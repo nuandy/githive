@@ -865,8 +865,23 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 	/** Slices of a gate run that are still the ones waiting to integrate at these commits. */
 	private gateMembers(task: Task, sliceId: string, head: string, group: { slice: string; head: string }[] = []) {
 		const members = [{ slice: sliceId, head }, ...group].map(({ slice: id, head: h }) => ({ s: task.slices.find((x) => x.id === id), h }));
-		const valid = members.every(({ s, h }) => s && s.status === "building" && s.reviewHead === h && s.gate?.head === h);
+		const valid = members.every(({ s, h }) =>
+			s &&
+			s.status === "building" &&
+			s.reviewHead === h &&
+			s.gate?.head === h &&
+			(this.hasApprovedQuorum(task, s, h) || this.hasWaiver(s, h)),
+		);
 		return valid ? members.map(({ s }) => s!) : null;
+	}
+
+	/** A gate is authorized only by the current quorum or a human waiver for that exact head. */
+	private hasApprovedQuorum(task: Task, slice: Slice, head: string) {
+		return slice.reviewHead === head && tally(task.review, slice).status === "approved";
+	}
+
+	private hasWaiver(slice: Slice, head: string) {
+		return slice.reviewHead === head && !!slice.waivers?.some((waiver) => waiver.head === head);
 	}
 
 	/**
@@ -1130,6 +1145,30 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 	private async sendBack(task: Task, slice: Slice, message: string) {
 		slice.sentBackFor = slice.reviewHead;
 		slice.lastFeedback = message;
+		const head = slice.reviewHead!;
+		// A queued or running gate may still be checking this commit (alone or as a
+		// member of a group). Cancel it before handing control back to the builder.
+		await this.env.GATE.getByName(task.id).cancel(task.id, slice.id, head);
+		const groupIds = new Set([slice.id, ...(slice.gate?.head === head ? slice.gate.group ?? [] : [])]);
+		for (const member of task.slices) {
+			if (
+				member.id !== slice.id &&
+				(member.gate?.status === "queued" || member.gate?.status === "running") &&
+				member.gate.head === member.reviewHead &&
+				member.gate.group?.includes(slice.id)
+			)
+				groupIds.add(member.id);
+		}
+		for (const id of groupIds) {
+			const member = task.slices.find((candidate) => candidate.id === id);
+			if (!member?.gate) continue;
+			const isSentBackHead = member === slice && member.gate.head === head;
+			const isCancelledGroupMember =
+				member.gate.head === member.reviewHead &&
+				(member.gate.status === "queued" || member.gate.status === "running") &&
+				member.gate.group?.includes(slice.id);
+			if (isSentBackHead || isCancelledGroupMember) member.gate = undefined;
+		}
 		if ((slice.revisions ?? 0) >= MAX_REVISIONS) {
 			slice.attention = `Sent back ${MAX_REVISIONS} times without passing review; needs a human. Last feedback:\n${message}`;
 			this.note(task, slice.reviewHead, `${slice.id} needs a human: sent back ${MAX_REVISIONS} times without passing`);
@@ -1137,7 +1176,6 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 		}
 		slice.revisions = (slice.revisions ?? 0) + 1;
 		this.note(task, slice.reviewHead, `${slice.id} sent back to its builder (revision ${slice.revisions} of ${MAX_REVISIONS}):\n${clipText(message, 1_500)}`);
-		const head = slice.reviewHead!;
 		task.queue = task.queue.filter((item) => !(item.kind === "reviewer" && item.slice === slice.id));
 		await Promise.allSettled(
 			task.review.reviewers.map((role) =>
