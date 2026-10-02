@@ -22,6 +22,11 @@ const onAuth = (remote: Remote) => () => ({
 });
 
 export type MergeOutcome = { clean: true } | { clean: false; files: string[] };
+export interface ChangedFileText {
+	path: string;
+	before: string | null;
+	after: string | null;
+}
 
 export class Workspace {
 	private constructor(
@@ -117,6 +122,32 @@ export class Workspace {
 				// Descend into directories; only files are reported.
 				if (typeA === "tree" || typeB === "tree") return true;
 				if ((await a?.oid()) !== (await b?.oid())) changed.push(path);
+				return true;
+			},
+		});
+		return changed;
+	}
+
+	/** Obtain UTF-8 old/new text for every changed file between two commits. */
+	async changedFiles(from: string, to: string): Promise<ChangedFileText[]> {
+		const changed: ChangedFileText[] = [];
+		const textAt = async (entry: { oid(): Promise<string | null> } | null | undefined) => {
+			if (!entry) return null;
+			const oid = await entry.oid();
+			if (!oid) return null;
+			const { blob } = await git.readBlob({ fs: this.fs, dir: DIR, oid });
+			return new TextDecoder().decode(blob);
+		};
+		await git.walk({
+			fs: this.fs,
+			dir: DIR,
+			trees: [git.TREE({ ref: from }), git.TREE({ ref: to })],
+			map: async (path, [a, b]) => {
+				if (path === ".") return true;
+				const [typeA, typeB] = [await a?.type(), await b?.type()];
+				if (typeA === "tree" || typeB === "tree") return true;
+				const [oidA, oidB] = await Promise.all([a?.oid(), b?.oid()]);
+				if (oidA !== oidB) changed.push({ path, before: await textAt(a), after: await textAt(b) });
 				return true;
 			},
 		});

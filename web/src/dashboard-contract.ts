@@ -49,12 +49,38 @@ export interface TaskHeaderProps {
   busy: boolean;
   onPlan(): void;
   onApproveAndBuild(): void;
-  onLand(): void;
 }
 export interface PlanPanelProps { task: Task }
 export interface SliceLanesProps { live: Live }
 export interface MergeAheadMatrixProps { task: Task }
 export interface ActivityFeedProps { agents: Live["agents"] }
+
+export interface ContractFile {
+  path: string;
+  content: string;
+}
+
+/** Unified, read-only Git diff pinned to the commits used to generate it. */
+export interface UnifiedCodeDiff {
+  base: string;
+  head: string;
+  unified: string;
+}
+
+/** Dashboard's narrow code-view and human-waiver API surface. */
+export interface CodeVisibilityApi {
+  contractFiles(taskId: string): Promise<ContractFile[]>;
+  sliceDiff(taskId: string, sliceId: string): Promise<UnifiedCodeDiff>;
+  landingDiff(taskId: string): Promise<UnifiedCodeDiff>;
+  waive(taskId: string, sliceId: string, reason: string): Promise<unknown>;
+}
+
+export interface CodeDecisionsProps {
+  task: Task;
+  busy: boolean;
+  onWaive(sliceId: string, reason: string): void;
+  onLand(): void;
+}
 
 /** Injected I/O surface used by the dashboard shell and its orchestration tests. */
 export interface DashboardShellApi {

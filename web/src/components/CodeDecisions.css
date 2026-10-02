@@ -1,0 +1,42 @@
+.code-decisions { display: flex; min-width: 0; flex-direction: column; gap: var(--gap); }
+.code-decisions__section { min-width: 0; }
+.code-decisions__section h2 { margin: 0 0 7px; font-size: 18px; }
+.code-decisions__section > p { margin: 6px 0 12px; }
+.code-decisions__section button { flex-shrink: 0; }
+.code-decisions__contract + .code-decisions__contract { margin-top: 16px; }
+.code-decisions__contract h3 { margin: 10px 0 6px; font-size: 14px; overflow-wrap: anywhere; }
+.code-decisions__human { display: grid; grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr); gap: 16px; padding: 14px 0; border-top: 1px solid var(--border); }
+.code-decisions__human:first-of-type { margin-top: 12px; }
+.code-decisions__finding, .code-decisions__diff { min-width: 0; }
+.code-decisions__finding h3 { margin: 0 0 12px; font-size: 15px; overflow-wrap: anywhere; }
+.code-decisions__finding h4, .code-decisions__diff h4 { margin: 10px 0 5px; font-size: 13px; overflow-wrap: anywhere; }
+.code-decisions__finding p { margin: 5px 0 12px; overflow-wrap: anywhere; }
+.code-decisions__reason-label { display: block; margin: 14px 0 5px; font-size: 13px; font-weight: 600; }
+.code-decisions__finding textarea { display: block; width: 100%; min-height: 72px; margin-bottom: 8px; resize: vertical; }
+.code-decisions__waiver-note { font-size: 12px; }
+.code-decisions__code {
+  max-width: 100%;
+  max-height: 560px;
+  margin: 0;
+  padding: 12px;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  color: var(--text);
+  font: 12px/1.55 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  tab-size: 2;
+  white-space: pre;
+}
+.code-decisions__code code { font: inherit; }
+.code-decisions__diff-text { max-height: 620px; }
+.code-decisions__commits { margin: 6px 0 !important; overflow-wrap: anywhere; font-size: 12px; }
+.code-decisions__commits code { overflow-wrap: anywhere; }
+.code-decisions__error { color: var(--bad); overflow-wrap: anywhere; }
+.code-decisions__error p { margin: 5px 0 8px; }
+.code-decisions__land { display: block; margin-top: 12px; }
+@media (max-width: 760px) {
+  .code-decisions__section { padding: 12px; }
+  .code-decisions__human { grid-template-columns: minmax(0, 1fr); gap: 8px; }
+  .code-decisions__code { max-height: 420px; padding: 9px; font-size: 11px; }
+}

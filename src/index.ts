@@ -49,6 +49,9 @@ app.get("/api", (c) =>
 			"POST /repos/import {url, name, branch?}",
 			"POST /tasks {repo, goal, limits?: {builders, reviewers}}",
 			"GET  /tasks/:id",
+			"GET  /tasks/:id/contracts",
+			"GET  /tasks/:id/slices/:slice/diff",
+			"GET  /tasks/:id/land-diff",
 			"POST /tasks/:id/plan",
 			"PUT  /tasks/:id/blueprint {slices, contracts, review?, rationale?}",
 			"POST /tasks/:id/approve",
@@ -194,6 +197,19 @@ app.get("/tasks/:id/live", async (c) => {
 });
 
 app.get("/tasks/:id", async (c) => c.json(await coordinator(c.env, c.req.param("id")).state()));
+
+// Read-only code views for the three human decision points.
+app.get("/tasks/:id/contracts", async (c) => {
+	const files = await coordinator(c.env, c.req.param("id")).contractFiles();
+	return c.json({ files });
+});
+
+app.get("/tasks/:id/slices/:slice/diff", async (c) => {
+	const { id, slice } = c.req.param();
+	return c.json(await coordinator(c.env, id).sliceDiff(slice));
+});
+
+app.get("/tasks/:id/land-diff", async (c) => c.json(await coordinator(c.env, c.req.param("id")).landingDiff()));
 
 // Starts the planner agent; poll GET /tasks/:id until planner.status is done or failed.
 app.post("/tasks/:id/plan", async (c) => c.json(await coordinator(c.env, c.req.param("id")).startPlanning(), 202));
