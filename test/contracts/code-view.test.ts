@@ -56,6 +56,8 @@ describe("read-only unified code diffs", () => {
     await workspace.write({ "collision": "old file\n" });
     const fileCommit = await workspace.commit("file path");
     await git.remove({ fs: workspace.fs, dir: "/repo", filepath: "collision" });
+    // isomorphic-git's remove only updates the index; remove the worktree file too.
+    await workspace.fs.promises.unlink("/repo/collision");
     await workspace.write({ "collision/child.ts": "new child\n" });
     const directoryCommit = await workspace.commit("directory path");
     const fileToDirectory = await workspace.changedFiles(fileCommit, directoryCommit);
@@ -67,6 +69,7 @@ describe("read-only unified code diffs", () => {
     await workspace.write({ "reverse/child.ts": "old child\n" });
     const nestedCommit = await workspace.commit("nested path");
     await git.remove({ fs: workspace.fs, dir: "/repo", filepath: "reverse/child.ts" });
+    await workspace.fs.promises.unlink("/repo/reverse/child.ts");
     await workspace.fs.promises.rmdir("/repo/reverse");
     await workspace.write({ reverse: "new file\n" });
     const reverseCommit = await workspace.commit("file replaces directory");
