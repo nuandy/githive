@@ -5,14 +5,15 @@ import {
 	DashboardSidebar,
 	MergeAheadMatrix,
 	PlanPanel,
-	SettingsControl,
 	SliceLanes,
 	TaskHeader,
+	TokenSettings,
 } from "./components";
 import { newestTasks } from "./lib/dashboardData";
+import type { DashboardShellAction, DashboardShellApi, DashboardTimerScheduler } from "./dashboard-contract";
 import "./App.css";
 
-function taskIdFromHash(hash: string): string | null {
+export function taskIdFromHash(hash: string): string | null {
 	const match = /^#\/tasks\/([^/]+)\/?$/.exec(hash);
 	if (!match) return null;
 	try {
@@ -20,6 +21,83 @@ function taskIdFromHash(hash: string): string | null {
 	} catch {
 		return null;
 	}
+}
+
+export const defaultDashboardScheduler: DashboardTimerScheduler = {
+	setInterval: (callback, milliseconds) => window.setInterval(callback, milliseconds),
+	clearInterval: (timer) => window.clearInterval(timer),
+};
+
+export function recordDashboardError(errors: string[], operation: string, error: unknown): string[] {
+	const detail = error instanceof Error ? error.message : String(error);
+	const message = `${operation}: ${detail}`;
+	return errors.includes(message) ? errors : [...errors, message];
+}
+
+export function clearDashboardError(errors: string[], operation: string): string[] {
+	return errors.filter((entry) => !entry.startsWith(`${operation}:`));
+}
+
+export class DashboardOperationError extends Error {
+	constructor(readonly operation: string, cause: unknown) {
+		super(cause instanceof Error ? cause.message : String(cause));
+		this.name = "DashboardOperationError";
+	}
+}
+
+export async function createTaskAndPlan(shellApi: DashboardShellApi, repo: string, goal: string): Promise<Task> {
+	let task: Task;
+	try {
+		task = await shellApi.create(repo, goal);
+	} catch (error) {
+		throw new DashboardOperationError("Create task", error);
+	}
+	try {
+		return await shellApi.plan(task.id);
+	} catch (error) {
+		throw new DashboardOperationError("Start planning", error);
+	}
+}
+
+export async function runDashboardAction(shellApi: DashboardShellApi, id: string, action: DashboardShellAction): Promise<void> {
+	if (action === "plan") {
+		await shellApi.plan(id);
+	} else if (action === "approve-build") {
+		await shellApi.approve(id);
+		await shellApi.build(id);
+	} else {
+		await shellApi.land(id);
+	}
+}
+
+export function startDashboardPolling(
+	id: string,
+	getSelectedId: () => string | null,
+	shellApi: Pick<DashboardShellApi, "live">,
+	onLive: (result: Live) => void,
+	onError: (error: unknown) => void,
+	scheduler: DashboardTimerScheduler = defaultDashboardScheduler,
+): () => void {
+	let active = true;
+	const poll = async () => {
+		try {
+			const result = await shellApi.live(id);
+			if (active && getSelectedId() === id) onLive(result);
+		} catch (error) {
+			if (active && getSelectedId() === id) onError(error);
+		}
+	};
+	void poll();
+	const timer = scheduler.setInterval(() => void poll(), 3_000);
+	return () => {
+		active = false;
+		scheduler.clearInterval(timer);
+	};
+}
+
+export function startTaskListPolling(fetchTasks: () => void, scheduler: DashboardTimerScheduler = defaultDashboardScheduler): () => void {
+	const timer = scheduler.setInterval(fetchTasks, 10_000);
+	return () => scheduler.clearInterval(timer);
 }
 
 export function App() {
@@ -36,12 +114,10 @@ export function App() {
 	selectedRef.current = selectedId;
 
 	const reportError = useCallback((operation: string, error: unknown) => {
-		const detail = error instanceof Error ? error.message : String(error);
-		const message = `${operation}: ${detail}`;
-		setErrors((current) => current.includes(message) ? current : [...current, message]);
+		setErrors((current) => recordDashboardError(current, operation, error));
 	}, []);
 	const clearError = useCallback((operation: string) => {
-		setErrors((current) => current.filter((entry) => !entry.startsWith(`${operation}:`)));
+		setErrors((current) => clearDashboardError(current, operation));
 	}, []);
 
 	const fetchTasks = useCallback(async () => {
@@ -71,8 +147,7 @@ export function App() {
 
 	useEffect(() => {
 		void refresh();
-		const timer = window.setInterval(() => void fetchTasks(), 10_000);
-		return () => window.clearInterval(timer);
+		return startTaskListPolling(() => void fetchTasks());
 	}, [fetchTasks, refresh]);
 
 	useEffect(() => {
@@ -92,29 +167,21 @@ export function App() {
 			setLive(null);
 			return;
 		}
-		let current = true;
 		const id = selectedId;
-		const poll = async () => {
-			try {
-				const result = await api.live(id);
-				if (current && selectedRef.current === id) {
-					setLive(result);
-					setTasks((existing) => newestTasks([
-						...existing.filter((task) => task.id !== result.task.id),
-						result.task,
-					]));
-					clearError("Live task");
-				}
-			} catch (error) {
-				if (current && selectedRef.current === id) reportError("Live task", error);
-			}
-		};
-		void poll();
-		const timer = window.setInterval(() => void poll(), 3_000);
-		return () => {
-			current = false;
-			window.clearInterval(timer);
-		};
+		return startDashboardPolling(
+			id,
+			() => selectedRef.current,
+			api,
+			(result) => {
+				setLive(result);
+				setTasks((existing) => newestTasks([
+					...existing.filter((task) => task.id !== result.task.id),
+					result.task,
+				]));
+				clearError("Live task");
+			},
+			(error) => reportError("Live task", error),
+		);
 	}, [clearError, selectedId, reportError]);
 
 	const selectedTask = live?.task.id === selectedId
@@ -123,42 +190,37 @@ export function App() {
 
 	const createTask = useCallback(async (repo: string, goal: string) => {
 		setCreating(true);
+		const shellApi: DashboardShellApi = {
+			...api,
+			create: async (selectedRepo, selectedGoal) => {
+				const task = await api.create(selectedRepo, selectedGoal);
+				setTasks((current) => newestTasks([...current.filter((item) => item.id !== task.id), task]));
+				clearError("Create task");
+				selectTask(task.id);
+				return task;
+			},
+		};
 		try {
-			const task = await api.create(repo, goal);
-			setTasks((current) => newestTasks([...current.filter((item) => item.id !== task.id), task]));
-			clearError("Create task");
-			selectTask(task.id);
-			try {
-				const planned = await api.plan(task.id);
-				setTasks((current) => newestTasks([...current.filter((item) => item.id !== planned.id), planned]));
-				clearError("Start planning");
-			} catch (error) {
-				reportError("Start planning", error);
-			}
+			const planned = await createTaskAndPlan(shellApi, repo, goal);
+			setTasks((current) => newestTasks([...current.filter((item) => item.id !== planned.id), planned]));
+			clearError("Start planning");
 			await refresh();
 		} catch (error) {
-			reportError("Create task", error);
+			const operation = error instanceof DashboardOperationError ? error.operation : "Create task";
+			reportError(operation, error);
 		} finally {
 			setCreating(false);
 		}
 	}, [clearError, refresh, reportError, selectTask]);
 
-	const runAction = useCallback(async (action: "plan" | "approve-build" | "land") => {
+	const runAction = useCallback(async (action: DashboardShellAction) => {
 		if (!selectedTask || busy) return;
 		const id = selectedTask.id;
 		const operation = action === "approve-build" ? "Approve and build" : action === "plan" ? "Plan" : "Land";
 		setBusy(true);
 		try {
-			if (action === "plan") {
-				await api.plan(id);
-				// A retry via the header also recovers a failed create-time plan.
-				clearError("Start planning");
-			} else if (action === "approve-build") {
-				await api.approve(id);
-				await api.build(id);
-			} else {
-				await api.land(id);
-			}
+			await runDashboardAction(api, id, action);
+			if (action === "plan") clearError("Start planning");
 			clearError(operation);
 		} catch (error) {
 			reportError(operation, error);
@@ -175,7 +237,7 @@ export function App() {
 		<div className="shell dashboard-shell">
 			<header className="topbar dashboard-topbar">
 				<a className="brand" href="#/">Blueprint</a>
-				<div className="dashboard-topbar-actions"><SettingsControl /></div>
+				<div className="dashboard-topbar-actions"><TokenSettings /></div>
 			</header>
 			<div className="dashboard-frame">
 				<aside className="dashboard-sidebar">
