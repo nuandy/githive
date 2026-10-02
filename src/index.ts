@@ -53,6 +53,7 @@ app.get("/api", (c) =>
 			"POST /tasks/:id/slices/:slice/reviewers",
 			"GET  /tasks/:id/slices/:slice/reviewers",
 			"POST /tasks/:id/slices/:slice/reviews {reviewer, head, verdict, summary, evidence?}",
+			"POST /tasks/:id/slices/:slice/message {message}",
 			"POST /tasks/:id/slices/:slice/waive {reason, by?}",
 			"POST /tasks/:id/slices/:slice/gate",
 			"POST /tasks/:id/slices/:slice/integrate",
@@ -243,6 +244,13 @@ app.post("/tasks/:id/slices/:slice/reviews", async (c) => {
 	const { id, slice } = c.req.param();
 	const review = await c.req.json<Omit<Review, "at">>();
 	return c.json(await coordinator(c.env, id).submitReview(slice, review));
+});
+
+// A human messages a slice's builder: delivered at its next turn, or it resumes if it stopped.
+app.post("/tasks/:id/slices/:slice/message", async (c) => {
+	const { id, slice } = c.req.param();
+	const { message } = await c.req.json<{ message: string }>();
+	return c.json(await coordinator(c.env, id).messageBuilder(slice, message));
 });
 
 // A human lets the current review commit through without an approved quorum (recorded; the gate still runs).

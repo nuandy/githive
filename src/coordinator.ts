@@ -664,6 +664,45 @@ export class Coordinator extends DurableObject<Env> {
 		});
 	}
 
+	/** Flag a slice for a human (for example, its builder stopped). */
+	flagSlice(sliceId: string, message: string) {
+		return this.exclusive(async () => {
+			const task = await this.load();
+			const slice = this.slice(task, sliceId);
+			if (slice.status === "integrated") return;
+			slice.attention = message;
+			await this.save(task);
+		});
+	}
+
+	/**
+	 * A human sends a message to a slice's builder. A running builder reads it
+	 * at its next turn; a stopped one resumes its conversation with the
+	 * message and fresh tokens. Clears the slice's flag.
+	 */
+	messageBuilder(sliceId: string, message: string) {
+		return this.exclusive(async () => {
+			if (!message?.trim()) fail(400, "the message is empty");
+			const task = await this.load();
+			const slice = this.slice(task, sliceId);
+			if (slice.status !== "building") fail(409, `slice ${sliceId} is ${slice.status}`);
+			const builder = this.env.BUILDER.getByName(slice.repo!);
+			const text = `Message from a human on the team: ${message}`;
+			let delivered: "inbox" | "resumed" = "inbox";
+			if (!(await builder.notify(text))) {
+				const [write, base] = await Promise.all([
+					remoteFor(this.env.ARTIFACTS, slice.repo!, "write", 3 * 3600),
+					remoteFor(this.env.ARTIFACTS, task.baseRepo!, "read", 3 * 3600),
+				]);
+				await builder.revise(text, { token: write.token, base: { remote: base.url, token: base.token } });
+				delivered = "resumed";
+			}
+			slice.attention = undefined;
+			await this.save(task);
+			return { delivered };
+		});
+	}
+
 	/** Whether any other slice could still be integrated (and so might fix a failing gate). */
 	private othersCanStillIntegrate(task: Task, slice: Slice) {
 		return task.slices.some((s) => s !== slice && s.status === "building" && s.gate?.status !== "waiting");

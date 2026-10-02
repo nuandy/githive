@@ -67,6 +67,8 @@ export interface AgentState {
 	startedAt: string;
 	finishedAt?: string;
 	turns: number;
+	/** `turns` when the current run started; each run (a revision) gets its own budget. */
+	turnsAtRunStart?: number;
 	toolCalls: number;
 	nudges: number;
 	usage: Usage;
@@ -107,6 +109,8 @@ export abstract class SandboxAgent<J extends SandboxJob, S extends AgentState> e
 	protected abstract freshFields(): Omit<S, keyof AgentState>;
 	/** Runs after each clone, in WORKDIR. */
 	protected abstract afterClone(job: J, state: S): Promise<void>;
+	/** Runs once when the agent fails; for example, to flag its slice for a human. */
+	protected async onFailed(_job: J, _state: S): Promise<void> {}
 
 	protected async load() {
 		const [job, state] = await Promise.all([this.ctx.storage.get<J>("job"), this.ctx.storage.get<S>("state")]);
@@ -222,6 +226,7 @@ export abstract class SandboxAgent<J extends SandboxJob, S extends AgentState> e
 			if (this.ctx.container?.running) await this.ctx.container.destroy(`${this.kind} ${state.status}`);
 		}
 		await this.save(state);
+		if ((state.status as string) === "failed") await this.onFailed(job, state).catch(() => {});
 	}
 
 	private async setUp(job: J, state: S) {
@@ -305,7 +310,7 @@ export abstract class SandboxAgent<J extends SandboxJob, S extends AgentState> e
 	}
 
 	private async turn(job: J, state: S) {
-		if (state.turns >= MAX_TURNS) throw new Error(`stopped after ${MAX_TURNS} turns without finishing`);
+		if (state.turns - (state.turnsAtRunStart ?? 0) >= MAX_TURNS) throw new Error(`stopped after ${MAX_TURNS} turns without finishing`);
 		const client = new OpenAI({ apiKey: this.env.OPENAI_API_KEY });
 		const tools = this.tools(job, state);
 		const input: ResponseInputItem[] = [

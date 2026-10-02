@@ -76,6 +76,7 @@ How to work:
 		state.error = undefined;
 		state.finishedAt = undefined;
 		state.nudges = 0;
+		state.turnsAtRunStart = state.turns;
 		state.revisions++;
 		// The finish call's output is still owed to the model, so it goes first.
 		state.pending = [...(state.pending ?? []), { role: "user", content: feedback }];
@@ -83,6 +84,10 @@ How to work:
 		await this.save(state);
 		await this.ctx.storage.setAlarm(Date.now());
 		return this.view(state);
+	}
+
+	protected async onFailed(job: BuildJob, state: BuilderState) {
+		await this.coordinator(job).flagSlice(job.slice.id, `The builder stopped: ${state.error}`);
 	}
 
 	protected async afterClone(job: BuildJob) {
