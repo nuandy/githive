@@ -34,8 +34,6 @@ export interface Live {
 	agents: { id: string; builder: AgentState | null; reviewers: { role: string; state: AgentState | null }[] }[];
 }
 
-const TOKEN_KEY = "blueprint.token";
-
 type RecordValue = Record<string, unknown>;
 
 function asRecord(value: unknown): RecordValue | null {
@@ -156,34 +154,15 @@ export function normalizeLive(value: unknown): Live {
 	return { ...live, task: normalizeTask(live.task), agents } as Live;
 }
 
-export function getToken() {
-	try {
-		return localStorage.getItem(TOKEN_KEY) ?? "";
-	} catch {
-		return "";
-	}
-}
-
-export function setToken(token: string) {
-	try {
-		if (token) localStorage.setItem(TOKEN_KEY, token);
-		else localStorage.removeItem(TOKEN_KEY);
-	} catch {
-		// Storage unavailable (private mode): the token lasts for this page only.
-	}
-}
-
 async function call<T>(method: string, path: string, body?: unknown): Promise<T> {
 	const headers: Record<string, string> = {};
 	if (body !== undefined) headers["Content-Type"] = "application/json";
-	const token = getToken();
-	if (method !== "GET" && token) headers.Authorization = `Bearer ${token}`;
 	const res = await fetch(path, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
 	const text = await res.text();
 	const data = text ? JSON.parse(text) : null;
 	if (!res.ok) {
 		const detail = asRecord(data)?.error;
-		throw new Error(res.status === 401 ? "Unauthorized: set your API token." : typeof detail === "string" ? detail : `${res.status} ${res.statusText}`);
+		throw new Error(res.status === 401 ? "Unauthorized: sign in through Cloudflare Access." : typeof detail === "string" ? detail : `${res.status} ${res.statusText}`);
 	}
 	return data as T;
 }
