@@ -1,4 +1,5 @@
 import { vi } from "vitest";
+import type { GateItem } from "../../src/gate";
 import { DEFAULT_POLICY, type Slice, type Task } from "../../src/types";
 
 /** In-memory Durable Object storage; values are copied in and out, like the real thing. */
@@ -37,6 +38,9 @@ export type AgentStatus = "queued" | "working" | "done" | "failed";
 /** Fake bindings: builders, reviewers and the gate record calls; their state can be set per test. */
 export function fakeEnv() {
 	const agentStatus = new Map<string, AgentStatus>();
+	/** What the Gate reports as queued and running. */
+	const gateQueue: GateItem[] = [];
+	const gateCurrent: { item: GateItem | null } = { item: null };
 	const agent = (name: string) => ({
 		start: vi.fn(async (_job: unknown) => void agentStatus.set(name, "queued")),
 		revise: vi.fn(async (_message: string, _credentials?: unknown) => void agentStatus.set(name, "queued")),
@@ -47,11 +51,14 @@ export function fakeEnv() {
 	const env = {
 		BUILDER: namespace(agent),
 		REVIEWER: namespace(agent),
-		GATE: namespace(() => ({ enqueue: vi.fn(async (_taskId: string, _item: unknown) => {}) })),
+		GATE: namespace(() => ({
+			enqueue: vi.fn(async (_taskId: string, _item: unknown) => {}),
+			state: vi.fn(async () => ({ queue: gateQueue, current: gateCurrent.item })),
+		})),
 		ARTIFACTS: {},
 		OPENAI_API_KEY: "test",
 	};
-	return { env, agentStatus };
+	return { env, agentStatus, gateQueue, gateCurrent };
 }
 
 export const slice = (id: string, overrides: Partial<Slice> = {}): Slice => ({

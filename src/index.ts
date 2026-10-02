@@ -58,6 +58,8 @@ app.get("/api", (c) =>
 			"POST /tasks/:id/slices/:slice/gate",
 			"POST /tasks/:id/slices/:slice/integrate",
 			"POST /tasks/:id/land",
+			"GET  /tasks/:id/ledger",
+			"POST /tasks/:id/restore {repo}",
 			"(contract amendments are proposed by builders; see task.amendments)",
 		],
 	}),
@@ -272,6 +274,15 @@ app.post("/tasks/:id/slices/:slice/integrate", async (c) => {
 });
 
 app.post("/tasks/:id/land", async (c) => c.json(await coordinator(c.env, c.req.param("id")).land()));
+
+// The task's record in Git: rebuild it from the notes ref and compare with the stored state.
+app.get("/tasks/:id/ledger", async (c) => c.json(await coordinator(c.env, c.req.param("id")).ledger()));
+
+// Recreate a task whose Coordinator lost its state, from the record in the project repo.
+app.post("/tasks/:id/restore", async (c) => {
+	const { repo } = await c.req.json<{ repo: string }>();
+	return c.json(await coordinator(c.env, c.req.param("id")).restore(c.req.param("id"), repo));
+});
 
 // Everything that isn't an API route is the dashboard.
 app.get("*", (c) => c.env.ASSETS.fetch(c.req.raw));

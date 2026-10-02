@@ -34,6 +34,21 @@ vi.mock("../src/git", () => ({
 	},
 }));
 
+// The task's notes ref, in memory: each write appends a commit message.
+const ledger = vi.hoisted(() => ({ messages: [] as string[], entries: [] as { commit: string; text: string }[], down: false }));
+
+vi.mock("../src/ledger-git", async () => {
+	const { ledgerMessage } = await import("../src/ledger");
+	return {
+		appendLedger: vi.fn(async (_remote: unknown, _taskId: string, entries: { commit: string; text: string; at: string }[], patch: never) => {
+			if (ledger.down) throw new Error("git is down");
+			ledger.messages.push(ledgerMessage(entries, patch));
+			ledger.entries.push(...entries);
+		}),
+		readLedger: vi.fn(async () => [...ledger.messages]),
+	};
+});
+
 const { Coordinator } = await import("../src/coordinator");
 
 let storage: FakeStorage;
@@ -56,6 +71,9 @@ beforeEach(() => {
 	io.mergeConflict = null;
 	io.merges = [];
 	io.heads.set("t1--base", "base0");
+	ledger.messages = [];
+	ledger.entries = [];
+	ledger.down = false;
 });
 
 describe("limits and queues", () => {
@@ -229,6 +247,21 @@ describe("the integration gate", () => {
 		expect(fake.env.GATE.getByName("t1").enqueue).toHaveBeenCalledWith("t1", { slice: "a", head: "h1", group: [{ slice: "b", head: "hb" }] });
 	});
 
+	it("refuses to retry while a run for the slice or its group is queued or running", async () => {
+		const approved = [{ ...vote("tests", "approve"), at: "" }, { ...vote("api", "approve"), at: "" }];
+		const grouped = (head: string, other: string) => ({ ...gated("queued", head), group: [other] });
+		await setup(task({ slices: [slice("a", { reviewHead: "h1", gate: grouped("h1", "b"), reviews: approved }), slice("b", { reviewHead: "hb", gate: grouped("hb", "a") })] }));
+		fake.gateQueue.push({ id: "q1", slice: "b", head: "hb" });
+		await expect(coordinator.retryGate("a")).rejects.toThrow(/already queued/);
+		fake.gateQueue.length = 0;
+		fake.gateCurrent.item = { id: "r1", slice: "a", head: "h1", group: [{ slice: "b", head: "hb" }] };
+		await expect(coordinator.retryGate("a")).rejects.toThrow(/already running/);
+		// A record left "queued" by a run the Gate no longer holds can be retried.
+		fake.gateCurrent.item = null;
+		await coordinator.retryGate("a");
+		expect(fake.env.GATE.getByName("t1").enqueue).toHaveBeenCalledOnce();
+	});
+
 	it("sends every slice of a failed group run back, naming the others", async () => {
 		const grouped = (head: string, other: string) => ({ ...gated("running", head), group: [other] });
 		await setup(task({ slices: [slice("a", { reviewHead: "h1", gate: grouped("h1", "b") }), slice("b", { reviewHead: "hb", gate: grouped("hb", "a") })] }));
@@ -291,5 +324,51 @@ describe("escalation and human controls", () => {
 		expect(await coordinator.messageBuilder("a", "use the contract")).toEqual({ delivered: "resumed" });
 		expect(builder("a").revise.mock.calls[0][0]).toMatch(/^Message from a human on the team: use the contract/);
 		expect((await stored()).active.builders).toContain("a");
+	});
+});
+
+describe("the record in Git", () => {
+	const approved = (head = "h1") => [vote("tests", "approve", head), vote("api", "approve", head)];
+
+	it("notes each vote and the integration on the reviewed commit, and rebuilds the same state", async () => {
+		await setup(task({ verify: [], slices: [slice("a", { reviewHead: "h1" }), slice("b")] }));
+		io.heads.set("t1--a", "h1");
+		for (const v of approved()) await coordinator.submitReview("a", v);
+		expect(ledger.entries.filter((e) => e.commit === "h1").map((e) => e.text)).toEqual([
+			"a: tests reviewer approved: tests says approve",
+			"a: api reviewer approved: api says approve",
+			"a: quorum approved",
+			"a integrated into the task base",
+		]);
+		expect(await coordinator.ledger()).toMatchObject({ matches: true, commits: 2 });
+	});
+
+	it("records nothing for a method that failed", async () => {
+		await setup(task({ slices: [slice("a", { reviewHead: "h1" })] }));
+		await expect(coordinator.submitReview("a", vote("tests", "approve", "old"))).rejects.toThrow(/head under review/);
+		expect(ledger.entries).toEqual([]);
+	});
+
+	it("keeps decisions while Git is unreachable and writes them with the next change", async () => {
+		await setup(task({ slices: [slice("a", { reviewHead: "h1" }), slice("b")] }));
+		io.heads.set("t1--a", "h1");
+		ledger.down = true;
+		await coordinator.submitReview("a", vote("security", "approve"));
+		expect(ledger.messages).toEqual([]);
+		ledger.down = false;
+		await coordinator.flagSlice("b", "stuck");
+		expect(ledger.entries.map((e) => e.text)).toEqual(["a: security reviewer approved: security says approve", "b needs a human: stuck"]);
+		expect(await coordinator.ledger()).toMatchObject({ matches: true });
+	});
+
+	it("restores a task from its record into an empty Coordinator", async () => {
+		await setup(task({ slices: [slice("a", { reviewHead: "h1" }), slice("b")], queue: [{ kind: "builder", slice: "b" }] }));
+		await coordinator.submitReview("a", vote("security", "reject"));
+		const original = await stored();
+
+		const restored = new Coordinator({ storage: new FakeStorage() } as never, fake.env as never);
+		const { task: t } = await restored.restore("t1", original.repo);
+		expect(t).toEqual({ ...original, queue: [], active: { builders: [], reviewers: [] } });
+		await expect(restored.restore("t1", original.repo)).rejects.toThrow(/task exists/);
 	});
 });

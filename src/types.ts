@@ -179,6 +179,8 @@ export interface Task {
 	/** Agents running now: builder keys are slice ids; reviewer keys are slice:role:head. */
 	active: { builders: string[]; reviewers: string[] };
 	createdAt: string;
+	/** The project's head when the task was created; task-wide decisions are noted on it until the base exists. */
+	anchor?: string;
 }
 
 export interface Limits {

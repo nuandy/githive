@@ -3,6 +3,8 @@ import git from "isomorphic-git";
 import { baseRepoName, forkAndWait, headOf, remoteFor, reviewerName, sliceRepoName } from "./artifacts";
 import { fail, statusOf } from "./errors";
 import { Workspace } from "./git";
+import { type LedgerDoc, type LedgerEntry, clipText, diff, fromDoc, replay, toDoc } from "./ledger";
+import { appendLedger, readLedger } from "./ledger-git";
 import { blueprintProblems } from "./blueprint";
 import { NEW_FILE, decideAmendment } from "./contract-owner";
 import type { GatePlan } from "./gate";
@@ -32,6 +34,12 @@ const conflictMessage = (files: string[]) =>
 /** Times a slice can go back to its builder before it waits for a human. */
 const MAX_REVISIONS = 3;
 
+/** Git's empty tree: where task-level decisions are noted when the project repo has no commits. */
+const EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
+
+const short = (oid?: string) => oid?.slice(0, 8) ?? "none";
+const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
+
 /** One side of a Merge-ahead check. */
 interface Side {
 	id: string;
@@ -50,10 +58,87 @@ export class Coordinator extends DurableObject<Env> {
 	// state-changing methods one at a time so they never overwrite each other.
 	private tail: Promise<unknown> = Promise.resolve();
 
+	/** Decisions made by the running method, written to Git when it finishes. */
+	private entries: LedgerEntry[] = [];
+
 	private exclusive<T>(fn: () => Promise<T>): Promise<T> {
-		const run = this.tail.then(fn, fn);
+		const recorded = async () => {
+			try {
+				return await fn();
+			} catch (err) {
+				// A method that failed didn't make its decisions; what it saved still goes out as state.
+				this.entries = [];
+				throw err;
+			} finally {
+				await this.flush();
+			}
+		};
+		const run = this.tail.then(recorded, recorded);
 		this.tail = run.catch(() => {});
 		return run;
+	}
+
+	/** Note a decision on the commit it is about (the task's anchor commit for task-wide ones). */
+	private note(task: Task, commit: string | undefined, text: string) {
+		this.entries.push({ commit: commit ?? task.baseCommit ?? task.anchor ?? EMPTY_TREE, text, at: new Date().toISOString() });
+	}
+
+	/**
+	 * Append the method's decisions and the state change since the last write to
+	 * the task's notes ref. If Git can't be reached, both are kept and go out
+	 * with the next write: the patch is always taken from the last recorded state.
+	 */
+	private async flush() {
+		const entries = this.entries;
+		this.entries = [];
+		const task = await this.ctx.storage.get<Task>("task");
+		if (!task) return;
+		const [contracts, recorded, pending] = await Promise.all([
+			this.ctx.storage.get<Record<string, string>>("contracts"),
+			this.ctx.storage.get<LedgerDoc>("ledger:doc"),
+			this.ctx.storage.get<LedgerEntry[]>("ledger:pending"),
+		]);
+		const doc = toDoc(task, contracts ?? {});
+		const patch = diff(recorded ?? {}, doc);
+		const all = [...(pending ?? []), ...entries];
+		if (patch === undefined && !all.length) return;
+		try {
+			await appendLedger(await remoteFor(this.env.ARTIFACTS, task.repo, "write"), task.id, all, patch);
+			await this.ctx.storage.put({ "ledger:doc": doc, "ledger:pending": [] });
+		} catch (err) {
+			await this.ctx.storage.put("ledger:pending", all);
+			console.error(`ledger write for task ${task.id} failed: ${statusOf(err).message}`);
+		}
+	}
+
+	/** Rebuild the task from its notes ref and compare it with the stored copy. */
+	ledger() {
+		return this.exclusive(async () => {
+			const task = await this.load();
+			const messages = await readLedger(await remoteFor(this.env.ARTIFACTS, task.repo), task.id);
+			const contracts = (await this.ctx.storage.get<Record<string, string>>("contracts")) ?? {};
+			const mismatch = diff(replay(messages), toDoc(task, contracts));
+			// Typed loosely: the recursive JSON type is too deep for the RPC stub's types.
+			return { commits: messages.length, matches: mismatch === undefined, mismatch: (mismatch ?? null) as Record<string, unknown> | null };
+		});
+	}
+
+	/**
+	 * Recreate a task from Git alone, into a Coordinator that has no state (for
+	 * example after its storage was lost). Agents that were running are not
+	 * restarted; slices that need them show as building with nothing active.
+	 */
+	restore(taskId: string, repo: string) {
+		return this.exclusive(async () => {
+			if (await this.ctx.storage.get("task")) fail(409, "task exists");
+			const messages = await readLedger(await remoteFor(this.env.ARTIFACTS, repo), taskId);
+			if (!messages.length) fail(404, `no record of task ${taskId} in ${repo}`);
+			const doc = replay(messages);
+			const { task, contracts } = fromDoc(doc);
+			if (task.id !== taskId || task.repo !== repo) fail(409, `the record in ${repo} is for task ${task.id}`);
+			await this.ctx.storage.put({ task, contracts, "ledger:doc": doc, "ledger:pending": [] });
+			return { task, commits: messages.length };
+		});
 	}
 
 	private async load() {
@@ -95,7 +180,9 @@ export class Coordinator extends DurableObject<Env> {
 				queue: [],
 				active: { builders: [], reviewers: [] },
 				createdAt: new Date().toISOString(),
+				anchor: (await headOf(this.env.ARTIFACTS, repo)) ?? EMPTY_TREE,
 			};
+			this.note(task, task.anchor, `Task ${id} created on ${repo}: ${goal}`);
 			await this.save(task);
 			return task;
 		});
@@ -129,6 +216,7 @@ export class Coordinator extends DurableObject<Env> {
 		await this.exclusive(async () => {
 			const latest = await this.load();
 			latest.planner = { ...latest.planner!, ...outcome, finishedAt: new Date().toISOString() };
+			this.note(latest, undefined, outcome.status === "done" ? `Planner finished after ${outcome.toolCalls ?? 0} tool calls` : `Planner failed: ${outcome.error}`);
 			await this.save(latest);
 		});
 	}
@@ -160,6 +248,13 @@ export class Coordinator extends DurableObject<Env> {
 			task.verify = (blueprint.verify ?? []).filter((c) => c.trim());
 			task.review = review;
 			task.phase = "awaiting-approval";
+			this.note(
+				task,
+				undefined,
+				`Blueprint proposed: ${plural(slices.length, "slice")} (${slices.map((s) => s.id).join(", ")}), ${plural(task.contracts.length, "contract file")}, quorum ${review.required} of ${review.reviewers.join("/")}` +
+					(task.verify.length ? `, gate: ${task.verify.join(" && ")}` : "") +
+					(rationale ? `\n${rationale}` : ""),
+			);
 			await this.ctx.storage.put("contracts", contracts ?? {});
 			await this.save(task);
 			return task;
@@ -199,6 +294,7 @@ export class Coordinator extends DurableObject<Env> {
 				}),
 			);
 			task.phase = "building";
+			this.note(task, task.baseCommit, `Blueprint approved: contracts committed to ${baseRepo}; slices forked: ${task.slices.map((s) => s.repo).join(", ")}`);
 			await this.save(task);
 			return { task, credentials };
 		});
@@ -290,6 +386,7 @@ export class Coordinator extends DurableObject<Env> {
 			const active = activeOf(task, item.kind);
 			active.splice(active.indexOf(key), 1);
 			slice.attention = `Could not start ${item.kind} ${key}: ${statusOf(err).message}`;
+			this.note(task, slice.head, `${slice.id} needs a human: ${slice.attention}`);
 		}
 	}
 
@@ -343,6 +440,14 @@ export class Coordinator extends DurableObject<Env> {
 			if (!head || head === slice.head) return { task, checks: [] as MergeCheck[], changed: false };
 
 			const checks = await this.mergeAhead(task, slice);
+			const conflicts = checks.filter((c) => c.status === "conflict");
+			this.note(
+				task,
+				slice.head,
+				`${slice.id} pushed ${short(slice.head)}: ${plural(slice.touched.length, "file")} changed` +
+					(slice.outOfLane.length ? `, outside its lane: ${slice.outOfLane.join(", ")}` : "") +
+					`; Merge-ahead: ${conflicts.length ? conflicts.map((c) => `conflict ${c.pair.join("/")} in ${c.files.join(", ")}`).join("; ") : "no conflicts"}`,
+			);
 			const keys = new Set(checks.map((c) => c.pair.join("|")));
 			task.checks = task.checks.filter((c) => !keys.has(c.pair.join("|"))).concat(checks);
 			await this.save(task);
@@ -412,6 +517,7 @@ export class Coordinator extends DurableObject<Env> {
 			const task = await this.load();
 			const slice = this.slice(task, sliceId);
 			const head = await this.pinForReview(task, slice);
+			this.note(task, head, `${slice.id} pinned for review at ${short(head)} by an external agent`);
 			const assignments: ReviewAssignment[] = await Promise.all(
 				task.review.reviewers.map(async (reviewer) => {
 					const remote = await remoteFor(this.env.ARTIFACTS, slice.repo!, "read", 3600);
@@ -448,9 +554,11 @@ export class Coordinator extends DurableObject<Env> {
 			// contract). Another review of the same commit can't change anything.
 			if (slice.sentBackFor && head === slice.sentBackFor) {
 				slice.attention = `Sent back, but the builder finished without new commits; it needs a decision outside its lane. Builder's explanation: ${buildSummary ?? "none given"}`;
+				this.note(task, head, `${slice.id} needs a human: sent back, but its builder finished without new commits`);
 				await this.save(task);
 				return { head, reviewers: [] as string[], failed: [] as string[], escalated: true };
 			}
+			this.note(task, head, `${slice.id} ready for review at ${short(head)}${buildSummary ? `: ${buildSummary}` : ""}`);
 			await this.save(task);
 
 			const reviewers = task.review.reviewers;
@@ -491,6 +599,7 @@ export class Coordinator extends DurableObject<Env> {
 				at: new Date().toISOString(),
 			};
 			task.amendments = [...(task.amendments ?? []), amendment];
+			this.note(task, this.slice(task, sliceId).head, `${sliceId} proposed a change to contract ${input.path}: ${input.reason}`);
 			await this.save(task);
 			return { task, amendment };
 		});
@@ -532,6 +641,7 @@ export class Coordinator extends DurableObject<Env> {
 			}
 			const a = latest.amendments!.find((x) => x.id === amendment.id)!;
 			Object.assign(a, { status: "approved", decision: decision.reason, commit, decidedAt: new Date().toISOString() });
+			this.note(latest, commit, `Contract ${input.path} ${isNew ? "added" : "amended"} for ${sliceId}; the contract owner approved: ${decision.reason}`);
 			await this.save(latest);
 			return a;
 		});
@@ -542,6 +652,7 @@ export class Coordinator extends DurableObject<Env> {
 			const task = await this.load();
 			const a = task.amendments!.find((x) => x.id === id)!;
 			Object.assign(a, outcome, { decidedAt: new Date().toISOString() });
+			this.note(task, task.slices.find((s) => s.id === a.slice)?.head, `Contract change to ${a.path} for ${a.slice} ${a.status}: ${a.decision}`);
 			await this.save(task);
 			return a;
 		});
@@ -571,6 +682,8 @@ export class Coordinator extends DurableObject<Env> {
 
 			slice.reviews.push({ ...input, at: new Date().toISOString() });
 			const quorum = tally(task.review, slice);
+			this.note(task, input.head, `${slice.id}: ${input.reviewer} reviewer ${input.verdict === "approve" ? "approved" : "rejected"}: ${input.summary}`);
+			if (quorum.status !== "pending") this.note(task, input.head, `${slice.id}: quorum ${quorum.status}`);
 			await this.save(task);
 
 			// Auto-integrate an approved slice; send a rejected one back to its builder.
@@ -696,12 +809,18 @@ export class Coordinator extends DurableObject<Env> {
 			const [slice, ...others] = members;
 			const baseHead = await headOf(this.env.ARTIFACTS, task.baseRepo!);
 			if (baseHead !== result.baseHead) {
+				this.note(task, slice.reviewHead, `${slice.id}: gate result discarded, the base moved from ${short(result.baseHead)} to ${short(baseHead)}; re-running`);
 				if (others.length) await this.startGroupGate(task, slice, others);
 				else await this.startGate(task, slice);
 				await this.save(task);
 				return { outcome: "rerun" as const };
 			}
 			const at = new Date().toISOString();
+			const checked = members.map((m) => m.id).join(" + ");
+			const outcome = result.mergeConflict
+				? `merge conflict in ${result.mergeConflict.join(", ")}`
+				: result.results.map((r) => `${r.command} → ${r.exitCode}`).join(", ");
+			this.note(task, slice.reviewHead, `${checked}: gate ${result.passed ? "passed" : "failed"} on base ${short(result.baseHead)}: ${outcome}`);
 			try {
 				if (result.passed) {
 					for (const m of members) m.gate = { ...m.gate!, status: "passed", baseHead: result.baseHead, result, at };
@@ -724,11 +843,13 @@ export class Coordinator extends DurableObject<Env> {
 					// (a slice can depend on another's implementation of a contract).
 					// Wait, and re-run after the next integration.
 					slice.gate = { ...slice.gate!, status: "waiting", baseHead: result.baseHead, result, at };
+					this.note(task, slice.reviewHead, `${slice.id}: waiting for other slices to integrate before the gate re-runs`);
 				} else {
 					const waiting = task.slices.filter((s) => s !== slice && s.status === "building" && s.gate?.status === "waiting");
 					if (!result.mergeConflict && waiting.length) {
 						// Nothing else can integrate first, but slices are waiting on each
 						// other: check them together.
+						this.note(task, slice.reviewHead, `${slice.id}: gating together with ${waiting.map((w) => w.id).join(", ")}, which wait on each other`);
 						await this.startGroupGate(task, slice, waiting);
 					} else {
 						slice.gate = { ...slice.gate!, status: "failed", baseHead: result.baseHead, result, at };
@@ -737,6 +858,7 @@ export class Coordinator extends DurableObject<Env> {
 				}
 			} catch (err) {
 				slice.attention = `after the gate: ${statusOf(err).message}`;
+				this.note(task, slice.reviewHead, `${slice.id} needs a human: ${slice.attention}`);
 			}
 			await this.save(task);
 			return { outcome: (slice.status === "integrated" ? "passed" : slice.gate?.status) ?? "failed" };
@@ -758,6 +880,14 @@ export class Coordinator extends DurableObject<Env> {
 			if (!task.verify.length) fail(409, "the task has no verify commands");
 			// A slice in a group gate retries with its group.
 			const group = (slice.gate?.group ?? []).map((id) => task.slices.find((s) => s.id === id)).filter((s): s is Slice => !!s && s.status === "building");
+			// Don't start a second run while one is queued or running: it would reset
+			// the gate record under the first. Ask the Gate itself, so a record left
+			// "queued" by a lost run can still be retried.
+			const covered = new Set([slice.id, ...group.map((g) => g.id)]);
+			const { queue, current } = await this.env.GATE.getByName(task.id).state();
+			const busy = [current, ...queue].find((item) => item && [item.slice, ...(item.group ?? []).map((g) => g.slice)].some((id) => covered.has(id)));
+			if (busy) fail(409, `a gate run for ${busy.slice} is already ${busy === current ? "running" : "queued"}`);
+			this.note(task, slice.reviewHead, `${slice.id}: gate re-run requested by a human`);
 			if (group.length) await this.startGroupGate(task, slice, group);
 			else await this.startGate(task, slice);
 			await this.save(task);
@@ -784,6 +914,7 @@ export class Coordinator extends DurableObject<Env> {
 
 			slice.waivers = [...(slice.waivers ?? []), { head, by: input.by || "a human", reason: input.reason, at: new Date().toISOString() }];
 			slice.attention = undefined;
+			this.note(task, head, `${slice.id}: quorum waived by ${input.by || "a human"}: ${input.reason}`);
 			await this.integrateOrGate(task, slice);
 			await this.save(task);
 			return slice;
@@ -797,6 +928,7 @@ export class Coordinator extends DurableObject<Env> {
 			const slice = this.slice(task, sliceId);
 			if (slice.status === "integrated") return;
 			slice.attention = message;
+			this.note(task, slice.head, `${slice.id} needs a human: ${message}`);
 			await this.save(task);
 		});
 	}
@@ -825,6 +957,7 @@ export class Coordinator extends DurableObject<Env> {
 				delivered = "resumed";
 			}
 			slice.attention = undefined;
+			this.note(task, slice.head, `Message from a human to ${slice.id}'s builder (${delivered === "inbox" ? "delivered" : "resumed it"}): ${message}`);
 			await this.save(task);
 			return { delivered };
 		});
@@ -858,6 +991,7 @@ export class Coordinator extends DurableObject<Env> {
 
 		slice.status = "integrated";
 		slice.attention = undefined;
+		this.note(task, head, `${slice.id} integrated into the task base`);
 		return { ok: true };
 	}
 
@@ -873,9 +1007,11 @@ export class Coordinator extends DurableObject<Env> {
 		slice.lastFeedback = message;
 		if ((slice.revisions ?? 0) >= MAX_REVISIONS) {
 			slice.attention = `Sent back ${MAX_REVISIONS} times without passing review; needs a human. Last feedback:\n${message}`;
+			this.note(task, slice.reviewHead, `${slice.id} needs a human: sent back ${MAX_REVISIONS} times without passing`);
 			return;
 		}
 		slice.revisions = (slice.revisions ?? 0) + 1;
+		this.note(task, slice.reviewHead, `${slice.id} sent back to its builder (revision ${slice.revisions} of ${MAX_REVISIONS}):\n${clipText(message, 1_500)}`);
 		const head = slice.reviewHead!;
 		task.queue = task.queue.filter((item) => !(item.kind === "reviewer" && item.slice === slice.id));
 		await Promise.allSettled(
@@ -902,14 +1038,16 @@ export class Coordinator extends DurableObject<Env> {
 
 			const ws = await Workspace.clone(await remoteFor(this.env.ARTIFACTS, task.repo, "write"));
 			await ws.fetch("base", await remoteFor(this.env.ARTIFACTS, task.baseRepo!));
+			let landed: string | undefined;
 			try {
-				await ws.merge("refs/remotes/base/main", `Land task ${task.id}: ${task.goal}`);
+				landed = (await ws.merge("refs/remotes/base/main", `Land task ${task.id}: ${task.goal}`))?.oid;
 			} catch (err) {
 				if (err instanceof git.Errors.MergeConflictError) fail(409, `conflicts with ${task.repo}: ${err.data.filepaths.join(", ")}`);
 				throw err;
 			}
 			await ws.push();
 			task.phase = "landed";
+			this.note(task, landed, `Task landed in ${task.repo}`);
 			await this.save(task);
 			return task;
 		});

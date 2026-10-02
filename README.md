@@ -45,7 +45,20 @@ Landing the finished task on the project repo stays a manual step: `POST /tasks/
 
 Each slice lists the contract tests it must make pass. Builders and reviewers run those, because another slice's contract tests can fail until that slice is integrated.
 
-One `Coordinator` Durable Object per task holds its state and runs every Git write. The Artifacts binding creates, forks and reads repos. Commits, merges and pushes go through [isomorphic-git](https://isomorphic-git.org/) on an in-memory filesystem, because the binding can't write inside a repo.
+**The record in Git.** Every decision is written to the project repo, on the notes ref `refs/notes/blueprint/<task>`. Each decision is a note on the commit it is about: a vote on the reviewed commit, a gate result on the gated one, a contract change on the commit that applied it. `git log --notes=blueprint/<task>` reads as the task's audit trail, with no dashboard or API needed. Each notes commit also carries a JSON merge patch of the task's state, so replaying the notes ref rebuilds the task exactly. `GET /tasks/:id/ledger` replays it and compares the result with the Coordinator's copy. `POST /tasks/:id/restore {repo}` recreates a task from Git into an empty Coordinator. If Git can't be reached, decisions are kept and written with the next change.
+
+```
+$ git fetch origin 'refs/notes/blueprint/*:refs/notes/blueprint/*'
+$ git log --notes=blueprint/a9338368 -1
+commit a2bb21f…  Add hello
+Notes (blueprint/a9338368):
+    2026-10-02 13:24:15Z  hello pushed a2bb21f5: 1 file changed; Merge-ahead: no conflicts
+    2026-10-02 13:24:22Z  hello: tests reviewer approved: README present; nothing else changed
+    2026-10-02 13:24:22Z  hello: quorum approved
+    2026-10-02 13:24:26Z  hello integrated into the task base
+```
+
+One `Coordinator` Durable Object per task holds its state and runs every Git write. Its state is a cache of the record in Git. The Artifacts binding creates, forks and reads repos. Commits, merges and pushes go through [isomorphic-git](https://isomorphic-git.org/) on an in-memory filesystem, because the binding can't write inside a repo.
 
 ## Language support
 
