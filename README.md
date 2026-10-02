@@ -76,20 +76,27 @@ Requires a Cloudflare account on the Workers Paid plan (Artifacts is not availab
 npm install
 npx wrangler login
 npx wrangler queues create blueprint-events
-cp .dev.vars.example .dev.vars        # set API_TOKEN and OPENAI_API_KEY
+cp .dev.vars.example .dev.vars        # set OPENAI_API_KEY
 npm run dev                           # real Artifacts service; builder containers disabled (they need Docker locally)
 ```
 
-Prove the core primitives end to end. This creates a repo, forks it twice, pushes a conflicting change to each fork, and test-merges them:
+The Access team domain and application audience are public configuration in `wrangler.jsonc`. There is no local-development authentication bypass: the Worker rejects requests without a valid, signed `Cf-Access-Jwt-Assertion`, including requests to `wrangler dev`. A service token's client ID and secret are credentials for the Cloudflare Access edge; they do not replace the signed assertion when calling the Worker directly. For authenticated manual requests, use the deployed hostname protected by the Access application.
+
+People can use the dashboard after signing in through Cloudflare Access. Scripts should be authorized by an Access service-token policy for the application. This creates a repo, forks it twice, pushes a conflicting change to each fork, and test-merges them:
 
 ```sh
-curl -X POST localhost:8787/spike -H "Authorization: Bearer $API_TOKEN"
+export CF_ACCESS_CLIENT_ID='your-service-token-client-id'
+export CF_ACCESS_CLIENT_SECRET='your-service-token-client-secret'
+curl -X POST https://blueprint.nuandy.workers.dev/spike \
+  -H "CF-Access-Client-Id: $CF_ACCESS_CLIENT_ID" \
+  -H "CF-Access-Client-Secret: $CF_ACCESS_CLIENT_SECRET"
 ```
 
-Deploy:
+The Access edge validates those service-token headers and supplies the assertion that the Worker verifies. Do not send an `Authorization: Bearer` API token; Blueprint no longer uses `API_TOKEN`.
+
+Deploy (the Access variables are already in `wrangler.jsonc`):
 
 ```sh
-npx wrangler secret put API_TOKEN
 npx wrangler secret put OPENAI_API_KEY
 npm run deploy
 ```

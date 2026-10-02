@@ -1,4 +1,6 @@
 import { Hono } from "hono";
+import { verifyAccessRequest } from "./access";
+import type { AccessIdentity, CoordinatorHumanActions } from "./access-contract";
 import { forkAndWait, parseRepoName, remoteFor, reviewerName } from "./artifacts";
 import { statusOf } from "./errors";
 import { retryTransient } from "./retry";
@@ -12,19 +14,21 @@ export { ContractChecker } from "./contract-check";
 export { Gate } from "./gate";
 export { TaskIndex } from "./task-index";
 
-const app = new Hono<{ Bindings: Env }>();
+const app = new Hono<{ Bindings: Env; Variables: { accessIdentity: AccessIdentity } }>();
 
 const coordinator = (env: Env, taskId: string) => env.COORDINATOR.get(env.COORDINATOR.idFromName(taskId));
+const humanCoordinator = (env: Env, taskId: string) => coordinator(env, taskId) as unknown as CoordinatorHumanActions;
 const taskIndex = (env: Env) => env.TASK_INDEX.getByName("all");
 
-// Write routes mint Git tokens, so they require API_TOKEN when it is set.
+// Authenticate before routing, including GETs and requests served from the dashboard assets.
 app.use("*", async (c, next) => {
-	if (c.req.method === "GET" || !c.env.API_TOKEN) return next();
-	const encoder = new TextEncoder();
-	const given = encoder.encode(c.req.header("Authorization") ?? "");
-	const expected = encoder.encode(`Bearer ${c.env.API_TOKEN}`);
-	const ok = given.byteLength === expected.byteLength && crypto.subtle.timingSafeEqual(given, expected);
-	return ok ? next() : c.json({ error: "unauthorized" }, 401);
+	const identity = await verifyAccessRequest(c.req.raw, {
+		teamDomain: c.env.ACCESS_TEAM_DOMAIN,
+		audience: c.env.ACCESS_AUD,
+	});
+	if (!identity) return c.json({ error: "unauthorized" }, 401);
+	c.set("accessIdentity", identity);
+	await next();
 });
 
 app.onError((err, c) => {
@@ -56,7 +60,7 @@ app.get("/api", (c) =>
 			"GET  /tasks/:id/slices/:slice/reviewers",
 			"POST /tasks/:id/slices/:slice/reviews {reviewer, head, verdict, summary, evidence?}",
 			"POST /tasks/:id/slices/:slice/message {message}",
-			"POST /tasks/:id/slices/:slice/waive {reason, by?}",
+			"POST /tasks/:id/slices/:slice/waive {reason}",
 			"POST /tasks/:id/slices/:slice/gate",
 			"POST /tasks/:id/slices/:slice/integrate",
 			"POST /tasks/:id/land",
@@ -200,7 +204,7 @@ app.put("/tasks/:id/blueprint", async (c) => {
 });
 
 // Returns write tokens for each slice's fork: hand them to the builder agents.
-app.post("/tasks/:id/approve", async (c) => c.json(await coordinator(c.env, c.req.param("id")).approve()));
+app.post("/tasks/:id/approve", async (c) => c.json(await humanCoordinator(c.env, c.req.param("id")).approve(c.get("accessIdentity"))));
 
 // Starts a hosted builder agent (gpt-6-luna in its own container) for each slice.
 app.post("/tasks/:id/build", async (c) => c.json(await coordinator(c.env, c.req.param("id")).startBuilders(), 202));
@@ -254,20 +258,20 @@ app.post("/tasks/:id/slices/:slice/reviews", async (c) => {
 app.post("/tasks/:id/slices/:slice/message", async (c) => {
 	const { id, slice } = c.req.param();
 	const { message } = await c.req.json<{ message: string }>();
-	return c.json(await coordinator(c.env, id).messageBuilder(slice, message));
+	return c.json(await humanCoordinator(c.env, id).messageBuilder(slice, message, c.get("accessIdentity")));
 });
 
 // A human lets the current review commit through without an approved quorum (recorded; the gate still runs).
 app.post("/tasks/:id/slices/:slice/waive", async (c) => {
 	const { id, slice } = c.req.param();
-	const { reason, by } = await c.req.json<{ reason: string; by?: string }>();
-	return c.json(await coordinator(c.env, id).waive(slice, { reason, by: by ?? "" }));
+	const { reason } = await c.req.json<{ reason: string }>();
+	return c.json(await humanCoordinator(c.env, id).waive(slice, { reason }, c.get("accessIdentity")));
 });
 
 // Re-run the integration gate for an approved slice (for example after fixing the task base).
 app.post("/tasks/:id/slices/:slice/gate", async (c) => {
 	const { id, slice } = c.req.param();
-	return c.json(await coordinator(c.env, id).retryGate(slice), 202);
+	return c.json(await humanCoordinator(c.env, id).retryGate(slice, c.get("accessIdentity")), 202);
 });
 
 app.post("/tasks/:id/slices/:slice/integrate", async (c) => {
@@ -275,7 +279,7 @@ app.post("/tasks/:id/slices/:slice/integrate", async (c) => {
 	return c.json(await coordinator(c.env, id).integrate(slice));
 });
 
-app.post("/tasks/:id/land", async (c) => c.json(await coordinator(c.env, c.req.param("id")).land()));
+app.post("/tasks/:id/land", async (c) => c.json(await humanCoordinator(c.env, c.req.param("id")).land(c.get("accessIdentity"))));
 
 // The task's record in Git: rebuild it from the notes ref and compare with the stored state.
 app.get("/tasks/:id/ledger", async (c) => c.json(await coordinator(c.env, c.req.param("id")).ledger()));

@@ -6,6 +6,10 @@
 	"compatibility_flags": ["nodejs_compat"],
 	"observability": { "enabled": true },
 	"workers_dev": true,
+	"vars": {
+		"ACCESS_TEAM_DOMAIN": "little-cake-3c64.cloudflareaccess.com",
+		"ACCESS_AUD": "40a0a047944251bc67f3291f138b617f8cdb68f342635bd15582a6d770d1fd52"
+	},
 	// The dashboard (web/, built with `npm run build:web`). The Worker runs first
 	// so API routes win; anything else falls through to these files.
 	"assets": {
