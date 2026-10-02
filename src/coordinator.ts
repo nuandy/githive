@@ -642,47 +642,46 @@ export class Coordinator extends DurableObject<Env> {
 		}
 		if (!decision.approve) return this.settleAmendment(amendment.id, { status: "rejected", decision: decision.reason });
 
-		// Contract checks can take tens of seconds. Run them before taking the
-		// Coordinator lock so votes and other task updates aren't blocked.
+		// Contract checks can take tens of seconds. Run the first checks outside
+		// the Coordinator lock; the checked commit is verified again under lock
+		// before committing. After repeated base movement, check once under lock.
 		const checker = this.env.CONTRACT_CHECKER.getByName("amend-" + task.id + "-" + amendment.id);
-		let checkResult: ContractCheckResult;
-		try {
-			const commit = await headOf(this.env.ARTIFACTS, task.baseRepo!);
-			if (!commit) throw new Error("task base has no commits");
-			const remote = await remoteFor(this.env.ARTIFACTS, task.baseRepo!, "read");
-			checkResult = await checker.check({ remote: remote.url, token: remote.token, commit, contracts: { [input.path]: input.content } });
-		} catch (err) {
-			// Like the planner, don't block on checker infrastructure failures.
-			checkResult = { status: "skipped", reason: "the check could not run: " + (err instanceof Error ? err.message : String(err)) };
-		} finally {
-			await checker.dispose().catch(() => {});
-		}
-		if (checkResult.status === "failed") {
-			const diagnostics = checkResult.errors.map(describeError);
-			const details = diagnostics.length ? diagnostics.map((line) => "- " + line).join("\n") : "- The checker reported errors without diagnostics.";
-			return this.settleAmendment(amendment.id, { status: "failed", decision: "Contract check failed:\n" + details });
-		}
-
-		return this.exclusive(async () => {
-			const latest = await this.load();
-			const a = latest.amendments!.find((x) => x.id === amendment.id)!;
-			// Another change may have landed on the file while the owner decided.
-			const now = await fileVersion(this.env.ARTIFACTS, latest.baseRepo!, input.path);
-			if ((now?.id ?? null) !== input.basedOn) {
-				Object.assign(a, { status: "stale", decision: staleMessage(input.path, now?.id ?? null), decidedAt: new Date().toISOString() });
-				this.note(latest, this.slice(latest, sliceId).head, `${sliceId}'s approved change to ${input.path} not applied: the file changed while it was decided`);
-				await this.save(latest);
-				return a;
+		const checkAt = async (commit: string): Promise<ContractCheckResult> => {
+			try {
+				const remote = await remoteFor(this.env.ARTIFACTS, task.baseRepo!, "read");
+				return await checker.check({ remote: remote.url, token: remote.token, commit, contracts: { [input.path]: input.content } });
+			} catch (err) {
+				// Like the planner, don't block on checker infrastructure failures.
+				return { status: "skipped", reason: "the check could not run: " + (err instanceof Error ? err.message : String(err)) };
 			}
+		};
+		const failedCheckMessage = (result: Extract<ContractCheckResult, { status: "failed" }>) => {
+			const diagnostics = result.errors.map(describeError);
+			const details = diagnostics.length ? diagnostics.map((line) => "- " + line).join("\n") : "- The checker reported errors without diagnostics.";
+			return "Contract check failed:\n" + details;
+		};
+		const staleFile = async (latest: Task, a: Amendment, now: { id: string; text: string } | null) => {
+			Object.assign(a, { status: "stale", decision: staleMessage(input.path, now?.id ?? null), decidedAt: new Date().toISOString() });
+			this.note(latest, this.slice(latest, sliceId).head, sliceId + "'s approved change to " + input.path + " not applied: the file changed while it was decided");
+			await this.save(latest);
+			return a;
+		};
+		const failedAmendment = async (latest: Task, a: Amendment, result: Extract<ContractCheckResult, { status: "failed" }>) => {
+			Object.assign(a, { status: "failed", decision: failedCheckMessage(result), decidedAt: new Date().toISOString() });
+			this.note(latest, this.slice(latest, sliceId).head, "Contract change to " + input.path + " for " + sliceId + " failed: " + a.decision);
+			await this.save(latest);
+			return a;
+		};
+		const applyApproved = async (latest: Task, a: Amendment) => {
 			const brought = !latest.contracts.includes(input.path);
 			const ws = await Workspace.clone(await remoteFor(this.env.ARTIFACTS, latest.baseRepo!, "write"));
 			await ws.write({ [input.path]: input.content });
-			const commit = await ws.commit(`Amend contract ${input.path} (proposed by ${sliceId})\n\n${input.reason}\n\nApproved: ${decision.reason}`);
+			const commit = await ws.commit("Amend contract " + input.path + " (proposed by " + sliceId + ")\n\n" + input.reason + "\n\nApproved: " + decision.reason);
 			await ws.push();
 
 			// Other slices' running builders need the new contract too.
 			const what = a.kind === "new" ? "added as a contract" : a.kind === "shared" ? "changed and brought under contract" : "amended";
-			const message = `Contract ${input.path} was ${what} at the request of slice ${sliceId}: ${input.reason}\nThe contract owner approved it: ${decision.reason}\nCall fetch_base and merge base/main to get it, re-run your acceptance tests, then call commit_and_push.`;
+			const message = "Contract " + input.path + " was " + what + " at the request of slice " + sliceId + ": " + input.reason + "\nThe contract owner approved it: " + decision.reason + "\nCall fetch_base and merge base/main to get it, re-run your acceptance tests, then call commit_and_push.";
 			const others = latest.slices.filter((s) => s.id !== sliceId && s.status === "building");
 			await Promise.allSettled(others.map((s) => this.env.BUILDER.getByName(s.repo!).notify(message)));
 
@@ -693,10 +692,67 @@ export class Coordinator extends DurableObject<Env> {
 				if (/\.(test|spec)\.[cm]?[jt]sx?$/.test(input.path)) proposer.tests = [...(proposer.tests ?? []), input.path];
 			}
 			Object.assign(a, { status: "approved", decision: decision.reason, commit, decidedAt: new Date().toISOString() });
-			this.note(latest, commit, `Contract ${input.path} ${what} for ${sliceId}; the contract owner approved: ${decision.reason}`);
+			this.note(latest, commit, "Contract " + input.path + " " + what + " for " + sliceId + "; the contract owner approved: " + decision.reason);
 			await this.save(latest);
 			return a;
-		});
+		};
+
+		try {
+			for (let attempt = 0; attempt < 3; attempt++) {
+				let checkedCommit: string | null = null;
+				let checkResult: ContractCheckResult;
+				try {
+					checkedCommit = await headOf(this.env.ARTIFACTS, task.baseRepo!);
+					if (!checkedCommit) throw new Error("task base has no commits");
+					checkResult = await checkAt(checkedCommit);
+				} catch (err) {
+					checkResult = { status: "skipped", reason: "the check could not run: " + (err instanceof Error ? err.message : String(err)) };
+				}
+				const outcome = await this.exclusive(async () => {
+					const latest = await this.load();
+					const a = latest.amendments!.find((x) => x.id === amendment.id)!;
+					const now = await fileVersion(this.env.ARTIFACTS, latest.baseRepo!, input.path);
+					if ((now?.id ?? null) !== input.basedOn)
+						return { retry: false as const, value: await staleFile(latest, a, now) };
+
+					// A different slice/amendment may have moved the base while the
+					// checker ran. Don't apply an overlay checked against an old tree.
+					const currentHead = await headOf(this.env.ARTIFACTS, latest.baseRepo!);
+					if (currentHead !== checkedCommit) return { retry: true as const };
+					if (checkResult.status === "failed") return { retry: false as const, value: await failedAmendment(latest, a, checkResult) };
+					return { retry: false as const, value: await applyApproved(latest, a) };
+				});
+				if (!outcome.retry) return outcome.value;
+			}
+
+			// After three races, use the lock as a fallback so a stable task base
+			// cannot keep an approved amendment from completing indefinitely.
+			return await this.exclusive(async () => {
+				const latest = await this.load();
+				const a = latest.amendments!.find((x) => x.id === amendment.id)!;
+				const now = await fileVersion(this.env.ARTIFACTS, latest.baseRepo!, input.path);
+				if ((now?.id ?? null) !== input.basedOn) return staleFile(latest, a, now);
+
+				const checkedCommit = await headOf(this.env.ARTIFACTS, latest.baseRepo!);
+				let checkResult: ContractCheckResult;
+				if (!checkedCommit) checkResult = { status: "skipped", reason: "task base has no commits" };
+				else checkResult = await checkAt(checkedCommit);
+				if (checkResult.status === "failed") return failedAmendment(latest, a, checkResult);
+
+				// The lock prevents another Coordinator commit between the fallback
+				// check and this commit. Refuse if the base nevertheless moved.
+				const currentHead = await headOf(this.env.ARTIFACTS, latest.baseRepo!);
+				if (currentHead !== checkedCommit) {
+					Object.assign(a, { status: "stale", decision: "The task base moved while the contract check ran; re-propose against its current version.", decidedAt: new Date().toISOString() });
+					this.note(latest, this.slice(latest, sliceId).head, "Contract change to " + input.path + " for " + sliceId + " not applied: the task base moved during its fallback check");
+					await this.save(latest);
+					return a;
+				}
+				return applyApproved(latest, a);
+			});
+		} finally {
+			await checker.dispose().catch(() => {});
+		}
 	}
 
 	private settleAmendment(id: string, outcome: Pick<Amendment, "status" | "decision">) {
