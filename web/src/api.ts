@@ -1,4 +1,5 @@
 import type { Task } from "../../src/types";
+import type { ContractFile, UnifiedCodeDiff } from "./dashboard-contract";
 
 export type { Task };
 export type Slice = Task["slices"][number];
@@ -180,4 +181,14 @@ export const api = {
 	approve: (id: string) => call<unknown>("POST", `/tasks/${encodeURIComponent(id)}/approve`),
 	build: (id: string) => call<unknown>("POST", `/tasks/${encodeURIComponent(id)}/build`),
 	land: async (id: string) => normalizeTask(await call<unknown>("POST", `/tasks/${encodeURIComponent(id)}/land`)),
+	contractFiles: async (taskId: string) => {
+		const result = await call<{ files: ContractFile[] }>("GET", `/tasks/${encodeURIComponent(taskId)}/contracts`);
+		return result.files;
+	},
+	sliceDiff: (taskId: string, sliceId: string) =>
+		call<UnifiedCodeDiff>("GET", `/tasks/${encodeURIComponent(taskId)}/slices/${encodeURIComponent(sliceId)}/diff`),
+	landingDiff: (taskId: string) =>
+		call<UnifiedCodeDiff>("GET", `/tasks/${encodeURIComponent(taskId)}/land-diff`),
+	waive: (taskId: string, sliceId: string, reason: string) =>
+		call<unknown>("POST", `/tasks/${encodeURIComponent(taskId)}/slices/${encodeURIComponent(sliceId)}/waive`, { reason }),
 };

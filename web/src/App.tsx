@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { api, type Live, type Task } from "./api";
 import {
 	ActivityFeed,
+	CodeDecisions,
 	DashboardSidebar,
 	MergeAheadMatrix,
 	PlanPanel,
@@ -230,6 +231,21 @@ export function App() {
 		}
 	}, [busy, clearError, refresh, reportError, selectedTask]);
 
+	const waiveSlice = useCallback(async (sliceId: string, reason: string) => {
+		if (!selectedTask || busy) return;
+		const id = selectedTask.id;
+		const operation = "Waive human review: " + sliceId;
+		setBusy(true);
+		try {
+			await api.waive(id, sliceId, reason);
+			clearError(operation);
+		} catch (error) {
+			reportError(operation, error);
+		} finally {
+			await refresh();
+			setBusy(false);
+		}
+	}, [busy, clearError, refresh, reportError, selectedTask]);
 	const plannerRunning = selectedTask?.planner?.status === "running";
 	const showingLive = live?.task.id === selectedId ? live : null;
 
@@ -272,9 +288,14 @@ export function App() {
 									busy={busy}
 									onPlan={() => void runAction("plan")}
 									onApproveAndBuild={() => void runAction("approve-build")}
-									onLand={() => void runAction("land")}
 								/>
 								<PlanPanel task={selectedTask} />
+								<CodeDecisions
+									task={selectedTask}
+									busy={busy}
+									onWaive={(sliceId, reason) => void waiveSlice(sliceId, reason)}
+									onLand={() => void runAction("land")}
+								/>
 								{showingLive && <SliceLanes live={showingLive} />}
 								<MergeAheadMatrix task={selectedTask} />
 								{showingLive && <ActivityFeed agents={showingLive.agents} />}

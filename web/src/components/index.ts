@@ -1,4 +1,5 @@
 export { ActivityFeed } from "./ActivityFeed";
+export { CodeDecisions } from "./CodeDecisions";
 export { DashboardSidebar } from "./DashboardSidebar";
 export { MergeAheadMatrix } from "./MergeAheadMatrix";
 export { PlanPanel } from "./PlanPanel";
