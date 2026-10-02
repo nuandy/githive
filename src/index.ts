@@ -7,6 +7,7 @@ import type { Blueprint, Review } from "./types";
 export { Builder } from "./builder";
 export { Reviewer } from "./reviewer";
 export { Coordinator } from "./coordinator";
+export { ContractChecker } from "./contract-check";
 export { Gate } from "./gate";
 export { TaskIndex } from "./task-index";
 

@@ -114,9 +114,9 @@ export class Coordinator extends DurableObject<Env> {
 		if (task.planner?.status !== "running") return;
 		let outcome: Partial<NonNullable<Task["planner"]>>;
 		try {
-			const result = await plan(this.env, task.repo, task.goal);
+			const result = await plan(this.env, task.id, task.repo, task.goal);
 			await this.proposeBlueprint(result.blueprint);
-			outcome = { status: "done", usage: result.usage, toolCalls: result.toolCalls };
+			outcome = { status: "done", usage: result.usage, toolCalls: result.toolCalls, contractCheck: result.contractCheck };
 		} catch (err) {
 			outcome = { status: "failed", error: err instanceof Error ? err.message : String(err) };
 		}
@@ -523,6 +523,7 @@ export class Coordinator extends DurableObject<Env> {
 		if (!task.verify.length) {
 			const result = await this.integrateSlice(task, slice);
 			if (!result.ok) await this.sendBack(task, slice, conflictMessage(result.files));
+			else await this.rerunWaitingGates(task);
 			return;
 		}
 		if (slice.gate?.head === slice.reviewHead) return;
@@ -568,20 +569,44 @@ export class Coordinator extends DurableObject<Env> {
 				await this.save(task);
 				return { outcome: "rerun" as const };
 			}
-			slice.gate = { ...slice.gate, status: result.passed ? "passed" : "failed", result, at: new Date().toISOString() };
+			const at = new Date().toISOString();
 			try {
 				if (result.passed) {
+					slice.gate = { ...slice.gate, status: "passed", result, at };
 					const merged = await this.integrateSlice(task, slice);
 					if (!merged.ok) await this.sendBack(task, slice, conflictMessage(merged.files));
+					else await this.rerunWaitingGates(task);
+				} else if (!result.mergeConflict && this.othersCanStillIntegrate(task, slice)) {
+					// The failure may come from code in slices that aren't integrated yet
+					// (a slice can depend on another's implementation of a contract).
+					// Wait, and re-run after the next integration.
+					slice.gate = { ...slice.gate, status: "waiting", result, at };
 				} else {
+					slice.gate = { ...slice.gate, status: "failed", result, at };
 					await this.sendBack(task, slice, gateFeedback(result, excluded));
+					// Nothing else can integrate, so slices waiting on each other go back too.
+					for (const other of task.slices)
+						if (other !== slice && other.gate?.status === "waiting" && !this.othersCanStillIntegrate(task, other)) {
+							other.gate = { ...other.gate, status: "failed" };
+							await this.sendBack(task, other, gateFeedback(other.gate.result!, other.gate.excluded));
+						}
 				}
 			} catch (err) {
 				slice.attention = `after the gate: ${statusOf(err).message}`;
 			}
 			await this.save(task);
-			return { outcome: result.passed ? ("passed" as const) : ("failed" as const) };
+			return { outcome: slice.gate?.status ?? "failed" };
 		});
+	}
+
+	/** Whether any other slice could still be integrated (and so might fix a failing gate). */
+	private othersCanStillIntegrate(task: Task, slice: Slice) {
+		return task.slices.some((s) => s !== slice && s.status === "building" && s.gate?.status !== "waiting");
+	}
+
+	/** After an integration, re-run gates that were waiting for it. */
+	private async rerunWaitingGates(task: Task) {
+		for (const s of task.slices) if (s.status === "building" && s.gate?.status === "waiting") await this.startGate(task, s);
 	}
 
 	/** Merge an approved slice into the task base. Caller holds the lock and saves. */

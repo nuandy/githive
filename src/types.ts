@@ -53,7 +53,8 @@ export interface Slice extends SliceSpec {
 	lastFeedback?: string;
 	/** The integration gate's run for the approved commit. */
 	gate?: {
-		status: "running" | "passed" | "failed";
+		/** "waiting": failed while other slices weren't integrated yet; re-runs after the next integration. */
+		status: "running" | "passed" | "failed" | "waiting";
 		head: string;
 		baseHead: string;
 		at: string;
@@ -83,6 +84,8 @@ export interface PlannerRun {
 	/** Tool calls the planner made while exploring the repo. */
 	toolCalls?: number;
 	usage?: { inputTokens: number; outputTokens: number; cacheReadTokens: number };
+	/** Outcome of type-checking the contracts before the blueprint was accepted. */
+	contractCheck?: string;
 }
 
 export const DEFAULT_POLICY: ReviewPolicy = {
