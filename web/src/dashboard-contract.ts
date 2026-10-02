@@ -47,6 +47,7 @@ export interface TaskHeaderProps {
   task: Task;
   plannerRunning: boolean;
   busy: boolean;
+  contractsReady: boolean;
   onPlan(): void;
   onApproveAndBuild(): void;
 }
@@ -65,6 +66,10 @@ export interface UnifiedCodeDiff {
   base: string;
   head: string;
   unified: string;
+  /** Every path whose tree entry changed, including paths whose diff text was capped. */
+  files: string[];
+  /** Changed paths whose diff content was omitted by per-file or total output limits. */
+  omitted: string[];
 }
 
 /** Dashboard's narrow code-view and human-waiver API surface. */
@@ -80,6 +85,7 @@ export interface CodeDecisionsProps {
   busy: boolean;
   onWaive(sliceId: string, reason: string): void;
   onLand(): void;
+  onContractFilesReady(taskId: string, ready: boolean): void;
 }
 
 /** Injected I/O surface used by the dashboard shell and its orchestration tests. */
