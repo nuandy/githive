@@ -171,10 +171,11 @@ export abstract class SandboxAgent<J extends SandboxJob, S extends AgentState> e
 		return true;
 	}
 
-	private async drainInbox(): Promise<ResponseInputItem[]> {
+	private async drainInbox(state: S): Promise<ResponseInputItem[]> {
 		const inbox = (await this.ctx.storage.get<string[]>("inbox")) ?? [];
 		if (!inbox.length) return [];
 		await this.ctx.storage.delete("inbox");
+		for (const text of inbox) this.note(state, `message delivered: ${text.split("\n")[0].slice(0, 160)}`);
 		return inbox.map((text) => ({ role: "user" as const, content: text }));
 	}
 
@@ -330,7 +331,7 @@ export abstract class SandboxAgent<J extends SandboxJob, S extends AgentState> e
 		const tools = this.tools(job, state);
 		const input: ResponseInputItem[] = [
 			...(state.previousResponseId ? (state.pending ?? []) : [{ role: "user" as const, content: this.kickoff(job) }]),
-			...(await this.drainInbox()),
+			...(await this.drainInbox(state)),
 		];
 		const response = await client.responses.create({
 			model: MODEL,

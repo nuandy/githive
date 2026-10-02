@@ -41,6 +41,7 @@ ${sliceContext(job)}
 
 How to work:
 - Explore the code you need, install dependencies, implement your slice, and run its acceptance tests and the type checks.
+- Only commit_and_push can push: the container has no Git credentials, so \`git push\` in the shell fails. It also pushes commits you made yourself, such as a merge.
 - Call commit_and_push whenever you reach a working checkpoint, not only at the end. Every push is test-merged against the other slices' work in progress, and the result tells you about conflicts while they are still cheap to fix.
 - Stay inside your lane. If your slice seems to need a change outside it, build against the contracts instead.
 - When the slice is complete, pushed and passing, call finish with a short summary for the reviewers.
@@ -109,7 +110,7 @@ How to work:
 					const a = await this.coordinator(job).proposeAmendment(job.slice.id, { path, content, reason });
 					this.note(state, `amendment ${a.status}: ${(a.decision ?? "").slice(0, 160)}`);
 					if (a.status === "approved")
-						return `Approved: ${a.decision}\nIt is committed to the task base. Call fetch_base, run \`git merge base/main\`, then re-run your acceptance tests.`;
+						return `Approved: ${a.decision}\nIt is committed to the task base. Call fetch_base, run \`git merge base/main\`, re-run your acceptance tests, then call commit_and_push.`;
 					if (a.status === "rejected") return `Rejected: ${a.decision}\nWork within the current contract.`;
 					return `The amendment could not be decided: ${a.decision}`;
 				},
@@ -121,7 +122,9 @@ How to work:
 				schema: NoArgs,
 				run: async () => {
 					const r = await this.git(job, ["fetch", "-q", job.base.remote, "main:refs/remotes/base/main"], undefined, job.base.token);
-					return r.exitCode === 0 ? "Fetched the task base into base/main." : `Fetch failed:\n${clip(r.output, 4_000)}`;
+					return r.exitCode === 0
+						? "Fetched the task base into base/main. Merge it with `git merge base/main`, re-run your tests, then call commit_and_push."
+						: `Fetch failed:\n${clip(r.output, 4_000)}`;
 				},
 			}),
 			tool({
@@ -132,6 +135,8 @@ How to work:
 					const dirty = await this.exec(["git", "status", "--porcelain"]);
 					if (dirty.output.trim()) return `Uncommitted changes remain:\n${dirty.output}\nCall commit_and_push first.`;
 					if (!state.pushes) return "Nothing has been pushed yet.";
+					const ahead = await this.unpushed();
+					if (ahead) return `${ahead} local commit(s) are not on your fork yet (for example a merge). Call commit_and_push first.`;
 					if (state.lastReport?.outOfLane.length)
 						return `Your last push changed files outside your lane: ${state.lastReport.outOfLane.join(", ")}. Revert them and push again.`;
 					state.status = "done";
@@ -154,12 +159,22 @@ How to work:
 		];
 	}
 
+	/** Local commits not yet on the fork. */
+	private async unpushed() {
+		const r = await this.exec(["git", "rev-list", "--count", "origin/main..HEAD"]);
+		return r.exitCode === 0 ? Number(r.output.trim()) : 0;
+	}
+
 	private async commitAndPush(job: BuildJob, state: BuilderState, message: string) {
 		await this.exec(["git", "add", "-A"]);
 		const staged = await this.exec(["git", "diff", "--cached", "--quiet"]);
-		if (staged.exitCode === 0) return "Nothing new to commit.";
-		const commit = await this.exec(["git", "commit", "-q", "-m", message]);
-		if (commit.exitCode !== 0) return `Commit failed:\n${clip(commit.output, 4_000)}`;
+		if (staged.exitCode !== 0) {
+			const commit = await this.exec(["git", "commit", "-q", "-m", message]);
+			if (commit.exitCode !== 0) return `Commit failed:\n${clip(commit.output, 4_000)}`;
+		} else if (!(await this.unpushed())) {
+			return "Nothing new to commit or push.";
+		}
+		// Otherwise there are commits made outside this tool (for example a merge of base/main) to push.
 		const push = await this.git(job, ["push", "-q", "origin", "HEAD:main"]);
 		if (push.exitCode !== 0) return `Push failed:\n${clip(push.output, 4_000)}`;
 		state.pushes++;

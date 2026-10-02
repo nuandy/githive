@@ -432,7 +432,7 @@ export class Coordinator extends DurableObject<Env> {
 			await ws.push();
 
 			// Other slices' running builders need the new contract too.
-			const message = `Contract ${input.path} was amended at the request of slice ${sliceId}: ${input.reason}\nThe contract owner approved it: ${decision.reason}\nCall fetch_base and merge base/main to get it, then re-run your acceptance tests.`;
+			const message = `Contract ${input.path} was amended at the request of slice ${sliceId}: ${input.reason}\nThe contract owner approved it: ${decision.reason}\nCall fetch_base and merge base/main to get it, re-run your acceptance tests, then call commit_and_push.`;
 			const others = latest.slices.filter((s) => s.id !== sliceId && s.status === "building");
 			await Promise.allSettled(others.map((s) => this.env.BUILDER.getByName(s.repo!).notify(message)));
 
