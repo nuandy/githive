@@ -3,10 +3,12 @@
 	"version": "0.1.0",
 	"scripts": {
 		"dev": "wrangler dev --enable-containers=false",
-		"deploy": "wrangler deploy",
+		"deploy": "npm run build:web && wrangler deploy",
 		"types": "wrangler types",
-		"typecheck": "tsc",
-		"test": "vitest run"
+		"typecheck": "tsc && tsc -p web",
+		"test": "vitest run",
+		"build:web": "vite build --config web/vite.config.ts",
+		"dev:web": "vite --config web/vite.config.ts"
 	},
 	"license": "MIT",
 	"description": "A Git platform where agents build planned slices in parallel and conflicts are caught before merge. Built on Cloudflare Workers + Artifacts.",
@@ -14,10 +16,16 @@
 		"hono": "^4.13.12",
 		"isomorphic-git": "^1.42.6",
 		"openai": "^7.27.0",
+		"react": "^19.3.0",
+		"react-dom": "^19.3.0",
 		"zod": "^4.6.5"
 	},
 	"devDependencies": {
+		"@types/react": "^19.3.0",
+		"@types/react-dom": "^19.3.0",
+		"@vitejs/plugin-react": "^6.1.1",
 		"typescript": "^7.0.2",
+		"vite": "^8.3.2",
 		"vitest": "^5.0.3",
 		"wrangler": "^4.146.0"
 	},

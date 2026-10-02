@@ -8,10 +8,12 @@ export { Builder } from "./builder";
 export { Reviewer } from "./reviewer";
 export { Coordinator } from "./coordinator";
 export { Gate } from "./gate";
+export { TaskIndex } from "./task-index";
 
 const app = new Hono<{ Bindings: Env }>();
 
 const coordinator = (env: Env, taskId: string) => env.COORDINATOR.get(env.COORDINATOR.idFromName(taskId));
+const taskIndex = (env: Env) => env.TASK_INDEX.getByName("all");
 
 // Write routes mint Git tokens, so they require API_TOKEN when it is set.
 app.use("*", async (c, next) => {
@@ -28,10 +30,14 @@ app.onError((err, c) => {
 	return c.json({ error: message }, status as 400);
 });
 
-app.get("/", (c) =>
+app.get("/api", (c) =>
 	c.json({
 		name: "blueprint",
 		routes: [
+			"GET  /            dashboard",
+			"GET  /repos",
+			"GET  /tasks",
+			"GET  /tasks/:id/live",
 			"POST /spike",
 			"POST /repos/import {url, name, branch?}",
 			"POST /tasks {repo, goal}",
@@ -121,7 +127,58 @@ app.post("/repos/import", async (c) => {
 app.post("/tasks", async (c) => {
 	const { repo, goal } = await c.req.json<{ repo: string; goal: string }>();
 	const id = crypto.randomUUID().slice(0, 8);
-	return c.json(await coordinator(c.env, id).create(id, repo, goal), 201);
+	const task = await coordinator(c.env, id).create(id, repo, goal);
+	await taskIndex(c.env).add({ id, repo, goal, createdAt: task.createdAt });
+	return c.json(task, 201);
+});
+
+// Add a task created before the index existed.
+app.post("/tasks/:id/index", async (c) => {
+	const task = await coordinator(c.env, c.req.param("id")).state();
+	await taskIndex(c.env).add({ id: task.id, repo: task.repo, goal: task.goal, createdAt: task.createdAt });
+	return c.json({ indexed: task.id });
+});
+
+// Newest first, with each task's current state.
+app.get("/tasks", async (c) => {
+	const refs = await taskIndex(c.env).list(Number(c.req.query("limit") ?? 50));
+	const tasks = await Promise.all(refs.map((r) => coordinator(c.env, r.id).state().catch(() => null)));
+	return c.json(tasks.filter((t) => t !== null));
+});
+
+// Repos in the namespace, for the dashboard's "new task" form. Task repos
+// (<taskId>--...) are left out.
+app.get("/repos", async (c) => {
+	const page = await c.env.ARTIFACTS.list({ limit: 100 });
+	return c.json(page.repos.filter((r) => !parseRepoName(r.name)).map((r) => ({ name: r.name })));
+});
+
+/**
+ * Everything the dashboard shows for one task, in one request: the task, each
+ * slice's builder, the reviewers of each slice's current review commit, and
+ * the gate. Agents that never ran are null.
+ */
+app.get("/tasks/:id/live", async (c) => {
+	const id = c.req.param("id");
+	const task = await coordinator(c.env, id).state();
+	const slices = await Promise.all(
+		task.slices.map(async (s) => {
+			const repo = `${id}--${s.id}`;
+			const [builder, reviewers] = await Promise.all([
+				c.env.BUILDER.getByName(repo).state(),
+				s.reviewHead
+					? Promise.all(
+							task.review.reviewers.map(async (role) => ({
+								role,
+								state: await c.env.REVIEWER.getByName(reviewerName(repo, role, s.reviewHead!)).state(),
+							})),
+						)
+					: [],
+			]);
+			return { id: s.id, builder, reviewers };
+		}),
+	);
+	return c.json({ task, agents: slices });
 });
 
 app.get("/tasks/:id", async (c) => c.json(await coordinator(c.env, c.req.param("id")).state()));
@@ -191,6 +248,9 @@ app.post("/tasks/:id/slices/:slice/integrate", async (c) => {
 });
 
 app.post("/tasks/:id/land", async (c) => c.json(await coordinator(c.env, c.req.param("id")).land()));
+
+// Everything that isn't an API route is the dashboard.
+app.get("*", (c) => c.env.ASSETS.fetch(c.req.raw));
 
 interface ArtifactsEvent {
 	type: string;

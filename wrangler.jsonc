@@ -6,6 +6,14 @@
 	"compatibility_flags": ["nodejs_compat"],
 	"observability": { "enabled": true },
 	"workers_dev": true,
+	// The dashboard (web/, built with `npm run build:web`). The Worker runs first
+	// so API routes win; anything else falls through to these files.
+	"assets": {
+		"directory": "./web/dist",
+		"binding": "ASSETS",
+		"run_worker_first": true,
+		"not_found_handling": "single-page-application"
+	},
 	"preview_urls": false,
 	"artifacts": [
 		{
@@ -20,7 +28,8 @@
 			{ "name": "COORDINATOR", "class_name": "Coordinator" },
 			{ "name": "BUILDER", "class_name": "Builder" },
 			{ "name": "REVIEWER", "class_name": "Reviewer" },
-			{ "name": "GATE", "class_name": "Gate" }
+			{ "name": "GATE", "class_name": "Gate" },
+			{ "name": "TASK_INDEX", "class_name": "TaskIndex" }
 		]
 	},
 	// One container per builder or reviewer agent, and per integration gate run. The image (cloudflare/debian-trixie)
@@ -34,7 +43,8 @@
 		{ "tag": "v1", "new_sqlite_classes": ["Coordinator"] },
 		{ "tag": "v2", "new_sqlite_classes": ["Builder"] },
 		{ "tag": "v3", "new_sqlite_classes": ["Reviewer"] },
-		{ "tag": "v4", "new_sqlite_classes": ["Gate"] }
+		{ "tag": "v4", "new_sqlite_classes": ["Gate"] },
+		{ "tag": "v5", "new_sqlite_classes": ["TaskIndex"] }
 	],
 	"queues": {
 		// Receives Artifacts event subscriptions (see README).
