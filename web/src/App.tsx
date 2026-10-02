@@ -151,6 +151,8 @@ export function App() {
 		try {
 			if (action === "plan") {
 				await api.plan(id);
+				// A retry via the header also recovers a failed create-time plan.
+				clearError("Start planning");
 			} else if (action === "approve-build") {
 				await api.approve(id);
 				await api.build(id);
