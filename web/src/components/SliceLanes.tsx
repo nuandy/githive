@@ -14,25 +14,31 @@ function toneForStage(stage: keyof typeof stageLabels) {
 
 export function SliceLanes({ live }: SliceLanesProps) {
   const { task, agents } = live;
+  const slices = Array.isArray(task.slices) ? task.slices : [];
+  const verify = Array.isArray(task.verify) ? task.verify : [];
+  const safeAgents = Array.isArray(agents) ? agents : [];
   return (
     <section className="slice-lanes" aria-labelledby="slice-lanes-title">
       <div className="slice-lanes__heading">
         <h2 id="slice-lanes-title">Slice lanes</h2>
-        <span className="muted">{task.slices.length} {task.slices.length === 1 ? "slice" : "slices"}</span>
+        <span className="muted">{slices.length} {slices.length === 1 ? "slice" : "slices"}</span>
       </div>
-      {task.slices.length === 0 ? <p className="card muted">No slices in this plan.</p> : null}
+      {slices.length === 0 ? <p className="card muted">No slices in this plan.</p> : null}
       <div className="slice-lanes__list">
-        {task.slices.map((slice) => {
+        {slices.map((slice) => {
           const stageInfo = getSliceStage(slice);
-          const sliceAgents = agents.find((agent) => agent.id === slice.id);
+          const sliceAgents = safeAgents.find((agent) => agent?.id === slice.id);
           const builder = sliceAgents?.builder;
-          const latestLog = builder?.log.slice().sort((a, b) => b.at.localeCompare(a.at))[0];
-          const currentReviews = slice.reviewHead ? slice.reviews.filter((review) => review.head === slice.reviewHead) : [];
+          const latestLog = (Array.isArray(builder?.log) ? builder.log : []).slice().sort((a, b) => (b?.at ?? "").localeCompare(a?.at ?? ""))[0];
+          const reviews = Array.isArray(slice.reviews) ? slice.reviews : [];
+          const owns = Array.isArray(slice.owns) ? slice.owns : [];
+          const currentReviews = slice.reviewHead ? reviews.filter((review) => review.head === slice.reviewHead) : [];
           const gate = slice.gate;
           const result = gate?.result;
+          const results = Array.isArray(result?.results) ? result.results : [];
           const checks = [
-            ...task.verify.map((command) => ({ command, check: result?.results.find((item) => item.command === command) })),
-            ...(result?.results ?? []).filter((item) => !task.verify.includes(item.command)).map((check) => ({ command: check.command, check })),
+            ...verify.map((command) => ({ command, check: results.find((item) => item.command === command) })),
+            ...results.filter((item) => !verify.includes(item.command)).map((check) => ({ command: check.command, check })),
           ];
           return (
             <article className="slice-lane card" key={slice.id}>
@@ -46,7 +52,7 @@ export function SliceLanes({ live }: SliceLanesProps) {
 
               <section className="slice-lane__section">
                 <h4>Owned paths</h4>
-                <div className="slice-lane__chips">{slice.owns.length ? slice.owns.map((path) => <code className="slice-lane__chip" key={path}>{path}</code>) : <span className="muted">No paths listed</span>}</div>
+                <div className="slice-lane__chips">{owns.length ? owns.map((path) => <code className="slice-lane__chip" key={path}>{path}</code>) : <span className="muted">No paths listed</span>}</div>
               </section>
 
               <section className="slice-lane__section">
@@ -92,7 +98,7 @@ export function SliceLanes({ live }: SliceLanesProps) {
                     ))}
                   </ul>
                 ) : null}
-                {gate?.excluded.length ? <div className="slice-lane__excluded"><strong>Excluded tests</strong><ul>{gate.excluded.map((test) => <li key={test}><code>{test}</code></li>)}</ul></div> : null}
+                {gate?.excluded?.length ? <div className="slice-lane__excluded"><strong>Excluded tests</strong><ul>{gate.excluded.map((test) => <li key={test}><code>{test}</code></li>)}</ul></div> : null}
               </section>
             </article>
           );

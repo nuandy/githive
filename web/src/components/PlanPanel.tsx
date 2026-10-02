@@ -9,7 +9,12 @@ function statusTone(status?: string) {
 }
 
 export function PlanPanel({ task }: PlanPanelProps) {
-  const policy = task.review;
+  const policy = task.review ?? { reviewers: [], required: 0, vetoes: [] };
+  const contracts = Array.isArray(task.contracts) ? task.contracts : [];
+  const verify = Array.isArray(task.verify) ? task.verify : [];
+  const amendments = Array.isArray(task.amendments) ? task.amendments : [];
+  const reviewers = Array.isArray(policy.reviewers) ? policy.reviewers : [];
+  const vetoes = Array.isArray(policy.vetoes) ? policy.vetoes : [];
   return (
     <section className="plan-panel card" aria-labelledby="plan-panel-title">
       <div className="plan-panel__title-row">
@@ -24,24 +29,24 @@ export function PlanPanel({ task }: PlanPanelProps) {
         </section>
         <section className="plan-panel__block">
           <h3>Contract files</h3>
-          {task.contracts.length ? <ul>{task.contracts.map((path) => <li key={path}><code>{path}</code></li>)}</ul> : <p className="muted">None</p>}
+          {contracts.length ? <ul>{contracts.map((path) => <li key={path}><code>{path}</code></li>)}</ul> : <p className="muted">None</p>}
         </section>
         <section className="plan-panel__block">
           <h3>Verify commands</h3>
-          {task.verify.length ? <ul>{task.verify.map((command, index) => <li key={`${command}-${index}`}><code>{command}</code></li>)}</ul> : <p className="muted">No gate commands.</p>}
+          {verify.length ? <ul>{verify.map((command, index) => <li key={`${command}-${index}`}><code>{command}</code></li>)}</ul> : <p className="muted">No gate commands.</p>}
         </section>
         <section className="plan-panel__block">
           <h3>Review policy</h3>
-          <p>{policy.required} approval{policy.required === 1 ? "" : "s"} required</p>
-          <p><span className="muted">Reviewer roles: </span>{policy.reviewers.length ? policy.reviewers.join(", ") : "None"}</p>
-          <p><span className="muted">Veto roles: </span>{policy.vetoes.length ? policy.vetoes.join(", ") : "None"}</p>
+          <p>{policy.required ?? 0} approval{policy.required === 1 ? "" : "s"} required</p>
+          <p><span className="muted">Reviewer roles: </span>{reviewers.length ? reviewers.join(", ") : "None"}</p>
+          <p><span className="muted">Veto roles: </span>{vetoes.length ? vetoes.join(", ") : "None"}</p>
         </section>
       </div>
       <section className="plan-panel__amendments">
         <h3>Contract amendments</h3>
-        {task.amendments?.length ? (
+        {amendments.length ? (
           <ul className="plan-panel__amendment-list">
-            {task.amendments.map((amendment) => (
+            {amendments.map((amendment) => (
               <li className="plan-panel__amendment" key={amendment.id}>
                 <div className="plan-panel__amendment-head">
                   <code>{amendment.path}</code>

@@ -5,7 +5,8 @@ import "./MergeAheadMatrix.css";
 
 export function MergeAheadMatrix({ task }: MergeAheadMatrixProps) {
   const matrix = buildMergeMatrix(task);
-  const label = (id: string) => id === "base" ? "Task base" : task.slices.find((slice) => slice.id === id)?.title ?? id;
+  const slices = Array.isArray(task.slices) ? task.slices : [];
+  const label = (id: string) => id === "base" ? "Task base" : slices.find((slice) => slice.id === id)?.title ?? id;
   return (
     <section className="merge-matrix card" aria-labelledby="merge-matrix-title">
       <div className="merge-matrix__heading">
@@ -21,7 +22,7 @@ export function MergeAheadMatrix({ task }: MergeAheadMatrixProps) {
             {matrix.ids.map((rowId, rowIndex) => (
               <tr key={rowId}>
                 <th scope="row">{label(rowId)}</th>
-                {matrix.cells[rowIndex].map((cell, columnIndex) => (
+                {(matrix.cells[rowIndex] ?? []).map((cell, columnIndex) => (
                   <td key={`${rowId}-${matrix.ids[columnIndex]}`}>
                     <span className={`merge-matrix__status merge-matrix__status--${cell.status}`}>{cell.status}</span>
                     {cell.files.length ? <ul className="merge-matrix__files">{cell.files.map((file) => <li key={file}><code>{file}</code></li>)}</ul> : null}

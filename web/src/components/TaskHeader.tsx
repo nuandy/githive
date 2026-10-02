@@ -5,7 +5,8 @@ import "./TaskHeader.css";
 export function TaskHeader({ task, plannerRunning, busy, onPlan, onApproveAndBuild, onLand }: TaskHeaderProps) {
   const [expandedGoal, setExpandedGoal] = useState<{ taskId: string; expanded: boolean }>({ taskId: task.id, expanded: false });
   const isGoalExpanded = expandedGoal.taskId === task.id && expandedGoal.expanded;
-  const canLand = task.phase === "building" && task.slices.length > 0 && task.slices.every((slice) => slice.status === "integrated");
+  const slices = Array.isArray(task.slices) ? task.slices : [];
+  const canLand = task.phase === "building" && slices.length > 0 && slices.every((slice) => slice.status === "integrated");
 
   function toggleGoal() {
     setExpandedGoal((previous) => ({

@@ -6,6 +6,7 @@ import {
 	MergeAheadMatrix,
 	PlanPanel,
 	SliceLanes,
+	TaskDetailBoundary,
 	TaskHeader,
 	TokenSettings,
 } from "./components";
@@ -265,21 +266,23 @@ export function App() {
 							{!reposLoaded && <p className="muted">Loading repositories…</p>}
 						</section>
 					) : (
-						<div className="dashboard-task">
-							<TaskHeader
-								task={selectedTask}
-								plannerRunning={plannerRunning}
-								busy={busy}
-								onPlan={() => void runAction("plan")}
-								onApproveAndBuild={() => void runAction("approve-build")}
-								onLand={() => void runAction("land")}
-							/>
-							<PlanPanel task={selectedTask} />
-							{showingLive && <SliceLanes live={showingLive} />}
-							<MergeAheadMatrix task={selectedTask} />
-							{showingLive && <ActivityFeed agents={showingLive.agents} />}
-							{!showingLive && <p className="muted dashboard-live-pending">Loading live slice activity…</p>}
-						</div>
+						<TaskDetailBoundary key={selectedTask.id}>
+							<div className="dashboard-task">
+								<TaskHeader
+									task={selectedTask}
+									plannerRunning={plannerRunning}
+									busy={busy}
+									onPlan={() => void runAction("plan")}
+									onApproveAndBuild={() => void runAction("approve-build")}
+									onLand={() => void runAction("land")}
+								/>
+								<PlanPanel task={selectedTask} />
+								{showingLive && <SliceLanes live={showingLive} />}
+								<MergeAheadMatrix task={selectedTask} />
+								{showingLive && <ActivityFeed agents={showingLive.agents} />}
+								{!showingLive && <p className="muted dashboard-live-pending">Loading live slice activity…</p>}
+							</div>
+						</TaskDetailBoundary>
 					)}
 				</main>
 			</div>
