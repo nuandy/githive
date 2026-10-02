@@ -3,7 +3,9 @@ import git from "isomorphic-git";
 import { baseRepoName, forkAndWait, headOf, remoteFor, sliceRepoName } from "./artifacts";
 import { fail } from "./errors";
 import { Workspace } from "./git";
-import { tally, validatePolicy } from "./quorum";
+import { blueprintProblems } from "./blueprint";
+import { plan } from "./planner";
+import { tally } from "./quorum";
 import {
 	DEFAULT_POLICY,
 	type Blueprint,
@@ -14,8 +16,6 @@ import {
 	type SliceCredentials,
 	type Task,
 } from "./types";
-
-const SLUG = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
 /** One side of a Merge-ahead check. */
 interface Side {
@@ -81,30 +81,50 @@ export class Coordinator extends DurableObject<Env> {
 		});
 	}
 
+	/** Start the planner agent. It runs from an alarm because a run takes minutes. */
+	startPlanning() {
+		return this.exclusive(async () => {
+			const task = await this.load();
+			if (task.phase !== "planning" && task.phase !== "awaiting-approval") fail(409, `task is ${task.phase}`);
+			if (task.planner?.status === "running") fail(409, "the planner is already running");
+			if (!this.env.OPENAI_API_KEY) fail(500, "OPENAI_API_KEY is not set");
+			task.planner = { status: "running", startedAt: new Date().toISOString() };
+			await this.save(task);
+			await this.ctx.storage.setAlarm(Date.now());
+			return task;
+		});
+	}
+
+	async alarm() {
+		const task = await this.load();
+		if (task.planner?.status !== "running") return;
+		let outcome: Partial<NonNullable<Task["planner"]>>;
+		try {
+			const result = await plan(this.env, task.repo, task.goal);
+			await this.proposeBlueprint(result.blueprint);
+			outcome = { status: "done", usage: result.usage, toolCalls: result.toolCalls };
+		} catch (err) {
+			outcome = { status: "failed", error: err instanceof Error ? err.message : String(err) };
+		}
+		await this.exclusive(async () => {
+			const latest = await this.load();
+			latest.planner = { ...latest.planner!, ...outcome, finishedAt: new Date().toISOString() };
+			await this.save(latest);
+		});
+	}
+
 	/** Store a proposed blueprint. A human (or the planner agent) approves it next. */
 	proposeBlueprint(blueprint: Blueprint) {
 		return this.exclusive(async () => {
 			const task = await this.load();
 			if (task.phase !== "planning" && task.phase !== "awaiting-approval") fail(409, `task is ${task.phase}`);
 
-			const { slices, contracts } = blueprint;
-			if (!slices?.length) fail(400, "a blueprint needs at least one slice");
-			for (const s of slices) {
-				if (!SLUG.test(s.id) || s.id === "base") fail(400, `bad slice id: ${s.id}`);
-				if (!s.owns?.length) fail(400, `slice ${s.id} owns no paths`);
-			}
-			if (new Set(slices.map((s) => s.id)).size !== slices.length) fail(400, "slice ids must be unique");
-			// Slices may not share paths: that's what lets them build in parallel.
-			for (const a of slices)
-				for (const b of slices)
-					for (const p of a.owns)
-						for (const q of b.owns)
-							if (a !== b && p.startsWith(q)) fail(400, `${a.id} and ${b.id} both own ${p}`);
-			for (const path of Object.keys(contracts ?? {}))
-				if (path.startsWith("/") || path.split("/").includes("..")) fail(400, `bad contract path: ${path}`);
+			const problems = blueprintProblems(blueprint);
+			if (problems.length) fail(400, problems.join(" "));
+			const { slices, contracts, rationale } = blueprint;
 			const review = blueprint.review ?? DEFAULT_POLICY;
-			validatePolicy(review);
 
+			task.rationale = rationale;
 			task.slices = slices.map(({ id, title, owns, instructions }) => ({
 				id,
 				title,

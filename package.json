@@ -12,7 +12,9 @@
 	"description": "A Git platform where agents build planned slices in parallel and conflicts are caught before merge. Built on Cloudflare Workers + Artifacts.",
 	"dependencies": {
 		"hono": "^4.13.12",
-		"isomorphic-git": "^1.42.6"
+		"isomorphic-git": "^1.42.6",
+		"openai": "^7.27.0",
+		"zod": "^4.6.5"
 	},
 	"devDependencies": {
 		"typescript": "^7.0.2",

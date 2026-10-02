@@ -1,2 +1,5 @@
 # Bearer token required on write routes. Leave unset to disable auth locally.
 API_TOKEN=change-me
+
+# OpenAI key for the planner agent (gpt-6-luna).
+OPENAI_API_KEY=sk-...

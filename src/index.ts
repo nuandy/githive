@@ -33,7 +33,8 @@ app.get("/", (c) =>
 			"POST /repos/import {url, name, branch?}",
 			"POST /tasks {repo, goal}",
 			"GET  /tasks/:id",
-			"PUT  /tasks/:id/blueprint {slices, contracts, review?}",
+			"POST /tasks/:id/plan",
+			"PUT  /tasks/:id/blueprint {slices, contracts, review?, rationale?}",
 			"POST /tasks/:id/approve",
 			"POST /tasks/:id/slices/:slice/pushed",
 			"POST /tasks/:id/slices/:slice/review",
@@ -116,6 +117,9 @@ app.post("/tasks", async (c) => {
 });
 
 app.get("/tasks/:id", async (c) => c.json(await coordinator(c.env, c.req.param("id")).state()));
+
+// Starts the planner agent; poll GET /tasks/:id until planner.status is done or failed.
+app.post("/tasks/:id/plan", async (c) => c.json(await coordinator(c.env, c.req.param("id")).startPlanning(), 202));
 
 app.put("/tasks/:id/blueprint", async (c) => {
 	const blueprint = await c.req.json<Blueprint>();

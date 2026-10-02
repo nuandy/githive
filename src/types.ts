@@ -37,6 +37,18 @@ export interface Blueprint {
 	contracts: Record<string, string>;
 	/** Defaults to DEFAULT_POLICY. */
 	review?: ReviewPolicy;
+	/** Why the work is split this way, for the human approving it. */
+	rationale?: string;
+}
+
+export interface PlannerRun {
+	status: "running" | "done" | "failed";
+	startedAt: string;
+	finishedAt?: string;
+	error?: string;
+	/** Tool calls the planner made while exploring the repo. */
+	toolCalls?: number;
+	usage?: { inputTokens: number; outputTokens: number; cacheReadTokens: number };
 }
 
 export const DEFAULT_POLICY: ReviewPolicy = {
@@ -87,6 +99,8 @@ export interface Task {
 	repo: string;
 	goal: string;
 	phase: Phase;
+	planner?: PlannerRun;
+	rationale?: string;
 	/** Repo holding the contracts; slices fork from it and integrate back into it. */
 	baseRepo?: string;
 	/** Commit on the base that slices forked from. */
