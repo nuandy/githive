@@ -6,7 +6,7 @@ import type { ContractCheckResult } from "./contract-check";
 import { describeError } from "./contract-check-plan";
 import { isTransientFailure, retryTransient } from "./retry";
 import { Workspace } from "./git";
-import { unifiedDiff } from "./code-view";
+import { boundedUnifiedDiff } from "./code-view";
 import { type LedgerDoc, type LedgerEntry, clipText, diff, fromDoc, replay, toDoc } from "./ledger";
 import { appendLedger, readLedger } from "./ledger-git";
 import { blueprintProblems } from "./blueprint";
@@ -186,7 +186,7 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 		if (!slice.repo) fail(409, `slice ${sliceId} has no repository`);
 		const ws = await Workspace.clone(await remoteFor(this.env.ARTIFACTS, slice.repo, "read"));
 		const files = await ws.changedFiles(base, slice.reviewHead);
-		return { base, head: slice.reviewHead, unified: unifiedDiff(files) };
+		return { base, head: slice.reviewHead, ...boundedUnifiedDiff(files) };
 	}
 
 	/** Diff the complete integrated task base against the project's captured main head. */
@@ -197,10 +197,11 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 		if (pending.length) fail(409, `slices not integrated: ${pending.join(", ")}`);
 		if (!task.baseRepo) fail(409, "task has no base repository");
 		const ws = await Workspace.clone(await remoteFor(this.env.ARTIFACTS, task.repo, "read"));
-		const base = await ws.head();
+		const projectHead = await ws.head();
 		const head = await ws.fetch("task-base", await remoteFor(this.env.ARTIFACTS, task.baseRepo, "read"));
+		const base = await ws.mergeBase(projectHead, head);
 		const files = await ws.changedFiles(base, head);
-		return { base, head, unified: unifiedDiff(files) };
+		return { base, head, ...boundedUnifiedDiff(files) };
 	}
 
 	create(id: string, repo: string, goal: string, limits?: Partial<Limits>) {

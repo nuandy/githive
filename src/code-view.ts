@@ -4,6 +4,22 @@ export interface ChangedTextFile {
 	after: string | null;
 }
 
+export interface BoundedDiff {
+	unified: string;
+	files: string[];
+	omitted: string[];
+}
+
+// Keep both the work performed by Myers and the response bounded. In particular,
+// check input byte lengths before splitting into lines or constructing the edit
+// graph: lockfiles and generated bundles should not get that far.
+const MAX_FILE_INPUT_BYTES = 32 * 1024;
+const MAX_FILE_LINES = 256;
+const MAX_FILE_DIFF_BYTES = 64 * 1024;
+const MAX_TOTAL_DIFF_BYTES = 256 * 1024;
+const MAX_NOTICE_BYTES = 2 * 1024;
+const encoder = new TextEncoder();
+
 interface Line {
 	text: string;
 	terminated: boolean;
@@ -13,6 +29,18 @@ type Edit =
 	| { type: "equal"; line: Line; oldLine: number; newLine: number }
 	| { type: "delete"; line: Line; oldLine: number; newLine: number }
 	| { type: "insert"; line: Line; oldLine: number; newLine: number };
+
+function byteLength(text: string) {
+	return encoder.encode(text).byteLength;
+}
+
+function lineCount(text: string | null) {
+	if (text === null || text === "") return 0;
+	let count = 1;
+	for (const character of text) if (character === "\n") count++;
+	if (text.endsWith("\n")) count--;
+	return count;
+}
 
 function lines(text: string | null): Line[] {
 	if (text === null || text === "") return [];
@@ -121,7 +149,7 @@ function quoteGitPath(path: string): string {
 				if (hasControl.test(character)) {
 					// Octal-escaped UTF-8 bytes follow Git's C-style pathname quoting and
 					// avoid emitting invisible/control characters into a header.
-					for (const byte of new TextEncoder().encode(character)) encoded.push("\\" + byte.toString(8).padStart(3, "0"));
+					for (const byte of encoder.encode(character)) encoded.push("\\" + byte.toString(8).padStart(3, "0"));
 				} else encoded.push(character);
 		}
 	}
@@ -168,13 +196,62 @@ function fileDiff(file: ChangedTextFile): string {
 	return output.join("");
 }
 
-/** Format changed text files as readable Git-style unified diffs. */
-export function unifiedDiff(files: ChangedTextFile[]): string {
-	return files
+function omissionNotice(omitted: string[]): string {
+	const heading = `\n[Blueprint diff notice: diff content omitted for ${omitted.length} changed file${omitted.length === 1 ? "" : "s"} because per-file or total diff limits were reached.`;
+	let notice = `${heading} Omitted paths: `;
+	for (const path of omitted) {
+		const next = `${notice}${notice.endsWith(" ") ? "" : ", "}${quoteGitPath(path)}`;
+		if (byteLength(`${next}, …]`) > MAX_NOTICE_BYTES) {
+			notice += `${notice.endsWith(" ") ? "" : ", "}…`;
+			break;
+		}
+		notice = next;
+	}
+	return `${notice}]\n`;
+}
+
+/** Generate a size-bounded Git-style diff and retain the complete changed-path list. */
+export function boundedUnifiedDiff(input: ChangedTextFile[]): BoundedDiff {
+	const changed = input
 		.filter((file) => file.before !== file.after)
 		.slice()
-		.sort((a, b) => a.path.localeCompare(b.path))
-		.map(fileDiff)
-		.filter(Boolean)
-		.join("");
+		.sort((a, b) => a.path.localeCompare(b.path));
+	const files = changed.map((file) => file.path);
+	const omitted: string[] = [];
+	const chunks: string[] = [];
+	let outputBytes = 0;
+	let aggregateFull = false;
+	const contentBudget = MAX_TOTAL_DIFF_BYTES - MAX_NOTICE_BYTES;
+
+	for (const file of changed) {
+		if (
+			aggregateFull ||
+			byteLength(file.before ?? "") + byteLength(file.after ?? "") > MAX_FILE_INPUT_BYTES ||
+			lineCount(file.before) > MAX_FILE_LINES ||
+			lineCount(file.after) > MAX_FILE_LINES
+		) {
+			omitted.push(file.path);
+			continue;
+		}
+		const rendered = fileDiff(file);
+		if (!rendered) continue;
+		const renderedBytes = byteLength(rendered);
+		if (renderedBytes > MAX_FILE_DIFF_BYTES || renderedBytes > contentBudget - outputBytes) {
+			omitted.push(file.path);
+			// Files are sorted; once the total budget is exhausted, skip every
+			// remaining diff rather than spending more time rendering it.
+			if (renderedBytes > contentBudget - outputBytes) aggregateFull = true;
+			continue;
+		}
+		chunks.push(rendered);
+		outputBytes += renderedBytes;
+	}
+
+	if (omitted.length) chunks.push(omissionNotice(omitted));
+	return { unified: chunks.join(""), files, omitted };
+}
+
+/** Format changed text files as readable Git-style unified diffs. */
+export function unifiedDiff(files: ChangedTextFile[]): string {
+	return boundedUnifiedDiff(files).unified;
 }

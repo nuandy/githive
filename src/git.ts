@@ -119,8 +119,12 @@ export class Workspace {
 			map: async (path, [a, b]) => {
 				if (path === ".") return true;
 				const [typeA, typeB] = [await a?.type(), await b?.type()];
-				// Descend into directories; only files are reported.
-				if (typeA === "tree" || typeB === "tree") return true;
+				// A tree/blob collision is both a changed file and a directory to
+				// descend into, so keep the blob path and still visit descendants.
+				if (typeA === "tree" || typeB === "tree") {
+					if ((typeA === "blob" || typeB === "blob") && typeA !== typeB) changed.push(path);
+					return true;
+				}
 				if ((await a?.oid()) !== (await b?.oid())) changed.push(path);
 				return true;
 			},
@@ -131,8 +135,8 @@ export class Workspace {
 	/** Obtain UTF-8 old/new text for every changed file between two commits. */
 	async changedFiles(from: string, to: string): Promise<ChangedFileText[]> {
 		const changed: ChangedFileText[] = [];
-		const textAt = async (entry: { oid(): Promise<string | null> } | null | undefined) => {
-			if (!entry) return null;
+		const textAt = async (entry: { oid(): Promise<string | null> } | null | undefined, type: string | undefined) => {
+			if (!entry || type !== "blob") return null;
 			const oid = await entry.oid();
 			if (!oid) return null;
 			const { blob } = await git.readBlob({ fs: this.fs, dir: DIR, oid });
@@ -145,9 +149,16 @@ export class Workspace {
 			map: async (path, [a, b]) => {
 				if (path === ".") return true;
 				const [typeA, typeB] = [await a?.type(), await b?.type()];
-				if (typeA === "tree" || typeB === "tree") return true;
+				if (typeA === "tree" || typeB === "tree") {
+					// Report the file on the blob side of a file/directory replacement,
+					// while returning true lets the walker include all tree descendants.
+					if ((typeA === "blob" || typeB === "blob") && typeA !== typeB) {
+						changed.push({ path, before: await textAt(a, typeA), after: await textAt(b, typeB) });
+					}
+					return true;
+				}
 				const [oidA, oidB] = await Promise.all([a?.oid(), b?.oid()]);
-				if (oidA !== oidB) changed.push({ path, before: await textAt(a), after: await textAt(b) });
+				if (oidA !== oidB) changed.push({ path, before: await textAt(a, typeA), after: await textAt(b, typeB) });
 				return true;
 			},
 		});
