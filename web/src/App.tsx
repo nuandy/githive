@@ -38,7 +38,7 @@ export function App() {
 	const reportError = useCallback((operation: string, error: unknown) => {
 		const detail = error instanceof Error ? error.message : String(error);
 		const message = `${operation}: ${detail}`;
-		setErrors((current) => [...current.filter((entry) => entry !== message), message]);
+		setErrors((current) => current.includes(message) ? current : [...current, message]);
 	}, []);
 	const clearError = useCallback((operation: string) => {
 		setErrors((current) => current.filter((entry) => !entry.startsWith(`${operation}:`)));
