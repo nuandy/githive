@@ -9,7 +9,10 @@ import { FakeStorage, fakeEnv, slice, task } from "./fakes/env";
 const io = vi.hoisted(() => ({
 	heads: new Map<string, string>(),
 	mergeConflict: null as string[] | null,
+	/** Only merges of this ref conflict, when set. */
+	conflictOn: null as string | null,
 	merges: [] as string[],
+	pushes: 0,
 	/** Files on the task base, by path: what fileVersion reads. */
 	files: new Map<string, { id: string; text: string }>(),
 	/** Files committed to the task base through a Workspace. */
@@ -30,13 +33,13 @@ vi.mock("../src/git", () => ({
 		clone: vi.fn(async () => ({
 			fetch: vi.fn(async () => "fetched"),
 			merge: vi.fn(async (ref: string) => {
-				if (io.mergeConflict) {
+				if (io.mergeConflict && (!io.conflictOn || io.conflictOn === ref)) {
 					const { default: isogit } = await import("isomorphic-git");
 					throw new isogit.Errors.MergeConflictError(io.mergeConflict, io.mergeConflict, [], []);
 				}
 				io.merges.push(ref);
 			}),
-			push: vi.fn(async () => ({})),
+			push: vi.fn(async () => void io.pushes++),
 			write: vi.fn(async (files: Record<string, string>) => {
 				io.written.push(files);
 				for (const [path, text] of Object.entries(files)) io.files.set(path, { id: `v-${text}`, text });
@@ -83,7 +86,9 @@ const vote = (reviewer: string, verdict: Review["verdict"], head = "h1") => ({ r
 beforeEach(() => {
 	io.heads.clear();
 	io.mergeConflict = null;
+	io.conflictOn = null;
 	io.merges = [];
+	io.pushes = 0;
 	io.heads.set("t1--base", "base0");
 	io.files.clear();
 	io.written = [];
@@ -248,7 +253,26 @@ describe("the integration gate", () => {
 		expect(plan?.others).toEqual([{ slice: "b", head: "hb", remote: "https://git.test/t1--b.git", token: "token-t1--b" }]);
 		expect(await coordinator.gateResult("a", result(), [], [{ slice: "b", head: "hb" }])).toEqual({ outcome: "passed" });
 		expect(io.merges).toEqual(["refs/remotes/a/main", "refs/remotes/b/main"]);
+		expect(io.pushes).toBe(1); // one push: the base gets the whole group at once
 		expect((await stored()).slices.map((s) => s.status)).toEqual(["integrated", "integrated"]);
+	});
+
+	it("integrates none of a group when one of its slices conflicts with the base", async () => {
+		const grouped = (head: string, other: string) => ({ ...gated("running", head), group: [other] });
+		await setup(task({ slices: [slice("a", { reviewHead: "h1", gate: grouped("h1", "b") }), slice("b", { reviewHead: "hb", gate: grouped("hb", "a") })] }));
+		io.heads.set("t1--a", "h1");
+		io.heads.set("t1--b", "hb");
+		io.mergeConflict = ["src/shared.ts"];
+		io.conflictOn = "refs/remotes/b/main";
+		await coordinator.gateResult("a", result(), [], [{ slice: "b", head: "hb" }]);
+		expect(io.pushes).toBe(0);
+		const t = await stored();
+		expect(t.slices.map((s) => [s.status, s.gate?.status])).toEqual([
+			["building", "waiting"],
+			["building", "passed"],
+		]);
+		expect(builder("b").revise.mock.calls[0][0]).toMatch(/conflicts with work already integrated.*src\/shared\.ts/s);
+		expect(builder("a").revise).not.toHaveBeenCalled();
 	});
 
 	it("retries a slice's gate together with its group", async () => {

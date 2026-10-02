@@ -839,14 +839,18 @@ export class Coordinator extends DurableObject<Env> {
 			try {
 				if (result.passed) {
 					for (const m of members) m.gate = { ...m.gate!, status: "passed", baseHead: result.baseHead, result, at };
-					for (const m of members) {
-						const merged = await this.integrateSlice(task, m);
-						if (!merged.ok) {
-							await this.sendBack(task, m, conflictMessage(merged.files));
-							break;
-						}
+					// All or nothing: a group's slices only pass together, so the base never gets part of a group.
+					const merged = await this.integrateSlices(task, members);
+					if (merged.ok) await this.rerunWaitingGates(task);
+					else {
+						await this.sendBack(task, merged.slice, conflictMessage(merged.files));
+						// The rest of the group waits for it, and is checked with it again once it's back.
+						for (const m of members)
+							if (m !== merged.slice) {
+								m.gate = { ...m.gate!, status: "waiting" };
+								this.note(task, m.reviewHead, `${m.id}: not integrated; ${merged.slice.id}, in the same group, conflicts with the base and went back to its builder`);
+							}
 					}
-					await this.rerunWaitingGates(task);
 				} else if (others.length) {
 					// A group run failed: every slice in it goes back, with the combined output.
 					for (const m of members) {
@@ -990,23 +994,38 @@ export class Coordinator extends DurableObject<Env> {
 
 	/** Merge an approved slice into the task base. Caller holds the lock and saves. */
 	private async integrateSlice(task: Task, slice: Slice): Promise<{ ok: true } | { ok: false; files: string[] }> {
-		const head = await headOf(this.env.ARTIFACTS, slice.repo!);
-		if (head !== slice.reviewHead) fail(409, `slice moved to ${head} after review of ${slice.reviewHead}`);
-		if (slice.outOfLane.length) fail(409, `slice changed paths outside its lane: ${slice.outOfLane.join(", ")}`);
+		const merged = await this.integrateSlices(task, [slice]);
+		return merged.ok ? merged : { ok: false, files: merged.files };
+	}
 
+	/**
+	 * Merge approved slices into the task base atomically: every merge is made in
+	 * one checkout and pushed once, so the base gets all of them or none. If any
+	 * conflicts, nothing is pushed. Caller holds the lock and saves.
+	 */
+	private async integrateSlices(task: Task, slices: Slice[]): Promise<{ ok: true } | { ok: false; slice: Slice; files: string[] }> {
+		for (const slice of slices) {
+			const head = await headOf(this.env.ARTIFACTS, slice.repo!);
+			if (head !== slice.reviewHead) fail(409, `${slice.id} moved to ${head} after review of ${slice.reviewHead}`);
+			if (slice.outOfLane.length) fail(409, `${slice.id} changed paths outside its lane: ${slice.outOfLane.join(", ")}`);
+		}
 		const ws = await Workspace.clone(await remoteFor(this.env.ARTIFACTS, task.baseRepo!, "write"));
-		await ws.fetch(slice.id, await remoteFor(this.env.ARTIFACTS, slice.repo!));
-		try {
-			await ws.merge(`refs/remotes/${slice.id}/main`, `Integrate ${slice.id}: ${slice.title}`);
-		} catch (err) {
-			if (err instanceof git.Errors.MergeConflictError) return { ok: false, files: err.data.filepaths };
-			throw err;
+		for (const slice of slices) {
+			await ws.fetch(slice.id, await remoteFor(this.env.ARTIFACTS, slice.repo!));
+			try {
+				await ws.merge(`refs/remotes/${slice.id}/main`, `Integrate ${slice.id}: ${slice.title}`);
+			} catch (err) {
+				if (err instanceof git.Errors.MergeConflictError) return { ok: false, slice, files: err.data.filepaths };
+				throw err;
+			}
 		}
 		await ws.push();
 
-		slice.status = "integrated";
-		slice.attention = undefined;
-		this.note(task, head, `${slice.id} integrated into the task base`);
+		for (const slice of slices) {
+			slice.status = "integrated";
+			slice.attention = undefined;
+			this.note(task, slice.reviewHead, `${slice.id} integrated into the task base${slices.length > 1 ? `, together with ${slices.filter((s) => s !== slice).map((s) => s.id).join(", ")}` : ""}`);
+		}
 		return { ok: true };
 	}
 
