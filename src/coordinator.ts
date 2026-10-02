@@ -704,7 +704,7 @@ export class Coordinator extends DurableObject<Env> {
 			const at = new Date().toISOString();
 			try {
 				if (result.passed) {
-					for (const m of members) m.gate = { ...m.gate!, status: "passed", result, at };
+					for (const m of members) m.gate = { ...m.gate!, status: "passed", baseHead: result.baseHead, result, at };
 					for (const m of members) {
 						const merged = await this.integrateSlice(task, m);
 						if (!merged.ok) {
@@ -716,14 +716,14 @@ export class Coordinator extends DurableObject<Env> {
 				} else if (others.length) {
 					// A group run failed: every slice in it goes back, with the combined output.
 					for (const m of members) {
-						m.gate = { ...m.gate!, status: "failed", result, at };
+						m.gate = { ...m.gate!, status: "failed", baseHead: result.baseHead, result, at };
 						await this.sendBack(task, m, gateFeedback(result, excluded, members.filter((x) => x !== m).map((x) => x.id)));
 					}
 				} else if (!result.mergeConflict && this.othersCanStillIntegrate(task, slice)) {
 					// The failure may come from code in slices that aren't integrated yet
 					// (a slice can depend on another's implementation of a contract).
 					// Wait, and re-run after the next integration.
-					slice.gate = { ...slice.gate!, status: "waiting", result, at };
+					slice.gate = { ...slice.gate!, status: "waiting", baseHead: result.baseHead, result, at };
 				} else {
 					const waiting = task.slices.filter((s) => s !== slice && s.status === "building" && s.gate?.status === "waiting");
 					if (!result.mergeConflict && waiting.length) {
@@ -731,7 +731,7 @@ export class Coordinator extends DurableObject<Env> {
 						// other: check them together.
 						await this.startGroupGate(task, slice, waiting);
 					} else {
-						slice.gate = { ...slice.gate!, status: "failed", result, at };
+						slice.gate = { ...slice.gate!, status: "failed", baseHead: result.baseHead, result, at };
 						await this.sendBack(task, slice, gateFeedback(result, excluded));
 					}
 				}
