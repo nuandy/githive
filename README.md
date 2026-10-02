@@ -24,7 +24,7 @@ POST /tasks/:id/slices/:s/integrate requires an approved quorum on the current h
 POST /tasks/:id/land                merges the base into the project repo
 ```
 
-The planner agent (OpenAI `gpt-6-luna`, via the Responses API) reads the repo through the Artifacts binding, with no clone, and finishes by calling a `submit_blueprint` tool. That tool applies the same validation as the Coordinator and returns any problems to the model to fix. Planning runs from a Durable Object alarm, so poll `GET /tasks/:id` until `planner.status` is `done` or `failed`.
+The planner agent (OpenAI `gpt-6-luna`, via the Responses API) reads the repo through the Artifacts binding, with no clone, and finishes by calling a `submit_blueprint` tool. That tool applies the same validation as the Coordinator, then checks the contract files in a container against the project: TypeScript with the compiler (using each file's nearest `tsconfig.json`), plain JavaScript for syntax with `node --check`. Errors about modules that don't exist yet are expected and ignored. Any problems go back to the model to fix. Planning runs from a Durable Object alarm, so poll `GET /tasks/:id` until `planner.status` is `done` or `failed`.
 
 `POST /tasks/:id/build` starts one hosted builder per slice: a `Builder` Durable Object with its own Linux container (the managed `cloudflare/debian-trixie` image, Node 24). A `gpt-6-luna` agent works on the slice's fork through tools (list, read, write, run a command, `commit_and_push`, `finish`). Every push runs Merge-ahead, and the agent gets the conflicts and lane violations back as the tool result. The fork's token is passed only on the git commands the Builder runs itself, so it never sits in the container's files or environment. Follow progress at `GET /tasks/:id/slices/:slice/builder`.
 
@@ -42,6 +42,14 @@ Landing the finished task on the project repo stays a manual step: `POST /tasks/
 Each slice lists the contract tests it must make pass. Builders and reviewers run those, because another slice's contract tests can fail until that slice is integrated.
 
 One `Coordinator` Durable Object per task holds its state and runs every Git write. The Artifacts binding creates, forks and reads repos. Commits, merges and pushes go through [isomorphic-git](https://isomorphic-git.org/) on an in-memory filesystem, because the binding can't write inside a repo.
+
+## Language support
+
+Blueprint works on **JavaScript and TypeScript projects** today. Builders, reviewers, the integration gate and the contract check all run in Cloudflare's managed `cloudflare/debian-trixie` image, which has Node.js 24 and npm (git is installed at startup), but no Python, Go or other toolchains.
+
+- **Contract check:** TypeScript files are type-checked and plain JavaScript files are syntax-checked. Files in other languages, and JSX, are listed as not checked; planning still goes ahead.
+- **Integration gate:** runs whatever `verify` commands the planner picks, so it isn't tied to a language, but commands like `pytest` or `go test` fail without their toolchain.
+- **Other languages** would need their toolchain installed when a container starts (or a custom image), plus a matching contract check such as `python -m py_compile` or `go vet`.
 
 ## Run it
 

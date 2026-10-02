@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { contractErrors, contractGroups, nearestConfig, parseTsc } from "../src/contract-check-plan";
+import { contractErrors, contractGroups, describeError, jsContracts, nearestConfig, parseNodeCheck, parseTsc } from "../src/contract-check-plan";
 
 const configs = ["tsconfig.json", "web/tsconfig.json"];
 
@@ -39,5 +39,27 @@ describe("parseTsc and contractErrors", () => {
 			"web/src/contract.ts:20 TS2391",
 			"test/events.test.ts:17 TS2345",
 		]);
+	});
+});
+
+describe("JavaScript contracts", () => {
+	it("checks plain JavaScript but not JSX", () => {
+		expect(jsContracts(["a.js", "b.mjs", "c.cjs", "d.jsx", "e.ts"])).toEqual(["a.js", "b.mjs", "c.cjs"]);
+	});
+
+	it("parses a node --check syntax error", () => {
+		const output = "/work/src/contract.js:3\n  return {\n         ^\n\nSyntaxError: Unexpected end of input\n    at checkSyntax (node:internal/main/check_syntax:75:5)";
+		expect(parseNodeCheck("src/contract.js", output)).toEqual({
+			file: "src/contract.js",
+			line: 3,
+			code: 0,
+			message: "SyntaxError: Unexpected end of input",
+		});
+		expect(parseNodeCheck("src/contract.js", "")).toBeNull();
+	});
+
+	it("describes TypeScript and JavaScript errors", () => {
+		expect(describeError({ file: "a.ts", line: 2, code: 2391, message: "m" })).toBe("a.ts:2 TS2391: m");
+		expect(describeError({ file: "a.js", line: 3, code: 0, message: "SyntaxError: x" })).toBe("a.js:3 JS: SyntaxError: x");
 	});
 });

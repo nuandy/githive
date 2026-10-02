@@ -13,9 +13,27 @@ const EXPECTED_WHILE_UNBUILT = new Set([
 export interface TscError {
 	file: string;
 	line: number;
+	/** The TypeScript error code; 0 for a JavaScript syntax error from `node --check`. */
 	code: number;
 	message: string;
 }
+
+/** Plain JavaScript contracts, which `node --check` can parse (JSX can't be checked this way). */
+export const jsContracts = (files: string[]) => files.filter((f) => /\.(js|mjs|cjs)$/.test(f));
+
+/**
+ * Parse `node --check` output for one file. Node prints "<path>:<line>", the
+ * source line, a caret, then "SyntaxError: <message>".
+ */
+export function parseNodeCheck(file: string, output: string): TscError | null {
+	const syntax = /^(SyntaxError: .*)$/m.exec(output);
+	if (!syntax) return null;
+	const at = new RegExp(`${file.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}:(\\d+)`).exec(output);
+	return { file, line: at ? Number(at[1]) : 0, code: 0, message: syntax[1] };
+}
+
+/** How an error reads to the planner. */
+export const describeError = (e: TscError) => `${e.file}:${e.line} ${e.code ? `TS${e.code}` : "JS"}: ${e.message}`;
 
 const dirOf = (path: string) => (path.includes("/") ? path.slice(0, path.lastIndexOf("/")) : "");
 
