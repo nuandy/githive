@@ -4,6 +4,7 @@ import { baseRepoName, forkAndWait, headOf, remoteFor, sliceRepoName } from "./a
 import { fail } from "./errors";
 import { Workspace } from "./git";
 import { blueprintProblems } from "./blueprint";
+import type { BuildJob } from "./builder";
 import { plan } from "./planner";
 import { tally } from "./quorum";
 import {
@@ -179,6 +180,36 @@ export class Coordinator extends DurableObject<Env> {
 			task.phase = "building";
 			await this.save(task);
 			return { task, credentials };
+		});
+	}
+
+	/**
+	 * Start a hosted builder agent for every slice that is building. Each gets a
+	 * write token for its own fork only. External agents can use the credentials
+	 * from approve() instead.
+	 */
+	startBuilders() {
+		return this.exclusive(async () => {
+			const task = await this.load();
+			if (task.phase !== "building") fail(409, `task is ${task.phase}`);
+			const building = task.slices.filter((s) => s.status === "building");
+			const started = await Promise.all(
+				building.map(async (slice) => {
+					const remote = await remoteFor(this.env.ARTIFACTS, slice.repo!, "write", 3 * 3600);
+					const job: BuildJob = {
+						taskId: task.id,
+						goal: task.goal,
+						slice: { id: slice.id, title: slice.title, owns: slice.owns, instructions: slice.instructions },
+						siblings: task.slices.filter((s) => s !== slice).map(({ id, title, owns }) => ({ id, title, owns })),
+						contracts: task.contracts,
+						repo: slice.repo!,
+						remote: remote.url,
+						token: remote.token,
+					};
+					return { slice: slice.id, builder: await this.env.BUILDER.getByName(slice.repo!).start(job) };
+				}),
+			);
+			return { task, started };
 		});
 	}
 

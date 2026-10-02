@@ -24,6 +24,8 @@ POST /tasks/:id/land                merges the base into the project repo
 
 The planner agent (OpenAI `gpt-6-luna`, via the Responses API) reads the repo through the Artifacts binding, with no clone, and finishes by calling a `submit_blueprint` tool. That tool applies the same validation as the Coordinator and returns any problems to the model to fix. Planning runs from a Durable Object alarm, so poll `GET /tasks/:id` until `planner.status` is `done` or `failed`.
 
+`POST /tasks/:id/build` starts one hosted builder per slice: a `Builder` Durable Object with its own Linux container (the managed `cloudflare/debian-trixie` image, Node 24). A `gpt-6-luna` agent works on the slice's fork through tools (list, read, write, run a command, `commit_and_push`, `finish`). Every push runs Merge-ahead, and the agent gets the conflicts and lane violations back as the tool result. The fork's token is passed only on the git commands the Builder runs itself, so it never sits in the container's files or environment. Follow progress at `GET /tasks/:id/slices/:slice/builder`.
+
 One `Coordinator` Durable Object per task holds its state and runs every Git write. The Artifacts binding creates, forks and reads repos. Commits, merges and pushes go through [isomorphic-git](https://isomorphic-git.org/) on an in-memory filesystem, because the binding can't write inside a repo.
 
 ## Run it
@@ -35,7 +37,7 @@ npm install
 npx wrangler login
 npx wrangler queues create blueprint-events
 cp .dev.vars.example .dev.vars        # set API_TOKEN and OPENAI_API_KEY
-npm run dev                           # uses the real Artifacts service (remote binding)
+npm run dev                           # real Artifacts service; builder containers disabled (they need Docker locally)
 ```
 
 Prove the core primitives end to end. This creates a repo, forks it twice, pushes a conflicting change to each fork, and test-merges them:
@@ -64,7 +66,7 @@ npm run types       # regenerate worker-configuration.d.ts after editing wrangle
 
 - **Push events.** Artifacts `pushed` events are per-repo subscriptions, so forks created at runtime aren't covered by a static subscription. For now, builders report pushes via `POST .../pushed`. The queue consumer handles any repo that does have a subscription.
 - **Semantic conflicts.** Merge-ahead detects text conflicts. Running tests on each clean merge in a Sandbox is still to do.
-- **Agents.** The builder and reviewer agents aren't in this repo yet. The HTTP API above is what they will call.
+- **Agents.** Reviewer agents aren't in this repo yet. The HTTP API above is what they will call.
 
 ## License
 

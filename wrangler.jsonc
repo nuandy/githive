@@ -5,6 +5,8 @@
 	"compatibility_date": "2026-10-01",
 	"compatibility_flags": ["nodejs_compat"],
 	"observability": { "enabled": true },
+	"workers_dev": true,
+	"preview_urls": false,
 	"artifacts": [
 		{
 			"binding": "ARTIFACTS",
@@ -14,9 +16,18 @@
 		}
 	],
 	"durable_objects": {
-		"bindings": [{ "name": "COORDINATOR", "class_name": "Coordinator" }]
+		"bindings": [
+			{ "name": "COORDINATOR", "class_name": "Coordinator" },
+			{ "name": "BUILDER", "class_name": "Builder" }
+		]
 	},
-	"migrations": [{ "tag": "v1", "new_sqlite_classes": ["Coordinator"] }],
+	// One container per Builder. The image (cloudflare/debian-trixie) is chosen at
+	// start(), so no Dockerfile or local Docker is needed to deploy.
+	"containers": [{ "class_name": "Builder", "scheduling_policy": "durable_object" }],
+	"migrations": [
+		{ "tag": "v1", "new_sqlite_classes": ["Coordinator"] },
+		{ "tag": "v2", "new_sqlite_classes": ["Builder"] }
+	],
 	"queues": {
 		// Receives Artifacts event subscriptions (see README).
 		"consumers": [{ "queue": "blueprint-events", "max_batch_size": 10, "max_batch_timeout": 1 }]

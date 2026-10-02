@@ -1,15 +1,14 @@
 import OpenAI from "openai";
-import { zodResponsesFunction } from "openai/helpers/zod";
 import { toResponseInputItems } from "openai/lib/responses/ResponseInputItems";
 import type { ResponseInputItem } from "openai/resources/responses/responses";
 import { z } from "zod";
+import { MODEL, addUsage, assertComplete, emptyUsage, openAITools, runCalls, tool } from "./agent";
 import { blueprintProblems } from "./blueprint";
 import type { Blueprint, PlannerRun } from "./types";
 
 // The planner explores a project repo through the Artifacts binding (no clone)
 // and ends by calling submit_blueprint, whose result tells it what to fix.
 
-const MODEL = "gpt-6-luna";
 const MAX_TURNS = 40;
 const MAX_LINES = 400;
 const MAX_ENTRIES = 400;
@@ -147,81 +146,53 @@ export async function plan(env: Env, repoName: string, goal: string): Promise<Pl
 		return "Blueprint accepted.";
 	};
 
-	const handlers = {
-		list_tree: { args: ListTreeArgs, run: (a: z.infer<typeof ListTreeArgs>) => snapshot.list(a.path, Math.min(4, Math.max(1, Math.trunc(a.depth)))) },
-		read_file: { args: ReadFileArgs, run: (a: z.infer<typeof ReadFileArgs>) => snapshot.read(a.path, Math.trunc(a.start_line)) },
-		submit_blueprint: { args: SubmitInput, run: async (a: z.infer<typeof SubmitInput>) => submit(a) },
-	};
 	const tools = [
-		zodResponsesFunction({
+		tool({
 			name: "list_tree",
 			description: "List files and directories under a path in the repository. Directories end in /.",
-			parameters: ListTreeArgs,
+			schema: ListTreeArgs,
+			run: (a) => snapshot.list(a.path, Math.min(4, Math.max(1, Math.trunc(a.depth)))),
 		}),
-		zodResponsesFunction({
+		tool({
 			name: "read_file",
 			description: `Read a text file from the repository, ${MAX_LINES} numbered lines at a time.`,
-			parameters: ReadFileArgs,
+			schema: ReadFileArgs,
+			run: (a) => snapshot.read(a.path, Math.trunc(a.start_line)),
 		}),
-		zodResponsesFunction({
+		tool({
 			name: "submit_blueprint",
 			description: "Submit the finished plan. Returns either acceptance or the problems to fix.",
-			parameters: SubmitInput,
+			schema: SubmitInput,
+			run: async (a) => submit(a),
 		}),
 	];
-
-	/** Run one function call; every failure becomes text the model can act on. */
-	const call = async (name: string, rawArgs: string) => {
-		const handler = handlers[name as keyof typeof handlers];
-		if (!handler) return `Unknown tool ${name}.`;
-		let json: unknown;
-		try {
-			json = JSON.parse(rawArgs);
-		} catch {
-			return `Arguments for ${name} were not valid JSON.`;
-		}
-		const parsed = handler.args.safeParse(json);
-		if (!parsed.success) return `Invalid arguments for ${name}: ${parsed.error.message}`;
-		try {
-			return await (handler.run as (a: unknown) => Promise<string>)(parsed.data);
-		} catch (err) {
-			return `${name} failed: ${err instanceof Error ? err.message : String(err)}`;
-		}
-	};
 
 	const client = new OpenAI({ apiKey: env.OPENAI_API_KEY });
 	const input: ResponseInputItem[] = [
 		{ role: "user", content: `Repository: ${repoName} (commit ${snapshot.commit})\n\nGoal: ${goal}` },
 	];
-	const usage = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0 };
+	const usage = emptyUsage();
 	let toolCalls = 0;
 
 	for (let turn = 0; turn < MAX_TURNS && !accepted; turn++) {
-		const response = await client.responses.parse({
+		const response = await client.responses.create({
 			model: MODEL,
 			instructions: SYSTEM,
 			input,
-			tools,
+			tools: openAITools(tools),
 			reasoning: { effort: "high" },
 			max_output_tokens: 32000,
 			// Same prefix every turn (instructions + tools), so route to the same cache.
 			prompt_cache_key: "blueprint-planner",
 		});
-		usage.inputTokens += response.usage?.input_tokens ?? 0;
-		usage.outputTokens += response.usage?.output_tokens ?? 0;
-		usage.cacheReadTokens += response.usage?.input_tokens_details?.cached_tokens ?? 0;
-		if (response.status === "incomplete")
-			throw new Error(`planner response incomplete: ${response.incomplete_details?.reason ?? "unknown"}`);
+		addUsage(usage, response);
+		assertComplete(response, "planner");
 
-		const calls = response.output.filter((item) => item.type === "function_call");
-		if (!calls.length) break; // answered in text without submitting
-
+		const outputs = await runCalls(tools, response);
+		if (!outputs.length) break; // answered in text without submitting
+		toolCalls += outputs.length;
 		// Carry the model's output (including reasoning items) into the next turn.
-		input.push(...toResponseInputItems(response.output));
-		for (const fc of calls) {
-			toolCalls++;
-			input.push({ type: "function_call_output", call_id: fc.call_id, output: await call(fc.name, fc.arguments) });
-		}
+		input.push(...toResponseInputItems(response.output), ...outputs);
 	}
 	if (!accepted) throw new Error(`planner stopped without an accepted blueprint after ${toolCalls} tool calls`);
 	return { blueprint: accepted, usage, toolCalls };

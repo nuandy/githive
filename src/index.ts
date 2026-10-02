@@ -4,6 +4,7 @@ import { statusOf } from "./errors";
 import { Workspace } from "./git";
 import type { Blueprint, Review } from "./types";
 
+export { Builder } from "./builder";
 export { Coordinator } from "./coordinator";
 
 const app = new Hono<{ Bindings: Env }>();
@@ -36,6 +37,8 @@ app.get("/", (c) =>
 			"POST /tasks/:id/plan",
 			"PUT  /tasks/:id/blueprint {slices, contracts, review?, rationale?}",
 			"POST /tasks/:id/approve",
+			"POST /tasks/:id/build",
+			"GET  /tasks/:id/slices/:slice/builder",
 			"POST /tasks/:id/slices/:slice/pushed",
 			"POST /tasks/:id/slices/:slice/review",
 			"POST /tasks/:id/slices/:slice/reviews {reviewer, head, verdict, summary, evidence?}",
@@ -128,6 +131,14 @@ app.put("/tasks/:id/blueprint", async (c) => {
 
 // Returns write tokens for each slice's fork: hand them to the builder agents.
 app.post("/tasks/:id/approve", async (c) => c.json(await coordinator(c.env, c.req.param("id")).approve()));
+
+// Starts a hosted builder agent (gpt-6-luna in its own container) for each slice.
+app.post("/tasks/:id/build", async (c) => c.json(await coordinator(c.env, c.req.param("id")).startBuilders(), 202));
+
+app.get("/tasks/:id/slices/:slice/builder", async (c) => {
+	const { id, slice } = c.req.param();
+	return c.json(await c.env.BUILDER.getByName(`${id}--${slice}`).state());
+});
 
 // Builder agents call this after each push. Runs Merge-ahead.
 app.post("/tasks/:id/slices/:slice/pushed", async (c) => {
