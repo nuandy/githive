@@ -53,6 +53,7 @@ app.get("/api", (c) =>
 			"POST /tasks/:id/slices/:slice/reviewers",
 			"GET  /tasks/:id/slices/:slice/reviewers",
 			"POST /tasks/:id/slices/:slice/reviews {reviewer, head, verdict, summary, evidence?}",
+			"POST /tasks/:id/slices/:slice/gate",
 			"POST /tasks/:id/slices/:slice/integrate",
 			"POST /tasks/:id/land",
 			"(contract amendments are proposed by builders; see task.amendments)",
@@ -241,6 +242,12 @@ app.post("/tasks/:id/slices/:slice/reviews", async (c) => {
 	const { id, slice } = c.req.param();
 	const review = await c.req.json<Omit<Review, "at">>();
 	return c.json(await coordinator(c.env, id).submitReview(slice, review));
+});
+
+// Re-run the integration gate for an approved slice (for example after fixing the task base).
+app.post("/tasks/:id/slices/:slice/gate", async (c) => {
+	const { id, slice } = c.req.param();
+	return c.json(await coordinator(c.env, id).retryGate(slice), 202);
 });
 
 app.post("/tasks/:id/slices/:slice/integrate", async (c) => {

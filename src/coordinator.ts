@@ -599,6 +599,24 @@ export class Coordinator extends DurableObject<Env> {
 		});
 	}
 
+	/**
+	 * Run the gate again for an approved slice, for example after the task base
+	 * was fixed by hand. Integrates on a pass, like any gate.
+	 */
+	retryGate(sliceId: string) {
+		return this.exclusive(async () => {
+			const task = await this.load();
+			const slice = this.slice(task, sliceId);
+			if (slice.status !== "building") fail(409, `slice ${sliceId} is ${slice.status}`);
+			const quorum = tally(task.review, slice);
+			if (quorum.status !== "approved") fail(409, `quorum is ${quorum.status}`);
+			if (!task.verify.length) fail(409, "the task has no verify commands");
+			await this.startGate(task, slice);
+			await this.save(task);
+			return slice.gate;
+		});
+	}
+
 	/** Whether any other slice could still be integrated (and so might fix a failing gate). */
 	private othersCanStillIntegrate(task: Task, slice: Slice) {
 		return task.slices.some((s) => s !== slice && s.status === "building" && s.gate?.status !== "waiting");
