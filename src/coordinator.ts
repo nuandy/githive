@@ -1,13 +1,13 @@
 import { DurableObject } from "cloudflare:workers";
 import git from "isomorphic-git";
-import { baseRepoName, forkAndWait, headOf, remoteFor, sliceRepoName } from "./artifacts";
-import { fail } from "./errors";
+import { baseRepoName, forkAndWait, headOf, remoteFor, reviewerName, sliceRepoName } from "./artifacts";
+import { fail, statusOf } from "./errors";
 import { Workspace } from "./git";
 import { blueprintProblems } from "./blueprint";
 import type { BuildJob } from "./builder";
 import type { ReviewJob } from "./reviewer";
 import { plan } from "./planner";
-import { tally } from "./quorum";
+import { nextStep, reviewFeedback, tally } from "./quorum";
 import {
 	DEFAULT_POLICY,
 	type Blueprint,
@@ -18,6 +18,9 @@ import {
 	type SliceCredentials,
 	type Task,
 } from "./types";
+
+/** Times a slice can go back to its builder before it waits for a human. */
+const MAX_REVISIONS = 3;
 
 /** One side of a Merge-ahead check. */
 interface Side {
@@ -197,7 +200,10 @@ export class Coordinator extends DurableObject<Env> {
 			const building = task.slices.filter((s) => s.status === "building");
 			const started = await Promise.all(
 				building.map(async (slice) => {
-					const remote = await remoteFor(this.env.ARTIFACTS, slice.repo!, "write", 3 * 3600);
+					const [remote, base] = await Promise.all([
+						remoteFor(this.env.ARTIFACTS, slice.repo!, "write", 3 * 3600),
+						remoteFor(this.env.ARTIFACTS, task.baseRepo!, "read", 3 * 3600),
+					]);
 					const job: BuildJob = {
 						taskId: task.id,
 						goal: task.goal,
@@ -207,6 +213,7 @@ export class Coordinator extends DurableObject<Env> {
 						repo: slice.repo!,
 						remote: remote.url,
 						token: remote.token,
+						base: { remote: base.url, token: base.token },
 					};
 					return { slice: slice.id, builder: await this.env.BUILDER.getByName(slice.repo!).start(job) };
 				}),
@@ -240,21 +247,26 @@ export class Coordinator extends DurableObject<Env> {
 		const artifacts = this.env.ARTIFACTS;
 		const baseCommit = task.baseCommit!;
 		const ws = await Workspace.clone(await remoteFor(artifacts, task.baseRepo!));
+		const baseHead = await ws.head("main");
 
-		const side = async (s: Slice): Promise<Side> => {
+		// A slice's own changes start at its merge base with the task base. That is
+		// the base commit until the slice merges integrated work; after that, the
+		// integrated files don't count as the slice's changes.
+		const side = async (s: Slice): Promise<Side & { from: string }> => {
 			const ref = `refs/remotes/${s.id}/main`;
 			const head = await ws.fetch(s.id, await remoteFor(artifacts, s.repo!));
-			return { id: s.id, ref, head, touched: await ws.changedPaths(baseCommit, head) };
+			const from = await ws.mergeBase(baseHead, head);
+			return { id: s.id, ref, head, from, touched: await ws.changedPaths(from, head) };
 		};
 
 		const ours = await side(slice);
 		slice.head = ours.head;
+		slice.mergeBase = ours.from;
 		slice.touched = ours.touched;
 		slice.outOfLane = ours.touched.filter((p) => !slice.owns.some((prefix) => p.startsWith(prefix)));
 
 		const checks: MergeCheck[] = [];
 		// Integrated slices move the base; check against it once it has.
-		const baseHead = await ws.head("main");
 		if (baseHead !== baseCommit) {
 			const base = { id: "base", ref: "main", head: baseHead, touched: await ws.changedPaths(baseCommit, baseHead) };
 			checks.push(await this.check(ws, base, ours));
@@ -326,7 +338,7 @@ export class Coordinator extends DurableObject<Env> {
 			await this.save(task);
 
 			const reviewers = task.review.reviewers;
-			await Promise.all(
+			const started = await Promise.allSettled(
 				reviewers.map(async (role) => {
 					const remote = await remoteFor(this.env.ARTIFACTS, slice.repo!, "read", 3 * 3600);
 					const job: ReviewJob = {
@@ -340,13 +352,22 @@ export class Coordinator extends DurableObject<Env> {
 						token: remote.token,
 						role,
 						head,
-						baseCommit: task.baseCommit!,
+						baseCommit: slice.mergeBase ?? task.baseCommit!,
 						buildSummary: slice.buildSummary,
+						revision: slice.revisions ?? 0,
+						priorFindings: slice.revisions ? slice.lastFeedback : undefined,
 					};
-					await this.env.REVIEWER.getByName(`${slice.repo}--review-${role}`).start(job);
+					await this.env.REVIEWER.getByName(reviewerName(slice.repo!, role, head)).start(job);
 				}),
 			);
-			return { head, reviewers };
+			const failed = started.flatMap((r, i) => (r.status === "rejected" ? [`${reviewers[i]}: ${statusOf(r.reason).message}`] : []));
+			if (failed.length) {
+				const latest = await this.load();
+				this.slice(latest, sliceId).attention = `Some reviewers did not start: ${failed.join("; ")}`;
+				await this.save(latest);
+			}
+			const startedRoles = reviewers.filter((_, i) => started[i].status === "fulfilled");
+			return { head, reviewers: startedRoles, failed };
 		});
 	}
 
@@ -361,8 +382,28 @@ export class Coordinator extends DurableObject<Env> {
 				fail(409, `review is for ${input.head}, but the head under review is ${slice.reviewHead ?? "none"}`);
 
 			slice.reviews.push({ ...input, at: new Date().toISOString() });
+			const quorum = tally(task.review, slice);
 			await this.save(task);
-			return { task, quorum: tally(task.review, slice) };
+
+			// Auto-integrate an approved slice; send a rejected one back to its builder.
+			const step = nextStep(task.review, slice);
+			try {
+				if (step === "integrate") {
+					const result = await this.integrateSlice(task, slice);
+					if (!result.ok)
+						await this.sendBack(
+							task,
+							slice,
+							`Review approved your slice, but it conflicts with work already integrated into the task base, in ${result.files.join(", ")}. Call fetch_base, merge it with \`git merge base/main\`, resolve the conflicts inside your lane, run your tests, push, and call finish again.`,
+						);
+				} else if (step === "send-back") {
+					await this.sendBack(task, slice, reviewFeedback(task.review, slice));
+				}
+			} catch (err) {
+				slice.attention = `${step} failed: ${statusOf(err).message}`;
+			}
+			await this.save(task);
+			return { task, quorum, next: step };
 		});
 	}
 
@@ -374,25 +415,61 @@ export class Coordinator extends DurableObject<Env> {
 			if (slice.status !== "building") fail(409, `slice ${sliceId} is ${slice.status}`);
 			const quorum = tally(task.review, slice);
 			if (quorum.status !== "approved") fail(409, `quorum is ${quorum.status}: ${JSON.stringify(quorum)}`);
-			const head = await headOf(this.env.ARTIFACTS, slice.repo!);
-			if (head !== slice.reviewHead) fail(409, `slice moved to ${head} after review of ${slice.reviewHead}`);
-			if (slice.outOfLane.length) fail(409, `slice changed paths outside its lane: ${slice.outOfLane.join(", ")}`);
-
-			const ws = await Workspace.clone(await remoteFor(this.env.ARTIFACTS, task.baseRepo!, "write"));
-			await ws.fetch(slice.id, await remoteFor(this.env.ARTIFACTS, slice.repo!));
-			try {
-				await ws.merge(`refs/remotes/${slice.id}/main`, `Integrate ${slice.id}: ${slice.title}`);
-			} catch (err) {
-				if (err instanceof git.Errors.MergeConflictError) fail(409, `conflicts with base: ${err.data.filepaths.join(", ")}`);
-				throw err;
-			}
-			await ws.push();
-
-			slice.status = "integrated";
-			task.checks = task.checks.filter((c) => !c.pair.includes(slice.id));
+			const result = await this.integrateSlice(task, slice);
+			if (!result.ok) fail(409, `conflicts with base: ${result.files.join(", ")}`);
 			await this.save(task);
 			return task;
 		});
+	}
+
+	/** Merge an approved slice into the task base. Caller holds the lock and saves. */
+	private async integrateSlice(task: Task, slice: Slice): Promise<{ ok: true } | { ok: false; files: string[] }> {
+		const head = await headOf(this.env.ARTIFACTS, slice.repo!);
+		if (head !== slice.reviewHead) fail(409, `slice moved to ${head} after review of ${slice.reviewHead}`);
+		if (slice.outOfLane.length) fail(409, `slice changed paths outside its lane: ${slice.outOfLane.join(", ")}`);
+
+		const ws = await Workspace.clone(await remoteFor(this.env.ARTIFACTS, task.baseRepo!, "write"));
+		await ws.fetch(slice.id, await remoteFor(this.env.ARTIFACTS, slice.repo!));
+		try {
+			await ws.merge(`refs/remotes/${slice.id}/main`, `Integrate ${slice.id}: ${slice.title}`);
+		} catch (err) {
+			if (err instanceof git.Errors.MergeConflictError) return { ok: false, files: err.data.filepaths };
+			throw err;
+		}
+		await ws.push();
+
+		slice.status = "integrated";
+		slice.attention = undefined;
+		task.checks = task.checks.filter((c) => !c.pair.includes(slice.id));
+		return { ok: true };
+	}
+
+	/**
+	 * Feedback loop: hand the slice back to its builder with what to fix. Stops
+	 * the reviewers of the current commit (their votes would be stale) and
+	 * refreshes the builder's tokens. After MAX_REVISIONS, the slice waits for
+	 * a human. Cancelling the reviewer whose vote triggered this is harmless: it
+	 * marks itself done before it would check for cancellation.
+	 */
+	private async sendBack(task: Task, slice: Slice, message: string) {
+		slice.sentBackFor = slice.reviewHead;
+		slice.lastFeedback = message;
+		if ((slice.revisions ?? 0) >= MAX_REVISIONS) {
+			slice.attention = `Sent back ${MAX_REVISIONS} times without passing review; needs a human. Last feedback:\n${message}`;
+			return;
+		}
+		slice.revisions = (slice.revisions ?? 0) + 1;
+		const head = slice.reviewHead!;
+		await Promise.allSettled(
+			task.review.reviewers.map((role) =>
+				this.env.REVIEWER.getByName(reviewerName(slice.repo!, role, head)).cancel("the slice was sent back to its builder"),
+			),
+		);
+		const [write, base] = await Promise.all([
+			remoteFor(this.env.ARTIFACTS, slice.repo!, "write", 3 * 3600),
+			remoteFor(this.env.ARTIFACTS, task.baseRepo!, "read", 3 * 3600),
+		]);
+		await this.env.BUILDER.getByName(slice.repo!).revise(message, { token: write.token, base: { remote: base.url, token: base.token } });
 	}
 
 	/** Merge the task base into the project once every slice is integrated. */

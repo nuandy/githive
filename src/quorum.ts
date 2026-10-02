@@ -31,3 +31,30 @@ export function tally(policy: ReviewPolicy, slice: Pick<Slice, "reviewHead" | "r
 
 	return { status, approvals, rejections, waiting };
 }
+
+/** What the Coordinator does after a vote on a slice. */
+export function nextStep(policy: ReviewPolicy, slice: Slice): "integrate" | "send-back" | "wait" {
+	if (slice.status !== "building" || !slice.reviewHead) return "wait";
+	const { status } = tally(policy, slice);
+	if (status === "approved") return "integrate";
+	if ((status === "rejected" || status === "vetoed") && slice.sentBackFor !== slice.reviewHead) return "send-back";
+	return "wait";
+}
+
+/** The message a builder gets when review sends its slice back. */
+export function reviewFeedback(policy: ReviewPolicy, slice: Pick<Slice, "reviewHead" | "reviews">) {
+	const { status, approvals } = tally(policy, slice);
+	const latest = new Map<string, Review>();
+	for (const review of slice.reviews) if (review.head === slice.reviewHead) latest.set(review.reviewer, review);
+	const rejections = [...latest.values()].filter((r) => r.verdict === "reject");
+	const findings = rejections.map((r) => {
+		const veto = policy.vetoes.includes(r.reviewer) ? " (veto)" : "";
+		return `- ${r.reviewer}${veto} rejected: ${r.summary}${r.evidence ? `\n  Evidence: ${r.evidence}` : ""}`;
+	});
+	return [
+		`Review sent your slice back (quorum ${status}). Fix the problems below, push, and call finish again. A new commit starts a new review.`,
+		"",
+		...findings,
+		...(approvals.length ? ["", `Approved by: ${approvals.join(", ")}.`] : []),
+	].join("\n");
+}

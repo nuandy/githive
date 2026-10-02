@@ -141,9 +141,31 @@ export abstract class SandboxAgent<J extends SandboxJob, S extends AgentState> e
 			...this.freshFields(),
 		} as unknown as S; // base fields + the subclass's fields make a full S
 		await this.ctx.storage.put("job", job);
+		await this.ctx.storage.delete("cancel");
 		await this.save(fresh);
 		await this.ctx.storage.setAlarm(Date.now());
 		return this.view(fresh);
+	}
+
+	/**
+	 * Ask a queued or working agent to stop. Cooperative: the agent loop holds its
+	 * state in memory, so it checks this flag before each turn rather than having
+	 * its state overwritten underneath it.
+	 */
+	async cancel(reason: string) {
+		const { state } = await this.load();
+		if (!state || (state.status !== "queued" && state.status !== "working")) return false;
+		await this.ctx.storage.put("cancel", reason);
+		return true;
+	}
+
+	private async cancelled(state: S) {
+		const reason = await this.ctx.storage.get<string>("cancel");
+		if (!reason) return false;
+		state.status = "failed";
+		state.error = `cancelled: ${reason}`;
+		this.note(state, state.error);
+		return true;
 	}
 
 	/** Public view: everything except the conversation plumbing. */
@@ -161,6 +183,7 @@ export abstract class SandboxAgent<J extends SandboxJob, S extends AgentState> e
 		const { job, state } = await this.load();
 		if (!job || !state || (state.status !== "queued" && state.status !== "working")) return;
 		try {
+			if (await this.cancelled(state)) throw new Error(state.error);
 			if (state.status === "queued" || !this.ctx.container?.running) {
 				await this.setUp(job, state);
 				state.status = "working";
@@ -168,15 +191,15 @@ export abstract class SandboxAgent<J extends SandboxJob, S extends AgentState> e
 			}
 			await this.ctx.container!.setInactivityTimeout(20 * 60_000);
 			const deadline = Date.now() + RUN_BUDGET_MS;
-			while (state.status === "working" && Date.now() < deadline) {
+			while (state.status === "working" && Date.now() < deadline && !(await this.cancelled(state))) {
 				await this.turn(job, state);
 				await this.save(state);
 			}
 			if (state.status === "working") await this.ctx.storage.setAlarm(Date.now() + 1_000);
 		} catch (err) {
 			state.status = "failed";
-			state.error = err instanceof Error ? err.message : String(err);
-			this.note(state, `failed: ${state.error}`);
+			state.error ??= err instanceof Error ? err.message : String(err);
+			if (!state.error.startsWith("cancelled")) this.note(state, `failed: ${state.error}`);
 		}
 		// Tools change the status inside closures, which TypeScript can't see.
 		if (["done", "failed"].includes(state.status)) {
@@ -222,9 +245,9 @@ export abstract class SandboxAgent<J extends SandboxJob, S extends AgentState> e
 		return { exitCode: result.exitCode, output: result.exitCode === 137 ? `${output}\n(killed after ${COMMAND_TIMEOUT_S}s)` : output };
 	}
 
-	/** Run git with the job's token on this one command only. */
-	protected git(job: J, args: string[], cwd = WORKDIR) {
-		const secret = job.token.split("?expires=")[0];
+	/** Run git with a token (the job's, by default) on this one command only. */
+	protected git(job: J, args: string[], cwd = WORKDIR, token = job.token) {
+		const secret = token.split("?expires=")[0];
 		return this.exec(["git", "-c", `http.extraHeader=Authorization: Bearer ${secret}`, ...args], cwd);
 	}
 

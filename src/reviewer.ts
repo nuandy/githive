@@ -15,6 +15,10 @@ export interface ReviewJob extends SliceJob {
 	/** Where the slice started; `git diff baseCommit head` is the change. */
 	baseCommit: string;
 	buildSummary?: string;
+	/** How many times the slice was sent back before this review. */
+	revision?: number;
+	/** The findings that sent it back last time, which this review must check. */
+	priorFindings?: string;
 }
 
 export interface ReviewerState extends AgentState {
@@ -56,7 +60,16 @@ The slice's code is checked out at commit ${job.head}. It started from commit ${
 ${sliceContext(job)}
 
 The builder's summary of its work: ${job.buildSummary ?? "none given"}
+${
+	job.priorFindings
+		? `
+This is revision ${job.revision}. The previous review sent the slice back with these findings:
+${job.priorFindings}
 
+Check each finding: was it addressed? If the builder could not address one (for example, it needs a change outside the slice's lane), it should have said so in its summary. A finding that was silently ignored is grounds for rejection, whatever your role.
+`
+		: ""
+}
 Your focus as the ${job.role} reviewer:
 ${focusFor(job.role)}
 

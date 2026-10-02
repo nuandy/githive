@@ -76,6 +76,13 @@ export class Workspace {
 		return git.resolveRef({ fs: this.fs, dir: DIR, ref });
 	}
 
+	/** The best common ancestor of two commits. */
+	async mergeBase(a: string, b: string) {
+		const [oid] = await git.findMergeBase({ fs: this.fs, dir: DIR, oids: [a, b] });
+		if (!oid) throw new Error(`no common ancestor for ${a} and ${b}`);
+		return oid as string;
+	}
+
 	/** Test-merge two refs without touching any branch. */
 	async tryMerge(ours: string, theirs: string): Promise<MergeOutcome> {
 		try {

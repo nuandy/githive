@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { tally, validatePolicy } from "../src/quorum";
+import { nextStep, reviewFeedback, tally, validatePolicy } from "../src/quorum";
 import type { Review, ReviewPolicy } from "../src/types";
 
 const policy: ReviewPolicy = { reviewers: ["security", "tests", "api"], required: 2, vetoes: ["security"] };
@@ -54,5 +54,41 @@ describe("validatePolicy", () => {
 		expect(() => validatePolicy({ ...policy, required: 4 })).toThrow(/between 1 and 3/);
 		expect(() => validatePolicy({ ...policy, vetoes: ["perf"] })).toThrow(/not reviewers/);
 		expect(() => validatePolicy(policy)).not.toThrow();
+	});
+});
+
+describe("nextStep", () => {
+	const base = { status: "building" as const, reviewHead: "h1", id: "api", title: "", owns: [], instructions: "", touched: [], outOfLane: [] };
+
+	it("integrates an approved slice", () => {
+		expect(nextStep(policy, { ...base, reviews: [review("tests", "approve"), review("api", "approve")] })).toBe("integrate");
+	});
+
+	it("sends a vetoed slice back once per head", () => {
+		const slice = { ...base, reviews: [review("security", "reject")] };
+		expect(nextStep(policy, slice)).toBe("send-back");
+		expect(nextStep(policy, { ...slice, sentBackFor: "h1" })).toBe("wait");
+	});
+
+	it("waits while the outcome is open", () => {
+		expect(nextStep(policy, { ...base, reviews: [review("tests", "reject")] })).toBe("wait");
+	});
+
+	it("waits once the slice is integrated", () => {
+		const reviews = [review("tests", "approve"), review("api", "approve")];
+		expect(nextStep(policy, { ...base, status: "integrated", reviews })).toBe("wait");
+	});
+});
+
+describe("reviewFeedback", () => {
+	it("lists rejections with evidence and marks vetoes", () => {
+		const reviews = [
+			{ ...review("security", "reject"), summary: "XSS in view", evidence: "src/ui.ts:12 uses innerHTML" },
+			review("tests", "approve"),
+		];
+		const text = reviewFeedback(policy, { reviewHead: "h1", reviews });
+		expect(text).toMatch(/quorum vetoed/);
+		expect(text).toMatch(/- security \(veto\) rejected: XSS in view\n  Evidence: src\/ui\.ts:12 uses innerHTML/);
+		expect(text).toMatch(/Approved by: tests\./);
 	});
 });

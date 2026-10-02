@@ -5,6 +5,12 @@ import type { Remote } from "./git";
 export const baseRepoName = (taskId: string) => `${taskId}--base`;
 export const sliceRepoName = (taskId: string, sliceId: string) => `${taskId}--${sliceId}`;
 
+/**
+ * One reviewer instance per (slice, role, commit). A new commit never collides
+ * with a reviewer that is still finishing on an older one.
+ */
+export const reviewerName = (sliceRepo: string, role: string, head: string) => `${sliceRepo}--review-${role}--${head.slice(0, 12)}`;
+
 export function parseRepoName(name: string) {
 	const match = /^([0-9a-f]{8})--([a-z0-9]+(?:-[a-z0-9]+)*)$/.exec(name);
 	return match ? { taskId: match[1], slice: match[2] } : null;

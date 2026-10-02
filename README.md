@@ -30,6 +30,13 @@ The planner agent (OpenAI `gpt-6-luna`, via the Responses API) reads the repo th
 
 When a builder finishes, its slice goes to review. One `Reviewer` per role (the planner picks the roles, for example security, tests and api) checks out the exact commit under review in its own container, with a read-only token. It reads the diff, runs the slice's acceptance tests, and calls `submit_verdict` with evidence. The vote goes to the slice's Quorum, and a vote on a commit that has since moved is rejected as stale. Follow reviewers at `GET /tasks/:id/slices/:slice/reviewers`.
 
+What happens after a vote is automatic:
+
+- **Approved:** the slice is integrated into the task base right away. If it conflicts with work already integrated, it goes back to its builder, which can `fetch_base`, merge, and finish again.
+- **Rejected or vetoed:** the rejecting reviewers' findings and evidence go back to the slice's builder. The builder resumes the same conversation in a fresh container, fixes the problems, pushes and finishes, which starts a new review. The slice's other reviewers are cancelled, since their votes would be on a stale commit. After 3 revisions, the slice is flagged for a human (`attention` on the slice).
+
+Landing the finished task on the project repo stays a manual step: `POST /tasks/:id/land`.
+
 Each slice lists the contract tests it must make pass. Builders and reviewers run those, because another slice's contract tests can fail until that slice is integrated.
 
 One `Coordinator` Durable Object per task holds its state and runs every Git write. The Artifacts binding creates, forks and reads repos. Commits, merges and pushes go through [isomorphic-git](https://isomorphic-git.org/) on an in-memory filesystem, because the binding can't write inside a repo.
@@ -72,7 +79,6 @@ npm run types       # regenerate worker-configuration.d.ts after editing wrangle
 
 - **Push events.** Artifacts `pushed` events are per-repo subscriptions, so forks created at runtime aren't covered by a static subscription. For now, builders report pushes via `POST .../pushed`. The queue consumer handles any repo that does have a subscription.
 - **Semantic conflicts.** Merge-ahead detects text conflicts. Running tests on each clean merge in a Sandbox is still to do.
-- **Feedback loop.** A rejected slice doesn't go back to its builder automatically yet.
 
 ## License
 

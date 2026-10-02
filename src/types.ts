@@ -36,6 +36,19 @@ export interface Slice extends SliceSpec {
 	reviews: Review[];
 	/** The builder's account of what it built, passed to reviewers. */
 	buildSummary?: string;
+	/**
+	 * Where the slice's own changes start: the merge base of its head and the task
+	 * base. Equals the base commit until the slice merges integrated work.
+	 */
+	mergeBase?: string;
+	/** Times review or integration sent the slice back to its builder. */
+	revisions?: number;
+	/** The review head that was last sent back, so one verdict triggers one revision. */
+	sentBackFor?: string;
+	/** Why the slice needs a human, when the agents can't proceed on their own. */
+	attention?: string;
+	/** The findings that last sent the slice back; the next review checks them. */
+	lastFeedback?: string;
 }
 
 export interface Blueprint {

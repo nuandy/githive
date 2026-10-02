@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import { forkAndWait, parseRepoName, remoteFor } from "./artifacts";
+import { forkAndWait, parseRepoName, remoteFor, reviewerName } from "./artifacts";
 import { statusOf } from "./errors";
 import { Workspace } from "./git";
 import type { Blueprint, Review } from "./types";
@@ -161,11 +161,18 @@ app.post("/tasks/:id/slices/:slice/reviewers", async (c) => {
 	return c.json(await coordinator(c.env, id).startReviewers(slice), 202);
 });
 
+// Reviewers of the slice's current review commit.
 app.get("/tasks/:id/slices/:slice/reviewers", async (c) => {
 	const { id, slice } = c.req.param();
 	const task = await coordinator(c.env, id).state();
+	const head = task.slices.find((s) => s.id === slice)?.reviewHead;
+	if (!head) return c.json([]);
 	const states = await Promise.all(
-		task.review.reviewers.map(async (role) => ({ role, state: await c.env.REVIEWER.getByName(`${id}--${slice}--review-${role}`).state() })),
+		task.review.reviewers.map(async (role) => ({
+			role,
+			head,
+			state: await c.env.REVIEWER.getByName(reviewerName(`${id}--${slice}`, role, head)).state(),
+		})),
 	);
 	return c.json(states);
 });
