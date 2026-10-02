@@ -8,7 +8,6 @@ import {
 	SliceLanes,
 	TaskDetailBoundary,
 	TaskHeader,
-	TokenSettings,
 } from "./components";
 import { newestTasks } from "./lib/dashboardData";
 import type { DashboardShellAction, DashboardShellApi, DashboardTimerScheduler } from "./dashboard-contract";
@@ -238,7 +237,6 @@ export function App() {
 		<div className="shell dashboard-shell">
 			<header className="topbar dashboard-topbar">
 				<a className="brand" href="#/">Blueprint</a>
-				<div className="dashboard-topbar-actions"><TokenSettings /></div>
 			</header>
 			<div className="dashboard-frame">
 				<aside className="dashboard-sidebar">
