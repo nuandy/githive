@@ -335,6 +335,15 @@ export class Coordinator extends DurableObject<Env> {
 			const slice = this.slice(task, sliceId);
 			const head = await this.pinForReview(task, slice);
 			if (buildSummary) slice.buildSummary = buildSummary;
+
+			// Sent back, but finished without a new commit: the builder couldn't fix
+			// it within its lane (for example, a finding that conflicts with a
+			// contract). Another review of the same commit can't change anything.
+			if (slice.sentBackFor && head === slice.sentBackFor) {
+				slice.attention = `Sent back, but the builder finished without new commits; it needs a decision outside its lane. Builder's explanation: ${buildSummary ?? "none given"}`;
+				await this.save(task);
+				return { head, reviewers: [] as string[], failed: [] as string[], escalated: true };
+			}
 			await this.save(task);
 
 			const reviewers = task.review.reviewers;
@@ -367,7 +376,7 @@ export class Coordinator extends DurableObject<Env> {
 				await this.save(latest);
 			}
 			const startedRoles = reviewers.filter((_, i) => started[i].status === "fulfilled");
-			return { head, reviewers: startedRoles, failed };
+			return { head, reviewers: startedRoles, failed, escalated: false };
 		});
 	}
 
