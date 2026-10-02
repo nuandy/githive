@@ -10,11 +10,18 @@ const io = vi.hoisted(() => ({
 	heads: new Map<string, string>(),
 	mergeConflict: null as string[] | null,
 	merges: [] as string[],
+	/** Files on the task base, by path: what fileVersion reads. */
+	files: new Map<string, { id: string; text: string }>(),
+	/** Files committed to the task base through a Workspace. */
+	written: [] as Record<string, string>[],
+	/** The contract owner's answer; may change files while it "decides". */
+	decide: vi.fn(async () => ({ approve: true, reason: "fine" })),
 }));
 
 vi.mock("../src/artifacts", async (importOriginal) => ({
 	...(await importOriginal<typeof import("../src/artifacts")>()),
 	headOf: vi.fn(async (_artifacts: unknown, repo: string) => io.heads.get(repo)),
+	fileVersion: vi.fn(async (_artifacts: unknown, _repo: string, path: string) => io.files.get(path) ?? null),
 	remoteFor: vi.fn(async (_artifacts: unknown, repo: string) => ({ url: `https://git.test/${repo}.git`, token: `token-${repo}` })),
 }));
 
@@ -30,9 +37,16 @@ vi.mock("../src/git", () => ({
 				io.merges.push(ref);
 			}),
 			push: vi.fn(async () => ({})),
+			write: vi.fn(async (files: Record<string, string>) => {
+				io.written.push(files);
+				for (const [path, text] of Object.entries(files)) io.files.set(path, { id: `v-${text}`, text });
+			}),
+			commit: vi.fn(async () => "amend-commit"),
 		})),
 	},
 }));
+
+vi.mock("../src/contract-owner", () => ({ NEW_FILE: "(new)", decideAmendment: (...args: unknown[]) => io.decide(...(args as [])) }));
 
 // The task's notes ref, in memory: each write appends a commit message.
 const ledger = vi.hoisted(() => ({ messages: [] as string[], entries: [] as { commit: string; text: string }[], down: false }));
@@ -71,6 +85,10 @@ beforeEach(() => {
 	io.mergeConflict = null;
 	io.merges = [];
 	io.heads.set("t1--base", "base0");
+	io.files.clear();
+	io.written = [];
+	io.decide.mockReset();
+	io.decide.mockImplementation(async () => ({ approve: true, reason: "fine" }));
 	ledger.messages = [];
 	ledger.entries = [];
 	ledger.down = false;
@@ -370,5 +388,65 @@ describe("the record in Git", () => {
 		const { task: t } = await restored.restore("t1", original.repo);
 		expect(t).toEqual({ ...original, queue: [], active: { builders: [], reviewers: [] } });
 		await expect(restored.restore("t1", original.repo)).rejects.toThrow(/task exists/);
+	});
+});
+
+describe("contract amendments", () => {
+	const routes = { id: "v-routes-1", text: "routes v1" };
+	const propose = (slice: string, content: string, basedOn: string | null, path = "src/routes.ts") =>
+		coordinator.proposeAmendment(slice, { path, content, reason: `${slice} needs a route`, basedOn });
+
+	it("brings a shared project file outside every lane under contract", async () => {
+		await setup(task());
+		io.files.set("src/routes.ts", routes);
+		const a = await propose("a", "routes v1 + a", routes.id);
+		expect(a).toMatchObject({ status: "approved", kind: "shared", commit: "amend-commit" });
+		expect(io.written).toEqual([{ "src/routes.ts": "routes v1 + a" }]);
+		expect((await stored()).contracts).toEqual(["src/routes.ts"]);
+		expect(builder("b").notify.mock.calls[0][0]).toMatch(/changed and brought under contract/);
+	});
+
+	it("refuses a proposal written against an older version without asking the contract owner", async () => {
+		await setup(task());
+		io.files.set("src/routes.ts", routes);
+		const a = await propose("a", "routes v0 + a", "v-routes-0");
+		expect(a.status).toBe("stale");
+		expect(a.decision).toMatch(/merge base\/main, then propose again/);
+		expect(io.decide).not.toHaveBeenCalled();
+		expect(io.written).toEqual([]);
+	});
+
+	it("doesn't apply an approval if the file changed while the owner decided", async () => {
+		await setup(task());
+		io.files.set("src/routes.ts", routes);
+		io.decide.mockImplementation(async () => {
+			io.files.set("src/routes.ts", { id: "v-routes-2", text: "routes v1 + b" }); // b's change lands meanwhile
+			return { approve: true, reason: "fine" };
+		});
+		const a = await propose("a", "routes v1 + a", routes.id);
+		expect(a.status).toBe("stale");
+		expect(io.written).toEqual([]);
+		expect((await stored()).contracts).toEqual([]);
+	});
+
+	it("lets two slices change the same shared file one after the other", async () => {
+		await setup(task());
+		io.files.set("src/routes.ts", routes);
+		expect((await propose("a", "routes v1 + a", routes.id)).status).toBe("approved");
+		// b wrote its proposal against v1 too: refused, then re-proposed on top of a's change.
+		expect((await propose("b", "routes v1 + b", routes.id)).status).toBe("stale");
+		const current = io.files.get("src/routes.ts")!;
+		expect((await propose("b", "routes v1 + a + b", current.id)).status).toBe("approved");
+		expect(io.files.get("src/routes.ts")!.text).toBe("routes v1 + a + b");
+		expect((await stored()).amendments!.map((x) => [x.slice, x.kind, x.status])).toEqual([
+			["a", "shared", "approved"],
+			["b", "contract", "stale"],
+			["b", "contract", "approved"],
+		]);
+	});
+
+	it("refuses a file inside a slice's lane", async () => {
+		await setup(task());
+		await expect(propose("a", "x", null, "src/b/index.ts")).rejects.toThrow(/inside b's lane/);
 	});
 });

@@ -28,6 +28,28 @@ export async function remoteFor(
 	return { url: info.remote, token: token.plaintext };
 }
 
+/**
+ * A file on a repo's ref with its Git blob id (the id `git rev-parse <ref>:<path>`
+ * prints), or null when the file doesn't exist.
+ */
+export async function fileVersion(artifacts: Artifacts, name: string, path: string, ref = "main") {
+	using repo = await artifacts.get(name);
+	const blob = await repo.readFile({ ref, path });
+	if (!blob) return null;
+	const bytes = new Uint8Array(await blob.arrayBuffer());
+	return { id: await blobId(bytes), text: new TextDecoder().decode(bytes) };
+}
+
+/** Git's id for a blob: SHA-1 over "blob <size>\0" and the content. */
+export async function blobId(bytes: Uint8Array) {
+	const header = new TextEncoder().encode(`blob ${bytes.byteLength}\0`);
+	const data = new Uint8Array(header.byteLength + bytes.byteLength);
+	data.set(header);
+	data.set(bytes, header.byteLength);
+	const digest = new Uint8Array(await crypto.subtle.digest("SHA-1", data));
+	return [...digest].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
 export async function headOf(artifacts: Artifacts, name: string, ref = "main") {
 	using repo = await artifacts.get(name);
 	const [latest] = await repo.log({ ref, limit: 1 });

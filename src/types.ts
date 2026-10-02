@@ -137,7 +137,11 @@ export interface MergeCheck {
 	checkedAt: string;
 }
 
-/** A proposed change to a contract file, decided by the contract owner. */
+/**
+ * A proposed change to a contract file, decided by the contract owner. It can
+ * also add a new contract file, or bring a project file that sits outside
+ * every lane (one slices share, such as a route list) under contract.
+ */
 export interface Amendment {
 	id: string;
 	/** The slice whose builder proposed it. */
@@ -145,7 +149,15 @@ export interface Amendment {
 	path: string;
 	reason: string;
 	content: string;
-	status: "pending" | "approved" | "rejected" | "failed";
+	/** "contract": an existing contract; "shared": a project file outside every lane; "new": a file that doesn't exist yet. */
+	kind?: "contract" | "shared" | "new";
+	/**
+	 * The blob id of the version the proposal was written against (null: the
+	 * file didn't exist). A proposal is whole-file, so one written against an
+	 * older version would undo changes made since; it is refused as "stale".
+	 */
+	basedOn?: string | null;
+	status: "pending" | "approved" | "rejected" | "failed" | "stale";
 	/** The contract owner's reason, or the error for a failed decision. */
 	decision?: string;
 	/** Commit on the task base that applied an approved amendment. */

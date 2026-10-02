@@ -4,7 +4,7 @@ import "./PlanPanel.css";
 function statusTone(status?: string) {
   if (status === "done" || status === "approved") return "good";
   if (status === "failed" || status === "rejected") return "bad";
-  if (status === "running" || status === "pending") return "warn";
+  if (status === "running" || status === "pending" || status === "stale") return "warn";
   return "";
 }
 

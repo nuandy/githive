@@ -1,6 +1,6 @@
 import { DurableObject } from "cloudflare:workers";
 import git from "isomorphic-git";
-import { baseRepoName, forkAndWait, headOf, remoteFor, reviewerName, sliceRepoName } from "./artifacts";
+import { baseRepoName, fileVersion, forkAndWait, headOf, remoteFor, reviewerName, sliceRepoName } from "./artifacts";
 import { fail, statusOf } from "./errors";
 import { Workspace } from "./git";
 import { type LedgerDoc, type LedgerEntry, clipText, diff, fromDoc, replay, toDoc } from "./ledger";
@@ -27,6 +27,9 @@ import {
 	type SliceCredentials,
 	type Task,
 } from "./types";
+
+const staleMessage = (path: string, current: string | null) =>
+	`${path} changed in the task base since the version you started from (it is now ${current ? current.slice(0, 12) : "deleted"}). Your proposal replaces the whole file, so committing it would undo that change. Revert any edits you made to ${path} yourself, call fetch_base, merge base/main, then propose again starting from the current version.`;
 
 const conflictMessage = (files: string[]) =>
 	`Review approved your slice, but it conflicts with work already integrated into the task base, in ${files.join(", ")}. Call fetch_base, merge it with \`git merge base/main\`, resolve the conflicts inside your lane, run your tests, then commit_and_push and finish.`;
@@ -571,38 +574,52 @@ export class Coordinator extends DurableObject<Env> {
 	}
 
 	/**
-	 * Contract amendments. A builder proposes a new version of a contract file;
-	 * the contract owner agent decides; an approved change is committed to the
-	 * task base and the builders of other running slices are told. The decision
-	 * runs outside the lock, so pushes and votes aren't held up meanwhile.
+	 * Contract amendments. A builder proposes the whole new content of a contract
+	 * file, a new contract file, or a project file outside every lane that slices
+	 * share (which the change brings under contract). The contract owner agent
+	 * decides; an approved change is committed to the task base and the builders
+	 * of other running slices are told. The decision runs outside the lock, so
+	 * pushes and votes aren't held up meanwhile.
+	 *
+	 * Proposals are whole files, so each names the version it was written
+	 * against (`basedOn`). If the base has a different version, when proposed or
+	 * when about to be committed, the proposal is refused as stale: committing it
+	 * would undo changes made since, such as another slice's approved amendment.
 	 */
-	async proposeAmendment(sliceId: string, input: { path: string; content: string; reason: string }) {
-		const { task, amendment } = await this.exclusive(async () => {
+	async proposeAmendment(sliceId: string, input: { path: string; content: string; reason: string; basedOn: string | null }) {
+		const { task, amendment, current } = await this.exclusive(async () => {
 			const task = await this.load();
-			this.slice(task, sliceId);
+			const slice = this.slice(task, sliceId);
 			if (task.phase !== "building") fail(409, `task is ${task.phase}`);
-			if (!task.contracts.includes(input.path)) {
-				// A new contract file (for example, a test a slice should be held to
-				// that its lane can't contain). It must sit outside every lane and
-				// must not be an existing project file.
-				const path = input.path;
+			const path = input.path;
+			if (input.basedOn === undefined) fail(400, "basedOn is required: the blob id of the version you started from, or null for a new file");
+			if (!task.contracts.includes(path)) {
+				// Anything that isn't a contract yet must sit outside every lane.
 				if (path.startsWith("/") || path.split("/").includes("..")) fail(400, `invalid path: ${path}`);
 				const owner = task.slices.find((s) => s.owns.some((prefix) => path.startsWith(prefix)));
 				if (owner) fail(400, `${path} is inside ${owner.id}'s lane; a contract file must sit outside every lane`);
-				if (await this.baseHas(task, path)) fail(400, `${path} is an existing project file, not a contract`);
 			}
+			const current = await fileVersion(this.env.ARTIFACTS, task.baseRepo!, path);
+			const kind: Amendment["kind"] = task.contracts.includes(path) ? "contract" : current ? "shared" : "new";
 			const amendment: Amendment = {
 				id: crypto.randomUUID().slice(0, 8),
 				slice: sliceId,
 				...input,
+				kind,
 				status: "pending",
 				at: new Date().toISOString(),
 			};
 			task.amendments = [...(task.amendments ?? []), amendment];
-			this.note(task, this.slice(task, sliceId).head, `${sliceId} proposed a change to contract ${input.path}: ${input.reason}`);
+			if ((current?.id ?? null) !== input.basedOn) {
+				Object.assign(amendment, { status: "stale", decision: staleMessage(path, current?.id ?? null), decidedAt: amendment.at });
+				this.note(task, slice.head, `${sliceId}'s change to ${path} refused: written against a version the base no longer has`);
+			} else {
+				this.note(task, slice.head, `${sliceId} proposed a change to ${kind === "shared" ? "shared file" : "contract"} ${path}: ${input.reason}`);
+			}
 			await this.save(task);
-			return { task, amendment };
+			return { task, amendment, current };
 		});
+		if (amendment.status === "stale") return amendment;
 
 		let decision: { approve: boolean; reason: string };
 		try {
@@ -611,8 +628,9 @@ export class Coordinator extends DurableObject<Env> {
 				slices: task.slices.map(({ id, title, owns, tests }) => ({ id, title, owns, tests })),
 				proposer: sliceId,
 				path: input.path,
+				kind: amendment.kind!,
 				reason: input.reason,
-				current: await this.readBase(task, input.path),
+				current: current?.text ?? NEW_FILE,
 				proposed: input.content,
 			});
 		} catch (err) {
@@ -622,26 +640,35 @@ export class Coordinator extends DurableObject<Env> {
 
 		return this.exclusive(async () => {
 			const latest = await this.load();
-			const isNew = !latest.contracts.includes(input.path);
+			const a = latest.amendments!.find((x) => x.id === amendment.id)!;
+			// Another change may have landed on the file while the owner decided.
+			const now = await fileVersion(this.env.ARTIFACTS, latest.baseRepo!, input.path);
+			if ((now?.id ?? null) !== input.basedOn) {
+				Object.assign(a, { status: "stale", decision: staleMessage(input.path, now?.id ?? null), decidedAt: new Date().toISOString() });
+				this.note(latest, this.slice(latest, sliceId).head, `${sliceId}'s approved change to ${input.path} not applied: the file changed while it was decided`);
+				await this.save(latest);
+				return a;
+			}
+			const brought = !latest.contracts.includes(input.path);
 			const ws = await Workspace.clone(await remoteFor(this.env.ARTIFACTS, latest.baseRepo!, "write"));
 			await ws.write({ [input.path]: input.content });
 			const commit = await ws.commit(`Amend contract ${input.path} (proposed by ${sliceId})\n\n${input.reason}\n\nApproved: ${decision.reason}`);
 			await ws.push();
 
 			// Other slices' running builders need the new contract too.
-			const message = `Contract ${input.path} was ${isNew ? "added" : "amended"} at the request of slice ${sliceId}: ${input.reason}\nThe contract owner approved it: ${decision.reason}\nCall fetch_base and merge base/main to get it, re-run your acceptance tests, then call commit_and_push.`;
+			const what = a.kind === "new" ? "added as a contract" : a.kind === "shared" ? "changed and brought under contract" : "amended";
+			const message = `Contract ${input.path} was ${what} at the request of slice ${sliceId}: ${input.reason}\nThe contract owner approved it: ${decision.reason}\nCall fetch_base and merge base/main to get it, re-run your acceptance tests, then call commit_and_push.`;
 			const others = latest.slices.filter((s) => s.id !== sliceId && s.status === "building");
 			await Promise.allSettled(others.map((s) => this.env.BUILDER.getByName(s.repo!).notify(message)));
 
-			if (isNew) {
+			if (brought) {
 				latest.contracts.push(input.path);
 				// A new test becomes one of the proposing slice's acceptance tests.
 				const proposer = this.slice(latest, sliceId);
 				if (/\.(test|spec)\.[cm]?[jt]sx?$/.test(input.path)) proposer.tests = [...(proposer.tests ?? []), input.path];
 			}
-			const a = latest.amendments!.find((x) => x.id === amendment.id)!;
 			Object.assign(a, { status: "approved", decision: decision.reason, commit, decidedAt: new Date().toISOString() });
-			this.note(latest, commit, `Contract ${input.path} ${isNew ? "added" : "amended"} for ${sliceId}; the contract owner approved: ${decision.reason}`);
+			this.note(latest, commit, `Contract ${input.path} ${what} for ${sliceId}; the contract owner approved: ${decision.reason}`);
 			await this.save(latest);
 			return a;
 		});
@@ -656,18 +683,6 @@ export class Coordinator extends DurableObject<Env> {
 			await this.save(task);
 			return a;
 		});
-	}
-
-	private async baseHas(task: Task, path: string) {
-		using repo = await this.env.ARTIFACTS.get(task.baseRepo!);
-		return (await repo.readFile({ ref: "main", path })) !== null;
-	}
-
-	/** A file's current content on the task base. */
-	private async readBase(task: Task, path: string) {
-		using repo = await this.env.ARTIFACTS.get(task.baseRepo!);
-		const blob = await repo.readFile({ ref: "main", path });
-		return blob ? await blob.text() : NEW_FILE;
 	}
 
 	/** Quorum, step 2. A reviewer agent submits its verdict on the pinned head. */
