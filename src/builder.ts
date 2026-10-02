@@ -187,8 +187,10 @@ How to work:
 		const report = await this.coordinator(job).recordPush(job.slice.id);
 		const slice = report.task.slices.find((s) => s.id === job.slice.id);
 		const outOfLane = slice?.outOfLane ?? [];
+		// Only this push's checks: the task keeps older ones as history (including
+		// pairs with slices that have since integrated), which would be stale here.
 		// RPC serialization widens the pair tuple to string[].
-		const checks = report.task.checks as MergeCheck[];
+		const checks = report.checks as MergeCheck[];
 		const conflicts = checks.filter((c) => c.status === "conflict" && c.pair.includes(job.slice.id));
 		state.lastReport = { outOfLane, conflicts };
 		if (conflicts.length || outOfLane.length) this.note(state, `merge-ahead: ${conflicts.length} conflict(s), ${outOfLane.length} out of lane`);
