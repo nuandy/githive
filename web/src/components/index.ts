@@ -5,4 +5,3 @@ export { PlanPanel } from "./PlanPanel";
 export { SliceLanes } from "./SliceLanes";
 export { TaskDetailBoundary } from "./TaskDetailBoundary";
 export { TaskHeader } from "./TaskHeader";
-export { TokenSettings } from "./TokenSettings";
