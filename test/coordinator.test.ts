@@ -253,6 +253,26 @@ describe("the integration gate", () => {
 		expect(io.pushes).toBe(0);
 	});
 
+	it("refuses to start a gate when the latest quorum includes a veto", async () => {
+		const vetoed = [...approvedReviews(), { ...vote("security", "reject"), at: "" }];
+		await setup(task({ slices: [slice("a", { reviewHead: "h1", gate: gated("queued"), reviews: vetoed }), slice("b")] }));
+		expect(await coordinator.gatePlan("a", "h1")).toBeNull();
+		expect((await stored()).slices[0].gate?.status).toBe("queued");
+	});
+
+	it("rejects a group result if any member no longer has an approved quorum", async () => {
+		const grouped = (head: string, other: string) => ({ ...gated("running", head), group: [other] });
+		const bReviews = [...approvedReviews("hb"), { ...vote("security", "reject", "hb"), at: "" }];
+		const members = [{ slice: "b", head: "hb" }];
+		await setup(task({ slices: [
+			slice("a", { reviewHead: "h1", gate: grouped("h1", "b"), reviews: approvedReviews() }),
+			slice("b", { reviewHead: "hb", gate: grouped("hb", "a"), reviews: bReviews }),
+		] }));
+		expect(await coordinator.gateResult("a", result(), [], members)).toEqual({ outcome: "stale" });
+		expect(io.merges).toEqual([]);
+		expect(io.pushes).toBe(0);
+	});
+
 	it("plans a run against the current base and marks it running", async () => {
 		await setup(task({ slices: [slice("a", { reviewHead: "h1", gate: gated("queued"), reviews: approvedReviews() }), slice("b")] }));
 		const plan = await coordinator.gatePlan("a", "h1");
