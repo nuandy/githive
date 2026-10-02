@@ -51,6 +51,8 @@ export interface Slice extends SliceSpec {
 	attention?: string;
 	/** The findings that last sent the slice back; the next review checks them. */
 	lastFeedback?: string;
+	/** Human decisions to let a commit through without an approved quorum. */
+	waivers?: { head: string; by: string; reason: string; at: string }[];
 	/** The integration gate's run for the approved commit. */
 	gate?: {
 		/** "waiting": failed while other slices weren't integrated yet; re-runs after the next integration. */

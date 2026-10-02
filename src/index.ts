@@ -53,6 +53,7 @@ app.get("/api", (c) =>
 			"POST /tasks/:id/slices/:slice/reviewers",
 			"GET  /tasks/:id/slices/:slice/reviewers",
 			"POST /tasks/:id/slices/:slice/reviews {reviewer, head, verdict, summary, evidence?}",
+			"POST /tasks/:id/slices/:slice/waive {reason, by?}",
 			"POST /tasks/:id/slices/:slice/gate",
 			"POST /tasks/:id/slices/:slice/integrate",
 			"POST /tasks/:id/land",
@@ -242,6 +243,13 @@ app.post("/tasks/:id/slices/:slice/reviews", async (c) => {
 	const { id, slice } = c.req.param();
 	const review = await c.req.json<Omit<Review, "at">>();
 	return c.json(await coordinator(c.env, id).submitReview(slice, review));
+});
+
+// A human lets the current review commit through without an approved quorum (recorded; the gate still runs).
+app.post("/tasks/:id/slices/:slice/waive", async (c) => {
+	const { id, slice } = c.req.param();
+	const { reason, by } = await c.req.json<{ reason: string; by?: string }>();
+	return c.json(await coordinator(c.env, id).waive(slice, { reason, by: by ?? "" }));
 });
 
 // Re-run the integration gate for an approved slice (for example after fixing the task base).

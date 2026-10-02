@@ -8,6 +8,9 @@ import type { Slice } from "./types";
 // stands in for the planner that wrote them: contracts are the seams between
 // slices, so a change must stay fair to every slice, not just the proposer.
 
+/** What `current` holds when the proposal adds a new contract file. */
+export const NEW_FILE = "(file does not exist yet)";
+
 export interface AmendmentRequest {
 	goal: string;
 	slices: Pick<Slice, "id" | "title" | "owns" | "tests">[];
@@ -24,6 +27,8 @@ const Decision = z.strictObject({
 });
 
 const INSTRUCTIONS = `You own the contract files for a Blueprint task. Contracts are committed before any agent starts and define the seams between slices that agents build in parallel: shared types, interfaces and acceptance tests. A builder has proposed changing one.
+
+An amendment changes a contract file or adds a new one, such as a test a slice should be held to that its lane can't contain. It cannot change which paths a slice owns: if the proposal asks for that, judge only the file content, and say in your reason that lanes don't change.
 
 Approve when the change is needed to reach the task's goal, or fixes a contract that is wrong or contradicts a reasonable review finding, and stays fair to every slice that depends on the file. Reject when the change weakens what the tests check without a good reason, makes one slice's job easier at another's expense, or reaches beyond what the reason justifies.
 
@@ -42,7 +47,7 @@ Slices:
 ${request.slices.map((s) => `- ${s.id}: ${s.title} (owns ${s.owns.join(", ")}; tests ${s.tests?.join(", ") || "none listed"})`).join("\n")}
 
 Proposed by slice: ${request.proposer}
-Contract file: ${request.path}
+Contract file: ${request.path}${request.current === NEW_FILE ? " (a new contract file)" : ""}
 Slices whose acceptance tests include it: ${affected.join(", ") || "none"}
 Reason given: ${request.reason}
 

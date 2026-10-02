@@ -4,7 +4,7 @@ import { baseRepoName, forkAndWait, headOf, remoteFor, reviewerName, sliceRepoNa
 import { fail, statusOf } from "./errors";
 import { Workspace } from "./git";
 import { blueprintProblems } from "./blueprint";
-import { decideAmendment } from "./contract-owner";
+import { NEW_FILE, decideAmendment } from "./contract-owner";
 import type { GateJob } from "./gate";
 import { gateExclusions, gateFeedback, type GateResult } from "./gate-plan";
 import type { BuildJob } from "./builder";
@@ -404,7 +404,16 @@ export class Coordinator extends DurableObject<Env> {
 			const task = await this.load();
 			this.slice(task, sliceId);
 			if (task.phase !== "building") fail(409, `task is ${task.phase}`);
-			if (!task.contracts.includes(input.path)) fail(400, `${input.path} is not a contract file`);
+			if (!task.contracts.includes(input.path)) {
+				// A new contract file (for example, a test a slice should be held to
+				// that its lane can't contain). It must sit outside every lane and
+				// must not be an existing project file.
+				const path = input.path;
+				if (path.startsWith("/") || path.split("/").includes("..")) fail(400, `invalid path: ${path}`);
+				const owner = task.slices.find((s) => s.owns.some((prefix) => path.startsWith(prefix)));
+				if (owner) fail(400, `${path} is inside ${owner.id}'s lane; a contract file must sit outside every lane`);
+				if (await this.baseHas(task, path)) fail(400, `${path} is an existing project file, not a contract`);
+			}
 			const amendment: Amendment = {
 				id: crypto.randomUUID().slice(0, 8),
 				slice: sliceId,
@@ -435,16 +444,23 @@ export class Coordinator extends DurableObject<Env> {
 
 		return this.exclusive(async () => {
 			const latest = await this.load();
+			const isNew = !latest.contracts.includes(input.path);
 			const ws = await Workspace.clone(await remoteFor(this.env.ARTIFACTS, latest.baseRepo!, "write"));
 			await ws.write({ [input.path]: input.content });
 			const commit = await ws.commit(`Amend contract ${input.path} (proposed by ${sliceId})\n\n${input.reason}\n\nApproved: ${decision.reason}`);
 			await ws.push();
 
 			// Other slices' running builders need the new contract too.
-			const message = `Contract ${input.path} was amended at the request of slice ${sliceId}: ${input.reason}\nThe contract owner approved it: ${decision.reason}\nCall fetch_base and merge base/main to get it, re-run your acceptance tests, then call commit_and_push.`;
+			const message = `Contract ${input.path} was ${isNew ? "added" : "amended"} at the request of slice ${sliceId}: ${input.reason}\nThe contract owner approved it: ${decision.reason}\nCall fetch_base and merge base/main to get it, re-run your acceptance tests, then call commit_and_push.`;
 			const others = latest.slices.filter((s) => s.id !== sliceId && s.status === "building");
 			await Promise.allSettled(others.map((s) => this.env.BUILDER.getByName(s.repo!).notify(message)));
 
+			if (isNew) {
+				latest.contracts.push(input.path);
+				// A new test becomes one of the proposing slice's acceptance tests.
+				const proposer = this.slice(latest, sliceId);
+				if (/\.(test|spec)\.[cm]?[jt]sx?$/.test(input.path)) proposer.tests = [...(proposer.tests ?? []), input.path];
+			}
 			const a = latest.amendments!.find((x) => x.id === amendment.id)!;
 			Object.assign(a, { status: "approved", decision: decision.reason, commit, decidedAt: new Date().toISOString() });
 			await this.save(latest);
@@ -462,11 +478,16 @@ export class Coordinator extends DurableObject<Env> {
 		});
 	}
 
+	private async baseHas(task: Task, path: string) {
+		using repo = await this.env.ARTIFACTS.get(task.baseRepo!);
+		return (await repo.readFile({ ref: "main", path })) !== null;
+	}
+
 	/** A file's current content on the task base. */
 	private async readBase(task: Task, path: string) {
 		using repo = await this.env.ARTIFACTS.get(task.baseRepo!);
 		const blob = await repo.readFile({ ref: "main", path });
-		return blob ? await blob.text() : "(file does not exist yet)";
+		return blob ? await blob.text() : NEW_FILE;
 	}
 
 	/** Quorum, step 2. A reviewer agent submits its verdict on the pinned head. */
@@ -609,11 +630,37 @@ export class Coordinator extends DurableObject<Env> {
 			const slice = this.slice(task, sliceId);
 			if (slice.status !== "building") fail(409, `slice ${sliceId} is ${slice.status}`);
 			const quorum = tally(task.review, slice);
-			if (quorum.status !== "approved") fail(409, `quorum is ${quorum.status}`);
+			const waived = slice.waivers?.some((w) => w.head === slice.reviewHead);
+			if (quorum.status !== "approved" && !waived) fail(409, `quorum is ${quorum.status}`);
 			if (!task.verify.length) fail(409, "the task has no verify commands");
 			await this.startGate(task, slice);
 			await this.save(task);
 			return slice.gate;
+		});
+	}
+
+	/**
+	 * A human lets the slice's current review commit through without an
+	 * approved quorum, for example when reviewers hold it to something its lane
+	 * can't contain. Recorded on the slice; the integration gate still runs.
+	 */
+	waive(sliceId: string, input: { by: string; reason: string }) {
+		return this.exclusive(async () => {
+			if (!input.reason?.trim()) fail(400, "a waiver needs a reason");
+			const task = await this.load();
+			const slice = this.slice(task, sliceId);
+			if (slice.status !== "building") fail(409, `slice ${sliceId} is ${slice.status}`);
+			if (!slice.reviewHead) fail(409, `slice ${sliceId} has no commit under review`);
+			const builder = await this.env.BUILDER.getByName(slice.repo!).state();
+			if (builder && (builder.status === "queued" || builder.status === "working")) fail(409, "the slice's builder is still working");
+			const head = await headOf(this.env.ARTIFACTS, slice.repo!);
+			if (head !== slice.reviewHead) fail(409, `the fork moved to ${head} after review of ${slice.reviewHead}`);
+
+			slice.waivers = [...(slice.waivers ?? []), { head, by: input.by || "a human", reason: input.reason, at: new Date().toISOString() }];
+			slice.attention = undefined;
+			await this.integrateOrGate(task, slice);
+			await this.save(task);
+			return slice;
 		});
 	}
 
