@@ -3,6 +3,7 @@ import http from "isomorphic-git/http/web";
 import { BOT, type Remote } from "./git";
 import { type LedgerEntry, ledgerMessage, noteLine, notesRef } from "./ledger";
 import { MemoryFS } from "./memory-fs";
+import { retryTransient } from "./retry";
 
 // Reading and writing a task's notes ref with isomorphic-git, in memory. A
 // write fetches only the tip of the ref; a read fetches its whole history.
@@ -18,7 +19,7 @@ async function open(remote: Remote, ref: string, depth?: number) {
 	await git.addRemote({ fs, dir: DIR, remote: "origin", url: remote.url });
 	await git.setConfig({ fs, dir: DIR, path: "remote.origin.fetch", value: "+refs/notes/*:refs/remotes/origin/notes/*" });
 	try {
-		const { fetchHead } = await git.fetch({ fs, http, dir: DIR, remote: "origin", ref, remoteRef: ref, singleBranch: true, tags: false, depth, onAuth: onAuth(remote) });
+		const { fetchHead } = await retryTransient(() => git.fetch({ fs, http, dir: DIR, remote: "origin", ref, remoteRef: ref, singleBranch: true, tags: false, depth, onAuth: onAuth(remote) }));
 		if (fetchHead) await git.writeRef({ fs, dir: DIR, ref, value: fetchHead, force: true });
 		return { fs, tip: fetchHead ?? null };
 	} catch (err) {
@@ -51,7 +52,7 @@ export async function appendLedger(remote: Remote, taskId: string, entries: Ledg
 		});
 		await git.writeRef({ fs, dir: DIR, ref, value: oid, force: true });
 		try {
-			await git.push({ fs, http, dir: DIR, url: remote.url, ref, remoteRef: ref, onAuth: onAuth(remote) });
+			await retryTransient(() => git.push({ fs, http, dir: DIR, url: remote.url, ref, remoteRef: ref, onAuth: onAuth(remote) }));
 			return oid;
 		} catch (err) {
 			// Someone else moved the ref (a restored copy of this task, say): rebuild on top of theirs.

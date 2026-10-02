@@ -1,6 +1,7 @@
 import git from "isomorphic-git";
 import http from "isomorphic-git/http/web";
 import { MemoryFS } from "./memory-fs";
+import { retryTransient } from "./retry";
 
 // The Artifacts binding manages repos but cannot write inside them, so every
 // commit, merge and push goes through isomorphic-git over an in-memory tree.
@@ -36,9 +37,13 @@ export class Workspace {
 	}
 
 	static async clone(origin: Remote, ref = "main") {
-		const fs = new MemoryFS();
-		await git.clone({ fs, http, dir: DIR, url: origin.url, ref, singleBranch: true, onAuth: onAuth(origin) });
-		return new Workspace(fs, origin);
+		return retryTransient(async () => {
+			// A failed clone may have populated part of the object database, refs, or
+			// worktree. Each attempt must therefore begin with an entirely fresh FS.
+			const fs = new MemoryFS();
+			await git.clone({ fs, http, dir: DIR, url: origin.url, ref, singleBranch: true, onAuth: onAuth(origin) });
+			return new Workspace(fs, origin);
+		});
 	}
 
 	async write(files: Record<string, string>) {
@@ -53,13 +58,13 @@ export class Workspace {
 	}
 
 	push(ref = "main", remote: Remote = this.origin) {
-		return git.push({ fs: this.fs, http, dir: DIR, url: remote.url, ref, onAuth: onAuth(remote) });
+		return retryTransient(() => git.push({ fs: this.fs, http, dir: DIR, url: remote.url, ref, onAuth: onAuth(remote) }));
 	}
 
 	/** Fetch `ref` from another repo into refs/remotes/<name>/<ref>; returns its commit. */
 	async fetch(name: string, remote: Remote, ref = "main") {
 		await git.addRemote({ fs: this.fs, dir: DIR, remote: name, url: remote.url, force: true });
-		const result = await git.fetch({
+		const result = await retryTransient(() => git.fetch({
 			fs: this.fs,
 			http,
 			dir: DIR,
@@ -67,7 +72,7 @@ export class Workspace {
 			ref,
 			singleBranch: true,
 			onAuth: onAuth(remote),
-		});
+		}));
 		if (!result.fetchHead) throw new Error(`fetch of ${name}/${ref} returned no head`);
 		return result.fetchHead;
 	}
