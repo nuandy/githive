@@ -15,6 +15,8 @@ import type { GateResult } from "./gate-plan";
 //   package-lock.json is unchanged since the last install in this container.
 
 export interface GateItem {
+	/** Set when queued; identifies this item when the run finishes. */
+	id?: string;
 	slice: string;
 	/** The approved commit to check. */
 	head: string;
@@ -41,7 +43,7 @@ export class Gate extends DurableObject<Env> {
 	async enqueue(taskId: string, item: GateItem) {
 		const covered = new Set([item.slice, ...(item.group ?? []).map((g) => g.slice)]);
 		const queue = ((await this.ctx.storage.get<GateItem[]>("queue")) ?? []).filter((q) => !covered.has(q.slice));
-		await this.ctx.storage.put({ taskId, queue: [...queue, item] });
+		await this.ctx.storage.put({ taskId, queue: [...queue, { ...item, id: crypto.randomUUID() }] });
 		await this.ctx.storage.setAlarm(Date.now());
 	}
 
@@ -72,9 +74,10 @@ export class Gate extends DurableObject<Env> {
 			await coordinator.gateResult(item.slice, result, plan.exclude, item.group);
 		}
 
-		// Done with this item (a newer one for the same slice may have replaced it meanwhile).
+		// Done with this item. Remove it by id: the run may have queued a new item
+		// for the same slice and commit (a group gate), which must stay.
 		const latest = (await this.ctx.storage.get<GateItem[]>("queue")) ?? [];
-		const rest = latest.filter((q) => !(q.slice === item.slice && q.head === item.head));
+		const rest = latest.filter((q) => q.id !== item.id);
 		await this.ctx.storage.put("queue", rest);
 		await this.ctx.storage.delete("current");
 		if (rest.length) await this.ctx.storage.setAlarm(Date.now());

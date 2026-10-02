@@ -756,7 +756,10 @@ export class Coordinator extends DurableObject<Env> {
 			const waived = slice.waivers?.some((w) => w.head === slice.reviewHead);
 			if (quorum.status !== "approved" && !waived) fail(409, `quorum is ${quorum.status}`);
 			if (!task.verify.length) fail(409, "the task has no verify commands");
-			await this.startGate(task, slice);
+			// A slice in a group gate retries with its group.
+			const group = (slice.gate?.group ?? []).map((id) => task.slices.find((s) => s.id === id)).filter((s): s is Slice => !!s && s.status === "building");
+			if (group.length) await this.startGroupGate(task, slice, group);
+			else await this.startGate(task, slice);
 			await this.save(task);
 			return slice.gate;
 		});

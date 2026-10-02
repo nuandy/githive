@@ -215,6 +215,20 @@ describe("the integration gate", () => {
 		expect((await stored()).slices.map((s) => s.status)).toEqual(["integrated", "integrated"]);
 	});
 
+	it("retries a slice's gate together with its group", async () => {
+		const grouped = (head: string, other: string) => ({ ...gated("queued", head), group: [other] });
+		await setup(
+			task({
+				slices: [
+					slice("a", { reviewHead: "h1", gate: grouped("h1", "b"), reviews: [{ ...vote("tests", "approve"), at: "" }, { ...vote("api", "approve"), at: "" }] }),
+					slice("b", { reviewHead: "hb", gate: grouped("hb", "a") }),
+				],
+			}),
+		);
+		await coordinator.retryGate("a");
+		expect(fake.env.GATE.getByName("t1").enqueue).toHaveBeenCalledWith("t1", { slice: "a", head: "h1", group: [{ slice: "b", head: "hb" }] });
+	});
+
 	it("sends every slice of a failed group run back, naming the others", async () => {
 		const grouped = (head: string, other: string) => ({ ...gated("running", head), group: [other] });
 		await setup(task({ slices: [slice("a", { reviewHead: "h1", gate: grouped("h1", "b") }), slice("b", { reviewHead: "hb", gate: grouped("hb", "a") })] }));
