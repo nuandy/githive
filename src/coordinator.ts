@@ -628,27 +628,52 @@ export class Coordinator extends DurableObject<Env> {
 	}
 
 	/**
+	 * Slices that depend on each other (for example through a shared contract
+	 * that imports both) can't pass the gate one at a time. Merge them together
+	 * in one run instead. Caller holds the lock and saves.
+	 */
+	private async startGroupGate(task: Task, lead: Slice, members: Slice[]) {
+		const ids = [lead.id, ...members.map((m) => m.id)];
+		const at = new Date().toISOString();
+		for (const s of [lead, ...members])
+			s.gate = { status: "queued", head: s.reviewHead!, baseHead: "", at, excluded: [], group: ids.filter((id) => id !== s.id) };
+		await this.env.GATE.getByName(task.id).enqueue(task.id, {
+			slice: lead.id,
+			head: lead.reviewHead!,
+			group: members.map((m) => ({ slice: m.id, head: m.reviewHead! })),
+		});
+	}
+
+	/** Slices of a gate run that are still the ones waiting to integrate at these commits. */
+	private gateMembers(task: Task, sliceId: string, head: string, group: { slice: string; head: string }[] = []) {
+		const members = [{ slice: sliceId, head }, ...group].map(({ slice: id, head: h }) => ({ s: task.slices.find((x) => x.id === id), h }));
+		const valid = members.every(({ s, h }) => s && s.status === "building" && s.reviewHead === h && s.gate?.head === h);
+		return valid ? members.map(({ s }) => s!) : null;
+	}
+
+	/**
 	 * The gate asks for its plan when a run starts, so it checks against the base
 	 * as it is then, with the exclusions and tokens of that moment. Null when the
-	 * commit is no longer the one waiting to integrate.
+	 * commits are no longer the ones waiting to integrate.
 	 */
-	gatePlan(sliceId: string, head: string) {
+	gatePlan(sliceId: string, head: string, group: { slice: string; head: string }[] = []) {
 		return this.exclusive(async (): Promise<GatePlan | null> => {
 			const task = await this.load();
-			const slice = this.slice(task, sliceId);
-			if (slice.status !== "building" || slice.reviewHead !== head || slice.gate?.head !== head) return null;
+			const members = this.gateMembers(task, sliceId, head, group);
+			if (!members) return null;
+			const [lead, ...others] = members;
 			const baseHead = (await headOf(this.env.ARTIFACTS, task.baseRepo!))!;
-			const exclude = gateExclusions(task.slices, slice.id);
-			const [base, fork] = await Promise.all([
-				remoteFor(this.env.ARTIFACTS, task.baseRepo!, "read", 3600),
-				remoteFor(this.env.ARTIFACTS, slice.repo!, "read", 3600),
-			]);
-			slice.gate = { status: "running", head, baseHead, at: new Date().toISOString(), excluded: exclude };
+			const exclude = gateExclusions(task.slices, members.map((m) => m.id));
+			const base = await remoteFor(this.env.ARTIFACTS, task.baseRepo!, "read", 3600);
+			const forks = await Promise.all(members.map((m) => remoteFor(this.env.ARTIFACTS, m.repo!, "read", 3600)));
+			const at = new Date().toISOString();
+			for (const m of members) m.gate = { ...m.gate!, status: "running", baseHead, at, excluded: exclude };
 			await this.save(task);
 			return {
 				baseHead,
 				base: { remote: base.url, token: base.token },
-				fork: { remote: fork.url, token: fork.token },
+				fork: { remote: forks[0].url, token: forks[0].token },
+				others: others.map((o, i) => ({ slice: o.id, head: o.reviewHead!, remote: forks[i + 1].url, token: forks[i + 1].token })),
 				checks: task.verify,
 				exclude,
 			};
@@ -656,45 +681,65 @@ export class Coordinator extends DurableObject<Env> {
 	}
 
 	/**
-	 * The gate reports back. A pass integrates the slice; a failure sends it
-	 * back with the failing output. A result checked against a base that has
-	 * since moved (another slice integrated) is discarded and the gate re-runs.
+	 * The gate reports back. A pass integrates the slice (or every slice of a
+	 * group, in order). A failure while other slices can still integrate waits
+	 * for them; a failure with nothing left to wait for merges the slice with the
+	 * slices waiting on it in one group run, or, failing that, sends it back with
+	 * the failing output. A result checked against a base that has since moved
+	 * is discarded and the gate re-runs.
 	 */
-	gateResult(sliceId: string, result: GateResult, excluded: string[]) {
+	gateResult(sliceId: string, result: GateResult, excluded: string[], group: { slice: string; head: string }[] = []) {
 		return this.exclusive(async () => {
 			const task = await this.load();
-			const slice = this.slice(task, sliceId);
-			if (slice.status !== "building" || slice.gate?.head !== result.head || slice.reviewHead !== result.head)
-				return { outcome: "stale" as const };
+			const members = this.gateMembers(task, sliceId, result.head, group);
+			if (!members) return { outcome: "stale" as const };
+			const [slice, ...others] = members;
 			const baseHead = await headOf(this.env.ARTIFACTS, task.baseRepo!);
 			if (baseHead !== result.baseHead) {
-				await this.startGate(task, slice);
+				if (others.length) await this.startGroupGate(task, slice, others);
+				else await this.startGate(task, slice);
 				await this.save(task);
 				return { outcome: "rerun" as const };
 			}
 			const at = new Date().toISOString();
 			try {
 				if (result.passed) {
-					slice.gate = { ...slice.gate, status: "passed", result, at };
-					const merged = await this.integrateSlice(task, slice);
-					if (!merged.ok) await this.sendBack(task, slice, conflictMessage(merged.files));
-					else await this.rerunWaitingGates(task);
+					for (const m of members) m.gate = { ...m.gate!, status: "passed", result, at };
+					for (const m of members) {
+						const merged = await this.integrateSlice(task, m);
+						if (!merged.ok) {
+							await this.sendBack(task, m, conflictMessage(merged.files));
+							break;
+						}
+					}
+					await this.rerunWaitingGates(task);
+				} else if (others.length) {
+					// A group run failed: every slice in it goes back, with the combined output.
+					for (const m of members) {
+						m.gate = { ...m.gate!, status: "failed", result, at };
+						await this.sendBack(task, m, gateFeedback(result, excluded, members.filter((x) => x !== m).map((x) => x.id)));
+					}
 				} else if (!result.mergeConflict && this.othersCanStillIntegrate(task, slice)) {
 					// The failure may come from code in slices that aren't integrated yet
 					// (a slice can depend on another's implementation of a contract).
 					// Wait, and re-run after the next integration.
-					slice.gate = { ...slice.gate, status: "waiting", result, at };
+					slice.gate = { ...slice.gate!, status: "waiting", result, at };
 				} else {
-					// Nothing else can integrate first, so the failure is this slice's to fix.
-					// Slices waiting on it keep waiting: they re-run once it integrates.
-					slice.gate = { ...slice.gate, status: "failed", result, at };
-					await this.sendBack(task, slice, gateFeedback(result, excluded));
+					const waiting = task.slices.filter((s) => s !== slice && s.status === "building" && s.gate?.status === "waiting");
+					if (!result.mergeConflict && waiting.length) {
+						// Nothing else can integrate first, but slices are waiting on each
+						// other: check them together.
+						await this.startGroupGate(task, slice, waiting);
+					} else {
+						slice.gate = { ...slice.gate!, status: "failed", result, at };
+						await this.sendBack(task, slice, gateFeedback(result, excluded));
+					}
 				}
 			} catch (err) {
 				slice.attention = `after the gate: ${statusOf(err).message}`;
 			}
 			await this.save(task);
-			return { outcome: slice.gate?.status ?? "failed" };
+			return { outcome: (slice.status === "integrated" ? "passed" : slice.gate?.status) ?? "failed" };
 		});
 	}
 

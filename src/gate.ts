@@ -18,6 +18,8 @@ export interface GateItem {
 	slice: string;
 	/** The approved commit to check. */
 	head: string;
+	/** Other slices to merge in the same run, when slices depend on each other (a group gate). */
+	group?: { slice: string; head: string }[];
 }
 
 /** What the Coordinator hands a run when it starts. */
@@ -25,6 +27,8 @@ export interface GatePlan {
 	baseHead: string;
 	base: { remote: string; token: string };
 	fork: { remote: string; token: string };
+	/** The forks of the other slices in a group gate. */
+	others: { slice: string; head: string; remote: string; token: string }[];
 	checks: string[];
 	/** Contract test files to remove first (their slices aren't integrated yet). */
 	exclude: string[];
@@ -33,9 +37,10 @@ export interface GatePlan {
 const INSTALL = /^npm ci(\s|$)/;
 
 export class Gate extends DurableObject<Env> {
-	/** Queue a slice's approved commit. A newer commit for the same slice replaces an older one. */
+	/** Queue a slice's approved commit. A newer item for the same slices replaces an older one. */
 	async enqueue(taskId: string, item: GateItem) {
-		const queue = ((await this.ctx.storage.get<GateItem[]>("queue")) ?? []).filter((q) => q.slice !== item.slice);
+		const covered = new Set([item.slice, ...(item.group ?? []).map((g) => g.slice)]);
+		const queue = ((await this.ctx.storage.get<GateItem[]>("queue")) ?? []).filter((q) => !covered.has(q.slice));
 		await this.ctx.storage.put({ taskId, queue: [...queue, item] });
 		await this.ctx.storage.setAlarm(Date.now());
 	}
@@ -53,7 +58,7 @@ export class Gate extends DurableObject<Env> {
 		await this.ctx.storage.put("current", item);
 		const coordinator = this.env.COORDINATOR.get(this.env.COORDINATOR.idFromName(taskId));
 
-		const plan = await coordinator.gatePlan(item.slice, item.head);
+		const plan = await coordinator.gatePlan(item.slice, item.head, item.group);
 		if (plan) {
 			let result: GateResult;
 			try {
@@ -64,7 +69,7 @@ export class Gate extends DurableObject<Env> {
 				result = { passed: false, head: item.head, baseHead: plan.baseHead, results: [{ command: "(gate setup)", exitCode: 1, output: message }], at: new Date().toISOString() };
 				await this.ctx.storage.delete("prepared"); // start from a fresh checkout next time
 			}
-			await coordinator.gateResult(item.slice, result, plan.exclude);
+			await coordinator.gateResult(item.slice, result, plan.exclude, item.group);
 		}
 
 		// Done with this item (a newer one for the same slice may have replaced it meanwhile).
@@ -106,14 +111,21 @@ export class Gate extends DurableObject<Env> {
 		if (fork.exitCode !== 0) throw new Error(`fetch of the slice failed: ${clip(fork.output, 2_000)}`);
 		const known = await run(container, ["git", "cat-file", "-e", `${item.head}^{commit}`]);
 		if (known.exitCode !== 0) throw new Error(`the approved commit ${item.head} is not in the slice's fork`);
+		for (const other of plan.others) {
+			const f = await gitWithToken(container, other.token, ["fetch", "-q", other.remote, `main:refs/remotes/${other.slice}/main`, "--force"]);
+			if (f.exitCode !== 0) throw new Error(`fetch of ${other.slice} failed: ${clip(f.output, 2_000)}`);
+		}
 
 		// A clean checkout of the base; ignored files (node_modules) survive `git clean -fd`.
 		await run(container, ["bash", "-lc", `git merge --abort 2>/dev/null; git checkout -q -f --detach ${plan.baseHead} && git clean -fdq`]);
-		const merge = await run(container, ["git", "-c", "user.name=gate", "-c", "user.email=gate@blueprint.invalid", "merge", "-q", "--no-edit", item.head]);
-		if (merge.exitCode !== 0) {
-			const conflicts = await run(container, ["git", "diff", "--name-only", "--diff-filter=U"]);
-			await run(container, ["git", "merge", "--abort"]);
-			return result({ mergeConflict: conflicts.output.split("\n").filter(Boolean) });
+		// Merge the slice, then any other slices in its group, onto the base.
+		for (const head of [item.head, ...plan.others.map((o) => o.head)]) {
+			const merge = await run(container, ["git", "-c", "user.name=gate", "-c", "user.email=gate@blueprint.invalid", "merge", "-q", "--no-edit", head]);
+			if (merge.exitCode !== 0) {
+				const conflicts = await run(container, ["git", "diff", "--name-only", "--diff-filter=U"]);
+				await run(container, ["git", "merge", "--abort"]);
+				return result({ mergeConflict: conflicts.output.split("\n").filter(Boolean) });
+			}
 		}
 		if (plan.exclude.length) await run(container, ["rm", "-f", "--", ...plan.exclude]);
 

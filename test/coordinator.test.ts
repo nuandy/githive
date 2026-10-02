@@ -187,13 +187,40 @@ describe("the integration gate", () => {
 		expect(builder("a").revise).not.toHaveBeenCalled();
 	});
 
-	it("sends back on a failure when nothing else can integrate; slices waiting on it keep waiting", async () => {
+	it("sends back on a failure when nothing else can integrate and nothing waits on it", async () => {
 		const failure = result({ passed: false, results: [{ command: "npm run typecheck", exitCode: 2, output: "TS2305" }] });
-		await setup(task({ slices: [slice("a", { reviewHead: "h1", gate: gated("running") }), slice("b", { reviewHead: "hb", gate: { ...gated("waiting", "hb"), result: { ...failure, head: "hb" } } })] }));
+		await setup(task({ slices: [slice("a", { reviewHead: "h1", gate: gated("running") }), slice("b", { status: "integrated" })] }));
 		expect(await coordinator.gateResult("a", failure, [])).toEqual({ outcome: "failed" });
 		expect(builder("a").revise.mock.calls[0][0]).toMatch(/npm run typecheck \(exit code 2\)\nTS2305/);
+	});
+
+	it("merges slices that wait on each other into one group gate", async () => {
+		const failure = result({ passed: false, results: [{ command: "npm run typecheck", exitCode: 2, output: "Cannot find module './b'" }] });
+		await setup(task({ slices: [slice("a", { reviewHead: "h1", gate: gated("running") }), slice("b", { reviewHead: "hb", gate: gated("waiting", "hb") })] }));
+		expect(await coordinator.gateResult("a", failure, [])).toEqual({ outcome: "queued" });
+		expect(fake.env.GATE.getByName("t1").enqueue).toHaveBeenCalledWith("t1", { slice: "a", head: "h1", group: [{ slice: "b", head: "hb" }] });
+		const t = await stored();
+		expect(t.slices.map((s) => [s.gate?.status, s.gate?.group])).toEqual([["queued", ["b"]], ["queued", ["a"]]]);
+		expect(builder("a").revise).not.toHaveBeenCalled();
 		expect(builder("b").revise).not.toHaveBeenCalled();
-		expect((await stored()).slices[1].gate?.status).toBe("waiting");
+	});
+
+	it("plans and integrates a group run as a whole", async () => {
+		const grouped = (head: string, other: string) => ({ ...gated("queued", head), group: [other] });
+		await setup(task({ slices: [slice("a", { reviewHead: "h1", gate: grouped("h1", "b") }), slice("b", { reviewHead: "hb", gate: grouped("hb", "a") })] }));
+		const plan = await coordinator.gatePlan("a", "h1", [{ slice: "b", head: "hb" }]);
+		expect(plan?.others).toEqual([{ slice: "b", head: "hb", remote: "https://git.test/t1--b.git", token: "token-t1--b" }]);
+		expect(await coordinator.gateResult("a", result(), [], [{ slice: "b", head: "hb" }])).toEqual({ outcome: "passed" });
+		expect(io.merges).toEqual(["refs/remotes/a/main", "refs/remotes/b/main"]);
+		expect((await stored()).slices.map((s) => s.status)).toEqual(["integrated", "integrated"]);
+	});
+
+	it("sends every slice of a failed group run back, naming the others", async () => {
+		const grouped = (head: string, other: string) => ({ ...gated("running", head), group: [other] });
+		await setup(task({ slices: [slice("a", { reviewHead: "h1", gate: grouped("h1", "b") }), slice("b", { reviewHead: "hb", gate: grouped("hb", "a") })] }));
+		await coordinator.gateResult("a", result({ passed: false }), [], [{ slice: "b", head: "hb" }]);
+		expect(builder("a").revise.mock.calls[0][0]).toMatch(/depends on \(or is depended on by\) b/);
+		expect(builder("b").revise.mock.calls[0][0]).toMatch(/depends on \(or is depended on by\) a/);
 	});
 
 	it("re-queues a result checked against a base that has since moved", async () => {

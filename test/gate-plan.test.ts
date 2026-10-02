@@ -42,3 +42,15 @@ describe("gateFeedback", () => {
 		expect(gateFeedback({ ...base, mergeConflict: ["src/a.ts"] }, [])).toMatch(/conflicts in src\/a\.ts/);
 	});
 });
+
+describe("group gates", () => {
+	it("keeps the tests of every slice in the group", () => {
+		const slices = [slice("api", "building", ["test/api.test.ts"]), slice("ui", "building", ["test/ui.test.ts"]), slice("web", "building", ["test/web.test.ts"])];
+		expect(gateExclusions(slices, ["api", "ui"])).toEqual(["test/web.test.ts"]);
+	});
+
+	it("tells the builder which slices were merged with it", () => {
+		const text = gateFeedback({ passed: false, head: "h", baseHead: "b", results: [{ command: "npm test", exitCode: 1, output: "x" }], at: "" }, [], ["ui"]);
+		expect(text).toMatch(/depends on \(or is depended on by\) ui, so this gate merged them together/);
+	});
+});

@@ -65,6 +65,8 @@ export interface Slice extends SliceSpec {
 		at: string;
 		/** Contract tests left out because their slices weren't integrated yet. */
 		excluded: string[];
+		/** Other slices merged in the same run, when slices depend on each other (a group gate). */
+		group?: string[];
 		result?: GateResult;
 	};
 }
