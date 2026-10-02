@@ -3,6 +3,7 @@ import { fileVersion, forkAndWait, remoteFor } from "../src/artifacts";
 import worker from "../src/index";
 
 const transient = () => Object.assign(new Error("temporarily unavailable"), { status: 503 });
+const disposeSymbol = (Symbol as unknown as { dispose: symbol }).dispose;
 
 describe("Artifacts transient failures", () => {
 	it("retries token minting and returns the remote credentials", async () => {
@@ -21,7 +22,7 @@ describe("Artifacts transient failures", () => {
 		const repo = {
 			info: vi.fn(async () => ({ remote: "https://git.test/repo.git" })),
 			createToken: vi.fn(async () => ({ plaintext: "token" })),
-			[Symbol.dispose]: dispose,
+			[disposeSymbol]: dispose,
 		};
 		const artifacts = { get: vi.fn(async () => repo) } as never;
 
@@ -35,7 +36,7 @@ describe("Artifacts transient failures", () => {
 		const repo = {
 			info: vi.fn(async () => { throw failure; }),
 			createToken: vi.fn(async () => ({ plaintext: "token" })),
-			[Symbol.dispose]: dispose,
+			[disposeSymbol]: dispose,
 		};
 		const artifacts = { get: vi.fn(async () => repo) } as never;
 
