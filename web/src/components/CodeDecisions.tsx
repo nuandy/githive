@@ -27,7 +27,31 @@ function isReadyToLand(task: Task): boolean {
 	return task.phase === "building" && slices.length > 0 && slices.every((slice) => slice.status === "integrated");
 }
 
-export function CodeDecisions({ task, busy, onWaive, onLand }: CodeDecisionsProps) {
+function ChangedFiles({ diff, label }: { diff: UnifiedCodeDiff; label: string }) {
+	const omitted = new Set(diff.omitted);
+	return (
+		<div className="code-decisions__files" aria-label={`${label} changed files`}>
+			<h4>Changed files ({diff.files.length})</h4>
+			{diff.files.length > 0 ? (
+				<ul>
+					{diff.files.map((path) => (
+						<li key={path}>
+							<code>{path}</code>
+							{omitted.has(path) ? <span className="code-decisions__omitted">Diff content omitted (size limit)</span> : null}
+						</li>
+					))}
+				</ul>
+			) : <p className="muted">No changed files.</p>}
+			{diff.omitted.length > 0 ? (
+				<p className="code-decisions__omission-note" role="note">
+					Diff content for {diff.omitted.length} changed {diff.omitted.length === 1 ? "file was" : "files were"} omitted by output size limits; those paths are still included in the changed-file list above.
+				</p>
+			) : null}
+		</div>
+	);
+}
+
+export function CodeDecisions({ task, busy, onWaive, onLand, onContractFilesReady }: CodeDecisionsProps) {
 	const slices = Array.isArray(task.slices) ? task.slices : [];
 	const contracts = Array.isArray(task.contracts) ? task.contracts : [];
 	const humanSlices = slices.filter(needsHuman);
@@ -46,17 +70,26 @@ export function CodeDecisions({ task, busy, onWaive, onLand }: CodeDecisionsProp
 	useEffect(() => {
 		if (!awaitingApproval) {
 			setContractState(null);
+			onContractFilesReady(task.id, false);
 			return;
 		}
 		let active = true;
+		onContractFilesReady(task.id, false);
 		setContractState({ key: contractKey, loading: true });
 		void api.contractFiles(task.id).then((files) => {
-			if (active) setContractState({ key: contractKey, loading: false, files });
+			if (!Array.isArray(files)) throw new Error("Invalid contract files response.");
+			if (active) {
+				setContractState({ key: contractKey, loading: false, files });
+				onContractFilesReady(task.id, true);
+			}
 		}).catch((error: unknown) => {
-			if (active) setContractState({ key: contractKey, loading: false, error: message(error) });
+			if (active) {
+				setContractState({ key: contractKey, loading: false, error: message(error) });
+				onContractFilesReady(task.id, false);
+			}
 		});
 		return () => { active = false; };
-	}, [awaitingApproval, contractKey, contractRetry, task.id]);
+	}, [awaitingApproval, contractKey, contractRetry, onContractFilesReady, task.id]);
 
 	useEffect(() => {
 		let active = true;
@@ -113,7 +146,7 @@ export function CodeDecisions({ task, busy, onWaive, onLand }: CodeDecisionsProp
 					{visibleContractState?.files?.map((file, index) => (
 						<article className="code-decisions__contract" key={`${file.path}-${index}`}>
 							<h3><code>{file.path}</code></h3>
-							<pre className="code-decisions__code"><code>{file.content}</code></pre>
+							<pre className="code-decisions__code" tabIndex={0} role="region" aria-label={`Contract file ${file.path}`}><code>{file.content}</code></pre>
 						</article>
 					))}
 				</section>
@@ -127,6 +160,7 @@ export function CodeDecisions({ task, busy, onWaive, onLand }: CodeDecisionsProp
 						const key = humanKey(slice);
 						const result = diffs[slice.id]?.key === key ? diffs[slice.id] : null;
 						const reason = reasons[slice.id] ?? "";
+						const diffLoaded = !!result && !result.loading && result.error === undefined && !!result.diff;
 						return (
 							<article className="code-decisions__human" key={slice.id}>
 								<div className="code-decisions__finding">
@@ -143,7 +177,8 @@ export function CodeDecisions({ task, busy, onWaive, onLand }: CodeDecisionsProp
 										disabled={busy}
 										placeholder="Explain why this slice may proceed without review quorum"
 									/>
-									<button type="button" disabled={busy || !reason.trim()} onClick={() => {
+									<button type="button" disabled={busy || !diffLoaded || !reason.trim()} onClick={() => {
+										if (!diffLoaded) return;
 										onWaive(slice.id, reason.trim());
 										setReasons((current) => ({ ...current, [slice.id]: "" }));
 									}}>Waive review quorum</button>
@@ -155,7 +190,8 @@ export function CodeDecisions({ task, busy, onWaive, onLand }: CodeDecisionsProp
 									{result?.error ? <div className="code-decisions__error" role="alert"><p>Could not load this slice diff: {result.error}</p><button type="button" onClick={() => setDiffRetry((count) => count + 1)}>Retry diffs</button></div> : null}
 									{result?.diff ? <>
 										<p className="code-decisions__commits muted"><code>{result.diff.base}</code> → <code>{result.diff.head}</code></p>
-										<pre className="code-decisions__code code-decisions__diff-text"><code>{result.diff.unified || "(No changes in this diff.)"}</code></pre>
+										<ChangedFiles diff={result.diff} label={`${slice.title} slice diff`} />
+										<pre className="code-decisions__code code-decisions__diff-text" tabIndex={0} role="region" aria-label={`Unified diff for slice ${slice.title}`}><code>{result.diff.unified || "(No changes in this diff.)"}</code></pre>
 									</> : null}
 								</div>
 							</article>
@@ -176,7 +212,8 @@ export function CodeDecisions({ task, busy, onWaive, onLand }: CodeDecisionsProp
 					{visibleLandingState?.error ? <p className="code-decisions__error" role="alert">Could not load the task diff: {visibleLandingState.error}</p> : null}
 					{visibleLandingState?.diff ? <>
 						<p className="code-decisions__commits muted">Project <code>{visibleLandingState.diff.base}</code> → task <code>{visibleLandingState.diff.head}</code></p>
-						<pre className="code-decisions__code code-decisions__diff-text"><code>{visibleLandingState.diff.unified || "(No changes in this diff.)"}</code></pre>
+						<ChangedFiles diff={visibleLandingState.diff} label="Landing diff" />
+						<pre className="code-decisions__code code-decisions__diff-text" tabIndex={0} role="region" aria-label="Unified task diff for landing"><code>{visibleLandingState.diff.unified || "(No changes in this diff.)"}</code></pre>
 						<button className="primary code-decisions__land" type="button" onClick={onLand} disabled={busy || !canLand}>Confirm land</button>
 					</> : null}
 				</section>

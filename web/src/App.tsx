@@ -110,6 +110,7 @@ export function App() {
 	const [reposLoaded, setReposLoaded] = useState(false);
 	const [creating, setCreating] = useState(false);
 	const [busy, setBusy] = useState(false);
+	const [contractReadiness, setContractReadiness] = useState<{ taskId: string; contractsKey: string; ready: boolean } | null>(null);
 	const [errors, setErrors] = useState<string[]>([]);
 	const selectedRef = useRef(selectedId);
 	selectedRef.current = selectedId;
@@ -188,6 +189,15 @@ export function App() {
 	const selectedTask = live?.task.id === selectedId
 		? live.task
 		: tasks.find((task) => task.id === selectedId) ?? null;
+	const selectedContractsKey = selectedTask ? JSON.stringify(selectedTask.contracts) : "";
+	const contractsReady = !!selectedTask && selectedTask.phase === "awaiting-approval"
+		&& contractReadiness?.taskId === selectedTask.id
+		&& contractReadiness.contractsKey === selectedContractsKey
+		&& contractReadiness.ready;
+	const onContractFilesReady = useCallback((taskId: string, ready: boolean) => {
+		if (selectedTask?.id !== taskId) return;
+		setContractReadiness({ taskId, contractsKey: selectedContractsKey, ready });
+	}, [selectedContractsKey, selectedTask?.id]);
 
 	const createTask = useCallback(async (repo: string, goal: string) => {
 		setCreating(true);
@@ -216,6 +226,8 @@ export function App() {
 
 	const runAction = useCallback(async (action: DashboardShellAction) => {
 		if (!selectedTask || busy) return;
+		// Keep the shell action guarded independently of the disabled approval button.
+		if (action === "approve-build" && !contractsReady) return;
 		const id = selectedTask.id;
 		const operation = action === "approve-build" ? "Approve and build" : action === "plan" ? "Plan" : "Land";
 		setBusy(true);
@@ -229,7 +241,7 @@ export function App() {
 			await refresh();
 			setBusy(false);
 		}
-	}, [busy, clearError, refresh, reportError, selectedTask]);
+	}, [busy, clearError, contractsReady, refresh, reportError, selectedTask]);
 
 	const waiveSlice = useCallback(async (sliceId: string, reason: string) => {
 		if (!selectedTask || busy) return;
@@ -286,6 +298,7 @@ export function App() {
 									task={selectedTask}
 									plannerRunning={plannerRunning}
 									busy={busy}
+									contractsReady={contractsReady}
 									onPlan={() => void runAction("plan")}
 									onApproveAndBuild={() => void runAction("approve-build")}
 								/>
@@ -295,6 +308,7 @@ export function App() {
 									busy={busy}
 									onWaive={(sliceId, reason) => void waiveSlice(sliceId, reason)}
 									onLand={() => void runAction("land")}
+									onContractFilesReady={onContractFilesReady}
 								/>
 								{showingLive && <SliceLanes live={showingLive} />}
 								<MergeAheadMatrix task={selectedTask} />

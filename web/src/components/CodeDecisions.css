@@ -14,7 +14,14 @@
 .code-decisions__reason-label { display: block; margin: 14px 0 5px; font-size: 13px; font-weight: 600; }
 .code-decisions__finding textarea { display: block; width: 100%; min-height: 72px; margin-bottom: 8px; resize: vertical; }
 .code-decisions__waiver-note { font-size: 12px; }
+.code-decisions__files { margin: 8px 0 10px; min-width: 0; }
+.code-decisions__files h4 { margin: 8px 0 5px; font-size: 13px; }
+.code-decisions__files ul { margin: 0; padding-left: 22px; }
+.code-decisions__files li { margin: 3px 0; overflow-wrap: anywhere; }
+.code-decisions__omitted { display: inline-block; margin-left: 8px; color: var(--bad); font-size: 12px; }
+.code-decisions__omission-note { margin: 6px 0 !important; color: var(--bad); font-size: 12px; overflow-wrap: anywhere; }
 .code-decisions__code {
+  display: block;
   max-width: 100%;
   max-height: 560px;
   margin: 0;
@@ -29,6 +36,7 @@
   white-space: pre;
 }
 .code-decisions__code code { font: inherit; }
+.code-decisions__code:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; }
 .code-decisions__diff-text { max-height: 620px; }
 .code-decisions__commits { margin: 6px 0 !important; overflow-wrap: anywhere; font-size: 12px; }
 .code-decisions__commits code { overflow-wrap: anywhere; }
