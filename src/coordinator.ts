@@ -5,6 +5,8 @@ import { fail, statusOf } from "./errors";
 import { Workspace } from "./git";
 import { blueprintProblems } from "./blueprint";
 import { decideAmendment } from "./contract-owner";
+import type { GateJob } from "./gate";
+import { gateExclusions, gateFeedback, type GateResult } from "./gate-plan";
 import type { BuildJob } from "./builder";
 import type { ReviewJob } from "./reviewer";
 import { plan } from "./planner";
@@ -20,6 +22,9 @@ import {
 	type SliceCredentials,
 	type Task,
 } from "./types";
+
+const conflictMessage = (files: string[]) =>
+	`Review approved your slice, but it conflicts with work already integrated into the task base, in ${files.join(", ")}. Call fetch_base, merge it with \`git merge base/main\`, resolve the conflicts inside your lane, run your tests, then commit_and_push and finish.`;
 
 /** Times a slice can go back to its builder before it waits for a human. */
 const MAX_REVISIONS = 3;
@@ -78,6 +83,7 @@ export class Coordinator extends DurableObject<Env> {
 				goal,
 				phase: "planning",
 				contracts: [],
+				verify: [],
 				review: DEFAULT_POLICY,
 				slices: [],
 				checks: [],
@@ -145,6 +151,7 @@ export class Coordinator extends DurableObject<Env> {
 				reviews: [],
 			}));
 			task.contracts = Object.keys(contracts ?? {});
+			task.verify = (blueprint.verify ?? []).filter((c) => c.trim());
 			task.review = review;
 			task.phase = "awaiting-approval";
 			await this.ctx.storage.put("contracts", contracts ?? {});
@@ -213,6 +220,7 @@ export class Coordinator extends DurableObject<Env> {
 						slice: { id: slice.id, title: slice.title, owns: slice.owns, instructions: slice.instructions, tests: slice.tests },
 						siblings: task.slices.filter((s) => s !== slice).map(({ id, title, owns }) => ({ id, title, owns })),
 						contracts: task.contracts,
+						verify: task.verify,
 						repo: slice.repo!,
 						remote: remote.url,
 						token: remote.token,
@@ -359,6 +367,7 @@ export class Coordinator extends DurableObject<Env> {
 						slice: { id: slice.id, title: slice.title, owns: slice.owns, instructions: slice.instructions, tests: slice.tests },
 						siblings: task.slices.filter((s) => s !== slice).map(({ id, title, owns }) => ({ id, title, owns })),
 						contracts: task.contracts,
+						verify: task.verify,
 						repo: slice.repo!,
 						remote: remote.url,
 						token: remote.token,
@@ -478,13 +487,7 @@ export class Coordinator extends DurableObject<Env> {
 			const step = nextStep(task.review, slice);
 			try {
 				if (step === "integrate") {
-					const result = await this.integrateSlice(task, slice);
-					if (!result.ok)
-						await this.sendBack(
-							task,
-							slice,
-							`Review approved your slice, but it conflicts with work already integrated into the task base, in ${result.files.join(", ")}. Call fetch_base, merge it with \`git merge base/main\`, resolve the conflicts inside your lane, run your tests, push, and call finish again.`,
-						);
+					await this.integrateOrGate(task, slice);
 				} else if (step === "send-back") {
 					await this.sendBack(task, slice, reviewFeedback(task.review, slice));
 				}
@@ -508,6 +511,76 @@ export class Coordinator extends DurableObject<Env> {
 			if (!result.ok) fail(409, `conflicts with base: ${result.files.join(", ")}`);
 			await this.save(task);
 			return task;
+		});
+	}
+
+	/**
+	 * An approved slice: integrate it directly when the task has no verify commands;
+	 * otherwise run the integration gate first. Each commit is gated once, so a
+	 * late approving vote doesn't start a second run.
+	 */
+	private async integrateOrGate(task: Task, slice: Slice) {
+		if (!task.verify.length) {
+			const result = await this.integrateSlice(task, slice);
+			if (!result.ok) await this.sendBack(task, slice, conflictMessage(result.files));
+			return;
+		}
+		if (slice.gate?.head === slice.reviewHead) return;
+		await this.startGate(task, slice);
+	}
+
+	private async startGate(task: Task, slice: Slice) {
+		const head = slice.reviewHead!;
+		const baseHead = (await headOf(this.env.ARTIFACTS, task.baseRepo!))!;
+		const exclude = gateExclusions(task.slices, slice.id);
+		const [base, fork] = await Promise.all([
+			remoteFor(this.env.ARTIFACTS, task.baseRepo!, "read", 3600),
+			remoteFor(this.env.ARTIFACTS, slice.repo!, "read", 3600),
+		]);
+		slice.gate = { status: "running", head, baseHead, at: new Date().toISOString(), excluded: exclude };
+		const job: GateJob = {
+			taskId: task.id,
+			slice: slice.id,
+			head,
+			baseHead,
+			base: { remote: base.url, token: base.token },
+			fork: { remote: fork.url, token: fork.token },
+			checks: task.verify,
+			exclude,
+		};
+		await this.env.GATE.getByName(`${slice.repo}--gate--${head.slice(0, 12)}--${baseHead.slice(0, 12)}`).start(job);
+	}
+
+	/**
+	 * The gate reports back. A pass integrates the slice; a failure sends it
+	 * back with the failing output. A result checked against a base that has
+	 * since moved (another slice integrated) is discarded and the gate re-runs.
+	 */
+	gateResult(sliceId: string, result: GateResult, excluded: string[]) {
+		return this.exclusive(async () => {
+			const task = await this.load();
+			const slice = this.slice(task, sliceId);
+			if (slice.status !== "building" || slice.gate?.head !== result.head || slice.reviewHead !== result.head)
+				return { outcome: "stale" as const };
+			const baseHead = await headOf(this.env.ARTIFACTS, task.baseRepo!);
+			if (baseHead !== result.baseHead) {
+				await this.startGate(task, slice);
+				await this.save(task);
+				return { outcome: "rerun" as const };
+			}
+			slice.gate = { ...slice.gate, status: result.passed ? "passed" : "failed", result, at: new Date().toISOString() };
+			try {
+				if (result.passed) {
+					const merged = await this.integrateSlice(task, slice);
+					if (!merged.ok) await this.sendBack(task, slice, conflictMessage(merged.files));
+				} else {
+					await this.sendBack(task, slice, gateFeedback(result, excluded));
+				}
+			} catch (err) {
+				slice.attention = `after the gate: ${statusOf(err).message}`;
+			}
+			await this.save(task);
+			return { outcome: result.passed ? ("passed" as const) : ("failed" as const) };
 		});
 	}
 

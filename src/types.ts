@@ -1,3 +1,5 @@
+import type { GateResult } from "./gate-plan";
+
 // Domain model. A task is one feature request against a project repo. A planner
 // (human or agent) turns it into a blueprint: contract files committed up front,
 // plus slices that agents build in parallel, each on its own Artifacts fork.
@@ -49,6 +51,16 @@ export interface Slice extends SliceSpec {
 	attention?: string;
 	/** The findings that last sent the slice back; the next review checks them. */
 	lastFeedback?: string;
+	/** The integration gate's run for the approved commit. */
+	gate?: {
+		status: "running" | "passed" | "failed";
+		head: string;
+		baseHead: string;
+		at: string;
+		/** Contract tests left out because their slices weren't integrated yet. */
+		excluded: string[];
+		result?: GateResult;
+	};
 }
 
 export interface Blueprint {
@@ -59,6 +71,8 @@ export interface Blueprint {
 	review?: ReviewPolicy;
 	/** Why the work is split this way, for the human approving it. */
 	rationale?: string;
+	/** Commands that verify the combined code before a slice integrates (the integration gate). */
+	verify?: string[];
 }
 
 export interface PlannerRun {
@@ -143,6 +157,8 @@ export interface Task {
 	/** Commit on the base that slices forked from. */
 	baseCommit?: string;
 	contracts: string[];
+	/** Commands the integration gate runs on the combined code. Empty: integrate on approval. */
+	verify: string[];
 	review: ReviewPolicy;
 	slices: Slice[];
 	checks: MergeCheck[];

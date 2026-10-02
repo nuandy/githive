@@ -3,7 +3,10 @@ import OpenAI from "openai";
 import type { ResponseInputItem } from "openai/resources/responses/responses";
 import { z } from "zod";
 import { MODEL, addUsage, assertComplete, emptyUsage, openAITools, runCalls, tool, type AgentTool, type Usage } from "./agent";
+import { COMMAND_TIMEOUT_S, WORKDIR, bootContainer, clip, gitWithToken, run } from "./container";
 import type { SliceSpec } from "./types";
+
+export { WORKDIR, clip };
 
 // Base for agents that work in their own Linux container on a clone of one
 // Artifacts repo: builders and reviewers. It owns the container lifecycle, the
@@ -14,12 +17,9 @@ import type { SliceSpec } from "./types";
 // invocations. Git credentials never enter the container's files or
 // environment: the token is passed only on the git commands run here.
 
-const IMAGE = "cloudflare/debian-trixie";
-export const WORKDIR = "/work";
 const RUN_BUDGET_MS = 8 * 60_000; // per alarm, well under the alarm wall-clock limit
 const MAX_TURNS = 80;
 const MAX_NUDGES = 3;
-const COMMAND_TIMEOUT_S = 300;
 const MAX_LINES = 400;
 const LOG_LIMIT = 200;
 
@@ -36,6 +36,8 @@ export interface SandboxJob {
 /** A job about one slice of a task: what builders and reviewers share. */
 export interface SliceJob extends SandboxJob {
 	goal: string;
+	/** Commands the integration gate runs on the combined code. */
+	verify?: string[];
 	slice: SliceSpec;
 	siblings: Pick<SliceSpec, "id" | "title" | "owns">[];
 	contracts: string[];
@@ -52,6 +54,7 @@ Slice: ${job.slice.title} (${job.slice.id})
 Lane (the only paths this slice may change): ${job.slice.owns.join(", ")}
 Contract files, committed before work started (they change only through approved amendments): ${job.contracts.join(", ") || "none"}
 Acceptance tests for this slice: ${tests}
+Before the slice is integrated, the combined code (this slice merged with everything integrated so far) must pass: ${job.verify?.length ? job.verify.join("; ") : "no extra checks"}
 Other slices being built at the same time:
 ${job.siblings.map((s) => `- ${s.id}: ${s.title} (owns ${s.owns.join(", ")})`).join("\n") || "- none"}
 
@@ -89,14 +92,6 @@ export function repoPath(path: string) {
 	const clean = path.replace(/^\.\//, "");
 	if (!clean || clean.startsWith("/") || clean.split("/").includes("..")) throw new Error(`path must stay inside the repository: ${path}`);
 	return clean;
-}
-
-/** Keep the start and end of long output; the end usually holds the error. */
-export function clip(text: string, limit = 12_000) {
-	if (text.length <= limit) return text;
-	const head = text.slice(0, 2_000);
-	const tail = text.slice(-(limit - 2_000));
-	return `${head}\n…(${text.length - limit} characters omitted)…\n${tail}`;
 }
 
 export abstract class SandboxAgent<J extends SandboxJob, S extends AgentState> extends DurableObject<Env> {
@@ -233,12 +228,8 @@ export abstract class SandboxAgent<J extends SandboxJob, S extends AgentState> e
 		const container = this.ctx.container;
 		if (!container) throw new Error(`no container is configured for ${this.kind}`);
 		const restart = state.status === "working";
-		if (!container.running)
-			container.start({ image: IMAGE, entrypoint: ["sleep", "infinity"], enableInternet: true, instance: "standard-1" });
 		this.note(state, restart ? "container restarted; re-cloning" : "starting container");
-		// WORKDIR doesn't exist until the clone, so setup runs from /.
-		const apt = await this.exec(["bash", "-lc", "apt-get update -qq && apt-get install -y -qq git ca-certificates >/dev/null"], "/");
-		if (apt.exitCode !== 0) throw new Error(`installing git failed: ${clip(apt.output, 2_000)}`);
+		await bootContainer(container);
 		const clone = await this.git(job, ["clone", "--quiet", job.remote, WORKDIR], "/");
 		if (clone.exitCode !== 0) throw new Error(`clone failed: ${clip(clone.output, 2_000)}`);
 		await this.afterClone(job, state);
@@ -250,25 +241,13 @@ export abstract class SandboxAgent<J extends SandboxJob, S extends AgentState> e
 			];
 	}
 
-	protected async exec(cmd: string[], cwd = WORKDIR, stdin?: string) {
-		// `timeout` runs the command in its own process group and kills all of it,
-		// so commands like `npm test` can't outlive their limit.
-		// Note: exec() reports a missing `cwd` as "command not found".
-		const process = await this.ctx.container!.exec(["timeout", "-s", "KILL", String(COMMAND_TIMEOUT_S), ...cmd], {
-			cwd,
-			stderr: "combined",
-			stdin: stdin === undefined ? undefined : new Response(stdin).body!,
-			env: { HOME: "/root", CI: "true", npm_config_update_notifier: "false" },
-		});
-		const result = await process.output();
-		const output = new TextDecoder().decode(result.stdout);
-		return { exitCode: result.exitCode, output: result.exitCode === 137 ? `${output}\n(killed after ${COMMAND_TIMEOUT_S}s)` : output };
+	protected exec(cmd: string[], cwd = WORKDIR, stdin?: string) {
+		return run(this.ctx.container!, cmd, cwd, stdin);
 	}
 
 	/** Run git with a token (the job's, by default) on this one command only. */
 	protected git(job: J, args: string[], cwd = WORKDIR, token = job.token) {
-		const secret = token.split("?expires=")[0];
-		return this.exec(["git", "-c", `http.extraHeader=Authorization: Bearer ${secret}`, ...args], cwd);
+		return gitWithToken(this.ctx.container!, token, args, cwd);
 	}
 
 	protected coordinator(job: J) {

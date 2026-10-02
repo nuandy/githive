@@ -32,7 +32,7 @@ When a builder finishes, its slice goes to review. One `Reviewer` per role (the 
 
 What happens after a vote is automatic:
 
-- **Approved:** the slice is integrated into the task base right away. If it conflicts with work already integrated, it goes back to its builder, which can `fetch_base`, merge, and finish again.
+- **Approved:** the slice goes through the **integration gate** (semantic Merge-ahead). A `Gate` container merges the slice onto the current task base and runs the task's `verify` commands, which the planner picks from the repo's scripts (for example `npm ci`, `npm test`, `npm run typecheck`). Contract tests that belong only to slices not yet integrated are left out, since they can't pass yet. A pass integrates the slice. A failure goes back to the builder with the failing output, like a rejection, and the builder fixes it in its lane or proposes a contract amendment. If another slice integrates while a gate runs, the result is discarded and the gate re-runs on the new base. Tasks without `verify` commands integrate on approval.
 - **Rejected or vetoed:** the rejecting reviewers' findings and evidence go back to the slice's builder. The builder resumes the same conversation in a fresh container, fixes the problems, pushes and finishes, which starts a new review. The slice's other reviewers are cancelled, since their votes would be on a stale commit. After 3 revisions, the slice is flagged for a human (`attention` on the slice).
 
 **Contract amendments.** Contracts are frozen for builders, but a contract can turn out to be wrong, or to contradict a review finding. A builder can then call `propose_contract_change` with the new file content and its reason. A contract owner agent weighs the change against the task goal and every slice's lane and tests, and approves or rejects it with a reason. An approved change is committed to the task base: the proposer merges it with `fetch_base`, and other slices' running builders are told to do the same. Reviewers judge slices against the amended contracts. Every amendment is recorded in `task.amendments`. If a slice is sent back and its builder finishes without a new commit, it is flagged for a human instead of being reviewed again.
@@ -80,7 +80,7 @@ npm run types       # regenerate worker-configuration.d.ts after editing wrangle
 ## Known gaps
 
 - **Push events.** Artifacts `pushed` events are per-repo subscriptions, so forks created at runtime aren't covered by a static subscription. For now, builders report pushes via `POST .../pushed`. The queue consumer handles any repo that does have a subscription.
-- **Semantic conflicts.** Merge-ahead detects text conflicts. Running tests on each clean merge in a Sandbox is still to do.
+- **Semantic conflicts during the build.** Every push is checked for text conflicts; changes that merge cleanly but break together are caught at the integration gate, not while slices are still being built.
 
 ## License
 
