@@ -27,10 +27,10 @@ export interface ActivityItem {
   event: string;
 }
 
-export function getSliceStage(slice: Task["slices"][number]): SliceStageInfo;
-export function buildMergeMatrix(task: Task): MergeMatrix;
-export function mergeActivity(agents: Live["agents"], includeCommands?: boolean): ActivityItem[];
-export function newestTasks(tasks: Task[]): Task[];
+export declare function getSliceStage(slice: Task["slices"][number]): SliceStageInfo;
+export declare function buildMergeMatrix(task: Task): MergeMatrix;
+export declare function mergeActivity(agents: Live["agents"], includeCommands?: boolean): ActivityItem[];
+export declare function newestTasks(tasks: Task[]): Task[];
 
 export interface DashboardSidebarProps {
   tasks: Task[];
