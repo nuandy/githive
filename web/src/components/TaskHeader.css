@@ -1,0 +1,9 @@
+.task-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; }
+.task-header__copy { min-width: 0; }
+.task-header__meta { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.task-header h1 { margin: 9px 0 0; font-size: clamp(20px, 3vw, 28px); line-height: 1.2; overflow-wrap: anywhere; }
+.task-header__action { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 8px; flex-shrink: 0; }
+@media (max-width: 600px) {
+  .task-header { flex-direction: column; gap: 12px; padding: 12px; }
+  .task-header__action { justify-content: flex-start; }
+}

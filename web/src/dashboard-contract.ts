@@ -53,3 +53,40 @@ export interface PlanPanelProps { task: Task }
 export interface SliceLanesProps { live: Live }
 export interface MergeAheadMatrixProps { task: Task }
 export interface ActivityFeedProps { agents: Live["agents"] }
+
+/** Injected I/O surface used by the dashboard shell and its orchestration tests. */
+export interface DashboardShellApi {
+  tasks(): Promise<Task[]>;
+  repos(): Promise<{ name: string }[]>;
+  live(id: string): Promise<Live>;
+  create(repo: string, goal: string): Promise<Task>;
+  plan(id: string): Promise<Task>;
+  approve(id: string): Promise<unknown>;
+  build(id: string): Promise<unknown>;
+  land(id: string): Promise<Task>;
+}
+
+export type DashboardShellAction = "plan" | "approve-build" | "land";
+export interface DashboardTimerScheduler {
+  setInterval(callback: () => void, milliseconds: number): number;
+  clearInterval(timer: number): void;
+}
+
+export declare function taskIdFromHash(hash: string): string | null;
+export declare function createTaskAndPlan(api: DashboardShellApi, repo: string, goal: string): Promise<Task>;
+export declare function runDashboardAction(api: DashboardShellApi, id: string, action: DashboardShellAction): Promise<void>;
+export declare function startDashboardPolling(
+  id: string,
+  getSelectedId: () => string | null,
+  api: Pick<DashboardShellApi, "live">,
+  onLive: (live: Live) => void,
+  onError: (error: unknown) => void,
+  scheduler?: DashboardTimerScheduler,
+): () => void;
+export declare function startTaskListPolling(
+  fetchTasks: () => void,
+  scheduler?: DashboardTimerScheduler,
+): () => void;
+export declare function recordDashboardError(errors: string[], operation: string, error: unknown): string[];
+export declare function clearDashboardError(errors: string[], operation: string): string[];
+export declare const defaultDashboardScheduler: DashboardTimerScheduler;
