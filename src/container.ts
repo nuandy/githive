@@ -1,6 +1,8 @@
 // Shared helpers for Durable Objects that run work in a Linux container:
 // agents (builders, reviewers) and the integration gate.
 
+import { retryTransient } from "./retry";
+
 export const IMAGE = "cloudflare/debian-trixie";
 export const WORKDIR = "/work";
 export const COMMAND_TIMEOUT_S = 300;
@@ -31,10 +33,74 @@ export async function run(container: Container, cmd: string[], cwd = WORKDIR, st
 	return { exitCode: result.exitCode, output: result.exitCode === 137 ? `${output}\n(killed after ${timeoutS}s)` : output };
 }
 
-/** Run git with a token on this one command only; it never lands in files or the environment. */
-export function gitWithToken(container: Container, token: string, args: string[], cwd = WORKDIR) {
+/**
+ * Run git with a token on this one command only; it never lands in files or the environment.
+ * Network commands retain their result shape even when a transient failure persists, so
+ * callers can report the final command's exit code and output to the builder.
+ */
+export async function gitWithToken(container: Container, token: string, args: string[], cwd = WORKDIR) {
 	const secret = token.split("?expires=")[0];
-	return run(container, ["git", "-c", `http.extraHeader=Authorization: Bearer ${secret}`, ...args], cwd);
+	const command = ["git", "-c", `http.extraHeader=Authorization: Bearer ${secret}`, ...args];
+	if (!isNetworkGitCommand(args)) return run(container, command, cwd);
+
+	let attempts = 0;
+	const cloneDir = args[0] === "clone" ? cloneDirectory(args) : undefined;
+	try {
+		return await retryTransient(async () => {
+			// A failed CLI clone can leave a partial target that prevents a second
+			// `git clone` from starting. Clean only an explicit clone destination.
+			if (attempts++ > 0 && cloneDir) await run(container, ["rm", "-rf", "--", cloneDir], cwd);
+			const result = await run(container, command, cwd);
+			if (result.exitCode !== 0 && isTransientGitOutput(result.output)) {
+				throw Object.assign(new Error("Transient Git transport failure"), {
+					statusCode: 503,
+					commandResult: result,
+				});
+			}
+			return result;
+		});
+	} catch (err) {
+		const result = (err as { commandResult?: Awaited<ReturnType<typeof run>> } | null)?.commandResult;
+		if (result) return result;
+		throw err;
+	}
+}
+
+function isNetworkGitCommand(args: string[]) {
+	return args[0] === "clone" || args[0] === "fetch" || args[0] === "push";
+}
+
+function cloneDirectory(args: string[]) {
+	const positional: string[] = [];
+	const valueOptions = new Set([
+		"-b", "--branch", "-o", "--origin", "--depth", "--shallow-since", "--shallow-exclude",
+		"--reference", "--reference-if-able", "--separate-git-dir", "--upload-pack", "-u", "-c",
+		"--config", "--server-option",
+	]);
+	let positionalOnly = false;
+	for (let i = 1; i < args.length; i++) {
+		const arg = args[i];
+		if (positionalOnly || !arg.startsWith("-")) {
+			positional.push(arg);
+			continue;
+		}
+		if (arg === "--") {
+			positionalOnly = true;
+			continue;
+		}
+		if (valueOptions.has(arg)) i++;
+	}
+	// The destination is optional in git clone; don't guess or remove anything
+	// in that case (Git chooses a directory based on the URL).
+	return positional.length >= 2 ? positional[positional.length - 1] : undefined;
+}
+
+/** Only retry recognizable transport errors; local and permanent Git failures pass through. */
+function isTransientGitOutput(output: string) {
+	return /\bHTTP(?:\/\d(?:\.\d)?)?\s+(?:408|429|5\d\d)\b/i.test(output)
+		|| /returned error:\s*(?:408|429|5\d\d)\b/i.test(output)
+		|| /\b(?:could not resolve (?:host|proxy)|failed to connect|connection (?:timed out|reset|refused)|operation timed out|network is unreachable|temporary failure in name resolution|recv failure|send failure|remote end hung up unexpectedly|unexpected disconnect|early eof)\b/i.test(output)
+		|| /\bcurl\s*\(?\s*(?:7|28|35|52|56)\)?\b/i.test(output);
 }
 
 /** Keep the start and end of long output; the end usually holds the error. */
