@@ -39,11 +39,15 @@ export function buildMergeMatrix(task: Task): MergeMatrix {
           return latest;
         }, undefined);
 
-      if (!newest) return { row, column, status: "unchecked", files: [] };
+      const integratedPair = task.slices.some(
+        (slice) => slice.status === "integrated" && (slice.id === row || slice.id === column),
+      );
+
+      if (!newest) return { row, column, status: integratedPair ? "integrated" : "unchecked", files: [] };
       return {
         row,
         column,
-        status: newest.status,
+        status: integratedPair ? "integrated" : newest.status,
         files: [...newest.files],
         checkedAt: newest.checkedAt,
       };
