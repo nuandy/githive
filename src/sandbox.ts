@@ -50,7 +50,7 @@ export function sliceContext(job: SliceJob) {
 
 Slice: ${job.slice.title} (${job.slice.id})
 Lane (the only paths this slice may change): ${job.slice.owns.join(", ")}
-Contract files, committed before work started and not to be modified: ${job.contracts.join(", ") || "none"}
+Contract files, committed before work started (they change only through approved amendments): ${job.contracts.join(", ") || "none"}
 Acceptance tests for this slice: ${tests}
 Other slices being built at the same time:
 ${job.siblings.map((s) => `- ${s.id}: ${s.title} (owns ${s.owns.join(", ")})`).join("\n") || "- none"}
@@ -141,7 +141,7 @@ export abstract class SandboxAgent<J extends SandboxJob, S extends AgentState> e
 			...this.freshFields(),
 		} as unknown as S; // base fields + the subclass's fields make a full S
 		await this.ctx.storage.put("job", job);
-		await this.ctx.storage.delete("cancel");
+		await this.ctx.storage.delete(["cancel", "inbox"]);
 		await this.save(fresh);
 		await this.ctx.storage.setAlarm(Date.now());
 		return this.view(fresh);
@@ -157,6 +157,25 @@ export abstract class SandboxAgent<J extends SandboxJob, S extends AgentState> e
 		if (!state || (state.status !== "queued" && state.status !== "working")) return false;
 		await this.ctx.storage.put("cancel", reason);
 		return true;
+	}
+
+	/**
+	 * Leave a message for a running agent; it reads it at its next turn. Returns
+	 * false when the agent isn't running, so the caller can handle that case.
+	 */
+	async notify(message: string) {
+		const { state } = await this.load();
+		if (!state || (state.status !== "queued" && state.status !== "working")) return false;
+		const inbox = (await this.ctx.storage.get<string[]>("inbox")) ?? [];
+		await this.ctx.storage.put("inbox", [...inbox, message]);
+		return true;
+	}
+
+	private async drainInbox(): Promise<ResponseInputItem[]> {
+		const inbox = (await this.ctx.storage.get<string[]>("inbox")) ?? [];
+		if (!inbox.length) return [];
+		await this.ctx.storage.delete("inbox");
+		return inbox.map((text) => ({ role: "user" as const, content: text }));
 	}
 
 	private async cancelled(state: S) {
@@ -309,7 +328,10 @@ export abstract class SandboxAgent<J extends SandboxJob, S extends AgentState> e
 		if (state.turns >= MAX_TURNS) throw new Error(`stopped after ${MAX_TURNS} turns without finishing`);
 		const client = new OpenAI({ apiKey: this.env.OPENAI_API_KEY });
 		const tools = this.tools(job, state);
-		const input: ResponseInputItem[] = state.previousResponseId ? (state.pending ?? []) : [{ role: "user", content: this.kickoff(job) }];
+		const input: ResponseInputItem[] = [
+			...(state.previousResponseId ? (state.pending ?? []) : [{ role: "user" as const, content: this.kickoff(job) }]),
+			...(await this.drainInbox()),
+		];
 		const response = await client.responses.create({
 			model: MODEL,
 			instructions: this.instructions(job),

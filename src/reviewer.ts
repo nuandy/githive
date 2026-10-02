@@ -19,6 +19,8 @@ export interface ReviewJob extends SliceJob {
 	revision?: number;
 	/** The findings that sent it back last time, which this review must check. */
 	priorFindings?: string;
+	/** Contract changes approved during the build. */
+	amendments?: { path: string; reason: string }[];
 }
 
 export interface ReviewerState extends AgentState {
@@ -61,6 +63,13 @@ ${sliceContext(job)}
 
 The builder's summary of its work: ${job.buildSummary ?? "none given"}
 ${
+	job.amendments?.length
+		? `
+Contracts were amended during the build (approved by the contract owner). Judge the slice against the amended versions:
+${job.amendments.map((a) => `- ${a.path}: ${a.reason}`).join("\n")}
+`
+		: ""
+}${
 	job.priorFindings
 		? `
 This is revision ${job.revision}. The previous review sent the slice back with these findings:

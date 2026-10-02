@@ -35,6 +35,8 @@ What happens after a vote is automatic:
 - **Approved:** the slice is integrated into the task base right away. If it conflicts with work already integrated, it goes back to its builder, which can `fetch_base`, merge, and finish again.
 - **Rejected or vetoed:** the rejecting reviewers' findings and evidence go back to the slice's builder. The builder resumes the same conversation in a fresh container, fixes the problems, pushes and finishes, which starts a new review. The slice's other reviewers are cancelled, since their votes would be on a stale commit. After 3 revisions, the slice is flagged for a human (`attention` on the slice).
 
+**Contract amendments.** Contracts are frozen for builders, but a contract can turn out to be wrong, or to contradict a review finding. A builder can then call `propose_contract_change` with the new file content and its reason. A contract owner agent weighs the change against the task goal and every slice's lane and tests, and approves or rejects it with a reason. An approved change is committed to the task base: the proposer merges it with `fetch_base`, and other slices' running builders are told to do the same. Reviewers judge slices against the amended contracts. Every amendment is recorded in `task.amendments`. If a slice is sent back and its builder finishes without a new commit, it is flagged for a human instead of being reviewed again.
+
 Landing the finished task on the project repo stays a manual step: `POST /tasks/:id/land`.
 
 Each slice lists the contract tests it must make pass. Builders and reviewers run those, because another slice's contract tests can fail until that slice is integrated.

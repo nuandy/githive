@@ -113,6 +113,23 @@ export interface MergeCheck {
 	checkedAt: string;
 }
 
+/** A proposed change to a contract file, decided by the contract owner. */
+export interface Amendment {
+	id: string;
+	/** The slice whose builder proposed it. */
+	slice: string;
+	path: string;
+	reason: string;
+	content: string;
+	status: "pending" | "approved" | "rejected" | "failed";
+	/** The contract owner's reason, or the error for a failed decision. */
+	decision?: string;
+	/** Commit on the task base that applied an approved amendment. */
+	commit?: string;
+	at: string;
+	decidedAt?: string;
+}
+
 export interface Task {
 	id: string;
 	/** Project repo the task lands on. */
@@ -129,6 +146,7 @@ export interface Task {
 	review: ReviewPolicy;
 	slices: Slice[];
 	checks: MergeCheck[];
+	amendments?: Amendment[];
 	createdAt: string;
 }
 

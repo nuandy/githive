@@ -47,6 +47,7 @@ app.get("/", (c) =>
 			"POST /tasks/:id/slices/:slice/reviews {reviewer, head, verdict, summary, evidence?}",
 			"POST /tasks/:id/slices/:slice/integrate",
 			"POST /tasks/:id/land",
+			"(contract amendments are proposed by builders; see task.amendments)",
 		],
 	}),
 );

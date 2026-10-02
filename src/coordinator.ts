@@ -4,12 +4,14 @@ import { baseRepoName, forkAndWait, headOf, remoteFor, reviewerName, sliceRepoNa
 import { fail, statusOf } from "./errors";
 import { Workspace } from "./git";
 import { blueprintProblems } from "./blueprint";
+import { decideAmendment } from "./contract-owner";
 import type { BuildJob } from "./builder";
 import type { ReviewJob } from "./reviewer";
 import { plan } from "./planner";
 import { nextStep, reviewFeedback, tally } from "./quorum";
 import {
 	DEFAULT_POLICY,
+	type Amendment,
 	type Blueprint,
 	type MergeCheck,
 	type Review,
@@ -79,6 +81,7 @@ export class Coordinator extends DurableObject<Env> {
 				review: DEFAULT_POLICY,
 				slices: [],
 				checks: [],
+				amendments: [],
 				createdAt: new Date().toISOString(),
 			};
 			await this.save(task);
@@ -365,6 +368,7 @@ export class Coordinator extends DurableObject<Env> {
 						buildSummary: slice.buildSummary,
 						revision: slice.revisions ?? 0,
 						priorFindings: slice.revisions ? slice.lastFeedback : undefined,
+						amendments: (task.amendments ?? []).filter((a) => a.status === "approved").map(({ path, reason }) => ({ path, reason })),
 					};
 					await this.env.REVIEWER.getByName(reviewerName(slice.repo!, role, head)).start(job);
 				}),
@@ -378,6 +382,82 @@ export class Coordinator extends DurableObject<Env> {
 			const startedRoles = reviewers.filter((_, i) => started[i].status === "fulfilled");
 			return { head, reviewers: startedRoles, failed, escalated: false };
 		});
+	}
+
+	/**
+	 * Contract amendments. A builder proposes a new version of a contract file;
+	 * the contract owner agent decides; an approved change is committed to the
+	 * task base and the builders of other running slices are told. The decision
+	 * runs outside the lock, so pushes and votes aren't held up meanwhile.
+	 */
+	async proposeAmendment(sliceId: string, input: { path: string; content: string; reason: string }) {
+		const { task, amendment } = await this.exclusive(async () => {
+			const task = await this.load();
+			this.slice(task, sliceId);
+			if (task.phase !== "building") fail(409, `task is ${task.phase}`);
+			if (!task.contracts.includes(input.path)) fail(400, `${input.path} is not a contract file`);
+			const amendment: Amendment = {
+				id: crypto.randomUUID().slice(0, 8),
+				slice: sliceId,
+				...input,
+				status: "pending",
+				at: new Date().toISOString(),
+			};
+			task.amendments = [...(task.amendments ?? []), amendment];
+			await this.save(task);
+			return { task, amendment };
+		});
+
+		let decision: { approve: boolean; reason: string };
+		try {
+			decision = await decideAmendment(this.env, {
+				goal: task.goal,
+				slices: task.slices.map(({ id, title, owns, tests }) => ({ id, title, owns, tests })),
+				proposer: sliceId,
+				path: input.path,
+				reason: input.reason,
+				current: await this.readBase(task, input.path),
+				proposed: input.content,
+			});
+		} catch (err) {
+			return this.settleAmendment(amendment.id, { status: "failed", decision: statusOf(err).message });
+		}
+		if (!decision.approve) return this.settleAmendment(amendment.id, { status: "rejected", decision: decision.reason });
+
+		return this.exclusive(async () => {
+			const latest = await this.load();
+			const ws = await Workspace.clone(await remoteFor(this.env.ARTIFACTS, latest.baseRepo!, "write"));
+			await ws.write({ [input.path]: input.content });
+			const commit = await ws.commit(`Amend contract ${input.path} (proposed by ${sliceId})\n\n${input.reason}\n\nApproved: ${decision.reason}`);
+			await ws.push();
+
+			// Other slices' running builders need the new contract too.
+			const message = `Contract ${input.path} was amended at the request of slice ${sliceId}: ${input.reason}\nThe contract owner approved it: ${decision.reason}\nCall fetch_base and merge base/main to get it, then re-run your acceptance tests.`;
+			const others = latest.slices.filter((s) => s.id !== sliceId && s.status === "building");
+			await Promise.allSettled(others.map((s) => this.env.BUILDER.getByName(s.repo!).notify(message)));
+
+			const a = latest.amendments!.find((x) => x.id === amendment.id)!;
+			Object.assign(a, { status: "approved", decision: decision.reason, commit, decidedAt: new Date().toISOString() });
+			await this.save(latest);
+			return a;
+		});
+	}
+
+	private settleAmendment(id: string, outcome: Pick<Amendment, "status" | "decision">) {
+		return this.exclusive(async () => {
+			const task = await this.load();
+			const a = task.amendments!.find((x) => x.id === id)!;
+			Object.assign(a, outcome, { decidedAt: new Date().toISOString() });
+			await this.save(task);
+			return a;
+		});
+	}
+
+	/** A file's current content on the task base. */
+	private async readBase(task: Task, path: string) {
+		using repo = await this.env.ARTIFACTS.get(task.baseRepo!);
+		const blob = await repo.readFile({ ref: "main", path });
+		return blob ? await blob.text() : "(file does not exist yet)";
 	}
 
 	/** Quorum, step 2. A reviewer agent submits its verdict on the pinned head. */
