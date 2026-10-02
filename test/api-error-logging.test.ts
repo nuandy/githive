@@ -1,6 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import worker from "../src/index";
 
+vi.mock("../src/access", () => ({
+	verifyAccessRequest: vi.fn(async () => ({ kind: "person", value: "test@example.com" })),
+}));
+
 afterEach(() => vi.restoreAllMocks());
 
 describe("API error logging", () => {

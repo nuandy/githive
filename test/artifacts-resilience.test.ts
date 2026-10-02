@@ -2,6 +2,10 @@ import { describe, expect, it, vi } from "vitest";
 import { fileVersion, forkAndWait, remoteFor } from "../src/artifacts";
 import worker from "../src/index";
 
+vi.mock("../src/access", () => ({
+	verifyAccessRequest: vi.fn(async () => ({ kind: "person", value: "test@example.com" })),
+}));
+
 const transient = () => Object.assign(new Error("temporarily unavailable"), { status: 503 });
 const disposeSymbol = (Symbol as unknown as { dispose: symbol }).dispose;
 
