@@ -1,0 +1,21 @@
+.plan-panel { min-width: 0; }
+.plan-panel h2 { margin: 0; font-size: 18px; }
+.plan-panel h3 { margin: 0 0 7px; font-size: 13px; }
+.plan-panel p { margin: 4px 0; overflow-wrap: anywhere; }
+.plan-panel__title-row { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-bottom: 14px; }
+.plan-panel__planner-error { margin: -5px 0 12px !important; }
+.plan-panel__grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.plan-panel__block { min-width: 0; padding: 11px; border-radius: var(--radius); background: var(--surface-2); }
+.plan-panel__block ul { margin: 0; padding-left: 18px; }
+.plan-panel__block li { margin: 4px 0; overflow-wrap: anywhere; }
+.plan-panel__rationale { grid-column: 1 / -1; }
+.plan-panel__amendments { margin-top: 16px; }
+.plan-panel__amendment-list { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.plan-panel__amendment { min-width: 0; padding: 10px; border: 1px solid var(--border); border-radius: var(--radius); }
+.plan-panel__amendment-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
+.plan-panel__amendment-head code { overflow-wrap: anywhere; }
+@media (max-width: 600px) {
+  .plan-panel { padding: 12px; }
+  .plan-panel__grid { grid-template-columns: minmax(0, 1fr); }
+  .plan-panel__rationale { grid-column: auto; }
+}
