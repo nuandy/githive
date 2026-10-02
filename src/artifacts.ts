@@ -25,8 +25,11 @@ async function withRepo<T>(artifacts: Artifacts, name: string, operation: (repo:
 	} finally {
 		// The binding provides disposable handles; optional invocation also keeps
 		// lightweight test doubles compatible with the same operation contract.
-		const dispose = (repo as unknown as Record<symbol, unknown>)[Symbol.for("Symbol.dispose")];
-		if (typeof dispose === "function") dispose.call(repo);
+		const disposeSymbol = (Symbol as unknown as { dispose?: symbol }).dispose;
+		if (disposeSymbol) {
+			const dispose = (repo as unknown as Record<symbol, unknown>)[disposeSymbol];
+			if (typeof dispose === "function") dispose.call(repo);
+		}
 	}
 }
 
