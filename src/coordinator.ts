@@ -17,6 +17,7 @@ import type { ReviewJob } from "./reviewer";
 import { plan } from "./planner";
 import { nextStep, reviewFeedback, tally } from "./quorum";
 import { activeOf, hasRoom, itemKey, stillWanted, validateLimits, withScheduling, type AgentKind } from "./schedule";
+import { accessIdentityLabel, type AccessIdentity, type CoordinatorHumanActions } from "./access-contract";
 import {
 	DEFAULT_POLICY,
 	type Amendment,
@@ -59,7 +60,7 @@ interface Side {
  * on the task's repos: forking slices, test-merging them against each other
  * (Merge-ahead), gating integration on reviewer votes (Quorum), and landing.
  */
-export class Coordinator extends DurableObject<Env> {
+export class Coordinator extends DurableObject<Env> implements CoordinatorHumanActions {
 	// Methods await network I/O, which lets other requests interleave. Run
 	// state-changing methods one at a time so they never overwrite each other.
 	private tail: Promise<unknown> = Promise.resolve();
@@ -272,7 +273,7 @@ export class Coordinator extends DurableObject<Env> {
 	 * Fork the project into a task base, commit the contracts to it, then fork
 	 * the base once per slice. Returns write credentials for each slice's builder.
 	 */
-	approve() {
+	approve(actor: AccessIdentity) {
 		return this.exclusive(async () => {
 			const task = await this.load();
 			if (task.phase !== "awaiting-approval") fail(409, `task is ${task.phase}`);
@@ -301,7 +302,7 @@ export class Coordinator extends DurableObject<Env> {
 				}),
 			);
 			task.phase = "building";
-			this.note(task, task.baseCommit, `Blueprint approved: contracts committed to ${baseRepo}; slices forked: ${task.slices.map((s) => s.repo).join(", ")}`);
+			this.note(task, task.baseCommit, `Blueprint approved by ${accessIdentityLabel(actor)}: contracts committed to ${baseRepo}; slices forked: ${task.slices.map((s) => s.repo).join(", ")}`);
 			await this.save(task);
 			return { task, credentials };
 		});
@@ -977,7 +978,7 @@ export class Coordinator extends DurableObject<Env> {
 	 * Run the gate again for an approved slice, for example after the task base
 	 * was fixed by hand. Integrates on a pass, like any gate.
 	 */
-	retryGate(sliceId: string) {
+	retryGate(sliceId: string, actor: AccessIdentity) {
 		return this.exclusive(async () => {
 			const task = await this.load();
 			const slice = this.slice(task, sliceId);
@@ -995,7 +996,7 @@ export class Coordinator extends DurableObject<Env> {
 			const { queue, current } = await this.env.GATE.getByName(task.id).state();
 			const busy = [current, ...queue].find((item) => item && [item.slice, ...(item.group ?? []).map((g) => g.slice)].some((id) => covered.has(id)));
 			if (busy) fail(409, `a gate run for ${busy.slice} is already ${busy === current ? "running" : "queued"}`);
-			this.note(task, slice.reviewHead, `${slice.id}: gate re-run requested by a human`);
+			this.note(task, slice.reviewHead, `${slice.id}: gate re-run requested by ${accessIdentityLabel(actor)}`);
 			if (group.length) await this.startGroupGate(task, slice, group);
 			else await this.startGate(task, slice);
 			await this.save(task);
@@ -1008,7 +1009,7 @@ export class Coordinator extends DurableObject<Env> {
 	 * approved quorum, for example when reviewers hold it to something its lane
 	 * can't contain. Recorded on the slice; the integration gate still runs.
 	 */
-	waive(sliceId: string, input: { by: string; reason: string }) {
+	waive(sliceId: string, input: { reason: string }, actor: AccessIdentity) {
 		return this.exclusive(async () => {
 			if (!input.reason?.trim()) fail(400, "a waiver needs a reason");
 			const task = await this.load();
@@ -1020,9 +1021,10 @@ export class Coordinator extends DurableObject<Env> {
 			const head = await headOf(this.env.ARTIFACTS, slice.repo!);
 			if (head !== slice.reviewHead) fail(409, `the fork moved to ${head} after review of ${slice.reviewHead}`);
 
-			slice.waivers = [...(slice.waivers ?? []), { head, by: input.by || "a human", reason: input.reason, at: new Date().toISOString() }];
+			const by = accessIdentityLabel(actor);
+			slice.waivers = [...(slice.waivers ?? []), { head, by, reason: input.reason, at: new Date().toISOString() }];
 			slice.attention = undefined;
-			this.note(task, head, `${slice.id}: quorum waived by ${input.by || "a human"}: ${input.reason}`);
+			this.note(task, head, `${slice.id}: quorum waived by ${by}: ${input.reason}`);
 			await this.integrateOrGate(task, slice);
 			await this.save(task);
 			return slice;
@@ -1046,7 +1048,7 @@ export class Coordinator extends DurableObject<Env> {
 	 * at its next turn; a stopped one resumes its conversation with the
 	 * message and fresh tokens. Clears the slice's flag.
 	 */
-	messageBuilder(sliceId: string, message: string) {
+	messageBuilder(sliceId: string, message: string, actor: AccessIdentity) {
 		return this.exclusive(async () => {
 			if (!message?.trim()) fail(400, "the message is empty");
 			const task = await this.load();
@@ -1065,7 +1067,7 @@ export class Coordinator extends DurableObject<Env> {
 				delivered = "resumed";
 			}
 			slice.attention = undefined;
-			this.note(task, slice.head, `Message from a human to ${slice.id}'s builder (${delivered === "inbox" ? "delivered" : "resumed it"}): ${message}`);
+			this.note(task, slice.head, `Message from ${accessIdentityLabel(actor)} to ${slice.id}'s builder (${delivered === "inbox" ? "delivered" : "resumed it"}): ${message}`);
 			await this.save(task);
 			return { delivered };
 		});
@@ -1152,7 +1154,7 @@ export class Coordinator extends DurableObject<Env> {
 	}
 
 	/** Merge the task base into the project once every slice is integrated. */
-	land() {
+	land(actor: AccessIdentity) {
 		return this.exclusive(async () => {
 			const task = await this.load();
 			if (task.phase !== "building") fail(409, `task is ${task.phase}`);
@@ -1170,7 +1172,7 @@ export class Coordinator extends DurableObject<Env> {
 			}
 			await ws.push();
 			task.phase = "landed";
-			this.note(task, landed, `Task landed in ${task.repo}`);
+			this.note(task, landed, `Task landed in ${task.repo} by ${accessIdentityLabel(actor)}`);
 			await this.save(task);
 			return task;
 		});
