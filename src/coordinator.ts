@@ -2,6 +2,7 @@ import { DurableObject } from "cloudflare:workers";
 import git from "isomorphic-git";
 import { baseRepoName, fileVersion, forkAndWait, headOf, remoteFor, reviewerName, sliceRepoName } from "./artifacts";
 import { fail, statusOf } from "./errors";
+import { isTransientFailure, retryTransient } from "./retry";
 import { Workspace } from "./git";
 import { type LedgerDoc, type LedgerEntry, clipText, diff, fromDoc, replay, toDoc } from "./ledger";
 import { appendLedger, readLedger } from "./ledger-git";
@@ -110,7 +111,7 @@ export class Coordinator extends DurableObject<Env> {
 			await this.ctx.storage.put({ "ledger:doc": doc, "ledger:pending": [] });
 		} catch (err) {
 			await this.ctx.storage.put("ledger:pending", all);
-			console.error(`ledger write for task ${task.id} failed: ${statusOf(err).message}`);
+			console.error(`ledger write for task ${task.id} failed: ${statusOf(err).message}`, err);
 		}
 	}
 
@@ -164,8 +165,9 @@ export class Coordinator extends DurableObject<Env> {
 		return this.exclusive(async () => {
 			if (await this.ctx.storage.get("task")) fail(409, "task exists");
 			try {
-				using _repo = await this.env.ARTIFACTS.get(repo);
-			} catch {
+				using _repo = await retryTransient(() => this.env.ARTIFACTS.get(repo));
+			} catch (err) {
+				if (isTransientFailure(err)) throw err;
 				fail(404, `no repo ${repo}`);
 			}
 			const task: Task = {
