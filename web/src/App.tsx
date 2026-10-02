@@ -37,7 +37,11 @@ export function App() {
 
 	const reportError = useCallback((operation: string, error: unknown) => {
 		const detail = error instanceof Error ? error.message : String(error);
-		setErrors((current) => [...current.filter((entry) => entry !== `${operation}: ${detail}`), `${operation}: ${detail}`]);
+		const message = `${operation}: ${detail}`;
+		setErrors((current) => [...current.filter((entry) => entry !== message), message]);
+	}, []);
+	const clearError = useCallback((operation: string) => {
+		setErrors((current) => current.filter((entry) => !entry.startsWith(`${operation}:`)));
 	}, []);
 
 	const fetchTasks = useCallback(async () => {
@@ -45,19 +49,21 @@ export function App() {
 			const result = await api.tasks();
 			setTasks(newestTasks(result));
 			setTasksLoaded(true);
+			clearError("Tasks");
 		} catch (error) {
 			reportError("Tasks", error);
 		}
-	}, [reportError]);
+	}, [clearError, reportError]);
 
 	const fetchRepos = useCallback(async () => {
 		try {
 			setRepos(await api.repos());
 			setReposLoaded(true);
+			clearError("Repositories");
 		} catch (error) {
 			reportError("Repositories", error);
 		}
-	}, [reportError]);
+	}, [clearError, reportError]);
 
 	const refresh = useCallback(async () => {
 		await Promise.all([fetchTasks(), fetchRepos()]);
@@ -97,6 +103,7 @@ export function App() {
 						...existing.filter((task) => task.id !== result.task.id),
 						result.task,
 					]));
+					clearError("Live task");
 				}
 			} catch (error) {
 				if (current && selectedRef.current === id) reportError("Live task", error);
@@ -108,7 +115,7 @@ export function App() {
 			current = false;
 			window.clearInterval(timer);
 		};
-	}, [selectedId, reportError]);
+	}, [clearError, selectedId, reportError]);
 
 	const selectedTask = live?.task.id === selectedId
 		? live.task
@@ -119,10 +126,12 @@ export function App() {
 		try {
 			const task = await api.create(repo, goal);
 			setTasks((current) => newestTasks([...current.filter((item) => item.id !== task.id), task]));
+			clearError("Create task");
 			selectTask(task.id);
 			try {
 				const planned = await api.plan(task.id);
 				setTasks((current) => newestTasks([...current.filter((item) => item.id !== planned.id), planned]));
+				clearError("Start planning");
 			} catch (error) {
 				reportError("Start planning", error);
 			}
@@ -132,11 +141,12 @@ export function App() {
 		} finally {
 			setCreating(false);
 		}
-	}, [refresh, reportError, selectTask]);
+	}, [clearError, refresh, reportError, selectTask]);
 
 	const runAction = useCallback(async (action: "plan" | "approve-build" | "land") => {
 		if (!selectedTask || busy) return;
 		const id = selectedTask.id;
+		const operation = action === "approve-build" ? "Approve and build" : action === "plan" ? "Plan" : "Land";
 		setBusy(true);
 		try {
 			if (action === "plan") {
@@ -147,13 +157,14 @@ export function App() {
 			} else {
 				await api.land(id);
 			}
+			clearError(operation);
 		} catch (error) {
-			reportError(action === "approve-build" ? "Approve and build" : action === "plan" ? "Plan" : "Land", error);
+			reportError(operation, error);
 		} finally {
 			await refresh();
 			setBusy(false);
 		}
-	}, [busy, refresh, reportError, selectedTask]);
+	}, [busy, clearError, refresh, reportError, selectedTask]);
 
 	const plannerRunning = selectedTask?.planner?.status === "running";
 	const showingLive = live?.task.id === selectedId ? live : null;
