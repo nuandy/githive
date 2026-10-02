@@ -16,6 +16,33 @@ describe("Artifacts transient failures", () => {
 		expect(repo.createToken).toHaveBeenCalledTimes(2);
 	});
 
+	it("disposes the repo handle after a successful operation", async () => {
+		const dispose = vi.fn();
+		const repo = {
+			info: vi.fn(async () => ({ remote: "https://git.test/repo.git" })),
+			createToken: vi.fn(async () => ({ plaintext: "token" })),
+			[Symbol.dispose]: dispose,
+		};
+		const artifacts = { get: vi.fn(async () => repo) } as never;
+
+		await expect(remoteFor(artifacts, "repo", "read")).resolves.toEqual({ url: "https://git.test/repo.git", token: "token" });
+		expect(dispose).toHaveBeenCalledTimes(1);
+	});
+
+	it("disposes the repo handle when an operation fails", async () => {
+		const failure = new Error("permanent read failure");
+		const dispose = vi.fn();
+		const repo = {
+			info: vi.fn(async () => { throw failure; }),
+			createToken: vi.fn(async () => ({ plaintext: "token" })),
+			[Symbol.dispose]: dispose,
+		};
+		const artifacts = { get: vi.fn(async () => repo) } as never;
+
+		await expect(remoteFor(artifacts, "repo", "read")).rejects.toBe(failure);
+		expect(dispose).toHaveBeenCalledTimes(1);
+	});
+
 	it("retries a transient repo read", async () => {
 		const blob = new Blob(["contents"]);
 		const repo = {
