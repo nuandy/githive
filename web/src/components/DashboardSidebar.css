@@ -18,7 +18,14 @@
   background: var(--surface);
 }
 .dashboard-sidebar__task.is-selected { border-color: var(--accent); box-shadow: inset 3px 0 var(--accent); }
-.dashboard-sidebar__task-title { display: block; font-weight: 600; }
+.dashboard-sidebar__task-title {
+  display: -webkit-box;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  font-weight: 600;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
 .dashboard-sidebar__task-meta { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px; margin-top: 7px; }
 .dashboard-sidebar__new-task { border-top: 1px solid var(--border); padding-top: 14px; }
 .dashboard-sidebar__new-task form { display: grid; gap: 7px; }
