@@ -132,8 +132,14 @@ export class Gate extends DurableObject<Env> {
 		}
 		if (plan.exclude.length) await run(container, ["rm", "-f", "--", ...plan.exclude]);
 
+		// Checks run on a fresh checkout. If none installs dependencies but the
+		// project has a lockfile, install them first, or every check fails on
+		// missing tools (planners sometimes leave the install step out).
+		const checks = [...plan.checks];
+		if (!checks.some((c) => INSTALL.test(c.trim())) && (await run(container, ["test", "-f", "package-lock.json"])).exitCode === 0) checks.unshift("npm ci");
+
 		const results = [];
-		for (const command of plan.checks) {
+		for (const command of checks) {
 			if (INSTALL.test(command.trim()) && (await this.installUnchanged(container))) {
 				results.push({ command, exitCode: 0, output: "Skipped: package-lock.json is unchanged since the last install in this gate." });
 				continue;
@@ -143,7 +149,7 @@ export class Gate extends DurableObject<Env> {
 			if (r.exitCode !== 0) break; // later checks usually depend on earlier ones (npm ci first)
 			if (INSTALL.test(command.trim())) await this.ctx.storage.put("lockHash", await this.lockHash(container));
 		}
-		return result({ passed: results.length === plan.checks.length && results.every((r) => r.exitCode === 0), results });
+		return result({ passed: results.length === checks.length && results.every((r) => r.exitCode === 0), results });
 	}
 
 	private async lockHash(container: Container) {
