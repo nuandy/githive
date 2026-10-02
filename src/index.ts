@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import { forkAndWait, parseRepoName, remoteFor, reviewerName } from "./artifacts";
 import { statusOf } from "./errors";
 import { Workspace } from "./git";
-import type { Blueprint, Review } from "./types";
+import type { Blueprint, Limits, Review } from "./types";
 
 export { Builder } from "./builder";
 export { Reviewer } from "./reviewer";
@@ -41,7 +41,7 @@ app.get("/api", (c) =>
 			"GET  /tasks/:id/live",
 			"POST /spike",
 			"POST /repos/import {url, name, branch?}",
-			"POST /tasks {repo, goal}",
+			"POST /tasks {repo, goal, limits?: {builders, reviewers}}",
 			"GET  /tasks/:id",
 			"POST /tasks/:id/plan",
 			"PUT  /tasks/:id/blueprint {slices, contracts, review?, rationale?}",
@@ -129,9 +129,9 @@ app.post("/repos/import", async (c) => {
 });
 
 app.post("/tasks", async (c) => {
-	const { repo, goal } = await c.req.json<{ repo: string; goal: string }>();
+	const { repo, goal, limits } = await c.req.json<{ repo: string; goal: string; limits?: Partial<Limits> }>();
 	const id = crypto.randomUUID().slice(0, 8);
-	const task = await coordinator(c.env, id).create(id, repo, goal);
+	const task = await coordinator(c.env, id).create(id, repo, goal, limits);
 	await taskIndex(c.env).add({ id, repo, goal, createdAt: task.createdAt });
 	return c.json(task, 201);
 });

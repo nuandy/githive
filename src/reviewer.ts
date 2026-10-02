@@ -103,6 +103,10 @@ How to work:
 		return {};
 	}
 
+	protected async onStopped(job: ReviewJob) {
+		await this.coordinator(job).agentStopped("reviewer", `${job.slice.id}:${job.role}:${job.head}`);
+	}
+
 	protected async afterClone(job: ReviewJob) {
 		const checkout = await this.exec(["git", "checkout", "-q", job.head]);
 		if (checkout.exitCode !== 0) throw new Error(`could not check out ${job.head}: ${checkout.output}`);

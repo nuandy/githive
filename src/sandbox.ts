@@ -111,6 +111,8 @@ export abstract class SandboxAgent<J extends SandboxJob, S extends AgentState> e
 	protected abstract afterClone(job: J, state: S): Promise<void>;
 	/** Runs once when the agent fails; for example, to flag its slice for a human. */
 	protected async onFailed(_job: J, _state: S): Promise<void> {}
+	/** Runs once when the agent stops for any reason (done, failed, cancelled); frees its slot in the task's limits. */
+	protected async onStopped(_job: J, _state: S): Promise<void> {}
 
 	protected async load() {
 		const [job, state] = await Promise.all([this.ctx.storage.get<J>("job"), this.ctx.storage.get<S>("state")]);
@@ -227,6 +229,7 @@ export abstract class SandboxAgent<J extends SandboxJob, S extends AgentState> e
 		}
 		await this.save(state);
 		if ((state.status as string) === "failed") await this.onFailed(job, state).catch(() => {});
+		if (["done", "failed"].includes(state.status)) await this.onStopped(job, state).catch(() => {});
 	}
 
 	private async setUp(job: J, state: S) {

@@ -5,17 +5,20 @@ import { fail, statusOf } from "./errors";
 import { Workspace } from "./git";
 import { blueprintProblems } from "./blueprint";
 import { NEW_FILE, decideAmendment } from "./contract-owner";
-import type { GateJob } from "./gate";
+import type { GatePlan } from "./gate";
 import { gateExclusions, gateFeedback, type GateResult } from "./gate-plan";
 import type { BuildJob } from "./builder";
 import type { ReviewJob } from "./reviewer";
 import { plan } from "./planner";
 import { nextStep, reviewFeedback, tally } from "./quorum";
+import { activeOf, hasRoom, itemKey, stillWanted, validateLimits, withScheduling, type AgentKind } from "./schedule";
 import {
 	DEFAULT_POLICY,
 	type Amendment,
 	type Blueprint,
+	type Limits,
 	type MergeCheck,
+	type QueueItem,
 	type Review,
 	type ReviewAssignment,
 	type Slice,
@@ -54,7 +57,7 @@ export class Coordinator extends DurableObject<Env> {
 	}
 
 	private async load() {
-		return (await this.ctx.storage.get<Task>("task")) ?? fail(404, "task not found");
+		return withScheduling((await this.ctx.storage.get<Task>("task")) ?? fail(404, "task not found"));
 	}
 
 	private save(task: Task) {
@@ -69,7 +72,7 @@ export class Coordinator extends DurableObject<Env> {
 		return this.load();
 	}
 
-	create(id: string, repo: string, goal: string) {
+	create(id: string, repo: string, goal: string, limits?: Partial<Limits>) {
 		return this.exclusive(async () => {
 			if (await this.ctx.storage.get("task")) fail(409, "task exists");
 			try {
@@ -88,6 +91,9 @@ export class Coordinator extends DurableObject<Env> {
 				slices: [],
 				checks: [],
 				amendments: [],
+				limits: validateLimits(limits),
+				queue: [],
+				active: { builders: [], reviewers: [] },
 				createdAt: new Date().toISOString(),
 			};
 			await this.save(task);
@@ -207,29 +213,119 @@ export class Coordinator extends DurableObject<Env> {
 		return this.exclusive(async () => {
 			const task = await this.load();
 			if (task.phase !== "building") fail(409, `task is ${task.phase}`);
-			const building = task.slices.filter((s) => s.status === "building");
-			const started = await Promise.all(
-				building.map(async (slice) => {
-					const [remote, base] = await Promise.all([
-						remoteFor(this.env.ARTIFACTS, slice.repo!, "write", 3 * 3600),
-						remoteFor(this.env.ARTIFACTS, task.baseRepo!, "read", 3 * 3600),
-					]);
-					const job: BuildJob = {
-						taskId: task.id,
-						goal: task.goal,
-						slice: { id: slice.id, title: slice.title, owns: slice.owns, instructions: slice.instructions, tests: slice.tests },
-						siblings: task.slices.filter((s) => s !== slice).map(({ id, title, owns }) => ({ id, title, owns })),
-						contracts: task.contracts,
-						verify: task.verify,
-						repo: slice.repo!,
-						remote: remote.url,
-						token: remote.token,
-						base: { remote: base.url, token: base.token },
-					};
-					return { slice: slice.id, builder: await this.env.BUILDER.getByName(slice.repo!).start(job) };
-				}),
-			);
+			const started: { slice: string; status: string }[] = [];
+			for (const slice of task.slices.filter((s) => s.status === "building"))
+				started.push({ slice: slice.id, status: await this.schedule(task, { kind: "builder", slice: slice.id }) });
+			await this.save(task);
 			return { task, started };
+		});
+	}
+
+	private async launchBuilder(task: Task, slice: Slice) {
+		const [remote, base] = await Promise.all([
+			remoteFor(this.env.ARTIFACTS, slice.repo!, "write", 3 * 3600),
+			remoteFor(this.env.ARTIFACTS, task.baseRepo!, "read", 3 * 3600),
+		]);
+		const job: BuildJob = {
+			taskId: task.id,
+			goal: task.goal,
+			slice: { id: slice.id, title: slice.title, owns: slice.owns, instructions: slice.instructions, tests: slice.tests },
+			siblings: task.slices.filter((s) => s !== slice).map(({ id, title, owns }) => ({ id, title, owns })),
+			contracts: task.contracts,
+			verify: task.verify,
+			repo: slice.repo!,
+			remote: remote.url,
+			token: remote.token,
+			base: { remote: base.url, token: base.token },
+		};
+		await this.env.BUILDER.getByName(slice.repo!).start(job);
+	}
+
+	private async launchReviewer(task: Task, slice: Slice, role: string, head: string) {
+		const remote = await remoteFor(this.env.ARTIFACTS, slice.repo!, "read", 3 * 3600);
+		const job: ReviewJob = {
+			taskId: task.id,
+			goal: task.goal,
+			slice: { id: slice.id, title: slice.title, owns: slice.owns, instructions: slice.instructions, tests: slice.tests },
+			siblings: task.slices.filter((s) => s !== slice).map(({ id, title, owns }) => ({ id, title, owns })),
+			contracts: task.contracts,
+			verify: task.verify,
+			repo: slice.repo!,
+			remote: remote.url,
+			token: remote.token,
+			role,
+			head,
+			baseCommit: slice.mergeBase ?? task.baseCommit!,
+			buildSummary: slice.buildSummary,
+			revision: slice.revisions ?? 0,
+			priorFindings: slice.revisions ? slice.lastFeedback : undefined,
+			amendments: (task.amendments ?? []).filter((a) => a.status === "approved").map(({ path, reason }) => ({ path, reason })),
+		};
+		await this.env.REVIEWER.getByName(reviewerName(slice.repo!, role, head)).start(job);
+	}
+
+	/**
+	 * Start agent work if the task's limit allows, otherwise queue it. Work
+	 * already running or queued is not started twice. Caller holds the lock and saves.
+	 */
+	private async schedule(task: Task, item: QueueItem): Promise<"started" | "queued" | "already"> {
+		const key = itemKey(item);
+		if (activeOf(task, item.kind).includes(key) || task.queue.some((q) => itemKey(q) === key)) return "already";
+		if (!hasRoom(task, item.kind)) {
+			task.queue.push(item);
+			return "queued";
+		}
+		await this.launch(task, item);
+		return "started";
+	}
+
+	private async launch(task: Task, item: QueueItem) {
+		const key = itemKey(item);
+		const slice = this.slice(task, item.slice);
+		activeOf(task, item.kind).push(key);
+		try {
+			if (item.kind === "builder") await this.launchBuilder(task, slice);
+			else await this.launchReviewer(task, slice, item.role, item.head);
+		} catch (err) {
+			const active = activeOf(task, item.kind);
+			active.splice(active.indexOf(key), 1);
+			slice.attention = `Could not start ${item.kind} ${key}: ${statusOf(err).message}`;
+		}
+	}
+
+	/** Start queued work while there is room, dropping work that is no longer wanted. */
+	private async drain(task: Task) {
+		if (task.queue.length && task.queue.some((item) => !hasRoom(task, item.kind))) await this.reconcile(task);
+		for (const item of [...task.queue]) {
+			const wanted = stillWanted(task, item);
+			if (wanted && !hasRoom(task, item.kind)) continue;
+			task.queue.splice(task.queue.indexOf(item), 1);
+			if (wanted) await this.launch(task, item);
+		}
+	}
+
+	/** Free slots held by agents that stopped without reporting it. */
+	private async reconcile(task: Task) {
+		const running = (s: { status: string } | null) => !!s && (s.status === "queued" || s.status === "working");
+		for (const key of [...task.active.builders]) {
+			const state = await this.env.BUILDER.getByName(sliceRepoName(task.id, key)).state();
+			if (!running(state)) task.active.builders.splice(task.active.builders.indexOf(key), 1);
+		}
+		for (const key of [...task.active.reviewers]) {
+			const [slice, role, head] = key.split(":");
+			const state = await this.env.REVIEWER.getByName(reviewerName(sliceRepoName(task.id, slice), role, head)).state();
+			if (!running(state)) task.active.reviewers.splice(task.active.reviewers.indexOf(key), 1);
+		}
+	}
+
+	/** An agent stopped (finished, failed or was cancelled): free its slot and start queued work. */
+	agentStopped(kind: AgentKind, key: string) {
+		return this.exclusive(async () => {
+			const task = await this.load();
+			const active = activeOf(task, kind);
+			if (active.includes(key)) active.splice(active.indexOf(key), 1);
+			await this.drain(task);
+			await this.save(task);
 		});
 	}
 
@@ -358,37 +454,10 @@ export class Coordinator extends DurableObject<Env> {
 			await this.save(task);
 
 			const reviewers = task.review.reviewers;
-			const started = await Promise.allSettled(
-				reviewers.map(async (role) => {
-					const remote = await remoteFor(this.env.ARTIFACTS, slice.repo!, "read", 3 * 3600);
-					const job: ReviewJob = {
-						taskId: task.id,
-						goal: task.goal,
-						slice: { id: slice.id, title: slice.title, owns: slice.owns, instructions: slice.instructions, tests: slice.tests },
-						siblings: task.slices.filter((s) => s !== slice).map(({ id, title, owns }) => ({ id, title, owns })),
-						contracts: task.contracts,
-						verify: task.verify,
-						repo: slice.repo!,
-						remote: remote.url,
-						token: remote.token,
-						role,
-						head,
-						baseCommit: slice.mergeBase ?? task.baseCommit!,
-						buildSummary: slice.buildSummary,
-						revision: slice.revisions ?? 0,
-						priorFindings: slice.revisions ? slice.lastFeedback : undefined,
-						amendments: (task.amendments ?? []).filter((a) => a.status === "approved").map(({ path, reason }) => ({ path, reason })),
-					};
-					await this.env.REVIEWER.getByName(reviewerName(slice.repo!, role, head)).start(job);
-				}),
-			);
-			const failed = started.flatMap((r, i) => (r.status === "rejected" ? [`${reviewers[i]}: ${statusOf(r.reason).message}`] : []));
-			if (failed.length) {
-				const latest = await this.load();
-				this.slice(latest, sliceId).attention = `Some reviewers did not start: ${failed.join("; ")}`;
-				await this.save(latest);
-			}
-			const startedRoles = reviewers.filter((_, i) => started[i].status === "fulfilled");
+			for (const role of reviewers) await this.schedule(task, { kind: "reviewer", slice: slice.id, role, head });
+			await this.save(task);
+			const failed = slice.attention?.startsWith("Could not start") ? [slice.attention] : [];
+			const startedRoles = reviewers;
 			return { head, reviewers: startedRoles, failed, escalated: false };
 		});
 	}
@@ -551,26 +620,39 @@ export class Coordinator extends DurableObject<Env> {
 		await this.startGate(task, slice);
 	}
 
+	/** Queue the slice's approved commit with the task's gate. Caller holds the lock and saves. */
 	private async startGate(task: Task, slice: Slice) {
 		const head = slice.reviewHead!;
-		const baseHead = (await headOf(this.env.ARTIFACTS, task.baseRepo!))!;
-		const exclude = gateExclusions(task.slices, slice.id);
-		const [base, fork] = await Promise.all([
-			remoteFor(this.env.ARTIFACTS, task.baseRepo!, "read", 3600),
-			remoteFor(this.env.ARTIFACTS, slice.repo!, "read", 3600),
-		]);
-		slice.gate = { status: "running", head, baseHead, at: new Date().toISOString(), excluded: exclude };
-		const job: GateJob = {
-			taskId: task.id,
-			slice: slice.id,
-			head,
-			baseHead,
-			base: { remote: base.url, token: base.token },
-			fork: { remote: fork.url, token: fork.token },
-			checks: task.verify,
-			exclude,
-		};
-		await this.env.GATE.getByName(`${slice.repo}--gate--${head.slice(0, 12)}--${baseHead.slice(0, 12)}`).start(job);
+		slice.gate = { status: "queued", head, baseHead: "", at: new Date().toISOString(), excluded: [] };
+		await this.env.GATE.getByName(task.id).enqueue(task.id, { slice: slice.id, head });
+	}
+
+	/**
+	 * The gate asks for its plan when a run starts, so it checks against the base
+	 * as it is then, with the exclusions and tokens of that moment. Null when the
+	 * commit is no longer the one waiting to integrate.
+	 */
+	gatePlan(sliceId: string, head: string) {
+		return this.exclusive(async (): Promise<GatePlan | null> => {
+			const task = await this.load();
+			const slice = this.slice(task, sliceId);
+			if (slice.status !== "building" || slice.reviewHead !== head || slice.gate?.head !== head) return null;
+			const baseHead = (await headOf(this.env.ARTIFACTS, task.baseRepo!))!;
+			const exclude = gateExclusions(task.slices, slice.id);
+			const [base, fork] = await Promise.all([
+				remoteFor(this.env.ARTIFACTS, task.baseRepo!, "read", 3600),
+				remoteFor(this.env.ARTIFACTS, slice.repo!, "read", 3600),
+			]);
+			slice.gate = { status: "running", head, baseHead, at: new Date().toISOString(), excluded: exclude };
+			await this.save(task);
+			return {
+				baseHead,
+				base: { remote: base.url, token: base.token },
+				fork: { remote: fork.url, token: fork.token },
+				checks: task.verify,
+				exclude,
+			};
+		});
 	}
 
 	/**
@@ -603,14 +685,10 @@ export class Coordinator extends DurableObject<Env> {
 					// Wait, and re-run after the next integration.
 					slice.gate = { ...slice.gate, status: "waiting", result, at };
 				} else {
+					// Nothing else can integrate first, so the failure is this slice's to fix.
+					// Slices waiting on it keep waiting: they re-run once it integrates.
 					slice.gate = { ...slice.gate, status: "failed", result, at };
 					await this.sendBack(task, slice, gateFeedback(result, excluded));
-					// Nothing else can integrate, so slices waiting on each other go back too.
-					for (const other of task.slices)
-						if (other !== slice && other.gate?.status === "waiting" && !this.othersCanStillIntegrate(task, other)) {
-							other.gate = { ...other.gate, status: "failed" };
-							await this.sendBack(task, other, gateFeedback(other.gate.result!, other.gate.excluded));
-						}
 				}
 			} catch (err) {
 				slice.attention = `after the gate: ${statusOf(err).message}`;
@@ -695,6 +773,7 @@ export class Coordinator extends DurableObject<Env> {
 					remoteFor(this.env.ARTIFACTS, task.baseRepo!, "read", 3 * 3600),
 				]);
 				await builder.revise(text, { token: write.token, base: { remote: base.url, token: base.token } });
+				if (!task.active.builders.includes(slice.id)) task.active.builders.push(slice.id);
 				delivered = "resumed";
 			}
 			slice.attention = undefined;
@@ -750,6 +829,7 @@ export class Coordinator extends DurableObject<Env> {
 		}
 		slice.revisions = (slice.revisions ?? 0) + 1;
 		const head = slice.reviewHead!;
+		task.queue = task.queue.filter((item) => !(item.kind === "reviewer" && item.slice === slice.id));
 		await Promise.allSettled(
 			task.review.reviewers.map((role) =>
 				this.env.REVIEWER.getByName(reviewerName(slice.repo!, role, head)).cancel("the slice was sent back to its builder"),
@@ -760,6 +840,8 @@ export class Coordinator extends DurableObject<Env> {
 			remoteFor(this.env.ARTIFACTS, task.baseRepo!, "read", 3 * 3600),
 		]);
 		await this.env.BUILDER.getByName(slice.repo!).revise(message, { token: write.token, base: { remote: base.url, token: base.token } });
+		// A revision runs right away, outside the queue: the slice is blocking integration.
+		if (!task.active.builders.includes(slice.id)) task.active.builders.push(slice.id);
 	}
 
 	/** Merge the task base into the project once every slice is integrated. */

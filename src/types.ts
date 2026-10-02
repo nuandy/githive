@@ -55,8 +55,11 @@ export interface Slice extends SliceSpec {
 	waivers?: { head: string; by: string; reason: string; at: string }[];
 	/** The integration gate's run for the approved commit. */
 	gate?: {
-		/** "waiting": failed while other slices weren't integrated yet; re-runs after the next integration. */
-		status: "running" | "passed" | "failed" | "waiting";
+		/**
+		 * "queued": waiting its turn in the task's gate queue. "waiting": failed
+		 * while other slices weren't integrated yet; re-runs after the next integration.
+		 */
+		status: "queued" | "running" | "passed" | "failed" | "waiting";
 		head: string;
 		baseHead: string;
 		at: string;
@@ -168,8 +171,23 @@ export interface Task {
 	slices: Slice[];
 	checks: MergeCheck[];
 	amendments?: Amendment[];
+	/** How many builders and reviewers may run at once; more wait in `queue`. */
+	limits: Limits;
+	queue: QueueItem[];
+	/** Agents running now: builder keys are slice ids; reviewer keys are slice:role:head. */
+	active: { builders: string[]; reviewers: string[] };
 	createdAt: string;
 }
+
+export interface Limits {
+	builders: number;
+	reviewers: number;
+}
+
+export const DEFAULT_LIMITS: Limits = { builders: 4, reviewers: 6 };
+
+/** Agent work waiting for a free slot. */
+export type QueueItem = { kind: "builder"; slice: string } | { kind: "reviewer"; slice: string; role: string; head: string };
 
 /** Handed to the agent that builds or reviews a slice. Never persisted. */
 export interface SliceCredentials {

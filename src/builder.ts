@@ -86,6 +86,10 @@ How to work:
 		return this.view(state);
 	}
 
+	protected async onStopped(job: BuildJob) {
+		await this.coordinator(job).agentStopped("builder", job.slice.id);
+	}
+
 	protected async onFailed(job: BuildJob, state: BuilderState) {
 		await this.coordinator(job).flagSlice(job.slice.id, `The builder stopped: ${state.error}`);
 	}
