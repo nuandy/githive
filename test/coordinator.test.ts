@@ -87,6 +87,10 @@ async function setup(t: Task) {
 const stored = async () => (await storage.get<Task>("task"))!;
 const builder = (sliceId: string) => fake.env.BUILDER.getByName(`t1--${sliceId}`);
 const vote = (reviewer: string, verdict: Review["verdict"], head = "h1") => ({ reviewer, verdict, head, summary: `${reviewer} says ${verdict}` });
+const approvedReviews = (head = "h1") => [
+	{ ...vote("tests", "approve", head), at: "" },
+	{ ...vote("api", "approve", head), at: "" },
+];
 
 beforeEach(() => {
 	io.heads.clear();
@@ -210,8 +214,67 @@ describe("the integration gate", () => {
 		io.heads.set("t1--b", "hb");
 	});
 
+	it("cancels an approved gate queued before a veto and ignores its late result", async () => {
+		await setup(task({ slices: [slice("a", { reviewHead: "h1" }), slice("b")] }));
+		await coordinator.submitReview("a", vote("tests", "approve"));
+		await coordinator.submitReview("a", vote("api", "approve"));
+		expect(fake.env.GATE.getByName("t1").enqueue).toHaveBeenCalledWith("t1", { slice: "a", head: "h1" });
+		await coordinator.submitReview("a", vote("security", "reject"));
+		expect(fake.env.GATE.getByName("t1").cancel).toHaveBeenCalledWith("t1", "a", "h1");
+		expect((await stored()).slices[0].gate).toBeUndefined();
+		expect(await coordinator.gateResult("a", result(), [])).toEqual({ outcome: "stale" });
+		expect(io.merges).toEqual([]);
+		expect(io.pushes).toBe(0);
+	});
+
+	it("cancels a running solo gate after a veto and does not integrate its result", async () => {
+		await setup(task({ slices: [slice("a", { reviewHead: "h1", gate: gated("queued"), reviews: approvedReviews() }), slice("b")] }));
+		await coordinator.gatePlan("a", "h1");
+		await coordinator.submitReview("a", vote("security", "reject"));
+		expect(fake.env.GATE.getByName("t1").cancel).toHaveBeenCalledWith("t1", "a", "h1");
+		expect(await coordinator.gateResult("a", result(), [])).toEqual({ outcome: "stale" });
+		expect(io.merges).toEqual([]);
+		expect(io.pushes).toBe(0);
+	});
+
+	it("cancels a running group gate when any member is vetoed", async () => {
+		const grouped = (head: string, other: string) => ({ ...gated("queued", head), group: [other] });
+		const members = [{ slice: "b", head: "hb" }];
+		await setup(task({ slices: [
+			slice("a", { reviewHead: "h1", gate: grouped("h1", "b"), reviews: approvedReviews() }),
+			slice("b", { reviewHead: "hb", gate: grouped("hb", "a"), reviews: approvedReviews("hb") }),
+		] }));
+		await coordinator.gatePlan("a", "h1", members);
+		await coordinator.submitReview("b", vote("security", "reject", "hb"));
+		expect(fake.env.GATE.getByName("t1").cancel).toHaveBeenCalledWith("t1", "b", "hb");
+		expect((await stored()).slices.map((slice) => slice.gate)).toEqual([undefined, undefined]);
+		expect(await coordinator.gateResult("a", result(), [], members)).toEqual({ outcome: "stale" });
+		expect(io.merges).toEqual([]);
+		expect(io.pushes).toBe(0);
+	});
+
+	it("refuses to start a gate when the latest quorum includes a veto", async () => {
+		const vetoed = [...approvedReviews(), { ...vote("security", "reject"), at: "" }];
+		await setup(task({ slices: [slice("a", { reviewHead: "h1", gate: gated("queued"), reviews: vetoed }), slice("b")] }));
+		expect(await coordinator.gatePlan("a", "h1")).toBeNull();
+		expect((await stored()).slices[0].gate?.status).toBe("queued");
+	});
+
+	it("rejects a group result if any member no longer has an approved quorum", async () => {
+		const grouped = (head: string, other: string) => ({ ...gated("running", head), group: [other] });
+		const bReviews = [...approvedReviews("hb"), { ...vote("security", "reject", "hb"), at: "" }];
+		const members = [{ slice: "b", head: "hb" }];
+		await setup(task({ slices: [
+			slice("a", { reviewHead: "h1", gate: grouped("h1", "b"), reviews: approvedReviews() }),
+			slice("b", { reviewHead: "hb", gate: grouped("hb", "a"), reviews: bReviews }),
+		] }));
+		expect(await coordinator.gateResult("a", result(), [], members)).toEqual({ outcome: "stale" });
+		expect(io.merges).toEqual([]);
+		expect(io.pushes).toBe(0);
+	});
+
 	it("plans a run against the current base and marks it running", async () => {
-		await setup(task({ slices: [slice("a", { reviewHead: "h1", gate: gated("queued") }), slice("b")] }));
+		await setup(task({ slices: [slice("a", { reviewHead: "h1", gate: gated("queued"), reviews: approvedReviews() }), slice("b")] }));
 		const plan = await coordinator.gatePlan("a", "h1");
 		expect(plan).toMatchObject({ baseHead: "base0", checks: ["npm test"], base: { token: "token-t1--base" } });
 		expect((await stored()).slices[0].gate?.status).toBe("running");
@@ -219,7 +282,7 @@ describe("the integration gate", () => {
 	});
 
 	it("integrates on a pass and re-queues gates that were waiting", async () => {
-		await setup(task({ slices: [slice("a", { reviewHead: "h1", gate: gated("running") }), slice("b", { reviewHead: "hb", gate: gated("waiting", "hb") })] }));
+		await setup(task({ slices: [slice("a", { reviewHead: "h1", gate: gated("running"), reviews: approvedReviews() }), slice("b", { reviewHead: "hb", gate: gated("waiting", "hb"), reviews: approvedReviews("hb") })] }));
 		expect(await coordinator.gateResult("a", result(), [])).toEqual({ outcome: "passed" });
 		const t = await stored();
 		expect(t.slices[0].status).toBe("integrated");
@@ -228,21 +291,21 @@ describe("the integration gate", () => {
 	});
 
 	it("waits on a failure while other slices can still integrate", async () => {
-		await setup(task({ slices: [slice("a", { reviewHead: "h1", gate: gated("running") }), slice("b")] }));
+		await setup(task({ slices: [slice("a", { reviewHead: "h1", gate: gated("running"), reviews: approvedReviews() }), slice("b")] }));
 		expect(await coordinator.gateResult("a", result({ passed: false }), [])).toEqual({ outcome: "waiting" });
 		expect(builder("a").revise).not.toHaveBeenCalled();
 	});
 
 	it("sends back on a failure when nothing else can integrate and nothing waits on it", async () => {
 		const failure = result({ passed: false, results: [{ command: "npm run typecheck", exitCode: 2, output: "TS2305" }] });
-		await setup(task({ slices: [slice("a", { reviewHead: "h1", gate: gated("running") }), slice("b", { status: "integrated" })] }));
+		await setup(task({ slices: [slice("a", { reviewHead: "h1", gate: gated("running"), reviews: approvedReviews() }), slice("b", { status: "integrated" })] }));
 		expect(await coordinator.gateResult("a", failure, [])).toEqual({ outcome: "failed" });
 		expect(builder("a").revise.mock.calls[0][0]).toMatch(/npm run typecheck \(exit code 2\)\nTS2305/);
 	});
 
 	it("merges slices that wait on each other into one group gate", async () => {
 		const failure = result({ passed: false, results: [{ command: "npm run typecheck", exitCode: 2, output: "Cannot find module './b'" }] });
-		await setup(task({ slices: [slice("a", { reviewHead: "h1", gate: gated("running") }), slice("b", { reviewHead: "hb", gate: gated("waiting", "hb") })] }));
+		await setup(task({ slices: [slice("a", { reviewHead: "h1", gate: gated("running"), reviews: approvedReviews() }), slice("b", { reviewHead: "hb", gate: gated("waiting", "hb"), reviews: approvedReviews("hb") })] }));
 		expect(await coordinator.gateResult("a", failure, [])).toEqual({ outcome: "queued" });
 		expect(fake.env.GATE.getByName("t1").enqueue).toHaveBeenCalledWith("t1", { slice: "a", head: "h1", group: [{ slice: "b", head: "hb" }] });
 		const t = await stored();
@@ -253,7 +316,7 @@ describe("the integration gate", () => {
 
 	it("plans and integrates a group run as a whole", async () => {
 		const grouped = (head: string, other: string) => ({ ...gated("queued", head), group: [other] });
-		await setup(task({ slices: [slice("a", { reviewHead: "h1", gate: grouped("h1", "b") }), slice("b", { reviewHead: "hb", gate: grouped("hb", "a") })] }));
+		await setup(task({ slices: [slice("a", { reviewHead: "h1", gate: grouped("h1", "b"), reviews: approvedReviews() }), slice("b", { reviewHead: "hb", gate: grouped("hb", "a"), reviews: approvedReviews("hb") })] }));
 		const plan = await coordinator.gatePlan("a", "h1", [{ slice: "b", head: "hb" }]);
 		expect(plan?.others).toEqual([{ slice: "b", head: "hb", remote: "https://git.test/t1--b.git", token: "token-t1--b" }]);
 		expect(await coordinator.gateResult("a", result(), [], [{ slice: "b", head: "hb" }])).toEqual({ outcome: "passed" });
@@ -264,7 +327,7 @@ describe("the integration gate", () => {
 
 	it("integrates none of a group when one of its slices conflicts with the base", async () => {
 		const grouped = (head: string, other: string) => ({ ...gated("running", head), group: [other] });
-		await setup(task({ slices: [slice("a", { reviewHead: "h1", gate: grouped("h1", "b") }), slice("b", { reviewHead: "hb", gate: grouped("hb", "a") })] }));
+		await setup(task({ slices: [slice("a", { reviewHead: "h1", gate: grouped("h1", "b"), reviews: approvedReviews() }), slice("b", { reviewHead: "hb", gate: grouped("hb", "a"), reviews: approvedReviews("hb") })] }));
 		io.heads.set("t1--a", "h1");
 		io.heads.set("t1--b", "hb");
 		io.mergeConflict = ["src/shared.ts"];
@@ -274,7 +337,7 @@ describe("the integration gate", () => {
 		const t = await stored();
 		expect(t.slices.map((s) => [s.status, s.gate?.status])).toEqual([
 			["building", "waiting"],
-			["building", "passed"],
+			["building", undefined],
 		]);
 		expect(builder("b").revise.mock.calls[0][0]).toMatch(/conflicts with work already integrated.*src\/shared\.ts/s);
 		expect(builder("a").revise).not.toHaveBeenCalled();
@@ -285,8 +348,8 @@ describe("the integration gate", () => {
 		await setup(
 			task({
 				slices: [
-					slice("a", { reviewHead: "h1", gate: grouped("h1", "b"), reviews: [{ ...vote("tests", "approve"), at: "" }, { ...vote("api", "approve"), at: "" }] }),
-					slice("b", { reviewHead: "hb", gate: grouped("hb", "a") }),
+					slice("a", { reviewHead: "h1", gate: grouped("h1", "b"), reviews: approvedReviews() }),
+					slice("b", { reviewHead: "hb", gate: grouped("hb", "a"), reviews: approvedReviews("hb") }),
 				],
 			}),
 		);
@@ -296,9 +359,9 @@ describe("the integration gate", () => {
 	});
 
 	it("refuses to retry while a run for the slice or its group is queued or running", async () => {
-		const approved = [{ ...vote("tests", "approve"), at: "" }, { ...vote("api", "approve"), at: "" }];
+		const approved = approvedReviews();
 		const grouped = (head: string, other: string) => ({ ...gated("queued", head), group: [other] });
-		await setup(task({ slices: [slice("a", { reviewHead: "h1", gate: grouped("h1", "b"), reviews: approved }), slice("b", { reviewHead: "hb", gate: grouped("hb", "a") })] }));
+		await setup(task({ slices: [slice("a", { reviewHead: "h1", gate: grouped("h1", "b"), reviews: approved }), slice("b", { reviewHead: "hb", gate: grouped("hb", "a"), reviews: approvedReviews("hb") })] }));
 		fake.gateQueue.push({ id: "q1", slice: "b", head: "hb" });
 		await expect(coordinator.retryGate("a", person)).rejects.toThrow(/already queued/);
 		fake.gateQueue.length = 0;
@@ -312,14 +375,14 @@ describe("the integration gate", () => {
 
 	it("sends every slice of a failed group run back, naming the others", async () => {
 		const grouped = (head: string, other: string) => ({ ...gated("running", head), group: [other] });
-		await setup(task({ slices: [slice("a", { reviewHead: "h1", gate: grouped("h1", "b") }), slice("b", { reviewHead: "hb", gate: grouped("hb", "a") })] }));
+		await setup(task({ slices: [slice("a", { reviewHead: "h1", gate: grouped("h1", "b"), reviews: approvedReviews() }), slice("b", { reviewHead: "hb", gate: grouped("hb", "a"), reviews: approvedReviews("hb") })] }));
 		await coordinator.gateResult("a", result({ passed: false }), [], [{ slice: "b", head: "hb" }]);
 		expect(builder("a").revise.mock.calls[0][0]).toMatch(/depends on \(or is depended on by\) b/);
 		expect(builder("b").revise.mock.calls[0][0]).toMatch(/depends on \(or is depended on by\) a/);
 	});
 
 	it("re-queues a result checked against a base that has since moved", async () => {
-		await setup(task({ slices: [slice("a", { reviewHead: "h1", gate: gated("running") }), slice("b")] }));
+		await setup(task({ slices: [slice("a", { reviewHead: "h1", gate: gated("running"), reviews: approvedReviews() }), slice("b")] }));
 		io.heads.set("t1--base", "base1");
 		expect(await coordinator.gateResult("a", result(), [])).toEqual({ outcome: "rerun" });
 		expect((await stored()).slices[0].status).toBe("building");
@@ -327,7 +390,7 @@ describe("the integration gate", () => {
 	});
 
 	it("sends back a slice that no longer merges onto the base", async () => {
-		await setup(task({ slices: [slice("a", { reviewHead: "h1", gate: gated("running") }), slice("b")] }));
+		await setup(task({ slices: [slice("a", { reviewHead: "h1", gate: gated("running"), reviews: approvedReviews() }), slice("b")] }));
 		io.mergeConflict = ["src/shared.ts"];
 		await coordinator.gateResult("a", result(), []);
 		expect(builder("a").revise.mock.calls[0][0]).toMatch(/conflicts with work already integrated.*src\/shared\.ts/s);

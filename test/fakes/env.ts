@@ -53,6 +53,7 @@ export function fakeEnv() {
 		REVIEWER: namespace(agent),
 		GATE: namespace(() => ({
 			enqueue: vi.fn(async (_taskId: string, _item: unknown) => {}),
+				cancel: vi.fn(async (_taskId: string, _slice: string, _head: string) => {}),
 			state: vi.fn(async () => ({ queue: gateQueue, current: gateCurrent.item })),
 		})),
 		CONTRACT_CHECKER: namespace(() => ({
