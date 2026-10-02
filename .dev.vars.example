@@ -1,0 +1,2 @@
+# Bearer token required on write routes. Leave unset to disable auth locally.
+API_TOKEN=change-me

@@ -1,0 +1,113 @@
+// Domain model. A task is one feature request against a project repo. A planner
+// (human or agent) turns it into a blueprint: contract files committed up front,
+// plus slices that agents build in parallel, each on its own Artifacts fork.
+
+export type Phase = "planning" | "awaiting-approval" | "building" | "landed";
+
+export type SliceStatus = "planned" | "building" | "integrated";
+
+export interface SliceSpec {
+	/** Lowercase slug, unique within the task. Used in repo names. */
+	id: string;
+	title: string;
+	/** Path prefixes this slice may change, e.g. ["src/billing/"]. */
+	owns: string[];
+	/** What the slice must implement, written for the agent that builds it. */
+	instructions: string;
+}
+
+export interface Slice extends SliceSpec {
+	status: SliceStatus;
+	/** Artifacts repo name of this slice's fork. */
+	repo?: string;
+	/** Last commit seen on the fork's main. */
+	head?: string;
+	/** Paths changed relative to the task base, as of `head`. */
+	touched: string[];
+	/** Touched paths outside `owns`. Non-empty means the agent left its lane. */
+	outOfLane: string[];
+	/** Commit the builder asked to have reviewed. Reviews of other commits don't count. */
+	reviewHead?: string;
+	reviews: Review[];
+}
+
+export interface Blueprint {
+	slices: SliceSpec[];
+	/** Files committed to the task base before any slice starts (types, interfaces, failing tests). */
+	contracts: Record<string, string>;
+	/** Defaults to DEFAULT_POLICY. */
+	review?: ReviewPolicy;
+}
+
+export const DEFAULT_POLICY: ReviewPolicy = {
+	reviewers: ["security", "tests", "api"],
+	required: 2,
+	vetoes: ["security"],
+};
+
+/** Quorum: who reviews each slice before it may integrate into the base. */
+export interface ReviewPolicy {
+	/** Reviewer roles, e.g. ["security", "tests", "api"]. Each is one specialist agent. */
+	reviewers: string[];
+	/** Approvals needed to integrate. */
+	required: number;
+	/** Roles whose rejection blocks integration regardless of the count. */
+	vetoes: string[];
+}
+
+export interface Review {
+	reviewer: string;
+	/** The commit reviewed. A review of an older head is stale and doesn't count. */
+	head: string;
+	verdict: "approve" | "reject";
+	summary: string;
+	/** Evidence the reviewer gathered: failing test output, an exploit, a benchmark. */
+	evidence?: string;
+	at: string;
+}
+
+export type QuorumStatus = "pending" | "approved" | "rejected" | "vetoed";
+
+export type CheckStatus = "clean" | "disjoint" | "conflict";
+
+/** Result of test-merging two in-progress heads (Merge-ahead). */
+export interface MergeCheck {
+	/** Slice ids, sorted. "base" stands for the task base's main. */
+	pair: [string, string];
+	heads: [string, string];
+	status: CheckStatus;
+	/** Conflicting paths when status is "conflict". */
+	files: string[];
+	checkedAt: string;
+}
+
+export interface Task {
+	id: string;
+	/** Project repo the task lands on. */
+	repo: string;
+	goal: string;
+	phase: Phase;
+	/** Repo holding the contracts; slices fork from it and integrate back into it. */
+	baseRepo?: string;
+	/** Commit on the base that slices forked from. */
+	baseCommit?: string;
+	contracts: string[];
+	review: ReviewPolicy;
+	slices: Slice[];
+	checks: MergeCheck[];
+	createdAt: string;
+}
+
+/** Handed to the agent that builds or reviews a slice. Never persisted. */
+export interface SliceCredentials {
+	slice: string;
+	repo: string;
+	remote: string;
+	token: string;
+}
+
+/** A reviewer's assignment: read-only access, pinned to one commit. */
+export interface ReviewAssignment extends SliceCredentials {
+	reviewer: string;
+	head: string;
+}

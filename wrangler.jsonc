@@ -1,0 +1,24 @@
+{
+	"$schema": "./node_modules/wrangler/config-schema.json",
+	"name": "blueprint",
+	"main": "src/index.ts",
+	"compatibility_date": "2026-10-01",
+	"compatibility_flags": ["nodejs_compat"],
+	"observability": { "enabled": true },
+	"artifacts": [
+		{
+			"binding": "ARTIFACTS",
+			"namespace": "blueprint",
+			// Artifacts has no local emulator; dev talks to the real service.
+			"remote": true
+		}
+	],
+	"durable_objects": {
+		"bindings": [{ "name": "COORDINATOR", "class_name": "Coordinator" }]
+	},
+	"migrations": [{ "tag": "v1", "new_sqlite_classes": ["Coordinator"] }],
+	"queues": {
+		// Receives Artifacts event subscriptions (see README).
+		"consumers": [{ "queue": "blueprint-events", "max_batch_size": 10, "max_batch_timeout": 1 }]
+	}
+}

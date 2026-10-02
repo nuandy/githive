@@ -1,0 +1,24 @@
+{
+	"name": "blueprint",
+	"version": "0.1.0",
+	"scripts": {
+		"dev": "wrangler dev",
+		"deploy": "wrangler deploy",
+		"types": "wrangler types",
+		"typecheck": "tsc",
+		"test": "vitest run"
+	},
+	"license": "MIT",
+	"description": "A Git platform where agents build planned slices in parallel and conflicts are caught before merge. Built on Cloudflare Workers + Artifacts.",
+	"dependencies": {
+		"hono": "^4.13.12",
+		"isomorphic-git": "^1.42.6"
+	},
+	"devDependencies": {
+		"typescript": "^7.0.2",
+		"vitest": "^5.0.3",
+		"wrangler": "^4.146.0"
+	},
+	"private": true,
+	"type": "module"
+}
