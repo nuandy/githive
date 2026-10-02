@@ -1,0 +1,11 @@
+.token-settings { position: relative; margin-left: auto; }
+.token-settings > summary { cursor: pointer; list-style: none; padding: 6px 10px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); }
+.token-settings > summary::-webkit-details-marker { display: none; }
+.token-settings > summary::before { content: "▸"; margin-right: 6px; }
+.token-settings[open] > summary::before { content: "▾"; }
+.token-settings form { position: absolute; z-index: 5; right: 0; top: calc(100% + 6px); width: min(360px, calc(100vw - 24px)); padding: 12px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); box-shadow: 0 4px 14px color-mix(in srgb, var(--text) 15%, transparent); }
+.token-settings label { display: block; margin-bottom: 6px; font-weight: 600; font-size: 12px; }
+.token-settings__controls { display: flex; gap: 6px; }
+.token-settings input { flex: 1; min-width: 0; padding: 7px 8px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); color: var(--text); font: inherit; }
+.token-settings p { margin: 8px 0 0; font-size: 11px; }
+@media (max-width: 420px) { .token-settings form { right: -8px; } }
