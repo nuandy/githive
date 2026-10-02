@@ -22,6 +22,8 @@ export interface GateItem {
 	head: string;
 	/** Other slices to merge in the same run, when slices depend on each other (a group gate). */
 	group?: { slice: string; head: string }[];
+	/** Internal marker set when a running item is cancelled. */
+	cancelled?: boolean;
 }
 
 /** What the Coordinator hands a run when it starts. */
@@ -37,14 +39,49 @@ export interface GatePlan {
 }
 
 const INSTALL = /^npm ci(\s|$)/;
+const CANCELLATIONS = "cancelled-item-ids";
+
+const members = (item: GateItem) => [{ slice: item.slice, head: item.head }, ...(item.group ?? [])];
+const covers = (item: GateItem, slice: string, head: string) => members(item).some((m) => m.slice === slice && m.head === head);
+const overlaps = (a: GateItem, b: GateItem) => members(a).some((x) => members(b).some((y) => x.slice === y.slice));
 
 export class Gate extends DurableObject<Env> {
 	/** Queue a slice's approved commit. A newer item for the same slices replaces an older one. */
 	async enqueue(taskId: string, item: GateItem) {
-		const covered = new Set([item.slice, ...(item.group ?? []).map((g) => g.slice)]);
-		const queue = ((await this.ctx.storage.get<GateItem[]>("queue")) ?? []).filter((q) => !covered.has(q.slice));
-		await this.ctx.storage.put({ taskId, queue: [...queue, { ...item, id: crypto.randomUUID() }] });
+		const queued = (await this.ctx.storage.get<GateItem[]>("queue")) ?? [];
+		const current = await this.ctx.storage.get<GateItem>("current");
+		const replaced = queued.filter((q) => q.id !== current?.id && overlaps(q, item));
+		const queue = queued.filter((q) => !replaced.some((r) => r.id === q.id));
+		const cancelled = (await this.ctx.storage.get<string[]>(CANCELLATIONS)) ?? [];
+		const replacedIds = replaced.map((q) => q.id).filter((id): id is string => !!id);
+		await this.ctx.storage.put({
+			taskId,
+			queue: [...queue, { ...item, id: crypto.randomUUID() }],
+			[CANCELLATIONS]: [...new Set([...cancelled, ...replacedIds])],
+		});
 		await this.ctx.storage.setAlarm(Date.now());
+	}
+
+	/** Cancel only the queued/current item containing this exact member commit. */
+	async cancel(taskId: string, slice: string, head: string): Promise<void> {
+		if ((await this.ctx.storage.get<string>("taskId")) !== taskId) return;
+		const [queue, current, cancelled] = await Promise.all([
+			this.ctx.storage.get<GateItem[]>("queue"),
+			this.ctx.storage.get<GateItem>("current"),
+			this.ctx.storage.get<string[]>(CANCELLATIONS),
+		]);
+		const queued = queue ?? [];
+		const matched = queued.filter((item) => covers(item, slice, head));
+		const currentMatches = !!current && current.id !== undefined && covers(current, slice, head);
+		const ids = [...matched.map((item) => item.id), ...(currentMatches ? [current!.id] : [])].filter((id): id is string => !!id);
+		const nextQueue = queued.filter((item) => !matched.some((match) => match.id === item.id));
+		const updates: Record<string, unknown> = {
+			queue: nextQueue,
+			[CANCELLATIONS]: [...new Set([...(cancelled ?? []), ...ids])],
+		};
+		if (currentMatches) updates.current = { ...current!, cancelled: true };
+		await this.ctx.storage.put(updates);
+		if (nextQueue.length) await this.ctx.storage.setAlarm(Date.now());
 	}
 
 	async state() {
@@ -52,16 +89,44 @@ export class Gate extends DurableObject<Env> {
 		return { queue: queue ?? [], current: current ?? null };
 	}
 
+	/** Whether this exact queue item still exists and has not been cancelled/replaced. */
+	private async itemIsLive(item: GateItem) {
+		const [queue, cancelled] = await Promise.all([
+			this.ctx.storage.get<GateItem[]>("queue"),
+			this.ctx.storage.get<string[]>(CANCELLATIONS),
+		]);
+		return !!item.id && (queue ?? []).some((queued) => queued.id === item.id) && !(cancelled ?? []).includes(item.id);
+	}
+
+	/** Drop only this run's item/current marker, never a newer item for the same slice. */
+	private async finishItem(item: GateItem) {
+		const [queue, current] = await Promise.all([
+			this.ctx.storage.get<GateItem[]>("queue"),
+			this.ctx.storage.get<GateItem>("current"),
+		]);
+		const rest = (queue ?? []).filter((q) => q.id !== item.id);
+		await this.ctx.storage.put("queue", rest);
+		if (current?.id === item.id) await this.ctx.storage.delete("current");
+		if (rest.length) await this.ctx.storage.setAlarm(Date.now());
+	}
+
 	async alarm() {
 		const taskId = await this.ctx.storage.get<string>("taskId");
 		const queue = (await this.ctx.storage.get<GateItem[]>("queue")) ?? [];
 		const item = queue[0];
 		if (!taskId || !item) return;
-		await this.ctx.storage.put("current", item);
-		const coordinator = this.env.COORDINATOR.get(this.env.COORDINATOR.idFromName(taskId));
 
-		const plan = await coordinator.gatePlan(item.slice, item.head, item.group);
-		if (plan) {
+		// A cancellation can race the initial queue read. Check before claiming,
+		// then again after writing current so a cancellation in that gap is seen.
+		if (!(await this.itemIsLive(item))) return;
+		await this.ctx.storage.put("current", item);
+		try {
+			if (!(await this.itemIsLive(item))) return;
+			const coordinator = this.env.COORDINATOR.get(this.env.COORDINATOR.idFromName(taskId));
+			const plan = await coordinator.gatePlan(item.slice, item.head, item.group);
+			// gatePlan may wait on Coordinator I/O while a send-back cancels the item.
+			if (!plan || !(await this.itemIsLive(item))) return;
+
 			let result: GateResult;
 			try {
 				result = await this.check(item, plan);
@@ -71,16 +136,11 @@ export class Gate extends DurableObject<Env> {
 				result = { passed: false, head: item.head, baseHead: plan.baseHead, results: [{ command: "(gate setup)", exitCode: 1, output: message }], at: new Date().toISOString() };
 				await this.ctx.storage.delete("prepared"); // start from a fresh checkout next time
 			}
-			await coordinator.gateResult(item.slice, result, plan.exclude, item.group);
+			// A veto may arrive while checks are running; never report that stale result.
+			if (await this.itemIsLive(item)) await coordinator.gateResult(item.slice, result, plan.exclude, item.group);
+		} finally {
+			await this.finishItem(item);
 		}
-
-		// Done with this item. Remove it by id: the run may have queued a new item
-		// for the same slice and commit (a group gate), which must stay.
-		const latest = (await this.ctx.storage.get<GateItem[]>("queue")) ?? [];
-		const rest = latest.filter((q) => q.id !== item.id);
-		await this.ctx.storage.put("queue", rest);
-		await this.ctx.storage.delete("current");
-		if (rest.length) await this.ctx.storage.setAlarm(Date.now());
 	}
 
 	private async check(item: GateItem, plan: GatePlan): Promise<GateResult> {

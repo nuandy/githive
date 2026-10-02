@@ -12,6 +12,15 @@ function gateWith(coordinator: { gatePlan: ReturnType<typeof vi.fn>; gateResult:
 	return { gate: new Gate({ storage } as never, env as never), storage };
 }
 
+const plan = {
+	baseHead: "base0",
+	base: { remote: "https://git.test/base.git", token: "base-token" },
+	fork: { remote: "https://git.test/a.git", token: "slice-token" },
+	others: [],
+	checks: ["npm test"],
+	exclude: [],
+};
+
 describe("gate queue", () => {
 	it("keeps an item queued during a run for the same slice and commit", async () => {
 		// While running a's solo item, the Coordinator queues a group item that also leads with a@h1.
@@ -27,8 +36,9 @@ describe("gate queue", () => {
 		gate = made.gate;
 		await gate.enqueue("t1", { slice: "a", head: "h1" });
 		await gate.alarm();
-		const { queue } = await gate.state();
+		const { queue, current } = await gate.state();
 		expect(queue).toEqual([expect.objectContaining({ slice: "a", head: "h1", group: [{ slice: "b", head: "hb" }] })]);
+		expect(current).toBeNull();
 	});
 
 	it("replaces a queued item for the same slices", async () => {
@@ -36,5 +46,55 @@ describe("gate queue", () => {
 		await gate.enqueue("t1", { slice: "a", head: "h1" });
 		await gate.enqueue("t1", { slice: "a", head: "h2" });
 		expect((await gate.state()).queue.map((q) => q.head)).toEqual(["h2"]);
+	});
+
+	it("does not start a plan when its queued item was cancelled", async () => {
+		const coordinator = { gatePlan: vi.fn(async () => plan), gateResult: vi.fn() };
+		const { gate } = gateWith(coordinator);
+		await gate.enqueue("t1", { slice: "a", head: "h1" });
+		await gate.cancel("t1", "a", "h1");
+
+		await gate.alarm();
+		expect(coordinator.gatePlan).not.toHaveBeenCalled();
+		expect(coordinator.gateResult).not.toHaveBeenCalled();
+		expect((await gate.state()).queue).toEqual([]);
+	});
+
+	it("allows a later retry of the same commit after cancellation", async () => {
+		const coordinator = { gatePlan: vi.fn(async () => null), gateResult: vi.fn() };
+		const { gate } = gateWith(coordinator);
+		await gate.enqueue("t1", { slice: "a", head: "h1" });
+		await gate.cancel("t1", "a", "h1");
+		await gate.enqueue("t1", { slice: "a", head: "h1" });
+
+		await gate.alarm();
+		expect(coordinator.gatePlan).toHaveBeenCalledTimes(1);
+		expect((await gate.state()).queue).toEqual([]);
+	});
+
+	it("checks cancellation again after the coordinator returns a plan", async () => {
+		const coordinator = { gatePlan: vi.fn(), gateResult: vi.fn() };
+		const { gate } = gateWith(coordinator);
+		let entered!: () => void;
+		let release!: () => void;
+		const waiting = new Promise<void>((resolve) => (release = resolve));
+		const started = new Promise<void>((resolve) => (entered = resolve));
+		coordinator.gatePlan.mockImplementation(async () => {
+			entered();
+			await waiting;
+			return plan;
+		});
+		const check = vi.fn();
+		Object.defineProperty(gate, "check", { value: check });
+		await gate.enqueue("t1", { slice: "a", head: "h1" });
+
+		const run = gate.alarm();
+		await started;
+		await gate.cancel("t1", "a", "h1");
+		release();
+		await run;
+		expect(check).not.toHaveBeenCalled();
+		expect(coordinator.gateResult).not.toHaveBeenCalled();
+		expect((await gate.state()).current).toBeNull();
 	});
 });
