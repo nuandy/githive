@@ -105,12 +105,14 @@ export function App() {
 	const [tasks, setTasks] = useState<Task[]>([]);
 	const [repos, setRepos] = useState<{ name: string }[]>([]);
 	const [selectedId, setSelectedId] = useState<string | null>(() => taskIdFromHash(window.location.hash));
+	const [selectionEpoch, setSelectionEpoch] = useState(0);
+	const selectionEpochRef = useRef(0);
 	const [live, setLive] = useState<Live | null>(null);
 	const [tasksLoaded, setTasksLoaded] = useState(false);
 	const [reposLoaded, setReposLoaded] = useState(false);
 	const [creating, setCreating] = useState(false);
 	const [busy, setBusy] = useState(false);
-	const [contractReadiness, setContractReadiness] = useState<{ taskId: string; contractsKey: string; ready: boolean } | null>(null);
+	const [contractReadiness, setContractReadiness] = useState<{ taskId: string; contractsKey: string; selectionEpoch: number; ready: boolean } | null>(null);
 	const [errors, setErrors] = useState<string[]>([]);
 	const selectedRef = useRef(selectedId);
 	selectedRef.current = selectedId;
@@ -152,17 +154,27 @@ export function App() {
 		return startTaskListPolling(() => void fetchTasks());
 	}, [fetchTasks, refresh]);
 
-	useEffect(() => {
-		const onHashChange = () => setSelectedId(taskIdFromHash(window.location.hash));
-		window.addEventListener("hashchange", onHashChange);
-		return () => window.removeEventListener("hashchange", onHashChange);
+	const changeSelection = useCallback((id: string | null) => {
+		if (selectedRef.current !== id) {
+			const nextEpoch = selectionEpochRef.current + 1;
+			selectionEpochRef.current = nextEpoch;
+			setSelectionEpoch(nextEpoch);
+			selectedRef.current = id;
+		}
+		setSelectedId(id);
 	}, []);
 
+	useEffect(() => {
+		const onHashChange = () => changeSelection(taskIdFromHash(window.location.hash));
+		window.addEventListener("hashchange", onHashChange);
+		return () => window.removeEventListener("hashchange", onHashChange);
+	}, [changeSelection]);
+
 	const selectTask = useCallback((id: string) => {
-		setSelectedId(id);
+		changeSelection(id);
 		const nextHash = `#/tasks/${encodeURIComponent(id)}`;
 		if (window.location.hash !== nextHash) window.location.hash = nextHash;
-	}, []);
+	}, [changeSelection]);
 
 	useEffect(() => {
 		if (!selectedId) {
@@ -192,12 +204,13 @@ export function App() {
 	const selectedContractsKey = selectedTask ? JSON.stringify(selectedTask.contracts) : "";
 	const contractsReady = !!selectedTask && selectedTask.phase === "awaiting-approval"
 		&& contractReadiness?.taskId === selectedTask.id
+		&& contractReadiness.selectionEpoch === selectionEpoch
 		&& contractReadiness.contractsKey === selectedContractsKey
 		&& contractReadiness.ready;
 	const onContractFilesReady = useCallback((taskId: string, ready: boolean) => {
 		if (selectedTask?.id !== taskId) return;
-		setContractReadiness({ taskId, contractsKey: selectedContractsKey, ready });
-	}, [selectedContractsKey, selectedTask?.id]);
+		setContractReadiness({ taskId, contractsKey: selectedContractsKey, selectionEpoch, ready });
+	}, [selectedContractsKey, selectedTask?.id, selectionEpoch]);
 
 	const createTask = useCallback(async (repo: string, goal: string) => {
 		setCreating(true);
@@ -292,7 +305,7 @@ export function App() {
 							{!reposLoaded && <p className="muted">Loading repositories…</p>}
 						</section>
 					) : (
-						<TaskDetailBoundary key={selectedTask.id}>
+						<TaskDetailBoundary key={`${selectedTask.id}:${selectionEpoch}`}>
 							<div className="dashboard-task">
 								<TaskHeader
 									task={selectedTask}
