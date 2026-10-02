@@ -1,4 +1,5 @@
 import type { Remote } from "./git";
+import { isTransientFailure, retryTransient } from "./retry";
 
 // Repo names encode the task (<taskId>--<slice>) so Artifacts events can be
 // routed back to the task's Coordinator without a lookup table.
@@ -23,8 +24,11 @@ export async function remoteFor(
 	scope: "read" | "write" = "read",
 	ttlSeconds = 600,
 ): Promise<Remote> {
-	using repo = await artifacts.get(name);
-	const [info, token] = await Promise.all([repo.info(), repo.createToken(scope, ttlSeconds)]);
+	using repo = await retryTransient(() => artifacts.get(name));
+	const [info, token] = await Promise.all([
+		retryTransient(() => repo.info()),
+		retryTransient(() => repo.createToken(scope, ttlSeconds)),
+	]);
 	return { url: info.remote, token: token.plaintext };
 }
 
@@ -33,8 +37,8 @@ export async function remoteFor(
  * prints), or null when the file doesn't exist.
  */
 export async function fileVersion(artifacts: Artifacts, name: string, path: string, ref = "main") {
-	using repo = await artifacts.get(name);
-	const blob = await repo.readFile({ ref, path });
+	using repo = await retryTransient(() => artifacts.get(name));
+	const blob = await retryTransient(() => repo.readFile({ ref, path }));
 	if (!blob) return null;
 	const bytes = new Uint8Array(await blob.arrayBuffer());
 	return { id: await blobId(bytes), text: new TextDecoder().decode(bytes) };
@@ -51,24 +55,30 @@ export async function blobId(bytes: Uint8Array) {
 }
 
 export async function headOf(artifacts: Artifacts, name: string, ref = "main") {
-	using repo = await artifacts.get(name);
-	const [latest] = await repo.log({ ref, limit: 1 });
+	using repo = await retryTransient(() => artifacts.get(name));
+	const [latest] = await retryTransient(() => repo.log({ ref, limit: 1 }));
 	return latest?.hash;
+}
+
+function isForkPending(err: unknown) {
+	if (!err || typeof err !== "object" || !("code" in err)) return false;
+	return ["FORK_IN_PROGRESS", "CREATE_IN_PROGRESS", "IMPORT_IN_PROGRESS"].includes(String(err.code));
 }
 
 /** Fork `source` and wait until the fork is ready, since get() throws while a repo is still forking. */
 export async function forkAndWait(artifacts: Artifacts, source: string, name: string, description: string) {
 	let forked: ArtifactsCreateRepoResult;
 	{
-		using repo = await artifacts.get(source);
-		forked = await repo.fork(name, { description, defaultBranchOnly: true });
+		using repo = await retryTransient(() => artifacts.get(source));
+		forked = await retryTransient(() => repo.fork(name, { description, defaultBranchOnly: true }));
 	}
 	const deadline = Date.now() + 20_000;
 	for (let delay = 100; ; delay = Math.min(delay * 2, 2_000)) {
 		try {
-			using _ready = await artifacts.get(name);
+			using _ready = await retryTransient(() => artifacts.get(name));
 			return forked;
 		} catch (err) {
+			if (!isTransientFailure(err) && !isForkPending(err)) throw err;
 			if (Date.now() > deadline) throw new Error(`fork ${name} not ready after 20s: ${err}`);
 			await scheduler.wait(delay);
 		}

@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { forkAndWait, parseRepoName, remoteFor, reviewerName } from "./artifacts";
 import { statusOf } from "./errors";
+import { retryTransient } from "./retry";
 import { Workspace } from "./git";
 import type { Blueprint, Limits, Review } from "./types";
 
@@ -28,6 +29,7 @@ app.use("*", async (c, next) => {
 
 app.onError((err, c) => {
 	const { status, message } = statusOf(err);
+	if (status >= 500) console.error("API error", err);
 	return c.json({ error: message }, status as 400);
 });
 
@@ -81,7 +83,7 @@ app.post("/spike", async (c) => {
 		return result;
 	};
 
-	const created = await time("create", () => artifacts.create(`spike-${id}`));
+	const created = await time("create", () => retryTransient(() => artifacts.create(`spike-${id}`)));
 	const origin = { url: created.remote, token: created.token };
 	await time("initial push", async () => {
 		const ws = await Workspace.init(origin);
@@ -126,7 +128,7 @@ app.post("/spike", async (c) => {
 
 app.post("/repos/import", async (c) => {
 	const { url, name, branch } = await c.req.json<{ url: string; name: string; branch?: string }>();
-	const imported = await c.env.ARTIFACTS.import({ source: { url, branch }, target: { name } });
+	const imported = await retryTransient(() => c.env.ARTIFACTS.import({ source: { url, branch }, target: { name } }));
 	return c.json({ name: imported.name, remote: imported.remote, defaultBranch: imported.defaultBranch });
 });
 
@@ -155,7 +157,7 @@ app.get("/tasks", async (c) => {
 // Repos in the namespace, for the dashboard's "new task" form. Task repos
 // (<taskId>--...) are left out.
 app.get("/repos", async (c) => {
-	const page = await c.env.ARTIFACTS.list({ limit: 100 });
+	const page = await retryTransient(() => c.env.ARTIFACTS.list({ limit: 100 }));
 	return c.json(page.repos.filter((r) => !parseRepoName(r.name)).map((r) => ({ name: r.name })));
 });
 
@@ -309,7 +311,7 @@ export default {
 				try {
 					await coordinator(env, target.taskId).recordPush(target.slice);
 				} catch (err) {
-					console.error("recordPush failed", event.source.repoName, statusOf(err).message);
+					console.error("recordPush failed", event.source.repoName, statusOf(err).message, err);
 				}
 			}
 			message.ack();
