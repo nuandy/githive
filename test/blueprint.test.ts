@@ -34,3 +34,12 @@ describe("blueprintProblems", () => {
 		expect(problems).toEqual(["Review policy: required must be between 1 and 1"]);
 	});
 });
+
+describe("slice tests", () => {
+	it("must be contract files", () => {
+		const problems = blueprintProblems(
+			blueprint({ slices: [{ ...slice("api", ["src/api/"]), tests: ["src/contract.ts", "test/missing.test.ts"] }] }),
+		);
+		expect(problems).toEqual(["Slice api lists test test/missing.test.ts, which is not a contract file."]);
+	});
+});

@@ -5,6 +5,7 @@ import { fail } from "./errors";
 import { Workspace } from "./git";
 import { blueprintProblems } from "./blueprint";
 import type { BuildJob } from "./builder";
+import type { ReviewJob } from "./reviewer";
 import { plan } from "./planner";
 import { tally } from "./quorum";
 import {
@@ -126,11 +127,12 @@ export class Coordinator extends DurableObject<Env> {
 			const review = blueprint.review ?? DEFAULT_POLICY;
 
 			task.rationale = rationale;
-			task.slices = slices.map(({ id, title, owns, instructions }) => ({
+			task.slices = slices.map(({ id, title, owns, instructions, tests }) => ({
 				id,
 				title,
 				owns,
 				instructions,
+				tests: tests ?? [],
 				status: "planned",
 				touched: [],
 				outOfLane: [],
@@ -199,7 +201,7 @@ export class Coordinator extends DurableObject<Env> {
 					const job: BuildJob = {
 						taskId: task.id,
 						goal: task.goal,
-						slice: { id: slice.id, title: slice.title, owns: slice.owns, instructions: slice.instructions },
+						slice: { id: slice.id, title: slice.title, owns: slice.owns, instructions: slice.instructions, tests: slice.tests },
 						siblings: task.slices.filter((s) => s !== slice).map(({ id, title, owns }) => ({ id, title, owns })),
 						contracts: task.contracts,
 						repo: slice.repo!,
@@ -290,11 +292,7 @@ export class Coordinator extends DurableObject<Env> {
 		return this.exclusive(async () => {
 			const task = await this.load();
 			const slice = this.slice(task, sliceId);
-			if (slice.status !== "building") fail(409, `slice ${sliceId} is ${slice.status}`);
-			const head = await headOf(this.env.ARTIFACTS, slice.repo!);
-			if (!head || head === task.baseCommit) fail(409, `slice ${sliceId} has no work to review`);
-
-			slice.reviewHead = head;
+			const head = await this.pinForReview(task, slice);
 			const assignments: ReviewAssignment[] = await Promise.all(
 				task.review.reviewers.map(async (reviewer) => {
 					const remote = await remoteFor(this.env.ARTIFACTS, slice.repo!, "read", 3600);
@@ -303,6 +301,52 @@ export class Coordinator extends DurableObject<Env> {
 			);
 			await this.save(task);
 			return { task, assignments };
+		});
+	}
+
+	/** Pin the slice's current head as the commit under review. */
+	private async pinForReview(task: Task, slice: Slice) {
+		if (slice.status !== "building") fail(409, `slice ${slice.id} is ${slice.status}`);
+		const head = await headOf(this.env.ARTIFACTS, slice.repo!);
+		if (!head || head === task.baseCommit) fail(409, `slice ${slice.id} has no work to review`);
+		slice.reviewHead = head;
+		return head;
+	}
+
+	/**
+	 * Quorum, hosted. Pin the head and start one reviewer agent per role, each in
+	 * its own container with a read-only token. Builders call this on finish.
+	 */
+	startReviewers(sliceId: string, buildSummary?: string) {
+		return this.exclusive(async () => {
+			const task = await this.load();
+			const slice = this.slice(task, sliceId);
+			const head = await this.pinForReview(task, slice);
+			if (buildSummary) slice.buildSummary = buildSummary;
+			await this.save(task);
+
+			const reviewers = task.review.reviewers;
+			await Promise.all(
+				reviewers.map(async (role) => {
+					const remote = await remoteFor(this.env.ARTIFACTS, slice.repo!, "read", 3 * 3600);
+					const job: ReviewJob = {
+						taskId: task.id,
+						goal: task.goal,
+						slice: { id: slice.id, title: slice.title, owns: slice.owns, instructions: slice.instructions, tests: slice.tests },
+						siblings: task.slices.filter((s) => s !== slice).map(({ id, title, owns }) => ({ id, title, owns })),
+						contracts: task.contracts,
+						repo: slice.repo!,
+						remote: remote.url,
+						token: remote.token,
+						role,
+						head,
+						baseCommit: task.baseCommit!,
+						buildSummary: slice.buildSummary,
+					};
+					await this.env.REVIEWER.getByName(`${slice.repo}--review-${role}`).start(job);
+				}),
+			);
+			return { head, reviewers };
 		});
 	}
 

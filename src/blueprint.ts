@@ -31,6 +31,9 @@ export function blueprintProblems(blueprint: Blueprint): string[] {
 
 	for (const path of Object.keys(contracts ?? {}))
 		if (path.startsWith("/") || path.split("/").includes("..")) problems.push(`Contract path is invalid: ${path}`);
+	for (const s of slices)
+		for (const test of s.tests ?? [])
+			if (!(test in (contracts ?? {}))) problems.push(`Slice ${s.id} lists test ${test}, which is not a contract file.`);
 
 	try {
 		validatePolicy(blueprint.review ?? DEFAULT_POLICY);

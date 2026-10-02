@@ -18,15 +18,20 @@
 	"durable_objects": {
 		"bindings": [
 			{ "name": "COORDINATOR", "class_name": "Coordinator" },
-			{ "name": "BUILDER", "class_name": "Builder" }
+			{ "name": "BUILDER", "class_name": "Builder" },
+			{ "name": "REVIEWER", "class_name": "Reviewer" }
 		]
 	},
-	// One container per Builder. The image (cloudflare/debian-trixie) is chosen at
-	// start(), so no Dockerfile or local Docker is needed to deploy.
-	"containers": [{ "class_name": "Builder", "scheduling_policy": "durable_object" }],
+	// One container per builder or reviewer agent. The image (cloudflare/debian-trixie)
+	// is chosen at start(), so no Dockerfile or local Docker is needed to deploy.
+	"containers": [
+		{ "class_name": "Builder", "scheduling_policy": "durable_object" },
+		{ "class_name": "Reviewer", "scheduling_policy": "durable_object" }
+	],
 	"migrations": [
 		{ "tag": "v1", "new_sqlite_classes": ["Coordinator"] },
-		{ "tag": "v2", "new_sqlite_classes": ["Builder"] }
+		{ "tag": "v2", "new_sqlite_classes": ["Builder"] },
+		{ "tag": "v3", "new_sqlite_classes": ["Reviewer"] }
 	],
 	"queues": {
 		// Receives Artifacts event subscriptions (see README).

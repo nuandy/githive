@@ -5,6 +5,7 @@ import { Workspace } from "./git";
 import type { Blueprint, Review } from "./types";
 
 export { Builder } from "./builder";
+export { Reviewer } from "./reviewer";
 export { Coordinator } from "./coordinator";
 
 const app = new Hono<{ Bindings: Env }>();
@@ -41,6 +42,8 @@ app.get("/", (c) =>
 			"GET  /tasks/:id/slices/:slice/builder",
 			"POST /tasks/:id/slices/:slice/pushed",
 			"POST /tasks/:id/slices/:slice/review",
+			"POST /tasks/:id/slices/:slice/reviewers",
+			"GET  /tasks/:id/slices/:slice/reviewers",
 			"POST /tasks/:id/slices/:slice/reviews {reviewer, head, verdict, summary, evidence?}",
 			"POST /tasks/:id/slices/:slice/integrate",
 			"POST /tasks/:id/land",
@@ -150,6 +153,21 @@ app.post("/tasks/:id/slices/:slice/pushed", async (c) => {
 app.post("/tasks/:id/slices/:slice/review", async (c) => {
 	const { id, slice } = c.req.param();
 	return c.json(await coordinator(c.env, id).requestReview(slice));
+});
+
+// Starts hosted reviewer agents (one container per role). Builders do this on finish.
+app.post("/tasks/:id/slices/:slice/reviewers", async (c) => {
+	const { id, slice } = c.req.param();
+	return c.json(await coordinator(c.env, id).startReviewers(slice), 202);
+});
+
+app.get("/tasks/:id/slices/:slice/reviewers", async (c) => {
+	const { id, slice } = c.req.param();
+	const task = await coordinator(c.env, id).state();
+	const states = await Promise.all(
+		task.review.reviewers.map(async (role) => ({ role, state: await c.env.REVIEWER.getByName(`${id}--${slice}--review-${role}`).state() })),
+	);
+	return c.json(states);
 });
 
 app.post("/tasks/:id/slices/:slice/reviews", async (c) => {

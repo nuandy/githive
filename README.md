@@ -16,7 +16,9 @@ POST /tasks/:id/approve             forks <id>--base, commits contracts, forks o
                                     -> returns write credentials for each builder agent
      builder pushes to its fork
 POST /tasks/:id/slices/:s/pushed    Merge-ahead: touched paths, out-of-lane paths, pairwise checks
-POST /tasks/:id/slices/:s/review    pins the head, returns read-only assignments for reviewers
+POST /tasks/:id/build               starts a hosted builder agent per slice
+POST /tasks/:id/slices/:s/reviewers starts hosted reviewer agents (builders do this on finish)
+POST /tasks/:id/slices/:s/review    or pins the head and returns read-only assignments for your own reviewers
 POST /tasks/:id/slices/:s/reviews   a reviewer's verdict on the pinned head
 POST /tasks/:id/slices/:s/integrate requires an approved quorum on the current head
 POST /tasks/:id/land                merges the base into the project repo
@@ -25,6 +27,10 @@ POST /tasks/:id/land                merges the base into the project repo
 The planner agent (OpenAI `gpt-6-luna`, via the Responses API) reads the repo through the Artifacts binding, with no clone, and finishes by calling a `submit_blueprint` tool. That tool applies the same validation as the Coordinator and returns any problems to the model to fix. Planning runs from a Durable Object alarm, so poll `GET /tasks/:id` until `planner.status` is `done` or `failed`.
 
 `POST /tasks/:id/build` starts one hosted builder per slice: a `Builder` Durable Object with its own Linux container (the managed `cloudflare/debian-trixie` image, Node 24). A `gpt-6-luna` agent works on the slice's fork through tools (list, read, write, run a command, `commit_and_push`, `finish`). Every push runs Merge-ahead, and the agent gets the conflicts and lane violations back as the tool result. The fork's token is passed only on the git commands the Builder runs itself, so it never sits in the container's files or environment. Follow progress at `GET /tasks/:id/slices/:slice/builder`.
+
+When a builder finishes, its slice goes to review. One `Reviewer` per role (the planner picks the roles, for example security, tests and api) checks out the exact commit under review in its own container, with a read-only token. It reads the diff, runs the slice's acceptance tests, and calls `submit_verdict` with evidence. The vote goes to the slice's Quorum, and a vote on a commit that has since moved is rejected as stale. Follow reviewers at `GET /tasks/:id/slices/:slice/reviewers`.
+
+Each slice lists the contract tests it must make pass. Builders and reviewers run those, because another slice's contract tests can fail until that slice is integrated.
 
 One `Coordinator` Durable Object per task holds its state and runs every Git write. The Artifacts binding creates, forks and reads repos. Commits, merges and pushes go through [isomorphic-git](https://isomorphic-git.org/) on an in-memory filesystem, because the binding can't write inside a repo.
 
@@ -66,7 +72,7 @@ npm run types       # regenerate worker-configuration.d.ts after editing wrangle
 
 - **Push events.** Artifacts `pushed` events are per-repo subscriptions, so forks created at runtime aren't covered by a static subscription. For now, builders report pushes via `POST .../pushed`. The queue consumer handles any repo that does have a subscription.
 - **Semantic conflicts.** Merge-ahead detects text conflicts. Running tests on each clean merge in a Sandbox is still to do.
-- **Agents.** Reviewer agents aren't in this repo yet. The HTTP API above is what they will call.
+- **Feedback loop.** A rejected slice doesn't go back to its builder automatically yet.
 
 ## License
 

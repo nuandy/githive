@@ -14,6 +14,11 @@ export interface SliceSpec {
 	owns: string[];
 	/** What the slice must implement, written for the agent that builds it. */
 	instructions: string;
+	/**
+	 * Contract test files this slice must make pass. Other slices' contract tests
+	 * may fail on this slice alone; they pass once everything is integrated.
+	 */
+	tests?: string[];
 }
 
 export interface Slice extends SliceSpec {
@@ -29,6 +34,8 @@ export interface Slice extends SliceSpec {
 	/** Commit the builder asked to have reviewed. Reviews of other commits don't count. */
 	reviewHead?: string;
 	reviews: Review[];
+	/** The builder's account of what it built, passed to reviewers. */
+	buildSummary?: string;
 }
 
 export interface Blueprint {
