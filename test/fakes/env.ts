@@ -55,6 +55,10 @@ export function fakeEnv() {
 			enqueue: vi.fn(async (_taskId: string, _item: unknown) => {}),
 			state: vi.fn(async () => ({ queue: gateQueue, current: gateCurrent.item })),
 		})),
+		CONTRACT_CHECKER: namespace(() => ({
+			check: vi.fn(async (job: { contracts: Record<string, string> }) => ({ status: "passed" as const, checked: Object.keys(job.contracts), unchecked: [] })),
+			dispose: vi.fn(async () => undefined),
+		})),
 		ARTIFACTS: {},
 		OPENAI_API_KEY: "test",
 	};

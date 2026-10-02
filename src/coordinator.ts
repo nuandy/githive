@@ -2,6 +2,8 @@ import { DurableObject } from "cloudflare:workers";
 import git from "isomorphic-git";
 import { baseRepoName, fileVersion, forkAndWait, headOf, remoteFor, reviewerName, sliceRepoName } from "./artifacts";
 import { fail, statusOf } from "./errors";
+import type { ContractCheckResult } from "./contract-check";
+import { describeError } from "./contract-check-plan";
 import { isTransientFailure, retryTransient } from "./retry";
 import { Workspace } from "./git";
 import { type LedgerDoc, type LedgerEntry, clipText, diff, fromDoc, replay, toDoc } from "./ledger";
@@ -640,6 +642,27 @@ export class Coordinator extends DurableObject<Env> {
 		}
 		if (!decision.approve) return this.settleAmendment(amendment.id, { status: "rejected", decision: decision.reason });
 
+		// Contract checks can take tens of seconds. Run them before taking the
+		// Coordinator lock so votes and other task updates aren't blocked.
+		const checker = this.env.CONTRACT_CHECKER.getByName("amend-" + task.id + "-" + amendment.id);
+		let checkResult: ContractCheckResult;
+		try {
+			const commit = await headOf(this.env.ARTIFACTS, task.baseRepo!);
+			if (!commit) throw new Error("task base has no commits");
+			const remote = await remoteFor(this.env.ARTIFACTS, task.baseRepo!, "read");
+			checkResult = await checker.check({ remote: remote.url, token: remote.token, commit, contracts: { [input.path]: input.content } });
+		} catch (err) {
+			// Like the planner, don't block on checker infrastructure failures.
+			checkResult = { status: "skipped", reason: "the check could not run: " + (err instanceof Error ? err.message : String(err)) };
+		} finally {
+			await checker.dispose().catch(() => {});
+		}
+		if (checkResult.status === "failed") {
+			const diagnostics = checkResult.errors.map(describeError);
+			const details = diagnostics.length ? diagnostics.map((line) => "- " + line).join("\n") : "- The checker reported errors without diagnostics.";
+			return this.settleAmendment(amendment.id, { status: "failed", decision: "Contract check failed:\n" + details });
+		}
+
 		return this.exclusive(async () => {
 			const latest = await this.load();
 			const a = latest.amendments!.find((x) => x.id === amendment.id)!;
@@ -701,7 +724,15 @@ export class Coordinator extends DurableObject<Env> {
 			const quorum = tally(task.review, slice);
 			this.note(task, input.head, `${slice.id}: ${input.reviewer} reviewer ${input.verdict === "approve" ? "approved" : "rejected"}: ${input.summary}`);
 			if (quorum.status !== "pending") this.note(task, input.head, `${slice.id}: quorum ${quorum.status}`);
+			if (slice.status === "integrated" && input.verdict === "reject") {
+				const finding = "Late rejection from " + input.reviewer + " after integration: " + input.summary + (input.evidence ? "\nEvidence: " + input.evidence : "");
+				slice.attention = [slice.attention, finding].filter(Boolean).join("\n");
+				this.note(task, input.head, slice.id + " needs a human: " + finding);
+			}
 			await this.save(task);
+			// Keep valid late votes for the pinned head, but integration is final:
+			// never send an already integrated slice back or integrate it again.
+			if (slice.status === "integrated") return { task, quorum, next: "wait" as const };
 
 			// Auto-integrate an approved slice; send a rejected one back to its builder.
 			const step = nextStep(task.review, slice);
