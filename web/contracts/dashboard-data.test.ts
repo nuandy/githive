@@ -44,7 +44,7 @@ describe("dashboard data helpers", () => {
 
   it("merges builder/reviewer logs newest-first and hides run commands by default", () => {
     const agents: Live["agents"] = [
-      { id: "one", builder: { status: "done", startedAt: "", turns: 0, toolCalls: 0, usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0 }, log: [{ at: "2025-01-01", event: "pushed" }, { at: "2025-01-03", event: "run: npm test" }] }, reviewers: [{ role: "tests", state: { status: "done", startedAt: "", turns: 0, toolCalls: 0, usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0 }, log: [{ at: "2025-01-02", event: "approved" }] } }],
+      { id: "one", builder: { status: "done", startedAt: "", turns: 0, toolCalls: 0, usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0 }, log: [{ at: "2025-01-01", event: "pushed" }, { at: "2025-01-03", event: "run: npm test" }] }, reviewers: [{ role: "tests", state: { status: "done", startedAt: "", turns: 0, toolCalls: 0, usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0 }, log: [{ at: "2025-01-02", event: "approved" }] } }] },
     ];
     expect(mergeActivity(agents).map((event) => [event.agent, event.event])).toEqual([["tests", "approved"], ["builder", "pushed"]]);
     expect(mergeActivity(agents, true)[0].event).toBe("run: npm test");
