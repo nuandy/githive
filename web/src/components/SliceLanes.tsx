@@ -1,5 +1,6 @@
 import type { SliceLanesProps } from "../dashboard-contract";
 import { getSliceStage } from "../lib/dashboardData";
+import { formatRelativeTime } from "../lib/relativeTime";
 import "./SliceLanes.css";
 
 const stageLabels = { building: "Building", "in-review": "In review", gate: "Gate", integrated: "Integrated", "needs-human": "Needs a human" } as const;
@@ -51,7 +52,7 @@ export function SliceLanes({ live }: SliceLanesProps) {
               <section className="slice-lane__section">
                 <h4>Builder</h4>
                 <p>{slice.buildSummary || builder?.summary || <span className="muted">No builder summary yet.</span>}</p>
-                {latestLog ? <p className="slice-lane__latest"><span className="muted">Latest activity: </span>{latestLog.event} <time>{latestLog.at}</time></p> : null}
+                {latestLog ? <p className="slice-lane__latest"><span className="muted">Latest activity: </span>{latestLog.event} <time dateTime={latestLog.at} title={latestLog.at}>{formatRelativeTime(latestLog.at)}</time></p> : null}
                 <p className="muted">{builder ? `${builder.pushes ?? 0} pushes · ${builder.status}` : "Builder not started"}</p>
                 {slice.attention ? <p className="error">Needs a human: {slice.attention}</p> : null}
               </section>
@@ -76,7 +77,7 @@ export function SliceLanes({ live }: SliceLanesProps) {
 
               <section className="slice-lane__section">
                 <h4>Integration gate</h4>
-                {gate ? <p><span className="muted">Status: </span>{gate.status}{gate.at ? ` · ${gate.at}` : ""}</p> : <p className="muted">Gate has not run.</p>}
+                {gate ? <p><span className="muted">Status: </span>{gate.status}{gate.at ? <> · <time dateTime={gate.at} title={gate.at}>{formatRelativeTime(gate.at)}</time></> : ""}</p> : <p className="muted">Gate has not run.</p>}
                 {result?.mergeConflict?.length ? <p className="error">Merge conflicts: {result.mergeConflict.join(", ")}</p> : null}
                 {checks.length ? (
                   <ul className="slice-lane__checks">

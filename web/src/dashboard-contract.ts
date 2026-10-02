@@ -6,7 +6,7 @@ export interface SliceStageInfo {
   revisions: number;
 }
 
-export type MatrixStatus = "clean" | "disjoint" | "conflict" | "unchecked" | "same";
+export type MatrixStatus = "clean" | "disjoint" | "conflict" | "unchecked" | "same" | "integrated";
 export interface MergeMatrixCell {
   row: string;
   column: string;
@@ -31,6 +31,8 @@ export declare function getSliceStage(slice: Task["slices"][number]): SliceStage
 export declare function buildMergeMatrix(task: Task): MergeMatrix;
 export declare function mergeActivity(agents: Live["agents"], includeCommands?: boolean): ActivityItem[];
 export declare function newestTasks(tasks: Task[]): Task[];
+/** Pure formatting helper. `now` is injectable so relative-time behavior is deterministic in tests. */
+export declare function formatRelativeTime(isoTime: string, now?: number | Date): string;
 
 export interface DashboardSidebarProps {
   tasks: Task[];

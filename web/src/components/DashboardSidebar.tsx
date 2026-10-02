@@ -44,7 +44,7 @@ export function DashboardSidebar({ tasks, repos, selectedId, taskLoading, creati
                   aria-current={selected ? "page" : undefined}
                   onClick={() => onSelect(task.id)}
                 >
-                  <span className="dashboard-sidebar__task-title">{task.goal}</span>
+                  <span className="dashboard-sidebar__task-title" title={task.goal}>{task.goal}</span>
                   <span className="dashboard-sidebar__task-meta">
                     <span className={`badge ${phaseTone(task.phase)}`}>{task.phase}</span>
                     <span className="muted">{integrated}/{total} integrated</span>

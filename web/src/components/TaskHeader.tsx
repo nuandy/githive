@@ -1,8 +1,19 @@
+import { useState } from "react";
 import type { TaskHeaderProps } from "../dashboard-contract";
 import "./TaskHeader.css";
 
 export function TaskHeader({ task, plannerRunning, busy, onPlan, onApproveAndBuild, onLand }: TaskHeaderProps) {
+  const [expandedGoal, setExpandedGoal] = useState<{ taskId: string; expanded: boolean }>({ taskId: task.id, expanded: false });
+  const isGoalExpanded = expandedGoal.taskId === task.id && expandedGoal.expanded;
   const canLand = task.phase === "building" && task.slices.length > 0 && task.slices.every((slice) => slice.status === "integrated");
+
+  function toggleGoal() {
+    setExpandedGoal((previous) => ({
+      taskId: task.id,
+      expanded: !(previous.taskId === task.id && previous.expanded),
+    }));
+  }
+
   return (
     <section className="task-header card" aria-labelledby="task-title">
       <div className="task-header__copy">
@@ -10,7 +21,16 @@ export function TaskHeader({ task, plannerRunning, busy, onPlan, onApproveAndBui
           <span className="badge accent">{task.phase}</span>
           <span className="muted">{task.repo}</span>
         </div>
-        <h1 id="task-title">{task.goal}</h1>
+        <h1 id="task-title" className={isGoalExpanded ? "is-expanded" : undefined}>{task.goal}</h1>
+        <button
+          className="task-header__goal-toggle"
+          type="button"
+          aria-expanded={isGoalExpanded}
+          aria-controls="task-title"
+          onClick={toggleGoal}
+        >
+          {isGoalExpanded ? "Show less" : "Show more"}
+        </button>
       </div>
       <div className="task-header__action">
         {task.phase === "planning" && !plannerRunning ? <button className="primary" type="button" onClick={onPlan} disabled={busy}>Plan</button> : null}

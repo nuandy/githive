@@ -16,6 +16,7 @@
 
 .dashboard-frame {
 	flex: 1;
+	min-width: 0;
 	min-height: 0;
 	display: grid;
 	grid-template-columns: minmax(230px, 290px) minmax(0, 1fr);
@@ -77,7 +78,7 @@
 	padding: 12px;
 }
 
-@media (max-width: 700px) {
+@media (max-width: 720px) {
 	.dashboard-frame {
 		grid-template-columns: minmax(0, 1fr);
 	}

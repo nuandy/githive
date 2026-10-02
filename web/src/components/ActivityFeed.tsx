@@ -1,6 +1,7 @@
 import { useState } from "react";
 import type { ActivityFeedProps } from "../dashboard-contract";
 import { mergeActivity } from "../lib/dashboardData";
+import { formatRelativeTime } from "../lib/relativeTime";
 import "./ActivityFeed.css";
 
 export function ActivityFeed({ agents }: ActivityFeedProps) {
@@ -25,7 +26,7 @@ export function ActivityFeed({ agents }: ActivityFeedProps) {
               <span className="activity-feed__agent">{item.agent}</span>
               <span className="activity-feed__slice">{item.sliceId}</span>
               <p>{item.event}</p>
-              <time>{item.at}</time>
+              <time dateTime={item.at} title={item.at}>{formatRelativeTime(item.at)}</time>
             </li>
           ))}
         </ol>

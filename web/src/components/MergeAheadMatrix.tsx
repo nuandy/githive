@@ -1,5 +1,6 @@
 import type { MergeAheadMatrixProps } from "../dashboard-contract";
 import { buildMergeMatrix } from "../lib/dashboardData";
+import { formatRelativeTime } from "../lib/relativeTime";
 import "./MergeAheadMatrix.css";
 
 export function MergeAheadMatrix({ task }: MergeAheadMatrixProps) {
@@ -24,7 +25,7 @@ export function MergeAheadMatrix({ task }: MergeAheadMatrixProps) {
                   <td key={`${rowId}-${matrix.ids[columnIndex]}`}>
                     <span className={`merge-matrix__status merge-matrix__status--${cell.status}`}>{cell.status}</span>
                     {cell.files.length ? <ul className="merge-matrix__files">{cell.files.map((file) => <li key={file}><code>{file}</code></li>)}</ul> : null}
-                    {cell.checkedAt ? <time className="merge-matrix__time">{cell.checkedAt}</time> : null}
+                    {cell.checkedAt ? <time className="merge-matrix__time" dateTime={cell.checkedAt} title={cell.checkedAt}>{formatRelativeTime(cell.checkedAt)}</time> : null}
                   </td>
                 ))}
               </tr>

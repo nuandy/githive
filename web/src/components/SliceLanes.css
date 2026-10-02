@@ -1,25 +1,27 @@
 .slice-lanes { min-width: 0; }
 .slice-lanes__heading { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin-bottom: 10px; }
+.slice-lanes__heading > * { min-width: 0; }
 .slice-lanes__heading h2 { margin: 0; font-size: 18px; }
-.slice-lanes__list { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 330px), 1fr)); gap: 12px; }
+.slice-lanes__list { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 330px), 1fr)); gap: 12px; min-width: 0; }
 .slice-lane { min-width: 0; padding: 13px; }
 .slice-lane__header { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
-.slice-lane__title { min-width: 0; }
+.slice-lane__title { min-width: 0; overflow-wrap: anywhere; }
 .slice-lane__title h3 { margin: 0; font-size: 16px; overflow-wrap: anywhere; }
-.slice-lane__title > .muted { font-size: 12px; }
-.slice-lane__header > .badge { flex: 0 0 auto; max-width: 58%; white-space: normal; text-align: center; }
+.slice-lane__title > .muted { font-size: 12px; overflow-wrap: anywhere; }
+.slice-lane__header > .badge { flex: 0 0 auto; max-width: 58%; white-space: normal; text-align: center; overflow-wrap: anywhere; }
 .slice-lane__section { min-width: 0; margin-top: 14px; padding-top: 11px; border-top: 1px solid var(--border); }
 .slice-lane__section h4 { margin: 0 0 6px; font-size: 13px; }
 .slice-lane__section p { margin: 5px 0; overflow-wrap: anywhere; }
-.slice-lane__chips { display: flex; flex-wrap: wrap; gap: 5px; }
-.slice-lane__chip { padding: 2px 6px; border-radius: 4px; background: var(--surface-2); overflow-wrap: anywhere; }
-.slice-lane__latest time { color: var(--text-muted); font-size: 11px; }
+.slice-lane__chips { display: flex; flex-wrap: wrap; gap: 5px; min-width: 0; }
+.slice-lane__chip { max-width: 100%; padding: 2px 6px; border-radius: 4px; background: var(--surface-2); overflow-wrap: anywhere; }
+.slice-lane__latest time { color: var(--text-muted); font-size: 11px; overflow-wrap: anywhere; }
 .slice-lane__commit { color: var(--text-muted); font-weight: 400; }
 .slice-lane__commit code { overflow-wrap: anywhere; }
 .slice-lane__reviews, .slice-lane__checks { display: grid; gap: 7px; margin: 0; padding: 0; list-style: none; }
 .slice-lane__review, .slice-lane__checks > li { min-width: 0; padding: 8px; border-radius: var(--radius); background: var(--surface-2); }
 .slice-lane__review-top, .slice-lane__check-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; }
-.slice-lane__review p { margin: 5px 0; }
+.slice-lane__review-top > *, .slice-lane__check-head > * { min-width: 0; overflow-wrap: anywhere; }
+.slice-lane__review p { margin: 5px 0; overflow-wrap: anywhere; }
 .slice-lane__check-head code { min-width: 0; overflow-wrap: anywhere; }
 .slice-lane details { margin-top: 5px; }
 .slice-lane summary { cursor: pointer; color: var(--accent); font-size: 12px; }
@@ -27,6 +29,9 @@
 .slice-lane__excluded { margin-top: 9px; font-size: 12px; }
 .slice-lane__excluded ul { margin: 4px 0 0; padding-left: 18px; }
 .slice-lane__excluded li { overflow-wrap: anywhere; }
+@media (max-width: 720px) {
+  .slice-lanes__list { grid-template-columns: minmax(0, 1fr); }
+}
 @media (max-width: 420px) {
   .slice-lane { padding: 10px; }
   .slice-lane__header { flex-direction: column; }

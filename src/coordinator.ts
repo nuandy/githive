@@ -731,7 +731,6 @@ export class Coordinator extends DurableObject<Env> {
 
 		slice.status = "integrated";
 		slice.attention = undefined;
-		task.checks = task.checks.filter((c) => !c.pair.includes(slice.id));
 		return { ok: true };
 	}
 
