@@ -2,11 +2,9 @@ import { useState } from "react";
 import type { TaskHeaderProps } from "../dashboard-contract";
 import "./TaskHeader.css";
 
-export function TaskHeader({ task, plannerRunning, busy, onPlan, onApproveAndBuild, onLand }: TaskHeaderProps) {
+export function TaskHeader({ task, plannerRunning, busy, onPlan, onApproveAndBuild }: TaskHeaderProps) {
   const [expandedGoal, setExpandedGoal] = useState<{ taskId: string; expanded: boolean }>({ taskId: task.id, expanded: false });
   const isGoalExpanded = expandedGoal.taskId === task.id && expandedGoal.expanded;
-  const slices = Array.isArray(task.slices) ? task.slices : [];
-  const canLand = task.phase === "building" && slices.length > 0 && slices.every((slice) => slice.status === "integrated");
 
   function toggleGoal() {
     setExpandedGoal((previous) => ({
@@ -37,7 +35,6 @@ export function TaskHeader({ task, plannerRunning, busy, onPlan, onApproveAndBui
         {task.phase === "planning" && !plannerRunning ? <button className="primary" type="button" onClick={onPlan} disabled={busy}>Plan</button> : null}
         {task.phase === "planning" && plannerRunning ? <span className="muted" role="status">Planning in progress…</span> : null}
         {task.phase === "awaiting-approval" ? <button className="primary" type="button" onClick={onApproveAndBuild} disabled={busy}>Approve and build</button> : null}
-        {canLand ? <button className="primary" type="button" onClick={onLand} disabled={busy}>Land</button> : null}
         {busy ? <span className="muted" role="status">Working…</span> : null}
       </div>
     </section>
