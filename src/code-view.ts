@@ -102,6 +102,32 @@ function formatRange(start: number, count: number) {
 	return `${start}${count === 1 ? "" : `,${count}`}`;
 }
 
+/** Quote a path using Git/C-style escapes before it enters a structural header. */
+function quoteGitPath(path: string): string {
+	const hasControl = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u;
+	const needsQuote = /[\s"\\]/u.test(path) || hasControl.test(path);
+	if (!needsQuote) return path;
+	const encoded: string[] = [];
+	for (const character of path) {
+		switch (character) {
+			case "\\": encoded.push("\\\\"); break;
+			case '"': encoded.push('\\"'); break;
+			case "\t": encoded.push("\\t"); break;
+			case "\n": encoded.push("\\n"); break;
+			case "\v": encoded.push("\\v"); break;
+			case "\f": encoded.push("\\f"); break;
+			case "\r": encoded.push("\\r"); break;
+			default:
+				if (hasControl.test(character)) {
+					// Octal-escaped UTF-8 bytes follow Git's C-style pathname quoting and
+					// avoid emitting invisible/control characters into a header.
+					for (const byte of new TextEncoder().encode(character)) encoded.push("\\" + byte.toString(8).padStart(3, "0"));
+				} else encoded.push(character);
+		}
+	}
+	return `"${encoded.join("")}"`;
+}
+
 function fileDiff(file: ChangedTextFile): string {
 	const before = lines(file.before);
 	const after = lines(file.after);
@@ -118,11 +144,13 @@ function fileDiff(file: ChangedTextFile): string {
 		else changes.push({ start, end });
 	}
 
-	const output = [`diff --git a/${file.path} b/${file.path}\n`];
+	const oldPath = quoteGitPath(`a/${file.path}`);
+	const newPath = quoteGitPath(`b/${file.path}`);
+	const output = [`diff --git ${oldPath} ${newPath}\n`];
 	if (file.before === null) output.push("new file mode 100644\n");
 	if (file.after === null) output.push("deleted file mode 100644\n");
-	output.push(`--- ${file.before === null ? "/dev/null" : `a/${file.path}`}\n`);
-	output.push(`+++ ${file.after === null ? "/dev/null" : `b/${file.path}`}\n`);
+	output.push(`--- ${file.before === null ? "/dev/null" : oldPath}\n`);
+	output.push(`+++ ${file.after === null ? "/dev/null" : newPath}\n`);
 
 	for (const hunk of changes) {
 		const chunk = edits.slice(hunk.start, hunk.end);
