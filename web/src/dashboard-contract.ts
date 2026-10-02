@@ -83,6 +83,10 @@ export declare function startDashboardPolling(
   onError: (error: unknown) => void,
   scheduler?: DashboardTimerScheduler,
 ): () => void;
+export declare function startTaskListPolling(
+  fetchTasks: () => void,
+  scheduler?: DashboardTimerScheduler,
+): () => void;
 export declare function recordDashboardError(errors: string[], operation: string, error: unknown): string[];
 export declare function clearDashboardError(errors: string[], operation: string): string[];
 export declare const defaultDashboardScheduler: DashboardTimerScheduler;
