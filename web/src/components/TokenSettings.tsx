@@ -4,13 +4,13 @@ import "./TokenSettings.css";
 
 export function TokenSettings() {
   const [token, setTokenValue] = useState(() => getToken());
-  const [saved, setSaved] = useState(false);
+  const [saved, setSaved] = useState(() => Boolean(getToken()));
 
   function save(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setToken(token.trim());
     setTokenValue(token.trim());
-    setSaved(true);
+    setSaved(Boolean(token.trim()));
   }
 
   return (
