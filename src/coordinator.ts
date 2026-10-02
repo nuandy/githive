@@ -6,6 +6,7 @@ import type { ContractCheckResult } from "./contract-check";
 import { describeError } from "./contract-check-plan";
 import { isTransientFailure, retryTransient } from "./retry";
 import { Workspace } from "./git";
+import { unifiedDiff } from "./code-view";
 import { type LedgerDoc, type LedgerEntry, clipText, diff, fromDoc, replay, toDoc } from "./ledger";
 import { appendLedger, readLedger } from "./ledger-git";
 import { blueprintProblems } from "./blueprint";
@@ -162,6 +163,44 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 
 	state() {
 		return this.load();
+	}
+
+	/** Stored blueprint contracts are visible only while awaiting human approval. */
+	async contractFiles() {
+		const task = await this.load();
+		if (task.phase !== "awaiting-approval") fail(409, `task is ${task.phase}`);
+		const contracts = (await this.ctx.storage.get<Record<string, string>>("contracts")) ?? {};
+		return Object.entries(contracts)
+			.sort(([a], [b]) => a.localeCompare(b))
+			.map(([path, content]) => ({ path, content }));
+	}
+
+	/** Diff the human-blocked slice's pinned review commit, never its moving head. */
+	async sliceDiff(sliceId: string) {
+		const task = await this.load();
+		const slice = this.slice(task, sliceId);
+		if (!slice.attention) fail(409, `slice ${sliceId} does not need a human`);
+		if (!slice.reviewHead) fail(409, `slice ${sliceId} has no commit under review`);
+		const base = slice.mergeBase ?? task.baseCommit;
+		if (!base) fail(409, `slice ${sliceId} has no review base`);
+		if (!slice.repo) fail(409, `slice ${sliceId} has no repository`);
+		const ws = await Workspace.clone(await remoteFor(this.env.ARTIFACTS, slice.repo, "read"));
+		const files = await ws.changedFiles(base, slice.reviewHead);
+		return { base, head: slice.reviewHead, unified: unifiedDiff(files) };
+	}
+
+	/** Diff the complete integrated task base against the project's captured main head. */
+	async landingDiff() {
+		const task = await this.load();
+		if (task.phase !== "building") fail(409, `task is ${task.phase}`);
+		const pending = task.slices.filter((slice) => slice.status !== "integrated").map((slice) => slice.id);
+		if (pending.length) fail(409, `slices not integrated: ${pending.join(", ")}`);
+		if (!task.baseRepo) fail(409, "task has no base repository");
+		const ws = await Workspace.clone(await remoteFor(this.env.ARTIFACTS, task.repo, "read"));
+		const base = await ws.head();
+		const head = await ws.fetch("task-base", await remoteFor(this.env.ARTIFACTS, task.baseRepo, "read"));
+		const files = await ws.changedFiles(base, head);
+		return { base, head, unified: unifiedDiff(files) };
 	}
 
 	create(id: string, repo: string, goal: string, limits?: Partial<Limits>) {
