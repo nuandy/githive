@@ -1,6 +1,7 @@
 export { ActivityFeed } from "./ActivityFeed";
 export { CodeDecisions } from "./CodeDecisions";
 export { DashboardSidebar } from "./DashboardSidebar";
+export { LaneChangeRequests } from "./LaneChangeRequests";
 export { MergeAheadMatrix } from "./MergeAheadMatrix";
 export { PlanPanel } from "./PlanPanel";
 export { SliceLanes } from "./SliceLanes";

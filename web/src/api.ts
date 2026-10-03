@@ -1,4 +1,5 @@
 import type { Task } from "../../src/types";
+import type { LaneChangeRequest } from "../../src/lane-change-contract";
 import type { ContractFile, UnifiedCodeDiff } from "./dashboard-contract";
 
 export type { Task };
@@ -61,6 +62,35 @@ function normalizeReviewPolicy(value: unknown): Task["review"] {
 	} as Task["review"];
 }
 
+const laneChangeRequestStatuses: readonly LaneChangeRequest["status"][] = ["pending", "answered", "declined", "integrated", "human"];
+
+function normalizeLaneChangeRequest(value: unknown): LaneChangeRequest | null {
+	const request = asRecord(value);
+	if (!request
+		|| typeof request.id !== "string"
+		|| typeof request.requester !== "string"
+		|| typeof request.owner !== "string"
+		|| typeof request.path !== "string"
+		|| typeof request.need !== "string"
+		|| typeof request.reason !== "string"
+		|| typeof request.createdAt !== "string"
+		|| !laneChangeRequestStatuses.includes(request.status as LaneChangeRequest["status"])) return null;
+	return {
+		id: request.id,
+		requester: request.requester,
+		owner: request.owner,
+		path: request.path,
+		need: request.need,
+		reason: request.reason,
+		status: request.status as LaneChangeRequest["status"],
+		createdAt: request.createdAt,
+		...(typeof request.answer === "string" ? { answer: request.answer } : {}),
+		...(typeof request.answerCommit === "string" ? { answerCommit: request.answerCommit } : {}),
+		...(typeof request.answeredAt === "string" ? { answeredAt: request.answeredAt } : {}),
+		...(typeof request.integratedAt === "string" ? { integratedAt: request.integratedAt } : {}),
+	};
+}
+
 function normalizeSlice(value: unknown): Slice | null {
 	const slice = asRecord(value);
 	if (!slice) return null;
@@ -100,6 +130,9 @@ export function normalizeTask(value: unknown): Task {
 	if (!task || typeof task.id !== "string") throw new Error("Invalid task response: expected a task with an id.");
 	const checks = asArray<unknown>(task.checks).filter((check) => asRecord(check) !== null);
 	const amendments = asArray<unknown>(task.amendments).filter((amendment) => asRecord(amendment) !== null);
+	const laneChangeRequests = asArray<unknown>(task.laneChangeRequests)
+		.map(normalizeLaneChangeRequest)
+		.filter((request): request is LaneChangeRequest => request !== null);
 	return {
 		...task,
 		contracts: asStringArray(task.contracts),
@@ -108,6 +141,7 @@ export function normalizeTask(value: unknown): Task {
 		slices: asArray<unknown>(task.slices).map(normalizeSlice).filter((slice): slice is Slice => slice !== null),
 		checks,
 		amendments,
+		laneChangeRequests,
 	} as Task;
 }
 

@@ -53,6 +53,7 @@ export interface TaskHeaderProps {
 }
 export interface PlanPanelProps { task: Task }
 export interface SliceLanesProps { live: Live }
+export interface LaneChangeRequestsProps { task: Task }
 export interface MergeAheadMatrixProps { task: Task }
 export interface ActivityFeedProps { agents: Live["agents"] }
 

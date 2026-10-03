@@ -23,7 +23,31 @@ describe("dashboard API compatibility", () => {
       review: { reviewers: [], required: 0, vetoes: [] },
       slices: [{ id: "one", title: "First slice", owns: [], touched: [], outOfLane: [], reviews: [] }],
       checks: [],
+      laneChangeRequests: [],
     });
+  });
+
+  it("safely normalizes cross-lane request records and drops malformed entries", () => {
+    const task = normalizeTask({
+      ...persistedTask,
+      laneChangeRequests: [
+        { id: "req", requester: "ui", owner: "api", path: "src/api.ts", need: "Add field", reason: "UI relies on it", status: "answered", createdAt: "then", answer: "Done", answerCommit: "abc123" },
+        { id: "bad", requester: "ui", status: "unknown" },
+        null,
+      ],
+    });
+    expect(task.laneChangeRequests).toEqual([{
+      id: "req",
+      requester: "ui",
+      owner: "api",
+      path: "src/api.ts",
+      need: "Add field",
+      reason: "UI relies on it",
+      status: "answered",
+      createdAt: "then",
+      answer: "Done",
+      answerCommit: "abc123",
+    }]);
   });
 
   it("normalizes missing live log, reviewer, and usage data", () => {
