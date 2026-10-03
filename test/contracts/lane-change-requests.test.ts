@@ -2,7 +2,11 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { FakeStorage, fakeEnv, slice, task } from "../fakes/env";
 import type { LaneChangeRequestInput } from "../../src/lane-change-contract";
 
-const io = vi.hoisted(() => ({ heads: new Map<string, string>(), merges: [] as string[] }));
+const io = vi.hoisted(() => ({
+	heads: new Map<string, string>(),
+	merges: [] as string[],
+	answerCommitIncluded: true,
+}));
 vi.mock("../../src/artifacts", async (importOriginal) => ({
 	...(await importOriginal<typeof import("../../src/artifacts")>()),
 	headOf: vi.fn(async (_artifacts: unknown, repo: string) => io.heads.get(repo)),
@@ -12,7 +16,8 @@ vi.mock("../../src/git", () => ({
 	Workspace: { clone: vi.fn(async () => ({
 		fetch: vi.fn(async () => "fetched"),
 		merge: vi.fn(async (ref: string) => { io.merges.push(ref); }),
-		push: vi.fn(async () => undefined),
+		mergeBase: vi.fn(async (commit: string) => io.answerCommitIncluded ? commit : "common"),
+		push: vi.fn(async () => { io.heads.set("t1--base", "integrated-head"); }),
 	})) },
 }));
 vi.mock("../../src/ledger-git", () => ({ appendLedger: vi.fn(async () => undefined), readLedger: vi.fn(async () => []) }));
@@ -32,6 +37,7 @@ async function setup(overrides: Parameters<typeof task>[0] = {}) {
 	fake = fakeEnv();
 	io.heads.clear(); io.heads.set("t1--base", "base0"); io.heads.set("t1--b", "owner-head");
 	io.merges = [];
+	io.answerCommitIncluded = true;
 	await storage.put("task", task({
 		slices: [slice("a"), slice("b")],
 		laneChangeRequests: [],
@@ -42,6 +48,12 @@ async function setup(overrides: Parameters<typeof task>[0] = {}) {
 	coordinator = new Coordinator({ storage } as never, fake.env as never);
 }
 const saved = async () => (await storage.get<ReturnType<typeof task>>("task"))!;
+
+async function makeRequest() {
+	const created = await coordinator.requestLaneChange("a", request);
+	if (created.outcome !== "requested") throw new Error("expected request to be delivered");
+	return created.request;
+}
 
 describe("cross-lane request lifecycle", () => {
 	beforeEach(() => { vi.clearAllMocks(); });
@@ -92,14 +104,39 @@ describe("cross-lane request lifecycle", () => {
 		expect((await saved()).laneChangeRequests).toEqual([]);
 	});
 
-	it("marks an owner's request integrated and tells the requester to merge the task base", async () => {
+	it("marks a request integrated only when its answered commit is in the integrated history", async () => {
 		await setup({ slices: [slice("a"), slice("b", { reviewHead: "owner-head", reviews: approved("owner-head") })] });
 		fake.agentStatus.set("t1--b", "working");
 		fake.agentStatus.set("t1--a", "done");
-		const created = await coordinator.requestLaneChange("a", request);
-		if (created.outcome !== "requested") throw new Error("expected request to be delivered");
+		const request = await makeRequest();
+		const answered = await coordinator.answerLaneChange("b", request.id, { outcome: "done", answer: "Implemented in the owner commit." });
+		expect(answered).toMatchObject({ status: "answered", answerCommit: "owner-head" });
+		io.answerCommitIncluded = true;
 		await coordinator.integrate("b");
-		expect((await saved()).laneChangeRequests![0]).toMatchObject({ id: created.request.id, status: "integrated" });
+		expect((await saved()).laneChangeRequests![0]).toMatchObject({ id: request.id, status: "integrated" });
 		expect(fake.env.BUILDER.getByName("t1--a").revise).toHaveBeenCalledWith(expect.stringMatching(/integrated.*fetch_base|fetch_base.*integrated/is), expect.anything());
+	});
+
+	it("flags the requester for a human when the owner integrates without the answered commit", async () => {
+		await setup({ slices: [slice("a"), slice("b", { reviewHead: "owner-head", reviews: approved("owner-head") })] });
+		fake.agentStatus.set("t1--b", "working");
+		const request = await makeRequest();
+		await coordinator.answerLaneChange("b", request.id, { outcome: "done", answer: "Implemented in the owner commit." });
+		io.answerCommitIncluded = false;
+		await coordinator.integrate("b");
+		expect((await saved()).laneChangeRequests![0]).toMatchObject({ id: request.id, status: "human" });
+		expect((await saved()).slices[0].attention).toMatch(/human|integrated/i);
+	});
+
+	it("records a declined request, tells the requester, and flags it for a human", async () => {
+		await setup();
+		fake.agentStatus.set("t1--b", "working");
+		fake.agentStatus.set("t1--a", "working");
+		const request = await makeRequest();
+		await coordinator.answerLaneChange("b", request.id, { outcome: "declined", answer: "This route belongs to a separate service and cannot be added here." });
+		const state = await saved();
+		expect(state.laneChangeRequests![0]).toMatchObject({ status: "declined", answer: expect.stringContaining("cannot be added") });
+		expect(state.slices[0].attention).toMatch(/human/i);
+		expect(fake.env.BUILDER.getByName("t1--a").notify).toHaveBeenCalledWith(expect.stringContaining("cannot be added"));
 	});
 });
