@@ -187,7 +187,15 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 				return { outcome: "human" as const, request, message };
 			}
 			const message = this.laneRequestMessage(request);
-			const delivery = await this.deliverBuilder(task, owner, message);
+			let delivery: "inbox" | "resumed";
+			try { delivery = await this.deliverBuilder(task, owner, message); }
+			catch (err) {
+				const explanation = "Could not deliver the cross-lane request to slice " + owner.id + ": " + statusOf(err).message + ". This request needs a human.";
+				await this.flagLaneRequest(task, request, explanation, false);
+				this.note(task, owner.head, "Cross-lane request " + request.id + " could not be delivered to owner " + owner.id + " and needs a human");
+				await this.save(task);
+				return { outcome: "human" as const, request, message: explanation };
+			}
 			this.note(task, owner.head, "Cross-lane request " + request.id + ": slice " + requesterSliceId + " asked slice " + owner.id + " to change " + request.path + ": " + request.need + ". Reason: " + request.reason + " (" + delivery + ")");
 			await this.save(task);
 			return { outcome: "requested" as const, request, delivery, message };
@@ -201,6 +209,13 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 			const request = (task.laneChangeRequests ?? []).find((item) => item.id === requestId) ?? fail(404, "no lane request " + requestId);
 			if (request.owner !== ownerSliceId) fail(403, "slice " + ownerSliceId + " does not own lane request " + requestId);
 			if (request.status !== "pending") fail(409, "lane request " + requestId + " is " + request.status);
+			if (owner.status === "integrated") {
+				const message = "Slice " + ownerSliceId + " is already integrated and can no longer change " + request.path + "; this request needs a human.";
+				await this.flagLaneRequest(task, request, message, true);
+				await this.save(task);
+				return request;
+			}
+			if (owner.status !== "building") fail(409, "slice " + ownerSliceId + " is " + owner.status);
 			if (!answer || (answer.outcome !== "done" && answer.outcome !== "declined")) fail(400, "lane request answer must be done or declined");
 			if (typeof answer.answer !== "string" || !answer.answer.trim()) fail(400, "a lane request answer needs a nonempty explanation");
 			if (answer.commit !== undefined && (typeof answer.commit !== "string" || !answer.commit.trim())) fail(400, "answer commit must be a nonempty commit id");
@@ -222,7 +237,7 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 	}
 
 	private safeLanePath(path: string) {
-		return path === path.trim() && !path.startsWith("/") && !path.includes("\\") && path.split("/").every((part) => part && part !== "." && part !== "..");
+		return path === path.trim() && !path.startsWith("/") && !/[A-Za-z]:/.test(path) && !path.includes("\\") && !/[\x00-\x1f\x7f]/.test(path) && path.split("/").every((part) => part && part !== "." && part !== "..");
 	}
 
 	private laneRequestMessage(request: LaneChangeRequest) {
@@ -242,7 +257,10 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 		if (human) request.status = "human";
 		const requester = this.slice(task, request.requester);
 		requester.attention = message;
-		if (notify && requester.status === "building") await this.deliverBuilder(task, requester, message);
+		if (notify && requester.status === "building") {
+			try { await this.deliverBuilder(task, requester, message); }
+			catch (err) { requester.attention += "\nThe requester could not be resumed or notified: " + statusOf(err).message; }
+		}
 		this.note(task, requester.head, "Cross-lane request " + request.id + " for " + request.path + " needs a human: " + message);
 	}
 
@@ -1272,7 +1290,11 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 				const requester = this.slice(task, request.requester);
 				if (requester.status === "building") {
 					const message = "Cross-lane request " + request.id + " was integrated with owner slice " + request.owner + " at commit " + request.answerCommit + ". Call fetch_base and merge base/main to get it, then re-run your tests.";
-					await this.deliverBuilder(task, requester, message);
+					try { await this.deliverBuilder(task, requester, message); }
+					catch (err) {
+						requester.attention = "Cross-lane request integrated, but the builder could not be notified: " + statusOf(err).message;
+						this.note(task, requester.head, "Could not notify slice " + requester.id + " that request " + request.id + " integrated; attention is needed");
+					}
 				}
 			} else {
 				const message = "Owner slice " + request.owner + " integrated without the answered change commit for cross-lane request " + request.id + " (" + request.path + "). The owner can no longer change its lane; this request needs a human.";
