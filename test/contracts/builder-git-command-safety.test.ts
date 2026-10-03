@@ -7,6 +7,8 @@ describe("builder Git command safety contract", () => {
     "git push -f origin HEAD:main",
     "git push --force-with-lease origin HEAD:main",
     "git push origin +HEAD:main",
+    "git -p push --force origin HEAD:main",
+    "git -P push --force origin HEAD:main",
   ])("refuses force-push command %s even before a builder push", (command) => {
     expect(builderGitCommandBlockReason(command, false)).toMatch(/force/i);
   });
@@ -15,11 +17,19 @@ describe("builder Git command safety contract", () => {
     "git commit --amend --no-edit",
     "git rebase base/main",
     "git rebase -i HEAD~2",
+    'echo "$(git commit --amend --no-edit)"',
   ])("refuses rewriting pushed history with %s", (command) => {
     const reason = builderGitCommandBlockReason(command, true);
     expect(reason).toMatch(/pushed/i);
     expect(reason).toMatch(/new commit/i);
     expect(reason).toContain("git merge base/main");
+  });
+
+  it.each([
+    "bash -c 'git push --force origin HEAD:main'",
+    'bash -lc "git push --force origin HEAD:main"',
+  ])("refuses a nested shell force-push %s", (command) => {
+    expect(builderGitCommandBlockReason(command, false)).toMatch(/force/i);
   });
 
   it("allows amend and rebase before the builder has pushed", () => {
