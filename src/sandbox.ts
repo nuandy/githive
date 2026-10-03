@@ -3,7 +3,7 @@ import OpenAI from "openai";
 import type { ResponseInputItem } from "openai/resources/responses/responses";
 import { z } from "zod";
 import { MODEL, addUsage, assertComplete, emptyUsage, openAITools, runCalls, tool, type AgentTool, type Usage } from "./agent";
-import { builderGitCommandBlockReason } from "./git-command-safety";
+import { builderGitCommandBlockReason, builderGitPushBlockReason } from "./git-command-safety";
 import { COMMAND_TIMEOUT_S, WORKDIR, bootContainer, clip, gitWithToken, run } from "./container";
 import type { SliceSpec } from "./types";
 
@@ -143,7 +143,7 @@ export abstract class SandboxAgent<J extends SandboxJob, S extends AgentState> e
 			...this.freshFields(),
 		} as unknown as S; // base fields + the subclass's fields make a full S
 		await this.ctx.storage.put("job", job);
-		await this.ctx.storage.delete(["cancel", "inbox"]);
+		await this.ctx.storage.delete(["cancel", "inbox", "builder-last-pushed-head"]);
 		await this.save(fresh);
 		await this.ctx.storage.setAlarm(Date.now());
 		return this.view(fresh);
@@ -255,10 +255,50 @@ export abstract class SandboxAgent<J extends SandboxJob, S extends AgentState> e
 	}
 
 	/** Run git with a token (the job's, by default) on this one command only. */
-	protected git(job: J, args: string[], cwd = WORKDIR, token = job.token) {
-		return gitWithToken(this.ctx.container!, token, args, cwd);
+	protected async git(job: J, args: string[], cwd = WORKDIR, token = job.token) {
+		if (this.kind === "builder" && args[0] === "push") {
+			const refusal = await this.builderPushRefusal(args, cwd, token);
+			if (refusal) return { exitCode: 1, output: refusal };
+		}
+		const result = await gitWithToken(this.ctx.container!, token, args, cwd);
+		if (this.kind === "builder" && args[0] === "push" && result.exitCode === 0) {
+			const head = await this.exec(["git", "rev-parse", "HEAD"], cwd);
+			if (head.exitCode === 0) await this.ctx.storage.put("builder-last-pushed-head", head.output.trim());
+		}
+		return result;
 	}
 
+	/** The authenticated push path is the enforcement point; shell parsing is only a nudge. */
+	private async builderPushRefusal(args: string[], cwd: string, token: string): Promise<string | undefined> {
+		const pushArgs = args.slice(1);
+		const forcePush = pushArgs.some(
+			(arg) => arg === "--force" || arg.startsWith("--force-with-lease") || (/^-[^-]/.test(arg) && arg.includes("f")) || arg.startsWith("+"),
+		);
+		const expectedMainPush = pushArgs.includes("origin") && pushArgs.includes("HEAD:main");
+		if (!expectedMainPush) return "Refusing an unrecognized builder push. Use commit_and_push to push the slice to origin/main.";
+
+		const pushedState = await this.ctx.storage.get<{ pushes?: number }>("state");
+		const lastPushedHead = await this.ctx.storage.get<string>("builder-last-pushed-head");
+		const remote = await gitWithToken(this.ctx.container!, token, ["ls-remote", "--heads", "origin", "refs/heads/main"], cwd);
+		if (remote.exitCode !== 0)
+			return "Could not verify origin/main; refusing to push to preserve history. Retry after the remote is reachable. " + clip(remote.output, 2_000);
+		const remoteHead = remote.output.trim().split(/\s+/)[0] || undefined;
+		const remoteHeadIsAncestor = remoteHead ? await this.isAncestor(cwd, remoteHead) : false;
+		const lastPushedHeadIsAncestor = lastPushedHead ? await this.isAncestor(cwd, lastPushedHead) : false;
+		return builderGitPushBlockReason({
+			remoteHead,
+			remoteHeadIsAncestor,
+			forcePush,
+			lastPushedHead,
+			lastPushedHeadIsAncestor,
+			hasPushedHistory: (pushedState?.pushes ?? 0) > 0,
+		});
+	}
+
+	private async isAncestor(cwd: string, commit: string) {
+		const result = await this.exec(["git", "merge-base", "--is-ancestor", commit, "HEAD"], cwd);
+		return result.exitCode === 0;
+	}
 	protected coordinator(job: J) {
 		return this.env.COORDINATOR.get(this.env.COORDINATOR.idFromName(job.taskId));
 	}

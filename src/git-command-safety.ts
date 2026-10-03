@@ -1,10 +1,29 @@
 /**
- * Find Git commands in a shell command and explain when a builder must not run
- * a history-rewriting operation. This inspects common nested shell execution
- * forms rather than evaluating shell expansions.
+ * Best-effort run_command nudge for common Git history rewrites. This parser is
+ * not a security boundary; authenticated pushes are enforced in SandboxAgent.git.
  */
 export function builderGitCommandBlockReason(command: string, hasPushedHistory: boolean): string | undefined {
-	return inspectShell(command, hasPushedHistory, 0);
+	// Shell removes backslash-newline pairs before parsing the command list.
+	return inspectShell(command.replace(/\\(?:\r\n|\n|\r)/g, ""), hasPushedHistory, 0);
+}
+
+export interface BuilderGitPushHistory {
+	remoteHead?: string;
+	remoteHeadIsAncestor: boolean;
+	forcePush: boolean;
+	lastPushedHead?: string;
+	lastPushedHeadIsAncestor: boolean;
+	hasPushedHistory: boolean;
+}
+
+/** Refuse a token-authenticated push if it would discard an already-pushed commit. */
+export function builderGitPushBlockReason(history: BuilderGitPushHistory): string | undefined {
+	if (history.forcePush) return "Refusing force-push: Blueprint pins reviews to exact commits, so pushed history must be preserved. Add a new commit instead.";
+	const remoteWouldBeRewritten = Boolean(history.remoteHead) && !history.remoteHeadIsAncestor;
+	const lastPushedCommitWasRewritten = Boolean(history.lastPushedHead) && !history.lastPushedHeadIsAncestor;
+	const pushedHeadCannotBeVerified = history.hasPushedHistory && !history.remoteHead && !history.lastPushedHead;
+	if (!remoteWouldBeRewritten && !lastPushedCommitWasRewritten && !pushedHeadCannotBeVerified) return undefined;
+	return "Refusing to push: the local branch no longer contains the head already pushed to the fork, so this would rewrite pushed history. Keep pushed commits, make a new commit, and merge task-base updates with `git merge base/main` instead of rebasing.";
 }
 
 const MAX_NESTED_SHELL_DEPTH = 16;
