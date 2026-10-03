@@ -2,6 +2,7 @@ import { z } from "zod";
 import { tool, type AgentTool } from "./agent";
 import { statusOf } from "./errors";
 import { ENVIRONMENT, SandboxAgent, sliceContext, type AgentState, type SliceJob } from "./sandbox";
+import { GIT_IN_BLUEPRINT } from "./git-blueprint-guidance";
 import type { QuorumStatus } from "./types";
 
 // One Reviewer per (slice, role): a gpt-6-luna agent that checks out the exact
@@ -58,6 +59,8 @@ export class Reviewer extends SandboxAgent<ReviewJob, ReviewerState> {
 		return `You are the ${job.role} reviewer on Blueprint, a Git platform where several agents build one feature in parallel. Reviewer agents vote on each slice before it can be integrated. ${ENVIRONMENT}
 
 The slice's code is checked out at commit ${job.head}. It started from commit ${job.baseCommit}, so \`git diff ${job.baseCommit} HEAD\` shows exactly what the slice changed.
+
+${GIT_IN_BLUEPRINT}
 
 ${sliceContext(job)}
 
