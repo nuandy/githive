@@ -3,6 +3,7 @@ import OpenAI from "openai";
 import type { ResponseInputItem } from "openai/resources/responses/responses";
 import { z } from "zod";
 import { MODEL, addUsage, assertComplete, emptyUsage, openAITools, runCalls, tool, type AgentTool, type Usage } from "./agent";
+import { builderGitCommandBlockReason } from "./git-command-safety";
 import { COMMAND_TIMEOUT_S, WORKDIR, bootContainer, clip, gitWithToken, run } from "./container";
 import type { SliceSpec } from "./types";
 
@@ -304,6 +305,14 @@ export abstract class SandboxAgent<J extends SandboxJob, S extends AgentState> e
 				description: `Run a bash command in ${WORKDIR}. Use it for npm install, tests, type checks, git and inspection.`,
 				schema: RunArgs,
 				run: async ({ command }) => {
+					if (this.kind === "builder") {
+						const pushes = (state as S & { pushes?: number }).pushes ?? 0;
+						const reason = builderGitCommandBlockReason(command, pushes > 0);
+						if (reason) {
+							this.note(state, `blocked unsafe git command: ${command.slice(0, 160)}`);
+							return `Command refused: ${reason}`;
+						}
+					}
 					this.note(state, `run: ${command.slice(0, 200)}`);
 					const r = await this.exec(["bash", "-lc", command]);
 					return `exit code ${r.exitCode}\n${clip(r.output)}`;
