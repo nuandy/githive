@@ -27,6 +27,8 @@ export interface LaneChangeAnswer {
 	outcome: "done" | "declined";
 	/** The owner's explanation, delivered to the requester when declined. */
 	answer: string;
+	/** Commit containing the requested change; required to verify an integration. */
+	commit?: string;
 }
 
 export type LaneChangeRequestResult =
