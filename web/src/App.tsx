@@ -4,6 +4,7 @@ import {
 	ActivityFeed,
 	CodeDecisions,
 	DashboardSidebar,
+	LaneChangeRequests,
 	MergeAheadMatrix,
 	PlanPanel,
 	SliceLanes,
@@ -324,6 +325,7 @@ export function App() {
 									onContractFilesReady={onContractFilesReady}
 								/>
 								{showingLive && <SliceLanes live={showingLive} />}
+								<LaneChangeRequests task={selectedTask} />
 								<MergeAheadMatrix task={selectedTask} />
 								{showingLive && <ActivityFeed agents={showingLive.agents} />}
 								{!showingLive && <p className="muted dashboard-live-pending">Loading live slice activity…</p>}
