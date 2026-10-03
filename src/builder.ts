@@ -2,6 +2,7 @@ import { z } from "zod";
 import { tool, type AgentTool } from "./agent";
 import { pushFeedback } from "./builder-feedback";
 import { ENVIRONMENT, SandboxAgent, clip, sliceContext, type AgentState, type SliceJob } from "./sandbox";
+import { GIT_IN_BLUEPRINT } from "./git-blueprint-guidance";
 import type { MergeCheck } from "./types";
 
 // One Builder per slice: a gpt-6-luna agent implementing the slice on its fork,
@@ -38,6 +39,8 @@ export class Builder extends SandboxAgent<BuildJob, BuilderState> {
 		return `You are a builder agent on Blueprint, a Git platform where several agents build one feature in parallel. You implement one slice. ${ENVIRONMENT}
 
 ${sliceContext(job)}
+
+${GIT_IN_BLUEPRINT}
 
 How to work:
 - Explore the code you need, install dependencies, implement your slice, and run its acceptance tests and the type checks.
