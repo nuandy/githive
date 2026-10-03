@@ -48,10 +48,6 @@ declare module "./types" {
 	}
 }
 
-declare module "./coordinator" {
-	interface Coordinator extends LaneChangeCoordinator {}
-}
-
 // Keep the imported Task in this module so the augmentation is checked against
 // the public task interface when the contract is type-checked.
 void (null as unknown as Task | null);
