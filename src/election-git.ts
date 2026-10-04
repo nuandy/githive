@@ -28,22 +28,116 @@ const signature = () => ({ ...BOT, timestamp: Math.floor(Date.now() / 1000), tim
 
 const onAuth = (remote: Remote) => () => ({ username: "x", password: remote.token.split("?expires=")[0] });
 
-/** An empty in-memory repo with the ref's tip fetched, if the ref exists. */
-async function openTip(remote: Remote, ref: string) {
+const ZERO_OID = "0".repeat(40);
+
+/** A Git pkt-line: four hex digits of length (including themselves), then the payload. */
+function pktLine(line: string) {
+	const payload = encoder.encode(line);
+	return [encoder.encode((payload.length + 4).toString(16).padStart(4, "0")), payload];
+}
+
+/** The pkt-lines of a response body, as text. */
+function pktLines(body: Uint8Array) {
+	const lines: string[] = [];
+	for (let at = 0; at + 4 <= body.length; ) {
+		const length = Number.parseInt(decoder.decode(body.subarray(at, at + 4)), 16);
+		if (!length) {
+			at += 4;
+			continue;
+		}
+		lines.push(decoder.decode(body.subarray(at + 4, at + length)).replace(/\n$/, ""));
+		at += length;
+	}
+	return lines;
+}
+
+/**
+ * Move `ref` from `from` (null: create it) to `to`, sending `oids` in one
+ * receive-pack request: no discovery round trip first. The server applies the
+ * update only if the ref is still at `from`, so this is a compare-and-swap.
+ * Returns whether it landed.
+ */
+async function pushDirect(remote: Remote, ref: string, from: string | null, to: string, fs: MemoryFS, oids: string[]) {
+	const { packfile } = await git.packObjects({ fs, dir: DIR, oids });
+	const parts = [...pktLine(`${from ?? ZERO_OID} ${to} ${ref}\0report-status agent=blueprint\n`), encoder.encode("0000"), packfile ?? new Uint8Array()];
+	const body = new Uint8Array(parts.reduce((n, p) => n + p.length, 0));
+	let at = 0;
+	for (const part of parts) {
+		body.set(part, at);
+		at += part.length;
+	}
+	const response = await fetch(`${remote.url}/git-receive-pack`, {
+		method: "POST",
+		headers: {
+			"Content-Type": "application/x-git-receive-pack-request",
+			Accept: "application/x-git-receive-pack-result",
+			Authorization: `Basic ${btoa(`x:${remote.token.split("?expires=")[0]}`)}`,
+		},
+		body,
+	});
+	if (!response.ok) throw new Error(`[${response.status}] push to ${ref} failed: ${(await response.text()).slice(0, 200)}`);
+	const report = pktLines(new Uint8Array(await response.arrayBuffer()));
+	if (!report.includes("unpack ok")) throw new Error(`push to ${ref} failed: ${report.join("; ")}`);
+	if (report.some((line) => line === `ok ${ref}`)) return true;
+	if (report.some((line) => line.startsWith(`ng ${ref}`))) return false;
+	throw new Error(`push to ${ref}: unexpected report: ${report.join("; ")}`);
+}
+
+/** Where the ref points on the server, or null if it doesn't exist (one request). */
+async function serverTip(remote: Remote, ref: string) {
+	// Ask the server whether the log exists, rather than reading a fetch error as "empty".
+	const refs = await git.listServerRefs({ http, url: remote.url, prefix: ref, onAuth: onAuth(remote) });
+	return refs.find((r) => r.ref === ref)?.oid ?? null;
+}
+
+/** An empty in-memory repo with the ref's tip fetched. */
+async function fetchTip(remote: Remote, ref: string) {
 	const fs = new MemoryFS();
 	await git.init({ fs, dir: DIR });
 	await git.addRemote({ fs, dir: DIR, remote: "origin", url: remote.url });
 	// isomorphic-git only fetches refs its remote's refspec maps; the default covers branches only.
 	await git.setConfig({ fs, dir: DIR, path: "remote.origin.fetch", value: "+refs/notes/*:refs/remotes/origin/notes/*" });
-	// Ask the server whether the log exists, rather than reading a fetch error as "empty".
-	const refs = await git.listServerRefs({ http, url: remote.url, prefix: ref, onAuth: onAuth(remote) });
-	if (!refs.some((r) => r.ref === ref)) return { fs, tip: null };
 	const { fetchHead } = await git.fetch({ fs, http, dir: DIR, remote: "origin", ref, remoteRef: ref, singleBranch: true, tags: false, depth: 1, onAuth: onAuth(remote) });
 	return { fs, tip: fetchHead ?? null };
 }
 
+/** The ref's tip in an in-memory repo, or an empty repo if the ref doesn't exist. */
+async function openTip(remote: Remote, ref: string) {
+	if (!(await serverTip(remote, ref))) {
+		const fs = new MemoryFS();
+		await git.init({ fs, dir: DIR });
+		return { fs, tip: null };
+	}
+	return fetchTip(remote, ref);
+}
+
+/**
+ * A remote whose token is minted once and reused while fresh. Minting takes
+ * several Artifacts calls, so doing it per read or push dominated their cost.
+ * Tokens last ten minutes by default; this renews well before.
+ */
+export function cachedRemote(mint: () => Promise<Remote>, freshForMs = 5 * 60_000, now: () => number = Date.now) {
+	let cached: { remote: Promise<Remote>; until: number } | null = null;
+	return () => {
+		if (!cached || now() >= cached.until) {
+			const remote = mint();
+			cached = { remote, until: now() + freshForMs };
+			// A failed mint isn't kept.
+			remote.catch(() => (cached = null));
+		}
+		return cached.remote;
+	};
+}
+
 export class GitCasLog<S> implements CasLog<S> {
 	private readonly ref: string;
+
+	/**
+	 * The in-memory repo this log last wrote or read, at that tip. A leader
+	 * appends on top of its own last commit, so it needn't read the log first:
+	 * the push alone says whether the tip moved.
+	 */
+	private held: { fs: MemoryFS; tip: string } | null = null;
 
 	constructor(
 		private readonly remote: () => Promise<Remote>,
@@ -53,8 +147,13 @@ export class GitCasLog<S> implements CasLog<S> {
 	}
 
 	async read(): Promise<{ tip: string; commit: LogCommit<S> } | null> {
-		const { fs, tip } = await openTip(await this.remote(), this.ref);
+		const remote = await this.remote();
+		const current = await serverTip(remote, this.ref);
+		if (!current) return null;
+		// Fetch only if the tip moved since this log last saw it.
+		const { fs, tip } = this.held?.tip === current ? this.held : await fetchTip(remote, this.ref);
 		if (!tip) return null;
+		this.held = { fs, tip };
 		const { commit } = await git.readCommit({ fs, dir: DIR, oid: tip });
 		const trailer = (name: string) => commit.message.match(new RegExp(`^${name}: (.*)$`, "m"))?.[1] ?? fail(`${tip} has no ${name} trailer`);
 		const json = async (filepath: string) => JSON.parse(decoder.decode((await git.readBlob({ fs, dir: DIR, oid: tip, filepath })).blob));
@@ -74,12 +173,19 @@ export class GitCasLog<S> implements CasLog<S> {
 
 	async append(parent: string | null, commit: LogCommit<S>): Promise<string | null> {
 		const remote = await this.remote();
-		const { fs, tip } = await openTip(remote, this.ref);
+		const { fs, tip } = parent !== null && this.held?.tip === parent ? this.held : await openTip(remote, this.ref);
 		// Built on a stale tip: no need to ask the server.
 		if (tip !== parent) return null;
 
 		// Carry the notes forward, adding this commit's decisions to them.
 		const files = new Map<string, string>();
+		/** Objects this commit adds: the only ones the push has to send. */
+		const added: string[] = [];
+		const write = async (text: string) => {
+			const oid = await git.writeBlob({ fs, dir: DIR, blob: encoder.encode(text) });
+			added.push(oid);
+			return oid;
+		};
 		if (tip) {
 			const { commit: previous } = await git.readCommit({ fs, dir: DIR, oid: tip });
 			for (const entry of (await git.readTree({ fs, dir: DIR, oid: previous.tree })).tree) files.set(entry.path, entry.oid);
@@ -87,10 +193,10 @@ export class GitCasLog<S> implements CasLog<S> {
 		for (const [about, lines] of notesByCommit(commit.entries)) {
 			const existing = files.get(about);
 			const before = existing ? `${decoder.decode((await git.readBlob({ fs, dir: DIR, oid: existing })).blob).trimEnd()}\n` : "";
-			files.set(about, await git.writeBlob({ fs, dir: DIR, blob: encoder.encode(`${before}${lines.join("\n")}\n`) }));
+			files.set(about, await write(`${before}${lines.join("\n")}\n`));
 		}
-		files.set(STATE_FILE, await git.writeBlob({ fs, dir: DIR, blob: encoder.encode(JSON.stringify(commit.state)) }));
-		files.set(DECISIONS_FILE, await git.writeBlob({ fs, dir: DIR, blob: encoder.encode(JSON.stringify(commit.entries)) }));
+		files.set(STATE_FILE, await write(JSON.stringify(commit.state)));
+		files.set(DECISIONS_FILE, await write(JSON.stringify(commit.entries)));
 		const tree = await git.writeTree({ fs, dir: DIR, tree: [...files].map(([path, oid]) => ({ mode: "100644", path, oid, type: "blob" as const })) });
 
 		const oid = await git.writeCommit({
@@ -99,14 +205,16 @@ export class GitCasLog<S> implements CasLog<S> {
 			commit: { message: message(commit), tree, parent: tip ? [tip] : [], author: signature(), committer: signature() },
 		});
 		await git.writeRef({ fs, dir: DIR, ref: this.ref, value: oid, force: true });
+		let landed: boolean;
 		try {
-			const result = await git.push({ fs, http, dir: DIR, url: remote.url, ref: this.ref, remoteRef: this.ref, onAuth: onAuth(remote) });
-			return result.ok ? oid : null;
+			landed = await pushDirect(remote, this.ref, tip, oid, fs, [...added, tree, oid]);
 		} catch (err) {
-			// The ref moved between our read and our push: compare-and-swap lost.
-			if (err instanceof git.Errors.PushRejectedError || err instanceof git.Errors.GitPushError) return null;
+			this.held = null;
 			throw err;
 		}
+		// Not landed: the ref moved since `tip`, and compare-and-swap lost.
+		this.held = landed ? { fs, tip: oid } : null;
+		return landed ? oid : null;
 	}
 }
 

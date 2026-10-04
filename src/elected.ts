@@ -1,5 +1,5 @@
 import { remoteFor, sliceRepoName } from "./artifacts";
-import { GitCasLog } from "./election-git";
+import { GitCasLog, cachedRemote } from "./election-git";
 import type { AccessIdentity } from "./access-contract";
 import type { Coordinator } from "./coordinator";
 import { statusOf } from "./errors";
@@ -74,12 +74,22 @@ export function electedCoordinator(ctx: ElectedContext) {
 	} satisfies Partial<Record<keyof Coordinator, unknown>>;
 }
 
+/**
+ * Logs the Worker reads tasks from, kept for the life of the isolate: each
+ * keeps its token and the tip it last fetched, so reading an unchanged task
+ * is one request.
+ */
+const readers = new Map<string, GitCasLog<Task>>();
+
 /** The elected coordinator of an open task, wired to the Worker's bindings: peers are Peer objects, the log is in Git. */
 export function electedForEnv(env: Env, taskId: string, repo: string) {
+	const key = `${repo}/${taskId}`;
+	if (!readers.has(key)) readers.set(key, new GitCasLog<Task>(cachedRemote(() => remoteFor(env.ARTIFACTS, repo, "read")), taskId));
+	const reader = readers.get(key)!;
 	return electedCoordinator({
 		taskId,
 		repo,
 		peer: (name) => env.PEER.getByName(name) as unknown as PeerStub,
-		readTask: async () => (await new GitCasLog<Task>(() => remoteFor(env.ARTIFACTS, repo, "read"), taskId).read())?.commit.state ?? null,
+		readTask: async () => (await reader.read())?.commit.state ?? null,
 	});
 }

@@ -1,6 +1,6 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Deposed, type LogCommit, campaign } from "../src/election";
-import { GitCasLog } from "../src/election-git";
+import { GitCasLog, cachedRemote } from "../src/election-git";
 import { startGitServer, type GitServer } from "./helpers/git-server";
 
 // The log in Git, against a real Git server (git http-backend).
@@ -76,6 +76,26 @@ describe("GitCasLog", () => {
 		expect(server.git("rev-list", "--count", "refs/notes/blueprint/t1").trim()).toBe("2");
 	});
 
+	it("appends on top of its own last commit without reading the log again", async () => {
+		const first = await log.append(null, commit());
+		server.requests.length = 0;
+		const second = await log.append(first, commit({ term: 1, kind: "decisions", batch: "batch-2" }));
+		expect(second).toMatch(/^[0-9a-f]{40}$/);
+		// Only the push, in one round trip: no listing of refs, no fetch, no push discovery.
+		expect(server.requests).toEqual(["POST git-receive-pack"]);
+		expect((await log.read())?.tip).toBe(second);
+	});
+
+	it("reads an unchanged log without fetching it again", async () => {
+		await new GitCasLog<State>(async () => ({ url: server.url, token: "unused" }), "t1").append(null, commit());
+		server.requests.length = 0;
+		const first = await log.read();
+		const firstRequests = server.requests.length;
+		server.requests.length = 0;
+		expect(await log.read()).toEqual(first);
+		expect(server.requests.length).toBeLessThan(firstRequests);
+	});
+
 	it("records decisions as Git notes that plain git can read", async () => {
 		const project = server.git("rev-parse", "main").trim();
 		await log.append(null, commit({ kind: "decisions", entries: [{ commit: project, text: "change stats-1f2e opened, claiming src/stats/", at: "2026-10-04T12:00:00.000Z" }] }));
@@ -109,5 +129,18 @@ describe("the election protocol over Git", () => {
 		expect((await log.read())?.commit.state).toEqual({ claims: { "src/x/": "peer-a", "src/y/": "peer-b" } });
 		const history = server.git("log", "--format=%(trailers:key=Blueprint-Term,valueonly,separator=)|%(trailers:key=Blueprint-Kind,valueonly,separator=)|%s", "refs/notes/blueprint/t1").trim().split("\n");
 		expect(history.reverse()).toEqual(["1|election|Election: term 1, peer-a", "1|decisions|peer-a claims src/x/", "2|election|Election: term 2, peer-b", "2|decisions|peer-b claims src/y/"]);
+	});
+});
+
+describe("cachedRemote", () => {
+	it("mints a token once while it is fresh, and again once it is not", async () => {
+		let now = 0;
+		const mint = vi.fn(async () => ({ url: "https://git.test/p.git", token: `t${mint.mock.calls.length}` }));
+		const remote = cachedRemote(mint, 60_000, () => now);
+		expect(await remote()).toEqual(await remote());
+		expect(mint).toHaveBeenCalledTimes(1);
+		now += 60_001;
+		await remote();
+		expect(mint).toHaveBeenCalledTimes(2);
 	});
 });

@@ -20,6 +20,8 @@ export interface GitServer {
 	holdPushes: (count: number) => Promise<void>;
 	/** Push uploads the server has answered. */
 	pushes: () => number;
+	/** Every request so far, as "METHOD path?service" (for counting round trips). */
+	requests: string[];
 	close: () => Promise<void>;
 }
 
@@ -38,10 +40,12 @@ export async function startGitServer(): Promise<GitServer> {
 	execFileSync("git", ["-C", repo, "symbolic-ref", "HEAD", "refs/heads/main"]);
 
 	let held: { count: number; waiting: (() => void)[]; all: () => void } | null = null;
+	const requests: string[] = [];
 	let answeredPushes = 0;
 
 	const server: Server = createServer(async (req, res) => {
 		const url = new URL(req.url ?? "/", "http://localhost");
+		requests.push(`${req.method} ${url.pathname.split("/").pop()}${url.search}`);
 		const isPush = req.method === "POST" && url.pathname.endsWith("/git-receive-pack");
 		if (isPush && held) {
 			const gate = held;
@@ -95,6 +99,7 @@ export async function startGitServer(): Promise<GitServer> {
 		git: (...args) => execFileSync("git", ["-C", repo, ...args]).toString(),
 		holdPushes: (count) => new Promise<void>((all) => (held = { count, waiting: [], all })),
 		pushes: () => answeredPushes,
+		requests,
 		close: async () => {
 			await new Promise<void>((resolve) => server.close(() => resolve()));
 			rmSync(root, { recursive: true, force: true });

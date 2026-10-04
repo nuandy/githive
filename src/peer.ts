@@ -1,7 +1,7 @@
 import { remoteFor } from "./artifacts";
 import { Coordinator } from "./coordinator";
 import { type CasLog, campaign, Deposed, type Leader } from "./election";
-import { GitCasLog } from "./election-git";
+import { GitCasLog, cachedRemote } from "./election-git";
 import { holdsClaim, nextLeaseCheck } from "./open-mode";
 import type { LedgerEntry } from "./ledger";
 import type { Task } from "./types";
@@ -34,10 +34,13 @@ export interface PeerOptions {
 
 export class Peer extends Coordinator {
 	private options: PeerOptions = {
-		log: (taskId, repo) => new GitCasLog<Task>(() => remoteFor(this.env.ARTIFACTS, repo, "write"), taskId),
+		log: (taskId, repo) => new GitCasLog<Task>(cachedRemote(() => remoteFor(this.env.ARTIFACTS, repo, "write")), taskId),
 		leaseMs: PEER_LEASE_MS,
 		now: Date.now,
 	};
+
+	/** The task's log, opened once: it keeps the tip it last saw, and its token. */
+	private log: CasLog<Task> | null = null;
 
 	/** While this peer leads: its hold on the log. */
 	private leader: Leader<Task> | null = null;
@@ -79,7 +82,8 @@ export class Peer extends Coordinator {
 		// Known without asking Git: this peer leads, or saw a lease that is still live.
 		if (this.leader?.leading && this.leader.leaseExpires > now) return { leader: me, term: this.leader.term };
 		if (!fresh && this.known && this.known.leaseUntil > now) return { leader: this.known.leader, term: this.known.term };
-		const log = this.options.log(taskId, repo);
+		this.log ??= this.options.log(taskId, repo);
+		const log = this.log;
 		const outcome = await campaign(log, me, () => {
 			throw new Error(`[404] no task ${taskId} on ${repo}`);
 		}, { leaseMs: this.options.leaseMs, now: this.options.now });

@@ -194,4 +194,15 @@ describe("a peer of the elected coordinator", () => {
 		expect(await b.lead()).toMatchObject({ leader: "t1--stats-1a2b" }); // still remembered
 		expect(await b.peer.lead("t1", "project", "t1--b", true)).toEqual({ leader: "t1--b", term: 2 });
 	});
+
+	it("keeps one log for the task rather than opening it on every call", async () => {
+		const storage = new FakeStorage();
+		const opened = vi.fn(() => log);
+		const a = new Peer({ storage } as never, fakeEnv().env as never);
+		a.configure({ log: opened, leaseMs: LEASE, now: () => clock.now });
+		await a.lead("t1", "project", "t1--a");
+		clock.now += LEASE + 1;
+		await a.lead("t1", "project", "t1--a", true);
+		expect(opened).toHaveBeenCalledTimes(1);
+	});
 });
