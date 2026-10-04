@@ -216,7 +216,7 @@ async function main() {
 	}
 	if (FREE) {
 		const started = await tool(0, "free_start", { repo: REPO, ...(SHARD_DEPTH === undefined ? {} : { shard_depth: SHARD_DEPTH }) });
-		console.log(`coordinator-free mode on ${REPO} at ${BASE} (access: ${started.access}, claims sharded ${started.shardDepth ? `${started.shardDepth} deep` : "not at all"})`);
+		console.log(`coordinator-free mode on ${REPO} at ${BASE} (access: ${started.access}, claims sharded ${started.shardDepth ? `${started.shardDepth} deep, over ${started.recordsRepos || "no"} records repos` : "not at all"})`);
 	}
 	const task = FREE ? { id: null } : await api("POST", `/repos/${REPO}/open`, {});
 	if (!FREE) console.log(`open task ${task.id} on ${REPO} at ${BASE}`);
