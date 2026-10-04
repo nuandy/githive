@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { GitCasLog } from "../src/election-git";
-import { activeClaims, claim, release, releaseStale, type Registry } from "../src/free/claims";
+import { activeClaims, claim, release, releaseStale, startFree, type Registry } from "../src/free/claims";
 import { startGitServer } from "./helpers/git-server";
 import { MemoryLog } from "./helpers/memory-log";
 
@@ -93,5 +93,16 @@ describe("claims, coordinator-free", () => {
 		await new Promise((resolve) => setTimeout(resolve, 5));
 		await claim(log, { ...a, paths: ["docs/stats.md"] });
 		expect(Date.parse((await log.read())!.commit.state.claims[0].active)).toBeGreaterThan(Date.parse(first));
+	});
+
+	it("keeps the baseline, policy and checks through claims and releases", async () => {
+		const log = new MemoryLog<Registry>();
+		const started = { baseline: "b0", policy: { required: 2, vetoes: ["security"] }, verify: ["npm test"] };
+		await startFree(log, started);
+		await claim(log, a);
+		await release(log, { change: "stats-1a2b", agent: "agent-a", reason: "merged", mergedAs: "m1" });
+		await claim(log, b);
+		await releaseStale(log, { change: "fix-3c4d", agent: "agent-a", staleAfterMs: 0, now: Date.now() + 1 });
+		expect((await log.read())!.commit.state).toMatchObject(started);
 	});
 });

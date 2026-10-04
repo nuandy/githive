@@ -100,6 +100,7 @@ export function release(log: CasLog<Registry>, input: { change: string; agent: s
 		if (!held) return { refused: `${input.change} holds no claim` };
 		return {
 			state: {
+				...state,
 				claims: state.claims.filter((c) => c.change !== input.change),
 				released: [...state.released, { change: input.change, agent: held.agent, by: input.agent, at: new Date().toISOString(), reason: input.reason, mergedAs: input.mergedAs, lastActive: held.active }],
 			},
@@ -118,6 +119,7 @@ export function releaseStale(log: CasLog<Registry>, input: { change: string; age
 		if (idle <= input.staleAfterMs) return { refused: `${input.change}'s claim was active ${Math.round(idle / 1000)}s ago; it isn't stale` };
 		return {
 			state: {
+				...state,
 				claims: state.claims.filter((c) => c.change !== input.change),
 				released: [...state.released, { change: input.change, agent: held.agent, by: input.agent, at: new Date(now).toISOString(), reason: "stale", stale: true, lastActive: held.active }],
 			},
