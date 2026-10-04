@@ -135,5 +135,7 @@ about the cooperative merge.
   `fetch_base`, and may only `finish` with everything pushed. Finishing starts
   the hosted reviewers (tests and the veto roles). Each votes with its own
   stamped identity, then tries `free_merge` for the change. The toolkit refuses
-  until enough approvals are in, so whichever reviewer completes the approval
-  merges it. Neither agent calls a Coordinator.
+  until enough approvals are in, so the first attempt that finds them merges.
+  Neither agent calls a Coordinator. Live (`scripts/free-build-demo.mjs`): the
+  builder pushed in a minute, both reviewers approved, and the change was on
+  main, stamped, about two minutes after `free_build`. The audit was clean.
