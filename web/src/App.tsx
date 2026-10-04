@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { api, type Live, type Task } from "./api";
+import { api, type FreeSnapshot, type Live, type Task } from "./api";
+import { FreeRepoList, FreeRepoView } from "./components/FreeRepoView";
 import {
 	ActivityFeed,
 	CodeDecisions,
@@ -14,6 +15,12 @@ import {
 import { newestTasks } from "./lib/dashboardData";
 import type { DashboardShellAction, DashboardShellApi, DashboardTimerScheduler } from "./dashboard-contract";
 import "./App.css";
+
+/** The coordinator-free repo a #/free/<repo> address names, if any. */
+export function freeRepoFromHash(hash: string): string | null {
+	const match = /^#\/free\/([^/]+)\/?$/.exec(hash);
+	return match ? decodeURIComponent(match[1]) : null;
+}
 
 export function taskIdFromHash(hash: string): string | null {
 	const match = /^#\/tasks\/([^/]+)\/?$/.exec(hash);
@@ -115,6 +122,9 @@ export function App() {
 	const [busy, setBusy] = useState(false);
 	const [contractReadiness, setContractReadiness] = useState<{ taskId: string; contractsKey: string; selectionEpoch: number; ready: boolean } | null>(null);
 	const [errors, setErrors] = useState<string[]>([]);
+	const [freeRepos, setFreeRepos] = useState<{ repo: string; since: string }[]>([]);
+	const [freeRepo, setFreeRepo] = useState<string | null>(() => freeRepoFromHash(window.location.hash));
+	const [freeSnapshot, setFreeSnapshot] = useState<FreeSnapshot | null>(null);
 	const selectedRef = useRef(selectedId);
 	selectedRef.current = selectedId;
 
@@ -146,9 +156,45 @@ export function App() {
 		}
 	}, [clearError, reportError]);
 
+	const fetchFreeRepos = useCallback(async () => {
+		try {
+			setFreeRepos(await api.freeRepos());
+			clearError("Coordinator-free repos");
+		} catch (error) {
+			reportError("Coordinator-free repos", error);
+		}
+	}, [clearError, reportError]);
+
 	const refresh = useCallback(async () => {
-		await Promise.all([fetchTasks(), fetchRepos()]);
-	}, [fetchRepos, fetchTasks]);
+		await Promise.all([fetchTasks(), fetchRepos(), fetchFreeRepos()]);
+	}, [fetchFreeRepos, fetchRepos, fetchTasks]);
+
+	// A coordinator-free repo's view: refreshed every few seconds while it is open.
+	useEffect(() => {
+		const onHashChange = () => setFreeRepo(freeRepoFromHash(window.location.hash));
+		window.addEventListener("hashchange", onHashChange);
+		return () => window.removeEventListener("hashchange", onHashChange);
+	}, []);
+	useEffect(() => {
+		setFreeSnapshot(null);
+		if (!freeRepo) return;
+		let active = true;
+		const poll = async () => {
+			try {
+				const snapshot = await api.freeRepo(freeRepo);
+				if (active) setFreeSnapshot(snapshot);
+				clearError("Coordinator-free repo");
+			} catch (error) {
+				if (active) reportError("Coordinator-free repo", error);
+			}
+		};
+		void poll();
+		const timer = setInterval(() => void poll(), 5_000);
+		return () => {
+			active = false;
+			clearInterval(timer);
+		};
+	}, [clearError, freeRepo, reportError]);
 
 	useEffect(() => {
 		void refresh();
@@ -291,6 +337,7 @@ export function App() {
 						onSelect={selectTask}
 						onCreate={(repo, goal) => void createTask(repo, goal)}
 					/>
+					<FreeRepoList repos={freeRepos} selected={freeRepo} />
 				</aside>
 				<main className="dashboard-content">
 					{errors.length > 0 && (
@@ -299,7 +346,15 @@ export function App() {
 							<ul>{errors.map((error) => <li key={error}>{error}</li>)}</ul>
 						</div>
 					)}
-					{!selectedTask ? (
+					{freeRepo ? (
+						freeSnapshot ? (
+							<FreeRepoView snapshot={freeSnapshot} />
+						) : (
+							<section className="dashboard-empty card">
+								<h1>Loading {freeRepo}…</h1>
+							</section>
+						)
+					) : !selectedTask ? (
 						<section className="dashboard-empty card">
 							<h1>{tasksLoaded && tasks.length === 0 ? "No tasks yet" : selectedId ? "Loading task…" : "Blueprint dashboard"}</h1>
 							<p className="muted">{tasksLoaded && tasks.length === 0 ? "Create a task to start planning and building." : selectedId ? "The selected task will appear here when it is available." : "Choose a task or create a new one to get started."}</p>

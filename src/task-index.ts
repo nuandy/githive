@@ -29,6 +29,16 @@ export class TaskIndex extends DurableObject<Env> {
 		return [...entries.values()];
 	}
 
+	/** Note a repo in coordinator-free mode, for the dashboard. */
+	async addFree(repo: string) {
+		await this.ctx.storage.put(`free:${repo}`, { repo, since: new Date().toISOString() });
+	}
+
+	/** Repos in coordinator-free mode, oldest first. */
+	async listFree() {
+		return [...(await this.ctx.storage.list<{ repo: string; since: string }>({ prefix: "free:" })).values()].sort((a, b) => a.since.localeCompare(b.since));
+	}
+
 	/** The task with this id, if it is listed. */
 	async get(id: string) {
 		const entries = await this.ctx.storage.list<TaskRef>({ prefix: "task:" });

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { FREE_TOOLS } from "../src/free/mcp";
+import { FREE_TOOLS, freeSnapshot } from "../src/free/mcp";
 import { TOOLS, handleRpc } from "../src/mcp";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -12,6 +12,7 @@ import { startGitServer, type GitServer } from "./helpers/git-server";
 // other tools; driven here over JSON-RPC against a real Git server.
 
 let server: GitServer;
+let registered: string[] = [];
 const ctx = () => ({
 	coordinator: () => {
 		throw new Error("not used");
@@ -22,6 +23,7 @@ const ctx = () => ({
 	free: {
 		remote: async () => ({ url: server.url, token: "unused" }),
 		head: async () => server.git("rev-parse", "main").trim(),
+		register: async (repo: string) => void registered.push(repo),
 	},
 });
 const call = async (name: string, args: Record<string, unknown>) => {
@@ -79,4 +81,22 @@ describe("the coordinator-free MCP tools", () => {
 			rmSync(work, { recursive: true, force: true });
 		}
 	}, 60_000);
+
+	it("notes a repo for the dashboard when the mode starts, and snapshots it", async () => {
+		registered = [];
+		await call("free_start", { repo: "project", verify: ["npm test"] });
+		expect(registered).toEqual(["project"]);
+		await call("free_claim", { repo: "project", change: "a-1", agent: "agent-a", paths: ["src/a/"], intent: "a" });
+		await call("free_vote", { repo: "project", commit: "h1", reviewer: "rev-1", role: "tests", verdict: "approve", evidence: "ok" });
+		const snapshot = await freeSnapshot(ctx().free, "project");
+		expect(snapshot).toMatchObject({
+			repo: "project",
+			policy: { required: 2, vetoes: ["security"] },
+			verify: ["npm test"],
+			verified: false,
+			claims: [{ change: "a-1", agent: "agent-a", paths: ["src/a/"] }],
+			votes: [{ commit: "h1", reviewer: "rev-1", verdict: "approve" }],
+			audit: { merges: 0, open: 0, violations: [] },
+		});
+	});
 });

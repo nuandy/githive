@@ -24,6 +24,8 @@ export interface FreeContext {
 	runChecks?: (repo: string) => CheckRunner;
 	/** Stamps what this caller writes with their verified identity (Blueprint's key); without it, nothing is stamped. */
 	stamper?: () => Promise<Stamper | undefined>;
+	/** Notes a repo in coordinator-free mode, so the dashboard can list it. */
+	register?: (repo: string) => Promise<void>;
 }
 
 const DEFAULT_POLICY: ReviewPolicy = { required: 2, vetoes: ["security"] };
@@ -68,6 +70,26 @@ async function runAudit(ctx: FreeContext, repo: string) {
 	return { merges: merges.length, violations };
 }
 
+/** Everything the dashboard shows for a repo in coordinator-free mode, read from Git. */
+export async function freeSnapshot(ctx: FreeContext, repo: string) {
+	const write = () => ctx.remote(repo, "read");
+	const [registry, votes] = await Promise.all([new GitCasLog<Registry>(write, repo, claimsRef(repo)).read(), new GitCasLog<Votes>(write, repo, votesRef(repo)).read()]);
+	const state = registry?.commit.state;
+	if (!state?.baseline) throw new Error(`[404] coordinator-free mode hasn't started on ${repo}`);
+	const { merges, violations } = await runAudit(ctx, repo);
+	return {
+		repo,
+		policy: state.policy ?? DEFAULT_POLICY,
+		verify: state.verify ?? [],
+		/** Whether records and merges are stamped with verified identity. */
+		verified: !!state.stampKey,
+		claims: activeClaims(state),
+		/** The latest votes, newest first. */
+		votes: (votes?.commit.state.votes ?? []).slice(-20).reverse(),
+		audit: { merges, open: violations.filter((v) => !v.resolvedBy).length, violations },
+	};
+}
+
 /** Run one coordinator-free tool. */
 export async function callFreeTool(name: string, args: Args, ctx: FreeContext): Promise<unknown> {
 	const repo = requiredString(args, "repo");
@@ -84,6 +106,7 @@ export async function callFreeTool(name: string, args: Args, ctx: FreeContext): 
 			};
 			const verify = Array.isArray(args.verify) ? (args.verify as string[]).filter((c) => typeof c === "string" && c.trim()) : [];
 			await startFree(claims, { baseline: await ctx.head(repo), policy, verify, stampKey: stamper?.publicKey });
+			await ctx.register?.(repo);
 			const registry = (await claims.read())?.commit.state;
 			return { repo, policy: registry?.policy ?? policy, verify: registry?.verify ?? [], instructions: FREE_INSTRUCTIONS };
 		}

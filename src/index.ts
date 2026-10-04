@@ -11,7 +11,7 @@ import { retryTransient } from "./retry";
 import type { Blueprint, Limits, Review, ReviewPolicy, Task } from "./types";
 import { openTaskId } from "./open-mode";
 import { handleMcpBody, type McpContext } from "./mcp";
-import type { FreeContext } from "./free/mcp";
+import { type FreeContext, freeSnapshot } from "./free/mcp";
 import { identityLabel, makeStamper } from "./free/stamp";
 
 export { Builder } from "./builder";
@@ -114,6 +114,8 @@ app.get("/api", (c) =>
 			"GET  /tasks/:id/ledger",
 			"DELETE /tasks/:id   (state, forks and dashboard entry; refused while agents work)",
 			"DELETE /repos/:repo (refused while tasks use it)",
+			"GET  /free         (repos in coordinator-free mode)",
+			"GET  /free/:repo   (claims, votes and audit, from Git)",
 			"GET  /tasks/:id/lock-stats",
 			"POST /tasks/:id/lock-stats/reset",
 			"POST /tasks/:id/restore {repo}",
@@ -178,6 +180,7 @@ app.get("/tasks/:id/claims", async (c) => c.json(await coordinator(c.env, c.req.
 
 /** Coordinator-free mode's tools (an exploration; see docs/coordinator-free.md): stateless, Git only. */
 const freeContext = (env: Env, identity: AccessIdentity | undefined): FreeContext => ({
+	register: async (repo) => taskIndex(env).addFree(repo),
 	// What this caller writes is stamped with who they are, as Access verified them.
 	stamper: async () => (env.FREE_STAMP_KEY && identity ? makeStamper(env.FREE_STAMP_KEY, identityLabel(identity)) : undefined),
 	remote: (repo, scope) => remoteFor(env.ARTIFACTS, repo, scope, 3600),
@@ -189,6 +192,10 @@ const freeContext = (env: Env, identity: AccessIdentity | undefined): FreeContex
 		return { passed: result.passed, results: result.results.map((r) => ({ command: r.command, exitCode: r.exitCode, output: r.output })) };
 	},
 });
+
+// Coordinator-free repos, for the dashboard: which repos, and a snapshot of one read from Git.
+app.get("/free", async (c) => c.json(await taskIndex(c.env).listFree()));
+app.get("/free/:repo", async (c) => c.json(await freeSnapshot(freeContext(c.env, c.get("accessIdentity")), c.req.param("repo"))));
 
 // The MCP front door (stateless JSON-RPC over HTTP), for agents from anywhere.
 app.post("/mcp", async (c) => {

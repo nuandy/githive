@@ -1,0 +1,17 @@
+.free-repo { display: grid; gap: 1rem; }
+.free-repo__settings { margin: 0.5rem 0 0; padding-left: 1.2rem; }
+.free-repo__settings code { margin-left: 0.3rem; }
+.free-repo__badge { display: inline-block; margin-left: 0.5rem; padding: 0.1rem 0.5rem; border-radius: 999px; font-size: 0.75rem; background: var(--surface-2, #eef1f4); vertical-align: middle; }
+.free-repo__badge--bad { background: #fde2e1; color: #9b1c1c; }
+.free-repo__table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+.free-repo__table th, .free-repo__table td { text-align: left; padding: 0.35rem 0.5rem; border-bottom: 1px solid var(--border, #e3e6ea); vertical-align: top; }
+.free-repo__table code { margin-right: 0.3rem; }
+.free-repo__approve { color: #1d6b3a; }
+.free-repo__reject { color: #9b1c1c; }
+.free-repo__violations { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.5rem; }
+.free-repo__violation { padding: 0.5rem 0.6rem; border-left: 3px solid #d64545; background: var(--surface-2, #fafafa); }
+.free-repo__violation--resolved { border-left-color: #8a9099; opacity: 0.8; }
+.free-repo-list { margin-top: 1rem; }
+.free-repo-list h2 { font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted, #6b7280); margin: 0 0 0.4rem; }
+.free-repo-list ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.25rem; }
+.free-repo-list a[aria-current="page"] { font-weight: 600; }

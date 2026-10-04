@@ -3,6 +3,22 @@ import type { LaneChangeRequest } from "../../src/lane-change-contract";
 import type { ContractFile, UnifiedCodeDiff } from "./dashboard-contract";
 
 export type { Task };
+
+/** A repo in coordinator-free mode, as the dashboard shows it (GET /free/:repo; see src/free/mcp.ts). */
+export interface FreeSnapshot {
+	repo: string;
+	policy: { required: number; vetoes: string[] };
+	verify: string[];
+	/** Whether records and merges are stamped with verified identity. */
+	verified: boolean;
+	claims: { change: string; agent: string; paths: string[]; intent: string; since: string; active: string; by?: string }[];
+	votes: { commit: string; reviewer: string; role: string; verdict: "approve" | "reject"; evidence: string; at: string; by?: string }[];
+	audit: {
+		merges: number;
+		open: number;
+		violations: { commit: string; author: string; rule: string; detail: string; by?: string; resolvedBy?: string }[];
+	};
+}
 export type Slice = Task["slices"][number];
 
 export interface Usage {
@@ -217,6 +233,8 @@ export const api = {
 	},
 	live: async (id: string) => normalizeLive(await call<unknown>("GET", `/tasks/${encodeURIComponent(id)}/live`)),
 	repos: () => call<{ name: string }[]>("GET", "/repos"),
+	freeRepos: () => call<{ repo: string; since: string }[]>("GET", "/free"),
+	freeRepo: (repo: string) => call<FreeSnapshot>("GET", `/free/${encodeURIComponent(repo)}`),
 	create: async (repo: string, goal: string) => normalizeTask(await call<unknown>("POST", "/tasks", { repo, goal })),
 	plan: async (id: string) => normalizeTask(await call<unknown>("POST", `/tasks/${encodeURIComponent(id)}/plan`)),
 	approve: (id: string) => call<unknown>("POST", `/tasks/${encodeURIComponent(id)}/approve`),
