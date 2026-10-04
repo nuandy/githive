@@ -57,6 +57,16 @@ main's history, and reports each violation with its commit and author:
 - a claims registry rewritten rather than appended to (its tip no longer
   descends from what an earlier reader saw).
 
+Each merge into main names its change and the registry tip its agent checked,
+as trailers (`Blueprint-Change`, `Blueprint-Claims`), so the audit checks the
+merge against the claims exactly as they stood at that tip. A merge without
+them, or citing a tip the registry never had (which is also what a rewritten
+registry looks like), is a violation in itself.
+
+Known gap: an agent could cite an old but real tip, from when it still held
+its claim, after releasing it. Closing it needs the release entry to cite the
+merge commit, so the audit can check the claim was held until the merge.
+
 Blueprint's part is a stateless toolkit (the MCP tools) that does the Git
 operations an agent asks for and reports what Git said, plus the audit.
 Neither decides anything: an agent can skip the toolkit and use plain git,
