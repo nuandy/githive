@@ -11,6 +11,7 @@
 //                          [--idle 40]   (changes held open through every level that never push)
 //                          [--mode free] (coordinator-free mode: the same lifecycle through the free_* tools, no Coordinator)
 //                          [--shard-depth 2] (free mode: how deep claims are sharded; 0 keeps them in one record)
+//                          [--ramp 60]   (agents start spread evenly over this many seconds, instead of all at once)
 //
 // Credentials come from .dev.vars (CF_ACCESS_CLIENT_ID, CF_ACCESS_CLIENT_SECRET) and are never printed.
 // Each run gets its own repo, so its Coordinator starts idle. Results go to
@@ -40,6 +41,7 @@ const RACERS = Number(args.racers ?? 5);
 const IDLE = Number(args.idle ?? 0);
 const FREE = args.mode === "free";
 const SHARD_DEPTH = args["shard-depth"] === undefined ? undefined : Number(args["shard-depth"]);
+const RAMP_MS = Number(args.ramp ?? 0) * 1000;
 
 // Calls can wait minutes behind the lock under load; don't let the client give up first.
 try {
@@ -243,7 +245,7 @@ async function main() {
 	if (!FREE) await optional(api("POST", `/tasks/${task.id}/lock-stats/reset`), null);
 
 	const levels = [];
-	const result = { label: LABEL, mode: FREE ? "free" : "open", base: BASE, repo: REPO, task: task.id, racers: RACERS, idle: IDLE, at: new Date().toISOString(), ledgerMatches: null, ledgerCommits: null, levels };
+	const result = { label: LABEL, mode: FREE ? "free" : "open", rampSeconds: RAMP_MS / 1000, base: BASE, repo: REPO, task: task.id, racers: RACERS, idle: IDLE, at: new Date().toISOString(), ledgerMatches: null, ledgerCommits: null, levels };
 	await mkdir(join(root, "bench-results"), { recursive: true });
 	const file = join(root, "bench-results", `${LABEL}-${result.at.replace(/[:.]/g, "-")}.json`);
 	const save = () => writeFile(file, JSON.stringify(result, null, "\t") + "\n");
@@ -252,7 +254,13 @@ async function main() {
 		const scratch = await mkdtemp(join(tmpdir(), "blueprint-bench-"));
 		const started = performance.now();
 		const [agents, raced] = await Promise.all([
-			Promise.allSettled(Array.from({ length: n }, (_, i) => (FREE ? freeAgent : agent)(n, task.id, runId, i, scratch))),
+			Promise.allSettled(
+				Array.from({ length: n }, async (_, i) => {
+					// Arrivals spread over the ramp, like agents starting work, rather than all at one instant.
+					if (RAMP_MS) await new Promise((resolve) => setTimeout(resolve, (RAMP_MS * i) / n));
+					return (FREE ? freeAgent : agent)(n, task.id, runId, i, scratch);
+				}),
+			),
 			(FREE ? freeRace : race)(n, task.id, runId),
 		]);
 		const wallMs = performance.now() - started;
