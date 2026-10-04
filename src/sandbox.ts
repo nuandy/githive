@@ -26,6 +26,7 @@ const MAX_NUDGES = 3;
 const MAX_LINES = 400;
 const LOG_LIMIT = 200;
 const TURN_IN_FLIGHT = "sandbox-turn-in-flight";
+const TURN_STARTED = "sandbox-turn-started-at";
 const PARK_COMMAND = "sandbox-park-command";
 const DEFERRED_WAKES = "sandbox-deferred-wakes";
 const DELIVERED_WAKES = "sandbox-delivered-wakes";
@@ -158,7 +159,7 @@ export abstract class SandboxAgent<J extends SandboxJob, S extends AgentState> e
 			...this.freshFields(),
 		} as unknown as S; // base fields + the subclass's fields make a full S
 		await this.ctx.storage.put("job", job);
-		await this.ctx.storage.delete(["cancel", "inbox", "builder-last-pushed-head"]);
+		await this.ctx.storage.delete(["cancel", INBOX, "builder-last-pushed-head", TURN_IN_FLIGHT, TURN_STARTED, PARK_COMMAND, DEFERRED_WAKES, DELIVERED_WAKES, TIMED_OUT_PARK]);
 		await this.save(fresh);
 		await this.ctx.storage.setAlarm(Date.now());
 		return this.view(fresh);
@@ -206,7 +207,7 @@ export abstract class SandboxAgent<J extends SandboxJob, S extends AgentState> e
 			const pending = (await this.ctx.storage.get<DeferredWake[]>(DEFERRED_WAKES)) ?? [];
 			if (delivered.includes(eventId) || pending.some((wake) => wake.eventId === eventId)) return "ignored";
 			const wake = { eventId, message, credentials };
-			if (await this.ctx.storage.get(TURN_IN_FLIGHT)) { await this.ctx.storage.put(DEFERRED_WAKES, [...pending, wake]); return "deferred"; }
+			if (await this.ctx.storage.get(TURN_IN_FLIGHT)) { await this.ctx.storage.put(DEFERRED_WAKES, [...pending, wake]); await this.ctx.storage.setAlarm(Date.now() + RUN_BUDGET_MS + 5_000); return "deferred"; }
 			const { job, state } = await this.load(); if (!job || !state) return "ignored";
 			return this.deliverWake(job, state, wake);
 		});
@@ -257,8 +258,13 @@ export abstract class SandboxAgent<J extends SandboxJob, S extends AgentState> e
 	async alarm() {
 		const { job, state } = await this.load();
 		if (!job || !state) return;
-		if (state.status === "parked") { await this.handleParkedAlarm(job, state); return; }
+		if (state.status === "parked") { await this.reconcileParkedWakes(job, state); const latest = (await this.load()).state; if (latest?.status === "parked") await this.handleParkedAlarm(job, latest); return; }
 		if (state.status !== "queued" && state.status !== "working") return;
+		if (state.status === "working" && await this.ctx.storage.get(TURN_IN_FLIGHT)) {
+			const started = await this.ctx.storage.get<number>(TURN_STARTED);
+			if (started && Date.now() - started < RUN_BUDGET_MS + 30_000) { await this.ctx.storage.setAlarm(Date.now() + 60_000); return; }
+			await this.ctx.storage.delete([TURN_IN_FLIGHT, TURN_STARTED]);
+		}
 		try {
 			if (await this.cancelled(state)) throw new Error(state.error);
 			if (state.status === "queued" || !this.ctx.container?.running) {
@@ -270,12 +276,12 @@ export abstract class SandboxAgent<J extends SandboxJob, S extends AgentState> e
 			const deadline = Date.now() + RUN_BUDGET_MS;
 			while (state.status === "working" && Date.now() < deadline && !(await this.cancelled(state))) {
 				const turnToken = crypto.randomUUID();
-					await this.ctx.storage.put(TURN_IN_FLIGHT, turnToken);
+					await this.ctx.storage.put({ [TURN_IN_FLIGHT]: turnToken, [TURN_STARTED]: Date.now() });
 					try { await this.turn(job, state); await this.save(state); await this.reconcileAfterTurn(job, state, turnToken); }
-					finally { if ((await this.ctx.storage.get<string>(TURN_IN_FLIGHT)) === turnToken) await this.ctx.storage.delete(TURN_IN_FLIGHT); }
+					finally { if ((await this.ctx.storage.get<string>(TURN_IN_FLIGHT)) === turnToken) await this.ctx.storage.delete([TURN_IN_FLIGHT, TURN_STARTED]); }
 					const refreshed = await this.ctx.storage.get<J>("job"); if (refreshed) Object.assign(job, refreshed);
 			}
-			if ((state.status as string) === "parked") { await this.save(state); if (this.ctx.container?.running) await this.ctx.container.destroy(this.kind + " parked"); await this.scheduleForState(state); return; }
+			if ((state.status as string) === "parked") { if (this.ctx.container?.running) await this.ctx.container.destroy(this.kind + " parked"); return; }
 			if (state.status === "working") await this.ctx.storage.setAlarm(Date.now() + 1_000);
 		} catch (err) {
 			state.status = "failed";
@@ -292,6 +298,17 @@ export abstract class SandboxAgent<J extends SandboxJob, S extends AgentState> e
 		if (["done", "failed"].includes(state.status)) await this.onStopped(job, state).catch(() => {});
 	}
 
+	private async reconcileParkedWakes(job: J, state: S) {
+		await this.lifecycle(async () => {
+			const pending = (await this.ctx.storage.get<DeferredWake[]>(DEFERRED_WAKES)) ?? [];
+			for (const wake of pending) await this.deliverWake(job, state, wake);
+			if (pending.length) await this.ctx.storage.delete(DEFERRED_WAKES);
+			await this.save(state);
+			if (state.status === "parked" || state.status === "queued") await this.scheduleForState(state);
+			await this.ctx.storage.delete([TURN_IN_FLIGHT, TURN_STARTED]);
+		});
+	}
+
 	private async reconcileAfterTurn(job: J, state: S, turnToken: string) {
 		await this.lifecycle(async () => {
 			const park = await this.ctx.storage.get<{ parkedAt: string; waitingFor: string[] }>(PARK_COMMAND);
@@ -302,7 +319,7 @@ export abstract class SandboxAgent<J extends SandboxJob, S extends AgentState> e
 			await this.save(state); if (park) await this.ctx.storage.delete(PARK_COMMAND);
 			if (state.status === "parked") { if (this.ctx.container?.running) await this.ctx.container.destroy(this.kind + " parked"); await this.scheduleForState(state); }
 			else if (state.status === "queued") await this.scheduleForState(state);
-			if ((await this.ctx.storage.get<string>(TURN_IN_FLIGHT)) === turnToken) await this.ctx.storage.delete(TURN_IN_FLIGHT);
+			if ((await this.ctx.storage.get<string>(TURN_IN_FLIGHT)) === turnToken) await this.ctx.storage.delete([TURN_IN_FLIGHT, TURN_STARTED]);
 		});
 	}
 
@@ -313,11 +330,18 @@ export abstract class SandboxAgent<J extends SandboxJob, S extends AgentState> e
 
 	private async handleParkedAlarm(job: J, state: S) {
 		const parkedAt = state.parkedAt ?? new Date().toISOString();
-		if (Date.now() < Date.parse(parkedAt) + BUILDER_PARK_TIMEOUT_MS) { await this.ctx.storage.setAlarm(Date.parse(parkedAt) + BUILDER_PARK_TIMEOUT_MS); return; }
+		const deadline = Date.parse(parkedAt) + BUILDER_PARK_TIMEOUT_MS;
+		if (Date.now() < deadline) {
+			await this.lifecycle(async () => { const current = (await this.load()).state; if (current?.status === "parked" && current.parkedAt === parkedAt) await this.ctx.storage.setAlarm(deadline); });
+			return;
+		}
 		if (await this.ctx.storage.get<string>(TIMED_OUT_PARK) === parkedAt) return;
-		await (this.coordinator(job) as unknown as LaneChangeCoordinator).parkedBuilderTimedOut((job as J & { slice: { id: string } }).slice.id, parkedAt);
-		const latest = (await this.load()).state;
-		if (latest?.status === "parked" && latest.parkedAt === parkedAt) { await this.ctx.storage.put(TIMED_OUT_PARK, parkedAt); this.note(latest, "park timeout reported while waiting for " + (latest.waitingRequestIds ?? []).join(", ")); await this.save(latest); }
+		try { await (this.coordinator(job) as unknown as LaneChangeCoordinator).parkedBuilderTimedOut((job as J & { slice: { id: string } }).slice.id, parkedAt); }
+		catch { await this.lifecycle(async () => { const current = (await this.load()).state; if (current?.status === "parked" && current.parkedAt === parkedAt) await this.ctx.storage.setAlarm(Date.now() + 60_000); }); return; }
+		await this.lifecycle(async () => {
+			const current = (await this.load()).state;
+			if (current?.status === "parked" && current.parkedAt === parkedAt) { await this.ctx.storage.put(TIMED_OUT_PARK, parkedAt); this.note(current, "park timeout reported while waiting for " + (current.waitingRequestIds ?? []).join(", ")); await this.save(current); }
+		});
 	}
 
 	private async setUp(job: J, state: S) {
