@@ -25,10 +25,12 @@ export interface CheckResult {
 }
 
 /** Runs the project's checks on `base` (main) with `head` (from branch `ref`) merged in. Live, the Gate's container. */
-export type CheckRunner = (input: { base: string; head: string; ref: string; commands: string[] }) => Promise<{ passed: boolean; results: CheckResult[] }>;
+export type CheckRunner = (input: { base: string; head: string; ref: string; commands: string[]; source?: Remote }) => Promise<{ passed: boolean; results: CheckResult[] }>;
 
 export interface MergeInput {
 	remote: Remote;
+	/** Where the change's branch lives (its fork); by default the project repo. */
+	source?: Remote;
 	claims: CasLog<Registry>;
 	votes: CasLog<Votes>;
 	policy: ReviewPolicy;
@@ -57,7 +59,7 @@ export async function mergeChange(input: MergeInput): Promise<MergeOutcome> {
 		const [claimsHead, votesHead] = await Promise.all([input.claims.read(), input.votes.read()]);
 		const ws = await Workspace.clone(input.remote);
 		const main = await ws.head();
-		const head = await ws.fetch("change", input.remote, `changes/${input.change}`);
+		const head = await ws.fetch("change", input.source ?? input.remote, `changes/${input.change}`);
 		const files = await ws.changedPaths(await ws.mergeBase(main, head), head);
 
 		const reasons: string[] = [];
@@ -91,7 +93,7 @@ export async function mergeChange(input: MergeInput): Promise<MergeOutcome> {
 		const verify = input.verify ?? [];
 		if (verify.length) {
 			if (!input.runChecks) throw new Error("[500] checks are configured but nothing can run them");
-			const checked = await input.runChecks({ base: main, head, ref: `changes/${input.change}`, commands: verify });
+			const checked = await input.runChecks({ base: main, head, ref: `changes/${input.change}`, commands: verify, source: input.source });
 			if (!checked.passed) {
 				const failed = checked.results.find((r) => r.exitCode !== 0);
 				return { ok: false, reasons: [failed ? `checks failed: ${failed.command} exited ${failed.exitCode}` : "checks failed"], checks: checked.results };

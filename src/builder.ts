@@ -650,8 +650,10 @@ How to work:
 		if (push.exitCode !== 0) return `Push failed:\n${clip(push.output, 4_000)}`;
 		state.pushes++;
 		this.note(state, `pushed: ${message.slice(0, 120)}`);
-		// The files this change touches, against where it left main.
-		const changed = await this.exec(["git", "diff", "--name-only", "origin/main...HEAD"]);
+		// The files this change touches, against where it left main: the project's
+		// main, since origin may be the change's fork and main may have been merged in.
+		const fetched = await this.git(job, ["fetch", "-q", job.base.remote, "main:refs/remotes/base/main"], undefined, job.base.token);
+		const changed = await this.exec(["git", "diff", "--name-only", `${fetched.exitCode === 0 ? "base" : "origin"}/main...HEAD`]);
 		const outOfLane = changed.output.split("\n").map((f) => f.trim()).filter((f) => f && !inLane(f, job.slice.owns));
 		state.lastReport = { outOfLane, conflicts: [] };
 		return outOfLane.length

@@ -78,6 +78,8 @@ describe("Blueprint's builder, coordinator-free", () => {
 		expect(b.ran).toContainEqual(["push", "-q", "origin", "HEAD:refs/heads/changes/stats-1a2b"]);
 		expect(said).toMatch(/outside your claim: src\/router\.ts/);
 		expect(b.state.lastReport?.outOfLane).toEqual(["src/router.ts"]);
+		// Against the project's main (origin may be the change's fork), so merged-in main isn't counted.
+		expect(b.ran).toContainEqual(["git", "diff", "--name-only", "base/main...HEAD"]);
 	});
 
 	it("extends its claim as itself", async () => {

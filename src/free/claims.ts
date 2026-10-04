@@ -52,6 +52,8 @@ export interface Registry {
 	verify?: string[];
 	/** Blueprint's public key, to check the stamps on records and merges with. */
 	stampKey?: string;
+	/** Where changes live: each in its own fork, writable only by its agent (the default), or branches of the project repo every agent can write. */
+	access?: FreeAccess;
 	/** Registered agent names, each bound to one secret key. */
 	agents?: Record<string, AgentRecord>;
 }
@@ -65,6 +67,8 @@ export interface AgentRecord {
 	stamp?: string;
 }
 
+export type FreeAccess = "forks" | "shared";
+
 export interface Conflict {
 	path: string;
 	held: string;
@@ -76,11 +80,11 @@ export interface Conflict {
 const empty = (): Registry => ({ claims: [], released: [] });
 
 /** Start coordinator-free mode on a repo: the registry's first entry records main's baseline and the review policy. Harmless to repeat. */
-export async function startFree(log: CasLog<Registry>, input: { baseline: string; policy: ReviewPolicy; verify?: string[]; stampKey?: string }) {
+export async function startFree(log: CasLog<Registry>, input: { baseline: string; policy: ReviewPolicy; verify?: string[]; stampKey?: string; access?: FreeAccess }) {
 	const outcome = await appendRecord<Registry, "started">(log, "blueprint", empty, (state) =>
 		state.baseline
 			? { refused: "started" }
-			: { state: { ...state, baseline: input.baseline, policy: input.policy, verify: input.verify ?? [], stampKey: input.stampKey }, text: `Coordinator-free mode starts at ${input.baseline}` },
+			: { state: { ...state, baseline: input.baseline, policy: input.policy, verify: input.verify ?? [], stampKey: input.stampKey, access: input.access ?? "forks" }, text: `Coordinator-free mode starts at ${input.baseline}` },
 	);
 	return { started: outcome.ok };
 }

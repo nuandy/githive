@@ -1,4 +1,4 @@
-import { headOf, remoteFor, reviewerName } from "../artifacts";
+import { forkAndWait, headOf, remoteFor, reviewerName } from "../artifacts";
 import { GitCasLog } from "../election-git";
 import { fail } from "../errors";
 import { Workspace } from "../git";
@@ -24,19 +24,33 @@ export function freeContextFor(env: Env, by: string | undefined, caller: { agent
 		startBuilder: (input) => startFreeBuilder(env, input),
 		stamper: async (agent) => (env.FREE_STAMP_KEY && by ? makeStamper(env.FREE_STAMP_KEY, agent ? `${by}/${agent}` : by) : undefined),
 		remote: (repo, scope) => remoteFor(env.ARTIFACTS, repo, scope, 3600),
+		changeRemote: (repo, change, scope) => changeRemote(env, repo, change, scope, 3600),
 		head: async (repo) => (await headOf(env.ARTIFACTS, repo)) ?? fail(409, `${repo} has no commits`),
 		// Checks run in the Gate's container, one Gate per repo.
-		runChecks: (repo) => async ({ base, head, ref, commands }) => {
+		runChecks: (repo) => async ({ base, head, ref, commands, source }) => {
 			const remote = await remoteFor(env.ARTIFACTS, repo, "read", 3600);
-			const result = await env.GATE.getByName(`free:${repo}`).checkCommit({ baseHead: base, base: { remote: remote.url, token: remote.token }, fork: { remote: remote.url, token: remote.token, ref }, head, checks: commands });
+			const change = source ?? remote;
+			const result = await env.GATE.getByName(`free:${repo}`).checkCommit({ baseHead: base, base: { remote: remote.url, token: remote.token }, fork: { remote: change.url, token: change.token, ref }, head, checks: commands });
 			return { passed: result.passed, results: result.results.map((r) => ({ command: r.command, exitCode: r.exitCode, output: r.output })) };
 		},
 	};
 }
 
 const claimsRef = (repo: string) => `refs/notes/blueprint-claims/${repo}`;
-/** Hosted agents' Durable Object names for a change: one builder, one reviewer per role and commit. */
+/** A change's fork, and its hosted agents' Durable Object names: one builder, one reviewer per role and commit. */
 export const freeAgentName = (repo: string, change: string) => `free--${repo}--${change}`;
+
+/** Credentials for a change's own fork of the project repo; writing to it first creates the fork. */
+export async function changeRemote(env: Env, repo: string, change: string, scope: "read" | "write", ttlSeconds: number) {
+	const name = freeAgentName(repo, change);
+	try {
+		return await remoteFor(env.ARTIFACTS, name, scope, ttlSeconds);
+	} catch (err) {
+		if (scope === "read") throw new Error(`[409] ${change} has no fork yet: nothing has been pushed for it`);
+		await forkAndWait(env.ARTIFACTS, repo, name, `Coordinator-free change ${change} of ${repo}`);
+		return remoteFor(env.ARTIFACTS, name, scope, ttlSeconds);
+	}
+}
 
 /** What every hosted agent on a change is told: its claim as the brief, the other claims, the checks. */
 async function changeBrief(env: Env, repo: string, change: string) {
@@ -46,6 +60,8 @@ async function changeBrief(env: Env, repo: string, change: string) {
 	return {
 		read,
 		own,
+		/** Where the change's branch lives: its fork, or the project repo when it's shared. */
+		source: (scope: "read" | "write") => (registry?.access === "forks" ? changeRemote(env, repo, change, scope, 3 * 3600) : remoteFor(env.ARTIFACTS, repo, scope, 3 * 3600)),
 		policy: registry?.policy ?? { required: 2, vetoes: ["security"] },
 		job: {
 			taskId: `free:${repo}`,
@@ -69,22 +85,23 @@ async function changeBrief(env: Env, repo: string, change: string) {
 export async function startFreeReviewers(env: Env, input: { repo: string; change: string; roles?: string[]; summary?: string; mergeWhenApproved?: boolean }) {
 	const { repo, change } = input;
 	const ref = `changes/${change}`;
-	const { read, own, policy, job } = await changeBrief(env, repo, change);
+	const { read, own, policy, job, source } = await changeBrief(env, repo, change);
 	// By default the tests role and every role that can veto.
 	const roles = input.roles?.length ? input.roles : [...new Set(["tests", ...policy.vetoes])];
+	const from = await source("read");
 	const ws = await Workspace.clone(read);
-	const head = await ws.fetch("change", read, ref);
+	const head = await ws.fetch("change", from, ref);
 	const baseCommit = await ws.mergeBase(await ws.head(), head);
-	const review = { ...job, remote: read.url, token: read.token, head, baseCommit, buildSummary: input.summary, free: { repo, change, ref, agent: own?.agent ?? change, mergeWhenApproved: !!input.mergeWhenApproved } };
+	const review = { ...job, remote: from.url, token: from.token, head, baseCommit, buildSummary: input.summary, free: { repo, change, ref, agent: own?.agent ?? change, mergeWhenApproved: !!input.mergeWhenApproved } };
 	await Promise.all(roles.map((role) => env.REVIEWER.getByName(reviewerName(freeAgentName(repo, change), role, head)).start({ ...review, role })));
 	return { head, reviewers: roles };
 }
 
-/** Start Blueprint's hosted builder on a claimed coordinator-free change: it works on the branch changes/<change> in the project repo. */
+/** Start Blueprint's hosted builder on a claimed coordinator-free change: it works on the branch changes/<change> in the change's fork (or the shared project repo). */
 export async function startFreeBuilder(env: Env, input: { repo: string; change: string }) {
 	const { repo, change } = input;
-	const { read, own, job } = await changeBrief(env, repo, change);
-	const write = await remoteFor(env.ARTIFACTS, repo, "write", 3 * 3600);
+	const { read, own, job, source } = await changeBrief(env, repo, change);
+	const write = await source("write");
 	const build = { ...job, remote: write.url, token: write.token, base: { remote: read.url, token: read.token }, free: { repo, change, ref: `changes/${change}`, agent: own?.agent ?? change } };
 	await env.BUILDER.getByName(freeAgentName(repo, change)).start(build);
 	return { change, builder: freeAgentName(repo, change) };

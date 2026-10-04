@@ -18,6 +18,8 @@ import { vote, type ReviewPolicy, type Votes } from "./votes";
 export interface FreeContext {
 	/** Credentials for a project repo. */
 	remote: (repo: string, scope: "read" | "write") => Promise<Remote>;
+	/** Credentials for a change's own fork of a project repo (forks access); asking to write creates the fork. */
+	changeRemote?: (repo: string, change: string, scope: "read" | "write") => Promise<Remote>;
 	/** Main's head in a project repo. */
 	head: (repo: string) => Promise<string>;
 	/** Runs a repo's checks on main plus a change (live, the Gate's container). */
@@ -45,7 +47,7 @@ const votesRef = (repo: string) => `refs/notes/blueprint-votes/${repo}`;
 export const FREE_INSTRUCTIONS = `Coordinator-free mode (the free_* tools): nobody enforces the rules; every agent follows them, and an audit anyone can run shows who didn't.
 Conventions:
 1. free_claim the paths you will change before editing; edit only inside your claim. A refusal names who holds what: narrow your claim, or ask them.
-2. Work on a branch changes/<change> in the project repo (free_credentials gives you git access) and push it.
+2. Work on a branch changes/<change> and push it where free_credentials with your change says: its own fork (only you can write it), or the project repo if it's shared. The project's main is written only through the toolkit.
 3. Reviewers free_vote on the exact commit they reviewed. A change merges with the policy's approvals and no veto.
 4. free_merge merges your branch with trailers recording the claims and votes it checked, then releases your claim. Merge by hand only with the same trailers.
 5. A claim idle for 30 minutes may be released by anyone (free_release with stale: true).
@@ -56,8 +58,8 @@ free_audit replays the records and lists every broken convention, with the commi
 
 const str = { type: "string" } as const;
 const TOOL_LIST = [
-	{ name: "free_start", description: "Start coordinator-free mode on a project repo (harmless if started): the review policy, and the checks run before each merge. Returns them.", inputSchema: { type: "object", properties: { repo: str, required: { type: "number" }, vetoes: { type: "array", items: str }, verify: { type: "array", items: str } }, required: ["repo"] } },
-	{ name: "free_credentials", description: "Git URL and a write token for the project repo, to push your change branch.", inputSchema: { type: "object", properties: { repo: str }, required: ["repo"] } },
+	{ name: "free_start", description: "Start coordinator-free mode on a project repo (harmless if started): the review policy, the checks run before each merge, and access: forks (default: each change in its own fork, only the toolkit writes the project) or shared (every agent writes the project repo). Returns them.", inputSchema: { type: "object", properties: { repo: str, required: { type: "number" }, vetoes: { type: "array", items: str }, verify: { type: "array", items: str }, access: { type: "string", enum: ["forks", "shared"] } }, required: ["repo"] } },
+	{ name: "free_credentials", description: "Git access. With your change: a write token for where its branch changes/<change> lives (its own fork, unless the repo is shared). Without: read access to the project repo.", inputSchema: { type: "object", properties: { repo: str, change: str }, required: ["repo"] } },
 	{ name: "free_claims", description: "The claims in force: who holds which paths, and why.", inputSchema: { type: "object", properties: { repo: str }, required: ["repo"] } },
 	{ name: "free_claim", description: "Claim paths for your change (again to extend it). Refused, naming the holder, if another claim overlaps.", inputSchema: { type: "object", properties: { repo: str, change: str, agent: str, paths: { type: "array", items: str }, intent: str }, required: ["repo", "change", "agent", "paths", "intent"] } },
 	{ name: "free_release", description: "Release a claim: yours, or another's idle for 30 minutes with stale: true.", inputSchema: { type: "object", properties: { repo: str, change: str, agent: str, reason: str, stale: { type: "boolean" } }, required: ["repo", "change", "agent"] } },
@@ -142,6 +144,13 @@ export async function callFreeTool(name: string, args: Args, ctx: FreeContext): 
 		return agent;
 	};
 	const stamper = await ctx.stamper?.(acting);
+	// Repos started before forks existed are shared.
+	const access = registered?.access ?? "shared";
+	const changeSource = (change: string, scope: "read" | "write") => {
+		if (access === "shared") return ctx.remote(repo, scope);
+		if (!ctx.changeRemote) throw new Error("[501] change forks aren't available here");
+		return ctx.changeRemote(repo, change, scope);
+	};
 	switch (name) {
 		case "free_start": {
 			const policy: ReviewPolicy = {
@@ -149,14 +158,26 @@ export async function callFreeTool(name: string, args: Args, ctx: FreeContext): 
 				vetoes: Array.isArray(args.vetoes) ? (args.vetoes as string[]) : DEFAULT_POLICY.vetoes,
 			};
 			const verify = Array.isArray(args.verify) ? (args.verify as string[]).filter((c) => typeof c === "string" && c.trim()) : [];
-			await startFree(claims, { baseline: await ctx.head(repo), policy, verify, stampKey: stamper?.publicKey });
+			await startFree(claims, { baseline: await ctx.head(repo), policy, verify, stampKey: stamper?.publicKey, access: args.access === "shared" ? "shared" : "forks" });
 			await ctx.register?.(repo);
 			const registry = (await claims.read())?.commit.state;
-			return { repo, policy: registry?.policy ?? policy, verify: registry?.verify ?? [], instructions: FREE_INSTRUCTIONS };
+			return { repo, policy: registry?.policy ?? policy, verify: registry?.verify ?? [], access: registry?.access ?? "shared", instructions: FREE_INSTRUCTIONS };
 		}
 		case "free_credentials": {
-			const remote = await write();
-			return { url: remote.url, token: remote.token };
+			if (access === "shared") {
+				const remote = await write();
+				return { url: remote.url, token: remote.token };
+			}
+			if (typeof args.change !== "string" || !args.change.trim()) {
+				const remote = await ctx.remote(repo, "read");
+				return { url: remote.url, token: remote.token, note: "read-only: the project repo is written only through the toolkit. Ask with your change for write access to its fork." };
+			}
+			const change = requiredString(args, "change");
+			const own = activeClaims(registered).find((c) => c.change === change);
+			if (!own) throw new Error(`[409] ${change} holds no claim: claim its paths first`);
+			mayActAs(own.agent, acting, registered, ctx.hosted);
+			const remote = await changeSource(change, "write");
+			return { url: remote.url, token: remote.token, branch: `changes/${change}`, note: "Your change's own fork: push your branch changes/<change> here. Fetch main from the project repo (free_credentials without change)." };
 		}
 		case "free_claims":
 			return activeClaims((await claims.read())?.commit.state);
@@ -193,6 +214,7 @@ export async function callFreeTool(name: string, args: Args, ctx: FreeContext): 
 				runChecks: ctx.runChecks?.(repo),
 				stamper,
 				stampKey: registry?.stampKey,
+				source: await changeSource(change, "read"),
 				change,
 				agent: requiredString(args, "agent"),
 			});
