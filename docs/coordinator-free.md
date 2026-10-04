@@ -168,8 +168,9 @@ agents splitting work would. Wall time on bench, 2026-10-05:
 | 25 | 71.3 s | – | 91.9 s, 2 failed | 44.3 s |
 | 50 | – | – | 140.3 s, 22 failed | 59.7 s |
 | 100 | – | – | – | 69.3 s |
+| 200 | – | – | – | 200.7 s, 30 failed |
 
-Sharded, with no failures at any level (606 calls at 100 agents), exactly one
+Sharded, with no failures up to 100 agents (606 calls at 100), exactly one
 racer won each race, and no claims were left over. From 5 to 100 agents total
 time grows about 0.25 s per agent (the fixed Coordinator, about 2.5 s); every
 call stays about flat
@@ -193,9 +194,12 @@ How it got there:
   needs one place where the calls meet (a Durable Object), which is what this
   mode does without.
 
-What limits it further (not yet measured past 100 agents): Artifacts takes one
-push at a time per repo, and every shard is in the project's repo, so claims,
-releases and votes queue there; a read fetches every shard that changed, so
+What limits it further: Artifacts takes one push at a time per repo, and every
+shard is in the project's repo, so claims, releases and votes queue there. At
+200 agents that is the ceiling: about 400 claim and release pushes queued on
+one repo, releases took 37 s at the median, and 30 claims gave up after their
+pushes were refused as busy again and again (reported, misleadingly, as "the
+record kept moving"). Also: a read fetches every shard that changed, so
 reads grow with the number of agents; and every change makes a fork. The next
 steps for hundreds of agents would be spreading the records across several
 repos (parallel pushes) and reading only the shards a call needs.
