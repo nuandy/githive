@@ -1,0 +1,103 @@
+{
+	"label": "free-records-200",
+	"mode": "free",
+	"base": "https://blueprint-bench.nuandy.workers.dev",
+	"repo": "bench-free-rec200-1791152831",
+	"task": null,
+	"racers": 5,
+	"idle": 0,
+	"at": "2026-10-04T22:27:18.229Z",
+	"ledgerMatches": null,
+	"ledgerCommits": null,
+	"levels": [
+		{
+			"agents": 200,
+			"wallMs": 61047.021958,
+			"calls": 1206,
+			"callsPerSecond": 19.75526342349216,
+			"errors": 0,
+			"failures": [],
+			"race": {
+				"winners": 1,
+				"unexpected": []
+			},
+			"leftoverClaims": 0,
+			"tools": {
+				"list_claims": {
+					"n": 400,
+					"p50": 6760.117042000005,
+					"p95": 11417.012125000001,
+					"p99": 11776.477541,
+					"max": 12875.924707999999
+				},
+				"open_change": {
+					"n": 205,
+					"p50": 15947.407583,
+					"p95": 19847.558957999998,
+					"p99": 21531.732541999998,
+					"max": 23382.987958000005
+				},
+				"report_push": {
+					"n": 200,
+					"p50": 7022.954832999996,
+					"p95": 8563.603666000003,
+					"p99": 10531.24125,
+					"max": 12064.272707999997
+				},
+				"abandon_change": {
+					"n": 201,
+					"p50": 6401.438249999999,
+					"p95": 7890.108250000005,
+					"p99": 9513.935540999999,
+					"max": 9590.721416
+				},
+				"change_status": {
+					"n": 200,
+					"p50": 6082.600209000004,
+					"p95": 7797.635458999997,
+					"p99": 8856.280666999999,
+					"max": 10373.802333
+				}
+			},
+			"lock": {
+				"samples": 0,
+				"waitMs": {
+					"n": 0,
+					"p50": null,
+					"p95": null,
+					"p99": null,
+					"max": null
+				},
+				"runMs": {
+					"n": 0,
+					"p50": null,
+					"p95": null,
+					"p99": null,
+					"max": null
+				},
+				"flushMs": {
+					"n": 0,
+					"p50": null,
+					"p95": null,
+					"p99": null,
+					"max": null
+				},
+				"busyFraction": 0,
+				"flushShareOfHold": 0,
+				"peakQueue": 0,
+				"byCall": {}
+			},
+			"ledger": {
+				"matches": null,
+				"commits": null,
+				"lagMs": {
+					"n": 0,
+					"p50": null,
+					"p95": null,
+					"p99": null,
+					"max": null
+				}
+			}
+		}
+	]
+}

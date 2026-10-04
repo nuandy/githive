@@ -160,15 +160,15 @@ the free tools (claim and fork, push, check, status, release), with five agents
 racing for one path at each level. Each agent works in its own directory, as
 agents splitting work would. Wall time on bench, 2026-10-05:
 
-| agents | fixed Coordinator (short locks) | elected coordinator | coordinator-free, one record | coordinator-free, sharded |
-|---|---|---|---|---|
-| 1 | 11.6 s | 28.2 s | 27.3 s | 35.5 s |
-| 5 | 16.1 s | 28.4 s | 43.1 s | 42.8 s |
-| 10 | 31.9 s | 48.1 s | 52.7 s | 45.9 s |
-| 25 | 71.3 s | – | 91.9 s, 2 failed | 44.3 s |
-| 50 | – | – | 140.3 s, 22 failed | 59.7 s |
-| 100 | – | – | – | 69.3 s |
-| 200 | – | – | – | 200.7 s, 30 failed |
+| agents | fixed Coordinator (short locks) | elected coordinator | coordinator-free, one record | sharded, in the project repo | sharded, over 8 records repos |
+|---|---|---|---|---|---|
+| 1 | 11.6 s | 28.2 s | 27.3 s | 35.5 s | |
+| 5 | 16.1 s | 28.4 s | 43.1 s | 42.8 s | |
+| 10 | 31.9 s | 48.1 s | 52.7 s | 45.9 s | |
+| 25 | 71.3 s | – | 91.9 s, 2 failed | 44.3 s | |
+| 50 | – | – | 140.3 s, 22 failed | 59.7 s | |
+| 100 | – | – | – | 69.3 s | 73.9 s |
+| 200 | – | – | – | 200.7 s, 30 failed | 61.0 s |
 
 Sharded, with no failures up to 100 agents (606 calls at 100), exactly one
 racer won each race, and no claims were left over. From 5 to 100 agents total
@@ -194,15 +194,18 @@ How it got there:
   needs one place where the calls meet (a Durable Object), which is what this
   mode does without.
 
-What limits it further: Artifacts takes one push at a time per repo, and every
-shard is in the project's repo, so claims, releases and votes queue there. At
-200 agents that is the ceiling: about 400 claim and release pushes queued on
-one repo, releases took 37 s at the median, and 30 claims gave up after their
-pushes were refused as busy again and again (reported, misleadingly, as "the
-record kept moving"). Also: a read fetches every shard that changed, so
-reads grow with the number of agents; and every change makes a fork. The next
-steps for hundreds of agents would be spreading the records across several
-repos (parallel pushes) and reading only the shards a call needs.
+**Records repos.** Artifacts takes one push at a time per repo. With every
+shard in the project's repo, 200 agents queued about 400 claim and release
+pushes on it: releases took 37 s at the median, and 30 claims gave up after
+their pushes were refused as busy again and again. Spread over 8 records repos
+(by a hash of each shard), the same 200 agents ran in 61 s with none failing:
+releases 6.4 s at the median, claiming with the fork 15.9 s. Run to run, times
+vary by about 10 s (100 agents took 69 s once and 74 s once).
+
+What limits it further (not measured past 200 agents): a read fetches every shard that changed, so
+reads grow with the number of agents; and every change makes a fork. Next
+steps: more records repos, votes sharded like claims (every vote is a push to
+one ref), and reading only the shards a call needs.
 
 Small runs pay for sharding: one agent takes 35.5 s against 27.3 s with one
 record, since a read lists the shards before fetching.
