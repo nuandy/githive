@@ -67,7 +67,9 @@ try {
 	say("\nagents register their own names, though they share one Access identity");
 	const a = await tool("free_register", { agent: "agent-a" });
 	const b = await tool("free_register", { agent: "agent-b" });
-	say("  agent-a and agent-b have keys:", Boolean(a.key && b.key));
+	const rev1 = await tool("free_register", { agent: "rev-1" });
+	const rev2 = await tool("free_register", { agent: "rev-2" });
+	say("  agent-a, agent-b and reviewers rev-1, rev-2 have keys:", Boolean(a.key && b.key && rev1.key && rev2.key));
 
 	say("\nagent-a claims src/a/, and gets write access to its change's own fork");
 	say("  claim:", JSON.stringify(await tool("free_claim", { change: "a-1", agent: "agent-a", paths: ["src/a/"], intent: "a's work" }, a.key)).slice(0, 80));
@@ -94,10 +96,14 @@ try {
 	const pushed = await cloneB.run("push", "--quiet", "origin", "main").then(() => "PUSHED (should not happen)", (err) => `refused: ${String(err.stderr || err.message).trim().split("\n")[0]}`);
 	say("  push to main:", pushed);
 
+	say("\nagent-a approves its own commit: recorded, but an author's approval doesn't count");
+	await tool("free_vote", { commit: aHead, reviewer: "agent-a", role: "tests", verdict: "approve", evidence: "I checked my own work" }, a.key);
+	say("  status:", JSON.stringify((await tool("free_status", { change: "a-1" }, a.key)).approval));
+
 	say("\nreviewers vote on agent-a's commit; agent-a sees where it stands, and merges");
-	await tool("free_vote", { commit: aHead, reviewer: "rev-1", role: "tests", verdict: "approve", evidence: "tests pass" });
+	await tool("free_vote", { commit: aHead, reviewer: "rev-1", role: "tests", verdict: "approve", evidence: "tests pass" }, rev1.key);
 	say("  status:", JSON.stringify((({ head, approval }) => ({ head: head?.slice(0, 8), approval }))(await tool("free_status", { change: "a-1" }, a.key))));
-	await tool("free_vote", { commit: aHead, reviewer: "rev-2", role: "security", verdict: "approve", evidence: "no secrets" });
+	await tool("free_vote", { commit: aHead, reviewer: "rev-2", role: "security", verdict: "approve", evidence: "no secrets" }, rev2.key);
 	const merged = await tool("free_merge", { change: "a-1", agent: "agent-a" }, a.key);
 	say("  merge:", JSON.stringify(merged));
 	say("  status after:", JSON.stringify((({ claim, released }) => ({ claim, released: released && { reason: released.reason, mergedAs: released.mergedAs?.slice(0, 8), verifiedBy: released.verifiedBy } }))(await tool("free_status", { change: "a-1" }, a.key))));

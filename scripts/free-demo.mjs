@@ -73,6 +73,8 @@ try {
 	const started = await tool("free_start", { required: 2, vetoes: ["security"], verify: ["test -f index.html"], access: "shared" });
 	say("started; policy:", JSON.stringify(started.policy), "checks:", JSON.stringify(started.verify));
 	credentials = await tool("free_credentials", {});
+	// Reviewers register, so each votes as its own verified identity: approvals count per identity, never the author's.
+	const keys = { "rev-1": (await tool("free_register", { agent: "rev-1" })).key, "rev-2": (await tool("free_register", { agent: "rev-2" })).key };
 
 	say("\nagent-a: claims src/a/, pushes, gets two approvals, merges through the tools");
 	say("  claim:", JSON.stringify(await tool("free_claim", { change: "a-1", agent: "agent-a", paths: ["src/a/"], intent: "a's work" })).slice(0, 60));
@@ -89,8 +91,8 @@ try {
 			}
 		}
 	} else {
-		await tool("free_vote", { commit: aHead, reviewer: "rev-1", role: "tests", verdict: "approve", evidence: "tests pass" });
-		await tool("free_vote", { commit: aHead, reviewer: "rev-2", role: "api", verdict: "approve", evidence: "api unchanged" });
+		await tool("free_vote", { commit: aHead, reviewer: "rev-1", agent_key: keys["rev-1"], role: "tests", verdict: "approve", evidence: "tests pass" });
+		await tool("free_vote", { commit: aHead, reviewer: "rev-2", agent_key: keys["rev-2"], role: "api", verdict: "approve", evidence: "api unchanged" });
 	}
 	say("  merge:", JSON.stringify(await tool("free_merge", { change: "a-1", agent: "agent-a" })));
 
@@ -102,8 +104,8 @@ try {
 	await dClone.run("commit", "--quiet", "-m", "d-1: remove index.html");
 	await dClone.run("push", "--quiet", "origin", "changes/d-1");
 	const dHead = await dClone.run("rev-parse", "HEAD");
-	await tool("free_vote", { commit: dHead, reviewer: "rev-1", role: "tests", verdict: "approve", evidence: "looks fine" });
-	await tool("free_vote", { commit: dHead, reviewer: "rev-2", role: "api", verdict: "approve", evidence: "looks fine" });
+	await tool("free_vote", { commit: dHead, reviewer: "rev-1", agent_key: keys["rev-1"], role: "tests", verdict: "approve", evidence: "looks fine" });
+	await tool("free_vote", { commit: dHead, reviewer: "rev-2", agent_key: keys["rev-2"], role: "api", verdict: "approve", evidence: "looks fine" });
 	const dMerge = await tool("free_merge", { change: "d-1", agent: "agent-d" });
 	say("  merge:", JSON.stringify({ ok: dMerge.ok, reasons: dMerge.reasons }));
 	await tool("free_release", { change: "d-1", agent: "agent-d", reason: "gave up" });
@@ -117,8 +119,8 @@ try {
 	await eClone.run("commit", "--quiet", "-m", "e-1: work");
 	await eClone.run("push", "--quiet", "origin", "changes/e-1");
 	const eHead = await eClone.run("rev-parse", "HEAD");
-	await tool("free_vote", { commit: eHead, reviewer: "rev-1", role: "tests", verdict: "approve", evidence: "ok" });
-	await tool("free_vote", { commit: eHead, reviewer: "rev-2", role: "api", verdict: "approve", evidence: "ok" });
+	await tool("free_vote", { commit: eHead, reviewer: "rev-1", agent_key: keys["rev-1"], role: "tests", verdict: "approve", evidence: "ok" });
+	await tool("free_vote", { commit: eHead, reviewer: "rev-2", agent_key: keys["rev-2"], role: "api", verdict: "approve", evidence: "ok" });
 	say("  merge:", JSON.stringify(await tool("free_merge", { change: "e-1", agent: "agent-e" })));
 	await tool("free_release", { change: "e-1", agent: "agent-e", reason: "will rebase" });
 
@@ -129,7 +131,7 @@ try {
 	say("\nagent-b: claims src/b/, but also edits src/c/z.txt, and has one approval of two");
 	await tool("free_claim", { change: "b-1", agent: "agent-b", paths: ["src/b/"], intent: "b's work" });
 	const bHead = await pushChange("agent-b", "b-1", { "src/b/y.txt": "b\n", "src/c/z.txt": "not b's\n" });
-	await tool("free_vote", { commit: bHead, reviewer: "rev-1", role: "tests", verdict: "approve", evidence: "looks fine" });
+	await tool("free_vote", { commit: bHead, reviewer: "rev-1", agent_key: keys["rev-1"], role: "tests", verdict: "approve", evidence: "looks fine" });
 	say("  the tools refuse to help:", JSON.stringify(await tool("free_merge", { change: "b-1", agent: "agent-b" })));
 
 	say("\nagent-b goes around them with plain git, with trailers saying all is well");

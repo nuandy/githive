@@ -62,6 +62,13 @@ describe("free_merge", { timeout: 60_000 }, () => {
 		expect(server.git("rev-parse", "main").trim()).toBe(main);
 	});
 
+	it("refuses a change approved only by its own author", async () => {
+		await claim(claims(), { change: "a-1", agent: "agent-a-1", paths: ["src/a.txt"], intent: "a" });
+		const head = await pushChange(server.url, work, "agent-a-1", "a-1", { "src/a.txt": "a\n" });
+		await vote(votes(), { commit: head, reviewer: "agent-a-1", role: "tests", verdict: "approve", evidence: "I checked my own work" });
+		expect(await merge("a-1")).toEqual({ ok: false, reasons: [`${head} has 0 of 1 approvals from reviewers other than its author`] });
+	});
+
 	it("runs the checks on main plus the change, and refuses to merge when they fail", async () => {
 		const head = await readyChange("a-1", { "src/a.txt": "a\n" });
 		const main = server.git("rev-parse", "main").trim();

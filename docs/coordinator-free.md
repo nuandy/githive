@@ -115,8 +115,14 @@ about the cooperative merge.
   The audit then trusts only stamped records: a merge without a valid stamp is
   `unverified` (and still checked against what it changed), and an unstamped
   vote doesn't count toward approval. Plain git can still write anything; it
-  just can't stamp it. One gap: agents that share one Access service token
-  share one identity, so each agent needs its own token for blame to name it.
+  just can't stamp it. Agents that share one Access service token tell
+  themselves apart with agent keys (`free_register`).
+- **Approvals count per verified identity, never the author's.** Each signed
+  vote counts once per `by`, whatever reviewer name it gives, and a vote from
+  the change's author (its claim's identity, or its agent name when unsigned)
+  doesn't count; a veto counts from anyone. Merging, the audit and
+  `free_status` all count this way, so an agent can't approve its own change,
+  or approve twice under two names.
 - **Every agent needs write access to the whole repo**, main included: the mode
   trusts agents by design.
 - **Merging checks what it can.** The toolkit's merge test-merges the change

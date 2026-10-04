@@ -122,7 +122,7 @@ describe("coordinator-free mode, end to end", { timeout: 60_000 }, () => {
 		const aHead = await pushChange("agent-a", "a-1", { "src/a/x.txt": "a\n", "src/elsewhere.txt": "outside\n" });
 		await vote(votes(), { commit: aHead, reviewer: "rev-1", role: "tests", verdict: "approve", evidence: "ok" });
 		const outcome = await mergeChange({ remote: remote(), claims: claims(), votes: votes(), policy, change: "a-1", agent: "agent-a" });
-		expect(outcome).toEqual({ ok: false, reasons: ["src/elsewhere.txt is outside a-1's claim", `${aHead} has 1 of 2 approvals`] });
+		expect(outcome).toEqual({ ok: false, reasons: ["src/elsewhere.txt is outside a-1's claim", `${aHead} has 1 of 2 approvals from reviewers other than its author`] });
 		expect(server.git("rev-list", "--count", "main").trim()).toBe("1");
 	});
 });

@@ -10,11 +10,14 @@ import type { VoteRecord, Votes } from "../src/free/votes";
 
 let key: { privateKey: string; publicKey: string };
 let toolkit: Stamper;
+/** Each reviewer signs as itself: approvals count per verified identity, never the author's. */
+const reviewers = new Map<string, Stamper>();
 const policy = { required: 2, vetoes: [] };
 
 beforeAll(async () => {
 	key = await generateStampKey();
 	toolkit = await makeStamper(key.privateKey, "service:agent-a");
+	for (const name of ["rev-1", "rev-2"]) reviewers.set(name, await makeStamper(key.privateKey, `service:${name}`));
 });
 
 const stampedClaim = async (record: Omit<ClaimRecord, "by" | "stamp">): Promise<ClaimRecord> => {
@@ -22,8 +25,9 @@ const stampedClaim = async (record: Omit<ClaimRecord, "by" | "stamp">): Promise<
 	return { ...withBy, stamp: await toolkit.stamp(stampPayload("claim", withBy)) };
 };
 const stampedVote = async (record: Omit<VoteRecord, "by" | "stamp">): Promise<VoteRecord> => {
-	const withBy = { ...record, by: toolkit.by };
-	return { ...withBy, stamp: await toolkit.stamp(stampPayload("vote", withBy)) };
+	const stamper = reviewers.get(record.reviewer)!;
+	const withBy = { ...record, by: stamper.by };
+	return { ...withBy, stamp: await stamper.stamp(stampPayload("vote", withBy)) };
 };
 const registryAt = (tip: string, claims: ClaimRecord[], released: Registry["released"] = []) => ({ tip, state: { claims, released, baseline: "b0", policy, stampKey: key.publicKey } as Registry });
 const claimA = { change: "a-1", agent: "agent-a", paths: ["src/a/"], intent: "a", since: "", active: "2026-10-05T10:00:00.000Z" };

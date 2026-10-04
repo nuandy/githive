@@ -61,6 +61,17 @@ describe("the audit", () => {
 		]);
 	});
 
+	it("reports a merge whose approvals came from its author, or from one identity under two names", async () => {
+		const self = { tip: "v3", state: { votes: [approve("agent-a", "tests"), approve("rev-2", "api")] } };
+		expect(await audit({ ...records([merge({ votesTip: "v3" })]), votes: [self] })).toEqual([
+			{ commit: "m1", author: "agent-a", rule: "unapproved", detail: "h1 had 1 of 2 approvals at v3" },
+		]);
+		const twice = { tip: "v4", state: { votes: [{ ...approve("rev-1", "tests"), by: "service:x/agent-z" }, { ...approve("rev-2", "api"), by: "service:x/agent-z" }] } };
+		expect(await audit({ ...records([merge({ votesTip: "v4" })]), votes: [twice] })).toEqual([
+			{ commit: "m1", author: "agent-a", rule: "unapproved", detail: "h1 had 1 of 2 approvals at v4" },
+		]);
+	});
+
 	it("reports a merge made after its own claim was released (citing an old tip)", async () => {
 		const releasedA = { change: "stats-1a2b", agent: "agent-a", by: "agent-a", at: "", reason: "gave up", lastActive: claimA.active };
 		const history = [...registry, { tip: "r3", state: at([claimB], [releasedA]) }];

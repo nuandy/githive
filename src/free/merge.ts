@@ -72,9 +72,10 @@ export async function mergeChange(input: MergeInput): Promise<MergeOutcome> {
 			else if (own && !inLane(file, own.paths)) reasons.push(`${file} is outside ${input.change}'s claim`);
 		}
 		const counted = await countedVotes(votesHead?.commit.state.votes ?? [], input.stampKey);
-		const outcome = approval({ votes: counted }, head, input.policy);
+		// Distinct reviewers, never the change's author: its claim's agent, and who made the claim.
+		const outcome = approval({ votes: counted }, head, input.policy, own);
 		if (outcome.vetoedBy.length) reasons.push(`${head} is vetoed by ${outcome.vetoedBy.join(", ")}`);
-		else if (!outcome.approved) reasons.push(`${head} has ${outcome.approvals} of ${input.policy.required} approvals`);
+		else if (!outcome.approved) reasons.push(`${head} has ${outcome.approvals} of ${input.policy.required} approvals from reviewers other than its author`);
 		if (reasons.length) return { ok: false, reasons };
 
 		const tried = await ws.tryMerge(main, head);

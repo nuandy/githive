@@ -41,12 +41,24 @@ export function vote(log: CasLog<Votes>, input: Omit<VoteRecord, "at" | "by" | "
 	});
 }
 
-/** Whether `commit` may merge under `policy`: each reviewer's latest verdict counts once. */
-export function approval(state: Votes | null | undefined, commit: string, policy: ReviewPolicy) {
+/** A change's author, whose own approval doesn't count: its claim's agent, and who made the claim as Access verified them. */
+export interface Author {
+	agent: string;
+	by?: string;
+}
+
+/**
+ * Whether `commit` may merge under `policy`. Each identity counts once, by its
+ * latest verdict: its verified identity (`by`) when the vote is signed, else
+ * its reviewer name, so one agent can't approve twice under two names. The
+ * author's own approval doesn't count; a veto counts from anyone.
+ */
+export function approval(state: Votes | null | undefined, commit: string, policy: ReviewPolicy, author?: Author) {
 	const latest = new Map<string, VoteRecord>();
-	for (const v of state?.votes ?? []) if (v.commit === commit) latest.set(v.reviewer, v);
+	for (const v of state?.votes ?? []) if (v.commit === commit) latest.set(v.by ?? `name:${v.reviewer}`, v);
 	const verdicts = [...latest.values()];
-	const approvals = verdicts.filter((v) => v.verdict === "approve").length;
+	const isAuthor = (v: VoteRecord) => !!author && ((!!v.by && v.by === author.by) || v.reviewer === author.agent);
+	const approvals = verdicts.filter((v) => v.verdict === "approve" && !isAuthor(v)).length;
 	const vetoedBy = verdicts.filter((v) => v.verdict === "reject" && policy.vetoes.includes(v.role)).map((v) => v.reviewer);
 	return { approved: approvals >= policy.required && !vetoedBy.length, approvals, vetoedBy };
 }

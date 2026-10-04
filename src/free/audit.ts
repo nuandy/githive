@@ -1,7 +1,7 @@
 import { inLane } from "../open-mode";
 import type { Registry } from "./claims";
 import { stampPayload, verifyStamp } from "./stamp";
-import { approval, type ReviewPolicy, type VoteRecord, type Votes } from "./votes";
+import { approval, type Author, type ReviewPolicy, type VoteRecord, type Votes } from "./votes";
 
 // The coordinator-free audit (see docs/coordinator-free.md). Nothing stops an
 // agent from breaking a convention, so this replays the records and reports
@@ -113,7 +113,7 @@ export async function audit(records: AuditRecords): Promise<Violation[]> {
 			else if (!own || !inLane(file, own.paths)) report("outside-claim", `${file} was not in ${merge.change}'s claim at ${merge.claimsTip}`);
 		}
 		checkReleasedAfter(records, merge, report);
-		checkApproved(records, votesAt, merge, report);
+		checkApproved(records, votesAt, merge, report, own);
 		if (records.verify?.length) {
 			if (!merge.testedOn) report("untested", "the merge records no checks run (Blueprint-Tested)");
 			else if (merge.testedOn !== merge.base) report("untested", `checks ran on ${merge.testedOn}, but the merge went onto ${merge.base}`);
@@ -191,13 +191,14 @@ function checkReleasedAfter(records: AuditRecords, merge: MergeRecord, report: (
 	}
 }
 
-/** The merged commit must have had the policy's approvals, and no veto, at the votes tip the merge cites. */
-function checkApproved(records: AuditRecords, votesAt: Map<string, Votes>, merge: MergeRecord, report: (rule: string, detail: string) => void) {
+/** The merged commit must have had the policy's approvals from reviewers other than its author, and no veto, at the votes tip the merge cites. */
+function checkApproved(records: AuditRecords, votesAt: Map<string, Votes>, merge: MergeRecord, report: (rule: string, detail: string) => void, author?: Author) {
 	if (!records.policy) return;
 	if (!merge.head || !merge.votesTip) return report("undeclared", "the merge names no reviewed commit or votes it counted (Blueprint-Votes)");
 	const votes = votesAt.get(merge.votesTip);
 	if (!votes) return report("unknown-votes", `${merge.votesTip} is not in the votes' history`);
-	const outcome = approval(votes, merge.head, records.policy);
+	// Distinct verified reviewers, never the change's own author.
+	const outcome = approval(votes, merge.head, records.policy, author);
 	if (outcome.vetoedBy.length) report("unapproved", `${merge.head} was vetoed by ${outcome.vetoedBy.join(", ")} at ${merge.votesTip}`);
 	else if (!outcome.approved) report("unapproved", `${merge.head} had ${outcome.approvals} of ${records.policy.required} approvals at ${merge.votesTip}`);
 }
