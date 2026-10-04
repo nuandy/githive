@@ -3,7 +3,8 @@ import { tool, type AgentTool } from "./agent";
 import { pushFeedback } from "./builder-feedback";
 import { ENVIRONMENT, SandboxAgent, clip, sliceContext, type AgentState, type SliceJob } from "./sandbox";
 import { GIT_IN_BLUEPRINT } from "./git-blueprint-guidance";
-import type { LaneChangeAnswer, LaneChangeRequestResult } from "./lane-change-contract";
+import type { LaneChangeAnswer, LaneChangeCoordinator, LaneChangeRequestResult } from "./lane-change-contract";
+import type { BuilderResumeCredentials } from "./parking-contract";
 import type { MergeCheck } from "./types";
 
 // One Builder per slice: a gpt-6-luna agent implementing the slice on its fork,
@@ -48,7 +49,7 @@ function laneChangeResult(result: LaneChangeRequestResult) {
 		case "requested":
 			return result.delivery === "resumed"
 				? `The request was delivered to the owning slice's builder, which has been resumed. Continue building within your lane against the existing contracts. The owner's change still goes through its normal review and gate. When you receive the integration notice, fetch base/main, merge it, and re-run your tests.`
-				: `The request was delivered to the owning slice's builder. Continue building within your lane against the existing contracts while it is pending. The owner's change still goes through its normal review and gate. When you receive the integration notice, fetch base/main, merge it, and re-run your tests.`;
+				: `The request was delivered to the owning slice's builder. Continue building within your lane against the existing contracts while it is pending. Use wait_for_requests when out of useful local work. The owner's change still goes through its normal review and gate. When you receive the integration notice, fetch base/main, merge it, and re-run your tests.`;
 		case "human":
 			return `The owning slice has already integrated, so this request was not delivered. A human is needed to resolve this change.`;
 		case "no-owner":
@@ -72,6 +73,7 @@ How to work:
 - Call commit_and_push whenever you reach a working checkpoint, not only at the end. Every push is test-merged against the other slices' work in progress, and the result tells you about conflicts while they are still cheap to fix.
 - Never edit or otherwise change a path in another slice's lane. Lanes never change, and out-of-lane checks still apply. For a needed change in another slice's lane, use request_lane_change to ask its owner; do not try to make that change yourself.
 - While a lane-change request is pending, continue building within your own lane against the existing contracts. The owning slice makes its change in its lane, and that change still goes through the owner's normal review and gate. After the integration notice, fetch base/main, merge it with \`git merge base/main\`, and re-run your tests.
+- When blocked on unresolved requests and you have no useful local work, call wait_for_requests to park safely.
 - If no slice owns a path, it is outside every lane: use propose_contract_change for the existing amendment path instead of a lane-change request.
 - Never include or reveal a person's identity in model-facing request or delivery text, including request details and answers.
 - When the slice is complete, pushed and passing, call finish with a short summary for the reviewers.
@@ -99,7 +101,8 @@ How to work:
 	async revise(feedback: string, credentials: { token: string; base: BuildJob["base"] }) {
 		const { job, state } = await this.load();
 		if (!job || !state) throw new Error("builder has never run");
-		if (state.status === "queued" || state.status === "working") throw new Error(`builder is already ${state.status}`);
+		if (state.status === "queued") throw new Error(`builder is already ${state.status}`);
+		if (state.status === "working" || state.status === "parked") { await this.wake(`human-${crypto.randomUUID()}`, feedback, credentials); return this.view((await this.load()).state!); }
 		await this.ctx.storage.put("job", { ...job, ...credentials });
 		await this.ctx.storage.delete("cancel");
 		state.status = "queued";
@@ -116,6 +119,20 @@ How to work:
 		return this.view(state);
 	}
 
+	async park(parkedAt: string, waitingFor: string[]) { return this.parkAgent(parkedAt, waitingFor); }
+	async wake(eventId: string, message: string, credentials: BuilderResumeCredentials): Promise<"resumed" | "deferred" | "ignored">;
+	async wake(message: string, credentials: BuilderResumeCredentials): Promise<"resumed" | "deferred" | "ignored">;
+	async wake(idOrMessage: string, messageOrCredentials: string | BuilderResumeCredentials, credentials?: BuilderResumeCredentials) {
+		return credentials ? this.receiveWake(idOrMessage, messageOrCredentials as string, credentials) : this.receiveWake("legacy:" + idOrMessage, idOrMessage, messageOrCredentials as BuilderResumeCredentials);
+	}
+	async markParkTimedOut() { return this.isParkStillTimedOut(); }
+	protected override async autoPark(job: BuildJob, state: BuilderState) {
+		const reason = await this.localWorkRefusal(state); if (reason) { this.note(state, "auto-park refused: " + reason); return false; }
+		const result = await (this.coordinator(job) as unknown as LaneChangeCoordinator).parkBuilder(job.slice.id);
+		if (result.outcome !== "parked") return false;
+		state.status = "parked"; state.parkedAt = result.parkedAt; state.waitingRequestIds = result.waitingFor; return true;
+	}
+
 	protected async onStopped(job: BuildJob) {
 		await this.coordinator(job).agentStopped("builder", job.slice.id);
 	}
@@ -129,6 +146,18 @@ How to work:
 		await this.exec(["git", "config", "user.email", `${job.slice.id}@builders.blueprint.invalid`]);
 	}
 
+	private async localWorkRefusal(state: BuilderState, requirePush = false): Promise<string | undefined> {
+		const dirty = await this.exec(["git", "status", "--porcelain"]);
+		if (dirty.exitCode !== 0) return "Could not verify the working tree: " + clip(dirty.output, 2_000);
+		if (dirty.output.trim()) return "Uncommitted changes remain:\n" + dirty.output + "\nCall commit_and_push first.";
+		const ahead = await this.exec(["git", "rev-list", "--count", "origin/main..HEAD"]);
+		if (ahead.exitCode !== 0) return "Could not verify commits on your fork: " + clip(ahead.output, 2_000);
+		const count = Number(ahead.output.trim());
+		if (count > 0) return count + " local commit(s) are not on your fork yet. Call commit_and_push first.";
+		if (requirePush && !state.pushes) return "Nothing has been pushed yet.";
+		return undefined;
+	}
+
 	protected tools(job: BuildJob, state: BuilderState): AgentTool[] {
 		return [
 			...this.baseTools(state),
@@ -137,6 +166,19 @@ How to work:
 				description: "Commit all changes and push them to your fork. Returns the Merge-ahead report: lane violations and conflicts with other slices.",
 				schema: PushArgs,
 				run: async ({ message }) => this.commitAndPush(job, state, message),
+			}),
+			tool({
+				name: "wait_for_requests",
+				description: "Park while unresolved cross-lane requests are pending; requires clean local work.",
+				schema: NoArgs,
+				run: async () => {
+					const refusal = await this.localWorkRefusal(state); if (refusal) return "Cannot park: " + refusal;
+					const result = await (this.coordinator(job) as unknown as LaneChangeCoordinator).parkBuilder(job.slice.id);
+					if (result.outcome !== "parked") return "Cannot park: " + result.reason + (result.resolutions?.map((r) => r.message).join("\n") ?? "");
+					state.status = "parked"; state.parkedAt = result.parkedAt; state.waitingRequestIds = result.waitingFor;
+					this.note(state, "parked while waiting for " + result.waitingFor.join(", "));
+					return "Parked while waiting for request(s) " + result.waitingFor.join(", ") + ". Conversation saved until a resolution.";
+				},
 			}),
 			tool({
 				name: "request_lane_change",
@@ -154,6 +196,10 @@ How to work:
 					"Answer a cross-lane request delivered to your slice. After making and pushing your lane change, use outcome done and explain what changed; use declined with an explanation if you will not make it. Do not identify any person in the answer. A done change still goes through your normal review and gate; the requester is notified after integration.",
 				schema: AnswerLaneChangeArgs,
 				run: async ({ request_id, outcome, answer }) => {
+						if (outcome === "done") {
+							const refusal = await this.localWorkRefusal(state, true); if (refusal) return refusal;
+							if (state.lastReport?.outOfLane.length) return "Your last push changed files outside your lane: " + state.lastReport.outOfLane.join(", ") + ". Revert them and push again.";
+						}
 					const result: LaneChangeAnswer = { outcome, answer };
 					await this.coordinator(job).answerLaneChange(job.slice.id, request_id, result);
 					return outcome === "declined"
@@ -197,14 +243,9 @@ How to work:
 				description: "Declare the slice complete. Only accepted when everything is pushed and inside your lane.",
 				schema: FinishArgs,
 				run: async ({ summary }) => {
-					const dirty = await this.exec(["git", "status", "--porcelain"]);
-					if (dirty.output.trim()) return `Uncommitted changes remain:\n${dirty.output}\nCall commit_and_push first.`;
-					if (!state.pushes) return "Nothing has been pushed yet.";
-					const ahead = await this.unpushed();
-					if (ahead) return `${ahead} local commit(s) are not on your fork yet (for example a merge). Call commit_and_push first.`;
-					if (state.lastReport?.outOfLane.length)
-						return `Your last push changed files outside your lane: ${state.lastReport.outOfLane.join(", ")}. Revert them and push again.`;
-					state.status = "done";
+						const refusal = await this.localWorkRefusal(state, true); if (refusal) return refusal;
+						if (state.lastReport?.outOfLane.length) return `Your last push changed files outside your lane: ${state.lastReport.outOfLane.join(", ")}. Revert them and push again.`;
+						state.status = "done";
 					state.summary = summary;
 					this.note(state, "finished");
 					try {

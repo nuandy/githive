@@ -6,6 +6,8 @@ import { MODEL, addUsage, assertComplete, emptyUsage, openAITools, runCalls, too
 import { builderGitCommandBlockReason, builderGitPushBlockReason } from "./git-command-safety";
 import { COMMAND_TIMEOUT_S, WORKDIR, bootContainer, clip, gitWithToken, run } from "./container";
 import type { SliceSpec } from "./types";
+import type { LaneChangeCoordinator } from "./lane-change-contract";
+import { BUILDER_PARK_TIMEOUT_MS, type BuilderResumeCredentials } from "./parking-contract";
 
 export { WORKDIR, clip };
 
@@ -23,6 +25,13 @@ const MAX_TURNS = 80;
 const MAX_NUDGES = 3;
 const MAX_LINES = 400;
 const LOG_LIMIT = 200;
+const TURN_IN_FLIGHT = "sandbox-turn-in-flight";
+const TURN_STARTED = "sandbox-turn-started-at";
+const PARK_COMMAND = "sandbox-park-command";
+const DEFERRED_WAKES = "sandbox-deferred-wakes";
+const DELIVERED_WAKES = "sandbox-delivered-wakes";
+const INBOX = "inbox";
+const TIMED_OUT_PARK = "sandbox-timed-out-park";
 
 /** Facts every agent prompt should state about the environment. */
 export const ENVIRONMENT = `The repository is checked out at ${WORKDIR} in a Linux container with Node.js 24, npm and git. Python is not installed; use node for scripting. Commands time out after ${COMMAND_TIMEOUT_S} seconds.`;
@@ -64,7 +73,7 @@ ${job.slice.instructions}`;
 }
 
 export interface AgentState {
-	status: "queued" | "working" | "done" | "failed";
+	status: "queued" | "working" | "parked" | "done" | "failed";
 	startedAt: string;
 	finishedAt?: string;
 	turns: number;
@@ -74,6 +83,8 @@ export interface AgentState {
 	nudges: number;
 	usage: Usage;
 	error?: string;
+	parkedAt?: string;
+	waitingRequestIds?: string[];
 	/** Most recent events, newest last. */
 	log: { at: string; event: string }[];
 	previousResponseId?: string;
@@ -97,7 +108,11 @@ export function repoPath(path: string) {
 	return clean;
 }
 
+interface DeferredWake { eventId: string; message: string; credentials: BuilderResumeCredentials }
+
 export abstract class SandboxAgent<J extends SandboxJob, S extends AgentState> extends DurableObject<Env> {
+	private lifecycleTail: Promise<unknown> = Promise.resolve();
+	private lifecycle<T>(fn: () => Promise<T>): Promise<T> { const next = this.lifecycleTail.then(fn, fn); this.lifecycleTail = next.catch(() => {}); return next; }
 	/** Short name for logs and prompt-cache keys, e.g. "builder". */
 	protected abstract readonly kind: string;
 	protected abstract instructions(job: J): string;
@@ -110,6 +125,7 @@ export abstract class SandboxAgent<J extends SandboxJob, S extends AgentState> e
 	protected abstract freshFields(): Omit<S, keyof AgentState>;
 	/** Runs after each clone, in WORKDIR. */
 	protected abstract afterClone(job: J, state: S): Promise<void>;
+	protected async autoPark(_job: J, _state: S): Promise<boolean> { return false; }
 	/** Runs once when the agent fails; for example, to flag its slice for a human. */
 	protected async onFailed(_job: J, _state: S): Promise<void> {}
 	/** Runs once when the agent stops for any reason (done, failed, cancelled); frees its slot in the task's limits. */
@@ -131,7 +147,7 @@ export abstract class SandboxAgent<J extends SandboxJob, S extends AgentState> e
 
 	async start(job: J) {
 		const { state } = await this.load();
-		if (state && (state.status === "queued" || state.status === "working")) throw new Error(`${this.kind} is already ${state.status}`);
+		if (state && (state.status === "queued" || state.status === "working" || state.status === "parked")) throw new Error(`${this.kind} is already ${state.status}`);
 		const fresh = {
 			status: "queued",
 			startedAt: new Date().toISOString(),
@@ -143,7 +159,7 @@ export abstract class SandboxAgent<J extends SandboxJob, S extends AgentState> e
 			...this.freshFields(),
 		} as unknown as S; // base fields + the subclass's fields make a full S
 		await this.ctx.storage.put("job", job);
-		await this.ctx.storage.delete(["cancel", "inbox", "builder-last-pushed-head"]);
+		await this.ctx.storage.delete(["cancel", INBOX, "builder-last-pushed-head", TURN_IN_FLIGHT, TURN_STARTED, PARK_COMMAND, DEFERRED_WAKES, DELIVERED_WAKES, TIMED_OUT_PARK]);
 		await this.save(fresh);
 		await this.ctx.storage.setAlarm(Date.now());
 		return this.view(fresh);
@@ -166,19 +182,62 @@ export abstract class SandboxAgent<J extends SandboxJob, S extends AgentState> e
 	 * false when the agent isn't running, so the caller can handle that case.
 	 */
 	async notify(message: string) {
-		const { state } = await this.load();
-		if (!state || (state.status !== "queued" && state.status !== "working")) return false;
-		const inbox = (await this.ctx.storage.get<string[]>("inbox")) ?? [];
-		await this.ctx.storage.put("inbox", [...inbox, message]);
-		return true;
+		return this.lifecycle(async () => {
+			const { state } = await this.load();
+			if (!state || (state.status !== "queued" && state.status !== "working")) return false;
+			if (state.status === "working" && await this.ctx.storage.get(TURN_IN_FLIGHT)) return false;
+			const inbox = (await this.ctx.storage.get<string[]>(INBOX)) ?? [];
+			await this.ctx.storage.put(INBOX, [...inbox, message]);
+			return true;
+		});
 	}
 
-	private async drainInbox(state: S): Promise<ResponseInputItem[]> {
-		const inbox = (await this.ctx.storage.get<string[]>("inbox")) ?? [];
-		if (!inbox.length) return [];
-		await this.ctx.storage.delete("inbox");
-		for (const text of inbox) this.note(state, `message delivered: ${text.split("\n")[0].slice(0, 160)}`);
-		return inbox.map((text) => ({ role: "user" as const, content: text }));
+	protected async parkAgent(parkedAt: string, waitingFor: string[]) {
+		return this.lifecycle(async () => {
+			if (await this.ctx.storage.get(TURN_IN_FLIGHT)) { await this.ctx.storage.put(PARK_COMMAND, { parkedAt, waitingFor, applied: false }); await this.ctx.storage.setAlarm(Date.now() + RUN_BUDGET_MS + 5_000); return; }
+			const { state } = await this.load(); if (!state || ["done", "failed"].includes(state.status)) return;
+			state.status = "parked"; state.parkedAt = parkedAt; state.waitingRequestIds = [...waitingFor];
+			this.note(state, "parked while waiting for " + waitingFor.join(", ")); await this.save(state);
+			if (this.ctx.container?.running) await this.ctx.container.destroy(this.kind + " parked").catch(() => {});
+			await this.scheduleForState(state);
+		});
+	}
+
+	protected async receiveWake(eventId: string, message: string, credentials: BuilderResumeCredentials): Promise<"resumed" | "deferred" | "ignored"> {
+		if (!eventId.trim()) throw new Error("wake event ID must be nonempty");
+		return this.lifecycle(async () => {
+			const delivered = (await this.ctx.storage.get<string[]>(DELIVERED_WAKES)) ?? [];
+			const pending = (await this.ctx.storage.get<DeferredWake[]>(DEFERRED_WAKES)) ?? [];
+			if (delivered.includes(eventId) || pending.some((wake) => wake.eventId === eventId)) return "ignored";
+			const wake = { eventId, message, credentials };
+			if (await this.ctx.storage.get(TURN_IN_FLIGHT)) { await this.ctx.storage.put(DEFERRED_WAKES, [...pending, wake]); await this.ctx.storage.setAlarm(Date.now() + RUN_BUDGET_MS + 5_000); return "deferred"; }
+			const { job, state } = await this.load(); if (!job || !state) return "ignored";
+			return this.deliverWake(job, state, wake);
+		});
+	}
+
+	private async deliverWake(job: J, state: S, wake: DeferredWake): Promise<"resumed" | "deferred" | "ignored"> {
+		const delivered = (await this.ctx.storage.get<string[]>(DELIVERED_WAKES)) ?? [];
+		if (delivered.includes(wake.eventId) || !["parked", "working", "queued"].includes(state.status)) return "ignored";
+		const inbox = (await this.ctx.storage.get<string[]>(INBOX)) ?? []; const parked = state.status === "parked";
+		if (parked) { state.status = "queued"; state.parkedAt = undefined; state.waitingRequestIds = undefined; state.finishedAt = undefined; state.error = undefined; state.nudges = 0; state.turnsAtRunStart = state.turns; this.note(state, "resumed for wake event " + wake.eventId); }
+		else this.note(state, "resolution event " + wake.eventId + " queued for next turn");
+		inbox.push(wake.message); delivered.push(wake.eventId);
+		await this.ctx.storage.put({ job: { ...job, ...wake.credentials }, state, [INBOX]: inbox, [DELIVERED_WAKES]: delivered });
+		if (parked) { if (this.ctx.container?.running) await this.ctx.container.destroy(this.kind + " resumed").catch(() => {}); await this.ctx.storage.setAlarm(Date.now()); return "resumed"; }
+		await this.ctx.storage.setAlarm(Date.now());
+		return "deferred";
+	}
+
+	protected async isParkStillTimedOut() { const { state } = await this.load(); return !!state && state.status === "parked" && !!state.parkedAt && Date.parse(state.parkedAt) + BUILDER_PARK_TIMEOUT_MS <= Date.now(); }
+
+	private async peekInbox() { return (await this.ctx.storage.get<string[]>(INBOX)) ?? []; }
+
+	private async acknowledgeInbox(sent: string[], state: S) {
+		if (!sent.length) return;
+		const inbox = (await this.ctx.storage.get<string[]>(INBOX)) ?? [];
+		if (sent.every((message, index) => inbox[index] === message)) await this.ctx.storage.put(INBOX, inbox.slice(sent.length));
+		for (const text of sent) this.note(state, "message delivered: " + text.split("\n")[0].slice(0, 160));
 	}
 
 	private async cancelled(state: S) {
@@ -203,7 +262,14 @@ export abstract class SandboxAgent<J extends SandboxJob, S extends AgentState> e
 
 	async alarm() {
 		const { job, state } = await this.load();
-		if (!job || !state || (state.status !== "queued" && state.status !== "working")) return;
+		if (!job || !state) return;
+		if (state.status === "parked") { await this.reconcileParkedWakes(job, state); const latest = (await this.load()).state; if (latest?.status === "parked") await this.handleParkedAlarm(job, latest); return; }
+		if (state.status !== "queued" && state.status !== "working") return;
+		if (state.status === "working" && await this.ctx.storage.get(TURN_IN_FLIGHT)) {
+			const started = await this.ctx.storage.get<number>(TURN_STARTED);
+			if (started && Date.now() - started < RUN_BUDGET_MS + 30_000) { await this.ctx.storage.setAlarm(Date.now() + 60_000); return; }
+			await this.ctx.storage.delete([TURN_IN_FLIGHT, TURN_STARTED]);
+		}
 		try {
 			if (await this.cancelled(state)) throw new Error(state.error);
 			if (state.status === "queued" || !this.ctx.container?.running) {
@@ -214,9 +280,13 @@ export abstract class SandboxAgent<J extends SandboxJob, S extends AgentState> e
 			await this.ctx.container!.setInactivityTimeout(20 * 60_000);
 			const deadline = Date.now() + RUN_BUDGET_MS;
 			while (state.status === "working" && Date.now() < deadline && !(await this.cancelled(state))) {
-				await this.turn(job, state);
-				await this.save(state);
+				const turnToken = crypto.randomUUID();
+					await this.lifecycle(async () => this.ctx.storage.put({ [TURN_IN_FLIGHT]: turnToken, [TURN_STARTED]: Date.now() }));
+					try { await this.turn(job, state); await this.save(state); await this.reconcileAfterTurn(job, state, turnToken); }
+					finally { if ((await this.ctx.storage.get<string>(TURN_IN_FLIGHT)) === turnToken) await this.ctx.storage.delete([TURN_IN_FLIGHT, TURN_STARTED]); }
+					const refreshed = await this.ctx.storage.get<J>("job"); if (refreshed) Object.assign(job, refreshed);
 			}
+			if ((state.status as string) === "parked") { if (this.ctx.container?.running) await this.ctx.container.destroy(this.kind + " parked"); return; }
 			if (state.status === "working") await this.ctx.storage.setAlarm(Date.now() + 1_000);
 		} catch (err) {
 			state.status = "failed";
@@ -231,6 +301,60 @@ export abstract class SandboxAgent<J extends SandboxJob, S extends AgentState> e
 		await this.save(state);
 		if ((state.status as string) === "failed") await this.onFailed(job, state).catch(() => {});
 		if (["done", "failed"].includes(state.status)) await this.onStopped(job, state).catch(() => {});
+	}
+
+	private async reconcileParkedWakes(job: J, _state: S) {
+		await this.lifecycle(async () => {
+			const latest = await this.load();
+			const current = latest.state;
+			if (!current) return;
+			const pending = (await this.ctx.storage.get<DeferredWake[]>(DEFERRED_WAKES)) ?? [];
+			for (const wake of pending) await this.deliverWake((latest.job ?? job) as J, current, wake);
+			if (pending.length) await this.ctx.storage.delete(DEFERRED_WAKES);
+			const park = await this.ctx.storage.get<{ applied?: boolean }>(PARK_COMMAND);
+			if (park && (park.applied || current.status === "parked")) await this.ctx.storage.delete(PARK_COMMAND);
+			await this.save(current);
+			if (current.status === "parked" || current.status === "queued") await this.scheduleForState(current);
+			await this.ctx.storage.delete([TURN_IN_FLIGHT, TURN_STARTED]);
+		});
+	}
+
+	private async reconcileAfterTurn(job: J, state: S, turnToken: string) {
+		await this.lifecycle(async () => {
+			const park = await this.ctx.storage.get<{ parkedAt: string; waitingFor: string[]; applied?: boolean }>(PARK_COMMAND);
+			if (park && !park.applied) {
+				if (state.status === "working" || state.status === "queued") { state.status = "parked"; state.parkedAt = park.parkedAt; state.waitingRequestIds = park.waitingFor; this.note(state, "parked while waiting for " + park.waitingFor.join(", ")); }
+				await this.ctx.storage.put({ state, [PARK_COMMAND]: { ...park, applied: true } });
+			}
+			const pending = (await this.ctx.storage.get<DeferredWake[]>(DEFERRED_WAKES)) ?? [];
+			for (const wake of pending) await this.deliverWake(job, state, wake);
+			if (pending.length) await this.ctx.storage.delete(DEFERRED_WAKES);
+			await this.save(state); if (park) await this.ctx.storage.delete(PARK_COMMAND);
+			if (state.status === "parked") { if (this.ctx.container?.running) await this.ctx.container.destroy(this.kind + " parked"); await this.scheduleForState(state); }
+			else if (state.status === "queued") await this.scheduleForState(state);
+			if ((await this.ctx.storage.get<string>(TURN_IN_FLIGHT)) === turnToken) await this.ctx.storage.delete([TURN_IN_FLIGHT, TURN_STARTED]);
+		});
+	}
+
+	private async scheduleForState(state: S) {
+		if (state.status === "parked") { const at = Date.parse(state.parkedAt ?? new Date().toISOString()) + BUILDER_PARK_TIMEOUT_MS; await this.ctx.storage.setAlarm(Math.max(Date.now(), at)); }
+		else if (state.status === "queued" || state.status === "working") await this.ctx.storage.setAlarm(Date.now());
+	}
+
+	private async handleParkedAlarm(job: J, state: S) {
+		const parkedAt = state.parkedAt ?? new Date().toISOString();
+		const deadline = Date.parse(parkedAt) + BUILDER_PARK_TIMEOUT_MS;
+		if (Date.now() < deadline) {
+			await this.lifecycle(async () => { const current = (await this.load()).state; if (current?.status === "parked" && current.parkedAt === parkedAt) await this.ctx.storage.setAlarm(deadline); });
+			return;
+		}
+		if (await this.ctx.storage.get<string>(TIMED_OUT_PARK) === parkedAt) return;
+		try { await (this.coordinator(job) as unknown as LaneChangeCoordinator).parkedBuilderTimedOut((job as J & { slice: { id: string } }).slice.id, parkedAt); }
+		catch { await this.lifecycle(async () => { const current = (await this.load()).state; if (current?.status === "parked" && current.parkedAt === parkedAt) await this.ctx.storage.setAlarm(Date.now() + 60_000); }); return; }
+		await this.lifecycle(async () => {
+			const current = (await this.load()).state;
+			if (current?.status === "parked" && current.parkedAt === parkedAt) { await this.ctx.storage.put(TIMED_OUT_PARK, parkedAt); this.note(current, "park timeout reported while waiting for " + (current.waitingRequestIds ?? []).join(", ")); await this.save(current); }
+		});
 	}
 
 	private async setUp(job: J, state: S) {
@@ -365,9 +489,10 @@ export abstract class SandboxAgent<J extends SandboxJob, S extends AgentState> e
 		if (state.turns - (state.turnsAtRunStart ?? 0) >= MAX_TURNS) throw new Error(`stopped after ${MAX_TURNS} turns without finishing`);
 		const client = new OpenAI({ apiKey: this.env.OPENAI_API_KEY });
 		const tools = this.tools(job, state);
+		const inbox = await this.peekInbox();
 		const input: ResponseInputItem[] = [
 			...(state.previousResponseId ? (state.pending ?? []) : [{ role: "user" as const, content: this.kickoff(job) }]),
-			...(await this.drainInbox(state)),
+			...inbox.map((content) => ({ role: "user" as const, content })),
 		];
 		const response = await client.responses.create({
 			model: MODEL,
@@ -379,6 +504,7 @@ export abstract class SandboxAgent<J extends SandboxJob, S extends AgentState> e
 			max_output_tokens: 32000,
 			prompt_cache_key: `${this.kind}-${job.repo}`,
 		});
+		await this.acknowledgeInbox(inbox, state);
 		state.turns++;
 		addUsage(state.usage, response);
 		assertComplete(response, this.kind);
@@ -391,7 +517,7 @@ export abstract class SandboxAgent<J extends SandboxJob, S extends AgentState> e
 			return;
 		}
 		// The model answered in text without finishing.
-		if (++state.nudges > MAX_NUDGES) throw new Error(`${this.kind} stopped calling tools without finishing`);
+		if (++state.nudges > MAX_NUDGES) { if (await this.autoPark(job, state)) { state.pending = []; return; } throw new Error(`${this.kind} stopped calling tools without finishing`); }
 		this.note(state, `nudged: ${response.output_text.slice(0, 200)}`);
 		state.pending = [{ role: "user", content: this.nudge(job) }];
 	}

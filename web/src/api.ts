@@ -13,7 +13,7 @@ export interface Usage {
 
 /** A builder's or reviewer's public state (see src/sandbox.ts). */
 export interface AgentState {
-	status: "queued" | "working" | "done" | "failed";
+	status: "queued" | "working" | "parked" | "done" | "failed";
 	startedAt: string;
 	finishedAt?: string;
 	turns: number;
@@ -25,6 +25,10 @@ export interface AgentState {
 	pushes?: number;
 	revisions?: number;
 	summary?: string;
+	/** Time at which a builder entered its durable parked state. */
+	parkedAt?: string;
+	/** IDs of requests a parked builder was waiting for. */
+	waitingFor?: string[];
 	// Reviewers
 	verdict?: "approve" | "reject";
 	evidence?: string;
@@ -155,8 +159,9 @@ function normalizeAgentState(value: unknown): AgentState | null {
 		if (!event || typeof event.event !== "string") return [];
 		return [{ ...event, at: typeof event.at === "string" ? event.at : "", event: event.event }];
 	});
+	const { parkedAt, waitingFor, ...rest } = state;
 	return {
-		...state,
+		...rest,
 		usage: {
 			...usage,
 			inputTokens: typeof usage?.inputTokens === "number" ? usage.inputTokens : 0,
@@ -164,6 +169,8 @@ function normalizeAgentState(value: unknown): AgentState | null {
 			cacheReadTokens: typeof usage?.cacheReadTokens === "number" ? usage.cacheReadTokens : 0,
 		},
 		log,
+		...(typeof parkedAt === "string" ? { parkedAt } : {}),
+		...(Array.isArray(waitingFor) ? { waitingFor: asStringArray(waitingFor) } : {}),
 	} as AgentState;
 }
 
