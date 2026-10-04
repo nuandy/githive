@@ -443,6 +443,25 @@ describe("escalation and human controls", () => {
 		expect(fake.env.REVIEWER.stubs.size).toBe(0);
 	});
 
+	it("reports a reviewer that could not start and flags the slice", async () => {
+		await setup(task());
+		vi.mocked(fake.env.REVIEWER.getByName("t1--a--review-tests--h1").start).mockRejectedValue(new Error("[503] no containers"));
+		const { reviewers, failed, escalated } = await coordinator.startReviewers("a", "built it");
+		expect(escalated).toBe(false);
+		expect(reviewers).toEqual(["security", "tests", "api"]);
+		expect(failed).toEqual(["Could not start reviewer a:tests:h1: no containers"]);
+		const t = await stored();
+		expect(t.slices[0].attention).toBe("Could not start reviewer a:tests:h1: no containers");
+		expect(t.active.reviewers).toEqual(["a:security:h1", "a:api:h1"]);
+		await coordinator.ledgerIdle();
+		expect(ledger.entries.map((e) => e.text)).toContain("a needs a human: Could not start reviewer a:tests:h1: no containers");
+	});
+
+	it("reports no failures when every reviewer starts", async () => {
+		await setup(task());
+		expect((await coordinator.startReviewers("a", "built it")).failed).toEqual([]);
+	});
+
 	it("refuses a waiver while the builder is working, then records it and queues the gate", async () => {
 		await setup(task({ slices: [slice("a", { reviewHead: "h1", attention: "stuck" }), slice("b")] }));
 		fake.agentStatus.set("t1--a", "working");
@@ -941,5 +960,110 @@ describe("parking: delivery and timeout", () => {
 		const result = await coordinator.parkBuilder("a");
 		expect(result).toMatchObject({ outcome: "refused", reason: expect.stringMatching(/Messages are waiting/) });
 		expect(builder("a").park).not.toHaveBeenCalled();
+	});
+});
+
+describe("creating tasks", () => {
+	const fresh = (get: (repo: string) => Promise<unknown>) => {
+		storage = new FakeStorage();
+		fake = fakeEnv();
+		Object.assign(fake.env.ARTIFACTS, { get: vi.fn(get) });
+		coordinator = new Coordinator({ storage } as never, fake.env as never);
+	};
+	const handle = async () => ({ [Symbol.dispose]() {} });
+
+	it("creates a planned task with nothing started, in the stored field order", async () => {
+		fresh(handle);
+		io.heads.set("project", "p0");
+		const t = await coordinator.create("abcd1234", "project", "a goal", { builders: 2 });
+		expect(Object.keys(t)).toEqual(["id", "repo", "goal", "phase", "contracts", "verify", "review", "slices", "checks", "amendments", "limits", "queue", "active", "createdAt", "anchor"]);
+		expect(t).toMatchObject({ phase: "planning", verify: [], review: { reviewers: ["security", "tests", "api"] }, limits: { builders: 2, reviewers: 6 }, anchor: "p0" });
+		await expect(coordinator.create("abcd1234", "project", "again")).rejects.toThrow("[409] task exists");
+	});
+
+	it("creates an open task on the project's head, in the stored field order", async () => {
+		fresh(handle);
+		io.heads.set("project", "p0");
+		const t = await coordinator.createOpen("abcd1234", "project", { verify: ["npm test", " "] });
+		expect(Object.keys(t)).toEqual(["id", "repo", "goal", "phase", "mode", "leaseMinutes", "baseRepo", "baseCommit", "contracts", "verify", "review", "slices", "checks", "amendments", "limits", "queue", "active", "createdAt", "anchor"]);
+		expect(t).toMatchObject({ goal: "Open changes on project", phase: "building", mode: "open", leaseMinutes: 30, baseRepo: "project", baseCommit: "p0", verify: ["npm test"], anchor: "p0" });
+		expect((await coordinator.createOpen("abcd1234", "project")).id).toBe("abcd1234");
+	});
+
+	it("refuses a repo that doesn't exist, and checks limits before reading the project", async () => {
+		fresh(async () => {
+			throw new Error("not found");
+		});
+		await expect(coordinator.create("abcd1234", "nope", "g")).rejects.toThrow("[404] no repo nope");
+		await expect(coordinator.createOpen("abcd1234", "nope")).rejects.toThrow("[404] no repo nope");
+		fresh(handle);
+		vi.mocked(artifacts.headOf).mockClear();
+		await expect(coordinator.create("abcd1234", "project", "g", { builders: 0 })).rejects.toThrow("[400] limits.builders must be a whole number from 1 to 50");
+		expect(artifacts.headOf).not.toHaveBeenCalled();
+	});
+});
+
+describe("agent jobs and credentials", () => {
+	it("starts a builder with its slice, siblings and tokens", async () => {
+		await setup(task({ slices: [slice("a"), slice("b"), slice("c", { status: "abandoned" })] }));
+		await coordinator.startBuilders();
+		expect(builder("a").start).toHaveBeenCalledWith({
+			taskId: "t1",
+			goal: "a goal",
+			slice: { id: "a", title: "a", owns: ["src/a/"], instructions: "build a", tests: [] },
+			siblings: [{ id: "b", title: "b", owns: ["src/b/"] }],
+			contracts: [],
+			verify: ["npm test"],
+			repo: "t1--a",
+			remote: "https://git.test/t1--a.git",
+			token: "token-t1--a",
+			base: { remote: "https://git.test/t1--base.git", token: "token-t1--base" },
+		});
+	});
+
+	it("starts a reviewer pinned to the commit under review", async () => {
+		io.heads.set("t1--a", "h1");
+		await setup(task());
+		await coordinator.startReviewers("a", "built it");
+		expect(fake.env.REVIEWER.getByName("t1--a--review-tests--h1").start).toHaveBeenCalledWith({
+			taskId: "t1",
+			goal: "a goal",
+			slice: { id: "a", title: "a", owns: ["src/a/"], instructions: "build a", tests: [] },
+			siblings: [{ id: "b", title: "b", owns: ["src/b/"] }],
+			contracts: [],
+			verify: ["npm test"],
+			repo: "t1--a",
+			remote: "https://git.test/t1--a.git",
+			token: "token-t1--a",
+			role: "tests",
+			head: "h1",
+			baseCommit: "base0",
+			buildSummary: "built it",
+			revision: 0,
+			priorFindings: undefined,
+			amendments: [],
+		});
+	});
+
+	it("sends a slice back with fresh builder credentials and cancels its reviewers", async () => {
+		io.heads.set("t1--a", "h1");
+		await setup(task());
+		await coordinator.startReviewers("a", "built it");
+		await coordinator.submitReview("a", vote("security", "reject"));
+		expect(builder("a").revise).toHaveBeenCalledWith(expect.stringContaining("security says reject"), {
+			token: "token-t1--a",
+			base: { remote: "https://git.test/t1--base.git", token: "token-t1--base" },
+		});
+		for (const role of ["security", "tests", "api"])
+			expect(fake.env.REVIEWER.getByName(`t1--a--review-${role}--h1`).cancel).toHaveBeenCalledWith("the slice was sent back to its builder");
+	});
+
+	it("wakes a builder with fresh credentials", async () => {
+		await setup(task());
+		await coordinator.messageBuilder("a", "hello", person);
+		expect(builder("a").wake).toHaveBeenCalledWith(expect.stringMatching(/^human-message:/), "Message from a human on the team: hello", {
+			token: "token-t1--a",
+			base: { remote: "https://git.test/t1--base.git", token: "token-t1--base" },
+		});
 	});
 });

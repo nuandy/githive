@@ -11,12 +11,15 @@ import { Workspace } from "./git";
 import { boundedUnifiedDiff } from "./code-view";
 import { type LedgerDoc, type LedgerEntry, clipText, diff, fromDoc, replay, toDoc } from "./ledger";
 import { appendLedger, readLedger } from "./ledger-git";
+import { unresolvedRequests } from "./lane-requests";
 import { blueprintProblems } from "./blueprint";
 import { NEW_FILE, decideAmendment } from "./contract-owner";
 import type { GatePlan } from "./gate";
 import { gateExclusions, gateFeedback, type GateResult } from "./gate-plan";
 import type { BuildJob } from "./builder";
+import type { Remote } from "./git";
 import type { ReviewJob } from "./reviewer";
+import type { SliceJob } from "./sandbox";
 import { plan } from "./planner";
 import { OPENING_LEASE_MS, claimConflicts, conflictMessage as claimConflictMessage, changeId, holdsClaim, inLane, leaseExpired, leaseUntil, nextLeaseCheck, normalizeClaim } from "./open-mode";
 import { nextStep, reviewFeedback, tally, validatePolicy } from "./quorum";
@@ -51,6 +54,47 @@ const EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
 
 const short = (oid?: string) => oid?.slice(0, 8) ?? "none";
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
+
+/** Remove `key` from a list in place (such as a task's active agents), if it is there. */
+function removeKey(list: string[], key: string) {
+	const index = list.indexOf(key);
+	if (index >= 0) list.splice(index, 1);
+}
+
+/**
+ * A new task, with nothing planned, queued or running yet. `head` holds the
+ * fields that come first in the stored task (an open task's mode and base among
+ * them), so both kinds keep their field order.
+ */
+function newTask(head: Pick<Task, "id" | "repo" | "goal" | "phase"> & Partial<Task>, rest: { verify?: string[]; review?: ReviewPolicy; limits: Limits; anchor: string }): Task {
+	return {
+		...head,
+		contracts: [],
+		verify: rest.verify ?? [],
+		review: rest.review ?? DEFAULT_POLICY,
+		slices: [],
+		checks: [],
+		amendments: [],
+		limits: rest.limits,
+		queue: [],
+		active: { builders: [], reviewers: [] },
+		createdAt: new Date().toISOString(),
+		anchor: rest.anchor,
+	};
+}
+
+/** What every agent working on a slice is told about it: the fields BuildJob and ReviewJob share, less credentials. */
+function sliceJobBase(task: Task, slice: Slice): Omit<SliceJob, "remote" | "token"> {
+	return {
+		taskId: task.id,
+		goal: task.goal,
+		slice: { id: slice.id, title: slice.title, owns: slice.owns, instructions: slice.instructions, tests: slice.tests },
+		siblings: task.slices.filter((s) => s !== slice && s.status !== "abandoned").map(({ id, title, owns }) => ({ id, title, owns })),
+		contracts: task.contracts,
+		verify: task.verify,
+		repo: slice.repo!,
+	};
+}
 
 /** One side of a Merge-ahead check. */
 interface Side {
@@ -259,25 +303,31 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 		return task.slices.find((s) => s.id === id) ?? fail(404, `no slice ${id}`);
 	}
 
+	/** Flag a slice for a human: `attention` is shown on it, and the decision is noted as "needs a human: <summary>". */
+	private flagHuman(task: Task, slice: Slice, commit: string | undefined, attention: string, summary = attention) {
+		slice.attention = attention;
+		this.note(task, commit, `${slice.id} needs a human: ${summary}`);
+	}
+
 	requestLaneChange(requesterSliceId: string, input: LaneChangeRequestInput) {
 		return this.exclusive(async () => {
 			const task = await this.load();
-			if (task.phase !== "building") fail(409, "task is " + task.phase);
+			if (task.phase !== "building") fail(409, `task is ${task.phase}`);
 			const requester = this.slice(task, requesterSliceId);
-			if (requester.status !== "building") fail(409, "slice " + requesterSliceId + " is " + requester.status);
+			if (requester.status !== "building") fail(409, `slice ${requesterSliceId} is ${requester.status}`);
 			if (!input || typeof input.path !== "string" || !input.path.trim()) fail(400, "a lane request needs a path");
-			if (!this.safeLanePath(input.path)) fail(400, "invalid relative path: " + input.path);
+			if (!this.safeLanePath(input.path)) fail(400, `invalid relative path: ${input.path}`);
 			if (typeof input.need !== "string" || !input.need.trim()) fail(400, "a lane request needs a nonempty need");
 			if (typeof input.reason !== "string" || !input.reason.trim()) fail(400, "a lane request needs a nonempty reason");
 			// In open mode, only active changes hold lanes; an integrated or abandoned change's paths are free.
 			const owners = task.slices.filter((candidate) => (task.mode !== "open" || candidate.status === "building") && inLane(input.path, candidate.owns));
-			if (owners.length > 1) fail(409, "more than one slice owns " + input.path + ": " + owners.map((x) => x.id).join(", "));
+			if (owners.length > 1) fail(409, `more than one slice owns ${input.path}: ${owners.map((x) => x.id).join(", ")}`);
 			if (!owners.length)
 				return task.mode === "open"
-					? { outcome: "no-owner" as const, message: "No active change holds " + input.path + ". Extend your own claim to it (extend_claim) and change it yourself." }
-					: { outcome: "no-owner" as const, message: "No slice owns " + input.path + ". Use the existing amendment path (propose_contract_change) for a file outside every lane." };
+					? { outcome: "no-owner" as const, message: `No active change holds ${input.path}. Extend your own claim to it (extend_claim) and change it yourself.` }
+					: { outcome: "no-owner" as const, message: `No slice owns ${input.path}. Use the existing amendment path (propose_contract_change) for a file outside every lane.` };
 			const owner = owners[0];
-			if (owner.id === requesterSliceId) fail(400, input.path + " is in your own lane; a cross-lane request must name another slice file");
+			if (owner.id === requesterSliceId) fail(400, `${input.path} is in your own lane; a cross-lane request must name another slice file`);
 			const request: LaneChangeRequest = { id: crypto.randomUUID().slice(0, 8), requester: requesterSliceId, owner: owner.id, path: input.path, need: input.need.trim(), reason: input.reason.trim(), status: "pending", createdAt: new Date().toISOString() };
 
 			// Adding requester -> owner is unsafe if owner already depends (directly or
@@ -286,7 +336,7 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 				request.status = "human";
 				const message = "This cross-lane request would create a wait cycle or deadlock. It was not sent and needs a human to resolve the dependency.";
 				await this.flagLaneRequest(task, request, message, false);
-				this.note(task, requester.head, "Cross-lane request " + request.id + " would create a wait cycle and was handed to a human");
+				this.note(task, requester.head, `Cross-lane request ${request.id} would create a wait cycle and was handed to a human`);
 				await this.save(task);
 				return { outcome: "human" as const, request, message };
 			}
@@ -294,27 +344,27 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 			task.laneChangeRequests = [...(task.laneChangeRequests ?? []), request];
 			if (owner.status === "integrated") {
 				request.status = "human";
-				const message = "Slice " + owner.id + " is already integrated; it can no longer make the requested change to " + request.path + ". This request needs a human.";
+				const message = `Slice ${owner.id} is already integrated; it can no longer make the requested change to ${request.path}. This request needs a human.`;
 				await this.flagLaneRequest(task, request, message, false);
-				this.note(task, owner.head, "Cross-lane request " + request.id + " from " + requesterSliceId + " to integrated slice " + owner.id + " needs a human: " + request.path + " (" + request.need + ")");
+				this.note(task, owner.head, `Cross-lane request ${request.id} from ${requesterSliceId} to integrated slice ${owner.id} needs a human: ${request.path} (${request.need})`);
 				await this.save(task);
 				return { outcome: "human" as const, request, message };
 			}
 			const message = this.laneRequestMessage(request);
 			let delivery: "inbox" | "resumed";
 			try {
-				const wake = await this.wakeBuilder(task, owner, "lane-request:" + request.id, message);
+				const wake = await this.wakeBuilder(task, owner, `lane-request:${request.id}`, message);
 				delivery = wake === "resumed" ? "resumed" : "inbox";
 			}
 			catch (err) {
 				request.status = "human";
-				const explanation = "Could not deliver the cross-lane request to slice " + owner.id + ": " + statusOf(err).message + ". This request needs a human.";
+				const explanation = `Could not deliver the cross-lane request to slice ${owner.id}: ${statusOf(err).message}. This request needs a human.`;
 				await this.flagLaneRequest(task, request, explanation, false);
-				this.note(task, owner.head, "Cross-lane request " + request.id + " could not be delivered to owner " + owner.id + " and needs a human");
+				this.note(task, owner.head, `Cross-lane request ${request.id} could not be delivered to owner ${owner.id} and needs a human`);
 				await this.save(task);
 				return { outcome: "human" as const, request, message: explanation };
 			}
-			this.note(task, owner.head, "Cross-lane request " + request.id + ": slice " + requesterSliceId + " asked slice " + owner.id + " to change " + request.path + ": " + request.need + ". Reason: " + request.reason + " (" + delivery + ")");
+			this.note(task, owner.head, `Cross-lane request ${request.id}: slice ${requesterSliceId} asked slice ${owner.id} to change ${request.path}: ${request.need}. Reason: ${request.reason} (${delivery})`);
 			await this.save(task);
 			return { outcome: "requested" as const, request, delivery, message };
 		});
@@ -324,25 +374,25 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 		return this.exclusive(async () => {
 			const task = await this.load();
 			const owner = this.slice(task, ownerSliceId);
-			const request = (task.laneChangeRequests ?? []).find((item) => item.id === requestId) ?? fail(404, "no lane request " + requestId);
-			if (request.owner !== ownerSliceId) fail(403, "slice " + ownerSliceId + " does not own lane request " + requestId);
-			if (request.status !== "pending") fail(409, "lane request " + requestId + " is " + request.status);
+			const request = (task.laneChangeRequests ?? []).find((item) => item.id === requestId) ?? fail(404, `no lane request ${requestId}`);
+			if (request.owner !== ownerSliceId) fail(403, `slice ${ownerSliceId} does not own lane request ${requestId}`);
+			if (request.status !== "pending") fail(409, `lane request ${requestId} is ${request.status}`);
 			if (owner.status === "integrated") {
-				const message = "Slice " + ownerSliceId + " is already integrated and can no longer change " + request.path + "; this request needs a human.";
+				const message = `Slice ${ownerSliceId} is already integrated and can no longer change ${request.path}; this request needs a human.`;
 				await this.flagLaneRequest(task, request, message, true);
 				await this.save(task);
 				return request;
 			}
-			if (owner.status !== "building") fail(409, "slice " + ownerSliceId + " is " + owner.status);
+			if (owner.status !== "building") fail(409, `slice ${ownerSliceId} is ${owner.status}`);
 			if (!answer || (answer.outcome !== "done" && answer.outcome !== "declined")) fail(400, "lane request answer must be done or declined");
 			if (typeof answer.answer !== "string" || !answer.answer.trim()) fail(400, "a lane request answer needs a nonempty explanation");
 			request.answer = answer.answer.trim();
 			request.answeredAt = new Date().toISOString();
 			if (answer.outcome === "declined") {
 				request.status = "declined";
-				const message = "Slice " + ownerSliceId + " declined cross-lane request " + request.id + " for " + request.path + ": " + request.answer;
+				const message = `Slice ${ownerSliceId} declined cross-lane request ${request.id} for ${request.path}: ${request.answer}`;
 				await this.wakeLaneRequester(task, request, message);
-				this.note(task, owner.head, "Cross-lane request " + request.id + " declined by slice " + ownerSliceId + "; requester " + request.requester + " was notified: " + request.answer);
+				this.note(task, owner.head, `Cross-lane request ${request.id} declined by slice ${ownerSliceId}; requester ${request.requester} was notified: ${request.answer}`);
 			} else {
 				// Agent-supplied commit IDs are untrusted. Only Artifacts' current fork
 				// head proves what was actually pushed by the owner.
@@ -350,7 +400,7 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 				if (!pushedHead || pushedHead === task.baseCommit) fail(409, "a done answer requires a current pushed change commit in the owner's fork");
 				request.status = "answered";
 				request.answerCommit = pushedHead;
-				this.note(task, pushedHead, "Slice " + ownerSliceId + " answered cross-lane request " + request.id + " as done for " + request.path + " at pushed commit " + pushedHead + ": " + request.answer);
+				this.note(task, pushedHead, `Slice ${ownerSliceId} answered cross-lane request ${request.id} as done for ${request.path} at pushed commit ${pushedHead}: ${request.answer}`);
 			}
 			await this.save(task);
 			return request;
@@ -380,7 +430,7 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 	}
 
 	private laneRequestMessage(request: LaneChangeRequest) {
-		return "Cross-lane change request " + request.id + " from slice " + request.requester + ". Path: " + request.path + ". Need: " + request.need + ". Reason: " + request.reason;
+		return `Cross-lane change request ${request.id} from slice ${request.requester}. Path: ${request.path}. Need: ${request.need}. Reason: ${request.reason}`;
 	}
 
 	private toInbox(slice: Slice, text: string): "inbox" {
@@ -395,11 +445,17 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 		return (slice.inbox ?? []).filter((m) => !since || m.at > since);
 	}
 
-	private async resumeCredentials(slice: Slice): Promise<BuilderResumeCredentials> {
-		const [write, base] = await Promise.all([
+	/** A builder's Git access for three hours: write to its own fork, read the task base. */
+	private builderRemotes(task: Task, slice: Slice): Promise<[Remote, Remote]> {
+		return Promise.all([
 			remoteFor(this.env.ARTIFACTS, slice.repo!, "write", 3 * 3600),
-			remoteFor(this.env.ARTIFACTS, (await this.load()).baseRepo!, "read", 3 * 3600),
+			remoteFor(this.env.ARTIFACTS, task.baseRepo!, "read", 3 * 3600),
 		]);
+	}
+
+	/** Fresh tokens for a builder that resumes its conversation. */
+	private async resumeCredentials(task: Task, slice: Slice): Promise<BuilderResumeCredentials> {
+		const [write, base] = await this.builderRemotes(task, slice);
 		return { token: write.token, base: { remote: base.url, token: base.token } };
 	}
 
@@ -438,7 +494,7 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 		let resumed = false;
 		let credentials: BuilderResumeCredentials;
 		try {
-			credentials = await this.resumeCredentials(slice);
+			credentials = await this.resumeCredentials(task, slice);
 		} catch {
 			this.ensureBuilderQueued(task, slice);
 			return "deferred";
@@ -464,7 +520,7 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 				slice.parkedAt = undefined;
 				slice.parkedWaitingFor = undefined;
 				if (!task.active.builders.includes(slice.id)) task.active.builders.push(slice.id);
-				this.note(task, slice.head, "Builder for slice " + slice.id + " resumed from parking");
+				this.note(task, slice.head, `Builder for slice ${slice.id} resumed from parking`);
 			}
 		} else if (!task.active.builders.includes(slice.id)) {
 			const state = await builder.state();
@@ -477,13 +533,13 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 		const requester = this.slice(task, request.requester);
 		if (request.status !== "human") requester.attention = undefined;
 		if (requester.status !== "building") return;
-		const eventId = "lane-change:" + request.id + ":" + request.status;
+		const eventId = `lane-change:${request.id}:${request.status}`;
 		try {
 			const delivery = await this.wakeBuilder(task, requester, eventId, message);
-			this.note(task, requester.head, "Cross-lane request " + request.id + " resolution " + request.status + " delivered to slice " + requester.id + " (" + delivery + ")");
+			this.note(task, requester.head, `Cross-lane request ${request.id} resolution ${request.status} delivered to slice ${requester.id} (${delivery})`);
 		} catch (err) {
-			requester.attention = "Cross-lane request resolution could not be delivered: " + statusOf(err).message;
-			this.note(task, requester.head, "Could not deliver resolution event " + eventId + " to slice " + requester.id + "; attention is needed");
+			requester.attention = `Cross-lane request resolution could not be delivered: ${statusOf(err).message}`;
+			this.note(task, requester.head, `Could not deliver resolution event ${eventId} to slice ${requester.id}; attention is needed`);
 		}
 	}
 
@@ -493,7 +549,7 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 		const requester = this.slice(task, request.requester);
 		requester.attention = message;
 		if (notify && requester.status === "building") await this.wakeLaneRequester(task, request, message);
-		this.note(task, requester.head, "Cross-lane request " + request.id + " for " + request.path + " needs a human: " + message);
+		this.note(task, requester.head, `Cross-lane request ${request.id} for ${request.path} needs a human: ${message}`);
 	}
 
 	parkBuilder(sliceId: string): Promise<ParkBuilderResult> {
@@ -510,22 +566,22 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 				requestId: request.id,
 				status: request.status,
 				message: request.status === "integrated"
-					? "Request " + request.id + " was integrated. Fetch and merge base/main."
+					? `Request ${request.id} was integrated. Fetch and merge base/main.`
 					: request.status === "declined"
-						? "Request " + request.id + " was declined: " + (request.answer ?? "no reason provided")
-						: "Request " + request.id + " needs a human: " + (this.slice(task, sliceId).attention ?? "the request was handed off"),
+						? `Request ${request.id} was declined: ${request.answer ?? "no reason provided"}`
+						: `Request ${request.id} needs a human: ${this.slice(task, sliceId).attention ?? "the request was handed off"}`,
 			}));
 	}
 
 	private async parkBuilderLocked(task: Task, sliceId: string): Promise<ParkBuilderResult> {
 		const slice = this.slice(task, sliceId);
-		const outgoing = (task.laneChangeRequests ?? []).filter((request) => request.requester === sliceId && (request.status === "pending" || request.status === "answered"));
+		const outgoing = unresolvedRequests(task, sliceId);
 		if (!outgoing.length) {
 			const resolutions = this.latestResolutions(task, sliceId);
-			const detail = resolutions.map((resolution) => resolution.status + ": " + resolution.message).join("; " );
-			return { outcome: "refused", reason: resolutions.length ? "A request resolved before parking took effect (" + detail + " )." : "There are no unresolved outgoing cross-lane requests to wait for.", ...(resolutions.length ? { resolutions } : {}) };
+			const detail = resolutions.map((resolution) => `${resolution.status}: ${resolution.message}`).join("; ");
+			return { outcome: "refused", reason: resolutions.length ? `A request resolved before parking took effect (${detail} ).` : "There are no unresolved outgoing cross-lane requests to wait for.", ...(resolutions.length ? { resolutions } : {}) };
 		}
-		if (slice.status !== "building") return { outcome: "refused", reason: "Slice " + sliceId + " is " + slice.status + ", not building." };
+		if (slice.status !== "building") return { outcome: "refused", reason: `Slice ${sliceId} is ${slice.status}, not building.` };
 		if (slice.parkedAt) return { outcome: "refused", reason: "The builder is already parked.", resolutions: [] };
 		if (slice.wakeOutbox?.length) {
 			this.ensureBuilderQueued(task, slice);
@@ -537,9 +593,8 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 		await builder.park(parkedAt, waitingFor);
 		slice.parkedAt = parkedAt;
 		slice.parkedWaitingFor = waitingFor;
-		const active = task.active.builders;
-		if (active.includes(sliceId)) active.splice(active.indexOf(sliceId), 1);
-		this.note(task, slice.head, "Builder for slice " + sliceId + " parked at " + parkedAt + " waiting for cross-lane requests " + waitingFor.join(", "));
+		removeKey(task.active.builders, sliceId);
+		this.note(task, slice.head, `Builder for slice ${sliceId} parked at ${parkedAt} waiting for cross-lane requests ${waitingFor.join(", ")}`);
 		await this.save(task);
 		await this.drain(task);
 		await this.save(task);
@@ -547,7 +602,7 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 	}
 
 	private async autoParkWaitingBuilder(task: Task, slice: Slice) {
-		const waiting = (task.laneChangeRequests ?? []).some((request) => request.requester === slice.id && (request.status === "pending" || request.status === "answered"));
+		const waiting = unresolvedRequests(task, slice.id).length > 0;
 		if (!waiting || slice.status !== "building" || slice.parkedAt) return false;
 		// Only auto-park when the fork is exactly at the Coordinator's recorded
 		// head; Builder.park performs the additional local dirty/unpushed check.
@@ -556,7 +611,7 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 		try {
 			const result = await this.parkBuilderLocked(task, slice.id);
 			if (result.outcome !== "parked") return false;
-			this.note(task, slice.head, "Slice " + slice.id + " automatically parked while waiting for its unresolved cross-lane requests");
+			this.note(task, slice.head, `Slice ${slice.id} automatically parked while waiting for its unresolved cross-lane requests`);
 			return true;
 		} catch {
 			return false;
@@ -576,16 +631,16 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 				if (!slice.parkedAt) return;
 			}
 			if (slice.parkTimeoutFlagged === parkedAt) return;
-			const unresolved = (task.laneChangeRequests ?? []).filter((request) => request.requester === sliceId && (request.status === "pending" || request.status === "answered"));
+			const unresolved = unresolvedRequests(task, sliceId);
 			if (!unresolved.length) return;
 			// Tell the builder too, but never let its answer decide whether a human is flagged.
 			await this.env.BUILDER.getByName(slice.repo!).markParkTimedOut().catch(() => false);
-			const waiting = unresolved.map((request) => request.id + " (" + request.path + ")").join(", ");
-			const message = "Builder has been parked for more than " + Math.round(BUILDER_PARK_TIMEOUT_MS / 60_000) + " minutes waiting for cross-lane requests " + waiting + "; human attention is needed.";
+			const waiting = unresolved.map((request) => `${request.id} (${request.path})`).join(", ");
+			const message = `Builder has been parked for more than ${Math.round(BUILDER_PARK_TIMEOUT_MS / 60_000)} minutes waiting for cross-lane requests ${waiting}; human attention is needed.`;
 			// The flag, the marker and the note are written together in one save.
 			slice.attention = message;
 			slice.parkTimeoutFlagged = parkedAt;
-			this.note(task, slice.head, slice.id + " parked timeout: " + message);
+			this.note(task, slice.head, `${slice.id} parked timeout: ${message}`);
 			await this.save(task);
 		});
 	}
@@ -663,13 +718,18 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 		return { base, head: slice.reviewHead, ...boundedUnifiedDiff(files) };
 	}
 
-	/** Diff the complete integrated task base against the project's captured main head. */
-	async landingDiff() {
-		const task = await this.load();
+	/** A planned task can land once every slice is integrated. */
+	private requireLandable(task: Task) {
 		if (task.mode === "open") fail(409, "open changes merge straight into the project's main; there is nothing to land");
 		if (task.phase !== "building") fail(409, `task is ${task.phase}`);
 		const pending = task.slices.filter((slice) => slice.status !== "integrated").map((slice) => slice.id);
 		if (pending.length) fail(409, `slices not integrated: ${pending.join(", ")}`);
+	}
+
+	/** Diff the complete integrated task base against the project's captured main head. */
+	async landingDiff() {
+		const task = await this.load();
+		this.requireLandable(task);
 		if (!task.baseRepo) fail(409, "task has no base repository");
 		const ws = await Workspace.clone(await remoteFor(this.env.ARTIFACTS, task.repo, "read"));
 		const projectHead = await ws.head();
@@ -682,33 +742,22 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 	create(id: string, repo: string, goal: string, limits?: Partial<Limits>) {
 		return this.exclusive(async () => {
 			if (await this.ctx.storage.get("task")) fail(409, "task exists");
-			try {
-				using _repo = await retryTransient(() => this.env.ARTIFACTS.get(repo));
-			} catch (err) {
-				if (isTransientFailure(err)) throw err;
-				fail(404, `no repo ${repo}`);
-			}
-			const task: Task = {
-				id,
-				repo,
-				goal,
-				phase: "planning",
-				contracts: [],
-				verify: [],
-				review: DEFAULT_POLICY,
-				slices: [],
-				checks: [],
-				amendments: [],
-				limits: validateLimits(limits),
-				queue: [],
-				active: { builders: [], reviewers: [] },
-				createdAt: new Date().toISOString(),
-				anchor: (await headOf(this.env.ARTIFACTS, repo)) ?? EMPTY_TREE,
-			};
+			await this.requireRepo(repo);
+			const task = newTask({ id, repo, goal, phase: "planning" }, { limits: validateLimits(limits), anchor: (await headOf(this.env.ARTIFACTS, repo)) ?? EMPTY_TREE });
 			this.note(task, task.anchor, `Task ${id} created on ${repo}: ${goal}`);
 			await this.save(task);
 			return task;
 		});
+	}
+
+	/** Refuse a project repo that doesn't exist. A transient failure is thrown as it is, to be tried again. */
+	private async requireRepo(repo: string) {
+		try {
+			using _repo = await retryTransient(() => this.env.ARTIFACTS.get(repo));
+		} catch (err) {
+			if (isTransientFailure(err)) throw err;
+			fail(404, `no repo ${repo}`);
+		}
 	}
 
 	/**
@@ -723,38 +772,16 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 				if (existing.mode === "open" && existing.repo === repo) return withScheduling(existing);
 				fail(409, "task exists");
 			}
-			try {
-				using _repo = await retryTransient(() => this.env.ARTIFACTS.get(repo));
-			} catch (err) {
-				if (isTransientFailure(err)) throw err;
-				fail(404, `no repo ${repo}`);
-			}
+			await this.requireRepo(repo);
 			const head = (await headOf(this.env.ARTIFACTS, repo)) ?? fail(409, `${repo} has no commits`);
 			const review = input.review ?? DEFAULT_POLICY;
 			validatePolicy(review);
 			const leaseMinutes = input.leaseMinutes ?? 30;
 			if (!Number.isInteger(leaseMinutes) || leaseMinutes < 5 || leaseMinutes > 1440) fail(400, "leaseMinutes must be a whole number from 5 to 1440");
-			const task: Task = {
-				id,
-				repo,
-				goal: `Open changes on ${repo}`,
-				phase: "building",
-				mode: "open",
-				leaseMinutes,
-				baseRepo: repo,
-				baseCommit: head,
-				contracts: [],
-				verify: (input.verify ?? []).filter((c) => typeof c === "string" && c.trim()),
-				review,
-				slices: [],
-				checks: [],
-				amendments: [],
-				limits: validateLimits(input.limits),
-				queue: [],
-				active: { builders: [], reviewers: [] },
-				createdAt: new Date().toISOString(),
-				anchor: head,
-			};
+			const task = newTask(
+				{ id, repo, goal: `Open changes on ${repo}`, phase: "building", mode: "open", leaseMinutes, baseRepo: repo, baseCommit: head },
+				{ verify: (input.verify ?? []).filter((c) => typeof c === "string" && c.trim()), review, limits: validateLimits(input.limits), anchor: head },
+			);
 			this.note(task, head, `Open mode started on ${repo}: agents claim their lanes as they arrive`);
 			await this.save(task);
 			return task;
@@ -933,8 +960,13 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 		return () =>
 			Promise.allSettled([
 				this.env.BUILDER.getByName(repo).cancel(`the change was abandoned: ${reason}`),
-				...(reviewHead ? roles.map((role) => this.env.REVIEWER.getByName(reviewerName(repo, role, reviewHead)).cancel("the change was abandoned")) : []),
+				...(reviewHead ? this.cancelReviewers(repo, roles, reviewHead, "the change was abandoned") : []),
 			]);
+	}
+
+	/** Ask the reviewers of one commit to stop. Returns each cancellation, for the caller to settle. */
+	private cancelReviewers(repo: string, roles: string[], head: string, reason: string) {
+		return roles.map((role) => this.env.REVIEWER.getByName(reviewerName(repo, role, head)).cancel(reason));
 	}
 
 	private renewLease(task: Task, slice: Slice) {
@@ -1105,24 +1137,12 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 		if (slice.parkedAt) {
 			// A parked builder resumes through its wake events, never through a fresh start.
 			await this.deliverOutbox(task, slice);
-			if (slice.parkedAt) {
-				const active = task.active.builders;
-				if (active.includes(slice.id)) active.splice(active.indexOf(slice.id), 1);
-			}
+			if (slice.parkedAt) removeKey(task.active.builders, slice.id);
 			return;
 		}
-		const [remote, base] = await Promise.all([
-			remoteFor(this.env.ARTIFACTS, slice.repo!, "write", 3 * 3600),
-			remoteFor(this.env.ARTIFACTS, task.baseRepo!, "read", 3 * 3600),
-		]);
+		const [remote, base] = await this.builderRemotes(task, slice);
 		const job: BuildJob = {
-			taskId: task.id,
-			goal: task.goal,
-			slice: { id: slice.id, title: slice.title, owns: slice.owns, instructions: slice.instructions, tests: slice.tests },
-			siblings: task.slices.filter((s) => s !== slice && s.status !== "abandoned").map(({ id, title, owns }) => ({ id, title, owns })),
-			contracts: task.contracts,
-			verify: task.verify,
-			repo: slice.repo!,
+			...sliceJobBase(task, slice),
 			remote: remote.url,
 			token: remote.token,
 			base: { remote: base.url, token: base.token },
@@ -1134,13 +1154,7 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 	private async launchReviewer(task: Task, slice: Slice, role: string, head: string) {
 		const remote = await remoteFor(this.env.ARTIFACTS, slice.repo!, "read", 3 * 3600);
 		const job: ReviewJob = {
-			taskId: task.id,
-			goal: task.goal,
-			slice: { id: slice.id, title: slice.title, owns: slice.owns, instructions: slice.instructions, tests: slice.tests },
-			siblings: task.slices.filter((s) => s !== slice && s.status !== "abandoned").map(({ id, title, owns }) => ({ id, title, owns })),
-			contracts: task.contracts,
-			verify: task.verify,
-			repo: slice.repo!,
+			...sliceJobBase(task, slice),
 			remote: remote.url,
 			token: remote.token,
 			role,
@@ -1158,18 +1172,20 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 	 * Start agent work if the task's limit allows, otherwise queue it. Work
 	 * already running or queued is not started twice. Caller holds the lock and saves.
 	 */
-	private async schedule(task: Task, item: QueueItem): Promise<"started" | "queued" | "already"> {
+	private async schedule(task: Task, item: QueueItem, failures?: string[]): Promise<"started" | "queued" | "already"> {
 		const key = itemKey(item);
 		if (activeOf(task, item.kind).includes(key) || task.queue.some((q) => itemKey(q) === key)) return "already";
 		if (!hasRoom(task, item.kind)) {
 			task.queue.push(item);
 			return "queued";
 		}
-		await this.launch(task, item);
+		const failure = await this.launch(task, item);
+		if (failure) failures?.push(failure);
 		return "started";
 	}
 
-	private async launch(task: Task, item: QueueItem) {
+	/** Start an agent in a slot. A start that fails frees the slot, flags the slice, and returns why. */
+	private async launch(task: Task, item: QueueItem): Promise<string | undefined> {
 		const key = itemKey(item);
 		const slice = this.slice(task, item.slice);
 		activeOf(task, item.kind).push(key);
@@ -1177,11 +1193,11 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 			if (item.kind === "builder") await this.launchBuilder(task, slice);
 			else await this.launchReviewer(task, slice, item.role, item.head);
 		} catch (err) {
-			const active = activeOf(task, item.kind);
-			active.splice(active.indexOf(key), 1);
+			removeKey(activeOf(task, item.kind), key);
 			if (item.kind === "builder" && slice.wakeOutbox?.length) this.ensureBuilderQueued(task, slice);
-			slice.attention = `Could not start ${item.kind} ${key}: ${statusOf(err).message}`;
-			this.note(task, slice.head, `${slice.id} needs a human: ${slice.attention}`);
+			const failure = `Could not start ${item.kind} ${key}: ${statusOf(err).message}`;
+			this.flagHuman(task, slice, slice.head, failure);
+			return failure;
 		}
 	}
 
@@ -1201,12 +1217,12 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 		const running = (s: { status: string } | null) => !!s && (s.status === "queued" || s.status === "working");
 		for (const key of [...task.active.builders]) {
 			const state = await this.env.BUILDER.getByName(sliceRepoName(task.id, key)).state();
-			if (!running(state)) task.active.builders.splice(task.active.builders.indexOf(key), 1);
+			if (!running(state)) removeKey(task.active.builders, key);
 		}
 		for (const key of [...task.active.reviewers]) {
 			const [slice, role, head] = key.split(":");
 			const state = await this.env.REVIEWER.getByName(reviewerName(sliceRepoName(task.id, slice), role, head)).state();
-			if (!running(state)) task.active.reviewers.splice(task.active.reviewers.indexOf(key), 1);
+			if (!running(state)) removeKey(task.active.reviewers, key);
 		}
 	}
 
@@ -1214,8 +1230,7 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 	agentStopped(kind: AgentKind, key: string) {
 		return this.exclusive(async () => {
 			const task = await this.load();
-			const active = activeOf(task, kind);
-			if (active.includes(key)) active.splice(active.indexOf(key), 1);
+			removeKey(activeOf(task, kind), key);
 			if (kind === "builder") {
 				const slice = task.slices.find((candidate) => candidate.id === key);
 				if (slice && !slice.parkedAt) await this.autoParkWaitingBuilder(task, slice);
@@ -1382,8 +1397,13 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 			// it within its lane (for example, a finding that conflicts with a
 			// contract). Another review of the same commit can't change anything.
 			if (slice.sentBackFor && head === slice.sentBackFor) {
-				slice.attention = `Sent back, but the builder finished without new commits; it needs a decision outside its lane. Builder's explanation: ${buildSummary ?? "none given"}`;
-				this.note(task, head, `${slice.id} needs a human: sent back, but its builder finished without new commits`);
+				this.flagHuman(
+					task,
+					slice,
+					head,
+					`Sent back, but the builder finished without new commits; it needs a decision outside its lane. Builder's explanation: ${buildSummary ?? "none given"}`,
+					"sent back, but its builder finished without new commits",
+				);
 				await this.save(task);
 				return { head, reviewers: [] as string[], failed: [] as string[], escalated: true };
 			}
@@ -1391,11 +1411,10 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 			await this.save(task);
 
 			const reviewers = task.review.reviewers;
-			for (const role of reviewers) await this.schedule(task, { kind: "reviewer", slice: slice.id, role, head });
+			const failed: string[] = [];
+			for (const role of reviewers) await this.schedule(task, { kind: "reviewer", slice: slice.id, role, head }, failed);
 			await this.save(task);
-			const failed = slice.attention?.startsWith("Could not start") ? [slice.attention] : [];
-			const startedRoles = reviewers;
-			return { head, reviewers: startedRoles, failed, escalated: false };
+			return { head, reviewers, failed, escalated: false };
 		});
 	}
 
@@ -1468,30 +1487,30 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 		// Contract checks can take tens of seconds. Run the first checks outside
 		// the Coordinator lock; the checked commit is verified again under lock
 		// before committing. After repeated base movement, check once under lock.
-		const checker = this.env.CONTRACT_CHECKER.getByName("amend-" + task.id + "-" + amendment.id);
+		const checker = this.env.CONTRACT_CHECKER.getByName(`amend-${task.id}-${amendment.id}`);
 		const checkAt = async (commit: string): Promise<ContractCheckResult> => {
 			try {
 				const remote = await remoteFor(this.env.ARTIFACTS, task.baseRepo!, "read");
 				return await checker.check({ remote: remote.url, token: remote.token, commit, contracts: { [input.path]: input.content } });
 			} catch (err) {
 				// Like the planner, don't block on checker infrastructure failures.
-				return { status: "skipped", reason: "the check could not run: " + (err instanceof Error ? err.message : String(err)) };
+				return { status: "skipped", reason: `the check could not run: ${err instanceof Error ? err.message : String(err)}` };
 			}
 		};
 		const failedCheckMessage = (result: Extract<ContractCheckResult, { status: "failed" }>) => {
 			const diagnostics = result.errors.map(describeError);
-			const details = diagnostics.length ? diagnostics.map((line) => "- " + line).join("\n") : "- The checker reported errors without diagnostics.";
-			return "Contract check failed:\n" + details;
+			const details = diagnostics.length ? diagnostics.map((line) => `- ${line}`).join("\n") : "- The checker reported errors without diagnostics.";
+			return `Contract check failed:\n${details}`;
 		};
 		const staleFile = async (latest: Task, a: Amendment, now: { id: string; text: string } | null) => {
 			Object.assign(a, { status: "stale", decision: staleMessage(input.path, now?.id ?? null), decidedAt: new Date().toISOString() });
-			this.note(latest, this.slice(latest, sliceId).head, sliceId + "'s approved change to " + input.path + " not applied: the file changed while it was decided");
+			this.note(latest, this.slice(latest, sliceId).head, `${sliceId}'s approved change to ${input.path} not applied: the file changed while it was decided`);
 			await this.save(latest);
 			return a;
 		};
 		const failedAmendment = async (latest: Task, a: Amendment, result: Extract<ContractCheckResult, { status: "failed" }>) => {
 			Object.assign(a, { status: "failed", decision: failedCheckMessage(result), decidedAt: new Date().toISOString() });
-			this.note(latest, this.slice(latest, sliceId).head, "Contract change to " + input.path + " for " + sliceId + " failed: " + a.decision);
+			this.note(latest, this.slice(latest, sliceId).head, `Contract change to ${input.path} for ${sliceId} failed: ${a.decision}`);
 			await this.save(latest);
 			return a;
 		};
@@ -1499,12 +1518,12 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 			const brought = !latest.contracts.includes(input.path);
 			const ws = await Workspace.clone(await remoteFor(this.env.ARTIFACTS, latest.baseRepo!, "write"));
 			await ws.write({ [input.path]: input.content });
-			const commit = await ws.commit("Amend contract " + input.path + " (proposed by " + sliceId + ")\n\n" + input.reason + "\n\nApproved: " + decision.reason);
+			const commit = await ws.commit(`Amend contract ${input.path} (proposed by ${sliceId})\n\n${input.reason}\n\nApproved: ${decision.reason}`);
 			await ws.push();
 
 			// Other slices' running builders need the new contract too.
 			const what = a.kind === "new" ? "added as a contract" : a.kind === "shared" ? "changed and brought under contract" : "amended";
-			const message = "Contract " + input.path + " was " + what + " at the request of slice " + sliceId + ": " + input.reason + "\nThe contract owner approved it: " + decision.reason + "\nCall fetch_base and merge base/main to get it, re-run your acceptance tests, then call commit_and_push.";
+			const message = `Contract ${input.path} was ${what} at the request of slice ${sliceId}: ${input.reason}\nThe contract owner approved it: ${decision.reason}\nCall fetch_base and merge base/main to get it, re-run your acceptance tests, then call commit_and_push.`;
 			const others = latest.slices.filter((s) => s.id !== sliceId && s.status === "building");
 			await Promise.allSettled(others.map((s) => this.env.BUILDER.getByName(s.repo!).notify(message)));
 
@@ -1515,7 +1534,7 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 				if (/\.(test|spec)\.[cm]?[jt]sx?$/.test(input.path)) proposer.tests = [...(proposer.tests ?? []), input.path];
 			}
 			Object.assign(a, { status: "approved", decision: decision.reason, commit, decidedAt: new Date().toISOString() });
-			this.note(latest, commit, "Contract " + input.path + " " + what + " for " + sliceId + "; the contract owner approved: " + decision.reason);
+			this.note(latest, commit, `Contract ${input.path} ${what} for ${sliceId}; the contract owner approved: ${decision.reason}`);
 			await this.save(latest);
 			return a;
 		};
@@ -1529,7 +1548,7 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 					if (!checkedCommit) throw new Error("task base has no commits");
 					checkResult = await checkAt(checkedCommit);
 				} catch (err) {
-					checkResult = { status: "skipped", reason: "the check could not run: " + (err instanceof Error ? err.message : String(err)) };
+					checkResult = { status: "skipped", reason: `the check could not run: ${err instanceof Error ? err.message : String(err)}` };
 				}
 				const outcome = await this.exclusive(async () => {
 					const latest = await this.load();
@@ -1567,7 +1586,7 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 				const currentHead = await headOf(this.env.ARTIFACTS, latest.baseRepo!);
 				if (currentHead !== checkedCommit) {
 					Object.assign(a, { status: "stale", decision: "The task base moved while the contract check ran; re-propose against its current version.", decidedAt: new Date().toISOString() });
-					this.note(latest, this.slice(latest, sliceId).head, "Contract change to " + input.path + " for " + sliceId + " not applied: the task base moved during its fallback check");
+					this.note(latest, this.slice(latest, sliceId).head, `Contract change to ${input.path} for ${sliceId} not applied: the task base moved during its fallback check`);
 					await this.save(latest);
 					return a;
 				}
@@ -1604,9 +1623,8 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 			this.note(task, input.head, `${slice.id}: ${input.reviewer} reviewer ${input.verdict === "approve" ? "approved" : "rejected"}: ${input.summary}`);
 			if (quorum.status !== "pending") this.note(task, input.head, `${slice.id}: quorum ${quorum.status}`);
 			if (slice.status === "integrated" && input.verdict === "reject") {
-				const finding = "Late rejection from " + input.reviewer + " after integration: " + input.summary + (input.evidence ? "\nEvidence: " + input.evidence : "");
-				slice.attention = [slice.attention, finding].filter(Boolean).join("\n");
-				this.note(task, input.head, slice.id + " needs a human: " + finding);
+				const finding = `Late rejection from ${input.reviewer} after integration: ${input.summary}${input.evidence ? `\nEvidence: ${input.evidence}` : ""}`;
+				this.flagHuman(task, slice, input.head, [slice.attention, finding].filter(Boolean).join("\n"), finding);
 			}
 			await this.save(task);
 			// Keep valid late votes for the pinned head, but integration is final:
@@ -1803,8 +1821,7 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 					}
 				}
 			} catch (err) {
-				slice.attention = `after the gate: ${statusOf(err).message}`;
-				this.note(task, slice.reviewHead, `${slice.id} needs a human: ${slice.attention}`);
+				this.flagHuman(task, slice, slice.reviewHead, `after the gate: ${statusOf(err).message}`);
 			}
 			await this.save(task);
 			return { outcome: (slice.status === "integrated" ? "passed" : slice.gate?.status) ?? "failed" };
@@ -1879,8 +1896,7 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 				await this.save(task);
 				return;
 			}
-			slice.attention = message;
-			this.note(task, slice.head, `${slice.id} needs a human: ${message}`);
+			this.flagHuman(task, slice, slice.head, message);
 			await this.save(task);
 		});
 	}
@@ -1897,7 +1913,7 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 			const slice = this.slice(task, sliceId);
 			if (slice.status !== "building") fail(409, `slice ${sliceId} is ${slice.status}`);
 			const text = `Message from a human on the team: ${message}`;
-			const eventId = "human-message:" + crypto.randomUUID();
+			const eventId = `human-message:${crypto.randomUUID()}`;
 			const delivery = await this.wakeBuilder(task, slice, eventId, text);
 			const delivered: "inbox" | "resumed" = delivery === "resumed" ? "resumed" : "inbox";
 			slice.attention = undefined;
@@ -1962,13 +1978,13 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 			if (included) {
 				request.status = "integrated";
 				request.integratedAt = new Date().toISOString();
-				this.note(task, request.answerCommit, "Cross-lane request " + request.id + " from " + request.requester + " fulfilled by slice " + request.owner + "; change commit " + request.answerCommit + " is integrated");
-				const message = "Cross-lane request " + request.id + " was integrated with owner slice " + request.owner + " at commit " + request.answerCommit + ". Call fetch_base and merge base/main to get it, then re-run your tests.";
+				this.note(task, request.answerCommit, `Cross-lane request ${request.id} from ${request.requester} fulfilled by slice ${request.owner}; change commit ${request.answerCommit} is integrated`);
+				const message = `Cross-lane request ${request.id} was integrated with owner slice ${request.owner} at commit ${request.answerCommit}. Call fetch_base and merge base/main to get it, then re-run your tests.`;
 				await this.wakeLaneRequester(task, request, message);
 			} else {
-				const message = "Owner slice " + request.owner + " integrated without the answered change commit for cross-lane request " + request.id + " (" + request.path + "). The owner can no longer change its lane; this request needs a human.";
+				const message = `Owner slice ${request.owner} integrated without the answered change commit for cross-lane request ${request.id} (${request.path}). The owner can no longer change its lane; this request needs a human.`;
 				await this.flagLaneRequest(task, request, message, true);
-				this.note(task, integratedHead, "Cross-lane request " + request.id + " from " + request.requester + " not fulfilled when owner " + request.owner + " integrated; request needs a human");
+				this.note(task, integratedHead, `Cross-lane request ${request.id} from ${request.requester} not fulfilled when owner ${request.owner} integrated; request needs a human`);
 			}
 		}
 		return { ok: true };
@@ -2009,28 +2025,19 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 			if (isSentBackHead || isCancelledGroupMember) member.gate = undefined;
 		}
 		if ((slice.revisions ?? 0) >= MAX_REVISIONS) {
-			slice.attention = `Sent back ${MAX_REVISIONS} times without passing review; needs a human. Last feedback:\n${message}`;
-			this.note(task, slice.reviewHead, `${slice.id} needs a human: sent back ${MAX_REVISIONS} times without passing`);
+			this.flagHuman(task, slice, slice.reviewHead, `Sent back ${MAX_REVISIONS} times without passing review; needs a human. Last feedback:\n${message}`, `sent back ${MAX_REVISIONS} times without passing`);
 			return;
 		}
 		slice.revisions = (slice.revisions ?? 0) + 1;
 		this.note(task, slice.reviewHead, `${slice.id} sent back to its builder (revision ${slice.revisions} of ${MAX_REVISIONS}):\n${clipText(message, 1_500)}`);
 		task.queue = task.queue.filter((item) => !(item.kind === "reviewer" && item.slice === slice.id));
-		await Promise.allSettled(
-			task.review.reviewers.map((role) =>
-				this.env.REVIEWER.getByName(reviewerName(slice.repo!, role, head)).cancel("the slice was sent back to its builder"),
-			),
-		);
+		await Promise.allSettled(this.cancelReviewers(slice.repo!, task.review.reviewers, head, "the slice was sent back to its builder"));
 		// An external agent reads the findings from its inbox; there is no hosted builder to resume.
 		if (slice.external) {
 			this.toInbox(slice, message);
 			return;
 		}
-		const [write, base] = await Promise.all([
-			remoteFor(this.env.ARTIFACTS, slice.repo!, "write", 3 * 3600),
-			remoteFor(this.env.ARTIFACTS, task.baseRepo!, "read", 3 * 3600),
-		]);
-		await this.env.BUILDER.getByName(slice.repo!).revise(message, { token: write.token, base: { remote: base.url, token: base.token } });
+		await this.env.BUILDER.getByName(slice.repo!).revise(message, await this.resumeCredentials(task, slice));
 		// A revision runs right away, outside the queue: the slice is blocking integration.
 		if (!task.active.builders.includes(slice.id)) task.active.builders.push(slice.id);
 	}
@@ -2039,10 +2046,7 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 	land(actor: AccessIdentity) {
 		return this.exclusive(async () => {
 			const task = await this.load();
-			if (task.mode === "open") fail(409, "open changes merge straight into the project's main; there is nothing to land");
-			if (task.phase !== "building") fail(409, `task is ${task.phase}`);
-			const pending = task.slices.filter((s) => s.status !== "integrated").map((s) => s.id);
-			if (pending.length) fail(409, `slices not integrated: ${pending.join(", ")}`);
+			this.requireLandable(task);
 
 			const ws = await Workspace.clone(await remoteFor(this.env.ARTIFACTS, task.repo, "write"));
 			await ws.fetch("base", await remoteFor(this.env.ARTIFACTS, task.baseRepo!));

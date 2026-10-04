@@ -1,3 +1,4 @@
+import { unresolvedRequests } from "./lane-requests";
 import type { Slice, Task } from "./types";
 
 // Open mode: agents arrive without a plan. Each opens a change, which is a
@@ -112,8 +113,7 @@ export function leaseExpired(task: Task, slice: Slice, now = Date.now()) {
 	if (Date.parse(slice.leaseUntil) > now) return false;
 	if (slice.reviewHead && slice.reviewHead !== slice.sentBackFor) return false;
 	if (slice.gate && ["queued", "running", "waiting"].includes(slice.gate.status)) return false;
-	const waiting = (task.laneChangeRequests ?? []).some((r) => r.requester === slice.id && (r.status === "pending" || r.status === "answered"));
-	return !waiting;
+	return !unresolvedRequests(task, slice.id).length;
 }
 
 /** When the next claim could expire, for the Coordinator's alarm. */
