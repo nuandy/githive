@@ -1,8 +1,8 @@
 import { remoteFor } from "./artifacts";
 import { Coordinator } from "./coordinator";
 import { statusOf } from "./errors";
-import { type CasLog, campaign, Deposed, type Leader } from "./election";
-import { GitCasLog, cachedRemote } from "./election-git";
+import { type CasLog, campaign, Deposed, type ElectionRefs, type Leader } from "./election";
+import { GitCasLog, cachedRemote, leaseRef } from "./election-git";
 import { holdsClaim, nextLeaseCheck } from "./open-mode";
 import type { LedgerEntry } from "./ledger";
 import type { Task } from "./types";
@@ -27,21 +27,36 @@ export async function openLog(log: CasLog<Task>, task: Task, entries: LedgerEntr
 }
 
 export interface PeerOptions {
-	/** The task's log; Git unless a test gives another. */
+	/** The task's decision log and lease ref; Git unless a test gives others. */
 	log: (taskId: string, repo: string) => CasLog<Task>;
+	leases: (taskId: string, repo: string) => CasLog<null>;
 	leaseMs: number;
 	now: () => number;
 }
 
 export class Peer extends Coordinator {
 	private options: PeerOptions = {
-		log: (taskId, repo) => new GitCasLog<Task>(cachedRemote(() => remoteFor(this.env.ARTIFACTS, repo, "write")), taskId),
+		log: (taskId, repo) => new GitCasLog<Task>(this.remote(repo), taskId),
+		leases: (taskId, repo) => new GitCasLog<null>(this.remote(repo), taskId, leaseRef(taskId)),
 		leaseMs: PEER_LEASE_MS,
 		now: Date.now,
 	};
 
-	/** The task's log, opened once: it keeps the tip it last saw, and its token. */
-	private log: CasLog<Task> | null = null;
+	/** The task's refs, opened once: each keeps the tip it last saw. */
+	private refs: ElectionRefs<Task> | null = null;
+
+	/** One write token for both refs, reused while fresh. */
+	private remoteCache: { repo: string; get: () => ReturnType<typeof remoteFor> } | null = null;
+
+	private remote(repo: string) {
+		if (this.remoteCache?.repo !== repo) this.remoteCache = { repo, get: cachedRemote(() => remoteFor(this.env.ARTIFACTS, repo, "write")) };
+		return this.remoteCache.get;
+	}
+
+	private refsOf(taskId: string, repo: string) {
+		this.refs ??= { log: this.options.log(taskId, repo), leases: this.options.leases(taskId, repo) };
+		return this.refs;
+	}
 
 	/** While this peer leads: its hold on the log. */
 	private leader: Leader<Task> | null = null;
@@ -83,9 +98,7 @@ export class Peer extends Coordinator {
 		// Known without asking Git: this peer leads, or saw a lease that is still live.
 		if (this.leader?.leading && this.leader.leaseExpires > now) return { leader: me, term: this.leader.term };
 		if (!fresh && this.known && this.known.leaseUntil > now) return { leader: this.known.leader, term: this.known.term };
-		this.log ??= this.options.log(taskId, repo);
-		const log = this.log;
-		const outcome = await campaign(log, me, () => {
+		const outcome = await campaign(this.refsOf(taskId, repo), me, () => {
 			throw new Error(`[404] no task ${taskId} on ${repo}`);
 		}, { leaseMs: this.options.leaseMs, now: this.options.now });
 		if (!outcome.leading) {
@@ -148,12 +161,11 @@ export class Peer extends Coordinator {
 				console.error(`peek via ${leader} failed; reading the log`, statusOf(err).message);
 			}
 		}
-		this.log ??= this.options.log(taskId, repo);
-		const head = await this.log.read();
+		const refs = this.refsOf(taskId, repo);
+		const [head, lease] = await Promise.all([refs.log.read(), refs.leases.read()]);
 		if (!head) throw new Error(`[404] no task ${taskId} on ${repo}`);
-		const tip = head.commit;
-		if (tip.leader && tip.leader !== me && tip.leaseUntil > now) this.known = { leader: tip.leader, term: tip.term, leaseUntil: tip.leaseUntil };
-		return tip.state;
+		this.remember(lease?.commit, me, now);
+		return head.commit.state;
 	}
 
 	/** Which peer leads, if any lease is live, without campaigning (reads the log only if it must). */
@@ -163,11 +175,15 @@ export class Peer extends Coordinator {
 		if (this.leader?.leading && this.leader.leaseExpires > now) return me;
 		const leader = await this.liveLeader(me);
 		if (leader) return leader;
-		this.log ??= this.options.log(taskId, repo);
-		const tip = (await this.log.read())?.commit;
-		if (!tip?.leader || tip.leaseUntil <= now) return null;
-		if (tip.leader !== me) this.known = { leader: tip.leader, term: tip.term, leaseUntil: tip.leaseUntil };
-		return tip.leader;
+		const lease = (await this.refsOf(taskId, repo).leases.read())?.commit;
+		if (!lease?.leader || lease.leaseUntil <= now) return null;
+		this.remember(lease, me, now);
+		return lease.leader;
+	}
+
+	/** Remember a live lease another peer holds, as read from the lease ref. */
+	private remember(lease: { leader: string; term: number; leaseUntil: number } | undefined, me: string, now: number) {
+		if (lease?.leader && lease.leader !== me && lease.leaseUntil > now) this.known = { leader: lease.leader, term: lease.term, leaseUntil: lease.leaseUntil };
 	}
 
 	/** Whether this peer leads, and until when: asked by a peer that remembers it as the leader. */

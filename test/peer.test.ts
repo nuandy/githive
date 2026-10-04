@@ -46,6 +46,7 @@ class SharedLog implements CasLog<Task> {
 }
 
 let log: SharedLog;
+let leases: SharedLog;
 let clock: { now: number };
 const LEASE = 30_000;
 
@@ -57,7 +58,7 @@ function peer(name: string) {
 	const storage = new FakeStorage();
 	const env = { ...fakeEnv().env, PEER: { getByName: (n: string) => registry.get(n) } };
 	const created = new Peer({ storage } as never, env as never);
-	created.configure({ log: () => log, leaseMs: LEASE, now: () => clock.now });
+	created.configure({ log: () => log, leases: () => leases as never, leaseMs: LEASE, now: () => clock.now });
 	registry.set(name, created);
 	return { name, peer: created, storage, lead: () => created.lead("t1", "project", name), peek: () => created.peek("t1", "project", name) };
 }
@@ -69,6 +70,7 @@ beforeEach(async () => {
 	registry = new Map();
 	clock = { now: 1_000_000 };
 	log = new SharedLog();
+	leases = new SharedLog();
 	await openLog(log, openTask());
 });
 
@@ -76,7 +78,8 @@ describe("a peer of the elected coordinator", () => {
 	it("leads the task in term 1 when it is the first to ask", async () => {
 		const a = peer("t1--a");
 		expect(await a.lead()).toEqual({ leader: "t1--a", term: 1 });
-		expect(log.commits.at(-1)?.commit).toMatchObject({ kind: "election", term: 1, leader: "t1--a" });
+		expect(leases.commits.at(-1)?.commit).toMatchObject({ kind: "election", term: 1, leader: "t1--a" });
+		expect(log.commits.at(-1)?.commit).toMatchObject({ kind: "term", term: 1, leader: "t1--a" });
 	});
 
 	it("tells a second peer who leads, without writing to the log", async () => {
@@ -132,8 +135,10 @@ describe("a peer of the elected coordinator", () => {
 		expect(a.storage.alarm).toBe(due);
 
 		clock.now = due;
+		const logLength = log.commits.length;
 		await a.peer.alarm();
-		expect(log.commits.at(-1)?.commit).toMatchObject({ kind: "heartbeat", term: 1, leader: "t1--a" });
+		expect(leases.commits.at(-1)?.commit).toMatchObject({ kind: "heartbeat", term: 1, leader: "t1--a" });
+		expect(log.commits).toHaveLength(logLength);
 		expect(a.storage.alarm).toBe(clock.now + (LEASE * 2) / 3);
 
 		clock.now += LEASE / 2; // past the first lease, inside the renewed one
@@ -143,6 +148,7 @@ describe("a peer of the elected coordinator", () => {
 	it("takes over the task's timers: an expired claim is swept by the new leader's alarm", async () => {
 		const expired = new Date(Date.now() - 60_000).toISOString();
 		log = new SharedLog();
+		leases = new SharedLog();
 		await openLog(log, { ...openTask(), slices: [slice("stale", { startCommit: "main0", leaseUntil: expired })] });
 		// Claim leases are real times, so this test runs the peers on the real clock.
 		clock.now = Date.now();
@@ -164,12 +170,12 @@ describe("a peer of the elected coordinator", () => {
 
 		// Its own change ends, but another is active: it stays in charge.
 		await a.peer.abandonChange("stats-1a2b", "done here");
-		expect(log.commits.at(-1)?.commit.kind).not.toBe("resignation");
+		expect(leases.commits.at(-1)?.commit.kind).not.toBe("resignation");
 		expect(await peer("t1--x").lead()).toEqual({ leader: "t1--stats-1a2b", term: 1 });
 
 		// The last active change ends: nothing left to coordinate, so it hands over.
 		await a.peer.abandonChange("docs-3c4d", "done too");
-		expect(log.commits.at(-1)?.commit).toMatchObject({ kind: "resignation", term: 1, leader: "t1--stats-1a2b" });
+		expect(leases.commits.at(-1)?.commit).toMatchObject({ kind: "resignation", term: 1, leader: "t1--stats-1a2b" });
 		expect(await peer("t1--b").lead()).toEqual({ leader: "t1--b", term: 2 });
 	});
 
@@ -216,7 +222,7 @@ describe("a peer of the elected coordinator", () => {
 		const storage = new FakeStorage();
 		const opened = vi.fn(() => log);
 		const a = new Peer({ storage } as never, fakeEnv().env as never);
-		a.configure({ log: opened, leaseMs: LEASE, now: () => clock.now });
+		a.configure({ log: opened, leases: () => leases as never, leaseMs: LEASE, now: () => clock.now });
 		await a.lead("t1", "project", "t1--a");
 		clock.now += LEASE + 1;
 		await a.lead("t1", "project", "t1--a", true);
@@ -247,6 +253,7 @@ describe("a peer of the elected coordinator", () => {
 		const reader = peer("t1--reader");
 		expect((await reader.peek()).id).toBe("t1");
 		expect(log.commits.every((c) => c.commit.kind === "genesis")).toBe(true); // reading never campaigns
+		expect(leases.commits).toEqual([]);
 	});
 
 	it("says who leads without campaigning, or nobody when no lease is live", async () => {
@@ -256,7 +263,7 @@ describe("a peer of the elected coordinator", () => {
 		expect(await reader.peer.whoLeads("t1", "project", "t1--reader")).toBe("t1--a");
 		clock.now += LEASE + 1;
 		expect(await reader.peer.whoLeads("t1", "project", "t1--reader")).toBeNull();
-		expect(log.commits.filter((c) => c.commit.kind === "election")).toHaveLength(1);
+		expect(leases.commits.filter((c) => c.commit.kind === "election")).toHaveLength(1);
 	});
 
 	it("checks with the leader it remembers once that lease has passed, rather than reading the log", async () => {

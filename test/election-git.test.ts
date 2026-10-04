@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Deposed, type LogCommit, campaign } from "../src/election";
-import { GitCasLog, cachedRemote } from "../src/election-git";
+import { GitCasLog, cachedRemote, leaseRef } from "../src/election-git";
 import { startGitServer, type GitServer } from "./helpers/git-server";
 
 // The log in Git, against a real Git server (git http-backend).
@@ -129,13 +129,16 @@ describe("the election protocol over Git", () => {
 	it("elects, decides, fences a stale leader and hands every decision to the next", async () => {
 		const c = { now: 1_000_000 };
 		const options = { leaseMs: 30_000, now: () => c.now };
-		const a = await campaign(log, "peer-a", empty, options);
+		const refs = { log, leases: new GitCasLog<null>(async () => ({ url: server.url, token: "unused" }), "t1", leaseRef("t1")) };
+		const a = await campaign(refs, "peer-a", empty, options);
 		if (!a.leading) throw new Error("peer-a should lead");
-		expect(await campaign(log, "peer-b", empty, options)).toMatchObject({ leading: false, leader: "peer-a" });
+		expect(await campaign(refs, "peer-b", empty, options)).toMatchObject({ leading: false, leader: "peer-a" });
 		await a.leader.decide(claim("src/x/", "peer-a"));
+		c.now += 20_000;
+		expect(await a.leader.heartbeat()).toBe(true);
 
 		c.now += 30_001;
-		const b = await campaign(log, "peer-b", empty, options);
+		const b = await campaign(refs, "peer-b", empty, options);
 		if (!b.leading) throw new Error("peer-b should lead");
 		expect(b.term).toBe(2);
 		await expect(a.leader.decide(claim("src/y/", "peer-a"))).rejects.toBeInstanceOf(Deposed);
@@ -144,7 +147,10 @@ describe("the election protocol over Git", () => {
 
 		expect((await log.read())?.commit.state).toEqual({ claims: { "src/x/": "peer-a", "src/y/": "peer-b" } });
 		const history = server.git("log", "--format=%(trailers:key=Blueprint-Term,valueonly,separator=)|%(trailers:key=Blueprint-Kind,valueonly,separator=)|%s", "refs/notes/blueprint/t1").trim().split("\n");
-		expect(history.reverse()).toEqual(["1|election|Election: term 1, peer-a", "1|decisions|peer-a claims src/x/", "2|election|Election: term 2, peer-b", "2|decisions|peer-b claims src/y/"]);
+		// The decision log holds only terms and decisions; the heartbeat went to the lease ref.
+		expect(history.reverse()).toEqual(["1|term|Term 1: peer-a leads", "1|decisions|peer-a claims src/x/", "2|term|Term 2: peer-b leads", "2|decisions|peer-b claims src/y/"]);
+		const leases = server.git("log", "--format=%s", leaseRef("t1")).trim().split("\n").reverse();
+		expect(leases).toEqual(["Election: peer-a leads term 1", "Heartbeat: peer-a, term 1", "Election: peer-b leads term 2"]);
 	});
 });
 

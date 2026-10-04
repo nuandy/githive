@@ -140,6 +140,9 @@ export function cachedRemote(mint: () => Promise<Remote>, freshForMs = 5 * 60_00
 	};
 }
 
+/** A task's lease ref: who leads, until when. Beside the decision log, so heartbeats don't grow it. */
+export const leaseRef = (taskId: string) => `refs/notes/blueprint-lease/${taskId}`;
+
 export class GitCasLog<S> implements CasLog<S> {
 	private readonly ref: string;
 
@@ -150,11 +153,13 @@ export class GitCasLog<S> implements CasLog<S> {
 	 */
 	private held: { fs: MemoryFS; tip: string } | null = null;
 
+	/** The task's decision log, or another ref (its lease ref) with the same commits. */
 	constructor(
 		private readonly remote: () => Promise<Remote>,
 		taskId: string,
+		ref = notesRef(taskId),
 	) {
-		this.ref = notesRef(taskId);
+		this.ref = ref;
 	}
 
 	async read(): Promise<{ tip: string; commit: LogCommit<S> } | null> {
@@ -232,7 +237,14 @@ export class GitCasLog<S> implements CasLog<S> {
 /** The commit message: a summary of the decisions, then the trailers. */
 function message<S>(commit: LogCommit<S>) {
 	const first = (text: string) => text.trim().split("\n")[0];
-	const title = commit.entries.length ? first(commit.entries[0].text) : `${commit.kind[0].toUpperCase()}${commit.kind.slice(1)}: term ${commit.term}, ${commit.leader}`;
+	const titles: Record<string, string> = {
+		genesis: "Genesis: the task's first state",
+		term: `Term ${commit.term}: ${commit.leader} leads`,
+		election: `Election: ${commit.leader} leads term ${commit.term}`,
+		heartbeat: `Heartbeat: ${commit.leader}, term ${commit.term}`,
+		resignation: `Resignation: ${commit.leader} ends term ${commit.term}`,
+	};
+	const title = commit.entries.length ? first(commit.entries[0].text) : (titles[commit.kind] ?? commit.kind);
 	const summary = commit.entries.map((e) => `- ${first(e.text)}`).join("\n");
 	const trailers = [
 		`${TRAILERS.term}: ${commit.term}`,
