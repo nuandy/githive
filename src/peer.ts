@@ -140,12 +140,12 @@ export class Peer extends Coordinator {
 		this.me ??= me;
 		if (this.leader?.leading) return structuredClone(this.leader.state);
 		const now = this.options.now();
-		if (!forwarded && this.known && this.known.leaseUntil > now && this.known.leader !== me) {
+		const leader = forwarded ? null : await this.liveLeader(me);
+		if (leader) {
 			try {
-				const leader = this.env.PEER.getByName(this.known.leader) as unknown as Peer;
-				return await leader.peek(taskId, repo, this.known.leader, true);
+				return await this.peerNamed(leader).peek(taskId, repo, leader, true);
 			} catch (err) {
-				console.error(`peek via ${this.known.leader} failed; reading the log`, statusOf(err).message);
+				console.error(`peek via ${leader} failed; reading the log`, statusOf(err).message);
 			}
 		}
 		this.log ??= this.options.log(taskId, repo);
@@ -161,12 +161,46 @@ export class Peer extends Coordinator {
 		this.me ??= me;
 		const now = this.options.now();
 		if (this.leader?.leading && this.leader.leaseExpires > now) return me;
-		if (this.known && this.known.leaseUntil > now) return this.known.leader;
+		const leader = await this.liveLeader(me);
+		if (leader) return leader;
 		this.log ??= this.options.log(taskId, repo);
 		const tip = (await this.log.read())?.commit;
 		if (!tip?.leader || tip.leaseUntil <= now) return null;
 		if (tip.leader !== me) this.known = { leader: tip.leader, term: tip.term, leaseUntil: tip.leaseUntil };
 		return tip.leader;
+	}
+
+	/** Whether this peer leads, and until when: asked by a peer that remembers it as the leader. */
+	async leaseStatus(): Promise<{ leading: boolean; term: number; leaseUntil: number }> {
+		const leader = this.leader;
+		return leader?.leading ? { leading: true, term: leader.term, leaseUntil: leader.leaseExpires } : { leading: false, term: 0, leaseUntil: 0 };
+	}
+
+	private peerNamed(name: string) {
+		return this.env.PEER.getByName(name) as unknown as Peer;
+	}
+
+	/**
+	 * The leader this peer knows of with a live lease. Past the lease it saw, it
+	 * asks that leader whether it renewed (a call between objects) before
+	 * anyone has to read the log.
+	 */
+	private async liveLeader(me: string): Promise<string | null> {
+		const known = this.known;
+		if (!known || known.leader === me) return null;
+		const now = this.options.now();
+		if (known.leaseUntil > now) return known.leader;
+		try {
+			const status = await this.peerNamed(known.leader).leaseStatus();
+			if (status.leading && status.leaseUntil > now) {
+				this.known = { leader: known.leader, term: status.term, leaseUntil: status.leaseUntil };
+				return known.leader;
+			}
+		} catch (err) {
+			console.error(`asking ${known.leader} for its lease failed`, statusOf(err).message);
+		}
+		this.known = null;
+		return null;
 	}
 
 	/** Refuse to decide without leading: the caller should ask the peer that does. */

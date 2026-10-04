@@ -255,4 +255,18 @@ describe("a peer of the elected coordinator", () => {
 		expect(await reader.peer.whoLeads("t1", "project", "t1--reader")).toBeNull();
 		expect(log.commits.filter((c) => c.commit.kind === "election")).toHaveLength(1);
 	});
+
+	it("checks with the leader it remembers once that lease has passed, rather than reading the log", async () => {
+		const a = peer("t1--a");
+		const reader = peer("t1--reader");
+		await a.lead();
+		expect(await reader.peer.whoLeads("t1", "project", "t1--reader")).toBe("t1--a");
+		clock.now += (LEASE * 2) / 3;
+		await a.peer.alarm(); // the leader renews
+		clock.now += LEASE / 2; // past the lease the reader saw, inside the renewed one
+		const reads = log.reads;
+		expect(await reader.peer.whoLeads("t1", "project", "t1--reader")).toBe("t1--a");
+		expect((await reader.peek()).id).toBe("t1");
+		expect(log.reads).toBe(reads);
+	});
 });

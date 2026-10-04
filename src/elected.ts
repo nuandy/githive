@@ -56,30 +56,37 @@ export function electedCoordinator(ctx: ElectedContext) {
 	const reader = () => ctx.peer(readerName);
 	const read = (): Promise<Task> => reader().peek(ctx.taskId, ctx.repo, readerName);
 
+	/**
+	 * Call the leader the reader knows of (it usually does, and stays warm); if
+	 * none, or that peer no longer leads, go through `asker`, the change's own
+	 * peer, which campaigns if nobody leads.
+	 */
+	async function onLeader<T>(asker: string, call: (leader: PeerStub) => Promise<T>): Promise<T> {
+		const known = await reader().whoLeads(ctx.taskId, ctx.repo, readerName);
+		if (!known) return viaLeader(asker, call);
+		try {
+			return await call(ctx.peer(known));
+		} catch (err) {
+			if (!NOT_LEADING.test(statusOf(err).message)) throw err;
+			return viaLeader(asker, call, true);
+		}
+	}
+
 	return {
 		state: read,
 		claims: async () => claimsOf(await read()),
 		openChange: async (input: { title: string; intent: string; owns: string[]; hosted?: boolean }, actor?: AccessIdentity) => {
 			const id = changeId(typeof input?.title === "string" ? input.title : "change");
-			const open = (leader: PeerStub) => leader.openChange({ ...input, id }, actor);
-			// The reader usually knows who leads, so the new change's peer needn't read the log cold.
-			const known = await reader().whoLeads(ctx.taskId, ctx.repo, readerName);
-			if (!known) return viaLeader(peerOf(id), open);
-			try {
-				return await open(ctx.peer(known));
-			} catch (err) {
-				if (!NOT_LEADING.test(statusOf(err).message)) throw err;
-				return viaLeader(peerOf(id), open, true);
-			}
+			return onLeader(peerOf(id), (leader) => leader.openChange({ ...input, id }, actor));
 		},
-		extendClaim: (change: string, paths: string[]) => viaLeader(peerOf(change), (leader) => leader.extendClaim(change, paths)),
-		abandonChange: (change: string, reason: string, actor?: AccessIdentity) => viaLeader(peerOf(change), (leader) => leader.abandonChange(change, reason, actor)),
-		recordPush: (change: string) => viaLeader(peerOf(change), (leader) => leader.recordPush(change)),
-		startReviewers: (change: string, summary?: string) => viaLeader(peerOf(change), (leader) => leader.startReviewers(change, summary)),
-		readInbox: (change: string, since?: string) => viaLeader(peerOf(change), (leader) => leader.readInbox(change, since)),
-		requestLaneChange: (change: string, input: LaneChangeRequestInput) => viaLeader(peerOf(change), (leader) => leader.requestLaneChange(change, input)),
-		answerLaneChange: (change: string, requestId: string, answer: LaneChangeAnswer) => viaLeader(peerOf(change), (leader) => leader.answerLaneChange(change, requestId, answer)),
-		externalCredentials: (change: string) => viaLeader(peerOf(change), (leader) => leader.externalCredentials(change)),
+		extendClaim: (change: string, paths: string[]) => onLeader(peerOf(change), (leader) => leader.extendClaim(change, paths)),
+		abandonChange: (change: string, reason: string, actor?: AccessIdentity) => onLeader(peerOf(change), (leader) => leader.abandonChange(change, reason, actor)),
+		recordPush: (change: string) => onLeader(peerOf(change), (leader) => leader.recordPush(change)),
+		startReviewers: (change: string, summary?: string) => onLeader(peerOf(change), (leader) => leader.startReviewers(change, summary)),
+		readInbox: (change: string, since?: string) => onLeader(peerOf(change), (leader) => leader.readInbox(change, since)),
+		requestLaneChange: (change: string, input: LaneChangeRequestInput) => onLeader(peerOf(change), (leader) => leader.requestLaneChange(change, input)),
+		answerLaneChange: (change: string, requestId: string, answer: LaneChangeAnswer) => onLeader(peerOf(change), (leader) => leader.answerLaneChange(change, requestId, answer)),
+		externalCredentials: (change: string) => onLeader(peerOf(change), (leader) => leader.externalCredentials(change)),
 	} satisfies Partial<Record<keyof Coordinator, unknown>>;
 }
 

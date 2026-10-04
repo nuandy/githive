@@ -51,11 +51,18 @@ describe("the elected coordinator, from the Worker", () => {
 		expect(own.openChange).toHaveBeenCalled();
 	});
 
-	it("asks about an existing change through that change's peer", async () => {
+	it("asks about an existing change on the leader the reader knows of", async () => {
 		const p = peers("t1--lead");
 		await elected(p).abandonChange("stats", "done");
-		expect(p.made.get("t1--stats")?.lead).toHaveBeenCalled();
 		expect(p.made.get("t1--lead")?.abandonChange).toHaveBeenCalledWith("stats", "done", undefined);
+		expect(p.made.has("t1--stats")).toBe(false);
+	});
+
+	it("has the change's own peer lead when nobody's lease is live", async () => {
+		const p = peers(null);
+		await elected(p).abandonChange("stats", "done");
+		expect(p.made.get("t1--stats")?.lead).toHaveBeenCalledWith("t1", "project", "t1--stats", false);
+		expect(p.made.get("t1--stats")?.abandonChange).toHaveBeenCalled();
 	});
 
 	it("asks afresh when the leader it was told of no longer leads", async () => {
