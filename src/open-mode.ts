@@ -1,4 +1,6 @@
+import { fail } from "./errors";
 import { unresolvedRequests } from "./lane-requests";
+import { isPlainPath } from "./paths";
 import type { Slice, Task } from "./types";
 
 // Open mode: agents arrive without a plan. Each opens a change, which is a
@@ -41,15 +43,14 @@ export function entriesOverlap(a: string, b: string) {
 
 /** Normalize and validate claimed paths: relative, no `..`, no empty segments. Throws `[400]` with the reason. */
 export function normalizeClaim(paths: unknown): string[] {
-	if (!Array.isArray(paths) || !paths.length) throw new Error("[400] claim at least one path");
-	if (paths.length > MAX_CLAIM_PATHS) throw new Error(`[400] claim at most ${MAX_CLAIM_PATHS} paths`);
+	if (!Array.isArray(paths) || !paths.length) fail(400, "claim at least one path");
+	if (paths.length > MAX_CLAIM_PATHS) fail(400, `claim at most ${MAX_CLAIM_PATHS} paths`);
 	const out: string[] = [];
 	for (const raw of paths) {
-		if (typeof raw !== "string") throw new Error("[400] paths must be strings");
+		if (typeof raw !== "string") fail(400, "paths must be strings");
 		const path = raw.trim().replace(/^\.\//, "");
-		const segments = path.replace(/\/$/, "").split("/");
-		if (!path || path === "/" || path.startsWith("/") || segments.some((s) => !s || s === "." || s === ".."))
-			throw new Error(`[400] invalid path: ${raw}`);
+		// A trailing slash marks a directory; the rest must be a plain path.
+		if (!isPlainPath(path.replace(/\/$/, ""))) fail(400, `invalid path: ${raw}`);
 		if (!out.includes(path)) out.push(path);
 	}
 	return out;
@@ -77,10 +78,10 @@ export function claimConflicts(task: Task, owns: string[], except?: string): Cla
 	return conflicts;
 }
 
-/** The refusal an agent sees when its claim collides with another change's. */
+/** The refusal an agent sees when its claim collides with another change's (a 409). */
 export function conflictMessage(conflicts: ClaimConflict[]) {
 	const lines = conflicts.map((c) => `- ${c.path} overlaps ${c.held}, held by change ${c.holder} ("${c.title}"): ${c.intent}`);
-	return `[409] These paths are already claimed:\n${lines.join("\n")}\nNarrow your claim, wait for that change to merge, or open your change on the free paths and ask the holder for what you need with a cross-lane request.`;
+	return `These paths are already claimed:\n${lines.join("\n")}\nNarrow your claim, wait for that change to merge, or open your change on the free paths and ask the holder for what you need with a cross-lane request.`;
 }
 
 /** A slug id for a new change: words from its title plus 4 random hex characters. */

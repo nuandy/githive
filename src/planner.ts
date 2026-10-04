@@ -7,6 +7,7 @@ import { remoteFor } from "./artifacts";
 import { blueprintProblems } from "./blueprint";
 import type { ContractCheckResult } from "./contract-check";
 import { describeError } from "./contract-check-plan";
+import { statusOf } from "./errors";
 import type { Blueprint, PlannerRun } from "./types";
 
 // The planner explores a project repo through the Artifacts binding (no clone)
@@ -150,7 +151,7 @@ export async function plan(env: Env, taskId: string, repoName: string, goal: str
 			result = await checker.check({ remote: remote.url, token: remote.token, commit: snapshot.commit, contracts });
 		} catch (err) {
 			// An infrastructure failure shouldn't block planning; record it.
-			result = { status: "skipped", reason: `the check could not run: ${err instanceof Error ? err.message : String(err)}` };
+			result = { status: "skipped", reason: `the check could not run: ${statusOf(err).message}` };
 		}
 		if (result.status === "failed") {
 			contractCheck = `failed (${result.errors.length} errors); planner asked to fix`;

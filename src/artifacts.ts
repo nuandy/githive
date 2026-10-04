@@ -1,5 +1,5 @@
 import type { Remote } from "./git";
-import { isTransientFailure, retryTransient } from "./retry";
+import { isTransientFailure, retryTransient, sleep, transientDelay } from "./retry";
 
 // Repo names encode the task (<taskId>--<slice>) so Artifacts events can be
 // routed back to the task's Coordinator without a lookup table.
@@ -17,9 +17,13 @@ export function parseRepoName(name: string) {
 	return match ? { taskId: match[1], slice: match[2] } : null;
 }
 
-/** Run work against a disposable repo capability, releasing it even on failure. */
-async function withRepo<T>(artifacts: Artifacts, name: string, operation: (repo: ArtifactsRepo) => Promise<T>): Promise<T> {
-	const repo = await retryTransient(() => artifacts.get(name));
+/**
+ * Run work against a disposable repo capability, releasing it even on failure.
+ * Getting the repo is retried when it fails transiently, unless `retry` is false
+ * because the caller retries itself.
+ */
+async function withRepo<T>(artifacts: Artifacts, name: string, operation: (repo: ArtifactsRepo) => Promise<T>, { retry = true } = {}): Promise<T> {
+	const repo = await (retry ? retryTransient(() => artifacts.get(name)) : artifacts.get(name));
 	try {
 		return await operation(repo);
 	} finally {
@@ -124,6 +128,8 @@ const FORK_READY_MS = 30_000;
  * Fork `source` and wait until the fork is ready, since get() throws while a
  * repo is still forking. Under load Artifacts fails some forks outright, and
  * now and then accepts one that never appears; both are asked for again.
+ * Each loop below does its own retrying, with no retry loop inside it, so a
+ * fork is requested at most FORK_ATTEMPTS times per ask.
  */
 export async function forkAndWait(artifacts: Artifacts, source: string, name: string, description: string) {
 	/** Request the fork; null when it turns out to exist already (a failed or lost request made it after all). */
@@ -131,12 +137,15 @@ export async function forkAndWait(artifacts: Artifacts, source: string, name: st
 		withRepo(artifacts, source, async (repo) => {
 			for (let attempt = 1; ; attempt++) {
 				try {
-					return await retryTransient(() => repo.fork(name, { description, defaultBranchOnly: true }));
+					return await repo.fork(name, { description, defaultBranchOnly: true });
 				} catch (err) {
 					if ((again || attempt > 1) && alreadyExists(err)) return null;
-					if (!isInternalError(err) || attempt === FORK_ATTEMPTS) throw err;
-					// Back off with jitter, so a burst of forks spreads out.
-					await scheduler.wait(Math.min(250 * 2 ** attempt, 4_000) * (0.5 + Math.random()));
+					const internal = isInternalError(err);
+					if ((!internal && !isTransientFailure(err)) || attempt === FORK_ATTEMPTS) throw err;
+					// An internal error backs off with jitter, so a burst of forks spreads
+					// out; a transient failure waits as retryTransient would.
+					if (internal) await scheduler.wait(Math.min(250 * 2 ** attempt, 4_000) * (0.5 + Math.random()));
+					else await sleep(transientDelay(attempt));
 				}
 			}
 		});
@@ -146,7 +155,8 @@ export async function forkAndWait(artifacts: Artifacts, source: string, name: st
 	const started = Date.now();
 	for (let delay = 100; ; delay = Math.min(delay * 2, 2_000)) {
 		try {
-			await withRepo(artifacts, name, async () => undefined);
+			// One try: this loop already waits out transient failures.
+			await withRepo(artifacts, name, async () => undefined, { retry: false });
 			if (forked) return forked;
 			const remote = await remoteFor(artifacts, name, "write", 3 * 3600);
 			return { name, remote: remote.url, token: remote.token };

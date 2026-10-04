@@ -5,6 +5,7 @@ import { z } from "zod";
 import { MODEL, addUsage, assertComplete, emptyUsage, openAITools, runCalls, tool, type AgentTool, type Usage } from "./agent";
 import { builderGitCommandBlockReason, builderGitPushBlockReason } from "./git-command-safety";
 import { COMMAND_TIMEOUT_S, WORKDIR, bootContainer, clip, gitWithToken, run } from "./container";
+import { staysInRepo } from "./paths";
 import type { SliceSpec } from "./types";
 import type { LaneChangeCoordinator } from "./lane-change-contract";
 import { BUILDER_PARK_TIMEOUT_MS, type BuilderResumeCredentials } from "./parking-contract";
@@ -104,7 +105,7 @@ const RunArgs = z.strictObject({ command: z.string().describe(`A bash command, r
 
 export function repoPath(path: string) {
 	const clean = path.replace(/^\.\//, "");
-	if (!clean || clean.startsWith("/") || clean.split("/").includes("..")) throw new Error(`path must stay inside the repository: ${path}`);
+	if (!clean || !staysInRepo(clean)) throw new Error(`path must stay inside the repository: ${path}`);
 	return clean;
 }
 

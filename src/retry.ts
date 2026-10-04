@@ -116,9 +116,12 @@ export function isTransientFailure(error: unknown): boolean {
 	return hasRecognizableNetworkFailure(error);
 }
 
-function defaultSleep(ms: number): Promise<void> {
+export function sleep(ms: number): Promise<void> {
 	return new Promise((resolve) => setTimeout(resolve, ms));
 }
+
+/** How long retryTransient waits after failed attempt `attempt` (counting from 1), by default. */
+export const transientDelay = (attempt: number, baseDelayMs = 100, maxDelayMs = 2000) => Math.min(maxDelayMs, baseDelayMs * 2 ** (attempt - 1));
 
 /** Run an operation again only when its failure is explicitly transient. */
 export async function retryTransient<T>(
@@ -130,15 +133,14 @@ export async function retryTransient<T>(
 		: 4;
 	const baseDelayMs = Number.isFinite(options.baseDelayMs) ? Math.max(0, options.baseDelayMs!) : 100;
 	const maxDelayMs = Number.isFinite(options.maxDelayMs) ? Math.max(0, options.maxDelayMs!) : 2000;
-	const sleep = options.sleep ?? defaultSleep;
+	const wait = options.sleep ?? sleep;
 
 	for (let attempt = 1; ; attempt++) {
 		try {
 			return await operation();
 		} catch (error) {
 			if (attempt >= maxAttempts || !isTransientFailure(error)) throw error;
-			const delay = Math.min(maxDelayMs, baseDelayMs * 2 ** (attempt - 1));
-			await sleep(delay);
+			await wait(transientDelay(attempt, baseDelayMs, maxDelayMs));
 		}
 	}
 }

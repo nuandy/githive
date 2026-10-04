@@ -1,6 +1,6 @@
 import type { AccessIdentity } from "./access-contract";
 import type { Coordinator } from "./coordinator";
-import { requiredPaths, requiredString as need, statusOf } from "./errors";
+import { fail, requiredPaths, requiredString as need, statusOf } from "./errors";
 import type { Task } from "./types";
 
 // The MCP front door: any agent (Claude Code, Codex, a team's own bots) joins
@@ -180,7 +180,7 @@ async function callTool(name: string, args: Args, ctx: McpContext): Promise<unkn
 			const changeId = need(args, "change_id");
 			const task = await co().state();
 			const s = task.slices.find((x) => x.id === changeId);
-			if (!s) throw new Error(`[404] no change ${changeId}`);
+			if (!s) fail(404, `no change ${changeId}`);
 			return {
 				status: s.status === "integrated" ? "merged" : s.attention ? "needs a human" : s.gate ? `gate ${s.gate.status}` : s.reviewHead && s.reviewHead !== s.sentBackFor ? "in review" : s.status,
 				lane: s.owns,
@@ -200,11 +200,11 @@ async function callTool(name: string, args: Args, ctx: McpContext): Promise<unkn
 			return co().requestLaneChange(need(args, "change_id"), { path: need(args, "path"), need: need(args, "need"), reason: need(args, "reason") });
 		case "answer_lane_change": {
 			const outcome = need(args, "outcome");
-			if (outcome !== "done" && outcome !== "declined") throw new Error("[400] outcome must be done or declined");
+			if (outcome !== "done" && outcome !== "declined") fail(400, "outcome must be done or declined");
 			return co().answerLaneChange(need(args, "change_id"), need(args, "request_id"), { outcome, answer: need(args, "answer") });
 		}
 		default:
-			throw new Error(`[404] unknown tool ${name}`);
+			fail(404, `unknown tool ${name}`);
 	}
 }
 

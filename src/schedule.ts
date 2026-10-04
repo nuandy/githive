@@ -1,3 +1,4 @@
+import { fail } from "./errors";
 import { DEFAULT_LIMITS, type QueueItem, type Task } from "./types";
 
 // Pure parts of agent scheduling: keys, capacity, and whether queued work is
@@ -32,6 +33,6 @@ export function withScheduling(task: Task): Task {
 export function validateLimits(limits: Partial<Task["limits"]> | undefined) {
 	const merged = { ...DEFAULT_LIMITS, ...(limits ?? {}) };
 	for (const [kind, n] of Object.entries(merged))
-		if (!Number.isInteger(n) || n < 1 || n > 50) throw new Error(`[400] limits.${kind} must be a whole number from 1 to 50`);
+		if (!Number.isInteger(n) || n < 1 || n > 50) fail(400, `limits.${kind} must be a whole number from 1 to 50`);
 	return merged;
 }

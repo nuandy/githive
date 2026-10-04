@@ -1067,3 +1067,12 @@ describe("agent jobs and credentials", () => {
 		});
 	});
 });
+
+describe("cross-lane request paths", () => {
+	it("refuses paths that are not plain, or not safe to repeat to another agent", async () => {
+		await setup(task());
+		for (const path of ["/src/b/x.ts", "src//b", "src/b/", "./src/b/x.ts", "src/b/../a/x.ts", " src/b/x.ts", "C:/src/b", "src\\b\\x.ts", "src/b/\u0007x"])
+			await expect(coordinator.requestLaneChange("a", { path, need: "n", reason: "r" })).rejects.toThrow(`[400] invalid relative path: ${path}`);
+		await expect(coordinator.requestLaneChange("a", { path: "src/b/x.ts", need: "n", reason: "r" })).resolves.toMatchObject({ outcome: "requested" });
+	});
+});

@@ -12,6 +12,7 @@ import { boundedUnifiedDiff } from "./code-view";
 import { type LedgerDoc, type LedgerEntry, clipText, diff, fromDoc, replay, toDoc } from "./ledger";
 import { appendLedger, readLedger } from "./ledger-git";
 import { unresolvedRequests } from "./lane-requests";
+import { isPlainPath, staysInRepo } from "./paths";
 import { blueprintProblems } from "./blueprint";
 import { NEW_FILE, decideAmendment } from "./contract-owner";
 import type { GatePlan } from "./gate";
@@ -444,8 +445,9 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 		return false;
 	}
 
+	/** A plain path that is also safe to repeat to other agents: no surrounding space, drive letters, backslashes or control characters. */
 	private safeLanePath(path: string) {
-		return path === path.trim() && !path.startsWith("/") && !/[A-Za-z]:/.test(path) && !path.includes("\\") && !/[\x00-\x1f\x7f]/.test(path) && path.split("/").every((part) => part && part !== "." && part !== "..");
+		return isPlainPath(path) && path === path.trim() && !/[A-Za-z]:/.test(path) && !path.includes("\\") && !/[\x00-\x1f\x7f]/.test(path);
 	}
 
 	private laneRequestMessage(request: LaneChangeRequest) {
@@ -514,7 +516,8 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 		let credentials: BuilderResumeCredentials;
 		try {
 			credentials = await this.resumeCredentials(task, slice);
-		} catch {
+		} catch (err) {
+			console.error(`credentials for slice ${slice.id}'s builder failed; its wake events wait in the queue: ${statusOf(err).message}`, err);
 			this.ensureBuilderQueued(task, slice);
 			return "deferred";
 		}
@@ -523,7 +526,8 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 			let result: "resumed" | "deferred" | "ignored";
 			try {
 				result = await retryTransient(() => builder.wake(event.eventId, event.message, credentials));
-			} catch {
+			} catch (err) {
+				console.error(`wake event ${event.eventId} for slice ${slice.id} failed; it waits in the queue: ${statusOf(err).message}`, err);
 				this.ensureBuilderQueued(task, slice);
 				return "deferred";
 			}
@@ -632,7 +636,8 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 			if (result.outcome !== "parked") return false;
 			this.note(task, slice.head, `Slice ${slice.id} automatically parked while waiting for its unresolved cross-lane requests`);
 			return true;
-		} catch {
+		} catch (err) {
+			console.error(`auto-parking slice ${slice.id}'s builder failed: ${statusOf(err).message}`, err);
 			return false;
 		}
 	}
@@ -653,7 +658,9 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 			const unresolved = unresolvedRequests(task, sliceId);
 			if (!unresolved.length) return;
 			// Tell the builder too, but never let its answer decide whether a human is flagged.
-			await this.env.BUILDER.getByName(slice.repo!).markParkTimedOut().catch(() => false);
+			await this.env.BUILDER.getByName(slice.repo!)
+				.markParkTimedOut()
+				.catch((err) => console.error(`telling slice ${sliceId}'s builder its park timed out failed: ${statusOf(err).message}`, err));
 			const waiting = unresolved.map((request) => `${request.id} (${request.path})`).join(", ");
 			const message = `Builder has been parked for more than ${Math.round(BUILDER_PARK_TIMEOUT_MS / 60_000)} minutes waiting for cross-lane requests ${waiting}; human attention is needed.`;
 			// The flag, the marker and the note are written together in one save.
@@ -821,7 +828,7 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 			if (typeof input.intent !== "string" || !input.intent.trim()) fail(400, "a change needs an intent: what it sets out to do");
 			const owns = normalizeClaim(input.owns);
 			const conflicts = claimConflicts(task, owns);
-			if (conflicts.length) throw new Error(claimConflictMessage(conflicts));
+			if (conflicts.length) fail(409, claimConflictMessage(conflicts));
 
 			let id = changeId(input.title);
 			while (task.slices.some((s) => s.id === id)) id = changeId(input.title);
@@ -911,7 +918,7 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 			// Paths already inside the change's own lane need no new claim.
 			const fresh = normalizeClaim(paths).filter((p) => !inLane(p, slice.owns));
 			const conflicts = claimConflicts(task, fresh, slice.id);
-			if (conflicts.length) throw new Error(claimConflictMessage(conflicts));
+			if (conflicts.length) fail(409, claimConflictMessage(conflicts));
 			if (fresh.length) {
 				slice.owns = [...slice.owns, ...fresh];
 				this.note(task, slice.head, `Change ${slice.id} extended its claim to ${fresh.join(", ")}`);
@@ -1429,7 +1436,7 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 			if (input.basedOn === undefined) fail(400, "basedOn is required: the blob id of the version you started from, or null for a new file");
 			if (!task.contracts.includes(path)) {
 				// Anything that isn't a contract yet must sit outside every lane.
-				if (path.startsWith("/") || path.split("/").includes("..")) fail(400, `invalid path: ${path}`);
+				if (!staysInRepo(path)) fail(400, `invalid path: ${path}`);
 				const owner = task.slices.find((s) => s.status !== "abandoned" && inLane(path, s.owns));
 				if (owner) fail(400, `${path} is inside ${owner.id}'s lane; a contract file must sit outside every lane`);
 			}
@@ -1481,7 +1488,7 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 				return await checker.check({ remote: remote.url, token: remote.token, commit, contracts: { [input.path]: input.content } });
 			} catch (err) {
 				// Like the planner, don't block on checker infrastructure failures.
-				return { status: "skipped", reason: `the check could not run: ${err instanceof Error ? err.message : String(err)}` };
+				return { status: "skipped", reason: `the check could not run: ${statusOf(err).message}` };
 			}
 		};
 		const failedCheckMessage = (result: Extract<ContractCheckResult, { status: "failed" }>) => {
@@ -1535,7 +1542,7 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 					if (!checkedCommit) throw new Error("task base has no commits");
 					checkResult = await checkAt(checkedCommit);
 				} catch (err) {
-					checkResult = { status: "skipped", reason: `the check could not run: ${err instanceof Error ? err.message : String(err)}` };
+					checkResult = { status: "skipped", reason: `the check could not run: ${statusOf(err).message}` };
 				}
 				const outcome = await this.exclusive(async () => {
 					const latest = await this.load();
@@ -1580,7 +1587,7 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 				return applyApproved(latest, a);
 			});
 		} finally {
-			await checker.dispose().catch(() => {});
+			await checker.dispose().catch((err) => console.error(`disposing the contract checker for amendment ${amendment.id} failed: ${statusOf(err).message}`, err));
 		}
 	}
 
@@ -1949,8 +1956,13 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 			if (!slices.some((slice) => slice.id === request.owner) || (request.status !== "pending" && request.status !== "answered")) continue;
 			let included = false;
 			if (request.status === "answered" && request.answerCommit && integratedHead) {
-				try { included = (await ws.mergeBase(request.answerCommit, integratedHead)) === request.answerCommit; }
-				catch { included = false; }
+				try {
+					included = (await ws.mergeBase(request.answerCommit, integratedHead)) === request.answerCommit;
+				} catch (err) {
+					// Not provably included: the request goes to a human below.
+					console.error(`checking whether ${request.answerCommit} is integrated, for cross-lane request ${request.id}, failed: ${statusOf(err).message}`, err);
+					included = false;
+				}
 			}
 			if (included) {
 				request.status = "integrated";

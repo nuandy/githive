@@ -1,5 +1,6 @@
 import { DurableObject } from "cloudflare:workers";
 import { WORKDIR, bootContainer, clip, gitWithToken, run } from "./container";
+import { statusOf } from "./errors";
 import type { GateResult } from "./gate-plan";
 
 // The integration gate ("semantic Merge-ahead"). Before an approved slice is
@@ -132,7 +133,7 @@ export class Gate extends DurableObject<Env> {
 				result = await this.check(item, plan);
 			} catch (err) {
 				// A gate that couldn't run counts as a failure the Coordinator can explain.
-				const message = err instanceof Error ? err.message : String(err);
+				const { message } = statusOf(err);
 				result = { passed: false, head: item.head, baseHead: plan.baseHead, results: [{ command: "(gate setup)", exitCode: 1, output: message }], at: new Date().toISOString() };
 				await this.ctx.storage.delete("prepared"); // start from a fresh checkout next time
 			}
