@@ -29,8 +29,8 @@ describe("claims, coordinator-free", () => {
 
 	it("lets Git settle two overlapping claims made at once: exactly one lands", async () => {
 		const log = new MemoryLog<Registry>();
-		// b's claim, from another isolate, lands between a reading the registry and a appending to it.
-		log.beforeAppend = async () => void (await claim({ read: () => log.read(), append: (p, c) => log.append(p, c) }, b));
+		// b's claim lands between a reading the registry and a appending to it.
+		log.beforeAppend = async () => void (await claim(log, b));
 		const outcome = await claim(log, a);
 		expect(outcome).toMatchObject({ ok: false, conflicts: [{ change: "fix-3c4d", agent: "agent-b" }] });
 		expect(activeClaims((await log.read())!.commit.state).map((c) => c.change)).toEqual(["fix-3c4d"]);
