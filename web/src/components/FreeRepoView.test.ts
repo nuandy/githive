@@ -13,7 +13,21 @@ const snapshot: FreeSnapshot = {
 	policy: { required: 2, vetoes: ["security"] },
 	verify: ["npm test"],
 	verified: true,
-	claims: [{ change: "c-1", agent: "agent-c", paths: ["src/c/"], intent: "c's work", since: "2026-10-05T10:00:00.000Z", active: "2026-10-05T10:00:00.000Z", by: "service:agent-c" }],
+	access: "forks",
+	claims: [
+		{
+			change: "c-1",
+			agent: "agent-c",
+			paths: ["src/c/"],
+			intent: "c's work",
+			since: "2026-10-05T10:00:00.000Z",
+			active: "2026-10-05T10:00:00.000Z",
+			by: "service:agent-c",
+			head: "b1c2d3e4f5a6",
+			approval: { approved: false, approvals: 1, required: 2, vetoedBy: [] },
+			hosted: { builder: { status: "working", revisions: 1 }, reviewers: [{ role: "security", status: "done", verdict: "reject" }] },
+		},
+	],
 	votes: [{ commit: "a9d4e88bd01e905b", reviewer: "rev-1", role: "tests", verdict: "approve", evidence: "ok", at: "2026-10-05T10:01:00.000Z", by: "service:rev-1" }],
 	audit: {
 		merges: 3,
@@ -39,6 +53,20 @@ describe("the coordinator-free view", () => {
 		expect(html).toMatch(/1 open/);
 		expect(html).toContain("undeclared");
 		expect(html).toMatch(/resolved by ee872a30/);
+	});
+
+	it("shows where each claimed change stands: its head, approvals, and Blueprint's agents on it", () => {
+		const html = renderToStaticMarkup(createElement(FreeRepoView, { snapshot }));
+		expect(html).toContain("b1c2d3e4");
+		expect(html).toMatch(/1 of 2 approvals/);
+		expect(html).toMatch(/builder working \(revision 1\)/);
+		expect(html).toMatch(/security: reject/);
+		expect(html).toMatch(/own fork/);
+	});
+
+	it("says when a claimed change has nothing pushed yet", () => {
+		const html = renderToStaticMarkup(createElement(FreeRepoView, { snapshot: { ...snapshot, claims: [{ ...snapshot.claims[0], head: null, hosted: undefined }] } }));
+		expect(html).toMatch(/nothing pushed yet/);
 	});
 
 	it("says so when the audit finds nothing", () => {

@@ -9,7 +9,7 @@ import { readMainMerges, readRecordHistory } from "./git-records";
 import { type CheckRunner, mergeChange } from "./merge";
 import { revertViolation } from "./revert";
 import type { Stamper } from "./stamp";
-import { approval, countedVotes, vote, type ReviewPolicy, type Votes } from "./votes";
+import { approval, countedVotes, vote, type ReviewPolicy, type VoteRecord, type Votes } from "./votes";
 
 // The coordinator-free MCP tools (see docs/coordinator-free.md). Stateless: each
 // tool reads or writes the repo's records in Git and reports what Git said.
@@ -108,6 +108,29 @@ function mayActAs(name: string, acting: string | undefined, registry: Registry |
 
 export type Args = Record<string, unknown>;
 
+/** Where a repo's change branches live: each change's own fork, or the project repo when it's shared (as repos started before forks are). */
+function changeSourceFor(ctx: FreeContext, repo: string, registry: Registry | null | undefined) {
+	const access = registry?.access ?? "shared";
+	return (change: string, scope: "read" | "write") => {
+		if (access === "shared") return ctx.remote(repo, scope);
+		if (!ctx.changeRemote) throw new Error("[501] change forks aren't available here");
+		return ctx.changeRemote(repo, change, scope);
+	};
+}
+
+/** Where a change stands: its branch head, the votes on that head, the approvals against the policy, and Blueprint's hosted agents on it. */
+async function changeStatus(ctx: FreeContext, repo: string, registry: Registry | null | undefined, cast: VoteRecord[], counted: VoteRecord[], change: string) {
+	// No fork yet means nothing pushed yet.
+	const head = await Promise.resolve()
+		.then(() => changeSourceFor(ctx, repo, registry)(change, "read"))
+		.then((source) => branchHead(source, `changes/${change}`))
+		.catch(() => null);
+	const policy = registry?.policy ?? DEFAULT_POLICY;
+	const outcome = head ? approval({ votes: counted }, head, policy) : { approved: false, approvals: 0, vetoedBy: [] };
+	const hosted = ctx.agentStatus ? await ctx.agentStatus(repo, change, head, [...new Set(["tests", ...policy.vetoes])]).catch(() => undefined) : undefined;
+	return { head, votes: head ? cast.filter((v) => v.commit === head) : [], approval: { ...outcome, required: policy.required }, ...(hosted ? { hosted } : {}) };
+}
+
 /** Replay a repo's records from Git: how many commits on main since the mode started, and what broke which convention. */
 async function runAudit(ctx: FreeContext, repo: string) {
 	const remote = await ctx.remote(repo, "read");
@@ -127,13 +150,23 @@ export async function freeSnapshot(ctx: FreeContext, repo: string) {
 	const state = registry?.commit.state;
 	if (!state?.baseline) throw new Error(`[404] coordinator-free mode hasn't started on ${repo}`);
 	const { merges, violations } = await runAudit(ctx, repo);
+	const cast = votes?.commit.state.votes ?? [];
+	const counted = await countedVotes(cast, state.stampKey);
+	const claims = await Promise.all(
+		activeClaims(state).map(async (c) => {
+			const { head, approval, hosted } = await changeStatus(ctx, repo, state, cast, counted, c.change);
+			return { ...c, head, approval, ...(hosted ? { hosted } : {}) };
+		}),
+	);
 	return {
 		repo,
 		policy: state.policy ?? DEFAULT_POLICY,
 		verify: state.verify ?? [],
 		/** Whether records and merges are stamped with verified identity. */
 		verified: !!state.stampKey,
-		claims: activeClaims(state),
+		access: state.access ?? "shared",
+		/** The claims in force, each with where its change stands. */
+		claims,
 		/** The latest votes, newest first. */
 		votes: (votes?.commit.state.votes ?? []).slice(-20).reverse(),
 		audit: { merges, open: violations.filter((v) => !v.resolvedBy).length, violations },
@@ -155,13 +188,8 @@ export async function callFreeTool(name: string, args: Args, ctx: FreeContext): 
 		return agent;
 	};
 	const stamper = await ctx.stamper?.(acting);
-	// Repos started before forks existed are shared.
 	const access = registered?.access ?? "shared";
-	const changeSource = (change: string, scope: "read" | "write") => {
-		if (access === "shared") return ctx.remote(repo, scope);
-		if (!ctx.changeRemote) throw new Error("[501] change forks aren't available here");
-		return ctx.changeRemote(repo, change, scope);
-	};
+	const changeSource = changeSourceFor(ctx, repo, registered);
 	switch (name) {
 		case "free_start": {
 			const policy: ReviewPolicy = {
@@ -260,21 +288,8 @@ export async function callFreeTool(name: string, args: Args, ctx: FreeContext): 
 			const change = requiredString(args, "change");
 			const held = activeClaims(registered).find((c) => c.change === change) ?? null;
 			const released = held ? undefined : registered?.released.findLast((r) => r.change === change);
-			// No fork yet means nothing pushed yet.
-			const head = await changeSource(change, "read").then((source) => branchHead(source, `changes/${change}`)).catch(() => null);
-			const policy = registered?.policy ?? DEFAULT_POLICY;
 			const cast = (await votes.read())?.commit.state.votes ?? [];
-			const outcome = head ? approval({ votes: await countedVotes(cast, registered?.stampKey) }, head, policy) : { approved: false, approvals: 0, vetoedBy: [] };
-			const hosted = ctx.agentStatus ? await ctx.agentStatus(repo, change, head, [...new Set(["tests", ...policy.vetoes])]).catch(() => undefined) : undefined;
-			return {
-				change,
-				claim: held,
-				...(released ? { released } : {}),
-				head,
-				votes: head ? cast.filter((v) => v.commit === head) : [],
-				approval: { ...outcome, required: policy.required },
-				...(hosted ? { hosted } : {}),
-			};
+			return { change, claim: held, ...(released ? { released } : {}), ...(await changeStatus(ctx, repo, registered, cast, await countedVotes(cast, registered?.stampKey), change)) };
 		}
 		case "free_check":
 			return checkChange({ project: await ctx.remote(repo, "read"), source: (change) => changeSource(change, "read"), claims: activeClaims(registered), change: requiredString(args, "change") });

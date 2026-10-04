@@ -11,7 +11,22 @@ export interface FreeSnapshot {
 	verify: string[];
 	/** Whether records and merges are stamped with verified identity. */
 	verified: boolean;
-	claims: { change: string; agent: string; paths: string[]; intent: string; since: string; active: string; by?: string }[];
+	/** Where changes live: each in its own fork (only the toolkit writes main), or branches of the shared project repo. */
+	access: "forks" | "shared";
+	claims: {
+		change: string;
+		agent: string;
+		paths: string[];
+		intent: string;
+		since: string;
+		active: string;
+		by?: string;
+		/** The change's branch head, null until something is pushed. */
+		head: string | null;
+		approval: { approved: boolean; approvals: number; required: number; vetoedBy: string[] };
+		/** Blueprint's hosted agents on the change. */
+		hosted?: { builder?: { status: string; revisions: number; error?: string }; reviewers: { role: string; status: string; verdict?: string }[] };
+	}[];
 	votes: { commit: string; reviewer: string; role: string; verdict: "approve" | "reject"; evidence: string; at: string; by?: string }[];
 	audit: {
 		merges: number;

@@ -32,6 +32,7 @@ const ctx = () => ({
 			builds.push(input);
 			return { change: input.change, builder: `free--${input.repo}--${input.change}` };
 		},
+		agentStatus: async () => ({ builder: { status: "working", revisions: 0 }, reviewers: [] }),
 		requestReview: async (input: { repo: string; change: string; roles: string[]; summary?: string }) => {
 			reviewRequests.push(input);
 			return { head: "h1", reviewers: input.roles };
@@ -115,7 +116,9 @@ describe("the coordinator-free MCP tools", () => {
 			policy: { required: 2, vetoes: ["security"] },
 			verify: ["npm test"],
 			verified: false,
-			claims: [{ change: "a-1", agent: "agent-a", paths: ["src/a/"] }],
+			access: "forks",
+			// Each claim with where its change stands, and what Blueprint's hosted agents on it are doing.
+			claims: [{ change: "a-1", agent: "agent-a", paths: ["src/a/"], head: null, approval: { approved: false, approvals: 0, required: 2 }, hosted: { builder: { status: "working" } } }],
 			votes: [{ commit: "h1", reviewer: "rev-1", verdict: "approve" }],
 			audit: { merges: 0, open: 0, violations: [] },
 		});

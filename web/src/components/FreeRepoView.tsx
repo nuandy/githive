@@ -25,6 +25,11 @@ export function FreeRepoView({ snapshot }: { snapshot: FreeSnapshot }) {
 					</li>
 					<li>{verify.length ? <>Checks before merging: {verify.map((c) => <code key={c}>{c}</code>)}</> : "No checks before merging"}</li>
 					<li>{snapshot.verified ? "Records and merges are stamped with verified identity" : "Records are not stamped: names are as agents give them"}</li>
+					<li>
+						{snapshot.access === "forks"
+							? "Each change in its own fork: agents can't write main; only the toolkit merges, once the conventions hold"
+							: "Shared repo: every agent can write main, so the audit is the only check"}
+					</li>
 				</ul>
 			</header>
 
@@ -50,6 +55,7 @@ export function FreeRepoView({ snapshot }: { snapshot: FreeSnapshot }) {
 								<th>Paths</th>
 								<th>Intent</th>
 								<th>Agent</th>
+								<th>Status</th>
 								<th>Active</th>
 							</tr>
 						</thead>
@@ -64,6 +70,9 @@ export function FreeRepoView({ snapshot }: { snapshot: FreeSnapshot }) {
 									<td>
 										{c.agent}
 										{c.by ? <span className="muted"> · {c.by}</span> : null}
+									</td>
+									<td>
+										<ChangeStatus claim={c} />
 									</td>
 									<td className="muted">{c.active ? formatRelativeTime(c.active) : ""}</td>
 								</tr>
@@ -96,6 +105,36 @@ export function FreeRepoView({ snapshot }: { snapshot: FreeSnapshot }) {
 					</table>
 				)}
 			</section>
+		</div>
+	);
+}
+
+/** Where a claimed change stands: its pushed head and approvals, and Blueprint's hosted agents on it. */
+function ChangeStatus({ claim }: { claim: FreeSnapshot["claims"][number] }) {
+	const { head, approval, hosted } = claim;
+	const builder = hosted?.builder;
+	return (
+		<div className="free-repo__status">
+			{head ? (
+				<div>
+					<code>{short(head)}</code> {approval.approvals} of {approval.required} approvals
+					{approval.vetoedBy.length ? <span className="free-repo__reject"> · vetoed by {approval.vetoedBy.join(", ")}</span> : null}
+				</div>
+			) : (
+				<div className="muted">nothing pushed yet</div>
+			)}
+			{builder ? (
+				<div className={builder.status === "failed" ? "free-repo__reject" : "muted"}>
+					builder {builder.status}
+					{builder.revisions ? ` (revision ${builder.revisions})` : ""}
+					{builder.error ? `: ${builder.error}` : ""}
+				</div>
+			) : null}
+			{hosted?.reviewers.map((r) => (
+				<div key={r.role} className="muted">
+					{r.role}: {r.verdict ?? r.status}
+				</div>
+			))}
 		</div>
 	);
 }
