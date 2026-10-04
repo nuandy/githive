@@ -114,23 +114,34 @@ describe("free_status", () => {
 	});
 });
 
-describe("free_check (Merge-ahead, run by the agent itself)", () => {
-	it("warns early: conflicts with main, files outside the claim, and files other changes touch too", async () => {
+describe("free_check (run by the agent itself)", () => {
+	// Claims are exclusive and free_merge refuses files outside them, so two
+	// mergeable changes can't conflict with each other: an overlap means someone
+	// is outside their claim, which their own check already shows. So the check
+	// is the change against main, and its files against its claim; it never
+	// fetches other changes.
+	it("warns early about conflicts with main and files outside the claim, without fetching other changes", async () => {
 		await call("free_start", { access: "shared" });
 		await call("free_claim", { change: "a-1", agent: "agent-a", paths: ["src/a/"], intent: "a" });
 		await call("free_claim", { change: "b-1", agent: "agent-b", paths: ["src/b/"], intent: "b" });
-		await call("free_claim", { change: "c-1", agent: "agent-c", paths: ["src/c/"], intent: "c" });
-		const head = await pushChange(project.url, work, "agent-a", "a-1", { "src/a/x.txt": "a\n", "README.md": "a's readme\n", "NOTES.md": "same\n" });
-		await pushChange(project.url, work, "agent-b", "b-1", { "src/b/y.txt": "b\n", "README.md": "b's readme\n", "NOTES.md": "same\n" });
-		await pushChange(project.url, work, "agent-c", "c-1", { "src/c/z.txt": "c\n" });
+		const head = await pushChange(project.url, work, "agent-a", "a-1", { "src/a/x.txt": "a\n", "README.md": "a's readme\n" });
+		await pushChange(project.url, work, "agent-b", "b-1", { "src/b/y.txt": "b\n", "README.md": "b's readme\n" });
+		// Main moved under a-1, in a file a-1 changed too.
+		const mainline = await agentClone(project.url, work, "mainline");
+		mainline.write("README.md", "main's readme\n");
+		await mainline.run("add", "-A");
+		await mainline.run("commit", "--quiet", "-m", "readme");
+		await mainline.run("push", "--quiet", "origin", "main");
 
+		const before = project.requests.length;
 		expect(await call("free_check", { change: "a-1" })).toEqual({
 			change: "a-1",
 			head,
-			main: { head: expect.stringMatching(/^[0-9a-f]{40}$/), clean: true },
-			outsideClaim: ["NOTES.md", "README.md"],
-			overlaps: [{ change: "b-1", agent: "agent-b", head: expect.stringMatching(/^[0-9a-f]{40}$/), files: ["NOTES.md", "README.md"], conflicts: ["README.md"] }],
+			main: { head: await mainline.run("rev-parse", "HEAD"), clean: false, conflicts: ["README.md"] },
+			outsideClaim: ["README.md"],
 		});
+		// The claims registry, main and the change: three fetches, nothing of b-1's.
+		expect(project.requests.slice(before).filter((r) => r === "POST git-upload-pack")).toHaveLength(3);
 	}, 60_000);
 
 	it("says when there's nothing pushed to check", async () => {

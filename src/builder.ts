@@ -693,7 +693,7 @@ How to work:
 		const fetched = await this.git(job, ["fetch", "-q", job.base.remote, "main:refs/remotes/base/main"], undefined, job.base.token);
 		const changed = await this.exec(["git", "diff", "--name-only", `${fetched.exitCode === 0 ? "base" : "origin"}/main...HEAD`]);
 		const outOfLane = changed.output.split("\n").map((f) => f.trim()).filter((f) => f && !inLane(f, job.slice.owns));
-		// Merge-ahead, run by the builder itself: against main and every other active change.
+		// The builder's own early check: does the change still merge into main.
 		const ahead = await this.freeMergeAhead(free).catch(() => null);
 		state.lastReport = { outOfLane, conflicts: ahead?.conflicts ?? [] };
 		const report = [
@@ -705,28 +705,15 @@ How to work:
 		return report.join("\n");
 	}
 
-	/** free_check on the builder's change: conflicts as Merge-ahead records, and a line for the model about each overlap. */
+	/** free_check on the builder's change: a conflict with main as a Merge-ahead record, and a line for the model about it. */
 	private async freeMergeAhead(free: NonNullable<BuildJob["free"]>) {
 		const check = (await callFreeTool("free_check", { repo: free.repo, change: free.change }, this.freeContext())) as Awaited<ReturnType<typeof checkChange>>;
-		const at = new Date().toISOString();
-		const record = (other: string, otherHead: string, files: string[]): MergeCheck => ({
-			pair: [other, free.change].sort() as [string, string],
-			heads: other < free.change ? [otherHead, check.head] : [check.head, otherHead],
-			status: "conflict",
-			files,
-			checkedAt: at,
-		});
-		const conflicts: MergeCheck[] = [];
-		const warnings: string[] = [];
-		if (!check.main.clean) {
-			conflicts.push(record("base", check.main.head, check.main.conflicts ?? []));
-			warnings.push(`Your change conflicts with main in ${(check.main.conflicts ?? []).join(", ")}: fetch_base, \`git merge base/main\`, resolve inside your claim, and push.`);
-		}
-		for (const o of check.overlaps) {
-			if (o.conflicts.length) conflicts.push(record(o.change, o.head, o.conflicts));
-			warnings.push(`${o.change} (${o.agent}) also changes ${o.files.join(", ")}${o.conflicts.length ? `, and would conflict in ${o.conflicts.join(", ")}` : ""}. Those files are outside a claim: leave them to their owner if you can.`);
-		}
-		return { conflicts, warnings };
+		if (check.main.clean) return { conflicts: [] as MergeCheck[], warnings: [] as string[] };
+		const files = check.main.conflicts ?? [];
+		return {
+			conflicts: [{ pair: ["base", free.change] as [string, string], heads: [check.main.head, check.head] as [string, string], status: "conflict" as const, files, checkedAt: new Date().toISOString() }],
+			warnings: [`Your change conflicts with main in ${files.join(", ")}: fetch_base, \`git merge base/main\`, resolve inside your claim, and push.`],
+		};
 	}
 
 	/** Local commits not yet on the fork. */

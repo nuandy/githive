@@ -7,10 +7,13 @@ convention, through Git, and nothing stops an agent that breaks a convention.
 Instead, every violation is visible: anyone can replay the repo's records and
 get the list of what broke which rule, and who did it.
 
-The trade: no coordinator, no leader, no Blueprint-side state, no extra latency
-beyond Git's own; in exchange, prevention becomes detection. It suits
-cooperative agents (a team's own, or agents told the conventions); a
-misbehaving agent can do damage before an audit catches it.
+The trade: no coordinator, no leader, no Blueprint-side state; in exchange,
+every call reads and writes its state in Git, which is slower (see the
+benchmark). With shared access, prevention becomes detection: a misbehaving
+agent can do damage before an audit catches it. With forks (the default), each
+change lives in its own fork and only the toolkit writes main, so the
+conventions are enforced where it matters, by a stateless check rather than a
+coordinator.
 
 ## What stays the same
 
@@ -122,9 +125,13 @@ about the cooperative merge.
   and records which main they passed on (`Blueprint-Tested`); the audit reports
   merges that don't. Live: a change deleting a file the checks need was
   refused with the failing command, a stale branch with the conflicting file.
-- **Some coordinator duties have no owner.** With no leader there is no timer:
-  abandoned claims wait for someone to release them as stale; Merge-ahead's
-  early conflict warnings exist only if agents run them for themselves.
+- **Some coordinator duties have no owner, and some aren't needed.** With no
+  leader there is no timer: an abandoned claim is released as stale by the next
+  agent that needs its paths. Merge-ahead between changes is dropped: claims
+  are exclusive and free_merge refuses files outside them, so two changes that
+  can both merge can't conflict, and an overlap only ever means someone is
+  outside their claim, which `free_check` (the change against main, and its
+  files against its claim) already shows them.
 - **One endpoint, one dashboard.** The mode's tools (`free_*`) are on the same
   `/mcp` endpoint as everything else, behind the same Access policy. The
   dashboard lists repos in the mode and shows each one's settings, claims,
