@@ -211,9 +211,16 @@ app.get("/tasks", async (c) => {
 
 // Repos in the namespace, for the dashboard's "new task" form. Task repos
 // (<taskId>--...) are left out.
+// Project repos, without task forks. Forks far outnumber projects, so read every page.
 app.get("/repos", async (c) => {
-	const page = await retryTransient(() => c.env.ARTIFACTS.list({ limit: 100 }));
-	return c.json(page.repos.filter((r) => !parseRepoName(r.name)).map((r) => ({ name: r.name })));
+	const names: string[] = [];
+	let cursor: string | undefined;
+	do {
+		const page = await retryTransient(() => c.env.ARTIFACTS.list({ limit: 200, cursor }));
+		names.push(...page.repos.map((r) => r.name).filter((name) => !parseRepoName(name)));
+		cursor = page.cursor;
+	} while (cursor);
+	return c.json(names.sort().map((name) => ({ name })));
 });
 
 /**

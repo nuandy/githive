@@ -169,6 +169,17 @@ describe("Artifacts transient failures", () => {
 		expect(remove).not.toHaveBeenCalledWith("used");
 	});
 
+	it("lists project repos from every page, without forks", async () => {
+		const list = vi
+			.fn()
+			.mockResolvedValueOnce({ repos: [{ name: "abcd1234--a" }, { name: "zeta" }], cursor: "next" })
+			.mockResolvedValueOnce({ repos: [{ name: "abcd1234--base" }, { name: "blueprint" }] });
+		const response = await worker.fetch(new Request("https://blueprint.test/repos"), { ARTIFACTS: { list } } as never, {} as never);
+
+		expect(await response.json()).toEqual([{ name: "blueprint" }, { name: "zeta" }]);
+		expect(list).toHaveBeenLastCalledWith({ limit: 200, cursor: "next" });
+	});
+
 	it("retries direct Artifacts list calls made by the API", async () => {
 		const list = vi.fn().mockRejectedValueOnce(transient()).mockResolvedValue({ repos: [{ name: "project" }] });
 		const response = await worker.fetch(
