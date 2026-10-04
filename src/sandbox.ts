@@ -6,6 +6,8 @@ import { MODEL, addUsage, assertComplete, emptyUsage, openAITools, runCalls, too
 import { builderGitCommandBlockReason, builderGitPushBlockReason } from "./git-command-safety";
 import { COMMAND_TIMEOUT_S, WORKDIR, bootContainer, clip, gitWithToken, run } from "./container";
 import type { SliceSpec } from "./types";
+import type { LaneChangeCoordinator } from "./lane-change-contract";
+import { BUILDER_PARK_TIMEOUT_MS, type BuilderResumeCredentials } from "./parking-contract";
 
 export { WORKDIR, clip };
 
@@ -23,6 +25,12 @@ const MAX_TURNS = 80;
 const MAX_NUDGES = 3;
 const MAX_LINES = 400;
 const LOG_LIMIT = 200;
+const TURN_IN_FLIGHT = "sandbox-turn-in-flight";
+const PARK_COMMAND = "sandbox-park-command";
+const DEFERRED_WAKES = "sandbox-deferred-wakes";
+const DELIVERED_WAKES = "sandbox-delivered-wakes";
+const INBOX = "inbox";
+const TIMED_OUT_PARK = "sandbox-timed-out-park";
 
 /** Facts every agent prompt should state about the environment. */
 export const ENVIRONMENT = `The repository is checked out at ${WORKDIR} in a Linux container with Node.js 24, npm and git. Python is not installed; use node for scripting. Commands time out after ${COMMAND_TIMEOUT_S} seconds.`;
@@ -64,7 +72,7 @@ ${job.slice.instructions}`;
 }
 
 export interface AgentState {
-	status: "queued" | "working" | "done" | "failed";
+	status: "queued" | "working" | "parked" | "done" | "failed";
 	startedAt: string;
 	finishedAt?: string;
 	turns: number;
@@ -74,6 +82,8 @@ export interface AgentState {
 	nudges: number;
 	usage: Usage;
 	error?: string;
+	parkedAt?: string;
+	waitingRequestIds?: string[];
 	/** Most recent events, newest last. */
 	log: { at: string; event: string }[];
 	previousResponseId?: string;
@@ -98,6 +108,8 @@ export function repoPath(path: string) {
 }
 
 export abstract class SandboxAgent<J extends SandboxJob, S extends AgentState> extends DurableObject<Env> {
+	private lifecycleTail: Promise<unknown> = Promise.resolve();
+	private lifecycle<T>(fn: () => Promise<T>): Promise<T> { const next = this.lifecycleTail.then(fn, fn); this.lifecycleTail = next.catch(() => {}); return next; }
 	/** Short name for logs and prompt-cache keys, e.g. "builder". */
 	protected abstract readonly kind: string;
 	protected abstract instructions(job: J): string;
@@ -110,6 +122,7 @@ export abstract class SandboxAgent<J extends SandboxJob, S extends AgentState> e
 	protected abstract freshFields(): Omit<S, keyof AgentState>;
 	/** Runs after each clone, in WORKDIR. */
 	protected abstract afterClone(job: J, state: S): Promise<void>;
+	protected async autoPark(_job: J, _state: S): Promise<boolean> { return false; }
 	/** Runs once when the agent fails; for example, to flag its slice for a human. */
 	protected async onFailed(_job: J, _state: S): Promise<void> {}
 	/** Runs once when the agent stops for any reason (done, failed, cancelled); frees its slot in the task's limits. */
@@ -173,6 +186,44 @@ export abstract class SandboxAgent<J extends SandboxJob, S extends AgentState> e
 		return true;
 	}
 
+	protected async parkAgent(parkedAt: string, waitingFor: string[]) {
+		return this.lifecycle(async () => {
+			if (await this.ctx.storage.get(TURN_IN_FLIGHT)) { await this.ctx.storage.put(PARK_COMMAND, { parkedAt, waitingFor, applied: false }); return; }
+			const { state } = await this.load(); if (!state || ["done", "failed"].includes(state.status)) return;
+			state.status = "parked"; state.parkedAt = parkedAt; state.waitingRequestIds = [...waitingFor];
+			this.note(state, "parked while waiting for " + waitingFor.join(", ")); await this.save(state);
+			if (this.ctx.container?.running) await this.ctx.container.destroy(this.kind + " parked");
+			await this.scheduleForState(state);
+		});
+	}
+
+	protected async receiveWake(eventId: string, message: string, credentials: BuilderResumeCredentials): Promise<"resumed" | "deferred" | "ignored"> {
+		if (!eventId.trim()) throw new Error("wake event ID must be nonempty");
+		return this.lifecycle(async () => {
+			const delivered = (await this.ctx.storage.get<string[]>(DELIVERED_WAKES)) ?? [];
+			const pending = (await this.ctx.storage.get<DeferredWake[]>(DEFERRED_WAKES)) ?? [];
+			if (delivered.includes(eventId) || pending.some((wake) => wake.eventId === eventId)) return "ignored";
+			const wake = { eventId, message, credentials };
+			if (await this.ctx.storage.get(TURN_IN_FLIGHT)) { await this.ctx.storage.put(DEFERRED_WAKES, [...pending, wake]); return "deferred"; }
+			const { job, state } = await this.load(); if (!job || !state) return "ignored";
+			return this.deliverWake(job, state, wake);
+		});
+	}
+
+	private async deliverWake(job: J, state: S, wake: DeferredWake): Promise<"resumed" | "deferred" | "ignored"> {
+		const delivered = (await this.ctx.storage.get<string[]>(DELIVERED_WAKES)) ?? [];
+		if (delivered.includes(wake.eventId) || !["parked", "working", "queued"].includes(state.status)) return "ignored";
+		const inbox = (await this.ctx.storage.get<string[]>(INBOX)) ?? []; const parked = state.status === "parked";
+		if (parked) { state.status = "queued"; state.parkedAt = undefined; state.waitingRequestIds = undefined; state.finishedAt = undefined; state.error = undefined; state.nudges = 0; state.turnsAtRunStart = state.turns; this.note(state, "resumed for wake event " + wake.eventId); }
+		else this.note(state, "resolution event " + wake.eventId + " queued for next turn");
+		inbox.push(wake.message); delivered.push(wake.eventId);
+		await this.ctx.storage.put({ job: { ...job, ...wake.credentials }, state, [INBOX]: inbox, [DELIVERED_WAKES]: delivered });
+		if (parked) { if (this.ctx.container?.running) await this.ctx.container.destroy(this.kind + " resumed"); await this.ctx.storage.setAlarm(Date.now()); return "resumed"; }
+		return "deferred";
+	}
+
+	protected async isParkStillTimedOut() { const { state } = await this.load(); return !!state && state.status === "parked" && !!state.parkedAt && Date.parse(state.parkedAt) + BUILDER_PARK_TIMEOUT_MS <= Date.now(); }
+
 	private async drainInbox(state: S): Promise<ResponseInputItem[]> {
 		const inbox = (await this.ctx.storage.get<string[]>("inbox")) ?? [];
 		if (!inbox.length) return [];
@@ -203,7 +254,9 @@ export abstract class SandboxAgent<J extends SandboxJob, S extends AgentState> e
 
 	async alarm() {
 		const { job, state } = await this.load();
-		if (!job || !state || (state.status !== "queued" && state.status !== "working")) return;
+		if (!job || !state) return;
+		if (state.status === "parked") { await this.handleParkedAlarm(job, state); return; }
+		if (state.status !== "queued" && state.status !== "working") return;
 		try {
 			if (await this.cancelled(state)) throw new Error(state.error);
 			if (state.status === "queued" || !this.ctx.container?.running) {
@@ -231,6 +284,20 @@ export abstract class SandboxAgent<J extends SandboxJob, S extends AgentState> e
 		await this.save(state);
 		if ((state.status as string) === "failed") await this.onFailed(job, state).catch(() => {});
 		if (["done", "failed"].includes(state.status)) await this.onStopped(job, state).catch(() => {});
+	}
+
+	private async scheduleForState(state: S) {
+		if (state.status === "parked") { const at = Date.parse(state.parkedAt ?? new Date().toISOString()) + BUILDER_PARK_TIMEOUT_MS; await this.ctx.storage.setAlarm(Math.max(Date.now(), at)); }
+		else if (state.status === "queued" || state.status === "working") await this.ctx.storage.setAlarm(Date.now());
+	}
+
+	private async handleParkedAlarm(job: J, state: S) {
+		const parkedAt = state.parkedAt ?? new Date().toISOString();
+		if (Date.now() < Date.parse(parkedAt) + BUILDER_PARK_TIMEOUT_MS) { await this.ctx.storage.setAlarm(Date.parse(parkedAt) + BUILDER_PARK_TIMEOUT_MS); return; }
+		if (await this.ctx.storage.get<string>(TIMED_OUT_PARK) === parkedAt) return;
+		await (this.coordinator(job) as unknown as LaneChangeCoordinator).parkedBuilderTimedOut((job as J & { slice: { id: string } }).slice.id, parkedAt);
+		const latest = (await this.load()).state;
+		if (latest?.status === "parked" && latest.parkedAt === parkedAt) { await this.ctx.storage.put(TIMED_OUT_PARK, parkedAt); this.note(latest, "park timeout reported while waiting for " + (latest.waitingRequestIds ?? []).join(", ")); await this.save(latest); }
 	}
 
 	private async setUp(job: J, state: S) {
