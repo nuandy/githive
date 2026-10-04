@@ -8,7 +8,9 @@
 //
 // Credentials come from .dev.vars (CF_ACCESS_CLIENT_ID, CF_ACCESS_CLIENT_SECRET) and are never printed.
 
+import { execFile } from "node:child_process";
 import { readFile } from "node:fs/promises";
+import { promisify } from "node:util";
 import { join } from "node:path";
 
 const root = new URL("..", import.meta.url).pathname;
@@ -55,6 +57,19 @@ for (let waited = 0; waited < 1800; waited += 20) {
 	if (builder.status === "failed") {
 		say("builder failed:", builder.error, "\n", builder.log.slice(-8).map((l) => l.event).join("\n "));
 		process.exit(1);
+	}
+	if (builder.status === "done") {
+		// The reviewers are named by the commit they review: the head of the change's branch.
+		const { url, token } = await tool("free_credentials", {});
+		const { stdout } = await promisify(execFile)("git", ["-c", `http.extraHeader=Authorization: Bearer ${token.split("?expires=")[0]}`, "ls-remote", url, `refs/heads/changes/${change}`]);
+		const head = stdout.split(/\s/)[0];
+		const reviewers = await Promise.all(started.policy.vetoes.concat("tests").map(async (role) => [role, await api("GET", `/free/${REPO}/reviewers/${change}/${head}/${role}`)]));
+		say("  reviewers:", reviewers.map(([role, r]) => `${role} ${r.status}`).join(", "));
+		const failed = reviewers.filter(([, r]) => r.status === "failed");
+		if (failed.length) {
+			for (const [role, r] of failed) say(`reviewer ${role} failed:`, r.error);
+			process.exit(1);
+		}
 	}
 	if (!held && snapshot.audit.merges > 0) break;
 }

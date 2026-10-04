@@ -99,6 +99,19 @@ const WriteArgs = z.strictObject({
 const ListArgs = z.strictObject({ prefix: z.string().describe('Only list paths starting with this; "" for all') });
 const RunArgs = z.strictObject({ command: z.string().describe(`A bash command, run in ${WORKDIR} with a ${COMMAND_TIMEOUT_S}s limit`) });
 
+const MAX_CACHE_KEY = 64;
+
+/** OpenAI's prompt_cache_key for an agent: `<kind>-<repo>`, cut to 64 characters with a hash of the whole when longer. */
+export function promptCacheKey(kind: string, repo: string) {
+	const key = `${kind}-${repo}`;
+	if (key.length <= MAX_CACHE_KEY) return key;
+	// FNV-1a: stable across restarts, so an agent keeps its cache.
+	let hash = 0x811c9dc5;
+	for (let i = 0; i < key.length; i++) hash = Math.imul(hash ^ key.charCodeAt(i), 0x01000193);
+	const suffix = `-${(hash >>> 0).toString(16).padStart(8, "0")}`;
+	return key.slice(0, MAX_CACHE_KEY - suffix.length) + suffix;
+}
+
 export function repoPath(path: string) {
 	const clean = path.replace(/^\.\//, "");
 	if (!clean || !staysInRepo(clean)) throw new Error(`path must stay inside the repository: ${path}`);
@@ -413,7 +426,7 @@ export abstract class SandboxAgent<J extends SandboxJob, S extends AgentState> e
 			tools: openAITools(tools),
 			reasoning: { effort: "high" },
 			max_output_tokens: 32000,
-			prompt_cache_key: `${this.kind}-${job.repo}`,
+			prompt_cache_key: promptCacheKey(this.kind, job.repo),
 		});
 		await this.acknowledgeInbox(inbox, state);
 		state.turns++;

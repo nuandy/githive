@@ -188,6 +188,11 @@ const freeContext = (env: Env, identity: AccessIdentity | undefined): FreeContex
 app.get("/free", async (c) => c.json(await taskIndex(c.env).listFree()));
 app.get("/free/:repo", async (c) => c.json(await freeSnapshot(freeContext(c.env, c.get("accessIdentity")), c.req.param("repo"))));
 app.get("/free/:repo/builders/:change", async (c) => c.json(await c.env.BUILDER.getByName(freeAgentName(c.req.param("repo"), c.req.param("change"))).state()));
+// A hosted reviewer's state, by the commit it reviews (the vote's commit) and its role.
+app.get("/free/:repo/reviewers/:change/:head/:role", async (c) => {
+	const { repo, change, head, role } = c.req.param();
+	return c.json(await c.env.REVIEWER.getByName(reviewerName(freeAgentName(repo, change), role, head)).state());
+});
 
 // The MCP front door (stateless JSON-RPC over HTTP), for agents from anywhere.
 app.post("/mcp", async (c) => {
