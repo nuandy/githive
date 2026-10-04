@@ -31,6 +31,7 @@ import {
 	type Blueprint,
 	type Limits,
 	type MergeCheck,
+	type Phase,
 	type QueueItem,
 	type Review,
 	type ReviewAssignment,
@@ -177,6 +178,16 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 		return run;
 	}
 
+	/** Run `fn` on the stored task under the lock, and save the task once it returns. A failure saves nothing. */
+	private mutate<T>(fn: (task: Task) => Promise<T>, label?: string): Promise<T> {
+		return this.exclusive(async () => {
+			const task = await this.load();
+			const result = await fn(task);
+			await this.save(task);
+			return result;
+		}, label);
+	}
+
 	/** Note a decision on the commit it is about (the task's anchor commit for task-wide ones). */
 	private note(task: Task, commit: string | undefined, text: string) {
 		this.entries.push({ commit: commit ?? task.baseCommit ?? task.anchor ?? EMPTY_TREE, text, at: new Date().toISOString() });
@@ -303,6 +314,18 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 		return task.slices.find((s) => s.id === id) ?? fail(404, `no slice ${id}`);
 	}
 
+	/** A slice that must be building. `noun` names it in the refusal: a "slice", or an open-mode "change". */
+	private buildingSlice(task: Task, id: string, noun = "slice") {
+		const slice = this.slice(task, id);
+		if (slice.status !== "building") fail(409, `${noun} ${id} is ${slice.status}`);
+		return slice;
+	}
+
+	/** Refuse a step the task's phase doesn't allow. */
+	private requirePhase(task: Task, ...phases: Phase[]) {
+		if (!phases.includes(task.phase)) fail(409, `task is ${task.phase}`);
+	}
+
 	/** Flag a slice for a human: `attention` is shown on it, and the decision is noted as "needs a human: <summary>". */
 	private flagHuman(task: Task, slice: Slice, commit: string | undefined, attention: string, summary = attention) {
 		slice.attention = attention;
@@ -312,9 +335,8 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 	requestLaneChange(requesterSliceId: string, input: LaneChangeRequestInput) {
 		return this.exclusive(async () => {
 			const task = await this.load();
-			if (task.phase !== "building") fail(409, `task is ${task.phase}`);
-			const requester = this.slice(task, requesterSliceId);
-			if (requester.status !== "building") fail(409, `slice ${requesterSliceId} is ${requester.status}`);
+			this.requirePhase(task, "building");
+			const requester = this.buildingSlice(task, requesterSliceId);
 			if (!input || typeof input.path !== "string" || !input.path.trim()) fail(400, "a lane request needs a path");
 			if (!this.safeLanePath(input.path)) fail(400, `invalid relative path: ${input.path}`);
 			if (typeof input.need !== "string" || !input.need.trim()) fail(400, "a lane request needs a nonempty need");
@@ -371,8 +393,7 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 	}
 
 	answerLaneChange(ownerSliceId: string, requestId: string, answer: LaneChangeAnswer) {
-		return this.exclusive(async () => {
-			const task = await this.load();
+		return this.mutate(async (task) => {
 			const owner = this.slice(task, ownerSliceId);
 			const request = (task.laneChangeRequests ?? []).find((item) => item.id === requestId) ?? fail(404, `no lane request ${requestId}`);
 			if (request.owner !== ownerSliceId) fail(403, `slice ${ownerSliceId} does not own lane request ${requestId}`);
@@ -380,7 +401,6 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 			if (owner.status === "integrated") {
 				const message = `Slice ${ownerSliceId} is already integrated and can no longer change ${request.path}; this request needs a human.`;
 				await this.flagLaneRequest(task, request, message, true);
-				await this.save(task);
 				return request;
 			}
 			if (owner.status !== "building") fail(409, `slice ${ownerSliceId} is ${owner.status}`);
@@ -402,7 +422,6 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 				request.answerCommit = pushedHead;
 				this.note(task, pushedHead, `Slice ${ownerSliceId} answered cross-lane request ${request.id} as done for ${request.path} at pushed commit ${pushedHead}: ${request.answer}`);
 			}
-			await this.save(task);
 			return request;
 		});
 	}
@@ -697,7 +716,7 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 	/** Stored blueprint contracts are visible only while awaiting human approval. */
 	async contractFiles() {
 		const task = await this.load();
-		if (task.phase !== "awaiting-approval") fail(409, `task is ${task.phase}`);
+		this.requirePhase(task, "awaiting-approval");
 		const contracts = (await this.ctx.storage.get<Record<string, string>>("contracts")) ?? {};
 		return Object.entries(contracts)
 			.sort(([a], [b]) => a.localeCompare(b))
@@ -721,7 +740,7 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 	/** A planned task can land once every slice is integrated. */
 	private requireLandable(task: Task) {
 		if (task.mode === "open") fail(409, "open changes merge straight into the project's main; there is nothing to land");
-		if (task.phase !== "building") fail(409, `task is ${task.phase}`);
+		this.requirePhase(task, "building");
 		const pending = task.slices.filter((slice) => slice.status !== "integrated").map((slice) => slice.id);
 		if (pending.length) fail(409, `slices not integrated: ${pending.join(", ")}`);
 	}
@@ -796,8 +815,7 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 	 */
 	async openChange(input: { title: string; intent: string; owns: string[]; hosted?: boolean }, actor?: AccessIdentity) {
 		// Reserve: the paths are held from here, so a racing claim is refused while the fork is made.
-		const { id, repo, title } = await this.exclusive(async () => {
-			const task = await this.load();
+		const { id, repo, title } = await this.mutate(async (task) => {
 			if (task.mode !== "open") fail(409, "changes can only be opened on an open-mode task");
 			if (typeof input?.title !== "string" || !input.title.trim()) fail(400, "a change needs a title");
 			if (typeof input.intent !== "string" || !input.intent.trim()) fail(400, "a change needs an intent: what it sets out to do");
@@ -824,7 +842,6 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 			};
 			task.slices.push(slice);
 			await this.scheduleLeaseCheck(task);
-			await this.save(task);
 			return { id, repo: slice.repo!, title: slice.title };
 		}, "open:reserve");
 
@@ -837,17 +854,14 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 			// The fork's own head is where this change starts, even if main moved meanwhile.
 			start = (await headOf(this.env.ARTIFACTS, repo)) ?? fail(500, "the new fork has no commits");
 		} catch (err) {
-			await this.exclusive(async () => {
-				const task = await this.load();
+			await this.mutate(async (task) => {
 				task.slices = task.slices.filter((s) => !(s.id === id && s.status === "opening"));
-				await this.save(task);
 			}, "open:release");
 			throw err;
 		}
 
 		// Confirm: the reservation becomes an open change.
-		return this.exclusive(async () => {
-			const task = await this.load();
+		return this.mutate(async (task) => {
 			const slice = this.slice(task, id);
 			if (slice.status !== "opening") fail(409, `change ${id} was ${slice.status} before its fork was ready; open it again`);
 			slice.status = "building";
@@ -857,7 +871,6 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 			this.note(task, start, `Change ${id} opened${actor ? ` by ${accessIdentityLabel(actor)}` : ""}: "${slice.title}", claiming ${slice.owns.join(", ")}. Intent: ${slice.intent}`);
 			if (input.hosted) await this.schedule(task, { kind: "builder", slice: id });
 			await this.scheduleLeaseCheck(task);
-			await this.save(task);
 			return { change: slice, credentials: { slice: id, repo, remote: fork.remote, token: fork.token } as SliceCredentials };
 		}, "open:confirm");
 	}
@@ -880,25 +893,21 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 
 	/** A fresh write token for an external agent's own fork. */
 	externalCredentials(sliceId: string) {
-		return this.exclusive(async () => {
-			const task = await this.load();
+		return this.mutate(async (task) => {
 			const slice = this.slice(task, sliceId);
 			if (!slice.external) fail(403, `change ${sliceId} is built by a hosted agent`);
 			if (slice.status !== "building") fail(409, `change ${sliceId} is ${slice.status}`);
 			const remote = await remoteFor(this.env.ARTIFACTS, slice.repo!, "write", 3 * 3600);
 			this.renewLease(task, slice);
-			await this.save(task);
 			return { fork: remote.url, token: remote.token };
 		});
 	}
 
 	/** Add paths to a change's claim, if no other active change holds them. */
 	extendClaim(sliceId: string, paths: string[]) {
-		return this.exclusive(async () => {
-			const task = await this.load();
+		return this.mutate(async (task) => {
 			if (task.mode !== "open") fail(409, "claims can only be extended in open mode; planned lanes are fixed");
-			const slice = this.slice(task, sliceId);
-			if (slice.status !== "building") fail(409, `change ${sliceId} is ${slice.status}`);
+			const slice = this.buildingSlice(task, sliceId, "change");
 			// Paths already inside the change's own lane need no new claim.
 			const fresh = normalizeClaim(paths).filter((p) => !inLane(p, slice.owns));
 			const conflicts = claimConflicts(task, fresh, slice.id);
@@ -909,21 +918,17 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 			}
 			this.renewLease(task, slice);
 			await this.scheduleLeaseCheck(task);
-			await this.save(task);
 			return slice;
 		});
 	}
 
 	/** Give up a change: its lane is freed and its agents are stopped. */
 	async abandonChange(sliceId: string, reason: string, actor?: AccessIdentity) {
-		const { slice, stopAgents } = await this.exclusive(async () => {
-			const task = await this.load();
+		const { slice, stopAgents } = await this.mutate(async (task) => {
 			if (task.mode !== "open") fail(409, "only open-mode changes can be abandoned");
 			if (typeof reason !== "string" || !reason.trim()) fail(400, "abandoning a change needs a reason");
-			const slice = this.slice(task, sliceId);
-			if (slice.status !== "building") fail(409, `change ${sliceId} is ${slice.status}`);
-			const stopAgents = this.abandon(task, slice, reason.trim() + (actor ? ` (by ${accessIdentityLabel(actor)})` : ""));
-			await this.save(task);
+			const slice = this.buildingSlice(task, sliceId, "change");
+			const stopAgents = this.abandon(task, slice, `${reason.trim()}${actor ? ` (by ${accessIdentityLabel(actor)})` : ""}`);
 			return { slice, stopAgents };
 		}, "abandon");
 		// The lane is already free; stopping the change's agents needn't hold up anyone else.
@@ -985,8 +990,7 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 	 * gate or another change keeps its claim, and its lease is renewed instead.
 	 */
 	private async sweepLeases() {
-		const stops = await this.exclusive(async () => {
-			const task = await this.load();
+		const stops = await this.mutate(async (task) => {
 			const now = Date.now();
 			const stops: (() => Promise<unknown>)[] = [];
 			for (const slice of task.slices) {
@@ -997,7 +1001,6 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 				else this.renewLease(task, slice);
 			}
 			await this.scheduleLeaseCheck(task);
-			await this.save(task);
 			return stops;
 		}, "sweep");
 		await Promise.all(stops.map((stop) => stop()));
@@ -1007,7 +1010,7 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 	startPlanning() {
 		return this.exclusive(async () => {
 			const task = await this.load();
-			if (task.phase !== "planning" && task.phase !== "awaiting-approval") fail(409, `task is ${task.phase}`);
+			this.requirePhase(task, "planning", "awaiting-approval");
 			if (task.planner?.status === "running") fail(409, "the planner is already running");
 			if (!this.env.OPENAI_API_KEY) fail(500, "OPENAI_API_KEY is not set");
 			task.planner = { status: "running", startedAt: new Date().toISOString() };
@@ -1029,19 +1032,16 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 		} catch (err) {
 			outcome = { status: "failed", error: err instanceof Error ? err.message : String(err) };
 		}
-		await this.exclusive(async () => {
-			const latest = await this.load();
+		await this.mutate(async (latest) => {
 			latest.planner = { ...latest.planner!, ...outcome, finishedAt: new Date().toISOString() };
 			this.note(latest, undefined, outcome.status === "done" ? `Planner finished after ${outcome.toolCalls ?? 0} tool calls` : `Planner failed: ${outcome.error}`);
-			await this.save(latest);
 		});
 	}
 
 	/** Store a proposed blueprint. A human (or the planner agent) approves it next. */
 	proposeBlueprint(blueprint: Blueprint) {
-		return this.exclusive(async () => {
-			const task = await this.load();
-			if (task.phase !== "planning" && task.phase !== "awaiting-approval") fail(409, `task is ${task.phase}`);
+		return this.mutate(async (task) => {
+			this.requirePhase(task, "planning", "awaiting-approval");
 
 			const problems = blueprintProblems(blueprint);
 			if (problems.length) fail(400, problems.join(" "));
@@ -1072,7 +1072,6 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 					(rationale ? `\n${rationale}` : ""),
 			);
 			await this.ctx.storage.put("contracts", contracts ?? {});
-			await this.save(task);
 			return task;
 		});
 	}
@@ -1082,9 +1081,8 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 	 * the base once per slice. Returns write credentials for each slice's builder.
 	 */
 	approve(actor: AccessIdentity) {
-		return this.exclusive(async () => {
-			const task = await this.load();
-			if (task.phase !== "awaiting-approval") fail(409, `task is ${task.phase}`);
+		return this.mutate(async (task) => {
+			this.requirePhase(task, "awaiting-approval");
 			const artifacts = this.env.ARTIFACTS;
 
 			const baseRepo = baseRepoName(task.id);
@@ -1111,7 +1109,6 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 			);
 			task.phase = "building";
 			this.note(task, task.baseCommit, `Blueprint approved by ${accessIdentityLabel(actor)}: contracts committed to ${baseRepo}; slices forked: ${task.slices.map((s) => s.repo).join(", ")}`);
-			await this.save(task);
 			return { task, credentials };
 		});
 	}
@@ -1122,13 +1119,11 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 	 * from approve() instead.
 	 */
 	startBuilders() {
-		return this.exclusive(async () => {
-			const task = await this.load();
-			if (task.phase !== "building") fail(409, `task is ${task.phase}`);
+		return this.mutate(async (task) => {
+			this.requirePhase(task, "building");
 			const started: { slice: string; status: string }[] = [];
 			for (const slice of task.slices.filter((s) => s.status === "building"))
 				started.push({ slice: slice.id, status: await this.schedule(task, { kind: "builder", slice: slice.id }) });
-			await this.save(task);
 			return { task, started };
 		});
 	}
@@ -1228,15 +1223,13 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 
 	/** An agent stopped (finished, failed or was cancelled): free its slot and start queued work. */
 	agentStopped(kind: AgentKind, key: string) {
-		return this.exclusive(async () => {
-			const task = await this.load();
+		return this.mutate(async (task) => {
 			removeKey(activeOf(task, kind), key);
 			if (kind === "builder") {
 				const slice = task.slices.find((candidate) => candidate.id === key);
 				if (slice && !slice.parkedAt) await this.autoParkWaitingBuilder(task, slice);
 			}
 			await this.drain(task);
-			await this.save(task);
 		});
 	}
 
@@ -1252,8 +1245,7 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 			// Check the push against a snapshot, without the lock: Merge-ahead clones
 			// and test-merges, which takes seconds and grows with the number of changes.
 			const snapshot = await this.load();
-			const seen = this.slice(snapshot, sliceId);
-			if (seen.status !== "building") fail(409, `slice ${sliceId} is ${seen.status}`);
+			const seen = this.buildingSlice(snapshot, sliceId);
 			const before = seen.head;
 			const head = await headOf(this.env.ARTIFACTS, seen.repo!);
 			if (!head || head === before) return { task: snapshot, checks: [] as MergeCheck[], changed: false };
@@ -1262,8 +1254,7 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 			// Apply it, if the change is still where the check found it.
 			const applied = await this.exclusive(async () => {
 				const task = await this.load();
-				const slice = this.slice(task, sliceId);
-				if (slice.status !== "building") fail(409, `slice ${sliceId} is ${slice.status}`);
+				const slice = this.buildingSlice(task, sliceId);
 				// Another report of the same push got here first.
 				if (slice.head === seen.head) return { task, checks: [] as MergeCheck[], changed: false };
 				// A different push was recorded meanwhile: this check may be stale.
@@ -1357,8 +1348,7 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 	 * and hand each reviewer a read-only token for it.
 	 */
 	requestReview(sliceId: string) {
-		return this.exclusive(async () => {
-			const task = await this.load();
+		return this.mutate(async (task) => {
 			const slice = this.slice(task, sliceId);
 			const head = await this.pinForReview(task, slice);
 			this.note(task, head, `${slice.id} pinned for review at ${short(head)} by an external agent`);
@@ -1368,7 +1358,6 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 					return { reviewer, head, slice: slice.id, repo: slice.repo!, remote: remote.url, token: remote.token };
 				}),
 			);
-			await this.save(task);
 			return { task, assignments };
 		});
 	}
@@ -1432,11 +1421,10 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 	 * would undo changes made since, such as another slice's approved amendment.
 	 */
 	async proposeAmendment(sliceId: string, input: { path: string; content: string; reason: string; basedOn: string | null }) {
-		const { task, amendment, current } = await this.exclusive(async () => {
-			const task = await this.load();
+		const { task, amendment, current } = await this.mutate(async (task) => {
 			const slice = this.slice(task, sliceId);
 			if (task.mode === "open") fail(409, "open mode has no contracts: claim the file with extend_claim, or ask the change that holds it with a cross-lane request");
-			if (task.phase !== "building") fail(409, `task is ${task.phase}`);
+			this.requirePhase(task, "building");
 			const path = input.path;
 			if (input.basedOn === undefined) fail(400, "basedOn is required: the blob id of the version you started from, or null for a new file");
 			if (!task.contracts.includes(path)) {
@@ -1462,7 +1450,6 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 			} else {
 				this.note(task, slice.head, `${sliceId} proposed a change to ${kind === "shared" ? "shared file" : "contract"} ${path}: ${input.reason}`);
 			}
-			await this.save(task);
 			return { task, amendment, current };
 		});
 		if (amendment.status === "stale") return amendment;
@@ -1598,12 +1585,10 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 	}
 
 	private settleAmendment(id: string, outcome: Pick<Amendment, "status" | "decision">) {
-		return this.exclusive(async () => {
-			const task = await this.load();
+		return this.mutate(async (task) => {
 			const a = task.amendments!.find((x) => x.id === id)!;
 			Object.assign(a, outcome, { decidedAt: new Date().toISOString() });
 			this.note(task, task.slices.find((s) => s.id === a.slice)?.head, `Contract change to ${a.path} for ${a.slice} ${a.status}: ${a.decision}`);
-			await this.save(task);
 			return a;
 		});
 	}
@@ -1649,15 +1634,12 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 
 	/** Merge a slice into the task base. Requires an approved quorum on the slice's current head. */
 	integrate(sliceId: string) {
-		return this.exclusive(async () => {
-			const task = await this.load();
-			const slice = this.slice(task, sliceId);
-			if (slice.status !== "building") fail(409, `slice ${sliceId} is ${slice.status}`);
+		return this.mutate(async (task) => {
+			const slice = this.buildingSlice(task, sliceId);
 			const quorum = tally(task.review, slice);
 			if (quorum.status !== "approved") fail(409, `quorum is ${quorum.status}: ${JSON.stringify(quorum)}`);
 			const result = await this.integrateSlice(task, slice);
 			if (!result.ok) fail(409, `conflicts with base: ${result.files.join(", ")}`);
-			await this.save(task);
 			return task;
 		});
 	}
@@ -1833,10 +1815,8 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 	 * was fixed by hand. Integrates on a pass, like any gate.
 	 */
 	retryGate(sliceId: string, actor: AccessIdentity) {
-		return this.exclusive(async () => {
-			const task = await this.load();
-			const slice = this.slice(task, sliceId);
-			if (slice.status !== "building") fail(409, `slice ${sliceId} is ${slice.status}`);
+		return this.mutate(async (task) => {
+			const slice = this.buildingSlice(task, sliceId);
 			const quorum = tally(task.review, slice);
 			const waived = slice.waivers?.some((w) => w.head === slice.reviewHead);
 			if (quorum.status !== "approved" && !waived) fail(409, `quorum is ${quorum.status}`);
@@ -1853,7 +1833,6 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 			this.note(task, slice.reviewHead, `${slice.id}: gate re-run requested by ${accessIdentityLabel(actor)}`);
 			if (group.length) await this.startGroupGate(task, slice, group);
 			else await this.startGate(task, slice);
-			await this.save(task);
 			return slice.gate;
 		});
 	}
@@ -1867,8 +1846,7 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 		return this.exclusive(async () => {
 			if (!input.reason?.trim()) fail(400, "a waiver needs a reason");
 			const task = await this.load();
-			const slice = this.slice(task, sliceId);
-			if (slice.status !== "building") fail(409, `slice ${sliceId} is ${slice.status}`);
+			const slice = this.buildingSlice(task, sliceId);
 			if (!slice.reviewHead) fail(409, `slice ${sliceId} has no commit under review`);
 			const builder = await this.env.BUILDER.getByName(slice.repo!).state();
 			if (builder && (builder.status === "queued" || builder.status === "working")) fail(409, "the slice's builder is still working");
@@ -1910,8 +1888,7 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 		return this.exclusive(async () => {
 			if (!message?.trim()) fail(400, "the message is empty");
 			const task = await this.load();
-			const slice = this.slice(task, sliceId);
-			if (slice.status !== "building") fail(409, `slice ${sliceId} is ${slice.status}`);
+			const slice = this.buildingSlice(task, sliceId);
 			const text = `Message from a human on the team: ${message}`;
 			const eventId = `human-message:${crypto.randomUUID()}`;
 			const delivery = await this.wakeBuilder(task, slice, eventId, text);
@@ -2044,8 +2021,7 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 
 	/** Merge the task base into the project once every slice is integrated. */
 	land(actor: AccessIdentity) {
-		return this.exclusive(async () => {
-			const task = await this.load();
+		return this.mutate(async (task) => {
 			this.requireLandable(task);
 
 			const ws = await Workspace.clone(await remoteFor(this.env.ARTIFACTS, task.repo, "write"));
@@ -2060,7 +2036,6 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 			await ws.push();
 			task.phase = "landed";
 			this.note(task, landed, `Task landed in ${task.repo} by ${accessIdentityLabel(actor)}`);
-			await this.save(task);
 			return task;
 		});
 	}
