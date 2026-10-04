@@ -6,11 +6,12 @@
 // one must win. After each level the Coordinator's lock timings are read, and at
 // the end the Git notes record is replayed against the stored state.
 //
-//   node scripts/bench.mjs [--label baseline] [--levels 1,5,10,25,50] [--racers 5]
-//                          [--base https://blueprint-bench.nuandy.workers.dev] [--repo bench-spoon]
+//   node scripts/bench.mjs [--label baseline] [--levels 1,5,10,25] [--racers 5]
+//                          [--base https://blueprint-bench.nuandy.workers.dev] [--repo bench-<label>]
 //
 // Credentials come from .dev.vars (CF_ACCESS_CLIENT_ID, CF_ACCESS_CLIENT_SECRET) and are never printed.
-// Results go to bench-results/<label>-<time>.json, with a summary table on stdout.
+// Each run gets its own repo, so its Coordinator starts idle. Results go to
+// bench-results/<label>-<time>.json after every level, with a summary table on stdout at the end.
 
 import { execFile } from "node:child_process";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
@@ -25,10 +26,10 @@ const args = Object.fromEntries(
 	process.argv.slice(2).reduce((pairs, arg, i, all) => (arg.startsWith("--") ? [...pairs, [arg.slice(2), all[i + 1]]] : pairs), []),
 );
 const BASE = args.base ?? "https://blueprint-bench.nuandy.workers.dev";
-const REPO = args.repo ?? "bench-spoon";
-const SOURCE = args.source ?? "https://github.com/octocat/Spoon-Knife";
 const LABEL = args.label ?? "baseline";
-const LEVELS = (args.levels ?? "1,5,10,25,50").split(",").map(Number);
+const REPO = args.repo ?? `bench-${LABEL}`;
+const SOURCE = args.source ?? "https://github.com/octocat/Spoon-Knife";
+const LEVELS = (args.levels ?? "1,5,10,25").split(",").map(Number);
 const RACERS = Number(args.racers ?? 5);
 
 // Calls can wait minutes behind the lock under load; don't let the client give up first.
@@ -151,6 +152,10 @@ async function main() {
 	await api("POST", `/tasks/${task.id}/lock-stats/reset`);
 
 	const levels = [];
+	const result = { label: LABEL, base: BASE, repo: REPO, task: task.id, racers: RACERS, at: new Date().toISOString(), ledgerMatches: null, ledgerCommits: null, levels };
+	await mkdir(join(root, "bench-results"), { recursive: true });
+	const file = join(root, "bench-results", `${LABEL}-${result.at.replace(/[:.]/g, "-")}.json`);
+	const save = () => writeFile(file, JSON.stringify(result, null, "\t") + "\n");
 	for (const n of LEVELS) {
 		const runId = `${LABEL}-n${n}-${Date.now().toString(36)}`;
 		const scratch = await mkdtemp(join(tmpdir(), "blueprint-bench-"));
@@ -189,6 +194,7 @@ async function main() {
 			},
 		};
 		levels.push(level);
+		await save();
 		console.log(
 			`n=${n}: ${(wallMs / 1000).toFixed(1)}s, ${level.calls} calls, lock wait p95 ${Math.round(level.lock.waitMs.p95 ?? 0)}ms, ` +
 				`race winners ${raced.winners}, failures ${failures.length}, leftover claims ${leftover.length}`,
@@ -196,10 +202,9 @@ async function main() {
 	}
 
 	const ledger = await api("GET", `/tasks/${task.id}/ledger`);
-	const result = { label: LABEL, base: BASE, repo: REPO, task: task.id, racers: RACERS, at: new Date().toISOString(), ledgerMatches: ledger.matches, ledgerCommits: ledger.commits, levels };
-	await mkdir(join(root, "bench-results"), { recursive: true });
-	const file = join(root, "bench-results", `${LABEL}-${result.at.replace(/[:.]/g, "-")}.json`);
-	await writeFile(file, JSON.stringify(result, null, "\t") + "\n");
+	result.ledgerMatches = ledger.matches;
+	result.ledgerCommits = ledger.commits;
+	await save();
 
 	const ms = (v) => (v === null ? "-" : v >= 10_000 ? `${(v / 1000).toFixed(0)}s` : v >= 1000 ? `${(v / 1000).toFixed(1)}s` : `${Math.round(v)}ms`);
 	console.log(`\n${LABEL}: ledger replay ${ledger.matches ? "matches" : "DOES NOT MATCH"} (${ledger.commits} commits)\n`);
