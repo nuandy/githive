@@ -1,0 +1,95 @@
+# Elected coordinator
+
+Blueprint has no coordinator service. Every open change is a peer, one peer at a
+time leads, and Git is the only shared memory. Any peer can take over from any
+other by reading Git.
+
+This document is the design for open mode. Planned mode (planner, slices,
+contracts, landing) is out of scope on this branch.
+
+## Pieces
+
+- **Peer.** A small Durable Object per open change, named by the change. It runs
+  Blueprint's decision code (claims, Merge-ahead, review, gate, cross-lane
+  requests), the same deterministic code the fixed Coordinator ran. The agent's
+  model never makes these decisions. External agents' changes get a peer too, so
+  a repo worked on only by outside agents still has candidates.
+- **The log.** One ref per repo, `refs/notes/blueprint/<task>`: an append-only
+  chain of commits. Each commit carries the decisions it records (the ledger
+  notes, as today), a `state.json` snapshot of the task in its tree, and three
+  trailers: `Blueprint-Term`, `Blueprint-Leader` and `Blueprint-Lease-Until`.
+- **Workers.** Builders, reviewers and the gate run work but decide nothing.
+  Their callbacks go to whoever leads.
+
+## The protocol
+
+Every write to the log is a push of one commit whose parent is the tip the
+writer read. Git rejects the push if the tip moved, so the log is a
+compare-and-swap register: of two writers that read the same tip, exactly one
+lands.
+
+1. **Campaign.** A peer that needs a decision reads the tip. If the latest
+   lease (from the tip's trailers) has expired, or there is no log yet, it
+   appends an election commit: term + 1, itself as leader, a fresh lease. If
+   the push is rejected, someone else moved first: read again.
+2. **Lead.** The leader loads state from the tip's `state.json` and decides.
+   A decision counts only once it is in Git: the leader appends a commit with
+   the decision, the new state and a renewed lease, and answers only after the
+   push lands. Decisions that arrive while a push is in flight go out together
+   in the next commit (group commit), so throughput doesn't drop to one decision
+   per round trip.
+3. **Fencing.** Before every append, the leader checks that the tip it builds on
+   carries its own term. A leader that stalled and lost its lease finds a newer
+   term (or has its push rejected), stops deciding, and forwards to the new
+   leader. Two leaders can never both land decisions.
+4. **Heartbeat.** An idle leader appends a lease renewal when two thirds of the
+   lease has passed, from its Durable Object alarm, so it keeps leading while
+   its agent's model is parked.
+5. **Hand-off.** When the leader's change merges or is abandoned, it appends a
+   resignation (lease ends now). The next peer that needs a decision wins the
+   next term at once instead of waiting out the lease.
+6. **Failover.** If a leader vanishes, its lease runs out and the next peer
+   that needs a decision campaigns. Decisions pause for at most the lease.
+
+## Requests
+
+The Worker (HTTP and MCP) is stateless. It reads the leader from the log tip and
+calls that peer's Durable Object by name. If the lease has expired, it asks the
+peer of the change making the request (or, for `open_change`, the new change's
+peer) to campaign first. A peer that is called but is no longer leader answers
+with the current leader, and the Worker retries there once.
+
+Reads that need no decision (`list_claims`, `change_status`, the dashboard) are
+served by the leader if one is alive, or straight from the tip's `state.json`.
+
+## Timers
+
+The leader owns the task's timers (claim leases, parked-builder timeouts) in its
+own alarm. A new leader schedules them from the state it loads.
+
+## Safety and liveness
+
+- **Safety:** one decision log, written only by compare-and-swap, fenced by
+  term. Every decision a client was told about is in Git, so a new leader
+  never forgets a grant.
+- **Liveness:** as long as any change on the repo is active, some peer can
+  lead. With no active changes there is nothing to coordinate; the next change
+  to arrive elects itself.
+- **Cost:** a decision waits for one Git push (about 1–4 s), instead of a
+  local write. Group commit keeps many concurrent decisions to a few pushes.
+
+## Milestones
+
+1. The log protocol as a pure module over a compare-and-swap interface, with an
+   in-memory fake: campaign, lead, fence, heartbeat, resign, group commit.
+   Test-first: racing campaigns, lease expiry takeover, a stale leader fenced,
+   decisions never lost across a takeover.
+2. The Git implementation of that interface (one shallow fetch to read, one
+   push to append), tested against a local Git server.
+3. The Peer Durable Object running open-mode decisions as leader, with state
+   from the log; the Worker routing requests to the leader.
+4. Workers' callbacks (builder, reviewer, gate) routed to the leader; timers
+   moved to the leader's alarm.
+5. Remove the fixed Coordinator from open mode.
+6. Failover test and benchmark: kill the leader mid-run, measure time to
+   recovery and decision latency.
