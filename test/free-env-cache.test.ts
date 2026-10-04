@@ -26,6 +26,15 @@ describe("the coordinator-free context's caches", () => {
 		expect(artifacts.mints.filter((m) => m.startsWith("cache-p|"))).toEqual(["cache-p|read", "cache-p|write"]);
 	});
 
+	it("never hands one call a token another call is still minting: in Workers, a request can't wait on another's I/O", async () => {
+		const env = {} as Env;
+		await Promise.all([freeContextFor(env, "service:a").remote("cache-s", "read"), freeContextFor(env, "service:b").remote("cache-s", "read")]);
+		expect(artifacts.mints.filter((m) => m.startsWith("cache-s|"))).toEqual(["cache-s|read", "cache-s|read"]);
+		// Once minted, it is shared.
+		await freeContextFor(env, "service:c").remote("cache-s", "read");
+		expect(artifacts.mints.filter((m) => m.startsWith("cache-s|"))).toHaveLength(2);
+	});
+
 	it("keeps a change fork's token too", async () => {
 		const env = {} as Env;
 		await freeContextFor(env, "service:a").changeRemote!("cache-q", "c-1", "read");

@@ -1,5 +1,5 @@
 import { forkAndWait, headOf, remoteFor, reviewerName } from "../artifacts";
-import { GitCasLog, cachedRemote } from "../election-git";
+import { GitCasLog } from "../election-git";
 import { fail } from "../errors";
 import { type Remote, Workspace } from "../git";
 import type { Registry } from "./claims";
@@ -14,13 +14,17 @@ import { makeStamper } from "./stamp";
 /**
  * Artifacts tokens, per repo and scope, kept for the isolate while fresh:
  * minting one is several Artifacts calls, which dominated each tool call. They
- * last an hour and are reused for half of it. A failed mint isn't kept.
+ * last an hour and are reused for half of it. Only minted tokens are shared: a
+ * mint still in flight is its own request's I/O, which in Workers no other
+ * request may wait on, so calls that miss at once each mint their own.
  */
-const remotes = new Map<string, () => Promise<Remote>>();
-function cached(key: string, mint: () => Promise<Remote>) {
-	let remote = remotes.get(key);
-	if (!remote) remotes.set(key, (remote = cachedRemote(mint, 30 * 60_000)));
-	return remote();
+const remotes = new Map<string, { remote: Remote; until: number }>();
+async function cached(key: string, mint: () => Promise<Remote>) {
+	const hit = remotes.get(key);
+	if (hit && Date.now() < hit.until) return hit.remote;
+	const remote = await mint();
+	remotes.set(key, { remote, until: Date.now() + 30 * 60_000 });
+	return remote;
 }
 
 /** Each record's log, kept for the isolate: a log remembers the tip it last saw, so reading an unmoved ref needn't fetch it. */
