@@ -1,6 +1,7 @@
 import type { CasLog } from "../election";
 import { entriesOverlap } from "../open-mode";
 import { appendRecord } from "./records";
+import type { ReviewPolicy } from "./votes";
 
 // Coordinator-free claims (see docs/coordinator-free.md). The registry is an
 // append-only log in Git. An agent claims by reading the tip, checking for
@@ -36,6 +37,10 @@ export interface ReleaseRecord {
 export interface Registry {
 	claims: ClaimRecord[];
 	released: ReleaseRecord[];
+	/** Main's commit when the mode started: the audit reads main after it. */
+	baseline?: string;
+	/** How many approvals a merge needs, and which roles veto. */
+	policy?: ReviewPolicy;
 }
 
 export interface Conflict {
@@ -47,6 +52,14 @@ export interface Conflict {
 }
 
 const empty = (): Registry => ({ claims: [], released: [] });
+
+/** Start coordinator-free mode on a repo: the registry's first entry records main's baseline and the review policy. Harmless to repeat. */
+export async function startFree(log: CasLog<Registry>, input: { baseline: string; policy: ReviewPolicy }) {
+	const outcome = await appendRecord<Registry, "started">(log, "blueprint", empty, (state) =>
+		state.baseline ? { refused: "started" } : { state: { ...state, baseline: input.baseline, policy: input.policy }, text: `Coordinator-free mode starts at ${input.baseline}` },
+	);
+	return { started: outcome.ok };
+}
 
 export const activeClaims = (state: Registry | null | undefined) => state?.claims ?? [];
 
