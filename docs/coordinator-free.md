@@ -63,9 +63,12 @@ merge against the claims exactly as they stood at that tip. A merge without
 them, or citing a tip the registry never had (which is also what a rewritten
 registry looks like), is a violation in itself.
 
-Known gap: an agent could cite an old but real tip, from when it still held
-its claim, after releasing it. Closing it needs the release entry to cite the
-merge commit, so the audit can check the claim was held until the merge.
+A merge also names the commit that was reviewed and the votes tip its agent
+counted (`Blueprint-Votes`), so the audit recounts the approvals exactly as the
+agent saw them. A release names the merge it follows, so a merge citing an old
+tip from before its claim was given up is caught. With no leader there is no
+timer to expire abandoned claims: by convention any agent may release a claim
+idle for 30 minutes, and the audit flags one released while still in use.
 
 Blueprint's part is a stateless toolkit (the MCP tools) that does the Git
 operations an agent asks for and reports what Git said, plus the audit.

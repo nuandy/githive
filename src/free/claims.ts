@@ -1,5 +1,6 @@
-import type { CasLog, LogCommit } from "../election";
+import type { CasLog } from "../election";
 import { entriesOverlap } from "../open-mode";
+import { appendRecord } from "./records";
 
 // Coordinator-free claims (see docs/coordinator-free.md). The registry is an
 // append-only log in Git. An agent claims by reading the tip, checking for
@@ -14,11 +15,27 @@ export interface ClaimRecord {
 	paths: string[];
 	intent: string;
 	since: string;
+	/** Its holder's last claim or extension: a claim idle long enough may be released by anyone. */
+	active: string;
 }
 
-/** The registry's state: the claims in force. */
+/** A released claim: who released it, after which merge (if it merged), and whether it was released as stale. */
+export interface ReleaseRecord {
+	change: string;
+	agent: string;
+	by: string;
+	at: string;
+	reason: string;
+	mergedAs?: string;
+	stale?: boolean;
+	/** The holder's last activity, for the audit to check a stale release against. */
+	lastActive: string;
+}
+
+/** The registry's state: the claims in force, and every release so far. */
 export interface Registry {
 	claims: ClaimRecord[];
+	released: ReleaseRecord[];
 }
 
 export interface Conflict {
@@ -29,9 +46,7 @@ export interface Conflict {
 	intent: string;
 }
 
-export type ClaimOutcome = { ok: true; tip: string } | { ok: false; conflicts: Conflict[] };
-
-const ATTEMPTS = 5;
+const empty = (): Registry => ({ claims: [], released: [] });
 
 export const activeClaims = (state: Registry | null | undefined) => state?.claims ?? [];
 
@@ -46,48 +61,50 @@ export function conflictsWith(state: Registry | null | undefined, paths: string[
 	return conflicts;
 }
 
-/**
- * Append a change to the registry on the tip it was computed from. `next`
- * returns the new state and what to record, or the conflicts that stop it.
- * Retries when another agent's append got there first.
- */
-async function append(log: CasLog<Registry>, agent: string, next: (state: Registry) => { state: Registry; text: string } | Conflict[]): Promise<ClaimOutcome> {
-	for (let attempt = 1; ; attempt++) {
-		const head = await log.read();
-		const outcome = next(head?.commit.state ?? { claims: [] });
-		if (Array.isArray(outcome)) return { ok: false, conflicts: outcome };
-		const commit: LogCommit<Registry> = {
-			term: 0,
-			leader: agent,
-			leaseUntil: 0,
-			kind: "decisions",
-			entries: [{ commit: "none", text: outcome.text, at: new Date().toISOString() }],
-			state: outcome.state,
-			batch: crypto.randomUUID(),
-		};
-		const tip = await log.append(head?.tip ?? null, commit);
-		if (tip) return { ok: true, tip };
-		if (attempt === ATTEMPTS) throw new Error("[503] the claims registry kept moving; try again");
-	}
-}
-
-/** Claim `paths` for a change, if no other change's claim overlaps them. */
-export function claim(log: CasLog<Registry>, input: { change: string; agent: string; paths: string[]; intent: string }) {
-	return append(log, input.agent, (state) => {
+/** Claim `paths` for a change, if no other change's claim overlaps them; claiming again extends the change's claim. */
+export async function claim(log: CasLog<Registry>, input: { change: string; agent: string; paths: string[]; intent: string }) {
+	const outcome = await appendRecord<Registry, Conflict[]>(log, input.agent, empty, (state) => {
 		const conflicts = conflictsWith(state, input.paths, input.change);
-		if (conflicts.length) return conflicts;
+		if (conflicts.length) return { refused: conflicts };
+		const now = new Date().toISOString();
 		const existing = state.claims.find((c) => c.change === input.change);
 		const claims = existing
-			? state.claims.map((c) => (c.change === input.change ? { ...c, paths: [...c.paths, ...input.paths.filter((p) => !c.paths.includes(p))] } : c))
-			: [...state.claims, { ...input, since: new Date().toISOString() }];
-		return { state: { claims }, text: `${input.agent} claims ${input.paths.join(", ")} for ${input.change}: ${input.intent}` };
+			? state.claims.map((c) => (c.change === input.change ? { ...c, paths: [...c.paths, ...input.paths.filter((p) => !c.paths.includes(p))], active: now } : c))
+			: [...state.claims, { ...input, since: now, active: now }];
+		return { state: { ...state, claims }, text: `${input.agent} claims ${input.paths.join(", ")} for ${input.change}: ${input.intent}` };
+	});
+	return outcome.ok ? outcome : { ok: false as const, conflicts: outcome.refused };
+}
+
+/** Release a change's claim: its holder's, after it merged (say which merge) or was given up. */
+export function release(log: CasLog<Registry>, input: { change: string; agent: string; reason: string; mergedAs?: string }) {
+	return appendRecord<Registry, string>(log, input.agent, empty, (state) => {
+		const held = state.claims.find((c) => c.change === input.change);
+		if (!held) return { refused: `${input.change} holds no claim` };
+		return {
+			state: {
+				claims: state.claims.filter((c) => c.change !== input.change),
+				released: [...state.released, { change: input.change, agent: held.agent, by: input.agent, at: new Date().toISOString(), reason: input.reason, mergedAs: input.mergedAs, lastActive: held.active }],
+			},
+			text: `${input.agent} releases ${input.change}${input.mergedAs ? ` after merging ${input.mergedAs}` : ""}: ${input.reason}`,
+		};
 	});
 }
 
-/** Release a change's claim (it merged or was given up). */
-export function release(log: CasLog<Registry>, input: { change: string; agent: string; reason: string }) {
-	return append(log, input.agent, (state) => ({
-		state: { claims: state.claims.filter((c) => c.change !== input.change) },
-		text: `${input.agent} releases ${input.change}: ${input.reason}`,
-	}));
+/** Release another agent's claim, if it has been idle longer than `staleAfterMs`. */
+export function releaseStale(log: CasLog<Registry>, input: { change: string; agent: string; staleAfterMs: number; now?: number }) {
+	const now = input.now ?? Date.now();
+	return appendRecord<Registry, string>(log, input.agent, empty, (state) => {
+		const held = state.claims.find((c) => c.change === input.change);
+		if (!held) return { refused: `${input.change} holds no claim` };
+		const idle = now - Date.parse(held.active);
+		if (idle <= input.staleAfterMs) return { refused: `${input.change}'s claim was active ${Math.round(idle / 1000)}s ago; it isn't stale` };
+		return {
+			state: {
+				claims: state.claims.filter((c) => c.change !== input.change),
+				released: [...state.released, { change: input.change, agent: held.agent, by: input.agent, at: new Date(now).toISOString(), reason: "stale", stale: true, lastActive: held.active }],
+			},
+			text: `${input.agent} releases ${input.change}'s claim, idle for ${Math.round(idle / 60_000)} minutes`,
+		};
+	});
 }

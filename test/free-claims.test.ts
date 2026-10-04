@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { GitCasLog } from "../src/election-git";
-import { activeClaims, claim, release, type Registry } from "../src/free/claims";
+import { activeClaims, claim, release, releaseStale, type Registry } from "../src/free/claims";
 import { startGitServer } from "./helpers/git-server";
 import { MemoryLog } from "./helpers/memory-log";
 
@@ -67,5 +67,31 @@ describe("claims, coordinator-free", () => {
 		} finally {
 			await server.close();
 		}
+	});
+
+	it("records which merge a release follows", async () => {
+		const log = new MemoryLog<Registry>();
+		await claim(log, a);
+		await release(log, { change: "stats-1a2b", agent: "agent-a", reason: "merged", mergedAs: "m1" });
+		expect((await log.read())!.commit.state.released).toEqual([expect.objectContaining({ change: "stats-1a2b", by: "agent-a", mergedAs: "m1" })]);
+	});
+
+	it("lets any agent release a claim gone stale, but not one still in use", async () => {
+		const log = new MemoryLog<Registry>();
+		await claim(log, a);
+		const since = Date.parse((await log.read())!.commit.state.claims[0].active);
+		expect(await releaseStale(log, { change: "stats-1a2b", agent: "agent-b", staleAfterMs: 60_000, now: since + 30_000 })).toMatchObject({ ok: false });
+		expect(await releaseStale(log, { change: "stats-1a2b", agent: "agent-b", staleAfterMs: 60_000, now: since + 60_001 })).toMatchObject({ ok: true });
+		expect(activeClaims((await log.read())!.commit.state)).toEqual([]);
+		expect((await log.read())!.commit.state.released).toEqual([expect.objectContaining({ change: "stats-1a2b", by: "agent-b", stale: true })]);
+	});
+
+	it("counts extending a claim as activity", async () => {
+		const log = new MemoryLog<Registry>();
+		await claim(log, a);
+		const first = (await log.read())!.commit.state.claims[0].active;
+		await new Promise((resolve) => setTimeout(resolve, 5));
+		await claim(log, { ...a, paths: ["docs/stats.md"] });
+		expect(Date.parse((await log.read())!.commit.state.claims[0].active)).toBeGreaterThan(Date.parse(first));
 	});
 });
