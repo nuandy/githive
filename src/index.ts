@@ -1,10 +1,14 @@
 import { Hono } from "hono";
 import { verifyAccessRequest } from "./access";
 import type { AccessIdentity, CoordinatorHumanActions } from "./access-contract";
-import { deleteReposWithPrefix, listRepoNames, parseRepoName, reviewerName, sliceRepoName } from "./artifacts";
-import { requiredPaths, requiredString, statusOf } from "./errors";
+import { deleteReposWithPrefix, headOf, listRepoNames, parseRepoName, remoteFor, reviewerName, sliceRepoName } from "./artifacts";
+import { openTaskFor, type OpenTaskInput } from "./coordinator";
+import { electedForEnv } from "./elected";
+import { GitCasLog } from "./election-git";
+import { openLog } from "./peer";
+import { fail, requiredPaths, requiredString, statusOf } from "./errors";
 import { retryTransient } from "./retry";
-import type { Blueprint, Limits, Review, ReviewPolicy } from "./types";
+import type { Blueprint, Limits, Review, ReviewPolicy, Task } from "./types";
 import { openTaskId } from "./open-mode";
 import { handleMcpBody, type McpContext } from "./mcp";
 
@@ -14,10 +18,31 @@ export { Coordinator } from "./coordinator";
 export { ContractChecker } from "./contract-check";
 export { Gate } from "./gate";
 export { TaskIndex } from "./task-index";
+export { Peer } from "./peer";
 
 const app = new Hono<{ Bindings: Env; Variables: { accessIdentity: AccessIdentity } }>();
 
-const coordinator = (env: Env, taskId: string) => env.COORDINATOR.get(env.COORDINATOR.idFromName(taskId));
+const fixedCoordinator = (env: Env, taskId: string) => env.COORDINATOR.get(env.COORDINATOR.idFromName(taskId));
+
+/**
+ * The coordinator of a task: the elected coordinator for an open task (its
+ * peers and its log in Git), or the task's Coordinator object for a planned
+ * one. Resolved on each call, so callers use it like a Coordinator stub.
+ */
+const coordinator = (env: Env, taskId: string) => {
+	const resolved = (async () => {
+		const ref = await taskIndex(env).get(taskId);
+		return ref?.elected ? electedForEnv(env, taskId, ref.repo) : fixedCoordinator(env, taskId);
+	})();
+	return new Proxy({} as ReturnType<typeof fixedCoordinator>, {
+		get: (_target, method: string) =>
+			async (...args: unknown[]) => {
+				const target = (await resolved) as unknown as Record<string, (...a: unknown[]) => unknown>;
+				if (typeof target[method] !== "function") throw new Error(`[409] tasks run by the elected coordinator don't support ${method}`);
+				return target[method](...args);
+			},
+	});
+};
 const humanCoordinator = (env: Env, taskId: string) => coordinator(env, taskId) as unknown as CoordinatorHumanActions;
 const taskIndex = (env: Env) => env.TASK_INDEX.getByName("all");
 
@@ -110,10 +135,17 @@ app.post("/tasks", async (c) => {
 });
 
 /** Open a repo for open changes, or find it already open, and list it on the dashboard. Shared by HTTP and MCP. */
-async function openRepoTask(env: Env, repo: string, input: { verify?: string[]; review?: ReviewPolicy; limits?: Partial<Limits>; leaseMinutes?: number } = {}) {
+async function openRepoTask(env: Env, repo: string, input: OpenTaskInput = {}): Promise<Task> {
 	const id = await openTaskId(repo);
-	const task = await coordinator(env, id).createOpen(id, repo, input);
-	await taskIndex(env).add({ id, repo, goal: task.goal, createdAt: task.createdAt });
+	const listed = await taskIndex(env).get(id);
+	if (listed?.elected) return electedForEnv(env, id, repo).state();
+	// No coordinator to create: the task's log in Git starts with it, and the
+	// first peer that needs a decision becomes its leader.
+	const head = (await headOf(env.ARTIFACTS, repo)) ?? fail(409, `${repo} has no commits`);
+	const task = openTaskFor(id, repo, head, input);
+	const log = new GitCasLog<Task>(() => remoteFor(env.ARTIFACTS, repo, "write"), id);
+	await openLog(log, task, [{ commit: head, text: `Open mode started on ${repo}: agents claim their lanes as they arrive`, at: new Date().toISOString() }]);
+	await taskIndex(env).add({ id, repo, goal: task.goal, createdAt: task.createdAt, elected: true });
 	return task;
 }
 

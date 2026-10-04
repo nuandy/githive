@@ -27,7 +27,9 @@ class SharedLog implements CasLog<Task> {
 	commits: { id: string; commit: LogCommit<Task> }[] = [];
 	/** How long a push takes; a real one takes a second or more. */
 	pushMs = 0;
+	reads = 0;
 	async read() {
+		this.reads++;
 		const tip = this.commits.at(-1);
 		return tip ? { tip: tip.id, commit: structuredClone(tip.commit) } : null;
 	}
@@ -164,5 +166,32 @@ describe("a peer of the elected coordinator", () => {
 		// Each change takes two steps (reserve, confirm): 20 steps in all.
 		expect(log.commits.length - before).toBeLessThan(20);
 		expect(log.commits.at(-1)?.commit.state.slices.filter((s) => s.status === "building")).toHaveLength(10);
+	});
+
+	it("answers lead() from memory while it knows a live lease, without reading the log", async () => {
+		const a = peer("t1--a");
+		const b = peer("t1--b");
+		await a.lead();
+		await b.lead();
+		const reads = log.reads;
+		expect(await a.lead()).toEqual({ leader: "t1--a", term: 1 });
+		expect(await b.lead()).toEqual({ leader: "t1--a", term: 1 });
+		expect(log.reads).toBe(reads);
+
+		// Once that lease has ended, b looks again (and takes over).
+		clock.now += LEASE + 1;
+		expect(await b.lead()).toEqual({ leader: "t1--b", term: 2 });
+		expect(log.reads).toBeGreaterThan(reads);
+	});
+
+	it("looks in the log again when asked to, after the leader it remembers stepped down", async () => {
+		const a = peer("t1--stats-1a2b");
+		const b = peer("t1--b");
+		await a.lead();
+		expect(await b.lead()).toMatchObject({ leader: "t1--stats-1a2b" });
+		await a.peer.openChange({ id: "stats-1a2b", title: "Stats", intent: "Stats", owns: ["src/stats/"] });
+		await a.peer.abandonChange("stats-1a2b", "done");
+		expect(await b.lead()).toMatchObject({ leader: "t1--stats-1a2b" }); // still remembered
+		expect(await b.peer.lead("t1", "project", "t1--b", true)).toEqual({ leader: "t1--b", term: 2 });
 	});
 });

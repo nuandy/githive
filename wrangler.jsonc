@@ -34,7 +34,8 @@
 			{ "name": "REVIEWER", "class_name": "Reviewer" },
 			{ "name": "GATE", "class_name": "Gate" },
 			{ "name": "TASK_INDEX", "class_name": "TaskIndex" },
-			{ "name": "CONTRACT_CHECKER", "class_name": "ContractChecker" }
+			{ "name": "CONTRACT_CHECKER", "class_name": "ContractChecker" },
+			{ "name": "PEER", "class_name": "Peer" }
 		]
 	},
 	// One container per builder or reviewer agent, and per integration gate run. The image (cloudflare/debian-trixie)
@@ -51,7 +52,8 @@
 		{ "tag": "v3", "new_sqlite_classes": ["Reviewer"] },
 		{ "tag": "v4", "new_sqlite_classes": ["Gate"] },
 		{ "tag": "v5", "new_sqlite_classes": ["TaskIndex"] },
-		{ "tag": "v6", "new_sqlite_classes": ["ContractChecker"] }
+		{ "tag": "v6", "new_sqlite_classes": ["ContractChecker"] },
+		{ "tag": "v7", "new_sqlite_classes": ["Peer"] }
 	],
 	"queues": {
 		// Receives Artifacts event subscriptions (see README).

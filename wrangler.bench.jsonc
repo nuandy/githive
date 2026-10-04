@@ -30,7 +30,8 @@
 			{ "name": "REVIEWER", "class_name": "Reviewer" },
 			{ "name": "GATE", "class_name": "Gate" },
 			{ "name": "TASK_INDEX", "class_name": "TaskIndex" },
-			{ "name": "CONTRACT_CHECKER", "class_name": "ContractChecker" }
+			{ "name": "CONTRACT_CHECKER", "class_name": "ContractChecker" },
+			{ "name": "PEER", "class_name": "Peer" }
 		]
 	},
 	"migrations": [
@@ -39,6 +40,7 @@
 		{ "tag": "v3", "new_sqlite_classes": ["Reviewer"] },
 		{ "tag": "v4", "new_sqlite_classes": ["Gate"] },
 		{ "tag": "v5", "new_sqlite_classes": ["TaskIndex"] },
-		{ "tag": "v6", "new_sqlite_classes": ["ContractChecker"] }
+		{ "tag": "v6", "new_sqlite_classes": ["ContractChecker"] },
+		{ "tag": "v7", "new_sqlite_classes": ["Peer"] }
 	]
 }

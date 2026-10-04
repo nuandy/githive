@@ -8,6 +8,8 @@ export interface TaskRef {
 	repo: string;
 	goal: string;
 	createdAt: string;
+	/** Run by the elected coordinator: its state is in the task's log, not a Coordinator object. */
+	elected?: boolean;
 }
 
 export class TaskIndex extends DurableObject<Env> {
@@ -19,6 +21,12 @@ export class TaskIndex extends DurableObject<Env> {
 	async list(limit = 50) {
 		const entries = await this.ctx.storage.list<TaskRef>({ prefix: "task:", reverse: true, limit });
 		return [...entries.values()];
+	}
+
+	/** The task with this id, if it is listed. */
+	async get(id: string) {
+		const entries = await this.ctx.storage.list<TaskRef>({ prefix: "task:" });
+		return [...entries.values()].find((ref) => ref.id === id) ?? null;
 	}
 
 	/** Every task on a repo. */

@@ -122,3 +122,10 @@ export function nextLeaseCheck(task: Task) {
 	const times = task.slices.filter((s) => holdsClaim(s) && s.leaseUntil).map((s) => Date.parse(s.leaseUntil!));
 	return times.length ? Math.min(...times) : null;
 }
+
+/** The claims active changes hold, for agents deciding what to claim. */
+export function claimsOf(task: Task) {
+	return task.slices
+		.filter(holdsClaim)
+		.map(({ id, title, intent, instructions, owns, leaseUntil: until, reviewHead }) => ({ change: id, title, intent: intent ?? instructions, owns, leaseUntil: until, inReview: !!reviewHead }));
+}

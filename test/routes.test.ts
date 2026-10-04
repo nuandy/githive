@@ -1,6 +1,24 @@
 import { describe, expect, it, vi } from "vitest";
 import worker from "../src/index";
 
+// Opening a repo writes the log's first commit to Git; the Git side is faked here.
+const genesis = vi.hoisted(() => ({ appended: [] as { parent: string | null; commit: { kind: string; state: { id: string; repo: string; mode?: string } } }[] }));
+vi.mock("../src/election-git", () => ({
+	GitCasLog: class {
+		async append(parent: string | null, commit: never) {
+			genesis.appended.push({ parent, commit });
+			return "c1";
+		}
+		async read() {
+			return null;
+		}
+	},
+}));
+vi.mock("../src/artifacts", async (importOriginal) => ({
+	...(await importOriginal<typeof import("../src/artifacts")>()),
+	headOf: vi.fn(async () => "main0"),
+}));
+
 // HTTP routes with the Durable Objects faked: what the Worker itself does around Coordinator calls.
 
 vi.mock("../src/access", () => ({
@@ -8,9 +26,8 @@ vi.mock("../src/access", () => ({
 }));
 
 function fakeEnv() {
-	const open = { id: "", repo: "", goal: "Open changes", createdAt: "2026-10-04T00:00:00.000Z", review: { reviewers: [], required: 0, vetoes: [] }, verify: [], leaseMinutes: 30 };
-	const coordinator = { createOpen: vi.fn(async (id: string, repo: string) => ({ ...open, id, repo })) };
-	const index = { add: vi.fn(async () => {}) };
+	const coordinator = { createOpen: vi.fn() };
+	const index = { add: vi.fn(async () => {}), get: vi.fn(async () => null) };
 	const env = {
 		COORDINATOR: { idFromName: (name: string) => name, get: () => coordinator },
 		TASK_INDEX: { getByName: () => index },
@@ -22,17 +39,25 @@ const post = (env: never, path: string, body: unknown) =>
 	worker.fetch(new Request(`https://blueprint.test${path}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }), env, {} as never);
 
 describe("opening a repo", () => {
-	it("lists a repo joined over MCP on the dashboard, like one opened over HTTP", async () => {
+	it("starts the task's log in Git, with no coordinator, whether joined over MCP or opened over HTTP", async () => {
+		genesis.appended = [];
 		const mcp = fakeEnv();
 		await post(mcp.env, "/mcp", { jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "join_repo", arguments: { repo: "project" } } });
 		const http = fakeEnv();
 		await post(http.env, "/repos/project/open", {});
 
-		for (const { coordinator, index } of [mcp, http]) {
-			expect(coordinator.createOpen).toHaveBeenCalledWith(expect.stringMatching(/^[0-9a-f]{8}$/), "project", {});
-			expect(index.add).toHaveBeenCalledWith(expect.objectContaining({ repo: "project", goal: "Open changes" }));
+		expect(genesis.appended).toHaveLength(2);
+		for (const { parent, commit } of genesis.appended) {
+			expect(parent).toBeNull();
+			expect(commit).toMatchObject({ kind: "genesis", state: { repo: "project", mode: "open" } });
 		}
-		expect(mcp.index.add.mock.calls[0]).toEqual(http.index.add.mock.calls[0]);
+		for (const { coordinator, index } of [mcp, http]) {
+			expect(coordinator.createOpen).not.toHaveBeenCalled();
+			expect(index.add).toHaveBeenCalledWith(expect.objectContaining({ repo: "project", elected: true }));
+		}
+		// The same entry either way (opened 1 ms apart, so the time can differ).
+		const entry = (calls: unknown[][]) => ({ ...(calls[0][0] as object), createdAt: undefined });
+		expect(entry(mcp.index.add.mock.calls)).toEqual(entry(http.index.add.mock.calls));
 	});
 });
 
@@ -52,6 +77,7 @@ describe("dashboard reads", () => {
 		const reviewers: string[] = [];
 		const env = {
 			COORDINATOR: { idFromName: (name: string) => name, get: () => ({ state: async () => task }) },
+			TASK_INDEX: { getByName: () => ({ get: async () => null }) },
 			BUILDER: { getByName: (name: string) => (builders.push(name), { state: async () => ({ status: "working", name }) }) },
 			REVIEWER: { getByName: (name: string) => (reviewers.push(name), { state: async () => ({ status: "done", name }) }) },
 			ARTIFACTS: {
@@ -106,7 +132,7 @@ describe("open-mode change routes", () => {
 			extendClaim: vi.fn(async () => ({ id: "c1" })),
 			abandonChange: vi.fn(async () => ({ id: "c1" })),
 		};
-		const env = { COORDINATOR: { idFromName: (name: string) => name, get: () => coordinator } };
+		const env = { COORDINATOR: { idFromName: (name: string) => name, get: () => coordinator }, TASK_INDEX: { getByName: () => ({ get: async () => null }) } };
 		return { env: env as never, coordinator };
 	}
 

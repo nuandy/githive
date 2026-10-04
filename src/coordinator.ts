@@ -24,7 +24,7 @@ import type { Remote } from "./git";
 import type { ReviewJob } from "./reviewer";
 import type { SliceJob } from "./sandbox";
 import { plan } from "./planner";
-import { OPENING_LEASE_MS, claimConflicts, conflictMessage as claimConflictMessage, changeId, holdsClaim, inLane, leaseExpired, leaseUntil, nextLeaseCheck, normalizeClaim } from "./open-mode";
+import { OPENING_LEASE_MS, claimConflicts, claimsOf, conflictMessage as claimConflictMessage, changeId, holdsClaim, inLane, leaseExpired, leaseUntil, nextLeaseCheck, normalizeClaim } from "./open-mode";
 import { nextStep, reviewFeedback, tally, validatePolicy } from "./quorum";
 import { activeOf, hasRoom, itemKey, stillWanted, validateLimits, withScheduling, type AgentKind } from "./schedule";
 import { accessIdentityLabel, type AccessIdentity, type CoordinatorHumanActions } from "./access-contract";
@@ -85,6 +85,26 @@ function newTask(head: Pick<Task, "id" | "repo" | "goal" | "phase"> & Partial<Ta
 		createdAt: new Date().toISOString(),
 		anchor: rest.anchor,
 	};
+}
+
+/** The options an open task can be started with. */
+export interface OpenTaskInput {
+	verify?: string[];
+	review?: ReviewPolicy;
+	limits?: Partial<Limits>;
+	leaseMinutes?: number;
+}
+
+/** A new open task on `repo`, based at `head`. Throws `[400]` for invalid options. */
+export function openTaskFor(id: string, repo: string, head: string, input: OpenTaskInput = {}): Task {
+	const review = input.review ?? DEFAULT_POLICY;
+	validatePolicy(review);
+	const leaseMinutes = input.leaseMinutes ?? 30;
+	if (!Number.isInteger(leaseMinutes) || leaseMinutes < 5 || leaseMinutes > 1440) fail(400, "leaseMinutes must be a whole number from 5 to 1440");
+	return newTask(
+		{ id, repo, goal: `Open changes on ${repo}`, phase: "building", mode: "open", leaseMinutes, baseRepo: repo, baseCommit: head },
+		{ verify: (input.verify ?? []).filter((c) => typeof c === "string" && c.trim()), review, limits: validateLimits(input.limits), anchor: head },
+	);
 }
 
 /** What every agent working on a slice is told about it: the fields BuildJob and ReviewJob share, less credentials. */
@@ -680,7 +700,7 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 	 * the project itself, so changes merge straight into the project's main.
 	 * Calling it again for the same repo returns the existing task.
 	 */
-	createOpen(id: string, repo: string, input: { verify?: string[]; review?: ReviewPolicy; limits?: Partial<Limits>; leaseMinutes?: number } = {}) {
+	createOpen(id: string, repo: string, input: OpenTaskInput = {}) {
 		return this.exclusive(async () => {
 			const existing = await this.readTask();
 			if (existing) {
@@ -689,14 +709,7 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 			}
 			await this.requireRepo(repo);
 			const head = (await headOf(this.env.ARTIFACTS, repo)) ?? fail(409, `${repo} has no commits`);
-			const review = input.review ?? DEFAULT_POLICY;
-			validatePolicy(review);
-			const leaseMinutes = input.leaseMinutes ?? 30;
-			if (!Number.isInteger(leaseMinutes) || leaseMinutes < 5 || leaseMinutes > 1440) fail(400, "leaseMinutes must be a whole number from 5 to 1440");
-			const task = newTask(
-				{ id, repo, goal: `Open changes on ${repo}`, phase: "building", mode: "open", leaseMinutes, baseRepo: repo, baseCommit: head },
-				{ verify: (input.verify ?? []).filter((c) => typeof c === "string" && c.trim()), review, limits: validateLimits(input.limits), anchor: head },
-			);
+			const task = openTaskFor(id, repo, head, input);
 			this.note(task, head, `Open mode started on ${repo}: agents claim their lanes as they arrive`);
 			await this.save(task);
 			return task;
@@ -839,10 +852,7 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 
 	/** Claims held by active changes, for agents deciding what to claim. */
 	async claims() {
-		const task = await this.load();
-		return task.slices
-			.filter(holdsClaim)
-			.map(({ id, title, intent, instructions, owns, leaseUntil: until, reviewHead }) => ({ change: id, title, intent: intent ?? instructions, owns, leaseUntil: until, inReview: !!reviewHead }));
+		return claimsOf(await this.load());
 	}
 
 	/**
