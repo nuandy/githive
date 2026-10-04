@@ -108,6 +108,28 @@ describe("Artifacts transient failures", () => {
 		vi.unstubAllGlobals();
 	});
 
+	it("asks again for a fork that was accepted but never appeared", async () => {
+		let now = 0;
+		vi.spyOn(Date, "now").mockImplementation(() => now);
+		vi.stubGlobal("scheduler", { wait: vi.fn(async (ms: number) => void (now += ms)) });
+		const forked = { name: "fork", remote: "https://git.test/fork.git", token: "token" };
+		const source = { fork: vi.fn(async () => forked) };
+		const missing = Object.assign(new Error("Repository not found: fork"), { code: "NOT_FOUND" });
+		// The fork reads as missing until it is asked for a second time.
+		const artifacts = {
+			get: vi.fn(async (name: string) => {
+				if (name === "source") return source;
+				if (source.fork.mock.calls.length < 2) throw missing;
+				return {};
+			}),
+		} as never;
+
+		await expect(forkAndWait(artifacts, "source", "fork", "test fork")).resolves.toEqual(forked);
+		expect(source.fork).toHaveBeenCalledTimes(2);
+		vi.restoreAllMocks();
+		vi.unstubAllGlobals();
+	});
+
 	it("gives up on a fork that keeps failing", async () => {
 		vi.stubGlobal("scheduler", { wait: vi.fn(async () => {}) });
 		const internal = Object.assign(new Error("An internal error occurred."), { code: "INTERNAL_ERROR" });

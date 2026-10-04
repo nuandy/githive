@@ -96,22 +96,34 @@ const notFoundYet = (err: unknown) => /NOT_FOUND/.test(codeOf(err)) || /not foun
 
 const FORK_ATTEMPTS = 5;
 
-/** Fork `source` and wait until the fork is ready, since get() throws while a repo is still forking. */
+/** How long a new fork may read as missing before it is asked for again, and how long to wait for it in all. */
+const FORK_LOST_MS = 8_000;
+const FORK_READY_MS = 30_000;
+
+/**
+ * Fork `source` and wait until the fork is ready, since get() throws while a
+ * repo is still forking. Under load Artifacts fails some forks outright, and
+ * now and then accepts one that never appears; both are asked for again.
+ */
 export async function forkAndWait(artifacts: Artifacts, source: string, name: string, description: string) {
-	const forked = await withRepo(artifacts, source, async (repo) => {
-		for (let attempt = 1; ; attempt++) {
-			try {
-				return await retryTransient(() => repo.fork(name, { description, defaultBranchOnly: true }));
-			} catch (err) {
-				// A failed attempt may still have made the fork; then use it.
-				if (attempt > 1 && alreadyExists(err)) return null;
-				if (!isInternalError(err) || attempt === FORK_ATTEMPTS) throw err;
-				// Back off with jitter, so a burst of forks spreads out.
-				await scheduler.wait(Math.min(250 * 2 ** attempt, 4_000) * (0.5 + Math.random()));
+	/** Request the fork; null when it turns out to exist already (a failed or lost request made it after all). */
+	const requestFork = (again: boolean) =>
+		withRepo(artifacts, source, async (repo) => {
+			for (let attempt = 1; ; attempt++) {
+				try {
+					return await retryTransient(() => repo.fork(name, { description, defaultBranchOnly: true }));
+				} catch (err) {
+					if ((again || attempt > 1) && alreadyExists(err)) return null;
+					if (!isInternalError(err) || attempt === FORK_ATTEMPTS) throw err;
+					// Back off with jitter, so a burst of forks spreads out.
+					await scheduler.wait(Math.min(250 * 2 ** attempt, 4_000) * (0.5 + Math.random()));
+				}
 			}
-		}
-	});
-	const deadline = Date.now() + 20_000;
+		});
+
+	let forked = await requestFork(false);
+	let askedAgain = false;
+	const started = Date.now();
 	for (let delay = 100; ; delay = Math.min(delay * 2, 2_000)) {
 		try {
 			await withRepo(artifacts, name, async () => undefined);
@@ -120,7 +132,12 @@ export async function forkAndWait(artifacts: Artifacts, source: string, name: st
 			return { name, remote: remote.url, token: remote.token };
 		} catch (err) {
 			if (!isTransientFailure(err) && !isForkPending(err) && !notFoundYet(err)) throw err;
-			if (Date.now() > deadline) throw new Error(`fork ${name} not ready after 20s: ${err}`);
+			if (notFoundYet(err) && !askedAgain && Date.now() - started > FORK_LOST_MS) {
+				askedAgain = true;
+				forked = (await requestFork(true)) ?? forked;
+				continue;
+			}
+			if (Date.now() - started > FORK_READY_MS) throw new Error(`fork ${name} not ready after ${FORK_READY_MS / 1000}s: ${err}`);
 			await scheduler.wait(delay);
 		}
 	}
