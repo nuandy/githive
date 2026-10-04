@@ -1,6 +1,6 @@
 import type { AccessIdentity } from "./access-contract";
 import type { Coordinator } from "./coordinator";
-import { statusOf } from "./errors";
+import { requiredPaths, requiredString as need, statusOf } from "./errors";
 import type { Task } from "./types";
 
 // The MCP front door: any agent (Claude Code, Codex, a team's own bots) joins
@@ -123,12 +123,6 @@ export const TOOLS = [
 
 type Args = Record<string, unknown>;
 
-const need = (args: Args, key: string) => {
-	const v = args[key];
-	if (typeof v !== "string" || !v.trim()) throw new Error(`[400] ${key} is required`);
-	return v.trim();
-};
-
 async function callTool(name: string, args: Args, ctx: McpContext): Promise<unknown> {
 	const co = () => ctx.coordinator(need(args, "task_id"));
 	switch (name) {
@@ -140,7 +134,7 @@ async function callTool(name: string, args: Args, ctx: McpContext): Promise<unkn
 			return co().claims();
 		case "open_change": {
 			const { change, credentials } = await co().openChange(
-				{ title: need(args, "title"), intent: need(args, "intent"), owns: args.paths as string[] },
+				{ title: need(args, "title"), intent: need(args, "intent"), owns: requiredPaths(args, "paths") },
 				ctx.identity,
 			);
 			return {
@@ -153,7 +147,7 @@ async function callTool(name: string, args: Args, ctx: McpContext): Promise<unkn
 			};
 		}
 		case "extend_claim": {
-			const slice = await co().extendClaim(need(args, "change_id"), args.paths as string[]);
+			const slice = await co().extendClaim(need(args, "change_id"), requiredPaths(args, "paths"));
 			return { lane: slice.owns, lease_until: slice.leaseUntil };
 		}
 		case "abandon_change": {

@@ -1,8 +1,8 @@
 import { Hono } from "hono";
 import { verifyAccessRequest } from "./access";
 import type { AccessIdentity, CoordinatorHumanActions } from "./access-contract";
-import { deleteReposWithPrefix, parseRepoName, reviewerName } from "./artifacts";
-import { statusOf } from "./errors";
+import { deleteReposWithPrefix, listRepoNames, parseRepoName, reviewerName, sliceRepoName } from "./artifacts";
+import { requiredPaths, requiredString, statusOf } from "./errors";
 import { retryTransient } from "./retry";
 import type { Blueprint, Limits, Review, ReviewPolicy } from "./types";
 import { openTaskId } from "./open-mode";
@@ -20,6 +20,16 @@ const app = new Hono<{ Bindings: Env; Variables: { accessIdentity: AccessIdentit
 const coordinator = (env: Env, taskId: string) => env.COORDINATOR.get(env.COORDINATOR.idFromName(taskId));
 const humanCoordinator = (env: Env, taskId: string) => coordinator(env, taskId) as unknown as CoordinatorHumanActions;
 const taskIndex = (env: Env) => env.TASK_INDEX.getByName("all");
+
+/** The reviewer agent of each role for one commit of a slice; state is null for agents that never ran. */
+const reviewerStates = (env: Env, repo: string, roles: string[], head: string) =>
+	Promise.all(roles.map(async (role) => ({ role, state: await env.REVIEWER.getByName(reviewerName(repo, role, head)).state() })));
+
+/** A JSON body as arguments to check, or none when it is missing or not JSON. */
+const jsonArgs = async (c: { req: { json<T>(): Promise<T> } }) => {
+	const body = await c.req.json<Record<string, unknown> | null>().catch(() => null);
+	return body && typeof body === "object" ? body : {};
+};
 
 // Authenticate before routing, including GETs and requests served from the dashboard assets.
 app.use("*", async (c, next) => {
@@ -113,18 +123,20 @@ app.post("/repos/:repo/open", async (c) => {
 	return c.json(await openRepoTask(c.env, c.req.param("repo"), body), 201);
 });
 
+// Arguments are checked as the MCP tools check them, so both front doors refuse the same calls.
 app.post("/tasks/:id/changes", async (c) => {
-	const body = await c.req.json<{ title: string; intent: string; owns: string[]; hosted?: boolean }>();
-	return c.json(await coordinator(c.env, c.req.param("id")).openChange(body, c.get("accessIdentity")), 201);
+	const body = await jsonArgs(c);
+	const input = { title: requiredString(body, "title"), intent: requiredString(body, "intent"), owns: requiredPaths(body, "owns"), hosted: body.hosted as boolean | undefined };
+	return c.json(await coordinator(c.env, c.req.param("id")).openChange(input, c.get("accessIdentity")), 201);
 });
 
 app.post("/tasks/:id/changes/:slice/extend", async (c) => {
-	const { owns } = await c.req.json<{ owns: string[] }>();
+	const owns = requiredPaths(await jsonArgs(c), "owns");
 	return c.json(await coordinator(c.env, c.req.param("id")).extendClaim(c.req.param("slice"), owns));
 });
 
 app.post("/tasks/:id/changes/:slice/abandon", async (c) => {
-	const { reason } = await c.req.json<{ reason: string }>();
+	const reason = requiredString(await jsonArgs(c), "reason");
 	return c.json(await coordinator(c.env, c.req.param("id")).abandonChange(c.req.param("slice"), reason, c.get("accessIdentity")));
 });
 
@@ -160,13 +172,7 @@ app.get("/tasks", async (c) => {
 // Project repos, without task forks (<taskId>--...), for the dashboard's "new task" form.
 // Forks far outnumber projects, so read every page.
 app.get("/repos", async (c) => {
-	const names: string[] = [];
-	let cursor: string | undefined;
-	do {
-		const page = await retryTransient(() => c.env.ARTIFACTS.list({ limit: 200, cursor }));
-		names.push(...page.repos.map((r) => r.name).filter((name) => !parseRepoName(name)));
-		cursor = page.cursor;
-	} while (cursor);
+	const names = (await listRepoNames(c.env.ARTIFACTS)).filter((name) => !parseRepoName(name));
 	return c.json(names.sort().map((name) => ({ name })));
 });
 
@@ -180,17 +186,10 @@ app.get("/tasks/:id/live", async (c) => {
 	const task = await coordinator(c.env, id).state();
 	const slices = await Promise.all(
 		task.slices.map(async (s) => {
-			const repo = `${id}--${s.id}`;
+			const repo = sliceRepoName(id, s.id);
 			const [builder, reviewers] = await Promise.all([
 				c.env.BUILDER.getByName(repo).state(),
-				s.reviewHead
-					? Promise.all(
-							task.review.reviewers.map(async (role) => ({
-								role,
-								state: await c.env.REVIEWER.getByName(reviewerName(repo, role, s.reviewHead!)).state(),
-							})),
-						)
-					: [],
+				s.reviewHead ? reviewerStates(c.env, repo, task.review.reviewers, s.reviewHead) : [],
 			]);
 			return { id: s.id, builder, reviewers };
 		}),
@@ -229,7 +228,7 @@ app.post("/tasks/:id/build", async (c) => c.json(await coordinator(c.env, c.req.
 
 app.get("/tasks/:id/slices/:slice/builder", async (c) => {
 	const { id, slice } = c.req.param();
-	return c.json(await c.env.BUILDER.getByName(`${id}--${slice}`).state());
+	return c.json(await c.env.BUILDER.getByName(sliceRepoName(id, slice)).state());
 });
 
 // Builder agents call this after each push. Runs Merge-ahead.
@@ -256,14 +255,8 @@ app.get("/tasks/:id/slices/:slice/reviewers", async (c) => {
 	const task = await coordinator(c.env, id).state();
 	const head = task.slices.find((s) => s.id === slice)?.reviewHead;
 	if (!head) return c.json([]);
-	const states = await Promise.all(
-		task.review.reviewers.map(async (role) => ({
-			role,
-			head,
-			state: await c.env.REVIEWER.getByName(reviewerName(`${id}--${slice}`, role, head)).state(),
-		})),
-	);
-	return c.json(states);
+	const states = await reviewerStates(c.env, sliceRepoName(id, slice), task.review.reviewers, head);
+	return c.json(states.map(({ role, state }) => ({ role, head, state })));
 });
 
 app.post("/tasks/:id/slices/:slice/reviews", async (c) => {
