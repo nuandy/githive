@@ -196,7 +196,7 @@ export abstract class SandboxAgent<J extends SandboxJob, S extends AgentState> e
 			const { state } = await this.load(); if (!state || ["done", "failed"].includes(state.status)) return;
 			state.status = "parked"; state.parkedAt = parkedAt; state.waitingRequestIds = [...waitingFor];
 			this.note(state, "parked while waiting for " + waitingFor.join(", ")); await this.save(state);
-			if (this.ctx.container?.running) await this.ctx.container.destroy(this.kind + " parked");
+			if (this.ctx.container?.running) await this.ctx.container.destroy(this.kind + " parked").catch(() => {});
 			await this.scheduleForState(state);
 		});
 	}
@@ -222,7 +222,7 @@ export abstract class SandboxAgent<J extends SandboxJob, S extends AgentState> e
 		else this.note(state, "resolution event " + wake.eventId + " queued for next turn");
 		inbox.push(wake.message); delivered.push(wake.eventId);
 		await this.ctx.storage.put({ job: { ...job, ...wake.credentials }, state, [INBOX]: inbox, [DELIVERED_WAKES]: delivered });
-		if (parked) { if (this.ctx.container?.running) await this.ctx.container.destroy(this.kind + " resumed"); await this.ctx.storage.setAlarm(Date.now()); return "resumed"; }
+		if (parked) { if (this.ctx.container?.running) await this.ctx.container.destroy(this.kind + " resumed").catch(() => {}); await this.ctx.storage.setAlarm(Date.now()); return "resumed"; }
 		await this.ctx.storage.setAlarm(Date.now());
 		return "deferred";
 	}
@@ -306,6 +306,8 @@ export abstract class SandboxAgent<J extends SandboxJob, S extends AgentState> e
 			const pending = (await this.ctx.storage.get<DeferredWake[]>(DEFERRED_WAKES)) ?? [];
 			for (const wake of pending) await this.deliverWake(job, state, wake);
 			if (pending.length) await this.ctx.storage.delete(DEFERRED_WAKES);
+			const park = await this.ctx.storage.get<{ applied?: boolean }>(PARK_COMMAND);
+			if (park && (park.applied || state.status === "parked")) await this.ctx.storage.delete(PARK_COMMAND);
 			await this.save(state);
 			if (state.status === "parked" || state.status === "queued") await this.scheduleForState(state);
 			await this.ctx.storage.delete([TURN_IN_FLIGHT, TURN_STARTED]);
@@ -314,8 +316,11 @@ export abstract class SandboxAgent<J extends SandboxJob, S extends AgentState> e
 
 	private async reconcileAfterTurn(job: J, state: S, turnToken: string) {
 		await this.lifecycle(async () => {
-			const park = await this.ctx.storage.get<{ parkedAt: string; waitingFor: string[] }>(PARK_COMMAND);
-			if (park && (state.status === "working" || state.status === "queued")) { state.status = "parked"; state.parkedAt = park.parkedAt; state.waitingRequestIds = park.waitingFor; this.note(state, "parked while waiting for " + park.waitingFor.join(", ")); }
+			const park = await this.ctx.storage.get<{ parkedAt: string; waitingFor: string[]; applied?: boolean }>(PARK_COMMAND);
+			if (park && !park.applied) {
+				if (state.status === "working" || state.status === "queued") { state.status = "parked"; state.parkedAt = park.parkedAt; state.waitingRequestIds = park.waitingFor; this.note(state, "parked while waiting for " + park.waitingFor.join(", ")); }
+				await this.ctx.storage.put({ state, [PARK_COMMAND]: { ...park, applied: true } });
+			}
 			const pending = (await this.ctx.storage.get<DeferredWake[]>(DEFERRED_WAKES)) ?? [];
 			for (const wake of pending) await this.deliverWake(job, state, wake);
 			if (pending.length) await this.ctx.storage.delete(DEFERRED_WAKES);
