@@ -82,12 +82,12 @@ npm run dev                           # real Artifacts service; builder containe
 
 The Access team domain and application audience are public configuration in `wrangler.jsonc`. There is no local-development authentication bypass: the Worker rejects requests without a valid, signed `Cf-Access-Jwt-Assertion`, including requests to `wrangler dev`. A service token's client ID and secret are credentials for the Cloudflare Access edge; they do not replace the signed assertion when calling the Worker directly. For authenticated manual requests, use the deployed hostname protected by the Access application.
 
-People can use the dashboard after signing in through Cloudflare Access. Scripts should be authorized by an Access service-token policy for the application. This creates a repo, forks it twice, pushes a conflicting change to each fork, and test-merges them:
+People can use the dashboard after signing in through Cloudflare Access. Scripts should be authorized by an Access service-token policy for the application. This lists the project repos:
 
 ```sh
 export CF_ACCESS_CLIENT_ID='your-service-token-client-id'
 export CF_ACCESS_CLIENT_SECRET='your-service-token-client-secret'
-curl -X POST https://blueprint.nuandy.workers.dev/spike \
+curl https://blueprint.nuandy.workers.dev/repos \
   -H "CF-Access-Client-Id: $CF_ACCESS_CLIENT_ID" \
   -H "CF-Access-Client-Secret: $CF_ACCESS_CLIENT_SECRET"
 ```

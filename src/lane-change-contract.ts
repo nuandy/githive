@@ -1,4 +1,4 @@
-import type { Task } from "./types";
+import type { ParkBuilderResult } from "./parking-contract";
 
 /** A builder's request that the slice owning a path make a change in its lane. */
 export interface LaneChangeRequest {
@@ -40,14 +40,6 @@ export type LaneChangeRequestResult =
 export interface LaneChangeCoordinator {
 	requestLaneChange(requesterSliceId: string, input: LaneChangeRequestInput): Promise<LaneChangeRequestResult>;
 	answerLaneChange(ownerSliceId: string, requestId: string, answer: LaneChangeAnswer): Promise<LaneChangeRequest>;
+	parkBuilder(sliceId: string): Promise<ParkBuilderResult>;
+	parkedBuilderTimedOut(sliceId: string, parkedAt: string): Promise<void>;
 }
-
-declare module "./types" {
-	interface Task {
-		laneChangeRequests?: LaneChangeRequest[];
-	}
-}
-
-// Keep the imported Task in this module so the augmentation is checked against
-// the public task interface when the contract is type-checked.
-void (null as unknown as Task | null);

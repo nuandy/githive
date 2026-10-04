@@ -68,7 +68,7 @@ describe("builder parking tools", () => {
 		const parked = (await builder.state()) as BuilderState;
 		Object.assign(parked, { status: "parked", turns: 5, turnsAtRunStart: 0, revisions: 0 });
 		await (builder as unknown as { save(state: BuilderState): Promise<void> }).save(parked);
-		await builder.wake("Request r1 integrated; merge base/main.", { token: "fresh-write", base: { remote: "https://git.test/base.git", token: "fresh-read" } });
+		await builder.wake("lane-change:r1:integrated", "Request r1 integrated; merge base/main.", { token: "fresh-write", base: { remote: "https://git.test/base.git", token: "fresh-read" } });
 		expect((await builder.state())?.status).toBe("queued");
 		expect((await builder.state() as BuilderState).revisions).toBe(0);
 		expect((await builder.state() as BuilderState).turnsAtRunStart).toBe(5);

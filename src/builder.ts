@@ -120,10 +120,13 @@ How to work:
 	}
 
 	async park(parkedAt: string, waitingFor: string[]) { return this.parkAgent(parkedAt, waitingFor); }
-	async wake(eventId: string, message: string, credentials: BuilderResumeCredentials): Promise<"resumed" | "deferred" | "ignored">;
-	async wake(message: string, credentials: BuilderResumeCredentials): Promise<"resumed" | "deferred" | "ignored">;
-	async wake(idOrMessage: string, messageOrCredentials: string | BuilderResumeCredentials, credentials?: BuilderResumeCredentials) {
-		return credentials ? this.receiveWake(idOrMessage, messageOrCredentials as string, credentials) : this.receiveWake("legacy:" + idOrMessage, idOrMessage, messageOrCredentials as BuilderResumeCredentials);
+	/**
+	 * Deliver a stable Coordinator wake event exactly once. Event IDs are kept
+	 * across restarts; the message is queued if the builder is working, and a
+	 * parked conversation resumes with fresh credentials.
+	 */
+	async wake(eventId: string, message: string, credentials: BuilderResumeCredentials) {
+		return this.receiveWake(eventId, message, credentials);
 	}
 	async markParkTimedOut() { return this.isParkStillTimedOut(); }
 	protected override async autoPark(job: BuildJob, state: BuilderState) {

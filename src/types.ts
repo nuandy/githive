@@ -1,4 +1,5 @@
 import type { GateResult } from "./gate-plan";
+import type { LaneChangeRequest } from "./lane-change-contract";
 
 // Domain model. A task is one feature request against a project repo. A planner
 // (human or agent) turns it into a blueprint: contract files committed up front,
@@ -86,6 +87,15 @@ export interface Slice extends SliceSpec {
 		group?: string[];
 		result?: GateResult;
 	};
+	/** When the slice's builder parked to wait for its cross-lane requests, and which ones. */
+	parkedAt?: string;
+	parkedWaitingFor?: string[];
+	/** Wake events not yet confirmed delivered, in order. An event leaves only after Builder.wake succeeds. */
+	wakeOutbox?: { eventId: string; message: string }[];
+	/** Wake events confirmed delivered, so a repeat is never sent twice. */
+	wakeEventIds?: string[];
+	/** The parkedAt whose 30-minute timeout has been flagged for a human, so it is flagged exactly once. */
+	parkTimeoutFlagged?: string;
 }
 
 export interface Blueprint {
@@ -217,6 +227,8 @@ export interface Task {
 	mode?: "planned" | "open";
 	/** Open mode: minutes a change keeps its claim without activity. */
 	leaseMinutes?: number;
+	/** Builders' requests that another slice change something in its lane. */
+	laneChangeRequests?: LaneChangeRequest[];
 }
 
 export interface Limits {

@@ -1,10 +1,9 @@
 import { Hono } from "hono";
 import { verifyAccessRequest } from "./access";
 import type { AccessIdentity, CoordinatorHumanActions } from "./access-contract";
-import { deleteReposWithPrefix, forkAndWait, parseRepoName, remoteFor, reviewerName } from "./artifacts";
+import { deleteReposWithPrefix, parseRepoName, reviewerName } from "./artifacts";
 import { statusOf } from "./errors";
 import { retryTransient } from "./retry";
-import { Workspace } from "./git";
 import type { Blueprint, Limits, Review, ReviewPolicy } from "./types";
 import { openTaskId } from "./open-mode";
 import { handleMcpBody, type McpContext } from "./mcp";
@@ -47,7 +46,6 @@ app.get("/api", (c) =>
 			"GET  /repos",
 			"GET  /tasks",
 			"GET  /tasks/:id/live",
-			"POST /spike",
 			"POST /repos/import {url, name, branch?}",
 			"POST /tasks {repo, goal, limits?: {builders, reviewers}}",
 			"GET  /tasks/:id",
@@ -74,6 +72,7 @@ app.get("/api", (c) =>
 			"POST /tasks/:id/changes/:slice/extend {owns}",
 			"POST /tasks/:id/changes/:slice/abandon {reason}",
 			"GET  /tasks/:id/claims",
+			"POST /tasks/:id/index   (list a task created before the dashboard index existed)",
 			"POST /mcp (MCP front door: JSON-RPC over HTTP)",
 			"GET  /tasks/:id/ledger",
 			"DELETE /tasks/:id   (state, forks and dashboard entry; refused while agents work)",
@@ -85,65 +84,6 @@ app.get("/api", (c) =>
 		],
 	}),
 );
-
-/**
- * Day 1 spike: proves the primitives the whole design rests on, with timings.
- * Creates a repo, pushes a commit, forks it twice, pushes a change to each fork
- * (one pair overlapping, one not), and test-merges them in memory.
- */
-app.post("/spike", async (c) => {
-	const artifacts = c.env.ARTIFACTS;
-	const id = crypto.randomUUID().slice(0, 8);
-	const timings: Record<string, number> = {};
-	const time = async <T>(label: string, fn: () => Promise<T>) => {
-		const start = Date.now();
-		const result = await fn();
-		timings[label] = Date.now() - start;
-		return result;
-	};
-
-	const created = await time("create", () => retryTransient(() => artifacts.create(`spike-${id}`)));
-	const origin = { url: created.remote, token: created.token };
-	await time("initial push", async () => {
-		const ws = await Workspace.init(origin);
-		await ws.write({ "README.md": "# spike\n", "src/shared.ts": "export const greeting = 'hello';\n" });
-		await ws.commit("Initial commit");
-		await ws.push();
-	});
-
-	const [a, b] = await time("fork x2", () =>
-		Promise.all([
-			forkAndWait(artifacts, created.name, `spike-${id}-a`, "spike fork a"),
-			forkAndWait(artifacts, created.name, `spike-${id}-b`, "spike fork b"),
-		]),
-	);
-	await time("push to forks", async () => {
-		for (const [fork, greeting] of [
-			[a, "hi from a"],
-			[b, "hi from b"],
-		] as const) {
-			const ws = await Workspace.clone({ url: fork.remote, token: fork.token });
-			await ws.write({ "src/shared.ts": `export const greeting = '${greeting}';\n` });
-			await ws.commit(`Change greeting in ${fork.name}`);
-			await ws.push();
-		}
-	});
-
-	const merge = await time("merge-ahead check", async () => {
-		const ws = await Workspace.clone(await remoteFor(artifacts, created.name));
-		await ws.fetch("a", await remoteFor(artifacts, a.name));
-		await ws.fetch("b", await remoteFor(artifacts, b.name));
-		return ws.tryMerge("refs/remotes/a/main", "refs/remotes/b/main");
-	});
-
-	return c.json({
-		repos: [created.name, a.name, b.name],
-		// Both forks edit the same line, so this should report a conflict in src/shared.ts.
-		merge,
-		timings,
-		cleanup: "Spike repos are kept for inspection; delete them with `wrangler artifacts repos delete <name> --namespace blueprint`.",
-	});
-});
 
 app.post("/repos/import", async (c) => {
 	const { url, name, branch } = await c.req.json<{ url: string; name: string; branch?: string }>();
@@ -217,9 +157,8 @@ app.get("/tasks", async (c) => {
 	return c.json(tasks.filter((t) => t !== null));
 });
 
-// Repos in the namespace, for the dashboard's "new task" form. Task repos
-// (<taskId>--...) are left out.
-// Project repos, without task forks. Forks far outnumber projects, so read every page.
+// Project repos, without task forks (<taskId>--...), for the dashboard's "new task" form.
+// Forks far outnumber projects, so read every page.
 app.get("/repos", async (c) => {
 	const names: string[] = [];
 	let cursor: string | undefined;
@@ -360,7 +299,6 @@ app.post("/tasks/:id/slices/:slice/integrate", async (c) => {
 
 app.post("/tasks/:id/land", async (c) => c.json(await humanCoordinator(c.env, c.req.param("id")).land(c.get("accessIdentity"))));
 
-// The task's record in Git: rebuild it from the notes ref and compare with the stored state.
 // Lock timings for benchmarks; POST clears them after reading.
 app.get("/tasks/:id/lock-stats", async (c) => c.json(await coordinator(c.env, c.req.param("id")).lockStats()));
 app.post("/tasks/:id/lock-stats/reset", async (c) => c.json(await coordinator(c.env, c.req.param("id")).lockStats(true)));
@@ -388,6 +326,7 @@ app.delete("/repos/:repo", async (c) => {
 	return c.json({ deleted: repo });
 });
 
+// The task's record in Git: rebuild it from the notes ref and compare with the stored state.
 app.get("/tasks/:id/ledger", async (c) => c.json(await coordinator(c.env, c.req.param("id")).ledger()));
 
 // Recreate a task whose Coordinator lost its state, from the record in the project repo.
