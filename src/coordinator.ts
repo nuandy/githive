@@ -664,7 +664,7 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 			const capable = builder as typeof builder & { wake?: (id: string, text: string, credentials: BuilderResumeCredentials) => Promise<"resumed" | "deferred" | "ignored"> };
 			const credentials = await this.resumeCredentials(slice);
 			for (const event of events) {
-				if (capable.wake) await capable.wake(event.eventId, event.message, credentials);
+				if (capable.wake) await retryTransient(() => capable.wake!(event.eventId, event.message, credentials));
 				else if (!(await builder.notify(event.message))) await builder.revise(event.message, credentials);
 			}
 			slice.parkedAt = undefined;
@@ -746,6 +746,7 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 		} catch (err) {
 			const active = activeOf(task, item.kind);
 			active.splice(active.indexOf(key), 1);
+			if (item.kind === "builder" && slice.wakeMessage && !task.queue.some((queued) => queued.kind === "builder" && queued.slice === slice.id)) task.queue.push(item);
 			slice.attention = `Could not start ${item.kind} ${key}: ${statusOf(err).message}`;
 			this.note(task, slice.head, `${slice.id} needs a human: ${slice.attention}`);
 		}
