@@ -184,6 +184,7 @@ export abstract class SandboxAgent<J extends SandboxJob, S extends AgentState> e
 	async notify(message: string) {
 		const { state } = await this.load();
 		if (!state || (state.status !== "queued" && state.status !== "working")) return false;
+		if (state.status === "working" && await this.ctx.storage.get(TURN_IN_FLIGHT)) return false;
 		const inbox = (await this.ctx.storage.get<string[]>("inbox")) ?? [];
 		await this.ctx.storage.put("inbox", [...inbox, message]);
 		return true;

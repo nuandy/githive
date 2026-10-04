@@ -101,8 +101,8 @@ How to work:
 	async revise(feedback: string, credentials: { token: string; base: BuildJob["base"] }) {
 		const { job, state } = await this.load();
 		if (!job || !state) throw new Error("builder has never run");
-		if (state.status === "queued" || state.status === "working") throw new Error(`builder is already ${state.status}`);
-		if (state.status === "parked") { await this.wake(`human-${crypto.randomUUID()}`, feedback, credentials); return this.view((await this.load()).state!); }
+		if (state.status === "queued") throw new Error(`builder is already ${state.status}`);
+		if (state.status === "working" || state.status === "parked") { await this.wake(`human-${crypto.randomUUID()}`, feedback, credentials); return this.view((await this.load()).state!); }
 		await this.ctx.storage.put("job", { ...job, ...credentials });
 		await this.ctx.storage.delete("cancel");
 		state.status = "queued";
