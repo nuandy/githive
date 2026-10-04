@@ -22,6 +22,8 @@ const io = vi.hoisted(() => ({
 	written: [] as Record<string, string>[],
 	/** Files each pushed head changed, for Merge-ahead: what changedPaths reports. */
 	touched: new Map<string, string[]>(),
+	/** Forks Merge-ahead fetched, by name. */
+	fetched: [] as string[],
 	/** Runs once when Merge-ahead next fetches a fork, to simulate something happening mid-check. */
 	onFetch: null as null | (() => Promise<void>),
 	/** The contract owner's answer; may change files while it "decides". */
@@ -41,6 +43,7 @@ vi.mock("../src/git", () => ({
 		clone: vi.fn(async () => ({
 			head: vi.fn(async () => io.heads.get("project") ?? io.defaultHead),
 			fetch: vi.fn(async (_name: string, remote: { url: string }) => {
+				io.fetched.push(_name);
 				const hook = io.onFetch;
 				io.onFetch = null;
 				await hook?.();
@@ -131,6 +134,7 @@ beforeEach(() => {
 	ledger.writeDelayMs = 0;
 	io.touched.clear();
 	io.onFetch = null;
+	io.fetched = [];
 });
 
 describe("limits and queues", () => {
@@ -801,6 +805,23 @@ describe("short locks: open mode under concurrency", () => {
 		const { changed } = await coordinator.recordPush("a");
 		expect(changed).toBe(true);
 		expect((await stored()).slices[0]).toMatchObject({ head: "h1", touched: ["src/a/x.ts", "README.md"], outOfLane: ["README.md"] });
+	});
+
+	it("checks a push only against changes that have pushed, without fetching the rest", async () => {
+		await setup(
+			openTask([
+				slice("a", { startCommit: "main0", head: "main0" }),
+				slice("idle", { startCommit: "main0", head: "main0" }),
+				slice("busy", { startCommit: "main0", head: "b1" }),
+			]),
+		);
+		io.heads.set("t1--a", "h1");
+		io.heads.set("t1--busy", "b1");
+		io.touched.set("h1", ["src/a/x.ts"]);
+		io.touched.set("b1", ["src/busy/y.ts"]);
+		const { checks } = await coordinator.recordPush("a");
+		expect(io.fetched).toEqual(["a", "busy"]);
+		expect(checks.map((c) => c.pair)).toEqual([["a", "busy"]]);
 	});
 
 	it("redoes a push check when another push was recorded while it ran", async () => {

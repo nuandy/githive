@@ -1284,6 +1284,10 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 		}
 		for (const other of task.slices) {
 			if (other === slice || other.status !== "building") continue;
+			// Nothing recorded as pushed means nothing to conflict with: skip it without
+			// fetching. If it has pushed but not reported yet, its own report checks
+			// it against this change.
+			if (!other.head || other.head === (other.startCommit ?? baseCommit)) continue;
 			const theirs = await side(other);
 			if (theirs.head === (other.startCommit ?? baseCommit)) continue; // nothing pushed yet
 			checks.push(await this.check(ws, theirs, ours));

@@ -8,6 +8,7 @@
 //
 //   node scripts/bench.mjs [--label baseline] [--levels 1,5,10,25] [--racers 5]
 //                          [--base https://blueprint-bench.nuandy.workers.dev] [--repo bench-<label>]
+//                          [--idle 40]   (changes held open through every level that never push)
 //
 // Credentials come from .dev.vars (CF_ACCESS_CLIENT_ID, CF_ACCESS_CLIENT_SECRET) and are never printed.
 // Each run gets its own repo, so its Coordinator starts idle. Results go to
@@ -31,6 +32,7 @@ const REPO = args.repo ?? `bench-${LABEL}`;
 const SOURCE = args.source ?? "https://github.com/octocat/Spoon-Knife";
 const LEVELS = (args.levels ?? "1,5,10,25").split(",").map(Number);
 const RACERS = Number(args.racers ?? 5);
+const IDLE = Number(args.idle ?? 0);
 
 // Calls can wait minutes behind the lock under load; don't let the client give up first.
 try {
@@ -149,10 +151,21 @@ async function main() {
 	}
 	const task = await api("POST", `/repos/${REPO}/open`, {});
 	console.log(`open task ${task.id} on ${REPO} at ${BASE}`);
+	// Changes that claim a lane and never push, like agents still thinking, held through every level.
+	const idle = [];
+	for (let i = 0; i < IDLE; i += 10) {
+		const batch = await Promise.all(
+			Array.from({ length: Math.min(10, IDLE - i) }, (_, j) =>
+				tool(0, "open_change", { task_id: task.id, title: `bench ${LABEL} idle ${i + j}`, intent: "idle benchmark change", paths: [`bench/idle-${LABEL}/i${i + j}/`] }),
+			),
+		);
+		idle.push(...batch.map((o) => o.change_id));
+	}
+	if (IDLE) console.log(`${idle.length} idle changes open`);
 	await api("POST", `/tasks/${task.id}/lock-stats/reset`);
 
 	const levels = [];
-	const result = { label: LABEL, base: BASE, repo: REPO, task: task.id, racers: RACERS, at: new Date().toISOString(), ledgerMatches: null, ledgerCommits: null, levels };
+	const result = { label: LABEL, base: BASE, repo: REPO, task: task.id, racers: RACERS, idle: IDLE, at: new Date().toISOString(), ledgerMatches: null, ledgerCommits: null, levels };
 	await mkdir(join(root, "bench-results"), { recursive: true });
 	const file = join(root, "bench-results", `${LABEL}-${result.at.replace(/[:.]/g, "-")}.json`);
 	const save = () => writeFile(file, JSON.stringify(result, null, "\t") + "\n");
@@ -168,7 +181,7 @@ async function main() {
 		await rm(scratch, { recursive: true, force: true });
 
 		const failures = agents.filter((a) => a.status === "rejected").map((a) => a.reason.message.slice(0, 200));
-		const leftover = (await tool(n, "list_claims", { task_id: task.id })).filter((c) => c.change?.includes(runId) || c.title?.includes(runId));
+		const leftover = (await tool(n, "list_claims", { task_id: task.id })).filter((c) => c.title?.includes(runId));
 		// Wait for the ledger to catch up (a no-op where it is written under the lock), so its lag is counted.
 		const ledgerCheck = await api("GET", `/tasks/${task.id}/ledger`);
 		const { samples, ledgerLagMs = [] } = await api("POST", `/tasks/${task.id}/lock-stats/reset`);
@@ -211,6 +224,7 @@ async function main() {
 		);
 	}
 
+	for (const change_id of idle) await tool(0, "abandon_change", { task_id: task.id, change_id, reason: "benchmark done" });
 	const ledger = await api("GET", `/tasks/${task.id}/ledger`);
 	result.ledgerMatches = ledger.matches;
 	result.ledgerCommits = ledger.commits;
