@@ -22,6 +22,8 @@ export interface GitServer {
 	pushes: () => number;
 	/** Every request so far, as "METHOD path?service" (for counting round trips). */
 	requests: string[];
+	/** Refuse the next `count` push uploads the way Artifacts does when a repo is busy. */
+	busyPushes: (count: number) => void;
 	close: () => Promise<void>;
 }
 
@@ -41,12 +43,21 @@ export async function startGitServer(): Promise<GitServer> {
 
 	let held: { count: number; waiting: (() => void)[]; all: () => void } | null = null;
 	const requests: string[] = [];
+	let busy = 0;
 	let answeredPushes = 0;
 
 	const server: Server = createServer(async (req, res) => {
 		const url = new URL(req.url ?? "/", "http://localhost");
 		requests.push(`${req.method} ${url.pathname.split("/").pop()}${url.search}`);
 		const isPush = req.method === "POST" && url.pathname.endsWith("/git-receive-pack");
+		if (isPush && busy > 0) {
+			busy--;
+			req.resume();
+			const line = "ERR artifacts_git_receive_pack_busy\n";
+			res.setHeader("Content-Type", "application/x-git-receive-pack-result");
+			res.end(`${(line.length + 4).toString(16).padStart(4, "0")}${line}`);
+			return;
+		}
 		if (isPush && held) {
 			const gate = held;
 			await new Promise<void>((release) => {
@@ -100,6 +111,7 @@ export async function startGitServer(): Promise<GitServer> {
 		holdPushes: (count) => new Promise<void>((all) => (held = { count, waiting: [], all })),
 		pushes: () => answeredPushes,
 		requests,
+		busyPushes: (count) => void (busy = count),
 		close: async () => {
 			await new Promise<void>((resolve) => server.close(() => resolve()));
 			rmSync(root, { recursive: true, force: true });

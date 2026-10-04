@@ -57,6 +57,9 @@ function pktLines(body: Uint8Array) {
  * update only if the ref is still at `from`, so this is a compare-and-swap.
  * Returns whether it landed.
  */
+/** Pushes Artifacts refused as busy (several at once on one repo) before reporting one as not landed. */
+const BUSY_ATTEMPTS = 6;
+
 async function pushDirect(remote: Remote, ref: string, from: string | null, to: string, fs: MemoryFS, oids: string[]) {
 	const { packfile } = await git.packObjects({ fs, dir: DIR, oids });
 	const parts = [...pktLine(`${from ?? ZERO_OID} ${to} ${ref}\0report-status agent=blueprint\n`), encoder.encode("0000"), packfile ?? new Uint8Array()];
@@ -66,17 +69,25 @@ async function pushDirect(remote: Remote, ref: string, from: string | null, to: 
 		body.set(part, at);
 		at += part.length;
 	}
-	const response = await fetch(`${remote.url}/git-receive-pack`, {
-		method: "POST",
-		headers: {
-			"Content-Type": "application/x-git-receive-pack-request",
-			Accept: "application/x-git-receive-pack-result",
-			Authorization: `Basic ${btoa(`x:${remote.token.split("?expires=")[0]}`)}`,
-		},
-		body,
-	});
-	if (!response.ok) throw new Error(`[${response.status}] push to ${ref} failed: ${(await response.text()).slice(0, 200)}`);
-	const report = pktLines(new Uint8Array(await response.arrayBuffer()));
+	let report: string[] = [];
+	for (let attempt = 1; ; attempt++) {
+		const response = await fetch(`${remote.url}/git-receive-pack`, {
+			method: "POST",
+			headers: {
+				"Content-Type": "application/x-git-receive-pack-request",
+				Accept: "application/x-git-receive-pack-result",
+				Authorization: `Basic ${btoa(`x:${remote.token.split("?expires=")[0]}`)}`,
+			},
+			body,
+		});
+		if (!response.ok) throw new Error(`[${response.status}] push to ${ref} failed: ${(await response.text()).slice(0, 200)}`);
+		report = pktLines(new Uint8Array(await response.arrayBuffer()));
+		// Busy: the repo is taking another push. Nothing was applied, so it is safe to send again.
+		if (!report.some((line) => line.startsWith("ERR") && /busy/i.test(line))) break;
+		// Still busy: report it as not landed, and the caller reads the log and tries again.
+		if (attempt === BUSY_ATTEMPTS) return false;
+		await new Promise((resolve) => setTimeout(resolve, Math.min(50 * 2 ** attempt, 1_500) * (0.5 + Math.random())));
+	}
 	if (!report.includes("unpack ok")) throw new Error(`push to ${ref} failed: ${report.join("; ")}`);
 	if (report.some((line) => line === `ok ${ref}`)) return true;
 	if (report.some((line) => line.startsWith(`ng ${ref}`))) return false;

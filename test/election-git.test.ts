@@ -96,6 +96,22 @@ describe("GitCasLog", () => {
 		expect(server.requests.length).toBeLessThan(firstRequests);
 	});
 
+	it("tries a push again when the server is busy, and lands it", async () => {
+		const first = await log.append(null, commit());
+		server.busyPushes(2);
+		const second = await log.append(first, commit({ kind: "decisions", batch: "after-busy" }));
+		expect(second).toMatch(/^[0-9a-f]{40}$/);
+		expect((await log.read())?.commit.batch).toBe("after-busy");
+	});
+
+	it("reports a push that stays busy as not landed, so the caller reads and retries", async () => {
+		const first = await log.append(null, commit());
+		server.busyPushes(100);
+		expect(await log.append(first, commit({ kind: "decisions", batch: "never" }))).toBeNull();
+		server.busyPushes(0);
+		expect((await log.read())?.tip).toBe(first);
+	});
+
 	it("records decisions as Git notes that plain git can read", async () => {
 		const project = server.git("rev-parse", "main").trim();
 		await log.append(null, commit({ kind: "decisions", entries: [{ commit: project, text: "change stats-1f2e opened, claiming src/stats/", at: "2026-10-04T12:00:00.000Z" }] }));
