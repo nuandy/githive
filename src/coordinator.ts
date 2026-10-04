@@ -9,14 +9,16 @@ import { describeError } from "./contract-check-plan";
 import { isTransientFailure, retryTransient } from "./retry";
 import { Workspace } from "./git";
 import { boundedUnifiedDiff } from "./code-view";
-import { type LedgerDoc, type LedgerEntry, clipText, diff, fromDoc, replay, toDoc } from "./ledger";
-import { appendLedger, readLedger } from "./ledger-git";
-import { unresolvedRequests } from "./lane-requests";
-import { isPlainPath, staysInRepo } from "./paths";
+import { clipText, diff, fromDoc, replay, toDoc } from "./ledger";
+import { readLedger } from "./ledger-git";
+import { LedgerOutbox, LockStats } from "./ledger-outbox";
+import { closesLaneRequestCycle, latestResolutions, laneRequestMessage, safeLanePath, unresolvedRequests } from "./lane-requests";
+import { mergeAhead } from "./merge-ahead";
+import { staysInRepo } from "./paths";
 import { blueprintProblems } from "./blueprint";
 import { NEW_FILE, decideAmendment } from "./contract-owner";
 import type { GatePlan } from "./gate";
-import { gateExclusions, gateFeedback, type GateResult } from "./gate-plan";
+import { gateExclusions, gateFeedback, gateMembers, othersCanStillIntegrate, type GateResult } from "./gate-plan";
 import type { BuildJob } from "./builder";
 import type { Remote } from "./git";
 import type { ReviewJob } from "./reviewer";
@@ -98,36 +100,14 @@ function sliceJobBase(task: Task, slice: Slice): Omit<SliceJob, "remote" | "toke
 	};
 }
 
-/** One side of a Merge-ahead check. */
-interface Side {
-	id: string;
-	ref: string;
-	head: string;
-	touched: string[];
-}
+/** Forks of one project at once; beyond about 15, Artifacts fails some of them. */
+const MAX_CONCURRENT_FORKS = 6;
 
 /**
  * One Coordinator per task. It owns the task's state and runs every Git operation
  * on the task's repos: forking slices, test-merging them against each other
  * (Merge-ahead), gating integration on reviewer votes (Quorum), and landing.
  */
-/**
- * One call through the Coordinator's lock: what it was, when it queued, and
- * milliseconds spent waiting, running, and queueing its decisions for the ledger.
- */
-export interface LockSample {
-	label: string;
-	at: number;
-	waitMs: number;
-	runMs: number;
-	flushMs: number;
-}
-
-const MAX_LOCK_SAMPLES = 5_000;
-
-/** Forks of one project at once; beyond about 15, Artifacts fails some of them. */
-const MAX_CONCURRENT_FORKS = 6;
-
 export class Coordinator extends DurableObject<Env> implements CoordinatorHumanActions, LaneChangeCoordinator {
 	// State-changing steps run one at a time so they never overwrite each other.
 	// A step should be short: the hot paths (opening a change, recording a push,
@@ -136,26 +116,18 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 	// Git in the background, never under the lock.
 	private tail: Promise<unknown> = Promise.resolve();
 
-	/** Decisions made by the running method, written to Git when it finishes. */
-	private entries: LedgerEntry[] = [];
+	private readonly stats = new LockStats();
 
-	/** Recent lock timings, for benchmarks. */
-	private lockSamples: LockSample[] = [];
-
-	/** For decisions written to Git since the last reset: milliseconds from the decision to its write. */
-	private ledgerLags: number[] = [];
+	/** Decisions made by the running method, written to Git in the background when it finishes. */
+	private readonly outbox = new LedgerOutbox(this.ctx, this.env, this.stats);
 
 	/** Forks in progress, and openers waiting for a turn. */
 	private forksRunning = 0;
 	private forkWaiters: (() => void)[] = [];
 
-	/** The background ledger write in progress, and whether more was queued while it ran. */
-	private flushing: Promise<void> | null = null;
-	private flushAgain = false;
-
 	private exclusive<T>(fn: () => Promise<T>, label = "other"): Promise<T> {
 		const queued = Date.now();
-		this.lockDepth++;
+		this.stats.depth++;
 		const recorded = async () => {
 			const started = Date.now();
 			let ran = started;
@@ -166,12 +138,12 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 			} catch (err) {
 				ran = Date.now();
 				// A method that failed didn't make its decisions; what it saved still goes out as state.
-				this.entries = [];
+				this.outbox.discard();
 				throw err;
 			} finally {
-				await this.queueLedger();
-				this.lockDepth--;
-				this.recordLockSample({ label, at: queued, waitMs: started - queued, runMs: ran - started, flushMs: Date.now() - ran });
+				await this.outbox.queue();
+				this.stats.depth--;
+				this.stats.record({ label, at: queued, waitMs: started - queued, runMs: ran - started, flushMs: Date.now() - ran });
 			}
 		};
 		const run = this.tail.then(recorded, recorded);
@@ -191,85 +163,12 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 
 	/** Note a decision on the commit it is about (the task's anchor commit for task-wide ones). */
 	private note(task: Task, commit: string | undefined, text: string) {
-		this.entries.push({ commit: commit ?? task.baseCommit ?? task.anchor ?? EMPTY_TREE, text, at: new Date().toISOString() });
-	}
-
-	/**
-	 * Add the step's decisions to the durable outbox and start the background
-	 * write. Caller holds the lock; this only touches local storage.
-	 */
-	private async queueLedger() {
-		const entries = this.entries;
-		this.entries = [];
-		if (entries.length) {
-			const pending = (await this.ctx.storage.get<LedgerEntry[]>("ledger:pending")) ?? [];
-			await this.ctx.storage.put("ledger:pending", [...pending, ...entries]);
-		}
-		this.kickLedger();
-	}
-
-	/** Start the ledger writer unless it is running; if it is, it goes round again when done. */
-	private kickLedger() {
-		if (this.flushing) {
-			this.flushAgain = true;
-			return;
-		}
-		this.flushing = (async () => {
-			try {
-				do this.flushAgain = false;
-				while ((await this.writeLedger()) && this.flushAgain);
-			} finally {
-				this.flushing = null;
-			}
-		})();
-		this.ctx.waitUntil?.(this.flushing);
-	}
-
-	/**
-	 * Append the queued decisions and the state change since the last write to
-	 * the task's notes ref, as one commit. Only one write runs at a time, so a
-	 * burst of decisions goes out in a few commits instead of one each. If Git
-	 * can't be reached, everything stays queued and goes out with the next write:
-	 * the patch is always taken from the last recorded state. Returns whether
-	 * the write succeeded (or there was nothing to write).
-	 */
-	private async writeLedger() {
-		const [task, contracts, recorded, pending] = await Promise.all([
-			this.ctx.storage.get<Task>("task"),
-			this.ctx.storage.get<Record<string, string>>("contracts"),
-			this.ctx.storage.get<LedgerDoc>("ledger:doc"),
-			this.ctx.storage.get<LedgerEntry[]>("ledger:pending"),
-		]);
-		if (!task) return true;
-		const doc = toDoc(task, contracts ?? {});
-		const patch = diff(recorded ?? {}, doc);
-		const batch = pending ?? [];
-		if (patch === undefined && !batch.length) return true;
-		try {
-			await appendLedger(await remoteFor(this.env.ARTIFACTS, task.repo, "write"), task.id, batch, patch);
-		} catch (err) {
-			console.error(`ledger write for task ${task.id} failed: ${statusOf(err).message}`, err);
-			return false;
-		}
-		// Decisions queued during the write stay queued for the next one.
-		const now = (await this.ctx.storage.get<LedgerEntry[]>("ledger:pending")) ?? [];
-		await this.ctx.storage.put({ "ledger:doc": doc, "ledger:pending": now.slice(batch.length) });
-		const written = Date.now();
-		this.ledgerLags.push(...batch.map((e) => written - Date.parse(e.at)));
-		if (this.ledgerLags.length > MAX_LOCK_SAMPLES) this.ledgerLags.splice(0, this.ledgerLags.length - MAX_LOCK_SAMPLES);
-		return true;
+		this.outbox.add({ commit: commit ?? task.baseCommit ?? task.anchor ?? EMPTY_TREE, text, at: new Date().toISOString() });
 	}
 
 	/** Wait until every queued decision is in Git, retrying a failed write once. Returns how many are still queued. */
-	async ledgerIdle() {
-		for (let attempt = 0; attempt < 2; attempt++) {
-			while (this.flushing) await this.flushing;
-			const pending = (await this.ctx.storage.get<LedgerEntry[]>("ledger:pending")) ?? [];
-			if (!pending.length) return 0;
-			this.kickLedger();
-		}
-		while (this.flushing) await this.flushing;
-		return ((await this.ctx.storage.get<LedgerEntry[]>("ledger:pending")) ?? []).length;
+	ledgerIdle() {
+		return this.outbox.idle();
 	}
 
 	/** Rebuild the task from its notes ref and compare it with the stored copy, once queued decisions are written. */
@@ -339,7 +238,7 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 			this.requirePhase(task, "building");
 			const requester = this.buildingSlice(task, requesterSliceId);
 			if (!input || typeof input.path !== "string" || !input.path.trim()) fail(400, "a lane request needs a path");
-			if (!this.safeLanePath(input.path)) fail(400, `invalid relative path: ${input.path}`);
+			if (!safeLanePath(input.path)) fail(400, `invalid relative path: ${input.path}`);
 			if (typeof input.need !== "string" || !input.need.trim()) fail(400, "a lane request needs a nonempty need");
 			if (typeof input.reason !== "string" || !input.reason.trim()) fail(400, "a lane request needs a nonempty reason");
 			// In open mode, only active changes hold lanes; an integrated or abandoned change's paths are free.
@@ -355,7 +254,7 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 
 			// Adding requester -> owner is unsafe if owner already depends (directly or
 			// transitively) on requester. Pending and answered requests both wait.
-			if (this.closesLaneRequestCycle(task, requesterSliceId, owner.id)) {
+			if (closesLaneRequestCycle(task, requesterSliceId, owner.id)) {
 				request.status = "human";
 				const message = "This cross-lane request would create a wait cycle or deadlock. It was not sent and needs a human to resolve the dependency.";
 				await this.flagLaneRequest(task, request, message, false);
@@ -373,7 +272,7 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 				await this.save(task);
 				return { outcome: "human" as const, request, message };
 			}
-			const message = this.laneRequestMessage(request);
+			const message = laneRequestMessage(request);
 			let delivery: "inbox" | "resumed";
 			try {
 				const wake = await this.wakeBuilder(task, owner, `lane-request:${request.id}`, message);
@@ -425,33 +324,6 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 			}
 			return request;
 		});
-	}
-
-	private closesLaneRequestCycle(task: Task, requester: string, owner: string) {
-		const graph = new Map<string, string[]>();
-		for (const request of task.laneChangeRequests ?? []) {
-			if (request.status !== "pending" && request.status !== "answered") continue;
-			graph.set(request.requester, [...(graph.get(request.requester) ?? []), request.owner]);
-		}
-		const seen = new Set<string>();
-		const pending = [owner];
-		while (pending.length) {
-			const current = pending.pop()!;
-			if (current === requester) return true;
-			if (seen.has(current)) continue;
-			seen.add(current);
-			pending.push(...(graph.get(current) ?? []));
-		}
-		return false;
-	}
-
-	/** A plain path that is also safe to repeat to other agents: no surrounding space, drive letters, backslashes or control characters. */
-	private safeLanePath(path: string) {
-		return isPlainPath(path) && path === path.trim() && !/[A-Za-z]:/.test(path) && !path.includes("\\") && !/[\x00-\x1f\x7f]/.test(path);
-	}
-
-	private laneRequestMessage(request: LaneChangeRequest) {
-		return `Cross-lane change request ${request.id} from slice ${request.requester}. Path: ${request.path}. Need: ${request.need}. Reason: ${request.reason}`;
 	}
 
 	private toInbox(slice: Slice, text: string): "inbox" {
@@ -582,25 +454,11 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 		});
 	}
 
-	private latestResolutions(task: Task, sliceId: string) {
-		return (task.laneChangeRequests ?? [])
-			.filter((request) => request.requester === sliceId && request.status !== "pending" && request.status !== "answered")
-			.map((request) => ({
-				requestId: request.id,
-				status: request.status,
-				message: request.status === "integrated"
-					? `Request ${request.id} was integrated. Fetch and merge base/main.`
-					: request.status === "declined"
-						? `Request ${request.id} was declined: ${request.answer ?? "no reason provided"}`
-						: `Request ${request.id} needs a human: ${this.slice(task, sliceId).attention ?? "the request was handed off"}`,
-			}));
-	}
-
 	private async parkBuilderLocked(task: Task, sliceId: string): Promise<ParkBuilderResult> {
 		const slice = this.slice(task, sliceId);
 		const outgoing = unresolvedRequests(task, sliceId);
 		if (!outgoing.length) {
-			const resolutions = this.latestResolutions(task, sliceId);
+			const resolutions = latestResolutions(task, sliceId);
 			const detail = resolutions.map((resolution) => `${resolution.status}: ${resolution.message}`).join("; ");
 			return { outcome: "refused", reason: resolutions.length ? `A request resolved before parking took effect (${detail} ).` : "There are no unresolved outgoing cross-lane requests to wait for.", ...(resolutions.length ? { resolutions } : {}) };
 		}
@@ -696,28 +554,14 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 			if (busy.length) fail(409, `task ${task.id} is still at work: ${busy.join(", ")}`);
 			await this.ctx.storage.deleteAlarm();
 			await this.ctx.storage.deleteAll();
-			this.entries = [];
+			this.outbox.discard();
 			return { id: task.id, repo: task.repo };
 		}, "destroy");
 	}
 
 	/** Lock timings since the last reset, oldest first. Kept in memory only, so they reset when the object restarts. */
 	lockStats(reset = false) {
-		const samples = this.lockSamples;
-		const ledgerLagMs = this.ledgerLags;
-		if (reset) {
-			this.lockSamples = [];
-			this.ledgerLags = [];
-		}
-		return { samples, ledgerLagMs, inFlight: this.lockDepth };
-	}
-
-	/** Calls waiting for or holding the lock right now. */
-	private lockDepth = 0;
-
-	private recordLockSample(sample: LockSample) {
-		this.lockSamples.push(sample);
-		if (this.lockSamples.length > MAX_LOCK_SAMPLES) this.lockSamples.splice(0, this.lockSamples.length - MAX_LOCK_SAMPLES);
+		return this.stats.read(reset);
 	}
 
 	/** Stored blueprint contracts are visible only while awaiting human approval. */
@@ -1256,7 +1100,7 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 			const before = seen.head;
 			const head = await headOf(this.env.ARTIFACTS, seen.repo!);
 			if (!head || head === before) return { task: snapshot, checks: [] as MergeCheck[], changed: false };
-			const checks = await this.mergeAhead(snapshot, seen);
+			const checks = await mergeAhead(this.env.ARTIFACTS, snapshot, seen);
 
 			// Apply it, if the change is still where the check found it.
 			const applied = await this.exclusive(async () => {
@@ -1288,66 +1132,6 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 			if (applied) return applied;
 			if (attempt === 3) fail(409, `${sliceId} kept moving while its push was being checked; report the push again`);
 		}
-	}
-
-	/** Test-merge a slice's pushed work. Updates `slice` (a snapshot's copy) and returns the checks. */
-	private async mergeAhead(task: Task, slice: Slice) {
-		const artifacts = this.env.ARTIFACTS;
-		const baseCommit = task.baseCommit!;
-		const ws = await Workspace.clone(await remoteFor(artifacts, task.baseRepo!));
-		const baseHead = await ws.head("main");
-
-		// A slice's own changes start at its merge base with the task base. That is
-		// the base commit until the slice merges integrated work; after that, the
-		// integrated files don't count as the slice's changes.
-		const side = async (s: Slice): Promise<Side & { from: string }> => {
-			const ref = `refs/remotes/${s.id}/main`;
-			const head = await ws.fetch(s.id, await remoteFor(artifacts, s.repo!));
-			const from = await ws.mergeBase(baseHead, head);
-			return { id: s.id, ref, head, from, touched: await ws.changedPaths(from, head) };
-		};
-
-		const ours = await side(slice);
-		// A planned slice started at the task's base commit; an open change at the project head when it was opened.
-		const start = slice.startCommit ?? baseCommit;
-		slice.head = ours.head;
-		slice.mergeBase = ours.from;
-		slice.touched = ours.touched;
-		slice.outOfLane = ours.touched.filter((p) => !inLane(p, slice.owns));
-
-		const checks: MergeCheck[] = [];
-		// Integrated slices move the base; check against it once it has.
-		if (baseHead !== start) {
-			const base = { id: "base", ref: "main", head: baseHead, touched: await ws.changedPaths(start, baseHead) };
-			checks.push(await this.check(ws, base, ours));
-		}
-		for (const other of task.slices) {
-			if (other === slice || other.status !== "building") continue;
-			// Nothing recorded as pushed means nothing to conflict with: skip it without
-			// fetching. If it has pushed but not reported yet, its own report checks
-			// it against this change.
-			if (!other.head || other.head === (other.startCommit ?? baseCommit)) continue;
-			const theirs = await side(other);
-			if (theirs.head === (other.startCommit ?? baseCommit)) continue; // nothing pushed yet
-			checks.push(await this.check(ws, theirs, ours));
-		}
-		// TODO(semantic): run the test suite on each clean merge in a Sandbox to
-		// catch changes that merge cleanly but fail together.
-		return checks;
-	}
-
-	private async check(ws: Workspace, a: Side, b: Side): Promise<MergeCheck> {
-		const [first, second] = a.id < b.id ? [a, b] : [b, a];
-		const shared = first.touched.filter((p) => second.touched.includes(p));
-		// Git only conflicts on files both sides changed.
-		const outcome = shared.length ? await ws.tryMerge(first.ref, second.ref) : null;
-		return {
-			pair: [first.id, second.id],
-			heads: [first.head, second.head],
-			status: !outcome ? "disjoint" : outcome.clean ? "clean" : "conflict",
-			files: outcome && !outcome.clean ? outcome.files : [],
-			checkedAt: new Date().toISOString(),
-		};
 	}
 
 	/**
@@ -1691,28 +1475,6 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 		});
 	}
 
-	/** Slices of a gate run that are still the ones waiting to integrate at these commits. */
-	private gateMembers(task: Task, sliceId: string, head: string, group: { slice: string; head: string }[] = []) {
-		const members = [{ slice: sliceId, head }, ...group].map(({ slice: id, head: h }) => ({ s: task.slices.find((x) => x.id === id), h }));
-		const valid = members.every(({ s, h }) =>
-			s &&
-			s.status === "building" &&
-			s.reviewHead === h &&
-			s.gate?.head === h &&
-			(this.hasApprovedQuorum(task, s, h) || this.hasWaiver(s, h)),
-		);
-		return valid ? members.map(({ s }) => s!) : null;
-	}
-
-	/** A gate is authorized only by the current quorum or a human waiver for that exact head. */
-	private hasApprovedQuorum(task: Task, slice: Slice, head: string) {
-		return slice.reviewHead === head && tally(task.review, slice).status === "approved";
-	}
-
-	private hasWaiver(slice: Slice, head: string) {
-		return slice.reviewHead === head && !!slice.waivers?.some((waiver) => waiver.head === head);
-	}
-
 	/**
 	 * The gate asks for its plan when a run starts, so it checks against the base
 	 * as it is then, with the exclusions and tokens of that moment. Null when the
@@ -1721,7 +1483,7 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 	gatePlan(sliceId: string, head: string, group: { slice: string; head: string }[] = []) {
 		return this.exclusive(async (): Promise<GatePlan | null> => {
 			const task = await this.load();
-			const members = this.gateMembers(task, sliceId, head, group);
+			const members = gateMembers(task, sliceId, head, group);
 			if (!members) return null;
 			const [lead, ...others] = members;
 			const baseHead = (await headOf(this.env.ARTIFACTS, task.baseRepo!))!;
@@ -1753,7 +1515,7 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 	gateResult(sliceId: string, result: GateResult, excluded: string[], group: { slice: string; head: string }[] = []) {
 		return this.exclusive(async () => {
 			const task = await this.load();
-			const members = this.gateMembers(task, sliceId, result.head, group);
+			const members = gateMembers(task, sliceId, result.head, group);
 			if (!members) return { outcome: "stale" as const };
 			const [slice, ...others] = members;
 			const baseHead = await headOf(this.env.ARTIFACTS, task.baseRepo!);
@@ -1791,7 +1553,7 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 						m.gate = { ...m.gate!, status: "failed", baseHead: result.baseHead, result, at };
 						await this.sendBack(task, m, gateFeedback(result, excluded, members.filter((x) => x !== m).map((x) => x.id)));
 					}
-				} else if (!result.mergeConflict && this.othersCanStillIntegrate(task, slice)) {
+				} else if (!result.mergeConflict && othersCanStillIntegrate(task, slice)) {
 					// The failure may come from code in slices that aren't integrated yet
 					// (a slice can depend on another's implementation of a contract).
 					// Wait, and re-run after the next integration.
@@ -1905,11 +1667,6 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 			await this.save(task);
 			return { delivered };
 		});
-	}
-
-	/** Whether any other slice could still be integrated (and so might fix a failing gate). */
-	private othersCanStillIntegrate(task: Task, slice: Slice) {
-		return task.slices.some((s) => s !== slice && s.status === "building" && s.gate?.status !== "waiting");
 	}
 
 	/** After an integration, re-run gates that were waiting for it. */

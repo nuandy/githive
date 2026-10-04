@@ -1,4 +1,5 @@
-import type { Slice } from "./types";
+import { tally } from "./quorum";
+import type { Slice, Task } from "./types";
 
 // Pure decisions for the integration gate, kept separate so they can be tested
 // without containers.
@@ -52,4 +53,27 @@ export function gateFeedback(result: GateResult, excluded: string[], groupedWith
 		excluded.length ? `\nLeft out because their slices aren't integrated yet: ${excluded.join(", ")}.` : "",
 		"\nFix it within your lane. If a contract is wrong (for example, a contract test that can't type-check), propose a fix with propose_contract_change. Then commit_and_push and finish.",
 	].join("\n");
+}
+
+/** A gate is authorized only by the current quorum or a human waiver for that exact head. */
+const hasApprovedQuorum = (task: Task, slice: Slice, head: string) => slice.reviewHead === head && tally(task.review, slice).status === "approved";
+
+const hasWaiver = (slice: Slice, head: string) => slice.reviewHead === head && !!slice.waivers?.some((waiver) => waiver.head === head);
+
+/** Slices of a gate run that are still the ones waiting to integrate at these commits, or null when any has moved on. */
+export function gateMembers(task: Task, sliceId: string, head: string, group: { slice: string; head: string }[] = []) {
+	const members = [{ slice: sliceId, head }, ...group].map(({ slice: id, head: h }) => ({ s: task.slices.find((x) => x.id === id), h }));
+	const valid = members.every(({ s, h }) =>
+		s &&
+		s.status === "building" &&
+		s.reviewHead === h &&
+		s.gate?.head === h &&
+		(hasApprovedQuorum(task, s, h) || hasWaiver(s, h)),
+	);
+	return valid ? members.map(({ s }) => s!) : null;
+}
+
+/** Whether any other slice could still be integrated (and so might fix a failing gate). */
+export function othersCanStillIntegrate(task: Task, slice: Slice) {
+	return task.slices.some((s) => s !== slice && s.status === "building" && s.gate?.status !== "waiting");
 }
