@@ -120,6 +120,20 @@ describe("campaign", () => {
 		expect(r.log.commits).toHaveLength(1);
 	});
 
+	it("takes a term above the log's when the lease ref is behind it (lost or reset)", async () => {
+		const r = refs();
+		const c = clock();
+		// The decision log already holds term 5; the lease ref starts empty.
+		await r.log.append(null, { term: 5, leader: "old", leaseUntil: 0, kind: "term", entries: [], state: { claims: { "src/x/": "old" } }, batch: "old" });
+		const a = await campaign(r, "a", empty, options(c));
+		expect(a).toMatchObject({ leading: true, term: 6 });
+		if (a.leading) expect(a.leader.state).toEqual({ claims: { "src/x/": "old" } });
+		expect(r.log.tip()?.commit).toMatchObject({ kind: "term", term: 6, leader: "a" });
+		expect(r.leases.tip()?.commit).toMatchObject({ kind: "election", term: 6, leader: "a" });
+		// And it keeps leading on later calls.
+		expect(await campaign(r, "a", empty, options(c))).toMatchObject({ leading: true, term: 6 });
+	});
+
 	it("stands down if it won the lease but a newer term reached the decision log first", async () => {
 		const r = refs();
 		const c = clock();

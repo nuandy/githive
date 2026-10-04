@@ -84,8 +84,8 @@ export async function campaign<S>(refs: ElectionRefs<S>, me: string, initial: ()
 				const log = await refs.log.read();
 				if (log && log.commit.term === lease.term && log.commit.leader === me)
 					return { leading: true, term: lease.term, leader: new Leader(refs, me, lease.term, log.tip, log.commit.state, leaseHead.tip, lease.leaseUntil, options) };
-				// Our lease, but not (or no longer) our term in the log: finish taking over below.
-				if (!log || log.commit.term <= lease.term) return markTerm(refs, me, lease.term, leaseHead.tip, lease.leaseUntil, initial, options);
+				// Our lease, but not our term in the log: finish taking over.
+				return markTerm(refs, me, lease.term, leaseHead.tip, lease.leaseUntil, initial, options);
 			}
 			return { leading: false, term: lease.term, leader: lease.leader, leaseUntil: lease.leaseUntil };
 		}
@@ -100,13 +100,23 @@ export async function campaign<S>(refs: ElectionRefs<S>, me: string, initial: ()
 /**
  * Having won the lease for `term`, write the term marker to the decision log.
  * The marker fences every earlier leader: their next append is built on a tip
- * that has moved. If the log already holds a newer term, stand down.
+ * that has moved. If the log already holds a newer term, either another peer
+ * took over while this one stalled (the lease ref has moved too: stand down),
+ * or the lease ref is behind the log (lost or reset): then raise this lease
+ * above the log's term, on the lease tip this peer holds, and go on.
  */
 async function markTerm<S>(refs: ElectionRefs<S>, me: string, term: number, leaseTip: string, leaseUntil: number, initial: () => S, options: ElectionOptions): Promise<CampaignResult<S>> {
 	for (let attempt = 1; ; attempt++) {
 		const head = await refs.log.read();
 		const last = head?.commit;
-		if (last && last.term > term) return { leading: false, term: last.term, leader: last.leader, leaseUntil: 0 };
+		if (last && last.term > term) {
+			const raised: LogCommit<null> = { term: last.term + 1, leader: me, leaseUntil, kind: "election", entries: [], state: null, batch: batchId() };
+			const tip = await appendOnce(refs.leases, leaseTip, raised);
+			if (!tip) return { leading: false, term: last.term, leader: last.leader, leaseUntil: 0 };
+			term = raised.term;
+			leaseTip = tip;
+			continue;
+		}
 		const marker: LogCommit<S> = { term, leader: me, leaseUntil: 0, kind: "term", entries: [], state: last ? last.state : initial(), batch: batchId() };
 		const tip = await appendOnce(refs.log, head?.tip ?? null, marker);
 		if (tip) return { leading: true, term, leader: new Leader(refs, me, term, tip, marker.state, leaseTip, leaseUntil, options) };
