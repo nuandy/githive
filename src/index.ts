@@ -182,7 +182,8 @@ app.post("/tasks/:id/changes/:slice/abandon", async (c) => {
 app.get("/tasks/:id/claims", async (c) => c.json(await coordinator(c.env, c.req.param("id")).claims()));
 
 /** Coordinator-free mode's tools for this caller (an exploration; see docs/coordinator-free.md): stateless, Git only. */
-const freeContext = (env: Env, identity: AccessIdentity | undefined): FreeContext => freeContextFor(env, identity ? identityLabel(identity) : undefined);
+const freeContext = (env: Env, identity: AccessIdentity | undefined, agentKey?: string): FreeContext =>
+	freeContextFor(env, identity ? identityLabel(identity) : undefined, agentKey ? { agentKey } : {});
 
 // Coordinator-free repos, for the dashboard: which repos, and a snapshot of one read from Git.
 app.get("/free", async (c) => c.json(await taskIndex(c.env).listFree()));
@@ -201,7 +202,7 @@ app.post("/mcp", async (c) => {
 	const result = await handleMcpBody(body, {
 		coordinator: (id) => coordinator(c.env, id) as unknown as ReturnType<McpContext["coordinator"]>,
 		openRepo: (repo) => openRepoTask(c.env, repo),
-		free: freeContext(c.env, c.get("accessIdentity")),
+		free: freeContext(c.env, c.get("accessIdentity"), c.req.header("X-Blueprint-Agent-Key")),
 		identity: c.get("accessIdentity"),
 	});
 	return result === null ? c.body(null, 202) : c.json(result);

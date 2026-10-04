@@ -157,7 +157,7 @@ How to work:
 						// By convention, merge once approved: the toolkit refuses until the
 						// approvals are in, so the last vote's attempt is the one that lands.
 						if (job.free.mergeWhenApproved && verdict === "approve") {
-							const merged = (await callFreeTool("free_merge", { repo: job.free.repo, change: job.free.change, agent: job.free.agent ?? job.free.change }, freeContextFor(this.env, `service:blueprint-reviewer:${job.role}`))) as { ok: boolean; reasons?: string[] };
+							const merged = (await callFreeTool("free_merge", { repo: job.free.repo, change: job.free.change, agent: job.free.agent ?? job.free.change }, freeContextFor(this.env, `service:blueprint-reviewer:${job.role}`, { hosted: true }))) as { ok: boolean; reasons?: string[] };
 							this.note(state, merged.ok ? "merged the change" : `not merged yet: ${(merged.reasons ?? []).join("; ").slice(0, 200)}`);
 						}
 						return "Vote recorded.";

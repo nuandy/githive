@@ -585,7 +585,7 @@ How to work:
 
 	/** A coordinator-free builder's tools: push to its branch, extend its claim, fetch main, finish. */
 	private freeTools(job: BuildJob, free: NonNullable<BuildJob["free"]>, state: BuilderState): AgentTool[] {
-		const acting = () => freeContextFor(this.env, "service:blueprint-builder");
+		const acting = () => freeContextFor(this.env, "service:blueprint-builder", { hosted: true });
 		return [
 			...this.baseTools(state),
 			tool({

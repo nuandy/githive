@@ -11,13 +11,18 @@ import { makeStamper } from "./stamp";
 // agents. Shared by the Worker (acting for an MCP caller) and by the hosted
 // agents themselves (acting as themselves).
 
-/** The coordinator-free context for one actor: `by` is who it is (as Access verified them, or a hosted agent's own name); stamps carry it. */
-export function freeContextFor(env: Env, by: string | undefined): FreeContext {
+/**
+ * The coordinator-free context for one actor: `by` is who it is (as Access
+ * verified them, or a hosted agent's own name), and stamps carry it, with the
+ * agent name its key is for. Hosted agents (`hosted`) act under blueprint- names.
+ */
+export function freeContextFor(env: Env, by: string | undefined, caller: { agentKey?: string; hosted?: boolean } = {}): FreeContext {
 	return {
+		...caller,
 		register: async (repo) => env.TASK_INDEX.getByName("all").addFree(repo),
 		requestReview: (input) => startFreeReviewers(env, input),
 		startBuilder: (input) => startFreeBuilder(env, input),
-		stamper: async () => (env.FREE_STAMP_KEY && by ? makeStamper(env.FREE_STAMP_KEY, by) : undefined),
+		stamper: async (agent) => (env.FREE_STAMP_KEY && by ? makeStamper(env.FREE_STAMP_KEY, agent ? `${by}/${agent}` : by) : undefined),
 		remote: (repo, scope) => remoteFor(env.ARTIFACTS, repo, scope, 3600),
 		head: async (repo) => (await headOf(env.ARTIFACTS, repo)) ?? fail(409, `${repo} has no commits`),
 		// Checks run in the Gate's container, one Gate per repo.

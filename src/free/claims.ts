@@ -52,6 +52,17 @@ export interface Registry {
 	verify?: string[];
 	/** Blueprint's public key, to check the stamps on records and merges with. */
 	stampKey?: string;
+	/** Registered agent names, each bound to one secret key. */
+	agents?: Record<string, AgentRecord>;
+}
+
+/** An agent's registered name: who registered it, and a hash of its key (never the key). */
+export interface AgentRecord {
+	agent: string;
+	keyHash: string;
+	at: string;
+	by?: string;
+	stamp?: string;
 }
 
 export interface Conflict {
@@ -146,5 +157,18 @@ export function releaseStale(log: CasLog<Registry>, input: { change: string; age
 			},
 			text: `${input.agent} releases ${input.change}'s claim, idle for ${Math.round(idle / 60_000)} minutes`,
 		};
+	});
+}
+
+/**
+ * Register an agent name with the hash of its new key, or rotate the key of a
+ * name the caller already holds (`holder`: the name its current key is for).
+ * A name, once registered, is never given to anyone else.
+ */
+export function registerAgent(log: CasLog<Registry>, input: { agent: string; keyHash: string; holder?: string }, stamper?: Stamper) {
+	return appendRecord<Registry, string>(log, input.agent, empty, async (state) => {
+		if (state.agents?.[input.agent] && input.holder !== input.agent) return { refused: `${input.agent} is registered: call with its agent key to rotate it` };
+		const record = await stamped("agent", { agent: input.agent, keyHash: input.keyHash, at: new Date().toISOString() }, stamper);
+		return { state: { ...state, agents: { ...state.agents, [input.agent]: record } }, text: `${input.agent} ${input.holder ? "rotates its key" : "registers"}` };
 	});
 }

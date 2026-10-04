@@ -3,7 +3,7 @@ import { requiredPaths, requiredString } from "../errors";
 import type { Remote } from "../git";
 import { changeId, normalizeClaim } from "../open-mode";
 import { audit } from "./audit";
-import { activeClaims, claim, release, releaseStale, startFree, type Registry } from "./claims";
+import { activeClaims, claim, registerAgent, release, releaseStale, startFree, type Registry } from "./claims";
 import { readMainMerges, readRecordHistory } from "./git-records";
 import { type CheckRunner, mergeChange } from "./merge";
 import { revertViolation } from "./revert";
@@ -22,8 +22,12 @@ export interface FreeContext {
 	head: (repo: string) => Promise<string>;
 	/** Runs a repo's checks on main plus a change (live, the Gate's container). */
 	runChecks?: (repo: string) => CheckRunner;
-	/** Stamps what this caller writes with their verified identity (Blueprint's key); without it, nothing is stamped. */
-	stamper?: () => Promise<Stamper | undefined>;
+	/** Stamps what this caller writes with their verified identity (Blueprint's key), and the agent name their key is for; without it, nothing is stamped. */
+	stamper?: (agent?: string) => Promise<Stamper | undefined>;
+	/** The caller's agent key (free_register), from the X-Blueprint-Agent-Key header. */
+	agentKey?: string;
+	/** Blueprint's own hosted agents, who act under the reserved blueprint- names. */
+	hosted?: boolean;
 	/** Notes a repo in coordinator-free mode, so the dashboard can list it. */
 	register?: (repo: string) => Promise<void>;
 	/** Starts Blueprint's hosted reviewers on a change's current commit; each votes with free_vote (and, asked to, then tries to merge it). */
@@ -33,6 +37,7 @@ export interface FreeContext {
 }
 
 const DEFAULT_POLICY: ReviewPolicy = { required: 2, vetoes: ["security"] };
+const HOSTED_PREFIX = "blueprint-";
 const STALE_AFTER_MS = 30 * 60_000;
 const claimsRef = (repo: string) => `refs/notes/blueprint-claims/${repo}`;
 const votesRef = (repo: string) => `refs/notes/blueprint-votes/${repo}`;
@@ -46,10 +51,11 @@ Conventions:
 5. A claim idle for 30 minutes may be released by anyone (free_release with stale: true).
 6. Anyone may free_revert a commit free_audit reports; the audit then counts it resolved.
 7. free_request_review asks Blueprint's hosted reviewers for votes on your change; free_build has Blueprint's hosted builder make a change from start to merge.
+8. Agents that share an Access identity tell themselves apart with free_register: it returns your agent key once; send it (header X-Blueprint-Agent-Key, or agent_key) with every call, and what you write is attributed to you. A registered name is never used without its key.
 free_audit replays the records and lists every broken convention, with the commit and the agent.`;
 
 const str = { type: "string" } as const;
-export const FREE_TOOLS = [
+const TOOL_LIST = [
 	{ name: "free_start", description: "Start coordinator-free mode on a project repo (harmless if started): the review policy, and the checks run before each merge. Returns them.", inputSchema: { type: "object", properties: { repo: str, required: { type: "number" }, vetoes: { type: "array", items: str }, verify: { type: "array", items: str } }, required: ["repo"] } },
 	{ name: "free_credentials", description: "Git URL and a write token for the project repo, to push your change branch.", inputSchema: { type: "object", properties: { repo: str }, required: ["repo"] } },
 	{ name: "free_claims", description: "The claims in force: who holds which paths, and why.", inputSchema: { type: "object", properties: { repo: str }, required: ["repo"] } },
@@ -61,7 +67,31 @@ export const FREE_TOOLS = [
 	{ name: "free_request_review", description: "Ask Blueprint's hosted reviewer agents to review your change's current commit (by default the tests role and every veto role); each votes with free_vote.", inputSchema: { type: "object", properties: { repo: str, change: str, roles: { type: "array", items: str }, summary: str }, required: ["repo", "change"] } },
 	{ name: "free_audit", description: "Replay the records and list every broken convention, with the commit and the agent (and whether a revert has resolved it).", inputSchema: { type: "object", properties: { repo: str }, required: ["repo"] } },
 	{ name: "free_revert", description: "Revert a commit the audit reports: its files go back to how they were before it, in a commit naming what it reverts.", inputSchema: { type: "object", properties: { repo: str, commit: str, agent: str }, required: ["repo", "commit", "agent"] } },
+	{ name: "free_register", description: "Register your agent name and get its secret key (shown once), so what you write is attributed to you even if you share an Access identity. With your current key, rotates it.", inputSchema: { type: "object", properties: { repo: str, agent: str }, required: ["repo", "agent"] } },
 ];
+// Every tool takes the caller's agent key, for clients that can't set the header.
+export const FREE_TOOLS = TOOL_LIST.map((t) => ({ ...t, inputSchema: { ...t.inputSchema, properties: { ...t.inputSchema.properties, agent_key: { type: "string", description: "Your agent key from free_register, if you can't send the X-Blueprint-Agent-Key header" } } } }));
+
+const sha256 = async (text: string) => Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text))), (b) => b.toString(16).padStart(2, "0")).join("");
+
+/** The agent name a key is for, checked against the registry; keys are `<agent>.<secret>`. */
+async function keyAgent(registry: Registry | undefined, key: string) {
+	const agent = key.slice(0, Math.max(0, key.lastIndexOf(".")));
+	const record = agent ? registry?.agents?.[agent] : undefined;
+	if (!record || record.keyHash !== (await sha256(key))) throw new Error("[403] unknown agent key");
+	return agent;
+}
+
+/** Refuses acting as `name`: another name than the caller's key is for, a registered name without its key, or a hosted agent's name. */
+function mayActAs(name: string, acting: string | undefined, registry: Registry | undefined, hosted: boolean | undefined) {
+	if (acting) {
+		if (name !== acting) throw new Error(`[403] your agent key is ${acting}'s; it can't act as ${name}`);
+		return;
+	}
+	if (hosted) return;
+	if (name.startsWith(HOSTED_PREFIX)) throw new Error("[403] blueprint- names are Blueprint's hosted agents'");
+	if (registry?.agents?.[name]) throw new Error(`[403] ${name} is registered: call with its agent key`);
+}
 
 export type Args = Record<string, unknown>;
 
@@ -103,8 +133,15 @@ export async function callFreeTool(name: string, args: Args, ctx: FreeContext): 
 	const write = () => ctx.remote(repo, "write");
 	const claims = new GitCasLog<Registry>(write, repo, claimsRef(repo));
 	const votes = new GitCasLog<Votes>(write, repo, votesRef(repo));
-	const policyOf = async () => (await claims.read())?.commit.state.policy ?? DEFAULT_POLICY;
-	const stamper = await ctx.stamper?.();
+	const registered = (await claims.read())?.commit.state;
+	const key = ctx.agentKey ?? (typeof args.agent_key === "string" ? args.agent_key : undefined);
+	const acting = key ? await keyAgent(registered, key) : undefined;
+	const actAs = (field: string) => {
+		const agent = requiredString(args, field);
+		mayActAs(agent, acting, registered, ctx.hosted);
+		return agent;
+	};
+	const stamper = await ctx.stamper?.(acting);
 	switch (name) {
 		case "free_start": {
 			const policy: ReviewPolicy = {
@@ -126,23 +163,27 @@ export async function callFreeTool(name: string, args: Args, ctx: FreeContext): 
 		case "free_claim":
 			return claim(claims, {
 				change: requiredString(args, "change"),
-				agent: requiredString(args, "agent"),
+				agent: actAs("agent"),
 				paths: normalizeClaim(requiredPaths(args, "paths")),
 				intent: requiredString(args, "intent"),
 			}, stamper);
 		case "free_release": {
 			const change = requiredString(args, "change");
-			const agent = requiredString(args, "agent");
+			const agent = actAs("agent");
 			if (args.stale === true) return releaseStale(claims, { change, agent, staleAfterMs: STALE_AFTER_MS }, stamper);
 			return release(claims, { change, agent, reason: typeof args.reason === "string" ? args.reason : "released" }, stamper);
 		}
 		case "free_vote": {
 			const verdict = requiredString(args, "verdict");
 			if (verdict !== "approve" && verdict !== "reject") throw new Error("[400] verdict is approve or reject");
-			return vote(votes, { commit: requiredString(args, "commit"), reviewer: requiredString(args, "reviewer"), role: requiredString(args, "role"), verdict, evidence: requiredString(args, "evidence") }, stamper);
+			return vote(votes, { commit: requiredString(args, "commit"), reviewer: actAs("reviewer"), role: requiredString(args, "role"), verdict, evidence: requiredString(args, "evidence") }, stamper);
 		}
 		case "free_merge": {
 			const registry = (await claims.read())?.commit.state;
+			// Anyone may merge a change whose conventions hold; it merges as its claim's agent, and the stamp says who asked.
+			const change = requiredString(args, "change");
+			const holder = activeClaims(registry).find((c) => c.change === change)?.agent;
+			if (holder && holder !== requiredString(args, "agent")) throw new Error(`[409] ${change} is ${holder}'s change: merge it as ${holder}`);
 			return mergeChange({
 				remote: await write(),
 				claims,
@@ -152,7 +193,7 @@ export async function callFreeTool(name: string, args: Args, ctx: FreeContext): 
 				runChecks: ctx.runChecks?.(repo),
 				stamper,
 				stampKey: registry?.stampKey,
-				change: requiredString(args, "change"),
+				change,
 				agent: requiredString(args, "agent"),
 			});
 		}
@@ -179,7 +220,16 @@ export async function callFreeTool(name: string, args: Args, ctx: FreeContext): 
 		}
 		case "free_revert": {
 			const { violations } = await runAudit(ctx, repo);
-			return revertViolation({ remote: await write(), claims, votes, stamper, target: requiredString(args, "commit"), violations, agent: requiredString(args, "agent") });
+			return revertViolation({ remote: await write(), claims, votes, stamper, target: requiredString(args, "commit"), violations, agent: actAs("agent") });
+		}
+		case "free_register": {
+			const agent = requiredString(args, "agent");
+			if (agent.startsWith(HOSTED_PREFIX) && !ctx.hosted) throw new Error("[403] blueprint- names are Blueprint's hosted agents'");
+			const secret = btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(24)))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+			const newKey = `${agent}.${secret}`;
+			const outcome = await registerAgent(claims, { agent, keyHash: await sha256(newKey), ...(acting ? { holder: acting } : {}) }, stamper);
+			if (!outcome.ok) throw new Error(`[409] ${outcome.refused}`);
+			return { agent, key: newKey, note: "Keep this key secret; it is shown once. Send it as X-Blueprint-Agent-Key (or agent_key) with every call." };
 		}
 		default:
 			throw new Error(`[400] unknown tool ${name}`);
