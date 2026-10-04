@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { GateResult } from "../src/gate-plan";
 import type { AccessIdentity } from "../src/access-contract";
-import type { Review, Task } from "../src/types";
+import type { Review, Slice, Task } from "../src/types";
 import { FakeStorage, fakeEnv, slice, task } from "./fakes/env";
 
 // Integration tests for the Coordinator's decisions: the real class, with
@@ -13,6 +13,8 @@ const io = vi.hoisted(() => ({
 	/** Only merges of this ref conflict, when set. */
 	conflictOn: null as string | null,
 	merges: [] as string[],
+	/** The head of any repo not in heads (open-mode forks get random names). */
+	defaultHead: undefined as string | undefined,
 	pushes: 0,
 	/** Files on the task base, by path: what fileVersion reads. */
 	files: new Map<string, { id: string; text: string }>(),
@@ -24,7 +26,7 @@ const io = vi.hoisted(() => ({
 
 vi.mock("../src/artifacts", async (importOriginal) => ({
 	...(await importOriginal<typeof import("../src/artifacts")>()),
-	headOf: vi.fn(async (_artifacts: unknown, repo: string) => io.heads.get(repo)),
+	headOf: vi.fn(async (_artifacts: unknown, repo: string) => io.heads.get(repo) ?? io.defaultHead),
 	forkAndWait: vi.fn(async (_artifacts: unknown, _source: string, name: string) => ({ remote: `https://git.test/${name}.git`, token: `token-${name}` })),
 	fileVersion: vi.fn(async (_artifacts: unknown, _repo: string, path: string) => io.files.get(path) ?? null),
 	remoteFor: vi.fn(async (_artifacts: unknown, repo: string) => ({ url: `https://git.test/${repo}.git`, token: `token-${repo}` })),
@@ -95,6 +97,7 @@ const approvedReviews = (head = "h1") => [
 beforeEach(() => {
 	io.heads.clear();
 	io.mergeConflict = null;
+	io.defaultHead = undefined;
 	io.conflictOn = null;
 	io.merges = [];
 	io.pushes = 0;
@@ -569,5 +572,83 @@ describe("contract amendments", () => {
 	it("refuses a file inside a slice's lane", async () => {
 		await setup(task());
 		await expect(propose("a", "x", null, "src/b/index.ts")).rejects.toThrow(/inside b's lane/);
+	});
+});
+
+describe("open mode", () => {
+	const openTask = (slices: Slice[] = []) =>
+		task({ mode: "open", repo: "project", baseRepo: "project", baseCommit: "main0", anchor: "main0", leaseMinutes: 30, verify: [], slices });
+	const open = (title: string, owns: string[]) => coordinator.openChange({ title, intent: `${title}, please`, owns });
+
+	beforeEach(() => {
+		io.defaultHead = "main0";
+	});
+
+	it("opens a change on free paths, forks the project for it and returns credentials", async () => {
+		await setup(openTask());
+		const { change, credentials } = await open("Add stats", ["src/stats/"]);
+		expect(change).toMatchObject({ status: "building", owns: ["src/stats/"], startCommit: "main0", intent: "Add stats, please" });
+		expect(credentials.remote).toBe(`https://git.test/t1--${change.id}.git`);
+		expect(Date.parse(change.leaseUntil!)).toBeGreaterThan(Date.now());
+		expect(ledger.entries.at(-1)?.text).toMatch(/opened.*claiming src\/stats\//);
+	});
+
+	it("refuses a claim that overlaps an active change, naming the holder and its intent", async () => {
+		await setup(openTask());
+		const { change } = await open("Add stats", ["src/stats/"]);
+		await expect(open("Tweak stats", ["src/stats/index.ts"])).rejects.toThrow(new RegExp(`held by change ${change.id} \\("Add stats"\\): Add stats, please`));
+		expect((await stored()).slices).toHaveLength(1);
+	});
+
+	it("matches whole path segments, so a shared prefix is not an overlap", async () => {
+		await setup(openTask());
+		await open("Stats", ["src/stats"]);
+		await expect(open("Extra", ["src/stats-extra.ts"])).resolves.toBeTruthy();
+		await expect(open("Inside", ["src/stats/a.ts"])).rejects.toThrow(/already claimed/);
+	});
+
+	it("frees a claim when its change is abandoned or integrated", async () => {
+		await setup(openTask([slice("old", { status: "integrated", owns: ["src/done/"] })]));
+		await expect(open("Reuse", ["src/done/"])).resolves.toBeTruthy();
+		const { change } = await open("First", ["src/x/"]);
+		await coordinator.abandonChange(change.id, "changed my mind");
+		expect((await stored()).slices.find((s) => s.id === change.id)?.status).toBe("abandoned");
+		await expect(open("Second", ["src/x/"])).resolves.toBeTruthy();
+	});
+
+	it("extends a claim only to paths no other change holds", async () => {
+		await setup(openTask());
+		const a = (await open("A", ["src/a/"])).change;
+		await open("B", ["src/b/"]);
+		await expect(coordinator.extendClaim(a.id, ["src/b/c.ts"])).rejects.toThrow(/already claimed/);
+		const extended = await coordinator.extendClaim(a.id, ["src/c/", "src/a/inner.ts"]);
+		expect(extended.owns).toEqual(["src/a/", "src/c/"]);
+	});
+
+	it("expires an idle claim but renews one that is waiting on review", async () => {
+		const past = new Date(Date.now() - 60_000).toISOString();
+		await setup(
+			openTask([
+				slice("idle", { leaseUntil: past, startCommit: "main0" }),
+				slice("reviewing", { leaseUntil: past, startCommit: "main0", reviewHead: "h9" }),
+			]),
+		);
+		await coordinator.alarm();
+		const [idle, reviewing] = (await stored()).slices;
+		expect(idle.status).toBe("abandoned");
+		expect(reviewing.status).toBe("building");
+		expect(Date.parse(reviewing.leaseUntil!)).toBeGreaterThan(Date.now());
+		expect(storage.alarm).not.toBeNull();
+	});
+
+	it("refuses landing and contract amendments in open mode", async () => {
+		await setup(openTask([slice("a", { startCommit: "main0" })]));
+		await expect(coordinator.land(person)).rejects.toThrow(/nothing to land/);
+		await expect(coordinator.proposeAmendment("a", { path: "src/shared.ts", content: "x", reason: "r", basedOn: null })).rejects.toThrow(/open mode has no contracts/);
+	});
+
+	it("only opens changes on an open-mode task", async () => {
+		await setup(task());
+		await expect(open("A", ["src/a/"])).rejects.toThrow(/open-mode task/);
 	});
 });

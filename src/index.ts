@@ -5,7 +5,8 @@ import { forkAndWait, parseRepoName, remoteFor, reviewerName } from "./artifacts
 import { statusOf } from "./errors";
 import { retryTransient } from "./retry";
 import { Workspace } from "./git";
-import type { Blueprint, Limits, Review } from "./types";
+import type { Blueprint, Limits, Review, ReviewPolicy } from "./types";
+import { openTaskId } from "./open-mode";
 
 export { Builder } from "./builder";
 export { Reviewer } from "./reviewer";
@@ -67,6 +68,11 @@ app.get("/api", (c) =>
 			"POST /tasks/:id/slices/:slice/gate",
 			"POST /tasks/:id/slices/:slice/integrate",
 			"POST /tasks/:id/land",
+			"POST /repos/:repo/open {verify?, review?, limits?, leaseMinutes?}",
+			"POST /tasks/:id/changes {title, intent, owns, hosted?}",
+			"POST /tasks/:id/changes/:slice/extend {owns}",
+			"POST /tasks/:id/changes/:slice/abandon {reason}",
+			"GET  /tasks/:id/claims",
 			"GET  /tasks/:id/ledger",
 			"POST /tasks/:id/restore {repo}",
 			"(contract amendments are proposed by builders; see task.amendments)",
@@ -146,6 +152,33 @@ app.post("/tasks", async (c) => {
 	await taskIndex(c.env).add({ id, repo, goal, createdAt: task.createdAt });
 	return c.json(task, 201);
 });
+
+// Open mode: one open task per repo, found by a stable id. Agents open changes on it and claim their lanes.
+app.post("/repos/:repo/open", async (c) => {
+	const repo = c.req.param("repo");
+	const body = await c.req.json<{ verify?: string[]; review?: ReviewPolicy; limits?: Partial<Limits>; leaseMinutes?: number }>().catch(() => ({}));
+	const id = await openTaskId(repo);
+	const task = await coordinator(c.env, id).createOpen(id, repo, body);
+	await taskIndex(c.env).add({ id, repo, goal: task.goal, createdAt: task.createdAt });
+	return c.json(task, 201);
+});
+
+app.post("/tasks/:id/changes", async (c) => {
+	const body = await c.req.json<{ title: string; intent: string; owns: string[]; hosted?: boolean }>();
+	return c.json(await coordinator(c.env, c.req.param("id")).openChange(body, c.get("accessIdentity")), 201);
+});
+
+app.post("/tasks/:id/changes/:slice/extend", async (c) => {
+	const { owns } = await c.req.json<{ owns: string[] }>();
+	return c.json(await coordinator(c.env, c.req.param("id")).extendClaim(c.req.param("slice"), owns));
+});
+
+app.post("/tasks/:id/changes/:slice/abandon", async (c) => {
+	const { reason } = await c.req.json<{ reason: string }>();
+	return c.json(await coordinator(c.env, c.req.param("id")).abandonChange(c.req.param("slice"), reason, c.get("accessIdentity")));
+});
+
+app.get("/tasks/:id/claims", async (c) => c.json(await coordinator(c.env, c.req.param("id")).claims()));
 
 // Add a task created before the index existed.
 app.post("/tasks/:id/index", async (c) => {

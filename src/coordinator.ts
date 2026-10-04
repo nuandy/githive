@@ -17,7 +17,8 @@ import { gateExclusions, gateFeedback, type GateResult } from "./gate-plan";
 import type { BuildJob } from "./builder";
 import type { ReviewJob } from "./reviewer";
 import { plan } from "./planner";
-import { nextStep, reviewFeedback, tally } from "./quorum";
+import { claimConflicts, conflictMessage as claimConflictMessage, changeId, inLane, leaseExpired, leaseUntil, nextLeaseCheck, normalizeClaim } from "./open-mode";
+import { nextStep, reviewFeedback, tally, validatePolicy } from "./quorum";
 import { activeOf, hasRoom, itemKey, stillWanted, validateLimits, withScheduling, type AgentKind } from "./schedule";
 import { accessIdentityLabel, type AccessIdentity, type CoordinatorHumanActions } from "./access-contract";
 import {
@@ -29,6 +30,7 @@ import {
 	type QueueItem,
 	type Review,
 	type ReviewAssignment,
+	type ReviewPolicy,
 	type Slice,
 	type SliceCredentials,
 	type Task,
@@ -172,9 +174,13 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 			if (!this.safeLanePath(input.path)) fail(400, "invalid relative path: " + input.path);
 			if (typeof input.need !== "string" || !input.need.trim()) fail(400, "a lane request needs a nonempty need");
 			if (typeof input.reason !== "string" || !input.reason.trim()) fail(400, "a lane request needs a nonempty reason");
-			const owners = task.slices.filter((candidate) => candidate.owns.some((prefix) => input.path.startsWith(prefix)));
+			// In open mode, only active changes hold lanes; an integrated or abandoned change's paths are free.
+			const owners = task.slices.filter((candidate) => (task.mode !== "open" || candidate.status === "building") && inLane(input.path, candidate.owns));
 			if (owners.length > 1) fail(409, "more than one slice owns " + input.path + ": " + owners.map((x) => x.id).join(", "));
-			if (!owners.length) return { outcome: "no-owner" as const, message: "No slice owns " + input.path + ". Use the existing amendment path (propose_contract_change) for a file outside every lane." };
+			if (!owners.length)
+				return task.mode === "open"
+					? { outcome: "no-owner" as const, message: "No active change holds " + input.path + ". Extend your own claim to it (extend_claim) and change it yourself." }
+					: { outcome: "no-owner" as const, message: "No slice owns " + input.path + ". Use the existing amendment path (propose_contract_change) for a file outside every lane." };
 			const owner = owners[0];
 			if (owner.id === requesterSliceId) fail(400, input.path + " is in your own lane; a cross-lane request must name another slice file");
 			const request: LaneChangeRequest = { id: crypto.randomUUID().slice(0, 8), requester: requesterSliceId, owner: owner.id, path: input.path, need: input.need.trim(), reason: input.reason.trim(), status: owner.status === "integrated" ? "human" : "pending", createdAt: new Date().toISOString() };
@@ -295,6 +301,7 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 	/** Diff the complete integrated task base against the project's captured main head. */
 	async landingDiff() {
 		const task = await this.load();
+		if (task.mode === "open") fail(409, "open changes merge straight into the project's main; there is nothing to land");
 		if (task.phase !== "building") fail(409, `task is ${task.phase}`);
 		const pending = task.slices.filter((slice) => slice.status !== "integrated").map((slice) => slice.id);
 		if (pending.length) fail(409, `slices not integrated: ${pending.join(", ")}`);
@@ -339,6 +346,191 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 		});
 	}
 
+	/**
+	 * Open mode: one long-lived task per project repo, with no plan. Its base is
+	 * the project itself, so changes merge straight into the project's main.
+	 * Calling it again for the same repo returns the existing task.
+	 */
+	createOpen(id: string, repo: string, input: { verify?: string[]; review?: ReviewPolicy; limits?: Partial<Limits>; leaseMinutes?: number } = {}) {
+		return this.exclusive(async () => {
+			const existing = await this.ctx.storage.get<Task>("task");
+			if (existing) {
+				if (existing.mode === "open" && existing.repo === repo) return withScheduling(existing);
+				fail(409, "task exists");
+			}
+			try {
+				using _repo = await retryTransient(() => this.env.ARTIFACTS.get(repo));
+			} catch (err) {
+				if (isTransientFailure(err)) throw err;
+				fail(404, `no repo ${repo}`);
+			}
+			const head = (await headOf(this.env.ARTIFACTS, repo)) ?? fail(409, `${repo} has no commits`);
+			const review = input.review ?? DEFAULT_POLICY;
+			validatePolicy(review);
+			const leaseMinutes = input.leaseMinutes ?? 30;
+			if (!Number.isInteger(leaseMinutes) || leaseMinutes < 5 || leaseMinutes > 1440) fail(400, "leaseMinutes must be a whole number from 5 to 1440");
+			const task: Task = {
+				id,
+				repo,
+				goal: `Open changes on ${repo}`,
+				phase: "building",
+				mode: "open",
+				leaseMinutes,
+				baseRepo: repo,
+				baseCommit: head,
+				contracts: [],
+				verify: (input.verify ?? []).filter((c) => typeof c === "string" && c.trim()),
+				review,
+				slices: [],
+				checks: [],
+				amendments: [],
+				limits: validateLimits(input.limits),
+				queue: [],
+				active: { builders: [], reviewers: [] },
+				createdAt: new Date().toISOString(),
+				anchor: head,
+			};
+			this.note(task, head, `Open mode started on ${repo}: agents claim their lanes as they arrive`);
+			await this.save(task);
+			return task;
+		});
+	}
+
+	/**
+	 * Open a change: claim paths as the change's lane and fork the project for
+	 * it. Refused, with who holds what, if an active change holds any of the
+	 * paths. Returns write credentials for the agent; with `hosted`, a builder
+	 * agent is started on it as well.
+	 */
+	openChange(input: { title: string; intent: string; owns: string[]; hosted?: boolean }, actor?: AccessIdentity) {
+		return this.exclusive(async () => {
+			const task = await this.load();
+			if (task.mode !== "open") fail(409, "changes can only be opened on an open-mode task");
+			if (typeof input?.title !== "string" || !input.title.trim()) fail(400, "a change needs a title");
+			if (typeof input.intent !== "string" || !input.intent.trim()) fail(400, "a change needs an intent: what it sets out to do");
+			const owns = normalizeClaim(input.owns);
+			const conflicts = claimConflicts(task, owns);
+			if (conflicts.length) throw new Error(claimConflictMessage(conflicts));
+
+			let id = changeId(input.title);
+			while (task.slices.some((s) => s.id === id)) id = changeId(input.title);
+			const repo = sliceRepoName(task.id, id);
+			const fork = await forkAndWait(this.env.ARTIFACTS, task.repo, repo, `${input.title.trim()} (open change on ${task.repo})`);
+			// The fork's own head is where this change starts, even if main moved meanwhile.
+			const start = (await headOf(this.env.ARTIFACTS, repo)) ?? fail(500, "the new fork has no commits");
+			const slice: Slice = {
+				id,
+				title: input.title.trim(),
+				owns,
+				instructions: input.intent.trim(),
+				intent: input.intent.trim(),
+				tests: [],
+				status: "building",
+				repo,
+				head: start,
+				startCommit: start,
+				touched: [],
+				outOfLane: [],
+				reviews: [],
+				leaseUntil: leaseUntil(task),
+			};
+			task.slices.push(slice);
+			this.note(task, start, `Change ${id} opened${actor ? ` by ${accessIdentityLabel(actor)}` : ""}: "${slice.title}", claiming ${owns.join(", ")}. Intent: ${slice.intent}`);
+			if (input.hosted) await this.schedule(task, { kind: "builder", slice: id });
+			await this.scheduleLeaseCheck(task);
+			await this.save(task);
+			return { change: slice, credentials: { slice: id, repo, remote: fork.remote, token: fork.token } as SliceCredentials };
+		});
+	}
+
+	/** Add paths to a change's claim, if no other active change holds them. */
+	extendClaim(sliceId: string, paths: string[]) {
+		return this.exclusive(async () => {
+			const task = await this.load();
+			if (task.mode !== "open") fail(409, "claims can only be extended in open mode; planned lanes are fixed");
+			const slice = this.slice(task, sliceId);
+			if (slice.status !== "building") fail(409, `change ${sliceId} is ${slice.status}`);
+			// Paths already inside the change's own lane need no new claim.
+			const fresh = normalizeClaim(paths).filter((p) => !inLane(p, slice.owns));
+			const conflicts = claimConflicts(task, fresh, slice.id);
+			if (conflicts.length) throw new Error(claimConflictMessage(conflicts));
+			if (fresh.length) {
+				slice.owns = [...slice.owns, ...fresh];
+				this.note(task, slice.head, `Change ${slice.id} extended its claim to ${fresh.join(", ")}`);
+			}
+			this.renewLease(task, slice);
+			await this.scheduleLeaseCheck(task);
+			await this.save(task);
+			return slice;
+		});
+	}
+
+	/** Give up a change: its lane is freed and its agents are stopped. */
+	abandonChange(sliceId: string, reason: string, actor?: AccessIdentity) {
+		return this.exclusive(async () => {
+			const task = await this.load();
+			if (task.mode !== "open") fail(409, "only open-mode changes can be abandoned");
+			if (typeof reason !== "string" || !reason.trim()) fail(400, "abandoning a change needs a reason");
+			const slice = this.slice(task, sliceId);
+			if (slice.status !== "building") fail(409, `change ${sliceId} is ${slice.status}`);
+			await this.abandon(task, slice, reason.trim() + (actor ? ` (by ${accessIdentityLabel(actor)})` : ""));
+			await this.save(task);
+			return slice;
+		});
+	}
+
+	/** Claims held by active changes, for agents deciding what to claim. */
+	async claims() {
+		const task = await this.load();
+		return task.slices
+			.filter((s) => s.status === "building")
+			.map(({ id, title, intent, instructions, owns, leaseUntil: until, reviewHead }) => ({ change: id, title, intent: intent ?? instructions, owns, leaseUntil: until, inReview: !!reviewHead }));
+	}
+
+	private async abandon(task: Task, slice: Slice, reason: string) {
+		slice.status = "abandoned";
+		slice.attention = undefined;
+		task.queue = task.queue.filter((item) => item.slice !== slice.id);
+		task.active.builders = task.active.builders.filter((key) => key !== slice.id);
+		task.active.reviewers = task.active.reviewers.filter((key) => !key.startsWith(`${slice.id}:`));
+		await Promise.allSettled([
+			this.env.BUILDER.getByName(slice.repo!).cancel(`the change was abandoned: ${reason}`),
+			...(slice.reviewHead
+				? task.review.reviewers.map((role) => this.env.REVIEWER.getByName(reviewerName(slice.repo!, role, slice.reviewHead!)).cancel("the change was abandoned"))
+				: []),
+		]);
+		this.note(task, slice.head, `Change ${slice.id} abandoned, freeing ${slice.owns.join(", ")}: ${reason}`);
+	}
+
+	private renewLease(task: Task, slice: Slice) {
+		if (task.mode === "open" && slice.status === "building") slice.leaseUntil = leaseUntil(task);
+	}
+
+	/** Wake up when the next claim could expire. Open tasks never plan, so the alarm is free for this. */
+	private async scheduleLeaseCheck(task: Task) {
+		if (task.mode !== "open") return;
+		const next = nextLeaseCheck(task);
+		if (next !== null) await this.ctx.storage.setAlarm(Math.max(next, Date.now() + 1_000));
+	}
+
+	/**
+	 * Expire claims whose lease ran out. A change that is waiting on review, the
+	 * gate or another change keeps its claim, and its lease is renewed instead.
+	 */
+	private sweepLeases() {
+		return this.exclusive(async () => {
+			const task = await this.load();
+			const now = Date.now();
+			for (const slice of task.slices) {
+				if (slice.status !== "building" || !slice.leaseUntil || Date.parse(slice.leaseUntil) > now) continue;
+				if (leaseExpired(task, slice, now)) await this.abandon(task, slice, `its claim expired after ${task.leaseMinutes ?? 30} minutes without activity`);
+				else this.renewLease(task, slice);
+			}
+			await this.scheduleLeaseCheck(task);
+			await this.save(task);
+		});
+	}
+
 	/** Start the planner agent. It runs from an alarm because a run takes minutes. */
 	startPlanning() {
 		return this.exclusive(async () => {
@@ -355,6 +547,7 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 
 	async alarm() {
 		const task = await this.load();
+		if (task.mode === "open") return this.sweepLeases();
 		if (task.planner?.status !== "running") return;
 		let outcome: Partial<NonNullable<Task["planner"]>>;
 		try {
@@ -477,7 +670,7 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 			taskId: task.id,
 			goal: task.goal,
 			slice: { id: slice.id, title: slice.title, owns: slice.owns, instructions: slice.instructions, tests: slice.tests },
-			siblings: task.slices.filter((s) => s !== slice).map(({ id, title, owns }) => ({ id, title, owns })),
+			siblings: task.slices.filter((s) => s !== slice && s.status !== "abandoned").map(({ id, title, owns }) => ({ id, title, owns })),
 			contracts: task.contracts,
 			verify: task.verify,
 			repo: slice.repo!,
@@ -494,7 +687,7 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 			taskId: task.id,
 			goal: task.goal,
 			slice: { id: slice.id, title: slice.title, owns: slice.owns, instructions: slice.instructions, tests: slice.tests },
-			siblings: task.slices.filter((s) => s !== slice).map(({ id, title, owns }) => ({ id, title, owns })),
+			siblings: task.slices.filter((s) => s !== slice && s.status !== "abandoned").map(({ id, title, owns }) => ({ id, title, owns })),
 			contracts: task.contracts,
 			verify: task.verify,
 			repo: slice.repo!,
@@ -502,7 +695,7 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 			token: remote.token,
 			role,
 			head,
-			baseCommit: slice.mergeBase ?? task.baseCommit!,
+			baseCommit: slice.mergeBase ?? slice.startCommit ?? task.baseCommit!,
 			buildSummary: slice.buildSummary,
 			revision: slice.revisions ?? 0,
 			priorFindings: slice.revisions ? slice.lastFeedback : undefined,
@@ -591,6 +784,8 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 			if (!head || head === slice.head) return { task, checks: [] as MergeCheck[], changed: false };
 
 			const checks = await this.mergeAhead(task, slice);
+			this.renewLease(task, slice);
+			await this.scheduleLeaseCheck(task);
 			const conflicts = checks.filter((c) => c.status === "conflict");
 			this.note(
 				task,
@@ -623,21 +818,23 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 		};
 
 		const ours = await side(slice);
+		// A planned slice started at the task's base commit; an open change at the project head when it was opened.
+		const start = slice.startCommit ?? baseCommit;
 		slice.head = ours.head;
 		slice.mergeBase = ours.from;
 		slice.touched = ours.touched;
-		slice.outOfLane = ours.touched.filter((p) => !slice.owns.some((prefix) => p.startsWith(prefix)));
+		slice.outOfLane = ours.touched.filter((p) => !inLane(p, slice.owns));
 
 		const checks: MergeCheck[] = [];
 		// Integrated slices move the base; check against it once it has.
-		if (baseHead !== baseCommit) {
-			const base = { id: "base", ref: "main", head: baseHead, touched: await ws.changedPaths(baseCommit, baseHead) };
+		if (baseHead !== start) {
+			const base = { id: "base", ref: "main", head: baseHead, touched: await ws.changedPaths(start, baseHead) };
 			checks.push(await this.check(ws, base, ours));
 		}
 		for (const other of task.slices) {
 			if (other === slice || other.status !== "building") continue;
 			const theirs = await side(other);
-			if (theirs.head === baseCommit) continue; // nothing pushed yet
+			if (theirs.head === (other.startCommit ?? baseCommit)) continue; // nothing pushed yet
 			checks.push(await this.check(ws, theirs, ours));
 		}
 		// TODO(semantic): run the test suite on each clean merge in a Sandbox to
@@ -684,7 +881,7 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 	private async pinForReview(task: Task, slice: Slice) {
 		if (slice.status !== "building") fail(409, `slice ${slice.id} is ${slice.status}`);
 		const head = await headOf(this.env.ARTIFACTS, slice.repo!);
-		if (!head || head === task.baseCommit) fail(409, `slice ${slice.id} has no work to review`);
+		if (!head || head === (slice.startCommit ?? task.baseCommit)) fail(409, `slice ${slice.id} has no work to review`);
 		slice.reviewHead = head;
 		return head;
 	}
@@ -738,13 +935,14 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 		const { task, amendment, current } = await this.exclusive(async () => {
 			const task = await this.load();
 			const slice = this.slice(task, sliceId);
+			if (task.mode === "open") fail(409, "open mode has no contracts: claim the file with extend_claim, or ask the change that holds it with a cross-lane request");
 			if (task.phase !== "building") fail(409, `task is ${task.phase}`);
 			const path = input.path;
 			if (input.basedOn === undefined) fail(400, "basedOn is required: the blob id of the version you started from, or null for a new file");
 			if (!task.contracts.includes(path)) {
 				// Anything that isn't a contract yet must sit outside every lane.
 				if (path.startsWith("/") || path.split("/").includes("..")) fail(400, `invalid path: ${path}`);
-				const owner = task.slices.find((s) => s.owns.some((prefix) => path.startsWith(prefix)));
+				const owner = task.slices.find((s) => s.status !== "abandoned" && inLane(path, s.owns));
 				if (owner) fail(400, `${path} is inside ${owner.id}'s lane; a contract file must sit outside every lane`);
 			}
 			const current = await fileVersion(this.env.ARTIFACTS, task.baseRepo!, path);
@@ -1365,6 +1563,7 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 	land(actor: AccessIdentity) {
 		return this.exclusive(async () => {
 			const task = await this.load();
+			if (task.mode === "open") fail(409, "open changes merge straight into the project's main; there is nothing to land");
 			if (task.phase !== "building") fail(409, `task is ${task.phase}`);
 			const pending = task.slices.filter((s) => s.status !== "integrated").map((s) => s.id);
 			if (pending.length) fail(409, `slices not integrated: ${pending.join(", ")}`);

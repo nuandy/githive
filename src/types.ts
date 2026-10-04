@@ -6,7 +6,8 @@ import type { GateResult } from "./gate-plan";
 
 export type Phase = "planning" | "awaiting-approval" | "building" | "landed";
 
-export type SliceStatus = "planned" | "building" | "integrated";
+/** "abandoned": an open-mode change that was given up or whose claim expired; its lane is free again. */
+export type SliceStatus = "planned" | "building" | "integrated" | "abandoned";
 
 export interface SliceSpec {
 	/** Lowercase slug, unique within the task. Used in repo names. */
@@ -25,6 +26,12 @@ export interface SliceSpec {
 
 export interface Slice extends SliceSpec {
 	status: SliceStatus;
+	/** Open mode: what the agent that opened this change set out to do. */
+	intent?: string;
+	/** Open mode: the project commit the change's fork started from (planned slices start at the task's baseCommit). */
+	startCommit?: string;
+	/** Open mode: when the change's claim expires unless it shows activity. */
+	leaseUntil?: string;
 	/** Artifacts repo name of this slice's fork. */
 	repo?: string;
 	/** Last commit seen on the fork's main. */
@@ -193,6 +200,13 @@ export interface Task {
 	createdAt: string;
 	/** The project's head when the task was created; task-wide decisions are noted on it until the base exists. */
 	anchor?: string;
+	/**
+	 * "open": no plan; agents open changes and claim their lanes as they arrive,
+	 * and changes merge straight into the project. Absent means planned.
+	 */
+	mode?: "planned" | "open";
+	/** Open mode: minutes a change keeps its claim without activity. */
+	leaseMinutes?: number;
 }
 
 export interface Limits {
