@@ -147,7 +147,7 @@ export abstract class SandboxAgent<J extends SandboxJob, S extends AgentState> e
 
 	async start(job: J) {
 		const { state } = await this.load();
-		if (state && (state.status === "queued" || state.status === "working")) throw new Error(`${this.kind} is already ${state.status}`);
+		if (state && (state.status === "queued" || state.status === "working" || state.status === "parked")) throw new Error(`${this.kind} is already ${state.status}`);
 		const fresh = {
 			status: "queued",
 			startedAt: new Date().toISOString(),
@@ -505,7 +505,7 @@ export abstract class SandboxAgent<J extends SandboxJob, S extends AgentState> e
 			return;
 		}
 		// The model answered in text without finishing.
-		if (++state.nudges > MAX_NUDGES) { if (await this.autoPark(job, state)) return; throw new Error(`${this.kind} stopped calling tools without finishing`); }
+		if (++state.nudges > MAX_NUDGES) { if (await this.autoPark(job, state)) { state.pending = []; return; } throw new Error(`${this.kind} stopped calling tools without finishing`); }
 		this.note(state, `nudged: ${response.output_text.slice(0, 200)}`);
 		state.pending = [{ role: "user", content: this.nudge(job) }];
 	}
