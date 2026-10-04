@@ -32,6 +32,13 @@ export interface Slice extends SliceSpec {
 	startCommit?: string;
 	/** Open mode: when the change's claim expires unless it shows activity. */
 	leaseUntil?: string;
+	/**
+	 * An external agent (for example through the MCP front door) works on this
+	 * slice instead of a hosted builder. Messages for it, such as review
+	 * findings and cross-lane requests, go to `inbox`, which it reads.
+	 */
+	external?: boolean;
+	inbox?: { at: string; text: string }[];
 	/** Artifacts repo name of this slice's fork. */
 	repo?: string;
 	/** Last commit seen on the fork's main. */

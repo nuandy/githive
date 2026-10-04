@@ -647,6 +647,17 @@ describe("open mode", () => {
 		await expect(coordinator.proposeAmendment("a", { path: "src/shared.ts", content: "x", reason: "r", basedOn: null })).rejects.toThrow(/open mode has no contracts/);
 	});
 
+	it("sends review findings for an external change to its inbox instead of a hosted builder", async () => {
+		await setup(openTask([slice("ext", { startCommit: "main0", reviewHead: "h1", external: true })]));
+		io.heads.set("t1--ext", "h1");
+		await coordinator.submitReview("ext", vote("security", "reject"));
+		const ext = (await stored()).slices[0];
+		expect(builder("ext").revise).not.toHaveBeenCalled();
+		expect(ext.revisions).toBe(1);
+		expect(ext.inbox?.at(-1)?.text).toMatch(/security/);
+		expect(await coordinator.readInbox("ext")).toHaveLength(1);
+	});
+
 	it("only opens changes on an open-mode task", async () => {
 		await setup(task());
 		await expect(open("A", ["src/a/"])).rejects.toThrow(/open-mode task/);

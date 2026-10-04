@@ -251,12 +251,25 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 	}
 
 	private async deliverBuilder(task: Task, slice: Slice, message: string): Promise<"inbox" | "resumed"> {
+		if (slice.external) return this.toInbox(slice, message);
 		const builder = this.env.BUILDER.getByName(slice.repo!);
 		if (await builder.notify(message)) return "inbox";
 		const [write, base] = await Promise.all([remoteFor(this.env.ARTIFACTS, slice.repo!, "write", 3 * 3600), remoteFor(this.env.ARTIFACTS, task.baseRepo!, "read", 3 * 3600)]);
 		await builder.revise(message, { token: write.token, base: { remote: base.url, token: base.token } });
 		if (!task.active.builders.includes(slice.id)) task.active.builders.push(slice.id);
 		return "resumed";
+	}
+
+	private toInbox(slice: Slice, text: string): "inbox" {
+		slice.inbox = [...(slice.inbox ?? []), { at: new Date().toISOString(), text }].slice(-50);
+		return "inbox";
+	}
+
+	/** An external agent reads its messages (review findings, requests, human messages), optionally only newer ones. */
+	async readInbox(sliceId: string, since?: string) {
+		const task = await this.load();
+		const slice = this.slice(task, sliceId);
+		return (slice.inbox ?? []).filter((m) => !since || m.at > since);
 	}
 
 	private async flagLaneRequest(task: Task, request: LaneChangeRequest, message: string, notify: boolean, human = true) {
@@ -433,6 +446,7 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 				outOfLane: [],
 				reviews: [],
 				leaseUntil: leaseUntil(task),
+				external: !input.hosted,
 			};
 			task.slices.push(slice);
 			this.note(task, start, `Change ${id} opened${actor ? ` by ${accessIdentityLabel(actor)}` : ""}: "${slice.title}", claiming ${owns.join(", ")}. Intent: ${slice.intent}`);
@@ -440,6 +454,20 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 			await this.scheduleLeaseCheck(task);
 			await this.save(task);
 			return { change: slice, credentials: { slice: id, repo, remote: fork.remote, token: fork.token } as SliceCredentials };
+		});
+	}
+
+	/** A fresh write token for an external agent's own fork. */
+	externalCredentials(sliceId: string) {
+		return this.exclusive(async () => {
+			const task = await this.load();
+			const slice = this.slice(task, sliceId);
+			if (!slice.external) fail(403, `change ${sliceId} is built by a hosted agent`);
+			if (slice.status !== "building") fail(409, `change ${sliceId} is ${slice.status}`);
+			const remote = await remoteFor(this.env.ARTIFACTS, slice.repo!, "write", 3 * 3600);
+			this.renewLease(task, slice);
+			await this.save(task);
+			return { fork: remote.url, token: remote.token };
 		});
 	}
 
@@ -1413,7 +1441,8 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 			const builder = this.env.BUILDER.getByName(slice.repo!);
 			const text = `Message from a human on the team: ${message}`;
 			let delivered: "inbox" | "resumed" = "inbox";
-			if (!(await builder.notify(text))) {
+			if (slice.external) this.toInbox(slice, text);
+			else if (!(await builder.notify(text))) {
 				const [write, base] = await Promise.all([
 					remoteFor(this.env.ARTIFACTS, slice.repo!, "write", 3 * 3600),
 					remoteFor(this.env.ARTIFACTS, task.baseRepo!, "read", 3 * 3600),
@@ -1550,6 +1579,11 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 				this.env.REVIEWER.getByName(reviewerName(slice.repo!, role, head)).cancel("the slice was sent back to its builder"),
 			),
 		);
+		// An external agent reads the findings from its inbox; there is no hosted builder to resume.
+		if (slice.external) {
+			this.toInbox(slice, message);
+			return;
+		}
 		const [write, base] = await Promise.all([
 			remoteFor(this.env.ARTIFACTS, slice.repo!, "write", 3 * 3600),
 			remoteFor(this.env.ARTIFACTS, task.baseRepo!, "read", 3 * 3600),

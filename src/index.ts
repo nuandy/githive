@@ -7,6 +7,7 @@ import { retryTransient } from "./retry";
 import { Workspace } from "./git";
 import type { Blueprint, Limits, Review, ReviewPolicy } from "./types";
 import { openTaskId } from "./open-mode";
+import { handleMcpBody, type McpContext } from "./mcp";
 
 export { Builder } from "./builder";
 export { Reviewer } from "./reviewer";
@@ -73,6 +74,7 @@ app.get("/api", (c) =>
 			"POST /tasks/:id/changes/:slice/extend {owns}",
 			"POST /tasks/:id/changes/:slice/abandon {reason}",
 			"GET  /tasks/:id/claims",
+			"POST /mcp (MCP front door: JSON-RPC over HTTP)",
 			"GET  /tasks/:id/ledger",
 			"POST /tasks/:id/restore {repo}",
 			"(contract amendments are proposed by builders; see task.amendments)",
@@ -179,6 +181,15 @@ app.post("/tasks/:id/changes/:slice/abandon", async (c) => {
 });
 
 app.get("/tasks/:id/claims", async (c) => c.json(await coordinator(c.env, c.req.param("id")).claims()));
+
+// The MCP front door (stateless JSON-RPC over HTTP), for agents from anywhere.
+app.post("/mcp", async (c) => {
+	const body = await c.req.json().catch(() => null);
+	if (body === null) return c.json({ jsonrpc: "2.0", id: null, error: { code: -32700, message: "parse error" } }, 400);
+	const result = await handleMcpBody(body, { coordinator: (id) => coordinator(c.env, id) as unknown as ReturnType<McpContext["coordinator"]>, identity: c.get("accessIdentity") });
+	return result === null ? c.body(null, 202) : c.json(result);
+});
+app.on(["GET", "DELETE"], "/mcp", (c) => c.body(null, 405, { Allow: "POST" }));
 
 // Add a task created before the index existed.
 app.post("/tasks/:id/index", async (c) => {
