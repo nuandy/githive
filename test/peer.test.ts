@@ -336,4 +336,28 @@ describe("a peer of the elected coordinator", () => {
 		await a.peer.abandonChange("stats-1a2b", "done");
 		expect(hints.at(-1)).toEqual({ id: "t1", name: null, term: 1 });
 	});
+
+	it("campaigns once for concurrent lead() calls, so a peer never holds two leaders for one term", async () => {
+		const a = peer("t1--a");
+		await Promise.all([a.lead(), a.lead(), a.lead()]);
+		expect(leases.commits.filter((c) => c.commit.kind === "election")).toHaveLength(1);
+		expect(log.commits.filter((c) => c.commit.kind === "term")).toHaveLength(1);
+	});
+
+	it("renews rather than re-campaigns when its lease has passed in its own view, keeping decisions in flight", async () => {
+		const a = peer("t1--a");
+		await a.lead();
+		let release!: () => void;
+		log.gate = new Promise((resolve) => (release = resolve));
+		const opening = a.peer.openChange({ title: "Stats", intent: "Stats", owns: ["src/stats/"] });
+		await vi.waitFor(() => expect(io.forks).toBe(1));
+		// Its alarm was late: the lease it holds has passed by its own clock.
+		clock.now += LEASE + 1;
+		expect(await a.lead()).toEqual({ leader: "t1--a", term: 1 });
+		log.gate = null;
+		release();
+		const { change } = await opening;
+		expect(change.status).toBe("building");
+		expect(log.commits.filter((c) => c.commit.kind === "term")).toHaveLength(1);
+	});
 });

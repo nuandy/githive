@@ -99,9 +99,25 @@ export class Peer extends Coordinator {
 		if (this.me !== me) await this.ctx.storage.put(IDENTITY, { taskId, repo, me });
 		this.me = me;
 		const now = this.options.now();
-		// Known without asking Git: this peer leads, or saw a lease that is still live.
-		if (this.leader?.leading && this.leader.leaseExpires > now) return { leader: me, term: this.leader.term };
+		const leader = this.leader;
+		if (leader?.leading) {
+			// Known without asking Git: this peer leads.
+			if (leader.leaseExpires > now) return { leader: me, term: leader.term };
+			// Its lease has passed by its own clock (a late alarm): renew it through
+			// the leader it has, rather than campaign and replace it, which would
+			// drop decisions still in flight.
+			if ((await leader.heartbeat()) && leader.leading) return { leader: me, term: leader.term };
+		}
 		if (!fresh && this.known && this.known.leaseUntil > now) return { leader: this.known.leader, term: this.known.term };
+		// One campaign at a time: concurrent calls share it, so a peer never holds two leaders for one term.
+		this.campaigning ??= this.campaign(taskId, repo, me).finally(() => (this.campaigning = null));
+		return this.campaigning;
+	}
+
+	/** A campaign in flight, shared by concurrent lead() calls. */
+	private campaigning: Promise<{ leader: string; term: number }> | null = null;
+
+	private async campaign(taskId: string, repo: string, me: string): Promise<{ leader: string; term: number }> {
 		const outcome = await campaign(this.refsOf(taskId, repo), me, () => {
 			throw new Error(`[404] no task ${taskId} on ${repo}`);
 		}, { leaseMs: this.options.leaseMs, now: this.options.now });
@@ -110,15 +126,15 @@ export class Peer extends Coordinator {
 			return { leader: outcome.leader, term: outcome.term };
 		}
 		this.known = null;
-		const newlyLeading = this.leader !== outcome.leader;
 		this.leader = outcome.leader;
-		if (newlyLeading) await this.hint(taskId, me, outcome.term);
+		await this.hint(taskId, me, outcome.term);
 		this.working = structuredClone(outcome.leader.state);
 		// The task's timers come with it: check claim leases when the earliest is due.
 		this.leaseCheckAt = nextLeaseCheck(this.working);
 		await this.armAlarm();
 		return { leader: me, term: outcome.term };
 	}
+
 
 	/**
 	 * The leader's alarm: renew the lease when two thirds of it has passed, and
