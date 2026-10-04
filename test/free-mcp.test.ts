@@ -80,6 +80,15 @@ describe("the coordinator-free MCP tools", () => {
 		expect(await call("free_audit", { repo: "project" })).toEqual({ merges: 0, open: 0, violations: [] });
 	});
 
+	it("reads the claims registry once for a call that only reads it", async () => {
+		await call("free_start", { repo: "project" });
+		await call("free_claim", { repo: "project", change: "a-1", agent: "agent-a", paths: ["src/a/"], intent: "a" });
+		const before = server.requests.length;
+		await call("free_claims", { repo: "project" });
+		// One read: where the ref points, then fetch it.
+		expect(server.requests.slice(before)).toEqual(["GET refs?service=git-upload-pack", "GET refs?service=git-upload-pack", "POST git-upload-pack"]);
+	});
+
 	it("reports a missing argument as a tool error", async () => {
 		expect(await call("free_claim", { repo: "project" })).toEqual({ error: "change is required" });
 	});

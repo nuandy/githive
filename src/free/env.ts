@@ -1,7 +1,7 @@
 import { forkAndWait, headOf, remoteFor, reviewerName } from "../artifacts";
-import { GitCasLog } from "../election-git";
+import { GitCasLog, cachedRemote } from "../election-git";
 import { fail } from "../errors";
-import { Workspace } from "../git";
+import { type Remote, Workspace } from "../git";
 import type { Registry } from "./claims";
 import type { FreeContext, HostedStatus } from "./mcp";
 import { makeStamper } from "./stamp";
@@ -10,6 +10,21 @@ import { makeStamper } from "./stamp";
 // container for checks, the task index for the dashboard, Blueprint's hosted
 // agents. Shared by the Worker (acting for an MCP caller) and by the hosted
 // agents themselves (acting as themselves).
+
+/**
+ * Artifacts tokens, per repo and scope, kept for the isolate while fresh:
+ * minting one is several Artifacts calls, which dominated each tool call. They
+ * last an hour and are reused for half of it. A failed mint isn't kept.
+ */
+const remotes = new Map<string, () => Promise<Remote>>();
+function cached(key: string, mint: () => Promise<Remote>) {
+	let remote = remotes.get(key);
+	if (!remote) remotes.set(key, (remote = cachedRemote(mint, 30 * 60_000)));
+	return remote();
+}
+
+/** Each record's log, kept for the isolate: a log remembers the tip it last saw, so reading an unmoved ref needn't fetch it. */
+const logs = new Map<string, GitCasLog<unknown>>();
 
 /**
  * The coordinator-free context for one actor: `by` is who it is (as Access
@@ -23,8 +38,13 @@ export function freeContextFor(env: Env, by: string | undefined, caller: { agent
 		requestReview: (input) => startFreeReviewers(env, input),
 		startBuilder: (input) => startFreeBuilder(env, input),
 		stamper: async (agent) => (env.FREE_STAMP_KEY && by ? makeStamper(env.FREE_STAMP_KEY, agent ? `${by}/${agent}` : by) : undefined),
-		remote: (repo, scope) => remoteFor(env.ARTIFACTS, repo, scope, 3600),
-		changeRemote: (repo, change, scope) => changeRemote(env, repo, change, scope, 3600),
+		remote: (repo, scope) => cached(`${repo}|${scope}`, () => remoteFor(env.ARTIFACTS, repo, scope, 3600)),
+		changeRemote: (repo, change, scope) => cached(`${freeAgentName(repo, change)}|${scope}`, () => changeRemote(env, repo, change, scope, 3600)),
+		records: <S>(repo: string, ref: string) => {
+			let log = logs.get(ref);
+			if (!log) logs.set(ref, (log = new GitCasLog<unknown>(() => cached(`${repo}|write`, () => remoteFor(env.ARTIFACTS, repo, "write", 3600)), repo, ref)));
+			return log as GitCasLog<S>;
+		},
 		agentStatus: (repo, change, head, roles) => freeAgentStatus(env, repo, change, head, roles),
 		head: async (repo) => (await headOf(env.ARTIFACTS, repo)) ?? fail(409, `${repo} has no commits`),
 		// Checks run in the Gate's container, one Gate per repo.

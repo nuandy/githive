@@ -1,3 +1,4 @@
+import type { CasLog } from "../election";
 import { GitCasLog } from "../election-git";
 import { requiredPaths, requiredString } from "../errors";
 import { branchHead, type Remote } from "../git";
@@ -19,6 +20,8 @@ import { approval, countedVotes, vote, type ReviewPolicy, type VoteRecord, type 
 export interface FreeContext {
 	/** Credentials for a project repo. */
 	remote: (repo: string, scope: "read" | "write") => Promise<Remote>;
+	/** A record's log (claims, votes), kept across calls so an unmoved ref isn't fetched again; without it, each call makes its own. */
+	records?: <S>(repo: string, ref: string) => CasLog<S>;
 	/** Credentials for a change's own fork of a project repo (forks access); asking to write creates the fork. */
 	changeRemote?: (repo: string, change: string, scope: "read" | "write") => Promise<Remote>;
 	/** Main's head in a project repo. */
@@ -108,6 +111,11 @@ function mayActAs(name: string, acting: string | undefined, registry: Registry |
 
 export type Args = Record<string, unknown>;
 
+/** A record's log: the context's shared one, or one for this call. */
+function recordLog<S>(ctx: FreeContext, repo: string, ref: string): CasLog<S> {
+	return ctx.records ? ctx.records<S>(repo, ref) : new GitCasLog<S>(() => ctx.remote(repo, "write"), repo, ref);
+}
+
 /** Where a repo's change branches live: each change's own fork, or the project repo when it's shared (as repos started before forks are). */
 function changeSourceFor(ctx: FreeContext, repo: string, registry: Registry | null | undefined) {
 	const access = registry?.access ?? "shared";
@@ -145,8 +153,7 @@ async function runAudit(ctx: FreeContext, repo: string) {
 
 /** Everything the dashboard shows for a repo in coordinator-free mode, read from Git. */
 export async function freeSnapshot(ctx: FreeContext, repo: string) {
-	const write = () => ctx.remote(repo, "read");
-	const [registry, votes] = await Promise.all([new GitCasLog<Registry>(write, repo, claimsRef(repo)).read(), new GitCasLog<Votes>(write, repo, votesRef(repo)).read()]);
+	const [registry, votes] = await Promise.all([recordLog<Registry>(ctx, repo, claimsRef(repo)).read(), recordLog<Votes>(ctx, repo, votesRef(repo)).read()]);
 	const state = registry?.commit.state;
 	if (!state?.baseline) throw new Error(`[404] coordinator-free mode hasn't started on ${repo}`);
 	const { merges, violations } = await runAudit(ctx, repo);
@@ -177,8 +184,9 @@ export async function freeSnapshot(ctx: FreeContext, repo: string) {
 export async function callFreeTool(name: string, args: Args, ctx: FreeContext): Promise<unknown> {
 	const repo = requiredString(args, "repo");
 	const write = () => ctx.remote(repo, "write");
-	const claims = new GitCasLog<Registry>(write, repo, claimsRef(repo));
-	const votes = new GitCasLog<Votes>(write, repo, votesRef(repo));
+	const claims = recordLog<Registry>(ctx, repo, claimsRef(repo));
+	const votes = recordLog<Votes>(ctx, repo, votesRef(repo));
+	// Read once per call; only free_start, which writes it first, reads it again.
 	const registered = (await claims.read())?.commit.state;
 	const key = ctx.agentKey ?? (typeof args.agent_key === "string" ? args.agent_key : undefined);
 	const acting = key ? await keyAgent(registered, key) : undefined;
@@ -219,7 +227,7 @@ export async function callFreeTool(name: string, args: Args, ctx: FreeContext): 
 			return { url: remote.url, token: remote.token, branch: `changes/${change}`, note: "Your change's own fork: push your branch changes/<change> here. Fetch main from the project repo (free_credentials without change)." };
 		}
 		case "free_claims":
-			return activeClaims((await claims.read())?.commit.state);
+			return activeClaims(registered);
 		case "free_claim":
 			return claim(claims, {
 				change: requiredString(args, "change"),
@@ -240,7 +248,8 @@ export async function callFreeTool(name: string, args: Args, ctx: FreeContext): 
 			return vote(votes, { commit: requiredString(args, "commit"), reviewer: actAs("reviewer"), role: requiredString(args, "role"), verdict, evidence: requiredString(args, "evidence") }, stamper);
 		}
 		case "free_merge": {
-			const registry = (await claims.read())?.commit.state;
+			// mergeChange reads the claims again itself, when it checks them.
+			const registry = registered;
 			// Anyone may merge a change whose conventions hold; it merges as its claim's agent, and the stamp says who asked.
 			const change = requiredString(args, "change");
 			const holder = activeClaims(registry).find((c) => c.change === change)?.agent;
@@ -269,7 +278,7 @@ export async function callFreeTool(name: string, args: Args, ctx: FreeContext): 
 		}
 		case "free_request_review": {
 			const change = requiredString(args, "change");
-			const registry = (await claims.read())?.commit.state;
+			const registry = registered;
 			if (!activeClaims(registry).some((c) => c.change === change)) throw new Error(`[409] ${change} holds no claim: claim the change's paths first`);
 			if (!ctx.requestReview) throw new Error("[501] hosted reviewers aren't available here");
 			const policy = registry?.policy ?? DEFAULT_POLICY;

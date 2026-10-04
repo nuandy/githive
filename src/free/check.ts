@@ -1,4 +1,4 @@
-import { type Remote, Workspace } from "../git";
+import { branchHead, type Remote, Workspace } from "../git";
 import { inLane } from "../open-mode";
 import type { ClaimRecord } from "./claims";
 
@@ -29,9 +29,21 @@ export async function checkChange(input: CheckInput) {
 	const outsideClaim = files.filter((f) => !own || !inLane(f, own.paths));
 	const withMain = await ws.tryMerge(main, head);
 
+	// Which other changes have pushed anything: cheap ref lookups, all at once, so
+	// only real branches are fetched (one at a time, into this one workspace).
+	const pushed = await Promise.all(
+		claims
+			.filter((c) => c.change !== change)
+			.map(async (other) => {
+				const remote = await input.source(other.change).catch(() => null);
+				const tip = remote ? await branchHead(remote, `changes/${other.change}`).catch(() => null) : null;
+				return remote && tip ? { other, remote } : null;
+			}),
+	);
 	const overlaps: { change: string; agent: string; head: string; files: string[]; conflicts: string[] }[] = [];
-	for (const [i, other] of claims.filter((c) => c.change !== change).entries()) {
-		const theirs = await fetchChange(`other-${i}`, other.change);
+	for (const [i, found] of pushed.filter((p) => p !== null).entries()) {
+		const { other, remote } = found;
+		const theirs = await ws.fetch(`other-${i}`, remote, `changes/${other.change}`).catch(() => null);
 		if (!theirs) continue;
 		const touched = new Set(await changedSinceMain(theirs));
 		const shared = files.filter((f) => touched.has(f));

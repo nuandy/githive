@@ -5,7 +5,10 @@ import type { CasLog, LogCommit } from "../election";
 // that tip; the append is compare-and-swap, so a concurrent author's entry
 // makes it read again and redo its check.
 
-const ATTEMPTS = 5;
+// Under load every claim, release and refresh contends for the one ref: keep
+// trying, with random, growing backoff so the losers don't collide again.
+const ATTEMPTS = 12;
+const backoff = (attempt: number) => new Promise((resolve) => setTimeout(resolve, Math.random() * Math.min(25 * 2 ** attempt, 1_000)));
 
 /**
  * Append to a record on the tip `next` was computed from. `next` returns the
@@ -34,5 +37,6 @@ export async function appendRecord<S, Refusal>(
 		const tip = await log.append(head?.tip ?? null, commit);
 		if (tip) return { ok: true, tip };
 		if (attempt === ATTEMPTS) throw new Error("[503] the record kept moving; try again");
+		await backoff(attempt);
 	}
 }
