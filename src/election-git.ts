@@ -164,7 +164,12 @@ export class GitCasLog<S> implements CasLog<S> {
 
 	async read(): Promise<{ tip: string; commit: LogCommit<S> } | null> {
 		const remote = await this.remote();
-		const current = await serverTip(remote, this.ref);
+		return this.readAt(await serverTip(remote, this.ref));
+	}
+
+	/** Read the log, already knowing where its ref points (from a listing): no need to ask the server again. */
+	async readAt(current: string | null): Promise<{ tip: string; commit: LogCommit<S> } | null> {
+		const remote = await this.remote();
 		if (!current) return null;
 		// Fetch only if the tip moved since this log last saw it.
 		const { fs, tip } = this.held?.tip === current ? this.held : await fetchTip(remote, this.ref);

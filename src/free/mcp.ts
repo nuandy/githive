@@ -1,12 +1,12 @@
-import type { CasLog } from "../election";
 import { GitCasLog } from "../election-git";
 import { requiredPaths, requiredString } from "../errors";
 import { branchHead, type Remote } from "../git";
 import { changeId, normalizeClaim } from "../open-mode";
 import { audit } from "./audit";
 import { checkChange } from "./check";
-import { activeClaims, claim, registerAgent, release, releaseStale, startFree, type Registry } from "./claims";
-import { readMainMerges, readRecordHistory } from "./git-records";
+import { claimStore, type ClaimStore } from "./claim-store";
+import { registerAgent, startFree, type ClaimRecord, type Registry } from "./claims";
+import { readMainMerges, readRecordHistory, readShardHistories } from "./git-records";
 import { type CheckRunner, mergeChange } from "./merge";
 import { revertViolation } from "./revert";
 import type { Stamper } from "./stamp";
@@ -21,7 +21,7 @@ export interface FreeContext {
 	/** Credentials for a project repo. */
 	remote: (repo: string, scope: "read" | "write") => Promise<Remote>;
 	/** A record's log (claims, votes), kept across calls so an unmoved ref isn't fetched again; without it, each call makes its own. */
-	records?: <S>(repo: string, ref: string) => CasLog<S>;
+	records?: <S>(repo: string, ref: string) => GitCasLog<S>;
 	/** Credentials for a change's own fork of a project repo (forks access); asking to write creates the fork. */
 	changeRemote?: (repo: string, change: string, scope: "read" | "write") => Promise<Remote>;
 	/** Main's head in a project repo. */
@@ -51,6 +51,7 @@ export interface HostedStatus {
 
 const DEFAULT_POLICY: ReviewPolicy = { required: 2, vetoes: ["security"] };
 const HOSTED_PREFIX = "blueprint-";
+const DEFAULT_SHARD_DEPTH = 2;
 const STALE_AFTER_MS = 30 * 60_000;
 const claimsRef = (repo: string) => `refs/notes/blueprint-claims/${repo}`;
 const votesRef = (repo: string) => `refs/notes/blueprint-votes/${repo}`;
@@ -70,7 +71,7 @@ free_audit replays the records and lists every broken convention, with the commi
 
 const str = { type: "string" } as const;
 const TOOL_LIST = [
-	{ name: "free_start", description: "Start coordinator-free mode on a project repo (harmless if started): the review policy, the checks run before each merge, and access: forks (default: each change in its own fork, only the toolkit writes the project) or shared (every agent writes the project repo). Returns them.", inputSchema: { type: "object", properties: { repo: str, required: { type: "number" }, vetoes: { type: "array", items: str }, verify: { type: "array", items: str }, access: { type: "string", enum: ["forks", "shared"] } }, required: ["repo"] } },
+	{ name: "free_start", description: "Start coordinator-free mode on a project repo (harmless if started): the review policy, the checks run before each merge, access: forks (default: each change in its own fork, only the toolkit writes the project) or shared (every agent writes the project repo), and shard_depth: claims are kept per path this many segments deep, so agents in different parts of the tree never contend (default 2; 0 keeps them in one record). Returns them.", inputSchema: { type: "object", properties: { repo: str, required: { type: "number" }, vetoes: { type: "array", items: str }, verify: { type: "array", items: str }, access: { type: "string", enum: ["forks", "shared"] }, shard_depth: { type: "number" } }, required: ["repo"] } },
 	{ name: "free_credentials", description: "Git access. With your change: a write token for where its branch changes/<change> lives (its own fork, unless the repo is shared). Without: read access to the project repo.", inputSchema: { type: "object", properties: { repo: str, change: str }, required: ["repo"] } },
 	{ name: "free_claims", description: "The claims in force: who holds which paths, and why.", inputSchema: { type: "object", properties: { repo: str }, required: ["repo"] } },
 	{ name: "free_claim", description: "Claim paths for your change (again to extend it, or to keep it active). Refused, naming the holder, if another claim overlaps; a claim in the way idle for 30 minutes is released as stale instead.", inputSchema: { type: "object", properties: { repo: str, change: str, agent: str, paths: { type: "array", items: str }, intent: str }, required: ["repo", "change", "agent", "paths", "intent"] } },
@@ -112,8 +113,13 @@ function mayActAs(name: string, acting: string | undefined, registry: Registry |
 export type Args = Record<string, unknown>;
 
 /** A record's log: the context's shared one, or one for this call. */
-function recordLog<S>(ctx: FreeContext, repo: string, ref: string): CasLog<S> {
+function recordLog<S>(ctx: FreeContext, repo: string, ref: string): GitCasLog<S> {
 	return ctx.records ? ctx.records<S>(repo, ref) : new GitCasLog<S>(() => ctx.remote(repo, "write"), repo, ref);
+}
+
+/** A repo's claims, where its registry says they are: in the registry itself, or split into per-path shards. */
+export function storeFor(ctx: FreeContext, repo: string, registry: Registry | null | undefined, root?: { log: GitCasLog<Registry>; head: Awaited<ReturnType<GitCasLog<Registry>["read"]>> }): ClaimStore {
+	return claimStore({ repo, registry, root: root?.log ?? recordLog<Registry>(ctx, repo, claimsRef(repo)), ...(root ? { rootHead: root.head } : {}), remote: () => ctx.remote(repo, "write"), log: ctx.records ? (ref) => ctx.records!<Registry>(repo, ref) : undefined });
 }
 
 /** Where a repo's change branches live: each change's own fork, or the project repo when it's shared (as repos started before forks are). */
@@ -127,14 +133,13 @@ function changeSourceFor(ctx: FreeContext, repo: string, registry: Registry | nu
 }
 
 /** Where a change stands: its branch head, the votes on that head, the approvals against the policy, and Blueprint's hosted agents on it. */
-async function changeStatus(ctx: FreeContext, repo: string, registry: Registry | null | undefined, cast: VoteRecord[], counted: VoteRecord[], change: string) {
+async function changeStatus(ctx: FreeContext, repo: string, registry: Registry | null | undefined, cast: VoteRecord[], counted: VoteRecord[], change: string, author: ClaimRecord | undefined) {
 	// No fork yet means nothing pushed yet.
 	const head = await Promise.resolve()
 		.then(() => changeSourceFor(ctx, repo, registry)(change, "read"))
 		.then((source) => branchHead(source, `changes/${change}`))
 		.catch(() => null);
 	const policy = registry?.policy ?? DEFAULT_POLICY;
-	const author = registry?.claims.find((c) => c.change === change);
 	const outcome = head ? approval({ votes: counted }, head, policy, author) : { approved: false, approvals: 0, vetoedBy: [] };
 	const hosted = ctx.agentStatus ? await ctx.agentStatus(repo, change, head, [...new Set(["tests", ...policy.vetoes])]).catch(() => undefined) : undefined;
 	return { head, votes: head ? cast.filter((v) => v.commit === head) : [], approval: { ...outcome, required: policy.required }, ...(hosted ? { hosted } : {}) };
@@ -148,7 +153,8 @@ async function runAudit(ctx: FreeContext, repo: string) {
 	if (!baseline) throw new Error(`[409] coordinator-free mode hasn't started on ${repo}`);
 	const merges = await readMainMerges(remote, baseline);
 	const start = registry[0].state;
-	const violations = await audit({ registry, votes: await readRecordHistory<Votes>(remote, votesRef(repo)), policy: start.policy ?? DEFAULT_POLICY, verify: start.verify, merges });
+	const shards = start.shardDepth ? await readShardHistories(remote, repo) : undefined;
+	const violations = await audit({ registry, ...(shards ? { shards } : {}), votes: await readRecordHistory<Votes>(remote, votesRef(repo)), policy: start.policy ?? DEFAULT_POLICY, verify: start.verify, merges });
 	return { merges: merges.length, violations };
 }
 
@@ -161,8 +167,8 @@ export async function freeSnapshot(ctx: FreeContext, repo: string) {
 	const cast = votes?.commit.state.votes ?? [];
 	const counted = await countedVotes(cast, state.stampKey);
 	const claims = await Promise.all(
-		activeClaims(state).map(async (c) => {
-			const { head, approval, hosted } = await changeStatus(ctx, repo, state, cast, counted, c.change);
+		(await storeFor(ctx, repo, state).read()).claims.map(async (c) => {
+			const { head, approval, hosted } = await changeStatus(ctx, repo, state, cast, counted, c.change, c);
 			return { ...c, head, approval, ...(hosted ? { hosted } : {}) };
 		}),
 	);
@@ -173,6 +179,8 @@ export async function freeSnapshot(ctx: FreeContext, repo: string) {
 		/** Whether records and merges are stamped with verified identity. */
 		verified: !!state.stampKey,
 		access: state.access ?? "shared",
+		/** Claims are split into per-path shards this deep (absent: one registry). */
+		...(state.shardDepth ? { shardDepth: state.shardDepth } : {}),
 		/** The claims in force, each with where its change stands. */
 		claims,
 		/** The latest votes, newest first. */
@@ -188,7 +196,8 @@ export async function callFreeTool(name: string, args: Args, ctx: FreeContext): 
 	const claims = recordLog<Registry>(ctx, repo, claimsRef(repo));
 	const votes = recordLog<Votes>(ctx, repo, votesRef(repo));
 	// Read once per call; only free_start, which writes it first, reads it again.
-	const registered = (await claims.read())?.commit.state;
+	const rootHead = await claims.read();
+	const registered = rootHead?.commit.state;
 	const key = ctx.agentKey ?? (typeof args.agent_key === "string" ? args.agent_key : undefined);
 	const acting = key ? await keyAgent(registered, key) : undefined;
 	const actAs = (field: string) => {
@@ -198,6 +207,11 @@ export async function callFreeTool(name: string, args: Args, ctx: FreeContext): 
 	};
 	const stamper = await ctx.stamper?.(acting);
 	const access = registered?.access ?? "shared";
+	const store = storeFor(ctx, repo, registered, { log: claims, head: rootHead });
+	let viewing: ReturnType<ClaimStore["read"]> | undefined;
+	/** The claims in force, read at most once per call. */
+	const view = () => (viewing ??= store.read());
+	const claimOf = async (change: string) => (await view()).claims.find((c) => c.change === change);
 	const changeSource = changeSourceFor(ctx, repo, registered);
 	switch (name) {
 		case "free_start": {
@@ -206,10 +220,12 @@ export async function callFreeTool(name: string, args: Args, ctx: FreeContext): 
 				vetoes: Array.isArray(args.vetoes) ? (args.vetoes as string[]) : DEFAULT_POLICY.vetoes,
 			};
 			const verify = Array.isArray(args.verify) ? (args.verify as string[]).filter((c) => typeof c === "string" && c.trim()) : [];
-			await startFree(claims, { baseline: await ctx.head(repo), policy, verify, stampKey: stamper?.publicKey, access: args.access === "shared" ? "shared" : "forks" });
+			// Claims are sharded by path, two segments deep unless asked otherwise (0: one registry).
+			const shardDepth = typeof args.shard_depth === "number" ? Math.max(0, Math.floor(args.shard_depth)) : DEFAULT_SHARD_DEPTH;
+			await startFree(claims, { baseline: await ctx.head(repo), policy, verify, stampKey: stamper?.publicKey, access: args.access === "shared" ? "shared" : "forks", shardDepth });
 			await ctx.register?.(repo);
 			const registry = (await claims.read())?.commit.state;
-			return { repo, policy: registry?.policy ?? policy, verify: registry?.verify ?? [], access: registry?.access ?? "shared", instructions: FREE_INSTRUCTIONS };
+			return { repo, policy: registry?.policy ?? policy, verify: registry?.verify ?? [], access: registry?.access ?? "shared", shardDepth: registry?.shardDepth ?? 0, instructions: FREE_INSTRUCTIONS };
 		}
 		case "free_credentials": {
 			if (access === "shared") {
@@ -221,16 +237,16 @@ export async function callFreeTool(name: string, args: Args, ctx: FreeContext): 
 				return { url: remote.url, token: remote.token, note: "read-only: the project repo is written only through the toolkit. Ask with your change for write access to its fork." };
 			}
 			const change = requiredString(args, "change");
-			const own = activeClaims(registered).find((c) => c.change === change);
+			const own = await claimOf(change);
 			if (!own) throw new Error(`[409] ${change} holds no claim: claim its paths first`);
 			mayActAs(own.agent, acting, registered, ctx.hosted);
 			const remote = await changeSource(change, "write");
 			return { url: remote.url, token: remote.token, branch: `changes/${change}`, note: "Your change's own fork: push your branch changes/<change> here. Fetch main from the project repo (free_credentials without change)." };
 		}
 		case "free_claims":
-			return activeClaims(registered);
+			return (await view()).claims;
 		case "free_claim":
-			return claim(claims, {
+			return store.claim({
 				change: requiredString(args, "change"),
 				agent: actAs("agent"),
 				paths: normalizeClaim(requiredPaths(args, "paths")),
@@ -240,8 +256,8 @@ export async function callFreeTool(name: string, args: Args, ctx: FreeContext): 
 		case "free_release": {
 			const change = requiredString(args, "change");
 			const agent = actAs("agent");
-			if (args.stale === true) return releaseStale(claims, { change, agent, staleAfterMs: STALE_AFTER_MS }, stamper);
-			return release(claims, { change, agent, reason: typeof args.reason === "string" ? args.reason : "released" }, stamper);
+			if (args.stale === true) return store.releaseStale({ change, agent, staleAfterMs: STALE_AFTER_MS }, stamper);
+			return store.release({ change, agent, reason: typeof args.reason === "string" ? args.reason : "released" }, stamper);
 		}
 		case "free_vote": {
 			const verdict = requiredString(args, "verdict");
@@ -253,11 +269,11 @@ export async function callFreeTool(name: string, args: Args, ctx: FreeContext): 
 			const registry = registered;
 			// Anyone may merge a change whose conventions hold; it merges as its claim's agent, and the stamp says who asked.
 			const change = requiredString(args, "change");
-			const holder = activeClaims(registry).find((c) => c.change === change)?.agent;
+			const holder = (await claimOf(change))?.agent;
 			if (holder && holder !== requiredString(args, "agent")) throw new Error(`[409] ${change} is ${holder}'s change: merge it as ${holder}`);
 			return mergeChange({
 				remote: await write(),
-				claims,
+				store,
 				votes,
 				policy: registry?.policy ?? DEFAULT_POLICY,
 				verify: registry?.verify ?? [],
@@ -273,14 +289,14 @@ export async function callFreeTool(name: string, args: Args, ctx: FreeContext): 
 			if (!ctx.startBuilder) throw new Error("[501] hosted builders aren't available here");
 			const intent = requiredString(args, "intent");
 			const change = changeId(intent);
-			const claimed = await claim(claims, { change, agent: "blueprint-builder", paths: normalizeClaim(requiredPaths(args, "paths")), intent, staleAfterMs: STALE_AFTER_MS }, stamper);
+			const claimed = await store.claim({ change, agent: "blueprint-builder", paths: normalizeClaim(requiredPaths(args, "paths")), intent, staleAfterMs: STALE_AFTER_MS }, stamper);
 			if (!claimed.ok) return claimed;
 			return ctx.startBuilder({ repo, change });
 		}
 		case "free_request_review": {
 			const change = requiredString(args, "change");
 			const registry = registered;
-			if (!activeClaims(registry).some((c) => c.change === change)) throw new Error(`[409] ${change} holds no claim: claim the change's paths first`);
+			if (!(await claimOf(change))) throw new Error(`[409] ${change} holds no claim: claim the change's paths first`);
 			if (!ctx.requestReview) throw new Error("[501] hosted reviewers aren't available here");
 			const policy = registry?.policy ?? DEFAULT_POLICY;
 			const roles = Array.isArray(args.roles) && args.roles.length ? (args.roles as string[]) : [...new Set(["tests", ...policy.vetoes])];
@@ -296,17 +312,17 @@ export async function callFreeTool(name: string, args: Args, ctx: FreeContext): 
 		}
 		case "free_status": {
 			const change = requiredString(args, "change");
-			const held = activeClaims(registered).find((c) => c.change === change) ?? null;
-			const released = held ? undefined : registered?.released.findLast((r) => r.change === change);
+			const held = (await claimOf(change)) ?? null;
+			const released = held ? undefined : (await view()).released.findLast((r) => r.change === change);
 			const cast = (await votes.read())?.commit.state.votes ?? [];
-			return { change, claim: held, ...(released ? { released } : {}), ...(await changeStatus(ctx, repo, registered, cast, await countedVotes(cast, registered?.stampKey), change)) };
+			return { change, claim: held, ...(released ? { released } : {}), ...(await changeStatus(ctx, repo, registered, cast, await countedVotes(cast, registered?.stampKey), change, held ?? undefined)) };
 		}
 		case "free_check":
 		{
 			const change = requiredString(args, "change");
 			const source = await changeSource(change, "read").catch(() => null);
 			if (!source) throw new Error(`[409] changes/${change} has nothing pushed to check`);
-			return checkChange({ project: await ctx.remote(repo, "read"), source, claims: activeClaims(registered), change });
+			return checkChange({ project: await ctx.remote(repo, "read"), source, claims: (await view()).claims, change });
 		}
 		case "free_register": {
 			const agent = requiredString(args, "agent");

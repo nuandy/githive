@@ -3,6 +3,8 @@ import http from "isomorphic-git/http/web";
 import { type Remote, Workspace } from "../git";
 import { MemoryFS } from "../memory-fs";
 import type { MergeRecord } from "./audit";
+import type { Registry } from "./claims";
+import { decodeShard, shardsPrefix } from "./shards";
 
 // Reading the coordinator-free records back out of Git for the audit: the full
 // history of a record ref (claims, votes), and main's commits since the mode
@@ -30,6 +32,14 @@ export async function readRecordHistory<S>(remote: Remote, ref: string): Promise
 			state: JSON.parse(decoder.decode((await git.readBlob({ fs, dir: DIR, oid: entry.oid, filepath: "state.json" })).blob)) as S,
 		})),
 	);
+}
+
+/** Every claims shard's history (see shards.ts), by shard. */
+export async function readShardHistories(remote: Remote, repo: string) {
+	const prefix = shardsPrefix(repo);
+	const refs = await git.listServerRefs({ http, url: remote.url, prefix, onAuth: onAuth(remote) });
+	const histories = await Promise.all(refs.filter((r) => r.ref.startsWith(prefix)).map(async (r) => [decodeShard(r.ref.slice(prefix.length)), await readRecordHistory<Registry>(remote, r.ref)] as const));
+	return new Map(histories);
 }
 
 const trailer = (message: string, name: string) => message.match(new RegExp(`^${name}: (.+)$`, "m"))?.[1]?.trim();

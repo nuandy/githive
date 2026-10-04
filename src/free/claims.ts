@@ -54,6 +54,8 @@ export interface Registry {
 	stampKey?: string;
 	/** Where changes live: each in its own fork, writable only by its agent (the default), or branches of the project repo every agent can write. */
 	access?: FreeAccess;
+	/** Claims are split into per-path shards this many segments deep (see shards.ts); absent, they're all here. */
+	shardDepth?: number;
 	/** Registered agent names, each bound to one secret key. */
 	agents?: Record<string, AgentRecord>;
 }
@@ -80,11 +82,11 @@ export interface Conflict {
 const empty = (): Registry => ({ claims: [], released: [] });
 
 /** Start coordinator-free mode on a repo: the registry's first entry records main's baseline and the review policy. Harmless to repeat. */
-export async function startFree(log: CasLog<Registry>, input: { baseline: string; policy: ReviewPolicy; verify?: string[]; stampKey?: string; access?: FreeAccess }) {
+export async function startFree(log: CasLog<Registry>, input: { baseline: string; policy: ReviewPolicy; verify?: string[]; stampKey?: string; access?: FreeAccess; shardDepth?: number }) {
 	const outcome = await appendRecord<Registry, "started">(log, "blueprint", empty, (state) =>
 		state.baseline
 			? { refused: "started" }
-			: { state: { ...state, baseline: input.baseline, policy: input.policy, verify: input.verify ?? [], stampKey: input.stampKey, access: input.access ?? "forks" }, text: `Coordinator-free mode starts at ${input.baseline}` },
+			: { state: { ...state, baseline: input.baseline, policy: input.policy, verify: input.verify ?? [], stampKey: input.stampKey, access: input.access ?? "forks", ...(input.shardDepth ? { shardDepth: input.shardDepth } : {}) }, text: `Coordinator-free mode starts at ${input.baseline}` },
 	);
 	return { started: outcome.ok };
 }
@@ -117,6 +119,8 @@ async function stamped<T extends object>(kind: string, record: T, stamper: Stamp
  */
 export async function claim(log: CasLog<Registry>, input: { change: string; agent: string; paths: string[]; intent: string; staleAfterMs?: number; now?: number }, stamper?: Stamper) {
 	const { staleAfterMs, now: at, ...wanted } = input;
+	/** The change's paths here before this claim (null: it had none), for a claim that must back out. */
+	let previous: string[] | null = null;
 	const outcome = await appendRecord<Registry, Conflict[]>(log, wanted.agent, empty, async (state) => {
 		const time = at ?? Date.now();
 		const isStale = (c: ClaimRecord) => staleAfterMs !== undefined && time - Date.parse(c.active) > staleAfterMs;
@@ -131,6 +135,7 @@ export async function claim(log: CasLog<Registry>, input: { change: string; agen
 			releases.push(await stamped("release", { change: held.change, agent: held.agent, by: wanted.agent, at: now, reason: "stale", stale: true, lastActive: held.active } as ReleaseRecord, stamper, "verifiedBy"));
 		const remaining = state.claims.filter((c) => !stale.includes(c));
 		const existing = remaining.find((c) => c.change === wanted.change);
+		previous = existing ? [...existing.paths] : null;
 		const { by: _by, stamp: _stamp, ...base } = existing ?? ({} as Partial<ClaimRecord>);
 		const record = await stamped(
 			"claim",
@@ -141,7 +146,24 @@ export async function claim(log: CasLog<Registry>, input: { change: string; agen
 		const freed = stale.length ? ` (releasing stale ${stale.map((c) => c.change).join(", ")})` : "";
 		return { state: { ...state, claims, released: [...state.released, ...releases] }, text: `${wanted.agent} claims ${wanted.paths.join(", ")} for ${wanted.change}: ${wanted.intent}${freed}` };
 	});
-	return outcome.ok ? outcome : { ok: false as const, conflicts: outcome.refused };
+	return outcome.ok ? { ...outcome, previous } : { ok: false as const, conflicts: outcome.refused };
+}
+
+/**
+ * Back a claim out: set the change's paths back to `keep`, or, with null,
+ * release it ("withdrawn"). For a claim that turned out to overlap another
+ * once written (see sharded claims).
+ */
+export function withdraw(log: CasLog<Registry>, input: { change: string; agent: string; keep: string[] | null; reason: string }, stamper?: Stamper) {
+	if (input.keep === null) return release(log, { change: input.change, agent: input.agent, reason: input.reason }, stamper);
+	const keep = input.keep;
+	return appendRecord<Registry, string>(log, input.agent, empty, async (state) => {
+		const held = state.claims.find((c) => c.change === input.change);
+		if (!held) return { refused: `${input.change} holds no claim` };
+		const { by: _by, stamp: _stamp, ...base } = held;
+		const record = await stamped("claim", { ...base, paths: keep }, stamper);
+		return { state: { ...state, claims: state.claims.map((c) => (c.change === input.change ? record : c)) }, text: `${input.agent} withdraws ${input.change}'s claim to ${keep.join(", ")}: ${input.reason}` };
+	});
 }
 
 /** Release a change's claim: its holder's, after it merged (say which merge) or was given up. */

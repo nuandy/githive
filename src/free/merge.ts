@@ -2,7 +2,7 @@ import git from "isomorphic-git";
 import type { CasLog } from "../election";
 import { BOT, type Remote, Workspace } from "../git";
 import { inLane } from "../open-mode";
-import { release, type Registry } from "./claims";
+import type { ClaimStore } from "./claim-store";
 import { mergeStampPayload } from "./audit";
 import type { Stamper } from "./stamp";
 import { approval, countedVotes, type ReviewPolicy, type Votes } from "./votes";
@@ -31,7 +31,8 @@ export interface MergeInput {
 	remote: Remote;
 	/** Where the change's branch lives (its fork); by default the project repo. */
 	source?: Remote;
-	claims: CasLog<Registry>;
+	/** The repo's claims: checked before merging, cited on the merge, released after. */
+	store: ClaimStore;
 	votes: CasLog<Votes>;
 	policy: ReviewPolicy;
 	/** The project's checks; none means the merge isn't tested. */
@@ -56,14 +57,14 @@ export type MergeOutcome =
  */
 export async function mergeChange(input: MergeInput): Promise<MergeOutcome> {
 	for (let attempt = 1; ; attempt++) {
-		const [claimsHead, votesHead] = await Promise.all([input.claims.read(), input.votes.read()]);
+		const [view, votesHead] = await Promise.all([input.store.read(), input.votes.read()]);
 		const ws = await Workspace.clone(input.remote);
 		const main = await ws.head();
 		const head = await ws.fetch("change", input.source ?? input.remote, `changes/${input.change}`);
 		const files = await ws.changedPaths(await ws.mergeBase(main, head), head);
 
 		const reasons: string[] = [];
-		const claims = claimsHead?.commit.state.claims ?? [];
+		const claims = view.claims;
 		const own = claims.find((c) => c.change === input.change);
 		if (!own) reasons.push(`${input.change} holds no claim`);
 		for (const file of files) {
@@ -99,7 +100,7 @@ export async function mergeChange(input: MergeInput): Promise<MergeOutcome> {
 			}
 		}
 
-		const claimed = { base: main, head, change: input.change, author: input.agent, by: input.stamper?.by, claimsTip: claimsHead!.tip, votesTip: votesHead!.tip, testedOn: verify.length ? main : undefined };
+		const claimed = { base: main, head, change: input.change, author: input.agent, by: input.stamper?.by, claimsTip: input.store.cite(view, files, own), votesTip: votesHead!.tip, testedOn: verify.length ? main : undefined };
 		const message = [
 			`Merge ${input.change} by ${input.agent}`,
 			"",
@@ -123,7 +124,7 @@ export async function mergeChange(input: MergeInput): Promise<MergeOutcome> {
 			if (attempt < ATTEMPTS && (err instanceof git.Errors.PushRejectedError || err instanceof git.Errors.GitPushError)) continue;
 			throw err;
 		}
-		await release(input.claims, { change: input.change, agent: input.agent, reason: "merged", mergedAs: oid }, input.stamper);
+		await input.store.release({ change: input.change, agent: input.agent, reason: "merged", mergedAs: oid }, input.stamper);
 		return { ok: true, commit: oid };
 	}
 }

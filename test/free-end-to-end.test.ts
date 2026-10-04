@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { GitCasLog } from "../src/election-git";
+import { claimStore } from "../src/free/claim-store";
 import { audit } from "../src/free/audit";
 import { claim, startFree, type Registry } from "../src/free/claims";
 import { readMainMerges, readRecordHistory } from "../src/free/git-records";
@@ -76,7 +77,7 @@ describe("coordinator-free mode, end to end", { timeout: 60_000 }, () => {
 		const aHead = await pushChange("agent-a", "a-1", { "src/a/x.txt": "a\n" });
 		await vote(votes(), { commit: aHead, reviewer: "rev-1", role: "tests", verdict: "approve", evidence: "ok" }, as.rev1);
 		await vote(votes(), { commit: aHead, reviewer: "rev-2", role: "api", verdict: "approve", evidence: "ok" }, as.rev2);
-		const merged = await mergeChange({ remote: remote(), claims: claims(), votes: votes(), policy, stamper: as.a, stampKey: (await claims().read())!.commit.state.stampKey, change: "a-1", agent: "agent-a" });
+		const merged = await mergeChange({ remote: remote(), store: claimStore({ repo: "t1", registry: undefined, root: claims(), remote: async () => remote() }), votes: votes(), policy, stamper: as.a, stampKey: (await claims().read())!.commit.state.stampKey, change: "a-1", agent: "agent-a" });
 		expect(merged).toMatchObject({ ok: true });
 
 		// Agent c holds src/c/.
@@ -121,7 +122,7 @@ describe("coordinator-free mode, end to end", { timeout: 60_000 }, () => {
 		await claim(claims(), { change: "a-1", agent: "agent-a", paths: ["src/a/"], intent: "a's work" }, as.a);
 		const aHead = await pushChange("agent-a", "a-1", { "src/a/x.txt": "a\n", "src/elsewhere.txt": "outside\n" });
 		await vote(votes(), { commit: aHead, reviewer: "rev-1", role: "tests", verdict: "approve", evidence: "ok" });
-		const outcome = await mergeChange({ remote: remote(), claims: claims(), votes: votes(), policy, change: "a-1", agent: "agent-a" });
+		const outcome = await mergeChange({ remote: remote(), store: claimStore({ repo: "t1", registry: undefined, root: claims(), remote: async () => remote() }), votes: votes(), policy, change: "a-1", agent: "agent-a" });
 		expect(outcome).toEqual({ ok: false, reasons: ["src/elsewhere.txt is outside a-1's claim", `${aHead} has 1 of 2 approvals from reviewers other than its author`] });
 		expect(server.git("rev-list", "--count", "main").trim()).toBe("1");
 	});

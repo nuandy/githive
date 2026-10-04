@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { GitCasLog } from "../src/election-git";
+import { claimStore } from "../src/free/claim-store";
 import { claim, startFree, type Registry } from "../src/free/claims";
 import { type CheckRunner, mergeChange } from "../src/free/merge";
 import { vote, type Votes } from "../src/free/votes";
@@ -31,7 +32,7 @@ async function readyChange(change: string, files: Record<string, string>) {
 }
 
 const merge = (change: string, runChecks: CheckRunner = passing) =>
-	mergeChange({ remote: remote(), claims: claims(), votes: votes(), policy, verify: ["npm test"], runChecks, change, agent: `agent-${change}` });
+	mergeChange({ remote: remote(), store: claimStore({ repo: "t1", registry: undefined, root: claims(), remote: async () => remote() }), votes: votes(), policy, verify: ["npm test"], runChecks, change, agent: `agent-${change}` });
 
 beforeEach(async () => {
 	server = await startGitServer();

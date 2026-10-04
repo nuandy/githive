@@ -2,6 +2,7 @@ import { forkAndWait, headOf, remoteFor, reviewerName } from "../artifacts";
 import { GitCasLog } from "../election-git";
 import { fail } from "../errors";
 import { type Remote, Workspace } from "../git";
+import { claimStore } from "./claim-store";
 import type { Registry } from "./claims";
 import type { FreeContext, HostedStatus } from "./mcp";
 import { makeStamper } from "./stamp";
@@ -80,8 +81,10 @@ export async function changeRemote(env: Env, repo: string, change: string, scope
 /** What every hosted agent on a change is told: its claim as the brief, the other claims, the checks. */
 async function changeBrief(env: Env, repo: string, change: string) {
 	const read = await remoteFor(env.ARTIFACTS, repo, "read", 3 * 3600);
-	const registry = (await new GitCasLog<Registry>(async () => read, repo, claimsRef(repo)).read())?.commit.state;
-	const own = registry?.claims.find((c) => c.change === change);
+	const root = new GitCasLog<Registry>(async () => read, repo, claimsRef(repo));
+	const registry = (await root.read())?.commit.state;
+	const { claims } = await claimStore({ repo, registry, root, remote: async () => read }).read();
+	const own = claims.find((c) => c.change === change);
 	return {
 		read,
 		own,
@@ -94,7 +97,7 @@ async function changeBrief(env: Env, repo: string, change: string) {
 			goal: own?.intent ?? change,
 			verify: registry?.verify ?? [],
 			slice: { id: change, title: change, owns: own?.paths ?? [], instructions: own?.intent ?? "", tests: [] },
-			siblings: (registry?.claims ?? []).filter((c) => c.change !== change).map((c) => ({ id: c.change, title: c.change, owns: c.paths })),
+			siblings: claims.filter((c) => c.change !== change).map((c) => ({ id: c.change, title: c.change, owns: c.paths })),
 			contracts: [],
 		},
 	};

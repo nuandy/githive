@@ -1,5 +1,6 @@
-import { inLane } from "../open-mode";
-import type { Registry } from "./claims";
+import { inLane, inLaneEntry } from "../open-mode";
+import type { ClaimRecord, Registry } from "./claims";
+import { decodeShard } from "./shards";
 import { stampPayload, verifyStamp } from "./stamp";
 import { approval, type Author, type ReviewPolicy, type VoteRecord, type Votes } from "./votes";
 
@@ -62,6 +63,8 @@ export const STALE_AFTER_MS = 30 * 60_000;
 export interface AuditRecords {
 	/** The claims registry's history, oldest first. */
 	registry: { tip: string; state: Registry }[];
+	/** Each claims shard's history, oldest first, when claims are sharded (see shards.ts). */
+	shards?: Map<string, { tip: string; state: Registry }[]>;
 	/** The votes' history, oldest first. */
 	votes?: { tip: string; state: Votes }[];
 	policy?: ReviewPolicy;
@@ -76,7 +79,7 @@ export async function audit(records: AuditRecords): Promise<Violation[]> {
 	// With a stamp key, only what Blueprint stamped is trusted.
 	const key = records.registry[0]?.state.stampKey;
 	const verified = (kind: string, record: object & { stamp?: string }) => (key ? verifyStamp(key, stampPayload(kind, record), record.stamp) : Promise.resolve(true));
-	violations.push(...(await unverifiedClaims(records, verified)));
+	for (const history of [records.registry, ...(records.shards?.values() ?? [])]) violations.push(...(await unverifiedClaims(history, verified)));
 	const { votesAt, forged } = await verifiedVotes(records, verified);
 	violations.push(...forged);
 
@@ -101,25 +104,24 @@ export async function audit(records: AuditRecords): Promise<Violation[]> {
 		// Git, so the checks below still run against the records it cites.
 		if (key && !stampedBy)
 			violations.push({ commit: merge.commit, author: merge.author, rule: "unverified", detail: "the merge has no valid Blueprint stamp: whoever made it, and what its trailers say, is unverified" });
-		const state = registryAt.get(merge.claimsTip);
-		if (!state) {
-			report("unknown-claims", `${merge.claimsTip} is not in the claims registry's history`);
-			continue;
-		}
-		const own = state.claims.find((c) => c.change === merge.change);
+		const cited = citedClaims(records, registryAt, merge, report);
+		if (!cited) continue;
+		const ownRecords = cited.claims.filter((c) => c.change === merge.change);
+		const own = ownRecords.length ? { ...ownRecords[0], paths: ownRecords.flatMap((c) => c.paths) } : undefined;
 		for (const file of merge.files) {
-			const holder = state.claims.find((c) => c.change !== merge.change && inLane(file, c.paths));
+			if (cited.uncovered.has(file)) continue;
+			const holder = cited.claims.find((c) => c.change !== merge.change && inLane(file, c.paths));
 			if (holder) report("inside-another-claim", `${file} was claimed by ${holder.change} (${holder.agent}) at ${merge.claimsTip}`);
 			else if (!own || !inLane(file, own.paths)) report("outside-claim", `${file} was not in ${merge.change}'s claim at ${merge.claimsTip}`);
 		}
-		checkReleasedAfter(records, merge, report);
+		for (const { history, tip } of cited.records) checkReleasedAfter(history, tip, merge, report);
 		checkApproved(records, votesAt, merge, report, own);
 		if (records.verify?.length) {
 			if (!merge.testedOn) report("untested", "the merge records no checks run (Blueprint-Tested)");
 			else if (merge.testedOn !== merge.base) report("untested", `checks ran on ${merge.testedOn}, but the merge went onto ${merge.base}`);
 		}
 	}
-	violations.push(...othersClaimsReleased(records));
+	for (const history of [records.registry, ...(records.shards?.values() ?? [])]) violations.push(...othersClaimsReleased(history, records.staleAfterMs));
 	for (const revert of reverts) {
 		const undone = violations.filter((v) => v.commit === revert.reverts && !v.resolvedBy);
 		for (const v of undone) v.resolvedBy = revert.commit;
@@ -130,13 +132,42 @@ export async function audit(records: AuditRecords): Promise<Violation[]> {
 }
 
 type Verify = (kind: string, record: object & { stamp?: string }) => Promise<boolean>;
+type History = { tip: string; state: Registry }[];
+
+/**
+ * The claims a merge says it checked (its Blueprint-Claims trailer): a tip of
+ * the claims registry, or, sharded, `shard=tip` for each shard it read. Each
+ * file must be covered by a cited shard (its own or one above it).
+ */
+function citedClaims(records: AuditRecords, registryAt: Map<string, Registry>, merge: MergeRecord, report: (rule: string, detail: string) => void) {
+	const tip = merge.claimsTip!;
+	if (!tip.includes("=")) {
+		const state = registryAt.get(tip);
+		if (!state) return void report("unknown-claims", `${tip} is not in the claims registry's history`);
+		return { claims: state.claims, records: [{ history: records.registry, tip }], uncovered: new Set<string>() };
+	}
+	const claims: ClaimRecord[] = [];
+	const cited: { shard: string; history: History; tip: string }[] = [];
+	for (const pair of tip.split(/\s+/).filter(Boolean)) {
+		const [encoded, at] = pair.split("=");
+		const shard = decodeShard(encoded);
+		const history = records.shards?.get(shard);
+		const entry = history?.find((e) => e.tip === at);
+		if (!history || !entry) return void report("unknown-claims", `${shard}@${at} is not in that shard's history`);
+		claims.push(...entry.state.claims);
+		cited.push({ shard, history, tip: at });
+	}
+	const uncovered = new Set(merge.files.filter((file) => !cited.some(({ shard }) => inLaneEntry(file, shard))));
+	for (const file of uncovered) report("unknown-claims", `${file}: the merge cites no claims shard covering it`);
+	return { claims, records: cited, uncovered };
+}
 
 /** Claims added without a stamp, and claims that disappeared without a stamped release. */
-async function unverifiedClaims(records: AuditRecords, verified: Verify): Promise<Violation[]> {
+async function unverifiedClaims(history: History, verified: Verify): Promise<Violation[]> {
 	const violations: Violation[] = [];
 	const seen = new Set<string>();
 	let previous: Registry | null = null;
-	for (const { tip, state } of records.registry) {
+	for (const { tip, state } of history) {
 		for (const held of state.claims) {
 			const id = `${held.change}|${held.stamp ?? ""}|${held.active}`;
 			if (seen.has(id)) continue;
@@ -181,9 +212,11 @@ async function verifiedVotes(records: AuditRecords, verified: Verify) {
  * registry state after the cited tip without the claim must be a release that
  * names this merge. Otherwise the agent merged after giving its claim up.
  */
-function checkReleasedAfter(records: AuditRecords, merge: MergeRecord, report: (rule: string, detail: string) => void) {
-	const from = records.registry.findIndex((r) => r.tip === merge.claimsTip);
-	for (const later of records.registry.slice(from + 1)) {
+function checkReleasedAfter(history: History, tip: string, merge: MergeRecord, report: (rule: string, detail: string) => void) {
+	const from = history.findIndex((r) => r.tip === tip);
+	// Only a record that held the change's claim at the cited tip has a release to check.
+	if (!history[from]?.state.claims.some((c) => c.change === merge.change)) return;
+	for (const later of history.slice(from + 1)) {
 		if (later.state.claims.some((c) => c.change === merge.change)) continue;
 		const release = later.state.released.findLast((r) => r.change === merge.change);
 		if (release?.mergedAs !== merge.commit) report("released-before-merge", `${merge.change}'s claim was released at ${later.tip} without naming ${merge.commit} as its merge`);
@@ -204,11 +237,11 @@ function checkApproved(records: AuditRecords, votesAt: Map<string, Votes>, merge
 }
 
 /** Releases of another agent's claim that wasn't stale yet. */
-function othersClaimsReleased(records: AuditRecords): Violation[] {
-	const staleAfter = records.staleAfterMs ?? STALE_AFTER_MS;
+function othersClaimsReleased(history: History, staleAfterMs?: number): Violation[] {
+	const staleAfter = staleAfterMs ?? STALE_AFTER_MS;
 	const violations: Violation[] = [];
 	let seen = 0;
-	for (const entry of records.registry) {
+	for (const entry of history) {
 		for (const release of entry.state.released.slice(seen)) {
 			if (release.by === release.agent) continue;
 			const idle = Date.parse(release.at) - Date.parse(release.lastActive);

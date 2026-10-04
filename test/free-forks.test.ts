@@ -121,7 +121,7 @@ describe("free_check (run by the agent itself)", () => {
 	// is the change against main, and its files against its claim; it never
 	// fetches other changes.
 	it("warns early about conflicts with main and files outside the claim, without fetching other changes", async () => {
-		await call("free_start", { access: "shared" });
+		await call("free_start", { access: "shared", shard_depth: 0 });
 		await call("free_claim", { change: "a-1", agent: "agent-a", paths: ["src/a/"], intent: "a" });
 		await call("free_claim", { change: "b-1", agent: "agent-b", paths: ["src/b/"], intent: "b" });
 		const head = await pushChange(project.url, work, "agent-a", "a-1", { "src/a/x.txt": "a\n", "README.md": "a's readme\n" });

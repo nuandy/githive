@@ -81,7 +81,7 @@ describe("the coordinator-free MCP tools", () => {
 	});
 
 	it("reads the claims registry once for a call that only reads it", async () => {
-		await call("free_start", { repo: "project" });
+		await call("free_start", { repo: "project", shard_depth: 0 });
 		await call("free_claim", { repo: "project", change: "a-1", agent: "agent-a", paths: ["src/a/"], intent: "a" });
 		const before = server.requests.length;
 		await call("free_claims", { repo: "project" });

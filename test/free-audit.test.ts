@@ -102,3 +102,49 @@ describe("the audit", () => {
 		expect(await audit(withChecks(merge({ base: "p1", testedOn: "p1" })))).toEqual([]);
 	});
 });
+
+describe("the audit, with sharded claims", () => {
+	// Claims split by path: a merge cites each shard it checked as shard=tip.
+	const wideOther = { change: "src-9z9z", agent: "agent-z", paths: ["src/"], intent: "Everything in src", since: "", active: "2026-10-05T10:00:00.000Z" };
+	const root = [{ tip: "r0", state: { ...at([]), baseline: "b0", shardDepth: 2 } }];
+	const shards = new Map([
+		["src/stats", [{ tip: "s1", state: at([claimA]) }]],
+		["src", [{ tip: "w1", state: at([wideOther]) }]],
+	]);
+	const sharded = (merges: MergeRecord[], history = shards) => ({ registry: root, shards: history, votes, policy, merges });
+
+	it("finds nothing wrong with a merge inside its own claim, citing its shard", async () => {
+		expect(await audit(sharded([merge({ claimsTip: "src%2Fstats=s1" })]))).toEqual([]);
+	});
+
+	it("checks a merge against every shard it cites, a wide claim above included", async () => {
+		expect(await audit(sharded([merge({ claimsTip: "src=w1 src%2Fstats=s1" })]))).toEqual([
+			{ commit: "m1", author: "agent-a", rule: "inside-another-claim", detail: "src/stats/index.ts was claimed by src-9z9z (agent-z) at src=w1 src%2Fstats=s1" },
+		]);
+	});
+
+	it("reports a file no cited shard covers, and a cited tip its shard never had", async () => {
+		expect(await audit(sharded([merge({ claimsTip: "src%2Fstats=s1", files: ["src/stats/a.ts", "lib/x.ts"] })]))).toEqual([
+			{ commit: "m1", author: "agent-a", rule: "unknown-claims", detail: "lib/x.ts: the merge cites no claims shard covering it" },
+		]);
+		expect(await audit(sharded([merge({ claimsTip: "src%2Fstats=made-up" })]))).toEqual([
+			{ commit: "m1", author: "agent-a", rule: "unknown-claims", detail: "src/stats@made-up is not in that shard's history" },
+		]);
+	});
+
+	it("reports a merge made after its claim was released in a shard it cites", async () => {
+		const releasedA = { change: "stats-1a2b", agent: "agent-a", by: "agent-a", at: "", reason: "gave up", lastActive: claimA.active };
+		const history = new Map([...shards, ["src/stats", [{ tip: "s1", state: at([claimA]) }, { tip: "s2", state: at([], [releasedA]) }]]]);
+		expect(await audit(sharded([merge({ claimsTip: "src%2Fstats=s1" })], history))).toEqual([
+			{ commit: "m1", author: "agent-a", rule: "released-before-merge", detail: "stats-1a2b's claim was released at s2 without naming m1 as its merge" },
+		]);
+	});
+
+	it("reports another agent releasing a claim that wasn't stale, in any shard", async () => {
+		const takenEarly = { change: "src-9z9z", agent: "agent-z", by: "agent-a", at: "2026-10-05T10:05:00.000Z", reason: "stale", stale: true, lastActive: wideOther.active };
+		const history = new Map([...shards, ["src", [{ tip: "w1", state: at([wideOther]) }, { tip: "w2", state: at([], [takenEarly]) }]]]);
+		expect(await audit({ ...sharded([], history), staleAfterMs: 30 * 60_000 })).toEqual([
+			{ commit: "w2", author: "agent-a", rule: "released-others-claim", detail: "agent-a released src-9z9z (agent-z), active 5 minutes before, not stale" },
+		]);
+	});
+});
