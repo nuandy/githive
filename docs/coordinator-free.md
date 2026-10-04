@@ -139,3 +139,23 @@ about the cooperative merge.
   Neither agent calls a Coordinator. Live (`scripts/free-build-demo.mjs`): the
   builder pushed in a minute, both reviewers approved, and the change was on
   main, stamped, about two minutes after `free_build`. The audit was clean.
+
+## Benchmark
+
+`scripts/bench.mjs --mode free` runs open mode's fake-agent lifecycle through
+the free tools (claim and fork, push, Merge-ahead, status, release), with five
+agents racing for one path at each level. Wall time on bench, 2026-10-05:
+
+| agents | fixed Coordinator (short locks) | elected coordinator | coordinator-free (first) | coordinator-free (tuned) |
+|---|---|---|---|---|
+| 1 | 11.6 s | 28.2 s | 48.0 s | 26.7 s |
+| 5 | 16.1 s | 28.4 s | 72.1 s | 47.7 s |
+| 10 | 31.9 s | 48.1 s | 89.6 s, 2 failed | 59.9 s |
+
+Exactly one racer won at every level, and no claims were left over. Tuning
+(tokens and record logs kept per isolate, one registry read per call, retries
+with backoff, Merge-ahead fetching only pushed branches) fixed the two claims
+that gave up under contention. The remaining gap is the price of having no
+server-side memory: every call reads its state from Git (listing claims, 0.2 s
+from the Coordinator's memory, takes 1–2 s), and every claim and release is a
+compare-and-swap push to one ref, so they serialize on Git under load.
