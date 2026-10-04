@@ -9,7 +9,7 @@ import { describeError } from "./contract-check-plan";
 import { isTransientFailure, retryTransient } from "./retry";
 import { Workspace } from "./git";
 import { boundedUnifiedDiff } from "./code-view";
-import { clipText, diff, fromDoc, replay, toDoc } from "./ledger";
+import { type LedgerEntry, clipText, diff, fromDoc, replay, toDoc } from "./ledger";
 import { readLedger } from "./ledger-git";
 import { LedgerOutbox, LockStats } from "./ledger-outbox";
 import { closesLaneRequestCycle, latestResolutions, laneRequestMessage, safeLanePath, unresolvedRequests } from "./lane-requests";
@@ -125,30 +125,75 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 	private forksRunning = 0;
 	private forkWaiters: (() => void)[] = [];
 
-	private exclusive<T>(fn: () => Promise<T>, label = "other"): Promise<T> {
+	/**
+	 * Run a state-changing step on its own: steps never interleave. The answer
+	 * waits for whatever `finishStep` says makes the step's decisions durable,
+	 * but the next step doesn't: it starts as soon as this one has run.
+	 */
+	protected exclusive<T>(fn: () => Promise<T>, label = "other"): Promise<T> {
 		const queued = Date.now();
 		this.stats.depth++;
+		let durable: Promise<void> = Promise.resolve();
 		const recorded = async () => {
 			const started = Date.now();
 			let ran = started;
+			let ok = false;
 			try {
 				const result = await fn();
 				ran = Date.now();
+				ok = true;
 				return result;
 			} catch (err) {
 				ran = Date.now();
-				// A method that failed didn't make its decisions; what it saved still goes out as state.
-				this.outbox.discard();
 				throw err;
 			} finally {
-				await this.outbox.queue();
+				({ durable } = await this.finishStep(ok));
 				this.stats.depth--;
 				this.stats.record({ label, at: queued, waitMs: started - queued, runMs: ran - started, flushMs: Date.now() - ran });
 			}
 		};
 		const run = this.tail.then(recorded, recorded);
 		this.tail = run.catch(() => {});
-		return run;
+		return run.then(async (result) => {
+			await durable;
+			return result;
+		});
+	}
+
+	// Where the task lives and how a step's decisions are kept. The fixed
+	// Coordinator keeps the task in its own storage and writes decisions to Git
+	// in the background; a peer of the elected coordinator overrides these to
+	// keep both in the shared log (see src/peer.ts).
+
+	/** The stored task, if there is one. */
+	protected readTask(): Promise<Task | undefined> {
+		return this.ctx.storage.get<Task>("task");
+	}
+
+	protected writeTask(task: Task): Promise<void> {
+		return this.ctx.storage.put("task", task);
+	}
+
+	/** Keep a decision until its step finishes. */
+	protected recordDecision(entry: LedgerEntry) {
+		this.outbox.add(entry);
+	}
+
+	/**
+	 * A step finished (or failed, `ok` false). Returns what its answer must wait
+	 * for (wrapped, since awaiting a promise of a promise flattens it). Here:
+	 * nothing, since decisions go to Git in the background. A method that failed
+	 * didn't make its decisions; what it saved still goes out as state.
+	 */
+	protected async finishStep(ok: boolean): Promise<{ durable: Promise<void> }> {
+		if (!ok) this.outbox.discard();
+		await this.outbox.queue();
+		return { durable: Promise.resolve() };
+	}
+
+	/** Wake this object at `at` (claim leases need checking). */
+	protected setTimer(at: number): Promise<void> {
+		return this.ctx.storage.setAlarm(at);
 	}
 
 	/** Run `fn` on the stored task under the lock, and save the task once it returns. A failure saves nothing. */
@@ -163,7 +208,7 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 
 	/** Note a decision on the commit it is about (the task's anchor commit for task-wide ones). */
 	private note(task: Task, commit: string | undefined, text: string) {
-		this.outbox.add({ commit: commit ?? task.baseCommit ?? task.anchor ?? EMPTY_TREE, text, at: new Date().toISOString() });
+		this.recordDecision({ commit: commit ?? task.baseCommit ?? task.anchor ?? EMPTY_TREE, text, at: new Date().toISOString() });
 	}
 
 	/** Wait until every queued decision is in Git, retrying a failed write once. Returns how many are still queued. */
@@ -202,12 +247,12 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 		});
 	}
 
-	private async load() {
-		return withScheduling((await this.ctx.storage.get<Task>("task")) ?? fail(404, "task not found"));
+	protected async load() {
+		return withScheduling((await this.readTask()) ?? fail(404, "task not found"));
 	}
 
-	private save(task: Task) {
-		return this.ctx.storage.put("task", task);
+	protected save(task: Task) {
+		return this.writeTask(task);
 	}
 
 	private slice(task: Task, id: string) {
@@ -637,7 +682,7 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 	 */
 	createOpen(id: string, repo: string, input: { verify?: string[]; review?: ReviewPolicy; limits?: Partial<Limits>; leaseMinutes?: number } = {}) {
 		return this.exclusive(async () => {
-			const existing = await this.ctx.storage.get<Task>("task");
+			const existing = await this.readTask();
 			if (existing) {
 				if (existing.mode === "open" && existing.repo === repo) return withScheduling(existing);
 				fail(409, "task exists");
@@ -833,7 +878,7 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 	private async scheduleLeaseCheck(task: Task) {
 		if (task.mode !== "open") return;
 		const next = nextLeaseCheck(task);
-		if (next !== null) await this.ctx.storage.setAlarm(Math.max(next, Date.now() + 1_000));
+		if (next !== null) await this.setTimer(Math.max(next, Date.now() + 1_000));
 	}
 
 	/**
