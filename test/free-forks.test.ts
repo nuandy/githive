@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { statusOf } from "../src/errors";
 import { callFreeTool, type FreeContext } from "../src/free/mcp";
-import { agentClone } from "./helpers/agents";
+import { agentClone, pushChange } from "./helpers/agents";
 import { startGitServer, type GitServer } from "./helpers/git-server";
 
 // Prevention, not just detection: by default each change lives in its own fork
@@ -111,6 +111,32 @@ describe("free_status", () => {
 		await call("free_claim", { change: "a-1", agent: "agent-a", paths: ["src/a/"], intent: "a" });
 		await call("free_release", { change: "a-1", agent: "agent-a", reason: "gave up" });
 		expect(await call("free_status", { change: "a-1" })).toMatchObject({ claim: null, released: { reason: "gave up" } });
+	});
+});
+
+describe("free_check (Merge-ahead, run by the agent itself)", () => {
+	it("warns early: conflicts with main, files outside the claim, and files other changes touch too", async () => {
+		await call("free_start", { access: "shared" });
+		await call("free_claim", { change: "a-1", agent: "agent-a", paths: ["src/a/"], intent: "a" });
+		await call("free_claim", { change: "b-1", agent: "agent-b", paths: ["src/b/"], intent: "b" });
+		await call("free_claim", { change: "c-1", agent: "agent-c", paths: ["src/c/"], intent: "c" });
+		const head = await pushChange(project.url, work, "agent-a", "a-1", { "src/a/x.txt": "a\n", "README.md": "a's readme\n", "NOTES.md": "same\n" });
+		await pushChange(project.url, work, "agent-b", "b-1", { "src/b/y.txt": "b\n", "README.md": "b's readme\n", "NOTES.md": "same\n" });
+		await pushChange(project.url, work, "agent-c", "c-1", { "src/c/z.txt": "c\n" });
+
+		expect(await call("free_check", { change: "a-1" })).toEqual({
+			change: "a-1",
+			head,
+			main: { head: expect.stringMatching(/^[0-9a-f]{40}$/), clean: true },
+			outsideClaim: ["NOTES.md", "README.md"],
+			overlaps: [{ change: "b-1", agent: "agent-b", head: expect.stringMatching(/^[0-9a-f]{40}$/), files: ["NOTES.md", "README.md"], conflicts: ["README.md"] }],
+		});
+	}, 60_000);
+
+	it("says when there's nothing pushed to check", async () => {
+		await call("free_start", { access: "shared" });
+		await call("free_claim", { change: "a-1", agent: "agent-a", paths: ["src/a/"], intent: "a" });
+		expect(await call("free_check", { change: "a-1" })).toEqual({ error: "changes/a-1 has nothing pushed to check" });
 	});
 });
 

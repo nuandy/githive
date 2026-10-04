@@ -16,6 +16,7 @@ const hosted = vi.hoisted(() => ({
 	merges: [] as unknown[],
 	votes: [] as unknown[],
 	releases: [] as unknown[],
+	check: { main: { clean: true }, outsideClaim: [], overlaps: [] } as unknown,
 }));
 
 vi.mock("../src/free/env", () => ({
@@ -29,6 +30,7 @@ vi.mock("../src/free/mcp", () => ({
 		if (name === "free_claim") hosted.claims.push({ args, by: ctx.by });
 		if (name === "free_merge") hosted.merges.push({ args, by: ctx.by });
 		if (name === "free_release") hosted.releases.push({ args, by: ctx.by });
+		if (name === "free_check") return hosted.check;
 		return { ok: true };
 	}),
 }));
@@ -67,6 +69,7 @@ beforeEach(() => {
 	hosted.merges = [];
 	hosted.votes = [];
 	hosted.releases = [];
+	hosted.check = { main: { clean: true }, outsideClaim: [], overlaps: [] };
 });
 
 describe("Blueprint's builder, coordinator-free", () => {
@@ -84,6 +87,18 @@ describe("Blueprint's builder, coordinator-free", () => {
 		expect(b.state.lastReport?.outOfLane).toEqual(["src/router.ts"]);
 		// Against the project's main (origin may be the change's fork), so merged-in main isn't counted.
 		expect(b.ran).toContainEqual(["git", "diff", "--name-only", "base/main...HEAD"]);
+	});
+
+	it("runs Merge-ahead after each push, and tells the model what would conflict", async () => {
+		hosted.check = { head: "h9", main: { head: "m1", clean: false, conflicts: ["src/stats/index.ts"] }, outsideClaim: [], overlaps: [{ change: "b-1", agent: "agent-b", head: "hb", files: ["package.json"], conflicts: ["package.json"] }] };
+		const b = builder({ "rev-list --count": "1" });
+		const said = await b.run("commit_and_push", { message: "stats" });
+		expect(said).toMatch(/conflicts with main in src\/stats\/index\.ts/);
+		expect(said).toMatch(/b-1 \(agent-b\) also changes package\.json, and would conflict in package\.json/);
+		expect(b.state.lastReport?.conflicts).toEqual([
+			expect.objectContaining({ pair: ["base", "stats-1a2b"], heads: ["m1", "h9"], status: "conflict", files: ["src/stats/index.ts"] }),
+			expect.objectContaining({ pair: ["b-1", "stats-1a2b"], heads: ["hb", "h9"], status: "conflict", files: ["package.json"] }),
+		]);
 	});
 
 	it("refreshes its claim with each push, so a working builder's claim never goes stale", async () => {

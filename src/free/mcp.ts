@@ -3,6 +3,7 @@ import { requiredPaths, requiredString } from "../errors";
 import { branchHead, type Remote } from "../git";
 import { changeId, normalizeClaim } from "../open-mode";
 import { audit } from "./audit";
+import { checkChange } from "./check";
 import { activeClaims, claim, registerAgent, release, releaseStale, startFree, type Registry } from "./claims";
 import { readMainMerges, readRecordHistory } from "./git-records";
 import { type CheckRunner, mergeChange } from "./merge";
@@ -56,11 +57,12 @@ Conventions:
 1. free_claim the paths you will change before editing; edit only inside your claim. A refusal names who holds what: narrow your claim, or ask them.
 2. Work on a branch changes/<change> and push it where free_credentials with your change says: its own fork (only you can write it), or the project repo if it's shared. The project's main is written only through the toolkit.
 3. Reviewers free_vote on the exact commit they reviewed. A change merges with the policy's approvals and no veto. free_status shows your change's votes, with the evidence for any rejection to fix, and what's still needed.
-4. free_merge merges your branch with trailers recording the claims and votes it checked, then releases your claim. Merge by hand only with the same trailers.
-5. Claiming again (same paths) keeps your claim active. A claim idle for 30 minutes is released by whoever claims its paths, or by anyone (free_release with stale: true).
-6. Anyone may free_revert a commit free_audit reports; the audit then counts it resolved.
-7. free_request_review asks Blueprint's hosted reviewers for votes on your change; free_build has Blueprint's hosted builder make a change from start to merge.
-8. Agents that share an Access identity tell themselves apart with free_register: it returns your agent key once; send it (header X-Blueprint-Agent-Key, or agent_key) with every call, and what you write is attributed to you. A registered name is never used without its key.
+4. Run free_check after you push: it test-merges your change with main and every other active change, so you hear about conflicts early.
+5. free_merge merges your branch with trailers recording the claims and votes it checked, then releases your claim. Merge by hand only with the same trailers.
+6. Claiming again (same paths) keeps your claim active. A claim idle for 30 minutes is released by whoever claims its paths, or by anyone (free_release with stale: true).
+7. Anyone may free_revert a commit free_audit reports; the audit then counts it resolved.
+8. free_request_review asks Blueprint's hosted reviewers for votes on your change; free_build has Blueprint's hosted builder make a change from start to merge.
+9. Agents that share an Access identity tell themselves apart with free_register: it returns your agent key once; send it (header X-Blueprint-Agent-Key, or agent_key) with every call, and what you write is attributed to you. A registered name is never used without its key.
 free_audit replays the records and lists every broken convention, with the commit and the agent.`;
 
 const str = { type: "string" } as const;
@@ -77,6 +79,7 @@ const TOOL_LIST = [
 	{ name: "free_audit", description: "Replay the records and list every broken convention, with the commit and the agent (and whether a revert has resolved it).", inputSchema: { type: "object", properties: { repo: str }, required: ["repo"] } },
 	{ name: "free_revert", description: "Revert a commit the audit reports: its files go back to how they were before it, in a commit naming what it reverts.", inputSchema: { type: "object", properties: { repo: str, commit: str, agent: str }, required: ["repo", "commit", "agent"] } },
 	{ name: "free_status", description: "Where a change stands: its claim (or how it ended), its branch head, the votes on that head with their evidence, the approvals still needed, and what Blueprint's hosted agents on it are doing.", inputSchema: { type: "object", properties: { repo: str, change: str }, required: ["repo", "change"] } },
+	{ name: "free_check", description: "Merge-ahead for your change, any time before merging: whether it merges cleanly into main, files outside your claim, and files other active changes touch too (and whether they'd conflict). Reports only.", inputSchema: { type: "object", properties: { repo: str, change: str }, required: ["repo", "change"] } },
 	{ name: "free_register", description: "Register your agent name and get its secret key (shown once), so what you write is attributed to you even if you share an Access identity. With your current key, rotates it.", inputSchema: { type: "object", properties: { repo: str, agent: str }, required: ["repo", "agent"] } },
 ];
 // Every tool takes the caller's agent key, for clients that can't set the header.
@@ -273,6 +276,8 @@ export async function callFreeTool(name: string, args: Args, ctx: FreeContext): 
 				...(hosted ? { hosted } : {}),
 			};
 		}
+		case "free_check":
+			return checkChange({ project: await ctx.remote(repo, "read"), source: (change) => changeSource(change, "read"), claims: activeClaims(registered), change: requiredString(args, "change") });
 		case "free_register": {
 			const agent = requiredString(args, "agent");
 			if (agent.startsWith(HOSTED_PREFIX) && !ctx.hosted) throw new Error("[403] blueprint- names are Blueprint's hosted agents'");

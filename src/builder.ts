@@ -8,6 +8,7 @@ import type { LaneChangeAnswer, LaneChangeRequestResult } from "./lane-change-co
 import { BUILDER_PARK_TIMEOUT_MS, type BuilderResumeCredentials } from "./parking-contract";
 import type { MergeCheck } from "./types";
 import { freeBuilderCredentials, freeContextFor, startFreeReviewers } from "./free/env";
+import type { checkChange } from "./free/check";
 import { callFreeTool } from "./free/mcp";
 import { inLane } from "./open-mode";
 
@@ -692,10 +693,40 @@ How to work:
 		const fetched = await this.git(job, ["fetch", "-q", job.base.remote, "main:refs/remotes/base/main"], undefined, job.base.token);
 		const changed = await this.exec(["git", "diff", "--name-only", `${fetched.exitCode === 0 ? "base" : "origin"}/main...HEAD`]);
 		const outOfLane = changed.output.split("\n").map((f) => f.trim()).filter((f) => f && !inLane(f, job.slice.owns));
-		state.lastReport = { outOfLane, conflicts: [] };
-		return outOfLane.length
-			? `Pushed to ${free.ref}. Files outside your claim: ${outOfLane.join(", ")}. Extend your claim (extend_claim) if you need them, or revert them.`
-			: `Pushed to ${free.ref}. Everything is inside your claim.`;
+		// Merge-ahead, run by the builder itself: against main and every other active change.
+		const ahead = await this.freeMergeAhead(free).catch(() => null);
+		state.lastReport = { outOfLane, conflicts: ahead?.conflicts ?? [] };
+		const report = [
+			outOfLane.length
+				? `Pushed to ${free.ref}. Files outside your claim: ${outOfLane.join(", ")}. Extend your claim (extend_claim) if you need them, or revert them.`
+				: `Pushed to ${free.ref}. Everything is inside your claim.`,
+			...(ahead?.warnings ?? []),
+		];
+		return report.join("\n");
+	}
+
+	/** free_check on the builder's change: conflicts as Merge-ahead records, and a line for the model about each overlap. */
+	private async freeMergeAhead(free: NonNullable<BuildJob["free"]>) {
+		const check = (await callFreeTool("free_check", { repo: free.repo, change: free.change }, this.freeContext())) as Awaited<ReturnType<typeof checkChange>>;
+		const at = new Date().toISOString();
+		const record = (other: string, otherHead: string, files: string[]): MergeCheck => ({
+			pair: [other, free.change].sort() as [string, string],
+			heads: other < free.change ? [otherHead, check.head] : [check.head, otherHead],
+			status: "conflict",
+			files,
+			checkedAt: at,
+		});
+		const conflicts: MergeCheck[] = [];
+		const warnings: string[] = [];
+		if (!check.main.clean) {
+			conflicts.push(record("base", check.main.head, check.main.conflicts ?? []));
+			warnings.push(`Your change conflicts with main in ${(check.main.conflicts ?? []).join(", ")}: fetch_base, \`git merge base/main\`, resolve inside your claim, and push.`);
+		}
+		for (const o of check.overlaps) {
+			if (o.conflicts.length) conflicts.push(record(o.change, o.head, o.conflicts));
+			warnings.push(`${o.change} (${o.agent}) also changes ${o.files.join(", ")}${o.conflicts.length ? `, and would conflict in ${o.conflicts.join(", ")}` : ""}. Those files are outside a claim: leave them to their owner if you can.`);
+		}
+		return { conflicts, warnings };
 	}
 
 	/** Local commits not yet on the fork. */
