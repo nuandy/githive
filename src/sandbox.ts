@@ -227,12 +227,13 @@ export abstract class SandboxAgent<J extends SandboxJob, S extends AgentState> e
 
 	protected async isParkStillTimedOut() { const { state } = await this.load(); return !!state && state.status === "parked" && !!state.parkedAt && Date.parse(state.parkedAt) + BUILDER_PARK_TIMEOUT_MS <= Date.now(); }
 
-	private async drainInbox(state: S): Promise<ResponseInputItem[]> {
-		const inbox = (await this.ctx.storage.get<string[]>("inbox")) ?? [];
-		if (!inbox.length) return [];
-		await this.ctx.storage.delete("inbox");
-		for (const text of inbox) this.note(state, `message delivered: ${text.split("\n")[0].slice(0, 160)}`);
-		return inbox.map((text) => ({ role: "user" as const, content: text }));
+	private async peekInbox() { return (await this.ctx.storage.get<string[]>(INBOX)) ?? []; }
+
+	private async acknowledgeInbox(sent: string[], state: S) {
+		if (!sent.length) return;
+		const inbox = (await this.ctx.storage.get<string[]>(INBOX)) ?? [];
+		if (sent.every((message, index) => inbox[index] === message)) await this.ctx.storage.put(INBOX, inbox.slice(sent.length));
+		for (const text of sent) this.note(state, "message delivered: " + text.split("\n")[0].slice(0, 160));
 	}
 
 	private async cancelled(state: S) {
@@ -476,9 +477,10 @@ export abstract class SandboxAgent<J extends SandboxJob, S extends AgentState> e
 		if (state.turns - (state.turnsAtRunStart ?? 0) >= MAX_TURNS) throw new Error(`stopped after ${MAX_TURNS} turns without finishing`);
 		const client = new OpenAI({ apiKey: this.env.OPENAI_API_KEY });
 		const tools = this.tools(job, state);
+		const inbox = await this.peekInbox();
 		const input: ResponseInputItem[] = [
 			...(state.previousResponseId ? (state.pending ?? []) : [{ role: "user" as const, content: this.kickoff(job) }]),
-			...(await this.drainInbox(state)),
+			...inbox.map((content) => ({ role: "user" as const, content })),
 		];
 		const response = await client.responses.create({
 			model: MODEL,
@@ -490,6 +492,7 @@ export abstract class SandboxAgent<J extends SandboxJob, S extends AgentState> e
 			max_output_tokens: 32000,
 			prompt_cache_key: `${this.kind}-${job.repo}`,
 		});
+		await this.acknowledgeInbox(inbox, state);
 		state.turns++;
 		addUsage(state.usage, response);
 		assertComplete(response, this.kind);
