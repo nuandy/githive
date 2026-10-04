@@ -134,6 +134,13 @@ try {
 	const report = await tool("free_audit", {});
 	say(`  ${report.merges} commits on main since the mode started; ${report.violations.length} violations:`);
 	for (const v of report.violations) say(`  - ${v.commit.slice(0, 8)} ${v.author}: ${v.rule}: ${v.detail}`);
+
+	say("\nagent-c reverts what the audit reported (newest first, so each revert is clean):");
+	const reported = [...new Set(report.violations.filter((v) => !v.resolvedBy).map((v) => v.commit))].reverse();
+	for (const commit of reported) say(`  revert ${commit.slice(0, 8)}:`, JSON.stringify(await tool("free_revert", { commit, agent: "agent-c" })).slice(0, 80));
+	const after = await tool("free_audit", {});
+	say(`\nthe audit again: ${after.open} open, ${after.violations.length - after.open} resolved`);
+	for (const v of after.violations) say(`  - ${v.commit.slice(0, 8)} ${v.rule}${v.resolvedBy ? ` (resolved by ${v.resolvedBy.slice(0, 8)})` : ""}`);
 } finally {
 	await rm(work, { recursive: true, force: true });
 }
