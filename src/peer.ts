@@ -208,13 +208,13 @@ export class Peer extends Coordinator {
 	}
 
 	/**
-	 * Once this peer's own change has merged or been abandoned, it hands the lead
-	 * over: the next peer that needs a decision takes it at once.
+	 * Once no change on the task is active, there is nothing left to coordinate:
+	 * hand the lead over, so the next change to arrive takes it at once. While
+	 * any change is active the leader stays in charge, even after its own change
+	 * has ended, so reads come from its memory and new changes skip an election.
 	 */
 	private async resignIfDone(leader: Leader<Task>, state: Task) {
-		const change = this.me?.slice(`${state.id}--`.length);
-		const mine = state.slices.find((s) => s.id === change);
-		if (!mine || holdsClaim(mine) || !leader.leading) return;
+		if (state.slices.some(holdsClaim) || !leader.leading) return;
 		await leader.resign();
 		this.working = null;
 	}

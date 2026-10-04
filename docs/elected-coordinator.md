@@ -45,9 +45,11 @@ lands.
 4. **Heartbeat.** An idle leader appends a lease renewal when two thirds of the
    lease has passed, from its Durable Object alarm, so it keeps leading while
    its agent's model is parked.
-5. **Hand-off.** When the leader's change merges or is abandoned, it appends a
-   resignation (lease ends now). The next peer that needs a decision wins the
-   next term at once instead of waiting out the lease.
+5. **Hand-off.** The leader stays in charge while any change on the task is
+   active, even after its own change ends: reads come from its memory and new
+   changes skip an election. When the last active change merges or is
+   abandoned, it appends a resignation (lease ends now), and the next change to
+   arrive wins the next term at once instead of waiting out the lease.
 6. **Failover.** If a leader vanishes, its lease runs out and the next peer
    that needs a decision campaigns. Decisions pause for at most the lease.
 

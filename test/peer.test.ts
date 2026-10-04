@@ -153,11 +153,19 @@ describe("a peer of the elected coordinator", () => {
 		expect(log.commits.flatMap((c) => c.commit.entries.map((e) => e.text)).join("\n")).toMatch(/Change stale abandoned/);
 	});
 
-	it("resigns when its own change ends, so the next peer leads at once", async () => {
+	it("keeps leading while other changes are active, and resigns when the last one ends", async () => {
 		const a = peer("t1--stats-1a2b");
 		await a.lead();
 		await a.peer.openChange({ id: "stats-1a2b", title: "Stats", intent: "Stats", owns: ["src/stats/"] });
+		await a.peer.openChange({ id: "docs-3c4d", title: "Docs", intent: "Docs", owns: ["docs/"] });
+
+		// Its own change ends, but another is active: it stays in charge.
 		await a.peer.abandonChange("stats-1a2b", "done here");
+		expect(log.commits.at(-1)?.commit.kind).not.toBe("resignation");
+		expect(await peer("t1--x").lead()).toEqual({ leader: "t1--stats-1a2b", term: 1 });
+
+		// The last active change ends: nothing left to coordinate, so it hands over.
+		await a.peer.abandonChange("docs-3c4d", "done too");
 		expect(log.commits.at(-1)?.commit).toMatchObject({ kind: "resignation", term: 1, leader: "t1--stats-1a2b" });
 		expect(await peer("t1--b").lead()).toEqual({ leader: "t1--b", term: 2 });
 	});
