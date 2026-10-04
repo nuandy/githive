@@ -11,7 +11,12 @@ export interface BuilderResumeCredentials {
 
 export interface BuilderParkingAgent {
 	park(parkedAt: string, waitingFor: string[]): Promise<void>;
-	wake(message: string, credentials: BuilderResumeCredentials): Promise<"resumed" | "deferred" | "ignored">;
+	/**
+	 * Deliver a stable Coordinator wake event exactly once. Implementations retain
+	 * event IDs across restarts, enqueue the message if already working, and resume
+	 * the parked conversation with fresh credentials if parked.
+	 */
+	wake(eventId: string, message: string, credentials: BuilderResumeCredentials): Promise<"resumed" | "deferred" | "ignored">;
 	markParkTimedOut(): Promise<boolean>;
 }
 
@@ -34,7 +39,7 @@ declare module "./types" {
 declare module "./builder" {
 	interface Builder {
 		park(parkedAt: string, waitingFor: string[]): Promise<void>;
-		wake(message: string, credentials: BuilderResumeCredentials): Promise<"resumed" | "deferred" | "ignored">;
+		wake(eventId: string, message: string, credentials: BuilderResumeCredentials): Promise<"resumed" | "deferred" | "ignored">;
 		markParkTimedOut(): Promise<boolean>;
 	}
 }
