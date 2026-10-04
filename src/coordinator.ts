@@ -18,7 +18,7 @@ import { gateExclusions, gateFeedback, type GateResult } from "./gate-plan";
 import type { BuildJob } from "./builder";
 import type { ReviewJob } from "./reviewer";
 import { plan } from "./planner";
-import { claimConflicts, conflictMessage as claimConflictMessage, changeId, inLane, leaseExpired, leaseUntil, nextLeaseCheck, normalizeClaim } from "./open-mode";
+import { OPENING_LEASE_MS, claimConflicts, conflictMessage as claimConflictMessage, changeId, holdsClaim, inLane, leaseExpired, leaseUntil, nextLeaseCheck, normalizeClaim } from "./open-mode";
 import { nextStep, reviewFeedback, tally, validatePolicy } from "./quorum";
 import { activeOf, hasRoom, itemKey, stillWanted, validateLimits, withScheduling, type AgentKind } from "./schedule";
 import { accessIdentityLabel, type AccessIdentity, type CoordinatorHumanActions } from "./access-contract";
@@ -65,8 +65,12 @@ interface Side {
  * on the task's repos: forking slices, test-merging them against each other
  * (Merge-ahead), gating integration on reviewer votes (Quorum), and landing.
  */
-/** One call through the Coordinator's lock: when it queued, and milliseconds spent waiting, running and writing the ledger. */
+/**
+ * One call through the Coordinator's lock: what it was, when it queued, and
+ * milliseconds spent waiting, running, and queueing its decisions for the ledger.
+ */
 export interface LockSample {
+	label: string;
 	at: number;
 	waitMs: number;
 	runMs: number;
@@ -76,17 +80,27 @@ export interface LockSample {
 const MAX_LOCK_SAMPLES = 5_000;
 
 export class Coordinator extends DurableObject<Env> implements CoordinatorHumanActions, LaneChangeCoordinator {
-	// Methods await network I/O, which lets other requests interleave. Run
-	// state-changing methods one at a time so they never overwrite each other.
+	// State-changing steps run one at a time so they never overwrite each other.
+	// A step should be short: the hot paths (opening a change, recording a push,
+	// abandoning) do their slow Git and agent I/O before or after their step,
+	// and re-check what they read once they hold it. The ledger is written to
+	// Git in the background, never under the lock.
 	private tail: Promise<unknown> = Promise.resolve();
 
 	/** Decisions made by the running method, written to Git when it finishes. */
 	private entries: LedgerEntry[] = [];
 
-	/** Recent lock timings, for benchmarks: how long each call waited, ran, and spent writing the ledger. */
+	/** Recent lock timings, for benchmarks. */
 	private lockSamples: LockSample[] = [];
 
-	private exclusive<T>(fn: () => Promise<T>): Promise<T> {
+	/** For decisions written to Git since the last reset: milliseconds from the decision to its write. */
+	private ledgerLags: number[] = [];
+
+	/** The background ledger write in progress, and whether more was queued while it ran. */
+	private flushing: Promise<void> | null = null;
+	private flushAgain = false;
+
+	private exclusive<T>(fn: () => Promise<T>, label = "other"): Promise<T> {
 		const queued = Date.now();
 		this.lockDepth++;
 		const recorded = async () => {
@@ -102,9 +116,9 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 				this.entries = [];
 				throw err;
 			} finally {
-				await this.flush();
+				await this.queueLedger();
 				this.lockDepth--;
-				this.recordLockSample({ at: queued, waitMs: started - queued, runMs: ran - started, flushMs: Date.now() - ran });
+				this.recordLockSample({ label, at: queued, waitMs: started - queued, runMs: ran - started, flushMs: Date.now() - ran });
 			}
 		};
 		const run = this.tail.then(recorded, recorded);
@@ -118,35 +132,86 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 	}
 
 	/**
-	 * Append the method's decisions and the state change since the last write to
-	 * the task's notes ref. If Git can't be reached, both are kept and go out
-	 * with the next write: the patch is always taken from the last recorded state.
+	 * Add the step's decisions to the durable outbox and start the background
+	 * write. Caller holds the lock; this only touches local storage.
 	 */
-	private async flush() {
+	private async queueLedger() {
 		const entries = this.entries;
 		this.entries = [];
-		const task = await this.ctx.storage.get<Task>("task");
-		if (!task) return;
-		const [contracts, recorded, pending] = await Promise.all([
+		if (entries.length) {
+			const pending = (await this.ctx.storage.get<LedgerEntry[]>("ledger:pending")) ?? [];
+			await this.ctx.storage.put("ledger:pending", [...pending, ...entries]);
+		}
+		this.kickLedger();
+	}
+
+	/** Start the ledger writer unless it is running; if it is, it goes round again when done. */
+	private kickLedger() {
+		if (this.flushing) {
+			this.flushAgain = true;
+			return;
+		}
+		this.flushing = (async () => {
+			try {
+				do this.flushAgain = false;
+				while ((await this.writeLedger()) && this.flushAgain);
+			} finally {
+				this.flushing = null;
+			}
+		})();
+		this.ctx.waitUntil?.(this.flushing);
+	}
+
+	/**
+	 * Append the queued decisions and the state change since the last write to
+	 * the task's notes ref, as one commit. Only one write runs at a time, so a
+	 * burst of decisions goes out in a few commits instead of one each. If Git
+	 * can't be reached, everything stays queued and goes out with the next write:
+	 * the patch is always taken from the last recorded state. Returns whether
+	 * the write succeeded (or there was nothing to write).
+	 */
+	private async writeLedger() {
+		const [task, contracts, recorded, pending] = await Promise.all([
+			this.ctx.storage.get<Task>("task"),
 			this.ctx.storage.get<Record<string, string>>("contracts"),
 			this.ctx.storage.get<LedgerDoc>("ledger:doc"),
 			this.ctx.storage.get<LedgerEntry[]>("ledger:pending"),
 		]);
+		if (!task) return true;
 		const doc = toDoc(task, contracts ?? {});
 		const patch = diff(recorded ?? {}, doc);
-		const all = [...(pending ?? []), ...entries];
-		if (patch === undefined && !all.length) return;
+		const batch = pending ?? [];
+		if (patch === undefined && !batch.length) return true;
 		try {
-			await appendLedger(await remoteFor(this.env.ARTIFACTS, task.repo, "write"), task.id, all, patch);
-			await this.ctx.storage.put({ "ledger:doc": doc, "ledger:pending": [] });
+			await appendLedger(await remoteFor(this.env.ARTIFACTS, task.repo, "write"), task.id, batch, patch);
 		} catch (err) {
-			await this.ctx.storage.put("ledger:pending", all);
 			console.error(`ledger write for task ${task.id} failed: ${statusOf(err).message}`, err);
+			return false;
 		}
+		// Decisions queued during the write stay queued for the next one.
+		const now = (await this.ctx.storage.get<LedgerEntry[]>("ledger:pending")) ?? [];
+		await this.ctx.storage.put({ "ledger:doc": doc, "ledger:pending": now.slice(batch.length) });
+		const written = Date.now();
+		this.ledgerLags.push(...batch.map((e) => written - Date.parse(e.at)));
+		if (this.ledgerLags.length > MAX_LOCK_SAMPLES) this.ledgerLags.splice(0, this.ledgerLags.length - MAX_LOCK_SAMPLES);
+		return true;
 	}
 
-	/** Rebuild the task from its notes ref and compare it with the stored copy. */
-	ledger() {
+	/** Wait until every queued decision is in Git, retrying a failed write once. Returns how many are still queued. */
+	async ledgerIdle() {
+		for (let attempt = 0; attempt < 2; attempt++) {
+			while (this.flushing) await this.flushing;
+			const pending = (await this.ctx.storage.get<LedgerEntry[]>("ledger:pending")) ?? [];
+			if (!pending.length) return 0;
+			this.kickLedger();
+		}
+		while (this.flushing) await this.flushing;
+		return ((await this.ctx.storage.get<LedgerEntry[]>("ledger:pending")) ?? []).length;
+	}
+
+	/** Rebuild the task from its notes ref and compare it with the stored copy, once queued decisions are written. */
+	async ledger() {
+		await this.ledgerIdle();
 		return this.exclusive(async () => {
 			const task = await this.load();
 			const messages = await readLedger(await remoteFor(this.env.ARTIFACTS, task.repo), task.id);
@@ -525,8 +590,12 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 	/** Lock timings since the last reset, oldest first. Kept in memory only, so they reset when the object restarts. */
 	lockStats(reset = false) {
 		const samples = this.lockSamples;
-		if (reset) this.lockSamples = [];
-		return { samples, inFlight: this.lockDepth };
+		const ledgerLagMs = this.ledgerLags;
+		if (reset) {
+			this.lockSamples = [];
+			this.ledgerLags = [];
+		}
+		return { samples, ledgerLagMs, inFlight: this.lockDepth };
 	}
 
 	/** Calls waiting for or holding the lock right now. */
@@ -665,8 +734,9 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 	 * paths. Returns write credentials for the agent; with `hosted`, a builder
 	 * agent is started on it as well.
 	 */
-	openChange(input: { title: string; intent: string; owns: string[]; hosted?: boolean }, actor?: AccessIdentity) {
-		return this.exclusive(async () => {
+	async openChange(input: { title: string; intent: string; owns: string[]; hosted?: boolean }, actor?: AccessIdentity) {
+		// Reserve: the paths are held from here, so a racing claim is refused while the fork is made.
+		const { id, repo, title } = await this.exclusive(async () => {
 			const task = await this.load();
 			if (task.mode !== "open") fail(409, "changes can only be opened on an open-mode task");
 			if (typeof input?.title !== "string" || !input.title.trim()) fail(400, "a change needs a title");
@@ -677,10 +747,6 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 
 			let id = changeId(input.title);
 			while (task.slices.some((s) => s.id === id)) id = changeId(input.title);
-			const repo = sliceRepoName(task.id, id);
-			const fork = await forkAndWait(this.env.ARTIFACTS, task.repo, repo, `${input.title.trim()} (open change on ${task.repo})`);
-			// The fork's own head is where this change starts, even if main moved meanwhile.
-			const start = (await headOf(this.env.ARTIFACTS, repo)) ?? fail(500, "the new fork has no commits");
 			const slice: Slice = {
 				id,
 				title: input.title.trim(),
@@ -688,23 +754,52 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 				instructions: input.intent.trim(),
 				intent: input.intent.trim(),
 				tests: [],
-				status: "building",
-				repo,
-				head: start,
-				startCommit: start,
+				status: "opening",
+				repo: sliceRepoName(task.id, id),
 				touched: [],
 				outOfLane: [],
 				reviews: [],
-				leaseUntil: leaseUntil(task),
+				leaseUntil: new Date(Date.now() + OPENING_LEASE_MS).toISOString(),
 				external: !input.hosted,
 			};
 			task.slices.push(slice);
-			this.note(task, start, `Change ${id} opened${actor ? ` by ${accessIdentityLabel(actor)}` : ""}: "${slice.title}", claiming ${owns.join(", ")}. Intent: ${slice.intent}`);
+			await this.scheduleLeaseCheck(task);
+			await this.save(task);
+			return { id, repo: slice.repo!, title: slice.title };
+		}, "open:reserve");
+
+		// Fork without the lock: this takes seconds, and other changes carry on meanwhile.
+		let fork: Awaited<ReturnType<typeof forkAndWait>>;
+		let start: string;
+		try {
+			const project = (await this.load()).repo;
+			fork = await forkAndWait(this.env.ARTIFACTS, project, repo, `${title} (open change on ${project})`);
+			// The fork's own head is where this change starts, even if main moved meanwhile.
+			start = (await headOf(this.env.ARTIFACTS, repo)) ?? fail(500, "the new fork has no commits");
+		} catch (err) {
+			await this.exclusive(async () => {
+				const task = await this.load();
+				task.slices = task.slices.filter((s) => !(s.id === id && s.status === "opening"));
+				await this.save(task);
+			}, "open:release");
+			throw err;
+		}
+
+		// Confirm: the reservation becomes an open change.
+		return this.exclusive(async () => {
+			const task = await this.load();
+			const slice = this.slice(task, id);
+			if (slice.status !== "opening") fail(409, `change ${id} was ${slice.status} before its fork was ready; open it again`);
+			slice.status = "building";
+			slice.head = start;
+			slice.startCommit = start;
+			slice.leaseUntil = leaseUntil(task);
+			this.note(task, start, `Change ${id} opened${actor ? ` by ${accessIdentityLabel(actor)}` : ""}: "${slice.title}", claiming ${slice.owns.join(", ")}. Intent: ${slice.intent}`);
 			if (input.hosted) await this.schedule(task, { kind: "builder", slice: id });
 			await this.scheduleLeaseCheck(task);
 			await this.save(task);
 			return { change: slice, credentials: { slice: id, repo, remote: fork.remote, token: fork.token } as SliceCredentials };
-		});
+		}, "open:confirm");
 	}
 
 	/** A fresh write token for an external agent's own fork. */
@@ -744,40 +839,53 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 	}
 
 	/** Give up a change: its lane is freed and its agents are stopped. */
-	abandonChange(sliceId: string, reason: string, actor?: AccessIdentity) {
-		return this.exclusive(async () => {
+	async abandonChange(sliceId: string, reason: string, actor?: AccessIdentity) {
+		const { slice, stopAgents } = await this.exclusive(async () => {
 			const task = await this.load();
 			if (task.mode !== "open") fail(409, "only open-mode changes can be abandoned");
 			if (typeof reason !== "string" || !reason.trim()) fail(400, "abandoning a change needs a reason");
 			const slice = this.slice(task, sliceId);
 			if (slice.status !== "building") fail(409, `change ${sliceId} is ${slice.status}`);
-			await this.abandon(task, slice, reason.trim() + (actor ? ` (by ${accessIdentityLabel(actor)})` : ""));
+			const stopAgents = this.abandon(task, slice, reason.trim() + (actor ? ` (by ${accessIdentityLabel(actor)})` : ""));
 			await this.save(task);
-			return slice;
-		});
+			return { slice, stopAgents };
+		}, "abandon");
+		// The lane is already free; stopping the change's agents needn't hold up anyone else.
+		await stopAgents();
+		return slice;
 	}
 
 	/** Claims held by active changes, for agents deciding what to claim. */
 	async claims() {
 		const task = await this.load();
 		return task.slices
-			.filter((s) => s.status === "building")
+			.filter(holdsClaim)
 			.map(({ id, title, intent, instructions, owns, leaseUntil: until, reviewHead }) => ({ change: id, title, intent: intent ?? instructions, owns, leaseUntil: until, inReview: !!reviewHead }));
 	}
 
-	private async abandon(task: Task, slice: Slice, reason: string) {
+	/**
+	 * Mark a change abandoned and free its lane and agent slots. Returns a
+	 * function that stops its agents, for the caller to run once it has saved
+	 * and let go of the lock.
+	 */
+	private abandon(task: Task, slice: Slice, reason: string): () => Promise<unknown> {
+		const opened = slice.status === "building";
 		slice.status = "abandoned";
 		slice.attention = undefined;
 		task.queue = task.queue.filter((item) => item.slice !== slice.id);
 		task.active.builders = task.active.builders.filter((key) => key !== slice.id);
 		task.active.reviewers = task.active.reviewers.filter((key) => !key.startsWith(`${slice.id}:`));
-		await Promise.allSettled([
-			this.env.BUILDER.getByName(slice.repo!).cancel(`the change was abandoned: ${reason}`),
-			...(slice.reviewHead
-				? task.review.reviewers.map((role) => this.env.REVIEWER.getByName(reviewerName(slice.repo!, role, slice.reviewHead!)).cancel("the change was abandoned"))
-				: []),
-		]);
 		this.note(task, slice.head, `Change ${slice.id} abandoned, freeing ${slice.owns.join(", ")}: ${reason}`);
+		const repo = slice.repo!;
+		const reviewHead = slice.reviewHead;
+		const roles = [...task.review.reviewers];
+		// A change still being opened has no agents yet.
+		if (!opened) return async () => {};
+		return () =>
+			Promise.allSettled([
+				this.env.BUILDER.getByName(repo).cancel(`the change was abandoned: ${reason}`),
+				...(reviewHead ? roles.map((role) => this.env.REVIEWER.getByName(reviewerName(repo, role, reviewHead)).cancel("the change was abandoned")) : []),
+			]);
 	}
 
 	private renewLease(task: Task, slice: Slice) {
@@ -795,18 +903,23 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 	 * Expire claims whose lease ran out. A change that is waiting on review, the
 	 * gate or another change keeps its claim, and its lease is renewed instead.
 	 */
-	private sweepLeases() {
-		return this.exclusive(async () => {
+	private async sweepLeases() {
+		const stops = await this.exclusive(async () => {
 			const task = await this.load();
 			const now = Date.now();
+			const stops: (() => Promise<unknown>)[] = [];
 			for (const slice of task.slices) {
-				if (slice.status !== "building" || !slice.leaseUntil || Date.parse(slice.leaseUntil) > now) continue;
-				if (leaseExpired(task, slice, now)) await this.abandon(task, slice, `its claim expired after ${task.leaseMinutes ?? 30} minutes without activity`);
+				if (!holdsClaim(slice) || !slice.leaseUntil || Date.parse(slice.leaseUntil) > now) continue;
+				// A reservation this old lost its opener (the object restarted while forking).
+				if (slice.status === "opening") stops.push(this.abandon(task, slice, "it was never finished opening"));
+				else if (leaseExpired(task, slice, now)) stops.push(this.abandon(task, slice, `its claim expired after ${task.leaseMinutes ?? 30} minutes without activity`));
 				else this.renewLease(task, slice);
 			}
 			await this.scheduleLeaseCheck(task);
 			await this.save(task);
-		});
+			return stops;
+		}, "sweep");
+		await Promise.all(stops.map((stop) => stop()));
 	}
 
 	/** Start the planner agent. It runs from an alarm because a run takes minutes. */
@@ -1066,34 +1179,56 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 	/**
 	 * Merge-ahead. Called whenever a slice's fork may have moved. Records what the
 	 * slice touched, flags paths outside its lane, and test-merges it against the
-	 * base and every other slice that has pushed work.
+	 * base and every other slice that has pushed work. The check runs without the
+	 * lock, on a snapshot; it is applied only if no other push was recorded
+	 * meanwhile, and redone otherwise.
 	 */
-	recordPush(sliceId: string) {
-		return this.exclusive(async () => {
-			const task = await this.load();
-			const slice = this.slice(task, sliceId);
-			if (slice.status !== "building") fail(409, `slice ${sliceId} is ${slice.status}`);
-			const head = await headOf(this.env.ARTIFACTS, slice.repo!);
-			if (!head || head === slice.head) return { task, checks: [] as MergeCheck[], changed: false };
+	async recordPush(sliceId: string) {
+		for (let attempt = 1; ; attempt++) {
+			// Check the push against a snapshot, without the lock: Merge-ahead clones
+			// and test-merges, which takes seconds and grows with the number of changes.
+			const snapshot = await this.load();
+			const seen = this.slice(snapshot, sliceId);
+			if (seen.status !== "building") fail(409, `slice ${sliceId} is ${seen.status}`);
+			const before = seen.head;
+			const head = await headOf(this.env.ARTIFACTS, seen.repo!);
+			if (!head || head === before) return { task: snapshot, checks: [] as MergeCheck[], changed: false };
+			const checks = await this.mergeAhead(snapshot, seen);
 
-			const checks = await this.mergeAhead(task, slice);
-			this.renewLease(task, slice);
-			await this.scheduleLeaseCheck(task);
-			const conflicts = checks.filter((c) => c.status === "conflict");
-			this.note(
-				task,
-				slice.head,
-				`${slice.id} pushed ${short(slice.head)}: ${plural(slice.touched.length, "file")} changed` +
-					(slice.outOfLane.length ? `, outside its lane: ${slice.outOfLane.join(", ")}` : "") +
-					`; Merge-ahead: ${conflicts.length ? conflicts.map((c) => `conflict ${c.pair.join("/")} in ${c.files.join(", ")}`).join("; ") : "no conflicts"}`,
-			);
-			const keys = new Set(checks.map((c) => c.pair.join("|")));
-			task.checks = task.checks.filter((c) => !keys.has(c.pair.join("|"))).concat(checks);
-			await this.save(task);
-			return { task, checks, changed: true };
-		});
+			// Apply it, if the change is still where the check found it.
+			const applied = await this.exclusive(async () => {
+				const task = await this.load();
+				const slice = this.slice(task, sliceId);
+				if (slice.status !== "building") fail(409, `slice ${sliceId} is ${slice.status}`);
+				// Another report of the same push got here first.
+				if (slice.head === seen.head) return { task, checks: [] as MergeCheck[], changed: false };
+				// A different push was recorded meanwhile: this check may be stale.
+				if (slice.head !== before) return null;
+				slice.head = seen.head;
+				slice.mergeBase = seen.mergeBase;
+				slice.touched = seen.touched;
+				slice.outOfLane = seen.outOfLane;
+				this.renewLease(task, slice);
+				await this.scheduleLeaseCheck(task);
+				const conflicts = checks.filter((c) => c.status === "conflict");
+				this.note(
+					task,
+					slice.head,
+					`${slice.id} pushed ${short(slice.head)}: ${plural(slice.touched.length, "file")} changed` +
+						(slice.outOfLane.length ? `, outside its lane: ${slice.outOfLane.join(", ")}` : "") +
+						`; Merge-ahead: ${conflicts.length ? conflicts.map((c) => `conflict ${c.pair.join("/")} in ${c.files.join(", ")}`).join("; ") : "no conflicts"}`,
+				);
+				const keys = new Set(checks.map((c) => c.pair.join("|")));
+				task.checks = task.checks.filter((c) => !keys.has(c.pair.join("|"))).concat(checks);
+				await this.save(task);
+				return { task, checks, changed: true };
+			}, "push:apply");
+			if (applied) return applied;
+			if (attempt === 3) fail(409, `${sliceId} kept moving while its push was being checked; report the push again`);
+		}
 	}
 
+	/** Test-merge a slice's pushed work. Updates `slice` (a snapshot's copy) and returns the checks. */
 	private async mergeAhead(task: Task, slice: Slice) {
 		const artifacts = this.env.ARTIFACTS;
 		const baseCommit = task.baseCommit!;

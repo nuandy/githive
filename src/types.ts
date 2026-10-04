@@ -6,8 +6,11 @@ import type { GateResult } from "./gate-plan";
 
 export type Phase = "planning" | "awaiting-approval" | "building" | "landed";
 
-/** "abandoned": an open-mode change that was given up or whose claim expired; its lane is free again. */
-export type SliceStatus = "planned" | "building" | "integrated" | "abandoned";
+/**
+ * "opening": an open-mode change whose claim is held while its fork is made.
+ * "abandoned": an open-mode change that was given up or whose claim expired; its lane is free again.
+ */
+export type SliceStatus = "planned" | "opening" | "building" | "integrated" | "abandoned";
 
 export interface SliceSpec {
 	/** Lowercase slug, unique within the task. Used in repo names. */

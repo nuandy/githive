@@ -10,6 +10,12 @@ import type { Slice, Task } from "./types";
 /** How long a change keeps its claim without activity before it expires. */
 export const DEFAULT_LEASE_MINUTES = 30;
 
+/** How long a claim is held while its fork is made; a reservation older than this was lost (the object restarted). */
+export const OPENING_LEASE_MS = 5 * 60_000;
+
+/** A change that holds its claim: being opened, or open. */
+export const holdsClaim = (slice: Slice) => slice.status === "opening" || slice.status === "building";
+
 /** Longest a claim may list, so one change can't take a whole repo by accident. */
 export const MAX_CLAIM_PATHS = 50;
 
@@ -57,11 +63,11 @@ export interface ClaimConflict {
 	intent: string;
 }
 
-/** Paths in `owns` that an active (building) change other than `except` holds. */
+/** Paths in `owns` that an active (opening or building) change other than `except` holds. */
 export function claimConflicts(task: Task, owns: string[], except?: string): ClaimConflict[] {
 	const conflicts: ClaimConflict[] = [];
 	for (const other of task.slices) {
-		if (other.id === except || other.status !== "building") continue;
+		if (other.id === except || !holdsClaim(other)) continue;
 		for (const path of owns)
 			for (const held of other.owns)
 				if (entriesOverlap(path, held))
@@ -112,6 +118,6 @@ export function leaseExpired(task: Task, slice: Slice, now = Date.now()) {
 
 /** When the next claim could expire, for the Coordinator's alarm. */
 export function nextLeaseCheck(task: Task) {
-	const times = task.slices.filter((s) => s.status === "building" && s.leaseUntil).map((s) => Date.parse(s.leaseUntil!));
+	const times = task.slices.filter((s) => holdsClaim(s) && s.leaseUntil).map((s) => Date.parse(s.leaseUntil!));
 	return times.length ? Math.min(...times) : null;
 }

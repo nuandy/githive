@@ -169,7 +169,9 @@ async function main() {
 
 		const failures = agents.filter((a) => a.status === "rejected").map((a) => a.reason.message.slice(0, 200));
 		const leftover = (await tool(n, "list_claims", { task_id: task.id })).filter((c) => c.change?.includes(runId) || c.title?.includes(runId));
-		const { samples } = await api("POST", `/tasks/${task.id}/lock-stats/reset`);
+		// Wait for the ledger to catch up (a no-op where it is written under the lock), so its lag is counted.
+		const ledgerCheck = await api("GET", `/tasks/${task.id}/ledger`);
+		const { samples, ledgerLagMs = [] } = await api("POST", `/tasks/${task.id}/lock-stats/reset`);
 		const levelCalls = calls.filter((c) => c.level === n);
 		const tools = Object.fromEntries([...new Set(levelCalls.map((c) => c.tool))].map((name) => [name, summary(levelCalls.filter((c) => c.tool === name).map((c) => c.ms))]));
 		const busy = samples.reduce((sum, s) => sum + s.runMs + s.flushMs, 0);
@@ -191,13 +193,21 @@ async function main() {
 				busyFraction: busy / wallMs,
 				flushShareOfHold: busy ? samples.reduce((sum, s) => sum + s.flushMs, 0) / busy : 0,
 				peakQueue: peakQueue(samples),
+				byCall: Object.fromEntries(
+					[...new Set(samples.map((s) => s.label ?? "all"))].map((label) => {
+						const mine = samples.filter((s) => (s.label ?? "all") === label);
+						return [label, { n: mine.length, holdMs: summary(mine.map((s) => s.runMs + s.flushMs)), waitMs: summary(mine.map((s) => s.waitMs)) }];
+					}),
+				),
 			},
+			ledger: { matches: ledgerCheck.matches, commits: ledgerCheck.commits, lagMs: summary(ledgerLagMs) },
 		};
 		levels.push(level);
 		await save();
 		console.log(
 			`n=${n}: ${(wallMs / 1000).toFixed(1)}s, ${level.calls} calls, lock wait p95 ${Math.round(level.lock.waitMs.p95 ?? 0)}ms, ` +
-				`race winners ${raced.winners}, failures ${failures.length}, leftover claims ${leftover.length}`,
+				`race winners ${raced.winners}, failures ${failures.length}, leftover claims ${leftover.length}, ` +
+				`ledger ${ledgerCheck.matches ? "matches" : "DOES NOT MATCH"} (lag p95 ${Math.round(level.ledger.lagMs.p95 ?? 0)}ms)`,
 		);
 	}
 
@@ -208,16 +218,19 @@ async function main() {
 
 	const ms = (v) => (v === null ? "-" : v >= 10_000 ? `${(v / 1000).toFixed(0)}s` : v >= 1000 ? `${(v / 1000).toFixed(1)}s` : `${Math.round(v)}ms`);
 	console.log(`\n${LABEL}: ledger replay ${ledger.matches ? "matches" : "DOES NOT MATCH"} (${ledger.commits} commits)\n`);
-	console.log("| agents | wall | calls/s | list_claims p50/p95 | open_change p50/p95 | report_push p50/p95 | lock wait p50/p95 | lock hold p50 (ledger write) | peak queue | lock busy | race winners | failures |");
-	console.log("|---|---|---|---|---|---|---|---|---|---|---|---|");
+	console.log("| agents | wall | calls/s | list_claims p50/p95 | open_change p50/p95 | report_push p50/p95 | lock wait p50/p95 | lock hold p50 (ledger write) | peak queue | lock busy | ledger lag p95 | race winners | failures |");
+	console.log("|---|---|---|---|---|---|---|---|---|---|---|---|---|");
 	for (const l of levels) {
 		const t = (name) => `${ms(l.tools[name]?.p50 ?? null)} / ${ms(l.tools[name]?.p95 ?? null)}`;
 		console.log(
 			`| ${l.agents} | ${ms(l.wallMs)} | ${l.callsPerSecond.toFixed(1)} | ${t("list_claims")} | ${t("open_change")} | ${t("report_push")} | ` +
 				`${ms(l.lock.waitMs.p50)} / ${ms(l.lock.waitMs.p95)} | ${ms((l.lock.runMs.p50 ?? 0) + (l.lock.flushMs.p50 ?? 0))} (${ms(l.lock.flushMs.p50)}) | ` +
-				`${l.lock.peakQueue} | ${Math.round(l.lock.busyFraction * 100)}% | ${l.race.winners}/${RACERS} | ${l.failures.length} |`,
+				`${l.lock.peakQueue} | ${Math.round(l.lock.busyFraction * 100)}% | ${ms(l.ledger?.lagMs.p95 ?? null)} | ${l.race.winners}/${RACERS} | ${l.failures.length} |`,
 		);
 	}
+	console.log("\nlock hold by call (p50 / p95), at the largest level:");
+	const last = levels.at(-1);
+	for (const [label, v] of Object.entries(last?.lock.byCall ?? {})) console.log(`  ${label}: ${v.n} calls, hold ${ms(v.holdMs.p50)} / ${ms(v.holdMs.p95)}, wait ${ms(v.waitMs.p50)} / ${ms(v.waitMs.p95)}`);
 	console.log(`\nfull results: ${file}`);
 }
 

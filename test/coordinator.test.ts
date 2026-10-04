@@ -20,6 +20,10 @@ const io = vi.hoisted(() => ({
 	files: new Map<string, { id: string; text: string }>(),
 	/** Files committed to the task base through a Workspace. */
 	written: [] as Record<string, string>[],
+	/** Files each pushed head changed, for Merge-ahead: what changedPaths reports. */
+	touched: new Map<string, string[]>(),
+	/** Runs once when Merge-ahead next fetches a fork, to simulate something happening mid-check. */
+	onFetch: null as null | (() => Promise<void>),
 	/** The contract owner's answer; may change files while it "decides". */
 	decide: vi.fn(async () => ({ approve: true, reason: "fine" })),
 }));
@@ -35,7 +39,16 @@ vi.mock("../src/artifacts", async (importOriginal) => ({
 vi.mock("../src/git", () => ({
 	Workspace: {
 		clone: vi.fn(async () => ({
-			fetch: vi.fn(async () => "fetched"),
+			head: vi.fn(async () => io.heads.get("project") ?? io.defaultHead),
+			fetch: vi.fn(async (_name: string, remote: { url: string }) => {
+				const hook = io.onFetch;
+				io.onFetch = null;
+				await hook?.();
+				return io.heads.get(remote.url.replace(/^https:\/\/git\.test\/|\.git$/g, "")) ?? "fetched";
+			}),
+			mergeBase: vi.fn(async () => "main0"),
+			changedPaths: vi.fn(async (_from: string, head: string) => io.touched.get(head) ?? []),
+			tryMerge: vi.fn(async () => ({ clean: true, files: [] })),
 			merge: vi.fn(async (ref: string) => {
 				if (io.mergeConflict && (!io.conflictOn || io.conflictOn === ref)) {
 					const { default: isogit } = await import("isomorphic-git");
@@ -56,12 +69,13 @@ vi.mock("../src/git", () => ({
 vi.mock("../src/contract-owner", () => ({ NEW_FILE: "(new)", decideAmendment: (...args: unknown[]) => io.decide(...(args as [])) }));
 
 // The task's notes ref, in memory: each write appends a commit message.
-const ledger = vi.hoisted(() => ({ messages: [] as string[], entries: [] as { commit: string; text: string }[], down: false, readDelayMs: 0 }));
+const ledger = vi.hoisted(() => ({ messages: [] as string[], entries: [] as { commit: string; text: string }[], down: false, readDelayMs: 0, writeDelayMs: 0 }));
 
 vi.mock("../src/ledger-git", async () => {
 	const { ledgerMessage } = await import("../src/ledger");
 	return {
 		appendLedger: vi.fn(async (_remote: unknown, _taskId: string, entries: { commit: string; text: string; at: string }[], patch: never) => {
+			if (ledger.writeDelayMs) await new Promise((resolve) => setTimeout(resolve, ledger.writeDelayMs));
 			if (ledger.down) throw new Error("git is down");
 			ledger.messages.push(ledgerMessage(entries, patch));
 			ledger.entries.push(...entries);
@@ -74,6 +88,7 @@ vi.mock("../src/ledger-git", async () => {
 });
 
 const { Coordinator } = await import("../src/coordinator");
+const artifacts = await import("../src/artifacts");
 
 const person: AccessIdentity = { kind: "person", value: "human@example.com" };
 const service: AccessIdentity = { kind: "service", value: "deploy-script" };
@@ -113,6 +128,9 @@ beforeEach(() => {
 	ledger.entries = [];
 	ledger.down = false;
 	ledger.readDelayMs = 0;
+	ledger.writeDelayMs = 0;
+	io.touched.clear();
+	io.onFetch = null;
 });
 
 describe("limits and queues", () => {
@@ -362,6 +380,7 @@ describe("the integration gate", () => {
 		);
 		await coordinator.retryGate("a", person);
 		expect(fake.env.GATE.getByName("t1").enqueue).toHaveBeenCalledWith("t1", { slice: "a", head: "h1", group: [{ slice: "b", head: "hb" }] });
+		await coordinator.ledgerIdle();
 		expect(ledger.entries.map((e) => e.text)).toContain("a: gate re-run requested by human@example.com");
 	});
 
@@ -428,6 +447,7 @@ describe("escalation and human controls", () => {
 		fake.agentStatus.set("t1--a", "done");
 		const s = await coordinator.waive("a", { reason: "reviewers asked for out-of-lane tests" }, person);
 		expect(s.waivers).toEqual([expect.objectContaining({ head: "h1", by: "human@example.com" })]);
+		await coordinator.ledgerIdle();
 		expect(ledger.entries.map((e) => e.text)).toContain("a: quorum waived by human@example.com: reviewers asked for out-of-lane tests");
 		expect(s.attention).toBeUndefined();
 		expect(fake.env.GATE.getByName("t1").enqueue).toHaveBeenCalledWith("t1", { slice: "a", head: "h1" });
@@ -441,6 +461,7 @@ describe("escalation and human controls", () => {
 		const inboxMessage = builder("a").notify.mock.calls[0][0];
 		expect(inboxMessage).toBe("Message from a human on the team: use the contract");
 		expect(inboxMessage).not.toContain(person.value);
+		await coordinator.ledgerIdle();
 		expect(ledger.entries.at(-1)?.text).toContain("Message from human@example.com to a's builder (delivered): use the contract");
 
 		fake.agentStatus.set("t1--a", "failed");
@@ -450,7 +471,9 @@ describe("escalation and human controls", () => {
 		const modelMessage = builder("a").revise.mock.calls[0][0];
 		expect(modelMessage).toBe("Message from a human on the team: use the contract");
 		expect(modelMessage).not.toContain(person.value);
+		await coordinator.ledgerIdle();
 		expect(ledger.entries.at(-1)?.text).toContain("human@example.com");
+		await coordinator.ledgerIdle();
 		expect(ledger.entries.at(-1)?.text).toContain("Message from human@example.com to a's builder (resumed it): use the contract");
 	});
 });
@@ -461,6 +484,7 @@ describe("the record in Git", () => {
 	it("attributes human approval in the blueprint ledger note", async () => {
 		await setup(task({ phase: "awaiting-approval" }));
 		await coordinator.approve(person);
+		await coordinator.ledgerIdle();
 		expect(ledger.entries.map((e) => e.text)).toContain("Blueprint approved by human@example.com: contracts committed to t1--base; slices forked: t1--a, t1--b");
 	});
 
@@ -468,11 +492,13 @@ describe("the record in Git", () => {
 		const approvedReviews = [{ ...vote("tests", "approve"), at: "" }, { ...vote("api", "approve"), at: "" }];
 		await setup(task({ slices: [slice("a", { reviewHead: "h1", gate: { status: "queued", head: "h1", baseHead: "base0", at: "", excluded: [] }, reviews: approvedReviews }), slice("b")] }));
 		await coordinator.retryGate("a", service);
+		await coordinator.ledgerIdle();
 		expect(ledger.entries.map((e) => e.text)).toContain("a: gate re-run requested by service token deploy-script");
 
 		await setup(task({ slices: [slice("a", { status: "integrated" }), slice("b", { status: "integrated" })] }));
 		await coordinator.land(service);
 		expect((await stored()).phase).toBe("landed");
+		await coordinator.ledgerIdle();
 		expect(ledger.entries.map((e) => e.text)).toContain("Task landed in project by service token deploy-script");
 	});
 
@@ -480,6 +506,7 @@ describe("the record in Git", () => {
 		await setup(task({ verify: [], slices: [slice("a", { reviewHead: "h1" }), slice("b")] }));
 		io.heads.set("t1--a", "h1");
 		for (const v of approved()) await coordinator.submitReview("a", v);
+		await coordinator.ledgerIdle();
 		expect(ledger.entries.filter((e) => e.commit === "h1").map((e) => e.text)).toEqual([
 			"a: tests reviewer approved: tests says approve",
 			"a: api reviewer approved: api says approve",
@@ -492,6 +519,7 @@ describe("the record in Git", () => {
 	it("records nothing for a method that failed", async () => {
 		await setup(task({ slices: [slice("a", { reviewHead: "h1" })] }));
 		await expect(coordinator.submitReview("a", vote("tests", "approve", "old"))).rejects.toThrow(/head under review/);
+		await coordinator.ledgerIdle();
 		expect(ledger.entries).toEqual([]);
 	});
 
@@ -500,9 +528,11 @@ describe("the record in Git", () => {
 		io.heads.set("t1--a", "h1");
 		ledger.down = true;
 		await coordinator.submitReview("a", vote("security", "approve"));
+		await coordinator.ledgerIdle();
 		expect(ledger.messages).toEqual([]);
 		ledger.down = false;
 		await coordinator.flagSlice("b", "stuck");
+		await coordinator.ledgerIdle();
 		expect(ledger.entries.map((e) => e.text)).toEqual(["a: security reviewer approved: security says approve", "b needs a human: stuck"]);
 		expect(await coordinator.ledger()).toMatchObject({ matches: true });
 	});
@@ -614,6 +644,7 @@ describe("open mode", () => {
 		expect(change).toMatchObject({ status: "building", owns: ["src/stats/"], startCommit: "main0", intent: "Add stats, please" });
 		expect(credentials.remote).toBe(`https://git.test/t1--${change.id}.git`);
 		expect(Date.parse(change.leaseUntil!)).toBeGreaterThan(Date.now());
+		await coordinator.ledgerIdle();
 		expect(ledger.entries.at(-1)?.text).toMatch(/opened.*claiming src\/stats\//);
 	});
 
@@ -688,6 +719,110 @@ describe("open mode", () => {
 	});
 });
 
+describe("short locks: open mode under concurrency", () => {
+	const openTask = (slices: Slice[] = []) =>
+		task({ mode: "open", repo: "project", baseRepo: "project", baseCommit: "main0", anchor: "main0", leaseMinutes: 30, verify: [], slices });
+	const open = (title: string, owns: string[]) => coordinator.openChange({ title, intent: `${title}, please`, owns });
+	const deferred = () => {
+		let resolve!: () => void;
+		const promise = new Promise<void>((r) => (resolve = r));
+		return { promise, resolve };
+	};
+
+	beforeEach(() => {
+		io.defaultHead = "main0";
+	});
+
+	it("holds a claim while the fork is made, without holding the lock", async () => {
+		await setup(openTask());
+		const forking = deferred();
+		const realFork = vi.mocked(artifacts.forkAndWait).getMockImplementation()!;
+		vi.mocked(artifacts.forkAndWait).mockImplementationOnce(async (...args) => {
+			await forking.promise;
+			return realFork(...args);
+		});
+		const first = open("Add stats", ["src/stats/"]);
+		await vi.waitFor(async () => expect((await stored()).slices[0]?.status).toBe("opening"));
+
+		// Other calls go ahead while the first change's fork is still being made.
+		await expect(open("Tweak stats", ["src/stats/index.ts"])).rejects.toThrow(/already claimed/);
+		await expect(open("Other", ["src/other/"])).resolves.toBeTruthy();
+		expect((await coordinator.claims()).map((c) => c.owns)).toEqual([["src/stats/"], ["src/other/"]]);
+
+		forking.resolve();
+		const { change } = await first;
+		expect(change).toMatchObject({ status: "building", startCommit: "main0" });
+		await coordinator.ledgerIdle();
+		expect(ledger.entries.filter((e) => e.text.includes("opened"))).toHaveLength(2);
+	});
+
+	it("frees the claim when the fork fails", async () => {
+		await setup(openTask());
+		vi.mocked(artifacts.forkAndWait).mockRejectedValueOnce(new Error("artifacts is down"));
+		await expect(open("Add stats", ["src/stats/"])).rejects.toThrow(/artifacts is down/);
+		expect((await stored()).slices).toEqual([]);
+		await expect(open("Add stats", ["src/stats/"])).resolves.toBeTruthy();
+	});
+
+	it("drops a reservation whose opener was lost", async () => {
+		const past = new Date(Date.now() - 1_000).toISOString();
+		await setup(openTask([slice("lost", { status: "opening", leaseUntil: past, head: undefined })]));
+		await coordinator.alarm();
+		expect((await stored()).slices[0].status).toBe("abandoned");
+		await expect(open("Again", ["src/lost/"])).resolves.toBeTruthy();
+	});
+
+	it("records a push checked outside the lock", async () => {
+		await setup(openTask([slice("a", { startCommit: "main0", head: "main0" })]));
+		io.heads.set("t1--a", "h1");
+		io.touched.set("h1", ["src/a/x.ts", "README.md"]);
+		const { changed } = await coordinator.recordPush("a");
+		expect(changed).toBe(true);
+		expect((await stored()).slices[0]).toMatchObject({ head: "h1", touched: ["src/a/x.ts", "README.md"], outOfLane: ["README.md"] });
+	});
+
+	it("redoes a push check when another push was recorded while it ran", async () => {
+		await setup(openTask([slice("a", { startCommit: "main0", head: "main0" })]));
+		io.heads.set("t1--a", "h1");
+		io.touched.set("h1", ["src/a/one.ts"]);
+		io.touched.set("h2", ["src/a/one.ts", "src/a/two.ts"]);
+		// While the first check runs, the agent pushes again and that push is recorded first.
+		io.onFetch = async () => {
+			io.heads.set("t1--a", "h2");
+			await coordinator.recordPush("a");
+		};
+		await coordinator.recordPush("a");
+		expect((await stored()).slices[0]).toMatchObject({ head: "h2", touched: ["src/a/one.ts", "src/a/two.ts"] });
+	});
+
+	it("writes a burst of decisions to Git in fewer commits, in order", async () => {
+		await setup(openTask());
+		ledger.writeDelayMs = 20;
+		const opened = await Promise.all(["a", "b", "c", "d"].map((name) => open(name, [`src/${name}/`])));
+		expect(await coordinator.ledgerIdle()).toBe(0);
+		const texts = ledger.entries.map((e) => e.text).filter((t) => t.includes("opened"));
+		expect(texts).toHaveLength(4);
+		expect(ledger.messages.length).toBeLessThan(5);
+		expect(new Set(opened.map((o) => o.change.id)).size).toBe(4);
+		expect(await coordinator.ledger()).toMatchObject({ matches: true });
+	});
+
+	it("frees an abandoned change's lane before its agents are stopped", async () => {
+		await setup(openTask([slice("a", { startCommit: "main0" })]));
+		const stopping = deferred();
+		builder("a").cancel.mockImplementationOnce(async () => {
+			await stopping.promise;
+			return true;
+		});
+		const abandoning = coordinator.abandonChange("a", "done");
+		await vi.waitFor(async () => expect((await stored()).slices[0].status).toBe("abandoned"));
+		await expect(open("Reuse", ["src/a/"])).resolves.toBeTruthy();
+		stopping.resolve();
+		await abandoning;
+		expect(builder("a").cancel).toHaveBeenCalled();
+	});
+});
+
 describe("parking: delivery and timeout", () => {
 	const request = { id: "r1", requester: "a", owner: "b", path: "src/b/x.ts", need: "add x", reason: "a needs x", status: "pending" as const, createdAt: "" };
 	const parked = (extra: Partial<Slice> = {}) => slice("a", { parkedAt: "2026-10-04T00:00:00.000Z", parkedWaitingFor: ["r1"], ...extra });
@@ -720,6 +855,7 @@ describe("parking: delivery and timeout", () => {
 		const a = (await stored()).slices[0];
 		expect(a.attention).toMatch(/parked for more than 30 minutes/);
 		expect(a.parkTimeoutFlagged).toBe("2026-10-04T00:00:00.000Z");
+		await coordinator.ledgerIdle();
 		expect(ledger.entries.filter((e) => e.text.includes("parked timeout"))).toHaveLength(1);
 	});
 
