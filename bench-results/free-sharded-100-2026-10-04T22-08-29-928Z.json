@@ -1,0 +1,103 @@
+{
+	"label": "free-sharded-100",
+	"mode": "free",
+	"base": "https://blueprint-bench.nuandy.workers.dev",
+	"repo": "bench-free-100-1791151697",
+	"task": null,
+	"racers": 5,
+	"idle": 0,
+	"at": "2026-10-04T22:08:29.928Z",
+	"ledgerMatches": null,
+	"ledgerCommits": null,
+	"levels": [
+		{
+			"agents": 100,
+			"wallMs": 69317.531,
+			"calls": 606,
+			"callsPerSecond": 8.742377162856537,
+			"errors": 0,
+			"failures": [],
+			"race": {
+				"winners": 1,
+				"unexpected": []
+			},
+			"leftoverClaims": 0,
+			"tools": {
+				"list_claims": {
+					"n": 200,
+					"p50": 3354.8116670000018,
+					"p95": 7308.598916999999,
+					"p99": 7454.648249999998,
+					"max": 7715.492
+				},
+				"open_change": {
+					"n": 105,
+					"p50": 22368.763875,
+					"p95": 33979.980583000004,
+					"p99": 36547.402333000005,
+					"max": 37515.592957999994
+				},
+				"report_push": {
+					"n": 100,
+					"p50": 6803.312375000001,
+					"p95": 7925.535750000003,
+					"p99": 8136.854124999998,
+					"max": 9454.845208000006
+				},
+				"abandon_change": {
+					"n": 101,
+					"p50": 6085.8738749999975,
+					"p95": 8866.658167000001,
+					"p99": 12953.636500000008,
+					"max": 14348.431583000001
+				},
+				"change_status": {
+					"n": 100,
+					"p50": 6062.279834000001,
+					"p95": 7795.7829159999965,
+					"p99": 9912.443166999998,
+					"max": 9929.673209
+				}
+			},
+			"lock": {
+				"samples": 0,
+				"waitMs": {
+					"n": 0,
+					"p50": null,
+					"p95": null,
+					"p99": null,
+					"max": null
+				},
+				"runMs": {
+					"n": 0,
+					"p50": null,
+					"p95": null,
+					"p99": null,
+					"max": null
+				},
+				"flushMs": {
+					"n": 0,
+					"p50": null,
+					"p95": null,
+					"p99": null,
+					"max": null
+				},
+				"busyFraction": 0,
+				"flushShareOfHold": 0,
+				"peakQueue": 0,
+				"byCall": {}
+			},
+			"ledger": {
+				"matches": null,
+				"commits": null,
+				"lagMs": {
+					"n": 0,
+					"p50": null,
+					"p95": null,
+					"p99": null,
+					"max": null
+				}
+			}
+		}
+	]
+}
