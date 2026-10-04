@@ -94,4 +94,21 @@ describe("sharded claims", { timeout: 60_000 }, () => {
 		expect(store().cite(view, ["src/a/x.ts"], own)).toBe(`src%2Fa=${view.tips.get("src/a")}`);
 		expect(store().cite(view, ["docs/x/y.md"], own)).toBe(`docs=${view.tips.get("docs")} src%2Fa=${view.tips.get("src/a")}`);
 	});
+
+	it("reads every shard in one listing and one fetch, however many there are", async () => {
+		for (const i of [1, 2, 3, 4, 5]) await store().claim(want(`c-${i}`, [`area${i}/x/`]));
+		const before = server.requests.length;
+		expect((await store().read()).claims).toHaveLength(5);
+		expect(server.requests.slice(before)).toEqual(["GET refs?service=git-upload-pack", "POST git-upload-pack"]);
+		// Nothing changed since: the listing alone, the states already known.
+		const again = server.requests.length;
+		expect((await store().read()).claims).toHaveLength(5);
+		expect(server.requests.slice(again)).toEqual(["GET refs?service=git-upload-pack"]);
+	});
+
+	it("retries a read the server fails for a moment", async () => {
+		await store().claim(want("e-1", ["fresh/one/"]));
+		server.failFetches(1);
+		expect((await store().read()).claims.map((c) => c.change)).toContain("e-1");
+	});
 });

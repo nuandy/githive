@@ -3,6 +3,8 @@ import http from "isomorphic-git/http/web";
 import type { CasLog } from "../election";
 import { GitCasLog } from "../election-git";
 import type { Remote } from "../git";
+import { fetchCommits } from "../git-fetch";
+import { retryTransient } from "../retry";
 import { activeClaims, claim, conflictsWith, release, releaseStale, withdraw, type ClaimRecord, type Conflict, type Registry, type ReleaseRecord } from "./claims";
 import { ancestorsOf, decodeShard, encodeShard, isWide, shardOf, shardRef, shardsPrefix } from "./shards";
 import type { Stamper } from "./stamp";
@@ -52,6 +54,37 @@ export interface StoreInput {
 	remote: () => Promise<Remote>;
 	/** A shard's log, if the caller keeps them across calls. */
 	log?: (ref: string) => CasLog<Registry> & Pick<GitCasLog<Registry>, "readAt">;
+}
+
+/**
+ * Shard states by commit, for the isolate. A commit never changes, so a state
+ * once read stays right; only states already read are kept (no request waits
+ * on another's I/O).
+ */
+const shardStates = new Map<string, Registry>();
+const decoder = new TextDecoder();
+
+/**
+ * Every shard under `prefix`, at its tip: one listing, then one fetch for all
+ * the shards whose tips aren't known yet. Brief server failures are retried.
+ */
+async function readAllShards(remote: Remote, prefix: string): Promise<{ ref: string; tip: string; state: Registry }[]> {
+	const onAuth = () => ({ username: "x", password: remote.token.split("?expires=")[0] });
+	for (let attempt = 1; ; attempt++) {
+		const listed = (await retryTransient(() => git.listServerRefs({ http, url: remote.url, prefix, onAuth }))).filter((r) => r.ref.startsWith(prefix));
+		const missing = [...new Set(listed.map((r) => r.oid).filter((oid) => !shardStates.has(oid)))];
+		try {
+			if (missing.length) {
+				const { fs, dir } = await retryTransient(() => fetchCommits(remote, missing));
+				for (const oid of missing) shardStates.set(oid, JSON.parse(decoder.decode((await git.readBlob({ fs, dir, oid, filepath: "state.json" })).blob)) as Registry);
+			}
+		} catch (err) {
+			// A shard moved between the listing and the fetch: its old tip is no longer served. List again.
+			if (attempt < 3 && /not our ref|fetch refused/i.test(String(err))) continue;
+			throw err;
+		}
+		return listed.map((r) => ({ ref: r.ref, tip: r.oid, state: shardStates.get(r.oid)! }));
+	}
 }
 
 export function claimStore(input: StoreInput): ClaimStore {
@@ -117,22 +150,21 @@ class ShardedClaims implements ClaimStore {
 	/** The shards whose refs start with `prefix`, with their tips: one listing. */
 	private async list(prefix = shardsPrefix(this.input.repo)) {
 		const remote = await this.input.remote();
-		const refs = await git.listServerRefs({ http, url: remote.url, prefix, onAuth: () => ({ username: "x", password: remote.token.split("?expires=")[0] }) });
+		const refs = await retryTransient(() => git.listServerRefs({ http, url: remote.url, prefix, onAuth: () => ({ username: "x", password: remote.token.split("?expires=")[0] }) }));
 		const base = shardsPrefix(this.input.repo);
 		return refs.filter((r) => r.ref.startsWith(prefix)).map((r) => ({ shard: decodeShard(r.ref.slice(base.length)), tip: r.oid }));
 	}
 
 	async read(): Promise<ClaimsView> {
-		const listed = await this.list();
-		const heads = await Promise.all(listed.map(async ({ shard, tip }) => ({ shard, head: await this.logOf(shard).readAt(tip) })));
+		const prefix = shardsPrefix(this.input.repo);
+		const shards = await readAllShards(await this.input.remote(), prefix);
 		const tips = new Map<string, string>();
 		const records: ClaimRecord[] = [];
 		const released: ReleaseRecord[] = [];
-		for (const { shard, head } of heads) {
-			if (!head) continue;
-			tips.set(shard, head.tip);
-			records.push(...head.commit.state.claims);
-			released.push(...head.commit.state.released);
+		for (const { ref, tip, state } of shards) {
+			tips.set(decodeShard(ref.slice(prefix.length)), tip);
+			records.push(...state.claims);
+			released.push(...state.released);
 		}
 		return { claims: mergeByChange(records), released, tips };
 	}
@@ -166,7 +198,7 @@ class ShardedClaims implements ClaimStore {
 			if (paths.some((p) => isWide(p, this.depth))) others.push(...(await this.list(`${shardRef(this.input.repo, shard)}%2F`)));
 			for (const other of others) {
 				const log = this.logOf(other.shard);
-				const head = other.tip ? await log.readAt(other.tip) : await log.read();
+				const head = await retryTransient(() => (other.tip ? log.readAt(other.tip) : log.read()));
 				const live: Conflict[] = [];
 				for (const conflict of conflictsWith(head?.commit.state, paths, input.change)) {
 					const holder = head!.commit.state.claims.find((c) => c.change === conflict.change)!;

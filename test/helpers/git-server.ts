@@ -24,6 +24,8 @@ export interface GitServer {
 	requests: string[];
 	/** Refuse the next `count` push uploads the way Artifacts does when a repo is busy. */
 	busyPushes: (count: number) => void;
+	/** Answer the next `count` fetch uploads with a 500, as an overloaded server might. */
+	failFetches: (count: number) => void;
 	close: () => Promise<void>;
 }
 
@@ -44,12 +46,20 @@ export async function startGitServer(): Promise<GitServer> {
 	let held: { count: number; waiting: (() => void)[]; all: () => void } | null = null;
 	const requests: string[] = [];
 	let busy = 0;
+	let failingFetches = 0;
 	let answeredPushes = 0;
 
 	const server: Server = createServer(async (req, res) => {
 		const url = new URL(req.url ?? "/", "http://localhost");
 		requests.push(`${req.method} ${url.pathname.split("/").pop()}${url.search}`);
 		const isPush = req.method === "POST" && url.pathname.endsWith("/git-receive-pack");
+		if (req.method === "POST" && url.pathname.endsWith("/git-upload-pack") && failingFetches > 0) {
+			failingFetches--;
+			req.resume();
+			res.statusCode = 500;
+			res.end("Internal Server Error");
+			return;
+		}
 		if (isPush && busy > 0) {
 			busy--;
 			req.resume();
@@ -112,6 +122,7 @@ export async function startGitServer(): Promise<GitServer> {
 		pushes: () => answeredPushes,
 		requests,
 		busyPushes: (count) => void (busy = count),
+		failFetches: (count) => void (failingFetches = count),
 		close: async () => {
 			await new Promise<void>((resolve) => server.close(() => resolve()));
 			rmSync(root, { recursive: true, force: true });
