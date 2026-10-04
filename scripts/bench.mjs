@@ -55,6 +55,9 @@ const headers = {
 	"Content-Type": "application/json",
 };
 
+/** For tasks run by the elected coordinator there is no Coordinator lock and no separate ledger: the log is the record. */
+const optional = (promise, fallback) => promise.catch((err) => (/elected coordinator/.test(err.message) ? fallback : Promise.reject(err)));
+
 async function api(method, path, body) {
 	const response = await fetch(`${BASE}${path}`, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
 	const text = await response.text();
@@ -162,7 +165,7 @@ async function main() {
 		idle.push(...batch.map((o) => o.change_id));
 	}
 	if (IDLE) console.log(`${idle.length} idle changes open`);
-	await api("POST", `/tasks/${task.id}/lock-stats/reset`);
+	await optional(api("POST", `/tasks/${task.id}/lock-stats/reset`), null);
 
 	const levels = [];
 	const result = { label: LABEL, base: BASE, repo: REPO, task: task.id, racers: RACERS, idle: IDLE, at: new Date().toISOString(), ledgerMatches: null, ledgerCommits: null, levels };
@@ -183,8 +186,8 @@ async function main() {
 		const failures = agents.filter((a) => a.status === "rejected").map((a) => a.reason.message.slice(0, 200));
 		const leftover = (await tool(n, "list_claims", { task_id: task.id })).filter((c) => c.title?.includes(runId));
 		// Wait for the ledger to catch up (a no-op where it is written under the lock), so its lag is counted.
-		const ledgerCheck = await api("GET", `/tasks/${task.id}/ledger`);
-		const { samples, ledgerLagMs = [] } = await api("POST", `/tasks/${task.id}/lock-stats/reset`);
+		const ledgerCheck = await optional(api("GET", `/tasks/${task.id}/ledger`), { matches: null, commits: null });
+		const { samples, ledgerLagMs = [] } = await optional(api("POST", `/tasks/${task.id}/lock-stats/reset`), { samples: [], ledgerLagMs: [] });
 		const levelCalls = calls.filter((c) => c.level === n);
 		const tools = Object.fromEntries([...new Set(levelCalls.map((c) => c.tool))].map((name) => [name, summary(levelCalls.filter((c) => c.tool === name).map((c) => c.ms))]));
 		const busy = samples.reduce((sum, s) => sum + s.runMs + s.flushMs, 0);
@@ -220,18 +223,18 @@ async function main() {
 		console.log(
 			`n=${n}: ${(wallMs / 1000).toFixed(1)}s, ${level.calls} calls, lock wait p95 ${Math.round(level.lock.waitMs.p95 ?? 0)}ms, ` +
 				`race winners ${raced.winners}, failures ${failures.length}, leftover claims ${leftover.length}, ` +
-				`ledger ${ledgerCheck.matches ? "matches" : "DOES NOT MATCH"} (lag p95 ${Math.round(level.ledger.lagMs.p95 ?? 0)}ms)`,
+				(ledgerCheck.matches === null ? "ledger: the log is the record" : `ledger ${ledgerCheck.matches ? "matches" : "DOES NOT MATCH"} (lag p95 ${Math.round(level.ledger.lagMs.p95 ?? 0)}ms)`),
 		);
 	}
 
 	for (const change_id of idle) await tool(0, "abandon_change", { task_id: task.id, change_id, reason: "benchmark done" });
-	const ledger = await api("GET", `/tasks/${task.id}/ledger`);
+	const ledger = await optional(api("GET", `/tasks/${task.id}/ledger`), { matches: null, commits: null });
 	result.ledgerMatches = ledger.matches;
 	result.ledgerCommits = ledger.commits;
 	await save();
 
 	const ms = (v) => (v === null ? "-" : v >= 10_000 ? `${(v / 1000).toFixed(0)}s` : v >= 1000 ? `${(v / 1000).toFixed(1)}s` : `${Math.round(v)}ms`);
-	console.log(`\n${LABEL}: ledger replay ${ledger.matches ? "matches" : "DOES NOT MATCH"} (${ledger.commits} commits)\n`);
+	console.log(ledger.matches === null ? `\n${LABEL}: elected coordinator (the log is the record)\n` : `\n${LABEL}: ledger replay ${ledger.matches ? "matches" : "DOES NOT MATCH"} (${ledger.commits} commits)\n`);
 	console.log("| agents | wall | calls/s | list_claims p50/p95 | open_change p50/p95 | report_push p50/p95 | lock wait p50/p95 | lock hold p50 (ledger write) | peak queue | lock busy | ledger lag p95 | race winners | failures |");
 	console.log("|---|---|---|---|---|---|---|---|---|---|---|---|---|");
 	for (const l of levels) {
