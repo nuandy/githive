@@ -56,7 +56,7 @@ vi.mock("../src/git", () => ({
 vi.mock("../src/contract-owner", () => ({ NEW_FILE: "(new)", decideAmendment: (...args: unknown[]) => io.decide(...(args as [])) }));
 
 // The task's notes ref, in memory: each write appends a commit message.
-const ledger = vi.hoisted(() => ({ messages: [] as string[], entries: [] as { commit: string; text: string }[], down: false }));
+const ledger = vi.hoisted(() => ({ messages: [] as string[], entries: [] as { commit: string; text: string }[], down: false, readDelayMs: 0 }));
 
 vi.mock("../src/ledger-git", async () => {
 	const { ledgerMessage } = await import("../src/ledger");
@@ -66,7 +66,10 @@ vi.mock("../src/ledger-git", async () => {
 			ledger.messages.push(ledgerMessage(entries, patch));
 			ledger.entries.push(...entries);
 		}),
-		readLedger: vi.fn(async () => [...ledger.messages]),
+		readLedger: vi.fn(async () => {
+			if (ledger.readDelayMs) await new Promise((resolve) => setTimeout(resolve, ledger.readDelayMs));
+			return [...ledger.messages];
+		}),
 	};
 });
 
@@ -109,6 +112,7 @@ beforeEach(() => {
 	ledger.messages = [];
 	ledger.entries = [];
 	ledger.down = false;
+	ledger.readDelayMs = 0;
 });
 
 describe("limits and queues", () => {
@@ -512,6 +516,26 @@ describe("the record in Git", () => {
 		const { task: t } = await restored.restore("t1", original.repo);
 		expect(t).toEqual({ ...original, queue: [], active: { builders: [], reviewers: [] } });
 		await expect(restored.restore("t1", original.repo)).rejects.toThrow(/task exists/);
+	});
+});
+
+describe("lock timings", () => {
+	it("records how long each call waited behind the one holding the lock", async () => {
+		await setup(task());
+		ledger.readDelayMs = 40;
+		await Promise.all([coordinator.ledger(), coordinator.ledger()]);
+		const { samples, inFlight } = await coordinator.lockStats();
+		expect(samples).toHaveLength(2);
+		expect(samples[0].runMs).toBeGreaterThanOrEqual(30);
+		expect(samples[1].waitMs).toBeGreaterThanOrEqual(30);
+		expect(inFlight).toBe(0);
+	});
+
+	it("records failed calls and clears samples on reset", async () => {
+		await setup(task({ mode: "open" }));
+		await expect(coordinator.land(service)).rejects.toThrow();
+		expect((await coordinator.lockStats(true)).samples).toHaveLength(1);
+		expect((await coordinator.lockStats()).samples).toHaveLength(0);
 	});
 });
 

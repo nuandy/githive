@@ -76,6 +76,8 @@ app.get("/api", (c) =>
 			"GET  /tasks/:id/claims",
 			"POST /mcp (MCP front door: JSON-RPC over HTTP)",
 			"GET  /tasks/:id/ledger",
+			"GET  /tasks/:id/lock-stats",
+			"POST /tasks/:id/lock-stats/reset",
 			"POST /tasks/:id/restore {repo}",
 			"(contract amendments are proposed by builders; see task.amendments)",
 		],
@@ -342,6 +344,10 @@ app.post("/tasks/:id/slices/:slice/integrate", async (c) => {
 app.post("/tasks/:id/land", async (c) => c.json(await humanCoordinator(c.env, c.req.param("id")).land(c.get("accessIdentity"))));
 
 // The task's record in Git: rebuild it from the notes ref and compare with the stored state.
+// Lock timings for benchmarks; POST clears them after reading.
+app.get("/tasks/:id/lock-stats", async (c) => c.json(await coordinator(c.env, c.req.param("id")).lockStats()));
+app.post("/tasks/:id/lock-stats/reset", async (c) => c.json(await coordinator(c.env, c.req.param("id")).lockStats(true)));
+
 app.get("/tasks/:id/ledger", async (c) => c.json(await coordinator(c.env, c.req.param("id")).ledger()));
 
 // Recreate a task whose Coordinator lost its state, from the record in the project repo.

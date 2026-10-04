@@ -65,6 +65,16 @@ interface Side {
  * on the task's repos: forking slices, test-merging them against each other
  * (Merge-ahead), gating integration on reviewer votes (Quorum), and landing.
  */
+/** One call through the Coordinator's lock: when it queued, and milliseconds spent waiting, running and writing the ledger. */
+export interface LockSample {
+	at: number;
+	waitMs: number;
+	runMs: number;
+	flushMs: number;
+}
+
+const MAX_LOCK_SAMPLES = 5_000;
+
 export class Coordinator extends DurableObject<Env> implements CoordinatorHumanActions, LaneChangeCoordinator {
 	// Methods await network I/O, which lets other requests interleave. Run
 	// state-changing methods one at a time so they never overwrite each other.
@@ -73,16 +83,28 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 	/** Decisions made by the running method, written to Git when it finishes. */
 	private entries: LedgerEntry[] = [];
 
+	/** Recent lock timings, for benchmarks: how long each call waited, ran, and spent writing the ledger. */
+	private lockSamples: LockSample[] = [];
+
 	private exclusive<T>(fn: () => Promise<T>): Promise<T> {
+		const queued = Date.now();
+		this.lockDepth++;
 		const recorded = async () => {
+			const started = Date.now();
+			let ran = started;
 			try {
-				return await fn();
+				const result = await fn();
+				ran = Date.now();
+				return result;
 			} catch (err) {
+				ran = Date.now();
 				// A method that failed didn't make its decisions; what it saved still goes out as state.
 				this.entries = [];
 				throw err;
 			} finally {
 				await this.flush();
+				this.lockDepth--;
+				this.recordLockSample({ at: queued, waitMs: started - queued, runMs: ran - started, flushMs: Date.now() - ran });
 			}
 		};
 		const run = this.tail.then(recorded, recorded);
@@ -498,6 +520,21 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 
 	state() {
 		return this.load();
+	}
+
+	/** Lock timings since the last reset, oldest first. Kept in memory only, so they reset when the object restarts. */
+	lockStats(reset = false) {
+		const samples = this.lockSamples;
+		if (reset) this.lockSamples = [];
+		return { samples, inFlight: this.lockDepth };
+	}
+
+	/** Calls waiting for or holding the lock right now. */
+	private lockDepth = 0;
+
+	private recordLockSample(sample: LockSample) {
+		this.lockSamples.push(sample);
+		if (this.lockSamples.length > MAX_LOCK_SAMPLES) this.lockSamples.splice(0, this.lockSamples.length - MAX_LOCK_SAMPLES);
 	}
 
 	/** Stored blueprint contracts are visible only while awaiting human approval. */
