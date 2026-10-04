@@ -182,12 +182,14 @@ export abstract class SandboxAgent<J extends SandboxJob, S extends AgentState> e
 	 * false when the agent isn't running, so the caller can handle that case.
 	 */
 	async notify(message: string) {
-		const { state } = await this.load();
-		if (!state || (state.status !== "queued" && state.status !== "working")) return false;
-		if (state.status === "working" && await this.ctx.storage.get(TURN_IN_FLIGHT)) return false;
-		const inbox = (await this.ctx.storage.get<string[]>("inbox")) ?? [];
-		await this.ctx.storage.put("inbox", [...inbox, message]);
-		return true;
+		return this.lifecycle(async () => {
+			const { state } = await this.load();
+			if (!state || (state.status !== "queued" && state.status !== "working")) return false;
+			if (state.status === "working" && await this.ctx.storage.get(TURN_IN_FLIGHT)) return false;
+			const inbox = (await this.ctx.storage.get<string[]>(INBOX)) ?? [];
+			await this.ctx.storage.put(INBOX, [...inbox, message]);
+			return true;
+		});
 	}
 
 	protected async parkAgent(parkedAt: string, waitingFor: string[]) {
@@ -279,7 +281,7 @@ export abstract class SandboxAgent<J extends SandboxJob, S extends AgentState> e
 			const deadline = Date.now() + RUN_BUDGET_MS;
 			while (state.status === "working" && Date.now() < deadline && !(await this.cancelled(state))) {
 				const turnToken = crypto.randomUUID();
-					await this.ctx.storage.put({ [TURN_IN_FLIGHT]: turnToken, [TURN_STARTED]: Date.now() });
+					await this.lifecycle(async () => this.ctx.storage.put({ [TURN_IN_FLIGHT]: turnToken, [TURN_STARTED]: Date.now() }));
 					try { await this.turn(job, state); await this.save(state); await this.reconcileAfterTurn(job, state, turnToken); }
 					finally { if ((await this.ctx.storage.get<string>(TURN_IN_FLIGHT)) === turnToken) await this.ctx.storage.delete([TURN_IN_FLIGHT, TURN_STARTED]); }
 					const refreshed = await this.ctx.storage.get<J>("job"); if (refreshed) Object.assign(job, refreshed);
