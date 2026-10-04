@@ -313,8 +313,16 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 		}
 		const capable = builder as typeof builder & { wake?: (id: string, text: string, credentials: BuilderResumeCredentials) => Promise<"resumed" | "deferred" | "ignored"> };
 		let result: "resumed" | "deferred" | "ignored";
-		if (capable.wake) result = await capable.wake(eventId, message, await this.resumeCredentials(slice));
-		else result = (await builder.notify(message)) ? "deferred" : (await builder.revise(message, await this.resumeCredentials(slice)), "resumed");
+		try {
+			const credentials = await this.resumeCredentials(slice);
+			if (capable.wake) result = await retryTransient(() => capable.wake!(eventId, message, credentials));
+			else result = (await builder.notify(message)) ? "deferred" : (await builder.revise(message, credentials), "resumed");
+		} catch {
+			// Retain the same event ID so a retry cannot deliver the message twice.
+			this.queueWake(slice, eventId, message);
+			if (!task.queue.some((item) => item.kind === "builder" && item.slice === slice.id)) task.queue.push({ kind: "builder", slice: slice.id });
+			return "deferred";
+		}
 		slice.wakeEventIds = [...new Set([...(slice.wakeEventIds ?? []), eventId])];
 		if (parked && result === "resumed") {
 			slice.parkedAt = undefined;
