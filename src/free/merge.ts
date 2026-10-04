@@ -57,11 +57,13 @@ export type MergeOutcome =
  */
 export async function mergeChange(input: MergeInput): Promise<MergeOutcome> {
 	for (let attempt = 1; ; attempt++) {
-		const [view, votesHead] = await Promise.all([input.store.read(), input.votes.read()]);
+		const votesHead = await input.votes.read();
 		const ws = await Workspace.clone(input.remote);
 		const main = await ws.head();
 		const head = await ws.fetch("change", input.source ?? input.remote, `changes/${input.change}`);
 		const files = await ws.changedPaths(await ws.mergeBase(main, head), head);
+		// The claims that bear on these files: the change's own, and any covering them.
+		const view = await input.store.readScope(input.change, files);
 
 		const reasons: string[] = [];
 		const claims = view.claims;

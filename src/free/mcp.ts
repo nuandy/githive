@@ -223,7 +223,13 @@ export async function callFreeTool(name: string, args: Args, ctx: FreeContext): 
 	let viewing: ReturnType<ClaimStore["read"]> | undefined;
 	/** The claims in force, read at most once per call. */
 	const view = () => (viewing ??= store.read());
-	const claimOf = async (change: string) => (await view()).claims.find((c) => c.change === change);
+	const changes = new Map<string, ReturnType<ClaimStore["readChange"]>>();
+	/** One change's claim and releases, read at most once per call, and only from what holds them. */
+	const changeOf = (change: string) => {
+		if (!changes.has(change)) changes.set(change, store.readChange(change));
+		return changes.get(change)!;
+	};
+	const claimOf = async (change: string) => (await changeOf(change)).claim;
 	const changeSource = changeSourceFor(ctx, repo, registered);
 	switch (name) {
 		case "free_start": {
@@ -329,7 +335,7 @@ export async function callFreeTool(name: string, args: Args, ctx: FreeContext): 
 		case "free_status": {
 			const change = requiredString(args, "change");
 			const held = (await claimOf(change)) ?? null;
-			const released = held ? undefined : (await view()).released.findLast((r) => r.change === change);
+			const released = held ? undefined : (await changeOf(change)).released.at(-1);
 			const cast = (await votes.read())?.commit.state.votes ?? [];
 			return { change, claim: held, ...(released ? { released } : {}), ...(await changeStatus(ctx, repo, registered, cast, await countedVotes(cast, registered?.stampKey), change, held ?? undefined)) };
 		}
@@ -338,7 +344,8 @@ export async function callFreeTool(name: string, args: Args, ctx: FreeContext): 
 			const change = requiredString(args, "change");
 			const source = await changeSource(change, "read").catch(() => null);
 			if (!source) throw new Error(`[409] changes/${change} has nothing pushed to check`);
-			return checkChange({ project: await ctx.remote(repo, "read"), source, claims: (await view()).claims, change });
+			const own = await claimOf(change);
+			return checkChange({ project: await ctx.remote(repo, "read"), source, claims: own ? [own] : [], change });
 		}
 		case "free_register": {
 			const agent = requiredString(args, "agent");

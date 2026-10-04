@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { GitCasLog } from "../src/election-git";
 import { claimStore } from "../src/free/claim-store";
-import type { Registry } from "../src/free/claims";
+import { claim, type Registry } from "../src/free/claims";
 import { recordsRepoOf, shardsPrefix } from "../src/free/shards";
 import { entriesOverlap } from "../src/open-mode";
 import { startGitServer, type GitServer } from "./helpers/git-server";
@@ -139,5 +139,26 @@ describe("sharded claims across records repos", { timeout: 60_000 }, () => {
 		await spread().release({ change: "wide-1", agent: "agent-wide-1", reason: "done" });
 		await spread().claim(want("deep-2", [`${area}/y/z.ts`]));
 		expect(await spread().claim(want("wide-2", [`${area}/`]))).toMatchObject({ ok: false, conflicts: [{ change: "deep-2" }] });
+	});
+
+	it("reads one change from its index and its own shards: two repos at most, not all of them", async () => {
+		const areas = ["alpha", "beta", "gamma", "delta", "epsilon", "zeta", "eta", "theta"];
+		for (const [i, area] of areas.entries()) await spread().claim(want(`c-${i}`, [`${area}/x/`]));
+		const before = server.requestsTo.length;
+		const { claim } = await spread().readChange("c-3");
+		expect(claim?.paths).toEqual(["delta/x/"]);
+		expect(new Set(server.requestsTo.slice(before).map((r) => r.split(" ")[0])).size).toBeLessThanOrEqual(2);
+
+		const releasing = server.requestsTo.length;
+		expect(await spread().release({ change: "c-3", agent: "agent-c-3", reason: "done" })).toEqual({ ok: true });
+		expect(new Set(server.requestsTo.slice(releasing).map((r) => r.split(" ")[0])).size).toBeLessThanOrEqual(2);
+		expect((await spread().readChange("c-3")).claim).toBeUndefined();
+	});
+
+	it("still finds a change whose claim has no index, by reading everything", async () => {
+		// Claimed straight into its shard, as before changes were indexed.
+		const shard = new GitCasLog<Registry>(async () => ({ url: records(recordsRepoOf("old/x", 4)), token: "unused" }), "p", `${shardsPrefix("p")}old%2Fx`);
+		await claim(shard, want("old-1", ["old/x/"]));
+		expect((await spread().readChange("old-1")).claim?.paths).toEqual(["old/x/"]);
 	});
 });

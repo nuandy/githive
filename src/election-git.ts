@@ -82,6 +82,13 @@ async function pushDirect(remote: Remote, ref: string, from: string | null, to: 
 			},
 			body,
 		});
+		if (response.status >= 500 && attempt < BUSY_ATTEMPTS) {
+			// The server failed, perhaps after applying the push: if the ref is now at `to`, it landed.
+			await response.body?.cancel();
+			if ((await serverTip(remote, ref).catch(() => null)) === to) return true;
+			await new Promise((resolve) => setTimeout(resolve, Math.min(50 * 2 ** attempt, 1_500) * (0.5 + Math.random())));
+			continue;
+		}
 		if (!response.ok) throw new Error(`[${response.status}] push to ${ref} failed: ${(await response.text()).slice(0, 200)}`);
 		report = pktLines(new Uint8Array(await response.arrayBuffer()));
 		// Busy: the repo is taking another push. Nothing was applied, so it is safe to send again.

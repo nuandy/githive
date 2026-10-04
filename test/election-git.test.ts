@@ -50,6 +50,18 @@ describe("GitCasLog", () => {
 		expect(await fresh.read()).toEqual({ tip, commit: written });
 	});
 
+	it("retries a push the server answered with a 500, and counts one it had applied as landed", async () => {
+		const first = await log.append(null, commit());
+		server.failPushes(1);
+		const second = await log.append(first, commit({ term: 2, batch: "batch-2" }));
+		expect(second).toMatch(/^[0-9a-f]{40}$/);
+		server.failPushes(1, true);
+		const third = await log.append(second, commit({ term: 3, batch: "batch-3" }));
+		expect(third).toMatch(/^[0-9a-f]{40}$/);
+		expect((await log.read())?.tip).toBe(third);
+		expect(server.git("rev-list", "--count", "refs/notes/blueprint/t1").trim()).toBe("3");
+	});
+
 	it("refuses an append built on a stale tip and leaves the log as it was", async () => {
 		const first = await log.append(null, commit());
 		const second = await log.append(first, commit({ term: 2, batch: "batch-2" }));

@@ -6,7 +6,8 @@ import { isEmptyRepo, type Remote } from "../git";
 import { fetchCommits } from "../git-fetch";
 import { retryTransient } from "../retry";
 import { activeClaims, claim, conflictsWith, release, releaseStale, withdraw, type ClaimRecord, type Conflict, type Registry, type ReleaseRecord } from "./claims";
-import { ancestorsOf, decodeShard, encodeShard, isWide, recordsRepoOf, shardOf, shardRef, shardsPrefix } from "./shards";
+import { appendRecord } from "./records";
+import { ancestorsOf, changeRef, changeRepoOf, decodeShard, encodeShard, isWide, recordsRepoOf, shardOf, shardRef, shardsPrefix } from "./shards";
 import type { Stamper } from "./stamp";
 
 // Where a repo's claims are kept: all in its claims registry (repos started
@@ -35,8 +36,19 @@ export interface ClaimInput {
 export type ClaimOutcome = { ok: true } | { ok: false; conflicts: Conflict[] };
 export type ReleaseOutcome = { ok: true } | { ok: false; refused: string };
 
+export interface ChangeView {
+	claim?: ClaimRecord;
+	/** The change's releases, oldest first. */
+	released: ReleaseRecord[];
+}
+
 export interface ClaimStore {
+	/** Every claim in force. */
 	read(): Promise<ClaimsView>;
+	/** One change's claim and releases, reading only what holds them where it can. */
+	readChange(change: string): Promise<ChangeView>;
+	/** What bears on merging `files` for `change`: its own claim and any covering the files, at the tips read (for citing). */
+	readScope(change: string, files: string[]): Promise<ClaimsView>;
 	claim(input: ClaimInput, stamper?: Stamper): Promise<ClaimOutcome>;
 	release(input: { change: string; agent: string; reason: string; mergedAs?: string }, stamper?: Stamper): Promise<ReleaseOutcome>;
 	releaseStale(input: { change: string; agent: string; staleAfterMs: number; now?: number }, stamper?: Stamper): Promise<ReleaseOutcome>;
@@ -70,10 +82,23 @@ const decoder = new TextDecoder();
  * Every shard under `prefix`, at its tip: one listing, then one fetch for all
  * the shards whose tips aren't known yet. Brief server failures are retried.
  */
-async function readAllShards(remote: Remote, prefix: string): Promise<{ ref: string; tip: string; state: Registry }[]> {
+async function readAllShards(remote: Remote, prefix: string) {
+	return readListed(remote, async (onAuth) => (await listRefs(remote, prefix, onAuth)).filter((r) => r.ref.startsWith(prefix)));
+}
+
+/** These refs (where they exist) at their tips: a listing each, all at once, then one fetch for the commits not known yet. */
+async function readRefs(remote: Remote, refs: string[]) {
+	return readListed(remote, async (onAuth) => (await Promise.all(refs.map(async (ref) => (await listRefs(remote, ref, onAuth)).filter((r) => r.ref === ref)))).flat());
+}
+
+const listRefs = (remote: Remote, prefix: string, onAuth: () => { username: string; password: string }) =>
+	retryTransient(() => git.listServerRefs({ http, url: remote.url, prefix, onAuth }).catch((err) => (isEmptyRepo(err) ? [] : Promise.reject(err))));
+
+/** Refs as `list` finds them, with their states: commits not known yet are fetched in one request. */
+async function readListed(remote: Remote, list: (onAuth: () => { username: string; password: string }) => Promise<{ ref: string; oid: string }[]>): Promise<{ ref: string; tip: string; state: Registry }[]> {
 	const onAuth = () => ({ username: "x", password: remote.token.split("?expires=")[0] });
 	for (let attempt = 1; ; attempt++) {
-		const listed = (await retryTransient(() => git.listServerRefs({ http, url: remote.url, prefix, onAuth }).catch((err) => (isEmptyRepo(err) ? [] : Promise.reject(err))))).filter((r) => r.ref.startsWith(prefix));
+		const listed = await list(onAuth);
 		const missing = [...new Set(listed.map((r) => r.oid).filter((oid) => !shardStates.has(oid)))];
 		try {
 			if (missing.length) {
@@ -81,7 +106,7 @@ async function readAllShards(remote: Remote, prefix: string): Promise<{ ref: str
 				for (const oid of missing) shardStates.set(oid, JSON.parse(decoder.decode((await git.readBlob({ fs, dir, oid, filepath: "state.json" })).blob)) as Registry);
 			}
 		} catch (err) {
-			// A shard moved between the listing and the fetch: its old tip is no longer served. List again.
+			// A ref moved between the listing and the fetch: its old tip is no longer served. List again.
 			if (attempt < 3 && /not our ref|fetch refused/i.test(String(err))) continue;
 			throw err;
 		}
@@ -107,6 +132,15 @@ class RegistryClaims implements ClaimStore {
 		const head = this.known !== undefined ? this.known : await this.root.read();
 		this.known = undefined;
 		return { claims: activeClaims(head?.commit.state), released: head?.commit.state.released ?? [], tips: new Map(head ? [["", head.tip]] : []) };
+	}
+
+	async readChange(change: string): Promise<ChangeView> {
+		const view = await this.read();
+		return { claim: view.claims.find((c) => c.change === change), released: view.released.filter((r) => r.change === change) };
+	}
+
+	readScope() {
+		return this.read();
 	}
 
 	async claim(input: ClaimInput, stamper?: Stamper): Promise<ClaimOutcome> {
@@ -195,6 +229,56 @@ class ShardedClaims implements ClaimStore {
 		return { claims: mergeByChange(records), released, tips };
 	}
 
+	/** The repo holding a change's index. */
+	private indexRemote(change: string) {
+		return this.spread ? this.input.recordsRemote!(changeRepoOf(change, this.spread)) : this.input.remote();
+	}
+
+	/** The shards a change has claimed in, from its index (null: it has none, from before indexing). */
+	private async indexed(change: string): Promise<string[] | null> {
+		const [entry] = await readRefs(await this.indexRemote(change), [changeRef(this.input.repo, change)]);
+		return entry ? ((entry.state as unknown as { shards?: string[] }).shards ?? []) : null;
+	}
+
+	/** These shards at their tips: per repo, a listing each and one fetch. */
+	private async readShards(shards: string[]) {
+		const byRepo = new Map<number, string[]>();
+		for (const shard of new Set(shards)) {
+			const k = this.spread ? recordsRepoOf(shard, this.spread) : -1;
+			byRepo.set(k, [...(byRepo.get(k) ?? []), shard]);
+		}
+		const read = await Promise.all(
+			[...byRepo].map(async ([k, group]) => readRefs(await (k < 0 ? this.input.remote() : this.input.recordsRemote!(k)), group.map((s) => shardRef(this.input.repo, s)))),
+		);
+		const prefix = shardsPrefix(this.input.repo);
+		return read.flat().map((entry) => ({ ...entry, shard: decodeShard(entry.ref.slice(prefix.length)) }));
+	}
+
+	/** The view of some shards: their claims (one per change), releases and tips. */
+	private viewOf(entries: { shard: string; tip: string; state: Registry }[]): ClaimsView {
+		return {
+			claims: mergeByChange(entries.flatMap((e) => e.state.claims)),
+			released: entries.flatMap((e) => e.state.released),
+			tips: new Map(entries.map((e) => [e.shard, e.tip])),
+		};
+	}
+
+	async readChange(change: string): Promise<ChangeView> {
+		const shards = await this.indexed(change);
+		const view = shards ? this.viewOf(await this.readShards(shards)) : await this.read();
+		return { claim: view.claims.find((c) => c.change === change), released: view.released.filter((r) => r.change === change) };
+	}
+
+	async readScope(change: string, files: string[]): Promise<ClaimsView> {
+		const own = await this.indexed(change);
+		if (!own) return this.read();
+		const covering = files.flatMap((file) => {
+			const shard = shardOf(file, this.depth);
+			return [...ancestorsOf(shard), shard];
+		});
+		return this.viewOf(await this.readShards([...own, ...covering]));
+	}
+
 	async claim(input: ClaimInput, stamper?: Stamper): Promise<ClaimOutcome> {
 		const groups = new Map<string, string[]>();
 		for (const path of input.paths) {
@@ -202,6 +286,13 @@ class ShardedClaims implements ClaimStore {
 			groups.set(shard, [...(groups.get(shard) ?? []), path]);
 		}
 		const shards = [...groups.keys()].sort();
+		// The change's index first, so it always covers every shard the change holds.
+		await appendRecord<{ shards: string[] }, "known">(
+			new GitCasLog<{ shards: string[] }>(() => this.indexRemote(input.change), this.input.repo, changeRef(this.input.repo, input.change)),
+			input.agent,
+			() => ({ shards: [] }),
+			(state) => (shards.every((s) => state.shards.includes(s)) ? { refused: "known" } : { state: { shards: [...new Set([...state.shards, ...shards])].sort() }, text: `${input.change} claims in ${shards.join(", ")}` }),
+		);
 		const written: { shard: string; previous: string[] | null }[] = [];
 		const backOut = async (reason: string) => {
 			for (const { shard, previous } of written.reverse())
@@ -246,7 +337,7 @@ class ShardedClaims implements ClaimStore {
 
 	/** The shards a change's claim is in, from a fresh read. */
 	private async shardsHolding(change: string) {
-		const own = (await this.read()).claims.find((c) => c.change === change);
+		const own = (await this.readChange(change)).claim;
 		return own ? { own, shards: [...new Set(own.paths.map((p) => shardOf(p, this.depth)))] } : null;
 	}
 

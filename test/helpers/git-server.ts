@@ -22,6 +22,10 @@ export interface GitServer {
 	pushes: () => number;
 	/** Every request so far, as "METHOD path?service" (for counting round trips). */
 	requests: string[];
+	/** Every request so far, as "repo METHOD path" (which repo each went to). */
+	requestsTo: string[];
+	/** Answer the next `count` push uploads with a 500, after (applied: true) or without applying them. */
+	failPushes: (count: number, applied?: boolean) => void;
 	/** Refuse the next `count` push uploads the way Artifacts does when a repo is busy. */
 	busyPushes: (count: number) => void;
 	/** Answer the next `count` fetch uploads with a 500, as an overloaded server might. */
@@ -49,6 +53,8 @@ export async function startGitServer(): Promise<GitServer> {
 
 	let held: { count: number; waiting: (() => void)[]; all: () => void } | null = null;
 	const requests: string[] = [];
+	const requestsTo: string[] = [];
+	let failingPushes = { count: 0, applied: false };
 	let busy = 0;
 	let failingFetches = 0;
 	let answeredPushes = 0;
@@ -56,6 +62,7 @@ export async function startGitServer(): Promise<GitServer> {
 	const server: Server = createServer(async (req, res) => {
 		const url = new URL(req.url ?? "/", "http://localhost");
 		requests.push(`${req.method} ${url.pathname.split("/").pop()}${url.search}`);
+		requestsTo.push(`${url.pathname.split("/")[1]?.replace(/\.git$/, "")} ${req.method} ${url.pathname.split("/").pop()}`);
 		const isPush = req.method === "POST" && url.pathname.endsWith("/git-receive-pack");
 		if (req.method === "POST" && url.pathname.endsWith("/git-upload-pack") && failingFetches > 0) {
 			failingFetches--;
@@ -70,6 +77,13 @@ export async function startGitServer(): Promise<GitServer> {
 			const line = "ERR artifacts_git_receive_pack_busy\n";
 			res.setHeader("Content-Type", "application/x-git-receive-pack-result");
 			res.end(`${(line.length + 4).toString(16).padStart(4, "0")}${line}`);
+			return;
+		}
+		const failThisPush = isPush && failingPushes.count > 0 ? (failingPushes.count--, failingPushes.applied ? "after" : "before") : null;
+		if (failThisPush === "before") {
+			req.resume();
+			res.statusCode = 500;
+			res.end("Internal Server Error");
 			return;
 		}
 		if (isPush && held) {
@@ -110,6 +124,12 @@ export async function startGitServer(): Promise<GitServer> {
 				if (name.toLowerCase() === "status") status = Number.parseInt(value, 10);
 				else if (name) res.setHeader(name, value);
 			}
+			if (failThisPush === "after") {
+				// Applied, but the answer is lost: the client sees a 500.
+				res.statusCode = 500;
+				res.end("Internal Server Error");
+				return;
+			}
 			res.statusCode = status;
 			res.end(out.subarray(split + 4));
 			if (isPush) answeredPushes++;
@@ -125,6 +145,8 @@ export async function startGitServer(): Promise<GitServer> {
 		holdPushes: (count) => new Promise<void>((all) => (held = { count, waiting: [], all })),
 		pushes: () => answeredPushes,
 		requests,
+		requestsTo,
+		failPushes: (count, applied = false) => void (failingPushes = { count, applied }),
 		busyPushes: (count) => void (busy = count),
 		failFetches: (count) => void (failingFetches = count),
 		repo: (name) => {

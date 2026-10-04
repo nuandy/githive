@@ -42,3 +42,12 @@ export function recordsRepoOf(shard: string, count: number) {
 
 /** A records repo's name: never a change fork's (free--<repo>--<change>), whatever an agent names its change. */
 export const recordsRepoName = (repo: string, k: number) => `free-records--${repo}--${k}`;
+
+/**
+ * Each change's index: the shards it has claimed in, so reading one change's
+ * claim needn't read every shard. Written before the shards, and only ever
+ * added to, so it always covers every shard the change holds.
+ */
+export const changeRef = (repo: string, change: string) => `refs/notes/blueprint-claim-changes/${repo}/${encodeShard(change)}`;
+/** Which records repo holds a change's index. */
+export const changeRepoOf = (change: string, count: number) => recordsRepoOf(`change:${change}`, count);
