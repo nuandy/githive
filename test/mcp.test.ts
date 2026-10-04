@@ -5,7 +5,6 @@ import { TOOLS, handleMcpBody, handleRpc, type McpContext } from "../src/mcp";
 
 function fakeCoordinator() {
 	return {
-		createOpen: vi.fn(async (id: string, repo: string) => ({ id, repo, review: { reviewers: ["tests"], required: 1, vetoes: [] }, verify: ["npm test"], leaseMinutes: 30 })),
 		claims: vi.fn(async () => [{ change: "a-1", owns: ["src/a/"] }]),
 		openChange: vi.fn(async (input: { title: string; owns: string[] }) => ({
 			change: { id: "stats-ab12", owns: input.owns, leaseUntil: "2026-10-04T10:00:00.000Z" },
@@ -29,13 +28,21 @@ function fakeCoordinator() {
 
 function ctx() {
 	const co = fakeCoordinator();
-	const context: McpContext = { coordinator: () => co as never, identity: { kind: "service", value: "token-1" } };
-	return { co, context };
+	const openRepo = vi.fn(async (repo: string) => ({ id: "t1", repo, review: { reviewers: ["tests"], required: 1, vetoes: [] }, verify: ["npm test"], leaseMinutes: 30 }));
+	const context: McpContext = { coordinator: () => co as never, openRepo, identity: { kind: "service", value: "token-1" } };
+	return { co, context, openRepo };
 }
 
 const call = (name: string, args: object, context: McpContext) => handleRpc({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name, arguments: args } }, context) as Promise<{ result: { content: { text: string }[]; isError?: boolean } }>;
 
 describe("MCP front door", () => {
+	it("joins a repo through the shared open-repo path", async () => {
+		const { context, openRepo } = ctx();
+		const reply = await call("join_repo", { repo: "project" }, context);
+		expect(openRepo).toHaveBeenCalledWith("project");
+		expect(JSON.parse(reply.result.content[0].text)).toMatchObject({ task_id: "t1", repo: "project", lease_minutes: 30 });
+	});
+
 	it("answers initialize with tools capability and the client's protocol version", async () => {
 		const { context } = ctx();
 		const res = (await handleRpc({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-03-26" } }, context)) as { result: Record<string, unknown> };

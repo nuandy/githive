@@ -10,7 +10,7 @@ const live = {
 		slices: [{ id: "ui", title: "UI", owns: ["src/ui/"], status: "building", touched: [], outOfLane: [], reviews: [], instructions: "" }],
 		laneChangeRequests: [{ id: "r1", requester: "ui", owner: "api", path: "src/api/routes.ts", need: "Add route", reason: "UI needs endpoint", status: "answered", createdAt: "now", answer: "Added" }],
 	},
-	agents: [{ id: "ui", builder: { status: "parked", startedAt: "now", parkedAt: "2026-10-02T00:00:00.000Z", waitingFor: ["r1"], turns: 1, toolCalls: 1, usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0 }, log: [] }, reviewers: [] }],
+	agents: [{ id: "ui", builder: { status: "parked", startedAt: "now", parkedAt: "2026-10-02T00:00:00.000Z", waitingRequestIds: ["r1"], turns: 1, toolCalls: 1, usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0 }, log: [] }, reviewers: [] }],
 } as unknown as Live;
 describe("parked builder dashboard", () => {
 	it("shows parked as a nonfailure with when and what it is waiting on", () => {

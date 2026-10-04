@@ -1,7 +1,7 @@
 import type { AccessIdentity } from "./access-contract";
 import type { Coordinator } from "./coordinator";
 import { statusOf } from "./errors";
-import { openTaskId } from "./open-mode";
+import type { Task } from "./types";
 
 // The MCP front door: any agent (Claude Code, Codex, a team's own bots) joins
 // a repo in open mode, claims a lane, works on its own fork with plain git,
@@ -11,7 +11,6 @@ import { openTaskId } from "./open-mode";
 
 type CoordinatorStub = Pick<
 	Coordinator,
-	| "createOpen"
 	| "claims"
 	| "openChange"
 	| "extendClaim"
@@ -27,6 +26,8 @@ type CoordinatorStub = Pick<
 
 export interface McpContext {
 	coordinator: (taskId: string) => CoordinatorStub;
+	/** Open a repo for open changes (or find it open) and list it on the dashboard; the same as POST /repos/:repo/open. */
+	openRepo: (repo: string) => Promise<Pick<Task, "id" | "repo" | "review" | "verify" | "leaseMinutes">>;
 	identity?: AccessIdentity;
 }
 
@@ -132,9 +133,7 @@ async function callTool(name: string, args: Args, ctx: McpContext): Promise<unkn
 	const co = () => ctx.coordinator(need(args, "task_id"));
 	switch (name) {
 		case "join_repo": {
-			const repo = need(args, "repo");
-			const id = await openTaskId(repo);
-			const task = await ctx.coordinator(id).createOpen(id, repo);
+			const task = await ctx.openRepo(need(args, "repo"));
 			return { task_id: task.id, repo: task.repo, review: task.review, verify: task.verify, lease_minutes: task.leaseMinutes, instructions: INSTRUCTIONS };
 		}
 		case "list_claims":

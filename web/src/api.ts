@@ -27,8 +27,8 @@ export interface AgentState {
 	summary?: string;
 	/** Time at which a builder entered its durable parked state. */
 	parkedAt?: string;
-	/** IDs of requests a parked builder was waiting for. */
-	waitingFor?: string[];
+	/** IDs of the cross-lane requests a parked builder is waiting for (the dashboard shows them from the task's requests). */
+	waitingRequestIds?: string[];
 	// Reviewers
 	verdict?: "approve" | "reject";
 	evidence?: string;
@@ -159,7 +159,7 @@ function normalizeAgentState(value: unknown): AgentState | null {
 		if (!event || typeof event.event !== "string") return [];
 		return [{ ...event, at: typeof event.at === "string" ? event.at : "", event: event.event }];
 	});
-	const { parkedAt, waitingFor, ...rest } = state;
+	const { parkedAt, waitingRequestIds, ...rest } = state;
 	return {
 		...rest,
 		usage: {
@@ -170,7 +170,7 @@ function normalizeAgentState(value: unknown): AgentState | null {
 		},
 		log,
 		...(typeof parkedAt === "string" ? { parkedAt } : {}),
-		...(Array.isArray(waitingFor) ? { waitingFor: asStringArray(waitingFor) } : {}),
+		...(Array.isArray(waitingRequestIds) ? { waitingRequestIds: asStringArray(waitingRequestIds) } : {}),
 	} as AgentState;
 }
 

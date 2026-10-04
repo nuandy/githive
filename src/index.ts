@@ -159,14 +159,18 @@ app.post("/tasks", async (c) => {
 	return c.json(task, 201);
 });
 
+/** Open a repo for open changes, or find it already open, and list it on the dashboard. Shared by HTTP and MCP. */
+async function openRepoTask(env: Env, repo: string, input: { verify?: string[]; review?: ReviewPolicy; limits?: Partial<Limits>; leaseMinutes?: number } = {}) {
+	const id = await openTaskId(repo);
+	const task = await coordinator(env, id).createOpen(id, repo, input);
+	await taskIndex(env).add({ id, repo, goal: task.goal, createdAt: task.createdAt });
+	return task;
+}
+
 // Open mode: one open task per repo, found by a stable id. Agents open changes on it and claim their lanes.
 app.post("/repos/:repo/open", async (c) => {
-	const repo = c.req.param("repo");
 	const body = await c.req.json<{ verify?: string[]; review?: ReviewPolicy; limits?: Partial<Limits>; leaseMinutes?: number }>().catch(() => ({}));
-	const id = await openTaskId(repo);
-	const task = await coordinator(c.env, id).createOpen(id, repo, body);
-	await taskIndex(c.env).add({ id, repo, goal: task.goal, createdAt: task.createdAt });
-	return c.json(task, 201);
+	return c.json(await openRepoTask(c.env, c.req.param("repo"), body), 201);
 });
 
 app.post("/tasks/:id/changes", async (c) => {
@@ -190,7 +194,11 @@ app.get("/tasks/:id/claims", async (c) => c.json(await coordinator(c.env, c.req.
 app.post("/mcp", async (c) => {
 	const body = await c.req.json().catch(() => null);
 	if (body === null) return c.json({ jsonrpc: "2.0", id: null, error: { code: -32700, message: "parse error" } }, 400);
-	const result = await handleMcpBody(body, { coordinator: (id) => coordinator(c.env, id) as unknown as ReturnType<McpContext["coordinator"]>, identity: c.get("accessIdentity") });
+	const result = await handleMcpBody(body, {
+		coordinator: (id) => coordinator(c.env, id) as unknown as ReturnType<McpContext["coordinator"]>,
+		openRepo: (repo) => openRepoTask(c.env, repo),
+		identity: c.get("accessIdentity"),
+	});
 	return result === null ? c.body(null, 202) : c.json(result);
 });
 app.on(["GET", "DELETE"], "/mcp", (c) => c.body(null, 405, { Allow: "POST" }));
