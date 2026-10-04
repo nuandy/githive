@@ -4,6 +4,7 @@ import { baseRepoName, fileVersion, forkAndWait, headOf, remoteFor, reviewerName
 import { fail, statusOf } from "./errors";
 import type { ContractCheckResult } from "./contract-check";
 import type { LaneChangeAnswer, LaneChangeCoordinator, LaneChangeRequest, LaneChangeRequestInput } from "./lane-change-contract";
+import { BUILDER_PARK_TIMEOUT_MS, type BuilderResumeCredentials, type ParkBuilderResult } from "./parking-contract";
 import { describeError } from "./contract-check-plan";
 import { isTransientFailure, retryTransient } from "./retry";
 import { Workspace } from "./git";
@@ -177,9 +178,22 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 			if (!owners.length) return { outcome: "no-owner" as const, message: "No slice owns " + input.path + ". Use the existing amendment path (propose_contract_change) for a file outside every lane." };
 			const owner = owners[0];
 			if (owner.id === requesterSliceId) fail(400, input.path + " is in your own lane; a cross-lane request must name another slice file");
-			const request: LaneChangeRequest = { id: crypto.randomUUID().slice(0, 8), requester: requesterSliceId, owner: owner.id, path: input.path, need: input.need.trim(), reason: input.reason.trim(), status: owner.status === "integrated" ? "human" : "pending", createdAt: new Date().toISOString() };
+			const request: LaneChangeRequest = { id: crypto.randomUUID().slice(0, 8), requester: requesterSliceId, owner: owner.id, path: input.path, need: input.need.trim(), reason: input.reason.trim(), status: "pending", createdAt: new Date().toISOString() };
+
+			// Adding requester -> owner is unsafe if owner already depends (directly or
+			// transitively) on requester. Pending and answered requests both wait.
+			if (this.closesLaneRequestCycle(task, requesterSliceId, owner.id)) {
+				request.status = "human";
+				const message = "This cross-lane request would create a wait cycle or deadlock. It was not sent and needs a human to resolve the dependency.";
+				await this.flagLaneRequest(task, request, message, false);
+				this.note(task, requester.head, "Cross-lane request " + request.id + " would create a wait cycle and was handed to a human");
+				await this.save(task);
+				return { outcome: "human" as const, request, message };
+			}
+
 			task.laneChangeRequests = [...(task.laneChangeRequests ?? []), request];
 			if (owner.status === "integrated") {
+				request.status = "human";
 				const message = "Slice " + owner.id + " is already integrated; it can no longer make the requested change to " + request.path + ". This request needs a human.";
 				await this.flagLaneRequest(task, request, message, false);
 				this.note(task, owner.head, "Cross-lane request " + request.id + " from " + requesterSliceId + " to integrated slice " + owner.id + " needs a human: " + request.path + " (" + request.need + ")");
@@ -188,8 +202,12 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 			}
 			const message = this.laneRequestMessage(request);
 			let delivery: "inbox" | "resumed";
-			try { delivery = await this.deliverBuilder(task, owner, message); }
+			try {
+				const wake = await this.wakeBuilder(task, owner, "lane-request:" + request.id, message);
+				delivery = wake === "resumed" ? "resumed" : "inbox";
+			}
 			catch (err) {
+				request.status = "human";
 				const explanation = "Could not deliver the cross-lane request to slice " + owner.id + ": " + statusOf(err).message + ". This request needs a human.";
 				await this.flagLaneRequest(task, request, explanation, false);
 				this.note(task, owner.head, "Cross-lane request " + request.id + " could not be delivered to owner " + owner.id + " and needs a human");
@@ -218,22 +236,43 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 			if (owner.status !== "building") fail(409, "slice " + ownerSliceId + " is " + owner.status);
 			if (!answer || (answer.outcome !== "done" && answer.outcome !== "declined")) fail(400, "lane request answer must be done or declined");
 			if (typeof answer.answer !== "string" || !answer.answer.trim()) fail(400, "a lane request answer needs a nonempty explanation");
-			if (answer.commit !== undefined && (typeof answer.commit !== "string" || !answer.commit.trim())) fail(400, "answer commit must be a nonempty commit id");
 			request.answer = answer.answer.trim();
 			request.answeredAt = new Date().toISOString();
 			if (answer.outcome === "declined") {
 				request.status = "declined";
-				const message = "Slice " + ownerSliceId + " declined cross-lane request " + request.id + " for " + request.path + ": " + request.answer + " This request needs a human.";
-				await this.flagLaneRequest(task, request, message, true, false);
-				this.note(task, owner.head, "Cross-lane request " + request.id + " declined by slice " + ownerSliceId + "; requester " + request.requester + " needs a human: " + request.answer);
+				const message = "Slice " + ownerSliceId + " declined cross-lane request " + request.id + " for " + request.path + ": " + request.answer;
+				await this.wakeLaneRequester(task, request, message);
+				this.note(task, owner.head, "Cross-lane request " + request.id + " declined by slice " + ownerSliceId + "; requester " + request.requester + " was notified: " + request.answer);
 			} else {
+				// Agent-supplied commit IDs are untrusted. Only Artifacts' current fork
+				// head proves what was actually pushed by the owner.
+				const pushedHead = await headOf(this.env.ARTIFACTS, owner.repo!);
+				if (!pushedHead || pushedHead === task.baseCommit) fail(409, "a done answer requires a current pushed change commit in the owner's fork");
 				request.status = "answered";
-				request.answerCommit = answer.commit?.trim();
-				this.note(task, request.answerCommit ?? owner.head, "Slice " + ownerSliceId + " answered cross-lane request " + request.id + " as done for " + request.path + (request.answerCommit ? " at " + request.answerCommit : " without a commit") + ": " + request.answer);
+				request.answerCommit = pushedHead;
+				this.note(task, pushedHead, "Slice " + ownerSliceId + " answered cross-lane request " + request.id + " as done for " + request.path + " at pushed commit " + pushedHead + ": " + request.answer);
 			}
 			await this.save(task);
 			return request;
 		});
+	}
+
+	private closesLaneRequestCycle(task: Task, requester: string, owner: string) {
+		const graph = new Map<string, string[]>();
+		for (const request of task.laneChangeRequests ?? []) {
+			if (request.status !== "pending" && request.status !== "answered") continue;
+			graph.set(request.requester, [...(graph.get(request.requester) ?? []), request.owner]);
+		}
+		const seen = new Set<string>();
+		const pending = [owner];
+		while (pending.length) {
+			const current = pending.pop()!;
+			if (current === requester) return true;
+			if (seen.has(current)) continue;
+			seen.add(current);
+			pending.push(...(graph.get(current) ?? []));
+		}
+		return false;
 	}
 
 	private safeLanePath(path: string) {
@@ -244,24 +283,166 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 		return "Cross-lane change request " + request.id + " from slice " + request.requester + ". Path: " + request.path + ". Need: " + request.need + ". Reason: " + request.reason;
 	}
 
-	private async deliverBuilder(task: Task, slice: Slice, message: string): Promise<"inbox" | "resumed"> {
-		const builder = this.env.BUILDER.getByName(slice.repo!);
-		if (await builder.notify(message)) return "inbox";
-		const [write, base] = await Promise.all([remoteFor(this.env.ARTIFACTS, slice.repo!, "write", 3 * 3600), remoteFor(this.env.ARTIFACTS, task.baseRepo!, "read", 3 * 3600)]);
-		await builder.revise(message, { token: write.token, base: { remote: base.url, token: base.token } });
-		if (!task.active.builders.includes(slice.id)) task.active.builders.push(slice.id);
-		return "resumed";
+	private async resumeCredentials(slice: Slice): Promise<BuilderResumeCredentials> {
+		const [write, base] = await Promise.all([
+			remoteFor(this.env.ARTIFACTS, slice.repo!, "write", 3 * 3600),
+			remoteFor(this.env.ARTIFACTS, (await this.load()).baseRepo!, "read", 3 * 3600),
+		]);
+		return { token: write.token, base: { remote: base.url, token: base.token } };
 	}
+
+	private queueWake(slice: Slice, eventId: string, message: string) {
+		const pending: { eventId: string; message: string }[] = (() => {
+			try { return JSON.parse(slice.wakeMessage ?? "[]") as { eventId: string; message: string }[]; }
+			catch { return slice.wakeMessage ? [{ eventId: "legacy", message: slice.wakeMessage }] : []; }
+		})();
+		if (!pending.some((event) => event.eventId === eventId)) pending.push({ eventId, message });
+		slice.wakeMessage = JSON.stringify(pending);
+		slice.wakeEventIds = [...new Set([...(slice.wakeEventIds ?? []), eventId])];
+	}
+
+	/** Deliver a stable wake event whether its builder is parked or already working. */
+	private async wakeBuilder(task: Task, slice: Slice, eventId: string, message: string): Promise<"inbox" | "resumed" | "deferred"> {
+		if ((slice.wakeEventIds ?? []).includes(eventId)) return "inbox";
+		const builder = this.env.BUILDER.getByName(slice.repo!);
+		const parked = !!slice.parkedAt;
+		if (!task.active.builders.includes(slice.id) && !hasRoom(task, "builder")) {
+			this.queueWake(slice, eventId, message);
+			if (!task.queue.some((item) => item.kind === "builder" && item.slice === slice.id)) task.queue.push({ kind: "builder", slice: slice.id });
+			return "deferred";
+		}
+		const capable = builder as typeof builder & { wake?: (id: string, text: string, credentials: BuilderResumeCredentials) => Promise<"resumed" | "deferred" | "ignored"> };
+		let result: "resumed" | "deferred" | "ignored";
+		if (capable.wake) result = await capable.wake(eventId, message, await this.resumeCredentials(slice));
+		else result = (await builder.notify(message)) ? "deferred" : (await builder.revise(message, await this.resumeCredentials(slice)), "resumed");
+		slice.wakeEventIds = [...new Set([...(slice.wakeEventIds ?? []), eventId])];
+		if (parked && result === "resumed") {
+			slice.parkedAt = undefined;
+			slice.parkedWaitingFor = undefined;
+			slice.wakeMessage = undefined;
+			if (!task.active.builders.includes(slice.id)) task.active.builders.push(slice.id);
+			this.note(task, slice.head, "Builder for slice " + slice.id + " resumed from parking for event " + eventId);
+		} else if (parked && result === "ignored") {
+			// An RPC may have succeeded before a Coordinator restart lost its write.
+			// Reconcile state without redelivering this already-consumed event.
+			const state = await builder.state();
+			if (state && (state.status === "queued" || state.status === "working")) {
+				slice.parkedAt = undefined;
+				slice.parkedWaitingFor = undefined;
+				slice.wakeMessage = undefined;
+				if (!task.active.builders.includes(slice.id)) task.active.builders.push(slice.id);
+			}
+		} else if (!task.active.builders.includes(slice.id) && result === "resumed") {
+			task.active.builders.push(slice.id);
+		}
+		return result === "resumed" ? "resumed" : result === "deferred" ? "inbox" : "inbox";
+	}
+
+	private async wakeLaneRequester(task: Task, request: LaneChangeRequest, message: string) {
+		const requester = this.slice(task, request.requester);
+		if (request.status !== "human") requester.attention = undefined;
+		if (requester.status !== "building") return;
+		const eventId = "lane-change:" + request.id + ":" + request.status;
+		try {
+			const delivery = await this.wakeBuilder(task, requester, eventId, message);
+			this.note(task, requester.head, "Cross-lane request " + request.id + " resolution " + request.status + " delivered to slice " + requester.id + " (" + delivery + ")");
+		} catch (err) {
+			requester.attention = "Cross-lane request resolution could not be delivered: " + statusOf(err).message;
+			this.note(task, requester.head, "Could not deliver resolution event " + eventId + " to slice " + requester.id + "; attention is needed");
+		}
+	}
+
 
 	private async flagLaneRequest(task: Task, request: LaneChangeRequest, message: string, notify: boolean, human = true) {
 		if (human) request.status = "human";
 		const requester = this.slice(task, request.requester);
 		requester.attention = message;
-		if (notify && requester.status === "building") {
-			try { await this.deliverBuilder(task, requester, message); }
-			catch (err) { requester.attention += "\nThe requester could not be resumed or notified: " + statusOf(err).message; }
-		}
+		if (notify && requester.status === "building") await this.wakeLaneRequester(task, request, message);
 		this.note(task, requester.head, "Cross-lane request " + request.id + " for " + request.path + " needs a human: " + message);
+	}
+
+	parkBuilder(sliceId: string): Promise<ParkBuilderResult> {
+		return this.exclusive(async () => {
+			const task = await this.load();
+			return this.parkBuilderLocked(task, sliceId);
+		});
+	}
+
+	private latestResolutions(task: Task, sliceId: string) {
+		return (task.laneChangeRequests ?? [])
+			.filter((request) => request.requester === sliceId && request.status !== "pending" && request.status !== "answered")
+			.map((request) => ({
+				requestId: request.id,
+				status: request.status,
+				message: request.status === "integrated"
+					? "Request " + request.id + " was integrated. Fetch and merge base/main."
+					: request.status === "declined"
+						? "Request " + request.id + " was declined: " + (request.answer ?? "no reason provided")
+						: "Request " + request.id + " needs a human: " + (this.slice(task, sliceId).attention ?? "the request was handed off"),
+			}));
+	}
+
+	private async parkBuilderLocked(task: Task, sliceId: string): Promise<ParkBuilderResult> {
+		const slice = this.slice(task, sliceId);
+		const outgoing = (task.laneChangeRequests ?? []).filter((request) => request.requester === sliceId && (request.status === "pending" || request.status === "answered"));
+		if (!outgoing.length) {
+			const resolutions = this.latestResolutions(task, sliceId);
+			const detail = resolutions.map((resolution) => resolution.status + ": " + resolution.message).join("; " );
+			return { outcome: "refused", reason: resolutions.length ? "A request resolved before parking took effect (" + detail + " )." : "There are no unresolved outgoing cross-lane requests to wait for.", ...(resolutions.length ? { resolutions } : {}) };
+		}
+		if (slice.status !== "building") return { outcome: "refused", reason: "Slice " + sliceId + " is " + slice.status + ", not building." };
+		if (slice.parkedAt) return { outcome: "refused", reason: "The builder is already parked.", resolutions: [] };
+		const parkedAt = new Date().toISOString();
+		const waitingFor = outgoing.map((request) => request.id);
+		const builder = this.env.BUILDER.getByName(slice.repo!);
+		await builder.park(parkedAt, waitingFor);
+		slice.parkedAt = parkedAt;
+		slice.parkedWaitingFor = waitingFor;
+		slice.wakeMessage = undefined;
+		const active = task.active.builders;
+		if (active.includes(sliceId)) active.splice(active.indexOf(sliceId), 1);
+		this.note(task, slice.head, "Builder for slice " + sliceId + " parked at " + parkedAt + " waiting for cross-lane requests " + waitingFor.join(", "));
+		await this.save(task);
+		await this.drain(task);
+		await this.save(task);
+		return { outcome: "parked", parkedAt, waitingFor };
+	}
+
+	private async autoParkWaitingBuilder(task: Task, slice: Slice) {
+		const waiting = (task.laneChangeRequests ?? []).some((request) => request.requester === slice.id && (request.status === "pending" || request.status === "answered"));
+		if (!waiting || slice.status !== "building" || slice.parkedAt) return false;
+		// Only auto-park when the fork is exactly at the Coordinator's recorded
+		// head; Builder.park performs the additional local dirty/unpushed check.
+		const forkHead = await headOf(this.env.ARTIFACTS, slice.repo!);
+		if (!forkHead || forkHead !== slice.head) return false;
+		try {
+			const result = await this.parkBuilderLocked(task, slice.id);
+			if (result.outcome !== "parked") return false;
+			this.note(task, slice.head, "Slice " + slice.id + " automatically parked while waiting for its unresolved cross-lane requests");
+			return true;
+		} catch {
+			return false;
+		}
+	}
+
+	parkedBuilderTimedOut(sliceId: string, parkedAt: string) {
+		return this.exclusive(async () => {
+			const task = await this.load();
+			const slice = this.slice(task, sliceId);
+			if (!slice.parkedAt || slice.parkedAt !== parkedAt) return;
+			const marker = "park-timeout:" + sliceId + ":" + parkedAt;
+			if (await this.ctx.storage.get(marker)) return;
+			const unresolved = (task.laneChangeRequests ?? []).filter((request) => request.requester === sliceId && (request.status === "pending" || request.status === "answered"));
+			if (!unresolved.length) return;
+			const builder = this.env.BUILDER.getByName(slice.repo!);
+			if (!(await builder.markParkTimedOut())) return;
+			const waiting = unresolved.map((request) => request.id + " (" + request.path + ")").join(", ");
+			const message = "Builder has been parked for more than " + Math.round(BUILDER_PARK_TIMEOUT_MS / 60_000) + " minutes waiting for cross-lane requests " + waiting + "; human attention is needed.";
+			slice.attention = message;
+			await this.ctx.storage.put(marker, true);
+			this.note(task, slice.head, slice.id + " parked timeout: " + message);
+			await this.save(task);
+		});
 	}
 
 	state() {
@@ -469,6 +650,21 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 	}
 
 	private async launchBuilder(task: Task, slice: Slice) {
+		if (slice.parkedAt && slice.wakeMessage) {
+			const events: { eventId: string; message: string }[] = JSON.parse(slice.wakeMessage);
+			const builder = this.env.BUILDER.getByName(slice.repo!);
+			const capable = builder as typeof builder & { wake?: (id: string, text: string, credentials: BuilderResumeCredentials) => Promise<"resumed" | "deferred" | "ignored"> };
+			const credentials = await this.resumeCredentials(slice);
+			for (const event of events) {
+				if (capable.wake) await capable.wake(event.eventId, event.message, credentials);
+				else if (!(await builder.notify(event.message))) await builder.revise(event.message, credentials);
+			}
+			slice.parkedAt = undefined;
+			slice.parkedWaitingFor = undefined;
+			slice.wakeMessage = undefined;
+			this.note(task, slice.head, "Builder for slice " + slice.id + " resumed from parking after a queued wake event");
+			return;
+		}
 		const [remote, base] = await Promise.all([
 			remoteFor(this.env.ARTIFACTS, slice.repo!, "write", 3 * 3600),
 			remoteFor(this.env.ARTIFACTS, task.baseRepo!, "read", 3 * 3600),
@@ -486,6 +682,12 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 			base: { remote: base.url, token: base.token },
 		};
 		await this.env.BUILDER.getByName(slice.repo!).start(job);
+		if (slice.wakeMessage) {
+			const events: { eventId: string; message: string }[] = JSON.parse(slice.wakeMessage);
+			const builder = this.env.BUILDER.getByName(slice.repo!);
+			for (const event of events) await builder.notify(event.message);
+			slice.wakeMessage = undefined;
+		}
 	}
 
 	private async launchReviewer(task: Task, slice: Slice, role: string, head: string) {
@@ -572,6 +774,10 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 			const task = await this.load();
 			const active = activeOf(task, kind);
 			if (active.includes(key)) active.splice(active.indexOf(key), 1);
+			if (kind === "builder") {
+				const slice = task.slices.find((candidate) => candidate.id === key);
+				if (slice && !slice.parkedAt) await this.autoParkWaitingBuilder(task, slice);
+			}
 			await this.drain(task);
 			await this.save(task);
 		});
@@ -1195,6 +1401,11 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 			const task = await this.load();
 			const slice = this.slice(task, sliceId);
 			if (slice.status === "integrated") return;
+			if (await this.autoParkWaitingBuilder(task, slice)) {
+				slice.attention = undefined;
+				await this.save(task);
+				return;
+			}
 			slice.attention = message;
 			this.note(task, slice.head, `${slice.id} needs a human: ${message}`);
 			await this.save(task);
@@ -1212,18 +1423,10 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 			const task = await this.load();
 			const slice = this.slice(task, sliceId);
 			if (slice.status !== "building") fail(409, `slice ${sliceId} is ${slice.status}`);
-			const builder = this.env.BUILDER.getByName(slice.repo!);
 			const text = `Message from a human on the team: ${message}`;
-			let delivered: "inbox" | "resumed" = "inbox";
-			if (!(await builder.notify(text))) {
-				const [write, base] = await Promise.all([
-					remoteFor(this.env.ARTIFACTS, slice.repo!, "write", 3 * 3600),
-					remoteFor(this.env.ARTIFACTS, task.baseRepo!, "read", 3 * 3600),
-				]);
-				await builder.revise(text, { token: write.token, base: { remote: base.url, token: base.token } });
-				if (!task.active.builders.includes(slice.id)) task.active.builders.push(slice.id);
-				delivered = "resumed";
-			}
+			const eventId = "human-message:" + crypto.randomUUID();
+			const delivery = await this.wakeBuilder(task, slice, eventId, text);
+			const delivered: "inbox" | "resumed" = delivery === "resumed" ? "resumed" : "inbox";
 			slice.attention = undefined;
 			this.note(task, slice.head, `Message from ${accessIdentityLabel(actor)} to ${slice.id}'s builder (${delivered === "inbox" ? "delivered" : "resumed it"}): ${message}`);
 			await this.save(task);
@@ -1287,15 +1490,8 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 				request.status = "integrated";
 				request.integratedAt = new Date().toISOString();
 				this.note(task, request.answerCommit, "Cross-lane request " + request.id + " from " + request.requester + " fulfilled by slice " + request.owner + "; change commit " + request.answerCommit + " is integrated");
-				const requester = this.slice(task, request.requester);
-				if (requester.status === "building") {
-					const message = "Cross-lane request " + request.id + " was integrated with owner slice " + request.owner + " at commit " + request.answerCommit + ". Call fetch_base and merge base/main to get it, then re-run your tests.";
-					try { await this.deliverBuilder(task, requester, message); }
-					catch (err) {
-						requester.attention = "Cross-lane request integrated, but the builder could not be notified: " + statusOf(err).message;
-						this.note(task, requester.head, "Could not notify slice " + requester.id + " that request " + request.id + " integrated; attention is needed");
-					}
-				}
+				const message = "Cross-lane request " + request.id + " was integrated with owner slice " + request.owner + " at commit " + request.answerCommit + ". Call fetch_base and merge base/main to get it, then re-run your tests.";
+				await this.wakeLaneRequester(task, request, message);
 			} else {
 				const message = "Owner slice " + request.owner + " integrated without the answered change commit for cross-lane request " + request.id + " (" + request.path + "). The owner can no longer change its lane; this request needs a human.";
 				await this.flagLaneRequest(task, request, message, true);
