@@ -109,21 +109,37 @@ async function stamped<T extends object>(kind: string, record: T, stamper: Stamp
 	return { ...withBy, stamp: await stamper.stamp(stampPayload(kind, withBy)) };
 }
 
-/** Claim `paths` for a change, if no other change's claim overlaps them; claiming again extends the change's claim. */
-export async function claim(log: CasLog<Registry>, input: { change: string; agent: string; paths: string[]; intent: string }, stamper?: Stamper) {
-	const outcome = await appendRecord<Registry, Conflict[]>(log, input.agent, empty, async (state) => {
-		const conflicts = conflictsWith(state, input.paths, input.change);
-		if (conflicts.length) return { refused: conflicts };
-		const now = new Date().toISOString();
-		const existing = state.claims.find((c) => c.change === input.change);
+/**
+ * Claim `paths` for a change, if no other change's claim overlaps them; claiming
+ * again extends the change's claim (and counts as activity). With `staleAfterMs`,
+ * a claim in the way that has been idle that long is released as stale in the
+ * same record, so an abandoned claim frees itself when someone needs its paths.
+ */
+export async function claim(log: CasLog<Registry>, input: { change: string; agent: string; paths: string[]; intent: string; staleAfterMs?: number; now?: number }, stamper?: Stamper) {
+	const { staleAfterMs, now: at, ...wanted } = input;
+	const outcome = await appendRecord<Registry, Conflict[]>(log, wanted.agent, empty, async (state) => {
+		const time = at ?? Date.now();
+		const isStale = (c: ClaimRecord) => staleAfterMs !== undefined && time - Date.parse(c.active) > staleAfterMs;
+		const conflicts = conflictsWith(state, wanted.paths, wanted.change);
+		const blocking = conflicts.filter((c) => !isStale(state.claims.find((held) => held.change === c.change)!));
+		if (blocking.length) return { refused: blocking };
+		const now = new Date(time).toISOString();
+		// Stale claims in the way: released, each with its own stamped release record.
+		const stale = state.claims.filter((c) => conflicts.some((x) => x.change === c.change));
+		const releases: ReleaseRecord[] = [];
+		for (const held of stale)
+			releases.push(await stamped("release", { change: held.change, agent: held.agent, by: wanted.agent, at: now, reason: "stale", stale: true, lastActive: held.active } as ReleaseRecord, stamper, "verifiedBy"));
+		const remaining = state.claims.filter((c) => !stale.includes(c));
+		const existing = remaining.find((c) => c.change === wanted.change);
 		const { by: _by, stamp: _stamp, ...base } = existing ?? ({} as Partial<ClaimRecord>);
 		const record = await stamped(
 			"claim",
-			existing ? { ...(base as ClaimRecord), paths: [...existing.paths, ...input.paths.filter((p) => !existing.paths.includes(p))], active: now } : { ...input, since: now, active: now },
+			existing ? { ...(base as ClaimRecord), paths: [...existing.paths, ...wanted.paths.filter((p) => !existing.paths.includes(p))], active: now } : { ...wanted, since: now, active: now },
 			stamper,
 		);
-		const claims = existing ? state.claims.map((c) => (c.change === input.change ? record : c)) : [...state.claims, record];
-		return { state: { ...state, claims }, text: `${input.agent} claims ${input.paths.join(", ")} for ${input.change}: ${input.intent}` };
+		const claims = existing ? remaining.map((c) => (c.change === wanted.change ? record : c)) : [...remaining, record];
+		const freed = stale.length ? ` (releasing stale ${stale.map((c) => c.change).join(", ")})` : "";
+		return { state: { ...state, claims, released: [...state.released, ...releases] }, text: `${wanted.agent} claims ${wanted.paths.join(", ")} for ${wanted.change}: ${wanted.intent}${freed}` };
 	});
 	return outcome.ok ? outcome : { ok: false as const, conflicts: outcome.refused };
 }

@@ -15,6 +15,7 @@ const hosted = vi.hoisted(() => ({
 	claims: [] as unknown[],
 	merges: [] as unknown[],
 	votes: [] as unknown[],
+	releases: [] as unknown[],
 }));
 
 vi.mock("../src/free/env", () => ({
@@ -26,6 +27,7 @@ vi.mock("../src/free/mcp", () => ({
 	callFreeTool: vi.fn(async (name: string, args: unknown, ctx: { by: string }) => {
 		if (name === "free_claim") hosted.claims.push({ args, by: ctx.by });
 		if (name === "free_merge") hosted.merges.push({ args, by: ctx.by });
+		if (name === "free_release") hosted.releases.push({ args, by: ctx.by });
 		return { ok: true };
 	}),
 }));
@@ -63,6 +65,7 @@ beforeEach(() => {
 	hosted.claims = [];
 	hosted.merges = [];
 	hosted.votes = [];
+	hosted.releases = [];
 });
 
 describe("Blueprint's builder, coordinator-free", () => {
@@ -80,6 +83,18 @@ describe("Blueprint's builder, coordinator-free", () => {
 		expect(b.state.lastReport?.outOfLane).toEqual(["src/router.ts"]);
 		// Against the project's main (origin may be the change's fork), so merged-in main isn't counted.
 		expect(b.ran).toContainEqual(["git", "diff", "--name-only", "base/main...HEAD"]);
+	});
+
+	it("refreshes its claim with each push, so a working builder's claim never goes stale", async () => {
+		const b = builder({ "rev-list --count": "1" });
+		await b.run("commit_and_push", { message: "stats" });
+		expect(hosted.claims).toEqual([{ args: { repo: "project", change: "stats-1a2b", agent: "blueprint-builder", paths: ["src/stats/"], intent: "Add stats" }, by: "service:blueprint-builder" }]);
+	});
+
+	it("releases its claim when it fails, so the paths don't wait to go stale", async () => {
+		const agent = new Builder({ storage: new FakeStorage() } as never, env as never);
+		await (agent as unknown as { onFailed(job: BuildJob, state: BuilderState): Promise<void> }).onFailed(job, { error: "out of turns" } as BuilderState);
+		expect(hosted.releases).toEqual([{ args: { repo: "project", change: "stats-1a2b", agent: "blueprint-builder", reason: "the hosted builder failed: out of turns" }, by: "service:blueprint-builder" }]);
 	});
 
 	it("extends its claim as itself", async () => {

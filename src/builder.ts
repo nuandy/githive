@@ -437,7 +437,12 @@ How to work:
 	}
 
 	protected async onFailed(job: BuildJob, state: BuilderState) {
-		if (job.free) return;
+		// A failed coordinator-free builder gives its paths back rather than leave them to go stale.
+		if (job.free) {
+			const { repo, change, agent } = job.free;
+			await callFreeTool("free_release", { repo, change, agent, reason: `the hosted builder failed: ${state.error}` }, this.freeContext());
+			return;
+		}
 		await this.coordinator(job).flagSlice(job.slice.id, `The builder stopped: ${state.error}`);
 	}
 
@@ -583,9 +588,13 @@ How to work:
 		];
 	}
 
+	/** The coordinator-free toolkit, acting as Blueprint's hosted builder. */
+	private freeContext() {
+		return freeContextFor(this.env, "service:blueprint-builder", { hosted: true });
+	}
+
 	/** A coordinator-free builder's tools: push to its branch, extend its claim, fetch main, finish. */
 	private freeTools(job: BuildJob, free: NonNullable<BuildJob["free"]>, state: BuilderState): AgentTool[] {
-		const acting = () => freeContextFor(this.env, "service:blueprint-builder", { hosted: true });
 		return [
 			...this.baseTools(state),
 			tool({
@@ -599,7 +608,7 @@ How to work:
 				description: "Claim more paths for your change, before changing them. Refused, naming the holder, if another agent holds them.",
 				schema: ExtendArgs,
 				run: async ({ paths }) => {
-					const outcome = (await callFreeTool("free_claim", { repo: free.repo, change: free.change, agent: free.agent, paths, intent: job.slice.instructions }, acting())) as { ok: boolean; conflicts?: { path: string; change: string; intent: string }[] };
+					const outcome = (await callFreeTool("free_claim", { repo: free.repo, change: free.change, agent: free.agent, paths, intent: job.slice.instructions }, this.freeContext())) as { ok: boolean; conflicts?: { path: string; change: string; intent: string }[] };
 					if (!outcome.ok) return `Refused: ${(outcome.conflicts ?? []).map((c) => `${c.path} is held by ${c.change} (${c.intent})`).join("; ")}`;
 					job.slice.owns = [...job.slice.owns, ...paths.filter((p) => !job.slice.owns.includes(p))];
 					await this.ctx.storage.put("job", job);
@@ -650,6 +659,9 @@ How to work:
 		if (push.exitCode !== 0) return `Push failed:\n${clip(push.output, 4_000)}`;
 		state.pushes++;
 		this.note(state, `pushed: ${message.slice(0, 120)}`);
+		// Claiming its paths again is the claim's heartbeat: a builder at work never looks abandoned.
+		const refreshed = (await callFreeTool("free_claim", { repo: free.repo, change: free.change, agent: free.agent, paths: job.slice.owns, intent: job.slice.instructions }, this.freeContext())) as { ok: boolean };
+		if (!refreshed.ok) this.note(state, "could not refresh the claim: it was released as stale and its paths are taken");
 		// The files this change touches, against where it left main: the project's
 		// main, since origin may be the change's fork and main may have been merged in.
 		const fetched = await this.git(job, ["fetch", "-q", job.base.remote, "main:refs/remotes/base/main"], undefined, job.base.token);

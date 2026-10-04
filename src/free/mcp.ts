@@ -50,7 +50,7 @@ Conventions:
 2. Work on a branch changes/<change> and push it where free_credentials with your change says: its own fork (only you can write it), or the project repo if it's shared. The project's main is written only through the toolkit.
 3. Reviewers free_vote on the exact commit they reviewed. A change merges with the policy's approvals and no veto.
 4. free_merge merges your branch with trailers recording the claims and votes it checked, then releases your claim. Merge by hand only with the same trailers.
-5. A claim idle for 30 minutes may be released by anyone (free_release with stale: true).
+5. Claiming again (same paths) keeps your claim active. A claim idle for 30 minutes is released by whoever claims its paths, or by anyone (free_release with stale: true).
 6. Anyone may free_revert a commit free_audit reports; the audit then counts it resolved.
 7. free_request_review asks Blueprint's hosted reviewers for votes on your change; free_build has Blueprint's hosted builder make a change from start to merge.
 8. Agents that share an Access identity tell themselves apart with free_register: it returns your agent key once; send it (header X-Blueprint-Agent-Key, or agent_key) with every call, and what you write is attributed to you. A registered name is never used without its key.
@@ -61,7 +61,7 @@ const TOOL_LIST = [
 	{ name: "free_start", description: "Start coordinator-free mode on a project repo (harmless if started): the review policy, the checks run before each merge, and access: forks (default: each change in its own fork, only the toolkit writes the project) or shared (every agent writes the project repo). Returns them.", inputSchema: { type: "object", properties: { repo: str, required: { type: "number" }, vetoes: { type: "array", items: str }, verify: { type: "array", items: str }, access: { type: "string", enum: ["forks", "shared"] } }, required: ["repo"] } },
 	{ name: "free_credentials", description: "Git access. With your change: a write token for where its branch changes/<change> lives (its own fork, unless the repo is shared). Without: read access to the project repo.", inputSchema: { type: "object", properties: { repo: str, change: str }, required: ["repo"] } },
 	{ name: "free_claims", description: "The claims in force: who holds which paths, and why.", inputSchema: { type: "object", properties: { repo: str }, required: ["repo"] } },
-	{ name: "free_claim", description: "Claim paths for your change (again to extend it). Refused, naming the holder, if another claim overlaps.", inputSchema: { type: "object", properties: { repo: str, change: str, agent: str, paths: { type: "array", items: str }, intent: str }, required: ["repo", "change", "agent", "paths", "intent"] } },
+	{ name: "free_claim", description: "Claim paths for your change (again to extend it, or to keep it active). Refused, naming the holder, if another claim overlaps; a claim in the way idle for 30 minutes is released as stale instead.", inputSchema: { type: "object", properties: { repo: str, change: str, agent: str, paths: { type: "array", items: str }, intent: str }, required: ["repo", "change", "agent", "paths", "intent"] } },
 	{ name: "free_release", description: "Release a claim: yours, or another's idle for 30 minutes with stale: true.", inputSchema: { type: "object", properties: { repo: str, change: str, agent: str, reason: str, stale: { type: "boolean" } }, required: ["repo", "change", "agent"] } },
 	{ name: "free_vote", description: "Record your review verdict on the exact commit you reviewed.", inputSchema: { type: "object", properties: { repo: str, commit: str, reviewer: str, role: str, verdict: { type: "string", enum: ["approve", "reject"] }, evidence: str }, required: ["repo", "commit", "reviewer", "role", "verdict", "evidence"] } },
 	{ name: "free_merge", description: "Merge changes/<change> into main if the conventions hold, recording what was checked, then release the claim.", inputSchema: { type: "object", properties: { repo: str, change: str, agent: str }, required: ["repo", "change", "agent"] } },
@@ -187,6 +187,7 @@ export async function callFreeTool(name: string, args: Args, ctx: FreeContext): 
 				agent: actAs("agent"),
 				paths: normalizeClaim(requiredPaths(args, "paths")),
 				intent: requiredString(args, "intent"),
+				staleAfterMs: STALE_AFTER_MS,
 			}, stamper);
 		case "free_release": {
 			const change = requiredString(args, "change");
@@ -223,7 +224,7 @@ export async function callFreeTool(name: string, args: Args, ctx: FreeContext): 
 			if (!ctx.startBuilder) throw new Error("[501] hosted builders aren't available here");
 			const intent = requiredString(args, "intent");
 			const change = changeId(intent);
-			const claimed = await claim(claims, { change, agent: "blueprint-builder", paths: normalizeClaim(requiredPaths(args, "paths")), intent }, stamper);
+			const claimed = await claim(claims, { change, agent: "blueprint-builder", paths: normalizeClaim(requiredPaths(args, "paths")), intent, staleAfterMs: STALE_AFTER_MS }, stamper);
 			if (!claimed.ok) return claimed;
 			return ctx.startBuilder({ repo, change });
 		}

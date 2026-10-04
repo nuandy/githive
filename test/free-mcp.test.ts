@@ -1,4 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { GitCasLog } from "../src/election-git";
+import { claim, type Registry } from "../src/free/claims";
 import { FREE_TOOLS, freeSnapshot } from "../src/free/mcp";
 import { TOOLS, handleRpc } from "../src/mcp";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -64,6 +66,15 @@ describe("the coordinator-free MCP tools", () => {
 			ok: false,
 			conflicts: [{ change: "a-1", agent: "agent-a" }],
 		});
+		expect((await call("free_claims", { repo: "project" })).map((c: { change: string }) => c.change)).toEqual(["a-1"]);
+		expect(await call("free_audit", { repo: "project" })).toEqual({ merges: 0, open: 0, violations: [] });
+	});
+
+	it("lets free_claim take paths from a claim idle for 30 minutes, releasing it as stale", async () => {
+		await call("free_start", { repo: "project" });
+		const registry = new GitCasLog<Registry>(async () => ({ url: server.url, token: "unused" }), "project", "refs/notes/blueprint-claims/project");
+		await claim(registry, { change: "old-1", agent: "agent-gone", paths: ["src/a/"], intent: "abandoned", now: Date.now() - 31 * 60_000 });
+		expect(await call("free_claim", { repo: "project", change: "a-1", agent: "agent-a", paths: ["src/a/x.ts"], intent: "a" })).toMatchObject({ ok: true });
 		expect((await call("free_claims", { repo: "project" })).map((c: { change: string }) => c.change)).toEqual(["a-1"]);
 		expect(await call("free_audit", { repo: "project" })).toEqual({ merges: 0, open: 0, violations: [] });
 	});
