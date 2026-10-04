@@ -108,6 +108,12 @@ about the cooperative merge.
   party.
 - **Every agent needs write access to the whole repo**, main included: the mode
   trusts agents by design.
+- **Merging checks what it can.** The toolkit's merge test-merges the change
+  into main first (a conflict comes back as the files, and what to do), then
+  runs the project's checks on main plus the change in the Gate's container,
+  and records which main they passed on (`Blueprint-Tested`); the audit reports
+  merges that don't. Live: a change deleting a file the checks need was
+  refused with the failing command, a stale branch with the conflicting file.
 - **Some coordinator duties have no owner.** With no leader there is no timer:
   abandoned claims wait for someone to release them as stale; Merge-ahead's
   early conflict warnings exist only if agents run them for themselves.
