@@ -16,6 +16,7 @@ export function SliceLanes({ live }: SliceLanesProps) {
   const { task, agents } = live;
   const slices = Array.isArray(task.slices) ? task.slices : [];
   const verify = Array.isArray(task.verify) ? task.verify : [];
+  const laneChangeRequests = Array.isArray(task.laneChangeRequests) ? task.laneChangeRequests : [];
   const safeAgents = Array.isArray(agents) ? agents : [];
   return (
     <section className="slice-lanes" aria-labelledby="slice-lanes-title">
@@ -29,6 +30,10 @@ export function SliceLanes({ live }: SliceLanesProps) {
           const stageInfo = getSliceStage(slice);
           const sliceAgents = safeAgents.find((agent) => agent?.id === slice.id);
           const builder = sliceAgents?.builder;
+          const isParked = builder?.status === "parked";
+          const waitingRequests = laneChangeRequests.filter((request) =>
+            request.requester === slice.id && (request.status === "pending" || request.status === "answered"),
+          );
           const latestLog = (Array.isArray(builder?.log) ? builder.log : []).slice().sort((a, b) => (b?.at ?? "").localeCompare(a?.at ?? ""))[0];
           const reviews = Array.isArray(slice.reviews) ? slice.reviews : [];
           const owns = Array.isArray(slice.owns) ? slice.owns : [];
@@ -47,7 +52,9 @@ export function SliceLanes({ live }: SliceLanesProps) {
                   <h3>{slice.title}</h3>
                   <span className="muted">{slice.id}</span>
                 </div>
-                <span className={`badge ${toneForStage(stageInfo.stage)}`}>{stageLabels[stageInfo.stage]} · {stageInfo.revisions} {stageInfo.revisions === 1 ? "revision" : "revisions"}</span>
+                <span className={`badge ${isParked ? "accent" : toneForStage(stageInfo.stage)}`}>
+                  {isParked ? "Parked" : stageLabels[stageInfo.stage]} · {stageInfo.revisions} {stageInfo.revisions === 1 ? "revision" : "revisions"}
+                </span>
               </header>
 
               <section className="slice-lane__section">
@@ -59,7 +66,20 @@ export function SliceLanes({ live }: SliceLanesProps) {
                 <h4>Builder</h4>
                 <p>{slice.buildSummary || builder?.summary || <span className="muted">No builder summary yet.</span>}</p>
                 {latestLog ? <p className="slice-lane__latest"><span className="muted">Latest activity: </span>{latestLog.event} <time dateTime={latestLog.at} title={latestLog.at}>{formatRelativeTime(latestLog.at)}</time></p> : null}
+                {isParked && builder.parkedAt ? <p className="slice-lane__latest"><span className="muted">Parked since: </span><time dateTime={builder.parkedAt} title={builder.parkedAt}>{formatRelativeTime(builder.parkedAt)}</time></p> : null}
                 <p className="muted">{builder ? `${builder.pushes ?? 0} pushes · ${builder.status}` : "Builder not started"}</p>
+                {isParked ? (
+                  <div className="slice-lane__waiting">
+                    <strong>Waiting on</strong>
+                    {waitingRequests.length ? (
+                      <ul>
+                        {waitingRequests.map((request) => (
+                          <li key={request.id}><code>{request.path}</code> · owner <strong>{request.owner}</strong></li>
+                        ))}
+                      </ul>
+                    ) : <p className="muted">No unresolved outgoing requests found.</p>}
+                  </div>
+                ) : null}
                 {slice.attention ? <p className="error">Needs a human: {slice.attention}</p> : null}
               </section>
 

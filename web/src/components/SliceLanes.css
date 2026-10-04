@@ -17,6 +17,11 @@
 .slice-lane__latest time { color: var(--text-muted); font-size: 11px; overflow-wrap: anywhere; }
 .slice-lane__commit { color: var(--text-muted); font-weight: 400; }
 .slice-lane__commit code { overflow-wrap: anywhere; }
+.slice-lane__waiting { margin-top: 8px; font-size: 12px; }
+.slice-lane__waiting ul { display: grid; gap: 5px; margin: 5px 0 0; padding-left: 18px; }
+.slice-lane__waiting li { min-width: 0; overflow-wrap: anywhere; }
+.slice-lane__waiting code { overflow-wrap: anywhere; }
+.slice-lane__waiting p { margin: 5px 0; }
 .slice-lane__reviews, .slice-lane__checks { display: grid; gap: 7px; margin: 0; padding: 0; list-style: none; }
 .slice-lane__review, .slice-lane__checks > li { min-width: 0; padding: 8px; border-radius: var(--radius); background: var(--surface-2); }
 .slice-lane__review-top, .slice-lane__check-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; }
