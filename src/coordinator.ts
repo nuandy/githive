@@ -148,9 +148,12 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 	/**
 	 * Run a state-changing step on its own: steps never interleave. The answer
 	 * waits for whatever `finishStep` says makes the step's decisions durable,
-	 * but the next step doesn't: it starts as soon as this one has run.
+	 * but the next step doesn't: it starts as soon as this one has run. With
+	 * `early`, the answer doesn't wait either: for a step whose effects only
+	 * matter once a later step's answer, which does wait, confirms them (steps
+	 * become durable in order).
 	 */
-	protected exclusive<T>(fn: () => Promise<T>, label = "other"): Promise<T> {
+	protected exclusive<T>(fn: () => Promise<T>, label = "other", early = false): Promise<T> {
 		const queued = Date.now();
 		this.stats.depth++;
 		let durable: Promise<void> = Promise.resolve();
@@ -175,7 +178,9 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 		const run = this.tail.then(recorded, recorded);
 		this.tail = run.catch(() => {});
 		return run.then(async (result) => {
-			await durable;
+			if (!early) await durable;
+			// Answered early: a later step's answer reports the failure, if any.
+			else void durable.catch(() => {});
 			return result;
 		});
 	}
@@ -217,13 +222,13 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 	}
 
 	/** Run `fn` on the stored task under the lock, and save the task once it returns. A failure saves nothing. */
-	private mutate<T>(fn: (task: Task) => Promise<T>, label?: string): Promise<T> {
+	private mutate<T>(fn: (task: Task) => Promise<T>, label?: string, early = false): Promise<T> {
 		return this.exclusive(async () => {
 			const task = await this.load();
 			const result = await fn(task);
 			await this.save(task);
 			return result;
-		}, label);
+		}, label, early);
 	}
 
 	/** Note a decision on the commit it is about (the task's anchor commit for task-wide ones). */
@@ -723,7 +728,9 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 	 * agent is started on it as well.
 	 */
 	async openChange(input: { id?: string; title: string; intent: string; owns: string[]; hosted?: boolean }, actor?: AccessIdentity) {
-		// Reserve: the paths are held from here, so a racing claim is refused while the fork is made.
+		// Reserve: the paths are held from here, so a racing claim is refused while
+		// the fork is made. Answered before the reservation is durable, so the fork
+		// starts at once; the confirm step's answer waits for both, in order.
 		const { id, repo, title } = await this.mutate(async (task) => {
 			if (task.mode !== "open") fail(409, "changes can only be opened on an open-mode task");
 			if (typeof input?.title !== "string" || !input.title.trim()) fail(400, "a change needs a title");
@@ -757,7 +764,7 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 			task.slices.push(slice);
 			await this.scheduleLeaseCheck(task);
 			return { id, repo: slice.repo!, title: slice.title };
-		}, "open:reserve");
+		}, "open:reserve", true);
 
 		// Fork without the lock: this takes seconds, and other changes carry on meanwhile.
 		let fork: Awaited<ReturnType<typeof forkAndWait>>;

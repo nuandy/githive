@@ -27,6 +27,8 @@ class SharedLog implements CasLog<Task> {
 	commits: { id: string; commit: LogCommit<Task> }[] = [];
 	/** How long a push takes; a real one takes a second or more. */
 	pushMs = 0;
+	/** When set, pushes wait until it resolves (to hold a commit in flight). */
+	gate: Promise<void> | null = null;
 	reads = 0;
 	async read() {
 		this.reads++;
@@ -35,6 +37,7 @@ class SharedLog implements CasLog<Task> {
 	}
 	async append(parent: string | null, commit: LogCommit<Task>) {
 		await new Promise((resolve) => setTimeout(resolve, this.pushMs));
+		await this.gate;
 		if ((this.commits.at(-1)?.id ?? null) !== parent) return null;
 		const id = `c${this.commits.length + 1}`;
 		this.commits.push({ id, commit: structuredClone(commit) });
@@ -268,5 +271,36 @@ describe("a peer of the elected coordinator", () => {
 		expect(await reader.peer.whoLeads("t1", "project", "t1--reader")).toBe("t1--a");
 		expect((await reader.peek()).id).toBe("t1");
 		expect(log.reads).toBe(reads);
+	});
+
+	it("starts the fork without waiting for the reservation to land, and answers once both have", async () => {
+		const a = peer("t1--a");
+		await a.lead();
+		let release!: () => void;
+		log.gate = new Promise((resolve) => (release = resolve));
+		const before = log.commits.length;
+		const opening = a.peer.openChange({ title: "Stats", intent: "Stats", owns: ["src/stats/"] });
+		// The fork has started while no commit has landed yet.
+		await vi.waitFor(() => expect(io.forks).toBe(1));
+		expect(log.commits.length).toBe(before);
+		// A racing claim is refused at once, from the leader's memory.
+		await expect(a.peer.openChange({ title: "Race", intent: "Race", owns: ["src/stats/x.ts"] })).rejects.toThrow(/already claimed/);
+		let answered = false;
+		void opening.then(() => (answered = true));
+		await new Promise((resolve) => setTimeout(resolve, 20));
+		expect(answered).toBe(false);
+		log.gate = null;
+		release();
+		const { change } = await opening;
+		expect(log.commits.at(-1)?.commit.state.slices.find((s) => s.id === change.id)?.status).toBe("building");
+	});
+
+	it("fails the open if the reservation never lands", async () => {
+		const a = peer("t1--a");
+		await a.lead();
+		clock.now += LEASE + 1;
+		await peer("t1--b").lead(); // a is deposed, and doesn't know yet
+		await expect(a.peer.openChange({ title: "Stats", intent: "Stats", owns: ["src/stats/"] })).rejects.toThrow(/no longer leading/);
+		expect(log.commits.flatMap((c) => c.commit.state.slices)).toEqual([]);
 	});
 });
