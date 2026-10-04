@@ -47,6 +47,8 @@ export async function readMainMerges(remote: Remote, baseline: string): Promise<
 			change: trailer(commit.message, "Blueprint-Change"),
 			claimsTip: trailer(commit.message, "Blueprint-Claims"),
 			votesTip: trailer(commit.message, "Blueprint-Votes"),
+			testedOn: trailer(commit.message, "Blueprint-Tested"),
+			base: first,
 			head: second,
 			files: first ? await ws.changedPaths(first, oid) : [],
 		});

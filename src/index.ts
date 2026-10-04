@@ -195,6 +195,12 @@ app.post("/free/mcp", async (c) => {
 	const result = await handleFreeRpc(body, {
 		remote: (repo, scope) => remoteFor(c.env.ARTIFACTS, repo, scope, 3600),
 		head: async (repo) => (await headOf(c.env.ARTIFACTS, repo)) ?? fail(409, `${repo} has no commits`),
+		// Checks run in the Gate's container, one Gate per repo.
+		runChecks: (repo) => async ({ base, head, ref, commands }) => {
+			const remote = await remoteFor(c.env.ARTIFACTS, repo, "read", 3600);
+			const result = await c.env.GATE.getByName(`free:${repo}`).checkCommit({ baseHead: base, base: { remote: remote.url, token: remote.token }, fork: { remote: remote.url, token: remote.token, ref }, head, checks: commands });
+			return { passed: result.passed, results: result.results.map((r) => ({ command: r.command, exitCode: r.exitCode, output: r.output })) };
+		},
 	});
 	return result === null ? c.body(null, 202) : c.json(result);
 });

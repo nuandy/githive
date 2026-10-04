@@ -66,8 +66,8 @@ async function pushChange(agent, change, files) {
 try {
 	say(`repo ${REPO} on ${BASE}`);
 	await api("POST", "/repos/import", { url: "https://github.com/octocat/Spoon-Knife", name: REPO, branch: "main" });
-	const started = await tool("free_start", { required: 2, vetoes: ["security"] });
-	say("started; policy:", JSON.stringify(started.policy));
+	const started = await tool("free_start", { required: 2, vetoes: ["security"], verify: ["test -f index.html"] });
+	say("started; policy:", JSON.stringify(started.policy), "checks:", JSON.stringify(started.verify));
 	credentials = await tool("free_credentials", {});
 
 	say("\nagent-a: claims src/a/, pushes, gets two approvals, merges through the tools");
@@ -76,6 +76,34 @@ try {
 	await tool("free_vote", { commit: aHead, reviewer: "rev-1", role: "tests", verdict: "approve", evidence: "tests pass" });
 	await tool("free_vote", { commit: aHead, reviewer: "rev-2", role: "api", verdict: "approve", evidence: "api unchanged" });
 	say("  merge:", JSON.stringify(await tool("free_merge", { change: "a-1", agent: "agent-a" })));
+
+	say("\nagent-d: approved, but its change deletes index.html, which the checks need");
+	await tool("free_claim", { change: "d-1", agent: "agent-d", paths: ["index.html"], intent: "d's cleanup" });
+	const dClone = await agentClone("agent-d");
+	await dClone.run("checkout", "--quiet", "-b", "changes/d-1");
+	await dClone.run("rm", "--quiet", "index.html");
+	await dClone.run("commit", "--quiet", "-m", "d-1: remove index.html");
+	await dClone.run("push", "--quiet", "origin", "changes/d-1");
+	const dHead = await dClone.run("rev-parse", "HEAD");
+	await tool("free_vote", { commit: dHead, reviewer: "rev-1", role: "tests", verdict: "approve", evidence: "looks fine" });
+	await tool("free_vote", { commit: dHead, reviewer: "rev-2", role: "api", verdict: "approve", evidence: "looks fine" });
+	const dMerge = await tool("free_merge", { change: "d-1", agent: "agent-d" });
+	say("  merge:", JSON.stringify({ ok: dMerge.ok, reasons: dMerge.reasons }));
+	await tool("free_release", { change: "d-1", agent: "agent-d", reason: "gave up" });
+
+	say("\nagent-e: its branch started before a-1 merged, and changed the same file");
+	await tool("free_claim", { change: "e-1", agent: "agent-e", paths: ["src/a/"], intent: "e's change to a" });
+	const eClone = await agentClone("agent-e");
+	await eClone.run("checkout", "--quiet", "-b", "changes/e-1", `${aHead}~1`);
+	await eClone.write("src/a/x.txt", "e\n");
+	await eClone.run("add", "-A");
+	await eClone.run("commit", "--quiet", "-m", "e-1: work");
+	await eClone.run("push", "--quiet", "origin", "changes/e-1");
+	const eHead = await eClone.run("rev-parse", "HEAD");
+	await tool("free_vote", { commit: eHead, reviewer: "rev-1", role: "tests", verdict: "approve", evidence: "ok" });
+	await tool("free_vote", { commit: eHead, reviewer: "rev-2", role: "api", verdict: "approve", evidence: "ok" });
+	say("  merge:", JSON.stringify(await tool("free_merge", { change: "e-1", agent: "agent-e" })));
+	await tool("free_release", { change: "e-1", agent: "agent-e", reason: "will rebase" });
 
 	say("\nagent-c: claims src/c/ and keeps it");
 	await tool("free_claim", { change: "c-1", agent: "agent-c", paths: ["src/c/"], intent: "c's work" });

@@ -19,6 +19,10 @@ export interface MergeRecord {
 	head?: string;
 	/** From its Blueprint-Votes trailer: the votes tip the merging agent counted. */
 	votesTip?: string;
+	/** Main before the merge (its first parent). */
+	base?: string;
+	/** From its Blueprint-Tested trailer: the main the checks passed on. */
+	testedOn?: string;
 	/** Files the merge changed. */
 	files: string[];
 }
@@ -39,6 +43,8 @@ export interface AuditRecords {
 	/** The votes' history, oldest first. */
 	votes?: { tip: string; state: Votes }[];
 	policy?: ReviewPolicy;
+	/** The project's checks; when set, every merge must record checks passing on the main it merged onto. */
+	verify?: string[];
 	merges: MergeRecord[];
 	staleAfterMs?: number;
 }
@@ -66,6 +72,10 @@ export function audit(records: AuditRecords): Violation[] {
 		}
 		checkReleasedAfter(records, merge, report);
 		checkApproved(records, votesAt, merge, report);
+		if (records.verify?.length) {
+			if (!merge.testedOn) report("untested", "the merge records no checks run (Blueprint-Tested)");
+			else if (merge.testedOn !== merge.base) report("untested", `checks ran on ${merge.testedOn}, but the merge went onto ${merge.base}`);
+		}
 	}
 	violations.push(...othersClaimsReleased(records));
 	return violations;

@@ -79,4 +79,15 @@ describe("the audit", () => {
 			{ commit: "r3", author: "agent-a", rule: "released-others-claim", detail: "agent-a released docs-3c4d (agent-b), active 5 minutes before, not stale" },
 		]);
 	});
+
+	it("reports a merge that records no checks, or checks run on a different main, when checks are configured", () => {
+		const withChecks = (m: MergeRecord) => ({ ...records([m]), verify: ["npm test"] });
+		expect(audit(withChecks(merge({ base: "p1" })))).toEqual([
+			{ commit: "m1", author: "agent-a", rule: "untested", detail: "the merge records no checks run (Blueprint-Tested)" },
+		]);
+		expect(audit(withChecks(merge({ base: "p1", testedOn: "p0" })))).toEqual([
+			{ commit: "m1", author: "agent-a", rule: "untested", detail: "checks ran on p0, but the merge went onto p1" },
+		]);
+		expect(audit(withChecks(merge({ base: "p1", testedOn: "p1" })))).toEqual([]);
+	});
 });

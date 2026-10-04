@@ -41,6 +41,8 @@ export interface Registry {
 	baseline?: string;
 	/** How many approvals a merge needs, and which roles veto. */
 	policy?: ReviewPolicy;
+	/** The project's checks, run on main plus a change before it merges. */
+	verify?: string[];
 }
 
 export interface Conflict {
@@ -54,9 +56,11 @@ export interface Conflict {
 const empty = (): Registry => ({ claims: [], released: [] });
 
 /** Start coordinator-free mode on a repo: the registry's first entry records main's baseline and the review policy. Harmless to repeat. */
-export async function startFree(log: CasLog<Registry>, input: { baseline: string; policy: ReviewPolicy }) {
+export async function startFree(log: CasLog<Registry>, input: { baseline: string; policy: ReviewPolicy; verify?: string[] }) {
 	const outcome = await appendRecord<Registry, "started">(log, "blueprint", empty, (state) =>
-		state.baseline ? { refused: "started" } : { state: { ...state, baseline: input.baseline, policy: input.policy }, text: `Coordinator-free mode starts at ${input.baseline}` },
+		state.baseline
+			? { refused: "started" }
+			: { state: { ...state, baseline: input.baseline, policy: input.policy, verify: input.verify ?? [] }, text: `Coordinator-free mode starts at ${input.baseline}` },
 	);
 	return { started: outcome.ok };
 }

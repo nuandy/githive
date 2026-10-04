@@ -34,6 +34,7 @@
 			{ "name": "PEER", "class_name": "Peer" }
 		]
 	},
+	"containers": [{ "class_name": "Gate", "scheduling_policy": "durable_object" }],
 	"migrations": [
 		{ "tag": "v1", "new_sqlite_classes": ["Coordinator"] },
 		{ "tag": "v2", "new_sqlite_classes": ["Builder"] },

@@ -5,7 +5,7 @@ import { normalizeClaim } from "../open-mode";
 import { audit } from "./audit";
 import { activeClaims, claim, release, releaseStale, startFree, type Registry } from "./claims";
 import { readMainMerges, readRecordHistory } from "./git-records";
-import { mergeChange } from "./merge";
+import { type CheckRunner, mergeChange } from "./merge";
 import { vote, type ReviewPolicy, type Votes } from "./votes";
 
 // The coordinator-free MCP tools (see docs/coordinator-free.md). Stateless: each
@@ -18,6 +18,8 @@ export interface FreeContext {
 	remote: (repo: string, scope: "read" | "write") => Promise<Remote>;
 	/** Main's head in a project repo. */
 	head: (repo: string) => Promise<string>;
+	/** Runs a repo's checks on main plus a change (live, the Gate's container). */
+	runChecks?: (repo: string) => CheckRunner;
 }
 
 const DEFAULT_POLICY: ReviewPolicy = { required: 2, vetoes: ["security"] };
@@ -36,7 +38,7 @@ free_audit replays the records and lists every broken convention, with the commi
 
 const str = { type: "string" } as const;
 export const FREE_TOOLS = [
-	{ name: "free_start", description: "Start coordinator-free mode on a project repo (harmless if started). Returns the review policy.", inputSchema: { type: "object", properties: { repo: str, required: { type: "number" }, vetoes: { type: "array", items: str } }, required: ["repo"] } },
+	{ name: "free_start", description: "Start coordinator-free mode on a project repo (harmless if started): the review policy, and the checks run before each merge. Returns them.", inputSchema: { type: "object", properties: { repo: str, required: { type: "number" }, vetoes: { type: "array", items: str }, verify: { type: "array", items: str } }, required: ["repo"] } },
 	{ name: "free_credentials", description: "Git URL and a write token for the project repo, to push your change branch.", inputSchema: { type: "object", properties: { repo: str }, required: ["repo"] } },
 	{ name: "free_claims", description: "The claims in force: who holds which paths, and why.", inputSchema: { type: "object", properties: { repo: str }, required: ["repo"] } },
 	{ name: "free_claim", description: "Claim paths for your change (again to extend it). Refused, naming the holder, if another claim overlaps.", inputSchema: { type: "object", properties: { repo: str, change: str, agent: str, paths: { type: "array", items: str }, intent: str }, required: ["repo", "change", "agent", "paths", "intent"] } },
@@ -60,8 +62,10 @@ async function callTool(name: string, args: Args, ctx: FreeContext): Promise<unk
 				required: typeof args.required === "number" ? args.required : DEFAULT_POLICY.required,
 				vetoes: Array.isArray(args.vetoes) ? (args.vetoes as string[]) : DEFAULT_POLICY.vetoes,
 			};
-			await startFree(claims, { baseline: await ctx.head(repo), policy });
-			return { repo, policy: await policyOf(), instructions: INSTRUCTIONS };
+			const verify = Array.isArray(args.verify) ? (args.verify as string[]).filter((c) => typeof c === "string" && c.trim()) : [];
+			await startFree(claims, { baseline: await ctx.head(repo), policy, verify });
+			const registry = (await claims.read())?.commit.state;
+			return { repo, policy: registry?.policy ?? policy, verify: registry?.verify ?? [], instructions: INSTRUCTIONS };
 		}
 		case "free_credentials": {
 			const remote = await write();
@@ -87,15 +91,26 @@ async function callTool(name: string, args: Args, ctx: FreeContext): Promise<unk
 			if (verdict !== "approve" && verdict !== "reject") throw new Error("[400] verdict is approve or reject");
 			return vote(votes, { commit: requiredString(args, "commit"), reviewer: requiredString(args, "reviewer"), role: requiredString(args, "role"), verdict, evidence: requiredString(args, "evidence") });
 		}
-		case "free_merge":
-			return mergeChange({ remote: await write(), claims, votes, policy: await policyOf(), change: requiredString(args, "change"), agent: requiredString(args, "agent") });
+		case "free_merge": {
+			const registry = (await claims.read())?.commit.state;
+			return mergeChange({
+				remote: await write(),
+				claims,
+				votes,
+				policy: registry?.policy ?? DEFAULT_POLICY,
+				verify: registry?.verify ?? [],
+				runChecks: ctx.runChecks?.(repo),
+				change: requiredString(args, "change"),
+				agent: requiredString(args, "agent"),
+			});
+		}
 		case "free_audit": {
 			const remote = await ctx.remote(repo, "read");
 			const registry = await readRecordHistory<Registry>(remote, claimsRef(repo));
 			const baseline = registry[0]?.state.baseline;
 			if (!baseline) throw new Error(`[409] coordinator-free mode hasn't started on ${repo}`);
 			const merges = await readMainMerges(remote, baseline);
-			const violations = audit({ registry, votes: await readRecordHistory<Votes>(remote, votesRef(repo)), policy: registry[0].state.policy ?? DEFAULT_POLICY, merges });
+			const violations = audit({ registry, votes: await readRecordHistory<Votes>(remote, votesRef(repo)), policy: registry[0].state.policy ?? DEFAULT_POLICY, verify: registry[0].state.verify, merges });
 			return { merges: merges.length, violations };
 		}
 		default:
