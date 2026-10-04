@@ -157,31 +157,46 @@ about the cooperative merge.
 
 `scripts/bench.mjs --mode free` runs open mode's fake-agent lifecycle through
 the free tools (claim and fork, push, check, status, release), with five agents
-racing for one path at each level. Wall time on bench, 2026-10-05:
+racing for one path at each level. Each agent works in its own directory, as
+agents splitting work would. Wall time on bench, 2026-10-05:
 
-| agents | fixed Coordinator (short locks) | elected coordinator | coordinator-free (first) | (tuned) | (trimmed check) |
-|---|---|---|---|---|---|
-| 1 | 11.6 s | 28.2 s | 48.0 s | 26.7 s | 27.3 s |
-| 5 | 16.1 s | 28.4 s | 72.1 s | 47.7 s | 43.1 s |
-| 10 | 31.9 s | 48.1 s | 89.6 s, 2 failed | 59.9 s | 52.7 s |
+| agents | fixed Coordinator (short locks) | elected coordinator | coordinator-free, one record | coordinator-free, sharded |
+|---|---|---|---|---|
+| 1 | 11.6 s | 28.2 s | 27.3 s | 35.5 s |
+| 5 | 16.1 s | 28.4 s | 43.1 s | 42.8 s |
+| 10 | 31.9 s | 48.1 s | 52.7 s | 45.9 s |
+| 25 | 71.3 s | – | 91.9 s, 2 failed | 44.3 s |
+| 50 | – | – | 140.3 s, 22 failed | 59.7 s |
 
-Exactly one racer won at every level, and no claims were left over.
+Sharded, with no failures at any level, exactly one racer won each race, and
+no claims were left over. From 5 to 50 agents total time grows about 0.4 s per
+agent (the fixed Coordinator, about 2.5 s); every call stays about flat
+(listing claims 2.7 to 3.0 s at the median; claiming, with the fork, 9 to 19 s,
+mostly Artifacts making the fork).
+
+How it got there:
 
 - **Tuned**: tokens and record logs kept per isolate, one registry read per
-  call, and retries with random backoff, which fixed the two claims that gave
-  up under contention.
-- **Trimmed check**: `free_check` no longer test-merges every other change
-  (see above), so it costs the same at any scale: 5.9 s at 10 agents, against
-  16 s before and the elected coordinator's 5.2 s report_push.
+  call, and retries with random backoff.
+- **Trimmed check**: `free_check` doesn't test-merge every other change (see
+  above), so it costs the same at any scale.
+- **Sharded claims**: one ref per part of the tree, so claims elsewhere never
+  contend (one record: 22 of 50 agents gave up on contention).
+- **One fetch per read**: every shard that changed, in one upload-pack request
+  (`fetchCommits`), with states kept by commit; brief Git errors are retried.
 - **Tried and reverted: batching writes.** The elected leader commits
   decisions that arrive together in one push. Doing the same across calls in a
   Worker made calls wait on I/O begun by another request, which the Workers
   runtime forbids: it cancelled them as hung. Combining writes across calls
   needs one place where the calls meet (a Durable Object), which is what this
-  mode does without. So every claim and release is its own compare-and-swap
-  push to one ref, and under load they take turns: claiming (with the fork) is
-  12 s at the median and 30 s at p95 with 10 agents, the remaining gap.
+  mode does without.
 
-The rest of the gap is the price of no server-side memory: each call reads its
-state from Git (listing claims, 0.2 s from the fixed Coordinator's memory,
-takes 1 to 2 s).
+What limits it further (not yet measured past 50 agents): Artifacts takes one
+push at a time per repo, and every shard is in the project's repo, so claims,
+releases and votes queue there; a read fetches every shard that changed, so
+reads grow with the number of agents; and every change makes a fork. The next
+steps for hundreds of agents would be spreading the records across several
+repos (parallel pushes) and reading only the shards a call needs.
+
+Small runs pay for sharding: one agent takes 35.5 s against 27.3 s with one
+record, since a read lists the shards before fetching.
