@@ -169,6 +169,7 @@ agents splitting work would. Wall time on bench, 2026-10-05:
 | 50 | – | – | 140.3 s, 22 failed | 59.7 s | |
 | 100 | – | – | – | 69.3 s | 73.9 s |
 | 200 | – | – | – | 200.7 s, 30 failed | 61.0 s |
+| 1000 | – | – | – | – | 212.8 s, 220 failed |
 
 Sharded, with no failures up to 100 agents (606 calls at 100), exactly one
 racer won each race, and no claims were left over. From 5 to 100 agents total
@@ -202,10 +203,17 @@ their pushes were refused as busy again and again. Spread over 8 records repos
 releases 6.4 s at the median, claiming with the fork 15.9 s. Run to run, times
 vary by about 10 s (100 agents took 69 s once and 74 s once).
 
-What limits it further (not measured past 200 agents): a read fetches every shard that changed, so
-reads grow with the number of agents; and every change makes a fork. Next
-steps: more records repos, votes sharded like claims (every vote is a push to
-one ref), and reading only the shards a call needs.
+**1000 agents at once** is past what this setup holds. With every read going
+to all 8 records repos, 522 of 1000 agents failed on 500s from Artifacts.
+Targeted reads (each change indexes the shards it claimed in, so status,
+check, credentials and release read at most two repos) and retried 5xx pushes
+brought that to 220 (claims left over: 258 to 41). The rest are still the Git
+servers answering 500 or 503 under about 1000 agents starting in the same
+instant, mostly on claims (an index write, a shard write, and the checks
+around it) and on listing every claim (still a read of all 8 repos). Exactly
+one racer still won, and no two claims overlapped. Next steps: more records
+repos, listing claims less often (agents, not the toolkit, decide that), and
+votes sharded like claims (every vote is a push to one ref).
 
 Small runs pay for sharding: one agent takes 35.5 s against 27.3 s with one
 record, since a read lists the shards before fetching.
