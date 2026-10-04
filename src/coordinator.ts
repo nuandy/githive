@@ -79,6 +79,9 @@ export interface LockSample {
 
 const MAX_LOCK_SAMPLES = 5_000;
 
+/** Forks of one project at once; beyond about 15, Artifacts fails some of them. */
+const MAX_CONCURRENT_FORKS = 6;
+
 export class Coordinator extends DurableObject<Env> implements CoordinatorHumanActions, LaneChangeCoordinator {
 	// State-changing steps run one at a time so they never overwrite each other.
 	// A step should be short: the hot paths (opening a change, recording a push,
@@ -95,6 +98,10 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 
 	/** For decisions written to Git since the last reset: milliseconds from the decision to its write. */
 	private ledgerLags: number[] = [];
+
+	/** Forks in progress, and openers waiting for a turn. */
+	private forksRunning = 0;
+	private forkWaiters: (() => void)[] = [];
 
 	/** The background ledger write in progress, and whether more was queued while it ran. */
 	private flushing: Promise<void> | null = null;
@@ -773,7 +780,7 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 		let start: string;
 		try {
 			const project = (await this.load()).repo;
-			fork = await forkAndWait(this.env.ARTIFACTS, project, repo, `${title} (open change on ${project})`);
+			fork = await this.withForkSlot(() => forkAndWait(this.env.ARTIFACTS, project, repo, `${title} (open change on ${project})`));
 			// The fork's own head is where this change starts, even if main moved meanwhile.
 			start = (await headOf(this.env.ARTIFACTS, repo)) ?? fail(500, "the new fork has no commits");
 		} catch (err) {
@@ -800,6 +807,22 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 			await this.save(task);
 			return { change: slice, credentials: { slice: id, repo, remote: fork.remote, token: fork.token } as SliceCredentials };
 		}, "open:confirm");
+	}
+
+	/**
+	 * Run a fork when fewer than MAX_CONCURRENT_FORKS are running. Artifacts fails
+	 * some forks of one repo when many run at once, so a burst of new changes
+	 * forks a few at a time. Only opening waits here; nothing holds the lock.
+	 */
+	private async withForkSlot<T>(fork: () => Promise<T>): Promise<T> {
+		while (this.forksRunning >= MAX_CONCURRENT_FORKS) await new Promise<void>((resolve) => this.forkWaiters.push(resolve));
+		this.forksRunning++;
+		try {
+			return await fork();
+		} finally {
+			this.forksRunning--;
+			this.forkWaiters.shift()?.();
+		}
 	}
 
 	/** A fresh write token for an external agent's own fork. */

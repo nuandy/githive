@@ -69,6 +69,42 @@ describe("Artifacts transient failures", () => {
 		expect(source.fork).toHaveBeenCalledTimes(2);
 	});
 
+	it("retries a fork that Artifacts failed with an internal error", async () => {
+		vi.stubGlobal("scheduler", { wait: vi.fn(async () => {}) });
+		const forked = { name: "fork", remote: "https://git.test/fork.git", token: "token" };
+		const internal = Object.assign(new Error("An internal error occurred."), { code: "INTERNAL_ERROR", numericCode: 10400 });
+		const source = { fork: vi.fn().mockRejectedValueOnce(internal).mockResolvedValue(forked) };
+		const artifacts = { get: vi.fn(async (name: string) => (name === "source" ? source : {})) } as never;
+
+		await expect(forkAndWait(artifacts, "source", "fork", "test fork")).resolves.toEqual(forked);
+		expect(source.fork).toHaveBeenCalledTimes(2);
+		vi.unstubAllGlobals();
+	});
+
+	it("uses the fork a failed attempt made", async () => {
+		vi.stubGlobal("scheduler", { wait: vi.fn(async () => {}) });
+		const internal = Object.assign(new Error("An internal error occurred."), { code: "INTERNAL_ERROR" });
+		const exists = Object.assign(new Error("repo fork already exists"), { code: "ALREADY_EXISTS" });
+		const source = { fork: vi.fn().mockRejectedValueOnce(internal).mockRejectedValueOnce(exists) };
+		const made = { info: vi.fn(async () => ({ remote: "https://git.test/fork.git" })), createToken: vi.fn(async () => ({ plaintext: "fresh" })) };
+		const artifacts = { get: vi.fn(async (name: string) => (name === "source" ? source : made)) } as never;
+
+		await expect(forkAndWait(artifacts, "source", "fork", "test fork")).resolves.toEqual({ name: "fork", remote: "https://git.test/fork.git", token: "fresh" });
+		expect(made.createToken).toHaveBeenCalledWith("write", 3 * 3600);
+		vi.unstubAllGlobals();
+	});
+
+	it("gives up on a fork that keeps failing", async () => {
+		vi.stubGlobal("scheduler", { wait: vi.fn(async () => {}) });
+		const internal = Object.assign(new Error("An internal error occurred."), { code: "INTERNAL_ERROR" });
+		const source = { fork: vi.fn().mockRejectedValue(internal) };
+		const artifacts = { get: vi.fn(async () => source) } as never;
+
+		await expect(forkAndWait(artifacts, "source", "fork", "test fork")).rejects.toBe(internal);
+		expect(source.fork).toHaveBeenCalledTimes(5);
+		vi.unstubAllGlobals();
+	});
+
 	it("retries direct Artifacts list calls made by the API", async () => {
 		const list = vi.fn().mockRejectedValueOnce(transient()).mockResolvedValue({ repos: [{ name: "project" }] });
 		const response = await worker.fetch(

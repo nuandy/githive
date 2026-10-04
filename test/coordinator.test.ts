@@ -756,6 +756,28 @@ describe("short locks: open mode under concurrency", () => {
 		expect(ledger.entries.filter((e) => e.text.includes("opened"))).toHaveLength(2);
 	});
 
+	it("forks at most six at a time, while claims carry on", async () => {
+		await setup(openTask());
+		const gate = deferred();
+		let running = 0;
+		let peak = 0;
+		const realFork = vi.mocked(artifacts.forkAndWait).getMockImplementation()!;
+		vi.mocked(artifacts.forkAndWait).mockImplementation(async (...args) => {
+			peak = Math.max(peak, ++running);
+			await gate.promise;
+			running--;
+			return realFork(...args);
+		});
+		const opening = Array.from({ length: 10 }, (_, i) => open(`c${i}`, [`src/c${i}/`]));
+		await vi.waitFor(async () => expect((await coordinator.claims())).toHaveLength(10));
+		expect(running).toBe(6);
+		await expect(open("Taken", ["src/c9/x.ts"])).rejects.toThrow(/already claimed/);
+		gate.resolve();
+		await Promise.all(opening);
+		expect(peak).toBe(6);
+		vi.mocked(artifacts.forkAndWait).mockImplementation(realFork);
+	});
+
 	it("frees the claim when the fork fails", async () => {
 		await setup(openTask());
 		vi.mocked(artifacts.forkAndWait).mockRejectedValueOnce(new Error("artifacts is down"));

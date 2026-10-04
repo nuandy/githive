@@ -84,16 +84,37 @@ function isForkPending(err: unknown) {
 	return ["FORK_IN_PROGRESS", "CREATE_IN_PROGRESS", "IMPORT_IN_PROGRESS"].includes(String(err.code));
 }
 
+const codeOf = (err: unknown) => (err && typeof err === "object" && "code" in err ? String(err.code) : "");
+
+/** Artifacts fails some forks of one repo when many run at once (INTERNAL_ERROR, 10400); they succeed when tried again. */
+const isInternalError = (err: unknown) => codeOf(err) === "INTERNAL_ERROR";
+
+const alreadyExists = (err: unknown) => /EXISTS/.test(codeOf(err)) || /already exists/i.test(err instanceof Error ? err.message : "");
+
+const FORK_ATTEMPTS = 5;
+
 /** Fork `source` and wait until the fork is ready, since get() throws while a repo is still forking. */
 export async function forkAndWait(artifacts: Artifacts, source: string, name: string, description: string) {
-	const forked = await withRepo(artifacts, source, (repo) =>
-		retryTransient(() => repo.fork(name, { description, defaultBranchOnly: true })),
-	);
+	const forked = await withRepo(artifacts, source, async (repo) => {
+		for (let attempt = 1; ; attempt++) {
+			try {
+				return await retryTransient(() => repo.fork(name, { description, defaultBranchOnly: true }));
+			} catch (err) {
+				// A failed attempt may still have made the fork; then use it.
+				if (attempt > 1 && alreadyExists(err)) return null;
+				if (!isInternalError(err) || attempt === FORK_ATTEMPTS) throw err;
+				// Back off with jitter, so a burst of forks spreads out.
+				await scheduler.wait(Math.min(250 * 2 ** attempt, 4_000) * (0.5 + Math.random()));
+			}
+		}
+	});
 	const deadline = Date.now() + 20_000;
 	for (let delay = 100; ; delay = Math.min(delay * 2, 2_000)) {
 		try {
 			await withRepo(artifacts, name, async () => undefined);
-			return forked;
+			if (forked) return forked;
+			const remote = await remoteFor(artifacts, name, "write", 3 * 3600);
+			return { name, remote: remote.url, token: remote.token };
 		} catch (err) {
 			if (!isTransientFailure(err) && !isForkPending(err)) throw err;
 			if (Date.now() > deadline) throw new Error(`fork ${name} not ready after 20s: ${err}`);
