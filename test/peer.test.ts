@@ -47,17 +47,23 @@ let clock: { now: number };
 const LEASE = 30_000;
 
 /** A peer named `name` (a change's peer), on the shared log and clock. */
+/** Every peer made in a test, by name: how peers reach each other, as Durable Objects would. */
+let registry: Map<string, InstanceType<typeof Peer>>;
+
 function peer(name: string) {
 	const storage = new FakeStorage();
-	const created = new Peer({ storage } as never, fakeEnv().env as never);
+	const env = { ...fakeEnv().env, PEER: { getByName: (n: string) => registry.get(n) } };
+	const created = new Peer({ storage } as never, env as never);
 	created.configure({ log: () => log, leaseMs: LEASE, now: () => clock.now });
-	return { name, peer: created, storage, lead: () => created.lead("t1", "project", name) };
+	registry.set(name, created);
+	return { name, peer: created, storage, lead: () => created.lead("t1", "project", name), peek: () => created.peek("t1", "project", name) };
 }
 
 const openTask = () => task({ mode: "open", repo: "project", baseRepo: "project", baseCommit: "main0", anchor: "main0", leaseMinutes: 30, verify: [], slices: [] });
 
 beforeEach(async () => {
 	io.forks = 0;
+	registry = new Map();
 	clock = { now: 1_000_000 };
 	log = new SharedLog();
 	await openLog(log, openTask());
@@ -204,5 +210,41 @@ describe("a peer of the elected coordinator", () => {
 		clock.now += LEASE + 1;
 		await a.lead("t1", "project", "t1--a", true);
 		expect(opened).toHaveBeenCalledTimes(1);
+	});
+
+	it("answers reads from the leader's memory, without reading the log", async () => {
+		const a = peer("t1--a");
+		await a.lead();
+		await a.peer.openChange({ title: "Stats", intent: "Stats", owns: ["src/stats/"] });
+		const reads = log.reads;
+		expect((await a.peek()).slices.map((s) => s.owns)).toEqual([["src/stats/"]]);
+		expect(log.reads).toBe(reads);
+	});
+
+	it("has a follower ask the leader for reads rather than Git", async () => {
+		const a = peer("t1--a");
+		const b = peer("t1--b");
+		await a.lead();
+		await b.lead();
+		await a.peer.openChange({ title: "Stats", intent: "Stats", owns: ["src/stats/"] });
+		const reads = log.reads;
+		expect((await b.peek()).slices).toHaveLength(1);
+		expect(log.reads).toBe(reads);
+	});
+
+	it("reads the log when it knows of no live leader", async () => {
+		const reader = peer("t1--reader");
+		expect((await reader.peek()).id).toBe("t1");
+		expect(log.commits.every((c) => c.commit.kind === "genesis")).toBe(true); // reading never campaigns
+	});
+
+	it("says who leads without campaigning, or nobody when no lease is live", async () => {
+		const reader = peer("t1--reader");
+		expect(await reader.peer.whoLeads("t1", "project", "t1--reader")).toBeNull();
+		await peer("t1--a").lead();
+		expect(await reader.peer.whoLeads("t1", "project", "t1--reader")).toBe("t1--a");
+		clock.now += LEASE + 1;
+		expect(await reader.peer.whoLeads("t1", "project", "t1--reader")).toBeNull();
+		expect(log.commits.filter((c) => c.commit.kind === "election")).toHaveLength(1);
 	});
 });

@@ -1,5 +1,4 @@
-import { remoteFor, sliceRepoName } from "./artifacts";
-import { GitCasLog, cachedRemote } from "./election-git";
+import { sliceRepoName } from "./artifacts";
 import type { AccessIdentity } from "./access-contract";
 import type { Coordinator } from "./coordinator";
 import { statusOf } from "./errors";
@@ -9,13 +8,16 @@ import type { Peer } from "./peer";
 import type { Task } from "./types";
 
 // The Worker's side of the elected coordinator. The Worker keeps no state: it
-// asks a change's own peer who leads, and calls the leader. A new change's peer
-// is named before the change exists (the Worker picks its id). Reads need no
-// leader: they come from the log's state in Git.
+// asks a change's own peer who leads, and calls the leader. Task-level reads,
+// and the question of who leads when a change is opened, go to the task's
+// reader: a peer that only reads (it never campaigns or decides) and, being a
+// Durable Object, keeps its copy of the log warm.
 
 type PeerStub = Pick<
 	Peer,
 	| "lead"
+	| "peek"
+	| "whoLeads"
 	| "openChange"
 	| "extendClaim"
 	| "abandonChange"
@@ -32,8 +34,6 @@ export interface ElectedContext {
 	repo: string;
 	/** The Peer Durable Object with this name. */
 	peer: (name: string) => PeerStub;
-	/** The task as the log's tip records it, or null if the log has no task. */
-	readTask: () => Promise<Task | null>;
 }
 
 const NOT_LEADING = /no longer leading/;
@@ -41,8 +41,8 @@ const NOT_LEADING = /no longer leading/;
 /** The open task's decisions, made by whichever peer leads, in place of a fixed Coordinator. */
 export function electedCoordinator(ctx: ElectedContext) {
 	/** Call the leader, asking `asker` (a change's peer) who it is; ask afresh once if the answer was stale. */
-	async function viaLeader<T>(asker: string, call: (leader: PeerStub) => Promise<T>): Promise<T> {
-		for (let fresh = false; ; fresh = true) {
+	async function viaLeader<T>(asker: string, call: (leader: PeerStub) => Promise<T>, startFresh = false): Promise<T> {
+		for (let fresh = startFresh; ; fresh = true) {
 			const { leader } = await ctx.peer(asker).lead(ctx.taskId, ctx.repo, asker, fresh);
 			try {
 				return await call(ctx.peer(leader));
@@ -52,16 +52,25 @@ export function electedCoordinator(ctx: ElectedContext) {
 		}
 	}
 	const peerOf = (change: string) => sliceRepoName(ctx.taskId, change);
-	const read = async () => (await ctx.readTask()) ?? (() => {
-		throw new Error(`[404] no task ${ctx.taskId}`);
-	})();
+	const readerName = peerOf("reader");
+	const reader = () => ctx.peer(readerName);
+	const read = (): Promise<Task> => reader().peek(ctx.taskId, ctx.repo, readerName);
 
 	return {
 		state: read,
 		claims: async () => claimsOf(await read()),
-		openChange: (input: { title: string; intent: string; owns: string[]; hosted?: boolean }, actor?: AccessIdentity) => {
+		openChange: async (input: { title: string; intent: string; owns: string[]; hosted?: boolean }, actor?: AccessIdentity) => {
 			const id = changeId(typeof input?.title === "string" ? input.title : "change");
-			return viaLeader(peerOf(id), (leader) => leader.openChange({ ...input, id }, actor));
+			const open = (leader: PeerStub) => leader.openChange({ ...input, id }, actor);
+			// The reader usually knows who leads, so the new change's peer needn't read the log cold.
+			const known = await reader().whoLeads(ctx.taskId, ctx.repo, readerName);
+			if (!known) return viaLeader(peerOf(id), open);
+			try {
+				return await open(ctx.peer(known));
+			} catch (err) {
+				if (!NOT_LEADING.test(statusOf(err).message)) throw err;
+				return viaLeader(peerOf(id), open, true);
+			}
 		},
 		extendClaim: (change: string, paths: string[]) => viaLeader(peerOf(change), (leader) => leader.extendClaim(change, paths)),
 		abandonChange: (change: string, reason: string, actor?: AccessIdentity) => viaLeader(peerOf(change), (leader) => leader.abandonChange(change, reason, actor)),
@@ -74,22 +83,7 @@ export function electedCoordinator(ctx: ElectedContext) {
 	} satisfies Partial<Record<keyof Coordinator, unknown>>;
 }
 
-/**
- * Logs the Worker reads tasks from, kept for the life of the isolate: each
- * keeps its token and the tip it last fetched, so reading an unchanged task
- * is one request.
- */
-const readers = new Map<string, GitCasLog<Task>>();
-
-/** The elected coordinator of an open task, wired to the Worker's bindings: peers are Peer objects, the log is in Git. */
+/** The elected coordinator of an open task, wired to the Worker's bindings: peers are Peer objects. */
 export function electedForEnv(env: Env, taskId: string, repo: string) {
-	const key = `${repo}/${taskId}`;
-	if (!readers.has(key)) readers.set(key, new GitCasLog<Task>(cachedRemote(() => remoteFor(env.ARTIFACTS, repo, "read")), taskId));
-	const reader = readers.get(key)!;
-	return electedCoordinator({
-		taskId,
-		repo,
-		peer: (name) => env.PEER.getByName(name) as unknown as PeerStub,
-		readTask: async () => (await reader.read())?.commit.state ?? null,
-	});
+	return electedCoordinator({ taskId, repo, peer: (name) => env.PEER.getByName(name) as unknown as PeerStub });
 }

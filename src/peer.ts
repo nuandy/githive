@@ -1,5 +1,6 @@
 import { remoteFor } from "./artifacts";
 import { Coordinator } from "./coordinator";
+import { statusOf } from "./errors";
 import { type CasLog, campaign, Deposed, type Leader } from "./election";
 import { GitCasLog, cachedRemote } from "./election-git";
 import { holdsClaim, nextLeaseCheck } from "./open-mode";
@@ -127,6 +128,45 @@ export class Peer extends Coordinator {
 		if (!leader?.leading) return;
 		const renew = leader.leaseExpires - this.options.leaseMs / 3;
 		await this.ctx.storage.setAlarm(Math.min(renew, this.leaseCheckAt ?? Number.POSITIVE_INFINITY));
+	}
+
+	/**
+	 * The task as committed to the log, for reads. Never campaigns. The leader
+	 * answers from memory; a peer that knows a live leader asks it (once, no
+	 * further); otherwise the log is read, from this peer's own copy when the
+	 * tip hasn't moved. A Durable Object stays put, so that copy stays warm.
+	 */
+	async peek(taskId: string, repo: string, me: string, forwarded = false): Promise<Task> {
+		this.me ??= me;
+		if (this.leader?.leading) return structuredClone(this.leader.state);
+		const now = this.options.now();
+		if (!forwarded && this.known && this.known.leaseUntil > now && this.known.leader !== me) {
+			try {
+				const leader = this.env.PEER.getByName(this.known.leader) as unknown as Peer;
+				return await leader.peek(taskId, repo, this.known.leader, true);
+			} catch (err) {
+				console.error(`peek via ${this.known.leader} failed; reading the log`, statusOf(err).message);
+			}
+		}
+		this.log ??= this.options.log(taskId, repo);
+		const head = await this.log.read();
+		if (!head) throw new Error(`[404] no task ${taskId} on ${repo}`);
+		const tip = head.commit;
+		if (tip.leader && tip.leader !== me && tip.leaseUntil > now) this.known = { leader: tip.leader, term: tip.term, leaseUntil: tip.leaseUntil };
+		return tip.state;
+	}
+
+	/** Which peer leads, if any lease is live, without campaigning (reads the log only if it must). */
+	async whoLeads(taskId: string, repo: string, me: string): Promise<string | null> {
+		this.me ??= me;
+		const now = this.options.now();
+		if (this.leader?.leading && this.leader.leaseExpires > now) return me;
+		if (this.known && this.known.leaseUntil > now) return this.known.leader;
+		this.log ??= this.options.log(taskId, repo);
+		const tip = (await this.log.read())?.commit;
+		if (!tip?.leader || tip.leaseUntil <= now) return null;
+		if (tip.leader !== me) this.known = { leader: tip.leader, term: tip.term, leaseUntil: tip.leaseUntil };
+		return tip.leader;
 	}
 
 	/** Refuse to decide without leading: the caller should ask the peer that does. */
