@@ -150,19 +150,32 @@ about the cooperative merge.
 ## Benchmark
 
 `scripts/bench.mjs --mode free` runs open mode's fake-agent lifecycle through
-the free tools (claim and fork, push, Merge-ahead, status, release), with five
-agents racing for one path at each level. Wall time on bench, 2026-10-05:
+the free tools (claim and fork, push, check, status, release), with five agents
+racing for one path at each level. Wall time on bench, 2026-10-05:
 
-| agents | fixed Coordinator (short locks) | elected coordinator | coordinator-free (first) | coordinator-free (tuned) |
-|---|---|---|---|---|
-| 1 | 11.6 s | 28.2 s | 48.0 s | 26.7 s |
-| 5 | 16.1 s | 28.4 s | 72.1 s | 47.7 s |
-| 10 | 31.9 s | 48.1 s | 89.6 s, 2 failed | 59.9 s |
+| agents | fixed Coordinator (short locks) | elected coordinator | coordinator-free (first) | (tuned) | (trimmed check) |
+|---|---|---|---|---|---|
+| 1 | 11.6 s | 28.2 s | 48.0 s | 26.7 s | 27.3 s |
+| 5 | 16.1 s | 28.4 s | 72.1 s | 47.7 s | 43.1 s |
+| 10 | 31.9 s | 48.1 s | 89.6 s, 2 failed | 59.9 s | 52.7 s |
 
-Exactly one racer won at every level, and no claims were left over. Tuning
-(tokens and record logs kept per isolate, one registry read per call, retries
-with backoff, Merge-ahead fetching only pushed branches) fixed the two claims
-that gave up under contention. The remaining gap is the price of having no
-server-side memory: every call reads its state from Git (listing claims, 0.2 s
-from the Coordinator's memory, takes 1–2 s), and every claim and release is a
-compare-and-swap push to one ref, so they serialize on Git under load.
+Exactly one racer won at every level, and no claims were left over.
+
+- **Tuned**: tokens and record logs kept per isolate, one registry read per
+  call, and retries with random backoff, which fixed the two claims that gave
+  up under contention.
+- **Trimmed check**: `free_check` no longer test-merges every other change
+  (see above), so it costs the same at any scale: 5.9 s at 10 agents, against
+  16 s before and the elected coordinator's 5.2 s report_push.
+- **Tried and reverted: batching writes.** The elected leader commits
+  decisions that arrive together in one push. Doing the same across calls in a
+  Worker made calls wait on I/O begun by another request, which the Workers
+  runtime forbids: it cancelled them as hung. Combining writes across calls
+  needs one place where the calls meet (a Durable Object), which is what this
+  mode does without. So every claim and release is its own compare-and-swap
+  push to one ref, and under load they take turns: claiming (with the fork) is
+  12 s at the median and 30 s at p95 with 10 agents, the remaining gap.
+
+The rest of the gap is the price of no server-side memory: each call reads its
+state from Git (listing claims, 0.2 s from the fixed Coordinator's memory,
+takes 1 to 2 s).
