@@ -677,10 +677,16 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 				if (capable.wake) await retryTransient(() => capable.wake!(event.eventId, event.message, credentials));
 				else if (!(await builder.notify(event.message))) await builder.revise(event.message, credentials);
 			}
-			slice.parkedAt = undefined;
-			slice.parkedWaitingFor = undefined;
+			const state = await builder.state();
 			slice.wakeMessage = undefined;
-			this.note(task, slice.head, "Builder for slice " + slice.id + " resumed from parking after a queued wake event");
+			if (state && (state.status === "queued" || state.status === "working")) {
+				slice.parkedAt = undefined;
+				slice.parkedWaitingFor = undefined;
+				this.note(task, slice.head, "Builder for slice " + slice.id + " resumed from parking after a queued wake event");
+			} else {
+				const active = task.active.builders;
+				if (active.includes(slice.id)) active.splice(active.indexOf(slice.id), 1);
+			}
 			return;
 		}
 		const [remote, base] = await Promise.all([
