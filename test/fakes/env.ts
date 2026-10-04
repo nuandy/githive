@@ -13,6 +13,11 @@ export class FakeStorage {
 		if (typeof key === "string") this.data.set(key, structuredClone(value));
 		else for (const [k, v] of Object.entries(key)) this.data.set(k, structuredClone(v));
 	}
+	async list<T>(options: { prefix?: string; reverse?: boolean; limit?: number } = {}) {
+		const keys = [...this.data.keys()].filter((k) => k.startsWith(options.prefix ?? "")).sort();
+		if (options.reverse) keys.reverse();
+		return new Map(keys.slice(0, options.limit ?? keys.length).map((k) => [k, structuredClone(this.data.get(k)) as T]));
+	}
 	async delete(key: string | string[]) {
 		for (const k of Array.isArray(key) ? key : [key]) this.data.delete(k);
 	}

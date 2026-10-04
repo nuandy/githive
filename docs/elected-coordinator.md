@@ -61,14 +61,18 @@ lands.
 
 ## Requests
 
-The Worker (HTTP and MCP) is stateless. It reads the leader from the log tip and
-calls that peer's Durable Object by name. If the lease has expired, it asks the
-peer of the change making the request (or, for `open_change`, the new change's
-peer) to campaign first. A peer that is called but is no longer leader answers
-with the current leader, and the Worker retries there once.
+The Worker (HTTP and MCP) is stateless. The task index, which lists tasks for
+the dashboard and is read on every request anyway, also notes who leads: each
+new leader writes "I lead term N" there, and a resigning leader clears it. A
+note from an older term never overwrites a newer one. The Worker calls the
+noted leader directly, for decisions and reads, in one hop.
 
-Reads that need no decision (`list_claims`, `change_status`, the dashboard) are
-served by the leader if one is alive, or straight from the tip's `state.json`.
+The note is only a hint; correctness never depends on it. If the noted peer no
+longer leads, or nobody is noted, a decision goes through the peer of the
+change it concerns (for `open_change`, the new change's peer, named before the
+change exists): that peer looks in Git, campaigns if nobody leads, and the
+Worker calls whoever leads. A read with nobody leading comes straight from the
+log in Git.
 
 ## Timers
 

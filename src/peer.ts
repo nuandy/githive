@@ -110,7 +110,9 @@ export class Peer extends Coordinator {
 			return { leader: outcome.leader, term: outcome.term };
 		}
 		this.known = null;
+		const newlyLeading = this.leader !== outcome.leader;
 		this.leader = outcome.leader;
+		if (newlyLeading) await this.hint(taskId, me, outcome.term);
 		this.working = structuredClone(outcome.leader.state);
 		// The task's timers come with it: check claim leases when the earliest is due.
 		this.leaseCheckAt = nextLeaseCheck(this.working);
@@ -173,19 +175,6 @@ export class Peer extends Coordinator {
 		return head.commit.state;
 	}
 
-	/** Which peer leads, if any lease is live, without campaigning (reads the log only if it must). */
-	async whoLeads(taskId: string, repo: string, me: string): Promise<string | null> {
-		this.me ??= me;
-		const now = this.options.now();
-		if (this.leader?.leading && this.leader.leaseExpires > now) return me;
-		const leader = await this.liveLeader(me);
-		if (leader) return leader;
-		const lease = (await this.refsOf(taskId, repo).leases.read())?.commit;
-		if (!lease?.leader || lease.leaseUntil <= now) return null;
-		this.remember(lease, me, now);
-		return lease.leader;
-	}
-
 	/** Remember a live lease another peer holds, as read from the lease ref. */
 	private remember(lease: { leader: string; term: number; leaseUntil: number } | undefined, me: string, now: number) {
 		if (lease?.leader && lease.leader !== me && lease.leaseUntil > now) this.known = { leader: lease.leader, term: lease.term, leaseUntil: lease.leaseUntil };
@@ -222,6 +211,15 @@ export class Peer extends Coordinator {
 		}
 		this.known = null;
 		return null;
+	}
+
+	/** Tell the task index who leads, so the Worker can reach the leader in one hop. Advice only: a failure is logged, not thrown. */
+	private async hint(taskId: string, leader: string | null, term: number) {
+		try {
+			await this.env.TASK_INDEX.getByName("all").hintLeader(taskId, leader, term);
+		} catch (err) {
+			console.error(`noting ${leader ?? "no leader"} for ${taskId} in the task index failed`, statusOf(err).message);
+		}
 	}
 
 	/** Refuse to decide without leading: the caller should ask the peer that does. */
@@ -285,6 +283,7 @@ export class Peer extends Coordinator {
 	private async resignIfDone(leader: Leader<Task>, state: Task) {
 		if (state.slices.some(holdsClaim) || !leader.leading) return;
 		await leader.resign();
+		await this.hint(state.id, null, leader.term);
 		this.working = null;
 	}
 }

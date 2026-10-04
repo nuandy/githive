@@ -32,7 +32,7 @@ const fixedCoordinator = (env: Env, taskId: string) => env.COORDINATOR.get(env.C
 const coordinator = (env: Env, taskId: string) => {
 	const resolved = (async () => {
 		const ref = await taskIndex(env).get(taskId);
-		return ref?.elected ? electedForEnv(env, taskId, ref.repo) : fixedCoordinator(env, taskId);
+		return ref?.elected ? electedForEnv(env, taskId, ref.repo, ref.leader?.name) : fixedCoordinator(env, taskId);
 	})();
 	return new Proxy({} as ReturnType<typeof fixedCoordinator>, {
 		get: (_target, method: string) =>
@@ -138,7 +138,7 @@ app.post("/tasks", async (c) => {
 async function openRepoTask(env: Env, repo: string, input: OpenTaskInput = {}): Promise<Task> {
 	const id = await openTaskId(repo);
 	const listed = await taskIndex(env).get(id);
-	if (listed?.elected) return electedForEnv(env, id, repo).state();
+	if (listed?.elected) return electedForEnv(env, id, repo, listed.leader?.name).state();
 	// No coordinator to create: the task's log in Git starts with it, and the
 	// first peer that needs a decision becomes its leader.
 	const head = (await headOf(env.ARTIFACTS, repo)) ?? fail(409, `${repo} has no commits`);

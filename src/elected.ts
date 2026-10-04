@@ -1,4 +1,5 @@
-import { sliceRepoName } from "./artifacts";
+import { remoteFor, sliceRepoName } from "./artifacts";
+import { GitCasLog } from "./election-git";
 import type { AccessIdentity } from "./access-contract";
 import type { Coordinator } from "./coordinator";
 import { statusOf } from "./errors";
@@ -7,17 +8,17 @@ import { changeId, claimsOf } from "./open-mode";
 import type { Peer } from "./peer";
 import type { Task } from "./types";
 
-// The Worker's side of the elected coordinator. The Worker keeps no state: it
-// asks a change's own peer who leads, and calls the leader. Task-level reads,
-// and the question of who leads when a change is opened, go to the task's
-// reader: a peer that only reads (it never campaigns or decides) and, being a
-// Durable Object, keeps its copy of the log warm.
+// The Worker's side of the elected coordinator. The Worker keeps no state. The
+// task index (which it reads on every request anyway) notes who leads, as the
+// leader last reported it: the Worker calls that peer directly, for decisions
+// and reads. The note is only a hint. If it is stale, or nobody leads, a
+// decision goes through the change's own peer, which looks in Git and
+// campaigns if need be; a read with nobody leading comes from Git.
 
 type PeerStub = Pick<
 	Peer,
 	| "lead"
 	| "peek"
-	| "whoLeads"
 	| "openChange"
 	| "extendClaim"
 	| "abandonChange"
@@ -34,6 +35,10 @@ export interface ElectedContext {
 	repo: string;
 	/** The Peer Durable Object with this name. */
 	peer: (name: string) => PeerStub;
+	/** Who leads, as the task index notes it (null or absent: nobody, as far as it knows). */
+	hint?: string | null;
+	/** The task from Git, for reads when nobody leads. */
+	readLog: () => Promise<Task | null>;
 }
 
 const NOT_LEADING = /no longer leading/;
@@ -52,17 +57,20 @@ export function electedCoordinator(ctx: ElectedContext) {
 		}
 	}
 	const peerOf = (change: string) => sliceRepoName(ctx.taskId, change);
-	const readerName = peerOf("reader");
-	const reader = () => ctx.peer(readerName);
-	const read = (): Promise<Task> => reader().peek(ctx.taskId, ctx.repo, readerName);
+	/** The task as committed: from the leader's memory (a peer that no longer leads reads its own copy of the log), or from Git if nobody leads. */
+	const read = async (): Promise<Task> =>
+		(ctx.hint ? await ctx.peer(ctx.hint).peek(ctx.taskId, ctx.repo, ctx.hint) : await ctx.readLog()) ??
+		(() => {
+			throw new Error(`[404] no task ${ctx.taskId}`);
+		})();
 
 	/**
-	 * Call the leader the reader knows of (it usually does, and stays warm); if
-	 * none, or that peer no longer leads, go through `asker`, the change's own
-	 * peer, which campaigns if nobody leads.
+	 * Call the leader the task index names; if none, or that peer no longer
+	 * leads, go through `asker`, the change's own peer, which looks in Git and
+	 * campaigns if nobody leads.
 	 */
 	async function onLeader<T>(asker: string, call: (leader: PeerStub) => Promise<T>): Promise<T> {
-		const known = await reader().whoLeads(ctx.taskId, ctx.repo, readerName);
+		const known = ctx.hint;
 		if (!known) return viaLeader(asker, call);
 		try {
 			return await call(ctx.peer(known));
@@ -90,7 +98,13 @@ export function electedCoordinator(ctx: ElectedContext) {
 	} satisfies Partial<Record<keyof Coordinator, unknown>>;
 }
 
-/** The elected coordinator of an open task, wired to the Worker's bindings: peers are Peer objects. */
-export function electedForEnv(env: Env, taskId: string, repo: string) {
-	return electedCoordinator({ taskId, repo, peer: (name) => env.PEER.getByName(name) as unknown as PeerStub });
+/** The elected coordinator of an open task, wired to the Worker's bindings: peers are Peer objects, the log is in Git. */
+export function electedForEnv(env: Env, taskId: string, repo: string, hint?: string | null) {
+	return electedCoordinator({
+		taskId,
+		repo,
+		hint,
+		peer: (name) => env.PEER.getByName(name) as unknown as PeerStub,
+		readLog: async () => (await new GitCasLog<Task>(() => remoteFor(env.ARTIFACTS, repo, "read"), taskId).read())?.commit.state ?? null,
+	});
 }
