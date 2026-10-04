@@ -41,13 +41,27 @@ export function fakeEnv() {
 	/** What the Gate reports as queued and running. */
 	const gateQueue: GateItem[] = [];
 	const gateCurrent: { item: GateItem | null } = { item: null };
-	const agent = (name: string) => ({
-		start: vi.fn(async (_job: unknown) => void agentStatus.set(name, "queued")),
-		revise: vi.fn(async (_message: string, _credentials?: unknown) => void agentStatus.set(name, "queued")),
-		notify: vi.fn(async (_message: string) => ["queued", "working"].includes(agentStatus.get(name) ?? "")),
-		cancel: vi.fn(async (_reason: string) => true),
-		state: vi.fn(async () => (agentStatus.has(name) ? { status: agentStatus.get(name) } : null)),
-	});
+	const agent = (name: string) => {
+		const a = {
+			start: vi.fn(async (_job: unknown) => void agentStatus.set(name, "queued")),
+			revise: vi.fn(async (_message: string, _credentials?: unknown) => void agentStatus.set(name, "queued")),
+			notify: vi.fn(async (_message: string) => ["queued", "working"].includes(agentStatus.get(name) ?? "")),
+			cancel: vi.fn(async (_reason: string) => true),
+			state: vi.fn(async () => (agentStatus.has(name) ? { status: agentStatus.get(name) } : null)),
+			park: vi.fn(async (_parkedAt: string, _waitingFor: string[]) => void agentStatus.set(name, "done")),
+			markParkTimedOut: vi.fn(async () => true),
+			/** Like the real Builder: once per event id; to the inbox if running, otherwise resume. */
+			wake: vi.fn(async (eventId: string, message: string, credentials?: unknown): Promise<"resumed" | "deferred" | "ignored"> => {
+				if (delivered.has(`${name}:${eventId}`)) return "ignored";
+				delivered.add(`${name}:${eventId}`);
+				if (await a.notify(message)) return "deferred";
+				await a.revise(message, credentials);
+				return "resumed";
+			}),
+		};
+		return a;
+	};
+	const delivered = new Set<string>();
 	const env = {
 		BUILDER: namespace(agent),
 		REVIEWER: namespace(agent),

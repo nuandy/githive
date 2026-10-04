@@ -31,8 +31,12 @@ declare module "./types" {
 	interface Slice {
 		parkedAt?: string;
 		parkedWaitingFor?: string[];
-		wakeMessage?: string;
+		/** Wake events not yet confirmed delivered, in order. An event leaves only after Builder.wake succeeds. */
+		wakeOutbox?: { eventId: string; message: string }[];
+		/** Wake events confirmed delivered, so a repeat is never sent twice. */
 		wakeEventIds?: string[];
+		/** The parkedAt whose 30-minute timeout has been flagged for a human, so it is flagged exactly once. */
+		parkTimeoutFlagged?: string;
 	}
 }
 

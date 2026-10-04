@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { GateResult } from "../src/gate-plan";
 import type { AccessIdentity } from "../src/access-contract";
-import type { Review, Task } from "../src/types";
+import type { Review, Slice, Task } from "../src/types";
 import { FakeStorage, fakeEnv, slice, task } from "./fakes/env";
 
 // Integration tests for the Coordinator's decisions: the real class, with
@@ -569,5 +569,48 @@ describe("contract amendments", () => {
 	it("refuses a file inside a slice's lane", async () => {
 		await setup(task());
 		await expect(propose("a", "x", null, "src/b/index.ts")).rejects.toThrow(/inside b's lane/);
+	});
+});
+
+describe("parking: delivery and timeout", () => {
+	const request = { id: "r1", requester: "a", owner: "b", path: "src/b/x.ts", need: "add x", reason: "a needs x", status: "pending" as const, createdAt: "" };
+	const parked = (extra: Partial<Slice> = {}) => slice("a", { parkedAt: "2026-10-04T00:00:00.000Z", parkedWaitingFor: ["r1"], ...extra });
+	const withRequests = (slices: Slice[]) => ({ ...task({ slices }), laneChangeRequests: [{ ...request }] }) as Task;
+
+	it("keeps a wake event whose delivery failed and delivers it exactly once on retry", async () => {
+		await setup(withRequests([parked(), slice("b")]));
+		builder("a").wake.mockRejectedValueOnce(new Error("[400] builder busy"));
+		await coordinator.answerLaneChange("b", "r1", { outcome: "declined", answer: "cannot be added" });
+		let a = (await stored()).slices[0];
+		expect(a.wakeOutbox).toHaveLength(1);
+		expect(a.parkedAt).toBeDefined();
+		expect((await stored()).queue).toContainEqual({ kind: "builder", slice: "a" });
+
+		await coordinator.agentStopped("builder", "nobody"); // drains the queue
+		a = (await stored()).slices[0];
+		expect(a.wakeOutbox).toBeUndefined();
+		expect(a.parkedAt).toBeUndefined();
+		const calls = builder("a").wake.mock.calls;
+		expect(calls).toHaveLength(2);
+		expect(calls[0][0]).toBe(calls[1][0]); // the same event id both times
+		expect(builder("a").revise).toHaveBeenCalledOnce();
+	});
+
+	it("flags a parked timeout once, even when the builder already recorded it, and notes it in Git", async () => {
+		await setup(withRequests([parked(), slice("b")]));
+		builder("a").markParkTimedOut.mockResolvedValue(false);
+		await coordinator.parkedBuilderTimedOut("a", "2026-10-04T00:00:00.000Z");
+		await coordinator.parkedBuilderTimedOut("a", "2026-10-04T00:00:00.000Z");
+		const a = (await stored()).slices[0];
+		expect(a.attention).toMatch(/parked for more than 30 minutes/);
+		expect(a.parkTimeoutFlagged).toBe("2026-10-04T00:00:00.000Z");
+		expect(ledger.entries.filter((e) => e.text.includes("parked timeout"))).toHaveLength(1);
+	});
+
+	it("refuses to park while messages are waiting to be delivered", async () => {
+		await setup(withRequests([slice("a", { wakeOutbox: [{ eventId: "e1", message: "news" }] }), slice("b")]));
+		const result = await coordinator.parkBuilder("a");
+		expect(result).toMatchObject({ outcome: "refused", reason: expect.stringMatching(/Messages are waiting/) });
+		expect(builder("a").park).not.toHaveBeenCalled();
 	});
 });

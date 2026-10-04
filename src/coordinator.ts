@@ -292,58 +292,68 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 	}
 
 	private queueWake(slice: Slice, eventId: string, message: string) {
-		const pending: { eventId: string; message: string }[] = (() => {
-			try { return JSON.parse(slice.wakeMessage ?? "[]") as { eventId: string; message: string }[]; }
-			catch { return slice.wakeMessage ? [{ eventId: "legacy", message: slice.wakeMessage }] : []; }
-		})();
-		if (!pending.some((event) => event.eventId === eventId)) pending.push({ eventId, message });
-		slice.wakeMessage = JSON.stringify(pending);
-		slice.wakeEventIds = [...new Set([...(slice.wakeEventIds ?? []), eventId])];
+		if (!(slice.wakeOutbox ?? []).some((event) => event.eventId === eventId)) slice.wakeOutbox = [...(slice.wakeOutbox ?? []), { eventId, message }];
 	}
 
-	/** Deliver a stable wake event whether its builder is parked or already working. */
+	private ensureBuilderQueued(task: Task, slice: Slice) {
+		if (!task.queue.some((item) => item.kind === "builder" && item.slice === slice.id)) task.queue.push({ kind: "builder", slice: slice.id });
+	}
+
+	/**
+	 * Deliver a stable wake event exactly once, whether its builder is parked or
+	 * already working. The event waits in the slice's outbox until Builder.wake
+	 * confirms it; a failure keeps it (and any later events) for a retry.
+	 */
 	private async wakeBuilder(task: Task, slice: Slice, eventId: string, message: string): Promise<"inbox" | "resumed" | "deferred"> {
 		if ((slice.wakeEventIds ?? []).includes(eventId)) return "inbox";
-		const builder = this.env.BUILDER.getByName(slice.repo!);
-		const parked = !!slice.parkedAt;
+		this.queueWake(slice, eventId, message);
 		if (!task.active.builders.includes(slice.id) && !hasRoom(task, "builder")) {
-			this.queueWake(slice, eventId, message);
-			if (!task.queue.some((item) => item.kind === "builder" && item.slice === slice.id)) task.queue.push({ kind: "builder", slice: slice.id });
+			this.ensureBuilderQueued(task, slice);
 			return "deferred";
 		}
-		const capable = builder as typeof builder & { wake?: (id: string, text: string, credentials: BuilderResumeCredentials) => Promise<"resumed" | "deferred" | "ignored"> };
-		let result: "resumed" | "deferred" | "ignored";
+		return this.deliverOutbox(task, slice);
+	}
+
+	/** Send the slice's outbox to its builder, in order, removing each event only once it is delivered. */
+	private async deliverOutbox(task: Task, slice: Slice): Promise<"inbox" | "resumed" | "deferred"> {
+		const builder = this.env.BUILDER.getByName(slice.repo!);
+		const wasParked = !!slice.parkedAt;
+		let resumed = false;
+		let credentials: BuilderResumeCredentials;
 		try {
-			const credentials = await this.resumeCredentials(slice);
-			if (capable.wake) result = await retryTransient(() => capable.wake!(eventId, message, credentials));
-			else result = (await builder.notify(message)) ? "deferred" : (await builder.revise(message, credentials), "resumed");
+			credentials = await this.resumeCredentials(slice);
 		} catch {
-			// Retain the same event ID so a retry cannot deliver the message twice.
-			this.queueWake(slice, eventId, message);
-			if (!task.queue.some((item) => item.kind === "builder" && item.slice === slice.id)) task.queue.push({ kind: "builder", slice: slice.id });
+			this.ensureBuilderQueued(task, slice);
 			return "deferred";
 		}
-		slice.wakeEventIds = [...new Set([...(slice.wakeEventIds ?? []), eventId])];
-		if (parked && (result === "resumed" || result === "deferred")) {
-			slice.parkedAt = undefined;
-			slice.parkedWaitingFor = undefined;
-			slice.wakeMessage = undefined;
-			if (!task.active.builders.includes(slice.id)) task.active.builders.push(slice.id);
-			if (result === "resumed") this.note(task, slice.head, "Builder for slice " + slice.id + " resumed from parking for event " + eventId);
-		} else if (parked && result === "ignored") {
-			// An RPC may have succeeded before a Coordinator restart lost its write.
-			// Reconcile state without redelivering this already-consumed event.
+		while (slice.wakeOutbox?.length) {
+			const event = slice.wakeOutbox[0];
+			let result: "resumed" | "deferred" | "ignored";
+			try {
+				result = await retryTransient(() => builder.wake(event.eventId, event.message, credentials));
+			} catch {
+				this.ensureBuilderQueued(task, slice);
+				return "deferred";
+			}
+			slice.wakeOutbox = slice.wakeOutbox.slice(1);
+			slice.wakeEventIds = [...new Set([...(slice.wakeEventIds ?? []), event.eventId])].slice(-200);
+			if (result === "resumed") resumed = true;
+		}
+		slice.wakeOutbox = undefined;
+		if (wasParked) {
+			// "ignored" can mean an earlier delivery already resumed it before a restart lost our write: ask the builder.
 			const state = await builder.state();
 			if (state && (state.status === "queued" || state.status === "working")) {
 				slice.parkedAt = undefined;
 				slice.parkedWaitingFor = undefined;
-				slice.wakeMessage = undefined;
 				if (!task.active.builders.includes(slice.id)) task.active.builders.push(slice.id);
+				this.note(task, slice.head, "Builder for slice " + slice.id + " resumed from parking");
 			}
-		} else if (!task.active.builders.includes(slice.id) && (result === "resumed" || result === "deferred")) {
-			task.active.builders.push(slice.id);
+		} else if (!task.active.builders.includes(slice.id)) {
+			const state = await builder.state();
+			if (state && (state.status === "queued" || state.status === "working")) task.active.builders.push(slice.id);
 		}
-		return result === "resumed" ? "resumed" : result === "deferred" ? "inbox" : "inbox";
+		return resumed ? "resumed" : "inbox";
 	}
 
 	private async wakeLaneRequester(task: Task, request: LaneChangeRequest, message: string) {
@@ -400,13 +410,16 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 		}
 		if (slice.status !== "building") return { outcome: "refused", reason: "Slice " + sliceId + " is " + slice.status + ", not building." };
 		if (slice.parkedAt) return { outcome: "refused", reason: "The builder is already parked.", resolutions: [] };
+		if (slice.wakeOutbox?.length) {
+			this.ensureBuilderQueued(task, slice);
+			return { outcome: "refused", reason: "Messages are waiting to be delivered to you; read them before parking.", resolutions: [] };
+		}
 		const parkedAt = new Date().toISOString();
 		const waitingFor = outgoing.map((request) => request.id);
 		const builder = this.env.BUILDER.getByName(slice.repo!);
 		await builder.park(parkedAt, waitingFor);
 		slice.parkedAt = parkedAt;
 		slice.parkedWaitingFor = waitingFor;
-		slice.wakeMessage = undefined;
 		const active = task.active.builders;
 		if (active.includes(sliceId)) active.splice(active.indexOf(sliceId), 1);
 		this.note(task, slice.head, "Builder for slice " + sliceId + " parked at " + parkedAt + " waiting for cross-lane requests " + waitingFor.join(", "));
@@ -438,24 +451,23 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 			const task = await this.load();
 			const slice = this.slice(task, sliceId);
 			if (!slice.parkedAt || slice.parkedAt !== parkedAt) return;
-			// Rebuild the non-ledger scheduling queue from the durable wake outbox.
-			// Drain it before deciding whether this is still an unresolved timeout.
-			if (slice.wakeMessage) {
-				if (!task.queue.some((item) => item.kind === "builder" && item.slice === sliceId)) task.queue.push({ kind: "builder", slice: sliceId });
+			// Deliver anything waiting first: it may resolve what the builder is waiting for.
+			if (slice.wakeOutbox?.length) {
+				this.ensureBuilderQueued(task, slice);
 				await this.drain(task);
 				await this.save(task);
 				if (!slice.parkedAt) return;
 			}
-			const marker = "park-timeout:" + sliceId + ":" + parkedAt;
-			if (await this.ctx.storage.get(marker)) return;
+			if (slice.parkTimeoutFlagged === parkedAt) return;
 			const unresolved = (task.laneChangeRequests ?? []).filter((request) => request.requester === sliceId && (request.status === "pending" || request.status === "answered"));
 			if (!unresolved.length) return;
-			const builder = this.env.BUILDER.getByName(slice.repo!);
-			if (!(await builder.markParkTimedOut())) return;
+			// Tell the builder too, but never let its answer decide whether a human is flagged.
+			await this.env.BUILDER.getByName(slice.repo!).markParkTimedOut().catch(() => false);
 			const waiting = unresolved.map((request) => request.id + " (" + request.path + ")").join(", ");
 			const message = "Builder has been parked for more than " + Math.round(BUILDER_PARK_TIMEOUT_MS / 60_000) + " minutes waiting for cross-lane requests " + waiting + "; human attention is needed.";
+			// The flag, the marker and the note are written together in one save.
 			slice.attention = message;
-			await this.ctx.storage.put(marker, true);
+			slice.parkTimeoutFlagged = parkedAt;
 			this.note(task, slice.head, slice.id + " parked timeout: " + message);
 			await this.save(task);
 		});
@@ -666,22 +678,10 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 	}
 
 	private async launchBuilder(task: Task, slice: Slice) {
-		if (slice.parkedAt && slice.wakeMessage) {
-			const events: { eventId: string; message: string }[] = JSON.parse(slice.wakeMessage);
-			const builder = this.env.BUILDER.getByName(slice.repo!);
-			const capable = builder as typeof builder & { wake?: (id: string, text: string, credentials: BuilderResumeCredentials) => Promise<"resumed" | "deferred" | "ignored"> };
-			const credentials = await this.resumeCredentials(slice);
-			for (const event of events) {
-				if (capable.wake) await retryTransient(() => capable.wake!(event.eventId, event.message, credentials));
-				else if (!(await builder.notify(event.message))) await builder.revise(event.message, credentials);
-			}
-			const state = await builder.state();
-			slice.wakeMessage = undefined;
-			if (state && (state.status === "queued" || state.status === "working")) {
-				slice.parkedAt = undefined;
-				slice.parkedWaitingFor = undefined;
-				this.note(task, slice.head, "Builder for slice " + slice.id + " resumed from parking after a queued wake event");
-			} else {
+		if (slice.parkedAt) {
+			// A parked builder resumes through its wake events, never through a fresh start.
+			await this.deliverOutbox(task, slice);
+			if (slice.parkedAt) {
 				const active = task.active.builders;
 				if (active.includes(slice.id)) active.splice(active.indexOf(slice.id), 1);
 			}
@@ -704,12 +704,7 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 			base: { remote: base.url, token: base.token },
 		};
 		await this.env.BUILDER.getByName(slice.repo!).start(job);
-		if (slice.wakeMessage) {
-			const events: { eventId: string; message: string }[] = JSON.parse(slice.wakeMessage);
-			const builder = this.env.BUILDER.getByName(slice.repo!);
-			for (const event of events) await builder.notify(event.message);
-			slice.wakeMessage = undefined;
-		}
+		if (slice.wakeOutbox?.length) await this.deliverOutbox(task, slice);
 	}
 
 	private async launchReviewer(task: Task, slice: Slice, role: string, head: string) {
@@ -760,7 +755,7 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 		} catch (err) {
 			const active = activeOf(task, item.kind);
 			active.splice(active.indexOf(key), 1);
-			if (item.kind === "builder" && slice.wakeMessage && !task.queue.some((queued) => queued.kind === "builder" && queued.slice === slice.id)) task.queue.push(item);
+			if (item.kind === "builder" && slice.wakeOutbox?.length) this.ensureBuilderQueued(task, slice);
 			slice.attention = `Could not start ${item.kind} ${key}: ${statusOf(err).message}`;
 			this.note(task, slice.head, `${slice.id} needs a human: ${slice.attention}`);
 		}
