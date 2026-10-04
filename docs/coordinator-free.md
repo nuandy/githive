@@ -85,3 +85,30 @@ and the audit sees the same records either way.
 3. Votes and merging by convention; the audit over merges without approval.
 4. Stateless MCP tools over these, and a live run with cooperative agents and
    one deliberately misbehaving agent the audit has to catch.
+
+## What the exploration showed
+
+All four steps are built and tested, the last end to end on a real Git server
+and live on Artifacts (`scripts/free-demo.mjs`): cooperative agents claimed,
+reviewed and merged by convention; a rogue agent the tools refused went around
+them with plain git, merging inside another agent's claim with one approval of
+two (its trailers claiming all was well) and pushing a hotfix straight to main;
+the audit, from Git alone, reported exactly those three violations and nothing
+about the cooperative merge.
+
+- **Claims work without a coordinator.** Git's compare-and-swap on one registry
+  ref gives cooperative agents exclusive lanes, even when two claim at once.
+- **Detection works; prevention doesn't.** The rogue's merge is on main by the
+  time the audit reports it. A natural next convention: any agent may revert a
+  commit the audit reports, recording the violation it reverts.
+- **Identity is self-declared.** Agent names, commit authors and trailers are
+  whatever an agent writes, so a rogue could pose as another agent. Real use
+  needs authenticated identity on every record (signed commits, or the Access
+  identity of whoever pushed), or the audit attributes blame to a name, not a
+  party.
+- **Every agent needs write access to the whole repo**, main included: the mode
+  trusts agents by design.
+- **Some coordinator duties have no owner.** With no leader there is no timer:
+  abandoned claims wait for someone to release them as stale; Merge-ahead's
+  early conflict warnings exist only if agents run them for themselves.
+
