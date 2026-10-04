@@ -54,8 +54,7 @@ const LEASE = 30_000;
 /** Every peer made in a test, by name: how peers reach each other, as Durable Objects would. */
 let registry: Map<string, InstanceType<typeof Peer>>;
 
-function peer(name: string) {
-	const storage = new FakeStorage();
+function peer(name: string, storage = new FakeStorage()) {
 	const env = { ...fakeEnv().env, PEER: { getByName: (n: string) => registry.get(n) } };
 	const created = new Peer({ storage } as never, env as never);
 	created.configure({ log: () => log, leases: () => leases as never, leaseMs: LEASE, now: () => clock.now });
@@ -309,5 +308,25 @@ describe("a peer of the elected coordinator", () => {
 		await peer("t1--b").lead(); // a is deposed, and doesn't know yet
 		await expect(a.peer.openChange({ title: "Stats", intent: "Stats", owns: ["src/stats/"] })).rejects.toThrow(/no longer leading/);
 		expect(log.commits.flatMap((c) => c.commit.state.slices)).toEqual([]);
+	});
+
+	it("rejoins as leader after its object restarts, when asked to decide", async () => {
+		const a = peer("t1--a");
+		await a.lead();
+		// The object is evicted: a new instance with the same storage and nothing in memory.
+		const restarted = peer("t1--a", a.storage);
+		const { change } = await restarted.peer.openChange({ title: "Stats", intent: "Stats", owns: ["src/stats/"] });
+		expect(change.status).toBe("building");
+		expect(log.commits.at(-1)?.commit).toMatchObject({ term: 1, leader: "t1--a", kind: "decisions" });
+		expect(leases.commits.filter((c) => c.commit.kind === "election")).toHaveLength(1);
+	});
+
+	it("keeps renewing its lease from its alarm after its object restarts", async () => {
+		const a = peer("t1--a");
+		await a.lead();
+		const restarted = peer("t1--a", a.storage);
+		clock.now += (LEASE * 2) / 3;
+		await restarted.peer.alarm();
+		expect(leases.commits.at(-1)?.commit).toMatchObject({ kind: "heartbeat", term: 1, leader: "t1--a" });
 	});
 });

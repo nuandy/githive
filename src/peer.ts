@@ -12,6 +12,9 @@ import type { Task } from "./types";
 // Coordinator, with the task kept in the shared log instead of its own storage.
 // See docs/elected-coordinator.md.
 
+/** Where a peer keeps which task it belongs to, so it can rejoin after its object restarts. */
+const IDENTITY = "peer:identity";
+
 /** How long a leader's lease lasts unless renewed. */
 export const PEER_LEASE_MS = 30_000;
 
@@ -93,6 +96,7 @@ export class Peer extends Coordinator {
 	 * said it no longer leads).
 	 */
 	async lead(taskId: string, repo: string, me: string, fresh = false): Promise<{ leader: string; term: number }> {
+		if (this.me !== me) await this.ctx.storage.put(IDENTITY, { taskId, repo, me });
 		this.me = me;
 		const now = this.options.now();
 		// Known without asking Git: this peer leads, or saw a lease that is still live.
@@ -119,6 +123,7 @@ export class Peer extends Coordinator {
 	 * check claim leases when they are due. A peer that doesn't lead ignores it.
 	 */
 	override async alarm() {
+		if (!this.leader) await this.rejoin();
 		const leader = this.leader;
 		if (!leader?.leading) return;
 		await leader.heartbeat();
@@ -225,7 +230,21 @@ export class Peer extends Coordinator {
 		return this.working;
 	}
 
+	/**
+	 * After its object restarted (evicted while idle, say), a peer has nothing in
+	 * memory, yet the lease ref may still name it leader. It campaigns again from
+	 * the identity it saved: with its lease still live that resumes its term,
+	 * with the state from the log. Returns whether it leads.
+	 */
+	private async rejoin(): Promise<boolean> {
+		const identity = await this.ctx.storage.get<{ taskId: string; repo: string; me: string }>(IDENTITY);
+		if (!identity) return false;
+		const { leader } = await this.lead(identity.taskId, identity.repo, identity.me);
+		return leader === identity.me;
+	}
+
 	protected override async readTask(): Promise<Task | undefined> {
+		if (!this.leader) await this.rejoin();
 		// A copy, like storage gives: a step that fails changes nothing it didn't save.
 		return structuredClone(this.leading());
 	}
