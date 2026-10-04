@@ -192,7 +192,7 @@ export abstract class SandboxAgent<J extends SandboxJob, S extends AgentState> e
 
 	protected async parkAgent(parkedAt: string, waitingFor: string[]) {
 		return this.lifecycle(async () => {
-			if (await this.ctx.storage.get(TURN_IN_FLIGHT)) { await this.ctx.storage.put(PARK_COMMAND, { parkedAt, waitingFor, applied: false }); return; }
+			if (await this.ctx.storage.get(TURN_IN_FLIGHT)) { await this.ctx.storage.put(PARK_COMMAND, { parkedAt, waitingFor, applied: false }); await this.ctx.storage.setAlarm(Date.now() + RUN_BUDGET_MS + 5_000); return; }
 			const { state } = await this.load(); if (!state || ["done", "failed"].includes(state.status)) return;
 			state.status = "parked"; state.parkedAt = parkedAt; state.waitingRequestIds = [...waitingFor];
 			this.note(state, "parked while waiting for " + waitingFor.join(", ")); await this.save(state);
@@ -301,15 +301,18 @@ export abstract class SandboxAgent<J extends SandboxJob, S extends AgentState> e
 		if (["done", "failed"].includes(state.status)) await this.onStopped(job, state).catch(() => {});
 	}
 
-	private async reconcileParkedWakes(job: J, state: S) {
+	private async reconcileParkedWakes(job: J, _state: S) {
 		await this.lifecycle(async () => {
+			const latest = await this.load();
+			const current = latest.state;
+			if (!current) return;
 			const pending = (await this.ctx.storage.get<DeferredWake[]>(DEFERRED_WAKES)) ?? [];
-			for (const wake of pending) await this.deliverWake(job, state, wake);
+			for (const wake of pending) await this.deliverWake((latest.job ?? job) as J, current, wake);
 			if (pending.length) await this.ctx.storage.delete(DEFERRED_WAKES);
 			const park = await this.ctx.storage.get<{ applied?: boolean }>(PARK_COMMAND);
-			if (park && (park.applied || state.status === "parked")) await this.ctx.storage.delete(PARK_COMMAND);
-			await this.save(state);
-			if (state.status === "parked" || state.status === "queued") await this.scheduleForState(state);
+			if (park && (park.applied || current.status === "parked")) await this.ctx.storage.delete(PARK_COMMAND);
+			await this.save(current);
+			if (current.status === "parked" || current.status === "queued") await this.scheduleForState(current);
 			await this.ctx.storage.delete([TURN_IN_FLIGHT, TURN_STARTED]);
 		});
 	}
