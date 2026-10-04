@@ -14,7 +14,7 @@ import { handleMcpBody, type McpContext } from "./mcp";
 import { type FreeContext, freeSnapshot } from "./free/mcp";
 import type { Registry } from "./free/claims";
 import { Workspace } from "./git";
-import { freeContextFor } from "./free/env";
+import { freeAgentName, freeContextFor } from "./free/env";
 import { identityLabel } from "./free/stamp";
 
 export { Builder } from "./builder";
@@ -187,6 +187,7 @@ const freeContext = (env: Env, identity: AccessIdentity | undefined): FreeContex
 // Coordinator-free repos, for the dashboard: which repos, and a snapshot of one read from Git.
 app.get("/free", async (c) => c.json(await taskIndex(c.env).listFree()));
 app.get("/free/:repo", async (c) => c.json(await freeSnapshot(freeContext(c.env, c.get("accessIdentity")), c.req.param("repo"))));
+app.get("/free/:repo/builders/:change", async (c) => c.json(await c.env.BUILDER.getByName(freeAgentName(c.req.param("repo"), c.req.param("change"))).state()));
 
 // The MCP front door (stateless JSON-RPC over HTTP), for agents from anywhere.
 app.post("/mcp", async (c) => {

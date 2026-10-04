@@ -374,20 +374,21 @@ How to work:
 		return result;
 	}
 
-	/** Why a push must not run: anything but HEAD to origin/main, or a push that would discard pushed history. */
+	/** Why a push must not run: anything but HEAD to the builder's branch (main on its fork; changes/<id> coordinator-free), or a push that would discard pushed history. */
 	private async pushRefusal(job: BuildJob, args: string[], cwd: string, token: string): Promise<string | undefined> {
 		const pushArgs = args.slice(1);
 		const forcePush = pushArgs.some(
 			(arg) => arg === "--force" || arg.startsWith("--force-with-lease") || (/^-[^-]/.test(arg) && arg.includes("f")) || arg.startsWith("+"),
 		);
-		const expectedMainPush = pushArgs.includes("origin") && pushArgs.includes("HEAD:main");
-		if (!expectedMainPush) return "Refusing an unrecognized builder push. Use commit_and_push to push the slice to origin/main.";
+		const branch = job.free ? `refs/heads/${job.free.ref}` : "refs/heads/main";
+		const expectedPush = pushArgs.includes("origin") && pushArgs.includes(job.free ? `HEAD:${branch}` : "HEAD:main");
+		if (!expectedPush) return `Refusing an unrecognized builder push. Use commit_and_push to push to origin/${job.free?.ref ?? "main"}.`;
 
 		const pushedState = await this.ctx.storage.get<{ pushes?: number }>("state");
 		const lastPushedHead = await this.ctx.storage.get<string>(LAST_PUSHED_HEAD);
-		const remote = await super.git(job, ["ls-remote", "--heads", "origin", "refs/heads/main"], cwd, token);
+		const remote = await super.git(job, ["ls-remote", "--heads", "origin", branch], cwd, token);
 		if (remote.exitCode !== 0)
-			return "Could not verify origin/main; refusing to push to preserve history. Retry after the remote is reachable. " + clip(remote.output, 2_000);
+			return `Could not verify origin/${job.free?.ref ?? "main"}; refusing to push to preserve history. Retry after the remote is reachable. ${clip(remote.output, 2_000)}`;
 		const remoteHead = remote.output.trim().split(/\s+/)[0] || undefined;
 		const remoteHeadIsAncestor = remoteHead ? await this.isAncestor(cwd, remoteHead) : false;
 		const lastPushedHeadIsAncestor = lastPushedHead ? await this.isAncestor(cwd, lastPushedHead) : false;
