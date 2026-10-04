@@ -14,6 +14,7 @@ import { startGitServer, type GitServer } from "./helpers/git-server";
 let server: GitServer;
 let registered: string[] = [];
 let reviewRequests: { repo: string; change: string; roles: string[]; summary?: string }[] = [];
+let builds: { repo: string; change: string }[] = [];
 const ctx = () => ({
 	coordinator: () => {
 		throw new Error("not used");
@@ -25,6 +26,10 @@ const ctx = () => ({
 		remote: async () => ({ url: server.url, token: "unused" }),
 		head: async () => server.git("rev-parse", "main").trim(),
 		register: async (repo: string) => void registered.push(repo),
+		startBuilder: async (input: { repo: string; change: string }) => {
+			builds.push(input);
+			return { change: input.change, builder: `free--${input.repo}--${input.change}` };
+		},
 		requestReview: async (input: { repo: string; change: string; roles: string[]; summary?: string }) => {
 			reviewRequests.push(input);
 			return { head: "h1", reviewers: input.roles };
@@ -114,5 +119,17 @@ describe("the coordinator-free MCP tools", () => {
 		await call("free_request_review", { repo: "project", change: "a-1", roles: ["api"] });
 		expect(reviewRequests[1].roles).toEqual(["api"]);
 		expect(await call("free_request_review", { repo: "project", change: "nope" })).toEqual({ error: "nope holds no claim: claim the change's paths first" });
+	});
+
+	it("claims paths for a new change and starts Blueprint's hosted builder on it", async () => {
+		builds = [];
+		await call("free_start", { repo: "project" });
+		const started = await call("free_build", { repo: "project", intent: "Add a stats page", paths: ["src/stats/"] });
+		expect(started.change).toMatch(/^add-a-stats-page-[0-9a-f]{4}$/);
+		expect(builds).toEqual([{ repo: "project", change: started.change }]);
+		expect((await call("free_claims", { repo: "project" }))[0]).toMatchObject({ change: started.change, agent: "blueprint-builder", paths: ["src/stats/"], intent: "Add a stats page" });
+		// Paths someone holds aren't built on.
+		expect(await call("free_build", { repo: "project", intent: "More stats", paths: ["src/stats/x.ts"] })).toMatchObject({ ok: false, conflicts: [{ change: started.change }] });
+		expect(builds).toHaveLength(1);
 	});
 });

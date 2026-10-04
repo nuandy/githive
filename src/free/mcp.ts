@@ -1,7 +1,7 @@
 import { GitCasLog } from "../election-git";
 import { requiredPaths, requiredString } from "../errors";
 import type { Remote } from "../git";
-import { normalizeClaim } from "../open-mode";
+import { changeId, normalizeClaim } from "../open-mode";
 import { audit } from "./audit";
 import { activeClaims, claim, release, releaseStale, startFree, type Registry } from "./claims";
 import { readMainMerges, readRecordHistory } from "./git-records";
@@ -26,8 +26,10 @@ export interface FreeContext {
 	stamper?: () => Promise<Stamper | undefined>;
 	/** Notes a repo in coordinator-free mode, so the dashboard can list it. */
 	register?: (repo: string) => Promise<void>;
-	/** Starts Blueprint's hosted reviewers on a change's current commit; each votes with free_vote. */
-	requestReview?: (input: { repo: string; change: string; roles: string[]; summary?: string }) => Promise<{ head: string; reviewers: string[] }>;
+	/** Starts Blueprint's hosted reviewers on a change's current commit; each votes with free_vote (and, asked to, then tries to merge it). */
+	requestReview?: (input: { repo: string; change: string; roles: string[]; summary?: string; mergeWhenApproved?: boolean }) => Promise<{ head: string; reviewers: string[] }>;
+	/** Starts Blueprint's hosted builder on a claimed change. */
+	startBuilder?: (input: { repo: string; change: string }) => Promise<{ change: string; builder: string }>;
 }
 
 const DEFAULT_POLICY: ReviewPolicy = { required: 2, vetoes: ["security"] };
@@ -43,7 +45,7 @@ Conventions:
 4. free_merge merges your branch with trailers recording the claims and votes it checked, then releases your claim. Merge by hand only with the same trailers.
 5. A claim idle for 30 minutes may be released by anyone (free_release with stale: true).
 6. Anyone may free_revert a commit free_audit reports; the audit then counts it resolved.
-7. free_request_review asks Blueprint's hosted reviewers for votes on your change.
+7. free_request_review asks Blueprint's hosted reviewers for votes on your change; free_build has Blueprint's hosted builder make a change from start to merge.
 free_audit replays the records and lists every broken convention, with the commit and the agent.`;
 
 const str = { type: "string" } as const;
@@ -55,6 +57,7 @@ export const FREE_TOOLS = [
 	{ name: "free_release", description: "Release a claim: yours, or another's idle for 30 minutes with stale: true.", inputSchema: { type: "object", properties: { repo: str, change: str, agent: str, reason: str, stale: { type: "boolean" } }, required: ["repo", "change", "agent"] } },
 	{ name: "free_vote", description: "Record your review verdict on the exact commit you reviewed.", inputSchema: { type: "object", properties: { repo: str, commit: str, reviewer: str, role: str, verdict: { type: "string", enum: ["approve", "reject"] }, evidence: str }, required: ["repo", "commit", "reviewer", "role", "verdict", "evidence"] } },
 	{ name: "free_merge", description: "Merge changes/<change> into main if the conventions hold, recording what was checked, then release the claim.", inputSchema: { type: "object", properties: { repo: str, change: str, agent: str }, required: ["repo", "change", "agent"] } },
+	{ name: "free_build", description: "Have Blueprint's hosted builder make a change: it claims the paths, builds on changes/<change>, asks the hosted reviewers when done, and the change merges once approved and checked.", inputSchema: { type: "object", properties: { repo: str, intent: str, paths: { type: "array", items: str } }, required: ["repo", "intent", "paths"] } },
 	{ name: "free_request_review", description: "Ask Blueprint's hosted reviewer agents to review your change's current commit (by default the tests role and every veto role); each votes with free_vote.", inputSchema: { type: "object", properties: { repo: str, change: str, roles: { type: "array", items: str }, summary: str }, required: ["repo", "change"] } },
 	{ name: "free_audit", description: "Replay the records and list every broken convention, with the commit and the agent (and whether a revert has resolved it).", inputSchema: { type: "object", properties: { repo: str }, required: ["repo"] } },
 	{ name: "free_revert", description: "Revert a commit the audit reports: its files go back to how they were before it, in a commit naming what it reverts.", inputSchema: { type: "object", properties: { repo: str, commit: str, agent: str }, required: ["repo", "commit", "agent"] } },
@@ -152,6 +155,14 @@ export async function callFreeTool(name: string, args: Args, ctx: FreeContext): 
 				change: requiredString(args, "change"),
 				agent: requiredString(args, "agent"),
 			});
+		}
+		case "free_build": {
+			if (!ctx.startBuilder) throw new Error("[501] hosted builders aren't available here");
+			const intent = requiredString(args, "intent");
+			const change = changeId(intent);
+			const claimed = await claim(claims, { change, agent: "blueprint-builder", paths: normalizeClaim(requiredPaths(args, "paths")), intent }, stamper);
+			if (!claimed.ok) return claimed;
+			return ctx.startBuilder({ repo, change });
 		}
 		case "free_request_review": {
 			const change = requiredString(args, "change");

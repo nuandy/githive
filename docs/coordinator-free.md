@@ -98,14 +98,22 @@ about the cooperative merge.
 
 - **Claims work without a coordinator.** Git's compare-and-swap on one registry
   ref gives cooperative agents exclusive lanes, even when two claim at once.
-- **Detection works; prevention doesn't.** The rogue's merge is on main by the
-  time the audit reports it. A natural next convention: any agent may revert a
-  commit the audit reports, recording the violation it reverts.
-- **Identity is self-declared.** Agent names, commit authors and trailers are
-  whatever an agent writes, so a rogue could pose as another agent. Real use
-  needs authenticated identity on every record (signed commits, or the Access
-  identity of whoever pushed), or the audit attributes blame to a name, not a
-  party.
+- **Detection works, and so does the remedy; prevention doesn't.** The rogue's
+  merge is on main by the time the audit reports it. Any agent may then revert
+  it with `free_revert`, which refuses a commit the audit doesn't report, or
+  one whose files changed since. The revert names what it undid
+  (`Blueprint-Reverts`), and the audit marks those violations resolved. Live:
+  five violations, five reverts, none left open.
+- **Identity is verified, not self-declared.** Every record the toolkit writes
+  (claims, releases, votes, merges and reverts) carries `by`, the identity
+  Access verified for the caller (`service:<name>`, or `person:` plus a hash of
+  the email, so no address is stored), and an Ed25519 stamp over the record,
+  made with a key only the Worker holds. The registry publishes the public key.
+  The audit then trusts only stamped records: a merge without a valid stamp is
+  `unverified` (and still checked against what it changed), and an unstamped
+  vote doesn't count toward approval. Plain git can still write anything; it
+  just can't stamp it. One gap: agents that share one Access service token
+  share one identity, so each agent needs its own token for blame to name it.
 - **Every agent needs write access to the whole repo**, main included: the mode
   trusts agents by design.
 - **Merging checks what it can.** The toolkit's merge test-merges the change
@@ -117,4 +125,15 @@ about the cooperative merge.
 - **Some coordinator duties have no owner.** With no leader there is no timer:
   abandoned claims wait for someone to release them as stale; Merge-ahead's
   early conflict warnings exist only if agents run them for themselves.
-
+- **One endpoint, one dashboard.** The mode's tools (`free_*`) are on the same
+  `/mcp` endpoint as everything else, behind the same Access policy. The
+  dashboard lists repos in the mode and shows each one's settings, claims,
+  recent votes and the audit, with open and resolved violations kept apart.
+- **Blueprint's own agents follow the conventions too.** `free_build` starts a
+  hosted builder on a `changes/<id>` branch of the project repo, inside its
+  claim. It pushes there, can extend its claim, merges main in with
+  `fetch_base`, and may only `finish` with everything pushed. Finishing starts
+  the hosted reviewers (tests and the veto roles). Each votes with its own
+  stamped identity, then tries `free_merge` for the change. The toolkit refuses
+  until enough approvals are in, so whichever reviewer completes the approval
+  merges it. Neither agent calls a Coordinator.

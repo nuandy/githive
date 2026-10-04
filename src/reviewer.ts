@@ -6,6 +6,8 @@ import { GIT_IN_BLUEPRINT } from "./git-blueprint-guidance";
 import type { QuorumStatus } from "./types";
 import { remoteFor } from "./artifacts";
 import { GitCasLog, cachedRemote } from "./election-git";
+import { freeContextFor } from "./free/env";
+import { callFreeTool } from "./free/mcp";
 import { makeStamper } from "./free/stamp";
 import { vote, type Votes } from "./free/votes";
 
@@ -31,7 +33,7 @@ export interface ReviewJob extends SliceJob {
 	 * repo, and the verdict is a vote in the repo's votes ref (free_vote),
 	 * stamped as this reviewer, rather than a call to a Coordinator.
 	 */
-	free?: { repo: string; change: string; ref: string };
+	free?: { repo: string; change: string; ref: string; agent?: string; mergeWhenApproved?: boolean };
 }
 
 export interface ReviewerState extends AgentState {
@@ -152,6 +154,12 @@ How to work:
 						await this.voteFree(job.free, job, verdict, `${summary}\n\n${evidence}`);
 						Object.assign(state, { status: "done", verdict, summary, evidence });
 						this.note(state, `voted ${verdict} on ${job.head} (coordinator-free)`);
+						// By convention, merge once approved: the toolkit refuses until the
+						// approvals are in, so the last vote's attempt is the one that lands.
+						if (job.free.mergeWhenApproved && verdict === "approve") {
+							const merged = (await callFreeTool("free_merge", { repo: job.free.repo, change: job.free.change, agent: job.free.agent ?? job.free.change }, freeContextFor(this.env, `service:blueprint-reviewer:${job.role}`))) as { ok: boolean; reasons?: string[] };
+							this.note(state, merged.ok ? "merged the change" : `not merged yet: ${(merged.reasons ?? []).join("; ").slice(0, 200)}`);
+						}
 						return "Vote recorded.";
 					}
 					try {
