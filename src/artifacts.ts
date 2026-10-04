@@ -91,6 +91,9 @@ const isInternalError = (err: unknown) => codeOf(err) === "INTERNAL_ERROR";
 
 const alreadyExists = (err: unknown) => /EXISTS/.test(codeOf(err)) || /already exists/i.test(err instanceof Error ? err.message : "");
 
+/** Under load a fork that was just made can briefly read as missing; while waiting for it, that means not ready yet. */
+const notFoundYet = (err: unknown) => /NOT_FOUND/.test(codeOf(err)) || /not found/i.test(err instanceof Error ? err.message : "");
+
 const FORK_ATTEMPTS = 5;
 
 /** Fork `source` and wait until the fork is ready, since get() throws while a repo is still forking. */
@@ -116,7 +119,7 @@ export async function forkAndWait(artifacts: Artifacts, source: string, name: st
 			const remote = await remoteFor(artifacts, name, "write", 3 * 3600);
 			return { name, remote: remote.url, token: remote.token };
 		} catch (err) {
-			if (!isTransientFailure(err) && !isForkPending(err)) throw err;
+			if (!isTransientFailure(err) && !isForkPending(err) && !notFoundYet(err)) throw err;
 			if (Date.now() > deadline) throw new Error(`fork ${name} not ready after 20s: ${err}`);
 			await scheduler.wait(delay);
 		}
