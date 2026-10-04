@@ -32,6 +32,8 @@ export interface CasLog<S> {
 	read(): Promise<{ tip: string; commit: LogCommit<S> } | null>;
 	/** Append on top of `parent` (null for an empty log): the new tip, or null when the tip had moved. */
 	append(parent: string | null, commit: LogCommit<S>): Promise<string | null>;
+	/** Why the last append didn't land: another writer moved the tip, or the server stayed busy. */
+	lastRefusal?: "moved" | "busy" | null;
 }
 
 export interface ElectionOptions {

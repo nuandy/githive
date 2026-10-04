@@ -226,7 +226,8 @@ app.get("/tasks", async (c) => {
 // Project repos, without task forks (<taskId>--...), for the dashboard's "new task" form.
 // Forks far outnumber projects, so read every page.
 app.get("/repos", async (c) => {
-	const names = (await listRepoNames(c.env.ARTIFACTS)).filter((name) => !parseRepoName(name));
+	// Not a project: a task's fork, or a coordinator-free change's fork or claim records.
+	const names = (await listRepoNames(c.env.ARTIFACTS)).filter((name) => !parseRepoName(name) && !name.startsWith("free--") && !name.startsWith("free-records--"));
 	return c.json(names.sort().map((name) => ({ name })));
 });
 

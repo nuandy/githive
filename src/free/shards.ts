@@ -28,3 +28,17 @@ export const decodeShard = (encoded: string) => decodeURIComponent(encoded);
 /** Where a repo's claim shards live: one ref each, side by side, so a shard's descendants share its prefix. */
 export const shardsPrefix = (repo: string) => `refs/notes/blueprint-claim-shards/${repo}/`;
 export const shardRef = (repo: string, shard: string) => `${shardsPrefix(repo)}${encodeShard(shard)}`;
+
+/**
+ * Which of a repo's `count` records repos holds a shard: a stable hash of its
+ * name. Artifacts takes one push at a time per repo; shards in different
+ * records repos are written side by side.
+ */
+export function recordsRepoOf(shard: string, count: number) {
+	let hash = 0x811c9dc5;
+	for (let i = 0; i < shard.length; i++) hash = Math.imul(hash ^ shard.charCodeAt(i), 0x01000193);
+	return (hash >>> 0) % count;
+}
+
+/** A records repo's name: never a change fork's (free--<repo>--<change>), whatever an agent names its change. */
+export const recordsRepoName = (repo: string, k: number) => `free-records--${repo}--${k}`;

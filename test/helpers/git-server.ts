@@ -1,5 +1,5 @@
 import { execFileSync, spawn } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -26,6 +26,10 @@ export interface GitServer {
 	busyPushes: (count: number) => void;
 	/** Answer the next `count` fetch uploads with a 500, as an overloaded server might. */
 	failFetches: (count: number) => void;
+	/** Another (empty) repo on the same server, created if need be: its URL. */
+	repo: (name: string) => string;
+	/** Run git against another repo on the server, for assertions. */
+	gitIn: (name: string, ...args: string[]) => string;
 	close: () => Promise<void>;
 }
 
@@ -123,6 +127,15 @@ export async function startGitServer(): Promise<GitServer> {
 		requests,
 		busyPushes: (count) => void (busy = count),
 		failFetches: (count) => void (failingFetches = count),
+		repo: (name) => {
+			const path = join(root, `${name}.git`);
+			if (!existsSync(path)) {
+				execFileSync("git", ["init", "--bare", "--quiet", path]);
+				execFileSync("git", ["-C", path, "config", "http.receivepack", "true"]);
+			}
+			return `http://127.0.0.1:${address.port}/${name}.git`;
+		},
+		gitIn: (name, ...args) => execFileSync("git", ["-C", join(root, `${name}.git`), ...args]).toString(),
 		close: async () => {
 			await new Promise<void>((resolve) => server.close(() => resolve()));
 			rmSync(root, { recursive: true, force: true });

@@ -22,6 +22,10 @@ export interface FreeContext {
 	remote: (repo: string, scope: "read" | "write") => Promise<Remote>;
 	/** A record's log (claims, votes), kept across calls so an unmoved ref isn't fetched again; without it, each call makes its own. */
 	records?: <S>(repo: string, ref: string) => GitCasLog<S>;
+	/** Credentials for one of a repo's records repos, which hold its claim shards when they're spread out. */
+	recordsRemote?: (repo: string, k: number, scope: "read" | "write") => Promise<Remote>;
+	/** Creates a repo's records repos (harmless if they exist). */
+	createRecordsRepos?: (repo: string, count: number) => Promise<void>;
 	/** Credentials for a change's own fork of a project repo (forks access); asking to write creates the fork. */
 	changeRemote?: (repo: string, change: string, scope: "read" | "write") => Promise<Remote>;
 	/** Main's head in a project repo. */
@@ -52,6 +56,8 @@ export interface HostedStatus {
 const DEFAULT_POLICY: ReviewPolicy = { required: 2, vetoes: ["security"] };
 const HOSTED_PREFIX = "blueprint-";
 const DEFAULT_SHARD_DEPTH = 2;
+/** Records repos per sharded repo, where they're available: Artifacts takes one push at a time per repo. */
+const DEFAULT_RECORDS_REPOS = 8;
 const STALE_AFTER_MS = 30 * 60_000;
 const claimsRef = (repo: string) => `refs/notes/blueprint-claims/${repo}`;
 const votesRef = (repo: string) => `refs/notes/blueprint-votes/${repo}`;
@@ -71,7 +77,7 @@ free_audit replays the records and lists every broken convention, with the commi
 
 const str = { type: "string" } as const;
 const TOOL_LIST = [
-	{ name: "free_start", description: "Start coordinator-free mode on a project repo (harmless if started): the review policy, the checks run before each merge, access: forks (default: each change in its own fork, only the toolkit writes the project) or shared (every agent writes the project repo), and shard_depth: claims are kept per path this many segments deep, so agents in different parts of the tree never contend (default 2; 0 keeps them in one record). Returns them.", inputSchema: { type: "object", properties: { repo: str, required: { type: "number" }, vetoes: { type: "array", items: str }, verify: { type: "array", items: str }, access: { type: "string", enum: ["forks", "shared"] }, shard_depth: { type: "number" } }, required: ["repo"] } },
+	{ name: "free_start", description: "Start coordinator-free mode on a project repo (harmless if started): the review policy, the checks run before each merge, access: forks (default: each change in its own fork, only the toolkit writes the project) or shared (every agent writes the project repo), shard_depth: claims are kept per path this many segments deep, so agents in different parts of the tree never contend (default 2; 0 keeps them in one record), and records_repos: how many repos the claim shards are spread over, since a repo takes one push at a time (default 8). Returns them.", inputSchema: { type: "object", properties: { repo: str, required: { type: "number" }, vetoes: { type: "array", items: str }, verify: { type: "array", items: str }, access: { type: "string", enum: ["forks", "shared"] }, shard_depth: { type: "number" }, records_repos: { type: "number" } }, required: ["repo"] } },
 	{ name: "free_credentials", description: "Git access. With your change: a write token for where its branch changes/<change> lives (its own fork, unless the repo is shared). Without: read access to the project repo.", inputSchema: { type: "object", properties: { repo: str, change: str }, required: ["repo"] } },
 	{ name: "free_claims", description: "The claims in force: who holds which paths, and why.", inputSchema: { type: "object", properties: { repo: str }, required: ["repo"] } },
 	{ name: "free_claim", description: "Claim paths for your change (again to extend it, or to keep it active). Refused, naming the holder, if another claim overlaps; a claim in the way idle for 30 minutes is released as stale instead.", inputSchema: { type: "object", properties: { repo: str, change: str, agent: str, paths: { type: "array", items: str }, intent: str }, required: ["repo", "change", "agent", "paths", "intent"] } },
@@ -119,7 +125,12 @@ function recordLog<S>(ctx: FreeContext, repo: string, ref: string): GitCasLog<S>
 
 /** A repo's claims, where its registry says they are: in the registry itself, or split into per-path shards. */
 export function storeFor(ctx: FreeContext, repo: string, registry: Registry | null | undefined, root?: { log: GitCasLog<Registry>; head: Awaited<ReturnType<GitCasLog<Registry>["read"]>> }): ClaimStore {
-	return claimStore({ repo, registry, root: root?.log ?? recordLog<Registry>(ctx, repo, claimsRef(repo)), ...(root ? { rootHead: root.head } : {}), remote: () => ctx.remote(repo, "write"), log: ctx.records ? (ref) => ctx.records!<Registry>(repo, ref) : undefined });
+	return claimStore({
+		repo,
+		registry,
+		root: root?.log ?? recordLog<Registry>(ctx, repo, claimsRef(repo)),
+		...(root ? { rootHead: root.head } : {}),
+		...(ctx.recordsRemote ? { recordsRemote: (k: number) => ctx.recordsRemote!(repo, k, "write") } : {}), remote: () => ctx.remote(repo, "write"), log: ctx.records ? (ref) => ctx.records!<Registry>(repo, ref) : undefined });
 }
 
 /** Where a repo's change branches live: each change's own fork, or the project repo when it's shared (as repos started before forks are). */
@@ -153,7 +164,8 @@ async function runAudit(ctx: FreeContext, repo: string) {
 	if (!baseline) throw new Error(`[409] coordinator-free mode hasn't started on ${repo}`);
 	const merges = await readMainMerges(remote, baseline);
 	const start = registry[0].state;
-	const shards = start.shardDepth ? await readShardHistories(remote, repo) : undefined;
+	const holders = start.recordsRepos && ctx.recordsRemote ? await Promise.all(Array.from({ length: start.recordsRepos }, (_, k) => ctx.recordsRemote!(repo, k, "read"))) : [remote];
+	const shards = start.shardDepth ? await readShardHistories(holders, repo) : undefined;
 	const violations = await audit({ registry, ...(shards ? { shards } : {}), votes: await readRecordHistory<Votes>(remote, votesRef(repo)), policy: start.policy ?? DEFAULT_POLICY, verify: start.verify, merges });
 	return { merges: merges.length, violations };
 }
@@ -222,10 +234,14 @@ export async function callFreeTool(name: string, args: Args, ctx: FreeContext): 
 			const verify = Array.isArray(args.verify) ? (args.verify as string[]).filter((c) => typeof c === "string" && c.trim()) : [];
 			// Claims are sharded by path, two segments deep unless asked otherwise (0: one registry).
 			const shardDepth = typeof args.shard_depth === "number" ? Math.max(0, Math.floor(args.shard_depth)) : DEFAULT_SHARD_DEPTH;
-			await startFree(claims, { baseline: await ctx.head(repo), policy, verify, stampKey: stamper?.publicKey, access: args.access === "shared" ? "shared" : "forks", shardDepth });
+			// Sharded claims are spread over records repos, where they can be made.
+			const wanted = typeof args.records_repos === "number" ? Math.max(0, Math.floor(args.records_repos)) : DEFAULT_RECORDS_REPOS;
+			const recordsRepos = shardDepth && ctx.recordsRemote && ctx.createRecordsRepos && !registered?.baseline ? wanted : 0;
+			if (recordsRepos) await ctx.createRecordsRepos!(repo, recordsRepos);
+			await startFree(claims, { baseline: await ctx.head(repo), policy, verify, stampKey: stamper?.publicKey, access: args.access === "shared" ? "shared" : "forks", shardDepth, recordsRepos });
 			await ctx.register?.(repo);
 			const registry = (await claims.read())?.commit.state;
-			return { repo, policy: registry?.policy ?? policy, verify: registry?.verify ?? [], access: registry?.access ?? "shared", shardDepth: registry?.shardDepth ?? 0, instructions: FREE_INSTRUCTIONS };
+			return { repo, policy: registry?.policy ?? policy, verify: registry?.verify ?? [], access: registry?.access ?? "shared", shardDepth: registry?.shardDepth ?? 0, recordsRepos: registry?.recordsRepos ?? 0, instructions: FREE_INSTRUCTIONS };
 		}
 		case "free_credentials": {
 			if (access === "shared") {

@@ -86,7 +86,7 @@ describe("the coordinator-free MCP tools", () => {
 		const before = server.requests.length;
 		await call("free_claims", { repo: "project" });
 		// One read: where the ref points, then fetch it.
-		expect(server.requests.slice(before)).toEqual(["GET refs?service=git-upload-pack", "GET refs?service=git-upload-pack", "POST git-upload-pack"]);
+		expect(server.requests.slice(before)).toEqual(["GET refs?service=git-upload-pack", "POST git-upload-pack"]);
 	});
 
 	it("reports a missing argument as a tool error", async () => {

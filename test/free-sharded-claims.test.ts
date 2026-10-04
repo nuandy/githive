@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { GitCasLog } from "../src/election-git";
 import { claimStore } from "../src/free/claim-store";
 import type { Registry } from "../src/free/claims";
-import { shardsPrefix } from "../src/free/shards";
+import { recordsRepoOf, shardsPrefix } from "../src/free/shards";
 import { entriesOverlap } from "../src/open-mode";
 import { startGitServer, type GitServer } from "./helpers/git-server";
 
@@ -110,5 +110,34 @@ describe("sharded claims", { timeout: 60_000 }, () => {
 		await store().claim(want("e-1", ["fresh/one/"]));
 		server.failFetches(1);
 		expect((await store().read()).claims.map((c) => c.change)).toContain("e-1");
+	});
+});
+
+describe("sharded claims across records repos", { timeout: 60_000 }, () => {
+	// Artifacts takes one push at a time per repo, so past about a hundred agents
+	// the shards are spread over several small records repos, by a hash of each
+	// shard: pushes to different records repos run side by side.
+	const records = (k: number) => server.repo(`rec-${k}`);
+	const spread = () =>
+		claimStore({ repo: "p", registry: { claims: [], released: [], shardDepth: 2, recordsRepos: 4 }, root: root(), remote, recordsRemote: async (k) => ({ url: records(k), token: "unused" }) });
+	const refsIn = (k: number) => (records(k), server.gitIn(`rec-${k}`, "for-each-ref", "--format=%(refname)", shardsPrefix("p")).trim().split("\n").filter(Boolean));
+
+	it("spreads the shards over the records repos, by hash, and reads them as one", async () => {
+		const areas = ["alpha", "beta", "gamma", "delta", "epsilon", "zeta", "eta", "theta"];
+		for (const [i, area] of areas.entries()) expect(await spread().claim(want(`c-${i}`, [`${area}/x/`]))).toMatchObject({ ok: true });
+		for (const [i, area] of areas.entries()) expect(refsIn(recordsRepoOf(`${area}/x`, 4))).toContain(`${shardsPrefix("p")}${area}%2Fx`);
+		expect(new Set(areas.map((a) => recordsRepoOf(`${a}/x`, 4))).size).toBeGreaterThan(1);
+		expect(shardRefs()).toEqual([]);
+		expect((await spread().read()).claims.map((c) => c.change)).toEqual(areas.map((_, i) => `c-${i}`));
+	});
+
+	it("still refuses across levels when the two shards are in different records repos", async () => {
+		// A wide claim and a deep one under it whose shards hash to different repos.
+		const area = ["a", "b", "c", "d", "e", "f", "g", "h"].find((x) => recordsRepoOf(x, 4) !== recordsRepoOf(`${x}/y`, 4))!;
+		await spread().claim(want("wide-1", [`${area}/`]));
+		expect(await spread().claim(want("deep-1", [`${area}/y/z.ts`]))).toMatchObject({ ok: false, conflicts: [{ change: "wide-1" }] });
+		await spread().release({ change: "wide-1", agent: "agent-wide-1", reason: "done" });
+		await spread().claim(want("deep-2", [`${area}/y/z.ts`]));
+		expect(await spread().claim(want("wide-2", [`${area}/`]))).toMatchObject({ ok: false, conflicts: [{ change: "deep-2" }] });
 	});
 });

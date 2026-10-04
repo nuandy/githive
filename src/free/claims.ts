@@ -56,6 +56,8 @@ export interface Registry {
 	access?: FreeAccess;
 	/** Claims are split into per-path shards this many segments deep (see shards.ts); absent, they're all here. */
 	shardDepth?: number;
+	/** The shards are spread over this many records repos (absent: they're in the project repo). */
+	recordsRepos?: number;
 	/** Registered agent names, each bound to one secret key. */
 	agents?: Record<string, AgentRecord>;
 }
@@ -82,11 +84,11 @@ export interface Conflict {
 const empty = (): Registry => ({ claims: [], released: [] });
 
 /** Start coordinator-free mode on a repo: the registry's first entry records main's baseline and the review policy. Harmless to repeat. */
-export async function startFree(log: CasLog<Registry>, input: { baseline: string; policy: ReviewPolicy; verify?: string[]; stampKey?: string; access?: FreeAccess; shardDepth?: number }) {
+export async function startFree(log: CasLog<Registry>, input: { baseline: string; policy: ReviewPolicy; verify?: string[]; stampKey?: string; access?: FreeAccess; shardDepth?: number; recordsRepos?: number }) {
 	const outcome = await appendRecord<Registry, "started">(log, "blueprint", empty, (state) =>
 		state.baseline
 			? { refused: "started" }
-			: { state: { ...state, baseline: input.baseline, policy: input.policy, verify: input.verify ?? [], stampKey: input.stampKey, access: input.access ?? "forks", ...(input.shardDepth ? { shardDepth: input.shardDepth } : {}) }, text: `Coordinator-free mode starts at ${input.baseline}` },
+			: { state: { ...state, baseline: input.baseline, policy: input.policy, verify: input.verify ?? [], stampKey: input.stampKey, access: input.access ?? "forks", ...(input.shardDepth ? { shardDepth: input.shardDepth } : {}), ...(input.shardDepth && input.recordsRepos ? { recordsRepos: input.recordsRepos } : {}) }, text: `Coordinator-free mode starts at ${input.baseline}` },
 	);
 	return { started: outcome.ok };
 }

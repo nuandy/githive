@@ -26,4 +26,9 @@ describe("appendRecord under contention", () => {
 		// It backed off between attempts rather than spinning.
 		expect(Date.now() - started).toBeGreaterThan(20);
 	}, 20_000);
+
+	it("says the Git server is busy when that, not another writer, kept the append out", async () => {
+		const busy = { read: async () => null, append: async () => null, lastRefusal: "busy" as const };
+		await expect(appendRecord(busy, "me", empty, bump)).rejects.toThrow("[503] the Git server stayed busy; try again");
+	}, 30_000);
 });

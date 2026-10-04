@@ -21,6 +21,9 @@ const onAuth = (remote: Remote) => () => ({
 	password: remote.token.split("?expires=")[0],
 });
 
+/** Whether a ref listing failed only because the repo is empty (no HEAD yet): it then has no refs. */
+export const isEmptyRepo = (err: unknown) => (err as { code?: string })?.code === "NotFoundError" && /HEAD/.test(String((err as Error)?.message));
+
 /** A branch's head on a remote, without cloning (one ls-remote), or null when it doesn't exist. */
 export async function branchHead(remote: Remote, branch: string): Promise<string | null> {
 	const refs = await retryTransient(() => git.listServerRefs({ http, url: remote.url, prefix: `refs/heads/${branch}`, onAuth: onAuth(remote) }));

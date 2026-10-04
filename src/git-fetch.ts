@@ -9,7 +9,7 @@ import { MemoryFS } from "./memory-fs";
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
-const DIR = "/fetched";
+const FETCHED = "/fetched";
 
 const pktLine = (line: string) => {
 	const payload = encoder.encode(line);
@@ -31,13 +31,14 @@ const concat = (parts: Uint8Array[]) => {
  * blobs, without history, in one upload-pack request. Returns an in-memory
  * repo holding them. A server error carries its status, for retries.
  */
-export async function fetchCommits(remote: Remote, oids: string[]) {
+export async function fetchCommits(remote: Remote, oids: string[], dir = FETCHED, { history = false } = {}) {
 	const fs = new MemoryFS();
-	await git.init({ fs, dir: DIR });
-	if (!oids.length) return { fs, dir: DIR };
+	await git.init({ fs, dir });
+	if (!oids.length) return { fs, dir };
 	const body = concat([
-		...oids.flatMap((oid, i) => pktLine(`want ${oid}${i === 0 ? " side-band-64k ofs-delta shallow no-progress agent=blueprint" : ""}\n`)),
-		...pktLine("deepen 1\n"),
+		...oids.flatMap((oid, i) => pktLine(`want ${oid}${i === 0 ? ` side-band-64k ofs-delta${history ? "" : " shallow"} no-progress agent=blueprint` : ""}\n`)),
+		// Just the commits, or (history) everything behind them too.
+		...(history ? [] : pktLine("deepen 1\n")),
 		encoder.encode("0000"),
 		...pktLine("done\n"),
 	]);
@@ -75,7 +76,7 @@ export async function fetchCommits(remote: Remote, oids: string[]) {
 		else if (payload[0] === 3) throw new Error(`fetch failed: ${decoder.decode(payload.subarray(1)).trim()}`);
 	}
 	const filepath = ".git/objects/pack/pack-fetched.pack";
-	await fs.promises.writeFile(`${DIR}/${filepath}`, concat(pack));
-	await git.indexPack({ fs, dir: DIR, filepath });
-	return { fs, dir: DIR };
+	await fs.promises.writeFile(`${dir}/${filepath}`, concat(pack));
+	await git.indexPack({ fs, dir, filepath });
+	return { fs, dir };
 }

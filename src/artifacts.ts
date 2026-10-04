@@ -172,3 +172,20 @@ export async function forkAndWait(artifacts: Artifacts, source: string, name: st
 		}
 	}
 }
+
+/** Make a repo unless it exists already, and wait until it can be used. */
+export async function ensureRepo(artifacts: Artifacts, name: string, description: string) {
+	await retryTransient(() => artifacts.create(name, { description })).catch((err) => {
+		if (!alreadyExists(err)) throw err;
+	});
+	const started = Date.now();
+	for (let delay = 100; ; delay = Math.min(delay * 2, 2_000)) {
+		try {
+			return await withRepo(artifacts, name, async () => undefined, { retry: false });
+		} catch (err) {
+			if (!isTransientFailure(err) && !isForkPending(err) && !notFoundYet(err)) throw err;
+			if (Date.now() - started > FORK_READY_MS) throw new Error(`repo ${name} not ready after ${FORK_READY_MS / 1000}s: ${err}`);
+			await scheduler.wait(delay);
+		}
+	}
+}

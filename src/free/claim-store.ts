@@ -2,11 +2,11 @@ import git from "isomorphic-git";
 import http from "isomorphic-git/http/web";
 import type { CasLog } from "../election";
 import { GitCasLog } from "../election-git";
-import type { Remote } from "../git";
+import { isEmptyRepo, type Remote } from "../git";
 import { fetchCommits } from "../git-fetch";
 import { retryTransient } from "../retry";
 import { activeClaims, claim, conflictsWith, release, releaseStale, withdraw, type ClaimRecord, type Conflict, type Registry, type ReleaseRecord } from "./claims";
-import { ancestorsOf, decodeShard, encodeShard, isWide, shardOf, shardRef, shardsPrefix } from "./shards";
+import { ancestorsOf, decodeShard, encodeShard, isWide, recordsRepoOf, shardOf, shardRef, shardsPrefix } from "./shards";
 import type { Stamper } from "./stamp";
 
 // Where a repo's claims are kept: all in its claims registry (repos started
@@ -52,7 +52,9 @@ export interface StoreInput {
 	root: CasLog<Registry>;
 	rootHead?: Awaited<ReturnType<CasLog<Registry>["read"]>>;
 	remote: () => Promise<Remote>;
-	/** A shard's log, if the caller keeps them across calls. */
+	/** A records repo's credentials, when the registry spreads shards over records repos. */
+	recordsRemote?: (k: number) => Promise<Remote>;
+	/** A shard's log in the project repo, if the caller keeps them across calls. */
 	log?: (ref: string) => CasLog<Registry> & Pick<GitCasLog<Registry>, "readAt">;
 }
 
@@ -71,7 +73,7 @@ const decoder = new TextDecoder();
 async function readAllShards(remote: Remote, prefix: string): Promise<{ ref: string; tip: string; state: Registry }[]> {
 	const onAuth = () => ({ username: "x", password: remote.token.split("?expires=")[0] });
 	for (let attempt = 1; ; attempt++) {
-		const listed = (await retryTransient(() => git.listServerRefs({ http, url: remote.url, prefix, onAuth }))).filter((r) => r.ref.startsWith(prefix));
+		const listed = (await retryTransient(() => git.listServerRefs({ http, url: remote.url, prefix, onAuth }).catch((err) => (isEmptyRepo(err) ? [] : Promise.reject(err))))).filter((r) => r.ref.startsWith(prefix));
 		const missing = [...new Set(listed.map((r) => r.oid).filter((oid) => !shardStates.has(oid)))];
 		try {
 			if (missing.length) {
@@ -140,24 +142,48 @@ class ShardedClaims implements ClaimStore {
 		private readonly depth: number,
 	) {}
 
+	/** How many records repos the shards are spread over (0: they're in the project repo). */
+	private get spread() {
+		return this.input.recordsRemote ? (this.input.registry?.recordsRepos ?? 0) : 0;
+	}
+
+	/** Where a shard's ref lives: its records repo, or the project repo. */
+	private remoteOf(shard: string) {
+		return this.spread ? () => this.input.recordsRemote!(recordsRepoOf(shard, this.spread)) : this.input.remote;
+	}
+
+	/** Every repo that holds shards. */
+	private remotes() {
+		return this.spread ? Array.from({ length: this.spread }, (_, k) => this.input.recordsRemote!(k)) : [this.input.remote()];
+	}
+
 	private logOf(shard: string) {
 		const ref = shardRef(this.input.repo, shard);
 		let log = this.logs.get(ref);
-		if (!log) this.logs.set(ref, (log = this.input.log?.(ref) ?? new GitCasLog<Registry>(this.input.remote, this.input.repo, ref)));
+		if (!log) this.logs.set(ref, (log = (!this.spread && this.input.log?.(ref)) || new GitCasLog<Registry>(this.remoteOf(shard), this.input.repo, ref)));
 		return log;
 	}
 
-	/** The shards whose refs start with `prefix`, with their tips: one listing. */
+	/** The shards whose refs start with `prefix`, with their tips: one listing per repo holding shards. */
 	private async list(prefix = shardsPrefix(this.input.repo)) {
-		const remote = await this.input.remote();
-		const refs = await retryTransient(() => git.listServerRefs({ http, url: remote.url, prefix, onAuth: () => ({ username: "x", password: remote.token.split("?expires=")[0] }) }));
 		const base = shardsPrefix(this.input.repo);
-		return refs.filter((r) => r.ref.startsWith(prefix)).map((r) => ({ shard: decodeShard(r.ref.slice(base.length)), tip: r.oid }));
+		const listed = await Promise.all(
+			this.remotes().map(async (pending) => {
+				const remote = await pending;
+				const refs = await retryTransient(() =>
+					git
+						.listServerRefs({ http, url: remote.url, prefix, onAuth: () => ({ username: "x", password: remote.token.split("?expires=")[0] }) })
+						.catch((err) => (isEmptyRepo(err) ? [] : Promise.reject(err))),
+				);
+				return refs.filter((r) => r.ref.startsWith(prefix)).map((r) => ({ shard: decodeShard(r.ref.slice(base.length)), tip: r.oid }));
+			}),
+		);
+		return listed.flat();
 	}
 
 	async read(): Promise<ClaimsView> {
 		const prefix = shardsPrefix(this.input.repo);
-		const shards = await readAllShards(await this.input.remote(), prefix);
+		const shards = (await Promise.all(this.remotes().map(async (remote) => readAllShards(await remote, prefix)))).flat();
 		const tips = new Map<string, string>();
 		const records: ClaimRecord[] = [];
 		const released: ReleaseRecord[] = [];

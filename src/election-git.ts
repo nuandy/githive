@@ -1,8 +1,9 @@
 import git from "isomorphic-git";
 import http from "isomorphic-git/http/web";
 import type { CasLog, CommitKind, LogCommit } from "./election";
-import { BOT, type Remote } from "./git";
+import { BOT, isEmptyRepo, type Remote } from "./git";
 import { type LedgerEntry, noteLine, notesRef } from "./ledger";
+import { fetchCommits } from "./git-fetch";
 import { MemoryFS } from "./memory-fs";
 import { retryTransient } from "./retry";
 
@@ -86,7 +87,7 @@ async function pushDirect(remote: Remote, ref: string, from: string | null, to: 
 		// Busy: the repo is taking another push. Nothing was applied, so it is safe to send again.
 		if (!report.some((line) => line.startsWith("ERR") && /busy/i.test(line))) break;
 		// Still busy: report it as not landed, and the caller reads the log and tries again.
-		if (attempt === BUSY_ATTEMPTS) return false;
+		if (attempt === BUSY_ATTEMPTS) return "busy" as const;
 		await new Promise((resolve) => setTimeout(resolve, Math.min(50 * 2 ** attempt, 1_500) * (0.5 + Math.random())));
 	}
 	if (!report.includes("unpack ok")) throw new Error(`push to ${ref} failed: ${report.join("; ")}`);
@@ -98,29 +99,36 @@ async function pushDirect(remote: Remote, ref: string, from: string | null, to: 
 /** Where the ref points on the server, or null if it doesn't exist (one request). */
 async function serverTip(remote: Remote, ref: string) {
 	// Ask the server whether the log exists, rather than reading a fetch error as "empty".
-	const refs = await git.listServerRefs({ http, url: remote.url, prefix: ref, onAuth: onAuth(remote) });
+	const refs = await git.listServerRefs({ http, url: remote.url, prefix: ref, onAuth: onAuth(remote) }).catch((err) => (isEmptyRepo(err) ? [] : Promise.reject(err)));
 	return refs.find((r) => r.ref === ref)?.oid ?? null;
 }
 
-/** An empty in-memory repo with the ref's tip fetched. */
-async function fetchTip(remote: Remote, ref: string) {
+/** An empty in-memory repo for a log with nothing in it. */
+async function emptyLog() {
 	const fs = new MemoryFS();
 	await git.init({ fs, dir: DIR });
-	await git.addRemote({ fs, dir: DIR, remote: "origin", url: remote.url });
-	// isomorphic-git only fetches refs its remote's refspec maps; the default covers branches only.
-	await git.setConfig({ fs, dir: DIR, path: "remote.origin.fetch", value: "+refs/notes/*:refs/remotes/origin/notes/*" });
-	const { fetchHead } = await git.fetch({ fs, http, dir: DIR, remote: "origin", ref, remoteRef: ref, singleBranch: true, tags: false, depth: 1, onAuth: onAuth(remote) });
-	return { fs, tip: fetchHead ?? null };
+	return { fs, tip: null };
+}
+
+/**
+ * The commit `tip` of `ref`, fetched alone in one request (no ref discovery,
+ * and no need for the repo to have a HEAD). If the ref has moved on from it
+ * meanwhile, the server won't serve it: fetch the new tip instead.
+ */
+async function fetchAt(remote: Remote, ref: string, tip: string): Promise<{ fs: MemoryFS; tip: string | null }> {
+	try {
+		return { fs: (await fetchCommits(remote, [tip], DIR)).fs, tip };
+	} catch (err) {
+		if (!/not our ref|fetch refused/i.test(String(err))) throw err;
+		const now = await serverTip(remote, ref);
+		return now ? { fs: (await fetchCommits(remote, [now], DIR)).fs, tip: now } : emptyLog();
+	}
 }
 
 /** The ref's tip in an in-memory repo, or an empty repo if the ref doesn't exist. */
 async function openTip(remote: Remote, ref: string) {
-	if (!(await serverTip(remote, ref))) {
-		const fs = new MemoryFS();
-		await git.init({ fs, dir: DIR });
-		return { fs, tip: null };
-	}
-	return fetchTip(remote, ref);
+	const tip = await serverTip(remote, ref);
+	return tip ? fetchAt(remote, ref, tip) : emptyLog();
 }
 
 /**
@@ -154,6 +162,8 @@ export class GitCasLog<S> implements CasLog<S> {
 	 */
 	private held: { fs: MemoryFS; tip: string } | null = null;
 
+	lastRefusal: "moved" | "busy" | null = null;
+
 	/** The task's decision log, or another ref (its lease ref) with the same commits. */
 	constructor(
 		private readonly remote: () => Promise<Remote>,
@@ -174,7 +184,7 @@ export class GitCasLog<S> implements CasLog<S> {
 		const remote = await this.remote();
 		if (!current) return null;
 		// Fetch only if the tip moved since this log last saw it.
-		const { fs, tip } = this.held?.tip === current ? this.held : await retryTransient(() => fetchTip(remote, this.ref));
+		const { fs, tip } = this.held?.tip === current ? this.held : await retryTransient(() => fetchAt(remote, this.ref, current));
 		if (!tip) return null;
 		this.held = { fs, tip };
 		const { commit } = await git.readCommit({ fs, dir: DIR, oid: tip });
@@ -228,16 +238,17 @@ export class GitCasLog<S> implements CasLog<S> {
 			commit: { message: message(commit), tree, parent: tip ? [tip] : [], author: signature(), committer: signature() },
 		});
 		await git.writeRef({ fs, dir: DIR, ref: this.ref, value: oid, force: true });
-		let landed: boolean;
+		let landed: boolean | "busy";
 		try {
 			landed = await pushDirect(remote, this.ref, tip, oid, fs, [...added, tree, oid]);
 		} catch (err) {
 			this.held = null;
 			throw err;
 		}
-		// Not landed: the ref moved since `tip`, and compare-and-swap lost.
-		this.held = landed ? { fs, tip: oid } : null;
-		return landed ? oid : null;
+		// Not landed: the ref moved since `tip` and compare-and-swap lost, or the server stayed busy.
+		this.held = landed === true ? { fs, tip: oid } : null;
+		this.lastRefusal = landed === true ? null : landed === "busy" ? "busy" : "moved";
+		return landed === true ? oid : null;
 	}
 }
 

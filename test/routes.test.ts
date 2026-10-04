@@ -83,7 +83,7 @@ describe("dashboard reads", () => {
 			ARTIFACTS: {
 				list: vi.fn(async ({ cursor }: { cursor?: string }) =>
 					cursor
-						? { repos: [{ name: "alpha" }, { name: "abcd1234--b" }] }
+						? { repos: [{ name: "alpha" }, { name: "abcd1234--b" }, { name: "free--alpha--a-1" }, { name: "free-records--alpha--3" }] }
 						: { repos: [{ name: "zeta" }, { name: "abcd1234--a" }, { name: "abcd1234--base" }], cursor: "next" },
 				),
 			},
@@ -91,7 +91,7 @@ describe("dashboard reads", () => {
 		return { env: env as never, builders, reviewers, list: env.ARTIFACTS.list };
 	}
 
-	it("lists project repos from every page, without task forks, sorted", async () => {
+	it("lists project repos from every page, without task forks or coordinator-free forks and records, sorted", async () => {
 		const { env, list } = readEnv();
 		const res = await get(env, "/repos");
 		expect(await res.json()).toEqual([{ name: "alpha" }, { name: "zeta" }]);

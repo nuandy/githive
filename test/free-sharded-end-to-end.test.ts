@@ -51,4 +51,22 @@ describe("coordinator-free with sharded claims", { timeout: 60_000 }, () => {
 		expect(await call("free_status", { change: "a-1" })).toMatchObject({ claim: null, released: { reason: "merged", mergedAs: merged.commit } });
 		expect(await call("free_audit", {})).toEqual({ merges: 1, open: 0, violations: [] });
 	});
+
+	it("spreads claims over records repos, merges, and audits clean from all of them", async () => {
+		const created: number[] = [];
+		const spread = (): FreeContext => ({
+			...ctx(),
+			recordsRemote: async (_repo, k) => ({ url: server.repo(`rec-${k}`), token: "unused" }),
+			createRecordsRepos: async (_repo, count) => void created.push(count),
+		});
+		const callSpread = (name: string, args: Record<string, unknown>) => callFreeTool(name, { repo: "p", ...args }, spread()) as Promise<Record<string, unknown>>;
+		expect(await callSpread("free_start", { access: "shared", required: 1, vetoes: [], records_repos: 4 })).toMatchObject({ shardDepth: 2, recordsRepos: 4 });
+		expect(created).toEqual([4]);
+		for (const area of ["alpha", "beta", "gamma"]) expect(await callSpread("free_claim", { change: `${area}-1`, agent: `agent-${area}`, paths: [`${area}/x/`], intent: area })).toMatchObject({ ok: true });
+		const head = await pushChange(server.url, work, "agent-alpha", "alpha-1", { "alpha/x/a.ts": "a\n" });
+		await callSpread("free_vote", { commit: head, reviewer: "rev-1", role: "tests", verdict: "approve", evidence: "ok" });
+		expect(await callSpread("free_merge", { change: "alpha-1", agent: "agent-alpha" })).toMatchObject({ ok: true });
+		expect(await callSpread("free_audit", {})).toEqual({ merges: 1, open: 0, violations: [] });
+		expect(((await callSpread("free_claims", {})) as unknown as { change: string }[]).map((c) => c.change)).toEqual(["beta-1", "gamma-1"]);
+	});
 });

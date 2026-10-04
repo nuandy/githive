@@ -1,7 +1,8 @@
 import git from "isomorphic-git";
 import http from "isomorphic-git/http/web";
-import { type Remote, Workspace } from "../git";
-import { MemoryFS } from "../memory-fs";
+import { isEmptyRepo, type Remote, Workspace } from "../git";
+import { fetchCommits } from "../git-fetch";
+import { retryTransient } from "../retry";
 import type { MergeRecord } from "./audit";
 import type { Registry } from "./claims";
 import { decodeShard, shardsPrefix } from "./shards";
@@ -16,16 +17,11 @@ const decoder = new TextDecoder();
 
 /** Every state a record ref has had, oldest first, with the commit that set it. */
 export async function readRecordHistory<S>(remote: Remote, ref: string): Promise<{ tip: string; state: S }[]> {
-	const refs = await git.listServerRefs({ http, url: remote.url, prefix: ref, onAuth: onAuth(remote) });
-	if (!refs.some((r) => r.ref === ref)) return [];
-	const fs = new MemoryFS();
-	await git.init({ fs, dir: DIR });
-	await git.addRemote({ fs, dir: DIR, remote: "origin", url: remote.url });
-	await git.setConfig({ fs, dir: DIR, path: "remote.origin.fetch", value: "+refs/notes/*:refs/remotes/origin/notes/*" });
-	const { fetchHead } = await git.fetch({ fs, http, dir: DIR, remote: "origin", ref, remoteRef: ref, singleBranch: true, tags: false, onAuth: onAuth(remote) });
-	if (!fetchHead) return [];
-	await git.writeRef({ fs, dir: DIR, ref: "refs/record", value: fetchHead, force: true });
-	const history = (await git.log({ fs, dir: DIR, ref: "refs/record" })).reverse();
+	const refs = await git.listServerRefs({ http, url: remote.url, prefix: ref, onAuth: onAuth(remote) }).catch((err) => (isEmptyRepo(err) ? [] : Promise.reject(err)));
+	const tip = refs.find((r) => r.ref === ref)?.oid;
+	if (!tip) return [];
+	const { fs } = await retryTransient(() => fetchCommits(remote, [tip], DIR, { history: true }));
+	const history = (await git.log({ fs, dir: DIR, ref: tip })).reverse();
 	return Promise.all(
 		history.map(async (entry) => ({
 			tip: entry.oid,
@@ -34,12 +30,16 @@ export async function readRecordHistory<S>(remote: Remote, ref: string): Promise
 	);
 }
 
-/** Every claims shard's history (see shards.ts), by shard. */
-export async function readShardHistories(remote: Remote, repo: string) {
+/** Every claims shard's history (see shards.ts), by shard, from every repo that holds shards. */
+export async function readShardHistories(remotes: Remote[], repo: string) {
 	const prefix = shardsPrefix(repo);
-	const refs = await git.listServerRefs({ http, url: remote.url, prefix, onAuth: onAuth(remote) });
-	const histories = await Promise.all(refs.filter((r) => r.ref.startsWith(prefix)).map(async (r) => [decodeShard(r.ref.slice(prefix.length)), await readRecordHistory<Registry>(remote, r.ref)] as const));
-	return new Map(histories);
+	const perRepo = await Promise.all(
+		remotes.map(async (remote) => {
+			const refs = await git.listServerRefs({ http, url: remote.url, prefix, onAuth: onAuth(remote) }).catch((err) => (isEmptyRepo(err) ? [] : Promise.reject(err)));
+			return Promise.all(refs.filter((r) => r.ref.startsWith(prefix)).map(async (r) => [decodeShard(r.ref.slice(prefix.length)), await readRecordHistory<Registry>(remote, r.ref)] as const));
+		}),
+	);
+	return new Map(perRepo.flat());
 }
 
 const trailer = (message: string, name: string) => message.match(new RegExp(`^${name}: (.+)$`, "m"))?.[1]?.trim();

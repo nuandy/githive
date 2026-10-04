@@ -1,10 +1,11 @@
-import { forkAndWait, headOf, remoteFor, reviewerName } from "../artifacts";
+import { ensureRepo, forkAndWait, headOf, remoteFor, reviewerName } from "../artifacts";
 import { GitCasLog } from "../election-git";
 import { fail } from "../errors";
 import { type Remote, Workspace } from "../git";
 import { claimStore } from "./claim-store";
 import type { Registry } from "./claims";
 import type { FreeContext, HostedStatus } from "./mcp";
+import { recordsRepoName } from "./shards";
 import { makeStamper } from "./stamp";
 
 // Coordinator-free mode wired to Cloudflare: Artifacts for Git, the Gate's
@@ -45,6 +46,10 @@ export function freeContextFor(env: Env, by: string | undefined, caller: { agent
 		stamper: async (agent) => (env.FREE_STAMP_KEY && by ? makeStamper(env.FREE_STAMP_KEY, agent ? `${by}/${agent}` : by) : undefined),
 		remote: (repo, scope) => cached(`${repo}|${scope}`, () => remoteFor(env.ARTIFACTS, repo, scope, 3600)),
 		changeRemote: (repo, change, scope) => cached(`${freeAgentName(repo, change)}|${scope}`, () => changeRemote(env, repo, change, scope, 3600)),
+		recordsRemote: (repo, k, scope) => cached(`${recordsRepoName(repo, k)}|${scope}`, () => remoteFor(env.ARTIFACTS, recordsRepoName(repo, k), scope, 3600)),
+		createRecordsRepos: async (repo, count) => {
+			await Promise.all(Array.from({ length: count }, (_, k) => ensureRepo(env.ARTIFACTS, recordsRepoName(repo, k), `Coordinator-free claim records for ${repo}`)));
+		},
 		records: <S>(repo: string, ref: string) => {
 			let log = logs.get(ref);
 			if (!log) logs.set(ref, (log = new GitCasLog<unknown>(() => cached(`${repo}|write`, () => remoteFor(env.ARTIFACTS, repo, "write", 3600)), repo, ref)));
@@ -83,7 +88,7 @@ async function changeBrief(env: Env, repo: string, change: string) {
 	const read = await remoteFor(env.ARTIFACTS, repo, "read", 3 * 3600);
 	const root = new GitCasLog<Registry>(async () => read, repo, claimsRef(repo));
 	const registry = (await root.read())?.commit.state;
-	const { claims } = await claimStore({ repo, registry, root, remote: async () => read }).read();
+	const { claims } = await claimStore({ repo, registry, root, remote: async () => read, recordsRemote: (k) => remoteFor(env.ARTIFACTS, recordsRepoName(repo, k), "read", 3 * 3600) }).read();
 	const own = claims.find((c) => c.change === change);
 	return {
 		read,
