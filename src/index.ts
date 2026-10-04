@@ -12,6 +12,7 @@ import type { Blueprint, Limits, Review, ReviewPolicy, Task } from "./types";
 import { openTaskId } from "./open-mode";
 import { handleMcpBody, type McpContext } from "./mcp";
 import type { FreeContext } from "./free/mcp";
+import { identityLabel, makeStamper } from "./free/stamp";
 
 export { Builder } from "./builder";
 export { Reviewer } from "./reviewer";
@@ -176,7 +177,9 @@ app.post("/tasks/:id/changes/:slice/abandon", async (c) => {
 app.get("/tasks/:id/claims", async (c) => c.json(await coordinator(c.env, c.req.param("id")).claims()));
 
 /** Coordinator-free mode's tools (an exploration; see docs/coordinator-free.md): stateless, Git only. */
-const freeContext = (env: Env): FreeContext => ({
+const freeContext = (env: Env, identity: AccessIdentity | undefined): FreeContext => ({
+	// What this caller writes is stamped with who they are, as Access verified them.
+	stamper: async () => (env.FREE_STAMP_KEY && identity ? makeStamper(env.FREE_STAMP_KEY, identityLabel(identity)) : undefined),
 	remote: (repo, scope) => remoteFor(env.ARTIFACTS, repo, scope, 3600),
 	head: async (repo) => (await headOf(env.ARTIFACTS, repo)) ?? fail(409, `${repo} has no commits`),
 	// Checks run in the Gate's container, one Gate per repo.
@@ -194,7 +197,7 @@ app.post("/mcp", async (c) => {
 	const result = await handleMcpBody(body, {
 		coordinator: (id) => coordinator(c.env, id) as unknown as ReturnType<McpContext["coordinator"]>,
 		openRepo: (repo) => openRepoTask(c.env, repo),
-		free: freeContext(c.env),
+		free: freeContext(c.env, c.get("accessIdentity")),
 		identity: c.get("accessIdentity"),
 	});
 	return result === null ? c.body(null, 202) : c.json(result);

@@ -6,6 +6,7 @@ import { audit } from "./audit";
 import { activeClaims, claim, release, releaseStale, startFree, type Registry } from "./claims";
 import { readMainMerges, readRecordHistory } from "./git-records";
 import { type CheckRunner, mergeChange } from "./merge";
+import type { Stamper } from "./stamp";
 import { vote, type ReviewPolicy, type Votes } from "./votes";
 
 // The coordinator-free MCP tools (see docs/coordinator-free.md). Stateless: each
@@ -20,6 +21,8 @@ export interface FreeContext {
 	head: (repo: string) => Promise<string>;
 	/** Runs a repo's checks on main plus a change (live, the Gate's container). */
 	runChecks?: (repo: string) => CheckRunner;
+	/** Stamps what this caller writes with their verified identity (Blueprint's key); without it, nothing is stamped. */
+	stamper?: () => Promise<Stamper | undefined>;
 }
 
 const DEFAULT_POLICY: ReviewPolicy = { required: 2, vetoes: ["security"] };
@@ -57,6 +60,7 @@ export async function callFreeTool(name: string, args: Args, ctx: FreeContext): 
 	const claims = new GitCasLog<Registry>(write, repo, claimsRef(repo));
 	const votes = new GitCasLog<Votes>(write, repo, votesRef(repo));
 	const policyOf = async () => (await claims.read())?.commit.state.policy ?? DEFAULT_POLICY;
+	const stamper = await ctx.stamper?.();
 	switch (name) {
 		case "free_start": {
 			const policy: ReviewPolicy = {
@@ -64,7 +68,7 @@ export async function callFreeTool(name: string, args: Args, ctx: FreeContext): 
 				vetoes: Array.isArray(args.vetoes) ? (args.vetoes as string[]) : DEFAULT_POLICY.vetoes,
 			};
 			const verify = Array.isArray(args.verify) ? (args.verify as string[]).filter((c) => typeof c === "string" && c.trim()) : [];
-			await startFree(claims, { baseline: await ctx.head(repo), policy, verify });
+			await startFree(claims, { baseline: await ctx.head(repo), policy, verify, stampKey: stamper?.publicKey });
 			const registry = (await claims.read())?.commit.state;
 			return { repo, policy: registry?.policy ?? policy, verify: registry?.verify ?? [], instructions: FREE_INSTRUCTIONS };
 		}
@@ -80,17 +84,17 @@ export async function callFreeTool(name: string, args: Args, ctx: FreeContext): 
 				agent: requiredString(args, "agent"),
 				paths: normalizeClaim(requiredPaths(args, "paths")),
 				intent: requiredString(args, "intent"),
-			});
+			}, stamper);
 		case "free_release": {
 			const change = requiredString(args, "change");
 			const agent = requiredString(args, "agent");
-			if (args.stale === true) return releaseStale(claims, { change, agent, staleAfterMs: STALE_AFTER_MS });
-			return release(claims, { change, agent, reason: typeof args.reason === "string" ? args.reason : "released" });
+			if (args.stale === true) return releaseStale(claims, { change, agent, staleAfterMs: STALE_AFTER_MS }, stamper);
+			return release(claims, { change, agent, reason: typeof args.reason === "string" ? args.reason : "released" }, stamper);
 		}
 		case "free_vote": {
 			const verdict = requiredString(args, "verdict");
 			if (verdict !== "approve" && verdict !== "reject") throw new Error("[400] verdict is approve or reject");
-			return vote(votes, { commit: requiredString(args, "commit"), reviewer: requiredString(args, "reviewer"), role: requiredString(args, "role"), verdict, evidence: requiredString(args, "evidence") });
+			return vote(votes, { commit: requiredString(args, "commit"), reviewer: requiredString(args, "reviewer"), role: requiredString(args, "role"), verdict, evidence: requiredString(args, "evidence") }, stamper);
 		}
 		case "free_merge": {
 			const registry = (await claims.read())?.commit.state;
@@ -101,6 +105,8 @@ export async function callFreeTool(name: string, args: Args, ctx: FreeContext): 
 				policy: registry?.policy ?? DEFAULT_POLICY,
 				verify: registry?.verify ?? [],
 				runChecks: ctx.runChecks?.(repo),
+				stamper,
+				stampKey: registry?.stampKey,
 				change: requiredString(args, "change"),
 				agent: requiredString(args, "agent"),
 			});
@@ -111,7 +117,7 @@ export async function callFreeTool(name: string, args: Args, ctx: FreeContext): 
 			const baseline = registry[0]?.state.baseline;
 			if (!baseline) throw new Error(`[409] coordinator-free mode hasn't started on ${repo}`);
 			const merges = await readMainMerges(remote, baseline);
-			const violations = audit({ registry, votes: await readRecordHistory<Votes>(remote, votesRef(repo)), policy: registry[0].state.policy ?? DEFAULT_POLICY, verify: registry[0].state.verify, merges });
+			const violations = await audit({ registry, votes: await readRecordHistory<Votes>(remote, votesRef(repo)), policy: registry[0].state.policy ?? DEFAULT_POLICY, verify: registry[0].state.verify, merges });
 			return { merges: merges.length, violations };
 		}
 		default:

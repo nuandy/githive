@@ -3,6 +3,8 @@ import type { CasLog } from "../election";
 import { BOT, type Remote, Workspace } from "../git";
 import { inLane } from "../open-mode";
 import { release, type Registry } from "./claims";
+import { mergeStampPayload } from "./audit";
+import { type Stamper, stampPayload, verifyStamp } from "./stamp";
 import { approval, type ReviewPolicy, type Votes } from "./votes";
 
 // The toolkit's merge for a cooperative agent in coordinator-free mode. It
@@ -33,6 +35,10 @@ export interface MergeInput {
 	/** The project's checks; none means the merge isn't tested. */
 	verify?: string[];
 	runChecks?: CheckRunner;
+	/** Stamps the merge (and the release) with the caller's verified identity. */
+	stamper?: Stamper;
+	/** The registry's stamp key: when set, only stamped votes count. */
+	stampKey?: string;
 	change: string;
 	agent: string;
 }
@@ -63,7 +69,10 @@ export async function mergeChange(input: MergeInput): Promise<MergeOutcome> {
 			if (holder) reasons.push(`${file} is inside ${holder.change}'s claim (${holder.agent})`);
 			else if (own && !inLane(file, own.paths)) reasons.push(`${file} is outside ${input.change}'s claim`);
 		}
-		const outcome = approval(votesHead?.commit.state, head, input.policy);
+		const cast = votesHead?.commit.state.votes ?? [];
+		const stampKey = input.stampKey;
+		const counted = stampKey ? (await Promise.all(cast.map(async (v) => ((await verifyStamp(stampKey, stampPayload("vote", v), v.stamp)) ? v : null)))).filter((v) => v !== null) : cast;
+		const outcome = approval({ votes: counted }, head, input.policy);
 		if (outcome.vetoedBy.length) reasons.push(`${head} is vetoed by ${outcome.vetoedBy.join(", ")}`);
 		else if (!outcome.approved) reasons.push(`${head} has ${outcome.approvals} of ${input.policy.required} approvals`);
 		if (reasons.length) return { ok: false, reasons };
@@ -89,15 +98,18 @@ export async function mergeChange(input: MergeInput): Promise<MergeOutcome> {
 			}
 		}
 
+		const claimed = { base: main, head, change: input.change, author: input.agent, by: input.stamper?.by, claimsTip: claimsHead!.tip, votesTip: votesHead!.tip, testedOn: verify.length ? main : undefined };
 		const message = [
 			`Merge ${input.change} by ${input.agent}`,
 			"",
 			`Blueprint-Change: ${input.change}`,
 			`Blueprint-Agent: ${input.agent}`,
-			`Blueprint-Claims: ${claimsHead!.tip}`,
-			`Blueprint-Votes: ${votesHead!.tip}`,
+			`Blueprint-Claims: ${claimed.claimsTip}`,
+			`Blueprint-Votes: ${claimed.votesTip}`,
 			// Which main the checks passed on: the merge's first parent, if nothing moved.
-			...(verify.length ? [`Blueprint-Tested: ${main}`] : []),
+			...(claimed.testedOn ? [`Blueprint-Tested: ${claimed.testedOn}`] : []),
+			// Who asked for it, as Access verified them, and Blueprint's stamp over all of the above.
+			...(input.stamper ? [`Blueprint-By: ${input.stamper.by}`, `Blueprint-Stamp: ${await input.stamper.stamp(mergeStampPayload(claimed))}`] : []),
 			"",
 		].join("\n");
 		// Always a merge commit, never a fast-forward: the merge's trailers are what the audit reads.
@@ -110,7 +122,7 @@ export async function mergeChange(input: MergeInput): Promise<MergeOutcome> {
 			if (attempt < ATTEMPTS && (err instanceof git.Errors.PushRejectedError || err instanceof git.Errors.GitPushError)) continue;
 			throw err;
 		}
-		await release(input.claims, { change: input.change, agent: input.agent, reason: "merged", mergedAs: oid });
+		await release(input.claims, { change: input.change, agent: input.agent, reason: "merged", mergedAs: oid }, input.stamper);
 		return { ok: true, commit: oid };
 	}
 }

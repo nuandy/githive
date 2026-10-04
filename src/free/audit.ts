@@ -1,6 +1,7 @@
 import { inLane } from "../open-mode";
 import type { Registry } from "./claims";
-import { approval, type ReviewPolicy, type Votes } from "./votes";
+import { stampPayload, verifyStamp } from "./stamp";
+import { approval, type ReviewPolicy, type VoteRecord, type Votes } from "./votes";
 
 // The coordinator-free audit (see docs/coordinator-free.md). Nothing stops an
 // agent from breaking a convention, so this replays the records and reports
@@ -23,15 +24,27 @@ export interface MergeRecord {
 	base?: string;
 	/** From its Blueprint-Tested trailer: the main the checks passed on. */
 	testedOn?: string;
+	/** From its Blueprint-By and Blueprint-Stamp trailers: who asked the toolkit to merge, as Access verified them, and Blueprint's stamp. */
+	by?: string;
+	stamp?: string;
 	/** Files the merge changed. */
 	files: string[];
 }
 
 export interface Violation {
 	commit: string;
+	/** The agent the record names: only verified when `by` is set. */
 	author: string;
 	rule: string;
 	detail: string;
+	/** Who did it, as Access verified them, when Blueprint stamped it. */
+	by?: string;
+}
+
+/** What Blueprint stamps on a merge: everything its trailers claim, and the commits it joins. */
+export function mergeStampPayload(merge: Pick<MergeRecord, "base" | "head" | "change" | "author" | "by" | "claimsTip" | "votesTip" | "testedOn">) {
+	const { base, head, change, author, by, claimsTip, votesTip, testedOn } = merge;
+	return stampPayload("merge", { base, head, change, agent: author, by, claimsTip, votesTip, testedOn: testedOn ?? null });
 }
 
 /** Claims idle longer than this may be released by anyone. */
@@ -49,16 +62,28 @@ export interface AuditRecords {
 	staleAfterMs?: number;
 }
 
-export function audit(records: AuditRecords): Violation[] {
+export async function audit(records: AuditRecords): Promise<Violation[]> {
 	const violations: Violation[] = [];
+	// With a stamp key, only what Blueprint stamped is trusted.
+	const key = records.registry[0]?.state.stampKey;
+	const verified = (kind: string, record: object & { stamp?: string }) => (key ? verifyStamp(key, stampPayload(kind, record), record.stamp) : Promise.resolve(true));
+	violations.push(...(await unverifiedClaims(records, verified)));
+	const { votesAt, forged } = await verifiedVotes(records, verified);
+	violations.push(...forged);
+
 	const registryAt = new Map(records.registry.map((r) => [r.tip, r.state]));
-	const votesAt = new Map((records.votes ?? []).map((v) => [v.tip, v.state]));
 	for (const merge of records.merges) {
-		const report = (rule: string, detail: string) => violations.push({ commit: merge.commit, author: merge.author, rule, detail });
+		let stampedBy: string | undefined;
+		const report = (rule: string, detail: string) => violations.push({ commit: merge.commit, author: merge.author, rule, detail, ...(stampedBy ? { by: stampedBy } : {}) });
 		if (!merge.change || !merge.claimsTip) {
 			report("undeclared", "the merge names no change or claims it checked (Blueprint-Change, Blueprint-Claims)");
 			continue;
 		}
+		if (key && merge.by && (await verifyStamp(key, mergeStampPayload(merge), merge.stamp))) stampedBy = merge.by;
+		// Unstamped: its maker is unverified. What it changed is still a fact in
+		// Git, so the checks below still run against the records it cites.
+		if (key && !stampedBy)
+			violations.push({ commit: merge.commit, author: merge.author, rule: "unverified", detail: "the merge has no valid Blueprint stamp: whoever made it, and what its trailers say, is unverified" });
 		const state = registryAt.get(merge.claimsTip);
 		if (!state) {
 			report("unknown-claims", `${merge.claimsTip} is not in the claims registry's history`);
@@ -79,6 +104,53 @@ export function audit(records: AuditRecords): Violation[] {
 	}
 	violations.push(...othersClaimsReleased(records));
 	return violations;
+}
+
+type Verify = (kind: string, record: object & { stamp?: string }) => Promise<boolean>;
+
+/** Claims added without a stamp, and claims that disappeared without a stamped release. */
+async function unverifiedClaims(records: AuditRecords, verified: Verify): Promise<Violation[]> {
+	const violations: Violation[] = [];
+	const seen = new Set<string>();
+	let previous: Registry | null = null;
+	for (const { tip, state } of records.registry) {
+		for (const held of state.claims) {
+			const id = `${held.change}|${held.stamp ?? ""}|${held.active}`;
+			if (seen.has(id)) continue;
+			seen.add(id);
+			if (!(await verified("claim", held))) violations.push({ commit: tip, author: held.agent, rule: "unverified-record", detail: `${held.change}'s claim has no valid Blueprint stamp` });
+		}
+		if (previous) {
+			const added = state.released.slice(previous.released.length);
+			for (const gone of previous.claims.filter((c) => !state.claims.some((x) => x.change === c.change))) {
+				const release = added.find((r) => r.change === gone.change);
+				if (!release || !(await verified("release", release))) violations.push({ commit: tip, author: gone.agent, rule: "unverified-record", detail: `${gone.change}'s claim was removed at ${tip} without a stamped release` });
+			}
+		}
+		previous = state;
+	}
+	return violations;
+}
+
+/** The votes at each tip that count (stamped), and a report for each one that doesn't. */
+async function verifiedVotes(records: AuditRecords, verified: Verify) {
+	const votesAt = new Map<string, Votes>();
+	const forged: Violation[] = [];
+	const checked = new Map<string, boolean>();
+	for (const { tip, state } of records.votes ?? []) {
+		const counted: VoteRecord[] = [];
+		for (const cast of state.votes) {
+			const id = `${cast.reviewer}|${cast.commit}|${cast.at}|${cast.stamp ?? ""}`;
+			if (!checked.has(id)) {
+				const ok = await verified("vote", cast);
+				checked.set(id, ok);
+				if (!ok) forged.push({ commit: tip, author: cast.reviewer, rule: "unverified-record", detail: `${cast.reviewer}'s vote on ${cast.commit} has no valid Blueprint stamp, so it doesn't count` });
+			}
+			if (checked.get(id)) counted.push(cast);
+		}
+		votesAt.set(tip, { votes: counted });
+	}
+	return { votesAt, forged };
 }
 
 /**
