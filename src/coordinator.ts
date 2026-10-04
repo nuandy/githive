@@ -324,12 +324,12 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 			return "deferred";
 		}
 		slice.wakeEventIds = [...new Set([...(slice.wakeEventIds ?? []), eventId])];
-		if (parked && result === "resumed") {
+		if (parked && (result === "resumed" || result === "deferred")) {
 			slice.parkedAt = undefined;
 			slice.parkedWaitingFor = undefined;
 			slice.wakeMessage = undefined;
 			if (!task.active.builders.includes(slice.id)) task.active.builders.push(slice.id);
-			this.note(task, slice.head, "Builder for slice " + slice.id + " resumed from parking for event " + eventId);
+			if (result === "resumed") this.note(task, slice.head, "Builder for slice " + slice.id + " resumed from parking for event " + eventId);
 		} else if (parked && result === "ignored") {
 			// An RPC may have succeeded before a Coordinator restart lost its write.
 			// Reconcile state without redelivering this already-consumed event.
@@ -340,7 +340,7 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 				slice.wakeMessage = undefined;
 				if (!task.active.builders.includes(slice.id)) task.active.builders.push(slice.id);
 			}
-		} else if (!task.active.builders.includes(slice.id) && result === "resumed") {
+		} else if (!task.active.builders.includes(slice.id) && (result === "resumed" || result === "deferred")) {
 			task.active.builders.push(slice.id);
 		}
 		return result === "resumed" ? "resumed" : result === "deferred" ? "inbox" : "inbox";
