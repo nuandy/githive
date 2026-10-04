@@ -1,0 +1,103 @@
+{
+	"label": "free-igit-check",
+	"mode": "free",
+	"base": "https://blueprint-bench.nuandy.workers.dev",
+	"repo": "bench-free-igit-1791153113",
+	"task": null,
+	"racers": 5,
+	"idle": 0,
+	"at": "2026-10-04T22:32:11.536Z",
+	"ledgerMatches": null,
+	"ledgerCommits": null,
+	"levels": [
+		{
+			"agents": 5,
+			"wallMs": 51789.390959,
+			"calls": 36,
+			"callsPerSecond": 0.6951230615648686,
+			"errors": 0,
+			"failures": [],
+			"race": {
+				"winners": 1,
+				"unexpected": []
+			},
+			"leftoverClaims": 0,
+			"tools": {
+				"list_claims": {
+					"n": 10,
+					"p50": 4212.346624999998,
+					"p95": 8806.353708999999,
+					"p99": 8806.353708999999,
+					"max": 8806.353708999999
+				},
+				"open_change": {
+					"n": 10,
+					"p50": 11260.788625000001,
+					"p95": 15424.944666000003,
+					"p99": 15424.944666000003,
+					"max": 15424.944666000003
+				},
+				"abandon_change": {
+					"n": 6,
+					"p50": 5079.810583999999,
+					"p95": 7170.009833999997,
+					"p99": 7170.009833999997,
+					"max": 7170.009833999997
+				},
+				"report_push": {
+					"n": 5,
+					"p50": 8037.382042000005,
+					"p95": 9026.841459000003,
+					"p99": 9026.841459000003,
+					"max": 9026.841459000003
+				},
+				"change_status": {
+					"n": 5,
+					"p50": 5692.0558750000055,
+					"p95": 7680.529208,
+					"p99": 7680.529208,
+					"max": 7680.529208
+				}
+			},
+			"lock": {
+				"samples": 0,
+				"waitMs": {
+					"n": 0,
+					"p50": null,
+					"p95": null,
+					"p99": null,
+					"max": null
+				},
+				"runMs": {
+					"n": 0,
+					"p50": null,
+					"p95": null,
+					"p99": null,
+					"max": null
+				},
+				"flushMs": {
+					"n": 0,
+					"p50": null,
+					"p95": null,
+					"p99": null,
+					"max": null
+				},
+				"busyFraction": 0,
+				"flushShareOfHold": 0,
+				"peakQueue": 0,
+				"byCall": {}
+			},
+			"ledger": {
+				"matches": null,
+				"commits": null,
+				"lagMs": {
+					"n": 0,
+					"p50": null,
+					"p95": null,
+					"p99": null,
+					"max": null
+				}
+			}
+		}
+	]
+}

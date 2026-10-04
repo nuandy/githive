@@ -23,7 +23,7 @@ export function parseRepoName(name: string) {
  * because the caller retries itself.
  */
 async function withRepo<T>(artifacts: Artifacts, name: string, operation: (repo: ArtifactsRepo) => Promise<T>, { retry = true } = {}): Promise<T> {
-	const repo = await (retry ? retryTransient(() => artifacts.get(name)) : artifacts.get(name));
+	const repo = await (retry ? retryArtifacts(() => artifacts.get(name)) : artifacts.get(name));
 	try {
 		return await operation(repo);
 	} finally {
@@ -46,8 +46,8 @@ export async function remoteFor(
 ): Promise<Remote> {
 	return withRepo(artifacts, name, async (repo) => {
 		const [info, token] = await Promise.all([
-			retryTransient(() => repo.info()),
-			retryTransient(() => repo.createToken(scope, ttlSeconds)),
+			retryArtifacts(() => repo.info()),
+			retryArtifacts(() => repo.createToken(scope, ttlSeconds)),
 		]);
 		return { url: info.remote, token: token.plaintext };
 	});
@@ -112,6 +112,9 @@ const codeOf = (err: unknown) => (err && typeof err === "object" && "code" in er
 
 /** Artifacts fails some forks of one repo when many run at once (INTERNAL_ERROR, 10400); they succeed when tried again. */
 const isInternalError = (err: unknown) => codeOf(err) === "INTERNAL_ERROR";
+
+/** Retry an Artifacts call through transient failures and the internal errors Artifacts returns under load. */
+const retryArtifacts = <T>(operation: () => Promise<T>) => retryTransient(operation, { retryable: (err) => isTransientFailure(err) || isInternalError(err) });
 
 const alreadyExists = (err: unknown) => /EXISTS/.test(codeOf(err)) || /already exists/i.test(err instanceof Error ? err.message : "");
 

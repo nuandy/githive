@@ -174,7 +174,9 @@ async function freeRace(level, _taskId, runId) {
 	);
 	const won = results.filter((r) => r.status === "fulfilled" && r.value.ok).map((r) => r.value.i);
 	const unexpected = results.filter((r) => r.status === "rejected" || (!r.value.ok && !r.value.conflicts?.length)).map((r) => (r.status === "rejected" ? r.reason.message : JSON.stringify(r.value)));
-	for (const i of won) await tool(level, "free_release", { repo: REPO, change: `${runId}-r${i}`, agent: `bench-${runId}-r${i}`, reason: "benchmark race done" }, "abandon_change");
+	// A failed release is recorded with the rest, not allowed to end the run.
+	for (const i of won)
+		await tool(level, "free_release", { repo: REPO, change: `${runId}-r${i}`, agent: `bench-${runId}-r${i}`, reason: "benchmark race done" }, "abandon_change").catch((err) => unexpected.push(`release: ${err.message}`));
 	return { winners: won.length, unexpected };
 }
 

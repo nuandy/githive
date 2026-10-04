@@ -21,6 +21,18 @@ describe("Artifacts transient failures", () => {
 		expect(repo.createToken).toHaveBeenCalledTimes(2);
 	});
 
+	it("retries token minting, and getting the repo, when Artifacts fails them with an internal error under load", async () => {
+		const internal = () => Object.assign(new Error("An internal error occurred."), { code: "INTERNAL_ERROR", numericCode: 10400 });
+		const repo = {
+			info: vi.fn(async () => ({ remote: "https://git.test/repo.git" })),
+			createToken: vi.fn().mockRejectedValueOnce(internal()).mockResolvedValue({ plaintext: "token" }),
+		};
+		const artifacts = { get: vi.fn().mockRejectedValueOnce(internal()).mockResolvedValue(repo) } as never;
+
+		await expect(remoteFor(artifacts, "repo", "write")).resolves.toEqual({ url: "https://git.test/repo.git", token: "token" });
+		expect(repo.createToken).toHaveBeenCalledTimes(2);
+	});
+
 	it("disposes the repo handle after a successful operation", async () => {
 		const dispose = vi.fn();
 		const repo = {
