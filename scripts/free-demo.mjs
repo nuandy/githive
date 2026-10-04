@@ -1,7 +1,8 @@
 #!/usr/bin/env node
-// Coordinator-free mode, live: cooperative agents claim, review and merge by
-// convention through the stateless MCP tools; a rogue agent bypasses them with
-// plain git. Then the audit, reading only Git, reports what the rogue did.
+// Coordinator-free mode with shared access, live: cooperative agents claim,
+// review and merge by convention through the stateless MCP tools; a rogue agent
+// bypasses them with plain git. Then the audit, reading only Git, reports what
+// the rogue did, and reverts undo it.
 //
 //   node scripts/free-demo.mjs [--base https://blueprint-bench.nuandy.workers.dev] [--repo free-demo]
 //
@@ -68,7 +69,8 @@ async function pushChange(agent, change, files) {
 try {
 	say(`repo ${REPO} on ${BASE}`);
 	await api("POST", "/repos/import", { url: "https://github.com/octocat/Spoon-Knife", name: REPO, branch: "main" });
-	const started = await tool("free_start", { required: 2, vetoes: ["security"], verify: ["test -f index.html"] });
+	// Shared access: every agent can write main, so the audit is the only check. (scripts/free-forks-demo.mjs shows the default, forks.)
+	const started = await tool("free_start", { required: 2, vetoes: ["security"], verify: ["test -f index.html"], access: "shared" });
 	say("started; policy:", JSON.stringify(started.policy), "checks:", JSON.stringify(started.verify));
 	credentials = await tool("free_credentials", {});
 
