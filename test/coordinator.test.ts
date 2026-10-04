@@ -730,6 +730,15 @@ describe("deleting a task", () => {
 		expect(await stored()).toBeTruthy();
 	});
 
+	it("deletes a task stored before scheduling existed", async () => {
+		const { queue: _queue, active: _active, ...old } = task();
+		storage = new FakeStorage();
+		fake = fakeEnv();
+		await storage.put("task", old);
+		coordinator = new Coordinator({ storage } as never, fake.env as never);
+		expect(await coordinator.destroy()).toEqual({ id: "t1", repo: "project" });
+	});
+
 	it("deletes the task's state and alarm, and is harmless to repeat", async () => {
 		await setup(task());
 		storage.alarm = Date.now() + 60_000;

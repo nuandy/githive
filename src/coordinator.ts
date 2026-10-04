@@ -601,8 +601,10 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 	 */
 	destroy() {
 		return this.exclusive(async () => {
-			const task = await this.ctx.storage.get<Task>("task");
-			if (!task) return { id: null, repo: null };
+			const stored = await this.ctx.storage.get<Task>("task");
+			if (!stored) return { id: null, repo: null };
+			// Tasks from before scheduling existed have no queue or active lists; fill them in.
+			const task = withScheduling(stored);
 			const busy = [
 				...task.active.builders.map((b) => `builder ${b}`),
 				...task.active.reviewers.map((r) => `reviewer ${r}`),
