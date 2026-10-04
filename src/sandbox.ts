@@ -222,6 +222,7 @@ export abstract class SandboxAgent<J extends SandboxJob, S extends AgentState> e
 		inbox.push(wake.message); delivered.push(wake.eventId);
 		await this.ctx.storage.put({ job: { ...job, ...wake.credentials }, state, [INBOX]: inbox, [DELIVERED_WAKES]: delivered });
 		if (parked) { if (this.ctx.container?.running) await this.ctx.container.destroy(this.kind + " resumed"); await this.ctx.storage.setAlarm(Date.now()); return "resumed"; }
+		await this.ctx.storage.setAlarm(Date.now());
 		return "deferred";
 	}
 
