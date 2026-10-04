@@ -211,7 +211,13 @@ brought that to 220 (claims left over: 258 to 41). The rest are still the Git
 servers answering 500 or 503 under about 1000 agents starting in the same
 instant, mostly on claims (an index write, a shard write, and the checks
 around it) and on listing every claim (still a read of all 8 repos). Exactly
-one racer still won, and no two claims overlapped. Next steps: more records
+one racer still won, and no two claims overlapped. Spreading the 1000 agents'
+starts over 60 s didn't help (268 failed): each agent's work takes one to two
+and a half minutes, so they still overlap, and the errors came from every
+repo involved (records repos, the project repo, the agents' forks), which
+suggests a throughput limit across Artifacts for the namespace, not one busy
+repo: roughly 5,000 calls in three and a half minutes, each several Git
+requests. Next steps: more records
 repos, listing claims less often (agents, not the toolkit, decide that), and
 votes sharded like claims (every vote is a push to one ref).
 
