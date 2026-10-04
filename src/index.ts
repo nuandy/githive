@@ -11,7 +11,7 @@ import { retryTransient } from "./retry";
 import type { Blueprint, Limits, Review, ReviewPolicy, Task } from "./types";
 import { openTaskId } from "./open-mode";
 import { handleMcpBody, type McpContext } from "./mcp";
-import { handleFreeRpc } from "./free/mcp";
+import type { FreeContext } from "./free/mcp";
 
 export { Builder } from "./builder";
 export { Reviewer } from "./reviewer";
@@ -175,6 +175,18 @@ app.post("/tasks/:id/changes/:slice/abandon", async (c) => {
 
 app.get("/tasks/:id/claims", async (c) => c.json(await coordinator(c.env, c.req.param("id")).claims()));
 
+/** Coordinator-free mode's tools (an exploration; see docs/coordinator-free.md): stateless, Git only. */
+const freeContext = (env: Env): FreeContext => ({
+	remote: (repo, scope) => remoteFor(env.ARTIFACTS, repo, scope, 3600),
+	head: async (repo) => (await headOf(env.ARTIFACTS, repo)) ?? fail(409, `${repo} has no commits`),
+	// Checks run in the Gate's container, one Gate per repo.
+	runChecks: (repo) => async ({ base, head, ref, commands }) => {
+		const remote = await remoteFor(env.ARTIFACTS, repo, "read", 3600);
+		const result = await env.GATE.getByName(`free:${repo}`).checkCommit({ baseHead: base, base: { remote: remote.url, token: remote.token }, fork: { remote: remote.url, token: remote.token, ref }, head, checks: commands });
+		return { passed: result.passed, results: result.results.map((r) => ({ command: r.command, exitCode: r.exitCode, output: r.output })) };
+	},
+});
+
 // The MCP front door (stateless JSON-RPC over HTTP), for agents from anywhere.
 app.post("/mcp", async (c) => {
 	const body = await c.req.json().catch(() => null);
@@ -182,28 +194,12 @@ app.post("/mcp", async (c) => {
 	const result = await handleMcpBody(body, {
 		coordinator: (id) => coordinator(c.env, id) as unknown as ReturnType<McpContext["coordinator"]>,
 		openRepo: (repo) => openRepoTask(c.env, repo),
+		free: freeContext(c.env),
 		identity: c.get("accessIdentity"),
 	});
 	return result === null ? c.body(null, 202) : c.json(result);
 });
 app.on(["GET", "DELETE"], "/mcp", (c) => c.body(null, 405, { Allow: "POST" }));
-
-// Coordinator-free mode's MCP tools (an exploration; see docs/coordinator-free.md): stateless, Git only.
-app.post("/free/mcp", async (c) => {
-	const body = await c.req.json().catch(() => null);
-	if (body === null) return c.json({ jsonrpc: "2.0", id: null, error: { code: -32700, message: "parse error" } }, 400);
-	const result = await handleFreeRpc(body, {
-		remote: (repo, scope) => remoteFor(c.env.ARTIFACTS, repo, scope, 3600),
-		head: async (repo) => (await headOf(c.env.ARTIFACTS, repo)) ?? fail(409, `${repo} has no commits`),
-		// Checks run in the Gate's container, one Gate per repo.
-		runChecks: (repo) => async ({ base, head, ref, commands }) => {
-			const remote = await remoteFor(c.env.ARTIFACTS, repo, "read", 3600);
-			const result = await c.env.GATE.getByName(`free:${repo}`).checkCommit({ baseHead: base, base: { remote: remote.url, token: remote.token }, fork: { remote: remote.url, token: remote.token, ref }, head, checks: commands });
-			return { passed: result.passed, results: result.results.map((r) => ({ command: r.command, exitCode: r.exitCode, output: r.output })) };
-		},
-	});
-	return result === null ? c.body(null, 202) : c.json(result);
-});
 
 // Add a task created before the index existed.
 app.post("/tasks/:id/index", async (c) => {

@@ -1,5 +1,5 @@
 import { GitCasLog } from "../election-git";
-import { requiredPaths, requiredString, statusOf } from "../errors";
+import { requiredPaths, requiredString } from "../errors";
 import type { Remote } from "../git";
 import { normalizeClaim } from "../open-mode";
 import { audit } from "./audit";
@@ -27,7 +27,7 @@ const STALE_AFTER_MS = 30 * 60_000;
 const claimsRef = (repo: string) => `refs/notes/blueprint-claims/${repo}`;
 const votesRef = (repo: string) => `refs/notes/blueprint-votes/${repo}`;
 
-const INSTRUCTIONS = `Coordinator-free mode: nobody enforces the rules; every agent follows them, and an audit anyone can run shows who didn't.
+export const FREE_INSTRUCTIONS = `Coordinator-free mode (the free_* tools): nobody enforces the rules; every agent follows them, and an audit anyone can run shows who didn't.
 Conventions:
 1. free_claim the paths you will change before editing; edit only inside your claim. A refusal names who holds what: narrow your claim, or ask them.
 2. Work on a branch changes/<change> in the project repo (free_credentials gives you git access) and push it.
@@ -48,9 +48,10 @@ export const FREE_TOOLS = [
 	{ name: "free_audit", description: "Replay the records and list every broken convention, with the commit and the agent.", inputSchema: { type: "object", properties: { repo: str }, required: ["repo"] } },
 ];
 
-type Args = Record<string, unknown>;
+export type Args = Record<string, unknown>;
 
-async function callTool(name: string, args: Args, ctx: FreeContext): Promise<unknown> {
+/** Run one coordinator-free tool. */
+export async function callFreeTool(name: string, args: Args, ctx: FreeContext): Promise<unknown> {
 	const repo = requiredString(args, "repo");
 	const write = () => ctx.remote(repo, "write");
 	const claims = new GitCasLog<Registry>(write, repo, claimsRef(repo));
@@ -65,7 +66,7 @@ async function callTool(name: string, args: Args, ctx: FreeContext): Promise<unk
 			const verify = Array.isArray(args.verify) ? (args.verify as string[]).filter((c) => typeof c === "string" && c.trim()) : [];
 			await startFree(claims, { baseline: await ctx.head(repo), policy, verify });
 			const registry = (await claims.read())?.commit.state;
-			return { repo, policy: registry?.policy ?? policy, verify: registry?.verify ?? [], instructions: INSTRUCTIONS };
+			return { repo, policy: registry?.policy ?? policy, verify: registry?.verify ?? [], instructions: FREE_INSTRUCTIONS };
 		}
 		case "free_credentials": {
 			const remote = await write();
@@ -115,45 +116,5 @@ async function callTool(name: string, args: Args, ctx: FreeContext): Promise<unk
 		}
 		default:
 			throw new Error(`[400] unknown tool ${name}`);
-	}
-}
-
-interface RpcRequest {
-	jsonrpc: "2.0";
-	id?: string | number | null;
-	method: string;
-	params?: { name?: string; arguments?: Args; protocolVersion?: string };
-}
-
-const PROTOCOL_VERSIONS = ["2025-06-18", "2025-03-26", "2024-11-05"];
-const reply = (id: RpcRequest["id"], result: object) => ({ jsonrpc: "2.0", id: id ?? null, result });
-const rpcError = (id: RpcRequest["id"], code: number, message: string) => ({ jsonrpc: "2.0", id: id ?? null, error: { code, message } });
-
-/** One JSON-RPC message to the coordinator-free MCP server; null for a notification. */
-export async function handleFreeRpc(msg: RpcRequest, ctx: FreeContext): Promise<object | null> {
-	if (!msg || typeof msg !== "object" || typeof msg.method !== "string") return rpcError(msg?.id, -32600, "invalid request");
-	if (msg.id === undefined) return null;
-	switch (msg.method) {
-		case "initialize": {
-			const requested = msg.params?.protocolVersion;
-			const protocolVersion = typeof requested === "string" && PROTOCOL_VERSIONS.includes(requested) ? requested : PROTOCOL_VERSIONS[0];
-			return reply(msg.id, { protocolVersion, capabilities: { tools: {} }, serverInfo: { name: "blueprint-free", version: "0.1.0" }, instructions: INSTRUCTIONS });
-		}
-		case "ping":
-			return reply(msg.id, {});
-		case "tools/list":
-			return reply(msg.id, { tools: FREE_TOOLS });
-		case "tools/call": {
-			const name = msg.params?.name;
-			if (typeof name !== "string" || !FREE_TOOLS.some((t) => t.name === name)) return rpcError(msg.id, -32602, `unknown tool ${String(name)}`);
-			try {
-				const result = await callTool(name, msg.params?.arguments ?? {}, ctx);
-				return reply(msg.id, { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] });
-			} catch (err) {
-				return reply(msg.id, { content: [{ type: "text", text: statusOf(err).message }], isError: true });
-			}
-		}
-		default:
-			return rpcError(msg.id, -32601, `method not found: ${msg.method}`);
 	}
 }

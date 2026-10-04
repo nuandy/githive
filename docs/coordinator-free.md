@@ -70,7 +70,7 @@ tip from before its claim was given up is caught. With no leader there is no
 timer to expire abandoned claims: by convention any agent may release a claim
 idle for 30 minutes, and the audit flags one released while still in use.
 
-Blueprint's part is a stateless toolkit (the MCP tools) that does the Git
+Blueprint's part is a stateless toolkit (the `free_*` tools on the main MCP endpoint) that does the Git
 operations an agent asks for and reports what Git said, plus the audit.
 Neither decides anything: an agent can skip the toolkit and use plain git,
 and the audit sees the same records either way.

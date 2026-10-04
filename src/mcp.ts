@@ -1,6 +1,7 @@
 import type { AccessIdentity } from "./access-contract";
 import type { Coordinator } from "./coordinator";
 import { fail, requiredPaths, requiredString as need, statusOf } from "./errors";
+import { FREE_INSTRUCTIONS, FREE_TOOLS, callFreeTool, type FreeContext } from "./free/mcp";
 import type { Task } from "./types";
 
 // The MCP front door: any agent (Claude Code, Codex, a team's own bots) joins
@@ -25,6 +26,8 @@ type CoordinatorStub = Pick<
 >;
 
 export interface McpContext {
+	/** Coordinator-free mode's context: when set, the free_* tools are served too. */
+	free?: FreeContext;
 	coordinator: (taskId: string) => CoordinatorStub;
 	/** Open a repo for open changes (or find it open) and list it on the dashboard; the same as POST /repos/:repo/open. */
 	openRepo: (repo: string) => Promise<Pick<Task, "id" | "repo" | "review" | "verify" | "leaseMinutes">>;
@@ -227,17 +230,19 @@ export async function handleRpc(msg: RpcRequest, ctx: McpContext): Promise<objec
 		case "initialize": {
 			const requested = msg.params?.protocolVersion;
 			const protocolVersion = typeof requested === "string" && PROTOCOL_VERSIONS.includes(requested) ? requested : PROTOCOL_VERSIONS[0];
-			return reply(msg.id, { protocolVersion, capabilities: { tools: {} }, serverInfo: { name: "blueprint", version: "1.0.0" }, instructions: INSTRUCTIONS });
+			return reply(msg.id, { protocolVersion, capabilities: { tools: {} }, serverInfo: { name: "blueprint", version: "1.0.0" }, instructions: ctx.free ? `${INSTRUCTIONS}\n\n${FREE_INSTRUCTIONS}` : INSTRUCTIONS });
 		}
 		case "ping":
 			return reply(msg.id, {});
 		case "tools/list":
-			return reply(msg.id, { tools: TOOLS });
+			return reply(msg.id, { tools: ctx.free ? [...TOOLS, ...FREE_TOOLS] : TOOLS });
 		case "tools/call": {
 			const name = msg.params?.name;
-			if (typeof name !== "string" || !TOOLS.some((t) => t.name === name)) return rpcError(msg.id, -32602, `unknown tool ${String(name)}`);
+			const free = ctx.free && FREE_TOOLS.some((t) => t.name === name) ? ctx.free : null;
+			if (typeof name !== "string" || (!free && !TOOLS.some((t) => t.name === name))) return rpcError(msg.id, -32602, `unknown tool ${String(name)}`);
 			try {
-				const result = await callTool(name, (msg.params?.arguments as Args) ?? {}, ctx);
+				const args = (msg.params?.arguments as Args) ?? {};
+				const result = free ? await callFreeTool(name, args, free) : await callTool(name, args, ctx);
 				return reply(msg.id, { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] });
 			} catch (err) {
 				// Tool failures go back to the agent as results it can act on, not protocol errors.

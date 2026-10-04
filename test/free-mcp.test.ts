@@ -1,17 +1,27 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { FREE_TOOLS, handleFreeRpc } from "../src/free/mcp";
+import { FREE_TOOLS } from "../src/free/mcp";
+import { TOOLS, handleRpc } from "../src/mcp";
 import { startGitServer, type GitServer } from "./helpers/git-server";
 
 // The coordinator-free MCP tools: stateless, each reads or writes Git and
-// reports what Git said. Driven over JSON-RPC against a real Git server.
+// reports what Git said. They are served by the main MCP endpoint, beside the
+// other tools; driven here over JSON-RPC against a real Git server.
 
 let server: GitServer;
 const ctx = () => ({
-	remote: async () => ({ url: server.url, token: "unused" }),
-	head: async () => server.git("rev-parse", "main").trim(),
+	coordinator: () => {
+		throw new Error("not used");
+	},
+	openRepo: async () => {
+		throw new Error("not used");
+	},
+	free: {
+		remote: async () => ({ url: server.url, token: "unused" }),
+		head: async () => server.git("rev-parse", "main").trim(),
+	},
 });
 const call = async (name: string, args: Record<string, unknown>) => {
-	const reply = (await handleFreeRpc({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name, arguments: args } }, ctx())) as {
+	const reply = (await handleRpc({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name, arguments: args } }, ctx() as never)) as {
 		result: { content: { text: string }[]; isError?: boolean };
 	};
 	const text = reply.result.content[0].text;
@@ -26,9 +36,9 @@ afterEach(async () => {
 });
 
 describe("the coordinator-free MCP tools", () => {
-	it("lists its tools", async () => {
-		const reply = (await handleFreeRpc({ jsonrpc: "2.0", id: 1, method: "tools/list" }, ctx())) as { result: { tools: { name: string }[] } };
-		expect(reply.result.tools.map((t) => t.name)).toEqual(FREE_TOOLS.map((t) => t.name));
+	it("are listed by the main MCP endpoint, beside the other tools", async () => {
+		const reply = (await handleRpc({ jsonrpc: "2.0", id: 1, method: "tools/list" }, ctx() as never)) as { result: { tools: { name: string }[] } };
+		expect(reply.result.tools.map((t) => t.name)).toEqual([...TOOLS, ...FREE_TOOLS].map((t) => t.name));
 	});
 
 	it("starts the mode, claims, refuses an overlapping claim, and audits a clean repo", async () => {

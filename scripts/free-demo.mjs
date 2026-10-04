@@ -30,7 +30,7 @@ async function api(method, path, body) {
 }
 
 async function tool(name, args) {
-	const reply = await api("POST", "/free/mcp", { jsonrpc: "2.0", id: 1, method: "tools/call", params: { name, arguments: { repo: REPO, ...args } } });
+	const reply = await api("POST", "/mcp", { jsonrpc: "2.0", id: 1, method: "tools/call", params: { name, arguments: { repo: REPO, ...args } } });
 	const text = reply.result.content[0].text.replace(/[\u0000-\u0008\u000b-\u001f]/g, "");
 	if (reply.result.isError) throw new Error(`${name}: ${text}`);
 	return JSON.parse(text);
