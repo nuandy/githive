@@ -7,7 +7,7 @@ import { GIT_IN_BLUEPRINT } from "./git-blueprint-guidance";
 import type { LaneChangeAnswer, LaneChangeRequestResult } from "./lane-change-contract";
 import { BUILDER_PARK_TIMEOUT_MS, type BuilderResumeCredentials } from "./parking-contract";
 import type { MergeCheck } from "./types";
-import { freeContextFor, startFreeReviewers } from "./free/env";
+import { freeBuilderCredentials, freeContextFor, startFreeReviewers } from "./free/env";
 import { callFreeTool } from "./free/mcp";
 import { inLane } from "./open-mode";
 
@@ -18,6 +18,8 @@ import { inLane } from "./open-mode";
 // its container stopped until a wake event (a resolution) resumes it.
 
 // Storage keys only builders use. The "sandbox-" names predate the split from the shared base.
+/** How many times review may send a coordinator-free change back before its builder gives up. */
+const MAX_FREE_REVISIONS = 3;
 const LAST_PUSHED_HEAD = "builder-last-pushed-head";
 const PARK_COMMAND = "sandbox-park-command";
 const DEFERRED_WAKES = "sandbox-deferred-wakes";
@@ -177,6 +179,29 @@ How to work:
 		await this.save(state);
 		await this.ctx.storage.setAlarm(Date.now());
 		return this.view(state);
+	}
+
+	/**
+	 * Coordinator-free: a reviewer rejected the change, so resume with its
+	 * feedback, as a revision. After MAX_FREE_REVISIONS the builder gives up and
+	 * releases its claim instead, so the paths don't wait for a change that keeps
+	 * failing review.
+	 */
+	async reviseFree(feedback: string): Promise<"revising" | "released"> {
+		const { job, state } = await this.load();
+		if (!job?.free || !state) throw new Error("[409] not a coordinator-free builder");
+		const { repo, change, agent } = job.free;
+		if (state.revisions >= MAX_FREE_REVISIONS) {
+			await callFreeTool("free_release", { repo, change, agent, reason: `rejected after ${state.revisions} revisions: ${feedback.split("\n")[0].slice(0, 200)}` }, this.freeContext());
+			this.note(state, `gave up after ${state.revisions} revisions; claim released`);
+			await this.save(state);
+			return "released";
+		}
+		const credentials = await freeBuilderCredentials(this.env, repo, change);
+		// Two rejections at once: the second joins the first's revision.
+		if (state.status === "queued") await this.wake(`review-${crypto.randomUUID()}`, feedback, credentials);
+		else await this.revise(feedback, credentials);
+		return "revising";
 	}
 
 	/**

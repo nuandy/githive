@@ -6,7 +6,7 @@ import { GIT_IN_BLUEPRINT } from "./git-blueprint-guidance";
 import type { QuorumStatus } from "./types";
 import { remoteFor } from "./artifacts";
 import { GitCasLog, cachedRemote } from "./election-git";
-import { freeContextFor } from "./free/env";
+import { freeAgentName, freeContextFor } from "./free/env";
 import { callFreeTool } from "./free/mcp";
 import { makeStamper } from "./free/stamp";
 import { vote, type Votes } from "./free/votes";
@@ -159,6 +159,12 @@ How to work:
 						if (job.free.mergeWhenApproved && verdict === "approve") {
 							const merged = (await callFreeTool("free_merge", { repo: job.free.repo, change: job.free.change, agent: job.free.agent ?? job.free.change }, freeContextFor(this.env, `service:blueprint-reviewer:${job.role}`, { hosted: true }))) as { ok: boolean; reasons?: string[] };
 							this.note(state, merged.ok ? "merged the change" : `not merged yet: ${(merged.reasons ?? []).join("; ").slice(0, 200)}`);
+						}
+						// A rejected change built by Blueprint's builder goes back to it, with why.
+						if (verdict === "reject" && job.free.agent === "blueprint-builder") {
+							const feedback = `The ${job.role} reviewer rejected ${job.head}:\n\n${summary}\n\n${evidence}\n\nFix it inside your claim, commit_and_push, then finish again for a new review.`;
+							const outcome = await this.env.BUILDER.getByName(freeAgentName(job.free.repo, job.free.change)).reviseFree(feedback);
+							this.note(state, outcome === "revising" ? "sent the change back to its builder" : "its builder gave up; claim released");
 						}
 						return "Vote recorded.";
 					}

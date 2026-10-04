@@ -1,6 +1,6 @@
 import type { CasLog } from "../election";
 import { appendRecord } from "./records";
-import { type Stamper, stampPayload } from "./stamp";
+import { type Stamper, stampPayload, verifyStamp } from "./stamp";
 
 // Coordinator-free review (see docs/coordinator-free.md). Reviewers append
 // verdicts on the exact commit they reviewed. A merging agent counts them
@@ -49,4 +49,11 @@ export function approval(state: Votes | null | undefined, commit: string, policy
 	const approvals = verdicts.filter((v) => v.verdict === "approve").length;
 	const vetoedBy = verdicts.filter((v) => v.verdict === "reject" && policy.vetoes.includes(v.role)).map((v) => v.reviewer);
 	return { approved: approvals >= policy.required && !vetoedBy.length, approvals, vetoedBy };
+}
+
+/** The votes that count: with the registry's stamp key, only those Blueprint stamped. */
+export async function countedVotes(cast: VoteRecord[], stampKey: string | undefined) {
+	if (!stampKey) return cast;
+	const checked = await Promise.all(cast.map(async (v) => ((await verifyStamp(stampKey, stampPayload("vote", v), v.stamp)) ? v : null)));
+	return checked.filter((v) => v !== null);
 }

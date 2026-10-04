@@ -3,7 +3,7 @@ import { GitCasLog } from "../election-git";
 import { fail } from "../errors";
 import { Workspace } from "../git";
 import type { Registry } from "./claims";
-import type { FreeContext } from "./mcp";
+import type { FreeContext, HostedStatus } from "./mcp";
 import { makeStamper } from "./stamp";
 
 // Coordinator-free mode wired to Cloudflare: Artifacts for Git, the Gate's
@@ -25,6 +25,7 @@ export function freeContextFor(env: Env, by: string | undefined, caller: { agent
 		stamper: async (agent) => (env.FREE_STAMP_KEY && by ? makeStamper(env.FREE_STAMP_KEY, agent ? `${by}/${agent}` : by) : undefined),
 		remote: (repo, scope) => remoteFor(env.ARTIFACTS, repo, scope, 3600),
 		changeRemote: (repo, change, scope) => changeRemote(env, repo, change, scope, 3600),
+		agentStatus: (repo, change, head, roles) => freeAgentStatus(env, repo, change, head, roles),
 		head: async (repo) => (await headOf(env.ARTIFACTS, repo)) ?? fail(409, `${repo} has no commits`),
 		// Checks run in the Gate's container, one Gate per repo.
 		runChecks: (repo) => async ({ base, head, ref, commands, source }) => {
@@ -105,4 +106,24 @@ export async function startFreeBuilder(env: Env, input: { repo: string; change: 
 	const build = { ...job, remote: write.url, token: write.token, base: { remote: read.url, token: read.token }, free: { repo, change, ref: `changes/${change}`, agent: own?.agent ?? change } };
 	await env.BUILDER.getByName(freeAgentName(repo, change)).start(build);
 	return { change, builder: freeAgentName(repo, change) };
+}
+
+/** Fresh credentials to resume Blueprint's hosted builder on a change: its branch's home to push to, the project's main to merge from. */
+export async function freeBuilderCredentials(env: Env, repo: string, change: string) {
+	const { read, source } = await changeBrief(env, repo, change);
+	const write = await source("write");
+	return { token: write.token, base: { remote: read.url, token: read.token } };
+}
+
+/** What Blueprint's hosted agents on a change are doing: its builder, if it has one, and each role's reviewer of `head`. */
+export async function freeAgentStatus(env: Env, repo: string, change: string, head: string | null, roles: string[]): Promise<HostedStatus> {
+	const name = freeAgentName(repo, change);
+	const [builder, reviewers] = await Promise.all([
+		env.BUILDER.getByName(name).state(),
+		head ? Promise.all(roles.map(async (role) => ({ role, state: await env.REVIEWER.getByName(reviewerName(name, role, head)).state() }))) : [],
+	]);
+	return {
+		...(builder ? { builder: { status: builder.status, revisions: builder.revisions, ...(builder.error ? { error: builder.error } : {}) } } : {}),
+		reviewers: reviewers.flatMap(({ role, state }) => (state ? [{ role, status: state.status, ...(state.verdict ? { verdict: state.verdict } : {}) }] : [])),
+	};
 }

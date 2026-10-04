@@ -4,8 +4,8 @@ import { BOT, type Remote, Workspace } from "../git";
 import { inLane } from "../open-mode";
 import { release, type Registry } from "./claims";
 import { mergeStampPayload } from "./audit";
-import { type Stamper, stampPayload, verifyStamp } from "./stamp";
-import { approval, type ReviewPolicy, type Votes } from "./votes";
+import type { Stamper } from "./stamp";
+import { approval, countedVotes, type ReviewPolicy, type Votes } from "./votes";
 
 // The toolkit's merge for a cooperative agent in coordinator-free mode. It
 // checks the conventions the agent follows (its claim covers every file it
@@ -71,9 +71,7 @@ export async function mergeChange(input: MergeInput): Promise<MergeOutcome> {
 			if (holder) reasons.push(`${file} is inside ${holder.change}'s claim (${holder.agent})`);
 			else if (own && !inLane(file, own.paths)) reasons.push(`${file} is outside ${input.change}'s claim`);
 		}
-		const cast = votesHead?.commit.state.votes ?? [];
-		const stampKey = input.stampKey;
-		const counted = stampKey ? (await Promise.all(cast.map(async (v) => ((await verifyStamp(stampKey, stampPayload("vote", v), v.stamp)) ? v : null)))).filter((v) => v !== null) : cast;
+		const counted = await countedVotes(votesHead?.commit.state.votes ?? [], input.stampKey);
 		const outcome = approval({ votes: counted }, head, input.policy);
 		if (outcome.vetoedBy.length) reasons.push(`${head} is vetoed by ${outcome.vetoedBy.join(", ")}`);
 		else if (!outcome.approved) reasons.push(`${head} has ${outcome.approvals} of ${input.policy.required} approvals`);

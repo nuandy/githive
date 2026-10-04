@@ -1,6 +1,6 @@
 import { GitCasLog } from "../election-git";
 import { requiredPaths, requiredString } from "../errors";
-import type { Remote } from "../git";
+import { branchHead, type Remote } from "../git";
 import { changeId, normalizeClaim } from "../open-mode";
 import { audit } from "./audit";
 import { activeClaims, claim, registerAgent, release, releaseStale, startFree, type Registry } from "./claims";
@@ -8,7 +8,7 @@ import { readMainMerges, readRecordHistory } from "./git-records";
 import { type CheckRunner, mergeChange } from "./merge";
 import { revertViolation } from "./revert";
 import type { Stamper } from "./stamp";
-import { vote, type ReviewPolicy, type Votes } from "./votes";
+import { approval, countedVotes, vote, type ReviewPolicy, type Votes } from "./votes";
 
 // The coordinator-free MCP tools (see docs/coordinator-free.md). Stateless: each
 // tool reads or writes the repo's records in Git and reports what Git said.
@@ -34,8 +34,15 @@ export interface FreeContext {
 	register?: (repo: string) => Promise<void>;
 	/** Starts Blueprint's hosted reviewers on a change's current commit; each votes with free_vote (and, asked to, then tries to merge it). */
 	requestReview?: (input: { repo: string; change: string; roles: string[]; summary?: string; mergeWhenApproved?: boolean }) => Promise<{ head: string; reviewers: string[] }>;
+	/** What Blueprint's hosted agents on a change are doing: its builder, and the reviewers of its head. */
+	agentStatus?: (repo: string, change: string, head: string | null, roles: string[]) => Promise<HostedStatus>;
 	/** Starts Blueprint's hosted builder on a claimed change. */
 	startBuilder?: (input: { repo: string; change: string }) => Promise<{ change: string; builder: string }>;
+}
+
+export interface HostedStatus {
+	builder?: { status: string; revisions: number; error?: string };
+	reviewers: { role: string; status: string; verdict?: string }[];
 }
 
 const DEFAULT_POLICY: ReviewPolicy = { required: 2, vetoes: ["security"] };
@@ -48,7 +55,7 @@ export const FREE_INSTRUCTIONS = `Coordinator-free mode (the free_* tools): nobo
 Conventions:
 1. free_claim the paths you will change before editing; edit only inside your claim. A refusal names who holds what: narrow your claim, or ask them.
 2. Work on a branch changes/<change> and push it where free_credentials with your change says: its own fork (only you can write it), or the project repo if it's shared. The project's main is written only through the toolkit.
-3. Reviewers free_vote on the exact commit they reviewed. A change merges with the policy's approvals and no veto.
+3. Reviewers free_vote on the exact commit they reviewed. A change merges with the policy's approvals and no veto. free_status shows your change's votes, with the evidence for any rejection to fix, and what's still needed.
 4. free_merge merges your branch with trailers recording the claims and votes it checked, then releases your claim. Merge by hand only with the same trailers.
 5. Claiming again (same paths) keeps your claim active. A claim idle for 30 minutes is released by whoever claims its paths, or by anyone (free_release with stale: true).
 6. Anyone may free_revert a commit free_audit reports; the audit then counts it resolved.
@@ -69,6 +76,7 @@ const TOOL_LIST = [
 	{ name: "free_request_review", description: "Ask Blueprint's hosted reviewer agents to review your change's current commit (by default the tests role and every veto role); each votes with free_vote.", inputSchema: { type: "object", properties: { repo: str, change: str, roles: { type: "array", items: str }, summary: str }, required: ["repo", "change"] } },
 	{ name: "free_audit", description: "Replay the records and list every broken convention, with the commit and the agent (and whether a revert has resolved it).", inputSchema: { type: "object", properties: { repo: str }, required: ["repo"] } },
 	{ name: "free_revert", description: "Revert a commit the audit reports: its files go back to how they were before it, in a commit naming what it reverts.", inputSchema: { type: "object", properties: { repo: str, commit: str, agent: str }, required: ["repo", "commit", "agent"] } },
+	{ name: "free_status", description: "Where a change stands: its claim (or how it ended), its branch head, the votes on that head with their evidence, the approvals still needed, and what Blueprint's hosted agents on it are doing.", inputSchema: { type: "object", properties: { repo: str, change: str }, required: ["repo", "change"] } },
 	{ name: "free_register", description: "Register your agent name and get its secret key (shown once), so what you write is attributed to you even if you share an Access identity. With your current key, rotates it.", inputSchema: { type: "object", properties: { repo: str, agent: str }, required: ["repo", "agent"] } },
 ];
 // Every tool takes the caller's agent key, for clients that can't set the header.
@@ -244,6 +252,26 @@ export async function callFreeTool(name: string, args: Args, ctx: FreeContext): 
 		case "free_revert": {
 			const { violations } = await runAudit(ctx, repo);
 			return revertViolation({ remote: await write(), claims, votes, stamper, target: requiredString(args, "commit"), violations, agent: actAs("agent") });
+		}
+		case "free_status": {
+			const change = requiredString(args, "change");
+			const held = activeClaims(registered).find((c) => c.change === change) ?? null;
+			const released = held ? undefined : registered?.released.findLast((r) => r.change === change);
+			// No fork yet means nothing pushed yet.
+			const head = await changeSource(change, "read").then((source) => branchHead(source, `changes/${change}`)).catch(() => null);
+			const policy = registered?.policy ?? DEFAULT_POLICY;
+			const cast = (await votes.read())?.commit.state.votes ?? [];
+			const outcome = head ? approval({ votes: await countedVotes(cast, registered?.stampKey) }, head, policy) : { approved: false, approvals: 0, vetoedBy: [] };
+			const hosted = ctx.agentStatus ? await ctx.agentStatus(repo, change, head, [...new Set(["tests", ...policy.vetoes])]).catch(() => undefined) : undefined;
+			return {
+				change,
+				claim: held,
+				...(released ? { released } : {}),
+				head,
+				votes: head ? cast.filter((v) => v.commit === head) : [],
+				approval: { ...outcome, required: policy.required },
+				...(hosted ? { hosted } : {}),
+			};
 		}
 		case "free_register": {
 			const agent = requiredString(args, "agent");

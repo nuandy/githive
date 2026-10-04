@@ -20,6 +20,7 @@ const hosted = vi.hoisted(() => ({
 
 vi.mock("../src/free/env", () => ({
 	startFreeReviewers: hosted.startFreeReviewers,
+	freeBuilderCredentials: async () => ({ token: "fork-write", base: { remote: "https://git.test/project.git", token: "read" } }),
 	freeContextFor: (_env: unknown, by: string) => ({ by }),
 	freeAgentName: (repo: string, change: string) => `free--${repo}--${change}`,
 }));
@@ -115,6 +116,32 @@ describe("Blueprint's builder, coordinator-free", () => {
 	});
 });
 
+describe("Blueprint's builder, sent back by review", () => {
+	/** A builder that finished `revisions` revisions ago. */
+	async function finished(revisions: number) {
+		const storage = new FakeStorage();
+		const agent = new Builder({ storage } as never, env as never);
+		await storage.put("job", job);
+		await storage.put("state", { status: "done", startedAt: "", turns: 3, toolCalls: 3, nudges: 0, usage: {}, log: [], pushes: 1, revisions } as unknown as BuilderState);
+		return { agent, state: async () => (await storage.get<BuilderState>("state"))! };
+	}
+
+	it("resumes with the reviewer's feedback, as a revision", async () => {
+		const b = await finished(0);
+		expect(await b.agent.reviseFree("The tests reviewer rejected h1: no tests")).toBe("revising");
+		const state = await b.state();
+		expect(state).toMatchObject({ status: "queued", revisions: 1 });
+		expect(JSON.stringify(state.pending)).toContain("no tests");
+	});
+
+	it("gives up after three revisions, releasing its claim for someone else", async () => {
+		const b = await finished(3);
+		expect(await b.agent.reviseFree("rejected again")).toBe("released");
+		expect((await b.state()).status).toBe("done");
+		expect(hosted.releases).toEqual([{ args: { repo: "project", change: "stats-1a2b", agent: "blueprint-builder", reason: "rejected after 3 revisions: rejected again" }, by: "service:blueprint-builder" }]);
+	});
+});
+
 describe("Blueprint's reviewer, coordinator-free", () => {
 	it("votes, then tries the merge as the change's agent when asked to", async () => {
 		const reviewer = new Reviewer({ storage: new FakeStorage() } as never, env as never);
@@ -124,5 +151,16 @@ describe("Blueprint's reviewer, coordinator-free", () => {
 		await tools.find((t) => t.name === "submit_verdict")!.run({ verdict: "approve", summary: "fine", evidence: "npm test passes" } as never);
 		expect(hosted.votes).toEqual([expect.objectContaining({ commit: "h1", reviewer: "blueprint-tests", role: "tests", verdict: "approve" })]);
 		expect(hosted.merges).toEqual([{ args: { repo: "project", change: "stats-1a2b", agent: "blueprint-builder" }, by: "service:blueprint-reviewer:tests" }]);
+	});
+
+	it("rejects, then sends the change back to Blueprint's builder instead of merging", async () => {
+		const reviseFree = vi.fn(async () => "revising");
+		const reviewer = new Reviewer({ storage: new FakeStorage() } as never, { ...env, BUILDER: { getByName: (name: string) => (name === "free--project--stats-1a2b" ? { reviseFree } : null) } } as never);
+		const review = { ...job, role: "tests", head: "h1", baseCommit: "b0", free: { ...free, mergeWhenApproved: true } } as unknown as ReviewJob;
+		const tools = (reviewer as unknown as { tools(job: ReviewJob, state: ReviewerState): AgentTool[] }).tools(review, { log: [] } as unknown as ReviewerState);
+		await tools.find((t) => t.name === "submit_verdict")!.run({ verdict: "reject", summary: "no tests", evidence: "src/stats has no test file" } as never);
+		expect(hosted.votes).toEqual([expect.objectContaining({ commit: "h1", verdict: "reject" })]);
+		expect(hosted.merges).toEqual([]);
+		expect(reviseFree).toHaveBeenCalledWith(expect.stringMatching(/tests reviewer rejected h1[\s\S]*no tests[\s\S]*src\/stats has no test file/));
 	});
 });

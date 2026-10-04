@@ -21,6 +21,12 @@ const onAuth = (remote: Remote) => () => ({
 	password: remote.token.split("?expires=")[0],
 });
 
+/** A branch's head on a remote, without cloning (one ls-remote), or null when it doesn't exist. */
+export async function branchHead(remote: Remote, branch: string): Promise<string | null> {
+	const refs = await retryTransient(() => git.listServerRefs({ http, url: remote.url, prefix: `refs/heads/${branch}`, onAuth: onAuth(remote) }));
+	return refs.find((r) => r.ref === `refs/heads/${branch}`)?.oid ?? null;
+}
+
 export type MergeOutcome = { clean: true } | { clean: false; files: string[] };
 export interface ChangedFileText {
 	path: string;

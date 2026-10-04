@@ -83,6 +83,37 @@ describe("forks (the default)", () => {
 	}, 60_000);
 });
 
+describe("free_status", () => {
+	it("tells an agent where its change stands: its claim, its branch head, the votes on it, and what's still needed", async () => {
+		await call("free_start", {});
+		await call("free_claim", { change: "a-1", agent: "agent-a", paths: ["src/a/"], intent: "a" });
+		expect(await call("free_status", { change: "a-1" })).toMatchObject({ change: "a-1", claim: { agent: "agent-a", paths: ["src/a/"] }, head: null, votes: [] });
+
+		const agent = await agentClone(fork.url, work, "agent-a");
+		await agent.run("checkout", "--quiet", "-b", "changes/a-1");
+		agent.write("src/a/x.txt", "a\n");
+		await agent.run("add", "-A");
+		await agent.run("commit", "--quiet", "-m", "a");
+		await agent.run("push", "--quiet", "origin", "changes/a-1");
+		const head = await agent.run("rev-parse", "HEAD");
+		await call("free_vote", { commit: head, reviewer: "rev-1", role: "tests", verdict: "reject", evidence: "no tests" });
+		await call("free_vote", { commit: "an-older-commit", reviewer: "rev-2", role: "tests", verdict: "approve", evidence: "ok" });
+
+		expect(await call("free_status", { change: "a-1" })).toMatchObject({
+			head,
+			votes: [{ reviewer: "rev-1", verdict: "reject", evidence: "no tests" }],
+			approval: { approved: false, approvals: 0, required: 2, vetoedBy: [] },
+		});
+	}, 60_000);
+
+	it("says how a change ended once its claim is gone", async () => {
+		await call("free_start", {});
+		await call("free_claim", { change: "a-1", agent: "agent-a", paths: ["src/a/"], intent: "a" });
+		await call("free_release", { change: "a-1", agent: "agent-a", reason: "gave up" });
+		expect(await call("free_status", { change: "a-1" })).toMatchObject({ claim: null, released: { reason: "gave up" } });
+	});
+});
+
 describe('access: "shared"', () => {
 	it("gives any agent write access to the project repo, as before", async () => {
 		await call("free_start", { access: "shared" });
