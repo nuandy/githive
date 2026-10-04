@@ -441,7 +441,17 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 			const marker = "park-timeout:" + sliceId + ":" + parkedAt;
 			if (await this.ctx.storage.get(marker)) return;
 			const unresolved = (task.laneChangeRequests ?? []).filter((request) => request.requester === sliceId && (request.status === "pending" || request.status === "answered"));
-			if (!unresolved.length) return;
+			if (!unresolved.length) {
+				// A resolution may have been retained for lack of a slot just before a
+				// Coordinator restart. The durable Builder alarm gives this queued wake
+				// afterward another chance to drain without treating it as a timeout.
+				if (slice.wakeMessage) {
+					if (!task.queue.some((item) => item.kind === "builder" && item.slice === sliceId)) task.queue.push({ kind: "builder", slice: sliceId });
+					await this.drain(task);
+					await this.save(task);
+				}
+				return;
+			}
 			const builder = this.env.BUILDER.getByName(slice.repo!);
 			if (!(await builder.markParkTimedOut())) return;
 			const waiting = unresolved.map((request) => request.id + " (" + request.path + ")").join(", ");
