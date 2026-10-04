@@ -107,6 +107,8 @@ export function repoPath(path: string) {
 	return clean;
 }
 
+interface DeferredWake { eventId: string; message: string; credentials: BuilderResumeCredentials }
+
 export abstract class SandboxAgent<J extends SandboxJob, S extends AgentState> extends DurableObject<Env> {
 	private lifecycleTail: Promise<unknown> = Promise.resolve();
 	private lifecycle<T>(fn: () => Promise<T>): Promise<T> { const next = this.lifecycleTail.then(fn, fn); this.lifecycleTail = next.catch(() => {}); return next; }
@@ -267,9 +269,13 @@ export abstract class SandboxAgent<J extends SandboxJob, S extends AgentState> e
 			await this.ctx.container!.setInactivityTimeout(20 * 60_000);
 			const deadline = Date.now() + RUN_BUDGET_MS;
 			while (state.status === "working" && Date.now() < deadline && !(await this.cancelled(state))) {
-				await this.turn(job, state);
-				await this.save(state);
+				const turnToken = crypto.randomUUID();
+					await this.ctx.storage.put(TURN_IN_FLIGHT, turnToken);
+					try { await this.turn(job, state); await this.save(state); await this.reconcileAfterTurn(job, state, turnToken); }
+					finally { if ((await this.ctx.storage.get<string>(TURN_IN_FLIGHT)) === turnToken) await this.ctx.storage.delete(TURN_IN_FLIGHT); }
+					const refreshed = await this.ctx.storage.get<J>("job"); if (refreshed) Object.assign(job, refreshed);
 			}
+			if ((state.status as string) === "parked") { await this.save(state); if (this.ctx.container?.running) await this.ctx.container.destroy(this.kind + " parked"); await this.scheduleForState(state); return; }
 			if (state.status === "working") await this.ctx.storage.setAlarm(Date.now() + 1_000);
 		} catch (err) {
 			state.status = "failed";
@@ -284,6 +290,20 @@ export abstract class SandboxAgent<J extends SandboxJob, S extends AgentState> e
 		await this.save(state);
 		if ((state.status as string) === "failed") await this.onFailed(job, state).catch(() => {});
 		if (["done", "failed"].includes(state.status)) await this.onStopped(job, state).catch(() => {});
+	}
+
+	private async reconcileAfterTurn(job: J, state: S, turnToken: string) {
+		await this.lifecycle(async () => {
+			const park = await this.ctx.storage.get<{ parkedAt: string; waitingFor: string[] }>(PARK_COMMAND);
+			if (park && (state.status === "working" || state.status === "queued")) { state.status = "parked"; state.parkedAt = park.parkedAt; state.waitingRequestIds = park.waitingFor; this.note(state, "parked while waiting for " + park.waitingFor.join(", ")); }
+			const pending = (await this.ctx.storage.get<DeferredWake[]>(DEFERRED_WAKES)) ?? [];
+			for (const wake of pending) await this.deliverWake(job, state, wake);
+			if (pending.length) await this.ctx.storage.delete(DEFERRED_WAKES);
+			await this.save(state); if (park) await this.ctx.storage.delete(PARK_COMMAND);
+			if (state.status === "parked") { if (this.ctx.container?.running) await this.ctx.container.destroy(this.kind + " parked"); await this.scheduleForState(state); }
+			else if (state.status === "queued") await this.scheduleForState(state);
+			if ((await this.ctx.storage.get<string>(TURN_IN_FLIGHT)) === turnToken) await this.ctx.storage.delete(TURN_IN_FLIGHT);
+		});
 	}
 
 	private async scheduleForState(state: S) {
@@ -458,7 +478,7 @@ export abstract class SandboxAgent<J extends SandboxJob, S extends AgentState> e
 			return;
 		}
 		// The model answered in text without finishing.
-		if (++state.nudges > MAX_NUDGES) throw new Error(`${this.kind} stopped calling tools without finishing`);
+		if (++state.nudges > MAX_NUDGES) { if (await this.autoPark(job, state)) return; throw new Error(`${this.kind} stopped calling tools without finishing`); }
 		this.note(state, `nudged: ${response.output_text.slice(0, 200)}`);
 		state.pending = [{ role: "user", content: this.nudge(job) }];
 	}
