@@ -10,6 +10,7 @@
 //                          [--base https://blueprint-bench.nuandy.workers.dev] [--repo bench-<label>]
 //                          [--idle 40]   (changes held open through every level that never push)
 //                          [--mode free] (coordinator-free mode: the same lifecycle through the free_* tools, no Coordinator)
+//                          [--shard-depth 2] (free mode: how deep claims are sharded; 0 keeps them in one record)
 //
 // Credentials come from .dev.vars (CF_ACCESS_CLIENT_ID, CF_ACCESS_CLIENT_SECRET) and are never printed.
 // Each run gets its own repo, so its Coordinator starts idle. Results go to
@@ -35,6 +36,7 @@ const LEVELS = (args.levels ?? "1,5,10,25").split(",").map(Number);
 const RACERS = Number(args.racers ?? 5);
 const IDLE = Number(args.idle ?? 0);
 const FREE = args.mode === "free";
+const SHARD_DEPTH = args["shard-depth"] === undefined ? undefined : Number(args["shard-depth"]);
 
 // Calls can wait minutes behind the lock under load; don't let the client give up first.
 try {
@@ -135,15 +137,16 @@ async function freeAgent(level, _taskId, runId, i, scratch) {
 	const agentName = `bench-${runId}-a${i}`;
 	await tool(level, "free_claims", ids, "list_claims");
 	const fork = await step(level, "open_change", async () => {
-		const claimed = await tool(level, "free_claim", { ...ids, change: change_id, agent: agentName, paths: [`bench/${runId}/a${i}/`], intent: "benchmark agent" }, null);
+		// Each agent in its own directory, as agents splitting work would be: two segments deep, so its own claims shard.
+		const claimed = await tool(level, "free_claim", { ...ids, change: change_id, agent: agentName, paths: [`bench-${runId}/a${i}/`], intent: "benchmark agent" }, null);
 		if (!claimed.ok) throw new Error(`free_claim refused: ${JSON.stringify(claimed)}`);
 		return tool(level, "free_credentials", { ...ids, change: change_id }, null);
 	});
 	const token = fork.token.replace(/\?.*$/, "");
 	const dir = join(scratch, `a${i}`);
 	await git(scratch, token, "clone", "-q", "--depth", "1", fork.url, dir);
-	await mkdir(join(dir, "bench", runId, `a${i}`), { recursive: true });
-	await writeFile(join(dir, "bench", runId, `a${i}`, "note.txt"), `agent ${i} of ${runId}\n`);
+	await mkdir(join(dir, `bench-${runId}`, `a${i}`), { recursive: true });
+	await writeFile(join(dir, `bench-${runId}`, `a${i}`, "note.txt"), `agent ${i} of ${runId}\n`);
 	await git(dir, token, "add", "-A");
 	await git(dir, token, "-c", "user.name=bench", "-c", "user.email=bench@example.com", "commit", "-qm", `bench ${runId} ${i}`);
 	await git(dir, token, "push", "-q", "origin", `HEAD:refs/heads/changes/${change_id}`);
@@ -159,7 +162,7 @@ async function freeAgent(level, _taskId, runId, i, scratch) {
 async function freeRace(level, _taskId, runId) {
 	const results = await Promise.allSettled(
 		Array.from({ length: RACERS }, (_, i) =>
-			tool(level, "free_claim", { repo: REPO, change: `${runId}-r${i}`, agent: `bench-${runId}-r${i}`, paths: [`bench/${runId}/race/`], intent: "benchmark race" }, "open_change").then((r) => ({ ...r, i })),
+			tool(level, "free_claim", { repo: REPO, change: `${runId}-r${i}`, agent: `bench-${runId}-r${i}`, paths: [`bench-${runId}/race/`], intent: "benchmark race" }, "open_change").then((r) => ({ ...r, i })),
 		),
 	);
 	const won = results.filter((r) => r.status === "fulfilled" && r.value.ok).map((r) => r.value.i);
@@ -212,8 +215,8 @@ async function main() {
 		});
 	}
 	if (FREE) {
-		const started = await tool(0, "free_start", { repo: REPO });
-		console.log(`coordinator-free mode on ${REPO} at ${BASE} (access: ${started.access})`);
+		const started = await tool(0, "free_start", { repo: REPO, ...(SHARD_DEPTH === undefined ? {} : { shard_depth: SHARD_DEPTH }) });
+		console.log(`coordinator-free mode on ${REPO} at ${BASE} (access: ${started.access}, claims sharded ${started.shardDepth ? `${started.shardDepth} deep` : "not at all"})`);
 	}
 	const task = FREE ? { id: null } : await api("POST", `/repos/${REPO}/open`, {});
 	if (!FREE) console.log(`open task ${task.id} on ${REPO} at ${BASE}`);
