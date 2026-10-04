@@ -13,6 +13,7 @@ import { startGitServer, type GitServer } from "./helpers/git-server";
 
 let server: GitServer;
 let registered: string[] = [];
+let reviewRequests: { repo: string; change: string; roles: string[]; summary?: string }[] = [];
 const ctx = () => ({
 	coordinator: () => {
 		throw new Error("not used");
@@ -24,6 +25,10 @@ const ctx = () => ({
 		remote: async () => ({ url: server.url, token: "unused" }),
 		head: async () => server.git("rev-parse", "main").trim(),
 		register: async (repo: string) => void registered.push(repo),
+		requestReview: async (input: { repo: string; change: string; roles: string[]; summary?: string }) => {
+			reviewRequests.push(input);
+			return { head: "h1", reviewers: input.roles };
+		},
 	},
 });
 const call = async (name: string, args: Record<string, unknown>) => {
@@ -98,5 +103,16 @@ describe("the coordinator-free MCP tools", () => {
 			votes: [{ commit: "h1", reviewer: "rev-1", verdict: "approve" }],
 			audit: { merges: 0, open: 0, violations: [] },
 		});
+	});
+
+	it("asks Blueprint's hosted reviewers to review a claimed change, by default the tests role and every veto role", async () => {
+		reviewRequests = [];
+		await call("free_start", { repo: "project", required: 2, vetoes: ["security"] });
+		await call("free_claim", { repo: "project", change: "a-1", agent: "agent-a", paths: ["src/a/"], intent: "a" });
+		expect(await call("free_request_review", { repo: "project", change: "a-1", summary: "adds a" })).toEqual({ head: "h1", reviewers: ["tests", "security"] });
+		expect(reviewRequests).toEqual([{ repo: "project", change: "a-1", roles: ["tests", "security"], summary: "adds a" }]);
+		await call("free_request_review", { repo: "project", change: "a-1", roles: ["api"] });
+		expect(reviewRequests[1].roles).toEqual(["api"]);
+		expect(await call("free_request_review", { repo: "project", change: "nope" })).toEqual({ error: "nope holds no claim: claim the change's paths first" });
 	});
 });

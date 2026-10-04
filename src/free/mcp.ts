@@ -26,6 +26,8 @@ export interface FreeContext {
 	stamper?: () => Promise<Stamper | undefined>;
 	/** Notes a repo in coordinator-free mode, so the dashboard can list it. */
 	register?: (repo: string) => Promise<void>;
+	/** Starts Blueprint's hosted reviewers on a change's current commit; each votes with free_vote. */
+	requestReview?: (input: { repo: string; change: string; roles: string[]; summary?: string }) => Promise<{ head: string; reviewers: string[] }>;
 }
 
 const DEFAULT_POLICY: ReviewPolicy = { required: 2, vetoes: ["security"] };
@@ -41,6 +43,7 @@ Conventions:
 4. free_merge merges your branch with trailers recording the claims and votes it checked, then releases your claim. Merge by hand only with the same trailers.
 5. A claim idle for 30 minutes may be released by anyone (free_release with stale: true).
 6. Anyone may free_revert a commit free_audit reports; the audit then counts it resolved.
+7. free_request_review asks Blueprint's hosted reviewers for votes on your change.
 free_audit replays the records and lists every broken convention, with the commit and the agent.`;
 
 const str = { type: "string" } as const;
@@ -52,6 +55,7 @@ export const FREE_TOOLS = [
 	{ name: "free_release", description: "Release a claim: yours, or another's idle for 30 minutes with stale: true.", inputSchema: { type: "object", properties: { repo: str, change: str, agent: str, reason: str, stale: { type: "boolean" } }, required: ["repo", "change", "agent"] } },
 	{ name: "free_vote", description: "Record your review verdict on the exact commit you reviewed.", inputSchema: { type: "object", properties: { repo: str, commit: str, reviewer: str, role: str, verdict: { type: "string", enum: ["approve", "reject"] }, evidence: str }, required: ["repo", "commit", "reviewer", "role", "verdict", "evidence"] } },
 	{ name: "free_merge", description: "Merge changes/<change> into main if the conventions hold, recording what was checked, then release the claim.", inputSchema: { type: "object", properties: { repo: str, change: str, agent: str }, required: ["repo", "change", "agent"] } },
+	{ name: "free_request_review", description: "Ask Blueprint's hosted reviewer agents to review your change's current commit (by default the tests role and every veto role); each votes with free_vote.", inputSchema: { type: "object", properties: { repo: str, change: str, roles: { type: "array", items: str }, summary: str }, required: ["repo", "change"] } },
 	{ name: "free_audit", description: "Replay the records and list every broken convention, with the commit and the agent (and whether a revert has resolved it).", inputSchema: { type: "object", properties: { repo: str }, required: ["repo"] } },
 	{ name: "free_revert", description: "Revert a commit the audit reports: its files go back to how they were before it, in a commit naming what it reverts.", inputSchema: { type: "object", properties: { repo: str, commit: str, agent: str }, required: ["repo", "commit", "agent"] } },
 ];
@@ -148,6 +152,15 @@ export async function callFreeTool(name: string, args: Args, ctx: FreeContext): 
 				change: requiredString(args, "change"),
 				agent: requiredString(args, "agent"),
 			});
+		}
+		case "free_request_review": {
+			const change = requiredString(args, "change");
+			const registry = (await claims.read())?.commit.state;
+			if (!activeClaims(registry).some((c) => c.change === change)) throw new Error(`[409] ${change} holds no claim: claim the change's paths first`);
+			if (!ctx.requestReview) throw new Error("[501] hosted reviewers aren't available here");
+			const policy = registry?.policy ?? DEFAULT_POLICY;
+			const roles = Array.isArray(args.roles) && args.roles.length ? (args.roles as string[]) : [...new Set(["tests", ...policy.vetoes])];
+			return ctx.requestReview({ repo, change, roles, ...(typeof args.summary === "string" ? { summary: args.summary } : {}) });
 		}
 		case "free_audit": {
 			const { merges, violations } = await runAudit(ctx, repo);

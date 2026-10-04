@@ -4,6 +4,10 @@ import { statusOf } from "./errors";
 import { ENVIRONMENT, SandboxAgent, sliceContext, type AgentState, type SliceJob } from "./sandbox";
 import { GIT_IN_BLUEPRINT } from "./git-blueprint-guidance";
 import type { QuorumStatus } from "./types";
+import { remoteFor } from "./artifacts";
+import { GitCasLog, cachedRemote } from "./election-git";
+import { makeStamper } from "./free/stamp";
+import { vote, type Votes } from "./free/votes";
 
 // One Reviewer per (slice, role): a gpt-6-luna agent that checks out the exact
 // commit under review in its own container, with a read-only token, runs the
@@ -22,6 +26,12 @@ export interface ReviewJob extends SliceJob {
 	priorFindings?: string;
 	/** Contract changes approved during the build. */
 	amendments?: { path: string; reason: string }[];
+	/**
+	 * A coordinator-free review: the change is the branch `ref` in the project
+	 * repo, and the verdict is a vote in the repo's votes ref (free_vote),
+	 * stamped as this reviewer, rather than a call to a Coordinator.
+	 */
+	free?: { repo: string; change: string; ref: string };
 }
 
 export interface ReviewerState extends AgentState {
@@ -54,6 +64,13 @@ const VerdictArgs = z.strictObject({
 
 export class Reviewer extends SandboxAgent<ReviewJob, ReviewerState> {
 	protected readonly kind = "reviewer";
+
+	/** Cast this review's verdict as a vote in the repo's votes ref, stamped as this reviewer when Blueprint has a key. */
+	private async voteFree(free: NonNullable<ReviewJob["free"]>, job: ReviewJob, verdict: "approve" | "reject", evidence: string) {
+		const votes = new GitCasLog<Votes>(cachedRemote(() => remoteFor(this.env.ARTIFACTS, free.repo, "write")), free.repo, `refs/notes/blueprint-votes/${free.repo}`);
+		const stamper = this.env.FREE_STAMP_KEY ? await makeStamper(this.env.FREE_STAMP_KEY, `service:blueprint-reviewer:${job.role}`) : undefined;
+		await vote(votes, { commit: job.head, reviewer: `blueprint-${job.role}`, role: job.role, verdict, evidence }, stamper);
+	}
 
 	protected instructions(job: ReviewJob) {
 		return `You are the ${job.role} reviewer on Blueprint, a Git platform where several agents build one feature in parallel. Reviewer agents vote on each slice before it can be integrated. ${ENVIRONMENT}
@@ -95,6 +112,7 @@ How to work:
 	}
 
 	protected kickoff(job: ReviewJob) {
+		if (job.free) return `Review change ${job.free.change} (branch ${job.free.ref}) at commit ${job.head}. Here a "slice" is this change, and its lane is the paths it claimed; your vote counts toward merging it into main.`;
 		return `Review slice ${job.slice.id} at commit ${job.head}.`;
 	}
 
@@ -107,10 +125,17 @@ How to work:
 	}
 
 	protected async onStopped(job: ReviewJob) {
+		// A coordinator-free review has no Coordinator to tell.
+		if (job.free) return;
 		await this.coordinator(job).agentStopped("reviewer", `${job.slice.id}:${job.role}:${job.head}`);
 	}
 
 	protected async afterClone(job: ReviewJob) {
+		// A coordinator-free change is a branch of the project repo, not a fork's main.
+		if (job.free) {
+			const fetched = await this.git(job, ["fetch", "-q", "origin", job.free.ref]);
+			if (fetched.exitCode !== 0) throw new Error(`could not fetch ${job.free.ref}: ${fetched.output}`);
+		}
 		const checkout = await this.exec(["git", "checkout", "-q", job.head]);
 		if (checkout.exitCode !== 0) throw new Error(`could not check out ${job.head}: ${checkout.output}`);
 	}
@@ -123,6 +148,12 @@ How to work:
 				description: "Submit your vote on the slice. Call once, when you have decided.",
 				schema: VerdictArgs,
 				run: async ({ verdict, summary, evidence }) => {
+					if (job.free) {
+						await this.voteFree(job.free, job, verdict, `${summary}\n\n${evidence}`);
+						Object.assign(state, { status: "done", verdict, summary, evidence });
+						this.note(state, `voted ${verdict} on ${job.head} (coordinator-free)`);
+						return "Vote recorded.";
+					}
 					try {
 						const { quorum } = await this.coordinator(job).submitReview(job.slice.id, {
 							reviewer: job.role,

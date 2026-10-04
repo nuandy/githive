@@ -12,6 +12,8 @@ import type { Blueprint, Limits, Review, ReviewPolicy, Task } from "./types";
 import { openTaskId } from "./open-mode";
 import { handleMcpBody, type McpContext } from "./mcp";
 import { type FreeContext, freeSnapshot } from "./free/mcp";
+import type { Registry } from "./free/claims";
+import { Workspace } from "./git";
 import { identityLabel, makeStamper } from "./free/stamp";
 
 export { Builder } from "./builder";
@@ -178,9 +180,43 @@ app.post("/tasks/:id/changes/:slice/abandon", async (c) => {
 
 app.get("/tasks/:id/claims", async (c) => c.json(await coordinator(c.env, c.req.param("id")).claims()));
 
+/**
+ * Start Blueprint's hosted reviewers on a coordinator-free change: its branch
+ * head, reviewed against where it left main, with its claim as the brief. Each
+ * reviewer votes with free_vote when it's done.
+ */
+async function startFreeReviewers(env: Env, input: { repo: string; change: string; roles: string[]; summary?: string }) {
+	const { repo, change } = input;
+	const ref = `changes/${change}`;
+	const read = await remoteFor(env.ARTIFACTS, repo, "read", 3 * 3600);
+	const ws = await Workspace.clone(read);
+	const head = await ws.fetch("change", read, ref);
+	const baseCommit = await ws.mergeBase(await ws.head(), head);
+	const registry = (await new GitCasLog<Registry>(async () => read, repo, `refs/notes/blueprint-claims/${repo}`).read())?.commit.state;
+	const own = registry?.claims.find((c) => c.change === change);
+	const job = {
+		taskId: `free:${repo}`,
+		repo: `free--${repo}--${change}`,
+		remote: read.url,
+		token: read.token,
+		goal: own?.intent ?? change,
+		verify: registry?.verify ?? [],
+		slice: { id: change, title: change, owns: own?.paths ?? [], instructions: own?.intent ?? "", tests: [] },
+		siblings: (registry?.claims ?? []).filter((c) => c.change !== change).map((c) => ({ id: c.change, title: c.change, owns: c.paths })),
+		contracts: [],
+		head,
+		baseCommit,
+		buildSummary: input.summary,
+		free: { repo, change, ref },
+	};
+	await Promise.all(input.roles.map((role) => env.REVIEWER.getByName(reviewerName(`free--${repo}--${change}`, role, head)).start({ ...job, role })));
+	return { head, reviewers: input.roles };
+}
+
 /** Coordinator-free mode's tools (an exploration; see docs/coordinator-free.md): stateless, Git only. */
 const freeContext = (env: Env, identity: AccessIdentity | undefined): FreeContext => ({
 	register: async (repo) => taskIndex(env).addFree(repo),
+	requestReview: (input) => startFreeReviewers(env, input),
 	// What this caller writes is stamped with who they are, as Access verified them.
 	stamper: async () => (env.FREE_STAMP_KEY && identity ? makeStamper(env.FREE_STAMP_KEY, identityLabel(identity)) : undefined),
 	remote: (repo, scope) => remoteFor(env.ARTIFACTS, repo, scope, 3600),

@@ -18,6 +18,8 @@ const root = new URL("..", import.meta.url).pathname;
 const args = Object.fromEntries(process.argv.slice(2).reduce((pairs, arg, i, all) => (arg.startsWith("--") ? [...pairs, [arg.slice(2), all[i + 1]]] : pairs), []));
 const BASE = args.base ?? "https://blueprint-bench.nuandy.workers.dev";
 const REPO = args.repo ?? `free-demo-${Date.now().toString(36)}`;
+// --hosted yes: agent-a asks Blueprint's hosted reviewers (gpt-6-luna) for its votes, instead of scripted ones.
+const HOSTED = args.hosted === "yes";
 
 const vars = Object.fromEntries((await readFile(join(root, ".dev.vars"), "utf8")).split("\n").map((l) => l.match(/^([A-Z_]+)=(.*)$/)).filter(Boolean).map(([, k, v]) => [k, v.replace(/^"|"$/g, "")]));
 const headers = { "CF-Access-Client-Id": vars.CF_ACCESS_CLIENT_ID, "CF-Access-Client-Secret": vars.CF_ACCESS_CLIENT_SECRET, "Content-Type": "application/json" };
@@ -73,8 +75,21 @@ try {
 	say("\nagent-a: claims src/a/, pushes, gets two approvals, merges through the tools");
 	say("  claim:", JSON.stringify(await tool("free_claim", { change: "a-1", agent: "agent-a", paths: ["src/a/"], intent: "a's work" })).slice(0, 60));
 	const aHead = await pushChange("agent-a", "a-1", { "src/a/x.txt": "a\n" });
-	await tool("free_vote", { commit: aHead, reviewer: "rev-1", role: "tests", verdict: "approve", evidence: "tests pass" });
-	await tool("free_vote", { commit: aHead, reviewer: "rev-2", role: "api", verdict: "approve", evidence: "api unchanged" });
+	if (HOSTED) {
+		say("  asks Blueprint's hosted reviewers:", JSON.stringify(await tool("free_request_review", { change: "a-1", roles: ["tests", "security"], summary: "adds src/a/x.txt" })));
+		for (let waited = 0; waited < 900; waited += 15) {
+			await new Promise((resolve) => setTimeout(resolve, 15_000));
+			const snapshot = await api("GET", `/free/${REPO}`);
+			const cast = snapshot.votes.filter((v) => v.commit === aHead);
+			if (cast.length >= 2) {
+				for (const v of cast) say(`  ${v.reviewer} (${v.by ?? "unstamped"}): ${v.verdict}: ${v.evidence.split("\n")[0].slice(0, 100)}`);
+				break;
+			}
+		}
+	} else {
+		await tool("free_vote", { commit: aHead, reviewer: "rev-1", role: "tests", verdict: "approve", evidence: "tests pass" });
+		await tool("free_vote", { commit: aHead, reviewer: "rev-2", role: "api", verdict: "approve", evidence: "api unchanged" });
+	}
 	say("  merge:", JSON.stringify(await tool("free_merge", { change: "a-1", agent: "agent-a" })));
 
 	say("\nagent-d: approved, but its change deletes index.html, which the checks need");
