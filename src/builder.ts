@@ -1,15 +1,41 @@
 import { z } from "zod";
 import { tool, type AgentTool } from "./agent";
 import { pushFeedback } from "./builder-feedback";
-import { ENVIRONMENT, SandboxAgent, clip, sliceContext, type AgentState, type SliceJob } from "./sandbox";
+import { builderGitCommandBlockReason, builderGitPushBlockReason } from "./git-command-safety";
+import { ENVIRONMENT, INBOX, RUN_BUDGET_MS, SandboxAgent, TURN_IN_FLIGHT, TURN_STARTED, WORKDIR, clip, sliceContext, type AgentState, type SliceJob } from "./sandbox";
 import { GIT_IN_BLUEPRINT } from "./git-blueprint-guidance";
-import type { LaneChangeAnswer, LaneChangeCoordinator, LaneChangeRequestResult } from "./lane-change-contract";
-import type { BuilderResumeCredentials } from "./parking-contract";
+import type { LaneChangeAnswer, LaneChangeRequestResult } from "./lane-change-contract";
+import { BUILDER_PARK_TIMEOUT_MS, type BuilderResumeCredentials } from "./parking-contract";
 import type { MergeCheck } from "./types";
 
 // One Builder per slice: a gpt-6-luna agent implementing the slice on its fork,
 // in its own container. Every push runs Merge-ahead and the result comes back
-// as the tool output. Finishing hands the slice to the reviewer agents.
+// as the tool output. Finishing hands the slice to the reviewer agents. A
+// builder waiting on cross-lane requests parks: its conversation is kept and
+// its container stopped until a wake event (a resolution) resumes it.
+
+// Storage keys only builders use. The "sandbox-" names predate the split from the shared base.
+const LAST_PUSHED_HEAD = "builder-last-pushed-head";
+const PARK_COMMAND = "sandbox-park-command";
+const DEFERRED_WAKES = "sandbox-deferred-wakes";
+const DELIVERED_WAKES = "sandbox-delivered-wakes";
+const TIMED_OUT_PARK = "sandbox-timed-out-park";
+
+/** A wake event that arrived during a turn, delivered when the turn ends. */
+interface DeferredWake {
+	eventId: string;
+	message: string;
+	credentials: BuilderResumeCredentials;
+}
+
+/** A park that arrived during a turn; `applied` once the end of the turn has applied it. */
+interface ParkCommand {
+	parkedAt: string;
+	waitingFor: string[];
+	applied?: boolean;
+}
+
+type WakeOutcome = "resumed" | "deferred" | "ignored";
 
 export interface BuildJob extends SliceJob {
 	/** Read access to the task base, for merging work other slices integrated. */
@@ -102,7 +128,10 @@ How to work:
 		const { job, state } = await this.load();
 		if (!job || !state) throw new Error("builder has never run");
 		if (state.status === "queued") throw new Error(`builder is already ${state.status}`);
-		if (state.status === "working" || state.status === "parked") { await this.wake(`human-${crypto.randomUUID()}`, feedback, credentials); return this.view((await this.load()).state!); }
+		if (state.status === "working" || state.status === "parked") {
+			await this.wake(`human-${crypto.randomUUID()}`, feedback, credentials);
+			return this.view((await this.load()).state!);
+		}
 		await this.ctx.storage.put("job", { ...job, ...credentials });
 		await this.ctx.storage.delete("cancel");
 		state.status = "queued";
@@ -119,21 +148,252 @@ How to work:
 		return this.view(state);
 	}
 
-	async park(parkedAt: string, waitingFor: string[]) { return this.parkAgent(parkedAt, waitingFor); }
+	/**
+	 * Park while waiting for cross-lane requests: the conversation is kept and the
+	 * container stopped. A park that arrives during a turn applies when it ends.
+	 */
+	async park(parkedAt: string, waitingFor: string[]) {
+		return this.lifecycle(async () => {
+			if (await this.ctx.storage.get(TURN_IN_FLIGHT)) {
+				await this.ctx.storage.put(PARK_COMMAND, { parkedAt, waitingFor, applied: false } satisfies ParkCommand);
+				await this.ctx.storage.setAlarm(Date.now() + RUN_BUDGET_MS + 5_000);
+				return;
+			}
+			const { state } = await this.load();
+			if (!state || ["done", "failed"].includes(state.status)) return;
+			state.status = "parked";
+			state.parkedAt = parkedAt;
+			state.waitingRequestIds = [...waitingFor];
+			this.note(state, `parked while waiting for ${waitingFor.join(", ")}`);
+			await this.save(state);
+			if (this.ctx.container?.running) await this.ctx.container.destroy(`${this.kind} parked`).catch(() => {});
+			await this.scheduleForState(state);
+		});
+	}
+
 	/**
 	 * Deliver a stable Coordinator wake event exactly once. Event IDs are kept
 	 * across restarts; the message is queued if the builder is working, and a
-	 * parked conversation resumes with fresh credentials.
+	 * parked conversation resumes with fresh credentials. An event that arrives
+	 * during a turn is delivered when the turn ends.
 	 */
-	async wake(eventId: string, message: string, credentials: BuilderResumeCredentials) {
-		return this.receiveWake(eventId, message, credentials);
+	async wake(eventId: string, message: string, credentials: BuilderResumeCredentials): Promise<WakeOutcome> {
+		if (!eventId.trim()) throw new Error("wake event ID must be nonempty");
+		return this.lifecycle(async () => {
+			const delivered = (await this.ctx.storage.get<string[]>(DELIVERED_WAKES)) ?? [];
+			const pending = (await this.ctx.storage.get<DeferredWake[]>(DEFERRED_WAKES)) ?? [];
+			if (delivered.includes(eventId) || pending.some((wake) => wake.eventId === eventId)) return "ignored";
+			const wake = { eventId, message, credentials };
+			if (await this.ctx.storage.get(TURN_IN_FLIGHT)) {
+				await this.ctx.storage.put(DEFERRED_WAKES, [...pending, wake]);
+				await this.ctx.storage.setAlarm(Date.now() + RUN_BUDGET_MS + 5_000);
+				return "deferred";
+			}
+			const { job, state } = await this.load();
+			if (!job || !state) return "ignored";
+			return this.deliverWake(job, state, wake);
+		});
 	}
-	async markParkTimedOut() { return this.isParkStillTimedOut(); }
+
+	/** Whether the builder is still parked past its timeout. */
+	async markParkTimedOut() {
+		const { state } = await this.load();
+		return !!state && state.status === "parked" && !!state.parkedAt && Date.parse(state.parkedAt) + BUILDER_PARK_TIMEOUT_MS <= Date.now();
+	}
+
+	/** Put a wake event's message in the inbox, with its credentials, and resume the builder if it is parked. */
+	private async deliverWake(job: BuildJob, state: BuilderState, wake: DeferredWake): Promise<WakeOutcome> {
+		const delivered = (await this.ctx.storage.get<string[]>(DELIVERED_WAKES)) ?? [];
+		if (delivered.includes(wake.eventId) || !["parked", "working", "queued"].includes(state.status)) return "ignored";
+		const inbox = (await this.ctx.storage.get<string[]>(INBOX)) ?? [];
+		const parked = state.status === "parked";
+		if (parked) {
+			state.status = "queued";
+			state.parkedAt = undefined;
+			state.waitingRequestIds = undefined;
+			state.finishedAt = undefined;
+			state.error = undefined;
+			state.nudges = 0;
+			state.turnsAtRunStart = state.turns;
+			this.note(state, `resumed for wake event ${wake.eventId}`);
+		} else {
+			this.note(state, `resolution event ${wake.eventId} queued for next turn`);
+		}
+		inbox.push(wake.message);
+		delivered.push(wake.eventId);
+		await this.ctx.storage.put({ job: { ...job, ...wake.credentials }, state, [INBOX]: inbox, [DELIVERED_WAKES]: delivered });
+		if (parked) {
+			if (this.ctx.container?.running) await this.ctx.container.destroy(`${this.kind} resumed`).catch(() => {});
+			await this.ctx.storage.setAlarm(Date.now());
+			return "resumed";
+		}
+		await this.ctx.storage.setAlarm(Date.now());
+		return "deferred";
+	}
+
+	/** Apply a park and deliver wake events that arrived during the turn. */
+	protected override async afterTurn(job: BuildJob, state: BuilderState, turnToken: string) {
+		await this.lifecycle(async () => {
+			const park = await this.ctx.storage.get<ParkCommand>(PARK_COMMAND);
+			if (park && !park.applied) {
+				if (state.status === "working" || state.status === "queued") {
+					state.status = "parked";
+					state.parkedAt = park.parkedAt;
+					state.waitingRequestIds = park.waitingFor;
+					this.note(state, `parked while waiting for ${park.waitingFor.join(", ")}`);
+				}
+				await this.ctx.storage.put({ state, [PARK_COMMAND]: { ...park, applied: true } });
+			}
+			const pending = (await this.ctx.storage.get<DeferredWake[]>(DEFERRED_WAKES)) ?? [];
+			for (const wake of pending) await this.deliverWake(job, state, wake);
+			if (pending.length) await this.ctx.storage.delete(DEFERRED_WAKES);
+			await this.save(state);
+			if (park) await this.ctx.storage.delete(PARK_COMMAND);
+			if (state.status === "parked") {
+				if (this.ctx.container?.running) await this.ctx.container.destroy(`${this.kind} parked`);
+				await this.scheduleForState(state);
+			} else if (state.status === "queued") {
+				await this.scheduleForState(state);
+			}
+			await this.endTurn(turnToken);
+		});
+	}
+
+	/** A parked builder's alarm: deliver what is waiting, then report a park that timed out. */
+	protected override async parkedAlarm(job: BuildJob) {
+		await this.reconcileParkedWakes(job);
+		const latest = (await this.load()).state;
+		if (latest?.status === "parked") await this.reportParkTimeout(job, latest);
+	}
+
+	private async reconcileParkedWakes(job: BuildJob) {
+		await this.lifecycle(async () => {
+			const latest = await this.load();
+			const current = latest.state;
+			if (!current) return;
+			const pending = (await this.ctx.storage.get<DeferredWake[]>(DEFERRED_WAKES)) ?? [];
+			for (const wake of pending) await this.deliverWake(latest.job ?? job, current, wake);
+			if (pending.length) await this.ctx.storage.delete(DEFERRED_WAKES);
+			const park = await this.ctx.storage.get<ParkCommand>(PARK_COMMAND);
+			if (park && (park.applied || current.status === "parked")) await this.ctx.storage.delete(PARK_COMMAND);
+			await this.save(current);
+			if (current.status === "parked" || current.status === "queued") await this.scheduleForState(current);
+			await this.ctx.storage.delete([TURN_IN_FLIGHT, TURN_STARTED]);
+		});
+	}
+
+	/** Wake at the park's deadline when parked, or right away when there is work to do. */
+	private async scheduleForState(state: BuilderState) {
+		if (state.status === "parked") {
+			const at = Date.parse(state.parkedAt ?? new Date().toISOString()) + BUILDER_PARK_TIMEOUT_MS;
+			await this.ctx.storage.setAlarm(Math.max(Date.now(), at));
+		} else if (state.status === "queued" || state.status === "working") {
+			await this.ctx.storage.setAlarm(Date.now());
+		}
+	}
+
+	/** Once the park's deadline passes, tell the Coordinator (once per park), which flags a human. */
+	private async reportParkTimeout(job: BuildJob, state: BuilderState) {
+		const parkedAt = state.parkedAt ?? new Date().toISOString();
+		const deadline = Date.parse(parkedAt) + BUILDER_PARK_TIMEOUT_MS;
+		const stillParked = (current: BuilderState | undefined): current is BuilderState => current?.status === "parked" && current.parkedAt === parkedAt;
+		if (Date.now() < deadline) {
+			await this.lifecycle(async () => {
+				if (stillParked((await this.load()).state)) await this.ctx.storage.setAlarm(deadline);
+			});
+			return;
+		}
+		if ((await this.ctx.storage.get<string>(TIMED_OUT_PARK)) === parkedAt) return;
+		try {
+			await this.coordinator(job).parkedBuilderTimedOut(job.slice.id, parkedAt);
+		} catch (err) {
+			console.error(`reporting the park timeout of builder ${job.slice.id} failed; trying again in a minute`, err);
+			await this.lifecycle(async () => {
+				if (stillParked((await this.load()).state)) await this.ctx.storage.setAlarm(Date.now() + 60_000);
+			});
+			return;
+		}
+		await this.lifecycle(async () => {
+			const current = (await this.load()).state;
+			if (!stillParked(current)) return;
+			await this.ctx.storage.put(TIMED_OUT_PARK, parkedAt);
+			this.note(current, `park timeout reported while waiting for ${(current.waitingRequestIds ?? []).join(", ")}`);
+			await this.save(current);
+		});
+	}
+
+	protected override staleKeys() {
+		return [...super.staleKeys(), LAST_PUSHED_HEAD, PARK_COMMAND, DEFERRED_WAKES, DELIVERED_WAKES, TIMED_OUT_PARK];
+	}
+
+	protected override commandRefusal(command: string, state: BuilderState) {
+		return builderGitCommandBlockReason(command, state.pushes > 0);
+	}
+
+	/** Pushes are checked here, on the authenticated path; run_command's check is only a nudge. */
+	protected override async git(job: BuildJob, args: string[], cwd = WORKDIR, token = job.token) {
+		if (args[0] !== "push") return super.git(job, args, cwd, token);
+		const refusal = await this.pushRefusal(job, args, cwd, token);
+		if (refusal) return { exitCode: 1, output: refusal };
+		const result = await super.git(job, args, cwd, token);
+		if (result.exitCode === 0) {
+			const head = await this.exec(["git", "rev-parse", "HEAD"], cwd);
+			if (head.exitCode === 0) await this.ctx.storage.put(LAST_PUSHED_HEAD, head.output.trim());
+		}
+		return result;
+	}
+
+	/** Why a push must not run: anything but HEAD to origin/main, or a push that would discard pushed history. */
+	private async pushRefusal(job: BuildJob, args: string[], cwd: string, token: string): Promise<string | undefined> {
+		const pushArgs = args.slice(1);
+		const forcePush = pushArgs.some(
+			(arg) => arg === "--force" || arg.startsWith("--force-with-lease") || (/^-[^-]/.test(arg) && arg.includes("f")) || arg.startsWith("+"),
+		);
+		const expectedMainPush = pushArgs.includes("origin") && pushArgs.includes("HEAD:main");
+		if (!expectedMainPush) return "Refusing an unrecognized builder push. Use commit_and_push to push the slice to origin/main.";
+
+		const pushedState = await this.ctx.storage.get<{ pushes?: number }>("state");
+		const lastPushedHead = await this.ctx.storage.get<string>(LAST_PUSHED_HEAD);
+		const remote = await super.git(job, ["ls-remote", "--heads", "origin", "refs/heads/main"], cwd, token);
+		if (remote.exitCode !== 0)
+			return "Could not verify origin/main; refusing to push to preserve history. Retry after the remote is reachable. " + clip(remote.output, 2_000);
+		const remoteHead = remote.output.trim().split(/\s+/)[0] || undefined;
+		const remoteHeadIsAncestor = remoteHead ? await this.isAncestor(cwd, remoteHead) : false;
+		const lastPushedHeadIsAncestor = lastPushedHead ? await this.isAncestor(cwd, lastPushedHead) : false;
+		return builderGitPushBlockReason({
+			remoteHead,
+			remoteHeadIsAncestor,
+			forcePush,
+			lastPushedHead,
+			lastPushedHeadIsAncestor,
+			hasPushedHistory: (pushedState?.pushes ?? 0) > 0,
+		});
+	}
+
+	private async isAncestor(cwd: string, commit: string) {
+		const result = await this.exec(["git", "merge-base", "--is-ancestor", commit, "HEAD"], cwd);
+		return result.exitCode === 0;
+	}
+
+	/**
+	 * Ask the Coordinator to park this builder, once all its work is pushed: it
+	 * must not lose local changes while its container is stopped.
+	 */
+	private async parkSelf(job: BuildJob, state: BuilderState): Promise<{ outcome: "parked"; waitingFor: string[] } | { outcome: "unpushed" | "refused"; reason: string }> {
+		const unpushed = await this.localWorkRefusal(state);
+		if (unpushed) return { outcome: "unpushed", reason: unpushed };
+		const result = await this.coordinator(job).parkBuilder(job.slice.id);
+		if (result.outcome !== "parked") return { outcome: "refused", reason: result.reason + (result.resolutions?.map((r) => r.message).join("\n") ?? "") };
+		state.status = "parked";
+		state.parkedAt = result.parkedAt;
+		state.waitingRequestIds = result.waitingFor;
+		return { outcome: "parked", waitingFor: result.waitingFor };
+	}
+
 	protected override async autoPark(job: BuildJob, state: BuilderState) {
-		const reason = await this.localWorkRefusal(state); if (reason) { this.note(state, "auto-park refused: " + reason); return false; }
-		const result = await (this.coordinator(job) as unknown as LaneChangeCoordinator).parkBuilder(job.slice.id);
-		if (result.outcome !== "parked") return false;
-		state.status = "parked"; state.parkedAt = result.parkedAt; state.waitingRequestIds = result.waitingFor; return true;
+		const parked = await this.parkSelf(job, state);
+		if (parked.outcome === "unpushed") this.note(state, `auto-park refused: ${parked.reason}`);
+		return parked.outcome === "parked";
 	}
 
 	protected async onStopped(job: BuildJob) {
@@ -149,16 +409,30 @@ How to work:
 		await this.exec(["git", "config", "user.email", `${job.slice.id}@builders.blueprint.invalid`]);
 	}
 
+	/** Why local work isn't safe to leave or hand on: uncommitted or unpushed changes, or (with `requirePush`) nothing pushed. */
 	private async localWorkRefusal(state: BuilderState, requirePush = false): Promise<string | undefined> {
 		const dirty = await this.exec(["git", "status", "--porcelain"]);
-		if (dirty.exitCode !== 0) return "Could not verify the working tree: " + clip(dirty.output, 2_000);
-		if (dirty.output.trim()) return "Uncommitted changes remain:\n" + dirty.output + "\nCall commit_and_push first.";
-		const ahead = await this.exec(["git", "rev-list", "--count", "origin/main..HEAD"]);
-		if (ahead.exitCode !== 0) return "Could not verify commits on your fork: " + clip(ahead.output, 2_000);
+		if (dirty.exitCode !== 0) return `Could not verify the working tree: ${clip(dirty.output, 2_000)}`;
+		if (dirty.output.trim()) return `Uncommitted changes remain:\n${dirty.output}\nCall commit_and_push first.`;
+		const ahead = await this.commitsAhead();
+		if (ahead.exitCode !== 0) return `Could not verify commits on your fork: ${clip(ahead.output, 2_000)}`;
 		const count = Number(ahead.output.trim());
-		if (count > 0) return count + " local commit(s) are not on your fork yet. Call commit_and_push first.";
+		if (count > 0) return `${count} local commit(s) are not on your fork yet. Call commit_and_push first.`;
 		if (requirePush && !state.pushes) return "Nothing has been pushed yet.";
 		return undefined;
+	}
+
+	/** Why the slice's work can't be handed on yet (to reviewers, or to a requester as done): not all pushed, or outside the lane. */
+	private async handOffRefusal(state: BuilderState): Promise<string | undefined> {
+		const refusal = await this.localWorkRefusal(state, true);
+		if (refusal) return refusal;
+		if (state.lastReport?.outOfLane.length) return `Your last push changed files outside your lane: ${state.lastReport.outOfLane.join(", ")}. Revert them and push again.`;
+		return undefined;
+	}
+
+	/** `git rev-list --count` of local commits not yet on the fork. */
+	private commitsAhead() {
+		return this.exec(["git", "rev-list", "--count", "origin/main..HEAD"]);
 	}
 
 	protected tools(job: BuildJob, state: BuilderState): AgentTool[] {
@@ -175,12 +449,10 @@ How to work:
 				description: "Park while unresolved cross-lane requests are pending; requires clean local work.",
 				schema: NoArgs,
 				run: async () => {
-					const refusal = await this.localWorkRefusal(state); if (refusal) return "Cannot park: " + refusal;
-					const result = await (this.coordinator(job) as unknown as LaneChangeCoordinator).parkBuilder(job.slice.id);
-					if (result.outcome !== "parked") return "Cannot park: " + result.reason + (result.resolutions?.map((r) => r.message).join("\n") ?? "");
-					state.status = "parked"; state.parkedAt = result.parkedAt; state.waitingRequestIds = result.waitingFor;
-					this.note(state, "parked while waiting for " + result.waitingFor.join(", "));
-					return "Parked while waiting for request(s) " + result.waitingFor.join(", ") + ". Conversation saved until a resolution.";
+					const parked = await this.parkSelf(job, state);
+					if (parked.outcome !== "parked") return `Cannot park: ${parked.reason}`;
+					this.note(state, `parked while waiting for ${parked.waitingFor.join(", ")}`);
+					return `Parked while waiting for request(s) ${parked.waitingFor.join(", ")}. Conversation saved until a resolution.`;
 				},
 			}),
 			tool({
@@ -199,10 +471,10 @@ How to work:
 					"Answer a cross-lane request delivered to your slice. After making and pushing your lane change, use outcome done and explain what changed; use declined with an explanation if you will not make it. Do not identify any person in the answer. A done change still goes through your normal review and gate; the requester is notified after integration.",
 				schema: AnswerLaneChangeArgs,
 				run: async ({ request_id, outcome, answer }) => {
-						if (outcome === "done") {
-							const refusal = await this.localWorkRefusal(state, true); if (refusal) return refusal;
-							if (state.lastReport?.outOfLane.length) return "Your last push changed files outside your lane: " + state.lastReport.outOfLane.join(", ") + ". Revert them and push again.";
-						}
+					if (outcome === "done") {
+						const refusal = await this.handOffRefusal(state);
+						if (refusal) return refusal;
+					}
 					const result: LaneChangeAnswer = { outcome, answer };
 					await this.coordinator(job).answerLaneChange(job.slice.id, request_id, result);
 					return outcome === "declined"
@@ -246,9 +518,9 @@ How to work:
 				description: "Declare the slice complete. Only accepted when everything is pushed and inside your lane.",
 				schema: FinishArgs,
 				run: async ({ summary }) => {
-						const refusal = await this.localWorkRefusal(state, true); if (refusal) return refusal;
-						if (state.lastReport?.outOfLane.length) return `Your last push changed files outside your lane: ${state.lastReport.outOfLane.join(", ")}. Revert them and push again.`;
-						state.status = "done";
+					const refusal = await this.handOffRefusal(state);
+					if (refusal) return refusal;
+					state.status = "done";
 					state.summary = summary;
 					this.note(state, "finished");
 					try {
@@ -270,7 +542,7 @@ How to work:
 
 	/** Local commits not yet on the fork. */
 	private async unpushed() {
-		const r = await this.exec(["git", "rev-list", "--count", "origin/main..HEAD"]);
+		const r = await this.commitsAhead();
 		return r.exitCode === 0 ? Number(r.output.trim()) : 0;
 	}
 

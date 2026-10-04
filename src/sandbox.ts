@@ -3,36 +3,32 @@ import OpenAI from "openai";
 import type { ResponseInputItem } from "openai/resources/responses/responses";
 import { z } from "zod";
 import { MODEL, addUsage, assertComplete, emptyUsage, openAITools, runCalls, tool, type AgentTool, type Usage } from "./agent";
-import { builderGitCommandBlockReason, builderGitPushBlockReason } from "./git-command-safety";
 import { COMMAND_TIMEOUT_S, WORKDIR, bootContainer, clip, gitWithToken, run } from "./container";
 import { staysInRepo } from "./paths";
 import type { SliceSpec } from "./types";
-import type { LaneChangeCoordinator } from "./lane-change-contract";
-import { BUILDER_PARK_TIMEOUT_MS, type BuilderResumeCredentials } from "./parking-contract";
 
 export { WORKDIR, clip };
 
 // Base for agents that work in their own Linux container on a clone of one
 // Artifacts repo: builders and reviewers. It owns the container lifecycle, the
-// alarm-driven agent loop, and the tools every such agent needs.
+// alarm-driven agent loop, and the tools every such agent needs. What only
+// builders do (guarding pushes, parking, wake events) is in builder.ts, behind
+// the hooks below.
 //
 // The loop runs from alarms in RUN_BUDGET_MS slices and keeps the conversation
 // on OpenAI's side (previous_response_id), so long runs survive across alarm
 // invocations. Git credentials never enter the container's files or
 // environment: the token is passed only on the git commands run here.
 
-const RUN_BUDGET_MS = 8 * 60_000; // per alarm, well under the alarm wall-clock limit
+export const RUN_BUDGET_MS = 8 * 60_000; // per alarm, well under the alarm wall-clock limit
 const MAX_TURNS = 80;
 const MAX_NUDGES = 3;
 const MAX_LINES = 400;
 const LOG_LIMIT = 200;
-const TURN_IN_FLIGHT = "sandbox-turn-in-flight";
-const TURN_STARTED = "sandbox-turn-started-at";
-const PARK_COMMAND = "sandbox-park-command";
-const DEFERRED_WAKES = "sandbox-deferred-wakes";
-const DELIVERED_WAKES = "sandbox-delivered-wakes";
-const INBOX = "inbox";
-const TIMED_OUT_PARK = "sandbox-timed-out-park";
+/** Storage keys: the turn running now (its token, and when it started), and messages waiting for the next turn. */
+export const TURN_IN_FLIGHT = "sandbox-turn-in-flight";
+export const TURN_STARTED = "sandbox-turn-started-at";
+export const INBOX = "inbox";
 
 /** Facts every agent prompt should state about the environment. */
 export const ENVIRONMENT = `The repository is checked out at ${WORKDIR} in a Linux container with Node.js 24, npm and git. Python is not installed; use node for scripting. Commands time out after ${COMMAND_TIMEOUT_S} seconds.`;
@@ -109,11 +105,16 @@ export function repoPath(path: string) {
 	return clean;
 }
 
-interface DeferredWake { eventId: string; message: string; credentials: BuilderResumeCredentials }
-
 export abstract class SandboxAgent<J extends SandboxJob, S extends AgentState> extends DurableObject<Env> {
 	private lifecycleTail: Promise<unknown> = Promise.resolve();
-	private lifecycle<T>(fn: () => Promise<T>): Promise<T> { const next = this.lifecycleTail.then(fn, fn); this.lifecycleTail = next.catch(() => {}); return next; }
+
+	/** Run storage changes that race with the agent loop (messages, parking, wake events) one at a time. */
+	protected lifecycle<T>(fn: () => Promise<T>): Promise<T> {
+		const next = this.lifecycleTail.then(fn, fn);
+		this.lifecycleTail = next.catch(() => {});
+		return next;
+	}
+
 	/** Short name for logs and prompt-cache keys, e.g. "builder". */
 	protected abstract readonly kind: string;
 	protected abstract instructions(job: J): string;
@@ -126,7 +127,20 @@ export abstract class SandboxAgent<J extends SandboxJob, S extends AgentState> e
 	protected abstract freshFields(): Omit<S, keyof AgentState>;
 	/** Runs after each clone, in WORKDIR. */
 	protected abstract afterClone(job: J, state: S): Promise<void>;
-	protected async autoPark(_job: J, _state: S): Promise<boolean> { return false; }
+	/** Park instead of failing when the model stops calling tools; returns whether it parked. */
+	protected async autoPark(_job: J, _state: S): Promise<boolean> {
+		return false;
+	}
+	/** Runs on an alarm while the agent is parked. Only builders park. */
+	protected async parkedAlarm(_job: J, _state: S): Promise<void> {}
+	/** Why a run_command must not run, if it must not. */
+	protected commandRefusal(_command: string, _state: S): string | undefined {
+		return undefined;
+	}
+	/** Storage keys a fresh start clears. */
+	protected staleKeys(): string[] {
+		return ["cancel", INBOX, TURN_IN_FLIGHT, TURN_STARTED];
+	}
 	/** Runs once when the agent fails; for example, to flag its slice for a human. */
 	protected async onFailed(_job: J, _state: S): Promise<void> {}
 	/** Runs once when the agent stops for any reason (done, failed, cancelled); frees its slot in the task's limits. */
@@ -160,7 +174,7 @@ export abstract class SandboxAgent<J extends SandboxJob, S extends AgentState> e
 			...this.freshFields(),
 		} as unknown as S; // base fields + the subclass's fields make a full S
 		await this.ctx.storage.put("job", job);
-		await this.ctx.storage.delete(["cancel", INBOX, "builder-last-pushed-head", TURN_IN_FLIGHT, TURN_STARTED, PARK_COMMAND, DEFERRED_WAKES, DELIVERED_WAKES, TIMED_OUT_PARK]);
+		await this.ctx.storage.delete(this.staleKeys());
 		await this.save(fresh);
 		await this.ctx.storage.setAlarm(Date.now());
 		return this.view(fresh);
@@ -186,53 +200,16 @@ export abstract class SandboxAgent<J extends SandboxJob, S extends AgentState> e
 		return this.lifecycle(async () => {
 			const { state } = await this.load();
 			if (!state || (state.status !== "queued" && state.status !== "working")) return false;
-			if (state.status === "working" && await this.ctx.storage.get(TURN_IN_FLIGHT)) return false;
+			if (state.status === "working" && (await this.ctx.storage.get(TURN_IN_FLIGHT))) return false;
 			const inbox = (await this.ctx.storage.get<string[]>(INBOX)) ?? [];
 			await this.ctx.storage.put(INBOX, [...inbox, message]);
 			return true;
 		});
 	}
 
-	protected async parkAgent(parkedAt: string, waitingFor: string[]) {
-		return this.lifecycle(async () => {
-			if (await this.ctx.storage.get(TURN_IN_FLIGHT)) { await this.ctx.storage.put(PARK_COMMAND, { parkedAt, waitingFor, applied: false }); await this.ctx.storage.setAlarm(Date.now() + RUN_BUDGET_MS + 5_000); return; }
-			const { state } = await this.load(); if (!state || ["done", "failed"].includes(state.status)) return;
-			state.status = "parked"; state.parkedAt = parkedAt; state.waitingRequestIds = [...waitingFor];
-			this.note(state, "parked while waiting for " + waitingFor.join(", ")); await this.save(state);
-			if (this.ctx.container?.running) await this.ctx.container.destroy(this.kind + " parked").catch(() => {});
-			await this.scheduleForState(state);
-		});
+	private async peekInbox() {
+		return (await this.ctx.storage.get<string[]>(INBOX)) ?? [];
 	}
-
-	protected async receiveWake(eventId: string, message: string, credentials: BuilderResumeCredentials): Promise<"resumed" | "deferred" | "ignored"> {
-		if (!eventId.trim()) throw new Error("wake event ID must be nonempty");
-		return this.lifecycle(async () => {
-			const delivered = (await this.ctx.storage.get<string[]>(DELIVERED_WAKES)) ?? [];
-			const pending = (await this.ctx.storage.get<DeferredWake[]>(DEFERRED_WAKES)) ?? [];
-			if (delivered.includes(eventId) || pending.some((wake) => wake.eventId === eventId)) return "ignored";
-			const wake = { eventId, message, credentials };
-			if (await this.ctx.storage.get(TURN_IN_FLIGHT)) { await this.ctx.storage.put(DEFERRED_WAKES, [...pending, wake]); await this.ctx.storage.setAlarm(Date.now() + RUN_BUDGET_MS + 5_000); return "deferred"; }
-			const { job, state } = await this.load(); if (!job || !state) return "ignored";
-			return this.deliverWake(job, state, wake);
-		});
-	}
-
-	private async deliverWake(job: J, state: S, wake: DeferredWake): Promise<"resumed" | "deferred" | "ignored"> {
-		const delivered = (await this.ctx.storage.get<string[]>(DELIVERED_WAKES)) ?? [];
-		if (delivered.includes(wake.eventId) || !["parked", "working", "queued"].includes(state.status)) return "ignored";
-		const inbox = (await this.ctx.storage.get<string[]>(INBOX)) ?? []; const parked = state.status === "parked";
-		if (parked) { state.status = "queued"; state.parkedAt = undefined; state.waitingRequestIds = undefined; state.finishedAt = undefined; state.error = undefined; state.nudges = 0; state.turnsAtRunStart = state.turns; this.note(state, "resumed for wake event " + wake.eventId); }
-		else this.note(state, "resolution event " + wake.eventId + " queued for next turn");
-		inbox.push(wake.message); delivered.push(wake.eventId);
-		await this.ctx.storage.put({ job: { ...job, ...wake.credentials }, state, [INBOX]: inbox, [DELIVERED_WAKES]: delivered });
-		if (parked) { if (this.ctx.container?.running) await this.ctx.container.destroy(this.kind + " resumed").catch(() => {}); await this.ctx.storage.setAlarm(Date.now()); return "resumed"; }
-		await this.ctx.storage.setAlarm(Date.now());
-		return "deferred";
-	}
-
-	protected async isParkStillTimedOut() { const { state } = await this.load(); return !!state && state.status === "parked" && !!state.parkedAt && Date.parse(state.parkedAt) + BUILDER_PARK_TIMEOUT_MS <= Date.now(); }
-
-	private async peekInbox() { return (await this.ctx.storage.get<string[]>(INBOX)) ?? []; }
 
 	private async acknowledgeInbox(sent: string[], state: S) {
 		if (!sent.length) return;
@@ -264,11 +241,18 @@ export abstract class SandboxAgent<J extends SandboxJob, S extends AgentState> e
 	async alarm() {
 		const { job, state } = await this.load();
 		if (!job || !state) return;
-		if (state.status === "parked") { await this.reconcileParkedWakes(job, state); const latest = (await this.load()).state; if (latest?.status === "parked") await this.handleParkedAlarm(job, latest); return; }
+		if (state.status === "parked") {
+			await this.parkedAlarm(job, state);
+			return;
+		}
 		if (state.status !== "queued" && state.status !== "working") return;
-		if (state.status === "working" && await this.ctx.storage.get(TURN_IN_FLIGHT)) {
+		if (state.status === "working" && (await this.ctx.storage.get(TURN_IN_FLIGHT))) {
+			// A turn may still be running in an earlier alarm; wait for it unless it is long overdue.
 			const started = await this.ctx.storage.get<number>(TURN_STARTED);
-			if (started && Date.now() - started < RUN_BUDGET_MS + 30_000) { await this.ctx.storage.setAlarm(Date.now() + 60_000); return; }
+			if (started && Date.now() - started < RUN_BUDGET_MS + 30_000) {
+				await this.ctx.storage.setAlarm(Date.now() + 60_000);
+				return;
+			}
 			await this.ctx.storage.delete([TURN_IN_FLIGHT, TURN_STARTED]);
 		}
 		try {
@@ -282,12 +266,22 @@ export abstract class SandboxAgent<J extends SandboxJob, S extends AgentState> e
 			const deadline = Date.now() + RUN_BUDGET_MS;
 			while (state.status === "working" && Date.now() < deadline && !(await this.cancelled(state))) {
 				const turnToken = crypto.randomUUID();
-					await this.lifecycle(async () => this.ctx.storage.put({ [TURN_IN_FLIGHT]: turnToken, [TURN_STARTED]: Date.now() }));
-					try { await this.turn(job, state); await this.save(state); await this.reconcileAfterTurn(job, state, turnToken); }
-					finally { if ((await this.ctx.storage.get<string>(TURN_IN_FLIGHT)) === turnToken) await this.ctx.storage.delete([TURN_IN_FLIGHT, TURN_STARTED]); }
-					const refreshed = await this.ctx.storage.get<J>("job"); if (refreshed) Object.assign(job, refreshed);
+				await this.lifecycle(async () => this.ctx.storage.put({ [TURN_IN_FLIGHT]: turnToken, [TURN_STARTED]: Date.now() }));
+				try {
+					await this.turn(job, state);
+					await this.save(state);
+					await this.afterTurn(job, state, turnToken);
+				} finally {
+					await this.endTurn(turnToken);
+				}
+				// A wake event may have brought fresh credentials.
+				const refreshed = await this.ctx.storage.get<J>("job");
+				if (refreshed) Object.assign(job, refreshed);
 			}
-			if ((state.status as string) === "parked") { if (this.ctx.container?.running) await this.ctx.container.destroy(this.kind + " parked"); return; }
+			if ((state.status as string) === "parked") {
+				if (this.ctx.container?.running) await this.ctx.container.destroy(`${this.kind} parked`);
+				return;
+			}
 			if (state.status === "working") await this.ctx.storage.setAlarm(Date.now() + 1_000);
 		} catch (err) {
 			state.status = "failed";
@@ -304,58 +298,17 @@ export abstract class SandboxAgent<J extends SandboxJob, S extends AgentState> e
 		if (["done", "failed"].includes(state.status)) await this.onStopped(job, state).catch(() => {});
 	}
 
-	private async reconcileParkedWakes(job: J, _state: S) {
+	/** Once a turn is saved: apply what arrived during it. A builder applies parking and wake events here. */
+	protected async afterTurn(_job: J, state: S, turnToken: string) {
 		await this.lifecycle(async () => {
-			const latest = await this.load();
-			const current = latest.state;
-			if (!current) return;
-			const pending = (await this.ctx.storage.get<DeferredWake[]>(DEFERRED_WAKES)) ?? [];
-			for (const wake of pending) await this.deliverWake((latest.job ?? job) as J, current, wake);
-			if (pending.length) await this.ctx.storage.delete(DEFERRED_WAKES);
-			const park = await this.ctx.storage.get<{ applied?: boolean }>(PARK_COMMAND);
-			if (park && (park.applied || current.status === "parked")) await this.ctx.storage.delete(PARK_COMMAND);
-			await this.save(current);
-			if (current.status === "parked" || current.status === "queued") await this.scheduleForState(current);
-			await this.ctx.storage.delete([TURN_IN_FLIGHT, TURN_STARTED]);
+			await this.save(state);
+			await this.endTurn(turnToken);
 		});
 	}
 
-	private async reconcileAfterTurn(job: J, state: S, turnToken: string) {
-		await this.lifecycle(async () => {
-			const park = await this.ctx.storage.get<{ parkedAt: string; waitingFor: string[]; applied?: boolean }>(PARK_COMMAND);
-			if (park && !park.applied) {
-				if (state.status === "working" || state.status === "queued") { state.status = "parked"; state.parkedAt = park.parkedAt; state.waitingRequestIds = park.waitingFor; this.note(state, "parked while waiting for " + park.waitingFor.join(", ")); }
-				await this.ctx.storage.put({ state, [PARK_COMMAND]: { ...park, applied: true } });
-			}
-			const pending = (await this.ctx.storage.get<DeferredWake[]>(DEFERRED_WAKES)) ?? [];
-			for (const wake of pending) await this.deliverWake(job, state, wake);
-			if (pending.length) await this.ctx.storage.delete(DEFERRED_WAKES);
-			await this.save(state); if (park) await this.ctx.storage.delete(PARK_COMMAND);
-			if (state.status === "parked") { if (this.ctx.container?.running) await this.ctx.container.destroy(this.kind + " parked"); await this.scheduleForState(state); }
-			else if (state.status === "queued") await this.scheduleForState(state);
-			if ((await this.ctx.storage.get<string>(TURN_IN_FLIGHT)) === turnToken) await this.ctx.storage.delete([TURN_IN_FLIGHT, TURN_STARTED]);
-		});
-	}
-
-	private async scheduleForState(state: S) {
-		if (state.status === "parked") { const at = Date.parse(state.parkedAt ?? new Date().toISOString()) + BUILDER_PARK_TIMEOUT_MS; await this.ctx.storage.setAlarm(Math.max(Date.now(), at)); }
-		else if (state.status === "queued" || state.status === "working") await this.ctx.storage.setAlarm(Date.now());
-	}
-
-	private async handleParkedAlarm(job: J, state: S) {
-		const parkedAt = state.parkedAt ?? new Date().toISOString();
-		const deadline = Date.parse(parkedAt) + BUILDER_PARK_TIMEOUT_MS;
-		if (Date.now() < deadline) {
-			await this.lifecycle(async () => { const current = (await this.load()).state; if (current?.status === "parked" && current.parkedAt === parkedAt) await this.ctx.storage.setAlarm(deadline); });
-			return;
-		}
-		if (await this.ctx.storage.get<string>(TIMED_OUT_PARK) === parkedAt) return;
-		try { await (this.coordinator(job) as unknown as LaneChangeCoordinator).parkedBuilderTimedOut((job as J & { slice: { id: string } }).slice.id, parkedAt); }
-		catch { await this.lifecycle(async () => { const current = (await this.load()).state; if (current?.status === "parked" && current.parkedAt === parkedAt) await this.ctx.storage.setAlarm(Date.now() + 60_000); }); return; }
-		await this.lifecycle(async () => {
-			const current = (await this.load()).state;
-			if (current?.status === "parked" && current.parkedAt === parkedAt) { await this.ctx.storage.put(TIMED_OUT_PARK, parkedAt); this.note(current, "park timeout reported while waiting for " + (current.waitingRequestIds ?? []).join(", ")); await this.save(current); }
-		});
+	/** Mark the turn finished, unless a newer one has started. */
+	protected async endTurn(turnToken: string) {
+		if ((await this.ctx.storage.get<string>(TURN_IN_FLIGHT)) === turnToken) await this.ctx.storage.delete([TURN_IN_FLIGHT, TURN_STARTED]);
 	}
 
 	private async setUp(job: J, state: S) {
@@ -381,49 +334,9 @@ export abstract class SandboxAgent<J extends SandboxJob, S extends AgentState> e
 
 	/** Run git with a token (the job's, by default) on this one command only. */
 	protected async git(job: J, args: string[], cwd = WORKDIR, token = job.token) {
-		if (this.kind === "builder" && args[0] === "push") {
-			const refusal = await this.builderPushRefusal(args, cwd, token);
-			if (refusal) return { exitCode: 1, output: refusal };
-		}
-		const result = await gitWithToken(this.ctx.container!, token, args, cwd);
-		if (this.kind === "builder" && args[0] === "push" && result.exitCode === 0) {
-			const head = await this.exec(["git", "rev-parse", "HEAD"], cwd);
-			if (head.exitCode === 0) await this.ctx.storage.put("builder-last-pushed-head", head.output.trim());
-		}
-		return result;
+		return gitWithToken(this.ctx.container!, token, args, cwd);
 	}
 
-	/** The authenticated push path is the enforcement point; shell parsing is only a nudge. */
-	private async builderPushRefusal(args: string[], cwd: string, token: string): Promise<string | undefined> {
-		const pushArgs = args.slice(1);
-		const forcePush = pushArgs.some(
-			(arg) => arg === "--force" || arg.startsWith("--force-with-lease") || (/^-[^-]/.test(arg) && arg.includes("f")) || arg.startsWith("+"),
-		);
-		const expectedMainPush = pushArgs.includes("origin") && pushArgs.includes("HEAD:main");
-		if (!expectedMainPush) return "Refusing an unrecognized builder push. Use commit_and_push to push the slice to origin/main.";
-
-		const pushedState = await this.ctx.storage.get<{ pushes?: number }>("state");
-		const lastPushedHead = await this.ctx.storage.get<string>("builder-last-pushed-head");
-		const remote = await gitWithToken(this.ctx.container!, token, ["ls-remote", "--heads", "origin", "refs/heads/main"], cwd);
-		if (remote.exitCode !== 0)
-			return "Could not verify origin/main; refusing to push to preserve history. Retry after the remote is reachable. " + clip(remote.output, 2_000);
-		const remoteHead = remote.output.trim().split(/\s+/)[0] || undefined;
-		const remoteHeadIsAncestor = remoteHead ? await this.isAncestor(cwd, remoteHead) : false;
-		const lastPushedHeadIsAncestor = lastPushedHead ? await this.isAncestor(cwd, lastPushedHead) : false;
-		return builderGitPushBlockReason({
-			remoteHead,
-			remoteHeadIsAncestor,
-			forcePush,
-			lastPushedHead,
-			lastPushedHeadIsAncestor,
-			hasPushedHistory: (pushedState?.pushes ?? 0) > 0,
-		});
-	}
-
-	private async isAncestor(cwd: string, commit: string) {
-		const result = await this.exec(["git", "merge-base", "--is-ancestor", commit, "HEAD"], cwd);
-		return result.exitCode === 0;
-	}
 	protected coordinator(job: J) {
 		return this.env.COORDINATOR.get(this.env.COORDINATOR.idFromName(job.taskId));
 	}
@@ -470,13 +383,10 @@ export abstract class SandboxAgent<J extends SandboxJob, S extends AgentState> e
 				description: `Run a bash command in ${WORKDIR}. Use it for npm install, tests, type checks, git and inspection.`,
 				schema: RunArgs,
 				run: async ({ command }) => {
-					if (this.kind === "builder") {
-						const pushes = (state as S & { pushes?: number }).pushes ?? 0;
-						const reason = builderGitCommandBlockReason(command, pushes > 0);
-						if (reason) {
-							this.note(state, `blocked unsafe git command: ${command.slice(0, 160)}`);
-							return `Command refused: ${reason}`;
-						}
+					const reason = this.commandRefusal(command, state);
+					if (reason) {
+						this.note(state, `blocked unsafe git command: ${command.slice(0, 160)}`);
+						return `Command refused: ${reason}`;
 					}
 					this.note(state, `run: ${command.slice(0, 200)}`);
 					const r = await this.exec(["bash", "-lc", command]);
@@ -518,7 +428,13 @@ export abstract class SandboxAgent<J extends SandboxJob, S extends AgentState> e
 			return;
 		}
 		// The model answered in text without finishing.
-		if (++state.nudges > MAX_NUDGES) { if (await this.autoPark(job, state)) { state.pending = []; return; } throw new Error(`${this.kind} stopped calling tools without finishing`); }
+		if (++state.nudges > MAX_NUDGES) {
+			if (await this.autoPark(job, state)) {
+				state.pending = [];
+				return;
+			}
+			throw new Error(`${this.kind} stopped calling tools without finishing`);
+		}
 		this.note(state, `nudged: ${response.output_text.slice(0, 200)}`);
 		state.pending = [{ role: "user", content: this.nudge(job) }];
 	}
