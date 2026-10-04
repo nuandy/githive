@@ -17,6 +17,9 @@
 // bench-results/<label>-<time>.json after every level, with a summary table on stdout at the end.
 
 import { execFile } from "node:child_process";
+import fs from "node:fs";
+import igit from "isomorphic-git";
+import ihttp from "isomorphic-git/http/node";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -41,7 +44,8 @@ const SHARD_DEPTH = args["shard-depth"] === undefined ? undefined : Number(args[
 // Calls can wait minutes behind the lock under load; don't let the client give up first.
 try {
 	const { Agent, setGlobalDispatcher } = await import("undici");
-	setGlobalDispatcher(new Agent({ headersTimeout: 0, bodyTimeout: 0, connections: 256 }));
+	// Enough connections that the client doesn't queue calls agents would make at once.
+	setGlobalDispatcher(new Agent({ headersTimeout: 0, bodyTimeout: 0, connections: Math.max(256, 4 * Math.max(...LEVELS)) }));
 } catch {
 	console.warn("undici not found: requests use Node's default 5-minute timeout");
 }
@@ -144,12 +148,15 @@ async function freeAgent(level, _taskId, runId, i, scratch) {
 	});
 	const token = fork.token.replace(/\?.*$/, "");
 	const dir = join(scratch, `a${i}`);
-	await git(scratch, token, "clone", "-q", "--depth", "1", fork.url, dir);
+	// In-process git (isomorphic-git): a thousand agents' git processes would exceed this machine's process limit.
+	const onAuth = () => ({ username: "x", password: token });
+	await igit.clone({ fs, http: ihttp, dir, url: fork.url, depth: 1, singleBranch: true, onAuth });
+	const file = `bench-${runId}/a${i}/note.txt`;
 	await mkdir(join(dir, `bench-${runId}`, `a${i}`), { recursive: true });
-	await writeFile(join(dir, `bench-${runId}`, `a${i}`, "note.txt"), `agent ${i} of ${runId}\n`);
-	await git(dir, token, "add", "-A");
-	await git(dir, token, "-c", "user.name=bench", "-c", "user.email=bench@example.com", "commit", "-qm", `bench ${runId} ${i}`);
-	await git(dir, token, "push", "-q", "origin", `HEAD:refs/heads/changes/${change_id}`);
+	await writeFile(join(dir, file), `agent ${i} of ${runId}\n`);
+	await igit.add({ fs, dir, filepath: file });
+	await igit.commit({ fs, dir, message: `bench ${runId} ${i}`, author: { name: "bench", email: "bench@example.com" } });
+	await igit.push({ fs, http: ihttp, dir, url: fork.url, ref: "main", remoteRef: `refs/heads/changes/${change_id}`, onAuth });
 	const checked = await tool(level, "free_check", { ...ids, change: change_id }, "report_push");
 	await tool(level, "free_status", { ...ids, change: change_id }, "change_status");
 	await tool(level, "free_claims", ids, "list_claims");
