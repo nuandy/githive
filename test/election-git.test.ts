@@ -42,6 +42,14 @@ describe("GitCasLog", () => {
 		expect(await log.read()).toEqual({ tip, commit: written });
 	});
 
+	it("retries a read the server fails for a moment", async () => {
+		const written = commit({ kind: "decisions" });
+		const tip = await log.append(null, written);
+		const fresh = new GitCasLog<State>(async () => ({ url: server.url, token: "unused" }), "t1");
+		server.failFetches(1);
+		expect(await fresh.read()).toEqual({ tip, commit: written });
+	});
+
 	it("refuses an append built on a stale tip and leaves the log as it was", async () => {
 		const first = await log.append(null, commit());
 		const second = await log.append(first, commit({ term: 2, batch: "batch-2" }));

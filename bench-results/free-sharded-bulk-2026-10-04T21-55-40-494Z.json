@@ -1,0 +1,461 @@
+{
+	"label": "free-sharded-bulk",
+	"mode": "free",
+	"base": "https://blueprint-bench.nuandy.workers.dev",
+	"repo": "bench-free-bulk-1791150928",
+	"task": null,
+	"racers": 5,
+	"idle": 0,
+	"at": "2026-10-04T21:55:40.494Z",
+	"ledgerMatches": null,
+	"ledgerCommits": null,
+	"levels": [
+		{
+			"agents": 1,
+			"wallMs": 37645.986833,
+			"calls": 12,
+			"callsPerSecond": 0.3187590765845179,
+			"errors": 0,
+			"failures": [],
+			"race": {
+				"winners": 1,
+				"unexpected": []
+			},
+			"leftoverClaims": 0,
+			"tools": {
+				"list_claims": {
+					"n": 2,
+					"p50": 2010.8765830000011,
+					"p95": 2345.5575420000023,
+					"p99": 2345.5575420000023,
+					"max": 2345.5575420000023
+				},
+				"open_change": {
+					"n": 6,
+					"p50": 9104.783333,
+					"p95": 13878.803875000001,
+					"p99": 13878.803875000001,
+					"max": 13878.803875000001
+				},
+				"abandon_change": {
+					"n": 2,
+					"p50": 3711.264833000001,
+					"p95": 4268.495874999997,
+					"p99": 4268.495874999997,
+					"max": 4268.495874999997
+				},
+				"report_push": {
+					"n": 1,
+					"p50": 7282.076375000001,
+					"p95": 7282.076375000001,
+					"p99": 7282.076375000001,
+					"max": 7282.076375000001
+				},
+				"change_status": {
+					"n": 1,
+					"p50": 4626.769583000001,
+					"p95": 4626.769583000001,
+					"p99": 4626.769583000001,
+					"max": 4626.769583000001
+				}
+			},
+			"lock": {
+				"samples": 0,
+				"waitMs": {
+					"n": 0,
+					"p50": null,
+					"p95": null,
+					"p99": null,
+					"max": null
+				},
+				"runMs": {
+					"n": 0,
+					"p50": null,
+					"p95": null,
+					"p99": null,
+					"max": null
+				},
+				"flushMs": {
+					"n": 0,
+					"p50": null,
+					"p95": null,
+					"p99": null,
+					"max": null
+				},
+				"busyFraction": 0,
+				"flushShareOfHold": 0,
+				"peakQueue": 0,
+				"byCall": {}
+			},
+			"ledger": {
+				"matches": null,
+				"commits": null,
+				"lagMs": {
+					"n": 0,
+					"p50": null,
+					"p95": null,
+					"p99": null,
+					"max": null
+				}
+			}
+		},
+		{
+			"agents": 5,
+			"wallMs": 39201.95662499999,
+			"calls": 36,
+			"callsPerSecond": 0.91832150992795,
+			"errors": 0,
+			"failures": [],
+			"race": {
+				"winners": 1,
+				"unexpected": []
+			},
+			"leftoverClaims": 0,
+			"tools": {
+				"list_claims": {
+					"n": 10,
+					"p50": 2064.3829160000023,
+					"p95": 5935.827583000006,
+					"p99": 5935.827583000006,
+					"max": 5935.827583000006
+				},
+				"open_change": {
+					"n": 10,
+					"p50": 6690.592875000002,
+					"p95": 13533.389084000002,
+					"p99": 13533.389084000002,
+					"max": 13533.389084000002
+				},
+				"abandon_change": {
+					"n": 6,
+					"p50": 3705.5414170000004,
+					"p95": 4779.371708999999,
+					"p99": 4779.371708999999,
+					"max": 4779.371708999999
+				},
+				"report_push": {
+					"n": 5,
+					"p50": 6013.017833000005,
+					"p95": 6502.5580000000045,
+					"p99": 6502.5580000000045,
+					"max": 6502.5580000000045
+				},
+				"change_status": {
+					"n": 5,
+					"p50": 4620.737083,
+					"p95": 4782.270292000001,
+					"p99": 4782.270292000001,
+					"max": 4782.270292000001
+				}
+			},
+			"lock": {
+				"samples": 0,
+				"waitMs": {
+					"n": 0,
+					"p50": null,
+					"p95": null,
+					"p99": null,
+					"max": null
+				},
+				"runMs": {
+					"n": 0,
+					"p50": null,
+					"p95": null,
+					"p99": null,
+					"max": null
+				},
+				"flushMs": {
+					"n": 0,
+					"p50": null,
+					"p95": null,
+					"p99": null,
+					"max": null
+				},
+				"busyFraction": 0,
+				"flushShareOfHold": 0,
+				"peakQueue": 0,
+				"byCall": {}
+			},
+			"ledger": {
+				"matches": null,
+				"commits": null,
+				"lagMs": {
+					"n": 0,
+					"p50": null,
+					"p95": null,
+					"p99": null,
+					"max": null
+				}
+			}
+		},
+		{
+			"agents": 10,
+			"wallMs": 48586.901832999996,
+			"calls": 65,
+			"callsPerSecond": 1.3378091120815672,
+			"errors": 1,
+			"failures": [
+				"free_claims: HTTP Error: 500 Internal Server Error"
+			],
+			"race": {
+				"winners": 1,
+				"unexpected": []
+			},
+			"leftoverClaims": 1,
+			"tools": {
+				"list_claims": {
+					"n": 20,
+					"p50": 2288.5085830000025,
+					"p95": 3295.428291999997,
+					"p99": 5935.84216700001,
+					"max": 5935.84216700001
+				},
+				"open_change": {
+					"n": 15,
+					"p50": 12695.908250000008,
+					"p95": 13631.323040999996,
+					"p99": 13631.323040999996,
+					"max": 13631.323040999996
+				},
+				"abandon_change": {
+					"n": 10,
+					"p50": 4741.402667000002,
+					"p95": 5360.797041999991,
+					"p99": 5360.797041999991,
+					"max": 5360.797041999991
+				},
+				"report_push": {
+					"n": 10,
+					"p50": 6282.729416999995,
+					"p95": 10417.528292000003,
+					"p99": 10417.528292000003,
+					"max": 10417.528292000003
+				},
+				"change_status": {
+					"n": 10,
+					"p50": 4568.7069159999955,
+					"p95": 6673.419416000004,
+					"p99": 6673.419416000004,
+					"max": 6673.419416000004
+				}
+			},
+			"lock": {
+				"samples": 0,
+				"waitMs": {
+					"n": 0,
+					"p50": null,
+					"p95": null,
+					"p99": null,
+					"max": null
+				},
+				"runMs": {
+					"n": 0,
+					"p50": null,
+					"p95": null,
+					"p99": null,
+					"max": null
+				},
+				"flushMs": {
+					"n": 0,
+					"p50": null,
+					"p95": null,
+					"p99": null,
+					"max": null
+				},
+				"busyFraction": 0,
+				"flushShareOfHold": 0,
+				"peakQueue": 0,
+				"byCall": {}
+			},
+			"ledger": {
+				"matches": null,
+				"commits": null,
+				"lagMs": {
+					"n": 0,
+					"p50": null,
+					"p95": null,
+					"p99": null,
+					"max": null
+				}
+			}
+		},
+		{
+			"agents": 25,
+			"wallMs": 45599.220249999984,
+			"calls": 156,
+			"callsPerSecond": 3.4211111318290595,
+			"errors": 0,
+			"failures": [],
+			"race": {
+				"winners": 1,
+				"unexpected": []
+			},
+			"leftoverClaims": 0,
+			"tools": {
+				"list_claims": {
+					"n": 50,
+					"p50": 2716.7078340000007,
+					"p95": 3992.600040999998,
+					"p99": 6036.128792000003,
+					"max": 6036.128792000003
+				},
+				"open_change": {
+					"n": 30,
+					"p50": 13639.452541000006,
+					"p95": 17987.399791999982,
+					"p99": 19215.04129199998,
+					"max": 19215.04129199998
+				},
+				"abandon_change": {
+					"n": 26,
+					"p50": 5469.724208,
+					"p95": 6154.265374999988,
+					"p99": 6237.840250000008,
+					"max": 6237.840250000008
+				},
+				"report_push": {
+					"n": 25,
+					"p50": 6116.938249999977,
+					"p95": 7153.436458000011,
+					"p99": 7234.823832999973,
+					"max": 7234.823832999973
+				},
+				"change_status": {
+					"n": 25,
+					"p50": 4656.810957999987,
+					"p95": 6180.6842079999915,
+					"p99": 6184.609457999992,
+					"max": 6184.609457999992
+				}
+			},
+			"lock": {
+				"samples": 0,
+				"waitMs": {
+					"n": 0,
+					"p50": null,
+					"p95": null,
+					"p99": null,
+					"max": null
+				},
+				"runMs": {
+					"n": 0,
+					"p50": null,
+					"p95": null,
+					"p99": null,
+					"max": null
+				},
+				"flushMs": {
+					"n": 0,
+					"p50": null,
+					"p95": null,
+					"p99": null,
+					"max": null
+				},
+				"busyFraction": 0,
+				"flushShareOfHold": 0,
+				"peakQueue": 0,
+				"byCall": {}
+			},
+			"ledger": {
+				"matches": null,
+				"commits": null,
+				"lagMs": {
+					"n": 0,
+					"p50": null,
+					"p95": null,
+					"p99": null,
+					"max": null
+				}
+			}
+		},
+		{
+			"agents": 50,
+			"wallMs": 58083.098708000005,
+			"calls": 306,
+			"callsPerSecond": 5.268313964073226,
+			"errors": 0,
+			"failures": [],
+			"race": {
+				"winners": 1,
+				"unexpected": []
+			},
+			"leftoverClaims": 0,
+			"tools": {
+				"list_claims": {
+					"n": 100,
+					"p50": 3180.3262499999837,
+					"p95": 5519.249333000014,
+					"p99": 7180.815957999992,
+					"max": 7203.252333000011
+				},
+				"open_change": {
+					"n": 55,
+					"p50": 18771.105582999997,
+					"p95": 26429.465792000003,
+					"p99": 27243.232958000008,
+					"max": 27243.232958000008
+				},
+				"abandon_change": {
+					"n": 51,
+					"p50": 6052.655375000002,
+					"p95": 8817.932042,
+					"p99": 9585.27095799998,
+					"max": 9585.27095799998
+				},
+				"report_push": {
+					"n": 50,
+					"p50": 6005.284207999997,
+					"p95": 7356.113417000015,
+					"p99": 7633.478959,
+					"max": 7633.478959
+				},
+				"change_status": {
+					"n": 50,
+					"p50": 5388.151834000018,
+					"p95": 7320.747707999981,
+					"p99": 7821.803583999979,
+					"max": 7821.803583999979
+				}
+			},
+			"lock": {
+				"samples": 0,
+				"waitMs": {
+					"n": 0,
+					"p50": null,
+					"p95": null,
+					"p99": null,
+					"max": null
+				},
+				"runMs": {
+					"n": 0,
+					"p50": null,
+					"p95": null,
+					"p99": null,
+					"max": null
+				},
+				"flushMs": {
+					"n": 0,
+					"p50": null,
+					"p95": null,
+					"p99": null,
+					"max": null
+				},
+				"busyFraction": 0,
+				"flushShareOfHold": 0,
+				"peakQueue": 0,
+				"byCall": {}
+			},
+			"ledger": {
+				"matches": null,
+				"commits": null,
+				"lagMs": {
+					"n": 0,
+					"p50": null,
+					"p95": null,
+					"p99": null,
+					"max": null
+				}
+			}
+		}
+	]
+}

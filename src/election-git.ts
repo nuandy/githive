@@ -4,6 +4,7 @@ import type { CasLog, CommitKind, LogCommit } from "./election";
 import { BOT, type Remote } from "./git";
 import { type LedgerEntry, noteLine, notesRef } from "./ledger";
 import { MemoryFS } from "./memory-fs";
+import { retryTransient } from "./retry";
 
 // The elected coordinator's log in Git: the task's notes ref in the project
 // repo. Reading fetches only the tip; appending pushes one commit on top of the
@@ -164,7 +165,8 @@ export class GitCasLog<S> implements CasLog<S> {
 
 	async read(): Promise<{ tip: string; commit: LogCommit<S> } | null> {
 		const remote = await this.remote();
-		return this.readAt(await serverTip(remote, this.ref));
+		// Reads change nothing, so a brief server failure is simply retried.
+		return this.readAt(await retryTransient(() => serverTip(remote, this.ref)));
 	}
 
 	/** Read the log, already knowing where its ref points (from a listing): no need to ask the server again. */
@@ -172,7 +174,7 @@ export class GitCasLog<S> implements CasLog<S> {
 		const remote = await this.remote();
 		if (!current) return null;
 		// Fetch only if the tip moved since this log last saw it.
-		const { fs, tip } = this.held?.tip === current ? this.held : await fetchTip(remote, this.ref);
+		const { fs, tip } = this.held?.tip === current ? this.held : await retryTransient(() => fetchTip(remote, this.ref));
 		if (!tip) return null;
 		this.held = { fs, tip };
 		const { commit } = await git.readCommit({ fs, dir: DIR, oid: tip });
