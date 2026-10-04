@@ -7,7 +7,7 @@ import type { LedgerEntry } from "./ledger";
 // its term. Safety rests on compare-and-swap alone; leases and clocks only
 // decide when another peer may try to take over. See docs/elected-coordinator.md.
 
-export type CommitKind = "election" | "decisions" | "heartbeat" | "resignation";
+export type CommitKind = "genesis" | "election" | "decisions" | "heartbeat" | "resignation";
 
 /** One commit in the log: who leads, until when, what was decided, and the state after it. */
 export interface LogCommit<S> {
@@ -133,6 +133,11 @@ export class Leader<S> {
 	/** The state as of the last commit this leader landed. */
 	get state(): S {
 		return this.current;
+	}
+
+	/** When this leader's lease ends, unless renewed. */
+	get leaseExpires() {
+		return this.leaseUntil;
 	}
 
 	/** Whether this peer still believes it leads (a fenced append is what proves it). */

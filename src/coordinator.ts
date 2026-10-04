@@ -709,7 +709,7 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 	 * paths. Returns write credentials for the agent; with `hosted`, a builder
 	 * agent is started on it as well.
 	 */
-	async openChange(input: { title: string; intent: string; owns: string[]; hosted?: boolean }, actor?: AccessIdentity) {
+	async openChange(input: { id?: string; title: string; intent: string; owns: string[]; hosted?: boolean }, actor?: AccessIdentity) {
 		// Reserve: the paths are held from here, so a racing claim is refused while the fork is made.
 		const { id, repo, title } = await this.mutate(async (task) => {
 			if (task.mode !== "open") fail(409, "changes can only be opened on an open-mode task");
@@ -719,7 +719,12 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 			const conflicts = claimConflicts(task, owns);
 			if (conflicts.length) fail(409, claimConflictMessage(conflicts));
 
-			let id = changeId(input.title);
+			// The caller may choose the id (a peer of the elected coordinator is named after its change).
+			let id = input.id ?? changeId(input.title);
+			if (input.id !== undefined) {
+				if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(input.id) || input.id.length > 40) fail(400, `invalid change id: ${input.id}`);
+				if (task.slices.some((s) => s.id === input.id)) fail(409, `change ${input.id} already exists`);
+			}
 			while (task.slices.some((s) => s.id === id)) id = changeId(input.title);
 			const slice: Slice = {
 				id,
