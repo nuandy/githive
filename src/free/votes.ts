@@ -1,5 +1,6 @@
 import type { CasLog } from "../election";
 import { appendRecord } from "./records";
+import { type Stamper, stampPayload } from "./stamp";
 
 // Coordinator-free review (see docs/coordinator-free.md). Reviewers append
 // verdicts on the exact commit they reviewed. A merging agent counts them
@@ -12,6 +13,9 @@ export interface VoteRecord {
 	verdict: "approve" | "reject";
 	evidence: string;
 	at: string;
+	/** Who cast it, as Access verified them, and Blueprint's stamp (written through the toolkit). */
+	by?: string;
+	stamp?: string;
 }
 
 export interface Votes {
@@ -26,11 +30,15 @@ export interface ReviewPolicy {
 }
 
 /** Record a reviewer's verdict on a commit. */
-export function vote(log: CasLog<Votes>, input: Omit<VoteRecord, "at">) {
-	return appendRecord<Votes, never>(log, input.reviewer, () => ({ votes: [] }), (state) => ({
-		state: { votes: [...state.votes, { ...input, at: new Date().toISOString() }] },
-		text: `${input.reviewer} (${input.role}) ${input.verdict === "approve" ? "approves" : "rejects"} ${input.commit}: ${input.evidence}`,
-	}));
+export function vote(log: CasLog<Votes>, input: Omit<VoteRecord, "at" | "by" | "stamp">, stamper?: Stamper) {
+	return appendRecord<Votes, never>(log, input.reviewer, () => ({ votes: [] }), async (state) => {
+		const record: VoteRecord = { ...input, at: new Date().toISOString() };
+		const cast = stamper ? { ...record, by: stamper.by } : record;
+		return {
+			state: { votes: [...state.votes, stamper ? { ...cast, stamp: await stamper.stamp(stampPayload("vote", cast)) } : cast] },
+			text: `${input.reviewer} (${input.role}) ${input.verdict === "approve" ? "approves" : "rejects"} ${input.commit}: ${input.evidence}`,
+		};
+	});
 }
 
 /** Whether `commit` may merge under `policy`: each reviewer's latest verdict counts once. */

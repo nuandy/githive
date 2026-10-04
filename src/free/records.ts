@@ -16,11 +16,11 @@ export async function appendRecord<S, Refusal>(
 	log: CasLog<S>,
 	author: string,
 	empty: () => S,
-	next: (state: S) => { state: S; text: string } | { refused: Refusal },
+	next: (state: S) => { state: S; text: string } | { refused: Refusal } | Promise<{ state: S; text: string } | { refused: Refusal }>,
 ): Promise<{ ok: true; tip: string } | { ok: false; refused: Refusal }> {
 	for (let attempt = 1; ; attempt++) {
 		const head = await log.read();
-		const outcome = next(head?.commit.state ?? empty());
+		const outcome = await next(head?.commit.state ?? empty());
 		if ("refused" in outcome) return { ok: false, refused: outcome.refused };
 		const commit: LogCommit<S> = {
 			term: 0,
