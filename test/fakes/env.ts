@@ -19,6 +19,12 @@ export class FakeStorage {
 	async setAlarm(at: number) {
 		this.alarm = at;
 	}
+	async deleteAlarm() {
+		this.alarm = null;
+	}
+	async deleteAll() {
+		this.data.clear();
+	}
 }
 
 /** A Durable Object namespace whose stubs record calls; `make` builds each stub. */

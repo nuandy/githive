@@ -84,6 +84,20 @@ function isForkPending(err: unknown) {
 	return ["FORK_IN_PROGRESS", "CREATE_IN_PROGRESS", "IMPORT_IN_PROGRESS"].includes(String(err.code));
 }
 
+/** Delete every repo whose name starts with `prefix` (a task's forks: `<task>--…`). Returns the names deleted. */
+export async function deleteReposWithPrefix(artifacts: Artifacts, prefix: string) {
+	if (!/^[0-9a-f]{8}--$/.test(prefix)) throw new Error(`refusing to delete repos by prefix ${prefix}: not a task's fork prefix`);
+	const names: string[] = [];
+	let cursor: string | undefined;
+	do {
+		const page = await retryTransient(() => artifacts.list({ limit: 200, cursor }));
+		names.push(...page.repos.map((r) => r.name).filter((name) => name.startsWith(prefix)));
+		cursor = page.cursor;
+	} while (cursor);
+	for (const name of names) await retryTransient(() => artifacts.delete(name));
+	return names;
+}
+
 const codeOf = (err: unknown) => (err && typeof err === "object" && "code" in err ? String(err.code) : "");
 
 /** Artifacts fails some forks of one repo when many run at once (INTERNAL_ERROR, 10400); they succeed when tried again. */

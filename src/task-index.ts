@@ -20,4 +20,17 @@ export class TaskIndex extends DurableObject<Env> {
 		const entries = await this.ctx.storage.list<TaskRef>({ prefix: "task:", reverse: true, limit });
 		return [...entries.values()];
 	}
+
+	/** Every task on a repo. */
+	async onRepo(repo: string) {
+		const entries = await this.ctx.storage.list<TaskRef>({ prefix: "task:" });
+		return [...entries.values()].filter((ref) => ref.repo === repo);
+	}
+
+	/** Forget a task; returns whether it was listed. */
+	async remove(id: string) {
+		const keys = [...(await this.ctx.storage.list({ prefix: "task:" })).keys()].filter((key) => key.endsWith(`:${id}`));
+		await this.ctx.storage.delete(keys);
+		return keys.length > 0;
+	}
 }

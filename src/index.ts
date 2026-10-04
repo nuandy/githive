@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { verifyAccessRequest } from "./access";
 import type { AccessIdentity, CoordinatorHumanActions } from "./access-contract";
-import { forkAndWait, parseRepoName, remoteFor, reviewerName } from "./artifacts";
+import { deleteReposWithPrefix, forkAndWait, parseRepoName, remoteFor, reviewerName } from "./artifacts";
 import { statusOf } from "./errors";
 import { retryTransient } from "./retry";
 import { Workspace } from "./git";
@@ -76,6 +76,8 @@ app.get("/api", (c) =>
 			"GET  /tasks/:id/claims",
 			"POST /mcp (MCP front door: JSON-RPC over HTTP)",
 			"GET  /tasks/:id/ledger",
+			"DELETE /tasks/:id   (state, forks and dashboard entry; refused while agents work)",
+			"DELETE /repos/:repo (refused while tasks use it)",
 			"GET  /tasks/:id/lock-stats",
 			"POST /tasks/:id/lock-stats/reset",
 			"POST /tasks/:id/restore {repo}",
@@ -347,6 +349,29 @@ app.post("/tasks/:id/land", async (c) => c.json(await humanCoordinator(c.env, c.
 // Lock timings for benchmarks; POST clears them after reading.
 app.get("/tasks/:id/lock-stats", async (c) => c.json(await coordinator(c.env, c.req.param("id")).lockStats()));
 app.post("/tasks/:id/lock-stats/reset", async (c) => c.json(await coordinator(c.env, c.req.param("id")).lockStats(true)));
+
+// Delete a task for good: its state, its forks (repos named <task>--…) and its dashboard entry.
+// Refused while agents are at work on it. The project repo is left alone.
+app.delete("/tasks/:id", async (c) => {
+	const id = c.req.param("id");
+	if (!/^[0-9a-f]{8}$/.test(id)) return c.json({ error: "not a task id" }, 400);
+	const destroyed = await coordinator(c.env, id).destroy();
+	const forks = await deleteReposWithPrefix(c.env.ARTIFACTS, `${id}--`);
+	const listed = await taskIndex(c.env).remove(id);
+	console.log("task deleted", JSON.stringify({ id, repo: destroyed.repo, forks: forks.length, listed }));
+	return c.json({ deleted: id, repo: destroyed.repo, forks, listed });
+});
+
+// Delete a project repo for good. Refused while any task still uses it.
+app.delete("/repos/:repo", async (c) => {
+	const repo = c.req.param("repo");
+	const tasks = await taskIndex(c.env).onRepo(repo);
+	if (tasks.length) return c.json({ error: `tasks still use ${repo}: ${tasks.map((t) => t.id).join(", ")}; delete them first` }, 409);
+	const deleted = await retryTransient(() => c.env.ARTIFACTS.delete(repo));
+	if (!deleted) return c.json({ error: `no repo ${repo}` }, 404);
+	console.log("repo deleted", repo);
+	return c.json({ deleted: repo });
+});
 
 app.get("/tasks/:id/ledger", async (c) => c.json(await coordinator(c.env, c.req.param("id")).ledger()));
 

@@ -723,6 +723,23 @@ describe("open mode", () => {
 	});
 });
 
+describe("deleting a task", () => {
+	it("refuses while agents are at work", async () => {
+		await setup(task({ active: { builders: ["a"], reviewers: [] } }));
+		await expect(coordinator.destroy()).rejects.toThrow(/still at work: builder a/);
+		expect(await stored()).toBeTruthy();
+	});
+
+	it("deletes the task's state and alarm, and is harmless to repeat", async () => {
+		await setup(task());
+		storage.alarm = Date.now() + 60_000;
+		expect(await coordinator.destroy()).toEqual({ id: "t1", repo: "project" });
+		expect(storage.data.size).toBe(0);
+		expect(storage.alarm).toBeNull();
+		expect(await coordinator.destroy()).toEqual({ id: null, repo: null });
+	});
+});
+
 describe("short locks: open mode under concurrency", () => {
 	const openTask = (slices: Slice[] = []) =>
 		task({ mode: "open", repo: "project", baseRepo: "project", baseCommit: "main0", anchor: "main0", leaseMinutes: 30, verify: [], slices });

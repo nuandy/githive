@@ -594,6 +594,30 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 		return this.load();
 	}
 
+	/**
+	 * Delete this task's state for good, so the task can be removed. Refused
+	 * while any agent or gate is at work on it. Its forks and its dashboard
+	 * entry are the caller's to remove; deleting again is harmless.
+	 */
+	destroy() {
+		return this.exclusive(async () => {
+			const task = await this.ctx.storage.get<Task>("task");
+			if (!task) return { id: null, repo: null };
+			const busy = [
+				...task.active.builders.map((b) => `builder ${b}`),
+				...task.active.reviewers.map((r) => `reviewer ${r}`),
+				...task.slices.filter((s) => s.status === "opening").map((s) => `change ${s.id} being opened`),
+				...task.slices.filter((s) => s.gate && ["queued", "running"].includes(s.gate.status)).map((s) => `${s.id}'s gate`),
+				...(task.planner?.status === "running" ? ["the planner"] : []),
+			];
+			if (busy.length) fail(409, `task ${task.id} is still at work: ${busy.join(", ")}`);
+			await this.ctx.storage.deleteAlarm();
+			await this.ctx.storage.deleteAll();
+			this.entries = [];
+			return { id: task.id, repo: task.repo };
+		}, "destroy");
+	}
+
 	/** Lock timings since the last reset, oldest first. Kept in memory only, so they reset when the object restarts. */
 	lockStats(reset = false) {
 		const samples = this.lockSamples;

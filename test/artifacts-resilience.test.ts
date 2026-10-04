@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { fileVersion, forkAndWait, remoteFor } from "../src/artifacts";
+import { deleteReposWithPrefix, fileVersion, forkAndWait, remoteFor } from "../src/artifacts";
 import worker from "../src/index";
 
 vi.mock("../src/access", () => ({
@@ -139,6 +139,34 @@ describe("Artifacts transient failures", () => {
 		await expect(forkAndWait(artifacts, "source", "fork", "test fork")).rejects.toBe(internal);
 		expect(source.fork).toHaveBeenCalledTimes(5);
 		vi.unstubAllGlobals();
+	});
+
+	it("deletes a task's forks across pages, and nothing else", async () => {
+		const list = vi
+			.fn()
+			.mockResolvedValueOnce({ repos: [{ name: "abcd1234--base" }, { name: "project" }], cursor: "next" })
+			.mockResolvedValueOnce({ repos: [{ name: "abcd1234--a" }, { name: "abcd12345--x" }, { name: "ffff0000--a" }] });
+		const remove = vi.fn(async (_name: string) => true);
+		const artifacts = { list, delete: remove } as never;
+
+		await expect(deleteReposWithPrefix(artifacts, "abcd1234--")).resolves.toEqual(["abcd1234--base", "abcd1234--a"]);
+		expect(remove.mock.calls.map(([name]) => name)).toEqual(["abcd1234--base", "abcd1234--a"]);
+		await expect(deleteReposWithPrefix(artifacts, "")).rejects.toThrow(/refusing/);
+		await expect(deleteReposWithPrefix(artifacts, "abcd--")).rejects.toThrow(/refusing/);
+	});
+
+	it("refuses to delete a repo that tasks still use", async () => {
+		const remove = vi.fn(async (_name: string) => true);
+		const index = { onRepo: vi.fn(async (repo: string) => (repo === "used" ? [{ id: "abcd1234", repo }] : [])) };
+		const env = { ARTIFACTS: { delete: remove }, TASK_INDEX: { getByName: () => index } } as never;
+		const del = (repo: string) => worker.fetch(new Request(`https://blueprint.test/repos/${repo}`, { method: "DELETE" }), env, {} as never);
+
+		const refused = await del("used");
+		expect(refused.status).toBe(409);
+		expect(await refused.json()).toEqual({ error: "tasks still use used: abcd1234; delete them first" });
+		expect((await del("unused")).status).toBe(200);
+		expect(remove).toHaveBeenCalledWith("unused");
+		expect(remove).not.toHaveBeenCalledWith("used");
 	});
 
 	it("retries direct Artifacts list calls made by the API", async () => {
