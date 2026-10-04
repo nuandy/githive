@@ -1,5 +1,5 @@
 import { beforeAll, describe, expect, it } from "vitest";
-import { audit, type MergeRecord, mergeStampPayload } from "../src/free/audit";
+import { audit, type MergeRecord, mergeStampPayload, revertStampPayload } from "../src/free/audit";
 import type { ClaimRecord, Registry } from "../src/free/claims";
 import { generateStampKey, makeStamper, stampPayload, type Stamper } from "../src/free/stamp";
 import type { VoteRecord, Votes } from "../src/free/votes";
@@ -80,5 +80,16 @@ describe("the audit, with stamps", () => {
 	it("reports a claim added without a stamp", async () => {
 		const records = { registry: [registryAt("r1", [claimA])], merges: [] };
 		expect(await audit(records)).toEqual([{ commit: "r1", author: "agent-a", rule: "unverified-record", detail: "a-1's claim has no valid Blueprint stamp" }]);
+	});
+
+	it("reports a stamped revert of a commit the audit doesn't report", async () => {
+		const revert: MergeRecord = { commit: "x1", author: "agent-a", reverts: "m1", base: "m1", files: ["src/a/x.ts"], by: toolkit.by };
+		const records = {
+			registry: [registryAt("r1", [await stampedClaim(claimA)])],
+			votes: [{ tip: "v1", state: { votes: [await stampedVote(vote("rev-1")), await stampedVote(vote("rev-2"))] } as Votes }],
+			policy,
+			merges: [await stampedMerge(), { ...revert, stamp: await toolkit.stamp(revertStampPayload(revert)) }],
+		};
+		expect(await audit(records)).toEqual([{ commit: "x1", author: "agent-a", rule: "unjustified-revert", detail: "reverted m1, which the audit doesn't report", by: "service:agent-a" }]);
 	});
 });

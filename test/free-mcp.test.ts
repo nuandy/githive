@@ -1,6 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { FREE_TOOLS } from "../src/free/mcp";
 import { TOOLS, handleRpc } from "../src/mcp";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { agentClone } from "./helpers/agents";
 import { startGitServer, type GitServer } from "./helpers/git-server";
 
 // The coordinator-free MCP tools: stateless, each reads or writes Git and
@@ -49,10 +53,30 @@ describe("the coordinator-free MCP tools", () => {
 			conflicts: [{ change: "a-1", agent: "agent-a" }],
 		});
 		expect((await call("free_claims", { repo: "project" })).map((c: { change: string }) => c.change)).toEqual(["a-1"]);
-		expect(await call("free_audit", { repo: "project" })).toEqual({ merges: 0, violations: [] });
+		expect(await call("free_audit", { repo: "project" })).toEqual({ merges: 0, open: 0, violations: [] });
 	});
 
 	it("reports a missing argument as a tool error", async () => {
 		expect(await call("free_claim", { repo: "project" })).toEqual({ error: "change is required" });
 	});
+
+	it("reverts a reported commit, after which the audit counts it resolved", async () => {
+		await call("free_start", { repo: "project" });
+		const work = mkdtempSync(join(tmpdir(), "free-mcp-"));
+		try {
+			const rogue = await agentClone(server.url, work, "rogue");
+			rogue.write("hotfix.txt", "x\n");
+			await rogue.run("add", "-A");
+			await rogue.run("commit", "--quiet", "-m", "hotfix");
+			await rogue.run("push", "--quiet", "origin", "main");
+			const bad = await rogue.run("rev-parse", "HEAD");
+			expect(await call("free_audit", { repo: "project" })).toMatchObject({ open: 1, violations: [{ commit: bad, rule: "undeclared" }] });
+			expect(await call("free_revert", { repo: "project", commit: bad, agent: "agent-c" })).toMatchObject({ ok: true });
+			const after = await call("free_audit", { repo: "project" });
+			expect(after).toMatchObject({ open: 0, violations: [{ commit: bad, rule: "undeclared" }] });
+			expect(after.violations[0].resolvedBy).toMatch(/^[0-9a-f]{40}$/);
+		} finally {
+			rmSync(work, { recursive: true, force: true });
+		}
+	}, 60_000);
 });

@@ -27,6 +27,8 @@ export interface MergeRecord {
 	/** From its Blueprint-By and Blueprint-Stamp trailers: who asked the toolkit to merge, as Access verified them, and Blueprint's stamp. */
 	by?: string;
 	stamp?: string;
+	/** From its Blueprint-Reverts trailer: the commit this one reverts. */
+	reverts?: string;
 	/** Files the merge changed. */
 	files: string[];
 }
@@ -39,6 +41,13 @@ export interface Violation {
 	detail: string;
 	/** Who did it, as Access verified them, when Blueprint stamped it. */
 	by?: string;
+	/** The stamped revert that undid the commit, if one did. */
+	resolvedBy?: string;
+}
+
+/** What Blueprint stamps on a revert: what it reverts, onto which main, and who asked. */
+export function revertStampPayload(revert: { base?: string; reverts?: string; author: string; by?: string }) {
+	return stampPayload("revert", { base: revert.base, reverts: revert.reverts, agent: revert.author, by: revert.by });
 }
 
 /** What Blueprint stamps on a merge: everything its trailers claim, and the commits it joins. */
@@ -72,7 +81,15 @@ export async function audit(records: AuditRecords): Promise<Violation[]> {
 	violations.push(...forged);
 
 	const registryAt = new Map(records.registry.map((r) => [r.tip, r.state]));
+	/** Stamped reverts: what each undid, settled once every commit has been checked. */
+	const reverts: MergeRecord[] = [];
 	for (const merge of records.merges) {
+		// A revert through the toolkit restores what a reported commit changed; it isn't a change of its own.
+		// Without a stamp key nothing is verified, as for every other record.
+		if (merge.reverts && (!key || (await verifyStamp(key, revertStampPayload(merge), merge.stamp)))) {
+			reverts.push(merge);
+			continue;
+		}
 		let stampedBy: string | undefined;
 		const report = (rule: string, detail: string) => violations.push({ commit: merge.commit, author: merge.author, rule, detail, ...(stampedBy ? { by: stampedBy } : {}) });
 		if (!merge.change || !merge.claimsTip) {
@@ -103,6 +120,12 @@ export async function audit(records: AuditRecords): Promise<Violation[]> {
 		}
 	}
 	violations.push(...othersClaimsReleased(records));
+	for (const revert of reverts) {
+		const undone = violations.filter((v) => v.commit === revert.reverts && !v.resolvedBy);
+		for (const v of undone) v.resolvedBy = revert.commit;
+		if (!undone.length)
+			violations.push({ commit: revert.commit, author: revert.author, rule: "unjustified-revert", detail: `reverted ${revert.reverts}, which the audit doesn't report`, ...(revert.by ? { by: revert.by } : {}) });
+	}
 	return violations;
 }
 

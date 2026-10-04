@@ -6,6 +6,7 @@ import { audit } from "./audit";
 import { activeClaims, claim, release, releaseStale, startFree, type Registry } from "./claims";
 import { readMainMerges, readRecordHistory } from "./git-records";
 import { type CheckRunner, mergeChange } from "./merge";
+import { revertViolation } from "./revert";
 import type { Stamper } from "./stamp";
 import { vote, type ReviewPolicy, type Votes } from "./votes";
 
@@ -37,6 +38,7 @@ Conventions:
 3. Reviewers free_vote on the exact commit they reviewed. A change merges with the policy's approvals and no veto.
 4. free_merge merges your branch with trailers recording the claims and votes it checked, then releases your claim. Merge by hand only with the same trailers.
 5. A claim idle for 30 minutes may be released by anyone (free_release with stale: true).
+6. Anyone may free_revert a commit free_audit reports; the audit then counts it resolved.
 free_audit replays the records and lists every broken convention, with the commit and the agent.`;
 
 const str = { type: "string" } as const;
@@ -48,10 +50,23 @@ export const FREE_TOOLS = [
 	{ name: "free_release", description: "Release a claim: yours, or another's idle for 30 minutes with stale: true.", inputSchema: { type: "object", properties: { repo: str, change: str, agent: str, reason: str, stale: { type: "boolean" } }, required: ["repo", "change", "agent"] } },
 	{ name: "free_vote", description: "Record your review verdict on the exact commit you reviewed.", inputSchema: { type: "object", properties: { repo: str, commit: str, reviewer: str, role: str, verdict: { type: "string", enum: ["approve", "reject"] }, evidence: str }, required: ["repo", "commit", "reviewer", "role", "verdict", "evidence"] } },
 	{ name: "free_merge", description: "Merge changes/<change> into main if the conventions hold, recording what was checked, then release the claim.", inputSchema: { type: "object", properties: { repo: str, change: str, agent: str }, required: ["repo", "change", "agent"] } },
-	{ name: "free_audit", description: "Replay the records and list every broken convention, with the commit and the agent.", inputSchema: { type: "object", properties: { repo: str }, required: ["repo"] } },
+	{ name: "free_audit", description: "Replay the records and list every broken convention, with the commit and the agent (and whether a revert has resolved it).", inputSchema: { type: "object", properties: { repo: str }, required: ["repo"] } },
+	{ name: "free_revert", description: "Revert a commit the audit reports: its files go back to how they were before it, in a commit naming what it reverts.", inputSchema: { type: "object", properties: { repo: str, commit: str, agent: str }, required: ["repo", "commit", "agent"] } },
 ];
 
 export type Args = Record<string, unknown>;
+
+/** Replay a repo's records from Git: how many commits on main since the mode started, and what broke which convention. */
+async function runAudit(ctx: FreeContext, repo: string) {
+	const remote = await ctx.remote(repo, "read");
+	const registry = await readRecordHistory<Registry>(remote, claimsRef(repo));
+	const baseline = registry[0]?.state.baseline;
+	if (!baseline) throw new Error(`[409] coordinator-free mode hasn't started on ${repo}`);
+	const merges = await readMainMerges(remote, baseline);
+	const start = registry[0].state;
+	const violations = await audit({ registry, votes: await readRecordHistory<Votes>(remote, votesRef(repo)), policy: start.policy ?? DEFAULT_POLICY, verify: start.verify, merges });
+	return { merges: merges.length, violations };
+}
 
 /** Run one coordinator-free tool. */
 export async function callFreeTool(name: string, args: Args, ctx: FreeContext): Promise<unknown> {
@@ -112,13 +127,12 @@ export async function callFreeTool(name: string, args: Args, ctx: FreeContext): 
 			});
 		}
 		case "free_audit": {
-			const remote = await ctx.remote(repo, "read");
-			const registry = await readRecordHistory<Registry>(remote, claimsRef(repo));
-			const baseline = registry[0]?.state.baseline;
-			if (!baseline) throw new Error(`[409] coordinator-free mode hasn't started on ${repo}`);
-			const merges = await readMainMerges(remote, baseline);
-			const violations = await audit({ registry, votes: await readRecordHistory<Votes>(remote, votesRef(repo)), policy: registry[0].state.policy ?? DEFAULT_POLICY, verify: registry[0].state.verify, merges });
-			return { merges: merges.length, violations };
+			const { merges, violations } = await runAudit(ctx, repo);
+			return { merges, open: violations.filter((v) => !v.resolvedBy).length, violations };
+		}
+		case "free_revert": {
+			const { violations } = await runAudit(ctx, repo);
+			return revertViolation({ remote: await write(), claims, votes, stamper, target: requiredString(args, "commit"), violations, agent: requiredString(args, "agent") });
 		}
 		default:
 			throw new Error(`[400] unknown tool ${name}`);
