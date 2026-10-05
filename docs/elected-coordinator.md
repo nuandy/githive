@@ -105,3 +105,26 @@ own alarm. A new leader schedules them from the state it loads.
 5. Remove the fixed Coordinator from open mode.
 6. Failover test and benchmark: kill the leader mid-run, measure time to
    recovery and decision latency.
+
+## Results
+
+All six milestones are built and tested. Failover, live on bench
+(`scripts/failover.mjs`): agents keep opening and abandoning changes while the
+leader is crashed (`POST /tasks/:id/leader/crash`: it stops renewing its lease
+and refuses every call, as an object that vanished would), for longer than its
+30 s lease.
+
+| run | agents | calls | failed | first decision after the crash | decisions after (p50 / p95) |
+|---|---|---|---|---|---|
+| 1 | 10 | 345 | 6 | 24.9 s | 2.3 s / 7.8 s |
+| 2 | 10 | 357 | 0 | 19.4 s | 2.6 s / 8.4 s |
+| 3 (merged into coordinator-free) | 8 | 150 | 0 | 29.8 s | 2.3 s / 7.6 s |
+
+While the leader is unreachable, calls wait rather than fail: they keep asking
+the change's own peer (or a standby peer) who leads, and once the old lease
+runs out a peer campaigns and takes over, with every decision the old leader
+had committed. So decisions pause for at most about a lease. Run 1 found that
+a retried call must be safe to repeat: six opens had reserved their paths on
+the crashed leader, then were refused on the new one by their own
+reservations. Opening and abandoning a change are now idempotent, and runs 2
+and 3 had no failures.
