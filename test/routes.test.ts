@@ -96,6 +96,11 @@ describe("crashing an elected task's leader, for failover tests", () => {
 		expect(simulateCrash).toHaveBeenCalledWith(90_000);
 	});
 
+	it("says who leads, as the task index notes it", async () => {
+		const env = { TASK_INDEX: { getByName: () => ({ get: async () => ({ id: "t1", repo: "project", elected: true, leader: { name: "t1--b", term: 5 } }) }) } };
+		expect(await (await get(env as never, "/tasks/t1/leader")).json()).toEqual({ leader: "t1--b", term: 5 });
+	});
+
 	it("says so when nobody leads", async () => {
 		const env = { TASK_INDEX: { getByName: () => ({ get: async () => ({ id: "t1", repo: "project", elected: true }) }) } };
 		expect((await post(env as never, "/tasks/t1/leader/crash", {})).status).toBe(409);

@@ -95,6 +95,7 @@ app.get("/api", (c) =>
 			"GET  /tasks/:id/ledger",
 			"DELETE /tasks/:id   (state, forks and dashboard entry; refused while agents work)",
 			"DELETE /repos/:repo (refused while tasks use it)",
+			"GET  /tasks/:id/leader  (who leads an elected task)",
 			"POST /tasks/:id/leader/crash {forMs?}  (failover test: the leader stops as if its object vanished)",
 			"GET  /tasks/:id/lock-stats",
 			"POST /tasks/:id/lock-stats/reset",
@@ -320,6 +321,12 @@ app.post("/tasks/:id/slices/:slice/integrate", async (c) => {
 app.post("/tasks/:id/land", async (c) => c.json(await humanCoordinator(c.env, c.req.param("id")).land(c.get("accessIdentity"))));
 
 // Lock timings for benchmarks; POST clears them after reading.
+// Who leads an elected task, as the task index notes it (null: nobody, as far as it knows).
+app.get("/tasks/:id/leader", async (c) => {
+	const leader = (await taskIndex(c.env).get(c.req.param("id")))?.leader;
+	return c.json({ leader: leader?.name ?? null, term: leader?.term ?? 0 });
+});
+
 // Failover tests: the leader the task index names stops as if its object vanished, for forMs (default two leases).
 app.post("/tasks/:id/leader/crash", async (c) => {
 	const id = c.req.param("id");
