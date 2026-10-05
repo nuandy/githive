@@ -1,9 +1,10 @@
 import type { GateResult } from "./gate-plan";
 import type { LaneChangeRequest } from "./lane-change-contract";
 
-// Domain model. A task is one feature request against a project repo. A planner
-// (human or agent) turns it into a blueprint: contract files committed up front,
-// plus slices that agents build in parallel, each on its own Artifacts fork.
+// Domain model. A task is a project repo open for changes: agents (outside or
+// Blueprint's own) open changes as they arrive, each claiming the paths it will
+// touch and working on its own Artifacts fork, and each change merges into the
+// project once reviewed and checked. A change is stored as a slice.
 
 export type Phase = "planning" | "awaiting-approval" | "building" | "landed";
 
@@ -11,7 +12,7 @@ export type Phase = "planning" | "awaiting-approval" | "building" | "landed";
  * "opening": an open-mode change whose claim is held while its fork is made.
  * "abandoned": an open-mode change that was given up or whose claim expired; its lane is free again.
  */
-export type SliceStatus = "planned" | "opening" | "building" | "integrated" | "abandoned";
+export type SliceStatus = "opening" | "building" | "integrated" | "abandoned";
 
 export interface SliceSpec {
 	/** Lowercase slug, unique within the task. Used in repo names. */
@@ -98,30 +99,6 @@ export interface Slice extends SliceSpec {
 	parkTimeoutFlagged?: string;
 }
 
-export interface Blueprint {
-	slices: SliceSpec[];
-	/** Files committed to the task base before any slice starts (types, interfaces, failing tests). */
-	contracts: Record<string, string>;
-	/** Defaults to DEFAULT_POLICY. */
-	review?: ReviewPolicy;
-	/** Why the work is split this way, for the human approving it. */
-	rationale?: string;
-	/** Commands that verify the combined code before a slice integrates (the integration gate). */
-	verify?: string[];
-}
-
-export interface PlannerRun {
-	status: "running" | "done" | "failed";
-	startedAt: string;
-	finishedAt?: string;
-	error?: string;
-	/** Tool calls the planner made while exploring the repo. */
-	toolCalls?: number;
-	usage?: { inputTokens: number; outputTokens: number; cacheReadTokens: number };
-	/** Outcome of type-checking the contracts before the blueprint was accepted. */
-	contractCheck?: string;
-}
-
 export const DEFAULT_POLICY: ReviewPolicy = {
 	reviewers: ["security", "tests", "api"],
 	required: 2,
@@ -164,54 +141,21 @@ export interface MergeCheck {
 	checkedAt: string;
 }
 
-/**
- * A proposed change to a contract file, decided by the contract owner. It can
- * also add a new contract file, or bring a project file that sits outside
- * every lane (one slices share, such as a route list) under contract.
- */
-export interface Amendment {
-	id: string;
-	/** The slice whose builder proposed it. */
-	slice: string;
-	path: string;
-	reason: string;
-	content: string;
-	/** "contract": an existing contract; "shared": a project file outside every lane; "new": a file that doesn't exist yet. */
-	kind?: "contract" | "shared" | "new";
-	/**
-	 * The blob id of the version the proposal was written against (null: the
-	 * file didn't exist). A proposal is whole-file, so one written against an
-	 * older version would undo changes made since; it is refused as "stale".
-	 */
-	basedOn?: string | null;
-	status: "pending" | "approved" | "rejected" | "failed" | "stale";
-	/** The contract owner's reason, or the error for a failed decision. */
-	decision?: string;
-	/** Commit on the task base that applied an approved amendment. */
-	commit?: string;
-	at: string;
-	decidedAt?: string;
-}
-
 export interface Task {
 	id: string;
 	/** Project repo the task lands on. */
 	repo: string;
 	goal: string;
 	phase: Phase;
-	planner?: PlannerRun;
-	rationale?: string;
-	/** Repo holding the contracts; slices fork from it and integrate back into it. */
+	/** The repo changes fork from and integrate back into: the project repo itself. */
 	baseRepo?: string;
-	/** Commit on the base that slices forked from. */
+	/** The project's head when the task was opened. */
 	baseCommit?: string;
-	contracts: string[];
 	/** Commands the integration gate runs on the combined code. Empty: integrate on approval. */
 	verify: string[];
 	review: ReviewPolicy;
 	slices: Slice[];
 	checks: MergeCheck[];
-	amendments?: Amendment[];
 	/** How many builders and reviewers may run at once; more wait in `queue`. */
 	limits: Limits;
 	queue: QueueItem[];
@@ -220,11 +164,8 @@ export interface Task {
 	createdAt: string;
 	/** The project's head when the task was created; task-wide decisions are noted on it until the base exists. */
 	anchor?: string;
-	/**
-	 * "open": no plan; agents open changes and claim their lanes as they arrive,
-	 * and changes merge straight into the project. Absent means planned.
-	 */
-	mode?: "planned" | "open";
+	/** Always "open": agents open changes and claim their lanes as they arrive, and changes merge straight into the project. (Planned mode lives on the plan-mode branch.) */
+	mode?: "open";
 	/** Open mode: minutes a change keeps its claim without activity. */
 	leaseMinutes?: number;
 	/** Builders' requests that another slice change something in its lane. */

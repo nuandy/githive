@@ -35,6 +35,10 @@ type PeerStub = Pick<
 	| "parkedBuilderTimedOut"
 	| "gatePlan"
 	| "gateResult"
+	| "sliceDiff"
+	| "waive"
+	| "messageBuilder"
+	| "retryGate"
 >;
 
 export interface ElectedContext {
@@ -149,6 +153,11 @@ export function electedCoordinator(ctx: ElectedContext) {
 		gatePlan: (change: string, head: string, group?: Parameters<Coordinator["gatePlan"]>[2]) => onLeader(peerOf(change), (leader) => leader.gatePlan(change, head, group)),
 		gateResult: (change: string, result: Parameters<Coordinator["gateResult"]>[1], excluded: string[], group?: Parameters<Coordinator["gateResult"]>[3]) =>
 			onLeader(peerOf(change), (leader) => leader.gateResult(change, result, excluded, group)),
+		// A person's controls, from the dashboard.
+		sliceDiff: (change: string) => onLeader(peerOf(change), (leader) => leader.sliceDiff(change)),
+		waive: (change: string, input: { reason: string }, actor: AccessIdentity) => onLeader(peerOf(change), (leader) => leader.waive(change, input, actor)),
+		messageBuilder: (change: string, message: string, actor: AccessIdentity) => onLeader(peerOf(change), (leader) => leader.messageBuilder(change, message, actor)),
+		retryGate: (change: string, actor: AccessIdentity) => onLeader(peerOf(change), (leader) => leader.retryGate(change, actor)),
 	} satisfies Partial<Record<keyof Coordinator, unknown>>;
 }
 

@@ -28,6 +28,11 @@ function peers(leader: string | null) {
 			parkedBuilderTimedOut: vi.fn(async () => undefined),
 			gatePlan: vi.fn(async () => ({ baseHead: "b0" })),
 			gateResult: vi.fn(async () => undefined),
+			// Human controls, from the dashboard.
+			sliceDiff: vi.fn(async () => ({ files: [] })),
+			waive: vi.fn(async () => undefined),
+			messageBuilder: vi.fn(async () => undefined),
+			retryGate: vi.fn(async () => undefined),
 		};
 	}
 	const peer = (name: string) => {
@@ -159,5 +164,20 @@ describe("the elected coordinator, from the Worker", () => {
 		p.peer("t1--stats").lead.mockResolvedValue({ leader: "t1--lead", term: 1 });
 		const co = electedCoordinator({ taskId: "t1", repo: "project", peer: p.peer as never, hint: "t1--lead", readLog: async () => stored, wait: async () => {}, patienceMs: 0 });
 		await expect(co.agentStopped("builder", "stats")).rejects.toThrow(/unavailable/);
+	});
+
+	it("sends a person's controls (a change's diff, a waiver, a message to its builder, a gate retry) to the leader", async () => {
+		const p = peers("t1--lead");
+		const co = elected(p);
+		const person = { kind: "person" as const, value: "human@example.com" };
+		await co.sliceDiff("stats");
+		await co.waive("stats", { reason: "checked by hand" }, person);
+		await co.messageBuilder("stats", "use the new helper", person);
+		await co.retryGate("stats", person);
+		const lead = p.made.get("t1--lead")!;
+		expect(lead.sliceDiff).toHaveBeenCalledWith("stats");
+		expect(lead.waive).toHaveBeenCalledWith("stats", { reason: "checked by hand" }, person);
+		expect(lead.messageBuilder).toHaveBeenCalledWith("stats", "use the new helper", person);
+		expect(lead.retryGate).toHaveBeenCalledWith("stats", person);
 	});
 });

@@ -30,7 +30,6 @@
 			{ "name": "REVIEWER", "class_name": "Reviewer" },
 			{ "name": "GATE", "class_name": "Gate" },
 			{ "name": "TASK_INDEX", "class_name": "TaskIndex" },
-			{ "name": "CONTRACT_CHECKER", "class_name": "ContractChecker" },
 			{ "name": "PEER", "class_name": "Peer" }
 		]
 	},
@@ -46,6 +45,8 @@
 		{ "tag": "v4", "new_sqlite_classes": ["Gate"] },
 		{ "tag": "v5", "new_sqlite_classes": ["TaskIndex"] },
 		{ "tag": "v6", "new_sqlite_classes": ["ContractChecker"] },
-		{ "tag": "v7", "new_sqlite_classes": ["Peer"] }
+		{ "tag": "v7", "new_sqlite_classes": ["Peer"] },
+		// Planned mode (contracts) is gone; it lives on the plan-mode branch.
+		{ "tag": "v8", "deleted_classes": ["ContractChecker"] }
 	]
 }

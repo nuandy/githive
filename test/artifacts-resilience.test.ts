@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { deleteReposWithPrefix, fileVersion, forkAndWait, remoteFor } from "../src/artifacts";
+import { deleteReposWithPrefix, forkAndWait, remoteFor } from "../src/artifacts";
 import worker from "../src/index";
 
 vi.mock("../src/access", () => ({
@@ -60,16 +60,6 @@ describe("Artifacts transient failures", () => {
 		expect(dispose).toHaveBeenCalledTimes(1);
 	});
 
-	it("retries a transient repo read", async () => {
-		const blob = new Blob(["contents"]);
-		const repo = {
-			readFile: vi.fn().mockRejectedValueOnce(transient()).mockResolvedValue(blob),
-		};
-		const artifacts = { get: vi.fn(async () => repo) } as never;
-
-		await expect(fileVersion(artifacts, "repo", "README.md")).resolves.toMatchObject({ text: "contents" });
-		expect(repo.readFile).toHaveBeenCalledTimes(2);
-	});
 
 	it("retries a transient fork request", async () => {
 		const forked = { name: "fork", remote: "https://git.test/fork.git", token: "token" };

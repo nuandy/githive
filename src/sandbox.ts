@@ -48,25 +48,19 @@ export interface SliceJob extends SandboxJob {
 	verify?: string[];
 	slice: SliceSpec;
 	siblings: Pick<SliceSpec, "id" | "title" | "owns">[];
-	contracts: string[];
 }
 
 /** The slice's place in the task, stated the same way to every agent. */
 export function sliceContext(job: SliceJob) {
-	const tests = job.slice.tests?.length
-		? `${job.slice.tests.join(", ")}. Other slices' contract tests may fail on this slice alone; they pass once everything is integrated.`
-		: "not specified; run the tests the brief names.";
-	return `Overall goal of the task: ${job.goal}
+	return `The task: ${job.goal}
 
-Slice: ${job.slice.title} (${job.slice.id})
-Lane (the only paths this slice may change): ${job.slice.owns.join(", ")}
-Contract files, committed before work started (they change only through approved amendments): ${job.contracts.join(", ") || "none"}
-Acceptance tests for this slice: ${tests}
-Before the slice is integrated, the combined code (this slice merged with everything integrated so far) must pass: ${job.verify?.length ? job.verify.join("; ") : "no extra checks"}
-Other slices being built at the same time:
-${job.siblings.map((s) => `- ${s.id}: ${s.title} (owns ${s.owns.join(", ")})`).join("\n") || "- none"}
+Change: ${job.slice.title} (${job.slice.id})
+Its claim (the only paths this change may touch): ${job.slice.owns.join(", ")}
+Before it merges, the project's checks must pass with it merged into main: ${job.verify?.length ? job.verify.join("; ") : "no checks configured; run the project's own tests"}
+Other changes in progress at the same time:
+${job.siblings.map((s) => `- ${s.id}: ${s.title} (claims ${s.owns.join(", ")})`).join("\n") || "- none"}
 
-The slice's brief:
+The change's brief:
 ${job.slice.instructions}`;
 }
 

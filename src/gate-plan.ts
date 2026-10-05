@@ -51,7 +51,7 @@ export function gateFeedback(result: GateResult, excluded: string[], groupedWith
 			: "",
 		failed ? `\nFailing command: ${failed.command} (exit code ${failed.exitCode})\n${failed.output}` : "",
 		excluded.length ? `\nLeft out because their slices aren't integrated yet: ${excluded.join(", ")}.` : "",
-		"\nFix it within your lane. If a contract is wrong (for example, a contract test that can't type-check), propose a fix with propose_contract_change. Then commit_and_push and finish.",
+		"\nFix it within your claim, then commit_and_push and finish.",
 	].join("\n");
 }
 

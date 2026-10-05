@@ -8,7 +8,7 @@ import { GitCasLog } from "./election-git";
 import { PEER_LEASE_MS, openLog, type Peer } from "./peer";
 import { fail, requiredPaths, requiredString, statusOf } from "./errors";
 import { retryTransient } from "./retry";
-import type { Blueprint, Limits, Review, ReviewPolicy, Task } from "./types";
+import type { Limits, Review, ReviewPolicy, Task } from "./types";
 import { openTaskId } from "./open-mode";
 import { handleMcpBody, type McpContext } from "./mcp";
 import { type FreeContext, freeSnapshot } from "./free/mcp";
@@ -20,7 +20,6 @@ import { identityLabel } from "./free/stamp";
 export { Builder } from "./builder";
 export { Reviewer } from "./reviewer";
 export { Coordinator } from "./coordinator";
-export { ContractChecker } from "./contract-check";
 export { Gate } from "./gate";
 export { TaskIndex } from "./task-index";
 export { Peer } from "./peer";
@@ -70,32 +69,21 @@ app.get("/api", (c) =>
 			"GET  /tasks",
 			"GET  /tasks/:id/live",
 			"POST /repos/import {url, name, branch?}",
-			"POST /tasks {repo, goal, limits?: {builders, reviewers}}",
 			"GET  /tasks/:id",
-			"GET  /tasks/:id/contracts",
 			"GET  /tasks/:id/slices/:slice/diff",
-			"GET  /tasks/:id/land-diff",
-			"POST /tasks/:id/plan",
-			"PUT  /tasks/:id/blueprint {slices, contracts, review?, rationale?}",
-			"POST /tasks/:id/approve",
-			"POST /tasks/:id/build",
 			"GET  /tasks/:id/slices/:slice/builder",
 			"POST /tasks/:id/slices/:slice/pushed",
-			"POST /tasks/:id/slices/:slice/review",
 			"POST /tasks/:id/slices/:slice/reviewers",
 			"GET  /tasks/:id/slices/:slice/reviewers",
 			"POST /tasks/:id/slices/:slice/reviews {reviewer, head, verdict, summary, evidence?}",
 			"POST /tasks/:id/slices/:slice/message {message}",
 			"POST /tasks/:id/slices/:slice/waive {reason}",
 			"POST /tasks/:id/slices/:slice/gate",
-			"POST /tasks/:id/slices/:slice/integrate",
-			"POST /tasks/:id/land",
 			"POST /repos/:repo/open {verify?, review?, limits?, leaseMinutes?}",
 			"POST /tasks/:id/changes {title, intent, owns, hosted?}",
 			"POST /tasks/:id/changes/:slice/extend {owns}",
 			"POST /tasks/:id/changes/:slice/abandon {reason}",
 			"GET  /tasks/:id/claims",
-			"POST /tasks/:id/index   (list a task created before the dashboard index existed)",
 			"POST /mcp (MCP front door: JSON-RPC over HTTP)",
 			"GET  /tasks/:id/ledger",
 			"DELETE /tasks/:id   (state, forks and dashboard entry; refused while agents work)",
@@ -106,7 +94,6 @@ app.get("/api", (c) =>
 			"POST /tasks/:id/leader/crash {forMs?}  (failover test: the leader stops as if its object vanished)",
 			"GET  /tasks/:id/lock-stats",
 			"POST /tasks/:id/lock-stats/reset",
-			"POST /tasks/:id/restore {repo}",
 			"(contract amendments are proposed by builders; see task.amendments)",
 		],
 	}),
@@ -116,14 +103,6 @@ app.post("/repos/import", async (c) => {
 	const { url, name, branch } = await c.req.json<{ url: string; name: string; branch?: string }>();
 	const imported = await retryTransient(() => c.env.ARTIFACTS.import({ source: { url, branch }, target: { name } }));
 	return c.json({ name: imported.name, remote: imported.remote, defaultBranch: imported.defaultBranch });
-});
-
-app.post("/tasks", async (c) => {
-	const { repo, goal, limits } = await c.req.json<{ repo: string; goal: string; limits?: Partial<Limits> }>();
-	const id = crypto.randomUUID().slice(0, 8);
-	const task = await coordinator(c.env, id).create(id, repo, goal, limits);
-	await taskIndex(c.env).add({ id, repo, goal, createdAt: task.createdAt });
-	return c.json(task, 201);
 });
 
 /** Open a repo for open changes, or find it already open, and list it on the dashboard. Shared by HTTP and MCP. */
@@ -205,13 +184,6 @@ app.post("/mcp", async (c) => {
 });
 app.on(["GET", "DELETE"], "/mcp", (c) => c.body(null, 405, { Allow: "POST" }));
 
-// Add a task created before the index existed.
-app.post("/tasks/:id/index", async (c) => {
-	const task = await coordinator(c.env, c.req.param("id")).state();
-	await taskIndex(c.env).add({ id: task.id, repo: task.repo, goal: task.goal, createdAt: task.createdAt });
-	return c.json({ indexed: task.id });
-});
-
 // Newest first, with each task's current state.
 app.get("/tasks", async (c) => {
 	const refs = await taskIndex(c.env).list(Number(c.req.query("limit") ?? 50));
@@ -250,32 +222,10 @@ app.get("/tasks/:id/live", async (c) => {
 
 app.get("/tasks/:id", async (c) => c.json(await coordinator(c.env, c.req.param("id")).state()));
 
-// Read-only code views for the three human decision points.
-app.get("/tasks/:id/contracts", async (c) => {
-	const files = await coordinator(c.env, c.req.param("id")).contractFiles();
-	return c.json({ files });
-});
-
 app.get("/tasks/:id/slices/:slice/diff", async (c) => {
 	const { id, slice } = c.req.param();
 	return c.json(await coordinator(c.env, id).sliceDiff(slice));
 });
-
-app.get("/tasks/:id/land-diff", async (c) => c.json(await coordinator(c.env, c.req.param("id")).landingDiff()));
-
-// Starts the planner agent; poll GET /tasks/:id until planner.status is done or failed.
-app.post("/tasks/:id/plan", async (c) => c.json(await coordinator(c.env, c.req.param("id")).startPlanning(), 202));
-
-app.put("/tasks/:id/blueprint", async (c) => {
-	const blueprint = await c.req.json<Blueprint>();
-	return c.json(await coordinator(c.env, c.req.param("id")).proposeBlueprint(blueprint));
-});
-
-// Returns write tokens for each slice's fork: hand them to the builder agents.
-app.post("/tasks/:id/approve", async (c) => c.json(await humanCoordinator(c.env, c.req.param("id")).approve(c.get("accessIdentity"))));
-
-// Starts a hosted builder agent (gpt-6-luna in its own container) for each slice.
-app.post("/tasks/:id/build", async (c) => c.json(await coordinator(c.env, c.req.param("id")).startBuilders(), 202));
 
 app.get("/tasks/:id/slices/:slice/builder", async (c) => {
 	const { id, slice } = c.req.param();
@@ -286,12 +236,6 @@ app.get("/tasks/:id/slices/:slice/builder", async (c) => {
 app.post("/tasks/:id/slices/:slice/pushed", async (c) => {
 	const { id, slice } = c.req.param();
 	return c.json(await coordinator(c.env, id).recordPush(slice));
-});
-
-// Builder says the slice is ready. Returns read-only assignments for each reviewer agent.
-app.post("/tasks/:id/slices/:slice/review", async (c) => {
-	const { id, slice } = c.req.param();
-	return c.json(await coordinator(c.env, id).requestReview(slice));
 });
 
 // Starts hosted reviewer agents (one container per role). Builders do this on finish.
@@ -335,13 +279,6 @@ app.post("/tasks/:id/slices/:slice/gate", async (c) => {
 	const { id, slice } = c.req.param();
 	return c.json(await humanCoordinator(c.env, id).retryGate(slice, c.get("accessIdentity")), 202);
 });
-
-app.post("/tasks/:id/slices/:slice/integrate", async (c) => {
-	const { id, slice } = c.req.param();
-	return c.json(await coordinator(c.env, id).integrate(slice));
-});
-
-app.post("/tasks/:id/land", async (c) => c.json(await humanCoordinator(c.env, c.req.param("id")).land(c.get("accessIdentity"))));
 
 // Lock timings for benchmarks; POST clears them after reading.
 // Who leads an elected task, as the task index notes it (null: nobody, as far as it knows).
@@ -390,12 +327,6 @@ app.delete("/repos/:repo", async (c) => {
 // The task's record in Git: rebuild it from the notes ref and compare with the stored state.
 app.get("/tasks/:id/ledger", async (c) => c.json(await coordinator(c.env, c.req.param("id")).ledger()));
 
-// Recreate a task whose Coordinator lost its state, from the record in the project repo.
-app.post("/tasks/:id/restore", async (c) => {
-	const { repo } = await c.req.json<{ repo: string }>();
-	return c.json(await coordinator(c.env, c.req.param("id")).restore(c.req.param("id"), repo));
-});
-
 // Everything that isn't an API route is the dashboard.
 app.get("*", (c) => c.env.ASSETS.fetch(c.req.raw));
 
@@ -417,7 +348,7 @@ export default {
 		for (const message of batch.messages) {
 			const event = message.body;
 			const target = parseRepoName(event.source?.repoName ?? "");
-			if (event.type === "cf.artifacts.repo.pushed" && target && target.slice !== "base") {
+			if (event.type === "cf.artifacts.repo.pushed" && target) {
 				try {
 					await coordinator(env, target.taskId).recordPush(target.slice);
 				} catch (err) {

@@ -50,7 +50,8 @@ describe("cross-lane request commit provenance", () => {
 		await setup({ slices: [slice("a"), slice("b", { reviewHead: "owner-head", reviews: approved("owner-head") })] });
 		const request = await makeRequest();
 		await laneCoordinator().answerLaneChange("b", request.id, { outcome: "done", answer: "Implemented and pushed." });
-		await coordinator.integrate("b");
+		// Its approvals in, the owner integrates (no checks configured here).
+		await coordinator.submitReview("b", { reviewer: "tests", head: "owner-head", verdict: "approve", summary: "ok", evidence: "ok" });
 		expect((await saved()).laneChangeRequests![0]).toMatchObject({ status: "integrated", answerCommit: "owner-head" });
 		expect(fake.env.BUILDER.getByName("t1--a").revise).toHaveBeenCalled();
 	});
@@ -59,7 +60,8 @@ describe("cross-lane request commit provenance", () => {
 		const request = await makeRequest();
 		await laneCoordinator().answerLaneChange("b", request.id, { outcome: "done", answer: "Implemented and pushed." });
 		io.answerCommitIncluded = false;
-		await coordinator.integrate("b");
+		// Its approvals in, the owner integrates (no checks configured here).
+		await coordinator.submitReview("b", { reviewer: "tests", head: "owner-head", verdict: "approve", summary: "ok", evidence: "ok" });
 		expect((await saved()).laneChangeRequests![0].status).toBe("human");
 		expect((await saved()).slices[0].attention).toMatch(/human|integrated/i);
 	});

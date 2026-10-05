@@ -1,4 +1,4 @@
-import type { Amendment, MergeCheck, Slice, Task } from "./types";
+import type { MergeCheck, Slice, Task } from "./types";
 
 // The task's record in Git. Every decision the Coordinator makes is appended
 // to the project repo as a commit on the notes ref refs/notes/blueprint/<task>:
@@ -43,13 +43,14 @@ const plain = <T>(value: T): Json => JSON.parse(JSON.stringify(value ?? null));
 const keyed = <T>(items: T[], key: (item: T) => string) => Object.fromEntries(items.map((i) => [key(i), plain(i) as JsonObject]));
 
 export function toDoc(task: Task, contracts: Record<string, string>): LedgerDoc {
-	const { queue: _queue, active: _active, slices, amendments = [], checks, ...rest } = task;
+	const { queue: _queue, active: _active, slices, checks, ...rest } = task;
 	return {
 		task: plain(rest) as JsonObject,
 		slices: keyed(slices, (s) => s.id),
-		amendments: keyed(amendments, (a) => a.id),
+		// Kept in the format, which planned tasks' ledgers also use; open tasks have none.
+		amendments: {},
 		checks: keyed(checks, checkKey),
-		order: { slices: slices.map((s) => s.id), amendments: amendments.map((a) => a.id), checks: checks.map(checkKey) },
+		order: { slices: slices.map((s) => s.id), amendments: [], checks: checks.map(checkKey) },
 		contracts: { ...contracts },
 	};
 }
@@ -59,7 +60,6 @@ export function fromDoc(doc: LedgerDoc): { task: Task; contracts: Record<string,
 	const task = {
 		...(doc.task as unknown as Task),
 		slices: pick<Slice>(doc.slices, doc.order.slices),
-		amendments: pick<Amendment>(doc.amendments, doc.order.amendments),
 		checks: pick<MergeCheck>(doc.checks, doc.order.checks),
 		queue: [],
 		active: { builders: [], reviewers: [] },

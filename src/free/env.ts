@@ -103,7 +103,6 @@ async function changeBrief(env: Env, repo: string, change: string) {
 			verify: registry?.verify ?? [],
 			slice: { id: change, title: change, owns: own?.paths ?? [], instructions: own?.intent ?? "", tests: [] },
 			siblings: claims.filter((c) => c.change !== change).map((c) => ({ id: c.change, title: c.change, owns: c.paths })),
-			contracts: [],
 		},
 	};
 }

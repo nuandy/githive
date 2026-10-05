@@ -13,7 +13,7 @@ describe("builder cross-lane tools", () => {
 		const builder = new Builder({ storage: new FakeStorage() } as never, env as never);
 		const job: BuildJob = {
 			taskId: "t1", goal: "goal", slice: { id: "a", title: "A", owns: ["src/a/"], instructions: "build", tests: [] },
-			siblings: [{ id: "b", title: "B", owns: ["src/b/"] }], contracts: [], verify: [], repo: "t1--a",
+			siblings: [{ id: "b", title: "B", owns: ["src/b/"] }], verify: [], repo: "t1--a",
 			remote: "https://git.test/t1--a.git", token: "token", base: { remote: "https://git.test/t1--base.git", token: "base-token" },
 		};
 		const state = { pushes: 0, revisions: 0, log: [] } as unknown as BuilderState;

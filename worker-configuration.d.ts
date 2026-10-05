@@ -15,13 +15,12 @@ interface __BaseEnv_Env {
 	REVIEWER: DurableObjectNamespace<import("./src/index").Reviewer>;
 	GATE: DurableObjectNamespace<import("./src/index").Gate>;
 	TASK_INDEX: DurableObjectNamespace<import("./src/index").TaskIndex>;
-	CONTRACT_CHECKER: DurableObjectNamespace<import("./src/index").ContractChecker>;
 	PEER: DurableObjectNamespace<import("./src/index").Peer>;
 }
 declare namespace Cloudflare {
 	interface GlobalProps {
 		mainModule: typeof import("./src/index");
-		durableNamespaces: "Coordinator" | "Builder" | "Reviewer" | "Gate" | "TaskIndex" | "ContractChecker" | "Peer";
+		durableNamespaces: "Coordinator" | "Builder" | "Reviewer" | "Gate" | "TaskIndex" | "Peer";
 	}
 	interface Env extends __BaseEnv_Env {}
 }

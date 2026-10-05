@@ -139,9 +139,12 @@ beforeEach(() => {
 
 describe("limits and queues", () => {
 	it("starts builders up to the limit, queues the rest, and starts the next when one stops", async () => {
-		await setup(task({ slices: [slice("a"), slice("b"), slice("c")], limits: { builders: 2, reviewers: 6 } }));
-		const { started } = await coordinator.startBuilders();
-		expect(started.map((s) => s.status)).toEqual(["started", "started", "queued"]);
+		io.defaultHead = "main0";
+		await setup(task({ mode: "open", baseRepo: "project", slices: [], limits: { builders: 2, reviewers: 6 } }));
+		// Hosted changes: each gets a builder, as many at once as the limit allows.
+		for (const id of ["a", "b", "c"]) await coordinator.openChange({ id, title: id, intent: `build ${id}`, owns: [`src/${id}/`], hosted: true });
+		expect(builder("a").start).toHaveBeenCalledOnce();
+		expect(builder("b").start).toHaveBeenCalledOnce();
 		expect(builder("c").start).not.toHaveBeenCalled();
 
 		await coordinator.agentStopped("builder", "a");
@@ -504,25 +507,12 @@ describe("escalation and human controls", () => {
 describe("the record in Git", () => {
 	const approved = (head = "h1") => [vote("tests", "approve", head), vote("api", "approve", head)];
 
-	it("attributes human approval in the blueprint ledger note", async () => {
-		await setup(task({ phase: "awaiting-approval" }));
-		await coordinator.approve(person);
-		await coordinator.ledgerIdle();
-		expect(ledger.entries.map((e) => e.text)).toContain("Blueprint approved by human@example.com: contracts committed to t1--base; slices forked: t1--a, t1--b");
-	});
-
-	it("attributes a requested gate retry and landing, including service-token identity", async () => {
+	it("attributes a requested gate retry, including service-token identity", async () => {
 		const approvedReviews = [{ ...vote("tests", "approve"), at: "" }, { ...vote("api", "approve"), at: "" }];
 		await setup(task({ slices: [slice("a", { reviewHead: "h1", gate: { status: "queued", head: "h1", baseHead: "base0", at: "", excluded: [] }, reviews: approvedReviews }), slice("b")] }));
 		await coordinator.retryGate("a", service);
 		await coordinator.ledgerIdle();
 		expect(ledger.entries.map((e) => e.text)).toContain("a: gate re-run requested by service token deploy-script");
-
-		await setup(task({ slices: [slice("a", { status: "integrated" }), slice("b", { status: "integrated" })] }));
-		await coordinator.land(service);
-		expect((await stored()).phase).toBe("landed");
-		await coordinator.ledgerIdle();
-		expect(ledger.entries.map((e) => e.text)).toContain("Task landed in project by service token deploy-script");
 	});
 
 	it("notes each vote and the integration on the reviewed commit, and rebuilds the same state", async () => {
@@ -560,16 +550,6 @@ describe("the record in Git", () => {
 		expect(await coordinator.ledger()).toMatchObject({ matches: true });
 	});
 
-	it("restores a task from its record into an empty Coordinator", async () => {
-		await setup(task({ slices: [slice("a", { reviewHead: "h1" }), slice("b")], queue: [{ kind: "builder", slice: "b" }] }));
-		await coordinator.submitReview("a", vote("security", "reject"));
-		const original = await stored();
-
-		const restored = new Coordinator({ storage: new FakeStorage() } as never, fake.env as never);
-		const { task: t } = await restored.restore("t1", original.repo);
-		expect(t).toEqual({ ...original, queue: [], active: { builders: [], reviewers: [] } });
-		await expect(restored.restore("t1", original.repo)).rejects.toThrow(/task exists/);
-	});
 });
 
 describe("lock timings", () => {
@@ -586,69 +566,9 @@ describe("lock timings", () => {
 
 	it("records failed calls and clears samples on reset", async () => {
 		await setup(task({ mode: "open" }));
-		await expect(coordinator.land(service)).rejects.toThrow();
+		await expect(coordinator.abandonChange("no-such-change", "gone")).rejects.toThrow();
 		expect((await coordinator.lockStats(true)).samples).toHaveLength(1);
 		expect((await coordinator.lockStats()).samples).toHaveLength(0);
-	});
-});
-
-describe("contract amendments", () => {
-	const routes = { id: "v-routes-1", text: "routes v1" };
-	const propose = (slice: string, content: string, basedOn: string | null, path = "src/routes.ts") =>
-		coordinator.proposeAmendment(slice, { path, content, reason: `${slice} needs a route`, basedOn });
-
-	it("brings a shared project file outside every lane under contract", async () => {
-		await setup(task());
-		io.files.set("src/routes.ts", routes);
-		const a = await propose("a", "routes v1 + a", routes.id);
-		expect(a).toMatchObject({ status: "approved", kind: "shared", commit: "amend-commit" });
-		expect(io.written).toEqual([{ "src/routes.ts": "routes v1 + a" }]);
-		expect((await stored()).contracts).toEqual(["src/routes.ts"]);
-		expect(builder("b").notify.mock.calls[0][0]).toMatch(/changed and brought under contract/);
-	});
-
-	it("refuses a proposal written against an older version without asking the contract owner", async () => {
-		await setup(task());
-		io.files.set("src/routes.ts", routes);
-		const a = await propose("a", "routes v0 + a", "v-routes-0");
-		expect(a.status).toBe("stale");
-		expect(a.decision).toMatch(/merge base\/main, then propose again/);
-		expect(io.decide).not.toHaveBeenCalled();
-		expect(io.written).toEqual([]);
-	});
-
-	it("doesn't apply an approval if the file changed while the owner decided", async () => {
-		await setup(task());
-		io.files.set("src/routes.ts", routes);
-		io.decide.mockImplementation(async () => {
-			io.files.set("src/routes.ts", { id: "v-routes-2", text: "routes v1 + b" }); // b's change lands meanwhile
-			return { approve: true, reason: "fine" };
-		});
-		const a = await propose("a", "routes v1 + a", routes.id);
-		expect(a.status).toBe("stale");
-		expect(io.written).toEqual([]);
-		expect((await stored()).contracts).toEqual([]);
-	});
-
-	it("lets two slices change the same shared file one after the other", async () => {
-		await setup(task());
-		io.files.set("src/routes.ts", routes);
-		expect((await propose("a", "routes v1 + a", routes.id)).status).toBe("approved");
-		// b wrote its proposal against v1 too: refused, then re-proposed on top of a's change.
-		expect((await propose("b", "routes v1 + b", routes.id)).status).toBe("stale");
-		const current = io.files.get("src/routes.ts")!;
-		expect((await propose("b", "routes v1 + a + b", current.id)).status).toBe("approved");
-		expect(io.files.get("src/routes.ts")!.text).toBe("routes v1 + a + b");
-		expect((await stored()).amendments!.map((x) => [x.slice, x.kind, x.status])).toEqual([
-			["a", "shared", "approved"],
-			["b", "contract", "stale"],
-			["b", "contract", "approved"],
-		]);
-	});
-
-	it("refuses a file inside a slice's lane", async () => {
-		await setup(task());
-		await expect(propose("a", "x", null, "src/b/index.ts")).rejects.toThrow(/inside b's lane/);
 	});
 });
 
@@ -758,12 +678,6 @@ describe("open mode", () => {
 		expect(storage.alarm).not.toBeNull();
 	});
 
-	it("refuses landing and contract amendments in open mode", async () => {
-		await setup(openTask([slice("a", { startCommit: "main0" })]));
-		await expect(coordinator.land(person)).rejects.toThrow(/nothing to land/);
-		await expect(coordinator.proposeAmendment("a", { path: "src/shared.ts", content: "x", reason: "r", basedOn: null })).rejects.toThrow(/open mode has no contracts/);
-	});
-
 	it("sends review findings for an external change to its inbox instead of a hosted builder", async () => {
 		await setup(openTask([slice("ext", { startCommit: "main0", reviewHead: "h1", external: true })]));
 		io.heads.set("t1--ext", "h1");
@@ -775,10 +689,6 @@ describe("open mode", () => {
 		expect(await coordinator.readInbox("ext")).toHaveLength(1);
 	});
 
-	it("only opens changes on an open-mode task", async () => {
-		await setup(task());
-		await expect(open("A", ["src/a/"])).rejects.toThrow(/open-mode task/);
-	});
 });
 
 describe("deleting a task", () => {
@@ -1002,61 +912,21 @@ describe("parking: delivery and timeout", () => {
 	});
 });
 
-describe("creating tasks", () => {
-	const fresh = (get: (repo: string) => Promise<unknown>) => {
-		storage = new FakeStorage();
-		fake = fakeEnv();
-		Object.assign(fake.env.ARTIFACTS, { get: vi.fn(get) });
-		coordinator = new Coordinator({ storage } as never, fake.env as never);
-	};
-	const handle = async () => ({ [Symbol.dispose]() {} });
-
-	it("creates a planned task with nothing started, in the stored field order", async () => {
-		fresh(handle);
-		io.heads.set("project", "p0");
-		const t = await coordinator.create("abcd1234", "project", "a goal", { builders: 2 });
-		expect(Object.keys(t)).toEqual(["id", "repo", "goal", "phase", "contracts", "verify", "review", "slices", "checks", "amendments", "limits", "queue", "active", "createdAt", "anchor"]);
-		expect(t).toMatchObject({ phase: "planning", verify: [], review: { reviewers: ["security", "tests", "api"] }, limits: { builders: 2, reviewers: 6 }, anchor: "p0" });
-		await expect(coordinator.create("abcd1234", "project", "again")).rejects.toThrow("[409] task exists");
-	});
-
-	it("creates an open task on the project's head, in the stored field order", async () => {
-		fresh(handle);
-		io.heads.set("project", "p0");
-		const t = await coordinator.createOpen("abcd1234", "project", { verify: ["npm test", " "] });
-		expect(Object.keys(t)).toEqual(["id", "repo", "goal", "phase", "mode", "leaseMinutes", "baseRepo", "baseCommit", "contracts", "verify", "review", "slices", "checks", "amendments", "limits", "queue", "active", "createdAt", "anchor"]);
-		expect(t).toMatchObject({ goal: "Open changes on project", phase: "building", mode: "open", leaseMinutes: 30, baseRepo: "project", baseCommit: "p0", verify: ["npm test"], anchor: "p0" });
-		expect((await coordinator.createOpen("abcd1234", "project")).id).toBe("abcd1234");
-	});
-
-	it("refuses a repo that doesn't exist, and checks limits before reading the project", async () => {
-		fresh(async () => {
-			throw new Error("not found");
-		});
-		await expect(coordinator.create("abcd1234", "nope", "g")).rejects.toThrow("[404] no repo nope");
-		await expect(coordinator.createOpen("abcd1234", "nope")).rejects.toThrow("[404] no repo nope");
-		fresh(handle);
-		vi.mocked(artifacts.headOf).mockClear();
-		await expect(coordinator.create("abcd1234", "project", "g", { builders: 0 })).rejects.toThrow("[400] limits.builders must be a whole number from 1 to 50");
-		expect(artifacts.headOf).not.toHaveBeenCalled();
-	});
-});
-
 describe("agent jobs and credentials", () => {
-	it("starts a builder with its slice, siblings and tokens", async () => {
-		await setup(task({ slices: [slice("a"), slice("b"), slice("c", { status: "abandoned" })] }));
-		await coordinator.startBuilders();
+	it("starts a hosted change's builder with its change, the other changes and tokens", async () => {
+		io.defaultHead = "main0";
+		await setup(task({ mode: "open", baseRepo: "project", slices: [slice("b"), slice("c", { status: "abandoned" })] }));
+		await coordinator.openChange({ id: "a", title: "a", intent: "build a", owns: ["src/a/"], hosted: true });
 		expect(builder("a").start).toHaveBeenCalledWith({
 			taskId: "t1",
 			goal: "a goal",
 			slice: { id: "a", title: "a", owns: ["src/a/"], instructions: "build a", tests: [] },
 			siblings: [{ id: "b", title: "b", owns: ["src/b/"] }],
-			contracts: [],
 			verify: ["npm test"],
 			repo: "t1--a",
 			remote: "https://git.test/t1--a.git",
 			token: "token-t1--a",
-			base: { remote: "https://git.test/t1--base.git", token: "token-t1--base" },
+			base: { remote: "https://git.test/project.git", token: "token-project" },
 		});
 	});
 
@@ -1069,7 +939,6 @@ describe("agent jobs and credentials", () => {
 			goal: "a goal",
 			slice: { id: "a", title: "a", owns: ["src/a/"], instructions: "build a", tests: [] },
 			siblings: [{ id: "b", title: "b", owns: ["src/b/"] }],
-			contracts: [],
 			verify: ["npm test"],
 			repo: "t1--a",
 			remote: "https://git.test/t1--a.git",
@@ -1080,7 +949,6 @@ describe("agent jobs and credentials", () => {
 			buildSummary: "built it",
 			revision: 0,
 			priorFindings: undefined,
-			amendments: [],
 		});
 	});
 

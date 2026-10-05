@@ -81,10 +81,6 @@ export function fakeEnv() {
 				cancel: vi.fn(async (_taskId: string, _slice: string, _head: string) => {}),
 			state: vi.fn(async () => ({ queue: gateQueue, current: gateCurrent.item })),
 		})),
-		CONTRACT_CHECKER: namespace(() => ({
-			check: vi.fn(async (job: { contracts: Record<string, string> }) => ({ status: "passed" as const, checked: Object.keys(job.contracts), unchecked: [] })),
-			dispose: vi.fn(async () => undefined),
-		})),
 		ARTIFACTS: {},
 		OPENAI_API_KEY: "test",
 	};
@@ -113,12 +109,10 @@ export const task = (overrides: Partial<Task> = {}): Task => ({
 	phase: "building",
 	baseRepo: "t1--base",
 	baseCommit: "base0",
-	contracts: [],
 	verify: ["npm test"],
 	review: { ...DEFAULT_POLICY },
 	slices: [slice("a"), slice("b")],
 	checks: [],
-	amendments: [],
 	limits: { builders: 4, reviewers: 6 },
 	queue: [],
 	active: { builders: [], reviewers: [] },

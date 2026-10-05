@@ -35,7 +35,7 @@ describe("gateFeedback", () => {
 		);
 		expect(text).toMatch(/Failing command: npm run typecheck \(exit code 2\)\nTS2345/);
 		expect(text).toMatch(/Left out because their slices aren't integrated yet: test\/ui\.test\.ts/);
-		expect(text).toMatch(/propose_contract_change/);
+		expect(text).toMatch(/Fix it within your claim/);
 	});
 
 	it("explains a merge conflict with the base", () => {

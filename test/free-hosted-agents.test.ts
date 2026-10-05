@@ -43,7 +43,7 @@ const env = { COORDINATOR: { idFromName: () => { throw new Error("no Coordinator
 const free = { repo: "project", change: "stats-1a2b", ref: "changes/stats-1a2b", agent: "blueprint-builder" };
 const job: BuildJob = {
 	taskId: "free:project", goal: "Add stats", slice: { id: "stats-1a2b", title: "stats-1a2b", owns: ["src/stats/"], instructions: "Add stats", tests: [] },
-	siblings: [], contracts: [], verify: ["npm test"], repo: "free--project--stats-1a2b",
+	siblings: [], verify: ["npm test"], repo: "free--project--stats-1a2b",
 	remote: "https://git.test/project.git", token: "write", base: { remote: "https://git.test/project.git", token: "read" }, free,
 };
 
