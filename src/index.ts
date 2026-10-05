@@ -5,7 +5,7 @@ import { deleteReposWithPrefix, headOf, listRepoNames, parseRepoName, remoteFor,
 import { openTaskFor, type OpenTaskInput } from "./coordinator";
 import { electedForEnv, taskCoordinator } from "./elected";
 import { GitCasLog } from "./election-git";
-import { openLog } from "./peer";
+import { PEER_LEASE_MS, openLog, type Peer } from "./peer";
 import { fail, requiredPaths, requiredString, statusOf } from "./errors";
 import { retryTransient } from "./retry";
 import type { Blueprint, Limits, Review, ReviewPolicy, Task } from "./types";
@@ -95,6 +95,7 @@ app.get("/api", (c) =>
 			"GET  /tasks/:id/ledger",
 			"DELETE /tasks/:id   (state, forks and dashboard entry; refused while agents work)",
 			"DELETE /repos/:repo (refused while tasks use it)",
+			"POST /tasks/:id/leader/crash {forMs?}  (failover test: the leader stops as if its object vanished)",
 			"GET  /tasks/:id/lock-stats",
 			"POST /tasks/:id/lock-stats/reset",
 			"POST /tasks/:id/restore {repo}",
@@ -319,6 +320,17 @@ app.post("/tasks/:id/slices/:slice/integrate", async (c) => {
 app.post("/tasks/:id/land", async (c) => c.json(await humanCoordinator(c.env, c.req.param("id")).land(c.get("accessIdentity"))));
 
 // Lock timings for benchmarks; POST clears them after reading.
+// Failover tests: the leader the task index names stops as if its object vanished, for forMs (default two leases).
+app.post("/tasks/:id/leader/crash", async (c) => {
+	const id = c.req.param("id");
+	const body = await jsonArgs(c);
+	const forMs = typeof body.forMs === "number" && body.forMs > 0 ? body.forMs : 2 * PEER_LEASE_MS;
+	const leader = (await taskIndex(c.env).get(id))?.leader;
+	if (!leader?.name) fail(409, `nobody leads ${id}`);
+	await (c.env.PEER.getByName(leader.name) as unknown as Peer).simulateCrash(forMs);
+	return c.json({ crashed: leader.name, term: leader.term, forMs });
+});
+
 app.get("/tasks/:id/lock-stats", async (c) => c.json(await coordinator(c.env, c.req.param("id")).lockStats()));
 app.post("/tasks/:id/lock-stats/reset", async (c) => c.json(await coordinator(c.env, c.req.param("id")).lockStats(true)));
 

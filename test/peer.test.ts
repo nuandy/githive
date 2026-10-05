@@ -126,6 +126,41 @@ describe("a peer of the elected coordinator", () => {
 		await expect(a.peer.claims()).rejects.toThrow(/no longer leading/);
 	});
 
+	it("fails over: a crashed leader stops answering and renewing, and another peer leads once its lease runs out, with every decision", async () => {
+		const a = peer("t1--a");
+		await a.lead();
+		const { change } = await a.peer.openChange({ title: "Stats", intent: "Stats", owns: ["src/stats/"] });
+		await a.peer.simulateCrash(2 * LEASE);
+		await expect(a.peer.claims()).rejects.toThrow(/unavailable/);
+		await expect(a.lead()).rejects.toThrow(/unavailable/);
+
+		// Its alarm renews nothing: the lease runs out.
+		const renewals = leases.commits.length;
+		clock.now += LEASE / 2;
+		await a.peer.alarm();
+		expect(leases.commits).toHaveLength(renewals);
+
+		// Until it does, the others still see it leading; then the next to ask takes over, with its grants.
+		const b = peer("t1--b");
+		expect(await b.lead()).toEqual({ leader: "t1--a", term: 1 });
+		clock.now += LEASE;
+		expect(await b.peer.lead("t1", "project", "t1--b", true)).toEqual({ leader: "t1--b", term: 2 });
+		expect((await b.peer.claims()).map((c) => c.change)).toEqual([change.id]);
+
+		// Back after its crash, while the new leader's lease is live, it doesn't lead.
+		clock.now += 0.6 * LEASE;
+		await expect(a.peer.openChange({ title: "Late", intent: "Late", owns: ["src/late/"] })).rejects.toThrow(/no longer leading/);
+	});
+
+	it("stays down through a restart of its object, until its crash is over", async () => {
+		const storage = new FakeStorage();
+		const a = peer("t1--a", storage);
+		await a.lead();
+		await a.peer.simulateCrash(LEASE);
+		const restarted = peer("t1--a", storage);
+		await expect(restarted.lead()).rejects.toThrow(/unavailable/);
+	});
+
 	it("writes nothing to the log for a refused decision", async () => {
 		const a = peer("t1--a");
 		await a.lead();

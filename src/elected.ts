@@ -46,27 +46,64 @@ export interface ElectedContext {
 	hint?: string | null;
 	/** The task from Git, for reads when nobody leads. */
 	readLog: () => Promise<Task | null>;
+	/** How to wait between tries while a leader is unavailable (default: a timer). */
+	wait?: (ms: number) => Promise<void>;
+	/** How long to keep trying while a leader is unavailable, before giving up (default: two leases). */
+	patienceMs?: number;
 }
 
 const NOT_LEADING = /no longer leading/;
 
+/** A peer that can't be reached: crashed (simulated, for failover tests), reset, or its connection lost. */
+const isUnavailable = (err: unknown) => /peer unavailable|network connection lost|durable object reset|code was updated|overloaded/i.test(statusOf(err).message);
+
+/** Between tries while a leader is unavailable. */
+const RETRY_MS = 1_000;
+
 /** The open task's decisions, made by whichever peer leads, in place of a fixed Coordinator. */
 export function electedCoordinator(ctx: ElectedContext) {
-	/** Call the leader, asking `asker` (a change's peer) who it is; ask afresh once if the answer was stale. */
+	const wait = ctx.wait ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
+	const patience = ctx.patienceMs ?? 60_000;
+	/** A peer of no change, for asking who leads when the change's own peer is the one that's down. */
+	const standby = `${ctx.taskId}--standby`;
+
+	/**
+	 * Call the leader, asking `asker` (a change's peer) who it is; ask afresh if
+	 * the answer was stale. While the leader is unavailable (crashed, or its
+	 * object reset), keep asking: once its lease runs out the asker campaigns and
+	 * leads, so decisions pause for at most a lease rather than fail. If the
+	 * asker itself is down, a standby peer asks instead.
+	 */
 	async function viaLeader<T>(asker: string, call: (leader: PeerStub) => Promise<T>, startFresh = false): Promise<T> {
+		const deadline = Date.now() + patience;
+		let who = asker;
 		for (let fresh = startFresh; ; fresh = true) {
-			const { leader } = await ctx.peer(asker).lead(ctx.taskId, ctx.repo, asker, fresh);
+			let leader: string;
+			try {
+				({ leader } = await ctx.peer(who).lead(ctx.taskId, ctx.repo, who, fresh));
+			} catch (err) {
+				if (!isUnavailable(err) || who === standby) throw err;
+				who = standby;
+				continue;
+			}
 			try {
 				return await call(ctx.peer(leader));
 			} catch (err) {
-				if (fresh || !NOT_LEADING.test(statusOf(err).message)) throw err;
+				// A stale answer: look afresh once, at once.
+				if (!fresh && NOT_LEADING.test(statusOf(err).message)) continue;
+				if (!isUnavailable(err) && !NOT_LEADING.test(statusOf(err).message)) throw err;
+				if (Date.now() >= deadline) throw err;
+				await wait(RETRY_MS);
 			}
 		}
 	}
 	const peerOf = (change: string) => sliceRepoName(ctx.taskId, change);
 	/** The task as committed: from the leader's memory (a peer that no longer leads reads its own copy of the log), or from Git if nobody leads. */
 	const read = async (): Promise<Task> =>
-		(ctx.hint ? await ctx.peer(ctx.hint).peek(ctx.taskId, ctx.repo, ctx.hint) : await ctx.readLog()) ??
+		(ctx.hint
+			? // A leader that can't be reached: what's committed is in Git.
+				await ctx.peer(ctx.hint).peek(ctx.taskId, ctx.repo, ctx.hint).catch((err) => (isUnavailable(err) ? ctx.readLog() : Promise.reject(err)))
+			: await ctx.readLog()) ??
 		(() => {
 			throw new Error(`[404] no task ${ctx.taskId}`);
 		})();
@@ -82,7 +119,7 @@ export function electedCoordinator(ctx: ElectedContext) {
 		try {
 			return await call(ctx.peer(known));
 		} catch (err) {
-			if (!NOT_LEADING.test(statusOf(err).message)) throw err;
+			if (!NOT_LEADING.test(statusOf(err).message) && !isUnavailable(err)) throw err;
 			return viaLeader(asker, call, true);
 		}
 	}

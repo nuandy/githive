@@ -131,4 +131,33 @@ describe("the elected coordinator, from the Worker", () => {
 		expect(p.made.get("t1--stats")?.lead).toHaveBeenCalledWith("t1", "project", "t1--stats", false);
 		expect(p.made.get("t1--stats")?.agentStopped).toHaveBeenCalledWith("reviewer", "stats:tests:h1");
 	});
+
+	it("waits out a leader that is unavailable, then reaches the peer that takes over", async () => {
+		const p = peers("t1--lead");
+		const crashed = p.peer("t1--lead");
+		crashed.agentStopped.mockRejectedValue(new Error("[503] peer unavailable (simulated crash)"));
+		// The change's own peer sees the crashed leader's lease twice more, then takes over.
+		const own = p.peer("t1--stats");
+		let asked = 0;
+		own.lead.mockImplementation(async (_t: string, _r: string, me: string) => ({ leader: ++asked <= 2 ? "t1--lead" : me, term: asked <= 2 ? 1 : 2 }));
+		const waits: number[] = [];
+		await electedCoordinator({ taskId: "t1", repo: "project", peer: p.peer as never, hint: "t1--lead", readLog: async () => stored, wait: async (ms) => void waits.push(ms) }).agentStopped("reviewer", "stats:tests:h1");
+		expect(own.agentStopped).toHaveBeenCalledWith("reviewer", "stats:tests:h1");
+		expect(waits.length).toBeGreaterThan(0);
+	});
+
+	it("asks a standby peer when the change's own peer is the one that crashed", async () => {
+		const p = peers(null);
+		p.peer("t1--stats").lead.mockRejectedValue(new Error("[503] peer unavailable (simulated crash)"));
+		await electedCoordinator({ taskId: "t1", repo: "project", peer: p.peer as never, hint: null, readLog: async () => stored, wait: async () => {} }).agentStopped("builder", "stats");
+		expect(p.made.get("t1--standby")?.agentStopped).toHaveBeenCalledWith("builder", "stats");
+	});
+
+	it("gives up after its patience, saying the leader is unavailable", async () => {
+		const p = peers("t1--lead");
+		p.peer("t1--lead").agentStopped.mockRejectedValue(new Error("[503] peer unavailable (simulated crash)"));
+		p.peer("t1--stats").lead.mockResolvedValue({ leader: "t1--lead", term: 1 });
+		const co = electedCoordinator({ taskId: "t1", repo: "project", peer: p.peer as never, hint: "t1--lead", readLog: async () => stored, wait: async () => {}, patienceMs: 0 });
+		await expect(co.agentStopped("builder", "stats")).rejects.toThrow(/unavailable/);
+	});
 });

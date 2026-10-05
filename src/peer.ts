@@ -15,6 +15,9 @@ import type { Task } from "./types";
 /** Where a peer keeps which task it belongs to, so it can rejoin after its object restarts. */
 const IDENTITY = "peer:identity";
 
+/** Until when a peer is down, for failover tests (simulateCrash): kept in storage, so it outlasts a restart. */
+const DOWN_UNTIL = "peer:down-until";
+
 /** How long a leader's lease lasts unless renewed. */
 export const PEER_LEASE_MS = 30_000;
 
@@ -88,6 +91,31 @@ export class Peer extends Coordinator {
 	/** When the task's claim leases next need checking (set by the decision code). */
 	private leaseCheckAt: number | null = null;
 
+	/** Until when this peer is down (simulateCrash), once read from storage. */
+	private downUntil: number | null = null;
+
+	/**
+	 * For failover tests: behave as if this object vanished for `forMs`. It
+	 * stops leading without resigning, stops renewing its lease, and refuses
+	 * every call (as an unreachable object would), so the others wait out its
+	 * lease and one of them takes over. Afterwards it is a peer like any other.
+	 */
+	async simulateCrash(forMs: number) {
+		this.downUntil = this.options.now() + forMs;
+		await this.ctx.storage.put(DOWN_UNTIL, this.downUntil);
+		await this.ctx.storage.deleteAlarm();
+		this.leader = null;
+		this.working = null;
+		this.known = null;
+		this.campaigning = null;
+	}
+
+	/** Refuse while down after a simulated crash. */
+	private async refuseIfDown() {
+		this.downUntil ??= (await this.ctx.storage.get<number>(DOWN_UNTIL)) ?? 0;
+		if (this.options.now() < this.downUntil) throw new Error("[503] peer unavailable (simulated crash)");
+	}
+
 	/** For tests: another log, lease or clock. */
 	configure(options: Partial<PeerOptions>) {
 		this.options = { ...this.options, ...options };
@@ -100,6 +128,7 @@ export class Peer extends Coordinator {
 	 * said it no longer leads).
 	 */
 	async lead(taskId: string, repo: string, me: string, fresh = false): Promise<{ leader: string; term: number }> {
+		await this.refuseIfDown();
 		if (this.me !== me) await this.ctx.storage.put(IDENTITY, { taskId, repo, me });
 		this.me = me;
 		const now = this.options.now();
@@ -145,6 +174,8 @@ export class Peer extends Coordinator {
 	 * check claim leases when they are due. A peer that doesn't lead ignores it.
 	 */
 	override async alarm() {
+		// Down after a simulated crash: renew nothing, so the lease runs out.
+		if (await this.refuseIfDown().then(() => false, () => true)) return;
 		if (!this.leader) await this.rejoin();
 		const leader = this.leader;
 		if (!leader?.leading) return;
@@ -177,6 +208,7 @@ export class Peer extends Coordinator {
 	 * tip hasn't moved. A Durable Object stays put, so that copy stays warm.
 	 */
 	async peek(taskId: string, repo: string, me: string, forwarded = false): Promise<Task> {
+		await this.refuseIfDown();
 		this.me ??= me;
 		if (this.leader?.leading) return structuredClone(this.leader.state);
 		const now = this.options.now();
@@ -202,6 +234,7 @@ export class Peer extends Coordinator {
 
 	/** Whether this peer leads, and until when: asked by a peer that remembers it as the leader. */
 	async leaseStatus(): Promise<{ leading: boolean; term: number; leaseUntil: number }> {
+		await this.refuseIfDown();
 		const leader = this.leader;
 		return leader?.leading ? { leading: true, term: leader.term, leaseUntil: leader.leaseExpires } : { leading: false, term: 0, leaseUntil: 0 };
 	}
@@ -262,6 +295,7 @@ export class Peer extends Coordinator {
 	}
 
 	protected override async readTask(): Promise<Task | undefined> {
+		await this.refuseIfDown();
 		if (!this.leader) await this.rejoin();
 		// A copy, like storage gives: a step that fails changes nothing it didn't save.
 		return structuredClone(this.leading());

@@ -84,6 +84,24 @@ describe("opening a repo already open on the fixed Coordinator", () => {
 	});
 });
 
+describe("crashing an elected task's leader, for failover tests", () => {
+	it("crashes the peer the task index names, for as long as asked", async () => {
+		const simulateCrash = vi.fn(async () => undefined);
+		const env = {
+			TASK_INDEX: { getByName: () => ({ get: async () => ({ id: "t1", repo: "project", elected: true, leader: { name: "t1--a", term: 4 } }) }) },
+			PEER: { getByName: (name: string) => (name === "t1--a" ? { simulateCrash } : null) },
+		};
+		const res = await post(env as never, "/tasks/t1/leader/crash", { forMs: 90_000 });
+		expect(await res.json()).toEqual({ crashed: "t1--a", term: 4, forMs: 90_000 });
+		expect(simulateCrash).toHaveBeenCalledWith(90_000);
+	});
+
+	it("says so when nobody leads", async () => {
+		const env = { TASK_INDEX: { getByName: () => ({ get: async () => ({ id: "t1", repo: "project", elected: true }) }) } };
+		expect((await post(env as never, "/tasks/t1/leader/crash", {})).status).toBe(409);
+	});
+});
+
 const get = (env: never, path: string) => worker.fetch(new Request(`https://blueprint.test${path}`), env, {} as never);
 
 describe("dashboard reads", () => {
