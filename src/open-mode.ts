@@ -99,7 +99,16 @@ export function claimConflicts(task: Task, owns: string[], except?: string): Cla
 
 /** The refusal an agent sees when its claim collides with another change's (a 409). */
 export function conflictMessage(conflicts: ClaimConflict[]) {
-	const lines = conflicts.map((c) => `- ${c.path} overlaps ${c.held}, held by change ${c.holder} ("${c.title}"): ${c.intent}`);
+	// One entry per holder, with what overlaps under it: a wide claim can overlap dozens of files.
+	const holders = new Map<string, ClaimConflict[]>();
+	for (const c of conflicts) holders.set(c.holder, [...(holders.get(c.holder) ?? []), c]);
+	const SHOWN = 10;
+	const lines = [...holders.values()].map((held) => {
+		const { holder, title, intent } = held[0];
+		const overlaps = held.slice(0, SHOWN).map((c) => (c.path === c.held ? c.path : `${c.path} overlaps ${c.held}`));
+		const more = held.length > SHOWN ? `, and ${held.length - SHOWN} more` : "";
+		return `- held by change ${holder} ("${title}"): ${intent}\n  ${overlaps.join("; ")}${more}`;
+	});
 	return `These paths are already claimed:\n${lines.join("\n")}\nNarrow your claim, wait for that change to merge, or open your change on the free paths and ask the holder for what you need with a cross-lane request.`;
 }
 

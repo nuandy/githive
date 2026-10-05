@@ -6,7 +6,7 @@
 //
 //   node scripts/mcp-agent.mjs call <tool> '<json args>' [--key-file F]
 //   node scripts/mcp-agent.mjs register <repo> <agent> <key-file>      coordinator-free: register an agent, key to <key-file>
-//   node scripts/mcp-agent.mjs clone <dir> --task T --change C          open mode: clone a change's fork
+//   node scripts/mcp-agent.mjs clone <dir> --task T --change C          open mode: clone a change's fork (shallow; --full x for all history)
 //   node scripts/mcp-agent.mjs clone <dir> --repo R --change C --key-file F   coordinator-free: clone a change's fork
 //   node scripts/mcp-agent.mjs auth <dir> (same flags as clone)          fresh write access for an existing clone
 //
@@ -76,7 +76,8 @@ switch (command) {
 	case "auth": {
 		const [dir] = positional;
 		const { url, token } = await forkAccess();
-		if (command === "clone") execFileSync("git", ["-c", header(token), "clone", "--quiet", url, dir], { stdio: "inherit" });
+		// Shallow by default: an agent needs the tip to work on, not the project's whole history (--full for all of it).
+		if (command === "clone") execFileSync("git", ["-c", header(token), "clone", "--quiet", ...(flags.full === undefined ? ["--depth", "1", "--no-single-branch"] : []), url, dir], { stdio: "inherit" });
 		// The token lives only in this clone's own config, so plain git push works until it expires (then: auth).
 		execFileSync("git", ["-C", dir, "config", "http.extraHeader", `Authorization: Bearer ${token.split("?")[0]}`]);
 		console.log(`${command === "clone" ? "cloned" : "refreshed"} ${dir}`);
