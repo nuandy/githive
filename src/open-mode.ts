@@ -161,8 +161,29 @@ export function nextLeaseCheck(task: Task) {
 	const times = [
 		...task.slices.filter((s) => holdsClaim(s) && s.leaseUntil).map((s) => Date.parse(s.leaseUntil!)),
 		...task.slices.map(gateStallCheck).filter((t): t is number => t !== null),
+		...task.slices.map(externalReviewCheck).filter((t): t is number => t !== null),
 	];
 	return times.length ? Math.min(...times) : null;
+}
+
+/** Minutes a change waits for an outside reviewer's vote, by default, before a person is asked. */
+export const EXTERNAL_WAIT_MINUTES = 60;
+
+/** The external roles that haven't voted on the commit under review. */
+export function awaitedExternalRoles(slice: Slice): string[] {
+	const roles = slice.review?.external ?? [];
+	return roles.filter((role) => !slice.reviews.some((r) => r.head === slice.reviewHead && r.reviewer === role));
+}
+
+/**
+ * When a change has waited long enough for its external reviewers: its commit
+ * went to review that long ago, some external role still hasn't voted, and
+ * nobody has been asked about it yet.
+ */
+export function externalReviewCheck(slice: Slice): number | null {
+	if (slice.status !== "building" || !slice.reviewHead || !slice.reviewRequestedAt || slice.attention) return null;
+	if (slice.sentBackFor === slice.reviewHead || slice.externalWaitFlagged === slice.reviewHead || !awaitedExternalRoles(slice).length) return null;
+	return Date.parse(slice.reviewRequestedAt) + (slice.review?.externalWaitMinutes ?? EXTERNAL_WAIT_MINUTES) * 60_000;
 }
 
 /** How long a check run may go without a result, or without the gate being seen holding it, before it's presumed lost. */

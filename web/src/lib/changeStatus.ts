@@ -34,6 +34,8 @@ export interface ReviewerVerdict {
 	review?: Review;
 	/** This role's rejection blocks the change whatever the count. */
 	veto: boolean;
+	/** Outside agents review this role, not Blueprint's own reviewer. */
+	external: boolean;
 }
 
 export interface ReviewSummary {
@@ -59,6 +61,9 @@ export interface ChecksSummary {
 	tone: Tone;
 }
 
+/** The review policy for a change: the one its commit went to review under (stricter for sensitive paths), or the repo's. */
+export const changePolicy = (change: Change, task: { review: ReviewPolicy }): ReviewPolicy => change.review ?? task.review;
+
 /** The gate run that applies to the commit under review; an older run is stale. */
 export function currentGate(change: Change) {
 	const gate = change.gate;
@@ -82,7 +87,7 @@ export function reviewSummary(change: Change, policy: ReviewPolicy): ReviewSumma
 	const roles = policy.reviewers.length ? policy.reviewers : [...latest.keys()];
 	const reviewers: ReviewerVerdict[] = roles.map((role) => {
 		const review = latest.get(role);
-		return { role, verdict: review?.verdict, review, veto: policy.vetoes.includes(role) };
+		return { role, verdict: review?.verdict, review, veto: policy.vetoes.includes(role), external: (policy.external ?? []).includes(role) };
 	});
 	const approvals = reviewers.filter((r) => r.verdict === "approve").length;
 	const required = policy.required > 0 ? policy.required : roles.length;

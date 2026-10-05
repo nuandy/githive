@@ -1,7 +1,8 @@
+import { identityName } from "../lib/agent";
 import type { ReactNode } from "react";
 import type { AgentState, Live, Task } from "../api";
 import { agentLabel, isHosted } from "../lib/agent";
-import { reviewSummary } from "../lib/changeStatus";
+import { reviewSummary, changePolicy } from "../lib/changeStatus";
 import { humanizeText } from "../lib/humanize";
 import { changesOf, isActive, type Change } from "../lib/model";
 import { timeAgo, timeUntil } from "../lib/relativeTime";
@@ -85,7 +86,7 @@ export interface ChangeSidebarProps {
 }
 
 export function ChangeSidebar({ task, change, agent, repo, base }: ChangeSidebarProps) {
-	const review = reviewSummary(change, task.review);
+	const review = reviewSummary(change, changePolicy(change, task));
 	const liveReviewers = new Map((agent?.reviewers ?? []).map((r) => [r.role, r.state]));
 	const builder = agent?.builder;
 	const hosted = isHosted(change);
@@ -103,7 +104,9 @@ export function ChangeSidebar({ task, change, agent, repo, base }: ChangeSidebar
 					<ul className="sidebar-reviewers">
 						{review.reviewers.map((reviewer) => {
 							const live = liveReviewers.get(reviewer.role);
-							const state = reviewer.verdict === "approve" ? "approved" : reviewer.verdict === "reject" ? "requested changes" : live?.status === "working" ? "reviewing" : live?.status === "queued" ? "queued" : change.reviewHead ? "pending" : "";
+							const waiting = reviewer.external ? "waiting for a reviewer" : "pending";
+							const state = reviewer.verdict === "approve" ? "approved" : reviewer.verdict === "reject" ? "requested changes" : live?.status === "working" ? "reviewing" : live?.status === "queued" ? "queued" : change.reviewHead ? waiting : "";
+							const who = identityName(reviewer.review?.by);
 							const icon: IconName = reviewer.verdict === "approve" ? "check" : reviewer.verdict === "reject" ? "x" : live?.status === "working" ? "loader" : "dot";
 							const tone = reviewer.verdict === "approve" ? "good" : reviewer.verdict === "reject" ? "bad" : live?.status === "working" ? "warn" : "neutral";
 							return (
@@ -114,6 +117,11 @@ export function ChangeSidebar({ task, change, agent, repo, base }: ChangeSidebar
 										{reviewer.veto ? (
 											<span className="muted sidebar-reviewers__veto" title="A rejection from this reviewer blocks the change">
 												can block
+											</span>
+										) : null}
+										{reviewer.external ? (
+											<span className="muted sidebar-reviewers__veto" title="An outside agent reviews this role, through review_queue and submit_review">
+												{who ? `by ${who}` : "outside agent"}
 											</span>
 										) : null}
 									</span>
@@ -128,7 +136,7 @@ export function ChangeSidebar({ task, change, agent, repo, base }: ChangeSidebar
 						})}
 					</ul>
 				) : (
-					<p className="muted">No reviewers set for this repo.</p>
+					<p className="muted">No review required: it merges once the checks pass.</p>
 				)}
 				<p className="muted sidebar-note">
 					{review.required} {review.required === 1 ? "approval" : "approvals"} required

@@ -1,3 +1,4 @@
+import { entriesOverlap } from "../open-mode";
 import type { CasLog } from "../election";
 import { appendRecord } from "./records";
 import { type Stamper, stampPayload, verifyStamp } from "./stamp";
@@ -23,10 +24,23 @@ export interface Votes {
 }
 
 export interface ReviewPolicy {
-	/** Approvals a commit needs. */
+	/** Approvals a commit needs; 0 merges on the checks alone (unless a veto role must approve). */
 	required: number;
-	/** Roles whose rejection blocks a merge whatever the approvals. */
+	/** Roles whose rejection blocks a merge whatever the approvals; each must approve. */
 	vetoes: string[];
+	/** Stricter rules for a change touching any of these paths: more approvals, more vetoes. */
+	escalate?: { paths: string[]; required?: number; vetoes?: string[] }[];
+}
+
+/** The policy for a change touching `paths`: made stricter by every escalation whose paths it touches. */
+export function effectiveFreePolicy(policy: ReviewPolicy, paths: string[]): { required: number; vetoes: string[] } {
+	let { required, vetoes } = policy;
+	for (const e of policy.escalate ?? []) {
+		if (!paths.some((p) => e.paths.some((q) => entriesOverlap(p, q)))) continue;
+		required = Math.max(required, e.required ?? required);
+		vetoes = [...new Set([...vetoes, ...(e.vetoes ?? [])])];
+	}
+	return { required, vetoes };
 }
 
 /** Record a reviewer's verdict on a commit. */
@@ -55,7 +69,8 @@ export interface Author {
  * role must approve too (`awaiting` lists those that haven't), so a veto can
  * always stop a merge, however fast the others vote.
  */
-export function approval(state: Votes | null | undefined, commit: string, policy: ReviewPolicy, author?: Author) {
+export function approval(state: Votes | null | undefined, commit: string, base: ReviewPolicy, author?: Author, paths: string[] = []) {
+	const policy = effectiveFreePolicy(base, paths);
 	const latest = new Map<string, VoteRecord>();
 	for (const v of state?.votes ?? []) if (v.commit === commit) latest.set(v.by ?? `name:${v.reviewer}`, v);
 	const verdicts = [...latest.values()];

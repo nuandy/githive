@@ -29,6 +29,8 @@ type PeerStub = Pick<
 	| "answerLaneChange"
 	| "externalCredentials"
 	| "submitReview"
+	| "submitExternalReview"
+	| "registerAgent"
 	| "agentStopped"
 	| "flagSlice"
 	| "parkBuilder"
@@ -131,7 +133,7 @@ export function electedCoordinator(ctx: ElectedContext) {
 	return {
 		state: read,
 		claims: async () => claimsOf(await read()),
-		openChange: async (input: { title: string; intent: string; owns: string[]; hosted?: boolean; agent?: string }, actor?: AccessIdentity) => {
+		openChange: async (input: { title: string; intent: string; owns: string[]; hosted?: boolean; agent?: string; authorAgent?: string }, actor?: AccessIdentity) => {
 			const id = changeId(typeof input?.title === "string" ? input.title : "change");
 			return onLeader(peerOf(id), (leader) => leader.openChange({ ...input, id }, actor));
 		},
@@ -143,6 +145,9 @@ export function electedCoordinator(ctx: ElectedContext) {
 		requestLaneChange: (change: string, input: LaneChangeRequestInput) => onLeader(peerOf(change), (leader) => leader.requestLaneChange(change, input)),
 		answerLaneChange: (change: string, requestId: string, answer: LaneChangeAnswer) => onLeader(peerOf(change), (leader) => leader.answerLaneChange(change, requestId, answer)),
 		externalCredentials: (change: string) => onLeader(peerOf(change), (leader) => leader.externalCredentials(change)),
+		// Outside agents: registering is the task's, so it asks through a peer of its own.
+		registerAgent: (name: string, keyHash: string, currentKeyHash?: string, actor?: AccessIdentity) => onLeader(peerOf("agents"), (leader) => leader.registerAgent(name, keyHash, currentKeyHash, actor)),
+		submitExternalReview: (change: string, review: Parameters<Coordinator["submitExternalReview"]>[1], by: string) => onLeader(peerOf(change), (leader) => leader.submitExternalReview(change, review, by)),
 		// Blueprint's own workers report here too: hosted reviewers and builders, and the gate.
 		submitReview: (change: string, review: Parameters<Coordinator["submitReview"]>[1]) => onLeader(peerOf(change), (leader) => leader.submitReview(change, review)),
 		/** A builder stops as its change; a reviewer as `change:role:head`. */

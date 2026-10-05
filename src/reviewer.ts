@@ -44,6 +44,8 @@ export interface ReviewerState extends AgentState {
 
 /** What each common role looks for. Roles the planner invents get a generic focus. */
 const FOCUS: Record<string, string> = {
+	review:
+		"Review the change as one independent reviewer would: it does what its intent says and nothing else; the logic is right, including edge cases and error paths; it's tested where it should be, and the project's checks pass; docs and instructions it adds are accurate (try them); and it has no obvious security problem (secrets, unsafe input). Run things yourself; don't trust the author's summary.",
 	security:
 		"Look for vulnerabilities the change introduces: injection (including HTML/script injection in rendered output), missing authorization on routes that change state or expose data, secrets in code or logs, unsafe handling of untrusted input. A concrete exploit or reproduction is the strongest evidence.",
 	tests:

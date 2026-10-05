@@ -82,7 +82,8 @@ function reviewItem(review: Review, index: number): TimelineItem {
 		kind: "review",
 		at: review.at,
 		tone: approved ? "good" : "bad",
-		text: `${review.reviewer} reviewer ${approved ? "approved" : "requested changes"}`,
+		// An outside agent's review names it; Blueprint's own reviewers go by their role.
+		text: review.by ? `${identityName(review.by)} (${review.reviewer} reviewer) ${approved ? "approved" : "requested changes"}` : `${review.reviewer} reviewer ${approved ? "approved" : "requested changes"}`,
 		commit: review.head,
 		body: review.summary,
 		review,

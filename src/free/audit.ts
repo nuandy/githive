@@ -2,7 +2,7 @@ import { inLane, inLaneEntry } from "../open-mode";
 import type { ClaimRecord, Registry } from "./claims";
 import { decodeShard } from "./shards";
 import { stampPayload, verifyStamp } from "./stamp";
-import { approval, type Author, type ReviewPolicy, type VoteRecord, type Votes } from "./votes";
+import { approval, type Author, type ReviewPolicy, type VoteRecord, type Votes, effectiveFreePolicy } from "./votes";
 
 // The coordinator-free audit (see docs/coordinator-free.md). Nothing stops an
 // agent from breaking a convention, so this replays the records and reports
@@ -231,9 +231,10 @@ function checkApproved(records: AuditRecords, votesAt: Map<string, Votes>, merge
 	const votes = votesAt.get(merge.votesTip);
 	if (!votes) return report("unknown-votes", `${merge.votesTip} is not in the votes' history`);
 	// Distinct verified reviewers, never the change's own author.
-	const outcome = approval(votes, merge.head, records.policy, author);
+	const outcome = approval(votes, merge.head, records.policy, author, merge.files);
+	const { required } = effectiveFreePolicy(records.policy, merge.files);
 	if (outcome.vetoedBy.length) report("unapproved", `${merge.head} was vetoed by ${outcome.vetoedBy.join(", ")} at ${merge.votesTip}`);
-	else if (outcome.approvals < records.policy.required) report("unapproved", `${merge.head} had ${outcome.approvals} of ${records.policy.required} approvals at ${merge.votesTip}`);
+	else if (outcome.approvals < required) report("unapproved", `${merge.head} had ${outcome.approvals} of ${required} approvals at ${merge.votesTip}`);
 	else if (outcome.awaiting.length) report("unapproved", `${merge.head} had no approval from ${outcome.awaiting.join(", ")} at ${merge.votesTip}`);
 }
 

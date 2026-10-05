@@ -5,7 +5,7 @@ import { inLane } from "../open-mode";
 import type { ClaimStore } from "./claim-store";
 import { mergeStampPayload } from "./audit";
 import type { Stamper } from "./stamp";
-import { approval, countedVotes, type ReviewPolicy, type Votes } from "./votes";
+import { type ReviewPolicy, type Votes, approval, countedVotes, effectiveFreePolicy } from "./votes";
 
 // The toolkit's merge for a cooperative agent in coordinator-free mode. It
 // checks the conventions the agent follows (its claim covers every file it
@@ -78,9 +78,11 @@ export async function mergeChange(input: MergeInput): Promise<MergeOutcome> {
 		}
 		const counted = await countedVotes(votesHead?.commit.state.votes ?? [], input.stampKey);
 		// Distinct reviewers, never the change's author: its claim's agent, and who made the claim.
-		const outcome = approval({ votes: counted }, head, input.policy, own);
+		// The policy for what it touches: stricter for dependency, CI and deploy files, say.
+		const outcome = approval({ votes: counted }, head, input.policy, own, files);
+		const { required } = effectiveFreePolicy(input.policy, files);
 		if (outcome.vetoedBy.length) reasons.push(`${head} is vetoed by ${outcome.vetoedBy.join(", ")}`);
-		else if (outcome.approvals < input.policy.required) reasons.push(`${head} has ${outcome.approvals} of ${input.policy.required} approvals from reviewers other than its author`);
+		else if (outcome.approvals < required) reasons.push(`${head} has ${outcome.approvals} of ${required} approvals from reviewers other than its author`);
 		else if (outcome.awaiting.length) reasons.push(`${head} still needs approval from ${outcome.awaiting.join(", ")}, which can veto it`);
 		if (reasons.length) return { ok: false, reasons };
 

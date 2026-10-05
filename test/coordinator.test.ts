@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { GateResult } from "../src/gate-plan";
 import type { AccessIdentity } from "../src/access-contract";
-import type { Review, Slice, Task } from "../src/types";
+import { DEFAULT_POLICY, type Review, type Slice, type Task } from "../src/types";
 import { FakeStorage, fakeEnv, slice, task } from "./fakes/env";
 
 // Integration tests for the Coordinator's decisions: the real class, with
@@ -1057,5 +1057,81 @@ describe("cross-lane request paths", () => {
 		for (const path of ["/src/b/x.ts", "src//b", "src/b/", "./src/b/x.ts", "src/b/../a/x.ts", " src/b/x.ts", "C:/src/b", "src\\b\\x.ts", "src/b/\u0007x"])
 			await expect(coordinator.requestLaneChange("a", { path, need: "n", reason: "r" })).rejects.toThrow(`[400] invalid relative path: ${path}`);
 		await expect(coordinator.requestLaneChange("a", { path: "src/b/x.ts", need: "n", reason: "r" })).resolves.toMatchObject({ outcome: "requested" });
+	});
+});
+
+describe("review policies and outside reviewers", () => {
+	beforeEach(() => io.heads.set("t1--a", "h1"));
+	const reviewerStarted = (role: string) => fake.env.REVIEWER.getByName(`t1--a--review-${role}--h1`).start;
+
+	it("starts one reviewer by default, and adds security, who can veto, for a change to dependencies", async () => {
+		await setup(task({ review: DEFAULT_POLICY, slices: [slice("a", { touched: ["src/a/x.ts"] })] }));
+		expect(await coordinator.startReviewers("a", "done")).toMatchObject({ reviewers: ["review"], external: [] });
+		expect((await stored()).slices[0].review).toMatchObject({ reviewers: ["review"], required: 1, vetoes: [] });
+
+		await setup(task({ review: DEFAULT_POLICY, slices: [slice("a", { touched: ["src/a/x.ts", "package.json"] })] }));
+		expect(await coordinator.startReviewers("a", "done")).toMatchObject({ reviewers: ["review", "security"] });
+		const t = await stored();
+		expect(t.slices[0].review).toMatchObject({ reviewers: ["review", "security"], required: 2, vetoes: ["security"] });
+		await coordinator.ledgerIdle();
+		expect(ledger.entries.map((e) => e.text)).toContain("a touches package.json, so its review needs review, security (security can veto)");
+	});
+
+	it("goes straight to the checks when the policy needs no approvals", async () => {
+		await setup(task({ review: { reviewers: [], required: 0, vetoes: [] } }));
+		expect(await coordinator.startReviewers("a", "done")).toMatchObject({ reviewers: [] });
+		expect(fake.env.GATE.getByName("t1").enqueue).toHaveBeenCalledWith("t1", { slice: "a", head: "h1" });
+	});
+
+	it("leaves external roles to outside agents: never the author, one role per reviewer, then merges like any review", async () => {
+		await setup(task({ review: { reviewers: ["review", "security"], required: 2, vetoes: ["security"], external: ["review"] }, slices: [slice("a", { authorBy: "agent:builder-1" }), slice("b")] }));
+		expect(await coordinator.startReviewers("a", "done")).toMatchObject({ reviewers: ["security"], external: ["review"] });
+		expect(reviewerStarted("review")).not.toHaveBeenCalled();
+		expect(reviewerStarted("security")).toHaveBeenCalled();
+
+		const verdict = { reviewer: "review", head: "h1", verdict: "approve" as const, summary: "does what it says", evidence: "npm test: 12 passing" };
+		await expect(coordinator.submitExternalReview("a", verdict, "agent:builder-1")).rejects.toThrow(/you opened a, so you can't review it/);
+		await expect(coordinator.submitExternalReview("a", { ...verdict, reviewer: "security" }, "agent:reviewer-1")).rejects.toThrow(/security is not a role outside agents review here \(they review review\)/);
+		// Blueprint's own reviewer can't vote an external role either.
+		await expect(coordinator.submitReview("a", verdict)).rejects.toThrow(/review is not a role Blueprint reviews here/);
+
+		await coordinator.submitExternalReview("a", verdict, "agent:reviewer-1");
+		expect((await stored()).slices[0].reviews).toEqual([expect.objectContaining({ reviewer: "review", by: "agent:reviewer-1", verdict: "approve" })]);
+		await coordinator.submitReview("a", vote("security", "approve"));
+		expect(fake.env.GATE.getByName("t1").enqueue).toHaveBeenCalledWith("t1", { slice: "a", head: "h1" });
+	});
+
+	it("counts a reviewer for one role per commit", async () => {
+		await setup(task({ review: { reviewers: ["review", "tests"], required: 2, vetoes: [], external: ["review", "tests"] } }));
+		await coordinator.startReviewers("a", "done");
+		const verdict = { head: "h1", verdict: "approve" as const, summary: "fine", evidence: "ran it" };
+		await coordinator.submitExternalReview("a", { ...verdict, reviewer: "review" }, "agent:reviewer-1");
+		await expect(coordinator.submitExternalReview("a", { ...verdict, reviewer: "tests" }, "agent:reviewer-1")).rejects.toThrow(/already reviewed h1 as review: each reviewer counts for one role/);
+		await coordinator.submitExternalReview("a", { ...verdict, reviewer: "tests" }, "agent:reviewer-2");
+		expect(fake.env.GATE.getByName("t1").enqueue).toHaveBeenCalled();
+	});
+
+	it("asks a person when no outside reviewer comes, once", async () => {
+		await setup(task({ review: { reviewers: ["review"], required: 1, vetoes: [], external: ["review"], externalWaitMinutes: 30 } }));
+		await coordinator.startReviewers("a", "done");
+		const t = await stored();
+		t.slices[0].reviewRequestedAt = new Date(Date.now() - 31 * 60_000).toISOString();
+		await storage.put("task", t);
+		await coordinator.alarm();
+		const flagged = (await stored()).slices[0];
+		expect(flagged.attention).toMatch(/^No outside reviewer has reviewed h1 as review in 31 minutes/);
+		expect(flagged.externalWaitFlagged).toBe("h1");
+	});
+
+	it("registers an agent's key, rotates it only with the current one, and keeps a registered name from being borrowed", async () => {
+		io.defaultHead = "main0";
+		await setup(task({ mode: "open", repo: "project", baseRepo: "project", baseCommit: "main0", anchor: "main0", leaseMinutes: 30, verify: [], slices: [] }));
+		expect(await coordinator.registerAgent("builder-1", "hash-1")).toEqual({ agent: "builder-1", rotated: false });
+		await expect(coordinator.registerAgent("builder-1", "hash-2")).rejects.toThrow(/already registered: send its current key/);
+		expect(await coordinator.registerAgent("builder-1", "hash-2", "hash-1")).toEqual({ agent: "builder-1", rotated: true });
+		expect((await stored()).agents?.["builder-1"].keyHash).toBe("hash-2");
+		await expect(coordinator.openChange({ title: "X", intent: "X, please", owns: ["src/x/"], agent: "builder-1" })).rejects.toThrow(/builder-1 is a registered agent: open the change with its key/);
+		const opened = await coordinator.openChange({ title: "X", intent: "X, please", owns: ["src/x/"], authorAgent: "builder-1" });
+		expect(opened.change).toMatchObject({ agent: "builder-1", authorBy: "agent:builder-1" });
 	});
 });

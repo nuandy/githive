@@ -1,3 +1,4 @@
+import { identityName } from "../lib/agent";
 import { Fragment, type ReactNode } from "react";
 import type { Tone } from "../lib/changeStatus";
 import { shortSha } from "../lib/model";
@@ -77,7 +78,15 @@ function ReviewCard({ item }: { item: TimelineItem }) {
 	return (
 		<div className={`timeline-card timeline-card--${approved ? "good" : "bad"}`}>
 			<div className="timeline-card__header">
-				<strong>{review.reviewer}</strong> reviewer {approved ? "approved these changes" : "requested changes"}
+				{review.by ? (
+					<>
+						<strong>{identityName(review.by)}</strong> ({review.reviewer} reviewer) {approved ? "approved these changes" : "requested changes"}
+					</>
+				) : (
+					<>
+						<strong>{review.reviewer}</strong> reviewer {approved ? "approved these changes" : "requested changes"}
+					</>
+				)}
 				{review.head ? (
 					<>
 						{" on "}

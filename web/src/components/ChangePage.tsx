@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import type { HistoryEntry, Live, Task } from "../api";
 import { agentLabel, isHosted } from "../lib/agent";
-import { checksSummary, currentGate, deriveChangeStatus } from "../lib/changeStatus";
+import { checksSummary, currentGate, deriveChangeStatus, changePolicy } from "../lib/changeStatus";
 import { conflictsFor, describeConflict } from "../lib/conflicts";
 import { changesOf, shortSha, type Change } from "../lib/model";
 import { timeAgo } from "../lib/relativeTime";
@@ -59,7 +59,7 @@ function useReviewDiff(task: Task, change: Change, api: ChangeActionsApi) {
 }
 
 export function ChangeHeader({ task, change }: { task: Task; change: Change }) {
-	const status = deriveChangeStatus(change, task.review, task.branch);
+	const status = deriveChangeStatus(change, changePolicy(change, task), task.branch);
 	const agent = agentLabel(change);
 	const branch = <code className="change-header__branch">changes/{change.id}</code>;
 	const main = <code className="change-header__branch">{task.branch ?? "main"}</code>;

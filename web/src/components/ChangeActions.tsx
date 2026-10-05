@@ -2,7 +2,7 @@ import { useState, type ReactNode } from "react";
 import type { Task, UnifiedCodeDiff } from "../api";
 import { isHosted } from "../lib/agent";
 import { humanizeText } from "../lib/humanize";
-import { checksSummary, currentGate, deriveChangeStatus, reviewSummary } from "../lib/changeStatus";
+import { checksSummary, currentGate, deriveChangeStatus, reviewSummary, changePolicy } from "../lib/changeStatus";
 import { describeConflict, type Conflict } from "../lib/conflicts";
 import { isActive, type Change } from "../lib/model";
 import { href, type RepoBase } from "../lib/routes";
@@ -95,8 +95,8 @@ export interface ChangeActionsProps {
 
 /** The box at the bottom of a change's conversation: where it stands, and what you can do. */
 export function ChangeActions({ task, change, conflicts, repo, base, diffStatus, api, onChanged }: ChangeActionsProps) {
-	const status = deriveChangeStatus(change, task.review, task.branch);
-	const review = reviewSummary(change, task.review);
+	const status = deriveChangeStatus(change, changePolicy(change, task), task.branch);
+	const review = reviewSummary(change, changePolicy(change, task));
 	const checks = checksSummary(change, task.verify, task.branch);
 	const can = availableActions(change, task.verify);
 	const [reason, setReason] = useState("");

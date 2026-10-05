@@ -1,6 +1,6 @@
 import { vi } from "vitest";
 import type { GateItem } from "../../src/gate";
-import { DEFAULT_POLICY, type Slice, type Task } from "../../src/types";
+import type { Slice, Task } from "../../src/types";
 
 /** In-memory Durable Object storage; values are copied in and out, like the real thing. */
 export class FakeStorage {
@@ -110,7 +110,8 @@ export const task = (overrides: Partial<Task> = {}): Task => ({
 	baseRepo: "t1--base",
 	baseCommit: "base0",
 	verify: ["npm test"],
-	review: { ...DEFAULT_POLICY },
+	// The mechanics tests are written for three roles, two approvals and a veto, not the default policy.
+	review: { reviewers: ["security", "tests", "api"], required: 2, vetoes: ["security"] },
 	slices: [slice("a"), slice("b")],
 	checks: [],
 	limits: { builders: 4, reviewers: 6 },

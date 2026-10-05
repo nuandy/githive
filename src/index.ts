@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import { verifyAccessRequest } from "./access";
 import type { AccessIdentity, CoordinatorHumanActions } from "./access-contract";
 import { deleteReposWithPrefix, headOf, listRepoNames, parseRepoName, remoteFor, reviewerName, sliceRepoName } from "./artifacts";
-import { openTaskFor, type OpenTaskInput } from "./coordinator";
+import { hostedRoles, openTaskFor, policyFor, type OpenTaskInput } from "./coordinator";
 import { electedForEnv, taskCoordinator } from "./elected";
 import { GitCasLog, readDecisionHistory } from "./election-git";
 import { PEER_LEASE_MS, openLog, type Peer } from "./peer";
@@ -186,6 +186,11 @@ app.post("/mcp", async (c) => {
 		openRepo: (repo) => openRepoTask(c.env, repo),
 		free: freeContext(c.env, c.get("accessIdentity"), c.req.header("X-Blueprint-Agent-Key")),
 		identity: c.get("accessIdentity"),
+		agentKey: c.req.header("X-Blueprint-Agent-Key") || undefined,
+		forkRead: async (repo) => {
+			const remote = await remoteFor(c.env.ARTIFACTS, repo, "read", 3 * 3600);
+			return { url: remote.url, token: remote.token };
+		},
 	});
 	return result === null ? c.body(null, 202) : c.json(result);
 });
@@ -249,7 +254,7 @@ app.get("/tasks/:id/live", async (c) => {
 			const repo = sliceRepoName(id, s.id);
 			const [builder, reviewers] = await Promise.all([
 				c.env.BUILDER.getByName(repo).state(),
-				s.reviewHead ? reviewerStates(c.env, repo, task.review.reviewers, s.reviewHead) : [],
+				s.reviewHead ? reviewerStates(c.env, repo, hostedRoles(policyFor(task as unknown as Task, s as unknown as Task["slices"][number])), s.reviewHead) : [],
 			]);
 			return { id: s.id, builder, reviewers };
 		}),
@@ -288,16 +293,20 @@ app.post("/tasks/:id/slices/:slice/reviewers", async (c) => {
 app.get("/tasks/:id/slices/:slice/reviewers", async (c) => {
 	const { id, slice } = c.req.param();
 	const task = await coordinator(c.env, id).state();
-	const head = task.slices.find((s) => s.id === slice)?.reviewHead;
-	if (!head) return c.json([]);
-	const states = await reviewerStates(c.env, sliceRepoName(id, slice), task.review.reviewers, head);
+	const found = task.slices.find((s) => s.id === slice);
+	const head = found?.reviewHead;
+	if (!found || !head) return c.json([]);
+	const states = await reviewerStates(c.env, sliceRepoName(id, slice), hostedRoles(policyFor(task as unknown as Task, found as unknown as Task["slices"][number])), head);
 	return c.json(states.map(({ role, state }) => ({ role, head, state })));
 });
 
+// An outside reviewer's verdict, as the caller's Access identity (agents use submit_review over MCP, with their key).
+// Blueprint's own reviewers vote from inside, never through here.
 app.post("/tasks/:id/slices/:slice/reviews", async (c) => {
 	const { id, slice } = c.req.param();
-	const review = await c.req.json<Omit<Review, "at">>();
-	return c.json(await coordinator(c.env, id).submitReview(slice, review));
+	const { reviewer, head, verdict, summary, evidence } = await c.req.json<Omit<Review, "at" | "by">>();
+	const actor = c.get("accessIdentity") ?? fail(401, "no identity");
+	return c.json(await coordinator(c.env, id).submitExternalReview(slice, { reviewer, head, verdict, summary, ...(evidence ? { evidence } : {}) }, identityLabel(actor)));
 });
 
 // A human messages a slice's builder: delivered at its next turn, or it resumes if it stopped.

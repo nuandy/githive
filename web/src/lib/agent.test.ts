@@ -16,6 +16,7 @@ describe("agent labels", () => {
 		expect(agentLabel({ openedBy: "service:abc/agent-a", external: true })).toBe("agent-a");
 		expect(agentLabel({ external: true })).toBe("external agent");
 		expect(agentLabel({ agent: "docs-agent", openedBy: "service:abc", external: true })).toBe("docs-agent");
+		expect(identityName("agent:reviewer-1")).toBe("reviewer-1");
 		expect(agentLabel({ external: false })).toBe("Blueprint builder");
 		expect(agentLabel({})).toBe("Blueprint builder");
 	});

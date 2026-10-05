@@ -19,8 +19,8 @@ import type { BuildJob } from "./builder";
 import type { Remote } from "./git";
 import type { ReviewJob } from "./reviewer";
 import type { SliceJob } from "./sandbox";
-import { OPENING_LEASE_MS, claimConflicts, gateStallCheck, claimsOf, conflictMessage as claimConflictMessage, agentName, changeId, holdsClaim, inLane, leaseExpired, leaseUntil, nextLeaseCheck, normalizeClaim } from "./open-mode";
-import { nextStep, reviewFeedback, tally, validatePolicy } from "./quorum";
+import { OPENING_LEASE_MS, awaitedExternalRoles, claimConflicts, externalReviewCheck, gateStallCheck, claimsOf, conflictMessage as claimConflictMessage, agentName, changeId, holdsClaim, inLane, leaseExpired, leaseUntil, nextLeaseCheck, normalizeClaim } from "./open-mode";
+import { effectivePolicy, nextStep, reviewFeedback, tally, validatePolicy } from "./quorum";
 import { activeOf, hasRoom, itemKey, stillWanted, validateLimits, withScheduling, type AgentKind } from "./schedule";
 import { accessIdentityLabel, type AccessIdentity, type CoordinatorHumanActions } from "./access-contract";
 import { identityLabel } from "./free/stamp";
@@ -39,6 +39,15 @@ import {
 
 const conflictMessage = (files: string[]) =>
 	`Review approved your slice, but it conflicts with work already integrated into the task base, in ${files.join(", ")}. Call fetch_base, merge what it fetched, resolve the conflicts inside your lane, run your tests, then commit_and_push and finish.`;
+
+/** What a change's review covers: the paths it claimed and the files it touched. */
+const changePaths = (slice: Slice) => [...new Set([...(slice.owns ?? []), ...(slice.touched ?? [])])];
+
+/** The review policy for a change: the one set when its commit went to review, or what it would be now. */
+export const policyFor = (task: Task, slice: Slice) => slice.review ?? effectivePolicy(task.review, changePaths(slice));
+
+/** The roles Blueprint's own reviewer agents review: all but the external ones. */
+export const hostedRoles = (policy: ReviewPolicy) => policy.reviewers.filter((r) => !(policy.external ?? []).includes(r));
 
 /** Times a slice can go back to its builder before it waits for a human. */
 const MAX_REVISIONS = 3;
@@ -643,7 +652,7 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 	 * paths. Returns write credentials for the agent; with `hosted`, a builder
 	 * agent is started on it as well.
 	 */
-	async openChange(input: { id?: string; title: string; intent: string; owns: string[]; hosted?: boolean; agent?: string }, actor?: AccessIdentity) {
+	async openChange(input: { id?: string; title: string; intent: string; owns: string[]; hosted?: boolean; agent?: string; authorAgent?: string }, actor?: AccessIdentity) {
 		// Asked again for a change that already opened (its answer was lost, say,
 		// with the leader that gave it): the same change, with fresh credentials.
 		if (input.id !== undefined) {
@@ -660,7 +669,9 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 			if (task.mode !== "open") fail(409, "changes can only be opened on an open-mode task");
 			if (typeof input?.title !== "string" || !input.title.trim()) fail(400, "a change needs a title");
 			if (typeof input.intent !== "string" || !input.intent.trim()) fail(400, "a change needs an intent: what it sets out to do");
-			const agent = agentName(input.agent);
+			// A registered agent (its key checked by the caller) is the change's author; otherwise whoever Access says called.
+			const agent = agentName(input.authorAgent ?? input.agent);
+			if (!input.authorAgent && agent && task.agents?.[agent]) fail(403, `${agent} is a registered agent: open the change with its key`);
 			const owns = normalizeClaim(input.owns);
 			// Asked again while its reservation stands (interrupted before it confirmed): carry on from there.
 			const reserved = input.id !== undefined ? task.slices.find((s) => s.id === input.id) : undefined;
@@ -696,6 +707,7 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 				// A person by a hash of their email: change records reach agents, never the address.
 				...(actor ? { openedBy: identityLabel(actor) } : input.hosted ? { openedBy: "blueprint-builder" } : {}),
 				...(agent ? { agent } : {}),
+				...(input.authorAgent ? { authorBy: `agent:${input.authorAgent}` } : actor ? { authorBy: identityLabel(actor) } : input.hosted ? { authorBy: "blueprint-builder" } : {}),
 			};
 			task.slices.push(slice);
 			await this.scheduleLeaseCheck(task);
@@ -763,6 +775,22 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 		});
 	}
 
+	/**
+	 * Register an outside agent on the task under `name`, bound to a key the
+	 * caller keeps (only its hash is stored). Registering a name again rotates its
+	 * key, and needs the current one.
+	 */
+	registerAgent(name: string, keyHash: string, currentKeyHash?: string, actor?: AccessIdentity) {
+		return this.mutate(async (task) => {
+			const agent = agentName(name) ?? fail(400, "an agent needs a name");
+			const existing = task.agents?.[agent];
+			if (existing && existing.keyHash !== currentKeyHash) fail(403, `${agent} is already registered: send its current key to rotate it`);
+			task.agents = { ...task.agents, [agent]: { keyHash, at: new Date().toISOString(), ...(actor ? { by: identityLabel(actor) } : {}) } };
+			this.note(task, task.anchor, existing ? `Agent ${agent} rotated its key` : `Agent ${agent} registered`);
+			return { agent, rotated: !!existing };
+		});
+	}
+
 	/** Add paths to a change's claim, if no other active change holds them. */
 	extendClaim(sliceId: string, paths: string[]) {
 		return this.mutate(async (task) => {
@@ -820,7 +848,7 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 		this.note(task, slice.head, `Change ${slice.id} abandoned, freeing ${slice.owns.join(", ")}: ${reason}`);
 		const repo = slice.repo!;
 		const reviewHead = slice.reviewHead;
-		const roles = [...task.review.reviewers];
+		const roles = hostedRoles(policyFor(task, slice));
 		// A change still being opened has no agents yet.
 		if (!opened) return async () => {};
 		return () =>
@@ -855,6 +883,13 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 			const now = Date.now();
 			const stops: (() => Promise<unknown>)[] = [];
 			await this.restartStalledGates(task, now);
+			// External reviews that never came: a person decides (review it, waive it, or wait more).
+			for (const slice of task.slices) {
+				if ((externalReviewCheck(slice) ?? Infinity) > now) continue;
+				const roles = awaitedExternalRoles(slice);
+				slice.externalWaitFlagged = slice.reviewHead;
+				this.flagHuman(task, slice, slice.reviewHead, `No outside reviewer has reviewed ${short(slice.reviewHead!)} as ${roles.join(", ")} in ${Math.round((now - Date.parse(slice.reviewRequestedAt!)) / 60_000)} minutes. Review it yourself, approve it without full review, or have a reviewer agent take it from review_queue.`, `waiting on external review (${roles.join(", ")})`);
+			}
 			for (const slice of task.slices) {
 				if (!holdsClaim(slice) || !slice.leaseUntil || Date.parse(slice.leaseUntil) > now) continue;
 				// A reservation this old lost its opener (the object restarted while forking).
@@ -1080,6 +1115,11 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 		const head = await headOf(this.env.ARTIFACTS, slice.repo!, projectBranch(task));
 		if (!head || head === (slice.startCommit ?? task.baseCommit)) fail(409, `slice ${slice.id} has no work to review`);
 		slice.reviewHead = head;
+		// The rules for this commit: the task's, made stricter for the paths it claims and touches.
+		const { escalatedBy, ...policy } = effectivePolicy(task.review, changePaths(slice));
+		slice.review = policy;
+		slice.reviewRequestedAt = new Date().toISOString();
+		if (escalatedBy.length) this.note(task, head, `${slice.id} touches ${escalatedBy.join(", ")}, so its review needs ${policy.reviewers.join(", ")}${policy.vetoes.length ? ` (${policy.vetoes.join(", ")} can veto)` : ""}`);
 		return head;
 	}
 
@@ -1111,51 +1151,88 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 			this.note(task, head, `${slice.id} ready for review at ${short(head)}${buildSummary ? `: ${buildSummary}` : ""}`);
 			await this.save(task);
 
-			const reviewers = task.review.reviewers;
+			const policy = policyFor(task, slice);
+			// Blueprint reviews its own roles; outside agents review the external ones (review_queue, submit_review).
+			const reviewers = hostedRoles(policy);
+			const external = policy.external ?? [];
+			if (external.length) this.note(task, head, `${slice.id} waits for external review: ${external.join(", ")}`);
 			const failed: string[] = [];
 			for (const role of reviewers) await this.schedule(task, { kind: "reviewer", slice: slice.id, role, head }, failed);
+			// Nothing to wait for (no approvals required, no veto role): straight to the checks.
+			if (tally(policy, slice).status === "approved") await this.integrateOrGate(task, slice);
+			// Look again if the external reviewers don't come.
+			if (external.length) await this.scheduleLeaseCheck(task);
 			await this.save(task);
-			return { head, reviewers, failed, escalated: false };
+			return { head, reviewers, external, failed, escalated: false };
 		});
 	}
 
-	/** Quorum, step 2. A reviewer agent submits its verdict on the pinned head. */
-	submitReview(sliceId: string, input: Omit<Review, "at">) {
+	/** Quorum, step 2. Blueprint's own reviewer agent submits its verdict on the pinned head. */
+	submitReview(sliceId: string, input: Omit<Review, "at" | "by">) {
 		return this.exclusive(async () => {
 			const task = await this.load();
 			const slice = this.slice(task, sliceId);
-			if (!task.review.reviewers.includes(input.reviewer)) fail(400, `unknown reviewer ${input.reviewer}`);
-			if (input.verdict !== "approve" && input.verdict !== "reject") fail(400, "verdict must be approve or reject");
-			if (!slice.reviewHead || input.head !== slice.reviewHead)
-				fail(409, `review is for ${input.head}, but the head under review is ${slice.reviewHead ?? "none"}`);
-
-			slice.reviews.push({ ...input, at: new Date().toISOString() });
-			const quorum = tally(task.review, slice);
-			this.note(task, input.head, `${slice.id}: ${input.reviewer} reviewer ${input.verdict === "approve" ? "approved" : "rejected"}: ${input.summary}`);
-			if (quorum.status !== "pending") this.note(task, input.head, `${slice.id}: quorum ${quorum.status}`);
-			if (slice.status === "integrated" && input.verdict === "reject") {
-				const finding = `Late rejection from ${input.reviewer} after integration: ${input.summary}${input.evidence ? `\nEvidence: ${input.evidence}` : ""}`;
-				this.flagHuman(task, slice, input.head, [slice.attention, finding].filter(Boolean).join("\n"), finding);
-			}
-			await this.save(task);
-			// Keep valid late votes for the pinned head, but integration is final:
-			// never send an already integrated slice back or integrate it again.
-			if (slice.status === "integrated") return { task, quorum, next: "wait" as const };
-
-			// Auto-integrate an approved slice; send a rejected one back to its builder.
-			const step = nextStep(task.review, slice);
-			try {
-				if (step === "integrate") {
-					await this.integrateOrGate(task, slice);
-				} else if (step === "send-back") {
-					await this.sendBack(task, slice, reviewFeedback(task.review, slice));
-				}
-			} catch (err) {
-				slice.attention = `${step} failed: ${statusOf(err).message}`;
-			}
-			await this.save(task);
-			return { task, quorum, next: step };
+			const policy = policyFor(task, slice);
+			if (!hostedRoles(policy).includes(input.reviewer)) fail(400, `${input.reviewer} is not a role Blueprint reviews here`);
+			return this.recordReview(task, slice, { reviewer: input.reviewer, head: input.head, verdict: input.verdict, summary: input.summary, ...(input.evidence ? { evidence: input.evidence } : {}) });
 		});
+	}
+
+	/**
+	 * An outside agent's review, for one of the policy's external roles. `by` is
+	 * who it is (a registered agent, or an Access identity): never the change's
+	 * author, and one role per reviewer on a commit, so approvals come from
+	 * different reviewers.
+	 */
+	submitExternalReview(sliceId: string, input: Omit<Review, "at" | "by">, by: string) {
+		return this.exclusive(async () => {
+			const task = await this.load();
+			const slice = this.slice(task, sliceId);
+			const policy = policyFor(task, slice);
+			if (!(policy.external ?? []).includes(input.reviewer))
+				fail(400, `${input.reviewer} is not a role outside agents review here${policy.external?.length ? ` (they review ${policy.external.join(", ")})` : ""}`);
+			if (by === slice.authorBy)
+				fail(403, `you opened ${slice.id}, so you can't review it${by.startsWith("agent:") ? "" : ": if you're a different agent sharing the author's access token, register your own agent (register_agent) and review with its key"}`);
+			const other = slice.reviews.find((r) => r.head === input.head && r.by === by && r.reviewer !== input.reviewer);
+			if (other) fail(409, `you already reviewed ${short(input.head)} as ${other.reviewer}: each reviewer counts for one role`);
+			return this.recordReview(task, slice, { reviewer: input.reviewer, head: input.head, verdict: input.verdict, summary: input.summary, ...(input.evidence ? { evidence: input.evidence } : {}), by });
+		});
+	}
+
+	/** Record a verdict on the pinned head, then merge, send back or wait, as the policy says. Caller holds the lock. */
+	private async recordReview(task: Task, slice: Slice, input: Omit<Review, "at">) {
+		const policy = policyFor(task, slice);
+		if (input.verdict !== "approve" && input.verdict !== "reject") fail(400, "verdict must be approve or reject");
+		if (typeof input.summary !== "string" || !input.summary.trim()) fail(400, "a review needs a summary");
+		if (!slice.reviewHead || input.head !== slice.reviewHead)
+			fail(409, `review is for ${input.head}, but the head under review is ${slice.reviewHead ?? "none"}`);
+
+		slice.reviews.push({ ...input, at: new Date().toISOString() });
+		const quorum = tally(policy, slice);
+		this.note(task, input.head, `${slice.id}: ${input.reviewer} reviewer ${input.verdict === "approve" ? "approved" : "rejected"}: ${input.summary}`);
+		if (quorum.status !== "pending") this.note(task, input.head, `${slice.id}: quorum ${quorum.status}`);
+		if (slice.status === "integrated" && input.verdict === "reject") {
+			const finding = `Late rejection from ${input.reviewer} after integration: ${input.summary}${input.evidence ? `\nEvidence: ${input.evidence}` : ""}`;
+			this.flagHuman(task, slice, input.head, [slice.attention, finding].filter(Boolean).join("\n"), finding);
+		}
+		await this.save(task);
+		// Keep valid late votes for the pinned head, but integration is final:
+		// never send an already integrated slice back or integrate it again.
+		if (slice.status === "integrated") return { task, quorum, next: "wait" as const };
+
+		// Auto-integrate an approved slice; send a rejected one back to its builder.
+		const step = nextStep(policy, slice);
+		try {
+			if (step === "integrate") {
+				await this.integrateOrGate(task, slice);
+			} else if (step === "send-back") {
+				await this.sendBack(task, slice, reviewFeedback(policy, slice));
+			}
+		} catch (err) {
+			slice.attention = `${step} failed: ${statusOf(err).message}`;
+		}
+		await this.save(task);
+		return { task, quorum, next: step };
 	}
 
 	/**
@@ -1313,7 +1390,7 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 	retryGate(sliceId: string, actor: AccessIdentity) {
 		return this.mutate(async (task) => {
 			const slice = this.buildingSlice(task, sliceId);
-			const quorum = tally(task.review, slice);
+			const quorum = tally(policyFor(task, slice), slice);
 			const waived = slice.waivers?.some((w) => w.head === slice.reviewHead);
 			if (quorum.status !== "approved" && !waived) fail(409, `quorum is ${quorum.status}`);
 			if (!task.verify.length) fail(409, "the task has no verify commands");
@@ -1505,7 +1582,7 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 		slice.revisions = (slice.revisions ?? 0) + 1;
 		this.note(task, slice.reviewHead, `${slice.id} sent back to its builder (revision ${slice.revisions} of ${MAX_REVISIONS}):\n${clipText(message, 1_500)}`);
 		task.queue = task.queue.filter((item) => !(item.kind === "reviewer" && item.slice === slice.id));
-		await Promise.allSettled(this.cancelReviewers(slice.repo!, task.review.reviewers, head, "the slice was sent back to its builder"));
+		await Promise.allSettled(this.cancelReviewers(slice.repo!, hostedRoles(policyFor(task, slice)), head, "the slice was sent back to its builder"));
 		// An external agent reads the findings from its inbox; there is no hosted builder to resume.
 		if (slice.external) {
 			this.toInbox(slice, message);

@@ -1,3 +1,5 @@
+import { DEFAULT_POLICY, hostedFreeRoles } from "./mcp";
+import { effectiveFreePolicy } from "./votes";
 import { ensureRepo, forkAndWait, headOf, remoteFor, reviewerName } from "../artifacts";
 import { GitCasLog } from "../election-git";
 import { fail } from "../errors";
@@ -99,7 +101,7 @@ async function changeBrief(env: Env, repo: string, change: string) {
 		branch: projectBranch(registry),
 		/** Where the change's branch lives: its own fork. */
 		source: (scope: "read" | "write") => changeRemote(env, repo, change, scope, 3 * 3600),
-		policy: registry?.policy ?? { required: 2, vetoes: ["security"] },
+		policy: registry?.policy ?? DEFAULT_POLICY,
 		job: {
 			taskId: `free:${repo}`,
 			branch: projectBranch(registry),
@@ -123,8 +125,8 @@ export async function startFreeReviewers(env: Env, input: { repo: string; change
 	const { repo, change } = input;
 	const ref = `changes/${change}`;
 	const { read, own, policy, job, source, branch } = await changeBrief(env, repo, change);
-	// By default the tests role and every role that can veto.
-	const roles = input.roles?.length ? input.roles : [...new Set(["tests", ...policy.vetoes])];
+	// By default a general review, and every role that can veto a change to its claim's paths.
+	const roles = input.roles?.length ? input.roles : hostedFreeRoles(effectiveFreePolicy(policy, own?.paths ?? []).vetoes);
 	const from = await source("read");
 	const ws = await Workspace.clone(read, branch);
 	const head = await ws.fetch("change", from, ref);

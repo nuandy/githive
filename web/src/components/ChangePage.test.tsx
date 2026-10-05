@@ -29,6 +29,23 @@ function render(overrides: Partial<ChangePageProps> = {}) {
 }
 
 describe("the change page", () => {
+	it("shows a role outside agents review, and the agent that reviewed it", () => {
+		const policy = { reviewers: ["review", "security"], required: 2, vetoes: ["security"], external: ["review"] };
+		const waiting = makeChange({ head: "h1", reviewHead: "h1", review: policy });
+		const before = render({ change: waiting, task: makeTask({ slices: [waiting] }) });
+		expect(before).toContain("outside agent");
+		expect(before).toContain("waiting for a reviewer");
+		const reviewed = makeChange({ head: "h1", reviewHead: "h1", review: policy, reviews: [{ ...approve("review", "h1"), by: "agent:reviewer-1" }] });
+		const after = render({ change: reviewed, task: makeTask({ slices: [reviewed] }) });
+		expect(after).toContain("by reviewer-1");
+		expect(after).toContain("<strong>reviewer-1</strong> (review reviewer) approved these changes");
+	});
+
+	it("says a change needs no review when its policy requires none", () => {
+		const change = makeChange({ head: "h1", reviewHead: "h1", review: { reviewers: [], required: 0, vetoes: [] } });
+		expect(render({ change, task: makeTask({ slices: [change] }) })).toContain("No review required: it merges once the checks pass.");
+	});
+
 	it("names the project's own branch, whatever it is", () => {
 		const change = makeChange({ status: "integrated", head: "h1", endedAt: ago(1) });
 		const html = render({ change, task: makeTask({ branch: "master", slices: [change] }) });

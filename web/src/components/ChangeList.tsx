@@ -1,6 +1,6 @@
 import type { Task } from "../api";
 import { agentLabel } from "../lib/agent";
-import { checksSummary, deriveChangeStatus, reviewSummary } from "../lib/changeStatus";
+import { checksSummary, deriveChangeStatus, reviewSummary, changePolicy } from "../lib/changeStatus";
 import { conflictsByChange, describeConflict } from "../lib/conflicts";
 import { changesOf, changeState, timeOf, type Change, type ChangeState } from "../lib/model";
 import { shortAge, timeAgo } from "../lib/relativeTime";
@@ -79,8 +79,8 @@ export function ChangeList({ task, repo, base, state }: ChangeListProps) {
 			) : (
 				<ul className="change-list__rows">
 					{shown.map((change) => {
-						const status = deriveChangeStatus(change, task.review, task.branch);
-						const review = reviewSummary(change, task.review);
+						const status = deriveChangeStatus(change, changePolicy(change, task), task.branch);
+						const review = reviewSummary(change, changePolicy(change, task));
 						const checks = checksSummary(change, task.verify, task.branch);
 						const ended = state !== "open";
 						const age = ended ? change.endedAt : change.openedAt;

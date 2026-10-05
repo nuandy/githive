@@ -12,7 +12,8 @@ import { readMainMerges, readRecordHistory, readShardHistories } from "./git-rec
 import { type CheckRunner, mergeChange } from "./merge";
 import { revertViolation } from "./revert";
 import type { Stamper } from "./stamp";
-import { approval, countedVotes, vote, type ReviewPolicy, type VoteRecord, type Votes } from "./votes";
+import { approval, countedVotes, effectiveFreePolicy, vote, type ReviewPolicy, type VoteRecord, type Votes } from "./votes";
+import { SENSITIVE_PATHS } from "../types";
 
 // The coordinator-free MCP tools (see docs/coordinator-free.md). Stateless: each
 // tool reads or writes the repo's records in Git and reports what Git said.
@@ -59,7 +60,8 @@ export interface HostedStatus {
 	reviewers: { role: string; status: string; verdict?: string }[];
 }
 
-const DEFAULT_POLICY: ReviewPolicy = { required: 2, vetoes: ["security"] };
+/** One approval by default; a change to dependency, CI or deploy files also needs security's, who can veto it. */
+export const DEFAULT_POLICY: ReviewPolicy = { required: 1, vetoes: [], escalate: [{ paths: SENSITIVE_PATHS, required: 2, vetoes: ["security"] }] };
 const HOSTED_PREFIX = "blueprint-";
 const DEFAULT_SHARD_DEPTH = 2;
 /** Records repos per sharded repo, where they're available: Artifacts takes one push at a time per repo. */
@@ -83,7 +85,7 @@ free_audit replays the records and lists every broken convention, with the commi
 
 const str = { type: "string" } as const;
 const TOOL_LIST = [
-	{ name: "free_start", description: "Start coordinator-free mode on a project repo (harmless if started): the review policy, the checks run before each merge (each change lives in its own fork, and only the toolkit writes the project), shard_depth: claims are kept per path this many segments deep, so agents in different parts of the tree never contend (default 2; 0 keeps them in one record), and records_repos: how many repos the claim shards are spread over, since a repo takes one push at a time (default 8). Returns them.", inputSchema: { type: "object", properties: { repo: str, required: { type: "number" }, vetoes: { type: "array", items: str }, verify: { type: "array", items: str }, shard_depth: { type: "number" }, records_repos: { type: "number" } }, required: ["repo"] } },
+	{ name: "free_start", description: "Start coordinator-free mode on a project repo (harmless if started): the review policy, the checks run before each merge (each change lives in its own fork, and only the toolkit writes the project), shard_depth: claims are kept per path this many segments deep, so agents in different parts of the tree never contend (default 2; 0 keeps them in one record), and records_repos: how many repos the claim shards are spread over, since a repo takes one push at a time (default 8). Returns them.", inputSchema: { type: "object", properties: { repo: str, required: { type: "number" }, vetoes: { type: "array", items: str }, escalate: { type: "array", items: { type: "object", properties: { paths: { type: "array", items: str }, required: { type: "number" }, vetoes: { type: "array", items: str } }, required: ["paths"] } }, verify: { type: "array", items: str }, shard_depth: { type: "number" }, records_repos: { type: "number" } }, required: ["repo"] } },
 	{ name: "free_credentials", description: "Git access. With your change: a write token for its own fork, where its branch changes/<change> lives. Without: read access to the project repo.", inputSchema: { type: "object", properties: { repo: str, change: str }, required: ["repo"] } },
 	{ name: "free_claims", description: "The claims in force: who holds which paths, and why.", inputSchema: { type: "object", properties: { repo: str }, required: ["repo"] } },
 	{ name: "free_claim", description: "Claim paths for your change (again to extend it, or to keep it active). Refused, naming the holder, if another claim overlaps; a claim in the way idle for 30 minutes is released as stale instead.", inputSchema: { type: "object", properties: { repo: str, change: str, agent: str, paths: { type: "array", items: str }, intent: str }, required: ["repo", "change", "agent", "paths", "intent"] } },
@@ -91,7 +93,7 @@ const TOOL_LIST = [
 	{ name: "free_vote", description: "Record your review verdict on the exact commit you reviewed.", inputSchema: { type: "object", properties: { repo: str, commit: str, reviewer: str, role: str, verdict: { type: "string", enum: ["approve", "reject"] }, evidence: str }, required: ["repo", "commit", "reviewer", "role", "verdict", "evidence"] } },
 	{ name: "free_merge", description: "Merge changes/<change> into the project's branch if the conventions hold, recording what was checked, then release the claim.", inputSchema: { type: "object", properties: { repo: str, change: str, agent: str }, required: ["repo", "change", "agent"] } },
 	{ name: "free_build", description: "Have Blueprint's hosted builder make a change: it claims the paths, builds on changes/<change>, asks the hosted reviewers when done, and the change merges once approved and checked.", inputSchema: { type: "object", properties: { repo: str, intent: str, paths: { type: "array", items: str } }, required: ["repo", "intent", "paths"] } },
-	{ name: "free_request_review", description: "Ask Blueprint's hosted reviewer agents to review your change's current commit (by default the tests role and every veto role); each votes with free_vote.", inputSchema: { type: "object", properties: { repo: str, change: str, roles: { type: "array", items: str }, summary: str }, required: ["repo", "change"] } },
+	{ name: "free_request_review", description: "Ask Blueprint's hosted reviewer agents to review your change's current commit (by default a general review, and every role that can veto it); each votes with free_vote.", inputSchema: { type: "object", properties: { repo: str, change: str, roles: { type: "array", items: str }, summary: str }, required: ["repo", "change"] } },
 	{ name: "free_audit", description: "Replay the records and list every broken convention, with the commit and the agent (and whether a revert has resolved it).", inputSchema: { type: "object", properties: { repo: str }, required: ["repo"] } },
 	{ name: "free_revert", description: "Revert a commit the audit reports: its files go back to how they were before it, in a commit naming what it reverts.", inputSchema: { type: "object", properties: { repo: str, commit: str, agent: str }, required: ["repo", "commit", "agent"] } },
 	{ name: "free_status", description: "Where a change stands: its claim (or how it ended), its branch head, the votes on that head with their evidence, the approvals still needed, and what Blueprint's hosted agents on it are doing.", inputSchema: { type: "object", properties: { repo: str, change: str }, required: ["repo", "change"] } },
@@ -172,10 +174,13 @@ async function changeStatus(ctx: FreeContext, repo: string, registry: Registry |
 		.then(() => changeSourceFor(ctx, repo)(change, "read"))
 		.then((source) => branchHead(source, `changes/${change}`))
 		.catch(() => null);
+	// The policy for the paths it claims: stricter for dependency, CI and deploy files, say.
+	const paths = author?.paths ?? [];
 	const policy = registry?.policy ?? DEFAULT_POLICY;
-	const outcome = head ? approval({ votes: counted }, head, policy, author) : { approved: false, approvals: 0, vetoedBy: [], awaiting: policy.vetoes };
-	const hosted = ctx.agentStatus ? await ctx.agentStatus(repo, change, head, [...new Set(["tests", ...policy.vetoes])]).catch(() => undefined) : undefined;
-	return { head, votes: head ? cast.filter((v) => v.commit === head) : [], approval: { ...outcome, required: policy.required }, ...(hosted ? { hosted } : {}) };
+	const { required, vetoes } = effectiveFreePolicy(policy, paths);
+	const outcome = head ? approval({ votes: counted }, head, policy, author, paths) : { approved: false, approvals: 0, vetoedBy: [], awaiting: vetoes };
+	const hosted = ctx.agentStatus ? await ctx.agentStatus(repo, change, head, hostedFreeRoles(vetoes)).catch(() => undefined) : undefined;
+	return { head, votes: head ? cast.filter((v) => v.commit === head) : [], approval: { ...outcome, required }, ...(hosted ? { hosted } : {}) };
 }
 
 /** Replay a repo's records from Git: how many commits on the project's branch since the mode started, and what broke which convention. */
@@ -193,6 +198,9 @@ async function runAudit(ctx: FreeContext, repo: string) {
 }
 
 /** The audit of a coordinator-free repo, for the dashboard: it replays every record, so it's read apart from the snapshot. */
+/** The roles Blueprint's own reviewers take on a coordinator-free change: one general review, and every role that can veto. */
+export const hostedFreeRoles = (vetoes: string[]) => [...new Set(["review", ...vetoes])];
+
 export async function freeAudit(ctx: FreeContext, repo: string) {
 	const { merges, violations } = await runAudit(ctx, repo);
 	const open = violations.filter((v) => !v.resolvedBy).length;
@@ -287,9 +295,13 @@ async function runFreeTool(name: string, args: Args, ctx: FreeContext): Promise<
 	const changeSource = changeSourceFor(ctx, repo);
 	switch (name) {
 		case "free_start": {
+			const required = typeof args.required === "number" ? args.required : DEFAULT_POLICY.required;
+			if (!Number.isInteger(required) || required < 0) throw new Error("[400] required is a whole number of approvals, 0 for none");
 			const policy: ReviewPolicy = {
-				required: typeof args.required === "number" ? args.required : DEFAULT_POLICY.required,
+				required,
 				vetoes: Array.isArray(args.vetoes) ? (args.vetoes as string[]) : DEFAULT_POLICY.vetoes,
+				// The default escalation unless the caller sets its own (an empty list for none).
+				escalate: Array.isArray(args.escalate) ? (args.escalate as ReviewPolicy["escalate"]) : DEFAULT_POLICY.escalate,
 			};
 			const verify = Array.isArray(args.verify) ? (args.verify as string[]).filter((c) => typeof c === "string" && c.trim()) : [];
 			// Claims are sharded by path, two segments deep unless asked otherwise (0: one registry).
@@ -374,7 +386,8 @@ async function runFreeTool(name: string, args: Args, ctx: FreeContext): Promise<
 			if (!(await claimOf(change))) throw new Error(`[409] ${change} holds no claim: claim the change's paths first`);
 			if (!ctx.requestReview) throw new Error("[501] hosted reviewers aren't available here");
 			const policy = registry?.policy ?? DEFAULT_POLICY;
-			const roles = Array.isArray(args.roles) && args.roles.length ? (args.roles as string[]) : [...new Set(["tests", ...policy.vetoes])];
+			// By default a general review, and every role that can veto a change to these paths.
+			const roles = Array.isArray(args.roles) && args.roles.length ? (args.roles as string[]) : hostedFreeRoles(effectiveFreePolicy(policy, (await claimOf(change))?.paths ?? []).vetoes);
 			return ctx.requestReview({ repo, change, roles, ...(typeof args.summary === "string" ? { summary: args.summary } : {}) });
 		}
 		case "free_audit": {

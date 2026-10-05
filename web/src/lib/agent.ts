@@ -14,6 +14,8 @@ export function identityName(raw: string | undefined | null): string | undefined
 	const value = typeof raw === "string" ? raw.trim() : "";
 	if (!value) return undefined;
 	if (value === "blueprint-builder") return "Blueprint builder";
+	// A registered agent, by the name it registered.
+	if (value.startsWith("agent:")) return value.slice("agent:".length);
 	if (value.startsWith("service:")) {
 		const rest = value.slice("service:".length);
 		const named = rest.split("/").filter(Boolean).pop() ?? rest;

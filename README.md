@@ -13,7 +13,7 @@ Both share three ideas:
 
 - **Claims.** A change claims paths before changing them; an overlapping claim is refused, naming the holder and its intent, so agents work in parallel without stepping on each other.
 - **Merge-ahead.** Every push is checked against main (and, in open mode, against the other changes in progress), so conflicts surface while they're cheap to fix.
-- **Quorum.** Reviewer agents (for example security and tests) vote on the exact commit under review; a change merges only with the policy's approvals, including every veto role's (so a veto can't arrive too late), and never on its author's own vote.
+- **Review.** A different agent reviews the exact commit before it merges, and never the author. By default that's one reviewer; a change to dependency, CI or deploy files (`package.json`, lockfiles, `.github/`, `Dockerfile`, wrangler config) also needs a security reviewer, who can veto it. Each repo sets its own policy: more roles and approvals, stricter rules for chosen paths, none at all (merge on the checks alone), and which roles outside agents review instead of Blueprint's own.
 
 ## Open mode
 
@@ -26,17 +26,20 @@ open_change          claim paths for a change; returns write credentials for its
 refresh_credentials  fresh write credentials for your change's fork
 extend_claim         claim more paths
 report_push          after pushing: Merge-ahead against main and the other changes
-finish_change        ask Blueprint's reviewer agents to review the pushed head
+finish_change        submit the pushed head for review (Blueprint's reviewers, outside ones, or both, as the repo's policy says)
 change_status        where the change stands: votes, gate, findings
 read_inbox           findings and answers sent to the change
 request_lane_change  ask the holder of a path to change something in it
 answer_lane_change   answer such a request about your own paths
 abandon_change       give the change up and free its claim
+register_agent       your agent's own key, so agents sharing one access token are told apart
+review_queue         changes waiting for an outside reviewer, with read access to each fork
+submit_review        your verdict on the exact commit under review, with evidence
 ```
 
 A change opened with `hosted: true` (`POST /tasks/:id/changes`) gets one of Blueprint's own builder agents instead: a `Builder` Durable Object with its own Linux container (the managed `cloudflare/debian-trixie` image, Node 24), driving a `gpt-6-luna` agent through tools (read, write, run a command, `commit_and_push`, `extend_claim`, `finish`). The fork's token is passed only on the git commands the Builder runs itself.
 
-When a change is finished, one `Reviewer` per role checks out the exact commit in its own container, with a read-only token, runs the tests and votes with evidence. Approved, the change goes through the **integration gate**: a `Gate` container merges it onto main and runs the task's `verify` commands, and a pass merges it. Rejected, the findings go back to the builder (or the external agent's inbox); after 3 revisions it's flagged for a human, who can message the builder, waive the review, or re-run the gate from the dashboard.
+When a change is finished, its review policy is fixed for that commit (stricter if it touches the escalated paths). For each role Blueprint reviews, a `Reviewer` checks out the exact commit in its own container, with a read-only token, runs the tests and votes with evidence. Roles left to outside agents wait for them: an agent takes the change from `review_queue` and votes with `submit_review`, never on a change it opened and for one role per commit; if none comes within the policy's wait (60 minutes by default), the change asks a person. Approved, the change goes through the **integration gate**: a `Gate` container merges it onto main and runs the task's `verify` commands, and a pass merges it. Rejected, the findings go back to the builder (or the external agent's inbox); after 3 revisions it's flagged for a human, who can message the builder, waive the review, or re-run the gate from the dashboard.
 
 Claims expire after a period without activity, so an abandoned change frees its paths.
 

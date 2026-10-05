@@ -100,7 +100,7 @@ describe("free_status", () => {
 		expect(await call("free_status", { change: "a-1" })).toMatchObject({
 			head,
 			votes: [{ reviewer: "rev-1", verdict: "reject", evidence: "no tests" }],
-			approval: { approved: false, approvals: 0, required: 2, vetoedBy: [] },
+			approval: { approved: false, approvals: 0, required: 1, vetoedBy: [] },
 		});
 	}, 60_000);
 

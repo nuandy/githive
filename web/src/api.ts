@@ -126,6 +126,7 @@ function normalizeReviewPolicy(value: unknown): Task["review"] {
 		reviewers: asStringArray(policy?.reviewers),
 		required: typeof policy?.required === "number" ? policy.required : 0,
 		vetoes: asStringArray(policy?.vetoes),
+		external: asStringArray(policy?.external),
 	} as Task["review"];
 }
 
@@ -171,6 +172,7 @@ function normalizeSlice(value: unknown): Slice | null {
 		owns: asStringArray(slice.owns),
 		touched: asStringArray(slice.touched),
 		outOfLane: asStringArray(slice.outOfLane),
+		...(slice.review ? { review: normalizeReviewPolicy(slice.review) } : {}),
 		reviews,
 		...(gate ? {
 			gate: {

@@ -44,7 +44,7 @@ export function RepoSettings({ task }: { task: Task }) {
 					<dl className="repo-settings__list">
 						<dt>Required approvals</dt>
 						<dd>
-							{review.required} {review.required === 1 ? "approval" : "approvals"} required
+							{review.required ? `${review.required} ${review.required === 1 ? "approval" : "approvals"} required` : "None: changes merge once the checks pass"}
 						</dd>
 						<dt>Reviewers</dt>
 						<dd>{review.reviewers.length ? review.reviewers.map((role) => <span key={role} className="pill pill--outline">{role}</span>) : <span className="muted">None</span>}</dd>
@@ -63,6 +63,35 @@ export function RepoSettings({ task }: { task: Task }) {
 								<span className="muted">No reviewer can block on their own.</span>
 							)}
 						</dd>
+						<dt>Reviewed by outside agents</dt>
+						<dd>
+							{review.external?.length ? (
+								<>
+									{review.external.map((role) => (
+										<span key={role} className="pill pill--outline">
+											{role}
+										</span>
+									))}
+									<span className="muted"> Outside agents take these from review_queue; Blueprint reviews the rest. A change waits {review.externalWaitMinutes ?? 60} minutes for them, then asks you.</span>
+								</>
+							) : (
+								<span className="muted">None: Blueprint's own reviewers review every role.</span>
+							)}
+						</dd>
+						{review.escalate?.length ? (
+							<>
+								<dt>Stricter review</dt>
+								<dd>
+									{review.escalate.map((e, i) => (
+										<p key={i} className="repo-settings__escalation">
+											Changes touching {e.paths.map((p, j) => <span key={p}>{j ? ", " : ""}<code>{p}</code></span>)} also need {[...new Set([...(e.reviewers ?? []), ...(e.vetoes ?? [])])].join(", ") || "more review"}
+											{e.required ? `, ${e.required} approvals in all` : ""}
+											{e.vetoes?.length ? ` (${e.vetoes.join(", ")} can block)` : ""}.
+										</p>
+									))}
+								</dd>
+							</>
+						) : null}
 					</dl>
 				</div>
 			</section>

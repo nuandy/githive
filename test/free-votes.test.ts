@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { approval, vote, type VoteRecord, type Votes } from "../src/free/votes";
+import { approval, effectiveFreePolicy, vote, type VoteRecord, type Votes } from "../src/free/votes";
 import { MemoryLog } from "./helpers/memory-log";
 
 // Coordinator-free review: reviewers append verdicts on the exact commit they
@@ -80,5 +80,23 @@ describe("votes count per verified identity, never the author's", () => {
 	it("falls back to reviewer names when votes aren't signed", () => {
 		const votes = { votes: [cast("rev-1", undefined), cast("rev-2", undefined)] };
 		expect(approval(votes, head, policy)).toEqual({ approved: true, approvals: 2, vetoedBy: [], awaiting: [] });
+	});
+});
+
+describe("coordinator-free policies", () => {
+	const cast = (reviewer: string, role: string, verdict: "approve" | "reject" = "approve"): VoteRecord => ({ commit: head, reviewer, role, verdict, evidence: "ok", at: "" });
+	const policy = { required: 1, vetoes: [], escalate: [{ paths: ["package.json", ".github/"], required: 2, vetoes: ["security"] }] };
+
+	it("needs one approval for most changes, and security's too for dependency and CI files", () => {
+		const one = { votes: [cast("rev-1", "review")] };
+		expect(approval(one, head, policy, undefined, ["src/a.js"])).toMatchObject({ approved: true, approvals: 1 });
+		expect(approval(one, head, policy, undefined, ["src/a.js", "package.json"])).toMatchObject({ approved: false, awaiting: ["security"] });
+		expect(effectiveFreePolicy(policy, [".github/workflows/ci.yml"])).toEqual({ required: 2, vetoes: ["security"] });
+		const both = { votes: [cast("rev-1", "review"), cast("rev-2", "security")] };
+		expect(approval(both, head, policy, undefined, ["package.json"])).toMatchObject({ approved: true, approvals: 2 });
+	});
+
+	it("merges on the checks alone when no approval is required", () => {
+		expect(approval({ votes: [] }, head, { required: 0, vetoes: [] })).toEqual({ approved: true, approvals: 0, vetoedBy: [], awaiting: [] });
 	});
 });

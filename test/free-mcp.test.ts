@@ -63,7 +63,8 @@ describe("the coordinator-free MCP tools", () => {
 	});
 
 	it("starts the mode, claims, refuses an overlapping claim, and audits a clean repo", async () => {
-		expect(await call("free_start", { repo: "project" })).toMatchObject({ repo: "project", policy: { required: 2, vetoes: ["security"] } });
+		// By default one approval; security, who can veto, too for dependency, CI and deploy files.
+		expect(await call("free_start", { repo: "project" })).toMatchObject({ repo: "project", policy: { required: 1, vetoes: [], escalate: [{ required: 2, vetoes: ["security"], paths: expect.arrayContaining(["package.json", ".github/"]) }] } });
 		expect(await call("free_claim", { repo: "project", change: "a-1", agent: "agent-a", paths: ["src/a/"], intent: "a" })).toMatchObject({ ok: true });
 		expect(await call("free_claim", { repo: "project", change: "b-1", agent: "agent-b", paths: ["src/a/x.ts"], intent: "b" })).toMatchObject({
 			ok: false,
@@ -124,11 +125,11 @@ describe("the coordinator-free MCP tools", () => {
 		const snapshot = await freeSnapshot(ctx().free, "project");
 		expect(snapshot).toMatchObject({
 			repo: "project",
-			policy: { required: 2, vetoes: ["security"] },
+			policy: { required: 1, vetoes: [] },
 			verify: ["npm test"],
 			verified: false,
 			// Each claim with where its change stands, and what Blueprint's hosted agents on it are doing.
-			claims: [{ change: "a-1", agent: "agent-a", paths: ["src/a/"], head: null, approval: { approved: false, approvals: 0, required: 2 }, hosted: { builder: { status: "working" } } }],
+			claims: [{ change: "a-1", agent: "agent-a", paths: ["src/a/"], head: null, approval: { approved: false, approvals: 0, required: 1 }, hosted: { builder: { status: "working" } } }],
 			votes: [{ commit: "h1", reviewer: "rev-1", verdict: "approve" }],
 		});
 		// The audit replays every record, so it's read on its own.
@@ -150,12 +151,12 @@ describe("the coordinator-free MCP tools", () => {
 		expect(await freeOpenCount(ctx().free, "elsewhere")).toBeNull();
 	});
 
-	it("asks Blueprint's hosted reviewers to review a claimed change, by default the tests role and every veto role", async () => {
+	it("asks Blueprint's hosted reviewers to review a claimed change, by default a general review and every veto role", async () => {
 		reviewRequests = [];
 		await call("free_start", { repo: "project", required: 2, vetoes: ["security"] });
 		await call("free_claim", { repo: "project", change: "a-1", agent: "agent-a", paths: ["src/a/"], intent: "a" });
-		expect(await call("free_request_review", { repo: "project", change: "a-1", summary: "adds a" })).toEqual({ head: "h1", reviewers: ["tests", "security"] });
-		expect(reviewRequests).toEqual([{ repo: "project", change: "a-1", roles: ["tests", "security"], summary: "adds a" }]);
+		expect(await call("free_request_review", { repo: "project", change: "a-1", summary: "adds a" })).toEqual({ head: "h1", reviewers: ["review", "security"] });
+		expect(reviewRequests).toEqual([{ repo: "project", change: "a-1", roles: ["review", "security"], summary: "adds a" }]);
 		await call("free_request_review", { repo: "project", change: "a-1", roles: ["api"] });
 		expect(reviewRequests[1].roles).toEqual(["api"]);
 		expect(await call("free_request_review", { repo: "project", change: "nope" })).toEqual({ error: "nope holds no claim: claim the change's paths first" });

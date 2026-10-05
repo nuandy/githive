@@ -97,6 +97,14 @@ export interface Slice extends SliceSpec {
 		/** When the gate was last seen holding this run, while it's queued or running (see gateStallCheck). */
 		seenAt?: string;
 	};
+	/** The review policy for the commit under review: the task's, with the escalations its paths call for. Set when review starts. */
+	review?: ReviewPolicy;
+	/** When the commit under review was submitted for review. */
+	reviewRequestedAt?: string;
+	/** The commit whose wait for an external review was flagged for a person, so it's flagged once. */
+	externalWaitFlagged?: string;
+	/** Who opened the change, for telling it apart from its reviewers: a registered agent ("agent:<name>") or an Access identity's label. */
+	authorBy?: string;
 	/** Reviewers started again after failing without a vote, by "role:head". */
 	reviewerRetries?: Record<string, number>;
 	/** When the slice's builder parked to wait for its cross-lane requests, and which ones. */
@@ -110,24 +118,49 @@ export interface Slice extends SliceSpec {
 	parkTimeoutFlagged?: string;
 }
 
+/** Paths where a change can reach beyond its code: dependencies, CI, deployment. */
+export const SENSITIVE_PATHS = [".github/", "package.json", "package-lock.json", "yarn.lock", "pnpm-lock.yaml", "bun.lockb", ".npmrc", "Dockerfile", "wrangler.json", "wrangler.jsonc", "wrangler.toml"];
+
+/**
+ * One independent reviewer by default; a change to dependencies, CI or
+ * deployment also needs the security reviewer, who can veto it.
+ */
 export const DEFAULT_POLICY: ReviewPolicy = {
-	reviewers: ["security", "tests", "api"],
-	required: 2,
-	vetoes: ["security"],
+	reviewers: ["review"],
+	required: 1,
+	vetoes: [],
+	escalate: [{ paths: SENSITIVE_PATHS, reviewers: ["security"], required: 2, vetoes: ["security"] }],
 };
 
 /** Quorum: who reviews each slice before it may integrate into the base. */
 export interface ReviewPolicy {
-	/** Reviewer roles, e.g. ["security", "tests", "api"]. Each is one specialist agent. */
+	/** Reviewer roles, e.g. ["review"] or ["security", "tests"]. Each is one reviewer. */
 	reviewers: string[];
-	/** Approvals needed to integrate. */
+	/** Approvals needed to merge; 0 merges on the checks alone (unless a veto role must approve). */
 	required: number;
-	/** Roles whose rejection blocks integration regardless of the count. */
+	/** Roles whose rejection blocks merging regardless of the count; each must approve. */
 	vetoes: string[];
+	/** Roles outside agents review (review_queue, submit_review). Blueprint starts its own reviewer only for the other roles. */
+	external?: string[];
+	/** Stricter rules for a change touching any of these paths, on top of the rest. */
+	escalate?: Escalation[];
+	/** Minutes to wait for an external role's vote before the change waits on a person (default 60). */
+	externalWaitMinutes?: number;
+}
+
+/** A stricter review for changes that touch `paths`: more roles, more approvals, more vetoes. */
+export interface Escalation {
+	paths: string[];
+	reviewers?: string[];
+	required?: number;
+	vetoes?: string[];
 }
 
 export interface Review {
+	/** The role reviewed for. */
 	reviewer: string;
+	/** Who reviewed: an outside agent ("agent:<name>", or an Access identity's label), or Blueprint's own reviewer when absent. */
+	by?: string;
 	/** The commit reviewed. A review of an older head is stale and doesn't count. */
 	head: string;
 	verdict: "approve" | "reject";
@@ -183,6 +216,8 @@ export interface Task {
 	leaseMinutes?: number;
 	/** Builders' requests that another slice change something in its lane. */
 	laneChangeRequests?: LaneChangeRequest[];
+	/** Outside agents registered on the task (register_agent): each name bound to one secret key, of which only a hash is kept. */
+	agents?: Record<string, { keyHash: string; at: string; by?: string }>;
 }
 
 export interface Limits {
