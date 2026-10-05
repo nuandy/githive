@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { FREE_TOOLS } from "../src/free/mcp";
 import { TOOLS, handleMcpBody, handleRpc, type McpContext } from "../src/mcp";
 
 // The MCP front door's protocol handling and tool mapping, with the Coordinator faked.
@@ -54,6 +55,22 @@ describe("MCP front door", () => {
 		const res = (await handleRpc({ jsonrpc: "2.0", id: 2, method: "tools/list" }, context)) as { result: { tools: { name: string; inputSchema: object }[] } };
 		expect(res.result.tools.map((t) => t.name)).toEqual(TOOLS.map((t) => t.name));
 		expect(res.result.tools.every((t) => t.inputSchema)).toBe(true);
+	});
+
+	it("gives every tool, in both modes, a title and hints about what it does", () => {
+		type Annotated = { name: string; title: string; annotations: { title: string; readOnlyHint: boolean; destructiveHint: boolean; idempotentHint: boolean } };
+		const all = [...TOOLS, ...FREE_TOOLS] as unknown as Annotated[];
+		for (const tool of all) {
+			expect(tool.title, tool.name).toMatch(/^[A-Z]/);
+			expect(tool.annotations.title).toBe(tool.title);
+			expect(typeof tool.annotations.readOnlyHint, tool.name).toBe("boolean");
+			expect(typeof tool.annotations.destructiveHint, tool.name).toBe("boolean");
+			// Nothing that reads can destroy.
+			expect(tool.annotations.readOnlyHint && tool.annotations.destructiveHint, tool.name).toBe(false);
+		}
+		const names = (pick: (t: Annotated) => boolean) => all.filter(pick).map((t) => t.name).sort();
+		expect(names((t) => t.annotations.readOnlyHint)).toEqual(["change_status", "free_audit", "free_check", "free_claims", "free_status", "list_claims", "read_inbox"]);
+		expect(names((t) => t.annotations.destructiveHint)).toEqual(["abandon_change", "free_register", "free_release", "free_revert"]);
 	});
 
 	it("opens a change with the caller's identity and returns the fork and lane", async () => {

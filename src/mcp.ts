@@ -1,4 +1,5 @@
 import { projectBranch } from "./project-branch";
+import { annotate, destroys, reads, writes } from "./tool-annotations";
 import type { AccessIdentity } from "./access-contract";
 import type { Coordinator } from "./coordinator";
 import { fail, requiredPaths, requiredString as need, statusOf } from "./errors";
@@ -50,7 +51,7 @@ const str = (description: string) => ({ type: "string", description });
 const paths = { type: "array", items: { type: "string" }, description: "Repo-relative paths. A trailing slash claims a directory, e.g. src/billing/" };
 const ids = { task_id: str("The open task id from join_repo"), change_id: str("Your change id from open_change") };
 
-export const TOOLS = [
+const TOOL_DEFS = [
 	{
 		name: "join_repo",
 		description: "Join a repo in open mode. Returns the task id every other tool needs, the review policy and the gate's verify commands. Safe to call again.",
@@ -130,6 +131,21 @@ export const TOOLS = [
 		},
 	},
 ] as const;
+
+export const TOOLS = annotate(TOOL_DEFS, {
+	join_repo: writes("Join a repo", { idempotent: true }),
+	list_claims: reads("List claims"),
+	open_change: writes("Open a change"),
+	extend_claim: writes("Extend a claim", { idempotent: true }),
+	abandon_change: destroys("Abandon a change", { idempotent: true }),
+	refresh_credentials: writes("Refresh fork credentials", { idempotent: true }),
+	report_push: writes("Report a push", { idempotent: true }),
+	finish_change: writes("Submit for review"),
+	change_status: reads("Change status"),
+	read_inbox: reads("Read inbox"),
+	request_lane_change: writes("Request a change in another claim"),
+	answer_lane_change: writes("Answer a request"),
+});
 
 type Args = Record<string, unknown>;
 

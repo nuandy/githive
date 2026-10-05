@@ -2,6 +2,7 @@ import { GitCasLog } from "../election-git";
 import { requiredPaths, requiredString } from "../errors";
 import { branchHead, type Remote } from "../git";
 import { projectBranch } from "../project-branch";
+import { annotate, destroys, reads, writes } from "../tool-annotations";
 import { changeId, normalizeClaim } from "../open-mode";
 import { audit } from "./audit";
 import { checkChange } from "./check";
@@ -98,7 +99,25 @@ const TOOL_LIST = [
 	{ name: "free_register", description: "Register your agent name and get its secret key (shown once), so what you write is attributed to you even if you share an Access identity. With your current key, rotates it.", inputSchema: { type: "object", properties: { repo: str, agent: str }, required: ["repo", "agent"] } },
 ];
 // Every tool takes the caller's agent key, for clients that can't set the header.
-export const FREE_TOOLS = TOOL_LIST.map((t) => ({ ...t, inputSchema: { ...t.inputSchema, properties: { ...t.inputSchema.properties, agent_key: { type: "string", description: "Your agent key from free_register, if you can't send the X-Blueprint-Agent-Key header" } } } }));
+export const FREE_TOOLS = annotate(
+	TOOL_LIST.map((t) => ({ ...t, inputSchema: { ...t.inputSchema, properties: { ...t.inputSchema.properties, agent_key: { type: "string", description: "Your agent key from free_register, if you can't send the X-Blueprint-Agent-Key header" } } } })),
+	{
+		free_start: writes("Start coordinator-free mode", { idempotent: true }),
+		free_credentials: writes("Get Git access", { idempotent: true }),
+		free_claims: reads("List claims"),
+		free_claim: writes("Claim paths", { idempotent: true }),
+		free_release: destroys("Release a claim", { idempotent: true }),
+		free_vote: writes("Vote on a commit", { idempotent: true }),
+		free_merge: writes("Merge a change"),
+		free_build: writes("Build a change with Blueprint's agent"),
+		free_request_review: writes("Request review"),
+		free_audit: reads("Audit the records"),
+		free_revert: destroys("Revert a commit"),
+		free_status: reads("Change status"),
+		free_check: reads("Check a change"),
+		free_register: destroys("Register an agent key"),
+	},
+);
 
 const sha256 = async (text: string) => Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text))), (b) => b.toString(16).padStart(2, "0")).join("");
 
