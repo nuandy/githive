@@ -131,6 +131,9 @@ const MAX_CONCURRENT_FORKS = 6;
 
 /** Set once an open task has moved to the elected coordinator: this object then decides nothing for it. */
 const MOVED = "moved-to-elected";
+
+/** Whether two claims are the same paths, in any order. */
+const sameClaim = (a: string[], b: string[]) => a.length === b.length && [...a].sort().every((p, i) => p === [...b].sort()[i]);
 export class Coordinator extends DurableObject<Env> implements CoordinatorHumanActions, LaneChangeCoordinator {
 	// State-changing steps run one at a time so they never overwrite each other.
 	// A step should be short: the hot paths (opening a change, recording a push,
@@ -753,14 +756,29 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 	 * agent is started on it as well.
 	 */
 	async openChange(input: { id?: string; title: string; intent: string; owns: string[]; hosted?: boolean }, actor?: AccessIdentity) {
+		// Asked again for a change that already opened (its answer was lost, say,
+		// with the leader that gave it): the same change, with fresh credentials.
+		if (input.id !== undefined) {
+			const opened = (await this.load()).slices.find((s) => s.id === input.id);
+			if (opened?.status === "building" && sameClaim(opened.owns, normalizeClaim(input.owns))) {
+				const remote = await remoteFor(this.env.ARTIFACTS, opened.repo!, "write");
+				return { change: opened, credentials: { slice: opened.id, repo: opened.repo!, remote: remote.url, token: remote.token } as SliceCredentials };
+			}
+		}
 		// Reserve: the paths are held from here, so a racing claim is refused while
 		// the fork is made. Answered before the reservation is durable, so the fork
 		// starts at once; the confirm step's answer waits for both, in order.
-		const { id, repo, title } = await this.mutate(async (task) => {
+		const { id, repo, title, resumed } = await this.mutate(async (task) => {
 			if (task.mode !== "open") fail(409, "changes can only be opened on an open-mode task");
 			if (typeof input?.title !== "string" || !input.title.trim()) fail(400, "a change needs a title");
 			if (typeof input.intent !== "string" || !input.intent.trim()) fail(400, "a change needs an intent: what it sets out to do");
 			const owns = normalizeClaim(input.owns);
+			// Asked again while its reservation stands (interrupted before it confirmed): carry on from there.
+			const reserved = input.id !== undefined ? task.slices.find((s) => s.id === input.id) : undefined;
+			if (reserved?.status === "opening" && sameClaim(reserved.owns, owns)) {
+				reserved.leaseUntil = new Date(Date.now() + OPENING_LEASE_MS).toISOString();
+				return { id: reserved.id, repo: reserved.repo!, title: reserved.title, resumed: true };
+			}
 			const conflicts = claimConflicts(task, owns);
 			if (conflicts.length) fail(409, claimConflictMessage(conflicts));
 
@@ -788,15 +806,17 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 			};
 			task.slices.push(slice);
 			await this.scheduleLeaseCheck(task);
-			return { id, repo: slice.repo!, title: slice.title };
+			return { id, repo: slice.repo!, title: slice.title, resumed: false };
 		}, "open:reserve", true);
 
 		// Fork without the lock: this takes seconds, and other changes carry on meanwhile.
-		let fork: Awaited<ReturnType<typeof forkAndWait>>;
+		let fork: { remote: string; token: string };
 		let start: string;
 		try {
 			const project = (await this.load()).repo;
-			fork = await this.withForkSlot(() => forkAndWait(this.env.ARTIFACTS, project, repo, `${title} (open change on ${project})`));
+			// A resumed open may have made its fork already.
+			const made = resumed ? await remoteFor(this.env.ARTIFACTS, repo, "write").then((r) => ({ remote: r.url, token: r.token }), () => null) : null;
+			fork = made ?? (await this.withForkSlot(() => forkAndWait(this.env.ARTIFACTS, project, repo, `${title} (open change on ${project})`)));
 			// The fork's own head is where this change starts, even if main moved meanwhile.
 			start = (await headOf(this.env.ARTIFACTS, repo)) ?? fail(500, "the new fork has no commits");
 		} catch (err) {
@@ -870,6 +890,9 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 
 	/** Give up a change: its lane is freed and its agents are stopped. */
 	async abandonChange(sliceId: string, reason: string, actor?: AccessIdentity) {
+		// Asked again after it went through (its answer was lost): the change, as abandoned.
+		const already = (await this.load()).slices.find((s) => s.id === sliceId);
+		if (already?.status === "abandoned") return already;
 		const { slice, stopAgents } = await this.mutate(async (task) => {
 			if (task.mode !== "open") fail(409, "only open-mode changes can be abandoned");
 			if (typeof reason !== "string" || !reason.trim()) fail(400, "abandoning a change needs a reason");

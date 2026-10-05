@@ -671,6 +671,45 @@ describe("open mode", () => {
 		expect(ledger.entries.at(-1)?.text).toMatch(/opened.*claiming src\/stats\//);
 	});
 
+	// A call can be asked again after an answer was lost (its leader crashed mid-call, say): opening is safe to repeat.
+	it("finishes an open that was interrupted after its reservation, when the same change is asked again", async () => {
+		const reserved = slice("x-1", { status: "opening", owns: ["src/x/"], repo: "t1--x-1", leaseUntil: new Date(Date.now() + 60_000).toISOString(), external: true });
+		await setup(openTask([reserved]));
+		const { change, credentials } = await coordinator.openChange({ id: "x-1", title: "X", intent: "X, please", owns: ["src/x/"] });
+		expect(change).toMatchObject({ id: "x-1", status: "building", startCommit: "main0" });
+		expect(credentials).toMatchObject({ slice: "x-1", remote: "https://git.test/t1--x-1.git" });
+		expect((await stored()).slices.map((s) => [s.id, s.status])).toEqual([["x-1", "building"]]);
+	});
+
+	it("answers an open asked again after it went through with the same change and fresh credentials", async () => {
+		await setup(openTask());
+		const first = await coordinator.openChange({ id: "x-1", title: "X", intent: "X, please", owns: ["src/x/"] });
+		const again = await coordinator.openChange({ id: "x-1", title: "X", intent: "X, please", owns: ["src/x/"] });
+		expect(again.change).toMatchObject({ id: "x-1", status: "building", startCommit: first.change.startCommit });
+		expect(again.credentials).toMatchObject({ slice: "x-1", remote: first.credentials.remote });
+		expect((await stored()).slices).toHaveLength(1);
+	});
+
+	it("answers an abandon asked again with the change as it was abandoned", async () => {
+		await setup(openTask());
+		const { change } = await open("X", ["src/x/"]);
+		await coordinator.abandonChange(change.id, "done");
+		await coordinator.ledgerIdle();
+		const commits = ledger.entries.length;
+		expect(await coordinator.abandonChange(change.id, "done")).toMatchObject({ id: change.id, status: "abandoned" });
+		await coordinator.ledgerIdle();
+		// Nothing new decided: it was already abandoned.
+		expect(ledger.entries).toHaveLength(commits);
+	});
+
+	it("still refuses the same change id for other paths, or once that change has ended", async () => {
+		await setup(openTask());
+		await coordinator.openChange({ id: "x-1", title: "X", intent: "X, please", owns: ["src/x/"] });
+		await expect(coordinator.openChange({ id: "x-1", title: "X", intent: "X, please", owns: ["src/y/"] })).rejects.toThrow("change x-1 already exists");
+		await coordinator.abandonChange("x-1", "done");
+		await expect(coordinator.openChange({ id: "x-1", title: "X", intent: "X, please", owns: ["src/x/"] })).rejects.toThrow("change x-1 already exists");
+	});
+
 	it("refuses a claim that overlaps an active change, naming the holder and its intent", async () => {
 		await setup(openTask());
 		const { change } = await open("Add stats", ["src/stats/"]);
