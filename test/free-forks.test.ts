@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { statusOf } from "../src/errors";
-import { callFreeTool, type FreeContext } from "../src/free/mcp";
+import { callFreeTool, freeChangeHistory, type FreeContext } from "../src/free/mcp";
 import { agentClone, pushChange } from "./helpers/agents";
 import { startGitServer, type GitServer } from "./helpers/git-server";
 
@@ -78,6 +78,13 @@ describe("forks (the default)", () => {
 		expect(project.git("show", "main:src/a/x.txt")).toBe("a\n");
 		// The project never had the branch: the change came from the fork.
 		expect(project.git("branch", "--list", "changes/*").trim()).toBe("");
+
+		// Its page on the dashboard: the commit, the votes on it, and the merge.
+		const history = await freeChangeHistory(ctx(), "project", "a-1");
+		expect(history).toMatchObject({ change: "a-1", branch: "main", claim: null, commits: [{ commit: head, message: "a", author: "agent-a" }] });
+		expect(history.votes.map((v) => [v.reviewer, v.verdict])).toEqual([["rev-1", "approve"], ["rev-2", "approve"]]);
+		expect(history.released).toEqual([expect.objectContaining({ reason: expect.stringMatching(/merged/), mergedAs: expect.stringMatching(/^[0-9a-f]{40}$/) })]);
+		await expect(freeChangeHistory(ctx(), "project", "nope")).rejects.toThrow(/\[404\] no change nope/);
 	}, 60_000);
 });
 

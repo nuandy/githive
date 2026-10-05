@@ -1,6 +1,7 @@
+import git from "isomorphic-git";
 import { GitCasLog } from "../election-git";
 import { requiredPaths, requiredString } from "../errors";
-import { branchHead, type Remote } from "../git";
+import { branchHead, type Remote, Workspace } from "../git";
 import { projectBranch } from "../project-branch";
 import { annotate, destroys, reads, writes } from "../tool-annotations";
 import { changeId, normalizeClaim } from "../open-mode";
@@ -49,6 +50,8 @@ export interface FreeContext {
 	requestReview?: (input: { repo: string; change: string; roles: string[]; summary?: string; mergeWhenApproved?: boolean }) => Promise<{ head: string; reviewers: string[] }>;
 	/** What Blueprint's hosted agents on a change are doing: its builder, and the reviewers of its head. */
 	agentStatus?: (repo: string, change: string, head: string | null, roles: string[]) => Promise<HostedStatus>;
+	/** Tells the dashboard's open pages that the repo's records changed. */
+	ping?: (repo: string) => Promise<void>;
 	/** Updates the repo's summary for the dashboard's list of repos (a hint; Git is what counts). */
 	summarize?: (repo: string, patch: { open?: number; needsYou?: number; waiting?: { change: string; title: string; reason: string }[]; merged?: number; mergedBy?: number; violations?: number; lastActivity?: string; countedAt?: string }) => Promise<void>;
 	/** Starts Blueprint's hosted builder on a claimed change. */
@@ -198,6 +201,41 @@ async function runAudit(ctx: FreeContext, repo: string) {
 }
 
 /** The audit of a coordinator-free repo, for the dashboard: it replays every record, so it's read apart from the snapshot. */
+/**
+ * One change's history, for its page on the dashboard: its claim (or how it
+ * ended), the commits on its branch (the last 50, newest first), every vote on
+ * any of them, and the merge if it merged.
+ */
+export async function freeChangeHistory(ctx: FreeContext, repo: string, change: string) {
+	const registry = (await recordLog<Registry>(ctx, repo, claimsRef(repo)).read())?.commit.state;
+	if (!registry?.baseline) throw new Error(`[404] coordinator-free mode hasn't started on ${repo}`);
+	const { claim, released } = await storeFor(ctx, repo, registry).readChange(change);
+	if (!claim && !released.length) throw new Error(`[404] no change ${change} on ${repo}`);
+	const branch = projectBranch(registry);
+	const mergedAs = released.find((r) => r.mergedAs)?.mergedAs;
+	const commits = await Promise.resolve()
+		.then(() => changeSourceFor(ctx, repo)(change, "read"))
+		.then(async (source) => {
+			const ws = await Workspace.clone(source, `changes/${change}`, { depth: 50 });
+			const head = await ws.head();
+			// The change's own commits: back to where it left the project's branch (as it was before the merge, if it merged).
+			const projectHead = await ws.fetch("project", await ctx.remote(repo, "read"), branch);
+			const before = mergedAs ? (await ws.ensureCommit(mergedAs)).commit.parent[0] : projectHead;
+			const stop = await ws.mergeBase(before, head);
+			const own = [];
+			for (const { oid, commit } of await git.log({ fs: ws.fs, dir: "/repo", ref: head, depth: 50 })) {
+				if (oid === stop) break;
+				own.push({ commit: oid, message: commit.message.trim(), author: commit.author.name, at: new Date(commit.author.timestamp * 1000).toISOString() });
+			}
+			return own;
+		})
+		// Nothing pushed yet (no fork, or no branch on it).
+		.catch(() => [] as { commit: string; message: string; author: string; at: string }[]);
+	const ids = new Set(commits.map((c) => c.commit));
+	const votes = ((await recordLog<Votes>(ctx, repo, votesRef(repo)).read())?.commit.state.votes ?? []).filter((v) => ids.has(v.commit));
+	return { change, branch, claim: claim ?? null, released, commits, votes };
+}
+
 /** The roles Blueprint's own reviewers take on a coordinator-free change: one general review, and every role that can veto. */
 export const hostedFreeRoles = (vetoes: string[]) => [...new Set(["review", ...vetoes])];
 
@@ -252,6 +290,7 @@ const noted = new Map<string, number>();
 /** Run one coordinator-free tool, and note what it wrote in the repo's summary. */
 export async function callFreeTool(name: string, args: Args, ctx: FreeContext): Promise<unknown> {
 	const result = await runFreeTool(name, args, ctx);
+	if (WRITES.has(name) && (result as { ok?: boolean } | null)?.ok !== false) await ctx.ping?.(requiredString(args, "repo")).catch(() => undefined);
 	if (ctx.summarize && WRITES.has(name) && (result as { ok?: boolean } | null)?.ok !== false) {
 		const repo = requiredString(args, "repo");
 		const merged = name === "free_merge";

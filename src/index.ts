@@ -11,8 +11,9 @@ import { retryTransient } from "./retry";
 import type { Limits, Review, ReviewPolicy, Task } from "./types";
 import { lastActivityOf, openTaskId, taskSummary } from "./open-mode";
 import { handleMcpBody, type McpContext } from "./mcp";
-import { type FreeContext, freeAudit, freeOpenCount, freeSnapshot } from "./free/mcp";
+import { type FreeContext, freeAudit, freeChangeHistory, freeOpenCount, freeSnapshot } from "./free/mcp";
 import type { Registry } from "./free/claims";
+import { listTree, readFile } from "./code-browse";
 import { defaultBranch, Workspace } from "./git";
 import { freeAgentName, freeContextFor } from "./free/env";
 import { identityLabel } from "./free/stamp";
@@ -23,6 +24,7 @@ export { Coordinator } from "./coordinator";
 export { Gate } from "./gate";
 export { TaskIndex } from "./task-index";
 export { Peer } from "./peer";
+export { LiveFeed } from "./live-feed";
 
 const app = new Hono<{ Bindings: Env; Variables: { accessIdentity: AccessIdentity } }>();
 
@@ -77,6 +79,9 @@ app.get("/api", (c) =>
 			"GET  /tasks/:id",
 			"GET  /tasks/:id/slices/:slice/diff",
 			"GET  /tasks/:id/gate   (the check run in progress and the queue)",
+			"GET  /repos/:repo/tree?ref=  (every file at a branch or commit)",
+			"GET  /repos/:repo/file?path=&ref=  (one file's text)",
+			"PATCH /tasks/:id/settings {review?, verify?, leaseMinutes?}",
 			"GET  /tasks/:id/slices/:slice/builder",
 			"POST /tasks/:id/slices/:slice/pushed",
 			"POST /tasks/:id/slices/:slice/reviewers",
@@ -173,6 +178,7 @@ const freeContext = (env: Env, identity: AccessIdentity | undefined, agentKey?: 
 // Coordinator-free repos, for the dashboard: which repos, and a snapshot of one read from Git.
 app.get("/free", async (c) => c.json(await taskIndex(c.env).listFree()));
 app.get("/free/:repo", async (c) => c.json(await freeSnapshot(freeContext(c.env, c.get("accessIdentity")), c.req.param("repo"))));
+app.get("/free/:repo/changes/:change", async (c) => c.json(await freeChangeHistory(freeContext(c.env, c.get("accessIdentity")), c.req.param("repo"), c.req.param("change"))));
 app.get("/free/:repo/audit", async (c) => c.json(await freeAudit(freeContext(c.env, c.get("accessIdentity")), c.req.param("repo"))));
 app.get("/free/:repo/builders/:change", async (c) => c.json(await c.env.BUILDER.getByName(freeAgentName(c.req.param("repo"), c.req.param("change"))).state()));
 // A hosted reviewer's state, by the commit it reviews (the vote's commit) and its role.
@@ -405,6 +411,25 @@ app.post("/admin/wipe", async (c) => {
 		await Promise.all(batch.slice(i, i + WIPE_PARALLEL).map((name) => retryTransient(() => c.env.ARTIFACTS.delete(name)).catch(() => failed.push(name))));
 	console.log("bench wipe", JSON.stringify({ deleted: batch.length - failed.length, failed: failed.length, remaining: names.length - batch.length }));
 	return c.json({ deleted: batch.length - failed.length, failed, remaining: names.length - batch.length + failed.length });
+});
+
+// Live updates: a page opens a WebSocket on its repo's feed ("task:<id>" or "free:<repo>") and refreshes when pinged.
+app.get("/live/:key", async (c) => {
+	const key = c.req.param("key");
+	if (!/^(task:[0-9a-f]{8}|free:[A-Za-z0-9._-]+)$/.test(key)) return c.json({ error: "not a feed" }, 400);
+	return c.env.LIVE.getByName(key).fetch(c.req.raw);
+});
+
+// Browse a repo's code: its files, and one file's text, at a branch or commit (the repo's default branch if none).
+app.get("/repos/:repo/tree", async (c) => {
+	const remote = await remoteFor(c.env.ARTIFACTS, c.req.param("repo"), "read");
+	const ref = c.req.query("ref") || ((await defaultBranch(remote)) ?? fail(404, "the repo has no commits"));
+	return c.json({ ref, ...(await listTree(remote, ref)) });
+});
+app.get("/repos/:repo/file", async (c) => {
+	const remote = await remoteFor(c.env.ARTIFACTS, c.req.param("repo"), "read");
+	const ref = c.req.query("ref") || ((await defaultBranch(remote)) ?? fail(404, "the repo has no commits"));
+	return c.json({ ref, ...(await readFile(remote, ref, c.req.query("path") ?? "")) });
 });
 
 // Delete a project repo for good. Refused while any task still uses it.

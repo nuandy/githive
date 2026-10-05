@@ -325,10 +325,20 @@ export class Peer extends Coordinator {
 		if (!leader?.leading || !this.working || (!saved && !entries.length)) return { durable: Promise.resolve() };
 		const state = structuredClone(this.working);
 		const durable = leader.decide(() => ({ state, entries, result: undefined })).then(async () => {
+			await this.ping(state.id);
 			await this.summarize(state);
 			await this.resignIfDone(leader, state);
 		});
 		return { durable };
+	}
+
+	/** Tell the dashboard's open pages that the task changed. Advice only: a failure is logged, not thrown. */
+	private async ping(taskId: string) {
+		try {
+			await this.env.LIVE?.getByName(`task:${taskId}`).ping("decision");
+		} catch (err) {
+			console.error(`pinging the live feed of ${taskId} failed`, statusOf(err).message);
+		}
 	}
 
 	private summarized = "";

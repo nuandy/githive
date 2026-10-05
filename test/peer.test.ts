@@ -58,6 +58,8 @@ let registry: Map<string, InstanceType<typeof Peer>>;
 let hints: { id: string; name: string | null; term: number }[];
 /** Summaries peers keep in the task index, for the dashboard's repo list. */
 let summaries: { key: string; patch: Record<string, unknown> }[];
+/** Pings to the dashboard's live feeds. */
+let pings: string[];
 
 function peer(name: string, storage = new FakeStorage()) {
 	const env = {
@@ -69,6 +71,7 @@ function peer(name: string, storage = new FakeStorage()) {
 				summarize: async (key: string, patch: Record<string, unknown>) => void summaries.push({ key, patch }),
 			}),
 		},
+		LIVE: { getByName: (key: string) => ({ ping: async () => void pings.push(key) }) },
 	};
 	const created = new Peer({ storage } as never, env as never);
 	created.configure({ log: () => log, leases: () => leases as never, leaseMs: LEASE, now: () => clock.now });
@@ -83,6 +86,7 @@ beforeEach(async () => {
 	registry = new Map();
 	hints = [];
 	summaries = [];
+	pings = [];
 	clock = { now: 1_000_000 };
 	log = new SharedLog();
 	leases = new SharedLog();
@@ -376,6 +380,8 @@ describe("a peer of the elected coordinator", () => {
 		await a.lead();
 		await a.peer.openChange({ id: "stats-1a2b", title: "Stats", intent: "Stats", owns: ["src/stats/"] });
 		expect(summaries.at(-1)).toMatchObject({ key: "task:t1", patch: { open: 1, needsYou: 0, merged: 0, abandoned: 0 } });
+		// And the dashboard's open pages are told at once.
+		expect(pings).toContain("task:t1");
 		const written = summaries.length;
 		await a.peer.extendClaim("stats-1a2b", ["src/stats/", "docs/stats.md"]);
 		expect(summaries).toHaveLength(written);
