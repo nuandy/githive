@@ -19,7 +19,7 @@ import type { BuildJob } from "./builder";
 import type { Remote } from "./git";
 import type { ReviewJob } from "./reviewer";
 import type { SliceJob } from "./sandbox";
-import { OPENING_LEASE_MS, claimConflicts, claimsOf, conflictMessage as claimConflictMessage, agentName, changeId, holdsClaim, inLane, leaseExpired, leaseUntil, nextLeaseCheck, normalizeClaim } from "./open-mode";
+import { OPENING_LEASE_MS, claimConflicts, gateStallCheck, claimsOf, conflictMessage as claimConflictMessage, agentName, changeId, holdsClaim, inLane, leaseExpired, leaseUntil, nextLeaseCheck, normalizeClaim } from "./open-mode";
 import { nextStep, reviewFeedback, tally, validatePolicy } from "./quorum";
 import { activeOf, hasRoom, itemKey, stillWanted, validateLimits, withScheduling, type AgentKind } from "./schedule";
 import { accessIdentityLabel, type AccessIdentity, type CoordinatorHumanActions } from "./access-contract";
@@ -854,6 +854,7 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 		const stops = await this.mutate(async (task) => {
 			const now = Date.now();
 			const stops: (() => Promise<unknown>)[] = [];
+			await this.restartStalledGates(task, now);
 			for (const slice of task.slices) {
 				if (!holdsClaim(slice) || !slice.leaseUntil || Date.parse(slice.leaseUntil) > now) continue;
 				// A reservation this old lost its opener (the object restarted while forking).
@@ -865,6 +866,31 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 			return stops;
 		}, "sweep");
 		await Promise.all(stops.map((stop) => stop()));
+	}
+
+	/**
+	 * Checks queued or running long past GATE_STALL_MS: if the gate still holds
+	 * the run, note it was seen and look again later; if not, its result was
+	 * lost, so queue the checks again. Caller holds the lock and saves.
+	 */
+	private async restartStalledGates(task: Task, now: number) {
+		const stalled = task.slices.filter((s) => (gateStallCheck(s) ?? Infinity) <= now);
+		if (!stalled.length) return;
+		const { queue, current } = await this.env.GATE.getByName(task.id).state();
+		const held = [current, ...queue].filter((item) => item !== null);
+		for (const slice of stalled) {
+			const gate = slice.gate!;
+			if (held.some((item) => [{ slice: item.slice, head: item.head }, ...(item.group ?? [])].some((m) => m.slice === slice.id && m.head === gate.head))) {
+				slice.gate = { ...gate, seenAt: new Date(now).toISOString() };
+				continue;
+			}
+			this.note(task, gate.head, `${slice.id}: its checks reported nothing for ${Math.round((now - Date.parse(gate.seenAt ?? gate.at)) / 60_000)} minutes and the gate no longer holds them; queued again`);
+			// A group's lead re-queues the whole group; its members wait on that.
+			if (gate.group?.length) {
+				const members = gate.group.map((id) => task.slices.find((s) => s.id === id)).filter((s): s is Slice => !!s && s.status === "building" && !!s.reviewHead);
+				if (members.length === gate.group.length && !stalled.some((s) => gate.group!.includes(s.id) && s.id < slice.id)) await this.startGroupGate(task, slice, members);
+			} else await this.startGate(task, slice);
+		}
 	}
 
 	/** The task's one timer: claim leases, swept when the earliest is due. */
@@ -1132,6 +1158,8 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 		const head = slice.reviewHead!;
 		slice.gate = { status: "queued", head, baseHead: "", at: new Date().toISOString(), excluded: [] };
 		await this.env.GATE.getByName(task.id).enqueue(task.id, { slice: slice.id, head });
+		// Look again if no result comes (see restartStalledGates).
+		await this.scheduleLeaseCheck(task);
 	}
 
 	/**
@@ -1149,6 +1177,7 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 			head: lead.reviewHead!,
 			group: members.map((m) => ({ slice: m.id, head: m.reviewHead! })),
 		});
+		await this.scheduleLeaseCheck(task);
 	}
 
 	/**

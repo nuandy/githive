@@ -97,4 +97,26 @@ describe("gate queue", () => {
 		expect(coordinator.gateResult).not.toHaveBeenCalled();
 		expect((await gate.state()).current).toBeNull();
 	});
+
+	it("keeps a result it couldn't report, and reports it on its next alarm instead of losing it", async () => {
+		const result = { passed: true, head: "h1", baseHead: "base0", results: [{ command: "npm test", exitCode: 0, output: "" }], at: "2026-10-06T00:00:00Z" };
+		const coordinator = { gatePlan: vi.fn(async () => plan), gateResult: vi.fn() };
+		const { gate, storage } = gateWith(coordinator);
+		Object.defineProperty(gate, "check", { value: vi.fn(async () => result) });
+		// The coordinator's leader was reset just as the run finished.
+		coordinator.gateResult.mockRejectedValueOnce(new Error("Durable Object's isolate exceeded its memory limit and was reset."));
+		await gate.enqueue("t1", { slice: "a", head: "h1" });
+
+		await gate.alarm();
+		expect(coordinator.gateResult).toHaveBeenCalledTimes(1);
+		expect(await storage.get("unreported")).toMatchObject({ item: { slice: "a", head: "h1" }, result });
+		expect((await gate.state()).queue).toEqual([]);
+
+		await gate.alarm();
+		expect(coordinator.gateResult).toHaveBeenCalledTimes(2);
+		expect(coordinator.gateResult).toHaveBeenLastCalledWith("a", result, [], undefined);
+		expect(await storage.get("unreported")).toBeUndefined();
+		// Not run again: the checks ran once.
+		expect(coordinator.gatePlan).toHaveBeenCalledTimes(1);
+	});
 });

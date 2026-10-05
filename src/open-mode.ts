@@ -158,8 +158,25 @@ export function leaseExpired(task: Task, slice: Slice, now = Date.now()) {
 
 /** When the next claim could expire, for the Coordinator's alarm. */
 export function nextLeaseCheck(task: Task) {
-	const times = task.slices.filter((s) => holdsClaim(s) && s.leaseUntil).map((s) => Date.parse(s.leaseUntil!));
+	const times = [
+		...task.slices.filter((s) => holdsClaim(s) && s.leaseUntil).map((s) => Date.parse(s.leaseUntil!)),
+		...task.slices.map(gateStallCheck).filter((t): t is number => t !== null),
+	];
 	return times.length ? Math.min(...times) : null;
+}
+
+/** How long a check run may go without a result, or without the gate being seen holding it, before it's presumed lost. */
+export const GATE_STALL_MS = 15 * 60_000;
+
+/**
+ * When to make sure the gate still holds a change's queued or running checks.
+ * A run whose result was lost (its gate restarted, say) would otherwise leave
+ * the change waiting for ever; the sweep then queues its checks again.
+ */
+export function gateStallCheck(slice: Slice): number | null {
+	const gate = slice.gate;
+	if (slice.status !== "building" || (gate?.status !== "queued" && gate?.status !== "running")) return null;
+	return Date.parse(gate.seenAt ?? gate.at) + GATE_STALL_MS;
 }
 
 /** The claims active changes hold, for agents deciding what to claim. */

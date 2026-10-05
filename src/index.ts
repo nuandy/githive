@@ -72,6 +72,7 @@ app.get("/api", (c) =>
 			"POST /repos/import {url, name, branch?}",
 			"GET  /tasks/:id",
 			"GET  /tasks/:id/slices/:slice/diff",
+			"GET  /tasks/:id/gate   (the check run in progress and the queue)",
 			"GET  /tasks/:id/slices/:slice/builder",
 			"POST /tasks/:id/slices/:slice/pushed",
 			"POST /tasks/:id/slices/:slice/reviewers",
@@ -262,6 +263,9 @@ app.get("/tasks/:id/slices/:slice/diff", async (c) => {
 	const { id, slice } = c.req.param();
 	return c.json(await coordinator(c.env, id).sliceDiff(slice));
 });
+
+// The task's gate: the run in progress and what's queued.
+app.get("/tasks/:id/gate", async (c) => c.json(await c.env.GATE.getByName(c.req.param("id")).state()));
 
 app.get("/tasks/:id/slices/:slice/builder", async (c) => {
 	const { id, slice } = c.req.param();

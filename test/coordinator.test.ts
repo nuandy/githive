@@ -688,6 +688,26 @@ describe("open mode", () => {
 		expect(extended.owns).toEqual(["src/a/", "src/c/"]);
 	});
 
+	it("queues a change's checks again when their result was lost, but not while the gate still holds them", async () => {
+		const long = new Date(Date.now() - 20 * 60_000).toISOString();
+		const later = new Date(Date.now() + 60 * 60_000).toISOString();
+		const running = (head: string) => ({ status: "running" as const, head, baseHead: "main0", at: long, excluded: [] });
+		await setup(
+			openTask([
+				slice("lost", { leaseUntil: later, startCommit: "main0", reviewHead: "h1", gate: running("h1") }),
+				slice("held", { leaseUntil: later, startCommit: "main0", reviewHead: "h2", gate: running("h2") }),
+			]),
+		);
+		fake.gateCurrent.item = { slice: "held", head: "h2" } as never;
+		await coordinator.alarm();
+		const [lost, held] = (await stored()).slices;
+		expect(lost.gate).toMatchObject({ status: "queued", head: "h1" });
+		expect(fake.env.GATE.getByName("t1").enqueue).toHaveBeenCalledWith("t1", { slice: "lost", head: "h1" });
+		expect(fake.env.GATE.getByName("t1").enqueue).toHaveBeenCalledTimes(1);
+		expect(held.gate).toMatchObject({ status: "running", seenAt: expect.any(String) });
+		expect(storage.alarm).not.toBeNull();
+	});
+
 	it("expires an idle claim but renews one that is waiting on review", async () => {
 		const past = new Date(Date.now() - 60_000).toISOString();
 		await setup(

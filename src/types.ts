@@ -94,6 +94,8 @@ export interface Slice extends SliceSpec {
 		/** Other slices merged in the same run, when slices depend on each other (a group gate). */
 		group?: string[];
 		result?: GateResult;
+		/** When the gate was last seen holding this run, while it's queued or running (see gateStallCheck). */
+		seenAt?: string;
 	};
 	/** When the slice's builder parked to wait for its cross-lane requests, and which ones. */
 	parkedAt?: string;

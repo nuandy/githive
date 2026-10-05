@@ -45,6 +45,9 @@ export interface GatePlan {
 
 const INSTALL = /^npm ci(\s|$)/;
 const CANCELLATIONS = "cancelled-item-ids";
+/** A finished run's result the coordinator hasn't taken yet. */
+const UNREPORTED = "unreported";
+const REPORT_RETRY_MS = 10_000;
 
 const members = (item: GateItem) => [{ slice: item.slice, head: item.head }, ...(item.group ?? [])];
 const covers = (item: GateItem, slice: string, head: string) => members(item).some((m) => m.slice === slice && m.head === head);
@@ -137,11 +140,34 @@ export class Gate extends DurableObject<Env> {
 		if (rest.length) await this.ctx.storage.setAlarm(Date.now());
 	}
 
+	/**
+	 * Report a run's result to the task's coordinator. If that fails (its leader
+	 * was reset, say), keep the result and report it again shortly: dropping it
+	 * would leave the change's checks "running" for ever. Reporting twice is safe;
+	 * the coordinator ignores a result for a change that has moved on.
+	 */
+	private async report(taskId: string, item: GateItem, result: GateResult, exclude: string[]) {
+		try {
+			await taskCoordinator(this.env, taskId).gateResult(item.slice, result, exclude, item.group);
+			await this.ctx.storage.delete(UNREPORTED);
+			return true;
+		} catch (err) {
+			console.error(`reporting the gate result for ${item.slice} failed; retrying`, statusOf(err).message);
+			await this.ctx.storage.put(UNREPORTED, { item, result, exclude });
+			await this.ctx.storage.setAlarm(Date.now() + REPORT_RETRY_MS);
+			return false;
+		}
+	}
+
 	async alarm() {
 		const taskId = await this.ctx.storage.get<string>("taskId");
+		if (!taskId) return;
+		// A result that couldn't be reported goes first, before the next run.
+		const unreported = await this.ctx.storage.get<{ item: GateItem; result: GateResult; exclude: string[] }>(UNREPORTED);
+		if (unreported && !(await this.report(taskId, unreported.item, unreported.result, unreported.exclude))) return;
 		const queue = (await this.ctx.storage.get<GateItem[]>("queue")) ?? [];
 		const item = queue[0];
-		if (!taskId || !item) return;
+		if (!item) return;
 
 		// A cancellation can race the initial queue read. Check before claiming,
 		// then again after writing current so a cancellation in that gap is seen.
@@ -165,7 +191,7 @@ export class Gate extends DurableObject<Env> {
 				await this.ctx.storage.delete("prepared"); // start from a fresh checkout next time
 			}
 			// A veto may arrive while checks are running; never report that stale result.
-			if (await this.itemIsLive(item)) await coordinator.gateResult(item.slice, result, plan.exclude, item.group);
+			if (await this.itemIsLive(item)) await this.report(taskId, item, result, plan.exclude);
 		} finally {
 			await this.finishItem(item);
 		}
