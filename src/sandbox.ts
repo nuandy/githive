@@ -44,11 +44,16 @@ export interface SandboxJob {
 /** A job about one slice of a task: what builders and reviewers share. */
 export interface SliceJob extends SandboxJob {
 	goal: string;
+	/** The project's branch changes merge into (main, master, ...). Absent from older jobs: main. */
+	branch?: string;
 	/** Commands the integration gate runs on the combined code. */
 	verify?: string[];
 	slice: SliceSpec;
 	siblings: Pick<SliceSpec, "id" | "title" | "owns">[];
 }
+
+/** The project's branch a job's change merges into. */
+export const branchOf = (job: Pick<SliceJob, "branch">) => job.branch ?? "main";
 
 /** The slice's place in the task, stated the same way to every agent. */
 export function sliceContext(job: SliceJob) {
@@ -56,7 +61,7 @@ export function sliceContext(job: SliceJob) {
 
 Change: ${job.slice.title} (${job.slice.id})
 Its claim (the only paths this change may touch): ${job.slice.owns.join(", ")}
-Before it merges, the project's checks must pass with it merged into main: ${job.verify?.length ? job.verify.join("; ") : "no checks configured; run the project's own tests"}
+Before it merges, the project's checks must pass with it merged into ${branchOf(job)}: ${job.verify?.length ? job.verify.join("; ") : "no checks configured; run the project's own tests"}
 Other changes in progress at the same time:
 ${job.siblings.map((s) => `- ${s.id}: ${s.title} (claims ${s.owns.join(", ")})`).join("\n") || "- none"}
 

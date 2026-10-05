@@ -1,8 +1,8 @@
 import { z } from "zod";
 import { tool, type AgentTool } from "./agent";
 import { statusOf } from "./errors";
-import { ENVIRONMENT, SandboxAgent, sliceContext, type AgentState, type SliceJob } from "./sandbox";
-import { GIT_IN_BLUEPRINT } from "./git-blueprint-guidance";
+import { ENVIRONMENT, SandboxAgent, branchOf, sliceContext, type AgentState, type SliceJob } from "./sandbox";
+import { gitInBlueprint } from "./git-blueprint-guidance";
 import type { QuorumStatus } from "./types";
 import { remoteFor } from "./artifacts";
 import { GitCasLog, cachedRemote } from "./election-git";
@@ -77,7 +77,7 @@ export class Reviewer extends SandboxAgent<ReviewJob, ReviewerState> {
 
 The change's code is checked out at commit ${job.head}. It started from commit ${job.baseCommit}, so \`git diff ${job.baseCommit} HEAD\` shows exactly what it changed.
 
-${GIT_IN_BLUEPRINT}
+${gitInBlueprint(branchOf(job))}
 
 ${sliceContext(job)}
 
@@ -105,7 +105,7 @@ How to work:
 	}
 
 	protected kickoff(job: ReviewJob) {
-		if (job.free) return `Review change ${job.free.change} (branch ${job.free.ref}) at commit ${job.head}. Here a "slice" is this change, and its lane is the paths it claimed; your vote counts toward merging it into main.`;
+		if (job.free) return `Review change ${job.free.change} (branch ${job.free.ref}) at commit ${job.head}. Here a "slice" is this change, and its lane is the paths it claimed; your vote counts toward merging it into ${branchOf(job)}.`;
 		return `Review slice ${job.slice.id} at commit ${job.head}.`;
 	}
 
@@ -124,7 +124,7 @@ How to work:
 	}
 
 	protected async afterClone(job: ReviewJob) {
-		// A coordinator-free change is a branch of the project repo, not a fork's main.
+		// A coordinator-free change is its own branch, not the fork's copy of the project's branch.
 		if (job.free) {
 			const fetched = await this.git(job, ["fetch", "-q", "origin", job.free.ref]);
 			if (fetched.exitCode !== 0) throw new Error(`could not fetch ${job.free.ref}: ${fetched.output}`);

@@ -23,7 +23,7 @@ describe("conflicts", () => {
 	it("reports each open change's conflicts with main and other open changes, not ended ones", () => {
 		expect(conflictsFor(task, "ui")).toEqual([
 			{ with: "api", withTitle: "API change", files: ["src/shared.ts"], checkedAt: "2026-10-02T00:00:00Z" },
-			{ with: "main", withTitle: undefined, files: ["package.json"], checkedAt: "2026-10-02T00:00:00Z" },
+			{ with: "main", base: true, withTitle: undefined, files: ["package.json"], checkedAt: "2026-10-02T00:00:00Z" },
 		]);
 		expect(conflictsFor(task, "api").map((c) => c.with)).toEqual(["ui"]);
 		expect(conflictsByChange(task).has("done")).toBe(false);
@@ -31,7 +31,9 @@ describe("conflicts", () => {
 
 	it("words a conflict for people", () => {
 		expect(describeConflict({ with: "api", withTitle: "API change", files: ["a.ts", "b.ts"] })).toBe("Conflicts with API change (api) in a.ts, b.ts");
-		expect(describeConflict({ with: "main", files: [] })).toBe("Conflicts with main");
+		expect(describeConflict({ with: "main", base: true, files: [] })).toBe("Conflicts with main");
+		// The project's branch by its own name.
+		expect(describeConflict({ with: "master", base: true, files: ["a.js"] })).toBe("Conflicts with master in a.js");
 	});
 
 	it("copes with older records without checks", () => {

@@ -18,11 +18,11 @@ export interface ActivityEntry {
 }
 
 /** The repo's decision log, newest first, worded for people. */
-export function activityFromHistory(entries: HistoryEntry[], ids: string[]): ActivityEntry[] {
+export function activityFromHistory(entries: HistoryEntry[], ids: string[], branch = "main"): ActivityEntry[] {
 	return entries
 		.map((entry, index) => {
 			const { kind, tone } = classifyHistory(entry.text);
-			const text = humanizeText(entry.text, ids).split("\n")[0];
+			const text = humanizeText(entry.text, ids, branch).split("\n")[0];
 			return { key: `h:${index}`, at: entry.at || undefined, text, commit: entry.commit || undefined, icon: kindIcon(kind, tone), tone };
 		})
 		.reverse();
@@ -33,7 +33,7 @@ export function activityFromRecords(task: Task): ActivityEntry[] {
 	const changes = changesOf(task);
 	const ids = changes.map((change) => change.id);
 	const items = changes.flatMap((change) =>
-		buildTimeline(change, { ids })
+		buildTimeline(change, { ids, branch: task.branch })
 			.filter((item) => item.at)
 			.map((item) => ({
 				key: `${change.id}:${item.key}`,
@@ -57,7 +57,7 @@ export interface RepoActivityProps {
 
 export function RepoActivity({ task, repo, base, history }: RepoActivityProps) {
 	const ids = changesOf(task).map((change) => change.id);
-	const entries = history ? activityFromHistory(history, ids) : history === null ? activityFromRecords(task) : [];
+	const entries = history ? activityFromHistory(history, ids, task.branch) : history === null ? activityFromRecords(task) : [];
 	const groups: { label: string; entries: ActivityEntry[] }[] = [];
 	for (const entry of entries) {
 		const label = dayLabel(entry.at);

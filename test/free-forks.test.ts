@@ -136,6 +136,7 @@ describe("free_check (run by the agent itself)", () => {
 		expect(await call("free_check", { change: "a-1" })).toEqual({
 			change: "a-1",
 			head,
+			branch: "main",
 			main: { head: await mainline.run("rev-parse", "HEAD"), clean: false, conflicts: ["README.md"] },
 			outsideClaim: ["README.md"],
 		});

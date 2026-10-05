@@ -59,10 +59,10 @@ function useReviewDiff(task: Task, change: Change, api: ChangeActionsApi) {
 }
 
 export function ChangeHeader({ task, change }: { task: Task; change: Change }) {
-	const status = deriveChangeStatus(change, task.review);
+	const status = deriveChangeStatus(change, task.review, task.branch);
 	const agent = agentLabel(change);
 	const branch = <code className="change-header__branch">changes/{change.id}</code>;
-	const main = <code className="change-header__branch">main</code>;
+	const main = <code className="change-header__branch">{task.branch ?? "main"}</code>;
 	return (
 		<div className="change-header">
 			<h1 className="change-header__title">
@@ -116,7 +116,7 @@ function Description({ change }: { change: Change }) {
 
 function ChecksTab({ task, change }: { task: Task; change: Change }) {
 	const gate = currentGate(change) ?? change.gate;
-	const summary = checksSummary(change, task.verify);
+	const summary = checksSummary(change, task.verify, task.branch);
 	if (!task.verify.length && !gate)
 		return (
 			<div className="box empty">
@@ -133,11 +133,11 @@ function ChecksTab({ task, change }: { task: Task; change: Change }) {
 				</h2>
 				{gate ? (
 					<span className="muted">
-						on <code>{shortSha(gate.head)}</code> merged with main{gate.at ? ` · ${timeAgo(gate.at)}` : ""}
+						on <code>{shortSha(gate.head)}</code> merged with {task.branch ?? "main"}{gate.at ? ` · ${timeAgo(gate.at)}` : ""}
 					</span>
 				) : null}
 			</div>
-			<CheckResults gate={gate} verify={task.verify} />
+			<CheckResults gate={gate} verify={task.verify} branch={task.branch} />
 			{gate?.group?.length ? <p className="box__row muted">Checked together with {gate.group.join(", ")}, which depend on each other.</p> : null}
 			{gate?.excluded?.length ? (
 				<div className="box__row">
@@ -159,7 +159,7 @@ export function ChangePage({ task, change, agent, history, repo, base, tab, api,
 	const { diff, retry } = useReviewDiff(task, change, api);
 	const conflicts = conflictsFor(task, change.id);
 	const ids = changesOf(task).map((c) => c.id);
-	const timeline = buildTimeline(change, { history: history ?? null, builderLog: agent?.builder?.log, ids });
+	const timeline = buildTimeline(change, { history: history ?? null, builderLog: agent?.builder?.log, ids, branch: task.branch });
 	const files = diff?.diff?.files.length ?? change.touched.length;
 	const checkCount = Math.max(task.verify.length, change.gate?.result?.results?.length ?? 0);
 	const link = (id: string) => href.change(repo, id, "conversation", base);
@@ -207,7 +207,7 @@ export function ChangePage({ task, change, agent, history, repo, base, tab, api,
 							) : null}
 							<Description change={change} />
 							{history === undefined ? <p className="muted change-layout__loading">Loading history…</p> : null}
-							<Timeline items={timeline.filter((item) => item.kind !== "opened")} ids={ids} link={link} />
+							<Timeline items={timeline.filter((item) => item.kind !== "opened")} ids={ids} link={link} branch={task.branch} />
 							<ChangeActions task={task} change={change} conflicts={conflicts} repo={repo} base={base} diffStatus={diff?.diff && diff.diff.head === change.reviewHead ? "loaded" : diff?.error ? "failed" : "loading"} api={api} onChanged={onChanged} />
 						</div>
 						<ChangeSidebar task={task} change={change} agent={agent} repo={repo} base={base} />

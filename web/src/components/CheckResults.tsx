@@ -29,14 +29,14 @@ const TONES = { passed: "good", failed: "bad", running: "warn", queued: "warn", 
 const WORDS = { passed: "passed", failed: "failed", running: "running", queued: "queued", pending: "not run yet" } as const;
 
 /** Check commands with their outcome; failed outputs open by default. */
-export function CheckResults({ gate, verify = [], compact = false }: { gate: Gate | undefined; verify?: string[]; compact?: boolean }) {
+export function CheckResults({ gate, verify = [], compact = false, branch = "main" }: { gate: Gate | undefined; verify?: string[]; compact?: boolean; branch?: string }) {
 	const rows = checkRows(verify, gate);
 	const conflicts = Array.isArray(gate?.result?.mergeConflict) ? gate.result.mergeConflict : [];
 	return (
 		<div className={`check-results${compact ? " check-results--compact" : ""}`}>
 			{conflicts.length ? (
 				<p className="check-results__conflict tone-bad">
-					<Icon name="conflict" size={14} /> Doesn't merge cleanly onto main: {conflicts.join(", ")}
+					<Icon name="conflict" size={14} /> Doesn't merge cleanly onto {branch}: {conflicts.join(", ")}
 				</p>
 			) : null}
 			{rows.length ? (

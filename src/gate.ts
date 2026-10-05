@@ -31,8 +31,10 @@ export interface GateItem {
 /** What the Coordinator hands a run when it starts. */
 export interface GatePlan {
 	baseHead: string;
+	/** The project's branch (main, master, ...); forks have it too. Absent from older plans: main. */
+	branch?: string;
 	base: { remote: string; token: string };
-	/** Where the approved commit is: a slice's fork (its main), or another branch. */
+	/** Where the approved commit is: a change's fork (its copy of the branch), or another branch (`ref`). */
 	fork: { remote: string; token: string; ref?: string };
 	/** The forks of the other slices in a group gate. */
 	others: { slice: string; head: string; remote: string; token: string }[];
@@ -95,8 +97,8 @@ export class Gate extends DurableObject<Env> {
 	 * run `checks`, returning the result. For coordinator-free mode, where the
 	 * merging agent asks for its own checks and nothing calls back.
 	 */
-	checkCommit(input: { baseHead: string; base: { remote: string; token: string }; fork: { remote: string; token: string; ref: string }; head: string; checks: string[] }): Promise<GateResult> {
-		const plan: GatePlan = { baseHead: input.baseHead, base: input.base, fork: input.fork, others: [], checks: input.checks, exclude: [] };
+	checkCommit(input: { baseHead: string; branch?: string; base: { remote: string; token: string }; fork: { remote: string; token: string; ref: string }; head: string; checks: string[] }): Promise<GateResult> {
+		const plan: GatePlan = { baseHead: input.baseHead, branch: input.branch, base: input.base, fork: input.fork, others: [], checks: input.checks, exclude: [] };
 		const run = this.checking.then(async () => {
 			try {
 				return await this.check({ slice: "free", head: input.head }, plan);
@@ -192,16 +194,17 @@ export class Gate extends DurableObject<Env> {
 		}
 		await container.setInactivityTimeout(10 * 60_000);
 
-		const base = await gitWithToken(container, plan.base.token, ["fetch", "-q", plan.base.remote, "main:refs/remotes/base/main", "--force"]);
-		if (base.exitCode !== 0) throw new Error(`fetch of the task base failed: ${clip(base.output, 2_000)}`);
-		// Fetch the fork's main (fetching a bare commit hash depends on server settings);
+		const branch = plan.branch ?? "main";
+		const base = await gitWithToken(container, plan.base.token, ["fetch", "-q", plan.base.remote, `${branch}:refs/remotes/base/${branch}`, "--force"]);
+		if (base.exitCode !== 0) throw new Error(`fetch of the project's ${branch} failed: ${clip(base.output, 2_000)}`);
+		// Fetch the fork's branch (fetching a bare commit hash depends on server settings);
 		// the approved commit is in its history.
-		const fork = await gitWithToken(container, plan.fork.token, ["fetch", "-q", plan.fork.remote, `${plan.fork.ref ?? "main"}:refs/remotes/slice/main`, "--force"]);
+		const fork = await gitWithToken(container, plan.fork.token, ["fetch", "-q", plan.fork.remote, `${plan.fork.ref ?? branch}:refs/remotes/slice/head`, "--force"]);
 		if (fork.exitCode !== 0) throw new Error(`fetch of the slice failed: ${clip(fork.output, 2_000)}`);
 		const known = await run(container, ["git", "cat-file", "-e", `${item.head}^{commit}`]);
 		if (known.exitCode !== 0) throw new Error(`the approved commit ${item.head} is not in the slice's fork`);
 		for (const other of plan.others) {
-			const f = await gitWithToken(container, other.token, ["fetch", "-q", other.remote, `main:refs/remotes/${other.slice}/main`, "--force"]);
+			const f = await gitWithToken(container, other.token, ["fetch", "-q", other.remote, `${branch}:refs/remotes/${other.slice}/head`, "--force"]);
 			if (f.exitCode !== 0) throw new Error(`fetch of ${other.slice} failed: ${clip(f.output, 2_000)}`);
 		}
 

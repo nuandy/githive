@@ -53,7 +53,7 @@ export interface Slice extends SliceSpec {
 	inbox?: { at: string; text: string }[];
 	/** Artifacts repo name of this slice's fork. */
 	repo?: string;
-	/** Last commit seen on the fork's main. */
+	/** Last commit seen on the fork's branch (the project's branch). */
 	head?: string;
 	/** Paths changed relative to the task base, as of `head`. */
 	touched: string[];
@@ -139,7 +139,7 @@ export type CheckStatus = "clean" | "disjoint" | "conflict";
 
 /** Result of test-merging two in-progress heads (Merge-ahead). */
 export interface MergeCheck {
-	/** Slice ids, sorted. "base" stands for the task base's main. */
+	/** Slice ids, sorted. "base" stands for the project's branch. */
 	pair: [string, string];
 	heads: [string, string];
 	status: CheckStatus;
@@ -158,6 +158,8 @@ export interface Task {
 	baseRepo?: string;
 	/** The project's head when the task was opened. */
 	baseCommit?: string;
+	/** The project's branch that changes merge into: the repo's default branch when the task opened (main, master, ...). Absent on older tasks: main. */
+	branch?: string;
 	/** Commands the integration gate runs on the combined code. Empty: integrate on approval. */
 	verify: string[];
 	review: ReviewPolicy;

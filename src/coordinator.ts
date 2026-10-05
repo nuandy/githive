@@ -6,6 +6,7 @@ import type { LaneChangeAnswer, LaneChangeCoordinator, LaneChangeRequest, LaneCh
 import { BUILDER_PARK_TIMEOUT_MS, type BuilderResumeCredentials, type ParkBuilderResult } from "./parking-contract";
 import { isTransientFailure, retryTransient } from "./retry";
 import { Workspace } from "./git";
+import { projectBranch } from "./project-branch";
 import { boundedUnifiedDiff } from "./code-view";
 import { type LedgerEntry, clipText, diff, fromDoc, replay, toDoc } from "./ledger";
 import { readLedger } from "./ledger-git";
@@ -37,7 +38,7 @@ import {
 } from "./types";
 
 const conflictMessage = (files: string[]) =>
-	`Review approved your slice, but it conflicts with work already integrated into the task base, in ${files.join(", ")}. Call fetch_base, merge it with \`git merge base/main\`, resolve the conflicts inside your lane, run your tests, then commit_and_push and finish.`;
+	`Review approved your slice, but it conflicts with work already integrated into the task base, in ${files.join(", ")}. Call fetch_base, merge what it fetched, resolve the conflicts inside your lane, run your tests, then commit_and_push and finish.`;
 
 /** Times a slice can go back to its builder before it waits for a human. */
 const MAX_REVISIONS = 3;
@@ -83,13 +84,13 @@ export interface OpenTaskInput {
 }
 
 /** A new open task on `repo`, based at `head`. Throws `[400]` for invalid options. */
-export function openTaskFor(id: string, repo: string, head: string, input: OpenTaskInput = {}): Task {
+export function openTaskFor(id: string, repo: string, head: string, input: OpenTaskInput = {}, branch = "main"): Task {
 	const review = input.review ?? DEFAULT_POLICY;
 	validatePolicy(review);
 	const leaseMinutes = input.leaseMinutes ?? 30;
 	if (!Number.isInteger(leaseMinutes) || leaseMinutes < 5 || leaseMinutes > 1440) fail(400, "leaseMinutes must be a whole number from 5 to 1440");
 	return newTask(
-		{ id, repo, goal: `Open changes on ${repo}`, phase: "building", mode: "open", leaseMinutes, baseRepo: repo, baseCommit: head },
+		{ id, repo, goal: `Open changes on ${repo}`, phase: "building", mode: "open", leaseMinutes, baseRepo: repo, baseCommit: head, branch },
 		{ verify: (input.verify ?? []).filter((c) => typeof c === "string" && c.trim()), review, limits: validateLimits(input.limits), anchor: head },
 	);
 }
@@ -99,6 +100,7 @@ function sliceJobBase(task: Task, slice: Slice): Omit<SliceJob, "remote" | "toke
 	return {
 		taskId: task.id,
 		goal: task.goal,
+		branch: projectBranch(task),
 		slice: { id: slice.id, title: slice.title, owns: slice.owns, instructions: slice.instructions, tests: slice.tests },
 		siblings: task.slices.filter((s) => s !== slice && s.status !== "abandoned").map(({ id, title, owns }) => ({ id, title, owns })),
 		verify: task.verify,
@@ -373,7 +375,7 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 			} else {
 				// Agent-supplied commit IDs are untrusted. Only Artifacts' current fork
 				// head proves what was actually pushed by the owner.
-				const pushedHead = await headOf(this.env.ARTIFACTS, owner.repo!);
+				const pushedHead = await headOf(this.env.ARTIFACTS, owner.repo!, projectBranch(task));
 				if (!pushedHead || pushedHead === task.baseCommit) fail(409, "a done answer requires a current pushed change commit in the owner's fork");
 				request.status = "answered";
 				request.answerCommit = pushedHead;
@@ -544,7 +546,7 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 		if (!waiting || slice.status !== "building" || slice.parkedAt) return false;
 		// Only auto-park when the fork is exactly at the Coordinator's recorded
 		// head; Builder.park performs the additional local dirty/unpushed check.
-		const forkHead = await headOf(this.env.ARTIFACTS, slice.repo!);
+		const forkHead = await headOf(this.env.ARTIFACTS, slice.repo!, projectBranch(task));
 		if (!forkHead || forkHead !== slice.head) return false;
 		try {
 			const result = await this.parkBuilderLocked(task, slice.id);
@@ -630,7 +632,7 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 		const base = slice.mergeBase ?? task.baseCommit;
 		if (!base) fail(409, `change ${sliceId} has no base to compare with`);
 		if (!slice.repo) fail(409, `change ${sliceId} has no repository`);
-		const ws = await Workspace.clone(await remoteFor(this.env.ARTIFACTS, slice.repo, "read"));
+		const ws = await Workspace.clone(await remoteFor(this.env.ARTIFACTS, slice.repo, "read"), projectBranch(task));
 		const files = await ws.changedFiles(base, head);
 		return { base, head, ...boundedUnifiedDiff(files) };
 	}
@@ -704,12 +706,13 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 		let fork: { remote: string; token: string };
 		let start: string;
 		try {
-			const project = (await this.load()).repo;
+			const current = await this.load();
+			const project = current.repo;
 			// A resumed open may have made its fork already.
 			const made = resumed ? await remoteFor(this.env.ARTIFACTS, repo, "write").then((r) => ({ remote: r.url, token: r.token }), () => null) : null;
 			fork = made ?? (await this.withForkSlot(() => forkAndWait(this.env.ARTIFACTS, project, repo, `${title} (open change on ${project})`)));
-			// The fork's own head is where this change starts, even if main moved meanwhile.
-			start = (await headOf(this.env.ARTIFACTS, repo)) ?? fail(500, "the new fork has no commits");
+			// The fork's own head is where this change starts, even if the project moved meanwhile.
+			start = (await headOf(this.env.ARTIFACTS, repo, projectBranch(current))) ?? fail(500, "the new fork has no commits");
 		} catch (err) {
 			await this.mutate(async (task) => {
 				task.slices = task.slices.filter((s) => !(s.id === id && s.status === "opening"));
@@ -988,7 +991,7 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 			const snapshot = await this.load();
 			const seen = this.buildingSlice(snapshot, sliceId);
 			const before = seen.head;
-			const head = await headOf(this.env.ARTIFACTS, seen.repo!);
+			const head = await headOf(this.env.ARTIFACTS, seen.repo!, projectBranch(snapshot));
 			if (!head || head === before) return { task: snapshot, checks: [] as MergeCheck[], changed: false };
 			const checks = await mergeAhead(this.env.ARTIFACTS, snapshot, seen);
 
@@ -1027,7 +1030,7 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 	/** Pin the slice's current head as the commit under review. */
 	private async pinForReview(task: Task, slice: Slice) {
 		if (slice.status !== "building") fail(409, `slice ${slice.id} is ${slice.status}`);
-		const head = await headOf(this.env.ARTIFACTS, slice.repo!);
+		const head = await headOf(this.env.ARTIFACTS, slice.repo!, projectBranch(task));
 		if (!head || head === (slice.startCommit ?? task.baseCommit)) fail(409, `slice ${slice.id} has no work to review`);
 		slice.reviewHead = head;
 		return head;
@@ -1159,7 +1162,7 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 			const members = gateMembers(task, sliceId, head, group);
 			if (!members) return null;
 			const [lead, ...others] = members;
-			const baseHead = (await headOf(this.env.ARTIFACTS, task.baseRepo!))!;
+			const baseHead = (await headOf(this.env.ARTIFACTS, task.baseRepo!, projectBranch(task)))!;
 			const exclude = gateExclusions(task.slices, members.map((m) => m.id));
 			const base = await remoteFor(this.env.ARTIFACTS, task.baseRepo!, "read", 3600);
 			const forks = await Promise.all(members.map((m) => remoteFor(this.env.ARTIFACTS, m.repo!, "read", 3600)));
@@ -1168,6 +1171,7 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 			await this.save(task);
 			return {
 				baseHead,
+				branch: projectBranch(task),
 				base: { remote: base.url, token: base.token },
 				fork: { remote: forks[0].url, token: forks[0].token },
 				others: others.map((o, i) => ({ slice: o.id, head: o.reviewHead!, remote: forks[i + 1].url, token: forks[i + 1].token })),
@@ -1191,7 +1195,7 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 			const members = gateMembers(task, sliceId, result.head, group);
 			if (!members) return { outcome: "stale" as const };
 			const [slice, ...others] = members;
-			const baseHead = await headOf(this.env.ARTIFACTS, task.baseRepo!);
+			const baseHead = await headOf(this.env.ARTIFACTS, task.baseRepo!, projectBranch(task));
 			if (baseHead !== result.baseHead) {
 				this.note(task, slice.reviewHead, `${slice.id}: gate result discarded, the base moved from ${short(result.baseHead)} to ${short(baseHead)}; re-running`);
 				if (others.length) await this.startGroupGate(task, slice, others);
@@ -1292,7 +1296,7 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 			if (!slice.reviewHead) fail(409, `slice ${sliceId} has no commit under review`);
 			const builder = await this.env.BUILDER.getByName(slice.repo!).state();
 			if (builder && (builder.status === "queued" || builder.status === "working")) fail(409, "the slice's builder is still working");
-			const head = await headOf(this.env.ARTIFACTS, slice.repo!);
+			const head = await headOf(this.env.ARTIFACTS, slice.repo!, projectBranch(task));
 			if (head !== slice.reviewHead) fail(409, `the fork moved to ${head} after review of ${slice.reviewHead}`);
 
 			const by = accessIdentityLabel(actor);
@@ -1360,15 +1364,15 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 	 */
 	private async integrateSlices(task: Task, slices: Slice[]): Promise<{ ok: true } | { ok: false; slice: Slice; files: string[] }> {
 		for (const slice of slices) {
-			const head = await headOf(this.env.ARTIFACTS, slice.repo!);
+			const head = await headOf(this.env.ARTIFACTS, slice.repo!, projectBranch(task));
 			if (head !== slice.reviewHead) fail(409, `${slice.id} moved to ${head} after review of ${slice.reviewHead}`);
 			if (slice.outOfLane.length) fail(409, `${slice.id} changed paths outside its lane: ${slice.outOfLane.join(", ")}`);
 		}
-		const ws = await Workspace.clone(await remoteFor(this.env.ARTIFACTS, task.baseRepo!, "write"));
+		const ws = await Workspace.clone(await remoteFor(this.env.ARTIFACTS, task.baseRepo!, "write"), projectBranch(task));
 		for (const slice of slices) {
 			await ws.fetch(slice.id, await remoteFor(this.env.ARTIFACTS, slice.repo!));
 			try {
-				await ws.merge(`refs/remotes/${slice.id}/main`, `Integrate ${slice.id}: ${slice.title}`);
+				await ws.merge(`refs/remotes/${slice.id}/${ws.branch}`, `Integrate ${slice.id}: ${slice.title}`);
 			} catch (err) {
 				if (err instanceof git.Errors.MergeConflictError) return { ok: false, slice, files: err.data.filepaths };
 				throw err;
@@ -1380,9 +1384,9 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 			slice.status = "integrated";
 			slice.endedAt = new Date().toISOString();
 			slice.attention = undefined;
-			this.note(task, slice.reviewHead, `${slice.id} merged into main${slices.length > 1 ? `, together with ${slices.filter((s) => s !== slice).map((s) => s.id).join(", ")}` : ""}`);
+			this.note(task, slice.reviewHead, `${slice.id} merged into ${projectBranch(task)}${slices.length > 1 ? `, together with ${slices.filter((s) => s !== slice).map((s) => s.id).join(", ")}` : ""}`);
 		}
-		const integratedHead = await headOf(this.env.ARTIFACTS, task.baseRepo!);
+		const integratedHead = await headOf(this.env.ARTIFACTS, task.baseRepo!, projectBranch(task));
 		for (const request of task.laneChangeRequests ?? []) {
 			if (!slices.some((slice) => slice.id === request.owner) || (request.status !== "pending" && request.status !== "answered")) continue;
 			let included = false;
@@ -1399,7 +1403,7 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 				request.status = "integrated";
 				request.integratedAt = new Date().toISOString();
 				this.note(task, request.answerCommit, `Cross-lane request ${request.id} from ${request.requester} fulfilled by slice ${request.owner}; change commit ${request.answerCommit} is integrated`);
-				const message = `Cross-lane request ${request.id} was integrated with owner slice ${request.owner} at commit ${request.answerCommit}. Call fetch_base and merge base/main to get it, then re-run your tests.`;
+				const message = `Cross-lane request ${request.id} was integrated with owner slice ${request.owner} at commit ${request.answerCommit}. Call fetch_base and merge what it fetched to get it, then re-run your tests.`;
 				await this.wakeLaneRequester(task, request, message);
 			} else {
 				const message = `Owner slice ${request.owner} integrated without the answered change commit for cross-lane request ${request.id} (${request.path}). The owner can no longer change its lane; this request needs a human.`;

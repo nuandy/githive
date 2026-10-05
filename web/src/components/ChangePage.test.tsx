@@ -29,6 +29,15 @@ function render(overrides: Partial<ChangePageProps> = {}) {
 }
 
 describe("the change page", () => {
+	it("names the project's own branch, whatever it is", () => {
+		const change = makeChange({ status: "integrated", head: "h1", endedAt: ago(1) });
+		const html = render({ change, task: makeTask({ branch: "master", slices: [change] }) });
+		expect(html).toMatch(/merged <code[^>]*>changes\/add-stats<\/code> into <code[^>]*>master<\/code>/);
+		expect(html).toContain("Merged into master");
+		expect(html).not.toMatch(/into <code[^>]*>main</);
+	});
+
+
 	it("reads like a pull request header with Conversation, Files changed and Checks tabs", () => {
 		const html = render();
 		expect(html).toContain("Add stats page");

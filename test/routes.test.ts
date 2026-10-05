@@ -18,6 +18,10 @@ vi.mock("../src/election-git", () => ({
 		}
 	},
 }));
+vi.mock("../src/git", async (importOriginal) => ({
+	...(await importOriginal<typeof import("../src/git")>()),
+	defaultBranch: vi.fn(async () => "main"),
+}));
 vi.mock("../src/artifacts", async (importOriginal) => ({
 	...(await importOriginal<typeof import("../src/artifacts")>()),
 	headOf: vi.fn(async () => "main0"),

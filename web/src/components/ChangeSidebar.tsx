@@ -149,7 +149,7 @@ export function ChangeSidebar({ task, change, agent, repo, base }: ChangeSidebar
 								{words.label}
 								{builder?.status === "parked" && builder.parkedAt ? <span className="muted"> since {timeAgo(builder.parkedAt)}</span> : null}
 							</p>
-							{builder?.error && builder.status === "failed" ? <p className="tone-bad sidebar-small">{humanizeText(builder.error, ids)}</p> : null}
+							{builder?.error && builder.status === "failed" ? <p className="tone-bad sidebar-small">{humanizeText(builder.error, ids, task.branch)}</p> : null}
 							{parkedOn.length ? (
 								<p className="sidebar-small">
 									Waiting on{" "}
@@ -163,7 +163,7 @@ export function ChangeSidebar({ task, change, agent, repo, base }: ChangeSidebar
 							) : null}
 							{last ? (
 								<p className="muted sidebar-small">
-									Last: {humanizeText(last.event, ids)}
+									Last: {humanizeText(last.event, ids, task.branch)}
 									{last.at ? ` · ${timeAgo(last.at)}` : ""}
 								</p>
 							) : null}

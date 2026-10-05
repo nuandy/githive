@@ -1,7 +1,8 @@
 import { ensureRepo, forkAndWait, headOf, remoteFor, reviewerName } from "../artifacts";
 import { GitCasLog } from "../election-git";
 import { fail } from "../errors";
-import { type Remote, Workspace } from "../git";
+import { defaultBranch, type Remote, Workspace } from "../git";
+import { projectBranch } from "../project-branch";
 import { claimStore } from "./claim-store";
 import type { Registry } from "./claims";
 import type { FreeContext, HostedStatus } from "./mcp";
@@ -57,12 +58,13 @@ export function freeContextFor(env: Env, by: string | undefined, caller: { agent
 			return log as GitCasLog<S>;
 		},
 		agentStatus: (repo, change, head, roles) => freeAgentStatus(env, repo, change, head, roles),
-		head: async (repo) => (await headOf(env.ARTIFACTS, repo)) ?? fail(409, `${repo} has no commits`),
+		head: async (repo, branch) => (await headOf(env.ARTIFACTS, repo, branch)) ?? fail(409, `${repo} has no ${branch} branch`),
+		defaultBranch: async (repo) => (await defaultBranch(await remoteFor(env.ARTIFACTS, repo, "read", 3600))) ?? fail(409, `${repo} has no commits`),
 		// Checks run in the Gate's container, one Gate per repo.
-		runChecks: (repo) => async ({ base, head, ref, commands, source }) => {
+		runChecks: (repo) => async ({ base, branch, head, ref, commands, source }) => {
 			const remote = await remoteFor(env.ARTIFACTS, repo, "read", 3600);
 			const change = source ?? remote;
-			const result = await env.GATE.getByName(`free:${repo}`).checkCommit({ baseHead: base, base: { remote: remote.url, token: remote.token }, fork: { remote: change.url, token: change.token, ref }, head, checks: commands });
+			const result = await env.GATE.getByName(`free:${repo}`).checkCommit({ baseHead: base, branch, base: { remote: remote.url, token: remote.token }, fork: { remote: change.url, token: change.token, ref }, head, checks: commands });
 			return { passed: result.passed, results: result.results.map((r) => ({ command: r.command, exitCode: r.exitCode, output: r.output })) };
 		},
 	};
@@ -94,11 +96,13 @@ async function changeBrief(env: Env, repo: string, change: string) {
 	return {
 		read,
 		own,
+		branch: projectBranch(registry),
 		/** Where the change's branch lives: its own fork. */
 		source: (scope: "read" | "write") => changeRemote(env, repo, change, scope, 3 * 3600),
 		policy: registry?.policy ?? { required: 2, vetoes: ["security"] },
 		job: {
 			taskId: `free:${repo}`,
+			branch: projectBranch(registry),
 			repo: freeAgentName(repo, change),
 			goal: own?.intent ?? change,
 			verify: registry?.verify ?? [],
@@ -118,11 +122,11 @@ async function changeBrief(env: Env, repo: string, change: string) {
 export async function startFreeReviewers(env: Env, input: { repo: string; change: string; roles?: string[]; summary?: string; mergeWhenApproved?: boolean }) {
 	const { repo, change } = input;
 	const ref = `changes/${change}`;
-	const { read, own, policy, job, source } = await changeBrief(env, repo, change);
+	const { read, own, policy, job, source, branch } = await changeBrief(env, repo, change);
 	// By default the tests role and every role that can veto.
 	const roles = input.roles?.length ? input.roles : [...new Set(["tests", ...policy.vetoes])];
 	const from = await source("read");
-	const ws = await Workspace.clone(read);
+	const ws = await Workspace.clone(read, branch);
 	const head = await ws.fetch("change", from, ref);
 	const baseCommit = await ws.mergeBase(await ws.head(), head);
 	const review = { ...job, remote: from.url, token: from.token, head, baseCommit, buildSummary: input.summary, free: { repo, change, ref, agent: own?.agent ?? change, mergeWhenApproved: !!input.mergeWhenApproved } };

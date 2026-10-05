@@ -13,7 +13,7 @@ import { lastActivityOf, openTaskId, taskSummary } from "./open-mode";
 import { handleMcpBody, type McpContext } from "./mcp";
 import { type FreeContext, freeAudit, freeOpenCount, freeSnapshot } from "./free/mcp";
 import type { Registry } from "./free/claims";
-import { Workspace } from "./git";
+import { defaultBranch, Workspace } from "./git";
 import { freeAgentName, freeContextFor } from "./free/env";
 import { identityLabel } from "./free/stamp";
 
@@ -126,10 +126,12 @@ async function openRepoTask(env: Env, repo: string, input: OpenTaskInput = {}): 
 	}
 	// No coordinator to create: the task's log in Git starts with it, and the
 	// first peer that needs a decision becomes its leader.
-	const head = (await headOf(env.ARTIFACTS, repo)) ?? fail(409, `${repo} has no commits`);
-	const task = openTaskFor(id, repo, head, input);
+	// Changes merge into the repo's default branch, whatever it's called.
+	const branch = (await defaultBranch(await remoteFor(env.ARTIFACTS, repo, "read"))) ?? fail(409, `${repo} has no commits`);
+	const head = (await headOf(env.ARTIFACTS, repo, branch)) ?? fail(409, `${repo} has no commits`);
+	const task = openTaskFor(id, repo, head, input, branch);
 	const log = new GitCasLog<Task>(() => remoteFor(env.ARTIFACTS, repo, "write"), id);
-	await openLog(log, task, [{ commit: head, text: `Open mode started on ${repo}: agents claim their lanes as they arrive`, at: new Date().toISOString() }]);
+	await openLog(log, task, [{ commit: head, text: `Open mode started on ${repo} (branch ${branch}): agents claim their lanes as they arrive`, at: new Date().toISOString() }]);
 	await taskIndex(env).add({ id, repo, goal: task.goal, createdAt: task.createdAt, elected: true });
 	return task;
 }

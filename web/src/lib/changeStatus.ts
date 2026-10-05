@@ -53,7 +53,7 @@ export interface ChecksSummary {
 	total: number;
 	passed: number;
 	failed: number;
-	/** Files that did not merge cleanly onto main in the last check run. */
+	/** Files that did not merge cleanly onto the project's branch in the last check run. */
 	conflicts: string[];
 	label: string;
 	tone: Tone;
@@ -105,7 +105,7 @@ export function reviewSummary(change: Change, policy: ReviewPolicy): ReviewSumma
 	return { ...base, state: "pending", label: count, tone: "warn" };
 }
 
-export function checksSummary(change: Change, verify: string[]): ChecksSummary {
+export function checksSummary(change: Change, verify: string[], branch = "main"): ChecksSummary {
 	const gate = currentGate(change);
 	const results = Array.isArray(gate?.result?.results) ? gate.result.results : [];
 	const conflicts = Array.isArray(gate?.result?.mergeConflict) ? gate.result.mergeConflict : [];
@@ -127,15 +127,15 @@ export function checksSummary(change: Change, verify: string[]): ChecksSummary {
 		case "passed":
 			return { ...base, state: "passed", label: total ? `${passed}/${total} checks passed` : "Checks passed", tone: "good" };
 		default: {
-			const label = conflicts.length ? "Conflicts with main" : total ? `${failed} of ${total} checks failed` : "Checks failed";
+			const label = conflicts.length ? `Conflicts with ${branch}` : total ? `${failed} of ${total} checks failed` : "Checks failed";
 			return { ...base, state: "failed", label, tone: "bad" };
 		}
 	}
 }
 
 /** The one status a person sees for a change, most urgent first. */
-export function deriveChangeStatus(change: Change, policy: ReviewPolicy): ChangeStatus {
-	if (change.status === "integrated") return { kind: "merged", label: "Merged", tone: "good", description: "Merged into main." };
+export function deriveChangeStatus(change: Change, policy: ReviewPolicy, branch = "main"): ChangeStatus {
+	if (change.status === "integrated") return { kind: "merged", label: "Merged", tone: "good", description: `Merged into ${branch}.` };
 	if (change.status === "abandoned") return { kind: "abandoned", label: "Abandoned", tone: "neutral", description: "Abandoned; its claim is free again." };
 	if (change.attention !== undefined && change.attention !== null)
 		return { kind: "needs-you", label: "Needs you", tone: "needs", description: change.attention || "The agents can't go on without a person." };
@@ -145,7 +145,7 @@ export function deriveChangeStatus(change: Change, policy: ReviewPolicy): Change
 		return { kind: "running-checks", label: "Running checks", tone: "warn", description: "Approved; the checks are running before it merges." };
 	if (gate?.status === "waiting")
 		return { kind: "waiting", label: "Waiting to merge", tone: "warn", description: "Waiting for other changes to merge before its checks run again." };
-	if (gate?.status === "passed") return { kind: "ready", label: "Ready to merge", tone: "good", description: "Approved and checks passed; merging into main." };
+	if (gate?.status === "passed") return { kind: "ready", label: "Ready to merge", tone: "good", description: `Approved and checks passed; merging into ${branch}.` };
 	if (change.status === "opening") return { kind: "opening", label: "Opening", tone: "neutral", description: "Its claim is held while its branch is created." };
 	const review = reviewSummary(change, policy);
 	if (review.state === "approved" || review.state === "waived")

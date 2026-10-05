@@ -100,7 +100,7 @@ function ReviewCard({ item }: { item: TimelineItem }) {
 	);
 }
 
-export function Timeline({ items, ids = [], link }: { items: TimelineItem[]; ids?: string[]; link?: (id: string) => string }) {
+export function Timeline({ items, ids = [], link, branch }: { items: TimelineItem[]; ids?: string[]; link?: (id: string) => string; branch?: string }) {
 	if (!items.length) return null;
 	const text = (value: string) => (link ? linkIds(value, ids, link) : value);
 	return (
@@ -132,7 +132,7 @@ export function Timeline({ items, ids = [], link }: { items: TimelineItem[]; ids
 								</p>
 								{item.body ? <div className={`timeline__body${item.kind === "pushed" ? " timeline__body--commit" : ""}`}>{text(item.body)}</div> : null}
 								{item.gate?.result?.results?.length || item.gate?.result?.mergeConflict?.length ? (
-									<CheckResults gate={item.gate} compact />
+									<CheckResults gate={item.gate} compact branch={branch} />
 								) : null}
 							</>
 						)}

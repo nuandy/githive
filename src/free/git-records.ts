@@ -44,9 +44,9 @@ export async function readShardHistories(remotes: Remote[], repo: string) {
 
 const trailer = (message: string, name: string) => message.match(new RegExp(`^${name}: (.+)$`, "m"))?.[1]?.trim();
 
-/** Main's commits after `baseline`, oldest first, following first parents: every one is audited. */
-export async function readMainMerges(remote: Remote, baseline: string): Promise<MergeRecord[]> {
-	const ws = await Workspace.clone(remote);
+/** The project branch's commits after `baseline`, oldest first, following first parents: every one is audited. */
+export async function readMainMerges(remote: Remote, baseline: string, branch: string): Promise<MergeRecord[]> {
+	const ws = await Workspace.clone(remote, branch);
 	const records: MergeRecord[] = [];
 	for (let oid = await ws.head(); oid && oid !== baseline; ) {
 		const { commit } = await git.readCommit({ fs: ws.fs, dir: "/repo", oid });

@@ -44,11 +44,13 @@ export interface ReleaseRecord {
 export interface Registry {
 	claims: ClaimRecord[];
 	released: ReleaseRecord[];
-	/** Main's commit when the mode started: the audit reads main after it. */
+	/** The project's branch: its default branch when the mode started (main, master, ...). Absent on older registries: main. */
+	branch?: string;
+	/** The branch's commit when the mode started: the audit reads the branch after it. */
 	baseline?: string;
 	/** How many approvals a merge needs, and which roles veto. */
 	policy?: ReviewPolicy;
-	/** The project's checks, run on main plus a change before it merges. */
+	/** The project's checks, run on the branch plus a change before it merges. */
 	verify?: string[];
 	/** Blueprint's public key, to check the stamps on records and merges with. */
 	stampKey?: string;
@@ -79,12 +81,12 @@ export interface Conflict {
 
 const empty = (): Registry => ({ claims: [], released: [] });
 
-/** Start coordinator-free mode on a repo: the registry's first entry records main's baseline and the review policy. Harmless to repeat. */
-export async function startFree(log: CasLog<Registry>, input: { baseline: string; policy: ReviewPolicy; verify?: string[]; stampKey?: string; shardDepth?: number; recordsRepos?: number }) {
+/** Start coordinator-free mode on a repo: the registry's first entry records its branch, the branch's baseline and the review policy. Harmless to repeat. */
+export async function startFree(log: CasLog<Registry>, input: { baseline: string; branch?: string; policy: ReviewPolicy; verify?: string[]; stampKey?: string; shardDepth?: number; recordsRepos?: number }) {
 	const outcome = await appendRecord<Registry, "started">(log, "blueprint", empty, (state) =>
 		state.baseline
 			? { refused: "started" }
-			: { state: { ...state, baseline: input.baseline, policy: input.policy, verify: input.verify ?? [], stampKey: input.stampKey, ...(input.shardDepth ? { shardDepth: input.shardDepth } : {}), ...(input.shardDepth && input.recordsRepos ? { recordsRepos: input.recordsRepos } : {}) }, text: `Coordinator-free mode starts at ${input.baseline}` },
+			: { state: { ...state, baseline: input.baseline, ...(input.branch ? { branch: input.branch } : {}), policy: input.policy, verify: input.verify ?? [], stampKey: input.stampKey, ...(input.shardDepth ? { shardDepth: input.shardDepth } : {}), ...(input.shardDepth && input.recordsRepos ? { recordsRepos: input.recordsRepos } : {}) }, text: `Coordinator-free mode starts at ${input.baseline}${input.branch ? ` on ${input.branch}` : ""}` },
 	);
 	return { started: outcome.ok };
 }

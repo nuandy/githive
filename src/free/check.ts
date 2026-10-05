@@ -3,7 +3,7 @@ import { inLane } from "../open-mode";
 import type { ClaimRecord } from "./claims";
 
 // An agent's early check on its own change, before merging: does it still
-// merge into main, and is everything it changed inside its claim. It reports;
+// merge into the project's branch, and is everything it changed inside its claim. It reports;
 // it decides nothing.
 //
 // It doesn't test-merge other agents' changes (Merge-ahead, as the
@@ -13,8 +13,10 @@ import type { ClaimRecord } from "./claims";
 // own check shows them. Checking every other change would cost a fetch each.
 
 export interface CheckInput {
-	/** The project repo (main). */
+	/** The project repo. */
 	project: Remote;
+	/** The project's branch the change would merge into. */
+	branch: string;
 	/** Where the change's branch lives (its fork, or the project repo). */
 	source: Remote;
 	claims: ClaimRecord[];
@@ -23,7 +25,7 @@ export interface CheckInput {
 
 export async function checkChange(input: CheckInput) {
 	const { change, claims } = input;
-	const ws = await Workspace.clone(input.project);
+	const ws = await Workspace.clone(input.project, input.branch);
 	const main = await ws.head();
 	const head = await ws.fetch("change", input.source, `changes/${change}`).catch(() => null);
 	if (!head) throw new Error(`[409] changes/${change} has nothing pushed to check`);
@@ -33,6 +35,8 @@ export async function checkChange(input: CheckInput) {
 	return {
 		change,
 		head,
+		/** The project's branch it was checked against (the result's `main` is that branch, whatever its name). */
+		branch: ws.branch,
 		main: withMain.clean ? { head: main, clean: true } : { head: main, clean: false, conflicts: withMain.files },
 		outsideClaim: files.filter((f) => !own || !inLane(f, own.paths)),
 	};

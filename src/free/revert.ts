@@ -20,7 +20,9 @@ export interface RevertInput {
 	claims: CasLog<Registry>;
 	votes: CasLog<Votes>;
 	stamper?: Stamper;
-	/** The commit on main to revert. */
+	/** The project's branch. */
+	branch: string;
+	/** The commit on the branch to revert. */
 	target: string;
 	/** The audit's report: the target must have an open violation in it. */
 	violations: Violation[];
@@ -32,7 +34,7 @@ export type RevertOutcome = { ok: true; commit: string } | { ok: false; reasons:
 export async function revertViolation(input: RevertInput): Promise<RevertOutcome> {
 	if (!input.violations.some((v) => v.commit === input.target && !v.resolvedBy)) return { ok: false, reasons: [`${input.target} has no reported violations to revert`] };
 	for (let attempt = 1; ; attempt++) {
-		const ws = await Workspace.clone(input.remote);
+		const ws = await Workspace.clone(input.remote, input.branch);
 		const head = await ws.head();
 		const { commit } = await git.readCommit({ fs: ws.fs, dir: DIR, oid: input.target });
 		const before = commit.parent[0];
@@ -69,7 +71,7 @@ export async function revertViolation(input: RevertInput): Promise<RevertOutcome
 		].join("\n");
 		const oid = await git.commit({ fs: ws.fs, dir: DIR, message, author: BOT });
 		try {
-			await ws.push("main");
+			await ws.push();
 		} catch (err) {
 			// Main moved under us: look again on top of it.
 			if (attempt < ATTEMPTS && (err instanceof git.Errors.PushRejectedError || err instanceof git.Errors.GitPushError)) continue;

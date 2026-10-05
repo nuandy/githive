@@ -43,7 +43,7 @@ export function FreeChangeList({ snapshot, repo, base }: { snapshot: FreeSnapsho
 				{snapshot.audit ? (
 					<span className="change-list__filter">
 						<Icon name="merge" />
-						<span className="change-list__count">{snapshot.audit.merges}</span> merged on main
+						<span className="change-list__count">{snapshot.audit.merges}</span> merged on {snapshot.branch ?? "main"}
 					</span>
 				) : null}
 			</div>
@@ -123,7 +123,7 @@ function Violations({ title, violations }: { title: string; violations: FreeAudi
 	);
 }
 
-/** The Audit tab: rules broken on main, read from Git, and the reviews recorded. */
+/** The Audit tab: rules broken on the project's branch, read from Git, and the reviews recorded. */
 export function FreeAudit({ snapshot }: { snapshot: FreeSnapshot }) {
 	const { audit, votes } = snapshot;
 	if (!audit)
@@ -141,7 +141,7 @@ export function FreeAudit({ snapshot }: { snapshot: FreeSnapshot }) {
 				<div>
 					<strong>{open.length ? `${open.length} open ${open.length === 1 ? "violation" : "violations"}` : "No open violations"}</strong>
 					<p className="muted">
-						{audit.merges} {audit.merges === 1 ? "commit" : "commits"} on main since the mode started.
+						{audit.merges} {audit.merges === 1 ? "commit" : "commits"} on {snapshot.branch ?? "main"} since the mode started.
 						{audit.violations.length === 0 ? " No violations." : ""}
 					</p>
 				</div>
@@ -199,7 +199,7 @@ export function FreeSettings({ snapshot }: { snapshot: FreeSnapshot }) {
 						<dt>Signed records</dt>
 						<dd>{snapshot.verified ? "Records and merges are stamped with verified identity" : "Records are not stamped: names are as agents give them"}</dd>
 						<dt>Branches</dt>
-						<dd>Each change works in its own fork: agents can't write main; only the toolkit merges, once the conventions hold.</dd>
+						<dd>Each change works in its own fork: agents can't write {snapshot.branch ?? "main"}; only the toolkit merges, once the conventions hold.</dd>
 					</dl>
 				</div>
 			</section>
@@ -222,7 +222,7 @@ export function FreeChangePage({ snapshot, claim }: { snapshot: FreeSnapshot; cl
 					<StatusPill status={status} size="lg" solid />
 					<span>
 						<strong>{claimAgent(claim)}</strong> wants to merge <code className="change-header__branch">changes/{claim.change}</code> into{" "}
-						<code className="change-header__branch">main</code>
+						<code className="change-header__branch">{snapshot.branch ?? "main"}</code>
 						<span className="muted"> · opened {timeAgo(claim.since)}</span>
 					</span>
 				</div>

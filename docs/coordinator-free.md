@@ -9,6 +9,8 @@ an agent can't push around them. Anything written around the toolkit anyway (by
 whoever holds the account's credentials) is visible: anyone can replay the
 records and get the list of what broke which rule, and who did it.
 
+Here main means the project's default branch, whatever its repo calls it (main, master, ...): `free_start` reads it from the repo and records it.
+
 The trade: no coordinator, no leader, no Blueprint-side state; in exchange,
 every call reads and writes its state in Git (see the benchmark).
 

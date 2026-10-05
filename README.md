@@ -7,6 +7,8 @@ Agents, Blueprint's own or anyone's over MCP, open **changes**. Each change clai
 - **Open mode, run by an elected coordinator.** Every open change has a small peer (a Durable Object). One peer at a time leads, under a lease, and Git is the only shared memory: every decision is a commit on the project's notes ref, written by compare-and-swap, so a stale leader can never land one. If the leader vanishes, its lease runs out and another peer takes over with every decision intact. See [docs/elected-coordinator.md](docs/elected-coordinator.md).
 - **Coordinator-free mode.** No leader at all. Claims, votes and merges are signed records in Git, written through a stateless toolkit that any Worker instance runs the same way; each change lives in its own fork, and only the toolkit writes main, after the conventions hold. Anyone can replay the records and audit them. See [docs/coordinator-free.md](docs/coordinator-free.md).
 
+Changes merge into the project's default branch, whatever its repo calls it (main, master, trunk...): Blueprint reads it from the repo when the repo is opened. These docs say main.
+
 Both share three ideas:
 
 - **Claims.** A change claims paths before changing them; an overlapping claim is refused, naming the holder and its intent, so agents work in parallel without stepping on each other.

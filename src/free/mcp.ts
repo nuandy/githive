@@ -1,6 +1,7 @@
 import { GitCasLog } from "../election-git";
 import { requiredPaths, requiredString } from "../errors";
 import { branchHead, type Remote } from "../git";
+import { projectBranch } from "../project-branch";
 import { changeId, normalizeClaim } from "../open-mode";
 import { audit } from "./audit";
 import { checkChange } from "./check";
@@ -28,9 +29,11 @@ export interface FreeContext {
 	createRecordsRepos?: (repo: string, count: number) => Promise<void>;
 	/** Credentials for a change's own fork of a project repo; asking to write creates the fork. */
 	changeRemote?: (repo: string, change: string, scope: "read" | "write") => Promise<Remote>;
-	/** Main's head in a project repo. */
-	head: (repo: string) => Promise<string>;
-	/** Runs a repo's checks on main plus a change (live, the Gate's container). */
+	/** A branch's head in a project repo. */
+	head: (repo: string, branch: string) => Promise<string>;
+	/** A project repo's default branch, where its HEAD points (main, master, ...); without it, main. */
+	defaultBranch?: (repo: string) => Promise<string>;
+	/** Runs a repo's checks on its branch plus a change (live, the Gate's container). */
 	runChecks?: (repo: string) => CheckRunner;
 	/** Stamps what this caller writes with their verified identity (Blueprint's key), and the agent name their key is for; without it, nothing is stamped. */
 	stamper?: (agent?: string) => Promise<Stamper | undefined>;
@@ -67,9 +70,9 @@ const votesRef = (repo: string) => `refs/notes/blueprint-votes/${repo}`;
 export const FREE_INSTRUCTIONS = `Coordinator-free mode (the free_* tools): nobody enforces the rules; every agent follows them, and an audit anyone can run shows who didn't.
 Conventions:
 1. free_claim the paths you will change before editing; edit only inside your claim. A refusal names who holds what: narrow your claim, or ask them.
-2. Work on a branch changes/<change> and push it to your change's own fork (free_credentials with your change; only you can write it). The project's main is written only through the toolkit.
+2. Work on a branch changes/<change> and push it to your change's own fork (free_credentials with your change; only you can write it). The project's branch (free_start names it: main, master, ...) is written only through the toolkit.
 3. Reviewers free_vote on the exact commit they reviewed. A change merges with the policy's approvals, including every veto role's, and no veto. Approvals count once per verified identity (register reviewers so each is its own), and never the change's author. free_status shows your change's votes, with the evidence for any rejection to fix, and what's still needed.
-4. Run free_check after you push: it test-merges your change with main and lists files outside your claim, so you hear about problems before merging.
+4. Run free_check after you push: it test-merges your change with the project's branch and lists files outside your claim, so you hear about problems before merging.
 5. free_merge merges your branch with trailers recording the claims and votes it checked, then releases your claim. Merge by hand only with the same trailers.
 6. Claiming again (same paths) keeps your claim active. A claim idle for 30 minutes is released by whoever claims its paths, or by anyone (free_release with stale: true).
 7. Anyone may free_revert a commit free_audit reports; the audit then counts it resolved.
@@ -85,13 +88,13 @@ const TOOL_LIST = [
 	{ name: "free_claim", description: "Claim paths for your change (again to extend it, or to keep it active). Refused, naming the holder, if another claim overlaps; a claim in the way idle for 30 minutes is released as stale instead.", inputSchema: { type: "object", properties: { repo: str, change: str, agent: str, paths: { type: "array", items: str }, intent: str }, required: ["repo", "change", "agent", "paths", "intent"] } },
 	{ name: "free_release", description: "Release a claim: yours, or another's idle for 30 minutes with stale: true.", inputSchema: { type: "object", properties: { repo: str, change: str, agent: str, reason: str, stale: { type: "boolean" } }, required: ["repo", "change", "agent"] } },
 	{ name: "free_vote", description: "Record your review verdict on the exact commit you reviewed.", inputSchema: { type: "object", properties: { repo: str, commit: str, reviewer: str, role: str, verdict: { type: "string", enum: ["approve", "reject"] }, evidence: str }, required: ["repo", "commit", "reviewer", "role", "verdict", "evidence"] } },
-	{ name: "free_merge", description: "Merge changes/<change> into main if the conventions hold, recording what was checked, then release the claim.", inputSchema: { type: "object", properties: { repo: str, change: str, agent: str }, required: ["repo", "change", "agent"] } },
+	{ name: "free_merge", description: "Merge changes/<change> into the project's branch if the conventions hold, recording what was checked, then release the claim.", inputSchema: { type: "object", properties: { repo: str, change: str, agent: str }, required: ["repo", "change", "agent"] } },
 	{ name: "free_build", description: "Have Blueprint's hosted builder make a change: it claims the paths, builds on changes/<change>, asks the hosted reviewers when done, and the change merges once approved and checked.", inputSchema: { type: "object", properties: { repo: str, intent: str, paths: { type: "array", items: str } }, required: ["repo", "intent", "paths"] } },
 	{ name: "free_request_review", description: "Ask Blueprint's hosted reviewer agents to review your change's current commit (by default the tests role and every veto role); each votes with free_vote.", inputSchema: { type: "object", properties: { repo: str, change: str, roles: { type: "array", items: str }, summary: str }, required: ["repo", "change"] } },
 	{ name: "free_audit", description: "Replay the records and list every broken convention, with the commit and the agent (and whether a revert has resolved it).", inputSchema: { type: "object", properties: { repo: str }, required: ["repo"] } },
 	{ name: "free_revert", description: "Revert a commit the audit reports: its files go back to how they were before it, in a commit naming what it reverts.", inputSchema: { type: "object", properties: { repo: str, commit: str, agent: str }, required: ["repo", "commit", "agent"] } },
 	{ name: "free_status", description: "Where a change stands: its claim (or how it ended), its branch head, the votes on that head with their evidence, the approvals still needed, and what Blueprint's hosted agents on it are doing.", inputSchema: { type: "object", properties: { repo: str, change: str }, required: ["repo", "change"] } },
-	{ name: "free_check", description: "An early check on your change, any time before merging: whether it still merges cleanly into main, and any files outside your claim. (Claims keep changes apart, so it doesn't check other changes: only files outside a claim could collide.) Reports only.", inputSchema: { type: "object", properties: { repo: str, change: str }, required: ["repo", "change"] } },
+	{ name: "free_check", description: "An early check on your change, any time before merging: whether it still merges cleanly into the project's branch, and any files outside your claim. (Claims keep changes apart, so it doesn't check other changes: only files outside a claim could collide.) Reports only.", inputSchema: { type: "object", properties: { repo: str, change: str }, required: ["repo", "change"] } },
 	{ name: "free_register", description: "Register your agent name and get its secret key (shown once), so what you write is attributed to you even if you share an Access identity. With your current key, rotates it.", inputSchema: { type: "object", properties: { repo: str, agent: str }, required: ["repo", "agent"] } },
 ];
 // Every tool takes the caller's agent key, for clients that can't set the header.
@@ -156,13 +159,13 @@ async function changeStatus(ctx: FreeContext, repo: string, registry: Registry |
 	return { head, votes: head ? cast.filter((v) => v.commit === head) : [], approval: { ...outcome, required: policy.required }, ...(hosted ? { hosted } : {}) };
 }
 
-/** Replay a repo's records from Git: how many commits on main since the mode started, and what broke which convention. */
+/** Replay a repo's records from Git: how many commits on the project's branch since the mode started, and what broke which convention. */
 async function runAudit(ctx: FreeContext, repo: string) {
 	const remote = await ctx.remote(repo, "read");
 	const registry = await readRecordHistory<Registry>(remote, claimsRef(repo));
 	const baseline = registry[0]?.state.baseline;
 	if (!baseline) throw new Error(`[409] coordinator-free mode hasn't started on ${repo}`);
-	const merges = await readMainMerges(remote, baseline);
+	const merges = await readMainMerges(remote, baseline, projectBranch(registry[0].state));
 	const start = registry[0].state;
 	const holders = start.recordsRepos && ctx.recordsRemote ? await Promise.all(Array.from({ length: start.recordsRepos }, (_, k) => ctx.recordsRemote!(repo, k, "read"))) : [remote];
 	const shards = start.shardDepth ? await readShardHistories(holders, repo) : undefined;
@@ -194,6 +197,8 @@ export async function freeSnapshot(ctx: FreeContext, repo: string) {
 	await ctx.summarize?.(repo, { open: claims.length, needsYou: claims.filter((c) => c.hosted?.builder?.status === "failed").length, countedAt: new Date().toISOString() }).catch(() => undefined);
 	return {
 		repo,
+		/** The project's branch changes merge into. */
+		branch: projectBranch(state),
 		policy: state.policy ?? DEFAULT_POLICY,
 		verify: state.verify ?? [],
 		/** Whether records and merges are stamped with verified identity. */
@@ -274,10 +279,12 @@ async function runFreeTool(name: string, args: Args, ctx: FreeContext): Promise<
 			const wanted = typeof args.records_repos === "number" ? Math.max(0, Math.floor(args.records_repos)) : DEFAULT_RECORDS_REPOS;
 			const recordsRepos = shardDepth && ctx.recordsRemote && ctx.createRecordsRepos && !registered?.baseline ? wanted : 0;
 			if (recordsRepos) await ctx.createRecordsRepos!(repo, recordsRepos);
-			await startFree(claims, { baseline: await ctx.head(repo), policy, verify, stampKey: stamper?.publicKey, shardDepth, recordsRepos });
+			// Changes merge into the repo's default branch, whatever it's called.
+			const branch = registered?.branch ?? (registered?.baseline || !ctx.defaultBranch ? "main" : await ctx.defaultBranch(repo));
+			await startFree(claims, { baseline: await ctx.head(repo, branch), branch, policy, verify, stampKey: stamper?.publicKey, shardDepth, recordsRepos });
 			await ctx.register?.(repo);
 			const registry = (await claims.read())?.commit.state;
-			return { repo, policy: registry?.policy ?? policy, verify: registry?.verify ?? [], shardDepth: registry?.shardDepth ?? 0, recordsRepos: registry?.recordsRepos ?? 0, instructions: FREE_INSTRUCTIONS };
+			return { repo, branch: projectBranch(registry), policy: registry?.policy ?? policy, verify: registry?.verify ?? [], shardDepth: registry?.shardDepth ?? 0, recordsRepos: registry?.recordsRepos ?? 0, instructions: FREE_INSTRUCTIONS };
 		}
 		case "free_credentials": {
 			if (typeof args.change !== "string" || !args.change.trim()) {
@@ -289,7 +296,7 @@ async function runFreeTool(name: string, args: Args, ctx: FreeContext): Promise<
 			if (!own) throw new Error(`[409] ${change} holds no claim: claim its paths first`);
 			mayActAs(own.agent, acting, registered, ctx.hosted);
 			const remote = await changeSource(change, "write");
-			return { url: remote.url, token: remote.token, branch: `changes/${change}`, note: "Your change's own fork: push your branch changes/<change> here. Fetch main from the project repo (free_credentials without change)." };
+			return { url: remote.url, token: remote.token, branch: `changes/${change}`, note: `Your change's own fork: push your branch changes/<change> here. Fetch ${projectBranch(registered)} from the project repo (free_credentials without change).` };
 		}
 		case "free_claims":
 			return (await view()).claims;
@@ -321,6 +328,7 @@ async function runFreeTool(name: string, args: Args, ctx: FreeContext): Promise<
 			if (holder && holder !== requiredString(args, "agent")) throw new Error(`[409] ${change} is ${holder}'s change: merge it as ${holder}`);
 			return mergeChange({
 				remote: await write(),
+				branch: projectBranch(registry),
 				store,
 				votes,
 				policy: registry?.policy ?? DEFAULT_POLICY,
@@ -356,7 +364,7 @@ async function runFreeTool(name: string, args: Args, ctx: FreeContext): Promise<
 		}
 		case "free_revert": {
 			const { violations } = await runAudit(ctx, repo);
-			return revertViolation({ remote: await write(), claims, votes, stamper, target: requiredString(args, "commit"), violations, agent: actAs("agent") });
+			return revertViolation({ remote: await write(), branch: projectBranch(registered), claims, votes, stamper, target: requiredString(args, "commit"), violations, agent: actAs("agent") });
 		}
 		case "free_status": {
 			const change = requiredString(args, "change");
@@ -371,7 +379,7 @@ async function runFreeTool(name: string, args: Args, ctx: FreeContext): Promise<
 			const source = await changeSource(change, "read").catch(() => null);
 			if (!source) throw new Error(`[409] changes/${change} has nothing pushed to check`);
 			const own = await claimOf(change);
-			return checkChange({ project: await ctx.remote(repo, "read"), source, claims: own ? [own] : [], change });
+			return checkChange({ project: await ctx.remote(repo, "read"), branch: projectBranch(registered), source, claims: own ? [own] : [], change });
 		}
 		case "free_register": {
 			const agent = requiredString(args, "agent");

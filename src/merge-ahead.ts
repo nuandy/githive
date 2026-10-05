@@ -1,9 +1,10 @@
 import { remoteFor } from "./artifacts";
 import { Workspace } from "./git";
+import { projectBranch } from "./project-branch";
 import { inLane } from "./open-mode";
 import type { MergeCheck, Slice, Task } from "./types";
 
-// Merge-ahead: test-merge a slice's pushed work against the task base and every
+// Merge-ahead: test-merge a slice's pushed work against the project's branch and every
 // other slice that has pushed, so conflicts show up while they are cheap to fix.
 
 /** One side of a Merge-ahead check. */
@@ -17,14 +18,15 @@ interface Side {
 /** Test-merge a slice's pushed work. Updates `slice` (a snapshot's copy) and returns the checks. */
 export async function mergeAhead(artifacts: Artifacts, task: Task, slice: Slice) {
 	const baseCommit = task.baseCommit!;
-	const ws = await Workspace.clone(await remoteFor(artifacts, task.baseRepo!));
-	const baseHead = await ws.head("main");
+	// The project's branch, and each fork's branch of the same name.
+	const ws = await Workspace.clone(await remoteFor(artifacts, task.baseRepo!), projectBranch(task));
+	const baseHead = await ws.head();
 
 	// A slice's own changes start at its merge base with the task base. That is
 	// the base commit until the slice merges integrated work; after that, the
 	// integrated files don't count as the slice's changes.
 	const side = async (s: Slice): Promise<Side & { from: string }> => {
-		const ref = `refs/remotes/${s.id}/main`;
+		const ref = `refs/remotes/${s.id}/${ws.branch}`;
 		const head = await ws.fetch(s.id, await remoteFor(artifacts, s.repo!));
 		const from = await ws.mergeBase(baseHead, head);
 		return { id: s.id, ref, head, from, touched: await ws.changedPaths(from, head) };
@@ -41,7 +43,7 @@ export async function mergeAhead(artifacts: Artifacts, task: Task, slice: Slice)
 	const checks: MergeCheck[] = [];
 	// Integrated slices move the base; check against it once it has.
 	if (baseHead !== start) {
-		const base = { id: "base", ref: "main", head: baseHead, touched: await ws.changedPaths(start, baseHead) };
+		const base = { id: "base", ref: ws.branch, head: baseHead, touched: await ws.changedPaths(start, baseHead) };
 		checks.push(await check(ws, base, ours));
 	}
 	for (const other of task.slices) {

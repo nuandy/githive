@@ -39,17 +39,18 @@ export interface GitServer {
 
 const backend = join(execFileSync("git", ["--exec-path"]).toString().trim(), "git-http-backend");
 
-export async function startGitServer(): Promise<GitServer> {
+/** A server whose project repo has one commit on `branch` (main unless asked), which HEAD names. */
+export async function startGitServer({ branch = "main" }: { branch?: string } = {}): Promise<GitServer> {
 	const root = mkdtempSync(join(tmpdir(), "blueprint-git-"));
 	const repo = join(root, "project.git");
 	execFileSync("git", ["init", "--bare", "--quiet", repo]);
 	execFileSync("git", ["-C", repo, "config", "http.receivepack", "true"]);
-	// Like any project repo, it has a main branch with a commit.
+	// Like any project repo, it has a default branch with a commit.
 	const work = join(root, "work");
-	execFileSync("git", ["init", "--quiet", "-b", "main", work]);
+	execFileSync("git", ["init", "--quiet", "-b", branch, work]);
 	execFileSync("git", ["-C", work, "-c", "user.name=test", "-c", "user.email=test@example.com", "commit", "--quiet", "--allow-empty", "-m", "Initial commit"]);
-	execFileSync("git", ["-C", work, "push", "--quiet", repo, "main"]);
-	execFileSync("git", ["-C", repo, "symbolic-ref", "HEAD", "refs/heads/main"]);
+	execFileSync("git", ["-C", work, "push", "--quiet", repo, branch]);
+	execFileSync("git", ["-C", repo, "symbolic-ref", "HEAD", `refs/heads/${branch}`]);
 
 	let held: { count: number; waiting: (() => void)[]; all: () => void } | null = null;
 	const requests: string[] = [];

@@ -40,7 +40,8 @@ vi.mock("../src/artifacts", async (importOriginal) => ({
 
 vi.mock("../src/git", () => ({
 	Workspace: {
-		clone: vi.fn(async () => ({
+		clone: vi.fn(async (_remote: unknown, branch: string) => ({
+			branch,
 			head: vi.fn(async () => io.heads.get("project") ?? io.defaultHead),
 			fetch: vi.fn(async (_name: string, remote: { url: string }) => {
 				io.fetched.push(_name);
@@ -944,6 +945,7 @@ describe("agent jobs and credentials", () => {
 		await coordinator.openChange({ id: "a", title: "a", intent: "build a", owns: ["src/a/"], hosted: true });
 		expect(builder("a").start).toHaveBeenCalledWith({
 			taskId: "t1",
+			branch: "main",
 			goal: "a goal",
 			slice: { id: "a", title: "a", owns: ["src/a/"], instructions: "build a", tests: [] },
 			siblings: [{ id: "b", title: "b", owns: ["src/b/"] }],
@@ -961,6 +963,7 @@ describe("agent jobs and credentials", () => {
 		await coordinator.startReviewers("a", "built it");
 		expect(fake.env.REVIEWER.getByName("t1--a--review-tests--h1").start).toHaveBeenCalledWith({
 			taskId: "t1",
+			branch: "main",
 			goal: "a goal",
 			slice: { id: "a", title: "a", owns: ["src/a/"], instructions: "build a", tests: [] },
 			siblings: [{ id: "b", title: "b", owns: ["src/b/"] }],

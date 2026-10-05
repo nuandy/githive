@@ -79,9 +79,9 @@ export function ChangeList({ task, repo, base, state }: ChangeListProps) {
 			) : (
 				<ul className="change-list__rows">
 					{shown.map((change) => {
-						const status = deriveChangeStatus(change, task.review);
+						const status = deriveChangeStatus(change, task.review, task.branch);
 						const review = reviewSummary(change, task.review);
-						const checks = checksSummary(change, task.verify);
+						const checks = checksSummary(change, task.verify, task.branch);
 						const ended = state !== "open";
 						const age = ended ? change.endedAt : change.openedAt;
 						const own = conflicts.get(change.id) ?? [];

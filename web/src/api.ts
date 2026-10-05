@@ -38,6 +38,8 @@ export interface FreeSnapshot {
 	repo: string;
 	policy: { required: number; vetoes: string[] };
 	verify: string[];
+	/** The project's branch changes merge into (older servers: absent, main). */
+	branch?: string;
 	/** Whether records and merges are stamped with verified identity. */
 	verified: boolean;
 	claims: {

@@ -64,14 +64,14 @@ export function classifyHistory(text: string): { kind: TimelineKind; tone: Tone 
 /** Builder log events worth a person's attention; the rest is tool chatter. */
 const NOISY_EVENT = /^(run:|nudged:|blocked unsafe|starting container|container restarted|repository cloned|message delivered|finished$|review started|resolution event|resumed for wake event)/;
 
-function builderItems(id: string, log: AgentState["log"] | undefined, ids: string[]): TimelineItem[] {
+function builderItems(id: string, log: AgentState["log"] | undefined, ids: string[], branch: string): TimelineItem[] {
 	return (Array.isArray(log) ? log : []).flatMap((entry, index): TimelineItem[] => {
 		if (!entry || typeof entry.event !== "string" || NOISY_EVENT.test(entry.event)) return [];
 		const at = entry.at || undefined;
 		const pushed = /^pushed:\s*(.*)$/s.exec(entry.event);
 		if (pushed) return [{ key: `builder:${index}`, kind: "pushed", at, tone: "neutral", text: "pushed a commit", body: pushed[1] || undefined }];
 		const failed = /^failed:/.test(entry.event) || /^gave up/.test(entry.event);
-		return [{ key: `builder:${index}`, kind: "agent", at, tone: failed ? "bad" : "neutral", text: `builder ${humanizeText(entry.event, ids)}` }];
+		return [{ key: `builder:${index}`, kind: "agent", at, tone: failed ? "bad" : "neutral", text: `builder ${humanizeText(entry.event, ids, branch)}` }];
 	}).map((item) => ({ ...item, key: `${id}:${item.key}` }));
 }
 
@@ -89,11 +89,11 @@ function reviewItem(review: Review, index: number): TimelineItem {
 	};
 }
 
-function gateItem(gate: NonNullable<Change["gate"]>): TimelineItem {
+function gateItem(gate: NonNullable<Change["gate"]>, branch: string): TimelineItem {
 	const tone: Tone = gate.status === "passed" ? "good" : gate.status === "failed" ? "bad" : "warn";
 	const text = {
 		passed: "checks passed",
-		failed: gate.result?.mergeConflict?.length ? "checks failed: conflicts with main" : "checks failed",
+		failed: gate.result?.mergeConflict?.length ? `checks failed: conflicts with ${branch}` : "checks failed",
 		queued: "checks queued",
 		running: "checks started",
 		waiting: "checks waiting for other changes to merge",
@@ -102,7 +102,7 @@ function gateItem(gate: NonNullable<Change["gate"]>): TimelineItem {
 }
 
 /** Items from the change record alone: what any server, old or new, can tell us. */
-function recordItems(change: Change, ids: string[]): TimelineItem[] {
+function recordItems(change: Change, ids: string[], branch: string): TimelineItem[] {
 	const items: TimelineItem[] = [];
 	const opener = identityName(change.openedBy);
 	items.push({
@@ -135,7 +135,7 @@ function recordItems(change: Change, ids: string[]): TimelineItem[] {
 			tone: "bad",
 			text: `sent back to the agent${change.revisions ? ` (revision ${change.revisions})` : ""}`,
 			commit: change.sentBackFor,
-			body: humanizeText(change.lastFeedback, ids),
+			body: humanizeText(change.lastFeedback, ids, branch),
 		});
 	}
 	(change.waivers ?? []).forEach((waiver, index) => {
@@ -151,8 +151,8 @@ function recordItems(change: Change, ids: string[]): TimelineItem[] {
 		});
 	});
 	const gate = currentGate(change) ?? change.gate;
-	if (gate) items.push(gateItem(gate));
-	if (change.status === "integrated") items.push({ key: "ended", kind: "merged", at: change.endedAt, tone: "good", text: "merged into main" });
+	if (gate) items.push(gateItem(gate, branch));
+	if (change.status === "integrated") items.push({ key: "ended", kind: "merged", at: change.endedAt, tone: "good", text: `merged into ${branch}` });
 	if (change.status === "abandoned") items.push({ key: "ended", kind: "abandoned", at: change.endedAt, tone: "neutral", text: "abandoned this change" });
 	return items;
 }
@@ -187,6 +187,8 @@ export interface TimelineSources {
 	builderLog?: AgentState["log"];
 	/** Every change id in the repo, kept intact when rewording log lines. */
 	ids?: string[];
+	/** The project's branch (main, master, ...). */
+	branch?: string;
 }
 
 /**
@@ -203,8 +205,9 @@ export function relabelForChange(text: string, id: string, agent: string): strin
 
 export function buildTimeline(change: Change, sources: TimelineSources = {}): TimelineItem[] {
 	const ids = sources.ids ?? [change.id];
-	const record = recordItems(change, ids);
-	const builder = builderItems(change.id, sources.builderLog, ids);
+	const branch = sources.branch ?? "main";
+	const record = recordItems(change, ids, branch);
+	const builder = builderItems(change.id, sources.builderLog, ids, branch);
 	const history = sources.history ? historyForChange(sources.history, change.id) : null;
 
 	if (!history || history.length === 0) {
@@ -220,7 +223,7 @@ export function buildTimeline(change: Change, sources: TimelineSources = {}): Ti
 		// The record carries these in full (summaries, evidence, reasons, outputs).
 		if (kind === "review" || kind === "waiver") return;
 		if (kind === "checks" && gate && entry.commit === gate.head && /\bgate (passed|failed)\b/.test(entry.text)) return;
-		const text = humanizeText(entry.text, ids);
+		const text = humanizeText(entry.text, ids, branch);
 		// "x sent back to its builder (revision n):\n<feedback>": the first line reads as the event, the rest as its body.
 		const [headline, ...rest] = text.split("\n");
 		fromLog.push({

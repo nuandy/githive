@@ -1,12 +1,12 @@
 // The server's decision log speaks in internal terms (slices, lanes, the gate,
 // quorum, the task base). People read changes, claims, checks, reviews and
-// main. Change ids are protected so a change named, say, "fix-gate" keeps its
-// name.
+// the project's branch (main, master, ...). Change ids are protected so a
+// change named, say, "fix-gate" keeps its name.
 
-const REPLACEMENTS: [RegExp, string][] = [
-	[/integrated into the task base/g, "merged into main"],
-	[/\bthe task base\b/g, "main"],
-	[/\btask base\b/g, "main"],
+const REPLACEMENTS = (branch: string): [RegExp, string][] => [
+	[/integrated into the task base/g, `merged into ${branch}`],
+	[/\bthe task base\b/g, branch],
+	[/\btask base\b/g, branch],
 	[/\bMerge-ahead:\s*/g, ""],
 	[/\b[Mm]erge-ahead\b/g, "conflict check"],
 	[/\bintegrated\b/g, "merged"],
@@ -36,8 +36,8 @@ const REPLACEMENTS: [RegExp, string][] = [
 
 const escape = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
-/** Rewrite internal vocabulary for people, leaving the given change ids untouched. */
-export function humanizeText(text: string, protectedIds: string[] = []): string {
+/** Rewrite internal vocabulary for people, leaving the given change ids untouched. `branch` is the project's branch. */
+export function humanizeText(text: string, protectedIds: string[] = [], branch = "main"): string {
 	const ids = [...new Set(protectedIds.filter(Boolean))].sort((a, b) => b.length - a.length);
 	const saved: string[] = [];
 	let out = text;
@@ -48,7 +48,7 @@ export function humanizeText(text: string, protectedIds: string[] = []): string 
 			return `${before}\u0000${saved.length - 1}\u0000`;
 		});
 	}
-	for (const [pattern, replacement] of REPLACEMENTS) out = out.replace(pattern, replacement);
+	for (const [pattern, replacement] of REPLACEMENTS(branch)) out = out.replace(pattern, replacement);
 	return out.replace(/\u0000(\d+)\u0000/g, (_m, index: string) => saved[Number(index)]);
 }
 

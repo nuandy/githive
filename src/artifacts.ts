@@ -52,7 +52,7 @@ export async function remoteFor(
 	});
 }
 
-export async function headOf(artifacts: Artifacts, name: string, ref = "main") {
+export async function headOf(artifacts: Artifacts, name: string, ref: string) {
 	return withRepo(artifacts, name, async (repo) => {
 		const [latest] = await retryTransient(() => repo.log({ ref, limit: 1 }));
 		return latest?.hash;

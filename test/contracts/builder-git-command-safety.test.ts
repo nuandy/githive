@@ -23,7 +23,7 @@ describe("builder Git command safety contract", () => {
     const reason = builderGitCommandBlockReason(command, true);
     expect(reason).toMatch(/pushed/i);
     expect(reason).toMatch(/new commit/i);
-    expect(reason).toContain("git merge base/main");
+    expect(reason).toContain("fetch_base and a merge");
   });
 
   it.each([
@@ -44,7 +44,7 @@ describe("builder Git command safety contract", () => {
     });
     expect(noRemoteAncestor).toMatch(/refusing to push/i);
     expect(noRemoteAncestor).toMatch(/make a new commit/i);
-    expect(noRemoteAncestor).toContain("git merge base/main");
+    expect(noRemoteAncestor).toContain("fetch_base and a merge");
 
     expect(builderGitPushBlockReason({
       remoteHead: "fork-head",

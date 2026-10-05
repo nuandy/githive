@@ -11,7 +11,7 @@ export function RepoSettings({ task }: { task: Task }) {
 	const { review, verify } = task;
 	const active = new Set(changesOf(task).filter(isActive).map((change) => change.id));
 	const pairs = newestChecks(task).filter((check) => check.pair.every((id) => id === "base" || active.has(id)));
-	const name = (id: string) => (id === "base" ? "main" : id);
+	const name = (id: string) => (id === "base" ? (task.branch ?? "main") : id);
 	return (
 		<div className="repo-settings">
 			<section className="box" aria-labelledby="settings-checks">
@@ -21,7 +21,7 @@ export function RepoSettings({ task }: { task: Task }) {
 				<div className="box__body">
 					{verify.length ? (
 						<>
-							<p>Before a change merges, these commands must pass on the change combined with main:</p>
+							<p>Before a change merges, these commands must pass on the change combined with {task.branch ?? "main"}:</p>
 							<ul className="repo-settings__commands">
 								{verify.map((command) => (
 									<li key={command}>
@@ -91,7 +91,7 @@ export function RepoSettings({ task }: { task: Task }) {
 					</dl>
 					<details className="repo-settings__details">
 						<summary>Conflict checks between open changes ({pairs.length})</summary>
-						<p className="muted">Each push is test-merged with main and with every other open change, so conflicts show up before anything merges.</p>
+						<p className="muted">Each push is test-merged with {task.branch ?? "main"} and with every other open change, so conflicts show up before anything merges.</p>
 						{pairs.length ? (
 							<ul>
 								{pairs.map((check) => (

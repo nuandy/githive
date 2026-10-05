@@ -25,10 +25,12 @@ export interface CheckResult {
 }
 
 /** Runs the project's checks on `base` (main) with `head` (from branch `ref`) merged in. Live, the Gate's container. */
-export type CheckRunner = (input: { base: string; head: string; ref: string; commands: string[]; source?: Remote }) => Promise<{ passed: boolean; results: CheckResult[] }>;
+export type CheckRunner = (input: { base: string; branch?: string; head: string; ref: string; commands: string[]; source?: Remote }) => Promise<{ passed: boolean; results: CheckResult[] }>;
 
 export interface MergeInput {
 	remote: Remote;
+	/** The project's branch the change merges into. */
+	branch: string;
 	/** Where the change's branch lives (its fork); by default the project repo. */
 	source?: Remote;
 	/** The repo's claims: checked before merging, cited on the merge, released after. */
@@ -58,7 +60,7 @@ export type MergeOutcome =
 export async function mergeChange(input: MergeInput): Promise<MergeOutcome> {
 	for (let attempt = 1; ; attempt++) {
 		const votesHead = await input.votes.read();
-		const ws = await Workspace.clone(input.remote);
+		const ws = await Workspace.clone(input.remote, input.branch);
 		const main = await ws.head();
 		const head = await ws.fetch("change", input.source ?? input.remote, `changes/${input.change}`);
 		const files = await ws.changedPaths(await ws.mergeBase(main, head), head);
@@ -88,7 +90,7 @@ export async function mergeChange(input: MergeInput): Promise<MergeOutcome> {
 			return {
 				ok: false,
 				conflicts: files,
-				reasons: [`changes/${input.change} conflicts with main in ${files.join(", ")}: merge main into your branch, resolve inside your claim, push, and get the new commit approved`],
+				reasons: [`changes/${input.change} conflicts with ${ws.branch} in ${files.join(", ")}: merge ${ws.branch} into your branch, resolve inside your claim, push, and get the new commit approved`],
 			};
 		}
 
@@ -96,7 +98,7 @@ export async function mergeChange(input: MergeInput): Promise<MergeOutcome> {
 		const verify = input.verify ?? [];
 		if (verify.length) {
 			if (!input.runChecks) throw new Error("[500] checks are configured but nothing can run them");
-			const checked = await input.runChecks({ base: main, head, ref: `changes/${input.change}`, commands: verify, source: input.source });
+			const checked = await input.runChecks({ base: main, branch: ws.branch, head, ref: `changes/${input.change}`, commands: verify, source: input.source });
 			if (!checked.passed) {
 				const failed = checked.results.find((r) => r.exitCode !== 0);
 				return { ok: false, reasons: [failed ? `checks failed: ${failed.command} exited ${failed.exitCode}` : "checks failed"], checks: checked.results };
@@ -118,10 +120,10 @@ export async function mergeChange(input: MergeInput): Promise<MergeOutcome> {
 			"",
 		].join("\n");
 		// Always a merge commit, never a fast-forward: the merge's trailers are what the audit reads.
-		const { oid } = await git.merge({ fs: ws.fs, dir: "/repo", ours: "main", theirs: head, message, author: BOT, fastForward: false, abortOnConflict: true });
+		const { oid } = await git.merge({ fs: ws.fs, dir: "/repo", ours: ws.branch, theirs: head, message, author: BOT, fastForward: false, abortOnConflict: true });
 		if (!oid) throw new Error(`merging ${input.change} made no commit`);
 		try {
-			await ws.push("main");
+			await ws.push();
 		} catch (err) {
 			// Main moved under us: another agent merged first. Check again on top of it.
 			if (attempt < ATTEMPTS && (err instanceof git.Errors.PushRejectedError || err instanceof git.Errors.GitPushError)) continue;

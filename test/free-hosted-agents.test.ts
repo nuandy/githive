@@ -93,7 +93,7 @@ describe("Blueprint's builder, coordinator-free", () => {
 		hosted.check = { head: "h9", main: { head: "m1", clean: false, conflicts: ["src/stats/index.ts"] }, outsideClaim: [] };
 		const b = builder({ "rev-list --count": "1" });
 		const said = await b.run("commit_and_push", { message: "stats" });
-		expect(said).toMatch(/conflicts with main in src\/stats\/index\.ts/);
+		expect(said).toMatch(/conflicts with the project's branch in src\/stats\/index\.ts/);
 		expect(b.state.lastReport?.conflicts).toEqual([expect.objectContaining({ pair: ["base", "stats-1a2b"], heads: ["m1", "h9"], status: "conflict", files: ["src/stats/index.ts"] })]);
 	});
 

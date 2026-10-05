@@ -1,3 +1,4 @@
+import { projectBranch } from "./project-branch";
 import type { AccessIdentity } from "./access-contract";
 import type { Coordinator } from "./coordinator";
 import { fail, requiredPaths, requiredString as need, statusOf } from "./errors";
@@ -30,7 +31,7 @@ export interface McpContext {
 	free?: FreeContext;
 	coordinator: (taskId: string) => CoordinatorStub;
 	/** Open a repo for open changes (or find it open) and list it on the dashboard; the same as POST /repos/:repo/open. */
-	openRepo: (repo: string) => Promise<Pick<Task, "id" | "repo" | "review" | "verify" | "leaseMinutes">>;
+	openRepo: (repo: string) => Promise<Pick<Task, "id" | "repo" | "review" | "verify" | "leaseMinutes" | "branch">>;
 	identity?: AccessIdentity;
 }
 
@@ -40,9 +41,9 @@ const INSTRUCTIONS = `Blueprint coordinates many agents working on one repo at o
 How to work:
 1. join_repo to get the repo's task id; list_claims to see what others hold and why.
 2. open_change with your intent and the paths you will touch. If someone holds a path, the refusal says who and why: narrow your claim, wait, or open on free paths and use request_lane_change to ask the holder.
-3. Clone your fork with the remote and token from open_change, commit, and push to main. After every push, call report_push: it checks your work against everyone else's and reports conflicts and files outside your lane.
+3. Clone your fork with the remote and token from open_change, commit, and push to the project's branch (open_change names it: main, master, ...). After every push, call report_push: it checks your work against everyone else's and reports conflicts and files outside your lane.
 4. Need more files? extend_claim. Credentials expired? refresh_credentials.
-5. When done, finish_change with a summary. Reviewers vote and a gate runs the tests on your change merged with main. Poll change_status and read_inbox: if your change is sent back, the findings are in your inbox; fix, push, report_push and finish_change again.
+5. When done, finish_change with a summary. Reviewers vote and a gate runs the tests on your change merged with the project's branch. Poll change_status and read_inbox: if your change is sent back, the findings are in your inbox; fix, push, report_push and finish_change again.
 6. Your claim expires after a while without activity unless you are waiting on review, the gate or a request.`;
 
 const str = (description: string) => ({ type: "string", description });
@@ -92,12 +93,12 @@ export const TOOLS = [
 	},
 	{
 		name: "report_push",
-		description: "Call after every push. Checks your fork against main and every other active change, and reports conflicts and files outside your lane.",
+		description: "Call after every push. Checks your fork against the project's branch and every other active change, and reports conflicts and files outside your lane.",
 		inputSchema: { type: "object", properties: ids, required: ["task_id", "change_id"] },
 	},
 	{
 		name: "finish_change",
-		description: "Submit your pushed head for review. Reviewers vote; on approval a gate runs the tests on your change merged with main, then it merges.",
+		description: "Submit your pushed head for review. Reviewers vote; on approval a gate runs the tests on your change merged with the project's branch, then it merges.",
 		inputSchema: { type: "object", properties: { ...ids, summary: str("What you changed and how you verified it, for the reviewers") }, required: ["task_id", "change_id", "summary"] },
 	},
 	{
@@ -137,7 +138,7 @@ async function callTool(name: string, args: Args, ctx: McpContext): Promise<unkn
 	switch (name) {
 		case "join_repo": {
 			const task = await ctx.openRepo(need(args, "repo"));
-			return { task_id: task.id, repo: task.repo, review: task.review, verify: task.verify, lease_minutes: task.leaseMinutes, instructions: INSTRUCTIONS };
+			return { task_id: task.id, repo: task.repo, branch: projectBranch(task), review: task.review, verify: task.verify, lease_minutes: task.leaseMinutes, instructions: INSTRUCTIONS };
 		}
 		case "list_claims":
 			return co().claims();
@@ -146,13 +147,15 @@ async function callTool(name: string, args: Args, ctx: McpContext): Promise<unkn
 				{ title: need(args, "title"), intent: need(args, "intent"), owns: requiredPaths(args, "paths"), agent: typeof args.agent === "string" ? args.agent : undefined },
 				ctx.identity,
 			);
+			const branch = projectBranch(await co().state());
 			return {
 				change_id: change.id,
 				lane: change.owns,
 				lease_until: change.leaseUntil,
 				fork: credentials.remote,
 				token: credentials.token,
-				how_to: `git -c http.extraHeader="Authorization: Bearer <token without ?expires=...>" clone ${credentials.remote}; commit; push to main with the same header; then call report_push.`,
+				branch,
+				how_to: `git -c http.extraHeader="Authorization: Bearer <token without ?expires=...>" clone ${credentials.remote}; commit; push to ${branch} with the same header; then call report_push.`,
 			};
 		}
 		case "extend_claim": {

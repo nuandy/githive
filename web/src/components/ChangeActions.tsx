@@ -95,9 +95,9 @@ export interface ChangeActionsProps {
 
 /** The box at the bottom of a change's conversation: where it stands, and what you can do. */
 export function ChangeActions({ task, change, conflicts, repo, base, diffStatus, api, onChanged }: ChangeActionsProps) {
-	const status = deriveChangeStatus(change, task.review);
+	const status = deriveChangeStatus(change, task.review, task.branch);
 	const review = reviewSummary(change, task.review);
-	const checks = checksSummary(change, task.verify);
+	const checks = checksSummary(change, task.verify, task.branch);
 	const can = availableActions(change, task.verify);
 	const [reason, setReason] = useState("");
 	const [note, setNote] = useState("");
@@ -111,8 +111,8 @@ export function ChangeActions({ task, change, conflicts, repo, base, diffStatus,
 	if (change.status === "integrated")
 		return (
 			<section className="merge-box merge-box--merged" aria-label="Merge status">
-				<StatusRow icon="merge" tone="good" title="Merged into main">
-					This change is part of main.
+				<StatusRow icon="merge" tone="good" title={`Merged into ${task.branch ?? "main"}`}>
+					This change is part of {task.branch ?? "main"}.
 				</StatusRow>
 			</section>
 		);
@@ -160,7 +160,7 @@ export function ChangeActions({ task, change, conflicts, repo, base, diffStatus,
 				{checks.state !== "none" && checks.state !== "not-run" ? <a href={href.change(repo, change.id, "checks", base)}>Details</a> : null}
 			</StatusRow>
 			<StatusRow icon={conflicts.length ? "conflict" : "check"} tone={conflicts.length ? "warn" : "good"} title={conflicts.length ? "This change has conflicts" : "No conflicts found"}>
-				{conflicts.length ? conflicts.map((conflict) => <div key={conflict.with}>{describeConflict(conflict)}</div>) : "It merges cleanly with main and the other open changes."}
+				{conflicts.length ? conflicts.map((conflict) => <div key={conflict.with}>{describeConflict(conflict)}</div>) : `It merges cleanly with ${task.branch ?? "main"} and the other open changes.`}
 			</StatusRow>
 
 			{status.kind === "needs-you" ? (
@@ -169,11 +169,11 @@ export function ChangeActions({ task, change, conflicts, repo, base, diffStatus,
 						<Icon name="alert" className="tone-needs" />
 						<div>
 							<strong>This change needs you</strong>
-							<p>{change.attention ? humanizeText(change.attention, [change.id]) : "The agents can't go on without a person."}</p>
+							<p>{change.attention ? humanizeText(change.attention, [change.id], task.branch) : "The agents can't go on without a person."}</p>
 							{change.lastFeedback ? (
 								<details className="merge-box__feedback">
 									<summary>Latest feedback to the agent</summary>
-									<pre tabIndex={0}>{humanizeText(change.lastFeedback, [change.id])}</pre>
+									<pre tabIndex={0}>{humanizeText(change.lastFeedback, [change.id], task.branch)}</pre>
 								</details>
 							) : null}
 						</div>
@@ -214,7 +214,7 @@ export function ChangeActions({ task, change, conflicts, repo, base, diffStatus,
 				<div className="merge-box__section">
 					<div className="change-actions__inline">
 						<p>
-							<strong>Checks failed.</strong> <span className="muted">Re-run them if the failure wasn't the change's fault, for example after fixing main.</span>
+							<strong>Checks failed.</strong> <span className="muted">Re-run them if the failure wasn't the change's fault, for example after fixing {task.branch ?? "main"}.</span>
 						</p>
 						<button
 							type="button"

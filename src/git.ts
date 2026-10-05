@@ -24,6 +24,16 @@ const onAuth = (remote: Remote) => () => ({
 /** Whether a ref listing failed only because the repo is empty (no HEAD yet): it then has no refs. */
 export const isEmptyRepo = (err: unknown) => (err as { code?: string })?.code === "NotFoundError" && /HEAD/.test(String((err as Error)?.message));
 
+/**
+ * The repo's default branch: where its HEAD points (one request), or null for
+ * an empty repo. A project's branch is whatever this is (main, master, ...).
+ */
+export async function defaultBranch(remote: Remote): Promise<string | null> {
+	const refs = await retryTransient(() => git.listServerRefs({ http, url: remote.url, prefix: "HEAD", symrefs: true, onAuth: onAuth(remote) })).catch((err) => (isEmptyRepo(err) ? [] : Promise.reject(err)));
+	const target = refs.find((r) => r.ref === "HEAD")?.target;
+	return target?.startsWith("refs/heads/") ? target.slice("refs/heads/".length) : null;
+}
+
 /** A branch's head on a remote, without cloning (one ls-remote), or null when it doesn't exist. */
 export async function branchHead(remote: Remote, branch: string): Promise<string | null> {
 	const refs = await retryTransient(() => git.listServerRefs({ http, url: remote.url, prefix: `refs/heads/${branch}`, onAuth: onAuth(remote) }));
@@ -41,22 +51,24 @@ export class Workspace {
 	private constructor(
 		readonly fs: MemoryFS,
 		readonly origin: Remote,
+		/** The branch cloned (the project's branch, say main or master): head, merge and push default to it. */
+		readonly branch: string,
 	) {}
 
 	/** Start an empty repo whose origin is a freshly created Artifacts repo. */
-	static async init(origin: Remote) {
+	static async init(origin: Remote, branch = "main") {
 		const fs = new MemoryFS();
-		await git.init({ fs, dir: DIR, defaultBranch: "main" });
-		return new Workspace(fs, origin);
+		await git.init({ fs, dir: DIR, defaultBranch: branch });
+		return new Workspace(fs, origin, branch);
 	}
 
-	static async clone(origin: Remote, ref = "main") {
+	static async clone(origin: Remote, branch: string) {
 		return retryTransient(async () => {
 			// A failed clone may have populated part of the object database, refs, or
 			// worktree. Each attempt must therefore begin with an entirely fresh FS.
 			const fs = new MemoryFS();
-			await git.clone({ fs, http, dir: DIR, url: origin.url, ref, singleBranch: true, onAuth: onAuth(origin) });
-			return new Workspace(fs, origin);
+			await git.clone({ fs, http, dir: DIR, url: origin.url, ref: branch, singleBranch: true, onAuth: onAuth(origin) });
+			return new Workspace(fs, origin, branch);
 		});
 	}
 
@@ -71,12 +83,12 @@ export class Workspace {
 		return git.commit({ fs: this.fs, dir: DIR, message, author });
 	}
 
-	push(ref = "main", remote: Remote = this.origin) {
+	push(ref = this.branch, remote: Remote = this.origin) {
 		return retryTransient(() => git.push({ fs: this.fs, http, dir: DIR, url: remote.url, ref, onAuth: onAuth(remote) }));
 	}
 
 	/** Fetch `ref` from another repo into refs/remotes/<name>/<ref>; returns its commit. */
-	async fetch(name: string, remote: Remote, ref = "main") {
+	async fetch(name: string, remote: Remote, ref = this.branch) {
 		await git.addRemote({ fs: this.fs, dir: DIR, remote: name, url: remote.url, force: true });
 		const result = await retryTransient(() => git.fetch({
 			fs: this.fs,
@@ -91,7 +103,7 @@ export class Workspace {
 		return result.fetchHead;
 	}
 
-	head(ref = "main") {
+	head(ref = this.branch) {
 		return git.resolveRef({ fs: this.fs, dir: DIR, ref });
 	}
 
@@ -113,9 +125,9 @@ export class Workspace {
 		}
 	}
 
-	/** Merge `theirs` into local main. Throws MergeConflictError on conflict. */
+	/** Merge `theirs` into the local branch. Throws MergeConflictError on conflict. */
 	merge(theirs: string, message: string) {
-		return git.merge({ fs: this.fs, dir: DIR, ours: "main", theirs, message, author: BOT, abortOnConflict: true });
+		return git.merge({ fs: this.fs, dir: DIR, ours: this.branch, theirs, message, author: BOT, abortOnConflict: true });
 	}
 
 	/** Paths whose content differs between two commits. */

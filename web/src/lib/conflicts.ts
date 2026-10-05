@@ -2,12 +2,14 @@ import type { Task } from "../api";
 import { changesOf, isActive, timeOf } from "./model";
 
 // Blueprint test-merges every pair of changes in progress (and each change
-// with main) as they push. People don't need the pairwise grid: they need to
+// with the project's branch) as they push. People don't need the pairwise grid: they need to
 // know, on a change, "this conflicts with X in these files".
 
 export interface Conflict {
-	/** The other change's id, or "main". */
+	/** The other change's id, or the project's branch (`base`). */
 	with: string;
+	/** It conflicts with the project's branch itself, not another change. */
+	base?: boolean;
 	withTitle?: string;
 	files: string[];
 	checkedAt?: string;
@@ -29,7 +31,7 @@ export function newestChecks(task: Pick<Task, "checks">): Check[] {
 }
 
 /** Conflicts of each change in progress, keyed by change id. Ended changes have none. */
-export function conflictsByChange(task: Pick<Task, "checks" | "slices">): Map<string, Conflict[]> {
+export function conflictsByChange(task: Pick<Task, "checks" | "slices" | "branch">): Map<string, Conflict[]> {
 	const active = new Map(changesOf(task).filter(isActive).map((change) => [change.id, change]));
 	const result = new Map<string, Conflict[]>();
 	for (const check of newestChecks(task)) {
@@ -40,7 +42,8 @@ export function conflictsByChange(task: Pick<Task, "checks" | "slices">): Map<st
 			if (other !== "base" && !active.has(other)) continue;
 			const list = result.get(self) ?? [];
 			list.push({
-				with: other === "base" ? "main" : other,
+				with: other === "base" ? (task.branch ?? "main") : other,
+				...(other === "base" ? { base: true } : {}),
 				withTitle: other === "base" ? undefined : active.get(other)?.title,
 				files: Array.isArray(check.files) ? check.files : [],
 				checkedAt: check.checkedAt,
@@ -51,12 +54,12 @@ export function conflictsByChange(task: Pick<Task, "checks" | "slices">): Map<st
 	return result;
 }
 
-export function conflictsFor(task: Pick<Task, "checks" | "slices">, changeId: string): Conflict[] {
+export function conflictsFor(task: Pick<Task, "checks" | "slices" | "branch">, changeId: string): Conflict[] {
 	return conflictsByChange(task).get(changeId) ?? [];
 }
 
 /** "Conflicts with Fix login (fix-login) in src/a.ts, src/b.ts" */
 export function describeConflict(conflict: Conflict): string {
-	const who = conflict.with === "main" ? "main" : conflict.withTitle ? `${conflict.withTitle} (${conflict.with})` : conflict.with;
+	const who = conflict.base ? conflict.with : conflict.withTitle ? `${conflict.withTitle} (${conflict.with})` : conflict.with;
 	return `Conflicts with ${who}${conflict.files.length ? ` in ${conflict.files.join(", ")}` : ""}`;
 }

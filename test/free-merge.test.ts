@@ -32,7 +32,7 @@ async function readyChange(change: string, files: Record<string, string>) {
 }
 
 const merge = (change: string, runChecks: CheckRunner = passing) =>
-	mergeChange({ remote: remote(), store: claimStore({ repo: "t1", registry: undefined, root: claims(), remote: async () => remote() }), votes: votes(), policy, verify: ["npm test"], runChecks, change, agent: `agent-${change}` });
+	mergeChange({ remote: remote(), branch: "main", store: claimStore({ repo: "t1", registry: undefined, root: claims(), remote: async () => remote() }), votes: votes(), policy, verify: ["npm test"], runChecks, change, agent: `agent-${change}` });
 
 beforeEach(async () => {
 	server = await startGitServer();
@@ -75,7 +75,7 @@ describe("free_merge", { timeout: 60_000 }, () => {
 		const main = server.git("rev-parse", "main").trim();
 		const failing: CheckRunner = vi.fn(async () => ({ passed: false, results: [{ command: "npm test", exitCode: 1, output: "1 failing" }] }));
 		expect(await merge("a-1", failing)).toEqual({ ok: false, reasons: ["checks failed: npm test exited 1"], checks: [{ command: "npm test", exitCode: 1, output: "1 failing" }] });
-		expect(failing).toHaveBeenCalledWith({ base: main, head, ref: "changes/a-1", commands: ["npm test"] });
+		expect(failing).toHaveBeenCalledWith({ base: main, branch: "main", head, ref: "changes/a-1", commands: ["npm test"] });
 		expect(server.git("rev-parse", "main").trim()).toBe(main);
 	});
 
