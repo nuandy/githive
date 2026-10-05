@@ -224,7 +224,7 @@ function checkReleasedAfter(history: History, tip: string, merge: MergeRecord, r
 	}
 }
 
-/** The merged commit must have had the policy's approvals from reviewers other than its author, and no veto, at the votes tip the merge cites. */
+/** The merged commit must have had the policy's approvals from reviewers other than its author, every veto role's among them, and no veto, at the votes tip the merge cites. */
 function checkApproved(records: AuditRecords, votesAt: Map<string, Votes>, merge: MergeRecord, report: (rule: string, detail: string) => void, author?: Author) {
 	if (!records.policy) return;
 	if (!merge.head || !merge.votesTip) return report("undeclared", "the merge names no reviewed commit or votes it counted (Blueprint-Votes)");
@@ -233,7 +233,8 @@ function checkApproved(records: AuditRecords, votesAt: Map<string, Votes>, merge
 	// Distinct verified reviewers, never the change's own author.
 	const outcome = approval(votes, merge.head, records.policy, author);
 	if (outcome.vetoedBy.length) report("unapproved", `${merge.head} was vetoed by ${outcome.vetoedBy.join(", ")} at ${merge.votesTip}`);
-	else if (!outcome.approved) report("unapproved", `${merge.head} had ${outcome.approvals} of ${records.policy.required} approvals at ${merge.votesTip}`);
+	else if (outcome.approvals < records.policy.required) report("unapproved", `${merge.head} had ${outcome.approvals} of ${records.policy.required} approvals at ${merge.votesTip}`);
+	else if (outcome.awaiting.length) report("unapproved", `${merge.head} had no approval from ${outcome.awaiting.join(", ")} at ${merge.votesTip}`);
 }
 
 /** Releases of another agent's claim that wasn't stale yet. */

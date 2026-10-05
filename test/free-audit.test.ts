@@ -18,7 +18,7 @@ const registry = [
 const approve = (reviewer: string, role: string, commit = "h1") => ({ commit, reviewer, role, verdict: "approve" as const, evidence: "ok", at: "" });
 const policy = { required: 2, vetoes: ["security"] };
 // The votes' history: two approvals of a's head h1.
-const votes: { tip: string; state: Votes }[] = [{ tip: "v1", state: { votes: [approve("rev-1", "tests"), approve("rev-2", "api")] } }];
+const votes: { tip: string; state: Votes }[] = [{ tip: "v1", state: { votes: [approve("rev-1", "tests"), approve("rev-2", "security")] } }];
 const merge = (overrides: Partial<MergeRecord>): MergeRecord => ({ commit: "m1", author: "agent-a", change: "stats-1a2b", claimsTip: "r2", head: "h1", votesTip: "v1", files: ["src/stats/index.ts"], ...overrides });
 const records = (merges: MergeRecord[], reg = registry) => ({ registry: reg, votes, policy, merges });
 
@@ -62,11 +62,11 @@ describe("the audit", () => {
 	});
 
 	it("reports a merge whose approvals came from its author, or from one identity under two names", async () => {
-		const self = { tip: "v3", state: { votes: [approve("agent-a", "tests"), approve("rev-2", "api")] } };
+		const self = { tip: "v3", state: { votes: [approve("agent-a", "tests"), approve("rev-2", "security")] } };
 		expect(await audit({ ...records([merge({ votesTip: "v3" })]), votes: [self] })).toEqual([
 			{ commit: "m1", author: "agent-a", rule: "unapproved", detail: "h1 had 1 of 2 approvals at v3" },
 		]);
-		const twice = { tip: "v4", state: { votes: [{ ...approve("rev-1", "tests"), by: "service:x/agent-z" }, { ...approve("rev-2", "api"), by: "service:x/agent-z" }] } };
+		const twice = { tip: "v4", state: { votes: [{ ...approve("rev-1", "tests"), by: "service:x/agent-z" }, { ...approve("rev-2", "security"), by: "service:x/agent-z" }] } };
 		expect(await audit({ ...records([merge({ votesTip: "v4" })]), votes: [twice] })).toEqual([
 			{ commit: "m1", author: "agent-a", rule: "unapproved", detail: "h1 had 1 of 2 approvals at v4" },
 		]);

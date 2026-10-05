@@ -76,7 +76,7 @@ describe("coordinator-free mode, end to end", { timeout: 60_000 }, () => {
 		await claim(claims(), { change: "a-1", agent: "agent-a", paths: ["src/a/"], intent: "a's work" }, as.a);
 		const aHead = await pushChange("agent-a", "a-1", { "src/a/x.txt": "a\n" });
 		await vote(votes(), { commit: aHead, reviewer: "rev-1", role: "tests", verdict: "approve", evidence: "ok" }, as.rev1);
-		await vote(votes(), { commit: aHead, reviewer: "rev-2", role: "api", verdict: "approve", evidence: "ok" }, as.rev2);
+		await vote(votes(), { commit: aHead, reviewer: "rev-2", role: "security", verdict: "approve", evidence: "ok" }, as.rev2);
 		const merged = await mergeChange({ remote: remote(), store: claimStore({ repo: "t1", registry: undefined, root: claims(), remote: async () => remote() }), votes: votes(), policy, stamper: as.a, stampKey: (await claims().read())!.commit.state.stampKey, change: "a-1", agent: "agent-a" });
 		expect(merged).toMatchObject({ ok: true });
 

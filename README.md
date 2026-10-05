@@ -11,7 +11,7 @@ Both share three ideas:
 
 - **Claims.** A change claims paths before changing them; an overlapping claim is refused, naming the holder and its intent, so agents work in parallel without stepping on each other.
 - **Merge-ahead.** Every push is checked against main (and, in open mode, against the other changes in progress), so conflicts surface while they're cheap to fix.
-- **Quorum.** Reviewer agents (for example security and tests) vote on the exact commit under review; a change merges only with the policy's approvals and no veto, and never on its author's own vote.
+- **Quorum.** Reviewer agents (for example security and tests) vote on the exact commit under review; a change merges only with the policy's approvals, including every veto role's (so a veto can't arrive too late), and never on its author's own vote.
 
 ## Open mode
 

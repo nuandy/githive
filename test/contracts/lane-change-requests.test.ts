@@ -23,7 +23,7 @@ const laneCoordinator = () => coordinator as unknown as LaneChangeCoordinator;
 const requestInput: LaneChangeRequestInput = { path: "src/b/routes.ts", need: "Add the route registration.", reason: "Slice a needs this endpoint." };
 const approved = (head: string) => [
 	{ reviewer: "tests", head, verdict: "approve" as const, summary: "ok", at: "" },
-	{ reviewer: "api", head, verdict: "approve" as const, summary: "ok", at: "" },
+	{ reviewer: "security", head, verdict: "approve" as const, summary: "ok", at: "" },
 ];
 async function setup(overrides: Parameters<typeof task>[0] = {}) {
 	storage = new FakeStorage(); fake = fakeEnv();

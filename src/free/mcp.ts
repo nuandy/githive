@@ -66,7 +66,7 @@ export const FREE_INSTRUCTIONS = `Coordinator-free mode (the free_* tools): nobo
 Conventions:
 1. free_claim the paths you will change before editing; edit only inside your claim. A refusal names who holds what: narrow your claim, or ask them.
 2. Work on a branch changes/<change> and push it to your change's own fork (free_credentials with your change; only you can write it). The project's main is written only through the toolkit.
-3. Reviewers free_vote on the exact commit they reviewed. A change merges with the policy's approvals and no veto. Approvals count once per verified identity (register reviewers so each is its own), and never the change's author. free_status shows your change's votes, with the evidence for any rejection to fix, and what's still needed.
+3. Reviewers free_vote on the exact commit they reviewed. A change merges with the policy's approvals, including every veto role's, and no veto. Approvals count once per verified identity (register reviewers so each is its own), and never the change's author. free_status shows your change's votes, with the evidence for any rejection to fix, and what's still needed.
 4. Run free_check after you push: it test-merges your change with main and lists files outside your claim, so you hear about problems before merging.
 5. free_merge merges your branch with trailers recording the claims and votes it checked, then releases your claim. Merge by hand only with the same trailers.
 6. Claiming again (same paths) keeps your claim active. A claim idle for 30 minutes is released by whoever claims its paths, or by anyone (free_release with stale: true).
@@ -149,7 +149,7 @@ async function changeStatus(ctx: FreeContext, repo: string, registry: Registry |
 		.then((source) => branchHead(source, `changes/${change}`))
 		.catch(() => null);
 	const policy = registry?.policy ?? DEFAULT_POLICY;
-	const outcome = head ? approval({ votes: counted }, head, policy, author) : { approved: false, approvals: 0, vetoedBy: [] };
+	const outcome = head ? approval({ votes: counted }, head, policy, author) : { approved: false, approvals: 0, vetoedBy: [], awaiting: policy.vetoes };
 	const hosted = ctx.agentStatus ? await ctx.agentStatus(repo, change, head, [...new Set(["tests", ...policy.vetoes])]).catch(() => undefined) : undefined;
 	return { head, votes: head ? cast.filter((v) => v.commit === head) : [], approval: { ...outcome, required: policy.required }, ...(hosted ? { hosted } : {}) };
 }

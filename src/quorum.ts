@@ -13,7 +13,11 @@ export function validatePolicy(policy: ReviewPolicy) {
 	if (unknown.length) fail(400, `veto roles are not reviewers: ${unknown.join(", ")}`);
 }
 
-/** Tally the reviews of the slice's current review head. A reviewer's latest verdict wins. */
+/**
+ * Tally the reviews of the slice's current review head. A reviewer's latest
+ * verdict wins. Approval needs the required approvals and every veto role's,
+ * so a veto can always stop a merge, however fast the others vote.
+ */
 export function tally(policy: ReviewPolicy, slice: Pick<Slice, "reviewHead" | "reviews">) {
 	const latest = new Map<string, Review>();
 	for (const review of slice.reviews) {
@@ -26,7 +30,7 @@ export function tally(policy: ReviewPolicy, slice: Pick<Slice, "reviewHead" | "r
 	let status: QuorumStatus = "pending";
 	if (!slice.reviewHead) status = "pending";
 	else if (rejections.some((r) => policy.vetoes.includes(r))) status = "vetoed";
-	else if (approvals.length >= policy.required) status = "approved";
+	else if (approvals.length >= policy.required && policy.vetoes.every((r) => approvals.includes(r))) status = "approved";
 	else if (approvals.length + waiting.length < policy.required) status = "rejected";
 
 	return { status, approvals, rejections, waiting };

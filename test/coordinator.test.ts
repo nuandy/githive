@@ -112,7 +112,7 @@ const builder = (sliceId: string) => fake.env.BUILDER.getByName(`t1--${sliceId}`
 const vote = (reviewer: string, verdict: Review["verdict"], head = "h1") => ({ reviewer, verdict, head, summary: `${reviewer} says ${verdict}` });
 const approvedReviews = (head = "h1") => [
 	{ ...vote("tests", "approve", head), at: "" },
-	{ ...vote("api", "approve", head), at: "" },
+	{ ...vote("security", "approve", head), at: "" },
 ];
 
 beforeEach(() => {
@@ -190,7 +190,7 @@ describe("votes", () => {
 	it("queues an approved slice with the task's gate", async () => {
 		await setup(task({ slices: [slice("a", { reviewHead: "h1" }), slice("b")] }));
 		await coordinator.submitReview("a", vote("tests", "approve"));
-		const { next } = await coordinator.submitReview("a", vote("api", "approve"));
+		const { next } = await coordinator.submitReview("a", vote("security", "approve"));
 		expect(next).toBe("integrate");
 		expect(fake.env.GATE.getByName("t1").enqueue).toHaveBeenCalledWith("t1", { slice: "a", head: "h1" });
 		expect((await stored()).slices[0].gate?.status).toBe("queued");
@@ -199,7 +199,7 @@ describe("votes", () => {
 	it("integrates directly when the task has no verify commands", async () => {
 		await setup(task({ verify: [], slices: [slice("a", { reviewHead: "h1" }), slice("b")] }));
 		await coordinator.submitReview("a", vote("tests", "approve"));
-		await coordinator.submitReview("a", vote("api", "approve"));
+		await coordinator.submitReview("a", vote("security", "approve"));
 		expect(io.merges).toEqual(["refs/remotes/a/main"]);
 		expect((await stored()).slices[0].status).toBe("integrated");
 	});
@@ -249,7 +249,7 @@ describe("the integration gate", () => {
 	it("cancels an approved gate queued before a veto and ignores its late result", async () => {
 		await setup(task({ slices: [slice("a", { reviewHead: "h1" }), slice("b")] }));
 		await coordinator.submitReview("a", vote("tests", "approve"));
-		await coordinator.submitReview("a", vote("api", "approve"));
+		await coordinator.submitReview("a", vote("security", "approve"));
 		expect(fake.env.GATE.getByName("t1").enqueue).toHaveBeenCalledWith("t1", { slice: "a", head: "h1" });
 		await coordinator.submitReview("a", vote("security", "reject"));
 		expect(fake.env.GATE.getByName("t1").cancel).toHaveBeenCalledWith("t1", "a", "h1");
@@ -505,10 +505,10 @@ describe("escalation and human controls", () => {
 });
 
 describe("the record in Git", () => {
-	const approved = (head = "h1") => [vote("tests", "approve", head), vote("api", "approve", head)];
+	const approved = (head = "h1") => [vote("tests", "approve", head), vote("security", "approve", head)];
 
 	it("attributes a requested gate retry, including service-token identity", async () => {
-		const approvedReviews = [{ ...vote("tests", "approve"), at: "" }, { ...vote("api", "approve"), at: "" }];
+		const approvedReviews = [{ ...vote("tests", "approve"), at: "" }, { ...vote("security", "approve"), at: "" }];
 		await setup(task({ slices: [slice("a", { reviewHead: "h1", gate: { status: "queued", head: "h1", baseHead: "base0", at: "", excluded: [] }, reviews: approvedReviews }), slice("b")] }));
 		await coordinator.retryGate("a", service);
 		await coordinator.ledgerIdle();
@@ -522,7 +522,7 @@ describe("the record in Git", () => {
 		await coordinator.ledgerIdle();
 		expect(ledger.entries.filter((e) => e.commit === "h1").map((e) => e.text)).toEqual([
 			"a: tests reviewer approved: tests says approve",
-			"a: api reviewer approved: api says approve",
+			"a: security reviewer approved: security says approve",
 			"a: quorum approved",
 			"a merged into main",
 		]);

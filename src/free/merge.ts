@@ -78,7 +78,8 @@ export async function mergeChange(input: MergeInput): Promise<MergeOutcome> {
 		// Distinct reviewers, never the change's author: its claim's agent, and who made the claim.
 		const outcome = approval({ votes: counted }, head, input.policy, own);
 		if (outcome.vetoedBy.length) reasons.push(`${head} is vetoed by ${outcome.vetoedBy.join(", ")}`);
-		else if (!outcome.approved) reasons.push(`${head} has ${outcome.approvals} of ${input.policy.required} approvals from reviewers other than its author`);
+		else if (outcome.approvals < input.policy.required) reasons.push(`${head} has ${outcome.approvals} of ${input.policy.required} approvals from reviewers other than its author`);
+		else if (outcome.awaiting.length) reasons.push(`${head} still needs approval from ${outcome.awaiting.join(", ")}, which can veto it`);
 		if (reasons.length) return { ok: false, reasons };
 
 		const tried = await ws.tryMerge(main, head);

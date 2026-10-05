@@ -17,9 +17,15 @@ describe("tally", () => {
 		expect(tally(policy, { reviews: [] }).status).toBe("pending");
 	});
 
-	it("approves once enough reviewers approve", () => {
+	it("approves once enough reviewers approve, every veto role among them", () => {
+		const slice = { reviewHead: "h1", reviews: [review("tests", "approve"), review("security", "approve")] };
+		expect(tally(policy, slice)).toMatchObject({ status: "approved", waiting: ["api"] });
+	});
+
+	it("waits for a veto role, however many others approve", () => {
 		const slice = { reviewHead: "h1", reviews: [review("tests", "approve"), review("api", "approve")] };
-		expect(tally(policy, slice)).toMatchObject({ status: "approved", waiting: ["security"] });
+		expect(tally(policy, slice)).toMatchObject({ status: "pending", waiting: ["security"] });
+		expect(nextStep(policy, { id: "a", status: "building", reviewHead: "h1", reviews: slice.reviews } as never)).toBe("wait");
 	});
 
 	it("lets a veto role block an otherwise approved slice", () => {
@@ -43,7 +49,7 @@ describe("tally", () => {
 	it("counts only a reviewer's latest verdict", () => {
 		const slice = {
 			reviewHead: "h1",
-			reviews: [review("tests", "reject"), review("tests", "approve"), review("api", "approve")],
+			reviews: [review("tests", "reject"), review("tests", "approve"), review("security", "approve")],
 		};
 		expect(tally(policy, slice).status).toBe("approved");
 	});
@@ -61,7 +67,7 @@ describe("nextStep", () => {
 	const base = { status: "building" as const, reviewHead: "h1", id: "api", title: "", owns: [], instructions: "", touched: [], outOfLane: [] };
 
 	it("integrates an approved slice", () => {
-		expect(nextStep(policy, { ...base, reviews: [review("tests", "approve"), review("api", "approve")] })).toBe("integrate");
+		expect(nextStep(policy, { ...base, reviews: [review("tests", "approve"), review("security", "approve")] })).toBe("integrate");
 	});
 
 	it("sends a vetoed slice back once per head", () => {

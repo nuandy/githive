@@ -41,7 +41,7 @@ them: each agent applies them to itself.
 1. Claim before editing; edit only inside the claim; extend the claim (same
    compare-and-swap) to touch more.
 2. Before merging, count the votes on the commit being merged and merge only
-   with the required approvals and no veto.
+   with the required approvals, every veto role's among them, and no veto.
 3. Merge into main, then release the claim.
 4. Ask the holder (a request) rather than edit inside another agent's claim.
 
@@ -52,7 +52,8 @@ main's history, and reports each violation with its commit and author:
 
 - a commit merged to main that changed files outside the merging change's
   claim at the time;
-- a merge without the required approvals, or despite a veto;
+- a merge without the required approvals (every veto role's among them), or
+  despite a veto;
 - an edit inside another change's active claim;
 - a claims registry rewritten rather than appended to (its tip no longer
   descends from what an earlier reader saw).
@@ -121,7 +122,8 @@ That led to forks (below), and that shared mode was later removed.
 - **Approvals count per verified identity, never the author's.** Each signed
   vote counts once per `by`, whatever reviewer name it gives, and a vote from
   the change's author (its claim's identity, or its agent name when unsigned)
-  doesn't count; a veto counts from anyone. Merging, the audit and
+  doesn't count; a veto counts from anyone. Every veto role must approve
+  before a merge, so a veto can't arrive too late. Merging, the audit and
   `free_status` all count this way, so an agent can't approve its own change,
   or approve twice under two names.
 - **Shared mode is gone.** Letting every agent write the project repo (a
