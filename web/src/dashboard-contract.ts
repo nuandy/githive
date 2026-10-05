@@ -1,6 +1,6 @@
 import type { Live, Task } from "./api";
 
-export type DashboardSliceStage = "building" | "in-review" | "gate" | "integrated" | "needs-human";
+export type DashboardSliceStage = "opening" | "building" | "in-review" | "gate" | "integrated" | "abandoned" | "needs-human";
 export interface SliceStageInfo {
   stage: DashboardSliceStage;
   revisions: number;

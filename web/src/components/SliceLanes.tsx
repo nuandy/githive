@@ -3,12 +3,16 @@ import { getSliceStage } from "../lib/dashboardData";
 import { formatRelativeTime } from "../lib/relativeTime";
 import "./SliceLanes.css";
 
-const stageLabels = { building: "Building", "in-review": "In review", gate: "Gate", integrated: "Integrated", "needs-human": "Needs a human" } as const;
+const stageLabels = { opening: "Opening", building: "Building", "in-review": "In review", gate: "Gate", integrated: "Integrated", abandoned: "Abandoned", "needs-human": "Needs a human" } as const;
+
+/** Changes in progress; the rest (integrated or abandoned) have ended. */
+const inProgress = (status: string) => status === "opening" || status === "building";
 
 function toneForStage(stage: keyof typeof stageLabels) {
   if (stage === "integrated") return "good";
   if (stage === "needs-human") return "bad";
   if (stage === "gate" || stage === "in-review") return "warn";
+  if (stage === "abandoned") return "muted";
   return "accent";
 }
 
@@ -18,15 +22,7 @@ export function SliceLanes({ live }: SliceLanesProps) {
   const verify = Array.isArray(task.verify) ? task.verify : [];
   const laneChangeRequests = Array.isArray(task.laneChangeRequests) ? task.laneChangeRequests : [];
   const safeAgents = Array.isArray(agents) ? agents : [];
-  return (
-    <section className="slice-lanes" aria-labelledby="slice-lanes-title">
-      <div className="slice-lanes__heading">
-        <h2 id="slice-lanes-title">Slice lanes</h2>
-        <span className="muted">{slices.length} {slices.length === 1 ? "slice" : "slices"}</span>
-      </div>
-      {slices.length === 0 ? <p className="card muted">No changes open yet.</p> : null}
-      <div className="slice-lanes__list">
-        {slices.map((slice) => {
+  const renderLane = (slice: (typeof slices)[number]) => {
           const stageInfo = getSliceStage(slice);
           const sliceAgents = safeAgents.find((agent) => agent?.id === slice.id);
           const builder = sliceAgents?.builder;
@@ -122,8 +118,27 @@ export function SliceLanes({ live }: SliceLanesProps) {
               </section>
             </article>
           );
-        })}
+  };
+  const active = slices.filter((slice) => inProgress(slice.status));
+  const ended = slices.filter((slice) => !inProgress(slice.status));
+  return (
+    <section className="slice-lanes" aria-labelledby="slice-lanes-title">
+      <div className="slice-lanes__heading">
+        <h2 id="slice-lanes-title">Changes</h2>
+        <span className="muted">{active.length} in progress</span>
       </div>
+      {active.length === 0 ? <p className="card muted">No changes in progress.</p> : null}
+      <div className="slice-lanes__list">
+        {active.map(renderLane)}
+      </div>
+      {ended.length > 0 ? (
+        <details className="slice-lanes__ended">
+          <summary>
+            {ended.length} ended {ended.length === 1 ? "change" : "changes"} (integrated or abandoned)
+          </summary>
+          <div className="slice-lanes__list">{ended.map(renderLane)}</div>
+        </details>
+      ) : null}
     </section>
   );
 }

@@ -8,7 +8,7 @@
 .merge-matrix tr:last-child th, .merge-matrix tr:last-child td { border-bottom: 0; }
 .merge-matrix th:last-child, .merge-matrix td:last-child { border-right: 0; }
 .merge-matrix thead th, .merge-matrix tbody th { background: var(--surface-2); font-weight: 600; }
-.merge-matrix__status { display: inline-block; padding: 1px 6px; border-radius: 999px; background: var(--surface-2); color: var(--text-muted); font-weight: 600; }
+.merge-matrix__status { display: inline-block; padding: 1px 6px; border-radius: 999px; background: var(--surface-2); color: var(--text-muted); font-weight: 600; white-space: nowrap; }
 .merge-matrix__status--clean { background: var(--good-soft); color: var(--good); }
 .merge-matrix__status--disjoint { background: var(--accent-soft); color: var(--accent); }
 .merge-matrix__status--conflict { background: var(--bad-soft); color: var(--bad); }

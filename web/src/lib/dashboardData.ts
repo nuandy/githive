@@ -10,10 +10,12 @@ import type {
 /** Derive the most relevant visible state for a slice. */
 export function getSliceStage(slice: Task["slices"][number]): SliceStageInfo {
   let stage: DashboardSliceStage;
-  if (slice?.attention !== undefined) stage = "needs-human";
+  if (slice?.status === "abandoned") stage = "abandoned";
+  else if (slice?.attention !== undefined) stage = "needs-human";
   else if (slice?.status === "integrated") stage = "integrated";
   else if (slice?.gate?.status === "running") stage = "gate";
   else if (slice?.reviewHead) stage = "in-review";
+  else if (slice?.status === "opening") stage = "opening";
   else stage = "building";
 
   return { stage, revisions: slice?.revisions ?? 0 };
@@ -21,7 +23,8 @@ export function getSliceStage(slice: Task["slices"][number]): SliceStageInfo {
 
 /** Build a matrix of the most recent merge-ahead check for every pair. */
 export function buildMergeMatrix(task: Task): MergeMatrix {
-  const slices = Array.isArray(task?.slices) ? task.slices : [];
+  // Only changes in progress: an ended change is never checked again.
+  const slices = (Array.isArray(task?.slices) ? task.slices : []).filter((slice) => slice.status === "opening" || slice.status === "building");
   const checks = Array.isArray(task?.checks) ? task.checks : [];
   const ids = ["base", ...slices.map((slice) => slice.id)];
   const cells: MergeMatrixCell[][] = ids.map((row, rowIndex) =>

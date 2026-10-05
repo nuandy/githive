@@ -42,3 +42,6 @@
   .slice-lane__header { flex-direction: column; }
   .slice-lane__header > .badge { max-width: 100%; }
 }
+.slice-lanes__ended { margin-top: 16px; }
+.slice-lanes__ended > summary { cursor: pointer; color: var(--text-muted); font-weight: 600; padding: 8px 0; }
+.slice-lanes__ended > .slice-lanes__list { margin-top: 8px; }

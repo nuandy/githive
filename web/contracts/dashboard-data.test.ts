@@ -24,6 +24,14 @@ describe("dashboard data helpers", () => {
     expect(getSliceStage(makeSlice({ gate: { status: "running", head: "h", baseHead: "b", at: "now", excluded: [] } })).stage).toBe("gate");
     expect(getSliceStage(makeSlice({ reviewHead: "head" })).stage).toBe("in-review");
     expect(getSliceStage(makeSlice()).stage).toBe("building");
+    // An open task's changes can also be opening, or abandoned (their claim given up or expired).
+    expect(getSliceStage(makeSlice({ status: "opening" })).stage).toBe("opening");
+    expect(getSliceStage(makeSlice({ status: "abandoned", reviewHead: "head" })).stage).toBe("abandoned");
+  });
+
+  it("keeps only active changes in the matrix: ended ones are never checked again", () => {
+    const task = makeTask({ slices: [makeSlice({ id: "live" }), makeSlice({ id: "starting", status: "opening" }), makeSlice({ id: "gone", status: "abandoned" }), makeSlice({ id: "done", status: "integrated" })] });
+    expect(buildMergeMatrix(task).ids).toEqual(["base", "live", "starting"]);
   });
 
   it("builds a base-and-slice matrix and picks the newest check regardless of pair orientation", () => {

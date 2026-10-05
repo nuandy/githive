@@ -33,15 +33,13 @@ const task = (): Task => ({
   createdAt: "2025-01-01T00:00:00.000Z",
 });
 
-describe("integrated merge-ahead matrix pairs", () => {
-  it("labels pairs involving integrated slices as integrated, regardless of retained check status", () => {
+describe("integrated changes and the merge-ahead matrix", () => {
+  it("leaves integrated changes out: an open task's matrix is the changes still in progress", () => {
     const matrix = buildMergeMatrix(task());
     const at = (row: string, column: string) => matrix.cells[matrix.ids.indexOf(row)][matrix.ids.indexOf(column)].status;
 
+    expect(matrix.ids).toEqual(["base", "building-two"]);
     expect(at("base", "base")).toBe("same");
-    expect(at("base", "integrated-one")).toBe("integrated");
-    expect(at("integrated-one", "base")).toBe("integrated");
-    expect(at("integrated-one", "building-two")).toBe("integrated");
     expect(at("base", "building-two")).toBe("disjoint");
   });
 });
