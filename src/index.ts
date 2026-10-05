@@ -122,8 +122,17 @@ async function openRepoTask(env: Env, repo: string, input: OpenTaskInput = {}): 
 	const id = await openTaskId(repo);
 	const listed = await taskIndex(env).get(id);
 	if (listed?.elected) return electedForEnv(env, id, repo, listed.leader?.name).state();
-	// Already open on a fixed Coordinator (opened before the elected coordinator): that task stays the repo's.
-	if (listed) return (await fixedCoordinator(env, id).createOpen(id, repo, input)) as unknown as Task;
+	// Opened on a fixed Coordinator, before open mode was elected: move the task
+	// now. The Coordinator hands over its state and stops deciding; the elected
+	// log starts from that state, on top of its ledger, so the record in Git runs on.
+	if (listed) {
+		const task = (await fixedCoordinator(env, id).handOver()) as unknown as Task;
+		const log = new GitCasLog<Task>(() => remoteFor(env.ARTIFACTS, repo, "write"), id);
+		const moved = { commit: task.anchor ?? task.baseCommit ?? "none", text: "Open mode moves to the elected coordinator: the task goes on from the fixed Coordinator's state", at: new Date().toISOString() };
+		await openLog(log, task, [moved], await log.tip());
+		await taskIndex(env).add({ ...listed, elected: true });
+		return task;
+	}
 	// No coordinator to create: the task's log in Git starts with it, and the
 	// first peer that needs a decision becomes its leader.
 	const head = (await headOf(env.ARTIFACTS, repo)) ?? fail(409, `${repo} has no commits`);

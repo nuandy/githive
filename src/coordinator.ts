@@ -128,6 +128,9 @@ const MAX_CONCURRENT_FORKS = 6;
  * on the task's repos: forking slices, test-merging them against each other
  * (Merge-ahead), gating integration on reviewer votes (Quorum), and landing.
  */
+
+/** Set once an open task has moved to the elected coordinator: this object then decides nothing for it. */
+const MOVED = "moved-to-elected";
 export class Coordinator extends DurableObject<Env> implements CoordinatorHumanActions, LaneChangeCoordinator {
 	// State-changing steps run one at a time so they never overwrite each other.
 	// A step should be short: the hot paths (opening a change, recording a push,
@@ -191,7 +194,9 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 	// keep both in the shared log (see src/peer.ts).
 
 	/** The stored task, if there is one. */
-	protected readTask(): Promise<Task | undefined> {
+	protected async readTask(): Promise<Task | undefined> {
+		// An open task handed over to the elected coordinator is decided there now, never here.
+		if (await this.ctx.storage.get(MOVED)) fail(409, "this task moved to the elected coordinator: its log in Git is the record now");
 		return this.ctx.storage.get<Task>("task");
 	}
 
@@ -234,6 +239,26 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 	/** Note a decision on the commit it is about (the task's anchor commit for task-wide ones). */
 	private note(task: Task, commit: string | undefined, text: string) {
 		this.recordDecision({ commit: commit ?? task.baseCommit ?? task.anchor ?? EMPTY_TREE, text, at: new Date().toISOString() });
+	}
+
+	/**
+	 * Hand an open task over to the elected coordinator (open mode has no fixed
+	 * Coordinator): every queued decision is written to Git first, so the elected
+	 * log continues from them; then this object stops its timers and refuses
+	 * everything. Returns the task's state, the elected log's first. Harmless to
+	 * repeat.
+	 */
+	async handOver() {
+		await this.ledgerIdle();
+		return this.exclusive(async () => {
+			const task = (await this.ctx.storage.get<Task>("task")) ?? fail(404, "task not found");
+			if (task.mode !== "open") fail(409, "only an open task moves to the elected coordinator");
+			if (!(await this.ctx.storage.get(MOVED))) {
+				await this.ctx.storage.put(MOVED, new Date().toISOString());
+				await this.ctx.storage.deleteAlarm();
+			}
+			return withScheduling(task);
+		});
 	}
 
 	/** Wait until every queued decision is in Git, retrying a failed write once. Returns how many are still queued. */
@@ -939,6 +964,7 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 	}
 
 	async alarm() {
+		if (await this.ctx.storage.get(MOVED)) return;
 		const task = await this.load();
 		if (task.mode === "open") return this.sweepLeases();
 		if (task.planner?.status !== "running") return;

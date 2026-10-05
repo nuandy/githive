@@ -18,9 +18,13 @@ const IDENTITY = "peer:identity";
 /** How long a leader's lease lasts unless renewed. */
 export const PEER_LEASE_MS = 30_000;
 
-/** Start a task's log: the open task as its first state, with nobody leading yet. */
-export async function openLog(log: CasLog<Task>, task: Task, entries: LedgerEntry[] = []) {
-	const tip = await log.append(null, { term: 0, leader: "", leaseUntil: 0, kind: "genesis", entries, state: task, batch: crypto.randomUUID() });
+/**
+ * Start a task's log: the open task as its first state, with nobody leading
+ * yet. `parent` continues an existing record on the same ref (a fixed
+ * Coordinator's ledger, for a task moving to the elected coordinator).
+ */
+export async function openLog(log: CasLog<Task>, task: Task, entries: LedgerEntry[] = [], parent: string | null = null) {
+	const tip = await log.append(parent, { term: 0, leader: "", leaseUntil: 0, kind: "genesis", entries, state: task, batch: crypto.randomUUID() });
 	if (!tip) {
 		const head = await log.read();
 		if (head?.commit.state.id === task.id) return head.tip;
