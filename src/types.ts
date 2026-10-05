@@ -31,6 +31,11 @@ export interface SliceSpec {
 
 export interface Slice extends SliceSpec {
 	status: SliceStatus;
+	/** When the change was opened, and who opened it: an Access identity's label (a person by a hash of their email), or "blueprint-builder" for a hosted change. */
+	openedAt?: string;
+	openedBy?: string;
+	/** When it merged or was abandoned. */
+	endedAt?: string;
 	/** Open mode: what the agent that opened this change set out to do. */
 	intent?: string;
 	/** Open mode: the project commit the change's fork started from (planned slices start at the task's baseCommit). */

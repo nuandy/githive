@@ -4,6 +4,7 @@ import worker from "../src/index";
 // Opening a repo writes the log's first commit to Git; the Git side is faked here.
 const genesis = vi.hoisted(() => ({ appended: [] as { parent: string | null; commit: { kind: string; state: { id: string; repo: string; mode?: string } } }[] }));
 vi.mock("../src/election-git", () => ({
+	readDecisionHistory: vi.fn(async (_remote: unknown, taskId: string) => (taskId === "t1" ? [{ commit: "c0", text: "Change a opened", at: "2026-10-06T00:00:01.000Z" }] : [])),
 	GitCasLog: class {
 		async append(parent: string | null, commit: never) {
 			genesis.appended.push({ parent, commit });
@@ -20,6 +21,7 @@ vi.mock("../src/election-git", () => ({
 vi.mock("../src/artifacts", async (importOriginal) => ({
 	...(await importOriginal<typeof import("../src/artifacts")>()),
 	headOf: vi.fn(async () => "main0"),
+	remoteFor: vi.fn(async (_artifacts: unknown, repo: string) => ({ url: `https://git.test/${repo}.git`, token: "read" })),
 }));
 
 // HTTP routes with the Durable Objects faked: what the Worker itself does around Coordinator calls.
@@ -99,6 +101,12 @@ describe("crashing an elected task's leader, for failover tests", () => {
 	it("says who leads, as the task index notes it", async () => {
 		const env = { TASK_INDEX: { getByName: () => ({ get: async () => ({ id: "t1", repo: "project", elected: true, leader: { name: "t1--b", term: 5 } }) }) } };
 		expect(await (await get(env as never, "/tasks/t1/leader")).json()).toEqual({ leader: "t1--b", term: 5 });
+	});
+
+	it("serves an elected task's history: the decisions in its log, oldest first", async () => {
+		const env = { TASK_INDEX: { getByName: () => ({ get: async (id: string) => (id === "t1" ? { id, repo: "project", elected: true } : null) }) } };
+		expect(await (await get(env as never, "/tasks/t1/history")).json()).toEqual({ entries: [{ commit: "c0", text: "Change a opened", at: "2026-10-06T00:00:01.000Z" }] });
+		expect((await get(env as never, "/tasks/nope/history")).status).toBe(404);
 	});
 
 	it("says so when nobody leads", async () => {

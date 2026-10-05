@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Deposed, type LogCommit, campaign } from "../src/election";
-import { GitCasLog, cachedRemote, leaseRef } from "../src/election-git";
+import { GitCasLog, readDecisionHistory, cachedRemote, leaseRef } from "../src/election-git";
 import { startGitServer, type GitServer } from "./helpers/git-server";
 
 // The log in Git, against a real Git server (git http-backend).
@@ -40,6 +40,14 @@ describe("GitCasLog", () => {
 		const tip = await log.append(null, written);
 		expect(tip).toMatch(/^[0-9a-f]{40}$/);
 		expect(await log.read()).toEqual({ tip, commit: written });
+	});
+
+	it("reads back every decision the log recorded, oldest first, for a task's history", async () => {
+		const first = await log.append(null, commit({ kind: "decisions", entries: [{ commit: "c0", text: "Change a opened", at: "2026-10-06T00:00:01.000Z" }] }));
+		const second = await log.append(first, commit({ kind: "decisions", batch: "b2", entries: [{ commit: "c1", text: "a pushed c1", at: "2026-10-06T00:00:02.000Z" }, { commit: "c1", text: "a: tests reviewer approved", at: "2026-10-06T00:00:03.000Z" }] }));
+		await log.append(second, commit({ kind: "heartbeat", batch: "b3" }));
+		expect((await readDecisionHistory({ url: server.url, token: "unused" }, "t1")).map((e) => e.text)).toEqual(["Change a opened", "a pushed c1", "a: tests reviewer approved"]);
+		expect(await readDecisionHistory({ url: server.url, token: "unused" }, "nothing-here")).toEqual([]);
 	});
 
 	it("retries a read the server fails for a moment", async () => {

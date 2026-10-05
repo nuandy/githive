@@ -4,7 +4,7 @@ import type { AccessIdentity, CoordinatorHumanActions } from "./access-contract"
 import { deleteReposWithPrefix, headOf, listRepoNames, parseRepoName, remoteFor, reviewerName, sliceRepoName } from "./artifacts";
 import { openTaskFor, type OpenTaskInput } from "./coordinator";
 import { electedForEnv, taskCoordinator } from "./elected";
-import { GitCasLog } from "./election-git";
+import { GitCasLog, readDecisionHistory } from "./election-git";
 import { PEER_LEASE_MS, openLog, type Peer } from "./peer";
 import { fail, requiredPaths, requiredString, statusOf } from "./errors";
 import { retryTransient } from "./retry";
@@ -90,6 +90,7 @@ app.get("/api", (c) =>
 			"DELETE /repos/:repo (refused while tasks use it)",
 			"GET  /free         (repos in coordinator-free mode)",
 			"GET  /free/:repo   (claims, votes and audit, from Git)",
+			"GET  /tasks/:id/history  (every decision in the task's log, oldest first)",
 			"GET  /tasks/:id/leader  (who leads an elected task)",
 			"POST /tasks/:id/leader/crash {forMs?}  (failover test: the leader stops as if its object vanished)",
 			"GET  /tasks/:id/lock-stats",
@@ -281,6 +282,14 @@ app.post("/tasks/:id/slices/:slice/gate", async (c) => {
 });
 
 // Lock timings for benchmarks; POST clears them after reading.
+// A task's history: every decision in its log in Git, oldest first (none for a task not run by the elected coordinator).
+app.get("/tasks/:id/history", async (c) => {
+	const ref = await taskIndex(c.env).get(c.req.param("id"));
+	if (!ref) fail(404, `no task ${c.req.param("id")}`);
+	const entries = ref.elected ? await readDecisionHistory(await remoteFor(c.env.ARTIFACTS, ref.repo, "read"), ref.id) : [];
+	return c.json({ entries });
+});
+
 // Who leads an elected task, as the task index notes it (null: nobody, as far as it knows).
 app.get("/tasks/:id/leader", async (c) => {
 	const leader = (await taskIndex(c.env).get(c.req.param("id")))?.leader;

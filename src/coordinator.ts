@@ -22,6 +22,7 @@ import { OPENING_LEASE_MS, claimConflicts, claimsOf, conflictMessage as claimCon
 import { nextStep, reviewFeedback, tally, validatePolicy } from "./quorum";
 import { activeOf, hasRoom, itemKey, stillWanted, validateLimits, withScheduling, type AgentKind } from "./schedule";
 import { accessIdentityLabel, type AccessIdentity, type CoordinatorHumanActions } from "./access-contract";
+import { identityLabel } from "./free/stamp";
 import {
 	DEFAULT_POLICY,
 	type Limits,
@@ -687,6 +688,9 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 				reviews: [],
 				leaseUntil: new Date(Date.now() + OPENING_LEASE_MS).toISOString(),
 				external: !input.hosted,
+				openedAt: new Date().toISOString(),
+				// A person by a hash of their email: change records reach agents, never the address.
+				...(actor ? { openedBy: identityLabel(actor) } : input.hosted ? { openedBy: "blueprint-builder" } : {}),
 			};
 			task.slices.push(slice);
 			await this.scheduleLeaseCheck(task);
@@ -802,6 +806,7 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 	private abandon(task: Task, slice: Slice, reason: string): () => Promise<unknown> {
 		const opened = slice.status === "building";
 		slice.status = "abandoned";
+		slice.endedAt = new Date().toISOString();
 		slice.attention = undefined;
 		task.queue = task.queue.filter((item) => item.slice !== slice.id);
 		task.active.builders = task.active.builders.filter((key) => key !== slice.id);
@@ -1370,8 +1375,9 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 
 		for (const slice of slices) {
 			slice.status = "integrated";
+			slice.endedAt = new Date().toISOString();
 			slice.attention = undefined;
-			this.note(task, slice.reviewHead, `${slice.id} integrated into the task base${slices.length > 1 ? `, together with ${slices.filter((s) => s !== slice).map((s) => s.id).join(", ")}` : ""}`);
+			this.note(task, slice.reviewHead, `${slice.id} merged into main${slices.length > 1 ? `, together with ${slices.filter((s) => s !== slice).map((s) => s.id).join(", ")}` : ""}`);
 		}
 		const integratedHead = await headOf(this.env.ARTIFACTS, task.baseRepo!);
 		for (const request of task.laneChangeRequests ?? []) {

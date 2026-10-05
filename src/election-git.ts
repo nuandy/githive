@@ -156,6 +156,24 @@ export function cachedRemote(mint: () => Promise<Remote>, freshForMs = 5 * 60_00
 	};
 }
 
+/**
+ * Every decision a task's log recorded, oldest first: each commit carries the
+ * decisions it made. (Commits from a fixed Coordinator's ledger, before a task
+ * moved to the elected coordinator, carry none and are skipped.)
+ */
+export async function readDecisionHistory(remote: Remote, taskId: string): Promise<LedgerEntry[]> {
+	const ref = notesRef(taskId);
+	const tip = await retryTransient(() => serverTip(remote, ref));
+	if (!tip) return [];
+	const { fs } = await retryTransient(() => fetchCommits(remote, [tip], DIR, { history: true }));
+	const entries: LedgerEntry[] = [];
+	for (const { oid } of (await git.log({ fs, dir: DIR, ref: tip })).reverse()) {
+		const blob = await git.readBlob({ fs, dir: DIR, oid, filepath: DECISIONS_FILE }).catch(() => null);
+		if (blob) entries.push(...(JSON.parse(decoder.decode(blob.blob)) as LedgerEntry[]));
+	}
+	return entries;
+}
+
 /** A task's lease ref: who leads, until when. Beside the decision log, so heartbeats don't grow it. */
 export const leaseRef = (taskId: string) => `refs/notes/blueprint-lease/${taskId}`;
 

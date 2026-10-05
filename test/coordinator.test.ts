@@ -524,7 +524,7 @@ describe("the record in Git", () => {
 			"a: tests reviewer approved: tests says approve",
 			"a: api reviewer approved: api says approve",
 			"a: quorum approved",
-			"a integrated into the task base",
+			"a merged into main",
 		]);
 		expect(await coordinator.ledger()).toMatchObject({ matches: true, commits: 2 });
 	});
@@ -628,6 +628,22 @@ describe("open mode", () => {
 		await expect(coordinator.openChange({ id: "x-1", title: "X", intent: "X, please", owns: ["src/y/"] })).rejects.toThrow("change x-1 already exists");
 		await coordinator.abandonChange("x-1", "done");
 		await expect(coordinator.openChange({ id: "x-1", title: "X", intent: "X, please", owns: ["src/x/"] })).rejects.toThrow("change x-1 already exists");
+	});
+
+	it("records when a change opened and who opened it (a person by a hash of their email, never the address), and when it ended", async () => {
+		await setup(openTask());
+		const byPerson = await coordinator.openChange({ title: "X", intent: "X, please", owns: ["src/x/"] }, { kind: "person", value: "Human@Example.com" });
+		expect(byPerson.change.openedBy).toMatch(/^person:[0-9a-f]{12}$/);
+		expect(JSON.stringify(byPerson.change)).not.toMatch(/example\.com/i);
+		expect(Date.parse(byPerson.change.openedAt!)).toBeGreaterThan(0);
+		const byService = await coordinator.openChange({ title: "Y", intent: "Y, please", owns: ["src/y/"] }, { kind: "service", value: "ci-bot" });
+		expect(byService.change.openedBy).toBe("service:ci-bot");
+		const hosted = await coordinator.openChange({ title: "Z", intent: "Z, please", owns: ["src/z/"], hosted: true });
+		expect(hosted.change.openedBy).toBe("blueprint-builder");
+
+		expect(byPerson.change.endedAt).toBeUndefined();
+		const abandoned = await coordinator.abandonChange(byPerson.change.id, "done");
+		expect(Date.parse(abandoned.endedAt!)).toBeGreaterThanOrEqual(Date.parse(byPerson.change.openedAt!));
 	});
 
 	it("refuses a claim that overlaps an active change, naming the holder and its intent", async () => {
