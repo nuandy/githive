@@ -61,6 +61,23 @@ describe("opening a repo", () => {
 	});
 });
 
+describe("opening a repo already open on the fixed Coordinator", () => {
+	it("returns its existing task, and starts no second, elected one under the same id", async () => {
+		for (const how of ["http", "mcp"] as const) {
+			genesis.appended = [];
+			const { env, coordinator, index } = fakeEnv();
+			const existing = { id: "t-open", repo: "project", mode: "open", goal: "open", createdAt: "2026-10-01T00:00:00.000Z" };
+			index.get.mockResolvedValue({ id: "t-open", repo: "project", goal: "open", createdAt: existing.createdAt } as never);
+			coordinator.createOpen.mockResolvedValue(existing as never);
+			if (how === "http") expect(await (await post(env, "/repos/project/open", {})).json()).toMatchObject({ id: "t-open", mode: "open" });
+			else await post(env, "/mcp", { jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "join_repo", arguments: { repo: "project" } } });
+			expect(coordinator.createOpen).toHaveBeenCalled();
+			expect(genesis.appended).toEqual([]);
+			expect(index.add).not.toHaveBeenCalledWith(expect.objectContaining({ elected: true }));
+		}
+	});
+});
+
 const get = (env: never, path: string) => worker.fetch(new Request(`https://blueprint.test${path}`), env, {} as never);
 
 describe("dashboard reads", () => {

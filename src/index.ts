@@ -139,6 +139,8 @@ async function openRepoTask(env: Env, repo: string, input: OpenTaskInput = {}): 
 	const id = await openTaskId(repo);
 	const listed = await taskIndex(env).get(id);
 	if (listed?.elected) return electedForEnv(env, id, repo, listed.leader?.name).state();
+	// Already open on a fixed Coordinator (opened before the elected coordinator): that task stays the repo's.
+	if (listed) return (await fixedCoordinator(env, id).createOpen(id, repo, input)) as unknown as Task;
 	// No coordinator to create: the task's log in Git starts with it, and the
 	// first peer that needs a decision becomes its leader.
 	const head = (await headOf(env.ARTIFACTS, repo)) ?? fail(409, `${repo} has no commits`);
