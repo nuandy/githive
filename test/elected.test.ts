@@ -113,6 +113,7 @@ describe("the elected coordinator, from the Worker", () => {
 		await co.submitReview("stats", review);
 		await co.agentStopped("reviewer", "stats:tests:h1");
 		await co.agentStopped("builder", "stats");
+		await co.agentStopped("reviewer", "stats:api:h1", "clone failed");
 		await co.flagSlice("stats", "the builder stopped");
 		await co.parkBuilder("stats");
 		await co.parkedBuilderTimedOut("stats", "2026-10-06T00:00:00.000Z");
@@ -120,8 +121,10 @@ describe("the elected coordinator, from the Worker", () => {
 		await co.gateResult("stats", result, [], undefined);
 		const lead = p.made.get("t1--lead")!;
 		expect(lead.submitReview).toHaveBeenCalledWith("stats", review);
-		expect(lead.agentStopped).toHaveBeenCalledWith("reviewer", "stats:tests:h1");
-		expect(lead.agentStopped).toHaveBeenCalledWith("builder", "stats");
+		expect(lead.agentStopped).toHaveBeenCalledWith("reviewer", "stats:tests:h1", undefined);
+		expect(lead.agentStopped).toHaveBeenCalledWith("builder", "stats", undefined);
+		// Why a reviewer failed reaches the leader, which decides whether to run it again.
+		expect(lead.agentStopped).toHaveBeenCalledWith("reviewer", "stats:api:h1", "clone failed");
 		expect(lead.flagSlice).toHaveBeenCalledWith("stats", "the builder stopped");
 		expect(lead.parkBuilder).toHaveBeenCalledWith("stats");
 		expect(lead.parkedBuilderTimedOut).toHaveBeenCalledWith("stats", "2026-10-06T00:00:00.000Z");
@@ -134,7 +137,7 @@ describe("the elected coordinator, from the Worker", () => {
 		const p = peers(null);
 		await elected(p).agentStopped("reviewer", "stats:tests:h1");
 		expect(p.made.get("t1--stats")?.lead).toHaveBeenCalledWith("t1", "project", "t1--stats", false);
-		expect(p.made.get("t1--stats")?.agentStopped).toHaveBeenCalledWith("reviewer", "stats:tests:h1");
+		expect(p.made.get("t1--stats")?.agentStopped).toHaveBeenCalledWith("reviewer", "stats:tests:h1", undefined);
 	});
 
 	it("waits out a leader that is unavailable, then reaches the peer that takes over", async () => {
@@ -147,7 +150,7 @@ describe("the elected coordinator, from the Worker", () => {
 		own.lead.mockImplementation(async (_t: string, _r: string, me: string) => ({ leader: ++asked <= 2 ? "t1--lead" : me, term: asked <= 2 ? 1 : 2 }));
 		const waits: number[] = [];
 		await electedCoordinator({ taskId: "t1", repo: "project", peer: p.peer as never, hint: "t1--lead", readLog: async () => stored, wait: async (ms) => void waits.push(ms) }).agentStopped("reviewer", "stats:tests:h1");
-		expect(own.agentStopped).toHaveBeenCalledWith("reviewer", "stats:tests:h1");
+		expect(own.agentStopped).toHaveBeenCalledWith("reviewer", "stats:tests:h1", undefined);
 		expect(waits.length).toBeGreaterThan(0);
 	});
 
@@ -155,7 +158,7 @@ describe("the elected coordinator, from the Worker", () => {
 		const p = peers(null);
 		p.peer("t1--stats").lead.mockRejectedValue(new Error("[503] peer unavailable (simulated crash)"));
 		await electedCoordinator({ taskId: "t1", repo: "project", peer: p.peer as never, hint: null, readLog: async () => stored, wait: async () => {} }).agentStopped("builder", "stats");
-		expect(p.made.get("t1--standby")?.agentStopped).toHaveBeenCalledWith("builder", "stats");
+		expect(p.made.get("t1--standby")?.agentStopped).toHaveBeenCalledWith("builder", "stats", undefined);
 	});
 
 	it("gives up after its patience, saying the leader is unavailable", async () => {
