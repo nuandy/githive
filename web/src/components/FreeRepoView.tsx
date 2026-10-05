@@ -25,11 +25,7 @@ export function FreeRepoView({ snapshot }: { snapshot: FreeSnapshot }) {
 					</li>
 					<li>{verify.length ? <>Checks before merging: {verify.map((c) => <code key={c}>{c}</code>)}</> : "No checks before merging"}</li>
 					<li>{snapshot.verified ? "Records and merges are stamped with verified identity" : "Records are not stamped: names are as agents give them"}</li>
-					<li>
-						{snapshot.access === "forks"
-							? "Each change in its own fork: agents can't write main; only the toolkit merges, once the conventions hold"
-							: "Shared repo: every agent can write main, so the audit is the only check"}
-					</li>
+					<li>Each change in its own fork: agents can't write main; only the toolkit merges, once the conventions hold</li>
 				</ul>
 			</header>
 

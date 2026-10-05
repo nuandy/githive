@@ -11,8 +11,6 @@ export interface FreeSnapshot {
 	verify: string[];
 	/** Whether records and merges are stamped with verified identity. */
 	verified: boolean;
-	/** Where changes live: each in its own fork (only the toolkit writes main), or branches of the shared project repo. */
-	access: "forks" | "shared";
 	claims: {
 		change: string;
 		agent: string;

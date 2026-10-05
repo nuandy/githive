@@ -62,7 +62,7 @@ try {
 	say(`repo ${REPO} on ${BASE}`);
 	await api("POST", "/repos/import", { url: "https://github.com/octocat/Spoon-Knife", name: REPO, branch: "main" });
 	const started = await tool("free_start", { required: 2, vetoes: ["security"], verify: ["test -f index.html"] });
-	say("started; access:", started.access, "policy:", JSON.stringify(started.policy));
+	say("started; policy:", JSON.stringify(started.policy), "claims sharded", started.shardDepth, "deep over", started.recordsRepos, "records repos");
 
 	say("\nagents register their own names, though they share one Access identity");
 	const a = await tool("free_register", { agent: "agent-a" });

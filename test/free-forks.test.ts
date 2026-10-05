@@ -7,12 +7,10 @@ import { callFreeTool, type FreeContext } from "../src/free/mcp";
 import { agentClone, pushChange } from "./helpers/agents";
 import { startGitServer, type GitServer } from "./helpers/git-server";
 
-// Prevention, not just detection: by default each change lives in its own fork
-// of the project repo, and an agent can write only to its own change's fork.
-// Only the toolkit writes the project repo (main and the records), and only
-// after the conventions hold, so an agent can't push around them. With
-// access: "shared", agents get the project repo itself, and the audit is all
-// there is.
+// Prevention, not just detection: each change lives in its own fork of the
+// project repo, and an agent can write only to its own change's fork. Only the
+// toolkit writes the project repo (main and the records), and only after the
+// conventions hold, so an agent can't push around them.
 
 let project: GitServer;
 let fork: GitServer;
@@ -121,11 +119,11 @@ describe("free_check (run by the agent itself)", () => {
 	// is the change against main, and its files against its claim; it never
 	// fetches other changes.
 	it("warns early about conflicts with main and files outside the claim, without fetching other changes", async () => {
-		await call("free_start", { access: "shared", shard_depth: 0 });
+		await call("free_start", { shard_depth: 0 });
 		await call("free_claim", { change: "a-1", agent: "agent-a", paths: ["src/a/"], intent: "a" });
 		await call("free_claim", { change: "b-1", agent: "agent-b", paths: ["src/b/"], intent: "b" });
-		const head = await pushChange(project.url, work, "agent-a", "a-1", { "src/a/x.txt": "a\n", "README.md": "a's readme\n" });
-		await pushChange(project.url, work, "agent-b", "b-1", { "src/b/y.txt": "b\n", "README.md": "b's readme\n" });
+		const head = await pushChange(fork.url, work, "agent-a", "a-1", { "src/a/x.txt": "a\n", "README.md": "a's readme\n" });
+		await pushChange(fork.url, work, "agent-b", "b-1", { "src/b/y.txt": "b\n", "README.md": "b's readme\n" });
 		// Main moved under a-1, in a file a-1 changed too.
 		const mainline = await agentClone(project.url, work, "mainline");
 		mainline.write("README.md", "main's readme\n");
@@ -134,27 +132,21 @@ describe("free_check (run by the agent itself)", () => {
 		await mainline.run("push", "--quiet", "origin", "main");
 
 		const before = project.requests.length;
+		const beforeFork = fork.requests.length;
 		expect(await call("free_check", { change: "a-1" })).toEqual({
 			change: "a-1",
 			head,
 			main: { head: await mainline.run("rev-parse", "HEAD"), clean: false, conflicts: ["README.md"] },
 			outsideClaim: ["README.md"],
 		});
-		// The claims registry, main and the change: three fetches, nothing of b-1's.
-		expect(project.requests.slice(before).filter((r) => r === "POST git-upload-pack")).toHaveLength(3);
+		// The claims registry and main from the project, the change from its fork: nothing of b-1's.
+		expect(project.requests.slice(before).filter((r) => r === "POST git-upload-pack")).toHaveLength(2);
+		expect(fork.requests.slice(beforeFork).filter((r) => r === "POST git-upload-pack")).toHaveLength(1);
 	}, 60_000);
 
 	it("says when there's nothing pushed to check", async () => {
-		await call("free_start", { access: "shared" });
+		await call("free_start", {});
 		await call("free_claim", { change: "a-1", agent: "agent-a", paths: ["src/a/"], intent: "a" });
 		expect(await call("free_check", { change: "a-1" })).toEqual({ error: "changes/a-1 has nothing pushed to check" });
-	});
-});
-
-describe('access: "shared"', () => {
-	it("gives any agent write access to the project repo, as before", async () => {
-		await call("free_start", { access: "shared" });
-		expect(await call("free_credentials", {})).toMatchObject({ url: project.url, token: "write" });
-		expect(forkRequests).toEqual([]);
 	});
 });

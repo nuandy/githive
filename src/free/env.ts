@@ -93,8 +93,8 @@ async function changeBrief(env: Env, repo: string, change: string) {
 	return {
 		read,
 		own,
-		/** Where the change's branch lives: its fork, or the project repo when it's shared. */
-		source: (scope: "read" | "write") => (registry?.access === "forks" ? changeRemote(env, repo, change, scope, 3 * 3600) : remoteFor(env.ARTIFACTS, repo, scope, 3 * 3600)),
+		/** Where the change's branch lives: its own fork. */
+		source: (scope: "read" | "write") => changeRemote(env, repo, change, scope, 3 * 3600),
 		policy: registry?.policy ?? { required: 2, vetoes: ["security"] },
 		job: {
 			taskId: `free:${repo}`,
@@ -130,7 +130,7 @@ export async function startFreeReviewers(env: Env, input: { repo: string; change
 	return { head, reviewers: roles };
 }
 
-/** Start Blueprint's hosted builder on a claimed coordinator-free change: it works on the branch changes/<change> in the change's fork (or the shared project repo). */
+/** Start Blueprint's hosted builder on a claimed coordinator-free change: it works on the branch changes/<change> in the change's own fork. */
 export async function startFreeBuilder(env: Env, input: { repo: string; change: string }) {
 	const { repo, change } = input;
 	const { read, own, job, source } = await changeBrief(env, repo, change);

@@ -1,19 +1,16 @@
 # Coordinator-free mode
 
-An exploration. Blueprint's other designs enforce the rules: a coordinator (fixed
-or elected) decides every claim and merge, and an agent can't get around it. This
-mode removes the rule-applying component altogether. Agents coordinate by
-convention, through Git, and nothing stops an agent that breaks a convention.
-Instead, every violation is visible: anyone can replay the repo's records and
-get the list of what broke which rule, and who did it.
+Blueprint's other designs have a coordinator (fixed or elected) that decides
+every claim and merge. This mode has none. Agents coordinate through Git: claims,
+votes and merges are signed records in Git, written through a stateless toolkit
+that any Worker instance runs the same way. Each change lives in its own fork,
+and only the toolkit writes the project's main, after the conventions hold, so
+an agent can't push around them. Anything written around the toolkit anyway (by
+whoever holds the account's credentials) is visible: anyone can replay the
+records and get the list of what broke which rule, and who did it.
 
 The trade: no coordinator, no leader, no Blueprint-side state; in exchange,
-every call reads and writes its state in Git, which is slower (see the
-benchmark). With shared access, prevention becomes detection: a misbehaving
-agent can do damage before an audit catches it. With forks (the default), each
-change lives in its own fork and only the toolkit writes main, so the
-conventions are enforced where it matters, by a stateless check rather than a
-coordinator.
+every call reads and writes its state in Git (see the benchmark).
 
 ## What stays the same
 
@@ -92,18 +89,22 @@ and the audit sees the same records either way.
 ## What the exploration showed
 
 All four steps are built and tested, the last end to end on a real Git server
-and live on Artifacts (`scripts/free-demo.mjs`): cooperative agents claimed,
-reviewed and merged by convention; a rogue agent the tools refused went around
-them with plain git, merging inside another agent's claim with one approval of
-two (its trailers claiming all was well) and pushing a hotfix straight to main;
-the audit, from Git alone, reported exactly those three violations and nothing
-about the cooperative merge.
+and live on Artifacts. At first every agent could write the project repo: in
+that live run, cooperative agents claimed, reviewed and merged by convention; a
+rogue agent the tools refused went around them with plain git, merging inside
+another agent's claim with one approval of two (its trailers claiming all was
+well) and pushing a hotfix straight to main; the audit, from Git alone,
+reported exactly those violations and nothing about the cooperative merge.
+That led to forks (below), and that shared mode was later removed.
 
 - **Claims work without a coordinator.** Git's compare-and-swap on one registry
   ref gives cooperative agents exclusive lanes, even when two claim at once.
-- **Detection works, and so does the remedy; prevention doesn't.** The rogue's
-  merge is on main by the time the audit reports it. Any agent may then revert
-  it with `free_revert`, which refuses a commit the audit doesn't report, or
+- **Prevention, with forks; detection and remedy for the rest.** Each change
+  lives in its own fork (`free--<repo>--<change>`); an agent gets read access
+  to the project and write access only to its own change's fork, so it can't
+  push to main or touch the records (`scripts/free-forks-demo.mjs`: a rogue's
+  push to main is refused). Whatever is written around the toolkit anyway, the
+  audit reports, and any agent may revert it with `free_revert`, which refuses a commit the audit doesn't report, or
   one whose files changed since. The revert names what it undid
   (`Blueprint-Reverts`), and the audit marks those violations resolved. Live:
   five violations, five reverts, none left open.
@@ -123,8 +124,11 @@ about the cooperative merge.
   doesn't count; a veto counts from anyone. Merging, the audit and
   `free_status` all count this way, so an agent can't approve its own change,
   or approve twice under two names.
-- **Every agent needs write access to the whole repo**, main included: the mode
-  trusts agents by design.
+- **Shared mode is gone.** Letting every agent write the project repo (a
+  branch per change, no forks) saved making a fork (about 9 s a change), but
+  Artifacts takes one push at a time per repo: at 100 agents, 64 failed pushing
+  their branches to the one repo. Agents' git clients would have to queue and
+  retry, which Blueprint can't make them do; forks are the fix.
 - **Merging checks what it can.** The toolkit's merge test-merges the change
   into main first (a conflict comes back as the files, and what to do), then
   runs the project's checks on main plus the change in the Gate's container,

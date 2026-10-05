@@ -13,7 +13,6 @@ const snapshot: FreeSnapshot = {
 	policy: { required: 2, vetoes: ["security"] },
 	verify: ["npm test"],
 	verified: true,
-	access: "forks",
 	claims: [
 		{
 			change: "c-1",
