@@ -1,10 +1,14 @@
-import type { FreeAudit, FreeSnapshot } from "../api";
+import type { FreeAudit, FreeChangeHistory, FreeSnapshot } from "../api";
 import { identityName } from "../lib/agent";
 import { claimAgent, claimApprovalLabel, claimTitle, freeClaimStatus, votesForClaim, type FreeClaim } from "../lib/freeStatus";
 import { shortSha } from "../lib/model";
 import { shortAge, timeAgo } from "../lib/relativeTime";
 import { href, type RepoBase } from "../lib/routes";
+import { buildFreeTimeline, freeEnding, freeHistoryStatus } from "../lib/freeTimeline";
+import { FreeCommits } from "./Commits";
 import { Icon } from "./Icon";
+import { Tabs } from "./Tabs";
+import { Timeline } from "./Timeline";
 import { StatusIcon, StatusPill, TonePill } from "./StatusPill";
 import "./ChangeList.css";
 import "./ChangePage.css";
@@ -183,6 +187,12 @@ export function FreeSettings({ snapshot }: { snapshot: FreeSnapshot }) {
 	const { policy, verify } = snapshot;
 	return (
 		<div className="repo-settings">
+			<p className="callout repo-settings__intro">
+				<Icon name="alert" className="muted" />
+				<span>
+					These settings can't be changed here. A coordinator-free repo's rules are set once, when the mode starts (the MCP <code>free_start</code> tool), and every agent checks them itself.
+				</span>
+			</p>
 			<section className="box">
 				<div className="box__header">
 					<h2>How changes merge</h2>
@@ -207,133 +217,220 @@ export function FreeSettings({ snapshot }: { snapshot: FreeSnapshot }) {
 	);
 }
 
-/** A claimed change, shown like a pull request. */
-export function FreeChangePage({ snapshot, claim }: { snapshot: FreeSnapshot; claim: FreeClaim }) {
-	const status = freeClaimStatus(claim);
-	const votes = votesForClaim(claim, snapshot.votes);
-	const builder = claim.hosted?.builder;
+export interface FreeChangePageProps {
+	snapshot: FreeSnapshot;
+	/** The change's id, from the address. */
+	changeId: string;
+	/** Its claim, while in force (the snapshot's, with approvals and hosted agents). */
+	claim?: FreeClaim;
+	/** Its history in Git: undefined while loading, null if it couldn't be read. */
+	history?: FreeChangeHistory | null;
+	repo: string;
+	base: RepoBase;
+	tab: "conversation" | "commits";
+}
+
+/** A coordinator-free change, shown like a pull request: in force, merged or released. */
+export function FreeChangePage({ snapshot, changeId, claim, history, repo, base, tab }: FreeChangePageProps) {
+	const branch = history?.branch || snapshot.branch || "main";
+	const record = claim ?? history?.claim ?? undefined;
+	const ending = history ? freeEnding(history) : null;
+	const status = claim ? freeClaimStatus(claim) : history ? freeHistoryStatus(history) : null;
+	const agent = record?.agent || ending?.release.agent || identityName(record?.by) || "agent";
+	const title = (record?.intent ?? "").split("\n")[0].trim() || changeId;
+	const votes = claim ? votesForClaim(claim, history?.votes ?? snapshot.votes) : (history?.votes ?? []);
+	const builder = claim?.hosted?.builder;
+	const branchCode = <code className="change-header__branch">changes/{changeId}</code>;
+	const into = <code className="change-header__branch">{branch}</code>;
+	const timeline = history ? buildFreeTimeline(history, repo, base).filter((item) => item.kind !== "opened") : [];
+
+	if (!record && !ending) {
+		if (history === undefined)
+			return (
+				<p className="muted" role="status">
+					Loading {changeId}…
+				</p>
+			);
+		return (
+			<div className="box empty">
+				<Icon name="alert" size={28} className="muted" />
+				<h2>Change not found</h2>
+				<p>
+					{repo} has no change named <code>{changeId}</code>. <a href={href.repo(repo, "changes", base)}>See open changes</a>.
+				</p>
+			</div>
+		);
+	}
+
 	return (
 		<div className="change-page">
 			<div className="change-header">
 				<h1 className="change-header__title">
-					{claimTitle(claim)} <span className="change-header__id">{claim.change}</span>
+					{title} <span className="change-header__id">{changeId}</span>
 				</h1>
 				<div className="change-header__meta">
-					<StatusPill status={status} size="lg" solid />
+					{status ? <StatusPill status={status} size="lg" solid /> : null}
 					<span>
-						<strong>{claimAgent(claim)}</strong> wants to merge <code className="change-header__branch">changes/{claim.change}</code> into{" "}
-						<code className="change-header__branch">{snapshot.branch ?? "main"}</code>
-						<span className="muted"> · opened {timeAgo(claim.since)}</span>
+						{ending?.kind === "merged" ? (
+							<>
+								<strong>{agent}</strong> merged {branchCode} into {into} {timeAgo(ending.release.at)}
+							</>
+						) : ending ? (
+							<>
+								<strong>{agent}</strong>’s change {branchCode} was released {timeAgo(ending.release.at)}
+							</>
+						) : (
+							<>
+								<strong>{agent}</strong> wants to merge {branchCode} into {into}
+								{record?.since ? <span className="muted"> · opened {timeAgo(record.since)}</span> : null}
+							</>
+						)}
 					</span>
 				</div>
 			</div>
-			<div className="change-page__body change-page__body--bordered">
-				<div className="change-layout">
-					<div className="change-layout__main">
-						<article className="comment">
-							<div className="comment__header">
-								<strong>{claimAgent(claim)}</strong> <span className="muted">opened this change {timeAgo(claim.since)} · claims {claim.paths.join(", ")}</span>
-							</div>
-							<div className="comment__body">{claim.intent || <span className="muted">No description provided.</span>}</div>
-						</article>
-						<ol className="timeline">
-							<li className="timeline__item">
-								<span className="timeline__badge" aria-hidden="true">
-									<Icon name="commit" size={14} />
-								</span>
-								<div className="timeline__content">
-									<p className="timeline__line">{claim.head ? <>latest push <code className="timeline__sha">{shortSha(claim.head)}</code></> : "nothing pushed yet"}</p>
-								</div>
-							</li>
-							{votes.map((v) => (
-								<li key={`${v.reviewer}-${v.at}`} className="timeline__item timeline__item--review">
-									<span className={`timeline__badge timeline__badge--${v.verdict === "approve" ? "good" : "bad"}`} aria-hidden="true">
-										<Icon name={v.verdict === "approve" ? "check" : "x"} size={14} />
+			<Tabs
+				label="Change sections"
+				current={tab}
+				items={[
+					{ id: "conversation", label: "Conversation", icon: "comment", href: href.change(repo, changeId, "conversation", base) },
+					{ id: "commits", label: "Commits", icon: "commit", href: href.change(repo, changeId, "commits", base), count: history?.commits.length },
+				]}
+			/>
+			<div className="change-page__body">
+				{tab === "commits" ? (
+					history === null ? (
+						<p className="muted">This change's commits couldn't be read.</p>
+					) : (
+						<FreeCommits history={history} repo={repo} base={base} />
+					)
+				) : (
+					<div className="change-layout">
+						<div className="change-layout__main">
+							<article className="comment comment--outside">
+								<div className="comment__header">
+									<strong>{agent}</strong>{" "}
+									<span className="muted">
+										opened this change{record?.since ? ` ${timeAgo(record.since)}` : ""}
+										{record?.paths.length ? ` · claims ${record.paths.join(", ")}` : ""}
 									</span>
-									<div className="timeline__content">
-										<div className={`timeline-card timeline-card--${v.verdict === "approve" ? "good" : "bad"}`}>
-											<div className="timeline-card__header">
-												<strong>{v.reviewer}</strong> ({v.role}) {v.verdict === "approve" ? "approved these changes" : "requested changes"}
-												<span className="muted"> · {timeAgo(v.at)}</span>
-											</div>
-											{v.evidence ? <div className="timeline-card__body">{v.evidence}</div> : null}
+								</div>
+								<div className="comment__body">{record?.intent || <span className="muted">No description provided.</span>}</div>
+							</article>
+							{history === undefined ? <p className="muted change-layout__loading">Loading history…</p> : null}
+							{history ? (
+								<Timeline items={timeline} branch={branch} />
+							) : (
+								<ol className="timeline">
+									<li className="timeline__item">
+										<span className="timeline__badge" aria-hidden="true">
+											<Icon name="commit" size={14} />
+										</span>
+										<div className="timeline__content">
+											<p className="timeline__line">{claim?.head ? <>latest push <code className="timeline__sha">{shortSha(claim.head)}</code></> : "nothing pushed yet"}</p>
+										</div>
+									</li>
+								</ol>
+							)}
+							{claim ? (
+								<section className="merge-box" aria-label="Merge status">
+									<div className="merge-box__row">
+										<span className={`merge-box__icon merge-box__icon--${freeClaimStatus(claim).tone}`} aria-hidden="true">
+											<Icon name={claim.approval.approved ? "check" : claim.approval.vetoedBy.length ? "x" : "eye"} />
+										</span>
+										<div className="merge-box__text">
+											<strong>
+												{claim.approval.approvals} of {claim.approval.required} approvals{claim.approval.approved ? "" : claimApprovalLabel(claim).startsWith("Waiting") ? ` · ${claimApprovalLabel(claim)}` : ""}
+											</strong>
+											<div className="muted">{freeClaimStatus(claim).description}</div>
 										</div>
 									</div>
-								</li>
-							))}
-						</ol>
-						<section className="merge-box" aria-label="Merge status">
-							<div className="merge-box__row">
-								<span className={`merge-box__icon merge-box__icon--${status.tone}`} aria-hidden="true">
-									<Icon name={claim.approval.approved ? "check" : claim.approval.vetoedBy.length ? "x" : "eye"} />
-								</span>
-								<div className="merge-box__text">
-									<strong>
-										{claim.approval.approvals} of {claim.approval.required} approvals{claim.approval.approved ? "" : claimApprovalLabel(claim).startsWith("Waiting") ? ` · ${claimApprovalLabel(claim)}` : ""}
-									</strong>
-									<div className="muted">{status.description}</div>
-								</div>
-							</div>
-						</section>
-					</div>
-					<aside className="change-sidebar" aria-label="Change details">
-						<section className="sidebar-section">
-							<h2>Reviewers</h2>
-							{claim.hosted?.reviewers.length ? (
-								<ul className="sidebar-reviewers">
-									{claim.hosted.reviewers.map((r) => (
-										<li key={r.role}>
-											<span className="sidebar-reviewers__role">
-												<Icon name="shield" size={14} className="muted" />
-												{r.role}
-											</span>
-											<span className={`sidebar-reviewers__state tone-${r.verdict === "approve" ? "good" : r.verdict === "reject" ? "bad" : "neutral"}`}>
-												{r.verdict ?? r.status}
-											</span>
-										</li>
-									))}
-								</ul>
-							) : (
-								<p className="muted">{votes.length ? `${votes.length} ${votes.length === 1 ? "review" : "reviews"} on this commit` : "No reviews yet."}</p>
-							)}
-							<p className="muted sidebar-note">{claim.approval.required} approvals required</p>
-						</section>
-						<section className="sidebar-section">
-							<h2>Agent</h2>
-							<p className="sidebar-agent">
-								<Icon name={builder ? "bot" : "user"} size={14} className="muted" />
-								<strong>{claimAgent(claim)}</strong>
-								{claim.by && identityName(claim.by) !== claimAgent(claim) ? <span className="muted"> · {identityName(claim.by)}</span> : null}
-							</p>
-							{builder ? (
-								<p className={`sidebar-small tone-${builder.status === "failed" ? "bad" : "neutral"}`}>
-									Builder {builder.status}
-									{builder.revisions ? ` (revision ${builder.revisions})` : ""}
-									{builder.error ? `: ${builder.error}` : ""}
-								</p>
+								</section>
+							) : ending ? (
+								<section className={`merge-box${ending.kind === "merged" ? " merge-box--merged" : ""}`} aria-label="Merge status">
+									<div className="merge-box__row">
+										<span className={`merge-box__icon merge-box__icon--${ending.kind === "merged" ? "good" : "neutral"}`} aria-hidden="true">
+											<Icon name={ending.kind === "merged" ? "merge" : "ban"} />
+										</span>
+										<div className="merge-box__text">
+											<strong>{ending.kind === "merged" ? `Merged into ${branch}` : "Claim released"}</strong>
+											<div className="muted">
+												{ending.kind === "merged" ? (
+													<>
+														As <a href={href.code(repo, "", base, ending.release.mergedAs)}>
+															<code>{shortSha(ending.release.mergedAs)}</code>
+														</a>
+														.
+													</>
+												) : (
+													ending.release.reason || "Its paths are free again."
+												)}
+											</div>
+										</div>
+									</div>
+								</section>
 							) : null}
-							<p className="muted sidebar-small">Last active {timeAgo(claim.active)}</p>
-						</section>
-						<section className="sidebar-section">
-							<h2>Claim</h2>
-							<ul className="sidebar-paths">
-								{claim.paths.map((path) => (
-									<li key={path}>
-										<Icon name="folder" size={13} className="muted" />
-										<code>{path}</code>
-									</li>
-								))}
-							</ul>
-						</section>
-						{claim.approval.vetoedBy.length ? (
+						</div>
+						<aside className="change-sidebar" aria-label="Change details">
 							<section className="sidebar-section">
-								<TonePill tone="bad" icon="x">
-									Blocked by {claim.approval.vetoedBy.join(", ")}
-								</TonePill>
+								<h2>Reviewers</h2>
+								{claim?.hosted?.reviewers.length ? (
+									<ul className="sidebar-reviewers">
+										{claim.hosted.reviewers.map((r) => (
+											<li key={r.role}>
+												<span className="sidebar-reviewers__role">
+													<Icon name="shield" size={14} className="muted" />
+													{r.role}
+												</span>
+												<span className={`sidebar-reviewers__state tone-${r.verdict === "approve" ? "good" : r.verdict === "reject" ? "bad" : "neutral"}`}>{r.verdict ?? r.status}</span>
+											</li>
+										))}
+									</ul>
+								) : (
+									<p className="muted">{votes.length ? `${votes.length} ${votes.length === 1 ? "review" : "reviews"}` : "No reviews yet."}</p>
+								)}
+								<p className="muted sidebar-note">{snapshot.policy.required} approvals required</p>
 							</section>
-						) : null}
-					</aside>
-				</div>
+							<section className="sidebar-section">
+								<h2>Agent</h2>
+								<p className="sidebar-agent">
+									<Icon name={builder ? "bot" : "user"} size={14} className="muted" />
+									<strong>{agent}</strong>
+									{record?.by && identityName(record.by) !== agent ? <span className="muted"> · {identityName(record.by)}</span> : null}
+								</p>
+								{builder ? (
+									<p className={`sidebar-small tone-${builder.status === "failed" ? "bad" : "neutral"}`}>
+										Builder {builder.status}
+										{builder.revisions ? ` (revision ${builder.revisions})` : ""}
+										{builder.error ? `: ${builder.error}` : ""}
+									</p>
+								) : null}
+								{claim ? <p className="muted sidebar-small">Last active {timeAgo(claim.active)}</p> : null}
+							</section>
+							<section className="sidebar-section">
+								<h2>Claim</h2>
+								{record?.paths.length ? (
+									<ul className="sidebar-paths">
+										{record.paths.map((path) => (
+											<li key={path}>
+												<Icon name="folder" size={13} className="muted" />
+												<code>{path}</code>
+											</li>
+										))}
+									</ul>
+								) : (
+									<p className="muted">Released.</p>
+								)}
+							</section>
+							{claim?.approval.vetoedBy.length ? (
+								<section className="sidebar-section">
+									<TonePill tone="bad" icon="x">
+										Blocked by {claim.approval.vetoedBy.join(", ")}
+									</TonePill>
+								</section>
+							) : null}
+						</aside>
+					</div>
+				)}
 			</div>
 		</div>
 	);

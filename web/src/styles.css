@@ -424,3 +424,106 @@ details > summary {
 .paths code {
 	font-size: 12px;
 }
+
+/* Claim colors: one per open change on the Claims map, in order. Readable on both themes. */
+.claim-c0 { --claim: #3b82f6; }
+.claim-c1 { --claim: #f59e0b; }
+.claim-c2 { --claim: #14b8a6; }
+.claim-c3 { --claim: #ec4899; }
+.claim-c4 { --claim: #8b5cf6; }
+.claim-c5 { --claim: #22c55e; }
+.claim-c6 { --claim: #ef4444; }
+.claim-c7 { --claim: #06b6d4; }
+
+/* Cards and bars for the Insights and Agents tabs. */
+.stat-grid {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+	gap: 12px;
+}
+
+.stat {
+	padding: 14px 16px;
+	border: 1px solid var(--border);
+	border-radius: var(--radius);
+	background: var(--surface);
+	min-width: 0;
+}
+
+.stat__label {
+	margin: 0;
+	color: var(--text-muted);
+	font-size: 12.5px;
+	font-weight: 500;
+}
+
+.stat__value {
+	margin: 4px 0 0;
+	font-size: 24px;
+	font-weight: 600;
+	line-height: 1.2;
+	overflow-wrap: anywhere;
+}
+
+.stat__hint {
+	margin: 2px 0 0;
+	color: var(--text-muted);
+	font-size: 12.5px;
+}
+
+.bars {
+	display: grid;
+	gap: 8px;
+	margin: 0;
+	padding: 0;
+	list-style: none;
+}
+
+.bar {
+	display: grid;
+	grid-template-columns: minmax(80px, 160px) 1fr auto;
+	align-items: center;
+	gap: 10px;
+	font-size: 13px;
+	min-width: 0;
+}
+
+.bar__label {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.bar__track {
+	display: flex;
+	height: 10px;
+	border-radius: 999px;
+	background: var(--surface-3);
+	overflow: hidden;
+}
+
+.bar__fill {
+	height: 100%;
+	background: var(--accent);
+}
+
+.bar__fill--good { background: var(--good); }
+.bar__fill--bad { background: var(--bad); }
+.bar__fill--warn { background: var(--warn); }
+
+.bar__value {
+	color: var(--text-muted);
+	font-variant-numeric: tabular-nums;
+	white-space: nowrap;
+}
+
+@media (max-width: 480px) {
+	.bar {
+		grid-template-columns: 1fr auto;
+	}
+
+	.bar__track {
+		grid-column: 1 / -1;
+		grid-row: 2;
+	}
+}

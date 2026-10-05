@@ -1,6 +1,6 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { freeSnapshot as snapshot } from "../test/fixtures";
+import { freeHistory, freeSnapshot as snapshot, stubApi } from "../test/fixtures";
 import { FreeAudit, FreeChangeList, FreeChangePage, FreeSettings } from "./FreeRepo";
 import { FreeRepoPage } from "./RepoPage";
 
@@ -40,19 +40,22 @@ describe("a coordinator-free repo", () => {
 		expect(html).toMatch(/own fork/);
 	});
 
-	it("shows one claim like a pull request, with its votes and hosted agents", () => {
-		const html = renderToStaticMarkup(<FreeChangePage snapshot={snapshot} claim={snapshot.claims[0]} />);
+	it("shows one claim like a pull request, with its commits, votes and hosted agents", () => {
+		const html = renderToStaticMarkup(<FreeChangePage snapshot={snapshot} changeId="c-1" claim={snapshot.claims[0]} history={freeHistory} repo="docs-site" base="free" tab="conversation" />);
 		expect(html).toMatch(/<strong>agent-c<\/strong> wants to merge <code[^>]*>changes\/c-1<\/code>/);
-		expect(html).toContain("rev-1</strong> (tests) approved these changes");
+		expect(html).toContain("rev-1</strong> (tests reviewer) approved these changes");
+		expect(html).toContain("First draft of section C");
 		expect(html).toContain("1 of 2 approvals");
 		expect(html).toMatch(/Builder working \(revision 1\)/);
 		expect(html).toMatch(/security.*reject/);
-		const empty = renderToStaticMarkup(<FreeChangePage snapshot={snapshot} claim={{ ...snapshot.claims[0], head: null, hosted: undefined }} />);
-		expect(empty).toContain("nothing pushed yet");
+		expect(html).toMatch(/Commits<\/span><span class="counter">2<\/span>/);
+		const loading = renderToStaticMarkup(<FreeChangePage snapshot={snapshot} changeId="c-1" claim={{ ...snapshot.claims[0], head: null, hosted: undefined }} repo="docs-site" base="free" tab="conversation" />);
+		expect(loading).toContain("nothing pushed yet");
+		expect(loading).toContain("Loading history");
 	});
 
 	it("has Changes, Audit and Settings tabs, and keeps old #/free links", () => {
-		const html = renderToStaticMarkup(<FreeRepoPage repo="docs-site" base="free" view={{ kind: "repo", tab: "audit", state: "open" }} snapshot={snapshot} />);
+		const html = renderToStaticMarkup(<FreeRepoPage repo="docs-site" base="free" view={{ kind: "repo", tab: "audit", state: "open" }} snapshot={snapshot} api={stubApi()} />);
 		expect(html).toContain('href="#/free/docs-site/audit"');
 		expect(html).toMatch(/aria-current="page"[^>]*>.*Audit/);
 		expect(html).toMatch(/>coordinator-free</);

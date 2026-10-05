@@ -95,3 +95,32 @@ export function visibleText(html: string): string {
 		.replace(/&[a-z#0-9]+;/gi, " ")
 		.replace(/\s+/g, " ");
 }
+
+/** A stand-in for every call a repo page makes; each resolves to a harmless value. */
+export function stubApi(): import("../components/RepoPage").RepoPageApi {
+	const ok = async () => ({});
+	return {
+		waive: ok,
+		messageBuilder: async () => ({ delivered: "inbox" }),
+		retryChecks: ok,
+		abandon: ok,
+		sliceDiff: async () => ({ base: "b", head: "h", unified: "", files: [], omitted: [] }),
+		submitReview: ok,
+		updateSettings: async (_id: string, s: { review?: Task["review"]; verify?: string[]; leaseMinutes?: number }) => ({ review: s.review ?? { reviewers: [], required: 0, vetoes: [] }, verify: s.verify ?? [], leaseMinutes: s.leaseMinutes ?? 30 }),
+		tree: async () => ({ ref: "main", commit: "c0ffee", files: [], truncated: false }),
+		file: async (_repo: string, path: string) => ({ ref: "main", commit: "c0ffee", path, size: 0, text: "" }),
+	};
+}
+
+/** A coordinator-free change's history: claimed, two commits, a vote, still in force. */
+export const freeHistory: import("../api").FreeChangeHistory = {
+	change: "c-1",
+	branch: "main",
+	claim: { change: "c-1", agent: "agent-c", paths: ["src/c/"], intent: "Rewrite the C section", since: ago(120), active: ago(5), by: "service:abc/agent-c" },
+	released: [],
+	commits: [
+		{ commit: "b1c2d3e4f5a6", message: "Tighten the wording\n\nAnd fix two links.", author: "agent-c", at: ago(30) },
+		{ commit: "a0a0a0a0a0a0", message: "First draft of section C", author: "agent-c", at: ago(90) },
+	],
+	votes: [{ commit: "b1c2d3e4f5a6", reviewer: "rev-1", role: "tests", verdict: "approve", evidence: "suite passes", at: ago(20), by: "service:rev-1" }],
+};

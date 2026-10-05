@@ -1,0 +1,43 @@
+.insights {
+	display: grid;
+	gap: 16px;
+	min-width: 0;
+}
+
+.insights h2 {
+	font-size: 14px;
+}
+
+.insights__panels {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(min(100%, 380px), 1fr));
+	gap: 16px;
+}
+
+.insights__legend {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	font-size: 12px;
+}
+
+.insights__key {
+	display: inline-block;
+	width: 10px;
+	height: 10px;
+	border-radius: 2px;
+}
+
+.insights__key--good {
+	background: var(--good);
+}
+
+.insights__key--bad {
+	background: var(--bad);
+	margin-left: 6px;
+}
+
+.insights__note {
+	margin: 12px 0 0;
+	font-size: 12.5px;
+}

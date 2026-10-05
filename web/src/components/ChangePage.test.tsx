@@ -1,17 +1,11 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import type { Live } from "../api";
-import { agentState, ago, approve, makeChange, makeTask, reject } from "../test/fixtures";
-import { availableActions, type ChangeActionsApi } from "./ChangeActions";
+import { agentState, ago, approve, makeChange, makeTask, reject, stubApi as stubApi_ } from "../test/fixtures";
+import { availableActions } from "./ChangeActions";
 import { ChangePage, type ChangePageProps } from "./ChangePage";
 
-const stubApi: ChangeActionsApi = {
-	waive: vi.fn(async () => ({})),
-	messageBuilder: vi.fn(async () => ({ delivered: "inbox" })),
-	retryChecks: vi.fn(async () => ({})),
-	abandon: vi.fn(async () => ({})),
-	sliceDiff: vi.fn(async () => ({ base: "b", head: "h", unified: "", files: [], omitted: [] })),
-};
+const stubApi = stubApi_();
 
 const failedGate = {
 	status: "failed" as const,

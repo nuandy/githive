@@ -1,3 +1,4 @@
+import { Icon } from "./Icon";
 import "./TopBar.css";
 
 export interface Crumb {
@@ -6,7 +7,7 @@ export interface Crumb {
 }
 
 /** The top bar: the Blueprint mark, which leads home, and where you are. */
-export function TopBar({ crumbs }: { crumbs: Crumb[] }) {
+export function TopBar({ crumbs, inboxCount, inboxCurrent = false }: { crumbs: Crumb[]; /** Changes waiting on a person, across repos; undefined until known. */ inboxCount?: number; inboxCurrent?: boolean }) {
 	return (
 		<header className="topbar">
 			<div className="topbar__inner">
@@ -35,6 +36,11 @@ export function TopBar({ crumbs }: { crumbs: Crumb[] }) {
 						</ol>
 					</nav>
 				) : null}
+				<a className="topbar__inbox" href="#/inbox" aria-current={inboxCurrent ? "page" : undefined} aria-label={inboxCount ? `Inbox, ${inboxCount} waiting on you` : "Inbox"}>
+					<Icon name="alert" size={15} />
+					<span className="topbar__inbox-label">Inbox</span>
+					{inboxCount ? <span className="topbar__inbox-count">{inboxCount}</span> : null}
+				</a>
 			</div>
 		</header>
 	);

@@ -31,12 +31,15 @@ describe("open-mode dashboard", () => {
 		for (const name of ["create", "plan", "approve", "build", "land", "contractFiles", "landingDiff"]) expect(api).not.toHaveProperty(name);
 	});
 
-	it("shows a repo's merge checks, review policy and claim expiry, read-only", () => {
-		const settings = renderToStaticMarkup(createElement(RepoSettings, { task }));
-		expect(settings).toContain("npm test");
-		expect(settings).toContain("1 approval required");
-		expect(settings).toContain("security");
-		expect(settings).toContain("30 minutes without activity");
-		expect(settings).not.toMatch(/<(input|textarea|select)\b/);
+	it("shows a repo's merge checks, review policy and claim expiry in an editable form", () => {
+		const updateSettings = vi.fn();
+		const settings = renderToStaticMarkup(createElement(RepoSettings, { task, api: { updateSettings } }));
+		expect(settings).toMatch(/<input id="settings-required"[^>]*value="1"/);
+		expect(settings).toMatch(/<code>tests<\/code>/);
+		expect(settings).toMatch(/aria-label="security can block a change" checked=""/);
+		expect(settings).toMatch(/value="npm test"/);
+		expect(settings).toMatch(/<input id="settings-expiry"[^>]*value="30"/);
+		expect(settings).toContain("A change already in review keeps the rules it went to review under");
+		expect(updateSettings).not.toHaveBeenCalled();
 	});
 });

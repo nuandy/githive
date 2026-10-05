@@ -67,6 +67,68 @@ export interface FreeAudit {
 	violations: { commit: string; author: string; rule: string; detail: string; by?: string; resolvedBy?: string }[];
 }
 export type Slice = Task["slices"][number];
+export type ReviewPolicy = Task["review"];
+
+/** A repo's files at a branch or commit (GET /repos/:repo/tree). */
+export interface RepoTree {
+	ref: string;
+	commit: string;
+	/** Every file path, sorted. */
+	files: string[];
+	/** The listing stopped early: a very large repo. */
+	truncated: boolean;
+}
+
+/** One file at a branch or commit (GET /repos/:repo/file): its text, or why there is none. */
+export interface RepoFile {
+	ref: string;
+	commit: string;
+	path: string;
+	size: number;
+	text?: string;
+	binary?: boolean;
+	tooBig?: boolean;
+}
+
+/** Who coordinates an elected repo now (GET /tasks/:id/leader): "<taskId>--<changeId>", or null. */
+export interface Leader {
+	leader: string | null;
+	term: number;
+}
+
+/** A person's review of one role on a change's commit under review. */
+export interface ReviewInput {
+	reviewer: string;
+	head: string;
+	verdict: "approve" | "reject";
+	summary: string;
+	evidence?: string;
+}
+
+/** What a person may change in an elected repo's settings (PATCH /tasks/:id/settings). */
+export interface SettingsInput {
+	review?: ReviewPolicy;
+	verify?: string[];
+	leaseMinutes?: number;
+}
+
+export interface SavedSettings {
+	review: ReviewPolicy;
+	verify: string[];
+	leaseMinutes: number;
+}
+
+/** One coordinator-free change's history (GET /free/:repo/changes/:change). */
+export interface FreeChangeHistory {
+	change: string;
+	branch: string;
+	/** The claim in force, or null once it merged or was released. */
+	claim: Omit<FreeSnapshot["claims"][number], "head" | "approval" | "hosted"> | null;
+	released: { reason: string; at: string; mergedAs?: string; agent: string; stale?: boolean }[];
+	/** The change's own commits, newest first. */
+	commits: { commit: string; message: string; author: string; at: string }[];
+	votes: FreeSnapshot["votes"];
+}
 
 export interface Usage {
 	inputTokens: number;
@@ -308,4 +370,26 @@ export const api = {
 	/** Give up a change and free its claim. */
 	abandon: (taskId: string, sliceId: string, reason: string) =>
 		call<unknown>("POST", `/tasks/${encodeURIComponent(taskId)}/changes/${encodeURIComponent(sliceId)}/abandon`, { reason }),
+	/** A signed-in person reviews one role of a change's commit under review. */
+	submitReview: (taskId: string, sliceId: string, review: ReviewInput) =>
+		call<unknown>("POST", `/tasks/${encodeURIComponent(taskId)}/slices/${encodeURIComponent(sliceId)}/reviews`, review),
+	/** Change an elected repo's review policy, checks or claim expiry. */
+	updateSettings: (taskId: string, settings: SettingsInput) => call<SavedSettings>("PATCH", `/tasks/${encodeURIComponent(taskId)}/settings`, settings),
+	/** Who coordinates an elected repo now. */
+	leader: (taskId: string) => call<Leader>("GET", `/tasks/${encodeURIComponent(taskId)}/leader`),
+	/** A repo's files at a branch or commit (its default branch if none). */
+	tree: (repo: string, ref?: string) => call<RepoTree>("GET", `/repos/${encodeURIComponent(repo)}/tree${ref ? `?ref=${encodeURIComponent(ref)}` : ""}`),
+	/** One file's text at a branch or commit. */
+	file: (repo: string, path: string, ref?: string) =>
+		call<RepoFile>("GET", `/repos/${encodeURIComponent(repo)}/file?path=${encodeURIComponent(path)}${ref ? `&ref=${encodeURIComponent(ref)}` : ""}`),
+	/** One coordinator-free change: its claim or how it ended, its commits and the votes on them. */
+	freeChange: (repo: string, change: string) => call<FreeChangeHistory>("GET", `/free/${encodeURIComponent(repo)}/changes/${encodeURIComponent(change)}`),
 };
+
+/** Everything the dashboard calls; tests pass stand-ins. */
+export type DashboardApi = typeof api;
+
+/** The WebSocket URL of a repo's live feed: "task:<id>" or "free:<repo>". Each message means "something changed". */
+export function liveFeedUrl(key: string, location: Pick<Location, "protocol" | "host"> = window.location): string {
+	return `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/live/${key}`;
+}

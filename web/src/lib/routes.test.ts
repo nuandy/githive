@@ -38,4 +38,21 @@ describe("hash routes", () => {
 		}
 		expect(parseRoute(href.change("a/b", "c d"))).toMatchObject({ repo: "a/b", change: "c d" });
 	});
+
+	it("parses the new pages and tabs", () => {
+		expect(parseRoute("#/inbox")).toEqual({ page: "inbox" });
+		for (const tab of ["claims", "insights", "agents"]) expect(parseRoute(`#/repos/my-app/${tab}`)).toMatchObject({ page: "repo", tab });
+		expect(parseRoute("#/repos/my-app/changes/add-stats/commits")).toMatchObject({ page: "change", tab: "commits" });
+		expect(parseRoute("#/repos/my-app/code")).toEqual({ page: "repo", repo: "my-app", base: "repos", tab: "code", state: "open", path: "" });
+		expect(parseRoute("#/repos/my-app/code/src/stats/page.tsx")).toMatchObject({ tab: "code", path: "src/stats/page.tsx" });
+		expect(parseRoute("#/free/docs/code/a%20b/c.md?ref=abc123")).toMatchObject({ base: "free", tab: "code", path: "a b/c.md", ref: "abc123" });
+	});
+
+	it("builds code links that parse back", () => {
+		expect(href.code("my-app")).toBe("#/repos/my-app/code");
+		expect(href.code("my-app", "src/a b.ts")).toBe("#/repos/my-app/code/src/a%20b.ts");
+		expect(href.code("docs", "", "free", "abc")).toBe("#/free/docs/code?ref=abc");
+		expect(parseRoute(href.code("team/app", "src/x#y.ts", "repos", "feature/1"))).toMatchObject({ repo: "team/app", path: "src/x#y.ts", ref: "feature/1" });
+		expect(href.inbox()).toBe("#/inbox");
+	});
 });

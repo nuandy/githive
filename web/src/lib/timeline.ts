@@ -36,6 +36,8 @@ export interface TimelineItem {
 	/** One line, already worded for people. */
 	text: string;
 	commit?: string;
+	/** Where the commit can be browsed, when there is a place (the Code tab at that commit). */
+	commitHref?: string;
 	/** Longer text shown under the line (a review summary, a commit message, feedback). */
 	body?: string;
 	review?: Review;

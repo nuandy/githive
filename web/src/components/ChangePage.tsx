@@ -8,6 +8,8 @@ import { timeAgo } from "../lib/relativeTime";
 import { href, type ChangeTab, type RepoBase } from "../lib/routes";
 import { buildTimeline } from "../lib/timeline";
 import { ChangeActions, type ChangeActionsApi } from "./ChangeActions";
+import { ChangeCommits } from "./Commits";
+import { ReviewForm, type ReviewFormApi } from "./ReviewForm";
 import { ChangeSidebar } from "./ChangeSidebar";
 import { CheckResults } from "./CheckResults";
 import { FilesChanged, type DiffState } from "./FilesChanged";
@@ -27,7 +29,7 @@ export interface ChangePageProps {
 	repo: string;
 	base: RepoBase;
 	tab: ChangeTab;
-	api: ChangeActionsApi;
+	api: ChangeActionsApi & ReviewFormApi;
 	/** Refresh after an action. */
 	onChanged(): void;
 }
@@ -172,6 +174,7 @@ export function ChangePage({ task, change, agent, history, repo, base, tab, api,
 				current={tab}
 				items={[
 					{ id: "conversation", label: "Conversation", icon: "comment", href: href.change(repo, change.id, "conversation", base) },
+					{ id: "commits", label: "Commits", icon: "commit", href: href.change(repo, change.id, "commits", base), count: change.pushes?.length ?? 0 },
 					{ id: "files", label: "Files changed", icon: "file", href: href.change(repo, change.id, "files", base), count: files },
 					{ id: "checks", label: "Checks", icon: "check-circle", href: href.change(repo, change.id, "checks", base), count: checkCount },
 				]}
@@ -209,9 +212,12 @@ export function ChangePage({ task, change, agent, history, repo, base, tab, api,
 							{history === undefined ? <p className="muted change-layout__loading">Loading history…</p> : null}
 							<Timeline items={timeline.filter((item) => item.kind !== "opened")} ids={ids} link={link} branch={task.branch} />
 							<ChangeActions task={task} change={change} conflicts={conflicts} repo={repo} base={base} diffStatus={diff?.diff && diff.diff.head === change.reviewHead ? "loaded" : diff?.error ? "failed" : "loading"} api={api} onChanged={onChanged} />
+							<ReviewForm task={task} change={change} api={api} onChanged={onChanged} />
 						</div>
 						<ChangeSidebar task={task} change={change} agent={agent} repo={repo} base={base} />
 					</div>
+				) : tab === "commits" ? (
+					<ChangeCommits change={change} repo={repo} base={base} />
 				) : tab === "files" ? (
 					<FilesChanged change={change} diff={diff} onRetry={retry} />
 				) : (

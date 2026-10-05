@@ -40,6 +40,8 @@ export interface RepoSummary {
 	violations?: number;
 	lastActivity?: string;
 	countedAt?: string;
+	/** Changes waiting on a person, with why: the Inbox. */
+	waiting?: { change: string; title: string; reason: string }[];
 }
 
 export interface Summaries {
@@ -61,15 +63,20 @@ function summaryRow(name: string, mode: RepoMode, since: string, summary: RepoSu
 	};
 }
 
-/** Every repo, most recently active first: one row per repo, its open-mode task (the newest, if the repo has several). */
-export function buildRepoRows(summaries: Summaries): RepoRow[] {
+/** One task per repo: the one it is open as (elected first, then the newest). */
+export function newestTaskPerRepo(tasks: Summaries["tasks"]): Summaries["tasks"] {
 	const byRepo = new Map<string, Summaries["tasks"][number]>();
-	for (const task of summaries.tasks) {
+	for (const task of tasks) {
 		const current = byRepo.get(task.repo);
 		const rank = (t: Summaries["tasks"][number]) => [t.elected ? 1 : 0, timeOf(t.createdAt) ?? 0] as const;
 		if (!current || rank(task)[0] > rank(current)[0] || (rank(task)[0] === rank(current)[0] && rank(task)[1] > rank(current)[1])) byRepo.set(task.repo, task);
 	}
-	const rows = [...byRepo.values()].map((task) => summaryRow(task.repo, "elected", task.createdAt, task.summary, task.id));
+	return [...byRepo.values()];
+}
+
+/** Every repo, most recently active first: one row per repo, its open-mode task (the newest, if the repo has several). */
+export function buildRepoRows(summaries: Summaries): RepoRow[] {
+	const rows = newestTaskPerRepo(summaries.tasks).map((task) => summaryRow(task.repo, "elected", task.createdAt, task.summary, task.id));
 	for (const repo of summaries.free) rows.push(summaryRow(repo.repo, "coordinator-free", repo.since, repo.summary));
 	return rows.sort((a, b) => (timeOf(b.lastActivity) ?? 0) - (timeOf(a.lastActivity) ?? 0) || a.name.localeCompare(b.name));
 }

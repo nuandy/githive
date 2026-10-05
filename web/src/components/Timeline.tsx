@@ -129,7 +129,13 @@ export function Timeline({ items, ids = [], link, branch }: { items: TimelineIte
 									{item.commit && !item.text.includes(shortSha(item.commit)) ? (
 										<>
 											{" "}
-											<code className="timeline__sha">{shortSha(item.commit)}</code>
+											{item.commitHref ? (
+												<a href={item.commitHref}>
+													<code className="timeline__sha">{shortSha(item.commit)}</code>
+												</a>
+											) : (
+												<code className="timeline__sha">{shortSha(item.commit)}</code>
+											)}
 										</>
 									) : null}
 									{item.at ? (
