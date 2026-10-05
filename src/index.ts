@@ -37,6 +37,10 @@ const taskIndex = (env: Env) => env.TASK_INDEX.getByName("all");
 const reviewerStates = (env: Env, repo: string, roles: string[], head: string) =>
 	Promise.all(roles.map(async (role) => ({ role, state: await env.REVIEWER.getByName(reviewerName(repo, role, head)).state() })));
 
+/** A task as the dashboard sees it: registered agents by name and date, never their keys' hashes. */
+const forPeople = <T extends { agents?: Record<string, { keyHash?: string }> }>(task: T): T =>
+	task.agents ? { ...task, agents: Object.fromEntries(Object.entries(task.agents).map(([name, { keyHash: _hidden, ...rest }]) => [name, rest])) } : task;
+
 /** A JSON body as arguments to check, or none when it is missing or not JSON. */
 const jsonArgs = async (c: { req: { json<T>(): Promise<T> } }) => {
 	const body = await c.req.json<Record<string, unknown> | null>().catch(() => null);
@@ -200,7 +204,7 @@ app.on(["GET", "DELETE"], "/mcp", (c) => c.body(null, 405, { Allow: "POST" }));
 app.get("/tasks", async (c) => {
 	const refs = await taskIndex(c.env).list(Number(c.req.query("limit") ?? 50));
 	const tasks = await Promise.all(refs.map((r) => coordinator(c.env, r.id).state().catch(() => null)));
-	return c.json(tasks.filter((t) => t !== null));
+	return c.json(tasks.filter((t) => t !== null).map(forPeople));
 });
 
 // The dashboard's list of repos in one read: every task and coordinator-free
@@ -259,10 +263,21 @@ app.get("/tasks/:id/live", async (c) => {
 			return { id: s.id, builder, reviewers };
 		}),
 	);
-	return c.json({ task, agents: slices });
+	return c.json({ task: forPeople(task), agents: slices });
 });
 
-app.get("/tasks/:id", async (c) => c.json(await coordinator(c.env, c.req.param("id")).state()));
+app.get("/tasks/:id", async (c) => c.json(forPeople(await coordinator(c.env, c.req.param("id")).state())));
+
+// A person changes a repo's settings from the dashboard: review policy, checks, claim lease.
+app.patch("/tasks/:id/settings", async (c) => {
+	const body = await jsonArgs(c);
+	const input = {
+		...(body.review !== undefined ? { review: body.review as ReviewPolicy } : {}),
+		...(body.verify !== undefined ? { verify: body.verify as string[] } : {}),
+		...(body.leaseMinutes !== undefined ? { leaseMinutes: body.leaseMinutes as number } : {}),
+	};
+	return c.json(await coordinator(c.env, c.req.param("id")).updateSettings(input, c.get("accessIdentity")));
+});
 
 app.get("/tasks/:id/slices/:slice/diff", async (c) => {
 	const { id, slice } = c.req.param();

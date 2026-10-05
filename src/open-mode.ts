@@ -22,9 +22,12 @@ export const holdsClaim = (slice: Slice) => slice.status === "opening" || slice.
 /** What the dashboard's repo list shows for an open task, counted from its state. */
 export function taskSummary(task: Task, now = new Date().toISOString(), lastActivity = now) {
 	const open = task.slices.filter(holdsClaim);
+	const waiting = open.filter((s) => s.attention !== undefined && s.attention !== null);
 	return {
 		open: open.length,
-		needsYou: open.filter((s) => s.attention !== undefined && s.attention !== null).length,
+		needsYou: waiting.length,
+		// For the inbox: which changes wait on a person, and why (the first line).
+		waiting: waiting.slice(0, 20).map((s) => ({ change: s.id, title: s.title, reason: (s.attention ?? "").split("\n")[0].slice(0, 200) })),
 		merged: task.slices.filter((s) => s.status === "integrated").length,
 		abandoned: task.slices.filter((s) => s.status === "abandoned").length,
 		lastActivity,

@@ -105,6 +105,8 @@ export interface Slice extends SliceSpec {
 	externalWaitFlagged?: string;
 	/** Who opened the change, for telling it apart from its reviewers: a registered agent ("agent:<name>") or an Access identity's label. */
 	authorBy?: string;
+	/** Every push recorded, oldest first (the last 50): its commit, when, and what Merge-ahead found. */
+	pushes?: { head: string; at: string; files: number; outOfLane: number; conflicts: number }[];
 	/** Reviewers started again after failing without a vote, by "role:head". */
 	reviewerRetries?: Record<string, number>;
 	/** When the slice's builder parked to wait for its cross-lane requests, and which ones. */
@@ -167,6 +169,8 @@ export interface Review {
 	summary: string;
 	/** Evidence the reviewer gathered: failing test output, an exploit, a benchmark. */
 	evidence?: string;
+	/** What a review by Blueprint's own reviewer agent cost, in model tokens. */
+	usage?: { inputTokens: number; outputTokens: number; cacheReadTokens?: number };
 	at: string;
 }
 

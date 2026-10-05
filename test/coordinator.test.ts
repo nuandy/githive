@@ -1123,6 +1123,33 @@ describe("review policies and outside reviewers", () => {
 		expect(flagged.externalWaitFlagged).toBe("h1");
 	});
 
+	it("lets a person review any role from the dashboard, but never their own change", async () => {
+		await setup(task({ review: { reviewers: ["review", "security"], required: 2, vetoes: ["security"], external: ["review"] }, slices: [slice("a", { authorBy: "person:abc" }), slice("b")] }));
+		await coordinator.startReviewers("a", "done");
+		const verdict = { reviewer: "security", head: "h1", verdict: "approve" as const, summary: "looked at the auth path", evidence: "read src/a/" };
+		await coordinator.submitExternalReview("a", verdict, "person:def");
+		expect((await stored()).slices[0].reviews).toEqual([expect.objectContaining({ reviewer: "security", by: "person:def" })]);
+		await expect(coordinator.submitExternalReview("a", { ...verdict, reviewer: "review" }, "person:abc")).rejects.toThrow(/you opened a/);
+		await expect(coordinator.submitExternalReview("a", { ...verdict, reviewer: "perf" }, "person:def")).rejects.toThrow(/perf is not a reviewer role here/);
+	});
+
+	it("keeps what each of Blueprint's reviews cost", async () => {
+		await setup(task());
+		await coordinator.startReviewers("a", "done");
+		await coordinator.submitReview("a", { ...vote("tests", "approve"), usage: { inputTokens: 1200, outputTokens: 300 } });
+		expect((await stored()).slices[0].reviews[0].usage).toEqual({ inputTokens: 1200, outputTokens: 300 });
+	});
+
+	it("changes a repo's settings, records who did, and refuses a bad policy", async () => {
+		await setup(task());
+		const updated = await coordinator.updateSettings({ review: { reviewers: ["review"], required: 1, vetoes: [] }, verify: ["npm test", " "], leaseMinutes: 60 }, person);
+		expect(updated).toEqual({ review: { reviewers: ["review"], required: 1, vetoes: [] }, verify: ["npm test"], leaseMinutes: 60 });
+		await coordinator.ledgerIdle();
+		expect(ledger.entries.at(-1)?.text).toMatch(/^Settings changed by person:[0-9a-f]{12}: review: 1 of review; checks: npm test; claims last 60 minutes without activity$/);
+		await expect(coordinator.updateSettings({ review: { reviewers: ["review"], required: 2, vetoes: [] } }, person)).rejects.toThrow(/required must be between 0 and 1/);
+		await expect(coordinator.updateSettings({}, person)).rejects.toThrow(/nothing to change/);
+	});
+
 	it("registers an agent's key, rotates it only with the current one, and keeps a registered name from being borrowed", async () => {
 		io.defaultHead = "main0";
 		await setup(task({ mode: "open", repo: "project", baseRepo: "project", baseCommit: "main0", anchor: "main0", leaseMinutes: 30, verify: [], slices: [] }));

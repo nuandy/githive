@@ -168,6 +168,8 @@ How to work:
 							verdict,
 							summary,
 							evidence,
+							// What this review cost, for the repo's insights.
+							...(state.usage ? { usage: { inputTokens: state.usage.inputTokens, outputTokens: state.usage.outputTokens, cacheReadTokens: state.usage.cacheReadTokens } } : {}),
 						});
 						Object.assign(state, { status: "done", verdict, summary, evidence, quorum: quorum.status });
 						this.note(state, `voted ${verdict}; quorum ${quorum.status}`);

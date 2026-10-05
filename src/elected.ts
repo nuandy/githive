@@ -31,6 +31,7 @@ type PeerStub = Pick<
 	| "submitReview"
 	| "submitExternalReview"
 	| "registerAgent"
+	| "updateSettings"
 	| "agentStopped"
 	| "flagSlice"
 	| "parkBuilder"
@@ -147,6 +148,7 @@ export function electedCoordinator(ctx: ElectedContext) {
 		externalCredentials: (change: string) => onLeader(peerOf(change), (leader) => leader.externalCredentials(change)),
 		// Outside agents: registering is the task's, so it asks through a peer of its own.
 		registerAgent: (name: string, keyHash: string, currentKeyHash?: string, actor?: AccessIdentity) => onLeader(peerOf("agents"), (leader) => leader.registerAgent(name, keyHash, currentKeyHash, actor)),
+		updateSettings: (input: Parameters<Coordinator["updateSettings"]>[0], actor?: AccessIdentity) => onLeader(peerOf("settings"), (leader) => leader.updateSettings(input, actor)),
 		submitExternalReview: (change: string, review: Parameters<Coordinator["submitExternalReview"]>[1], by: string) => onLeader(peerOf(change), (leader) => leader.submitExternalReview(change, review, by)),
 		// Blueprint's own workers report here too: hosted reviewers and builders, and the gate.
 		submitReview: (change: string, review: Parameters<Coordinator["submitReview"]>[1]) => onLeader(peerOf(change), (leader) => leader.submitReview(change, review)),

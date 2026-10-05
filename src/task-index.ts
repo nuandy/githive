@@ -30,6 +30,8 @@ export interface RepoSummary {
 	open?: number;
 	/** Changes waiting on a person. */
 	needsYou?: number;
+	/** Which changes wait on a person, and why, for the inbox. */
+	waiting?: { change: string; title: string; reason: string }[];
 	merged?: number;
 	abandoned?: number;
 	/** Open audit violations (coordinator-free). */

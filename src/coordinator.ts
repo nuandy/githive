@@ -776,6 +776,36 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 	}
 
 	/**
+	 * Change the task's settings: its review policy, its checks, how long a claim
+	 * lasts without activity. A commit already in review keeps the policy it went
+	 * to review under. Recorded in the task's log with who changed what.
+	 */
+	updateSettings(input: { review?: ReviewPolicy; verify?: string[]; leaseMinutes?: number }, actor?: AccessIdentity) {
+		return this.mutate(async (task) => {
+			const changed: string[] = [];
+			if (input.review !== undefined) {
+				const review = { ...input.review, vetoes: input.review.vetoes ?? [], reviewers: input.review.reviewers ?? [] };
+				validatePolicy(review);
+				task.review = review;
+				changed.push(`review: ${review.required} of ${review.reviewers.join(", ") || "no reviewers"}${review.vetoes.length ? `, ${review.vetoes.join(", ")} can veto` : ""}${review.external?.length ? `, outside agents review ${review.external.join(", ")}` : ""}${review.escalate?.length ? `, stricter for ${review.escalate.flatMap((e) => e.paths).join(", ")}` : ""}`);
+			}
+			if (input.verify !== undefined) {
+				if (!Array.isArray(input.verify) || !input.verify.every((c) => typeof c === "string")) fail(400, "verify is a list of commands");
+				task.verify = input.verify.map((c) => c.trim()).filter(Boolean);
+				changed.push(`checks: ${task.verify.join("; ") || "none"}`);
+			}
+			if (input.leaseMinutes !== undefined) {
+				if (!Number.isInteger(input.leaseMinutes) || input.leaseMinutes < 5 || input.leaseMinutes > 1440) fail(400, "leaseMinutes must be a whole number from 5 to 1440");
+				task.leaseMinutes = input.leaseMinutes;
+				changed.push(`claims last ${input.leaseMinutes} minutes without activity`);
+			}
+			if (!changed.length) fail(400, "nothing to change: send review, verify or leaseMinutes");
+			this.note(task, task.anchor, `Settings changed${actor ? ` by ${identityLabel(actor)}` : ""}: ${changed.join("; ")}`);
+			return { review: task.review, verify: task.verify, leaseMinutes: task.leaseMinutes };
+		});
+	}
+
+	/**
 	 * Register an outside agent on the task under `name`, bound to a key the
 	 * caller keeps (only its hash is stored). Registering a name again rotates its
 	 * key, and needs the current one.
@@ -1092,6 +1122,7 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 				this.renewLease(task, slice);
 				await this.scheduleLeaseCheck(task);
 				const conflicts = checks.filter((c) => c.status === "conflict");
+				slice.pushes = [...(slice.pushes ?? []), { head: slice.head!, at: new Date().toISOString(), files: slice.touched.length, outOfLane: slice.outOfLane.length, conflicts: conflicts.length }].slice(-50);
 				this.note(
 					task,
 					slice.head,
@@ -1174,7 +1205,7 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 			const slice = this.slice(task, sliceId);
 			const policy = policyFor(task, slice);
 			if (!hostedRoles(policy).includes(input.reviewer)) fail(400, `${input.reviewer} is not a role Blueprint reviews here`);
-			return this.recordReview(task, slice, { reviewer: input.reviewer, head: input.head, verdict: input.verdict, summary: input.summary, ...(input.evidence ? { evidence: input.evidence } : {}) });
+			return this.recordReview(task, slice, { reviewer: input.reviewer, head: input.head, verdict: input.verdict, summary: input.summary, ...(input.evidence ? { evidence: input.evidence } : {}), ...(input.usage ? { usage: input.usage } : {}) });
 		});
 	}
 
@@ -1184,12 +1215,15 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 	 * author, and one role per reviewer on a commit, so approvals come from
 	 * different reviewers.
 	 */
-	submitExternalReview(sliceId: string, input: Omit<Review, "at" | "by">, by: string) {
+	submitExternalReview(sliceId: string, input: Omit<Review, "at" | "by" | "usage">, by: string) {
 		return this.exclusive(async () => {
 			const task = await this.load();
 			const slice = this.slice(task, sliceId);
 			const policy = policyFor(task, slice);
-			if (!(policy.external ?? []).includes(input.reviewer))
+			// A person (signed in through Access) may review any role, from the dashboard; an agent only the external ones.
+			const person = by.startsWith("person:");
+			if (person && !policy.reviewers.includes(input.reviewer)) fail(400, `${input.reviewer} is not a reviewer role here (${policy.reviewers.join(", ") || "none"})`);
+			if (!person && !(policy.external ?? []).includes(input.reviewer))
 				fail(400, `${input.reviewer} is not a role outside agents review here${policy.external?.length ? ` (they review ${policy.external.join(", ")})` : ""}`);
 			if (by === slice.authorBy)
 				fail(403, `you opened ${slice.id}, so you can't review it${by.startsWith("agent:") ? "" : ": if you're a different agent sharing the author's access token, register your own agent (register_agent) and review with its key"}`);

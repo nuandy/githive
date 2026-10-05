@@ -50,7 +50,7 @@ export interface FreeContext {
 	/** What Blueprint's hosted agents on a change are doing: its builder, and the reviewers of its head. */
 	agentStatus?: (repo: string, change: string, head: string | null, roles: string[]) => Promise<HostedStatus>;
 	/** Updates the repo's summary for the dashboard's list of repos (a hint; Git is what counts). */
-	summarize?: (repo: string, patch: { open?: number; needsYou?: number; merged?: number; mergedBy?: number; violations?: number; lastActivity?: string; countedAt?: string }) => Promise<void>;
+	summarize?: (repo: string, patch: { open?: number; needsYou?: number; waiting?: { change: string; title: string; reason: string }[]; merged?: number; mergedBy?: number; violations?: number; lastActivity?: string; countedAt?: string }) => Promise<void>;
 	/** Starts Blueprint's hosted builder on a claimed change. */
 	startBuilder?: (input: { repo: string; change: string }) => Promise<{ change: string; builder: string }>;
 }
@@ -221,7 +221,13 @@ export async function freeSnapshot(ctx: FreeContext, repo: string) {
 			return { ...c, head, approval, ...(hosted ? { hosted } : {}) };
 		}),
 	);
-	await ctx.summarize?.(repo, { open: claims.length, needsYou: claims.filter((c) => c.hosted?.builder?.status === "failed").length, countedAt: new Date().toISOString() }).catch(() => undefined);
+	const failed = claims.filter((c) => c.hosted?.builder?.status === "failed");
+	await ctx.summarize?.(repo, {
+		open: claims.length,
+		needsYou: failed.length,
+		waiting: failed.slice(0, 20).map((c) => ({ change: c.change, title: c.intent.split("\n")[0].slice(0, 120), reason: `Blueprint's builder failed${c.hosted?.builder?.error ? `: ${c.hosted.builder.error.slice(0, 160)}` : ""}` })),
+		countedAt: new Date().toISOString(),
+	}).catch(() => undefined);
 	return {
 		repo,
 		/** The project's branch changes merge into. */

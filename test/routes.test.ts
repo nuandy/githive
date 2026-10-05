@@ -247,7 +247,7 @@ describe("the dashboard's list of repos", () => {
 		await Promise.all(waits);
 		// Only t2 lacked counts; the free repo's are newer than its last activity.
 		expect((index as unknown as { summarize: ReturnType<typeof vi.fn> }).summarize.mock.calls).toEqual([
-			["task:t2", { open: 1, needsYou: 1, merged: 1, abandoned: 0, lastActivity: reviewed.at, countedAt: expect.any(String) }],
+			["task:t2", { open: 1, needsYou: 1, waiting: [expect.objectContaining({ reason: "stuck" })], merged: 1, abandoned: 0, lastActivity: reviewed.at, countedAt: expect.any(String) }],
 		]);
 	});
 });
