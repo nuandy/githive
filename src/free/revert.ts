@@ -36,7 +36,7 @@ export async function revertViolation(input: RevertInput): Promise<RevertOutcome
 	for (let attempt = 1; ; attempt++) {
 		const ws = await Workspace.clone(input.remote, input.branch);
 		const head = await ws.head();
-		const { commit } = await git.readCommit({ fs: ws.fs, dir: DIR, oid: input.target });
+		const { commit } = await ws.ensureCommit(input.target);
 		const before = commit.parent[0];
 		if (!before) return { ok: false, reasons: [`${input.target} has no parent to revert to`] };
 		const files = await ws.changedPaths(before, input.target);

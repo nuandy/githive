@@ -49,7 +49,7 @@ export async function readMainMerges(remote: Remote, baseline: string, branch: s
 	const ws = await Workspace.clone(remote, branch);
 	const records: MergeRecord[] = [];
 	for (let oid = await ws.head(); oid && oid !== baseline; ) {
-		const { commit } = await git.readCommit({ fs: ws.fs, dir: "/repo", oid });
+		const { commit } = await ws.ensureCommit(oid);
 		const [first, second] = commit.parent;
 		records.push({
 			commit: oid,
