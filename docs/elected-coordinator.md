@@ -4,8 +4,9 @@ Blueprint has no coordinator service. Every open change is a peer, one peer at a
 time leads, and Git is the only shared memory. Any peer can take over from any
 other by reading Git.
 
-This document is the design for open mode. Planned mode (planner, slices,
-contracts, landing) is out of scope on this branch.
+This document is the design for open mode, which is how Blueprint runs every
+task. (Planned mode, with a planner, contracts and landing, was removed; it
+lives on the plan-mode branch.)
 
 ## Pieces
 
