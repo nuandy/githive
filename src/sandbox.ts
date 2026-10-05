@@ -330,6 +330,8 @@ export abstract class SandboxAgent<J extends SandboxJob, S extends AgentState> e
 		const restart = state.status === "working";
 		this.note(state, restart ? "container restarted; re-cloning" : "starting container");
 		await bootContainer(container);
+		// A container that outlived its object (a deploy, say) still has the last checkout.
+		await run(container, ["rm", "-rf", WORKDIR], "/");
 		const clone = await this.git(job, ["clone", "--quiet", job.remote, WORKDIR], "/");
 		if (clone.exitCode !== 0) throw new Error(`clone failed: ${clip(clone.output, 2_000)}`);
 		await this.afterClone(job, state);

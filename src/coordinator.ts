@@ -991,16 +991,37 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 		}
 	}
 
-	/** An agent stopped (finished, failed or was cancelled): free its slot and start queued work. */
-	agentStopped(kind: AgentKind, key: string) {
+	/**
+	 * An agent stopped (finished, failed or was cancelled): free its slot and
+	 * start queued work. A reviewer that failed without voting, on the commit
+	 * still under review, runs once more; failing again, the change waits on a
+	 * person, rather than on a vote that will never come.
+	 */
+	agentStopped(kind: AgentKind, key: string, failure?: string) {
 		return this.mutate(async (task) => {
 			removeKey(activeOf(task, kind), key);
 			if (kind === "builder") {
 				const slice = task.slices.find((candidate) => candidate.id === key);
 				if (slice && !slice.parkedAt) await this.autoParkWaitingBuilder(task, slice);
 			}
+			if (kind === "reviewer" && failure !== undefined) await this.reviewerFailed(task, key, failure);
 			await this.drain(task);
 		});
+	}
+
+	private async reviewerFailed(task: Task, key: string, failure: string) {
+		const [sliceId, role, head] = key.split(":");
+		const slice = task.slices.find((s) => s.id === sliceId);
+		if (!slice || slice.status !== "building" || slice.reviewHead !== head || slice.reviews.some((r) => r.head === head && r.reviewer === role)) return;
+		if (failure.startsWith("cancelled")) return;
+		const retries = (slice.reviewerRetries ??= {});
+		if (!retries[`${role}:${head}`]) {
+			retries[`${role}:${head}`] = 1;
+			this.note(task, head, `${slice.id}: the ${role} reviewer failed (${failure.split("\n")[0].slice(0, 200)}); starting it again`);
+			await this.schedule(task, { kind: "reviewer", slice: slice.id, role, head }, []);
+			return;
+		}
+		this.flagHuman(task, slice, head, `The ${role} reviewer failed twice on ${short(head)}: ${failure.slice(0, 500)}`, `the ${role} reviewer failed twice`);
 	}
 
 	/**

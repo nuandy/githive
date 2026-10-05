@@ -117,10 +117,10 @@ How to work:
 		return {};
 	}
 
-	protected async onStopped(job: ReviewJob) {
+	protected async onStopped(job: ReviewJob, state: ReviewerState) {
 		// A coordinator-free review has no Coordinator to tell.
 		if (job.free) return;
-		await this.coordinator(job).agentStopped("reviewer", `${job.slice.id}:${job.role}:${job.head}`);
+		await this.coordinator(job).agentStopped("reviewer", `${job.slice.id}:${job.role}:${job.head}`, state.status === "failed" ? (state.error ?? "failed") : undefined);
 	}
 
 	protected async afterClone(job: ReviewJob) {

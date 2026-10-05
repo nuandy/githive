@@ -97,6 +97,8 @@ export interface Slice extends SliceSpec {
 		/** When the gate was last seen holding this run, while it's queued or running (see gateStallCheck). */
 		seenAt?: string;
 	};
+	/** Reviewers started again after failing without a vote, by "role:head". */
+	reviewerRetries?: Record<string, number>;
 	/** When the slice's builder parked to wait for its cross-lane requests, and which ones. */
 	parkedAt?: string;
 	parkedWaitingFor?: string[];

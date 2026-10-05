@@ -146,7 +146,7 @@ export function electedCoordinator(ctx: ElectedContext) {
 		// Blueprint's own workers report here too: hosted reviewers and builders, and the gate.
 		submitReview: (change: string, review: Parameters<Coordinator["submitReview"]>[1]) => onLeader(peerOf(change), (leader) => leader.submitReview(change, review)),
 		/** A builder stops as its change; a reviewer as `change:role:head`. */
-		agentStopped: (kind: Parameters<Coordinator["agentStopped"]>[0], key: string) => onLeader(peerOf(key.split(":")[0]), (leader) => leader.agentStopped(kind, key)),
+		agentStopped: (kind: Parameters<Coordinator["agentStopped"]>[0], key: string, failure?: string) => onLeader(peerOf(key.split(":")[0]), (leader) => leader.agentStopped(kind, key, failure)),
 		flagSlice: (change: string, message: string) => onLeader(peerOf(change), (leader) => leader.flagSlice(change, message)),
 		parkBuilder: (change: string) => onLeader(peerOf(change), (leader) => leader.parkBuilder(change)),
 		parkedBuilderTimedOut: (change: string, parkedAt: string) => onLeader(peerOf(change), (leader) => leader.parkedBuilderTimedOut(change, parkedAt)),

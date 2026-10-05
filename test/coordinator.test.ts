@@ -461,6 +461,34 @@ describe("escalation and human controls", () => {
 		expect(ledger.entries.map((e) => e.text)).toContain("a needs a human: Could not start reviewer a:tests:h1: no containers");
 	});
 
+	it("starts a reviewer that failed without voting once more, then flags the change, never waiting on a vote that won't come", async () => {
+		await setup(task());
+		await coordinator.startReviewers("a", "built it");
+		const tests = fake.env.REVIEWER.getByName("t1--a--review-tests--h1");
+		expect(tests.start).toHaveBeenCalledTimes(1);
+
+		await coordinator.agentStopped("reviewer", "a:tests:h1", "clone failed: fatal: destination path '/work' already exists");
+		expect(tests.start).toHaveBeenCalledTimes(2);
+		let t = await stored();
+		expect(t.active.reviewers).toContain("a:tests:h1");
+		expect(t.slices[0].attention).toBeUndefined();
+
+		await coordinator.agentStopped("reviewer", "a:tests:h1", "clone failed again");
+		expect(tests.start).toHaveBeenCalledTimes(2);
+		t = await stored();
+		expect(t.slices[0].attention).toBe("The tests reviewer failed twice on h1: clone failed again");
+		expect(t.active.reviewers).not.toContain("a:tests:h1");
+	});
+
+	it("doesn't start a failed reviewer again once its role has voted, or for an older commit", async () => {
+		await setup(task({ slices: [slice("a", { reviewHead: "h2", reviews: [{ ...vote("tests", "approve", "h2"), at: "" }] })] }));
+		await coordinator.agentStopped("reviewer", "a:tests:h2", "crashed after voting");
+		await coordinator.agentStopped("reviewer", "a:api:h1", "an older commit's reviewer");
+		expect(fake.env.REVIEWER.getByName("t1--a--review-tests--h2").start).not.toHaveBeenCalled();
+		expect(fake.env.REVIEWER.getByName("t1--a--review-api--h1").start).not.toHaveBeenCalled();
+		expect((await stored()).slices[0].attention).toBeUndefined();
+	});
+
 	it("reports no failures when every reviewer starts", async () => {
 		await setup(task());
 		expect((await coordinator.startReviewers("a", "built it")).failed).toEqual([]);
