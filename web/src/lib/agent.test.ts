@@ -15,6 +15,7 @@ describe("agent labels", () => {
 	it("falls back to the kind of agent when nobody is recorded", () => {
 		expect(agentLabel({ openedBy: "service:abc/agent-a", external: true })).toBe("agent-a");
 		expect(agentLabel({ external: true })).toBe("external agent");
+		expect(agentLabel({ agent: "docs-agent", openedBy: "service:abc", external: true })).toBe("docs-agent");
 		expect(agentLabel({ external: false })).toBe("Blueprint builder");
 		expect(agentLabel({})).toBe("Blueprint builder");
 	});

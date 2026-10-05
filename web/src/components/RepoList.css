@@ -117,6 +117,11 @@
 		flex-wrap: wrap;
 	}
 
+	/* The "needs you" pill goes under the text instead of squeezing it. */
+	.repo-row__main {
+		flex-basis: calc(100% - 40px);
+	}
+
 	.repo-row__needs {
 		margin-left: 28px;
 	}

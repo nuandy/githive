@@ -1,7 +1,7 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { buildRepoRows } from "../lib/repos";
-import { ago, freeSnapshot, makeChange, makeTask } from "../test/fixtures";
+import { ago } from "../test/fixtures";
 import { OpenRepoForm } from "./OpenRepoForm";
 import { RepoList } from "./RepoList";
 
@@ -9,15 +9,15 @@ const noop = () => undefined;
 
 describe("the Repositories page", () => {
 	it("lists repos in both modes with their counts and a mode badge", () => {
-		const rows = buildRepoRows(
-			[makeTask({ slices: [makeChange({ id: "a" }), makeChange({ id: "b", attention: "stuck" }), makeChange({ id: "c" })] })],
-			[{ repo: "docs-site", since: ago(1) }],
-			{ "docs-site": { ...freeSnapshot, audit: { ...freeSnapshot.audit!, open: 0 } } },
-		);
+		const rows = buildRepoRows({
+			tasks: [{ id: "open-my-app", repo: "my-app", createdAt: ago(10), elected: true, summary: { open: 3, needsYou: 1, countedAt: ago(1) } }],
+			free: [{ repo: "docs-site", since: ago(1), summary: { open: 1, countedAt: ago(1) } }],
+		});
 		const html = renderToStaticMarkup(<RepoList rows={rows} loaded allRepos={[]} opening={false} onOpenRepo={noop} />);
 		expect(html).toContain('href="#/repos/my-app"');
 		expect(html).toContain('href="#/free/docs-site"');
-		expect(html).toContain("3 open · 1 needs you");
+		expect(html).toContain("3 open");
+		expect(html).toContain("1 needs you");
 		expect(html).toContain("1 open");
 		expect(html).toMatch(/>elected</);
 		expect(html).toMatch(/>coordinator-free</);

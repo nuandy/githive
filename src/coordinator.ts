@@ -18,7 +18,7 @@ import type { BuildJob } from "./builder";
 import type { Remote } from "./git";
 import type { ReviewJob } from "./reviewer";
 import type { SliceJob } from "./sandbox";
-import { OPENING_LEASE_MS, claimConflicts, claimsOf, conflictMessage as claimConflictMessage, changeId, holdsClaim, inLane, leaseExpired, leaseUntil, nextLeaseCheck, normalizeClaim } from "./open-mode";
+import { OPENING_LEASE_MS, claimConflicts, claimsOf, conflictMessage as claimConflictMessage, agentName, changeId, holdsClaim, inLane, leaseExpired, leaseUntil, nextLeaseCheck, normalizeClaim } from "./open-mode";
 import { nextStep, reviewFeedback, tally, validatePolicy } from "./quorum";
 import { activeOf, hasRoom, itemKey, stillWanted, validateLimits, withScheduling, type AgentKind } from "./schedule";
 import { accessIdentityLabel, type AccessIdentity, type CoordinatorHumanActions } from "./access-contract";
@@ -621,17 +621,18 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 	}
 
 	/** Diff the human-blocked slice's pinned review commit, never its moving head. */
+	/** A change's diff, for people to read: the commit under review, or before review the latest push. */
 	async sliceDiff(sliceId: string) {
 		const task = await this.load();
 		const slice = this.slice(task, sliceId);
-		if (!slice.attention) fail(409, `slice ${sliceId} does not need a human`);
-		if (!slice.reviewHead) fail(409, `slice ${sliceId} has no commit under review`);
+		const head = slice.reviewHead ?? slice.head;
+		if (!head) fail(409, `change ${sliceId} has nothing pushed yet`);
 		const base = slice.mergeBase ?? task.baseCommit;
-		if (!base) fail(409, `slice ${sliceId} has no review base`);
-		if (!slice.repo) fail(409, `slice ${sliceId} has no repository`);
+		if (!base) fail(409, `change ${sliceId} has no base to compare with`);
+		if (!slice.repo) fail(409, `change ${sliceId} has no repository`);
 		const ws = await Workspace.clone(await remoteFor(this.env.ARTIFACTS, slice.repo, "read"));
-		const files = await ws.changedFiles(base, slice.reviewHead);
-		return { base, head: slice.reviewHead, ...boundedUnifiedDiff(files) };
+		const files = await ws.changedFiles(base, head);
+		return { base, head, ...boundedUnifiedDiff(files) };
 	}
 
 	/**
@@ -640,7 +641,7 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 	 * paths. Returns write credentials for the agent; with `hosted`, a builder
 	 * agent is started on it as well.
 	 */
-	async openChange(input: { id?: string; title: string; intent: string; owns: string[]; hosted?: boolean }, actor?: AccessIdentity) {
+	async openChange(input: { id?: string; title: string; intent: string; owns: string[]; hosted?: boolean; agent?: string }, actor?: AccessIdentity) {
 		// Asked again for a change that already opened (its answer was lost, say,
 		// with the leader that gave it): the same change, with fresh credentials.
 		if (input.id !== undefined) {
@@ -657,6 +658,7 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 			if (task.mode !== "open") fail(409, "changes can only be opened on an open-mode task");
 			if (typeof input?.title !== "string" || !input.title.trim()) fail(400, "a change needs a title");
 			if (typeof input.intent !== "string" || !input.intent.trim()) fail(400, "a change needs an intent: what it sets out to do");
+			const agent = agentName(input.agent);
 			const owns = normalizeClaim(input.owns);
 			// Asked again while its reservation stands (interrupted before it confirmed): carry on from there.
 			const reserved = input.id !== undefined ? task.slices.find((s) => s.id === input.id) : undefined;
@@ -691,6 +693,7 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 				openedAt: new Date().toISOString(),
 				// A person by a hash of their email: change records reach agents, never the address.
 				...(actor ? { openedBy: identityLabel(actor) } : input.hosted ? { openedBy: "blueprint-builder" } : {}),
+				...(agent ? { agent } : {}),
 			};
 			task.slices.push(slice);
 			await this.scheduleLeaseCheck(task);

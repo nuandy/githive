@@ -56,12 +56,19 @@ let registry: Map<string, InstanceType<typeof Peer>>;
 
 /** Leader hints peers report to the task index. */
 let hints: { id: string; name: string | null; term: number }[];
+/** Summaries peers keep in the task index, for the dashboard's repo list. */
+let summaries: { key: string; patch: Record<string, unknown> }[];
 
 function peer(name: string, storage = new FakeStorage()) {
 	const env = {
 		...fakeEnv().env,
 		PEER: { getByName: (n: string) => registry.get(n) },
-		TASK_INDEX: { getByName: () => ({ hintLeader: async (id: string, leader: string | null, term: number) => void hints.push({ id, name: leader, term }) }) },
+		TASK_INDEX: {
+			getByName: () => ({
+				hintLeader: async (id: string, leader: string | null, term: number) => void hints.push({ id, name: leader, term }),
+				summarize: async (key: string, patch: Record<string, unknown>) => void summaries.push({ key, patch }),
+			}),
+		},
 	};
 	const created = new Peer({ storage } as never, env as never);
 	created.configure({ log: () => log, leases: () => leases as never, leaseMs: LEASE, now: () => clock.now });
@@ -75,6 +82,7 @@ beforeEach(async () => {
 	io.forks = 0;
 	registry = new Map();
 	hints = [];
+	summaries = [];
 	clock = { now: 1_000_000 };
 	log = new SharedLog();
 	leases = new SharedLog();
@@ -361,6 +369,18 @@ describe("a peer of the elected coordinator", () => {
 		clock.now += (LEASE * 2) / 3;
 		await restarted.peer.alarm();
 		expect(leases.commits.at(-1)?.commit).toMatchObject({ kind: "heartbeat", term: 1, leader: "t1--a" });
+	});
+
+	it("keeps the task's summary in the index as decisions commit, writing only when the counts change", async () => {
+		const a = peer("t1--stats-1a2b");
+		await a.lead();
+		await a.peer.openChange({ id: "stats-1a2b", title: "Stats", intent: "Stats", owns: ["src/stats/"] });
+		expect(summaries.at(-1)).toMatchObject({ key: "task:t1", patch: { open: 1, needsYou: 0, merged: 0, abandoned: 0 } });
+		const written = summaries.length;
+		await a.peer.extendClaim("stats-1a2b", ["src/stats/", "docs/stats.md"]);
+		expect(summaries).toHaveLength(written);
+		await a.peer.abandonChange("stats-1a2b", "done");
+		expect(summaries.at(-1)).toMatchObject({ key: "task:t1", patch: { open: 0, abandoned: 1 } });
 	});
 
 	it("tells the task index it leads when it wins a term, and that nobody does when it resigns", async () => {

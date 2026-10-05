@@ -646,6 +646,15 @@ describe("open mode", () => {
 		expect(Date.parse(abandoned.endedAt!)).toBeGreaterThanOrEqual(Date.parse(byPerson.change.openedAt!));
 	});
 
+	it("records the name an agent gives itself, apart from who opened the change, and refuses a name that isn't one", async () => {
+		await setup(openTask());
+		const named = await coordinator.openChange({ title: "X", intent: "X, please", owns: ["src/x/"], agent: "docs-agent" }, { kind: "service", value: "ci-bot" });
+		expect(named.change).toMatchObject({ agent: "docs-agent", openedBy: "service:ci-bot" });
+		await expect(coordinator.openChange({ title: "Y", intent: "Y, please", owns: ["src/y/"], agent: "<b>me</b>" })).rejects.toThrow(/\[400\] agent must be a short name/);
+		const unnamed = await coordinator.openChange({ title: "Z", intent: "Z, please", owns: ["src/z/"] });
+		expect(unnamed.change.agent).toBeUndefined();
+	});
+
 	it("refuses a claim that overlaps an active change, naming the holder and its intent", async () => {
 		await setup(openTask());
 		const { change } = await open("Add stats", ["src/stats/"]);

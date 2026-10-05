@@ -65,8 +65,8 @@ export function App() {
 	const repoName = route.page === "repo" || route.page === "change" ? route.repo : null;
 	const base = route.page === "repo" || route.page === "change" ? route.base : "repos";
 
-	// Every task's state is slow to gather, so only the pages that list tasks poll it.
-	const tasks = usePoll(onRepos || route.page === "task" ? "tasks" : null, api.tasks, 15_000);
+	// The Repositories list, with each repo's counts, in one read.
+	const summaries = usePoll(onRepos || route.page === "task" ? "summaries" : null, api.summaries, 15_000);
 	const free = usePoll("free", api.freeRepos, 10_000);
 	const allRepos = usePoll(onRepos ? "repos" : null, api.repos, 60_000);
 
@@ -87,16 +87,16 @@ export function App() {
 
 	// Old links named a task: send them to its repo.
 	useEffect(() => {
-		if (route.page !== "task" || !tasks.data) return;
-		const found = tasks.data.find((t) => t.id === route.taskId);
+		if (route.page !== "task" || !summaries.data) return;
+		const found = summaries.data.tasks.find((t) => t.id === route.taskId);
 		if (found) window.location.replace(href.repo(found.repo));
-	}, [route, tasks.data]);
+	}, [route, summaries.data]);
 
 	const onChanged = useCallback(() => {
 		live.refresh();
 		history.refresh();
-		tasks.refresh();
-	}, [history, live, tasks]);
+		summaries.refresh();
+	}, [history, live, summaries]);
 
 	const openRepo = useCallback(
 		async (repo: string) => {
@@ -105,7 +105,7 @@ export function App() {
 			try {
 				const result = await api.openRepo(repo);
 				setOpened(result);
-				tasks.refresh();
+				summaries.refresh();
 				window.location.hash = href.repo(result.repo);
 			} catch (error) {
 				setOpenError(error instanceof Error ? error.message : String(error));
@@ -113,7 +113,7 @@ export function App() {
 				setOpening(false);
 			}
 		},
-		[tasks],
+		[summaries],
 	);
 
 	const view: RepoView | null = route.page === "repo" ? { kind: "repo", tab: route.tab, state: route.state } : route.page === "change" ? { kind: "change", change: route.change, tab: route.tab } : null;
@@ -137,7 +137,7 @@ export function App() {
 	}, [title]);
 
 	const errors = [
-		tasks.error && `Repositories: ${tasks.error}`,
+		summaries.error && `Repositories: ${summaries.error}`,
 		free.error && `Coordinator-free repos: ${free.error}`,
 		task && live.error && `Live status: ${live.error}`,
 		snapshot.error && `${repoName}: ${snapshot.error}`,
@@ -147,8 +147,8 @@ export function App() {
 	if (route.page === "repos") {
 		page = (
 			<RepoList
-				rows={buildRepoRows(tasks.data ?? [], free.data ?? [])}
-				loaded={tasks.loaded}
+				rows={summaries.data ? buildRepoRows(summaries.data) : []}
+				loaded={summaries.loaded}
 				allRepos={allRepos.data ?? []}
 				opening={opening}
 				openError={openError}
@@ -175,7 +175,7 @@ export function App() {
 			);
 		}
 	} else if (route.page === "task") {
-		page = tasks.loaded && !tasks.data?.some((t) => t.id === route.taskId) ? (
+		page = summaries.loaded && !summaries.data?.tasks.some((t) => t.id === route.taskId) ? (
 			<main className="page" id="main">
 				<div className="box empty">
 					<h2>That link is out of date</h2>

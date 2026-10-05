@@ -54,3 +54,19 @@
 	outline: 2px solid var(--accent);
 	outline-offset: -2px;
 }
+
+@media (max-width: 560px) {
+	/* Narrow screens: tighter tabs, so a page's three fit without scrolling. */
+	.tabs ul {
+		gap: 0;
+	}
+
+	.tabs__tab {
+		gap: 6px;
+		padding: 10px 8px 11px;
+	}
+
+	.tabs__tab > svg {
+		display: none;
+	}
+}

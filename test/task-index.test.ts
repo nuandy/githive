@@ -28,6 +28,21 @@ describe("the task index's leader hint", () => {
 		expect(await index.get("t1")).toMatchObject({ leader: { name: "t1--b", term: 2 } });
 	});
 
+	it("keeps a summary per task and coordinator-free repo, merging updates and adding merges", async () => {
+		const index = new TaskIndex({ storage: new FakeStorage() } as never, {} as never);
+		await index.add(ref);
+		await index.addFree("docs");
+		await index.summarize("task:t1", { open: 2, merged: 1, lastActivity: "2026-10-06T10:00:00.000Z" });
+		await index.summarize("task:t1", { open: 1 });
+		await index.summarize("free:docs", { open: 3 });
+		await index.summarize("free:docs", { mergedBy: 1, lastActivity: "2026-10-06T11:00:00.000Z" });
+		const { tasks, free } = await index.summaries();
+		expect(tasks).toEqual([{ ...ref, summary: { open: 1, merged: 1, lastActivity: "2026-10-06T10:00:00.000Z" } }]);
+		expect(free).toEqual([{ repo: "docs", since: expect.any(String), summary: { open: 3, merged: 1, lastActivity: "2026-10-06T11:00:00.000Z" } }]);
+		await index.remove("t1");
+		expect((await index.summaries()).tasks).toEqual([]);
+	});
+
 	it("ignores a hint for a task it doesn't list", async () => {
 		const index = new TaskIndex({ storage: new FakeStorage() } as never, {} as never);
 		await index.hintLeader("nope", "x", 1);

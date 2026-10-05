@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { GitCasLog } from "../src/election-git";
 import { claim, type Registry } from "../src/free/claims";
-import { FREE_TOOLS, freeAudit, freeSnapshot } from "../src/free/mcp";
+import { FREE_TOOLS, freeAudit, freeOpenCount, freeSnapshot } from "../src/free/mcp";
 import { TOOLS, handleRpc } from "../src/mcp";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -15,6 +15,7 @@ import { startGitServer, type GitServer } from "./helpers/git-server";
 
 let server: GitServer;
 let registered: string[] = [];
+let summarized: { repo: string; patch: Record<string, unknown> }[] = [];
 let reviewRequests: { repo: string; change: string; roles: string[]; summary?: string }[] = [];
 let builds: { repo: string; change: string }[] = [];
 const ctx = () => ({
@@ -28,6 +29,7 @@ const ctx = () => ({
 		remote: async () => ({ url: server.url, token: "unused" }),
 		head: async () => server.git("rev-parse", "main").trim(),
 		register: async (repo: string) => void registered.push(repo),
+		summarize: async (repo: string, patch: Record<string, unknown>) => void summarized.push({ repo, patch }),
 		startBuilder: async (input: { repo: string; change: string }) => {
 			builds.push(input);
 			return { change: input.change, builder: `free--${input.repo}--${input.change}` };
@@ -132,6 +134,20 @@ describe("the coordinator-free MCP tools", () => {
 		// The audit replays every record, so it's read on its own.
 		expect(snapshot).not.toHaveProperty("audit");
 		expect(await freeAudit(ctx().free, "project")).toEqual({ merges: 0, open: 0, violations: [] });
+	});
+
+	it("keeps the repo's summary for the dashboard: activity on writes, counts when they're read", async () => {
+		// Its own repo: activity is noted at most every 10 seconds per repo, and other tests write "project".
+		summarized = [];
+		await call("free_start", { repo: "summed" });
+		await call("free_claim", { repo: "summed", change: "a-1", agent: "agent-a", paths: ["src/a/"], intent: "a" });
+		expect(summarized.at(-1)).toMatchObject({ repo: "summed", patch: { lastActivity: expect.any(String) } });
+		expect(await freeOpenCount(ctx().free, "summed")).toBe(1);
+		await freeSnapshot(ctx().free, "summed");
+		expect(summarized.at(-1)).toMatchObject({ repo: "summed", patch: { open: 1, needsYou: 0, countedAt: expect.any(String) } });
+		await freeAudit(ctx().free, "summed");
+		expect(summarized.at(-1)).toEqual({ repo: "summed", patch: { merged: 0, violations: 0 } });
+		expect(await freeOpenCount(ctx().free, "elsewhere")).toBeNull();
 	});
 
 	it("asks Blueprint's hosted reviewers to review a claimed change, by default the tests role and every veto role", async () => {

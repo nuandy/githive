@@ -68,6 +68,7 @@ describe("buildTimeline with the repo's decision log", () => {
 		{ at: ago(1), text: "add-stats integrated into the task base", commit: "a1b2c3d" },
 	];
 	const change = makeChange({
+		agent: "stats-agent",
 		status: "integrated",
 		head: "a1b2c3d",
 		reviewHead: "a1b2c3d",
@@ -88,18 +89,20 @@ describe("buildTimeline with the repo's decision log", () => {
 			builderLog: [{ at: new Date(Date.parse(ago(60)) - 20_000).toISOString(), event: "pushed: Add the stats page" }],
 		});
 		expect(items.map((item) => item.kind)).toEqual(["opened", "pushed", "review-requested", "review", "review-result", "checks", "merged"]);
-		expect(items[0].text).toBe('Change add-stats opened by abc: "Add stats page", claiming src/stats/. Intent: stats');
-		expect(items[1]).toMatchObject({ text: "add-stats pushed a1b2c3d: 4 files changed; no conflicts", body: "Add the stats page" });
+		// On the change's own page, lines name who acted rather than repeat the change.
+		expect(items[0].text).toBe('Opened by abc: "Add stats page", claiming src/stats/. Intent: stats');
+		expect(items[1]).toMatchObject({ text: "stats-agent pushed a1b2c3d: 4 files changed; no conflicts", body: "Add the stats page" });
+		expect(items[2].text).toBe("stats-agent ready for review at a1b2c3d");
 		expect(items[3].review?.summary).toBe("suite passes");
 		expect(items[5].gate?.status).toBe("passed");
-		expect(items[6].text).toBe("add-stats merged into main");
+		expect(items[6].text).toBe("Merged into main");
 		expect(items.filter((item) => item.kind === "merged")).toHaveLength(1);
 	});
 
 	it("splits a multi-line log entry into a line and its body", () => {
 		const sentBack = [{ at: ago(10), text: "add-stats sent back to its builder (revision 1 of 3):\n- tests rejected: slice tests fail", commit: "a1b2c3d" }];
 		const [, item] = buildTimeline(makeChange({ openedAt: ago(20) }), { history: sentBack });
-		expect(item).toMatchObject({ kind: "changes-requested", text: "add-stats sent back to its builder (revision 1 of 3):", body: "- tests rejected: change tests fail" });
+		expect(item).toMatchObject({ kind: "changes-requested", text: "Sent back to its builder (revision 1 of 3):", body: "- tests rejected: change tests fail" });
 	});
 });
 

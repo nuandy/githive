@@ -131,7 +131,7 @@ export function electedCoordinator(ctx: ElectedContext) {
 	return {
 		state: read,
 		claims: async () => claimsOf(await read()),
-		openChange: async (input: { title: string; intent: string; owns: string[]; hosted?: boolean }, actor?: AccessIdentity) => {
+		openChange: async (input: { title: string; intent: string; owns: string[]; hosted?: boolean; agent?: string }, actor?: AccessIdentity) => {
 			const id = changeId(typeof input?.title === "string" ? input.title : "change");
 			return onLeader(peerOf(id), (leader) => leader.openChange({ ...input, id }, actor));
 		},

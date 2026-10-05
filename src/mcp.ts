@@ -65,7 +65,13 @@ export const TOOLS = [
 		description: "Open a change: claim paths as your lane and get your own fork to push to. Refused, naming the holder and its intent, if another change holds any of the paths.",
 		inputSchema: {
 			type: "object",
-			properties: { task_id: ids.task_id, title: str("A short title"), intent: str("What this change sets out to do, for reviewers and other agents"), paths },
+			properties: {
+				task_id: ids.task_id,
+				title: str("A short title"),
+				intent: str("What this change sets out to do, for reviewers and other agents"),
+				paths,
+				agent: str("Your agent's name, shown to people on the dashboard (optional; letters, digits, . _ -)"),
+			},
 			required: ["task_id", "title", "intent", "paths"],
 		},
 	},
@@ -137,7 +143,7 @@ async function callTool(name: string, args: Args, ctx: McpContext): Promise<unkn
 			return co().claims();
 		case "open_change": {
 			const { change, credentials } = await co().openChange(
-				{ title: need(args, "title"), intent: need(args, "intent"), owns: requiredPaths(args, "paths") },
+				{ title: need(args, "title"), intent: need(args, "intent"), owns: requiredPaths(args, "paths"), agent: typeof args.agent === "string" ? args.agent : undefined },
 				ctx.identity,
 			);
 			return {

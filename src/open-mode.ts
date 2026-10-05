@@ -19,6 +19,25 @@ export const OPENING_LEASE_MS = 5 * 60_000;
 /** A change that holds its claim: being opened, or open. */
 export const holdsClaim = (slice: Slice) => slice.status === "opening" || slice.status === "building";
 
+/** What the dashboard's repo list shows for an open task, counted from its state. */
+export function taskSummary(task: Task, now = new Date().toISOString(), lastActivity = now) {
+	const open = task.slices.filter(holdsClaim);
+	return {
+		open: open.length,
+		needsYou: open.filter((s) => s.attention !== undefined && s.attention !== null).length,
+		merged: task.slices.filter((s) => s.status === "integrated").length,
+		abandoned: task.slices.filter((s) => s.status === "abandoned").length,
+		lastActivity,
+		countedAt: now,
+	};
+}
+
+/** The time of the last thing recorded on a task: a change opening or ending, a review, a check run. */
+export function lastActivityOf(task: Task) {
+	const times = [task.createdAt, ...task.slices.flatMap((s) => [s.openedAt, s.endedAt, s.gate?.at, ...s.reviews.map((r) => r.at)])];
+	return times.filter((t): t is string => typeof t === "string" && !Number.isNaN(Date.parse(t))).sort().pop() ?? task.createdAt;
+}
+
 /** Longest a claim may list, so one change can't take a whole repo by accident. */
 export const MAX_CLAIM_PATHS = 50;
 
@@ -94,6 +113,17 @@ export function changeId(title: string) {
 		.replace(/-+$/, "");
 	const suffix = crypto.randomUUID().replace(/-/g, "").slice(0, 4);
 	return `${words || "change"}-${suffix}`;
+}
+
+/**
+ * The name an agent gives itself on a change, for people to tell agents apart
+ * (who opened it, verified, is `openedBy`). Undefined when none is given;
+ * refused unless it's a short name of letters, digits, dots, dashes or underscores.
+ */
+export function agentName(name: unknown): string | undefined {
+	if (name === undefined || name === null || name === "") return undefined;
+	if (typeof name !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,39}$/.test(name)) fail(400, "agent must be a short name: letters, digits, dots, dashes or underscores, at most 40");
+	return name;
 }
 
 /** The open task's id for a repo: stable, so every agent finds the same one. 8 hex characters, like any task id. */

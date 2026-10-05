@@ -49,7 +49,7 @@ function FileBlock({ file, outside }: { file: FileDiff; outside: boolean }) {
 	);
 }
 
-/** The Files changed tab: the line-by-line diff when the server provides it, else the list of files. */
+/** The Files changed tab: the line-by-line diff, or the list of files while it loads or if it can't. */
 export function FilesChanged({ change, diff, onRetry }: { change: Change; diff?: DiffState; onRetry?(): void }) {
 	const outside = new Set(change.outOfLane ?? []);
 	const parsed = diff?.diff ? parseUnifiedDiff(diff.diff.unified) : [];
@@ -89,7 +89,7 @@ export function FilesChanged({ change, diff, onRetry }: { change: Change; diff?:
 
 			{diff?.loading ? (
 				<p className="muted" role="status">
-					Loading the changes under review…
+					Loading the changes…
 				</p>
 			) : null}
 			{diff?.error ? (
@@ -129,11 +129,6 @@ export function FilesChanged({ change, diff, onRetry }: { change: Change; diff?:
 			{!diff?.diff ? (
 				files.length ? (
 					<div className="box">
-						{!diff ? (
-							<p className="box__header muted files-changed__note">
-								The line-by-line diff is shown here while a change is waiting on you. These are the files it changes.
-							</p>
-						) : null}
 						<ul className="files-changed__list">
 							{files.map((path) => (
 								<li key={path}>

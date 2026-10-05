@@ -59,7 +59,7 @@ function words(html: string) {
 describe("dashboard copy", () => {
 	it("uses people's words on every page", () => {
 		const pages = [
-			<RepoList rows={buildRepoRows([task], [{ repo: "docs-site", since: ago(1) }], { "docs-site": freeSnapshot })} loaded allRepos={[]} opening={false} onOpenRepo={() => undefined} />,
+			<RepoList rows={buildRepoRows({ tasks: [{ id: task.id, repo: task.repo, createdAt: task.createdAt, elected: true, summary: { open: 2, needsYou: 1, countedAt: ago(1) } }], free: [{ repo: "docs-site", since: ago(1), summary: { open: 1, violations: 1, countedAt: ago(1) } }] })} loaded allRepos={[]} opening={false} onOpenRepo={() => undefined} />,
 			<RepoList rows={[]} loaded allRepos={[]} opening={false} onOpenRepo={() => undefined} />,
 			...(["open", "merged", "abandoned"] as const).map((state) => <ElectedRepoPage repo="my-app" base="repos" view={{ kind: "repo", tab: "changes", state }} task={task} live={live} history={history} api={api} onChanged={() => undefined} />),
 			...(["activity", "settings"] as const).map((tab) => <ElectedRepoPage repo="my-app" base="repos" view={{ kind: "repo", tab, state: "open" }} task={task} live={live} history={history} api={api} onChanged={() => undefined} />),

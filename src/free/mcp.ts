@@ -44,6 +44,8 @@ export interface FreeContext {
 	requestReview?: (input: { repo: string; change: string; roles: string[]; summary?: string; mergeWhenApproved?: boolean }) => Promise<{ head: string; reviewers: string[] }>;
 	/** What Blueprint's hosted agents on a change are doing: its builder, and the reviewers of its head. */
 	agentStatus?: (repo: string, change: string, head: string | null, roles: string[]) => Promise<HostedStatus>;
+	/** Updates the repo's summary for the dashboard's list of repos (a hint; Git is what counts). */
+	summarize?: (repo: string, patch: { open?: number; needsYou?: number; merged?: number; mergedBy?: number; violations?: number; lastActivity?: string; countedAt?: string }) => Promise<void>;
 	/** Starts Blueprint's hosted builder on a claimed change. */
 	startBuilder?: (input: { repo: string; change: string }) => Promise<{ change: string; builder: string }>;
 }
@@ -171,7 +173,9 @@ async function runAudit(ctx: FreeContext, repo: string) {
 /** The audit of a coordinator-free repo, for the dashboard: it replays every record, so it's read apart from the snapshot. */
 export async function freeAudit(ctx: FreeContext, repo: string) {
 	const { merges, violations } = await runAudit(ctx, repo);
-	return { merges, open: violations.filter((v) => !v.resolvedBy).length, violations };
+	const open = violations.filter((v) => !v.resolvedBy).length;
+	await ctx.summarize?.(repo, { merged: merges, violations: open }).catch(() => undefined);
+	return { merges, open, violations };
 }
 
 /** What the dashboard shows for a repo in coordinator-free mode, read from the records' tips (the audit is apart, in freeAudit). */
@@ -187,6 +191,7 @@ export async function freeSnapshot(ctx: FreeContext, repo: string) {
 			return { ...c, head, approval, ...(hosted ? { hosted } : {}) };
 		}),
 	);
+	await ctx.summarize?.(repo, { open: claims.length, needsYou: claims.filter((c) => c.hosted?.builder?.status === "failed").length, countedAt: new Date().toISOString() }).catch(() => undefined);
 	return {
 		repo,
 		policy: state.policy ?? DEFAULT_POLICY,
@@ -202,8 +207,33 @@ export async function freeSnapshot(ctx: FreeContext, repo: string) {
 	};
 }
 
-/** Run one coordinator-free tool. */
+// Tools that write records, after which the repo's summary notes the activity.
+const WRITES = new Set(["free_claim", "free_release", "free_merge", "free_vote", "free_build", "free_revert"]);
+const noted = new Map<string, number>();
+
+/** Run one coordinator-free tool, and note what it wrote in the repo's summary. */
 export async function callFreeTool(name: string, args: Args, ctx: FreeContext): Promise<unknown> {
+	const result = await runFreeTool(name, args, ctx);
+	if (ctx.summarize && WRITES.has(name) && (result as { ok?: boolean } | null)?.ok !== false) {
+		const repo = requiredString(args, "repo");
+		const merged = name === "free_merge";
+		// Activity alone is noted at most every 10 seconds per repo, so a busy repo doesn't queue on the index.
+		if (merged || Date.now() - (noted.get(repo) ?? 0) > 10_000) {
+			noted.set(repo, Date.now());
+			await ctx.summarize(repo, { lastActivity: new Date().toISOString(), ...(merged ? { mergedBy: 1 } : {}) }).catch((err) => console.error(`summarizing ${repo} failed`, String(err)));
+		}
+	}
+	return result;
+}
+
+/** How many claims are in force on a repo, read from its records alone: the repo list's count. Null before the mode starts. */
+export async function freeOpenCount(ctx: FreeContext, repo: string) {
+	const state = (await recordLog<Registry>(ctx, repo, claimsRef(repo)).read())?.commit.state;
+	if (!state?.baseline) return null;
+	return (await storeFor(ctx, repo, state).read()).claims.length;
+}
+
+async function runFreeTool(name: string, args: Args, ctx: FreeContext): Promise<unknown> {
 	const repo = requiredString(args, "repo");
 	const write = () => ctx.remote(repo, "write");
 	const claims = recordLog<Registry>(ctx, repo, claimsRef(repo));

@@ -4,8 +4,10 @@
 //
 // <repo>: open mode, run by the elected coordinator. Blueprint's own reviewer
 // agents review the finished changes, so their verdicts and evidence are real
-// (this spends a few model calls). Two are sent back and revised; --only
-// revise does that step again on an existing repo.
+// (this spends a few model calls). Two are sent back and revised, and one
+// sent back is resubmitted unchanged, so it waits on a person; --only revise
+// does that step again on an existing repo. Claims last a day (the most a
+// repo allows), so seed on the day you show it.
 // <repo>-free: coordinator-free mode. Agents with their own keys claim, push
 // to their forks, vote and merge through the toolkit; no model calls.
 //
@@ -53,14 +55,14 @@ const say = (...line) => console.log(...line);
 const work = await mkdtemp(join(tmpdir(), "seed-demo-"));
 
 /** Open a change, commit `edit` to its fork, push and report it. */
-async function change(taskId, { title, intent, paths, edit }) {
-	const opened = await tool("open_change", { task_id: taskId, title, intent, paths });
+async function change(taskId, { title, intent, paths, agent, edit }) {
+	const opened = await tool("open_change", { task_id: taskId, title, intent, paths, agent });
 	const dir = join(work, opened.change_id);
 	const onAuth = () => ({ username: "x", password: opened.token.replace(/\?.*$/, "") });
 	await git.clone({ fs, http, dir, url: opened.fork, depth: 1, singleBranch: true, onAuth });
 	const files = await edit(dir);
 	for (const [path, action] of Object.entries(files)) await (action === "remove" ? git.remove({ fs, dir, filepath: path }) : git.add({ fs, dir, filepath: path }));
-	await git.commit({ fs, dir, message: title, author: { name: "demo agent", email: "agent@example.com" } });
+	await git.commit({ fs, dir, message: title, author: { name: agent, email: `${agent}@example.com` } });
 	await git.push({ fs, http, dir, url: opened.fork, ref: "main", onAuth });
 	await tool("report_push", { task_id: taskId, change_id: opened.change_id });
 	say(`  ${title}: ${opened.change_id}`);
@@ -76,6 +78,8 @@ const write = (dir, path, text) => {
 async function seedOpen() {
 	say(`open mode: ${REPO} on ${BASE}`);
 	await api("POST", "/repos/import", { url: "https://github.com/octocat/Spoon-Knife", name: REPO, branch: "main" });
+	// Claims last a day without activity (the most allowed), so the demo holds still for a while.
+	await api("POST", `/repos/${REPO}/open`, { leaseMinutes: 1440 });
 	const { task_id: taskId } = await tool("join_repo", { repo: REPO });
 	say(`task ${taskId}`);
 
@@ -83,18 +87,21 @@ async function seedOpen() {
 		title: "Add a contributing guide",
 		intent: "Explain how to fork the repo and open a pull request.",
 		paths: ["CONTRIBUTING.md"],
+		agent: "docs-agent",
 		edit: (dir) => write(dir, "CONTRIBUTING.md", "# Contributing\n\n1. Fork this repository.\n2. Make your change on a branch.\n3. Open a pull request describing what you changed and why.\n"),
 	});
 	const readme = await change(taskId, {
 		title: "Clarify the README",
 		intent: "Say what the repo is for in the README's first line.",
 		paths: ["README.md"],
+		agent: "readme-agent",
 		edit: (dir) => write(dir, "README.md", "### Well hello there!\n\nThis repository is meant to provide an example for *forking* a repository on GitHub.\n\nCreating a *fork* is producing a personal copy of someone else's project. Forks act as a sort of bridge between the original repository and your personal copy.\n"),
 	});
 	const homepage = await change(taskId, {
 		title: "Clean up the site",
 		intent: "Tidy the site files.",
 		paths: ["index.html"],
+		agent: "site-agent",
 		edit: async (dir) => {
 			fs.rmSync(join(dir, "index.html"));
 			return { "index.html": "remove" };
@@ -104,15 +111,17 @@ async function seedOpen() {
 		title: "Center the page title",
 		intent: "Center the heading on the page.",
 		paths: ["styles.css"],
+		agent: "style-agent",
 		edit: (dir) => write(dir, "styles.css", "* {\n  margin: 0;\n  padding: 0;\n}\n\nh1 {\n  text-align: center;\n}\n"),
 	});
 	await change(taskId, {
 		title: "Add a dark mode",
 		intent: "Respect the reader's dark-mode preference.",
 		paths: ["dark.css"],
+		agent: "theme-agent",
 		edit: (dir) => write(dir, "dark.css", "@media (prefers-color-scheme: dark) {\n  body { background: #111; color: #eee; }\n}\n"),
 	});
-	const experiment = await tool("open_change", { task_id: taskId, title: "Try a new layout", intent: "An experiment with the page layout.", paths: ["layout/"] });
+	const experiment = await tool("open_change", { task_id: taskId, title: "Try a new layout", intent: "An experiment with the page layout.", paths: ["layout/"], agent: "layout-agent" });
 	await tool("abandon_change", { task_id: taskId, change_id: experiment.change_id, reason: "Not needed after all." });
 	say(`  Try a new layout: ${experiment.change_id} (abandoned)`);
 
@@ -136,7 +145,7 @@ const REVISIONS = {
 	"Add a contributing guide": {
 		message: "Explain each contributing step",
 		summary: "Each step now says how to do it: fork on GitHub, clone the fork, branch, commit, push, and open the pull request against octocat/Spoon-Knife.",
-		edit: (dir) => write(dir, "CONTRIBUTING.md", "# Contributing\n\n1. **Fork** this repository: click *Fork* at the top right of its GitHub page. You now have your own copy.\n2. **Clone** your fork: `git clone https://github.com/<you>/Spoon-Knife.git` and `cd Spoon-Knife`.\n3. **Branch**: `git switch -c my-change`.\n4. **Change and commit**: edit the files, then `git add -A` and `git commit -m \"Describe the change\"`.\n5. **Push** the branch to your fork: `git push -u origin my-change`.\n6. **Open a pull request**: on your fork's GitHub page, click *Compare & pull request*, check that the base is `octocat/Spoon-Knife` `main`, and describe what you changed and why.\n"),
+		edit: (dir) => write(dir, "CONTRIBUTING.md", "# Contributing\n\n1. **Fork** this repository: click *Fork* at the top right of its GitHub page. You now have your own copy.\n2. **Clone** your fork: `git clone https://github.com/<you>/Spoon-Knife.git` and `cd Spoon-Knife`.\n3. **Branch**: `git switch -c my-change`.\n4. **Change and commit**: edit the files, stage only those you changed (`git add <file>`), check what you staged with `git diff --cached`, then `git commit -m \"Describe the change\"`.\n5. **Push** the branch to your fork: `git push -u origin my-change`.\n6. **Open a pull request**: on your fork's GitHub page, click *Compare & pull request*, check that the base is `octocat/Spoon-Knife` `main`, and describe what you changed and why.\n"),
 	},
 	"Clarify the README": {
 		message: "State the repo's purpose in the first line",
@@ -145,15 +154,26 @@ const REVISIONS = {
 	},
 };
 
+// The agent of this change insists instead of revising, so it waits on a person.
+const INSIST = "Clean up the site";
+
 /** Wait for the reviewers' verdicts, then revise the changes sent back that have a revision. */
 async function reviseOpen(taskId) {
 	say("  waiting for the reviewers' verdicts…");
 	for (const deadline = Date.now() + 15 * 60_000; ; ) {
 		const { slices } = await api("GET", `/tasks/${taskId}`).then((t) => t.task ?? t);
-		const pending = slices.filter((s) => REVISIONS[s.title] && s.status === "building" && (!s.reviewHead || s.reviewHead !== s.sentBackFor));
-		const sentBack = slices.filter((s) => REVISIONS[s.title] && s.status === "building" && s.reviewHead && s.reviewHead === s.sentBackFor);
+		const watched = (s) => (REVISIONS[s.title] || s.title === INSIST) && s.status === "building" && !s.attention;
+		const pending = slices.filter((s) => watched(s) && (!s.reviewHead || s.reviewHead !== s.sentBackFor));
+		const sentBack = slices.filter((s) => watched(s) && s.reviewHead && s.reviewHead === s.sentBackFor);
 		if (!pending.length || Date.now() > deadline) {
-			for (const s of sentBack) await revise(taskId, s.id, REVISIONS[s.title]);
+			for (const s of sentBack) {
+				if (REVISIONS[s.title]) await revise(taskId, s.id, REVISIONS[s.title]);
+				else {
+					// Sent back, it asks again without a new commit: a person decides.
+					const again = await tool("finish_change", { task_id: taskId, change_id: s.id, summary: "Removing index.html is the tidy-up intended: the site moves elsewhere." });
+					say(`  resubmitted ${s.id} unchanged: ${again.status}`);
+				}
+			}
 			if (pending.length) say(`  gave up waiting on ${pending.map((s) => s.id).join(", ")}`);
 			break;
 		}
@@ -169,7 +189,7 @@ async function revise(taskId, changeId, { message, summary, edit }) {
 	const onAuth = () => ({ username: "x", password: token.replace(/\?.*$/, "") });
 	await git.clone({ fs, http, dir, url: fork, depth: 1, singleBranch: true, onAuth });
 	for (const path of Object.keys(await edit(dir))) await git.add({ fs, dir, filepath: path });
-	await git.commit({ fs, dir, message, author: { name: "demo agent", email: "agent@example.com" } });
+	await git.commit({ fs, dir, message, author: { name: "demo-agent", email: "demo-agent@example.com" } });
 	await git.push({ fs, http, dir, url: fork, ref: "main", onAuth });
 	await tool("report_push", { task_id: taskId, change_id: changeId });
 	const finished = await tool("finish_change", { task_id: taskId, change_id: changeId, summary });

@@ -41,6 +41,7 @@ export function freeContextFor(env: Env, by: string | undefined, caller: { agent
 	return {
 		...caller,
 		register: async (repo) => env.TASK_INDEX.getByName("all").addFree(repo),
+		summarize: (repo, patch) => env.TASK_INDEX.getByName("all").summarize(`free:${repo}`, patch),
 		requestReview: (input) => startFreeReviewers(env, input),
 		startBuilder: (input) => startFreeBuilder(env, input),
 		stamper: async (agent) => (env.FREE_STAMP_KEY && by ? makeStamper(env.FREE_STAMP_KEY, agent ? `${by}/${agent}` : by) : undefined),

@@ -18,6 +18,28 @@ export interface TaskRef {
 	leader?: { name: string | null; term: number };
 }
 
+/**
+ * What the dashboard's list of repos shows for one, kept here so the list is
+ * one read rather than every task's state. Written by whoever decides (an
+ * elected task's leader after each commit; the coordinator-free toolkit after
+ * claims, releases and merges, and whenever a repo's counts are read), so it
+ * is a hint: the log and records in Git are what count.
+ */
+export interface RepoSummary {
+	/** Changes in progress (claims in force, coordinator-free). */
+	open?: number;
+	/** Changes waiting on a person. */
+	needsYou?: number;
+	merged?: number;
+	abandoned?: number;
+	/** Open audit violations (coordinator-free). */
+	violations?: number;
+	/** The last decision or record written. */
+	lastActivity?: string;
+	/** When the counts were last taken from the state itself. */
+	countedAt?: string;
+}
+
 export class TaskIndex extends DurableObject<Env> {
 	async add(ref: TaskRef) {
 		// Keys sort by creation time, so a reverse list is newest first.
@@ -61,10 +83,32 @@ export class TaskIndex extends DurableObject<Env> {
 		return [...entries.values()].filter((ref) => ref.repo === repo);
 	}
 
+	/** Update the summary of a task (`task:<id>`) or coordinator-free repo (`free:<repo>`). `mergedBy` adds to the merged count. */
+	async summarize(key: string, patch: RepoSummary & { mergedBy?: number }) {
+		const { mergedBy, ...rest } = patch;
+		const current = (await this.ctx.storage.get<RepoSummary>(`summary:${key}`)) ?? {};
+		const next: RepoSummary = { ...current, ...rest };
+		if (mergedBy) next.merged = (next.merged ?? 0) + mergedBy;
+		await this.ctx.storage.put(`summary:${key}`, next);
+	}
+
+	/** Every listed task and coordinator-free repo, with its summary if it has one: the dashboard's list of repos. */
+	async summaries(limit = 200) {
+		const [tasks, free, summaries] = await Promise.all([
+			this.ctx.storage.list<TaskRef>({ prefix: "task:", reverse: true, limit }),
+			this.listFree(),
+			this.ctx.storage.list<RepoSummary>({ prefix: "summary:" }),
+		]);
+		return {
+			tasks: [...tasks.values()].map(({ leader: _leader, ...ref }) => ({ ...ref, summary: summaries.get(`summary:task:${ref.id}`) ?? null })),
+			free: free.map((repo) => ({ ...repo, summary: summaries.get(`summary:free:${repo.repo}`) ?? null })),
+		};
+	}
+
 	/** Forget a task; returns whether it was listed. */
 	async remove(id: string) {
 		const keys = [...(await this.ctx.storage.list({ prefix: "task:" })).keys()].filter((key) => key.endsWith(`:${id}`));
-		await this.ctx.storage.delete(keys);
+		await this.ctx.storage.delete([...keys, `summary:task:${id}`]);
 		return keys.length > 0;
 	}
 }

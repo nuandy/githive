@@ -1,6 +1,6 @@
 import type { AgentState, HistoryEntry } from "../api";
 import { currentGate, type Tone } from "./changeStatus";
-import { identityName } from "./agent";
+import { agentLabel, identityName } from "./agent";
 import { humanizeText, mentionsChange } from "./humanize";
 import { timeOf, type Change, type Review } from "./model";
 
@@ -189,6 +189,18 @@ export interface TimelineSources {
 	ids?: string[];
 }
 
+/**
+ * On the change's own page a log line names who acted, not the change:
+ * "add-stats pushed …" reads "docs-agent pushed …", and "add-stats merged into
+ * main" reads "Merged into main".
+ */
+export function relabelForChange(text: string, id: string, agent: string): string {
+	const escaped = id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+	if (new RegExp(`^${escaped} (pushed|ready for review)\\b`).test(text)) return agent + text.slice(id.length);
+	const rest = text.match(new RegExp(`^(?:Change )?${escaped}:? ([\\s\\S]*)$`));
+	return rest ? rest[1].charAt(0).toUpperCase() + rest[1].slice(1) : text;
+}
+
 export function buildTimeline(change: Change, sources: TimelineSources = {}): TimelineItem[] {
 	const ids = sources.ids ?? [change.id];
 	const record = recordItems(change, ids);
@@ -216,7 +228,7 @@ export function buildTimeline(change: Change, sources: TimelineSources = {}): Ti
 			kind,
 			at: entry.at,
 			tone,
-			text: headline,
+			text: relabelForChange(headline, change.id, agentLabel(change)),
 			body: rest.join("\n").trim() || undefined,
 			commit: entry.commit || undefined,
 		});

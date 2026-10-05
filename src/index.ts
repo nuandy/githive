@@ -9,9 +9,9 @@ import { PEER_LEASE_MS, openLog, type Peer } from "./peer";
 import { fail, requiredPaths, requiredString, statusOf } from "./errors";
 import { retryTransient } from "./retry";
 import type { Limits, Review, ReviewPolicy, Task } from "./types";
-import { openTaskId } from "./open-mode";
+import { lastActivityOf, openTaskId, taskSummary } from "./open-mode";
 import { handleMcpBody, type McpContext } from "./mcp";
-import { type FreeContext, freeAudit, freeSnapshot } from "./free/mcp";
+import { type FreeContext, freeAudit, freeOpenCount, freeSnapshot } from "./free/mcp";
 import type { Registry } from "./free/claims";
 import { Workspace } from "./git";
 import { freeAgentName, freeContextFor } from "./free/env";
@@ -67,6 +67,7 @@ app.get("/api", (c) =>
 			"GET  /            dashboard",
 			"GET  /repos",
 			"GET  /tasks",
+			"GET  /summaries   (every repo with its counts, for the dashboard's list)",
 			"GET  /tasks/:id/live",
 			"POST /repos/import {url, name, branch?}",
 			"GET  /tasks/:id",
@@ -142,7 +143,7 @@ app.post("/repos/:repo/open", async (c) => {
 // Arguments are checked as the MCP tools check them, so both front doors refuse the same calls.
 app.post("/tasks/:id/changes", async (c) => {
 	const body = await jsonArgs(c);
-	const input = { title: requiredString(body, "title"), intent: requiredString(body, "intent"), owns: requiredPaths(body, "owns"), hosted: body.hosted as boolean | undefined };
+	const input = { title: requiredString(body, "title"), intent: requiredString(body, "intent"), owns: requiredPaths(body, "owns"), hosted: body.hosted as boolean | undefined, agent: body.agent as string | undefined };
 	return c.json(await coordinator(c.env, c.req.param("id")).openChange(input, c.get("accessIdentity")), 201);
 });
 
@@ -192,6 +193,36 @@ app.get("/tasks", async (c) => {
 	const refs = await taskIndex(c.env).list(Number(c.req.query("limit") ?? 50));
 	const tasks = await Promise.all(refs.map((r) => coordinator(c.env, r.id).state().catch(() => null)));
 	return c.json(tasks.filter((t) => t !== null));
+});
+
+// The dashboard's list of repos in one read: every task and coordinator-free
+// repo with its summary. Summaries missing or older than the repo's last
+// activity are counted again in the background, a few per request.
+app.get("/summaries", async (c) => {
+	const index = taskIndex(c.env);
+	const listed = await index.summaries();
+	const now = new Date().toISOString();
+	const tasks = listed.tasks.filter((t) => !t.summary?.countedAt).slice(0, 5);
+	// The most recently active first: those are the rows people look at.
+	const free = listed.free
+		.filter((r) => !r.summary?.countedAt || (r.summary.lastActivity ?? "") > r.summary.countedAt)
+		.sort((a, b) => (b.summary?.lastActivity ?? b.since).localeCompare(a.summary?.lastActivity ?? a.since))
+		.slice(0, 3);
+	const ctx = freeContext(c.env, c.get("accessIdentity"));
+	c.executionCtx.waitUntil(
+		Promise.allSettled([
+			...tasks.map(async (t) => {
+				// A task whose state can't be read is marked counted, so it isn't tried on every request.
+				const task = (await coordinator(c.env, t.id).state().catch(() => null)) as unknown as Task | null;
+				await index.summarize(`task:${t.id}`, task ? taskSummary(task, now, lastActivityOf(task)) : { countedAt: now });
+			}),
+			...free.map(async (r) => {
+				const open = await freeOpenCount(ctx, r.repo).catch(() => null);
+				await index.summarize(`free:${r.repo}`, open === null ? { countedAt: now } : { open, countedAt: now });
+			}),
+		]),
+	);
+	return c.json(listed);
 });
 
 // Project repos, without task forks (<taskId>--...), for the dashboard's "new task" form.

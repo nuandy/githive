@@ -25,6 +25,6 @@ export function identityName(raw: string | undefined | null): string | undefined
 }
 
 /** Who a change belongs to, as the change list and page show it. */
-export function agentLabel(change: Pick<Change, "external" | "openedBy">): string {
-	return identityName(change.openedBy) ?? (change.external === true ? "external agent" : "Blueprint builder");
+export function agentLabel(change: Pick<Change, "external" | "openedBy" | "agent">): string {
+	return change.agent?.trim() || identityName(change.openedBy) || (change.external === true ? "external agent" : "Blueprint builder");
 }

@@ -36,13 +36,10 @@ function message(error: unknown) {
 	return error instanceof Error ? error.message : String(error);
 }
 
-/**
- * The diff of the commit under review. The server serves it while a change
- * needs a person (that's when someone must judge the code), so it is only
- * requested then.
- */
+/** The change's diff: the commit under review, or before review its latest push. */
 function useReviewDiff(task: Task, change: Change, api: ChangeActionsApi) {
-	const key = change.attention != null && change.reviewHead && change.status === "building" ? JSON.stringify([task.id, change.id, change.reviewHead, change.mergeBase, change.attention]) : null;
+	const head = change.reviewHead ?? change.head;
+	const key = head ? JSON.stringify([task.id, change.id, head, change.mergeBase]) : null;
 	const [state, setState] = useState<{ key: string; value: DiffState } | null>(null);
 	const [retry, setRetry] = useState(0);
 	useEffect(() => {
@@ -211,7 +208,7 @@ export function ChangePage({ task, change, agent, history, repo, base, tab, api,
 							<Description change={change} />
 							{history === undefined ? <p className="muted change-layout__loading">Loading history…</p> : null}
 							<Timeline items={timeline.filter((item) => item.kind !== "opened")} ids={ids} link={link} />
-							<ChangeActions task={task} change={change} conflicts={conflicts} repo={repo} base={base} diffStatus={diff?.diff ? "loaded" : diff?.error ? "failed" : "loading"} api={api} onChanged={onChanged} />
+							<ChangeActions task={task} change={change} conflicts={conflicts} repo={repo} base={base} diffStatus={diff?.diff && diff.diff.head === change.reviewHead ? "loaded" : diff?.error ? "failed" : "loading"} api={api} onChanged={onChanged} />
 						</div>
 						<ChangeSidebar task={task} change={change} agent={agent} repo={repo} base={base} />
 					</div>

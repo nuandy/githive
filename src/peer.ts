@@ -3,7 +3,7 @@ import { Coordinator } from "./coordinator";
 import { statusOf } from "./errors";
 import { type CasLog, campaign, Deposed, type ElectionRefs, type Leader } from "./election";
 import { GitCasLog, cachedRemote, leaseRef } from "./election-git";
-import { holdsClaim, nextLeaseCheck } from "./open-mode";
+import { holdsClaim, nextLeaseCheck, taskSummary } from "./open-mode";
 import type { LedgerEntry } from "./ledger";
 import type { Task } from "./types";
 
@@ -324,8 +324,27 @@ export class Peer extends Coordinator {
 		// A step that saved nothing and decided nothing (a refusal, a read) has nothing to commit.
 		if (!leader?.leading || !this.working || (!saved && !entries.length)) return { durable: Promise.resolve() };
 		const state = structuredClone(this.working);
-		const durable = leader.decide(() => ({ state, entries, result: undefined })).then(() => this.resignIfDone(leader, state));
+		const durable = leader.decide(() => ({ state, entries, result: undefined })).then(async () => {
+			await this.summarize(state);
+			await this.resignIfDone(leader, state);
+		});
 		return { durable };
+	}
+
+	private summarized = "";
+
+	/** Keep the task's summary in the index current, for the dashboard's repo list. Advice only: a failure is logged, not thrown. */
+	private async summarize(state: Task) {
+		const { lastActivity, countedAt, ...counts } = taskSummary(state);
+		const key = JSON.stringify(counts);
+		// The time moves with every decision; the counts less often. Write when they change, or a minute on.
+		if (key === this.summarized.split("|")[0] && Date.now() - Number(this.summarized.split("|")[1]) < 60_000) return;
+		try {
+			await this.env.TASK_INDEX.getByName("all").summarize(`task:${state.id}`, { ...counts, lastActivity, countedAt });
+			this.summarized = `${key}|${Date.now()}`;
+		} catch (err) {
+			console.error(`summarizing ${state.id} in the task index failed`, statusOf(err).message);
+		}
 	}
 
 	/**

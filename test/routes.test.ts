@@ -221,3 +221,29 @@ describe("open-mode change routes", () => {
 		expect(coordinator.abandonChange).toHaveBeenCalledWith("c1", "done elsewhere", { kind: "service", value: "token-1" });
 	});
 });
+
+describe("the dashboard's list of repos", () => {
+	it("answers from the index, and counts a task with no summary yet in the background", async () => {
+		const { env, coordinator, index } = fakeEnv();
+		const counted = { open: 1, merged: 2, countedAt: "2026-10-06T10:00:00.000Z", lastActivity: "2026-10-06T09:00:00.000Z" };
+		Object.assign(index, {
+			summaries: vi.fn(async () => ({
+				tasks: [{ id: "t1", repo: "a", goal: "", createdAt: "2026-10-01T00:00:00.000Z", summary: counted }, { id: "t2", repo: "b", goal: "", createdAt: "2026-10-01T00:00:00.000Z", summary: null }],
+				free: [{ repo: "c", since: "2026-10-01T00:00:00.000Z", summary: { open: 3, countedAt: "2026-10-06T10:00:00.000Z", lastActivity: "2026-10-06T09:00:00.000Z" } }],
+			})),
+			summarize: vi.fn(async () => {}),
+		});
+		const reviewed = { at: "2026-10-05T12:00:00.000Z" };
+		Object.assign(coordinator, {
+			state: vi.fn(async () => ({ id: "t2", createdAt: "2026-10-01T00:00:00.000Z", slices: [{ status: "integrated", reviews: [reviewed] }, { status: "building", attention: "stuck", reviews: [] }] })),
+		});
+		const waits: Promise<unknown>[] = [];
+		const response = await worker.fetch(new Request("https://blueprint.test/summaries"), env, { waitUntil: (p: Promise<unknown>) => void waits.push(p) } as never);
+		expect(((await response.json()) as { tasks: unknown[] }).tasks).toHaveLength(2);
+		await Promise.all(waits);
+		// Only t2 lacked counts; the free repo's are newer than its last activity.
+		expect((index as unknown as { summarize: ReturnType<typeof vi.fn> }).summarize.mock.calls).toEqual([
+			["task:t2", { open: 1, needsYou: 1, merged: 1, abandoned: 0, lastActivity: reviewed.at, countedAt: expect.any(String) }],
+		]);
+	});
+});

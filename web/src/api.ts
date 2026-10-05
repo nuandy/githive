@@ -2,6 +2,7 @@ import type { Task } from "../../src/types";
 import type { LaneChangeRequest } from "../../src/lane-change-contract";
 
 export type { Task };
+import type { Summaries } from "./lib/repos";
 
 /** Unified, read-only Git diff pinned to the commits used to generate it. */
 export interface UnifiedCodeDiff {
@@ -280,6 +281,8 @@ export const api = {
 	},
 	live: async (id: string) => normalizeLive(await call<unknown>("GET", `/tasks/${encodeURIComponent(id)}/live`)),
 	repos: () => call<{ name: string }[]>("GET", "/repos"),
+	/** Every repo with its counts, for the Repositories list (one read, kept by the server). */
+	summaries: () => call<Summaries>("GET", "/summaries"),
 	freeRepos: () => call<{ repo: string; since: string }[]>("GET", "/free"),
 	freeRepo: (repo: string) => call<FreeSnapshot>("GET", `/free/${encodeURIComponent(repo)}`),
 	freeAudit: (repo: string) => call<FreeAudit>("GET", `/free/${encodeURIComponent(repo)}/audit`),

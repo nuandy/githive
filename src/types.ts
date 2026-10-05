@@ -34,6 +34,8 @@ export interface Slice extends SliceSpec {
 	/** When the change was opened, and who opened it: an Access identity's label (a person by a hash of their email), or "blueprint-builder" for a hosted change. */
 	openedAt?: string;
 	openedBy?: string;
+	/** The name the agent gave itself (open_change's `agent`), for people; unverified, unlike `openedBy`. */
+	agent?: string;
 	/** When it merged or was abandoned. */
 	endedAt?: string;
 	/** Open mode: what the agent that opened this change set out to do. */
