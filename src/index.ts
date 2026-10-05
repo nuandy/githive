@@ -376,15 +376,18 @@ app.delete("/tasks/:id", async (c) => {
 // Call again until nothing remains.
 const WIPE_CONFIRMATION = "delete every repo in the bench namespace";
 const WIPE_BATCH = 400;
+const WIPE_PARALLEL = 8;
 app.post("/admin/wipe", async (c) => {
 	if ((c.env as unknown as { BENCH_WIPE?: string }).BENCH_WIPE !== "allowed") return c.json({ error: "not available here" }, 404);
-	const { confirm } = await jsonArgs(c);
+	const { confirm, batch: size } = await jsonArgs(c);
 	if (confirm !== WIPE_CONFIRMATION) return c.json({ error: `confirm with "${WIPE_CONFIRMATION}"` }, 400);
 	await taskIndex(c.env).clear();
 	const names = await listRepoNames(c.env.ARTIFACTS);
-	const batch = names.slice(0, WIPE_BATCH);
+	const batch = names.slice(0, typeof size === "number" && size > 0 ? Math.min(size, WIPE_BATCH) : WIPE_BATCH);
 	const failed: string[] = [];
-	for (const name of batch) await retryTransient(() => c.env.ARTIFACTS.delete(name)).catch(() => failed.push(name));
+	// A few at a time: one by one, a batch outlasts the caller's patience.
+	for (let i = 0; i < batch.length; i += WIPE_PARALLEL)
+		await Promise.all(batch.slice(i, i + WIPE_PARALLEL).map((name) => retryTransient(() => c.env.ARTIFACTS.delete(name)).catch(() => failed.push(name))));
 	console.log("bench wipe", JSON.stringify({ deleted: batch.length - failed.length, failed: failed.length, remaining: names.length - batch.length }));
 	return c.json({ deleted: batch.length - failed.length, failed, remaining: names.length - batch.length + failed.length });
 });
