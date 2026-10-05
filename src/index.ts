@@ -11,7 +11,7 @@ import { retryTransient } from "./retry";
 import type { Limits, Review, ReviewPolicy, Task } from "./types";
 import { openTaskId } from "./open-mode";
 import { handleMcpBody, type McpContext } from "./mcp";
-import { type FreeContext, freeSnapshot } from "./free/mcp";
+import { type FreeContext, freeAudit, freeSnapshot } from "./free/mcp";
 import type { Registry } from "./free/claims";
 import { Workspace } from "./git";
 import { freeAgentName, freeContextFor } from "./free/env";
@@ -89,7 +89,8 @@ app.get("/api", (c) =>
 			"DELETE /tasks/:id   (state, forks and dashboard entry; refused while agents work)",
 			"DELETE /repos/:repo (refused while tasks use it)",
 			"GET  /free         (repos in coordinator-free mode)",
-			"GET  /free/:repo   (claims, votes and audit, from Git)",
+			"GET  /free/:repo   (claims and votes, from Git)",
+			"GET  /free/:repo/audit  (replays the records: merges and broken conventions)",
 			"GET  /tasks/:id/history  (every decision in the task's log, oldest first)",
 			"GET  /tasks/:id/leader  (who leads an elected task)",
 			"POST /tasks/:id/leader/crash {forMs?}  (failover test: the leader stops as if its object vanished)",
@@ -164,6 +165,7 @@ const freeContext = (env: Env, identity: AccessIdentity | undefined, agentKey?: 
 // Coordinator-free repos, for the dashboard: which repos, and a snapshot of one read from Git.
 app.get("/free", async (c) => c.json(await taskIndex(c.env).listFree()));
 app.get("/free/:repo", async (c) => c.json(await freeSnapshot(freeContext(c.env, c.get("accessIdentity")), c.req.param("repo"))));
+app.get("/free/:repo/audit", async (c) => c.json(await freeAudit(freeContext(c.env, c.get("accessIdentity")), c.req.param("repo"))));
 app.get("/free/:repo/builders/:change", async (c) => c.json(await c.env.BUILDER.getByName(freeAgentName(c.req.param("repo"), c.req.param("change"))).state()));
 // A hosted reviewer's state, by the commit it reviews (the vote's commit) and its role.
 app.get("/free/:repo/reviewers/:change/:head/:role", async (c) => {

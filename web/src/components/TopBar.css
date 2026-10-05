@@ -1,0 +1,87 @@
+.topbar {
+	position: sticky;
+	top: 0;
+	z-index: 10;
+	background: var(--surface);
+	border-bottom: 1px solid var(--border);
+}
+
+.topbar__inner {
+	display: flex;
+	align-items: center;
+	gap: 14px;
+	max-width: var(--page-width);
+	margin: 0 auto;
+	padding: 10px 24px;
+	min-width: 0;
+}
+
+.topbar__brand {
+	display: inline-flex;
+	align-items: center;
+	gap: 8px;
+	color: var(--text);
+	font-weight: 700;
+	font-size: 15px;
+	flex-shrink: 0;
+}
+
+.topbar__brand:hover {
+	text-decoration: none;
+}
+
+.topbar__crumbs {
+	min-width: 0;
+	overflow: hidden;
+}
+
+.topbar__crumbs ol {
+	display: flex;
+	align-items: center;
+	margin: 0;
+	padding: 0;
+	list-style: none;
+	min-width: 0;
+}
+
+.topbar__crumbs li {
+	display: flex;
+	align-items: center;
+	min-width: 0;
+	white-space: nowrap;
+}
+
+.topbar__crumbs li::before {
+	content: "/";
+	margin: 0 8px;
+	color: var(--border-strong);
+}
+
+.topbar__crumbs li:last-child {
+	overflow: hidden;
+}
+
+.topbar__crumbs li:last-child span {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	font-weight: 600;
+}
+
+.topbar__crumbs a {
+	color: var(--text);
+}
+
+@media (max-width: 560px) {
+	.topbar__inner {
+		padding: 10px 16px;
+		gap: 8px;
+	}
+
+	.topbar__brand span {
+		display: none;
+	}
+
+	.topbar__crumbs li:not(:last-child):not(:nth-last-child(2)) {
+		display: none;
+	}
+}

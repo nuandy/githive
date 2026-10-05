@@ -1,14 +1,12 @@
-import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
+import { createElement } from "react";
 import { describe, expect, it, vi } from "vitest";
 import { api, type Task } from "../src/api";
-import { DashboardSidebar } from "../src/components/DashboardSidebar";
-import { TaskHeader } from "../src/components/TaskHeader";
-import { TaskSettings } from "../src/components/TaskSettings";
+import { RepoSettings } from "../src/components/RepoSettings";
 
 const task = {
 	id: "open-example", repo: "example", goal: "Open changes on example", phase: "building", mode: "open", leaseMinutes: 30,
-	verify: ["npm test"], review: { reviewers: ["tests"], required: 1, vetoes: ["security"] }, slices: [], checks: [], createdAt: "now",
+	verify: ["npm test"], review: { reviewers: ["tests", "security"], required: 1, vetoes: ["security"] }, slices: [], checks: [], createdAt: "now",
 } as unknown as Task;
 
 describe("open-mode dashboard", () => {
@@ -33,25 +31,12 @@ describe("open-mode dashboard", () => {
 		for (const name of ["create", "plan", "approve", "build", "land", "contractFiles", "landingDiff"]) expect(api).not.toHaveProperty(name);
 	});
 
-	it("shows an open task without plan or approval actions, with its merge checks", () => {
-		const header = renderToStaticMarkup(createElement(TaskHeader, { task, busy: false }));
-		expect(header).toContain(">open<");
-		expect(header).not.toMatch(/Plan|Approve/);
-		const settings = renderToStaticMarkup(createElement(TaskSettings, { task }));
+	it("shows a repo's merge checks, review policy and claim expiry, read-only", () => {
+		const settings = renderToStaticMarkup(createElement(RepoSettings, { task }));
 		expect(settings).toContain("npm test");
 		expect(settings).toContain("1 approval required");
 		expect(settings).toContain("security");
-		expect(settings).toContain("30 min");
-	});
-
-	it("offers an open-a-repo form in place of task creation", () => {
-		const html = renderToStaticMarkup(createElement(DashboardSidebar, {
-			tasks: [], repos: [{ name: "example" }], selectedId: null, taskLoading: false, opening: false,
-			onSelect: () => undefined, onOpenRepo: () => undefined,
-		}));
-		expect(html).toContain("Open a repo");
-		expect(html).toContain("Open for agents");
-		expect(html).toContain('<option value="example">');
-		expect(html).not.toMatch(/Create and plan|Goal/);
+		expect(settings).toContain("30 minutes without activity");
+		expect(settings).not.toMatch(/<(input|textarea|select)\b/);
 	});
 });

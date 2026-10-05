@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { GitCasLog } from "../src/election-git";
 import { claim, type Registry } from "../src/free/claims";
-import { FREE_TOOLS, freeSnapshot } from "../src/free/mcp";
+import { FREE_TOOLS, freeAudit, freeSnapshot } from "../src/free/mcp";
 import { TOOLS, handleRpc } from "../src/mcp";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -128,8 +128,10 @@ describe("the coordinator-free MCP tools", () => {
 			// Each claim with where its change stands, and what Blueprint's hosted agents on it are doing.
 			claims: [{ change: "a-1", agent: "agent-a", paths: ["src/a/"], head: null, approval: { approved: false, approvals: 0, required: 2 }, hosted: { builder: { status: "working" } } }],
 			votes: [{ commit: "h1", reviewer: "rev-1", verdict: "approve" }],
-			audit: { merges: 0, open: 0, violations: [] },
 		});
+		// The audit replays every record, so it's read on its own.
+		expect(snapshot).not.toHaveProperty("audit");
+		expect(await freeAudit(ctx().free, "project")).toEqual({ merges: 0, open: 0, violations: [] });
 	});
 
 	it("asks Blueprint's hosted reviewers to review a claimed change, by default the tests role and every veto role", async () => {

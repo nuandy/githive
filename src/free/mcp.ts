@@ -168,12 +168,17 @@ async function runAudit(ctx: FreeContext, repo: string) {
 	return { merges: merges.length, violations };
 }
 
-/** Everything the dashboard shows for a repo in coordinator-free mode, read from Git. */
+/** The audit of a coordinator-free repo, for the dashboard: it replays every record, so it's read apart from the snapshot. */
+export async function freeAudit(ctx: FreeContext, repo: string) {
+	const { merges, violations } = await runAudit(ctx, repo);
+	return { merges, open: violations.filter((v) => !v.resolvedBy).length, violations };
+}
+
+/** What the dashboard shows for a repo in coordinator-free mode, read from the records' tips (the audit is apart, in freeAudit). */
 export async function freeSnapshot(ctx: FreeContext, repo: string) {
 	const [registry, votes] = await Promise.all([recordLog<Registry>(ctx, repo, claimsRef(repo)).read(), recordLog<Votes>(ctx, repo, votesRef(repo)).read()]);
 	const state = registry?.commit.state;
 	if (!state?.baseline) throw new Error(`[404] coordinator-free mode hasn't started on ${repo}`);
-	const { merges, violations } = await runAudit(ctx, repo);
 	const cast = votes?.commit.state.votes ?? [];
 	const counted = await countedVotes(cast, state.stampKey);
 	const claims = await Promise.all(
@@ -194,7 +199,6 @@ export async function freeSnapshot(ctx: FreeContext, repo: string) {
 		claims,
 		/** The latest votes, newest first. */
 		votes: (votes?.commit.state.votes ?? []).slice(-20).reverse(),
-		audit: { merges, open: violations.filter((v) => !v.resolvedBy).length, violations },
 	};
 }
 

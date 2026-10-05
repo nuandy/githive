@@ -1,313 +1,219 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { api, type FreeSnapshot, type Live, type Task } from "./api";
-import { FreeRepoList, FreeRepoView } from "./components/FreeRepoView";
-import {
-	ActivityFeed,
-	CodeDecisions,
-	DashboardSidebar,
-	LaneChangeRequests,
-	MergeAheadMatrix,
-	SliceLanes,
-	TaskDetailBoundary,
-	TaskHeader,
-	TaskSettings,
-} from "./components";
-import { newestTasks } from "./lib/dashboardData";
-import type { DashboardShellApi, DashboardTimerScheduler } from "./dashboard-contract";
+import { api, type FreeSnapshot, type Task } from "./api";
+import { PageBoundary } from "./components/PageBoundary";
+import { RepoList } from "./components/RepoList";
+import { ElectedRepoPage, FreeRepoPage, type RepoView } from "./components/RepoPage";
+import { TopBar, type Crumb } from "./components/TopBar";
+import { usePoll } from "./hooks/usePoll";
+import { claimTitle } from "./lib/freeStatus";
+import { changesOf } from "./lib/model";
+import { buildRepoRows, openTaskId } from "./lib/repos";
+import { href, parseRoute, type Route } from "./lib/routes";
 import "./App.css";
 
-/** The coordinator-free repo a #/free/<repo> address names, if any. */
-export function freeRepoFromHash(hash: string): string | null {
-	const match = /^#\/free\/([^/]+)\/?$/.exec(hash);
-	return match ? decodeURIComponent(match[1]) : null;
+/** Where a route points, ignoring tabs: moving to a different place scrolls to the top; switching tabs doesn't. */
+export function routePlace(route: Route): string {
+	if (route.page === "repo") return `repo:${route.base}:${route.repo}`;
+	if (route.page === "change") return `change:${route.base}:${route.repo}:${route.change}`;
+	return route.page;
 }
 
-export function taskIdFromHash(hash: string): string | null {
-	const match = /^#\/tasks\/([^/]+)\/?$/.exec(hash);
-	if (!match) return null;
-	try {
-		return decodeURIComponent(match[1]);
-	} catch {
-		return null;
-	}
+export function useHashRoute(): Route {
+	const [route, setRoute] = useState<Route>(() => parseRoute(window.location.hash));
+	const place = useRef(routePlace(route));
+	useEffect(() => {
+		const onChange = () => {
+			const next = parseRoute(window.location.hash);
+			const nextPlace = routePlace(next);
+			if (nextPlace !== place.current) window.scrollTo(0, 0);
+			place.current = nextPlace;
+			setRoute(next);
+		};
+		window.addEventListener("hashchange", onChange);
+		return () => window.removeEventListener("hashchange", onChange);
+	}, []);
+	return route;
 }
 
-export const defaultDashboardScheduler: DashboardTimerScheduler = {
-	setInterval: (callback, milliseconds) => window.setInterval(callback, milliseconds),
-	clearInterval: (timer) => window.clearInterval(timer),
-};
-
-export function recordDashboardError(errors: string[], operation: string, error: unknown): string[] {
-	const detail = error instanceof Error ? error.message : String(error);
-	const message = `${operation}: ${detail}`;
-	return errors.includes(message) ? errors : [...errors, message];
+function Loading({ what }: { what: string }) {
+	return (
+		<main className="page" id="main">
+			<p className="muted page__loading" role="status">
+				Loading {what}…
+			</p>
+		</main>
+	);
 }
 
-export function clearDashboardError(errors: string[], operation: string): string[] {
-	return errors.filter((entry) => !entry.startsWith(`${operation}:`));
-}
-
-export function startDashboardPolling(
-	id: string,
-	getSelectedId: () => string | null,
-	shellApi: Pick<DashboardShellApi, "live">,
-	onLive: (result: Live) => void,
-	onError: (error: unknown) => void,
-	scheduler: DashboardTimerScheduler = defaultDashboardScheduler,
-): () => void {
-	let active = true;
-	const poll = async () => {
-		try {
-			const result = await shellApi.live(id);
-			if (active && getSelectedId() === id) onLive(result);
-		} catch (error) {
-			if (active && getSelectedId() === id) onError(error);
-		}
-	};
-	void poll();
-	const timer = scheduler.setInterval(() => void poll(), 3_000);
-	return () => {
-		active = false;
-		scheduler.clearInterval(timer);
-	};
-}
-
-export function startTaskListPolling(fetchTasks: () => void, scheduler: DashboardTimerScheduler = defaultDashboardScheduler): () => void {
-	const timer = scheduler.setInterval(fetchTasks, 10_000);
-	return () => scheduler.clearInterval(timer);
+/** The open task id for `repo`, once computed; null while there is none to look for. */
+function useOpenTaskId(repo: string | null): string | null {
+	const [ids, setIds] = useState<{ repo: string; id: string } | null>(null);
+	useEffect(() => {
+		if (repo === null) return;
+		let active = true;
+		void openTaskId(repo).then((id) => active && setIds({ repo, id }));
+		return () => {
+			active = false;
+		};
+	}, [repo]);
+	return repo !== null && ids?.repo === repo ? ids.id : null;
 }
 
 export function App() {
-	const [tasks, setTasks] = useState<Task[]>([]);
-	const [repos, setRepos] = useState<{ name: string }[]>([]);
-	const [selectedId, setSelectedId] = useState<string | null>(() => taskIdFromHash(window.location.hash));
-	const [selectionEpoch, setSelectionEpoch] = useState(0);
-	const selectionEpochRef = useRef(0);
-	const [live, setLive] = useState<Live | null>(null);
-	const [tasksLoaded, setTasksLoaded] = useState(false);
-	const [reposLoaded, setReposLoaded] = useState(false);
+	const route = useHashRoute();
+	const onRepos = route.page === "repos";
+	const repoName = route.page === "repo" || route.page === "change" ? route.repo : null;
+	const base = route.page === "repo" || route.page === "change" ? route.base : "repos";
+
+	// Every task's state is slow to gather, so only the pages that list tasks poll it.
+	const tasks = usePoll(onRepos || route.page === "task" ? "tasks" : null, api.tasks, 15_000);
+	const free = usePoll("free", api.freeRepos, 10_000);
+	const allRepos = usePoll(onRepos ? "repos" : null, api.repos, 60_000);
+
+	// A repo just opened from the dialog shows at once, before the next list refresh.
+	const [opened, setOpened] = useState<Task | null>(null);
 	const [opening, setOpening] = useState(false);
-	const [busy, setBusy] = useState(false);
-	const [errors, setErrors] = useState<string[]>([]);
-	const [freeRepos, setFreeRepos] = useState<{ repo: string; since: string }[]>([]);
-	const [freeRepo, setFreeRepo] = useState<string | null>(() => freeRepoFromHash(window.location.hash));
-	const [freeSnapshot, setFreeSnapshot] = useState<FreeSnapshot | null>(null);
-	const selectedRef = useRef(selectedId);
-	selectedRef.current = selectedId;
+	const [openError, setOpenError] = useState<string>();
 
-	const reportError = useCallback((operation: string, error: unknown) => {
-		setErrors((current) => recordDashboardError(current, operation, error));
-	}, []);
-	const clearError = useCallback((operation: string) => {
-		setErrors((current) => clearDashboardError(current, operation));
-	}, []);
+	// A repo is coordinator-free if it's listed as such; otherwise its open task has a known id.
+	const isFree = repoName !== null && (base === "free" || !!free.data?.some((repo) => repo.repo === repoName));
+	const openId = useOpenTaskId(repoName !== null && free.loaded && !isFree ? repoName : null);
+	const live = usePoll(openId ? `live:${openId}` : null, () => api.live(openId!), 5_000);
+	const history = usePoll(openId ? `history:${openId}` : null, () => api.history(openId!), 15_000);
+	const snapshot = usePoll(isFree ? `free:${repoName}` : null, () => api.freeRepo(repoName!), 5_000);
+	// The audit replays every record in Git, so it loads on its own and less often.
+	const audit = usePoll(isFree ? `audit:${repoName}` : null, () => api.freeAudit(repoName!), 60_000);
+	const task = openId && live.data?.task.id === openId ? live.data.task : opened && opened.repo === repoName ? opened : undefined;
 
-	const fetchTasks = useCallback(async () => {
-		try {
-			const result = await api.tasks();
-			setTasks(newestTasks(result));
-			setTasksLoaded(true);
-			clearError("Tasks");
-		} catch (error) {
-			reportError("Tasks", error);
-		}
-	}, [clearError, reportError]);
-
-	const fetchRepos = useCallback(async () => {
-		try {
-			setRepos(await api.repos());
-			setReposLoaded(true);
-			clearError("Repositories");
-		} catch (error) {
-			reportError("Repositories", error);
-		}
-	}, [clearError, reportError]);
-
-	const fetchFreeRepos = useCallback(async () => {
-		try {
-			setFreeRepos(await api.freeRepos());
-			clearError("Coordinator-free repos");
-		} catch (error) {
-			reportError("Coordinator-free repos", error);
-		}
-	}, [clearError, reportError]);
-
-	const refresh = useCallback(async () => {
-		await Promise.all([fetchTasks(), fetchRepos(), fetchFreeRepos()]);
-	}, [fetchFreeRepos, fetchRepos, fetchTasks]);
-
-	// A coordinator-free repo's view: refreshed every few seconds while it is open.
+	// Old links named a task: send them to its repo.
 	useEffect(() => {
-		const onHashChange = () => setFreeRepo(freeRepoFromHash(window.location.hash));
-		window.addEventListener("hashchange", onHashChange);
-		return () => window.removeEventListener("hashchange", onHashChange);
-	}, []);
-	useEffect(() => {
-		setFreeSnapshot(null);
-		if (!freeRepo) return;
-		let active = true;
-		const poll = async () => {
+		if (route.page !== "task" || !tasks.data) return;
+		const found = tasks.data.find((t) => t.id === route.taskId);
+		if (found) window.location.replace(href.repo(found.repo));
+	}, [route, tasks.data]);
+
+	const onChanged = useCallback(() => {
+		live.refresh();
+		history.refresh();
+		tasks.refresh();
+	}, [history, live, tasks]);
+
+	const openRepo = useCallback(
+		async (repo: string) => {
+			setOpening(true);
+			setOpenError(undefined);
 			try {
-				const snapshot = await api.freeRepo(freeRepo);
-				if (active) setFreeSnapshot(snapshot);
-				clearError("Coordinator-free repo");
+				const result = await api.openRepo(repo);
+				setOpened(result);
+				tasks.refresh();
+				window.location.hash = href.repo(result.repo);
 			} catch (error) {
-				if (active) reportError("Coordinator-free repo", error);
+				setOpenError(error instanceof Error ? error.message : String(error));
+			} finally {
+				setOpening(false);
 			}
-		};
-		void poll();
-		const timer = setInterval(() => void poll(), 5_000);
-		return () => {
-			active = false;
-			clearInterval(timer);
-		};
-	}, [clearError, freeRepo, reportError]);
+		},
+		[tasks],
+	);
 
-	useEffect(() => {
-		void refresh();
-		return startTaskListPolling(() => void fetchTasks());
-	}, [fetchTasks, refresh]);
+	const view: RepoView | null = route.page === "repo" ? { kind: "repo", tab: route.tab, state: route.state } : route.page === "change" ? { kind: "change", change: route.change, tab: route.tab } : null;
 
-	const changeSelection = useCallback((id: string | null) => {
-		if (selectedRef.current !== id) {
-			const nextEpoch = selectionEpochRef.current + 1;
-			selectionEpochRef.current = nextEpoch;
-			setSelectionEpoch(nextEpoch);
-			selectedRef.current = id;
+	// Breadcrumbs and the window title.
+	const crumbs: Crumb[] = [];
+	let title = "Blueprint";
+	if (repoName !== null) {
+		crumbs.push({ label: "Repositories", href: href.repos() }, { label: repoName, href: href.repo(repoName, "changes", base) });
+		title = `${repoName} · Blueprint`;
+		if (route.page === "change") {
+			const change = task ? changesOf(task).find((c) => c.id === route.change) : undefined;
+			const claim = !task ? snapshot.data?.claims.find((c) => c.change === route.change) : undefined;
+			const label = change?.title || (claim ? claimTitle(claim) : route.change);
+			crumbs.push({ label });
+			title = `${label} · ${repoName} · Blueprint`;
 		}
-		setSelectedId(id);
-	}, []);
-
+	} else if (onRepos) title = "Repositories · Blueprint";
 	useEffect(() => {
-		const onHashChange = () => changeSelection(taskIdFromHash(window.location.hash));
-		window.addEventListener("hashchange", onHashChange);
-		return () => window.removeEventListener("hashchange", onHashChange);
-	}, [changeSelection]);
+		document.title = title;
+	}, [title]);
 
-	const selectTask = useCallback((id: string) => {
-		changeSelection(id);
-		const nextHash = `#/tasks/${encodeURIComponent(id)}`;
-		if (window.location.hash !== nextHash) window.location.hash = nextHash;
-	}, [changeSelection]);
+	const errors = [
+		tasks.error && `Repositories: ${tasks.error}`,
+		free.error && `Coordinator-free repos: ${free.error}`,
+		task && live.error && `Live status: ${live.error}`,
+		snapshot.error && `${repoName}: ${snapshot.error}`,
+	].filter((error): error is string => !!error);
 
-	useEffect(() => {
-		if (!selectedId) {
-			setLive(null);
-			return;
-		}
-		const id = selectedId;
-		return startDashboardPolling(
-			id,
-			() => selectedRef.current,
-			api,
-			(result) => {
-				setLive(result);
-				setTasks((existing) => newestTasks([
-					...existing.filter((task) => task.id !== result.task.id),
-					result.task,
-				]));
-				clearError("Live task");
-			},
-			(error) => reportError("Live task", error),
+	let page;
+	if (route.page === "repos") {
+		page = (
+			<RepoList
+				rows={buildRepoRows(tasks.data ?? [], free.data ?? [])}
+				loaded={tasks.loaded}
+				allRepos={allRepos.data ?? []}
+				opening={opening}
+				openError={openError}
+				onOpenRepo={(repo) => void openRepo(repo)}
+			/>
 		);
-	}, [clearError, selectedId, reportError]);
-
-	const selectedTask = live?.task.id === selectedId
-		? live.task
-		: tasks.find((task) => task.id === selectedId) ?? null;
-	const openRepo = useCallback(async (repo: string) => {
-		setOpening(true);
-		try {
-			const task = await api.openRepo(repo);
-			setTasks((current) => newestTasks([...current.filter((item) => item.id !== task.id), task]));
-			clearError("Open repo");
-			selectTask(task.id);
-			await fetchTasks();
-		} catch (error) {
-			reportError("Open repo", error);
-		} finally {
-			setOpening(false);
+	} else if (repoName !== null && view) {
+		if (task) {
+			page = <ElectedRepoPage repo={repoName} base={base} view={view} task={task} live={live.data} history={history.data ?? (history.error ? null : undefined)} api={api} onChanged={onChanged} />;
+		} else if (isFree && snapshot.data) {
+			page = <FreeRepoPage repo={repoName} base={base} view={view} snapshot={{ ...snapshot.data, audit: audit.data }} />;
+		} else if ((isFree && !snapshot.error) || !free.loaded || (!isFree && !live.loaded)) {
+			page = <Loading what={repoName} />;
+		} else {
+			page = (
+				<main className="page" id="main">
+					<div className="box empty">
+						<h2>{repoName} isn't open for agents</h2>
+						<p>
+							{isFree ? snapshot.error : "No agents are working on a repo by this name."} <a href={href.repos()}>Back to Repositories</a>.
+						</p>
+					</div>
+				</main>
+			);
 		}
-	}, [clearError, fetchTasks, reportError, selectTask]);
-
-	const waiveSlice = useCallback(async (sliceId: string, reason: string) => {
-		if (!selectedTask || busy) return;
-		const id = selectedTask.id;
-		const operation = "Waive human review: " + sliceId;
-		setBusy(true);
-		try {
-			await api.waive(id, sliceId, reason);
-			clearError(operation);
-		} catch (error) {
-			reportError(operation, error);
-		} finally {
-			await refresh();
-			setBusy(false);
-		}
-	}, [busy, clearError, refresh, reportError, selectedTask]);
-	const showingLive = live?.task.id === selectedId ? live : null;
+	} else if (route.page === "task") {
+		page = tasks.loaded && !tasks.data?.some((t) => t.id === route.taskId) ? (
+			<main className="page" id="main">
+				<div className="box empty">
+					<h2>That link is out of date</h2>
+					<p>
+						It points to something that no longer exists. <a href={href.repos()}>See all repositories</a>.
+					</p>
+				</div>
+			</main>
+		) : (
+			<Loading what="repo" />
+		);
+	} else {
+		page = (
+			<main className="page" id="main">
+				<div className="box empty">
+					<h2>Page not found</h2>
+					<p>
+						<a href={href.repos()}>Go to Repositories</a>.
+					</p>
+				</div>
+			</main>
+		);
+	}
 
 	return (
-		<div className="shell dashboard-shell">
-			<header className="topbar dashboard-topbar">
-				<a className="brand" href="#/">Blueprint</a>
-			</header>
-			<div className="dashboard-frame">
-				<aside className="dashboard-sidebar">
-					<DashboardSidebar
-						tasks={newestTasks(tasks)}
-						repos={repos}
-						selectedId={selectedId}
-						taskLoading={!tasksLoaded}
-						opening={opening}
-						onSelect={selectTask}
-						onOpenRepo={(repo) => void openRepo(repo)}
-					/>
-					<FreeRepoList repos={freeRepos} selected={freeRepo} />
-				</aside>
-				<main className="dashboard-content">
-					{errors.length > 0 && (
-						<div className="dashboard-errors" role="alert" aria-live="polite">
-							<strong>Some dashboard requests failed</strong>
-							<ul>{errors.map((error) => <li key={error}>{error}</li>)}</ul>
-						</div>
-					)}
-					{freeRepo ? (
-						freeSnapshot ? (
-							<FreeRepoView snapshot={freeSnapshot} />
-						) : (
-							<section className="dashboard-empty card">
-								<h1>Loading {freeRepo}…</h1>
-							</section>
-						)
-					) : !selectedTask ? (
-						<section className="dashboard-empty card">
-							<h1>{tasksLoaded && tasks.length === 0 ? "No repos open yet" : selectedId ? "Loading task…" : "Blueprint dashboard"}</h1>
-							<p className="muted">{tasksLoaded && tasks.length === 0
-								? <>Open a repo for agents from the sidebar, or let agents join one themselves with the MCP <code>join_repo</code> tool.</>
-								: selectedId ? "The selected task will appear here when it is available." : "Choose an open repo, or open a new one for agents."}</p>
-							{!reposLoaded && <p className="muted">Loading repositories…</p>}
-						</section>
-					) : (
-						<TaskDetailBoundary key={`${selectedTask.id}:${selectionEpoch}`}>
-							<div className="dashboard-task">
-								<TaskHeader task={selectedTask} busy={busy} />
-								<TaskSettings task={selectedTask} />
-								<CodeDecisions
-									task={selectedTask}
-									busy={busy}
-									onWaive={(sliceId, reason) => void waiveSlice(sliceId, reason)}
-								/>
-								{showingLive && <SliceLanes live={showingLive} />}
-								<LaneChangeRequests task={selectedTask} />
-								<MergeAheadMatrix task={selectedTask} />
-								{showingLive && <ActivityFeed agents={showingLive.agents} />}
-								{!showingLive && <p className="muted dashboard-live-pending">Loading live slice activity…</p>}
-							</div>
-						</TaskDetailBoundary>
-					)}
-				</main>
-			</div>
+		<div className="shell">
+			<a className="skip-link" href="#main">
+				Skip to content
+			</a>
+			<TopBar crumbs={crumbs} />
+			{errors.length > 0 ? (
+				<div className="page-errors" role="alert">
+					<div className="page-errors__inner">
+						<strong>Some data couldn't be refreshed.</strong> <span>{errors.join(" · ")}</span>
+					</div>
+				</div>
+			) : null}
+			<PageBoundary key={routePlace(route)}>{page}</PageBoundary>
 		</div>
 	);
 }

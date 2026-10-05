@@ -1,0 +1,53 @@
+.free-audit {
+	display: grid;
+	gap: 16px;
+	max-width: 900px;
+}
+
+.free-audit h3 {
+	font-size: 14px;
+}
+
+.free-violations,
+.free-votes {
+	margin: 0;
+	padding: 0;
+	list-style: none;
+}
+
+.free-violation,
+.free-vote {
+	display: flex;
+	gap: 10px;
+	align-items: flex-start;
+	overflow-wrap: anywhere;
+}
+
+.free-violation > span,
+.free-vote > span {
+	display: inline-flex;
+	margin-top: 2px;
+	flex-shrink: 0;
+}
+
+.free-violation p,
+.free-vote p {
+	margin: 0;
+}
+
+.free-violation p + p {
+	margin-top: 2px;
+}
+
+.free-violation--resolved {
+	opacity: 0.75;
+}
+
+.free-vote__evidence {
+	margin-top: 2px !important;
+	font-size: 13px;
+}
+
+.change-page__body--bordered {
+	border-top: 1px solid var(--border);
+}

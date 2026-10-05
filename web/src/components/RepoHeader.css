@@ -1,0 +1,37 @@
+.repo-header {
+	background: var(--surface);
+	border-bottom: 1px solid var(--border);
+}
+
+.repo-header__inner {
+	max-width: var(--page-width);
+	margin: 0 auto;
+	padding: 18px 24px 0;
+}
+
+.repo-header__title {
+	display: flex;
+	align-items: center;
+	flex-wrap: wrap;
+	gap: 8px;
+	margin-bottom: 10px;
+	font-size: 20px;
+	font-weight: 400;
+}
+
+.repo-header__title a {
+	color: var(--accent);
+	font-weight: 600;
+	overflow-wrap: anywhere;
+}
+
+.repo-header .tabs {
+	border-bottom: 0;
+	margin-bottom: -1px;
+}
+
+@media (max-width: 560px) {
+	.repo-header__inner {
+		padding: 14px 16px 0;
+	}
+}

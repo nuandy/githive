@@ -1,8 +1,36 @@
 import type { Task } from "../../src/types";
 import type { LaneChangeRequest } from "../../src/lane-change-contract";
-import type { UnifiedCodeDiff } from "./dashboard-contract";
 
 export type { Task };
+
+/** Unified, read-only Git diff pinned to the commits used to generate it. */
+export interface UnifiedCodeDiff {
+	base: string;
+	head: string;
+	unified: string;
+	/** Every path whose tree entry changed, including paths whose diff text was capped. */
+	files: string[];
+	/** Changed paths whose diff content was omitted by per-file or total output limits. */
+	omitted: string[];
+}
+
+/** One decision in a repo's log in Git (GET /tasks/:id/history), oldest first. */
+export interface HistoryEntry {
+	at: string;
+	text: string;
+	commit: string;
+}
+
+/** Accept { entries: [...] } (or a bare list), dropping malformed entries. */
+export function normalizeHistory(value: unknown): HistoryEntry[] {
+	const record = asRecord(value);
+	const list = Array.isArray(value) ? value : asArray<unknown>(record?.entries);
+	return list.flatMap((item) => {
+		const entry = asRecord(item);
+		if (!entry || typeof entry.text !== "string") return [];
+		return [{ at: typeof entry.at === "string" ? entry.at : "", text: entry.text, commit: typeof entry.commit === "string" ? entry.commit : "" }];
+	});
+}
 
 /** A repo in coordinator-free mode, as the dashboard shows it (GET /free/:repo; see src/free/mcp.ts). */
 export interface FreeSnapshot {
@@ -21,16 +49,19 @@ export interface FreeSnapshot {
 		by?: string;
 		/** The change's branch head, null until something is pushed. */
 		head: string | null;
-		approval: { approved: boolean; approvals: number; required: number; vetoedBy: string[] };
+		approval: { approved: boolean; approvals: number; required: number; vetoedBy: string[]; /** Veto roles that haven't approved yet (newer servers); a change merges only once each has. */ awaiting?: string[] };
 		/** Blueprint's hosted agents on the change. */
 		hosted?: { builder?: { status: string; revisions: number; error?: string }; reviewers: { role: string; status: string; verdict?: string }[] };
 	}[];
 	votes: { commit: string; reviewer: string; role: string; verdict: "approve" | "reject"; evidence: string; at: string; by?: string }[];
-	audit: {
-		merges: number;
-		open: number;
-		violations: { commit: string; author: string; rule: string; detail: string; by?: string; resolvedBy?: string }[];
-	};
+	/** Loaded apart (GET /free/:repo/audit): it replays every record, so it comes slower and less often. */
+	audit?: FreeAudit;
+}
+
+export interface FreeAudit {
+	merges: number;
+	open: number;
+	violations: { commit: string; author: string; rule: string; detail: string; by?: string; resolvedBy?: string }[];
 }
 export type Slice = Task["slices"][number];
 
@@ -133,7 +164,7 @@ function normalizeSlice(value: unknown): Slice | null {
 	return {
 		...slice,
 		id: typeof slice.id === "string" ? slice.id : "",
-		title: typeof slice.title === "string" ? slice.title : "Untitled slice",
+		title: typeof slice.title === "string" ? slice.title : "Untitled change",
 		owns: asStringArray(slice.owns),
 		touched: asStringArray(slice.touched),
 		outOfLane: asStringArray(slice.outOfLane),
@@ -227,7 +258,13 @@ async function call<T>(method: string, path: string, body?: unknown): Promise<T>
 	if (body !== undefined) headers["Content-Type"] = "application/json";
 	const res = await fetch(path, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
 	const text = await res.text();
-	const data = text ? JSON.parse(text) : null;
+	let data: unknown = null;
+	try {
+		data = text ? JSON.parse(text) : null;
+	} catch {
+		// Not JSON: an older server without this route answers with the dashboard page.
+		throw new Error(res.ok ? `Unexpected response from ${path}` : `${res.status} ${res.statusText}`);
+	}
 	if (!res.ok) {
 		const detail = asRecord(data)?.error;
 		throw new Error(res.status === 401 ? "Unauthorized: sign in through Cloudflare Access." : typeof detail === "string" ? detail : `${res.status} ${res.statusText}`);
@@ -245,10 +282,23 @@ export const api = {
 	repos: () => call<{ name: string }[]>("GET", "/repos"),
 	freeRepos: () => call<{ repo: string; since: string }[]>("GET", "/free"),
 	freeRepo: (repo: string) => call<FreeSnapshot>("GET", `/free/${encodeURIComponent(repo)}`),
+	freeAudit: (repo: string) => call<FreeAudit>("GET", `/free/${encodeURIComponent(repo)}/audit`),
 	/** Open a repo for agents (or find the task it is already open as), as the MCP join_repo tool does. */
 	openRepo: async (repo: string) => normalizeTask(await call<unknown>("POST", `/repos/${encodeURIComponent(repo)}/open`, {})),
 	sliceDiff: (taskId: string, sliceId: string) =>
 		call<UnifiedCodeDiff>("GET", `/tasks/${encodeURIComponent(taskId)}/slices/${encodeURIComponent(sliceId)}/diff`),
+	/** A person lets the commit under review through without full review (the checks still run). */
 	waive: (taskId: string, sliceId: string, reason: string) =>
 		call<unknown>("POST", `/tasks/${encodeURIComponent(taskId)}/slices/${encodeURIComponent(sliceId)}/waive`, { reason }),
+	/** The repo's decision log from Git, oldest first. */
+	history: async (taskId: string) => normalizeHistory(await call<unknown>("GET", `/tasks/${encodeURIComponent(taskId)}/history`)),
+	/** Message a change's builder: delivered at its next turn, or it resumes if it stopped. */
+	messageBuilder: (taskId: string, sliceId: string, message: string) =>
+		call<{ delivered: "inbox" | "resumed" }>("POST", `/tasks/${encodeURIComponent(taskId)}/slices/${encodeURIComponent(sliceId)}/message`, { message }),
+	/** Re-run the checks for an approved change. */
+	retryChecks: (taskId: string, sliceId: string) =>
+		call<unknown>("POST", `/tasks/${encodeURIComponent(taskId)}/slices/${encodeURIComponent(sliceId)}/gate`, {}),
+	/** Give up a change and free its claim. */
+	abandon: (taskId: string, sliceId: string, reason: string) =>
+		call<unknown>("POST", `/tasks/${encodeURIComponent(taskId)}/changes/${encodeURIComponent(sliceId)}/abandon`, { reason }),
 };
