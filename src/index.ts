@@ -370,6 +370,25 @@ app.delete("/tasks/:id", async (c) => {
 	return c.json({ deleted: id, repo: destroyed.repo, forks, listed });
 });
 
+// Bench only (BENCH_WIPE, set in wrangler.bench.jsonc and never on production):
+// delete every repo in the namespace, a batch per call (a request can make only
+// so many subrequests), and forget every task and repo the dashboard lists.
+// Call again until nothing remains.
+const WIPE_CONFIRMATION = "delete every repo in the bench namespace";
+const WIPE_BATCH = 400;
+app.post("/admin/wipe", async (c) => {
+	if ((c.env as unknown as { BENCH_WIPE?: string }).BENCH_WIPE !== "allowed") return c.json({ error: "not available here" }, 404);
+	const { confirm } = await jsonArgs(c);
+	if (confirm !== WIPE_CONFIRMATION) return c.json({ error: `confirm with "${WIPE_CONFIRMATION}"` }, 400);
+	await taskIndex(c.env).clear();
+	const names = await listRepoNames(c.env.ARTIFACTS);
+	const batch = names.slice(0, WIPE_BATCH);
+	const failed: string[] = [];
+	for (const name of batch) await retryTransient(() => c.env.ARTIFACTS.delete(name)).catch(() => failed.push(name));
+	console.log("bench wipe", JSON.stringify({ deleted: batch.length - failed.length, failed: failed.length, remaining: names.length - batch.length }));
+	return c.json({ deleted: batch.length - failed.length, failed, remaining: names.length - batch.length + failed.length });
+});
+
 // Delete a project repo for good. Refused while any task still uses it.
 app.delete("/repos/:repo", async (c) => {
 	const repo = c.req.param("repo");

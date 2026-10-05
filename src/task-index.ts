@@ -105,6 +105,11 @@ export class TaskIndex extends DurableObject<Env> {
 		};
 	}
 
+	/** Forget every task, coordinator-free repo and summary (the bench's wipe). */
+	async clear() {
+		await this.ctx.storage.deleteAll();
+	}
+
 	/** Forget a task; returns whether it was listed. */
 	async remove(id: string) {
 		const keys = [...(await this.ctx.storage.list({ prefix: "task:" })).keys()].filter((key) => key.endsWith(`:${id}`));

@@ -251,3 +251,36 @@ describe("the dashboard's list of repos", () => {
 		]);
 	});
 });
+
+describe("the bench's wipe", () => {
+	const confirm = { confirm: "delete every repo in the bench namespace" };
+	const benchEnv = (names: string[], allowed = true) => {
+		const index = { clear: vi.fn(async () => {}) };
+		const deleted: string[] = [];
+		const env = {
+			...(allowed ? { BENCH_WIPE: "allowed" } : {}),
+			TASK_INDEX: { getByName: () => index },
+			ARTIFACTS: {
+				list: vi.fn(async () => ({ repos: names.filter((n) => !deleted.includes(n)).map((name) => ({ name })) })),
+				delete: vi.fn(async (name: string) => void deleted.push(name)),
+			},
+		};
+		return { env: env as never, index, deleted };
+	};
+
+	it("is refused anywhere it isn't switched on, as on production", async () => {
+		const { env, index, deleted } = benchEnv(["project"], false);
+		expect((await post(env, "/admin/wipe", confirm)).status).toBe(404);
+		expect(index.clear).not.toHaveBeenCalled();
+		expect(deleted).toEqual([]);
+	});
+
+	it("needs its confirmation, then deletes the namespace's repos and forgets the dashboard's list", async () => {
+		const { env, index, deleted } = benchEnv(["project", "t1--a", "free--docs--c-1"]);
+		expect((await post(env, "/admin/wipe", { confirm: "yes" })).status).toBe(400);
+		expect(deleted).toEqual([]);
+		expect(await (await post(env, "/admin/wipe", confirm)).json()).toEqual({ deleted: 3, failed: [], remaining: 0 });
+		expect(deleted).toEqual(["project", "t1--a", "free--docs--c-1"]);
+		expect(index.clear).toHaveBeenCalled();
+	});
+});
