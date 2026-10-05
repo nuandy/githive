@@ -1,4 +1,5 @@
 import { DurableObject } from "cloudflare:workers";
+import { taskCoordinator } from "./elected";
 import { WORKDIR, bootContainer, clip, gitWithToken, run } from "./container";
 import { statusOf } from "./errors";
 import type { GateResult } from "./gate-plan";
@@ -146,7 +147,8 @@ export class Gate extends DurableObject<Env> {
 		await this.ctx.storage.put("current", item);
 		try {
 			if (!(await this.itemIsLive(item))) return;
-			const coordinator = this.env.COORDINATOR.get(this.env.COORDINATOR.idFromName(taskId));
+			// The task's leader, if it's elected; its Coordinator object otherwise.
+			const coordinator = taskCoordinator(this.env, taskId);
 			const plan = await coordinator.gatePlan(item.slice, item.head, item.group);
 			// gatePlan may wait on Coordinator I/O while a send-back cancels the item.
 			if (!plan || !(await this.itemIsLive(item))) return;

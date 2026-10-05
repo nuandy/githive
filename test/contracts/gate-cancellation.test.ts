@@ -6,7 +6,7 @@ const { Gate } = await import("../../src/gate");
 
 function makeGate(coordinator: { gatePlan: ReturnType<typeof vi.fn>; gateResult: ReturnType<typeof vi.fn> }) {
 	const storage = new FakeStorage();
-	const env = { COORDINATOR: { idFromName: (name: string) => name, get: () => coordinator } };
+	const env = { COORDINATOR: { idFromName: (name: string) => name, get: () => coordinator }, TASK_INDEX: { getByName: () => ({ get: async () => null }) } };
 	return new Gate({ storage } as never, env as never);
 }
 

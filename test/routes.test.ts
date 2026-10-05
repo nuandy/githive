@@ -12,6 +12,9 @@ vi.mock("../src/election-git", () => ({
 		async read() {
 			return null;
 		}
+		async tip() {
+			return "ledger-tip";
+		}
 	},
 }));
 vi.mock("../src/artifacts", async (importOriginal) => ({
@@ -62,19 +65,45 @@ describe("opening a repo", () => {
 });
 
 describe("opening a repo already open on the fixed Coordinator", () => {
-	it("returns its existing task, and starts no second, elected one under the same id", async () => {
+	it("moves its task to the elected coordinator: the Coordinator hands over its state, which continues the task's record in Git", async () => {
 		for (const how of ["http", "mcp"] as const) {
 			genesis.appended = [];
 			const { env, coordinator, index } = fakeEnv();
-			const existing = { id: "t-open", repo: "project", mode: "open", goal: "open", createdAt: "2026-10-01T00:00:00.000Z" };
-			index.get.mockResolvedValue({ id: "t-open", repo: "project", goal: "open", createdAt: existing.createdAt } as never);
-			coordinator.createOpen.mockResolvedValue(existing as never);
+			const listed = { id: "t-open", repo: "project", goal: "open", createdAt: "2026-10-01T00:00:00.000Z" };
+			const existing = { id: "t-open", repo: "project", mode: "open", goal: "open", createdAt: listed.createdAt, slices: [] };
+			index.get.mockResolvedValue(listed as never);
+			(coordinator as unknown as { handOver: unknown }).handOver = vi.fn(async () => existing);
 			if (how === "http") expect(await (await post(env, "/repos/project/open", {})).json()).toMatchObject({ id: "t-open", mode: "open" });
 			else await post(env, "/mcp", { jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "join_repo", arguments: { repo: "project" } } });
-			expect(coordinator.createOpen).toHaveBeenCalled();
-			expect(genesis.appended).toEqual([]);
-			expect(index.add).not.toHaveBeenCalledWith(expect.objectContaining({ elected: true }));
+			expect((coordinator as unknown as { handOver: ReturnType<typeof vi.fn> }).handOver).toHaveBeenCalled();
+			expect(coordinator.createOpen).not.toHaveBeenCalled();
+			// The elected log starts on top of the Coordinator's ledger, with its state: one record in Git.
+			expect(genesis.appended).toEqual([{ parent: "ledger-tip", commit: expect.objectContaining({ kind: "genesis", state: expect.objectContaining({ id: "t-open" }) }) }]);
+			expect(index.add).toHaveBeenCalledWith({ ...listed, elected: true });
 		}
+	});
+});
+
+describe("crashing an elected task's leader, for failover tests", () => {
+	it("crashes the peer the task index names, for as long as asked", async () => {
+		const simulateCrash = vi.fn(async () => undefined);
+		const env = {
+			TASK_INDEX: { getByName: () => ({ get: async () => ({ id: "t1", repo: "project", elected: true, leader: { name: "t1--a", term: 4 } }) }) },
+			PEER: { getByName: (name: string) => (name === "t1--a" ? { simulateCrash } : null) },
+		};
+		const res = await post(env as never, "/tasks/t1/leader/crash", { forMs: 90_000 });
+		expect(await res.json()).toEqual({ crashed: "t1--a", term: 4, forMs: 90_000 });
+		expect(simulateCrash).toHaveBeenCalledWith(90_000);
+	});
+
+	it("says who leads, as the task index notes it", async () => {
+		const env = { TASK_INDEX: { getByName: () => ({ get: async () => ({ id: "t1", repo: "project", elected: true, leader: { name: "t1--b", term: 5 } }) }) } };
+		expect(await (await get(env as never, "/tasks/t1/leader")).json()).toEqual({ leader: "t1--b", term: 5 });
+	});
+
+	it("says so when nobody leads", async () => {
+		const env = { TASK_INDEX: { getByName: () => ({ get: async () => ({ id: "t1", repo: "project", elected: true }) }) } };
+		expect((await post(env as never, "/tasks/t1/leader/crash", {})).status).toBe(409);
 	});
 });
 

@@ -3,9 +3,9 @@ import { verifyAccessRequest } from "./access";
 import type { AccessIdentity, CoordinatorHumanActions } from "./access-contract";
 import { deleteReposWithPrefix, headOf, listRepoNames, parseRepoName, remoteFor, reviewerName, sliceRepoName } from "./artifacts";
 import { openTaskFor, type OpenTaskInput } from "./coordinator";
-import { electedForEnv } from "./elected";
+import { electedForEnv, taskCoordinator } from "./elected";
 import { GitCasLog } from "./election-git";
-import { openLog } from "./peer";
+import { PEER_LEASE_MS, openLog, type Peer } from "./peer";
 import { fail, requiredPaths, requiredString, statusOf } from "./errors";
 import { retryTransient } from "./retry";
 import type { Blueprint, Limits, Review, ReviewPolicy, Task } from "./types";
@@ -29,25 +29,8 @@ const app = new Hono<{ Bindings: Env; Variables: { accessIdentity: AccessIdentit
 
 const fixedCoordinator = (env: Env, taskId: string) => env.COORDINATOR.get(env.COORDINATOR.idFromName(taskId));
 
-/**
- * The coordinator of a task: the elected coordinator for an open task (its
- * peers and its log in Git), or the task's Coordinator object for a planned
- * one. Resolved on each call, so callers use it like a Coordinator stub.
- */
-const coordinator = (env: Env, taskId: string) => {
-	const resolved = (async () => {
-		const ref = await taskIndex(env).get(taskId);
-		return ref?.elected ? electedForEnv(env, taskId, ref.repo, ref.leader?.name) : fixedCoordinator(env, taskId);
-	})();
-	return new Proxy({} as ReturnType<typeof fixedCoordinator>, {
-		get: (_target, method: string) =>
-			async (...args: unknown[]) => {
-				const target = (await resolved) as unknown as Record<string, (...a: unknown[]) => unknown>;
-				if (typeof target[method] !== "function") throw new Error(`[409] tasks run by the elected coordinator don't support ${method}`);
-				return target[method](...args);
-			},
-	});
-};
+/** The coordinator of a task: elected for an open task, its Coordinator object for a planned one (see taskCoordinator). */
+const coordinator = taskCoordinator;
 const humanCoordinator = (env: Env, taskId: string) => coordinator(env, taskId) as unknown as CoordinatorHumanActions;
 const taskIndex = (env: Env) => env.TASK_INDEX.getByName("all");
 
@@ -119,6 +102,8 @@ app.get("/api", (c) =>
 			"DELETE /repos/:repo (refused while tasks use it)",
 			"GET  /free         (repos in coordinator-free mode)",
 			"GET  /free/:repo   (claims, votes and audit, from Git)",
+			"GET  /tasks/:id/leader  (who leads an elected task)",
+			"POST /tasks/:id/leader/crash {forMs?}  (failover test: the leader stops as if its object vanished)",
 			"GET  /tasks/:id/lock-stats",
 			"POST /tasks/:id/lock-stats/reset",
 			"POST /tasks/:id/restore {repo}",
@@ -146,8 +131,17 @@ async function openRepoTask(env: Env, repo: string, input: OpenTaskInput = {}): 
 	const id = await openTaskId(repo);
 	const listed = await taskIndex(env).get(id);
 	if (listed?.elected) return electedForEnv(env, id, repo, listed.leader?.name).state();
-	// Already open on a fixed Coordinator (opened before the elected coordinator): that task stays the repo's.
-	if (listed) return (await fixedCoordinator(env, id).createOpen(id, repo, input)) as unknown as Task;
+	// Opened on a fixed Coordinator, before open mode was elected: move the task
+	// now. The Coordinator hands over its state and stops deciding; the elected
+	// log starts from that state, on top of its ledger, so the record in Git runs on.
+	if (listed) {
+		const task = (await fixedCoordinator(env, id).handOver()) as unknown as Task;
+		const log = new GitCasLog<Task>(() => remoteFor(env.ARTIFACTS, repo, "write"), id);
+		const moved = { commit: task.anchor ?? task.baseCommit ?? "none", text: "Open mode moves to the elected coordinator: the task goes on from the fixed Coordinator's state", at: new Date().toISOString() };
+		await openLog(log, task, [moved], await log.tip());
+		await taskIndex(env).add({ ...listed, elected: true });
+		return task;
+	}
 	// No coordinator to create: the task's log in Git starts with it, and the
 	// first peer that needs a decision becomes its leader.
 	const head = (await headOf(env.ARTIFACTS, repo)) ?? fail(409, `${repo} has no commits`);
@@ -350,6 +344,23 @@ app.post("/tasks/:id/slices/:slice/integrate", async (c) => {
 app.post("/tasks/:id/land", async (c) => c.json(await humanCoordinator(c.env, c.req.param("id")).land(c.get("accessIdentity"))));
 
 // Lock timings for benchmarks; POST clears them after reading.
+// Who leads an elected task, as the task index notes it (null: nobody, as far as it knows).
+app.get("/tasks/:id/leader", async (c) => {
+	const leader = (await taskIndex(c.env).get(c.req.param("id")))?.leader;
+	return c.json({ leader: leader?.name ?? null, term: leader?.term ?? 0 });
+});
+
+// Failover tests: the leader the task index names stops as if its object vanished, for forMs (default two leases).
+app.post("/tasks/:id/leader/crash", async (c) => {
+	const id = c.req.param("id");
+	const body = await jsonArgs(c);
+	const forMs = typeof body.forMs === "number" && body.forMs > 0 ? body.forMs : 2 * PEER_LEASE_MS;
+	const leader = (await taskIndex(c.env).get(id))?.leader;
+	if (!leader?.name) fail(409, `nobody leads ${id}`);
+	await (c.env.PEER.getByName(leader.name) as unknown as Peer).simulateCrash(forMs);
+	return c.json({ crashed: leader.name, term: leader.term, forMs });
+});
+
 app.get("/tasks/:id/lock-stats", async (c) => c.json(await coordinator(c.env, c.req.param("id")).lockStats()));
 app.post("/tasks/:id/lock-stats/reset", async (c) => c.json(await coordinator(c.env, c.req.param("id")).lockStats(true)));
 

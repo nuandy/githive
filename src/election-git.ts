@@ -211,6 +211,11 @@ export class GitCasLog<S> implements CasLog<S> {
 		};
 	}
 
+	/** Where the ref points now, without reading what's there (it may predate this log's format, as a fixed Coordinator's ledger does). */
+	async tip(): Promise<string | null> {
+		return serverTip(await this.remote(), this.ref);
+	}
+
 	async append(parent: string | null, commit: LogCommit<S>): Promise<string | null> {
 		const remote = await this.remote();
 		const { fs, tip } = parent !== null && this.held?.tip === parent ? this.held : await openTip(remote, this.ref);
