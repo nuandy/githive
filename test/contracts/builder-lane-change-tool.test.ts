@@ -9,7 +9,7 @@ describe("builder cross-lane tools", () => {
 	it("asks the Coordinator to route a lane request without adding a person identity", async () => {
 		const requestLaneChange = vi.fn(async () => ({ outcome: "requested" as const, delivery: "inbox" as const, message: "delivered" }));
 		const coordinator = { requestLaneChange, answerLaneChange: vi.fn() };
-		const env = { COORDINATOR: { idFromName: (id: string) => id, get: () => coordinator } };
+		const env = { COORDINATOR: { idFromName: (id: string) => id, get: () => coordinator }, TASK_INDEX: { getByName: () => ({ get: async () => null }) } };
 		const builder = new Builder({ storage: new FakeStorage() } as never, env as never);
 		const job: BuildJob = {
 			taskId: "t1", goal: "goal", slice: { id: "a", title: "A", owns: ["src/a/"], instructions: "build", tests: [] },

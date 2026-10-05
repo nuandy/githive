@@ -3,7 +3,7 @@ import { verifyAccessRequest } from "./access";
 import type { AccessIdentity, CoordinatorHumanActions } from "./access-contract";
 import { deleteReposWithPrefix, headOf, listRepoNames, parseRepoName, remoteFor, reviewerName, sliceRepoName } from "./artifacts";
 import { openTaskFor, type OpenTaskInput } from "./coordinator";
-import { electedForEnv } from "./elected";
+import { electedForEnv, taskCoordinator } from "./elected";
 import { GitCasLog } from "./election-git";
 import { openLog } from "./peer";
 import { fail, requiredPaths, requiredString, statusOf } from "./errors";
@@ -24,25 +24,8 @@ const app = new Hono<{ Bindings: Env; Variables: { accessIdentity: AccessIdentit
 
 const fixedCoordinator = (env: Env, taskId: string) => env.COORDINATOR.get(env.COORDINATOR.idFromName(taskId));
 
-/**
- * The coordinator of a task: the elected coordinator for an open task (its
- * peers and its log in Git), or the task's Coordinator object for a planned
- * one. Resolved on each call, so callers use it like a Coordinator stub.
- */
-const coordinator = (env: Env, taskId: string) => {
-	const resolved = (async () => {
-		const ref = await taskIndex(env).get(taskId);
-		return ref?.elected ? electedForEnv(env, taskId, ref.repo, ref.leader?.name) : fixedCoordinator(env, taskId);
-	})();
-	return new Proxy({} as ReturnType<typeof fixedCoordinator>, {
-		get: (_target, method: string) =>
-			async (...args: unknown[]) => {
-				const target = (await resolved) as unknown as Record<string, (...a: unknown[]) => unknown>;
-				if (typeof target[method] !== "function") throw new Error(`[409] tasks run by the elected coordinator don't support ${method}`);
-				return target[method](...args);
-			},
-	});
-};
+/** The coordinator of a task: elected for an open task, its Coordinator object for a planned one (see taskCoordinator). */
+const coordinator = taskCoordinator;
 const humanCoordinator = (env: Env, taskId: string) => coordinator(env, taskId) as unknown as CoordinatorHumanActions;
 const taskIndex = (env: Env) => env.TASK_INDEX.getByName("all");
 

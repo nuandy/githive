@@ -28,6 +28,13 @@ type PeerStub = Pick<
 	| "requestLaneChange"
 	| "answerLaneChange"
 	| "externalCredentials"
+	| "submitReview"
+	| "agentStopped"
+	| "flagSlice"
+	| "parkBuilder"
+	| "parkedBuilderTimedOut"
+	| "gatePlan"
+	| "gateResult"
 >;
 
 export interface ElectedContext {
@@ -95,6 +102,16 @@ export function electedCoordinator(ctx: ElectedContext) {
 		requestLaneChange: (change: string, input: LaneChangeRequestInput) => onLeader(peerOf(change), (leader) => leader.requestLaneChange(change, input)),
 		answerLaneChange: (change: string, requestId: string, answer: LaneChangeAnswer) => onLeader(peerOf(change), (leader) => leader.answerLaneChange(change, requestId, answer)),
 		externalCredentials: (change: string) => onLeader(peerOf(change), (leader) => leader.externalCredentials(change)),
+		// Blueprint's own workers report here too: hosted reviewers and builders, and the gate.
+		submitReview: (change: string, review: Parameters<Coordinator["submitReview"]>[1]) => onLeader(peerOf(change), (leader) => leader.submitReview(change, review)),
+		/** A builder stops as its change; a reviewer as `change:role:head`. */
+		agentStopped: (kind: Parameters<Coordinator["agentStopped"]>[0], key: string) => onLeader(peerOf(key.split(":")[0]), (leader) => leader.agentStopped(kind, key)),
+		flagSlice: (change: string, message: string) => onLeader(peerOf(change), (leader) => leader.flagSlice(change, message)),
+		parkBuilder: (change: string) => onLeader(peerOf(change), (leader) => leader.parkBuilder(change)),
+		parkedBuilderTimedOut: (change: string, parkedAt: string) => onLeader(peerOf(change), (leader) => leader.parkedBuilderTimedOut(change, parkedAt)),
+		gatePlan: (change: string, head: string, group?: Parameters<Coordinator["gatePlan"]>[2]) => onLeader(peerOf(change), (leader) => leader.gatePlan(change, head, group)),
+		gateResult: (change: string, result: Parameters<Coordinator["gateResult"]>[1], excluded: string[], group?: Parameters<Coordinator["gateResult"]>[3]) =>
+			onLeader(peerOf(change), (leader) => leader.gateResult(change, result, excluded, group)),
 	} satisfies Partial<Record<keyof Coordinator, unknown>>;
 }
 
@@ -106,5 +123,32 @@ export function electedForEnv(env: Env, taskId: string, repo: string, hint?: str
 		hint,
 		peer: (name) => env.PEER.getByName(name) as unknown as PeerStub,
 		readLog: async () => (await new GitCasLog<Task>(() => remoteFor(env.ARTIFACTS, repo, "read"), taskId).read())?.commit.state ?? null,
+	});
+}
+
+const fixedCoordinator = (env: Env, taskId: string) => env.COORDINATOR.get(env.COORDINATOR.idFromName(taskId));
+
+/**
+ * The coordinator of a task, for anyone reporting to it (the Worker, and
+ * Blueprint's builders, reviewers and gate): the elected coordinator for an
+ * open task (its peers and its log in Git), or the task's Coordinator object
+ * for a planned one. Resolved from the task index on first use, so callers use
+ * it like a Coordinator stub.
+ */
+export function taskCoordinator(env: Env, taskId: string) {
+	const resolved = (async () => {
+		const ref = await env.TASK_INDEX.getByName("all").get(taskId);
+		return ref?.elected ? electedForEnv(env, taskId, ref.repo, ref.leader?.name) : fixedCoordinator(env, taskId);
+	})();
+	return new Proxy({} as ReturnType<typeof fixedCoordinator>, {
+		get: (_target, method: string) =>
+			// Not a promise itself: `await taskCoordinator(...)` must not look for `then`.
+			method === "then"
+				? undefined
+				: async (...args: unknown[]) => {
+						const target = (await resolved) as unknown as Record<string, (...a: unknown[]) => unknown>;
+						if (typeof target[method] !== "function") throw new Error(`[409] tasks run by the elected coordinator don't support ${method}`);
+						return target[method](...args);
+					},
 	});
 }

@@ -4,6 +4,7 @@ import type { ResponseInputItem } from "openai/resources/responses/responses";
 import { z } from "zod";
 import { MODEL, addUsage, assertComplete, emptyUsage, openAITools, runCalls, tool, type AgentTool, type Usage } from "./agent";
 import { COMMAND_TIMEOUT_S, WORKDIR, bootContainer, clip, gitWithToken, run } from "./container";
+import { taskCoordinator } from "./elected";
 import { staysInRepo } from "./paths";
 import type { SliceSpec } from "./types";
 
@@ -337,8 +338,9 @@ export abstract class SandboxAgent<J extends SandboxJob, S extends AgentState> e
 		return gitWithToken(this.ctx.container!, token, args, cwd);
 	}
 
+	/** Whoever coordinates the job's task: its leader if the task is elected, its Coordinator object otherwise. */
 	protected coordinator(job: J) {
-		return this.env.COORDINATOR.get(this.env.COORDINATOR.idFromName(job.taskId));
+		return taskCoordinator(this.env, job.taskId);
 	}
 
 	/** Tools every container agent gets: explore, edit and run commands. */
