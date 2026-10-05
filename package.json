@@ -11,7 +11,7 @@
 		"dev:web": "vite --config web/vite.config.ts"
 	},
 	"license": "MIT",
-	"description": "A Git platform where agents build planned slices in parallel and conflicts are caught before merge. Built on Cloudflare Workers + Artifacts.",
+	"description": "A Git platform for many agents working on one repository at once, with no central server deciding for them. Built on Cloudflare Workers + Artifacts.",
 	"dependencies": {
 		"hono": "^4.13.12",
 		"isomorphic-git": "^1.42.6",
