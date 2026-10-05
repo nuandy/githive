@@ -1,27 +1,24 @@
 import { useState, type FormEvent } from "react";
 import type { DashboardSidebarProps } from "../dashboard-contract";
 import { newestTasks } from "../lib/dashboardData";
+import { taskPhaseLabel } from "./TaskHeader";
 import "./DashboardSidebar.css";
 
 function phaseTone(phase: string) {
-  if (phase === "landed") return "good";
-  if (phase === "building") return "accent";
-  if (phase === "awaiting-approval") return "warn";
-  return "";
+  return phase === "building" ? "accent" : "";
 }
 
-export function DashboardSidebar({ tasks, repos, selectedId, taskLoading, creating, onSelect, onCreate }: DashboardSidebarProps) {
+export function DashboardSidebar({ tasks, repos, selectedId, taskLoading, opening, onSelect, onOpenRepo }: DashboardSidebarProps) {
   const [repo, setRepo] = useState("");
-  const [goal, setGoal] = useState("");
   const safeTasks = Array.isArray(tasks) ? tasks : [];
   const safeRepos = Array.isArray(repos) ? repos : [];
-  const canCreate = Boolean(repo && goal.trim() && !creating);
+  const canOpen = Boolean(repo.trim() && !opening);
 
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!canCreate) return;
-    onCreate(repo, goal.trim());
-    setGoal("");
+    if (!canOpen) return;
+    onOpenRepo(repo.trim());
+    setRepo("");
   }
 
   return (
@@ -32,7 +29,7 @@ export function DashboardSidebar({ tasks, repos, selectedId, taskLoading, creati
           <span className="muted">{safeTasks.length}</span>
         </div>
         {taskLoading && safeTasks.length === 0 ? <p className="muted">Loading tasks…</p> : null}
-        {!taskLoading && safeTasks.length === 0 ? <p className="muted">No tasks yet. Start with a goal below.</p> : null}
+        {!taskLoading && safeTasks.length === 0 ? <p className="muted">No repos open yet. Open one below.</p> : null}
         <ul className="dashboard-sidebar__task-list">
           {newestTasks(safeTasks).map((task) => {
             const slices = Array.isArray(task.slices) ? task.slices : [];
@@ -49,7 +46,7 @@ export function DashboardSidebar({ tasks, repos, selectedId, taskLoading, creati
                 >
                   <span className="dashboard-sidebar__task-title" title={task.goal}>{task.goal}</span>
                   <span className="dashboard-sidebar__task-meta">
-                    <span className={`badge ${phaseTone(task.phase)}`}>{task.phase}</span>
+                    <span className={`badge ${phaseTone(task.phase)}`}>{taskPhaseLabel(task.phase)}</span>
                     <span className="muted">{integrated}/{total} integrated</span>
                   </span>
                 </button>
@@ -60,16 +57,25 @@ export function DashboardSidebar({ tasks, repos, selectedId, taskLoading, creati
       </section>
 
       <section className="dashboard-sidebar__section dashboard-sidebar__new-task">
-        <h2>New task</h2>
+        <h2>Open a repo</h2>
         <form onSubmit={submit}>
-          <label htmlFor="new-task-repo">Repository</label>
-          <select id="new-task-repo" value={repo} onChange={(event) => setRepo(event.target.value)} required disabled={creating || safeRepos.length === 0}>
-            <option value="" disabled>{safeRepos.length ? "Choose a repository" : "No repositories available"}</option>
-            {safeRepos.map((item) => <option key={item.name} value={item.name}>{item.name}</option>)}
-          </select>
-          <label htmlFor="new-task-goal">Goal</label>
-          <textarea id="new-task-goal" value={goal} onChange={(event) => setGoal(event.target.value)} placeholder="What should the builders implement?" rows={3} required disabled={creating} />
-          <button className="primary" type="submit" disabled={!canCreate}>{creating ? "Starting…" : "Create and plan"}</button>
+          <label htmlFor="open-repo-name">Repository</label>
+          <input
+            id="open-repo-name"
+            type="text"
+            list="open-repo-options"
+            value={repo}
+            onChange={(event) => setRepo(event.target.value)}
+            placeholder={safeRepos.length ? "Choose or type a repository" : "Repository name"}
+            autoComplete="off"
+            required
+            disabled={opening}
+          />
+          <datalist id="open-repo-options">
+            {safeRepos.map((item) => <option key={item.name} value={item.name} />)}
+          </datalist>
+          <button className="primary" type="submit" disabled={!canOpen}>{opening ? "Opening…" : "Open for agents"}</button>
+          <p className="muted dashboard-sidebar__hint">Agents can also join a repo themselves with the MCP <code>join_repo</code> tool.</p>
         </form>
       </section>
     </aside>

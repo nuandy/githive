@@ -1,6 +1,6 @@
 import type { Task } from "../../src/types";
 import type { LaneChangeRequest } from "../../src/lane-change-contract";
-import type { ContractFile, UnifiedCodeDiff } from "./dashboard-contract";
+import type { UnifiedCodeDiff } from "./dashboard-contract";
 
 export type { Task };
 
@@ -162,18 +162,15 @@ export function normalizeTask(value: unknown): Task {
 	const task = asRecord(value);
 	if (!task || typeof task.id !== "string") throw new Error("Invalid task response: expected a task with an id.");
 	const checks = asArray<unknown>(task.checks).filter((check) => asRecord(check) !== null);
-	const amendments = asArray<unknown>(task.amendments).filter((amendment) => asRecord(amendment) !== null);
 	const laneChangeRequests = asArray<unknown>(task.laneChangeRequests)
 		.map(normalizeLaneChangeRequest)
 		.filter((request): request is LaneChangeRequest => request !== null);
 	return {
 		...task,
-		contracts: asStringArray(task.contracts),
 		verify: asStringArray(task.verify),
 		review: normalizeReviewPolicy(task.review),
 		slices: asArray<unknown>(task.slices).map(normalizeSlice).filter((slice): slice is Slice => slice !== null),
 		checks,
-		amendments,
 		laneChangeRequests,
 	} as Task;
 }
@@ -248,19 +245,10 @@ export const api = {
 	repos: () => call<{ name: string }[]>("GET", "/repos"),
 	freeRepos: () => call<{ repo: string; since: string }[]>("GET", "/free"),
 	freeRepo: (repo: string) => call<FreeSnapshot>("GET", `/free/${encodeURIComponent(repo)}`),
-	create: async (repo: string, goal: string) => normalizeTask(await call<unknown>("POST", "/tasks", { repo, goal })),
-	plan: async (id: string) => normalizeTask(await call<unknown>("POST", `/tasks/${encodeURIComponent(id)}/plan`)),
-	approve: (id: string) => call<unknown>("POST", `/tasks/${encodeURIComponent(id)}/approve`),
-	build: (id: string) => call<unknown>("POST", `/tasks/${encodeURIComponent(id)}/build`),
-	land: async (id: string) => normalizeTask(await call<unknown>("POST", `/tasks/${encodeURIComponent(id)}/land`)),
-	contractFiles: async (taskId: string) => {
-		const result = await call<{ files: ContractFile[] }>("GET", `/tasks/${encodeURIComponent(taskId)}/contracts`);
-		return result.files;
-	},
+	/** Open a repo for agents (or find the task it is already open as), as the MCP join_repo tool does. */
+	openRepo: async (repo: string) => normalizeTask(await call<unknown>("POST", `/repos/${encodeURIComponent(repo)}/open`, {})),
 	sliceDiff: (taskId: string, sliceId: string) =>
 		call<UnifiedCodeDiff>("GET", `/tasks/${encodeURIComponent(taskId)}/slices/${encodeURIComponent(sliceId)}/diff`),
-	landingDiff: (taskId: string) =>
-		call<UnifiedCodeDiff>("GET", `/tasks/${encodeURIComponent(taskId)}/land-diff`),
 	waive: (taskId: string, sliceId: string, reason: string) =>
 		call<unknown>("POST", `/tasks/${encodeURIComponent(taskId)}/slices/${encodeURIComponent(sliceId)}/waive`, { reason }),
 };

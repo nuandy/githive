@@ -3,8 +3,6 @@
 .code-decisions__section h2 { margin: 0 0 7px; font-size: 18px; }
 .code-decisions__section > p { margin: 6px 0 12px; }
 .code-decisions__section button { flex-shrink: 0; }
-.code-decisions__contract + .code-decisions__contract { margin-top: 16px; }
-.code-decisions__contract h3 { margin: 10px 0 6px; font-size: 14px; overflow-wrap: anywhere; }
 .code-decisions__human { display: grid; grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr); gap: 16px; padding: 14px 0; border-top: 1px solid var(--border); }
 .code-decisions__human:first-of-type { margin-top: 12px; }
 .code-decisions__finding, .code-decisions__diff { min-width: 0; }
@@ -42,7 +40,6 @@
 .code-decisions__commits code { overflow-wrap: anywhere; }
 .code-decisions__error { color: var(--bad); overflow-wrap: anywhere; }
 .code-decisions__error p { margin: 5px 0 8px; }
-.code-decisions__land { display: block; margin-top: 12px; }
 @media (max-width: 760px) {
   .code-decisions__section { padding: 12px; }
   .code-decisions__human { grid-template-columns: minmax(0, 1fr); gap: 8px; }

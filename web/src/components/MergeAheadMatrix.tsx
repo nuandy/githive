@@ -6,7 +6,7 @@ import "./MergeAheadMatrix.css";
 export function MergeAheadMatrix({ task }: MergeAheadMatrixProps) {
   const matrix = buildMergeMatrix(task);
   const slices = Array.isArray(task.slices) ? task.slices : [];
-  const label = (id: string) => id === "base" ? "Task base" : slices.find((slice) => slice.id === id)?.title ?? id;
+  const label = (id: string) => id === "base" ? "main" : slices.find((slice) => slice.id === id)?.title ?? id;
   return (
     <section className="merge-matrix card" aria-labelledby="merge-matrix-title">
       <div className="merge-matrix__heading">

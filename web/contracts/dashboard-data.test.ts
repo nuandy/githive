@@ -4,8 +4,9 @@ import { buildMergeMatrix, getSliceStage, mergeActivity, newestTasks } from "../
 
 function makeTask(overrides: Partial<Task> = {}): Task {
   return {
-    id: "task", repo: "repo", goal: "goal", phase: "building", contracts: [], verify: [],
+    id: "task", repo: "repo", goal: "goal", phase: "building", verify: [],
     review: { reviewers: ["tests"], required: 1, vetoes: [] }, slices: [], checks: [],
+    limits: { builders: 1, reviewers: 1 }, queue: [], active: { builders: [], reviewers: [] },
     createdAt: "2025-01-01T00:00:00.000Z", ...overrides,
   };
 }

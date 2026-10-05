@@ -39,28 +39,21 @@ export interface DashboardSidebarProps {
   repos: { name: string }[];
   selectedId: string | null;
   taskLoading: boolean;
-  creating: boolean;
+  /** Whether a repo is being opened for agents. */
+  opening: boolean;
   onSelect(id: string): void;
-  onCreate(repo: string, goal: string): void;
+  /** Open a repo for agents (POST /repos/:repo/open). */
+  onOpenRepo(repo: string): void;
 }
 export interface TaskHeaderProps {
   task: Task;
-  plannerRunning: boolean;
   busy: boolean;
-  contractsReady: boolean;
-  onPlan(): void;
-  onApproveAndBuild(): void;
 }
-export interface PlanPanelProps { task: Task }
+export interface TaskSettingsProps { task: Task }
 export interface SliceLanesProps { live: Live }
 export interface LaneChangeRequestsProps { task: Task }
 export interface MergeAheadMatrixProps { task: Task }
 export interface ActivityFeedProps { agents: Live["agents"] }
-
-export interface ContractFile {
-  path: string;
-  content: string;
-}
 
 /** Unified, read-only Git diff pinned to the commits used to generate it. */
 export interface UnifiedCodeDiff {
@@ -75,9 +68,7 @@ export interface UnifiedCodeDiff {
 
 /** Dashboard's narrow code-view and human-waiver API surface. */
 export interface CodeVisibilityApi {
-  contractFiles(taskId: string): Promise<ContractFile[]>;
   sliceDiff(taskId: string, sliceId: string): Promise<UnifiedCodeDiff>;
-  landingDiff(taskId: string): Promise<UnifiedCodeDiff>;
   waive(taskId: string, sliceId: string, reason: string): Promise<unknown>;
 }
 
@@ -85,8 +76,6 @@ export interface CodeDecisionsProps {
   task: Task;
   busy: boolean;
   onWaive(sliceId: string, reason: string): void;
-  onLand(): void;
-  onContractFilesReady(taskId: string, ready: boolean): void;
 }
 
 /** Injected I/O surface used by the dashboard shell and its orchestration tests. */
@@ -94,22 +83,15 @@ export interface DashboardShellApi {
   tasks(): Promise<Task[]>;
   repos(): Promise<{ name: string }[]>;
   live(id: string): Promise<Live>;
-  create(repo: string, goal: string): Promise<Task>;
-  plan(id: string): Promise<Task>;
-  approve(id: string): Promise<unknown>;
-  build(id: string): Promise<unknown>;
-  land(id: string): Promise<Task>;
+  openRepo(repo: string): Promise<Task>;
 }
 
-export type DashboardShellAction = "plan" | "approve-build" | "land";
 export interface DashboardTimerScheduler {
   setInterval(callback: () => void, milliseconds: number): number;
   clearInterval(timer: number): void;
 }
 
 export declare function taskIdFromHash(hash: string): string | null;
-export declare function createTaskAndPlan(api: DashboardShellApi, repo: string, goal: string): Promise<Task>;
-export declare function runDashboardAction(api: DashboardShellApi, id: string, action: DashboardShellAction): Promise<void>;
 export declare function startDashboardPolling(
   id: string,
   getSelectedId: () => string | null,

@@ -30,14 +30,12 @@
 .dashboard-sidebar__new-task { border-top: 1px solid var(--border); padding-top: 14px; }
 .dashboard-sidebar__new-task form { display: grid; gap: 7px; }
 .dashboard-sidebar__new-task label { font-size: 12px; font-weight: 600; }
-.dashboard-sidebar__new-task input,
-.dashboard-sidebar__new-task select,
-.dashboard-sidebar__new-task textarea {
+.dashboard-sidebar__new-task input {
   width: 100%; min-width: 0; padding: 8px 10px; border: 1px solid var(--border);
   border-radius: var(--radius); background: var(--surface); color: var(--text); font: inherit;
 }
-.dashboard-sidebar__new-task textarea { resize: vertical; }
 .dashboard-sidebar__new-task button { margin-top: 4px; }
+.dashboard-sidebar__hint { margin: 2px 0 0; font-size: 12px; overflow-wrap: anywhere; }
 @media (max-width: 600px) {
   .dashboard-sidebar { gap: 14px; }
   .dashboard-sidebar__task { padding: 9px; }

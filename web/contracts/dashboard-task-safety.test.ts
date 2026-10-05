@@ -7,7 +7,7 @@ const legacyTask = (overrides: Partial<Task> = {}): Task => ({
   repo: "repo",
   goal: "A task created by an older Blueprint version",
   phase: "building",
-  contracts: [],
+ 
   verify: [],
   review: { reviewers: [], required: 0, vetoes: [] },
   slices: [{

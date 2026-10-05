@@ -3,7 +3,7 @@ export { CodeDecisions } from "./CodeDecisions";
 export { DashboardSidebar } from "./DashboardSidebar";
 export { LaneChangeRequests } from "./LaneChangeRequests";
 export { MergeAheadMatrix } from "./MergeAheadMatrix";
-export { PlanPanel } from "./PlanPanel";
 export { SliceLanes } from "./SliceLanes";
 export { TaskDetailBoundary } from "./TaskDetailBoundary";
 export { TaskHeader } from "./TaskHeader";
+export { TaskSettings } from "./TaskSettings";

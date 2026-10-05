@@ -7,7 +7,7 @@ import { LaneChangeRequests } from "../src/components/LaneChangeRequests";
 describe("dashboard cross-lane requests", () => {
 	it("shows pending and answered requests and their outcomes without a person identity", () => {
 		const task = {
-			id: "t1", repo: "repo", goal: "goal", phase: "building", contracts: [], verify: [],
+			id: "t1", repo: "repo", goal: "goal", phase: "building", verify: [],
 			review: { reviewers: [], required: 0, vetoes: [] }, slices: [], checks: [], createdAt: "now",
 			laneChangeRequests: [
 				{ id: "r1", requester: "ui", owner: "api", path: "src/api/routes.ts", need: "Register route", reason: "UI needs the endpoint", status: "pending", createdAt: "now" },

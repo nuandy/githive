@@ -24,7 +24,7 @@ export function SliceLanes({ live }: SliceLanesProps) {
         <h2 id="slice-lanes-title">Slice lanes</h2>
         <span className="muted">{slices.length} {slices.length === 1 ? "slice" : "slices"}</span>
       </div>
-      {slices.length === 0 ? <p className="card muted">No slices in this plan.</p> : null}
+      {slices.length === 0 ? <p className="card muted">No changes open yet.</p> : null}
       <div className="slice-lanes__list">
         {slices.map((slice) => {
           const stageInfo = getSliceStage(slice);

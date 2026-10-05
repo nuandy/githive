@@ -18,7 +18,7 @@ const task = (): Task => ({
   repo: "repo",
   goal: "goal",
   phase: "building",
-  contracts: [],
+ 
   verify: [],
   review: { reviewers: ["tests"], required: 1, vetoes: [] },
   slices: [slice("integrated-one", "integrated"), slice("building-two", "building")],
@@ -27,6 +27,9 @@ const task = (): Task => ({
     { pair: ["integrated-one", "building-two"], heads: ["one", "two"], status: "conflict", files: ["shared.ts"], checkedAt: "2025-01-02T00:00:00.000Z" },
     { pair: ["base", "building-two"], heads: ["base", "two"], status: "disjoint", files: [], checkedAt: "2025-01-03T00:00:00.000Z" },
   ],
+  limits: { builders: 1, reviewers: 1 },
+  queue: [],
+  active: { builders: [], reviewers: [] },
   createdAt: "2025-01-01T00:00:00.000Z",
 });
 

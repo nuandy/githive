@@ -7,13 +7,13 @@ import {
 	DashboardSidebar,
 	LaneChangeRequests,
 	MergeAheadMatrix,
-	PlanPanel,
 	SliceLanes,
 	TaskDetailBoundary,
 	TaskHeader,
+	TaskSettings,
 } from "./components";
 import { newestTasks } from "./lib/dashboardData";
-import type { DashboardShellAction, DashboardShellApi, DashboardTimerScheduler } from "./dashboard-contract";
+import type { DashboardShellApi, DashboardTimerScheduler } from "./dashboard-contract";
 import "./App.css";
 
 /** The coordinator-free repo a #/free/<repo> address names, if any. */
@@ -45,38 +45,6 @@ export function recordDashboardError(errors: string[], operation: string, error:
 
 export function clearDashboardError(errors: string[], operation: string): string[] {
 	return errors.filter((entry) => !entry.startsWith(`${operation}:`));
-}
-
-export class DashboardOperationError extends Error {
-	constructor(readonly operation: string, cause: unknown) {
-		super(cause instanceof Error ? cause.message : String(cause));
-		this.name = "DashboardOperationError";
-	}
-}
-
-export async function createTaskAndPlan(shellApi: DashboardShellApi, repo: string, goal: string): Promise<Task> {
-	let task: Task;
-	try {
-		task = await shellApi.create(repo, goal);
-	} catch (error) {
-		throw new DashboardOperationError("Create task", error);
-	}
-	try {
-		return await shellApi.plan(task.id);
-	} catch (error) {
-		throw new DashboardOperationError("Start planning", error);
-	}
-}
-
-export async function runDashboardAction(shellApi: DashboardShellApi, id: string, action: DashboardShellAction): Promise<void> {
-	if (action === "plan") {
-		await shellApi.plan(id);
-	} else if (action === "approve-build") {
-		await shellApi.approve(id);
-		await shellApi.build(id);
-	} else {
-		await shellApi.land(id);
-	}
 }
 
 export function startDashboardPolling(
@@ -118,9 +86,8 @@ export function App() {
 	const [live, setLive] = useState<Live | null>(null);
 	const [tasksLoaded, setTasksLoaded] = useState(false);
 	const [reposLoaded, setReposLoaded] = useState(false);
-	const [creating, setCreating] = useState(false);
+	const [opening, setOpening] = useState(false);
 	const [busy, setBusy] = useState(false);
-	const [contractReadiness, setContractReadiness] = useState<{ taskId: string; contractsKey: string; selectionEpoch: number; ready: boolean } | null>(null);
 	const [errors, setErrors] = useState<string[]>([]);
 	const [freeRepos, setFreeRepos] = useState<{ repo: string; since: string }[]>([]);
 	const [freeRepo, setFreeRepo] = useState<string | null>(() => freeRepoFromHash(window.location.hash));
@@ -248,60 +215,20 @@ export function App() {
 	const selectedTask = live?.task.id === selectedId
 		? live.task
 		: tasks.find((task) => task.id === selectedId) ?? null;
-	const selectedContractsKey = selectedTask ? JSON.stringify(selectedTask.contracts) : "";
-	const contractsReady = !!selectedTask && selectedTask.phase === "awaiting-approval"
-		&& contractReadiness?.taskId === selectedTask.id
-		&& contractReadiness.selectionEpoch === selectionEpoch
-		&& contractReadiness.contractsKey === selectedContractsKey
-		&& contractReadiness.ready;
-	const onContractFilesReady = useCallback((taskId: string, ready: boolean) => {
-		if (selectedTask?.id !== taskId) return;
-		setContractReadiness({ taskId, contractsKey: selectedContractsKey, selectionEpoch, ready });
-	}, [selectedContractsKey, selectedTask?.id, selectionEpoch]);
-
-	const createTask = useCallback(async (repo: string, goal: string) => {
-		setCreating(true);
-		const shellApi: DashboardShellApi = {
-			...api,
-			create: async (selectedRepo, selectedGoal) => {
-				const task = await api.create(selectedRepo, selectedGoal);
-				setTasks((current) => newestTasks([...current.filter((item) => item.id !== task.id), task]));
-				clearError("Create task");
-				selectTask(task.id);
-				return task;
-			},
-		};
+	const openRepo = useCallback(async (repo: string) => {
+		setOpening(true);
 		try {
-			const planned = await createTaskAndPlan(shellApi, repo, goal);
-			setTasks((current) => newestTasks([...current.filter((item) => item.id !== planned.id), planned]));
-			clearError("Start planning");
-			await refresh();
+			const task = await api.openRepo(repo);
+			setTasks((current) => newestTasks([...current.filter((item) => item.id !== task.id), task]));
+			clearError("Open repo");
+			selectTask(task.id);
+			await fetchTasks();
 		} catch (error) {
-			const operation = error instanceof DashboardOperationError ? error.operation : "Create task";
-			reportError(operation, error);
+			reportError("Open repo", error);
 		} finally {
-			setCreating(false);
+			setOpening(false);
 		}
-	}, [clearError, refresh, reportError, selectTask]);
-
-	const runAction = useCallback(async (action: DashboardShellAction) => {
-		if (!selectedTask || busy) return;
-		// Keep the shell action guarded independently of the disabled approval button.
-		if (action === "approve-build" && !contractsReady) return;
-		const id = selectedTask.id;
-		const operation = action === "approve-build" ? "Approve and build" : action === "plan" ? "Plan" : "Land";
-		setBusy(true);
-		try {
-			await runDashboardAction(api, id, action);
-			if (action === "plan") clearError("Start planning");
-			clearError(operation);
-		} catch (error) {
-			reportError(operation, error);
-		} finally {
-			await refresh();
-			setBusy(false);
-		}
-	}, [busy, clearError, contractsReady, refresh, reportError, selectedTask]);
+	}, [clearError, fetchTasks, reportError, selectTask]);
 
 	const waiveSlice = useCallback(async (sliceId: string, reason: string) => {
 		if (!selectedTask || busy) return;
@@ -318,7 +245,6 @@ export function App() {
 			setBusy(false);
 		}
 	}, [busy, clearError, refresh, reportError, selectedTask]);
-	const plannerRunning = selectedTask?.planner?.status === "running";
 	const showingLive = live?.task.id === selectedId ? live : null;
 
 	return (
@@ -333,9 +259,9 @@ export function App() {
 						repos={repos}
 						selectedId={selectedId}
 						taskLoading={!tasksLoaded}
-						creating={creating}
+						opening={opening}
 						onSelect={selectTask}
-						onCreate={(repo, goal) => void createTask(repo, goal)}
+						onOpenRepo={(repo) => void openRepo(repo)}
 					/>
 					<FreeRepoList repos={freeRepos} selected={freeRepo} />
 				</aside>
@@ -356,28 +282,21 @@ export function App() {
 						)
 					) : !selectedTask ? (
 						<section className="dashboard-empty card">
-							<h1>{tasksLoaded && tasks.length === 0 ? "No tasks yet" : selectedId ? "Loading task…" : "Blueprint dashboard"}</h1>
-							<p className="muted">{tasksLoaded && tasks.length === 0 ? "Create a task to start planning and building." : selectedId ? "The selected task will appear here when it is available." : "Choose a task or create a new one to get started."}</p>
+							<h1>{tasksLoaded && tasks.length === 0 ? "No repos open yet" : selectedId ? "Loading task…" : "Blueprint dashboard"}</h1>
+							<p className="muted">{tasksLoaded && tasks.length === 0
+								? <>Open a repo for agents from the sidebar, or let agents join one themselves with the MCP <code>join_repo</code> tool.</>
+								: selectedId ? "The selected task will appear here when it is available." : "Choose an open repo, or open a new one for agents."}</p>
 							{!reposLoaded && <p className="muted">Loading repositories…</p>}
 						</section>
 					) : (
 						<TaskDetailBoundary key={`${selectedTask.id}:${selectionEpoch}`}>
 							<div className="dashboard-task">
-								<TaskHeader
-									task={selectedTask}
-									plannerRunning={plannerRunning}
-									busy={busy}
-									contractsReady={contractsReady}
-									onPlan={() => void runAction("plan")}
-									onApproveAndBuild={() => void runAction("approve-build")}
-								/>
-								<PlanPanel task={selectedTask} />
+								<TaskHeader task={selectedTask} busy={busy} />
+								<TaskSettings task={selectedTask} />
 								<CodeDecisions
 									task={selectedTask}
 									busy={busy}
 									onWaive={(sliceId, reason) => void waiveSlice(sliceId, reason)}
-									onLand={() => void runAction("land")}
-									onContractFilesReady={onContractFilesReady}
 								/>
 								{showingLive && <SliceLanes live={showingLive} />}
 								<LaneChangeRequests task={selectedTask} />

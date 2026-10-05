@@ -5,7 +5,7 @@ import type { Live } from "../src/api";
 import { SliceLanes } from "../src/components/SliceLanes";
 const live = {
 	task: {
-		id: "t1", repo: "repo", goal: "goal", phase: "building", contracts: [], verify: [],
+		id: "t1", repo: "repo", goal: "goal", phase: "building", verify: [],
 		review: { reviewers: [], required: 0, vetoes: [] }, checks: [], createdAt: "now",
 		slices: [{ id: "ui", title: "UI", owns: ["src/ui/"], status: "building", touched: [], outOfLane: [], reviews: [], instructions: "" }],
 		laneChangeRequests: [{ id: "r1", requester: "ui", owner: "api", path: "src/api/routes.ts", need: "Add route", reason: "UI needs endpoint", status: "answered", createdAt: "now", answer: "Added" }],

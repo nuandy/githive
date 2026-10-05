@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState } from "react";
-import { api, type Slice, type Task } from "../api";
-import type { CodeDecisionsProps, ContractFile, UnifiedCodeDiff } from "../dashboard-contract";
+import { useEffect, useState } from "react";
+import { api, type Slice } from "../api";
+import type { CodeDecisionsProps, UnifiedCodeDiff } from "../dashboard-contract";
 import "./CodeDecisions.css";
 
 interface StoredDiff {
@@ -20,11 +20,6 @@ function needsHuman(slice: Slice): boolean {
 
 function humanKey(slice: Slice): string {
 	return JSON.stringify([slice.id, slice.attention, slice.lastFeedback, slice.reviewHead, slice.mergeBase]);
-}
-
-function isReadyToLand(task: Task): boolean {
-	const slices = Array.isArray(task.slices) ? task.slices : [];
-	return task.phase === "building" && slices.length > 0 && slices.every((slice) => slice.status === "integrated");
 }
 
 function ChangedFiles({ diff, label }: { diff: UnifiedCodeDiff; label: string }) {
@@ -51,45 +46,13 @@ function ChangedFiles({ diff, label }: { diff: UnifiedCodeDiff; label: string })
 	);
 }
 
-export function CodeDecisions({ task, busy, onWaive, onLand, onContractFilesReady }: CodeDecisionsProps) {
+export function CodeDecisions({ task, busy, onWaive }: CodeDecisionsProps) {
 	const slices = Array.isArray(task.slices) ? task.slices : [];
-	const contracts = Array.isArray(task.contracts) ? task.contracts : [];
 	const humanSlices = slices.filter(needsHuman);
-	const awaitingApproval = task.phase === "awaiting-approval";
-	const contractKey = JSON.stringify([task.id, awaitingApproval, contracts]);
 	const humanStateKey = JSON.stringify([task.id, humanSlices.map(humanKey)]);
-	const landingKey = JSON.stringify([task.id, task.phase, slices.map((slice) => [slice.id, slice.status])]);
-	const [contractState, setContractState] = useState<{ key: string; loading: boolean; files?: ContractFile[]; error?: string } | null>(null);
-	const [contractRetry, setContractRetry] = useState(0);
 	const [diffs, setDiffs] = useState<Record<string, StoredDiff>>({});
 	const [diffRetry, setDiffRetry] = useState(0);
 	const [reasons, setReasons] = useState<Record<string, string>>({});
-	const [landingState, setLandingState] = useState<{ key: string; loading: boolean; opened: boolean; diff?: UnifiedCodeDiff; error?: string } | null>(null);
-	const landingRequest = useRef(0);
-
-	useEffect(() => {
-		if (!awaitingApproval) {
-			setContractState(null);
-			onContractFilesReady(task.id, false);
-			return;
-		}
-		let active = true;
-		onContractFilesReady(task.id, false);
-		setContractState({ key: contractKey, loading: true });
-		void api.contractFiles(task.id).then((files) => {
-			if (!Array.isArray(files)) throw new Error("Invalid contract files response.");
-			if (active) {
-				setContractState({ key: contractKey, loading: false, files });
-				onContractFilesReady(task.id, true);
-			}
-		}).catch((error: unknown) => {
-			if (active) {
-				setContractState({ key: contractKey, loading: false, error: message(error) });
-				onContractFilesReady(task.id, false);
-			}
-		});
-		return () => { active = false; };
-	}, [awaitingApproval, contractKey, contractRetry, onContractFilesReady, task.id]);
 
 	useEffect(() => {
 		let active = true;
@@ -108,50 +71,8 @@ export function CodeDecisions({ task, busy, onWaive, onLand, onContractFilesRead
 		return () => { active = false; };
 	}, [humanStateKey, diffRetry, task.id]);
 
-	useEffect(() => {
-		landingRequest.current++;
-		setLandingState(null);
-	}, [landingKey]);
-
-	async function openLandingDiff() {
-		if (!isReadyToLand(task) || busy) return;
-		const requestId = ++landingRequest.current;
-		setLandingState({ key: landingKey, loading: true, opened: false });
-		try {
-			const diff = await api.landingDiff(task.id);
-			if (landingRequest.current === requestId) setLandingState({ key: landingKey, loading: false, opened: true, diff });
-		} catch (error) {
-			if (landingRequest.current === requestId) setLandingState({ key: landingKey, loading: false, opened: false, error: message(error) });
-		}
-	}
-
-	const visibleContractState = contractState?.key === contractKey ? contractState : null;
-	const visibleLandingState = landingState?.key === landingKey ? landingState : null;
-	const canLand = isReadyToLand(task) && visibleLandingState?.opened === true && visibleLandingState.diff !== undefined && !visibleLandingState.loading;
-
 	return (
 		<section className="code-decisions" aria-label="Code decision details">
-			{awaitingApproval ? (
-				<section className="code-decisions__section card" aria-labelledby="code-contracts-title">
-					<h2 id="code-contracts-title">Blueprint contract code</h2>
-					<p className="muted">Review the full contents of every contract file before approving this blueprint.</p>
-					{visibleContractState?.loading || !visibleContractState ? <p className="muted" role="status">Loading contract files…</p> : null}
-					{visibleContractState?.error ? (
-						<div className="code-decisions__error" role="alert">
-							<p>Could not load contract files: {visibleContractState.error}</p>
-							<button type="button" onClick={() => setContractRetry((count) => count + 1)}>Retry</button>
-						</div>
-					) : null}
-					{visibleContractState?.files?.length === 0 ? <p className="muted">There are no contract files.</p> : null}
-					{visibleContractState?.files?.map((file, index) => (
-						<article className="code-decisions__contract" key={`${file.path}-${index}`}>
-							<h3><code>{file.path}</code></h3>
-							<pre className="code-decisions__code" tabIndex={0} role="region" aria-label={`Contract file ${file.path}`}><code>{file.content}</code></pre>
-						</article>
-					))}
-				</section>
-			) : null}
-
 			{humanSlices.length > 0 ? (
 				<section className="code-decisions__section card" aria-labelledby="code-human-title">
 					<h2 id="code-human-title">Human review decisions</h2>
@@ -197,25 +118,6 @@ export function CodeDecisions({ task, busy, onWaive, onLand, onContractFilesRead
 							</article>
 						);
 					})}
-				</section>
-			) : null}
-
-			{isReadyToLand(task) ? (
-				<section className="code-decisions__section card" aria-labelledby="code-landing-title">
-					<h2 id="code-landing-title">Review full task diff before landing</h2>
-					<p className="muted">Open and review the complete task diff against the project before you can confirm landing.</p>
-					{!visibleLandingState?.opened ? (
-						<button type="button" onClick={() => void openLandingDiff()} disabled={busy || visibleLandingState?.loading}>
-							{visibleLandingState?.loading ? "Loading full task diff…" : visibleLandingState?.error ? "Retry full task diff" : "Open full task diff"}
-						</button>
-					) : null}
-					{visibleLandingState?.error ? <p className="code-decisions__error" role="alert">Could not load the task diff: {visibleLandingState.error}</p> : null}
-					{visibleLandingState?.diff ? <>
-						<p className="code-decisions__commits muted">Project <code>{visibleLandingState.diff.base}</code> → task <code>{visibleLandingState.diff.head}</code></p>
-						<ChangedFiles diff={visibleLandingState.diff} label="Landing diff" />
-						<pre className="code-decisions__code code-decisions__diff-text" tabIndex={0} role="region" aria-label="Unified task diff for landing"><code>{visibleLandingState.diff.unified || "(No changes in this diff.)"}</code></pre>
-						<button className="primary code-decisions__land" type="button" onClick={onLand} disabled={busy || !canLand}>Confirm land</button>
-					</> : null}
 				</section>
 			) : null}
 		</section>

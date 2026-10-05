@@ -5,11 +5,9 @@ import type { CodeVisibilityApi } from "../src/dashboard-contract";
 const codeApi = api as unknown as CodeVisibilityApi;
 
 describe("dashboard code decision API", () => {
-  it("loads contract contents, pinned slice and landing diffs with all/omitted file lists, and posts a waiver reason", async () => {
+  it("loads a pinned slice diff with all/omitted file lists and posts a waiver reason", async () => {
     const responses = new Map<string, unknown>([
-      ["/tasks/task%20%2F1/contracts", { files: [{ path: "test/contract.ts", content: "export interface Contract {}\n" }] }],
       ["/tasks/task%20%2F1/slices/slice%2Fone/diff", { base: "base-sha", head: "review-sha", unified: "--- a/file.ts\n+++ b/file.ts\n", files: ["file.ts", "large.json"], omitted: ["large.json"] }],
-      ["/tasks/task%20%2F1/land-diff", { base: "project-sha", head: "task-sha", unified: "diff text\n", files: ["file.ts"], omitted: [] }],
       ["/tasks/task%20%2F1/slices/slice%2Fone/waive", { waived: true }],
     ]);
     const originalFetch = globalThis.fetch;
@@ -20,19 +18,15 @@ describe("dashboard code decision API", () => {
     });
     globalThis.fetch = request as unknown as typeof fetch;
     try {
-      await expect(codeApi.contractFiles("task /1")).resolves.toEqual([
-        { path: "test/contract.ts", content: "export interface Contract {}\n" },
-      ]);
       await expect(codeApi.sliceDiff("task /1", "slice/one")).resolves.toMatchObject({
         base: "base-sha", head: "review-sha", unified: expect.stringContaining("--- a/file.ts"),
         files: ["file.ts", "large.json"], omitted: ["large.json"],
       });
-      await expect(codeApi.landingDiff("task /1")).resolves.toMatchObject({ base: "project-sha", head: "task-sha", unified: "diff text\n", files: ["file.ts"], omitted: [] });
       await codeApi.waive("task /1", "slice/one", "Human accepts this review risk");
 
       expect(request.mock.calls.map(([input]) => String(input))).toEqual([...responses.keys()]);
-      expect(request.mock.calls.map(([, init]) => init?.method ?? "GET")).toEqual(["GET", "GET", "GET", "POST"]);
-      expect(JSON.parse(String(request.mock.calls[3][1]?.body))).toEqual({ reason: "Human accepts this review risk" });
+      expect(request.mock.calls.map(([, init]) => init?.method ?? "GET")).toEqual(["GET", "POST"]);
+      expect(JSON.parse(String(request.mock.calls[1][1]?.body))).toEqual({ reason: "Human accepts this review risk" });
     } finally {
       globalThis.fetch = originalFetch;
     }
