@@ -12,6 +12,7 @@
 //                          [--mode free] (coordinator-free mode: the same lifecycle through the free_* tools, no Coordinator)
 //                          [--shard-depth 2] (free mode: how deep claims are sharded; 0 keeps them in one record)
 //                          [--ramp 60]   (agents start spread evenly over this many seconds, instead of all at once)
+//                          [--access shared] (free mode: agents push branches to the project repo instead of their own forks)
 //
 // Credentials come from .dev.vars (CF_ACCESS_CLIENT_ID, CF_ACCESS_CLIENT_SECRET) and are never printed.
 // Each run gets its own repo, so its Coordinator starts idle. Results go to
@@ -42,6 +43,7 @@ const IDLE = Number(args.idle ?? 0);
 const FREE = args.mode === "free";
 const SHARD_DEPTH = args["shard-depth"] === undefined ? undefined : Number(args["shard-depth"]);
 const RAMP_MS = Number(args.ramp ?? 0) * 1000;
+const ACCESS = args.access === "shared" ? "shared" : "forks";
 
 // Calls can wait minutes behind the lock under load; don't let the client give up first.
 try {
@@ -226,7 +228,7 @@ async function main() {
 		});
 	}
 	if (FREE) {
-		const started = await tool(0, "free_start", { repo: REPO, ...(SHARD_DEPTH === undefined ? {} : { shard_depth: SHARD_DEPTH }) });
+		const started = await tool(0, "free_start", { repo: REPO, access: ACCESS, ...(SHARD_DEPTH === undefined ? {} : { shard_depth: SHARD_DEPTH }) });
 		console.log(`coordinator-free mode on ${REPO} at ${BASE} (access: ${started.access}, claims sharded ${started.shardDepth ? `${started.shardDepth} deep, over ${started.recordsRepos || "no"} records repos` : "not at all"})`);
 	}
 	const task = FREE ? { id: null } : await api("POST", `/repos/${REPO}/open`, {});
