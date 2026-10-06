@@ -9,6 +9,8 @@
 //   node scripts/mcp-agent.mjs clone <dir> --task T --change C          open mode: clone a change's fork (shallow; --full x for all history)
 //   node scripts/mcp-agent.mjs clone <dir> --repo R --change C --key-file F   coordinator-free: clone the project, push to your fork (remote "fork")
 //   node scripts/mcp-agent.mjs auth <dir> (same flags as clone)          fresh write access for an existing clone
+//   node scripts/mcp-agent.mjs review-clone <dir> --repo R --change C [--key-file F]   coordinator-free: a change to review
+//        (the project, with the change's branch from its author's fork as "change", checked out at its pushed head)
 //
 // --base defaults to the bench Worker. Access credentials come from .dev.vars
 // (CF_ACCESS_CLIENT_ID, CF_ACCESS_CLIENT_SECRET).
@@ -102,7 +104,20 @@ switch (command) {
 		console.log(`${command === "clone" ? "cloned" : "refreshed"} ${dir}${project ? " (push your branch to the remote \"fork\")" : ""}`);
 		break;
 	}
+	case "review-clone": {
+		const [dir] = positional;
+		const access = await tool("free_review_access", { repo: flags.repo, change: flags.change }, flags["key-file"]);
+		// Deep enough to diff against the project's branch; read-only tokens, each in this clone's own config.
+		execFileSync("git", ["-c", header(access.project.token), "clone", "--quiet", "--depth", "50", "--branch", access.project.branch, access.project.url, dir], { stdio: "inherit" });
+		execFileSync("git", ["-C", dir, "config", `http.${access.project.url}.extraHeader`, `Authorization: Bearer ${access.project.token.split("?")[0]}`]);
+		execFileSync("git", ["-C", dir, "remote", "add", "change", access.url]);
+		execFileSync("git", ["-C", dir, "config", `http.${access.url}.extraHeader`, `Authorization: Bearer ${access.token.split("?")[0]}`]);
+		execFileSync("git", ["-C", dir, "fetch", "--quiet", "--depth", "50", "change", `${access.branch}:refs/remotes/change/${access.branch}`], { stdio: "inherit" });
+		execFileSync("git", ["-C", dir, "checkout", "--quiet", access.head]);
+		console.log(JSON.stringify({ dir, change: access.change, author: access.author, head: access.head, base: `origin/${access.project.branch}` }));
+		break;
+	}
 	default:
-		console.error("usage: call | register | clone | auth (see the top of this file)");
+		console.error("usage: call | register | clone | auth | review-clone (see the top of this file)");
 		process.exit(2);
 }

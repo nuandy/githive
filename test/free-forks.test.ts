@@ -53,6 +53,27 @@ describe("forks (the default)", () => {
 		await call("free_start", {});
 	});
 
+	it("gives any reviewer read access to a change's branch in its author's fork, once something is pushed", async () => {
+		const { key: keyA } = (await call("free_register", { agent: "agent-a" })) as { key: string };
+		const { key: keyR } = (await call("free_register", { agent: "reviewer-1" })) as { key: string };
+		expect(await call("free_review_access", { change: "a-1" }, keyR)).toEqual({ error: "no change a-1 on project" });
+		await call("free_claim", { change: "a-1", agent: "agent-a", paths: ["src/a.ts"], intent: "a" }, keyA);
+		expect(await call("free_review_access", { change: "a-1" }, keyR)).toEqual({ error: "a-1 has nothing pushed to review yet" });
+		const head = await pushChange(fork.url, work, "agent-a", "a-1", { "src/a.ts": "a\n" });
+		forkRequests = [];
+		expect(await call("free_review_access", { change: "a-1" }, keyR)).toEqual({
+			change: "a-1",
+			author: "agent-a",
+			url: fork.url,
+			token: "fork-read",
+			branch: "changes/a-1",
+			head,
+			project: { url: project.url, token: "read", branch: "main" },
+		});
+		// Read access only, to the author's fork.
+		expect(forkRequests).toEqual([{ agent: "agent-a", scope: "read" }]);
+	});
+
 	it("gives an agent read access to the project, and write access only to its own fork, shared by its changes", async () => {
 		expect(await call("free_credentials", {})).toEqual({ url: project.url, token: "read", note: expect.stringMatching(/read-only/) });
 		expect(await call("free_credentials", { change: "a-1" })).toEqual({ error: "a-1 holds no claim: claim its paths first" });

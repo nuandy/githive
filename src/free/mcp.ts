@@ -83,14 +83,14 @@ export const FREE_INSTRUCTIONS = `Coordinator-free mode (the free_* tools): nobo
 Conventions:
 1. free_claim the paths you will change before editing; edit only inside your claim. A refusal names who holds what: narrow your claim, or ask them.
 2. Work on a branch changes/<change>, started from the project's branch, and push it to your own fork (free_credentials with your change: one fork per agent, for all its changes; only you can write it). The project's branch (free_start names it: main, master, ...) is written only through the toolkit.
-3. Reviewers free_vote on the exact commit they reviewed. A change merges with the policy's approvals, including every veto role's, and no veto. Approvals count once per verified identity (register reviewers so each is its own), and never the change's author. free_status shows your change's votes, with the evidence for any rejection to fix, and what's still needed.
+3. Reviewers get the change's code with free_review_access (read-only: its branch in the author's fork, and the project to diff against), then free_vote on the exact commit they reviewed. A change merges with the policy's approvals, including every veto role's, and no veto. Approvals count once per verified identity (register reviewers so each is its own), and never the change's author. free_status shows your change's votes, with the evidence for any rejection to fix, and what's still needed.
 4. Run free_check after you push: it test-merges your change with the project's branch and lists files outside your claim, so you hear about problems before merging.
 5. free_merge merges your branch with trailers recording the claims and votes it checked, then releases your claim. Merge by hand only with the same trailers.
 6. Claiming again (same paths) keeps your claim active. A claim idle for 30 minutes is released by whoever claims its paths, or by anyone (free_release with stale: true).
 7. Anyone may free_revert a commit free_audit reports; the audit then counts it resolved.
 8. Something agents can't settle (reviewers disagree, a trade-off needs an owner)? free_ask_human with the reason: a person sees it in their inbox and decides with their own vote.
-8. free_request_review asks Blueprint's hosted reviewers for votes on your change; free_build has Blueprint's hosted builder make a change from start to merge.
-9. Agents that share an Access identity tell themselves apart with free_register: it returns your agent key once; send it (header X-Blueprint-Agent-Key, or agent_key) with every call, and what you write is attributed to you. A registered name is never used without its key.
+9. free_request_review asks Blueprint's hosted reviewers for votes on your change; free_build has Blueprint's hosted builder make a change from start to merge.
+10. Agents that share an Access identity tell themselves apart with free_register: it returns your agent key once; send it (header X-Blueprint-Agent-Key, or agent_key) with every call, and what you write is attributed to you. A registered name is never used without its key.
 free_audit replays the records and lists every broken convention, with the commit and the agent.`;
 
 const str = { type: "string" } as const;
@@ -100,6 +100,7 @@ const TOOL_LIST = [
 	{ name: "free_claims", description: "The claims in force: who holds which paths, and why.", inputSchema: { type: "object", properties: { repo: str }, required: ["repo"] } },
 	{ name: "free_claim", description: "Claim paths for your change (again to extend it, or to keep it active). Refused, naming the holder, if another claim overlaps; a claim in the way idle for 30 minutes is released as stale instead.", inputSchema: { type: "object", properties: { repo: str, change: str, agent: str, paths: { type: "array", items: str }, intent: str }, required: ["repo", "change", "agent", "paths", "intent"] } },
 	{ name: "free_release", description: "Release a claim: yours, or another's idle for 30 minutes with stale: true.", inputSchema: { type: "object", properties: { repo: str, change: str, agent: str, reason: str, stale: { type: "boolean" } }, required: ["repo", "change", "agent"] } },
+	{ name: "free_review_access", description: "Read access to a change you'll review: a read-only token for the author's fork, the change's branch (changes/<change>) and its pushed head, and read access to the project to diff against. Anyone may review; each grant is logged.", inputSchema: { type: "object", properties: { repo: str, change: str }, required: ["repo", "change"] } },
 	{ name: "free_vote", description: "Record your review verdict on the exact commit you reviewed.", inputSchema: { type: "object", properties: { repo: str, commit: str, reviewer: str, role: str, verdict: { type: "string", enum: ["approve", "reject"] }, evidence: str }, required: ["repo", "commit", "reviewer", "role", "verdict", "evidence"] } },
 	{ name: "free_merge", description: "Merge changes/<change> into the project's branch if the conventions hold, recording what was checked, then release the claim.", inputSchema: { type: "object", properties: { repo: str, change: str, agent: str }, required: ["repo", "change", "agent"] } },
 	{ name: "free_build", description: "Have Blueprint's hosted builder make a change: it claims the paths, builds on changes/<change>, asks the hosted reviewers when done, and the change merges once approved and checked.", inputSchema: { type: "object", properties: { repo: str, intent: str, paths: { type: "array", items: str } }, required: ["repo", "intent", "paths"] } },
@@ -118,6 +119,7 @@ export const FREE_TOOLS = annotate(
 		free_start: writes("Start coordinator-free mode", { idempotent: true }),
 		free_credentials: writes("Get Git access", { idempotent: true }),
 		free_claims: reads("List claims"),
+		free_review_access: reads("Get read access to a change to review"),
 		free_claim: writes("Claim paths", { idempotent: true }),
 		free_release: destroys("Release a claim", { idempotent: true }),
 		free_vote: writes("Vote on a commit", { idempotent: true }),
@@ -484,6 +486,19 @@ async function runFreeTool(name: string, args: Args, ctx: FreeContext): Promise<
 			await ctx.register?.(repo);
 			const registry = (await claims.read())?.commit.state;
 			return { repo, branch: projectBranch(registry), policy: registry?.policy ?? policy, verify: registry?.verify ?? [], ...shardingOf(registry), instructions: FREE_INSTRUCTIONS };
+		}
+		case "free_review_access": {
+			// Anyone may review: a read-only view of the change's branch in its author's fork (or its own fork, from before forks were per agent).
+			const change = requiredString(args, "change");
+			const { claim: held, released } = await changeOf(change);
+			const author = held?.agent ?? released.at(-1)?.agent;
+			if (!author) throw new Error(`[404] no change ${change} on ${repo}`);
+			const [fork, project] = await Promise.all([changeSource(author, "read", change), ctx.remote(repo, "read")]);
+			const head = await branchHead(fork, `changes/${change}`).catch(() => null);
+			if (!head) throw new Error(`[409] ${change} has nothing pushed to review yet`);
+			// Agent names only: a person's identity stays in the records, out of logs.
+			console.log(`review access to ${repo} ${change} (${author}) for ${acting ?? "an unregistered caller"}`);
+			return { change, author, url: fork.url, token: fork.token, branch: `changes/${change}`, head, project: { url: project.url, token: project.token, branch: projectBranch(registered) } };
 		}
 		case "free_credentials": {
 			if (typeof args.change !== "string" || !args.change.trim()) {
