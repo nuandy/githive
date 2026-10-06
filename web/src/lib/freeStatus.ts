@@ -101,3 +101,10 @@ export function recordsBadge(snapshot: Pick<FreeSnapshot, "sharding" | "shardDep
 	const label = claims.sharded && votes?.sharded ? "Sharded claims & votes" : claims.sharded ? "Sharded claims" : votes?.sharded ? "Sharded votes" : claims.label;
 	return { label, sharded: claims.sharded || !!votes?.sharded, detail: [claims.detail, votes?.detail].filter(Boolean).join(" ") };
 }
+
+/** Who may vote as each role that can block a merge, in words: the policy's grants, else people and Blueprint's reviewers. */
+export function blockingRoles(policy: FreeSnapshot["policy"]): { role: string; holders: string }[] {
+	const roles = [...new Set([...policy.vetoes, ...(policy.escalate ?? []).flatMap((e) => e.vetoes ?? [])])];
+	const name = (grant: string) => (grant === "person:*" ? "people" : grant === "blueprint" ? "Blueprint's reviewers" : grant.startsWith("person:") ? identityName(grant) : grant);
+	return roles.map((role) => ({ role, holders: (policy.grants?.[role] ?? ["person:*", "blueprint"]).map(name).join(", ") }));
+}

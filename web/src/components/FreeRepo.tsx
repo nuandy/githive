@@ -1,7 +1,7 @@
 import { FreeVoteForm, type FreeVoteApi } from "./FreeVoteForm";
 import type { FreeAudit, FreeChangeHistory, FreeSnapshot } from "../api";
 import { identityName } from "../lib/agent";
-import { claimAgent, claimApprovalLabel, claimTitle, freeClaimStatus, shardingSummary, votesForClaim, votesShardingSummary, type FreeClaim } from "../lib/freeStatus";
+import { claimAgent, claimApprovalLabel, claimTitle, blockingRoles, freeClaimStatus, shardingSummary, votesForClaim, votesShardingSummary, type FreeClaim } from "../lib/freeStatus";
 import { shortSha, briefPaths } from "../lib/model";
 import { shortAge, timeAgo } from "../lib/relativeTime";
 import { href, type RepoBase } from "../lib/routes";
@@ -207,6 +207,17 @@ export function FreeSettings({ snapshot }: { snapshot: FreeSnapshot }) {
 							Merging needs {policy.required} {policy.required === 1 ? "approval" : "approvals"}
 							{policy.vetoes.length ? `; ${policy.vetoes.join(", ")} can block` : ""}
 						</dd>
+						{blockingRoles(policy).length ? (
+							<>
+								<dt>Who can block</dt>
+								<dd>
+									{blockingRoles(policy)
+										.map(({ role, holders }) => `${role}: ${holders}`)
+										.join("; ")}
+									. A vote as one of these roles from anyone else counts as an ordinary review.
+								</dd>
+							</>
+						) : null}
 						<dt>Merge checks</dt>
 						<dd>{verify.length ? verify.map((c) => <code key={c}>{c}</code>) : "No checks before merging"}</dd>
 						<dt>Signed records</dt>

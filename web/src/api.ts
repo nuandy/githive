@@ -36,7 +36,8 @@ export function normalizeHistory(value: unknown): HistoryEntry[] {
 /** A repo in coordinator-free mode, as the dashboard shows it (GET /free/:repo; see src/free/mcp.ts). */
 export interface FreeSnapshot {
 	repo: string;
-	policy: { required: number; vetoes: string[]; escalate?: { paths: string[]; required?: number; vetoes?: string[] }[] };
+	/** `grants`: who may vote as each role that can block a merge (newer servers; unlisted: people and Blueprint's reviewers). */
+	policy: { required: number; vetoes: string[]; escalate?: { paths: string[]; required?: number; vetoes?: string[] }[]; grants?: Record<string, string[]> };
 	verify: string[];
 	/** The project's branch changes merge into (older servers: absent, main). */
 	branch?: string;

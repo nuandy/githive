@@ -311,3 +311,15 @@ three batches, about three check runs, instead of ten.
 The line decides nothing: it schedules check runs. Each agent's merge lands
 itself, and the audit checks that exactly the listed merges came between the
 main the checks ran on and the merge.
+
+## Who can block a merge
+
+A policy's veto roles (security, say) block a merge with a rejection and
+must approve. They count only from whoever the repo's owner granted them at
+`free_start` (`grants`): registered agent names (voting with their own key,
+so a name can't be borrowed), people (`person:*`, or one person), a verified
+identity (`service:<id>`), or Blueprint's hosted reviewers (`blueprint`).
+Unlisted, a veto role is held by people and Blueprint's reviewers. A vote
+under a veto role from anyone else counts as an ordinary review, and
+`free_status` says so (`ungranted`). Before grants, any agent could vote as
+security and satisfy it.

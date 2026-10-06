@@ -83,7 +83,7 @@ export const FREE_INSTRUCTIONS = `Coordinator-free mode (the free_* tools): nobo
 Conventions:
 1. free_claim the paths you will change before editing; edit only inside your claim. A refusal names who holds what: narrow your claim, or ask them.
 2. Work on a branch changes/<change>, started from the project's branch, and push it to your own fork (free_credentials with your change: one fork per agent, for all its changes; only you can write it). The project's branch (free_start names it: main, master, ...) is written only through the toolkit.
-3. Reviewers get the change's code with free_review_access (read-only: its branch in the author's fork, and the project to diff against), then free_vote on the exact commit they reviewed. A change merges with the policy's approvals, including every veto role's, and no veto. Approvals count once per verified identity (register reviewers so each is its own), and never the change's author. free_status shows your change's votes, with the evidence for any rejection to fix, and what's still needed.
+3. Reviewers get the change's code with free_review_access (read-only: its branch in the author's fork, and the project to diff against), then free_vote on the exact commit they reviewed. A change merges with the policy's approvals, including every veto role's, and no veto; a veto role counts only from whoever free_start granted it (by default people and Blueprint's reviewers), so register with your key to vote as one. Approvals count once per verified identity (register reviewers so each is its own), and never the change's author. free_status shows your change's votes, with the evidence for any rejection to fix, and what's still needed.
 4. Run free_check after you push: it test-merges your change with the project's branch and lists files outside your claim, so you hear about problems before merging.
 5. free_merge merges your branch with trailers recording the claims and votes it checked, then releases your claim. Merge by hand only with the same trailers.
 6. Claiming again (same paths) keeps your claim active. A claim idle for 30 minutes is released by whoever claims its paths, or by anyone (free_release with stale: true).
@@ -95,7 +95,7 @@ free_audit replays the records and lists every broken convention, with the commi
 
 const str = { type: "string" } as const;
 const TOOL_LIST = [
-	{ name: "free_start", description: "Start coordinator-free mode on a project repo (harmless if started): the review policy, the checks run before each merge (each change lives in its own fork, and only the toolkit writes the project), how claims are kept: in one record until the load calls for more (8 agents holding claims, or over 15 claim writes a minute), then sharded per path 2 segments deep over 8 records repos, so agents in different parts of the tree never contend. shard_depth shards now, this deep (0: never), and records_repos is how many repos the shards are spread over, since a repo takes one push at a time. Returns them.", inputSchema: { type: "object", properties: { repo: str, required: { type: "number" }, vetoes: { type: "array", items: str }, escalate: { type: "array", items: { type: "object", properties: { paths: { type: "array", items: str }, required: { type: "number" }, vetoes: { type: "array", items: str } }, required: ["paths"] } }, verify: { type: "array", items: str }, shard_depth: { type: "number" }, records_repos: { type: "number" } }, required: ["repo"] } },
+	{ name: "free_start", description: "Start coordinator-free mode on a project repo (harmless if started): the review policy, the checks run before each merge (each change lives in its own fork, and only the toolkit writes the project), grants: who may vote as each role that can block a merge (registered agent names, 'person:*', a verified identity like 'person:<who>' or 'service:<id>', 'blueprint' for Blueprint's reviewers; unlisted roles: people and Blueprint's reviewers), how claims are kept: in one record until the load calls for more (8 agents holding claims, or over 15 claim writes a minute), then sharded per path 2 segments deep over 8 records repos, so agents in different parts of the tree never contend. shard_depth shards now, this deep (0: never), and records_repos is how many repos the shards are spread over, since a repo takes one push at a time. Returns them.", inputSchema: { type: "object", properties: { repo: str, required: { type: "number" }, vetoes: { type: "array", items: str }, escalate: { type: "array", items: { type: "object", properties: { paths: { type: "array", items: str }, required: { type: "number" }, vetoes: { type: "array", items: str } }, required: ["paths"] } }, grants: { type: "object", additionalProperties: { type: "array", items: str } }, verify: { type: "array", items: str }, shard_depth: { type: "number" }, records_repos: { type: "number" } }, required: ["repo"] } },
 	{ name: "free_credentials", description: "Git access. With your change: a write token for its own fork, where its branch changes/<change> lives. Without: read access to the project repo.", inputSchema: { type: "object", properties: { repo: str, change: str }, required: ["repo"] } },
 	{ name: "free_claims", description: "The claims in force: who holds which paths, and why.", inputSchema: { type: "object", properties: { repo: str }, required: ["repo"] } },
 	{ name: "free_claim", description: "Claim paths for your change (again to extend it, or to keep it active). Refused, naming the holder, if another claim overlaps; a claim in the way idle for 30 minutes is released as stale instead.", inputSchema: { type: "object", properties: { repo: str, change: str, agent: str, paths: { type: "array", items: str }, intent: str }, required: ["repo", "change", "agent", "paths", "intent"] } },
@@ -166,6 +166,17 @@ function recordLog<S>(ctx: FreeContext, repo: string, ref: string): GitCasLog<S>
 }
 
 /** A repo's claims, where its registry says they are: in the registry itself, or split into per-path shards. */
+/** Role grants as free_start takes them: each role to a list of agent names, "person:*", verified identities or "blueprint". */
+function validGrants(value: unknown): Record<string, string[]> {
+	if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("[400] grants maps each role to who may vote as it");
+	const grants: Record<string, string[]> = {};
+	for (const [role, who] of Object.entries(value)) {
+		if (!Array.isArray(who) || !who.every((w) => typeof w === "string" && w.trim())) throw new Error(`[400] grants.${role} is a list: agent names, "person:*", "person:<who>", "service:<id>" or "blueprint"`);
+		grants[role] = who.map((w) => w.trim());
+	}
+	return grants;
+}
+
 /** How a repo's claims are kept, for callers and the dashboard. */
 function shardingOf(registry: Registry | null | undefined) {
 	return {
@@ -470,6 +481,7 @@ async function runFreeTool(name: string, args: Args, ctx: FreeContext): Promise<
 				vetoes: Array.isArray(args.vetoes) ? (args.vetoes as string[]) : DEFAULT_POLICY.vetoes,
 				// The default escalation unless the caller sets its own (an empty list for none).
 				escalate: Array.isArray(args.escalate) ? (args.escalate as ReviewPolicy["escalate"]) : DEFAULT_POLICY.escalate,
+				...(args.grants !== undefined ? { grants: validGrants(args.grants) } : {}),
 			};
 			const verify = Array.isArray(args.verify) ? (args.verify as string[]).filter((c) => typeof c === "string" && c.trim()) : [];
 			// Claims stay in one record until the load calls for shards, unless asked to shard now (or never: 0).

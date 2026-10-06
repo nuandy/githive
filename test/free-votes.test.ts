@@ -5,7 +5,7 @@ import { MemoryLog } from "./helpers/memory-log";
 // Coordinator-free review: reviewers append verdicts on the exact commit they
 // reviewed; a merging agent counts them itself, under the task's policy.
 
-const policy = { required: 2, vetoes: ["security"] };
+const policy = { required: 2, vetoes: ["security"], grants: { security: ["rev-2", "rev-3"] } };
 const head = "h1";
 
 describe("votes, coordinator-free", () => {
@@ -70,11 +70,11 @@ describe("votes count per verified identity, never the author's", () => {
 		expect(approval(votes, head, policy, author)).toEqual({ approved: false, approvals: 1, vetoedBy: [], awaiting: [] });
 	});
 
-	it("still takes a veto from anyone, the author included", () => {
-		const policy = { required: 2, vetoes: ["security"] };
+	it("takes a veto from whoever holds the role, the author included", () => {
+		const policy = { required: 2, vetoes: ["security"], grants: { security: ["agent-a"] } };
 		const author = { agent: "agent-a", by: "service:shared/agent-a" };
-		const votes = { votes: [cast("rev-1", "service:shared/rev-1"), cast("rev-2", "service:shared/rev-2"), cast("sec", "service:shared/agent-a", "reject", "security")] };
-		expect(approval(votes, head, policy, author)).toMatchObject({ approved: false, vetoedBy: ["sec"] });
+		const votes = { votes: [cast("rev-1", "service:shared/rev-1"), cast("rev-2", "service:shared/rev-2"), cast("agent-a", "service:shared/agent-a", "reject", "security")] };
+		expect(approval(votes, head, policy, author)).toMatchObject({ approved: false, vetoedBy: ["agent-a"] });
 	});
 
 	it("falls back to reviewer names when votes aren't signed", () => {
@@ -85,7 +85,7 @@ describe("votes count per verified identity, never the author's", () => {
 
 describe("coordinator-free policies", () => {
 	const cast = (reviewer: string, role: string, verdict: "approve" | "reject" = "approve"): VoteRecord => ({ commit: head, reviewer, role, verdict, evidence: "ok", at: "" });
-	const policy = { required: 1, vetoes: [], escalate: [{ paths: ["package.json", ".github/"], required: 2, vetoes: ["security"] }] };
+	const policy = { required: 1, vetoes: [], escalate: [{ paths: ["package.json", ".github/"], required: 2, vetoes: ["security"] }], grants: { security: ["sec", "rev-2", "rev-3"] } };
 
 	it("needs one approval for most changes, and security's too for dependency and CI files", () => {
 		const one = { votes: [cast("rev-1", "review")] };

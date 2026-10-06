@@ -110,6 +110,32 @@ export interface ReviewPolicy {
 	vetoes: string[];
 	/** Stricter rules for a change touching any of these paths: more approvals, more vetoes. */
 	escalate?: { paths: string[]; required?: number; vetoes?: string[] }[];
+	/**
+	 * Who may vote as each role that can block a merge (a veto role): registered
+	 * agent names, "person:*" (anyone signed in through Access), a verified
+	 * identity as the records show it ("person:<who>", "service:<id>"), or
+	 * "blueprint" (Blueprint's hosted reviewers). A role not listed: people and
+	 * Blueprint's reviewers (DEFAULT_GRANT). Agents never grant themselves a role.
+	 */
+	grants?: Record<string, string[]>;
+}
+
+/** Who holds a veto role the policy doesn't grant: people, and Blueprint's own reviewers. */
+export const DEFAULT_GRANT = ["person:*", "blueprint"];
+
+/**
+ * Whether `vote` was cast by someone granted `role`. Signed votes are matched
+ * by verified identity: a person's, Blueprint's reviewer's, or an agent's own
+ * key (its stamp ends in /<agent>, so a name is never borrowed). Unsigned
+ * records (no stamp key) are matched by name, as everything there is.
+ */
+export function holdsRole(policy: ReviewPolicy, role: string, vote: Pick<VoteRecord, "reviewer" | "by">) {
+	return (policy.grants?.[role] ?? DEFAULT_GRANT).some((grant) => {
+		if (grant === "person:*") return !!vote.by?.startsWith("person:");
+		if (/^(person|service):/.test(grant)) return vote.by === grant;
+		if (grant === "blueprint") return vote.by ? vote.by === `service:blueprint-reviewer:${role}` : vote.reviewer === `blueprint-${role}`;
+		return vote.reviewer === grant && (!vote.by || vote.by.endsWith(`/${grant}`));
+	});
 }
 
 /** The policy for a change touching `paths`: made stricter by every escalation whose paths it touches. */
@@ -145,9 +171,12 @@ export interface Author {
  * Whether `commit` may merge under `policy`. Each identity counts once, by its
  * latest verdict: its verified identity (`by`) when the vote is signed, else
  * its reviewer name, so one agent can't approve twice under two names. The
- * author's own approval doesn't count; a veto counts from anyone. Every veto
- * role must approve too (`awaiting` lists those that haven't), so a veto can
- * always stop a merge, however fast the others vote.
+ * author's own approval doesn't count. A veto role's verdict counts as that
+ * role only from someone granted it (see holdsRole): their rejection blocks,
+ * and every veto role must approve (`awaiting` lists those that haven't), so a
+ * veto can always stop a merge, however fast the others vote. A verdict under
+ * a veto role from someone not granted it counts as an ordinary one
+ * (`ungranted` lists who).
  */
 export function approval(state: Pick<Votes, "votes"> | null | undefined, commit: string, base: ReviewPolicy, author?: Author, paths: string[] = []) {
 	const policy = effectiveFreePolicy(base, paths);
@@ -157,9 +186,11 @@ export function approval(state: Pick<Votes, "votes"> | null | undefined, commit:
 	const isAuthor = (v: VoteRecord) => !!author && ((!!v.by && v.by === author.by) || v.reviewer === author.agent);
 	const approving = verdicts.filter((v) => v.verdict === "approve" && !isAuthor(v));
 	const approvals = approving.length;
-	const vetoedBy = verdicts.filter((v) => v.verdict === "reject" && policy.vetoes.includes(v.role)).map((v) => v.reviewer);
-	const awaiting = policy.vetoes.filter((role) => !approving.some((v) => v.role === role));
-	return { approved: approvals >= policy.required && !vetoedBy.length && !awaiting.length, approvals, vetoedBy, awaiting };
+	const asRole = (v: VoteRecord) => policy.vetoes.includes(v.role) && holdsRole(base, v.role, v);
+	const vetoedBy = verdicts.filter((v) => v.verdict === "reject" && asRole(v)).map((v) => v.reviewer);
+	const awaiting = policy.vetoes.filter((role) => !approving.some((v) => v.role === role && asRole(v)));
+	const ungranted = verdicts.filter((v) => policy.vetoes.includes(v.role) && !asRole(v)).map((v) => `${v.reviewer} (${v.role})`);
+	return { approved: approvals >= policy.required && !vetoedBy.length && !awaiting.length, approvals, vetoedBy, awaiting, ...(ungranted.length ? { ungranted } : {}) };
 }
 
 /** The votes that count: with the registry's stamp key, only those Blueprint stamped. */

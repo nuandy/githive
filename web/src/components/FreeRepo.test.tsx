@@ -40,6 +40,13 @@ describe("a coordinator-free repo", () => {
 		expect(html).toMatch(/own fork/);
 	});
 
+	it("says in the settings who can block a merge: the grants, or people and Blueprint's reviewers", () => {
+		const byDefault = renderToStaticMarkup(<FreeSettings snapshot={snapshot} />);
+		expect(byDefault).toContain("<dt>Who can block</dt><dd>security: people, Blueprint&#x27;s reviewers.");
+		const granted = renderToStaticMarkup(<FreeSettings snapshot={{ ...snapshot, policy: { ...snapshot.policy, grants: { security: ["security-1", "person:*"] } } }} />);
+		expect(granted).toContain("security: security-1, people.");
+	});
+
 	it("says in the header and settings how claims are kept, sharded or in one record", () => {
 		const page = (sharding: typeof snapshot.sharding) =>
 			renderToStaticMarkup(<FreeRepoPage repo="docs-site" base="free" view={{ kind: "repo", tab: "settings", state: "open" }} snapshot={{ ...snapshot, sharding, shardDepth: sharding && typeof sharding === "object" ? 2 : undefined }} api={stubApi()} />);

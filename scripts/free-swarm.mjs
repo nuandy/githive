@@ -32,7 +32,8 @@
 //                     "rejectFirst": { "const-lib": "what to change" } }],   scripted rejections (optional)
 //     "reviewersPerChange": 1,              each change goes to this many general reviewers, in turn
 //     "setup": { "import": "https://github.com/expressjs/express", "branch": "master",
-//                "verify": ["npm install", "npm test"], "required": 1 }   optional: make the repo first
+//                "verify": ["npm install", "npm test"], "required": 1,
+//                "grants": { "security": ["security-1"] } }   optional: make the repo first
 //   }
 //
 // Agents and reviewers whose keyFile doesn't exist yet are registered first
@@ -332,7 +333,7 @@ if (plan.setup) {
 		const imported = await fetch(`${BASE}/repos/import`, { method: "POST", dispatcher: patient, headers: { ...access, "Content-Type": "application/json" }, body: JSON.stringify({ url: plan.setup.import, name: plan.repo, branch: plan.setup.branch }) });
 		if (!imported.ok) throw new Error(`import failed: HTTP ${imported.status}`);
 	}
-	const startedMode = await tool("free_start", { required: plan.setup.required ?? 1, ...(plan.setup.verify ? { verify: plan.setup.verify } : {}) });
+	const startedMode = await tool("free_start", { required: plan.setup.required ?? 1, ...(plan.setup.verify ? { verify: plan.setup.verify } : {}), ...(plan.setup.grants ? { grants: plan.setup.grants } : {}) });
 	branch = startedMode.branch;
 	say("swarm", `${plan.repo} on ${startedMode.branch}: checks ${JSON.stringify(startedMode.verify)}, claims sharded ${JSON.stringify(startedMode.sharding)}`);
 }

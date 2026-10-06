@@ -26,7 +26,7 @@ let work: string;
 const remote = () => ({ url: server.url, token: "unused" });
 const claims = () => new GitCasLog<Registry>(async () => remote(), "t1", "refs/notes/blueprint-claims/t1");
 const votes = () => new GitCasLog<Votes>(async () => remote(), "t1", "refs/notes/blueprint-votes/t1");
-const policy = { required: 2, vetoes: ["security"] };
+const policy = { required: 2, vetoes: ["security"], grants: { security: ["service:rev-2"] } };
 // Each agent acts through the toolkit as itself, as Access verified it.
 let as: Record<"a" | "b" | "c" | "rev1" | "rev2", Stamper>;
 

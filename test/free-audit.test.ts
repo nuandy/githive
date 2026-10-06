@@ -16,7 +16,7 @@ const registry = [
 	{ tip: "r2", state: at([claimA, claimB]) },
 ];
 const approve = (reviewer: string, role: string, commit = "h1") => ({ commit, reviewer, role, verdict: "approve" as const, evidence: "ok", at: "" });
-const policy = { required: 2, vetoes: ["security"] };
+const policy = { required: 2, vetoes: ["security"], grants: { security: ["rev-2", "rev-3"] } };
 // The votes' history: two approvals of a's head h1.
 const votes: { tip: string; state: Votes }[] = [{ tip: "v1", state: { votes: [approve("rev-1", "tests"), approve("rev-2", "security")] } }];
 const merge = (overrides: Partial<MergeRecord>): MergeRecord => ({ commit: "m1", author: "agent-a", change: "stats-1a2b", claimsTip: "r2", head: "h1", votesTip: "v1", files: ["src/stats/index.ts"], ...overrides });
