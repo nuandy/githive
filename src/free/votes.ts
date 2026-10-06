@@ -47,7 +47,8 @@ export function votesShardingReason(state: Votes | null | undefined, reviewer: s
 	if (state?.buckets) return null;
 	const since = now - SHARD_VOTES_WHEN.windowMs;
 	const recent = (state?.votes ?? []).filter((v) => Date.parse(v.at) >= since);
-	const reviewers = new Set([...recent.map((v) => v.by ?? `name:${v.reviewer}`), `name:${reviewer}`]);
+	// Load, not trust: reviewers by name (agents sharing an Access identity each write their own votes).
+	const reviewers = new Set([...recent.map((v) => v.reviewer), reviewer]);
 	if (reviewers.size >= SHARD_VOTES_WHEN.reviewers) return `${reviewers.size} reviewers voting`;
 	const writes = recent.length + (state?.flags ?? []).filter((f) => Date.parse(f.at) >= since).length;
 	const perMinute = writes / (SHARD_VOTES_WHEN.windowMs / 60_000);

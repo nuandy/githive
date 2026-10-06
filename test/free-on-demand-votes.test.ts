@@ -44,6 +44,9 @@ describe("when to shard the votes", () => {
 		expect(votesShardingReason({ votes: cast(SHARD_VOTES_WHEN.reviewers - 2) }, "newcomer", at)).toBeNull();
 		expect(votesShardingReason({ votes: cast(SHARD_VOTES_WHEN.reviewers - 1) }, "newcomer", at)).toBe(`${SHARD_VOTES_WHEN.reviewers} reviewers voting`);
 		expect(votesShardingReason({ votes: cast(SHARD_VOTES_WHEN.reviewers - 1) }, "rev-0", at)).toBeNull();
+		// Reviewers sharing one Access identity still each write: counted by name.
+		const shared = cast(SHARD_VOTES_WHEN.reviewers - 1).map((v) => ({ ...v, by: "service:one-token" }));
+		expect(votesShardingReason({ votes: shared }, "newcomer", at)).toBe(`${SHARD_VOTES_WHEN.reviewers} reviewers voting`);
 	});
 
 	it("shards when votes come faster than one record serves well, counting only the last few minutes", () => {
