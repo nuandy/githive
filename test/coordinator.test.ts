@@ -16,6 +16,8 @@ const io = vi.hoisted(() => ({
 	/** The head of any repo not in heads (open-mode forks get random names). */
 	defaultHead: undefined as string | undefined,
 	pushes: 0,
+	/** Agents' forks made so far: one only exists once forked. */
+	forked: new Set<string>(),
 	/** Files on the task base, by path: what fileVersion reads. */
 	files: new Map<string, { id: string; text: string }>(),
 	/** Files committed to the task base through a Workspace. */
@@ -33,22 +35,31 @@ const io = vi.hoisted(() => ({
 vi.mock("../src/artifacts", async (importOriginal) => ({
 	...(await importOriginal<typeof import("../src/artifacts")>()),
 	headOf: vi.fn(async (_artifacts: unknown, repo: string) => io.heads.get(repo) ?? io.defaultHead),
-	forkAndWait: vi.fn(async (_artifacts: unknown, _source: string, name: string) => ({ remote: `https://git.test/${name}.git`, token: `token-${name}` })),
+	forkAndWait: vi.fn(async (_artifacts: unknown, _source: string, name: string) => {
+		io.forked.add(name);
+		return { remote: `https://git.test/${name}.git`, token: `token-${name}` };
+	}),
 	fileVersion: vi.fn(async (_artifacts: unknown, _repo: string, path: string) => io.files.get(path) ?? null),
-	remoteFor: vi.fn(async (_artifacts: unknown, repo: string) => ({ url: `https://git.test/${repo}.git`, token: `token-${repo}` })),
+	remoteFor: vi.fn(async (_artifacts: unknown, repo: string) => {
+		if (repo.includes("--agent--") && !io.forked.has(repo)) throw new Error(`no repo ${repo}`);
+		return { url: `https://git.test/${repo}.git`, token: `token-${repo}` };
+	}),
 }));
 
 vi.mock("../src/git", () => ({
+	// A change's branch in its author's fork: heads keyed "<fork>:<branch>".
+	branchHead: vi.fn(async (remote: { url: string }, ref: string) => io.heads.get(`${remote.url.replace(/^https:\/\/git\.test\/|\.git$/g, "")}:${ref}`) ?? null),
 	Workspace: {
 		clone: vi.fn(async (_remote: unknown, branch: string) => ({
 			branch,
 			head: vi.fn(async () => io.heads.get("project") ?? io.defaultHead),
-			fetch: vi.fn(async (_name: string, remote: { url: string }) => {
+			fetch: vi.fn(async (_name: string, remote: { url: string }, ref?: string) => {
 				io.fetched.push(_name);
 				const hook = io.onFetch;
 				io.onFetch = null;
 				await hook?.();
-				return io.heads.get(remote.url.replace(/^https:\/\/git\.test\/|\.git$/g, "")) ?? "fetched";
+				const repo = remote.url.replace(/^https:\/\/git\.test\/|\.git$/g, "");
+				return (ref && io.heads.get(`${repo}:${ref}`)) ?? io.heads.get(repo) ?? "fetched";
 			}),
 			mergeBase: vi.fn(async () => "main0"),
 			changedPaths: vi.fn(async (_from: string, head: string) => io.touched.get(head) ?? []),
@@ -91,7 +102,7 @@ vi.mock("../src/ledger-git", async () => {
 	};
 });
 
-const { Coordinator } = await import("../src/coordinator");
+const { Coordinator, agentForkName } = await import("../src/coordinator");
 const artifacts = await import("../src/artifacts");
 
 const person: AccessIdentity = { kind: "person", value: "human@example.com" };
@@ -117,6 +128,7 @@ const approvedReviews = (head = "h1") => [
 ];
 
 beforeEach(() => {
+	io.forked.clear();
 	io.heads.clear();
 	io.mergeConflict = null;
 	io.defaultHead = undefined;
@@ -351,7 +363,8 @@ describe("the integration gate", () => {
 		const grouped = (head: string, other: string) => ({ ...gated("queued", head), group: [other] });
 		await setup(task({ slices: [slice("a", { reviewHead: "h1", gate: grouped("h1", "b"), reviews: approvedReviews() }), slice("b", { reviewHead: "hb", gate: grouped("hb", "a"), reviews: approvedReviews("hb") })] }));
 		const plan = await coordinator.gatePlan("a", "h1", [{ slice: "b", head: "hb" }]);
-		expect(plan?.others).toEqual([{ slice: "b", head: "hb", remote: "https://git.test/t1--b.git", token: "token-t1--b" }]);
+		// An older change's branch is its own fork's copy of the project's branch.
+		expect(plan?.others).toEqual([{ slice: "b", head: "hb", remote: "https://git.test/t1--b.git", token: "token-t1--b", ref: "main" }]);
 		expect(await coordinator.gateResult("a", result(), [], [{ slice: "b", head: "hb" }])).toEqual({ outcome: "passed" });
 		expect(io.merges).toEqual(["refs/remotes/a/main", "refs/remotes/b/main"]);
 		expect(io.pushes).toBe(1); // one push: the base gets the whole group at once
@@ -610,17 +623,40 @@ describe("open mode", () => {
 		io.defaultHead = "main0";
 	});
 
-	it("opens a change on free paths, forks the project for it and returns credentials", async () => {
+	it("opens a change on free paths, on its author's fork (made once), and returns credentials", async () => {
 		await setup(openTask());
 		const { change, credentials } = await open("Add stats", ["src/stats/"]);
 		expect(change).toMatchObject({ status: "building", owns: ["src/stats/"], startCommit: "main0", intent: "Add stats, please" });
-		expect(credentials.remote).toBe(`https://git.test/t1--${change.id}.git`);
+		// Its author's fork, and its own branch there; the project to start from.
+		expect(change).toMatchObject({ repo: "t1--agent--anonymous", ref: `changes/${change.id}` });
+		expect(credentials).toMatchObject({ remote: "https://git.test/t1--agent--anonymous.git", ref: `changes/${change.id}`, project: { remote: "https://git.test/project.git", branch: "main" } });
 		expect(Date.parse(change.leaseUntil!)).toBeGreaterThan(Date.now());
 		await coordinator.ledgerIdle();
 		expect(ledger.entries.at(-1)?.text).toMatch(/opened.*claiming src\/stats\//);
+		// The same author's next change reuses the fork.
+		await open("More stats", ["src/more/"]);
+		expect(vi.mocked(artifacts.forkAndWait)).toHaveBeenCalledTimes(1);
 	});
 
 	// A call can be asked again after an answer was lost (its leader crashed mid-call, say): opening is safe to repeat.
+	it("follows a change on its own branch in its author's fork, from push to review to merge", async () => {
+		await setup({ ...openTask(), verify: [] });
+		const { change } = await coordinator.openChange({ title: "Add stats", intent: "Add stats, please", owns: ["src/stats/"], authorAgent: "stats-agent" });
+		expect(change).toMatchObject({ repo: "t1--agent--stats-agent", ref: `changes/${change.id}` });
+		// Nothing pushed to its branch yet: nothing to review.
+		await expect(coordinator.startReviewers(change.id)).rejects.toThrow(/no work to review/);
+
+		io.heads.set(`t1--agent--stats-agent:changes/${change.id}`, "h1");
+		expect(await coordinator.recordPush(change.id)).toMatchObject({ changed: true });
+		expect((await stored()).slices[0].head).toBe("h1");
+		await coordinator.startReviewers(change.id, "done");
+		expect((await stored()).slices[0].reviewHead).toBe("h1");
+		// Merged from its branch, not the fork's copy of the project's branch.
+		for (const role of ["tests", "security"]) await coordinator.submitReview(change.id, vote(role, "approve"));
+		expect(io.merges).toEqual([`refs/remotes/${change.id}/changes/${change.id}`]);
+		expect((await stored()).slices[0].status).toBe("integrated");
+	});
+
 	it("finishes an open that was interrupted after its reservation, when the same change is asked again", async () => {
 		const reserved = slice("x-1", { status: "opening", owns: ["src/x/"], repo: "t1--x-1", leaseUntil: new Date(Date.now() + 60_000).toISOString(), external: true });
 		await setup(openTask([reserved]));
@@ -840,7 +876,8 @@ describe("short locks: open mode under concurrency", () => {
 			running--;
 			return realFork(...args);
 		});
-		const opening = Array.from({ length: 10 }, (_, i) => open(`c${i}`, [`src/c${i}/`]));
+		// Ten agents' first changes: ten forks to make.
+		const opening = Array.from({ length: 10 }, (_, i) => coordinator.openChange({ title: `c${i}`, intent: `c${i}, please`, owns: [`src/c${i}/`], authorAgent: `agent-${i}` }));
 		await vi.waitFor(async () => expect((await coordinator.claims())).toHaveLength(10));
 		expect(running).toBe(6);
 		await expect(open("Taken", ["src/c9/x.ts"])).rejects.toThrow(/already claimed/);
@@ -998,9 +1035,11 @@ describe("agent jobs and credentials", () => {
 			slice: { id: "a", title: "a", owns: ["src/a/"], instructions: "build a", tests: [] },
 			siblings: [{ id: "b", title: "b", owns: ["src/b/"] }],
 			verify: ["npm test"],
+			// Its agents are named after the change; its branch is in Blueprint's builder's fork.
 			repo: "t1--a",
-			remote: "https://git.test/t1--a.git",
-			token: "token-t1--a",
+			ref: "changes/a",
+			remote: "https://git.test/t1--agent--blueprint-builder.git",
+			token: "token-t1--agent--blueprint-builder",
 			base: { remote: "https://git.test/project.git", token: "token-project" },
 		});
 	});
@@ -1160,5 +1199,17 @@ describe("review policies and outside reviewers", () => {
 		await expect(coordinator.openChange({ title: "X", intent: "X, please", owns: ["src/x/"], agent: "builder-1" })).rejects.toThrow(/builder-1 is a registered agent: open the change with its key/);
 		const opened = await coordinator.openChange({ title: "X", intent: "X, please", owns: ["src/x/"], authorAgent: "builder-1" });
 		expect(opened.change).toMatchObject({ agent: "builder-1", authorBy: "agent:builder-1" });
+	});
+});
+
+describe("an agent's fork", () => {
+	it("is named after who opened the change, keeping identities of different kinds apart", async () => {
+		expect(await agentForkName("t1", "agent:stats-agent")).toBe("t1--agent--stats-agent");
+		expect(await agentForkName("t1", "blueprint-builder")).toBe("t1--agent--blueprint-builder");
+		expect(await agentForkName("t1", undefined)).toBe("t1--agent--anonymous");
+		expect(await agentForkName("t1", "person:0123456789ab")).toMatch(/^t1--agent--person-0123456789ab-[0-9a-f]{6}$/);
+		expect(await agentForkName("t1", "service:ci-bot")).toMatch(/^t1--agent--service-ci-bot-[0-9a-f]{6}$/);
+		// A registered agent can't take another identity's fork by picking a lookalike name.
+		expect(await agentForkName("t1", "agent:service-ci-bot")).not.toBe(await agentForkName("t1", "service:ci-bot"));
 	});
 });

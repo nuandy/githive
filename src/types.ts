@@ -53,7 +53,9 @@ export interface Slice extends SliceSpec {
 	inbox?: { at: string; text: string }[];
 	/** Artifacts repo name of this slice's fork. */
 	repo?: string;
-	/** Last commit seen on the fork's branch (the project's branch). */
+	/** The change's branch in its fork (changes/<id>); absent on changes made when each had its own fork, which used the project's branch. */
+	ref?: string;
+	/** Last commit seen on the change's branch. */
 	head?: string;
 	/** Paths changed relative to the task base, as of `head`. */
 	touched: string[];
@@ -240,6 +242,10 @@ export interface SliceCredentials {
 	repo: string;
 	remote: string;
 	token: string;
+	/** The branch to push the change to, in the fork. */
+	ref?: string;
+	/** Read access to the project, to start the change from (the fork is shared by an author's changes, and may be behind). */
+	project?: { remote: string; token: string; branch: string };
 }
 
 /** A reviewer's assignment: read-only access, pinned to one commit. */

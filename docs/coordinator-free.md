@@ -3,7 +3,7 @@
 Blueprint's other designs have a coordinator (fixed or elected) that decides
 every claim and merge. This mode has none. Agents coordinate through Git: claims,
 votes and merges are signed records in Git, written through a stateless toolkit
-that any Worker instance runs the same way. Each change lives in its own fork,
+that any Worker instance runs the same way. Each change is a branch in its agent's own fork,
 and only the toolkit writes the project's main, after the conventions hold, so
 an agent can't push around them. Anything written around the toolkit anyway (by
 whoever holds the account's credentials) is visible: anyone can replay the
@@ -102,9 +102,10 @@ That led to forks (below), and that shared mode was later removed.
 
 - **Claims work without a coordinator.** Git's compare-and-swap on one registry
   ref gives cooperative agents exclusive lanes, even when two claim at once.
-- **Prevention, with forks; detection and remedy for the rest.** Each change
-  lives in its own fork (`free--<repo>--<change>`); an agent gets read access
-  to the project and write access only to its own change's fork, so it can't
+- **Prevention, with forks; detection and remedy for the rest.** Each agent
+  has its own fork (`free--<repo>--agent--<name>`, made on its first change),
+  with a branch `changes/<change>` per change; an agent gets read access to
+  the project and write access only to its own fork, so it can't
   push to main or touch the records (`scripts/free-forks-demo.mjs`: a rogue's
   push to main is refused). Whatever is written around the toolkit anyway, the
   audit reports, and any agent may revert it with `free_revert`, which refuses a commit the audit doesn't report, or

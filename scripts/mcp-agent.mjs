@@ -49,8 +49,9 @@ const redact = (value) => JSON.parse(JSON.stringify(value, (k, v) => (k === "tok
 /** A fork's remote and write token, for open mode or coordinator-free (with the project to start from). */
 async function forkAccess() {
 	if (flags.task) {
-		const { fork, token } = await tool("refresh_credentials", { task_id: flags.task, change_id: flags.change });
-		return { url: fork, token };
+		const { fork, token, project } = await tool("refresh_credentials", { task_id: flags.task, change_id: flags.change });
+		// Changes on their own branch in the author's fork start from the project (older ones from the fork).
+		return { url: fork, token, ...(project ? { project: { url: project.remote, token: project.token, branch: project.branch } } : {}) };
 	}
 	const { url, token, project } = await tool("free_credentials", { repo: flags.repo, change: flags.change }, flags["key-file"]);
 	return { url, token, project };

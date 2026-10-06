@@ -5,7 +5,7 @@ import { fail, statusOf } from "./errors";
 import type { LaneChangeAnswer, LaneChangeCoordinator, LaneChangeRequest, LaneChangeRequestInput } from "./lane-change-contract";
 import { BUILDER_PARK_TIMEOUT_MS, type BuilderResumeCredentials, type ParkBuilderResult } from "./parking-contract";
 import { isTransientFailure, retryTransient } from "./retry";
-import { Workspace } from "./git";
+import { branchHead, Workspace } from "./git";
 import { projectBranch } from "./project-branch";
 import { boundedUnifiedDiff } from "./code-view";
 import { type LedgerEntry, clipText, diff, fromDoc, replay, toDoc } from "./ledger";
@@ -113,8 +113,30 @@ function sliceJobBase(task: Task, slice: Slice): Omit<SliceJob, "remote" | "toke
 		slice: { id: slice.id, title: slice.title, owns: slice.owns, instructions: slice.instructions, tests: slice.tests },
 		siblings: task.slices.filter((s) => s !== slice && s.status !== "abandoned").map(({ id, title, owns }) => ({ id, title, owns })),
 		verify: task.verify,
-		repo: slice.repo!,
+		repo: agentsOf(task, slice),
+		...(slice.ref ? { ref: slice.ref } : {}),
 	};
+}
+
+/** A change's own agents (its builder, its reviewers) are named after it: <task>--<change>. */
+export const agentsOf = (task: Pick<Task, "id">, slice: Pick<Slice, "id">) => sliceRepoName(task.id, slice.id);
+
+/** The branch a change's commits are on in its fork: changes/<id>, or (changes made when each had its own fork) the project's branch. */
+export const changeRef = (task: Task, slice: Slice) => slice.ref ?? projectBranch(task);
+
+/**
+ * An agent's fork of the project, for all its changes on the task: named after
+ * who opened them (a registered agent, a person, an access token, Blueprint's
+ * builder), with a short hash when the name had to change to be a repo name.
+ */
+export async function agentForkName(taskId: string, author: string | undefined) {
+	const who = author ?? "anonymous";
+	// A registered agent goes by its name; other identities keep their kind (person-…, service-…), so they never collide with one.
+	const name = who.replace(/^agent:/, "");
+	const slug = name.toLowerCase().replace(/[^a-z0-9-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40) || "agent";
+	if (slug === name) return `${taskId}--agent--${slug}`;
+	const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(who)));
+	return `${taskId}--agent--${slug}-${[...digest.slice(0, 3)].map((b) => b.toString(16).padStart(2, "0")).join("")}`;
 }
 
 /** Forks of one project at once; beyond about 15, Artifacts fails some of them. */
@@ -384,7 +406,7 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 			} else {
 				// Agent-supplied commit IDs are untrusted. Only Artifacts' current fork
 				// head proves what was actually pushed by the owner.
-				const pushedHead = await headOf(this.env.ARTIFACTS, owner.repo!, projectBranch(task));
+				const pushedHead = await this.changeHead(task, owner);
 				if (!pushedHead || pushedHead === task.baseCommit) fail(409, "a done answer requires a current pushed change commit in the owner's fork");
 				request.status = "answered";
 				request.answerCommit = pushedHead;
@@ -450,7 +472,7 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 
 	/** Send the slice's outbox to its builder, in order, removing each event only once it is delivered. */
 	private async deliverOutbox(task: Task, slice: Slice): Promise<"inbox" | "resumed" | "deferred"> {
-		const builder = this.env.BUILDER.getByName(slice.repo!);
+		const builder = this.env.BUILDER.getByName(agentsOf(task, slice));
 		const wasParked = !!slice.parkedAt;
 		let resumed = false;
 		let credentials: BuilderResumeCredentials;
@@ -538,7 +560,7 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 		}
 		const parkedAt = new Date().toISOString();
 		const waitingFor = outgoing.map((request) => request.id);
-		const builder = this.env.BUILDER.getByName(slice.repo!);
+		const builder = this.env.BUILDER.getByName(agentsOf(task, slice));
 		await builder.park(parkedAt, waitingFor);
 		slice.parkedAt = parkedAt;
 		slice.parkedWaitingFor = waitingFor;
@@ -555,7 +577,7 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 		if (!waiting || slice.status !== "building" || slice.parkedAt) return false;
 		// Only auto-park when the fork is exactly at the Coordinator's recorded
 		// head; Builder.park performs the additional local dirty/unpushed check.
-		const forkHead = await headOf(this.env.ARTIFACTS, slice.repo!, projectBranch(task));
+		const forkHead = await this.changeHead(task, slice);
 		if (!forkHead || forkHead !== slice.head) return false;
 		try {
 			const result = await this.parkBuilderLocked(task, slice.id);
@@ -584,7 +606,7 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 			const unresolved = unresolvedRequests(task, sliceId);
 			if (!unresolved.length) return;
 			// Tell the builder too, but never let its answer decide whether a human is flagged.
-			await this.env.BUILDER.getByName(slice.repo!)
+			await this.env.BUILDER.getByName(agentsOf(task, slice))
 				.markParkTimedOut()
 				.catch((err) => console.error(`telling slice ${sliceId}'s builder its park timed out failed: ${statusOf(err).message}`, err));
 			const waiting = unresolved.map((request) => `${request.id} (${request.path})`).join(", ");
@@ -641,7 +663,7 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 		const base = slice.mergeBase ?? task.baseCommit;
 		if (!base) fail(409, `change ${sliceId} has no base to compare with`);
 		if (!slice.repo) fail(409, `change ${sliceId} has no repository`);
-		const ws = await Workspace.clone(await remoteFor(this.env.ARTIFACTS, slice.repo, "read"), projectBranch(task));
+		const ws = await Workspace.clone(await remoteFor(this.env.ARTIFACTS, slice.repo, "read"), changeRef(task, slice));
 		const files = await ws.changedFiles(base, head);
 		return { base, head, ...boundedUnifiedDiff(files) };
 	}
@@ -658,10 +680,12 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 		if (input.id !== undefined) {
 			const opened = (await this.load()).slices.find((s) => s.id === input.id);
 			if (opened?.status === "building" && sameClaim(opened.owns, normalizeClaim(input.owns))) {
-				const remote = await remoteFor(this.env.ARTIFACTS, opened.repo!, "write");
-				return { change: opened, credentials: { slice: opened.id, repo: opened.repo!, remote: remote.url, token: remote.token } as SliceCredentials };
+				return { change: opened, credentials: await this.changeCredentials(await this.load(), opened) };
 			}
 		}
+		// Whose change it is decides its fork: the author's own, shared by all their changes.
+		const authorBy = input.authorAgent ? `agent:${input.authorAgent}` : actor ? identityLabel(actor) : input.hosted ? "blueprint-builder" : undefined;
+		const forkName = await agentForkName((await this.load()).id, authorBy);
 		// Reserve: the paths are held from here, so a racing claim is refused while
 		// the fork is made. Answered before the reservation is durable, so the fork
 		// starts at once; the confirm step's answer waits for both, in order.
@@ -697,7 +721,8 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 				intent: input.intent.trim(),
 				tests: [],
 				status: "opening",
-				repo: sliceRepoName(task.id, id),
+				repo: forkName,
+				ref: `changes/${id}`,
 				touched: [],
 				outOfLane: [],
 				reviews: [],
@@ -707,24 +732,26 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 				// A person by a hash of their email: change records reach agents, never the address.
 				...(actor ? { openedBy: identityLabel(actor) } : input.hosted ? { openedBy: "blueprint-builder" } : {}),
 				...(agent ? { agent } : {}),
-				...(input.authorAgent ? { authorBy: `agent:${input.authorAgent}` } : actor ? { authorBy: identityLabel(actor) } : input.hosted ? { authorBy: "blueprint-builder" } : {}),
+				...(authorBy ? { authorBy } : {}),
 			};
 			task.slices.push(slice);
 			await this.scheduleLeaseCheck(task);
 			return { id, repo: slice.repo!, title: slice.title, resumed: false };
 		}, "open:reserve", true);
 
-		// Fork without the lock: this takes seconds, and other changes carry on meanwhile.
-		let fork: { remote: string; token: string };
+		// The author's fork: made on their first change, reused after. Without the lock: making one takes seconds.
 		let start: string;
 		try {
 			const current = await this.load();
 			const project = current.repo;
-			// A resumed open may have made its fork already.
-			const made = resumed ? await remoteFor(this.env.ARTIFACTS, repo, "write").then((r) => ({ remote: r.url, token: r.token }), () => null) : null;
-			fork = made ?? (await this.withForkSlot(() => forkAndWait(this.env.ARTIFACTS, project, repo, `${title} (open change on ${project})`)));
-			// The fork's own head is where this change starts, even if the project moved meanwhile.
-			start = (await headOf(this.env.ARTIFACTS, repo, projectBranch(current))) ?? fail(500, "the new fork has no commits");
+			const exists = await remoteFor(this.env.ARTIFACTS, repo, "write").then(() => true, () => false);
+			if (!exists)
+				await this.withForkSlot(() => forkAndWait(this.env.ARTIFACTS, project, repo, `${authorBy ?? "an agent"}'s changes on ${project}`)).catch(async (err) => {
+					// Another of their changes made it meanwhile.
+					if (!(await remoteFor(this.env.ARTIFACTS, repo, "write").then(() => true, () => false))) throw err;
+				});
+			// The change starts from the project as it is now; its branch changes/<id> starts there.
+			start = (await headOf(this.env.ARTIFACTS, project, projectBranch(current))) ?? fail(500, `${project} has no commits`);
 		} catch (err) {
 			await this.mutate(async (task) => {
 				task.slices = task.slices.filter((s) => !(s.id === id && s.status === "opening"));
@@ -743,8 +770,20 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 			this.note(task, start, `Change ${id} opened${actor ? ` by ${accessIdentityLabel(actor)}` : ""}: "${slice.title}", claiming ${slice.owns.join(", ")}. Intent: ${slice.intent}`);
 			if (input.hosted) await this.schedule(task, { kind: "builder", slice: id });
 			await this.scheduleLeaseCheck(task);
-			return { change: slice, credentials: { slice: id, repo, remote: fork.remote, token: fork.token } as SliceCredentials };
+			return { change: slice, credentials: await this.changeCredentials(task, slice) };
 		}, "open:confirm");
+	}
+
+	/** What an agent needs to work on its change: write access to its fork and the branch to push, and read access to the project to start from. */
+	private async changeCredentials(task: Task, slice: Slice): Promise<SliceCredentials> {
+		const [fork, project] = await Promise.all([remoteFor(this.env.ARTIFACTS, slice.repo!, "write", 3 * 3600), remoteFor(this.env.ARTIFACTS, task.baseRepo!, "read", 3 * 3600)]);
+		return { slice: slice.id, repo: slice.repo!, remote: fork.url, token: fork.token, ref: changeRef(task, slice), project: { remote: project.url, token: project.token, branch: projectBranch(task) } };
+	}
+
+	/** The head of a change's branch in its fork, or null before anything is pushed. */
+	private async changeHead(task: Task, slice: Slice) {
+		if (!slice.ref) return headOf(this.env.ARTIFACTS, slice.repo!, projectBranch(task));
+		return branchHead(await remoteFor(this.env.ARTIFACTS, slice.repo!, "read"), slice.ref);
 	}
 
 	/**
@@ -763,15 +802,15 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 		}
 	}
 
-	/** A fresh write token for an external agent's own fork. */
+	/** Fresh write access to an external agent's own fork (with the branch to push), and read access to the project. */
 	externalCredentials(sliceId: string) {
 		return this.mutate(async (task) => {
 			const slice = this.slice(task, sliceId);
 			if (!slice.external) fail(403, `change ${sliceId} is built by a hosted agent`);
 			if (slice.status !== "building") fail(409, `change ${sliceId} is ${slice.status}`);
-			const remote = await remoteFor(this.env.ARTIFACTS, slice.repo!, "write", 3 * 3600);
+			const credentials = await this.changeCredentials(task, slice);
 			this.renewLease(task, slice);
-			return { fork: remote.url, token: remote.token };
+			return { fork: credentials.remote, token: credentials.token, branch: credentials.ref, project: credentials.project };
 		});
 	}
 
@@ -876,7 +915,7 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 		task.active.builders = task.active.builders.filter((key) => key !== slice.id);
 		task.active.reviewers = task.active.reviewers.filter((key) => !key.startsWith(`${slice.id}:`));
 		this.note(task, slice.head, `Change ${slice.id} abandoned, freeing ${slice.owns.join(", ")}: ${reason}`);
-		const repo = slice.repo!;
+		const repo = agentsOf(task, slice);
 		const reviewHead = slice.reviewHead;
 		const roles = hostedRoles(policyFor(task, slice));
 		// A change still being opened has no agents yet.
@@ -978,7 +1017,7 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 			token: remote.token,
 			base: { remote: base.url, token: base.token },
 		};
-		await this.env.BUILDER.getByName(slice.repo!).start(job);
+		await this.env.BUILDER.getByName(agentsOf(task, slice)).start(job);
 		if (slice.wakeOutbox?.length) await this.deliverOutbox(task, slice);
 	}
 
@@ -995,7 +1034,7 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 			revision: slice.revisions ?? 0,
 			priorFindings: slice.revisions ? slice.lastFeedback : undefined,
 		};
-		await this.env.REVIEWER.getByName(reviewerName(slice.repo!, role, head)).start(job);
+		await this.env.REVIEWER.getByName(reviewerName(agentsOf(task, slice), role, head)).start(job);
 	}
 
 	/**
@@ -1103,7 +1142,7 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 			const snapshot = await this.load();
 			const seen = this.buildingSlice(snapshot, sliceId);
 			const before = seen.head;
-			const head = await headOf(this.env.ARTIFACTS, seen.repo!, projectBranch(snapshot));
+			const head = await this.changeHead(snapshot, seen);
 			if (!head || head === before) return { task: snapshot, checks: [] as MergeCheck[], changed: false };
 			const checks = await mergeAhead(this.env.ARTIFACTS, snapshot, seen);
 
@@ -1143,7 +1182,7 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 	/** Pin the slice's current head as the commit under review. */
 	private async pinForReview(task: Task, slice: Slice) {
 		if (slice.status !== "building") fail(409, `slice ${slice.id} is ${slice.status}`);
-		const head = await headOf(this.env.ARTIFACTS, slice.repo!, projectBranch(task));
+		const head = await this.changeHead(task, slice);
 		if (!head || head === (slice.startCommit ?? task.baseCommit)) fail(409, `slice ${slice.id} has no work to review`);
 		slice.reviewHead = head;
 		// The rules for this commit: the task's, made stricter for the paths it claims and touches.
@@ -1334,8 +1373,8 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 				baseHead,
 				branch: projectBranch(task),
 				base: { remote: base.url, token: base.token },
-				fork: { remote: forks[0].url, token: forks[0].token },
-				others: others.map((o, i) => ({ slice: o.id, head: o.reviewHead!, remote: forks[i + 1].url, token: forks[i + 1].token })),
+				fork: { remote: forks[0].url, token: forks[0].token, ref: changeRef(task, lead) },
+				others: others.map((o, i) => ({ slice: o.id, head: o.reviewHead!, remote: forks[i + 1].url, token: forks[i + 1].token, ref: changeRef(task, o) })),
 				checks: task.verify,
 				exclude,
 			};
@@ -1455,9 +1494,9 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 			const task = await this.load();
 			const slice = this.buildingSlice(task, sliceId);
 			if (!slice.reviewHead) fail(409, `slice ${sliceId} has no commit under review`);
-			const builder = await this.env.BUILDER.getByName(slice.repo!).state();
+			const builder = await this.env.BUILDER.getByName(agentsOf(task, slice)).state();
 			if (builder && (builder.status === "queued" || builder.status === "working")) fail(409, "the slice's builder is still working");
-			const head = await headOf(this.env.ARTIFACTS, slice.repo!, projectBranch(task));
+			const head = await this.changeHead(task, slice);
 			if (head !== slice.reviewHead) fail(409, `the fork moved to ${head} after review of ${slice.reviewHead}`);
 
 			const by = accessIdentityLabel(actor);
@@ -1525,15 +1564,15 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 	 */
 	private async integrateSlices(task: Task, slices: Slice[]): Promise<{ ok: true } | { ok: false; slice: Slice; files: string[] }> {
 		for (const slice of slices) {
-			const head = await headOf(this.env.ARTIFACTS, slice.repo!, projectBranch(task));
+			const head = await this.changeHead(task, slice);
 			if (head !== slice.reviewHead) fail(409, `${slice.id} moved to ${head} after review of ${slice.reviewHead}`);
 			if (slice.outOfLane.length) fail(409, `${slice.id} changed paths outside its lane: ${slice.outOfLane.join(", ")}`);
 		}
 		const ws = await Workspace.clone(await remoteFor(this.env.ARTIFACTS, task.baseRepo!, "write"), projectBranch(task));
 		for (const slice of slices) {
-			await ws.fetch(slice.id, await remoteFor(this.env.ARTIFACTS, slice.repo!));
+			await ws.fetch(slice.id, await remoteFor(this.env.ARTIFACTS, slice.repo!), changeRef(task, slice));
 			try {
-				await ws.merge(`refs/remotes/${slice.id}/${ws.branch}`, `Integrate ${slice.id}: ${slice.title}`);
+				await ws.merge(`refs/remotes/${slice.id}/${changeRef(task, slice)}`, `Integrate ${slice.id}: ${slice.title}`);
 			} catch (err) {
 				if (err instanceof git.Errors.MergeConflictError) return { ok: false, slice, files: err.data.filepaths };
 				throw err;
@@ -1616,13 +1655,13 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 		slice.revisions = (slice.revisions ?? 0) + 1;
 		this.note(task, slice.reviewHead, `${slice.id} sent back to its builder (revision ${slice.revisions} of ${MAX_REVISIONS}):\n${clipText(message, 1_500)}`);
 		task.queue = task.queue.filter((item) => !(item.kind === "reviewer" && item.slice === slice.id));
-		await Promise.allSettled(this.cancelReviewers(slice.repo!, hostedRoles(policyFor(task, slice)), head, "the slice was sent back to its builder"));
+		await Promise.allSettled(this.cancelReviewers(agentsOf(task, slice), hostedRoles(policyFor(task, slice)), head, "the slice was sent back to its builder"));
 		// An external agent reads the findings from its inbox; there is no hosted builder to resume.
 		if (slice.external) {
 			this.toInbox(slice, message);
 			return;
 		}
-		await this.env.BUILDER.getByName(slice.repo!).revise(message, await this.resumeCredentials(task, slice));
+		await this.env.BUILDER.getByName(agentsOf(task, slice)).revise(message, await this.resumeCredentials(task, slice));
 		// A revision runs right away, outside the queue: the slice is blocking integration.
 		if (!task.active.builders.includes(slice.id)) task.active.builders.push(slice.id);
 	}

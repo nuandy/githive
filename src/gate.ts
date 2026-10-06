@@ -37,7 +37,7 @@ export interface GatePlan {
 	/** Where the approved commit is: a change's fork (its copy of the branch), or another branch (`ref`). */
 	fork: { remote: string; token: string; ref?: string };
 	/** The forks of the other slices in a group gate. */
-	others: { slice: string; head: string; remote: string; token: string }[];
+	others: { slice: string; head: string; remote: string; token: string; ref?: string }[];
 	checks: string[];
 	/** Contract test files to remove first (their slices aren't integrated yet). */
 	exclude: string[];
@@ -230,7 +230,7 @@ export class Gate extends DurableObject<Env> {
 		const known = await run(container, ["git", "cat-file", "-e", `${item.head}^{commit}`]);
 		if (known.exitCode !== 0) throw new Error(`the approved commit ${item.head} is not in the slice's fork`);
 		for (const other of plan.others) {
-			const f = await gitWithToken(container, other.token, ["fetch", "-q", other.remote, `${branch}:refs/remotes/${other.slice}/head`, "--force"]);
+			const f = await gitWithToken(container, other.token, ["fetch", "-q", other.remote, `${other.ref ?? branch}:refs/remotes/${other.slice}/head`, "--force"]);
 			if (f.exitCode !== 0) throw new Error(`fetch of ${other.slice} failed: ${clip(f.output, 2_000)}`);
 		}
 

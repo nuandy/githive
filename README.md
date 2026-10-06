@@ -2,10 +2,10 @@
 
 A Git platform for many agents working on one repository at once, with no central server deciding for them. Built on Cloudflare Workers and [Artifacts](https://developers.cloudflare.com/artifacts/).
 
-Agents, Blueprint's own or anyone's over MCP, open **changes**. Each change claims the paths it will touch, works on its own Artifacts fork, and merges into the project once reviewers approve it and the project's checks pass. Two ways to coordinate them:
+Agents, Blueprint's own or anyone's over MCP, open **changes**. Each change claims the paths it will touch, works on its own branch in its agent's Artifacts fork (one fork per agent, made on its first change), and merges into the project once reviewers approve it and the project's checks pass. Two ways to coordinate them:
 
 - **Open mode, run by an elected coordinator.** Every open change has a small peer (a Durable Object). One peer at a time leads, under a lease, and Git is the only shared memory: every decision is a commit on the project's notes ref, written by compare-and-swap, so a stale leader can never land one. If the leader vanishes, its lease runs out and another peer takes over with every decision intact. See [docs/elected-coordinator.md](docs/elected-coordinator.md).
-- **Coordinator-free mode.** No leader at all. Claims, votes and merges are signed records in Git, written through a stateless toolkit that any Worker instance runs the same way; each change lives in its own fork, and only the toolkit writes main, after the conventions hold. Anyone can replay the records and audit them. See [docs/coordinator-free.md](docs/coordinator-free.md).
+- **Coordinator-free mode.** No leader at all. Claims, votes and merges are signed records in Git, written through a stateless toolkit that any Worker instance runs the same way; each change is a branch in its agent's own fork, and only the toolkit writes main, after the conventions hold. Anyone can replay the records and audit them. See [docs/coordinator-free.md](docs/coordinator-free.md).
 
 Changes merge into the project's default branch, whatever its repo calls it (main, master, trunk...): Blueprint reads it from the repo when the repo is opened. These docs say main.
 
@@ -52,7 +52,7 @@ $ git log --notes=blueprint/a9338368 -1
 
 ## Coordinator-free mode
 
-The `free_*` MCP tools: `free_start` (review policy, checks, how claims are sharded), `free_register` (an agent's own key, so agents sharing an Access token are told apart), `free_claim`, `free_credentials` (write access to your change's own fork only), `free_vote`, `free_check`, `free_status`, `free_merge` (merges only with a claim covering every file, the approvals, a clean merge and passing checks), `free_audit`, `free_revert`, and `free_build` / `free_request_review` for Blueprint's hosted agents. Claims are sharded by path over several records repos, so agents in different parts of the tree never contend. Every record is stamped with the caller's verified identity and Blueprint's signature, so the audit trusts only what went through the toolkit.
+The `free_*` MCP tools: `free_start` (review policy, checks, how claims are sharded), `free_register` (an agent's own key, so agents sharing an Access token are told apart), `free_claim`, `free_credentials` (write access to your own fork only, with read access to the project to start from), `free_vote`, `free_check`, `free_status`, `free_merge` (merges only with a claim covering every file, the approvals, a clean merge and passing checks), `free_audit`, `free_revert`, and `free_build` / `free_request_review` for Blueprint's hosted agents. Claims are sharded by path over several records repos, so agents in different parts of the tree never contend. Every record is stamped with the caller's verified identity and Blueprint's signature, so the audit trusts only what went through the toolkit.
 
 ## Benchmarks
 

@@ -7,16 +7,20 @@ import { FakeStorage, fakeEnv, slice, task } from "./fakes/env";
 // separate Durable Objects would share the task's notes ref. Artifacts and git
 // I/O are mocked as in the Coordinator tests.
 
-const io = vi.hoisted(() => ({ forks: 0 }));
+const io = vi.hoisted(() => ({ forks: 0, forked: new Set<string>() }));
 
 vi.mock("../src/artifacts", async (importOriginal) => ({
 	...(await importOriginal<typeof import("../src/artifacts")>()),
 	headOf: vi.fn(async () => "main0"),
 	forkAndWait: vi.fn(async (_artifacts: unknown, _source: string, name: string) => {
 		io.forks++;
+		io.forked.add(name);
 		return { remote: `https://git.test/${name}.git`, token: `token-${name}` };
 	}),
-	remoteFor: vi.fn(async (_artifacts: unknown, repo: string) => ({ url: `https://git.test/${repo}.git`, token: `token-${repo}` })),
+	remoteFor: vi.fn(async (_artifacts: unknown, repo: string) => {
+		if (repo.includes("--agent--") && !io.forked.has(repo)) throw new Error(`no repo ${repo}`);
+		return { url: `https://git.test/${repo}.git`, token: `token-${repo}` };
+	}),
 }));
 
 const { Peer } = await import("../src/peer");
@@ -83,6 +87,7 @@ const openTask = () => task({ mode: "open", repo: "project", baseRepo: "project"
 
 beforeEach(async () => {
 	io.forks = 0;
+	io.forked.clear();
 	registry = new Map();
 	hints = [];
 	summaries = [];

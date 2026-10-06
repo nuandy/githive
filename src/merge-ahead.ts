@@ -26,8 +26,10 @@ export async function mergeAhead(artifacts: Artifacts, task: Task, slice: Slice)
 	// the base commit until the slice merges integrated work; after that, the
 	// integrated files don't count as the slice's changes.
 	const side = async (s: Slice): Promise<Side & { from: string }> => {
-		const ref = `refs/remotes/${s.id}/${ws.branch}`;
-		const head = await ws.fetch(s.id, await remoteFor(artifacts, s.repo!));
+		// Each change's branch in its fork: changes/<id>, or the fork's copy of the project's branch for older changes.
+		const branch = s.ref ?? ws.branch;
+		const ref = `refs/remotes/${s.id}/${branch}`;
+		const head = await ws.fetch(s.id, await remoteFor(artifacts, s.repo!), branch);
 		const from = await ws.mergeBase(baseHead, head);
 		return { id: s.id, ref, head, from, touched: await ws.changedPaths(from, head) };
 	};

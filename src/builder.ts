@@ -400,7 +400,7 @@ How to work:
 		const forcePush = pushArgs.some(
 			(arg) => arg === "--force" || arg.startsWith("--force-with-lease") || (/^-[^-]/.test(arg) && arg.includes("f")) || arg.startsWith("+"),
 		);
-		const target = job.free?.ref ?? branchOf(job);
+		const target = job.free?.ref ?? job.ref ?? branchOf(job);
 		const branch = `refs/heads/${target}`;
 		const expectedPush = pushArgs.includes("origin") && (pushArgs.includes(`HEAD:${branch}`) || pushArgs.includes(`HEAD:${target}`));
 		if (!expectedPush) return `Refusing an unrecognized builder push. Use commit_and_push to push to origin/${target}.`;
@@ -470,6 +470,18 @@ How to work:
 	protected async afterClone(job: BuildJob) {
 		await this.exec(["git", "config", "user.name", `builder ${job.slice.id}`]);
 		await this.exec(["git", "config", "user.email", `${job.slice.id}@builders.blueprint.invalid`]);
+		// A change on its own branch (changes/<id>) in a fork shared by its author's changes: continue
+		// the branch if it has been pushed, or start it from the project's branch, never the fork's.
+		const own = job.free?.ref ?? job.ref;
+		if (own && !job.free) {
+			const fetched = await this.git(job, ["fetch", "-q", "origin", `+${own}:refs/remotes/origin/${own}`]);
+			if (fetched.exitCode === 0) await this.exec(["git", "checkout", "-q", "-B", own, `origin/${own}`]);
+			else {
+				const branch = branchOf(job);
+				const base = await this.git(job, ["fetch", "-q", job.base.remote, `${branch}:refs/remotes/base/${branch}`], undefined, job.base.token);
+				await this.exec(["git", "checkout", "-q", "-b", own, ...(base.exitCode === 0 ? [`base/${branch}`] : [])]);
+			}
+		}
 		// A coordinator-free change continues its branch if it has been pushed, or starts it from the project's branch.
 		if (job.free) {
 			const fetched = await this.git(job, ["fetch", "-q", "origin", `+${job.free.ref}:refs/remotes/origin/${job.free.ref}`]);
@@ -727,7 +739,7 @@ How to work:
 			return "Nothing new to commit or push.";
 		}
 		// Otherwise there are commits made outside this tool (for example a merge of the project's branch) to push.
-		const push = await this.git(job, ["push", "-q", "origin", `HEAD:${branchOf(job)}`]);
+		const push = await this.git(job, ["push", "-q", "origin", `HEAD:${job.ref ?? branchOf(job)}`]);
 		if (push.exitCode !== 0) return `Push failed:\n${clip(push.output, 4_000)}`;
 		state.pushes++;
 		this.note(state, `pushed: ${message.slice(0, 120)}`);

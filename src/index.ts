@@ -254,7 +254,7 @@ app.get("/summaries", async (c) => {
 // Forks far outnumber projects, so read every page.
 app.get("/repos", async (c) => {
 	// Not a project: a task's fork, or a coordinator-free change's fork or claim records.
-	const names = (await listRepoNames(c.env.ARTIFACTS)).filter((name) => !parseRepoName(name) && !name.startsWith("free--") && !name.startsWith("free-records--"));
+	const names = (await listRepoNames(c.env.ARTIFACTS)).filter((name) => !parseRepoName(name) && !/^[0-9a-f]{8}--agent--/.test(name) && !name.startsWith("free--") && !name.startsWith("free-records--"));
 	return c.json(names.sort().map((name) => ({ name })));
 });
 

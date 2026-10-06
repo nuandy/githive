@@ -46,6 +46,8 @@ export interface SliceJob extends SandboxJob {
 	goal: string;
 	/** The project's branch changes merge into (main, master, ...). Absent from older jobs: main. */
 	branch?: string;
+	/** The change's own branch in its fork (changes/<id>); absent when the change uses the fork's copy of the project's branch. */
+	ref?: string;
 	/** Commands the integration gate runs on the combined code. */
 	verify?: string[];
 	slice: SliceSpec;

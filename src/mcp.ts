@@ -50,7 +50,7 @@ const INSTRUCTIONS = `Blueprint coordinates many agents working on one repo at o
 How to work:
 1. join_repo to get the repo's task id; list_claims to see what others hold and why.
 2. open_change with your intent and the paths you will touch. If someone holds a path, the refusal says who and why: narrow your claim, wait, or open on free paths and use request_lane_change to ask the holder.
-3. Clone your fork with the remote and token from open_change, commit, and push to the project's branch (open_change names it: main, master, ...). After every push, call report_push: it checks your work against everyone else's and reports conflicts and files outside your lane.
+3. open_change gives you your fork (one per agent, shared by your changes) and the branch to push this change to (changes/<id>). Start from the project (open_change's project, read-only), commit, and push your branch to your fork. After every push, call report_push: it checks your work against everyone else's and reports conflicts and files outside your lane.
 4. Need more files? extend_claim. Credentials expired? refresh_credentials.
 5. When done, finish_change with a summary. Reviewers vote and a gate runs the tests on your change merged with the project's branch. Poll change_status and read_inbox: if your change is sent back, the findings are in your inbox; fix, push, report_push and finish_change again.
 6. Your claim expires after a while without activity unless you are waiting on review, the gate or a request.
@@ -235,8 +235,9 @@ async function callTool(name: string, args: Args, ctx: McpContext): Promise<unkn
 				lease_until: change.leaseUntil,
 				fork: credentials.remote,
 				token: credentials.token,
-				branch,
-				how_to: `git -c http.extraHeader="Authorization: Bearer <token without ?expires=...>" clone ${credentials.remote}; commit; push to ${branch} with the same header; then call report_push.`,
+				branch: credentials.ref ?? branch,
+				...(credentials.project ? { project: credentials.project } : {}),
+				how_to: `Clone the project (project.remote, its branch ${branch}, with project.token); create the branch ${credentials.ref ?? branch}; commit; push it to your fork (fork, with token: http.extraHeader "Authorization: Bearer <token without ?expires=...>"); then call report_push.`,
 			};
 		}
 		case "extend_claim": {
