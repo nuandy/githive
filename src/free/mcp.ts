@@ -10,11 +10,12 @@ import { audit } from "./audit";
 import { checkChange } from "./check";
 import { claimStore, type ClaimStore } from "./claim-store";
 import { registerAgent, shardClaims, shardingReason, startFree, type ClaimRecord, type Registry } from "./claims";
-import { readMainMerges, readRecordHistory, readShardHistories } from "./git-records";
+import { readMainMerges, readRecordHistory, readRefHistories, readShardHistories } from "./git-records";
 import { type CheckRunner, mergeChange } from "./merge";
 import { revertViolation } from "./revert";
 import type { Stamper } from "./stamp";
-import { approval, countedVotes, effectiveFreePolicy, flagChange, openFlag, vote, type ReviewPolicy, type VoteRecord, type Votes } from "./votes";
+import { approval, countedVotes, effectiveFreePolicy, openFlag, shardVotes, votesShardingReason, type ReviewPolicy, type VoteRecord, type Votes } from "./votes";
+import { VOTE_BUCKETS, type VoteStore, voteStore, votesPrefix } from "./vote-store";
 import { SENSITIVE_PATHS } from "../types";
 
 // The coordinator-free MCP tools (see docs/coordinator-free.md). Stateless: each
@@ -188,6 +189,37 @@ async function shardIfBusy(ctx: FreeContext, repo: string, log: GitCasLog<Regist
 	return (await log.read())?.commit.state ?? null;
 }
 
+/** A repo's votes: in its votes record, and in buckets by commit once sharded (see vote-store.ts). */
+export function votesFor(ctx: FreeContext, repo: string, rootHead?: Awaited<ReturnType<GitCasLog<Votes>["read"]>>): VoteStore {
+	return voteStore({
+		repo,
+		root: recordLog<Votes>(ctx, repo, votesRef(repo)),
+		...(rootHead !== undefined ? { rootHead } : {}),
+		remote: () => ctx.remote(repo, "write"),
+		...(ctx.recordsRemote ? { recordsRemote: (k: number) => ctx.recordsRemote!(repo, k, "write") } : {}),
+	});
+}
+
+/**
+ * Shard the repo's votes if the load calls for it (see votesShardingReason),
+ * where its claims may shard (on demand, or sharded from the start): makes the
+ * records repos, then records the switch in the votes record. Returns the
+ * votes record's head as it is now, for the vote that follows (undefined: not read).
+ */
+async function shardVotesIfBusy(ctx: FreeContext, repo: string, registry: Registry | null | undefined, reviewer: string) {
+	if (!registry?.autoShard && !registry?.shardDepth) return undefined;
+	const log = recordLog<Votes>(ctx, repo, votesRef(repo));
+	const head = await log.read();
+	const reason = votesShardingReason(head?.commit.state, reviewer);
+	if (!reason) return head;
+	const wanted = registry.autoShard?.recordsRepos ?? registry.recordsRepos ?? 0;
+	const spread = wanted && ctx.recordsRemote && ctx.createRecordsRepos ? wanted : 0;
+	if (spread) await ctx.createRecordsRepos!(repo, spread);
+	const outcome = await shardVotes(log, { buckets: VOTE_BUCKETS, recordsRepos: spread, reason });
+	if (outcome.ok) console.log(`sharding ${repo}'s votes: ${reason}`);
+	return log.read();
+}
+
 export function storeFor(ctx: FreeContext, repo: string, registry: Registry | null | undefined, root?: { log: GitCasLog<Registry>; head: Awaited<ReturnType<GitCasLog<Registry>["read"]>> }): ClaimStore {
 	return claimStore({
 		repo,
@@ -213,7 +245,7 @@ function changeSourceFor(ctx: FreeContext, repo: string) {
 }
 
 /** Where a change stands: its branch head, the votes on that head, the approvals against the policy, and Blueprint's hosted agents on it. */
-async function changeStatus(ctx: FreeContext, repo: string, registry: Registry | null | undefined, cast: VoteRecord[], counted: VoteRecord[], change: string, author: ClaimRecord | undefined, agent = author?.agent) {
+async function changeStatus(ctx: FreeContext, repo: string, registry: Registry | null | undefined, votesOn: (head: string) => Promise<VoteRecord[]>, change: string, author: ClaimRecord | undefined, agent = author?.agent) {
 	// No fork (or no branch on it) means nothing pushed yet.
 	const head = await Promise.resolve()
 		.then(() => changeSourceFor(ctx, repo)(agent ?? fail(409, `${change} has no agent`), "read", change))
@@ -223,9 +255,10 @@ async function changeStatus(ctx: FreeContext, repo: string, registry: Registry |
 	const paths = author?.paths ?? [];
 	const policy = registry?.policy ?? DEFAULT_POLICY;
 	const { required, vetoes } = effectiveFreePolicy(policy, paths);
-	const outcome = head ? approval({ votes: counted }, head, policy, author, paths) : { approved: false, approvals: 0, vetoedBy: [], awaiting: vetoes };
+	const cast = head ? (await votesOn(head)).filter((v) => v.commit === head) : [];
+	const outcome = head ? approval({ votes: await countedVotes(cast, registry?.stampKey) }, head, policy, author, paths) : { approved: false, approvals: 0, vetoedBy: [], awaiting: vetoes };
 	const hosted = ctx.agentStatus ? await ctx.agentStatus(repo, change, head, hostedFreeRoles(vetoes)).catch(() => undefined) : undefined;
-	return { head, votes: head ? cast.filter((v) => v.commit === head) : [], approval: { ...outcome, required }, ...(hosted ? { hosted } : {}) };
+	return { head, votes: cast, approval: { ...outcome, required }, ...(hosted ? { hosted } : {}) };
 }
 
 /** Replay a repo's records from Git: how many commits on the project's branch since the mode started, and what broke which convention. */
@@ -248,7 +281,14 @@ async function runAudit(ctx: FreeContext, repo: string) {
 			: undefined,
 		votesRead,
 	]);
-	const violations = await t.time("audit", () => audit({ registry, ...(shards ? { shards } : {}), votes: votesHistory, policy: start.policy ?? DEFAULT_POLICY, verify: start.verify, merges }));
+	// The votes' buckets, once they're sharded: where the latest state says.
+	const votesNow = votesHistory.at(-1)?.state;
+	const voteBuckets = votesNow?.buckets
+		? await t.time("buckets", async () =>
+				readRefHistories<Votes>(votesNow.recordsRepos && ctx.recordsRemote ? await Promise.all(Array.from({ length: votesNow.recordsRepos }, (_, k) => ctx.recordsRemote!(repo, k, "read"))) : [remote], votesPrefix(repo)),
+			)
+		: undefined;
+	const violations = await t.time("audit", () => audit({ registry, ...(shards ? { shards } : {}), votes: votesHistory, ...(voteBuckets ? { voteBuckets } : {}), policy: start.policy ?? DEFAULT_POLICY, verify: start.verify, merges }));
 	return { merges: merges.length, violations };
 }
 
@@ -286,7 +326,7 @@ export async function freeChangeHistory(ctx: FreeContext, repo: string, change: 
 		// Nothing pushed yet (no fork, or no branch on it).
 		.catch(() => [] as { commit: string; message: string; author: string; at: string }[]);
 	const ids = new Set(commits.map((c) => c.commit));
-	const votes = ((await recordLog<Votes>(ctx, repo, votesRef(repo)).read())?.commit.state.votes ?? []).filter((v) => ids.has(v.commit));
+	const votes = (await votesFor(ctx, repo).readFor([...ids])).votes.filter((v) => ids.has(v.commit));
 	return { change, branch, claim: claim ?? null, released, commits, votes };
 }
 
@@ -306,7 +346,7 @@ export async function freeVoteAsPerson(ctx: FreeContext, repo: string, change: s
 	const head = await branchHead(await changeSourceFor(ctx, repo)(claim.agent, "read", change), `changes/${change}`).catch(() => null);
 	if (!head) throw new Error(`[409] ${change} has nothing pushed to vote on`);
 	const stamper = await ctx.stamper?.();
-	await vote(recordLog<Votes>(ctx, repo, votesRef(repo)), { commit: head, reviewer: person, role: input.role, verdict: input.verdict, evidence: input.evidence }, stamper);
+	await votesFor(ctx, repo, await shardVotesIfBusy(ctx, repo, registry, person)).vote({ commit: head, reviewer: person, role: input.role, verdict: input.verdict, evidence: input.evidence }, stamper);
 	await ctx.ping?.(repo).catch(() => undefined);
 	return { commit: head, role: input.role, verdict: input.verdict };
 }
@@ -324,17 +364,15 @@ export async function freeAudit(ctx: FreeContext, repo: string) {
 /** What the dashboard shows for a repo in coordinator-free mode, read from the records' tips (the audit is apart, in freeAudit). */
 export async function freeSnapshot(ctx: FreeContext, repo: string) {
 	const t = ctx.timing ?? new Timing();
-	const [registry, votes] = await t.time("records", () => Promise.all([recordLog<Registry>(ctx, repo, claimsRef(repo)).read(), recordLog<Votes>(ctx, repo, votesRef(repo)).read()]));
+	const [registry, votes] = await t.time("records", () => Promise.all([recordLog<Registry>(ctx, repo, claimsRef(repo)).read(), votesFor(ctx, repo).read()]));
 	const state = registry?.commit.state;
 	if (!state?.baseline) throw new Error(`[404] coordinator-free mode hasn't started on ${repo}`);
-	const cast = votes?.commit.state.votes ?? [];
-	const counted = await countedVotes(cast, state.stampKey);
 	const held = await t.time("claims", () => storeFor(ctx, repo, state).read());
 	const claims = await t.time("status", () => Promise.all(
 		held.claims.map(async (c) => {
-			const { head, approval, hosted } = await changeStatus(ctx, repo, state, cast, counted, c.change, c);
+			const { head, approval, hosted } = await changeStatus(ctx, repo, state, async () => votes.votes, c.change, c);
 			// A question for a person, until a person votes on the change's commit.
-			const flag = openFlag(votes?.commit.state, c.change, head);
+			const flag = openFlag(votes, c.change, head);
 			const attention = flag ? { reason: flag.reason, agent: flag.agent, at: flag.at } : hosted?.builder?.status === "failed" ? { reason: `Blueprint's builder failed${hosted.builder.error ? `: ${hosted.builder.error.slice(0, 160)}` : ""}`, agent: "blueprint-builder", at: c.active } : null;
 			return { ...c, head, approval, ...(hosted ? { hosted } : {}), ...(attention ? { attention } : {}) };
 		}),
@@ -357,10 +395,12 @@ export async function freeSnapshot(ctx: FreeContext, repo: string) {
 		/** Claims are split into per-path shards this deep (absent: one registry), and since when and why, or whether they will be. */
 		...(state.shardDepth ? { shardDepth: state.shardDepth } : {}),
 		sharding: shardingOf(state).sharding,
+		/** How votes are kept: in one record until the load calls for buckets ("on demand"), always ("never"), or in buckets since `since`. */
+		votesSharding: votes.sharded ?? (state.autoShard || state.shardDepth ? "on demand" : "never"),
 		/** The claims in force, each with where its change stands. */
 		claims,
 		/** The latest votes, newest first. */
-		votes: (votes?.commit.state.votes ?? []).slice(-20).reverse(),
+		votes: votes.votes.slice(-20).reverse(),
 	};
 }
 
@@ -395,7 +435,7 @@ async function runFreeTool(name: string, args: Args, ctx: FreeContext): Promise<
 	const repo = requiredString(args, "repo");
 	const write = () => ctx.remote(repo, "write");
 	const claims = recordLog<Registry>(ctx, repo, claimsRef(repo));
-	const votes = recordLog<Votes>(ctx, repo, votesRef(repo));
+	const votes = votesFor(ctx, repo);
 	// Read once per call; only free_start, which writes it first, reads it again.
 	const rootHead = await claims.read();
 	const registered = rootHead?.commit.state;
@@ -483,12 +523,14 @@ async function runFreeTool(name: string, args: Args, ctx: FreeContext): Promise<
 		case "free_ask_human": {
 			const change = requiredString(args, "change");
 			if (!(await claimOf(change))) throw new Error(`[409] ${change} holds no claim`);
-			return flagChange(votes, { change, agent: actAs("agent"), reason: requiredString(args, "reason") }, stamper);
+			return votes.flag({ change, agent: actAs("agent"), reason: requiredString(args, "reason") }, stamper);
 		}
 		case "free_vote": {
 			const verdict = requiredString(args, "verdict");
 			if (verdict !== "approve" && verdict !== "reject") throw new Error("[400] verdict is approve or reject");
-			return vote(votes, { commit: requiredString(args, "commit"), reviewer: actAs("reviewer"), role: requiredString(args, "role"), verdict, evidence: requiredString(args, "evidence") }, stamper);
+			const reviewer = actAs("reviewer");
+			// Busy enough that one record would hold reviewers up: shard the votes first.
+			return votesFor(ctx, repo, await shardVotesIfBusy(ctx, repo, registered, reviewer)).vote({ commit: requiredString(args, "commit"), reviewer, role: requiredString(args, "role"), verdict, evidence: requiredString(args, "evidence") }, stamper);
 		}
 		case "free_merge": {
 			// mergeChange reads the claims again itself, when it checks them.
@@ -542,8 +584,8 @@ async function runFreeTool(name: string, args: Args, ctx: FreeContext): Promise<
 			const change = requiredString(args, "change");
 			const held = (await claimOf(change)) ?? null;
 			const released = held ? undefined : (await changeOf(change)).released.at(-1);
-			const cast = (await votes.read())?.commit.state.votes ?? [];
-			return { change, claim: held, ...(released ? { released } : {}), ...(await changeStatus(ctx, repo, registered, cast, await countedVotes(cast, registered?.stampKey), change, held ?? undefined, held?.agent ?? released?.agent)) };
+			const votesOn = async (head: string) => (await votes.readFor([head])).votes;
+			return { change, claim: held, ...(released ? { released } : {}), ...(await changeStatus(ctx, repo, registered, votesOn, change, held ?? undefined, held?.agent ?? released?.agent)) };
 		}
 		case "free_check":
 		{

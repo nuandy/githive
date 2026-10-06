@@ -9,6 +9,7 @@ import { readMainMerges, readRecordHistory } from "../src/free/git-records";
 import { revertViolation } from "../src/free/revert";
 import { generateStampKey, makeStamper, type Stamper } from "../src/free/stamp";
 import type { Votes } from "../src/free/votes";
+import { voteStore } from "../src/free/vote-store";
 import { agentClone } from "./helpers/agents";
 import { startGitServer, type GitServer } from "./helpers/git-server";
 
@@ -60,7 +61,7 @@ describe("free_revert", { timeout: 60_000 }, () => {
 		const before = await audit(await records());
 		expect(before.map((v) => [v.commit, v.rule])).toEqual([[bad, "undeclared"]]);
 
-		const reverted = await revertViolation({ remote: remote(), branch: "main", claims: claims(), votes: votes(), stamper, target: bad, violations: before, agent: "agent-c" });
+		const reverted = await revertViolation({ remote: remote(), branch: "main", claims: claims(), votes: voteStore({ repo: "t1", root: votes(), remote: async () => remote() }), stamper, target: bad, violations: before, agent: "agent-c" });
 		expect(reverted).toMatchObject({ ok: true });
 		expect(server.git("ls-tree", "-r", "--name-only", "main").includes("src/c/z.txt")).toBe(false);
 
@@ -70,7 +71,7 @@ describe("free_revert", { timeout: 60_000 }, () => {
 
 	it("refuses to revert a commit the audit doesn't report", async () => {
 		const main = server.git("rev-parse", "main").trim();
-		expect(await revertViolation({ remote: remote(), branch: "main", claims: claims(), votes: votes(), stamper, target: main, violations: [], agent: "agent-c" })).toEqual({
+		expect(await revertViolation({ remote: remote(), branch: "main", claims: claims(), votes: voteStore({ repo: "t1", root: votes(), remote: async () => remote() }), stamper, target: main, violations: [], agent: "agent-c" })).toEqual({
 			ok: false,
 			reasons: [`${main} has no reported violations to revert`],
 		});
@@ -80,7 +81,7 @@ describe("free_revert", { timeout: 60_000 }, () => {
 		const bad = await rogueEdit("first\n");
 		await rogueEdit("second\n");
 		const violations = await audit(await records());
-		expect(await revertViolation({ remote: remote(), branch: "main", claims: claims(), votes: votes(), stamper, target: bad, violations, agent: "agent-c" })).toEqual({
+		expect(await revertViolation({ remote: remote(), branch: "main", claims: claims(), votes: voteStore({ repo: "t1", root: votes(), remote: async () => remote() }), stamper, target: bad, violations, agent: "agent-c" })).toEqual({
 			ok: false,
 			reasons: ["src/c/z.txt has changed since; revert it by hand"],
 		});

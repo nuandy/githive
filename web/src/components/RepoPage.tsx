@@ -2,7 +2,7 @@ import type { FreeVoteApi } from "./FreeVoteForm";
 import type { ReactNode } from "react";
 import type { FreeChangeHistory, FreeSnapshot, HistoryEntry, Leader, Live, Task } from "../api";
 import { holdersFromSnapshot, holdersFromTask } from "../lib/claimsMap";
-import { shardingSummary } from "../lib/freeStatus";
+import { recordsBadge } from "../lib/freeStatus";
 import type { LiveStatus } from "../lib/liveFeed";
 import { changesOf, isActive, type ChangeState } from "../lib/model";
 import { href, type ChangeTab, type RepoBase, type RepoTab } from "../lib/routes";
@@ -148,7 +148,7 @@ export function FreeRepoPage({ repo, base, view, snapshot, changeHistory, liveSt
 			<RepoHeader
 				name={repo}
 				mode="coordinator-free"
-				badges={<ShardingBadge summary={shardingSummary(snapshot)} />}
+				badges={<ShardingBadge summary={recordsBadge(snapshot)} />}
 				tabs={tabs}
 				current={current}
 				homeHref={href.repo(repo, "changes", base)}

@@ -33,8 +33,9 @@ vi.mock("../src/free/mcp", () => ({
 		if (name === "free_check") return hosted.check;
 		return { ok: true };
 	}),
+	// The repo's votes: wherever they're kept, a vote is recorded once.
+	votesFor: () => ({ vote: vi.fn(async (input: unknown) => void hosted.votes.push(input)) }),
 }));
-vi.mock("../src/free/votes", () => ({ vote: vi.fn(async (_log: unknown, input: unknown) => void hosted.votes.push(input)) }));
 
 const { Builder } = await import("../src/builder");
 const { Reviewer } = await import("../src/reviewer");

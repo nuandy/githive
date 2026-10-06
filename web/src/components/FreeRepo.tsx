@@ -1,7 +1,7 @@
 import { FreeVoteForm, type FreeVoteApi } from "./FreeVoteForm";
 import type { FreeAudit, FreeChangeHistory, FreeSnapshot } from "../api";
 import { identityName } from "../lib/agent";
-import { claimAgent, claimApprovalLabel, claimTitle, freeClaimStatus, shardingSummary, votesForClaim, type FreeClaim } from "../lib/freeStatus";
+import { claimAgent, claimApprovalLabel, claimTitle, freeClaimStatus, shardingSummary, votesForClaim, votesShardingSummary, type FreeClaim } from "../lib/freeStatus";
 import { shortSha, briefPaths } from "../lib/model";
 import { shortAge, timeAgo } from "../lib/relativeTime";
 import { href, type RepoBase } from "../lib/routes";
@@ -187,6 +187,7 @@ export function FreeAudit({ snapshot }: { snapshot: FreeSnapshot }) {
 export function FreeSettings({ snapshot }: { snapshot: FreeSnapshot }) {
 	const { policy, verify } = snapshot;
 	const sharding = shardingSummary(snapshot);
+	const votesSharding = votesShardingSummary(snapshot);
 	return (
 		<div className="repo-settings">
 			<p className="callout repo-settings__intro">
@@ -214,6 +215,12 @@ export function FreeSettings({ snapshot }: { snapshot: FreeSnapshot }) {
 							<>
 								<dt>Claims</dt>
 								<dd>{sharding.detail}</dd>
+							</>
+						) : null}
+						{votesSharding ? (
+							<>
+								<dt>Votes</dt>
+								<dd>{votesSharding.detail}</dd>
 							</>
 						) : null}
 						<dt>Branches</dt>

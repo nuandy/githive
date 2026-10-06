@@ -80,3 +80,24 @@ export function shardingSummary(snapshot: Pick<FreeSnapshot, "sharding" | "shard
 		detail: `Claims are sharded by path${deep}${since}${because}, so agents in different parts of the tree never wait on each other. Claims made before stay in the top record, above every shard.`,
 	};
 }
+
+/** How a repo keeps its votes, as a sentence: in one record, or in buckets by commit once the load called for it. Null for older servers. */
+export function votesShardingSummary(snapshot: Pick<FreeSnapshot, "votesSharding">): { sharded: boolean; detail: string } | null {
+	const { votesSharding } = snapshot;
+	if (!votesSharding) return null;
+	if (votesSharding === "on demand")
+		return { sharded: false, detail: "Votes are kept in one record. They are split by commit automatically once 8 reviewers vote within 5 minutes, or votes come more than 15 times a minute." };
+	if (votesSharding === "never") return { sharded: false, detail: "Votes are kept in one record; this repo was set never to split them." };
+	const since = votesSharding.since ? ` since ${new Date(votesSharding.since).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })}` : "";
+	const because = votesSharding.because ? ` (${votesSharding.because})` : "";
+	return { sharded: true, detail: `Votes are split by commit${since}${because}, so reviewers of different changes never wait on each other. Votes cast before stay in the top record.` };
+}
+
+/** The header's badge: what's sharded (claims, votes, both), or one claims record; the detail says both. Null for older servers. */
+export function recordsBadge(snapshot: Pick<FreeSnapshot, "sharding" | "shardDepth" | "votesSharding">): { label: string; sharded: boolean; detail: string } | null {
+	const claims = shardingSummary(snapshot);
+	const votes = votesShardingSummary(snapshot);
+	if (!claims) return null;
+	const label = claims.sharded && votes?.sharded ? "Sharded claims & votes" : claims.sharded ? "Sharded claims" : votes?.sharded ? "Sharded votes" : claims.label;
+	return { label, sharded: claims.sharded || !!votes?.sharded, detail: [claims.detail, votes?.detail].filter(Boolean).join(" ") };
+}

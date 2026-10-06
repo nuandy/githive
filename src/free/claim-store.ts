@@ -3,8 +3,8 @@ import http from "isomorphic-git/http/web";
 import type { CasLog } from "../election";
 import { GitCasLog } from "../election-git";
 import { isEmptyRepo, type Remote } from "../git";
-import { fetchCommits } from "../git-fetch";
 import { retryTransient } from "../retry";
+import { readAllShards, readRefs } from "./record-refs";
 import { activeClaims, claim, conflictsWith, release, releaseStale, withdraw, type ClaimRecord, type Conflict, type Registry, type ReleaseRecord } from "./claims";
 import { appendRecord } from "./records";
 import { ancestorsOf, changeRef, changeRepoOf, decodeShard, encodeShard, isWide, recordsRepoOf, shardOf, shardRef, shardsPrefix } from "./shards";
@@ -70,60 +70,8 @@ export interface StoreInput {
 	log?: (ref: string) => CasLog<Registry> & Pick<GitCasLog<Registry>, "readAt">;
 }
 
-/**
- * Shard states by commit, for the isolate. A commit never changes, so a state
- * once read stays right; only states already read are kept (no request waits
- * on another's I/O).
- */
-const shardStates = new Map<string, Registry>();
-
 /** How many records repos a release writes to at once. */
 const RELEASE_REPOS_AT_ONCE = 4;
-const decoder = new TextDecoder();
-
-/**
- * Every shard under `prefix`, at its tip: one listing, then one fetch for all
- * the shards whose tips aren't known yet. Brief server failures are retried.
- */
-async function readAllShards(remote: Remote, prefix: string) {
-	return readListed(remote, async (onAuth) => (await listRefs(remote, prefix, onAuth)).filter((r) => r.ref.startsWith(prefix)));
-}
-
-/** These refs (where they exist) at their tips: one listing (of the prefix they share), then one fetch for the commits not known yet. */
-async function readRefs(remote: Remote, refs: string[]) {
-	const wanted = new Set(refs);
-	return readListed(remote, async (onAuth) => (await listRefs(remote, sharedPrefix(refs), onAuth)).filter((r) => wanted.has(r.ref)));
-}
-
-/** The longest prefix every ref starts with. */
-function sharedPrefix(refs: string[]) {
-	let prefix = refs[0] ?? "";
-	for (const ref of refs) while (!ref.startsWith(prefix)) prefix = prefix.slice(0, -1);
-	return prefix;
-}
-
-const listRefs = (remote: Remote, prefix: string, onAuth: () => { username: string; password: string }) =>
-	retryTransient(() => git.listServerRefs({ http, url: remote.url, protocolVersion: 1, prefix, onAuth }).catch((err) => (isEmptyRepo(err) ? [] : Promise.reject(err))));
-
-/** Refs as `list` finds them, with their states: commits not known yet are fetched in one request. */
-async function readListed(remote: Remote, list: (onAuth: () => { username: string; password: string }) => Promise<{ ref: string; oid: string }[]>): Promise<{ ref: string; tip: string; state: Registry }[]> {
-	const onAuth = () => ({ username: "x", password: remote.token.split("?expires=")[0] });
-	for (let attempt = 1; ; attempt++) {
-		const listed = await list(onAuth);
-		const missing = [...new Set(listed.map((r) => r.oid).filter((oid) => !shardStates.has(oid)))];
-		try {
-			if (missing.length) {
-				const { fs, dir } = await retryTransient(() => fetchCommits(remote, missing));
-				for (const oid of missing) shardStates.set(oid, JSON.parse(decoder.decode((await git.readBlob({ fs, dir, oid, filepath: "state.json" })).blob)) as Registry);
-			}
-		} catch (err) {
-			// A ref moved between the listing and the fetch: its old tip is no longer served. List again.
-			if (attempt < 3 && /not our ref|fetch refused/i.test(String(err))) continue;
-			throw err;
-		}
-		return listed.map((r) => ({ ref: r.ref, tip: r.oid, state: shardStates.get(r.oid)! }));
-	}
-}
 
 export function claimStore(input: StoreInput): ClaimStore {
 	return new Claims(input);
@@ -237,7 +185,7 @@ class Claims implements ClaimStore {
 	/** Every shard at its tip: per repo, one listing and one fetch. */
 	private async readAll(): Promise<Entry[]> {
 		const prefix = shardsPrefix(this.input.repo);
-		const shards = (await Promise.all(this.remotes().map(async (remote) => readAllShards(await remote, prefix)))).flat();
+		const shards = (await Promise.all(this.remotes().map(async (remote) => readAllShards<Registry>(await remote, prefix)))).flat();
 		return shards.map(({ ref, tip, state }) => ({ shard: decodeShard(ref.slice(prefix.length)), tip, state }));
 	}
 
@@ -245,7 +193,7 @@ class Claims implements ClaimStore {
 	private async readShards(shards: string[]): Promise<Entry[]> {
 		const byRepo = new Map<number, string[]>();
 		for (const shard of new Set(shards)) if (shard !== ROOT) byRepo.set(this.repoOf(shard), [...(byRepo.get(this.repoOf(shard)) ?? []), shard]);
-		const read = await Promise.all([...byRepo].map(async ([k, group]) => readRefs(await this.remote(k), group.map((s) => shardRef(this.input.repo, s)))));
+		const read = await Promise.all([...byRepo].map(async ([k, group]) => readRefs<Registry>(await this.remote(k), group.map((s) => shardRef(this.input.repo, s)))));
 		const prefix = shardsPrefix(this.input.repo);
 		return read.flat().map((entry) => ({ shard: decodeShard(entry.ref.slice(prefix.length)), tip: entry.tip, state: entry.state }));
 	}
@@ -279,8 +227,8 @@ class Claims implements ClaimStore {
 
 	/** The shards a change has claimed in below the registry, from its index (null: it has none). */
 	private async indexed(change: string): Promise<string[] | null> {
-		const [entry] = await readRefs(await this.indexRemote(change), [changeRef(this.input.repo, change)]);
-		return entry ? ((entry.state as unknown as { shards?: string[] }).shards ?? []) : null;
+		const [entry] = await readRefs<{ shards?: string[] }>(await this.indexRemote(change), [changeRef(this.input.repo, change)]);
+		return entry ? (entry.state.shards ?? []) : null;
 	}
 
 	/**

@@ -1,11 +1,11 @@
 import git from "isomorphic-git";
-import type { CasLog } from "../election";
 import { BOT, type Remote, Workspace } from "../git";
 import { inLane } from "../open-mode";
 import type { ClaimStore } from "./claim-store";
 import { mergeStampPayload } from "./audit";
 import type { Stamper } from "./stamp";
-import { type ReviewPolicy, type Votes, approval, countedVotes, effectiveFreePolicy } from "./votes";
+import type { VoteStore } from "./vote-store";
+import { type ReviewPolicy, approval, countedVotes, effectiveFreePolicy } from "./votes";
 
 // The toolkit's merge for a cooperative agent in coordinator-free mode. It
 // checks the conventions the agent follows (its claim covers every file it
@@ -35,7 +35,8 @@ export interface MergeInput {
 	source?: Remote;
 	/** The repo's claims: checked before merging, cited on the merge, released after. */
 	store: ClaimStore;
-	votes: CasLog<Votes>;
+	/** The repo's votes: counted on the change's head, and cited on the merge. */
+	votes: VoteStore;
 	policy: ReviewPolicy;
 	/** The project's checks; none means the merge isn't tested. */
 	verify?: string[];
@@ -59,13 +60,12 @@ export type MergeOutcome =
  */
 export async function mergeChange(input: MergeInput): Promise<MergeOutcome> {
 	for (let attempt = 1; ; attempt++) {
-		const votesHead = await input.votes.read();
 		const ws = await Workspace.clone(input.remote, input.branch);
 		const main = await ws.head();
 		const head = await ws.fetch("change", input.source ?? input.remote, `changes/${input.change}`);
 		const files = await ws.changedPaths(await ws.mergeBase(main, head), head);
-		// The claims that bear on these files: the change's own, and any covering them.
-		const view = await input.store.readScope(input.change, files);
+		// The claims that bear on these files (the change's own, and any covering them), and the votes on its head.
+		const [view, votes] = await Promise.all([input.store.readScope(input.change, files), input.votes.readFor([head])]);
 
 		const reasons: string[] = [];
 		const claims = view.claims;
@@ -76,7 +76,7 @@ export async function mergeChange(input: MergeInput): Promise<MergeOutcome> {
 			if (holder) reasons.push(`${file} is inside ${holder.change}'s claim (${holder.agent})`);
 			else if (own && !inLane(file, own.paths)) reasons.push(`${file} is outside ${input.change}'s claim`);
 		}
-		const counted = await countedVotes(votesHead?.commit.state.votes ?? [], input.stampKey);
+		const counted = await countedVotes(votes.votes, input.stampKey);
 		// Distinct reviewers, never the change's author: its claim's agent, and who made the claim.
 		// The policy for what it touches: stricter for dependency, CI and deploy files, say.
 		const outcome = approval({ votes: counted }, head, input.policy, own, files);
@@ -108,7 +108,7 @@ export async function mergeChange(input: MergeInput): Promise<MergeOutcome> {
 			}
 		}
 
-		const claimed = { base: main, head, change: input.change, author: input.agent, by: input.stamper?.by, claimsTip: input.store.cite(view, files, own), votesTip: votesHead!.tip, testedOn: verify.length ? main : undefined };
+		const claimed = { base: main, head, change: input.change, author: input.agent, by: input.stamper?.by, claimsTip: input.store.cite(view, files, own), votesTip: input.votes.cite(votes, head), testedOn: verify.length ? main : undefined };
 		const message = [
 			`Merge ${input.change} by ${input.agent}`,
 			"",

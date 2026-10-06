@@ -46,6 +46,8 @@ export interface FreeSnapshot {
 	sharding?: "on demand" | "never" | { since?: string; because?: string };
 	/** How many path segments deep claims are sharded, once they are. */
 	shardDepth?: number;
+	/** How votes are kept (newer servers): in one record until the load calls for buckets ("on demand"), always ("never"), or in buckets since `since`. */
+	votesSharding?: "on demand" | "never" | { since?: string; because?: string };
 	claims: {
 		change: string;
 		agent: string;

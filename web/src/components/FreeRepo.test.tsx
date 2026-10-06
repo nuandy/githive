@@ -49,9 +49,14 @@ describe("a coordinator-free repo", () => {
 		const sharded = page({ since: "2026-10-07T09:30:00.000Z", because: "8 agents hold claims" });
 		expect(sharded).toMatch(/mode-badge mode-badge--sharded"[^>]*>Sharded claims/);
 		expect(sharded).toContain("(8 agents hold claims)");
+		const votes = renderToStaticMarkup(
+			<FreeRepoPage repo="docs-site" base="free" view={{ kind: "repo", tab: "settings", state: "open" }} snapshot={{ ...snapshot, sharding: "on demand", votesSharding: { since: "2026-10-07T09:30:00.000Z", because: "8 reviewers voting" } }} api={stubApi()} />,
+		);
+		expect(votes).toMatch(/mode-badge--sharded"[^>]*>Sharded votes/);
+		expect(votes).toMatch(/<dt>Votes<\/dt><dd>Votes are split by commit/);
 		// Older servers don't say: no badge, no line.
 		const older = page(undefined);
-		expect(older).not.toMatch(/claims record|Sharded claims|<dt>Claims<\/dt>/);
+		expect(older).not.toMatch(/claims record|Sharded claims|<dt>Claims<\/dt>|<dt>Votes<\/dt>/);
 	});
 
 	it("shows one claim like a pull request, with its commits, votes and hosted agents", () => {

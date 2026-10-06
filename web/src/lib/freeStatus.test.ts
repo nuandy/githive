@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { freeSnapshot } from "../test/fixtures";
-import { claimAgent, claimApprovalLabel, claimTitle, freeClaimStatus, votesForClaim, shardingSummary } from "./freeStatus";
+import { claimAgent, claimApprovalLabel, claimTitle, freeClaimStatus, votesForClaim, shardingSummary, votesShardingSummary, recordsBadge } from "./freeStatus";
 
 const claim = freeSnapshot.claims[0];
 
@@ -48,5 +48,22 @@ describe("how a repo keeps its claims", () => {
 		const sharded = shardingSummary({ sharding: { since: "2026-10-07T09:30:00.000Z", because: "8 agents hold claims" }, shardDepth: 2 });
 		expect(sharded).toMatchObject({ label: "Sharded claims", sharded: true });
 		expect(sharded?.detail).toMatch(/sharded by path, 2 folders deep since .*2026.* \(8 agents hold claims\)/);
+	});
+});
+
+describe("how a repo keeps its votes", () => {
+	it("says one record on demand, and when and why once split by commit", () => {
+		expect(votesShardingSummary({})).toBeNull();
+		expect(votesShardingSummary({ votesSharding: "on demand" })).toMatchObject({ sharded: false, detail: expect.stringMatching(/automatically once 8 reviewers vote/) });
+		expect(votesShardingSummary({ votesSharding: { since: "2026-10-07T09:30:00.000Z", because: "8 reviewers voting" } })?.detail).toMatch(/split by commit since .*2026.* \(8 reviewers voting\)/);
+	});
+
+	it("names what's sharded in the header badge, and says both in its detail", () => {
+		const sharded = { since: "2026-10-07T09:30:00.000Z" };
+		expect(recordsBadge({ sharding: "on demand", votesSharding: "on demand" })).toMatchObject({ label: "One claims record", sharded: false, detail: expect.stringMatching(/Claims are kept.*Votes are kept/) });
+		expect(recordsBadge({ sharding: sharded, votesSharding: "on demand" })).toMatchObject({ label: "Sharded claims", sharded: true });
+		expect(recordsBadge({ sharding: "on demand", votesSharding: sharded })).toMatchObject({ label: "Sharded votes", sharded: true });
+		expect(recordsBadge({ sharding: sharded, votesSharding: sharded })).toMatchObject({ label: "Sharded claims & votes", sharded: true });
+		expect(recordsBadge({})).toBeNull();
 	});
 });

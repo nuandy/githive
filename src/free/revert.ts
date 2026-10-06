@@ -4,7 +4,7 @@ import { BOT, type Remote, Workspace } from "../git";
 import { type Violation, revertStampPayload } from "./audit";
 import type { Registry } from "./claims";
 import type { Stamper } from "./stamp";
-import type { Votes } from "./votes";
+import type { VoteStore } from "./vote-store";
 
 // The remedy that goes with detection in coordinator-free mode: any agent may
 // revert a commit the audit reports. The revert restores the files that commit
@@ -18,7 +18,7 @@ const ATTEMPTS = 3;
 export interface RevertInput {
 	remote: Remote;
 	claims: CasLog<Registry>;
-	votes: CasLog<Votes>;
+	votes: VoteStore;
 	stamper?: Stamper;
 	/** The project's branch. */
 	branch: string;

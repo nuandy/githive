@@ -21,8 +21,50 @@ export interface VoteRecord {
 
 export interface Votes {
 	votes: VoteRecord[];
-	/** Changes an agent has asked a person about, oldest first. */
+	/** Changes an agent has asked a person about, oldest first (always here, never in a bucket). */
 	flags?: FlagRecord[];
+	/**
+	 * Votes are split by commit into this many buckets, each its own ref (see
+	 * vote-store.ts); absent, they're all here. The votes cast before stay here.
+	 */
+	buckets?: number;
+	/** The buckets are spread over this many records repos (absent: they're in the project repo). */
+	recordsRepos?: number;
+	/** When the votes were sharded, and why. */
+	shardedAt?: string;
+	shardedBecause?: string;
+}
+
+/**
+ * When an unsharded votes record should shard, from the votes it records: as
+ * many reviewers voting at once as one record serves well, or as many writes
+ * a minute (the same limits as claims; see SHARD_WHEN in claims.ts).
+ */
+export const SHARD_VOTES_WHEN = { reviewers: 8, writesPerMinute: 15, windowMs: 5 * 60_000 };
+
+/** Why the votes should shard before the next one, or null if they needn't (or are). */
+export function votesShardingReason(state: Votes | null | undefined, reviewer: string, now = Date.now()): string | null {
+	if (state?.buckets) return null;
+	const since = now - SHARD_VOTES_WHEN.windowMs;
+	const recent = (state?.votes ?? []).filter((v) => Date.parse(v.at) >= since);
+	const reviewers = new Set([...recent.map((v) => v.by ?? `name:${v.reviewer}`), `name:${reviewer}`]);
+	if (reviewers.size >= SHARD_VOTES_WHEN.reviewers) return `${reviewers.size} reviewers voting`;
+	const writes = recent.length + (state?.flags ?? []).filter((f) => Date.parse(f.at) >= since).length;
+	const perMinute = writes / (SHARD_VOTES_WHEN.windowMs / 60_000);
+	if (perMinute > SHARD_VOTES_WHEN.writesPerMinute) return `${Math.round(perMinute)} votes a minute`;
+	return null;
+}
+
+/** Shard the votes from here on (once: refused if they are). The votes cast so far stay in this record. */
+export function shardVotes(log: CasLog<Votes>, input: { buckets: number; recordsRepos: number; reason: string }) {
+	return appendRecord<Votes, "sharded">(log, "blueprint", () => ({ votes: [] }), (state) =>
+		state.buckets
+			? { refused: "sharded" }
+			: {
+					state: { ...state, buckets: input.buckets, ...(input.recordsRepos ? { recordsRepos: input.recordsRepos } : {}), shardedAt: new Date().toISOString(), shardedBecause: input.reason },
+					text: `Votes are sharded from here on, over ${input.buckets} buckets: ${input.reason}`,
+				},
+	);
 }
 
 /** An agent asking a person to decide something about a change (reviewers disagree, say). */
@@ -48,8 +90,12 @@ export function flagChange(log: CasLog<Votes>, input: Omit<FlagRecord, "at" | "b
 	});
 }
 
-/** The latest question about `change` that no person has answered yet: a person's vote on `head` after it answers it. */
-export function openFlag(state: Votes | null | undefined, change: string, head: string | null) {
+/**
+ * The latest question about `change` that no person has answered yet: a
+ * person's vote on `head` after it answers it. `state` holds the flags and
+ * (at least) the votes on `head`.
+ */
+export function openFlag(state: Pick<Votes, "votes" | "flags"> | null | undefined, change: string, head: string | null) {
 	const flag = (state?.flags ?? []).filter((f) => f.change === change).at(-1);
 	if (!flag) return null;
 	const answered = (state?.votes ?? []).some((v) => v.by?.startsWith("person:") && v.commit === head && v.at >= flag.at);
@@ -102,7 +148,7 @@ export interface Author {
  * role must approve too (`awaiting` lists those that haven't), so a veto can
  * always stop a merge, however fast the others vote.
  */
-export function approval(state: Votes | null | undefined, commit: string, base: ReviewPolicy, author?: Author, paths: string[] = []) {
+export function approval(state: Pick<Votes, "votes"> | null | undefined, commit: string, base: ReviewPolicy, author?: Author, paths: string[] = []) {
 	const policy = effectiveFreePolicy(base, paths);
 	const latest = new Map<string, VoteRecord>();
 	for (const v of state?.votes ?? []) if (v.commit === commit) latest.set(v.by ?? `name:${v.reviewer}`, v);

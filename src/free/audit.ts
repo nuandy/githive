@@ -67,6 +67,8 @@ export interface AuditRecords {
 	shards?: Map<string, { tip: string; state: Registry }[]>;
 	/** The votes' history, oldest first. */
 	votes?: { tip: string; state: Votes }[];
+	/** Each vote bucket's history, oldest first, once the votes are sharded (see vote-store.ts). */
+	voteBuckets?: Map<string, { tip: string; state: Votes }[]>;
 	policy?: ReviewPolicy;
 	/** The project's checks; when set, every merge must record checks passing on the main it merged onto. */
 	verify?: string[];
@@ -192,7 +194,7 @@ async function verifiedVotes(records: AuditRecords, verified: Verify) {
 	const votesAt = new Map<string, Votes>();
 	const forged: Violation[] = [];
 	const checked = new Map<string, boolean>();
-	for (const { tip, state } of records.votes ?? []) {
+	for (const { tip, state } of [...(records.votes ?? []), ...[...(records.voteBuckets?.values() ?? [])].flat()]) {
 		const counted: VoteRecord[] = [];
 		for (const cast of state.votes) {
 			const id = `${cast.reviewer}|${cast.commit}|${cast.at}|${cast.stamp ?? ""}`;
@@ -225,12 +227,35 @@ function checkReleasedAfter(history: History, tip: string, merge: MergeRecord, r
 	}
 }
 
-/** The merged commit must have had the policy's approvals from reviewers other than its author, every veto role's among them, and no veto, at the votes tip the merge cites. */
+/**
+ * The votes a merge says it counted (its Blueprint-Votes trailer): a tip of
+ * the votes record, or, sharded, `=tip` for the record and `bucket=tip` for
+ * the bucket of the merged commit, counted together.
+ */
+function citedVotes(records: AuditRecords, votesAt: Map<string, Votes>, merge: MergeRecord, report: (rule: string, detail: string) => void): Votes | undefined {
+	const cited = merge.votesTip!;
+	if (!cited.includes("=")) {
+		const votes = votesAt.get(cited);
+		if (!votes) report("unknown-votes", `${cited} is not in the votes' history`);
+		return votes;
+	}
+	const votes: VoteRecord[] = [];
+	for (const pair of cited.split(/\s+/).filter(Boolean)) {
+		const [bucket, tip] = pair.split("=");
+		const history = bucket === "" ? records.votes : records.voteBuckets?.get(bucket);
+		const at = history?.some((e) => e.tip === tip) ? votesAt.get(tip) : undefined;
+		if (!at) return void report("unknown-votes", `${bucket ? `bucket ${bucket}` : "the votes record"} at ${tip} is not in its history`);
+		votes.push(...at.votes);
+	}
+	return { votes };
+}
+
+/** The merged commit must have had the policy's approvals from reviewers other than its author, every veto role's among them, and no veto, in the votes the merge cites. */
 function checkApproved(records: AuditRecords, votesAt: Map<string, Votes>, merge: MergeRecord, report: (rule: string, detail: string) => void, author?: Author) {
 	if (!records.policy) return;
 	if (!merge.head || !merge.votesTip) return report("undeclared", "the merge names no reviewed commit or votes it counted (Blueprint-Votes)");
-	const votes = votesAt.get(merge.votesTip);
-	if (!votes) return report("unknown-votes", `${merge.votesTip} is not in the votes' history`);
+	const votes = citedVotes(records, votesAt, merge, report);
+	if (!votes) return;
 	// Distinct verified reviewers, never the change's own author.
 	const outcome = approval(votes, merge.head, records.policy, author, merge.files);
 	const { required } = effectiveFreePolicy(records.policy, merge.files);

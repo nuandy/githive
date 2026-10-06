@@ -36,6 +36,11 @@ export async function readRecordHistory<S>(remote: Remote, ref: string): Promise
  */
 export async function readShardHistories(remotes: Remote[], repo: string) {
 	const prefix = shardsPrefix(repo);
+	return new Map([...(await readRefHistories<Registry>(remotes, prefix))].map(([name, history]) => [decodeShard(name), history]));
+}
+
+/** Every record ref's history under `prefix` (vote buckets, say), by the rest of its name: per repo, one listing and one fetch. */
+export async function readRefHistories<S>(remotes: Remote[], prefix: string) {
 	const perRepo = await Promise.all(
 		remotes.map(async (remote) => {
 			const { refs, fs } = await listAndFetch(remote, prefix);
@@ -45,10 +50,10 @@ export async function readShardHistories(remotes: Remote[], repo: string) {
 					const states = await Promise.all(
 						history.map(async (entry) => ({
 							tip: entry.oid,
-							state: JSON.parse(decoder.decode((await git.readBlob({ fs, dir: DIR, oid: entry.oid, filepath: "state.json" })).blob)) as Registry,
+							state: JSON.parse(decoder.decode((await git.readBlob({ fs, dir: DIR, oid: entry.oid, filepath: "state.json" })).blob)) as S,
 						})),
 					);
-					return [decodeShard(r.ref.slice(prefix.length)), states] as const;
+					return [r.ref.slice(prefix.length), states] as const;
 				}),
 			);
 		}),

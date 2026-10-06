@@ -227,8 +227,8 @@ repo involved (records repos, the project repo, the agents' forks), which
 suggests a throughput limit across Artifacts for the namespace, not one busy
 repo: roughly 5,000 calls in three and a half minutes, each several Git
 requests. Next steps: more records
-repos, listing claims less often (agents, not the toolkit, decide that), and
-votes sharded like claims (every vote is a push to one ref).
+repos, and listing claims less often (agents, not the toolkit, decide that).
+Votes now shard like claims (see Sharding on demand).
 
 Small runs pay for sharding: one agent takes 35.5 s against 27.3 s with one
 record, since a read lists the shards before fetching.
@@ -275,3 +275,17 @@ its paths (more than 4 shards: `examples/a/…` to `examples/x/…` go to
 shards below it. Writing it shard by shard took 70 s for 24 example folders.
 
 A merge cites the registry as `=<tip>` among its shards; it covers every file.
+
+**Votes shard on demand too.** Every vote is a write to the one votes record,
+so a swarm reviewing at once meets the same limit. Votes stay there until 8
+reviewers vote within 5 minutes, or more than 15 votes are written a minute
+(`votesShardingReason`, in repos whose claims may shard); then the record is
+marked sharded, once, and new votes go to one of 16 buckets by the commit's
+leading hex digits, each its own ref, spread over the records repos
+(`vote-store.ts`). Votes never conflict, so nothing is checked across the
+switch: the votes cast before stay in the record, a vote cast there after (by
+a caller that read it before) still counts, and every reader reads the record
+with the buckets it needs (a commit's votes: the record and one bucket).
+Questions for a person (`free_ask_human`) are rare and always stay in the
+record. A merge cites its votes as `=<record tip> <bucket>=<tip>`, and the
+audit counts the cited records together.

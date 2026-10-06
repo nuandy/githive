@@ -54,7 +54,7 @@ export function ModeBadge({ mode }: { mode: "elected" | "coordinator-free" }) {
 	);
 }
 
-/** How a coordinator-free repo keeps its claims: one record, or sharded by path (see shardingSummary). */
+/** How a coordinator-free repo keeps its claims and votes: one record, or sharded (see recordsBadge). */
 export function ShardingBadge({ summary }: { summary: { label: string; sharded: boolean; detail: string } | null }) {
 	if (!summary) return null;
 	return (

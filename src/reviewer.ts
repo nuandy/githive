@@ -4,12 +4,9 @@ import { statusOf } from "./errors";
 import { ENVIRONMENT, SandboxAgent, branchOf, sliceContext, type AgentState, type SliceJob } from "./sandbox";
 import { gitInBlueprint } from "./git-blueprint-guidance";
 import type { QuorumStatus } from "./types";
-import { remoteFor } from "./artifacts";
-import { GitCasLog, cachedRemote } from "./election-git";
 import { freeAgentName, freeContextFor } from "./free/env";
-import { callFreeTool } from "./free/mcp";
+import { callFreeTool, votesFor } from "./free/mcp";
 import { makeStamper } from "./free/stamp";
-import { vote, type Votes } from "./free/votes";
 
 // One Reviewer per (slice, role): a gpt-6-luna agent that checks out the exact
 // commit under review in its own container, with a read-only token, runs the
@@ -69,9 +66,10 @@ export class Reviewer extends SandboxAgent<ReviewJob, ReviewerState> {
 
 	/** Cast this review's verdict as a vote in the repo's votes ref, stamped as this reviewer when Blueprint has a key. */
 	private async voteFree(free: NonNullable<ReviewJob["free"]>, job: ReviewJob, verdict: "approve" | "reject", evidence: string) {
-		const votes = new GitCasLog<Votes>(cachedRemote(() => remoteFor(this.env.ARTIFACTS, free.repo, "write")), free.repo, `refs/notes/blueprint-votes/${free.repo}`);
+		// The repo's votes, wherever they're kept now: their record, or the commit's bucket once sharded.
+		const votes = votesFor(freeContextFor(this.env, undefined, { hosted: true }), free.repo);
 		const stamper = this.env.FREE_STAMP_KEY ? await makeStamper(this.env.FREE_STAMP_KEY, `service:blueprint-reviewer:${job.role}`) : undefined;
-		await vote(votes, { commit: job.head, reviewer: `blueprint-${job.role}`, role: job.role, verdict, evidence }, stamper);
+		await votes.vote({ commit: job.head, reviewer: `blueprint-${job.role}`, role: job.role, verdict, evidence }, stamper);
 	}
 
 	protected instructions(job: ReviewJob) {
