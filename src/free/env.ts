@@ -50,7 +50,8 @@ export function freeContextFor(env: Env, by: string | undefined, caller: { agent
 		startBuilder: (input) => startFreeBuilder(env, input),
 		stamper: async (agent) => (env.FREE_STAMP_KEY && by ? makeStamper(env.FREE_STAMP_KEY, agent ? `${by}/${agent}` : by) : undefined),
 		remote: (repo, scope) => cached(`${repo}|${scope}`, () => remoteFor(env.ARTIFACTS, repo, scope, 3600)),
-		changeRemote: (repo, change, scope) => cached(`${freeAgentName(repo, change)}|${scope}`, () => changeRemote(env, repo, change, scope, 3600)),
+		changeRemote: (repo, agent, scope) => cached(`fork:${repo}:${agent}|${scope}`, () => changeRemote(env, repo, agent, scope, 3600)),
+		legacyChangeRemote: (repo, change) => cached(`${freeAgentName(repo, change)}|read`, () => remoteFor(env.ARTIFACTS, freeAgentName(repo, change), "read", 3600)),
 		recordsRemote: (repo, k, scope) => cached(`${recordsRepoName(repo, k)}|${scope}`, () => remoteFor(env.ARTIFACTS, recordsRepoName(repo, k), scope, 3600)),
 		createRecordsRepos: async (repo, count) => {
 			await Promise.all(Array.from({ length: count }, (_, k) => ensureRepo(env.ARTIFACTS, recordsRepoName(repo, k), `Coordinator-free claim records for ${repo}`)));
@@ -74,17 +75,29 @@ export function freeContextFor(env: Env, by: string | undefined, caller: { agent
 }
 
 const claimsRef = (repo: string) => `refs/notes/blueprint-claims/${repo}`;
-/** A change's fork, and its hosted agents' Durable Object names: one builder, one reviewer per role and commit. */
+/** A change's hosted agents' Durable Object names: one builder, one reviewer per role and commit. */
 export const freeAgentName = (repo: string, change: string) => `free--${repo}--${change}`;
 
-/** Credentials for a change's own fork of the project repo; writing to it first creates the fork. */
-export async function changeRemote(env: Env, repo: string, change: string, scope: "read" | "write", ttlSeconds: number) {
-	const name = freeAgentName(repo, change);
+/**
+ * An agent's fork of a project repo: one per agent, holding a branch per
+ * change. Its name follows the agent's (lowercase, safe characters), with a
+ * short hash of the real name when those differ, so two names never share one.
+ */
+export async function freeForkName(repo: string, agent: string) {
+	const slug = agent.toLowerCase().replace(/[^a-z0-9-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40) || "agent";
+	if (slug === agent) return `free--${repo}--agent--${slug}`;
+	const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(agent)));
+	return `free--${repo}--agent--${slug}-${[...digest.slice(0, 3)].map((b) => b.toString(16).padStart(2, "0")).join("")}`;
+}
+
+/** Credentials for an agent's own fork of the project repo; writing to it first creates the fork (once, for all its changes). */
+export async function changeRemote(env: Env, repo: string, agent: string, scope: "read" | "write", ttlSeconds: number) {
+	const name = await freeForkName(repo, agent);
 	try {
 		return await remoteFor(env.ARTIFACTS, name, scope, ttlSeconds);
 	} catch (err) {
-		if (scope === "read") throw new Error(`[409] ${change} has no fork yet: nothing has been pushed for it`);
-		await forkAndWait(env.ARTIFACTS, repo, name, `Coordinator-free change ${change} of ${repo}`);
+		if (scope === "read") throw new Error(`[409] ${agent} has no fork yet: nothing has been pushed`);
+		await forkAndWait(env.ARTIFACTS, repo, name, `${agent}'s fork of ${repo} (coordinator-free)`);
 		return remoteFor(env.ARTIFACTS, name, scope, ttlSeconds);
 	}
 }
@@ -101,7 +114,7 @@ async function changeBrief(env: Env, repo: string, change: string) {
 		own,
 		branch: projectBranch(registry),
 		/** Where the change's branch lives: its own fork. */
-		source: (scope: "read" | "write") => changeRemote(env, repo, change, scope, 3 * 3600),
+		source: (scope: "read" | "write") => changeRemote(env, repo, own?.agent ?? "blueprint-builder", scope, 3 * 3600),
 		policy: registry?.policy ?? DEFAULT_POLICY,
 		job: {
 			taskId: `free:${repo}`,

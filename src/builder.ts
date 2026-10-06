@@ -473,7 +473,13 @@ How to work:
 		// A coordinator-free change continues its branch if it has been pushed, or starts it from the project's branch.
 		if (job.free) {
 			const fetched = await this.git(job, ["fetch", "-q", "origin", `+${job.free.ref}:refs/remotes/origin/${job.free.ref}`]);
-			await this.exec(fetched.exitCode === 0 ? ["git", "checkout", "-q", "-B", job.free.ref, `origin/${job.free.ref}`] : ["git", "checkout", "-q", "-b", job.free.ref]);
+			if (fetched.exitCode === 0) await this.exec(["git", "checkout", "-q", "-B", job.free.ref, `origin/${job.free.ref}`]);
+			else {
+				// A new change: from the project's branch, since the builder's fork is shared by its changes and may be behind.
+				const branch = branchOf(job);
+				const base = await this.git(job, ["fetch", "-q", job.base.remote, `${branch}:refs/remotes/base/${branch}`], undefined, job.base.token);
+				await this.exec(["git", "checkout", "-q", "-b", job.free.ref, ...(base.exitCode === 0 ? [`base/${branch}`] : [])]);
+			}
 		}
 	}
 

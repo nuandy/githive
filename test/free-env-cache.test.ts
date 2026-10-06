@@ -14,7 +14,7 @@ vi.mock("../src/artifacts", async (importOriginal) => ({
 	}),
 }));
 
-const { freeContextFor } = await import("../src/free/env");
+const { freeContextFor, freeForkName } = await import("../src/free/env");
 
 describe("the coordinator-free context's caches", () => {
 	it("mints a repo's token once per scope, for every caller", async () => {
@@ -35,11 +35,19 @@ describe("the coordinator-free context's caches", () => {
 		expect(artifacts.mints.filter((m) => m.startsWith("cache-s|"))).toHaveLength(2);
 	});
 
-	it("keeps a change fork's token too", async () => {
+	it("keeps an agent fork's token too", async () => {
 		const env = {} as Env;
-		await freeContextFor(env, "service:a").changeRemote!("cache-q", "c-1", "read");
-		await freeContextFor(env, "service:b").changeRemote!("cache-q", "c-1", "read");
-		expect(artifacts.mints.filter((m) => m.startsWith("free--cache-q--c-1"))).toEqual(["free--cache-q--c-1|read"]);
+		await freeContextFor(env, "service:a").changeRemote!("cache-q", "agent-a", "read");
+		await freeContextFor(env, "service:b").changeRemote!("cache-q", "agent-a", "read");
+		expect(artifacts.mints.filter((m) => m.startsWith("free--cache-q--agent--agent-a"))).toEqual(["free--cache-q--agent--agent-a|read"]);
+	});
+
+	it("names one fork per agent, telling apart names that look alike", async () => {
+		expect(await freeForkName("express", "agent-a")).toBe("free--express--agent--agent-a");
+		const [upper, dotted] = [await freeForkName("express", "Agent.A"), await freeForkName("express", "agent_a")];
+		expect(upper).toMatch(/^free--express--agent--agent-a-[0-9a-f]{6}$/);
+		expect(dotted).toMatch(/^free--express--agent--agent-a-[0-9a-f]{6}$/);
+		expect(upper).not.toBe(dotted);
 	});
 
 	it("shares each record's log across callers", () => {

@@ -7,7 +7,7 @@
 //   node scripts/mcp-agent.mjs call <tool> '<json args>' [--key-file F]
 //   node scripts/mcp-agent.mjs register <repo> <agent> <key-file>      coordinator-free: register an agent, key to <key-file>
 //   node scripts/mcp-agent.mjs clone <dir> --task T --change C          open mode: clone a change's fork (shallow; --full x for all history)
-//   node scripts/mcp-agent.mjs clone <dir> --repo R --change C --key-file F   coordinator-free: clone a change's fork
+//   node scripts/mcp-agent.mjs clone <dir> --repo R --change C --key-file F   coordinator-free: clone the project, push to your fork (remote "fork")
 //   node scripts/mcp-agent.mjs auth <dir> (same flags as clone)          fresh write access for an existing clone
 //
 // --base defaults to the bench Worker. Access credentials come from .dev.vars
@@ -46,14 +46,14 @@ async function tool(name, args, keyFile) {
 
 const redact = (value) => JSON.parse(JSON.stringify(value, (k, v) => (k === "token" || k === "key" ? "<redacted>" : v)));
 
-/** A fork's remote and write token, for open mode or coordinator-free. */
+/** A fork's remote and write token, for open mode or coordinator-free (with the project to start from). */
 async function forkAccess() {
 	if (flags.task) {
 		const { fork, token } = await tool("refresh_credentials", { task_id: flags.task, change_id: flags.change });
 		return { url: fork, token };
 	}
-	const { url, token } = await tool("free_credentials", { repo: flags.repo, change: flags.change }, flags["key-file"]);
-	return { url, token };
+	const { url, token, project } = await tool("free_credentials", { repo: flags.repo, change: flags.change }, flags["key-file"]);
+	return { url, token, project };
 }
 
 const header = (token) => `http.extraHeader=Authorization: Bearer ${token.split("?")[0]}`;
@@ -75,12 +75,30 @@ switch (command) {
 	case "clone":
 	case "auth": {
 		const [dir] = positional;
-		const { url, token } = await forkAccess();
-		// Shallow by default: an agent needs the tip to work on, not the project's whole history (--full for all of it).
-		if (command === "clone") execFileSync("git", ["-c", header(token), "clone", "--quiet", ...(flags.full === undefined ? ["--depth", "1", "--no-single-branch"] : []), url, dir], { stdio: "inherit" });
-		// The token lives only in this clone's own config, so plain git push works until it expires (then: auth).
-		execFileSync("git", ["-C", dir, "config", "http.extraHeader", `Authorization: Bearer ${token.split("?")[0]}`]);
-		console.log(`${command === "clone" ? "cloned" : "refreshed"} ${dir}`);
+		const { url, token, project } = await forkAccess();
+		const depth = flags.full === undefined ? ["--depth", "1"] : [];
+		if (project) {
+			// Coordinator-free: the agent's fork is shared by its changes and may be behind, so start from the
+			// project (origin, read-only) and push to the fork (remote "fork"). Each URL gets its own token.
+			if (command === "clone") execFileSync("git", ["-c", header(project.token), "clone", "--quiet", ...depth, "--branch", project.branch, project.url, dir], { stdio: "inherit" });
+			execFileSync("git", ["-C", dir, "config", `http.${project.url}.extraHeader`, `Authorization: Bearer ${project.token.split("?")[0]}`]);
+			try {
+				execFileSync("git", ["-C", dir, "remote", "remove", "fork"], { stdio: "ignore" });
+			} catch {
+				// No fork remote yet (a fresh clone).
+			}
+		} else if (command === "clone") {
+			// Shallow by default: an agent needs the tip to work on, not the project's whole history (--full for all of it).
+			execFileSync("git", ["-c", header(token), "clone", "--quiet", ...depth, "--no-single-branch", url, dir], { stdio: "inherit" });
+		}
+		if (project) {
+			execFileSync("git", ["-C", dir, "remote", "add", "fork", url]);
+			execFileSync("git", ["-C", dir, "config", `http.${url}.extraHeader`, `Authorization: Bearer ${token.split("?")[0]}`]);
+		} else {
+			// The token lives only in this clone's own config, so plain git push works until it expires (then: auth).
+			execFileSync("git", ["-C", dir, "config", "http.extraHeader", `Authorization: Bearer ${token.split("?")[0]}`]);
+		}
+		console.log(`${command === "clone" ? "cloned" : "refreshed"} ${dir}${project ? " (push your branch to the remote \"fork\")" : ""}`);
 		break;
 	}
 	default:

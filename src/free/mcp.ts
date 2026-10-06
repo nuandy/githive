@@ -1,6 +1,6 @@
 import git from "isomorphic-git";
 import { GitCasLog } from "../election-git";
-import { requiredPaths, requiredString } from "../errors";
+import { fail, requiredPaths, requiredString } from "../errors";
 import { branchHead, type Remote, Workspace } from "../git";
 import { projectBranch } from "../project-branch";
 import { annotate, destroys, reads, writes } from "../tool-annotations";
@@ -30,8 +30,10 @@ export interface FreeContext {
 	recordsRemote?: (repo: string, k: number, scope: "read" | "write") => Promise<Remote>;
 	/** Creates a repo's records repos (harmless if they exist). */
 	createRecordsRepos?: (repo: string, count: number) => Promise<void>;
-	/** Credentials for a change's own fork of a project repo; asking to write creates the fork. */
-	changeRemote?: (repo: string, change: string, scope: "read" | "write") => Promise<Remote>;
+	/** Credentials for an agent's own fork of a project repo, where its changes' branches live; asking to write creates the fork. */
+	changeRemote?: (repo: string, agent: string, scope: "read" | "write") => Promise<Remote>;
+	/** Read access to a change's own fork, where changes made before forks were per agent keep their branch. */
+	legacyChangeRemote?: (repo: string, change: string) => Promise<Remote>;
 	/** A branch's head in a project repo. */
 	head: (repo: string, branch: string) => Promise<string>;
 	/** A project repo's default branch, where its HEAD points (main, master, ...); without it, main. */
@@ -76,7 +78,7 @@ const votesRef = (repo: string) => `refs/notes/blueprint-votes/${repo}`;
 export const FREE_INSTRUCTIONS = `Coordinator-free mode (the free_* tools): nobody enforces the rules; every agent follows them, and an audit anyone can run shows who didn't.
 Conventions:
 1. free_claim the paths you will change before editing; edit only inside your claim. A refusal names who holds what: narrow your claim, or ask them.
-2. Work on a branch changes/<change> and push it to your change's own fork (free_credentials with your change; only you can write it). The project's branch (free_start names it: main, master, ...) is written only through the toolkit.
+2. Work on a branch changes/<change>, started from the project's branch, and push it to your own fork (free_credentials with your change: one fork per agent, for all its changes; only you can write it). The project's branch (free_start names it: main, master, ...) is written only through the toolkit.
 3. Reviewers free_vote on the exact commit they reviewed. A change merges with the policy's approvals, including every veto role's, and no veto. Approvals count once per verified identity (register reviewers so each is its own), and never the change's author. free_status shows your change's votes, with the evidence for any rejection to fix, and what's still needed.
 4. Run free_check after you push: it test-merges your change with the project's branch and lists files outside your claim, so you hear about problems before merging.
 5. free_merge merges your branch with trailers recording the claims and votes it checked, then releases your claim. Merge by hand only with the same trailers.
@@ -167,19 +169,26 @@ export function storeFor(ctx: FreeContext, repo: string, registry: Registry | nu
 		...(ctx.recordsRemote ? { recordsRemote: (k: number) => ctx.recordsRemote!(repo, k, "write") } : {}), remote: () => ctx.remote(repo, "write"), log: ctx.records ? (ref) => ctx.records!<Registry>(repo, ref) : undefined });
 }
 
-/** Where a repo's change branches live: each change's own fork. */
+/**
+ * Where a repo's change branches live: each in its agent's own fork (one per
+ * agent, a branch changes/<change> per change). Reading a change made before
+ * forks were per agent, its branch is in that change's own fork instead.
+ */
 function changeSourceFor(ctx: FreeContext, repo: string) {
-	return (change: string, scope: "read" | "write") => {
+	return async (agent: string, scope: "read" | "write", change?: string): Promise<Remote> => {
 		if (!ctx.changeRemote) throw new Error("[501] change forks aren't available here");
-		return ctx.changeRemote(repo, change, scope);
+		if (scope === "write" || !change || !ctx.legacyChangeRemote) return ctx.changeRemote(repo, agent, scope);
+		const fork = await ctx.changeRemote(repo, agent, "read").catch(() => null);
+		if (fork && (await branchHead(fork, `changes/${change}`).catch(() => null))) return fork;
+		return (await ctx.legacyChangeRemote(repo, change).catch(() => null)) ?? fork ?? ctx.changeRemote(repo, agent, "read");
 	};
 }
 
 /** Where a change stands: its branch head, the votes on that head, the approvals against the policy, and Blueprint's hosted agents on it. */
-async function changeStatus(ctx: FreeContext, repo: string, registry: Registry | null | undefined, cast: VoteRecord[], counted: VoteRecord[], change: string, author: ClaimRecord | undefined) {
-	// No fork yet means nothing pushed yet.
+async function changeStatus(ctx: FreeContext, repo: string, registry: Registry | null | undefined, cast: VoteRecord[], counted: VoteRecord[], change: string, author: ClaimRecord | undefined, agent = author?.agent) {
+	// No fork (or no branch on it) means nothing pushed yet.
 	const head = await Promise.resolve()
-		.then(() => changeSourceFor(ctx, repo)(change, "read"))
+		.then(() => changeSourceFor(ctx, repo)(agent ?? fail(409, `${change} has no agent`), "read", change))
 		.then((source) => branchHead(source, `changes/${change}`))
 		.catch(() => null);
 	// The policy for the paths it claims: stricter for dependency, CI and deploy files, say.
@@ -219,7 +228,7 @@ export async function freeChangeHistory(ctx: FreeContext, repo: string, change: 
 	const branch = projectBranch(registry);
 	const mergedAs = released.find((r) => r.mergedAs)?.mergedAs;
 	const commits = await Promise.resolve()
-		.then(() => changeSourceFor(ctx, repo)(change, "read"))
+		.then(() => changeSourceFor(ctx, repo)(claim?.agent ?? released.at(-1)!.agent, "read", change))
 		.then(async (source) => {
 			const ws = await Workspace.clone(source, `changes/${change}`, { depth: 50 });
 			const head = await ws.head();
@@ -251,7 +260,10 @@ export async function freeVoteAsPerson(ctx: FreeContext, repo: string, change: s
 	if (!input.role?.trim()) throw new Error("[400] a vote needs a role");
 	if (input.verdict !== "approve" && input.verdict !== "reject") throw new Error("[400] verdict is approve or reject");
 	if (typeof input.evidence !== "string" || !input.evidence.trim()) throw new Error("[400] a vote needs evidence: what you checked");
-	const head = await branchHead(await changeSourceFor(ctx, repo)(change, "read"), `changes/${change}`).catch(() => null);
+	const registry = (await recordLog<Registry>(ctx, repo, claimsRef(repo)).read())?.commit.state;
+	const { claim } = await storeFor(ctx, repo, registry).readChange(change);
+	if (!claim) throw new Error(`[409] ${change} holds no claim: there's nothing to vote on`);
+	const head = await branchHead(await changeSourceFor(ctx, repo)(claim.agent, "read", change), `changes/${change}`).catch(() => null);
 	if (!head) throw new Error(`[409] ${change} has nothing pushed to vote on`);
 	const stamper = await ctx.stamper?.();
 	await vote(recordLog<Votes>(ctx, repo, votesRef(repo)), { commit: head, reviewer: person, role: input.role, verdict: input.verdict, evidence: input.evidence }, stamper);
@@ -397,8 +409,17 @@ async function runFreeTool(name: string, args: Args, ctx: FreeContext): Promise<
 			const own = await claimOf(change);
 			if (!own) throw new Error(`[409] ${change} holds no claim: claim its paths first`);
 			mayActAs(own.agent, acting, registered, ctx.hosted);
-			const remote = await changeSource(change, "write");
-			return { url: remote.url, token: remote.token, branch: `changes/${change}`, note: `Your change's own fork: push your branch changes/<change> here. Fetch ${projectBranch(registered)} from the project repo (free_credentials without change).` };
+			// The agent's own fork, made on its first change and reused for the rest. Its default branch may be
+			// behind the project's, so a new change starts from the project, read with `project`.
+			const [remote, project] = await Promise.all([changeSource(own.agent, "write"), ctx.remote(repo, "read")]);
+			const branch = projectBranch(registered);
+			return {
+				url: remote.url,
+				token: remote.token,
+				branch: `changes/${change}`,
+				project: { url: project.url, token: project.token, branch },
+				note: `Your own fork, for all your changes: push this change's branch changes/${change} to it. Start the branch from the project's ${branch} (project), not the fork's, which may be behind.`,
+			};
 		}
 		case "free_claims":
 			return (await view()).claims;
@@ -443,7 +464,7 @@ async function runFreeTool(name: string, args: Args, ctx: FreeContext): Promise<
 				runChecks: ctx.runChecks?.(repo),
 				stamper,
 				stampKey: registry?.stampKey,
-				source: await changeSource(change, "read"),
+				source: await changeSource(holder ?? requiredString(args, "agent"), "read", change),
 				change,
 				agent: requiredString(args, "agent"),
 			});
@@ -479,14 +500,14 @@ async function runFreeTool(name: string, args: Args, ctx: FreeContext): Promise<
 			const held = (await claimOf(change)) ?? null;
 			const released = held ? undefined : (await changeOf(change)).released.at(-1);
 			const cast = (await votes.read())?.commit.state.votes ?? [];
-			return { change, claim: held, ...(released ? { released } : {}), ...(await changeStatus(ctx, repo, registered, cast, await countedVotes(cast, registered?.stampKey), change, held ?? undefined)) };
+			return { change, claim: held, ...(released ? { released } : {}), ...(await changeStatus(ctx, repo, registered, cast, await countedVotes(cast, registered?.stampKey), change, held ?? undefined, held?.agent ?? released?.agent)) };
 		}
 		case "free_check":
 		{
 			const change = requiredString(args, "change");
-			const source = await changeSource(change, "read").catch(() => null);
-			if (!source) throw new Error(`[409] changes/${change} has nothing pushed to check`);
 			const own = await claimOf(change);
+			const source = own ? await changeSource(own.agent, "read", change).catch(() => null) : null;
+			if (!source) throw new Error(`[409] changes/${change} has nothing pushed to check`);
 			return checkChange({ project: await ctx.remote(repo, "read"), branch: projectBranch(registered), source, claims: own ? [own] : [], change });
 		}
 		case "free_register": {

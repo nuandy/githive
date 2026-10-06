@@ -16,7 +16,7 @@ import { startGitServer, type GitServer } from "./helpers/git-server";
 let project: GitServer;
 let fork: GitServer;
 let work: string;
-let forkRequests: { change: string; scope: string }[];
+let forkRequests: { agent: string; scope: string }[];
 
 beforeEach(async () => {
 	[project, fork] = await Promise.all([startGitServer(), startGitServer()]);
@@ -33,8 +33,8 @@ afterEach(async () => {
 
 const ctx = (agentKey?: string): FreeContext => ({
 	remote: async (_repo, scope) => ({ url: project.url, token: scope }),
-	changeRemote: async (_repo, change, scope) => {
-		forkRequests.push({ change, scope });
+	changeRemote: async (_repo, agent, scope) => {
+		forkRequests.push({ agent, scope });
 		return { url: fork.url, token: `fork-${scope}` };
 	},
 	head: async () => project.git("rev-parse", "main").trim(),
@@ -53,15 +53,18 @@ describe("forks (the default)", () => {
 		await call("free_start", {});
 	});
 
-	it("gives an agent read access to the project, and write access only to its own change's fork", async () => {
+	it("gives an agent read access to the project, and write access only to its own fork, shared by its changes", async () => {
 		expect(await call("free_credentials", {})).toEqual({ url: project.url, token: "read", note: expect.stringMatching(/read-only/) });
 		expect(await call("free_credentials", { change: "a-1" })).toEqual({ error: "a-1 holds no claim: claim its paths first" });
 		const { key: keyA } = (await call("free_register", { agent: "agent-a" })) as { key: string };
 		const { key: keyB } = (await call("free_register", { agent: "agent-b" })) as { key: string };
 		await call("free_claim", { change: "a-1", agent: "agent-a", paths: ["src/a/"], intent: "a" }, keyA);
 		expect(await call("free_credentials", { change: "a-1" }, keyB)).toEqual({ error: "your agent key is agent-b's; it can't act as agent-a" });
-		expect(await call("free_credentials", { change: "a-1" }, keyA)).toMatchObject({ url: fork.url, token: "fork-write", branch: "changes/a-1" });
-		expect(forkRequests).toEqual([{ change: "a-1", scope: "write" }]);
+		expect(await call("free_credentials", { change: "a-1" }, keyA)).toMatchObject({ url: fork.url, token: "fork-write", branch: "changes/a-1", project: { url: project.url, token: "read", branch: "main" } });
+		// A second change by the same agent goes to the same fork, a branch of its own.
+		await call("free_claim", { change: "a-2", agent: "agent-a", paths: ["src/a2/"], intent: "a, again" }, keyA);
+		expect(await call("free_credentials", { change: "a-2" }, keyA)).toMatchObject({ branch: "changes/a-2" });
+		expect(forkRequests).toEqual([{ agent: "agent-a", scope: "write" }, { agent: "agent-a", scope: "write" }]);
 	});
 
 	it("merges a change from its fork into the project's main", async () => {
@@ -110,6 +113,16 @@ describe("free_status", () => {
 			votes: [{ reviewer: "rev-1", verdict: "reject", evidence: "no tests" }],
 			approval: { approved: false, approvals: 0, required: 1, vetoedBy: [] },
 		});
+	}, 60_000);
+
+	it("still finds a change made before forks were per agent, in that change's own fork", async () => {
+		await call("free_start", {});
+		await call("free_claim", { change: "old-1", agent: "agent-a", paths: ["src/old/"], intent: "from before" });
+		// Its branch is in its own (older) fork; the agent's fork, here, doesn't have it.
+		const head = await pushChange(fork.url, work, "agent-a", "old-1", { "src/old/x.txt": "x\n" });
+		const older: FreeContext = { ...ctx(), changeRemote: async () => ({ url: project.url, token: "agent-fork" }), legacyChangeRemote: async () => ({ url: fork.url, token: "old-fork" }) };
+		const status = (await callFreeTool("free_status", { repo: "project", change: "old-1" }, older)) as { head: string };
+		expect(status.head).toBe(head);
 	}, 60_000);
 
 	it("lets an agent ask a person about a change, until a person votes on its commit", async () => {
