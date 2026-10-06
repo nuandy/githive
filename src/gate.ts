@@ -1,4 +1,5 @@
 import { DurableObject } from "cloudflare:workers";
+import { taskCoordinator } from "./elected";
 import { WORKDIR, bootContainer, clip, gitWithToken, run } from "./container";
 import { statusOf } from "./errors";
 import type { GateResult } from "./gate-plan";
@@ -30,10 +31,13 @@ export interface GateItem {
 /** What the Coordinator hands a run when it starts. */
 export interface GatePlan {
 	baseHead: string;
+	/** The project's branch (main, master, ...); forks have it too. Absent from older plans: main. */
+	branch?: string;
 	base: { remote: string; token: string };
-	fork: { remote: string; token: string };
+	/** Where the approved commit is: a change's fork (its copy of the branch), or another branch (`ref`). */
+	fork: { remote: string; token: string; ref?: string };
 	/** The forks of the other slices in a group gate. */
-	others: { slice: string; head: string; remote: string; token: string }[];
+	others: { slice: string; head: string; remote: string; token: string; ref?: string }[];
 	checks: string[];
 	/** Contract test files to remove first (their slices aren't integrated yet). */
 	exclude: string[];
@@ -41,6 +45,9 @@ export interface GatePlan {
 
 const INSTALL = /^npm ci(\s|$)/;
 const CANCELLATIONS = "cancelled-item-ids";
+/** A finished run's result the coordinator hasn't taken yet. */
+const UNREPORTED = "unreported";
+const REPORT_RETRY_MS = 10_000;
 
 const members = (item: GateItem) => [{ slice: item.slice, head: item.head }, ...(item.group ?? [])];
 const covers = (item: GateItem, slice: string, head: string) => members(item).some((m) => m.slice === slice && m.head === head);
@@ -85,6 +92,28 @@ export class Gate extends DurableObject<Env> {
 		if (nextQueue.length) await this.ctx.storage.setAlarm(Date.now());
 	}
 
+	/** Checks run one at a time: there is one container, and one checkout in it. */
+	private checking: Promise<unknown> = Promise.resolve();
+
+	/**
+	 * Check one commit now, outside the queue: merge `head` onto `baseHead` and
+	 * run `checks`, returning the result. For coordinator-free mode, where the
+	 * merging agent asks for its own checks and nothing calls back.
+	 */
+	checkCommit(input: { baseHead: string; branch?: string; base: { remote: string; token: string }; fork: { remote: string; token: string; ref: string }; head: string; checks: string[] }): Promise<GateResult> {
+		const plan: GatePlan = { baseHead: input.baseHead, branch: input.branch, base: input.base, fork: input.fork, others: [], checks: input.checks, exclude: [] };
+		const run = this.checking.then(async () => {
+			try {
+				return await this.check({ slice: "free", head: input.head }, plan);
+			} catch (err) {
+				await this.ctx.storage.delete("prepared");
+				return { passed: false, head: input.head, baseHead: input.baseHead, results: [{ command: "(gate setup)", exitCode: 1, output: statusOf(err).message }], at: new Date().toISOString() } satisfies GateResult;
+			}
+		});
+		this.checking = run.catch(() => {});
+		return run;
+	}
+
 	async state() {
 		const [queue, current] = await Promise.all([this.ctx.storage.get<GateItem[]>("queue"), this.ctx.storage.get<GateItem>("current")]);
 		return { queue: queue ?? [], current: current ?? null };
@@ -111,11 +140,34 @@ export class Gate extends DurableObject<Env> {
 		if (rest.length) await this.ctx.storage.setAlarm(Date.now());
 	}
 
+	/**
+	 * Report a run's result to the task's coordinator. If that fails (its leader
+	 * was reset, say), keep the result and report it again shortly: dropping it
+	 * would leave the change's checks "running" for ever. Reporting twice is safe;
+	 * the coordinator ignores a result for a change that has moved on.
+	 */
+	private async report(taskId: string, item: GateItem, result: GateResult, exclude: string[]) {
+		try {
+			await taskCoordinator(this.env, taskId).gateResult(item.slice, result, exclude, item.group);
+			await this.ctx.storage.delete(UNREPORTED);
+			return true;
+		} catch (err) {
+			console.error(`reporting the gate result for ${item.slice} failed; retrying`, statusOf(err).message);
+			await this.ctx.storage.put(UNREPORTED, { item, result, exclude });
+			await this.ctx.storage.setAlarm(Date.now() + REPORT_RETRY_MS);
+			return false;
+		}
+	}
+
 	async alarm() {
 		const taskId = await this.ctx.storage.get<string>("taskId");
+		if (!taskId) return;
+		// A result that couldn't be reported goes first, before the next run.
+		const unreported = await this.ctx.storage.get<{ item: GateItem; result: GateResult; exclude: string[] }>(UNREPORTED);
+		if (unreported && !(await this.report(taskId, unreported.item, unreported.result, unreported.exclude))) return;
 		const queue = (await this.ctx.storage.get<GateItem[]>("queue")) ?? [];
 		const item = queue[0];
-		if (!taskId || !item) return;
+		if (!item) return;
 
 		// A cancellation can race the initial queue read. Check before claiming,
 		// then again after writing current so a cancellation in that gap is seen.
@@ -123,7 +175,8 @@ export class Gate extends DurableObject<Env> {
 		await this.ctx.storage.put("current", item);
 		try {
 			if (!(await this.itemIsLive(item))) return;
-			const coordinator = this.env.COORDINATOR.get(this.env.COORDINATOR.idFromName(taskId));
+			// The task's leader, if it's elected; its Coordinator object otherwise.
+			const coordinator = taskCoordinator(this.env, taskId);
 			const plan = await coordinator.gatePlan(item.slice, item.head, item.group);
 			// gatePlan may wait on Coordinator I/O while a send-back cancels the item.
 			if (!plan || !(await this.itemIsLive(item))) return;
@@ -138,7 +191,7 @@ export class Gate extends DurableObject<Env> {
 				await this.ctx.storage.delete("prepared"); // start from a fresh checkout next time
 			}
 			// A veto may arrive while checks are running; never report that stale result.
-			if (await this.itemIsLive(item)) await coordinator.gateResult(item.slice, result, plan.exclude, item.group);
+			if (await this.itemIsLive(item)) await this.report(taskId, item, result, plan.exclude);
 		} finally {
 			await this.finishItem(item);
 		}
@@ -167,16 +220,17 @@ export class Gate extends DurableObject<Env> {
 		}
 		await container.setInactivityTimeout(10 * 60_000);
 
-		const base = await gitWithToken(container, plan.base.token, ["fetch", "-q", plan.base.remote, "main:refs/remotes/base/main", "--force"]);
-		if (base.exitCode !== 0) throw new Error(`fetch of the task base failed: ${clip(base.output, 2_000)}`);
-		// Fetch the fork's main (fetching a bare commit hash depends on server settings);
+		const branch = plan.branch ?? "main";
+		const base = await gitWithToken(container, plan.base.token, ["fetch", "-q", plan.base.remote, `${branch}:refs/remotes/base/${branch}`, "--force"]);
+		if (base.exitCode !== 0) throw new Error(`fetch of the project's ${branch} failed: ${clip(base.output, 2_000)}`);
+		// Fetch the fork's branch (fetching a bare commit hash depends on server settings);
 		// the approved commit is in its history.
-		const fork = await gitWithToken(container, plan.fork.token, ["fetch", "-q", plan.fork.remote, "main:refs/remotes/slice/main", "--force"]);
+		const fork = await gitWithToken(container, plan.fork.token, ["fetch", "-q", plan.fork.remote, `${plan.fork.ref ?? branch}:refs/remotes/slice/head`, "--force"]);
 		if (fork.exitCode !== 0) throw new Error(`fetch of the slice failed: ${clip(fork.output, 2_000)}`);
 		const known = await run(container, ["git", "cat-file", "-e", `${item.head}^{commit}`]);
 		if (known.exitCode !== 0) throw new Error(`the approved commit ${item.head} is not in the slice's fork`);
 		for (const other of plan.others) {
-			const f = await gitWithToken(container, other.token, ["fetch", "-q", other.remote, `main:refs/remotes/${other.slice}/main`, "--force"]);
+			const f = await gitWithToken(container, other.token, ["fetch", "-q", other.remote, `${other.ref ?? branch}:refs/remotes/${other.slice}/head`, "--force"]);
 			if (f.exitCode !== 0) throw new Error(`fetch of ${other.slice} failed: ${clip(f.output, 2_000)}`);
 		}
 

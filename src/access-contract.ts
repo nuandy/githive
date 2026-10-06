@@ -35,9 +35,7 @@ export function accessIdentityLabel(identity: AccessIdentity): string {
 
 /** Actor-aware Coordinator RPC surface shared by the HTTP Worker and Coordinator. */
 export interface CoordinatorHumanActions {
-	approve(actor: AccessIdentity): Promise<unknown>;
 	waive(sliceId: string, input: { reason: string }, actor: AccessIdentity): Promise<unknown>;
 	messageBuilder(sliceId: string, message: string, actor: AccessIdentity): Promise<unknown>;
 	retryGate(sliceId: string, actor: AccessIdentity): Promise<unknown>;
-	land(actor: AccessIdentity): Promise<unknown>;
 }

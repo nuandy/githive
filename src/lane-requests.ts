@@ -49,7 +49,7 @@ export function latestResolutions(task: Task, sliceId: string) {
 			requestId: request.id,
 			status: request.status,
 			message: request.status === "integrated"
-				? `Request ${request.id} was integrated. Fetch and merge base/main.`
+				? `Request ${request.id} was integrated. Call fetch_base and merge what it fetched.`
 				: request.status === "declined"
 					? `Request ${request.id} was declined: ${request.answer ?? "no reason provided"}`
 					: `Request ${request.id} needs a human: ${task.slices.find((s) => s.id === sliceId)?.attention ?? "the request was handed off"}`,

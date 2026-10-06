@@ -13,7 +13,9 @@
 	"preview_urls": false,
 	"vars": {
 		"ACCESS_TEAM_DOMAIN": "little-cake-3c64.cloudflareaccess.com",
-		"ACCESS_AUD": "40a0a047944251bc67f3291f138b617f8cdb68f342635bd15582a6d770d1fd52"
+		"ACCESS_AUD": "40a0a047944251bc67f3291f138b617f8cdb68f342635bd15582a6d770d1fd52",
+		// Bench only: POST /admin/wipe may delete every repo in this namespace. Never set on production.
+		"BENCH_WIPE": "allowed"
 	},
 	"assets": {
 		"directory": "./web/dist",
@@ -30,15 +32,28 @@
 			{ "name": "REVIEWER", "class_name": "Reviewer" },
 			{ "name": "GATE", "class_name": "Gate" },
 			{ "name": "TASK_INDEX", "class_name": "TaskIndex" },
-			{ "name": "CONTRACT_CHECKER", "class_name": "ContractChecker" }
+			{ "name": "PEER", "class_name": "Peer" },
+			{ "name": "LIVE", "class_name": "LiveFeed" },
+			{ "name": "TOKENS", "class_name": "TokenCache" }
 		]
 	},
+	"containers": [
+		{ "class_name": "Gate", "scheduling_policy": "durable_object" },
+		{ "class_name": "Reviewer", "scheduling_policy": "durable_object" },
+		{ "class_name": "Builder", "scheduling_policy": "durable_object" }
+	],
 	"migrations": [
 		{ "tag": "v1", "new_sqlite_classes": ["Coordinator"] },
 		{ "tag": "v2", "new_sqlite_classes": ["Builder"] },
 		{ "tag": "v3", "new_sqlite_classes": ["Reviewer"] },
 		{ "tag": "v4", "new_sqlite_classes": ["Gate"] },
 		{ "tag": "v5", "new_sqlite_classes": ["TaskIndex"] },
-		{ "tag": "v6", "new_sqlite_classes": ["ContractChecker"] }
+		{ "tag": "v6", "new_sqlite_classes": ["ContractChecker"] },
+		{ "tag": "v7", "new_sqlite_classes": ["Peer"] },
+		// Planned mode (contracts) is gone; it lives on the plan-mode branch.
+		{ "tag": "v8", "deleted_classes": ["ContractChecker"] },
+		// The dashboard's live updates.
+		{ "tag": "v9", "new_sqlite_classes": ["LiveFeed"] },
+		{ "tag": "v10", "new_sqlite_classes": ["TokenCache"] }
 	]
 }

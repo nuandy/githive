@@ -54,3 +54,15 @@ describe("leases", () => {
 		expect(leaseExpired(waiting, slice("a", { leaseUntil: past }))).toBe(false);
 	});
 });
+
+describe("the refusal an agent sees for an overlapping claim", () => {
+	it("names each holder once, with what overlaps under it, and shortens a long list", async () => {
+		const { conflictMessage } = await import("../src/open-mode");
+		const many = Array.from({ length: 12 }, (_, i) => ({ path: "examples/", holder: "modernize-1", held: `examples/e${i}.js`, title: "Modernize", intent: "Use const" }));
+		const message = conflictMessage([...many, { path: "lib/a.js", holder: "lib-1", held: "lib/a.js", title: "Lib", intent: "Tidy lib" }]);
+		expect(message.match(/held by change modernize-1/g)).toHaveLength(1);
+		expect(message).toContain('- held by change modernize-1 ("Modernize"): Use const\n  examples/ overlaps examples/e0.js;');
+		expect(message).toContain("examples/ overlaps examples/e9.js, and 2 more");
+		expect(message).toContain('- held by change lib-1 ("Lib"): Tidy lib\n  lib/a.js\n');
+	});
+});

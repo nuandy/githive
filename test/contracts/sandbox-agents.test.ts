@@ -59,8 +59,8 @@ class BuilderHarness extends Builder {
 		if (cmd[1] === "ls-files" && this.duringTool) await this.duringTool();
 		return super.exec(cmd, cwd, stdin);
 	}
-	callGit(args: string[]) {
-		return this.git(job, args);
+	callGit(args: string[], as: BuildJob = job) {
+		return this.git(as, args);
 	}
 	getTools(state: BuilderState): AgentTool[] {
 		return this.tools(job, state);
@@ -111,6 +111,21 @@ describe("pushes", () => {
 		expect(result.exitCode).toBe(0);
 		expect(box.ran.map((args) => args.find((a) => ["ls-remote", "merge-base", "push", "rev-parse"].includes(a)))).toEqual(["ls-remote", "merge-base", "push", "rev-parse"]);
 		expect(await storage.get("builder-last-pushed-head")).toBe("def");
+	});
+
+	it("a coordinator-free builder pushes to its change branch, checking that branch on origin first", async () => {
+		const freeJob = { ...job, free: { repo: "project", change: "a-1", ref: "changes/a-1", agent: "agent-a" } } as BuildJob;
+		const result = await builder.callGit(["push", "-q", "origin", "HEAD:refs/heads/changes/a-1"], freeJob);
+		expect(result.exitCode).toBe(0);
+		expect(box.ran.find((args) => args.includes("ls-remote"))).toContain("refs/heads/changes/a-1");
+		expect(box.ran.some((args) => args.includes("push"))).toBe(true);
+	});
+
+	it("a coordinator-free builder refuses to push to main, without running it", async () => {
+		const freeJob = { ...job, free: { repo: "project", change: "a-1", ref: "changes/a-1", agent: "agent-a" } } as BuildJob;
+		const result = await builder.callGit(["push", "-q", "origin", "HEAD:main"], freeJob);
+		expect(result).toEqual({ exitCode: 1, output: expect.stringMatching(/^Refusing an unrecognized builder push.*changes\/a-1/) });
+		expect(box.ran).toEqual([]);
 	});
 
 	it("a reviewer's git commands run as given", async () => {

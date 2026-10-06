@@ -42,7 +42,7 @@ export function gateExclusions(slices: Pick<Slice, "id" | "status" | "tests">[],
 /** What a builder is told when the combined code fails the gate. */
 export function gateFeedback(result: GateResult, excluded: string[], groupedWith: string[] = []) {
 	if (result.mergeConflict)
-		return `Review approved your slice, but it no longer merges cleanly onto the task base: conflicts in ${result.mergeConflict.join(", ")}. Call fetch_base, merge base/main, resolve the conflicts inside your lane, run the checks, then commit_and_push and finish.`;
+		return `Review approved your slice, but it no longer merges cleanly onto the task base: conflicts in ${result.mergeConflict.join(", ")}. Call fetch_base, merge what it fetched, resolve the conflicts inside your lane, run the checks, then commit_and_push and finish.`;
 	const failed = result.results.find((r) => r.exitCode !== 0);
 	return [
 		"Review approved your slice, but the combined code (your slice merged onto the task base, with everything integrated so far) fails the task's checks.",
@@ -51,7 +51,7 @@ export function gateFeedback(result: GateResult, excluded: string[], groupedWith
 			: "",
 		failed ? `\nFailing command: ${failed.command} (exit code ${failed.exitCode})\n${failed.output}` : "",
 		excluded.length ? `\nLeft out because their slices aren't integrated yet: ${excluded.join(", ")}.` : "",
-		"\nFix it within your lane. If a contract is wrong (for example, a contract test that can't type-check), propose a fix with propose_contract_change. Then commit_and_push and finish.",
+		"\nFix it within your claim, then commit_and_push and finish.",
 	].join("\n");
 }
 

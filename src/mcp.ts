@@ -1,6 +1,11 @@
+import { projectBranch } from "./project-branch";
+import { annotate, destroys, reads, writes } from "./tool-annotations";
 import type { AccessIdentity } from "./access-contract";
 import type { Coordinator } from "./coordinator";
 import { fail, requiredPaths, requiredString as need, statusOf } from "./errors";
+import { FREE_INSTRUCTIONS, FREE_TOOLS, callFreeTool, type FreeContext } from "./free/mcp";
+import { identityLabel } from "./free/stamp";
+import { awaitedExternalRoles } from "./open-mode";
 import type { Task } from "./types";
 
 // The MCP front door: any agent (Claude Code, Codex, a team's own bots) joins
@@ -22,13 +27,21 @@ type CoordinatorStub = Pick<
 	| "requestLaneChange"
 	| "answerLaneChange"
 	| "externalCredentials"
+	| "registerAgent"
+	| "submitExternalReview"
 >;
 
 export interface McpContext {
+	/** Coordinator-free mode's context: when set, the free_* tools are served too. */
+	free?: FreeContext;
 	coordinator: (taskId: string) => CoordinatorStub;
 	/** Open a repo for open changes (or find it open) and list it on the dashboard; the same as POST /repos/:repo/open. */
-	openRepo: (repo: string) => Promise<Pick<Task, "id" | "repo" | "review" | "verify" | "leaseMinutes">>;
+	openRepo: (repo: string) => Promise<Pick<Task, "id" | "repo" | "review" | "verify" | "leaseMinutes" | "branch">>;
 	identity?: AccessIdentity;
+	/** The caller's agent key (register_agent), from the X-Blueprint-Agent-Key header. */
+	agentKey?: string;
+	/** Read access to a change's fork, for a reviewer. */
+	forkRead?: (repo: string) => Promise<{ url: string; token: string }>;
 }
 
 const PROTOCOL_VERSIONS = ["2025-06-18", "2025-03-26", "2024-11-05"];
@@ -37,16 +50,19 @@ const INSTRUCTIONS = `Blueprint coordinates many agents working on one repo at o
 How to work:
 1. join_repo to get the repo's task id; list_claims to see what others hold and why.
 2. open_change with your intent and the paths you will touch. If someone holds a path, the refusal says who and why: narrow your claim, wait, or open on free paths and use request_lane_change to ask the holder.
-3. Clone your fork with the remote and token from open_change, commit, and push to main. After every push, call report_push: it checks your work against everyone else's and reports conflicts and files outside your lane.
+3. open_change gives you your fork (one per agent, shared by your changes) and the branch to push this change to (changes/<id>). Start from the project (open_change's project, read-only), commit, and push your branch to your fork. After every push, call report_push: it checks your work against everyone else's and reports conflicts and files outside your lane.
 4. Need more files? extend_claim. Credentials expired? refresh_credentials.
-5. When done, finish_change with a summary. Reviewers vote and a gate runs the tests on your change merged with main. Poll change_status and read_inbox: if your change is sent back, the findings are in your inbox; fix, push, report_push and finish_change again.
-6. Your claim expires after a while without activity unless you are waiting on review, the gate or a request.`;
+5. When done, finish_change with a summary. Reviewers vote and a gate runs the tests on your change merged with the project's branch. Poll change_status and read_inbox: if your change is sent back, the findings are in your inbox; fix, push, report_push and finish_change again.
+6. Your claim expires after a while without activity unless you are waiting on review, the gate or a request.
+Agents sharing one access token: register_agent once each, and send your key (X-Blueprint-Agent-Key, or agent_key) so your changes and reviews are yours.
+Reviewing: a repo's policy may leave roles to outside agents. review_queue lists the changes waiting on a role, with read access to each fork; check out the exact head, review it against its intent, run the checks, and submit_review with your verdict and evidence. You can't review a change you opened, and you count for one role per commit.`;
 
 const str = (description: string) => ({ type: "string", description });
 const paths = { type: "array", items: { type: "string" }, description: "Repo-relative paths. A trailing slash claims a directory, e.g. src/billing/" };
 const ids = { task_id: str("The open task id from join_repo"), change_id: str("Your change id from open_change") };
+const agentKey = { agent_key: str("Your agent key from register_agent, if you can't send the X-Blueprint-Agent-Key header") };
 
-export const TOOLS = [
+const TOOL_DEFS = [
 	{
 		name: "join_repo",
 		description: "Join a repo in open mode. Returns the task id every other tool needs, the review policy and the gate's verify commands. Safe to call again.",
@@ -62,7 +78,14 @@ export const TOOLS = [
 		description: "Open a change: claim paths as your lane and get your own fork to push to. Refused, naming the holder and its intent, if another change holds any of the paths.",
 		inputSchema: {
 			type: "object",
-			properties: { task_id: ids.task_id, title: str("A short title"), intent: str("What this change sets out to do, for reviewers and other agents"), paths },
+			properties: {
+				task_id: ids.task_id,
+				title: str("A short title"),
+				intent: str("What this change sets out to do, for reviewers and other agents"),
+				paths,
+				agent: str("Your agent's name, shown to people on the dashboard (optional; letters, digits, . _ -). With an agent key, the registered name is used."),
+				...agentKey,
+			},
 			required: ["task_id", "title", "intent", "paths"],
 		},
 	},
@@ -83,12 +106,12 @@ export const TOOLS = [
 	},
 	{
 		name: "report_push",
-		description: "Call after every push. Checks your fork against main and every other active change, and reports conflicts and files outside your lane.",
+		description: "Call after every push. Checks your fork against the project's branch and every other active change, and reports conflicts and files outside your lane.",
 		inputSchema: { type: "object", properties: ids, required: ["task_id", "change_id"] },
 	},
 	{
 		name: "finish_change",
-		description: "Submit your pushed head for review. Reviewers vote; on approval a gate runs the tests on your change merged with main, then it merges.",
+		description: "Submit your pushed head for review. Reviewers vote; on approval a gate runs the tests on your change merged with the project's branch, then it merges.",
 		inputSchema: { type: "object", properties: { ...ids, summary: str("What you changed and how you verified it, for the reviewers") }, required: ["task_id", "change_id", "summary"] },
 	},
 	{
@@ -119,7 +142,72 @@ export const TOOLS = [
 			required: ["task_id", "change_id", "request_id", "outcome", "answer"],
 		},
 	},
+	{
+		name: "register_agent",
+		description: "Register your agent on the task under a name, and get its secret key (shown once). Send the key with your calls (X-Blueprint-Agent-Key header, or agent_key) so changes and reviews are told apart even when agents share one access token. Registering again rotates the key, with the current one.",
+		inputSchema: { type: "object", properties: { task_id: ids.task_id, agent: str("Your agent's name: letters, digits, . _ -"), ...agentKey }, required: ["task_id", "agent"] },
+	},
+	{
+		name: "review_queue",
+		description: "Changes waiting for an outside reviewer: the commit to review, its intent and summary, the roles still needed, and read access to its fork. Changes you opened aren't listed.",
+		inputSchema: { type: "object", properties: { task_id: ids.task_id, role: str("Only changes waiting on this role (optional)"), ...agentKey }, required: ["task_id"] },
+	},
+	{
+		name: "submit_review",
+		description: "Submit your review of the exact commit under review, for one of the roles outside agents review. A rejection goes back to the change's author with your evidence.",
+		inputSchema: {
+			type: "object",
+			properties: {
+				task_id: ids.task_id,
+				change_id: str("The change you reviewed"),
+				head: str("The commit you reviewed (review_queue's head)"),
+				role: str("The role you reviewed for"),
+				verdict: { type: "string", enum: ["approve", "reject"] },
+				summary: str("One or two sentences: what you checked and your conclusion"),
+				evidence: str("Commands you ran with their key output, or file:line references; for a rejection, what must change"),
+				...agentKey,
+			},
+			required: ["task_id", "change_id", "head", "role", "verdict", "summary", "evidence"],
+		},
+	},
 ] as const;
+
+export const TOOLS = annotate(TOOL_DEFS, {
+	join_repo: writes("Join a repo", { idempotent: true }),
+	list_claims: reads("List claims"),
+	open_change: writes("Open a change"),
+	extend_claim: writes("Extend a claim", { idempotent: true }),
+	abandon_change: destroys("Abandon a change", { idempotent: true }),
+	refresh_credentials: writes("Refresh fork credentials", { idempotent: true }),
+	report_push: writes("Report a push", { idempotent: true }),
+	finish_change: writes("Submit for review"),
+	change_status: reads("Change status"),
+	read_inbox: reads("Read inbox"),
+	request_lane_change: writes("Request a change in another claim"),
+	answer_lane_change: writes("Answer a request"),
+	register_agent: destroys("Register an agent key"),
+	review_queue: reads("Review queue"),
+	submit_review: writes("Submit a review"),
+});
+
+const sha256 = async (text: string) => Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text))), (b) => b.toString(16).padStart(2, "0")).join("");
+
+/** The caller's key, from the header or the arguments. */
+const keyOf = (args: Args, ctx: McpContext) => ctx.agentKey ?? (typeof args.agent_key === "string" && args.agent_key ? args.agent_key : undefined);
+
+/** The registered agent whose key this is, or a 403. */
+async function agentOfKey(task: Task, key: string) {
+	const hash = await sha256(key);
+	const name = Object.entries(task.agents ?? {}).find(([, a]) => a.keyHash === hash)?.[0];
+	return name ?? fail(403, "unknown agent key for this task: register_agent first");
+}
+
+/** Who is calling, for telling authors and reviewers apart: a registered agent, or the Access identity. */
+async function callerBy(task: Task, args: Args, ctx: McpContext) {
+	const key = keyOf(args, ctx);
+	if (key) return `agent:${await agentOfKey(task, key)}`;
+	return ctx.identity ? identityLabel(ctx.identity) : fail(401, "no identity: call through Cloudflare Access, or with an agent key");
+}
 
 type Args = Record<string, unknown>;
 
@@ -128,22 +216,28 @@ async function callTool(name: string, args: Args, ctx: McpContext): Promise<unkn
 	switch (name) {
 		case "join_repo": {
 			const task = await ctx.openRepo(need(args, "repo"));
-			return { task_id: task.id, repo: task.repo, review: task.review, verify: task.verify, lease_minutes: task.leaseMinutes, instructions: INSTRUCTIONS };
+			return { task_id: task.id, repo: task.repo, branch: projectBranch(task), review: task.review, verify: task.verify, lease_minutes: task.leaseMinutes, instructions: INSTRUCTIONS };
 		}
 		case "list_claims":
 			return co().claims();
 		case "open_change": {
+			const key = keyOf(args, ctx);
+			const authorAgent = key ? await agentOfKey(await co().state(), key) : undefined;
+			if (authorAgent && typeof args.agent === "string" && args.agent && args.agent !== authorAgent) fail(403, `your key is ${authorAgent}'s, not ${args.agent}'s`);
 			const { change, credentials } = await co().openChange(
-				{ title: need(args, "title"), intent: need(args, "intent"), owns: requiredPaths(args, "paths") },
+				{ title: need(args, "title"), intent: need(args, "intent"), owns: requiredPaths(args, "paths"), agent: typeof args.agent === "string" ? args.agent : undefined, ...(authorAgent ? { authorAgent } : {}) },
 				ctx.identity,
 			);
+			const branch = projectBranch(await co().state());
 			return {
 				change_id: change.id,
 				lane: change.owns,
 				lease_until: change.leaseUntil,
 				fork: credentials.remote,
 				token: credentials.token,
-				how_to: `git -c http.extraHeader="Authorization: Bearer <token without ?expires=...>" clone ${credentials.remote}; commit; push to main with the same header; then call report_push.`,
+				branch: credentials.ref ?? branch,
+				...(credentials.project ? { project: credentials.project } : {}),
+				how_to: `Clone the project (project.remote, its branch ${branch}, with project.token); create the branch ${credentials.ref ?? branch}; commit; push it to your fork (fork, with token: http.extraHeader "Authorization: Bearer <token without ?expires=...>"); then call report_push.`,
 			};
 		}
 		case "extend_claim": {
@@ -175,6 +269,49 @@ async function callTool(name: string, args: Args, ctx: McpContext): Promise<unkn
 			return result.escalated
 				? { status: "needs a human", detail: "You were sent back but finished without a new commit; a human decides next." }
 				: { status: "in review", head: result.head, reviewers: result.reviewers };
+		}
+		case "register_agent": {
+			const key = Array.from(crypto.getRandomValues(new Uint8Array(32)), (b) => b.toString(16).padStart(2, "0")).join("");
+			const current = keyOf(args, ctx);
+			const { agent, rotated } = await co().registerAgent(need(args, "agent"), await sha256(key), current ? await sha256(current) : undefined, ctx.identity);
+			return { agent, key, note: `${rotated ? "Key rotated: the old one no longer works. " : ""}Keep this key secret; it is shown once. Send it as the X-Blueprint-Agent-Key header (or agent_key) with your calls.` };
+		}
+		case "review_queue": {
+			const task = await co().state();
+			const by = await callerBy(task, args, ctx);
+			const role = typeof args.role === "string" && args.role ? args.role : undefined;
+			const waiting = task.slices.filter((s) => s.status === "building" && s.reviewHead && s.sentBackFor !== s.reviewHead && !s.attention && s.authorBy !== by);
+			const reviews = [];
+			for (const s of waiting) {
+				const roles = awaitedExternalRoles(s).filter((r) => !role || r === role);
+				if (!roles.length) continue;
+				const fork = ctx.forkRead ? await ctx.forkRead(s.repo!) : undefined;
+				reviews.push({
+					change_id: s.id,
+					title: s.title,
+					intent: s.intent ?? s.instructions,
+					summary: s.buildSummary,
+					head: s.reviewHead,
+					base: s.mergeBase ?? s.startCommit ?? task.baseCommit,
+					branch: projectBranch(task),
+					roles,
+					paths: s.touched.length ? s.touched : s.owns,
+					...(fork ? { fork: fork.url, token: fork.token } : {}),
+				});
+			}
+			return { reviews, how_to: "Fetch the head from the fork (the token is read-only), git diff <base> <head> for the change, run the checks, then submit_review." };
+		}
+		case "submit_review": {
+			const task = await co().state();
+			const by = await callerBy(task, args, ctx);
+			const verdict = need(args, "verdict");
+			if (verdict !== "approve" && verdict !== "reject") fail(400, "verdict is approve or reject");
+			const { quorum, next } = await co().submitExternalReview(
+				need(args, "change_id"),
+				{ reviewer: need(args, "role"), head: need(args, "head"), verdict, summary: need(args, "summary"), evidence: need(args, "evidence") },
+				by,
+			);
+			return { recorded: true, review: quorum.status, next };
 		}
 		case "change_status": {
 			const changeId = need(args, "change_id");
@@ -227,17 +364,19 @@ export async function handleRpc(msg: RpcRequest, ctx: McpContext): Promise<objec
 		case "initialize": {
 			const requested = msg.params?.protocolVersion;
 			const protocolVersion = typeof requested === "string" && PROTOCOL_VERSIONS.includes(requested) ? requested : PROTOCOL_VERSIONS[0];
-			return reply(msg.id, { protocolVersion, capabilities: { tools: {} }, serverInfo: { name: "blueprint", version: "1.0.0" }, instructions: INSTRUCTIONS });
+			return reply(msg.id, { protocolVersion, capabilities: { tools: {} }, serverInfo: { name: "blueprint", version: "1.0.0" }, instructions: ctx.free ? `${INSTRUCTIONS}\n\n${FREE_INSTRUCTIONS}` : INSTRUCTIONS });
 		}
 		case "ping":
 			return reply(msg.id, {});
 		case "tools/list":
-			return reply(msg.id, { tools: TOOLS });
+			return reply(msg.id, { tools: ctx.free ? [...TOOLS, ...FREE_TOOLS] : TOOLS });
 		case "tools/call": {
 			const name = msg.params?.name;
-			if (typeof name !== "string" || !TOOLS.some((t) => t.name === name)) return rpcError(msg.id, -32602, `unknown tool ${String(name)}`);
+			const free = ctx.free && FREE_TOOLS.some((t) => t.name === name) ? ctx.free : null;
+			if (typeof name !== "string" || (!free && !TOOLS.some((t) => t.name === name))) return rpcError(msg.id, -32602, `unknown tool ${String(name)}`);
 			try {
-				const result = await callTool(name, (msg.params?.arguments as Args) ?? {}, ctx);
+				const args = (msg.params?.arguments as Args) ?? {};
+				const result = free ? await callFreeTool(name, args, free) : await callTool(name, args, ctx);
 				return reply(msg.id, { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] });
 			} catch (err) {
 				// Tool failures go back to the agent as results it can act on, not protocol errors.

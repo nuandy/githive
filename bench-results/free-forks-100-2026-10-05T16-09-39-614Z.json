@@ -1,0 +1,104 @@
+{
+	"label": "free-forks-100",
+	"mode": "free",
+	"rampSeconds": 0,
+	"base": "https://blueprint-bench.nuandy.workers.dev",
+	"repo": "bench-free-forks100-1791216553",
+	"task": null,
+	"racers": 5,
+	"idle": 0,
+	"at": "2026-10-05T16:09:39.614Z",
+	"ledgerMatches": null,
+	"ledgerCommits": null,
+	"levels": [
+		{
+			"agents": 100,
+			"wallMs": 65441.167499999996,
+			"calls": 606,
+			"callsPerSecond": 9.260225988480418,
+			"errors": 0,
+			"failures": [],
+			"race": {
+				"winners": 1,
+				"unexpected": []
+			},
+			"leftoverClaims": 0,
+			"tools": {
+				"list_claims": {
+					"n": 200,
+					"p50": 4724.669542000003,
+					"p95": 9710.741166999996,
+					"p99": 9725.741417000001,
+					"max": 9879.972416
+				},
+				"open_change": {
+					"n": 105,
+					"p50": 18841.753375,
+					"p95": 22525.795457999993,
+					"p99": 23754.557708,
+					"max": 24505.925083000002
+				},
+				"abandon_change": {
+					"n": 101,
+					"p50": 6043.443041000006,
+					"p95": 7074.454916000002,
+					"p99": 9728.391166999994,
+					"max": 9984.826583999995
+				},
+				"report_push": {
+					"n": 100,
+					"p50": 8794.401625000006,
+					"p95": 10081.451083,
+					"p99": 12495.219125000003,
+					"max": 15500.739916000006
+				},
+				"change_status": {
+					"n": 100,
+					"p50": 6293.223125000004,
+					"p95": 7976.046208,
+					"p99": 8784.640082999991,
+					"max": 9281.201042
+				}
+			},
+			"lock": {
+				"samples": 0,
+				"waitMs": {
+					"n": 0,
+					"p50": null,
+					"p95": null,
+					"p99": null,
+					"max": null
+				},
+				"runMs": {
+					"n": 0,
+					"p50": null,
+					"p95": null,
+					"p99": null,
+					"max": null
+				},
+				"flushMs": {
+					"n": 0,
+					"p50": null,
+					"p95": null,
+					"p99": null,
+					"max": null
+				},
+				"busyFraction": 0,
+				"flushShareOfHold": 0,
+				"peakQueue": 0,
+				"byCall": {}
+			},
+			"ledger": {
+				"matches": null,
+				"commits": null,
+				"lagMs": {
+					"n": 0,
+					"p50": null,
+					"p95": null,
+					"p99": null,
+					"max": null
+				}
+			}
+		}
+	]
+}

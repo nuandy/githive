@@ -1,6 +1,6 @@
 import { vi } from "vitest";
 import type { GateItem } from "../../src/gate";
-import { DEFAULT_POLICY, type Slice, type Task } from "../../src/types";
+import type { Slice, Task } from "../../src/types";
 
 /** In-memory Durable Object storage; values are copied in and out, like the real thing. */
 export class FakeStorage {
@@ -12,6 +12,11 @@ export class FakeStorage {
 	async put(key: string | Record<string, unknown>, value?: unknown) {
 		if (typeof key === "string") this.data.set(key, structuredClone(value));
 		else for (const [k, v] of Object.entries(key)) this.data.set(k, structuredClone(v));
+	}
+	async list<T>(options: { prefix?: string; reverse?: boolean; limit?: number } = {}) {
+		const keys = [...this.data.keys()].filter((k) => k.startsWith(options.prefix ?? "")).sort();
+		if (options.reverse) keys.reverse();
+		return new Map(keys.slice(0, options.limit ?? keys.length).map((k) => [k, structuredClone(this.data.get(k)) as T]));
 	}
 	async delete(key: string | string[]) {
 		for (const k of Array.isArray(key) ? key : [key]) this.data.delete(k);
@@ -76,10 +81,6 @@ export function fakeEnv() {
 				cancel: vi.fn(async (_taskId: string, _slice: string, _head: string) => {}),
 			state: vi.fn(async () => ({ queue: gateQueue, current: gateCurrent.item })),
 		})),
-		CONTRACT_CHECKER: namespace(() => ({
-			check: vi.fn(async (job: { contracts: Record<string, string> }) => ({ status: "passed" as const, checked: Object.keys(job.contracts), unchecked: [] })),
-			dispose: vi.fn(async () => undefined),
-		})),
 		ARTIFACTS: {},
 		OPENAI_API_KEY: "test",
 	};
@@ -108,12 +109,11 @@ export const task = (overrides: Partial<Task> = {}): Task => ({
 	phase: "building",
 	baseRepo: "t1--base",
 	baseCommit: "base0",
-	contracts: [],
 	verify: ["npm test"],
-	review: { ...DEFAULT_POLICY },
+	// The mechanics tests are written for three roles, two approvals and a veto, not the default policy.
+	review: { reviewers: ["security", "tests", "api"], required: 2, vetoes: ["security"] },
 	slices: [slice("a"), slice("b")],
 	checks: [],
-	amendments: [],
 	limits: { builders: 4, reviewers: 6 },
 	queue: [],
 	active: { builders: [], reviewers: [] },

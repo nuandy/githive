@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { GateResult } from "../src/gate-plan";
 import type { AccessIdentity } from "../src/access-contract";
-import type { Review, Slice, Task } from "../src/types";
+import { DEFAULT_POLICY, type Review, type Slice, type Task } from "../src/types";
 import { FakeStorage, fakeEnv, slice, task } from "./fakes/env";
 
 // Integration tests for the Coordinator's decisions: the real class, with
@@ -16,6 +16,8 @@ const io = vi.hoisted(() => ({
 	/** The head of any repo not in heads (open-mode forks get random names). */
 	defaultHead: undefined as string | undefined,
 	pushes: 0,
+	/** Agents' forks made so far: one only exists once forked. */
+	forked: new Set<string>(),
 	/** Files on the task base, by path: what fileVersion reads. */
 	files: new Map<string, { id: string; text: string }>(),
 	/** Files committed to the task base through a Workspace. */
@@ -33,21 +35,31 @@ const io = vi.hoisted(() => ({
 vi.mock("../src/artifacts", async (importOriginal) => ({
 	...(await importOriginal<typeof import("../src/artifacts")>()),
 	headOf: vi.fn(async (_artifacts: unknown, repo: string) => io.heads.get(repo) ?? io.defaultHead),
-	forkAndWait: vi.fn(async (_artifacts: unknown, _source: string, name: string) => ({ remote: `https://git.test/${name}.git`, token: `token-${name}` })),
+	forkAndWait: vi.fn(async (_artifacts: unknown, _source: string, name: string) => {
+		io.forked.add(name);
+		return { remote: `https://git.test/${name}.git`, token: `token-${name}` };
+	}),
 	fileVersion: vi.fn(async (_artifacts: unknown, _repo: string, path: string) => io.files.get(path) ?? null),
-	remoteFor: vi.fn(async (_artifacts: unknown, repo: string) => ({ url: `https://git.test/${repo}.git`, token: `token-${repo}` })),
+	remoteFor: vi.fn(async (_artifacts: unknown, repo: string) => {
+		if (repo.includes("--agent--") && !io.forked.has(repo)) throw new Error(`no repo ${repo}`);
+		return { url: `https://git.test/${repo}.git`, token: `token-${repo}` };
+	}),
 }));
 
 vi.mock("../src/git", () => ({
+	// A change's branch in its author's fork: heads keyed "<fork>:<branch>".
+	branchHead: vi.fn(async (remote: { url: string }, ref: string) => io.heads.get(`${remote.url.replace(/^https:\/\/git\.test\/|\.git$/g, "")}:${ref}`) ?? null),
 	Workspace: {
-		clone: vi.fn(async () => ({
+		clone: vi.fn(async (_remote: unknown, branch: string) => ({
+			branch,
 			head: vi.fn(async () => io.heads.get("project") ?? io.defaultHead),
-			fetch: vi.fn(async (_name: string, remote: { url: string }) => {
+			fetch: vi.fn(async (_name: string, remote: { url: string }, ref?: string) => {
 				io.fetched.push(_name);
 				const hook = io.onFetch;
 				io.onFetch = null;
 				await hook?.();
-				return io.heads.get(remote.url.replace(/^https:\/\/git\.test\/|\.git$/g, "")) ?? "fetched";
+				const repo = remote.url.replace(/^https:\/\/git\.test\/|\.git$/g, "");
+				return (ref && io.heads.get(`${repo}:${ref}`)) ?? io.heads.get(repo) ?? "fetched";
 			}),
 			mergeBase: vi.fn(async () => "main0"),
 			changedPaths: vi.fn(async (_from: string, head: string) => io.touched.get(head) ?? []),
@@ -90,7 +102,7 @@ vi.mock("../src/ledger-git", async () => {
 	};
 });
 
-const { Coordinator } = await import("../src/coordinator");
+const { Coordinator, agentForkName } = await import("../src/coordinator");
 const artifacts = await import("../src/artifacts");
 
 const person: AccessIdentity = { kind: "person", value: "human@example.com" };
@@ -112,10 +124,11 @@ const builder = (sliceId: string) => fake.env.BUILDER.getByName(`t1--${sliceId}`
 const vote = (reviewer: string, verdict: Review["verdict"], head = "h1") => ({ reviewer, verdict, head, summary: `${reviewer} says ${verdict}` });
 const approvedReviews = (head = "h1") => [
 	{ ...vote("tests", "approve", head), at: "" },
-	{ ...vote("api", "approve", head), at: "" },
+	{ ...vote("security", "approve", head), at: "" },
 ];
 
 beforeEach(() => {
+	io.forked.clear();
 	io.heads.clear();
 	io.mergeConflict = null;
 	io.defaultHead = undefined;
@@ -139,9 +152,12 @@ beforeEach(() => {
 
 describe("limits and queues", () => {
 	it("starts builders up to the limit, queues the rest, and starts the next when one stops", async () => {
-		await setup(task({ slices: [slice("a"), slice("b"), slice("c")], limits: { builders: 2, reviewers: 6 } }));
-		const { started } = await coordinator.startBuilders();
-		expect(started.map((s) => s.status)).toEqual(["started", "started", "queued"]);
+		io.defaultHead = "main0";
+		await setup(task({ mode: "open", baseRepo: "project", slices: [], limits: { builders: 2, reviewers: 6 } }));
+		// Hosted changes: each gets a builder, as many at once as the limit allows.
+		for (const id of ["a", "b", "c"]) await coordinator.openChange({ id, title: id, intent: `build ${id}`, owns: [`src/${id}/`], hosted: true });
+		expect(builder("a").start).toHaveBeenCalledOnce();
+		expect(builder("b").start).toHaveBeenCalledOnce();
 		expect(builder("c").start).not.toHaveBeenCalled();
 
 		await coordinator.agentStopped("builder", "a");
@@ -187,7 +203,7 @@ describe("votes", () => {
 	it("queues an approved slice with the task's gate", async () => {
 		await setup(task({ slices: [slice("a", { reviewHead: "h1" }), slice("b")] }));
 		await coordinator.submitReview("a", vote("tests", "approve"));
-		const { next } = await coordinator.submitReview("a", vote("api", "approve"));
+		const { next } = await coordinator.submitReview("a", vote("security", "approve"));
 		expect(next).toBe("integrate");
 		expect(fake.env.GATE.getByName("t1").enqueue).toHaveBeenCalledWith("t1", { slice: "a", head: "h1" });
 		expect((await stored()).slices[0].gate?.status).toBe("queued");
@@ -196,7 +212,7 @@ describe("votes", () => {
 	it("integrates directly when the task has no verify commands", async () => {
 		await setup(task({ verify: [], slices: [slice("a", { reviewHead: "h1" }), slice("b")] }));
 		await coordinator.submitReview("a", vote("tests", "approve"));
-		await coordinator.submitReview("a", vote("api", "approve"));
+		await coordinator.submitReview("a", vote("security", "approve"));
 		expect(io.merges).toEqual(["refs/remotes/a/main"]);
 		expect((await stored()).slices[0].status).toBe("integrated");
 	});
@@ -246,7 +262,7 @@ describe("the integration gate", () => {
 	it("cancels an approved gate queued before a veto and ignores its late result", async () => {
 		await setup(task({ slices: [slice("a", { reviewHead: "h1" }), slice("b")] }));
 		await coordinator.submitReview("a", vote("tests", "approve"));
-		await coordinator.submitReview("a", vote("api", "approve"));
+		await coordinator.submitReview("a", vote("security", "approve"));
 		expect(fake.env.GATE.getByName("t1").enqueue).toHaveBeenCalledWith("t1", { slice: "a", head: "h1" });
 		await coordinator.submitReview("a", vote("security", "reject"));
 		expect(fake.env.GATE.getByName("t1").cancel).toHaveBeenCalledWith("t1", "a", "h1");
@@ -347,7 +363,8 @@ describe("the integration gate", () => {
 		const grouped = (head: string, other: string) => ({ ...gated("queued", head), group: [other] });
 		await setup(task({ slices: [slice("a", { reviewHead: "h1", gate: grouped("h1", "b"), reviews: approvedReviews() }), slice("b", { reviewHead: "hb", gate: grouped("hb", "a"), reviews: approvedReviews("hb") })] }));
 		const plan = await coordinator.gatePlan("a", "h1", [{ slice: "b", head: "hb" }]);
-		expect(plan?.others).toEqual([{ slice: "b", head: "hb", remote: "https://git.test/t1--b.git", token: "token-t1--b" }]);
+		// An older change's branch is its own fork's copy of the project's branch.
+		expect(plan?.others).toEqual([{ slice: "b", head: "hb", remote: "https://git.test/t1--b.git", token: "token-t1--b", ref: "main" }]);
 		expect(await coordinator.gateResult("a", result(), [], [{ slice: "b", head: "hb" }])).toEqual({ outcome: "passed" });
 		expect(io.merges).toEqual(["refs/remotes/a/main", "refs/remotes/b/main"]);
 		expect(io.pushes).toBe(1); // one push: the base gets the whole group at once
@@ -457,6 +474,34 @@ describe("escalation and human controls", () => {
 		expect(ledger.entries.map((e) => e.text)).toContain("a needs a human: Could not start reviewer a:tests:h1: no containers");
 	});
 
+	it("starts a reviewer that failed without voting once more, then flags the change, never waiting on a vote that won't come", async () => {
+		await setup(task());
+		await coordinator.startReviewers("a", "built it");
+		const tests = fake.env.REVIEWER.getByName("t1--a--review-tests--h1");
+		expect(tests.start).toHaveBeenCalledTimes(1);
+
+		await coordinator.agentStopped("reviewer", "a:tests:h1", "clone failed: fatal: destination path '/work' already exists");
+		expect(tests.start).toHaveBeenCalledTimes(2);
+		let t = await stored();
+		expect(t.active.reviewers).toContain("a:tests:h1");
+		expect(t.slices[0].attention).toBeUndefined();
+
+		await coordinator.agentStopped("reviewer", "a:tests:h1", "clone failed again");
+		expect(tests.start).toHaveBeenCalledTimes(2);
+		t = await stored();
+		expect(t.slices[0].attention).toBe("The tests reviewer failed twice on h1: clone failed again");
+		expect(t.active.reviewers).not.toContain("a:tests:h1");
+	});
+
+	it("doesn't start a failed reviewer again once its role has voted, or for an older commit", async () => {
+		await setup(task({ slices: [slice("a", { reviewHead: "h2", reviews: [{ ...vote("tests", "approve", "h2"), at: "" }] })] }));
+		await coordinator.agentStopped("reviewer", "a:tests:h2", "crashed after voting");
+		await coordinator.agentStopped("reviewer", "a:api:h1", "an older commit's reviewer");
+		expect(fake.env.REVIEWER.getByName("t1--a--review-tests--h2").start).not.toHaveBeenCalled();
+		expect(fake.env.REVIEWER.getByName("t1--a--review-api--h1").start).not.toHaveBeenCalled();
+		expect((await stored()).slices[0].attention).toBeUndefined();
+	});
+
 	it("reports no failures when every reviewer starts", async () => {
 		await setup(task());
 		expect((await coordinator.startReviewers("a", "built it")).failed).toEqual([]);
@@ -502,27 +547,14 @@ describe("escalation and human controls", () => {
 });
 
 describe("the record in Git", () => {
-	const approved = (head = "h1") => [vote("tests", "approve", head), vote("api", "approve", head)];
+	const approved = (head = "h1") => [vote("tests", "approve", head), vote("security", "approve", head)];
 
-	it("attributes human approval in the blueprint ledger note", async () => {
-		await setup(task({ phase: "awaiting-approval" }));
-		await coordinator.approve(person);
-		await coordinator.ledgerIdle();
-		expect(ledger.entries.map((e) => e.text)).toContain("Blueprint approved by human@example.com: contracts committed to t1--base; slices forked: t1--a, t1--b");
-	});
-
-	it("attributes a requested gate retry and landing, including service-token identity", async () => {
-		const approvedReviews = [{ ...vote("tests", "approve"), at: "" }, { ...vote("api", "approve"), at: "" }];
+	it("attributes a requested gate retry, including service-token identity", async () => {
+		const approvedReviews = [{ ...vote("tests", "approve"), at: "" }, { ...vote("security", "approve"), at: "" }];
 		await setup(task({ slices: [slice("a", { reviewHead: "h1", gate: { status: "queued", head: "h1", baseHead: "base0", at: "", excluded: [] }, reviews: approvedReviews }), slice("b")] }));
 		await coordinator.retryGate("a", service);
 		await coordinator.ledgerIdle();
 		expect(ledger.entries.map((e) => e.text)).toContain("a: gate re-run requested by service token deploy-script");
-
-		await setup(task({ slices: [slice("a", { status: "integrated" }), slice("b", { status: "integrated" })] }));
-		await coordinator.land(service);
-		expect((await stored()).phase).toBe("landed");
-		await coordinator.ledgerIdle();
-		expect(ledger.entries.map((e) => e.text)).toContain("Task landed in project by service token deploy-script");
 	});
 
 	it("notes each vote and the integration on the reviewed commit, and rebuilds the same state", async () => {
@@ -532,9 +564,9 @@ describe("the record in Git", () => {
 		await coordinator.ledgerIdle();
 		expect(ledger.entries.filter((e) => e.commit === "h1").map((e) => e.text)).toEqual([
 			"a: tests reviewer approved: tests says approve",
-			"a: api reviewer approved: api says approve",
+			"a: security reviewer approved: security says approve",
 			"a: quorum approved",
-			"a integrated into the task base",
+			"a merged into main",
 		]);
 		expect(await coordinator.ledger()).toMatchObject({ matches: true, commits: 2 });
 	});
@@ -560,16 +592,6 @@ describe("the record in Git", () => {
 		expect(await coordinator.ledger()).toMatchObject({ matches: true });
 	});
 
-	it("restores a task from its record into an empty Coordinator", async () => {
-		await setup(task({ slices: [slice("a", { reviewHead: "h1" }), slice("b")], queue: [{ kind: "builder", slice: "b" }] }));
-		await coordinator.submitReview("a", vote("security", "reject"));
-		const original = await stored();
-
-		const restored = new Coordinator({ storage: new FakeStorage() } as never, fake.env as never);
-		const { task: t } = await restored.restore("t1", original.repo);
-		expect(t).toEqual({ ...original, queue: [], active: { builders: [], reviewers: [] } });
-		await expect(restored.restore("t1", original.repo)).rejects.toThrow(/task exists/);
-	});
 });
 
 describe("lock timings", () => {
@@ -586,69 +608,9 @@ describe("lock timings", () => {
 
 	it("records failed calls and clears samples on reset", async () => {
 		await setup(task({ mode: "open" }));
-		await expect(coordinator.land(service)).rejects.toThrow();
+		await expect(coordinator.abandonChange("no-such-change", "gone")).rejects.toThrow();
 		expect((await coordinator.lockStats(true)).samples).toHaveLength(1);
 		expect((await coordinator.lockStats()).samples).toHaveLength(0);
-	});
-});
-
-describe("contract amendments", () => {
-	const routes = { id: "v-routes-1", text: "routes v1" };
-	const propose = (slice: string, content: string, basedOn: string | null, path = "src/routes.ts") =>
-		coordinator.proposeAmendment(slice, { path, content, reason: `${slice} needs a route`, basedOn });
-
-	it("brings a shared project file outside every lane under contract", async () => {
-		await setup(task());
-		io.files.set("src/routes.ts", routes);
-		const a = await propose("a", "routes v1 + a", routes.id);
-		expect(a).toMatchObject({ status: "approved", kind: "shared", commit: "amend-commit" });
-		expect(io.written).toEqual([{ "src/routes.ts": "routes v1 + a" }]);
-		expect((await stored()).contracts).toEqual(["src/routes.ts"]);
-		expect(builder("b").notify.mock.calls[0][0]).toMatch(/changed and brought under contract/);
-	});
-
-	it("refuses a proposal written against an older version without asking the contract owner", async () => {
-		await setup(task());
-		io.files.set("src/routes.ts", routes);
-		const a = await propose("a", "routes v0 + a", "v-routes-0");
-		expect(a.status).toBe("stale");
-		expect(a.decision).toMatch(/merge base\/main, then propose again/);
-		expect(io.decide).not.toHaveBeenCalled();
-		expect(io.written).toEqual([]);
-	});
-
-	it("doesn't apply an approval if the file changed while the owner decided", async () => {
-		await setup(task());
-		io.files.set("src/routes.ts", routes);
-		io.decide.mockImplementation(async () => {
-			io.files.set("src/routes.ts", { id: "v-routes-2", text: "routes v1 + b" }); // b's change lands meanwhile
-			return { approve: true, reason: "fine" };
-		});
-		const a = await propose("a", "routes v1 + a", routes.id);
-		expect(a.status).toBe("stale");
-		expect(io.written).toEqual([]);
-		expect((await stored()).contracts).toEqual([]);
-	});
-
-	it("lets two slices change the same shared file one after the other", async () => {
-		await setup(task());
-		io.files.set("src/routes.ts", routes);
-		expect((await propose("a", "routes v1 + a", routes.id)).status).toBe("approved");
-		// b wrote its proposal against v1 too: refused, then re-proposed on top of a's change.
-		expect((await propose("b", "routes v1 + b", routes.id)).status).toBe("stale");
-		const current = io.files.get("src/routes.ts")!;
-		expect((await propose("b", "routes v1 + a + b", current.id)).status).toBe("approved");
-		expect(io.files.get("src/routes.ts")!.text).toBe("routes v1 + a + b");
-		expect((await stored()).amendments!.map((x) => [x.slice, x.kind, x.status])).toEqual([
-			["a", "shared", "approved"],
-			["b", "contract", "stale"],
-			["b", "contract", "approved"],
-		]);
-	});
-
-	it("refuses a file inside a slice's lane", async () => {
-		await setup(task());
-		await expect(propose("a", "x", null, "src/b/index.ts")).rejects.toThrow(/inside b's lane/);
 	});
 });
 
@@ -661,14 +623,101 @@ describe("open mode", () => {
 		io.defaultHead = "main0";
 	});
 
-	it("opens a change on free paths, forks the project for it and returns credentials", async () => {
+	it("opens a change on free paths, on its author's fork (made once), and returns credentials", async () => {
 		await setup(openTask());
 		const { change, credentials } = await open("Add stats", ["src/stats/"]);
 		expect(change).toMatchObject({ status: "building", owns: ["src/stats/"], startCommit: "main0", intent: "Add stats, please" });
-		expect(credentials.remote).toBe(`https://git.test/t1--${change.id}.git`);
+		// Its author's fork, and its own branch there; the project to start from.
+		expect(change).toMatchObject({ repo: "t1--agent--anonymous", ref: `changes/${change.id}` });
+		expect(credentials).toMatchObject({ remote: "https://git.test/t1--agent--anonymous.git", ref: `changes/${change.id}`, project: { remote: "https://git.test/project.git", branch: "main" } });
 		expect(Date.parse(change.leaseUntil!)).toBeGreaterThan(Date.now());
 		await coordinator.ledgerIdle();
 		expect(ledger.entries.at(-1)?.text).toMatch(/opened.*claiming src\/stats\//);
+		// The same author's next change reuses the fork.
+		await open("More stats", ["src/more/"]);
+		expect(vi.mocked(artifacts.forkAndWait)).toHaveBeenCalledTimes(1);
+	});
+
+	// A call can be asked again after an answer was lost (its leader crashed mid-call, say): opening is safe to repeat.
+	it("follows a change on its own branch in its author's fork, from push to review to merge", async () => {
+		await setup({ ...openTask(), verify: [] });
+		const { change } = await coordinator.openChange({ title: "Add stats", intent: "Add stats, please", owns: ["src/stats/"], authorAgent: "stats-agent" });
+		expect(change).toMatchObject({ repo: "t1--agent--stats-agent", ref: `changes/${change.id}` });
+		// Nothing pushed to its branch yet: nothing to review.
+		await expect(coordinator.startReviewers(change.id)).rejects.toThrow(/no work to review/);
+
+		io.heads.set(`t1--agent--stats-agent:changes/${change.id}`, "h1");
+		expect(await coordinator.recordPush(change.id)).toMatchObject({ changed: true });
+		expect((await stored()).slices[0].head).toBe("h1");
+		await coordinator.startReviewers(change.id, "done");
+		expect((await stored()).slices[0].reviewHead).toBe("h1");
+		// Merged from its branch, not the fork's copy of the project's branch.
+		for (const role of ["tests", "security"]) await coordinator.submitReview(change.id, vote(role, "approve"));
+		expect(io.merges).toEqual([`refs/remotes/${change.id}/changes/${change.id}`]);
+		expect((await stored()).slices[0].status).toBe("integrated");
+	});
+
+	it("finishes an open that was interrupted after its reservation, when the same change is asked again", async () => {
+		const reserved = slice("x-1", { status: "opening", owns: ["src/x/"], repo: "t1--x-1", leaseUntil: new Date(Date.now() + 60_000).toISOString(), external: true });
+		await setup(openTask([reserved]));
+		const { change, credentials } = await coordinator.openChange({ id: "x-1", title: "X", intent: "X, please", owns: ["src/x/"] });
+		expect(change).toMatchObject({ id: "x-1", status: "building", startCommit: "main0" });
+		expect(credentials).toMatchObject({ slice: "x-1", remote: "https://git.test/t1--x-1.git" });
+		expect((await stored()).slices.map((s) => [s.id, s.status])).toEqual([["x-1", "building"]]);
+	});
+
+	it("answers an open asked again after it went through with the same change and fresh credentials", async () => {
+		await setup(openTask());
+		const first = await coordinator.openChange({ id: "x-1", title: "X", intent: "X, please", owns: ["src/x/"] });
+		const again = await coordinator.openChange({ id: "x-1", title: "X", intent: "X, please", owns: ["src/x/"] });
+		expect(again.change).toMatchObject({ id: "x-1", status: "building", startCommit: first.change.startCommit });
+		expect(again.credentials).toMatchObject({ slice: "x-1", remote: first.credentials.remote });
+		expect((await stored()).slices).toHaveLength(1);
+	});
+
+	it("answers an abandon asked again with the change as it was abandoned", async () => {
+		await setup(openTask());
+		const { change } = await open("X", ["src/x/"]);
+		await coordinator.abandonChange(change.id, "done");
+		await coordinator.ledgerIdle();
+		const commits = ledger.entries.length;
+		expect(await coordinator.abandonChange(change.id, "done")).toMatchObject({ id: change.id, status: "abandoned" });
+		await coordinator.ledgerIdle();
+		// Nothing new decided: it was already abandoned.
+		expect(ledger.entries).toHaveLength(commits);
+	});
+
+	it("still refuses the same change id for other paths, or once that change has ended", async () => {
+		await setup(openTask());
+		await coordinator.openChange({ id: "x-1", title: "X", intent: "X, please", owns: ["src/x/"] });
+		await expect(coordinator.openChange({ id: "x-1", title: "X", intent: "X, please", owns: ["src/y/"] })).rejects.toThrow("change x-1 already exists");
+		await coordinator.abandonChange("x-1", "done");
+		await expect(coordinator.openChange({ id: "x-1", title: "X", intent: "X, please", owns: ["src/x/"] })).rejects.toThrow("change x-1 already exists");
+	});
+
+	it("records when a change opened and who opened it (a person by a hash of their email, never the address), and when it ended", async () => {
+		await setup(openTask());
+		const byPerson = await coordinator.openChange({ title: "X", intent: "X, please", owns: ["src/x/"] }, { kind: "person", value: "Human@Example.com" });
+		expect(byPerson.change.openedBy).toMatch(/^person:[0-9a-f]{12}$/);
+		expect(JSON.stringify(byPerson.change)).not.toMatch(/example\.com/i);
+		expect(Date.parse(byPerson.change.openedAt!)).toBeGreaterThan(0);
+		const byService = await coordinator.openChange({ title: "Y", intent: "Y, please", owns: ["src/y/"] }, { kind: "service", value: "ci-bot" });
+		expect(byService.change.openedBy).toBe("service:ci-bot");
+		const hosted = await coordinator.openChange({ title: "Z", intent: "Z, please", owns: ["src/z/"], hosted: true });
+		expect(hosted.change.openedBy).toBe("blueprint-builder");
+
+		expect(byPerson.change.endedAt).toBeUndefined();
+		const abandoned = await coordinator.abandonChange(byPerson.change.id, "done");
+		expect(Date.parse(abandoned.endedAt!)).toBeGreaterThanOrEqual(Date.parse(byPerson.change.openedAt!));
+	});
+
+	it("records the name an agent gives itself, apart from who opened the change, and refuses a name that isn't one", async () => {
+		await setup(openTask());
+		const named = await coordinator.openChange({ title: "X", intent: "X, please", owns: ["src/x/"], agent: "docs-agent" }, { kind: "service", value: "ci-bot" });
+		expect(named.change).toMatchObject({ agent: "docs-agent", openedBy: "service:ci-bot" });
+		await expect(coordinator.openChange({ title: "Y", intent: "Y, please", owns: ["src/y/"], agent: "<b>me</b>" })).rejects.toThrow(/\[400\] agent must be a short name/);
+		const unnamed = await coordinator.openChange({ title: "Z", intent: "Z, please", owns: ["src/z/"] });
+		expect(unnamed.change.agent).toBeUndefined();
 	});
 
 	it("refuses a claim that overlaps an active change, naming the holder and its intent", async () => {
@@ -703,6 +752,26 @@ describe("open mode", () => {
 		expect(extended.owns).toEqual(["src/a/", "src/c/"]);
 	});
 
+	it("queues a change's checks again when their result was lost, but not while the gate still holds them", async () => {
+		const long = new Date(Date.now() - 20 * 60_000).toISOString();
+		const later = new Date(Date.now() + 60 * 60_000).toISOString();
+		const running = (head: string) => ({ status: "running" as const, head, baseHead: "main0", at: long, excluded: [] });
+		await setup(
+			openTask([
+				slice("lost", { leaseUntil: later, startCommit: "main0", reviewHead: "h1", gate: running("h1") }),
+				slice("held", { leaseUntil: later, startCommit: "main0", reviewHead: "h2", gate: running("h2") }),
+			]),
+		);
+		fake.gateCurrent.item = { slice: "held", head: "h2" } as never;
+		await coordinator.alarm();
+		const [lost, held] = (await stored()).slices;
+		expect(lost.gate).toMatchObject({ status: "queued", head: "h1" });
+		expect(fake.env.GATE.getByName("t1").enqueue).toHaveBeenCalledWith("t1", { slice: "lost", head: "h1" });
+		expect(fake.env.GATE.getByName("t1").enqueue).toHaveBeenCalledTimes(1);
+		expect(held.gate).toMatchObject({ status: "running", seenAt: expect.any(String) });
+		expect(storage.alarm).not.toBeNull();
+	});
+
 	it("expires an idle claim but renews one that is waiting on review", async () => {
 		const past = new Date(Date.now() - 60_000).toISOString();
 		await setup(
@@ -719,12 +788,6 @@ describe("open mode", () => {
 		expect(storage.alarm).not.toBeNull();
 	});
 
-	it("refuses landing and contract amendments in open mode", async () => {
-		await setup(openTask([slice("a", { startCommit: "main0" })]));
-		await expect(coordinator.land(person)).rejects.toThrow(/nothing to land/);
-		await expect(coordinator.proposeAmendment("a", { path: "src/shared.ts", content: "x", reason: "r", basedOn: null })).rejects.toThrow(/open mode has no contracts/);
-	});
-
 	it("sends review findings for an external change to its inbox instead of a hosted builder", async () => {
 		await setup(openTask([slice("ext", { startCommit: "main0", reviewHead: "h1", external: true })]));
 		io.heads.set("t1--ext", "h1");
@@ -736,10 +799,6 @@ describe("open mode", () => {
 		expect(await coordinator.readInbox("ext")).toHaveLength(1);
 	});
 
-	it("only opens changes on an open-mode task", async () => {
-		await setup(task());
-		await expect(open("A", ["src/a/"])).rejects.toThrow(/open-mode task/);
-	});
 });
 
 describe("deleting a task", () => {
@@ -817,7 +876,8 @@ describe("short locks: open mode under concurrency", () => {
 			running--;
 			return realFork(...args);
 		});
-		const opening = Array.from({ length: 10 }, (_, i) => open(`c${i}`, [`src/c${i}/`]));
+		// Ten agents' first changes: ten forks to make.
+		const opening = Array.from({ length: 10 }, (_, i) => coordinator.openChange({ title: `c${i}`, intent: `c${i}, please`, owns: [`src/c${i}/`], authorAgent: `agent-${i}` }));
 		await vi.waitFor(async () => expect((await coordinator.claims())).toHaveLength(10));
 		expect(running).toBe(6);
 		await expect(open("Taken", ["src/c9/x.ts"])).rejects.toThrow(/already claimed/);
@@ -963,61 +1023,24 @@ describe("parking: delivery and timeout", () => {
 	});
 });
 
-describe("creating tasks", () => {
-	const fresh = (get: (repo: string) => Promise<unknown>) => {
-		storage = new FakeStorage();
-		fake = fakeEnv();
-		Object.assign(fake.env.ARTIFACTS, { get: vi.fn(get) });
-		coordinator = new Coordinator({ storage } as never, fake.env as never);
-	};
-	const handle = async () => ({ [Symbol.dispose]() {} });
-
-	it("creates a planned task with nothing started, in the stored field order", async () => {
-		fresh(handle);
-		io.heads.set("project", "p0");
-		const t = await coordinator.create("abcd1234", "project", "a goal", { builders: 2 });
-		expect(Object.keys(t)).toEqual(["id", "repo", "goal", "phase", "contracts", "verify", "review", "slices", "checks", "amendments", "limits", "queue", "active", "createdAt", "anchor"]);
-		expect(t).toMatchObject({ phase: "planning", verify: [], review: { reviewers: ["security", "tests", "api"] }, limits: { builders: 2, reviewers: 6 }, anchor: "p0" });
-		await expect(coordinator.create("abcd1234", "project", "again")).rejects.toThrow("[409] task exists");
-	});
-
-	it("creates an open task on the project's head, in the stored field order", async () => {
-		fresh(handle);
-		io.heads.set("project", "p0");
-		const t = await coordinator.createOpen("abcd1234", "project", { verify: ["npm test", " "] });
-		expect(Object.keys(t)).toEqual(["id", "repo", "goal", "phase", "mode", "leaseMinutes", "baseRepo", "baseCommit", "contracts", "verify", "review", "slices", "checks", "amendments", "limits", "queue", "active", "createdAt", "anchor"]);
-		expect(t).toMatchObject({ goal: "Open changes on project", phase: "building", mode: "open", leaseMinutes: 30, baseRepo: "project", baseCommit: "p0", verify: ["npm test"], anchor: "p0" });
-		expect((await coordinator.createOpen("abcd1234", "project")).id).toBe("abcd1234");
-	});
-
-	it("refuses a repo that doesn't exist, and checks limits before reading the project", async () => {
-		fresh(async () => {
-			throw new Error("not found");
-		});
-		await expect(coordinator.create("abcd1234", "nope", "g")).rejects.toThrow("[404] no repo nope");
-		await expect(coordinator.createOpen("abcd1234", "nope")).rejects.toThrow("[404] no repo nope");
-		fresh(handle);
-		vi.mocked(artifacts.headOf).mockClear();
-		await expect(coordinator.create("abcd1234", "project", "g", { builders: 0 })).rejects.toThrow("[400] limits.builders must be a whole number from 1 to 50");
-		expect(artifacts.headOf).not.toHaveBeenCalled();
-	});
-});
-
 describe("agent jobs and credentials", () => {
-	it("starts a builder with its slice, siblings and tokens", async () => {
-		await setup(task({ slices: [slice("a"), slice("b"), slice("c", { status: "abandoned" })] }));
-		await coordinator.startBuilders();
+	it("starts a hosted change's builder with its change, the other changes and tokens", async () => {
+		io.defaultHead = "main0";
+		await setup(task({ mode: "open", baseRepo: "project", slices: [slice("b"), slice("c", { status: "abandoned" })] }));
+		await coordinator.openChange({ id: "a", title: "a", intent: "build a", owns: ["src/a/"], hosted: true });
 		expect(builder("a").start).toHaveBeenCalledWith({
 			taskId: "t1",
+			branch: "main",
 			goal: "a goal",
 			slice: { id: "a", title: "a", owns: ["src/a/"], instructions: "build a", tests: [] },
 			siblings: [{ id: "b", title: "b", owns: ["src/b/"] }],
-			contracts: [],
 			verify: ["npm test"],
+			// Its agents are named after the change; its branch is in Blueprint's builder's fork.
 			repo: "t1--a",
-			remote: "https://git.test/t1--a.git",
-			token: "token-t1--a",
-			base: { remote: "https://git.test/t1--base.git", token: "token-t1--base" },
+			ref: "changes/a",
+			remote: "https://git.test/t1--agent--blueprint-builder.git",
+			token: "token-t1--agent--blueprint-builder",
+			base: { remote: "https://git.test/project.git", token: "token-project" },
 		});
 	});
 
@@ -1027,10 +1050,10 @@ describe("agent jobs and credentials", () => {
 		await coordinator.startReviewers("a", "built it");
 		expect(fake.env.REVIEWER.getByName("t1--a--review-tests--h1").start).toHaveBeenCalledWith({
 			taskId: "t1",
+			branch: "main",
 			goal: "a goal",
 			slice: { id: "a", title: "a", owns: ["src/a/"], instructions: "build a", tests: [] },
 			siblings: [{ id: "b", title: "b", owns: ["src/b/"] }],
-			contracts: [],
 			verify: ["npm test"],
 			repo: "t1--a",
 			remote: "https://git.test/t1--a.git",
@@ -1041,7 +1064,6 @@ describe("agent jobs and credentials", () => {
 			buildSummary: "built it",
 			revision: 0,
 			priorFindings: undefined,
-			amendments: [],
 		});
 	});
 
@@ -1074,5 +1096,120 @@ describe("cross-lane request paths", () => {
 		for (const path of ["/src/b/x.ts", "src//b", "src/b/", "./src/b/x.ts", "src/b/../a/x.ts", " src/b/x.ts", "C:/src/b", "src\\b\\x.ts", "src/b/\u0007x"])
 			await expect(coordinator.requestLaneChange("a", { path, need: "n", reason: "r" })).rejects.toThrow(`[400] invalid relative path: ${path}`);
 		await expect(coordinator.requestLaneChange("a", { path: "src/b/x.ts", need: "n", reason: "r" })).resolves.toMatchObject({ outcome: "requested" });
+	});
+});
+
+describe("review policies and outside reviewers", () => {
+	beforeEach(() => io.heads.set("t1--a", "h1"));
+	const reviewerStarted = (role: string) => fake.env.REVIEWER.getByName(`t1--a--review-${role}--h1`).start;
+
+	it("starts one reviewer by default, and adds security, who can veto, for a change to dependencies", async () => {
+		await setup(task({ review: DEFAULT_POLICY, slices: [slice("a", { touched: ["src/a/x.ts"] })] }));
+		expect(await coordinator.startReviewers("a", "done")).toMatchObject({ reviewers: ["review"], external: [] });
+		expect((await stored()).slices[0].review).toMatchObject({ reviewers: ["review"], required: 1, vetoes: [] });
+
+		await setup(task({ review: DEFAULT_POLICY, slices: [slice("a", { touched: ["src/a/x.ts", "package.json"] })] }));
+		expect(await coordinator.startReviewers("a", "done")).toMatchObject({ reviewers: ["review", "security"] });
+		const t = await stored();
+		expect(t.slices[0].review).toMatchObject({ reviewers: ["review", "security"], required: 2, vetoes: ["security"] });
+		await coordinator.ledgerIdle();
+		expect(ledger.entries.map((e) => e.text)).toContain("a touches package.json, so its review needs review, security (security can veto)");
+	});
+
+	it("goes straight to the checks when the policy needs no approvals", async () => {
+		await setup(task({ review: { reviewers: [], required: 0, vetoes: [] } }));
+		expect(await coordinator.startReviewers("a", "done")).toMatchObject({ reviewers: [] });
+		expect(fake.env.GATE.getByName("t1").enqueue).toHaveBeenCalledWith("t1", { slice: "a", head: "h1" });
+	});
+
+	it("leaves external roles to outside agents: never the author, one role per reviewer, then merges like any review", async () => {
+		await setup(task({ review: { reviewers: ["review", "security"], required: 2, vetoes: ["security"], external: ["review"] }, slices: [slice("a", { authorBy: "agent:builder-1" }), slice("b")] }));
+		expect(await coordinator.startReviewers("a", "done")).toMatchObject({ reviewers: ["security"], external: ["review"] });
+		expect(reviewerStarted("review")).not.toHaveBeenCalled();
+		expect(reviewerStarted("security")).toHaveBeenCalled();
+
+		const verdict = { reviewer: "review", head: "h1", verdict: "approve" as const, summary: "does what it says", evidence: "npm test: 12 passing" };
+		await expect(coordinator.submitExternalReview("a", verdict, "agent:builder-1")).rejects.toThrow(/you opened a, so you can't review it/);
+		await expect(coordinator.submitExternalReview("a", { ...verdict, reviewer: "security" }, "agent:reviewer-1")).rejects.toThrow(/security is not a role outside agents review here \(they review review\)/);
+		// Blueprint's own reviewer can't vote an external role either.
+		await expect(coordinator.submitReview("a", verdict)).rejects.toThrow(/review is not a role Blueprint reviews here/);
+
+		await coordinator.submitExternalReview("a", verdict, "agent:reviewer-1");
+		expect((await stored()).slices[0].reviews).toEqual([expect.objectContaining({ reviewer: "review", by: "agent:reviewer-1", verdict: "approve" })]);
+		await coordinator.submitReview("a", vote("security", "approve"));
+		expect(fake.env.GATE.getByName("t1").enqueue).toHaveBeenCalledWith("t1", { slice: "a", head: "h1" });
+	});
+
+	it("counts a reviewer for one role per commit", async () => {
+		await setup(task({ review: { reviewers: ["review", "tests"], required: 2, vetoes: [], external: ["review", "tests"] } }));
+		await coordinator.startReviewers("a", "done");
+		const verdict = { head: "h1", verdict: "approve" as const, summary: "fine", evidence: "ran it" };
+		await coordinator.submitExternalReview("a", { ...verdict, reviewer: "review" }, "agent:reviewer-1");
+		await expect(coordinator.submitExternalReview("a", { ...verdict, reviewer: "tests" }, "agent:reviewer-1")).rejects.toThrow(/already reviewed h1 as review: each reviewer counts for one role/);
+		await coordinator.submitExternalReview("a", { ...verdict, reviewer: "tests" }, "agent:reviewer-2");
+		expect(fake.env.GATE.getByName("t1").enqueue).toHaveBeenCalled();
+	});
+
+	it("asks a person when no outside reviewer comes, once", async () => {
+		await setup(task({ review: { reviewers: ["review"], required: 1, vetoes: [], external: ["review"], externalWaitMinutes: 30 } }));
+		await coordinator.startReviewers("a", "done");
+		const t = await stored();
+		t.slices[0].reviewRequestedAt = new Date(Date.now() - 31 * 60_000).toISOString();
+		await storage.put("task", t);
+		await coordinator.alarm();
+		const flagged = (await stored()).slices[0];
+		expect(flagged.attention).toMatch(/^No outside reviewer has reviewed h1 as review in 31 minutes/);
+		expect(flagged.externalWaitFlagged).toBe("h1");
+	});
+
+	it("lets a person review any role from the dashboard, but never their own change", async () => {
+		await setup(task({ review: { reviewers: ["review", "security"], required: 2, vetoes: ["security"], external: ["review"] }, slices: [slice("a", { authorBy: "person:abc" }), slice("b")] }));
+		await coordinator.startReviewers("a", "done");
+		const verdict = { reviewer: "security", head: "h1", verdict: "approve" as const, summary: "looked at the auth path", evidence: "read src/a/" };
+		await coordinator.submitExternalReview("a", verdict, "person:def");
+		expect((await stored()).slices[0].reviews).toEqual([expect.objectContaining({ reviewer: "security", by: "person:def" })]);
+		await expect(coordinator.submitExternalReview("a", { ...verdict, reviewer: "review" }, "person:abc")).rejects.toThrow(/you opened a/);
+		await expect(coordinator.submitExternalReview("a", { ...verdict, reviewer: "perf" }, "person:def")).rejects.toThrow(/perf is not a reviewer role here/);
+	});
+
+	it("keeps what each of Blueprint's reviews cost", async () => {
+		await setup(task());
+		await coordinator.startReviewers("a", "done");
+		await coordinator.submitReview("a", { ...vote("tests", "approve"), usage: { inputTokens: 1200, outputTokens: 300 } });
+		expect((await stored()).slices[0].reviews[0].usage).toEqual({ inputTokens: 1200, outputTokens: 300 });
+	});
+
+	it("changes a repo's settings, records who did, and refuses a bad policy", async () => {
+		await setup(task());
+		const updated = await coordinator.updateSettings({ review: { reviewers: ["review"], required: 1, vetoes: [] }, verify: ["npm test", " "], leaseMinutes: 60 }, person);
+		expect(updated).toEqual({ review: { reviewers: ["review"], required: 1, vetoes: [] }, verify: ["npm test"], leaseMinutes: 60 });
+		await coordinator.ledgerIdle();
+		expect(ledger.entries.at(-1)?.text).toMatch(/^Settings changed by person:[0-9a-f]{12}: review: 1 of review; checks: npm test; claims last 60 minutes without activity$/);
+		await expect(coordinator.updateSettings({ review: { reviewers: ["review"], required: 2, vetoes: [] } }, person)).rejects.toThrow(/required must be between 0 and 1/);
+		await expect(coordinator.updateSettings({}, person)).rejects.toThrow(/nothing to change/);
+	});
+
+	it("registers an agent's key, rotates it only with the current one, and keeps a registered name from being borrowed", async () => {
+		io.defaultHead = "main0";
+		await setup(task({ mode: "open", repo: "project", baseRepo: "project", baseCommit: "main0", anchor: "main0", leaseMinutes: 30, verify: [], slices: [] }));
+		expect(await coordinator.registerAgent("builder-1", "hash-1")).toEqual({ agent: "builder-1", rotated: false });
+		await expect(coordinator.registerAgent("builder-1", "hash-2")).rejects.toThrow(/already registered: send its current key/);
+		expect(await coordinator.registerAgent("builder-1", "hash-2", "hash-1")).toEqual({ agent: "builder-1", rotated: true });
+		expect((await stored()).agents?.["builder-1"].keyHash).toBe("hash-2");
+		await expect(coordinator.openChange({ title: "X", intent: "X, please", owns: ["src/x/"], agent: "builder-1" })).rejects.toThrow(/builder-1 is a registered agent: open the change with its key/);
+		const opened = await coordinator.openChange({ title: "X", intent: "X, please", owns: ["src/x/"], authorAgent: "builder-1" });
+		expect(opened.change).toMatchObject({ agent: "builder-1", authorBy: "agent:builder-1" });
+	});
+});
+
+describe("an agent's fork", () => {
+	it("is named after who opened the change, keeping identities of different kinds apart", async () => {
+		expect(await agentForkName("t1", "agent:stats-agent")).toBe("t1--agent--stats-agent");
+		expect(await agentForkName("t1", "blueprint-builder")).toBe("t1--agent--blueprint-builder");
+		expect(await agentForkName("t1", undefined)).toBe("t1--agent--anonymous");
+		expect(await agentForkName("t1", "person:0123456789ab")).toMatch(/^t1--agent--person-0123456789ab-[0-9a-f]{6}$/);
+		expect(await agentForkName("t1", "service:ci-bot")).toMatch(/^t1--agent--service-ci-bot-[0-9a-f]{6}$/);
+		// A registered agent can't take another identity's fork by picking a lookalike name.
+		expect(await agentForkName("t1", "agent:service-ci-bot")).not.toBe(await agentForkName("t1", "service:ci-bot"));
 	});
 });

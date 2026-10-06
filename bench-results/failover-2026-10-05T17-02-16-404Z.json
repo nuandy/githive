@@ -1,0 +1,31 @@
+{
+	"base": "https://blueprint-bench.nuandy.workers.dev",
+	"repo": "failover-muvhx16d",
+	"task": "381cdffb",
+	"agents": 8,
+	"durationS": 100,
+	"crashAtS": 40.38299175,
+	"crashForS": 70,
+	"crashed": "381cdffb--failover-a2-0-35f1",
+	"crashedTerm": 1,
+	"leaderAfter": {
+		"leader": null,
+		"term": 2
+	},
+	"calls": 150,
+	"failed": 0,
+	"errors": {},
+	"recoveryMs": 29758.638082999998,
+	"gapMs": 580.018624999997,
+	"before": {
+		"decisions": 39,
+		"p50Ms": 6159.040375000004,
+		"p95Ms": 35464.99458399999
+	},
+	"after": {
+		"decisions": 58,
+		"p50Ms": 2344.8722500000003,
+		"p95Ms": 7613.103750000009
+	},
+	"slowestDuringMs": 37482.88629199999
+}

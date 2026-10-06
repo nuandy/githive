@@ -10,7 +10,7 @@ describe("Access identities in the human-action contract", () => {
 	});
 
 	it("defines actor arguments for each human action", () => {
-		const actions: (keyof CoordinatorHumanActions)[] = ["approve", "waive", "messageBuilder", "retryGate", "land"];
-		expect(actions).toEqual(["approve", "waive", "messageBuilder", "retryGate", "land"]);
+		const actions: (keyof CoordinatorHumanActions)[] = ["waive", "messageBuilder", "retryGate"];
+		expect(actions).toEqual(["waive", "messageBuilder", "retryGate"]);
 	});
 });

@@ -19,6 +19,28 @@ export const OPENING_LEASE_MS = 5 * 60_000;
 /** A change that holds its claim: being opened, or open. */
 export const holdsClaim = (slice: Slice) => slice.status === "opening" || slice.status === "building";
 
+/** What the dashboard's repo list shows for an open task, counted from its state. */
+export function taskSummary(task: Task, now = new Date().toISOString(), lastActivity = now) {
+	const open = task.slices.filter(holdsClaim);
+	const waiting = open.filter((s) => s.attention !== undefined && s.attention !== null);
+	return {
+		open: open.length,
+		needsYou: waiting.length,
+		// For the inbox: which changes wait on a person, and why (the first line).
+		waiting: waiting.slice(0, 20).map((s) => ({ change: s.id, title: s.title, reason: (s.attention ?? "").split("\n")[0].slice(0, 500) })),
+		merged: task.slices.filter((s) => s.status === "integrated").length,
+		abandoned: task.slices.filter((s) => s.status === "abandoned").length,
+		lastActivity,
+		countedAt: now,
+	};
+}
+
+/** The time of the last thing recorded on a task: a change opening or ending, a review, a check run. */
+export function lastActivityOf(task: Task) {
+	const times = [task.createdAt, ...task.slices.flatMap((s) => [s.openedAt, s.endedAt, s.gate?.at, ...s.reviews.map((r) => r.at)])];
+	return times.filter((t): t is string => typeof t === "string" && !Number.isNaN(Date.parse(t))).sort().pop() ?? task.createdAt;
+}
+
 /** Longest a claim may list, so one change can't take a whole repo by accident. */
 export const MAX_CLAIM_PATHS = 50;
 
@@ -80,7 +102,16 @@ export function claimConflicts(task: Task, owns: string[], except?: string): Cla
 
 /** The refusal an agent sees when its claim collides with another change's (a 409). */
 export function conflictMessage(conflicts: ClaimConflict[]) {
-	const lines = conflicts.map((c) => `- ${c.path} overlaps ${c.held}, held by change ${c.holder} ("${c.title}"): ${c.intent}`);
+	// One entry per holder, with what overlaps under it: a wide claim can overlap dozens of files.
+	const holders = new Map<string, ClaimConflict[]>();
+	for (const c of conflicts) holders.set(c.holder, [...(holders.get(c.holder) ?? []), c]);
+	const SHOWN = 10;
+	const lines = [...holders.values()].map((held) => {
+		const { holder, title, intent } = held[0];
+		const overlaps = held.slice(0, SHOWN).map((c) => (c.path === c.held ? c.path : `${c.path} overlaps ${c.held}`));
+		const more = held.length > SHOWN ? `, and ${held.length - SHOWN} more` : "";
+		return `- held by change ${holder} ("${title}"): ${intent}\n  ${overlaps.join("; ")}${more}`;
+	});
 	return `These paths are already claimed:\n${lines.join("\n")}\nNarrow your claim, wait for that change to merge, or open your change on the free paths and ask the holder for what you need with a cross-lane request.`;
 }
 
@@ -94,6 +125,17 @@ export function changeId(title: string) {
 		.replace(/-+$/, "");
 	const suffix = crypto.randomUUID().replace(/-/g, "").slice(0, 4);
 	return `${words || "change"}-${suffix}`;
+}
+
+/**
+ * The name an agent gives itself on a change, for people to tell agents apart
+ * (who opened it, verified, is `openedBy`). Undefined when none is given;
+ * refused unless it's a short name of letters, digits, dots, dashes or underscores.
+ */
+export function agentName(name: unknown): string | undefined {
+	if (name === undefined || name === null || name === "") return undefined;
+	if (typeof name !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,39}$/.test(name)) fail(400, "agent must be a short name: letters, digits, dots, dashes or underscores, at most 40");
+	return name;
 }
 
 /** The open task's id for a repo: stable, so every agent finds the same one. 8 hex characters, like any task id. */
@@ -119,6 +161,51 @@ export function leaseExpired(task: Task, slice: Slice, now = Date.now()) {
 
 /** When the next claim could expire, for the Coordinator's alarm. */
 export function nextLeaseCheck(task: Task) {
-	const times = task.slices.filter((s) => holdsClaim(s) && s.leaseUntil).map((s) => Date.parse(s.leaseUntil!));
+	const times = [
+		...task.slices.filter((s) => holdsClaim(s) && s.leaseUntil).map((s) => Date.parse(s.leaseUntil!)),
+		...task.slices.map(gateStallCheck).filter((t): t is number => t !== null),
+		...task.slices.map(externalReviewCheck).filter((t): t is number => t !== null),
+	];
 	return times.length ? Math.min(...times) : null;
+}
+
+/** Minutes a change waits for an outside reviewer's vote, by default, before a person is asked. */
+export const EXTERNAL_WAIT_MINUTES = 60;
+
+/** The external roles that haven't voted on the commit under review. */
+export function awaitedExternalRoles(slice: Slice): string[] {
+	const roles = slice.review?.external ?? [];
+	return roles.filter((role) => !slice.reviews.some((r) => r.head === slice.reviewHead && r.reviewer === role));
+}
+
+/**
+ * When a change has waited long enough for its external reviewers: its commit
+ * went to review that long ago, some external role still hasn't voted, and
+ * nobody has been asked about it yet.
+ */
+export function externalReviewCheck(slice: Slice): number | null {
+	if (slice.status !== "building" || !slice.reviewHead || !slice.reviewRequestedAt || slice.attention) return null;
+	if (slice.sentBackFor === slice.reviewHead || slice.externalWaitFlagged === slice.reviewHead || !awaitedExternalRoles(slice).length) return null;
+	return Date.parse(slice.reviewRequestedAt) + (slice.review?.externalWaitMinutes ?? EXTERNAL_WAIT_MINUTES) * 60_000;
+}
+
+/** How long a check run may go without a result, or without the gate being seen holding it, before it's presumed lost. */
+export const GATE_STALL_MS = 15 * 60_000;
+
+/**
+ * When to make sure the gate still holds a change's queued or running checks.
+ * A run whose result was lost (its gate restarted, say) would otherwise leave
+ * the change waiting for ever; the sweep then queues its checks again.
+ */
+export function gateStallCheck(slice: Slice): number | null {
+	const gate = slice.gate;
+	if (slice.status !== "building" || (gate?.status !== "queued" && gate?.status !== "running")) return null;
+	return Date.parse(gate.seenAt ?? gate.at) + GATE_STALL_MS;
+}
+
+/** The claims active changes hold, for agents deciding what to claim. */
+export function claimsOf(task: Task) {
+	return task.slices
+		.filter(holdsClaim)
+		.map(({ id, title, intent, instructions, owns, leaseUntil: until, reviewHead }) => ({ change: id, title, intent: intent ?? instructions, owns, leaseUntil: until, inReview: !!reviewHead }));
 }

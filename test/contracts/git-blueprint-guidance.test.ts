@@ -1,15 +1,17 @@
 import { describe, expect, it } from "vitest";
-import { GIT_IN_BLUEPRINT } from "../../src/git-blueprint-guidance";
+import { gitInBlueprint } from "../../src/git-blueprint-guidance";
 
 describe("Git in Blueprint guidance contract", () => {
-  it("covers pinned-history-safe Git habits", () => {
-    expect(GIT_IN_BLUEPRINT).toContain("Git in Blueprint");
-    expect(GIT_IN_BLUEPRINT).toMatch(/Never rewrite history that has been pushed/);
-    expect(GIT_IN_BLUEPRINT).toContain("git merge base/main");
-    expect(GIT_IN_BLUEPRINT).toContain("not against the moving `base/main` tip");
-    expect(GIT_IN_BLUEPRINT).toContain("git show base/main:<path>");
-    expect(GIT_IN_BLUEPRINT).toContain("git reset --hard");
-    expect(GIT_IN_BLUEPRINT).toContain("git checkout -- .");
-    expect(GIT_IN_BLUEPRINT).toContain("git clean -fdx");
+  it("covers pinned-history-safe Git habits, on the project's own branch", () => {
+    const guidance = gitInBlueprint("master");
+    expect(guidance).toContain("Git in Blueprint");
+    expect(guidance).toMatch(/Never rewrite history that has been pushed/);
+    expect(guidance).toContain("The project's branch is master");
+    expect(guidance).toContain("git merge base/master");
+    expect(guidance).toContain("not against the moving `base/master` tip");
+    expect(guidance).not.toContain("main");
+    expect(guidance).toContain("git reset --hard");
+    expect(guidance).toContain("git checkout -- .");
+    expect(guidance).toContain("git clean -fdx");
   });
 });

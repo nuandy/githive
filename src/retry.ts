@@ -7,6 +7,8 @@ export interface RetryTransientOptions {
 	maxDelayMs?: number;
 	/** Injectable delay function, useful for tests and custom runtimes. */
 	sleep?: (ms: number) => Promise<void>;
+	/** Which failures to retry (default: isTransientFailure). */
+	retryable?: (error: unknown) => boolean;
 }
 
 const TRANSIENT_HTTP_STATUSES = new Set([408, 425, 429]);
@@ -139,7 +141,7 @@ export async function retryTransient<T>(
 		try {
 			return await operation();
 		} catch (error) {
-			if (attempt >= maxAttempts || !isTransientFailure(error)) throw error;
+			if (attempt >= maxAttempts || !(options.retryable ?? isTransientFailure)(error)) throw error;
 			await wait(transientDelay(attempt, baseDelayMs, maxDelayMs));
 		}
 	}

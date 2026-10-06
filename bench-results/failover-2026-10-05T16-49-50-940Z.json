@@ -1,0 +1,38 @@
+{
+	"base": "https://blueprint-bench.nuandy.workers.dev",
+	"repo": "failover-muvhg0k5",
+	"task": "1cdab0c0",
+	"agents": 10,
+	"durationS": 150,
+	"crashAtS": 52.396866959,
+	"crashForS": 90,
+	"crashed": "1cdab0c0--failover-a7-0-7dc1",
+	"crashedTerm": 1,
+	"leaderAfter": {
+		"leader": "1cdab0c0--failover-a1-3-e6ef",
+		"term": 2
+	},
+	"calls": 345,
+	"failed": 6,
+	"errors": {
+		"open_change: These paths are already claimed:\n- failover/a7/k3/ overlaps failover/a7/k3/, held by change failover-a7-3-4": 1,
+		"open_change: These paths are already claimed:\n- failover/a9/k3/ overlaps failover/a9/k3/, held by change failover-a9-3-c": 1,
+		"open_change: These paths are already claimed:\n- failover/a5/k2/ overlaps failover/a5/k2/, held by change failover-a5-2-9": 1,
+		"open_change: These paths are already claimed:\n- failover/a4/k3/ overlaps failover/a4/k3/, held by change failover-a4-3-2": 1,
+		"open_change: These paths are already claimed:\n- failover/a8/k3/ overlaps failover/a8/k3/, held by change failover-a8-3-f": 1,
+		"open_change: These paths are already claimed:\n- failover/a3/k3/ overlaps failover/a3/k3/, held by change failover-a3-3-3": 1
+	},
+	"recoveryMs": 24858.374833,
+	"gapMs": 1707.4311249999955,
+	"before": {
+		"decisions": 58,
+		"p50Ms": 2353.380333000001,
+		"p95Ms": 20874.114916
+	},
+	"after": {
+		"decisions": 158,
+		"p50Ms": 2280.98937499999,
+		"p95Ms": 7838.637917
+	},
+	"slowestDuringMs": 36014.290499999996
+}

@@ -11,6 +11,6 @@ export default defineConfig({
 	plugins: [react()],
 	build: { outDir: "dist", emptyOutDir: true },
 	server: {
-		proxy: Object.fromEntries(["/tasks", "/repos", "/api"].map((p) => [p, { target: api, changeOrigin: true }])),
+		proxy: Object.fromEntries(["/tasks", "/repos", "/api", "/free", "/summaries", "/live"].map((p) => [p, { target: api, changeOrigin: true, ws: p === "/live" }])),
 	},
 });

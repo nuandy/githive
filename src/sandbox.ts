@@ -4,6 +4,7 @@ import type { ResponseInputItem } from "openai/resources/responses/responses";
 import { z } from "zod";
 import { MODEL, addUsage, assertComplete, emptyUsage, openAITools, runCalls, tool, type AgentTool, type Usage } from "./agent";
 import { COMMAND_TIMEOUT_S, WORKDIR, bootContainer, clip, gitWithToken, run } from "./container";
+import { taskCoordinator } from "./elected";
 import { staysInRepo } from "./paths";
 import type { SliceSpec } from "./types";
 
@@ -43,29 +44,30 @@ export interface SandboxJob {
 /** A job about one slice of a task: what builders and reviewers share. */
 export interface SliceJob extends SandboxJob {
 	goal: string;
+	/** The project's branch changes merge into (main, master, ...). Absent from older jobs: main. */
+	branch?: string;
+	/** The change's own branch in its fork (changes/<id>); absent when the change uses the fork's copy of the project's branch. */
+	ref?: string;
 	/** Commands the integration gate runs on the combined code. */
 	verify?: string[];
 	slice: SliceSpec;
 	siblings: Pick<SliceSpec, "id" | "title" | "owns">[];
-	contracts: string[];
 }
+
+/** The project's branch a job's change merges into. */
+export const branchOf = (job: Pick<SliceJob, "branch">) => job.branch ?? "main";
 
 /** The slice's place in the task, stated the same way to every agent. */
 export function sliceContext(job: SliceJob) {
-	const tests = job.slice.tests?.length
-		? `${job.slice.tests.join(", ")}. Other slices' contract tests may fail on this slice alone; they pass once everything is integrated.`
-		: "not specified; run the tests the brief names.";
-	return `Overall goal of the task: ${job.goal}
+	return `The task: ${job.goal}
 
-Slice: ${job.slice.title} (${job.slice.id})
-Lane (the only paths this slice may change): ${job.slice.owns.join(", ")}
-Contract files, committed before work started (they change only through approved amendments): ${job.contracts.join(", ") || "none"}
-Acceptance tests for this slice: ${tests}
-Before the slice is integrated, the combined code (this slice merged with everything integrated so far) must pass: ${job.verify?.length ? job.verify.join("; ") : "no extra checks"}
-Other slices being built at the same time:
-${job.siblings.map((s) => `- ${s.id}: ${s.title} (owns ${s.owns.join(", ")})`).join("\n") || "- none"}
+Change: ${job.slice.title} (${job.slice.id})
+Its claim (the only paths this change may touch): ${job.slice.owns.join(", ")}
+Before it merges, the project's checks must pass with it merged into ${branchOf(job)}: ${job.verify?.length ? job.verify.join("; ") : "no checks configured; run the project's own tests"}
+Other changes in progress at the same time:
+${job.siblings.map((s) => `- ${s.id}: ${s.title} (claims ${s.owns.join(", ")})`).join("\n") || "- none"}
 
-The slice's brief:
+The change's brief:
 ${job.slice.instructions}`;
 }
 
@@ -98,6 +100,19 @@ const WriteArgs = z.strictObject({
 });
 const ListArgs = z.strictObject({ prefix: z.string().describe('Only list paths starting with this; "" for all') });
 const RunArgs = z.strictObject({ command: z.string().describe(`A bash command, run in ${WORKDIR} with a ${COMMAND_TIMEOUT_S}s limit`) });
+
+const MAX_CACHE_KEY = 64;
+
+/** OpenAI's prompt_cache_key for an agent: `<kind>-<repo>`, cut to 64 characters with a hash of the whole when longer. */
+export function promptCacheKey(kind: string, repo: string) {
+	const key = `${kind}-${repo}`;
+	if (key.length <= MAX_CACHE_KEY) return key;
+	// FNV-1a: stable across restarts, so an agent keeps its cache.
+	let hash = 0x811c9dc5;
+	for (let i = 0; i < key.length; i++) hash = Math.imul(hash ^ key.charCodeAt(i), 0x01000193);
+	const suffix = `-${(hash >>> 0).toString(16).padStart(8, "0")}`;
+	return key.slice(0, MAX_CACHE_KEY - suffix.length) + suffix;
+}
 
 export function repoPath(path: string) {
 	const clean = path.replace(/^\.\//, "");
@@ -317,6 +332,8 @@ export abstract class SandboxAgent<J extends SandboxJob, S extends AgentState> e
 		const restart = state.status === "working";
 		this.note(state, restart ? "container restarted; re-cloning" : "starting container");
 		await bootContainer(container);
+		// A container that outlived its object (a deploy, say) still has the last checkout.
+		await run(container, ["rm", "-rf", WORKDIR], "/");
 		const clone = await this.git(job, ["clone", "--quiet", job.remote, WORKDIR], "/");
 		if (clone.exitCode !== 0) throw new Error(`clone failed: ${clip(clone.output, 2_000)}`);
 		await this.afterClone(job, state);
@@ -337,8 +354,9 @@ export abstract class SandboxAgent<J extends SandboxJob, S extends AgentState> e
 		return gitWithToken(this.ctx.container!, token, args, cwd);
 	}
 
+	/** Whoever coordinates the job's task: its leader if the task is elected, its Coordinator object otherwise. */
 	protected coordinator(job: J) {
-		return this.env.COORDINATOR.get(this.env.COORDINATOR.idFromName(job.taskId));
+		return taskCoordinator(this.env, job.taskId);
 	}
 
 	/** Tools every container agent gets: explore, edit and run commands. */
@@ -413,7 +431,7 @@ export abstract class SandboxAgent<J extends SandboxJob, S extends AgentState> e
 			tools: openAITools(tools),
 			reasoning: { effort: "high" },
 			max_output_tokens: 32000,
-			prompt_cache_key: `${this.kind}-${job.repo}`,
+			prompt_cache_key: promptCacheKey(this.kind, job.repo),
 		});
 		await this.acknowledgeInbox(inbox, state);
 		state.turns++;

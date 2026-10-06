@@ -9,12 +9,18 @@
 //   node scripts/bench.mjs [--label baseline] [--levels 1,5,10,25] [--racers 5]
 //                          [--base https://blueprint-bench.nuandy.workers.dev] [--repo bench-<label>]
 //                          [--idle 40]   (changes held open through every level that never push)
+//                          [--mode free] (coordinator-free mode: the same lifecycle through the free_* tools, no Coordinator)
+//                          [--shard-depth 2] (free mode: how deep claims are sharded; 0 keeps them in one record)
+//                          [--ramp 60]   (agents start spread evenly over this many seconds, instead of all at once)
 //
 // Credentials come from .dev.vars (CF_ACCESS_CLIENT_ID, CF_ACCESS_CLIENT_SECRET) and are never printed.
 // Each run gets its own repo, so its Coordinator starts idle. Results go to
 // bench-results/<label>-<time>.json after every level, with a summary table on stdout at the end.
 
 import { execFile } from "node:child_process";
+import fs from "node:fs";
+import igit from "isomorphic-git";
+import ihttp from "isomorphic-git/http/node";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -33,11 +39,15 @@ const SOURCE = args.source ?? "https://github.com/octocat/Spoon-Knife";
 const LEVELS = (args.levels ?? "1,5,10,25").split(",").map(Number);
 const RACERS = Number(args.racers ?? 5);
 const IDLE = Number(args.idle ?? 0);
+const FREE = args.mode === "free";
+const SHARD_DEPTH = args["shard-depth"] === undefined ? undefined : Number(args["shard-depth"]);
+const RAMP_MS = Number(args.ramp ?? 0) * 1000;
 
 // Calls can wait minutes behind the lock under load; don't let the client give up first.
 try {
 	const { Agent, setGlobalDispatcher } = await import("undici");
-	setGlobalDispatcher(new Agent({ headersTimeout: 0, bodyTimeout: 0, connections: 256 }));
+	// Enough connections that the client doesn't queue calls agents would make at once.
+	setGlobalDispatcher(new Agent({ headersTimeout: 0, bodyTimeout: 0, connections: Math.max(256, 4 * Math.max(...LEVELS)) }));
 } catch {
 	console.warn("undici not found: requests use Node's default 5-minute timeout");
 }
@@ -55,6 +65,9 @@ const headers = {
 	"Content-Type": "application/json",
 };
 
+/** For tasks run by the elected coordinator there is no Coordinator lock and no separate ledger: the log is the record. */
+const optional = (promise, fallback) => promise.catch((err) => (/elected coordinator/.test(err.message) ? fallback : Promise.reject(err)));
+
 async function api(method, path, body) {
 	const response = await fetch(`${BASE}${path}`, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
 	const text = await response.text();
@@ -65,8 +78,8 @@ async function api(method, path, body) {
 /** Every timed MCP call, for the tables: {level, tool, ms, ok}. */
 const calls = [];
 
-/** Call an MCP tool, timing it. Tool errors throw with the tool's message. */
-async function tool(level, name, args) {
+/** Call an MCP tool, timing it (as `as`, to line up with open mode's tools). Tool errors throw with the tool's message. */
+async function tool(level, name, args, as = name) {
 	const start = performance.now();
 	let ok = false;
 	try {
@@ -77,7 +90,20 @@ async function tool(level, name, args) {
 		ok = true;
 		return JSON.parse(text.replace(/[\u0000-\u0008\u000b-\u001f]/g, ""));
 	} finally {
-		calls.push({ level, tool: name, ms: performance.now() - start, ok });
+		if (as) calls.push({ level, tool: as, ms: performance.now() - start, ok });
+	}
+}
+
+/** Time several calls as one step, under open mode's name for it. */
+async function step(level, as, fn) {
+	const start = performance.now();
+	let ok = false;
+	try {
+		const result = await fn();
+		ok = true;
+		return result;
+	} finally {
+		calls.push({ level, tool: as, ms: performance.now() - start, ok });
 	}
 }
 
@@ -104,6 +130,56 @@ async function agent(level, taskId, runId, i, scratch) {
 	await tool(level, "list_claims", ids);
 	await tool(level, "abandon_change", { ...change, reason: "benchmark done" });
 	return pushed;
+}
+
+/**
+ * The same fake agent in coordinator-free mode, each step timed under open
+ * mode's name for it: claim and get its change's fork (open_change), push,
+ * Merge-ahead on itself (report_push), status, release (abandon_change).
+ */
+async function freeAgent(level, _taskId, runId, i, scratch) {
+	const ids = { repo: REPO };
+	const change_id = `${runId}-a${i}`;
+	const agentName = `bench-${runId}-a${i}`;
+	await tool(level, "free_claims", ids, "list_claims");
+	const fork = await step(level, "open_change", async () => {
+		// Each agent in its own directory, as agents splitting work would be: two segments deep, so its own claims shard.
+		const claimed = await tool(level, "free_claim", { ...ids, change: change_id, agent: agentName, paths: [`bench-${runId}/a${i}/`], intent: "benchmark agent" }, null);
+		if (!claimed.ok) throw new Error(`free_claim refused: ${JSON.stringify(claimed)}`);
+		return tool(level, "free_credentials", { ...ids, change: change_id }, null);
+	});
+	const token = fork.token.replace(/\?.*$/, "");
+	const dir = join(scratch, `a${i}`);
+	// In-process git (isomorphic-git): a thousand agents' git processes would exceed this machine's process limit.
+	const onAuth = () => ({ username: "x", password: token });
+	await igit.clone({ fs, http: ihttp, dir, url: fork.url, depth: 1, singleBranch: true, onAuth });
+	const file = `bench-${runId}/a${i}/note.txt`;
+	await mkdir(join(dir, `bench-${runId}`, `a${i}`), { recursive: true });
+	await writeFile(join(dir, file), `agent ${i} of ${runId}\n`);
+	await igit.add({ fs, dir, filepath: file });
+	await igit.commit({ fs, dir, message: `bench ${runId} ${i}`, author: { name: "bench", email: "bench@example.com" } });
+	await igit.push({ fs, http: ihttp, dir, url: fork.url, ref: "main", remoteRef: `refs/heads/changes/${change_id}`, onAuth });
+	const checked = await tool(level, "free_check", { ...ids, change: change_id }, "report_push");
+	await tool(level, "free_status", { ...ids, change: change_id }, "change_status");
+	await tool(level, "free_claims", ids, "list_claims");
+	const released = await tool(level, "free_release", { ...ids, change: change_id, agent: agentName, reason: "benchmark done" }, "abandon_change");
+	if (!released.ok) throw new Error(`free_release refused: ${JSON.stringify(released)}`);
+	return checked;
+}
+
+/** Several agents claim the same path at once in coordinator-free mode: Git's compare-and-swap lets exactly one win. */
+async function freeRace(level, _taskId, runId) {
+	const results = await Promise.allSettled(
+		Array.from({ length: RACERS }, (_, i) =>
+			tool(level, "free_claim", { repo: REPO, change: `${runId}-r${i}`, agent: `bench-${runId}-r${i}`, paths: [`bench-${runId}/race/`], intent: "benchmark race" }, "open_change").then((r) => ({ ...r, i })),
+		),
+	);
+	const won = results.filter((r) => r.status === "fulfilled" && r.value.ok).map((r) => r.value.i);
+	const unexpected = results.filter((r) => r.status === "rejected" || (!r.value.ok && !r.value.conflicts?.length)).map((r) => (r.status === "rejected" ? r.reason.message : JSON.stringify(r.value)));
+	// A failed release is recorded with the rest, not allowed to end the run.
+	for (const i of won)
+		await tool(level, "free_release", { repo: REPO, change: `${runId}-r${i}`, agent: `bench-${runId}-r${i}`, reason: "benchmark race done" }, "abandon_change").catch((err) => unexpected.push(`release: ${err.message}`));
+	return { winners: won.length, unexpected };
 }
 
 /** Several agents claim the same path at once: exactly one may win. */
@@ -149,11 +225,15 @@ async function main() {
 			if (!/exist/i.test(err.message)) throw err;
 		});
 	}
-	const task = await api("POST", `/repos/${REPO}/open`, {});
-	console.log(`open task ${task.id} on ${REPO} at ${BASE}`);
+	if (FREE) {
+		const started = await tool(0, "free_start", { repo: REPO, ...(SHARD_DEPTH === undefined ? {} : { shard_depth: SHARD_DEPTH }) });
+		console.log(`coordinator-free mode on ${REPO} at ${BASE} (claims sharded ${started.shardDepth ? `${started.shardDepth} deep, over ${started.recordsRepos || "no"} records repos` : "not at all"})`);
+	}
+	const task = FREE ? { id: null } : await api("POST", `/repos/${REPO}/open`, {});
+	if (!FREE) console.log(`open task ${task.id} on ${REPO} at ${BASE}`);
 	// Changes that claim a lane and never push, like agents still thinking, held through every level.
 	const idle = [];
-	for (let i = 0; i < IDLE; i += 10) {
+	for (let i = 0; i < (FREE ? 0 : IDLE); i += 10) {
 		const batch = await Promise.all(
 			Array.from({ length: Math.min(10, IDLE - i) }, (_, j) =>
 				tool(0, "open_change", { task_id: task.id, title: `bench ${LABEL} idle ${i + j}`, intent: "idle benchmark change", paths: [`bench/idle-${LABEL}/i${i + j}/`] }),
@@ -162,10 +242,10 @@ async function main() {
 		idle.push(...batch.map((o) => o.change_id));
 	}
 	if (IDLE) console.log(`${idle.length} idle changes open`);
-	await api("POST", `/tasks/${task.id}/lock-stats/reset`);
+	if (!FREE) await optional(api("POST", `/tasks/${task.id}/lock-stats/reset`), null);
 
 	const levels = [];
-	const result = { label: LABEL, base: BASE, repo: REPO, task: task.id, racers: RACERS, idle: IDLE, at: new Date().toISOString(), ledgerMatches: null, ledgerCommits: null, levels };
+	const result = { label: LABEL, mode: FREE ? "free" : "open", rampSeconds: RAMP_MS / 1000, base: BASE, repo: REPO, task: task.id, racers: RACERS, idle: IDLE, at: new Date().toISOString(), ledgerMatches: null, ledgerCommits: null, levels };
 	await mkdir(join(root, "bench-results"), { recursive: true });
 	const file = join(root, "bench-results", `${LABEL}-${result.at.replace(/[:.]/g, "-")}.json`);
 	const save = () => writeFile(file, JSON.stringify(result, null, "\t") + "\n");
@@ -174,17 +254,26 @@ async function main() {
 		const scratch = await mkdtemp(join(tmpdir(), "blueprint-bench-"));
 		const started = performance.now();
 		const [agents, raced] = await Promise.all([
-			Promise.allSettled(Array.from({ length: n }, (_, i) => agent(n, task.id, runId, i, scratch))),
-			race(n, task.id, runId),
+			Promise.allSettled(
+				Array.from({ length: n }, async (_, i) => {
+					// Arrivals spread over the ramp, like agents starting work, rather than all at one instant.
+					if (RAMP_MS) await new Promise((resolve) => setTimeout(resolve, (RAMP_MS * i) / n));
+					return (FREE ? freeAgent : agent)(n, task.id, runId, i, scratch);
+				}),
+			),
+			(FREE ? freeRace : race)(n, task.id, runId),
 		]);
 		const wallMs = performance.now() - started;
 		await rm(scratch, { recursive: true, force: true });
 
 		const failures = agents.filter((a) => a.status === "rejected").map((a) => a.reason.message.slice(0, 200));
-		const leftover = (await tool(n, "list_claims", { task_id: task.id })).filter((c) => c.title?.includes(runId));
+		const leftover = FREE
+			? (await tool(n, "free_claims", { repo: REPO }, null)).filter((c) => c.change.startsWith(runId))
+			: (await tool(n, "list_claims", { task_id: task.id })).filter((c) => c.title?.includes(runId));
 		// Wait for the ledger to catch up (a no-op where it is written under the lock), so its lag is counted.
-		const ledgerCheck = await api("GET", `/tasks/${task.id}/ledger`);
-		const { samples, ledgerLagMs = [] } = await api("POST", `/tasks/${task.id}/lock-stats/reset`);
+		// Coordinator-free mode has no lock and no ledger: the records in Git are all there is.
+		const ledgerCheck = FREE ? { matches: null, commits: null } : await optional(api("GET", `/tasks/${task.id}/ledger`), { matches: null, commits: null });
+		const { samples, ledgerLagMs = [] } = FREE ? { samples: [] } : await optional(api("POST", `/tasks/${task.id}/lock-stats/reset`), { samples: [], ledgerLagMs: [] });
 		const levelCalls = calls.filter((c) => c.level === n);
 		const tools = Object.fromEntries([...new Set(levelCalls.map((c) => c.tool))].map((name) => [name, summary(levelCalls.filter((c) => c.tool === name).map((c) => c.ms))]));
 		const busy = samples.reduce((sum, s) => sum + s.runMs + s.flushMs, 0);
@@ -193,7 +282,8 @@ async function main() {
 			wallMs,
 			calls: levelCalls.length,
 			callsPerSecond: levelCalls.length / (wallMs / 1000),
-			errors: levelCalls.filter((c) => !c.ok).length - (RACERS - raced.winners),
+			// Open mode's refused racers throw; coordinator-free refusals are answers ({ ok: false }).
+			errors: levelCalls.filter((c) => !c.ok).length - (FREE ? 0 : RACERS - raced.winners),
 			failures,
 			race: raced,
 			leftoverClaims: leftover.length,
@@ -220,18 +310,18 @@ async function main() {
 		console.log(
 			`n=${n}: ${(wallMs / 1000).toFixed(1)}s, ${level.calls} calls, lock wait p95 ${Math.round(level.lock.waitMs.p95 ?? 0)}ms, ` +
 				`race winners ${raced.winners}, failures ${failures.length}, leftover claims ${leftover.length}, ` +
-				`ledger ${ledgerCheck.matches ? "matches" : "DOES NOT MATCH"} (lag p95 ${Math.round(level.ledger.lagMs.p95 ?? 0)}ms)`,
+				(ledgerCheck.matches === null ? "ledger: the log is the record" : `ledger ${ledgerCheck.matches ? "matches" : "DOES NOT MATCH"} (lag p95 ${Math.round(level.ledger.lagMs.p95 ?? 0)}ms)`),
 		);
 	}
 
 	for (const change_id of idle) await tool(0, "abandon_change", { task_id: task.id, change_id, reason: "benchmark done" });
-	const ledger = await api("GET", `/tasks/${task.id}/ledger`);
+	const ledger = FREE ? { matches: null, commits: null } : await optional(api("GET", `/tasks/${task.id}/ledger`), { matches: null, commits: null });
 	result.ledgerMatches = ledger.matches;
 	result.ledgerCommits = ledger.commits;
 	await save();
 
 	const ms = (v) => (v === null ? "-" : v >= 10_000 ? `${(v / 1000).toFixed(0)}s` : v >= 1000 ? `${(v / 1000).toFixed(1)}s` : `${Math.round(v)}ms`);
-	console.log(`\n${LABEL}: ledger replay ${ledger.matches ? "matches" : "DOES NOT MATCH"} (${ledger.commits} commits)\n`);
+	console.log(FREE ? `\n${LABEL}: coordinator-free (no lock, no ledger: the records in Git)\n` : ledger.matches === null ? `\n${LABEL}: elected coordinator (the log is the record)\n` : `\n${LABEL}: ledger replay ${ledger.matches ? "matches" : "DOES NOT MATCH"} (${ledger.commits} commits)\n`);
 	console.log("| agents | wall | calls/s | list_claims p50/p95 | open_change p50/p95 | report_push p50/p95 | lock wait p50/p95 | lock hold p50 (ledger write) | peak queue | lock busy | ledger lag p95 | race winners | failures |");
 	console.log("|---|---|---|---|---|---|---|---|---|---|---|---|---|");
 	for (const l of levels) {

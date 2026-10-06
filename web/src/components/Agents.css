@@ -1,0 +1,72 @@
+.agents {
+	display: grid;
+	gap: 16px;
+	min-width: 0;
+}
+
+.agents h2 {
+	font-size: 14px;
+}
+
+.agents__note {
+	margin: 0;
+}
+
+.agents__registered {
+	margin: 0;
+	padding: 0;
+	list-style: none;
+}
+
+.agents__registered li {
+	display: flex;
+	align-items: center;
+	flex-wrap: wrap;
+	gap: 4px 8px;
+	padding: 10px 16px;
+	border-top: 1px solid var(--border);
+	overflow-wrap: anywhere;
+}
+
+.agents__registered li:first-child {
+	border-top: 0;
+}
+
+.agents__scroll {
+	overflow-x: auto;
+}
+
+.agents__table {
+	width: 100%;
+	border-collapse: collapse;
+	font-size: 13px;
+}
+
+.agents__table th,
+.agents__table td {
+	padding: 9px 16px;
+	text-align: left;
+	border-top: 1px solid var(--border);
+	white-space: nowrap;
+}
+
+.agents__table thead th {
+	border-top: 0;
+	color: var(--text-muted);
+	font-size: 12px;
+	font-weight: 600;
+}
+
+.agents__table tbody th {
+	font-weight: 600;
+}
+
+.agents__table tbody th .icon {
+	vertical-align: -2px;
+	margin-right: 4px;
+}
+
+.agents__table td:not(:nth-child(2)),
+.agents__table thead th:not(:first-child) {
+	font-variant-numeric: tabular-nums;
+}

@@ -11,7 +11,7 @@ export function pushFeedback(sliceId: string, outOfLane: string[], checks: Merge
 		const who = other === "base" ? "the task base (work already integrated)" : `slice ${other}`;
 		const lane = siblings.find((s) => s.id === other)?.owns.join(", ");
 		lines.push(
-			`Conflict with ${who} in ${c.files.join(", ")}.${lane ? ` ${other} owns ${lane}.` : ""} Change your work so it no longer edits these files, or build against the contracts instead.`,
+			`Conflict with ${who} in ${c.files.join(", ")}.${lane ? ` ${other} owns ${lane}.` : ""} Change your work so it no longer edits these files, or ask its owner for what you need (request_lane_change).`,
 		);
 	}
 	if (!lines.length) lines.push("No conflicts with the other slices' work in progress, and everything is inside your lane.");

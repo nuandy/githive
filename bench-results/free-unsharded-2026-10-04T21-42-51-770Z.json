@@ -1,0 +1,218 @@
+{
+	"label": "free-unsharded",
+	"mode": "free",
+	"base": "https://blueprint-bench.nuandy.workers.dev",
+	"repo": "bench-free-unsharded-1791150159",
+	"task": null,
+	"racers": 5,
+	"idle": 0,
+	"at": "2026-10-04T21:42:51.770Z",
+	"ledgerMatches": null,
+	"ledgerCommits": null,
+	"levels": [
+		{
+			"agents": 25,
+			"wallMs": 91946.827542,
+			"calls": 148,
+			"callsPerSecond": 1.6096259540047286,
+			"errors": 2,
+			"failures": [
+				"free_claim: the record kept moving; try again",
+				"free_claim: the record kept moving; try again"
+			],
+			"race": {
+				"winners": 1,
+				"unexpected": []
+			},
+			"leftoverClaims": 0,
+			"tools": {
+				"list_claims": {
+					"n": 48,
+					"p50": 2792.974540999996,
+					"p95": 4333.241583999998,
+					"p99": 4439.633541000001,
+					"max": 4439.633541000001
+				},
+				"open_change": {
+					"n": 30,
+					"p50": 26197.707667,
+					"p95": 49895.474958000006,
+					"p99": 55611.823709000004,
+					"max": 55611.823709000004
+				},
+				"report_push": {
+					"n": 23,
+					"p50": 6071.96875,
+					"p95": 7782.635957999999,
+					"p99": 7909.122625,
+					"max": 7909.122625
+				},
+				"change_status": {
+					"n": 23,
+					"p50": 5048.806832999995,
+					"p95": 6773.930625000001,
+					"p99": 16461.643000000004,
+					"max": 16461.643000000004
+				},
+				"abandon_change": {
+					"n": 24,
+					"p50": 10857.051082999998,
+					"p95": 23188.670334000002,
+					"p99": 24003.521667000008,
+					"max": 24003.521667000008
+				}
+			},
+			"lock": {
+				"samples": 0,
+				"waitMs": {
+					"n": 0,
+					"p50": null,
+					"p95": null,
+					"p99": null,
+					"max": null
+				},
+				"runMs": {
+					"n": 0,
+					"p50": null,
+					"p95": null,
+					"p99": null,
+					"max": null
+				},
+				"flushMs": {
+					"n": 0,
+					"p50": null,
+					"p95": null,
+					"p99": null,
+					"max": null
+				},
+				"busyFraction": 0,
+				"flushShareOfHold": 0,
+				"peakQueue": 0,
+				"byCall": {}
+			},
+			"ledger": {
+				"matches": null,
+				"commits": null,
+				"lagMs": {
+					"n": 0,
+					"p50": null,
+					"p95": null,
+					"p99": null,
+					"max": null
+				}
+			}
+		},
+		{
+			"agents": 50,
+			"wallMs": 140268.25079199998,
+			"calls": 222,
+			"callsPerSecond": 1.5826817454877786,
+			"errors": 22,
+			"failures": [
+				"free_claim: the record kept moving; try again",
+				"free_claim: the record kept moving; try again",
+				"free_claim: the record kept moving; try again",
+				"free_claim: the record kept moving; try again",
+				"free_claim: the record kept moving; try again",
+				"free_claim: the record kept moving; try again",
+				"free_claim: the record kept moving; try again",
+				"free_claim: the record kept moving; try again",
+				"free_claim: the record kept moving; try again",
+				"free_claim: the record kept moving; try again",
+				"free_claim: the record kept moving; try again",
+				"free_claim: the record kept moving; try again",
+				"free_release: the record kept moving; try again",
+				"free_claim: the record kept moving; try again",
+				"free_claim: the record kept moving; try again",
+				"free_claim: the record kept moving; try again",
+				"free_claim: the record kept moving; try again",
+				"free_claim: the record kept moving; try again",
+				"free_claim: the record kept moving; try again",
+				"free_claim: the record kept moving; try again",
+				"free_claim: the record kept moving; try again",
+				"free_claim: the record kept moving; try again"
+			],
+			"race": {
+				"winners": 1,
+				"unexpected": []
+			},
+			"leftoverClaims": 1,
+			"tools": {
+				"list_claims": {
+					"n": 79,
+					"p50": 2611.5164159999986,
+					"p95": 4569.800792000009,
+					"p99": 4766.260290999999,
+					"max": 4766.260290999999
+				},
+				"open_change": {
+					"n": 55,
+					"p50": 67139.55862499999,
+					"p95": 85822.50320899999,
+					"p99": 89961.754209,
+					"max": 89961.754209
+				},
+				"report_push": {
+					"n": 29,
+					"p50": 5991.891042000003,
+					"p95": 6854.159125000006,
+					"p99": 7626.866000000009,
+					"max": 7626.866000000009
+				},
+				"change_status": {
+					"n": 29,
+					"p50": 5334.400457999989,
+					"p95": 7136.317708000017,
+					"p99": 7528.188207999978,
+					"max": 7528.188207999978
+				},
+				"abandon_change": {
+					"n": 30,
+					"p50": 36436.272,
+					"p95": 72118.38591699998,
+					"p99": 87320.204375,
+					"max": 87320.204375
+				}
+			},
+			"lock": {
+				"samples": 0,
+				"waitMs": {
+					"n": 0,
+					"p50": null,
+					"p95": null,
+					"p99": null,
+					"max": null
+				},
+				"runMs": {
+					"n": 0,
+					"p50": null,
+					"p95": null,
+					"p99": null,
+					"max": null
+				},
+				"flushMs": {
+					"n": 0,
+					"p50": null,
+					"p95": null,
+					"p99": null,
+					"max": null
+				},
+				"busyFraction": 0,
+				"flushShareOfHold": 0,
+				"peakQueue": 0,
+				"byCall": {}
+			},
+			"ledger": {
+				"matches": null,
+				"commits": null,
+				"lagMs": {
+					"n": 0,
+					"p50": null,
+					"p95": null,
+					"p99": null,
+					"max": null
+				}
+			}
+		}
+	]
+}

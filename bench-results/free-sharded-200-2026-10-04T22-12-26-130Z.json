@@ -1,0 +1,134 @@
+{
+	"label": "free-sharded-200",
+	"mode": "free",
+	"base": "https://blueprint-bench.nuandy.workers.dev",
+	"repo": "bench-free-200-1791151933",
+	"task": null,
+	"racers": 5,
+	"idle": 0,
+	"at": "2026-10-04T22:12:26.130Z",
+	"ledgerMatches": null,
+	"ledgerCommits": null,
+	"levels": [
+		{
+			"agents": 200,
+			"wallMs": 200694.36745800002,
+			"calls": 1086,
+			"callsPerSecond": 5.411213148407221,
+			"errors": 30,
+			"failures": [
+				"free_claim: the record kept moving; try again",
+				"free_claim: the record kept moving; try again",
+				"free_claim: the record kept moving; try again",
+				"free_claim: the record kept moving; try again",
+				"free_claim: the record kept moving; try again",
+				"free_claim: the record kept moving; try again",
+				"free_claim: the record kept moving; try again",
+				"free_claim: the record kept moving; try again",
+				"free_claim: the record kept moving; try again",
+				"free_claim: the record kept moving; try again",
+				"free_claim: the record kept moving; try again",
+				"free_claim: the record kept moving; try again",
+				"free_claim: the record kept moving; try again",
+				"free_claim: the record kept moving; try again",
+				"free_claim: the record kept moving; try again",
+				"free_claim: the record kept moving; try again",
+				"free_claim: the record kept moving; try again",
+				"free_claim: the record kept moving; try again",
+				"free_claim: the record kept moving; try again",
+				"free_claim: the record kept moving; try again",
+				"free_claim: the record kept moving; try again",
+				"free_claim: the record kept moving; try again",
+				"free_claim: the record kept moving; try again",
+				"free_claim: the record kept moving; try again",
+				"free_claim: the record kept moving; try again",
+				"free_claim: the record kept moving; try again",
+				"free_claim: the record kept moving; try again",
+				"free_claim: the record kept moving; try again",
+				"free_claim: the record kept moving; try again",
+				"free_claim: the record kept moving; try again"
+			],
+			"race": {
+				"winners": 1,
+				"unexpected": []
+			},
+			"leftoverClaims": 0,
+			"tools": {
+				"list_claims": {
+					"n": 370,
+					"p50": 7356.421042000002,
+					"p95": 11472.217708999999,
+					"p99": 11519.722542,
+					"max": 11537.7895
+				},
+				"open_change": {
+					"n": 205,
+					"p50": 81932.307459,
+					"p95": 149925.67254200001,
+					"p99": 161371.01037499998,
+					"max": 164117.877541
+				},
+				"report_push": {
+					"n": 170,
+					"p50": 10395.875499999995,
+					"p95": 13078.849000000002,
+					"p99": 15466.351374999998,
+					"max": 17119.497499999998
+				},
+				"change_status": {
+					"n": 170,
+					"p50": 10008.637375000006,
+					"p95": 12676.087249999997,
+					"p99": 16672.819583999997,
+					"max": 17009.46291700001
+				},
+				"abandon_change": {
+					"n": 171,
+					"p50": 37274.276125000004,
+					"p95": 112161.98162500001,
+					"p99": 131532.005167,
+					"max": 133522.407709
+				}
+			},
+			"lock": {
+				"samples": 0,
+				"waitMs": {
+					"n": 0,
+					"p50": null,
+					"p95": null,
+					"p99": null,
+					"max": null
+				},
+				"runMs": {
+					"n": 0,
+					"p50": null,
+					"p95": null,
+					"p99": null,
+					"max": null
+				},
+				"flushMs": {
+					"n": 0,
+					"p50": null,
+					"p95": null,
+					"p99": null,
+					"max": null
+				},
+				"busyFraction": 0,
+				"flushShareOfHold": 0,
+				"peakQueue": 0,
+				"byCall": {}
+			},
+			"ledger": {
+				"matches": null,
+				"commits": null,
+				"lagMs": {
+					"n": 0,
+					"p50": null,
+					"p95": null,
+					"p99": null,
+					"max": null
+				}
+			}
+		}
+	]
+}

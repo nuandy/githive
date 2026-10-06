@@ -1,0 +1,147 @@
+.files-changed {
+	display: grid;
+	gap: 14px;
+	min-width: 0;
+}
+
+.files-changed__summary {
+	display: flex;
+	align-items: baseline;
+	flex-wrap: wrap;
+	gap: 8px 14px;
+}
+
+.files-changed__summary h2 {
+	font-size: 15px;
+}
+
+.files-changed__note {
+	margin: 0;
+	font-size: 13px;
+}
+
+.files-changed__list {
+	margin: 0;
+	padding: 0;
+	list-style: none;
+}
+
+.files-changed__list li {
+	display: flex;
+	align-items: center;
+	flex-wrap: wrap;
+	gap: 8px;
+	padding: 8px 16px;
+	border-top: 1px solid var(--border);
+	overflow-wrap: anywhere;
+}
+
+.files-changed__list li:first-child {
+	border-top: 0;
+}
+
+.file-diff {
+	overflow: hidden;
+}
+
+.file-diff__header {
+	display: flex;
+	align-items: center;
+	flex-wrap: wrap;
+	gap: 8px;
+	padding: 8px 14px;
+	background: var(--surface-2);
+	border-bottom: 1px solid var(--border);
+	list-style: none;
+	min-width: 0;
+}
+
+.file-diff__header::-webkit-details-marker {
+	display: none;
+}
+
+.file-diff:not([open]) .file-diff__header {
+	border-bottom: 0;
+}
+
+.file-diff__chevron {
+	color: var(--text-muted);
+	transition: transform 0.12s ease;
+}
+
+.file-diff:not([open]) .file-diff__chevron {
+	transform: rotate(-90deg);
+}
+
+.file-diff__path {
+	background: none;
+	padding: 0;
+	font-weight: 600;
+	min-width: 0;
+}
+
+.file-diff__stats {
+	margin-left: auto;
+	font-family: var(--mono);
+	font-size: 12px;
+}
+
+.file-diff__scroll {
+	overflow-x: auto;
+	max-height: 640px;
+	overflow-y: auto;
+}
+
+.file-diff__table {
+	width: 100%;
+	border-collapse: collapse;
+	font: 12px/1.6 var(--mono);
+	tab-size: 2;
+}
+
+.file-diff__table td {
+	padding: 0 10px;
+	vertical-align: top;
+}
+
+.file-diff__no {
+	width: 1%;
+	min-width: 42px;
+	text-align: right;
+	color: var(--text-muted);
+	user-select: none;
+	white-space: nowrap;
+}
+
+.file-diff__code {
+	white-space: pre;
+}
+
+.file-diff__sign {
+	display: inline-block;
+	width: 1.2em;
+	user-select: none;
+	color: var(--text-muted);
+}
+
+.file-diff__line--add {
+	background: var(--diff-add);
+}
+
+.file-diff__line--add .file-diff__no {
+	background: var(--diff-add-strong);
+}
+
+.file-diff__line--del {
+	background: var(--diff-del);
+}
+
+.file-diff__line--del .file-diff__no {
+	background: var(--diff-del-strong);
+}
+
+.file-diff__hunk td {
+	padding: 4px 10px;
+	background: var(--accent-soft);
+	color: var(--text-muted);
+}

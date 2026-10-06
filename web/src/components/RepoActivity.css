@@ -1,0 +1,65 @@
+.repo-activity__note {
+	margin: 0 0 12px;
+}
+
+.repo-activity__group + .repo-activity__group {
+	margin-top: 20px;
+}
+
+.repo-activity__day {
+	margin: 0 0 8px;
+	font-size: 13px;
+	font-weight: 600;
+	color: var(--text-muted);
+}
+
+.repo-activity__list {
+	margin: 0;
+	padding: 0;
+	list-style: none;
+}
+
+.repo-activity__entry {
+	display: flex;
+	align-items: flex-start;
+	gap: 10px;
+	padding: 10px 16px;
+	border-top: 1px solid var(--border);
+}
+
+.repo-activity__entry:first-child {
+	border-top: 0;
+}
+
+.repo-activity__icon {
+	display: inline-flex;
+	flex-shrink: 0;
+	margin-top: 3px;
+}
+
+.repo-activity__text {
+	flex: 1;
+	min-width: 0;
+	margin: 0;
+	overflow-wrap: anywhere;
+}
+
+.repo-activity__meta {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	flex-shrink: 0;
+	font-size: 12.5px;
+	white-space: nowrap;
+}
+
+@media (max-width: 560px) {
+	.repo-activity__entry {
+		flex-wrap: wrap;
+	}
+
+	.repo-activity__meta {
+		margin-left: 24px;
+		flex-basis: 100%;
+	}
+}

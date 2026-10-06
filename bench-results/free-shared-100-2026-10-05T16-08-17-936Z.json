@@ -1,0 +1,169 @@
+{
+	"label": "free-shared-100",
+	"mode": "free",
+	"rampSeconds": 0,
+	"base": "https://blueprint-bench.nuandy.workers.dev",
+	"repo": "bench-free-shared100-1791216469",
+	"task": null,
+	"racers": 5,
+	"idle": 0,
+	"at": "2026-10-05T16:08:17.936Z",
+	"ledgerMatches": null,
+	"ledgerCommits": null,
+	"levels": [
+		{
+			"agents": 100,
+			"wallMs": 50990.623166,
+			"calls": 350,
+			"callsPerSecond": 6.864007110887326,
+			"errors": 0,
+			"failures": [
+				"Expected \"unpack ok\" or \"unpack [error message]\" but received \"\".",
+				"Expected \"unpack ok\" or \"unpack [error message]\" but received \"\".",
+				"Expected \"unpack ok\" or \"unpack [error message]\" but received \"\".",
+				"Expected \"unpack ok\" or \"unpack [error message]\" but received \"\".",
+				"Expected \"unpack ok\" or \"unpack [error message]\" but received \"\".",
+				"Expected \"unpack ok\" or \"unpack [error message]\" but received \"\".",
+				"Expected \"unpack ok\" or \"unpack [error message]\" but received \"\".",
+				"Expected \"unpack ok\" or \"unpack [error message]\" but received \"\".",
+				"Expected \"unpack ok\" or \"unpack [error message]\" but received \"\".",
+				"Expected \"unpack ok\" or \"unpack [error message]\" but received \"\".",
+				"Expected \"unpack ok\" or \"unpack [error message]\" but received \"\".",
+				"Expected \"unpack ok\" or \"unpack [error message]\" but received \"\".",
+				"Expected \"unpack ok\" or \"unpack [error message]\" but received \"\".",
+				"Expected \"unpack ok\" or \"unpack [error message]\" but received \"\".",
+				"Expected \"unpack ok\" or \"unpack [error message]\" but received \"\".",
+				"Expected \"unpack ok\" or \"unpack [error message]\" but received \"\".",
+				"Expected \"unpack ok\" or \"unpack [error message]\" but received \"\".",
+				"Expected \"unpack ok\" or \"unpack [error message]\" but received \"\".",
+				"Expected \"unpack ok\" or \"unpack [error message]\" but received \"\".",
+				"Expected \"unpack ok\" or \"unpack [error message]\" but received \"\".",
+				"Expected \"unpack ok\" or \"unpack [error message]\" but received \"\".",
+				"Expected \"unpack ok\" or \"unpack [error message]\" but received \"\".",
+				"Expected \"unpack ok\" or \"unpack [error message]\" but received \"\".",
+				"Expected \"unpack ok\" or \"unpack [error message]\" but received \"\".",
+				"Expected \"unpack ok\" or \"unpack [error message]\" but received \"\".",
+				"Expected \"unpack ok\" or \"unpack [error message]\" but received \"\".",
+				"Expected \"unpack ok\" or \"unpack [error message]\" but received \"\".",
+				"Expected \"unpack ok\" or \"unpack [error message]\" but received \"\".",
+				"Expected \"unpack ok\" or \"unpack [error message]\" but received \"\".",
+				"Expected \"unpack ok\" or \"unpack [error message]\" but received \"\".",
+				"Expected \"unpack ok\" or \"unpack [error message]\" but received \"\".",
+				"Expected \"unpack ok\" or \"unpack [error message]\" but received \"\".",
+				"Expected \"unpack ok\" or \"unpack [error message]\" but received \"\".",
+				"Expected \"unpack ok\" or \"unpack [error message]\" but received \"\".",
+				"Expected \"unpack ok\" or \"unpack [error message]\" but received \"\".",
+				"Expected \"unpack ok\" or \"unpack [error message]\" but received \"\".",
+				"Expected \"unpack ok\" or \"unpack [error message]\" but received \"\".",
+				"Expected \"unpack ok\" or \"unpack [error message]\" but received \"\".",
+				"Expected \"unpack ok\" or \"unpack [error message]\" but received \"\".",
+				"Expected \"unpack ok\" or \"unpack [error message]\" but received \"\".",
+				"Expected \"unpack ok\" or \"unpack [error message]\" but received \"\".",
+				"Expected \"unpack ok\" or \"unpack [error message]\" but received \"\".",
+				"Expected \"unpack ok\" or \"unpack [error message]\" but received \"\".",
+				"Expected \"unpack ok\" or \"unpack [error message]\" but received \"\".",
+				"Expected \"unpack ok\" or \"unpack [error message]\" but received \"\".",
+				"Expected \"unpack ok\" or \"unpack [error message]\" but received \"\".",
+				"Expected \"unpack ok\" or \"unpack [error message]\" but received \"\".",
+				"Expected \"unpack ok\" or \"unpack [error message]\" but received \"\".",
+				"Expected \"unpack ok\" or \"unpack [error message]\" but received \"\".",
+				"Expected \"unpack ok\" or \"unpack [error message]\" but received \"\".",
+				"Expected \"unpack ok\" or \"unpack [error message]\" but received \"\".",
+				"Expected \"unpack ok\" or \"unpack [error message]\" but received \"\".",
+				"Expected \"unpack ok\" or \"unpack [error message]\" but received \"\".",
+				"Expected \"unpack ok\" or \"unpack [error message]\" but received \"\".",
+				"Expected \"unpack ok\" or \"unpack [error message]\" but received \"\".",
+				"Expected \"unpack ok\" or \"unpack [error message]\" but received \"\".",
+				"Expected \"unpack ok\" or \"unpack [error message]\" but received \"\".",
+				"Expected \"unpack ok\" or \"unpack [error message]\" but received \"\".",
+				"Expected \"unpack ok\" or \"unpack [error message]\" but received \"\".",
+				"Expected \"unpack ok\" or \"unpack [error message]\" but received \"\".",
+				"Expected \"unpack ok\" or \"unpack [error message]\" but received \"\".",
+				"Expected \"unpack ok\" or \"unpack [error message]\" but received \"\".",
+				"Expected \"unpack ok\" or \"unpack [error message]\" but received \"\".",
+				"Expected \"unpack ok\" or \"unpack [error message]\" but received \"\"."
+			],
+			"race": {
+				"winners": 1,
+				"unexpected": []
+			},
+			"leftoverClaims": 64,
+			"tools": {
+				"list_claims": {
+					"n": 136,
+					"p50": 11269.723500000004,
+					"p95": 11825.057332999997,
+					"p99": 12061.339458000002,
+					"max": 12115.625333999997
+				},
+				"open_change": {
+					"n": 105,
+					"p50": 10213.087833999998,
+					"p95": 12551.510540999996,
+					"p99": 14487.298541,
+					"max": 14583.831416
+				},
+				"abandon_change": {
+					"n": 37,
+					"p50": 5874.949290999997,
+					"p95": 7270.606584000001,
+					"p99": 10271.439167000004,
+					"max": 10271.439167000004
+				},
+				"report_push": {
+					"n": 36,
+					"p50": 7386.436290999998,
+					"p95": 7990.467958000001,
+					"p99": 8298.902042000002,
+					"max": 8298.902042000002
+				},
+				"change_status": {
+					"n": 36,
+					"p50": 6127.141999999993,
+					"p95": 7612.857334,
+					"p99": 8329.435416,
+					"max": 8329.435416
+				}
+			},
+			"lock": {
+				"samples": 0,
+				"waitMs": {
+					"n": 0,
+					"p50": null,
+					"p95": null,
+					"p99": null,
+					"max": null
+				},
+				"runMs": {
+					"n": 0,
+					"p50": null,
+					"p95": null,
+					"p99": null,
+					"max": null
+				},
+				"flushMs": {
+					"n": 0,
+					"p50": null,
+					"p95": null,
+					"p99": null,
+					"max": null
+				},
+				"busyFraction": 0,
+				"flushShareOfHold": 0,
+				"peakQueue": 0,
+				"byCall": {}
+			},
+			"ledger": {
+				"matches": null,
+				"commits": null,
+				"lagMs": {
+					"n": 0,
+					"p50": null,
+					"p95": null,
+					"p99": null,
+					"max": null
+				}
+			}
+		}
+	]
+}

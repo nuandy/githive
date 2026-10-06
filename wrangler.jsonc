@@ -34,7 +34,9 @@
 			{ "name": "REVIEWER", "class_name": "Reviewer" },
 			{ "name": "GATE", "class_name": "Gate" },
 			{ "name": "TASK_INDEX", "class_name": "TaskIndex" },
-			{ "name": "CONTRACT_CHECKER", "class_name": "ContractChecker" }
+			{ "name": "PEER", "class_name": "Peer" },
+			{ "name": "LIVE", "class_name": "LiveFeed" },
+			{ "name": "TOKENS", "class_name": "TokenCache" }
 		]
 	},
 	// One container per builder or reviewer agent, and per integration gate run. The image (cloudflare/debian-trixie)
@@ -42,8 +44,7 @@
 	"containers": [
 		{ "class_name": "Builder", "scheduling_policy": "durable_object" },
 		{ "class_name": "Reviewer", "scheduling_policy": "durable_object" },
-		{ "class_name": "Gate", "scheduling_policy": "durable_object" },
-		{ "class_name": "ContractChecker", "scheduling_policy": "durable_object" }
+		{ "class_name": "Gate", "scheduling_policy": "durable_object" }
 	],
 	"migrations": [
 		{ "tag": "v1", "new_sqlite_classes": ["Coordinator"] },
@@ -51,7 +52,13 @@
 		{ "tag": "v3", "new_sqlite_classes": ["Reviewer"] },
 		{ "tag": "v4", "new_sqlite_classes": ["Gate"] },
 		{ "tag": "v5", "new_sqlite_classes": ["TaskIndex"] },
-		{ "tag": "v6", "new_sqlite_classes": ["ContractChecker"] }
+		{ "tag": "v6", "new_sqlite_classes": ["ContractChecker"] },
+		{ "tag": "v7", "new_sqlite_classes": ["Peer"] },
+		// Planned mode (contracts) is gone; it lives on the plan-mode branch.
+		{ "tag": "v8", "deleted_classes": ["ContractChecker"] },
+		// The dashboard's live updates.
+		{ "tag": "v9", "new_sqlite_classes": ["LiveFeed"] },
+		{ "tag": "v10", "new_sqlite_classes": ["TokenCache"] }
 	],
 	"queues": {
 		// Receives Artifacts event subscriptions (see README).

@@ -1,40 +1,33 @@
 import { DurableObject } from "cloudflare:workers";
 import git from "isomorphic-git";
-import { baseRepoName, fileVersion, forkAndWait, headOf, remoteFor, reviewerName, sliceRepoName } from "./artifacts";
+import { forkAndWait, headOf, remoteFor, reviewerName, sliceRepoName } from "./artifacts";
 import { fail, statusOf } from "./errors";
-import type { ContractCheckResult } from "./contract-check";
 import type { LaneChangeAnswer, LaneChangeCoordinator, LaneChangeRequest, LaneChangeRequestInput } from "./lane-change-contract";
 import { BUILDER_PARK_TIMEOUT_MS, type BuilderResumeCredentials, type ParkBuilderResult } from "./parking-contract";
-import { describeError } from "./contract-check-plan";
 import { isTransientFailure, retryTransient } from "./retry";
-import { Workspace } from "./git";
+import { branchHead, Workspace } from "./git";
+import { projectBranch } from "./project-branch";
 import { boundedUnifiedDiff } from "./code-view";
-import { clipText, diff, fromDoc, replay, toDoc } from "./ledger";
+import { type LedgerEntry, clipText, diff, fromDoc, replay, toDoc } from "./ledger";
 import { readLedger } from "./ledger-git";
 import { LedgerOutbox, LockStats } from "./ledger-outbox";
 import { closesLaneRequestCycle, latestResolutions, laneRequestMessage, safeLanePath, unresolvedRequests } from "./lane-requests";
 import { mergeAhead } from "./merge-ahead";
-import { staysInRepo } from "./paths";
-import { blueprintProblems } from "./blueprint";
-import { NEW_FILE, decideAmendment } from "./contract-owner";
 import type { GatePlan } from "./gate";
 import { gateExclusions, gateFeedback, gateMembers, othersCanStillIntegrate, type GateResult } from "./gate-plan";
 import type { BuildJob } from "./builder";
 import type { Remote } from "./git";
 import type { ReviewJob } from "./reviewer";
 import type { SliceJob } from "./sandbox";
-import { plan } from "./planner";
-import { OPENING_LEASE_MS, claimConflicts, conflictMessage as claimConflictMessage, changeId, holdsClaim, inLane, leaseExpired, leaseUntil, nextLeaseCheck, normalizeClaim } from "./open-mode";
-import { nextStep, reviewFeedback, tally, validatePolicy } from "./quorum";
+import { OPENING_LEASE_MS, awaitedExternalRoles, claimConflicts, externalReviewCheck, gateStallCheck, claimsOf, conflictMessage as claimConflictMessage, agentName, changeId, holdsClaim, inLane, leaseExpired, leaseUntil, nextLeaseCheck, normalizeClaim } from "./open-mode";
+import { effectivePolicy, nextStep, reviewFeedback, tally, validatePolicy } from "./quorum";
 import { activeOf, hasRoom, itemKey, stillWanted, validateLimits, withScheduling, type AgentKind } from "./schedule";
 import { accessIdentityLabel, type AccessIdentity, type CoordinatorHumanActions } from "./access-contract";
+import { identityLabel } from "./free/stamp";
 import {
 	DEFAULT_POLICY,
-	type Amendment,
-	type Blueprint,
 	type Limits,
 	type MergeCheck,
-	type Phase,
 	type QueueItem,
 	type Review,
 	type ReviewAssignment,
@@ -44,11 +37,17 @@ import {
 	type Task,
 } from "./types";
 
-const staleMessage = (path: string, current: string | null) =>
-	`${path} changed in the task base since the version you started from (it is now ${current ? current.slice(0, 12) : "deleted"}). Your proposal replaces the whole file, so committing it would undo that change. Revert any edits you made to ${path} yourself, call fetch_base, merge base/main, then propose again starting from the current version.`;
-
 const conflictMessage = (files: string[]) =>
-	`Review approved your slice, but it conflicts with work already integrated into the task base, in ${files.join(", ")}. Call fetch_base, merge it with \`git merge base/main\`, resolve the conflicts inside your lane, run your tests, then commit_and_push and finish.`;
+	`Review approved your slice, but it conflicts with work already integrated into the task base, in ${files.join(", ")}. Call fetch_base, merge what it fetched, resolve the conflicts inside your lane, run your tests, then commit_and_push and finish.`;
+
+/** What a change's review covers: the paths it claimed and the files it touched. */
+const changePaths = (slice: Slice) => [...new Set([...(slice.owns ?? []), ...(slice.touched ?? [])])];
+
+/** The review policy for a change: the one set when its commit went to review, or what it would be now. */
+export const policyFor = (task: Task, slice: Slice) => slice.review ?? effectivePolicy(task.review, changePaths(slice));
+
+/** The roles Blueprint's own reviewer agents review: all but the external ones. */
+export const hostedRoles = (policy: ReviewPolicy) => policy.reviewers.filter((r) => !(policy.external ?? []).includes(r));
 
 /** Times a slice can go back to its builder before it waits for a human. */
 const MAX_REVISIONS = 3;
@@ -73,12 +72,10 @@ function removeKey(list: string[], key: string) {
 function newTask(head: Pick<Task, "id" | "repo" | "goal" | "phase"> & Partial<Task>, rest: { verify?: string[]; review?: ReviewPolicy; limits: Limits; anchor: string }): Task {
 	return {
 		...head,
-		contracts: [],
 		verify: rest.verify ?? [],
 		review: rest.review ?? DEFAULT_POLICY,
 		slices: [],
 		checks: [],
-		amendments: [],
 		limits: rest.limits,
 		queue: [],
 		active: { builders: [], reviewers: [] },
@@ -87,17 +84,59 @@ function newTask(head: Pick<Task, "id" | "repo" | "goal" | "phase"> & Partial<Ta
 	};
 }
 
+/** The options an open task can be started with. */
+export interface OpenTaskInput {
+	verify?: string[];
+	review?: ReviewPolicy;
+	limits?: Partial<Limits>;
+	leaseMinutes?: number;
+}
+
+/** A new open task on `repo`, based at `head`. Throws `[400]` for invalid options. */
+export function openTaskFor(id: string, repo: string, head: string, input: OpenTaskInput = {}, branch = "main"): Task {
+	const review = input.review ?? DEFAULT_POLICY;
+	validatePolicy(review);
+	const leaseMinutes = input.leaseMinutes ?? 30;
+	if (!Number.isInteger(leaseMinutes) || leaseMinutes < 5 || leaseMinutes > 1440) fail(400, "leaseMinutes must be a whole number from 5 to 1440");
+	return newTask(
+		{ id, repo, goal: `Open changes on ${repo}`, phase: "building", mode: "open", leaseMinutes, baseRepo: repo, baseCommit: head, branch },
+		{ verify: (input.verify ?? []).filter((c) => typeof c === "string" && c.trim()), review, limits: validateLimits(input.limits), anchor: head },
+	);
+}
+
 /** What every agent working on a slice is told about it: the fields BuildJob and ReviewJob share, less credentials. */
 function sliceJobBase(task: Task, slice: Slice): Omit<SliceJob, "remote" | "token"> {
 	return {
 		taskId: task.id,
 		goal: task.goal,
+		branch: projectBranch(task),
 		slice: { id: slice.id, title: slice.title, owns: slice.owns, instructions: slice.instructions, tests: slice.tests },
 		siblings: task.slices.filter((s) => s !== slice && s.status !== "abandoned").map(({ id, title, owns }) => ({ id, title, owns })),
-		contracts: task.contracts,
 		verify: task.verify,
-		repo: slice.repo!,
+		repo: agentsOf(task, slice),
+		...(slice.ref ? { ref: slice.ref } : {}),
 	};
+}
+
+/** A change's own agents (its builder, its reviewers) are named after it: <task>--<change>. */
+export const agentsOf = (task: Pick<Task, "id">, slice: Pick<Slice, "id">) => sliceRepoName(task.id, slice.id);
+
+/** The branch a change's commits are on in its fork: changes/<id>, or (changes made when each had its own fork) the project's branch. */
+export const changeRef = (task: Task, slice: Slice) => slice.ref ?? projectBranch(task);
+
+/**
+ * An agent's fork of the project, for all its changes on the task: named after
+ * who opened them (a registered agent, a person, an access token, Blueprint's
+ * builder), with a short hash when the name had to change to be a repo name.
+ */
+export async function agentForkName(taskId: string, author: string | undefined) {
+	const who = author ?? "anonymous";
+	// A registered agent goes by its name; other identities keep their kind (person-…, service-…), so they never collide with one.
+	const name = who.replace(/^agent:/, "");
+	const slug = name.toLowerCase().replace(/[^a-z0-9-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40) || "agent";
+	if (slug === name) return `${taskId}--agent--${slug}`;
+	const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(who)));
+	return `${taskId}--agent--${slug}-${[...digest.slice(0, 3)].map((b) => b.toString(16).padStart(2, "0")).join("")}`;
 }
 
 /** Forks of one project at once; beyond about 15, Artifacts fails some of them. */
@@ -108,6 +147,12 @@ const MAX_CONCURRENT_FORKS = 6;
  * on the task's repos: forking slices, test-merging them against each other
  * (Merge-ahead), gating integration on reviewer votes (Quorum), and landing.
  */
+
+/** Set once an open task has moved to the elected coordinator: this object then decides nothing for it. */
+const MOVED = "moved-to-elected";
+
+/** Whether two claims are the same paths, in any order. */
+const sameClaim = (a: string[], b: string[]) => a.length === b.length && [...a].sort().every((p, i) => p === [...b].sort()[i]);
 export class Coordinator extends DurableObject<Env> implements CoordinatorHumanActions, LaneChangeCoordinator {
 	// State-changing steps run one at a time so they never overwrite each other.
 	// A step should be short: the hot paths (opening a change, recording a push,
@@ -125,45 +170,117 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 	private forksRunning = 0;
 	private forkWaiters: (() => void)[] = [];
 
-	private exclusive<T>(fn: () => Promise<T>, label = "other"): Promise<T> {
+	/**
+	 * Run a state-changing step on its own: steps never interleave. The answer
+	 * waits for whatever `finishStep` says makes the step's decisions durable,
+	 * but the next step doesn't: it starts as soon as this one has run. With
+	 * `early`, the answer doesn't wait either: for a step whose effects only
+	 * matter once a later step's answer, which does wait, confirms them (steps
+	 * become durable in order).
+	 */
+	protected exclusive<T>(fn: () => Promise<T>, label = "other", early = false): Promise<T> {
 		const queued = Date.now();
 		this.stats.depth++;
+		let durable: Promise<void> = Promise.resolve();
 		const recorded = async () => {
 			const started = Date.now();
 			let ran = started;
+			let ok = false;
 			try {
 				const result = await fn();
 				ran = Date.now();
+				ok = true;
 				return result;
 			} catch (err) {
 				ran = Date.now();
-				// A method that failed didn't make its decisions; what it saved still goes out as state.
-				this.outbox.discard();
 				throw err;
 			} finally {
-				await this.outbox.queue();
+				({ durable } = await this.finishStep(ok));
 				this.stats.depth--;
 				this.stats.record({ label, at: queued, waitMs: started - queued, runMs: ran - started, flushMs: Date.now() - ran });
 			}
 		};
 		const run = this.tail.then(recorded, recorded);
 		this.tail = run.catch(() => {});
-		return run;
+		return run.then(async (result) => {
+			if (!early) await durable;
+			// Answered early: a later step's answer reports the failure, if any.
+			else void durable.catch(() => {});
+			return result;
+		});
+	}
+
+	// Where the task lives and how a step's decisions are kept. The fixed
+	// Coordinator keeps the task in its own storage and writes decisions to Git
+	// in the background; a peer of the elected coordinator overrides these to
+	// keep both in the shared log (see src/peer.ts).
+
+	/** The stored task, if there is one. */
+	protected async readTask(): Promise<Task | undefined> {
+		// An open task handed over to the elected coordinator is decided there now, never here.
+		if (await this.ctx.storage.get(MOVED)) fail(409, "this task moved to the elected coordinator: its log in Git is the record now");
+		return this.ctx.storage.get<Task>("task");
+	}
+
+	protected writeTask(task: Task): Promise<void> {
+		return this.ctx.storage.put("task", task);
+	}
+
+	/** Keep a decision until its step finishes. */
+	protected recordDecision(entry: LedgerEntry) {
+		this.outbox.add(entry);
+	}
+
+	/**
+	 * A step finished (or failed, `ok` false). Returns what its answer must wait
+	 * for (wrapped, since awaiting a promise of a promise flattens it). Here:
+	 * nothing, since decisions go to Git in the background. A method that failed
+	 * didn't make its decisions; what it saved still goes out as state.
+	 */
+	protected async finishStep(ok: boolean): Promise<{ durable: Promise<void> }> {
+		if (!ok) this.outbox.discard();
+		await this.outbox.queue();
+		return { durable: Promise.resolve() };
+	}
+
+	/** Wake this object at `at` (claim leases need checking). */
+	protected setTimer(at: number): Promise<void> {
+		return this.ctx.storage.setAlarm(at);
 	}
 
 	/** Run `fn` on the stored task under the lock, and save the task once it returns. A failure saves nothing. */
-	private mutate<T>(fn: (task: Task) => Promise<T>, label?: string): Promise<T> {
+	private mutate<T>(fn: (task: Task) => Promise<T>, label?: string, early = false): Promise<T> {
 		return this.exclusive(async () => {
 			const task = await this.load();
 			const result = await fn(task);
 			await this.save(task);
 			return result;
-		}, label);
+		}, label, early);
 	}
 
 	/** Note a decision on the commit it is about (the task's anchor commit for task-wide ones). */
 	private note(task: Task, commit: string | undefined, text: string) {
-		this.outbox.add({ commit: commit ?? task.baseCommit ?? task.anchor ?? EMPTY_TREE, text, at: new Date().toISOString() });
+		this.recordDecision({ commit: commit ?? task.baseCommit ?? task.anchor ?? EMPTY_TREE, text, at: new Date().toISOString() });
+	}
+
+	/**
+	 * Hand an open task over to the elected coordinator (open mode has no fixed
+	 * Coordinator): every queued decision is written to Git first, so the elected
+	 * log continues from them; then this object stops its timers and refuses
+	 * everything. Returns the task's state, the elected log's first. Harmless to
+	 * repeat.
+	 */
+	async handOver() {
+		await this.ledgerIdle();
+		return this.exclusive(async () => {
+			const task = (await this.ctx.storage.get<Task>("task")) ?? fail(404, "task not found");
+			if (task.mode !== "open") fail(409, "only an open task moves to the elected coordinator");
+			if (!(await this.ctx.storage.get(MOVED))) {
+				await this.ctx.storage.put(MOVED, new Date().toISOString());
+				await this.ctx.storage.deleteAlarm();
+			}
+			return withScheduling(task);
+		});
 	}
 
 	/** Wait until every queued decision is in Git, retrying a failed write once. Returns how many are still queued. */
@@ -184,30 +301,12 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 		});
 	}
 
-	/**
-	 * Recreate a task from Git alone, into a Coordinator that has no state (for
-	 * example after its storage was lost). Agents that were running are not
-	 * restarted; slices that need them show as building with nothing active.
-	 */
-	restore(taskId: string, repo: string) {
-		return this.exclusive(async () => {
-			if (await this.ctx.storage.get("task")) fail(409, "task exists");
-			const messages = await readLedger(await remoteFor(this.env.ARTIFACTS, repo), taskId);
-			if (!messages.length) fail(404, `no record of task ${taskId} in ${repo}`);
-			const doc = replay(messages);
-			const { task, contracts } = fromDoc(doc);
-			if (task.id !== taskId || task.repo !== repo) fail(409, `the record in ${repo} is for task ${task.id}`);
-			await this.ctx.storage.put({ task, contracts, "ledger:doc": doc, "ledger:pending": [] });
-			return { task, commits: messages.length };
-		});
+	protected async load() {
+		return withScheduling((await this.readTask()) ?? fail(404, "task not found"));
 	}
 
-	private async load() {
-		return withScheduling((await this.ctx.storage.get<Task>("task")) ?? fail(404, "task not found"));
-	}
-
-	private save(task: Task) {
-		return this.ctx.storage.put("task", task);
+	protected save(task: Task) {
+		return this.writeTask(task);
 	}
 
 	private slice(task: Task, id: string) {
@@ -221,11 +320,6 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 		return slice;
 	}
 
-	/** Refuse a step the task's phase doesn't allow. */
-	private requirePhase(task: Task, ...phases: Phase[]) {
-		if (!phases.includes(task.phase)) fail(409, `task is ${task.phase}`);
-	}
-
 	/** Flag a slice for a human: `attention` is shown on it, and the decision is noted as "needs a human: <summary>". */
 	private flagHuman(task: Task, slice: Slice, commit: string | undefined, attention: string, summary = attention) {
 		slice.attention = attention;
@@ -235,19 +329,15 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 	requestLaneChange(requesterSliceId: string, input: LaneChangeRequestInput) {
 		return this.exclusive(async () => {
 			const task = await this.load();
-			this.requirePhase(task, "building");
 			const requester = this.buildingSlice(task, requesterSliceId);
 			if (!input || typeof input.path !== "string" || !input.path.trim()) fail(400, "a lane request needs a path");
 			if (!safeLanePath(input.path)) fail(400, `invalid relative path: ${input.path}`);
 			if (typeof input.need !== "string" || !input.need.trim()) fail(400, "a lane request needs a nonempty need");
 			if (typeof input.reason !== "string" || !input.reason.trim()) fail(400, "a lane request needs a nonempty reason");
-			// In open mode, only active changes hold lanes; an integrated or abandoned change's paths are free.
-			const owners = task.slices.filter((candidate) => (task.mode !== "open" || candidate.status === "building") && inLane(input.path, candidate.owns));
+			// Only active changes hold lanes; an integrated or abandoned change's paths are free.
+			const owners = task.slices.filter((candidate) => candidate.status === "building" && inLane(input.path, candidate.owns));
 			if (owners.length > 1) fail(409, `more than one slice owns ${input.path}: ${owners.map((x) => x.id).join(", ")}`);
-			if (!owners.length)
-				return task.mode === "open"
-					? { outcome: "no-owner" as const, message: `No active change holds ${input.path}. Extend your own claim to it (extend_claim) and change it yourself.` }
-					: { outcome: "no-owner" as const, message: `No slice owns ${input.path}. Use the existing amendment path (propose_contract_change) for a file outside every lane.` };
+			if (!owners.length) return { outcome: "no-owner" as const, message: `No active change holds ${input.path}. Extend your own claim to it (extend_claim) and change it yourself.` };
 			const owner = owners[0];
 			if (owner.id === requesterSliceId) fail(400, `${input.path} is in your own lane; a cross-lane request must name another slice file`);
 			const request: LaneChangeRequest = { id: crypto.randomUUID().slice(0, 8), requester: requesterSliceId, owner: owner.id, path: input.path, need: input.need.trim(), reason: input.reason.trim(), status: "pending", createdAt: new Date().toISOString() };
@@ -316,7 +406,7 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 			} else {
 				// Agent-supplied commit IDs are untrusted. Only Artifacts' current fork
 				// head proves what was actually pushed by the owner.
-				const pushedHead = await headOf(this.env.ARTIFACTS, owner.repo!);
+				const pushedHead = await this.changeHead(task, owner);
 				if (!pushedHead || pushedHead === task.baseCommit) fail(409, "a done answer requires a current pushed change commit in the owner's fork");
 				request.status = "answered";
 				request.answerCommit = pushedHead;
@@ -382,7 +472,7 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 
 	/** Send the slice's outbox to its builder, in order, removing each event only once it is delivered. */
 	private async deliverOutbox(task: Task, slice: Slice): Promise<"inbox" | "resumed" | "deferred"> {
-		const builder = this.env.BUILDER.getByName(slice.repo!);
+		const builder = this.env.BUILDER.getByName(agentsOf(task, slice));
 		const wasParked = !!slice.parkedAt;
 		let resumed = false;
 		let credentials: BuilderResumeCredentials;
@@ -470,7 +560,7 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 		}
 		const parkedAt = new Date().toISOString();
 		const waitingFor = outgoing.map((request) => request.id);
-		const builder = this.env.BUILDER.getByName(slice.repo!);
+		const builder = this.env.BUILDER.getByName(agentsOf(task, slice));
 		await builder.park(parkedAt, waitingFor);
 		slice.parkedAt = parkedAt;
 		slice.parkedWaitingFor = waitingFor;
@@ -487,7 +577,7 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 		if (!waiting || slice.status !== "building" || slice.parkedAt) return false;
 		// Only auto-park when the fork is exactly at the Coordinator's recorded
 		// head; Builder.park performs the additional local dirty/unpushed check.
-		const forkHead = await headOf(this.env.ARTIFACTS, slice.repo!);
+		const forkHead = await this.changeHead(task, slice);
 		if (!forkHead || forkHead !== slice.head) return false;
 		try {
 			const result = await this.parkBuilderLocked(task, slice.id);
@@ -516,7 +606,7 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 			const unresolved = unresolvedRequests(task, sliceId);
 			if (!unresolved.length) return;
 			// Tell the builder too, but never let its answer decide whether a human is flagged.
-			await this.env.BUILDER.getByName(slice.repo!)
+			await this.env.BUILDER.getByName(agentsOf(task, slice))
 				.markParkTimedOut()
 				.catch((err) => console.error(`telling slice ${sliceId}'s builder its park timed out failed: ${statusOf(err).message}`, err));
 			const waiting = unresolved.map((request) => `${request.id} (${request.path})`).join(", ");
@@ -549,7 +639,6 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 				...task.active.reviewers.map((r) => `reviewer ${r}`),
 				...task.slices.filter((s) => s.status === "opening").map((s) => `change ${s.id} being opened`),
 				...task.slices.filter((s) => s.gate && ["queued", "running"].includes(s.gate.status)).map((s) => `${s.id}'s gate`),
-				...(task.planner?.status === "running" ? ["the planner"] : []),
 			];
 			if (busy.length) fail(409, `task ${task.id} is still at work: ${busy.join(", ")}`);
 			await this.ctx.storage.deleteAlarm();
@@ -564,98 +653,19 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 		return this.stats.read(reset);
 	}
 
-	/** Stored blueprint contracts are visible only while awaiting human approval. */
-	async contractFiles() {
-		const task = await this.load();
-		this.requirePhase(task, "awaiting-approval");
-		const contracts = (await this.ctx.storage.get<Record<string, string>>("contracts")) ?? {};
-		return Object.entries(contracts)
-			.sort(([a], [b]) => a.localeCompare(b))
-			.map(([path, content]) => ({ path, content }));
-	}
-
 	/** Diff the human-blocked slice's pinned review commit, never its moving head. */
+	/** A change's diff, for people to read: the commit under review, or before review the latest push. */
 	async sliceDiff(sliceId: string) {
 		const task = await this.load();
 		const slice = this.slice(task, sliceId);
-		if (!slice.attention) fail(409, `slice ${sliceId} does not need a human`);
-		if (!slice.reviewHead) fail(409, `slice ${sliceId} has no commit under review`);
+		const head = slice.reviewHead ?? slice.head;
+		if (!head) fail(409, `change ${sliceId} has nothing pushed yet`);
 		const base = slice.mergeBase ?? task.baseCommit;
-		if (!base) fail(409, `slice ${sliceId} has no review base`);
-		if (!slice.repo) fail(409, `slice ${sliceId} has no repository`);
-		const ws = await Workspace.clone(await remoteFor(this.env.ARTIFACTS, slice.repo, "read"));
-		const files = await ws.changedFiles(base, slice.reviewHead);
-		return { base, head: slice.reviewHead, ...boundedUnifiedDiff(files) };
-	}
-
-	/** A planned task can land once every slice is integrated. */
-	private requireLandable(task: Task) {
-		if (task.mode === "open") fail(409, "open changes merge straight into the project's main; there is nothing to land");
-		this.requirePhase(task, "building");
-		const pending = task.slices.filter((slice) => slice.status !== "integrated").map((slice) => slice.id);
-		if (pending.length) fail(409, `slices not integrated: ${pending.join(", ")}`);
-	}
-
-	/** Diff the complete integrated task base against the project's captured main head. */
-	async landingDiff() {
-		const task = await this.load();
-		this.requireLandable(task);
-		if (!task.baseRepo) fail(409, "task has no base repository");
-		const ws = await Workspace.clone(await remoteFor(this.env.ARTIFACTS, task.repo, "read"));
-		const projectHead = await ws.head();
-		const head = await ws.fetch("task-base", await remoteFor(this.env.ARTIFACTS, task.baseRepo, "read"));
-		const base = await ws.mergeBase(projectHead, head);
+		if (!base) fail(409, `change ${sliceId} has no base to compare with`);
+		if (!slice.repo) fail(409, `change ${sliceId} has no repository`);
+		const ws = await Workspace.clone(await remoteFor(this.env.ARTIFACTS, slice.repo, "read"), changeRef(task, slice));
 		const files = await ws.changedFiles(base, head);
 		return { base, head, ...boundedUnifiedDiff(files) };
-	}
-
-	create(id: string, repo: string, goal: string, limits?: Partial<Limits>) {
-		return this.exclusive(async () => {
-			if (await this.ctx.storage.get("task")) fail(409, "task exists");
-			await this.requireRepo(repo);
-			const task = newTask({ id, repo, goal, phase: "planning" }, { limits: validateLimits(limits), anchor: (await headOf(this.env.ARTIFACTS, repo)) ?? EMPTY_TREE });
-			this.note(task, task.anchor, `Task ${id} created on ${repo}: ${goal}`);
-			await this.save(task);
-			return task;
-		});
-	}
-
-	/** Refuse a project repo that doesn't exist. A transient failure is thrown as it is, to be tried again. */
-	private async requireRepo(repo: string) {
-		try {
-			using _repo = await retryTransient(() => this.env.ARTIFACTS.get(repo));
-		} catch (err) {
-			if (isTransientFailure(err)) throw err;
-			fail(404, `no repo ${repo}`);
-		}
-	}
-
-	/**
-	 * Open mode: one long-lived task per project repo, with no plan. Its base is
-	 * the project itself, so changes merge straight into the project's main.
-	 * Calling it again for the same repo returns the existing task.
-	 */
-	createOpen(id: string, repo: string, input: { verify?: string[]; review?: ReviewPolicy; limits?: Partial<Limits>; leaseMinutes?: number } = {}) {
-		return this.exclusive(async () => {
-			const existing = await this.ctx.storage.get<Task>("task");
-			if (existing) {
-				if (existing.mode === "open" && existing.repo === repo) return withScheduling(existing);
-				fail(409, "task exists");
-			}
-			await this.requireRepo(repo);
-			const head = (await headOf(this.env.ARTIFACTS, repo)) ?? fail(409, `${repo} has no commits`);
-			const review = input.review ?? DEFAULT_POLICY;
-			validatePolicy(review);
-			const leaseMinutes = input.leaseMinutes ?? 30;
-			if (!Number.isInteger(leaseMinutes) || leaseMinutes < 5 || leaseMinutes > 1440) fail(400, "leaseMinutes must be a whole number from 5 to 1440");
-			const task = newTask(
-				{ id, repo, goal: `Open changes on ${repo}`, phase: "building", mode: "open", leaseMinutes, baseRepo: repo, baseCommit: head },
-				{ verify: (input.verify ?? []).filter((c) => typeof c === "string" && c.trim()), review, limits: validateLimits(input.limits), anchor: head },
-			);
-			this.note(task, head, `Open mode started on ${repo}: agents claim their lanes as they arrive`);
-			await this.save(task);
-			return task;
-		});
 	}
 
 	/**
@@ -664,17 +674,44 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 	 * paths. Returns write credentials for the agent; with `hosted`, a builder
 	 * agent is started on it as well.
 	 */
-	async openChange(input: { title: string; intent: string; owns: string[]; hosted?: boolean }, actor?: AccessIdentity) {
-		// Reserve: the paths are held from here, so a racing claim is refused while the fork is made.
-		const { id, repo, title } = await this.mutate(async (task) => {
+	async openChange(input: { id?: string; title: string; intent: string; owns: string[]; hosted?: boolean; agent?: string; authorAgent?: string }, actor?: AccessIdentity) {
+		// Asked again for a change that already opened (its answer was lost, say,
+		// with the leader that gave it): the same change, with fresh credentials.
+		if (input.id !== undefined) {
+			const opened = (await this.load()).slices.find((s) => s.id === input.id);
+			if (opened?.status === "building" && sameClaim(opened.owns, normalizeClaim(input.owns))) {
+				return { change: opened, credentials: await this.changeCredentials(await this.load(), opened) };
+			}
+		}
+		// Whose change it is decides its fork: the author's own, shared by all their changes.
+		const authorBy = input.authorAgent ? `agent:${input.authorAgent}` : actor ? identityLabel(actor) : input.hosted ? "blueprint-builder" : undefined;
+		const forkName = await agentForkName((await this.load()).id, authorBy);
+		// Reserve: the paths are held from here, so a racing claim is refused while
+		// the fork is made. Answered before the reservation is durable, so the fork
+		// starts at once; the confirm step's answer waits for both, in order.
+		const { id, repo, title, resumed } = await this.mutate(async (task) => {
 			if (task.mode !== "open") fail(409, "changes can only be opened on an open-mode task");
 			if (typeof input?.title !== "string" || !input.title.trim()) fail(400, "a change needs a title");
 			if (typeof input.intent !== "string" || !input.intent.trim()) fail(400, "a change needs an intent: what it sets out to do");
+			// A registered agent (its key checked by the caller) is the change's author; otherwise whoever Access says called.
+			const agent = agentName(input.authorAgent ?? input.agent);
+			if (!input.authorAgent && agent && task.agents?.[agent]) fail(403, `${agent} is a registered agent: open the change with its key`);
 			const owns = normalizeClaim(input.owns);
+			// Asked again while its reservation stands (interrupted before it confirmed): carry on from there.
+			const reserved = input.id !== undefined ? task.slices.find((s) => s.id === input.id) : undefined;
+			if (reserved?.status === "opening" && sameClaim(reserved.owns, owns)) {
+				reserved.leaseUntil = new Date(Date.now() + OPENING_LEASE_MS).toISOString();
+				return { id: reserved.id, repo: reserved.repo!, title: reserved.title, resumed: true };
+			}
 			const conflicts = claimConflicts(task, owns);
 			if (conflicts.length) fail(409, claimConflictMessage(conflicts));
 
-			let id = changeId(input.title);
+			// The caller may choose the id (a peer of the elected coordinator is named after its change).
+			let id = input.id ?? changeId(input.title);
+			if (input.id !== undefined) {
+				if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(input.id) || input.id.length > 40) fail(400, `invalid change id: ${input.id}`);
+				if (task.slices.some((s) => s.id === input.id)) fail(409, `change ${input.id} already exists`);
+			}
 			while (task.slices.some((s) => s.id === id)) id = changeId(input.title);
 			const slice: Slice = {
 				id,
@@ -684,26 +721,37 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 				intent: input.intent.trim(),
 				tests: [],
 				status: "opening",
-				repo: sliceRepoName(task.id, id),
+				repo: forkName,
+				ref: `changes/${id}`,
 				touched: [],
 				outOfLane: [],
 				reviews: [],
 				leaseUntil: new Date(Date.now() + OPENING_LEASE_MS).toISOString(),
 				external: !input.hosted,
+				openedAt: new Date().toISOString(),
+				// A person by a hash of their email: change records reach agents, never the address.
+				...(actor ? { openedBy: identityLabel(actor) } : input.hosted ? { openedBy: "blueprint-builder" } : {}),
+				...(agent ? { agent } : {}),
+				...(authorBy ? { authorBy } : {}),
 			};
 			task.slices.push(slice);
 			await this.scheduleLeaseCheck(task);
-			return { id, repo: slice.repo!, title: slice.title };
-		}, "open:reserve");
+			return { id, repo: slice.repo!, title: slice.title, resumed: false };
+		}, "open:reserve", true);
 
-		// Fork without the lock: this takes seconds, and other changes carry on meanwhile.
-		let fork: Awaited<ReturnType<typeof forkAndWait>>;
+		// The author's fork: made on their first change, reused after. Without the lock: making one takes seconds.
 		let start: string;
 		try {
-			const project = (await this.load()).repo;
-			fork = await this.withForkSlot(() => forkAndWait(this.env.ARTIFACTS, project, repo, `${title} (open change on ${project})`));
-			// The fork's own head is where this change starts, even if main moved meanwhile.
-			start = (await headOf(this.env.ARTIFACTS, repo)) ?? fail(500, "the new fork has no commits");
+			const current = await this.load();
+			const project = current.repo;
+			const exists = await remoteFor(this.env.ARTIFACTS, repo, "write").then(() => true, () => false);
+			if (!exists)
+				await this.withForkSlot(() => forkAndWait(this.env.ARTIFACTS, project, repo, `${authorBy ?? "an agent"}'s changes on ${project}`)).catch(async (err) => {
+					// Another of their changes made it meanwhile.
+					if (!(await remoteFor(this.env.ARTIFACTS, repo, "write").then(() => true, () => false))) throw err;
+				});
+			// The change starts from the project as it is now; its branch changes/<id> starts there.
+			start = (await headOf(this.env.ARTIFACTS, project, projectBranch(current))) ?? fail(500, `${project} has no commits`);
 		} catch (err) {
 			await this.mutate(async (task) => {
 				task.slices = task.slices.filter((s) => !(s.id === id && s.status === "opening"));
@@ -722,8 +770,20 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 			this.note(task, start, `Change ${id} opened${actor ? ` by ${accessIdentityLabel(actor)}` : ""}: "${slice.title}", claiming ${slice.owns.join(", ")}. Intent: ${slice.intent}`);
 			if (input.hosted) await this.schedule(task, { kind: "builder", slice: id });
 			await this.scheduleLeaseCheck(task);
-			return { change: slice, credentials: { slice: id, repo, remote: fork.remote, token: fork.token } as SliceCredentials };
+			return { change: slice, credentials: await this.changeCredentials(task, slice) };
 		}, "open:confirm");
+	}
+
+	/** What an agent needs to work on its change: write access to its fork and the branch to push, and read access to the project to start from. */
+	private async changeCredentials(task: Task, slice: Slice): Promise<SliceCredentials> {
+		const [fork, project] = await Promise.all([remoteFor(this.env.ARTIFACTS, slice.repo!, "write", 3 * 3600), remoteFor(this.env.ARTIFACTS, task.baseRepo!, "read", 3 * 3600)]);
+		return { slice: slice.id, repo: slice.repo!, remote: fork.url, token: fork.token, ref: changeRef(task, slice), project: { remote: project.url, token: project.token, branch: projectBranch(task) } };
+	}
+
+	/** The head of a change's branch in its fork, or null before anything is pushed. */
+	private async changeHead(task: Task, slice: Slice) {
+		if (!slice.ref) return headOf(this.env.ARTIFACTS, slice.repo!, projectBranch(task));
+		return branchHead(await remoteFor(this.env.ARTIFACTS, slice.repo!, "read"), slice.ref);
 	}
 
 	/**
@@ -742,15 +802,61 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 		}
 	}
 
-	/** A fresh write token for an external agent's own fork. */
+	/** Fresh write access to an external agent's own fork (with the branch to push), and read access to the project. */
 	externalCredentials(sliceId: string) {
 		return this.mutate(async (task) => {
 			const slice = this.slice(task, sliceId);
 			if (!slice.external) fail(403, `change ${sliceId} is built by a hosted agent`);
 			if (slice.status !== "building") fail(409, `change ${sliceId} is ${slice.status}`);
-			const remote = await remoteFor(this.env.ARTIFACTS, slice.repo!, "write", 3 * 3600);
+			const credentials = await this.changeCredentials(task, slice);
 			this.renewLease(task, slice);
-			return { fork: remote.url, token: remote.token };
+			return { fork: credentials.remote, token: credentials.token, branch: credentials.ref, project: credentials.project };
+		});
+	}
+
+	/**
+	 * Change the task's settings: its review policy, its checks, how long a claim
+	 * lasts without activity. A commit already in review keeps the policy it went
+	 * to review under. Recorded in the task's log with who changed what.
+	 */
+	updateSettings(input: { review?: ReviewPolicy; verify?: string[]; leaseMinutes?: number }, actor?: AccessIdentity) {
+		return this.mutate(async (task) => {
+			const changed: string[] = [];
+			if (input.review !== undefined) {
+				const review = { ...input.review, vetoes: input.review.vetoes ?? [], reviewers: input.review.reviewers ?? [] };
+				validatePolicy(review);
+				task.review = review;
+				changed.push(`review: ${review.required} of ${review.reviewers.join(", ") || "no reviewers"}${review.vetoes.length ? `, ${review.vetoes.join(", ")} can veto` : ""}${review.external?.length ? `, outside agents review ${review.external.join(", ")}` : ""}${review.escalate?.length ? `, stricter for ${review.escalate.flatMap((e) => e.paths).join(", ")}` : ""}`);
+			}
+			if (input.verify !== undefined) {
+				if (!Array.isArray(input.verify) || !input.verify.every((c) => typeof c === "string")) fail(400, "verify is a list of commands");
+				task.verify = input.verify.map((c) => c.trim()).filter(Boolean);
+				changed.push(`checks: ${task.verify.join("; ") || "none"}`);
+			}
+			if (input.leaseMinutes !== undefined) {
+				if (!Number.isInteger(input.leaseMinutes) || input.leaseMinutes < 5 || input.leaseMinutes > 1440) fail(400, "leaseMinutes must be a whole number from 5 to 1440");
+				task.leaseMinutes = input.leaseMinutes;
+				changed.push(`claims last ${input.leaseMinutes} minutes without activity`);
+			}
+			if (!changed.length) fail(400, "nothing to change: send review, verify or leaseMinutes");
+			this.note(task, task.anchor, `Settings changed${actor ? ` by ${identityLabel(actor)}` : ""}: ${changed.join("; ")}`);
+			return { review: task.review, verify: task.verify, leaseMinutes: task.leaseMinutes };
+		});
+	}
+
+	/**
+	 * Register an outside agent on the task under `name`, bound to a key the
+	 * caller keeps (only its hash is stored). Registering a name again rotates its
+	 * key, and needs the current one.
+	 */
+	registerAgent(name: string, keyHash: string, currentKeyHash?: string, actor?: AccessIdentity) {
+		return this.mutate(async (task) => {
+			const agent = agentName(name) ?? fail(400, "an agent needs a name");
+			const existing = task.agents?.[agent];
+			if (existing && existing.keyHash !== currentKeyHash) fail(403, `${agent} is already registered: send its current key to rotate it`);
+			task.agents = { ...task.agents, [agent]: { keyHash, at: new Date().toISOString(), ...(actor ? { by: identityLabel(actor) } : {}) } };
+			this.note(task, task.anchor, existing ? `Agent ${agent} rotated its key` : `Agent ${agent} registered`);
+			return { agent, rotated: !!existing };
 		});
 	}
 
@@ -775,6 +881,9 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 
 	/** Give up a change: its lane is freed and its agents are stopped. */
 	async abandonChange(sliceId: string, reason: string, actor?: AccessIdentity) {
+		// Asked again after it went through (its answer was lost): the change, as abandoned.
+		const already = (await this.load()).slices.find((s) => s.id === sliceId);
+		if (already?.status === "abandoned") return already;
 		const { slice, stopAgents } = await this.mutate(async (task) => {
 			if (task.mode !== "open") fail(409, "only open-mode changes can be abandoned");
 			if (typeof reason !== "string" || !reason.trim()) fail(400, "abandoning a change needs a reason");
@@ -789,10 +898,7 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 
 	/** Claims held by active changes, for agents deciding what to claim. */
 	async claims() {
-		const task = await this.load();
-		return task.slices
-			.filter(holdsClaim)
-			.map(({ id, title, intent, instructions, owns, leaseUntil: until, reviewHead }) => ({ change: id, title, intent: intent ?? instructions, owns, leaseUntil: until, inReview: !!reviewHead }));
+		return claimsOf(await this.load());
 	}
 
 	/**
@@ -803,14 +909,15 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 	private abandon(task: Task, slice: Slice, reason: string): () => Promise<unknown> {
 		const opened = slice.status === "building";
 		slice.status = "abandoned";
+		slice.endedAt = new Date().toISOString();
 		slice.attention = undefined;
 		task.queue = task.queue.filter((item) => item.slice !== slice.id);
 		task.active.builders = task.active.builders.filter((key) => key !== slice.id);
 		task.active.reviewers = task.active.reviewers.filter((key) => !key.startsWith(`${slice.id}:`));
 		this.note(task, slice.head, `Change ${slice.id} abandoned, freeing ${slice.owns.join(", ")}: ${reason}`);
-		const repo = slice.repo!;
+		const repo = agentsOf(task, slice);
 		const reviewHead = slice.reviewHead;
-		const roles = [...task.review.reviewers];
+		const roles = hostedRoles(policyFor(task, slice));
 		// A change still being opened has no agents yet.
 		if (!opened) return async () => {};
 		return () =>
@@ -833,7 +940,7 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 	private async scheduleLeaseCheck(task: Task) {
 		if (task.mode !== "open") return;
 		const next = nextLeaseCheck(task);
-		if (next !== null) await this.ctx.storage.setAlarm(Math.max(next, Date.now() + 1_000));
+		if (next !== null) await this.setTimer(Math.max(next, Date.now() + 1_000));
 	}
 
 	/**
@@ -844,6 +951,14 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 		const stops = await this.mutate(async (task) => {
 			const now = Date.now();
 			const stops: (() => Promise<unknown>)[] = [];
+			await this.restartStalledGates(task, now);
+			// External reviews that never came: a person decides (review it, waive it, or wait more).
+			for (const slice of task.slices) {
+				if ((externalReviewCheck(slice) ?? Infinity) > now) continue;
+				const roles = awaitedExternalRoles(slice);
+				slice.externalWaitFlagged = slice.reviewHead;
+				this.flagHuman(task, slice, slice.reviewHead, `No outside reviewer has reviewed ${short(slice.reviewHead!)} as ${roles.join(", ")} in ${Math.round((now - Date.parse(slice.reviewRequestedAt!)) / 60_000)} minutes. Review it yourself, approve it without full review, or have a reviewer agent take it from review_queue.`, `waiting on external review (${roles.join(", ")})`);
+			}
 			for (const slice of task.slices) {
 				if (!holdsClaim(slice) || !slice.leaseUntil || Date.parse(slice.leaseUntil) > now) continue;
 				// A reservation this old lost its opener (the object restarted while forking).
@@ -857,126 +972,35 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 		await Promise.all(stops.map((stop) => stop()));
 	}
 
-	/** Start the planner agent. It runs from an alarm because a run takes minutes. */
-	startPlanning() {
-		return this.exclusive(async () => {
-			const task = await this.load();
-			this.requirePhase(task, "planning", "awaiting-approval");
-			if (task.planner?.status === "running") fail(409, "the planner is already running");
-			if (!this.env.OPENAI_API_KEY) fail(500, "OPENAI_API_KEY is not set");
-			task.planner = { status: "running", startedAt: new Date().toISOString() };
-			await this.save(task);
-			await this.ctx.storage.setAlarm(Date.now());
-			return task;
-		});
-	}
-
-	async alarm() {
-		const task = await this.load();
-		if (task.mode === "open") return this.sweepLeases();
-		if (task.planner?.status !== "running") return;
-		let outcome: Partial<NonNullable<Task["planner"]>>;
-		try {
-			const result = await plan(this.env, task.id, task.repo, task.goal);
-			await this.proposeBlueprint(result.blueprint);
-			outcome = { status: "done", usage: result.usage, toolCalls: result.toolCalls, contractCheck: result.contractCheck };
-		} catch (err) {
-			outcome = { status: "failed", error: err instanceof Error ? err.message : String(err) };
-		}
-		await this.mutate(async (latest) => {
-			latest.planner = { ...latest.planner!, ...outcome, finishedAt: new Date().toISOString() };
-			this.note(latest, undefined, outcome.status === "done" ? `Planner finished after ${outcome.toolCalls ?? 0} tool calls` : `Planner failed: ${outcome.error}`);
-		});
-	}
-
-	/** Store a proposed blueprint. A human (or the planner agent) approves it next. */
-	proposeBlueprint(blueprint: Blueprint) {
-		return this.mutate(async (task) => {
-			this.requirePhase(task, "planning", "awaiting-approval");
-
-			const problems = blueprintProblems(blueprint);
-			if (problems.length) fail(400, problems.join(" "));
-			const { slices, contracts, rationale } = blueprint;
-			const review = blueprint.review ?? DEFAULT_POLICY;
-
-			task.rationale = rationale;
-			task.slices = slices.map(({ id, title, owns, instructions, tests }) => ({
-				id,
-				title,
-				owns,
-				instructions,
-				tests: tests ?? [],
-				status: "planned",
-				touched: [],
-				outOfLane: [],
-				reviews: [],
-			}));
-			task.contracts = Object.keys(contracts ?? {});
-			task.verify = (blueprint.verify ?? []).filter((c) => c.trim());
-			task.review = review;
-			task.phase = "awaiting-approval";
-			this.note(
-				task,
-				undefined,
-				`Blueprint proposed: ${plural(slices.length, "slice")} (${slices.map((s) => s.id).join(", ")}), ${plural(task.contracts.length, "contract file")}, quorum ${review.required} of ${review.reviewers.join("/")}` +
-					(task.verify.length ? `, gate: ${task.verify.join(" && ")}` : "") +
-					(rationale ? `\n${rationale}` : ""),
-			);
-			await this.ctx.storage.put("contracts", contracts ?? {});
-			return task;
-		});
-	}
-
 	/**
-	 * Fork the project into a task base, commit the contracts to it, then fork
-	 * the base once per slice. Returns write credentials for each slice's builder.
+	 * Checks queued or running long past GATE_STALL_MS: if the gate still holds
+	 * the run, note it was seen and look again later; if not, its result was
+	 * lost, so queue the checks again. Caller holds the lock and saves.
 	 */
-	approve(actor: AccessIdentity) {
-		return this.mutate(async (task) => {
-			this.requirePhase(task, "awaiting-approval");
-			const artifacts = this.env.ARTIFACTS;
-
-			const baseRepo = baseRepoName(task.id);
-			const base = await forkAndWait(artifacts, task.repo, baseRepo, `Base for task: ${task.goal}`);
-			const contracts = (await this.ctx.storage.get<Record<string, string>>("contracts")) ?? {};
-			if (Object.keys(contracts).length) {
-				const ws = await Workspace.clone({ url: base.remote, token: base.token });
-				await ws.write(contracts);
-				await ws.commit(`Blueprint contracts: ${task.goal}`);
-				await ws.push();
+	private async restartStalledGates(task: Task, now: number) {
+		const stalled = task.slices.filter((s) => (gateStallCheck(s) ?? Infinity) <= now);
+		if (!stalled.length) return;
+		const { queue, current } = await this.env.GATE.getByName(task.id).state();
+		const held = [current, ...queue].filter((item) => item !== null);
+		for (const slice of stalled) {
+			const gate = slice.gate!;
+			if (held.some((item) => [{ slice: item.slice, head: item.head }, ...(item.group ?? [])].some((m) => m.slice === slice.id && m.head === gate.head))) {
+				slice.gate = { ...gate, seenAt: new Date(now).toISOString() };
+				continue;
 			}
-			task.baseRepo = baseRepo;
-			task.baseCommit = (await headOf(artifacts, baseRepo)) ?? fail(500, "base has no commits");
-
-			const credentials: SliceCredentials[] = await Promise.all(
-				task.slices.map(async (slice) => {
-					const repo = sliceRepoName(task.id, slice.id);
-					const fork = await forkAndWait(artifacts, baseRepo, repo, `${slice.title} (task ${task.id})`);
-					slice.repo = repo;
-					slice.head = task.baseCommit;
-					slice.status = "building";
-					return { slice: slice.id, repo, remote: fork.remote, token: fork.token };
-				}),
-			);
-			task.phase = "building";
-			this.note(task, task.baseCommit, `Blueprint approved by ${accessIdentityLabel(actor)}: contracts committed to ${baseRepo}; slices forked: ${task.slices.map((s) => s.repo).join(", ")}`);
-			return { task, credentials };
-		});
+			this.note(task, gate.head, `${slice.id}: its checks reported nothing for ${Math.round((now - Date.parse(gate.seenAt ?? gate.at)) / 60_000)} minutes and the gate no longer holds them; queued again`);
+			// A group's lead re-queues the whole group; its members wait on that.
+			if (gate.group?.length) {
+				const members = gate.group.map((id) => task.slices.find((s) => s.id === id)).filter((s): s is Slice => !!s && s.status === "building" && !!s.reviewHead);
+				if (members.length === gate.group.length && !stalled.some((s) => gate.group!.includes(s.id) && s.id < slice.id)) await this.startGroupGate(task, slice, members);
+			} else await this.startGate(task, slice);
+		}
 	}
 
-	/**
-	 * Start a hosted builder agent for every slice that is building. Each gets a
-	 * write token for its own fork only. External agents can use the credentials
-	 * from approve() instead.
-	 */
-	startBuilders() {
-		return this.mutate(async (task) => {
-			this.requirePhase(task, "building");
-			const started: { slice: string; status: string }[] = [];
-			for (const slice of task.slices.filter((s) => s.status === "building"))
-				started.push({ slice: slice.id, status: await this.schedule(task, { kind: "builder", slice: slice.id }) });
-			return { task, started };
-		});
+	/** The task's one timer: claim leases, swept when the earliest is due. */
+	async alarm() {
+		if (await this.ctx.storage.get(MOVED)) return;
+		return this.sweepLeases();
 	}
 
 	private async launchBuilder(task: Task, slice: Slice) {
@@ -993,7 +1017,7 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 			token: remote.token,
 			base: { remote: base.url, token: base.token },
 		};
-		await this.env.BUILDER.getByName(slice.repo!).start(job);
+		await this.env.BUILDER.getByName(agentsOf(task, slice)).start(job);
 		if (slice.wakeOutbox?.length) await this.deliverOutbox(task, slice);
 	}
 
@@ -1009,9 +1033,8 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 			buildSummary: slice.buildSummary,
 			revision: slice.revisions ?? 0,
 			priorFindings: slice.revisions ? slice.lastFeedback : undefined,
-			amendments: (task.amendments ?? []).filter((a) => a.status === "approved").map(({ path, reason }) => ({ path, reason })),
 		};
-		await this.env.REVIEWER.getByName(reviewerName(slice.repo!, role, head)).start(job);
+		await this.env.REVIEWER.getByName(reviewerName(agentsOf(task, slice), role, head)).start(job);
 	}
 
 	/**
@@ -1072,16 +1095,37 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 		}
 	}
 
-	/** An agent stopped (finished, failed or was cancelled): free its slot and start queued work. */
-	agentStopped(kind: AgentKind, key: string) {
+	/**
+	 * An agent stopped (finished, failed or was cancelled): free its slot and
+	 * start queued work. A reviewer that failed without voting, on the commit
+	 * still under review, runs once more; failing again, the change waits on a
+	 * person, rather than on a vote that will never come.
+	 */
+	agentStopped(kind: AgentKind, key: string, failure?: string) {
 		return this.mutate(async (task) => {
 			removeKey(activeOf(task, kind), key);
 			if (kind === "builder") {
 				const slice = task.slices.find((candidate) => candidate.id === key);
 				if (slice && !slice.parkedAt) await this.autoParkWaitingBuilder(task, slice);
 			}
+			if (kind === "reviewer" && failure !== undefined) await this.reviewerFailed(task, key, failure);
 			await this.drain(task);
 		});
+	}
+
+	private async reviewerFailed(task: Task, key: string, failure: string) {
+		const [sliceId, role, head] = key.split(":");
+		const slice = task.slices.find((s) => s.id === sliceId);
+		if (!slice || slice.status !== "building" || slice.reviewHead !== head || slice.reviews.some((r) => r.head === head && r.reviewer === role)) return;
+		if (failure.startsWith("cancelled")) return;
+		const retries = (slice.reviewerRetries ??= {});
+		if (!retries[`${role}:${head}`]) {
+			retries[`${role}:${head}`] = 1;
+			this.note(task, head, `${slice.id}: the ${role} reviewer failed (${failure.split("\n")[0].slice(0, 200)}); starting it again`);
+			await this.schedule(task, { kind: "reviewer", slice: slice.id, role, head }, []);
+			return;
+		}
+		this.flagHuman(task, slice, head, `The ${role} reviewer failed twice on ${short(head)}: ${failure.slice(0, 500)}`, `the ${role} reviewer failed twice`);
 	}
 
 	/**
@@ -1098,7 +1142,7 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 			const snapshot = await this.load();
 			const seen = this.buildingSlice(snapshot, sliceId);
 			const before = seen.head;
-			const head = await headOf(this.env.ARTIFACTS, seen.repo!);
+			const head = await this.changeHead(snapshot, seen);
 			if (!head || head === before) return { task: snapshot, checks: [] as MergeCheck[], changed: false };
 			const checks = await mergeAhead(this.env.ARTIFACTS, snapshot, seen);
 
@@ -1117,6 +1161,7 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 				this.renewLease(task, slice);
 				await this.scheduleLeaseCheck(task);
 				const conflicts = checks.filter((c) => c.status === "conflict");
+				slice.pushes = [...(slice.pushes ?? []), { head: slice.head!, at: new Date().toISOString(), files: slice.touched.length, outOfLane: slice.outOfLane.length, conflicts: conflicts.length }].slice(-50);
 				this.note(
 					task,
 					slice.head,
@@ -1134,31 +1179,17 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 		}
 	}
 
-	/**
-	 * Quorum, step 1. The builder says the slice is ready. Pin the current head
-	 * and hand each reviewer a read-only token for it.
-	 */
-	requestReview(sliceId: string) {
-		return this.mutate(async (task) => {
-			const slice = this.slice(task, sliceId);
-			const head = await this.pinForReview(task, slice);
-			this.note(task, head, `${slice.id} pinned for review at ${short(head)} by an external agent`);
-			const assignments: ReviewAssignment[] = await Promise.all(
-				task.review.reviewers.map(async (reviewer) => {
-					const remote = await remoteFor(this.env.ARTIFACTS, slice.repo!, "read", 3600);
-					return { reviewer, head, slice: slice.id, repo: slice.repo!, remote: remote.url, token: remote.token };
-				}),
-			);
-			return { task, assignments };
-		});
-	}
-
 	/** Pin the slice's current head as the commit under review. */
 	private async pinForReview(task: Task, slice: Slice) {
 		if (slice.status !== "building") fail(409, `slice ${slice.id} is ${slice.status}`);
-		const head = await headOf(this.env.ARTIFACTS, slice.repo!);
+		const head = await this.changeHead(task, slice);
 		if (!head || head === (slice.startCommit ?? task.baseCommit)) fail(409, `slice ${slice.id} has no work to review`);
 		slice.reviewHead = head;
+		// The rules for this commit: the task's, made stricter for the paths it claims and touches.
+		const { escalatedBy, ...policy } = effectivePolicy(task.review, changePaths(slice));
+		slice.review = policy;
+		slice.reviewRequestedAt = new Date().toISOString();
+		if (escalatedBy.length) this.note(task, head, `${slice.id} touches ${escalatedBy.join(", ")}, so its review needs ${policy.reviewers.join(", ")}${policy.vetoes.length ? ` (${policy.vetoes.join(", ")} can veto)` : ""}`);
 		return head;
 	}
 
@@ -1190,249 +1221,91 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 			this.note(task, head, `${slice.id} ready for review at ${short(head)}${buildSummary ? `: ${buildSummary}` : ""}`);
 			await this.save(task);
 
-			const reviewers = task.review.reviewers;
+			const policy = policyFor(task, slice);
+			// Blueprint reviews its own roles; outside agents review the external ones (review_queue, submit_review).
+			const reviewers = hostedRoles(policy);
+			const external = policy.external ?? [];
+			if (external.length) this.note(task, head, `${slice.id} waits for external review: ${external.join(", ")}`);
 			const failed: string[] = [];
 			for (const role of reviewers) await this.schedule(task, { kind: "reviewer", slice: slice.id, role, head }, failed);
+			// Nothing to wait for (no approvals required, no veto role): straight to the checks.
+			if (tally(policy, slice).status === "approved") await this.integrateOrGate(task, slice);
+			// Look again if the external reviewers don't come.
+			if (external.length) await this.scheduleLeaseCheck(task);
 			await this.save(task);
-			return { head, reviewers, failed, escalated: false };
+			return { head, reviewers, external, failed, escalated: false };
+		});
+	}
+
+	/** Quorum, step 2. Blueprint's own reviewer agent submits its verdict on the pinned head. */
+	submitReview(sliceId: string, input: Omit<Review, "at" | "by">) {
+		return this.exclusive(async () => {
+			const task = await this.load();
+			const slice = this.slice(task, sliceId);
+			const policy = policyFor(task, slice);
+			if (!hostedRoles(policy).includes(input.reviewer)) fail(400, `${input.reviewer} is not a role Blueprint reviews here`);
+			return this.recordReview(task, slice, { reviewer: input.reviewer, head: input.head, verdict: input.verdict, summary: input.summary, ...(input.evidence ? { evidence: input.evidence } : {}), ...(input.usage ? { usage: input.usage } : {}) });
 		});
 	}
 
 	/**
-	 * Contract amendments. A builder proposes the whole new content of a contract
-	 * file, a new contract file, or a project file outside every lane that slices
-	 * share (which the change brings under contract). The contract owner agent
-	 * decides; an approved change is committed to the task base and the builders
-	 * of other running slices are told. The decision runs outside the lock, so
-	 * pushes and votes aren't held up meanwhile.
-	 *
-	 * Proposals are whole files, so each names the version it was written
-	 * against (`basedOn`). If the base has a different version, when proposed or
-	 * when about to be committed, the proposal is refused as stale: committing it
-	 * would undo changes made since, such as another slice's approved amendment.
+	 * An outside agent's review, for one of the policy's external roles. `by` is
+	 * who it is (a registered agent, or an Access identity): never the change's
+	 * author, and one role per reviewer on a commit, so approvals come from
+	 * different reviewers.
 	 */
-	async proposeAmendment(sliceId: string, input: { path: string; content: string; reason: string; basedOn: string | null }) {
-		const { task, amendment, current } = await this.mutate(async (task) => {
-			const slice = this.slice(task, sliceId);
-			if (task.mode === "open") fail(409, "open mode has no contracts: claim the file with extend_claim, or ask the change that holds it with a cross-lane request");
-			this.requirePhase(task, "building");
-			const path = input.path;
-			if (input.basedOn === undefined) fail(400, "basedOn is required: the blob id of the version you started from, or null for a new file");
-			if (!task.contracts.includes(path)) {
-				// Anything that isn't a contract yet must sit outside every lane.
-				if (!staysInRepo(path)) fail(400, `invalid path: ${path}`);
-				const owner = task.slices.find((s) => s.status !== "abandoned" && inLane(path, s.owns));
-				if (owner) fail(400, `${path} is inside ${owner.id}'s lane; a contract file must sit outside every lane`);
-			}
-			const current = await fileVersion(this.env.ARTIFACTS, task.baseRepo!, path);
-			const kind: Amendment["kind"] = task.contracts.includes(path) ? "contract" : current ? "shared" : "new";
-			const amendment: Amendment = {
-				id: crypto.randomUUID().slice(0, 8),
-				slice: sliceId,
-				...input,
-				kind,
-				status: "pending",
-				at: new Date().toISOString(),
-			};
-			task.amendments = [...(task.amendments ?? []), amendment];
-			if ((current?.id ?? null) !== input.basedOn) {
-				Object.assign(amendment, { status: "stale", decision: staleMessage(path, current?.id ?? null), decidedAt: amendment.at });
-				this.note(task, slice.head, `${sliceId}'s change to ${path} refused: written against a version the base no longer has`);
-			} else {
-				this.note(task, slice.head, `${sliceId} proposed a change to ${kind === "shared" ? "shared file" : "contract"} ${path}: ${input.reason}`);
-			}
-			return { task, amendment, current };
-		});
-		if (amendment.status === "stale") return amendment;
-
-		let decision: { approve: boolean; reason: string };
-		try {
-			decision = await decideAmendment(this.env, {
-				goal: task.goal,
-				slices: task.slices.map(({ id, title, owns, tests }) => ({ id, title, owns, tests })),
-				proposer: sliceId,
-				path: input.path,
-				kind: amendment.kind!,
-				reason: input.reason,
-				current: current?.text ?? NEW_FILE,
-				proposed: input.content,
-			});
-		} catch (err) {
-			return this.settleAmendment(amendment.id, { status: "failed", decision: statusOf(err).message });
-		}
-		if (!decision.approve) return this.settleAmendment(amendment.id, { status: "rejected", decision: decision.reason });
-
-		// Contract checks can take tens of seconds. Run the first checks outside
-		// the Coordinator lock; the checked commit is verified again under lock
-		// before committing. After repeated base movement, check once under lock.
-		const checker = this.env.CONTRACT_CHECKER.getByName(`amend-${task.id}-${amendment.id}`);
-		const checkAt = async (commit: string): Promise<ContractCheckResult> => {
-			try {
-				const remote = await remoteFor(this.env.ARTIFACTS, task.baseRepo!, "read");
-				return await checker.check({ remote: remote.url, token: remote.token, commit, contracts: { [input.path]: input.content } });
-			} catch (err) {
-				// Like the planner, don't block on checker infrastructure failures.
-				return { status: "skipped", reason: `the check could not run: ${statusOf(err).message}` };
-			}
-		};
-		const failedCheckMessage = (result: Extract<ContractCheckResult, { status: "failed" }>) => {
-			const diagnostics = result.errors.map(describeError);
-			const details = diagnostics.length ? diagnostics.map((line) => `- ${line}`).join("\n") : "- The checker reported errors without diagnostics.";
-			return `Contract check failed:\n${details}`;
-		};
-		const staleFile = async (latest: Task, a: Amendment, now: { id: string; text: string } | null) => {
-			Object.assign(a, { status: "stale", decision: staleMessage(input.path, now?.id ?? null), decidedAt: new Date().toISOString() });
-			this.note(latest, this.slice(latest, sliceId).head, `${sliceId}'s approved change to ${input.path} not applied: the file changed while it was decided`);
-			await this.save(latest);
-			return a;
-		};
-		const failedAmendment = async (latest: Task, a: Amendment, result: Extract<ContractCheckResult, { status: "failed" }>) => {
-			Object.assign(a, { status: "failed", decision: failedCheckMessage(result), decidedAt: new Date().toISOString() });
-			this.note(latest, this.slice(latest, sliceId).head, `Contract change to ${input.path} for ${sliceId} failed: ${a.decision}`);
-			await this.save(latest);
-			return a;
-		};
-		const applyApproved = async (latest: Task, a: Amendment) => {
-			const brought = !latest.contracts.includes(input.path);
-			const ws = await Workspace.clone(await remoteFor(this.env.ARTIFACTS, latest.baseRepo!, "write"));
-			await ws.write({ [input.path]: input.content });
-			const commit = await ws.commit(`Amend contract ${input.path} (proposed by ${sliceId})\n\n${input.reason}\n\nApproved: ${decision.reason}`);
-			await ws.push();
-
-			// Other slices' running builders need the new contract too.
-			const what = a.kind === "new" ? "added as a contract" : a.kind === "shared" ? "changed and brought under contract" : "amended";
-			const message = `Contract ${input.path} was ${what} at the request of slice ${sliceId}: ${input.reason}\nThe contract owner approved it: ${decision.reason}\nCall fetch_base and merge base/main to get it, re-run your acceptance tests, then call commit_and_push.`;
-			const others = latest.slices.filter((s) => s.id !== sliceId && s.status === "building");
-			await Promise.allSettled(others.map((s) => this.env.BUILDER.getByName(s.repo!).notify(message)));
-
-			if (brought) {
-				latest.contracts.push(input.path);
-				// A new test becomes one of the proposing slice's acceptance tests.
-				const proposer = this.slice(latest, sliceId);
-				if (/\.(test|spec)\.[cm]?[jt]sx?$/.test(input.path)) proposer.tests = [...(proposer.tests ?? []), input.path];
-			}
-			Object.assign(a, { status: "approved", decision: decision.reason, commit, decidedAt: new Date().toISOString() });
-			this.note(latest, commit, `Contract ${input.path} ${what} for ${sliceId}; the contract owner approved: ${decision.reason}`);
-			await this.save(latest);
-			return a;
-		};
-
-		try {
-			for (let attempt = 0; attempt < 3; attempt++) {
-				let checkedCommit: string | null = null;
-				let checkResult: ContractCheckResult;
-				try {
-					checkedCommit = await headOf(this.env.ARTIFACTS, task.baseRepo!);
-					if (!checkedCommit) throw new Error("task base has no commits");
-					checkResult = await checkAt(checkedCommit);
-				} catch (err) {
-					checkResult = { status: "skipped", reason: `the check could not run: ${statusOf(err).message}` };
-				}
-				const outcome = await this.exclusive(async () => {
-					const latest = await this.load();
-					const a = latest.amendments!.find((x) => x.id === amendment.id)!;
-					const now = await fileVersion(this.env.ARTIFACTS, latest.baseRepo!, input.path);
-					if ((now?.id ?? null) !== input.basedOn)
-						return { retry: false as const, value: await staleFile(latest, a, now) };
-
-					// A different slice/amendment may have moved the base while the
-					// checker ran. Don't apply an overlay checked against an old tree.
-					const currentHead = await headOf(this.env.ARTIFACTS, latest.baseRepo!);
-					if (currentHead !== checkedCommit) return { retry: true as const };
-					if (checkResult.status === "failed") return { retry: false as const, value: await failedAmendment(latest, a, checkResult) };
-					return { retry: false as const, value: await applyApproved(latest, a) };
-				});
-				if (!outcome.retry) return outcome.value;
-			}
-
-			// After three races, use the lock as a fallback so a stable task base
-			// cannot keep an approved amendment from completing indefinitely.
-			return await this.exclusive(async () => {
-				const latest = await this.load();
-				const a = latest.amendments!.find((x) => x.id === amendment.id)!;
-				const now = await fileVersion(this.env.ARTIFACTS, latest.baseRepo!, input.path);
-				if ((now?.id ?? null) !== input.basedOn) return staleFile(latest, a, now);
-
-				const checkedCommit = await headOf(this.env.ARTIFACTS, latest.baseRepo!);
-				let checkResult: ContractCheckResult;
-				if (!checkedCommit) checkResult = { status: "skipped", reason: "task base has no commits" };
-				else checkResult = await checkAt(checkedCommit);
-				if (checkResult.status === "failed") return failedAmendment(latest, a, checkResult);
-
-				// The lock prevents another Coordinator commit between the fallback
-				// check and this commit. Refuse if the base nevertheless moved.
-				const currentHead = await headOf(this.env.ARTIFACTS, latest.baseRepo!);
-				if (currentHead !== checkedCommit) {
-					Object.assign(a, { status: "stale", decision: "The task base moved while the contract check ran; re-propose against its current version.", decidedAt: new Date().toISOString() });
-					this.note(latest, this.slice(latest, sliceId).head, `Contract change to ${input.path} for ${sliceId} not applied: the task base moved during its fallback check`);
-					await this.save(latest);
-					return a;
-				}
-				return applyApproved(latest, a);
-			});
-		} finally {
-			await checker.dispose().catch((err) => console.error(`disposing the contract checker for amendment ${amendment.id} failed: ${statusOf(err).message}`, err));
-		}
-	}
-
-	private settleAmendment(id: string, outcome: Pick<Amendment, "status" | "decision">) {
-		return this.mutate(async (task) => {
-			const a = task.amendments!.find((x) => x.id === id)!;
-			Object.assign(a, outcome, { decidedAt: new Date().toISOString() });
-			this.note(task, task.slices.find((s) => s.id === a.slice)?.head, `Contract change to ${a.path} for ${a.slice} ${a.status}: ${a.decision}`);
-			return a;
-		});
-	}
-
-	/** Quorum, step 2. A reviewer agent submits its verdict on the pinned head. */
-	submitReview(sliceId: string, input: Omit<Review, "at">) {
+	submitExternalReview(sliceId: string, input: Omit<Review, "at" | "by" | "usage">, by: string) {
 		return this.exclusive(async () => {
 			const task = await this.load();
 			const slice = this.slice(task, sliceId);
-			if (!task.review.reviewers.includes(input.reviewer)) fail(400, `unknown reviewer ${input.reviewer}`);
-			if (input.verdict !== "approve" && input.verdict !== "reject") fail(400, "verdict must be approve or reject");
-			if (!slice.reviewHead || input.head !== slice.reviewHead)
-				fail(409, `review is for ${input.head}, but the head under review is ${slice.reviewHead ?? "none"}`);
-
-			slice.reviews.push({ ...input, at: new Date().toISOString() });
-			const quorum = tally(task.review, slice);
-			this.note(task, input.head, `${slice.id}: ${input.reviewer} reviewer ${input.verdict === "approve" ? "approved" : "rejected"}: ${input.summary}`);
-			if (quorum.status !== "pending") this.note(task, input.head, `${slice.id}: quorum ${quorum.status}`);
-			if (slice.status === "integrated" && input.verdict === "reject") {
-				const finding = `Late rejection from ${input.reviewer} after integration: ${input.summary}${input.evidence ? `\nEvidence: ${input.evidence}` : ""}`;
-				this.flagHuman(task, slice, input.head, [slice.attention, finding].filter(Boolean).join("\n"), finding);
-			}
-			await this.save(task);
-			// Keep valid late votes for the pinned head, but integration is final:
-			// never send an already integrated slice back or integrate it again.
-			if (slice.status === "integrated") return { task, quorum, next: "wait" as const };
-
-			// Auto-integrate an approved slice; send a rejected one back to its builder.
-			const step = nextStep(task.review, slice);
-			try {
-				if (step === "integrate") {
-					await this.integrateOrGate(task, slice);
-				} else if (step === "send-back") {
-					await this.sendBack(task, slice, reviewFeedback(task.review, slice));
-				}
-			} catch (err) {
-				slice.attention = `${step} failed: ${statusOf(err).message}`;
-			}
-			await this.save(task);
-			return { task, quorum, next: step };
+			const policy = policyFor(task, slice);
+			// A person (signed in through Access) may review any role, from the dashboard; an agent only the external ones.
+			const person = by.startsWith("person:");
+			if (person && !policy.reviewers.includes(input.reviewer)) fail(400, `${input.reviewer} is not a reviewer role here (${policy.reviewers.join(", ") || "none"})`);
+			if (!person && !(policy.external ?? []).includes(input.reviewer))
+				fail(400, `${input.reviewer} is not a role outside agents review here${policy.external?.length ? ` (they review ${policy.external.join(", ")})` : ""}`);
+			if (by === slice.authorBy)
+				fail(403, `you opened ${slice.id}, so you can't review it${by.startsWith("agent:") ? "" : ": if you're a different agent sharing the author's access token, register your own agent (register_agent) and review with its key"}`);
+			const other = slice.reviews.find((r) => r.head === input.head && r.by === by && r.reviewer !== input.reviewer);
+			if (other) fail(409, `you already reviewed ${short(input.head)} as ${other.reviewer}: each reviewer counts for one role`);
+			return this.recordReview(task, slice, { reviewer: input.reviewer, head: input.head, verdict: input.verdict, summary: input.summary, ...(input.evidence ? { evidence: input.evidence } : {}), by });
 		});
 	}
 
-	/** Merge a slice into the task base. Requires an approved quorum on the slice's current head. */
-	integrate(sliceId: string) {
-		return this.mutate(async (task) => {
-			const slice = this.buildingSlice(task, sliceId);
-			const quorum = tally(task.review, slice);
-			if (quorum.status !== "approved") fail(409, `quorum is ${quorum.status}: ${JSON.stringify(quorum)}`);
-			const result = await this.integrateSlice(task, slice);
-			if (!result.ok) fail(409, `conflicts with base: ${result.files.join(", ")}`);
-			return task;
-		});
+	/** Record a verdict on the pinned head, then merge, send back or wait, as the policy says. Caller holds the lock. */
+	private async recordReview(task: Task, slice: Slice, input: Omit<Review, "at">) {
+		const policy = policyFor(task, slice);
+		if (input.verdict !== "approve" && input.verdict !== "reject") fail(400, "verdict must be approve or reject");
+		if (typeof input.summary !== "string" || !input.summary.trim()) fail(400, "a review needs a summary");
+		if (!slice.reviewHead || input.head !== slice.reviewHead)
+			fail(409, `review is for ${input.head}, but the head under review is ${slice.reviewHead ?? "none"}`);
+
+		slice.reviews.push({ ...input, at: new Date().toISOString() });
+		const quorum = tally(policy, slice);
+		this.note(task, input.head, `${slice.id}: ${input.reviewer} reviewer ${input.verdict === "approve" ? "approved" : "rejected"}: ${input.summary}`);
+		if (quorum.status !== "pending") this.note(task, input.head, `${slice.id}: quorum ${quorum.status}`);
+		if (slice.status === "integrated" && input.verdict === "reject") {
+			const finding = `Late rejection from ${input.reviewer} after integration: ${input.summary}${input.evidence ? `\nEvidence: ${input.evidence}` : ""}`;
+			this.flagHuman(task, slice, input.head, [slice.attention, finding].filter(Boolean).join("\n"), finding);
+		}
+		await this.save(task);
+		// Keep valid late votes for the pinned head, but integration is final:
+		// never send an already integrated slice back or integrate it again.
+		if (slice.status === "integrated") return { task, quorum, next: "wait" as const };
+
+		// Auto-integrate an approved slice; send a rejected one back to its builder.
+		const step = nextStep(policy, slice);
+		try {
+			if (step === "integrate") {
+				await this.integrateOrGate(task, slice);
+			} else if (step === "send-back") {
+				await this.sendBack(task, slice, reviewFeedback(policy, slice));
+			}
+		} catch (err) {
+			slice.attention = `${step} failed: ${statusOf(err).message}`;
+		}
+		await this.save(task);
+		return { task, quorum, next: step };
 	}
 
 	/**
@@ -1456,6 +1329,8 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 		const head = slice.reviewHead!;
 		slice.gate = { status: "queued", head, baseHead: "", at: new Date().toISOString(), excluded: [] };
 		await this.env.GATE.getByName(task.id).enqueue(task.id, { slice: slice.id, head });
+		// Look again if no result comes (see restartStalledGates).
+		await this.scheduleLeaseCheck(task);
 	}
 
 	/**
@@ -1473,6 +1348,7 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 			head: lead.reviewHead!,
 			group: members.map((m) => ({ slice: m.id, head: m.reviewHead! })),
 		});
+		await this.scheduleLeaseCheck(task);
 	}
 
 	/**
@@ -1486,7 +1362,7 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 			const members = gateMembers(task, sliceId, head, group);
 			if (!members) return null;
 			const [lead, ...others] = members;
-			const baseHead = (await headOf(this.env.ARTIFACTS, task.baseRepo!))!;
+			const baseHead = (await headOf(this.env.ARTIFACTS, task.baseRepo!, projectBranch(task)))!;
 			const exclude = gateExclusions(task.slices, members.map((m) => m.id));
 			const base = await remoteFor(this.env.ARTIFACTS, task.baseRepo!, "read", 3600);
 			const forks = await Promise.all(members.map((m) => remoteFor(this.env.ARTIFACTS, m.repo!, "read", 3600)));
@@ -1495,9 +1371,10 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 			await this.save(task);
 			return {
 				baseHead,
+				branch: projectBranch(task),
 				base: { remote: base.url, token: base.token },
-				fork: { remote: forks[0].url, token: forks[0].token },
-				others: others.map((o, i) => ({ slice: o.id, head: o.reviewHead!, remote: forks[i + 1].url, token: forks[i + 1].token })),
+				fork: { remote: forks[0].url, token: forks[0].token, ref: changeRef(task, lead) },
+				others: others.map((o, i) => ({ slice: o.id, head: o.reviewHead!, remote: forks[i + 1].url, token: forks[i + 1].token, ref: changeRef(task, o) })),
 				checks: task.verify,
 				exclude,
 			};
@@ -1518,7 +1395,7 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 			const members = gateMembers(task, sliceId, result.head, group);
 			if (!members) return { outcome: "stale" as const };
 			const [slice, ...others] = members;
-			const baseHead = await headOf(this.env.ARTIFACTS, task.baseRepo!);
+			const baseHead = await headOf(this.env.ARTIFACTS, task.baseRepo!, projectBranch(task));
 			if (baseHead !== result.baseHead) {
 				this.note(task, slice.reviewHead, `${slice.id}: gate result discarded, the base moved from ${short(result.baseHead)} to ${short(baseHead)}; re-running`);
 				if (others.length) await this.startGroupGate(task, slice, others);
@@ -1586,7 +1463,7 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 	retryGate(sliceId: string, actor: AccessIdentity) {
 		return this.mutate(async (task) => {
 			const slice = this.buildingSlice(task, sliceId);
-			const quorum = tally(task.review, slice);
+			const quorum = tally(policyFor(task, slice), slice);
 			const waived = slice.waivers?.some((w) => w.head === slice.reviewHead);
 			if (quorum.status !== "approved" && !waived) fail(409, `quorum is ${quorum.status}`);
 			if (!task.verify.length) fail(409, "the task has no verify commands");
@@ -1617,9 +1494,9 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 			const task = await this.load();
 			const slice = this.buildingSlice(task, sliceId);
 			if (!slice.reviewHead) fail(409, `slice ${sliceId} has no commit under review`);
-			const builder = await this.env.BUILDER.getByName(slice.repo!).state();
+			const builder = await this.env.BUILDER.getByName(agentsOf(task, slice)).state();
 			if (builder && (builder.status === "queued" || builder.status === "working")) fail(409, "the slice's builder is still working");
-			const head = await headOf(this.env.ARTIFACTS, slice.repo!);
+			const head = await this.changeHead(task, slice);
 			if (head !== slice.reviewHead) fail(409, `the fork moved to ${head} after review of ${slice.reviewHead}`);
 
 			const by = accessIdentityLabel(actor);
@@ -1687,15 +1564,15 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 	 */
 	private async integrateSlices(task: Task, slices: Slice[]): Promise<{ ok: true } | { ok: false; slice: Slice; files: string[] }> {
 		for (const slice of slices) {
-			const head = await headOf(this.env.ARTIFACTS, slice.repo!);
+			const head = await this.changeHead(task, slice);
 			if (head !== slice.reviewHead) fail(409, `${slice.id} moved to ${head} after review of ${slice.reviewHead}`);
 			if (slice.outOfLane.length) fail(409, `${slice.id} changed paths outside its lane: ${slice.outOfLane.join(", ")}`);
 		}
-		const ws = await Workspace.clone(await remoteFor(this.env.ARTIFACTS, task.baseRepo!, "write"));
+		const ws = await Workspace.clone(await remoteFor(this.env.ARTIFACTS, task.baseRepo!, "write"), projectBranch(task));
 		for (const slice of slices) {
-			await ws.fetch(slice.id, await remoteFor(this.env.ARTIFACTS, slice.repo!));
+			await ws.fetch(slice.id, await remoteFor(this.env.ARTIFACTS, slice.repo!), changeRef(task, slice));
 			try {
-				await ws.merge(`refs/remotes/${slice.id}/main`, `Integrate ${slice.id}: ${slice.title}`);
+				await ws.merge(`refs/remotes/${slice.id}/${changeRef(task, slice)}`, `Integrate ${slice.id}: ${slice.title}`);
 			} catch (err) {
 				if (err instanceof git.Errors.MergeConflictError) return { ok: false, slice, files: err.data.filepaths };
 				throw err;
@@ -1705,10 +1582,11 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 
 		for (const slice of slices) {
 			slice.status = "integrated";
+			slice.endedAt = new Date().toISOString();
 			slice.attention = undefined;
-			this.note(task, slice.reviewHead, `${slice.id} integrated into the task base${slices.length > 1 ? `, together with ${slices.filter((s) => s !== slice).map((s) => s.id).join(", ")}` : ""}`);
+			this.note(task, slice.reviewHead, `${slice.id} merged into ${projectBranch(task)}${slices.length > 1 ? `, together with ${slices.filter((s) => s !== slice).map((s) => s.id).join(", ")}` : ""}`);
 		}
-		const integratedHead = await headOf(this.env.ARTIFACTS, task.baseRepo!);
+		const integratedHead = await headOf(this.env.ARTIFACTS, task.baseRepo!, projectBranch(task));
 		for (const request of task.laneChangeRequests ?? []) {
 			if (!slices.some((slice) => slice.id === request.owner) || (request.status !== "pending" && request.status !== "answered")) continue;
 			let included = false;
@@ -1725,7 +1603,7 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 				request.status = "integrated";
 				request.integratedAt = new Date().toISOString();
 				this.note(task, request.answerCommit, `Cross-lane request ${request.id} from ${request.requester} fulfilled by slice ${request.owner}; change commit ${request.answerCommit} is integrated`);
-				const message = `Cross-lane request ${request.id} was integrated with owner slice ${request.owner} at commit ${request.answerCommit}. Call fetch_base and merge base/main to get it, then re-run your tests.`;
+				const message = `Cross-lane request ${request.id} was integrated with owner slice ${request.owner} at commit ${request.answerCommit}. Call fetch_base and merge what it fetched to get it, then re-run your tests.`;
 				await this.wakeLaneRequester(task, request, message);
 			} else {
 				const message = `Owner slice ${request.owner} integrated without the answered change commit for cross-lane request ${request.id} (${request.path}). The owner can no longer change its lane; this request needs a human.`;
@@ -1777,35 +1655,15 @@ export class Coordinator extends DurableObject<Env> implements CoordinatorHumanA
 		slice.revisions = (slice.revisions ?? 0) + 1;
 		this.note(task, slice.reviewHead, `${slice.id} sent back to its builder (revision ${slice.revisions} of ${MAX_REVISIONS}):\n${clipText(message, 1_500)}`);
 		task.queue = task.queue.filter((item) => !(item.kind === "reviewer" && item.slice === slice.id));
-		await Promise.allSettled(this.cancelReviewers(slice.repo!, task.review.reviewers, head, "the slice was sent back to its builder"));
+		await Promise.allSettled(this.cancelReviewers(agentsOf(task, slice), hostedRoles(policyFor(task, slice)), head, "the slice was sent back to its builder"));
 		// An external agent reads the findings from its inbox; there is no hosted builder to resume.
 		if (slice.external) {
 			this.toInbox(slice, message);
 			return;
 		}
-		await this.env.BUILDER.getByName(slice.repo!).revise(message, await this.resumeCredentials(task, slice));
+		await this.env.BUILDER.getByName(agentsOf(task, slice)).revise(message, await this.resumeCredentials(task, slice));
 		// A revision runs right away, outside the queue: the slice is blocking integration.
 		if (!task.active.builders.includes(slice.id)) task.active.builders.push(slice.id);
 	}
 
-	/** Merge the task base into the project once every slice is integrated. */
-	land(actor: AccessIdentity) {
-		return this.mutate(async (task) => {
-			this.requireLandable(task);
-
-			const ws = await Workspace.clone(await remoteFor(this.env.ARTIFACTS, task.repo, "write"));
-			await ws.fetch("base", await remoteFor(this.env.ARTIFACTS, task.baseRepo!));
-			let landed: string | undefined;
-			try {
-				landed = (await ws.merge("refs/remotes/base/main", `Land task ${task.id}: ${task.goal}`))?.oid;
-			} catch (err) {
-				if (err instanceof git.Errors.MergeConflictError) fail(409, `conflicts with ${task.repo}: ${err.data.filepaths.join(", ")}`);
-				throw err;
-			}
-			await ws.push();
-			task.phase = "landed";
-			this.note(task, landed, `Task landed in ${task.repo} by ${accessIdentityLabel(actor)}`);
-			return task;
-		});
-	}
 }

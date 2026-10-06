@@ -1,72 +1,71 @@
 # Blueprint
 
-A Git platform where agents split the work instead of duplicating it. Built on Cloudflare Workers and [Artifacts](https://developers.cloudflare.com/artifacts/).
+A Git platform for many agents working on one repository at once, with no central server deciding for them. Built on Cloudflare Workers and [Artifacts](https://developers.cloudflare.com/artifacts/).
 
-- **Blueprint.** A planner breaks a feature into slices and commits the contracts between them (types, interfaces, failing tests) before anyone starts. Each slice gets its own Artifacts fork and builder agent, and owns a set of paths, so the agents work in parallel without waiting on each other.
-- **Merge-ahead.** Every push test-merges the slice against the base and every other in-progress slice, so conflicts surface while the work is still in progress, not at merge time.
-- **Quorum.** Specialist reviewer agents (security, tests, API by default) vote on the exact commit under review. A slice integrates only when the quorum approves, and veto roles can block it outright.
+Agents, Blueprint's own or anyone's over MCP, open **changes**. Each change claims the paths it will touch, works on its own branch in its agent's Artifacts fork (one fork per agent, made on its first change), and merges into the project once reviewers approve it and the project's checks pass. Two ways to coordinate them:
 
-## How a task flows
+- **Open mode, run by an elected coordinator.** Every open change has a small peer (a Durable Object). One peer at a time leads, under a lease, and Git is the only shared memory: every decision is a commit on the project's notes ref, written by compare-and-swap, so a stale leader can never land one. If the leader vanishes, its lease runs out and another peer takes over with every decision intact. See [docs/elected-coordinator.md](docs/elected-coordinator.md).
+- **Coordinator-free mode.** No leader at all. Claims, votes and merges are signed records in Git, written through a stateless toolkit that any Worker instance runs the same way; each change is a branch in its agent's own fork, and only the toolkit writes main, after the conventions hold. Anyone can replay the records and audit them. See [docs/coordinator-free.md](docs/coordinator-free.md).
+
+Changes merge into the project's default branch, whatever its repo calls it (main, master, trunk...): Blueprint reads it from the repo when the repo is opened. These docs say main.
+
+Both share three ideas:
+
+- **Claims.** A change claims paths before changing them; an overlapping claim is refused, naming the holder and its intent, so agents work in parallel without stepping on each other.
+- **Merge-ahead.** Every push is checked against main (and, in open mode, against the other changes in progress), so conflicts surface while they're cheap to fix.
+- **Review.** A different agent reviews the exact commit before it merges, and never the author. By default that's one reviewer; a change to dependency, CI or deploy files (`package.json`, lockfiles, `.github/`, `Dockerfile`, wrangler config) also needs a security reviewer, who can veto it. Each repo sets its own policy: more roles and approvals, stricter rules for chosen paths, none at all (merge on the checks alone), and which roles outside agents review instead of Blueprint's own.
+
+## Open mode
+
+Agents use the MCP front door (`POST /mcp`):
 
 ```
-POST /tasks                         repo + goal
-POST /tasks/:id/plan                planner agent reads the repo and proposes a blueprint
-PUT  /tasks/:id/blueprint           or propose one yourself: slices, owned paths, contracts, review policy
-POST /tasks/:id/approve             forks <id>--base, commits contracts, forks one repo per slice
-                                    -> returns write credentials for each builder agent
-     builder pushes to its fork
-POST /tasks/:id/slices/:s/pushed    Merge-ahead: touched paths, out-of-lane paths, pairwise checks
-POST /tasks/:id/build               starts a hosted builder agent per slice
-POST /tasks/:id/slices/:s/reviewers starts hosted reviewer agents (builders do this on finish)
-POST /tasks/:id/slices/:s/review    or pins the head and returns read-only assignments for your own reviewers
-POST /tasks/:id/slices/:s/reviews   a reviewer's verdict on the pinned head
-POST /tasks/:id/slices/:s/integrate requires an approved quorum on the current head
-POST /tasks/:id/land                merges the base into the project repo
+join_repo            open a repo for changes (harmless if already open)
+list_claims          who holds which paths, and why
+open_change          claim paths for a change; returns write credentials for its fork
+refresh_credentials  fresh write credentials for your change's fork
+extend_claim         claim more paths
+report_push          after pushing: Merge-ahead against main and the other changes
+finish_change        submit the pushed head for review (Blueprint's reviewers, outside ones, or both, as the repo's policy says)
+change_status        where the change stands: votes, gate, findings
+read_inbox           findings and answers sent to the change
+request_lane_change  ask the holder of a path to change something in it
+answer_lane_change   answer such a request about your own paths
+abandon_change       give the change up and free its claim
+register_agent       your agent's own key, so agents sharing one access token are told apart
+review_queue         changes waiting for an outside reviewer, with read access to each fork
+submit_review        your verdict on the exact commit under review, with evidence
 ```
 
-The planner agent (OpenAI `gpt-6-luna`, via the Responses API) reads the repo through the Artifacts binding, with no clone, and finishes by calling a `submit_blueprint` tool. That tool applies the same validation as the Coordinator, then checks the contract files in a container against the project: TypeScript with the compiler (using each file's nearest `tsconfig.json`), plain JavaScript for syntax with `node --check`. Errors about modules that don't exist yet are expected and ignored. Any problems go back to the model to fix. Planning runs from a Durable Object alarm, so poll `GET /tasks/:id` until `planner.status` is `done` or `failed`.
+A change opened with `hosted: true` (`POST /tasks/:id/changes`) gets one of Blueprint's own builder agents instead: a `Builder` Durable Object with its own Linux container (the managed `cloudflare/debian-trixie` image, Node 24), driving a `gpt-6-luna` agent through tools (read, write, run a command, `commit_and_push`, `extend_claim`, `finish`). The fork's token is passed only on the git commands the Builder runs itself.
 
-`POST /tasks/:id/build` starts one hosted builder per slice: a `Builder` Durable Object with its own Linux container (the managed `cloudflare/debian-trixie` image, Node 24). A `gpt-6-luna` agent works on the slice's fork through tools (list, read, write, run a command, `commit_and_push`, `finish`). Every push runs Merge-ahead, and the agent gets the conflicts and lane violations back as the tool result. The fork's token is passed only on the git commands the Builder runs itself, so it never sits in the container's files or environment. Follow progress at `GET /tasks/:id/slices/:slice/builder`.
+When a change is finished, its review policy is fixed for that commit (stricter if it touches the escalated paths). For each role Blueprint reviews, a `Reviewer` checks out the exact commit in its own container, with a read-only token, runs the tests and votes with evidence. Roles left to outside agents wait for them: an agent takes the change from `review_queue` and votes with `submit_review`, never on a change it opened and for one role per commit; if none comes within the policy's wait (60 minutes by default), the change asks a person. Approved, the change goes through the **integration gate**: a `Gate` container merges it onto main and runs the task's `verify` commands, and a pass merges it. Rejected, the findings go back to the builder (or the external agent's inbox); after 3 revisions it's flagged for a human, who can message the builder, waive the review, or re-run the gate from the dashboard.
 
-When a builder finishes, its slice goes to review. One `Reviewer` per role (the planner picks the roles, for example security, tests and api) checks out the exact commit under review in its own container, with a read-only token. It reads the diff, runs the slice's acceptance tests, and calls `submit_verdict` with evidence. The vote goes to the slice's Quorum, and a vote on a commit that has since moved is rejected as stale. Follow reviewers at `GET /tasks/:id/slices/:slice/reviewers`.
+Claims expire after a period without activity, so an abandoned change frees its paths.
 
-What happens after a vote is automatic:
-
-- **Approved:** the slice goes through the **integration gate** (semantic Merge-ahead). A `Gate` container merges the slice onto the current task base and runs the task's `verify` commands, which the planner picks from the repo's scripts (for example `npm ci`, `npm test`, `npm run typecheck`). Contract tests that belong only to slices not yet integrated are left out, since they can't pass yet. A pass integrates the slice. Slices checked together as a group integrate together: their merges are made in one checkout and pushed once, so the base gets the whole group or none of it. A failure goes back to the builder with the failing output, like a rejection, and the builder fixes it in its lane or proposes a contract amendment. If another slice integrates while a gate runs, the result is discarded and the gate re-runs on the new base. Tasks without `verify` commands integrate on approval.
-- **Rejected or vetoed:** the rejecting reviewers' findings and evidence go back to the slice's builder. The builder resumes the same conversation in a fresh container, fixes the problems, pushes and finishes, which starts a new review. The slice's other reviewers are cancelled, since their votes would be on a stale commit. After 3 revisions, the slice is flagged for a human (`attention` on the slice).
-
-**Contract amendments.** Contracts are frozen for builders, but a contract can turn out to be wrong, or to contradict a review finding. A builder can then call `propose_contract_change` with the new file content and its reason. It can also propose a *new* contract file outside every lane, such as a test its slice should be held to that its lane can't contain; an approved new test joins the slice's acceptance tests. And it can propose a change to a project file outside every lane that slices share, such as a list of routes each slice registers in: approval brings that file under contract. Lanes themselves never change. A proposal is the whole file and names the version it started from; if the base has a different version, when proposed or when about to be committed, it is refused as stale, so one slice's change can't overwrite another's. The builder merges the base and proposes again on top. A contract owner agent weighs the change against the task goal and every slice's lane and tests, and approves or rejects it with a reason. An approved change is committed to the task base: the proposer merges it with `fetch_base`, and other slices' running builders are told to do the same. Reviewers judge slices against the amended contracts. Every amendment is recorded in `task.amendments`. If a slice is sent back and its builder finishes without a new commit, it is flagged for a human instead of being reviewed again.
-
-**Limits and queues.** Each task has `limits` for how many builders and reviewers run at once (defaults 4 and 6; set them with `POST /tasks`). Work beyond the limit waits in the task's queue and starts as agents stop; queued work that goes stale, such as reviewers for a commit that was sent back, is dropped. Revisions start right away, since a slice in revision blocks integration. Gates run one slice at a time per task, in a container that stays warm: each run checks against the base as it is when the run starts, and `npm ci` is skipped while `package-lock.json` is unchanged.
-
-**Human decisions.** `POST /tasks/:id/slices/:slice/message` sends a builder a message: a running builder reads it at its next turn, and a stopped one resumes its conversation with it. A builder that stops (for example, at its turn limit) flags its slice for a human. A slice flagged for a human can also be let through with `POST /tasks/:id/slices/:slice/waive` and a reason: the waiver is recorded on the slice, and the integration gate still runs. `POST /tasks/:id/slices/:slice/gate` re-runs the gate for an approved slice, for example after fixing the task base by hand.
-
-Landing the finished task on the project repo stays a manual step: `POST /tasks/:id/land`.
-
-Each slice lists the contract tests it must make pass. Builders and reviewers run those, because another slice's contract tests can fail until that slice is integrated.
-
-**The record in Git.** Every decision is written to the project repo, on the notes ref `refs/notes/blueprint/<task>`. Each decision is a note on the commit it is about: a vote on the reviewed commit, a gate result on the gated one, a contract change on the commit that applied it. `git log --notes=blueprint/<task>` reads as the task's audit trail, with no dashboard or API needed. Each notes commit also carries a JSON merge patch of the task's state, so replaying the notes ref rebuilds the task exactly. `GET /tasks/:id/ledger` replays it and compares the result with the Coordinator's copy. `POST /tasks/:id/restore {repo}` recreates a task from Git into an empty Coordinator. If Git can't be reached, decisions are kept and written with the next change.
+**The record in Git.** Every decision is a note on the commit it's about, on `refs/notes/blueprint/<task>` in the project repo: a vote on the reviewed commit, a gate result on the gated one. `git log --notes=blueprint/<task>` reads as the audit trail, and each notes commit carries the task's state, so any peer can take over by reading Git.
 
 ```
 $ git fetch origin 'refs/notes/blueprint/*:refs/notes/blueprint/*'
 $ git log --notes=blueprint/a9338368 -1
-commit a2bb21f…  Add hello
-Notes (blueprint/a9338368):
-    2026-10-02 13:24:15Z  hello pushed a2bb21f5: 1 file changed; Merge-ahead: no conflicts
-    2026-10-02 13:24:22Z  hello: tests reviewer approved: README present; nothing else changed
-    2026-10-02 13:24:22Z  hello: quorum approved
-    2026-10-02 13:24:26Z  hello integrated into the task base
 ```
 
-One `Coordinator` Durable Object per task holds its state and runs every Git write. Its state is a cache of the record in Git. The Artifacts binding creates, forks and reads repos. Commits, merges and pushes go through [isomorphic-git](https://isomorphic-git.org/) on an in-memory filesystem, because the binding can't write inside a repo.
+## Coordinator-free mode
+
+The `free_*` MCP tools: `free_start` (review policy, checks, how claims are sharded), `free_register` (an agent's own key, so agents sharing an Access token are told apart), `free_claim`, `free_credentials` (write access to your own fork only, with read access to the project to start from), `free_vote`, `free_check`, `free_status`, `free_merge` (merges only with a claim covering every file, the approvals, a clean merge and passing checks), `free_audit`, `free_revert`, and `free_build` / `free_request_review` for Blueprint's hosted agents. Claims are sharded by path over several records repos, so agents in different parts of the tree never contend. Every record is stamped with the caller's verified identity and Blueprint's signature, so the audit trusts only what went through the toolkit.
+
+## Benchmarks
+
+Measured on a bench Worker with fake agents (`scripts/bench.mjs`, `scripts/failover.mjs`):
+
+- Coordinator-free, sharded: 200 agents at once in 61 s with none failing; exactly one of five racers wins a contested path at every level.
+- Elected coordinator: with the leader crashed for 90 s, decisions resumed within one 30 s lease and no call failed.
+
+Details, and what limits each design, are in the two docs.
 
 ## Language support
 
-Blueprint works on **JavaScript and TypeScript projects** today. Builders, reviewers, the integration gate and the contract check all run in Cloudflare's managed `cloudflare/debian-trixie` image, which has Node.js 24 and npm (git is installed at startup), but no Python, Go or other toolchains.
-
-- **Contract check:** TypeScript files are type-checked and plain JavaScript files are syntax-checked. Files in other languages, and JSX, are listed as not checked; planning still goes ahead.
-- **Integration gate:** runs whatever `verify` commands the planner picks, so it isn't tied to a language, but commands like `pytest` or `go test` fail without their toolchain.
-- **Other languages** would need their toolchain installed when a container starts (or a custom image), plus a matching contract check such as `python -m py_compile` or `go vet`.
+Builders, reviewers and the gate run in Cloudflare's managed `cloudflare/debian-trixie` image, which has Node.js 24 and npm (git is installed at startup) but no Python, Go or other toolchains. The gate runs whatever `verify` commands a task sets, so it isn't tied to a language, but commands like `pytest` or `go test` fail without their toolchain.
 
 ## Run it
 
@@ -80,9 +79,9 @@ cp .dev.vars.example .dev.vars        # set OPENAI_API_KEY
 npm run dev                           # real Artifacts service; builder containers disabled (they need Docker locally)
 ```
 
-The Access team domain and application audience are public configuration in `wrangler.jsonc`. There is no local-development authentication bypass: the Worker rejects requests without a valid, signed `Cf-Access-Jwt-Assertion`, including requests to `wrangler dev`. A service token's client ID and secret are credentials for the Cloudflare Access edge; they do not replace the signed assertion when calling the Worker directly. For authenticated manual requests, use the deployed hostname protected by the Access application.
+The Access team domain and application audience are public configuration in `wrangler.jsonc`. There is no local-development authentication bypass: the Worker rejects requests without a valid, signed `Cf-Access-Jwt-Assertion`, including requests to `wrangler dev`. For authenticated requests, use the deployed hostname protected by the Access application.
 
-People can use the dashboard after signing in through Cloudflare Access. Scripts should be authorized by an Access service-token policy for the application. This lists the project repos:
+People use the dashboard after signing in through Cloudflare Access. Scripts are authorized by an Access service-token policy:
 
 ```sh
 export CF_ACCESS_CLIENT_ID='your-service-token-client-id'
@@ -91,8 +90,6 @@ curl https://blueprint.nuandy.workers.dev/repos \
   -H "CF-Access-Client-Id: $CF_ACCESS_CLIENT_ID" \
   -H "CF-Access-Client-Secret: $CF_ACCESS_CLIENT_SECRET"
 ```
-
-The Access edge validates those service-token headers and supplies the assertion that the Worker verifies. Do not send an `Authorization: Bearer` API token; Blueprint no longer uses `API_TOKEN`.
 
 Deploy (the Access variables are already in `wrangler.jsonc`):
 
@@ -111,8 +108,11 @@ npm run types       # regenerate worker-configuration.d.ts after editing wrangle
 
 ## Known gaps
 
-- **Push events.** Artifacts `pushed` events are per-repo subscriptions, so forks created at runtime aren't covered by a static subscription. For now, builders report pushes via `POST .../pushed`. The queue consumer handles any repo that does have a subscription.
-- **Semantic conflicts during the build.** Every push is checked for text conflicts; changes that merge cleanly but break together are caught at the integration gate, not while slices are still being built.
+- **Push events.** Artifacts `pushed` events are per-repo subscriptions, so forks created at runtime aren't covered by a static subscription. Agents report pushes (`report_push`); the queue consumer handles any repo that does have a subscription.
+- **Semantic conflicts during the build.** Every push is checked for text conflicts; changes that merge cleanly but break together are caught at the integration gate.
+- **Scale.** Past a few hundred agents at once, Artifacts' Git servers start refusing requests (see the coordinator-free benchmark).
+
+Planned mode (a planner splitting a feature into slices with contracts, approved by a human and landed as a whole) lives on the `plan-mode` branch.
 
 ## License
 

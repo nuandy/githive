@@ -1,0 +1,103 @@
+{
+	"label": "free-records-100",
+	"mode": "free",
+	"base": "https://blueprint-bench.nuandy.workers.dev",
+	"repo": "bench-free-rec100-1791152737",
+	"task": null,
+	"racers": 5,
+	"idle": 0,
+	"at": "2026-10-04T22:25:54.188Z",
+	"ledgerMatches": null,
+	"ledgerCommits": null,
+	"levels": [
+		{
+			"agents": 100,
+			"wallMs": 73948.894208,
+			"calls": 606,
+			"callsPerSecond": 8.194848705857202,
+			"errors": 0,
+			"failures": [],
+			"race": {
+				"winners": 1,
+				"unexpected": []
+			},
+			"leftoverClaims": 0,
+			"tools": {
+				"list_claims": {
+					"n": 200,
+					"p50": 5712.528375000002,
+					"p95": 10349.109875000002,
+					"p99": 10846.661958,
+					"max": 12316.727167000001
+				},
+				"open_change": {
+					"n": 105,
+					"p50": 16475.227209000004,
+					"p95": 18323.557,
+					"p99": 19044.953959000002,
+					"max": 19347.863708
+				},
+				"abandon_change": {
+					"n": 101,
+					"p50": 5824.814790999997,
+					"p95": 8083.912624999997,
+					"p99": 9146.809666000001,
+					"max": 9360.483667000008
+				},
+				"report_push": {
+					"n": 100,
+					"p50": 6716.968124999999,
+					"p95": 7671.620208,
+					"p99": 10609.762792000001,
+					"max": 32826.82925
+				},
+				"change_status": {
+					"n": 100,
+					"p50": 5473.750166999998,
+					"p95": 6878.7748749999955,
+					"p99": 7913.906707999995,
+					"max": 8970.541082999996
+				}
+			},
+			"lock": {
+				"samples": 0,
+				"waitMs": {
+					"n": 0,
+					"p50": null,
+					"p95": null,
+					"p99": null,
+					"max": null
+				},
+				"runMs": {
+					"n": 0,
+					"p50": null,
+					"p95": null,
+					"p99": null,
+					"max": null
+				},
+				"flushMs": {
+					"n": 0,
+					"p50": null,
+					"p95": null,
+					"p99": null,
+					"max": null
+				},
+				"busyFraction": 0,
+				"flushShareOfHold": 0,
+				"peakQueue": 0,
+				"byCall": {}
+			},
+			"ledger": {
+				"matches": null,
+				"commits": null,
+				"lagMs": {
+					"n": 0,
+					"p50": null,
+					"p95": null,
+					"p99": null,
+					"max": null
+				}
+			}
+		}
+	]
+}

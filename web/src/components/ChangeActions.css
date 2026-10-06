@@ -1,0 +1,130 @@
+.merge-box {
+	position: relative;
+	margin-left: 44px;
+	border: 1px solid var(--border);
+	border-radius: var(--radius);
+	background: var(--surface);
+	box-shadow: var(--shadow);
+}
+
+.merge-box--merged {
+	border-color: color-mix(in srgb, var(--good) 45%, transparent);
+}
+
+.merge-box__row {
+	display: flex;
+	align-items: flex-start;
+	gap: 12px;
+	padding: 12px 16px;
+	border-top: 1px solid var(--border);
+}
+
+.merge-box__row:first-child {
+	border-top: 0;
+}
+
+.merge-box__icon {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	flex-shrink: 0;
+	width: 28px;
+	height: 28px;
+	border-radius: 50%;
+	background: var(--neutral-soft);
+	color: var(--neutral);
+}
+
+.merge-box__icon--good { background: var(--good); color: #fff; }
+.merge-box__icon--bad { background: var(--bad); color: #fff; }
+.merge-box__icon--warn { background: var(--warn-soft); color: var(--warn); }
+.merge-box__icon--needs { background: var(--needs); color: #fff; }
+
+.merge-box__text {
+	min-width: 0;
+	padding-top: 3px;
+	overflow-wrap: anywhere;
+}
+
+.merge-box__text .muted {
+	font-size: 13px;
+	margin-top: 1px;
+}
+
+.merge-box__section {
+	padding: 14px 16px;
+	border-top: 1px solid var(--border);
+}
+
+.merge-box__section--needs {
+	display: grid;
+	gap: 14px;
+}
+
+.merge-box__feedback {
+	margin-top: 8px;
+}
+
+.merge-box__feedback summary {
+	font-size: 13px;
+	color: var(--text-muted);
+}
+
+.merge-box__feedback pre {
+	margin-top: 6px;
+	max-height: 280px;
+	background: var(--surface);
+}
+
+.change-actions__form {
+	display: grid;
+	gap: 8px;
+}
+
+.change-actions__form p {
+	margin: 0;
+	font-size: 13px;
+}
+
+.change-actions__buttons {
+	display: flex;
+	align-items: center;
+	justify-content: flex-end;
+	flex-wrap: wrap;
+	gap: 10px;
+}
+
+.change-actions__inline {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 12px;
+	flex-wrap: wrap;
+}
+
+.change-actions__inline p {
+	margin: 0;
+	flex: 1;
+	min-width: 200px;
+}
+
+.change-actions__feedback {
+	margin: 4px 0 0;
+	font-size: 13px;
+	overflow-wrap: anywhere;
+}
+
+.change-actions__danger > summary {
+	color: var(--bad);
+	font-weight: 500;
+}
+
+.change-actions__danger[open] > summary {
+	margin-bottom: 10px;
+}
+
+@media (max-width: 720px) {
+	.merge-box {
+		margin-left: 0;
+	}
+}

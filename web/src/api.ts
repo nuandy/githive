@@ -1,9 +1,149 @@
 import type { Task } from "../../src/types";
 import type { LaneChangeRequest } from "../../src/lane-change-contract";
-import type { ContractFile, UnifiedCodeDiff } from "./dashboard-contract";
 
 export type { Task };
+import type { Summaries } from "./lib/repos";
+
+/** Unified, read-only Git diff pinned to the commits used to generate it. */
+export interface UnifiedCodeDiff {
+	base: string;
+	head: string;
+	unified: string;
+	/** Every path whose tree entry changed, including paths whose diff text was capped. */
+	files: string[];
+	/** Changed paths whose diff content was omitted by per-file or total output limits. */
+	omitted: string[];
+}
+
+/** One decision in a repo's log in Git (GET /tasks/:id/history), oldest first. */
+export interface HistoryEntry {
+	at: string;
+	text: string;
+	commit: string;
+}
+
+/** Accept { entries: [...] } (or a bare list), dropping malformed entries. */
+export function normalizeHistory(value: unknown): HistoryEntry[] {
+	const record = asRecord(value);
+	const list = Array.isArray(value) ? value : asArray<unknown>(record?.entries);
+	return list.flatMap((item) => {
+		const entry = asRecord(item);
+		if (!entry || typeof entry.text !== "string") return [];
+		return [{ at: typeof entry.at === "string" ? entry.at : "", text: entry.text, commit: typeof entry.commit === "string" ? entry.commit : "" }];
+	});
+}
+
+/** A repo in coordinator-free mode, as the dashboard shows it (GET /free/:repo; see src/free/mcp.ts). */
+export interface FreeSnapshot {
+	repo: string;
+	policy: { required: number; vetoes: string[]; escalate?: { paths: string[]; required?: number; vetoes?: string[] }[] };
+	verify: string[];
+	/** The project's branch changes merge into (older servers: absent, main). */
+	branch?: string;
+	/** Whether records and merges are stamped with verified identity. */
+	verified: boolean;
+	/** How claims are kept (newer servers): in one record until the load calls for shards ("on demand"), always ("never"), or sharded since `since`. */
+	sharding?: "on demand" | "never" | { since?: string; because?: string };
+	/** How many path segments deep claims are sharded, once they are. */
+	shardDepth?: number;
+	/** How votes are kept (newer servers): in one record until the load calls for buckets ("on demand"), always ("never"), or in buckets since `since`. */
+	votesSharding?: "on demand" | "never" | { since?: string; because?: string };
+	claims: {
+		change: string;
+		agent: string;
+		paths: string[];
+		intent: string;
+		since: string;
+		active: string;
+		by?: string;
+		/** The change's branch head, null until something is pushed. */
+		head: string | null;
+		approval: { approved: boolean; approvals: number; required: number; vetoedBy: string[]; /** Veto roles that haven't approved yet (newer servers); a change merges only once each has. */ awaiting?: string[] };
+		/** A question for a person about the change (an agent asked, or Blueprint's builder failed), until a person votes. */
+		attention?: { reason: string; agent: string; at: string };
+		/** Blueprint's hosted agents on the change. */
+		hosted?: { builder?: { status: string; revisions: number; error?: string }; reviewers: { role: string; status: string; verdict?: string }[] };
+	}[];
+	votes: { commit: string; reviewer: string; role: string; verdict: "approve" | "reject"; evidence: string; at: string; by?: string }[];
+	/** Loaded apart (GET /free/:repo/audit): it replays every record, so it comes slower and less often. */
+	audit?: FreeAudit;
+}
+
+/** A person's vote from the dashboard. */
+export interface FreeVoteInput {
+	role: string;
+	verdict: "approve" | "reject";
+	evidence: string;
+}
+
+export interface FreeAudit {
+	merges: number;
+	open: number;
+	violations: { commit: string; author: string; rule: string; detail: string; by?: string; resolvedBy?: string }[];
+}
 export type Slice = Task["slices"][number];
+export type ReviewPolicy = Task["review"];
+
+/** A repo's files at a branch or commit (GET /repos/:repo/tree). */
+export interface RepoTree {
+	ref: string;
+	commit: string;
+	/** Every file path, sorted. */
+	files: string[];
+	/** The listing stopped early: a very large repo. */
+	truncated: boolean;
+}
+
+/** One file at a branch or commit (GET /repos/:repo/file): its text, or why there is none. */
+export interface RepoFile {
+	ref: string;
+	commit: string;
+	path: string;
+	size: number;
+	text?: string;
+	binary?: boolean;
+	tooBig?: boolean;
+}
+
+/** Who coordinates an elected repo now (GET /tasks/:id/leader): "<taskId>--<changeId>", or null. */
+export interface Leader {
+	leader: string | null;
+	term: number;
+}
+
+/** A person's review of one role on a change's commit under review. */
+export interface ReviewInput {
+	reviewer: string;
+	head: string;
+	verdict: "approve" | "reject";
+	summary: string;
+	evidence?: string;
+}
+
+/** What a person may change in an elected repo's settings (PATCH /tasks/:id/settings). */
+export interface SettingsInput {
+	review?: ReviewPolicy;
+	verify?: string[];
+	leaseMinutes?: number;
+}
+
+export interface SavedSettings {
+	review: ReviewPolicy;
+	verify: string[];
+	leaseMinutes: number;
+}
+
+/** One coordinator-free change's history (GET /free/:repo/changes/:change). */
+export interface FreeChangeHistory {
+	change: string;
+	branch: string;
+	/** The claim in force, or null once it merged or was released. */
+	claim: Omit<FreeSnapshot["claims"][number], "head" | "approval" | "hosted"> | null;
+	released: { reason: string; at: string; mergedAs?: string; agent: string; stale?: boolean }[];
+	/** The change's own commits, newest first. */
+	commits: { commit: string; message: string; author: string; at: string }[];
+	votes: FreeSnapshot["votes"];
+}
 
 export interface Usage {
 	inputTokens: number;
@@ -63,6 +203,7 @@ function normalizeReviewPolicy(value: unknown): Task["review"] {
 		reviewers: asStringArray(policy?.reviewers),
 		required: typeof policy?.required === "number" ? policy.required : 0,
 		vetoes: asStringArray(policy?.vetoes),
+		external: asStringArray(policy?.external),
 	} as Task["review"];
 }
 
@@ -104,10 +245,11 @@ function normalizeSlice(value: unknown): Slice | null {
 	return {
 		...slice,
 		id: typeof slice.id === "string" ? slice.id : "",
-		title: typeof slice.title === "string" ? slice.title : "Untitled slice",
+		title: typeof slice.title === "string" ? slice.title : "Untitled change",
 		owns: asStringArray(slice.owns),
 		touched: asStringArray(slice.touched),
 		outOfLane: asStringArray(slice.outOfLane),
+		...(slice.review ? { review: normalizeReviewPolicy(slice.review) } : {}),
 		reviews,
 		...(gate ? {
 			gate: {
@@ -133,18 +275,15 @@ export function normalizeTask(value: unknown): Task {
 	const task = asRecord(value);
 	if (!task || typeof task.id !== "string") throw new Error("Invalid task response: expected a task with an id.");
 	const checks = asArray<unknown>(task.checks).filter((check) => asRecord(check) !== null);
-	const amendments = asArray<unknown>(task.amendments).filter((amendment) => asRecord(amendment) !== null);
 	const laneChangeRequests = asArray<unknown>(task.laneChangeRequests)
 		.map(normalizeLaneChangeRequest)
 		.filter((request): request is LaneChangeRequest => request !== null);
 	return {
 		...task,
-		contracts: asStringArray(task.contracts),
 		verify: asStringArray(task.verify),
 		review: normalizeReviewPolicy(task.review),
 		slices: asArray<unknown>(task.slices).map(normalizeSlice).filter((slice): slice is Slice => slice !== null),
 		checks,
-		amendments,
 		laneChangeRequests,
 	} as Task;
 }
@@ -201,7 +340,13 @@ async function call<T>(method: string, path: string, body?: unknown): Promise<T>
 	if (body !== undefined) headers["Content-Type"] = "application/json";
 	const res = await fetch(path, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
 	const text = await res.text();
-	const data = text ? JSON.parse(text) : null;
+	let data: unknown = null;
+	try {
+		data = text ? JSON.parse(text) : null;
+	} catch {
+		// Not JSON: an older server without this route answers with the dashboard page.
+		throw new Error(res.ok ? `Unexpected response from ${path}` : `${res.status} ${res.statusText}`);
+	}
 	if (!res.ok) {
 		const detail = asRecord(data)?.error;
 		throw new Error(res.status === 401 ? "Unauthorized: sign in through Cloudflare Access." : typeof detail === "string" ? detail : `${res.status} ${res.statusText}`);
@@ -217,19 +362,51 @@ export const api = {
 	},
 	live: async (id: string) => normalizeLive(await call<unknown>("GET", `/tasks/${encodeURIComponent(id)}/live`)),
 	repos: () => call<{ name: string }[]>("GET", "/repos"),
-	create: async (repo: string, goal: string) => normalizeTask(await call<unknown>("POST", "/tasks", { repo, goal })),
-	plan: async (id: string) => normalizeTask(await call<unknown>("POST", `/tasks/${encodeURIComponent(id)}/plan`)),
-	approve: (id: string) => call<unknown>("POST", `/tasks/${encodeURIComponent(id)}/approve`),
-	build: (id: string) => call<unknown>("POST", `/tasks/${encodeURIComponent(id)}/build`),
-	land: async (id: string) => normalizeTask(await call<unknown>("POST", `/tasks/${encodeURIComponent(id)}/land`)),
-	contractFiles: async (taskId: string) => {
-		const result = await call<{ files: ContractFile[] }>("GET", `/tasks/${encodeURIComponent(taskId)}/contracts`);
-		return result.files;
-	},
+	/** Every repo with its counts, for the Repositories list (one read, kept by the server). */
+	summaries: () => call<Summaries>("GET", "/summaries"),
+	freeRepos: () => call<{ repo: string; since: string }[]>("GET", "/free"),
+	freeRepo: (repo: string) => call<FreeSnapshot>("GET", `/free/${encodeURIComponent(repo)}`),
+	freeAudit: (repo: string) => call<FreeAudit>("GET", `/free/${encodeURIComponent(repo)}/audit`),
+	/** Open a repo for agents (or find the task it is already open as), as the MCP join_repo tool does. */
+	openRepo: async (repo: string) => normalizeTask(await call<unknown>("POST", `/repos/${encodeURIComponent(repo)}/open`, {})),
 	sliceDiff: (taskId: string, sliceId: string) =>
 		call<UnifiedCodeDiff>("GET", `/tasks/${encodeURIComponent(taskId)}/slices/${encodeURIComponent(sliceId)}/diff`),
-	landingDiff: (taskId: string) =>
-		call<UnifiedCodeDiff>("GET", `/tasks/${encodeURIComponent(taskId)}/land-diff`),
+	/** A person lets the commit under review through without full review (the checks still run). */
 	waive: (taskId: string, sliceId: string, reason: string) =>
 		call<unknown>("POST", `/tasks/${encodeURIComponent(taskId)}/slices/${encodeURIComponent(sliceId)}/waive`, { reason }),
+	/** The repo's decision log from Git, oldest first. */
+	history: async (taskId: string) => normalizeHistory(await call<unknown>("GET", `/tasks/${encodeURIComponent(taskId)}/history`)),
+	/** Message a change's builder: delivered at its next turn, or it resumes if it stopped. */
+	messageBuilder: (taskId: string, sliceId: string, message: string) =>
+		call<{ delivered: "inbox" | "resumed" }>("POST", `/tasks/${encodeURIComponent(taskId)}/slices/${encodeURIComponent(sliceId)}/message`, { message }),
+	/** Re-run the checks for an approved change. */
+	retryChecks: (taskId: string, sliceId: string) =>
+		call<unknown>("POST", `/tasks/${encodeURIComponent(taskId)}/slices/${encodeURIComponent(sliceId)}/gate`, {}),
+	/** Give up a change and free its claim. */
+	abandon: (taskId: string, sliceId: string, reason: string) =>
+		call<unknown>("POST", `/tasks/${encodeURIComponent(taskId)}/changes/${encodeURIComponent(sliceId)}/abandon`, { reason }),
+	/** A signed-in person reviews one role of a change's commit under review. */
+	submitReview: (taskId: string, sliceId: string, review: ReviewInput) =>
+		call<unknown>("POST", `/tasks/${encodeURIComponent(taskId)}/slices/${encodeURIComponent(sliceId)}/reviews`, review),
+	/** Change an elected repo's review policy, checks or claim expiry. */
+	updateSettings: (taskId: string, settings: SettingsInput) => call<SavedSettings>("PATCH", `/tasks/${encodeURIComponent(taskId)}/settings`, settings),
+	/** Who coordinates an elected repo now. */
+	leader: (taskId: string) => call<Leader>("GET", `/tasks/${encodeURIComponent(taskId)}/leader`),
+	/** A repo's files at a branch or commit (its default branch if none). */
+	tree: (repo: string, ref?: string) => call<RepoTree>("GET", `/repos/${encodeURIComponent(repo)}/tree${ref ? `?ref=${encodeURIComponent(ref)}` : ""}`),
+	/** One file's text at a branch or commit. */
+	file: (repo: string, path: string, ref?: string) =>
+		call<RepoFile>("GET", `/repos/${encodeURIComponent(repo)}/file?path=${encodeURIComponent(path)}${ref ? `&ref=${encodeURIComponent(ref)}` : ""}`),
+	/** One coordinator-free change: its claim or how it ended, its commits and the votes on them. */
+	/** A person's vote on a coordinator-free change's current commit. */
+	freeVote: (repo: string, change: string, vote: FreeVoteInput) => call<unknown>("POST", `/free/${encodeURIComponent(repo)}/changes/${encodeURIComponent(change)}/votes`, vote),
+	freeChange: (repo: string, change: string) => call<FreeChangeHistory>("GET", `/free/${encodeURIComponent(repo)}/changes/${encodeURIComponent(change)}`),
 };
+
+/** Everything the dashboard calls; tests pass stand-ins. */
+export type DashboardApi = typeof api;
+
+/** The WebSocket URL of a repo's live feed: "task:<id>" or "free:<repo>". Each message means "something changed". */
+export function liveFeedUrl(key: string, location: Pick<Location, "protocol" | "host"> = window.location): string {
+	return `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/live/${key}`;
+}

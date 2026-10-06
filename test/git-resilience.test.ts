@@ -63,7 +63,7 @@ describe("Git network retries", () => {
 			retryStartedClean = fs !== firstFs && !fs!.entries.has("/repo/partial-clone-data");
 		});
 
-		const workspace = await Workspace.clone(remote);
+		const workspace = await Workspace.clone(remote, "main");
 
 		expect(io.clone).toHaveBeenCalledTimes(2);
 		expect(retryStartedClean).toBe(true);

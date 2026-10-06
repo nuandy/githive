@@ -18,7 +18,6 @@ describe("dashboard API compatibility", () => {
       repo: "example",
       goal: "Keep old task data visible",
       createdAt: "2025-01-01T00:00:00.000Z",
-      contracts: [],
       verify: [],
       review: { reviewers: [], required: 0, vetoes: [] },
       slices: [{ id: "one", title: "First slice", owns: [], touched: [], outOfLane: [], reviews: [] }],
