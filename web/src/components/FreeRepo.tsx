@@ -1,3 +1,4 @@
+import { FreeVoteForm, type FreeVoteApi } from "./FreeVoteForm";
 import type { FreeAudit, FreeChangeHistory, FreeSnapshot } from "../api";
 import { identityName } from "../lib/agent";
 import { claimAgent, claimApprovalLabel, claimTitle, freeClaimStatus, votesForClaim, type FreeClaim } from "../lib/freeStatus";
@@ -228,10 +229,12 @@ export interface FreeChangePageProps {
 	repo: string;
 	base: RepoBase;
 	tab: "conversation" | "commits";
+	/** For a person's vote; without it, the page only shows. */
+	api?: FreeVoteApi;
 }
 
 /** A coordinator-free change, shown like a pull request: in force, merged or released. */
-export function FreeChangePage({ snapshot, changeId, claim, history, repo, base, tab }: FreeChangePageProps) {
+export function FreeChangePage({ snapshot, changeId, claim, history, repo, base, tab, api }: FreeChangePageProps) {
 	const branch = history?.branch || snapshot.branch || "main";
 	const record = claim ?? history?.claim ?? undefined;
 	const ending = history ? freeEnding(history) : null;
@@ -306,6 +309,16 @@ export function FreeChangePage({ snapshot, changeId, claim, history, repo, base,
 				) : (
 					<div className="change-layout">
 						<div className="change-layout__main">
+							{claim?.attention ? (
+								<div className="callout callout--needs" role="status">
+									<Icon name="alert" className="tone-needs" />
+									<div>
+										<strong>{claim.attention.agent} asks you</strong>
+										<p>{claim.attention.reason}</p>
+										<p className="muted">Decide with your vote below: it counts like a reviewer's and answers the question.</p>
+									</div>
+								</div>
+							) : null}
 							<article className="comment comment--outside">
 								<div className="comment__header">
 									<strong>{agent}</strong>{" "}
@@ -331,6 +344,7 @@ export function FreeChangePage({ snapshot, changeId, claim, history, repo, base,
 									</li>
 								</ol>
 							)}
+							{claim && api ? <FreeVoteForm repo={repo} claim={claim} policy={snapshot.policy} api={api} /> : null}
 							{claim ? (
 								<section className="merge-box" aria-label="Merge status">
 									<div className="merge-box__row">

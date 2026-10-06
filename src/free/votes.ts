@@ -21,6 +21,39 @@ export interface VoteRecord {
 
 export interface Votes {
 	votes: VoteRecord[];
+	/** Changes an agent has asked a person about, oldest first. */
+	flags?: FlagRecord[];
+}
+
+/** An agent asking a person to decide something about a change (reviewers disagree, say). */
+export interface FlagRecord {
+	change: string;
+	reason: string;
+	agent: string;
+	at: string;
+	/** Who asked, as Access verified them, and Blueprint's stamp (written through the toolkit). */
+	by?: string;
+	stamp?: string;
+}
+
+/** Ask a person about a change: it waits in their inbox until a person votes on its commit. */
+export function flagChange(log: CasLog<Votes>, input: Omit<FlagRecord, "at" | "by" | "stamp">, stamper?: Stamper) {
+	return appendRecord<Votes, never>(log, input.agent, () => ({ votes: [] }), async (state) => {
+		const record: FlagRecord = { ...input, at: new Date().toISOString() };
+		const asked = stamper ? { ...record, by: stamper.by } : record;
+		return {
+			state: { ...state, flags: [...(state.flags ?? []), stamper ? { ...asked, stamp: await stamper.stamp(stampPayload("flag", asked)) } : asked] },
+			text: `${input.agent} asks a person about ${input.change}: ${input.reason}`,
+		};
+	});
+}
+
+/** The latest question about `change` that no person has answered yet: a person's vote on `head` after it answers it. */
+export function openFlag(state: Votes | null | undefined, change: string, head: string | null) {
+	const flag = (state?.flags ?? []).filter((f) => f.change === change).at(-1);
+	if (!flag) return null;
+	const answered = (state?.votes ?? []).some((v) => v.by?.startsWith("person:") && v.commit === head && v.at >= flag.at);
+	return answered ? null : flag;
 }
 
 export interface ReviewPolicy {
@@ -49,7 +82,7 @@ export function vote(log: CasLog<Votes>, input: Omit<VoteRecord, "at" | "by" | "
 		const record: VoteRecord = { ...input, at: new Date().toISOString() };
 		const cast = stamper ? { ...record, by: stamper.by } : record;
 		return {
-			state: { votes: [...state.votes, stamper ? { ...cast, stamp: await stamper.stamp(stampPayload("vote", cast)) } : cast] },
+			state: { ...state, votes: [...state.votes, stamper ? { ...cast, stamp: await stamper.stamp(stampPayload("vote", cast)) } : cast] },
 			text: `${input.reviewer} (${input.role}) ${input.verdict === "approve" ? "approves" : "rejects"} ${input.commit}: ${input.evidence}`,
 		};
 	});

@@ -9,6 +9,7 @@ export type FreeClaim = FreeSnapshot["claims"][number];
 export type FreeVote = FreeSnapshot["votes"][number];
 
 export function freeClaimStatus(claim: FreeClaim): ChangeStatus {
+	if (claim.attention) return { kind: "needs-you", label: "Needs you", tone: "needs", description: `${claim.attention.agent} asks you: ${claim.attention.reason}` };
 	const builder = claim.hosted?.builder;
 	if (builder?.status === "failed")
 		return { kind: "needs-you", label: "Needs you", tone: "needs", description: builder.error ? `The builder failed: ${builder.error}` : "The builder failed." };

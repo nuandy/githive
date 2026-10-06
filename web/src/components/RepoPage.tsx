@@ -1,3 +1,4 @@
+import type { FreeVoteApi } from "./FreeVoteForm";
 import type { ReactNode } from "react";
 import type { FreeChangeHistory, FreeSnapshot, HistoryEntry, Leader, Live, Task } from "../api";
 import { holdersFromSnapshot, holdersFromTask } from "../lib/claimsMap";
@@ -24,7 +25,7 @@ export type RepoView =
 	| { kind: "change"; change: string; tab: ChangeTab };
 
 /** Everything a repo's pages call. The dashboard's api object satisfies it; tests pass stand-ins. */
-export type RepoPageApi = ChangeActionsApi & ReviewFormApi & SettingsApi & CodeApi;
+export type RepoPageApi = ChangeActionsApi & ReviewFormApi & SettingsApi & CodeApi & FreeVoteApi;
 
 function NotFound({ title, children }: { title: string; children: ReactNode }) {
 	return (
@@ -125,7 +126,7 @@ export interface FreeRepoPageProps {
 	/** On a change page: the change's history (undefined while loading, null if unreadable). */
 	changeHistory?: FreeChangeHistory | null;
 	liveStatus?: LiveStatus;
-	api: CodeApi;
+	api: CodeApi & FreeVoteApi;
 }
 
 /** A coordinator-free repo: claims in force as its changes, its claims map, code, agents, audit and settings, or one change. */
@@ -153,6 +154,7 @@ export function FreeRepoPage({ repo, base, view, snapshot, changeHistory, liveSt
 						repo={repo}
 						base={base}
 						tab={view.tab === "commits" ? "commits" : "conversation"}
+						api={api}
 					/>
 				) : current === "audit" ? (
 					<FreeAudit snapshot={snapshot} />

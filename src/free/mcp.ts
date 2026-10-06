@@ -13,7 +13,7 @@ import { readMainMerges, readRecordHistory, readShardHistories } from "./git-rec
 import { type CheckRunner, mergeChange } from "./merge";
 import { revertViolation } from "./revert";
 import type { Stamper } from "./stamp";
-import { approval, countedVotes, effectiveFreePolicy, vote, type ReviewPolicy, type VoteRecord, type Votes } from "./votes";
+import { approval, countedVotes, effectiveFreePolicy, flagChange, openFlag, vote, type ReviewPolicy, type VoteRecord, type Votes } from "./votes";
 import { SENSITIVE_PATHS } from "../types";
 
 // The coordinator-free MCP tools (see docs/coordinator-free.md). Stateless: each
@@ -82,6 +82,7 @@ Conventions:
 5. free_merge merges your branch with trailers recording the claims and votes it checked, then releases your claim. Merge by hand only with the same trailers.
 6. Claiming again (same paths) keeps your claim active. A claim idle for 30 minutes is released by whoever claims its paths, or by anyone (free_release with stale: true).
 7. Anyone may free_revert a commit free_audit reports; the audit then counts it resolved.
+8. Something agents can't settle (reviewers disagree, a trade-off needs an owner)? free_ask_human with the reason: a person sees it in their inbox and decides with their own vote.
 8. free_request_review asks Blueprint's hosted reviewers for votes on your change; free_build has Blueprint's hosted builder make a change from start to merge.
 9. Agents that share an Access identity tell themselves apart with free_register: it returns your agent key once; send it (header X-Blueprint-Agent-Key, or agent_key) with every call, and what you write is attributed to you. A registered name is never used without its key.
 free_audit replays the records and lists every broken convention, with the commit and the agent.`;
@@ -101,6 +102,7 @@ const TOOL_LIST = [
 	{ name: "free_revert", description: "Revert a commit the audit reports: its files go back to how they were before it, in a commit naming what it reverts.", inputSchema: { type: "object", properties: { repo: str, commit: str, agent: str }, required: ["repo", "commit", "agent"] } },
 	{ name: "free_status", description: "Where a change stands: its claim (or how it ended), its branch head, the votes on that head with their evidence, the approvals still needed, and what Blueprint's hosted agents on it are doing.", inputSchema: { type: "object", properties: { repo: str, change: str }, required: ["repo", "change"] } },
 	{ name: "free_check", description: "An early check on your change, any time before merging: whether it still merges cleanly into the project's branch, and any files outside your claim. (Claims keep changes apart, so it doesn't check other changes: only files outside a claim could collide.) Reports only.", inputSchema: { type: "object", properties: { repo: str, change: str }, required: ["repo", "change"] } },
+	{ name: "free_ask_human", description: "Ask a person to decide something about a change you can't settle among agents (reviewers disagree, a trade-off needs an owner). It waits in their inbox until a person votes on the change's commit.", inputSchema: { type: "object", properties: { repo: str, change: str, agent: str, reason: str }, required: ["repo", "change", "agent", "reason"] } },
 	{ name: "free_register", description: "Register your agent name and get its secret key (shown once), so what you write is attributed to you even if you share an Access identity. With your current key, rotates it.", inputSchema: { type: "object", properties: { repo: str, agent: str }, required: ["repo", "agent"] } },
 ];
 // Every tool takes the caller's agent key, for clients that can't set the header.
@@ -121,6 +123,7 @@ export const FREE_TOOLS = annotate(
 		free_status: reads("Change status"),
 		free_check: reads("Check a change"),
 		free_register: destroys("Register an agent key"),
+		free_ask_human: writes("Ask a person"),
 	},
 );
 
@@ -142,6 +145,8 @@ function mayActAs(name: string, acting: string | undefined, registry: Registry |
 	}
 	if (hosted) return;
 	if (name.startsWith(HOSTED_PREFIX)) throw new Error("[403] blueprint- names are Blueprint's hosted agents'");
+	// "person:…", "service:…" name verified identities, which an agent can't take on.
+	if (name.includes(":")) throw new Error("[403] an agent's name can't contain \":\"");
 	if (registry?.agents?.[name]) throw new Error(`[403] ${name} is registered: call with its agent key`);
 }
 
@@ -236,6 +241,24 @@ export async function freeChangeHistory(ctx: FreeContext, repo: string, change: 
 	return { change, branch, claim: claim ?? null, released, commits, votes };
 }
 
+/**
+ * A person's vote on a change, from the dashboard: on the change's current
+ * commit, stamped with their verified identity (ctx's stamper), counted like
+ * any vote (never the author's), and answering any question about it.
+ */
+export async function freeVoteAsPerson(ctx: FreeContext, repo: string, change: string, input: { role: string; verdict: "approve" | "reject"; evidence: string }, person: string) {
+	if (!person.startsWith("person:")) throw new Error("[403] only a person signed in through Access votes from the dashboard; agents use free_vote");
+	if (!input.role?.trim()) throw new Error("[400] a vote needs a role");
+	if (input.verdict !== "approve" && input.verdict !== "reject") throw new Error("[400] verdict is approve or reject");
+	if (typeof input.evidence !== "string" || !input.evidence.trim()) throw new Error("[400] a vote needs evidence: what you checked");
+	const head = await branchHead(await changeSourceFor(ctx, repo)(change, "read"), `changes/${change}`).catch(() => null);
+	if (!head) throw new Error(`[409] ${change} has nothing pushed to vote on`);
+	const stamper = await ctx.stamper?.();
+	await vote(recordLog<Votes>(ctx, repo, votesRef(repo)), { commit: head, reviewer: person, role: input.role, verdict: input.verdict, evidence: input.evidence }, stamper);
+	await ctx.ping?.(repo).catch(() => undefined);
+	return { commit: head, role: input.role, verdict: input.verdict };
+}
+
 /** The roles Blueprint's own reviewers take on a coordinator-free change: one general review, and every role that can veto. */
 export const hostedFreeRoles = (vetoes: string[]) => [...new Set(["review", ...vetoes])];
 
@@ -256,14 +279,17 @@ export async function freeSnapshot(ctx: FreeContext, repo: string) {
 	const claims = await Promise.all(
 		(await storeFor(ctx, repo, state).read()).claims.map(async (c) => {
 			const { head, approval, hosted } = await changeStatus(ctx, repo, state, cast, counted, c.change, c);
-			return { ...c, head, approval, ...(hosted ? { hosted } : {}) };
+			// A question for a person, until a person votes on the change's commit.
+			const flag = openFlag(votes?.commit.state, c.change, head);
+			const attention = flag ? { reason: flag.reason, agent: flag.agent, at: flag.at } : hosted?.builder?.status === "failed" ? { reason: `Blueprint's builder failed${hosted.builder.error ? `: ${hosted.builder.error.slice(0, 160)}` : ""}`, agent: "blueprint-builder", at: c.active } : null;
+			return { ...c, head, approval, ...(hosted ? { hosted } : {}), ...(attention ? { attention } : {}) };
 		}),
 	);
-	const failed = claims.filter((c) => c.hosted?.builder?.status === "failed");
+	const waiting = claims.filter((c) => c.attention);
 	await ctx.summarize?.(repo, {
 		open: claims.length,
-		needsYou: failed.length,
-		waiting: failed.slice(0, 20).map((c) => ({ change: c.change, title: c.intent.split("\n")[0].slice(0, 120), reason: `Blueprint's builder failed${c.hosted?.builder?.error ? `: ${c.hosted.builder.error.slice(0, 160)}` : ""}` })),
+		needsYou: waiting.length,
+		waiting: waiting.slice(0, 20).map((c) => ({ change: c.change, title: c.intent.split("\n")[0].slice(0, 120), reason: c.attention!.reason.slice(0, 200) })),
 		countedAt: new Date().toISOString(),
 	}).catch(() => undefined);
 	return {
@@ -284,7 +310,7 @@ export async function freeSnapshot(ctx: FreeContext, repo: string) {
 }
 
 // Tools that write records, after which the repo's summary notes the activity.
-const WRITES = new Set(["free_claim", "free_release", "free_merge", "free_vote", "free_build", "free_revert"]);
+const WRITES = new Set(["free_claim", "free_release", "free_merge", "free_vote", "free_build", "free_revert", "free_ask_human"]);
 const noted = new Map<string, number>();
 
 /** Run one coordinator-free tool, and note what it wrote in the repo's summary. */
@@ -389,6 +415,11 @@ async function runFreeTool(name: string, args: Args, ctx: FreeContext): Promise<
 			const agent = actAs("agent");
 			if (args.stale === true) return store.releaseStale({ change, agent, staleAfterMs: STALE_AFTER_MS }, stamper);
 			return store.release({ change, agent, reason: typeof args.reason === "string" ? args.reason : "released" }, stamper);
+		}
+		case "free_ask_human": {
+			const change = requiredString(args, "change");
+			if (!(await claimOf(change))) throw new Error(`[409] ${change} holds no claim`);
+			return flagChange(votes, { change, agent: actAs("agent"), reason: requiredString(args, "reason") }, stamper);
 		}
 		case "free_vote": {
 			const verdict = requiredString(args, "verdict");

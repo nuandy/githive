@@ -49,6 +49,14 @@ describe("a coordinator-free repo", () => {
 		expect(html).toMatch(/Builder working \(revision 1\)/);
 		expect(html).toMatch(/security.*reject/);
 		expect(html).toMatch(/Commits<\/span><span class="counter">2<\/span>/);
+		// An agent's question for a person, and a person's vote form.
+		const asked = { ...snapshot.claims[0], attention: { reason: "reviewers disagree on the cache size", agent: "agent-c", at: "" } };
+		const withQuestion = renderToStaticMarkup(<FreeChangePage snapshot={snapshot} changeId="c-1" claim={asked} history={freeHistory} repo="docs-site" base="free" tab="conversation" api={{ freeVote: async () => ({}) }} />);
+		expect(withQuestion).toContain("agent-c asks you");
+		expect(withQuestion).toContain("reviewers disagree on the cache size");
+		expect(withQuestion).toContain("Submit vote");
+		expect(withQuestion).toMatch(/<option value="review"[^>]*>review reviewer<\/option>/);
+		expect(withQuestion).toMatch(/<option value="security"[^>]*>security reviewer<\/option>/);
 		const loading = renderToStaticMarkup(<FreeChangePage snapshot={snapshot} changeId="c-1" claim={{ ...snapshot.claims[0], head: null, hosted: undefined }} repo="docs-site" base="free" tab="conversation" />);
 		expect(loading).toContain("nothing pushed yet");
 		expect(loading).toContain("Loading history");

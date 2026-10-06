@@ -36,7 +36,7 @@ export function normalizeHistory(value: unknown): HistoryEntry[] {
 /** A repo in coordinator-free mode, as the dashboard shows it (GET /free/:repo; see src/free/mcp.ts). */
 export interface FreeSnapshot {
 	repo: string;
-	policy: { required: number; vetoes: string[] };
+	policy: { required: number; vetoes: string[]; escalate?: { paths: string[]; required?: number; vetoes?: string[] }[] };
 	verify: string[];
 	/** The project's branch changes merge into (older servers: absent, main). */
 	branch?: string;
@@ -53,12 +53,21 @@ export interface FreeSnapshot {
 		/** The change's branch head, null until something is pushed. */
 		head: string | null;
 		approval: { approved: boolean; approvals: number; required: number; vetoedBy: string[]; /** Veto roles that haven't approved yet (newer servers); a change merges only once each has. */ awaiting?: string[] };
+		/** A question for a person about the change (an agent asked, or Blueprint's builder failed), until a person votes. */
+		attention?: { reason: string; agent: string; at: string };
 		/** Blueprint's hosted agents on the change. */
 		hosted?: { builder?: { status: string; revisions: number; error?: string }; reviewers: { role: string; status: string; verdict?: string }[] };
 	}[];
 	votes: { commit: string; reviewer: string; role: string; verdict: "approve" | "reject"; evidence: string; at: string; by?: string }[];
 	/** Loaded apart (GET /free/:repo/audit): it replays every record, so it comes slower and less often. */
 	audit?: FreeAudit;
+}
+
+/** A person's vote from the dashboard. */
+export interface FreeVoteInput {
+	role: string;
+	verdict: "approve" | "reject";
+	evidence: string;
 }
 
 export interface FreeAudit {
@@ -383,6 +392,8 @@ export const api = {
 	file: (repo: string, path: string, ref?: string) =>
 		call<RepoFile>("GET", `/repos/${encodeURIComponent(repo)}/file?path=${encodeURIComponent(path)}${ref ? `&ref=${encodeURIComponent(ref)}` : ""}`),
 	/** One coordinator-free change: its claim or how it ended, its commits and the votes on them. */
+	/** A person's vote on a coordinator-free change's current commit. */
+	freeVote: (repo: string, change: string, vote: FreeVoteInput) => call<unknown>("POST", `/free/${encodeURIComponent(repo)}/changes/${encodeURIComponent(change)}/votes`, vote),
 	freeChange: (repo: string, change: string) => call<FreeChangeHistory>("GET", `/free/${encodeURIComponent(repo)}/changes/${encodeURIComponent(change)}`),
 };
 

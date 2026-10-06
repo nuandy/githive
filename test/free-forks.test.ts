@@ -3,7 +3,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { statusOf } from "../src/errors";
-import { callFreeTool, freeChangeHistory, type FreeContext } from "../src/free/mcp";
+import { generateStampKey, makeStamper } from "../src/free/stamp";
+import { callFreeTool, freeChangeHistory, freeSnapshot, freeVoteAsPerson, type FreeContext } from "../src/free/mcp";
 import { agentClone, pushChange } from "./helpers/agents";
 import { startGitServer, type GitServer } from "./helpers/git-server";
 
@@ -109,6 +110,31 @@ describe("free_status", () => {
 			votes: [{ reviewer: "rev-1", verdict: "reject", evidence: "no tests" }],
 			approval: { approved: false, approvals: 0, required: 1, vetoedBy: [] },
 		});
+	}, 60_000);
+
+	it("lets an agent ask a person about a change, until a person votes on its commit", async () => {
+		await call("free_start", {});
+		const { key: keyA } = (await call("free_register", { agent: "agent-a" })) as { key: string };
+		await call("free_claim", { change: "a-1", agent: "agent-a", paths: ["src/a/"], intent: "Speed up the a module" }, keyA);
+		const head = await pushChange(fork.url, work, "agent-a", "a-1", { "src/a/x.txt": "a\n" });
+		expect(await call("free_ask_human", { change: "a-1", agent: "agent-a", reason: "reviewers disagree on the cache size" }, keyA)).toMatchObject({ ok: true });
+
+		const summaries: { repo: string; patch: Record<string, unknown> }[] = [];
+		const watched = { ...ctx(), summarize: async (repo: string, patch: Record<string, unknown>) => void summaries.push({ repo, patch }) };
+		const before = await freeSnapshot(watched, "project");
+		expect(before.claims[0]).toMatchObject({ change: "a-1", attention: { reason: "reviewers disagree on the cache size", agent: "agent-a" } });
+		expect(summaries.at(-1)?.patch).toMatchObject({ needsYou: 1, waiting: [{ change: "a-1", title: "Speed up the a module", reason: "reviewers disagree on the cache size" }] });
+
+		// An agent can't pass itself off as a person to answer it.
+		expect(await call("free_vote", { commit: head, reviewer: "person:abc", role: "review", verdict: "approve", evidence: "ok" })).toEqual({ error: "an agent's name can't contain \":\"" });
+		// A person decides, from the dashboard; their vote counts and answers the question.
+		const key = await generateStampKey();
+		const person = { ...ctx(), stamper: async () => makeStamper(key.privateKey, "person:abc") };
+		await expect(freeVoteAsPerson(person, "project", "a-1", { role: "review", verdict: "approve", evidence: "ok" }, "service:a-script")).rejects.toThrow(/only a person/);
+		expect(await freeVoteAsPerson(person, "project", "a-1", { role: "review", verdict: "approve", evidence: "a cache of 64 is fine" }, "person:abc")).toEqual({ commit: head, role: "review", verdict: "approve" });
+		const after = await freeSnapshot(watched, "project");
+		expect(after.claims[0].attention).toBeUndefined();
+		expect(after.votes[0]).toMatchObject({ commit: head, reviewer: "person:abc", role: "review", verdict: "approve" });
 	}, 60_000);
 
 	it("says how a change ended once its claim is gone", async () => {

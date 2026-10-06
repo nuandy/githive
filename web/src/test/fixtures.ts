@@ -109,6 +109,7 @@ export function stubApi(): import("../components/RepoPage").RepoPageApi {
 		updateSettings: async (_id: string, s: { review?: Task["review"]; verify?: string[]; leaseMinutes?: number }) => ({ review: s.review ?? { reviewers: [], required: 0, vetoes: [] }, verify: s.verify ?? [], leaseMinutes: s.leaseMinutes ?? 30 }),
 		tree: async () => ({ ref: "main", commit: "c0ffee", files: [], truncated: false }),
 		file: async (_repo: string, path: string) => ({ ref: "main", commit: "c0ffee", path, size: 0, text: "" }),
+		freeVote: async () => ({}),
 	};
 }
 

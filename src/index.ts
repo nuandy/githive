@@ -11,7 +11,7 @@ import { retryTransient } from "./retry";
 import type { Limits, Review, ReviewPolicy, Task } from "./types";
 import { lastActivityOf, openTaskId, taskSummary } from "./open-mode";
 import { handleMcpBody, type McpContext } from "./mcp";
-import { type FreeContext, freeAudit, freeChangeHistory, freeOpenCount, freeSnapshot } from "./free/mcp";
+import { type FreeContext, freeAudit, freeChangeHistory, freeOpenCount, freeSnapshot, freeVoteAsPerson } from "./free/mcp";
 import type { Registry } from "./free/claims";
 import { listTree, readFile } from "./code-browse";
 import { defaultBranch, Workspace } from "./git";
@@ -178,6 +178,13 @@ const freeContext = (env: Env, identity: AccessIdentity | undefined, agentKey?: 
 // Coordinator-free repos, for the dashboard: which repos, and a snapshot of one read from Git.
 app.get("/free", async (c) => c.json(await taskIndex(c.env).listFree()));
 app.get("/free/:repo", async (c) => c.json(await freeSnapshot(freeContext(c.env, c.get("accessIdentity")), c.req.param("repo"))));
+// A person's vote on a coordinator-free change, from the dashboard: stamped with their verified identity.
+app.post("/free/:repo/changes/:change/votes", async (c) => {
+	const actor = c.get("accessIdentity") ?? fail(401, "no identity");
+	const { role, verdict, evidence } = await jsonArgs(c);
+	const repo = c.req.param("repo");
+	return c.json(await freeVoteAsPerson(freeContext(c.env, actor), repo, c.req.param("change"), { role: String(role ?? ""), verdict: verdict as "approve" | "reject", evidence: String(evidence ?? "") }, identityLabel(actor)));
+});
 app.get("/free/:repo/changes/:change", async (c) => c.json(await freeChangeHistory(freeContext(c.env, c.get("accessIdentity")), c.req.param("repo"), c.req.param("change"))));
 app.get("/free/:repo/audit", async (c) => c.json(await freeAudit(freeContext(c.env, c.get("accessIdentity")), c.req.param("repo"))));
 app.get("/free/:repo/builders/:change", async (c) => c.json(await c.env.BUILDER.getByName(freeAgentName(c.req.param("repo"), c.req.param("change"))).state()));

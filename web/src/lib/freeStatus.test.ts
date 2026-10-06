@@ -9,6 +9,8 @@ describe("coordinator-free changes", () => {
 		expect(freeClaimStatus(claim).kind).toBe("changes-requested");
 		expect(freeClaimStatus({ ...claim, hosted: undefined }).kind).toBe("in-review");
 		expect(freeClaimStatus({ ...claim, head: null, hosted: undefined }).kind).toBe("draft");
+		// An agent asked a person: that comes first.
+		expect(freeClaimStatus({ ...claim, attention: { reason: "reviewers disagree", agent: "agent-c", at: "" } })).toMatchObject({ kind: "needs-you", description: "agent-c asks you: reviewers disagree" });
 		expect(freeClaimStatus({ ...claim, approval: { ...claim.approval, approved: true }, hosted: undefined }).kind).toBe("approved");
 		expect(freeClaimStatus({ ...claim, approval: { ...claim.approval, vetoedBy: ["security"] } })).toMatchObject({ label: "Changes requested", description: "Blocked by security." });
 		expect(freeClaimStatus({ ...claim, hosted: { builder: { status: "failed", revisions: 0, error: "boom" }, reviewers: [] } })).toMatchObject({ kind: "needs-you", description: "The builder failed: boom" });
