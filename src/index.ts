@@ -26,6 +26,7 @@ export { Gate } from "./gate";
 export { TaskIndex } from "./task-index";
 export { Peer } from "./peer";
 export { LiveFeed } from "./live-feed";
+export { TokenCache } from "./token-cache";
 
 type AppEnv = { Bindings: Env; Variables: { accessIdentity: AccessIdentity } };
 const app = new Hono<AppEnv>();

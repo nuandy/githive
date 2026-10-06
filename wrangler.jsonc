@@ -35,7 +35,8 @@
 			{ "name": "GATE", "class_name": "Gate" },
 			{ "name": "TASK_INDEX", "class_name": "TaskIndex" },
 			{ "name": "PEER", "class_name": "Peer" },
-			{ "name": "LIVE", "class_name": "LiveFeed" }
+			{ "name": "LIVE", "class_name": "LiveFeed" },
+			{ "name": "TOKENS", "class_name": "TokenCache" }
 		]
 	},
 	// One container per builder or reviewer agent, and per integration gate run. The image (cloudflare/debian-trixie)
@@ -56,7 +57,8 @@
 		// Planned mode (contracts) is gone; it lives on the plan-mode branch.
 		{ "tag": "v8", "deleted_classes": ["ContractChecker"] },
 		// The dashboard's live updates.
-		{ "tag": "v9", "new_sqlite_classes": ["LiveFeed"] }
+		{ "tag": "v9", "new_sqlite_classes": ["LiveFeed"] },
+		{ "tag": "v10", "new_sqlite_classes": ["TokenCache"] }
 	],
 	"queues": {
 		// Receives Artifacts event subscriptions (see README).

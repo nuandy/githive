@@ -98,6 +98,7 @@ export async function mergeChange(input: MergeInput): Promise<MergeOutcome> {
 
 		// The project's checks, on main with the change merged in: what main would become.
 		const verify = input.verify ?? [];
+		const checksFrom = Date.now();
 		if (verify.length) {
 			if (!input.runChecks) throw new Error("[500] checks are configured but nothing can run them");
 			const checked = await input.runChecks({ base: main, branch: ws.branch, head, ref: `changes/${input.change}`, commands: verify, source: input.source });
@@ -131,7 +132,9 @@ export async function mergeChange(input: MergeInput): Promise<MergeOutcome> {
 			if (attempt < ATTEMPTS && (err instanceof git.Errors.PushRejectedError || err instanceof git.Errors.GitPushError)) continue;
 			throw err;
 		}
+		const releaseFrom = Date.now();
 		await input.store.release({ change: input.change, agent: input.agent, reason: "merged", mergedAs: oid }, input.stamper);
+		console.log(`merged ${input.change} as ${oid.slice(0, 8)}: checks and push ${releaseFrom - checksFrom} ms, releasing its claim ${Date.now() - releaseFrom} ms`);
 		return { ok: true, commit: oid };
 	}
 }
