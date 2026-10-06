@@ -14,6 +14,12 @@
 export const LANES = 4;
 /** How long an idle line waits for more merges before checking the first: merges ready together are checked together. */
 export const GATHER_MS = 2_000;
+/**
+ * How long the line waits for a batch's passing merges to land (or give up)
+ * before checking the next batch on main: checked on main without them, the
+ * next batch's results would go stale the moment they land.
+ */
+export const LANDING_WAIT_MS = 3 * 60_000;
 
 export interface LineRequest<I> {
 	change: string;
@@ -39,12 +45,36 @@ export interface LineRunner<I, R extends { passed: boolean }> {
 export class CheckLine<I, R extends { passed: boolean }> {
 	private readonly waiting: (LineRequest<I> & { resolve: (r: LineResult<R>) => void; reject: (err: unknown) => void })[] = [];
 	private running = false;
+	/** The last batch's passing merges that haven't landed or given up yet. */
+	private landing = new Set<string>();
+	private landed?: () => void;
 
 	constructor(
 		private readonly runner: LineRunner<I, R>,
 		private readonly lanes = LANES,
 		private readonly gatherMs = GATHER_MS,
+		private readonly landingWaitMs = LANDING_WAIT_MS,
 	) {}
+
+	/** A merge the line checked is done with its result: it landed, or gave up (it checks again if it tries again). */
+	done(change: string) {
+		this.landing.delete(change);
+		if (!this.landing.size) this.landed?.();
+	}
+
+	/** Until the last batch's passing merges have landed or given up, or the wait runs out. */
+	private async awaitLandings() {
+		if (!this.landing.size) return;
+		await new Promise<void>((resolve) => {
+			const timer = setTimeout(resolve, this.landingWaitMs);
+			this.landed = () => {
+				clearTimeout(timer);
+				resolve();
+			};
+		});
+		this.landed = undefined;
+		this.landing.clear();
+	}
 
 	/** Join the line; resolves with this merge's checks, once they've run. */
 	join(request: LineRequest<I>): Promise<LineResult<R>> {
@@ -68,6 +98,7 @@ export class CheckLine<I, R extends { passed: boolean }> {
 		try {
 			await new Promise((resolve) => setTimeout(resolve, this.gatherMs));
 			while (this.waiting.length) {
+				await this.awaitLandings();
 				const batch = this.waiting.splice(0, this.lanes);
 				let base: string;
 				let results: R[];
@@ -89,7 +120,10 @@ export class CheckLine<I, R extends { passed: boolean }> {
 						continue;
 					}
 					w.resolve({ result: results[i], base, after: [...after] });
-					if (results[i].passed) after.push({ change: w.change, head: w.head });
+					if (results[i].passed) {
+						after.push({ change: w.change, head: w.head });
+						this.landing.add(w.change);
+					}
 					else failed = true;
 				}
 				this.waiting.unshift(...again);

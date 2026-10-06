@@ -29,6 +29,11 @@ describe("what an agent should do next", () => {
 		expect(next).toMatchObject({ kind: "merge", change: "mine", head: "h1" });
 	});
 
+	it("revises its own change before merging it over a reviewer who asked for changes, however many approved", () => {
+		const open = [{ claim: claimOf("mine", "agent-x"), head: "h1" }];
+		expect(nextFor(base({ open, votes: [vote("h1", "agent-y", "reject"), vote("h1", "agent-z")] }))).toMatchObject({ kind: "revise", change: "mine", reviewer: "agent-y" });
+	});
+
 	it("revises its own change a reviewer rejected, with their evidence; finishes one it never pushed", () => {
 		expect(nextFor(base({ open: [{ claim: claimOf("mine", "agent-x"), head: "h1" }], votes: [vote("h1", "agent-y", "reject")] }))).toMatchObject({ kind: "revise", change: "mine", reviewer: "agent-y", evidence: "fix the edge case" });
 		expect(nextFor(base({ open: [{ claim: claimOf("mine", "agent-x"), head: null }] }))).toMatchObject({ kind: "finish", change: "mine" });

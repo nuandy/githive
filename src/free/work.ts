@@ -6,8 +6,10 @@ import { type Author, approval, effectiveFreePolicy, holdsRole, type ReviewPolic
 
 // What an agent should do next, in coordinator-free mode, so users can send
 // any number of agents without giving them roles: Blueprint hands each one
-// the most useful work there is. First its own change (merge it once
-// approved, revise it when rejected, finish it if nothing is pushed), then a
+// the most useful work there is. First its own change (revise it when a
+// reviewer asked for changes, even if approved: a cooperative agent doesn't
+// merge over an objection; merge it once approved; finish it if nothing is
+// pushed), then a
 // review someone else's change is waiting for (never its own; a role that can
 // block a merge only if it holds that role), then a piece of the repo's
 // backlog nobody has claimed. Nothing is reserved: two agents told the same
@@ -87,14 +89,15 @@ export function nextFor(input: NextInput): NextStep {
 
 	// Its own changes first: a change that's done unblocks everything after it. One waiting on a person is left to them.
 	const own = input.open.filter((o) => o.claim.agent === agent && !input.asked?.has(o.claim.change));
-	for (const { claim, head } of own) {
-		if (head && approval({ votes }, head, policy, authorOf(claim), claim.paths).approved)
-			return { kind: "merge", change: claim.change, head, next: `free_merge your change ${claim.change}: its commit ${head.slice(0, 8)} is approved.` };
-	}
+	// An objection first: a cooperative agent doesn't merge over a reviewer who asked for changes, even with enough approvals.
 	for (const { claim, head } of own) {
 		const rejection = head ? rejectionOf(head, authorOf(claim)) : undefined;
 		if (head && rejection)
 			return { kind: "revise", change: claim.change, head, reviewer: rejection.reviewer, evidence: rejection.evidence, next: `Revise ${claim.change}: ${rejection.reviewer} asked for changes (see evidence). Push the fix to changes/${claim.change}; reviewers look at the new commit. If it's not yours to settle, free_ask_human.` };
+	}
+	for (const { claim, head } of own) {
+		if (head && approval({ votes }, head, policy, authorOf(claim), claim.paths).approved)
+			return { kind: "merge", change: claim.change, head, next: `free_merge your change ${claim.change}: its commit ${head.slice(0, 8)} is approved.` };
 	}
 	const unpushed = own.find((o) => !o.head);
 	if (unpushed) return { kind: "finish", change: unpushed.claim.change, next: `Finish ${unpushed.claim.change}: you hold its claim but nothing is pushed. Push changes/${unpushed.claim.change} to your fork (free_credentials), then free_check.` };

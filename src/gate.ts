@@ -151,6 +151,11 @@ export class Gate extends DurableObject<Env> {
 		return this.line.join({ change, head: input.head, input: { ...check, repo } });
 	}
 
+	/** A merge checked in line is done with its result (landed, or gave up), so the next batch can start. */
+	lineDone(change: string) {
+		this.line?.done(change);
+	}
+
 	async state() {
 		const [queue, current] = await Promise.all([this.ctx.storage.get<GateItem[]>("queue"), this.ctx.storage.get<GateItem>("current")]);
 		return { queue: queue ?? [], current: current ?? null };

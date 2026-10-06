@@ -46,7 +46,7 @@ function runner(failing = new Set<string>(), onRun?: (change: string) => void) {
 describe("the line of merges", () => {
 	it("checks a batch side by side, each after the ones ahead of it, and says what each lands after", async () => {
 		const r = runner();
-		const line = new CheckLine<Input, Result>(r.run, 4, 0);
+		const line = new CheckLine<Input, Result>(r.run, 4, 0, 0);
 		const [a, b, c] = await Promise.all(["a", "b", "c"].map((x) => line.join(request(x))));
 		expect(r.runs).toEqual([
 			{ lane: 0, change: "a", base: "m0", ahead: [] },
@@ -59,7 +59,7 @@ describe("the line of merges", () => {
 
 	it("checks the merges behind a failure again without it, first in line", async () => {
 		const r = runner(new Set(["b"]));
-		const line = new CheckLine<Input, Result>(r.run, 4, 0);
+		const line = new CheckLine<Input, Result>(r.run, 4, 0, 0);
 		const results = await Promise.all(["a", "b", "c", "d"].map((x) => line.join(request(x))));
 		expect(results.map((x) => x.result.passed)).toEqual([true, false, true, true]);
 		// c and d ran again, after a only; their answers are from that run.
@@ -73,7 +73,7 @@ describe("the line of merges", () => {
 	it("takes at most one batch of lanes at a time; the rest wait for the next, on main as it is then", async () => {
 		// Main moves while the first batch runs (its merges land).
 		const r: ReturnType<typeof runner> = runner(new Set(), (change) => change === "b" && r.setBase("m2"));
-		const line = new CheckLine<Input, Result>(r.run, 2, 0);
+		const line = new CheckLine<Input, Result>(r.run, 2, 0, 0);
 		await Promise.all(["a", "b", "c", "d", "e"].map((x) => line.join(request(x))));
 		expect(r.runs.map((x) => [x.lane, x.change, x.base])).toEqual([
 			[0, "a", "m0"],
@@ -84,9 +84,30 @@ describe("the line of merges", () => {
 		]);
 	});
 
+	it("starts the next batch once the last one's passing merges have landed or given up, not before", async () => {
+		const r = runner();
+		const line = new CheckLine<Input, Result>(r.run, 1, 0, 60_000);
+		const a = line.join(request("a"));
+		const b = line.join(request("b"));
+		await a;
+		await new Promise((resolve) => setTimeout(resolve, 30));
+		// a passed and hasn't landed: b waits, rather than be checked on a main without it.
+		expect(r.runs.map((x) => x.change)).toEqual(["a"]);
+		line.done("a");
+		await b;
+		expect(r.runs.map((x) => x.change)).toEqual(["a", "b"]);
+	});
+
+	it("starts the next batch anyway when a passing merge never reports back", async () => {
+		const r = runner();
+		const line = new CheckLine<Input, Result>(r.run, 1, 0, 20);
+		await Promise.all([line.join(request("a")), line.join(request("b"))]);
+		expect(r.runs.map((x) => x.change)).toEqual(["a", "b"]);
+	});
+
 	it("lets a change's newer head replace its place while it waits", async () => {
 		const r = runner();
-		const line = new CheckLine<Input, Result>(r.run, 1, 0);
+		const line = new CheckLine<Input, Result>(r.run, 1, 0, 0);
 		const busy = line.join(request("a"));
 		const old = line.join({ ...request("b"), head: "b-old" });
 		const fresh = line.join({ ...request("b"), head: "b-new" });
@@ -131,7 +152,7 @@ describe("merging in line", { timeout: 120_000 }, () => {
 		);
 		return async ({ change, head }) => {
 			const { base, after } = await line.join({ change, head, input: { change } });
-			return { passed: true, results: [{ command: "npm test", exitCode: 0, output: "ok" }], base, after };
+			return { passed: true, results: [{ command: "npm test", exitCode: 0, output: "ok" }], base, after, done: async () => line.done(change) };
 		};
 	}
 

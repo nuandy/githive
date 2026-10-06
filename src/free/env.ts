@@ -83,7 +83,13 @@ export function freeContextFor(env: Env, by: string | undefined, caller: { agent
 			const fork = source ?? remote;
 			const { result, base, after } = await env.GATE.getByName(`free:${repo}`).checkInLine({ repo, change, branch, base: { remote: remote.url, token: remote.token }, fork: { remote: fork.url, token: fork.token, ref }, head, checks: commands });
 			const conflict = result.mergeConflict ? [{ command: "(merging onto main and the merges ahead in line)", exitCode: 1, output: `conflicts in ${result.mergeConflict.join(", ")}` }] : [];
-			return { passed: result.passed, results: [...conflict, ...result.results.map((r) => ({ command: r.command, exitCode: r.exitCode, output: r.output }))], base, after };
+			return {
+				passed: result.passed,
+				results: [...conflict, ...result.results.map((r) => ({ command: r.command, exitCode: r.exitCode, output: r.output }))],
+				base,
+				after,
+				done: () => env.GATE.getByName(`free:${repo}`).lineDone(change),
+			};
 		},
 	};
 }
