@@ -2,6 +2,7 @@ import type { FreeVoteApi } from "./FreeVoteForm";
 import type { ReactNode } from "react";
 import type { FreeChangeHistory, FreeSnapshot, HistoryEntry, Leader, Live, Task } from "../api";
 import { holdersFromSnapshot, holdersFromTask } from "../lib/claimsMap";
+import { shardingSummary } from "../lib/freeStatus";
 import type { LiveStatus } from "../lib/liveFeed";
 import { changesOf, isActive, type ChangeState } from "../lib/model";
 import { href, type ChangeTab, type RepoBase, type RepoTab } from "../lib/routes";
@@ -17,6 +18,7 @@ import { Insights } from "./Insights";
 import { RepoActivity } from "./RepoActivity";
 import { CoordinatorLine, RepoHeader } from "./RepoHeader";
 import { RepoSettings, type SettingsApi } from "./RepoSettings";
+import { ShardingBadge } from "./StatusPill";
 import type { ReviewFormApi } from "./ReviewForm";
 import type { TabItem } from "./Tabs";
 
@@ -143,7 +145,15 @@ export function FreeRepoPage({ repo, base, view, snapshot, changeHistory, liveSt
 	const current = view.kind === "change" ? "changes" : view.tab === "activity" || view.tab === "insights" ? "audit" : view.tab;
 	return (
 		<>
-			<RepoHeader name={repo} mode="coordinator-free" tabs={tabs} current={current} homeHref={href.repo(repo, "changes", base)} live={liveStatus} />
+			<RepoHeader
+				name={repo}
+				mode="coordinator-free"
+				badges={<ShardingBadge summary={shardingSummary(snapshot)} />}
+				tabs={tabs}
+				current={current}
+				homeHref={href.repo(repo, "changes", base)}
+				live={liveStatus}
+			/>
 			<main className="page" id="main">
 				{view.kind === "change" ? (
 					<FreeChangePage

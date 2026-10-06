@@ -55,3 +55,28 @@ export function votesForClaim(claim: FreeClaim, votes: FreeVote[]): FreeVote[] {
 	if (!head) return [];
 	return votes.filter((vote) => !!vote.commit && (vote.commit.startsWith(head) || head.startsWith(vote.commit)));
 }
+
+/**
+ * How a repo keeps its claims, as a short label and a sentence: in one record
+ * (the cheapest while few agents write), or sharded by path once the load
+ * called for it. Null for older servers, which don't say.
+ */
+export function shardingSummary(snapshot: Pick<FreeSnapshot, "sharding" | "shardDepth">): { label: string; sharded: boolean; detail: string } | null {
+	const { sharding } = snapshot;
+	if (!sharding) return null;
+	if (sharding === "on demand")
+		return {
+			label: "One claims record",
+			sharded: false,
+			detail: "Claims are kept in one record, the fastest while few agents write. They are sharded by path automatically once 8 agents hold claims, or claims are written more than 15 times a minute.",
+		};
+	if (sharding === "never") return { label: "One claims record", sharded: false, detail: "Claims are kept in one record; this repo was set never to shard them." };
+	const deep = snapshot.shardDepth ? `, ${snapshot.shardDepth} ${snapshot.shardDepth === 1 ? "folder" : "folders"} deep` : "";
+	const since = sharding.since ? ` since ${new Date(sharding.since).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })}` : "";
+	const because = sharding.because ? ` (${sharding.because})` : "";
+	return {
+		label: "Sharded claims",
+		sharded: true,
+		detail: `Claims are sharded by path${deep}${since}${because}, so agents in different parts of the tree never wait on each other. Claims made before stay in the top record, above every shard.`,
+	};
+}

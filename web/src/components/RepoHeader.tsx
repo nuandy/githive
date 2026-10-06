@@ -58,6 +58,7 @@ export function RepoHeader({
 	homeHref,
 	live = "off",
 	coordinator,
+	badges,
 }: {
 	name: string;
 	mode: RepoMode;
@@ -67,6 +68,8 @@ export function RepoHeader({
 	live?: LiveStatus;
 	/** A line under the name, e.g. who coordinates. */
 	coordinator?: ReactNode;
+	/** More badges after the mode's, e.g. how claims are kept. */
+	badges?: ReactNode;
 }) {
 	return (
 		<div className="repo-header">
@@ -76,6 +79,7 @@ export function RepoHeader({
 						<Icon name="repo" className="muted" />
 						<a href={homeHref}>{name}</a>
 						<ModeBadge mode={mode} />
+						{badges}
 					</h1>
 					<LiveDot status={live} />
 				</div>

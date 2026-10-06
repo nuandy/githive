@@ -306,6 +306,12 @@ label {
 	font-weight: 500;
 }
 
+/* How a coordinator-free repo keeps its claims: sharded stands out from one record. */
+.mode-badge--sharded {
+	border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+	color: var(--accent);
+}
+
 .pill--lg {
 	padding: 5px 12px;
 	font-size: 13.5px;

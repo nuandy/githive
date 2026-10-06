@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { freeSnapshot } from "../test/fixtures";
-import { claimAgent, claimApprovalLabel, claimTitle, freeClaimStatus, votesForClaim } from "./freeStatus";
+import { claimAgent, claimApprovalLabel, claimTitle, freeClaimStatus, votesForClaim, shardingSummary } from "./freeStatus";
 
 const claim = freeSnapshot.claims[0];
 
@@ -37,5 +37,16 @@ describe("coordinator-free changes", () => {
 		expect(votesForClaim({ ...claim, head: "b1c2d3e4" }, freeSnapshot.votes)).toHaveLength(1);
 		expect(votesForClaim({ ...claim, head: null }, freeSnapshot.votes)).toEqual([]);
 		expect(votesForClaim(claim, [{ ...freeSnapshot.votes[0], commit: "" }])).toEqual([]);
+	});
+});
+
+describe("how a repo keeps its claims", () => {
+	it("says one record while sharding is on demand or off, and when and why once sharded", () => {
+		expect(shardingSummary({})).toBeNull();
+		expect(shardingSummary({ sharding: "on demand" })).toMatchObject({ label: "One claims record", sharded: false, detail: expect.stringMatching(/automatically once 8 agents hold claims/) });
+		expect(shardingSummary({ sharding: "never" })).toMatchObject({ label: "One claims record", sharded: false, detail: expect.stringMatching(/never to shard/) });
+		const sharded = shardingSummary({ sharding: { since: "2026-10-07T09:30:00.000Z", because: "8 agents hold claims" }, shardDepth: 2 });
+		expect(sharded).toMatchObject({ label: "Sharded claims", sharded: true });
+		expect(sharded?.detail).toMatch(/sharded by path, 2 folders deep since .*2026.* \(8 agents hold claims\)/);
 	});
 });

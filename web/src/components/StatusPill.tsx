@@ -53,3 +53,14 @@ export function ModeBadge({ mode }: { mode: "elected" | "coordinator-free" }) {
 		</span>
 	);
 }
+
+/** How a coordinator-free repo keeps its claims: one record, or sharded by path (see shardingSummary). */
+export function ShardingBadge({ summary }: { summary: { label: string; sharded: boolean; detail: string } | null }) {
+	if (!summary) return null;
+	return (
+		<span className={`pill pill--outline mode-badge${summary.sharded ? " mode-badge--sharded" : ""}`} title={summary.detail}>
+			{summary.label}
+			<span className="sr-only">: {summary.detail}</span>
+		</span>
+	);
+}

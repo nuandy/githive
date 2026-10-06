@@ -40,6 +40,20 @@ describe("a coordinator-free repo", () => {
 		expect(html).toMatch(/own fork/);
 	});
 
+	it("says in the header and settings how claims are kept, sharded or in one record", () => {
+		const page = (sharding: typeof snapshot.sharding) =>
+			renderToStaticMarkup(<FreeRepoPage repo="docs-site" base="free" view={{ kind: "repo", tab: "settings", state: "open" }} snapshot={{ ...snapshot, sharding, shardDepth: sharding && typeof sharding === "object" ? 2 : undefined }} api={stubApi()} />);
+		const flat = page("on demand");
+		expect(flat).toMatch(/class="pill pill--outline mode-badge"[^>]*>One claims record/);
+		expect(flat).toMatch(/<dt>Claims<\/dt><dd>Claims are kept in one record/);
+		const sharded = page({ since: "2026-10-07T09:30:00.000Z", because: "8 agents hold claims" });
+		expect(sharded).toMatch(/mode-badge mode-badge--sharded"[^>]*>Sharded claims/);
+		expect(sharded).toContain("(8 agents hold claims)");
+		// Older servers don't say: no badge, no line.
+		const older = page(undefined);
+		expect(older).not.toMatch(/claims record|Sharded claims|<dt>Claims<\/dt>/);
+	});
+
 	it("shows one claim like a pull request, with its commits, votes and hosted agents", () => {
 		const html = renderToStaticMarkup(<FreeChangePage snapshot={snapshot} changeId="c-1" claim={snapshot.claims[0]} history={freeHistory} repo="docs-site" base="free" tab="conversation" />);
 		expect(html).toMatch(/<strong>agent-c<\/strong> wants to merge <code[^>]*>changes\/c-1<\/code>/);

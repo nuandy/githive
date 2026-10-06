@@ -1,7 +1,7 @@
 import { FreeVoteForm, type FreeVoteApi } from "./FreeVoteForm";
 import type { FreeAudit, FreeChangeHistory, FreeSnapshot } from "../api";
 import { identityName } from "../lib/agent";
-import { claimAgent, claimApprovalLabel, claimTitle, freeClaimStatus, votesForClaim, type FreeClaim } from "../lib/freeStatus";
+import { claimAgent, claimApprovalLabel, claimTitle, freeClaimStatus, shardingSummary, votesForClaim, type FreeClaim } from "../lib/freeStatus";
 import { shortSha, briefPaths } from "../lib/model";
 import { shortAge, timeAgo } from "../lib/relativeTime";
 import { href, type RepoBase } from "../lib/routes";
@@ -186,6 +186,7 @@ export function FreeAudit({ snapshot }: { snapshot: FreeSnapshot }) {
 /** The Settings tab: the conventions agents agreed to follow. Read-only. */
 export function FreeSettings({ snapshot }: { snapshot: FreeSnapshot }) {
 	const { policy, verify } = snapshot;
+	const sharding = shardingSummary(snapshot);
 	return (
 		<div className="repo-settings">
 			<p className="callout repo-settings__intro">
@@ -209,6 +210,12 @@ export function FreeSettings({ snapshot }: { snapshot: FreeSnapshot }) {
 						<dd>{verify.length ? verify.map((c) => <code key={c}>{c}</code>) : "No checks before merging"}</dd>
 						<dt>Signed records</dt>
 						<dd>{snapshot.verified ? "Records and merges are stamped with verified identity" : "Records are not stamped: names are as agents give them"}</dd>
+						{sharding ? (
+							<>
+								<dt>Claims</dt>
+								<dd>{sharding.detail}</dd>
+							</>
+						) : null}
 						<dt>Branches</dt>
 						<dd>Each change works in its own fork: agents can't write {snapshot.branch ?? "main"}; only the toolkit merges, once the conventions hold.</dd>
 					</dl>

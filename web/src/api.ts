@@ -42,6 +42,10 @@ export interface FreeSnapshot {
 	branch?: string;
 	/** Whether records and merges are stamped with verified identity. */
 	verified: boolean;
+	/** How claims are kept (newer servers): in one record until the load calls for shards ("on demand"), always ("never"), or sharded since `since`. */
+	sharding?: "on demand" | "never" | { since?: string; because?: string };
+	/** How many path segments deep claims are sharded, once they are. */
+	shardDepth?: number;
 	claims: {
 		change: string;
 		agent: string;
