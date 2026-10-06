@@ -91,6 +91,7 @@ export async function readMainMerges(remote: Remote, baseline: string, branch: s
 			claimsTip: trailer(commit.message, "Blueprint-Claims"),
 			votesTip: trailer(commit.message, "Blueprint-Votes"),
 			testedOn: trailer(commit.message, "Blueprint-Tested"),
+			testedAfter: trailer(commit.message, "Blueprint-Tested-After")?.split(/\s+/).filter(Boolean),
 			by: trailer(commit.message, "Blueprint-By"),
 			stamp: trailer(commit.message, "Blueprint-Stamp"),
 			reverts: trailer(commit.message, "Blueprint-Reverts"),

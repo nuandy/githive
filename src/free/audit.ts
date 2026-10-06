@@ -25,6 +25,8 @@ export interface MergeRecord {
 	base?: string;
 	/** From its Blueprint-Tested trailer: the main the checks passed on. */
 	testedOn?: string;
+	/** From its Blueprint-Tested-After trailer: the changes (their heads) merged in before it in the check, ahead of it in line. */
+	testedAfter?: string[];
 	/** From its Blueprint-By and Blueprint-Stamp trailers: who asked the toolkit to merge, as Access verified them, and Blueprint's stamp. */
 	by?: string;
 	stamp?: string;
@@ -52,9 +54,9 @@ export function revertStampPayload(revert: { base?: string; reverts?: string; au
 }
 
 /** What Blueprint stamps on a merge: everything its trailers claim, and the commits it joins. */
-export function mergeStampPayload(merge: Pick<MergeRecord, "base" | "head" | "change" | "author" | "by" | "claimsTip" | "votesTip" | "testedOn">) {
-	const { base, head, change, author, by, claimsTip, votesTip, testedOn } = merge;
-	return stampPayload("merge", { base, head, change, agent: author, by, claimsTip, votesTip, testedOn: testedOn ?? null });
+export function mergeStampPayload(merge: Pick<MergeRecord, "base" | "head" | "change" | "author" | "by" | "claimsTip" | "votesTip" | "testedOn" | "testedAfter">) {
+	const { base, head, change, author, by, claimsTip, votesTip, testedOn, testedAfter } = merge;
+	return stampPayload("merge", { base, head, change, agent: author, by, claimsTip, votesTip, testedOn: testedOn ?? null, ...(testedAfter?.length ? { testedAfter } : {}) });
 }
 
 /** Claims idle longer than this may be released by anyone. */
@@ -86,6 +88,7 @@ export async function audit(records: AuditRecords): Promise<Violation[]> {
 	violations.push(...forged);
 
 	const registryAt = new Map(records.registry.map((r) => [r.tip, r.state]));
+	const byCommit = new Map(records.merges.map((m) => [m.commit, m]));
 	/** Stamped reverts: what each undid, settled once every commit has been checked. */
 	const reverts: MergeRecord[] = [];
 	for (const merge of records.merges) {
@@ -120,7 +123,10 @@ export async function audit(records: AuditRecords): Promise<Violation[]> {
 		checkApproved(records, votesAt, merge, report, own);
 		if (records.verify?.length) {
 			if (!merge.testedOn) report("untested", "the merge records no checks run (Blueprint-Tested)");
-			else if (merge.testedOn !== merge.base) report("untested", `checks ran on ${merge.testedOn}, but the merge went onto ${merge.base}`);
+			else if (!testedAsLanded(merge, byCommit)) {
+				const after = merge.testedAfter?.length ? ` after ${merge.testedAfter.map((h) => h.slice(0, 8)).join(", ")}` : "";
+				report("untested", `checks ran on ${merge.testedOn}${after}, but the merge went onto ${merge.base}`);
+			}
 		}
 	}
 	for (const history of [records.registry, ...(records.shards?.values() ?? [])]) violations.push(...othersClaimsReleased(history, records.staleAfterMs));
@@ -262,6 +268,23 @@ function checkApproved(records: AuditRecords, votesAt: Map<string, Votes>, merge
 	if (outcome.vetoedBy.length) report("unapproved", `${merge.head} was vetoed by ${outcome.vetoedBy.join(", ")} at ${merge.votesTip}`);
 	else if (outcome.approvals < required) report("unapproved", `${merge.head} had ${outcome.approvals} of ${required} approvals at ${merge.votesTip}`);
 	else if (outcome.awaiting.length) report("unapproved", `${merge.head} had no approval from ${outcome.awaiting.join(", ")} at ${merge.votesTip}`);
+}
+
+/**
+ * Whether a merge went onto the code its checks ran on: right onto the main
+ * they ran on, or, checked in line after other merges, onto that main with
+ * exactly those merges (and nothing else) landed on it since, in order.
+ */
+function testedAsLanded(merge: MergeRecord, byCommit: Map<string, MergeRecord>) {
+	const after = merge.testedAfter ?? [];
+	const landed: string[] = [];
+	for (let at = merge.base; at !== merge.testedOn; ) {
+		const between = at ? byCommit.get(at) : undefined;
+		if (!between?.head || landed.length === after.length) return false;
+		landed.unshift(between.head);
+		at = between.base;
+	}
+	return landed.length === after.length && landed.every((head, i) => head === after[i]);
 }
 
 /** Releases of another agent's claim that wasn't stale yet. */

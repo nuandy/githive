@@ -1,5 +1,5 @@
 import git from "isomorphic-git";
-import { BOT, type Remote, Workspace } from "../git";
+import { BOT, branchHead, type Remote, Workspace } from "../git";
 import { inLane } from "../open-mode";
 import type { ClaimStore } from "./claim-store";
 import { mergeStampPayload } from "./audit";
@@ -25,7 +25,22 @@ export interface CheckResult {
 }
 
 /** Runs the project's checks on `base` (main) with `head` (from branch `ref`) merged in. Live, the Gate's container. */
-export type CheckRunner = (input: { base: string; branch?: string; head: string; ref: string; commands: string[]; source?: Remote }) => Promise<{ passed: boolean; results: CheckResult[] }>;
+/**
+ * Runs the project's checks on `base` (main) with `head` (from branch `ref`)
+ * merged in. Live, in the repo's line of merges (see check-line.ts): the
+ * result says which main they ran on (`base`, by default the one given) and
+ * which merges ahead were merged in first (`after`), which must land first.
+ */
+export type CheckRunner = (input: { change: string; base: string; branch?: string; head: string; ref: string; commands: string[]; source?: Remote }) => Promise<{
+	passed: boolean;
+	results: CheckResult[];
+	base?: string;
+	after?: { change: string; head: string }[];
+}>;
+
+/** How long a merge waits for the merges ahead of it in line to land, before it checks again without them. */
+export const TURN_WAIT_MS = 5 * 60_000;
+const TURN_POLL_MS = 3_000;
 
 export interface MergeInput {
 	remote: Remote;
@@ -47,6 +62,8 @@ export interface MergeInput {
 	stampKey?: string;
 	change: string;
 	agent: string;
+	/** How long to wait for the merges ahead in line to land (TURN_WAIT_MS unless set, as tests do). */
+	turnWaitMs?: number;
 }
 
 export type MergeOutcome =
@@ -99,16 +116,37 @@ export async function mergeChange(input: MergeInput): Promise<MergeOutcome> {
 		// The project's checks, on main with the change merged in: what main would become.
 		const verify = input.verify ?? [];
 		const checksFrom = Date.now();
+		let onto = ws;
+		let tested: { base: string; after: string[] } | undefined;
 		if (verify.length) {
 			if (!input.runChecks) throw new Error("[500] checks are configured but nothing can run them");
-			const checked = await input.runChecks({ base: main, branch: ws.branch, head, ref: `changes/${input.change}`, commands: verify, source: input.source });
+			const checked = await input.runChecks({ change: input.change, base: main, branch: ws.branch, head, ref: `changes/${input.change}`, commands: verify, source: input.source });
 			if (!checked.passed) {
 				const failed = checked.results.find((r) => r.exitCode !== 0);
 				return { ok: false, reasons: [failed ? `checks failed: ${failed.command} exited ${failed.exitCode}` : "checks failed"], checks: checked.results };
 			}
+			tested = { base: checked.base ?? main, after: (checked.after ?? []).map((a) => a.head) };
+			// Tested on another main, or after merges ahead in line: land right after those, on exactly the code tested.
+			if (tested.base !== main || tested.after.length) {
+				const turn = await awaitTurn(input, tested);
+				if (!turn) continue;
+				onto = turn;
+				await onto.fetch("change", input.source ?? input.remote, `changes/${input.change}`);
+			}
 		}
 
-		const claimed = { base: main, head, change: input.change, author: input.agent, by: input.stamper?.by, claimsTip: input.store.cite(view, files, own), votesTip: input.votes.cite(votes, head), testedOn: verify.length ? main : undefined };
+		const base = await onto.head();
+		const claimed = {
+			base,
+			head,
+			change: input.change,
+			author: input.agent,
+			by: input.stamper?.by,
+			claimsTip: input.store.cite(view, files, own),
+			votesTip: input.votes.cite(votes, head),
+			testedOn: tested?.base,
+			...(tested?.after.length ? { testedAfter: tested.after } : {}),
+		};
 		const message = [
 			`Merge ${input.change} by ${input.agent}`,
 			"",
@@ -118,15 +156,17 @@ export async function mergeChange(input: MergeInput): Promise<MergeOutcome> {
 			`Blueprint-Votes: ${claimed.votesTip}`,
 			// Which main the checks passed on: the merge's first parent, if nothing moved.
 			...(claimed.testedOn ? [`Blueprint-Tested: ${claimed.testedOn}`] : []),
+			// The merges ahead in line the checks merged in first: exactly these came between that main and this merge.
+			...(claimed.testedAfter ? [`Blueprint-Tested-After: ${claimed.testedAfter.join(" ")}`] : []),
 			// Who asked for it, as Access verified them, and Blueprint's stamp over all of the above.
 			...(input.stamper ? [`Blueprint-By: ${input.stamper.by}`, `Blueprint-Stamp: ${await input.stamper.stamp(mergeStampPayload(claimed))}`] : []),
 			"",
 		].join("\n");
 		// Always a merge commit, never a fast-forward: the merge's trailers are what the audit reads.
-		const { oid } = await git.merge({ fs: ws.fs, dir: "/repo", ours: ws.branch, theirs: head, message, author: BOT, fastForward: false, abortOnConflict: true });
+		const { oid } = await git.merge({ fs: onto.fs, dir: "/repo", ours: onto.branch, theirs: head, message, author: BOT, fastForward: false, abortOnConflict: true });
 		if (!oid) throw new Error(`merging ${input.change} made no commit`);
 		try {
-			await ws.push();
+			await onto.push();
 		} catch (err) {
 			// Main moved under us: another agent merged first. Check again on top of it.
 			if (attempt < ATTEMPTS && (err instanceof git.Errors.PushRejectedError || err instanceof git.Errors.GitPushError)) continue;
@@ -136,5 +176,40 @@ export async function mergeChange(input: MergeInput): Promise<MergeOutcome> {
 		await input.store.release({ change: input.change, agent: input.agent, reason: "merged", mergedAs: oid }, input.stamper);
 		console.log(`merged ${input.change} as ${oid.slice(0, 8)}: checks and push ${releaseFrom - checksFrom} ms, releasing its claim ${Date.now() - releaseFrom} ms`);
 		return { ok: true, commit: oid };
+	}
+}
+
+/**
+ * Wait until the project's branch is `tested.base` followed by merges of
+ * exactly `tested.after`, in order: then a merge onto it lands on the code its
+ * checks ran on. Returns a checkout of that main, or null if main went another
+ * way (a merge outside the line, or one ahead that never landed in time):
+ * then the merge checks again.
+ */
+async function awaitTurn(input: MergeInput, tested: { base: string; after: string[] }): Promise<Workspace | null> {
+	const until = Date.now() + (input.turnWaitMs ?? TURN_WAIT_MS);
+	for (let seen: string | null = null; ; await new Promise((resolve) => setTimeout(resolve, TURN_POLL_MS))) {
+		const now = await branchHead(input.remote, input.branch);
+		if (now && now !== seen) {
+			seen = now;
+			const ws = await Workspace.clone(input.remote, input.branch);
+			const landed = await landedSince(ws, await ws.head(), tested.base, tested.after.length);
+			if (!landed || landed.some((head, i) => head !== tested.after[i])) return null;
+			if (landed.length === tested.after.length) return ws;
+		}
+		if (Date.now() > until) return null;
+	}
+}
+
+/** The changes merged on the branch from `base` to `head`, oldest first (their merges' second parents), if it's at most `most` merges; else null. */
+export async function landedSince(ws: Workspace, head: string, base: string, most: number): Promise<string[] | null> {
+	const heads: string[] = [];
+	for (let at = head; ; ) {
+		if (at === base) return heads.reverse();
+		if (heads.length === most) return null;
+		const { commit } = await ws.ensureCommit(at);
+		if (commit.parent.length < 2) return null;
+		heads.push(commit.parent[1]);
+		at = commit.parent[0];
 	}
 }

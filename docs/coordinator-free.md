@@ -136,9 +136,9 @@ That led to forks (below), and that shared mode was later removed.
   retry, which Blueprint can't make them do; forks are the fix.
 - **Merging checks what it can.** The toolkit's merge test-merges the change
   into main first (a conflict comes back as the files, and what to do), then
-  runs the project's checks on main plus the change in the Gate's container,
-  and records which main they passed on (`Blueprint-Tested`); the audit reports
-  merges that don't. Live: a change deleting a file the checks need was
+  runs the project's checks on main plus the change in the Gate's container
+  (in line with other merges: see The line of merges), and records which main
+  they passed on (`Blueprint-Tested`); the audit reports merges that don't. Live: a change deleting a file the checks need was
   refused with the failing command, a stale branch with the conflicting file.
 - **Some coordinator duties have no owner, and some aren't needed.** With no
   leader there is no timer: an abandoned claim is released as stale by the next
@@ -289,3 +289,25 @@ with the buckets it needs (a commit's votes: the record and one bucket).
 Questions for a person (`free_ask_human`) are rare and always stay in the
 record. A merge cites its votes as `=<record tip> <bucket>=<tip>`, and the
 audit counts the cited records together.
+
+## The line of merges
+
+Every merge must be tested on exactly the code it lands on (the audit checks
+`Blueprint-Tested`). Checking merges one at a time costs a check run each, in
+a row (about 90 s each on Express). Checking them side by side on one main
+gains nothing: the first to land makes the others' results stale.
+
+So merges wait in a line (`check-line.ts`), kept by the repo's Gate. Merges
+ready together (within 2 s of an idle line) form a batch of up to 4, and each
+is checked on main with the merges ahead of it in the batch merged in first,
+all at once, each in its own container (the repo's Gate and three beside it).
+A result says what it was tested on and after; the merge waits until exactly
+those merges have landed on that main, then lands (`Blueprint-Tested-After`
+lists their heads). A merge behind one that failed is checked again without
+it, first in line; one whose merges ahead never land within 5 minutes, or
+whose main went another way, checks again. Ten merges ready at once take
+three batches, about three check runs, instead of ten.
+
+The line decides nothing: it schedules check runs. Each agent's merge lands
+itself, and the audit checks that exactly the listed merges came between the
+main the checks ran on and the merge.

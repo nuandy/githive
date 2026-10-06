@@ -77,12 +77,13 @@ export function freeContextFor(env: Env, by: string | undefined, caller: { agent
 		agentStatus: (repo, change, head, roles) => freeAgentStatus(env, repo, change, head, roles),
 		head: async (repo, branch) => (await headOf(env.ARTIFACTS, repo, branch)) ?? fail(409, `${repo} has no ${branch} branch`),
 		defaultBranch: async (repo) => (await defaultBranch(await remoteFor(env.ARTIFACTS, repo, "read", 3600))) ?? fail(409, `${repo} has no commits`),
-		// Checks run in the Gate's container, one Gate per repo.
-		runChecks: (repo) => async ({ base, branch, head, ref, commands, source }) => {
+		// Checks run in the repo's line of merges (see check-line.ts): its Gate and the Gates beside it, each with a container.
+		runChecks: (repo) => async ({ change, branch, head, ref, commands, source }) => {
 			const remote = await remoteFor(env.ARTIFACTS, repo, "read", 3600);
-			const change = source ?? remote;
-			const result = await env.GATE.getByName(`free:${repo}`).checkCommit({ baseHead: base, branch, base: { remote: remote.url, token: remote.token }, fork: { remote: change.url, token: change.token, ref }, head, checks: commands });
-			return { passed: result.passed, results: result.results.map((r) => ({ command: r.command, exitCode: r.exitCode, output: r.output })) };
+			const fork = source ?? remote;
+			const { result, base, after } = await env.GATE.getByName(`free:${repo}`).checkInLine({ repo, change, branch, base: { remote: remote.url, token: remote.token }, fork: { remote: fork.url, token: fork.token, ref }, head, checks: commands });
+			const conflict = result.mergeConflict ? [{ command: "(merging onto main and the merges ahead in line)", exitCode: 1, output: `conflicts in ${result.mergeConflict.join(", ")}` }] : [];
+			return { passed: result.passed, results: [...conflict, ...result.results.map((r) => ({ command: r.command, exitCode: r.exitCode, output: r.output }))], base, after };
 		},
 	};
 }
