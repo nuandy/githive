@@ -86,13 +86,21 @@ async function readAllShards(remote: Remote, prefix: string) {
 	return readListed(remote, async (onAuth) => (await listRefs(remote, prefix, onAuth)).filter((r) => r.ref.startsWith(prefix)));
 }
 
-/** These refs (where they exist) at their tips: a listing each, all at once, then one fetch for the commits not known yet. */
+/** These refs (where they exist) at their tips: one listing (of the prefix they share), then one fetch for the commits not known yet. */
 async function readRefs(remote: Remote, refs: string[]) {
-	return readListed(remote, async (onAuth) => (await Promise.all(refs.map(async (ref) => (await listRefs(remote, ref, onAuth)).filter((r) => r.ref === ref)))).flat());
+	const wanted = new Set(refs);
+	return readListed(remote, async (onAuth) => (await listRefs(remote, sharedPrefix(refs), onAuth)).filter((r) => wanted.has(r.ref)));
+}
+
+/** The longest prefix every ref starts with. */
+function sharedPrefix(refs: string[]) {
+	let prefix = refs[0] ?? "";
+	for (const ref of refs) while (!ref.startsWith(prefix)) prefix = prefix.slice(0, -1);
+	return prefix;
 }
 
 const listRefs = (remote: Remote, prefix: string, onAuth: () => { username: string; password: string }) =>
-	retryTransient(() => git.listServerRefs({ http, url: remote.url, prefix, onAuth }).catch((err) => (isEmptyRepo(err) ? [] : Promise.reject(err))));
+	retryTransient(() => git.listServerRefs({ http, url: remote.url, protocolVersion: 1, prefix, onAuth }).catch((err) => (isEmptyRepo(err) ? [] : Promise.reject(err))));
 
 /** Refs as `list` finds them, with their states: commits not known yet are fetched in one request. */
 async function readListed(remote: Remote, list: (onAuth: () => { username: string; password: string }) => Promise<{ ref: string; oid: string }[]>): Promise<{ ref: string; tip: string; state: Registry }[]> {
@@ -206,7 +214,7 @@ class ShardedClaims implements ClaimStore {
 				const remote = await pending;
 				const refs = await retryTransient(() =>
 					git
-						.listServerRefs({ http, url: remote.url, prefix, onAuth: () => ({ username: "x", password: remote.token.split("?expires=")[0] }) })
+						.listServerRefs({ http, url: remote.url, protocolVersion: 1, prefix, onAuth: () => ({ username: "x", password: remote.token.split("?expires=")[0] }) })
 						.catch((err) => (isEmptyRepo(err) ? [] : Promise.reject(err))),
 				);
 				return refs.filter((r) => r.ref.startsWith(prefix)).map((r) => ({ shard: decodeShard(r.ref.slice(base.length)), tip: r.oid }));
@@ -264,6 +272,8 @@ class ShardedClaims implements ClaimStore {
 	}
 
 	async readChange(change: string): Promise<ChangeView> {
+		// Every records repo's credentials meanwhile, for the shards the index names.
+		for (const remote of this.remotes()) remote.catch(() => undefined);
 		const shards = await this.indexed(change);
 		const view = shards ? this.viewOf(await this.readShards(shards)) : await this.read();
 		return { claim: view.claims.find((c) => c.change === change), released: view.released.filter((r) => r.change === change) };
@@ -344,11 +354,7 @@ class ShardedClaims implements ClaimStore {
 	async release(input: { change: string; agent: string; reason: string; mergedAs?: string }, stamper?: Stamper): Promise<ReleaseOutcome> {
 		const held = await this.shardsHolding(input.change);
 		if (!held) return { ok: false, refused: `${input.change} holds no claim` };
-		for (const shard of held.shards) {
-			const outcome = await release(this.logOf(shard), input, stamper);
-			if (!outcome.ok && !/holds no claim/.test(outcome.refused)) return outcome;
-		}
-		return { ok: true };
+		return this.eachShard(held.shards, (shard) => release(this.logOf(shard), input, stamper));
 	}
 
 	async releaseStale(input: { change: string; agent: string; staleAfterMs: number; now?: number }, stamper?: Stamper): Promise<ReleaseOutcome> {
@@ -357,11 +363,30 @@ class ShardedClaims implements ClaimStore {
 		// Stale as a whole: by its latest activity in any shard.
 		const idle = (input.now ?? Date.now()) - Date.parse(held.own.active);
 		if (idle <= input.staleAfterMs) return { ok: false, refused: `${input.change}'s claim was active ${Math.round(idle / 1000)}s ago; it isn't stale` };
-		for (const shard of held.shards) {
-			const outcome = await releaseStale(this.logOf(shard), input, stamper);
-			if (!outcome.ok && !/holds no claim/.test(outcome.refused)) return outcome;
+		return this.eachShard(held.shards, (shard) => releaseStale(this.logOf(shard), input, stamper));
+	}
+
+	/**
+	 * Release in each shard: the records repos at once, each one's shards in
+	 * turn. A shard that no longer holds the claim is fine; the first other
+	 * refusal is the outcome (the other repos' shards are still released).
+	 */
+	private async eachShard(shards: string[], step: (shard: string) => Promise<{ ok: true } | { ok: false; refused: string }>): Promise<ReleaseOutcome> {
+		const byRepo = new Map<number, string[]>();
+		for (const shard of shards) {
+			const k = this.spread ? recordsRepoOf(shard, this.spread) : -1;
+			byRepo.set(k, [...(byRepo.get(k) ?? []), shard]);
 		}
-		return { ok: true };
+		const refusals = await Promise.all(
+			[...byRepo.values()].map(async (group) => {
+				for (const shard of group) {
+					const outcome = await step(shard);
+					if (!outcome.ok && !/holds no claim/.test(outcome.refused)) return outcome;
+				}
+				return null;
+			}),
+		);
+		return refusals.find((r) => r) ?? { ok: true };
 	}
 
 	cite(view: ClaimsView, files: string[], own?: ClaimRecord) {

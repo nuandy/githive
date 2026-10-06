@@ -106,7 +106,7 @@ async function pushDirect(remote: Remote, ref: string, from: string | null, to: 
 /** Where the ref points on the server, or null if it doesn't exist (one request). */
 async function serverTip(remote: Remote, ref: string) {
 	// Ask the server whether the log exists, rather than reading a fetch error as "empty".
-	const refs = await git.listServerRefs({ http, url: remote.url, prefix: ref, onAuth: onAuth(remote) }).catch((err) => (isEmptyRepo(err) ? [] : Promise.reject(err)));
+	const refs = await git.listServerRefs({ http, url: remote.url, protocolVersion: 1, prefix: ref, onAuth: onAuth(remote) }).catch((err) => (isEmptyRepo(err) ? [] : Promise.reject(err)));
 	return refs.find((r) => r.ref === ref)?.oid ?? null;
 }
 

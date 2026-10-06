@@ -17,7 +17,7 @@ const decoder = new TextDecoder();
 
 /** Every state a record ref has had, oldest first, with the commit that set it. */
 export async function readRecordHistory<S>(remote: Remote, ref: string): Promise<{ tip: string; state: S }[]> {
-	const refs = await git.listServerRefs({ http, url: remote.url, prefix: ref, onAuth: onAuth(remote) }).catch((err) => (isEmptyRepo(err) ? [] : Promise.reject(err)));
+	const refs = await git.listServerRefs({ http, url: remote.url, protocolVersion: 1, prefix: ref, onAuth: onAuth(remote) }).catch((err) => (isEmptyRepo(err) ? [] : Promise.reject(err)));
 	const tip = refs.find((r) => r.ref === ref)?.oid;
 	if (!tip) return [];
 	const { fs } = await retryTransient(() => fetchCommits(remote, [tip], DIR, { history: true }));
@@ -30,16 +30,44 @@ export async function readRecordHistory<S>(remote: Remote, ref: string): Promise
 	);
 }
 
-/** Every claims shard's history (see shards.ts), by shard, from every repo that holds shards. */
+/**
+ * Every claims shard's history (see shards.ts), by shard, from every repo that
+ * holds shards: per repo, one listing and one fetch of every shard's history.
+ */
 export async function readShardHistories(remotes: Remote[], repo: string) {
 	const prefix = shardsPrefix(repo);
 	const perRepo = await Promise.all(
 		remotes.map(async (remote) => {
-			const refs = await git.listServerRefs({ http, url: remote.url, prefix, onAuth: onAuth(remote) }).catch((err) => (isEmptyRepo(err) ? [] : Promise.reject(err)));
-			return Promise.all(refs.filter((r) => r.ref.startsWith(prefix)).map(async (r) => [decodeShard(r.ref.slice(prefix.length)), await readRecordHistory<Registry>(remote, r.ref)] as const));
+			const { refs, fs } = await listAndFetch(remote, prefix);
+			return Promise.all(
+				refs.map(async (r) => {
+					const history = (await git.log({ fs, dir: DIR, ref: r.oid })).reverse();
+					const states = await Promise.all(
+						history.map(async (entry) => ({
+							tip: entry.oid,
+							state: JSON.parse(decoder.decode((await git.readBlob({ fs, dir: DIR, oid: entry.oid, filepath: "state.json" })).blob)) as Registry,
+						})),
+					);
+					return [decodeShard(r.ref.slice(prefix.length)), states] as const;
+				}),
+			);
 		}),
 	);
 	return new Map(perRepo.flat());
+}
+
+/** The refs under `prefix`, and their histories in one fetch; listed again if one moves in between (its old tip is no longer served). */
+async function listAndFetch(remote: Remote, prefix: string) {
+	for (let attempt = 1; ; attempt++) {
+		const refs = (await retryTransient(() => git.listServerRefs({ http, url: remote.url, protocolVersion: 1, prefix, onAuth: onAuth(remote) }).catch((err) => (isEmptyRepo(err) ? [] : Promise.reject(err))))).filter((r) => r.ref.startsWith(prefix));
+		try {
+			const { fs } = await retryTransient(() => fetchCommits(remote, [...new Set(refs.map((r) => r.oid))], DIR, { history: true }));
+			return { refs, fs };
+		} catch (err) {
+			if (attempt < 3 && /not our ref|fetch refused/i.test(String(err))) continue;
+			throw err;
+		}
+	}
 }
 
 const trailer = (message: string, name: string) => message.match(new RegExp(`^${name}: (.+)$`, "m"))?.[1]?.trim();

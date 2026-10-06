@@ -3,6 +3,7 @@ import { GitCasLog } from "../election-git";
 import { fail, requiredPaths, requiredString } from "../errors";
 import { branchHead, type Remote, Workspace } from "../git";
 import { projectBranch } from "../project-branch";
+import { Timing } from "../timing";
 import { annotate, destroys, reads, writes } from "../tool-annotations";
 import { changeId, normalizeClaim } from "../open-mode";
 import { audit } from "./audit";
@@ -52,6 +53,8 @@ export interface FreeContext {
 	requestReview?: (input: { repo: string; change: string; roles: string[]; summary?: string; mergeWhenApproved?: boolean }) => Promise<{ head: string; reviewers: string[] }>;
 	/** What Blueprint's hosted agents on a change are doing: its builder, and the reviewers of its head. */
 	agentStatus?: (repo: string, change: string, head: string | null, roles: string[]) => Promise<HostedStatus>;
+	/** Times a request's steps, for its Server-Timing header. */
+	timing?: Timing;
 	/** Tells the dashboard's open pages that the repo's records changed. */
 	ping?: (repo: string) => Promise<void>;
 	/** Updates the repo's summary for the dashboard's list of repos (a hint; Git is what counts). */
@@ -202,15 +205,23 @@ async function changeStatus(ctx: FreeContext, repo: string, registry: Registry |
 
 /** Replay a repo's records from Git: how many commits on the project's branch since the mode started, and what broke which convention. */
 async function runAudit(ctx: FreeContext, repo: string) {
-	const remote = await ctx.remote(repo, "read");
-	const registry = await readRecordHistory<Registry>(remote, claimsRef(repo));
+	const t = ctx.timing ?? new Timing();
+	const remote = await t.time("token", () => ctx.remote(repo, "read"));
+	// The votes don't depend on the registry: read them meanwhile.
+	const votesRead = t.time("votes", () => readRecordHistory<Votes>(remote, votesRef(repo)));
+	votesRead.catch(() => undefined);
+	const registry = await t.time("registry", () => readRecordHistory<Registry>(remote, claimsRef(repo)));
 	const baseline = registry[0]?.state.baseline;
 	if (!baseline) throw new Error(`[409] coordinator-free mode hasn't started on ${repo}`);
-	const merges = await readMainMerges(remote, baseline, projectBranch(registry[0].state));
 	const start = registry[0].state;
-	const holders = start.recordsRepos && ctx.recordsRemote ? await Promise.all(Array.from({ length: start.recordsRepos }, (_, k) => ctx.recordsRemote!(repo, k, "read"))) : [remote];
-	const shards = start.shardDepth ? await readShardHistories(holders, repo) : undefined;
-	const violations = await audit({ registry, ...(shards ? { shards } : {}), votes: await readRecordHistory<Votes>(remote, votesRef(repo)), policy: start.policy ?? DEFAULT_POLICY, verify: start.verify, merges });
+	const [merges, shards, votesHistory] = await Promise.all([
+		t.time("merges", () => readMainMerges(remote, baseline, projectBranch(start))),
+		start.shardDepth
+			? t.time("shards", async () => readShardHistories(start.recordsRepos && ctx.recordsRemote ? await Promise.all(Array.from({ length: start.recordsRepos }, (_, k) => ctx.recordsRemote!(repo, k, "read"))) : [remote], repo))
+			: undefined,
+		votesRead,
+	]);
+	const violations = await t.time("audit", () => audit({ registry, ...(shards ? { shards } : {}), votes: votesHistory, policy: start.policy ?? DEFAULT_POLICY, verify: start.verify, merges }));
 	return { merges: merges.length, violations };
 }
 
@@ -221,21 +232,23 @@ async function runAudit(ctx: FreeContext, repo: string) {
  * any of them, and the merge if it merged.
  */
 export async function freeChangeHistory(ctx: FreeContext, repo: string, change: string) {
-	const registry = (await recordLog<Registry>(ctx, repo, claimsRef(repo)).read())?.commit.state;
+	const t = ctx.timing ?? new Timing();
+	const registry = (await t.time("registry", () => recordLog<Registry>(ctx, repo, claimsRef(repo)).read()))?.commit.state;
 	if (!registry?.baseline) throw new Error(`[404] coordinator-free mode hasn't started on ${repo}`);
-	const { claim, released } = await storeFor(ctx, repo, registry).readChange(change);
+	const { claim, released } = await t.time("change", () => storeFor(ctx, repo, registry).readChange(change));
 	if (!claim && !released.length) throw new Error(`[404] no change ${change} on ${repo}`);
 	const branch = projectBranch(registry);
 	const mergedAs = released.find((r) => r.mergedAs)?.mergedAs;
 	const commits = await Promise.resolve()
-		.then(() => changeSourceFor(ctx, repo)(claim?.agent ?? released.at(-1)!.agent, "read", change))
+		.then(() => t.time("fork", () => changeSourceFor(ctx, repo)(claim?.agent ?? released.at(-1)!.agent, "read", change)))
 		.then(async (source) => {
-			const ws = await Workspace.clone(source, `changes/${change}`, { depth: 50 });
+			// Shallow: a change is a few commits on a recent project head; finding where it left deepens history if that's further back.
+			const ws = await t.time("clone", () => Workspace.clone(source, `changes/${change}`, { depth: 8 }));
 			const head = await ws.head();
 			// The change's own commits: back to where it left the project's branch (as it was before the merge, if it merged).
-			const projectHead = await ws.fetch("project", await ctx.remote(repo, "read"), branch);
+			const projectHead = await t.time("project", async () => ws.fetch("project", await ctx.remote(repo, "read"), branch));
 			const before = mergedAs ? (await ws.ensureCommit(mergedAs)).commit.parent[0] : projectHead;
-			const stop = await ws.mergeBase(before, head);
+			const stop = await t.time("base", () => ws.mergeBase(before, head));
 			const own = [];
 			for (const { oid, commit } of await git.log({ fs: ws.fs, dir: "/repo", ref: head, depth: 50 })) {
 				if (oid === stop) break;
@@ -283,20 +296,22 @@ export async function freeAudit(ctx: FreeContext, repo: string) {
 
 /** What the dashboard shows for a repo in coordinator-free mode, read from the records' tips (the audit is apart, in freeAudit). */
 export async function freeSnapshot(ctx: FreeContext, repo: string) {
-	const [registry, votes] = await Promise.all([recordLog<Registry>(ctx, repo, claimsRef(repo)).read(), recordLog<Votes>(ctx, repo, votesRef(repo)).read()]);
+	const t = ctx.timing ?? new Timing();
+	const [registry, votes] = await t.time("records", () => Promise.all([recordLog<Registry>(ctx, repo, claimsRef(repo)).read(), recordLog<Votes>(ctx, repo, votesRef(repo)).read()]));
 	const state = registry?.commit.state;
 	if (!state?.baseline) throw new Error(`[404] coordinator-free mode hasn't started on ${repo}`);
 	const cast = votes?.commit.state.votes ?? [];
 	const counted = await countedVotes(cast, state.stampKey);
-	const claims = await Promise.all(
-		(await storeFor(ctx, repo, state).read()).claims.map(async (c) => {
+	const held = await t.time("claims", () => storeFor(ctx, repo, state).read());
+	const claims = await t.time("status", () => Promise.all(
+		held.claims.map(async (c) => {
 			const { head, approval, hosted } = await changeStatus(ctx, repo, state, cast, counted, c.change, c);
 			// A question for a person, until a person votes on the change's commit.
 			const flag = openFlag(votes?.commit.state, c.change, head);
 			const attention = flag ? { reason: flag.reason, agent: flag.agent, at: flag.at } : hosted?.builder?.status === "failed" ? { reason: `Blueprint's builder failed${hosted.builder.error ? `: ${hosted.builder.error.slice(0, 160)}` : ""}`, agent: "blueprint-builder", at: c.active } : null;
 			return { ...c, head, approval, ...(hosted ? { hosted } : {}), ...(attention ? { attention } : {}) };
 		}),
-	);
+	));
 	const waiting = claims.filter((c) => c.attention);
 	await ctx.summarize?.(repo, {
 		open: claims.length,
@@ -322,7 +337,7 @@ export async function freeSnapshot(ctx: FreeContext, repo: string) {
 }
 
 // Tools that write records, after which the repo's summary notes the activity.
-const WRITES = new Set(["free_claim", "free_release", "free_merge", "free_vote", "free_build", "free_revert", "free_ask_human"]);
+const WRITES = new Set(["free_claim", "free_release", "free_merge", "free_vote", "free_build", "free_revert", "free_ask_human", "free_check"]);
 const noted = new Map<string, number>();
 
 /** Run one coordinator-free tool, and note what it wrote in the repo's summary. */

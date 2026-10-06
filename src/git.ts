@@ -36,7 +36,7 @@ export async function defaultBranch(remote: Remote): Promise<string | null> {
 
 /** A branch's head on a remote, without cloning (one ls-remote), or null when it doesn't exist. */
 export async function branchHead(remote: Remote, branch: string): Promise<string | null> {
-	const refs = await retryTransient(() => git.listServerRefs({ http, url: remote.url, prefix: `refs/heads/${branch}`, onAuth: onAuth(remote) }));
+	const refs = await retryTransient(() => git.listServerRefs({ http, url: remote.url, protocolVersion: 1, prefix: `refs/heads/${branch}`, onAuth: onAuth(remote) }));
 	return refs.find((r) => r.ref === `refs/heads/${branch}`)?.oid ?? null;
 }
 

@@ -1,4 +1,4 @@
-import { Hono } from "hono";
+import { type Context, Hono } from "hono";
 import { verifyAccessRequest } from "./access";
 import type { AccessIdentity, CoordinatorHumanActions } from "./access-contract";
 import { deleteReposWithPrefix, headOf, listRepoNames, parseRepoName, remoteFor, reviewerName, sliceRepoName } from "./artifacts";
@@ -14,6 +14,7 @@ import { handleMcpBody, type McpContext } from "./mcp";
 import { type FreeContext, freeAudit, freeChangeHistory, freeOpenCount, freeSnapshot, freeVoteAsPerson } from "./free/mcp";
 import type { Registry } from "./free/claims";
 import { listTree, readFile } from "./code-browse";
+import { Timing } from "./timing";
 import { defaultBranch, Workspace } from "./git";
 import { freeAgentName, freeContextFor } from "./free/env";
 import { identityLabel } from "./free/stamp";
@@ -26,7 +27,8 @@ export { TaskIndex } from "./task-index";
 export { Peer } from "./peer";
 export { LiveFeed } from "./live-feed";
 
-const app = new Hono<{ Bindings: Env; Variables: { accessIdentity: AccessIdentity } }>();
+type AppEnv = { Bindings: Env; Variables: { accessIdentity: AccessIdentity } };
+const app = new Hono<AppEnv>();
 
 const fixedCoordinator = (env: Env, taskId: string) => env.COORDINATOR.get(env.COORDINATOR.idFromName(taskId));
 
@@ -175,9 +177,49 @@ app.get("/tasks/:id/claims", async (c) => c.json(await coordinator(c.env, c.req.
 const freeContext = (env: Env, identity: AccessIdentity | undefined, agentKey?: string): FreeContext =>
 	freeContextFor(env, identity ? identityLabel(identity) : undefined, agentKey ? { agentKey } : {});
 
+/** Views bigger than this aren't kept (a Durable Object value holds up to 2 MB). */
+const MAX_KEPT_VIEW = 1_000_000;
+
+/**
+ * A dashboard view kept in the repo's live feed (see live-feed.ts): served as
+ * kept while fresh; when stale, served as kept while one fresh build runs in
+ * the background, and pages are pinged when it's ready; built now only when
+ * none is kept, or the reader asks for it fresh. Server-Timing says which
+ * ("view;desc=fresh|stale|built").
+ */
+async function keptView(c: Context<AppEnv>, key: string, name: string, maxAgeMs: number, build: (timing: Timing) => Promise<unknown>) {
+	const feed = c.env.LIVE.getByName(key);
+	const kept = await feed.view(name, maxAgeMs);
+	const rebuild = async (timing: Timing) => {
+		try {
+			const json = JSON.stringify(await timing.time("total", () => build(timing)));
+			if (json.length <= MAX_KEPT_VIEW) await feed.keep(name, json, kept.writes);
+			else await feed.buildFailed(name);
+			return json;
+		} catch (err) {
+			await feed.buildFailed(name).catch(() => undefined);
+			throw err;
+		}
+	};
+	const send = (json: string, timing: string) => c.body(json, 200, { "Content-Type": "application/json", "Server-Timing": timing });
+	// "Cache-Control: no-cache" (say, right after the reader's own write): build it now.
+	const now = /no-cache/.test(c.req.header("Cache-Control") ?? "");
+	if (kept.json !== undefined && !now) {
+		if (!kept.fresh && !kept.building && (await feed.startBuild(name))) c.executionCtx.waitUntil(rebuild(new Timing()).catch((err) => console.error(`rebuilding ${key} ${name} failed`, String(err))));
+		return send(kept.json, `view;desc=${kept.fresh ? "fresh" : "stale"}`);
+	}
+	const timing = new Timing();
+	await feed.startBuild(name);
+	const json = await rebuild(timing);
+	return send(json, `view;desc=built, ${timing.header()}`);
+}
+
 // Coordinator-free repos, for the dashboard: which repos, and a snapshot of one read from Git.
 app.get("/free", async (c) => c.json(await taskIndex(c.env).listFree()));
-app.get("/free/:repo", async (c) => c.json(await freeSnapshot(freeContext(c.env, c.get("accessIdentity")), c.req.param("repo"))));
+app.get("/free/:repo", async (c) => {
+	const repo = c.req.param("repo");
+	return keptView(c, `free:${repo}`, "snapshot", 20_000, (timing) => freeSnapshot({ ...freeContext(c.env, c.get("accessIdentity")), timing }, repo));
+});
 // A person's vote on a coordinator-free change, from the dashboard: stamped with their verified identity.
 app.post("/free/:repo/changes/:change/votes", async (c) => {
 	const actor = c.get("accessIdentity") ?? fail(401, "no identity");
@@ -185,8 +227,14 @@ app.post("/free/:repo/changes/:change/votes", async (c) => {
 	const repo = c.req.param("repo");
 	return c.json(await freeVoteAsPerson(freeContext(c.env, actor), repo, c.req.param("change"), { role: String(role ?? ""), verdict: verdict as "approve" | "reject", evidence: String(evidence ?? "") }, identityLabel(actor)));
 });
-app.get("/free/:repo/changes/:change", async (c) => c.json(await freeChangeHistory(freeContext(c.env, c.get("accessIdentity")), c.req.param("repo"), c.req.param("change"))));
-app.get("/free/:repo/audit", async (c) => c.json(await freeAudit(freeContext(c.env, c.get("accessIdentity")), c.req.param("repo"))));
+app.get("/free/:repo/changes/:change", async (c) => {
+	const { repo, change } = c.req.param();
+	return keptView(c, `free:${repo}`, `change:${change}`, 60_000, (timing) => freeChangeHistory({ ...freeContext(c.env, c.get("accessIdentity")), timing }, repo, change));
+});
+app.get("/free/:repo/audit", async (c) => {
+	const repo = c.req.param("repo");
+	return keptView(c, `free:${repo}`, "audit", 5 * 60_000, (timing) => freeAudit({ ...freeContext(c.env, c.get("accessIdentity")), timing }, repo));
+});
 app.get("/free/:repo/builders/:change", async (c) => c.json(await c.env.BUILDER.getByName(freeAgentName(c.req.param("repo"), c.req.param("change"))).state()));
 // A hosted reviewer's state, by the commit it reviews (the vote's commit) and its role.
 app.get("/free/:repo/reviewers/:change/:head/:role", async (c) => {
