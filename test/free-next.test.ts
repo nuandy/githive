@@ -70,6 +70,20 @@ describe("what an agent should do next", () => {
 		expect([...picks].sort()).toEqual(["w3", "w4", "w5"]);
 	});
 
+	it("leaves its own change to a person once it asked one, and does other work meanwhile", () => {
+		const open = [{ claim: claimOf("mine", "agent-x"), head: "h1" }];
+		const votes = [vote("h1", "agent-y", "reject")];
+		expect(nextFor(base({ open, votes, work: [item("w1")] }))).toMatchObject({ kind: "revise", change: "mine" });
+		expect(nextFor(base({ open, votes, work: [item("w1")], asked: new Set(["mine"]) }))).toMatchObject({ kind: "build", work: { id: "w1" } });
+	});
+
+	it("holds back backlog items a claim in force overlaps, until it's gone", () => {
+		const overlapping = { ...item("w-deep"), paths: ["src/held/x.ts"] };
+		const open = [{ claim: claimOf("held", "agent-y"), head: null }];
+		expect(nextFor(base({ open, work: [overlapping] }))).toMatchObject({ kind: "wait", reason: "the rest of the backlog (w-deep) overlaps claims in force" });
+		expect(nextFor(base({ open: [], work: [overlapping] }))).toMatchObject({ kind: "build", work: { id: "w-deep" } });
+	});
+
 	it("waits, saying why, when there's nothing to do", () => {
 		expect(nextFor(base({ open: [{ claim: claimOf("mine", "agent-x"), head: "h1" }] }))).toMatchObject({ kind: "wait", reason: "your mine waits for votes, and nothing else needs you" });
 		expect(nextFor(base({}))).toMatchObject({ kind: "wait", reason: "no reviews are waiting and the backlog is empty" });

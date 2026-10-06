@@ -518,6 +518,8 @@ async function runFreeTool(name: string, args: Args, ctx: FreeContext): Promise<
 				open,
 				votes: await countedVotes(cast.votes, registered?.stampKey),
 				merged: new Set(inForce.released.filter((r) => r.mergedAs).map((r) => r.change)),
+				// Its own changes waiting on a person: asked about, not yet answered on their head.
+				asked: new Set(open.filter((o) => o.claim.agent === agent && openFlag(cast, o.claim.change, o.head)).map((o) => o.claim.change)),
 				work: backlog?.commit.state.items ?? [],
 			});
 		}

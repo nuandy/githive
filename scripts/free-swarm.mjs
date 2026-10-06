@@ -1,15 +1,17 @@
 #!/usr/bin/env node
-// Run scripted outside agents and reviewers on a coordinator-free repo, all
-// at once, the way independent agents would work. Each agent arrives on its
-// own clock, claims, clones the project, takes its time over its edit,
-// pushes to its fork, checks, waits for approval and merges; and recovers
-// as an agent would: it extends its claim when a file falls outside it,
-// merges the project's branch in when it conflicts, and answers a rejection
-// with a fix (or a question for a person). Each reviewer gets the change's
-// code through Blueprint (free_review_access), takes its time, runs the tests
-// and votes by their exit code. Nothing waits on anything but the protocol: a
-// claim held by another change, votes, and the line of merges. Prints each
-// step as it happens, then a timeline per change and the audit.
+// Run scripted outside agents on a coordinator-free repo, all at once, the way
+// users would: they send agents, not a team of builders and reviewers. Every
+// agent is the same: it asks free_next what to do, does it, and asks again.
+// Building a piece of the backlog, it claims, clones the project, takes its
+// time over the piece's scripted edit, pushes to its fork and checks; it
+// recovers as an agent would (extends its claim when a file falls outside
+// it, merges the project's branch in on a conflict). Reviewing, it gets the
+// change through Blueprint (free_review_access), takes its time, runs the
+// tests and votes by their exit code, in the role free_next names. Asked to
+// revise, it applies the piece's fix, or asks a person. Asked to merge, it
+// merges. Nothing waits on anything but the protocol. Prints each step as it
+// happens, then a timeline per piece of work, what each agent did, and the
+// audit.
 //
 //   node scripts/free-swarm.mjs <plan.json> [--base URL] [--speed N]
 //
@@ -22,26 +24,24 @@
 //     "seed": 7,                             for the random timings, so a run can be repeated
 //     "timing": { "arrive": [0, 120], "edit": [30, 180], "fix": [30, 120], "review": [20, 90] },
 //                                           seconds, each a [min, max] range (--speed N divides them)
-//     "agents": [{ "agent": "lib-agent", "change": "const-lib", "intent": "...", "paths": ["lib/"],
-//                  "edit": "node $PLAN/edits/const-requires.mjs . lib", "message": "commit message",
-//                  "fix": "node $PLAN/edits/fix.mjs .",   what it does about a rejection (optional)
-//                  "onReject": "fix" | "ask" | "stop",     default: fix if it has one, else stop
-//                  "reviewers": ["reviewer-1", "security-1"],   its own reviewers (optional)
-//                  "keyFile": "keys/lib-agent.key" }],
-//     "reviewers": [{ "reviewer": "reviewer-1", "role": "review", "keyFile": "keys/reviewer-1.key",
-//                     "rejectFirst": { "const-lib": "what to change" } }],   scripted rejections (optional)
-//     "reviewersPerChange": 1,              each change goes to this many general reviewers, in turn
+//     "agents": [{ "agent": "agent-1", "keyFile": "keys/agent-1.key" }],   all alike
+//     "planner": { "agent": "planner", "keyFile": "keys/planner.key" },    adds the backlog
+//     "backlog": [{ "id": "const-lib", "title": "...", "intent": "...", "paths": ["lib/"],
+//                   "edit": "node $PLAN/edits/const-requires.mjs . lib", "message": "commit message",
+//                   "fix": "node $PLAN/edits/fix.mjs .",   what its builder does about a rejection (optional)
+//                   "onReject": "fix" | "ask" | "stop",     default: fix if it has one, else stop
+//                   "rejectFirst": "what to change" }],     the first review of it asks for changes (optional)
 //     "setup": { "import": "https://github.com/expressjs/express", "branch": "master",
 //                "verify": ["npm install", "npm test"], "required": 1,
-//                "grants": { "security": ["security-1"] } }   optional: make the repo first
+//                "grants": { "security": ["agent-3"] } }   optional: make the repo first
 //   }
 //
-// Agents and reviewers whose keyFile doesn't exist yet are registered first
-// (free_register), the key written to that file: each needs its own identity,
-// or their votes count as one and an author's reviewers as the author.
-// An agent's edit and fix run in its clone, with $PLAN set to the plan's
-// directory. --base defaults to the bench Worker. Access credentials come
-// from .dev.vars. Tokens and keys are never printed.
+// Agents whose keyFile doesn't exist yet are registered first (free_register),
+// the key written to that file: each needs its own identity, or their votes
+// count as one and an author's reviewers as the author. A piece's edit and fix
+// run in its builder's clone, with $PLAN set to the plan's directory. --base
+// defaults to the bench Worker. Access credentials come from .dev.vars.
+// Tokens and keys are never printed.
 
 import { execFile } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
@@ -63,13 +63,15 @@ const vars = Object.fromEntries(readFileSync(join(root, ".dev.vars"), "utf8").sp
 const access = { "CF-Access-Client-Id": vars.CF_ACCESS_CLIENT_ID, "CF-Access-Client-Secret": vars.CF_ACCESS_CLIENT_SECRET };
 // A merge can wait in line for minutes: no client-side timeouts.
 const patient = new Agent({ headersTimeout: 0, bodyTimeout: 0 });
+/** The whole run gives up after this long. */
+const RUN_LIMIT_MS = 60 * 60_000;
 
 const started = Date.now();
 const clock = () => `${((Date.now() - started) / 1000).toFixed(0).padStart(4)}s`;
-const say = (who, text) => console.log(`${clock()}  ${who.padEnd(18)} ${text}`);
+const say = (who, text) => console.log(`${clock()}  ${who.padEnd(12)} ${text}`);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-// Seeded timings (mulberry32): the same plan and seed wait the same way.
+// Seeded timings (mulberry32): the same plan and seed wait about the same way.
 let seed = plan.seed ?? 1;
 const random = () => {
 	seed = (seed + 0x6d2b79f5) | 0;
@@ -78,7 +80,7 @@ const random = () => {
 	return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
 };
 const timing = { arrive: [0, 120], edit: [30, 180], fix: [30, 120], review: [20, 90], ...plan.timing };
-/** Seconds to spend on `step`, drawn now (in a fixed order per actor, so runs repeat), already divided by --speed. */
+/** Milliseconds to spend on `step`, divided by --speed. */
 const draw = (step) => {
 	const [min, max] = timing[step];
 	return ((min + random() * (max - min)) * 1000) / speed;
@@ -107,223 +109,212 @@ const helper = (...rest) => run("node", [join(root, "scripts/mcp-agent.mjs"), ..
 const work = at(plan.work ?? "swarm-work");
 rmSync(work, { recursive: true, force: true });
 mkdirSync(work, { recursive: true });
-let branch = plan.branch ?? plan.setup?.branch ?? "main";
+let branch = plan.setup?.branch ?? "main";
 
-/** Each change's timeline: when each step happened, its heads, what it ran into. */
-const timeline = new Map(plan.agents.map((a) => [a.change, { agent: a.agent, heads: [], events: [] }]));
-const mark = (change, step) => (timeline.get(change)[step] ??= Date.now() - started);
-const note = (change, event) => timeline.get(change).events.push(event);
-let agentsLeft = plan.agents.length;
+const pieces = new Map(plan.backlog.map((p) => [p.id, p]));
+/** Each piece's timeline: when each step happened, who did what, what it ran into. */
+const timeline = new Map(plan.backlog.map((p) => [p.id, { heads: [], reviews: [], events: [] }]));
+const mark = (id, step) => (timeline.get(id)[step] ??= Date.now() - started);
+const note = (id, event) => timeline.get(id).events.push(event);
+/** What each agent did. */
+const did = new Map(plan.agents.map((a) => [a.agent, { build: 0, review: 0, revise: 0, merge: 0, wait: 0 }]));
+/** Pieces whose first review has asked for changes already (rejectFirst happens once). */
+const askedOnce = new Set();
+/** Pieces settled for this run: merged, waiting on a person, or stopped. */
+const settled = new Map();
+const allSettled = () => plan.backlog.every((p) => settled.has(p.id));
 
-async function agent(spec) {
-	const { agent: name, change } = spec;
-	const t = timeline.get(change);
-	const dir = join(work, change);
-	const key = spec.keyFile;
-	// Each agent's timings drawn up front, in order, so the run repeats whatever happens.
-	const arrive = draw("arrive");
-	const editFor = draw("edit");
-	const fixFor = draw("fix");
-	let paths = [...spec.paths];
+/** One agent's hands: build, review, revise and merge, as free_next says. */
+function agentFor(spec) {
+	const { agent: name, keyFile: key } = spec;
+	const call = (toolName, toolArgs) => tool(toolName, toolArgs, key);
+	const dirOf = (id) => join(work, id);
+	const claimed = new Map();
 
-	/** Claim (again, to extend), waiting while another change holds what this one needs. */
-	const claimPaths = async (wanted) => {
-		for (let waited = 0; ; waited += 15) {
-			const claimed = await tool("free_claim", { change, agent: name, paths: wanted, intent: spec.intent }, key);
-			if (claimed.ok) return;
-			const holders = [...new Set((claimed.conflicts ?? []).map((c) => c.change))].join(", ");
-			if (waited >= 900) throw new Error(`still blocked by ${holders} after 15 minutes`);
-			if (waited === 0) {
-				say(name, `waits: ${holders} hold part of what it needs`);
-				note(change, `waited on ${holders}`);
-			}
-			await sleep(15_000);
-		}
-	};
-	const commitAndPush = async (message) => {
+	const commitAndPush = async (id, message) => {
+		const dir = dirOf(id);
 		await git(dir, "add", "-A");
 		await git(dir, "-c", `user.name=${name}`, "-c", `user.email=${name}@agents.example`, "commit", "-q", "-m", message);
-		await git(dir, "push", "-q", "fork", `HEAD:refs/heads/changes/${change}`);
+		await git(dir, "push", "-q", "fork", `HEAD:refs/heads/changes/${id}`);
 		const head = (await git(dir, "rev-parse", "HEAD")).stdout.trim();
 		const { stdout: stat } = await git(dir, "show", "--stat", "--format=", "HEAD");
-		t.heads.push(head);
-		say(name, `pushed ${head.slice(0, 7)}: ${stat.trim().split("\n").at(-1).trim()}`);
-		return head;
+		timeline.get(id).heads.push(head);
+		say(name, `pushed ${id} ${head.slice(0, 7)}: ${stat.trim().split("\n").at(-1).trim()}`);
 	};
-	/** The project's branch merged into this one (deep enough to find where they meet), and pushed. */
-	const mergeProject = async () => {
+	/** The project's branch merged in (deep enough to find where they meet), and pushed. */
+	const mergeProject = async (id) => {
+		const dir = dirOf(id);
 		await git(dir, "fetch", "-q", "--depth", "50", "origin", branch);
 		await git(dir, "-c", `user.name=${name}`, "-c", `user.email=${name}@agents.example`, "merge", "-q", "--no-edit", `origin/${branch}`).catch(async (err) => {
 			await git(dir, "merge", "--abort").catch(() => undefined);
 			throw new Error(`conflicts with ${branch} it can't resolve inside its claim: ${String(err.stderr ?? err).slice(0, 160)}`);
 		});
-		note(change, `merged ${branch} in`);
-		await git(dir, "push", "-q", "fork", `HEAD:refs/heads/changes/${change}`);
-		const head = (await git(dir, "rev-parse", "HEAD")).stdout.trim();
-		t.heads.push(head);
-		say(name, `merged ${branch} in and pushed ${head.slice(0, 7)}`);
+		note(id, `merged ${branch} in`);
+		await git(dir, "push", "-q", "fork", `HEAD:refs/heads/changes/${id}`);
+		timeline.get(id).heads.push((await git(dir, "rev-parse", "HEAD")).stdout.trim());
+		say(name, `merged ${branch} into ${id} and pushed`);
+	};
+	const extendClaim = async (id, files, when) => {
+		const paths = [...new Set([...(claimed.get(id) ?? []), ...files])];
+		const piece = pieces.get(id);
+		const result = await call("free_claim", { change: id, agent: name, paths, intent: piece.intent });
+		if (!result.ok) throw new Error(`couldn't extend its claim to ${files.join(", ")}: ${JSON.stringify(result.conflicts ?? result).slice(0, 160)}`);
+		claimed.set(id, paths);
+		note(id, `extended claim ${when} (${files.length})`);
+		say(name, `extends ${id}'s claim to ${files.join(", ")}`);
 	};
 	/** Check after a push: extend the claim to files outside it, merge the project in on a conflict. */
-	const settle = async () => {
+	const settle = async (id) => {
 		for (let round = 0; round < 3; round++) {
-			const checked = await tool("free_check", { change }, key);
-			mark(change, "checked");
+			const checked = await call("free_check", { change: id });
+			mark(id, "checked");
 			if (checked.outsideClaim?.length) {
-				paths = [...new Set([...paths, ...checked.outsideClaim])];
-				say(name, `extends its claim to ${checked.outsideClaim.join(", ")}`);
-				note(change, `extended claim (${checked.outsideClaim.length})`);
-				await claimPaths(paths);
+				await extendClaim(id, checked.outsideClaim, "at check");
 				continue;
 			}
 			if (checked.main && !checked.main.clean) {
-				say(name, `conflicts with ${branch} in ${(checked.main.conflicts ?? []).join(", ")}`);
-				await mergeProject();
+				await mergeProject(id);
 				continue;
 			}
-			say(name, "check: merges cleanly, all inside its claim");
 			return;
 		}
 	};
 
-	try {
-		await sleep(arrive);
-		say(name, `arrives for ${change}`);
-		await claimPaths(paths);
-		mark(change, "claimed");
-		say(name, `claimed ${paths.length} path(s)`);
-
-		await helper("clone", dir, "--repo", plan.repo, "--change", change, ...(key ? ["--key-file", at(key)] : []));
-		await git(dir, "checkout", "-q", "-b", `changes/${change}`);
-		await sleep(editFor);
-		await sh(dir, spec.edit);
-		await commitAndPush(spec.message ?? spec.intent);
-		mark(change, "pushed");
-		await settle();
-
-		let fixed = false;
-		const giveUp = Date.now() + 20 * 60_000;
-		for (;;) {
-			if (Date.now() > giveUp) throw new Error("no approval after 20 minutes");
-			const status = await tool("free_status", { change }, key);
-			const rejection = status.votes?.find((v) => v.verdict === "reject");
-			if (rejection || status.approval.vetoedBy?.length) {
-				const why = rejection?.evidence ?? `vetoed by ${status.approval.vetoedBy.join(", ")}`;
-				const onReject = spec.onReject ?? (spec.fix ? "fix" : "stop");
-				say(name, `${rejection?.reviewer ?? "a reviewer"} asks for changes: ${why.slice(0, 120)}`);
-				note(change, `rejected by ${rejection?.reviewer ?? "a veto"}`);
-				if (onReject === "fix" && spec.fix && !fixed) {
-					fixed = true;
-					await sleep(fixFor);
-					await sh(dir, spec.fix);
-					await commitAndPush(`Address review: ${why.slice(0, 60)}`);
-					mark(change, "revised");
-					await settle();
-					continue;
-				}
-				if (onReject === "ask") {
-					await tool("free_ask_human", { change, agent: name, reason: `A reviewer asked for changes I can't make within this change: ${why}` }, key);
-					throw new Error("asked a person; waiting on their vote");
-				}
-				throw new Error(`changes requested: ${why.slice(0, 160)}`);
-			}
-			if (!status.approval.approved) {
-				await sleep(5_000);
-				continue;
-			}
-			mark(change, "approved");
-			const merged = await tool("free_merge", { change, agent: name }, key);
-			if (merged.ok) {
-				mark(change, "merged");
-				t.commit = merged.commit;
-				say(name, `merged as ${merged.commit.slice(0, 8)}`);
-				return;
-			}
-			const reasons = (merged.reasons ?? []).join("; ");
-			const outside = [...reasons.matchAll(/(\S+) is outside /g)].map((m) => m[1]);
-			if (outside.length) {
-				paths = [...new Set([...paths, ...outside])];
-				say(name, `merge refused: extends its claim to ${outside.join(", ")}`);
-				note(change, `extended claim at merge (${outside.length})`);
-				await claimPaths(paths);
-				continue;
-			}
-			if (merged.conflicts?.length) {
-				say(name, `merge refused: conflicts in ${merged.conflicts.join(", ")}`);
-				await mergeProject();
-				await settle();
-				continue;
-			}
-			if (/approvals|needs approval/.test(reasons)) {
-				// A newer head than the votes: wait for them.
-				await sleep(5_000);
-				continue;
-			}
-			throw new Error(`merge refused: ${reasons.slice(0, 300)}`);
+	const build = async (item) => {
+		const piece = pieces.get(item.id);
+		if (!piece) throw new Error(`free_next offered ${item.id}, which isn't in this plan's backlog`);
+		const paths = piece.paths ?? item.paths ?? [];
+		const result = await call("free_claim", { change: piece.id, agent: name, paths, intent: piece.intent }).catch((err) => ({ ok: false, error: String(err.message ?? err) }));
+		if (!result.ok) {
+			// Told the same piece as another agent, which claimed it first: ask again.
+			say(name, `couldn't claim ${piece.id}: ${(result.error ?? JSON.stringify(result.conflicts)).slice(0, 100)}`);
+			return;
 		}
-	} catch (err) {
-		t.failed = String(err.message ?? err).slice(0, 300);
-		say(name, `stopped: ${t.failed}`);
-	} finally {
-		agentsLeft--;
-	}
-}
+		claimed.set(piece.id, paths);
+		timeline.get(piece.id).builder = name;
+		mark(piece.id, "claimed");
+		say(name, `builds ${piece.id} (${paths.length} path(s))`);
+		const dir = dirOf(piece.id);
+		// Starting over after a build that failed partway (free_next says finish): a fresh clone.
+		rmSync(dir, { recursive: true, force: true });
+		await helper("clone", dir, "--repo", plan.repo, "--change", piece.id, ...(key ? ["--key-file", at(key)] : []));
+		await git(dir, "checkout", "-q", "-b", `changes/${piece.id}`);
+		await sleep(draw("edit"));
+		await sh(dir, piece.edit);
+		await commitAndPush(piece.id, piece.message ?? piece.intent);
+		mark(piece.id, "pushed");
+		await settle(piece.id);
+	};
 
-async function reviewer(spec) {
-	// Each change goes to its own reviewers, or to `per` general reviewers in turn.
-	const general = plan.reviewers.filter((r) => (r.role ?? "review") === "review");
-	const index = general.indexOf(spec);
-	const per = Math.min(plan.reviewersPerChange ?? 1, general.length);
-	const mine = plan.agents.filter((a, i) => (a.reviewers ? a.reviewers.includes(spec.reviewer) : index >= 0 && Array.from({ length: per }, (__, k) => (i + k) % general.length).includes(index)));
-	const reviewed = new Set();
-	const rejected = new Set();
-	while (agentsLeft > 0) {
-		for (const change of mine) {
-			const t = timeline.get(change.change);
-			const head = t.heads.at(-1);
-			if (!head || reviewed.has(head) || t.failed || t.merged) continue;
-			reviewed.add(head);
-			const dir = join(work, `review-${spec.reviewer}-${change.change}`);
+	const review = async (next) => {
+		const dir = join(work, `review-${name}-${next.change}`);
+		rmSync(dir, { recursive: true, force: true });
+		try {
+			const { stdout } = await helper("review-clone", dir, "--repo", plan.repo, "--change", next.change, ...(key ? ["--key-file", at(key)] : []));
+			const got = JSON.parse(stdout.trim().split("\n").at(-1));
+			if (got.head !== next.head) return; // pushed again meanwhile: ask again
+			const { stdout: stat } = await git(dir, "diff", "--stat", `${got.base}...HEAD`);
+			await sleep(draw("review"));
+			let verdict = "approve";
+			let evidence = `Read the diff (${stat.trim().split("\n").at(-1)?.trim() ?? "no changes"}).`;
+			if (plan.test) {
+				if (plan.nodeModules && !existsSync(join(dir, "node_modules"))) symlinkSync(at(plan.nodeModules), join(dir, "node_modules"));
+				// The test command's exit code decides; its summary lines are the evidence.
+				const { stdout: out } = await sh(dir, `${plan.test} > .swarm-test.log 2>&1; echo "exit=$?"; tail -60 .swarm-test.log`);
+				const failing = !/^exit=0$/m.test(out);
+				const summary = (out.match(/\d+ passing|\d+ failing|\d+ pending|Tests\s+[^\n]*/g) ?? []).join(", ");
+				if (failing) verdict = "reject";
+				evidence += ` ${plan.test}: ${summary || (failing ? "failed" : "passed")}${failing ? ` (exit ${out.match(/^exit=(\d+)$/m)?.[1]})` : ""}.`;
+			}
+			// A scripted request for changes: the first review of the piece asks for it.
+			const ask = pieces.get(next.change)?.rejectFirst;
+			if (ask && verdict === "approve" && !askedOnce.has(next.change)) {
+				askedOnce.add(next.change);
+				verdict = "reject";
+				evidence = `${ask} ${evidence}`;
+			}
+			await call("free_vote", { commit: next.head, reviewer: name, role: next.role, verdict, evidence });
+			timeline.get(next.change)?.reviews.push(`${name}${next.role !== "review" ? ` as ${next.role}` : ""}: ${verdict}`);
+			say(name, `${verdict === "approve" ? "approves" : "rejects"} ${next.change} (${next.head.slice(0, 7)})${next.role !== "review" ? ` as ${next.role}` : ""}`);
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
+	};
+
+	const revise = async (next) => {
+		const piece = pieces.get(next.change);
+		const onReject = piece?.onReject ?? (piece?.fix ? "fix" : "stop");
+		note(next.change, `rejected by ${next.reviewer}`);
+		say(name, `${next.reviewer} asks for changes to ${next.change}: ${next.evidence.slice(0, 100)}`);
+		if (onReject === "fix" && piece?.fix && !timeline.get(next.change).revised) {
+			await sleep(draw("fix"));
+			await sh(dirOf(next.change), piece.fix);
+			await commitAndPush(next.change, `Address review: ${next.evidence.slice(0, 60)}`);
+			mark(next.change, "revised");
+			await settle(next.change);
+			return;
+		}
+		if (onReject === "ask") {
+			await call("free_ask_human", { change: next.change, agent: name, reason: `A reviewer asked for changes I shouldn't decide alone: ${next.evidence}` });
+			note(next.change, "asked a person");
+			settled.set(next.change, "waits on a person");
+			say(name, `asks a person about ${next.change}`);
+			return;
+		}
+		settled.set(next.change, `stopped: changes requested (${next.evidence.slice(0, 60)})`);
+		await call("free_release", { change: next.change, agent: name, reason: "a reviewer asked for changes I can't make" });
+	};
+
+	const merge = async (next) => {
+		mark(next.change, "approved");
+		const merged = await call("free_merge", { change: next.change, agent: name });
+		if (merged.ok) {
+			mark(next.change, "merged");
+			timeline.get(next.change).commit = merged.commit;
+			settled.set(next.change, `merged ${merged.commit.slice(0, 8)}`);
+			say(name, `merged ${next.change} as ${merged.commit.slice(0, 8)}`);
+			return;
+		}
+		const reasons = (merged.reasons ?? []).join("; ");
+		const outside = [...reasons.matchAll(/(\S+) is outside /g)].map((m) => m[1]);
+		if (outside.length) return extendClaim(next.change, outside, "at merge");
+		if (merged.conflicts?.length) {
+			await mergeProject(next.change);
+			return settle(next.change);
+		}
+		say(name, `merge of ${next.change} refused: ${reasons.slice(0, 160)}`);
+		note(next.change, `merge refused: ${reasons.slice(0, 60)}`);
+	};
+
+	return async () => {
+		await sleep(draw("arrive"));
+		say(name, "arrives");
+		const until = started + RUN_LIMIT_MS;
+		while (Date.now() < until) {
+			let next;
 			try {
-				// The change's code through Blueprint, as any outside reviewer gets it.
-				rmSync(dir, { recursive: true, force: true });
-				const { stdout } = await helper("review-clone", dir, "--repo", plan.repo, "--change", change.change, ...(spec.keyFile ? ["--key-file", at(spec.keyFile)] : []));
-				const got = JSON.parse(stdout.trim().split("\n").at(-1));
-				if (got.head !== head) {
-					// Pushed again meanwhile: review the newest next time round.
-					reviewed.delete(head);
+				next = await call("free_next", { agent: name });
+				if (next.kind === "wait") {
+					did.get(name).wait++;
+					if (allSettled()) break;
+					await sleep(Math.min(next.retryAfterSeconds ?? 30, 15) * 1000);
 					continue;
 				}
-				const { stdout: stat } = await git(dir, "diff", "--stat", `${got.base}...HEAD`);
-				await sleep(draw("review"));
-				let verdict = "approve";
-				let evidence = `Read the diff (${stat.trim().split("\n").at(-1)?.trim() ?? "no changes"}), within ${change.change}'s claim.`;
-				if (plan.test) {
-					if (plan.nodeModules && !existsSync(join(dir, "node_modules"))) symlinkSync(at(plan.nodeModules), join(dir, "node_modules"));
-					// The test command's exit code decides; its summary lines are the evidence.
-					const { stdout: out } = await sh(dir, `${plan.test} > .swarm-test.log 2>&1; echo "exit=$?"; tail -60 .swarm-test.log`);
-					const failing = !/^exit=0$/m.test(out);
-					const summary = (out.match(/\d+ passing|\d+ failing|\d+ pending|Tests\s+[^\n]*/g) ?? []).join(", ");
-					if (failing) verdict = "reject";
-					evidence += ` ${plan.test}: ${summary || (failing ? "failed" : "passed")}${failing ? ` (exit ${out.match(/^exit=(\d+)$/m)?.[1]})` : ""}.`;
-				}
-				// A scripted request for changes, once per change.
-				const ask = spec.rejectFirst?.[change.change];
-				if (ask && !rejected.has(change.change) && verdict === "approve") {
-					rejected.add(change.change);
-					verdict = "reject";
-					evidence = `${ask} ${evidence}`;
-				}
-				await tool("free_vote", { commit: head, reviewer: spec.reviewer, role: spec.role ?? "review", verdict, evidence }, spec.keyFile);
-				say(spec.reviewer, `${verdict === "approve" ? "approves" : "rejects"} ${change.change} (${head.slice(0, 7)})`);
+				did.get(name)[next.kind === "finish" ? "build" : next.kind]++;
+				if (next.kind === "build") await build(next.work);
+				else if (next.kind === "finish") await build({ id: next.change });
+				else if (next.kind === "review") await review(next);
+				else if (next.kind === "revise") await revise(next);
+				else if (next.kind === "merge") await merge(next);
 			} catch (err) {
-				reviewed.delete(head);
-				say(spec.reviewer, `couldn't review ${change.change} yet: ${String(err.message ?? err).slice(0, 160)}`);
-			} finally {
-				rmSync(dir, { recursive: true, force: true });
+				const id = next?.change ?? next?.work?.id;
+				say(name, `${next?.kind ?? "free_next"}${id ? ` ${id}` : ""} failed: ${String(err.message ?? err).slice(0, 200)}`);
+				if (id && timeline.has(id)) note(id, `${next.kind} failed`);
+				await sleep(10_000);
 			}
 		}
-		await sleep(3_000);
-	}
+		say(name, "done");
+	};
 }
 
 if (plan.setup) {
@@ -335,27 +326,35 @@ if (plan.setup) {
 	}
 	const startedMode = await tool("free_start", { required: plan.setup.required ?? 1, ...(plan.setup.verify ? { verify: plan.setup.verify } : {}), ...(plan.setup.grants ? { grants: plan.setup.grants } : {}) });
 	branch = startedMode.branch;
-	say("swarm", `${plan.repo} on ${startedMode.branch}: checks ${JSON.stringify(startedMode.verify)}, claims sharded ${JSON.stringify(startedMode.sharding)}`);
+	say("swarm", `${plan.repo} on ${branch}: checks ${JSON.stringify(startedMode.verify)}, grants ${JSON.stringify(startedMode.policy?.grants ?? {})}, claims ${JSON.stringify(startedMode.sharding)}`);
 }
-for (const who of [...plan.agents.map((a) => ({ name: a.agent, keyFile: a.keyFile })), ...plan.reviewers.map((r) => ({ name: r.reviewer, keyFile: r.keyFile }))]) {
+for (const who of [...plan.agents, ...(plan.planner ? [plan.planner] : [])]) {
 	if (!who.keyFile || existsSync(at(who.keyFile))) continue;
 	mkdirSync(dirname(at(who.keyFile)), { recursive: true });
-	const { key } = await tool("free_register", { agent: who.name });
+	const { key } = await tool("free_register", { agent: who.agent });
 	writeFileSync(at(who.keyFile), key);
 	chmodSync(at(who.keyFile), 0o600);
-	say("swarm", `registered ${who.name}`);
+	say("swarm", `registered ${who.agent}`);
 }
+const planner = plan.planner ?? plan.agents[0];
+for (const piece of plan.backlog) {
+	const added = await tool("free_add_work", { id: piece.id, title: piece.title ?? piece.id, intent: piece.intent, ...(piece.paths ? { paths: piece.paths } : {}), agent: planner.agent }, planner.keyFile);
+	if (!added.ok && !/already/.test(added.reason ?? "")) throw new Error(`adding ${piece.id} failed: ${added.reason}`);
+}
+say("swarm", `${plan.backlog.length} pieces in the backlog; ${plan.agents.length} agents, all alike${speed !== 1 ? `, at ${speed}x speed` : ""}`);
 
-say("swarm", `${plan.agents.length} agents and ${plan.reviewers.length} reviewers on ${plan.repo}${speed !== 1 ? `, ${speed}x speed` : ""}`);
-await Promise.all([...plan.agents.map(agent), ...plan.reviewers.map(reviewer)]);
+await Promise.all(plan.agents.map((spec) => agentFor(spec)()));
 
 const seconds = (ms) => (ms === undefined ? "    -" : `${(ms / 1000).toFixed(0).padStart(4)}s`);
-console.log(`\n${"change".padEnd(18)} claimed  pushed checked revised approved merged  outcome`);
-for (const [change, t] of timeline) {
-	const outcome = t.failed ? `stopped: ${t.failed.slice(0, 70)}` : `merged ${t.commit?.slice(0, 8)}`;
-	console.log(`${change.padEnd(18)} ${seconds(t.claimed)} ${seconds(t.pushed)} ${seconds(t.checked)} ${seconds(t.revised)}  ${seconds(t.approved)} ${seconds(t.merged)}  ${outcome}${t.events.length ? ` (${t.events.join("; ")})` : ""}`);
+console.log(`\n${"piece".padEnd(16)} builder     claimed  pushed revised approved merged  outcome`);
+for (const [id, t] of timeline) {
+	console.log(`${id.padEnd(16)} ${(t.builder ?? "-").padEnd(10)} ${seconds(t.claimed)} ${seconds(t.pushed)} ${seconds(t.revised)}  ${seconds(t.approved)} ${seconds(t.merged)}  ${settled.get(id) ?? "unfinished"}`);
+	const detail = [...(t.reviews.length ? [`reviews: ${t.reviews.join(", ")}`] : []), ...t.events];
+	if (detail.length) console.log(`${"".padEnd(16)} ${detail.join("; ")}`);
 }
-const merged = [...timeline.values()].filter((t) => t.merged !== undefined).length;
-console.log(`\n${merged} of ${timeline.size} merged in ${((Date.now() - started) / 1000).toFixed(0)}s`);
+console.log(`\n${"agent".padEnd(12)} build review revise merge wait`);
+for (const [name, d] of did) console.log(`${name.padEnd(12)} ${String(d.build).padStart(5)} ${String(d.review).padStart(6)} ${String(d.revise).padStart(6)} ${String(d.merge).padStart(5)} ${String(d.wait).padStart(4)}`);
+const merged = [...settled.values()].filter((s) => s.startsWith("merged")).length;
+console.log(`\n${merged} of ${plan.backlog.length} merged in ${((Date.now() - started) / 1000).toFixed(0)}s`);
 const audit = await fetch(`${BASE}/free/${plan.repo}/audit`, { headers: { ...access, "Cache-Control": "no-cache" }, dispatcher: patient }).then((r) => r.json());
 console.log(`audit: ${audit.merges} merges, ${audit.open} open violations${audit.violations?.length ? `: ${JSON.stringify(audit.violations).slice(0, 400)}` : ""}`);

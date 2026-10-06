@@ -1,4 +1,5 @@
 import type { CasLog } from "../election";
+import { entriesOverlap } from "../open-mode";
 import type { ClaimRecord } from "./claims";
 import { appendRecord } from "./records";
 import { type Author, approval, effectiveFreePolicy, holdsRole, type ReviewPolicy, type VoteRecord } from "./votes";
@@ -63,6 +64,8 @@ export interface NextInput {
 	votes: VoteRecord[];
 	/** Changes that merged. */
 	merged: Set<string>;
+	/** Changes waiting on a person (asked about, and not answered on their head): their agent can do other work meanwhile. */
+	asked?: Set<string>;
 	work: WorkItem[];
 }
 
@@ -82,8 +85,8 @@ export function nextFor(input: NextInput): NextStep {
 	const on = (head: string) => votes.filter((v) => v.commit === head);
 	const rejectionOf = (head: string, author: Author) => on(head).find((v) => v.verdict === "reject" && v.reviewer !== author.agent);
 
-	// Its own changes first: a change that's done unblocks everything after it.
-	const own = input.open.filter((o) => o.claim.agent === agent);
+	// Its own changes first: a change that's done unblocks everything after it. One waiting on a person is left to them.
+	const own = input.open.filter((o) => o.claim.agent === agent && !input.asked?.has(o.claim.change));
 	for (const { claim, head } of own) {
 		if (head && approval({ votes }, head, policy, authorOf(claim), claim.paths).approved)
 			return { kind: "merge", change: claim.change, head, next: `free_merge your change ${claim.change}: its commit ${head.slice(0, 8)} is approved.` };
@@ -127,9 +130,10 @@ export function nextFor(input: NextInput): NextStep {
 		};
 	}
 
-	// A piece of the backlog nobody has taken.
+	// A piece of the backlog nobody has taken, and that a claim in force doesn't stand in the way of (it would be refused).
 	const taken = new Set(input.open.map((o) => o.claim.change));
-	const open = input.work.filter((w) => !taken.has(w.id) && !input.merged.has(w.id));
+	const blocked = (w: WorkItem) => !!w.paths?.some((p) => input.open.some((o) => o.claim.paths.some((held) => entriesOverlap(p, held))));
+	const open = input.work.filter((w) => !taken.has(w.id) && !input.merged.has(w.id) && !blocked(w));
 	if (open.length) {
 		const choices = open.slice(0, SPREAD);
 		const work = choices[spread(agent, choices.length)];
@@ -141,9 +145,14 @@ export function nextFor(input: NextInput): NextStep {
 	}
 
 	const waiting = own.filter((o) => o.head).map((o) => o.claim.change);
+	const later = input.work.filter((w) => !taken.has(w.id) && !input.merged.has(w.id) && blocked(w)).map((w) => w.id);
 	return {
 		kind: "wait",
-		reason: waiting.length ? `your ${waiting.join(", ")} ${waiting.length === 1 ? "waits" : "wait"} for votes, and nothing else needs you` : "no reviews are waiting and the backlog is empty",
+		reason: waiting.length
+			? `your ${waiting.join(", ")} ${waiting.length === 1 ? "waits" : "wait"} for votes, and nothing else needs you`
+			: later.length
+				? `the rest of the backlog (${later.join(", ")}) overlaps claims in force`
+				: "no reviews are waiting and the backlog is empty",
 		retryAfterSeconds: 30,
 		next: "Call free_next again in a little while.",
 	};
