@@ -69,7 +69,7 @@ describe("MCP front door", () => {
 			expect(tool.annotations.readOnlyHint && tool.annotations.destructiveHint, tool.name).toBe(false);
 		}
 		const names = (pick: (t: Annotated) => boolean) => all.filter(pick).map((t) => t.name).sort();
-		expect(names((t) => t.annotations.readOnlyHint)).toEqual(["change_status", "free_audit", "free_check", "free_claims", "free_review_access", "free_status", "list_claims", "read_inbox", "review_queue"]);
+		expect(names((t) => t.annotations.readOnlyHint)).toEqual(["change_status", "free_audit", "free_check", "free_claims", "free_next", "free_review_access", "free_status", "list_claims", "read_inbox", "review_queue"]);
 		expect(names((t) => t.annotations.destructiveHint)).toEqual(["abandon_change", "free_register", "free_release", "free_revert", "register_agent"]);
 	});
 

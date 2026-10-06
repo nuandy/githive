@@ -16,6 +16,7 @@ import { revertViolation } from "./revert";
 import type { Stamper } from "./stamp";
 import { approval, countedVotes, effectiveFreePolicy, openFlag, shardVotes, votesShardingReason, type ReviewPolicy, type VoteRecord, type Votes } from "./votes";
 import { VOTE_BUCKETS, type VoteStore, voteStore, votesPrefix } from "./vote-store";
+import { addWork, nextFor, type Work, workId } from "./work";
 import { SENSITIVE_PATHS } from "../types";
 
 // The coordinator-free MCP tools (see docs/coordinator-free.md). Stateless: each
@@ -78,8 +79,10 @@ const DEFAULT_RECORDS_REPOS = 8;
 const STALE_AFTER_MS = 30 * 60_000;
 const claimsRef = (repo: string) => `refs/notes/blueprint-claims/${repo}`;
 const votesRef = (repo: string) => `refs/notes/blueprint-votes/${repo}`;
+const workRef = (repo: string) => `refs/notes/blueprint-work/${repo}`;
 
 export const FREE_INSTRUCTIONS = `Coordinator-free mode (the free_* tools): nobody enforces the rules; every agent follows them, and an audit anyone can run shows who didn't.
+Not sure what to do? free_next tells you the most useful thing for you now: merge or revise your own change, review someone else's, or build a piece of the backlog (free_add_work adds to it). Do it, then ask again.
 Conventions:
 1. free_claim the paths you will change before editing; edit only inside your claim. A refusal names who holds what: narrow your claim, or ask them.
 2. Work on a branch changes/<change>, started from the project's branch, and push it to your own fork (free_credentials with your change: one fork per agent, for all its changes; only you can write it). The project's branch (free_start names it: main, master, ...) is written only through the toolkit.
@@ -100,6 +103,8 @@ const TOOL_LIST = [
 	{ name: "free_claims", description: "The claims in force: who holds which paths, and why.", inputSchema: { type: "object", properties: { repo: str }, required: ["repo"] } },
 	{ name: "free_claim", description: "Claim paths for your change (again to extend it, or to keep it active). Refused, naming the holder, if another claim overlaps; a claim in the way idle for 30 minutes is released as stale instead.", inputSchema: { type: "object", properties: { repo: str, change: str, agent: str, paths: { type: "array", items: str }, intent: str }, required: ["repo", "change", "agent", "paths", "intent"] } },
 	{ name: "free_release", description: "Release a claim: yours, or another's idle for 30 minutes with stale: true.", inputSchema: { type: "object", properties: { repo: str, change: str, agent: str, reason: str, stale: { type: "boolean" } }, required: ["repo", "change", "agent"] } },
+	{ name: "free_next", description: "What you should do next, for any agent without a set role: merge your change if it's approved, revise it if a reviewer asked for changes, finish it if nothing is pushed; else review a change that's waiting (never your own, and a role that can block only if you hold it); else build a piece of the backlog nobody has taken; else wait. Says how to do it.", inputSchema: { type: "object", properties: { repo: str, agent: str }, required: ["repo", "agent"] } },
+	{ name: "free_add_work", description: "Add a piece of work to the repo's backlog, for free_next to hand to an agent: a title, what it should do (intent), and the paths it's likely to touch. Its id (from the title unless given) is the change name to claim it under.", inputSchema: { type: "object", properties: { repo: str, title: str, intent: str, paths: { type: "array", items: str }, id: str, agent: str }, required: ["repo", "title", "intent", "agent"] } },
 	{ name: "free_review_access", description: "Read access to a change you'll review: a read-only token for the author's fork, the change's branch (changes/<change>) and its pushed head, and read access to the project to diff against. Anyone may review; each grant is logged.", inputSchema: { type: "object", properties: { repo: str, change: str }, required: ["repo", "change"] } },
 	{ name: "free_vote", description: "Record your review verdict on the exact commit you reviewed.", inputSchema: { type: "object", properties: { repo: str, commit: str, reviewer: str, role: str, verdict: { type: "string", enum: ["approve", "reject"] }, evidence: str }, required: ["repo", "commit", "reviewer", "role", "verdict", "evidence"] } },
 	{ name: "free_merge", description: "Merge changes/<change> into the project's branch if the conventions hold, recording what was checked, then release the claim.", inputSchema: { type: "object", properties: { repo: str, change: str, agent: str }, required: ["repo", "change", "agent"] } },
@@ -120,6 +125,8 @@ export const FREE_TOOLS = annotate(
 		free_credentials: writes("Get Git access", { idempotent: true }),
 		free_claims: reads("List claims"),
 		free_review_access: reads("Get read access to a change to review"),
+		free_next: reads("What to do next"),
+		free_add_work: writes("Add work to the backlog"),
 		free_claim: writes("Claim paths", { idempotent: true }),
 		free_release: destroys("Release a claim", { idempotent: true }),
 		free_vote: writes("Vote on a commit", { idempotent: true }),
@@ -418,7 +425,7 @@ export async function freeSnapshot(ctx: FreeContext, repo: string) {
 }
 
 // Tools that write records, after which the repo's summary notes the activity.
-const WRITES = new Set(["free_claim", "free_release", "free_merge", "free_vote", "free_build", "free_revert", "free_ask_human", "free_check"]);
+const WRITES = new Set(["free_claim", "free_release", "free_merge", "free_vote", "free_build", "free_revert", "free_ask_human", "free_check", "free_add_work"]);
 const noted = new Map<string, number>();
 
 /** Run one coordinator-free tool, and note what it wrote in the repo's summary. */
@@ -498,6 +505,29 @@ async function runFreeTool(name: string, args: Args, ctx: FreeContext): Promise<
 			await ctx.register?.(repo);
 			const registry = (await claims.read())?.commit.state;
 			return { repo, branch: projectBranch(registry), policy: registry?.policy ?? policy, verify: registry?.verify ?? [], ...shardingOf(registry), instructions: FREE_INSTRUCTIONS };
+		}
+		case "free_next": {
+			const agent = actAs("agent");
+			const [inForce, cast, backlog] = await Promise.all([view(), votes.read(), recordLog<Work>(ctx, repo, workRef(repo)).read()]);
+			// Each open change's pushed head, from its author's fork.
+			const open = await Promise.all(inForce.claims.map(async (claim) => ({ claim, head: await changeSource(claim.agent, "read", claim.change).then((fork) => branchHead(fork, `changes/${claim.change}`)).catch(() => null) })));
+			return nextFor({
+				agent,
+				...(stamper?.by ? { by: stamper.by } : {}),
+				policy: registered?.policy ?? DEFAULT_POLICY,
+				open,
+				votes: await countedVotes(cast.votes, registered?.stampKey),
+				merged: new Set(inForce.released.filter((r) => r.mergedAs).map((r) => r.change)),
+				work: backlog?.commit.state.items ?? [],
+			});
+		}
+		case "free_add_work": {
+			const title = requiredString(args, "title");
+			const id = typeof args.id === "string" && args.id.trim() ? args.id.trim() : workId(title);
+			if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(id)) throw new Error("[400] a work id is letters, digits, dots, dashes and underscores");
+			const paths = args.paths === undefined ? undefined : normalizeClaim(requiredPaths(args, "paths"));
+			const added = await addWork(recordLog<Work>(ctx, repo, workRef(repo)), { id, title, intent: requiredString(args, "intent"), ...(paths ? { paths } : {}), by: actAs("agent") });
+			return added.ok ? { ok: true, id } : { ok: false, reason: added.refused };
 		}
 		case "free_review_access": {
 			// Anyone may review: a read-only view of the change's branch in its author's fork (or its own fork, from before forks were per agent).

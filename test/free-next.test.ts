@@ -1,0 +1,173 @@
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { GitCasLog } from "../src/election-git";
+import { statusOf } from "../src/errors";
+import { claimStore } from "../src/free/claim-store";
+import { type ClaimRecord, type Registry, shardClaims } from "../src/free/claims";
+import { callFreeTool, type FreeContext } from "../src/free/mcp";
+import type { VoteRecord } from "../src/free/votes";
+import { nextFor, type NextInput, type WorkItem, workId } from "../src/free/work";
+import { pushChange } from "./helpers/agents";
+import { startGitServer, type GitServer } from "./helpers/git-server";
+
+// Agents without set roles: free_next hands each the most useful work there
+// is. Its own change first (merge, revise, finish), then a review someone is
+// waiting for (never its own; a role that can block only if it holds it), then
+// an untaken piece of the backlog, else wait. Nothing is reserved: the claim
+// settles who builds what, so a change is only ever its first agent's.
+
+const claimOf = (change: string, agent: string, since = "2026-10-07T10:00:00.000Z", paths = [`src/${change}/`]): ClaimRecord => ({ change, agent, paths, intent: `do ${change}`, since, active: since });
+const vote = (commit: string, reviewer: string, verdict: "approve" | "reject" = "approve", role = "review"): VoteRecord => ({ commit, reviewer, role, verdict, evidence: verdict === "reject" ? "fix the edge case" : "ok", at: "" });
+const item = (id: string): WorkItem => ({ id, title: id, intent: `build ${id}`, by: "planner", at: "" });
+const base = (over: Partial<NextInput>): NextInput => ({ agent: "agent-x", policy: { required: 1, vetoes: [] }, open: [], votes: [], merged: new Set(), work: [], ...over });
+
+describe("what an agent should do next", () => {
+	it("merges its own approved change before anything else", () => {
+		const next = nextFor(base({ open: [{ claim: claimOf("mine", "agent-x"), head: "h1" }, { claim: claimOf("theirs", "agent-y"), head: "h2" }], votes: [vote("h1", "agent-y")], work: [item("w1")] }));
+		expect(next).toMatchObject({ kind: "merge", change: "mine", head: "h1" });
+	});
+
+	it("revises its own change a reviewer rejected, with their evidence; finishes one it never pushed", () => {
+		expect(nextFor(base({ open: [{ claim: claimOf("mine", "agent-x"), head: "h1" }], votes: [vote("h1", "agent-y", "reject")] }))).toMatchObject({ kind: "revise", change: "mine", reviewer: "agent-y", evidence: "fix the edge case" });
+		expect(nextFor(base({ open: [{ claim: claimOf("mine", "agent-x"), head: null }] }))).toMatchObject({ kind: "finish", change: "mine" });
+	});
+
+	it("reviews what others wait for: never its own, a commit it voted on, one rejected, or one approved", () => {
+		const open = [
+			{ claim: claimOf("own", "agent-x"), head: "h0" },
+			{ claim: claimOf("voted", "agent-y", "2026-10-07T09:00:00.000Z"), head: "h1" },
+			{ claim: claimOf("rejected", "agent-y", "2026-10-07T09:01:00.000Z"), head: "h2" },
+			{ claim: claimOf("approved", "agent-y", "2026-10-07T09:02:00.000Z"), head: "h3" },
+			{ claim: claimOf("unpushed", "agent-y"), head: null },
+			{ claim: claimOf("waiting", "agent-z", "2026-10-07T09:03:00.000Z"), head: "h4" },
+		];
+		const votes = [vote("h1", "agent-x"), vote("h2", "agent-w", "reject"), vote("h3", "agent-w")];
+		expect(nextFor(base({ open, votes }))).toMatchObject({ kind: "review", change: "waiting", author: "agent-z", head: "h4", role: "review" });
+	});
+
+	it("takes a role that can block only if it holds it, and those reviews first", () => {
+		const policy = { required: 1, vetoes: [], escalate: [{ paths: ["package.json"], required: 2, vetoes: ["security"] }], grants: { security: ["sec-agent"] } };
+		const open = [
+			{ claim: claimOf("plain", "agent-y", "2026-10-07T09:00:00.000Z"), head: "h1" },
+			{ claim: claimOf("deps", "agent-y", "2026-10-07T09:30:00.000Z", ["package.json"]), head: "h2" },
+		];
+		// The security holder reviews the change that needs it, though the other waits longer.
+		expect(nextFor(base({ agent: "sec-agent", policy, open }))).toMatchObject({ kind: "review", change: "deps", role: "security" });
+		// Anyone else: an ordinary review, wherever one is still needed; deps already has one approval of its two.
+		expect(nextFor(base({ policy, open, votes: [vote("h1", "agent-w")] }))).toMatchObject({ kind: "review", change: "deps", role: "review" });
+		// With deps' ordinary approvals in, only the security holder is asked.
+		const deps = [vote("h1", "agent-w"), vote("h2", "agent-w"), vote("h2", "agent-v")];
+		expect(nextFor(base({ policy, open, votes: deps, work: [item("w1")] }))).toMatchObject({ kind: "build" });
+		expect(nextFor(base({ agent: "sec-agent", policy, open, votes: deps }))).toMatchObject({ kind: "review", change: "deps", role: "security" });
+	});
+
+	it("builds a piece of the backlog nobody has taken or merged, spreading agents over the first few", () => {
+		const work = ["w1", "w2", "w3", "w4", "w5"].map(item);
+		const open = [{ claim: claimOf("w1", "agent-y"), head: null }];
+		const picks = new Set(Array.from({ length: 30 }, (_, i) => (nextFor(base({ agent: `agent-${i}`, open, work, merged: new Set(["w2"]) })) as { work: WorkItem }).work.id));
+		expect([...picks].sort()).toEqual(["w3", "w4", "w5"]);
+	});
+
+	it("waits, saying why, when there's nothing to do", () => {
+		expect(nextFor(base({ open: [{ claim: claimOf("mine", "agent-x"), head: "h1" }] }))).toMatchObject({ kind: "wait", reason: "your mine waits for votes, and nothing else needs you" });
+		expect(nextFor(base({}))).toMatchObject({ kind: "wait", reason: "no reviews are waiting and the backlog is empty" });
+	});
+
+	it("names work after its title", () => {
+		expect(workId("Use const in lib/ — all of it!")).toBe("use-const-in-lib-all-of-it");
+	});
+});
+
+describe("a change is its first agent's", { timeout: 60_000 }, () => {
+	let server: GitServer;
+	const remote = async () => ({ url: server.url, token: "unused" });
+	const root = () => new GitCasLog<Registry>(remote, "p", "refs/notes/blueprint-claims/p");
+	const store = async () => claimStore({ repo: "p", registry: (await root().read())?.commit.state, root: root(), remote });
+	const want = (change: string, agent: string, paths: string[]) => ({ change, agent, paths, intent: change });
+	beforeEach(async () => {
+		server = await startGitServer();
+	});
+	afterEach(async () => {
+		await server.close();
+	});
+
+	it("refuses another agent's claim under its name, in one record and in shards", async () => {
+		expect(await (await store()).claim(want("w1", "agent-a", ["src/a/"]))).toMatchObject({ ok: true });
+		await expect((await store()).claim(want("w1", "agent-b", ["src/a/x.ts"]))).rejects.toThrow("w1 is agent-a's change");
+		await shardClaims(root(), { depth: 2, recordsRepos: 0, reason: "test" });
+		// Claimed before sharding, extended after: still agent-a's.
+		await expect((await store()).claim(want("w1", "agent-b", ["docs/b/"]))).rejects.toThrow("w1 is agent-a's change");
+		expect(await (await store()).claim(want("w2", "agent-a", ["docs/w2/"]))).toMatchObject({ ok: true });
+		await expect((await store()).claim(want("w2", "agent-b", ["lib/w2/"]))).rejects.toThrow("w2 is agent-a's change");
+		expect(await (await store()).claim(want("w2", "agent-a", ["lib/w2/"]))).toMatchObject({ ok: true });
+	});
+});
+
+describe("free_next through the toolkit", { timeout: 120_000 }, () => {
+	let server: GitServer;
+	let work: string;
+	beforeEach(async () => {
+		server = await startGitServer();
+		work = mkdtempSync(join(tmpdir(), "free-next-"));
+	});
+	afterEach(async () => {
+		await server.close();
+		rmSync(work, { recursive: true, force: true });
+	});
+
+	it("hands two agents with no roles the backlog, then each other's reviews, then their merges", async () => {
+		const ctx = (agentKey?: string): FreeContext => ({
+			remote: async () => ({ url: server.url, token: "unused" }),
+			changeRemote: async () => ({ url: server.url, token: "unused" }),
+			head: async () => server.git("rev-parse", "main").trim(),
+			...(agentKey ? { agentKey } : {}),
+		});
+		const call = async (name: string, args: Record<string, unknown>, key?: string) => {
+			try {
+				return (await callFreeTool(name, { repo: "p", ...args }, ctx(key))) as Record<string, unknown> & { kind?: string; work?: WorkItem };
+			} catch (err) {
+				return { error: statusOf(err).message };
+			}
+		};
+		await call("free_start", { required: 1, vetoes: [] });
+		const keys = Object.fromEntries(await Promise.all(["agent-a", "agent-b"].map(async (a) => [a, ((await call("free_register", { agent: a })) as { key: string }).key])));
+		expect(await call("free_add_work", { title: "Add the greeting", intent: "a greeting module", paths: ["src/greet/"], agent: "agent-a" }, keys["agent-a"])).toEqual({ ok: true, id: "add-the-greeting" });
+		expect(await call("free_add_work", { title: "Add the farewell", intent: "a farewell module", paths: ["src/bye/"], agent: "agent-a" }, keys["agent-a"])).toEqual({ ok: true, id: "add-the-farewell" });
+		expect(await call("free_add_work", { title: "Add the farewell", intent: "again", agent: "agent-a" }, keys["agent-a"])).toEqual({ ok: false, reason: "add-the-farewell is in the backlog already" });
+
+		// Each builds a piece; if both were told the same, the claim decides and the other asks again.
+		const built: Record<string, string> = {};
+		for (const agent of ["agent-a", "agent-b"]) {
+			for (;;) {
+				const next = await call("free_next", { agent }, keys[agent]);
+				expect(next.kind).toBe("build");
+				const claimed = await call("free_claim", { change: next.work!.id, agent, paths: next.work!.paths, intent: next.work!.intent }, keys[agent]);
+				if (claimed.ok) {
+					built[agent] = next.work!.id;
+					break;
+				}
+				expect(claimed.error).toMatch(/is agent-a's change/);
+			}
+		}
+		expect(new Set(Object.values(built)).size).toBe(2);
+		const heads: Record<string, string> = {};
+		for (const agent of ["agent-a", "agent-b"]) heads[agent] = await pushChange(server.url, work, agent, built[agent], { [`src/${built[agent] === "add-the-greeting" ? "greet" : "bye"}/index.js`]: `${agent}\n` });
+
+		// a reviews b's change; then b's best step is merging its own, approved; then b reviews a's; then a merges.
+		const review = async (agent: string, other: string) => {
+			expect(await call("free_next", { agent }, keys[agent])).toMatchObject({ kind: "review", change: built[other], author: other, head: heads[other], role: "review" });
+			await call("free_vote", { commit: heads[other], reviewer: agent, role: "review", verdict: "approve", evidence: "read it" }, keys[agent]);
+		};
+		const merge = async (agent: string) => {
+			expect(await call("free_next", { agent }, keys[agent])).toMatchObject({ kind: "merge", change: built[agent] });
+			expect(await call("free_merge", { change: built[agent], agent }, keys[agent])).toMatchObject({ ok: true });
+		};
+		await review("agent-a", "agent-b");
+		await merge("agent-b");
+		await review("agent-b", "agent-a");
+		await merge("agent-a");
+		expect(await call("free_next", { agent: "agent-a" }, keys["agent-a"])).toMatchObject({ kind: "wait", reason: "no reviews are waiting and the backlog is empty" });
+	});
+});

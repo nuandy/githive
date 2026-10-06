@@ -5,7 +5,7 @@ import { GitCasLog } from "../election-git";
 import { isEmptyRepo, type Remote } from "../git";
 import { retryTransient } from "../retry";
 import { readAllShards, readRefs } from "./record-refs";
-import { activeClaims, claim, conflictsWith, release, releaseStale, withdraw, type ClaimRecord, type Conflict, type Registry, type ReleaseRecord } from "./claims";
+import { activeClaims, changeTaken, claim, conflictsWith, release, releaseStale, withdraw, type ClaimRecord, type Conflict, type Registry, type ReleaseRecord } from "./claims";
 import { appendRecord } from "./records";
 import { ancestorsOf, changeRef, changeRepoOf, decodeShard, encodeShard, isWide, recordsRepoOf, shardOf, shardRef, shardsPrefix } from "./shards";
 import type { Stamper } from "./stamp";
@@ -280,14 +280,23 @@ class Claims implements ClaimStore {
 		const placed = this.place(input.paths);
 		const shards = [...placed.keys()].sort();
 		const below = shards.filter((s) => s !== ROOT);
-		// The change's index first, so it always covers every shard the change holds below the registry.
-		if (below.length)
-			await appendRecord<{ shards: string[] }, "known">(
-				new GitCasLog<{ shards: string[] }>(() => this.indexRemote(input.change), this.input.repo, changeRef(this.input.repo, input.change)),
+		if (below.length) {
+			// A change claimed in the registry before sharding is its agent's too.
+			const held = (await this.input.root.read())?.commit.state.claims.find((c) => c.change === input.change);
+			if (held && held.agent !== input.agent) throw new Error(changeTaken(input.change, held.agent));
+			// The change's index first, so it always covers every shard the change holds below the registry.
+			// It names the change's agent: another agent's claim under the same name is refused.
+			await appendRecord<{ shards: string[]; agent?: string }, "known">(
+				new GitCasLog<{ shards: string[]; agent?: string }>(() => this.indexRemote(input.change), this.input.repo, changeRef(this.input.repo, input.change)),
 				input.agent,
 				() => ({ shards: [] }),
-				(state) => (below.every((s) => state.shards.includes(s)) ? { refused: "known" } : { state: { shards: [...new Set([...state.shards, ...below])].sort() }, text: `${input.change} claims in ${below.join(", ")}` }),
+				(state) => {
+					if (state.agent && state.agent !== input.agent) throw new Error(changeTaken(input.change, state.agent));
+					if (state.agent && below.every((s) => state.shards.includes(s))) return { refused: "known" };
+					return { state: { shards: [...new Set([...state.shards, ...below])].sort(), agent: state.agent ?? input.agent }, text: `${input.change} claims in ${below.join(", ")}` };
+				},
 			);
+		}
 		const written: { shard: string; previous: string[] | null }[] = [];
 		const backOut = async (reason: string) => {
 			for (const { shard, previous } of written.reverse())

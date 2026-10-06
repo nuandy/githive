@@ -155,6 +155,9 @@ export function conflictsWith(state: Registry | null | undefined, paths: string[
 	return conflicts;
 }
 
+/** Why an agent can't claim under a change name another agent holds. */
+export const changeTaken = (change: string, agent: string) => `[409] ${change} is ${agent}'s change: claim under a change name of your own`;
+
 /** A record with who wrote it and Blueprint's stamp over it, when written through the toolkit (`stamper`). */
 async function stamped<T extends object>(kind: string, record: T, stamper: Stamper | undefined, byField: "by" | "verifiedBy" = "by"): Promise<T> {
 	if (!stamper) return record;
@@ -189,6 +192,8 @@ export async function claim(log: CasLog<Registry>, input: { change: string; agen
 			releases.push(await stamped("release", { change: held.change, agent: held.agent, by: wanted.agent, at: now, reason: "stale", stale: true, lastActive: held.active } as ReleaseRecord, stamper, "verifiedBy"));
 		const remaining = state.claims.filter((c) => !stale.includes(c));
 		const existing = remaining.find((c) => c.change === wanted.change);
+		// A change is its agent's: another agent claiming under its name would extend someone else's claim.
+		if (existing && existing.agent !== wanted.agent) throw new Error(changeTaken(wanted.change, existing.agent));
 		previous = existing ? [...existing.paths] : null;
 		const { by: _by, stamp: _stamp, ...base } = existing ?? ({} as Partial<ClaimRecord>);
 		const record = await stamped(

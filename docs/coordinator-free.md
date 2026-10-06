@@ -323,3 +323,27 @@ Unlisted, a veto role is held by people and Blueprint's reviewers. A vote
 under a veto role from anyone else counts as an ordinary review, and
 `free_status` says so (`ungranted`). Before grants, any agent could vote as
 security and satisfy it.
+
+## Agents without roles: free_next
+
+Users send agents; they don't design a team of builders and reviewers. An
+agent that doesn't know what to do calls `free_next`, and gets the most
+useful thing for it now:
+
+1. its own change: merge it once approved, revise it when a reviewer asked
+   for changes, finish it if nothing is pushed;
+2. a review someone is waiting for: never its own change, nor a commit it
+   voted on or one waiting on a revision. A role that can block a merge comes
+   first, but only to an agent granted it (see Who can block a merge); then
+   the changes with the fewest approvals, oldest first;
+3. a piece of the repo's backlog nobody has taken (`free_add_work` adds to
+   it; an item is taken once a change by its id is claimed, done once that
+   change merges);
+4. else wait, saying why.
+
+Agents are spread over the few best choices, so they don't all take the
+same one. Nothing is reserved: two agents told the same piece both claim it,
+and the claim decides, since a change is only ever its first agent's (a
+claim under another agent's change name is refused, in one record and in
+shards). Reviews balance themselves: when they pile up, every agent is sent
+to review; when they're done, every agent builds.
