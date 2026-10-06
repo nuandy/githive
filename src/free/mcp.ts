@@ -289,7 +289,7 @@ export async function freeSnapshot(ctx: FreeContext, repo: string) {
 	await ctx.summarize?.(repo, {
 		open: claims.length,
 		needsYou: waiting.length,
-		waiting: waiting.slice(0, 20).map((c) => ({ change: c.change, title: c.intent.split("\n")[0].slice(0, 120), reason: c.attention!.reason.slice(0, 200) })),
+		waiting: waiting.slice(0, 20).map((c) => ({ change: c.change, title: c.intent.split("\n")[0].slice(0, 120), reason: c.attention!.reason.slice(0, 500) })),
 		countedAt: new Date().toISOString(),
 	}).catch(() => undefined);
 	return {

@@ -2,7 +2,7 @@ import { FreeVoteForm, type FreeVoteApi } from "./FreeVoteForm";
 import type { FreeAudit, FreeChangeHistory, FreeSnapshot } from "../api";
 import { identityName } from "../lib/agent";
 import { claimAgent, claimApprovalLabel, claimTitle, freeClaimStatus, votesForClaim, type FreeClaim } from "../lib/freeStatus";
-import { shortSha } from "../lib/model";
+import { shortSha, briefPaths } from "../lib/model";
 import { shortAge, timeAgo } from "../lib/relativeTime";
 import { href, type RepoBase } from "../lib/routes";
 import { buildFreeTimeline, freeEnding, freeHistoryStatus } from "../lib/freeTimeline";
@@ -79,7 +79,7 @@ export function FreeChangeList({ snapshot, repo, base }: { snapshot: FreeSnapsho
 											<span className="change-row__paths">
 												{" · "}
 												<Icon name="folder" size={12} />
-												{claim.paths.join(", ")}
+												<span title={claim.paths.join("\n")}>{briefPaths(claim.paths)}</span>
 											</span>
 										) : null}
 									</p>
@@ -355,7 +355,7 @@ export function FreeChangePage({ snapshot, changeId, claim, history, repo, base,
 											<strong>
 												{claim.approval.approvals} of {claim.approval.required} approvals{claim.approval.approved ? "" : claimApprovalLabel(claim).startsWith("Waiting") ? ` · ${claimApprovalLabel(claim)}` : ""}
 											</strong>
-											<div className="muted">{freeClaimStatus(claim).description}</div>
+											<div className="muted">{claim.attention ? `Waiting on your decision: ${claim.attention.agent}'s question is above.` : freeClaimStatus(claim).description}</div>
 										</div>
 									</div>
 								</section>

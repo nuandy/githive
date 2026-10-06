@@ -27,7 +27,7 @@ export function taskSummary(task: Task, now = new Date().toISOString(), lastActi
 		open: open.length,
 		needsYou: waiting.length,
 		// For the inbox: which changes wait on a person, and why (the first line).
-		waiting: waiting.slice(0, 20).map((s) => ({ change: s.id, title: s.title, reason: (s.attention ?? "").split("\n")[0].slice(0, 200) })),
+		waiting: waiting.slice(0, 20).map((s) => ({ change: s.id, title: s.title, reason: (s.attention ?? "").split("\n")[0].slice(0, 500) })),
 		merged: task.slices.filter((s) => s.status === "integrated").length,
 		abandoned: task.slices.filter((s) => s.status === "abandoned").length,
 		lastActivity,

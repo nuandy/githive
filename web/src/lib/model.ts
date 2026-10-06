@@ -59,3 +59,8 @@ export function changeLastActivity(change: Change): string | undefined {
 		...(change.inbox ?? []).map((message) => message?.at),
 	);
 }
+
+/** A list of paths for a one-line summary: the first few, then how many more. */
+export function briefPaths(paths: string[], shown = 3): string {
+	return paths.length > shown ? `${paths.slice(0, shown).join(", ")} +${paths.length - shown} more` : paths.join(", ");
+}

@@ -2,7 +2,7 @@ import type { Task } from "../api";
 import { agentLabel } from "../lib/agent";
 import { checksSummary, deriveChangeStatus, reviewSummary, changePolicy } from "../lib/changeStatus";
 import { conflictsByChange, describeConflict } from "../lib/conflicts";
-import { changesOf, changeState, timeOf, type Change, type ChangeState } from "../lib/model";
+import { changesOf, changeState, timeOf, type Change, type ChangeState, briefPaths } from "../lib/model";
 import { shortAge, timeAgo } from "../lib/relativeTime";
 import { href, type RepoBase } from "../lib/routes";
 import { ChecksBadge, ReviewBadge } from "./Badges";
@@ -104,7 +104,7 @@ export function ChangeList({ task, repo, base, state }: ChangeListProps) {
 											<span className="change-row__paths">
 												{" · "}
 												<Icon name="folder" size={12} />
-												{change.owns.join(", ")}
+												<span title={change.owns.join("\n")}>{briefPaths(change.owns)}</span>
 											</span>
 										) : null}
 									</p>
