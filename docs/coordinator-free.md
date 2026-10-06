@@ -232,3 +232,46 @@ votes sharded like claims (every vote is a push to one ref).
 
 Small runs pay for sharding: one agent takes 35.5 s against 27.3 s with one
 record, since a read lists the shards before fetching.
+
+## Sharding on demand
+
+Sharding only pays when many agents write claims at once, so a repo starts
+with every claim in its registry and shards when the load calls for it.
+Measured on bench, 2026-10-07 (simulated agents through the toolkit, each
+claiming its own folder, so all waiting is contention on the records):
+
+| agents | one record: all claim at once | sharded: all claim at once | one record: claim/release loop | sharded: claim/release loop |
+|---|---|---|---|---|
+| 2 | 7.5 s | 12.5 s | 37 writes/min, p95 11 s | 23 writes/min, p95 6 s |
+| 4 | 6.9 s | 9.6 s | 38/min, p95 21 s | 47/min, p95 6 s |
+| 8 | 13.9 s | 8.2 s | 38/min, p95 32 s, first failures | 89/min, p95 6 s |
+| 16 | 24.5 s | 10.2 s | 35/min, p95 45 s | 186/min, p95 6 s |
+| 32 | 52 s | 9.4 s | 29/min, p95 56 s | 347/min, p95 6 s |
+| 48 | 63 s, 17 failed | 7.3 s | 28/min, p95 68 s | 538/min, p95 6 s, none failed |
+
+One record takes about 35 writes a minute, whatever the number of agents, and
+a write there costs 1.6 s when nobody else is writing. A sharded write costs
+about 5 s (an index, the shard, and the checks above it) at any load. From
+8 agents claiming at once, sharded claims land first.
+
+So `free_start` (unless told `shard_depth`: a depth to shard now, 0 never)
+records `autoShard`, and a claim shards the registry first when 8 agents would
+hold claims, or more than 15 claims and releases were written a minute over
+the last 5 minutes (`shardingReason`). Sharding is one compare-and-swap on the
+registry that sets `shardDepth` (and makes the records repos first); it
+happens once.
+
+**The registry is the shard above every other.** The claims held when it
+shards stay in it and are released from it. Every shard claim checks it, as
+it checks every shard above its own; a claim that lands in it after the
+switch (made by a caller that read it before) checks every shard below, like
+any claim covering more than its own shard. Each claim writes before it
+looks, so of two overlapping claims, at least one sees the other, across the
+switch too. A change with no index has claimed only in the registry.
+
+**A claim spread over many shards is written once**, in the shard holding all
+its paths (more than 4 shards: `examples/a/…` to `examples/x/…` go to
+`examples`; paths with no common folder go to the registry), and checks the
+shards below it. Writing it shard by shard took 70 s for 24 example folders.
+
+A merge cites the registry as `=<tip>` among its shards; it covers every file.

@@ -7,7 +7,7 @@ import { callFreeTool, type FreeContext } from "../src/free/mcp";
 import { pushChange } from "./helpers/agents";
 import { startGitServer, type GitServer } from "./helpers/git-server";
 
-// The coordinator-free tools on a repo whose claims are sharded (the default):
+// The coordinator-free tools on a repo whose claims are sharded from the start:
 // claims in different parts of the tree go to different refs, overlaps across
 // levels are refused, a merge cites the shards it checked, and the audit,
 // reading every shard's history, finds nothing wrong.
@@ -39,7 +39,7 @@ afterEach(async () => {
 
 describe("coordinator-free with sharded claims", { timeout: 60_000 }, () => {
 	it("claims, refuses across levels, merges citing its shards, and audits clean", async () => {
-		expect(await call("free_start", { required: 1, vetoes: [] })).toMatchObject({ shardDepth: 2 });
+		expect(await call("free_start", { required: 1, vetoes: [], shard_depth: 2 })).toMatchObject({ shardDepth: 2 });
 		expect(await call("free_claim", { change: "a-1", agent: "agent-a", paths: ["src/a/"], intent: "a" })).toMatchObject({ ok: true });
 		expect(await call("free_claim", { change: "d-1", agent: "agent-d", paths: ["docs/"], intent: "docs" })).toMatchObject({ ok: true });
 		expect(await call("free_claim", { change: "x-1", agent: "agent-x", paths: ["docs/guide/x.md"], intent: "x" })).toMatchObject({ ok: false, conflicts: [{ change: "d-1" }] });
@@ -49,7 +49,7 @@ describe("coordinator-free with sharded claims", { timeout: 60_000 }, () => {
 		await call("free_vote", { commit: head, reviewer: "rev-1", role: "tests", verdict: "approve", evidence: "ok" });
 		const merged = await call("free_merge", { change: "a-1", agent: "agent-a" });
 		expect(merged).toMatchObject({ ok: true });
-		expect(server.git("log", "-1", "--format=%(trailers:key=Blueprint-Claims,valueonly)", "main").trim()).toMatch(/^src%2Fa=[0-9a-f]{40}$/);
+		expect(server.git("log", "-1", "--format=%(trailers:key=Blueprint-Claims,valueonly)", "main").trim()).toMatch(/^=[0-9a-f]{40} src%2Fa=[0-9a-f]{40}$/);
 		expect(await call("free_status", { change: "a-1" })).toMatchObject({ claim: null, released: { reason: "merged", mergedAs: merged.commit } });
 		expect(await call("free_audit", {})).toEqual({ merges: 1, open: 0, violations: [] });
 	});
@@ -62,7 +62,7 @@ describe("coordinator-free with sharded claims", { timeout: 60_000 }, () => {
 			createRecordsRepos: async (_repo, count) => void created.push(count),
 		});
 		const callSpread = (name: string, args: Record<string, unknown>) => callFreeTool(name, { repo: "p", ...args }, spread()) as Promise<Record<string, unknown>>;
-		expect(await callSpread("free_start", { required: 1, vetoes: [], records_repos: 4 })).toMatchObject({ shardDepth: 2, recordsRepos: 4 });
+		expect(await callSpread("free_start", { required: 1, vetoes: [], shard_depth: 2, records_repos: 4 })).toMatchObject({ shardDepth: 2, recordsRepos: 4 });
 		expect(created).toEqual([4]);
 		for (const area of ["alpha", "beta", "gamma"]) expect(await callSpread("free_claim", { change: `${area}-1`, agent: `agent-${area}`, paths: [`${area}/x/`], intent: area })).toMatchObject({ ok: true });
 		const head = await pushChange(server.url, work, "agent-alpha", "alpha-1", { "alpha/x/a.ts": "a\n" });

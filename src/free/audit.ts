@@ -136,8 +136,9 @@ type History = { tip: string; state: Registry }[];
 
 /**
  * The claims a merge says it checked (its Blueprint-Claims trailer): a tip of
- * the claims registry, or, sharded, `shard=tip` for each shard it read. Each
- * file must be covered by a cited shard (its own or one above it).
+ * the claims registry, or, sharded, `shard=tip` for each shard it read, the
+ * registry among them as "" (above every shard). Each file must be covered by
+ * a cited shard (its own or one above it).
  */
 function citedClaims(records: AuditRecords, registryAt: Map<string, Registry>, merge: MergeRecord, report: (rule: string, detail: string) => void) {
 	const tip = merge.claimsTip!;
@@ -151,13 +152,13 @@ function citedClaims(records: AuditRecords, registryAt: Map<string, Registry>, m
 	for (const pair of tip.split(/\s+/).filter(Boolean)) {
 		const [encoded, at] = pair.split("=");
 		const shard = decodeShard(encoded);
-		const history = records.shards?.get(shard);
+		const history = shard === "" ? records.registry : records.shards?.get(shard);
 		const entry = history?.find((e) => e.tip === at);
 		if (!history || !entry) return void report("unknown-claims", `${shard}@${at} is not in that shard's history`);
 		claims.push(...entry.state.claims);
 		cited.push({ shard, history, tip: at });
 	}
-	const uncovered = new Set(merge.files.filter((file) => !cited.some(({ shard }) => inLaneEntry(file, shard))));
+	const uncovered = new Set(merge.files.filter((file) => !cited.some(({ shard }) => shard === "" || inLaneEntry(file, shard))));
 	for (const file of uncovered) report("unknown-claims", `${file}: the merge cites no claims shard covering it`);
 	return { claims, records: cited, uncovered };
 }

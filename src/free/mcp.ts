@@ -9,7 +9,7 @@ import { changeId, normalizeClaim } from "../open-mode";
 import { audit } from "./audit";
 import { checkChange } from "./check";
 import { claimStore, type ClaimStore } from "./claim-store";
-import { registerAgent, startFree, type ClaimRecord, type Registry } from "./claims";
+import { registerAgent, shardClaims, shardingReason, startFree, type ClaimRecord, type Registry } from "./claims";
 import { readMainMerges, readRecordHistory, readShardHistories } from "./git-records";
 import { type CheckRunner, mergeChange } from "./merge";
 import { revertViolation } from "./revert";
@@ -94,7 +94,7 @@ free_audit replays the records and lists every broken convention, with the commi
 
 const str = { type: "string" } as const;
 const TOOL_LIST = [
-	{ name: "free_start", description: "Start coordinator-free mode on a project repo (harmless if started): the review policy, the checks run before each merge (each change lives in its own fork, and only the toolkit writes the project), shard_depth: claims are kept per path this many segments deep, so agents in different parts of the tree never contend (default 2; 0 keeps them in one record), and records_repos: how many repos the claim shards are spread over, since a repo takes one push at a time (default 8). Returns them.", inputSchema: { type: "object", properties: { repo: str, required: { type: "number" }, vetoes: { type: "array", items: str }, escalate: { type: "array", items: { type: "object", properties: { paths: { type: "array", items: str }, required: { type: "number" }, vetoes: { type: "array", items: str } }, required: ["paths"] } }, verify: { type: "array", items: str }, shard_depth: { type: "number" }, records_repos: { type: "number" } }, required: ["repo"] } },
+	{ name: "free_start", description: "Start coordinator-free mode on a project repo (harmless if started): the review policy, the checks run before each merge (each change lives in its own fork, and only the toolkit writes the project), how claims are kept: in one record until the load calls for more (8 agents holding claims, or over 15 claim writes a minute), then sharded per path 2 segments deep over 8 records repos, so agents in different parts of the tree never contend. shard_depth shards now, this deep (0: never), and records_repos is how many repos the shards are spread over, since a repo takes one push at a time. Returns them.", inputSchema: { type: "object", properties: { repo: str, required: { type: "number" }, vetoes: { type: "array", items: str }, escalate: { type: "array", items: { type: "object", properties: { paths: { type: "array", items: str }, required: { type: "number" }, vetoes: { type: "array", items: str } }, required: ["paths"] } }, verify: { type: "array", items: str }, shard_depth: { type: "number" }, records_repos: { type: "number" } }, required: ["repo"] } },
 	{ name: "free_credentials", description: "Git access. With your change: a write token for its own fork, where its branch changes/<change> lives. Without: read access to the project repo.", inputSchema: { type: "object", properties: { repo: str, change: str }, required: ["repo"] } },
 	{ name: "free_claims", description: "The claims in force: who holds which paths, and why.", inputSchema: { type: "object", properties: { repo: str }, required: ["repo"] } },
 	{ name: "free_claim", description: "Claim paths for your change (again to extend it, or to keep it active). Refused, naming the holder, if another claim overlaps; a claim in the way idle for 30 minutes is released as stale instead.", inputSchema: { type: "object", properties: { repo: str, change: str, agent: str, paths: { type: "array", items: str }, intent: str }, required: ["repo", "change", "agent", "paths", "intent"] } },
@@ -163,6 +163,31 @@ function recordLog<S>(ctx: FreeContext, repo: string, ref: string): GitCasLog<S>
 }
 
 /** A repo's claims, where its registry says they are: in the registry itself, or split into per-path shards. */
+/** How a repo's claims are kept, for callers and the dashboard. */
+function shardingOf(registry: Registry | null | undefined) {
+	return {
+		shardDepth: registry?.shardDepth ?? 0,
+		recordsRepos: registry?.recordsRepos ?? 0,
+		sharding: registry?.shardDepth ? { since: registry.shardedAt, because: registry.shardedBecause } : registry?.autoShard ? "on demand" : "never",
+	};
+}
+
+/**
+ * Shard the repo's claims if the load calls for it (see shardingReason):
+ * makes the records repos, then records the switch in the registry. Returns
+ * the registry as it is now, or null if it stays as it was.
+ */
+async function shardIfBusy(ctx: FreeContext, repo: string, log: GitCasLog<Registry>, registry: Registry | null | undefined, agent: string) {
+	const reason = shardingReason(registry, agent);
+	if (!reason || !registry?.autoShard) return null;
+	const { depth, recordsRepos } = registry.autoShard;
+	const spread = recordsRepos && ctx.recordsRemote && ctx.createRecordsRepos ? recordsRepos : 0;
+	if (spread) await ctx.createRecordsRepos!(repo, spread);
+	const outcome = await shardClaims(log, { depth, recordsRepos: spread, reason });
+	if (outcome.ok) console.log(`sharding ${repo}'s claims: ${reason}`);
+	return (await log.read())?.commit.state ?? null;
+}
+
 export function storeFor(ctx: FreeContext, repo: string, registry: Registry | null | undefined, root?: { log: GitCasLog<Registry>; head: Awaited<ReturnType<GitCasLog<Registry>["read"]>> }): ClaimStore {
 	return claimStore({
 		repo,
@@ -214,10 +239,12 @@ async function runAudit(ctx: FreeContext, repo: string) {
 	const baseline = registry[0]?.state.baseline;
 	if (!baseline) throw new Error(`[409] coordinator-free mode hasn't started on ${repo}`);
 	const start = registry[0].state;
+	// Sharded since the start, or since the load called for it: the latest state says.
+	const latest = registry.at(-1)!.state;
 	const [merges, shards, votesHistory] = await Promise.all([
 		t.time("merges", () => readMainMerges(remote, baseline, projectBranch(start))),
-		start.shardDepth
-			? t.time("shards", async () => readShardHistories(start.recordsRepos && ctx.recordsRemote ? await Promise.all(Array.from({ length: start.recordsRepos }, (_, k) => ctx.recordsRemote!(repo, k, "read"))) : [remote], repo))
+		latest.shardDepth
+			? t.time("shards", async () => readShardHistories(latest.recordsRepos && ctx.recordsRemote ? await Promise.all(Array.from({ length: latest.recordsRepos }, (_, k) => ctx.recordsRemote!(repo, k, "read"))) : [remote], repo))
 			: undefined,
 		votesRead,
 	]);
@@ -327,8 +354,9 @@ export async function freeSnapshot(ctx: FreeContext, repo: string) {
 		verify: state.verify ?? [],
 		/** Whether records and merges are stamped with verified identity. */
 		verified: !!state.stampKey,
-		/** Claims are split into per-path shards this deep (absent: one registry). */
+		/** Claims are split into per-path shards this deep (absent: one registry), and since when and why, or whether they will be. */
 		...(state.shardDepth ? { shardDepth: state.shardDepth } : {}),
+		sharding: shardingOf(state).sharding,
 		/** The claims in force, each with where its change stands. */
 		claims,
 		/** The latest votes, newest first. */
@@ -402,18 +430,20 @@ async function runFreeTool(name: string, args: Args, ctx: FreeContext): Promise<
 				escalate: Array.isArray(args.escalate) ? (args.escalate as ReviewPolicy["escalate"]) : DEFAULT_POLICY.escalate,
 			};
 			const verify = Array.isArray(args.verify) ? (args.verify as string[]).filter((c) => typeof c === "string" && c.trim()) : [];
-			// Claims are sharded by path, two segments deep unless asked otherwise (0: one registry).
-			const shardDepth = typeof args.shard_depth === "number" ? Math.max(0, Math.floor(args.shard_depth)) : DEFAULT_SHARD_DEPTH;
+			// Claims stay in one record until the load calls for shards, unless asked to shard now (or never: 0).
+			const asked = typeof args.shard_depth === "number" ? Math.max(0, Math.floor(args.shard_depth)) : undefined;
 			// Sharded claims are spread over records repos, where they can be made.
 			const wanted = typeof args.records_repos === "number" ? Math.max(0, Math.floor(args.records_repos)) : DEFAULT_RECORDS_REPOS;
-			const recordsRepos = shardDepth && ctx.recordsRemote && ctx.createRecordsRepos && !registered?.baseline ? wanted : 0;
+			const spread = ctx.recordsRemote && ctx.createRecordsRepos ? wanted : 0;
+			const recordsRepos = asked && !registered?.baseline ? spread : 0;
 			if (recordsRepos) await ctx.createRecordsRepos!(repo, recordsRepos);
 			// Changes merge into the repo's default branch, whatever it's called.
 			const branch = registered?.branch ?? (registered?.baseline || !ctx.defaultBranch ? "main" : await ctx.defaultBranch(repo));
-			await startFree(claims, { baseline: await ctx.head(repo, branch), branch, policy, verify, stampKey: stamper?.publicKey, shardDepth, recordsRepos });
+			const sharding = asked ? { shardDepth: asked, recordsRepos } : asked === 0 ? {} : { autoShard: { depth: DEFAULT_SHARD_DEPTH, recordsRepos: spread } };
+			await startFree(claims, { baseline: await ctx.head(repo, branch), branch, policy, verify, stampKey: stamper?.publicKey, ...sharding });
 			await ctx.register?.(repo);
 			const registry = (await claims.read())?.commit.state;
-			return { repo, branch: projectBranch(registry), policy: registry?.policy ?? policy, verify: registry?.verify ?? [], shardDepth: registry?.shardDepth ?? 0, recordsRepos: registry?.recordsRepos ?? 0, instructions: FREE_INSTRUCTIONS };
+			return { repo, branch: projectBranch(registry), policy: registry?.policy ?? policy, verify: registry?.verify ?? [], ...shardingOf(registry), instructions: FREE_INSTRUCTIONS };
 		}
 		case "free_credentials": {
 			if (typeof args.change !== "string" || !args.change.trim()) {
@@ -438,14 +468,12 @@ async function runFreeTool(name: string, args: Args, ctx: FreeContext): Promise<
 		}
 		case "free_claims":
 			return (await view()).claims;
-		case "free_claim":
-			return store.claim({
-				change: requiredString(args, "change"),
-				agent: actAs("agent"),
-				paths: normalizeClaim(requiredPaths(args, "paths")),
-				intent: requiredString(args, "intent"),
-				staleAfterMs: STALE_AFTER_MS,
-			}, stamper);
+		case "free_claim": {
+			const input = { change: requiredString(args, "change"), agent: actAs("agent"), paths: normalizeClaim(requiredPaths(args, "paths")), intent: requiredString(args, "intent"), staleAfterMs: STALE_AFTER_MS };
+			// Busy enough that one record would hold agents up: shard first, then claim in the shards.
+			const sharded = await shardIfBusy(ctx, repo, claims, registered, input.agent);
+			return (sharded ? storeFor(ctx, repo, sharded) : store).claim(input, stamper);
+		}
 		case "free_release": {
 			const change = requiredString(args, "change");
 			const agent = actAs("agent");

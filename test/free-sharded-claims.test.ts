@@ -99,11 +99,12 @@ describe("sharded claims", { timeout: 60_000 }, () => {
 		for (const i of [1, 2, 3, 4, 5]) await store().claim(want(`c-${i}`, [`area${i}/x/`]));
 		const before = server.requests.length;
 		expect((await store().read()).claims).toHaveLength(5);
-		expect(server.requests.slice(before)).toEqual(["GET refs?service=git-upload-pack", "POST git-upload-pack"]);
-		// Nothing changed since: the listing alone, the states already known.
+		// The shards' listing and fetch, and the registry's listing (it has nothing to fetch here).
+		expect(server.requests.slice(before).sort()).toEqual(["GET refs?service=git-upload-pack", "GET refs?service=git-upload-pack", "POST git-upload-pack"]);
+		// Nothing changed since: the listings alone, the states already known.
 		const again = server.requests.length;
 		expect((await store().read()).claims).toHaveLength(5);
-		expect(server.requests.slice(again)).toEqual(["GET refs?service=git-upload-pack"]);
+		expect(server.requests.slice(again)).toEqual(["GET refs?service=git-upload-pack", "GET refs?service=git-upload-pack"]);
 	});
 
 	it("retries a read the server fails for a moment", async () => {

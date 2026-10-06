@@ -54,10 +54,19 @@ export interface Registry {
 	verify?: string[];
 	/** Blueprint's public key, to check the stamps on records and merges with. */
 	stampKey?: string;
-	/** Claims are split into per-path shards this many segments deep (see shards.ts); absent, they're all here. */
+	/**
+	 * Claims are split into per-path shards this many segments deep (see
+	 * shards.ts); absent, they're all here. Once sharded, this registry is the
+	 * shard above every other: the claims made here before stay here.
+	 */
 	shardDepth?: number;
 	/** The shards are spread over this many records repos (absent: they're in the project repo). */
 	recordsRepos?: number;
+	/** Shard when the load calls for it (see shardingReason), this deep and over this many records repos. */
+	autoShard?: { depth: number; recordsRepos: number };
+	/** When the claims were sharded, and why. Every claim outside this registry since has an index (see shards.ts). */
+	shardedAt?: string;
+	shardedBecause?: string;
 	/** Registered agent names, each bound to one secret key. */
 	agents?: Record<string, AgentRecord>;
 }
@@ -81,14 +90,56 @@ export interface Conflict {
 
 const empty = (): Registry => ({ claims: [], released: [] });
 
-/** Start coordinator-free mode on a repo: the registry's first entry records its branch, the branch's baseline and the review policy. Harmless to repeat. */
-export async function startFree(log: CasLog<Registry>, input: { baseline: string; branch?: string; policy: ReviewPolicy; verify?: string[]; stampKey?: string; shardDepth?: number; recordsRepos?: number }) {
-	const outcome = await appendRecord<Registry, "started">(log, "blueprint", empty, (state) =>
-		state.baseline
-			? { refused: "started" }
-			: { state: { ...state, baseline: input.baseline, ...(input.branch ? { branch: input.branch } : {}), policy: input.policy, verify: input.verify ?? [], stampKey: input.stampKey, ...(input.shardDepth ? { shardDepth: input.shardDepth } : {}), ...(input.shardDepth && input.recordsRepos ? { recordsRepos: input.recordsRepos } : {}) }, text: `Coordinator-free mode starts at ${input.baseline}${input.branch ? ` on ${input.branch}` : ""}` },
-	);
+/**
+ * Start coordinator-free mode on a repo: the registry's first entry records its
+ * branch, the branch's baseline and the review policy, and how claims are kept:
+ * sharded now (`shardDepth`), when the load calls for it (`autoShard`), or
+ * all here. Harmless to repeat.
+ */
+export async function startFree(log: CasLog<Registry>, input: { baseline: string; branch?: string; policy: ReviewPolicy; verify?: string[]; stampKey?: string; shardDepth?: number; recordsRepos?: number; autoShard?: Registry["autoShard"] }) {
+	const outcome = await appendRecord<Registry, "started">(log, "blueprint", empty, (state) => {
+		if (state.baseline) return { refused: "started" };
+		const sharding: Partial<Registry> = input.shardDepth
+			? { shardDepth: input.shardDepth, ...(input.recordsRepos ? { recordsRepos: input.recordsRepos } : {}), shardedAt: new Date().toISOString(), shardedBecause: "asked for at the start" }
+			: input.autoShard
+				? { autoShard: input.autoShard }
+				: {};
+		return { state: { ...state, baseline: input.baseline, ...(input.branch ? { branch: input.branch } : {}), policy: input.policy, verify: input.verify ?? [], stampKey: input.stampKey, ...sharding }, text: `Coordinator-free mode starts at ${input.baseline}${input.branch ? ` on ${input.branch}` : ""}` };
+	});
 	return { started: outcome.ok };
+}
+
+/**
+ * When an unsharded registry should shard, from the load it records: as many
+ * agents holding claims as one record serves well, or as many writes a minute.
+ * Measured on Artifacts (see docs/coordinator-free.md): one record takes about
+ * 35 writes a minute; with 8 agents claiming at once, sharded claims land first.
+ */
+export const SHARD_WHEN = { agents: 8, writesPerMinute: 15, windowMs: 5 * 60_000 };
+
+/** Why `agent`'s claim should shard the registry first, or null if it needn't (or can't: sharded, or not on demand). */
+export function shardingReason(state: Registry | null | undefined, agent: string, now = Date.now()): string | null {
+	if (!state?.autoShard || state.shardDepth) return null;
+	const agents = new Set([...state.claims.map((c) => c.agent), agent]);
+	if (agents.size >= SHARD_WHEN.agents) return `${agents.size} agents hold claims`;
+	// Claims made or extended, and releases, in the window: each was a write.
+	const since = now - SHARD_WHEN.windowMs;
+	const writes = state.claims.filter((c) => Date.parse(c.active) >= since).length + state.released.filter((r) => Date.parse(r.at) >= since).length;
+	const perMinute = writes / (SHARD_WHEN.windowMs / 60_000);
+	if (perMinute > SHARD_WHEN.writesPerMinute) return `${Math.round(perMinute)} claim writes a minute`;
+	return null;
+}
+
+/** Shard the claims from here on (once: refused if they are). The claims held now stay in the registry, above every shard. */
+export function shardClaims(log: CasLog<Registry>, input: { depth: number; recordsRepos: number; reason: string }) {
+	return appendRecord<Registry, "sharded">(log, "blueprint", empty, (state) =>
+		state.shardDepth
+			? { refused: "sharded" }
+			: {
+					state: { ...state, shardDepth: input.depth, ...(input.recordsRepos ? { recordsRepos: input.recordsRepos } : {}), shardedAt: new Date().toISOString(), shardedBecause: input.reason },
+					text: `Claims are sharded from here on, ${input.depth} segments deep: ${input.reason}`,
+				},
+	);
 }
 
 export const activeClaims = (state: Registry | null | undefined) => state?.claims ?? [];
@@ -121,7 +172,10 @@ export async function claim(log: CasLog<Registry>, input: { change: string; agen
 	const { staleAfterMs, now: at, ...wanted } = input;
 	/** The change's paths here before this claim (null: it had none), for a claim that must back out. */
 	let previous: string[] | null = null;
+	/** The state the claim was written onto: whether the registry was sharded by then. */
+	let seen: Registry | undefined;
 	const outcome = await appendRecord<Registry, Conflict[]>(log, wanted.agent, empty, async (state) => {
+		seen = state;
 		const time = at ?? Date.now();
 		const isStale = (c: ClaimRecord) => staleAfterMs !== undefined && time - Date.parse(c.active) > staleAfterMs;
 		const conflicts = conflictsWith(state, wanted.paths, wanted.change);
@@ -146,7 +200,7 @@ export async function claim(log: CasLog<Registry>, input: { change: string; agen
 		const freed = stale.length ? ` (releasing stale ${stale.map((c) => c.change).join(", ")})` : "";
 		return { state: { ...state, claims, released: [...state.released, ...releases] }, text: `${wanted.agent} claims ${wanted.paths.join(", ")} for ${wanted.change}: ${wanted.intent}${freed}` };
 	});
-	return outcome.ok ? { ...outcome, previous } : { ok: false as const, conflicts: outcome.refused };
+	return outcome.ok ? { ...outcome, previous, seen } : { ok: false as const, conflicts: outcome.refused };
 }
 
 /**

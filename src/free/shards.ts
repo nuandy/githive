@@ -1,11 +1,13 @@
-// Sharded claims (see docs/coordinator-free.md). The claims are split by path
-// into shards, each its own Git ref, so agents working in different parts of
-// the tree never contend for one ref. A claim lives in the shard of its first
-// `depth` path segments. A claim with fewer segments ("wide", like docs/)
-// lives in its own path's shard, which is an ancestor of every shard it
-// covers. So two overlapping claims are always in the same shard (where the
-// ref's compare-and-swap decides) or in an ancestor and a descendant (where
-// each, after writing, checks the other).
+// Sharded claims (see docs/coordinator-free.md). Once the load calls for it,
+// the claims are split by path into shards, each its own Git ref, so agents
+// working in different parts of the tree never contend for one ref. The
+// registry stays above them all, as the shard "" (see claim-store.ts). A
+// claim lives in the shard of its first `depth` path segments. A claim with
+// fewer segments ("wide", like docs/) lives in its own path's shard, which is
+// an ancestor of every shard it covers; a claim spread over many shards, in
+// the one holding all of them. So two overlapping claims are always in the
+// same shard (where the ref's compare-and-swap decides) or in an ancestor and
+// a descendant (where each, after writing, checks the other).
 
 const segments = (entry: string) => entry.replace(/\/$/, "").split("/");
 
