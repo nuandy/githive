@@ -76,6 +76,9 @@ export interface StoreInput {
  * on another's I/O).
  */
 const shardStates = new Map<string, Registry>();
+
+/** How many records repos a release writes to at once. */
+const RELEASE_REPOS_AT_ONCE = 4;
 const decoder = new TextDecoder();
 
 /**
@@ -367,9 +370,11 @@ class ShardedClaims implements ClaimStore {
 	}
 
 	/**
-	 * Release in each shard: the records repos at once, each one's shards in
-	 * turn. A shard that no longer holds the claim is fine; the first other
+	 * Release in each shard: a few records repos at a time, each one's shards
+	 * in turn. A shard that no longer holds the claim is fine; the first other
 	 * refusal is the outcome (the other repos' shards are still released).
+	 * Workers lets a request keep 6 connections open; more, and it cancels
+	 * stalled ones, so RELEASE_REPOS_AT_ONCE stays under that.
 	 */
 	private async eachShard(shards: string[], step: (shard: string) => Promise<{ ok: true } | { ok: false; refused: string }>): Promise<ReleaseOutcome> {
 		const byRepo = new Map<number, string[]>();
@@ -377,16 +382,20 @@ class ShardedClaims implements ClaimStore {
 			const k = this.spread ? recordsRepoOf(shard, this.spread) : -1;
 			byRepo.set(k, [...(byRepo.get(k) ?? []), shard]);
 		}
-		const refusals = await Promise.all(
-			[...byRepo.values()].map(async (group) => {
+		const groups = [...byRepo.values()];
+		let refused: ReleaseOutcome | null = null;
+		const worker = async () => {
+			for (let group = groups.shift(); group; group = groups.shift())
 				for (const shard of group) {
 					const outcome = await step(shard);
-					if (!outcome.ok && !/holds no claim/.test(outcome.refused)) return outcome;
+					if (!outcome.ok && !/holds no claim/.test(outcome.refused)) {
+						refused ??= outcome;
+						break;
+					}
 				}
-				return null;
-			}),
-		);
-		return refusals.find((r) => r) ?? { ok: true };
+		};
+		await Promise.all(Array.from({ length: Math.min(RELEASE_REPOS_AT_ONCE, groups.length) }, worker));
+		return refused ?? { ok: true };
 	}
 
 	cite(view: ClaimsView, files: string[], own?: ClaimRecord) {
