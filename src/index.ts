@@ -301,9 +301,18 @@ app.get("/summaries", async (c) => {
 
 // Project repos, without task forks (<taskId>--...), for the dashboard's "new task" form.
 // Forks far outnumber projects, so read every page.
+/** Not a project: a task's fork, or a coordinator-free change's fork or claim records. */
+const isProject = (name: string) => !parseRepoName(name) && !/^[0-9a-f]{8}--agent--/.test(name) && !name.startsWith("free--") && !name.startsWith("free-records--");
+
+/** A deleted project's tokens and kept dashboard views go with it, so a new repo by its name starts clean. */
+async function forgetRepo(env: Env, repo: string) {
+	await Promise.resolve()
+		.then(() => Promise.all([env.TOKENS?.getByName(repo).clear(), env.LIVE?.getByName(`free:${repo}`).clearViews()]))
+		.catch((err) => console.error(`forgetting ${repo}'s tokens and views failed`, String(err)));
+}
+
 app.get("/repos", async (c) => {
-	// Not a project: a task's fork, or a coordinator-free change's fork or claim records.
-	const names = (await listRepoNames(c.env.ARTIFACTS)).filter((name) => !parseRepoName(name) && !/^[0-9a-f]{8}--agent--/.test(name) && !name.startsWith("free--") && !name.startsWith("free-records--"));
+	const names = (await listRepoNames(c.env.ARTIFACTS)).filter(isProject);
 	return c.json(names.sort().map((name) => ({ name })));
 });
 
@@ -464,7 +473,7 @@ app.post("/admin/wipe", async (c) => {
 	const failed: string[] = [];
 	// A few at a time: one by one, a batch outlasts the caller's patience.
 	for (let i = 0; i < batch.length; i += WIPE_PARALLEL)
-		await Promise.all(batch.slice(i, i + WIPE_PARALLEL).map((name) => retryTransient(() => c.env.ARTIFACTS.delete(name)).catch(() => failed.push(name))));
+		await Promise.all(batch.slice(i, i + WIPE_PARALLEL).map((name) => retryTransient(() => c.env.ARTIFACTS.delete(name)).then(() => (isProject(name) ? forgetRepo(c.env, name) : undefined)).catch(() => failed.push(name))));
 	console.log("bench wipe", JSON.stringify({ deleted: batch.length - failed.length, failed: failed.length, remaining: names.length - batch.length }));
 	return c.json({ deleted: batch.length - failed.length, failed, remaining: names.length - batch.length + failed.length });
 });
@@ -495,6 +504,7 @@ app.delete("/repos/:repo", async (c) => {
 	if (tasks.length) return c.json({ error: `tasks still use ${repo}: ${tasks.map((t) => t.id).join(", ")}; delete them first` }, 409);
 	const deleted = await retryTransient(() => c.env.ARTIFACTS.delete(repo));
 	if (!deleted) return c.json({ error: `no repo ${repo}` }, 404);
+	await forgetRepo(c.env, repo);
 	console.log("repo deleted", repo);
 	return c.json({ deleted: repo });
 });

@@ -18,3 +18,13 @@ describe("the token cache", () => {
 		expect(storage.data.has("r|write")).toBe(false);
 	});
 });
+
+describe("forgetting a deleted project", () => {
+	it("clears its tokens", async () => {
+		const storage = new FakeStorage();
+		const cache = new TokenCache({ storage } as never, {} as never);
+		await cache.put("r|read", { url: "u", token: "t" }, Date.now() + 60_000);
+		await cache.clear();
+		expect(await cache.get("r|read")).toBeNull();
+	});
+});

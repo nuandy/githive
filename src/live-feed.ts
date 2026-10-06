@@ -73,6 +73,13 @@ export class LiveFeed extends DurableObject<Env> {
 		await this.ctx.storage.delete(`building:${name}`);
 	}
 
+	/** Forget the kept views: the repo was deleted. */
+	async clearViews() {
+		const kept = await this.ctx.storage.list({ prefix: "view:" });
+		const building = await this.ctx.storage.list({ prefix: "building:" });
+		await this.ctx.storage.delete([...kept.keys(), ...building.keys()]);
+	}
+
 	private async writes() {
 		return (await this.ctx.storage.get<number>("writes")) ?? 0;
 	}

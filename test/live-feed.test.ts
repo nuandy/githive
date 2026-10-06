@@ -57,3 +57,15 @@ describe("kept views", () => {
 		expect(await live.view("snapshot", -1)).toMatchObject({ fresh: false });
 	});
 });
+
+describe("forgetting a deleted repo's views", () => {
+	it("drops kept views and builds, and keeps counting writes", async () => {
+		const { live } = feed();
+		await live.keep("snapshot", "{}", 0);
+		await live.startBuild("audit");
+		await live.ping("records");
+		await live.clearViews();
+		expect(await live.view("snapshot", 60_000)).toEqual({ json: undefined, fresh: false, building: false, writes: 1 });
+		expect(await live.startBuild("audit")).toBe(true);
+	});
+});

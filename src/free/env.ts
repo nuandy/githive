@@ -17,27 +17,30 @@ import { makeStamper } from "./stamp";
 // agents themselves (acting as themselves).
 
 /**
- * Artifacts tokens, per repo and scope, kept for the isolate while fresh, and
- * past it in the repo's TokenCache: minting one is several Artifacts calls,
- * which dominated each tool call. They last an hour and are reused for half
- * of it. Only minted tokens are shared: a mint still in flight is its own
- * request's I/O, which in Workers no other request may wait on, so calls that
- * miss at once each mint their own. The TokenCache is a shortcut: if it fails,
- * the token is minted.
+ * Artifacts tokens, per repo and scope, kept in the project's TokenCache (for
+ * every isolate) and briefly in the isolate: minting one is several Artifacts
+ * calls, which dominated each tool call. They last an hour and are reused for
+ * half of it. An isolate asks the TokenCache again after ISOLATE_MS, so
+ * deleting a project (which clears its TokenCache) reaches every isolate soon.
+ * Only minted tokens are shared: a mint still in flight is its own request's
+ * I/O, which in Workers no other request may wait on, so calls that miss at
+ * once each mint their own. If the TokenCache fails, the token is minted.
  */
 const remotes = new Map<string, { remote: Remote; until: number }>();
-async function cached(env: Env, key: string, mint: () => Promise<Remote>) {
+const REUSE_MS = 30 * 60_000;
+const ISOLATE_MS = 2 * 60_000;
+async function cached(env: Env, project: string, key: string, mint: () => Promise<Remote>) {
 	const hit = remotes.get(key);
 	if (hit && Date.now() < hit.until) return hit.remote;
-	const store = env.TOKENS?.getByName(key.split("|")[0]);
+	const store = env.TOKENS?.getByName(project);
 	const kept = await store?.get(key).catch(() => null);
 	if (kept) {
-		remotes.set(key, kept);
+		remotes.set(key, { remote: kept.remote, until: Math.min(kept.until, Date.now() + ISOLATE_MS) });
 		return kept.remote;
 	}
 	const remote = await mint();
-	const until = Date.now() + 30 * 60_000;
-	remotes.set(key, { remote, until });
+	const until = Date.now() + REUSE_MS;
+	remotes.set(key, { remote, until: Date.now() + ISOLATE_MS });
 	await store?.put(key, remote, until).catch(() => undefined);
 	return remote;
 }
@@ -59,16 +62,16 @@ export function freeContextFor(env: Env, by: string | undefined, caller: { agent
 		requestReview: (input) => startFreeReviewers(env, input),
 		startBuilder: (input) => startFreeBuilder(env, input),
 		stamper: async (agent) => (env.FREE_STAMP_KEY && by ? makeStamper(env.FREE_STAMP_KEY, agent ? `${by}/${agent}` : by) : undefined),
-		remote: (repo, scope) => cached(env, `${repo}|${scope}`, () => remoteFor(env.ARTIFACTS, repo, scope, 3600)),
-		changeRemote: (repo, agent, scope) => cached(env, `fork:${repo}:${agent}|${scope}`, () => changeRemote(env, repo, agent, scope, 3600)),
-		legacyChangeRemote: (repo, change) => cached(env, `${freeAgentName(repo, change)}|read`, () => remoteFor(env.ARTIFACTS, freeAgentName(repo, change), "read", 3600)),
-		recordsRemote: (repo, k, scope) => cached(env, `${recordsRepoName(repo, k)}|${scope}`, () => remoteFor(env.ARTIFACTS, recordsRepoName(repo, k), scope, 3600)),
+		remote: (repo, scope) => cached(env, repo, `${repo}|${scope}`, () => remoteFor(env.ARTIFACTS, repo, scope, 3600)),
+		changeRemote: (repo, agent, scope) => cached(env, repo, `fork:${repo}:${agent}|${scope}`, () => changeRemote(env, repo, agent, scope, 3600)),
+		legacyChangeRemote: (repo, change) => cached(env, repo, `${freeAgentName(repo, change)}|read`, () => remoteFor(env.ARTIFACTS, freeAgentName(repo, change), "read", 3600)),
+		recordsRemote: (repo, k, scope) => cached(env, repo, `${recordsRepoName(repo, k)}|${scope}`, () => remoteFor(env.ARTIFACTS, recordsRepoName(repo, k), scope, 3600)),
 		createRecordsRepos: async (repo, count) => {
 			await Promise.all(Array.from({ length: count }, (_, k) => ensureRepo(env.ARTIFACTS, recordsRepoName(repo, k), `Coordinator-free claim records for ${repo}`)));
 		},
 		records: <S>(repo: string, ref: string) => {
 			let log = logs.get(ref);
-			if (!log) logs.set(ref, (log = new GitCasLog<unknown>(() => cached(env, `${repo}|write`, () => remoteFor(env.ARTIFACTS, repo, "write", 3600)), repo, ref)));
+			if (!log) logs.set(ref, (log = new GitCasLog<unknown>(() => cached(env, repo, `${repo}|write`, () => remoteFor(env.ARTIFACTS, repo, "write", 3600)), repo, ref)));
 			return log as GitCasLog<S>;
 		},
 		agentStatus: (repo, change, head, roles) => freeAgentStatus(env, repo, change, head, roles),

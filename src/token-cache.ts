@@ -1,8 +1,8 @@
 import { DurableObject } from "cloudflare:workers";
 import type { Remote } from "./git";
 
-// Artifacts tokens, kept past an isolate's life: one per repo (named by the
-// repo it's for). Minting a token takes several Artifacts calls (~0.6 s), and
+// Artifacts tokens, kept past an isolate's life: one per project repo, for it
+// and its forks and records repos. Minting a token takes several Artifacts calls (~0.6 s), and
 // a fresh isolate (a deploy, a new location, a quiet spell) used to mint every
 // token again; asking here costs one Durable Object call. Tokens never leave
 // the Worker: they are kept here as in the isolate, and expire as they would.
@@ -23,5 +23,10 @@ export class TokenCache extends DurableObject<Env> {
 
 	async put(key: string, remote: Remote, until: number) {
 		await this.ctx.storage.put<Kept>(key, { remote, until });
+	}
+
+	/** Forget every token: the project was deleted (a new one by its name gets its own). */
+	async clear() {
+		await this.ctx.storage.deleteAll();
 	}
 }
