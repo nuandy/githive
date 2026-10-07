@@ -145,3 +145,24 @@ describe("warming a coordinator-free repo's lanes", () => {
 		expect(storage.alarm).toBeNull();
 	});
 });
+
+describe("a coordinator-free repo's lanes, warm or not", () => {
+	it("says per lane whether it runs, when it last warmed, and whether it's warming", async () => {
+		const storage = new FakeStorage();
+		const others = new Map<string, { running: boolean; warmedAt: number | null; warming: boolean }>([
+			["free:express:lane:1", { running: true, warmedAt: 2, warming: false }],
+			["free:express:lane:2", { running: true, warmedAt: null, warming: true }],
+			["free:express:lane:3", { running: false, warmedAt: null, warming: false }],
+		]);
+		const env = { GATE: { getByName: (name: string) => ({ warmth: async () => others.get(name) }) } };
+		const gate = new Gate({ storage } as never, env as never);
+		await storage.put("warmingSince", 5);
+		await storage.put("warmedAt", 9);
+		expect(await gate.lanes("express")).toEqual([
+			{ lane: 0, running: false, warmedAt: 9, warming: false },
+			{ lane: 1, running: true, warmedAt: 2, warming: false },
+			{ lane: 2, running: true, warmedAt: null, warming: true },
+			{ lane: 3, running: false, warmedAt: null, warming: false },
+		]);
+	});
+});

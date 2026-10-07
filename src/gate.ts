@@ -344,6 +344,7 @@ export class Gate extends DurableObject<Env> {
 			if (!container) return;
 			const at = await this.ctx.storage.get<number>("warmedAt");
 			if (container.running && at && Date.now() - at < WARM_FOR_MS) return;
+			await this.ctx.storage.put("warmingSince", Date.now());
 			try {
 				await this.prepare(container, input.base);
 				const branch = input.branch ?? "main";
@@ -359,11 +360,26 @@ export class Gate extends DurableObject<Env> {
 			} catch (err) {
 				// Warming is a head start, never a requirement: the check prepares what it needs.
 				console.error("warming a gate container failed", statusOf(err).message);
-				await this.ctx.storage.delete("prepared");
+				await this.ctx.storage.delete(["prepared", "warmingSince"]);
 			}
 		});
 		this.checking = warming.catch(() => {});
 		return warming;
+	}
+
+	/** This container's warmth: whether it runs, when it last finished warming, and whether it's warming now. */
+	async warmth() {
+		const [warmedAt, warmingSince] = await Promise.all([this.ctx.storage.get<number>("warmedAt"), this.ctx.storage.get<number>("warmingSince")]);
+		return {
+			running: !!this.ctx.container?.running,
+			warmedAt: warmedAt ?? null,
+			warming: !!warmingSince && (!warmedAt || warmingSince > warmedAt),
+		};
+	}
+
+	/** The warmth of the repo's lanes (this Gate first, then the ones beside it). */
+	async lanes(repo: string) {
+		return Promise.all(Array.from({ length: WARM_LANES }, async (_, lane) => ({ lane, ...(await (lane === 0 ? this.warmth() : this.env.GATE.getByName(`free:${repo}:lane:${lane}`).warmth())) })));
 	}
 
 	/**

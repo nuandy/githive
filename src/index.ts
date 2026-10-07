@@ -240,6 +240,8 @@ app.get("/free/:repo/changes/:change", async (c) => {
 	const { repo, change } = c.req.param();
 	return keptView(c, `free:${repo}`, `change:${change}`, 60_000, (timing) => freeChangeHistory({ ...freeContext(c.env, c.get("accessIdentity")), timing }, repo, change));
 });
+// The warmth of a coordinator-free repo's check containers: whether each lane runs, and when it last warmed.
+app.get("/free/:repo/lanes", async (c) => c.json(await c.env.GATE.getByName(`free:${c.req.param("repo")}`).lanes(c.req.param("repo"))));
 app.get("/free/:repo/audit", async (c) => {
 	const repo = c.req.param("repo");
 	return keptView(c, `free:${repo}`, "audit", 5 * 60_000, (timing) => freeAudit({ ...freeContext(c.env, c.get("accessIdentity")), timing }, repo));

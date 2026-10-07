@@ -123,6 +123,10 @@ const did = new Map(plan.agents.map((a) => [a.agent, { build: 0, review: 0, revi
 const askedOnce = new Set();
 /** Pieces settled for this run: merged, waiting on a person, or stopped. */
 const settled = new Map();
+const settlePiece = (id, outcome) => {
+	settled.set(id, outcome);
+	lastSettled = Date.now();
+};
 const allSettled = () => plan.backlog.every((p) => settled.has(p.id));
 
 /** One agent's hands: build, review, revise and merge, as free_next says. */
@@ -258,11 +262,11 @@ function agentFor(spec) {
 		if (onReject === "ask") {
 			await call("free_ask_human", { change: next.change, agent: name, reason: `A reviewer asked for changes I shouldn't decide alone: ${next.evidence}` });
 			note(next.change, "asked a person");
-			settled.set(next.change, "waits on a person");
+			settlePiece(next.change, "waits on a person");
 			say(name, `asks a person about ${next.change}`);
 			return;
 		}
-		settled.set(next.change, `stopped: changes requested (${next.evidence.slice(0, 60)})`);
+		settlePiece(next.change, `stopped: changes requested (${next.evidence.slice(0, 60)})`);
 		await call("free_release", { change: next.change, agent: name, reason: "a reviewer asked for changes I can't make" });
 	};
 
@@ -272,7 +276,7 @@ function agentFor(spec) {
 		if (merged.ok) {
 			mark(next.change, "merged");
 			timeline.get(next.change).commit = merged.commit;
-			settled.set(next.change, `merged ${merged.commit.slice(0, 8)}`);
+			settlePiece(next.change, `merged ${merged.commit.slice(0, 8)}`);
 			say(name, `merged ${next.change} as ${merged.commit.slice(0, 8)}`);
 			return;
 		}
@@ -355,7 +359,29 @@ await Promise.all(
 		if (!added.ok && !/already/.test(added.reason ?? "")) throw new Error(`adding ${piece.id} failed: ${added.reason}`);
 	}),
 );
-const setupSeconds = ((Date.now() - started) / 1000).toFixed(0);
+// Setup ends once the check containers are warm, as on a repo that's been running: the work clock starts then.
+if (plan.setup?.verify?.length) {
+	const until = Date.now() + 6 * 60_000;
+	for (;;) {
+		const lanes = await fetch(`${BASE}/free/${plan.repo}/lanes`, { headers: access, dispatcher: patient })
+			.then((r) => (r.ok ? r.json() : []))
+			.catch(() => []);
+		const warm = lanes.filter((l) => l.warmedAt && !l.warming).length;
+		if (lanes.length && warm === lanes.length) {
+			say("swarm", `check containers warm (${warm} lanes)`);
+			break;
+		}
+		if (Date.now() > until) {
+			say("swarm", `starting with ${warm} of ${lanes.length} lanes warm after 6 minutes`);
+			break;
+		}
+		await sleep(5_000);
+	}
+}
+const workStarted = Date.now();
+const setupSeconds = ((workStarted - started) / 1000).toFixed(0);
+/** When the last piece settled (merged, waiting on a person, or stopped): the end of the work. */
+let lastSettled = workStarted;
 say("swarm", `${plan.backlog.length} pieces in the backlog; ${plan.agents.length} agents, all alike${speed !== 1 ? `, at ${speed}x speed` : ""}`);
 
 await Promise.all(plan.agents.map((spec) => agentFor(spec)()));
@@ -370,6 +396,6 @@ for (const [id, t] of timeline) {
 console.log(`\n${"agent".padEnd(12)} build review revise merge wait`);
 for (const [name, d] of did) console.log(`${name.padEnd(12)} ${String(d.build).padStart(5)} ${String(d.review).padStart(6)} ${String(d.revise).padStart(6)} ${String(d.merge).padStart(5)} ${String(d.wait).padStart(4)}`);
 const merged = [...settled.values()].filter((s) => s.startsWith("merged")).length;
-console.log(`\n${merged} of ${plan.backlog.length} merged in ${((Date.now() - started) / 1000).toFixed(0)}s (setup ${setupSeconds}s)`);
+console.log(`\n${merged} of ${plan.backlog.length} merged. Setup ${setupSeconds}s (once per repo); work ${((lastSettled - workStarted) / 1000).toFixed(0)}s (agents released to the last piece settled); total ${((Date.now() - started) / 1000).toFixed(0)}s`);
 const audit = await fetch(`${BASE}/free/${plan.repo}/audit`, { headers: { ...access, "Cache-Control": "no-cache" }, dispatcher: patient }).then((r) => r.json());
 console.log(`audit: ${audit.merges} merges, ${audit.open} open violations${audit.violations?.length ? `: ${JSON.stringify(audit.violations).slice(0, 400)}` : ""}`);
