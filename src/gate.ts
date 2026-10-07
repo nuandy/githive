@@ -1,8 +1,9 @@
 import { DurableObject } from "cloudflare:workers";
-import { WORKDIR, bootContainer, clip, gitWithToken, run } from "./container";
+import { WORKDIR, bootContainer, clip, gitWithToken, installToolchains, run } from "./container";
 import { statusOf } from "./errors";
 import { CheckLine, type LineResult } from "./toolkit/check-line";
 import { branchHead } from "./git";
+import { DEPENDENCIES, DEPENDENCY_FILES } from "./toolchains";
 
 // The project's checks, run before a merge lands: the change merged onto the
 // project's branch (after the merges ahead of it in line) and the checks run
@@ -12,7 +13,8 @@ import { branchHead } from "./git";
 // batches, itself and the Gates beside it each checking one (see
 // toolkit/check-line.ts), in containers it keeps warm: dependencies stay
 // installed between runs, and an install is skipped while what it depends on
-// is unchanged.
+// is unchanged. Python, Go and Rust are installed when the repo uses them
+// (see toolchains.ts), with their dependencies.
 
 export interface CheckResult {
 	command: string;
@@ -166,7 +168,11 @@ export class Gate extends DurableObject<Env> {
 		const checks = [...plan.checks];
 		if (!checks.some((c) => INSTALL.test(c.trim())) && (await run(container, ["test", "-f", "package-lock.json"])).exitCode === 0) checks.unshift("npm ci");
 
-		const results = [];
+		// Toolchains beyond Node, read from the merged code (a change may add one), and their dependencies.
+		const setup = await this.setUpToolchains(container);
+		if (setup.some((r) => r.exitCode !== 0)) return result({ results: setup });
+
+		const results: CheckResult[] = [];
 		for (const command of checks) {
 			if (INSTALLS.test(command.trim()) && (await this.installUnchanged(container))) {
 				results.push({ command, exitCode: 0, output: "Skipped: package.json and its lockfile are unchanged since the last install in this gate." });
@@ -177,7 +183,30 @@ export class Gate extends DurableObject<Env> {
 			if (r.exitCode !== 0) break; // later checks usually depend on earlier ones (npm ci first)
 			if (INSTALLS.test(command.trim())) await this.ctx.storage.put("lockHash", await this.lockHash(container));
 		}
-		return result({ passed: results.length === checks.length && results.every((r) => r.exitCode === 0), results });
+		return result({ passed: results.length === checks.length && results.every((r) => r.exitCode === 0), results: [...setup, ...results] });
+	}
+
+	/**
+	 * Install the toolchains the checkout uses and their dependencies, skipping
+	 * the dependencies while the files they come from are unchanged. A failed
+	 * install comes back as a failed check result.
+	 */
+	private async setUpToolchains(container: Container): Promise<CheckResult[]> {
+		const installed = await installToolchains(container);
+		const failed = installed.filter((i) => i.exitCode !== 0);
+		if (failed.length) return failed.map((i) => ({ command: `install ${i.toolchain}`, exitCode: i.exitCode, output: clip(i.output, 6_000) }));
+		if (!installed.length) return [];
+		const hash = (await run(container, ["bash", "-c", `{ echo ${installed.map((i) => i.toolchain).join(",")}; cat ${DEPENDENCY_FILES} 2>/dev/null; } | sha256sum | cut -d' ' -f1`])).output.trim();
+		if (hash && (await this.ctx.storage.get<string>("depsHash")) === hash)
+			return installed.map((i) => ({ command: DEPENDENCIES[i.toolchain].command, exitCode: 0, output: "Skipped: the files dependencies come from are unchanged since the last install in this gate." }));
+		const results: CheckResult[] = [];
+		for (const { toolchain } of installed) {
+			const r = await run(container, ["bash", "-lc", DEPENDENCIES[toolchain].script], WORKDIR, undefined, 600);
+			results.push({ command: DEPENDENCIES[toolchain].command, exitCode: r.exitCode, output: clip(r.output, 6_000) });
+			if (r.exitCode !== 0) return results;
+		}
+		await this.ctx.storage.put("depsHash", hash);
+		return results;
 	}
 
 	/** A running container with the project checked out: reused (with its installed dependencies) while it lives. */
@@ -187,7 +216,7 @@ export class Gate extends DurableObject<Env> {
 			await run(container, ["rm", "-rf", WORKDIR], "/");
 			const clone = await gitWithToken(container, base.token, ["clone", "--quiet", base.remote, WORKDIR], "/");
 			if (clone.exitCode !== 0) throw new Error(`clone of the project failed: ${clip(clone.output, 2_000)}`);
-			await this.ctx.storage.delete("lockHash");
+			await this.ctx.storage.delete(["lockHash", "depsHash"]);
 			await this.ctx.storage.put("prepared", true);
 		}
 		await container.setInactivityTimeout(IDLE_MS);
@@ -212,6 +241,7 @@ export class Gate extends DurableObject<Env> {
 				const fetched = await gitWithToken(container, input.base.token, ["fetch", "-q", input.base.remote, `${branch}:refs/remotes/base/${branch}`, "--force"]);
 				if (fetched.exitCode !== 0) return;
 				await run(container, ["bash", "-lc", `git merge --abort 2>/dev/null; git checkout -q -f --detach refs/remotes/base/${branch} && git clean -fdq`]);
+				await this.setUpToolchains(container);
 				const install = input.checks.find((c) => INSTALLS.test(c.trim()));
 				if (install && !(await this.installUnchanged(container))) {
 					const installed = await run(container, ["bash", "-lc", install], WORKDIR, undefined, 600);

@@ -2,6 +2,7 @@
 // agents (builders, reviewers) and the integration gate.
 
 import { retryTransient } from "./retry";
+import { INSTALL, MARKER_PATHSPECS, PROFILE, type Toolchain, detectToolchains } from "./toolchains";
 
 export const IMAGE = "cloudflare/debian-trixie";
 export const WORKDIR = "/work";
@@ -14,6 +15,28 @@ export async function bootContainer(container: Container) {
 	// WORKDIR doesn't exist until a clone, so setup runs from /.
 	const apt = await run(container, ["bash", "-lc", "apt-get update -qq && apt-get install -y -qq git ca-certificates >/dev/null"], "/");
 	if (apt.exitCode !== 0) throw new Error(`installing git failed: ${clip(apt.output, 2_000)}`);
+}
+
+/** The toolchains beyond Node the checkout at `cwd` uses (see toolchains.ts). */
+export async function repoToolchains(container: Container, cwd = WORKDIR): Promise<Toolchain[]> {
+	const listed = await run(container, ["git", "ls-files", "--", ...MARKER_PATHSPECS], cwd);
+	return listed.exitCode === 0 ? detectToolchains(listed.output.split("\n")) : [];
+}
+
+/**
+ * Install the toolchains the checkout uses (each a no-op once there), and the
+ * login profile that puts them on the PATH. Returns how each install went.
+ */
+export async function installToolchains(container: Container, cwd = WORKDIR) {
+	const toolchains = await repoToolchains(container, cwd);
+	if (!toolchains.length) return [];
+	await run(container, ["bash", "-c", "cat > /etc/profile.d/githive.sh"], "/", PROFILE);
+	const installed = [];
+	for (const toolchain of toolchains) {
+		const r = await run(container, ["bash", "-lc", INSTALL[toolchain]], "/", undefined, 600);
+		installed.push({ toolchain, exitCode: r.exitCode, output: r.output });
+	}
+	return installed;
 }
 
 /**

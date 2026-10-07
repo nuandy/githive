@@ -52,7 +52,15 @@ Measured on a bench Worker with fake agents (`scripts/bench.mjs`) and scripted o
 
 ## Language support
 
-Builders, reviewers and the checks run in Cloudflare's managed `cloudflare/debian-trixie` image, which has Node.js 24 and npm (git is installed at startup) but no Python, Go or other toolchains. The checks run whatever `verify` commands a repo sets, so they aren't tied to a language, but commands like `pytest` or `go test` fail without their toolchain.
+Builders, reviewers and the checks run in Cloudflare's managed `cloudflare/debian-trixie` image, which has Node.js 24 and npm. On top of it, each container installs git and whichever toolchains the repo uses, read from its tracked files in any folder:
+
+| Toolchain | Detected by | Installed | Dependencies |
+|---|---|---|---|
+| Python 3 | `pyproject.toml`, `requirements*.txt`, `setup.py`, `setup.cfg`, `uv.lock`, `Pipfile` | the system's `python3` and `uv`, with a virtualenv at `/opt/venv` | `uv sync` (or `uv pip install -r requirements*.txt`) |
+| Go | `go.mod` | the latest release (`GOTOOLCHAIN` fetches a newer one a `go.mod` asks for) | `go mod download` |
+| Rust | `Cargo.toml` | `rustup`, minimal profile with clippy and rustfmt (a `rust-toolchain.toml` is honoured) | `cargo fetch` |
+
+The checks install dependencies before a repo's `verify` commands run, and skip that while the files they come from are unchanged. A failed install fails the check, with its output. Toolchains install outside the checkout, so they survive between checks in a warm container; the first warm-up of a lane pays for them. Other languages (Java, .NET, Ruby, Swift) aren't installed; iOS apps can't be built at all, since Xcode runs only on macOS.
 
 ## Run it
 

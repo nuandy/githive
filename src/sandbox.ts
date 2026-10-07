@@ -3,7 +3,7 @@ import OpenAI from "openai";
 import type { ResponseInputItem } from "openai/resources/responses/responses";
 import { z } from "zod";
 import { MODEL, addUsage, assertComplete, emptyUsage, openAITools, runCalls, tool, type AgentTool, type Usage } from "./agent";
-import { COMMAND_TIMEOUT_S, WORKDIR, bootContainer, clip, gitWithToken, run } from "./container";
+import { COMMAND_TIMEOUT_S, WORKDIR, bootContainer, clip, gitWithToken, installToolchains, run } from "./container";
 import { staysInRepo } from "./paths";
 
 export { WORKDIR, clip };
@@ -30,7 +30,7 @@ export const TURN_STARTED = "sandbox-turn-started-at";
 export const INBOX = "inbox";
 
 /** Facts every agent prompt should state about the environment. */
-export const ENVIRONMENT = `The repository is checked out at ${WORKDIR} in a Linux container with Node.js 24, npm and git. Python is not installed; use node for scripting. Commands time out after ${COMMAND_TIMEOUT_S} seconds.`;
+export const ENVIRONMENT = `The repository is checked out at ${WORKDIR} in a Linux container with Node.js 24, npm and git, plus whichever of these the repository uses: Python 3 with uv (a virtualenv at /opt/venv is active: python, pip and uv pip install into it; uv sync installs the project), Go (go mod download), and Rust with cargo, clippy and rustfmt (cargo fetch). Dependencies are not installed yet. Commands time out after ${COMMAND_TIMEOUT_S} seconds.`;
 
 export interface SandboxJob {
 	/** The agent's own name, for prompt caching: <project>--<change>, say. */
@@ -314,6 +314,8 @@ export abstract class SandboxAgent<J extends SandboxJob, S extends AgentState> e
 		if (clone.exitCode !== 0) throw new Error(`clone failed: ${clip(clone.output, 2_000)}`);
 		await this.afterClone(job, state);
 		this.note(state, "repository cloned");
+		// Toolchains the checkout uses beyond Node; a failed install is noted, and the agent sees the missing tool for itself.
+		for (const installed of await installToolchains(container)) this.note(state, installed.exitCode === 0 ? `installed ${installed.toolchain}` : `installing ${installed.toolchain} failed: ${clip(installed.output, 300)}`);
 		if (restart)
 			state.pending = [
 				...(state.pending ?? []),

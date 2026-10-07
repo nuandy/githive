@@ -293,7 +293,15 @@ itself.
 run, with dependencies installed. An install is skipped while `package.json`'s
 dependency sections and the lockfile are unchanged since the last one. If no
 check runs `npm ci` but the project has a `package-lock.json`, the Gate runs
-`npm ci` first. The lanes are warmed in the background when a merge
+`npm ci` first.
+Python, Go and Rust are installed when the repo's tracked files use them
+(`toolchains.ts`: `pyproject.toml` or `requirements*.txt`, `go.mod`,
+`Cargo.toml`, in any folder), read from the merged code, since a change may
+add one. Their dependencies (`uv sync`, `go mod download`, `cargo fetch`) are
+installed before the checks and skipped while the files they come from are
+unchanged. Toolchains, the virtualenv and Cargo's target folder live outside
+the checkout, so a clean checkout between checks keeps them. A failed install
+fails the check with its output. The lanes are warmed in the background when a merge
 is likely soon: at `start`, after `check`, and after an approving vote. A
 container warmed in the last 5 minutes isn't warmed again. The dashboard shows
 each lane's warmth.
