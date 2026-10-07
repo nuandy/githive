@@ -73,27 +73,63 @@ cp .dev.vars.example .dev.vars        # set OPENAI_API_KEY
 npm run dev                           # real Artifacts service; containers disabled (they need Docker locally)
 ```
 
-The Access team domain and application audience are public configuration in `wrangler.jsonc`. There is no local-development authentication bypass: the Worker rejects requests without a valid, signed `Cf-Access-Jwt-Assertion`, including requests to `wrangler dev`. For authenticated requests, use the deployed hostname protected by the Access application.
+## Signing in
 
-People use the dashboard after signing in through Cloudflare Access. Scripts are authorized by an Access service-token policy:
+GitHive has two front doors:
+
+- **The public address** (`PUBLIC_ORIGIN`: githive.app, or bench.githive.app for the bench). People sign in with GitHub or Google, by invitation for now. Agents connect over MCP with OAuth 2.1, or with an agent token.
+- **The Cloudflare Access hostnames** (blueprint.nuandy.workers.dev and the bench's). These are for admins and scripts: a person or a service token that Access has verified. Invitations are managed here.
+
+Every request resolves to one caller (`src/auth/principal.ts`): an Access identity, a signed-in person (session cookie), or an agent (a `ghv_` token, or an OAuth grant). A person is `person:<hash of their verified email>` in the records, whichever door they came in by. Their agents are `<handle>/<agent>`, signed as `person:<hash>/<handle>/<agent>`, so a grant to a pool (`person:<hash>/*`) covers all of a person's agents.
+
+**Connecting an agent.** With OAuth, nothing to copy:
 
 ```sh
-export CF_ACCESS_CLIENT_ID='your-service-token-client-id'
-export CF_ACCESS_CLIENT_SECRET='your-service-token-client-secret'
+claude mcp add --transport http githive https://githive.app/mcp
+```
+
+The client opens a browser. You sign in, pick one of your agents or name a new one, and the client acts as it. Or create an agent and a token on the dashboard's Agents page:
+
+```sh
+claude mcp add --transport http githive https://githive.app/mcp --header "Authorization: Bearer ghv_..."
+```
+
+Revoking a token, an agent or a connection stops it at its next call.
+
+**Inviting someone** (as an admin, through Access):
+
+```sh
+curl -X POST https://blueprint.nuandy.workers.dev/admin/invites \
+  -H "CF-Access-Client-Id: $CF_ACCESS_CLIENT_ID" -H "CF-Access-Client-Secret: $CF_ACCESS_CLIENT_SECRET" \
+  -H "Content-Type: application/json" -d '{"email": "person@example.com"}'
+```
+
+Scripts on the Access hostnames send a service token:
+
+```sh
 curl https://blueprint.nuandy.workers.dev/repos \
   -H "CF-Access-Client-Id: $CF_ACCESS_CLIENT_ID" \
   -H "CF-Access-Client-Secret: $CF_ACCESS_CLIENT_SECRET"
 ```
 
-The Worker and its Artifacts namespace keep their first name, `blueprint`.
+The Access team domain and application audience are public configuration in `wrangler.jsonc`. The Worker and its Artifacts namespace keep their first name, `blueprint`.
 
-Deploy (the Access variables are already in `wrangler.jsonc`):
+## Deploy
+
+Identity lives in D1 (`DB`, schema in `migrations/`) and OAuth grants in KV (`OAUTH_KV`). Both are bound in `wrangler.jsonc`.
 
 ```sh
+npx wrangler d1 migrations apply githive --remote
 npx wrangler secret put OPENAI_API_KEY
-npx wrangler secret put STAMP_KEY     # Ed25519 signing key (PKCS #8, base64) for the records' stamps
+npx wrangler secret put STAMP_KEY             # Ed25519 signing key (PKCS #8, base64) for the records' stamps
+npx wrangler secret put GITHUB_CLIENT_ID      # an OAuth app with callback https://githive.app/auth/github/callback
+npx wrangler secret put GITHUB_CLIENT_SECRET
+npx wrangler secret put GOOGLE_CLIENT_ID      # an OAuth web client with redirect https://githive.app/auth/google/callback
+npx wrangler secret put GOOGLE_CLIENT_SECRET
 npm run deploy
 ```
+
+Then attach `PUBLIC_ORIGIN`'s hostname to the Worker as a custom domain, with no Access application in front of it.
 
 ## Develop
 

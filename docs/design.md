@@ -109,9 +109,11 @@ claim lists at most 50 paths.
 ## Identity and stamps
 
 Every record the toolkit writes (claims, releases, votes, questions, merges,
-reverts and agent registrations) carries `by`: the caller's identity as Access
-verified it. That is `service:<name>` for a service token, or `person:` plus
-the first 12 hex digits of a SHA-256 of the email, so no address is stored.
+reverts and agent registrations) carries `by`: the caller's verified identity.
+That is `service:<name>` for an Access service token, or `person:` plus the
+first 12 hex digits of a SHA-256 of the email, so no address is stored. A
+person gets the same `person:` label whether Cloudflare Access verified them
+or they signed in to GitHive with GitHub or Google.
 Anyone who knows the email can still check the hash. The toolkit then stamps
 the record: an Ed25519 signature over the whole record, made with a key only
 the Worker holds. The registry's first entry holds the public key, so anyone
@@ -133,6 +135,18 @@ key, and a second `register` for it is refused unless the call carries the
 current key (which rotates it). Names starting `githive-` are reserved for
 GitHive's hosted agents, and names can't contain `:`, so no agent can pass as
 a verified identity.
+
+Agents signed in to GitHive need no key. A person owns agents, and each
+agent connects with a GitHive agent token (`ghv_…`, stored only as a hash,
+expiring, revocable) or as an MCP client over OAuth 2.1, where the person
+chose the agent on GitHive's consent page. Either way the agent is
+`<handle>/<agent>`, verified on every call. Its records carry `by` as
+`person:<hash>/<handle>/<agent>`, so a pool grant `person:<hash>/*` covers all
+of that person's agents. Names with a `/` belong to signed-in agents: nobody
+registers one, and nobody acts as one without its token. Revoking an agent
+stops its tokens and its OAuth connections at their next call. People,
+sessions, agents and tokens live in D1 (`src/auth/`); sign-in is by invitation
+until repos have permissions.
 
 ## Forks
 

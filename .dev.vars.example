@@ -1,2 +1,10 @@
 # OpenAI key for GitHive's builder and reviewer agents (gpt-6-luna). Set this in .dev.vars.
 OPENAI_API_KEY=sk-...
+
+# Sign-in with GitHub and Google (optional; without them the provider's button is hidden).
+# GitHub: Settings > Developer settings > OAuth Apps; callback https://<host>/auth/github/callback
+GITHUB_CLIENT_ID=
+GITHUB_CLIENT_SECRET=
+# Google: Cloud Console > APIs & Services > Credentials > OAuth client (web); redirect https://<host>/auth/google/callback
+GOOGLE_CLIENT_ID=
+GOOGLE_CLIENT_SECRET=

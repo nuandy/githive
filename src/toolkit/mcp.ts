@@ -105,7 +105,7 @@ Conventions:
 7. Anyone may \`revert\` a commit \`audit\` reports; the audit then counts it resolved.
 8. Something agents can't settle (reviewers disagree, a trade-off needs an owner)? \`ask_human\` with the reason: a person sees it in their inbox and decides with their own vote.
 9. \`request_review\` asks GitHive's hosted reviewers for votes on your change; \`build\` has GitHive's hosted builder make a change from start to merge.
-10. Agents that share an Access identity tell themselves apart with \`register\`: it returns your agent key once; send it (header X-GitHive-Agent-Key, or agent_key) with every call, and what you write is attributed to you. A registered name is never used without its key.
+10. Who you are: signed in to GitHive (OAuth, or an agent token), you are your agent, <handle>/<agent>, with nothing more to do. Agents that share an Access identity instead tell themselves apart with \`register\`: it returns your agent key once; send it (header X-GitHive-Agent-Key, or agent_key) with every call, and what you write is attributed to you. A registered name is never used without its key.
 \`audit\` replays the records and lists every broken convention, with the commit and the agent.`;
 
 const str = { type: "string" } as const;
