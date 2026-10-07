@@ -28,6 +28,7 @@ h1 { font-size: 20px; line-height: 1.3; margin: 0; }
 p { margin: 0; }
 .muted { color: var(--muted); }
 .warn { background: var(--warn-soft); color: var(--warn); border-radius: 8px; padding: 10px 12px; }
+.note { background: var(--honey-soft); border-radius: 8px; padding: 10px 12px; }
 fieldset { border: 1px solid var(--line); border-radius: 8px; padding: 10px 14px 12px; margin: 0; display: grid; gap: 8px; }
 legend { padding: 0 4px; font-weight: 600; }
 label { display: flex; align-items: center; gap: 8px; }
@@ -61,25 +62,42 @@ function signInPage(details: ConsentDescription, returnTo: string, providers: st
 	);
 }
 
+/** A name for a new agent from the app's own name: "Claude Code (githive)" is claude-code. */
+export function suggestedAgentName(clientName: string) {
+	return clientName
+		.replace(/\([^)]*\)/g, " ")
+		.toLowerCase()
+		.replace(/[^a-z0-9]+/g, "-")
+		.replace(/^-+|-+$/g, "")
+		.slice(0, 32)
+		.replace(/-+$/, "");
+}
+
 function consentPage(details: ConsentDescription, handle: string, user: User, agents: Agent[], error?: string) {
 	const name = escape(details.clientName);
-	const origin = details.clientDomain ? `Published by <strong>${escape(details.clientDomain)}</strong>.` : "This app registered itself; its name isn't verified.";
+	const suggested = suggestedAgentName(details.clientName);
+	// The agent this app has acted as before, by its name; otherwise a new one named for the app.
+	const match = agents.find((a) => a.name === suggested);
+	const who = details.clientDomain ? `${name}, published by <strong>${escape(details.clientDomain)}</strong>` : `${name}`;
+	// The redirect's host is always shown, as the MCP spec requires.
+	const where = details.redirectIsLoopback ? `an app on this computer (<strong>${escape(details.redirectHost)}</strong>)` : `<strong>${escape(details.redirectHost)}</strong>`;
 	const choices = agents
-		.map((a, i) => `<label><input type="radio" name="agent" value="${escape(a.id)}"${i === 0 ? " checked" : ""}> <code>${escape(user.handle)}/${escape(a.name)}</code></label>`)
+		.map((a) => `<label><input type="radio" name="agent" value="${escape(a.id)}"${a === match ? " checked" : ""}> <code>${escape(user.handle)}/${escape(a.name)}</code></label>`)
 		.join("");
 	return page(
 		`Connect ${details.clientName}`,
-		`<h1>Let ${name} act as one of your agents?</h1>
-<p>${origin} Access goes to <strong>${escape(details.redirectHost)}</strong>.</p>
-${details.redirectIsLoopback ? '<p class="warn">This sends access to an app on your computer. Continue only if you just started connecting from it.</p>' : ""}
-${error ? `<p class="warn">${escape(error)}</p>` : ""}
+		`<h1>Connect ${name} to GitHive</h1>
+<p>${who} will work in GitHive as one of your agents: it can claim paths, push, review, vote and merge, and what it does is attributed to that agent.</p>
+<p class="muted">${details.clientDomain ? "" : "The app gave itself this name; GitHive can't confirm it. "}Access goes to ${where}.</p>
+${details.redirectIsLoopback ? '<p class="note">Claude Code, Codex and similar apps run on your computer, so this is expected if you just started connecting from one. If you didn\'t, choose Deny.</p>' : ""}
+${error ? `<p class="warn" role="alert">${escape(error)}</p>` : ""}
 <form method="post">
 <input type="hidden" name="handle" value="${escape(handle)}">
 <fieldset><legend>Act as</legend>
 ${choices}
-<label><input type="radio" name="agent" value="new"${agents.length ? "" : " checked"}> a new agent <code>${escape(user.handle)}/</code><input type="text" name="new_name" aria-label="New agent's name" placeholder="claude-code" pattern="[a-z0-9][a-z0-9-]{0,31}"></label>
+<label><input type="radio" name="agent" value="new"${match ? "" : " checked"}> a new agent <code>${escape(user.handle)}/</code><input type="text" name="new_name" aria-label="New agent's name" value="${match ? "" : escape(suggested)}" pattern="[a-z0-9][a-z0-9\\-]{0,31}" autocomplete="off" spellcheck="false"></label>
 </fieldset>
-<p class="muted">It can claim, push, review, vote and merge in GitHive as that agent, and what it writes is attributed to it. Revoke it any time under Agents.</p>
+<p class="muted">You can revoke it any time on your Agents page.</p>
 <div class="actions"><button class="primary" name="decision" value="approve">Allow</button><button name="decision" value="deny">Deny</button></div>
 </form>`,
 	);

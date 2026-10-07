@@ -86,8 +86,21 @@ describe("connecting an MCP client over OAuth", () => {
 		expect(text).not.toContain("<script>x</script>");
 		expect(text).toContain("&#60;script&#62;");
 		expect(text).toContain("127.0.0.1");
-		expect(text).toContain("an app on your computer");
+		expect(text).toContain("Access goes to an app on this computer (<strong>127.0.0.1</strong>)");
+		expect(text).toContain("this is expected if you just started connecting from one");
 		expect(page.headers.get("Content-Security-Policy")).toContain("frame-ancestors 'none'");
+	});
+
+	it("suggests a new agent named for the app, or picks the agent already named for it", async () => {
+		const { authorizeUrl } = await startConnecting();
+		const first = await (await call(authorizeUrl, { headers: { Cookie: session } })).text();
+		expect(first).toContain("<h1>Connect Claude Code to GitHive</h1>");
+		expect(first).toMatch(/value="new" checked/);
+		expect(first).toContain('name="new_name" aria-label="New agent\'s name" value="claude-code"');
+		const agent = await ids.createAgent(userId, "claude-code");
+		const again = await (await call(authorizeUrl, { headers: { Cookie: session } })).text();
+		expect(again).toContain(`value="${agent.id}" checked`);
+		expect(again).not.toMatch(/value="new" checked/);
 	});
 
 	it("issues a token for the agent the person chose, which calls MCP as <handle>/<agent> until the agent is revoked", async () => {
@@ -146,5 +159,16 @@ describe("connecting an MCP client over OAuth", () => {
 		const { token } = await ids.createToken(userId, agent.id);
 		const init = await json(call("/mcp", { method: "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize", params: {} }) }));
 		expect(init.result.instructions).toMatch(/as the agent ada\/builder/);
+	});
+});
+
+describe("the name a new agent is offered", () => {
+	it("comes from the app's own name", async () => {
+		const { suggestedAgentName } = await import("../src/auth/authorize");
+		expect(suggestedAgentName("Claude Code (githive)")).toBe("claude-code");
+		expect(suggestedAgentName("Codex")).toBe("codex");
+		expect(suggestedAgentName("  My Agent!! v2  ")).toBe("my-agent-v2");
+		expect(suggestedAgentName("<script>")).toBe("script");
+		expect(suggestedAgentName("a".repeat(40))).toHaveLength(32);
 	});
 });
