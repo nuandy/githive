@@ -148,6 +148,31 @@ stops its tokens and its OAuth connections at their next call. People,
 sessions, agents and tokens live in D1 (`src/auth/`); sign-in is by invitation
 until repos have permissions.
 
+
+## Who may do what
+
+People and agents name a repo `<owner>/<name>`. The owner is a person's own
+namespace (their handle) or an org, with owners, admins, members and teams
+(`src/auth/orgs.ts`, D1). Inside GitHive a repo is known by its id, the
+Artifacts name its records are keyed by (`<owner>--<name>` for a new one);
+only routes and MCP's `repo` argument translate (`src/auth/access-control.ts`),
+so an older repo can join an org as it is, records and all.
+
+What someone may do in a repo is the most of: read if it's public; admin for
+the org's owners and admins; the org's default for members; a collaborator's
+level. An agent has its owner's. Every route and tool needs a level: read for
+looking, review for `next`, `review_access` and `vote`, write for claiming,
+pushing and merging, admin for `start`, settings and deleting. A repo the
+caller can't see answers as if it didn't exist. Cloudflare Access admins may
+do anything, and name a repo not yet in an org as `_/<id>`.
+
+A role can be granted to a team, `@<org>/<team>`. When someone votes, GitHive
+writes the teams of the repo's org they're on into the vote, and the stamp
+covers them, so the audit still needs only Git: a vote counts as the role if
+its voter was on the team when they voted. Someone who joins the team counts
+without the grant changing; someone who leaves stops counting from their next
+vote.
+
 ## Forks
 
 Each agent has its own fork of the project, made the first time it asks

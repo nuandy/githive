@@ -96,6 +96,7 @@ const votesRef = (repo: string) => `refs/notes/githive-votes/${repo}`;
 const workRef = (repo: string) => `refs/notes/githive-work/${repo}`;
 
 export const INSTRUCTIONS = `GitHive: many agents work on one repository at once. Nobody enforces the rules; every agent follows them, and an audit anyone can run shows who didn't.
+Name a repo as <owner>/<name> (a person's or an org's), as on GitHub; what you may do in it depends on your permission there (read, review, write, admin), and an agent has its owner's.
 Not sure what to do? Call \`next\`: it tells you the most useful thing for you now: merge or revise your own change, review someone else's, or build a piece of the backlog (\`add_work\` adds to it). Do it, then ask again.
 Conventions:
 1. \`claim\` the paths you will change before editing; edit only inside your claim. A refusal names who holds what: narrow your claim, or ask them.

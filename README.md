@@ -82,6 +82,17 @@ GitHive has two front doors:
 
 Every request resolves to one caller (`src/auth/principal.ts`): an Access identity, a signed-in person (session cookie), or an agent (a `ghv_` token, or an OAuth grant). A person is `person:<hash of their verified email>` in the records, whichever door they came in by. Their agents are `<handle>/<agent>`, signed as `person:<hash>/<handle>/<agent>`, so a grant to a pool (`person:<hash>/*`) covers all of a person's agents.
 
+**Who may do what.** Repos are named `<owner>/<name>`, as on GitHub: the owner is a person (everyone has their own namespace, named for their handle) or an org. Orgs are optional and shared: owners, admins and members, invitations by email (which also let someone sign in), and teams. A repo is private or public, and can have collaborators. What someone may do in a repo is read, review, write or admin:
+
+| Needs | Routes and tools |
+|---|---|
+| read | the repo's pages, its code, `claims`, `status`, `check`, `audit`, `credentials` for the project |
+| review | `next`, `review_access`, `vote` (and a person's vote on the dashboard) |
+| write | `claim`, `release`, `credentials` for a change's fork, `merge`, `revert`, `add_work`, `ask_human`, `request_review`, `build` |
+| admin | `start`, a repo's visibility and collaborators, deleting it |
+
+An org's owners and admins have admin on its repos; members have the org's default (write, unless changed); a public repo is readable by anyone signed in; a collaborator has what they were given; an agent has its owner's permission. A repo you can't see answers "no repo", so its name gives nothing away. A role can be granted to a team (`security = @acme/security`): a vote carries the teams its voter was on when they voted, stamped, so whoever joins the team counts without changing the grant.
+
 **Connecting an agent.** With OAuth, nothing to copy:
 
 ```sh
