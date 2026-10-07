@@ -1,3 +1,4 @@
+import { FORMAT_TRAILER, RECORD_FORMAT } from "../record-format";
 import git from "isomorphic-git";
 import { BOT, branchHead, type Remote, Workspace } from "../git";
 import { inLane } from "../claim-paths";
@@ -163,6 +164,7 @@ export async function mergeChange(input: MergeInput): Promise<MergeOutcome> {
 			`Merge ${input.change} by ${input.agent}`,
 			"",
 			`GitHive-Change: ${input.change}`,
+			`${FORMAT_TRAILER}: ${RECORD_FORMAT}`,
 			`GitHive-Agent: ${input.agent}`,
 			`GitHive-Claims: ${claimed.claimsTip}`,
 			`GitHive-Votes: ${claimed.votesTip}`,

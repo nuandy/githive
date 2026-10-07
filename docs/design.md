@@ -106,6 +106,20 @@ file in it) can't be settled by refs of different names. Two paths overlap
 when one is, or is inside, the other; a trailing slash marks a directory. A
 claim lists at most 50 paths.
 
+
+**Formats.** Records outlive the code that wrote them, so each record commit,
+merge and revert says its record format in a `GitHive-Format` trailer
+(`src/record-format.ts`); records written before formats existed have none
+and are format 1. A reader upgrades an older format's state one step at a
+time as it reads it (`UPGRADES`), and a writer always writes the current
+format. A GitHive that meets records newer than it knows reads them as they
+are and refuses to write over them, so a rollback can't corrupt them. The
+shape of each kind of record (claims, votes, the backlog) is pinned in
+`test/fixtures/record-shapes.json`: changing one fails the tests until the
+format is bumped and an upgrade written. The pinned shapes don't yet cover
+fields only sharded repos and merges write (shard indexes, `mergedAs`).
+D1 migrations only ever add, and no Durable Object class is deleted beyond
+those decided before there were users: tests fail on anything else.
 ## Identity and stamps
 
 Every record the toolkit writes (claims, releases, votes, questions, merges,

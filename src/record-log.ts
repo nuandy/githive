@@ -3,6 +3,7 @@ import http from "isomorphic-git/http/web";
 import { BOT, isEmptyRepo, type Remote } from "./git";
 import { fetchCommits } from "./git-fetch";
 import { MemoryFS } from "./memory-fs";
+import { FORMAT_TRAILER, RECORD_FORMAT, type Upgrade, UPGRADES, formatOf, newerFormat, upgradeState } from "./record-format";
 import { retryTransient } from "./retry";
 
 // A record log in Git: one ref in a repo, appended to by compare-and-swap.
@@ -13,7 +14,10 @@ import { retryTransient } from "./retry";
 //
 // Each commit's tree holds state.json (the record after this commit) and
 // decisions.json (this commit's entries), plus each entry as a Git note on the
-// commit it is about. Who wrote it and why are trailers on its message.
+// commit it is about. Who wrote it, why, and the record format (see
+// record-format.ts) are trailers on its message. Reading upgrades an older
+// format's state; records newer than this GitHive knows are read as they are
+// and never written over.
 
 /** One entry: what happened, about which commit (if any), and when. */
 export interface LogEntry {
@@ -31,6 +35,8 @@ export interface LogCommit<S> {
 	state: S;
 	/** Unique per append, so a writer can tell whether a push whose answer was lost landed. */
 	batch: string;
+	/** The record format it was written in (as read; a write is always in the current one). */
+	format?: number;
 }
 
 /** The log as compare-and-swap storage. */
@@ -182,13 +188,20 @@ export class GitCasLog<S> implements CasLog<S> {
 
 	lastRefusal: "moved" | "busy" | null = null;
 
+	/** The format this log writes and upgrades to, and how; tests rehearse other formats. */
+	private readonly format: number;
+	private readonly upgrades: Readonly<Record<number, Upgrade>>;
+
 	/** The log at `ref` in the repo `remote` reaches (`_repo` names it, for callers' readability). */
 	constructor(
 		private readonly remote: () => Promise<Remote>,
 		_repo: string,
 		ref: string,
+		options: { format?: number; upgrades?: Readonly<Record<number, Upgrade>> } = {},
 	) {
 		this.ref = ref;
+		this.format = options.format ?? RECORD_FORMAT;
+		this.upgrades = options.upgrades ?? UPGRADES;
 	}
 
 	async read(): Promise<{ tip: string; commit: LogCommit<S> } | null> {
@@ -208,14 +221,18 @@ export class GitCasLog<S> implements CasLog<S> {
 		const { commit } = await git.readCommit({ fs, dir: DIR, oid: tip });
 		const trailer = (name: string) => commit.message.match(new RegExp(`^${name}: (.*)$`, "m"))?.[1] ?? fail(`${tip} has no ${name} trailer`);
 		const json = async (filepath: string) => JSON.parse(decoder.decode((await git.readBlob({ fs, dir: DIR, oid: tip, filepath })).blob));
+		const format = formatOf(commit.message);
+		const raw = await json(STATE_FILE);
 		return {
 			tip,
 			commit: {
 				author: trailer(TRAILERS.author),
 				kind: trailer(TRAILERS.kind),
 				entries: (await json(DECISIONS_FILE)) as LogEntry[],
-				state: (await json(STATE_FILE)) as S,
+				// A newer format is read as it is: this GitHive can't know how to upgrade it.
+				state: (format > this.format ? raw : upgradeState<S>(raw, format, this.ref, this.format, this.upgrades)) as S,
 				batch: trailer(TRAILERS.batch),
+				format,
 			},
 		};
 	}
@@ -230,6 +247,11 @@ export class GitCasLog<S> implements CasLog<S> {
 		const { fs, tip } = parent !== null && this.held?.tip === parent ? this.held : await openTip(remote, this.ref);
 		// Built on a stale tip: no need to ask the server.
 		if (tip !== parent) return null;
+		// Never write over records a newer GitHive wrote: this one can't keep what it doesn't know.
+		if (tip) {
+			const found = formatOf((await git.readCommit({ fs, dir: DIR, oid: tip })).commit.message);
+			if (found > this.format) throw newerFormat(found, this.format);
+		}
 
 		// Carry the notes forward, adding this commit's entries to them.
 		const files = new Map<string, string>();
@@ -256,7 +278,7 @@ export class GitCasLog<S> implements CasLog<S> {
 		const oid = await git.writeCommit({
 			fs,
 			dir: DIR,
-			commit: { message: message(commit), tree, parent: tip ? [tip] : [], author: signature(), committer: signature() },
+			commit: { message: message(commit, this.format), tree, parent: tip ? [tip] : [], author: signature(), committer: signature() },
 		});
 		await git.writeRef({ fs, dir: DIR, ref: this.ref, value: oid, force: true });
 		let landed: boolean | "busy";
@@ -274,7 +296,7 @@ export class GitCasLog<S> implements CasLog<S> {
 }
 
 /** The commit message: a summary of the entries, then the trailers. */
-function message<S>(commit: LogCommit<S>) {
+function message<S>(commit: LogCommit<S>, format: number) {
 	const first = (text: string) => text.trim().split("\n")[0];
 	const title = commit.entries.length ? first(commit.entries[0].text) : commit.kind;
 	const summary = commit.entries.map((e) => `- ${first(e.text)}`).join("\n");
@@ -282,6 +304,7 @@ function message<S>(commit: LogCommit<S>) {
 		`${TRAILERS.author}: ${commit.author}`,
 		`${TRAILERS.kind}: ${commit.kind}`,
 		`${TRAILERS.batch}: ${commit.batch}`,
+		`${FORMAT_TRAILER}: ${format}`,
 	].join("\n");
 	return `${title}\n\n${summary ? `${summary}\n\n` : ""}${trailers}\n`;
 }

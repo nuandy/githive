@@ -1,0 +1,106 @@
+{
+	"format": 1,
+	"shapes": {
+		"claims": {
+			"agents": {
+				"keyed-agent": {
+					"agent": "string",
+					"at": "string",
+					"keyHash": "string"
+				}
+			},
+			"baseline": "string",
+			"branch": "string",
+			"claims": [
+				{
+					"active": "string",
+					"agent": "string",
+					"by": "string",
+					"change": "string",
+					"intent": "string",
+					"paths": [
+						"string"
+					],
+					"since": "string",
+					"stamp": "string"
+				}
+			],
+			"policy": {
+				"escalate": [
+					{
+						"paths": [
+							"string"
+						],
+						"required": "number"
+					}
+				],
+				"grants": {
+					"security": [
+						"string"
+					]
+				},
+				"required": "number",
+				"vetoes": [
+					"string"
+				]
+			},
+			"released": [
+				{
+					"agent": "string",
+					"at": "string",
+					"by": "string",
+					"change": "string",
+					"lastActive": "string",
+					"reason": "string",
+					"stamp": "string",
+					"verifiedBy": "string"
+				}
+			],
+			"stampKey": "string",
+			"verify": [
+				"string"
+			]
+		},
+		"votes": {
+			"flags": [
+				{
+					"agent": "string",
+					"at": "string",
+					"by": "string",
+					"change": "string",
+					"reason": "string",
+					"stamp": "string"
+				}
+			],
+			"votes": [
+				{
+					"at": "string",
+					"by": "string",
+					"commit": "string",
+					"evidence": "string",
+					"reviewer": "string",
+					"role": "string",
+					"stamp": "string",
+					"teams": [
+						"string"
+					],
+					"verdict": "string"
+				}
+			]
+		},
+		"work": {
+			"items": [
+				{
+					"at": "string",
+					"by": "string",
+					"id": "string",
+					"intent": "string",
+					"paths": [
+						"string"
+					],
+					"title": "string"
+				}
+			]
+		}
+	}
+}

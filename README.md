@@ -175,6 +175,8 @@ npm run typecheck
 npm run types       # regenerate worker-configuration.d.ts after editing wrangler.jsonc
 ```
 
+Records in Git outlive the code that wrote them. To change a record's shape, bump `RECORD_FORMAT` in `src/record-format.ts`, add an upgrade from the old format, and run `UPDATE_RECORD_SHAPES=1 npx vitest run test/record-shapes.test.ts` to pin the new shape. Database migrations only add: the tests refuse one that drops, deletes or rewrites data.
+
 ## Known gaps
 
 - **Semantic conflicts.** Every push is checked for text conflicts; changes that merge cleanly but break together are caught by the checks on the merge line.

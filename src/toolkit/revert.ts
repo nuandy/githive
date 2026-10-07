@@ -1,3 +1,4 @@
+import { FORMAT_TRAILER, RECORD_FORMAT } from "../record-format";
 import git from "isomorphic-git";
 import type { CasLog } from "../record-log";
 import { BOT, type Remote, Workspace } from "../git";
@@ -65,6 +66,7 @@ export async function revertViolation(input: RevertInput): Promise<RevertOutcome
 			`Revert ${input.target.slice(0, 8)} (${rules})`,
 			"",
 			`GitHive-Reverts: ${input.target}`,
+			`${FORMAT_TRAILER}: ${RECORD_FORMAT}`,
 			`GitHive-Agent: ${input.agent}`,
 			...(input.stamper ? [`GitHive-By: ${input.stamper.by}`, `GitHive-Stamp: ${stamp}`] : []),
 			"",

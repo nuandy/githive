@@ -2,6 +2,7 @@ import git from "isomorphic-git";
 import http from "isomorphic-git/http/web";
 import { isEmptyRepo, type Remote, Workspace } from "../git";
 import { fetchCommits } from "../git-fetch";
+import { formatOf, RECORD_FORMAT, upgradeState } from "../record-format";
 import { retryTransient } from "../retry";
 import type { MergeRecord } from "./audit";
 import type { Registry } from "./claims";
@@ -25,9 +26,16 @@ export async function readRecordHistory<S>(remote: Remote, ref: string): Promise
 	return Promise.all(
 		history.map(async (entry) => ({
 			tip: entry.oid,
-			state: JSON.parse(decoder.decode((await git.readBlob({ fs, dir: DIR, oid: entry.oid, filepath: "state.json" })).blob)) as S,
+			state: stateOf<S>(entry.commit.message, decoder.decode((await git.readBlob({ fs, dir: DIR, oid: entry.oid, filepath: "state.json" })).blob), ref),
 		})),
 	);
+}
+
+/** A record commit's state, upgraded from the format it was written in; a newer format's as it is. */
+function stateOf<S>(message: string, text: string, ref: string): S {
+	const format = formatOf(message);
+	const raw = JSON.parse(text);
+	return format > RECORD_FORMAT ? (raw as S) : upgradeState<S>(raw, format, ref);
 }
 
 /**
@@ -50,7 +58,7 @@ export async function readRefHistories<S>(remotes: Remote[], prefix: string) {
 					const states = await Promise.all(
 						history.map(async (entry) => ({
 							tip: entry.oid,
-							state: JSON.parse(decoder.decode((await git.readBlob({ fs, dir: DIR, oid: entry.oid, filepath: "state.json" })).blob)) as S,
+							state: stateOf<S>(entry.commit.message, decoder.decode((await git.readBlob({ fs, dir: DIR, oid: entry.oid, filepath: "state.json" })).blob), r.ref),
 						})),
 					);
 					return [r.ref.slice(prefix.length), states] as const;
