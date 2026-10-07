@@ -41,6 +41,10 @@
 	},
 	// One container per builder or reviewer agent, and per integration gate run. The image (cloudflare/debian-trixie)
 	// is chosen at start(), so no Dockerfile or local Docker is needed to deploy.
+	// GitHive's own identity: people, sessions, agents and their tokens (migrations/).
+	"d1_databases": [{ "binding": "DB", "database_name": "githive", "database_id": "d443038b-ea5c-40e5-9a5f-86adefdbc667", "migrations_dir": "migrations" }],
+	// The OAuth provider's grants and tokens, for MCP clients that sign in.
+	"kv_namespaces": [{ "binding": "OAUTH_KV", "id": "9449f5dfdc074c228358d0bbcd85abf0" }],
 	"containers": [
 		{ "class_name": "Builder", "scheduling_policy": "durable_object" },
 		{ "class_name": "Reviewer", "scheduling_policy": "durable_object" },

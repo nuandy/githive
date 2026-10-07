@@ -1,6 +1,6 @@
 import { type Context, Hono } from "hono";
-import { verifyAccessRequest } from "./access";
-import type { AccessIdentity } from "./access-contract";
+import { type Principal, agentNameOf, byOf, isPerson, resolvePrincipal } from "./auth/principal";
+import { authRoutes } from "./auth/routes";
 import { forkAndWait, listRepoNames, remoteFor, reviewerName } from "./artifacts";
 import { fail, statusOf } from "./errors";
 import { retryTransient } from "./retry";
@@ -10,7 +10,6 @@ import { listTree, readFile } from "./code-browse";
 import { Timing } from "./timing";
 import { defaultBranch } from "./git";
 import { changeRepoName, toolContextFor } from "./toolkit/env";
-import { identityLabel } from "./toolkit/stamp";
 
 export { Builder } from "./builder";
 export { Reviewer } from "./reviewer";
@@ -19,7 +18,7 @@ export { RepoIndex } from "./repo-index";
 export { LiveFeed } from "./live-feed";
 export { TokenCache } from "./token-cache";
 
-type AppEnv = { Bindings: Env; Variables: { accessIdentity: AccessIdentity } };
+type AppEnv = { Bindings: Env; Variables: { principal?: Principal } };
 const app = new Hono<AppEnv>();
 
 const repoIndex = (env: Env) => env.REPO_INDEX.getByName("all");
@@ -30,14 +29,17 @@ const jsonArgs = async (c: { req: { json<T>(): Promise<T> } }) => {
 	return body && typeof body === "object" ? body : {};
 };
 
-// Authenticate before routing, including GETs and requests served from the dashboard assets.
+/** Served to anyone: the dashboard's page and files (it asks people to sign in), sign-in itself, and OAuth's own endpoints. */
+const isPublic = (path: string) => path === "/" || path === "/index.html" || path.startsWith("/assets/") || path.startsWith("/auth/") || path.startsWith("/.well-known/") || path === "/authorize";
+
+// Authenticate before routing: Access, an agent token, or a session cookie (see auth/principal.ts).
 app.use("*", async (c, next) => {
-	const identity = await verifyAccessRequest(c.req.raw, {
-		teamDomain: c.env.ACCESS_TEAM_DOMAIN,
-		audience: c.env.ACCESS_AUD,
-	});
-	if (!identity) return c.json({ error: "unauthorized" }, 401);
-	c.set("accessIdentity", identity);
+	const principal = await resolvePrincipal(c.req.raw, c.env);
+	if (principal) c.set("principal", principal);
+	else if (!isPublic(c.req.path)) return c.json({ error: "sign in to GitHive first" }, 401);
+	// A session cookie rides along with any request to this site, so a write on one must come from this site's own pages.
+	if (principal?.kind === "user" && !["GET", "HEAD", "OPTIONS"].includes(c.req.method) && c.req.header("Origin") !== new URL(c.req.url).origin)
+		return c.json({ error: "refused: a signed-in write must come from GitHive's own pages" }, 403);
 	await next();
 });
 
@@ -46,6 +48,9 @@ app.onError((err, c) => {
 	if (status >= 500) console.error("API error", err);
 	return c.json({ error: message }, status as 400);
 });
+
+// Sign-in, the caller's own agents and tokens, and invitations.
+authRoutes(app);
 
 app.get("/api", (c) =>
 	c.json({
@@ -65,6 +70,11 @@ app.get("/api", (c) =>
 			"POST /repos/:repo/changes/:change/votes {role, verdict, evidence}  (a person's vote)",
 			"GET  /repos/:repo/audit  (replays the records: merges and broken conventions)",
 			"GET  /repos/:repo/lanes  (the check containers' warmth)",
+			"GET  /auth/:provider  (sign in with github or google)",
+			"GET  /me          (who you are)",
+			"GET|POST /me/agents, DELETE /me/agents/:id, POST /me/agents/:id/tokens, DELETE /me/tokens/:id  (your agents and their tokens)",
+			"GET|DELETE /me/connections  (MCP clients connected as your agents)",
+			"GET|POST|DELETE /admin/invites  (who may sign in; admins, through Access)",
 		],
 	}),
 );
@@ -83,9 +93,11 @@ app.post("/repos/:repo/copy", async (c) => {
 	return c.json({ name, remote: copied.remote });
 });
 
-/** GitHive's tools for this caller (an exploration; see docs/design.md): stateless, Git only. */
-const toolContext = (env: Env, identity: AccessIdentity | undefined, agentKey?: string): ToolContext =>
-	toolContextFor(env, identity ? identityLabel(identity) : undefined, agentKey ? { agentKey } : {});
+/** GitHive's tools for this caller (see docs/design.md): stateless, Git only. A signed-in agent needs no key. */
+const toolContext = (env: Env, principal: Principal | undefined, agentKey?: string): ToolContext => {
+	const agent = principal && agentNameOf(principal);
+	return toolContextFor(env, principal ? byOf(principal) : undefined, agent ? { agent } : agentKey ? { agentKey } : {});
+};
 
 /** Views bigger than this aren't kept (a Durable Object value holds up to 2 MB). */
 const MAX_KEPT_VIEW = 1_000_000;
@@ -127,24 +139,25 @@ async function keptView(c: Context<AppEnv>, key: string, name: string, maxAgeMs:
 // A repo for the dashboard: a snapshot of its claims and votes, read from Git.
 app.get("/repos/:repo", async (c) => {
 	const repo = c.req.param("repo");
-	return keptView(c, `repo:${repo}`, "snapshot", 20_000, (timing) => repoSnapshot({ ...toolContext(c.env, c.get("accessIdentity")), timing }, repo));
+	return keptView(c, `repo:${repo}`, "snapshot", 20_000, (timing) => repoSnapshot({ ...toolContext(c.env, c.get("principal")), timing }, repo));
 });
 // A person's vote on a change, from the dashboard: stamped with their verified identity.
 app.post("/repos/:repo/changes/:change/votes", async (c) => {
-	const actor = c.get("accessIdentity") ?? fail(401, "no identity");
+	const actor = c.get("principal") ?? fail(401, "no identity");
+	if (!isPerson(actor)) fail(403, "a vote from the dashboard is a person's: agents vote through MCP");
 	const { role, verdict, evidence } = await jsonArgs(c);
 	const repo = c.req.param("repo");
-	return c.json(await voteAsPerson(toolContext(c.env, actor), repo, c.req.param("change"), { role: String(role ?? ""), verdict: verdict as "approve" | "reject", evidence: String(evidence ?? "") }, identityLabel(actor)));
+	return c.json(await voteAsPerson(toolContext(c.env, actor), repo, c.req.param("change"), { role: String(role ?? ""), verdict: verdict as "approve" | "reject", evidence: String(evidence ?? "") }, byOf(actor)));
 });
 app.get("/repos/:repo/changes/:change", async (c) => {
 	const { repo, change } = c.req.param();
-	return keptView(c, `repo:${repo}`, `change:${change}`, 60_000, (timing) => changeHistory({ ...toolContext(c.env, c.get("accessIdentity")), timing }, repo, change));
+	return keptView(c, `repo:${repo}`, `change:${change}`, 60_000, (timing) => changeHistory({ ...toolContext(c.env, c.get("principal")), timing }, repo, change));
 });
 // The warmth of a repo's check containers: whether each lane runs, and when it last warmed.
 app.get("/repos/:repo/lanes", async (c) => c.json(await c.env.GATE.getByName(`repo:${c.req.param("repo")}`).lanes(c.req.param("repo"))));
 app.get("/repos/:repo/audit", async (c) => {
 	const repo = c.req.param("repo");
-	return keptView(c, `repo:${repo}`, "audit", 5 * 60_000, (timing) => repoAudit({ ...toolContext(c.env, c.get("accessIdentity")), timing }, repo));
+	return keptView(c, `repo:${repo}`, "audit", 5 * 60_000, (timing) => repoAudit({ ...toolContext(c.env, c.get("principal")), timing }, repo));
 });
 app.get("/repos/:repo/builders/:change", async (c) => c.json(await c.env.BUILDER.getByName(changeRepoName(c.req.param("repo"), c.req.param("change"))).state()));
 // A hosted reviewer's state, by the commit it reviews (the vote's commit) and its role.
@@ -157,7 +170,7 @@ app.get("/repos/:repo/reviewers/:change/:head/:role", async (c) => {
 app.post("/mcp", async (c) => {
 	const body = await c.req.json().catch(() => null);
 	if (body === null) return c.json({ jsonrpc: "2.0", id: null, error: { code: -32700, message: "parse error" } }, 400);
-	const result = await handleMcpBody(body, { toolkit: toolContext(c.env, c.get("accessIdentity"), c.req.header("X-GitHive-Agent-Key")) });
+	const result = await handleMcpBody(body, { toolkit: toolContext(c.env, c.get("principal"), c.req.header("X-GitHive-Agent-Key")) });
 	return result === null ? c.body(null, 202) : c.json(result);
 });
 app.on(["GET", "DELETE"], "/mcp", (c) => c.body(null, 405, { Allow: "POST" }));
@@ -174,7 +187,7 @@ app.get("/summaries", async (c) => {
 		.filter((r) => !r.summary?.countedAt || (r.summary.lastActivity ?? "") > r.summary.countedAt)
 		.sort((a, b) => (b.summary?.lastActivity ?? b.since).localeCompare(a.summary?.lastActivity ?? a.since))
 		.slice(0, 3);
-	const ctx = toolContext(c.env, c.get("accessIdentity"));
+	const ctx = toolContext(c.env, c.get("principal"));
 	c.executionCtx.waitUntil(
 		Promise.allSettled(
 			stale.map(async (r) => {
@@ -210,6 +223,7 @@ const WIPE_BATCH = 400;
 const WIPE_PARALLEL = 8;
 app.post("/admin/wipe", async (c) => {
 	if ((c.env as unknown as { BENCH_WIPE?: string }).BENCH_WIPE !== "allowed") return c.json({ error: "not available here" }, 404);
+	if (c.get("principal")?.kind !== "access") return c.json({ error: "only through Cloudflare Access" }, 403);
 	const { confirm, batch: size } = await jsonArgs(c);
 	if (confirm !== WIPE_CONFIRMATION) return c.json({ error: `confirm with "${WIPE_CONFIRMATION}"` }, 400);
 	await repoIndex(c.env).clear();

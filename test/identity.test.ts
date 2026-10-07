@@ -68,7 +68,7 @@ describe("agent identity", () => {
 	it("refuses a registered name without its key, and a key acting as another name", async () => {
 		const { key } = (await call(as(), "register", { agent: "agent-a" })) as { key: string };
 		expect(await call(as(), "claim", claimA)).toEqual({ error: "agent-a is registered: call with its agent key" });
-		expect(await call(as(key), "claim", { ...claimA, agent: "agent-c" })).toEqual({ error: "your agent key is agent-a's; it can't act as agent-c" });
+		expect(await call(as(key), "claim", { ...claimA, agent: "agent-c" })).toEqual({ error: "you act as agent-a; you can't act as agent-c" });
 		expect(await call(as("agent-a.forged"), "claim", claimA)).toEqual({ error: "unknown agent key" });
 	});
 
@@ -97,5 +97,35 @@ describe("agent identity", () => {
 		const registry = server.git("log", "-p", "refs/notes/githive-claims/project");
 		expect(registry).toContain("agent-a");
 		expect(registry).not.toContain(key.split(".").pop());
+	});
+});
+
+describe("signed-in agents", () => {
+	/** An agent signed in to GitHive: its token names it <handle>/<agent>, under its owner's person:<hash>. */
+	const signedIn = (agent: string): ToolContext => ({
+		remote: async () => ({ url: server.url, token: "unused" }),
+		head: async () => server.git("rev-parse", "main").trim(),
+		stamper: (acting?: string) => makeStamper(privateKey, `person:ada000000000${acting ? `/${acting}` : ""}`),
+		agent,
+	});
+
+	beforeEach(async () => {
+		await call(as(), "start", {});
+	});
+
+	it("act as their verified name with no key, may leave the agent argument out, and are stamped under their owner", async () => {
+		expect(await call(signedIn("ada/builder"), "claim", { change: "a-1", paths: ["src/a/"], intent: "a" })).toMatchObject({ ok: true });
+		const claims = (await call(as(), "claims", {})) as { change: string; agent: string; by: string }[];
+		expect(claims.map((c) => [c.change, c.agent, c.by])).toEqual([["a-1", "ada/builder", "person:ada000000000/ada/builder"]]);
+	});
+
+	it("can't act as another name, and nobody else can act as theirs", async () => {
+		expect(await call(signedIn("ada/builder"), "claim", { ...claimA, agent: "agent-a" })).toEqual({ error: "you act as ada/builder; you can't act as agent-a" });
+		expect(await call(as(), "claim", { ...claimA, agent: "ada/builder" })).toEqual({ error: "ada/builder is a signed-in agent's name: sign in to GitHive as it to act as it" });
+	});
+
+	it("need no register, and nobody registers a name with a slash", async () => {
+		expect(await call(signedIn("ada/builder"), "register", { agent: "x" })).toEqual({ error: "you're signed in as ada/builder: what you write is already attributed to you, with no key" });
+		expect(await call(as(), "register", { agent: "ada/builder" })).toEqual({ error: "names with \"/\" are signed-in agents' (<handle>/<agent>); register a name without one" });
 	});
 });

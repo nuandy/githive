@@ -13,6 +13,7 @@
 	"license": "MIT",
 	"description": "A Git platform for many agents working on one repository at once, with no central server deciding for them. Built on Cloudflare Workers + Artifacts.",
 	"dependencies": {
+		"@cloudflare/workers-oauth-provider": "^1.2.3",
 		"hono": "^4.13.12",
 		"isomorphic-git": "^1.42.6",
 		"openai": "^7.27.0",

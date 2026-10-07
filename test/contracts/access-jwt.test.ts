@@ -87,12 +87,15 @@ describe("Cloudflare Access JWT verification", () => {
 });
 
 describe("Worker ingress authentication", () => {
-	it("refuses unauthenticated requests for API, dashboard assets, and writes", async () => {
+	it("refuses unauthenticated requests for the API, MCP and writes, but serves the page that asks people to sign in", async () => {
 		const worker = (await import("../../src/index")).default;
-		const env = { ACCESS_TEAM_DOMAIN: config.teamDomain, ACCESS_AUD: config.audience } as never;
-		for (const [path, method] of [["/api", "GET"], ["/", "GET"], ["/tasks", "POST"]] as const) {
+		const assets = { fetch: async () => new Response("<!doctype html>the dashboard") };
+		const env = { ACCESS_TEAM_DOMAIN: config.teamDomain, ACCESS_AUD: config.audience, ASSETS: assets } as never;
+		for (const [path, method] of [["/api", "GET"], ["/repos", "GET"], ["/me", "GET"], ["/repos/import", "POST"], ["/mcp", "POST"], ["/admin/invites", "GET"]] as const) {
 			const response = await worker.fetch(new Request(`https://blueprint.nuandy.workers.dev${path}`, { method }), env, {} as never);
-			expect(response.status).toBe(401);
+			expect(response.status, `${method} ${path}`).toBe(401);
 		}
+		const page = await worker.fetch(new Request("https://blueprint.nuandy.workers.dev/"), env, {} as never);
+		expect(page.status).toBe(200);
 	});
 });

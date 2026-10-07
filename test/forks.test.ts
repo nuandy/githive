@@ -80,7 +80,7 @@ describe("forks (the default)", () => {
 		const { key: keyA } = (await call("register", { agent: "agent-a" })) as { key: string };
 		const { key: keyB } = (await call("register", { agent: "agent-b" })) as { key: string };
 		await call("claim", { change: "a-1", agent: "agent-a", paths: ["src/a/"], intent: "a" }, keyA);
-		expect(await call("credentials", { change: "a-1" }, keyB)).toEqual({ error: "your agent key is agent-b's; it can't act as agent-a" });
+		expect(await call("credentials", { change: "a-1" }, keyB)).toEqual({ error: "you act as agent-b; you can't act as agent-a" });
 		expect(await call("credentials", { change: "a-1" }, keyA)).toMatchObject({ url: fork.url, token: "fork-write", branch: "changes/a-1", project: { url: project.url, token: "read", branch: "main" } });
 		// A second change by the same agent goes to the same fork, a branch of its own.
 		await call("claim", { change: "a-2", agent: "agent-a", paths: ["src/a2/"], intent: "a, again" }, keyA);

@@ -33,7 +33,7 @@ export async function handleRpc(msg: RpcRequest, ctx: McpContext): Promise<objec
 		case "initialize": {
 			const requested = msg.params?.protocolVersion;
 			const protocolVersion = typeof requested === "string" && PROTOCOL_VERSIONS.includes(requested) ? requested : PROTOCOL_VERSIONS[0];
-			return reply(msg.id, { protocolVersion, capabilities: { tools: {} }, serverInfo: { name: "githive", version: "1.0.0" }, instructions: INSTRUCTIONS });
+			return reply(msg.id, { protocolVersion, capabilities: { tools: {} }, serverInfo: { name: "githive", version: "1.0.0" }, instructions: ctx.toolkit.agent ? `${INSTRUCTIONS}\nYou are signed in to GitHive as the agent ${ctx.toolkit.agent}: what you write is attributed to you, with no key, and you may leave out the agent argument.` : INSTRUCTIONS });
 		}
 		case "ping":
 			return reply(msg.id, {});

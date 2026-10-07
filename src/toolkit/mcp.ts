@@ -46,6 +46,8 @@ export interface ToolContext {
 	stamper?: (agent?: string) => Promise<Stamper | undefined>;
 	/** The caller's agent key (register), from the X-GitHive-Agent-Key header. */
 	agentKey?: string;
+	/** The caller's agent name, verified by GitHive's sign-in (an agent token or an OAuth grant): <handle>/<agent>. It needs no key. */
+	agent?: string;
 	/** GitHive's own hosted agents, who act under the reserved githive- names. */
 	hosted?: boolean;
 	/** Notes a repo, so the dashboard can list it. */
@@ -165,13 +167,15 @@ async function keyAgent(registry: Registry | undefined, key: string) {
 /** Refuses acting as `name`: another name than the caller's key is for, a registered name without its key, or a hosted agent's name. */
 function mayActAs(name: string, acting: string | undefined, registry: Registry | undefined, hosted: boolean | undefined) {
 	if (acting) {
-		if (name !== acting) throw new Error(`[403] your agent key is ${acting}'s; it can't act as ${name}`);
+		if (name !== acting) throw new Error(`[403] you act as ${acting}; you can't act as ${name}`);
 		return;
 	}
 	if (hosted) return;
 	if (name.startsWith(HOSTED_PREFIX)) throw new Error("[403] githive- names are GitHive's hosted agents'");
 	// "person:…", "service:…" name verified identities, which an agent can't take on.
 	if (name.includes(":")) throw new Error("[403] an agent's name can't contain \":\"");
+	// <handle>/<agent> names are signed-in agents', verified by their token.
+	if (name.includes("/")) throw new Error(`[403] ${name} is a signed-in agent's name: sign in to GitHive as it to act as it`);
 	if (registry?.agents?.[name]) throw new Error(`[403] ${name} is registered: call with its agent key`);
 }
 
@@ -502,9 +506,12 @@ async function runTool(name: string, args: Args, ctx: ToolContext): Promise<unkn
 	const rootHead = await claims.read();
 	const registered = rootHead?.commit.state;
 	const key = ctx.agentKey ?? (typeof args.agent_key === "string" ? args.agent_key : undefined);
-	const acting = key ? await keyAgent(registered, key) : undefined;
+	// A signed-in agent is who its token says; otherwise an agent key names the agent.
+	const acting = ctx.agent ?? (key ? await keyAgent(registered, key) : undefined);
+	/** The agent named in `field`; a signed-in agent may leave it out. */
+	const agentArg = (field: string) => (ctx.agent && !(typeof args[field] === "string" && args[field].trim()) ? ctx.agent : requiredString(args, field));
 	const actAs = (field: string) => {
-		const agent = requiredString(args, field);
+		const agent = agentArg(field);
 		mayActAs(agent, acting, registered, ctx.hosted);
 		return agent;
 	};
@@ -663,7 +670,7 @@ async function runTool(name: string, args: Args, ctx: ToolContext): Promise<unkn
 			// Anyone may merge a change whose conventions hold; it merges as its claim's agent, and the stamp says who asked.
 			const change = requiredString(args, "change");
 			const holder = (await claimOf(change))?.agent;
-			if (holder && holder !== requiredString(args, "agent")) throw new Error(`[409] ${change} is ${holder}'s change: merge it as ${holder}`);
+			if (holder && holder !== agentArg("agent")) throw new Error(`[409] ${change} is ${holder}'s change: merge it as ${holder}`);
 			return mergeChange({
 				remote: await write(),
 				branch: projectBranch(registry),
@@ -674,9 +681,9 @@ async function runTool(name: string, args: Args, ctx: ToolContext): Promise<unkn
 				runChecks: ctx.runChecks?.(repo),
 				stamper,
 				stampKey: registry?.stampKey,
-				source: await changeSource(holder ?? requiredString(args, "agent"), "read", change),
+				source: await changeSource(holder ?? agentArg("agent"), "read", change),
 				change,
-				agent: requiredString(args, "agent"),
+				agent: agentArg("agent"),
 			});
 		}
 		case "build": {
@@ -724,7 +731,9 @@ async function runTool(name: string, args: Args, ctx: ToolContext): Promise<unkn
 			return checked;
 		}
 		case "register": {
+			if (ctx.agent) throw new Error(`[409] you're signed in as ${ctx.agent}: what you write is already attributed to you, with no key`);
 			const agent = requiredString(args, "agent");
+			if (agent.includes("/")) throw new Error("[400] names with \"/\" are signed-in agents' (<handle>/<agent>); register a name without one");
 			if (agent.startsWith(HOSTED_PREFIX) && !ctx.hosted) throw new Error("[403] githive- names are GitHive's hosted agents'");
 			const secret = btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(24)))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 			const newKey = `${agent}.${secret}`;

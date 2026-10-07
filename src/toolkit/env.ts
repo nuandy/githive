@@ -49,11 +49,11 @@ async function cached(env: Env, project: string, key: string, mint: () => Promis
 const logs = new Map<string, GitCasLog<unknown>>();
 
 /**
- * The context for one actor: `by` is who it is (as Access
- * verified them, or a hosted agent's own name), and stamps carry it, with the
- * agent name its key is for. Hosted agents (`hosted`) act under githive- names.
+ * The context for one actor: `by` is who it is (as Access or GitHive's
+ * sign-in verified them, or a hosted agent's own name), and stamps carry it,
+ * with the agent name its key or token is for. Hosted agents (`hosted`) act under githive- names.
  */
-export function toolContextFor(env: Env, by: string | undefined, caller: { agentKey?: string; hosted?: boolean } = {}): ToolContext {
+export function toolContextFor(env: Env, by: string | undefined, caller: { agentKey?: string; agent?: string; hosted?: boolean } = {}): ToolContext {
 	return {
 		...caller,
 		register: async (repo) => env.REPO_INDEX.getByName("all").addRepo(repo),

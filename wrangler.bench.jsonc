@@ -35,6 +35,10 @@
 			{ "name": "TOKENS", "class_name": "TokenCache" }
 		]
 	},
+	// GitHive's own identity: people, sessions, agents and their tokens (migrations/).
+	"d1_databases": [{ "binding": "DB", "database_name": "githive-bench", "database_id": "72e60aef-4f1f-48da-93e4-cc1811443db7", "migrations_dir": "migrations" }],
+	// The OAuth provider's grants and tokens, for MCP clients that sign in.
+	"kv_namespaces": [{ "binding": "OAUTH_KV", "id": "adf3d5a6fa5247f6849af337c4236193" }],
 	"containers": [
 		{ "class_name": "Gate", "scheduling_policy": "durable_object" },
 		{ "class_name": "Reviewer", "scheduling_policy": "durable_object" },
