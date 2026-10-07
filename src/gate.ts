@@ -378,12 +378,14 @@ export class Gate extends DurableObject<Env> {
 	}
 
 	/**
-	 * What an install depends on: package.json and whichever lockfile there is.
-	 * Without a lockfile (Express has none), every install resolves every
-	 * dependency from the registry again, so skipping an unchanged one matters.
+	 * What an install depends on: package.json's dependency sections (not its
+	 * scripts, say) and whichever lockfile there is. Without a lockfile
+	 * (Express has none), every install resolves every dependency from the
+	 * registry again, so skipping an unchanged one matters.
 	 */
 	private async lockHash(container: Container) {
-		const r = await run(container, ["bash", "-lc", "cat package.json package-lock.json npm-shrinkwrap.json yarn.lock pnpm-lock.yaml 2>/dev/null | sha256sum | cut -d' ' -f1"]);
+		const deps = `node -e 'try { const p = require("./package.json"); console.log(JSON.stringify(["dependencies", "devDependencies", "optionalDependencies", "peerDependencies", "overrides", "resolutions", "workspaces"].map((k) => p[k] ?? null))) } catch { console.log("none") }'`;
+		const r = await run(container, ["bash", "-lc", `{ ${deps}; cat package-lock.json npm-shrinkwrap.json yarn.lock pnpm-lock.yaml 2>/dev/null; } | sha256sum | cut -d' ' -f1`]);
 		return r.output.trim();
 	}
 

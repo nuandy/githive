@@ -200,7 +200,7 @@ describe("review holds through the toolkit", { timeout: 120_000 }, () => {
 });
 
 describe("warming the checks when a merge is near", { timeout: 60_000 }, () => {
-	it("warms after a check and an approval, where the repo has checks", async () => {
+	it("warms at the start, after a check and after an approval, where the repo has checks", async () => {
 		const server = await startGitServer();
 		const work = mkdtempSync(join(tmpdir(), "free-warm-"));
 		try {
@@ -222,8 +222,8 @@ describe("warming the checks when a merge is near", { timeout: 60_000 }, () => {
 				await call(repo, "free_vote", { commit: head, reviewer: "rev", role: "review", verdict: "approve", evidence: "ok" });
 				await call(repo, "free_vote", { commit: head, reviewer: "rev-2", role: "review", verdict: "reject", evidence: "no" });
 			}
-			// The check and the approval warm; the rejection and the repo without checks don't.
-			expect(warmed).toEqual([{ branch: "main", checks: ["npm test"] }, { branch: "main", checks: ["npm test"] }]);
+			// The start, the check and the approval warm; the rejection and the repo without checks don't.
+			expect(warmed).toEqual([{ branch: "main", checks: ["npm test"] }, { branch: "main", checks: ["npm test"] }, { branch: "main", checks: ["npm test"] }]);
 		} finally {
 			await server.close();
 			rmSync(work, { recursive: true, force: true });

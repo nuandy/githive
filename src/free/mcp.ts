@@ -551,6 +551,8 @@ async function runFreeTool(name: string, args: Args, ctx: FreeContext): Promise<
 			await startFree(claims, { baseline: await ctx.head(repo, branch), branch, policy, verify, stampKey: stamper?.publicKey, ...sharding });
 			await ctx.register?.(repo);
 			const registry = (await claims.read())?.commit.state;
+			// The check containers warm up while agents start: the first merge is minutes away, and a fresh install takes them.
+			if (registry?.verify?.length) await ctx.warmChecks?.(repo, { branch: projectBranch(registry), checks: registry.verify }).catch(() => undefined);
 			const warnings = grantWarnings(registry?.policy ?? policy);
 			return { repo, branch: projectBranch(registry), policy: registry?.policy ?? policy, verify: registry?.verify ?? [], ...shardingOf(registry), ...(warnings.length ? { warnings } : {}), instructions: FREE_INSTRUCTIONS };
 		}
