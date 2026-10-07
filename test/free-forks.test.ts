@@ -151,10 +151,12 @@ describe("free_status", () => {
 		const { key: keyA } = (await call("free_register", { agent: "agent-a" })) as { key: string };
 		await call("free_claim", { change: "a-1", agent: "agent-a", paths: ["src/a/"], intent: "Speed up the a module" }, keyA);
 		const head = await pushChange(fork.url, work, "agent-a", "a-1", { "src/a/x.txt": "a\n" });
-		expect(await call("free_ask_human", { change: "a-1", agent: "agent-a", reason: "reviewers disagree on the cache size" }, keyA)).toMatchObject({ ok: true });
-
 		const summaries: { repo: string; patch: Record<string, unknown> }[] = [];
 		const watched = { ...ctx(), summarize: async (repo: string, patch: Record<string, unknown>) => void summaries.push({ repo, patch }) };
+		expect(await callFreeTool("free_ask_human", { repo: "project", change: "a-1", agent: "agent-a", reason: "reviewers disagree on the cache size" }, { ...watched, agentKey: keyA })).toMatchObject({ ok: true });
+		// In the person's inbox at once, before anyone opens the repo.
+		expect(summaries.at(-1)?.patch).toMatchObject({ needsYou: 1, waiting: [{ change: "a-1", reason: "reviewers disagree on the cache size" }] });
+
 		const before = await freeSnapshot(watched, "project");
 		expect(before.claims[0]).toMatchObject({ change: "a-1", attention: { reason: "reviewers disagree on the cache size", agent: "agent-a" } });
 		expect(summaries.at(-1)?.patch).toMatchObject({ needsYou: 1, waiting: [{ change: "a-1", title: "Speed up the a module", reason: "reviewers disagree on the cache size" }] });

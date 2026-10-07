@@ -440,6 +440,8 @@ export async function callFreeTool(name: string, args: Args, ctx: FreeContext): 
 			noted.set(repo, Date.now());
 			await ctx.summarize(repo, { lastActivity: new Date().toISOString(), ...(merged ? { mergedBy: 1 } : {}) }).catch((err) => console.error(`summarizing ${repo} failed`, String(err)));
 		}
+		// A question for a person belongs in their inbox now, not when someone next opens the repo: the snapshot updates the summary's waiting list.
+		if (name === "free_ask_human") await freeSnapshot(ctx, repo).catch((err) => console.error(`updating ${repo}'s inbox failed`, String(err)));
 	}
 	return result;
 }
