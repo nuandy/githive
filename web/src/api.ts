@@ -85,6 +85,49 @@ export interface ChangeHistory {
 	votes: RepoSnapshot["votes"];
 }
 
+/** Who is looking at the dashboard (GET /me). */
+export type Me =
+	| { kind: "user"; handle: string; name: string | null; email: string; avatarUrl: string | null; by: string }
+	/** Through Cloudflare Access, on the admin hostnames: no sign-in and no agents of their own. */
+	| { kind: "access"; label: string; by: string }
+	| { kind: "agent"; handle: string; agent: string; by: string };
+
+/** One of your agents' tokens: its first characters only; the secret is shown once, when it is made. */
+export interface AgentToken {
+	id: string;
+	agentId: string;
+	prefix: string;
+	createdAt: string;
+	expiresAt: string | null;
+	lastUsedAt: string | null;
+	revokedAt: string | null;
+}
+
+/** One of your agents (GET /me/agents). Its full name is <handle>/<name>. */
+export interface MyAgent {
+	id: string;
+	ownerId: string;
+	name: string;
+	createdAt: string;
+	revokedAt: string | null;
+	tokens: AgentToken[];
+}
+
+/** A token just made: `token` is the secret, shown this once. */
+export type IssuedToken = AgentToken & { token: string };
+
+/** An MCP client connected over OAuth, acting as one of your agents. */
+export interface Connection {
+	id: string;
+	client: string;
+	agentId: string | null;
+	agent: string | null;
+	createdAt: string;
+}
+
+/** Fired when the server says the session is gone, so the dashboard shows the sign-in screen again. */
+export const SIGNED_OUT_EVENT = "githive:signed-out";
+
 function asRecord(value: unknown): Record<string, unknown> | null {
 	return value !== null && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
 }
@@ -103,7 +146,8 @@ async function call<T>(method: string, path: string, body?: unknown): Promise<T>
 	}
 	if (!res.ok) {
 		const detail = asRecord(data)?.error;
-		throw new Error(res.status === 401 ? "Unauthorized: sign in through Cloudflare Access." : typeof detail === "string" ? detail : `${res.status} ${res.statusText}`);
+		if (res.status === 401 && typeof window !== "undefined") window.dispatchEvent(new Event(SIGNED_OUT_EVENT));
+		throw new Error(res.status === 401 ? "Your session ended: sign in to GitHive again." : typeof detail === "string" ? detail : `${res.status} ${res.statusText}`);
 	}
 	return data as T;
 }
@@ -123,6 +167,30 @@ export const api = {
 	/** One change: its claim or how it ended, its commits and the votes on them. */
 	change: (repo: string, change: string) => call<ChangeHistory>("GET", `/repos/${encodeURIComponent(repo)}/changes/${encodeURIComponent(change)}`),
 };
+
+/** Who is looking, or null when nobody is signed in (a 401 here is the normal signed-out answer, not an error). */
+export async function fetchMe(): Promise<Me | null> {
+	const res = await fetch("/me");
+	if (res.status === 401) return null;
+	if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+	return (await res.json()) as Me;
+}
+
+/** Signing in and out, and a signed-in person's agents, tokens and connected apps. */
+export const account = {
+	/** The sign-in providers set up on this address. */
+	providers: () => call<{ providers: ("github" | "google")[] }>("GET", "/auth/providers"),
+	signOut: () => call<{ signedOut: boolean }>("POST", "/auth/signout"),
+	agents: () => call<MyAgent[]>("GET", "/me/agents"),
+	createAgent: (name: string) => call<MyAgent>("POST", "/me/agents", { name }),
+	revokeAgent: (id: string) => call<unknown>("DELETE", `/me/agents/${encodeURIComponent(id)}`),
+	createToken: (agentId: string, expiresInDays: number | null) => call<IssuedToken>("POST", `/me/agents/${encodeURIComponent(agentId)}/tokens`, { expires_in_days: expiresInDays }),
+	revokeToken: (id: string) => call<unknown>("DELETE", `/me/tokens/${encodeURIComponent(id)}`),
+	connections: () => call<Connection[]>("GET", "/me/connections"),
+	disconnect: (id: string) => call<unknown>("DELETE", `/me/connections/${encodeURIComponent(id)}`),
+};
+
+export type AccountApi = typeof account;
 
 /** Everything the dashboard calls; tests pass stand-ins. */
 export type DashboardApi = typeof api;

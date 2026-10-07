@@ -127,3 +127,123 @@
 		display: none;
 	}
 }
+
+/* Who is looking */
+
+.topbar__access {
+	flex-shrink: 1;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	font-size: 12.5px;
+	color: var(--text-muted);
+}
+
+.usermenu {
+	position: relative;
+	flex-shrink: 0;
+}
+
+.usermenu__summary {
+	display: inline-flex;
+	align-items: center;
+	gap: 8px;
+	padding: 3px 10px 3px 3px;
+	border: 1px solid var(--border);
+	border-radius: 999px;
+	font-size: 13px;
+	font-weight: 500;
+	list-style: none;
+	cursor: pointer;
+}
+
+.usermenu__summary::-webkit-details-marker {
+	display: none;
+}
+
+.usermenu__summary:hover,
+.usermenu[open] .usermenu__summary {
+	background: var(--surface-2);
+}
+
+.usermenu__avatar {
+	width: 22px;
+	height: 22px;
+	border-radius: 50%;
+	object-fit: cover;
+	flex-shrink: 0;
+}
+
+.usermenu__avatar--initial {
+	display: grid;
+	place-items: center;
+	background: var(--accent-fill);
+	color: var(--on-accent);
+	font-size: 11.5px;
+	font-weight: 700;
+}
+
+.usermenu__panel {
+	position: absolute;
+	right: 0;
+	top: calc(100% + 6px);
+	z-index: 20;
+	min-width: 220px;
+	max-width: calc(100vw - 32px);
+	display: grid;
+	padding: 6px;
+	background: var(--surface);
+	border: 1px solid var(--border);
+	border-radius: var(--radius);
+	box-shadow: var(--shadow-lg);
+}
+
+.usermenu__who {
+	display: grid;
+	gap: 2px;
+	padding: 8px 10px 10px;
+	margin-bottom: 4px;
+	border-bottom: 1px solid var(--border);
+	font-size: 13px;
+	overflow-wrap: anywhere;
+}
+
+.usermenu__item {
+	display: flex;
+	align-items: center;
+	justify-content: flex-start;
+	gap: 8px;
+	width: 100%;
+	padding: 7px 10px;
+	border: 0;
+	border-radius: var(--radius-sm);
+	background: none;
+	color: var(--text);
+	font-size: 13.5px;
+	font-weight: 500;
+	text-decoration: none;
+}
+
+.usermenu__item:hover {
+	background: var(--surface-2);
+	text-decoration: none;
+}
+
+.usermenu__item[aria-current="page"] {
+	color: var(--accent);
+}
+
+@media (max-width: 560px) {
+	.usermenu__handle {
+		display: none;
+	}
+
+	.usermenu__summary {
+		padding-right: 3px;
+	}
+
+	.topbar__access {
+		display: none;
+	}
+}

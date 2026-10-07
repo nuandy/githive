@@ -1,3 +1,6 @@
+import type { Me } from "../api";
+import { href } from "../lib/routes";
+import { HiveMark } from "./HiveMark";
 import { Icon } from "./Icon";
 import "./TopBar.css";
 
@@ -6,24 +9,54 @@ export interface Crumb {
 	href?: string;
 }
 
-/** The top bar: the GitHive mark, which leads home, and where you are. */
-export function TopBar({ crumbs, inboxCount, inboxCurrent = false }: { crumbs: Crumb[]; /** Changes waiting on a person, across repos; undefined until known. */ inboxCount?: number; inboxCurrent?: boolean }) {
+/** A signed-in person's menu: their face or initial and handle, their agents, and signing out. */
+export function UserMenu({ me, onSignOut, agentsCurrent = false }: { me: Extract<Me, { kind: "user" }>; onSignOut: () => void; agentsCurrent?: boolean }) {
+	const initial = (me.name || me.handle).trim().charAt(0).toUpperCase() || "?";
+	return (
+		<details className="usermenu">
+			<summary className="usermenu__summary" aria-label={`Signed in as ${me.handle}`}>
+				{me.avatarUrl ? <img className="usermenu__avatar" src={me.avatarUrl} alt="" width={22} height={22} referrerPolicy="no-referrer" /> : <span className="usermenu__avatar usermenu__avatar--initial" aria-hidden="true">{initial}</span>}
+				<span className="usermenu__handle">{me.handle}</span>
+			</summary>
+			<div className="usermenu__panel" role="menu">
+				<div className="usermenu__who">
+					<strong>{me.name || me.handle}</strong>
+					<span className="muted">{me.email}</span>
+				</div>
+				<a role="menuitem" className="usermenu__item" href={href.agents()} aria-current={agentsCurrent ? "page" : undefined}>
+					<Icon name="bot" size={15} /> Agents
+				</a>
+				<button type="button" role="menuitem" className="usermenu__item" onClick={onSignOut}>
+					<Icon name="arrow" size={15} /> Sign out
+				</button>
+			</div>
+		</details>
+	);
+}
+
+/** The top bar: the GitHive mark, which leads home, where you are, the Inbox, and who you are. */
+export function TopBar({
+	crumbs,
+	inboxCount,
+	inboxCurrent = false,
+	me,
+	onSignOut,
+	agentsCurrent = false,
+}: {
+	crumbs: Crumb[];
+	/** Changes waiting on a person, across repos; undefined until known. */
+	inboxCount?: number;
+	inboxCurrent?: boolean;
+	/** Who is looking: a signed-in person gets a menu; an Access caller sees their label, quietly. */
+	me?: Me;
+	onSignOut?: () => void;
+	agentsCurrent?: boolean;
+}) {
 	return (
 		<header className="topbar">
 			<div className="topbar__inner">
 				<a className="topbar__brand" href="#/" aria-label="GitHive home">
-					{/* A beehive (a skep): stacked bands and an entrance, on honey. */}
-					<svg width="24" height="24" viewBox="0 0 32 32" aria-hidden="true">
-						<rect width="32" height="32" rx="7" fill="#f2a516" />
-						<g fill="#fff" stroke="#f2a516" strokeWidth="1.2">
-							<rect x="12" y="5.5" width="8" height="5" rx="2.5" />
-							<rect x="9" y="10" width="14" height="5" rx="2.5" />
-							<rect x="7" y="14.5" width="18" height="5" rx="2.5" />
-							<rect x="6" y="19" width="20" height="5.5" rx="2.75" />
-						</g>
-						<rect x="4.5" y="24.2" width="23" height="2.6" rx="1.3" fill="#fff" />
-						<path d="M13.6 24.4a2.4 2.4 0 0 1 4.8 0z" fill="#7a4a06" />
-					</svg>
+					<HiveMark />
 					<span>GitHive</span>
 				</a>
 				{crumbs.length > 0 ? (
@@ -49,6 +82,12 @@ export function TopBar({ crumbs, inboxCount, inboxCurrent = false }: { crumbs: C
 					<span className="topbar__inbox-label">Inbox</span>
 					{inboxCount ? <span className="topbar__inbox-count">{inboxCount}</span> : null}
 				</a>
+				{me?.kind === "user" ? <UserMenu me={me} onSignOut={onSignOut ?? (() => undefined)} agentsCurrent={agentsCurrent} /> : null}
+				{me?.kind === "access" ? (
+					<span className="topbar__access" title="Signed in through Cloudflare Access">
+						{me.label}
+					</span>
+				) : null}
 			</div>
 		</header>
 	);

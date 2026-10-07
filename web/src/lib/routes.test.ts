@@ -6,6 +6,8 @@ describe("hash routes", () => {
 		expect(parseRoute("")).toEqual({ page: "repos" });
 		expect(parseRoute("#/")).toEqual({ page: "repos" });
 		expect(parseRoute("#/inbox")).toEqual({ page: "inbox" });
+		expect(parseRoute("#/settings/agents")).toEqual({ page: "agents-settings" });
+		expect(parseRoute(href.agents())).toEqual({ page: "agents-settings" });
 		expect(parseRoute("#/repos/my-app")).toEqual({ page: "repo", repo: "my-app", tab: "changes" });
 		expect(parseRoute("#/repos/team%2Fapp/settings")).toMatchObject({ repo: "team/app", tab: "settings" });
 		for (const tab of ["claims", "agents", "audit"]) expect(parseRoute(`#/repos/my-app/${tab}`)).toMatchObject({ page: "repo", tab });
@@ -15,6 +17,8 @@ describe("hash routes", () => {
 
 	it("rejects what it doesn't know", () => {
 		expect(parseRoute("#/nope")).toEqual({ page: "not-found" });
+		expect(parseRoute("#/settings")).toEqual({ page: "not-found" });
+		expect(parseRoute("#/settings/agents/x")).toEqual({ page: "not-found" });
 		expect(parseRoute("#/free/docs-site")).toEqual({ page: "not-found" });
 		expect(parseRoute("#/tasks/open-my-app")).toEqual({ page: "not-found" });
 		expect(parseRoute("#/repos/my-app/insights")).toEqual({ page: "not-found" });

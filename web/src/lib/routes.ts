@@ -4,6 +4,7 @@
 //   #/repos/:repo[/claims|/agents|/audit|/settings]
 //   #/repos/:repo/code[/<path>][?ref=<branch or commit>]
 //   #/repos/:repo/changes/:id[/commits]
+//   #/settings/agents                   your agents, their tokens, and connected apps
 
 export type RepoTab = "changes" | "claims" | "code" | "agents" | "settings" | "audit";
 export type ChangeTab = "conversation" | "commits";
@@ -11,6 +12,7 @@ export type ChangeTab = "conversation" | "commits";
 export type Route =
 	| { page: "repos" }
 	| { page: "inbox" }
+	| { page: "agents-settings" }
 	| { page: "repo"; repo: string; tab: RepoTab; /** Code tab: the file or folder shown, "" for the top. */ path?: string; /** Code tab: a branch or commit other than the project's branch. */ ref?: string }
 	| { page: "change"; repo: string; change: string; tab: ChangeTab }
 	| { page: "not-found" };
@@ -33,6 +35,7 @@ export function parseRoute(hash: string): Route {
 	if (parts.length === 0) return { page: "repos" };
 	const params = new URLSearchParams(query);
 	if (parts[0] === "inbox" && parts.length === 1) return { page: "inbox" };
+	if (parts[0] === "settings" && parts[1] === "agents" && parts.length === 2) return { page: "agents-settings" };
 
 	if (parts[0] === "repos" && parts.length >= 2) {
 		const repo = decode(parts[1]);
@@ -68,4 +71,5 @@ export const href = {
 	code: (repo: string, path = "", ref?: string) =>
 		`#/repos/${enc(repo)}/code${path ? `/${path.split("/").filter(Boolean).map(enc).join("/")}` : ""}${ref ? `?ref=${enc(ref)}` : ""}`,
 	inbox: () => "#/inbox",
+	agents: () => "#/settings/agents",
 };
