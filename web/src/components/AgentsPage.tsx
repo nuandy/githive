@@ -132,6 +132,8 @@ export function AgentsView({
 		rememberClient(next);
 	};
 	const clientLabel = MCP_CLIENTS.find((c) => c.id === client)!.label;
+	/** The apps connected as an agent over OAuth, each named once. */
+	const signsInFrom = (agentId: string) => [...new Set((connections ?? []).filter((c) => c.agentId === agentId).map((c) => c.client))];
 
 	const run = async (key: string, work: () => Promise<unknown>, onError: (text: string) => void) => {
 		setBusy(key);
@@ -254,7 +256,7 @@ export function AgentsView({
 						))}
 					</ul>
 				) : active ? (
-					<p className="muted agents__none">No tokens. Make one to connect with a token, or connect over OAuth, which needs none.</p>
+					<p className="muted agents__none">{signsInFrom(agent.id).length ? `Signs in from ${signsInFrom(agent.id).join(" and ")}, so it needs no token.` : "No tokens yet."}</p>
 				) : null}
 			</li>
 		);

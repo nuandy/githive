@@ -39,6 +39,15 @@ describe("the Agents page", () => {
 		expect(text).not.toContain("Bearer token");
 	});
 
+	it("says an agent with no tokens signs in from its connected app, or just that it has none yet", () => {
+		const signedIn: MyAgent = { id: "a3", ownerId: "u1", name: "claude-code", createdAt: ago(30), revokedAt: null, tokens: [] };
+		const bare: MyAgent = { id: "a4", ownerId: "u1", name: "spare", createdAt: ago(30), revokedAt: null, tokens: [] };
+		const text = visibleText(render({ agents: [signedIn, bare], connections: [{ id: "g2", client: "Claude Code", agentId: "a3", agent: "ada/claude-code", createdAt: ago(5) }] }));
+		expect(text).toContain("Signs in from Claude Code, so it needs no token.");
+		expect(text).toContain("No tokens yet.");
+		expect(text).not.toContain("which needs none");
+	});
+
 	it("lists your agents by full name with their tokens, never a token's secret", () => {
 		const html = render();
 		const text = visibleText(html);
