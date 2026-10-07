@@ -32,7 +32,8 @@ describe("the Agents page", () => {
 	it("explains both ways to connect: Claude Code step by step with this address's command, or a token", () => {
 		const text = visibleText(render());
 		expect(text).toContain("claude mcp add --transport http githive https://githive.app/mcp");
-		expect(text).toContain("Connect Claude Code");
+		expect(text).toContain("Sign in from Claude Code");
+		expect(text).toContain("Codex");
 		expect(text).toContain("Or use a token");
 		// No command with a placeholder to fill in: a new token comes with its own, filled in.
 		expect(text).not.toContain("Bearer token");

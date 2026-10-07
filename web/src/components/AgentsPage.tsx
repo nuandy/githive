@@ -2,7 +2,7 @@ import { useState } from "react";
 import type { AccountApi, Connection, IssuedToken, Me, MyAgent } from "../api";
 import { usePoll } from "../hooks/usePoll";
 import { timeAgo } from "../lib/relativeTime";
-import { DEFAULT_TOKEN_DAYS, TOKEN_EXPIRY, expiryDate, expiryFromValue, expiryValue, mcpCommands, tokenLabel } from "../lib/session";
+import { type ConnectStep, DEFAULT_TOKEN_DAYS, MCP_CLIENTS, type McpClient, TOKEN_EXPIRY, connectSteps, expiryDate, expiryFromValue, expiryValue, isMcpClient, tokenLabel, tokenSteps } from "../lib/session";
 import { CopyBlock } from "./CopyBlock";
 import { Icon } from "./Icon";
 import "./AgentsPage.css";
@@ -58,6 +58,47 @@ function ConfirmButton({
 }
 
 /** The Agents page as it looks: how to connect, your agents and their tokens, and connected apps. */
+const CLIENT_KEY = "githive:mcp-client";
+/** The client chosen last time, in this browser; Claude Code at first. */
+function rememberedClient(): McpClient {
+	try {
+		const saved = localStorage.getItem(CLIENT_KEY);
+		return isMcpClient(saved) ? saved : "claude-code";
+	} catch {
+		return "claude-code";
+	}
+}
+function rememberClient(client: McpClient) {
+	try {
+		localStorage.setItem(CLIENT_KEY, client);
+	} catch {
+		// Only a convenience: without storage the choice lasts as long as the page.
+	}
+}
+
+/** Text with `code` in backticks. */
+function WithCode({ text }: { text: string }) {
+	return (
+		<>
+			{text.split("`").map((part, i) => (i % 2 ? <code key={i}>{part}</code> : <span key={i}>{part}</span>))}
+		</>
+	);
+}
+
+/** Numbered steps, each with what to copy. */
+function Steps({ steps }: { steps: ConnectStep[] }) {
+	return (
+		<ol className="agents__steps">
+			{steps.map((step, i) => (
+				<li key={i}>
+					<WithCode text={step.text} />
+					{step.copy ? <CopyBlock text={step.copy} /> : null}
+				</li>
+			))}
+		</ol>
+	);
+}
+
 export function AgentsView({
 	me,
 	origin,
@@ -85,7 +126,12 @@ export function AgentsView({
 	const [busy, setBusy] = useState<string | null>(null);
 	const [expiry, setExpiry] = useState<Record<string, number | null>>({});
 	const [issued, setIssued] = useState<{ agentId: string; token: string } | null>(initialIssued);
-	const commands = mcpCommands(origin);
+	const [client, setClient] = useState<McpClient>(rememberedClient);
+	const chooseClient = (next: McpClient) => {
+		setClient(next);
+		rememberClient(next);
+	};
+	const clientLabel = MCP_CLIENTS.find((c) => c.id === client)!.label;
 
 	const run = async (key: string, work: () => Promise<unknown>, onError: (text: string) => void) => {
 		setBusy(key);
@@ -174,8 +220,7 @@ export function AgentsView({
 								<strong>New token for {full}.</strong> Copy it now: you won't see it again.
 							</p>
 							<CopyBlock text={shown} label="Copy token" />
-							<p className="muted">Connect Claude Code with it:</p>
-							<CopyBlock text={mcpCommands(origin, shown).token} label="Copy command" />
+							<Steps steps={tokenSteps(client, origin, shown)} />
 							<button type="button" className="agents__small" onClick={() => setIssued(null)}>
 								Done
 							</button>
@@ -232,28 +277,27 @@ export function AgentsView({
 
 			<section className="agents__connect" aria-labelledby="connect-title">
 				<h2 id="connect-title">Connect an agent</h2>
+				<div className="agents__clients" role="radiogroup" aria-label="Your agent's app">
+					{MCP_CLIENTS.map((c) => (
+						<label key={c.id} className={`agents__client${client === c.id ? " is-selected" : ""}`}>
+							<input type="radio" name="mcp-client" value={c.id} checked={client === c.id} onChange={() => chooseClient(c.id)} />
+							{c.label}
+						</label>
+					))}
+				</div>
 				<div className="agents__ways">
 					<div className="box agents__way">
 						<div className="box__body">
 							<h3>
-								Connect Claude Code <span className="pill pill--accent">Recommended</span>
+								Sign in from {client === "other" ? "the client" : clientLabel} <span className="pill pill--accent">Recommended</span>
 							</h3>
-							<ol className="agents__steps">
-								<li>
-									Add GitHive to Claude Code, in your terminal:
-									<CopyBlock text={commands.oauth} />
-								</li>
-								<li>
-									In Claude Code, run <code>/mcp</code> and choose <strong>githive</strong> to sign in.
-								</li>
-								<li>Your browser opens GitHive: choose the agent Claude Code acts as, or name a new one.</li>
-							</ol>
+							<Steps steps={connectSteps(client, origin)} />
 						</div>
 					</div>
 					<div className="box agents__way">
 						<div className="box__body">
 							<h3>Or use a token</h3>
-							<p className="muted">For a tool that can't sign in through your browser. Make an agent below and choose New token. GitHive shows the token once, with the command to connect it filled in, ready to copy.</p>
+							<p className="muted">For a client that can't sign in through your browser. Make an agent below and choose New token. GitHive shows the token once, with the setup for {client === "other" ? "your client" : clientLabel} filled in, ready to copy.</p>
 						</div>
 					</div>
 				</div>
@@ -286,7 +330,7 @@ export function AgentsView({
 					</p>
 				) : agents.length === 0 ? (
 					<div className="box__body agents__empty">
-						<p>No agents yet. Name one above, or connect Claude Code and name it while you sign in.</p>
+						<p>No agents yet. Name one above, or connect {client === "other" ? "your client" : clientLabel} and name it while you sign in.</p>
 					</div>
 				) : (
 					<ul className="agents__agents">{[...live, ...revoked].map(agentRow)}</ul>

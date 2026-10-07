@@ -235,3 +235,42 @@
 .agents__steps li > .copy-block {
 	margin-top: 6px;
 }
+
+.agents__clients {
+	display: inline-flex;
+	flex-wrap: wrap;
+	gap: 4px;
+	padding: 3px;
+	border: 1px solid var(--border);
+	border-radius: var(--radius);
+	background: var(--surface-2);
+	justify-self: start;
+}
+
+.agents__client {
+	display: inline-flex;
+	align-items: center;
+	padding: 5px 12px;
+	border-radius: var(--radius-sm);
+	font-size: 13.5px;
+	font-weight: 500;
+	color: var(--text-muted);
+	cursor: pointer;
+}
+
+.agents__client input {
+	position: absolute;
+	opacity: 0;
+	pointer-events: none;
+}
+
+.agents__client.is-selected {
+	background: var(--surface);
+	color: var(--text);
+	box-shadow: var(--shadow);
+}
+
+.agents__client:has(input:focus-visible) {
+	outline: 2px solid var(--accent);
+	outline-offset: 1px;
+}
