@@ -97,9 +97,11 @@ export function authRoutes(app: Hono<AuthEnv>) {
 		return c.json({ signedOut: true });
 	});
 
-	app.get("/me", (c) => {
+	app.get("/me", async (c) => {
 		const principal = c.get("principal");
 		if (!principal) return c.json({ error: "sign in to GitHive first" }, 401);
+		// Someone who signed in before orgs existed gets their own namespace now.
+		if (principal.kind === "user" && c.env.DB) await new OrgStore(c.env.DB).personalOrg(principal.user);
 		return c.json(describe(principal));
 	});
 

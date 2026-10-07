@@ -153,3 +153,14 @@ describe("what a person may do in a repo", () => {
 		expect(atLeast(null, "read")).toBe(false);
 	});
 });
+
+describe("someone who signed in before orgs existed", () => {
+	it("gets their own namespace the first time it's needed, once", async () => {
+		await ids.invite("old@example.com", "admin");
+		const { user } = (await ids.signIn({ provider: "github", providerId: "old", email: "old@example.com", login: "old" })) as { user: U };
+		expect(await orgs.orgsOf(user.id)).toEqual([]);
+		await orgs.personalOrg(user);
+		await orgs.personalOrg(user);
+		expect(await orgs.orgsOf(user.id)).toEqual([expect.objectContaining({ slug: "old", personal: true, role: "owner" })]);
+	});
+});

@@ -37,7 +37,10 @@ export function orgRoutes(app: Hono<OrgEnv>) {
 	app.get("/orgs", async (c) => {
 		const principal = c.get("principal");
 		if (principal?.kind === "access" || !principal) return c.json([]);
-		return c.json(await store(c.env).orgsOf(principal.user.id));
+		const orgs = store(c.env);
+		// Someone who signed in before orgs existed gets their own namespace now.
+		await orgs.personalOrg(principal.user);
+		return c.json(await orgs.orgsOf(principal.user.id));
 	});
 
 	app.post("/orgs", async (c) => {

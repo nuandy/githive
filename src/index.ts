@@ -117,6 +117,8 @@ app.post("/repos", async (c) => {
 	const repoName = String(name);
 	if (!validRepoName(repoName)) fail(400, "a repo's name is letters, digits, dots, underscores or single dashes, up to 100");
 	const orgs = new OrgStore(c.env.DB);
+	// Your own namespace exists from your first sign-in; someone who signed in before orgs existed gets it now.
+	if (principal.kind !== "access" && owner === principal.user.handle) await orgs.personalOrg(principal.user);
 	const org = await orgs.orgOrFail(String(owner));
 	const userId = principal.kind === "access" ? null : principal.user.id;
 	if (userId && !(await orgs.mayCreateRepo(org, userId))) fail(403, `you can't make repos in ${org.slug}`);
