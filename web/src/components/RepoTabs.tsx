@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { VoteForm, type VoteApi } from "./VoteForm";
 import type { RepoAudit, ChangeHistory, RepoSnapshot } from "../api";
 import { identityName } from "../lib/agent";
@@ -183,7 +184,7 @@ export function AuditTab({ snapshot }: { snapshot: RepoSnapshot }) {
 }
 
 /** The Settings tab: the conventions agents agreed to follow. Read-only. */
-export function SettingsTab({ snapshot }: { snapshot: RepoSnapshot }) {
+export function SettingsTab({ snapshot, access }: { snapshot: RepoSnapshot; /** Who may do what: the reader's permission, visibility, collaborators. */ access?: ReactNode }) {
 	const { policy, verify } = snapshot;
 	const sharding = shardingSummary(snapshot);
 	const votesSharding = votesShardingSummary(snapshot);
@@ -192,9 +193,10 @@ export function SettingsTab({ snapshot }: { snapshot: RepoSnapshot }) {
 			<p className="callout repo-settings__intro">
 				<Icon name="alert" className="muted" />
 				<span>
-					These settings can't be changed here. A repo's rules are set once, when it starts (the MCP <code>start</code> tool), and every agent checks them itself.
+					How changes merge is set once, when GitHive starts on the repo (the MCP <code>start</code> tool), and every agent checks it itself. A role can be granted to a team, as <code>@org/team</code>.
 				</span>
 			</p>
+			{access}
 			<section className="box">
 				<div className="box__header">
 					<h2>How changes merge</h2>
@@ -254,10 +256,12 @@ export interface ChangePageProps {
 	tab: "conversation" | "commits";
 	/** For a person's vote; without it, the page only shows. */
 	api?: VoteApi;
+	/** Whether the reader may vote (review or more in the repo); without it, no vote form. */
+	canVote?: boolean;
 }
 
 /** A change, shown like a pull request: in force, merged or released. */
-export function ChangePage({ snapshot, changeId, claim, history, repo, tab, api }: ChangePageProps) {
+export function ChangePage({ snapshot, changeId, claim, history, repo, tab, api, canVote = true }: ChangePageProps) {
 	const branch = history?.branch || snapshot.branch || "main";
 	const record = claim ?? history?.claim ?? undefined;
 	const ending = history ? changeEnding(history) : null;
@@ -367,7 +371,7 @@ export function ChangePage({ snapshot, changeId, claim, history, repo, tab, api 
 									</li>
 								</ol>
 							)}
-							{claim && api ? <VoteForm repo={repo} claim={claim} policy={snapshot.policy} api={api} /> : null}
+							{claim && api && canVote ? <VoteForm repo={repo} claim={claim} policy={snapshot.policy} api={api} /> : null}
 							{claim ? (
 								<section className="merge-box" aria-label="Merge status">
 									<div className="merge-box__row">

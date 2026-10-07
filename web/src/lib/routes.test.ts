@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { isLoose, repoPath, splitRepo } from "./repoName";
 import { href, parseRoute } from "./routes";
 
 describe("hash routes", () => {
@@ -8,11 +9,17 @@ describe("hash routes", () => {
 		expect(parseRoute("#/inbox")).toEqual({ page: "inbox" });
 		expect(parseRoute("#/settings/agents")).toEqual({ page: "agents-settings" });
 		expect(parseRoute(href.agents())).toEqual({ page: "agents-settings" });
-		expect(parseRoute("#/repos/my-app")).toEqual({ page: "repo", repo: "my-app", tab: "changes" });
-		expect(parseRoute("#/repos/team%2Fapp/settings")).toMatchObject({ repo: "team/app", tab: "settings" });
-		for (const tab of ["claims", "agents", "audit"]) expect(parseRoute(`#/repos/my-app/${tab}`)).toMatchObject({ page: "repo", tab });
-		expect(parseRoute("#/repos/my-app/changes/add-stats")).toEqual({ page: "change", repo: "my-app", change: "add-stats", tab: "conversation" });
-		expect(parseRoute("#/repos/my-app/changes/add-stats/commits")).toMatchObject({ page: "change", tab: "commits" });
+		expect(parseRoute("#/new")).toEqual({ page: "new-repo" });
+		expect(parseRoute("#/new?owner=acme")).toEqual({ page: "new-repo", owner: "acme" });
+		expect(parseRoute("#/orgs")).toEqual({ page: "orgs" });
+		expect(parseRoute("#/orgs/acme")).toEqual({ page: "org", org: "acme" });
+		expect(parseRoute("#/repos/acme/web")).toEqual({ page: "repo", repo: "acme/web", tab: "changes" });
+		expect(parseRoute("#/repos/acme/web/settings")).toMatchObject({ repo: "acme/web", tab: "settings" });
+		for (const tab of ["claims", "agents", "audit"]) expect(parseRoute(`#/repos/acme/web/${tab}`)).toMatchObject({ page: "repo", tab });
+		expect(parseRoute("#/repos/acme/web/changes/add-stats")).toEqual({ page: "change", repo: "acme/web", change: "add-stats", tab: "conversation" });
+		expect(parseRoute("#/repos/acme/web/changes/add-stats/commits")).toMatchObject({ page: "change", tab: "commits" });
+		// A repo not yet in an org, as an Access admin sees it.
+		expect(parseRoute("#/repos/_/walkthrough-01774")).toMatchObject({ page: "repo", repo: "_/walkthrough-01774" });
 	});
 
 	it("rejects what it doesn't know", () => {
@@ -20,31 +27,44 @@ describe("hash routes", () => {
 		expect(parseRoute("#/settings")).toEqual({ page: "not-found" });
 		expect(parseRoute("#/settings/agents/x")).toEqual({ page: "not-found" });
 		expect(parseRoute("#/free/docs-site")).toEqual({ page: "not-found" });
-		expect(parseRoute("#/tasks/open-my-app")).toEqual({ page: "not-found" });
-		expect(parseRoute("#/repos/my-app/insights")).toEqual({ page: "not-found" });
-		expect(parseRoute("#/repos/my-app/changes/x/files")).toEqual({ page: "not-found" });
-		expect(parseRoute("#/repos/%E0%A4%A")).toEqual({ page: "not-found" });
+		// One segment is no longer a repo: a repo has an owner.
+		expect(parseRoute("#/repos/my-app")).toEqual({ page: "not-found" });
+		expect(parseRoute("#/repos/acme/web/insights")).toEqual({ page: "not-found" });
+		expect(parseRoute("#/repos/acme/web/changes/x/files")).toEqual({ page: "not-found" });
+		expect(parseRoute("#/repos/acme/%E0%A4%A")).toEqual({ page: "not-found" });
+		expect(parseRoute("#/orgs/a/b")).toEqual({ page: "not-found" });
 	});
 
 	it("builds links that parse back", () => {
-		expect(href.repo("team/app")).toBe("#/repos/team%2Fapp");
-		expect(href.repo("docs", "audit")).toBe("#/repos/docs/audit");
-		expect(href.change("my-app", "add-stats", "commits")).toBe("#/repos/my-app/changes/add-stats/commits");
-		for (const link of [href.repo("team/app", "settings"), href.change("a/b", "c d", "commits")]) {
-			const route = parseRoute(link);
-			expect(route.page === "repo" || route.page === "change").toBe(true);
+		expect(href.repo("acme/web")).toBe("#/repos/acme/web");
+		expect(href.repo("acme/web", "audit")).toBe("#/repos/acme/web/audit");
+		expect(href.repo("_/old-repo")).toBe("#/repos/_/old-repo");
+		expect(href.change("acme/web", "add-stats", "commits")).toBe("#/repos/acme/web/changes/add-stats/commits");
+		expect(href.newRepo()).toBe("#/new");
+		expect(href.newRepo("acme")).toBe("#/new?owner=acme");
+		expect(href.org("acme")).toBe("#/orgs/acme");
+		for (const link of [href.repo("acme/a b", "settings"), href.change("acme/web", "c d", "commits"), href.org("x y")]) {
+			expect(parseRoute(link).page).not.toBe("not-found");
 		}
-		expect(parseRoute(href.change("a/b", "c d"))).toMatchObject({ repo: "a/b", change: "c d" });
+		expect(parseRoute(href.change("acme/a b", "c d"))).toMatchObject({ repo: "acme/a b", change: "c d" });
+		expect(parseRoute(href.org("acme"))).toEqual({ page: "org", org: "acme" });
 	});
 
-	it("parses and builds code links", () => {
-		expect(parseRoute("#/repos/my-app/code")).toEqual({ page: "repo", repo: "my-app", tab: "code", path: "" });
-		expect(parseRoute("#/repos/my-app/code/src/stats/page.tsx")).toMatchObject({ tab: "code", path: "src/stats/page.tsx" });
-		expect(parseRoute("#/repos/docs/code/a%20b/c.md?ref=abc123")).toMatchObject({ tab: "code", path: "a b/c.md", ref: "abc123" });
-		expect(href.code("my-app")).toBe("#/repos/my-app/code");
-		expect(href.code("my-app", "src/a b.ts")).toBe("#/repos/my-app/code/src/a%20b.ts");
-		expect(href.code("docs", "", "abc")).toBe("#/repos/docs/code?ref=abc");
-		expect(parseRoute(href.code("team/app", "src/x#y.ts", "feature/1"))).toMatchObject({ repo: "team/app", path: "src/x#y.ts", ref: "feature/1" });
-		expect(href.inbox()).toBe("#/inbox");
+	it("puts files in the Code tab's path, encoded per segment", () => {
+		expect(href.code("acme/web")).toBe("#/repos/acme/web/code");
+		expect(href.code("acme/web", "src/a b.ts")).toBe("#/repos/acme/web/code/src/a%20b.ts");
+		expect(href.code("acme/web", "", "abc")).toBe("#/repos/acme/web/code?ref=abc");
+		expect(parseRoute(href.code("acme/web", "src/x#y.ts", "feature/1"))).toMatchObject({ repo: "acme/web", path: "src/x#y.ts", ref: "feature/1" });
+	});
+});
+
+describe("repo names", () => {
+	it("splits a full name into its owner and name, and makes URL segments of them", () => {
+		expect(splitRepo("acme/web")).toEqual({ owner: "acme", name: "web" });
+		expect(splitRepo("lone")).toEqual({ owner: "_", name: "lone" });
+		expect(repoPath("acme/my repo")).toBe("acme/my%20repo");
+		expect(repoPath("_/x")).toBe("_/x");
+		expect(isLoose("_/x")).toBe(true);
+		expect(isLoose("acme/x")).toBe(false);
 	});
 });

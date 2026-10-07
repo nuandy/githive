@@ -10,8 +10,8 @@ export interface Crumb {
 	href?: string;
 }
 
-/** A signed-in person's menu: their face or initial and handle, their agents, and signing out. */
-export function UserMenu({ me, onSignOut, agentsCurrent = false }: { me: Extract<Me, { kind: "user" }>; onSignOut: () => void; agentsCurrent?: boolean }) {
+/** A signed-in person's menu: their face or initial and handle, their organizations, their agents, and signing out. */
+export function UserMenu({ me, onSignOut, agentsCurrent = false, orgsCurrent = false }: { me: Extract<Me, { kind: "user" }>; onSignOut: () => void; agentsCurrent?: boolean; orgsCurrent?: boolean }) {
 	const initial = (me.name || me.handle).trim().charAt(0).toUpperCase() || "?";
 	const menu = useRef<HTMLDetailsElement>(null);
 	const close = () => {
@@ -48,6 +48,9 @@ export function UserMenu({ me, onSignOut, agentsCurrent = false }: { me: Extract
 					<strong>{me.name || me.handle}</strong>
 					<span className="muted">{me.email}</span>
 				</div>
+				<a role="menuitem" className="usermenu__item" href={href.orgs()} aria-current={orgsCurrent ? "page" : undefined} onClick={close}>
+					<Icon name="repo" size={15} /> Your organizations
+				</a>
 				<a role="menuitem" className="usermenu__item" href={href.agents()} aria-current={agentsCurrent ? "page" : undefined} onClick={close}>
 					<Icon name="bot" size={15} /> Agents
 				</a>
@@ -75,6 +78,7 @@ export function TopBar({
 	me,
 	onSignOut,
 	agentsCurrent = false,
+	orgsCurrent = false,
 }: {
 	crumbs: Crumb[];
 	/** Changes waiting on a person, across repos; undefined until known. */
@@ -84,6 +88,7 @@ export function TopBar({
 	me?: Me;
 	onSignOut?: () => void;
 	agentsCurrent?: boolean;
+	orgsCurrent?: boolean;
 }) {
 	return (
 		<header className="topbar">
@@ -115,7 +120,7 @@ export function TopBar({
 					<span className="topbar__inbox-label">Inbox</span>
 					{inboxCount ? <span className="topbar__inbox-count">{inboxCount}</span> : null}
 				</a>
-				{me?.kind === "user" ? <UserMenu me={me} onSignOut={onSignOut ?? (() => undefined)} agentsCurrent={agentsCurrent} /> : null}
+				{me?.kind === "user" ? <UserMenu me={me} onSignOut={onSignOut ?? (() => undefined)} agentsCurrent={agentsCurrent} orgsCurrent={orgsCurrent} /> : null}
 				{me?.kind === "access" ? (
 					<span className="topbar__access" title="Signed in through Cloudflare Access">
 						{me.label}

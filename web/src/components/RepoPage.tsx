@@ -1,5 +1,7 @@
 import type { VoteApi } from "./VoteForm";
-import type { ChangeHistory, RepoSnapshot } from "../api";
+import type { ChangeHistory, RepoAccess, RepoSnapshot } from "../api";
+import { canVote } from "../lib/permissions";
+import { RepoAdmin, type RepoManageApi } from "./RepoAdmin";
 import { holdersFromSnapshot } from "../lib/claimsMap";
 import { recordsBadge } from "../lib/claimStatus";
 import type { LiveStatus } from "../lib/liveFeed";
@@ -27,10 +29,20 @@ export interface RepoPageProps {
 	changeHistory?: ChangeHistory | null;
 	liveStatus?: LiveStatus;
 	api: RepoPageApi;
+	/** What the reader may do here (GET .../access): gates the vote form and the settings they can change. */
+	access?: RepoAccess;
+	/** Changing the repo's settings; without it, Settings only shows. */
+	manage?: RepoManageApi;
+	/** After a settings change: refresh what the page shows. */
+	onAccessChanged?: () => void;
+	/** After the repo is deleted. */
+	onDeleted?: () => void;
 }
 
 /** A repo: claims in force as its changes, its claims map, code, agents, audit and settings, or one change. */
-export function RepoPage({ repo, view, snapshot, changeHistory, liveStatus = "off", api }: RepoPageProps) {
+export function RepoPage({ repo, view, snapshot, changeHistory, liveStatus = "off", api, access, manage, onAccessChanged, onDeleted }: RepoPageProps) {
+	// Until the reader's permission is known, no vote form where it would be checked.
+	const voting = access ? canVote(access.level) : !manage;
 	const branch = snapshot.branch ?? "main";
 	const tabs: TabItem[] = [
 		{ id: "changes", label: "Changes", icon: "pull", href: href.repo(repo), count: snapshot.claims.length },
@@ -61,6 +73,7 @@ export function RepoPage({ repo, view, snapshot, changeHistory, liveStatus = "of
 						repo={repo}
 						tab={view.tab}
 						api={api}
+						canVote={voting}
 					/>
 				) : current === "audit" ? (
 					<AuditTab snapshot={snapshot} />
@@ -71,7 +84,10 @@ export function RepoPage({ repo, view, snapshot, changeHistory, liveStatus = "of
 				) : current === "agents" ? (
 					<AgentsTab snapshot={snapshot} />
 				) : current === "settings" ? (
-					<SettingsTab snapshot={snapshot} />
+					<SettingsTab
+						snapshot={snapshot}
+						access={manage ? <RepoAdmin repo={repo} access={access} manage={manage} onChanged={() => onAccessChanged?.()} onDeleted={() => onDeleted?.()} /> : undefined}
+					/>
 				) : (
 					<ChangeList snapshot={snapshot} repo={repo} />
 				)}

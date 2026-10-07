@@ -126,3 +126,24 @@
 		margin-left: 28px;
 	}
 }
+
+.repo-list__actions {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 8px;
+}
+
+.button.accent-link {
+	background: var(--accent-fill);
+	border-color: var(--accent-fill);
+	color: var(--on-accent);
+}
+
+.button.accent-link:hover {
+	background: color-mix(in srgb, var(--accent-fill) 90%, #000);
+}
+
+.repo-row__owner {
+	font-weight: 400;
+	color: var(--text-muted);
+}

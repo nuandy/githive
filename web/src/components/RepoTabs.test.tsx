@@ -10,9 +10,9 @@ import { RepoPage } from "./RepoPage";
 
 describe("a repo", () => {
 	it("shows claims in force as open changes, with head and approvals", () => {
-		const html = renderToStaticMarkup(<ChangeList snapshot={snapshot} repo="docs-site" />);
+		const html = renderToStaticMarkup(<ChangeList snapshot={snapshot} repo="acme/docs-site" />);
 		expect(html).toContain("Rewrite the C section");
-		expect(html).toContain('href="#/repos/docs-site/changes/c-1"');
+		expect(html).toContain('href="#/repos/acme/docs-site/changes/c-1"');
 		expect(html).toContain("src/c/");
 		expect(html).toContain("by agent-c");
 		expect(html).toContain("1/2 approvals");
@@ -49,7 +49,7 @@ describe("a repo", () => {
 
 	it("says in the header and settings how claims are kept, sharded or in one record", () => {
 		const page = (sharding: typeof snapshot.sharding) =>
-			renderToStaticMarkup(<RepoPage repo="docs-site" view={{ kind: "repo", tab: "settings" }} snapshot={{ ...snapshot, sharding, shardDepth: sharding && typeof sharding === "object" ? 2 : undefined }} api={stubApi()} />);
+			renderToStaticMarkup(<RepoPage repo="acme/docs-site" view={{ kind: "repo", tab: "settings" }} snapshot={{ ...snapshot, sharding, shardDepth: sharding && typeof sharding === "object" ? 2 : undefined }} api={stubApi()} />);
 		const flat = page("on demand");
 		expect(flat).toMatch(/class="pill pill--outline mode-badge"[^>]*>One claims record/);
 		expect(flat).toMatch(/<dt>Claims<\/dt><dd>Claims are kept in one record/);
@@ -57,7 +57,7 @@ describe("a repo", () => {
 		expect(sharded).toMatch(/mode-badge mode-badge--sharded"[^>]*>Sharded claims/);
 		expect(sharded).toContain("(8 agents hold claims)");
 		const votes = renderToStaticMarkup(
-			<RepoPage repo="docs-site" view={{ kind: "repo", tab: "settings" }} snapshot={{ ...snapshot, sharding: "on demand", votesSharding: { since: "2026-10-07T09:30:00.000Z", because: "8 reviewers voting" } }} api={stubApi()} />,
+			<RepoPage repo="acme/docs-site" view={{ kind: "repo", tab: "settings" }} snapshot={{ ...snapshot, sharding: "on demand", votesSharding: { since: "2026-10-07T09:30:00.000Z", because: "8 reviewers voting" } }} api={stubApi()} />,
 		);
 		expect(votes).toMatch(/mode-badge--sharded"[^>]*>Sharded votes/);
 		expect(votes).toMatch(/<dt>Votes<\/dt><dd>Votes are split by commit/);
@@ -67,7 +67,7 @@ describe("a repo", () => {
 	});
 
 	it("shows one claim like a pull request, with its commits, votes and hosted agents", () => {
-		const html = renderToStaticMarkup(<ChangePage snapshot={snapshot} changeId="c-1" claim={snapshot.claims[0]} history={historyFixture} repo="docs-site" tab="conversation" />);
+		const html = renderToStaticMarkup(<ChangePage snapshot={snapshot} changeId="c-1" claim={snapshot.claims[0]} history={historyFixture} repo="acme/docs-site" tab="conversation" />);
 		expect(html).toMatch(/<strong>agent-c<\/strong> wants to merge <code[^>]*>changes\/c-1<\/code>/);
 		expect(html).toContain("rev-1</strong> (tests reviewer) approved these changes");
 		expect(html).toContain("First draft of section C");
@@ -77,20 +77,20 @@ describe("a repo", () => {
 		expect(html).toMatch(/Commits<\/span><span class="counter">2<\/span>/);
 		// An agent's question for a person, and a person's vote form.
 		const asked = { ...snapshot.claims[0], attention: { reason: "reviewers disagree on the cache size", agent: "agent-c", at: "" } };
-		const withQuestion = renderToStaticMarkup(<ChangePage snapshot={snapshot} changeId="c-1" claim={asked} history={historyFixture} repo="docs-site" tab="conversation" api={{ vote: async () => ({}) }} />);
+		const withQuestion = renderToStaticMarkup(<ChangePage snapshot={snapshot} changeId="c-1" claim={asked} history={historyFixture} repo="acme/docs-site" tab="conversation" api={{ vote: async () => ({}) }} />);
 		expect(withQuestion).toContain("agent-c asks you");
 		expect(withQuestion).toContain("reviewers disagree on the cache size");
 		expect(withQuestion).toContain("Submit vote");
 		expect(withQuestion).toMatch(/<option value="review"[^>]*>review reviewer<\/option>/);
 		expect(withQuestion).toMatch(/<option value="security"[^>]*>security reviewer<\/option>/);
-		const loading = renderToStaticMarkup(<ChangePage snapshot={snapshot} changeId="c-1" claim={{ ...snapshot.claims[0], head: null, hosted: undefined }} repo="docs-site" tab="conversation" />);
+		const loading = renderToStaticMarkup(<ChangePage snapshot={snapshot} changeId="c-1" claim={{ ...snapshot.claims[0], head: null, hosted: undefined }} repo="acme/docs-site" tab="conversation" />);
 		expect(loading).toContain("nothing pushed yet");
 		expect(loading).toContain("Loading history");
 	});
 
 	it("has Changes, Audit and Settings tabs", () => {
-		const html = renderToStaticMarkup(<RepoPage repo="docs-site" view={{ kind: "repo", tab: "audit" }} snapshot={snapshot} api={stubApi()} />);
-		expect(html).toContain('href="#/repos/docs-site/audit"');
+		const html = renderToStaticMarkup(<RepoPage repo="acme/docs-site" view={{ kind: "repo", tab: "audit" }} snapshot={snapshot} api={stubApi()} />);
+		expect(html).toContain('href="#/repos/acme/docs-site/audit"');
 		expect(html).toMatch(/aria-current="page"[^>]*>.*Audit/);
 		for (const tab of ["Changes", "Settings"]) expect(html).toContain(`<span>${tab}</span>`);
 	});

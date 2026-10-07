@@ -1,8 +1,10 @@
+import type { Level } from "./lib/permissions";
+import { repoPath } from "./lib/repoName";
 import type { Summaries } from "./lib/repos";
 
 // The dashboard's calls to the Worker.
 
-/** A repo, as the dashboard shows it (GET /repos/:repo). */
+/** A repo, as the dashboard shows it (GET /repos/:owner/:name). */
 export interface RepoSnapshot {
 	repo: string;
 	/** `grants`: who may vote as each role that can block a merge (newer servers; unlisted: people and GitHive's reviewers). */
@@ -125,6 +127,59 @@ export interface Connection {
 	createdAt: string;
 }
 
+/** A role in an org. A person's own namespace has only its owner. */
+export type OrgRole = "owner" | "admin" | "member";
+
+/** An org, or a person's own namespace (`personal`), as GET /orgs lists them, with the caller's role. */
+export interface Org {
+	id: string;
+	slug: string;
+	name: string | null;
+	personal: boolean;
+	defaultPermission: Level;
+	membersCanCreateRepos: boolean;
+}
+
+export type MyOrg = Org & { role: OrgRole };
+
+/** A repo record (POST /repos, GET /orgs/:org). */
+export interface RepoRecord {
+	id: string;
+	org: string;
+	name: string;
+	fullName: string;
+	visibility: "private" | "public";
+	createdAt: string;
+}
+
+/** One org (GET /orgs/:org): its people and teams only to members, its invitations only to owners and admins. */
+export interface OrgDetail extends Org {
+	role: OrgRole | null;
+	canCreateRepos: boolean;
+	repos: RepoRecord[];
+	members: { userId: string; handle: string; name: string | null; avatarUrl: string | null; role: OrgRole }[];
+	teams: { id: string; slug: string; name: string | null; members: string[] }[];
+	invites: { email: string; role: OrgRole; createdAt: string }[];
+}
+
+/** What the caller may do in a repo (GET /repos/:owner/:name/access). */
+export interface RepoAccess {
+	id: string;
+	fullName: string;
+	level: Level;
+	visibility: "private" | "public" | null;
+}
+
+/** A new repository: imported, copied, or empty. */
+export interface NewRepoInput {
+	owner: string;
+	name: string;
+	import_url?: string;
+	branch?: string;
+	copy_from?: string;
+	visibility: "private" | "public";
+}
+
 /** Fired when the server says the session is gone, so the dashboard shows the sign-in screen again. */
 export const SIGNED_OUT_EVENT = "githive:signed-out";
 
@@ -155,18 +210,46 @@ async function call<T>(method: string, path: string, body?: unknown): Promise<T>
 export const api = {
 	/** Every repo with its counts, for the Repositories list and the Inbox (one read, kept by the server). */
 	summaries: () => call<Summaries>("GET", "/summaries"),
-	snapshot: (repo: string) => call<RepoSnapshot>("GET", `/repos/${encodeURIComponent(repo)}`),
-	audit: (repo: string) => call<RepoAudit>("GET", `/repos/${encodeURIComponent(repo)}/audit`),
+	snapshot: (repo: string) => call<RepoSnapshot>("GET", `/repos/${repoPath(repo)}`),
+	audit: (repo: string) => call<RepoAudit>("GET", `/repos/${repoPath(repo)}/audit`),
 	/** A repo's files at a branch or commit (its default branch if none). */
-	tree: (repo: string, ref?: string) => call<RepoTree>("GET", `/repos/${encodeURIComponent(repo)}/tree${ref ? `?ref=${encodeURIComponent(ref)}` : ""}`),
+	tree: (repo: string, ref?: string) => call<RepoTree>("GET", `/repos/${repoPath(repo)}/tree${ref ? `?ref=${encodeURIComponent(ref)}` : ""}`),
 	/** One file's text at a branch or commit. */
 	file: (repo: string, path: string, ref?: string) =>
-		call<RepoFile>("GET", `/repos/${encodeURIComponent(repo)}/file?path=${encodeURIComponent(path)}${ref ? `&ref=${encodeURIComponent(ref)}` : ""}`),
+		call<RepoFile>("GET", `/repos/${repoPath(repo)}/file?path=${encodeURIComponent(path)}${ref ? `&ref=${encodeURIComponent(ref)}` : ""}`),
 	/** A person's vote on a change's current commit. */
-	vote: (repo: string, change: string, vote: VoteInput) => call<unknown>("POST", `/repos/${encodeURIComponent(repo)}/changes/${encodeURIComponent(change)}/votes`, vote),
+	vote: (repo: string, change: string, vote: VoteInput) => call<unknown>("POST", `/repos/${repoPath(repo)}/changes/${encodeURIComponent(change)}/votes`, vote),
 	/** One change: its claim or how it ended, its commits and the votes on them. */
-	change: (repo: string, change: string) => call<ChangeHistory>("GET", `/repos/${encodeURIComponent(repo)}/changes/${encodeURIComponent(change)}`),
+	change: (repo: string, change: string) => call<ChangeHistory>("GET", `/repos/${repoPath(repo)}/changes/${encodeURIComponent(change)}`),
+	/** What the caller may do in a repo, and whether it's private or public. */
+	access: (repo: string) => call<RepoAccess>("GET", `/repos/${repoPath(repo)}/access`),
 };
+
+/** Repositories, orgs and their people: making, settings, members, teams and collaborators. */
+export const manage = {
+	/** Every repo the caller can see, by full name. */
+	repos: () => call<{ name: string; id: string; visibility: "private" | "public" }[]>("GET", "/repos"),
+	createRepo: (input: NewRepoInput) => call<RepoRecord>("POST", "/repos", input),
+	setVisibility: (repo: string, visibility: "private" | "public") => call<RepoRecord>("PATCH", `/repos/${repoPath(repo)}`, { visibility }),
+	deleteRepo: (repo: string) => call<unknown>("DELETE", `/repos/${repoPath(repo)}`),
+	collaborators: (repo: string) => call<{ handle: string; permission: Level }[]>("GET", `/repos/${repoPath(repo)}/collaborators`),
+	setCollaborator: (repo: string, handle: string, permission: Level) => call<unknown>("PUT", `/repos/${repoPath(repo)}/collaborators/${encodeURIComponent(handle)}`, { permission }),
+	removeCollaborator: (repo: string, handle: string) => call<unknown>("DELETE", `/repos/${repoPath(repo)}/collaborators/${encodeURIComponent(handle)}`),
+	orgs: () => call<MyOrg[]>("GET", "/orgs"),
+	createOrg: (slug: string, name: string) => call<Org>("POST", "/orgs", { slug, name }),
+	org: (slug: string) => call<OrgDetail>("GET", `/orgs/${encodeURIComponent(slug)}`),
+	updateOrg: (slug: string, patch: { name?: string | null; default_permission?: Level; members_can_create_repos?: boolean }) => call<Org>("PATCH", `/orgs/${encodeURIComponent(slug)}`, patch),
+	addMember: (slug: string, email: string, role: OrgRole) => call<{ added?: string; invited?: string; role: OrgRole }>("POST", `/orgs/${encodeURIComponent(slug)}/members`, { email, role }),
+	setRole: (slug: string, handle: string, role: OrgRole) => call<unknown>("PATCH", `/orgs/${encodeURIComponent(slug)}/members/${encodeURIComponent(handle)}`, { role }),
+	removeMember: (slug: string, handle: string) => call<unknown>("DELETE", `/orgs/${encodeURIComponent(slug)}/members/${encodeURIComponent(handle)}`),
+	cancelInvite: (slug: string, email: string) => call<unknown>("DELETE", `/orgs/${encodeURIComponent(slug)}/invites/${encodeURIComponent(email)}`),
+	createTeam: (slug: string, team: string, name: string) => call<{ team: string }>("POST", `/orgs/${encodeURIComponent(slug)}/teams`, { slug: team, name }),
+	deleteTeam: (slug: string, team: string) => call<unknown>("DELETE", `/orgs/${encodeURIComponent(slug)}/teams/${encodeURIComponent(team)}`),
+	addTeamMember: (slug: string, team: string, handle: string) => call<unknown>("PUT", `/orgs/${encodeURIComponent(slug)}/teams/${encodeURIComponent(team)}/members/${encodeURIComponent(handle)}`),
+	removeTeamMember: (slug: string, team: string, handle: string) => call<unknown>("DELETE", `/orgs/${encodeURIComponent(slug)}/teams/${encodeURIComponent(team)}/members/${encodeURIComponent(handle)}`),
+};
+
+export type ManageApi = typeof manage;
 
 /** Who is looking, or null when nobody is signed in (a 401 here is the normal signed-out answer, not an error). */
 export async function fetchMe(): Promise<Me | null> {
@@ -195,7 +278,7 @@ export type AccountApi = typeof account;
 /** Everything the dashboard calls; tests pass stand-ins. */
 export type DashboardApi = typeof api;
 
-/** The WebSocket URL of a repo's live feed ("repo:<repo>"). Each message means "something changed". */
-export function liveFeedUrl(key: string, location: Pick<Location, "protocol" | "host"> = window.location): string {
-	return `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/live/${key}`;
+/** The WebSocket URL of a repo's live feed (GET /repos/:owner/:name/live). Each message means "something changed". */
+export function liveFeedUrl(repo: string, location: Pick<Location, "protocol" | "host"> = window.location): string {
+	return `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/repos/${repoPath(repo)}/live`;
 }

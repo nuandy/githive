@@ -1,7 +1,10 @@
 import { useEffect, useRef, useState } from "react";
-import { SIGNED_OUT_EVENT, account, api, fetchMe, type Me } from "./api";
+import { SIGNED_OUT_EVENT, account, api, fetchMe, manage, type Me } from "./api";
 import { AgentsPage } from "./components/AgentsPage";
 import { InboxPage } from "./components/InboxPage";
+import { NewRepoPage } from "./components/NewRepoPage";
+import { OrgPage } from "./components/OrgPage";
+import { OrgsPage } from "./components/OrgsPage";
 import { PageBoundary } from "./components/PageBoundary";
 import { SignIn } from "./components/SignIn";
 import { RepoList } from "./components/RepoList";
@@ -20,6 +23,7 @@ import "./App.css";
 export function routePlace(route: Route): string {
 	if (route.page === "repo") return `repo:${route.repo}`;
 	if (route.page === "change") return `change:${route.repo}:${route.change}`;
+	if (route.page === "org") return `org:${route.org}`;
 	return route.page;
 }
 
@@ -109,7 +113,7 @@ export function Dashboard({ me, onSignOut }: { me: Me; onSignOut: () => void }) 
 	const inbox = buildInbox(summaries.data);
 
 	// The repo's live feed: while it's connected, a ping triggers each refresh and polling slows to a safety net.
-	const feedKey = repoName !== null ? `repo:${repoName}` : null;
+	const feedKey = repoName;
 	const refreshers = useRef<(() => void)[]>([]);
 	const liveStatus = useLiveFeed(feedKey, () => refreshers.current.forEach((refresh) => refresh()));
 	const every = (ms: number) => (liveStatus === "live" ? 30_000 : ms);
@@ -117,6 +121,8 @@ export function Dashboard({ me, onSignOut }: { me: Me; onSignOut: () => void }) 
 	const snapshot = usePoll(repoName !== null ? `repo:${repoName}` : null, () => api.snapshot(repoName!), every(5_000));
 	// The audit replays every record in Git, so it loads on its own and less often.
 	const audit = usePoll(repoName !== null ? `audit:${repoName}` : null, () => api.audit(repoName!), 60_000);
+	// What the reader may do here: the vote form and the settings they can change.
+	const access = usePoll(repoName !== null ? `access:${repoName}` : null, () => api.access(repoName!), 60_000);
 	const changeId = route.page === "change" ? route.change : null;
 	const change = usePoll(changeId ? `change:${repoName}:${changeId}` : null, () => api.change(repoName!, changeId!), every(10_000));
 	refreshers.current = [snapshot.refresh, audit.refresh, change.refresh];
@@ -148,6 +154,15 @@ export function Dashboard({ me, onSignOut }: { me: Me; onSignOut: () => void }) 
 	} else if (route.page === "agents-settings") {
 		crumbs.push({ label: "Agents" });
 		title = "Agents · GitHive";
+	} else if (route.page === "new-repo") {
+		crumbs.push({ label: "Repositories", href: href.repos() }, { label: "New repository" });
+		title = "New repository · GitHive";
+	} else if (route.page === "orgs") {
+		crumbs.push({ label: "Your organizations" });
+		title = "Your organizations · GitHive";
+	} else if (route.page === "org") {
+		crumbs.push({ label: "Your organizations", href: href.orgs() }, { label: route.org });
+		title = `${route.org} · GitHive`;
 	}
 	useEffect(() => {
 		document.title = title;
@@ -155,8 +170,26 @@ export function Dashboard({ me, onSignOut }: { me: Me; onSignOut: () => void }) 
 
 	const errors = [summaries.error && `Repositories: ${summaries.error}`, snapshot.data && snapshot.error && `${repoName}: ${snapshot.error}`].filter((error): error is string => !!error);
 
+	/** For pages that belong to a person signed in to GitHive, not an Access caller. */
+	const forPeople = (what: string) => (
+		<main className="page" id="main">
+			<div className="box empty">
+				<h2>{what} belong to people signed in to GitHive</h2>
+				<p>
+					Through Cloudflare Access you see every repository, but have no namespace or organizations of your own. <a href={href.repos()}>Back to Repositories</a>.
+				</p>
+			</div>
+		</main>
+	);
+
 	let page;
-	if (route.page === "agents-settings") {
+	if (route.page === "new-repo") {
+		page = me.kind === "user" ? <NewRepoPage manage={manage} {...(route.owner ? { owner: route.owner } : {})} /> : forPeople("New repositories");
+	} else if (route.page === "orgs") {
+		page = me.kind === "user" ? <OrgsPage me={me} manage={manage} /> : forPeople("Organizations");
+	} else if (route.page === "org") {
+		page = <OrgPage slug={route.org} me={me.kind === "user" ? me : { handle: "" }} manage={manage} />;
+	} else if (route.page === "agents-settings") {
 		page =
 			me.kind === "user" ? (
 				<AgentsPage me={me} account={account} />
@@ -173,7 +206,7 @@ export function Dashboard({ me, onSignOut }: { me: Me; onSignOut: () => void }) 
 	} else if (route.page === "inbox") {
 		page = <InboxPage groups={inbox.groups} loaded={summaries.loaded} error={summaries.error} />;
 	} else if (route.page === "repos") {
-		page = <RepoList rows={summaries.data ? buildRepoRows(summaries.data) : []} loaded={summaries.loaded} />;
+		page = <RepoList rows={summaries.data ? buildRepoRows(summaries.data) : []} loaded={summaries.loaded} canCreate={me.kind === "user"} />;
 	} else if (repoName !== null && view) {
 		if (snapshot.data) {
 			page = (
@@ -184,6 +217,16 @@ export function Dashboard({ me, onSignOut }: { me: Me; onSignOut: () => void }) 
 					changeHistory={change.data ?? (change.error ? null : undefined)}
 					liveStatus={liveStatus}
 					api={api}
+					{...(access.data ? { access: access.data } : {})}
+					manage={manage}
+					onAccessChanged={() => {
+						access.refresh();
+						summaries.refresh();
+					}}
+					onDeleted={() => {
+						summaries.refresh();
+						window.location.hash = href.repos();
+					}}
 				/>
 			);
 		} else if (!snapshot.error) {
@@ -192,9 +235,9 @@ export function Dashboard({ me, onSignOut }: { me: Me; onSignOut: () => void }) 
 			page = (
 				<main className="page" id="main">
 					<div className="box empty">
-						<h2>{repoName} isn't open for agents</h2>
+						<h2>{/^no repo /.test(snapshot.error) ? `There's no ${repoName} you can see` : `${repoName} isn't open for agents yet`}</h2>
 						<p>
-							{snapshot.error} <a href={href.repos()}>Back to Repositories</a>.
+							{/^no repo /.test(snapshot.error) ? "It doesn't exist, or you aren't one of the people who can see it." : snapshot.error} <a href={href.repos()}>Back to Repositories</a>.
 						</p>
 					</div>
 				</main>
@@ -218,7 +261,15 @@ export function Dashboard({ me, onSignOut }: { me: Me; onSignOut: () => void }) 
 			<a className="skip-link" href="#main">
 				Skip to content
 			</a>
-			<TopBar crumbs={crumbs} inboxCount={inbox.count} inboxCurrent={route.page === "inbox"} me={me} onSignOut={onSignOut} agentsCurrent={route.page === "agents-settings"} />
+			<TopBar
+				crumbs={crumbs}
+				inboxCount={inbox.count}
+				inboxCurrent={route.page === "inbox"}
+				me={me}
+				onSignOut={onSignOut}
+				agentsCurrent={route.page === "agents-settings"}
+				orgsCurrent={route.page === "orgs" || route.page === "org"}
+			/>
 			{errors.length > 0 ? (
 				<div className="page-errors" role="alert">
 					<div className="page-errors__inner">

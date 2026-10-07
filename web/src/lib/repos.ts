@@ -3,6 +3,7 @@ import { latest, timeOf } from "./model";
 // The Repositories list: the repos agents work on.
 
 export interface RepoRow {
+	/** Its full name, <owner>/<name>. */
 	name: string;
 	/** Claims in force. */
 	open: number;
@@ -29,7 +30,8 @@ export interface RepoSummary {
 }
 
 export interface Summaries {
-	repos: { repo: string; since: string; summary: RepoSummary | null }[];
+	/** Every repo the reader can see, by full name (<owner>/<name>), with its counts once GitHive has started on it. */
+	repos: { repo: string; id?: string; since: string; summary: RepoSummary | null }[];
 }
 
 function summaryRow(name: string, since: string, summary: RepoSummary | null): RepoRow {

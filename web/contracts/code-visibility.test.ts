@@ -19,18 +19,18 @@ describe("dashboard change API", () => {
 
 	it("browses code, reads a change and posts a person's vote", async () => {
 		const request = mockFetch(new Map<string, unknown>([
-			["/repos/team%2Fapp/tree?ref=master", { ref: "master", commit: "abc", files: ["a.ts"], truncated: false }],
-			["/repos/team%2Fapp/tree", { ref: "main", commit: "abc", files: [], truncated: false }],
-			["/repos/team%2Fapp/file?path=src%2Fa%20b.ts&ref=abc", { ref: "abc", commit: "abc", path: "src/a b.ts", size: 3, text: "hi\n" }],
-			["/repos/docs/changes/c-1", { change: "c-1", branch: "main", claim: null, released: [], commits: [], votes: [] }],
-			["/repos/docs/changes/c-1/votes", { commit: "h1", role: "security", verdict: "reject" }],
+			["/repos/team/app/tree?ref=master", { ref: "master", commit: "abc", files: ["a.ts"], truncated: false }],
+			["/repos/team/app/tree", { ref: "main", commit: "abc", files: [], truncated: false }],
+			["/repos/team/app/file?path=src%2Fa%20b.ts&ref=abc", { ref: "abc", commit: "abc", path: "src/a b.ts", size: 3, text: "hi\n" }],
+			["/repos/acme/docs/changes/c-1", { change: "c-1", branch: "main", claim: null, released: [], commits: [], votes: [] }],
+			["/repos/acme/docs/changes/c-1/votes", { commit: "h1", role: "security", verdict: "reject" }],
 		]));
 		try {
 			await api.tree("team/app", "master");
 			await api.tree("team/app");
 			await expect(api.file("team/app", "src/a b.ts", "abc")).resolves.toMatchObject({ text: "hi\n" });
-			await api.change("docs", "c-1");
-			await api.vote("docs", "c-1", { role: "security", verdict: "reject", evidence: "Leaks the token" });
+			await api.change("acme/docs", "c-1");
+			await api.vote("acme/docs", "c-1", { role: "security", verdict: "reject", evidence: "Leaks the token" });
 			const calls = request.mock.calls.map(([input, init]) => [String(input), init?.method ?? "GET"]);
 			expect(calls.map(([, method]) => method)).toEqual(["GET", "GET", "GET", "GET", "POST"]);
 			expect(JSON.parse(String(request.mock.calls[4][1]?.body))).toEqual({ role: "security", verdict: "reject", evidence: "Leaks the token" });
@@ -49,7 +49,7 @@ describe("dashboard change API", () => {
 	});
 
 	it("opens a repo's live feed on the same host", () => {
-		expect(liveFeedUrl("repo:docs", { protocol: "https:", host: "githive.example" })).toBe("wss://githive.example/live/repo:docs");
-		expect(liveFeedUrl("repo:docs", { protocol: "http:", host: "localhost:5173" })).toBe("ws://localhost:5173/live/repo:docs");
+		expect(liveFeedUrl("acme/docs", { protocol: "https:", host: "githive.example" })).toBe("wss://githive.example/repos/acme/docs/live");
+		expect(liveFeedUrl("acme/my docs", { protocol: "http:", host: "localhost:5173" })).toBe("ws://localhost:5173/repos/acme/my%20docs/live");
 	});
 });

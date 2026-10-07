@@ -6,7 +6,7 @@ export const NOW = Date.now();
 export const ago = (minutes: number) => new Date(NOW - minutes * 60_000).toISOString();
 
 export const repoSnapshot: RepoSnapshot = {
-	repo: "docs-site",
+	repo: "acme/docs-site",
 	policy: { required: 2, vetoes: ["security"] },
 	verify: ["npm test"],
 	verified: true,

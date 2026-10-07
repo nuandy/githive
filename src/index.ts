@@ -350,6 +350,9 @@ app.post("/admin/repos/:id/adopt", async (c) => {
 	requireAccess(c);
 	const { owner, name } = await jsonArgs(c);
 	const orgs = new OrgStore(c.env.DB);
+	// A person's own namespace may not exist yet if they haven't been back since orgs arrived.
+	const person = await orgs.userByHandle(String(owner ?? ""));
+	if (person && !(await orgs.org(person.handle))) await orgs.personalOrg(person);
 	const org = await orgs.orgOrFail(String(owner ?? ""));
 	return c.json(await orgs.addRepo(org, String(name ?? c.req.param("id")), null, { id: c.req.param("id") }), 201);
 });

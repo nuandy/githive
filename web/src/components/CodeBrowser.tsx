@@ -1,6 +1,7 @@
 import type { RepoFile, RepoTree } from "../api";
 import { usePoll } from "../hooks/usePoll";
 import { shortSha } from "../lib/model";
+import { splitRepo } from "../lib/repoName";
 import { href } from "../lib/routes";
 import { listDir, normalizePath, pathCrumbs, pathKind } from "../lib/tree";
 import { Icon } from "./Icon";
@@ -51,7 +52,7 @@ export function CodeView({ repo, path, refParam, branch, tree, treeError, file, 
 				) : null}
 				<nav aria-label="File path" className="code__crumbs">
 					<h2 id="code-title" className="code__path">
-						<a href={link("")}>{repo}</a>
+						<a href={link("")}>{splitRepo(repo).name}</a>
 						{pathCrumbs(clean).map((crumb, index, all) => (
 							<span key={crumb.path}>
 								<span className="code__slash">/</span>

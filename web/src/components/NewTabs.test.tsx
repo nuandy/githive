@@ -26,14 +26,14 @@ describe("the Commits tab", () => {
 
 describe("the Inbox", () => {
 	const summaries = {
-		repos: [{ repo: "my-app", since: ago(10), summary: { waiting: [{ change: "fix-login", title: "Fix login", reason: "Reviewers disagree after 3 revisions" }] } }],
+		repos: [{ repo: "acme/my-app", since: ago(10), summary: { waiting: [{ change: "fix-login", title: "Fix login", reason: "Reviewers disagree after 3 revisions" }] } }],
 	};
 
 	it("lists what waits on you, grouped by repo, each linking to its change", () => {
 		const { groups } = buildInbox(summaries);
 		const html = renderToStaticMarkup(<InboxPage groups={groups} loaded />);
-		expect(html).toContain('<a href="#/repos/my-app">my-app</a>');
-		expect(html).toContain('<a href="#/repos/my-app/changes/fix-login" class="inbox__title">Fix login</a>');
+		expect(html).toContain('<a href="#/repos/acme/my-app">acme/my-app</a>');
+		expect(html).toContain('<a href="#/repos/acme/my-app/changes/fix-login" class="inbox__title">Fix login</a>');
 		expect(html).toContain("Reviewers disagree after 3 revisions");
 	});
 
@@ -61,7 +61,7 @@ describe("the repo header", () => {
 		expect(renderToStaticMarkup(<LiveDot status="live" />)).toMatch(/live-dot--live.*Live/);
 		expect(renderToStaticMarkup(<LiveDot status="reconnecting" />)).toContain("Reconnecting");
 		expect(renderToStaticMarkup(<LiveDot status="off" />)).toBe("");
-		const page = renderToStaticMarkup(<RepoPage repo="docs-site" view={{ kind: "repo", tab: "changes" }} snapshot={repoSnapshot} liveStatus="live" api={stubApi()} />);
+		const page = renderToStaticMarkup(<RepoPage repo="acme/docs-site" view={{ kind: "repo", tab: "changes" }} snapshot={repoSnapshot} liveStatus="live" api={stubApi()} />);
 		expect(page).toContain("live-dot--live");
 		for (const tab of ["Changes", "Claims", "Code", "Agents", "Audit", "Settings"]) expect(page).toContain(`<span>${tab}</span>`);
 		expect(page).not.toMatch(/elected|Insights|Activity/);
@@ -69,7 +69,14 @@ describe("the repo header", () => {
 });
 
 describe("Settings", () => {
-	it("says the settings can't be changed here", () => {
-		expect(renderToStaticMarkup(<SettingsTab snapshot={repoSnapshot} />)).toMatch(/can.{1,6}t be changed here.*start/);
+	it("says how changes merge is set when GitHive starts, and that a role can go to a team", () => {
+		const html = renderToStaticMarkup(<SettingsTab snapshot={repoSnapshot} />);
+		expect(html).toMatch(/set once, when GitHive starts on the repo.*start/);
+		expect(html).toContain("@org/team");
+	});
+
+	it("shows a team granted a role as the grant names it", () => {
+		const granted = { ...repoSnapshot, policy: { ...repoSnapshot.policy, vetoes: ["security"], grants: { security: ["@acme/security", "person:*"] } } };
+		expect(renderToStaticMarkup(<SettingsTab snapshot={granted} />)).toContain("security: @acme/security, people");
 	});
 });

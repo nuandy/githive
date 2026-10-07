@@ -17,7 +17,7 @@ const claim = (change: string, intent: string, agent: string, paths: string[]): 
 });
 const snapshot = { ...repoSnapshot, claims: [claim("stats", "Stats page", "agent-a", ["src/stats/", "src/stats/new.ts"]), claim("readme", "README", "agent-b", ["README.md"])] };
 // A conflict, where the server reports one, shows on the holder's paths.
-const holders = holdersFromSnapshot(snapshot, "my-app").map((h) => (h.change === "readme" ? { ...h, conflicts: ["README.md"] } : h));
+const holders = holdersFromSnapshot(snapshot, "acme/my-app").map((h) => (h.change === "readme" ? { ...h, conflicts: ["README.md"] } : h));
 const tree = { ref: "master", commit: "abc", files: ["README.md", "docs/guide.md", "src/index.ts", "src/stats/page.tsx"], truncated: false };
 
 describe("the Claims map", () => {
@@ -31,9 +31,9 @@ describe("the Claims map", () => {
 
 	it("colors claimed files and folders, links them to their change, and marks conflicts", () => {
 		const html = renderToStaticMarkup(<ClaimsMap branch="master" holders={holders} tree={tree} />);
-		expect(html).toMatch(/<a href="#\/repos\/my-app\/changes\/readme" class="claims__item claims__item--held claim-c1"[^>]*>.*README\.md.*aria-label="conflict"/);
+		expect(html).toMatch(/<a href="#\/repos\/acme\/my-app\/changes\/readme" class="claims__item claims__item--held claim-c1"[^>]*>.*README\.md.*aria-label="conflict"/);
 		expect(html).toMatch(/<summary class="claims__item claims__dir claims__item--held claim-c0"[^>]*>.*stats/);
-		expect(html).toMatch(/<a href="#\/repos\/my-app\/changes\/stats" class="claims__item claims__item--held claim-c0"[^>]*>.*page\.tsx/);
+		expect(html).toMatch(/<a href="#\/repos\/acme\/my-app\/changes\/stats" class="claims__item claims__item--held claim-c0"[^>]*>.*page\.tsx/);
 		expect(html).toMatch(/<span class="claims__item">.*index\.ts/);
 		// A folder with claims inside opens; one without stays folded unless it is small at the top.
 		expect(html).toMatch(/<details open="">.*src/);

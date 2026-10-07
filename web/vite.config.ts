@@ -12,6 +12,7 @@ export default defineConfig({
 	plugins: [react()],
 	build: { outDir: "dist", emptyOutDir: true },
 	server: {
-		proxy: Object.fromEntries(["/repos", "/api", "/summaries", "/live", "/me", "/auth"].map((p) => [p, { target: api, changeOrigin: true, ws: p === "/live" }])),
+		// /repos carries each repo's live feed too (a WebSocket at /repos/<owner>/<name>/live).
+		proxy: Object.fromEntries(["/repos", "/api", "/summaries", "/live", "/me", "/auth", "/orgs"].map((p) => [p, { target: api, changeOrigin: true, ws: p === "/live" || p === "/repos" }])),
 	},
 });

@@ -16,16 +16,16 @@ const claim = (change: string, agent: string, paths: string[]): RepoSnapshot["cl
 const files = ["README.md", "docs/guide.md", "src/index.ts", "src/stats/page.tsx", "src/stats/charts/bar.tsx"];
 
 describe("the claims map", () => {
-	const holders = holdersFromSnapshot({ claims: [claim("stats", "agent-a", ["src/stats/", "src/stats/new.ts"]), claim("readme", "agent-b", ["README.md"]), claim("deep", "agent-c", ["src/stats/charts/"])] }, "my-app");
+	const holders = holdersFromSnapshot({ claims: [claim("stats", "agent-a", ["src/stats/", "src/stats/new.ts"]), claim("readme", "agent-b", ["README.md"]), claim("deep", "agent-c", ["src/stats/charts/"])] }, "acme/my-app");
 
 	it("reads a repo's claims from its snapshot, each with a color and a link to its change", () => {
-		expect(holdersFromSnapshot(repoSnapshot, "docs-site")).toEqual([
-			{ change: "c-1", title: "Rewrite the C section", agent: "agent-c", paths: ["src/c/"], href: "#/repos/docs-site/changes/c-1", color: 0, conflicts: [] },
+		expect(holdersFromSnapshot(repoSnapshot, "acme/docs-site")).toEqual([
+			{ change: "c-1", title: "Rewrite the C section", agent: "agent-c", paths: ["src/c/"], href: "#/repos/acme/docs-site/changes/c-1", color: 0, conflicts: [] },
 		]);
 		expect(holders.map((h) => [h.change, h.color, h.href])).toEqual([
-			["stats", 0, "#/repos/my-app/changes/stats"],
-			["readme", 1, "#/repos/my-app/changes/readme"],
-			["deep", 2, "#/repos/my-app/changes/deep"],
+			["stats", 0, "#/repos/acme/my-app/changes/stats"],
+			["readme", 1, "#/repos/acme/my-app/changes/readme"],
+			["deep", 2, "#/repos/acme/my-app/changes/deep"],
 		]);
 	});
 
