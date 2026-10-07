@@ -36,8 +36,8 @@ export type CheckRunner = (input: { change: string; base: string; branch?: strin
 	results: CheckResult[];
 	base?: string;
 	after?: { change: string; head: string }[];
-	/** Tells the line the merge is done with this result (landed, or gave up), so the next batch can start. */
-	done?: () => Promise<void>;
+	/** Tells the line the merge is done with this result: it landed, or (false) gave up and checks again if it tries again. */
+	done?: (landed: boolean) => Promise<void>;
 }>;
 
 /** How long a merge waits for the merges ahead of it in line to land, before it checks again without them. */
@@ -120,10 +120,10 @@ export async function mergeChange(input: MergeInput): Promise<MergeOutcome> {
 		const checksFrom = Date.now();
 		let onto = ws;
 		let tested: { base: string; after: string[] } | undefined;
-		// Tell the line this result is done with (landed, or not), so its next batch can start.
-		let lineDone: (() => Promise<void>) | undefined;
-		const doneWithLine = async () => {
-			await lineDone?.().catch(() => undefined);
+		// Tell the line this result is done with: landed, or not (merges checked on top of it can't land as checked).
+		let lineDone: ((landed: boolean) => Promise<void>) | undefined;
+		const doneWithLine = async (landed: boolean) => {
+			await lineDone?.(landed).catch(() => undefined);
 			lineDone = undefined;
 		};
 		if (verify.length) {
@@ -139,7 +139,7 @@ export async function mergeChange(input: MergeInput): Promise<MergeOutcome> {
 			if (tested.base !== main || tested.after.length) {
 				const turn = await awaitTurn(input, tested);
 				if (!turn) {
-					await doneWithLine();
+					await doneWithLine(false);
 					continue;
 				}
 				onto = turn;
@@ -180,13 +180,13 @@ export async function mergeChange(input: MergeInput): Promise<MergeOutcome> {
 		try {
 			await onto.push();
 		} catch (err) {
-			await doneWithLine();
+			await doneWithLine(false);
 			if (!(err instanceof git.Errors.PushRejectedError || err instanceof git.Errors.GitPushError)) throw err;
 			// Main moved under us: another agent merged first. Check again on top of it, a few times.
 			if (attempt < ATTEMPTS) continue;
 			return { ok: false, reasons: [`the project's branch kept moving while ${input.change} merged (other merges landed first): merge again`] };
 		}
-		await doneWithLine();
+		await doneWithLine(true);
 		const releaseFrom = Date.now();
 		await input.store.release({ change: input.change, agent: input.agent, reason: "merged", mergedAs: oid }, input.stamper);
 		console.log(`merged ${input.change} as ${oid.slice(0, 8)}: checks and push ${releaseFrom - checksFrom} ms, releasing its claim ${Date.now() - releaseFrom} ms`);

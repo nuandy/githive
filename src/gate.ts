@@ -159,9 +159,9 @@ export class Gate extends DurableObject<Env> {
 		return this.line.join({ change, head: input.head, input: { ...check, repo } });
 	}
 
-	/** A merge checked in line is done with its result (landed, or gave up), so the next batch can start. */
-	lineDone(change: string) {
-		this.line?.done(change);
+	/** A merge checked in line is done with its result: it landed, or (landed false) gave up. */
+	lineDone(change: string, landed = true) {
+		this.line?.done(change, landed);
 	}
 
 	async state() {

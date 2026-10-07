@@ -303,7 +303,11 @@ is checked on main with the merges ahead of it in the batch merged in first,
 all at once, each in its own container (the repo's Gate and three beside it).
 A result says what it was tested on and after; the merge waits until exactly
 those merges have landed on that main, then lands (`Blueprint-Tested-After`
-lists their heads). A merge behind one that failed is checked again without
+lists their heads). Batches don't wait for each other to land: the next is
+checked on the same main, after every merge still landing (the chain, up to
+8), so its results stay right as they land; once the chain has landed, the
+next batch starts from main as it is. A merge in the chain that gives up
+breaks it: the line lets the rest report back and starts afresh. A merge behind one that failed is checked again without
 it, first in line; one whose merges ahead never land within 5 minutes, or
 whose main went another way, checks again. Ten merges ready at once take
 three batches, about three check runs, instead of ten.

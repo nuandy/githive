@@ -99,7 +99,7 @@ export function freeContextFor(env: Env, by: string | undefined, caller: { agent
 				results: [...conflict, ...result.results.map((r) => ({ command: r.command, exitCode: r.exitCode, output: r.output }))],
 				base,
 				after,
-				done: () => env.GATE.getByName(`free:${repo}`).lineDone(change),
+				done: (landed: boolean) => env.GATE.getByName(`free:${repo}`).lineDone(change, landed),
 			};
 		},
 	};

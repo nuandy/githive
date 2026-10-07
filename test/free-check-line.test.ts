@@ -57,52 +57,65 @@ describe("the line of merges", () => {
 		expect([a.base, b.base, c.base]).toEqual(["m0", "m0", "m0"]);
 	});
 
-	it("checks the merges behind a failure again without it, first in line", async () => {
+	it("checks the merges behind a failure again without it, first in line, on top of the merge still landing", async () => {
 		const r = runner(new Set(["b"]));
 		const line = new CheckLine<Input, Result>(r.run, 4, 0, 0);
 		const results = await Promise.all(["a", "b", "c", "d"].map((x) => line.join(request(x))));
 		expect(results.map((x) => x.result.passed)).toEqual([true, false, true, true]);
-		// c and d ran again, after a only; their answers are from that run.
+		// c and d ran again, after a (which passed and hasn't landed yet); their answers are from that run.
 		expect(r.runs.slice(4)).toEqual([
-			{ lane: 0, change: "c", base: "m0", ahead: [] },
-			{ lane: 1, change: "d", base: "m0", ahead: ["c"] },
+			{ lane: 0, change: "c", base: "m0", ahead: ["a"] },
+			{ lane: 1, change: "d", base: "m0", ahead: ["a", "c"] },
 		]);
-		expect(results[3].after).toEqual([{ change: "c", head: "c-head" }]);
+		expect(results[3].after).toEqual([{ change: "a", head: "a-head" }, { change: "c", head: "c-head" }]);
 	});
 
-	it("takes at most one batch of lanes at a time; the rest wait for the next, on main as it is then", async () => {
-		// Main moves while the first batch runs (its merges land).
+	it("doesn't wait for a batch to land: checks the next one on the same main, after the merges still landing", async () => {
+		// Main moves while the first batch runs (its merges land); the batches after it stay on the main they're checked on.
 		const r: ReturnType<typeof runner> = runner(new Set(), (change) => change === "b" && r.setBase("m2"));
-		const line = new CheckLine<Input, Result>(r.run, 2, 0, 0);
-		await Promise.all(["a", "b", "c", "d", "e"].map((x) => line.join(request(x))));
-		expect(r.runs.map((x) => [x.lane, x.change, x.base])).toEqual([
-			[0, "a", "m0"],
-			[1, "b", "m0"],
-			[0, "c", "m2"],
-			[1, "d", "m2"],
-			[0, "e", "m2"],
+		const line = new CheckLine<Input, Result>(r.run, 2, 0, 60_000);
+		const results = await Promise.all(["a", "b", "c", "d", "e"].map((x) => line.join(request(x))));
+		expect(r.runs.map((x) => [x.lane, x.change, x.base, x.ahead.join(",")])).toEqual([
+			[0, "a", "m0", ""],
+			[1, "b", "m0", "a"],
+			[0, "c", "m0", "a,b"],
+			[1, "d", "m0", "a,b,c"],
+			[0, "e", "m0", "a,b,c,d"],
 		]);
+		expect(results[4].after.map((a) => a.change)).toEqual(["a", "b", "c", "d"]);
 	});
 
-	it("starts the next batch once the last one's passing merges have landed or given up, not before", async () => {
+	it("starts from main as it is once every merge it checked on top of has landed", async () => {
 		const r = runner();
 		const line = new CheckLine<Input, Result>(r.run, 1, 0, 60_000);
-		const a = line.join(request("a"));
-		const b = line.join(request("b"));
-		await a;
-		await new Promise((resolve) => setTimeout(resolve, 30));
-		// a passed and hasn't landed: b waits, rather than be checked on a main without it.
-		expect(r.runs.map((x) => x.change)).toEqual(["a"]);
+		await line.join(request("a"));
 		line.done("a");
-		await b;
-		expect(r.runs.map((x) => x.change)).toEqual(["a", "b"]);
+		r.setBase("m1");
+		const b = await line.join(request("b"));
+		expect(b).toMatchObject({ base: "m1", after: [] });
 	});
 
-	it("starts the next batch anyway when a passing merge never reports back", async () => {
+	it("lets the rest land and starts afresh from main when a merge it checked on top of gives up", async () => {
+		const r = runner();
+		const line = new CheckLine<Input, Result>(r.run, 1, 0, 60_000);
+		await Promise.all([line.join(request("a")), line.join(request("b"))]);
+		// a gives up; b, checked after it, can't land as checked: the next batch waits for b to report back.
+		line.done("a", false);
+		r.setBase("m3");
+		const c = line.join(request("c"));
+		await new Promise((resolve) => setTimeout(resolve, 30));
+		expect(r.runs.map((x) => x.change)).toEqual(["a", "b"]);
+		line.done("b", false);
+		expect(await c).toMatchObject({ base: "m3", after: [] });
+	});
+
+	it("checks on main as it is when the chain never reports back in time", async () => {
 		const r = runner();
 		const line = new CheckLine<Input, Result>(r.run, 1, 0, 20);
-		await Promise.all([line.join(request("a")), line.join(request("b"))]);
-		expect(r.runs.map((x) => x.change)).toEqual(["a", "b"]);
+		await line.join(request("a"));
+		line.done("a", false);
+		r.setBase("m4");
+		expect(await line.join(request("b"))).toMatchObject({ base: "m4", after: [] });
 	});
 
 	it("lets a change's newer head replace its place while it waits", async () => {
@@ -152,7 +165,7 @@ describe("merging in line", { timeout: 120_000 }, () => {
 		);
 		return async ({ change, head }) => {
 			const { base, after } = await line.join({ change, head, input: { change } });
-			return { passed: true, results: [{ command: "npm test", exitCode: 0, output: "ok" }], base, after, done: async () => line.done(change) };
+			return { passed: true, results: [{ command: "npm test", exitCode: 0, output: "ok" }], base, after, done: async (landed: boolean) => line.done(change, landed) };
 		};
 	}
 
@@ -185,6 +198,20 @@ describe("merging in line", { timeout: 120_000 }, () => {
 		// One check run each, no retries: three merges on main, each after the ones ahead of it.
 		const after = server.git("log", "--first-parent", "-3", "--format=%(trailers:key=Blueprint-Tested-After,valueonly)", "main").trim().split("\n").filter(Boolean);
 		expect(after.length).toBe(2);
+		expect(await auditNow()).toEqual([]);
+	});
+
+	it("lands merges from batches checked on top of each other while they land, with no checks again, and audits clean", async () => {
+		for (const x of ["a", "b", "c"]) await readyChange(`${x}-1`, { [`src/${x}.txt`]: `${x}\n` });
+		let checks = 0;
+		const inLine = lineRunner(1);
+		const runChecks: CheckRunner = async (input) => {
+			checks++;
+			return inLine(input);
+		};
+		const outcomes = await Promise.all(["a-1", "b-1", "c-1"].map((c) => merge(c, runChecks)));
+		expect(outcomes.every((o) => o.ok)).toBe(true);
+		expect(checks).toBe(3);
 		expect(await auditNow()).toEqual([]);
 	});
 
