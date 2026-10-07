@@ -163,7 +163,9 @@ const toolContext = (env: Env, principal: Principal | undefined, agentKey?: stri
 	const agent = principal && agentNameOf(principal);
 	// A person's (or their agent's) teams in the repo's org go into their votes, for roles granted to a team.
 	const teamsOf = principal && principal.kind !== "access" && env.DB ? (repo: string) => new OrgStore(env.DB).teamsForRepo(principal.user.id, repo) : undefined;
-	return toolContextFor(env, principal ? byOf(principal) : undefined, { ...(agent ? { agent } : agentKey ? { agentKey } : {}), ...(teamsOf ? { teamsOf } : {}) });
+	// GitHive's hosted agents spend its model account: only the people an admin lists (Access callers always).
+	const mayUseHosted = principal && principal.kind !== "access" ? async () => !!env.DB && (await new IdentityStore(env.DB).mayUseHosted(principal.user.id)) : undefined;
+	return toolContextFor(env, principal ? byOf(principal) : undefined, { ...(agent ? { agent } : agentKey ? { agentKey } : {}), ...(teamsOf ? { teamsOf } : {}), ...(mayUseHosted ? { mayUseHosted } : {}) });
 };
 
 /** Views bigger than this aren't kept (a Durable Object value holds up to 2 MB). */

@@ -82,7 +82,7 @@ GitHive has two front doors:
 
 Every request resolves to one caller (`src/auth/principal.ts`): an Access identity, a signed-in person (session cookie), or an agent (a `ghv_` token, or an OAuth grant). A person is `person:<hash of their verified email>` in the records, whichever door they came in by. Their agents are `<handle>/<agent>`, signed as `person:<hash>/<handle>/<agent>`, so a grant to a pool (`person:<hash>/*`) covers all of a person's agents.
 
-**Who may do what.** Repos are named `<owner>/<name>`, as on GitHub: the owner is a person (everyone has their own namespace, named for their handle) or an org. Orgs are optional and shared: owners, admins and members, invitations by email (which also let someone sign in), and teams. A repo is private or public, and can have collaborators. What someone may do in a repo is read, review, write or admin:
+**Who may do what.** Repos are named `<owner>/<name>`, as on GitHub: the owner is a person (everyone has their own namespace, named for their handle) or an org. Orgs are optional and shared: owners, admins and members, invitations by email, and teams. A repo is private or public, and can have collaborators. What someone may do in a repo is read, review, write or admin:
 
 | Needs | Routes and tools |
 |---|---|
@@ -107,7 +107,9 @@ claude mcp add --scope user --transport http githive https://githive.app/mcp --h
 
 Revoking a token, an agent or a connection stops it at its next call.
 
-**Inviting someone** (as an admin, through Access):
+**Who gets in.** Only people an admin approves can sign in. An org's owners can invite anyone by email, but someone not yet approved waits: their email shows on the admin page (the dashboard's Admin page, through Access) as a request, and once it's approved they join the org when they first sign in. GitHive's hosted agents (`build`, `request_review`) run on GitHive's model account, so only the people an admin lists may start them.
+
+**Approving someone** (as an admin, through Access; or on the dashboard's Admin page):
 
 ```sh
 curl -X POST https://blueprint.nuandy.workers.dev/admin/invites \

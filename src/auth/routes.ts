@@ -102,7 +102,8 @@ export function authRoutes(app: Hono<AuthEnv>) {
 		if (!principal) return c.json({ error: "sign in to GitHive first" }, 401);
 		// Someone who signed in before orgs existed gets their own namespace now.
 		if (principal.kind === "user" && c.env.DB) await new OrgStore(c.env.DB).personalOrg(principal.user);
-		return c.json(describe(principal));
+		const hosted = principal.kind === "access" ? true : c.env.DB ? await store(c.env).mayUseHosted(principal.user.id) : false;
+		return c.json({ ...describe(principal), hostedAgents: hosted });
 	});
 
 	app.get("/me/agents", async (c) => c.json(await store(c.env).agents(signedInUser(c.get("principal")).id)));
@@ -174,6 +175,32 @@ export function authRoutes(app: Hono<AuthEnv>) {
 		admin(c.get("principal"));
 		await store(c.env).uninvite(c.req.param("email"));
 		return c.json({ uninvited: c.req.param("email") });
+	});
+
+	// People orgs asked for who can't sign in until approved: approve (POST /admin/invites) or turn down.
+	app.get("/admin/invite-requests", async (c) => {
+		admin(c.get("principal"));
+		return c.json(await store(c.env).inviteRequests());
+	});
+	app.delete("/admin/invite-requests/:email", async (c) => {
+		admin(c.get("principal"));
+		await store(c.env).declineRequest(c.req.param("email"));
+		return c.json({ declined: c.req.param("email") });
+	});
+
+	// Who may use GitHive's hosted agents (build, request_review), which spend its model account.
+	app.get("/admin/hosted-agents", async (c) => {
+		admin(c.get("principal"));
+		return c.json(await store(c.env).hostedUsers());
+	});
+	app.put("/admin/hosted-agents/:handle", async (c) => {
+		const by = admin(c.get("principal"));
+		return c.json({ allowed: await store(c.env).allowHosted(c.req.param("handle"), by) });
+	});
+	app.delete("/admin/hosted-agents/:handle", async (c) => {
+		admin(c.get("principal"));
+		await store(c.env).disallowHosted(c.req.param("handle"));
+		return c.json({ disallowed: c.req.param("handle") });
 	});
 
 }

@@ -48,6 +48,8 @@ export interface ToolContext {
 	agentKey?: string;
 	/** The caller's agent name, verified by GitHive's sign-in (an agent token or an OAuth grant): <handle>/<agent>. It needs no key. */
 	agent?: string;
+	/** Whether the caller may start GitHive's hosted agents (build, request_review), which spend its model account; unset, they may. */
+	mayUseHosted?: () => Promise<boolean>;
 	/** The teams the caller is on in a repo's org (@<org>/<team>), as GitHive checks them: recorded in their votes. */
 	teamsOf?: (repo: string) => Promise<string[]>;
 	/** GitHive's own hosted agents, who act under the reserved githive- names. */
@@ -695,6 +697,7 @@ async function runTool(name: string, args: Args, ctx: ToolContext): Promise<unkn
 		}
 		case "build": {
 			if (!ctx.startBuilder) throw new Error("[501] hosted builders aren't available here");
+			if (ctx.mayUseHosted && !(await ctx.mayUseHosted())) throw new Error("[403] GitHive's hosted agents are by invitation: ask an admin to add you");
 			const intent = requiredString(args, "intent");
 			const change = changeId(intent);
 			const claimed = await store.claim({ change, agent: "githive-builder", paths: normalizeClaim(requiredPaths(args, "paths")), intent, staleAfterMs: STALE_AFTER_MS }, stamper);
@@ -702,6 +705,7 @@ async function runTool(name: string, args: Args, ctx: ToolContext): Promise<unkn
 			return ctx.startBuilder({ repo, change });
 		}
 		case "request_review": {
+			if (ctx.mayUseHosted && !(await ctx.mayUseHosted())) throw new Error("[403] GitHive's hosted agents are by invitation: ask an admin to add you");
 			const change = requiredString(args, "change");
 			const registry = registered;
 			if (!(await claimOf(change))) throw new Error(`[409] ${change} holds no claim: claim the change's paths first`);

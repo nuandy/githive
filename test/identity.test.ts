@@ -129,3 +129,23 @@ describe("signed-in agents", () => {
 		expect(await call(as(), "register", { agent: "ada/builder" })).toEqual({ error: "names with \"/\" are signed-in agents' (<handle>/<agent>); register a name without one" });
 	});
 });
+
+describe("GitHive's hosted agents", () => {
+	/** A signed-in agent whose owner is, or isn't, on the admin's list. */
+	const listed = (allowed: boolean): ToolContext => ({
+		remote: async () => ({ url: server.url, token: "unused" }),
+		head: async () => server.git("rev-parse", "main").trim(),
+		agent: "ada/builder",
+		mayUseHosted: async () => allowed,
+		startBuilder: async (input) => ({ change: input.change, builder: "b" }),
+		requestReview: async () => ({ head: "h1", reviewers: ["review"] }),
+	});
+
+	it("are only for the people an admin lists: build and request_review refuse anyone else", async () => {
+		const refusal = "GitHive's hosted agents are by invitation: ask an admin to add you";
+		expect(await call(listed(false), "build", { intent: "Add stats", paths: ["src/stats/"] })).toEqual({ error: refusal });
+		expect(await call(listed(false), "request_review", { change: "a-1" })).toEqual({ error: refusal });
+		// On the list, they get past the gate (here: request_review finds no claim).
+		expect(await call(listed(true), "request_review", { change: "a-1" })).toEqual({ error: "a-1 holds no claim: claim the change's paths first" });
+	});
+});

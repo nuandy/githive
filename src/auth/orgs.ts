@@ -156,7 +156,8 @@ export class OrgStore {
 
 	/**
 	 * Add someone to an org by email: at once if they have signed in, else as an
-	 * invitation they take up when they first sign in (which also lets them in).
+	 * invitation they take up when they first sign in, once an admin has
+	 * approved their email.
 	 */
 	async addMember(org: Org, email: string, role: Role, invitedBy: string) {
 		if (org.personal) fail(400, "a personal org has no members: add collaborators to its repos instead");
@@ -170,16 +171,13 @@ export class OrgStore {
 			return { added: String(user.handle), role };
 		}
 		await this.db.prepare("INSERT INTO org_invites (org_id, email, role, invited_by, created_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT (org_id, email) DO UPDATE SET role = excluded.role").bind(org.id, address, role, invitedBy, at).run();
-		return { invited: address, role };
+		// Someone GitHive's admin hasn't approved can't sign in yet: the invitation waits for that.
+		const approved = !!(await this.db.prepare("SELECT 1 FROM invites WHERE email = ?").bind(address).first());
+		return { invited: address, role, ...(approved ? {} : { awaitingApproval: true }) };
 	}
 
 	async uninvite(orgId: string, email: string) {
 		await this.db.prepare("DELETE FROM org_invites WHERE org_id = ? AND email = ?").bind(orgId, normalizeEmail(email)).run();
-	}
-
-	/** Whether an email has an org invitation waiting: enough to be let in to sign in. */
-	async invitedToAnOrg(email: string) {
-		return !!(await this.db.prepare("SELECT 1 FROM org_invites WHERE email = ?").bind(normalizeEmail(email)).first());
 	}
 
 	/** A person who has just signed in joins every org that invited their email. */

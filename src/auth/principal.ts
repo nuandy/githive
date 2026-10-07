@@ -40,9 +40,14 @@ export const identityStore = (env: Env) => (env.DB ? new IdentityStore(env.DB) :
 
 /** The caller, or null: an Access assertion first, then an agent token, then a session cookie. */
 export async function resolvePrincipal(request: Request, env: Env): Promise<Principal | null> {
-	// Without its header this returns at once.
-	const identity = await verifyAccessRequest(request, { teamDomain: env.ACCESS_TEAM_DOMAIN, audience: env.ACCESS_AUD });
-	if (identity) return { kind: "access", identity };
+	// Access is the admin door, on the Access hostnames only: on the public address (githive.app) an Access
+	// assertion is never accepted, so nothing there can act as an admin, however it was obtained.
+	const publicOrigin = (env as unknown as { PUBLIC_ORIGIN?: string }).PUBLIC_ORIGIN;
+	if (!publicOrigin || new URL(request.url).origin !== publicOrigin) {
+		// Without its header this returns at once.
+		const identity = await verifyAccessRequest(request, { teamDomain: env.ACCESS_TEAM_DOMAIN, audience: env.ACCESS_AUD });
+		if (identity) return { kind: "access", identity };
+	}
 	const store = identityStore(env);
 	if (!store) return null;
 	const token = bearer(request);

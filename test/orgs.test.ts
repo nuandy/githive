@@ -42,16 +42,36 @@ describe("orgs", () => {
 		expect(validSlug("a")).toBe(true);
 	});
 
-	it("adds a member at once by email if they've signed in, else when they first sign in", async () => {
+	it("adds a member at once by email if they've signed in, else when they first sign in, once an admin approves them", async () => {
 		const acme = await orgs.createOrg(people.ada, "acme");
 		expect(await orgs.addMember(acme, "BOB@example.com", "member", "ada")).toEqual({ added: "bob", role: "member" });
-		expect(await orgs.addMember(acme, "dan@example.com", "admin", "ada")).toEqual({ invited: "dan@example.com", role: "admin" });
-		// The invitation alone lets dan sign in, and he joins as he does.
-		const signed = (await ids.signIn({ provider: "github", providerId: "dan", email: "dan@example.com", login: "dan" })) as { user: U };
+		expect(await orgs.addMember(acme, "dan@example.com", "admin", "ada")).toEqual({ invited: "dan@example.com", role: "admin", awaitingApproval: true });
+		// An org's invitation alone doesn't let dan in: it's a request the admin sees.
+		const profile = { provider: "github" as const, providerId: "dan", email: "dan@example.com", login: "dan" };
+		expect(await ids.signIn(profile)).toEqual({ refused: "not-invited" });
+		expect(await ids.inviteRequests()).toEqual([{ email: "dan@example.com", orgs: [{ org: "acme", role: "admin", invitedBy: "ada" }], createdAt: expect.any(String) }]);
+		// Approved, he signs in and joins.
+		await ids.invite("dan@example.com", "admin");
+		expect(await ids.inviteRequests()).toEqual([]);
+		const signed = (await ids.signIn(profile)) as { user: U };
 		expect(signed.user.handle).toBe("dan");
 		await orgs.acceptInvites(signed.user);
 		expect(await orgs.roleIn(acme.id, signed.user.id)).toBe("admin");
 		expect(await orgs.invites(acme.id)).toEqual([]);
+	});
+
+	it("drops an org's request the admin turns down", async () => {
+		const acme = await orgs.createOrg(people.ada, "acme");
+		await orgs.addMember(acme, "zed@example.com", "member", "ada");
+		await ids.declineRequest("zed@example.com");
+		expect(await ids.inviteRequests()).toEqual([]);
+		expect(await orgs.invites(acme.id)).toEqual([]);
+	});
+
+	it("says an invitation for someone already approved needs nothing more", async () => {
+		const acme = await orgs.createOrg(people.ada, "acme");
+		await ids.invite("fay@example.com", "admin");
+		expect(await orgs.addMember(acme, "fay@example.com", "member", "ada")).toEqual({ invited: "fay@example.com", role: "member" });
 	});
 
 	it("never leaves an org without an owner", async () => {
@@ -162,5 +182,17 @@ describe("someone who signed in before orgs existed", () => {
 		await orgs.personalOrg(user);
 		await orgs.personalOrg(user);
 		expect(await orgs.orgsOf(user.id)).toEqual([expect.objectContaining({ slug: "old", personal: true, role: "owner" })]);
+	});
+});
+
+describe("who may use GitHive's hosted agents", () => {
+	it("is only the people an admin lists, who must have signed in", async () => {
+		expect(await ids.mayUseHosted(people.ada.id)).toBe(false);
+		expect(await ids.allowHosted("Ada", "admin@example.com")).toBe("ada");
+		expect(await ids.mayUseHosted(people.ada.id)).toBe(true);
+		expect(await ids.hostedUsers()).toEqual([{ handle: "ada", grantedBy: "admin@example.com", createdAt: expect.any(String) }]);
+		await expect(ids.allowHosted("nobody", "admin")).rejects.toThrow(/need to have signed in/);
+		await ids.disallowHosted("ada");
+		expect(await ids.mayUseHosted(people.ada.id)).toBe(false);
 	});
 });

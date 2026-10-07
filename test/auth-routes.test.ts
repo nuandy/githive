@@ -163,3 +163,15 @@ describe("invitations", () => {
 		expect((await call("/admin/invites", { cookie: session! })).status).toBe(403);
 	});
 });
+
+describe("the admin door", () => {
+	it("is shut on the public address: an Access assertion there is never accepted", async () => {
+		env.PUBLIC_ORIGIN = ORIGIN;
+		const asAdmin = { "Cf-Access-Jwt-Assertion": "admin" };
+		expect((await call("/admin/invites", { headers: asAdmin })).status).toBe(401);
+		expect((await call("/me", { headers: asAdmin })).status).toBe(401);
+		// The same assertion on an Access hostname is an admin.
+		const access = await worker.fetch(new Request("https://blueprint.test/admin/invites", { headers: asAdmin }), env as never, { waitUntil: () => {} } as never);
+		expect(access.status).toBe(200);
+	});
+});

@@ -110,6 +110,59 @@ export class IdentityStore {
 		return results.map((r) => ({ email: String(r.email), invitedBy: String(r.invited_by), createdAt: String(r.created_at) }));
 	}
 
+	/**
+	 * People orgs asked to have who can't sign in yet: an org's invitation waits
+	 * for an admin to approve the email. Each with the orgs that asked.
+	 */
+	async inviteRequests() {
+		const { results } = await this.db
+			.prepare(
+				"SELECT oi.email, o.slug, oi.role, oi.invited_by, oi.created_at FROM org_invites oi JOIN orgs o ON o.id = oi.org_id WHERE oi.email NOT IN (SELECT email FROM invites) AND oi.email NOT IN (SELECT email FROM users) ORDER BY oi.created_at",
+			)
+			.all<Row>();
+		const byEmail = new Map<string, { email: string; orgs: { org: string; role: string; invitedBy: string }[]; createdAt: string }>();
+		for (const r of results) {
+			const email = String(r.email);
+			const entry = byEmail.get(email) ?? { email, orgs: [], createdAt: String(r.created_at) };
+			entry.orgs.push({ org: String(r.slug), role: String(r.role), invitedBy: String(r.invited_by) });
+			byEmail.set(email, entry);
+		}
+		return [...byEmail.values()];
+	}
+
+	/** Turn down a request: every org invitation for that email goes. */
+	async declineRequest(email: string) {
+		await this.db.prepare("DELETE FROM org_invites WHERE email = ?").bind(normalizeEmail(email)).run();
+	}
+
+	/** Whether an admin has approved this email to sign in. */
+	async approved(email: string) {
+		return !!(await this.db.prepare("SELECT 1 FROM invites WHERE email = ?").bind(normalizeEmail(email)).first());
+	}
+
+	// Hosted agents
+
+	/** Who may use GitHive's hosted agents, with who allowed them. */
+	async hostedUsers() {
+		const { results } = await this.db.prepare("SELECT u.handle, h.granted_by, h.created_at FROM hosted_agent_users h JOIN users u ON u.id = h.user_id ORDER BY u.handle").all<Row>();
+		return results.map((r) => ({ handle: String(r.handle), grantedBy: String(r.granted_by), createdAt: String(r.created_at) }));
+	}
+
+	async allowHosted(handle: string, grantedBy: string) {
+		const user = await this.db.prepare("SELECT id, handle FROM users WHERE handle = ?").bind(handle.trim().toLowerCase()).first<Row>();
+		if (!user) fail(404, `no one is called ${handle}: they need to have signed in once`);
+		await this.db.prepare("INSERT INTO hosted_agent_users (user_id, granted_by, created_at) VALUES (?, ?, ?) ON CONFLICT (user_id) DO NOTHING").bind(user!.id, grantedBy, this.iso()).run();
+		return String(user!.handle);
+	}
+
+	async disallowHosted(handle: string) {
+		await this.db.prepare("DELETE FROM hosted_agent_users WHERE user_id = (SELECT id FROM users WHERE handle = ?)").bind(handle.trim().toLowerCase()).run();
+	}
+
+	async mayUseHosted(userId: string) {
+		return !!(await this.db.prepare("SELECT 1 FROM hosted_agent_users WHERE user_id = ?").bind(userId).first());
+	}
+
 	// Sign-in
 
 	/**
@@ -126,8 +179,8 @@ export class IdentityStore {
 			await this.link(String(byEmail.id), profile);
 			return { user: toUser(byEmail) };
 		}
-		// Invited by an admin, or by an org that wants them as a member.
-		if (!(await this.db.prepare("SELECT 1 FROM invites WHERE email = ? UNION SELECT 1 FROM org_invites WHERE email = ?").bind(email, email).first())) return { refused: "not-invited" };
+		// Only an admin's approval lets someone in; an org's invitation waits for it.
+		if (!(await this.db.prepare("SELECT 1 FROM invites WHERE email = ?").bind(email).first())) return { refused: "not-invited" };
 		const user: User = { id: crypto.randomUUID(), handle: await this.freeHandle(profile), email, name: profile.name ?? null, avatarUrl: profile.avatarUrl ?? null, createdAt: this.iso() };
 		await this.db.batch([
 			this.db.prepare("INSERT INTO users (id, handle, email, name, avatar_url, created_at) VALUES (?, ?, ?, ?, ?, ?)").bind(user.id, user.handle, user.email, user.name, user.avatarUrl, user.createdAt),
