@@ -126,7 +126,8 @@ export class IdentityStore {
 			await this.link(String(byEmail.id), profile);
 			return { user: toUser(byEmail) };
 		}
-		if (!(await this.db.prepare("SELECT 1 FROM invites WHERE email = ?").bind(email).first())) return { refused: "not-invited" };
+		// Invited by an admin, or by an org that wants them as a member.
+		if (!(await this.db.prepare("SELECT 1 FROM invites WHERE email = ? UNION SELECT 1 FROM org_invites WHERE email = ?").bind(email, email).first())) return { refused: "not-invited" };
 		const user: User = { id: crypto.randomUUID(), handle: await this.freeHandle(profile), email, name: profile.name ?? null, avatarUrl: profile.avatarUrl ?? null, createdAt: this.iso() };
 		await this.db.batch([
 			this.db.prepare("INSERT INTO users (id, handle, email, name, avatar_url, created_at) VALUES (?, ?, ?, ?, ?, ?)").bind(user.id, user.handle, user.email, user.name, user.avatarUrl, user.createdAt),
@@ -142,7 +143,8 @@ export class IdentityStore {
 	/** The provider's login when it makes a free handle (GitHub's), else u-<hex>: never derived from an email. */
 	private async freeHandle(profile: ProviderProfile) {
 		const login = profile.login?.trim().toLowerCase();
-		const taken = async (handle: string) => !!(await this.db.prepare("SELECT 1 FROM users WHERE handle = ?").bind(handle).first());
+		// Handles and org names share one namespace: a person's handle names their personal org.
+		const taken = async (handle: string) => !!(await this.db.prepare("SELECT 1 FROM users WHERE handle = ? UNION SELECT 1 FROM orgs WHERE slug = ?").bind(handle, handle).first());
 		if (login && HANDLE.test(login) && !(await taken(login))) return login;
 		for (;;) {
 			const handle = `u-${Array.from(crypto.getRandomValues(new Uint8Array(3)), (b) => b.toString(16).padStart(2, "0")).join("")}`;

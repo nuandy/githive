@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { type Principal, SESSION_COOKIE, cookie, describe, identityStore } from "./principal";
 import { PROVIDERS, type ProviderConfig, type ProviderName, isProvider, pkceChallenge } from "./providers";
+import { OrgStore } from "./orgs";
 import { type IdentityStore, SESSION_DAYS, randomSecret } from "./store";
 
 // GitHive's sign-in and a signed-in person's own things: sign in with GitHub
@@ -79,6 +80,10 @@ export function authRoutes(app: Hono<AuthEnv>) {
 		const ids = store(c.env);
 		const signed = await ids.signIn(profile);
 		if ("refused" in signed) return back("not-invited");
+		// Their own org, and every org that invited them.
+		const orgs = new OrgStore(c.env.DB);
+		await orgs.personalOrg(signed.user);
+		await orgs.acceptInvites(signed.user);
 		const session = await ids.createSession(signed.user.id);
 		c.header("Set-Cookie", cookieHeader(SIGNIN_COOKIE, "", 0));
 		c.header("Set-Cookie", cookieHeader(SESSION_COOKIE, session, SESSION_DAYS * 86_400), { append: true });
