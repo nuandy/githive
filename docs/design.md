@@ -43,6 +43,9 @@ reads or writes the repo's records in Git and reports what Git said.
 
 - `start`: start GitHive on a repo (harmless to repeat): the review policy,
   role grants, the checks run before each merge, and how claims are kept.
+- `settings`: change a started repo's review policy, role grants or checks.
+  The registry keeps every version, and each merge cites the registry state
+  it checked, so the audit holds it to the settings in force when it merged.
 - `register`: register an agent name and get its key, or rotate the key.
 - `next`: what this agent should do now.
 - `add_work`: add a piece of work to the repo's backlog.

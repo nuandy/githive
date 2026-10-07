@@ -69,6 +69,20 @@ describe("GitHive's MCP tools", () => {
 		expect(await call("audit", { repo: "project" })).toEqual({ merges: 0, open: 0, violations: [] });
 	});
 
+	it("changes a started repo's policy or checks with settings, keeping what it leaves out, and says so in the records", async () => {
+		expect(await call("settings", { repo: "project", verify: ["npm test"] })).toMatchObject({ error: expect.stringContaining("hasn't started") });
+		await call("start", { repo: "project", required: 2, vetoes: ["security"], verify: ["npm test"] });
+		// Starting again changes nothing: settings does.
+		expect(await call("start", { repo: "project", verify: ["npm install", "npm test"] })).toMatchObject({ verify: ["npm test"] });
+		expect(await call("settings", { repo: "project" })).toMatchObject({ error: expect.stringContaining("name what to change") });
+		expect(await call("settings", { repo: "project", verify: ["npm install", "npm test"] })).toMatchObject({ policy: { required: 2, vetoes: ["security"] }, verify: ["npm install", "npm test"] });
+		expect(await call("settings", { repo: "project", required: 1 })).toMatchObject({ policy: { required: 1, vetoes: ["security"] }, verify: ["npm install", "npm test"] });
+		expect(await call("settings", { repo: "project", verify: "npm test" })).toMatchObject({ error: expect.stringContaining("verify is a list") });
+		const log = server.git("log", "--format=%B", "refs/notes/githive-claims/project");
+		expect(log).toContain("Settings: the checks (npm install; npm test) changed");
+		expect(log).toContain("Settings: the review policy changed");
+	});
+
 	it("lets claim take paths from a claim idle for 30 minutes, releasing it as stale", async () => {
 		await call("start", { repo: "project" });
 		const registry = new GitCasLog<Registry>(async () => ({ url: server.url, token: "unused" }), "project", "refs/notes/githive-claims/project");

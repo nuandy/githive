@@ -101,6 +101,16 @@ describe("the audit", () => {
 		]);
 		expect(await audit(withChecks(merge({ base: "p1", testedOn: "p1" })))).toEqual([]);
 	});
+
+	it("holds each merge to the settings in force at the registry state it cites", async () => {
+		// At r3 the policy was raised to 3 approvals and checks were added: a merge citing r2 came before.
+		const raised = [...registry, { tip: "r3", state: { ...at([claimA, claimB]), policy: { ...policy, required: 3 }, verify: ["npm test"] } }];
+		expect(await audit(records([merge({ claimsTip: "r2" })], raised))).toEqual([]);
+		expect(await audit(records([merge({ claimsTip: "r3" })], raised))).toEqual([
+			{ commit: "m1", author: "agent-a", rule: "unapproved", detail: "h1 had 2 of 3 approvals at v1" },
+			{ commit: "m1", author: "agent-a", rule: "untested", detail: "the merge records no checks run (GitHive-Tested)" },
+		]);
+	});
 });
 
 describe("the audit, with sharded claims", () => {
@@ -115,6 +125,13 @@ describe("the audit, with sharded claims", () => {
 
 	it("finds nothing wrong with a merge inside its own claim, citing its shard", async () => {
 		expect(await audit(sharded([merge({ claimsTip: "src%2Fstats=s1" })]))).toEqual([]);
+	});
+
+	it("holds a merge to the settings in the registry state it cites among its shards", async () => {
+		const raised = [...root, { tip: "r1", state: { ...root[0].state, policy: { ...policy, required: 3 } } }];
+		expect(await audit({ ...sharded([merge({ claimsTip: "=r1 src%2Fstats=s1" })]), registry: raised })).toEqual([
+			{ commit: "m1", author: "agent-a", rule: "unapproved", detail: "h1 had 2 of 3 approvals at v1" },
+		]);
 	});
 
 	it("checks a merge against every shard it cites, a wide claim above included", async () => {

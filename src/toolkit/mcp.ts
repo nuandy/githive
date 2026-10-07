@@ -9,7 +9,7 @@ import { changeId, normalizeClaim } from "../claim-paths";
 import { audit } from "./audit";
 import { checkChange } from "./check";
 import { claimStore, type ClaimStore } from "./claim-store";
-import { registerAgent, shardClaims, shardingReason, startRepo, type ClaimRecord, type Registry } from "./claims";
+import { changeSettings, registerAgent, shardClaims, shardingReason, startRepo, type ClaimRecord, type Registry } from "./claims";
 import { readMainMerges, readRecordHistory, readRefHistories, readShardHistories } from "./git-records";
 import { type CheckRunner, mergeChange } from "./merge";
 import { revertViolation } from "./revert";
@@ -115,7 +115,8 @@ Conventions:
 
 const str = { type: "string" } as const;
 const TOOL_LIST = [
-	{ name: "start", description: "Start GitHive on a project repo (harmless if started): the review policy, the checks run before each merge (each change lives in its own fork, and only the toolkit writes the project), grants: who may vote as each role that can block a merge (registered agent names, 'person:*', a verified identity like 'person:<who>' or 'service:<id>', a pool 'service:<id>/*' (every agent registered under it, never on its own team's changes), 'githive' for GitHive's reviewers; unlisted roles: people and GitHive's reviewers), how claims are kept: in one record until the load calls for more (8 agents holding claims, or over 15 claim writes a minute), then sharded per path 2 segments deep over 8 records repos, so agents in different parts of the tree never contend. shard_depth shards now, this deep (0: never), and records_repos is how many repos the shards are spread over, since a repo takes one push at a time. Returns them.", inputSchema: { type: "object", properties: { repo: str, required: { type: "number" }, vetoes: { type: "array", items: str }, escalate: { type: "array", items: { type: "object", properties: { paths: { type: "array", items: str }, required: { type: "number" }, vetoes: { type: "array", items: str } }, required: ["paths"] } }, grants: { type: "object", additionalProperties: { type: "array", items: str } }, verify: { type: "array", items: str }, shard_depth: { type: "number" }, records_repos: { type: "number" } }, required: ["repo"] } },
+	{ name: "start", description: "Start GitHive on a project repo (harmless if started; change a started repo's policy or checks with settings): the review policy, the checks run before each merge (each change lives in its own fork, and only the toolkit writes the project), grants: who may vote as each role that can block a merge (registered agent names, 'person:*', a verified identity like 'person:<who>' or 'service:<id>', a pool 'service:<id>/*' (every agent registered under it, never on its own team's changes), 'githive' for GitHive's reviewers; unlisted roles: people and GitHive's reviewers), how claims are kept: in one record until the load calls for more (8 agents holding claims, or over 15 claim writes a minute), then sharded per path 2 segments deep over 8 records repos, so agents in different parts of the tree never contend. shard_depth shards now, this deep (0: never), and records_repos is how many repos the shards are spread over, since a repo takes one push at a time. Returns them.", inputSchema: { type: "object", properties: { repo: str, required: { type: "number" }, vetoes: { type: "array", items: str }, escalate: { type: "array", items: { type: "object", properties: { paths: { type: "array", items: str }, required: { type: "number" }, vetoes: { type: "array", items: str } }, required: ["paths"] } }, grants: { type: "object", additionalProperties: { type: "array", items: str } }, verify: { type: "array", items: str }, shard_depth: { type: "number" }, records_repos: { type: "number" } }, required: ["repo"] } },
+	{ name: "settings", description: "Change a started repo's review policy or its checks; whatever you leave out stays as it is. The same fields as start: required approvals, vetoes, escalate (stricter rules for chosen paths), grants (who may vote as each role), verify (the checks run before each merge; [] for none). Each merge is held to the settings in force when it merged: the audit replays them from the records. Returns the settings now.", inputSchema: { type: "object", properties: { repo: str, required: { type: "number" }, vetoes: { type: "array", items: str }, escalate: { type: "array", items: { type: "object", properties: { paths: { type: "array", items: str }, required: { type: "number" }, vetoes: { type: "array", items: str } }, required: ["paths"] } }, grants: { type: "object", additionalProperties: { type: "array", items: str } }, verify: { type: "array", items: str } }, required: ["repo"] } },
 	{ name: "credentials", description: "Git access. With your change: a write token for its own fork, where its branch changes/<change> lives. Without: read access to the project repo.", inputSchema: { type: "object", properties: { repo: str, change: str }, required: ["repo"] } },
 	{ name: "claims", description: "The claims in force: who holds which paths, and why.", inputSchema: { type: "object", properties: { repo: str }, required: ["repo"] } },
 	{ name: "claim", description: "Claim paths for your change (again to extend it, or to keep it active). Refused, naming the holder, if another claim overlaps; a claim in the way idle for 30 minutes is released as stale instead.", inputSchema: { type: "object", properties: { repo: str, change: str, agent: str, paths: { type: "array", items: str }, intent: str }, required: ["repo", "change", "agent", "paths", "intent"] } },
@@ -139,6 +140,7 @@ export const TOOLS = annotate(
 	TOOL_LIST.map((t) => ({ ...t, inputSchema: { ...t.inputSchema, properties: { ...t.inputSchema.properties, agent_key: { type: "string", description: "Your agent key from register, if you can't send the X-GitHive-Agent-Key header" } } } })),
 	{
 		start: writes("Start GitHive on a repo", { idempotent: true }),
+		settings: writes("Change a repo's review policy or checks", { idempotent: true }),
 		credentials: writes("Get Git access", { idempotent: true }),
 		claims: reads("List claims"),
 		review_access: reads("Get read access to a change to review"),
@@ -192,6 +194,29 @@ function recordLog<S>(ctx: ToolContext, repo: string, ref: string): GitCasLog<S>
 }
 
 /** A repo's claims, where its registry says they are: in the registry itself, or split into per-path shards. */
+/** The arguments start and settings take for the review policy. */
+const POLICY_FIELDS = ["required", "vetoes", "escalate", "grants"] as const;
+
+/** A review policy from start's or settings' arguments, each one left out kept from `base`. */
+function policyFrom(args: Args, base: ReviewPolicy): ReviewPolicy {
+	const required = typeof args.required === "number" ? args.required : base.required;
+	if (!Number.isInteger(required) || required < 0) throw new Error("[400] required is a whole number of approvals, 0 for none");
+	const grants = args.grants !== undefined ? validGrants(args.grants) : base.grants;
+	return {
+		required,
+		vetoes: Array.isArray(args.vetoes) ? (args.vetoes as string[]) : base.vetoes,
+		// The base's escalation unless the caller sets its own (an empty list for none).
+		escalate: Array.isArray(args.escalate) ? (args.escalate as ReviewPolicy["escalate"]) : base.escalate,
+		...(grants ? { grants } : {}),
+	};
+}
+
+/** The checks run before each merge, as start and settings take them. */
+function checksFrom(value: unknown): string[] {
+	if (!Array.isArray(value)) throw new Error("[400] verify is a list of commands, [] for none");
+	return value.filter((c): c is string => typeof c === "string" && !!c.trim());
+}
+
 /** Role grants as start takes them: each role to a list of agent names, "person:*", verified identities, teams (@<org>/<team>) or "githive". */
 function validGrants(value: unknown): Record<string, string[]> {
 	if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("[400] grants maps each role to who may vote as it");
@@ -540,16 +565,8 @@ async function runTool(name: string, args: Args, ctx: ToolContext): Promise<unkn
 	};
 	switch (name) {
 		case "start": {
-			const required = typeof args.required === "number" ? args.required : DEFAULT_POLICY.required;
-			if (!Number.isInteger(required) || required < 0) throw new Error("[400] required is a whole number of approvals, 0 for none");
-			const policy: ReviewPolicy = {
-				required,
-				vetoes: Array.isArray(args.vetoes) ? (args.vetoes as string[]) : DEFAULT_POLICY.vetoes,
-				// The default escalation unless the caller sets its own (an empty list for none).
-				escalate: Array.isArray(args.escalate) ? (args.escalate as ReviewPolicy["escalate"]) : DEFAULT_POLICY.escalate,
-				...(args.grants !== undefined ? { grants: validGrants(args.grants) } : {}),
-			};
-			const verify = Array.isArray(args.verify) ? (args.verify as string[]).filter((c) => typeof c === "string" && c.trim()) : [];
+			const policy = policyFrom(args, DEFAULT_POLICY);
+			const verify = args.verify === undefined ? [] : checksFrom(args.verify);
 			// Claims stay in one record until the load calls for shards, unless asked to shard now (or never: 0).
 			const asked = typeof args.shard_depth === "number" ? Math.max(0, Math.floor(args.shard_depth)) : undefined;
 			// Sharded claims are spread over records repos, where they can be made.
@@ -567,6 +584,18 @@ async function runTool(name: string, args: Args, ctx: ToolContext): Promise<unkn
 			if (registry?.verify?.length) await ctx.warmChecks?.(repo, { branch: projectBranch(registry), checks: registry.verify }).catch(() => undefined);
 			const warnings = grantWarnings(registry?.policy ?? policy);
 			return { repo, branch: projectBranch(registry), policy: registry?.policy ?? policy, verify: registry?.verify ?? [], ...shardingOf(registry), ...(warnings.length ? { warnings } : {}), instructions: INSTRUCTIONS };
+		}
+		case "settings": {
+			if (!registered?.baseline) throw new Error(`[409] GitHive hasn't started on ${repo}: start it first`);
+			const policy = POLICY_FIELDS.some((f) => args[f] !== undefined) ? policyFrom(args, registered.policy ?? DEFAULT_POLICY) : undefined;
+			const verify = args.verify === undefined ? undefined : checksFrom(args.verify);
+			if (!policy && !verify) throw new Error(`[400] name what to change: ${[...POLICY_FIELDS, "verify"].join(", ")}`);
+			await changeSettings(claims, { ...(policy ? { policy } : {}), ...(verify ? { verify } : {}), ...(stamper?.by ? { by: stamper.by } : {}) });
+			const registry = (await claims.read())?.commit.state;
+			// New checks may install something new: warm the containers for them.
+			if (verify?.length) await ctx.warmChecks?.(repo, { branch: projectBranch(registry), checks: verify }).catch(() => undefined);
+			const warnings = grantWarnings(registry?.policy ?? DEFAULT_POLICY);
+			return { repo, branch: projectBranch(registry), policy: registry?.policy ?? DEFAULT_POLICY, verify: registry?.verify ?? [], ...(warnings.length ? { warnings } : {}) };
 		}
 		case "next": {
 			const agent = actAs("agent");

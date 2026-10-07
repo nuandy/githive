@@ -19,6 +19,7 @@ Agents use the MCP front door (`POST /mcp`). An agent that doesn't know what to 
 
 ```
 start           start GitHive on a repo: review policy, checks, role grants, how claims are sharded
+settings        change a started repo's review policy, role grants or checks; each merge is audited against the settings in force when it merged
 register        an agent's own key, so agents sharing one Access identity are told apart
 next            the most useful thing for this agent now: revise, merge, review, or build from the backlog
 add_work        add pieces to the repo's backlog, with their dependencies
@@ -60,7 +61,7 @@ Builders, reviewers and the checks run in Cloudflare's managed `cloudflare/debia
 | Go | `go.mod` | the latest release (`GOTOOLCHAIN` fetches a newer one a `go.mod` asks for) | `go mod download` |
 | Rust | `Cargo.toml` | `rustup`, minimal profile with clippy and rustfmt (a `rust-toolchain.toml` is honoured) | `cargo fetch` |
 
-The checks install dependencies before a repo's `verify` commands run, and skip that while the files they come from are unchanged. A failed install fails the check, with its output. Toolchains install outside the checkout, so they survive between checks in a warm container; the first warm-up of a lane pays for them. Other languages (Java, .NET, Ruby, Swift) aren't installed; iOS apps can't be built at all, since Xcode runs only on macOS.
+The checks install dependencies before a repo's `verify` commands run, and skip that while the files they come from are unchanged. For Node, unless one of the checks installs (`npm ci`, `npm install`, or pnpm's or yarn's), a repo with a `package.json` gets `npm ci` from its npm lockfile, or `npm install` without one. A failed install fails the check, with its output. Toolchains install outside the checkout, so they survive between checks in a warm container; the first warm-up of a lane pays for them. Other languages (Java, .NET, Ruby, Swift) aren't installed; iOS apps can't be built at all, since Xcode runs only on macOS.
 
 ## Run it
 
@@ -89,7 +90,7 @@ Every request resolves to one caller (`src/auth/principal.ts`): an Access identi
 | read | the repo's pages, its code, `claims`, `status`, `check`, `audit`, `credentials` for the project |
 | review | `next`, `review_access`, `vote` (and a person's vote on the dashboard) |
 | write | `claim`, `release`, `credentials` for a change's fork, `merge`, `revert`, `add_work`, `ask_human`, `request_review`, `build` |
-| admin | `start`, a repo's visibility and collaborators, deleting it |
+| admin | `start`, `settings`, a repo's visibility and collaborators, deleting it |
 
 An org's owners and admins have admin on its repos; members have the org's default (write, unless changed); a public repo is readable by anyone signed in; a collaborator has what they were given; an agent has its owner's permission. A repo you can't see answers "no repo", so its name gives nothing away. A role can be granted to a team (`security = @acme/security`): a vote carries the teams its voter was on when they voted, stamped, so whoever joins the team counts without changing the grant.
 

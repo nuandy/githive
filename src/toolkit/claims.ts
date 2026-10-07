@@ -110,6 +110,22 @@ export async function startRepo(log: CasLog<Registry>, input: { baseline: string
 }
 
 /**
+ * Change a started repo's review policy or checks; what's left out stays. The
+ * registry's history keeps every version, and the audit holds each merge to
+ * the settings in the registry state it cites.
+ */
+export async function changeSettings(log: CasLog<Registry>, input: { policy?: ReviewPolicy; verify?: string[]; by?: string }) {
+	const outcome = await appendRecord<Registry, "not started" | "unchanged">(log, "githive", empty, (state) => {
+		if (!state.baseline) return { refused: "not started" };
+		const next: Registry = { ...state, ...(input.policy ? { policy: input.policy } : {}), ...(input.verify ? { verify: input.verify } : {}) };
+		if (JSON.stringify([next.policy, next.verify]) === JSON.stringify([state.policy, state.verify])) return { refused: "unchanged" };
+		const what = [input.policy && "the review policy", input.verify && `the checks (${input.verify.join("; ") || "none"})`].filter(Boolean).join(" and ");
+		return { state: next, text: `Settings: ${what} changed${input.by ? ` by ${input.by}` : ""}` };
+	});
+	return outcome.ok ? { changed: true as const } : { changed: false as const, refused: outcome.refused };
+}
+
+/**
  * When an unsharded registry should shard, from the load it records: as many
  * agents holding claims as one record serves well, or as many writes a minute.
  * Measured on Artifacts (see docs/design.md): one record takes about

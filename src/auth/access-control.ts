@@ -27,6 +27,7 @@ export const TOOL_LEVEL: Record<string, Level> = {
 	build: "write",
 	register: "write",
 	start: "admin",
+	settings: "admin",
 };
 
 export function toolLevel(tool: string, args: Record<string, unknown>): Level {

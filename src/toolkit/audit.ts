@@ -71,8 +71,9 @@ export interface AuditRecords {
 	votes?: { tip: string; state: Votes }[];
 	/** Each vote bucket's history, oldest first, once the votes are sharded (see vote-store.ts). */
 	voteBuckets?: Map<string, { tip: string; state: Votes }[]>;
+	/** The review policy, for merges that cite no registry state with one (see settingsFor). */
 	policy?: ReviewPolicy;
-	/** The project's checks; when set, every merge must record checks passing on the main it merged onto. */
+	/** The project's checks, likewise; when set, every merge must record checks passing on the main it merged onto. */
 	verify?: string[];
 	merges: MergeRecord[];
 	staleAfterMs?: number;
@@ -120,8 +121,9 @@ export async function audit(records: AuditRecords): Promise<Violation[]> {
 			else if (!own || !inLane(file, own.paths)) report("outside-claim", `${file} was not in ${merge.change}'s claim at ${merge.claimsTip}`);
 		}
 		for (const { history, tip } of cited.records) checkReleasedAfter(history, tip, merge, report);
-		checkApproved(records, votesAt, merge, report, own);
-		if (records.verify?.length) {
+		const settings = settingsFor(records, registryAt, merge);
+		checkApproved(records, settings.policy, votesAt, merge, report, own);
+		if (settings.verify?.length) {
 			if (!merge.testedOn) report("untested", "the merge records no checks run (GitHive-Tested)");
 			else if (!testedAsLanded(merge, byCommit)) {
 				const after = merge.testedAfter?.length ? ` after ${merge.testedAfter.map((h) => h.slice(0, 8)).join(", ")}` : "";
@@ -256,15 +258,27 @@ function citedVotes(records: AuditRecords, votesAt: Map<string, Votes>, merge: M
 	return { votes };
 }
 
+/**
+ * The settings a merge is held to: the review policy and checks in the
+ * registry state it cites (the registry itself, "", among shards), since
+ * settings can change; the records' own when it cites none.
+ */
+function settingsFor(records: AuditRecords, registryAt: Map<string, Registry>, merge: MergeRecord): { policy?: ReviewPolicy; verify?: string[] } {
+	const cited = merge.claimsTip!;
+	const tip = cited.includes("=") ? cited.split(/\s+/).map((pair) => pair.split("=")).find(([shard]) => decodeShard(shard) === "")?.[1] : cited;
+	const state = tip ? registryAt.get(tip) : undefined;
+	return { policy: state?.policy ?? records.policy, verify: state?.verify ?? records.verify };
+}
+
 /** The merged commit must have had the policy's approvals from reviewers other than its author, every veto role's among them, and no veto, in the votes the merge cites. */
-function checkApproved(records: AuditRecords, votesAt: Map<string, Votes>, merge: MergeRecord, report: (rule: string, detail: string) => void, author?: Author) {
-	if (!records.policy) return;
+function checkApproved(records: AuditRecords, policy: ReviewPolicy | undefined, votesAt: Map<string, Votes>, merge: MergeRecord, report: (rule: string, detail: string) => void, author?: Author) {
+	if (!policy) return;
 	if (!merge.head || !merge.votesTip) return report("undeclared", "the merge names no reviewed commit or votes it counted (GitHive-Votes)");
 	const votes = citedVotes(records, votesAt, merge, report);
 	if (!votes) return;
 	// Distinct verified reviewers, never the change's own author.
-	const outcome = approval(votes, merge.head, records.policy, author, merge.files);
-	const { required } = effectivePolicy(records.policy, merge.files);
+	const outcome = approval(votes, merge.head, policy, author, merge.files);
+	const { required } = effectivePolicy(policy, merge.files);
 	if (outcome.vetoedBy.length) report("unapproved", `${merge.head} was vetoed by ${outcome.vetoedBy.join(", ")} at ${merge.votesTip}`);
 	else if (outcome.approvals < required) report("unapproved", `${merge.head} had ${outcome.approvals} of ${required} approvals at ${merge.votesTip}`);
 	else if (outcome.awaiting.length) report("unapproved", `${merge.head} had no approval from ${outcome.awaiting.join(", ")} at ${merge.votesTip}`);
