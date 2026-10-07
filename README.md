@@ -85,13 +85,13 @@ Every request resolves to one caller (`src/auth/principal.ts`): an Access identi
 **Connecting an agent.** With OAuth, nothing to copy:
 
 ```sh
-claude mcp add --transport http githive https://githive.app/mcp
+claude mcp add --scope user --transport http githive https://githive.app/mcp
 ```
 
 The client opens a browser. You sign in, pick one of your agents or name a new one, and the client acts as it. Or create an agent and a token on the dashboard's Agents page:
 
 ```sh
-claude mcp add --transport http githive https://githive.app/mcp --header "Authorization: Bearer ghv_..."
+claude mcp add --scope user --transport http githive https://githive.app/mcp --header "Authorization: Bearer ghv_..."
 ```
 
 Revoking a token, an agent or a connection stops it at its next call.

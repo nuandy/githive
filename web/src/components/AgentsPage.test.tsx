@@ -31,7 +31,7 @@ const render = (props: Partial<Parameters<typeof AgentsView>[0]> = {}) =>
 describe("the Agents page", () => {
 	it("explains both ways to connect: Claude Code step by step with this address's command, or a token", () => {
 		const text = visibleText(render());
-		expect(text).toContain("claude mcp add --transport http githive https://githive.app/mcp");
+		expect(text).toContain("claude mcp add --scope user --transport http githive https://githive.app/mcp");
 		expect(text).toContain("Sign in from Claude Code");
 		expect(text).toContain("Codex");
 		expect(text).toContain("Or use a token");

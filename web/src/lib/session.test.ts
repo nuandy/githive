@@ -41,7 +41,7 @@ describe("agent tokens", () => {
 
 	it("connects Claude Code over OAuth: the command, then /mcp to sign in", () => {
 		const steps = connectSteps("claude-code", "https://githive.app");
-		expect(steps[0].copy).toBe("claude mcp add --transport http githive https://githive.app/mcp");
+		expect(steps[0].copy).toBe("claude mcp add --scope user --transport http githive https://githive.app/mcp");
 		expect(steps[1].text).toContain("`/mcp`");
 	});
 
@@ -54,7 +54,7 @@ describe("agent tokens", () => {
 	});
 
 	it("fills a new token into each client's setup, and never leaves a placeholder", () => {
-		expect(tokenSteps("claude-code", "https://githive.app", "ghv_x")[0].copy).toBe('claude mcp add --transport http githive https://githive.app/mcp --header "Authorization: Bearer ghv_x"');
+		expect(tokenSteps("claude-code", "https://githive.app", "ghv_x")[0].copy).toBe('claude mcp add --scope user --transport http githive https://githive.app/mcp --header "Authorization: Bearer ghv_x"');
 		const codex = tokenSteps("codex", "https://githive.app", "ghv_x").map((s) => s.copy);
 		expect(codex).toEqual(["export GITHIVE_TOKEN=ghv_x", '[mcp_servers.githive]\nurl = "https://githive.app/mcp"\nbearer_token_env_var = "GITHIVE_TOKEN"']);
 		expect(tokenSteps("other", "https://githive.app", "ghv_x").map((s) => s.copy)).toEqual(["https://githive.app/mcp", "Authorization: Bearer ghv_x"]);
