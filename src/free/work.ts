@@ -51,7 +51,7 @@ export type NextStep =
 	| { kind: "merge"; change: string; head: string; next: string }
 	| { kind: "revise"; change: string; head: string; reviewer: string; evidence: string; next: string }
 	| { kind: "finish"; change: string; next: string }
-	| { kind: "review"; change: string; author: string; head: string; role: string; intent: string; paths: string[]; next: string }
+	| { kind: "review"; change: string; author: string; head: string; role: string; intent: string; paths: string[]; needed: number; next: string }
 	| { kind: "build"; work: WorkItem; next: string }
 	| { kind: "wait"; reason: string; retryAfterSeconds: number; next: string };
 
@@ -68,6 +68,8 @@ export interface NextInput {
 	merged: Set<string>;
 	/** Changes waiting on a person (asked about, and not answered on their head): their agent can do other work meanwhile. */
 	asked?: Set<string>;
+	/** Reviews other agents are on now, by commit (review holds): a review already held as often as it's needed is left to them. */
+	held?: Record<string, string[]>;
 	work: WorkItem[];
 }
 
@@ -115,11 +117,16 @@ export function nextFor(input: NextInput): NextStep {
 			const role = outcome.awaiting.find((r) => holdsRole(policy, r, { reviewer: agent, by: input.by }));
 			const { required } = effectiveFreePolicy(policy, claim.paths);
 			if (!role && outcome.approvals >= required) return [];
-			return [{ claim, head, role: role ?? "review", blocking: !!role, approvals: outcome.approvals }];
+			// As many reviews as it still needs: one for a role that can block, else the approvals missing. Others already on it count.
+			const needed = role ? 1 : required - outcome.approvals;
+			if ((input.held?.[head] ?? []).filter((a) => a !== agent).length >= needed) return [];
+			// One it holds already (it asked again mid-review): the same one, first.
+			const mine = (input.held?.[head] ?? []).includes(agent);
+			return [{ claim, head, role: role ?? "review", blocking: !!role, approvals: outcome.approvals, needed, mine }];
 		})
-		.sort((a, b) => Number(b.blocking) - Number(a.blocking) || a.approvals - b.approvals || a.claim.since.localeCompare(b.claim.since));
+		.sort((a, b) => Number(b.mine) - Number(a.mine) || Number(b.blocking) - Number(a.blocking) || a.approvals - b.approvals || a.claim.since.localeCompare(b.claim.since));
 	if (reviews.length) {
-		const best = reviews.filter((r) => r.blocking === reviews[0].blocking && r.approvals === reviews[0].approvals).slice(0, SPREAD);
+		const best = reviews[0].mine ? [reviews[0]] : reviews.filter((r) => r.blocking === reviews[0].blocking && r.approvals === reviews[0].approvals).slice(0, SPREAD);
 		const pick = best[spread(agent, best.length)];
 		return {
 			kind: "review",
@@ -129,6 +136,7 @@ export function nextFor(input: NextInput): NextStep {
 			role: pick.role,
 			intent: pick.claim.intent,
 			paths: pick.claim.paths,
+			needed: pick.needed,
 			next: `Review ${pick.claim.change} by ${pick.claim.agent}: free_review_access for its code, read the diff against the project's branch, run the checks, then free_vote as ${pick.role} on ${pick.head} with your evidence.`,
 		};
 	}

@@ -59,6 +59,12 @@ export interface FreeContext {
 	timing?: Timing;
 	/** Tells the dashboard's open pages that the repo's records changed. */
 	ping?: (repo: string) => Promise<void>;
+	/** Review holds, so free_next doesn't send two agents to a review that needs one (see LiveFeed). */
+	reviews?: {
+		held(repo: string): Promise<Record<string, string[]>>;
+		hold(repo: string, head: string, agent: string, needed: number): Promise<boolean>;
+		release(repo: string, head: string, agent: string): Promise<void>;
+	};
 	/** Updates the repo's summary for the dashboard's list of repos (a hint; Git is what counts). */
 	summarize?: (repo: string, patch: { open?: number; needsYou?: number; waiting?: { change: string; title: string; reason: string }[]; merged?: number; mergedBy?: number; violations?: number; lastActivity?: string; countedAt?: string }) => Promise<void>;
 	/** Starts Blueprint's hosted builder on a claimed change. */
@@ -513,17 +519,25 @@ async function runFreeTool(name: string, args: Args, ctx: FreeContext): Promise<
 			const [inForce, cast, backlog] = await Promise.all([view(), votes.read(), recordLog<Work>(ctx, repo, workRef(repo)).read()]);
 			// Each open change's pushed head, from its author's fork.
 			const open = await Promise.all(inForce.claims.map(async (claim) => ({ claim, head: await changeSource(claim.agent, "read", claim.change).then((fork) => branchHead(fork, `changes/${claim.change}`)).catch(() => null) })));
-			return nextFor({
+			const counted = await countedVotes(cast.votes, registered?.stampKey);
+			const decide = (held?: Record<string, string[]>) => nextFor({
 				agent,
 				...(stamper?.by ? { by: stamper.by } : {}),
 				policy: registered?.policy ?? DEFAULT_POLICY,
 				open,
-				votes: await countedVotes(cast.votes, registered?.stampKey),
+				votes: counted,
 				merged: new Set(inForce.released.filter((r) => r.mergedAs).map((r) => r.change)),
 				// Its own changes waiting on a person: asked about, not yet answered on their head.
 				asked: new Set(open.filter((o) => o.claim.agent === agent && openFlag(cast, o.claim.change, o.head)).map((o) => o.claim.change)),
 				work: backlog?.commit.state.items ?? [],
+				...(held ? { held } : {}),
 			});
+			// A review is held for this agent before it's handed out, so two agents aren't sent to one that needs one review.
+			if (!ctx.reviews) return decide();
+			for (let attempt = 0; ; attempt++) {
+				const next = decide(await ctx.reviews.held(repo).catch(() => ({})));
+				if (next.kind !== "review" || attempt === 2 || (await ctx.reviews.hold(repo, next.head, agent, next.needed).catch(() => true))) return next;
+			}
 		}
 		case "free_add_work": {
 			const title = requiredString(args, "title");
@@ -591,7 +605,11 @@ async function runFreeTool(name: string, args: Args, ctx: FreeContext): Promise<
 			if (verdict !== "approve" && verdict !== "reject") throw new Error("[400] verdict is approve or reject");
 			const reviewer = actAs("reviewer");
 			// Busy enough that one record would hold reviewers up: shard the votes first.
-			return votesFor(ctx, repo, await shardVotesIfBusy(ctx, repo, registered, reviewer)).vote({ commit: requiredString(args, "commit"), reviewer, role: requiredString(args, "role"), verdict, evidence: requiredString(args, "evidence") }, stamper);
+			const commit = requiredString(args, "commit");
+			const cast = await votesFor(ctx, repo, await shardVotesIfBusy(ctx, repo, registered, reviewer)).vote({ commit, reviewer, role: requiredString(args, "role"), verdict, evidence: requiredString(args, "evidence") }, stamper);
+			// Its review is done: the hold free_next took for it goes.
+			await ctx.reviews?.release(repo, commit, reviewer).catch(() => undefined);
+			return cast;
 		}
 		case "free_merge": {
 			// mergeChange reads the claims again itself, when it checks them.

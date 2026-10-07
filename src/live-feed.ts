@@ -28,6 +28,15 @@ interface View {
 /** How long a build may run before another caller may start one. */
 const BUILD_LEASE_MS = 2 * 60_000;
 
+/**
+ * Review holds, for free_next in coordinator-free mode: which agents are
+ * reviewing a commit, until they vote or the hold runs out. A hint so two
+ * agents aren't sent to the same review that needs one; not a record.
+ */
+type Holds = Record<string, Record<string, number>>;
+/** How long a review hold lasts if its agent never votes. */
+export const REVIEW_HOLD_MS = 15 * 60_000;
+
 export class LiveFeed extends DurableObject<Env> {
 	async fetch(request: Request) {
 		if (request.headers.get("Upgrade") !== "websocket") return new Response("expected a WebSocket", { status: 426 });
@@ -78,6 +87,45 @@ export class LiveFeed extends DurableObject<Env> {
 		const kept = await this.ctx.storage.list({ prefix: "view:" });
 		const building = await this.ctx.storage.list({ prefix: "building:" });
 		await this.ctx.storage.delete([...kept.keys(), ...building.keys()]);
+	}
+
+	/** The review holds in force: by commit, the agents reviewing it. */
+	async reviewsHeld(): Promise<Record<string, string[]>> {
+		const holds = this.live((await this.ctx.storage.get<Holds>("holds")) ?? {});
+		return Object.fromEntries(Object.entries(holds).map(([head, agents]) => [head, Object.keys(agents)]));
+	}
+
+	/**
+	 * Hold a review of `head` for `agent`, if fewer than `needed` others hold
+	 * one. Atomic: two agents asking at once can't both take the last one.
+	 */
+	async holdReview(head: string, agent: string, needed: number) {
+		const holds = this.live((await this.ctx.storage.get<Holds>("holds")) ?? {});
+		const others = Object.keys(holds[head] ?? {}).filter((a) => a !== agent);
+		if (others.length >= needed) return false;
+		holds[head] = { ...holds[head], [agent]: Date.now() + REVIEW_HOLD_MS };
+		await this.ctx.storage.put("holds", holds);
+		return true;
+	}
+
+	/** The agent voted on `head` (or gave up): its hold goes. */
+	async releaseReview(head: string, agent: string) {
+		const holds = this.live((await this.ctx.storage.get<Holds>("holds")) ?? {});
+		if (!holds[head]?.[agent]) return;
+		delete holds[head][agent];
+		if (!Object.keys(holds[head]).length) delete holds[head];
+		await this.ctx.storage.put("holds", holds);
+	}
+
+	/** The holds that haven't run out. */
+	private live(holds: Holds): Holds {
+		const now = Date.now();
+		const kept: Holds = {};
+		for (const [head, agents] of Object.entries(holds)) {
+			const alive = Object.fromEntries(Object.entries(agents).filter(([, until]) => until > now));
+			if (Object.keys(alive).length) kept[head] = alive;
+		}
+		return kept;
 	}
 
 	private async writes() {

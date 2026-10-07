@@ -52,6 +52,17 @@ describe("what an agent should do next", () => {
 		expect(nextFor(base({ open, votes }))).toMatchObject({ kind: "review", change: "waiting", author: "agent-z", head: "h4", role: "review" });
 	});
 
+	it("leaves a review to the agents already on it, as many as it needs", () => {
+		const open = [{ claim: claimOf("a", "agent-y", "2026-10-07T09:00:00.000Z"), head: "h1" }, { claim: claimOf("b", "agent-y", "2026-10-07T09:01:00.000Z"), head: "h2" }];
+		expect(nextFor(base({ open, held: { h1: ["agent-z"] } }))).toMatchObject({ kind: "review", change: "b", needed: 1 });
+		// The one it holds already comes back to it; both held by others: wait.
+		expect(nextFor(base({ open, held: { h1: ["agent-x"] } }))).toMatchObject({ kind: "review", change: "a" });
+		expect(nextFor(base({ open, held: { h2: ["agent-x"] } }))).toMatchObject({ kind: "review", change: "b" });
+		expect(nextFor(base({ open, held: { h1: ["agent-z"], h2: ["agent-w"] } }))).toMatchObject({ kind: "wait" });
+		// Two approvals needed: one agent on it leaves room for another.
+		expect(nextFor(base({ policy: { required: 2, vetoes: [] }, open: [open[0]], held: { h1: ["agent-z"] } }))).toMatchObject({ kind: "review", change: "a", needed: 2 });
+	});
+
 	it("takes a role that can block only if it holds it, and those reviews first", () => {
 		const policy = { required: 1, vetoes: [], escalate: [{ paths: ["package.json"], required: 2, vetoes: ["security"] }], grants: { security: ["sec-agent"] } };
 		const open = [
@@ -121,6 +132,47 @@ describe("a change is its first agent's", { timeout: 60_000 }, () => {
 		expect(await (await store()).claim(want("w2", "agent-a", ["docs/w2/"]))).toMatchObject({ ok: true });
 		await expect((await store()).claim(want("w2", "agent-b", ["lib/w2/"]))).rejects.toThrow("w2 is agent-a's change");
 		expect(await (await store()).claim(want("w2", "agent-a", ["lib/w2/"]))).toMatchObject({ ok: true });
+	});
+});
+
+describe("review holds through the toolkit", { timeout: 120_000 }, () => {
+	it("sends two agents asking at once to different reviews, not both to the one", async () => {
+		const server = await startGitServer();
+		const work = mkdtempSync(join(tmpdir(), "free-holds-"));
+		try {
+			const { LiveFeed } = await import("../src/live-feed");
+			const { FakeStorage } = await import("./fakes/env");
+			const live = new LiveFeed({ storage: new FakeStorage(), getWebSockets: () => [] } as never, {} as never);
+			const ctx = (agentKey?: string): FreeContext => ({
+				remote: async () => ({ url: server.url, token: "unused" }),
+				changeRemote: async () => ({ url: server.url, token: "unused" }),
+				head: async () => server.git("rev-parse", "main").trim(),
+				reviews: { held: () => live.reviewsHeld(), hold: (_r, head, agent, needed) => live.holdReview(head, agent, needed), release: (_r, head, agent) => live.releaseReview(head, agent) },
+				...(agentKey ? { agentKey } : {}),
+			});
+			const call = (name: string, args: Record<string, unknown>, key?: string) => callFreeTool(name, { repo: "p", ...args }, ctx(key)) as Promise<Record<string, unknown>>;
+			await call("free_start", { required: 1, vetoes: [] });
+			const keys: Record<string, string> = {};
+			for (const a of ["author", "rev-1", "rev-2"]) keys[a] = ((await call("free_register", { agent: a })) as { key: string }).key;
+			const heads: string[] = [];
+			for (const c of ["c-1", "c-2"]) {
+				await call("free_claim", { change: c, agent: "author", paths: [`src/${c}/`], intent: c }, keys.author);
+				heads.push(await pushChange(server.url, work, "author", c, { [`src/${c}/x.js`]: `${c}\n` }));
+			}
+			const [one, two] = await Promise.all(["rev-1", "rev-2"].map((a) => call("free_next", { agent: a }, keys[a])));
+			expect(one.kind).toBe("review");
+			expect(two.kind).toBe("review");
+			expect(new Set([one.change, two.change]).size).toBe(2);
+			// A third finds both held, and waits.
+			keys["rev-3"] = ((await call("free_register", { agent: "rev-3" })) as { key: string }).key;
+			expect(await call("free_next", { agent: "rev-3" }, keys["rev-3"])).toMatchObject({ kind: "wait" });
+			// rev-1 votes: its hold goes.
+			await call("free_vote", { commit: one.head, reviewer: "rev-1", role: "review", verdict: "approve", evidence: "ok" }, keys["rev-1"]);
+			expect(Object.keys(await live.reviewsHeld())).toEqual([two.head]);
+		} finally {
+			await server.close();
+			rmSync(work, { recursive: true, force: true });
+		}
 	});
 });
 
