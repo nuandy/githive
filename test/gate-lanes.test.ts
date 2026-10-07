@@ -51,3 +51,18 @@ describe("a repo's lanes, warm or not", () => {
 		]);
 	});
 });
+
+describe("installing a Node project's dependencies before its checks", () => {
+	it("installs first with npm ci from an npm lockfile, or npm install without one", async () => {
+		const { withInstall } = await import("../src/gate");
+		expect(withInstall(["npm test"], { packageJson: true, npmLockfile: true })).toEqual(["npm ci", "npm test"]);
+		expect(withInstall(["npm test"], { packageJson: true, npmLockfile: false })).toEqual(["npm install", "npm test"]);
+	});
+
+	it("leaves the checks as they are when one installs, or the project isn't a Node one", async () => {
+		const { withInstall } = await import("../src/gate");
+		expect(withInstall(["npm install", "npm test"], { packageJson: true, npmLockfile: true })).toEqual(["npm install", "npm test"]);
+		expect(withInstall(["pnpm install --frozen-lockfile", "pnpm test"], { packageJson: true, npmLockfile: false })).toEqual(["pnpm install --frozen-lockfile", "pnpm test"]);
+		expect(withInstall(["cargo test"], { packageJson: false, npmLockfile: false })).toEqual(["cargo test"]);
+	});
+});

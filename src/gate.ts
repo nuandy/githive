@@ -47,9 +47,18 @@ interface CheckPlan {
 	checks: string[];
 }
 
-const INSTALL = /^npm ci(\s|$)/;
 /** A check that installs dependencies (any of the usual package managers): what warming a container runs. */
 const INSTALLS = /^(npm|pnpm|yarn)\s+(ci|install)(\s|$)/;
+
+/**
+ * A Node project's checks, with an install first when none of them installs
+ * its dependencies: `npm ci` from an npm lockfile, `npm install` without one
+ * (Express has none). Otherwise every check fails on missing tools.
+ */
+export function withInstall(checks: string[], project: { packageJson: boolean; npmLockfile: boolean }) {
+	if (!project.packageJson || checks.some((c) => INSTALLS.test(c.trim()))) return checks;
+	return [project.npmLockfile ? "npm ci" : "npm install", ...checks];
+}
 /** How long a container stays up with nothing to run: through a burst of merges. */
 const IDLE_MS = 20 * 60_000;
 /** A container warmed this recently isn't warmed again. */
@@ -162,11 +171,8 @@ export class Gate extends DurableObject<Env> {
 			}
 		}
 
-		// Checks run on a fresh checkout. If none installs dependencies but the
-		// project has a lockfile, install them first, or every check fails on
-		// missing tools.
-		const checks = [...plan.checks];
-		if (!checks.some((c) => INSTALL.test(c.trim())) && (await run(container, ["test", "-f", "package-lock.json"])).exitCode === 0) checks.unshift("npm ci");
+		// Checks run on a fresh checkout: a Node project's dependencies are installed first.
+		const checks = await this.checksFor(container, plan.checks);
 
 		// Toolchains beyond Node, read from the merged code (a change may add one), and their dependencies.
 		const setup = await this.setUpToolchains(container);
@@ -242,7 +248,7 @@ export class Gate extends DurableObject<Env> {
 				if (fetched.exitCode !== 0) return;
 				await run(container, ["bash", "-lc", `git merge --abort 2>/dev/null; git checkout -q -f --detach refs/remotes/base/${branch} && git clean -fdq`]);
 				await this.setUpToolchains(container);
-				const install = input.checks.find((c) => INSTALLS.test(c.trim()));
+				const install = (await this.checksFor(container, input.checks)).find((c) => INSTALLS.test(c.trim()));
 				if (install && !(await this.installUnchanged(container))) {
 					const installed = await run(container, ["bash", "-lc", install], WORKDIR, undefined, 600);
 					if (installed.exitCode === 0) await this.ctx.storage.put("lockHash", await this.lockHash(container));
@@ -282,6 +288,12 @@ export class Gate extends DurableObject<Env> {
 		if (!input.checks.length) return;
 		await this.ctx.storage.put("warmLanes", input);
 		await this.ctx.storage.setAlarm(Date.now());
+	}
+
+	/** The repo's checks for the checkout here, with the install a Node project needs first (see withInstall). */
+	private async checksFor(container: Container, checks: string[]) {
+		const found = await run(container, ["bash", "-c", "[ -f package.json ] && echo package.json; [ -f package-lock.json ] || [ -f npm-shrinkwrap.json ] && echo lockfile; true"]);
+		return withInstall(checks, { packageJson: found.output.includes("package.json"), npmLockfile: found.output.includes("lockfile") });
 	}
 
 	/**
