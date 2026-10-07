@@ -8,6 +8,8 @@
 	"compatibility_flags": ["nodejs_compat"],
 	"observability": { "enabled": true },
 	"workers_dev": true,
+	// githive.app: people sign in and MCP clients connect (no Access in front). blueprint.nuandy.workers.dev stays the Access door for admins and scripts.
+	"routes": [{ "pattern": "githive.app", "custom_domain": true }],
 	"vars": {
 		// Where people sign in and MCP clients connect over OAuth (no Access in front). The Access hostnames serve as before.
 		"PUBLIC_ORIGIN": "https://githive.app",
