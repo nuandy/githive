@@ -16,7 +16,7 @@ import { revertViolation } from "./revert";
 import type { Stamper } from "./stamp";
 import { approval, countedVotes, effectiveFreePolicy, openFlag, shardVotes, votesShardingReason, type ReviewPolicy, type VoteRecord, type Votes } from "./votes";
 import { VOTE_BUCKETS, type VoteStore, voteStore, votesPrefix } from "./vote-store";
-import { addWork, type NextStep, nextFor, type Work, workId } from "./work";
+import { addWork, holdKey, type NextStep, nextFor, type Work, workId } from "./work";
 import { SENSITIVE_PATHS } from "../types";
 
 // The coordinator-free MCP tools (see docs/coordinator-free.md). Stateless: each
@@ -542,7 +542,7 @@ async function runFreeTool(name: string, args: Args, ctx: FreeContext): Promise<
 			if (!ctx.reviews) return decide();
 			for (let attempt = 0; attempt < 3; attempt++) {
 				const next = decide(await ctx.reviews.held(repo).catch(() => ({})));
-				if (next.kind !== "review" || (await ctx.reviews.hold(repo, next.head, agent, next.needed).catch(() => true))) return next;
+				if (next.kind !== "review" || (await ctx.reviews.hold(repo, holdKey(next.head, next.role), agent, next.needed).catch(() => true))) return next;
 			}
 			// Others kept taking the reviews first: they're covered.
 			return { kind: "wait", reason: "other agents just took the reviews that were waiting", retryAfterSeconds: 15, next: "Call free_next again in a little while." } satisfies NextStep;
@@ -616,7 +616,7 @@ async function runFreeTool(name: string, args: Args, ctx: FreeContext): Promise<
 			const commit = requiredString(args, "commit");
 			const cast = await votesFor(ctx, repo, await shardVotesIfBusy(ctx, repo, registered, reviewer)).vote({ commit, reviewer, role: requiredString(args, "role"), verdict, evidence: requiredString(args, "evidence") }, stamper);
 			// Its review is done: the hold free_next took for it goes.
-			await ctx.reviews?.release(repo, commit, reviewer).catch(() => undefined);
+			await ctx.reviews?.release(repo, holdKey(commit, requiredString(args, "role")), reviewer).catch(() => undefined);
 			if (verdict === "approve") await warmChecks();
 			return cast;
 		}

@@ -54,13 +54,13 @@ describe("what an agent should do next", () => {
 
 	it("leaves a review to the agents already on it, as many as it needs", () => {
 		const open = [{ claim: claimOf("a", "agent-y", "2026-10-07T09:00:00.000Z"), head: "h1" }, { claim: claimOf("b", "agent-y", "2026-10-07T09:01:00.000Z"), head: "h2" }];
-		expect(nextFor(base({ open, held: { h1: ["agent-z"] } }))).toMatchObject({ kind: "review", change: "b", needed: 1 });
+		expect(nextFor(base({ open, held: { "h1#review": ["agent-z"] } }))).toMatchObject({ kind: "review", change: "b", needed: 1 });
 		// The one it holds already comes back to it; both held by others: wait.
-		expect(nextFor(base({ open, held: { h1: ["agent-x"] } }))).toMatchObject({ kind: "review", change: "a" });
-		expect(nextFor(base({ open, held: { h2: ["agent-x"] } }))).toMatchObject({ kind: "review", change: "b" });
-		expect(nextFor(base({ open, held: { h1: ["agent-z"], h2: ["agent-w"] } }))).toMatchObject({ kind: "wait" });
+		expect(nextFor(base({ open, held: { "h1#review": ["agent-x"] } }))).toMatchObject({ kind: "review", change: "a" });
+		expect(nextFor(base({ open, held: { "h2#review": ["agent-x"] } }))).toMatchObject({ kind: "review", change: "b" });
+		expect(nextFor(base({ open, held: { "h1#review": ["agent-z"], "h2#review": ["agent-w"] } }))).toMatchObject({ kind: "wait" });
 		// Two approvals needed: one agent on it leaves room for another.
-		expect(nextFor(base({ policy: { required: 2, vetoes: [] }, open: [open[0]], held: { h1: ["agent-z"] } }))).toMatchObject({ kind: "review", change: "a", needed: 2 });
+		expect(nextFor(base({ policy: { required: 2, vetoes: [] }, open: [open[0]], held: { "h1#review": ["agent-z"] } }))).toMatchObject({ kind: "review", change: "a", needed: 2 });
 	});
 
 	it("asks for no more ordinary reviews than a change needs beside the role that can block it", () => {
@@ -68,9 +68,17 @@ describe("what an agent should do next", () => {
 		const policy = { required: 1, vetoes: [], escalate: [{ paths: ["package.json"], required: 2, vetoes: ["security"] }], grants: { security: ["sec-agent"] } };
 		const open = [{ claim: claimOf("deps", "agent-y", "2026-10-07T09:30:00.000Z", ["package.json"]), head: "h2" }];
 		expect(nextFor(base({ policy, open }))).toMatchObject({ kind: "review", change: "deps", role: "review", needed: 1 });
-		expect(nextFor(base({ policy, open, held: { h2: ["agent-w"] } }))).toMatchObject({ kind: "wait" });
+		expect(nextFor(base({ policy, open, held: { "h2#review": ["agent-w"] } }))).toMatchObject({ kind: "wait" });
 		expect(nextFor(base({ policy, open, votes: [vote("h2", "agent-w")] }))).toMatchObject({ kind: "wait" });
 		expect(nextFor(base({ agent: "sec-agent", policy, open, votes: [vote("h2", "agent-w")] }))).toMatchObject({ kind: "review", role: "security" });
+	});
+
+	it("doesn't let an ordinary reviewer's hold keep the holder of a role that can block away", () => {
+		const policy = { required: 1, vetoes: [], escalate: [{ paths: ["package.json"], required: 2, vetoes: ["security"] }], grants: { security: ["sec-agent"] } };
+		const open = [{ claim: claimOf("deps", "agent-y", "2026-10-07T09:30:00.000Z", ["package.json"]), head: "h2" }];
+		// agent-w approved and its hold lingers; the security review is still the security holder's to do.
+		expect(nextFor(base({ agent: "sec-agent", policy, open, votes: [vote("h2", "agent-w")], held: { "h2#review": ["agent-w"] } }))).toMatchObject({ kind: "review", role: "security" });
+		expect(nextFor(base({ agent: "sec-agent", policy, open, votes: [vote("h2", "agent-w")], held: { "h2#security": ["other-sec"] } }))).toMatchObject({ kind: "wait" });
 	});
 
 	it("takes a role that can block only if it holds it, and those reviews first", () => {
@@ -180,7 +188,7 @@ describe("review holds through the toolkit", { timeout: 120_000 }, () => {
 			await call("free_vote", { commit: one.head, reviewer: "rev-1", role: "review", verdict: "approve", evidence: "ok" }, keys["rev-1"]);
 			const later = vi.spyOn(Date, "now").mockReturnValue(Date.now() + 61_000);
 			try {
-				expect(Object.keys(await live.reviewsHeld())).toEqual([two.head]);
+				expect(Object.keys(await live.reviewsHeld())).toEqual([`${two.head}#review`]);
 			} finally {
 				later.mockRestore();
 			}

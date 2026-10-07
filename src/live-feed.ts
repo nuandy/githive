@@ -30,7 +30,8 @@ const BUILD_LEASE_MS = 2 * 60_000;
 
 /**
  * Review holds, for free_next in coordinator-free mode: which agents are
- * reviewing a commit, until they vote or the hold runs out. A hint so two
+ * reviewing a commit in a role (keyed as free/work.ts holdKey), until they
+ * vote or the hold runs out. A hint so two
  * agents aren't sent to the same review that needs one; not a record.
  */
 type Holds = Record<string, Record<string, number>>;

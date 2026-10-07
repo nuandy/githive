@@ -68,10 +68,17 @@ export interface NextInput {
 	merged: Set<string>;
 	/** Changes waiting on a person (asked about, and not answered on their head): their agent can do other work meanwhile. */
 	asked?: Set<string>;
-	/** Reviews other agents are on now, by commit (review holds): a review already held as often as it's needed is left to them. */
+	/** Reviews other agents are on now, by commit and role (review holds, see holdKey): a review already held as often as it's needed is left to them. */
 	held?: Record<string, string[]>;
 	work: WorkItem[];
 }
+
+/**
+ * A review hold's key: a commit and the role reviewed. An ordinary reviewer's
+ * hold mustn't keep the holder of a role that can block away (in a run, one
+ * lingering after its vote sent the only security holder to build instead).
+ */
+export const holdKey = (head: string, role: string) => `${head}#${role}`;
 
 /** A small, stable hash, to spread agents over equally good choices. */
 function spread(agent: string, n: number) {
@@ -121,9 +128,10 @@ export function nextFor(input: NextInput): NextStep {
 			// roles still awaited will bring (their approvals count too). Others already on it count.
 			const needed = role ? 1 : required - outcome.approvals - outcome.awaiting.length;
 			if (needed <= 0) return [];
-			if ((input.held?.[head] ?? []).filter((a) => a !== agent).length >= needed) return [];
+			const holders = input.held?.[holdKey(head, role ?? "review")] ?? [];
+			if (holders.filter((a) => a !== agent).length >= needed) return [];
 			// One it holds already (it asked again mid-review): the same one, first.
-			const mine = (input.held?.[head] ?? []).includes(agent);
+			const mine = holders.includes(agent);
 			return [{ claim, head, role: role ?? "review", blocking: !!role, approvals: outcome.approvals, needed, mine }];
 		})
 		.sort((a, b) => Number(b.mine) - Number(a.mine) || Number(b.blocking) - Number(a.blocking) || a.approvals - b.approvals || a.claim.since.localeCompare(b.claim.since));
