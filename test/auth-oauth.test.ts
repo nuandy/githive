@@ -194,3 +194,51 @@ describe("where the consent form may lead", () => {
 		expect(page.headers.get("Content-Security-Policy")).toContain("form-action 'self' http://127.0.0.1:33418;");
 	});
 });
+
+describe("feedback on Allow and Deny", () => {
+	/** The page's script, run against a form with Allow and Deny and nothing else. */
+	function runFeedback() {
+		const appended: { name: string; value: string }[] = [];
+		const button = (value: string) => ({ name: "decision", value, disabled: false, textContent: value, attrs: {} as Record<string, string>, setAttribute(k: string, v: string) { this.attrs[k] = v; } });
+		const buttons = [button("approve"), button("deny")];
+		let submit: (event: unknown) => void = () => {};
+		const form = { addEventListener: (_: string, fn: (event: unknown) => void) => (submit = fn), querySelectorAll: () => buttons, appendChild: (input: { name: string; value: string }) => appended.push({ name: input.name, value: input.value }) };
+		const document = { querySelector: () => form, createElement: () => ({}) };
+		const window = { addEventListener: () => {} };
+		return import("../src/auth/authorize").then(({ SUBMIT_FEEDBACK }) => {
+			new Function("document", "window", "location", SUBMIT_FEEDBACK)(document, window, {});
+			return { buttons, appended, submit };
+		});
+	}
+
+	it("says Connecting…, disables both buttons, and still sends the choice", async () => {
+		const { buttons, appended, submit } = await runFeedback();
+		submit({ submitter: buttons[0] });
+		expect(appended).toEqual([{ name: "decision", value: "approve" }]);
+		expect(buttons.map((b) => b.disabled)).toEqual([true, true]);
+		expect(buttons[0].textContent).toBe("Connecting…");
+		expect(buttons[0].attrs["aria-busy"]).toBe("true");
+	});
+
+	it("says Cancelling… for Deny", async () => {
+		const { buttons, appended, submit } = await runFeedback();
+		submit({ submitter: buttons[1] });
+		expect(appended).toEqual([{ name: "decision", value: "deny" }]);
+		expect(buttons[1].textContent).toBe("Cancelling…");
+	});
+
+	it("is allowed by a nonce in the page's policy, fresh for each page", async () => {
+		const registered = await json(call("/oauth/register", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ client_name: "Claude Code", redirect_uris: [CLIENT_REDIRECT], token_endpoint_auth_method: "none" }) }));
+		const { challenge } = await pkce();
+		const url = `/authorize?${new URLSearchParams({ response_type: "code", client_id: registered.client_id, redirect_uri: CLIENT_REDIRECT, scope: "mcp", state: "st", code_challenge: challenge, code_challenge_method: "S256" })}`;
+		const nonceOf = async () => {
+			const response = await call(url, { headers: { Cookie: session } });
+			const policy = response.headers.get("Content-Security-Policy")!;
+			const fromPolicy = policy.match(/script-src 'nonce-([^']+)'/)![1];
+			const fromPage = (await response.text()).match(/<script nonce="([^"]+)">/)![1];
+			expect(fromPage).toBe(fromPolicy);
+			return fromPage;
+		};
+		expect(await nonceOf()).not.toBe(await nonceOf());
+	});
+});

@@ -1,7 +1,7 @@
 import type { Context } from "hono";
 import { AuthorizationError, CimdFetchError, type ConsentDescription, type OAuthHelpers } from "@cloudflare/workers-oauth-provider";
 import type { AuthEnv } from "./routes";
-import type { Agent, User } from "./store";
+import { type Agent, type User, randomSecret } from "./store";
 import { identityStore } from "./principal";
 
 // The page an MCP client sends a person to (OAuth's authorize endpoint): sign
@@ -13,7 +13,7 @@ const escape = (value: string) => value.replace(/[&<>"']/g, (char) => `&#${char.
 
 const HIVE = `<svg width="28" height="28" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="7" fill="#f2a516"/><g fill="#fff" stroke="#f2a516" stroke-width="1.2"><rect x="12" y="5.5" width="8" height="5" rx="2.5"/><rect x="9" y="10" width="14" height="5" rx="2.5"/><rect x="7" y="14.5" width="18" height="5" rx="2.5"/><rect x="6" y="19" width="20" height="5.5" rx="2.75"/></g><rect x="4.5" y="24.2" width="23" height="2.6" rx="1.3" fill="#fff"/><path d="M13.6 24.4a2.4 2.4 0 0 1 4.8 0z" fill="#7a4a06"/></svg>`;
 
-function page(title: string, body: string) {
+function page(title: string, body: string, script = "") {
 	return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${escape(title)} · GitHive</title>
@@ -36,10 +36,16 @@ input[type=text] { font: inherit; padding: 6px 8px; border: 1px solid var(--line
 .actions { display: flex; gap: 10px; flex-wrap: wrap; }
 button, .button { font: inherit; font-weight: 600; padding: 8px 16px; border-radius: 8px; border: 1px solid var(--line); background: var(--surface); color: var(--fg); cursor: pointer; text-decoration: none; display: inline-block; }
 button.primary, .button.primary { background: var(--honey); border-color: var(--honey); color: var(--on-honey); }
+button:hover:not(:disabled), .button:hover { filter: brightness(0.95); }
+button:active:not(:disabled), .button:active { transform: translateY(1px); filter: brightness(0.9); }
+button:disabled { cursor: progress; opacity: 0.75; }
+button[aria-busy="true"]::before { content: ""; display: inline-block; width: 0.8em; height: 0.8em; margin-right: 8px; vertical-align: -0.08em; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: spin 0.7s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { button[aria-busy="true"]::before { animation: none; } }
 button:focus-visible, .button:focus-visible, input:focus-visible { outline: 2px solid var(--honey-ink); outline-offset: 2px; }
 code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9em; }
 </style></head>
-<body><main><div class="brand">${HIVE} GitHive</div>${body}</main></body></html>`;
+<body><main><div class="brand">${HIVE} GitHive</div>${body}</main>${script}</body></html>`;
 }
 
 /**
@@ -58,10 +64,10 @@ export function formAction(redirectUri?: string) {
 	}
 }
 
-const html = (body: string, status = 200, headers?: Headers, redirectUri?: string) => {
+const html = (body: string, status = 200, headers?: Headers, redirectUri?: string, nonce?: string) => {
 	const h = new Headers(headers);
 	h.set("Content-Type", "text/html; charset=utf-8");
-	h.set("Content-Security-Policy", `default-src 'none'; style-src 'unsafe-inline'; img-src data:; form-action ${formAction(redirectUri)}; frame-ancestors 'none'`);
+	h.set("Content-Security-Policy", `default-src 'none'; style-src 'unsafe-inline'; img-src data:;${nonce ? ` script-src 'nonce-${nonce}';` : ""} form-action ${formAction(redirectUri)}; frame-ancestors 'none'`);
 	return new Response(body, { status, headers: h });
 };
 
@@ -78,6 +84,31 @@ function signInPage(details: ConsentDescription, returnTo: string, providers: st
 	);
 }
 
+/**
+ * Feedback once Allow or Deny is clicked: the button says what's happening,
+ * and both are disabled so the choice is sent once. A disabled button isn't
+ * submitted, so the choice goes in a hidden field first. Coming back to the
+ * page (the browser's Back) makes them usable again.
+ */
+export const SUBMIT_FEEDBACK = `const form = document.querySelector("form");
+form.addEventListener("submit", (event) => {
+	const button = event.submitter;
+	if (!button || !button.name) return;
+	const choice = document.createElement("input");
+	choice.type = "hidden";
+	choice.name = button.name;
+	choice.value = button.value;
+	form.appendChild(choice);
+	for (const b of form.querySelectorAll("button")) b.disabled = true;
+	button.setAttribute("aria-busy", "true");
+	button.textContent = button.value === "approve" ? "Connecting…" : "Cancelling…";
+});
+window.addEventListener("pageshow", (event) => {
+	if (event.persisted) location.reload();
+});`;
+
+const feedbackScript = (nonce: string) => `<script nonce="${nonce}">${SUBMIT_FEEDBACK}</script>`;
+
 /** A name for a new agent from the app's own name: "Claude Code (githive)" is claude-code. */
 export function suggestedAgentName(clientName: string) {
 	return clientName
@@ -89,7 +120,7 @@ export function suggestedAgentName(clientName: string) {
 		.replace(/-+$/, "");
 }
 
-function consentPage(details: ConsentDescription, handle: string, user: User, agents: Agent[], error?: string) {
+function consentPage(details: ConsentDescription, handle: string, user: User, agents: Agent[], nonce: string, error?: string) {
 	const name = escape(details.clientName);
 	const suggested = suggestedAgentName(details.clientName);
 	// The agent this app has acted as before, by its name; otherwise a new one named for the app.
@@ -116,6 +147,7 @@ ${choices}
 <p class="muted">You can revoke it any time on your Agents page.</p>
 <div class="actions"><button class="primary" name="decision" value="approve">Allow</button><button name="decision" value="deny">Deny</button></div>
 </form>`,
+		feedbackScript(nonce),
 	);
 }
 
@@ -140,7 +172,8 @@ export async function authorize(c: Context<AuthEnv>) {
 
 		if (c.req.method === "GET") {
 			const consent = await oauth.beginConsent(request);
-			return html(consentPage(details, consent.handle, user, await active()), 200, consent.headers, details.redirectUri);
+			const nonce = randomSecret(16);
+			return html(consentPage(details, consent.handle, user, await active(), nonce), 200, consent.headers, details.redirectUri, nonce);
 		}
 
 		const form = await c.req.formData();
@@ -155,9 +188,13 @@ export async function authorize(c: Context<AuthEnv>) {
 		try {
 			agent = choice === "new" ? await ids.createAgent(user.id, String(form.get("new_name") ?? "")) : (await active()).find((a) => a.id === choice);
 		} catch (err) {
-			return html(consentPage(details, handle, user, await active(), (err instanceof Error ? err.message : String(err)).replace(/^\[\d+\]\s*/, "")), 400, undefined, details.redirectUri);
+			const nonce = randomSecret(16);
+			return html(consentPage(details, handle, user, await active(), nonce, (err instanceof Error ? err.message : String(err)).replace(/^\[\d+\]\s*/, "")), 400, undefined, details.redirectUri, nonce);
 		}
-		if (!agent) return html(consentPage(details, handle, user, await active(), "Choose one of your agents, or name a new one."), 400, undefined, details.redirectUri);
+		if (!agent) {
+			const nonce = randomSecret(16);
+			return html(consentPage(details, handle, user, await active(), nonce, "Choose one of your agents, or name a new one."), 400, undefined, details.redirectUri, nonce);
+		}
 		const approved = await oauth.approveConsent(c.req.raw, handle, { scope: request.scope });
 		const { redirectTo } = await oauth.completeAuthorization({
 			request: approved.request,
