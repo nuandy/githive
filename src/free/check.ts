@@ -1,5 +1,5 @@
 import { type Remote, Workspace } from "../git";
-import { inLane } from "../open-mode";
+import { inLane } from "../claim-paths";
 import type { ClaimRecord } from "./claims";
 
 // An agent's early check on its own change, before merging: does it still

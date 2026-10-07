@@ -1,9 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { Deposed, type LogCommit, campaign } from "../src/election";
-import { GitCasLog, readDecisionHistory, cachedRemote, leaseRef } from "../src/election-git";
+import { GitCasLog, type LogCommit } from "../src/record-log";
 import { startGitServer, type GitServer } from "./helpers/git-server";
 
-// The log in Git, against a real Git server (git http-backend).
+// A record log in Git, against a real Git server (git http-backend): reads,
+// compare-and-swap appends, retries, and entries as notes plain git can read.
 
 type State = { claims: Record<string, string> };
 
@@ -12,14 +12,14 @@ let log: GitCasLog<State>;
 
 beforeEach(async () => {
 	server = await startGitServer();
-	log = new GitCasLog<State>(async () => ({ url: server.url, token: "unused" }), "t1");
+	log = new GitCasLog<State>(async () => ({ url: server.url, token: "unused" }), "t1", "refs/notes/blueprint/t1");
 });
 
 const commit = (overrides: Partial<LogCommit<State>> = {}): LogCommit<State> => ({
 	term: 1,
 	leader: "peer-a",
 	leaseUntil: 1_790_000_000_000,
-	kind: "election",
+	kind: "decisions",
 	entries: [],
 	state: { claims: {} },
 	batch: "batch-1",
@@ -42,18 +42,10 @@ describe("GitCasLog", () => {
 		expect(await log.read()).toEqual({ tip, commit: written });
 	});
 
-	it("reads back every decision the log recorded, oldest first, for a task's history", async () => {
-		const first = await log.append(null, commit({ kind: "decisions", entries: [{ commit: "c0", text: "Change a opened", at: "2026-10-06T00:00:01.000Z" }] }));
-		const second = await log.append(first, commit({ kind: "decisions", batch: "b2", entries: [{ commit: "c1", text: "a pushed c1", at: "2026-10-06T00:00:02.000Z" }, { commit: "c1", text: "a: tests reviewer approved", at: "2026-10-06T00:00:03.000Z" }] }));
-		await log.append(second, commit({ kind: "heartbeat", batch: "b3" }));
-		expect((await readDecisionHistory({ url: server.url, token: "unused" }, "t1")).map((e) => e.text)).toEqual(["Change a opened", "a pushed c1", "a: tests reviewer approved"]);
-		expect(await readDecisionHistory({ url: server.url, token: "unused" }, "nothing-here")).toEqual([]);
-	});
-
 	it("retries a read the server fails for a moment", async () => {
 		const written = commit({ kind: "decisions" });
 		const tip = await log.append(null, written);
-		const fresh = new GitCasLog<State>(async () => ({ url: server.url, token: "unused" }), "t1");
+		const fresh = new GitCasLog<State>(async () => ({ url: server.url, token: "unused" }), "t1", "refs/notes/blueprint/t1");
 		server.failFetches(1);
 		expect(await fresh.read()).toEqual({ tip, commit: written });
 	});
@@ -115,7 +107,7 @@ describe("GitCasLog", () => {
 	});
 
 	it("reads an unchanged log without fetching it again", async () => {
-		await new GitCasLog<State>(async () => ({ url: server.url, token: "unused" }), "t1").append(null, commit());
+		await new GitCasLog<State>(async () => ({ url: server.url, token: "unused" }), "t1", "refs/notes/blueprint/t1").append(null, commit());
 		server.requests.length = 0;
 		const first = await log.read();
 		const firstRequests = server.requests.length;
@@ -144,53 +136,5 @@ describe("GitCasLog", () => {
 		const project = server.git("rev-parse", "main").trim();
 		await log.append(null, commit({ kind: "decisions", entries: [{ commit: project, text: "change stats-1f2e opened, claiming src/stats/", at: "2026-10-04T12:00:00.000Z" }] }));
 		expect(server.git("notes", "--ref", "blueprint/t1", "show", project)).toContain("change stats-1f2e opened, claiming src/stats/");
-	});
-});
-
-describe("the election protocol over Git", () => {
-	const empty = (): State => ({ claims: {} });
-	const claim = (path: string, holder: string) => (state: State) => {
-		if (state.claims[path]) throw new Error(`[409] ${path} is held by ${state.claims[path]}`);
-		return { state: { claims: { ...state.claims, [path]: holder } }, entries: [{ commit: "none", text: `${holder} claims ${path}`, at: "" }], result: path };
-	};
-
-	it("elects, decides, fences a stale leader and hands every decision to the next", async () => {
-		const c = { now: 1_000_000 };
-		const options = { leaseMs: 30_000, now: () => c.now };
-		const refs = { log, leases: new GitCasLog<null>(async () => ({ url: server.url, token: "unused" }), "t1", leaseRef("t1")) };
-		const a = await campaign(refs, "peer-a", empty, options);
-		if (!a.leading) throw new Error("peer-a should lead");
-		expect(await campaign(refs, "peer-b", empty, options)).toMatchObject({ leading: false, leader: "peer-a" });
-		await a.leader.decide(claim("src/x/", "peer-a"));
-		c.now += 20_000;
-		expect(await a.leader.heartbeat()).toBe(true);
-
-		c.now += 30_001;
-		const b = await campaign(refs, "peer-b", empty, options);
-		if (!b.leading) throw new Error("peer-b should lead");
-		expect(b.term).toBe(2);
-		await expect(a.leader.decide(claim("src/y/", "peer-a"))).rejects.toBeInstanceOf(Deposed);
-		await expect(b.leader.decide(claim("src/x/", "peer-b"))).rejects.toThrow(/held by peer-a/);
-		await b.leader.decide(claim("src/y/", "peer-b"));
-
-		expect((await log.read())?.commit.state).toEqual({ claims: { "src/x/": "peer-a", "src/y/": "peer-b" } });
-		const history = server.git("log", "--format=%(trailers:key=Blueprint-Term,valueonly,separator=)|%(trailers:key=Blueprint-Kind,valueonly,separator=)|%s", "refs/notes/blueprint/t1").trim().split("\n");
-		// The decision log holds only terms and decisions; the heartbeat went to the lease ref.
-		expect(history.reverse()).toEqual(["1|term|Term 1: peer-a leads", "1|decisions|peer-a claims src/x/", "2|term|Term 2: peer-b leads", "2|decisions|peer-b claims src/y/"]);
-		const leases = server.git("log", "--format=%s", leaseRef("t1")).trim().split("\n").reverse();
-		expect(leases).toEqual(["Election: peer-a leads term 1", "Heartbeat: peer-a, term 1", "Election: peer-b leads term 2"]);
-	});
-});
-
-describe("cachedRemote", () => {
-	it("mints a token once while it is fresh, and again once it is not", async () => {
-		let now = 0;
-		const mint = vi.fn(async () => ({ url: "https://git.test/p.git", token: `t${mint.mock.calls.length}` }));
-		const remote = cachedRemote(mint, 60_000, () => now);
-		expect(await remote()).toEqual(await remote());
-		expect(mint).toHaveBeenCalledTimes(1);
-		now += 60_001;
-		await remote();
-		expect(mint).toHaveBeenCalledTimes(2);
 	});
 });

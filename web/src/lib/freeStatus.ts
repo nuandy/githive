@@ -30,7 +30,7 @@ export function awaitingVetoes(claim: FreeClaim): string[] {
 	return Array.isArray(claim.approval.awaiting) ? claim.approval.awaiting : [];
 }
 
-/** "1/2 approvals", "Waiting for security", "Blocked by security", like the elected repos' review badge. */
+/** "1/2 approvals", "Waiting for security", "Blocked by security": the review badge. */
 export function claimApprovalLabel(claim: FreeClaim): string {
 	const { approval } = claim;
 	if (approval.vetoedBy.length) return `Blocked by ${approval.vetoedBy.join(", ")}`;

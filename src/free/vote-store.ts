@@ -1,5 +1,5 @@
-import type { CasLog } from "../election";
-import { GitCasLog } from "../election-git";
+import type { CasLog } from "../record-log";
+import { GitCasLog } from "../record-log";
 import type { Remote } from "../git";
 import { readAllShards, readRefs } from "./record-refs";
 import { recordsRepoOf } from "./shards";

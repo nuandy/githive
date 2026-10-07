@@ -356,7 +356,7 @@ export function FreeChangePage({ snapshot, changeId, claim, history, repo, base,
 							</article>
 							{history === undefined ? <p className="muted change-layout__loading">Loading history…</p> : null}
 							{history ? (
-								<Timeline items={timeline} branch={branch} />
+								<Timeline items={timeline} />
 							) : (
 								<ol className="timeline">
 									<li className="timeline__item">

@@ -1,4 +1,4 @@
-import { inLane, inLaneEntry } from "../open-mode";
+import { inLane, inLaneEntry } from "../claim-paths";
 import type { ClaimRecord, Registry } from "./claims";
 import { decodeShard } from "./shards";
 import { stampPayload, verifyStamp } from "./stamp";

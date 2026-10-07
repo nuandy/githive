@@ -2,13 +2,13 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { GitCasLog } from "../src/election-git";
+import { GitCasLog } from "../src/record-log";
 import { statusOf } from "../src/errors";
 import { claimStore } from "../src/free/claim-store";
 import { type Registry, SHARD_WHEN, shardClaims, shardingReason } from "../src/free/claims";
 import { callFreeTool, type FreeContext } from "../src/free/mcp";
 import { changeRef, shardsPrefix } from "../src/free/shards";
-import { entriesOverlap } from "../src/open-mode";
+import { entriesOverlap } from "../src/claim-paths";
 import { pushChange } from "./helpers/agents";
 import { startGitServer, type GitServer } from "./helpers/git-server";
 

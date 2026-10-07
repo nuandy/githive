@@ -1,11 +1,11 @@
 import git from "isomorphic-git";
-import { GitCasLog } from "../election-git";
+import { GitCasLog } from "../record-log";
 import { fail, requiredPaths, requiredString } from "../errors";
 import { branchHead, type Remote, Workspace } from "../git";
 import { projectBranch } from "../project-branch";
 import { Timing } from "../timing";
 import { annotate, destroys, reads, writes } from "../tool-annotations";
-import { changeId, normalizeClaim } from "../open-mode";
+import { changeId, normalizeClaim } from "../claim-paths";
 import { audit } from "./audit";
 import { checkChange } from "./check";
 import { claimStore, type ClaimStore } from "./claim-store";
@@ -14,10 +14,9 @@ import { readMainMerges, readRecordHistory, readRefHistories, readShardHistories
 import { type CheckRunner, mergeChange } from "./merge";
 import { revertViolation } from "./revert";
 import type { Stamper } from "./stamp";
-import { approval, countedVotes, DEFAULT_GRANT, effectiveFreePolicy, grantWarnings, openFlag, shardVotes, votesShardingReason, type ReviewPolicy, type VoteRecord, type Votes } from "./votes";
+import { SENSITIVE_PATHS, approval, countedVotes, DEFAULT_GRANT, effectiveFreePolicy, grantWarnings, openFlag, shardVotes, votesShardingReason, type ReviewPolicy, type VoteRecord, type Votes } from "./votes";
 import { VOTE_BUCKETS, type VoteStore, voteStore, votesPrefix } from "./vote-store";
 import { addWork, holdKey, type NextStep, nextFor, ROLE_WAIT_MS, type Work, waitingRoleReviews, workId } from "./work";
-import { SENSITIVE_PATHS } from "../types";
 
 // The coordinator-free MCP tools (see docs/coordinator-free.md). Stateless: each
 // tool reads or writes the repo's records in Git and reports what Git said.

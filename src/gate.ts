@@ -1,54 +1,48 @@
 import { DurableObject } from "cloudflare:workers";
-import { taskCoordinator } from "./elected";
 import { WORKDIR, bootContainer, clip, gitWithToken, run } from "./container";
 import { statusOf } from "./errors";
 import { CheckLine, type LineResult } from "./free/check-line";
 import { branchHead } from "./git";
-import type { GateResult } from "./gate-plan";
 
-// The integration gate ("semantic Merge-ahead"). Before an approved slice is
-// integrated, it is merged onto the current task base and the task's verify
-// commands run on the combined code. No model is involved.
+// The project's checks, run before a merge lands: the change merged onto the
+// project's branch (after the merges ahead of it in line) and the checks run
+// on the combined code, in a container. No model is involved.
 //
-// One Gate per task works through a queue, one slice at a time, in a
-// container it keeps warm:
-// - Each run asks the Coordinator for its plan when it starts, so it uses the
-//   base as it is then. The previous slice is integrated before the next run
-//   starts, so runs don't go stale as each other integrate.
-// - Dependencies stay installed between runs: `npm ci` is skipped when
-//   package-lock.json is unchanged since the last install in this container.
-//
-// In coordinator-free mode, a repo's Gate keeps its line of merges waiting for
-// checks and runs them in batches, itself and the Gates beside it each
-// checking one (see free/check-line.ts).
+// A repo's Gate keeps its line of merges waiting for checks and runs them in
+// batches, itself and the Gates beside it each checking one (see
+// free/check-line.ts), in containers it keeps warm: dependencies stay
+// installed between runs, and an install is skipped while what it depends on
+// is unchanged.
 
-export interface GateItem {
-	/** Set when queued; identifies this item when the run finishes. */
-	id?: string;
-	slice: string;
-	/** The approved commit to check. */
-	head: string;
-	/** Other slices to merge in the same run, when slices depend on each other (a group gate). */
-	group?: { slice: string; head: string }[];
-	/** Internal marker set when a running item is cancelled. */
-	cancelled?: boolean;
+export interface CheckResult {
+	command: string;
+	exitCode: number;
+	output: string;
 }
 
-/** What the Coordinator hands a run when it starts. */
-export interface GatePlan {
+export interface GateResult {
+	passed: boolean;
+	/** The commit that was checked. */
+	head: string;
+	/** The project's branch commit it was merged onto. */
 	baseHead: string;
-	/** The project's branch (main, master, ...); forks have it too. Absent from older plans: main. */
+	/** Set when the change didn't merge cleanly. */
+	mergeConflict?: string[];
+	results: CheckResult[];
+	at: string;
+}
+
+/** One check run: where the project's branch and the change are, and what runs. */
+interface CheckPlan {
+	baseHead: string;
+	/** The project's branch (main, master, ...). */
 	branch?: string;
 	base: { remote: string; token: string };
-	/** Where the approved commit is: a change's fork (its copy of the branch), or another branch (`ref`). */
-	fork: { remote: string; token: string; ref?: string };
-	/** The forks of the other slices in a group gate. */
-	others: { slice: string; head: string; remote: string; token: string; ref?: string }[];
-	/** Coordinator-free merges ahead in the line: merged in, in order, before the commit checked (see check-line.ts). */
+	/** Where the change is: its branch in its author's fork. */
+	fork: { remote: string; token: string; ref: string };
+	/** Merges ahead in the line: merged in, in order, before the commit checked (see check-line.ts). */
 	ahead?: { head: string; remote: string; token: string; ref?: string }[];
 	checks: string[];
-	/** Contract test files to remove first (their slices aren't integrated yet). */
-	exclude: string[];
 }
 
 const INSTALL = /^npm ci(\s|$)/;
@@ -60,16 +54,8 @@ const IDLE_MS = 20 * 60_000;
 const WARM_FOR_MS = 5 * 60_000;
 /** Lanes to warm, the repo's own Gate first (see check-line.ts LANES). */
 const WARM_LANES = 4;
-const CANCELLATIONS = "cancelled-item-ids";
-/** A finished run's result the coordinator hasn't taken yet. */
-const UNREPORTED = "unreported";
-const REPORT_RETRY_MS = 10_000;
 
-const members = (item: GateItem) => [{ slice: item.slice, head: item.head }, ...(item.group ?? [])];
-const covers = (item: GateItem, slice: string, head: string) => members(item).some((m) => m.slice === slice && m.head === head);
-const overlaps = (a: GateItem, b: GateItem) => members(a).some((x) => members(b).some((y) => x.slice === y.slice));
-
-/** A coordinator-free merge's checks: the project's branch and checks, and the change's fork and commit. */
+/** A merge's checks: the project's branch and checks, and the change's fork and commit. */
 export interface FreeCheck {
 	branch?: string;
 	base: { remote: string; token: string };
@@ -79,57 +65,18 @@ export interface FreeCheck {
 }
 
 export class Gate extends DurableObject<Env> {
-	/** Queue a slice's approved commit. A newer item for the same slices replaces an older one. */
-	async enqueue(taskId: string, item: GateItem) {
-		const queued = (await this.ctx.storage.get<GateItem[]>("queue")) ?? [];
-		const current = await this.ctx.storage.get<GateItem>("current");
-		const replaced = queued.filter((q) => q.id !== current?.id && overlaps(q, item));
-		const queue = queued.filter((q) => !replaced.some((r) => r.id === q.id));
-		const cancelled = (await this.ctx.storage.get<string[]>(CANCELLATIONS)) ?? [];
-		const replacedIds = replaced.map((q) => q.id).filter((id): id is string => !!id);
-		await this.ctx.storage.put({
-			taskId,
-			queue: [...queue, { ...item, id: crypto.randomUUID() }],
-			[CANCELLATIONS]: [...new Set([...cancelled, ...replacedIds])],
-		});
-		await this.ctx.storage.setAlarm(Date.now());
-	}
-
-	/** Cancel only the queued/current item containing this exact member commit. */
-	async cancel(taskId: string, slice: string, head: string): Promise<void> {
-		if ((await this.ctx.storage.get<string>("taskId")) !== taskId) return;
-		const [queue, current, cancelled] = await Promise.all([
-			this.ctx.storage.get<GateItem[]>("queue"),
-			this.ctx.storage.get<GateItem>("current"),
-			this.ctx.storage.get<string[]>(CANCELLATIONS),
-		]);
-		const queued = queue ?? [];
-		const matched = queued.filter((item) => covers(item, slice, head));
-		const currentMatches = !!current && current.id !== undefined && covers(current, slice, head);
-		const ids = [...matched.map((item) => item.id), ...(currentMatches ? [current!.id] : [])].filter((id): id is string => !!id);
-		const nextQueue = queued.filter((item) => !matched.some((match) => match.id === item.id));
-		const updates: Record<string, unknown> = {
-			queue: nextQueue,
-			[CANCELLATIONS]: [...new Set([...(cancelled ?? []), ...ids])],
-		};
-		if (currentMatches) updates.current = { ...current!, cancelled: true };
-		await this.ctx.storage.put(updates);
-		if (nextQueue.length) await this.ctx.storage.setAlarm(Date.now());
-	}
-
 	/** Checks run one at a time: there is one container, and one checkout in it. */
 	private checking: Promise<unknown> = Promise.resolve();
 
 	/**
-	 * Check one commit now, outside the queue: merge `head` onto `baseHead` and
-	 * run `checks`, returning the result. For coordinator-free mode, where the
-	 * merging agent asks for its own checks and nothing calls back.
+	 * Check one commit now: merge `head` onto `baseHead` (after the merges
+	 * ahead) and run `checks`, returning the result. A lane of the repo's line.
 	 */
-	checkCommit(input: FreeCheck & { baseHead: string; ahead?: GatePlan["ahead"] }): Promise<GateResult> {
-		const plan: GatePlan = { baseHead: input.baseHead, branch: input.branch, base: input.base, fork: input.fork, others: [], ...(input.ahead?.length ? { ahead: input.ahead } : {}), checks: input.checks, exclude: [] };
+	checkCommit(input: FreeCheck & { baseHead: string; ahead?: CheckPlan["ahead"] }): Promise<GateResult> {
+		const plan: CheckPlan = { baseHead: input.baseHead, branch: input.branch, base: input.base, fork: input.fork, ...(input.ahead?.length ? { ahead: input.ahead } : {}), checks: input.checks };
 		const run = this.checking.then(async () => {
 			try {
-				return await this.check({ slice: "free", head: input.head }, plan);
+				return await this.check(input.head, plan);
 			} catch (err) {
 				await this.ctx.storage.delete("prepared");
 				return { passed: false, head: input.head, baseHead: input.baseHead, results: [{ command: "(gate setup)", exitCode: 1, output: statusOf(err).message }], at: new Date().toISOString() } satisfies GateResult;
@@ -139,7 +86,7 @@ export class Gate extends DurableObject<Env> {
 		return run;
 	}
 
-	/** Coordinator-free mode's line of merges waiting for checks, for the repo this Gate serves (see check-line.ts). */
+	/** The line of merges waiting for checks, for the repo this Gate serves (see check-line.ts). */
 	private line?: CheckLine<FreeCheck & { repo: string }, GateResult>;
 
 	/**
@@ -164,102 +111,21 @@ export class Gate extends DurableObject<Env> {
 		this.line?.done(change, landed);
 	}
 
-	async state() {
-		const [queue, current] = await Promise.all([this.ctx.storage.get<GateItem[]>("queue"), this.ctx.storage.get<GateItem>("current")]);
-		return { queue: queue ?? [], current: current ?? null };
-	}
-
-	/** Whether this exact queue item still exists and has not been cancelled/replaced. */
-	private async itemIsLive(item: GateItem) {
-		const [queue, cancelled] = await Promise.all([
-			this.ctx.storage.get<GateItem[]>("queue"),
-			this.ctx.storage.get<string[]>(CANCELLATIONS),
-		]);
-		return !!item.id && (queue ?? []).some((queued) => queued.id === item.id) && !(cancelled ?? []).includes(item.id);
-	}
-
-	/** Drop only this run's item/current marker, never a newer item for the same slice. */
-	private async finishItem(item: GateItem) {
-		const [queue, current] = await Promise.all([
-			this.ctx.storage.get<GateItem[]>("queue"),
-			this.ctx.storage.get<GateItem>("current"),
-		]);
-		const rest = (queue ?? []).filter((q) => q.id !== item.id);
-		await this.ctx.storage.put("queue", rest);
-		if (current?.id === item.id) await this.ctx.storage.delete("current");
-		if (rest.length) await this.ctx.storage.setAlarm(Date.now());
-	}
-
-	/**
-	 * Report a run's result to the task's coordinator. If that fails (its leader
-	 * was reset, say), keep the result and report it again shortly: dropping it
-	 * would leave the change's checks "running" for ever. Reporting twice is safe;
-	 * the coordinator ignores a result for a change that has moved on.
-	 */
-	private async report(taskId: string, item: GateItem, result: GateResult, exclude: string[]) {
-		try {
-			await taskCoordinator(this.env, taskId).gateResult(item.slice, result, exclude, item.group);
-			await this.ctx.storage.delete(UNREPORTED);
-			return true;
-		} catch (err) {
-			console.error(`reporting the gate result for ${item.slice} failed; retrying`, statusOf(err).message);
-			await this.ctx.storage.put(UNREPORTED, { item, result, exclude });
-			await this.ctx.storage.setAlarm(Date.now() + REPORT_RETRY_MS);
-			return false;
-		}
-	}
-
 	async alarm() {
-		// A coordinator-free repo's lanes to warm (see warmLanes).
+		// The repo's lanes to warm (see warmLanes).
 		const warmLanes = await this.ctx.storage.get<{ repo: string; branch?: string; base: { remote: string; token: string }; checks: string[] }>("warmLanes");
-		if (warmLanes) {
-			await this.ctx.storage.delete("warmLanes");
-			const { repo, ...input } = warmLanes;
-			await Promise.all(Array.from({ length: WARM_LANES }, (_, lane) => (lane === 0 ? this.warm(input) : this.env.GATE.getByName(`free:${repo}:lane:${lane}`).warm(input)).catch(() => undefined)));
-		}
-		const taskId = await this.ctx.storage.get<string>("taskId");
-		if (!taskId) return;
-		// A result that couldn't be reported goes first, before the next run.
-		const unreported = await this.ctx.storage.get<{ item: GateItem; result: GateResult; exclude: string[] }>(UNREPORTED);
-		if (unreported && !(await this.report(taskId, unreported.item, unreported.result, unreported.exclude))) return;
-		const queue = (await this.ctx.storage.get<GateItem[]>("queue")) ?? [];
-		const item = queue[0];
-		if (!item) return;
-
-		// A cancellation can race the initial queue read. Check before claiming,
-		// then again after writing current so a cancellation in that gap is seen.
-		if (!(await this.itemIsLive(item))) return;
-		await this.ctx.storage.put("current", item);
-		try {
-			if (!(await this.itemIsLive(item))) return;
-			// The task's leader, if it's elected; its Coordinator object otherwise.
-			const coordinator = taskCoordinator(this.env, taskId);
-			const plan = await coordinator.gatePlan(item.slice, item.head, item.group);
-			// gatePlan may wait on Coordinator I/O while a send-back cancels the item.
-			if (!plan || !(await this.itemIsLive(item))) return;
-
-			let result: GateResult;
-			try {
-				result = await this.check(item, plan);
-			} catch (err) {
-				// A gate that couldn't run counts as a failure the Coordinator can explain.
-				const { message } = statusOf(err);
-				result = { passed: false, head: item.head, baseHead: plan.baseHead, results: [{ command: "(gate setup)", exitCode: 1, output: message }], at: new Date().toISOString() };
-				await this.ctx.storage.delete("prepared"); // start from a fresh checkout next time
-			}
-			// A veto may arrive while checks are running; never report that stale result.
-			if (await this.itemIsLive(item)) await this.report(taskId, item, result, plan.exclude);
-		} finally {
-			await this.finishItem(item);
-		}
+		if (!warmLanes) return;
+		await this.ctx.storage.delete("warmLanes");
+		const { repo, ...input } = warmLanes;
+		await Promise.all(Array.from({ length: WARM_LANES }, (_, lane) => (lane === 0 ? this.warm(input) : this.env.GATE.getByName(`free:${repo}:lane:${lane}`).warm(input)).catch(() => undefined)));
 	}
 
-	private async check(item: GateItem, plan: GatePlan): Promise<GateResult> {
+	private async check(head: string, plan: CheckPlan): Promise<GateResult> {
 		const container = this.ctx.container;
 		if (!container) throw new Error("no container is configured for Gate");
 		const result = (partial: Partial<GateResult>): GateResult => ({
 			passed: false,
-			head: item.head,
+			head,
 			baseHead: plan.baseHead,
 			results: [],
 			at: new Date().toISOString(),
@@ -271,16 +137,12 @@ export class Gate extends DurableObject<Env> {
 		const branch = plan.branch ?? "main";
 		const base = await gitWithToken(container, plan.base.token, ["fetch", "-q", plan.base.remote, `${branch}:refs/remotes/base/${branch}`, "--force"]);
 		if (base.exitCode !== 0) throw new Error(`fetch of the project's ${branch} failed: ${clip(base.output, 2_000)}`);
-		// Fetch the fork's branch (fetching a bare commit hash depends on server settings);
+		// Fetch the change's branch (fetching a bare commit hash depends on server settings);
 		// the approved commit is in its history.
-		const fork = await gitWithToken(container, plan.fork.token, ["fetch", "-q", plan.fork.remote, `${plan.fork.ref ?? branch}:refs/remotes/slice/head`, "--force"]);
-		if (fork.exitCode !== 0) throw new Error(`fetch of the slice failed: ${clip(fork.output, 2_000)}`);
-		const known = await run(container, ["git", "cat-file", "-e", `${item.head}^{commit}`]);
-		if (known.exitCode !== 0) throw new Error(`the approved commit ${item.head} is not in the slice's fork`);
-		for (const other of plan.others) {
-			const f = await gitWithToken(container, other.token, ["fetch", "-q", other.remote, `${other.ref ?? branch}:refs/remotes/${other.slice}/head`, "--force"]);
-			if (f.exitCode !== 0) throw new Error(`fetch of ${other.slice} failed: ${clip(f.output, 2_000)}`);
-		}
+		const fork = await gitWithToken(container, plan.fork.token, ["fetch", "-q", plan.fork.remote, `${plan.fork.ref}:refs/remotes/change/head`, "--force"]);
+		if (fork.exitCode !== 0) throw new Error(`fetch of the change failed: ${clip(fork.output, 2_000)}`);
+		const known = await run(container, ["git", "cat-file", "-e", `${head}^{commit}`]);
+		if (known.exitCode !== 0) throw new Error(`the approved commit ${head} is not on the change's branch`);
 		for (const [k, ahead] of (plan.ahead ?? []).entries()) {
 			const f = await gitWithToken(container, ahead.token, ["fetch", "-q", ahead.remote, `${ahead.ref ?? branch}:refs/remotes/ahead-${k}/head`, "--force"]);
 			if (f.exitCode !== 0) throw new Error(`fetch of a merge ahead in line failed: ${clip(f.output, 2_000)}`);
@@ -288,20 +150,19 @@ export class Gate extends DurableObject<Env> {
 
 		// A clean checkout of the base; ignored files (node_modules) survive `git clean -fd`.
 		await run(container, ["bash", "-lc", `git merge --abort 2>/dev/null; git checkout -q -f --detach ${plan.baseHead} && git clean -fdq`]);
-		// Merge the merges ahead in line, in order, then the slice, then any other slices in its group, onto the base.
-		for (const head of [...(plan.ahead ?? []).map((a) => a.head), item.head, ...plan.others.map((o) => o.head)]) {
-			const merge = await run(container, ["git", "-c", "user.name=gate", "-c", "user.email=gate@blueprint.invalid", "merge", "-q", "--no-edit", head]);
+		// Merge the merges ahead in line, in order, then the change, onto the base.
+		for (const commit of [...(plan.ahead ?? []).map((a) => a.head), head]) {
+			const merge = await run(container, ["git", "-c", "user.name=gate", "-c", "user.email=gate@blueprint.invalid", "merge", "-q", "--no-edit", commit]);
 			if (merge.exitCode !== 0) {
 				const conflicts = await run(container, ["git", "diff", "--name-only", "--diff-filter=U"]);
 				await run(container, ["git", "merge", "--abort"]);
 				return result({ mergeConflict: conflicts.output.split("\n").filter(Boolean) });
 			}
 		}
-		if (plan.exclude.length) await run(container, ["rm", "-f", "--", ...plan.exclude]);
 
 		// Checks run on a fresh checkout. If none installs dependencies but the
 		// project has a lockfile, install them first, or every check fails on
-		// missing tools (planners sometimes leave the install step out).
+		// missing tools.
 		const checks = [...plan.checks];
 		if (!checks.some((c) => INSTALL.test(c.trim())) && (await run(container, ["test", "-f", "package-lock.json"])).exitCode === 0) checks.unshift("npm ci");
 
@@ -325,7 +186,7 @@ export class Gate extends DurableObject<Env> {
 			await bootContainer(container);
 			await run(container, ["rm", "-rf", WORKDIR], "/");
 			const clone = await gitWithToken(container, base.token, ["clone", "--quiet", base.remote, WORKDIR], "/");
-			if (clone.exitCode !== 0) throw new Error(`clone of the task base failed: ${clip(clone.output, 2_000)}`);
+			if (clone.exitCode !== 0) throw new Error(`clone of the project failed: ${clip(clone.output, 2_000)}`);
 			await this.ctx.storage.delete("lockHash");
 			await this.ctx.storage.put("prepared", true);
 		}
@@ -333,7 +194,7 @@ export class Gate extends DurableObject<Env> {
 	}
 
 	/**
-	 * Warm this container for a coordinator-free repo's checks before a merge
+	 * Warm this container for a repo's checks before a merge
 	 * needs them: running, the project's branch checked out, and its install
 	 * step run once, so the merge's checks start from installed dependencies.
 	 * In turn with checks (one checkout); skipped if warmed in the last minutes.

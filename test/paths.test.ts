@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { normalizeClaim } from "../src/open-mode";
+import { normalizeClaim } from "../src/claim-paths";
 import { repoPath } from "../src/sandbox";
 
 // The path rules each caller applies. They differ on purpose; these pin each one down.

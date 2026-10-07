@@ -32,10 +32,3 @@ export type AccessVerifier = (
 export function accessIdentityLabel(identity: AccessIdentity): string {
 	return identity.kind === "person" ? identity.value : `service token ${identity.value}`;
 }
-
-/** Actor-aware Coordinator RPC surface shared by the HTTP Worker and Coordinator. */
-export interface CoordinatorHumanActions {
-	waive(sliceId: string, input: { reason: string }, actor: AccessIdentity): Promise<unknown>;
-	messageBuilder(sliceId: string, message: string, actor: AccessIdentity): Promise<unknown>;
-	retryGate(sliceId: string, actor: AccessIdentity): Promise<unknown>;
-}

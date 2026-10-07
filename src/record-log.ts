@@ -1,21 +1,55 @@
 import git from "isomorphic-git";
 import http from "isomorphic-git/http/web";
-import type { CasLog, CommitKind, LogCommit } from "./election";
 import { BOT, isEmptyRepo, type Remote } from "./git";
-import { type LedgerEntry, noteLine, notesRef } from "./ledger";
 import { fetchCommits } from "./git-fetch";
 import { MemoryFS } from "./memory-fs";
 import { retryTransient } from "./retry";
 
-// The elected coordinator's log in Git: the task's notes ref in the project
-// repo. Reading fetches only the tip; appending pushes one commit on top of the
-// tip it was built on, and Git rejects the push if the ref moved meanwhile.
+// A record log in Git: one ref in a repo, appended to by compare-and-swap.
+// Reading fetches only the tip; appending pushes one commit on top of the tip
+// it was built on, and Git rejects the push if the ref moved meanwhile, so of
+// two writers on one tip only one lands and the other reads again. Claims,
+// votes and the backlog are kept this way (see free/records.ts).
 //
-// Each commit's tree holds the decisions as Git notes on the commits they are
-// about (so `git notes --ref blueprint/<task> show <commit>` reads them), plus
-// state.json (the task after this commit) and decisions.json (this commit's
-// decisions, losslessly). Who leads, until when, and why the commit was made
-// are trailers on its message.
+// Each commit's tree holds state.json (the record after this commit) and
+// decisions.json (this commit's entries), plus each entry as a Git note on the
+// commit it is about. Who wrote it and why are trailers on its message.
+
+/** One entry: what happened, about which commit (if any), and when. */
+export interface LogEntry {
+	commit: string;
+	text: string;
+	at: string;
+}
+
+/** One commit of a log: who wrote it, its entries, and the state after it. */
+export interface LogCommit<S> {
+	term: number;
+	/** Who wrote it. */
+	leader: string;
+	leaseUntil: number;
+	kind: string;
+	entries: LogEntry[];
+	state: S;
+	/** Unique per append, so a writer can tell whether a push whose answer was lost landed. */
+	batch: string;
+}
+
+/** The log as compare-and-swap storage. */
+export interface CasLog<S> {
+	/** The tip and its commit, or null when nothing has been written. */
+	read(): Promise<{ tip: string; commit: LogCommit<S> } | null>;
+	/** Append on top of `parent` (null for an empty log): the new tip, or null when the tip had moved. */
+	append(parent: string | null, commit: LogCommit<S>): Promise<string | null>;
+	/** Why the last append didn't land: another writer moved the tip, or the server stayed busy. */
+	lastRefusal?: "moved" | "busy" | null;
+}
+
+/** A note line: when, then the entry. Multi-line text is indented under it. */
+function noteLine(entry: LogEntry) {
+	const [first, ...rest] = entry.text.trim().split("\n");
+	return [`${entry.at.slice(0, 19).replace("T", " ")}Z  ${first}`, ...rest.map((l) => `    ${l}`)].join("\n");
+}
 
 const DIR = "/log";
 const STATE_FILE = "state.json";
@@ -138,45 +172,6 @@ async function openTip(remote: Remote, ref: string) {
 	return tip ? fetchAt(remote, ref, tip) : emptyLog();
 }
 
-/**
- * A remote whose token is minted once and reused while fresh. Minting takes
- * several Artifacts calls, so doing it per read or push dominated their cost.
- * Tokens last ten minutes by default; this renews well before.
- */
-export function cachedRemote(mint: () => Promise<Remote>, freshForMs = 5 * 60_000, now: () => number = Date.now) {
-	let cached: { remote: Promise<Remote>; until: number } | null = null;
-	return () => {
-		if (!cached || now() >= cached.until) {
-			const remote = mint();
-			cached = { remote, until: now() + freshForMs };
-			// A failed mint isn't kept.
-			remote.catch(() => (cached = null));
-		}
-		return cached.remote;
-	};
-}
-
-/**
- * Every decision a task's log recorded, oldest first: each commit carries the
- * decisions it made. (Commits from a fixed Coordinator's ledger, before a task
- * moved to the elected coordinator, carry none and are skipped.)
- */
-export async function readDecisionHistory(remote: Remote, taskId: string): Promise<LedgerEntry[]> {
-	const ref = notesRef(taskId);
-	const tip = await retryTransient(() => serverTip(remote, ref));
-	if (!tip) return [];
-	const { fs } = await retryTransient(() => fetchCommits(remote, [tip], DIR, { history: true }));
-	const entries: LedgerEntry[] = [];
-	for (const { oid } of (await git.log({ fs, dir: DIR, ref: tip })).reverse()) {
-		const blob = await git.readBlob({ fs, dir: DIR, oid, filepath: DECISIONS_FILE }).catch(() => null);
-		if (blob) entries.push(...(JSON.parse(decoder.decode(blob.blob)) as LedgerEntry[]));
-	}
-	return entries;
-}
-
-/** A task's lease ref: who leads, until when. Beside the decision log, so heartbeats don't grow it. */
-export const leaseRef = (taskId: string) => `refs/notes/blueprint-lease/${taskId}`;
-
 export class GitCasLog<S> implements CasLog<S> {
 	private readonly ref: string;
 
@@ -189,11 +184,11 @@ export class GitCasLog<S> implements CasLog<S> {
 
 	lastRefusal: "moved" | "busy" | null = null;
 
-	/** The task's decision log, or another ref (its lease ref) with the same commits. */
+	/** The log at `ref` in the repo `remote` reaches (`_repo` names it, for callers' readability). */
 	constructor(
 		private readonly remote: () => Promise<Remote>,
-		taskId: string,
-		ref = notesRef(taskId),
+		_repo: string,
+		ref: string,
 	) {
 		this.ref = ref;
 	}
@@ -221,15 +216,15 @@ export class GitCasLog<S> implements CasLog<S> {
 				term: Number(trailer(TRAILERS.term)),
 				leader: trailer(TRAILERS.leader),
 				leaseUntil: Number(trailer(TRAILERS.leaseUntil)),
-				kind: trailer(TRAILERS.kind) as CommitKind,
-				entries: (await json(DECISIONS_FILE)) as LedgerEntry[],
+				kind: trailer(TRAILERS.kind),
+				entries: (await json(DECISIONS_FILE)) as LogEntry[],
 				state: (await json(STATE_FILE)) as S,
 				batch: trailer(TRAILERS.batch),
 			},
 		};
 	}
 
-	/** Where the ref points now, without reading what's there (it may predate this log's format, as a fixed Coordinator's ledger does). */
+	/** Where the ref points now, without reading what's there. */
 	async tip(): Promise<string | null> {
 		return serverTip(await this.remote(), this.ref);
 	}
@@ -240,7 +235,7 @@ export class GitCasLog<S> implements CasLog<S> {
 		// Built on a stale tip: no need to ask the server.
 		if (tip !== parent) return null;
 
-		// Carry the notes forward, adding this commit's decisions to them.
+		// Carry the notes forward, adding this commit's entries to them.
 		const files = new Map<string, string>();
 		/** Objects this commit adds: the only ones the push has to send. */
 		const added: string[] = [];
@@ -282,17 +277,10 @@ export class GitCasLog<S> implements CasLog<S> {
 	}
 }
 
-/** The commit message: a summary of the decisions, then the trailers. */
+/** The commit message: a summary of the entries, then the trailers. */
 function message<S>(commit: LogCommit<S>) {
 	const first = (text: string) => text.trim().split("\n")[0];
-	const titles: Record<string, string> = {
-		genesis: "Genesis: the task's first state",
-		term: `Term ${commit.term}: ${commit.leader} leads`,
-		election: `Election: ${commit.leader} leads term ${commit.term}`,
-		heartbeat: `Heartbeat: ${commit.leader}, term ${commit.term}`,
-		resignation: `Resignation: ${commit.leader} ends term ${commit.term}`,
-	};
-	const title = commit.entries.length ? first(commit.entries[0].text) : (titles[commit.kind] ?? commit.kind);
+	const title = commit.entries.length ? first(commit.entries[0].text) : commit.kind;
 	const summary = commit.entries.map((e) => `- ${first(e.text)}`).join("\n");
 	const trailers = [
 		`${TRAILERS.term}: ${commit.term}`,
@@ -304,8 +292,8 @@ function message<S>(commit: LogCommit<S>) {
 	return `${title}\n\n${summary ? `${summary}\n\n` : ""}${trailers}\n`;
 }
 
-/** Decision lines grouped by the commit they are about; decisions not about a commit live only in decisions.json. */
-function notesByCommit(entries: LedgerEntry[]) {
+/** Entry lines grouped by the commit they are about; entries not about a commit live only in decisions.json. */
+function notesByCommit(entries: LogEntry[]) {
 	const byCommit = new Map<string, string[]>();
 	for (const e of entries) if (isCommitId(e.commit)) byCommit.set(e.commit, [...(byCommit.get(e.commit) ?? []), noteLine(e)]);
 	return byCommit;

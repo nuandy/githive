@@ -1,6 +1,6 @@
 import git from "isomorphic-git";
 import { BOT, branchHead, type Remote, Workspace } from "../git";
-import { inLane } from "../open-mode";
+import { inLane } from "../claim-paths";
 import type { ClaimStore } from "./claim-store";
 import { mergeStampPayload } from "./audit";
 import type { Stamper } from "./stamp";

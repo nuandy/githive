@@ -1,7 +1,7 @@
 import git from "isomorphic-git";
 import http from "isomorphic-git/http/web";
-import type { CasLog } from "../election";
-import { GitCasLog } from "../election-git";
+import type { CasLog } from "../record-log";
+import { GitCasLog } from "../record-log";
 import { isEmptyRepo, type Remote } from "../git";
 import { retryTransient } from "../retry";
 import { readAllShards, readRefs } from "./record-refs";

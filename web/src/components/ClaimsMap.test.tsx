@@ -1,17 +1,23 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { holdersFromTask } from "../lib/claimsMap";
-import { ago, makeChange, makeTask } from "../test/fixtures";
+import type { FreeSnapshot } from "../api";
+import { holdersFromSnapshot } from "../lib/claimsMap";
+import { ago, freeSnapshot } from "../test/fixtures";
 import { ClaimsMap } from "./ClaimsMap";
 
-const task = makeTask({
-	slices: [
-		makeChange({ id: "stats", title: "Stats page", owns: ["src/stats/"], touched: ["src/stats/new.ts"], openedBy: "agent:agent-a" }),
-		makeChange({ id: "readme", title: "README", owns: ["README.md"], openedBy: "agent:agent-b" }),
-	],
-	checks: [{ pair: ["readme", "stats"], heads: ["a", "b"], status: "conflict", files: ["README.md"], checkedAt: ago(1) }],
+const claim = (change: string, intent: string, agent: string, paths: string[]): FreeSnapshot["claims"][number] => ({
+	change,
+	agent,
+	paths,
+	intent,
+	since: ago(30),
+	active: ago(5),
+	head: null,
+	approval: { approved: false, approvals: 0, required: 1, vetoedBy: [] },
 });
-const holders = holdersFromTask(task, "my-app");
+const snapshot = { ...freeSnapshot, claims: [claim("stats", "Stats page", "agent-a", ["src/stats/", "src/stats/new.ts"]), claim("readme", "README", "agent-b", ["README.md"])] };
+// A conflict, where the server reports one, shows on the holder's paths.
+const holders = holdersFromSnapshot(snapshot, "my-app", "repos").map((h) => (h.change === "readme" ? { ...h, conflicts: ["README.md"] } : h));
 const tree = { ref: "master", commit: "abc", files: ["README.md", "docs/guide.md", "src/index.ts", "src/stats/page.tsx"], truncated: false };
 
 describe("the Claims map", () => {

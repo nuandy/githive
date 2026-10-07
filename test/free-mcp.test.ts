@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { GitCasLog } from "../src/election-git";
+import { GitCasLog } from "../src/record-log";
 import { claim, type Registry } from "../src/free/claims";
 import { FREE_TOOLS, freeAudit, freeOpenCount, freeSnapshot } from "../src/free/mcp";
-import { TOOLS, handleRpc } from "../src/mcp";
+import { handleRpc } from "../src/mcp";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -61,7 +61,7 @@ afterEach(async () => {
 describe("the coordinator-free MCP tools", () => {
 	it("are listed by the main MCP endpoint, beside the other tools", async () => {
 		const reply = (await handleRpc({ jsonrpc: "2.0", id: 1, method: "tools/list" }, ctx() as never)) as { result: { tools: { name: string }[] } };
-		expect(reply.result.tools.map((t) => t.name)).toEqual([...TOOLS, ...FREE_TOOLS].map((t) => t.name));
+		expect(reply.result.tools.map((t) => t.name)).toEqual(FREE_TOOLS.map((t) => t.name));
 	});
 
 	it("starts the mode, claims, refuses an overlapping claim, and audits a clean repo", async () => {

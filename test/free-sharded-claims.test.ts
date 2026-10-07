@@ -1,9 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { GitCasLog } from "../src/election-git";
+import { GitCasLog } from "../src/record-log";
 import { claimStore } from "../src/free/claim-store";
 import { claim, type Registry } from "../src/free/claims";
 import { recordsRepoOf, shardsPrefix } from "../src/free/shards";
-import { entriesOverlap } from "../src/open-mode";
+import { entriesOverlap } from "../src/claim-paths";
 import { startGitServer, type GitServer } from "./helpers/git-server";
 
 // Sharded claims on a real Git server: each shard is its own ref, so claims in

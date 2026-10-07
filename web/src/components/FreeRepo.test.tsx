@@ -49,7 +49,7 @@ describe("a coordinator-free repo", () => {
 
 	it("says in the header and settings how claims are kept, sharded or in one record", () => {
 		const page = (sharding: typeof snapshot.sharding) =>
-			renderToStaticMarkup(<FreeRepoPage repo="docs-site" base="free" view={{ kind: "repo", tab: "settings", state: "open" }} snapshot={{ ...snapshot, sharding, shardDepth: sharding && typeof sharding === "object" ? 2 : undefined }} api={stubApi()} />);
+			renderToStaticMarkup(<FreeRepoPage repo="docs-site" base="free" view={{ kind: "repo", tab: "settings" }} snapshot={{ ...snapshot, sharding, shardDepth: sharding && typeof sharding === "object" ? 2 : undefined }} api={stubApi()} />);
 		const flat = page("on demand");
 		expect(flat).toMatch(/class="pill pill--outline mode-badge"[^>]*>One claims record/);
 		expect(flat).toMatch(/<dt>Claims<\/dt><dd>Claims are kept in one record/);
@@ -57,7 +57,7 @@ describe("a coordinator-free repo", () => {
 		expect(sharded).toMatch(/mode-badge mode-badge--sharded"[^>]*>Sharded claims/);
 		expect(sharded).toContain("(8 agents hold claims)");
 		const votes = renderToStaticMarkup(
-			<FreeRepoPage repo="docs-site" base="free" view={{ kind: "repo", tab: "settings", state: "open" }} snapshot={{ ...snapshot, sharding: "on demand", votesSharding: { since: "2026-10-07T09:30:00.000Z", because: "8 reviewers voting" } }} api={stubApi()} />,
+			<FreeRepoPage repo="docs-site" base="free" view={{ kind: "repo", tab: "settings" }} snapshot={{ ...snapshot, sharding: "on demand", votesSharding: { since: "2026-10-07T09:30:00.000Z", because: "8 reviewers voting" } }} api={stubApi()} />,
 		);
 		expect(votes).toMatch(/mode-badge--sharded"[^>]*>Sharded votes/);
 		expect(votes).toMatch(/<dt>Votes<\/dt><dd>Votes are split by commit/);
@@ -89,9 +89,9 @@ describe("a coordinator-free repo", () => {
 	});
 
 	it("has Changes, Audit and Settings tabs, and keeps old #/free links", () => {
-		const html = renderToStaticMarkup(<FreeRepoPage repo="docs-site" base="free" view={{ kind: "repo", tab: "audit", state: "open" }} snapshot={snapshot} api={stubApi()} />);
+		const html = renderToStaticMarkup(<FreeRepoPage repo="docs-site" base="free" view={{ kind: "repo", tab: "audit" }} snapshot={snapshot} api={stubApi()} />);
 		expect(html).toContain('href="#/free/docs-site/audit"');
 		expect(html).toMatch(/aria-current="page"[^>]*>.*Audit/);
-		expect(html).toMatch(/>coordinator-free</);
+		for (const tab of ["Changes", "Settings"]) expect(html).toContain(`<span>${tab}</span>`);
 	});
 });

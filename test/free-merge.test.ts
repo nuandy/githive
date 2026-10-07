@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { GitCasLog } from "../src/election-git";
+import { GitCasLog } from "../src/record-log";
 import { claimStore } from "../src/free/claim-store";
 import { claim, startFree, type Registry } from "../src/free/claims";
 import { type CheckRunner, mergeChange } from "../src/free/merge";

@@ -1,4 +1,4 @@
-import type { CasLog, LogCommit } from "../election";
+import type { CasLog, LogCommit } from "../record-log";
 
 // The coordinator-free records (claims, votes) are append-only logs in Git.
 // An author reads the tip, works out the next state itself, and appends on

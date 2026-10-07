@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { entriesOverlap } from "../src/open-mode";
+import { entriesOverlap } from "../src/claim-paths";
 import { ancestorsOf, decodeShard, encodeShard, isWide, shardOf } from "../src/free/shards";
 
 // Claims are split by path into shards, each its own Git ref, so agents working

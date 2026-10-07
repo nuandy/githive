@@ -1,7 +1,7 @@
 import { DEFAULT_POLICY, hostedFreeRoles } from "./mcp";
 import { effectiveFreePolicy } from "./votes";
 import { ensureRepo, forkAndWait, headOf, remoteFor, reviewerName } from "../artifacts";
-import { GitCasLog } from "../election-git";
+import { GitCasLog } from "../record-log";
 import { fail } from "../errors";
 import { defaultBranch, type Remote, Workspace } from "../git";
 import { projectBranch } from "../project-branch";
@@ -148,13 +148,16 @@ async function changeBrief(env: Env, repo: string, change: string) {
 		source: (scope: "read" | "write") => changeRemote(env, repo, own?.agent ?? "blueprint-builder", scope, 3 * 3600),
 		policy: registry?.policy ?? DEFAULT_POLICY,
 		job: {
-			taskId: `free:${repo}`,
-			branch: projectBranch(registry),
 			repo: freeAgentName(repo, change),
-			goal: own?.intent ?? change,
+			project: repo,
+			branch: projectBranch(registry),
 			verify: registry?.verify ?? [],
-			slice: { id: change, title: change, owns: own?.paths ?? [], instructions: own?.intent ?? "", tests: [] },
-			siblings: claims.filter((c) => c.change !== change).map((c) => ({ id: c.change, title: c.change, owns: c.paths })),
+			change,
+			ref: `changes/${change}`,
+			agent: own?.agent ?? change,
+			intent: own?.intent ?? change,
+			claim: own?.paths ?? [],
+			others: claims.filter((c) => c.change !== change).map((c) => ({ change: c.change, claim: c.paths })),
 		},
 	};
 }
@@ -176,7 +179,7 @@ export async function startFreeReviewers(env: Env, input: { repo: string; change
 	const ws = await Workspace.clone(read, branch);
 	const head = await ws.fetch("change", from, ref);
 	const baseCommit = await ws.mergeBase(await ws.head(), head);
-	const review = { ...job, remote: from.url, token: from.token, head, baseCommit, buildSummary: input.summary, free: { repo, change, ref, agent: own?.agent ?? change, mergeWhenApproved: !!input.mergeWhenApproved } };
+	const review = { ...job, remote: from.url, token: from.token, head, baseCommit, buildSummary: input.summary, mergeWhenApproved: !!input.mergeWhenApproved };
 	await Promise.all(roles.map((role) => env.REVIEWER.getByName(reviewerName(freeAgentName(repo, change), role, head)).start({ ...review, role })));
 	return { head, reviewers: roles };
 }
@@ -186,7 +189,7 @@ export async function startFreeBuilder(env: Env, input: { repo: string; change: 
 	const { repo, change } = input;
 	const { read, own, job, source } = await changeBrief(env, repo, change);
 	const write = await source("write");
-	const build = { ...job, remote: write.url, token: write.token, base: { remote: read.url, token: read.token }, free: { repo, change, ref: `changes/${change}`, agent: own?.agent ?? change } };
+	const build = { ...job, remote: write.url, token: write.token, base: { remote: read.url, token: read.token } };
 	await env.BUILDER.getByName(freeAgentName(repo, change)).start(build);
 	return { change, builder: freeAgentName(repo, change) };
 }

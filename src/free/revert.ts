@@ -1,5 +1,5 @@
 import git from "isomorphic-git";
-import type { CasLog } from "../election";
+import type { CasLog } from "../record-log";
 import { BOT, type Remote, Workspace } from "../git";
 import { type Violation, revertStampPayload } from "./audit";
 import type { Registry } from "./claims";

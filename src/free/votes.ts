@@ -1,5 +1,5 @@
-import { entriesOverlap } from "../open-mode";
-import type { CasLog } from "../election";
+import { entriesOverlap } from "../claim-paths";
+import type { CasLog } from "../record-log";
 import { appendRecord } from "./records";
 import { type Stamper, stampPayload, verifyStamp } from "./stamp";
 
@@ -104,6 +104,9 @@ export function openFlag(state: Pick<Votes, "votes" | "flags"> | null | undefine
 	const answered = (state?.votes ?? []).some((v) => v.by?.startsWith("person:") && v.commit === head && v.at >= flag.at);
 	return answered ? null : flag;
 }
+
+/** Paths whose changes need more review by default: dependencies, CI and deployment. */
+export const SENSITIVE_PATHS = [".github/", "package.json", "package-lock.json", "yarn.lock", "pnpm-lock.yaml", "bun.lockb", ".npmrc", "Dockerfile", "wrangler.json", "wrangler.jsonc", "wrangler.toml"];
 
 export interface ReviewPolicy {
 	/** Approvals a commit needs; 0 merges on the checks alone (unless a veto role must approve). */

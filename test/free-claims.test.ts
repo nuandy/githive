@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { GitCasLog } from "../src/election-git";
+import { GitCasLog } from "../src/record-log";
 import { activeClaims, claim, release, releaseStale, startFree, type Registry } from "../src/free/claims";
 import { startGitServer } from "./helpers/git-server";
 import { MemoryLog } from "./helpers/memory-log";

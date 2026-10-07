@@ -1,5 +1,5 @@
-import type { CasLog } from "../election";
-import { entriesOverlap } from "../open-mode";
+import type { CasLog } from "../record-log";
+import { entriesOverlap } from "../claim-paths";
 import type { ClaimRecord } from "./claims";
 import { appendRecord } from "./records";
 import { type Author, approval, effectiveFreePolicy, holdsRole, type ReviewPolicy, type VoteRecord } from "./votes";

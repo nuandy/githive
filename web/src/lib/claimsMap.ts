@@ -1,8 +1,5 @@
-import type { FreeSnapshot, Task } from "../api";
-import { agentLabel } from "./agent";
-import { conflictsByChange } from "./conflicts";
+import type { FreeSnapshot } from "../api";
 import { claimAgent, claimTitle } from "./freeStatus";
-import { changesOf, isActive } from "./model";
 import { href, type RepoBase } from "./routes";
 import { normalizePath } from "./tree";
 
@@ -16,28 +13,13 @@ export interface ClaimHolder {
 	change: string;
 	title: string;
 	agent: string;
-	/** Claimed paths (and, in elected repos, files it has changed). */
+	/** Claimed paths. */
 	paths: string[];
 	href: string;
 	/** 0-based index into the claim colors. */
 	color: number;
-	/** Files where it conflicts with another open change or the project's branch. */
+	/** Files where it conflicts with another open change or the project's branch (none known in coordinator-free repos). */
 	conflicts: string[];
-}
-
-export function holdersFromTask(task: Pick<Task, "slices" | "checks">, repo: string, base: RepoBase = "repos"): ClaimHolder[] {
-	const conflicts = conflictsByChange(task);
-	return changesOf(task)
-		.filter(isActive)
-		.map((change, index) => ({
-			change: change.id,
-			title: change.title || change.id,
-			agent: agentLabel(change),
-			paths: [...new Set([...(change.owns ?? []), ...(change.touched ?? [])])],
-			href: href.change(repo, change.id, "conversation", base),
-			color: index % CLAIM_COLORS,
-			conflicts: [...new Set((conflicts.get(change.id) ?? []).flatMap((c) => c.files))],
-		}));
 }
 
 export function holdersFromSnapshot(snapshot: Pick<FreeSnapshot, "claims">, repo: string, base: RepoBase = "free"): ClaimHolder[] {

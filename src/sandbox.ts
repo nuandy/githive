@@ -4,17 +4,15 @@ import type { ResponseInputItem } from "openai/resources/responses/responses";
 import { z } from "zod";
 import { MODEL, addUsage, assertComplete, emptyUsage, openAITools, runCalls, tool, type AgentTool, type Usage } from "./agent";
 import { COMMAND_TIMEOUT_S, WORKDIR, bootContainer, clip, gitWithToken, run } from "./container";
-import { taskCoordinator } from "./elected";
 import { staysInRepo } from "./paths";
-import type { SliceSpec } from "./types";
 
 export { WORKDIR, clip };
 
-// Base for agents that work in their own Linux container on a clone of one
-// Artifacts repo: builders and reviewers. It owns the container lifecycle, the
-// alarm-driven agent loop, and the tools every such agent needs. What only
-// builders do (guarding pushes, parking, wake events) is in builder.ts, behind
-// the hooks below.
+// Base for Blueprint's hosted agents, which work in their own Linux container
+// on a clone of one change: builders and reviewers. It owns the container
+// lifecycle, the alarm-driven agent loop, and the tools every such agent
+// needs. What only builders do (guarding pushes) is in builder.ts, behind the
+// hooks below.
 //
 // The loop runs from alarms in RUN_BUDGET_MS slices and keeps the conversation
 // on OpenAI's side (previous_response_id), so long runs survive across alarm
@@ -35,44 +33,41 @@ export const INBOX = "inbox";
 export const ENVIRONMENT = `The repository is checked out at ${WORKDIR} in a Linux container with Node.js 24, npm and git. Python is not installed; use node for scripting. Commands time out after ${COMMAND_TIMEOUT_S} seconds.`;
 
 export interface SandboxJob {
-	taskId: string;
+	/** The agent's own name, for prompt caching: <project>--<change>, say. */
 	repo: string;
 	remote: string;
 	token: string;
 }
 
-/** A job about one slice of a task: what builders and reviewers share. */
-export interface SliceJob extends SandboxJob {
-	goal: string;
-	/** The project's branch changes merge into (main, master, ...). Absent from older jobs: main. */
-	branch?: string;
-	/** The change's own branch in its fork (changes/<id>); absent when the change uses the fork's copy of the project's branch. */
-	ref?: string;
-	/** Commands the integration gate runs on the combined code. */
-	verify?: string[];
-	slice: SliceSpec;
-	siblings: Pick<SliceSpec, "id" | "title" | "owns">[];
+/** A job about one change: what builders and reviewers share. */
+export interface ChangeJob extends SandboxJob {
+	/** The project repo the change merges into, its branch (main, master, ...) and its checks. */
+	project: string;
+	branch: string;
+	verify: string[];
+	change: string;
+	/** The change's own branch in its author's fork: changes/<change>. */
+	ref: string;
+	/** Its claim's agent, as the records name it. */
+	agent: string;
+	intent: string;
+	/** Its claim: the only paths it may change. */
+	claim: string[];
+	/** The other claims in force. */
+	others: { change: string; claim: string[] }[];
 }
 
-/** The project's branch a job's change merges into. */
-export const branchOf = (job: Pick<SliceJob, "branch">) => job.branch ?? "main";
-
-/** The slice's place in the task, stated the same way to every agent. */
-export function sliceContext(job: SliceJob) {
-	return `The task: ${job.goal}
-
-Change: ${job.slice.title} (${job.slice.id})
-Its claim (the only paths this change may touch): ${job.slice.owns.join(", ")}
-Before it merges, the project's checks must pass with it merged into ${branchOf(job)}: ${job.verify?.length ? job.verify.join("; ") : "no checks configured; run the project's own tests"}
+/** The change's place in the repo, stated the same way to every agent. */
+export function changeContext(job: ChangeJob) {
+	return `Change: ${job.change}. What it should do: ${job.intent}
+Its claim (the only paths this change may touch): ${job.claim.join(", ")}
+Before it merges, the project's checks must pass with it merged into ${job.branch}: ${job.verify.length ? job.verify.join("; ") : "no checks configured; run the project's own tests"}
 Other changes in progress at the same time:
-${job.siblings.map((s) => `- ${s.id}: ${s.title} (claims ${s.owns.join(", ")})`).join("\n") || "- none"}
-
-The change's brief:
-${job.slice.instructions}`;
+${job.others.map((o) => `- ${o.change} (claims ${o.claim.join(", ")})`).join("\n") || "- none"}`;
 }
 
 export interface AgentState {
-	status: "queued" | "working" | "parked" | "done" | "failed";
+	status: "queued" | "working" | "done" | "failed";
 	startedAt: string;
 	finishedAt?: string;
 	turns: number;
@@ -82,8 +77,6 @@ export interface AgentState {
 	nudges: number;
 	usage: Usage;
 	error?: string;
-	parkedAt?: string;
-	waitingRequestIds?: string[];
 	/** Most recent events, newest last. */
 	log: { at: string; event: string }[];
 	previousResponseId?: string;
@@ -123,7 +116,7 @@ export function repoPath(path: string) {
 export abstract class SandboxAgent<J extends SandboxJob, S extends AgentState> extends DurableObject<Env> {
 	private lifecycleTail: Promise<unknown> = Promise.resolve();
 
-	/** Run storage changes that race with the agent loop (messages, parking, wake events) one at a time. */
+	/** Run storage changes that race with the agent loop (messages) one at a time. */
 	protected lifecycle<T>(fn: () => Promise<T>): Promise<T> {
 		const next = this.lifecycleTail.then(fn, fn);
 		this.lifecycleTail = next.catch(() => {});
@@ -142,12 +135,6 @@ export abstract class SandboxAgent<J extends SandboxJob, S extends AgentState> e
 	protected abstract freshFields(): Omit<S, keyof AgentState>;
 	/** Runs after each clone, in WORKDIR. */
 	protected abstract afterClone(job: J, state: S): Promise<void>;
-	/** Park instead of failing when the model stops calling tools; returns whether it parked. */
-	protected async autoPark(_job: J, _state: S): Promise<boolean> {
-		return false;
-	}
-	/** Runs on an alarm while the agent is parked. Only builders park. */
-	protected async parkedAlarm(_job: J, _state: S): Promise<void> {}
 	/** Why a run_command must not run, if it must not. */
 	protected commandRefusal(_command: string, _state: S): string | undefined {
 		return undefined;
@@ -156,10 +143,8 @@ export abstract class SandboxAgent<J extends SandboxJob, S extends AgentState> e
 	protected staleKeys(): string[] {
 		return ["cancel", INBOX, TURN_IN_FLIGHT, TURN_STARTED];
 	}
-	/** Runs once when the agent fails; for example, to flag its slice for a human. */
+	/** Runs once when the agent fails; for example, to give its claim back. */
 	protected async onFailed(_job: J, _state: S): Promise<void> {}
-	/** Runs once when the agent stops for any reason (done, failed, cancelled); frees its slot in the task's limits. */
-	protected async onStopped(_job: J, _state: S): Promise<void> {}
 
 	protected async load() {
 		const [job, state] = await Promise.all([this.ctx.storage.get<J>("job"), this.ctx.storage.get<S>("state")]);
@@ -177,7 +162,7 @@ export abstract class SandboxAgent<J extends SandboxJob, S extends AgentState> e
 
 	async start(job: J) {
 		const { state } = await this.load();
-		if (state && (state.status === "queued" || state.status === "working" || state.status === "parked")) throw new Error(`${this.kind} is already ${state.status}`);
+		if (state && (state.status === "queued" || state.status === "working")) throw new Error(`${this.kind} is already ${state.status}`);
 		const fresh = {
 			status: "queued",
 			startedAt: new Date().toISOString(),
@@ -256,10 +241,6 @@ export abstract class SandboxAgent<J extends SandboxJob, S extends AgentState> e
 	async alarm() {
 		const { job, state } = await this.load();
 		if (!job || !state) return;
-		if (state.status === "parked") {
-			await this.parkedAlarm(job, state);
-			return;
-		}
 		if (state.status !== "queued" && state.status !== "working") return;
 		if (state.status === "working" && (await this.ctx.storage.get(TURN_IN_FLIGHT))) {
 			// A turn may still be running in an earlier alarm; wait for it unless it is long overdue.
@@ -289,13 +270,9 @@ export abstract class SandboxAgent<J extends SandboxJob, S extends AgentState> e
 				} finally {
 					await this.endTurn(turnToken);
 				}
-				// A wake event may have brought fresh credentials.
+				// A revision may have brought fresh credentials.
 				const refreshed = await this.ctx.storage.get<J>("job");
 				if (refreshed) Object.assign(job, refreshed);
-			}
-			if ((state.status as string) === "parked") {
-				if (this.ctx.container?.running) await this.ctx.container.destroy(`${this.kind} parked`);
-				return;
 			}
 			if (state.status === "working") await this.ctx.storage.setAlarm(Date.now() + 1_000);
 		} catch (err) {
@@ -310,10 +287,9 @@ export abstract class SandboxAgent<J extends SandboxJob, S extends AgentState> e
 		}
 		await this.save(state);
 		if ((state.status as string) === "failed") await this.onFailed(job, state).catch(() => {});
-		if (["done", "failed"].includes(state.status)) await this.onStopped(job, state).catch(() => {});
 	}
 
-	/** Once a turn is saved: apply what arrived during it. A builder applies parking and wake events here. */
+	/** Once a turn is saved: apply what arrived during it. */
 	protected async afterTurn(_job: J, state: S, turnToken: string) {
 		await this.lifecycle(async () => {
 			await this.save(state);
@@ -352,11 +328,6 @@ export abstract class SandboxAgent<J extends SandboxJob, S extends AgentState> e
 	/** Run git with a token (the job's, by default) on this one command only. */
 	protected async git(job: J, args: string[], cwd = WORKDIR, token = job.token) {
 		return gitWithToken(this.ctx.container!, token, args, cwd);
-	}
-
-	/** Whoever coordinates the job's task: its leader if the task is elected, its Coordinator object otherwise. */
-	protected coordinator(job: J) {
-		return taskCoordinator(this.env, job.taskId);
 	}
 
 	/** Tools every container agent gets: explore, edit and run commands. */
@@ -446,13 +417,7 @@ export abstract class SandboxAgent<J extends SandboxJob, S extends AgentState> e
 			return;
 		}
 		// The model answered in text without finishing.
-		if (++state.nudges > MAX_NUDGES) {
-			if (await this.autoPark(job, state)) {
-				state.pending = [];
-				return;
-			}
-			throw new Error(`${this.kind} stopped calling tools without finishing`);
-		}
+		if (++state.nudges > MAX_NUDGES) throw new Error(`${this.kind} stopped calling tools without finishing`);
 		this.note(state, `nudged: ${response.output_text.slice(0, 200)}`);
 		state.pending = [{ role: "user", content: this.nudge(job) }];
 	}
