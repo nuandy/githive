@@ -6,17 +6,17 @@ export interface Crumb {
 	href?: string;
 }
 
-/** The top bar: the Blueprint mark, which leads home, and where you are. */
+/** The top bar: the GitHive mark, which leads home, and where you are. */
 export function TopBar({ crumbs, inboxCount, inboxCurrent = false }: { crumbs: Crumb[]; /** Changes waiting on a person, across repos; undefined until known. */ inboxCount?: number; inboxCurrent?: boolean }) {
 	return (
 		<header className="topbar">
 			<div className="topbar__inner">
-				<a className="topbar__brand" href="#/" aria-label="Blueprint home">
+				<a className="topbar__brand" href="#/" aria-label="GitHive home">
 					<svg width="24" height="24" viewBox="0 0 32 32" aria-hidden="true">
 						<rect width="32" height="32" rx="7" fill="#2f6fed" />
 						<path d="M9 10h14M9 16h9M9 22h12" stroke="white" strokeWidth="3" strokeLinecap="round" />
 					</svg>
-					<span>Blueprint</span>
+					<span>GitHive</span>
 				</a>
 				{crumbs.length > 0 ? (
 					<nav className="topbar__crumbs" aria-label="Breadcrumb">

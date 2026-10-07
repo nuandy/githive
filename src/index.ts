@@ -5,24 +5,24 @@ import { forkAndWait, listRepoNames, remoteFor, reviewerName } from "./artifacts
 import { fail, statusOf } from "./errors";
 import { retryTransient } from "./retry";
 import { handleMcpBody } from "./mcp";
-import { type FreeContext, freeAudit, freeChangeHistory, freeOpenCount, freeSnapshot, freeVoteAsPerson } from "./free/mcp";
+import { type ToolContext, repoAudit, changeHistory, openCount, repoSnapshot, voteAsPerson } from "./toolkit/mcp";
 import { listTree, readFile } from "./code-browse";
 import { Timing } from "./timing";
 import { defaultBranch } from "./git";
-import { freeAgentName, freeContextFor } from "./free/env";
-import { identityLabel } from "./free/stamp";
+import { changeRepoName, toolContextFor } from "./toolkit/env";
+import { identityLabel } from "./toolkit/stamp";
 
 export { Builder } from "./builder";
 export { Reviewer } from "./reviewer";
 export { Gate } from "./gate";
-export { TaskIndex } from "./task-index";
+export { RepoIndex } from "./repo-index";
 export { LiveFeed } from "./live-feed";
 export { TokenCache } from "./token-cache";
 
 type AppEnv = { Bindings: Env; Variables: { accessIdentity: AccessIdentity } };
 const app = new Hono<AppEnv>();
 
-const taskIndex = (env: Env) => env.TASK_INDEX.getByName("all");
+const repoIndex = (env: Env) => env.REPO_INDEX.getByName("all");
 
 /** A JSON body as arguments to check, or none when it is missing or not JSON. */
 const jsonArgs = async (c: { req: { json<T>(): Promise<T> } }) => {
@@ -49,7 +49,7 @@ app.onError((err, c) => {
 
 app.get("/api", (c) =>
 	c.json({
-		name: "blueprint",
+		name: "githive",
 		routes: [
 			"GET  /            dashboard",
 			"POST /mcp         (the MCP front door: JSON-RPC over HTTP)",
@@ -60,12 +60,11 @@ app.get("/api", (c) =>
 			"GET  /repos/:repo/file?path=&ref=  (one file's text)",
 			"DELETE /repos/:repo",
 			"GET  /summaries   (every repo with its counts, for the dashboard's list)",
-			"GET  /free         (repos Blueprint coordinates)",
-			"GET  /free/:repo   (claims and votes, from Git)",
-			"GET  /free/:repo/changes/:change  (one change's history)",
-			"POST /free/:repo/changes/:change/votes {role, verdict, evidence}  (a person's vote)",
-			"GET  /free/:repo/audit  (replays the records: merges and broken conventions)",
-			"GET  /free/:repo/lanes  (the check containers' warmth)",
+			"GET  /repos/:repo  (claims and votes, from Git)",
+			"GET  /repos/:repo/changes/:change  (one change's history)",
+			"POST /repos/:repo/changes/:change/votes {role, verdict, evidence}  (a person's vote)",
+			"GET  /repos/:repo/audit  (replays the records: merges and broken conventions)",
+			"GET  /repos/:repo/lanes  (the check containers' warmth)",
 		],
 	}),
 );
@@ -84,9 +83,9 @@ app.post("/repos/:repo/copy", async (c) => {
 	return c.json({ name, remote: copied.remote });
 });
 
-/** Coordinator-free mode's tools for this caller (an exploration; see docs/coordinator-free.md): stateless, Git only. */
-const freeContext = (env: Env, identity: AccessIdentity | undefined, agentKey?: string): FreeContext =>
-	freeContextFor(env, identity ? identityLabel(identity) : undefined, agentKey ? { agentKey } : {});
+/** GitHive's tools for this caller (an exploration; see docs/design.md): stateless, Git only. */
+const toolContext = (env: Env, identity: AccessIdentity | undefined, agentKey?: string): ToolContext =>
+	toolContextFor(env, identity ? identityLabel(identity) : undefined, agentKey ? { agentKey } : {});
 
 /** Views bigger than this aren't kept (a Durable Object value holds up to 2 MB). */
 const MAX_KEPT_VIEW = 1_000_000;
@@ -125,41 +124,40 @@ async function keptView(c: Context<AppEnv>, key: string, name: string, maxAgeMs:
 	return send(json, `view;desc=built, ${timing.header()}`);
 }
 
-// Coordinator-free repos, for the dashboard: which repos, and a snapshot of one read from Git.
-app.get("/free", async (c) => c.json(await taskIndex(c.env).listFree()));
-app.get("/free/:repo", async (c) => {
+// A repo for the dashboard: a snapshot of its claims and votes, read from Git.
+app.get("/repos/:repo", async (c) => {
 	const repo = c.req.param("repo");
-	return keptView(c, `free:${repo}`, "snapshot", 20_000, (timing) => freeSnapshot({ ...freeContext(c.env, c.get("accessIdentity")), timing }, repo));
+	return keptView(c, `repo:${repo}`, "snapshot", 20_000, (timing) => repoSnapshot({ ...toolContext(c.env, c.get("accessIdentity")), timing }, repo));
 });
-// A person's vote on a coordinator-free change, from the dashboard: stamped with their verified identity.
-app.post("/free/:repo/changes/:change/votes", async (c) => {
+// A person's vote on a change, from the dashboard: stamped with their verified identity.
+app.post("/repos/:repo/changes/:change/votes", async (c) => {
 	const actor = c.get("accessIdentity") ?? fail(401, "no identity");
 	const { role, verdict, evidence } = await jsonArgs(c);
 	const repo = c.req.param("repo");
-	return c.json(await freeVoteAsPerson(freeContext(c.env, actor), repo, c.req.param("change"), { role: String(role ?? ""), verdict: verdict as "approve" | "reject", evidence: String(evidence ?? "") }, identityLabel(actor)));
+	return c.json(await voteAsPerson(toolContext(c.env, actor), repo, c.req.param("change"), { role: String(role ?? ""), verdict: verdict as "approve" | "reject", evidence: String(evidence ?? "") }, identityLabel(actor)));
 });
-app.get("/free/:repo/changes/:change", async (c) => {
+app.get("/repos/:repo/changes/:change", async (c) => {
 	const { repo, change } = c.req.param();
-	return keptView(c, `free:${repo}`, `change:${change}`, 60_000, (timing) => freeChangeHistory({ ...freeContext(c.env, c.get("accessIdentity")), timing }, repo, change));
+	return keptView(c, `repo:${repo}`, `change:${change}`, 60_000, (timing) => changeHistory({ ...toolContext(c.env, c.get("accessIdentity")), timing }, repo, change));
 });
-// The warmth of a coordinator-free repo's check containers: whether each lane runs, and when it last warmed.
-app.get("/free/:repo/lanes", async (c) => c.json(await c.env.GATE.getByName(`free:${c.req.param("repo")}`).lanes(c.req.param("repo"))));
-app.get("/free/:repo/audit", async (c) => {
+// The warmth of a repo's check containers: whether each lane runs, and when it last warmed.
+app.get("/repos/:repo/lanes", async (c) => c.json(await c.env.GATE.getByName(`repo:${c.req.param("repo")}`).lanes(c.req.param("repo"))));
+app.get("/repos/:repo/audit", async (c) => {
 	const repo = c.req.param("repo");
-	return keptView(c, `free:${repo}`, "audit", 5 * 60_000, (timing) => freeAudit({ ...freeContext(c.env, c.get("accessIdentity")), timing }, repo));
+	return keptView(c, `repo:${repo}`, "audit", 5 * 60_000, (timing) => repoAudit({ ...toolContext(c.env, c.get("accessIdentity")), timing }, repo));
 });
-app.get("/free/:repo/builders/:change", async (c) => c.json(await c.env.BUILDER.getByName(freeAgentName(c.req.param("repo"), c.req.param("change"))).state()));
+app.get("/repos/:repo/builders/:change", async (c) => c.json(await c.env.BUILDER.getByName(changeRepoName(c.req.param("repo"), c.req.param("change"))).state()));
 // A hosted reviewer's state, by the commit it reviews (the vote's commit) and its role.
-app.get("/free/:repo/reviewers/:change/:head/:role", async (c) => {
+app.get("/repos/:repo/reviewers/:change/:head/:role", async (c) => {
 	const { repo, change, head, role } = c.req.param();
-	return c.json(await c.env.REVIEWER.getByName(reviewerName(freeAgentName(repo, change), role, head)).state());
+	return c.json(await c.env.REVIEWER.getByName(reviewerName(changeRepoName(repo, change), role, head)).state());
 });
 
 // The MCP front door (stateless JSON-RPC over HTTP), for agents from anywhere.
 app.post("/mcp", async (c) => {
 	const body = await c.req.json().catch(() => null);
 	if (body === null) return c.json({ jsonrpc: "2.0", id: null, error: { code: -32700, message: "parse error" } }, 400);
-	const result = await handleMcpBody(body, { free: freeContext(c.env, c.get("accessIdentity"), c.req.header("X-Blueprint-Agent-Key")) });
+	const result = await handleMcpBody(body, { toolkit: toolContext(c.env, c.get("accessIdentity"), c.req.header("X-GitHive-Agent-Key")) });
 	return result === null ? c.body(null, 202) : c.json(result);
 });
 app.on(["GET", "DELETE"], "/mcp", (c) => c.body(null, 405, { Allow: "POST" }));
@@ -168,33 +166,33 @@ app.on(["GET", "DELETE"], "/mcp", (c) => c.body(null, 405, { Allow: "POST" }));
 // Summaries older than the repo's last activity are counted again in the
 // background, a few per request.
 app.get("/summaries", async (c) => {
-	const index = taskIndex(c.env);
+	const index = repoIndex(c.env);
 	const listed = await index.summaries();
 	const now = new Date().toISOString();
 	// The most recently active first: those are the rows people look at.
-	const stale = listed.free
+	const stale = listed.repos
 		.filter((r) => !r.summary?.countedAt || (r.summary.lastActivity ?? "") > r.summary.countedAt)
 		.sort((a, b) => (b.summary?.lastActivity ?? b.since).localeCompare(a.summary?.lastActivity ?? a.since))
 		.slice(0, 3);
-	const ctx = freeContext(c.env, c.get("accessIdentity"));
+	const ctx = toolContext(c.env, c.get("accessIdentity"));
 	c.executionCtx.waitUntil(
 		Promise.allSettled(
 			stale.map(async (r) => {
-				const open = await freeOpenCount(ctx, r.repo).catch(() => null);
-				await index.summarize(`free:${r.repo}`, open === null ? { countedAt: now } : { open, countedAt: now });
+				const open = await openCount(ctx, r.repo).catch(() => null);
+				await index.summarize(`repo:${r.repo}`, open === null ? { countedAt: now } : { open, countedAt: now });
 			}),
 		),
 	);
-	return c.json({ free: listed.free });
+	return c.json({ repos: listed.repos });
 });
 
 /** Not a project: an agent's fork, or a repo's claim records. */
-const isProject = (name: string) => !name.startsWith("free--") && !name.startsWith("free-records--");
+const isProject = (name: string) => !name.startsWith("fork--") && !name.startsWith("records--");
 
 /** A deleted project's tokens and kept dashboard views go with it, so a new repo by its name starts clean. */
 async function forgetRepo(env: Env, repo: string) {
 	await Promise.resolve()
-		.then(() => Promise.all([env.TOKENS?.getByName(repo).clear(), env.LIVE?.getByName(`free:${repo}`).clearViews()]))
+		.then(() => Promise.all([env.TOKENS?.getByName(repo).clear(), env.LIVE?.getByName(`repo:${repo}`).clearViews()]))
 		.catch((err) => console.error(`forgetting ${repo}'s tokens and views failed`, String(err)));
 }
 
@@ -214,7 +212,7 @@ app.post("/admin/wipe", async (c) => {
 	if ((c.env as unknown as { BENCH_WIPE?: string }).BENCH_WIPE !== "allowed") return c.json({ error: "not available here" }, 404);
 	const { confirm, batch: size } = await jsonArgs(c);
 	if (confirm !== WIPE_CONFIRMATION) return c.json({ error: `confirm with "${WIPE_CONFIRMATION}"` }, 400);
-	await taskIndex(c.env).clear();
+	await repoIndex(c.env).clear();
 	const names = await listRepoNames(c.env.ARTIFACTS);
 	const batch = names.slice(0, typeof size === "number" && size > 0 ? Math.min(size, WIPE_BATCH) : WIPE_BATCH);
 	const failed: string[] = [];
@@ -225,10 +223,10 @@ app.post("/admin/wipe", async (c) => {
 	return c.json({ deleted: batch.length - failed.length, failed, remaining: names.length - batch.length + failed.length });
 });
 
-// Live updates: a page opens a WebSocket on its repo's feed ("free:<repo>") and refreshes when pinged.
+// Live updates: a page opens a WebSocket on its repo's feed ("repo:<repo>") and refreshes when pinged.
 app.get("/live/:key", async (c) => {
 	const key = c.req.param("key");
-	if (!/^free:[A-Za-z0-9._-]+$/.test(key)) return c.json({ error: "not a feed" }, 400);
+	if (!/^repo:[A-Za-z0-9._-]+$/.test(key)) return c.json({ error: "not a feed" }, 400);
 	return c.env.LIVE.getByName(key).fetch(c.req.raw);
 });
 

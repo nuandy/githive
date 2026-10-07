@@ -4,7 +4,7 @@ import { buildRepoRows, filterRepos, repoCounts, type Summaries } from "./repos"
 
 describe("the repositories list", () => {
 	const summaries: Summaries = {
-		free: [
+		repos: [
 			{ repo: "docs-site", since: ago(1000), summary: { open: 1, merged: 3, violations: 1, lastActivity: ago(5), countedAt: ago(1) } },
 			{ repo: "my-app", since: ago(600), summary: { open: 2, needsYou: 1, merged: 1, lastActivity: ago(2), countedAt: ago(1) } },
 		],
@@ -20,7 +20,7 @@ describe("the repositories list", () => {
 	});
 
 	it("marks repos the server hasn't counted yet", () => {
-		expect(buildRepoRows({ free: [{ repo: "docs-site", since: ago(10), summary: null }] })[0]).toMatchObject({ detailed: false, open: 0, lastActivity: ago(10) });
+		expect(buildRepoRows({ repos: [{ repo: "docs-site", since: ago(10), summary: null }] })[0]).toMatchObject({ detailed: false, open: 0, lastActivity: ago(10) });
 	});
 
 	it("filters by name", () => {

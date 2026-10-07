@@ -1,8 +1,8 @@
 import type { Tone } from "./changeStatus";
 
 // A change's Conversation: what happened to it, oldest first, like a pull
-// request's timeline (see freeTimeline.ts, which builds it from a
-// coordinator-free change's history in Git).
+// request's timeline (see changeTimeline.ts, which builds it from a
+// change's history in Git).
 
 export type TimelineKind = "opened" | "pushed" | "review" | "changes-requested" | "needs-you" | "merged" | "abandoned" | "note";
 

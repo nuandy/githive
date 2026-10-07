@@ -8,7 +8,7 @@ import { staysInRepo } from "./paths";
 
 export { WORKDIR, clip };
 
-// Base for Blueprint's hosted agents, which work in their own Linux container
+// Base for GitHive's hosted agents, which work in their own Linux container
 // on a clone of one change: builders and reviewers. It owns the container
 // lifecycle, the alarm-driven agent loop, and the tools every such agent
 // needs. What only builders do (guarding pushes) is in builder.ts, behind the

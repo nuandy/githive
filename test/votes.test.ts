@@ -1,0 +1,102 @@
+import { describe, expect, it } from "vitest";
+import { approval, effectivePolicy, vote, type VoteRecord, type Votes } from "../src/toolkit/votes";
+import { MemoryLog } from "./helpers/memory-log";
+
+// Review: reviewers append verdicts on the exact commit they
+// reviewed; a merging agent counts them itself, under the task's policy.
+
+const policy = { required: 2, vetoes: ["security"], grants: { security: ["rev-2", "rev-3"] } };
+const head = "h1";
+
+describe("votes", () => {
+	it("approves a commit with the required approvals and no veto", async () => {
+		const log = new MemoryLog<Votes>();
+		await vote(log, { commit: head, reviewer: "rev-1", role: "tests", verdict: "approve", evidence: "tests pass" });
+		await vote(log, { commit: head, reviewer: "rev-2", role: "security", verdict: "approve", evidence: "no secrets" });
+		expect(approval((await log.read())!.commit.state, head, policy)).toEqual({ approved: true, approvals: 2, vetoedBy: [], awaiting: [] });
+	});
+
+	it("waits for every veto role, however many others approve", async () => {
+		const log = new MemoryLog<Votes>();
+		await vote(log, { commit: head, reviewer: "rev-1", role: "tests", verdict: "approve", evidence: "tests pass" });
+		await vote(log, { commit: head, reviewer: "rev-2", role: "api", verdict: "approve", evidence: "api is fine" });
+		expect(approval((await log.read())!.commit.state, head, policy)).toEqual({ approved: false, approvals: 2, vetoedBy: [], awaiting: ["security"] });
+	});
+
+	it("blocks a merge on a veto, whatever the approvals", async () => {
+		const log = new MemoryLog<Votes>();
+		await vote(log, { commit: head, reviewer: "rev-1", role: "tests", verdict: "approve", evidence: "ok" });
+		await vote(log, { commit: head, reviewer: "rev-2", role: "api", verdict: "approve", evidence: "ok" });
+		await vote(log, { commit: head, reviewer: "rev-3", role: "security", verdict: "reject", evidence: "leaks a token" });
+		expect(approval((await log.read())!.commit.state, head, policy)).toEqual({ approved: false, approvals: 2, vetoedBy: ["rev-3"], awaiting: ["security"] });
+	});
+
+	it("counts only votes on the commit being merged: a new push needs new approval", async () => {
+		const log = new MemoryLog<Votes>();
+		await vote(log, { commit: "h0", reviewer: "rev-1", role: "tests", verdict: "approve", evidence: "ok" });
+		await vote(log, { commit: "h0", reviewer: "rev-2", role: "api", verdict: "approve", evidence: "ok" });
+		expect(approval((await log.read())!.commit.state, head, policy)).toMatchObject({ approved: false, approvals: 0 });
+	});
+
+	it("counts a reviewer once, by their latest verdict", async () => {
+		const log = new MemoryLog<Votes>();
+		await vote(log, { commit: head, reviewer: "rev-1", role: "tests", verdict: "approve", evidence: "ok" });
+		await vote(log, { commit: head, reviewer: "rev-1", role: "tests", verdict: "approve", evidence: "still ok" });
+		await vote(log, { commit: head, reviewer: "rev-2", role: "security", verdict: "reject", evidence: "leaks a token" });
+		await vote(log, { commit: head, reviewer: "rev-2", role: "security", verdict: "approve", evidence: "fixed" });
+		expect(approval((await log.read())!.commit.state, head, policy)).toEqual({ approved: true, approvals: 2, vetoedBy: [], awaiting: [] });
+	});
+
+});
+
+describe("votes count per verified identity, never the author's", () => {
+	// No veto roles here: these are about whose approvals count.
+	const policy = { required: 2, vetoes: [] as string[] };
+	const cast = (reviewer: string, by: string | undefined, verdict: "approve" | "reject" = "approve", role = "tests"): VoteRecord => ({ commit: head, reviewer, role, verdict, evidence: "ok", at: "", ...(by ? { by } : {}) });
+
+	it("counts one identity once, whatever names it votes under", () => {
+		const votes = { votes: [cast("rev-1", "service:shared/agent-x"), cast("rev-2", "service:shared/agent-x")] };
+		expect(approval(votes, head, policy)).toEqual({ approved: false, approvals: 1, vetoedBy: [], awaiting: [] });
+	});
+
+	it("counts distinct identities, as before", () => {
+		const votes = { votes: [cast("rev-1", "service:shared/rev-1"), cast("rev-2", "service:githive-reviewer:tests")] };
+		expect(approval(votes, head, policy)).toEqual({ approved: true, approvals: 2, vetoedBy: [], awaiting: [] });
+	});
+
+	it("doesn't count the author's own approval, by verified identity or, unsigned, by name", () => {
+		const author = { agent: "agent-a", by: "service:shared/agent-a" };
+		const votes = { votes: [cast("rev-1", "service:shared/agent-a"), cast("agent-a", undefined), cast("rev-2", "service:shared/rev-2")] };
+		expect(approval(votes, head, policy, author)).toEqual({ approved: false, approvals: 1, vetoedBy: [], awaiting: [] });
+	});
+
+	it("takes a veto from whoever holds the role, the author included", () => {
+		const policy = { required: 2, vetoes: ["security"], grants: { security: ["agent-a"] } };
+		const author = { agent: "agent-a", by: "service:shared/agent-a" };
+		const votes = { votes: [cast("rev-1", "service:shared/rev-1"), cast("rev-2", "service:shared/rev-2"), cast("agent-a", "service:shared/agent-a", "reject", "security")] };
+		expect(approval(votes, head, policy, author)).toMatchObject({ approved: false, vetoedBy: ["agent-a"] });
+	});
+
+	it("falls back to reviewer names when votes aren't signed", () => {
+		const votes = { votes: [cast("rev-1", undefined), cast("rev-2", undefined)] };
+		expect(approval(votes, head, policy)).toEqual({ approved: true, approvals: 2, vetoedBy: [], awaiting: [] });
+	});
+});
+
+describe("policies", () => {
+	const cast = (reviewer: string, role: string, verdict: "approve" | "reject" = "approve"): VoteRecord => ({ commit: head, reviewer, role, verdict, evidence: "ok", at: "" });
+	const policy = { required: 1, vetoes: [], escalate: [{ paths: ["package.json", ".github/"], required: 2, vetoes: ["security"] }], grants: { security: ["sec", "rev-2", "rev-3"] } };
+
+	it("needs one approval for most changes, and security's too for dependency and CI files", () => {
+		const one = { votes: [cast("rev-1", "review")] };
+		expect(approval(one, head, policy, undefined, ["src/a.js"])).toMatchObject({ approved: true, approvals: 1 });
+		expect(approval(one, head, policy, undefined, ["src/a.js", "package.json"])).toMatchObject({ approved: false, awaiting: ["security"] });
+		expect(effectivePolicy(policy, [".github/workflows/ci.yml"])).toEqual({ required: 2, vetoes: ["security"] });
+		const both = { votes: [cast("rev-1", "review"), cast("rev-2", "security")] };
+		expect(approval(both, head, policy, undefined, ["package.json"])).toMatchObject({ approved: true, approvals: 2 });
+	});
+
+	it("merges on the checks alone when no approval is required", () => {
+		expect(approval({ votes: [] }, head, { required: 0, vetoes: [] })).toEqual({ approved: true, approvals: 0, vetoedBy: [], awaiting: [] });
+	});
+});

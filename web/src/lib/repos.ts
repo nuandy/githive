@@ -1,6 +1,6 @@
 import { latest, timeOf } from "./model";
 
-// The Repositories list: the coordinator-free repos agents work on.
+// The Repositories list: the repos agents work on.
 
 export interface RepoRow {
 	name: string;
@@ -29,7 +29,7 @@ export interface RepoSummary {
 }
 
 export interface Summaries {
-	free: { repo: string; since: string; summary: RepoSummary | null }[];
+	repos: { repo: string; since: string; summary: RepoSummary | null }[];
 }
 
 function summaryRow(name: string, since: string, summary: RepoSummary | null): RepoRow {
@@ -46,7 +46,7 @@ function summaryRow(name: string, since: string, summary: RepoSummary | null): R
 
 /** Every repo, most recently active first. */
 export function buildRepoRows(summaries: Summaries): RepoRow[] {
-	return (summaries.free ?? [])
+	return (summaries.repos ?? [])
 		.map((repo) => summaryRow(repo.repo, repo.since, repo.summary))
 		.sort((a, b) => (timeOf(b.lastActivity) ?? 0) - (timeOf(a.lastActivity) ?? 0) || a.name.localeCompare(b.name));
 }

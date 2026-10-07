@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { CodeView } from "./CodeBrowser";
 
 const tree = { ref: "master", commit: "abc1234def", files: ["README.md", "src/index.ts", "src/stats/page.tsx", "assets/logo.png"], truncated: false };
-const base = { repo: "my-app", base: "repos" as const, branch: "master", tree };
+const base = { repo: "my-app", branch: "master", tree };
 
 describe("the Code tab", () => {
 	it("lists a folder, folders first, with links into each", () => {

@@ -1,11 +1,11 @@
-import type { FreeSnapshot } from "../api";
+import type { RepoSnapshot } from "../api";
 
-// Small builders for dashboard tests: a coordinator-free repo and one of its changes.
+// Small builders for dashboard tests: a repo and one of its changes.
 
 export const NOW = Date.now();
 export const ago = (minutes: number) => new Date(NOW - minutes * 60_000).toISOString();
 
-export const freeSnapshot: FreeSnapshot = {
+export const repoSnapshot: RepoSnapshot = {
 	repo: "docs-site",
 	policy: { required: 2, vetoes: ["security"] },
 	verify: ["npm test"],
@@ -49,12 +49,12 @@ export function stubApi(): import("../components/RepoPage").RepoPageApi {
 	return {
 		tree: async () => ({ ref: "main", commit: "c0ffee", files: [], truncated: false }),
 		file: async (_repo: string, path: string) => ({ ref: "main", commit: "c0ffee", path, size: 0, text: "" }),
-		freeVote: async () => ({}),
+		vote: async () => ({}),
 	};
 }
 
-/** A coordinator-free change's history: claimed, two commits, a vote, still in force. */
-export const freeHistory: import("../api").FreeChangeHistory = {
+/** A change's history: claimed, two commits, a vote, still in force. */
+export const historyFixture: import("../api").ChangeHistory = {
 	change: "c-1",
 	branch: "main",
 	claim: { change: "c-1", agent: "agent-c", paths: ["src/c/"], intent: "Rewrite the C section", since: ago(120), active: ago(5), by: "service:abc/agent-c" },

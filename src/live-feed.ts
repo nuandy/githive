@@ -1,15 +1,14 @@
 import { DurableObject } from "cloudflare:workers";
 
-// One per repo ("task:<id>" or "free:<repo>"), for the dashboard:
+// One per repo ("repo:<repo>"), for the dashboard:
 //
-// Live updates. Pages hold a WebSocket open; whoever decides something there
-// (an elected leader after each commit, the coordinator-free toolkit after a
-// write) pings the feed, and every page refreshes at once instead of waiting
+// Live updates. Pages hold a WebSocket open; the toolkit pings the feed after
+// each write, and every page refreshes at once instead of waiting
 // for its next poll. Sockets hibernate between pings, so an idle feed costs
 // nothing. A ping carries no data, only that something changed: pages read
 // the state through the usual routes, with the reader's own access.
 //
-// Ready-made views. Reading a coordinator-free repo from Git takes many round
+// Ready-made views. Reading a repo from Git takes many round
 // trips (its snapshot ~9 s, its audit ~20 s), so the last of each view is kept
 // here, with the count of writes it was built after. A write makes it stale;
 // a stale view is still served at once while a fresh one is built in the
@@ -29,8 +28,8 @@ interface View {
 const BUILD_LEASE_MS = 2 * 60_000;
 
 /**
- * Review holds, for free_next in coordinator-free mode: which agents are
- * reviewing a commit in a role (keyed as free/work.ts holdKey), until they
+ * Review holds, for next: which agents are
+ * reviewing a commit in a role (keyed as toolkit/work.ts holdKey), until they
  * vote or the hold runs out. A hint so two
  * agents aren't sent to the same review that needs one; not a record.
  */

@@ -9,7 +9,7 @@ import { retryTransient } from "./retry";
 // Reading fetches only the tip; appending pushes one commit on top of the tip
 // it was built on, and Git rejects the push if the ref moved meanwhile, so of
 // two writers on one tip only one lands and the other reads again. Claims,
-// votes and the backlog are kept this way (see free/records.ts).
+// votes and the backlog are kept this way (see toolkit/records.ts).
 //
 // Each commit's tree holds state.json (the record after this commit) and
 // decisions.json (this commit's entries), plus each entry as a Git note on the
@@ -24,10 +24,8 @@ export interface LogEntry {
 
 /** One commit of a log: who wrote it, its entries, and the state after it. */
 export interface LogCommit<S> {
-	term: number;
 	/** Who wrote it. */
-	leader: string;
-	leaseUntil: number;
+	author: string;
 	kind: string;
 	entries: LogEntry[];
 	state: S;
@@ -55,7 +53,7 @@ const DIR = "/log";
 const STATE_FILE = "state.json";
 const DECISIONS_FILE = "decisions.json";
 
-const TRAILERS = { term: "Blueprint-Term", leader: "Blueprint-Leader", leaseUntil: "Blueprint-Lease-Until", kind: "Blueprint-Kind", batch: "Blueprint-Batch" } as const;
+const TRAILERS = { author: "GitHive-Author", kind: "GitHive-Kind", batch: "GitHive-Batch" } as const;
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
@@ -98,7 +96,7 @@ const BUSY_ATTEMPTS = 6;
 
 async function pushDirect(remote: Remote, ref: string, from: string | null, to: string, fs: MemoryFS, oids: string[]) {
 	const { packfile } = await git.packObjects({ fs, dir: DIR, oids });
-	const parts = [...pktLine(`${from ?? ZERO_OID} ${to} ${ref}\0report-status agent=blueprint\n`), encoder.encode("0000"), packfile ?? new Uint8Array()];
+	const parts = [...pktLine(`${from ?? ZERO_OID} ${to} ${ref}\0report-status agent=githive\n`), encoder.encode("0000"), packfile ?? new Uint8Array()];
 	const body = new Uint8Array(parts.reduce((n, p) => n + p.length, 0));
 	let at = 0;
 	for (const part of parts) {
@@ -176,7 +174,7 @@ export class GitCasLog<S> implements CasLog<S> {
 	private readonly ref: string;
 
 	/**
-	 * The in-memory repo this log last wrote or read, at that tip. A leader
+	 * The in-memory repo this log last wrote or read, at that tip. A writer
 	 * appends on top of its own last commit, so it needn't read the log first:
 	 * the push alone says whether the tip moved.
 	 */
@@ -213,9 +211,7 @@ export class GitCasLog<S> implements CasLog<S> {
 		return {
 			tip,
 			commit: {
-				term: Number(trailer(TRAILERS.term)),
-				leader: trailer(TRAILERS.leader),
-				leaseUntil: Number(trailer(TRAILERS.leaseUntil)),
+				author: trailer(TRAILERS.author),
 				kind: trailer(TRAILERS.kind),
 				entries: (await json(DECISIONS_FILE)) as LogEntry[],
 				state: (await json(STATE_FILE)) as S,
@@ -283,9 +279,7 @@ function message<S>(commit: LogCommit<S>) {
 	const title = commit.entries.length ? first(commit.entries[0].text) : commit.kind;
 	const summary = commit.entries.map((e) => `- ${first(e.text)}`).join("\n");
 	const trailers = [
-		`${TRAILERS.term}: ${commit.term}`,
-		`${TRAILERS.leader}: ${commit.leader}`,
-		`${TRAILERS.leaseUntil}: ${commit.leaseUntil}`,
+		`${TRAILERS.author}: ${commit.author}`,
 		`${TRAILERS.kind}: ${commit.kind}`,
 		`${TRAILERS.batch}: ${commit.batch}`,
 	].join("\n");

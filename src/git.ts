@@ -8,7 +8,7 @@ import { retryTransient } from "./retry";
 
 const DIR = "/repo";
 
-export const BOT = { name: "Blueprint", email: "bot@blueprint.invalid" };
+export const BOT = { name: "GitHive", email: "bot@githive.invalid" };
 
 export interface Remote {
 	url: string;

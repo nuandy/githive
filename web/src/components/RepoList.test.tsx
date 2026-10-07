@@ -7,7 +7,7 @@ import { RepoList } from "./RepoList";
 describe("the Repositories page", () => {
 	it("lists repos with their counts and what needs you", () => {
 		const rows = buildRepoRows({
-			free: [
+			repos: [
 				{ repo: "my-app", since: ago(10), summary: { open: 3, needsYou: 1, countedAt: ago(1) } },
 				{ repo: "docs-site", since: ago(1), summary: { open: 1, countedAt: ago(1) } },
 			],
@@ -25,6 +25,6 @@ describe("the Repositories page", () => {
 	it("explains how agents start a repo when nothing is open", () => {
 		const html = renderToStaticMarkup(<RepoList rows={[]} loaded />);
 		expect(html).toContain("No repos are open for agents yet");
-		expect(html).toContain("free_start");
+		expect(html).toContain("start");
 	});
 });

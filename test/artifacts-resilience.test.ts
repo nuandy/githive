@@ -146,7 +146,7 @@ describe("Artifacts transient failures", () => {
 	it("deletes a repo, and says when there's none by that name", async () => {
 		const remove = vi.fn(async (name: string) => name === "project");
 		const env = { ARTIFACTS: { delete: remove } } as never;
-		const del = (repo: string) => worker.fetch(new Request(`https://blueprint.test/repos/${repo}`, { method: "DELETE" }), env, {} as never);
+		const del = (repo: string) => worker.fetch(new Request(`https://githive.test/repos/${repo}`, { method: "DELETE" }), env, {} as never);
 
 		expect(await (await del("project")).json()).toEqual({ deleted: "project" });
 		expect((await del("missing")).status).toBe(404);
@@ -155,18 +155,18 @@ describe("Artifacts transient failures", () => {
 	it("lists project repos from every page, without forks", async () => {
 		const list = vi
 			.fn()
-			.mockResolvedValueOnce({ repos: [{ name: "free--zeta--a-1" }, { name: "zeta" }], cursor: "next" })
-			.mockResolvedValueOnce({ repos: [{ name: "free-records--zeta--2" }, { name: "blueprint" }] });
-		const response = await worker.fetch(new Request("https://blueprint.test/repos"), { ARTIFACTS: { list } } as never, {} as never);
+			.mockResolvedValueOnce({ repos: [{ name: "fork--zeta--a-1" }, { name: "zeta" }], cursor: "next" })
+			.mockResolvedValueOnce({ repos: [{ name: "records--zeta--2" }, { name: "githive" }] });
+		const response = await worker.fetch(new Request("https://githive.test/repos"), { ARTIFACTS: { list } } as never, {} as never);
 
-		expect(await response.json()).toEqual([{ name: "blueprint" }, { name: "zeta" }]);
+		expect(await response.json()).toEqual([{ name: "githive" }, { name: "zeta" }]);
 		expect(list).toHaveBeenLastCalledWith({ limit: 200, cursor: "next" });
 	});
 
 	it("retries direct Artifacts list calls made by the API", async () => {
 		const list = vi.fn().mockRejectedValueOnce(transient()).mockResolvedValue({ repos: [{ name: "project" }] });
 		const response = await worker.fetch(
-			new Request("https://blueprint.test/repos"),
+			new Request("https://githive.test/repos"),
 			{ ARTIFACTS: { list } } as never,
 			{} as never,
 		);

@@ -1,5 +1,5 @@
 // How a change stands, in the words a person reading a pull request expects
-// (see freeStatus.ts, which derives it for coordinator-free claims).
+// (see claimStatus.ts, which derives it from claims).
 
 export type Tone = "good" | "bad" | "warn" | "neutral" | "needs" | "accent";
 

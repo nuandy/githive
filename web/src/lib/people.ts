@@ -1,9 +1,9 @@
-import type { FreeSnapshot } from "../api";
+import type { RepoSnapshot } from "../api";
 import { identityName } from "./agent";
 import { latest } from "./model";
 
-// The Agents tab: who works on a repo and who reviews it. Coordinator-free
-// repos keep no list of agents: they come from the claims in force and the votes.
+// The Agents tab: who works on a repo and who reviews it. Repos
+// keep no list of agents: they come from the claims in force and the votes.
 
 export interface AuthorStats {
 	name: string;
@@ -20,7 +20,7 @@ export interface ReviewerStats {
 	roles: string[];
 	approvals: number;
 	rejections: number;
-	/** Blueprint's own reviewer, not an outside agent or a person. */
+	/** GitHive's own reviewer, not an outside agent or a person. */
 	hosted: boolean;
 	lastActive?: string;
 }
@@ -30,8 +30,8 @@ const byActivity = <T extends { opened?: number; approvals?: number; rejections?
 	return weight(b) - weight(a) || a.name.localeCompare(b.name);
 };
 
-/** Coordinator-free repos keep no change records: agents come from the claims in force and the votes. */
-export function freeAuthorStats(snapshot: Pick<FreeSnapshot, "claims">): AuthorStats[] {
+/** Repos keep no change records: agents come from the claims in force and the votes. */
+export function authorStats(snapshot: Pick<RepoSnapshot, "claims">): AuthorStats[] {
 	const authors = new Map<string, AuthorStats>();
 	for (const claim of snapshot.claims) {
 		const name = claim.agent || identityName(claim.by) || "agent";
@@ -44,7 +44,7 @@ export function freeAuthorStats(snapshot: Pick<FreeSnapshot, "claims">): AuthorS
 	return [...authors.values()].sort(byActivity);
 }
 
-export function freeReviewerStats(snapshot: Pick<FreeSnapshot, "votes">): ReviewerStats[] {
+export function reviewerStats(snapshot: Pick<RepoSnapshot, "votes">): ReviewerStats[] {
 	const reviewers = new Map<string, ReviewerStats>();
 	for (const vote of snapshot.votes) {
 		const name = vote.reviewer || identityName(vote.by) || "reviewer";

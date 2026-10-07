@@ -6,7 +6,7 @@ import { FakeStorage } from "./fakes/env";
 
 const { Gate } = await import("../src/gate");
 
-describe("warming a coordinator-free repo's lanes", () => {
+describe("warming a repo's lanes", () => {
 	it("returns at once, then warms this Gate and the three beside it in the background", async () => {
 		const storage = new FakeStorage();
 		const lanes = new Map<string, ReturnType<typeof vi.fn>>();
@@ -17,7 +17,7 @@ describe("warming a coordinator-free repo's lanes", () => {
 		expect(storage.alarm).not.toBeNull();
 		expect(lanes.size).toBe(0);
 		await gate.alarm();
-		expect([...lanes.keys()].sort()).toEqual(["free:express:lane:1", "free:express:lane:2", "free:express:lane:3"]);
+		expect([...lanes.keys()].sort()).toEqual(["repo:express:lane:1", "repo:express:lane:2", "repo:express:lane:3"]);
 		const { repo: _repo, ...warmed } = input;
 		for (const warm of lanes.values()) expect(warm).toHaveBeenCalledWith(warmed);
 		expect(await storage.get("warmLanes")).toBeUndefined();
@@ -31,13 +31,13 @@ describe("warming a coordinator-free repo's lanes", () => {
 	});
 });
 
-describe("a coordinator-free repo's lanes, warm or not", () => {
+describe("a repo's lanes, warm or not", () => {
 	it("says per lane whether it runs, when it last warmed, and whether it's warming", async () => {
 		const storage = new FakeStorage();
 		const others = new Map<string, { running: boolean; warmedAt: number | null; warming: boolean }>([
-			["free:express:lane:1", { running: true, warmedAt: 2, warming: false }],
-			["free:express:lane:2", { running: true, warmedAt: null, warming: true }],
-			["free:express:lane:3", { running: false, warmedAt: null, warming: false }],
+			["repo:express:lane:1", { running: true, warmedAt: 2, warming: false }],
+			["repo:express:lane:2", { running: true, warmedAt: null, warming: true }],
+			["repo:express:lane:3", { running: false, warmedAt: null, warming: false }],
 		]);
 		const env = { GATE: { getByName: (name: string) => ({ warmth: async () => others.get(name) }) } };
 		const gate = new Gate({ storage } as never, env as never);

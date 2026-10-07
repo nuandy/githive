@@ -21,7 +21,7 @@ export interface InboxGroup {
 export function buildInbox(summaries: Summaries | undefined): { groups: InboxGroup[]; count: number } {
 	if (!summaries) return { groups: [], count: 0 };
 	const groups: InboxGroup[] = [];
-	for (const repo of summaries.free ?? []) {
+	for (const repo of summaries.repos ?? []) {
 		const waiting = repo.summary?.waiting ?? [];
 		if (!waiting.length) continue;
 		groups.push({

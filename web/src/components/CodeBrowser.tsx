@@ -1,7 +1,7 @@
 import type { RepoFile, RepoTree } from "../api";
 import { usePoll } from "../hooks/usePoll";
 import { shortSha } from "../lib/model";
-import { href, type RepoBase } from "../lib/routes";
+import { href } from "../lib/routes";
 import { listDir, normalizePath, pathCrumbs, pathKind } from "../lib/tree";
 import { Icon } from "./Icon";
 import "./CodeBrowser.css";
@@ -13,7 +13,6 @@ export interface CodeApi {
 
 export interface CodeViewProps {
 	repo: string;
-	base: RepoBase;
 	/** The file or folder shown ("" for the top). */
 	path: string;
 	/** A commit or branch other than the project's branch, from the address. */
@@ -33,10 +32,10 @@ function formatSize(bytes: number): string {
 }
 
 /** The Code tab, given what it has loaded: a folder listing or one file with line numbers. */
-export function CodeView({ repo, base, path, refParam, branch, tree, treeError, file, fileError }: CodeViewProps) {
+export function CodeView({ repo, path, refParam, branch, tree, treeError, file, fileError }: CodeViewProps) {
 	const clean = normalizePath(path);
 	const shownRef = refParam ?? branch;
-	const link = (p: string) => href.code(repo, p, base, refParam);
+	const link = (p: string) => href.code(repo, p, refParam);
 	const kind = tree ? pathKind(tree.files, clean) : undefined;
 	return (
 		<section className="code" aria-labelledby="code-title">
@@ -46,7 +45,7 @@ export function CodeView({ repo, base, path, refParam, branch, tree, treeError, 
 					{refParam ? shortSha(refParam) : shownRef}
 				</span>
 				{refParam ? (
-					<a href={href.code(repo, clean, base)} className="code__back">
+					<a href={href.code(repo, clean)} className="code__back">
 						Back to {branch}
 					</a>
 				) : null}
@@ -163,13 +162,13 @@ function FileView({ file, error, path }: { file?: RepoFile; error?: string; path
 }
 
 /** The Code tab with its loading: the listing at the project's branch (or the address's ref), and the file shown. */
-export function CodeTab({ repo, base, path, refParam, branch, api }: Omit<CodeViewProps, "tree" | "treeError" | "file" | "fileError"> & { api: CodeApi }) {
+export function CodeTab({ repo, path, refParam, branch, api }: Omit<CodeViewProps, "tree" | "treeError" | "file" | "fileError"> & { api: CodeApi }) {
 	const ref = refParam ?? branch;
 	const tree = usePoll(`tree:${repo}:${ref}`, () => api.tree(repo, ref), 60_000);
 	const clean = normalizePath(path);
 	const isFile = !!tree.data && pathKind(tree.data.files, clean) === "file";
 	const file = usePoll(isFile ? `file:${repo}:${ref}:${clean}` : null, () => api.file(repo, clean, ref), 60_000);
 	return (
-		<CodeView repo={repo} base={base} path={path} refParam={refParam} branch={branch} tree={tree.data} treeError={tree.data ? undefined : tree.error} file={file.data} fileError={file.data ? undefined : file.error} />
+		<CodeView repo={repo} path={path} refParam={refParam} branch={branch} tree={tree.data} treeError={tree.data ? undefined : tree.error} file={file.data} fileError={file.data ? undefined : file.error} />
 	);
 }

@@ -43,7 +43,7 @@ export function TonePill({ tone, children, icon }: { tone: Tone; children: React
 	);
 }
 
-/** How a coordinator-free repo keeps its claims and votes: one record, or sharded (see recordsBadge). */
+/** How a repo keeps its claims and votes: one record, or sharded (see recordsBadge). */
 export function ShardingBadge({ summary }: { summary: { label: string; sharded: boolean; detail: string } | null }) {
 	if (!summary) return null;
 	return (

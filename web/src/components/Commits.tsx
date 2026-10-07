@@ -1,7 +1,7 @@
-import type { FreeChangeHistory } from "../api";
+import type { ChangeHistory } from "../api";
 import { shortSha } from "../lib/model";
 import { timeAgo } from "../lib/relativeTime";
-import { href, type RepoBase } from "../lib/routes";
+import { href } from "../lib/routes";
 import { Icon } from "./Icon";
 import "./Commits.css";
 
@@ -13,8 +13,8 @@ function When({ at }: { at: string }) {
 	);
 }
 
-/** A coordinator-free change's own commits, newest first, with their messages. */
-export function FreeCommits({ history, repo, base }: { history: FreeChangeHistory | undefined; repo: string; base: RepoBase }) {
+/** A change's own commits, newest first, with their messages. */
+export function ChangeCommits({ history, repo }: { history: ChangeHistory | undefined; repo: string }) {
 	if (!history)
 		return (
 			<p className="muted" role="status">
@@ -54,7 +54,7 @@ export function FreeCommits({ history, repo, base }: { history: FreeChangeHistor
 									<strong>{commit.author || "someone"}</strong> committed <When at={commit.at} />
 								</p>
 							</div>
-							<a className="commits__sha" href={href.code(repo, "", base, commit.commit)}>
+							<a className="commits__sha" href={href.code(repo, "", commit.commit)}>
 								<code>{shortSha(commit.commit)}</code>
 							</a>
 						</li>

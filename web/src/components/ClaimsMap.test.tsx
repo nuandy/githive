@@ -1,11 +1,11 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import type { FreeSnapshot } from "../api";
+import type { RepoSnapshot } from "../api";
 import { holdersFromSnapshot } from "../lib/claimsMap";
-import { ago, freeSnapshot } from "../test/fixtures";
+import { ago, repoSnapshot } from "../test/fixtures";
 import { ClaimsMap } from "./ClaimsMap";
 
-const claim = (change: string, intent: string, agent: string, paths: string[]): FreeSnapshot["claims"][number] => ({
+const claim = (change: string, intent: string, agent: string, paths: string[]): RepoSnapshot["claims"][number] => ({
 	change,
 	agent,
 	paths,
@@ -15,9 +15,9 @@ const claim = (change: string, intent: string, agent: string, paths: string[]): 
 	head: null,
 	approval: { approved: false, approvals: 0, required: 1, vetoedBy: [] },
 });
-const snapshot = { ...freeSnapshot, claims: [claim("stats", "Stats page", "agent-a", ["src/stats/", "src/stats/new.ts"]), claim("readme", "README", "agent-b", ["README.md"])] };
+const snapshot = { ...repoSnapshot, claims: [claim("stats", "Stats page", "agent-a", ["src/stats/", "src/stats/new.ts"]), claim("readme", "README", "agent-b", ["README.md"])] };
 // A conflict, where the server reports one, shows on the holder's paths.
-const holders = holdersFromSnapshot(snapshot, "my-app", "repos").map((h) => (h.change === "readme" ? { ...h, conflicts: ["README.md"] } : h));
+const holders = holdersFromSnapshot(snapshot, "my-app").map((h) => (h.change === "readme" ? { ...h, conflicts: ["README.md"] } : h));
 const tree = { ref: "master", commit: "abc", files: ["README.md", "docs/guide.md", "src/index.ts", "src/stats/page.tsx"], truncated: false };
 
 describe("the Claims map", () => {

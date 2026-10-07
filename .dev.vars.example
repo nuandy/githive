@@ -1,2 +1,2 @@
-# OpenAI key for Blueprint's builder and reviewer agents (gpt-6-luna). Set this in .dev.vars.
+# OpenAI key for GitHive's builder and reviewer agents (gpt-6-luna). Set this in .dev.vars.
 OPENAI_API_KEY=sk-...

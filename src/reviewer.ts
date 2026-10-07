@@ -1,16 +1,16 @@
 import { z } from "zod";
 import { tool, type AgentTool } from "./agent";
 import { ENVIRONMENT, SandboxAgent, changeContext, type AgentState, type ChangeJob } from "./sandbox";
-import { gitInBlueprint } from "./git-blueprint-guidance";
-import { freeAgentName, freeContextFor } from "./free/env";
-import { callFreeTool, votesFor } from "./free/mcp";
-import { makeStamper } from "./free/stamp";
+import { gitGuidance } from "./git-guidance";
+import { changeRepoName, toolContextFor } from "./toolkit/env";
+import { callTool, votesFor } from "./toolkit/mcp";
+import { makeStamper } from "./toolkit/stamp";
 
-// Blueprint's hosted reviewer, one per (change, role, commit), asked for with
-// free_request_review (or by Blueprint's builder when it finishes): a
+// GitHive's hosted reviewer, one per (change, role, commit), asked for with
+// request_review (or by GitHive's builder when it finishes): a
 // gpt-6-luna agent that checks out the exact commit under review in its own
 // container, with a read-only token, runs the code, and votes with evidence,
-// stamped as Blueprint's reviewer for its role.
+// stamped as GitHive's reviewer for its role.
 
 export interface ReviewJob extends ChangeJob {
 	role: string;
@@ -54,25 +54,25 @@ const VerdictArgs = z.strictObject({
 export class Reviewer extends SandboxAgent<ReviewJob, ReviewerState> {
 	protected readonly kind = "reviewer";
 
-	/** The toolkit, acting as Blueprint's reviewer for this role. */
-	private freeContext(job: ReviewJob) {
-		return freeContextFor(this.env, `service:blueprint-reviewer:${job.role}`, { hosted: true });
+	/** The toolkit, acting as GitHive's reviewer for this role. */
+	private toolContext(job: ReviewJob) {
+		return toolContextFor(this.env, `service:githive-reviewer:${job.role}`, { hosted: true });
 	}
 
-	/** Cast the verdict as a vote on the commit, stamped as this reviewer when Blueprint has a key. */
+	/** Cast the verdict as a vote on the commit, stamped as this reviewer when GitHive has a key. */
 	private async vote(job: ReviewJob, verdict: "approve" | "reject", evidence: string) {
 		// The repo's votes, wherever they're kept now: their record, or the commit's bucket once sharded.
-		const votes = votesFor(freeContextFor(this.env, undefined, { hosted: true }), job.project);
-		const stamper = this.env.FREE_STAMP_KEY ? await makeStamper(this.env.FREE_STAMP_KEY, `service:blueprint-reviewer:${job.role}`) : undefined;
-		await votes.vote({ commit: job.head, reviewer: `blueprint-${job.role}`, role: job.role, verdict, evidence }, stamper);
+		const votes = votesFor(toolContextFor(this.env, undefined, { hosted: true }), job.project);
+		const stamper = this.env.STAMP_KEY ? await makeStamper(this.env.STAMP_KEY, `service:githive-reviewer:${job.role}`) : undefined;
+		await votes.vote({ commit: job.head, reviewer: `githive-${job.role}`, role: job.role, verdict, evidence }, stamper);
 	}
 
 	protected instructions(job: ReviewJob) {
-		return `You are Blueprint's ${job.role} reviewer. Many agents work on this repository at once, each on its own change; reviewers vote on each change before it can merge. ${ENVIRONMENT}
+		return `You are GitHive's ${job.role} reviewer. Many agents work on this repository at once, each on its own change; reviewers vote on each change before it can merge. ${ENVIRONMENT}
 
 The change's code is checked out at commit ${job.head}. It left ${job.branch} at commit ${job.baseCommit}, so \`git diff ${job.baseCommit} HEAD\` shows exactly what it changed.
 
-${gitInBlueprint(job.branch)}
+${gitGuidance(job.branch)}
 
 ${changeContext(job)}
 
@@ -122,13 +122,13 @@ How to work:
 					Object.assign(state, { status: "done", verdict, summary, evidence });
 					this.note(state, `voted ${verdict} on ${job.head}`);
 					if (job.mergeWhenApproved && verdict === "approve") {
-						const merged = (await callFreeTool("free_merge", { repo: job.project, change: job.change, agent: job.agent }, this.freeContext(job))) as { ok: boolean; reasons?: string[] };
+						const merged = (await callTool("merge", { repo: job.project, change: job.change, agent: job.agent }, this.toolContext(job))) as { ok: boolean; reasons?: string[] };
 						this.note(state, merged.ok ? "merged the change" : `not merged yet: ${(merged.reasons ?? []).join("; ").slice(0, 200)}`);
 					}
-					// A rejected change built by Blueprint's builder goes back to it, with why.
-					if (verdict === "reject" && job.agent === "blueprint-builder") {
+					// A rejected change built by GitHive's builder goes back to it, with why.
+					if (verdict === "reject" && job.agent === "githive-builder") {
 						const feedback = `The ${job.role} reviewer rejected ${job.head}:\n\n${summary}\n\n${evidence}\n\nFix it inside your claim, commit_and_push, then finish again for a new review.`;
-						const outcome = await this.env.BUILDER.getByName(freeAgentName(job.project, job.change)).revise(feedback);
+						const outcome = await this.env.BUILDER.getByName(changeRepoName(job.project, job.change)).revise(feedback);
 						this.note(state, outcome === "revising" ? "sent the change back to its builder" : "its builder gave up; claim released");
 					}
 					return "Vote recorded.";

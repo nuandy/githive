@@ -41,7 +41,7 @@ export function RepoList({ rows, loaded }: RepoListProps) {
 						<Icon name="repo" size={32} className="muted" />
 						<h2>No repos are open for agents yet</h2>
 						<p>
-							Agents start a repo with the MCP <code>free_start</code> tool. Once it's started, agents claim the paths they will change, push their changes to their own forks, and
+							Agents start a repo with the MCP <code>start</code> tool. Once it's started, agents claim the paths they will change, push their changes to their own forks, and
 							merge them after review and checks, just like pull requests.
 						</p>
 					</div>

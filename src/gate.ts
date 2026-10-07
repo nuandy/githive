@@ -1,7 +1,7 @@
 import { DurableObject } from "cloudflare:workers";
 import { WORKDIR, bootContainer, clip, gitWithToken, run } from "./container";
 import { statusOf } from "./errors";
-import { CheckLine, type LineResult } from "./free/check-line";
+import { CheckLine, type LineResult } from "./toolkit/check-line";
 import { branchHead } from "./git";
 
 // The project's checks, run before a merge lands: the change merged onto the
@@ -10,7 +10,7 @@ import { branchHead } from "./git";
 //
 // A repo's Gate keeps its line of merges waiting for checks and runs them in
 // batches, itself and the Gates beside it each checking one (see
-// free/check-line.ts), in containers it keeps warm: dependencies stay
+// toolkit/check-line.ts), in containers it keeps warm: dependencies stay
 // installed between runs, and an install is skipped while what it depends on
 // is unchanged.
 
@@ -56,7 +56,7 @@ const WARM_FOR_MS = 5 * 60_000;
 const WARM_LANES = 4;
 
 /** A merge's checks: the project's branch and checks, and the change's fork and commit. */
-export interface FreeCheck {
+export interface ChangeCheck {
 	branch?: string;
 	base: { remote: string; token: string };
 	fork: { remote: string; token: string; ref: string };
@@ -72,7 +72,7 @@ export class Gate extends DurableObject<Env> {
 	 * Check one commit now: merge `head` onto `baseHead` (after the merges
 	 * ahead) and run `checks`, returning the result. A lane of the repo's line.
 	 */
-	checkCommit(input: FreeCheck & { baseHead: string; ahead?: CheckPlan["ahead"] }): Promise<GateResult> {
+	checkCommit(input: ChangeCheck & { baseHead: string; ahead?: CheckPlan["ahead"] }): Promise<GateResult> {
 		const plan: CheckPlan = { baseHead: input.baseHead, branch: input.branch, base: input.base, fork: input.fork, ...(input.ahead?.length ? { ahead: input.ahead } : {}), checks: input.checks };
 		const run = this.checking.then(async () => {
 			try {
@@ -87,19 +87,19 @@ export class Gate extends DurableObject<Env> {
 	}
 
 	/** The line of merges waiting for checks, for the repo this Gate serves (see check-line.ts). */
-	private line?: CheckLine<FreeCheck & { repo: string }, GateResult>;
+	private line?: CheckLine<ChangeCheck & { repo: string }, GateResult>;
 
 	/**
 	 * Wait in the repo's line for a merge's checks: run, in a batch, on the
 	 * project's branch with the merges ahead merged in first. This Gate is the
 	 * first lane; the others are Gates of their own, each with its container.
 	 */
-	checkInLine(input: FreeCheck & { repo: string; change: string }): Promise<LineResult<GateResult>> {
+	checkInLine(input: ChangeCheck & { repo: string; change: string }): Promise<LineResult<GateResult>> {
 		this.line ??= new CheckLine({
 			base: async (check) => (await branchHead({ url: check.base.remote, token: check.base.token }, check.branch ?? "main")) ?? Promise.reject(new Error(`the project has no ${check.branch ?? "main"} branch`)),
 			check: (lane, request, baseHead, ahead) => {
 				const check = { ...request.input, baseHead, ahead: ahead.map((a) => ({ head: a.head, remote: a.input.fork.remote, token: a.input.fork.token, ref: a.input.fork.ref })) };
-				return lane === 0 ? this.checkCommit(check) : this.env.GATE.getByName(`free:${request.input.repo}:lane:${lane}`).checkCommit(check);
+				return lane === 0 ? this.checkCommit(check) : this.env.GATE.getByName(`repo:${request.input.repo}:lane:${lane}`).checkCommit(check);
 			},
 		});
 		const { repo, change, ...check } = input;
@@ -117,7 +117,7 @@ export class Gate extends DurableObject<Env> {
 		if (!warmLanes) return;
 		await this.ctx.storage.delete("warmLanes");
 		const { repo, ...input } = warmLanes;
-		await Promise.all(Array.from({ length: WARM_LANES }, (_, lane) => (lane === 0 ? this.warm(input) : this.env.GATE.getByName(`free:${repo}:lane:${lane}`).warm(input)).catch(() => undefined)));
+		await Promise.all(Array.from({ length: WARM_LANES }, (_, lane) => (lane === 0 ? this.warm(input) : this.env.GATE.getByName(`repo:${repo}:lane:${lane}`).warm(input)).catch(() => undefined)));
 	}
 
 	private async check(head: string, plan: CheckPlan): Promise<GateResult> {
@@ -152,7 +152,7 @@ export class Gate extends DurableObject<Env> {
 		await run(container, ["bash", "-lc", `git merge --abort 2>/dev/null; git checkout -q -f --detach ${plan.baseHead} && git clean -fdq`]);
 		// Merge the merges ahead in line, in order, then the change, onto the base.
 		for (const commit of [...(plan.ahead ?? []).map((a) => a.head), head]) {
-			const merge = await run(container, ["git", "-c", "user.name=gate", "-c", "user.email=gate@blueprint.invalid", "merge", "-q", "--no-edit", commit]);
+			const merge = await run(container, ["git", "-c", "user.name=gate", "-c", "user.email=gate@githive.invalid", "merge", "-q", "--no-edit", commit]);
 			if (merge.exitCode !== 0) {
 				const conflicts = await run(container, ["git", "diff", "--name-only", "--diff-filter=U"]);
 				await run(container, ["git", "merge", "--abort"]);
@@ -240,7 +240,7 @@ export class Gate extends DurableObject<Env> {
 
 	/** The warmth of the repo's lanes (this Gate first, then the ones beside it). */
 	async lanes(repo: string) {
-		return Promise.all(Array.from({ length: WARM_LANES }, async (_, lane) => ({ lane, ...(await (lane === 0 ? this.warmth() : this.env.GATE.getByName(`free:${repo}:lane:${lane}`).warmth())) })));
+		return Promise.all(Array.from({ length: WARM_LANES }, async (_, lane) => ({ lane, ...(await (lane === 0 ? this.warmth() : this.env.GATE.getByName(`repo:${repo}:lane:${lane}`).warmth())) })));
 	}
 
 	/**

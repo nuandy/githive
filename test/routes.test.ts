@@ -6,17 +6,17 @@ import worker from "../src/index";
 vi.mock("../src/access", () => ({
 	verifyAccessRequest: vi.fn(async () => ({ kind: "service", value: "token-1" })),
 }));
-const counts = vi.hoisted(() => ({ freeOpenCount: vi.fn(async () => 4) }));
-vi.mock("../src/free/mcp", async (importOriginal) => ({ ...(await importOriginal<object>()), freeOpenCount: counts.freeOpenCount }));
+const counts = vi.hoisted(() => ({ openCount: vi.fn(async () => 4) }));
+vi.mock("../src/toolkit/mcp", async (importOriginal) => ({ ...(await importOriginal<object>()), openCount: counts.openCount }));
 
 const post = (env: never, path: string, body: unknown) =>
-	worker.fetch(new Request(`https://blueprint.test${path}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }), env, {} as never);
-const get = (env: never, path: string) => worker.fetch(new Request(`https://blueprint.test${path}`), env, {} as never);
+	worker.fetch(new Request(`https://githive.test${path}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }), env, {} as never);
+const get = (env: never, path: string) => worker.fetch(new Request(`https://githive.test${path}`), env, {} as never);
 
 describe("the dashboard's repos", () => {
 	it("lists project repos from every page, without agents' forks and records, sorted", async () => {
 		const list = vi.fn(async ({ cursor }: { cursor?: string }) =>
-			cursor ? { repos: [{ name: "alpha" }, { name: "free--alpha--a-1" }, { name: "free-records--alpha--3" }] } : { repos: [{ name: "zeta" }], cursor: "next" },
+			cursor ? { repos: [{ name: "alpha" }, { name: "fork--alpha--a-1" }, { name: "records--alpha--3" }] } : { repos: [{ name: "zeta" }], cursor: "next" },
 		);
 		const res = await get({ ARTIFACTS: { list } } as never, "/repos");
 		expect(await res.json()).toEqual([{ name: "alpha" }, { name: "zeta" }]);
@@ -27,7 +27,7 @@ describe("the dashboard's repos", () => {
 		const fresh = { open: 1, countedAt: "2026-10-06T10:00:00.000Z", lastActivity: "2026-10-06T09:00:00.000Z" };
 		const index = {
 			summaries: vi.fn(async () => ({
-				free: [
+				repos: [
 					{ repo: "a", since: "2026-10-01T00:00:00.000Z", summary: fresh },
 					{ repo: "b", since: "2026-10-01T00:00:00.000Z", summary: { open: 2, countedAt: "2026-10-06T08:00:00.000Z", lastActivity: "2026-10-06T09:00:00.000Z" } },
 					{ repo: "c", since: "2026-10-01T00:00:00.000Z", summary: null },
@@ -36,11 +36,11 @@ describe("the dashboard's repos", () => {
 			summarize: vi.fn(async (_key: string, _counts: object) => {}),
 		};
 		const waits: Promise<unknown>[] = [];
-		const response = await worker.fetch(new Request("https://blueprint.test/summaries"), { TASK_INDEX: { getByName: () => index } } as never, { waitUntil: (p: Promise<unknown>) => void waits.push(p) } as never);
-		expect(((await response.json()) as { free: unknown[] }).free).toHaveLength(3);
+		const response = await worker.fetch(new Request("https://githive.test/summaries"), { REPO_INDEX: { getByName: () => index } } as never, { waitUntil: (p: Promise<unknown>) => void waits.push(p) } as never);
+		expect(((await response.json()) as { repos: unknown[] }).repos).toHaveLength(3);
 		await Promise.all(waits);
-		expect(index.summarize.mock.calls.map(([key]) => key).sort()).toEqual(["free:b", "free:c"]);
-		expect(index.summarize).toHaveBeenCalledWith("free:b", { open: 4, countedAt: expect.any(String) });
+		expect(index.summarize.mock.calls.map(([key]) => key).sort()).toEqual(["repo:b", "repo:c"]);
+		expect(index.summarize).toHaveBeenCalledWith("repo:b", { open: 4, countedAt: expect.any(String) });
 	});
 });
 
@@ -51,7 +51,7 @@ describe("the bench's wipe", () => {
 		const deleted: string[] = [];
 		const env = {
 			...(allowed ? { BENCH_WIPE: "allowed" } : {}),
-			TASK_INDEX: { getByName: () => index },
+			REPO_INDEX: { getByName: () => index },
 			ARTIFACTS: {
 				list: vi.fn(async () => ({ repos: names.filter((n) => !deleted.includes(n)).map((name) => ({ name })) })),
 				delete: vi.fn(async (name: string) => void deleted.push(name)),
@@ -68,11 +68,11 @@ describe("the bench's wipe", () => {
 	});
 
 	it("needs its confirmation, then deletes the namespace's repos and forgets the dashboard's list", async () => {
-		const { env, index, deleted } = benchEnv(["project", "t1--a", "free--docs--c-1"]);
+		const { env, index, deleted } = benchEnv(["project", "t1--a", "fork--docs--c-1"]);
 		expect((await post(env, "/admin/wipe", { confirm: "yes" })).status).toBe(400);
 		expect(deleted).toEqual([]);
 		expect(await (await post(env, "/admin/wipe", confirm)).json()).toEqual({ deleted: 3, failed: [], remaining: 0 });
-		expect(deleted).toEqual(["project", "t1--a", "free--docs--c-1"]);
+		expect(deleted).toEqual(["project", "t1--a", "fork--docs--c-1"]);
 		expect(index.clear).toHaveBeenCalled();
 	});
 });

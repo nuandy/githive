@@ -1,5 +1,5 @@
-import type { FreeSnapshot } from "../api";
-import { freeAuthorStats, freeReviewerStats, type AuthorStats, type ReviewerStats } from "../lib/people";
+import type { RepoSnapshot } from "../api";
+import { authorStats, reviewerStats, type AuthorStats, type ReviewerStats } from "../lib/people";
 import { timeAgo } from "../lib/relativeTime";
 import { Icon } from "./Icon";
 import "./Agents.css";
@@ -24,7 +24,7 @@ function Authors({ authors }: { authors: AuthorStats[] }) {
 							{authors.map((a) => (
 								<tr key={a.name}>
 									<th scope="row">
-										<Icon name={a.name === "Blueprint builder" ? "bot" : "user"} size={14} className="muted" /> {a.name}
+										<Icon name={a.name === "GitHive builder" ? "bot" : "user"} size={14} className="muted" /> {a.name}
 									</th>
 									<td>{a.open}</td>
 									<td className="muted">{a.lastActive ? timeAgo(a.lastActive) : "–"}</td>
@@ -80,13 +80,13 @@ function Reviewers({ reviewers }: { reviewers: ReviewerStats[] }) {
 	);
 }
 
-/** A coordinator-free repo's agents, from the claims in force and the recent votes. */
-export function FreeAgents({ snapshot }: { snapshot: FreeSnapshot }) {
+/** A repo's agents, from the claims in force and the recent votes. */
+export function AgentsTab({ snapshot }: { snapshot: RepoSnapshot }) {
 	return (
 		<div className="agents">
-			<p className="muted agents__note">Coordinator-free repos keep no list of agents: these come from the claims in force and the latest votes.</p>
-			<Authors authors={freeAuthorStats(snapshot)} />
-			<Reviewers reviewers={freeReviewerStats(snapshot)} />
+			<p className="muted agents__note">Repos keep no list of agents: these come from the claims in force and the latest votes.</p>
+			<Authors authors={authorStats(snapshot)} />
+			<Reviewers reviewers={reviewerStats(snapshot)} />
 		</div>
 	);
 }

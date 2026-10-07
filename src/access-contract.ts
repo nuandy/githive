@@ -10,7 +10,7 @@ export interface AccessConfiguration {
 	audience: string;
 }
 
-/** The signed claims Blueprint uses from a Cloudflare Access assertion. */
+/** The signed claims GitHive uses from a Cloudflare Access assertion. */
 export interface AccessJwtClaims {
 	iss: string;
 	aud: string | string[];

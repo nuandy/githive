@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
-import type { FreeSnapshot } from "../api";
-import { ago, freeSnapshot } from "../test/fixtures";
+import type { RepoSnapshot } from "../api";
+import { ago, repoSnapshot } from "../test/fixtures";
 import { claimedElsewhere, covers, holderOf, holdersFromSnapshot, holdsInside } from "./claimsMap";
 
-const claim = (change: string, agent: string, paths: string[]): FreeSnapshot["claims"][number] => ({
+const claim = (change: string, agent: string, paths: string[]): RepoSnapshot["claims"][number] => ({
 	change,
 	agent,
 	paths,
@@ -16,11 +16,11 @@ const claim = (change: string, agent: string, paths: string[]): FreeSnapshot["cl
 const files = ["README.md", "docs/guide.md", "src/index.ts", "src/stats/page.tsx", "src/stats/charts/bar.tsx"];
 
 describe("the claims map", () => {
-	const holders = holdersFromSnapshot({ claims: [claim("stats", "agent-a", ["src/stats/", "src/stats/new.ts"]), claim("readme", "agent-b", ["README.md"]), claim("deep", "agent-c", ["src/stats/charts/"])] }, "my-app", "repos");
+	const holders = holdersFromSnapshot({ claims: [claim("stats", "agent-a", ["src/stats/", "src/stats/new.ts"]), claim("readme", "agent-b", ["README.md"]), claim("deep", "agent-c", ["src/stats/charts/"])] }, "my-app");
 
 	it("reads a repo's claims from its snapshot, each with a color and a link to its change", () => {
-		expect(holdersFromSnapshot(freeSnapshot, "docs-site")).toEqual([
-			{ change: "c-1", title: "Rewrite the C section", agent: "agent-c", paths: ["src/c/"], href: "#/free/docs-site/changes/c-1", color: 0, conflicts: [] },
+		expect(holdersFromSnapshot(repoSnapshot, "docs-site")).toEqual([
+			{ change: "c-1", title: "Rewrite the C section", agent: "agent-c", paths: ["src/c/"], href: "#/repos/docs-site/changes/c-1", color: 0, conflicts: [] },
 		]);
 		expect(holders.map((h) => [h.change, h.color, h.href])).toEqual([
 			["stats", 0, "#/repos/my-app/changes/stats"],

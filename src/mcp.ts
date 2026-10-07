@@ -1,14 +1,14 @@
 import { statusOf } from "./errors";
-import { FREE_INSTRUCTIONS, FREE_TOOLS, callFreeTool, type FreeContext } from "./free/mcp";
+import { INSTRUCTIONS, TOOLS, callTool, type ToolContext } from "./toolkit/mcp";
 
 // The MCP front door: any agent (Claude Code, Codex, a team's own bots) works
-// on a repo through Blueprint's tools, with its own fork and plain git. A
+// on a repo through GitHive's tools, with its own fork and plain git. A
 // stateless MCP server over HTTP (JSON-RPC 2.0, JSON responses, no sessions),
 // behind Cloudflare Access like every other route.
 
 export interface McpContext {
 	/** The toolkit for this caller: who it is (as Access verified it) and its agent key. */
-	free: FreeContext;
+	toolkit: ToolContext;
 }
 
 const PROTOCOL_VERSIONS = ["2025-06-18", "2025-03-26", "2024-11-05"];
@@ -33,17 +33,17 @@ export async function handleRpc(msg: RpcRequest, ctx: McpContext): Promise<objec
 		case "initialize": {
 			const requested = msg.params?.protocolVersion;
 			const protocolVersion = typeof requested === "string" && PROTOCOL_VERSIONS.includes(requested) ? requested : PROTOCOL_VERSIONS[0];
-			return reply(msg.id, { protocolVersion, capabilities: { tools: {} }, serverInfo: { name: "blueprint", version: "1.0.0" }, instructions: FREE_INSTRUCTIONS });
+			return reply(msg.id, { protocolVersion, capabilities: { tools: {} }, serverInfo: { name: "githive", version: "1.0.0" }, instructions: INSTRUCTIONS });
 		}
 		case "ping":
 			return reply(msg.id, {});
 		case "tools/list":
-			return reply(msg.id, { tools: FREE_TOOLS });
+			return reply(msg.id, { tools: TOOLS });
 		case "tools/call": {
 			const name = msg.params?.name;
-			if (typeof name !== "string" || !FREE_TOOLS.some((t) => t.name === name)) return rpcError(msg.id, -32602, `unknown tool ${String(name)}`);
+			if (typeof name !== "string" || !TOOLS.some((t) => t.name === name)) return rpcError(msg.id, -32602, `unknown tool ${String(name)}`);
 			try {
-				const result = await callFreeTool(name, (msg.params?.arguments as Args) ?? {}, ctx.free);
+				const result = await callTool(name, (msg.params?.arguments as Args) ?? {}, ctx.toolkit);
 				return reply(msg.id, { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] });
 			} catch (err) {
 				// Tool failures go back to the agent as results it can act on, not protocol errors.

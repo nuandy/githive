@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Workspace } from "../src/git";
-import { readMainMerges } from "../src/free/git-records";
+import { readMainMerges } from "../src/toolkit/git-records";
 import { startGitServer, type GitServer } from "./helpers/git-server";
 
 // A project's whole history may not fit in a Durable Object's memory, so a

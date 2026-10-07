@@ -1,13 +1,13 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { buildInbox } from "../lib/inbox";
-import { ago, freeHistory, freeSnapshot, stubApi } from "../test/fixtures";
-import { FreeAgents } from "./Agents";
-import { FreeCommits } from "./Commits";
+import { ago, historyFixture, repoSnapshot, stubApi } from "../test/fixtures";
+import { AgentsTab } from "./Agents";
+import { ChangeCommits } from "./Commits";
 import { InboxPage } from "./InboxPage";
 import { LiveDot } from "./RepoHeader";
-import { FreeRepoPage } from "./RepoPage";
-import { FreeSettings } from "./FreeRepo";
+import { RepoPage } from "./RepoPage";
+import { SettingsTab } from "./RepoTabs";
 import { TopBar } from "./TopBar";
 
 // The repo tabs and pages beside the change list: commits, the inbox, agents,
@@ -15,18 +15,18 @@ import { TopBar } from "./TopBar";
 
 describe("the Commits tab", () => {
 	it("lists a change's commits with their messages", () => {
-		const html = renderToStaticMarkup(<FreeCommits history={freeHistory} repo="docs" base="free" />);
+		const html = renderToStaticMarkup(<ChangeCommits history={historyFixture} repo="docs" />);
 		expect(html).toContain("Tighten the wording");
 		expect(html).toContain("And fix two links.");
 		expect(html).toContain("First draft of section C");
 		expect(html).toContain("<strong>agent-c</strong> committed");
-		expect(renderToStaticMarkup(<FreeCommits history={undefined} repo="docs" base="free" />)).toContain("Loading commits");
+		expect(renderToStaticMarkup(<ChangeCommits history={undefined} repo="docs" />)).toContain("Loading commits");
 	});
 });
 
 describe("the Inbox", () => {
 	const summaries = {
-		free: [{ repo: "my-app", since: ago(10), summary: { waiting: [{ change: "fix-login", title: "Fix login", reason: "Reviewers disagree after 3 revisions" }] } }],
+		repos: [{ repo: "my-app", since: ago(10), summary: { waiting: [{ change: "fix-login", title: "Fix login", reason: "Reviewers disagree after 3 revisions" }] } }],
 	};
 
 	it("lists what waits on you, grouped by repo, each linking to its change", () => {
@@ -49,7 +49,7 @@ describe("the Inbox", () => {
 
 describe("Agents", () => {
 	it("lists who holds claims and who reviews", () => {
-		const html = renderToStaticMarkup(<FreeAgents snapshot={freeSnapshot} />);
+		const html = renderToStaticMarkup(<AgentsTab snapshot={repoSnapshot} />);
 		expect(html).toContain("agent-c");
 		expect(html).toContain("rev-1");
 		expect(html).toContain("Claims in force");
@@ -61,7 +61,7 @@ describe("the repo header", () => {
 		expect(renderToStaticMarkup(<LiveDot status="live" />)).toMatch(/live-dot--live.*Live/);
 		expect(renderToStaticMarkup(<LiveDot status="reconnecting" />)).toContain("Reconnecting");
 		expect(renderToStaticMarkup(<LiveDot status="off" />)).toBe("");
-		const page = renderToStaticMarkup(<FreeRepoPage repo="docs-site" base="repos" view={{ kind: "repo", tab: "changes" }} snapshot={freeSnapshot} liveStatus="live" api={stubApi()} />);
+		const page = renderToStaticMarkup(<RepoPage repo="docs-site" view={{ kind: "repo", tab: "changes" }} snapshot={repoSnapshot} liveStatus="live" api={stubApi()} />);
 		expect(page).toContain("live-dot--live");
 		for (const tab of ["Changes", "Claims", "Code", "Agents", "Audit", "Settings"]) expect(page).toContain(`<span>${tab}</span>`);
 		expect(page).not.toMatch(/elected|Insights|Activity/);
@@ -70,6 +70,6 @@ describe("the repo header", () => {
 
 describe("Settings", () => {
 	it("says the settings can't be changed here", () => {
-		expect(renderToStaticMarkup(<FreeSettings snapshot={freeSnapshot} />)).toMatch(/can.{1,6}t be changed here.*free_start/);
+		expect(renderToStaticMarkup(<SettingsTab snapshot={repoSnapshot} />)).toMatch(/can.{1,6}t be changed here.*start/);
 	});
 });
