@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import { SIGNED_OUT_EVENT, account, api, fetchMe, manage, type Me } from "./api";
+import { SIGNED_OUT_EVENT, account, admin, api, fetchMe, manage, type Me } from "./api";
+import { AdminPage } from "./components/AdminPage";
 import { AgentsPage } from "./components/AgentsPage";
 import { InboxPage } from "./components/InboxPage";
 import { NewRepoPage } from "./components/NewRepoPage";
@@ -110,6 +111,8 @@ export function Dashboard({ me, onSignOut }: { me: Me; onSignOut: () => void }) 
 
 	// Every repo's counts in one read: the Repositories list, and the Inbox count on every page.
 	const summaries = usePoll("summaries", api.summaries, onRepos || route.page === "inbox" ? 15_000 : 30_000);
+	// For GitHive's operators (Access): orgs' requests waiting for approval, counted on the Admin link.
+	const adminRequests = usePoll(me.kind === "access" ? "admin:requests:count" : null, admin.requests, 60_000);
 	const inbox = buildInbox(summaries.data);
 
 	// The repo's live feed: while it's connected, a ping triggers each refresh and polling slows to a safety net.
@@ -154,6 +157,9 @@ export function Dashboard({ me, onSignOut }: { me: Me; onSignOut: () => void }) 
 	} else if (route.page === "agents-settings") {
 		crumbs.push({ label: "Agents" });
 		title = "Agents · GitHive";
+	} else if (route.page === "admin") {
+		crumbs.push({ label: "Admin" });
+		title = "Admin · GitHive";
 	} else if (route.page === "new-repo") {
 		crumbs.push({ label: "Repositories", href: href.repos() }, { label: "New repository" });
 		title = "New repository · GitHive";
@@ -183,7 +189,21 @@ export function Dashboard({ me, onSignOut }: { me: Me; onSignOut: () => void }) 
 	);
 
 	let page;
-	if (route.page === "new-repo") {
+	if (route.page === "admin") {
+		page =
+			me.kind === "access" ? (
+				<AdminPage admin={admin} />
+			) : (
+				<main className="page" id="main">
+					<div className="box empty">
+						<h2>Admin is for GitHive's operators</h2>
+						<p>
+							It's reached through Cloudflare Access, on GitHive's admin address. <a href={href.repos()}>Back to Repositories</a>.
+						</p>
+					</div>
+				</main>
+			);
+	} else if (route.page === "new-repo") {
 		page = me.kind === "user" ? <NewRepoPage manage={manage} {...(route.owner ? { owner: route.owner } : {})} /> : forPeople("New repositories");
 	} else if (route.page === "orgs") {
 		page = me.kind === "user" ? <OrgsPage me={me} manage={manage} /> : forPeople("Organizations");
@@ -274,6 +294,8 @@ export function Dashboard({ me, onSignOut }: { me: Me; onSignOut: () => void }) 
 				me={me}
 				onSignOut={onSignOut}
 				agentsCurrent={route.page === "agents-settings"}
+				adminCurrent={route.page === "admin"}
+				{...(adminRequests.data ? { adminRequests: adminRequests.data.length } : {})}
 				orgsCurrent={route.page === "orgs" || route.page === "org"}
 			/>
 			{errors.length > 0 ? (

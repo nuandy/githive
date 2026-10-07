@@ -79,6 +79,8 @@ export function TopBar({
 	onSignOut,
 	agentsCurrent = false,
 	orgsCurrent = false,
+	adminCurrent = false,
+	adminRequests,
 }: {
 	crumbs: Crumb[];
 	/** Changes waiting on a person, across repos; undefined until known. */
@@ -89,6 +91,9 @@ export function TopBar({
 	onSignOut?: () => void;
 	agentsCurrent?: boolean;
 	orgsCurrent?: boolean;
+	adminCurrent?: boolean;
+	/** For an Access caller: orgs' requests waiting for approval, once known. */
+	adminRequests?: number;
 }) {
 	return (
 		<header className="topbar">
@@ -122,9 +127,16 @@ export function TopBar({
 				</a>
 				{me?.kind === "user" ? <UserMenu me={me} onSignOut={onSignOut ?? (() => undefined)} agentsCurrent={agentsCurrent} orgsCurrent={orgsCurrent} /> : null}
 				{me?.kind === "access" ? (
-					<span className="topbar__access" title="Signed in through Cloudflare Access">
-						{me.label}
-					</span>
+					<>
+						<a className="topbar__inbox" href={href.admin()} aria-current={adminCurrent ? "page" : undefined} aria-label={adminRequests ? `Admin, ${adminRequests} requests waiting` : "Admin"}>
+							<Icon name="settings" size={15} />
+							<span className="topbar__inbox-label">Admin</span>
+							{adminRequests ? <span className="topbar__inbox-count">{adminRequests}</span> : null}
+						</a>
+						<span className="topbar__access" title="Signed in through Cloudflare Access">
+							{me.label}
+						</span>
+					</>
 				) : null}
 			</div>
 		</header>

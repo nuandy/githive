@@ -159,7 +159,7 @@ function MembersSection({ org, me, manager, actions, run, busy, confirming, setC
 		if (!email.trim()) return;
 		setAdded(null);
 		setAddError(null);
-		let result: { added?: string; invited?: string } = {};
+		let result: { added?: string; invited?: string; awaitingApproval?: boolean } = {};
 		const ok = await run("add-member", async () => (result = await actions.addMember(org.slug, email.trim(), role)), setAddError);
 		if (ok) {
 			setAdded(addedMessage(result));
@@ -266,7 +266,7 @@ function MembersSection({ org, me, manager, actions, run, busy, confirming, setC
 							{busy === "add-member" ? "Adding…" : "Add"}
 						</button>
 					</div>
-					<p className="manage__hint">Someone who hasn't signed in yet is invited, and joins when they first sign in to GitHive.</p>
+					<p className="manage__hint">Someone who hasn't signed in yet is invited, and joins when they first sign in to GitHive, once a GitHive admin has approved them.</p>
 					{added ? (
 						<p className="manage__note" role="status">
 							{added}

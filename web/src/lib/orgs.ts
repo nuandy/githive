@@ -39,8 +39,10 @@ export const canManage = (role: OrgRole | null | undefined) => role === "owner" 
 export const assignableRoles = (role: OrgRole | null | undefined): OrgRole[] => (role === "owner" ? ["owner", "admin", "member"] : role === "admin" ? ["admin", "member"] : []);
 
 /** What adding someone did: they joined, or they'll join when they first sign in. */
-export function addedMessage(result: { added?: string; invited?: string }): string {
-	return result.added ? `${result.added} joined.` : `${result.invited} is invited: they'll join when they first sign in to GitHive.`;
+export function addedMessage(result: { added?: string; invited?: string; awaitingApproval?: boolean }): string {
+	if (result.added) return `${result.added} joined.`;
+	if (result.awaitingApproval) return `Invited ${result.invited}. They can sign in once a GitHive admin approves them.`;
+	return `Invited ${result.invited}: they'll join when they first sign in.`;
 }
 
 /** Whether the caller can leave: a member who isn't the org's last owner. */

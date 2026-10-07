@@ -9,6 +9,9 @@ describe("hash routes", () => {
 		expect(parseRoute("#/inbox")).toEqual({ page: "inbox" });
 		expect(parseRoute("#/settings/agents")).toEqual({ page: "agents-settings" });
 		expect(parseRoute(href.agents())).toEqual({ page: "agents-settings" });
+		expect(parseRoute("#/admin")).toEqual({ page: "admin" });
+		expect(parseRoute(href.admin())).toEqual({ page: "admin" });
+		expect(parseRoute("#/admin/x")).toEqual({ page: "not-found" });
 		expect(parseRoute("#/new")).toEqual({ page: "new-repo" });
 		expect(parseRoute("#/new?owner=acme")).toEqual({ page: "new-repo", owner: "acme" });
 		expect(parseRoute("#/orgs")).toEqual({ page: "orgs" });

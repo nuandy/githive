@@ -13,6 +13,6 @@ export default defineConfig({
 	build: { outDir: "dist", emptyOutDir: true },
 	server: {
 		// /repos carries each repo's live feed too (a WebSocket at /repos/<owner>/<name>/live).
-		proxy: Object.fromEntries(["/repos", "/api", "/summaries", "/live", "/me", "/auth", "/orgs"].map((p) => [p, { target: api, changeOrigin: true, ws: p === "/live" || p === "/repos" }])),
+		proxy: Object.fromEntries(["/repos", "/api", "/summaries", "/live", "/me", "/auth", "/orgs", "/admin"].map((p) => [p, { target: api, changeOrigin: true, ws: p === "/live" || p === "/repos" }])),
 	},
 });

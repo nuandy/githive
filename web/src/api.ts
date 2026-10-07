@@ -89,9 +89,9 @@ export interface ChangeHistory {
 
 /** Who is looking at the dashboard (GET /me). */
 export type Me =
-	| { kind: "user"; handle: string; name: string | null; email: string; avatarUrl: string | null; by: string }
+	| { kind: "user"; handle: string; name: string | null; email: string; avatarUrl: string | null; by: string; /** Whether they may start GitHive's hosted agents (newer servers). */ hostedAgents?: boolean }
 	/** Through Cloudflare Access, on the admin hostnames: no sign-in and no agents of their own. */
-	| { kind: "access"; label: string; by: string }
+	| { kind: "access"; label: string; by: string; hostedAgents?: boolean }
 	| { kind: "agent"; handle: string; agent: string; by: string };
 
 /** One of your agents' tokens: its first characters only; the secret is shown once, when it is made. */
@@ -247,7 +247,7 @@ export const manage = {
 	createOrg: (slug: string, name: string) => call<Org>("POST", "/orgs", { slug, name }),
 	org: (slug: string) => call<OrgDetail>("GET", `/orgs/${encodeURIComponent(slug)}`),
 	updateOrg: (slug: string, patch: { name?: string | null; default_permission?: Level; members_can_create_repos?: boolean }) => call<Org>("PATCH", `/orgs/${encodeURIComponent(slug)}`, patch),
-	addMember: (slug: string, email: string, role: OrgRole) => call<{ added?: string; invited?: string; role: OrgRole }>("POST", `/orgs/${encodeURIComponent(slug)}/members`, { email, role }),
+	addMember: (slug: string, email: string, role: OrgRole) => call<AddedMember>("POST", `/orgs/${encodeURIComponent(slug)}/members`, { email, role }),
 	setRole: (slug: string, handle: string, role: OrgRole) => call<unknown>("PATCH", `/orgs/${encodeURIComponent(slug)}/members/${encodeURIComponent(handle)}`, { role }),
 	removeMember: (slug: string, handle: string) => call<unknown>("DELETE", `/orgs/${encodeURIComponent(slug)}/members/${encodeURIComponent(handle)}`),
 	cancelInvite: (slug: string, email: string) => call<unknown>("DELETE", `/orgs/${encodeURIComponent(slug)}/invites/${encodeURIComponent(email)}`),
@@ -282,6 +282,49 @@ export const account = {
 };
 
 export type AccountApi = typeof account;
+
+/** What adding a member by email did: added at once, or invited (waiting for an admin's approval, if they can't sign in yet). */
+export interface AddedMember {
+	added?: string;
+	invited?: string;
+	role: OrgRole;
+	awaitingApproval?: boolean;
+}
+
+/** An email an admin approved to sign in. */
+export interface ApprovedEmail {
+	email: string;
+	invitedBy: string;
+	createdAt: string;
+}
+
+/** Someone orgs asked to have who can't sign in until an admin approves them. */
+export interface InviteRequest {
+	email: string;
+	orgs: { org: string; role: string; invitedBy: string }[];
+	createdAt: string;
+}
+
+/** Someone allowed to start GitHive's hosted agents. */
+export interface HostedUser {
+	handle: string;
+	grantedBy: string;
+	createdAt: string;
+}
+
+/** GitHive's operators, through Cloudflare Access: who may sign in, orgs' requests, and who may use hosted agents. */
+export const admin = {
+	invites: () => call<ApprovedEmail[]>("GET", "/admin/invites"),
+	approve: (email: string) => call<{ invited: string }>("POST", "/admin/invites", { email }),
+	removeInvite: (email: string) => call<unknown>("DELETE", `/admin/invites/${encodeURIComponent(email)}`),
+	requests: () => call<InviteRequest[]>("GET", "/admin/invite-requests"),
+	decline: (email: string) => call<unknown>("DELETE", `/admin/invite-requests/${encodeURIComponent(email)}`),
+	hosted: () => call<HostedUser[]>("GET", "/admin/hosted-agents"),
+	allowHosted: (handle: string) => call<{ allowed: string }>("PUT", `/admin/hosted-agents/${encodeURIComponent(handle)}`),
+	disallowHosted: (handle: string) => call<unknown>("DELETE", `/admin/hosted-agents/${encodeURIComponent(handle)}`),
+};
+
+export type AdminApi = typeof admin;
 
 /** Everything the dashboard calls; tests pass stand-ins. */
 export type DashboardApi = typeof api;

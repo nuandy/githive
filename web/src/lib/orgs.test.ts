@@ -44,7 +44,8 @@ describe("orgs", () => {
 
 	it("says whether someone joined or was invited", () => {
 		expect(addedMessage({ added: "bob" })).toBe("bob joined.");
-		expect(addedMessage({ invited: "dan@example.com" })).toMatch(/dan@example.com is invited: they'll join when they first sign in/);
+		expect(addedMessage({ invited: "dan@example.com" })).toBe("Invited dan@example.com: they'll join when they first sign in.");
+		expect(addedMessage({ invited: "dan@example.com", awaitingApproval: true })).toBe("Invited dan@example.com. They can sign in once a GitHive admin approves them.");
 	});
 
 	it("checks names as the server does", () => {

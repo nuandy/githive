@@ -22,6 +22,7 @@ export type Route =
 	| { page: "org"; org: string }
 	| { page: "inbox" }
 	| { page: "agents-settings" }
+	| { page: "admin" }
 	| { page: "repo"; repo: string; tab: RepoTab; /** Code tab: the file or folder shown, "" for the top. */ path?: string; /** Code tab: a branch or commit other than the project's branch. */ ref?: string }
 	| { page: "change"; repo: string; change: string; tab: ChangeTab }
 	| { page: "not-found" };
@@ -54,6 +55,7 @@ export function parseRoute(hash: string): Route {
 		return org ? { page: "org", org } : { page: "not-found" };
 	}
 	if (parts[0] === "settings" && parts[1] === "agents" && parts.length === 2) return { page: "agents-settings" };
+	if (parts[0] === "admin" && parts.length === 1) return { page: "admin" };
 
 	if (parts[0] === "repos" && parts.length >= 3) {
 		const owner = decode(parts[1]);
@@ -95,4 +97,5 @@ export const href = {
 	org: (org: string) => `#/orgs/${enc(org)}`,
 	inbox: () => "#/inbox",
 	agents: () => "#/settings/agents",
+	admin: () => "#/admin",
 };
