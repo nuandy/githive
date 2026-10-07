@@ -307,14 +307,14 @@ export class Gate extends DurableObject<Env> {
 
 		const results = [];
 		for (const command of checks) {
-			if (INSTALL.test(command.trim()) && (await this.installUnchanged(container))) {
-				results.push({ command, exitCode: 0, output: "Skipped: package-lock.json is unchanged since the last install in this gate." });
+			if (INSTALLS.test(command.trim()) && (await this.installUnchanged(container))) {
+				results.push({ command, exitCode: 0, output: "Skipped: package.json and its lockfile are unchanged since the last install in this gate." });
 				continue;
 			}
 			const r = await run(container, ["bash", "-lc", command], WORKDIR, undefined, 600);
 			results.push({ command, exitCode: r.exitCode, output: clip(r.output, 6_000) });
 			if (r.exitCode !== 0) break; // later checks usually depend on earlier ones (npm ci first)
-			if (INSTALL.test(command.trim())) await this.ctx.storage.put("lockHash", await this.lockHash(container));
+			if (INSTALLS.test(command.trim())) await this.ctx.storage.put("lockHash", await this.lockHash(container));
 		}
 		return result({ passed: results.length === checks.length && results.every((r) => r.exitCode === 0), results });
 	}
@@ -351,7 +351,10 @@ export class Gate extends DurableObject<Env> {
 				if (fetched.exitCode !== 0) return;
 				await run(container, ["bash", "-lc", `git merge --abort 2>/dev/null; git checkout -q -f --detach refs/remotes/base/${branch} && git clean -fdq`]);
 				const install = input.checks.find((c) => INSTALLS.test(c.trim()));
-				if (install) await run(container, ["bash", "-lc", install], WORKDIR, undefined, 600);
+				if (install && !(await this.installUnchanged(container))) {
+					const installed = await run(container, ["bash", "-lc", install], WORKDIR, undefined, 600);
+					if (installed.exitCode === 0) await this.ctx.storage.put("lockHash", await this.lockHash(container));
+				}
 				await this.ctx.storage.put("warmedAt", Date.now());
 			} catch (err) {
 				// Warming is a head start, never a requirement: the check prepares what it needs.
@@ -374,12 +377,17 @@ export class Gate extends DurableObject<Env> {
 		await this.ctx.storage.setAlarm(Date.now());
 	}
 
+	/**
+	 * What an install depends on: package.json and whichever lockfile there is.
+	 * Without a lockfile (Express has none), every install resolves every
+	 * dependency from the registry again, so skipping an unchanged one matters.
+	 */
 	private async lockHash(container: Container) {
-		const r = await run(container, ["bash", "-lc", "sha256sum package-lock.json 2>/dev/null | cut -d' ' -f1"]);
+		const r = await run(container, ["bash", "-lc", "cat package.json package-lock.json npm-shrinkwrap.json yarn.lock pnpm-lock.yaml 2>/dev/null | sha256sum | cut -d' ' -f1"]);
 		return r.output.trim();
 	}
 
-	/** Dependencies are installed and the lockfile matches the last install. */
+	/** Dependencies are installed and what they depend on matches the last install. */
 	private async installUnchanged(container: Container) {
 		const last = await this.ctx.storage.get<string>("lockHash");
 		if (!last) return false;

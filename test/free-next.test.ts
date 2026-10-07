@@ -1,7 +1,7 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { GitCasLog } from "../src/election-git";
 import { statusOf } from "../src/errors";
 import { claimStore } from "../src/free/claim-store";
@@ -61,6 +61,16 @@ describe("what an agent should do next", () => {
 		expect(nextFor(base({ open, held: { h1: ["agent-z"], h2: ["agent-w"] } }))).toMatchObject({ kind: "wait" });
 		// Two approvals needed: one agent on it leaves room for another.
 		expect(nextFor(base({ policy: { required: 2, vetoes: [] }, open: [open[0]], held: { h1: ["agent-z"] } }))).toMatchObject({ kind: "review", change: "a", needed: 2 });
+	});
+
+	it("asks for no more ordinary reviews than a change needs beside the role that can block it", () => {
+		// Two approvals, security's among them: one ordinary review, then only the security holder.
+		const policy = { required: 1, vetoes: [], escalate: [{ paths: ["package.json"], required: 2, vetoes: ["security"] }], grants: { security: ["sec-agent"] } };
+		const open = [{ claim: claimOf("deps", "agent-y", "2026-10-07T09:30:00.000Z", ["package.json"]), head: "h2" }];
+		expect(nextFor(base({ policy, open }))).toMatchObject({ kind: "review", change: "deps", role: "review", needed: 1 });
+		expect(nextFor(base({ policy, open, held: { h2: ["agent-w"] } }))).toMatchObject({ kind: "wait" });
+		expect(nextFor(base({ policy, open, votes: [vote("h2", "agent-w")] }))).toMatchObject({ kind: "wait" });
+		expect(nextFor(base({ agent: "sec-agent", policy, open, votes: [vote("h2", "agent-w")] }))).toMatchObject({ kind: "review", role: "security" });
 	});
 
 	it("takes a role that can block only if it holds it, and those reviews first", () => {
@@ -166,9 +176,14 @@ describe("review holds through the toolkit", { timeout: 120_000 }, () => {
 			// A third finds both held, and waits.
 			keys["rev-3"] = ((await call("free_register", { agent: "rev-3" })) as { key: string }).key;
 			expect(await call("free_next", { agent: "rev-3" }, keys["rev-3"])).toMatchObject({ kind: "wait" });
-			// rev-1 votes: its hold goes.
+			// rev-1 votes: its hold runs out a minute later (until the vote shows everywhere), not 15 minutes later.
 			await call("free_vote", { commit: one.head, reviewer: "rev-1", role: "review", verdict: "approve", evidence: "ok" }, keys["rev-1"]);
-			expect(Object.keys(await live.reviewsHeld())).toEqual([two.head]);
+			const later = vi.spyOn(Date, "now").mockReturnValue(Date.now() + 61_000);
+			try {
+				expect(Object.keys(await live.reviewsHeld())).toEqual([two.head]);
+			} finally {
+				later.mockRestore();
+			}
 		} finally {
 			await server.close();
 			rmSync(work, { recursive: true, force: true });

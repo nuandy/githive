@@ -16,7 +16,7 @@ import { revertViolation } from "./revert";
 import type { Stamper } from "./stamp";
 import { approval, countedVotes, effectiveFreePolicy, openFlag, shardVotes, votesShardingReason, type ReviewPolicy, type VoteRecord, type Votes } from "./votes";
 import { VOTE_BUCKETS, type VoteStore, voteStore, votesPrefix } from "./vote-store";
-import { addWork, nextFor, type Work, workId } from "./work";
+import { addWork, type NextStep, nextFor, type Work, workId } from "./work";
 import { SENSITIVE_PATHS } from "../types";
 
 // The coordinator-free MCP tools (see docs/coordinator-free.md). Stateless: each
@@ -540,10 +540,12 @@ async function runFreeTool(name: string, args: Args, ctx: FreeContext): Promise<
 			});
 			// A review is held for this agent before it's handed out, so two agents aren't sent to one that needs one review.
 			if (!ctx.reviews) return decide();
-			for (let attempt = 0; ; attempt++) {
+			for (let attempt = 0; attempt < 3; attempt++) {
 				const next = decide(await ctx.reviews.held(repo).catch(() => ({})));
-				if (next.kind !== "review" || attempt === 2 || (await ctx.reviews.hold(repo, next.head, agent, next.needed).catch(() => true))) return next;
+				if (next.kind !== "review" || (await ctx.reviews.hold(repo, next.head, agent, next.needed).catch(() => true))) return next;
 			}
+			// Others kept taking the reviews first: they're covered.
+			return { kind: "wait", reason: "other agents just took the reviews that were waiting", retryAfterSeconds: 15, next: "Call free_next again in a little while." } satisfies NextStep;
 		}
 		case "free_add_work": {
 			const title = requiredString(args, "title");

@@ -36,6 +36,12 @@ const BUILD_LEASE_MS = 2 * 60_000;
 type Holds = Record<string, Record<string, number>>;
 /** How long a review hold lasts if its agent never votes. */
 export const REVIEW_HOLD_MS = 15 * 60_000;
+/**
+ * How long a hold lasts once its agent voted: a vote just written can take a
+ * moment to show in every read of the votes, and until it does, the change
+ * would look unreviewed (and unheld) to the next agent asking.
+ */
+export const VOTED_HOLD_MS = 60_000;
 
 export class LiveFeed extends DurableObject<Env> {
 	async fetch(request: Request) {
@@ -108,12 +114,11 @@ export class LiveFeed extends DurableObject<Env> {
 		return true;
 	}
 
-	/** The agent voted on `head` (or gave up): its hold goes. */
+	/** The agent voted on `head`: its hold goes once the vote has had a moment to show everywhere. */
 	async releaseReview(head: string, agent: string) {
 		const holds = this.live((await this.ctx.storage.get<Holds>("holds")) ?? {});
 		if (!holds[head]?.[agent]) return;
-		delete holds[head][agent];
-		if (!Object.keys(holds[head]).length) delete holds[head];
+		holds[head][agent] = Math.min(holds[head][agent], Date.now() + VOTED_HOLD_MS);
 		await this.ctx.storage.put("holds", holds);
 	}
 

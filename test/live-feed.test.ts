@@ -80,8 +80,16 @@ describe("review holds", () => {
 		// Needed twice: room for a second.
 		expect(await live.holdReview("h1", "agent-b", 2)).toBe(true);
 		expect(await live.reviewsHeld()).toEqual({ h1: ["agent-a", "agent-b"] });
+		// Voted: held a minute more, until the vote shows everywhere, then gone.
+		const now = Date.now();
 		await live.releaseReview("h1", "agent-a");
-		expect(await live.reviewsHeld()).toEqual({ h1: ["agent-b"] });
+		expect(await live.reviewsHeld()).toEqual({ h1: ["agent-a", "agent-b"] });
+		const later = vi.spyOn(Date, "now").mockReturnValue(now + 61_000);
+		try {
+			expect(await live.reviewsHeld()).toEqual({ h1: ["agent-b"] });
+		} finally {
+			later.mockRestore();
+		}
 	});
 
 	it("lets holds run out", async () => {

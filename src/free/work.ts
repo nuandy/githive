@@ -117,8 +117,10 @@ export function nextFor(input: NextInput): NextStep {
 			const role = outcome.awaiting.find((r) => holdsRole(policy, r, { reviewer: agent, by: input.by }));
 			const { required } = effectiveFreePolicy(policy, claim.paths);
 			if (!role && outcome.approvals >= required) return [];
-			// As many reviews as it still needs: one for a role that can block, else the approvals missing. Others already on it count.
-			const needed = role ? 1 : required - outcome.approvals;
+			// As many reviews as it still needs: one for a role that can block; else the approvals missing, less those the
+			// roles still awaited will bring (their approvals count too). Others already on it count.
+			const needed = role ? 1 : required - outcome.approvals - outcome.awaiting.length;
+			if (needed <= 0) return [];
 			if ((input.held?.[head] ?? []).filter((a) => a !== agent).length >= needed) return [];
 			// One it holds already (it asked again mid-review): the same one, first.
 			const mine = (input.held?.[head] ?? []).includes(agent);
