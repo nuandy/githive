@@ -80,6 +80,23 @@ export interface NextInput {
  */
 export const holdKey = (head: string, role: string) => `${head}#${role}`;
 
+/** How long a review a role that can block awaits may wait, unheld, before people are told. */
+export const ROLE_WAIT_MS = 10 * 60_000;
+
+/**
+ * The reviews roles that can block are waiting for, that no one holds: on
+ * changes pushed, not sent back, and still awaiting that role's approval.
+ */
+export function waitingRoleReviews(input: Pick<NextInput, "policy" | "open" | "votes" | "held">) {
+	return input.open.flatMap(({ claim, head }) => {
+		if (!head) return [];
+		const author: Author = { agent: claim.agent, ...(claim.by ? { by: claim.by } : {}) };
+		if (input.votes.some((v) => v.commit === head && v.verdict === "reject" && v.reviewer !== author.agent)) return [];
+		const { awaiting } = approval({ votes: input.votes }, head, input.policy, author, claim.paths);
+		return awaiting.filter((role) => !input.held?.[holdKey(head, role)]?.length).map((role) => ({ change: claim.change, head, role }));
+	});
+}
+
 /** A small, stable hash, to spread agents over equally good choices. */
 function spread(agent: string, n: number) {
 	let h = 0x811c9dc5;
@@ -121,7 +138,7 @@ export function nextFor(input: NextInput): NextStep {
 			const outcome = approval({ votes }, head, policy, authorOf(claim), claim.paths);
 			if (outcome.approved) return [];
 			// A role that can block, if it holds one the change still needs; else an ordinary review, if more are needed.
-			const role = outcome.awaiting.find((r) => holdsRole(policy, r, { reviewer: agent, by: input.by }));
+			const role = outcome.awaiting.find((r) => holdsRole(policy, r, { reviewer: agent, by: input.by }, authorOf(claim)));
 			const { required } = effectiveFreePolicy(policy, claim.paths);
 			if (!role && outcome.approvals >= required) return [];
 			// As many reviews as it still needs: one for a role that can block; else the approvals missing, less those the

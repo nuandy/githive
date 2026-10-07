@@ -123,6 +123,27 @@ export class LiveFeed extends DurableObject<Env> {
 		await this.ctx.storage.put("holds", holds);
 	}
 
+	/**
+	 * When each of `waiting` (reviews a role that can block awaits, by
+	 * holdKey) was first seen waiting, and whether people were told. Reviews
+	 * no longer waiting are forgotten, so a review that waits again starts over.
+	 */
+	async roleWaits(waiting: string[]): Promise<Record<string, { since: number; told?: boolean }>> {
+		const known = (await this.ctx.storage.get<Record<string, { since: number; told?: boolean }>>("roleWaits")) ?? {};
+		const now = Date.now();
+		const current = Object.fromEntries(waiting.map((key) => [key, known[key] ?? { since: now }]));
+		await this.ctx.storage.put("roleWaits", current);
+		return current;
+	}
+
+	/** People were told about a waiting review: once is enough. */
+	async roleWaitTold(key: string) {
+		const known = (await this.ctx.storage.get<Record<string, { since: number; told?: boolean }>>("roleWaits")) ?? {};
+		if (!known[key]) return;
+		known[key].told = true;
+		await this.ctx.storage.put("roleWaits", known);
+	}
+
 	/** The holds that haven't run out. */
 	private live(holds: Holds): Holds {
 		const now = Date.now();

@@ -73,6 +73,8 @@ export interface FlagRecord {
 	change: string;
 	reason: string;
 	agent: string;
+	/** Set when Blueprint flagged a review this role awaits: answered once the role signs it off too. */
+	role?: string;
 	at: string;
 	/** Who asked, as Access verified them, and Blueprint's stamp (written through the toolkit). */
 	by?: string;
@@ -113,9 +115,11 @@ export interface ReviewPolicy {
 	/**
 	 * Who may vote as each role that can block a merge (a veto role): registered
 	 * agent names, "person:*" (anyone signed in through Access), a verified
-	 * identity as the records show it ("person:<who>", "service:<id>"), or
-	 * "blueprint" (Blueprint's hosted reviewers). A role not listed: people and
-	 * Blueprint's reviewers (DEFAULT_GRANT). Agents never grant themselves a role.
+	 * identity as the records show it ("person:<who>", "service:<id>"), a pool
+	 * of the agents registered under one ("service:<id>/*": however many there
+	 * are; whoever holds that identity decides who's in it), or "blueprint"
+	 * (Blueprint's hosted reviewers). A role not listed: people and Blueprint's
+	 * reviewers (DEFAULT_GRANT). Agents never grant themselves a role.
 	 */
 	grants?: Record<string, string[]>;
 }
@@ -123,15 +127,44 @@ export interface ReviewPolicy {
 /** Who holds a veto role the policy doesn't grant: people, and Blueprint's own reviewers. */
 export const DEFAULT_GRANT = ["person:*", "blueprint"];
 
+/** The identity a pool grant ("service:<id>/*") is of, or null for any other grant. */
+const poolOf = (grant: string) => grant.match(/^((?:person|service):[^/*]+)\/\*$/)?.[1] ?? null;
+
+/** Every role that can block a merge under `policy`, its own vetoes and its escalations'. */
+export const blockingRoles = (policy: ReviewPolicy) => [...new Set([...policy.vetoes, ...(policy.escalate ?? []).flatMap((e) => e.vetoes ?? [])])];
+
+/**
+ * What a policy's owner should know about who holds each role that can
+ * block: a role only one agent or identity holds waits whenever it's busy; a
+ * role no person holds can be flagged to people when it waits, but they can't
+ * sign it off.
+ */
+export function grantWarnings(policy: ReviewPolicy): string[] {
+	return blockingRoles(policy).flatMap((role) => {
+		const holders = policy.grants?.[role] ?? DEFAULT_GRANT;
+		const people = holders.some((h) => h.startsWith("person:"));
+		const many = holders.some((h) => poolOf(h)) || holders.length > 1;
+		const warnings: string[] = [];
+		if (!many && !people)
+			warnings.push(`${role} is held by ${holders[0]} alone: its reviews wait whenever it's busy. Grant it to two or more agents, or a pool ("service:<id>/*": every agent registered under that identity).`);
+		if (!people) warnings.push(`no person holds ${role}: when its reviews wait 10 minutes people are told, but can't sign them off. Add "person:*" to let them.`);
+		return warnings;
+	});
+}
+
 /**
  * Whether `vote` was cast by someone granted `role`. Signed votes are matched
  * by verified identity: a person's, Blueprint's reviewer's, or an agent's own
  * key (its stamp ends in /<agent>, so a name is never borrowed). Unsigned
- * records (no stamp key) are matched by name, as everything there is.
+ * records (no stamp key) are matched by name, as everything there is. A pool
+ * member's vote doesn't count as the role on a change whose `author` runs
+ * under the same identity: a team doesn't sign off its own changes.
  */
-export function holdsRole(policy: ReviewPolicy, role: string, vote: Pick<VoteRecord, "reviewer" | "by">) {
+export function holdsRole(policy: ReviewPolicy, role: string, vote: Pick<VoteRecord, "reviewer" | "by">, author?: Pick<Author, "by">) {
 	return (policy.grants?.[role] ?? DEFAULT_GRANT).some((grant) => {
 		if (grant === "person:*") return !!vote.by?.startsWith("person:");
+		const pool = poolOf(grant);
+		if (pool) return !!vote.by?.startsWith(`${pool}/`) && !author?.by?.startsWith(`${pool}/`);
 		if (/^(person|service):/.test(grant)) return vote.by === grant;
 		if (grant === "blueprint") return vote.by ? vote.by === `service:blueprint-reviewer:${role}` : vote.reviewer === `blueprint-${role}`;
 		return vote.reviewer === grant && (!vote.by || vote.by.endsWith(`/${grant}`));
@@ -186,7 +219,7 @@ export function approval(state: Pick<Votes, "votes"> | null | undefined, commit:
 	const isAuthor = (v: VoteRecord) => !!author && ((!!v.by && v.by === author.by) || v.reviewer === author.agent);
 	const approving = verdicts.filter((v) => v.verdict === "approve" && !isAuthor(v));
 	const approvals = approving.length;
-	const asRole = (v: VoteRecord) => policy.vetoes.includes(v.role) && holdsRole(base, v.role, v);
+	const asRole = (v: VoteRecord) => policy.vetoes.includes(v.role) && holdsRole(base, v.role, v, author);
 	const vetoedBy = verdicts.filter((v) => v.verdict === "reject" && asRole(v)).map((v) => v.reviewer);
 	const awaiting = policy.vetoes.filter((role) => !approving.some((v) => v.role === role && asRole(v)));
 	const ungranted = verdicts.filter((v) => policy.vetoes.includes(v.role) && !asRole(v)).map((v) => `${v.reviewer} (${v.role})`);

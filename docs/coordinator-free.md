@@ -347,3 +347,16 @@ and the claim decides, since a change is only ever its first agent's (a
 claim under another agent's change name is refused, in one record and in
 shards). Reviews balance themselves: when they pile up, every agent is sent
 to review; when they're done, every agent builds.
+
+**Pools, warnings and a fallback.** A grant can name a pool:
+`service:<id>/*` is every agent registered under that Access identity,
+however many there are; whoever holds the identity decides who's in it. A
+pool member's vote never counts as the role on a change whose author runs
+under the same identity, so a team doesn't sign off its own changes.
+`free_start` warns when one agent or identity alone holds a role (its reviews
+wait whenever it's busy), and when no person does. A review a role awaits
+that nobody has taken for 10 minutes is flagged to people's inbox, once,
+noticed by whichever agent calls `free_next` next (there is no timer); the
+flag clears when the role signs it off. Never Blueprint's own reviewers: if
+no person holds the role, the flag says so, to nudge its holders or grant it
+to more.

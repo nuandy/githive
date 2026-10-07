@@ -6,7 +6,7 @@ import { GitCasLog } from "../src/election-git";
 import { statusOf } from "../src/errors";
 import { claimStore } from "../src/free/claim-store";
 import { type ClaimRecord, type Registry, shardClaims } from "../src/free/claims";
-import { callFreeTool, type FreeContext } from "../src/free/mcp";
+import { callFreeTool, type FreeContext, freeSnapshot } from "../src/free/mcp";
 import type { VoteRecord } from "../src/free/votes";
 import { nextFor, type NextInput, type WorkItem, workId } from "../src/free/work";
 import { pushChange } from "./helpers/agents";
@@ -224,6 +224,59 @@ describe("warming the checks when a merge is near", { timeout: 60_000 }, () => {
 			}
 			// The check and the approval warm; the rejection and the repo without checks don't.
 			expect(warmed).toEqual([{ branch: "main", checks: ["npm test"] }, { branch: "main", checks: ["npm test"] }]);
+		} finally {
+			await server.close();
+			rmSync(work, { recursive: true, force: true });
+		}
+	});
+});
+
+describe("a review a role waits for too long", { timeout: 120_000 }, () => {
+	it("is flagged to people once, clears once the role signs it off, and never holds up the author", async () => {
+		const server = await startGitServer();
+		const work = mkdtempSync(join(tmpdir(), "free-role-wait-"));
+		try {
+			const { LiveFeed } = await import("../src/live-feed");
+			const { FakeStorage } = await import("./fakes/env");
+			const live = new LiveFeed({ storage: new FakeStorage(), getWebSockets: () => [] } as never, {} as never);
+			const ctx = (agentKey?: string): FreeContext => ({
+				remote: async () => ({ url: server.url, token: "unused" }),
+				changeRemote: async () => ({ url: server.url, token: "unused" }),
+				head: async () => server.git("rev-parse", "main").trim(),
+				reviews: {
+					held: () => live.reviewsHeld(),
+					hold: (_r, key, agent, needed) => live.holdReview(key, agent, needed),
+					release: (_r, key, agent) => live.releaseReview(key, agent),
+					waits: (_r, keys) => live.roleWaits(keys),
+					told: (_r, key) => live.roleWaitTold(key),
+				},
+				...(agentKey ? { agentKey } : {}),
+			});
+			const call = (name: string, args: Record<string, unknown>, key?: string) => callFreeTool(name, { repo: "p", ...args }, ctx(key)) as Promise<Record<string, unknown>>;
+			await call("free_start", { required: 1, vetoes: ["security"], grants: { security: ["sec-1", "person:*"] } });
+			const keys: Record<string, string> = {};
+			for (const a of ["author", "rev", "sec-1"]) keys[a] = ((await call("free_register", { agent: a })) as { key: string }).key;
+			await call("free_claim", { change: "c-1", agent: "author", paths: ["src/c/"], intent: "c" }, keys.author);
+			const head = await pushChange(server.url, work, "author", "c-1", { "src/c/x.js": "x\n" });
+			await call("free_vote", { commit: head, reviewer: "rev", role: "review", verdict: "approve", evidence: "ok" }, keys.rev);
+			// The clock starts when someone first asks; nothing is told before 10 minutes.
+			await call("free_next", { agent: "rev" }, keys.rev);
+			const snapshot = async () => (await freeSnapshot(ctx(), "p")).claims[0].attention;
+			expect(await snapshot()).toBeUndefined();
+			const later = vi.spyOn(Date, "now").mockReturnValue(Date.now() + 11 * 60_000);
+			try {
+				await call("free_next", { agent: "rev" }, keys.rev);
+				await call("free_next", { agent: "rev" }, keys.rev);
+				expect(await snapshot()).toMatchObject({ agent: "blueprint", reason: expect.stringMatching(/c-1's security review has waited 11 minutes .* You can review it as security from the dashboard/) });
+				// Told once only.
+				expect((await call("free_status", { change: "c-1" })).votes).toHaveLength(1);
+			} finally {
+				later.mockRestore();
+			}
+			// The flag doesn't stop the author: once security signs off, it merges, and the flag is gone.
+			await call("free_vote", { commit: head, reviewer: "sec-1", role: "security", verdict: "approve", evidence: "ok" }, keys["sec-1"]);
+			expect(await snapshot()).toBeUndefined();
+			expect(await call("free_next", { agent: "author" }, keys.author)).toMatchObject({ kind: "merge", change: "c-1" });
 		} finally {
 			await server.close();
 			rmSync(work, { recursive: true, force: true });

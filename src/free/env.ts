@@ -67,6 +67,8 @@ export function freeContextFor(env: Env, by: string | undefined, caller: { agent
 			held: (repo) => env.LIVE.getByName(`free:${repo}`).reviewsHeld(),
 			hold: (repo, head, agent, needed) => env.LIVE.getByName(`free:${repo}`).holdReview(head, agent, needed),
 			release: (repo, head, agent) => env.LIVE.getByName(`free:${repo}`).releaseReview(head, agent),
+			waits: (repo, keys) => env.LIVE.getByName(`free:${repo}`).roleWaits(keys),
+			told: (repo, key) => env.LIVE.getByName(`free:${repo}`).roleWaitTold(key),
 		},
 		requestReview: (input) => startFreeReviewers(env, input),
 		startBuilder: (input) => startFreeBuilder(env, input),

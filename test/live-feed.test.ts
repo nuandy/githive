@@ -105,3 +105,16 @@ describe("review holds", () => {
 		}
 	});
 });
+
+describe("reviews a role waits for", () => {
+	it("remembers when each was first seen waiting, forgets one that stops waiting, and whether people were told", async () => {
+		const { live } = feed();
+		const first = await live.roleWaits(["h1#security"]);
+		expect((await live.roleWaits(["h1#security", "h2#security"]))["h1#security"].since).toBe(first["h1#security"].since);
+		await live.roleWaitTold("h1#security");
+		expect(await live.roleWaits(["h1#security"])).toEqual({ "h1#security": { since: first["h1#security"].since, told: true } });
+		// h1's review was taken; when it waits again, its clock starts over.
+		await live.roleWaits([]);
+		expect((await live.roleWaits(["h1#security"]))["h1#security"].told).toBeUndefined();
+	});
+});

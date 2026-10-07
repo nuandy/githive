@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { statusOf } from "../src/errors";
 import { callFreeTool, type FreeContext } from "../src/free/mcp";
-import { approval, holdsRole, type VoteRecord } from "../src/free/votes";
+import { approval, grantWarnings, holdsRole, type VoteRecord } from "../src/free/votes";
 import { startGitServer } from "./helpers/git-server";
 
 // A role that can block a merge (a veto role, like security) counts only from
@@ -43,6 +43,37 @@ describe("who holds a role", () => {
 	});
 });
 
+describe("pools of agents holding a role", () => {
+	const policy = { required: 1, vetoes: ["security"], grants: { security: ["service:sec-team/*"] } };
+
+	it("counts any agent registered under the pool's identity, voting with its key, however many there are", () => {
+		for (const n of [1, 2, 9]) expect(holdsRole(policy, "security", cast(`sec-${n}`, `service:sec-team/sec-${n}`), { by: "service:dev-team/builder" })).toBe(true);
+		// Not the identity itself without an agent key, nor another identity, nor a name that looks the part.
+		expect(holdsRole(policy, "security", cast("sec", "service:sec-team"))).toBe(false);
+		expect(holdsRole(policy, "security", cast("sec-1", "service:other/sec-1"))).toBe(false);
+		expect(holdsRole(policy, "security", cast("sec-team", undefined))).toBe(false);
+	});
+
+	it("never counts a pool member as the role on its own team's change", () => {
+		expect(holdsRole(policy, "security", cast("sec-1", "service:sec-team/sec-1"), { by: "service:sec-team/sec-2" })).toBe(false);
+		const votes = { votes: [cast("sec-1", "service:sec-team/sec-1", "security")] };
+		expect(approval(votes, head, policy, { agent: "sec-2", by: "service:sec-team/sec-2" })).toMatchObject({ approved: false, awaiting: ["security"], ungranted: ["sec-1 (security)"] });
+		expect(approval(votes, head, policy, { agent: "builder", by: "service:dev-team/builder" })).toMatchObject({ approved: true, awaiting: [] });
+	});
+});
+
+describe("warnings about who holds a role", () => {
+	it("warns when one agent or identity holds a role, and when no person does", () => {
+		expect(grantWarnings({ required: 1, vetoes: ["security"] })).toEqual([]);
+		expect(grantWarnings({ required: 1, vetoes: ["security"], grants: { security: ["sec-1"] } })).toEqual([
+			expect.stringMatching(/^security is held by sec-1 alone: its reviews wait whenever it's busy/),
+			expect.stringMatching(/^no person holds security/),
+		]);
+		expect(grantWarnings({ required: 1, vetoes: [], escalate: [{ paths: ["package.json"], vetoes: ["security"] }], grants: { security: ["service:sec-team/*"] } })).toEqual([expect.stringMatching(/^no person holds security/)]);
+		expect(grantWarnings({ required: 1, vetoes: ["security"], grants: { security: ["sec-1", "sec-2", "person:*"] } })).toEqual([]);
+	});
+});
+
 describe("granting roles through the toolkit", { timeout: 60_000 }, () => {
 	it("records grants at the start, refuses bad ones, and counts the granted agent's vote only", async () => {
 		const server = await startGitServer();
@@ -56,7 +87,7 @@ describe("granting roles through the toolkit", { timeout: 60_000 }, () => {
 				}
 			};
 			expect(await call("free_start", { required: 1, vetoes: ["security"], grants: { security: "security-1" } })).toEqual({ error: expect.stringMatching(/grants.security is a list/) });
-			expect(await call("free_start", { required: 1, vetoes: ["security"], grants: { security: ["security-1"] } })).toMatchObject({ policy: { grants: { security: ["security-1"] } } });
+			expect(await call("free_start", { required: 1, vetoes: ["security"], grants: { security: ["security-1"] } })).toMatchObject({ policy: { grants: { security: ["security-1"] } }, warnings: [expect.stringMatching(/held by security-1 alone/), expect.stringMatching(/no person holds security/)] });
 			// Nothing signs these records here, so roles go by name; a registered name needs its key.
 			const { key } = (await call("free_register", { agent: "security-1" })) as { key: string };
 			expect(await call("free_vote", { commit: head, reviewer: "security-1", role: "security", verdict: "approve", evidence: "ok" })).toEqual({ error: expect.stringMatching(/registered/) });

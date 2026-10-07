@@ -14,9 +14,9 @@ import { readMainMerges, readRecordHistory, readRefHistories, readShardHistories
 import { type CheckRunner, mergeChange } from "./merge";
 import { revertViolation } from "./revert";
 import type { Stamper } from "./stamp";
-import { approval, countedVotes, effectiveFreePolicy, openFlag, shardVotes, votesShardingReason, type ReviewPolicy, type VoteRecord, type Votes } from "./votes";
+import { approval, countedVotes, DEFAULT_GRANT, effectiveFreePolicy, grantWarnings, openFlag, shardVotes, votesShardingReason, type ReviewPolicy, type VoteRecord, type Votes } from "./votes";
 import { VOTE_BUCKETS, type VoteStore, voteStore, votesPrefix } from "./vote-store";
-import { addWork, holdKey, type NextStep, nextFor, type Work, workId } from "./work";
+import { addWork, holdKey, type NextStep, nextFor, ROLE_WAIT_MS, type Work, waitingRoleReviews, workId } from "./work";
 import { SENSITIVE_PATHS } from "../types";
 
 // The coordinator-free MCP tools (see docs/coordinator-free.md). Stateless: each
@@ -66,6 +66,9 @@ export interface FreeContext {
 		held(repo: string): Promise<Record<string, string[]>>;
 		hold(repo: string, head: string, agent: string, needed: number): Promise<boolean>;
 		release(repo: string, head: string, agent: string): Promise<void>;
+		/** When each waiting review a role that can block awaits (by holdKey) was first seen, and whether people were told. */
+		waits?(repo: string, keys: string[]): Promise<Record<string, { since: number; told?: boolean }>>;
+		told?(repo: string, key: string): Promise<void>;
 	};
 	/** Updates the repo's summary for the dashboard's list of repos (a hint; Git is what counts). */
 	summarize?: (repo: string, patch: { open?: number; needsYou?: number; waiting?: { change: string; title: string; reason: string }[]; merged?: number; mergedBy?: number; violations?: number; lastActivity?: string; countedAt?: string }) => Promise<void>;
@@ -106,7 +109,7 @@ free_audit replays the records and lists every broken convention, with the commi
 
 const str = { type: "string" } as const;
 const TOOL_LIST = [
-	{ name: "free_start", description: "Start coordinator-free mode on a project repo (harmless if started): the review policy, the checks run before each merge (each change lives in its own fork, and only the toolkit writes the project), grants: who may vote as each role that can block a merge (registered agent names, 'person:*', a verified identity like 'person:<who>' or 'service:<id>', 'blueprint' for Blueprint's reviewers; unlisted roles: people and Blueprint's reviewers), how claims are kept: in one record until the load calls for more (8 agents holding claims, or over 15 claim writes a minute), then sharded per path 2 segments deep over 8 records repos, so agents in different parts of the tree never contend. shard_depth shards now, this deep (0: never), and records_repos is how many repos the shards are spread over, since a repo takes one push at a time. Returns them.", inputSchema: { type: "object", properties: { repo: str, required: { type: "number" }, vetoes: { type: "array", items: str }, escalate: { type: "array", items: { type: "object", properties: { paths: { type: "array", items: str }, required: { type: "number" }, vetoes: { type: "array", items: str } }, required: ["paths"] } }, grants: { type: "object", additionalProperties: { type: "array", items: str } }, verify: { type: "array", items: str }, shard_depth: { type: "number" }, records_repos: { type: "number" } }, required: ["repo"] } },
+	{ name: "free_start", description: "Start coordinator-free mode on a project repo (harmless if started): the review policy, the checks run before each merge (each change lives in its own fork, and only the toolkit writes the project), grants: who may vote as each role that can block a merge (registered agent names, 'person:*', a verified identity like 'person:<who>' or 'service:<id>', a pool 'service:<id>/*' (every agent registered under it, never on its own team's changes), 'blueprint' for Blueprint's reviewers; unlisted roles: people and Blueprint's reviewers), how claims are kept: in one record until the load calls for more (8 agents holding claims, or over 15 claim writes a minute), then sharded per path 2 segments deep over 8 records repos, so agents in different parts of the tree never contend. shard_depth shards now, this deep (0: never), and records_repos is how many repos the shards are spread over, since a repo takes one push at a time. Returns them.", inputSchema: { type: "object", properties: { repo: str, required: { type: "number" }, vetoes: { type: "array", items: str }, escalate: { type: "array", items: { type: "object", properties: { paths: { type: "array", items: str }, required: { type: "number" }, vetoes: { type: "array", items: str } }, required: ["paths"] } }, grants: { type: "object", additionalProperties: { type: "array", items: str } }, verify: { type: "array", items: str }, shard_depth: { type: "number" }, records_repos: { type: "number" } }, required: ["repo"] } },
 	{ name: "free_credentials", description: "Git access. With your change: a write token for its own fork, where its branch changes/<change> lives. Without: read access to the project repo.", inputSchema: { type: "object", properties: { repo: str, change: str }, required: ["repo"] } },
 	{ name: "free_claims", description: "The claims in force: who holds which paths, and why.", inputSchema: { type: "object", properties: { repo: str }, required: ["repo"] } },
 	{ name: "free_claim", description: "Claim paths for your change (again to extend it, or to keep it active). Refused, naming the holder, if another claim overlaps; a claim in the way idle for 30 minutes is released as stale instead.", inputSchema: { type: "object", properties: { repo: str, change: str, agent: str, paths: { type: "array", items: str }, intent: str }, required: ["repo", "change", "agent", "paths", "intent"] } },
@@ -190,6 +193,35 @@ function validGrants(value: unknown): Record<string, string[]> {
 		grants[role] = who.map((w) => w.trim());
 	}
 	return grants;
+}
+
+/**
+ * Tell people (their inbox) about each review a role that can block has
+ * awaited, unheld, for ROLE_WAIT_MS: once per commit and role. Never
+ * Blueprint's own reviewers: if no person holds the role, the flag says so,
+ * so its holders can be nudged or more granted.
+ */
+async function tellPeopleOfWaitingRoles(ctx: FreeContext, repo: string, votes: VoteStore, policy: ReviewPolicy, open: { claim: ClaimRecord; head: string | null }[], counted: VoteRecord[]) {
+	if (!ctx.reviews?.waits || !ctx.reviews.told) return;
+	const waiting = waitingRoleReviews({ policy, open, votes: counted, held: await ctx.reviews.held(repo) });
+	const seen = await ctx.reviews.waits(repo, waiting.map((w) => holdKey(w.head, w.role)));
+	let told = false;
+	for (const w of waiting) {
+		const key = holdKey(w.head, w.role);
+		const since = seen[key];
+		if (!since || since.told || Date.now() - since.since < ROLE_WAIT_MS) continue;
+		const holders = policy.grants?.[w.role] ?? DEFAULT_GRANT;
+		const people = holders.some((h) => h.startsWith("person:"));
+		const minutes = Math.round((Date.now() - since.since) / 60_000);
+		const reason = `${w.change}'s ${w.role} review has waited ${minutes} minutes and none of its holders (${holders.join(", ")}) has taken it. ${people ? `You can review it as ${w.role} from the dashboard.` : `No person holds ${w.role}, so you can't sign it off: nudge its holders, or grant it to more.`}`;
+		await votes.flag({ change: w.change, agent: "blueprint", role: w.role, reason });
+		await ctx.reviews.told(repo, key);
+		told = true;
+	}
+	if (told) {
+		await ctx.ping?.(repo).catch(() => undefined);
+		await freeSnapshot(ctx, repo).catch(() => undefined);
+	}
 }
 
 /** How a repo's claims are kept, for callers and the dashboard. */
@@ -399,8 +431,9 @@ export async function freeSnapshot(ctx: FreeContext, repo: string) {
 	const claims = await t.time("status", () => Promise.all(
 		held.claims.map(async (c) => {
 			const { head, approval, hosted } = await changeStatus(ctx, repo, state, async () => votes.votes, c.change, c);
-			// A question for a person, until a person votes on the change's commit.
-			const flag = openFlag(votes, c.change, head);
+			// A question for a person, until a person votes on the change's commit (or, for a waiting role's review, until the role signs it off).
+			const asked = openFlag(votes, c.change, head);
+			const flag = asked?.role && !approval.awaiting?.includes(asked.role) ? null : asked;
 			const attention = flag ? { reason: flag.reason, agent: flag.agent, at: flag.at } : hosted?.builder?.status === "failed" ? { reason: `Blueprint's builder failed${hosted.builder.error ? `: ${hosted.builder.error.slice(0, 160)}` : ""}`, agent: "blueprint-builder", at: c.active } : null;
 			return { ...c, head, approval, ...(hosted ? { hosted } : {}), ...(attention ? { attention } : {}) };
 		}),
@@ -518,7 +551,8 @@ async function runFreeTool(name: string, args: Args, ctx: FreeContext): Promise<
 			await startFree(claims, { baseline: await ctx.head(repo, branch), branch, policy, verify, stampKey: stamper?.publicKey, ...sharding });
 			await ctx.register?.(repo);
 			const registry = (await claims.read())?.commit.state;
-			return { repo, branch: projectBranch(registry), policy: registry?.policy ?? policy, verify: registry?.verify ?? [], ...shardingOf(registry), instructions: FREE_INSTRUCTIONS };
+			const warnings = grantWarnings(registry?.policy ?? policy);
+			return { repo, branch: projectBranch(registry), policy: registry?.policy ?? policy, verify: registry?.verify ?? [], ...shardingOf(registry), ...(warnings.length ? { warnings } : {}), instructions: FREE_INSTRUCTIONS };
 		}
 		case "free_next": {
 			const agent = actAs("agent");
@@ -533,13 +567,15 @@ async function runFreeTool(name: string, args: Args, ctx: FreeContext): Promise<
 				open,
 				votes: counted,
 				merged: new Set(inForce.released.filter((r) => r.mergedAs).map((r) => r.change)),
-				// Its own changes waiting on a person: asked about, not yet answered on their head.
-				asked: new Set(open.filter((o) => o.claim.agent === agent && openFlag(cast, o.claim.change, o.head)).map((o) => o.claim.change)),
+				// Its own changes waiting on a person: asked about, not yet answered on their head (not a review Blueprint flagged as waiting).
+				asked: new Set(open.filter((o) => o.claim.agent === agent && openFlag(cast, o.claim.change, o.head) && !openFlag(cast, o.claim.change, o.head)?.role).map((o) => o.claim.change)),
 				work: backlog?.commit.state.items ?? [],
 				...(held ? { held } : {}),
 			});
 			// A review is held for this agent before it's handed out, so two agents aren't sent to one that needs one review.
 			if (!ctx.reviews) return decide();
+			// Reviews a role that can block has waited too long for: people hear of it (whoever asks next notices; no timer).
+			await tellPeopleOfWaitingRoles(ctx, repo, votes, registered?.policy ?? DEFAULT_POLICY, open, counted).catch((err) => console.error(`checking ${repo}'s waiting reviews failed`, String(err)));
 			for (let attempt = 0; attempt < 3; attempt++) {
 				const next = decide(await ctx.reviews.held(repo).catch(() => ({})));
 				if (next.kind !== "review" || (await ctx.reviews.hold(repo, holdKey(next.head, next.role), agent, next.needed).catch(() => true))) return next;
