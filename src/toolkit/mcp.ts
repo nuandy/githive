@@ -320,7 +320,7 @@ async function changeStatus(ctx: ToolContext, repo: string, registry: Registry |
 	return { head, votes: cast, approval: { ...outcome, required }, ...(hosted ? { hosted } : {}) };
 }
 
-/** Replay a repo's records from Git: how many commits on the project's branch since the mode started, and what broke which convention. */
+/** Replay a repo's records from Git: how many commits on the project's branch since GitHive started on it, and what broke which convention. */
 async function runAudit(ctx: ToolContext, repo: string) {
 	const t = ctx.timing ?? new Timing();
 	const remote = await t.time("token", () => ctx.remote(repo, "read"));
@@ -486,7 +486,7 @@ export async function callTool(name: string, args: Args, ctx: ToolContext): Prom
 	return result;
 }
 
-/** How many claims are in force on a repo, read from its records alone: the repo list's count. Null before the mode starts. */
+/** How many claims are in force on a repo, read from its records alone: the repo list's count. Null before GitHive starts on it. */
 export async function openCount(ctx: ToolContext, repo: string) {
 	const state = (await recordLog<Registry>(ctx, repo, claimsRef(repo)).read())?.commit.state;
 	if (!state?.baseline) return null;

@@ -44,9 +44,9 @@ export interface ReleaseRecord {
 export interface Registry {
 	claims: ClaimRecord[];
 	released: ReleaseRecord[];
-	/** The project's branch: its default branch when the mode started (main, master, ...). Absent on older registries: main. */
+	/** The project's branch: its default branch when GitHive started on it (main, master, ...). Absent on older registries: main. */
 	branch?: string;
-	/** The branch's commit when the mode started: the audit reads the branch after it. */
+	/** The branch's commit when GitHive started on it: the audit reads the branch after it. */
 	baseline?: string;
 	/** How many approvals a merge needs, and which roles veto. */
 	policy?: ReviewPolicy;

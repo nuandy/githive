@@ -8,7 +8,7 @@ import type { Registry } from "./claims";
 import { decodeShard, shardsPrefix } from "./shards";
 
 // Reading the records back out of Git for the audit: the full
-// history of a record ref (claims, votes), and main's commits since the mode
+// history of a record ref (claims, votes), and main's commits since GitHive
 // started, with their trailers and the files each changed.
 
 const DIR = "/records";

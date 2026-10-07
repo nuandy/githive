@@ -11,12 +11,15 @@
 	--border-strong: #c9cfd6;
 	--text: #1b1f24;
 	--text-muted: #5b6573;
-	--accent: #2f6fed;
-	--accent-soft: #e6eefd;
+	/* Honey, from the logo: --accent for text and borders (dark enough to read), --accent-fill behind --on-accent text. */
+	--accent: #9a5b00;
+	--accent-soft: #fdf1d9;
+	--accent-fill: #f2a516;
+	--on-accent: #2b1c00;
 	--good: #1f8a4c;
 	--good-soft: #e3f4ea;
-	--warn: #b26b00;
-	--warn-soft: #fbf0dc;
+	--warn: #c2410c;
+	--warn-soft: #fef3ec;
 	--bad: #c23a3a;
 	--bad-soft: #fbe5e5;
 	--needs: #7c3aed;
@@ -49,12 +52,14 @@
 		--border-strong: #3a434f;
 		--text: #e6e9ee;
 		--text-muted: #98a2b3;
-		--accent: #6c9cff;
-		--accent-soft: #1b2a45;
+		--accent: #f6b840;
+		--accent-soft: #33270f;
+		--accent-fill: #f2a516;
+		--on-accent: #1f1400;
 		--good: #4cc38a;
 		--good-soft: #15302a;
-		--warn: #e0a54a;
-		--warn-soft: #33281a;
+		--warn: #f2894f;
+		--warn-soft: #36211a;
 		--bad: #ef6b6b;
 		--bad-soft: #3a1d1f;
 		--needs: #b48cff;
@@ -197,13 +202,13 @@ button.primary:hover:not(:disabled) {
 }
 
 button.accent {
-	background: var(--accent);
-	border-color: var(--accent);
-	color: #fff;
+	background: var(--accent-fill);
+	border-color: var(--accent-fill);
+	color: var(--on-accent);
 }
 
 button.accent:hover:not(:disabled) {
-	background: color-mix(in srgb, var(--accent) 88%, #000);
+	background: color-mix(in srgb, var(--accent-fill) 90%, #000);
 }
 
 button.danger {
@@ -296,7 +301,7 @@ label {
 .pill--solid.pill--bad { background: var(--bad); color: #fff; }
 .pill--solid.pill--warn { background: var(--warn); color: #fff; }
 .pill--solid.pill--needs { background: var(--needs); color: #fff; }
-.pill--solid.pill--accent { background: var(--accent); color: #fff; }
+.pill--solid.pill--accent { background: var(--accent-fill); color: var(--on-accent); }
 .pill--solid.pill--neutral { background: var(--neutral); color: var(--surface); }
 
 .pill--outline {
@@ -510,7 +515,7 @@ details > summary {
 
 .bar__fill {
 	height: 100%;
-	background: var(--accent);
+	background: var(--accent-fill);
 }
 
 .bar__fill--good { background: var(--good); }

@@ -145,7 +145,7 @@ export function AuditTab({ snapshot }: { snapshot: RepoSnapshot }) {
 				<div>
 					<strong>{open.length ? `${open.length} open ${open.length === 1 ? "violation" : "violations"}` : "No open violations"}</strong>
 					<p className="muted">
-						{audit.merges} {audit.merges === 1 ? "commit" : "commits"} on {snapshot.branch ?? "main"} since the mode started.
+						{audit.merges} {audit.merges === 1 ? "commit" : "commits"} on {snapshot.branch ?? "main"} since GitHive started on it.
 						{audit.violations.length === 0 ? " No violations." : ""}
 					</p>
 				</div>

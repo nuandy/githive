@@ -47,7 +47,7 @@
 	bottom: -1px;
 	height: 2px;
 	border-radius: 2px;
-	background: #fd8c73;
+	background: var(--accent-fill);
 }
 
 .tabs__tab:focus-visible {
