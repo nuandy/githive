@@ -178,7 +178,7 @@ export function RepoAdmin({ repo, access, manage, onDeleted, onChanged }: { repo
 				<div className="box__body manage__form manage__danger">
 					<h2>Delete this repository</h2>
 					<p className="manage__note">
-						Its code, its records, its changes and its forks' link to it go for good. Type <code>{repo}</code> to confirm.
+						This deletes its code, its history, and GitHive's record of its claims, votes and merges. It can't be undone. Type <code>{repo}</code> to confirm.
 					</p>
 					<div className="manage__inline">
 						<label className="sr-only" htmlFor="delete-confirm">
