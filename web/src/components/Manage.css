@@ -215,21 +215,29 @@
 	color: var(--bad);
 }
 
-/* An import's source: the URL takes the row, the branch keeps a narrow column beside it, and they stack on a phone. */
+/* An import's source: the URL as wide as the name above it, the branch a short field below. */
 .manage__source {
-	align-items: start;
+	display: grid;
 	gap: 12px;
+}
+
+.manage__source-branch input[type="text"] {
+	max-width: 12rem;
+}
+
+/* A fresh repo's first commit: what it holds. */
+.manage__first {
+	border: 0;
+	padding: 0;
+	margin: 0;
+	display: grid;
+	gap: 10px;
 	max-width: 720px;
 }
 
-.manage__source-url {
-	flex: 1 1 26rem;
-}
-
-.manage__source-url input[type="url"] {
-	max-width: none;
-}
-
-.manage__source-branch {
-	flex: 0 1 11rem;
+.manage__check {
+	display: inline-flex;
+	align-items: center;
+	gap: 8px;
+	font-weight: 500;
 }

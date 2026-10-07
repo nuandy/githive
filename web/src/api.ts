@@ -178,7 +178,11 @@ export interface NewRepoInput {
 	branch?: string;
 	copy_from?: string;
 	visibility: "private" | "public";
+	/** For a fresh repo: what its first commit holds. */
+	init?: { readme?: boolean; description?: string; gitignore?: Gitignore; license?: "mit" };
 }
+
+export type Gitignore = "node" | "python" | "go" | "rust";
 
 /** Fired when the server says the session is gone, so the dashboard shows the sign-in screen again. */
 export const SIGNED_OUT_EVENT = "githive:signed-out";

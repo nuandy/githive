@@ -53,7 +53,11 @@ describe("a new repository", () => {
 		expect(newRepoInput({ ...base, source: "import" })).toEqual({ owner: "acme", name: "web", visibility: "private", import_url: "https://g.test/x" });
 		expect(newRepoInput({ ...base, source: "import", branch: "dev" })).toMatchObject({ branch: "dev" });
 		expect(newRepoInput({ ...base, source: "copy" })).toEqual({ owner: "acme", name: "web", visibility: "private", copy_from: "acme/old" });
-		expect(newRepoInput({ ...base, source: "empty" })).toEqual({ owner: "acme", name: "web", visibility: "private" });
+		// Fresh: a README by default, and whatever else was chosen; nothing at all only if nothing was.
+		expect(newRepoInput({ ...base, source: "empty" })).toEqual({ owner: "acme", name: "web", visibility: "private", init: { readme: true } });
+		expect(newRepoInput({ ...base, source: "empty", first: { readme: true, description: " Docs ", gitignore: "python", license: "mit" } })).toMatchObject({ init: { readme: true, description: "Docs", gitignore: "python", license: "mit" } });
+		expect(newRepoInput({ ...base, source: "empty", first: { readme: false, description: "ignored", gitignore: "rust", license: "" } })).toMatchObject({ init: { gitignore: "rust" } });
+		expect(newRepoInput({ ...base, source: "empty", first: { readme: false, description: "", gitignore: "", license: "" } })).toEqual({ owner: "acme", name: "web", visibility: "private" });
 	});
 });
 

@@ -1,5 +1,5 @@
 import { type FormEvent, useState } from "react";
-import type { ManageApi, MyOrg, NewRepoInput, RepoRecord } from "../api";
+import type { Gitignore, ManageApi, MyOrg, NewRepoInput, RepoRecord } from "../api";
 import { usePoll } from "../hooks/usePoll";
 import { creatableOwners, repoNameProblem } from "../lib/orgs";
 import { href } from "../lib/routes";
@@ -20,12 +20,36 @@ export interface NewRepoViewProps {
 	onCreated: (repo: RepoRecord) => void;
 }
 
+/** What a fresh repo's first commit holds. */
+export interface FirstCommit {
+	readme: boolean;
+	description: string;
+	gitignore: Gitignore | "";
+	license: "mit" | "";
+}
+export const DEFAULT_FIRST_COMMIT: FirstCommit = { readme: true, description: "", gitignore: "", license: "" };
+const GITIGNORES: { value: Gitignore; label: string }[] = [
+	{ value: "node", label: "Node" },
+	{ value: "python", label: "Python" },
+	{ value: "go", label: "Go" },
+	{ value: "rust", label: "Rust" },
+];
+
+/** Whether a fresh repo would start with no commit (and so no branch for agents to work from). */
+export const emptyFirstCommit = (first: FirstCommit) => !first.readme && !first.gitignore && !first.license;
+
 /** The request a filled-in form makes: only the fields its source needs. */
-export function newRepoInput(form: { owner: string; name: string; source: Source; url: string; branch: string; copyFrom: string; visibility: "private" | "public" }): NewRepoInput {
+export function newRepoInput(form: { owner: string; name: string; source: Source; url: string; branch: string; copyFrom: string; visibility: "private" | "public"; first?: FirstCommit }): NewRepoInput {
 	const base = { owner: form.owner, name: form.name.trim(), visibility: form.visibility };
 	if (form.source === "import") return { ...base, import_url: form.url.trim(), ...(form.branch.trim() ? { branch: form.branch.trim() } : {}) };
 	if (form.source === "copy") return { ...base, copy_from: form.copyFrom };
-	return base;
+	const first = form.first ?? DEFAULT_FIRST_COMMIT;
+	if (emptyFirstCommit(first)) return base;
+	const description = first.readme ? first.description.trim() : "";
+	return {
+		...base,
+		init: { ...(first.readme ? { readme: true } : {}), ...(description ? { description } : {}), ...(first.gitignore ? { gitignore: first.gitignore } : {}), ...(first.license ? { license: first.license } : {}) },
+	};
 }
 
 /** A new repository, in your own namespace or an org you may create in: imported, copied, or empty. */
@@ -39,6 +63,7 @@ export function NewRepoView({ orgs, repos, owner: wanted, create, onCreated }: N
 	const [branch, setBranch] = useState("");
 	const [copyFrom, setCopyFrom] = useState("");
 	const [visibility, setVisibility] = useState<"private" | "public">("private");
+	const [first, setFirst] = useState<FirstCommit>(DEFAULT_FIRST_COMMIT);
 	const [busy, setBusy] = useState(false);
 	const [error, setError] = useState<string | null>(null);
 
@@ -51,7 +76,7 @@ export function NewRepoView({ orgs, repos, owner: wanted, create, onCreated }: N
 		setBusy(true);
 		setError(null);
 		try {
-			onCreated(await create(newRepoInput({ owner: chosen, name, source, url, branch, copyFrom, visibility })));
+			onCreated(await create(newRepoInput({ owner: chosen, name, source, url, branch, copyFrom, visibility, first })));
 		} catch (err) {
 			setError(messageOf(err));
 			setBusy(false);
@@ -112,14 +137,14 @@ export function NewRepoView({ orgs, repos, owner: wanted, create, onCreated }: N
 							<label className="manage__choice">
 								<input type="radio" name="new-repo-source" value="empty" checked={source === "empty"} onChange={() => setSource("empty")} />
 								<span>
-									<strong>Nothing</strong>
-									<span className="muted">An empty repository.</span>
+									<strong>Start fresh</strong>
+									<span className="muted">A new repository with a first commit, ready for agents.</span>
 								</span>
 							</label>
 						</fieldset>
 						{source === "import" ? (
-							<div className="manage__inline manage__source">
-								<div className="manage__field manage__source-url">
+							<div className="manage__source">
+								<div className="manage__field">
 									<label htmlFor="new-repo-url">Git URL</label>
 									<input id="new-repo-url" type="url" value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://github.com/octocat/Spoon-Knife" autoComplete="off" spellCheck={false} />
 								</div>
@@ -140,7 +165,46 @@ export function NewRepoView({ orgs, repos, owner: wanted, create, onCreated }: N
 									))}
 								</select>
 							</div>
-						) : null}
+						) : (
+							<fieldset className="manage__field manage__first">
+								<legend className="manage__label">First commit</legend>
+								<label className="manage__check">
+									<input type="checkbox" checked={first.readme} onChange={(e) => setFirst({ ...first, readme: e.target.checked })} />
+									<span>Add a README</span>
+								</label>
+								{first.readme ? (
+									<div className="manage__field">
+										<label htmlFor="new-repo-description">Description (optional)</label>
+										<input id="new-repo-description" type="text" value={first.description} onChange={(e) => setFirst({ ...first, description: e.target.value })} placeholder="What it's for, in a line" maxLength={300} autoComplete="off" />
+									</div>
+								) : null}
+								<div className="manage__inline">
+									<div className="manage__field">
+										<label htmlFor="new-repo-gitignore">.gitignore</label>
+										<select id="new-repo-gitignore" value={first.gitignore} onChange={(e) => setFirst({ ...first, gitignore: e.target.value as FirstCommit["gitignore"] })}>
+											<option value="">None</option>
+											{GITIGNORES.map((g) => (
+												<option key={g.value} value={g.value}>
+													{g.label}
+												</option>
+											))}
+										</select>
+									</div>
+									<div className="manage__field">
+										<label htmlFor="new-repo-license">License</label>
+										<select id="new-repo-license" value={first.license} onChange={(e) => setFirst({ ...first, license: e.target.value as FirstCommit["license"] })}>
+											<option value="">None</option>
+											<option value="mit">MIT</option>
+										</select>
+									</div>
+								</div>
+								<p className="manage__hint">
+									{emptyFirstCommit(first)
+										? "With nothing in it, the repository has no branch: GitHive can't start on it, and agents can't work in it, until someone pushes a first commit."
+										: "A .gitignore keeps build output and dependencies (node_modules, .venv, target) out of commits, and out of agents' claims."}
+								</p>
+							</fieldset>
+						)}
 						<fieldset className="manage__field manage__choices">
 							<legend className="manage__label">Who can see it</legend>
 							<label className="manage__choice">

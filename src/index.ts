@@ -13,6 +13,7 @@ import { retryTransient } from "./retry";
 import { handleMcpBody } from "./mcp";
 import { type ToolContext, repoAudit, changeHistory, openCount, repoSnapshot, voteAsPerson } from "./toolkit/mcp";
 import { listTree, readFile } from "./code-browse";
+import { initialFiles, parseInit, writeFirstCommit } from "./repo-init";
 import { Timing } from "./timing";
 import { defaultBranch } from "./git";
 import { changeRepoName, toolContextFor } from "./toolkit/env";
@@ -112,7 +113,8 @@ app.post("/repos/import", async (c) => {
  */
 app.post("/repos", async (c) => {
 	const principal = c.get("principal") ?? fail(401, "sign in to GitHive first");
-	const { owner, name, import_url: url, branch, copy_from: from, visibility } = await jsonArgs(c);
+	const { owner, name, import_url: url, branch, copy_from: from, visibility, init } = await jsonArgs(c);
+	const start = parseInit(init);
 	if (typeof owner !== "string" || typeof name !== "string") fail(400, "owner and name are required");
 	const repoName = String(name);
 	if (!validRepoName(repoName)) fail(400, "a repo's name is letters, digits, dots, underscores or single dashes, up to 100");
@@ -131,6 +133,12 @@ app.post("/repos", async (c) => {
 		await retryTransient(() => c.env.ARTIFACTS.import({ source: { url, branch: typeof branch === "string" ? branch : undefined }, target: { name: id } }));
 	} else {
 		await ensureRepo(c.env.ARTIFACTS, id, `${org.slug}/${repoName}`);
+		// A first commit (README, .gitignore, license) gives it a main branch, so GitHive can start on it at once.
+		const files = initialFiles({ fullName: `${org.slug}/${repoName}`, holder: org.name ?? org.slug, year: new Date().getUTCFullYear(), ...start });
+		if (Object.keys(files).length) {
+			const handle = principal.kind === "access" ? "githive" : principal.user.handle;
+			await writeFirstCommit(await remoteFor(c.env.ARTIFACTS, id, "write"), files, { name: handle, email: `${handle}@users.githive.app` });
+		}
 	}
 	const repo = await orgs.addRepo(org, repoName, userId, { visibility: visibility === "public" ? "public" : "private", id });
 	return c.json(repo, 201);
