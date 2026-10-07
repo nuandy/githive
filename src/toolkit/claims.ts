@@ -117,9 +117,11 @@ export async function startRepo(log: CasLog<Registry>, input: { baseline: string
 export async function changeSettings(log: CasLog<Registry>, input: { policy?: ReviewPolicy; verify?: string[]; by?: string }) {
 	const outcome = await appendRecord<Registry, "not started" | "unchanged">(log, "githive", empty, (state) => {
 		if (!state.baseline) return { refused: "not started" };
-		const next: Registry = { ...state, ...(input.policy ? { policy: input.policy } : {}), ...(input.verify ? { verify: input.verify } : {}) };
-		if (JSON.stringify([next.policy, next.verify]) === JSON.stringify([state.policy, state.verify])) return { refused: "unchanged" };
-		const what = [input.policy && "the review policy", input.verify && `the checks (${input.verify.join("; ") || "none"})`].filter(Boolean).join(" and ");
+		const policy = input.policy && JSON.stringify(input.policy) !== JSON.stringify(state.policy) ? input.policy : undefined;
+		const verify = input.verify && JSON.stringify(input.verify) !== JSON.stringify(state.verify ?? []) ? input.verify : undefined;
+		if (!policy && !verify) return { refused: "unchanged" };
+		const next: Registry = { ...state, ...(policy ? { policy } : {}), ...(verify ? { verify } : {}) };
+		const what = [policy && "the review policy", verify && `the checks (${verify.join("; ") || "none"})`].filter(Boolean).join(" and ");
 		return { state: next, text: `Settings: ${what} changed${input.by ? ` by ${input.by}` : ""}` };
 	});
 	return outcome.ok ? { changed: true as const } : { changed: false as const, refused: outcome.refused };

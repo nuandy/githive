@@ -209,7 +209,8 @@ function policyFrom(args: Args, base: ReviewPolicy): ReviewPolicy {
 		vetoes: Array.isArray(args.vetoes) ? (args.vetoes as string[]) : base.vetoes,
 		// The base's escalation unless the caller sets its own (an empty list for none).
 		escalate: Array.isArray(args.escalate) ? (args.escalate as ReviewPolicy["escalate"]) : base.escalate,
-		...(grants ? { grants } : {}),
+		// No grants: every role keeps the default holders.
+		...(grants && Object.keys(grants).length ? { grants } : {}),
 	};
 }
 
