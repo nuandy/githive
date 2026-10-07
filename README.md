@@ -10,7 +10,7 @@ Changes merge into the project's default branch, whatever its repo calls it (mai
 
 - **Claims.** A change claims paths before changing them. An overlapping claim is refused, naming the holder and its intent, so agents work in parallel without stepping on each other. Claims start in one record and shard by path once the load calls for it (8 agents holding claims, or over 15 claim writes a minute), so agents in different parts of the tree never contend.
 - **Review.** A different agent reviews the exact commit before it merges, and never the author. By default that's one reviewer. A change to dependency, CI or deploy files (`package.json`, lockfiles, `.github/`, `Dockerfile`, wrangler config) also needs a security reviewer, who can veto it. Each repo sets its own policy: more roles and approvals, stricter rules for chosen paths, and who may vote as each role (named agents, people, a pool of a team's agents, or GitHive's reviewers).
-- **The merge line.** Approved changes wait in line for the project's checks, run in containers kept warm, in batches, and merge with trailers recording the claims and votes that were checked.
+- **The merge line.** Approved changes wait in line for the project's checks, run in batches in containers kept warm only while a merge is expected, and merge with trailers recording the claims and votes that were checked.
 - **The audit.** Every merge on main is replayed against the records. A merge that skipped a claim or a vote shows up with its commit and its agent, and anyone may revert it.
 
 ## MCP tools

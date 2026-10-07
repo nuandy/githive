@@ -63,6 +63,7 @@ export function toolContextFor(env: Env, by: string | undefined, caller: { agent
 			const remote = await cached(env, repo, `${repo}|read`, () => remoteFor(env.ARTIFACTS, repo, "read", 3600));
 			await env.GATE.getByName(`repo:${repo}`).warmLanes({ repo, ...input, base: { remote: remote.url, token: remote.token } });
 		},
+		mergeNotExpected: async (repo, change) => env.GATE.getByName(`repo:${repo}`).notExpecting(change),
 		reviews: {
 			held: (repo) => env.LIVE.getByName(`repo:${repo}`).reviewsHeld(),
 			hold: (repo, head, agent, needed) => env.LIVE.getByName(`repo:${repo}`).holdReview(head, agent, needed),

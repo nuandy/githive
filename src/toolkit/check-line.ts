@@ -70,6 +70,11 @@ export class CheckLine<I, R extends { passed: boolean }> {
 		private readonly landingWaitMs = LANDING_WAIT_MS,
 	) {}
 
+	/** Whether the line has work: merges waiting, being checked, or checked and not all reported back. */
+	busy() {
+		return this.running || this.waiting.length > 0 || this.chain.length > 0;
+	}
+
 	/** A merge the line checked is done with its result: it landed, or (landed false) gave up and will check again if it tries again. */
 	done(change: string, landed = true) {
 		if (!this.chain.some((c) => c.change === change)) return;

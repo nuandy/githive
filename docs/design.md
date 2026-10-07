@@ -345,11 +345,20 @@ checks ran on and the merge.
 The line decides nothing: it schedules check runs. Each agent's merge lands
 itself.
 
-**Warm lanes.** A Gate keeps its container up for 20 minutes after its last
-run, with dependencies installed. An install is skipped while `package.json`'s
+**Warm lanes.** A Gate's container starts small (1 vCPU, 3 GiB: memory is
+paid for while it runs, CPU only while it works) and moves to 2 vCPU, 6 GiB
+for good once a repo's checks are killed for memory, checking again there.
+It stays up, with dependencies installed, only while a merge is expected:
+each warm-up says why (a change was checked after a push, or approved, or the
+checks were just set up) and for what, and the container waits for that
+merge for a few minutes at most (past about 2, waiting costs more than
+starting again cold). A merge that lands or gives up, or a released claim,
+is no longer expected. With nothing expected, nothing running and nothing in
+line, the Gate stops its container a minute after its last run; a 30-minute
+inactivity timeout is only the backstop. An install is skipped while `package.json`'s
 dependency sections and the lockfile are unchanged since the last one. If no
-check runs `npm ci` but the project has a `package-lock.json`, the Gate runs
-`npm ci` first.
+check installs a Node project's dependencies, the Gate runs `npm ci` first
+(from an npm lockfile) or `npm install` (without one).
 Python, Go and Rust are installed when the repo's tracked files use them
 (`toolchains.ts`: `pyproject.toml` or `requirements*.txt`, `go.mod`,
 `Cargo.toml`, in any folder), read from the merged code, since a change may
@@ -357,9 +366,11 @@ add one. Their dependencies (`uv sync`, `go mod download`, `cargo fetch`) are
 installed before the checks and skipped while the files they come from are
 unchanged. Toolchains, the virtualenv and Cargo's target folder live outside
 the checkout, so a clean checkout between checks keeps them. A failed install
-fails the check with its output. The lanes are warmed in the background when a merge
-is likely soon: at `start`, after `check`, and after an approving vote. A
-container warmed in the last 5 minutes isn't warmed again. The dashboard shows
+fails the check with its output. The repo's first lane is warmed in the background when a merge
+is likely soon: at `start`, `settings`, after `check`, and after an approving
+vote. The other lanes start only when a batch needs them, so a quiet repo
+pays for one container. A container warmed in the last minute isn't warmed
+again. The dashboard shows
 each lane's warmth.
 
 ## Audit

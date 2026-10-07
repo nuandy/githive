@@ -205,6 +205,7 @@ describe("warming the checks when a merge is near", { timeout: 60_000 }, () => {
 		const work = mkdtempSync(join(tmpdir(), "githive-warm-"));
 		try {
 			const warmed: unknown[] = [];
+			const heads: Record<string, string> = {};
 			const ctx = (agentKey?: string): ToolContext => ({
 				remote: async () => ({ url: server.url, token: "unused" }),
 				changeRemote: async () => ({ url: server.url, token: "unused" }),
@@ -218,12 +219,17 @@ describe("warming the checks when a merge is near", { timeout: 60_000 }, () => {
 				const { key } = (await call(repo, "register", { agent: `a-${repo}` })) as { key: string };
 				await call(repo, "claim", { change: `c-${repo}`, agent: `a-${repo}`, paths: [`src/${repo}/`], intent: "x" }, key);
 				const head = await pushChange(server.url, work, `a-${repo}`, `c-${repo}`, { [`src/${repo}/x.js`]: "x\n" });
+				heads[repo] = head;
 				await call(repo, "check", { change: `c-${repo}` }, key);
 				await call(repo, "vote", { commit: head, reviewer: "rev", role: "review", verdict: "approve", evidence: "ok" });
 				await call(repo, "vote", { commit: head, reviewer: "rev-2", role: "review", verdict: "reject", evidence: "no" });
 			}
-			// The start, the check and the approval warm; the rejection and the repo without checks don't.
-			expect(warmed).toEqual([{ branch: "main", checks: ["npm test"] }, { branch: "main", checks: ["npm test"] }, { branch: "main", checks: ["npm test"] }]);
+			// The start, the check and the approval warm, each saying what merge to expect; the rejection and the repo without checks don't.
+			expect(warmed).toEqual([
+				{ branch: "main", checks: ["npm test"], expect: "set up" },
+				{ branch: "main", checks: ["npm test"], expect: "checked", key: "c-checked" },
+				{ branch: "main", checks: ["npm test"], expect: "approved", key: heads.checked },
+			]);
 		} finally {
 			await server.close();
 			rmSync(work, { recursive: true, force: true });

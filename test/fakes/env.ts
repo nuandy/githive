@@ -18,6 +18,9 @@ export class FakeStorage {
 	async delete(key: string | string[]) {
 		for (const k of Array.isArray(key) ? key : [key]) this.data.delete(k);
 	}
+	async getAlarm() {
+		return this.alarm;
+	}
 	async setAlarm(at: number) {
 		this.alarm = at;
 	}

@@ -8,10 +8,23 @@ export const IMAGE = "cloudflare/debian-trixie";
 export const WORKDIR = "/work";
 export const COMMAND_TIMEOUT_S = 300;
 
-/** Start the container if needed and install git (the managed image has Node 24 but no git). */
-export async function bootContainer(container: Container) {
-	if (!container.running)
-		container.start({ image: IMAGE, entrypoint: ["sleep", "infinity"], enableInternet: true, instance: "standard-1" });
+/**
+ * The sizes GitHive starts containers at. Memory is paid for as long as a
+ * container runs, CPU only while it works, so generous CPU and tight memory
+ * cost least. Containers started by a Durable Object take lite, standard-1
+ * to standard-4, or a custom size of 1 to 4 vCPU with at least 3 GiB each.
+ */
+export const INSTANCE_SIZES = {
+	/** 1 vCPU, 3 GiB: a quarter less memory than standard-1, and twice its CPU. */
+	small: { vcpu: 1, memoryMib: 3 * 1024, diskMb: 8_000 },
+	large: { vcpu: 2, memoryMib: 6 * 1024, diskMb: 12_000 },
+	"standard-1": "standard-1",
+} as const satisfies Record<string, ContainerStartupOptions["instance"]>;
+export type InstanceSize = keyof typeof INSTANCE_SIZES;
+
+/** Start the container if needed, at `size`, and install git (the managed image has Node 24 but no git). */
+export async function bootContainer(container: Container, size: InstanceSize = "standard-1") {
+	if (!container.running) container.start({ image: IMAGE, entrypoint: ["sleep", "infinity"], enableInternet: true, instance: INSTANCE_SIZES[size] });
 	// WORKDIR doesn't exist until a clone, so setup runs from /.
 	const apt = await run(container, ["bash", "-lc", "apt-get update -qq && apt-get install -y -qq git ca-certificates >/dev/null"], "/");
 	if (apt.exitCode !== 0) throw new Error(`installing git failed: ${clip(apt.output, 2_000)}`);
@@ -37,6 +50,14 @@ export async function installToolchains(container: Container, cwd = WORKDIR) {
 		installed.push({ toolchain, exitCode: r.exitCode, output: r.output });
 	}
 	return installed;
+}
+
+/**
+ * Whether a command was killed for memory: SIGKILL (exit 137) well before
+ * its time limit, which `timeout` would otherwise have been the one to send.
+ */
+export function outOfMemory(exitCode: number, elapsedMs: number, timeoutS: number) {
+	return exitCode === 137 && elapsedMs < timeoutS * 1000 - 5_000;
 }
 
 /**

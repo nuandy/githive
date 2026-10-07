@@ -64,8 +64,10 @@ export interface ToolContext {
 	timing?: Timing;
 	/** Tells the dashboard's open pages that the repo's records changed. */
 	ping?: (repo: string) => Promise<void>;
-	/** Warms the repo's check containers in the background, when a merge is likely soon (see Gate.warmLanes). */
-	warmChecks?: (repo: string, input: { branch: string; checks: string[] }) => Promise<void>;
+	/** Warms the repo's check container in the background, when a merge is likely soon: why, and for what (see Gate.warmLanes). */
+	warmChecks?: (repo: string, input: { branch: string; checks: string[]; expect: "checked" | "approved" | "set up"; key?: string }) => Promise<void>;
+	/** Tells the repo's check container a merge it was waiting for won't come (its claim was released). */
+	mergeNotExpected?: (repo: string, change: string) => Promise<void>;
 	/** Review holds, so next doesn't send two agents to a review that needs one (see LiveFeed). */
 	reviews?: {
 		held(repo: string): Promise<Record<string, string[]>>;
@@ -559,9 +561,9 @@ async function runTool(name: string, args: Args, ctx: ToolContext): Promise<unkn
 	};
 	const claimOf = async (change: string) => (await changeOf(change)).claim;
 	const changeSource = changeSourceFor(ctx, repo);
-	/** Warm the check containers for a merge to come (only where the repo has checks); never holds the call up for long. */
-	const warmChecks = async () => {
-		if (registered?.verify?.length) await ctx.warmChecks?.(repo, { branch: projectBranch(registered), checks: registered.verify }).catch(() => undefined);
+	/** Warm the check container for a merge to come (only where the repo has checks): why, and for which change or commit. */
+	const warmChecks = async (expect: "checked" | "approved", key: string) => {
+		if (registered?.verify?.length) await ctx.warmChecks?.(repo, { branch: projectBranch(registered), checks: registered.verify, expect, key }).catch(() => undefined);
 	};
 	switch (name) {
 		case "start": {
@@ -581,7 +583,7 @@ async function runTool(name: string, args: Args, ctx: ToolContext): Promise<unkn
 			await ctx.register?.(repo);
 			const registry = (await claims.read())?.commit.state;
 			// The check containers warm up while agents start: the first merge is minutes away, and a fresh install takes them.
-			if (registry?.verify?.length) await ctx.warmChecks?.(repo, { branch: projectBranch(registry), checks: registry.verify }).catch(() => undefined);
+			if (registry?.verify?.length) await ctx.warmChecks?.(repo, { branch: projectBranch(registry), checks: registry.verify, expect: "set up" }).catch(() => undefined);
 			const warnings = grantWarnings(registry?.policy ?? policy);
 			return { repo, branch: projectBranch(registry), policy: registry?.policy ?? policy, verify: registry?.verify ?? [], ...shardingOf(registry), ...(warnings.length ? { warnings } : {}), instructions: INSTRUCTIONS };
 		}
@@ -593,7 +595,7 @@ async function runTool(name: string, args: Args, ctx: ToolContext): Promise<unkn
 			await changeSettings(claims, { ...(policy ? { policy } : {}), ...(verify ? { verify } : {}), ...(stamper?.by ? { by: stamper.by } : {}) });
 			const registry = (await claims.read())?.commit.state;
 			// New checks may install something new: warm the containers for them.
-			if (verify?.length) await ctx.warmChecks?.(repo, { branch: projectBranch(registry), checks: verify }).catch(() => undefined);
+			if (verify?.length) await ctx.warmChecks?.(repo, { branch: projectBranch(registry), checks: verify, expect: "set up" }).catch(() => undefined);
 			const warnings = grantWarnings(registry?.policy ?? DEFAULT_POLICY);
 			return { repo, branch: projectBranch(registry), policy: registry?.policy ?? DEFAULT_POLICY, verify: registry?.verify ?? [], ...(warnings.length ? { warnings } : {}) };
 		}
@@ -681,8 +683,10 @@ async function runTool(name: string, args: Args, ctx: ToolContext): Promise<unkn
 		case "release": {
 			const change = requiredString(args, "change");
 			const agent = actAs("agent");
-			if (args.stale === true) return store.releaseStale({ change, agent, staleAfterMs: STALE_AFTER_MS }, stamper);
-			return store.release({ change, agent, reason: typeof args.reason === "string" ? args.reason : "released" }, stamper);
+			const released = args.stale === true ? await store.releaseStale({ change, agent, staleAfterMs: STALE_AFTER_MS }, stamper) : await store.release({ change, agent, reason: typeof args.reason === "string" ? args.reason : "released" }, stamper);
+			// Given up: the check container needn't wait for its merge.
+			if (released.ok) await ctx.mergeNotExpected?.(repo, change).catch(() => undefined);
+			return released;
 		}
 		case "ask_human": {
 			const change = requiredString(args, "change");
@@ -699,7 +703,7 @@ async function runTool(name: string, args: Args, ctx: ToolContext): Promise<unkn
 			const cast = await votesFor(ctx, repo, await shardVotesIfBusy(ctx, repo, registered, reviewer)).vote({ commit, reviewer, role: requiredString(args, "role"), verdict, evidence: requiredString(args, "evidence"), ...(teams.length ? { teams } : {}) }, stamper);
 			// Its review is done: the hold next took for it goes.
 			await ctx.reviews?.release(repo, holdKey(commit, requiredString(args, "role")), reviewer).catch(() => undefined);
-			if (verdict === "approve") await warmChecks();
+			if (verdict === "approve") await warmChecks("approved", commit);
 			return cast;
 		}
 		case "merge": {
@@ -766,8 +770,8 @@ async function runTool(name: string, args: Args, ctx: ToolContext): Promise<unkn
 			const source = own ? await changeSource(own.agent, "read", change).catch(() => null) : null;
 			if (!source) throw new Error(`[409] changes/${change} has nothing pushed to check`);
 			const checked = await checkChange({ project: await ctx.remote(repo, "read"), branch: projectBranch(registered), source, claims: own ? [own] : [], change });
-			// Pushed and checked: a merge is likely within minutes, so its check containers warm up meanwhile.
-			await warmChecks();
+			// Pushed and checked: a merge is likely within minutes, so its check container warms up meanwhile.
+			await warmChecks("checked", change);
 			return checked;
 		}
 		case "register": {

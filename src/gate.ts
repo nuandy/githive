@@ -1,7 +1,7 @@
 import { DurableObject } from "cloudflare:workers";
-import { WORKDIR, bootContainer, clip, gitWithToken, installToolchains, run } from "./container";
+import { type InstanceSize, WORKDIR, bootContainer, clip, gitWithToken, installToolchains, outOfMemory, run } from "./container";
 import { statusOf } from "./errors";
-import { CheckLine, type LineResult } from "./toolkit/check-line";
+import { CheckLine, LANES, type LineResult } from "./toolkit/check-line";
 import { branchHead } from "./git";
 import { DEPENDENCIES, DEPENDENCY_FILES } from "./toolchains";
 
@@ -59,12 +59,43 @@ export function withInstall(checks: string[], project: { packageJson: boolean; n
 	if (!project.packageJson || checks.some((c) => INSTALLS.test(c.trim()))) return checks;
 	return [project.npmLockfile ? "npm ci" : "npm install", ...checks];
 }
-/** How long a container stays up with nothing to run: through a burst of merges. */
-const IDLE_MS = 20 * 60_000;
+/**
+ * Why a merge is expected soon: a change was checked after a push, or
+ * approved, or the repo's checks were just set up (start, settings).
+ */
+export type MergeExpected = "checked" | "approved" | "set up";
+/**
+ * How long a check container waits for an expected merge. Its memory is paid
+ * for while it waits, and past about 2 minutes waiting costs more than
+ * starting again cold, so it doesn't wait much longer than that.
+ */
+export const EXPECT_MS: Record<MergeExpected, number> = { checked: 3 * 60_000, approved: 3 * 60_000, "set up": 2 * 60_000 };
+/** How long a container stays up after its last run once no merge is expected: long enough for a merge that follows at once. */
+export const GRACE_MS = 60_000;
+/** The platform stops a container left this long, in case GitHive's own stop never comes. */
+const SAFETY_MS = 30 * 60_000;
 /** A container warmed this recently isn't warmed again. */
-const WARM_FOR_MS = 5 * 60_000;
-/** Lanes to warm, the repo's own Gate first (see check-line.ts LANES). */
-const WARM_LANES = 4;
+const WARM_FOR_MS = 60_000;
+
+/**
+ * When a check container may stop: a grace after its last run, and not
+ * before any merge it expects is due (`expecting`: deadlines, by key).
+ */
+export function stopAt(lastActive: number, expecting: Record<string, number>) {
+	return Math.max(lastActive + GRACE_MS, ...Object.values(expecting));
+}
+/** A check container's size: small at first, larger once a repo's checks run out of memory in it (see check). */
+const SMALL: InstanceSize = "small";
+const LARGE: InstanceSize = "large";
+/** How long one check command may run. */
+const CHECK_TIMEOUT_S = 600;
+
+/**
+ * Lanes warmed ahead of a merge: the repo's own Gate only. The others start
+ * when a batch needs them (several merges at once), so a quiet repo pays for
+ * one container, not LANES.
+ */
+const WARM_LANES = 1;
 
 /** A merge's checks: the project's branch and checks, and the change's fork and commit. */
 export interface ChangeCheck {
@@ -78,6 +109,22 @@ export interface ChangeCheck {
 export class Gate extends DurableObject<Env> {
 	/** Checks run one at a time: there is one container, and one checkout in it. */
 	private checking: Promise<unknown> = Promise.resolve();
+	/** Checks and warm-ups running or waiting their turn: while any is, the container stays up. */
+	private active = 0;
+	/** The commit each merge in line was checked at: its approval's expectation goes when it's done. */
+	private readonly heads = new Map<string, string>();
+
+	/** Run `work` in turn with the container's other work, keeping the container up meanwhile, and after it. */
+	private inTurn<T>(work: () => Promise<T>): Promise<T> {
+		this.active++;
+		const run = this.checking.then(work).finally(async () => {
+			this.active--;
+			await this.ctx.storage.put("lastActive", Date.now());
+			await this.scheduleStop();
+		});
+		this.checking = run.catch(() => {});
+		return run;
+	}
 
 	/**
 	 * Check one commit now: merge `head` onto `baseHead` (after the merges
@@ -85,7 +132,7 @@ export class Gate extends DurableObject<Env> {
 	 */
 	checkCommit(input: ChangeCheck & { baseHead: string; ahead?: CheckPlan["ahead"] }): Promise<GateResult> {
 		const plan: CheckPlan = { baseHead: input.baseHead, branch: input.branch, base: input.base, fork: input.fork, ...(input.ahead?.length ? { ahead: input.ahead } : {}), checks: input.checks };
-		const run = this.checking.then(async () => {
+		return this.inTurn(async () => {
 			try {
 				return await this.check(input.head, plan);
 			} catch (err) {
@@ -93,8 +140,6 @@ export class Gate extends DurableObject<Env> {
 				return { passed: false, head: input.head, baseHead: input.baseHead, results: [{ command: "(gate setup)", exitCode: 1, output: statusOf(err).message }], at: new Date().toISOString() } satisfies GateResult;
 			}
 		});
-		this.checking = run.catch(() => {});
-		return run;
 	}
 
 	/** The line of merges waiting for checks, for the repo this Gate serves (see check-line.ts). */
@@ -114,21 +159,69 @@ export class Gate extends DurableObject<Env> {
 			},
 		});
 		const { repo, change, ...check } = input;
+		this.heads.set(change, input.head);
 		return this.line.join({ change, head: input.head, input: { ...check, repo } });
 	}
 
-	/** A merge checked in line is done with its result: it landed, or (landed false) gave up. */
-	lineDone(change: string, landed = true) {
+	/** A merge checked in line is done with its result: it landed, or (landed false) gave up. Either way it's no longer expected. */
+	async lineDone(change: string, landed = true) {
 		this.line?.done(change, landed);
+		const head = this.heads.get(change);
+		this.heads.delete(change);
+		await this.notExpecting(change, ...(head ? [head] : []));
+	}
+
+	/** Merges no longer expected (merged, given up, or their claim released): the container need not wait for them. */
+	async notExpecting(...keys: string[]) {
+		const expecting = await this.expecting();
+		for (const key of keys) delete expecting[key];
+		await this.ctx.storage.put("expecting", expecting);
+		await this.scheduleStop();
+	}
+
+	/** The merges expected soon, by key (a change, or an approved commit), with their deadlines; past ones dropped. */
+	private async expecting() {
+		const now = Date.now();
+		return Object.fromEntries(Object.entries((await this.ctx.storage.get<Record<string, number>>("expecting")) ?? {}).filter(([, due]) => due > now));
+	}
+
+	/** Make sure an alarm comes by `at` (an earlier one stays). */
+	private async alarmBy(at: number) {
+		const current = await this.ctx.storage.getAlarm();
+		if (current === null || at < current) await this.ctx.storage.setAlarm(at);
+	}
+
+	/** Plan the container's stop: an alarm when it may (see stopAt); none while it isn't running. */
+	private async scheduleStop() {
+		if (!this.ctx.container?.running) return;
+		await this.alarmBy(stopAt((await this.ctx.storage.get<number>("lastActive")) ?? Date.now(), await this.expecting()));
 	}
 
 	async alarm() {
 		// The repo's lanes to warm (see warmLanes).
 		const warmLanes = await this.ctx.storage.get<{ repo: string; branch?: string; base: { remote: string; token: string }; checks: string[] }>("warmLanes");
-		if (!warmLanes) return;
-		await this.ctx.storage.delete("warmLanes");
-		const { repo, ...input } = warmLanes;
-		await Promise.all(Array.from({ length: WARM_LANES }, (_, lane) => (lane === 0 ? this.warm(input) : this.env.GATE.getByName(`repo:${repo}:lane:${lane}`).warm(input)).catch(() => undefined)));
+		if (warmLanes) {
+			await this.ctx.storage.delete("warmLanes");
+			const { repo, ...input } = warmLanes;
+			await Promise.all(Array.from({ length: WARM_LANES }, (_, lane) => (lane === 0 ? this.warm(input) : this.env.GATE.getByName(`repo:${repo}:lane:${lane}`).warm(input)).catch(() => undefined)));
+		}
+		await this.stopIfIdle();
+	}
+
+	/**
+	 * Stop the container once nothing needs it: no check or warm-up running or
+	 * waiting, no merge in line, a grace since its last run, and no merge
+	 * expected (see stopAt). Otherwise look again when it might be.
+	 */
+	private async stopIfIdle() {
+		const container = this.ctx.container;
+		if (!container?.running) return;
+		if (this.active > 0 || this.line?.busy()) return this.alarmBy(Date.now() + GRACE_MS);
+		const expecting = await this.expecting();
+		const at = stopAt((await this.ctx.storage.get<number>("lastActive")) ?? 0, expecting);
+		if (at > Date.now()) return this.alarmBy(at);
+		await container.destroy("nothing to check");
+		await this.ctx.storage.delete(["prepared", "expecting"]);
 	}
 
 	private async check(head: string, plan: CheckPlan): Promise<GateResult> {
@@ -184,7 +277,16 @@ export class Gate extends DurableObject<Env> {
 				results.push({ command, exitCode: 0, output: "Skipped: package.json and its lockfile are unchanged since the last install in this gate." });
 				continue;
 			}
-			const r = await run(container, ["bash", "-lc", command], WORKDIR, undefined, 600);
+			const started = Date.now();
+			const r = await run(container, ["bash", "-lc", command], WORKDIR, undefined, CHECK_TIMEOUT_S);
+			if (outOfMemory(r.exitCode, Date.now() - started, CHECK_TIMEOUT_S) && (await this.size()) !== LARGE) {
+				// Killed for memory, not time: this repo's checks need the larger container. Move up and check again.
+				console.log(`checks ran out of memory in a ${SMALL} container: moving up to ${LARGE}`);
+				await this.ctx.storage.put("instance", LARGE);
+				await container.destroy(`checks ran out of memory in ${SMALL}`);
+				await this.ctx.storage.delete(["prepared", "lockHash", "depsHash"]);
+				return this.check(head, plan);
+			}
 			results.push({ command, exitCode: r.exitCode, output: clip(r.output, 6_000) });
 			if (r.exitCode !== 0) break; // later checks usually depend on earlier ones (npm ci first)
 			if (INSTALLS.test(command.trim())) await this.ctx.storage.put("lockHash", await this.lockHash(container));
@@ -218,14 +320,17 @@ export class Gate extends DurableObject<Env> {
 	/** A running container with the project checked out: reused (with its installed dependencies) while it lives. */
 	private async prepare(container: Container, base: { remote: string; token: string }) {
 		if (!container.running || !(await this.ctx.storage.get<boolean>("prepared"))) {
-			await bootContainer(container);
+			await bootContainer(container, await this.size());
+			const limits = await run(container, ["bash", "-c", "echo $(nproc) cpus, $(awk '/MemTotal/ {print int($2/1024)}' /proc/meminfo) MiB"], "/");
+			console.log(`gate container started at ${await this.size()}: ${limits.output.trim()}`);
 			await run(container, ["rm", "-rf", WORKDIR], "/");
 			const clone = await gitWithToken(container, base.token, ["clone", "--quiet", base.remote, WORKDIR], "/");
 			if (clone.exitCode !== 0) throw new Error(`clone of the project failed: ${clip(clone.output, 2_000)}`);
 			await this.ctx.storage.delete(["lockHash", "depsHash"]);
 			await this.ctx.storage.put("prepared", true);
 		}
-		await container.setInactivityTimeout(IDLE_MS);
+		// GitHive stops it itself once nothing needs it (see stopIfIdle); this is the backstop.
+		await container.setInactivityTimeout(SAFETY_MS);
 	}
 
 	/**
@@ -235,7 +340,7 @@ export class Gate extends DurableObject<Env> {
 	 * In turn with checks (one checkout); skipped if warmed in the last minutes.
 	 */
 	warm(input: { branch?: string; base: { remote: string; token: string }; checks: string[] }): Promise<void> {
-		const warming = this.checking.then(async () => {
+		return this.inTurn(async () => {
 			const container = this.ctx.container;
 			if (!container) return;
 			const at = await this.ctx.storage.get<number>("warmedAt");
@@ -260,15 +365,19 @@ export class Gate extends DurableObject<Env> {
 				await this.ctx.storage.delete(["prepared", "warmingSince"]);
 			}
 		});
-		this.checking = warming.catch(() => {});
-		return warming;
 	}
 
-	/** This container's warmth: whether it runs, when it last finished warming, and whether it's warming now. */
+	/** The size this Gate's container starts at: small, until its checks have run out of memory. */
+	private async size(): Promise<InstanceSize> {
+		return (await this.ctx.storage.get<InstanceSize>("instance")) ?? SMALL;
+	}
+
+	/** This container's warmth: whether it runs, at what size, when it last finished warming, and whether it's warming now. */
 	async warmth() {
-		const [warmedAt, warmingSince] = await Promise.all([this.ctx.storage.get<number>("warmedAt"), this.ctx.storage.get<number>("warmingSince")]);
+		const [warmedAt, warmingSince, size] = await Promise.all([this.ctx.storage.get<number>("warmedAt"), this.ctx.storage.get<number>("warmingSince"), this.size()]);
 		return {
 			running: !!this.ctx.container?.running,
+			size,
 			warmedAt: warmedAt ?? null,
 			warming: !!warmingSince && (!warmedAt || warmingSince > warmedAt),
 		};
@@ -276,17 +385,20 @@ export class Gate extends DurableObject<Env> {
 
 	/** The warmth of the repo's lanes (this Gate first, then the ones beside it). */
 	async lanes(repo: string) {
-		return Promise.all(Array.from({ length: WARM_LANES }, async (_, lane) => ({ lane, ...(await (lane === 0 ? this.warmth() : this.env.GATE.getByName(`repo:${repo}:lane:${lane}`).warmth())) })));
+		return Promise.all(Array.from({ length: LANES }, async (_, lane) => ({ lane, ...(await (lane === 0 ? this.warmth() : this.env.GATE.getByName(`repo:${repo}:lane:${lane}`).warmth())) })));
 	}
 
 	/**
-	 * Warm the repo's lanes (this Gate and the ones beside it) in the
-	 * background: called when a merge is likely soon (a change was checked or
-	 * approved). Returns at once; the alarm does the work.
+	 * Warm the repo's first lane in the background: called when a merge is
+	 * likely soon, saying why (`expect`) and for what (`key`: the change, or
+	 * the approved commit), so the container waits for it, and not much
+	 * longer (see EXPECT_MS). Returns at once; the alarm does the work.
 	 */
-	async warmLanes(input: { repo: string; branch?: string; base: { remote: string; token: string }; checks: string[] }) {
+	async warmLanes(input: { repo: string; branch?: string; base: { remote: string; token: string }; checks: string[]; expect?: MergeExpected; key?: string }) {
 		if (!input.checks.length) return;
-		await this.ctx.storage.put("warmLanes", input);
+		const { expect, key, ...warming } = input;
+		if (expect) await this.ctx.storage.put("expecting", { ...(await this.expecting()), [key ?? `(${expect})`]: Date.now() + EXPECT_MS[expect] });
+		await this.ctx.storage.put("warmLanes", warming);
 		await this.ctx.storage.setAlarm(Date.now());
 	}
 
