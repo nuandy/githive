@@ -151,8 +151,8 @@ export function authRoutes(app: Hono<AuthEnv>) {
 
 	// Invitations: who may sign in, until repos have permissions. Only an admin, through Access.
 	const admin = (principal: Principal | undefined) => {
-		if (principal?.kind !== "access" || principal.identity.kind !== "person") throw new Error("[403] invitations are managed by an admin, through Cloudflare Access");
-		return principal.identity.value;
+		if (principal?.kind !== "access") throw new Error("[403] invitations are managed by an admin, through Cloudflare Access");
+		return principal.identity.kind === "person" ? principal.identity.value : `service token ${principal.identity.value}`;
 	};
 	app.get("/admin/invites", async (c) => {
 		admin(c.get("principal"));
