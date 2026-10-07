@@ -232,7 +232,6 @@
 	margin: 0;
 	display: grid;
 	gap: 10px;
-	max-width: 720px;
 }
 
 .manage__check {

@@ -175,7 +175,7 @@ export function NewRepoView({ orgs, repos, owner: wanted, create, onCreated }: N
 								{first.readme ? (
 									<div className="manage__field">
 										<label htmlFor="new-repo-description">Description (optional)</label>
-										<input id="new-repo-description" type="text" value={first.description} onChange={(e) => setFirst({ ...first, description: e.target.value })} placeholder="What it's for, in a line" maxLength={300} autoComplete="off" />
+										<input id="new-repo-description" type="text" value={first.description} onChange={(e) => setFirst({ ...first, description: e.target.value })} placeholder="Shown under the name in the README" maxLength={300} autoComplete="off" />
 									</div>
 								) : null}
 								<div className="manage__inline">
