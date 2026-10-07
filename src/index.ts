@@ -1,6 +1,9 @@
 import { type Context, Hono } from "hono";
 import { type Principal, agentNameOf, byOf, isPerson, resolvePrincipal } from "./auth/principal";
 import { authRoutes } from "./auth/routes";
+import { authorize } from "./auth/authorize";
+import { IdentityStore } from "./auth/store";
+import { OAuthProvider } from "@cloudflare/workers-oauth-provider";
 import { forkAndWait, listRepoNames, remoteFor, reviewerName } from "./artifacts";
 import { fail, statusOf } from "./errors";
 import { retryTransient } from "./retry";
@@ -51,6 +54,8 @@ app.onError((err, c) => {
 
 // Sign-in, the caller's own agents and tokens, and invitations.
 authRoutes(app);
+// Where an MCP client sends a person to connect it as one of their agents (OAuth).
+app.on(["GET", "POST"], "/authorize", authorize);
 
 app.get("/api", (c) =>
 	c.json({
@@ -166,13 +171,16 @@ app.get("/repos/:repo/reviewers/:change/:head/:role", async (c) => {
 	return c.json(await c.env.REVIEWER.getByName(reviewerName(changeRepoName(repo, change), role, head)).state());
 });
 
-// The MCP front door (stateless JSON-RPC over HTTP), for agents from anywhere.
-app.post("/mcp", async (c) => {
-	const body = await c.req.json().catch(() => null);
-	if (body === null) return c.json({ jsonrpc: "2.0", id: null, error: { code: -32700, message: "parse error" } }, 400);
-	const result = await handleMcpBody(body, { toolkit: toolContext(c.env, c.get("principal"), c.req.header("X-GitHive-Agent-Key")) });
-	return result === null ? c.body(null, 202) : c.json(result);
-});
+/** One MCP request (stateless JSON-RPC over HTTP) from a caller: Access, an agent token, or an OAuth grant. */
+async function mcpResponse(request: Request, env: Env, principal: Principal | undefined) {
+	const body = await request.json().catch(() => null);
+	if (body === null) return Response.json({ jsonrpc: "2.0", id: null, error: { code: -32700, message: "parse error" } }, { status: 400 });
+	const result = await handleMcpBody(body, { toolkit: toolContext(env, principal, request.headers.get("X-GitHive-Agent-Key") ?? undefined) });
+	return result === null ? new Response(null, { status: 202 }) : Response.json(result);
+}
+
+// The MCP front door, for agents from anywhere.
+app.post("/mcp", (c) => mcpResponse(c.req.raw, c.env, c.get("principal")));
 app.on(["GET", "DELETE"], "/mcp", (c) => c.body(null, 405, { Allow: "POST" }));
 
 // The dashboard's list of repos in one read: every repo with its summary.
@@ -269,4 +277,47 @@ app.delete("/repos/:repo", async (c) => {
 // Everything that isn't an API route is the dashboard.
 app.get("*", (c) => c.env.ASSETS.fetch(c.req.raw));
 
-export default { fetch: app.fetch } satisfies ExportedHandler<Env>;
+/**
+ * MCP over OAuth, on the public origin only (PUBLIC_ORIGIN: githive.app, or
+ * bench.githive.app): a client discovers GitHive's authorization server from
+ * /mcp's 401, registers, and sends a person to /authorize. Every call with a
+ * grant checks its agent is still active. The Access hostnames are served as
+ * before, and an agent token on /mcp needs no OAuth.
+ */
+const providers = new Map<string, OAuthProvider<Env>>();
+function oauthFor(origin: string) {
+	let provider = providers.get(origin);
+	if (!provider) {
+		provider = new OAuthProvider<Env>({
+			apiRoute: "/mcp",
+			apiHandler: {
+				async fetch(request, env, ctx) {
+					const props = (ctx as unknown as { props?: { userId?: string; agentId?: string } }).props;
+					const found = props?.agentId ? await new IdentityStore(env.DB).activeAgent(props.agentId) : null;
+					if (!found || found.user.id !== props?.userId) return Response.json({ error: "this connection's agent was revoked: connect again" }, { status: 401 });
+					return mcpResponse(request, env, { kind: "agent", ...found });
+				},
+			},
+			defaultHandler: { fetch: (request, env, ctx) => app.fetch(request, env, ctx) },
+			authorizeEndpoint: "/authorize",
+			tokenEndpoint: "/oauth/token",
+			clientRegistrationEndpoint: "/oauth/register",
+			clientIdMetadataDocumentEnabled: true,
+			scopesSupported: ["mcp"],
+			requiredScopes: ["mcp"],
+			resourceMetadata: { resource: `${origin}/mcp`, authorization_servers: [origin], resource_name: "GitHive" },
+		});
+		providers.set(origin, provider);
+	}
+	return provider;
+}
+
+export default {
+	fetch(request: Request, env: Env, ctx: ExecutionContext) {
+		const origin = (env as unknown as { PUBLIC_ORIGIN?: string }).PUBLIC_ORIGIN;
+		const url = new URL(request.url);
+		if (!origin || !env.OAUTH_KV || url.origin !== origin) return app.fetch(request, env, ctx);
+		if (url.pathname === "/mcp" && /^Bearer\s+ghv_/i.test(request.headers.get("Authorization") ?? "")) return app.fetch(request, env, ctx);
+		return oauthFor(origin).fetch(request, env, ctx);
+	},
+} satisfies ExportedHandler<Env>;

@@ -6,3 +6,11 @@ export class DurableObject<E = unknown> {
 		readonly env: E,
 	) {}
 }
+
+/** The base of a Worker entrypoint class: the OAuth provider checks handlers against it. */
+export class WorkerEntrypoint<E = unknown> {
+	constructor(
+		readonly ctx: any,
+		readonly env: E,
+	) {}
+}

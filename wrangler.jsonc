@@ -9,6 +9,8 @@
 	"observability": { "enabled": true },
 	"workers_dev": true,
 	"vars": {
+		// Where people sign in and MCP clients connect over OAuth (no Access in front). The Access hostnames serve as before.
+		"PUBLIC_ORIGIN": "https://githive.app",
 		"ACCESS_TEAM_DOMAIN": "little-cake-3c64.cloudflareaccess.com",
 		"ACCESS_AUD": "40a0a047944251bc67f3291f138b617f8cdb68f342635bd15582a6d770d1fd52"
 	},
