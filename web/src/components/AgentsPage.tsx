@@ -236,17 +236,24 @@ export function AgentsView({
 					<div className="box agents__way">
 						<div className="box__body">
 							<h3>
-								Sign in from the app <span className="pill pill--accent">Nothing to copy</span>
+								Connect Claude Code <span className="pill pill--accent">Recommended</span>
 							</h3>
-							<CopyBlock text={commands.oauth} />
-							<p className="muted">Claude Code opens your browser. Sign in, then choose the agent it acts as, or name a new one.</p>
+							<ol className="agents__steps">
+								<li>
+									Add GitHive to Claude Code, in your terminal:
+									<CopyBlock text={commands.oauth} />
+								</li>
+								<li>
+									In Claude Code, run <code>/mcp</code> and choose <strong>githive</strong> to sign in.
+								</li>
+								<li>Your browser opens GitHive: choose the agent Claude Code acts as, or name a new one.</li>
+							</ol>
 						</div>
 					</div>
 					<div className="box agents__way">
 						<div className="box__body">
-							<h3>With a token</h3>
-							<CopyBlock text={commands.token} />
-							<p className="muted">Make an agent below, give it a token, and put the token in place of &lt;token&gt;.</p>
+							<h3>Or use a token</h3>
+							<p className="muted">For a tool that can't sign in through your browser. Make an agent below and choose New token. GitHive shows the token once, with the command to connect it filled in, ready to copy.</p>
 						</div>
 					</div>
 				</div>

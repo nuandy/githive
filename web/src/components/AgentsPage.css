@@ -220,3 +220,18 @@
 	min-width: 0;
 	overflow-wrap: anywhere;
 }
+
+.agents__steps {
+	margin: 0;
+	padding-left: 1.3em;
+	display: grid;
+	gap: 10px;
+}
+
+.agents__steps li {
+	min-width: 0;
+}
+
+.agents__steps li > .copy-block {
+	margin-top: 6px;
+}

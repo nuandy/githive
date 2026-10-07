@@ -29,12 +29,13 @@ const render = (props: Partial<Parameters<typeof AgentsView>[0]> = {}) =>
 	renderToStaticMarkup(<AgentsView me={me} origin="https://githive.app" agents={agents} connections={connections} actions={actions} now={NOW} {...props} />);
 
 describe("the Agents page", () => {
-	it("explains both ways to connect, with this address's commands", () => {
+	it("explains both ways to connect: Claude Code step by step with this address's command, or a token", () => {
 		const text = visibleText(render());
 		expect(text).toContain("claude mcp add --transport http githive https://githive.app/mcp");
-		expect(text).toContain("--header Authorization: Bearer token");
-		expect(text).toContain("Sign in from the app");
-		expect(text).toContain("With a token");
+		expect(text).toContain("Connect Claude Code");
+		expect(text).toContain("Or use a token");
+		// No command with a placeholder to fill in: a new token comes with its own, filled in.
+		expect(text).not.toContain("Bearer token");
 	});
 
 	it("lists your agents by full name with their tokens, never a token's secret", () => {
