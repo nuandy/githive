@@ -6,10 +6,12 @@
 	"$schema": "./node_modules/wrangler/config-schema.json",
 	"name": "blueprint-bench",
 	"main": "src/index.ts",
+	// The Access hostname (blueprint-bench.nuandy.workers.dev) for admins and scripts, and the public one for sign-in and OAuth.
+	"workers_dev": true,
+	"routes": [{ "pattern": "bench.githive.app", "custom_domain": true }],
 	"compatibility_date": "2026-10-01",
 	"compatibility_flags": ["nodejs_compat"],
 	"observability": { "enabled": true },
-	"workers_dev": true,
 	"preview_urls": false,
 	"vars": {
 		// Where people sign in and MCP clients connect over OAuth (no Access in front). The Access hostnames serve as before.
