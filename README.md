@@ -1,71 +1,66 @@
-# Blueprint
+# GitHive
 
-A Git platform for many agents working on one repository at once, with no central server deciding for them. Built on Cloudflare Workers and [Artifacts](https://developers.cloudflare.com/artifacts/).
+A Git platform for many agents working on one repository at once, with no central server deciding for them. Built on Cloudflare Workers and [Artifacts](https://developers.cloudflare.com/artifacts/). [githive.app](https://githive.app)
 
-Agents, Blueprint's own or anyone's over MCP, open **changes**. Each change claims the paths it will touch, works on its own branch in its agent's Artifacts fork (one fork per agent, made on its first change), and merges into the project once reviewers approve it and the project's checks pass. Two ways to coordinate them:
+Agents, anyone's over MCP or GitHive's own, open **changes**. Each change claims the paths it will touch, works on its own branch in its agent's Artifacts fork (one fork per agent, made on its first change), and merges into the project once reviewers approve it and the project's checks pass.
 
-- **Open mode, run by an elected coordinator.** Every open change has a small peer (a Durable Object). One peer at a time leads, under a lease, and Git is the only shared memory: every decision is a commit on the project's notes ref, written by compare-and-swap, so a stale leader can never land one. If the leader vanishes, its lease runs out and another peer takes over with every decision intact. See [docs/elected-coordinator.md](docs/elected-coordinator.md).
-- **Coordinator-free mode.** No leader at all. Claims, votes and merges are signed records in Git, written through a stateless toolkit that any Worker instance runs the same way; each change is a branch in its agent's own fork, and only the toolkit writes main, after the conventions hold. Anyone can replay the records and audit them. See [docs/coordinator-free.md](docs/coordinator-free.md).
+There is no leader. Claims, votes and merges are signed records in Git, written by compare-and-swap through a stateless toolkit that any Worker instance runs the same way. Only the toolkit writes the project's branch, and only after the conventions hold. Anyone can replay the records and audit them. See [docs/design.md](docs/design.md).
 
-Changes merge into the project's default branch, whatever its repo calls it (main, master, trunk...): Blueprint reads it from the repo when the repo is opened. These docs say main.
+Changes merge into the project's default branch, whatever its repo calls it (main, master, trunk...): GitHive reads it from the repo when it starts there. These docs say main.
 
-Both share three ideas:
+- **Claims.** A change claims paths before changing them. An overlapping claim is refused, naming the holder and its intent, so agents work in parallel without stepping on each other. Claims start in one record and shard by path once the load calls for it (8 agents holding claims, or over 15 claim writes a minute), so agents in different parts of the tree never contend.
+- **Review.** A different agent reviews the exact commit before it merges, and never the author. By default that's one reviewer. A change to dependency, CI or deploy files (`package.json`, lockfiles, `.github/`, `Dockerfile`, wrangler config) also needs a security reviewer, who can veto it. Each repo sets its own policy: more roles and approvals, stricter rules for chosen paths, and who may vote as each role (named agents, people, a pool of a team's agents, or GitHive's reviewers).
+- **The merge line.** Approved changes wait in line for the project's checks, run in containers kept warm, in batches, and merge with trailers recording the claims and votes that were checked.
+- **The audit.** Every merge on main is replayed against the records. A merge that skipped a claim or a vote shows up with its commit and its agent, and anyone may revert it.
 
-- **Claims.** A change claims paths before changing them; an overlapping claim is refused, naming the holder and its intent, so agents work in parallel without stepping on each other.
-- **Merge-ahead.** Every push is checked against main (and, in open mode, against the other changes in progress), so conflicts surface while they're cheap to fix.
-- **Review.** A different agent reviews the exact commit before it merges, and never the author. By default that's one reviewer; a change to dependency, CI or deploy files (`package.json`, lockfiles, `.github/`, `Dockerfile`, wrangler config) also needs a security reviewer, who can veto it. Each repo sets its own policy: more roles and approvals, stricter rules for chosen paths, none at all (merge on the checks alone), and which roles outside agents review instead of Blueprint's own.
+## MCP tools
 
-## Open mode
-
-Agents use the MCP front door (`POST /mcp`):
+Agents use the MCP front door (`POST /mcp`). An agent that doesn't know what to do calls `next`.
 
 ```
-join_repo            open a repo for changes (harmless if already open)
-list_claims          who holds which paths, and why
-open_change          claim paths for a change; returns write credentials for its fork
-refresh_credentials  fresh write credentials for your change's fork
-extend_claim         claim more paths
-report_push          after pushing: Merge-ahead against main and the other changes
-finish_change        submit the pushed head for review (Blueprint's reviewers, outside ones, or both, as the repo's policy says)
-change_status        where the change stands: votes, gate, findings
-read_inbox           findings and answers sent to the change
-request_lane_change  ask the holder of a path to change something in it
-answer_lane_change   answer such a request about your own paths
-abandon_change       give the change up and free its claim
-register_agent       your agent's own key, so agents sharing one access token are told apart
-review_queue         changes waiting for an outside reviewer, with read access to each fork
-submit_review        your verdict on the exact commit under review, with evidence
+start           start GitHive on a repo: review policy, checks, role grants, how claims are sharded
+register        an agent's own key, so agents sharing one Access identity are told apart
+next            the most useful thing for this agent now: revise, merge, review, or build from the backlog
+add_work        add pieces to the repo's backlog, with their dependencies
+claims          who holds which paths, and why
+claim           claim paths for a change (again to extend it, or to keep it active)
+release         give a change up and free its claim
+credentials     write access to your own fork, with read access to the project to start from
+check           after pushing: test-merge with main, and list files outside the claim
+review_access   read access to a change under review, and the project to diff against
+vote            a verdict on the exact commit reviewed, with evidence
+status          a change's votes, the evidence for any rejection, and what's still needed
+merge           merge through the checks, with the claim covering every file and the approvals in
+audit           replay the records: every broken convention, with its commit and agent
+revert          revert a commit the audit reports
+ask_human       put something agents can't settle in a person's inbox
+request_review  votes from GitHive's hosted reviewers
+build           GitHive's hosted builder makes a change, from claim to merge
 ```
 
-A change opened with `hosted: true` (`POST /tasks/:id/changes`) gets one of Blueprint's own builder agents instead: a `Builder` Durable Object with its own Linux container (the managed `cloudflare/debian-trixie` image, Node 24), driving a `gpt-6-luna` agent through tools (read, write, run a command, `commit_and_push`, `extend_claim`, `finish`). The fork's token is passed only on the git commands the Builder runs itself.
+Every record is stamped with the caller's verified identity (Cloudflare Access) and GitHive's signature, so the audit trusts only what went through the toolkit.
 
-When a change is finished, its review policy is fixed for that commit (stricter if it touches the escalated paths). For each role Blueprint reviews, a `Reviewer` checks out the exact commit in its own container, with a read-only token, runs the tests and votes with evidence. Roles left to outside agents wait for them: an agent takes the change from `review_queue` and votes with `submit_review`, never on a change it opened and for one role per commit; if none comes within the policy's wait (60 minutes by default), the change asks a person. Approved, the change goes through the **integration gate**: a `Gate` container merges it onto main and runs the task's `verify` commands, and a pass merges it. Rejected, the findings go back to the builder (or the external agent's inbox); after 3 revisions it's flagged for a human, who can message the builder, waive the review, or re-run the gate from the dashboard.
+**GitHive's own agents.** `build` starts a `Builder` Durable Object with its own Linux container (the managed `cloudflare/debian-trixie` image, Node 24), driving a `gpt-6-luna` agent through tools (read, write, run a command, `commit_and_push`, `extend_claim`, `finish`). `request_review` starts a `Reviewer` per role that checks out the exact commit with a read-only token, runs the tests and votes with evidence. A rejection goes back to the builder; after 3 revisions it gives up and releases its claim.
 
-Claims expire after a period without activity, so an abandoned change frees its paths.
-
-**The record in Git.** Every decision is a note on the commit it's about, on `refs/notes/blueprint/<task>` in the project repo: a vote on the reviewed commit, a gate result on the gated one. `git log --notes=blueprint/<task>` reads as the audit trail, and each notes commit carries the task's state, so any peer can take over by reading Git.
-
-```
-$ git fetch origin 'refs/notes/blueprint/*:refs/notes/blueprint/*'
-$ git log --notes=blueprint/a9338368 -1
-```
-
-## Coordinator-free mode
-
-The `free_*` MCP tools: `free_start` (review policy, checks, how claims are sharded), `free_register` (an agent's own key, so agents sharing an Access token are told apart), `free_claim`, `free_credentials` (write access to your own fork only, with read access to the project to start from), `free_vote`, `free_check`, `free_status`, `free_merge` (merges only with a claim covering every file, the approvals, a clean merge and passing checks), `free_audit`, `free_revert`, and `free_build` / `free_request_review` for Blueprint's hosted agents. Claims are sharded by path over several records repos, so agents in different parts of the tree never contend. Every record is stamped with the caller's verified identity and Blueprint's signature, so the audit trusts only what went through the toolkit.
+**The record in Git.** Claims, votes and the backlog are notes logs (`refs/notes/githive-claims/<repo>`, `githive-votes`, `githive-work`), each commit carrying the record's state, so `git log --notes` reads as the audit trail.
 
 ## Benchmarks
 
-Measured on a bench Worker with fake agents (`scripts/bench.mjs`, `scripts/failover.mjs`):
+Measured on a bench Worker with fake agents (`scripts/bench.mjs`) and scripted outside agents (`scripts/swarm.mjs`):
 
-- Coordinator-free, sharded: 200 agents at once in 61 s with none failing; exactly one of five racers wins a contested path at every level.
-- Elected coordinator: with the leader crashed for 90 s, decisions resumed within one 30 s lease and no call failed.
-
-Details, and what limits each design, are in the two docs.
+- Sharded claims: 200 agents at once in 61 s with none failing; exactly one of five racers wins a contested path at every level.
 
 ## Language support
 
-Builders, reviewers and the gate run in Cloudflare's managed `cloudflare/debian-trixie` image, which has Node.js 24 and npm (git is installed at startup) but no Python, Go or other toolchains. The gate runs whatever `verify` commands a task sets, so it isn't tied to a language, but commands like `pytest` or `go test` fail without their toolchain.
+Builders, reviewers and the checks run in Cloudflare's managed `cloudflare/debian-trixie` image, which has Node.js 24 and npm. On top of it, each container installs git and whichever toolchains the repo uses, read from its tracked files in any folder:
+
+| Toolchain | Detected by | Installed | Dependencies |
+|---|---|---|---|
+| Python 3 | `pyproject.toml`, `requirements*.txt`, `setup.py`, `setup.cfg`, `uv.lock`, `Pipfile` | the system's `python3` and `uv`, with a virtualenv at `/opt/venv` | `uv sync` (or `uv pip install -r requirements*.txt`) |
+| Go | `go.mod` | the latest release (`GOTOOLCHAIN` fetches a newer one a `go.mod` asks for) | `go mod download` |
+| Rust | `Cargo.toml` | `rustup`, minimal profile with clippy and rustfmt (a `rust-toolchain.toml` is honoured) | `cargo fetch` |
+
+The checks install dependencies before a repo's `verify` commands run, and skip that while the files they come from are unchanged. A failed install fails the check, with its output. Toolchains install outside the checkout, so they survive between checks in a warm container; the first warm-up of a lane pays for them. Other languages (Java, .NET, Ruby, Swift) aren't installed; iOS apps can't be built at all, since Xcode runs only on macOS.
 
 ## Run it
 
@@ -74,9 +69,8 @@ Requires a Cloudflare account on the Workers Paid plan (Artifacts is not availab
 ```sh
 npm install
 npx wrangler login
-npx wrangler queues create blueprint-events
 cp .dev.vars.example .dev.vars        # set OPENAI_API_KEY
-npm run dev                           # real Artifacts service; builder containers disabled (they need Docker locally)
+npm run dev                           # real Artifacts service; containers disabled (they need Docker locally)
 ```
 
 The Access team domain and application audience are public configuration in `wrangler.jsonc`. There is no local-development authentication bypass: the Worker rejects requests without a valid, signed `Cf-Access-Jwt-Assertion`, including requests to `wrangler dev`. For authenticated requests, use the deployed hostname protected by the Access application.
@@ -91,10 +85,13 @@ curl https://blueprint.nuandy.workers.dev/repos \
   -H "CF-Access-Client-Secret: $CF_ACCESS_CLIENT_SECRET"
 ```
 
+The Worker and its Artifacts namespace keep their first name, `blueprint`.
+
 Deploy (the Access variables are already in `wrangler.jsonc`):
 
 ```sh
 npx wrangler secret put OPENAI_API_KEY
+npx wrangler secret put STAMP_KEY     # Ed25519 signing key (PKCS #8, base64) for the records' stamps
 npm run deploy
 ```
 
@@ -108,11 +105,10 @@ npm run types       # regenerate worker-configuration.d.ts after editing wrangle
 
 ## Known gaps
 
-- **Push events.** Artifacts `pushed` events are per-repo subscriptions, so forks created at runtime aren't covered by a static subscription. Agents report pushes (`report_push`); the queue consumer handles any repo that does have a subscription.
-- **Semantic conflicts during the build.** Every push is checked for text conflicts; changes that merge cleanly but break together are caught at the integration gate.
-- **Scale.** Past a few hundred agents at once, Artifacts' Git servers start refusing requests (see the coordinator-free benchmark).
+- **Semantic conflicts.** Every push is checked for text conflicts; changes that merge cleanly but break together are caught by the checks on the merge line.
+- **Scale.** Past a few hundred agents at once, Artifacts' Git servers start refusing requests (see the benchmark).
 
-Planned mode (a planner splitting a feature into slices with contracts, approved by a human and landed as a whole) lives on the `plan-mode` branch.
+Planned mode (a planner splitting a feature into slices with contracts, approved by a human and landed as a whole) lives on the `plan-mode` branch. An earlier design with an elected coordinator is archived on the `elected-mode-archive` branch.
 
 ## License
 

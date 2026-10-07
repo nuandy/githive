@@ -49,17 +49,6 @@
 	margin-bottom: 0;
 }
 
-.repo-header__coordinator {
-	display: flex;
-	align-items: center;
-	flex-wrap: wrap;
-	gap: 6px;
-	margin: -2px 0 10px;
-	font-size: 13px;
-	overflow-wrap: anywhere;
-	cursor: help;
-}
-
 .live-dot {
 	display: inline-flex;
 	align-items: center;

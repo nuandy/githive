@@ -18,7 +18,7 @@ export interface BuilderGitPushHistory {
 
 /** Refuse a token-authenticated push if it would discard an already-pushed commit. */
 export function builderGitPushBlockReason(history: BuilderGitPushHistory): string | undefined {
-	if (history.forcePush) return "Refusing force-push: Blueprint pins reviews to exact commits, so pushed history must be preserved. Add a new commit instead.";
+	if (history.forcePush) return "Refusing force-push: GitHive pins reviews to exact commits, so pushed history must be preserved. Add a new commit instead.";
 	const remoteWouldBeRewritten = Boolean(history.remoteHead) && !history.remoteHeadIsAncestor;
 	const lastPushedCommitWasRewritten = Boolean(history.lastPushedHead) && !history.lastPushedHeadIsAncestor;
 	const pushedHeadCannotBeVerified = history.hasPushedHistory && !history.remoteHead && !history.lastPushedHead;
@@ -28,11 +28,11 @@ export function builderGitPushBlockReason(history: BuilderGitPushHistory): strin
 
 const MAX_NESTED_SHELL_DEPTH = 16;
 const UNSAFE_SHELL_REASON =
-	"Blueprint pins reviews to exact commits. This shell execution cannot be safely inspected for history rewrites; run its Git command directly, preserve pushed history by adding a new commit, and bring in the project's updates with fetch_base and a merge rather than rebasing.";
+	"GitHive pins reviews to exact commits. This shell execution cannot be safely inspected for history rewrites; run its Git command directly, preserve pushed history by adding a new commit, and bring in the project's updates with fetch_base and a merge rather than rebasing.";
 const PUSH_REASON =
-	"Blueprint pins reviews to exact commits. Force-pushes can replace pushed history, so preserve history and add a new commit instead. Use commit_and_push for a normal push.";
+	"GitHive pins reviews to exact commits. Force-pushes can replace pushed history, so preserve history and add a new commit instead. Use commit_and_push for a normal push.";
 const HISTORY_REASON =
-	"Blueprint pins reviews to exact commits, so preserve pushed history. Add a new commit instead; bring in the project's updates with fetch_base and a merge rather than rebasing.";
+	"GitHive pins reviews to exact commits, so preserve pushed history. Add a new commit instead; bring in the project's updates with fetch_base and a merge rather than rebasing.";
 
 function inspectShell(command: string, hasPushedHistory: boolean, depth: number): string | undefined {
 	if (depth > MAX_NESTED_SHELL_DEPTH) return UNSAFE_SHELL_REASON;

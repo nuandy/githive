@@ -36,7 +36,7 @@ export async function fetchCommits(remote: Remote, oids: string[], dir = FETCHED
 	await git.init({ fs, dir });
 	if (!oids.length) return { fs, dir };
 	const body = concat([
-		...oids.flatMap((oid, i) => pktLine(`want ${oid}${i === 0 ? ` side-band-64k ofs-delta${history ? "" : " shallow"} no-progress agent=blueprint` : ""}\n`)),
+		...oids.flatMap((oid, i) => pktLine(`want ${oid}${i === 0 ? ` side-band-64k ofs-delta${history ? "" : " shallow"} no-progress agent=githive` : ""}\n`)),
 		// Just the commits, or (history) everything behind them too.
 		...(history ? [] : pktLine("deepen 1\n")),
 		encoder.encode("0000"),

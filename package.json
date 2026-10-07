@@ -1,5 +1,5 @@
 {
-	"name": "blueprint",
+	"name": "githive",
 	"version": "0.1.0",
 	"scripts": {
 		"dev": "wrangler dev --enable-containers=false",

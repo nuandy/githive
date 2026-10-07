@@ -1,4 +1,4 @@
-import { newestTaskPerRepo, type RepoMode, type Summaries } from "./repos";
+import type { Summaries } from "./repos";
 import { href } from "./routes";
 import { timeOf } from "./model";
 
@@ -13,7 +13,6 @@ export interface InboxItem {
 
 export interface InboxGroup {
 	repo: string;
-	mode: RepoMode;
 	repoHref: string;
 	lastActivity?: string;
 	items: InboxItem[];
@@ -22,26 +21,14 @@ export interface InboxGroup {
 export function buildInbox(summaries: Summaries | undefined): { groups: InboxGroup[]; count: number } {
 	if (!summaries) return { groups: [], count: 0 };
 	const groups: InboxGroup[] = [];
-	for (const task of newestTaskPerRepo(summaries.tasks)) {
-		const waiting = task.summary?.waiting ?? [];
-		if (!waiting.length) continue;
-		groups.push({
-			repo: task.repo,
-			mode: "elected",
-			repoHref: href.repo(task.repo),
-			lastActivity: task.summary?.lastActivity,
-			items: waiting.map((item) => ({ ...item, title: item.title || item.change, href: href.change(task.repo, item.change) })),
-		});
-	}
-	for (const repo of summaries.free) {
+	for (const repo of summaries.repos ?? []) {
 		const waiting = repo.summary?.waiting ?? [];
 		if (!waiting.length) continue;
 		groups.push({
 			repo: repo.repo,
-			mode: "coordinator-free",
-			repoHref: href.repo(repo.repo, "changes", "free"),
+			repoHref: href.repo(repo.repo),
 			lastActivity: repo.summary?.lastActivity,
-			items: waiting.map((item) => ({ ...item, title: item.title || item.change, href: href.change(repo.repo, item.change, "conversation", "free") })),
+			items: waiting.map((item) => ({ ...item, title: item.title || item.change, href: href.change(repo.repo, item.change) })),
 		});
 	}
 	groups.sort((a, b) => (timeOf(b.lastActivity) ?? 0) - (timeOf(a.lastActivity) ?? 0) || a.repo.localeCompare(b.repo));

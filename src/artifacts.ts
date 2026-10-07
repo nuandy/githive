@@ -1,20 +1,11 @@
 import type { Remote } from "./git";
 import { isTransientFailure, retryTransient, sleep, transientDelay } from "./retry";
 
-// Repo names encode the task (<taskId>--<slice>) so Artifacts events can be
-// routed back to the task's Coordinator without a lookup table.
-export const sliceRepoName = (taskId: string, sliceId: string) => `${taskId}--${sliceId}`;
-
 /**
  * One reviewer instance per (slice, role, commit). A new commit never collides
  * with a reviewer that is still finishing on an older one.
  */
 export const reviewerName = (sliceRepo: string, role: string, head: string) => `${sliceRepo}--review-${role}--${head.slice(0, 12)}`;
-
-export function parseRepoName(name: string) {
-	const match = /^([0-9a-f]{8})--([a-z0-9]+(?:-[a-z0-9]+)*)$/.exec(name);
-	return match ? { taskId: match[1], slice: match[2] } : null;
-}
 
 /**
  * Run work against a disposable repo capability, releasing it even on failure.
@@ -73,14 +64,6 @@ export async function listRepoNames(artifacts: Artifacts) {
 		names.push(...page.repos.map((r) => r.name));
 		cursor = page.cursor;
 	} while (cursor);
-	return names;
-}
-
-/** Delete every repo whose name starts with `prefix` (a task's forks: `<task>--…`). Returns the names deleted. */
-export async function deleteReposWithPrefix(artifacts: Artifacts, prefix: string) {
-	if (!/^[0-9a-f]{8}--$/.test(prefix)) throw new Error(`refusing to delete repos by prefix ${prefix}: not a task's fork prefix`);
-	const names = (await listRepoNames(artifacts)).filter((name) => name.startsWith(prefix));
-	for (const name of names) await retryTransient(() => artifacts.delete(name));
 	return names;
 }
 

@@ -41,7 +41,7 @@ const backend = join(execFileSync("git", ["--exec-path"]).toString().trim(), "gi
 
 /** A server whose project repo has one commit on `branch` (main unless asked), which HEAD names. */
 export async function startGitServer({ branch = "main" }: { branch?: string } = {}): Promise<GitServer> {
-	const root = mkdtempSync(join(tmpdir(), "blueprint-git-"));
+	const root = mkdtempSync(join(tmpdir(), "githive-git-"));
 	const repo = join(root, "project.git");
 	execFileSync("git", ["init", "--bare", "--quiet", repo]);
 	execFileSync("git", ["-C", repo, "config", "http.receivepack", "true"]);

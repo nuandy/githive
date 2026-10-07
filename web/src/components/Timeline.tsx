@@ -4,7 +4,6 @@ import type { Tone } from "../lib/changeStatus";
 import { shortSha } from "../lib/model";
 import { timeAgo } from "../lib/relativeTime";
 import type { TimelineItem, TimelineKind } from "../lib/timeline";
-import { CheckResults } from "./CheckResults";
 import { Icon, type IconName } from "./Icon";
 import "./Timeline.css";
 
@@ -14,27 +13,16 @@ export function kindIcon(kind: TimelineKind, tone: Tone): IconName {
 			return "pull";
 		case "pushed":
 			return "commit";
-		case "review-requested":
-			return "eye";
 		case "review":
-		case "review-result":
 			return tone === "good" ? "check" : "x";
 		case "changes-requested":
 			return "x";
 		case "needs-you":
 			return "alert";
-		case "waiver":
-			return "shield";
-		case "checks":
-			return tone === "good" ? "check" : tone === "bad" ? "x" : "clock";
 		case "merged":
 			return "merge";
 		case "abandoned":
 			return "ban";
-		case "message":
-			return "comment";
-		case "agent":
-			return "bot";
 		default:
 			return "dot";
 	}
@@ -109,7 +97,7 @@ function ReviewCard({ item }: { item: TimelineItem }) {
 	);
 }
 
-export function Timeline({ items, ids = [], link, branch }: { items: TimelineItem[]; ids?: string[]; link?: (id: string) => string; branch?: string }) {
+export function Timeline({ items, ids = [], link }: { items: TimelineItem[]; ids?: string[]; link?: (id: string) => string }) {
 	if (!items.length) return null;
 	const text = (value: string) => (link ? linkIds(value, ids, link) : value);
 	return (
@@ -146,9 +134,6 @@ export function Timeline({ items, ids = [], link, branch }: { items: TimelineIte
 									) : null}
 								</p>
 								{item.body ? <div className={`timeline__body${item.kind === "pushed" ? " timeline__body--commit" : ""}`}>{text(item.body)}</div> : null}
-								{item.gate?.result?.results?.length || item.gate?.result?.mergeConflict?.length ? (
-									<CheckResults gate={item.gate} compact branch={branch} />
-								) : null}
 							</>
 						)}
 					</div>

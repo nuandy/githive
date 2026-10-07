@@ -1,29 +1,22 @@
-import type { ChangeState } from "./model";
-
 // Hash routes. Repo names may contain "/", so each segment is URI-encoded.
 //   #/                                  Repositories
 //   #/inbox                             what waits on a person, across repos
-//   #/repos/:repo[/activity|/claims|/insights|/agents|/settings|/audit][?state=open|merged|abandoned]
+//   #/repos/:repo[/claims|/agents|/audit|/settings]
 //   #/repos/:repo/code[/<path>][?ref=<branch or commit>]
-//   #/repos/:repo/changes/:id[/commits|/files|/checks]
-//   #/free/:repo/...                    the same, forcing coordinator-free mode
-//   #/tasks/:id                         an old link; redirected to its repo
+//   #/repos/:repo/changes/:id[/commits]
 
-export type RepoTab = "changes" | "activity" | "claims" | "code" | "insights" | "agents" | "settings" | "audit";
-export type ChangeTab = "conversation" | "commits" | "files" | "checks";
-export type RepoBase = "repos" | "free";
+export type RepoTab = "changes" | "claims" | "code" | "agents" | "settings" | "audit";
+export type ChangeTab = "conversation" | "commits";
 
 export type Route =
 	| { page: "repos" }
 	| { page: "inbox" }
-	| { page: "repo"; repo: string; base: RepoBase; tab: RepoTab; state: ChangeState; /** Code tab: the file or folder shown, "" for the top. */ path?: string; /** Code tab: a branch or commit other than the project's branch. */ ref?: string }
-	| { page: "change"; repo: string; base: RepoBase; change: string; tab: ChangeTab }
-	| { page: "task"; taskId: string }
+	| { page: "repo"; repo: string; tab: RepoTab; /** Code tab: the file or folder shown, "" for the top. */ path?: string; /** Code tab: a branch or commit other than the project's branch. */ ref?: string }
+	| { page: "change"; repo: string; change: string; tab: ChangeTab }
 	| { page: "not-found" };
 
-const REPO_TABS: RepoTab[] = ["changes", "activity", "claims", "code", "insights", "agents", "settings", "audit"];
-const CHANGE_TABS: ChangeTab[] = ["commits", "files", "checks"];
-const STATES: ChangeState[] = ["open", "merged", "abandoned"];
+const REPO_TABS: RepoTab[] = ["changes", "claims", "code", "agents", "settings", "audit"];
+const CHANGE_TABS: ChangeTab[] = ["commits"];
 
 function decode(segment: string): string | null {
 	try {
@@ -41,12 +34,7 @@ export function parseRoute(hash: string): Route {
 	const params = new URLSearchParams(query);
 	if (parts[0] === "inbox" && parts.length === 1) return { page: "inbox" };
 
-	if (parts[0] === "tasks" && parts.length >= 2) {
-		const taskId = decode(parts[1]);
-		return taskId ? { page: "task", taskId } : { page: "not-found" };
-	}
-	if ((parts[0] === "repos" || parts[0] === "free") && parts.length >= 2) {
-		const base = parts[0] as RepoBase;
+	if (parts[0] === "repos" && parts.length >= 2) {
 		const repo = decode(parts[1]);
 		if (!repo) return { page: "not-found" };
 		const rest = parts.slice(2);
@@ -54,18 +42,16 @@ export function parseRoute(hash: string): Route {
 			const segments = rest.slice(1).map(decode);
 			if (segments.some((segment) => segment === null)) return { page: "not-found" };
 			const ref = params.get("ref") || undefined;
-			return { page: "repo", repo, base, tab: "code", state: "open", path: segments.join("/"), ...(ref ? { ref } : {}) };
+			return { page: "repo", repo, tab: "code", path: segments.join("/"), ...(ref ? { ref } : {}) };
 		}
 		if (rest.length === 0 || (rest.length === 1 && REPO_TABS.includes(rest[0] as RepoTab))) {
-			const tab = (rest[0] as RepoTab | undefined) ?? "changes";
-			const state = STATES.includes(params.get("state") as ChangeState) ? (params.get("state") as ChangeState) : "open";
-			return { page: "repo", repo, base, tab, state };
+			return { page: "repo", repo, tab: (rest[0] as RepoTab | undefined) ?? "changes" };
 		}
 		if (rest[0] === "changes" && rest.length >= 2 && rest.length <= 3) {
 			const change = decode(rest[1]);
 			if (!change) return { page: "not-found" };
 			if (rest.length === 3 && !CHANGE_TABS.includes(rest[2] as ChangeTab)) return { page: "not-found" };
-			return { page: "change", repo, base, change, tab: (rest[2] as ChangeTab | undefined) ?? "conversation" };
+			return { page: "change", repo, change, tab: (rest[2] as ChangeTab | undefined) ?? "conversation" };
 		}
 	}
 	return { page: "not-found" };
@@ -75,12 +61,11 @@ const enc = encodeURIComponent;
 
 export const href = {
 	repos: () => "#/",
-	repo: (repo: string, tab: RepoTab = "changes", base: RepoBase = "repos", state: ChangeState = "open") =>
-		`#/${base}/${enc(repo)}${tab === "changes" ? "" : `/${tab}`}${tab === "changes" && state !== "open" ? `?state=${state}` : ""}`,
-	change: (repo: string, change: string, tab: ChangeTab = "conversation", base: RepoBase = "repos") =>
-		`#/${base}/${enc(repo)}/changes/${enc(change)}${tab === "conversation" ? "" : `/${tab}`}`,
+	repo: (repo: string, tab: RepoTab = "changes") => `#/repos/${enc(repo)}${tab === "changes" ? "" : `/${tab}`}`,
+	change: (repo: string, change: string, tab: ChangeTab = "conversation") =>
+		`#/repos/${enc(repo)}/changes/${enc(change)}${tab === "conversation" ? "" : `/${tab}`}`,
 	/** A file or folder in the Code tab; each path segment is encoded, so the path reads naturally in the address bar. */
-	code: (repo: string, path = "", base: RepoBase = "repos", ref?: string) =>
-		`#/${base}/${enc(repo)}/code${path ? `/${path.split("/").filter(Boolean).map(enc).join("/")}` : ""}${ref ? `?ref=${enc(ref)}` : ""}`,
+	code: (repo: string, path = "", ref?: string) =>
+		`#/repos/${enc(repo)}/code${path ? `/${path.split("/").filter(Boolean).map(enc).join("/")}` : ""}${ref ? `?ref=${enc(ref)}` : ""}`,
 	inbox: () => "#/inbox",
 };

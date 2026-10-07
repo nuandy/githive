@@ -3,7 +3,7 @@
  * a call does. Read-only tools change nothing; destructive ones can undo or
  * give up work (abandoning a change, releasing a claim, a revert, a new agent
  * key); idempotent ones can be repeated with the same arguments to the same
- * effect. Blueprint's tools act only on its own repos and records, not an open
+ * effect. GitHive's tools act only on its own repos and records, not an open
  * world. (Anthropic's connector directory asks for a title and readOnlyHint or
  * destructiveHint on every tool.)
  */

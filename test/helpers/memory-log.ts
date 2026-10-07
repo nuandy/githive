@@ -1,4 +1,4 @@
-import type { CasLog, LogCommit } from "../../src/election";
+import type { CasLog, LogCommit } from "../../src/record-log";
 
 /** An in-memory ref with Git's push semantics: an append lands only on the tip it was built on. */
 export class MemoryLog<S> implements CasLog<S> {

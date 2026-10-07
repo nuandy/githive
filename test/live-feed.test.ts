@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { FakeStorage } from "./fakes/env";
 
 const { LiveFeed } = await import("../src/live-feed");
@@ -67,5 +67,54 @@ describe("forgetting a deleted repo's views", () => {
 		await live.clearViews();
 		expect(await live.view("snapshot", 60_000)).toEqual({ json: undefined, fresh: false, building: false, writes: 1 });
 		expect(await live.startBuild("audit")).toBe(true);
+	});
+});
+
+describe("review holds", () => {
+	it("holds a review for as many agents as it needs, atomically, until they vote or the hold runs out", async () => {
+		const { live } = feed();
+		expect(await live.holdReview("h1", "agent-a", 1)).toBe(true);
+		// Needed once and held: the next agent is turned away; the holder may take it again.
+		expect(await live.holdReview("h1", "agent-b", 1)).toBe(false);
+		expect(await live.holdReview("h1", "agent-a", 1)).toBe(true);
+		// Needed twice: room for a second.
+		expect(await live.holdReview("h1", "agent-b", 2)).toBe(true);
+		expect(await live.reviewsHeld()).toEqual({ h1: ["agent-a", "agent-b"] });
+		// Voted: held a minute more, until the vote shows everywhere, then gone.
+		const now = Date.now();
+		await live.releaseReview("h1", "agent-a");
+		expect(await live.reviewsHeld()).toEqual({ h1: ["agent-a", "agent-b"] });
+		const later = vi.spyOn(Date, "now").mockReturnValue(now + 61_000);
+		try {
+			expect(await live.reviewsHeld()).toEqual({ h1: ["agent-b"] });
+		} finally {
+			later.mockRestore();
+		}
+	});
+
+	it("lets holds run out", async () => {
+		const { live } = feed();
+		const now = Date.now();
+		await live.holdReview("h1", "agent-a", 1);
+		const later = vi.spyOn(Date, "now").mockReturnValue(now + 16 * 60_000);
+		try {
+			expect(await live.reviewsHeld()).toEqual({});
+			expect(await live.holdReview("h1", "agent-b", 1)).toBe(true);
+		} finally {
+			later.mockRestore();
+		}
+	});
+});
+
+describe("reviews a role waits for", () => {
+	it("remembers when each was first seen waiting, forgets one that stops waiting, and whether people were told", async () => {
+		const { live } = feed();
+		const first = await live.roleWaits(["h1#security"]);
+		expect((await live.roleWaits(["h1#security", "h2#security"]))["h1#security"].since).toBe(first["h1#security"].since);
+		await live.roleWaitTold("h1#security");
+		expect(await live.roleWaits(["h1#security"])).toEqual({ "h1#security": { since: first["h1#security"].since, told: true } });
+		// h1's review was taken; when it waits again, its clock starts over.
+		await live.roleWaits([]);
+		expect((await live.roleWaits(["h1#security"]))["h1#security"].told).toBeUndefined();
 	});
 });

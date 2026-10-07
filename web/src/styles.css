@@ -306,7 +306,7 @@ label {
 	font-weight: 500;
 }
 
-/* How a coordinator-free repo keeps its claims: sharded stands out from one record. */
+/* How a repo keeps its claims: sharded stands out from one record. */
 .mode-badge--sharded {
 	border-color: color-mix(in srgb, var(--accent) 45%, transparent);
 	color: var(--accent);

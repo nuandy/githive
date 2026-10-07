@@ -3,7 +3,7 @@ import { liveFeedUrl } from "../api";
 import { LiveFeed, type LiveStatus, type SocketLike } from "../lib/liveFeed";
 
 /**
- * Keep a repo's live feed open ("task:<id>" or "free:<repo>") and call
+ * Keep a repo's live feed open ("repo:<repo>") and call
  * `onPing` when something changed. A null key closes it. Returns whether it's
  * connected, so pages can poll less while it is.
  */

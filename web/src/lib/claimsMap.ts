@@ -1,9 +1,6 @@
-import type { FreeSnapshot, Task } from "../api";
-import { agentLabel } from "./agent";
-import { conflictsByChange } from "./conflicts";
-import { claimAgent, claimTitle } from "./freeStatus";
-import { changesOf, isActive } from "./model";
-import { href, type RepoBase } from "./routes";
+import type { RepoSnapshot } from "../api";
+import { claimAgent, claimTitle } from "./claimStatus";
+import { href } from "./routes";
 import { normalizePath } from "./tree";
 
 // The Claims map: which open change holds which part of a repo. A claim on a
@@ -16,37 +13,22 @@ export interface ClaimHolder {
 	change: string;
 	title: string;
 	agent: string;
-	/** Claimed paths (and, in elected repos, files it has changed). */
+	/** Claimed paths. */
 	paths: string[];
 	href: string;
 	/** 0-based index into the claim colors. */
 	color: number;
-	/** Files where it conflicts with another open change or the project's branch. */
+	/** Files where it conflicts with another open change or the project's branch (none known here: claims keep no conflicts). */
 	conflicts: string[];
 }
 
-export function holdersFromTask(task: Pick<Task, "slices" | "checks">, repo: string, base: RepoBase = "repos"): ClaimHolder[] {
-	const conflicts = conflictsByChange(task);
-	return changesOf(task)
-		.filter(isActive)
-		.map((change, index) => ({
-			change: change.id,
-			title: change.title || change.id,
-			agent: agentLabel(change),
-			paths: [...new Set([...(change.owns ?? []), ...(change.touched ?? [])])],
-			href: href.change(repo, change.id, "conversation", base),
-			color: index % CLAIM_COLORS,
-			conflicts: [...new Set((conflicts.get(change.id) ?? []).flatMap((c) => c.files))],
-		}));
-}
-
-export function holdersFromSnapshot(snapshot: Pick<FreeSnapshot, "claims">, repo: string, base: RepoBase = "free"): ClaimHolder[] {
+export function holdersFromSnapshot(snapshot: Pick<RepoSnapshot, "claims">, repo: string): ClaimHolder[] {
 	return snapshot.claims.map((claim, index) => ({
 		change: claim.change,
 		title: claimTitle(claim),
 		agent: claimAgent(claim),
 		paths: [...claim.paths],
-		href: href.change(repo, claim.change, "conversation", base),
+		href: href.change(repo, claim.change),
 		color: index % CLAIM_COLORS,
 		conflicts: [],
 	}));

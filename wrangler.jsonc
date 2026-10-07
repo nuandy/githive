@@ -1,5 +1,7 @@
 {
 	"$schema": "./node_modules/wrangler/config-schema.json",
+	// GitHive. The Worker and its Artifacts namespace keep their first name, "blueprint":
+	// renaming the namespace would start it empty, and the Worker's URL stays the same.
 	"name": "blueprint",
 	"main": "src/index.ts",
 	"compatibility_date": "2026-10-01",
@@ -29,12 +31,10 @@
 	],
 	"durable_objects": {
 		"bindings": [
-			{ "name": "COORDINATOR", "class_name": "Coordinator" },
 			{ "name": "BUILDER", "class_name": "Builder" },
 			{ "name": "REVIEWER", "class_name": "Reviewer" },
 			{ "name": "GATE", "class_name": "Gate" },
-			{ "name": "TASK_INDEX", "class_name": "TaskIndex" },
-			{ "name": "PEER", "class_name": "Peer" },
+			{ "name": "REPO_INDEX", "class_name": "RepoIndex" },
 			{ "name": "LIVE", "class_name": "LiveFeed" },
 			{ "name": "TOKENS", "class_name": "TokenCache" }
 		]
@@ -58,10 +58,10 @@
 		{ "tag": "v8", "deleted_classes": ["ContractChecker"] },
 		// The dashboard's live updates.
 		{ "tag": "v9", "new_sqlite_classes": ["LiveFeed"] },
-		{ "tag": "v10", "new_sqlite_classes": ["TokenCache"] }
-	],
-	"queues": {
-		// Receives Artifacts event subscriptions (see README).
-		"consumers": [{ "queue": "blueprint-events", "max_batch_size": 10, "max_batch_timeout": 1 }]
-	}
+		{ "tag": "v10", "new_sqlite_classes": ["TokenCache"] },
+		// Elected mode is frozen (branch elected-mode-archive); its task state goes.
+		{ "tag": "v11", "deleted_classes": ["Coordinator", "Peer"] },
+		// GitHive: the repo index starts fresh under its new name.
+		{ "tag": "v12", "deleted_classes": ["TaskIndex"], "new_sqlite_classes": ["RepoIndex"] }
+	]
 }

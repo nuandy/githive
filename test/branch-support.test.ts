@@ -38,7 +38,7 @@ describe("a project whose branch is master", () => {
 		expect(await branchHead(remote(), "main")).toBeNull();
 	});
 
-	it("runs coordinator-free mode end to end: started, checked, merged and audited on master", async () => {
+	it("runs GitHive end to end: started, checked, merged and audited on master", async () => {
 		// A change's fork starts as a copy of the project: master, and nothing else.
 		const forkUrl = server.repo("fork");
 		// Pushed by path: git over HTTP would wait on this process's own server.
@@ -46,13 +46,7 @@ describe("a project whose branch is master", () => {
 		server.git("push", "--quiet", join(repos, "fork.git"), "master");
 		server.gitIn("fork", "symbolic-ref", "HEAD", "refs/heads/master");
 		const ctx = {
-			coordinator: () => {
-				throw new Error("not used");
-			},
-			openRepo: async () => {
-				throw new Error("not used");
-			},
-			free: {
+			toolkit: {
 				remote: async () => remote(),
 				changeRemote: async () => ({ url: forkUrl, token: "unused" }),
 				head: async (_repo: string, branch: string) => (await branchHead(remote(), branch)) ?? "",
@@ -65,17 +59,17 @@ describe("a project whose branch is master", () => {
 			return reply.result.isError ? { error: text } : JSON.parse(text);
 		};
 
-		expect(await call("free_start", { repo: "project", shard_depth: 0 })).toMatchObject({ branch: "master" });
-		await call("free_claim", { repo: "project", change: "a-1", agent: "agent-a", paths: ["src/a/"], intent: "a" });
+		expect(await call("start", { repo: "project", shard_depth: 0 })).toMatchObject({ branch: "master" });
+		await call("claim", { repo: "project", change: "a-1", agent: "agent-a", paths: ["src/a/"], intent: "a" });
 		const head = await pushChange(forkUrl, work, "agent-a", "a-1", { "src/a/x.txt": "a\n" });
-		expect(await call("free_check", { repo: "project", change: "a-1" })).toMatchObject({ branch: "master", main: { clean: true }, outsideClaim: [] });
-		await call("free_vote", { repo: "project", commit: head, reviewer: "rev-1", role: "tests", verdict: "approve", evidence: "ok" });
-		await call("free_vote", { repo: "project", commit: head, reviewer: "rev-2", role: "security", verdict: "approve", evidence: "ok" });
+		expect(await call("check", { repo: "project", change: "a-1" })).toMatchObject({ branch: "master", main: { clean: true }, outsideClaim: [] });
+		await call("vote", { repo: "project", commit: head, reviewer: "rev-1", role: "tests", verdict: "approve", evidence: "ok" });
+		await call("vote", { repo: "project", commit: head, reviewer: "rev-2", role: "security", verdict: "approve", evidence: "ok" });
 
-		expect(await call("free_merge", { repo: "project", change: "a-1", agent: "agent-a" })).toMatchObject({ ok: true });
+		expect(await call("merge", { repo: "project", change: "a-1", agent: "agent-a" })).toMatchObject({ ok: true });
 		// The merge is on master, which has the change; no main branch was made.
 		expect(server.git("show", "master:src/a/x.txt")).toBe("a\n");
 		expect(await branchHead(remote(), "main")).toBeNull();
-		expect(await call("free_audit", { repo: "project" })).toEqual({ merges: 1, open: 0, violations: [] });
+		expect(await call("audit", { repo: "project" })).toEqual({ merges: 1, open: 0, violations: [] });
 	});
 });

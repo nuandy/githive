@@ -43,18 +43,7 @@ export function TonePill({ tone, children, icon }: { tone: Tone; children: React
 	);
 }
 
-export function ModeBadge({ mode }: { mode: "elected" | "coordinator-free" }) {
-	return (
-		<span
-			className="pill pill--outline mode-badge"
-			title={mode === "elected" ? "An elected coordinator enforces claims, reviews and checks" : "Agents follow the rules themselves; an audit from Git shows who didn't"}
-		>
-			{mode}
-		</span>
-	);
-}
-
-/** How a coordinator-free repo keeps its claims and votes: one record, or sharded (see recordsBadge). */
+/** How a repo keeps its claims and votes: one record, or sharded (see recordsBadge). */
 export function ShardingBadge({ summary }: { summary: { label: string; sharded: boolean; detail: string } | null }) {
 	if (!summary) return null;
 	return (

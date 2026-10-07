@@ -15,7 +15,7 @@ describe("dashboard Cloudflare Access behavior", () => {
 		const request = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => Response.json([]));
 		globalThis.fetch = request as unknown as typeof fetch;
 		try {
-			await api.tasks();
+			await api.summaries();
 			expect(new Headers(request.mock.calls[0][1]?.headers).get("Authorization")).toBeNull();
 		} finally {
 			globalThis.fetch = originalFetch;

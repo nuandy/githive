@@ -1,6 +1,5 @@
 import type { InboxGroup } from "../lib/inbox";
 import { Icon } from "./Icon";
-import { ModeBadge } from "./StatusPill";
 import "./InboxPage.css";
 
 /** Every change waiting on a person, across repos, with why. */
@@ -32,13 +31,12 @@ export function InboxPage({ groups, loaded, error }: { groups: InboxGroup[]; loa
 				</div>
 			) : (
 				groups.map((group) => (
-					<section key={`${group.mode}:${group.repo}`} className="box inbox__group" aria-labelledby={`inbox-${group.mode}-${group.repo}`}>
+					<section key={group.repo} className="box inbox__group" aria-labelledby={`inbox-${group.repo}`}>
 						<div className="box__header">
-							<h2 id={`inbox-${group.mode}-${group.repo}`} className="inbox__repo">
+							<h2 id={`inbox-${group.repo}`} className="inbox__repo">
 								<Icon name="repo" className="muted" />
 								<a href={group.repoHref}>{group.repo}</a>
 							</h2>
-							<ModeBadge mode={group.mode} />
 							<span className="counter">{group.items.length}</span>
 						</div>
 						<ul className="inbox__items">
