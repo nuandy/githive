@@ -59,6 +59,10 @@ export function freeContextFor(env: Env, by: string | undefined, caller: { agent
 		register: async (repo) => env.TASK_INDEX.getByName("all").addFree(repo),
 		summarize: (repo, patch) => env.TASK_INDEX.getByName("all").summarize(`free:${repo}`, patch),
 		ping: async (repo) => void (await env.LIVE?.getByName(`free:${repo}`).ping("records")),
+		warmChecks: async (repo, input) => {
+			const remote = await cached(env, repo, `${repo}|read`, () => remoteFor(env.ARTIFACTS, repo, "read", 3600));
+			await env.GATE.getByName(`free:${repo}`).warmLanes({ repo, ...input, base: { remote: remote.url, token: remote.token } });
+		},
 		reviews: {
 			held: (repo) => env.LIVE.getByName(`free:${repo}`).reviewsHeld(),
 			hold: (repo, head, agent, needed) => env.LIVE.getByName(`free:${repo}`).holdReview(head, agent, needed),

@@ -59,6 +59,8 @@ export interface FreeContext {
 	timing?: Timing;
 	/** Tells the dashboard's open pages that the repo's records changed. */
 	ping?: (repo: string) => Promise<void>;
+	/** Warms the repo's check containers in the background, when a merge is likely soon (see Gate.warmLanes). */
+	warmChecks?: (repo: string, input: { branch: string; checks: string[] }) => Promise<void>;
 	/** Review holds, so free_next doesn't send two agents to a review that needs one (see LiveFeed). */
 	reviews?: {
 		held(repo: string): Promise<Record<string, string[]>>;
@@ -487,6 +489,10 @@ async function runFreeTool(name: string, args: Args, ctx: FreeContext): Promise<
 	};
 	const claimOf = async (change: string) => (await changeOf(change)).claim;
 	const changeSource = changeSourceFor(ctx, repo);
+	/** Warm the check containers for a merge to come (only where the repo has checks); never holds the call up for long. */
+	const warmChecks = async () => {
+		if (registered?.verify?.length) await ctx.warmChecks?.(repo, { branch: projectBranch(registered), checks: registered.verify }).catch(() => undefined);
+	};
 	switch (name) {
 		case "free_start": {
 			const required = typeof args.required === "number" ? args.required : DEFAULT_POLICY.required;
@@ -609,6 +615,7 @@ async function runFreeTool(name: string, args: Args, ctx: FreeContext): Promise<
 			const cast = await votesFor(ctx, repo, await shardVotesIfBusy(ctx, repo, registered, reviewer)).vote({ commit, reviewer, role: requiredString(args, "role"), verdict, evidence: requiredString(args, "evidence") }, stamper);
 			// Its review is done: the hold free_next took for it goes.
 			await ctx.reviews?.release(repo, commit, reviewer).catch(() => undefined);
+			if (verdict === "approve") await warmChecks();
 			return cast;
 		}
 		case "free_merge": {
@@ -672,7 +679,10 @@ async function runFreeTool(name: string, args: Args, ctx: FreeContext): Promise<
 			const own = await claimOf(change);
 			const source = own ? await changeSource(own.agent, "read", change).catch(() => null) : null;
 			if (!source) throw new Error(`[409] changes/${change} has nothing pushed to check`);
-			return checkChange({ project: await ctx.remote(repo, "read"), branch: projectBranch(registered), source, claims: own ? [own] : [], change });
+			const checked = await checkChange({ project: await ctx.remote(repo, "read"), branch: projectBranch(registered), source, claims: own ? [own] : [], change });
+			// Pushed and checked: a merge is likely within minutes, so its check containers warm up meanwhile.
+			await warmChecks();
+			return checked;
 		}
 		case "free_register": {
 			const agent = requiredString(args, "agent");

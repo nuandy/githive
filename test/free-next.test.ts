@@ -176,6 +176,38 @@ describe("review holds through the toolkit", { timeout: 120_000 }, () => {
 	});
 });
 
+describe("warming the checks when a merge is near", { timeout: 60_000 }, () => {
+	it("warms after a check and an approval, where the repo has checks", async () => {
+		const server = await startGitServer();
+		const work = mkdtempSync(join(tmpdir(), "free-warm-"));
+		try {
+			const warmed: unknown[] = [];
+			const ctx = (agentKey?: string): FreeContext => ({
+				remote: async () => ({ url: server.url, token: "unused" }),
+				changeRemote: async () => ({ url: server.url, token: "unused" }),
+				head: async () => server.git("rev-parse", "main").trim(),
+				warmChecks: async (_repo, input) => void warmed.push(input),
+				...(agentKey ? { agentKey } : {}),
+			});
+			const call = (repo: string, name: string, args: Record<string, unknown>, key?: string) => callFreeTool(name, { repo, ...args }, ctx(key)) as Promise<Record<string, unknown>>;
+			for (const [repo, verify] of [["checked", ["npm test"]], ["unchecked", []]] as const) {
+				await call(repo, "free_start", { required: 1, vetoes: [], verify });
+				const { key } = (await call(repo, "free_register", { agent: `a-${repo}` })) as { key: string };
+				await call(repo, "free_claim", { change: `c-${repo}`, agent: `a-${repo}`, paths: [`src/${repo}/`], intent: "x" }, key);
+				const head = await pushChange(server.url, work, `a-${repo}`, `c-${repo}`, { [`src/${repo}/x.js`]: "x\n" });
+				await call(repo, "free_check", { change: `c-${repo}` }, key);
+				await call(repo, "free_vote", { commit: head, reviewer: "rev", role: "review", verdict: "approve", evidence: "ok" });
+				await call(repo, "free_vote", { commit: head, reviewer: "rev-2", role: "review", verdict: "reject", evidence: "no" });
+			}
+			// The check and the approval warm; the rejection and the repo without checks don't.
+			expect(warmed).toEqual([{ branch: "main", checks: ["npm test"] }, { branch: "main", checks: ["npm test"] }]);
+		} finally {
+			await server.close();
+			rmSync(work, { recursive: true, force: true });
+		}
+	});
+});
+
 describe("free_next through the toolkit", { timeout: 120_000 }, () => {
 	let server: GitServer;
 	let work: string;
