@@ -32,6 +32,7 @@
 //                   "onReject": "fix" | "ask" | "stop",     default: fix if it has one, else stop
 //                   "rejectFirst": "what to change" }],     the first review of it asks for changes (optional)
 //     "setup": { "import": "https://github.com/expressjs/express", "branch": "master",
+//                "template": "express-template",   imported once; each run's repo is a copy of it (seconds, not a minute)
 //                "verify": ["npm install", "npm test"], "required": 1,
 //                "grants": { "security": ["agent-3"] } }   optional: make the repo first
 //   }
@@ -297,7 +298,8 @@ function agentFor(spec) {
 				if (next.kind === "wait") {
 					did.get(name).wait++;
 					if (allSettled()) break;
-					await sleep(Math.min(next.retryAfterSeconds ?? 30, 15) * 1000);
+					// Asked again soon: a merge or a review can free work any moment.
+					await sleep(Math.min(next.retryAfterSeconds ?? 30, 5) * 1000);
 					continue;
 				}
 				did.get(name)[next.kind === "finish" ? "build" : next.kind]++;
@@ -317,30 +319,43 @@ function agentFor(spec) {
 	};
 }
 
+const post = (path, body) => fetch(`${BASE}${path}`, { method: "POST", dispatcher: patient, headers: { ...access, "Content-Type": "application/json" }, body: JSON.stringify(body) });
 if (plan.setup) {
-	const exists = (await (await fetch(`${BASE}/repos`, { headers: access, dispatcher: patient })).json()).some((r) => r.name === plan.repo);
-	if (!exists) {
-		say("swarm", `importing ${plan.setup.import} as ${plan.repo}`);
-		const imported = await fetch(`${BASE}/repos/import`, { method: "POST", dispatcher: patient, headers: { ...access, "Content-Type": "application/json" }, body: JSON.stringify({ url: plan.setup.import, name: plan.repo, branch: plan.setup.branch }) });
-		if (!imported.ok) throw new Error(`import failed: HTTP ${imported.status}`);
+	const repos = new Set((await (await fetch(`${BASE}/repos`, { headers: access, dispatcher: patient })).json()).map((r) => r.name));
+	if (!repos.has(plan.repo)) {
+		const template = plan.setup.template;
+		if (template && !repos.has(template)) {
+			say("swarm", `importing ${plan.setup.import} as ${template}, once`);
+			const imported = await post("/repos/import", { url: plan.setup.import, name: template, branch: plan.setup.branch });
+			if (!imported.ok) throw new Error(`import failed: HTTP ${imported.status}`);
+		}
+		say("swarm", template ? `copying ${template} as ${plan.repo}` : `importing ${plan.setup.import} as ${plan.repo}`);
+		const made = template ? await post(`/repos/${template}/copy`, { name: plan.repo }) : await post("/repos/import", { url: plan.setup.import, name: plan.repo, branch: plan.setup.branch });
+		if (!made.ok) throw new Error(`making ${plan.repo} failed: HTTP ${made.status} ${(await made.text()).slice(0, 200)}`);
 	}
 	const startedMode = await tool("free_start", { required: plan.setup.required ?? 1, ...(plan.setup.verify ? { verify: plan.setup.verify } : {}), ...(plan.setup.grants ? { grants: plan.setup.grants } : {}) });
 	branch = startedMode.branch;
 	say("swarm", `${plan.repo} on ${branch}: checks ${JSON.stringify(startedMode.verify)}, grants ${JSON.stringify(startedMode.policy?.grants ?? {})}, claims ${JSON.stringify(startedMode.sharding)}`);
 }
-for (const who of [...plan.agents, ...(plan.planner ? [plan.planner] : [])]) {
-	if (!who.keyFile || existsSync(at(who.keyFile))) continue;
-	mkdirSync(dirname(at(who.keyFile)), { recursive: true });
-	const { key } = await tool("free_register", { agent: who.agent });
-	writeFileSync(at(who.keyFile), key);
-	chmodSync(at(who.keyFile), 0o600);
-	say("swarm", `registered ${who.agent}`);
-}
+// Registered side by side, then the backlog filed side by side: setup takes seconds.
+const unregistered = [...plan.agents, ...(plan.planner ? [plan.planner] : [])].filter((who) => who.keyFile && !existsSync(at(who.keyFile)));
+await Promise.all(
+	unregistered.map(async (who) => {
+		mkdirSync(dirname(at(who.keyFile)), { recursive: true });
+		const { key } = await tool("free_register", { agent: who.agent });
+		writeFileSync(at(who.keyFile), key);
+		chmodSync(at(who.keyFile), 0o600);
+	}),
+);
+if (unregistered.length) say("swarm", `registered ${unregistered.map((w) => w.agent).join(", ")}`);
 const planner = plan.planner ?? plan.agents[0];
-for (const piece of plan.backlog) {
-	const added = await tool("free_add_work", { id: piece.id, title: piece.title ?? piece.id, intent: piece.intent, ...(piece.paths ? { paths: piece.paths } : {}), agent: planner.agent }, planner.keyFile);
-	if (!added.ok && !/already/.test(added.reason ?? "")) throw new Error(`adding ${piece.id} failed: ${added.reason}`);
-}
+await Promise.all(
+	plan.backlog.map(async (piece) => {
+		const added = await tool("free_add_work", { id: piece.id, title: piece.title ?? piece.id, intent: piece.intent, ...(piece.paths ? { paths: piece.paths } : {}), agent: planner.agent }, planner.keyFile);
+		if (!added.ok && !/already/.test(added.reason ?? "")) throw new Error(`adding ${piece.id} failed: ${added.reason}`);
+	}),
+);
+const setupSeconds = ((Date.now() - started) / 1000).toFixed(0);
 say("swarm", `${plan.backlog.length} pieces in the backlog; ${plan.agents.length} agents, all alike${speed !== 1 ? `, at ${speed}x speed` : ""}`);
 
 await Promise.all(plan.agents.map((spec) => agentFor(spec)()));
@@ -355,6 +370,6 @@ for (const [id, t] of timeline) {
 console.log(`\n${"agent".padEnd(12)} build review revise merge wait`);
 for (const [name, d] of did) console.log(`${name.padEnd(12)} ${String(d.build).padStart(5)} ${String(d.review).padStart(6)} ${String(d.revise).padStart(6)} ${String(d.merge).padStart(5)} ${String(d.wait).padStart(4)}`);
 const merged = [...settled.values()].filter((s) => s.startsWith("merged")).length;
-console.log(`\n${merged} of ${plan.backlog.length} merged in ${((Date.now() - started) / 1000).toFixed(0)}s`);
+console.log(`\n${merged} of ${plan.backlog.length} merged in ${((Date.now() - started) / 1000).toFixed(0)}s (setup ${setupSeconds}s)`);
 const audit = await fetch(`${BASE}/free/${plan.repo}/audit`, { headers: { ...access, "Cache-Control": "no-cache" }, dispatcher: patient }).then((r) => r.json());
 console.log(`audit: ${audit.merges} merges, ${audit.open} open violations${audit.violations?.length ? `: ${JSON.stringify(audit.violations).slice(0, 400)}` : ""}`);

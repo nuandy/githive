@@ -1,7 +1,7 @@
 import { type Context, Hono } from "hono";
 import { verifyAccessRequest } from "./access";
 import type { AccessIdentity, CoordinatorHumanActions } from "./access-contract";
-import { deleteReposWithPrefix, headOf, listRepoNames, parseRepoName, remoteFor, reviewerName, sliceRepoName } from "./artifacts";
+import { deleteReposWithPrefix, headOf, listRepoNames, parseRepoName, remoteFor, reviewerName, sliceRepoName, forkAndWait } from "./artifacts";
 import { hostedRoles, openTaskFor, policyFor, type OpenTaskInput } from "./coordinator";
 import { electedForEnv, taskCoordinator } from "./elected";
 import { GitCasLog, readDecisionHistory } from "./election-git";
@@ -119,6 +119,14 @@ app.post("/repos/import", async (c) => {
 	const { url, name, branch } = await c.req.json<{ url: string; name: string; branch?: string }>();
 	const imported = await retryTransient(() => c.env.ARTIFACTS.import({ source: { url, branch }, target: { name } }));
 	return c.json({ name: imported.name, remote: imported.remote, defaultBranch: imported.defaultBranch });
+});
+
+// A new project repo copied from another (its default branch): seconds, where importing a big project takes a minute or more.
+app.post("/repos/:repo/copy", async (c) => {
+	const { name } = await c.req.json<{ name: string }>();
+	if (!name || !isProject(name)) fail(400, "name the new repo: not a fork's or a records repo's name");
+	const copied = await forkAndWait(c.env.ARTIFACTS, c.req.param("repo"), name, `A copy of ${c.req.param("repo")}`);
+	return c.json({ name, remote: copied.remote });
 });
 
 /** Open a repo for open changes, or find it already open, and list it on the dashboard. Shared by HTTP and MCP. */
