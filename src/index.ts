@@ -7,7 +7,7 @@ import { type Level, OrgStore, validRepoName } from "./auth/orgs";
 import { orgRoutes } from "./auth/org-routes";
 import { IdentityStore } from "./auth/store";
 import { OAuthProvider } from "@cloudflare/workers-oauth-provider";
-import { ensureRepo, forkAndWait, listRepoNames, remoteFor, reviewerName } from "./artifacts";
+import { ensureRepo, forkAndWait, leftoversOf, listRepoNames, remoteFor, reviewerName } from "./artifacts";
 import { fail, statusOf } from "./errors";
 import { retryTransient } from "./retry";
 import { handleMcpBody } from "./mcp";
@@ -421,8 +421,12 @@ app.delete("/repos/:owner/:name", async (c) => {
 	if (!deleted) return c.json({ error: `no repo ${repo.fullName}` }, 404);
 	if (c.env.DB) await new OrgStore(c.env.DB).removeRepo(repo.id);
 	await forgetRepo(c.env, repo.id);
-	console.log("repo deleted", repo.id);
-	return c.json({ deleted: repo.fullName });
+	// Its agents' forks hold copies of its code, and its claim shards its records: they go with it.
+	const { forks, shards } = leftoversOf(repo.id, await listRepoNames(c.env.ARTIFACTS));
+	const failed: string[] = [];
+	for (const name of [...forks, ...shards]) await retryTransient(() => c.env.ARTIFACTS.delete(name)).catch(() => failed.push(name));
+	console.log("repo deleted", JSON.stringify({ repo: repo.id, forks: forks.length, shards: shards.length, failed }));
+	return c.json({ deleted: repo.fullName, forks: forks.length, shards: shards.length, ...(failed.length ? { failed } : {}) });
 });
 
 // Everything that isn't an API route is the dashboard.

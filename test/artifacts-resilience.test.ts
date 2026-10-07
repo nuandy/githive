@@ -145,10 +145,10 @@ describe("Artifacts transient failures", () => {
 
 	it("deletes a repo, and says when there's none by that name", async () => {
 		const remove = vi.fn(async (name: string) => name === "project");
-		const env = { ARTIFACTS: { delete: remove } } as never;
+		const env = { ARTIFACTS: { delete: remove, list: async () => ({ repos: [] }) } } as never;
 		const del = (repo: string) => worker.fetch(new Request(`https://githive.test/repos/_/${repo}`, { method: "DELETE" }), env, {} as never);
 
-		expect(await (await del("project")).json()).toEqual({ deleted: "_/project" });
+		expect(await (await del("project")).json()).toEqual({ deleted: "_/project", forks: 0, shards: 0 });
 		expect((await del("missing")).status).toBe(404);
 	});
 

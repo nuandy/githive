@@ -151,3 +151,24 @@ export async function ensureRepo(artifacts: Artifacts, name: string, description
 		}
 	}
 }
+
+const escapeRegex = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+/**
+ * What a repo leaves behind besides itself: its agents' forks
+ * (fork--<id>--agent--<agent>, and fork--<id>--<change> from before forks
+ * were per agent) and its claim shards (records--<id>--<n>). A name that
+ * belongs to a longer repo id (acme--web, when deleting acme) is never one of
+ * them, whatever it looks like.
+ */
+export function leftoversOf(id: string, names: string[]) {
+	const longer = names.filter((n) => !n.startsWith("fork--") && !n.startsWith("records--") && n.startsWith(`${id}--`));
+	const theirs = (name: string, kind: "fork" | "records") => longer.some((other) => name.startsWith(`${kind}--${other}--`));
+	const fork = new RegExp(`^fork--${escapeRegex(id)}--.+$`);
+	const shard = new RegExp(`^records--${escapeRegex(id)}--\\d+$`);
+	return {
+		forks: names.filter((n) => fork.test(n) && !theirs(n, "fork")),
+		shards: names.filter((n) => shard.test(n) && !theirs(n, "records")),
+	};
+}
+
