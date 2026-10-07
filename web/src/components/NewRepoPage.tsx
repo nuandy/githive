@@ -118,12 +118,12 @@ export function NewRepoView({ orgs, repos, owner: wanted, create, onCreated }: N
 							</label>
 						</fieldset>
 						{source === "import" ? (
-							<div className="manage__inline">
-								<div className="manage__field">
+							<div className="manage__inline manage__source">
+								<div className="manage__field manage__source-url">
 									<label htmlFor="new-repo-url">Git URL</label>
 									<input id="new-repo-url" type="url" value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://github.com/octocat/Spoon-Knife" autoComplete="off" spellCheck={false} />
 								</div>
-								<div className="manage__field">
+								<div className="manage__field manage__source-branch">
 									<label htmlFor="new-repo-branch">Branch (optional)</label>
 									<input id="new-repo-branch" type="text" value={branch} onChange={(e) => setBranch(e.target.value)} placeholder="main" autoComplete="off" spellCheck={false} />
 								</div>

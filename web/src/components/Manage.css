@@ -214,3 +214,22 @@
 .manage__danger .box__header h2 {
 	color: var(--bad);
 }
+
+/* An import's source: the URL takes the row, the branch keeps a narrow column beside it, and they stack on a phone. */
+.manage__source {
+	align-items: start;
+	gap: 12px;
+	max-width: 720px;
+}
+
+.manage__source-url {
+	flex: 1 1 26rem;
+}
+
+.manage__source-url input[type="url"] {
+	max-width: none;
+}
+
+.manage__source-branch {
+	flex: 0 1 11rem;
+}
