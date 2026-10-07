@@ -61,6 +61,14 @@ describe("Cloudflare Access JWT verification", () => {
 		await expect(verify(await token())).resolves.toEqual({ kind: "person", value: "dev@example.com" });
 	});
 
+	it("identifies a person's browser session, an app token with their email, as that person", async () => {
+		await expect(verify(await token({ type: "app", sub: "5cded567-0ef8-5e1d-beae-1bfd05aec026" }))).resolves.toEqual({ kind: "person", value: "dev@example.com" });
+	});
+
+	it("identifies an app token with no email or common name by its subject", async () => {
+		await expect(verify(await token({ type: "app", sub: "app-subject", email: undefined }))).resolves.toEqual({ kind: "service", value: "app-subject" });
+	});
+
 	it("identifies a service token from its signed common_name", async () => {
 		await expect(verify(await token({ type: "app", common_name: "release-script", email: undefined }))).resolves.toEqual({ kind: "service", value: "release-script" });
 	});
