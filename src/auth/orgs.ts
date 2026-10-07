@@ -269,6 +269,15 @@ export class OrgStore {
 		return results.map((r) => `@${r.org_slug}/${r.slug}`);
 	}
 
+	/** The teams a person is on in the org a repo belongs to: what their vote on it carries. */
+	async teamsForRepo(userId: string, repoId: string) {
+		const { results } = await this.db
+			.prepare("SELECT o.slug AS org_slug, t.slug FROM team_members tm JOIN teams t ON t.id = tm.team_id JOIN orgs o ON o.id = t.org_id JOIN repos r ON r.org_id = t.org_id WHERE tm.user_id = ? AND r.id = ? ORDER BY t.slug")
+			.bind(userId, repoId)
+			.all<Row>();
+		return results.map((r) => `@${r.org_slug}/${r.slug}`);
+	}
+
 	// Repos
 
 	async repo(org: string, name: string) {

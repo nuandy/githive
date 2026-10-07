@@ -48,6 +48,8 @@ export interface ToolContext {
 	agentKey?: string;
 	/** The caller's agent name, verified by GitHive's sign-in (an agent token or an OAuth grant): <handle>/<agent>. It needs no key. */
 	agent?: string;
+	/** The teams the caller is on in a repo's org (@<org>/<team>), as GitHive checks them: recorded in their votes. */
+	teamsOf?: (repo: string) => Promise<string[]>;
 	/** GitHive's own hosted agents, who act under the reserved githive- names. */
 	hosted?: boolean;
 	/** Notes a repo, so the dashboard can list it. */
@@ -187,12 +189,12 @@ function recordLog<S>(ctx: ToolContext, repo: string, ref: string): GitCasLog<S>
 }
 
 /** A repo's claims, where its registry says they are: in the registry itself, or split into per-path shards. */
-/** Role grants as start takes them: each role to a list of agent names, "person:*", verified identities or "githive". */
+/** Role grants as start takes them: each role to a list of agent names, "person:*", verified identities, teams (@<org>/<team>) or "githive". */
 function validGrants(value: unknown): Record<string, string[]> {
 	if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("[400] grants maps each role to who may vote as it");
 	const grants: Record<string, string[]> = {};
 	for (const [role, who] of Object.entries(value)) {
-		if (!Array.isArray(who) || !who.every((w) => typeof w === "string" && w.trim())) throw new Error(`[400] grants.${role} is a list: agent names, "person:*", "person:<who>", "service:<id>" or "githive"`);
+		if (!Array.isArray(who) || !who.every((w) => typeof w === "string" && w.trim())) throw new Error(`[400] grants.${role} is a list: agent names, "person:*", "person:<who>", "service:<id>", a team "@<org>/<team>" or "githive"`);
 		grants[role] = who.map((w) => w.trim());
 	}
 	return grants;
@@ -409,7 +411,8 @@ export async function voteAsPerson(ctx: ToolContext, repo: string, change: strin
 	const head = await branchHead(await changeSourceFor(ctx, repo)(claim.agent, "read", change), `changes/${change}`).catch(() => null);
 	if (!head) throw new Error(`[409] ${change} has nothing pushed to vote on`);
 	const stamper = await ctx.stamper?.();
-	await votesFor(ctx, repo, await shardVotesIfBusy(ctx, repo, registry, person)).vote({ commit: head, reviewer: person, role: input.role, verdict: input.verdict, evidence: input.evidence }, stamper);
+	const teams = (await ctx.teamsOf?.(repo)) ?? [];
+	await votesFor(ctx, repo, await shardVotesIfBusy(ctx, repo, registry, person)).vote({ commit: head, reviewer: person, role: input.role, verdict: input.verdict, evidence: input.evidence, ...(teams.length ? { teams } : {}) }, stamper);
 	await ctx.ping?.(repo).catch(() => undefined);
 	return { commit: head, role: input.role, verdict: input.verdict };
 }
@@ -568,9 +571,11 @@ async function runTool(name: string, args: Args, ctx: ToolContext): Promise<unkn
 			// Each open change's pushed head, from its author's fork.
 			const open = await Promise.all(inForce.claims.map(async (claim) => ({ claim, head: await changeSource(claim.agent, "read", claim.change).then((fork) => branchHead(fork, `changes/${claim.change}`)).catch(() => null) })));
 			const counted = await countedVotes(cast.votes, registered?.stampKey);
+			const teams = (await ctx.teamsOf?.(repo)) ?? [];
 			const decide = (held?: Record<string, string[]>) => nextFor({
 				agent,
 				...(stamper?.by ? { by: stamper.by } : {}),
+				...(teams.length ? { teams } : {}),
 				policy: registered?.policy ?? DEFAULT_POLICY,
 				open,
 				votes: counted,
@@ -658,7 +663,8 @@ async function runTool(name: string, args: Args, ctx: ToolContext): Promise<unkn
 			const reviewer = actAs("reviewer");
 			// Busy enough that one record would hold reviewers up: shard the votes first.
 			const commit = requiredString(args, "commit");
-			const cast = await votesFor(ctx, repo, await shardVotesIfBusy(ctx, repo, registered, reviewer)).vote({ commit, reviewer, role: requiredString(args, "role"), verdict, evidence: requiredString(args, "evidence") }, stamper);
+			const teams = (await ctx.teamsOf?.(repo)) ?? [];
+			const cast = await votesFor(ctx, repo, await shardVotesIfBusy(ctx, repo, registered, reviewer)).vote({ commit, reviewer, role: requiredString(args, "role"), verdict, evidence: requiredString(args, "evidence"), ...(teams.length ? { teams } : {}) }, stamper);
 			// Its review is done: the hold next took for it goes.
 			await ctx.reviews?.release(repo, holdKey(commit, requiredString(args, "role")), reviewer).catch(() => undefined);
 			if (verdict === "approve") await warmChecks();

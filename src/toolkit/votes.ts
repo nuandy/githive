@@ -16,6 +16,11 @@ export interface VoteRecord {
 	at: string;
 	/** Who cast it, as Access verified them, and GitHive's stamp (written through the toolkit). */
 	by?: string;
+	/**
+	 * The teams of the repo's org the voter was on when they voted (@<org>/<team>),
+	 * as GitHive checked: a grant to a team counts their vote. Covered by the stamp.
+	 */
+	teams?: string[];
 	stamp?: string;
 }
 
@@ -120,8 +125,9 @@ export interface ReviewPolicy {
 	 * agent names, "person:*" (anyone signed in through Access), a verified
 	 * identity as the records show it ("person:<who>", "service:<id>"), a pool
 	 * of the agents registered under one ("service:<id>/*": however many there
-	 * are; whoever holds that identity decides who's in it), or "githive"
-	 * (GitHive's hosted reviewers). A role not listed: people and GitHive's
+	 * are; whoever holds that identity decides who's in it), a team of the
+	 * repo's org ("@<org>/<team>": whoever is on it when they vote), or
+	 * "githive" (GitHive's hosted reviewers). A role not listed: people and GitHive's
 	 * reviewers (DEFAULT_GRANT). Agents never grant themselves a role.
 	 */
 	grants?: Record<string, string[]>;
@@ -145,8 +151,9 @@ export const blockingRoles = (policy: ReviewPolicy) => [...new Set([...policy.ve
 export function grantWarnings(policy: ReviewPolicy): string[] {
 	return blockingRoles(policy).flatMap((role) => {
 		const holders = policy.grants?.[role] ?? DEFAULT_GRANT;
-		const people = holders.some((h) => h.startsWith("person:"));
-		const many = holders.some((h) => poolOf(h)) || holders.length > 1;
+		// A team is people, however many it has.
+		const people = holders.some((h) => h.startsWith("person:") || h.startsWith("@"));
+		const many = holders.some((h) => poolOf(h) || h.startsWith("@")) || holders.length > 1;
 		const warnings: string[] = [];
 		if (!many && !people)
 			warnings.push(`${role} is held by ${holders[0]} alone: its reviews wait whenever it's busy. Grant it to two or more agents, or a pool ("service:<id>/*": every agent registered under that identity).`);
@@ -163,9 +170,11 @@ export function grantWarnings(policy: ReviewPolicy): string[] {
  * member's vote doesn't count as the role on a change whose `author` runs
  * under the same identity: a team doesn't sign off its own changes.
  */
-export function holdsRole(policy: ReviewPolicy, role: string, vote: Pick<VoteRecord, "reviewer" | "by">, author?: Pick<Author, "by">) {
+export function holdsRole(policy: ReviewPolicy, role: string, vote: Pick<VoteRecord, "reviewer" | "by" | "teams">, author?: Pick<Author, "by">) {
 	return (policy.grants?.[role] ?? DEFAULT_GRANT).some((grant) => {
 		if (grant === "person:*") return !!vote.by?.startsWith("person:");
+		// A team: the voter was on it when they voted, as GitHive checked and stamped.
+		if (grant.startsWith("@")) return !!vote.teams?.includes(grant);
 		const pool = poolOf(grant);
 		if (pool) return !!vote.by?.startsWith(`${pool}/`) && !author?.by?.startsWith(`${pool}/`);
 		if (/^(person|service):/.test(grant)) return vote.by === grant;

@@ -151,7 +151,9 @@ app.post("/repos/:owner/:name/copy", async (c) => {
 /** GitHive's tools for this caller (see docs/design.md): stateless, Git only. A signed-in agent needs no key. */
 const toolContext = (env: Env, principal: Principal | undefined, agentKey?: string): ToolContext => {
 	const agent = principal && agentNameOf(principal);
-	return toolContextFor(env, principal ? byOf(principal) : undefined, agent ? { agent } : agentKey ? { agentKey } : {});
+	// A person's (or their agent's) teams in the repo's org go into their votes, for roles granted to a team.
+	const teamsOf = principal && principal.kind !== "access" && env.DB ? (repo: string) => new OrgStore(env.DB).teamsForRepo(principal.user.id, repo) : undefined;
+	return toolContextFor(env, principal ? byOf(principal) : undefined, { ...(agent ? { agent } : agentKey ? { agentKey } : {}), ...(teamsOf ? { teamsOf } : {}) });
 };
 
 /** Views bigger than this aren't kept (a Durable Object value holds up to 2 MB). */

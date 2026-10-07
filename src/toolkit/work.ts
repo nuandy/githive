@@ -58,6 +58,8 @@ export type NextStep =
 export interface NextInput {
 	agent: string;
 	/** The caller's verified identity, as its votes would carry it (to tell whether it holds a role). */
+	/** The teams the caller is on in the repo's org (@<org>/<team>), for roles granted to a team. */
+	teams?: string[];
 	by?: string;
 	policy: ReviewPolicy;
 	/** The claims in force, each with its change's pushed head (null: nothing pushed). */
@@ -138,7 +140,7 @@ export function nextFor(input: NextInput): NextStep {
 			const outcome = approval({ votes }, head, policy, authorOf(claim), claim.paths);
 			if (outcome.approved) return [];
 			// A role that can block, if it holds one the change still needs; else an ordinary review, if more are needed.
-			const role = outcome.awaiting.find((r) => holdsRole(policy, r, { reviewer: agent, by: input.by }, authorOf(claim)));
+			const role = outcome.awaiting.find((r) => holdsRole(policy, r, { reviewer: agent, by: input.by, teams: input.teams }, authorOf(claim)));
 			const { required } = effectivePolicy(policy, claim.paths);
 			if (!role && outcome.approvals >= required) return [];
 			// As many reviews as it still needs: one for a role that can block; else the approvals missing, less those the

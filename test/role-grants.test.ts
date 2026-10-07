@@ -97,3 +97,48 @@ describe("granting roles through the toolkit", { timeout: 60_000 }, () => {
 		}
 	});
 });
+
+describe("roles granted to a team", () => {
+	const policy = { required: 1, vetoes: ["security"], grants: { security: ["@acme/security"] } };
+	const onTeam = (reviewer: string, teams: string[]): VoteRecord => ({ ...cast(reviewer, `person:${reviewer}`, "security"), ...(teams.length ? { teams } : {}) });
+
+	it("counts the vote of whoever was on the team when they voted, and nobody else's", () => {
+		expect(holdsRole(policy, "security", onTeam("ana", ["@acme/security"]))).toBe(true);
+		expect(holdsRole(policy, "security", onTeam("bob", []))).toBe(false);
+		// Another org's team of the same name is another team.
+		expect(holdsRole(policy, "security", onTeam("cy", ["@other/security"]))).toBe(false);
+		expect(approval({ votes: [onTeam("ana", ["@acme/security"])] }, head, policy)).toMatchObject({ approved: true, awaiting: [] });
+	});
+
+	it("needs no warning: a team is people, however many", () => {
+		expect(grantWarnings(policy)).toEqual([]);
+	});
+});
+
+describe("team grants through the toolkit", { timeout: 60_000 }, () => {
+	it("records the voter's teams in their vote, so a new member's vote counts without changing the grant", async () => {
+		const { GitCasLog } = await import("../src/record-log");
+		const server = await startGitServer();
+		try {
+			const teams = new Map<string, string[]>([["ada/sec", ["@acme/security"]]]);
+			const as = (agent: string): ToolContext => ({ remote: async () => ({ url: server.url, token: "unused" }), head: async () => server.git("rev-parse", "main").trim(), agent, teamsOf: async () => teams.get(agent) ?? [] });
+			const call = (agent: string, name: string, args: Record<string, unknown>) => callTool(name, { repo: "p", ...args }, as(agent));
+			expect(await call("ada/sec", "start", { required: 1, vetoes: ["security"], grants: { security: ["@acme/security"] } })).toMatchObject({ policy: { grants: { security: ["@acme/security"] } } });
+			await call("ada/sec", "vote", { commit: head, role: "security", verdict: "approve", evidence: "ok" });
+			await call("bob/sec", "vote", { commit: head, role: "security", verdict: "approve", evidence: "ok" });
+			// bob joins the team; the grant stays as it was.
+			teams.set("bob/sec", ["@acme/security"]);
+			await call("bob/sec", "vote", { commit: "h2", role: "security", verdict: "approve", evidence: "ok" });
+			const votes = (await new GitCasLog<{ votes: VoteRecord[] }>(async () => ({ url: server.url, token: "unused" }), "p", "refs/notes/githive-votes/p").read())!.commit.state.votes;
+			expect(votes.map((v) => [v.reviewer, v.commit, v.teams ?? []])).toEqual([
+				["ada/sec", head, ["@acme/security"]],
+				["bob/sec", head, []],
+				["bob/sec", "h2", ["@acme/security"]],
+			]);
+			const policy = { required: 1, vetoes: ["security"], grants: { security: ["@acme/security"] } };
+			expect(votes.map((v) => holdsRole(policy, "security", v))).toEqual([true, false, true]);
+		} finally {
+			await server.close();
+		}
+	});
+});

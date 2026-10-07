@@ -79,6 +79,11 @@ describe("teams", () => {
 		await expect(orgs.addTeamMember(acme.id, "security", "eve")).rejects.toThrow(/isn't a member/);
 		expect(await orgs.teamsOf(people.bob.id, acme.id)).toEqual(["@acme/security"]);
 		expect(await orgs.teams(acme.id)).toEqual([expect.objectContaining({ slug: "security", members: ["bob"] })]);
+		// What their vote on one of the org's repos carries; on another org's repo, nothing.
+		const web = await orgs.addRepo(acme, "web", people.ada.id);
+		const other = await orgs.addRepo((await orgs.org("eve"))!, "notes", people.eve.id);
+		expect(await orgs.teamsForRepo(people.bob.id, web.id)).toEqual(["@acme/security"]);
+		expect(await orgs.teamsForRepo(people.bob.id, other.id)).toEqual([]);
 		// Leaving the org takes them off its teams.
 		await orgs.removeMember(acme.id, people.bob.id);
 		expect(await orgs.teamsOf(people.bob.id, acme.id)).toEqual([]);
