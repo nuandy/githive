@@ -49,8 +49,8 @@ const change = build.change;
 let snapshot;
 for (let waited = 0; waited < 1800; waited += 20) {
 	await new Promise((r) => setTimeout(r, 20_000));
-	snapshot = await api("GET", `/repos/${REPO}`);
-	const builder = await api("GET", `/repos/${REPO}/builders/${change}`);
+	snapshot = await api("GET", `/repos/_/${REPO}`);
+	const builder = await api("GET", `/repos/_/${REPO}/builders/${change}`);
 	const held = snapshot.claims.find((c) => c.change === change);
 	const votes = snapshot.votes.map((v) => `${v.reviewer}:${v.verdict}`).join(" ");
 	say(`builder ${builder.status} (${builder.pushes} pushes); claim ${held ? "held" : "released"}; merges ${snapshot.audit.merges}; votes ${votes || "none"}`);
@@ -63,7 +63,7 @@ for (let waited = 0; waited < 1800; waited += 20) {
 		const { url, token } = await tool("credentials", {});
 		const { stdout } = await promisify(execFile)("git", ["-c", `http.extraHeader=Authorization: Bearer ${token.split("?expires=")[0]}`, "ls-remote", url, `refs/heads/changes/${change}`]);
 		const head = stdout.split(/\s/)[0];
-		const reviewers = await Promise.all(started.policy.vetoes.concat("tests").map(async (role) => [role, await api("GET", `/repos/${REPO}/reviewers/${change}/${head}/${role}`)]));
+		const reviewers = await Promise.all(started.policy.vetoes.concat("tests").map(async (role) => [role, await api("GET", `/repos/_/${REPO}/reviewers/${change}/${head}/${role}`)]));
 		say("  reviewers:", reviewers.map(([role, r]) => `${role} ${r.status}`).join(", "));
 		const failed = reviewers.filter(([, r]) => r.status === "failed");
 		if (failed.length) {

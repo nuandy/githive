@@ -19,7 +19,10 @@ describe("the dashboard's repos", () => {
 			cursor ? { repos: [{ name: "alpha" }, { name: "fork--alpha--a-1" }, { name: "records--alpha--3" }] } : { repos: [{ name: "zeta" }], cursor: "next" },
 		);
 		const res = await get({ ARTIFACTS: { list } } as never, "/repos");
-		expect(await res.json()).toEqual([{ name: "alpha" }, { name: "zeta" }]);
+		expect(await res.json()).toEqual([
+			{ name: "_/alpha", id: "alpha", visibility: "private" },
+			{ name: "_/zeta", id: "zeta", visibility: "private" },
+		]);
 		expect(list).toHaveBeenCalledTimes(2);
 	});
 
@@ -36,8 +39,10 @@ describe("the dashboard's repos", () => {
 			summarize: vi.fn(async (_key: string, _counts: object) => {}),
 		};
 		const waits: Promise<unknown>[] = [];
-		const response = await worker.fetch(new Request("https://githive.test/summaries"), { REPO_INDEX: { getByName: () => index } } as never, { waitUntil: (p: Promise<unknown>) => void waits.push(p) } as never);
-		expect(((await response.json()) as { repos: unknown[] }).repos).toHaveLength(3);
+		const ARTIFACTS = { list: vi.fn(async () => ({ repos: [{ name: "a" }, { name: "b" }, { name: "c" }] })) };
+		const response = await worker.fetch(new Request("https://githive.test/summaries"), { REPO_INDEX: { getByName: () => index }, ARTIFACTS } as never, { waitUntil: (p: Promise<unknown>) => void waits.push(p) } as never);
+		const { repos } = (await response.json()) as { repos: { repo: string; id: string }[] };
+		expect(repos.map((r) => [r.repo, r.id])).toEqual([["_/a", "a"], ["_/b", "b"], ["_/c", "c"]]);
 		await Promise.all(waits);
 		expect(index.summarize.mock.calls.map(([key]) => key).sort()).toEqual(["repo:b", "repo:c"]);
 		expect(index.summarize).toHaveBeenCalledWith("repo:b", { open: 4, countedAt: expect.any(String) });

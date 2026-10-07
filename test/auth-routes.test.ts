@@ -148,7 +148,7 @@ describe("a signed-in person", () => {
 		const { token } = await json(call(`/me/agents/${agent.id}/tokens`, { ...post({}), cookie: session }));
 		const asAgent = { Authorization: `Bearer ${token}`, "Content-Type": "application/json" };
 		expect((await call("/me/agents", { method: "POST", headers: asAgent, body: JSON.stringify({ name: "more" }) })).status).toBe(401);
-		expect((await call("/repos/project/changes/c-1/votes", { method: "POST", headers: asAgent, body: JSON.stringify({ role: "review", verdict: "approve", evidence: "ok" }) })).status).toBe(403);
+		expect((await call("/repos/acme/web/changes/c-1/votes", { method: "POST", headers: asAgent, body: JSON.stringify({ role: "review", verdict: "approve", evidence: "ok" }) })).status).toBe(403);
 	});
 });
 

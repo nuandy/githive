@@ -146,20 +146,23 @@ describe("Artifacts transient failures", () => {
 	it("deletes a repo, and says when there's none by that name", async () => {
 		const remove = vi.fn(async (name: string) => name === "project");
 		const env = { ARTIFACTS: { delete: remove } } as never;
-		const del = (repo: string) => worker.fetch(new Request(`https://githive.test/repos/${repo}`, { method: "DELETE" }), env, {} as never);
+		const del = (repo: string) => worker.fetch(new Request(`https://githive.test/repos/_/${repo}`, { method: "DELETE" }), env, {} as never);
 
-		expect(await (await del("project")).json()).toEqual({ deleted: "project" });
+		expect(await (await del("project")).json()).toEqual({ deleted: "_/project" });
 		expect((await del("missing")).status).toBe(404);
 	});
 
-	it("lists project repos from every page, without forks", async () => {
+	it("lists project repos from every page, without forks, as _/<id> to an Access admin until they join an org", async () => {
 		const list = vi
 			.fn()
 			.mockResolvedValueOnce({ repos: [{ name: "fork--zeta--a-1" }, { name: "zeta" }], cursor: "next" })
 			.mockResolvedValueOnce({ repos: [{ name: "records--zeta--2" }, { name: "githive" }] });
 		const response = await worker.fetch(new Request("https://githive.test/repos"), { ARTIFACTS: { list } } as never, {} as never);
 
-		expect(await response.json()).toEqual([{ name: "githive" }, { name: "zeta" }]);
+		expect(await response.json()).toEqual([
+			{ name: "_/githive", id: "githive", visibility: "private" },
+			{ name: "_/zeta", id: "zeta", visibility: "private" },
+		]);
 		expect(list).toHaveBeenLastCalledWith({ limit: 200, cursor: "next" });
 	});
 
@@ -172,7 +175,7 @@ describe("Artifacts transient failures", () => {
 		);
 
 		expect(response.status).toBe(200);
-		expect(await response.json()).toEqual([{ name: "project" }]);
+		expect(await response.json()).toEqual([{ name: "_/project", id: "project", visibility: "private" }]);
 		expect(list).toHaveBeenCalledTimes(2);
 	});
 });

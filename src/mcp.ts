@@ -9,6 +9,12 @@ import { INSTRUCTIONS, TOOLS, callTool, type ToolContext } from "./toolkit/mcp";
 export interface McpContext {
 	/** The toolkit for this caller: who it is (as Access verified it) and its agent key. */
 	toolkit: ToolContext;
+	/**
+	 * The repo a tool call names (<owner>/<name>), checked against what the
+	 * caller may do: its id, which the toolkit keys everything by, and the name
+	 * people use. Without it, a repo is named by its id.
+	 */
+	resolveRepo?: (repo: string, tool: string, args: Args) => Promise<{ id: string; fullName: string }>;
 }
 
 const PROTOCOL_VERSIONS = ["2025-06-18", "2025-03-26", "2024-11-05"];
@@ -43,7 +49,12 @@ export async function handleRpc(msg: RpcRequest, ctx: McpContext): Promise<objec
 			const name = msg.params?.name;
 			if (typeof name !== "string" || !TOOLS.some((t) => t.name === name)) return rpcError(msg.id, -32602, `unknown tool ${String(name)}`);
 			try {
-				const result = await callTool(name, (msg.params?.arguments as Args) ?? {}, ctx.toolkit);
+				let args = (msg.params?.arguments as Args) ?? {};
+				const named = typeof args.repo === "string" && ctx.resolveRepo ? await ctx.resolveRepo(args.repo, name, args) : null;
+				if (named) args = { ...args, repo: named.id };
+				let result = await callTool(name, args, ctx.toolkit);
+				// Answer with the name the caller used, not the id.
+				if (named && result && typeof result === "object" && (result as Args).repo === named.id) result = { ...(result as Args), repo: named.fullName };
 				return reply(msg.id, { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] });
 			} catch (err) {
 				// Tool failures go back to the agent as results it can act on, not protocol errors.

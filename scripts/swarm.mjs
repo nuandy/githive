@@ -334,7 +334,7 @@ if (plan.setup) {
 			if (!imported.ok) throw new Error(`import failed: HTTP ${imported.status}`);
 		}
 		say("swarm", template ? `copying ${template} as ${plan.repo}` : `importing ${plan.setup.import} as ${plan.repo}`);
-		const made = template ? await post(`/repos/${template}/copy`, { name: plan.repo }) : await post("/repos/import", { url: plan.setup.import, name: plan.repo, branch: plan.setup.branch });
+		const made = template ? await post(`/repos/_/${template}/copy`, { name: plan.repo }) : await post("/repos/import", { url: plan.setup.import, name: plan.repo, branch: plan.setup.branch });
 		if (!made.ok) throw new Error(`making ${plan.repo} failed: HTTP ${made.status} ${(await made.text()).slice(0, 200)}`);
 	}
 	const startedMode = await tool("start", { required: plan.setup.required ?? 1, ...(plan.setup.verify ? { verify: plan.setup.verify } : {}), ...(plan.setup.grants ? { grants: plan.setup.grants } : {}) });
@@ -363,7 +363,7 @@ await Promise.all(
 if (plan.setup?.verify?.length) {
 	const until = Date.now() + 6 * 60_000;
 	for (;;) {
-		const lanes = await fetch(`${BASE}/repos/${plan.repo}/lanes`, { headers: access, dispatcher: patient })
+		const lanes = await fetch(`${BASE}/repos/_/${plan.repo}/lanes`, { headers: access, dispatcher: patient })
 			.then((r) => (r.ok ? r.json() : []))
 			.catch(() => []);
 		const warm = lanes.filter((l) => l.warmedAt && !l.warming).length;
@@ -397,5 +397,5 @@ console.log(`\n${"agent".padEnd(12)} build review revise merge wait`);
 for (const [name, d] of did) console.log(`${name.padEnd(12)} ${String(d.build).padStart(5)} ${String(d.review).padStart(6)} ${String(d.revise).padStart(6)} ${String(d.merge).padStart(5)} ${String(d.wait).padStart(4)}`);
 const merged = [...settled.values()].filter((s) => s.startsWith("merged")).length;
 console.log(`\n${merged} of ${plan.backlog.length} merged. Setup ${setupSeconds}s (once per repo); work ${((lastSettled - workStarted) / 1000).toFixed(0)}s (agents released to the last piece settled); total ${((Date.now() - started) / 1000).toFixed(0)}s`);
-const audit = await fetch(`${BASE}/repos/${plan.repo}/audit`, { headers: { ...access, "Cache-Control": "no-cache" }, dispatcher: patient }).then((r) => r.json());
+const audit = await fetch(`${BASE}/repos/_/${plan.repo}/audit`, { headers: { ...access, "Cache-Control": "no-cache" }, dispatcher: patient }).then((r) => r.json());
 console.log(`audit: ${audit.merges} merges, ${audit.open} open violations${audit.violations?.length ? `: ${JSON.stringify(audit.violations).slice(0, 400)}` : ""}`);
