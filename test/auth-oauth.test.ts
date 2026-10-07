@@ -172,3 +172,25 @@ describe("the name a new agent is offered", () => {
 		expect(suggestedAgentName("a".repeat(40))).toHaveLength(32);
 	});
 });
+
+describe("where the consent form may lead", () => {
+	it("allows the redirect back to the app, which browsers check against form-action after Allow", async () => {
+		const { formAction } = await import("../src/auth/authorize");
+		expect(formAction("http://127.0.0.1:33418/callback")).toBe("'self' http://127.0.0.1:33418");
+		expect(formAction("http://localhost:55938/callback")).toBe("'self' http://localhost:55938");
+		expect(formAction("https://app.example.com/oauth/cb?x=1")).toBe("'self' https://app.example.com");
+		expect(formAction("com.example.app:/callback")).toBe("'self' com.example.app:");
+		expect(formAction(undefined)).toBe("'self'");
+		expect(formAction("not a url")).toBe("'self'");
+	});
+
+	it("sends that policy with the consent page", async () => {
+		const { authorizeUrl } = await (async () => {
+			const registered = await json(call("/oauth/register", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ client_name: "Claude Code", redirect_uris: [CLIENT_REDIRECT], token_endpoint_auth_method: "none" }) }));
+			const { challenge } = await pkce();
+			return { authorizeUrl: `/authorize?${new URLSearchParams({ response_type: "code", client_id: registered.client_id, redirect_uri: CLIENT_REDIRECT, scope: "mcp", state: "st", code_challenge: challenge, code_challenge_method: "S256" })}` };
+		})();
+		const page = await call(authorizeUrl, { headers: { Cookie: session } });
+		expect(page.headers.get("Content-Security-Policy")).toContain("form-action 'self' http://127.0.0.1:33418;");
+	});
+});

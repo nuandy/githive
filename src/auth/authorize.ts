@@ -42,10 +42,26 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0
 <body><main><div class="brand">${HIVE} GitHive</div>${body}</main></body></html>`;
 }
 
-const html = (body: string, status = 200, headers?: Headers) => {
+/**
+ * Where a form on the page may lead: GitHive, and the one app this request
+ * goes back to. Browsers apply form-action to the redirect after a submit, so
+ * without the app's origin, Allow's redirect back to it is silently blocked.
+ */
+export function formAction(redirectUri?: string) {
+	if (!redirectUri) return "'self'";
+	try {
+		const url = new URL(redirectUri);
+		const target = url.protocol === "http:" || url.protocol === "https:" ? url.origin : url.protocol;
+		return /^[A-Za-z0-9+.:/\[\]-]+$/.test(target) ? `'self' ${target}` : "'self'";
+	} catch {
+		return "'self'";
+	}
+}
+
+const html = (body: string, status = 200, headers?: Headers, redirectUri?: string) => {
 	const h = new Headers(headers);
 	h.set("Content-Type", "text/html; charset=utf-8");
-	h.set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; img-src data:; form-action 'self'; frame-ancestors 'none'");
+	h.set("Content-Security-Policy", `default-src 'none'; style-src 'unsafe-inline'; img-src data:; form-action ${formAction(redirectUri)}; frame-ancestors 'none'`);
 	return new Response(body, { status, headers: h });
 };
 
@@ -124,7 +140,7 @@ export async function authorize(c: Context<AuthEnv>) {
 
 		if (c.req.method === "GET") {
 			const consent = await oauth.beginConsent(request);
-			return html(consentPage(details, consent.handle, user, await active()), 200, consent.headers);
+			return html(consentPage(details, consent.handle, user, await active()), 200, consent.headers, details.redirectUri);
 		}
 
 		const form = await c.req.formData();
@@ -139,9 +155,9 @@ export async function authorize(c: Context<AuthEnv>) {
 		try {
 			agent = choice === "new" ? await ids.createAgent(user.id, String(form.get("new_name") ?? "")) : (await active()).find((a) => a.id === choice);
 		} catch (err) {
-			return html(consentPage(details, handle, user, await active(), (err instanceof Error ? err.message : String(err)).replace(/^\[\d+\]\s*/, "")), 400);
+			return html(consentPage(details, handle, user, await active(), (err instanceof Error ? err.message : String(err)).replace(/^\[\d+\]\s*/, "")), 400, undefined, details.redirectUri);
 		}
-		if (!agent) return html(consentPage(details, handle, user, await active(), "Choose one of your agents, or name a new one."), 400);
+		if (!agent) return html(consentPage(details, handle, user, await active(), "Choose one of your agents, or name a new one."), 400, undefined, details.redirectUri);
 		const approved = await oauth.approveConsent(c.req.raw, handle, { scope: request.scope });
 		const { redirectTo } = await oauth.completeAuthorization({
 			request: approved.request,
