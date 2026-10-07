@@ -11,7 +11,7 @@ import { ensureRepo, forkAndWait, listRepoNames, remoteFor, reviewerName } from 
 import { fail, statusOf } from "./errors";
 import { retryTransient } from "./retry";
 import { handleMcpBody } from "./mcp";
-import { type ToolContext, repoAudit, changeHistory, openCount, repoSnapshot, voteAsPerson } from "./toolkit/mcp";
+import { type ToolContext, callTool, repoAudit, changeHistory, openCount, repoSnapshot, voteAsPerson } from "./toolkit/mcp";
 import { listTree, readFile } from "./code-browse";
 import { initialFiles, parseInit, writeFirstCommit } from "./repo-init";
 import { Timing } from "./timing";
@@ -208,11 +208,17 @@ app.get("/repos/:owner/:name", async (c) => {
 	const repo = await routeRepo(c, "read");
 	return keptView(c, `repo:${repo.id}`, "snapshot", 20_000, (timing) => repoSnapshot({ ...toolContext(c.env, c.get("principal")), timing }, repo.id));
 });
-// Who the caller is in a repo: its full name, id (the live feed's key), and what they may do.
+// Who the caller is in a repo: its full name, id (the live feed's key), what they may do, and its default branch.
 app.get("/repos/:owner/:name/access", async (c) => {
 	const repo = await routeRepo(c, "read");
-	const meta = c.env.DB ? await new OrgStore(c.env.DB).repoById(repo.id) : null;
-	return c.json({ ...repo, visibility: meta?.visibility ?? null });
+	const [meta, branch] = await Promise.all([c.env.DB ? new OrgStore(c.env.DB).repoById(repo.id) : null, remoteFor(c.env.ARTIFACTS, repo.id, "read").then(defaultBranch).catch(() => null)]);
+	return c.json({ ...repo, visibility: meta?.visibility ?? null, branch });
+});
+// Start GitHive on a repo from the dashboard (its admins): the MCP start tool, with the default policy unless told otherwise.
+app.post("/repos/:owner/:name/start", async (c) => {
+	const repo = await routeRepo(c, "admin");
+	const started = (await callTool("start", { ...(await jsonArgs(c)), repo: repo.id }, toolContext(c.env, c.get("principal")))) as Record<string, unknown>;
+	return c.json({ ...started, repo: repo.fullName });
 });
 // A person's vote on a change, from the dashboard: stamped with their verified identity.
 app.post("/repos/:owner/:name/changes/:change/votes", async (c) => {

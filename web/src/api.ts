@@ -168,6 +168,8 @@ export interface RepoAccess {
 	fullName: string;
 	level: Level;
 	visibility: "private" | "public" | null;
+	/** Its default branch (newer servers), or null for a repo with no commits. */
+	branch?: string | null;
 }
 
 /** A new repository: imported, copied, or empty. */
@@ -236,6 +238,8 @@ export const manage = {
 	createRepo: (input: NewRepoInput) => call<RepoRecord>("POST", "/repos", input),
 	setVisibility: (repo: string, visibility: "private" | "public") => call<RepoRecord>("PATCH", `/repos/${repoPath(repo)}`, { visibility }),
 	deleteRepo: (repo: string) => call<unknown>("DELETE", `/repos/${repoPath(repo)}`),
+	/** Start GitHive on a repo with the default policy (its admins). */
+	startRepo: (repo: string) => call<unknown>("POST", `/repos/${repoPath(repo)}/start`, {}),
 	collaborators: (repo: string) => call<{ handle: string; permission: Level }[]>("GET", `/repos/${repoPath(repo)}/collaborators`),
 	setCollaborator: (repo: string, handle: string, permission: Level) => call<unknown>("PUT", `/repos/${repoPath(repo)}/collaborators/${encodeURIComponent(handle)}`, { permission }),
 	removeCollaborator: (repo: string, handle: string) => call<unknown>("DELETE", `/repos/${repoPath(repo)}/collaborators/${encodeURIComponent(handle)}`),

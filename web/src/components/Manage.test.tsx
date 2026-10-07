@@ -142,4 +142,20 @@ describe("a repo's access settings", () => {
 		expect(page("read")).not.toContain("vote-title");
 		expect(page("review")).toContain("vote-title");
 	});
+
+	it("shows a repo GitHive hasn't started on, its code and settings, and offers its admins a start", () => {
+		const render = (level: RepoAccess["level"], view: Parameters<typeof RepoPage>[0]["view"]) =>
+			visibleText(renderToStaticMarkup(<RepoPage repo="acme/fresh" view={view} snapshot={null} api={stubApi()} access={{ ...access(level), fullName: "acme/fresh", branch: "main" }} manage={{ ...manageApi, startRepo: noop }} />));
+		const changes = render("admin", { kind: "repo", tab: "changes" });
+		expect(changes).toMatch(/GitHive hasn.t started on acme\/fresh yet\./);
+		expect(changes).toContain("Start GitHive");
+		expect(changes).toContain("Nothing here yet");
+		// Someone who may only write is told who can start it, with no button.
+		expect(render("write", { kind: "repo", tab: "changes" })).not.toContain("Start GitHive");
+		expect(render("write", { kind: "repo", tab: "changes" })).toContain("once one of its admins starts it");
+		// Settings shows who may do what, and the code shows, without a start.
+		expect(render("admin", { kind: "repo", tab: "settings" })).toContain("Delete");
+		expect(render("admin", { kind: "repo", tab: "settings" })).not.toContain("Nothing here yet");
+		expect(render("admin", { kind: "repo", tab: "code" })).not.toContain("Nothing here yet");
+	});
 });

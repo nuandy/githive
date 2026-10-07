@@ -6,7 +6,7 @@ import { ConfirmButton, messageOf } from "./Confirm";
 import "./Manage.css";
 
 /** What the repo's Settings can change. */
-export type RepoManageApi = Pick<ManageApi, "setVisibility" | "deleteRepo" | "collaborators" | "setCollaborator" | "removeCollaborator">;
+export type RepoManageApi = Pick<ManageApi, "setVisibility" | "deleteRepo" | "collaborators" | "setCollaborator" | "removeCollaborator"> & Partial<Pick<ManageApi, "startRepo">>;
 
 const label = (level: Level) => level[0].toUpperCase() + level.slice(1);
 

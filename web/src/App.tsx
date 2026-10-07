@@ -208,12 +208,18 @@ export function Dashboard({ me, onSignOut }: { me: Me; onSignOut: () => void }) 
 	} else if (route.page === "repos") {
 		page = <RepoList rows={summaries.data ? buildRepoRows(summaries.data) : []} loaded={summaries.loaded} canCreate={me.kind === "user"} />;
 	} else if (repoName !== null && view) {
-		if (snapshot.data) {
+		// GitHive not started on it yet: the repo still shows, with its code and settings, and a way to start.
+		const notStarted = !snapshot.data && !!snapshot.error && !/^no repo /.test(snapshot.error);
+		if (snapshot.data || notStarted) {
 			page = (
 				<RepoPage
 					repo={repoName}
 					view={view}
-					snapshot={{ ...snapshot.data, audit: audit.data }}
+					snapshot={snapshot.data ? { ...snapshot.data, audit: audit.data } : null}
+					onStarted={() => {
+						snapshot.refresh();
+						summaries.refresh();
+					}}
 					changeHistory={change.data ?? (change.error ? null : undefined)}
 					liveStatus={liveStatus}
 					api={api}
