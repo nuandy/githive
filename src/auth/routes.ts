@@ -75,6 +75,8 @@ export function authRoutes(app: Hono<AuthEnv>) {
 		try {
 			profile = await PROVIDERS[name].profile({ config, code, redirectUri: `${new URL(c.req.url).origin}/auth/${name}/callback`, verifier: pending.verifier });
 		} catch (err) {
+			// What the provider said (its error, never the code or a secret), for whoever reads the logs.
+			console.error(`sign-in with ${name} failed`, err instanceof Error ? err.message : String(err));
 			return back(/\[403\]/.test(String(err)) ? "unverified-email" : "provider-failed");
 		}
 		const ids = store(c.env);
