@@ -4,6 +4,7 @@ import type { VoteApi } from "./VoteForm";
 import type { ChangeHistory, RepoAccess, RepoSnapshot } from "../api";
 import { canVote } from "../lib/permissions";
 import { messageOf } from "./Confirm";
+import { MergeSettings } from "./MergeSettings";
 import { RepoAdmin, type RepoManageApi } from "./RepoAdmin";
 import { holdersFromSnapshot } from "../lib/claimsMap";
 import { recordsBadge } from "../lib/claimStatus";
@@ -43,6 +44,8 @@ export interface RepoPageProps {
 	onDeleted?: () => void;
 	/** After GitHive is started on it. */
 	onStarted?: () => void;
+	/** After its admins change how changes merge. */
+	onSettingsChanged?: () => void;
 }
 
 /** Above a repo GitHive hasn't started on: what that means, and for its admins, starting it. */
@@ -88,7 +91,7 @@ const NothingYet = ({ repo }: { repo: string }) => (
 );
 
 /** A repo: claims in force as its changes, its claims map, code, agents, audit and settings, or one change. */
-export function RepoPage({ repo, view, snapshot, changeHistory, liveStatus = "off", api, access, manage, onAccessChanged, onDeleted, onStarted }: RepoPageProps) {
+export function RepoPage({ repo, view, snapshot, changeHistory, liveStatus = "off", api, access, manage, onAccessChanged, onDeleted, onStarted, onSettingsChanged }: RepoPageProps) {
 	// Until the reader's permission is known, no vote form where it would be checked.
 	const voting = access ? canVote(access.level) : !manage;
 	const branch = snapshot?.branch ?? access?.branch ?? "main";
@@ -144,6 +147,11 @@ export function RepoPage({ repo, view, snapshot, changeHistory, liveStatus = "of
 					<SettingsTab
 						snapshot={snapshot}
 						access={manage ? <RepoAdmin repo={repo} access={access} manage={manage} onChanged={() => onAccessChanged?.()} onDeleted={() => onDeleted?.()} /> : undefined}
+						editor={
+							access?.level === "admin" && manage?.changeSettings ? (
+								<MergeSettings snapshot={snapshot} save={(settings) => manage.changeSettings!(repo, settings)} {...(onSettingsChanged ? { onSaved: onSettingsChanged } : {})} />
+							) : undefined
+						}
 					/>
 				) : (
 					<ChangeList snapshot={snapshot} repo={repo} />

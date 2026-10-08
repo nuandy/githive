@@ -4,6 +4,22 @@ import type { Summaries } from "./lib/repos";
 
 // The dashboard's calls to the Worker.
 
+/** How changes merge, as the settings tool takes it: each field left out stays as it is. */
+export interface SettingsInput {
+	required?: number;
+	vetoes?: string[];
+	escalate?: { paths: string[]; required?: number; vetoes?: string[] }[];
+	grants?: Record<string, string[]>;
+	verify?: string[];
+}
+
+/** The settings after a change, and anything to know about the grants. */
+export interface SavedMergeSettings {
+	policy: RepoSnapshot["policy"];
+	verify: string[];
+	warnings?: string[];
+}
+
 /** A repo, as the dashboard shows it (GET /repos/:owner/:name). */
 export interface RepoSnapshot {
 	repo: string;
@@ -240,6 +256,8 @@ export const manage = {
 	deleteRepo: (repo: string) => call<unknown>("DELETE", `/repos/${repoPath(repo)}`),
 	/** Start GitHive on a repo with the default policy (its admins). */
 	startRepo: (repo: string) => call<unknown>("POST", `/repos/${repoPath(repo)}/start`, {}),
+	/** Change a started repo's review policy or checks (its admins); what's left out stays. */
+	changeSettings: (repo: string, settings: SettingsInput) => call<SavedMergeSettings>("POST", `/repos/${repoPath(repo)}/settings`, settings),
 	collaborators: (repo: string) => call<{ handle: string; permission: Level }[]>("GET", `/repos/${repoPath(repo)}/collaborators`),
 	setCollaborator: (repo: string, handle: string, permission: Level) => call<unknown>("PUT", `/repos/${repoPath(repo)}/collaborators/${encodeURIComponent(handle)}`, { permission }),
 	removeCollaborator: (repo: string, handle: string) => call<unknown>("DELETE", `/repos/${repoPath(repo)}/collaborators/${encodeURIComponent(handle)}`),

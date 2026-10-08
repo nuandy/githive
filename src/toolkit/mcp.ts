@@ -503,7 +503,7 @@ export async function repoSnapshot(ctx: ToolContext, repo: string) {
 }
 
 // Tools that write records, after which the repo's summary notes the activity.
-const WRITES = new Set(["claim", "release", "merge", "vote", "build", "revert", "ask_human", "check", "add_work"]);
+const WRITES = new Set(["claim", "release", "merge", "vote", "build", "revert", "ask_human", "check", "add_work", "settings"]);
 const noted = new Map<string, number>();
 
 /** Run one tool, and note what it wrote in the repo's summary. */

@@ -143,6 +143,22 @@ describe("a repo's access settings", () => {
 		expect(page("review")).toContain("vote-title");
 	});
 
+	it("lets a repo's admins change how changes merge; shows everyone else what it is", () => {
+		const snapshot = { ...repoSnapshot, policy: { required: 2, vetoes: ["security"], escalate: [{ paths: ["package.json"], required: 3 }] }, verify: ["npm test"] };
+		const render = (level: RepoAccess["level"]) =>
+			renderToStaticMarkup(<RepoPage repo="acme/web" view={{ kind: "repo", tab: "settings" }} snapshot={snapshot} api={stubApi()} access={access(level)} manage={{ ...manageApi, changeSettings: noop }} />);
+		const admin = render("admin");
+		expect(admin).toContain('id="settings-required" type="number" min="0" inputMode="numeric" value="2"');
+		expect(admin).toContain('value="npm test"');
+		expect(visibleText(admin)).toContain("Save settings");
+		expect(visibleText(admin)).toContain("Stricter rules for paths");
+		expect(visibleText(admin)).toContain("How the records are kept");
+		const writer = visibleText(render("write"));
+		expect(writer).not.toContain("Save settings");
+		expect(writer).toContain("Merging needs 2 approvals; security can block");
+		expect(writer).toContain("package.json need 3 approvals");
+	});
+
 	it("shows a repo GitHive hasn't started on, its code and settings, and offers its admins a start", () => {
 		const render = (level: RepoAccess["level"], view: Parameters<typeof RepoPage>[0]["view"]) =>
 			visibleText(renderToStaticMarkup(<RepoPage repo="acme/fresh" view={view} snapshot={null} api={stubApi()} access={{ ...access(level), fullName: "acme/fresh", branch: "main" }} manage={{ ...manageApi, startRepo: noop }} />));

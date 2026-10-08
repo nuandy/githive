@@ -222,6 +222,12 @@ app.post("/repos/:owner/:name/start", async (c) => {
 	const started = (await callTool("start", { ...(await jsonArgs(c)), repo: repo.id }, toolContext(c.env, c.get("principal")))) as Record<string, unknown>;
 	return c.json({ ...started, repo: repo.fullName });
 });
+// Change a started repo's review policy or checks from the dashboard (its admins): the MCP settings tool.
+app.post("/repos/:owner/:name/settings", async (c) => {
+	const repo = await routeRepo(c, "admin");
+	const changed = (await callTool("settings", { ...(await jsonArgs(c)), repo: repo.id }, toolContext(c.env, c.get("principal")))) as Record<string, unknown>;
+	return c.json({ ...changed, repo: repo.fullName });
+});
 // A person's vote on a change, from the dashboard: stamped with their verified identity.
 app.post("/repos/:owner/:name/changes/:change/votes", async (c) => {
 	const actor = c.get("principal") ?? fail(401, "no identity");

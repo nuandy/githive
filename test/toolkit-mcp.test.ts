@@ -76,7 +76,10 @@ describe("GitHive's MCP tools", () => {
 		expect(await call("start", { repo: "project", verify: ["npm install", "npm test"] })).toMatchObject({ verify: ["npm test"] });
 		expect(await call("settings", { repo: "project" })).toMatchObject({ error: expect.stringContaining("name what to change") });
 		expect(await call("settings", { repo: "project", verify: ["npm install", "npm test"] })).toMatchObject({ policy: { required: 2, vetoes: ["security"] }, verify: ["npm install", "npm test"] });
+		pinged = [];
 		expect(await call("settings", { repo: "project", required: 1 })).toMatchObject({ policy: { required: 1, vetoes: ["security"] }, verify: ["npm install", "npm test"] });
+		// The dashboard's views of the repo rebuild with the new settings.
+		expect(pinged).toEqual(["project"]);
 		expect(await call("settings", { repo: "project", verify: "npm test" })).toMatchObject({ error: expect.stringContaining("verify is a list") });
 		const log = server.git("log", "--format=%B", "refs/notes/githive-claims/project");
 		expect(log).toContain("Settings: the checks (npm install; npm test) changed");

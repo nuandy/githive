@@ -240,6 +240,7 @@ export function Dashboard({ me, onSignOut }: { me: Me; onSignOut: () => void }) 
 						snapshot.refresh();
 						summaries.refresh();
 					}}
+					onSettingsChanged={() => snapshot.refresh()}
 					changeHistory={change.data ?? (change.error ? null : undefined)}
 					liveStatus={liveStatus}
 					api={api}

@@ -183,8 +183,18 @@ export function AuditTab({ snapshot }: { snapshot: RepoSnapshot }) {
 	);
 }
 
-/** The Settings tab: the conventions agents agreed to follow. Read-only. */
-export function SettingsTab({ snapshot, access }: { snapshot: RepoSnapshot; /** Who may do what: the reader's permission, visibility, collaborators. */ access?: ReactNode }) {
+/** A stricter rule for paths, in words: what touching them needs. */
+function ruleWords(rule: NonNullable<RepoSnapshot["policy"]["escalate"]>[number], required: number) {
+	const approvals = rule.required ?? required;
+	return `${approvals} ${approvals === 1 ? "approval" : "approvals"}${rule.vetoes?.length ? `; ${rule.vetoes.join(", ")} can block` : ""}`;
+}
+
+/**
+ * The Settings tab: how changes merge (for the repo's admins, `editor` to
+ * change it; for everyone else, what it is), how the records are kept, and
+ * who may do what (`access`).
+ */
+export function SettingsTab({ snapshot, access, editor }: { snapshot: RepoSnapshot; /** Who may do what: the reader's permission, visibility, collaborators. */ access?: ReactNode; /** For the repo's admins: the form that changes how changes merge. */ editor?: ReactNode }) {
 	const { policy, verify } = snapshot;
 	const sharding = shardingSummary(snapshot);
 	const votesSharding = votesShardingSummary(snapshot);
@@ -193,34 +203,57 @@ export function SettingsTab({ snapshot, access }: { snapshot: RepoSnapshot; /** 
 			<p className="callout repo-settings__intro">
 				<Icon name="alert" className="muted" />
 				<span>
-					How changes merge is set once, when GitHive starts on the repo (the MCP <code>start</code> tool), and every agent checks it itself. A role can be granted to a team, as <code>@org/team</code>.
+					{editor
+						? "Changes here apply to merges from now on: each merge is audited against the settings in force when it merged. Agents can change them too, with the MCP settings tool."
+						: "The repo's admins set how changes merge, and every agent checks it itself. A role can be granted to a team, as @org/team."}
 				</span>
 			</p>
-			{access}
+			{editor}
 			<section className="box">
 				<div className="box__header">
-					<h2>How changes merge</h2>
+					<h2>{editor ? "How the records are kept" : "How changes merge"}</h2>
 				</div>
 				<div className="box__body">
 					<dl className="repo-settings__list">
-						<dt>Approvals</dt>
-						<dd>
-							Merging needs {policy.required} {policy.required === 1 ? "approval" : "approvals"}
-							{policy.vetoes.length ? `; ${policy.vetoes.join(", ")} can block` : ""}
-						</dd>
-						{blockingRoles(policy).length ? (
+						{editor ? null : (
 							<>
-								<dt>Who can block</dt>
+								<dt>Approvals</dt>
 								<dd>
-									{blockingRoles(policy)
-										.map(({ role, holders }) => `${role}: ${holders}`)
-										.join("; ")}
-									. A vote as one of these roles from anyone else counts as an ordinary review.
+									Merging needs {policy.required} {policy.required === 1 ? "approval" : "approvals"}
+									{policy.vetoes.length ? `; ${policy.vetoes.join(", ")} can block` : ""}
 								</dd>
+								{blockingRoles(policy).length ? (
+									<>
+										<dt>Who can block</dt>
+										<dd>
+											{blockingRoles(policy)
+												.map(({ role, holders }) => `${role}: ${holders}`)
+												.join("; ")}
+											. A vote as one of these roles from anyone else counts as an ordinary review.
+										</dd>
+									</>
+								) : null}
+								{policy.escalate?.length ? (
+									<>
+										<dt>Stricter paths</dt>
+										<dd>
+											<ul className="repo-settings__commands">
+												{policy.escalate.map((rule, i) => (
+													<li key={i}>
+														{rule.paths.map((p) => (
+															<code key={p}>{p}</code>
+														))}{" "}
+														need {ruleWords(rule, policy.required)}
+													</li>
+												))}
+											</ul>
+										</dd>
+									</>
+								) : null}
+								<dt>Merge checks</dt>
+								<dd>{verify.length ? verify.map((c) => <code key={c}>{c}</code>) : "No checks before merging"}</dd>
 							</>
-						) : null}
-						<dt>Merge checks</dt>
-						<dd>{verify.length ? verify.map((c) => <code key={c}>{c}</code>) : "No checks before merging"}</dd>
+						)}
 						<dt>Signed records</dt>
 						<dd>{snapshot.verified ? "Records and merges are stamped with verified identity" : "Records are not stamped: names are as agents give them"}</dd>
 						{sharding ? (
@@ -240,6 +273,7 @@ export function SettingsTab({ snapshot, access }: { snapshot: RepoSnapshot; /** 
 					</dl>
 				</div>
 			</section>
+			{access}
 		</div>
 	);
 }

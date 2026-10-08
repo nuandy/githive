@@ -69,9 +69,9 @@ describe("the repo header", () => {
 });
 
 describe("Settings", () => {
-	it("says how changes merge is set when GitHive starts, and that a role can go to a team", () => {
+	it("says the repo's admins set how changes merge, and that a role can go to a team", () => {
 		const html = renderToStaticMarkup(<SettingsTab snapshot={repoSnapshot} />);
-		expect(html).toMatch(/set once, when GitHive starts on the repo.*start/);
+		expect(html).toContain("The repo&#x27;s admins set how changes merge");
 		expect(html).toContain("@org/team");
 	});
 

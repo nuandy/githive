@@ -55,6 +55,7 @@ const ROUTES: [method: string, path: string, needs: Level][] = [
 	["POST", "/repos/acme/web/changes/c-1/votes", "review"],
 	["PATCH", "/repos/acme/web", "admin"],
 	["POST", "/repos/acme/web/start", "admin"],
+	["POST", "/repos/acme/web/settings", "admin"],
 	["GET", "/repos/acme/web/collaborators", "admin"],
 	["PUT", "/repos/acme/web/collaborators/bob", "admin"],
 	["DELETE", "/repos/acme/web/collaborators/bob", "admin"],
