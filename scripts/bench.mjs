@@ -8,6 +8,7 @@
 //   node scripts/bench.mjs [--label baseline] [--levels 1,5,10,25] [--racers 5]
 //                          [--base https://blueprint-bench.nuandy.workers.dev] [--repo bench-<label>]
 //                          [--shard-depth 2] (how deep claims are sharded; 0 keeps them in one record)
+//                          [--records-repos N] (how many records repos the shards are spread over; default the toolkit's)
 //                          [--ramp 60]   (agents start spread evenly over this many seconds, instead of all at once)
 //
 // Credentials come from .dev.vars (CF_ACCESS_CLIENT_ID, CF_ACCESS_CLIENT_SECRET) and are never printed.
@@ -32,6 +33,7 @@ const SOURCE = args.source ?? "https://github.com/octocat/Spoon-Knife";
 const LEVELS = (args.levels ?? "1,5,10,25").split(",").map(Number);
 const RACERS = Number(args.racers ?? 5);
 const SHARD_DEPTH = args["shard-depth"] === undefined ? undefined : Number(args["shard-depth"]);
+const RECORDS_REPOS = args["records-repos"] === undefined ? undefined : Number(args["records-repos"]);
 const RAMP_MS = Number(args.ramp ?? 0) * 1000;
 
 // Calls can wait under load; don't let the client give up first.
@@ -158,7 +160,7 @@ async function main() {
 			if (!/exist/i.test(err.message)) throw err;
 		});
 	}
-	const started = await tool(0, "start", { repo: REPO, ...(SHARD_DEPTH === undefined ? {} : { shard_depth: SHARD_DEPTH }) });
+	const started = await tool(0, "start", { repo: REPO, ...(SHARD_DEPTH === undefined ? {} : { shard_depth: SHARD_DEPTH }), ...(RECORDS_REPOS === undefined ? {} : { records_repos: RECORDS_REPOS }) });
 	console.log(`${REPO} at ${BASE} (claims sharded ${started.shardDepth ? `${started.shardDepth} deep, over ${started.recordsRepos || "no"} records repos` : "not at all"})`);
 
 	const levels = [];
