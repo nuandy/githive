@@ -6,6 +6,7 @@ import { GitCasLog } from "../src/record-log";
 import { callTool, type ToolContext } from "../src/toolkit/mcp";
 import { generateStampKey, makeStamper } from "../src/toolkit/stamp";
 import { joinLine, landedFromLine, type Line, lineRef, markPassed } from "../src/toolkit/line";
+import { holdReview, type ReviewHolds, reviewsRef, roleWaits, roleWaitTold } from "../src/toolkit/review-holds";
 import { startGitServer, type GitServer } from "./helpers/git-server";
 
 // The shape of every kind of record GitHive keeps, pinned. Records outlive
@@ -64,12 +65,18 @@ beforeAll(async () => {
 	if (first === "full" || second === "full") throw new Error("the line was full");
 	await markPassed(line, second.id);
 	await landedFromLine(line, first.id, "4".repeat(40));
+	// Review holds: one held, and a role's review waiting, told to people.
+	const holds = new GitCasLog<ReviewHolds>(async () => ({ url: server.url, token: "unused" }), "p", reviewsRef("p"));
+	await holdReview(holds, `${"1".repeat(40)}#review`, "bob/reviewer", 1);
+	await roleWaits(holds, [`${"1".repeat(40)}#security`]);
+	await roleWaitTold(holds, `${"1".repeat(40)}#security`);
 	const read = async (ref: string) => (await new GitCasLog<unknown>(async () => ({ url: server.url, token: "unused" }), "p", ref).read())?.commit.state;
 	shapes = {
 		claims: shapeOf(await read("refs/notes/githive-claims/p")),
 		votes: shapeOf(await read("refs/notes/githive-votes/p")),
 		work: shapeOf(await read("refs/notes/githive-work/p")),
 		line: shapeOf(await read(lineRef("p"))),
+		reviews: shapeOf(await read(reviewsRef("p"))),
 	};
 }, 60_000);
 

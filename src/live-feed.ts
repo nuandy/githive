@@ -27,21 +27,6 @@ interface View {
 /** How long a build may run before another caller may start one. */
 const BUILD_LEASE_MS = 2 * 60_000;
 
-/**
- * Review holds, for next: which agents are
- * reviewing a commit in a role (keyed as toolkit/work.ts holdKey), until they
- * vote or the hold runs out. A hint so two
- * agents aren't sent to the same review that needs one; not a record.
- */
-type Holds = Record<string, Record<string, number>>;
-/** How long a review hold lasts if its agent never votes. */
-export const REVIEW_HOLD_MS = 15 * 60_000;
-/**
- * How long a hold lasts once its agent voted: a vote just written can take a
- * moment to show in every read of the votes, and until it does, the change
- * would look unreviewed (and unheld) to the next agent asking.
- */
-export const VOTED_HOLD_MS = 60_000;
 
 export class LiveFeed extends DurableObject<Env> {
 	async fetch(request: Request) {
@@ -93,65 +78,6 @@ export class LiveFeed extends DurableObject<Env> {
 		const kept = await this.ctx.storage.list({ prefix: "view:" });
 		const building = await this.ctx.storage.list({ prefix: "building:" });
 		await this.ctx.storage.delete([...kept.keys(), ...building.keys()]);
-	}
-
-	/** The review holds in force: by commit, the agents reviewing it. */
-	async reviewsHeld(): Promise<Record<string, string[]>> {
-		const holds = this.live((await this.ctx.storage.get<Holds>("holds")) ?? {});
-		return Object.fromEntries(Object.entries(holds).map(([head, agents]) => [head, Object.keys(agents)]));
-	}
-
-	/**
-	 * Hold a review of `head` for `agent`, if fewer than `needed` others hold
-	 * one. Atomic: two agents asking at once can't both take the last one.
-	 */
-	async holdReview(head: string, agent: string, needed: number) {
-		const holds = this.live((await this.ctx.storage.get<Holds>("holds")) ?? {});
-		const others = Object.keys(holds[head] ?? {}).filter((a) => a !== agent);
-		if (others.length >= needed) return false;
-		holds[head] = { ...holds[head], [agent]: Date.now() + REVIEW_HOLD_MS };
-		await this.ctx.storage.put("holds", holds);
-		return true;
-	}
-
-	/** The agent voted on `head`: its hold goes once the vote has had a moment to show everywhere. */
-	async releaseReview(head: string, agent: string) {
-		const holds = this.live((await this.ctx.storage.get<Holds>("holds")) ?? {});
-		if (!holds[head]?.[agent]) return;
-		holds[head][agent] = Math.min(holds[head][agent], Date.now() + VOTED_HOLD_MS);
-		await this.ctx.storage.put("holds", holds);
-	}
-
-	/**
-	 * When each of `waiting` (reviews a role that can block awaits, by
-	 * holdKey) was first seen waiting, and whether people were told. Reviews
-	 * no longer waiting are forgotten, so a review that waits again starts over.
-	 */
-	async roleWaits(waiting: string[]): Promise<Record<string, { since: number; told?: boolean }>> {
-		const known = (await this.ctx.storage.get<Record<string, { since: number; told?: boolean }>>("roleWaits")) ?? {};
-		const now = Date.now();
-		const current = Object.fromEntries(waiting.map((key) => [key, known[key] ?? { since: now }]));
-		await this.ctx.storage.put("roleWaits", current);
-		return current;
-	}
-
-	/** People were told about a waiting review: once is enough. */
-	async roleWaitTold(key: string) {
-		const known = (await this.ctx.storage.get<Record<string, { since: number; told?: boolean }>>("roleWaits")) ?? {};
-		if (!known[key]) return;
-		known[key].told = true;
-		await this.ctx.storage.put("roleWaits", known);
-	}
-
-	/** The holds that haven't run out. */
-	private live(holds: Holds): Holds {
-		const now = Date.now();
-		const kept: Holds = {};
-		for (const [head, agents] of Object.entries(holds)) {
-			const alive = Object.fromEntries(Object.entries(agents).filter(([, until]) => until > now));
-			if (Object.keys(alive).length) kept[head] = alive;
-		}
-		return kept;
 	}
 
 	private async writes() {

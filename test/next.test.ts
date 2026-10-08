@@ -9,6 +9,7 @@ import { type ClaimRecord, type Registry, shardClaims } from "../src/toolkit/cla
 import { callTool, type ToolContext, repoSnapshot } from "../src/toolkit/mcp";
 import type { VoteRecord } from "../src/toolkit/votes";
 import { nextFor, type NextInput, type WorkItem, workId } from "../src/toolkit/work";
+import { type ReviewHolds, reviewHolds, reviewsRef } from "../src/toolkit/review-holds";
 import { pushChange } from "./helpers/agents";
 import { startGitServer, type GitServer } from "./helpers/git-server";
 
@@ -158,14 +159,13 @@ describe("review holds through the toolkit", { timeout: 120_000 }, () => {
 		const server = await startGitServer();
 		const work = mkdtempSync(join(tmpdir(), "githive-holds-"));
 		try {
-			const { LiveFeed } = await import("../src/live-feed");
-			const { FakeStorage } = await import("./fakes/env");
-			const live = new LiveFeed({ storage: new FakeStorage(), getWebSockets: () => [] } as never, {} as never);
+			// Holds kept as the record in Git, as the Worker keeps them.
+			const reviews = reviewHolds((repo) => new GitCasLog<ReviewHolds>(async () => ({ url: server.url, token: "unused" }), repo, reviewsRef(repo)));
 			const ctx = (agentKey?: string): ToolContext => ({
 				remote: async () => ({ url: server.url, token: "unused" }),
 				changeRemote: async () => ({ url: server.url, token: "unused" }),
 				head: async () => server.git("rev-parse", "main").trim(),
-				reviews: { held: () => live.reviewsHeld(), hold: (_r, head, agent, needed) => live.holdReview(head, agent, needed), release: (_r, head, agent) => live.releaseReview(head, agent) },
+				reviews,
 				...(agentKey ? { agentKey } : {}),
 			});
 			const call = (name: string, args: Record<string, unknown>, key?: string) => callTool(name, { repo: "p", ...args }, ctx(key)) as Promise<Record<string, unknown>>;
@@ -188,7 +188,7 @@ describe("review holds through the toolkit", { timeout: 120_000 }, () => {
 			await call("vote", { commit: one.head, reviewer: "rev-1", role: "review", verdict: "approve", evidence: "ok" }, keys["rev-1"]);
 			const later = vi.spyOn(Date, "now").mockReturnValue(Date.now() + 61_000);
 			try {
-				expect(Object.keys(await live.reviewsHeld())).toEqual([`${two.head}#review`]);
+				expect(Object.keys(await reviews.held("p"))).toEqual([`${two.head}#review`]);
 			} finally {
 				later.mockRestore();
 			}
@@ -242,20 +242,12 @@ describe("a review a role waits for too long", { timeout: 120_000 }, () => {
 		const server = await startGitServer();
 		const work = mkdtempSync(join(tmpdir(), "githive-role-wait-"));
 		try {
-			const { LiveFeed } = await import("../src/live-feed");
-			const { FakeStorage } = await import("./fakes/env");
-			const live = new LiveFeed({ storage: new FakeStorage(), getWebSockets: () => [] } as never, {} as never);
+			const reviews = reviewHolds((repo) => new GitCasLog<ReviewHolds>(async () => ({ url: server.url, token: "unused" }), repo, reviewsRef(repo)));
 			const ctx = (agentKey?: string): ToolContext => ({
 				remote: async () => ({ url: server.url, token: "unused" }),
 				changeRemote: async () => ({ url: server.url, token: "unused" }),
 				head: async () => server.git("rev-parse", "main").trim(),
-				reviews: {
-					held: () => live.reviewsHeld(),
-					hold: (_r, key, agent, needed) => live.holdReview(key, agent, needed),
-					release: (_r, key, agent) => live.releaseReview(key, agent),
-					waits: (_r, keys) => live.roleWaits(keys),
-					told: (_r, key) => live.roleWaitTold(key),
-				},
+				reviews,
 				...(agentKey ? { agentKey } : {}),
 			});
 			const call = (name: string, args: Record<string, unknown>, key?: string) => callTool(name, { repo: "p", ...args }, ctx(key)) as Promise<Record<string, unknown>>;

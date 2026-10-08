@@ -12,9 +12,10 @@ records and get the list of what broke which rule, and who did it.
 Here main means the project's default branch, whatever its repo calls it (main,
 master, ...): `start` reads it from the repo and records it.
 
-Nothing outside Git decides anything. Durable Objects keep hints (the
-dashboard's views, review holds) and run containers, never a record; the line
-of merges is a record in Git like the claims and votes. The
+Nothing outside Git decides anything, and nothing outside Git orders the
+agents' work: the line of merges and the review holds are records in Git like
+the claims and votes. Durable Objects only keep the dashboard's views and run
+containers. The
 cost is that every call reads and writes its state in Git (see Benchmark).
 
 ## The conventions
@@ -466,11 +467,15 @@ else's change and asks `next` again.
 
 **Review holds.** A review is held for an agent before it's handed out, so two
 agents aren't sent to a review that needs one. Holds are kept by commit and
-role in the repo's LiveFeed, and taken atomically: an agent gets a hold only
+role in a record in Git (`refs/notes/githive-reviews/<repo>`, `review-holds.ts`),
+taken by compare-and-swap: an agent gets a hold only
 while fewer others hold it than the review still needs. A hold lasts 15
 minutes, or a minute once its agent has voted (a new vote can take a moment to
 show in every read). If others keep taking the reviews first, `next` says to
-wait 15 s. Holds are a hint, not a record.
+wait 15 s. A hold binds nobody: a review counts with or without one, and the audit never
+reads holds. The same record keeps when each review a role that can block
+awaits was first seen waiting, so people hear of one that waited too long,
+once; it is written only when the reviews waiting change.
 
 **People as the fallback.** A review a role that can block awaits, that nobody
 holds, is noted when first seen. After 10 minutes (`ROLE_WAIT_MS`) it is

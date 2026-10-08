@@ -124,6 +124,19 @@
 				}
 			],
 			"tip": "string"
+		},
+		"reviews": {
+			"holds": {
+				"1111111111111111111111111111111111111111#review": {
+					"bob/reviewer": "string"
+				}
+			},
+			"waits": {
+				"1111111111111111111111111111111111111111#security": {
+					"since": "string",
+					"told": "boolean"
+				}
+			}
 		}
 	}
 }

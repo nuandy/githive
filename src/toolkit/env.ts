@@ -7,6 +7,7 @@ import { defaultBranch, type Remote, Workspace } from "../git";
 import { projectBranch } from "../project-branch";
 import { claimStore } from "./claim-store";
 import { type Line, lineCheckRunner, lineRef } from "./line";
+import { type ReviewHolds, reviewHolds, reviewsRef } from "./review-holds";
 import type { Registry } from "./claims";
 import type { ToolContext, HostedStatus } from "./mcp";
 import { recordsRepoName } from "./shards";
@@ -49,6 +50,13 @@ async function cached(env: Env, project: string, key: string, mint: () => Promis
 /** Each record's log, kept for the isolate: a log remembers the tip it last saw, so reading an unmoved ref needn't fetch it. */
 const logs = new Map<string, GitCasLog<unknown>>();
 
+/** A repo's record log at `ref`, one per ref in the isolate. */
+function recordsLog<S>(env: Env, repo: string, ref: string) {
+	let log = logs.get(ref);
+	if (!log) logs.set(ref, (log = new GitCasLog<unknown>(() => cached(env, repo, `${repo}|write`, () => remoteFor(env.ARTIFACTS, repo, "write", 3600)), repo, ref)));
+	return log as GitCasLog<S>;
+}
+
 /**
  * The context for one actor: `by` is who it is (as Access or GitHive's
  * sign-in verified them, or a hosted agent's own name), and stamps carry it,
@@ -65,13 +73,8 @@ export function toolContextFor(env: Env, by: string | undefined, caller: { agent
 			const remote = await cached(env, repo, `${repo}|read`, () => remoteFor(env.ARTIFACTS, repo, "read", 3600));
 			await env.GATE.getByName(`repo:${repo}`).warmUp({ repo, ...input, base: { remote: remote.url, token: remote.token }, why: expect });
 		},
-		reviews: {
-			held: (repo) => env.LIVE.getByName(`repo:${repo}`).reviewsHeld(),
-			hold: (repo, head, agent, needed) => env.LIVE.getByName(`repo:${repo}`).holdReview(head, agent, needed),
-			release: (repo, head, agent) => env.LIVE.getByName(`repo:${repo}`).releaseReview(head, agent),
-			waits: (repo, keys) => env.LIVE.getByName(`repo:${repo}`).roleWaits(keys),
-			told: (repo, key) => env.LIVE.getByName(`repo:${repo}`).roleWaitTold(key),
-		},
+		// Review holds are a record in Git (see review-holds.ts), like the claims and votes.
+		reviews: reviewHolds((repo) => recordsLog<ReviewHolds>(env, repo, reviewsRef(repo))),
 		requestReview: (input) => startHostedReviewers(env, input),
 		startBuilder: (input) => startHostedBuilder(env, input),
 		stamper: async (agent) => (env.STAMP_KEY && by ? makeStamper(env.STAMP_KEY, agent ? `${by}/${agent}` : by) : undefined),
@@ -82,11 +85,7 @@ export function toolContextFor(env: Env, by: string | undefined, caller: { agent
 		createRecordsRepos: async (repo, count) => {
 			await Promise.all(Array.from({ length: count }, (_, k) => ensureRepo(env.ARTIFACTS, recordsRepoName(repo, k), `Claim records for ${repo}`)));
 		},
-		records: <S>(repo: string, ref: string) => {
-			let log = logs.get(ref);
-			if (!log) logs.set(ref, (log = new GitCasLog<unknown>(() => cached(env, repo, `${repo}|write`, () => remoteFor(env.ARTIFACTS, repo, "write", 3600)), repo, ref)));
-			return log as GitCasLog<S>;
-		},
+		records: <S>(repo: string, ref: string) => recordsLog<S>(env, repo, ref),
 		agentStatus: (repo, change, head, roles) => hostedAgentStatus(env, repo, change, head, roles),
 		head: async (repo, branch) => (await headOf(env.ARTIFACTS, repo, branch)) ?? fail(409, `${repo} has no ${branch} branch`),
 		defaultBranch: async (repo) => (await defaultBranch(await remoteFor(env.ARTIFACTS, repo, "read", 3600))) ?? fail(409, `${repo} has no commits`),
