@@ -359,20 +359,19 @@ await Promise.all(
 		if (!added.ok && !/already/.test(added.reason ?? "")) throw new Error(`adding ${piece.id} failed: ${added.reason}`);
 	}),
 );
-// Setup ends once the check containers are warm, as on a repo that's been running: the work clock starts then.
+// Setup ends once the repo has a snapshot for check containers to start from, as on a repo that's been running: the work clock starts then.
 if (plan.setup?.verify?.length) {
 	const until = Date.now() + 6 * 60_000;
 	for (;;) {
-		const lanes = await fetch(`${BASE}/repos/_/${plan.repo}/lanes`, { headers: access, dispatcher: patient })
-			.then((r) => (r.ok ? r.json() : []))
-			.catch(() => []);
-		const warm = lanes.filter((l) => l.warmedAt && !l.warming).length;
-		if (lanes.length && warm === lanes.length) {
-			say("swarm", `check containers warm (${warm} lanes)`);
+		const line = await fetch(`${BASE}/repos/_/${plan.repo}/line`, { headers: access, dispatcher: patient })
+			.then((r) => (r.ok ? r.json() : {}))
+			.catch(() => ({}));
+		if (line.snapshot) {
+			say("swarm", `the repo's snapshot is ready (${Math.round(line.snapshot.size / 1e6)} MB)`);
 			break;
 		}
 		if (Date.now() > until) {
-			say("swarm", `starting with ${warm} of ${lanes.length} lanes warm after 6 minutes`);
+			say("swarm", "starting without a snapshot after 6 minutes");
 			break;
 		}
 		await sleep(5_000);

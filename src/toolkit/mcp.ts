@@ -66,8 +66,6 @@ export interface ToolContext {
 	ping?: (repo: string) => Promise<void>;
 	/** Warms the repo's check container in the background, when a merge is likely soon: why, and for what (see Gate.warmLanes). */
 	warmChecks?: (repo: string, input: { branch: string; checks: string[]; expect: "checked" | "approved" | "set up"; key?: string }) => Promise<void>;
-	/** Tells the repo's check container a merge it was waiting for won't come (its claim was released). */
-	mergeNotExpected?: (repo: string, change: string) => Promise<void>;
 	/** Review holds, so next doesn't send two agents to a review that needs one (see LiveFeed). */
 	reviews?: {
 		held(repo: string): Promise<Record<string, string[]>>;
@@ -684,10 +682,8 @@ async function runTool(name: string, args: Args, ctx: ToolContext): Promise<unkn
 		case "release": {
 			const change = requiredString(args, "change");
 			const agent = actAs("agent");
-			const released = args.stale === true ? await store.releaseStale({ change, agent, staleAfterMs: STALE_AFTER_MS }, stamper) : await store.release({ change, agent, reason: typeof args.reason === "string" ? args.reason : "released" }, stamper);
-			// Given up: the check container needn't wait for its merge.
-			if (released.ok) await ctx.mergeNotExpected?.(repo, change).catch(() => undefined);
-			return released;
+			if (args.stale === true) return store.releaseStale({ change, agent, staleAfterMs: STALE_AFTER_MS }, stamper);
+			return store.release({ change, agent, reason: typeof args.reason === "string" ? args.reason : "released" }, stamper);
 		}
 		case "ask_human": {
 			const change = requiredString(args, "change");

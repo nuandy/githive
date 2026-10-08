@@ -17,6 +17,8 @@ import { initialFiles, parseInit, writeFirstCommit } from "./repo-init";
 import { Timing } from "./timing";
 import { defaultBranch } from "./git";
 import { changeRepoName, toolContextFor } from "./toolkit/env";
+import { type Line, lineRef } from "./toolkit/line";
+import { GitCasLog } from "./record-log";
 
 export { Builder } from "./builder";
 export { Reviewer } from "./reviewer";
@@ -82,7 +84,7 @@ app.get("/api", (c) =>
 			"GET  /repos/:owner/:name  (claims and votes, from Git); /access (your permission)",
 			"GET  /repos/:owner/:name/changes/:change  (one change's history)",
 			"POST /repos/:owner/:name/changes/:change/votes {role, verdict, evidence}  (a person's vote; review)",
-			"GET  /repos/:owner/:name/audit | /lanes | /tree?ref= | /file?path=&ref= | /live (WebSocket)",
+			"GET  /repos/:owner/:name/audit | /line | /tree?ref= | /file?path=&ref= | /live (WebSocket)",
 			"PATCH /repos/:owner/:name {visibility}, GET|PUT|DELETE /repos/:owner/:name/collaborators[/:handle]  (admin)",
 			"DELETE /repos/:owner/:name  (admin)",
 			"Access admins: POST /repos/import, /repos/_/<id>/..., GET /admin/repos, POST /admin/repos/:id/adopt {owner, name}, GET|POST|DELETE /admin/invites",
@@ -241,10 +243,12 @@ app.get("/repos/:owner/:name/changes/:change", async (c) => {
 	const change = c.req.param("change");
 	return keptView(c, `repo:${repo.id}`, `change:${change}`, 60_000, (timing) => changeHistory({ ...toolContext(c.env, c.get("principal")), timing }, repo.id, change));
 });
-// The warmth of a repo's check containers: whether each lane runs, and when it last warmed.
-app.get("/repos/:owner/:name/lanes", async (c) => {
+// The repo's line of merges (a record in Git: see toolkit/line.ts), and the snapshot its check containers start from.
+app.get("/repos/:owner/:name/line", async (c) => {
 	const repo = await routeRepo(c, "read");
-	return c.json(await c.env.GATE.getByName(`repo:${repo.id}`).lanes(repo.id));
+	const read = await remoteFor(c.env.ARTIFACTS, repo.id, "read", 3600);
+	const [line, snapshot] = await Promise.all([new GitCasLog<Line>(async () => read, repo.id, lineRef(repo.id)).read(), c.env.GATE.getByName(`repo:${repo.id}`).snapshotInfo()]);
+	return c.json({ ...(line?.commit.state ?? { tip: null, entries: [], left: [] }), snapshot });
 });
 app.get("/repos/:owner/:name/audit", async (c) => {
 	const repo = await routeRepo(c, "read");

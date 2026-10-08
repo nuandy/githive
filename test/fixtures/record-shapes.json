@@ -101,6 +101,29 @@
 					"title": "string"
 				}
 			]
+		},
+		"line": {
+			"entries": [
+				{
+					"active": "string",
+					"agent": "string",
+					"change": "string",
+					"head": "string",
+					"id": "string",
+					"since": "string",
+					"status": "string"
+				}
+			],
+			"left": [
+				{
+					"at": "string",
+					"change": "string",
+					"commit": "string",
+					"head": "string",
+					"how": "string"
+				}
+			],
+			"tip": "string"
 		}
 	}
 }

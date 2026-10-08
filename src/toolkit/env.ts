@@ -6,6 +6,7 @@ import { fail } from "../errors";
 import { defaultBranch, type Remote, Workspace } from "../git";
 import { projectBranch } from "../project-branch";
 import { claimStore } from "./claim-store";
+import { type Line, lineCheckRunner, lineRef } from "./line";
 import type { Registry } from "./claims";
 import type { ToolContext, HostedStatus } from "./mcp";
 import { recordsRepoName } from "./shards";
@@ -59,11 +60,11 @@ export function toolContextFor(env: Env, by: string | undefined, caller: { agent
 		register: async (repo) => env.REPO_INDEX.getByName("all").addRepo(repo),
 		summarize: (repo, patch) => env.REPO_INDEX.getByName("all").summarize(`repo:${repo}`, patch),
 		ping: async (repo) => void (await env.LIVE?.getByName(`repo:${repo}`).ping("records")),
-		warmChecks: async (repo, input) => {
+		// The repo's own Gate keeps its snapshot fresh (see Gate.warmUp): the merges' checks run in their changes' Gates.
+		warmChecks: async (repo, { expect, ...input }) => {
 			const remote = await cached(env, repo, `${repo}|read`, () => remoteFor(env.ARTIFACTS, repo, "read", 3600));
-			await env.GATE.getByName(`repo:${repo}`).warmLanes({ repo, ...input, base: { remote: remote.url, token: remote.token } });
+			await env.GATE.getByName(`repo:${repo}`).warmUp({ repo, ...input, base: { remote: remote.url, token: remote.token }, why: expect });
 		},
-		mergeNotExpected: async (repo, change) => env.GATE.getByName(`repo:${repo}`).notExpecting(change),
 		reviews: {
 			held: (repo) => env.LIVE.getByName(`repo:${repo}`).reviewsHeld(),
 			hold: (repo, head, agent, needed) => env.LIVE.getByName(`repo:${repo}`).holdReview(head, agent, needed),
@@ -89,18 +90,26 @@ export function toolContextFor(env: Env, by: string | undefined, caller: { agent
 		agentStatus: (repo, change, head, roles) => hostedAgentStatus(env, repo, change, head, roles),
 		head: async (repo, branch) => (await headOf(env.ARTIFACTS, repo, branch)) ?? fail(409, `${repo} has no ${branch} branch`),
 		defaultBranch: async (repo) => (await defaultBranch(await remoteFor(env.ARTIFACTS, repo, "read", 3600))) ?? fail(409, `${repo} has no commits`),
-		// Checks run in the repo's line of merges (see check-line.ts): its Gate and the Gates beside it, each with a container.
-		runChecks: (repo) => async ({ change, branch, head, ref, commands, source }) => {
-			const remote = await remoteFor(env.ARTIFACTS, repo, "read", 3600);
-			const fork = source ?? remote;
-			const { result, base, after } = await env.GATE.getByName(`repo:${repo}`).checkInLine({ repo, change, branch, base: { remote: remote.url, token: remote.token }, fork: { remote: fork.url, token: fork.token, ref }, head, checks: commands });
-			const conflict = result.mergeConflict ? [{ command: "(merging onto main and the merges ahead in line)", exitCode: 1, output: `conflicts in ${result.mergeConflict.join(", ")}` }] : [];
-			return {
-				passed: result.passed,
-				results: [...conflict, ...result.results.map((r) => ({ command: r.command, exitCode: r.exitCode, output: r.output }))],
-				base,
-				after,
-				done: (landed: boolean) => env.GATE.getByName(`repo:${repo}`).lineDone(change, landed),
+		// Checks run in the repo's line of merges, a record in Git (see line.ts), each in its change's own Gate and container.
+		runChecks: (repo) => {
+			const read = () => cached(env, repo, `${repo}|read`, () => remoteFor(env.ARTIFACTS, repo, "read", 3600));
+			const fork = (agent: string) => cached(env, repo, `fork:${repo}:${agent}|read`, () => changeRemote(env, repo, agent, "read", 3600));
+			let branch = "main";
+			const runner = lineCheckRunner({
+				log: new GitCasLog<Line>(() => cached(env, repo, `${repo}|write`, () => remoteFor(env.ARTIFACTS, repo, "write", 3600)), repo, lineRef(repo)),
+				main: async () => headOf(env.ARTIFACTS, repo, branch),
+				check: async ({ change, head, ref, agent, source, commands, base, ahead }) => {
+					const remote = await read();
+					const from = source ?? (await fork(agent));
+					const merges = await Promise.all(ahead.map(async (a) => ({ head: a.head, ref: `changes/${a.change}`, ...(await fork(a.agent).then((r) => ({ remote: r.url, token: r.token }))) })));
+					const result = await env.GATE.getByName(`repo:${repo}:change:${change}`).checkCommit({ repo, branch, base: { remote: remote.url, token: remote.token }, fork: { remote: from.url, token: from.token, ref }, head, checks: commands, baseHead: base, ahead: merges });
+					const conflict = result.mergeConflict ? [{ command: "(merging onto main and the merges ahead in line)", exitCode: 1, output: `conflicts in ${result.mergeConflict.join(", ")}` }] : [];
+					return { passed: result.passed, results: [...conflict, ...result.results.map((r) => ({ command: r.command, exitCode: r.exitCode, output: r.output }))] };
+				},
+			});
+			return (input) => {
+				branch = input.branch ?? branch;
+				return runner(input);
 			};
 		},
 	};

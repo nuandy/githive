@@ -12,8 +12,9 @@ records and get the list of what broke which rule, and who did it.
 Here main means the project's default branch, whatever its repo calls it (main,
 master, ...): `start` reads it from the repo and records it.
 
-Nothing outside Git decides anything. Durable Objects keep hints and schedules
-(the dashboard's views, review holds, the line of merges), never a record. The
+Nothing outside Git decides anything. Durable Objects keep hints (the
+dashboard's views, review holds) and run containers, never a record; the line
+of merges is a record in Git like the claims and votes. The
 cost is that every call reads and writes its state in Git (see Benchmark).
 
 ## The conventions
@@ -319,43 +320,43 @@ Every merge must be tested on exactly the code it lands on (the audit checks
 row (about 90 s each on Express). Checking them side by side on one main gains
 nothing: the first to land makes the others' results stale.
 
-So merges wait in a line (`check-line.ts`), kept by the repo's Gate. When a
-merge joins an idle line, the line waits 2 s for others. Merges ready together
-form a batch of up to 4. Each is checked on main with the merges ahead of it
-in the batch merged in first, all at once, each in its own container (the
-repo's Gate and three beside it). A result says what it was tested on and
-after. The merge waits until exactly those merges have landed on that main,
-then lands, listing their heads in `GitHive-Tested-After`.
+So merges wait in a line, kept as a record in Git (`refs/notes/githive-line/<repo>`,
+`line.ts`) and written by compare-and-swap by whichever merge is acting, as
+the claims are. Nobody runs it. The record holds the merges in line, in
+landing order, and its tip: the main a merge joining now is checked on (the
+last merge landed from the line, or main as it was when the line was empty).
 
-Batches are pipelined: they don't wait for each other to land. The next batch
-is checked on the same main, after every merge still landing (the chain, up to
-8), so its results stay right as they land. Once the chain has landed, the
-next batch starts from main as it is then. A merge in the chain that gives up
-instead of landing breaks it: the line lets the rest report back, up to 3
-minutes, and starts afresh. A merge behind one that failed is checked again
-without it, first in line. A merge whose merges ahead don't land within 5
-minutes, or whose main went another way, checks again. A new head for a
-change replaces its request still waiting. Ten merges ready at once take
-three batches, about three check runs, instead of ten.
+A merge joins at the end and is checked on the tip with the merges ahead of
+it merged in first, in its own container (its change's Gate, started from
+the repo's snapshot), side by side with the others. Its result says what it
+was tested on and after; it waits until exactly those merges have landed,
+then lands, listing their heads in `GitHive-Tested-After`, and moves the tip
+to its merge commit. Nothing waits for a batch: every merge in line is
+checked at once, up to 8 in line (more wait for room, up to 5 minutes). A
+merge that fails, gives up, or goes quiet for 2 minutes (one in line shows
+it's still at it every 30 s) leaves the line and takes every merge behind it
+along: they were checked assuming it would land, and check again. A merge
+waiting for its turn sees at once that it lost its place. A merge whose
+merges ahead don't land within 5 minutes, or whose main went another way,
+checks again. A change that joins again gives up its earlier place. Ten
+merges ready at once are checked side by side, about one check run's time
+for all ten.
 
 The audit checks each merge as landed (`testedAsLanded`): exactly the merges
 its trailer lists, in that order, and nothing else, came between the main its
 checks ran on and the merge.
 
-The line decides nothing: it schedules check runs. Each agent's merge lands
-itself.
+The line decides nothing: it says where each merge is checked, and the
+merge's trailers say what it was tested on and after, which the audit checks.
+Each agent's merge lands itself.
 
-**Warm lanes.** A Gate's container starts small (1 vCPU, 3 GiB: memory is
-paid for while it runs, CPU only while it works) and moves to 2 vCPU, 6 GiB
+**Check containers.** A Gate's container starts small (1 vCPU, 3 GiB: memory
+is paid for while it runs, CPU only while it works) and moves to 2 vCPU, 6 GiB
 for good once a repo's checks are killed for memory, checking again there.
-It stays up, with dependencies installed, only while a merge is expected:
-each warm-up says why (a change was checked after a push, or approved, or the
-checks were just set up) and for what, and the container waits for that
-merge for a few minutes at most (past about 2, waiting costs more than
-starting again cold). A merge that lands or gives up, or a released claim,
-is no longer expected. With nothing expected, nothing running and nothing in
-line, the Gate stops its container a minute after its last run; a 30-minute
-inactivity timeout is only the backstop.
+Each change has its own Gate (`repo:<repo>:change:<change>`), which runs its
+merge's checks and stops its container a minute after the last run; a
+30-minute inactivity timeout is only the backstop. The repo's own Gate never
+runs a change's checks: it warms on main to keep the repo's snapshot.
 
 **Snapshots.** After a warm-up on main, the repo's own Gate saves its
 container as the repo's snapshot (git, toolchains, the project checked out,
@@ -363,7 +364,7 @@ main's dependencies installed) when there's none yet, the dependencies
 changed, or it's a week old. Only a container to trust is saved: started
 fresh or from the snapshot, and set up on main alone. One that has run a
 change's code (installers, scripts, tests) never is, so a change can't plant
-anything later containers would start with. The repo's lanes, builders and
+anything later containers would start with. The changes' Gates, builders and
 reviewers start from the snapshot in seconds (2.5 s for cors, against 28 s
 from the image), fetch what they need, and install only what differs from
 what it has. A snapshot that won't start is forgotten and the container
@@ -380,12 +381,12 @@ add one. Their dependencies (`uv sync`, `go mod download`, `cargo fetch`) are
 installed before the checks and skipped while the files they come from are
 unchanged. Toolchains, the virtualenv and Cargo's target folder live outside
 the checkout, so a clean checkout between checks keeps them. A failed install
-fails the check with its output. The repo's first lane is warmed in the background when a merge
-is likely soon: at `start`, `settings`, after `check`, and after an approving
-vote. The other lanes start only when a batch needs them, so a quiet repo
-pays for one container. A container warmed in the last minute isn't warmed
-again. The dashboard shows
-each lane's warmth.
+fails the check with its output. The repo's own Gate warms on main at `start`
+and `settings`, after `check` or an approving vote while the repo has no
+usable snapshot, and when a change's Gate had to set up from scratch or
+install what the snapshot didn't have; it saves a new snapshot only when one
+is due. A container warmed in the last minute isn't warmed again.
+`GET /repos/<owner>/<name>/line` shows the line and the snapshot.
 
 ## Audit
 
@@ -720,7 +721,10 @@ one RepoIndex; the records in Git are what count.
 - **Reverts are clean only.** A reported commit whose files changed since is
   reverted by hand.
 - **Merges wait for the line.** A merge waits up to 5 minutes for the merges
-  ahead of it to land before it checks again.
+  ahead of it to land before it checks again, and up to 5 minutes for room
+  in a full line (8 merges).
+- **One quiet merge holds up those behind it** for up to 2 minutes, until
+  it's taken to have gone and they check again.
 - **Without a stamp key** nothing is stamped or verified, and the audit takes
   names as written.
 

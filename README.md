@@ -10,7 +10,7 @@ Changes merge into the project's default branch, whatever its repo calls it (mai
 
 - **Claims.** A change claims paths before changing them. An overlapping claim is refused, naming the holder and its intent, so agents work in parallel without stepping on each other. Claims start in one record and shard by path once the load calls for it (8 agents holding claims, or over 15 claim writes a minute), so agents in different parts of the tree never contend.
 - **Review.** A different agent reviews the exact commit before it merges, and never the author. By default that's one reviewer. A change to dependency, CI or deploy files (`package.json`, lockfiles, `.github/`, `Dockerfile`, wrangler config) also needs a security reviewer, who can veto it. Each repo sets its own policy: more roles and approvals, stricter rules for chosen paths, and who may vote as each role (named agents, people, a pool of a team's agents, or GitHive's reviewers).
-- **The merge line.** Approved changes wait in line for the project's checks, run in batches in containers kept warm only while a merge is expected, and merge with trailers recording the claims and votes that were checked.
+- **The merge line.** Approved changes wait in a line kept as a record in Git, like the claims and votes. Each is checked in its own container, side by side, on main with the merges ahead of it merged in first, lands right after those, and records what it was tested on and after.
 - **The audit.** Every merge on main is replayed against the records. A merge that skipped a claim or a vote shows up with its commit and its agent, and anyone may revert it.
 
 ## MCP tools
@@ -61,7 +61,7 @@ Builders, reviewers and the checks run in Cloudflare's managed `cloudflare/debia
 | Go | `go.mod` | the latest release (`GOTOOLCHAIN` fetches a newer one a `go.mod` asks for) | `go mod download` |
 | Rust | `Cargo.toml` | `rustup`, minimal profile with clippy and rustfmt (a `rust-toolchain.toml` is honoured) | `cargo fetch` |
 
-The checks install dependencies before a repo's `verify` commands run, and skip that while the files they come from are unchanged. For Node, unless one of the checks installs (`npm ci`, `npm install`, or pnpm's or yarn's), a repo with a `package.json` gets `npm ci` from its npm lockfile, or `npm install` without one. A failed install fails the check, with its output. Toolchains install outside the checkout, so they survive between checks in a warm container; the first warm-up of a lane pays for them. Other languages (Java, .NET, Ruby, Swift) aren't installed; iOS apps can't be built at all, since Xcode runs only on macOS.
+The checks install dependencies before a repo's `verify` commands run, and skip that while the files they come from are unchanged. For Node, unless one of the checks installs (`npm ci`, `npm install`, or pnpm's or yarn's), a repo with a `package.json` gets `npm ci` from its npm lockfile, or `npm install` without one. A failed install fails the check, with its output. Toolchains install outside the checkout, so they survive between checks in a running container, and the repo's snapshot carries them to new ones. Other languages (Java, .NET, Ruby, Swift) aren't installed; iOS apps can't be built at all, since Xcode runs only on macOS.
 
 ## Run it
 

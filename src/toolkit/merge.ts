@@ -25,20 +25,21 @@ export interface CheckResult {
 	output: string;
 }
 
-/** Runs the project's checks on `base` (main) with `head` (from branch `ref`) merged in. Live, the Gate's container. */
 /**
  * Runs the project's checks on `base` (main) with `head` (from branch `ref`)
- * merged in. Live, in the repo's line of merges (see check-line.ts): the
- * result says which main they ran on (`base`, by default the one given) and
- * which merges ahead were merged in first (`after`), which must land first.
+ * merged in. Live, in the repo's line of merges (see line.ts): the result
+ * says which main they ran on (`base`, by default the one given) and which
+ * merges ahead were merged in first (`after`), which must land first.
  */
-export type CheckRunner = (input: { change: string; base: string; branch?: string; head: string; ref: string; commands: string[]; source?: Remote }) => Promise<{
+export type CheckRunner = (input: { change: string; base: string; branch?: string; head: string; ref: string; commands: string[]; source?: Remote; agent?: string }) => Promise<{
 	passed: boolean;
 	results: CheckResult[];
 	base?: string;
 	after?: { change: string; head: string }[];
-	/** Tells the line the merge is done with this result: it landed, or (false) gave up and checks again if it tries again. */
-	done?: (landed: boolean) => Promise<void>;
+	/** Tells the line the merge is done with this result: it landed (as `commit`), or (false) gave up and checks again if it tries again. */
+	done?: (landed: boolean, commit?: string) => Promise<void>;
+	/** While the merge waits for its turn: whether it still holds its place in line (false: one ahead left, so check again). */
+	inLine?: () => Promise<boolean>;
 }>;
 
 /** How long a merge waits for the merges ahead of it in line to land, before it checks again without them. */
@@ -122,14 +123,14 @@ export async function mergeChange(input: MergeInput): Promise<MergeOutcome> {
 		let onto = ws;
 		let tested: { base: string; after: string[] } | undefined;
 		// Tell the line this result is done with: landed, or not (merges checked on top of it can't land as checked).
-		let lineDone: ((landed: boolean) => Promise<void>) | undefined;
-		const doneWithLine = async (landed: boolean) => {
-			await lineDone?.(landed).catch(() => undefined);
+		let lineDone: ((landed: boolean, commit?: string) => Promise<void>) | undefined;
+		const doneWithLine = async (landed: boolean, commit?: string) => {
+			await lineDone?.(landed, commit).catch(() => undefined);
 			lineDone = undefined;
 		};
 		if (verify.length) {
 			if (!input.runChecks) throw new Error("[500] checks are configured but nothing can run them");
-			const checked = await input.runChecks({ change: input.change, base: main, branch: ws.branch, head, ref: `changes/${input.change}`, commands: verify, source: input.source });
+			const checked = await input.runChecks({ change: input.change, base: main, branch: ws.branch, head, ref: `changes/${input.change}`, commands: verify, source: input.source, agent: input.agent });
 			if (!checked.passed) {
 				const failed = checked.results.find((r) => r.exitCode !== 0);
 				return { ok: false, reasons: [failed ? `checks failed: ${failed.command} exited ${failed.exitCode}` : "checks failed"], checks: checked.results };
@@ -138,7 +139,7 @@ export async function mergeChange(input: MergeInput): Promise<MergeOutcome> {
 			tested = { base: checked.base ?? main, after: (checked.after ?? []).map((a) => a.head) };
 			// Tested on another main, or after merges ahead in line: land right after those, on exactly the code tested.
 			if (tested.base !== main || tested.after.length) {
-				const turn = await awaitTurn(input, tested);
+				const turn = await awaitTurn(input, tested, checked.inLine);
 				if (!turn) {
 					await doneWithLine(false);
 					continue;
@@ -188,7 +189,7 @@ export async function mergeChange(input: MergeInput): Promise<MergeOutcome> {
 			if (attempt < ATTEMPTS) continue;
 			return { ok: false, reasons: [`the project's branch kept moving while ${input.change} merged (other merges landed first): merge again`] };
 		}
-		await doneWithLine(true);
+		await doneWithLine(true, oid);
 		const releaseFrom = Date.now();
 		await input.store.release({ change: input.change, agent: input.agent, reason: "merged", mergedAs: oid }, input.stamper);
 		console.log(`merged ${input.change} as ${oid.slice(0, 8)}: checks and push ${releaseFrom - checksFrom} ms, releasing its claim ${Date.now() - releaseFrom} ms`);
@@ -200,12 +201,14 @@ export async function mergeChange(input: MergeInput): Promise<MergeOutcome> {
  * Wait until the project's branch is `tested.base` followed by merges of
  * exactly `tested.after`, in order: then a merge onto it lands on the code its
  * checks ran on. Returns a checkout of that main, or null if main went another
- * way (a merge outside the line, or one ahead that never landed in time):
- * then the merge checks again.
+ * way (a merge outside the line, or one ahead that never landed in time),
+ * or the merge lost its place in line (`inLine`: one ahead left it): then
+ * the merge checks again.
  */
-async function awaitTurn(input: MergeInput, tested: { base: string; after: string[] }): Promise<Workspace | null> {
+async function awaitTurn(input: MergeInput, tested: { base: string; after: string[] }, inLine?: () => Promise<boolean>): Promise<Workspace | null> {
 	const until = Date.now() + (input.turnWaitMs ?? TURN_WAIT_MS);
 	for (let seen: string | null = null; ; await new Promise((resolve) => setTimeout(resolve, TURN_POLL_MS))) {
+		if (inLine && !(await inLine().catch(() => true))) return null;
 		const now = await branchHead(input.remote, input.branch);
 		if (now && now !== seen) {
 			seen = now;
