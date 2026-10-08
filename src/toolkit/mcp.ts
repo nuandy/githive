@@ -66,7 +66,15 @@ export interface ToolContext {
 	ping?: (repo: string) => Promise<void>;
 	/** Warms the repo's check container in the background, when a merge is likely soon: why, and for what (see Gate.warmLanes). */
 	warmChecks?: (repo: string, input: { branch: string; checks: string[]; expect: "checked" | "approved" | "set up"; key?: string }) => Promise<void>;
-	/** Review holds, so next doesn't send two agents to a review that needs one (see LiveFeed). */
+	/**
+	 * A kept copy of the repo's claims in force and the changes merged,
+	 * rebuilt after writes (stale while one caller rebuilds it): for advice
+	 * that a moment's staleness doesn't harm (the claims tool, next), so a
+	 * busy repo isn't read whole on every call. Never for a claim or a merge,
+	 * which read their own records in Git. Unset: read every time.
+	 */
+	keptClaims?: (repo: string, read: () => Promise<ClaimsAdvice>) => Promise<ClaimsAdvice>;
+	/** Review holds, so next doesn't send two agents to a review that needs one (see review-holds.ts). */
 	reviews?: {
 		held(repo: string): Promise<Record<string, string[]>>;
 		hold(repo: string, head: string, agent: string, needed: number): Promise<boolean>;
@@ -187,6 +195,12 @@ function mayActAs(name: string, acting: string | undefined, registry: Registry |
 }
 
 export type Args = Record<string, unknown>;
+
+/** The claims in force and the changes merged: what advice (the claims tool, next) reads of the claims. */
+export interface ClaimsAdvice {
+	claims: ClaimRecord[];
+	merged: string[];
+}
 
 /** A record's log: the context's shared one, or one for this call. */
 function recordLog<S>(ctx: ToolContext, repo: string, ref: string): GitCasLog<S> {
@@ -552,6 +566,14 @@ async function runTool(name: string, args: Args, ctx: ToolContext): Promise<unkn
 	let viewing: ReturnType<ClaimStore["read"]> | undefined;
 	/** The claims in force, read at most once per call. */
 	const view = () => (viewing ??= store.read());
+	/** The claims for advice: the kept copy when the context keeps one (see keptClaims), else read now. */
+	const adviceView = async (): Promise<ClaimsAdvice> => {
+		const read = async () => {
+			const v = await view();
+			return { claims: v.claims, merged: v.released.filter((r) => r.mergedAs).map((r) => r.change) };
+		};
+		return ctx.keptClaims ? ctx.keptClaims(repo, read) : read();
+	};
 	const changes = new Map<string, ReturnType<ClaimStore["readChange"]>>();
 	/** One change's claim and releases, read at most once per call, and only from what holds them. */
 	const changeOf = (change: string) => {
@@ -600,7 +622,7 @@ async function runTool(name: string, args: Args, ctx: ToolContext): Promise<unkn
 		}
 		case "next": {
 			const agent = actAs("agent");
-			const [inForce, cast, backlog] = await Promise.all([view(), votes.read(), recordLog<Work>(ctx, repo, workRef(repo)).read()]);
+			const [inForce, cast, backlog] = await Promise.all([adviceView(), votes.read(), recordLog<Work>(ctx, repo, workRef(repo)).read()]);
 			// Each open change's pushed head, from its author's fork.
 			const open = await Promise.all(inForce.claims.map(async (claim) => ({ claim, head: await changeSource(claim.agent, "read", claim.change).then((fork) => branchHead(fork, `changes/${claim.change}`)).catch(() => null) })));
 			const counted = await countedVotes(cast.votes, registered?.stampKey);
@@ -612,7 +634,7 @@ async function runTool(name: string, args: Args, ctx: ToolContext): Promise<unkn
 				policy: registered?.policy ?? DEFAULT_POLICY,
 				open,
 				votes: counted,
-				merged: new Set(inForce.released.filter((r) => r.mergedAs).map((r) => r.change)),
+				merged: new Set(inForce.merged),
 				// Its own changes waiting on a person: asked about, not yet answered on their head (not a review GitHive flagged as waiting).
 				asked: new Set(open.filter((o) => o.claim.agent === agent && openFlag(cast, o.claim.change, o.head) && !openFlag(cast, o.claim.change, o.head)?.role).map((o) => o.claim.change)),
 				work: backlog?.commit.state.items ?? [],
@@ -672,7 +694,7 @@ async function runTool(name: string, args: Args, ctx: ToolContext): Promise<unkn
 			};
 		}
 		case "claims":
-			return (await view()).claims;
+			return (await adviceView()).claims;
 		case "claim": {
 			const input = { change: requiredString(args, "change"), agent: actAs("agent"), paths: normalizeClaim(requiredPaths(args, "paths")), intent: requiredString(args, "intent"), staleAfterMs: STALE_AFTER_MS };
 			// Busy enough that one record would hold agents up: shard first, then claim in the shards.

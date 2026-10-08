@@ -86,6 +86,16 @@ describe("GitHive's MCP tools", () => {
 		expect(log).toContain("Settings: the review policy changed");
 	});
 
+	it("answers the claims tool from the kept copy when the context keeps one", async () => {
+		await call("start", { repo: "project" });
+		await call("claim", { repo: "project", change: "a-1", agent: "agent-a", paths: ["src/a/"], intent: "a" });
+		const kept = { claims: [{ change: "kept-1", agent: "agent-k", paths: ["src/k/"], intent: "k", since: "", active: "" }], merged: [] };
+		const reply = (await handleRpc({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "claims", arguments: { repo: "project" } } }, { toolkit: { ...ctx().toolkit, keptClaims: async () => kept } } as never)) as { result: { content: { text: string }[] } };
+		expect(JSON.parse(reply.result.content[0].text).map((c: { change: string }) => c.change)).toEqual(["kept-1"]);
+		// Without one, the claims are read from Git.
+		expect((await call("claims", { repo: "project" })).map((c: { change: string }) => c.change)).toEqual(["a-1"]);
+	});
+
 	it("lets claim take paths from a claim idle for 30 minutes, releasing it as stale", async () => {
 		await call("start", { repo: "project" });
 		const registry = new GitCasLog<Registry>(async () => ({ url: server.url, token: "unused" }), "project", "refs/notes/githive-claims/project");

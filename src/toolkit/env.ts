@@ -50,6 +50,45 @@ async function cached(env: Env, project: string, key: string, mint: () => Promis
 /** Each record's log, kept for the isolate: a log remembers the tip it last saw, so reading an unmoved ref needn't fetch it. */
 const logs = new Map<string, GitCasLog<unknown>>();
 
+/** How long a kept copy of the claims stays fresh with no write in between. */
+const KEPT_CLAIMS_MS = 30_000;
+/** The largest view a LiveFeed keeps. */
+const MAX_KEPT = 1_000_000;
+
+/**
+ * A view of a repo kept in its LiveFeed, for reads that tolerate a moment's
+ * staleness: fresh, served as is; stale, served as is while one caller
+ * rebuilds it (that caller gets the new one); none yet, one caller builds it
+ * and the others wait for it a few seconds, so many callers at once read the
+ * repo once, not once each. Writes make it stale (their pings count them).
+ */
+export async function keptRead<T>(env: Env, repo: string, name: string, maxAgeMs: number, read: () => Promise<T>): Promise<T> {
+	const feed = env.LIVE.getByName(`repo:${repo}`);
+	const rebuild = async (writes: number) => {
+		try {
+			const value = await read();
+			const json = JSON.stringify(value);
+			if (json.length <= MAX_KEPT) await feed.keep(name, json, writes);
+			else await feed.buildFailed(name);
+			return value;
+		} catch (err) {
+			await feed.buildFailed(name).catch(() => undefined);
+			throw err;
+		}
+	};
+	for (const until = Date.now() + 10_000; ; ) {
+		const kept = await feed.view(name, maxAgeMs);
+		if (kept.json !== undefined) {
+			if (kept.fresh || kept.building || !(await feed.startBuild(name))) return JSON.parse(kept.json) as T;
+			return rebuild(kept.writes);
+		}
+		if (!kept.building && (await feed.startBuild(name))) return rebuild(kept.writes);
+		// Another caller is building the first one: wait for it, a few seconds at most.
+		if (Date.now() > until) return read();
+		await new Promise((resolve) => setTimeout(resolve, 250));
+	}
+}
+
 /** A repo's record log at `ref`, one per ref in the isolate. */
 function recordsLog<S>(env: Env, repo: string, ref: string) {
 	let log = logs.get(ref);
@@ -73,6 +112,8 @@ export function toolContextFor(env: Env, by: string | undefined, caller: { agent
 			const remote = await cached(env, repo, `${repo}|read`, () => remoteFor(env.ARTIFACTS, repo, "read", 3600));
 			await env.GATE.getByName(`repo:${repo}`).warmUp({ repo, ...input, base: { remote: remote.url, token: remote.token }, why: expect });
 		},
+		// The claims for advice, kept in the repo's LiveFeed so a busy repo isn't read whole on every call.
+		keptClaims: (repo, read) => keptRead(env, repo, "claims-advice", KEPT_CLAIMS_MS, read),
 		// Review holds are a record in Git (see review-holds.ts), like the claims and votes.
 		reviews: reviewHolds((repo) => recordsLog<ReviewHolds>(env, repo, reviewsRef(repo))),
 		requestReview: (input) => startHostedReviewers(env, input),
