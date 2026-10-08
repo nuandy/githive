@@ -153,3 +153,94 @@ describe("stopping a check container once nothing needs it", () => {
 		}
 	});
 });
+
+/** A container that runs every command successfully, unless `fails` picks it out. */
+function fakeContainer(fails: (cmd: string[]) => boolean = () => false) {
+	const container = {
+		running: false,
+		starts: [] as Record<string, unknown>[],
+		snapshots: 0,
+		start(options: Record<string, unknown>) {
+			container.starts.push(options);
+			container.running = true;
+		},
+		destroy: vi.fn(async () => void (container.running = false)),
+		setInactivityTimeout: vi.fn(async () => undefined),
+		exec: async (cmd: string[]) => ({ output: async () => ({ exitCode: fails(cmd) ? 1 : 0, stdout: new Uint8Array() }) }),
+		snapshotContainer: async () => ({ id: `snap-${++container.snapshots}`, size: 123e6 }),
+	};
+	return container;
+}
+
+describe("a repo's snapshot", () => {
+	const snapshot = { id: "s1", size: 1, at: 1_000, lockHash: "l1" };
+
+	it("is due when there's none, the dependencies changed, or it's a week old", async () => {
+		const { snapshotDue } = await import("../src/gate");
+		expect(snapshotDue(null, { lockHash: "l1" })).toBe(true);
+		expect(snapshotDue(snapshot, { lockHash: "l1" }, 2_000)).toBe(false);
+		expect(snapshotDue(snapshot, { lockHash: "l2" }, 2_000)).toBe(true);
+		expect(snapshotDue(snapshot, { lockHash: "l1", depsHash: "d1" }, 2_000)).toBe(true);
+		expect(snapshotDue(snapshot, { lockHash: "l1" }, 1_000 + 7 * 24 * 3600_000)).toBe(true);
+	});
+
+	it("starts a container in seconds, and an unusable one falls back to the image", async () => {
+		const { bootContainer, IMAGE } = await import("../src/container");
+		const restored = fakeContainer();
+		expect(await bootContainer(restored as never, "small", snapshot)).toBe("restored");
+		expect(restored.starts).toEqual([expect.objectContaining({ containerSnapshot: { id: "s1" } })]);
+		// Started without its checkout (expired, say): destroyed, and started from the image with git installed.
+		const unusable = fakeContainer((cmd) => cmd.join(" ").includes("command -v git"));
+		expect(await bootContainer(unusable as never, "small", snapshot)).toBe("fresh");
+		expect(unusable.destroy).toHaveBeenCalledOnce();
+		expect(unusable.starts.at(-1)).toMatchObject({ image: IMAGE });
+		const running = fakeContainer();
+		running.running = true;
+		expect(await bootContainer(running as never, "small", snapshot)).toBe("running");
+	});
+
+	const gateFor = (own: boolean) => {
+		const storage = new FakeStorage();
+		const container = fakeContainer();
+		const id = { equals: () => own };
+		const gate = new Gate({ storage, container, id } as never, { GATE: { idFromName: () => ({}), getByName: () => ({ snapshot: async () => null }) } } as never);
+		return { storage, container, gate };
+	};
+	const warmInput = { repo: "acme--web", branch: "main", base: { remote: "https://git.test/web.git", token: "t" }, checks: ["npm test"] };
+
+	it("is taken by the repo's own Gate after a warm-up on main, from a fresh container", async () => {
+		const { storage, container, gate } = gateFor(true);
+		await gate.warm(warmInput);
+		expect(await storage.get("snapshot")).toMatchObject({ id: "snap-1", size: 123e6 });
+		expect(container.snapshots).toBe(1);
+	});
+
+	it("is never taken from a container that ran a change's code, nor by another lane", async () => {
+		const tainted = gateFor(true);
+		await tainted.storage.put("tainted", true);
+		tainted.container.running = true;
+		await tainted.storage.put("prepared", true);
+		await tainted.gate.warm(warmInput);
+		expect(tainted.container.snapshots).toBe(0);
+		const lane = gateFor(false);
+		await lane.gate.warm(warmInput);
+		expect(lane.container.snapshots).toBe(0);
+	});
+
+	it("isn't started from once it may have expired, and is forgotten only by its id", async () => {
+		vi.useFakeTimers({ now: 1_000, toFake: ["Date"] });
+		try {
+			const { storage, gate } = gateFor(true);
+			await storage.put("snapshot", snapshot);
+			expect(await gate.snapshot()).toEqual(snapshot);
+			await gate.forgetSnapshot("other");
+			expect(await gate.snapshot()).toEqual(snapshot);
+			vi.setSystemTime(1_000 + 25 * 24 * 3600_000);
+			expect(await gate.snapshot()).toBeNull();
+			await gate.forgetSnapshot();
+			expect(await storage.get("snapshot")).toBeUndefined();
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+});

@@ -355,7 +355,21 @@ merge for a few minutes at most (past about 2, waiting costs more than
 starting again cold). A merge that lands or gives up, or a released claim,
 is no longer expected. With nothing expected, nothing running and nothing in
 line, the Gate stops its container a minute after its last run; a 30-minute
-inactivity timeout is only the backstop. An install is skipped while `package.json`'s
+inactivity timeout is only the backstop.
+
+**Snapshots.** After a warm-up on main, the repo's own Gate saves its
+container as the repo's snapshot (git, toolchains, the project checked out,
+main's dependencies installed) when there's none yet, the dependencies
+changed, or it's a week old. Only a container to trust is saved: started
+fresh or from the snapshot, and set up on main alone. One that has run a
+change's code (installers, scripts, tests) never is, so a change can't plant
+anything later containers would start with. The repo's lanes, builders and
+reviewers start from the snapshot in seconds (2.5 s for cors, against 28 s
+from the image), fetch what they need, and install only what differs from
+what it has. A snapshot that won't start is forgotten and the container
+starts from the image. Containers keeps a snapshot 30 days after it was
+taken or last restored and has no way to delete one sooner: deleting a repo
+forgets its snapshot, so nothing starts from it again. An install is skipped while `package.json`'s
 dependency sections and the lockfile are unchanged since the last one. If no
 check installs a Node project's dependencies, the Gate runs `npm ci` first
 (from an npm lockfile) or `npm install` (without one).

@@ -138,6 +138,7 @@ The Access team domain and application audience are public configuration in `wra
 | People, sessions, agents and their tokens, orgs, teams, permissions | D1 | [AES-256-GCM](https://developers.cloudflare.com/d1/reference/data-security/) |
 | MCP clients' OAuth grants | Workers KV | AES-256-GCM |
 | Live feeds, kept dashboard views, the repo list's counts, check containers' state | Durable Objects | AES-256 (LUKS) |
+| A repo's snapshot: a container's disk with its code checked out and its main branch's dependencies installed, which check containers, builders and reviewers start from | Cloudflare Containers | Not documented by Containers |
 
 Artifacts is in beta, and its own documentation doesn't yet state encryption at rest: the claim for repos rests on what it's built on. Ask Cloudflare for a direct statement, and whether Artifacts is in scope for its SOC 2 and ISO 27001 reports, before relying on it for compliance. Everything travels over TLS.
 
@@ -148,6 +149,8 @@ Artifacts is in beta, and its own documentation doesn't yet state encryption at 
 - Records are signed (Ed25519) with a key only the Worker holds, so the audit can tell what went through GitHive from what was pushed around it.
 - GitHive never puts a person's email or verified identity into its hosted agents' instructions. Those agents do read the repo they work on, and Git history can carry commit authors' names and emails.
 - A repo someone can't see answers as if it didn't exist.
+
+**Deleting a repo** deletes its code, history, records and its agents' forks at once. Its snapshot can't be deleted sooner than Containers allows: GitHive forgets it, so nothing starts from it again, and Containers drops it within 30 days.
 
 **What it can't add.** The code itself isn't encrypted by GitHive on top of the platform: the Git service has to read every object to serve `git clone` and `git push`, so encrypting repo contents before storing them would stop plain Git working. Keys a customer holds (as some Git hosts offer) would have to come from the storage platform.
 

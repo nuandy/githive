@@ -22,12 +22,48 @@ export const INSTANCE_SIZES = {
 } as const satisfies Record<string, ContainerStartupOptions["instance"]>;
 export type InstanceSize = keyof typeof INSTANCE_SIZES;
 
-/** Start the container if needed, at `size`, and install git (the managed image has Node 24 but no git). */
-export async function bootContainer(container: Container, size: InstanceSize = "standard-1") {
-	if (!container.running) container.start({ image: IMAGE, entrypoint: ["sleep", "infinity"], enableInternet: true, instance: INSTANCE_SIZES[size] });
+/**
+ * A repo's setup, saved: a container's disk with git, the repo's toolchains,
+ * the project checked out at WORKDIR and its main branch's dependencies
+ * installed (see Gate.snapshotIfDue). Containers start from it in seconds
+ * instead of setting all that up again.
+ */
+export interface SetupSnapshot {
+	id: string;
+	/** Its size, in bytes. */
+	size: number;
+	/** When it was taken. */
+	at: number;
+	/** What the installed dependencies came from (Gate.lockHash, the toolchains' depsHash): a container from it reinstalls only if these differ. */
+	lockHash?: string;
+	depsHash?: string;
+}
+
+/**
+ * Start the container if needed, at `size`: from the repo's snapshot when
+ * there is one ("restored": its checkout and dependencies are there), or
+ * from the image with git installed ("fresh": the managed image has Node 24
+ * but no git). A snapshot that won't start, or starts without its checkout,
+ * is given up on for the image.
+ */
+export async function bootContainer(container: Container, size: InstanceSize = "standard-1", snapshot?: SetupSnapshot | null): Promise<"running" | "restored" | "fresh"> {
+	if (container.running) return "running";
+	const options = { entrypoint: ["sleep", "infinity"], enableInternet: true, instance: INSTANCE_SIZES[size] };
+	if (snapshot) {
+		try {
+			container.start({ ...options, containerSnapshot: { id: snapshot.id } });
+			const ready = await run(container, ["bash", "-c", `command -v git >/dev/null && test -d ${WORKDIR}/.git`], "/");
+			if (ready.exitCode === 0) return "restored";
+		} catch (err) {
+			console.error("starting from a snapshot failed", err instanceof Error ? err.message : String(err));
+		}
+		if (container.running) await container.destroy("the snapshot was unusable").catch(() => undefined);
+	}
+	container.start({ ...options, image: IMAGE });
 	// WORKDIR doesn't exist until a clone, so setup runs from /.
 	const apt = await run(container, ["bash", "-lc", "apt-get update -qq && apt-get install -y -qq git ca-certificates >/dev/null"], "/");
 	if (apt.exitCode !== 0) throw new Error(`installing git failed: ${clip(apt.output, 2_000)}`);
+	return "fresh";
 }
 
 /** The toolchains beyond Node the checkout at `cwd` uses (see toolchains.ts). */

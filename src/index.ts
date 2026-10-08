@@ -348,8 +348,9 @@ const isProject = (name: string) => !name.startsWith("fork--") && !name.startsWi
 /** A deleted project's tokens and kept dashboard views go with it, so a new repo by its name starts clean. */
 async function forgetRepo(env: Env, repo: string) {
 	await Promise.resolve()
-		.then(() => Promise.all([env.TOKENS?.getByName(repo).clear(), env.LIVE?.getByName(`repo:${repo}`).clearViews()]))
-		.catch((err) => console.error(`forgetting ${repo}'s tokens and views failed`, String(err)));
+		// Its snapshot too: nothing starts from it again, and Containers drops it within 30 days (there's no deleting one sooner).
+		.then(() => Promise.all([env.TOKENS?.getByName(repo).clear(), env.LIVE?.getByName(`repo:${repo}`).clearViews(), env.GATE?.getByName(`repo:${repo}`).forgetSnapshot()]))
+		.catch((err) => console.error(`forgetting ${repo}'s tokens, views and snapshot failed`, String(err)));
 }
 
 app.get("/repos", async (c) => {

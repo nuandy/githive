@@ -1,5 +1,5 @@
 import { DurableObject } from "cloudflare:workers";
-import { type InstanceSize, WORKDIR, bootContainer, clip, gitWithToken, installToolchains, outOfMemory, run } from "./container";
+import { type InstanceSize, type SetupSnapshot, WORKDIR, bootContainer, clip, gitWithToken, installToolchains, outOfMemory, run } from "./container";
 import { statusOf } from "./errors";
 import { CheckLine, LANES, type LineResult } from "./toolkit/check-line";
 import { branchHead } from "./git";
@@ -36,6 +36,8 @@ export interface GateResult {
 
 /** One check run: where the project's branch and the change are, and what runs. */
 interface CheckPlan {
+	/** The repo, for its snapshot (see snapshotFor). */
+	repo?: string;
 	baseHead: string;
 	/** The project's branch (main, master, ...). */
 	branch?: string;
@@ -76,6 +78,15 @@ export const GRACE_MS = 60_000;
 const SAFETY_MS = 30 * 60_000;
 /** A container warmed this recently isn't warmed again. */
 const WARM_FOR_MS = 60_000;
+/** A repo's snapshot is taken again this often, so containers from it have little of main to fetch, and Containers' 30 days never run out. */
+const SNAPSHOT_RETAKE_MS = 7 * 24 * 3600_000;
+/** A snapshot older than this may be gone (Containers keeps one 30 days after it was taken or last restored): not started from. */
+const SNAPSHOT_USABLE_MS = 25 * 24 * 3600_000;
+
+/** Whether a new snapshot is due: none yet, its dependencies differ from the ones installed now, or it's a week old. */
+export function snapshotDue(current: SetupSnapshot | null, installed: { lockHash?: string; depsHash?: string }, now = Date.now()) {
+	return !current || current.lockHash !== installed.lockHash || current.depsHash !== installed.depsHash || now - current.at >= SNAPSHOT_RETAKE_MS;
+}
 
 /**
  * When a check container may stop: a grace after its last run, and not
@@ -99,6 +110,8 @@ const WARM_LANES = 1;
 
 /** A merge's checks: the project's branch and checks, and the change's fork and commit. */
 export interface ChangeCheck {
+	/** The repo, for its snapshot (see snapshotFor). */
+	repo?: string;
 	branch?: string;
 	base: { remote: string; token: string };
 	fork: { remote: string; token: string; ref: string };
@@ -131,7 +144,7 @@ export class Gate extends DurableObject<Env> {
 	 * ahead) and run `checks`, returning the result. A lane of the repo's line.
 	 */
 	checkCommit(input: ChangeCheck & { baseHead: string; ahead?: CheckPlan["ahead"] }): Promise<GateResult> {
-		const plan: CheckPlan = { baseHead: input.baseHead, branch: input.branch, base: input.base, fork: input.fork, ...(input.ahead?.length ? { ahead: input.ahead } : {}), checks: input.checks };
+		const plan: CheckPlan = { ...(input.repo ? { repo: input.repo } : {}), baseHead: input.baseHead, branch: input.branch, base: input.base, fork: input.fork, ...(input.ahead?.length ? { ahead: input.ahead } : {}), checks: input.checks };
 		return this.inTurn(async () => {
 			try {
 				return await this.check(input.head, plan);
@@ -202,8 +215,8 @@ export class Gate extends DurableObject<Env> {
 		const warmLanes = await this.ctx.storage.get<{ repo: string; branch?: string; base: { remote: string; token: string }; checks: string[] }>("warmLanes");
 		if (warmLanes) {
 			await this.ctx.storage.delete("warmLanes");
-			const { repo, ...input } = warmLanes;
-			await Promise.all(Array.from({ length: WARM_LANES }, (_, lane) => (lane === 0 ? this.warm(input) : this.env.GATE.getByName(`repo:${repo}:lane:${lane}`).warm(input)).catch(() => undefined)));
+			const { repo } = warmLanes;
+			await Promise.all(Array.from({ length: WARM_LANES }, (_, lane) => (lane === 0 ? this.warm(warmLanes) : this.env.GATE.getByName(`repo:${repo}:lane:${lane}`).warm(warmLanes)).catch(() => undefined)));
 		}
 		await this.stopIfIdle();
 	}
@@ -236,7 +249,7 @@ export class Gate extends DurableObject<Env> {
 			...partial,
 		});
 
-		await this.prepare(container, plan.base);
+		await this.prepare(container, plan.base, plan.repo);
 
 		const branch = plan.branch ?? "main";
 		const base = await gitWithToken(container, plan.base.token, ["fetch", "-q", plan.base.remote, `${branch}:refs/remotes/base/${branch}`, "--force"]);
@@ -264,6 +277,8 @@ export class Gate extends DurableObject<Env> {
 			}
 		}
 
+		// From here the change's own code runs (installers, scripts, tests): a container that ran one is never saved as the repo's snapshot.
+		await this.ctx.storage.put("tainted", true);
 		// Checks run on a fresh checkout: a Node project's dependencies are installed first.
 		const checks = await this.checksFor(container, plan.checks);
 
@@ -317,20 +332,92 @@ export class Gate extends DurableObject<Env> {
 		return results;
 	}
 
-	/** A running container with the project checked out: reused (with its installed dependencies) while it lives. */
-	private async prepare(container: Container, base: { remote: string; token: string }) {
+	/**
+	 * A running container with the project checked out: reused (with its
+	 * installed dependencies) while it lives, and started from the repo's
+	 * snapshot when there is one, so it fetches and installs only what
+	 * changed since.
+	 */
+	private async prepare(container: Container, base: { remote: string; token: string }, repo?: string) {
 		if (!container.running || !(await this.ctx.storage.get<boolean>("prepared"))) {
-			await bootContainer(container, await this.size());
-			const limits = await run(container, ["bash", "-c", "echo $(nproc) cpus, $(awk '/MemTotal/ {print int($2/1024)}' /proc/meminfo) MiB"], "/");
-			console.log(`gate container started at ${await this.size()}: ${limits.output.trim()}`);
-			await run(container, ["rm", "-rf", WORKDIR], "/");
-			const clone = await gitWithToken(container, base.token, ["clone", "--quiet", base.remote, WORKDIR], "/");
-			if (clone.exitCode !== 0) throw new Error(`clone of the project failed: ${clip(clone.output, 2_000)}`);
-			await this.ctx.storage.delete(["lockHash", "depsHash"]);
+			const snapshot = repo ? await this.snapshotFor(repo) : null;
+			const size = await this.size();
+			const booted = await bootContainer(container, size, snapshot);
+			if (booted === "restored" && snapshot) {
+				await this.ctx.storage.delete(["lockHash", "depsHash", "tainted"]);
+				await this.ctx.storage.put({ ...(snapshot.lockHash ? { lockHash: snapshot.lockHash } : {}), ...(snapshot.depsHash ? { depsHash: snapshot.depsHash } : {}) });
+				console.log(`gate container started at ${size} from ${repo}'s snapshot`);
+			} else {
+				if (snapshot && repo) await this.snapshotUnusable(repo, snapshot.id);
+				const limits = await run(container, ["bash", "-c", "echo $(nproc) cpus, $(awk '/MemTotal/ {print int($2/1024)}' /proc/meminfo) MiB"], "/");
+				console.log(`gate container started at ${size}: ${limits.output.trim()}`);
+				await run(container, ["rm", "-rf", WORKDIR], "/");
+				const clone = await gitWithToken(container, base.token, ["clone", "--quiet", base.remote, WORKDIR], "/");
+				if (clone.exitCode !== 0) throw new Error(`clone of the project failed: ${clip(clone.output, 2_000)}`);
+				await this.ctx.storage.delete(["lockHash", "depsHash"]);
+				// A container that was already running may have run a change's code; a fresh one hasn't.
+				if (booted === "fresh") await this.ctx.storage.delete("tainted");
+				else await this.ctx.storage.put("tainted", true);
+			}
 			await this.ctx.storage.put("prepared", true);
 		}
 		// GitHive stops it itself once nothing needs it (see stopIfIdle); this is the backstop.
 		await container.setInactivityTimeout(SAFETY_MS);
+	}
+
+	/** Whether this Gate is the repo's own (its first lane), which keeps the repo's snapshot. */
+	private ownsSnapshot(repo: string) {
+		const own = this.env.GATE?.idFromName?.(`repo:${repo}`);
+		return !!own && !!this.ctx.id?.equals?.(own);
+	}
+
+	/** The repo's snapshot to start from, if it has a usable one: this Gate's own, or its first lane's. */
+	private async snapshotFor(repo: string): Promise<SetupSnapshot | null> {
+		if (this.ownsSnapshot(repo)) return this.snapshot();
+		return this.env.GATE.getByName(`repo:${repo}`).snapshot().catch(() => null);
+	}
+
+	/** A snapshot that wouldn't start: forget it, so the next warm-up on main takes a new one. */
+	private async snapshotUnusable(repo: string, id: string) {
+		if (this.ownsSnapshot(repo)) return this.forgetSnapshot(id);
+		await this.env.GATE.getByName(`repo:${repo}`).forgetSnapshot(id).catch(() => undefined);
+	}
+
+	/**
+	 * The repo's snapshot, for its lanes, reviewers and builders to start
+	 * from: null if none, or if it's too old to be sure it still exists
+	 * (Containers keeps one 30 days after it was taken or last restored).
+	 */
+	async snapshot(): Promise<SetupSnapshot | null> {
+		const snapshot = await this.ctx.storage.get<SetupSnapshot>("snapshot");
+		return snapshot && Date.now() - snapshot.at < SNAPSHOT_USABLE_MS ? snapshot : null;
+	}
+
+	/** Forget the repo's snapshot (only `id`, if given: a newer one stays). Nothing starts from it again; Containers drops it within 30 days. */
+	async forgetSnapshot(id?: string) {
+		const snapshot = await this.ctx.storage.get<SetupSnapshot>("snapshot");
+		if (snapshot && (!id || snapshot.id === id)) await this.ctx.storage.delete("snapshot");
+	}
+
+	/**
+	 * Save this container as the repo's snapshot, when it's due (see
+	 * snapshotDue) and the container is one to trust: started fresh or from
+	 * the snapshot, and since then only set up on main (never a change's
+	 * code, see check). Taking one is a head start for later containers,
+	 * never a requirement: a failure is only logged.
+	 */
+	private async snapshotIfDue(container: Container, repo?: string) {
+		if (!repo || !this.ownsSnapshot(repo) || (await this.ctx.storage.get<boolean>("tainted"))) return;
+		const [current, lockHash, depsHash] = await Promise.all([this.ctx.storage.get<SetupSnapshot>("snapshot"), this.ctx.storage.get<string>("lockHash"), this.ctx.storage.get<string>("depsHash")]);
+		if (!snapshotDue(current ?? null, { lockHash, depsHash })) return;
+		try {
+			const started = Date.now();
+			const taken = await container.snapshotContainer({ name: `githive-${repo}`.slice(0, 64) });
+			await this.ctx.storage.put("snapshot", { id: taken.id, size: taken.size, at: Date.now(), ...(lockHash ? { lockHash } : {}), ...(depsHash ? { depsHash } : {}) } satisfies SetupSnapshot);
+			console.log(`saved ${repo}'s snapshot (${Math.round(taken.size / 1e6)} MB) in ${Date.now() - started} ms`);
+		} catch (err) {
+			console.error(`saving ${repo}'s snapshot failed`, statusOf(err).message);
+		}
 	}
 
 	/**
@@ -339,7 +426,7 @@ export class Gate extends DurableObject<Env> {
 	 * step run once, so the merge's checks start from installed dependencies.
 	 * In turn with checks (one checkout); skipped if warmed in the last minutes.
 	 */
-	warm(input: { branch?: string; base: { remote: string; token: string }; checks: string[] }): Promise<void> {
+	warm(input: { repo?: string; branch?: string; base: { remote: string; token: string }; checks: string[] }): Promise<void> {
 		return this.inTurn(async () => {
 			const container = this.ctx.container;
 			if (!container) return;
@@ -347,7 +434,7 @@ export class Gate extends DurableObject<Env> {
 			if (container.running && at && Date.now() - at < WARM_FOR_MS) return;
 			await this.ctx.storage.put("warmingSince", Date.now());
 			try {
-				await this.prepare(container, input.base);
+				await this.prepare(container, input.base, input.repo);
 				const branch = input.branch ?? "main";
 				const fetched = await gitWithToken(container, input.base.token, ["fetch", "-q", input.base.remote, `${branch}:refs/remotes/base/${branch}`, "--force"]);
 				if (fetched.exitCode !== 0) return;
@@ -359,6 +446,8 @@ export class Gate extends DurableObject<Env> {
 					if (installed.exitCode === 0) await this.ctx.storage.put("lockHash", await this.lockHash(container));
 				}
 				await this.ctx.storage.put("warmedAt", Date.now());
+				// Set up on main and nothing else: what later containers can start from.
+				await this.snapshotIfDue(container, input.repo);
 			} catch (err) {
 				// Warming is a head start, never a requirement: the check prepares what it needs.
 				console.error("warming a gate container failed", statusOf(err).message);

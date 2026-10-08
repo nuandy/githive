@@ -30,7 +30,7 @@ export const TURN_STARTED = "sandbox-turn-started-at";
 export const INBOX = "inbox";
 
 /** Facts every agent prompt should state about the environment. */
-export const ENVIRONMENT = `The repository is checked out at ${WORKDIR} in a Linux container with Node.js 24, npm and git, plus whichever of these the repository uses: Python 3 with uv (a virtualenv at /opt/venv is active: python, pip and uv pip install into it; uv sync installs the project), Go (go mod download), and Rust with cargo, clippy and rustfmt (cargo fetch). Dependencies are not installed yet. Commands time out after ${COMMAND_TIMEOUT_S} seconds.`;
+export const ENVIRONMENT = `The repository is checked out at ${WORKDIR} in a Linux container with Node.js 24, npm and git, plus whichever of these the repository uses: Python 3 with uv (a virtualenv at /opt/venv is active: python, pip and uv pip install into it; uv sync installs the project), Go (go mod download), and Rust with cargo, clippy and rustfmt (cargo fetch). Dependencies may already be installed from the project's main branch; install them again if the change touches what they come from (package.json, a lockfile, pyproject.toml, go.mod, Cargo.toml...). Commands time out after ${COMMAND_TIMEOUT_S} seconds.`;
 
 export interface SandboxJob {
 	/** The agent's own name, for prompt caching: <project>--<change>, say. */
@@ -307,13 +307,24 @@ export abstract class SandboxAgent<J extends SandboxJob, S extends AgentState> e
 		if (!container) throw new Error(`no container is configured for ${this.kind}`);
 		const restart = state.status === "working";
 		this.note(state, restart ? "container restarted; re-cloning" : "starting container");
-		await bootContainer(container);
-		// A container that outlived its object (a deploy, say) still has the last checkout.
-		await run(container, ["rm", "-rf", WORKDIR], "/");
-		const clone = await this.git(job, ["clone", "--quiet", job.remote, WORKDIR], "/");
-		if (clone.exitCode !== 0) throw new Error(`clone failed: ${clip(clone.output, 2_000)}`);
+		// The project's snapshot, when it has one: its checkout with main's dependencies installed, in seconds.
+		const project = (job as Partial<ChangeJob>).project;
+		const snapshot = project ? await this.env.GATE.getByName(`repo:${project}`).snapshot().catch(() => null) : null;
+		const booted = await bootContainer(container, "standard-1", snapshot);
+		if (booted === "restored") {
+			// Its checkout, pointed at this job's remote; afterClone fetches what the job needs from it.
+			const reset = await run(container, ["bash", "-c", "git checkout -q -f --detach && git clean -fdq"]);
+			const pointed = await run(container, ["git", "remote", "set-url", "origin", job.remote]);
+			if (reset.exitCode !== 0 || pointed.exitCode !== 0) throw new Error(`setting up the snapshot's checkout failed: ${clip(reset.output + pointed.output, 2_000)}`);
+			this.note(state, "started from the project's snapshot");
+		} else {
+			// A container that outlived its object (a deploy, say) still has the last checkout.
+			await run(container, ["rm", "-rf", WORKDIR], "/");
+			const clone = await this.git(job, ["clone", "--quiet", job.remote, WORKDIR], "/");
+			if (clone.exitCode !== 0) throw new Error(`clone failed: ${clip(clone.output, 2_000)}`);
+			this.note(state, "repository cloned");
+		}
 		await this.afterClone(job, state);
-		this.note(state, "repository cloned");
 		// Toolchains the checkout uses beyond Node; a failed install is noted, and the agent sees the missing tool for itself.
 		for (const installed of await installToolchains(container)) this.note(state, installed.exitCode === 0 ? `installed ${installed.toolchain}` : `installing ${installed.toolchain} failed: ${clip(installed.output, 300)}`);
 		if (restart)
