@@ -169,7 +169,9 @@ export class Gate extends DurableObject<Env> {
 		const at = ((await this.ctx.storage.get<number>("lastActive")) ?? 0) + GRACE_MS;
 		if (at > Date.now()) return this.alarmBy(at);
 		await container.destroy("nothing to check");
-		await this.ctx.storage.delete("prepared");
+		const started = await this.ctx.storage.get<{ at: number; repo: string | null; own: boolean; size: InstanceSize }>("started");
+		if (started) console.log(JSON.stringify({ event: "check container stopped", repo: started.repo, gate: started.own ? "repo" : "change", size: started.size, seconds: Math.round((Date.now() - started.at) / 1000) }));
+		await this.ctx.storage.delete(["prepared", "started"]);
 	}
 
 	private async check(head: string, plan: CheckPlan): Promise<GateResult> {
@@ -285,6 +287,8 @@ export class Gate extends DurableObject<Env> {
 			const snapshot = repo ? await this.snapshotFor(repo) : null;
 			const size = await this.size();
 			const booted = await bootContainer(container, size, snapshot);
+			// For the log line when it stops: how long it ran, for whom, at what size (what it cost).
+			if (booted !== "running") await this.ctx.storage.put("started", { at: Date.now(), repo: repo ?? null, own: !!repo && this.ownsSnapshot(repo), size });
 			started = booted === "restored" && snapshot ? "restored" : "fresh";
 			if (booted === "restored" && snapshot) {
 				await this.ctx.storage.delete(["lockHash", "depsHash", "tainted"]);
