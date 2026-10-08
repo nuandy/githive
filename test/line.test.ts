@@ -127,15 +127,18 @@ describe("merging in line", { timeout: 120_000 }, () => {
 	/**
 	 * Checks through the line record. A check fails when a change in `failing`
 	 * is in what it ran (itself, or one ahead merged in first), as real checks
-	 * would; the failing ones take longer, so the ones behind finish first.
+	 * would; a failing one finishes only once `behind` checks have started, so
+ * the ones behind it are checked after it, and fail first.
 	 */
-	function runner(failing = new Set<string>(), seen: { change: string; base: string; ahead: string[] }[] = []): CheckRunner {
+	function runner(failing = new Set<string>(), seen: { change: string; base: string; ahead: string[] }[] = [], behind = 0): CheckRunner {
 		return lineCheckRunner({
 			log: line(),
 			main: () => branchHead(remote(), "main"),
 			check: async ({ change, base, ahead }) => {
 				seen.push({ change, base, ahead: ahead.map((a) => a.change) });
-				await new Promise((resolve) => setTimeout(resolve, failing.has(change) ? 300 : 20));
+				// A failing one finishes last: after the checks behind it have started (or 5 s), however slow the machine.
+				if (failing.has(change)) for (const until = Date.now() + 5_000; seen.length < behind && Date.now() < until; ) await new Promise((resolve) => setTimeout(resolve, 20));
+				await new Promise((resolve) => setTimeout(resolve, 20));
 				const broken = [change, ...ahead.map((a) => a.change)].some((c) => failing.has(c));
 				return { passed: !broken, results: [{ command: "npm test", exitCode: broken ? 1 : 0, output: "" }] };
 			},
@@ -180,7 +183,7 @@ describe("merging in line", { timeout: 120_000 }, () => {
 	it("checks the merges behind a failure again without it, lands them, and audits clean", async () => {
 		for (const x of ["a", "b", "c"]) await readyChange(`${x}-1`, { [`src/${x}.txt`]: `${x}\n` });
 		const seen: { change: string; base: string; ahead: string[] }[] = [];
-		const runChecks = runner(new Set(["a-1"]), seen);
+		const runChecks = runner(new Set(["a-1"]), seen, 3);
 		// a joins first and fails. b and c, checked after it, fail too, before a has: they wait to see
 		// whose failure it is, and once a fails they check again without it.
 		const a = merge("a-1", runChecks);
