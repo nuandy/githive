@@ -106,7 +106,7 @@ describe("agent identity", () => {
 		expect(await call(as(key), "add_work", { agent: "agent-a", items: [...items, { id: "wave", title: "Wave", intent: "a wave" }] })).toEqual({ ok: true, added: ["wave"], already: ["add-the-greeting", "bye"] });
 		expect(await call(as(key), "add_work", { agent: "agent-a", items })).toEqual({ ok: false, added: [], already: ["add-the-greeting", "bye"] });
 		expect(await call(as(key), "add_work", { agent: "agent-a", items: [items[1], items[1]] })).toEqual({ error: "each piece needs its own id: bye more than once" });
-		expect(await call(as(key), "next", { agent: "agent-a" })).toMatchObject({ kind: "build", work: { id: expect.stringMatching(/^(add-the-greeting|bye|wave)$/) } });
+		expect(((await call(as(key), "backlog", { agent: "agent-a" })) as { open: { id: string }[] }).open.map((w) => w.id).sort()).toEqual(["add-the-greeting", "bye", "wave"]);
 	});
 
 	it("keeps githive- names for GitHive's hosted agents", async () => {

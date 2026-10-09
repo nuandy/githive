@@ -10,11 +10,12 @@ import type { Principal } from "./principal";
 /** What each MCP tool needs. credentials needs write only for a change's fork; for the project alone, read. */
 export const TOOL_LEVEL: Record<string, Level> = {
 	claims: "read",
+	backlog: "read",
 	status: "read",
 	audit: "read",
 	check: "read",
 	credentials: "read",
-	next: "review",
+	reviews: "review",
 	review_access: "review",
 	vote: "review",
 	claim: "write",

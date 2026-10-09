@@ -51,22 +51,25 @@ mkdirSync(work, { recursive: true });
 /** What every agent is told: who it is, the loop, and how to use git with GitHive; and its own `brief`, if the plan gives it one. */
 const prompt = (agent, dir, keyFile, brief) => `You are ${agent}, one of ${total} independent AI agents working at the same time on the GitHive repo "${plan.repo}": a copy of Express (Node.js). GitHive coordinates you through its MCP tools (server "githive"); read its instructions. Pass repo "${plan.repo}" and agent "${agent}" wherever a tool asks for them. You're registered already, and your key goes with every call: never call register.
 
-Work in a loop:
-1. Call next. Do exactly what it says:
-   - build: claim the piece's paths (its id as the change), then make the change for real: read the surrounding code and tests, write good code (and tests where it fits), and run the tests. Commit on the branch changes/<change>, push it to your fork, then call check. Stay inside your claim.
-   - review: get the change's code, read the diff against the project's branch carefully, run the tests, and vote on that exact commit: approve if it's correct, tested and inside its claim, reject with specific evidence if not.
-   - revise: fix what the reviewer or the checks asked for, commit, push the new commit.
-   - merge: call merge. It lands your change together with the others ready, after their checks run; it can take a few minutes. If it refuses, do what the reasons say.
-   - wait: run \`sleep 30\`, then ask again.
-2. Stop when next has said wait three times in a row and none of your changes is still open, or when ${minutes} minutes have passed. Then print a short summary of what you did.
+Nobody assigns you work: you look, and choose. Work in a loop:
+1. Your own changes first. For each change you hold, call status:
+   - landed (or its claim released as merged): it's done.
+   - nothing pushed: finish it (below, build).
+   - a reviewer asked for changes, or the checks failed: revise it: fix what they asked, commit, push the new commit.
+   - approved: call merge. It lands your change together with the others ready, after their checks run; it can take a few minutes. If it refuses, do what the reasons say.
+   - otherwise it's waiting for reviews: leave it.
+2. Then reviews: the reviews you may give. Pick one (others may be on the first, so any is fine). Get its code with review-clone (below, which also marks you reviewing it), read the diff against the project's branch carefully, run the tests, and vote on that exact commit in the role it names: approve if it's correct, tested and inside its claim, reject with specific evidence if not.
+3. Then backlog: pieces of work free to build. Pick one and build it: claim its paths (its id as the change), then make the change for real: read the surrounding code and tests, write good code (and tests where it fits), and run the tests. Commit on the branch changes/<change>, push it to your fork, then call check. Stay inside your claim. If the claim is refused because another agent took it first, pick another.
+4. Nothing to do: run \`sleep 30\`, then look again.
+Stop when you've looked three times in a row with nothing to do and none of your changes is still open, or when ${minutes} minutes have passed. Then print a short summary of what you did.
 
 Git, without ever printing a token (the helper keeps credentials in each clone's own config):
   node ${root}scripts/mcp-agent.mjs clone <dir> --repo ${plan.repo} --change <change> --key-file ${keyFile}
       a clone of the project, with your fork as the remote "fork": push changes/<change> to "fork". Claim first.
   node ${root}scripts/mcp-agent.mjs auth <dir> --repo ${plan.repo} --change <change> --key-file ${keyFile}
       fresh write access for that clone, if a push is refused for authentication.
-  node ${root}scripts/mcp-agent.mjs review-clone <dir> --repo ${plan.repo} --change <change> --key-file ${keyFile}
-      a change to review: the project, with the change checked out at its pushed head ("origin/<branch>" is what it lands on).
+  node ${root}scripts/mcp-agent.mjs review-clone <dir> --repo ${plan.repo} --change <change> --role <role> --key-file ${keyFile}
+      a change to review: the project, with the change checked out at its pushed head ("origin/<branch>" is what it lands on); marks you reviewing it in that role.
 Make every clone inside ${dir}, a new folder each time. Run \`npm install --no-audit --no-fund\` in a clone before \`npm test\`. Never rewrite pushed commits; to take in the project's branch, merge it. Don't use GitHive's hosted agents (the build and request_review tools).${brief ? `\n\n${brief}` : ""}`;
 
 /** This environment without an API key: the CLI then uses what it's signed in with. */

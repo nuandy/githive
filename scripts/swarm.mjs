@@ -1,15 +1,17 @@
 #!/usr/bin/env node
 // Run scripted outside agents on a repo, all at once, the way
 // users would: they send agents, not a team of builders and reviewers. Every
-// agent is the same: it asks next what to do, does it, and asks again.
+// agent is the same, and chooses its own work from what it sees: its own
+// changes first (status: revise one sent back, merge one approved, finish one
+// with nothing pushed), then a review it may give (reviews), then a piece of
+// the backlog (backlog), each list's first, else it waits a moment.
 // Building a piece of the backlog, it claims, clones the project, takes its
 // time over the piece's scripted edit, pushes to its fork and checks; it
 // recovers as an agent would (extends its claim when a file falls outside
 // it, merges the project's branch in on a conflict). Reviewing, it gets the
 // change through GitHive (review_access), takes its time, runs the
-// tests and votes by their exit code, in the role next names. Asked to
-// revise, it applies the piece's fix, or asks a person. Asked to merge, it
-// merges. Nothing waits on anything but the protocol. Prints each step as it
+// tests and votes by their exit code, in the role reviews names. Sent
+// back, it applies the piece's fix, or asks a person. Approved, it merges. Nothing waits on anything but the protocol. Prints each step as it
 // happens, then a timeline per piece of work, what each agent did, and the
 // audit.
 //
@@ -200,7 +202,7 @@ async function settleLanded() {
 	}
 }
 
-/** One agent's hands: build, review, revise and merge, as next says. */
+/** One agent: build, review, revise and merge, as it chooses. */
 function agentFor(spec) {
 	const { agent: name, keyFile: key } = spec;
 	const call = (toolName, toolArgs) => tool(toolName, toolArgs, key);
@@ -258,11 +260,11 @@ function agentFor(spec) {
 
 	const build = async (item) => {
 		const piece = pieces.get(item.id);
-		if (!piece) throw new Error(`next offered ${item.id}, which isn't in this plan's backlog`);
+		if (!piece) throw new Error(`the backlog has ${item.id}, which isn't in this plan's`);
 		const paths = piece.paths ?? item.paths ?? [];
 		const result = await call("claim", { change: piece.id, agent: name, paths, intent: piece.intent }).catch((err) => ({ ok: false, error: String(err.message ?? err) }));
 		if (!result.ok) {
-			// Told the same piece as another agent, which claimed it first: ask again.
+			// Picked the same piece as another agent, which claimed it first: look again.
 			say(name, `couldn't claim ${piece.id}: ${(result.error ?? JSON.stringify(result.conflicts)).slice(0, 100)}`);
 			return;
 		}
@@ -271,7 +273,7 @@ function agentFor(spec) {
 		mark(piece.id, "claimed");
 		say(name, `builds ${piece.id} (${paths.length} path(s))`);
 		const dir = dirOf(piece.id);
-		// Starting over after a build that failed partway (next says finish): a fresh clone.
+		// Starting over after a build that failed partway (nothing pushed yet: finish it): a fresh clone.
 		rmSync(dir, { recursive: true, force: true });
 		await helper("clone", dir, "--repo", plan.repo, "--change", piece.id, ...(key ? ["--key-file", at(key)] : []));
 		await git(dir, "checkout", "-q", "-b", `changes/${piece.id}`);
@@ -286,7 +288,7 @@ function agentFor(spec) {
 		const dir = join(work, `review-${name}-${next.change}`);
 		rmSync(dir, { recursive: true, force: true });
 		try {
-			const { stdout } = await helper("review-clone", dir, "--repo", plan.repo, "--change", next.change, ...(key ? ["--key-file", at(key)] : []));
+			const { stdout } = await helper("review-clone", dir, "--repo", plan.repo, "--change", next.change, "--role", next.role, ...(key ? ["--key-file", at(key)] : []));
 			const got = JSON.parse(stdout.trim().split("\n").at(-1));
 			if (got.head !== next.head) return; // pushed again meanwhile: ask again
 			const { stdout: stat } = await git(dir, "diff", "--stat", `${got.base}...HEAD`);
@@ -362,20 +364,57 @@ function agentFor(spec) {
 		note(next.change, `merge refused: ${reasons.slice(0, 60)}`);
 	};
 
+	/**
+	 * Its own changes, as status has them, the first that needs it: revise one
+	 * sent back, merge one approved, finish one with nothing pushed. One that
+	 * landed (its claim released, or landed though not released yet) is done.
+	 */
+	const ownStep = async () => {
+		for (const id of claimed.keys()) {
+			if (settled.has(id)) continue;
+			const status = await call("status", { change: id });
+			const mergedAs = status.landed?.commit ?? status.released?.mergedAs;
+			if (mergedAs || (!status.claim && status.released)) {
+				claimed.delete(id);
+				if (mergedAs && !settled.has(id)) {
+					mark(id, "merged");
+					timeline.get(id).commit = mergedAs;
+					settlePiece(id, `merged ${mergedAs.slice(0, 8)}`);
+				}
+				continue;
+			}
+			if (!status.head) return { kind: "finish", change: id };
+			const rejection = status.votes.find((v) => v.commit === status.head && v.verdict === "reject" && v.reviewer !== name);
+			if (rejection) return { kind: "revise", change: id, head: status.head, reviewer: rejection.reviewer, evidence: rejection.evidence };
+			if (status.approval?.approved) return { kind: "merge", change: id, head: status.head };
+		}
+		return null;
+	};
+
 	return async () => {
 		await sleep(draw("arrive"));
 		say(name, "arrives");
 		const until = started + RUN_LIMIT_MS;
 		while (Date.now() < until) {
+			// What it does next is its own choice, from what it sees (nobody assigns work): its own changes first, then a
+			// review it may give, then a piece of the backlog, else wait a moment.
 			let next;
 			try {
-				next = await call("next", { agent: name });
-				if (next.kind === "wait") {
+				next = await ownStep();
+				if (!next) {
+					const { reviews } = await call("reviews", { agent: name });
+					if (reviews.length) next = { kind: "review", ...reviews[0] };
+				}
+				if (!next) {
+					const { open } = await call("backlog", { agent: name });
+					if (open.length) next = { kind: "build", work: open[0] };
+				}
+				if (!next) {
 					did.get(name).wait++;
 					await settleLanded();
 					if (allSettled()) break;
-					// Asked again soon: a merge or a review can free work any moment.
-					await sleep(Math.min(next.retryAfterSeconds ?? 30, 5) * 1000);
+					// Looked again soon: a merge or a review can free work any moment.
+					await sleep(5_000);
 					continue;
 				}
 				did.get(name)[next.kind === "finish" ? "build" : next.kind]++;
@@ -388,7 +427,7 @@ function agentFor(spec) {
 				const id = next?.change ?? next?.work?.id;
 				// A command's own message is mostly its command line: what it printed last says why it failed.
 				const why = err.stderr ? String(err.stderr).trim().split("\n").slice(-2).join(" | ") : String(err.message ?? err);
-				say(name, `${next?.kind ?? "next"}${id ? ` ${id}` : ""} failed: ${why.slice(0, 300)}`);
+				say(name, `${next?.kind ?? "look"}${id ? ` ${id}` : ""} failed: ${why.slice(0, 300)}`);
 				if (id && timeline.has(id)) note(id, `${next.kind} failed`);
 				await sleep(10_000);
 			}

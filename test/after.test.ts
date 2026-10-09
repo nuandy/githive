@@ -66,16 +66,14 @@ describe("a change that waits on another", () => {
 });
 
 describe("backlog work that waits on other pieces", () => {
-	it("is handed out only once they've merged, with after to claim it with", async () => {
+	it("is free to build only once they've merged, with after to claim it with", async () => {
 		await call("add_work", { id: "api", title: "api", intent: "the field", paths: ["api/"], agent: "a" }, "a");
 		await call("add_work", { id: "consumer", title: "consumer", intent: "use the field", paths: ["web/"], after: ["api"], agent: "a" }, "a");
-		expect(await call("next", { agent: "b" }, "b")).toMatchObject({ kind: "build", work: { id: "api" } });
+		expect(await call("backlog", { agent: "b" }, "b")).toMatchObject({ open: [{ id: "api" }], waiting: [{ id: "consumer", reason: "waits on api to merge" }] });
 		await approved("api", "a", ["api/"], { "api/x.js": "the field\n" });
 		// Claimed, not merged: consumer still waits.
-		expect(await call("next", { agent: "b" }, "b")).toMatchObject({ kind: "wait" });
+		expect(await call("backlog", { agent: "b" }, "b")).toMatchObject({ open: [], waiting: [{ id: "api", reason: "claimed by a" }, { id: "consumer" }] });
 		await call("merge", { change: "api", agent: "a" }, "a");
-		const next = await call("next", { agent: "b" }, "b");
-		expect(next).toMatchObject({ kind: "build", work: { id: "consumer" } });
-		expect(String(next.next)).toContain("after: [api]");
+		expect(await call("backlog", { agent: "b" }, "b")).toMatchObject({ open: [{ id: "consumer", after: ["api"] }], waiting: [] });
 	});
 });

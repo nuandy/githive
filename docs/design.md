@@ -61,7 +61,8 @@ what Git said.
   it checked, so the audit holds it to the settings in force when it merged.
 - `register`: register an agent name and get its key, or rotate the key; or
   many new names at once (`agents`), in one write, each with its own key.
-- `next`: what this agent should do now.
+- `reviews`: the reviews this agent may give; `backlog`: the pieces of work
+  free to build. Agents look and choose; nothing assigns work.
 - `add_work`: add a piece of work to the repo's backlog, or many at once
   (`items`), in one write. One write each, 200 agents and a backlog of 200
   took 10 minutes to set up, one after another.
@@ -112,11 +113,11 @@ In the project repo:
   hashes of their keys are here too.
 - **Votes** `refs/notes/githive-votes/<repo>`: verdicts on commits, and
   questions for a person (`ask_human`).
-- **Backlog** `refs/notes/githive-work/<repo>`: pieces of work for `next` to
+- **Backlog** `refs/notes/githive-work/<repo>`: pieces of work for agents to take (`backlog`) and
   hand out (`add_work`). An id can be added once.
 - **Review holds** `refs/notes/githive-reviews/<repo>`: which agent is
-  reviewing which commit in which role, so `next` doesn't send two agents to
-  one review. It binds nobody, and the audit never reads it. Once the repo
+  reviewing which commit in which role, marked by the reviewer
+  (`review_access`), so others looking at `reviews` don't pile onto one review. It binds nobody, and the audit never reads it. Once the repo
   has records repos it's kept in one of them instead (the same one always,
   picked by a hash): every review handed out writes it, and in the project
   repo those writes kept the repo busy for the batches landing on its branch.
@@ -211,7 +212,7 @@ so an older repo can join an org as it is, records and all.
 What someone may do in a repo is the most of: read if it's public; admin for
 the org's owners and admins; the org's default for members; a collaborator's
 level. An agent has its owner's. Every route and tool needs a level: read for
-looking, review for `next`, `review_access` and `vote`, write for claiming,
+looking, review for `reviews`, `review_access` and `vote`, write for claiming,
 pushing and merging, admin for `start`, settings and deleting. A repo the
 caller can't see answers as if it didn't exist. Anyone who comes through
 Cloudflare Access (a person or a service token) may do anything, and name a
@@ -264,8 +265,8 @@ again.
 The refusal names who holds what, so the agent can narrow its claim or ask
 them. A claim in the way that its agent has abandoned is released as stale in
 the same append, with its own stamped release. There is no timer: an
-abandoned claim is freed by the next agent that needs its paths (`next` hands
-its work out again), or by anyone with `release` and `stale: true`.
+abandoned claim is freed by the next agent that needs its paths (`backlog`
+lists its work as free again), or by anyone with `release` and `stale: true`.
 
 Abandoned is decided by whose turn it is (`staleness.ts`), not by quiet alone.
 An agent that pushed and waits for review, whose change is being checked to
@@ -321,8 +322,8 @@ Within a branch, `after` orders dependent changes: a claim (or a backlog
 item) names the changes it depends on, and `merge` refuses it, saying what it
 waits on, until each has merged into the same branch. A release records the
 branch a change merged into, so a dependency that landed elsewhere doesn't
-count. `next` hands out a backlog item only once its pieces have merged, and
-never tells an agent to merge a change still waiting. A loop (x after y, y
+count. `backlog` lists an item as free only once its pieces have merged, and
+`merge` refuses a change still waiting. A loop (x after y, y
 after x) is refused when claimed, since every change in it would wait forever.
 The audit reports a merge that landed before what its claim waited on.
 
@@ -331,7 +332,7 @@ A finished branch merges into another as one change: a claim with `source`
 it left the target: the files, or their folders, deepest first, when there
 are more than a claim holds. The toolkit pushes the source's tip to the
 claiming agent's fork as the change's branch, so review, `check`, landing,
-`merge`, `status`, `next`, abandoned claims and the audit treat it as any
+`merge`, `status`, `reviews`, abandoned claims and the audit treat it as any
 change, and the merge commit's second parent is the source's tip: the target
 gets the whole branch in one merge. The claim holds those paths on the target
 while the merge is under way, so the target can't change under it. If the
@@ -357,7 +358,7 @@ none). What it leaves out stays the repo's, and follows the repo's when they
 change. The first matching rule applies; the project's branch always has the
 repo's own settings. So `feature/*` can merge on its checks alone while a
 feature's merge into `main` gets the full review, and `release/*` can need a
-role only people hold. `merge`, `status`, `next`, the abandoned rule and the
+role only people hold. `merge`, `status`, `reviews`, the abandoned rule and the
 audit all read a change's settings from the branch it lands on; the audit
 from the rules in force when it merged. A merge whose settings need no
 approvals and no role needs no votes to cite. A branch rule may grant roles of
@@ -385,7 +386,7 @@ review, and the default policy (one approval) then works for one person with
 one agent. A team that wants a second person's eyes requires two approvals, or
 grants a role to others. A veto role
 blocks a merge with a rejection, and must approve before a merge, so a veto
-can't arrive too late. Merging, `status`, `next` and the audit all count this
+can't arrive too late. Merging, `status`, `reviews` and the audit all count this
 way.
 
 ### Who holds a role
@@ -408,7 +409,7 @@ any of:
 A role not granted is held by people and GitHive's reviewers. A vote under a
 veto role from anyone else counts as an ordinary review, and `status` lists it
 as `ungranted`. A rejection from someone who doesn't hold a veto role doesn't
-block a merge; `next` still sends the author to revise.
+block a merge; `status` still shows it, for the author to revise.
 
 A pool member's vote never counts as the role on a change whose author runs
 under the same identity, so a team doesn't sign off its own changes.
@@ -542,7 +543,7 @@ they stop a minute after the search, like every check container: nothing is
 kept warm waiting for a fix, which a later batch checks afresh. A change that fails alone is
 checked once more (a flaky run isn't a verdict), then put out:
 `githive-checks` rejects its head, with the failing command's output as
-evidence. That sends it back to its agent through `next` like any rejection,
+evidence. Its agent sees it in `status` like any rejection,
 and keeps it out of later batches until it has a new commit: `merge` refuses
 that commit at once, with the failure, rather than check it a third time.
 
@@ -601,10 +602,10 @@ that head, and a merge asked again meanwhile finds it landed. Each batch asks
 for its forks' read access 6 at a time: a Worker request holds 6 connections
 open.
 
-**Open changes' heads, as last seen.** `next` and `merge` need each open
+**Open changes' heads, as last seen.** `reviews`, `backlog` and `merge` need each open
 change's pushed head, and GitHive doesn't see pushes: they go to the agent's
 fork. Read from every fork on every call, they were most of GitHive's Git
-requests (8 fork reads a call of `next` at 200 agents), growing with the
+requests (8 fork reads a call of `next`, as it was, at 200 agents), growing with the
 crowd. Now the repo's RepoCache keeps the head last seen on each change's
 branch, and when: `check` (which agents call after each push) and `status`
 note the head they read, and so do the reads below. A call reads the
@@ -767,63 +768,67 @@ and pushed a hotfix straight to main. The audit, from Git alone, reported
 exactly those violations and nothing about the cooperative merges. Five
 violations, five reverts, none left open.
 
-## Agents without roles: next
+## Agents without roles: they look and choose
 
-Users send agents; they don't design a team of builders and reviewers. An
-agent that doesn't know what to do calls `next`, and gets the most useful
-thing for it now, with how to do it:
+Users send agents; they don't design a team of builders and reviewers. And
+nothing in GitHive tells an agent what to do: there is no orchestrator. Each
+agent looks at the state of the work and chooses, the way ants coordinate
+through the trail others left rather than through a leader. Three reads show
+it:
 
-1. its own change: revise it when a reviewer asked for changes (even if it's
-   approved: a cooperative agent doesn't merge over an objection), merge it
-   once approved and what it depends on has merged, finish it if nothing is
-   pushed. A change waiting on a
-   person is left to them;
-2. a review someone is waiting for: never its own change, nor a commit it
-   voted on (as itself or as the same person), nor one waiting on a
-   revision. A review it already holds comes
-   first. Then a role that can block a merge, but only to an agent granted it
-   (see Who holds a role); then the changes with the fewest approvals, oldest
-   first;
-3. a piece of the backlog nobody has taken, whose pieces it depends on have
-   merged, and that no live claim stands in the way of (an abandoned one
-   doesn't: claiming releases it). An item is taken once a change by its id is
-   claimed, and done once that change merges;
-4. else wait, saying why (its own changes waiting for votes or on what they
-   depend on, backlog blocked by claims or dependencies), and ask again in
-   30 s.
+- `status`, for each change the agent holds: its head, the votes on it with
+  their evidence, what it still needs, and whether it landed. The agent's own
+  changes come first, by its instructions: revise one sent back (even if it's
+  approved: a cooperative agent doesn't merge over an objection), merge one
+  approved, finish one with nothing pushed.
+- `reviews`: the reviews it may give. Never its own change, nor a commit it
+  voted on (as itself or as the same person), nor one sent back, nor one
+  approved; a role that can block a merge only to an agent granted it (see Who
+  holds a role), else an ordinary review where one is still needed. Each says
+  how many more it needs and who's reviewing it already, and one its
+  reviewers already cover isn't listed. Those it's reviewing first, then roles
+  that can block, the fewest approvals, the oldest.
+- `backlog`: the pieces free to build: nobody has claimed one (an abandoned
+  claim doesn't count: claiming releases it), nor its paths, and the pieces it
+  depends on have merged. The rest are listed with why they wait.
 
-Agents are spread over the best choices, at least three and as many as there
-are agents, so they don't all take the same one. Reviews balance themselves: when they pile up, every agent is sent
-to review; when they're done, every agent builds.
+Equally good choices come in an order of each agent's own (a stable hash of
+its name), so a crowd looking at once spreads out instead of all taking the
+first. That's a view, not an assignment: reviews balance themselves (when
+they pile up, many agents see them; when they're done, the backlog is what's
+left), and agents with their own instructions (a reviewer, a security agent)
+pick what those say.
 
-**Backlog items aren't reserved.** Two agents told the same piece both claim
-it under its id, and the claim decides: the second is refused as someone
-else's change and asks `next` again.
+Until GitHive had these reads, a tool, `next`, picked one step for each agent
+and placed its review hold for it. It bound nobody, but every agent asked it
+and did what it said, so it ran the crowd: a stale answer once sent 80 agents
+to merge changes that had landed, all at once. It's gone.
 
-**Review holds.** A review is held for an agent before it's handed out, so two
-agents aren't sent to a review that needs one. Holds are kept by commit and
-role in a record in Git (`refs/notes/githive-reviews/<repo>`, `review-holds.ts`),
-taken by compare-and-swap: an agent gets a hold only
-while fewer others hold it than the review still needs. A hold lasts 15
+**Backlog items aren't reserved.** Two agents picking the same piece both
+claim it under its id, and the claim decides: the second is refused as
+someone else's change and picks another.
+
+**Review holds.** An agent starting a review marks it, with `review_access`
+(in the role it names), so others looking at `reviews` see it taken. Holds are
+kept by commit and role in a record in Git
+(`refs/notes/githive-reviews/<repo>`, `review-holds.ts`). A hold lasts 15
 minutes, or a minute once its agent has voted (a new vote can take a moment to
-show in every read). If others keep taking the reviews first, `next` says to
-wait 15 s. A hold binds nobody: a review counts with or without one, and the audit never
-reads holds. The same record keeps when each review a role that can block
-awaits was first seen waiting, so people hear of one that waited too long,
-once; it is written only when the reviews waiting change.
+show in every read). A hold binds nobody: a review counts with or without one,
+and the audit never reads holds. The same record keeps when each review a role
+that can block awaits was first seen waiting, so people hear of one that
+waited too long, once; it is written only when the reviews waiting change.
 
 **People as the fallback.** A review a role that can block awaits, that nobody
 holds, is noted when first seen. After 10 minutes (`ROLE_WAIT_MS`) it is
-flagged to people's inbox, once. There is no timer: whichever agent calls
-`next` next notices. The flag clears when the role signs it off, or a person
+flagged to people's inbox, once. There is no timer: whichever agent next looks
+at `reviews` notices. The flag clears when the role signs it off, or a person
 votes. The flag goes to people, never to GitHive's own reviewers. If no person
 holds the role, the flag says so, to nudge its holders or grant it to more.
 
 **Asking a person.** `ask_human` puts a change in people's inbox with the
 reason. It stays there until a person votes on the change's commit, from the
 dashboard, with their own stamped identity (an agent's vote, even one of
-that person's agents, doesn't answer it). Meanwhile `next` sends its agent to
-other work.
+that person's agents, doesn't answer it). Meanwhile its agent does other work.
 
 ## GitHive's own agents
 
@@ -1024,7 +1029,7 @@ been taking requests off the busiest repos:
 
 - **Kept claim views**: the claims list is built once per 30 s per project
   (in its RepoCache Durable Object) and served to every caller meanwhile;
-  `next` reads its advice from the same view.
+  `reviews` and `backlog` read from the same view.
 - **Shared record states**: a record log's state at a tip is kept in the
   project's RepoCache, so a Worker isolate that hasn't read a log yet doesn't
   fetch it from Git again (the tip is still listed, so a state is never
@@ -1090,7 +1095,8 @@ project, all at once, the way users would send them:
 
     node scripts/swarm.mjs <plan.json> [--base URL] [--speed N] [--setup-only]
 
-Every agent asks `next`, does what it says, and asks again. Building, it
+Every agent looks and chooses: its own changes (`status`), then a review it may
+give (`reviews`), then a piece of the backlog (`backlog`), each list's first. Building, it
 claims, clones, makes the piece's scripted edit, pushes to its fork and
 checks, recovering as an agent would (extending its claim, merging main in on
 a conflict). Reviewing, it gets the change with `review_access`, runs the
@@ -1103,8 +1109,8 @@ the backlog, and runs no scripted agents.
 **Real agents.** `scripts/claude-agents.mjs` runs the same plan with real
 Claude Code agents: one headless `claude -p` session per agent, all at once,
 on what the Claude Code CLI is signed in with (no API key). Each is its own
-registered GitHive agent with its own key, and does the work for real: `next`,
-claim, change the code, run the tests, push, review others' changes and vote,
+registered GitHive agent with its own key, and does the work for real: looks at
+`status`, `reviews` and `backlog`, claims, change the code, run the tests, push, review others' changes and vote,
 merge. Run `swarm.mjs --setup-only` first.
 
     node scripts/claude-agents.mjs <plan.json> [--base URL] [--model claude-sonnet-5-5] [--minutes 45] [--only agent-7]
@@ -1147,7 +1153,7 @@ one RepoIndex; the records in Git are what count.
   audit reports it, unstamped, and any agent can revert it.
 - **No timers.** A stale claim is freed only when someone needs its paths or
   releases it. A review waiting on a role reaches people only when some agent
-  calls `next`.
+  looks at `reviews`.
 - **Artifacts throttles each busy repo** (answering `INTERNAL_ERROR`, not
   429). 1000 agents at once hold on 16 records repos with kept views and tips;
   on 8, a third of them failed (see Benchmark). The claims list is built at
@@ -1168,8 +1174,8 @@ one RepoIndex; the records in Git are what count.
 - **Sharding costs small runs** about 8 s for one agent; on demand, only once
   the load calls for it.
 - **A rejection only blocks from a veto role** (or the checks, whose
-  rejection blocks that head). From anyone else, `next` sends the author to
-  revise and other merges leave the change out of their batches, but the
+  rejection blocks that head). From anyone else, `status` shows the author it
+  should revise and other merges leave the change out of their batches, but the
   author's own `merge` with enough approvals lands it.
 - **A role no person holds** can be flagged to people, who can't sign it off.
 - **Holds are hints.** A lost hold means at worst two reviewers on one change.

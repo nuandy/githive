@@ -114,14 +114,10 @@ describe.each([
 				"author",
 			);
 			await call("claim", { change: "a", agent: "author", paths: ["src/a/"], intent: "a" }, "author");
-			// While author is at it, other isn't sent there.
-			expect(await call("next", { agent: "other" }, "other")).toMatchObject({
-				kind: "wait",
-			});
+			// While author is at it, it isn't free to build.
+			expect(await call("backlog", { agent: "other" }, "other")).toMatchObject({ open: [], waiting: [{ id: "a", reason: "claimed by author" }] });
 			later(BUILDING_IDLE_MS + 60_000);
-			const next = await call("next", { agent: "other" }, "other");
-			expect(next).toMatchObject({ kind: "build", work: { id: "a" } });
-			expect(String(next.next)).toContain("author started it and abandoned it");
+			expect(await call("backlog", { agent: "other" }, "other")).toMatchObject({ open: [{ id: "a", abandonedBy: "author" }] });
 			expect(await call("claim", { change: "a", agent: "other", paths: ["src/a/"], intent: "a" }, "other")).toMatchObject({ ok: true });
 			expect(
 				(

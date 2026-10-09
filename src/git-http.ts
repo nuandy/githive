@@ -25,7 +25,7 @@ export function repoOfUrl(url: string) {
  * again, leaving the 401's body unread: a Worker request holds 6 connections
  * open, and with a few reads side by side those held them all, so the
  * runtime cancelled responses to break the stall (2,585 times in a 200-agent
- * run, in next and merge). onAuth stays, should a server ask anyway.
+ * run, in next (now reviews and backlog) and merge). onAuth stays, should a server ask anyway.
  */
 export function gitAuth(remote: Remote) {
 	const password = remote.token.split("?expires=")[0];

@@ -38,7 +38,7 @@ describe("MCP front door", () => {
 			expect(tool.annotations.readOnlyHint && tool.annotations.destructiveHint, tool.name).toBe(false);
 		}
 		const names = (pick: (t: Annotated) => boolean) => all.filter(pick).map((t) => t.name).sort();
-		expect(names((t) => t.annotations.readOnlyHint)).toEqual(["audit", "check", "claims", "next", "review_access", "status"]);
+		expect(names((t) => t.annotations.readOnlyHint)).toEqual(["audit", "backlog", "check", "claims", "reviews", "status"]);
 		expect(names((t) => t.annotations.destructiveHint)).toEqual(["register", "release", "revert"]);
 	});
 

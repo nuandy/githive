@@ -11,10 +11,11 @@ import { recordsRepoOf } from "./shards";
 // batches landing on its branch.
 //
 // A hold says an agent is reviewing a commit in a role (keyed as work.ts
-// holdKey), until it votes or the hold runs out: next hands a review out only
-// while fewer agents hold it than it needs, so two agents aren't sent to one
-// review that needs one. A hold binds nobody: a review is valid with or
-// without one, and the audit never reads them.
+// holdKey), until it votes or the hold runs out: the agent marks it itself,
+// starting the review (review_access), and reviews offers a review only while
+// fewer others hold it than it needs, so agents looking don't all pile onto
+// one. A hold binds nobody: a review is valid with or without one, and the
+// audit never reads them.
 //
 // Beside the holds: reviews a role that can block has awaited, and when each
 // was first seen waiting, so people hear of one that waited too long, once.
@@ -112,7 +113,7 @@ export async function roleWaitTold(log: CasLog<ReviewHolds>, key: string) {
 	});
 }
 
-/** The review holds as next and vote use them (ToolContext.reviews), kept in the repo's record (`log`: wherever it is). */
+/** The review holds as review_access, reviews and vote use them (ToolContext.reviews), kept in the repo's record (`log`: wherever it is). */
 export function reviewHolds(log: (repo: string) => CasLog<ReviewHolds> | Promise<CasLog<ReviewHolds>>): NonNullable<ToolContext["reviews"]> {
 	return {
 		held: async (repo) => heldReviews(await log(repo)),

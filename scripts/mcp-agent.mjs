@@ -8,7 +8,7 @@
 //   node scripts/mcp-agent.mjs register <repo> <agent> <key-file>      register an agent, key to <key-file>
 //   node scripts/mcp-agent.mjs clone <dir> --repo R --change C --key-file F   clone the project, push to your fork (remote "fork"; --full x for all history)
 //   node scripts/mcp-agent.mjs auth <dir> (same flags as clone)          fresh write access for an existing clone
-//   node scripts/mcp-agent.mjs review-clone <dir> --repo R --change C [--key-file F]   a change to review
+//   node scripts/mcp-agent.mjs review-clone <dir> --repo R --change C [--role R] [--key-file F]   a change to review (marks you reviewing it)
 //        (the project, with the change's branch from its author's fork as "change", checked out at its pushed head)
 //
 // --base defaults to the bench Worker. Access credentials come from .dev.vars
@@ -100,7 +100,7 @@ switch (command) {
 	}
 	case "review-clone": {
 		const [dir] = positional;
-		const access = await tool("review_access", { repo: flags.repo, change: flags.change }, flags["key-file"]);
+		const access = await tool("review_access", { repo: flags.repo, change: flags.change, ...(flags.role ? { role: flags.role } : {}) }, flags["key-file"]);
 		// Deep enough to diff against the project's branch; read-only tokens, each in this clone's own config.
 		execFileSync("git", ["-c", header(access.project.token), "clone", "--quiet", "--depth", "50", "--branch", access.project.branch, access.project.url, dir], { stdio: "inherit" });
 		execFileSync("git", ["-C", dir, "config", `http.${access.project.url}.extraHeader`, `Authorization: Bearer ${access.project.token.split("?")[0]}`]);

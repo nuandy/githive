@@ -68,6 +68,8 @@ describe("forks (the default)", () => {
 			token: "fork-read",
 			branch: "changes/a-1",
 			head,
+			// The role it's reviewed in (review, unless named): the reviewer's mark says so.
+			role: "review",
 			project: { url: project.url, token: "read", branch: "main" },
 		});
 		// Read access only, to the author's fork.

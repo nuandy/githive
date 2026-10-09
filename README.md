@@ -12,18 +12,19 @@ Changes merge into the project's default branch, whatever its repo calls it (mai
 - **Review.** A different agent reviews the exact commit before it merges, and never the author. A person and their agents count as one: your agents can't approve each other's changes, but you can approve theirs on the dashboard. By default that's one reviewer. A change to dependency, CI or deploy files (`package.json`, the npm, yarn, pnpm and bun lockfiles, `.npmrc`, `.github/`, `Dockerfile`, wrangler config) also needs a security reviewer, who can veto it. Each repo sets its own policy: more roles and approvals, stricter rules for chosen paths, rules for other branches by name (`feature/*`), and who may vote as each role (named agents, people, an org's team, a pool of one person's agents, or GitHive's reviewers).
 - **Landing as a set.** Claims keep changes off each other's paths, so approved changes land together, in any order, without a queue. One merge lands a branch's ready changes as a batch (4 to 64 at a time, sized to how often its checks fail): checked once with all of them merged in, then pushed in one push, each as its own merge recording what it was checked with. A failing batch is split and its halves checked side by side; the first passing part lands at once, and a change that fails alone twice is sent back. Changes that only touch documentation and other files no check reads skip the checks.
 - **Branches and order.** A claim lands on main or `into` any other branch, made from `from` if it's new. `after` names changes it must wait for, and `source` merges a whole branch into another as one reviewed change. People can make branches and merge approved changes on the dashboard too.
-- **Abandoned work.** A claim counts as abandoned only when its change waits on its own agent: 30 minutes with nothing pushed, or 2 hours after changes were asked for, its checks failed, or it was approved and not merged. A claim waiting for review, a check or a person never is. Another agent's claim on its paths, or `release` with `stale: true`, frees it, and `next` hands its work to someone else.
+- **Abandoned work.** A claim counts as abandoned only when its change waits on its own agent: 30 minutes with nothing pushed, or 2 hours after changes were asked for, its checks failed, or it was approved and not merged. A claim waiting for review, a check or a person never is. Another agent's claim on its paths, or `release` with `stale: true`, frees it, and `backlog` lists its work as free again.
 - **The audit.** Every merge GitHive lands, on any branch, is replayed against the records. A merge that skipped a claim or a vote shows up with its commit and its agent, and anyone may revert it.
 
 ## MCP tools
 
-Agents use the MCP front door (`POST /mcp`). An agent that doesn't know what to do calls `next`.
+Agents use the MCP front door (`POST /mcp`). Nothing assigns work: an agent looks (`status` for its own changes, `reviews`, `backlog`, `claims`) and chooses.
 
 ```
 start           start GitHive on a repo: review policy, checks, role grants, how claims are sharded
 settings        change a started repo's review policy, role grants or checks, rules for other branches, and what the checks skip; each merge is audited against the settings in force when it merged
 register        an agent's own key, so agents sharing one Access identity are told apart
-next            the most useful thing for this agent now: revise, merge, review, or build from the backlog
+reviews         the reviews this agent may give, in an order of its own
+backlog         the pieces of work free to build, and why the rest wait
 add_work        add pieces to the repo's backlog, with their dependencies
 claims          who holds which paths, and why
 claim           claim paths for a change, on main or `into` another branch; `after` orders it behind other changes, `source` merges a whole branch
@@ -104,7 +105,7 @@ Every request resolves to one caller (`src/auth/principal.ts`): an Access identi
 | Needs | Routes and tools |
 |---|---|
 | read | the repo's pages, its code, `claims`, `status`, `check`, `audit`, `credentials` for the project |
-| review | `next`, `review_access`, `vote` (and a person's vote on the dashboard) |
+| review | `reviews`, `review_access`, `vote` (and a person's vote on the dashboard) |
 | write | `register`, `claim`, `release`, `credentials` for a change's fork, `merge`, `revert`, `add_work`, `ask_human`, `request_review`, `build` (and merging or making a branch on the dashboard) |
 | admin | `start`, `settings`, a repo's visibility and collaborators, deleting it |
 
@@ -202,7 +203,7 @@ Records in Git outlive the code that wrote them. To change a record's shape, bum
 - **Semantic conflicts.** `check` and every merge find text conflicts; changes that merge cleanly but break together are caught by the checks, which run on everything landing together.
 - **Scale.** 1,000 agents at once claim, push, check and release with no failures (see Benchmarks); past that is untested. Merging is proven at 200: 200 scripted agents landed 200 of 200 changes as a set (before that, a line of merges stalled with about 190 approved changes calling `merge` at once). Merging with more is untested.
 - **Plain git goes around GitHive.** Anyone with the account's Artifacts credentials can write the project with plain git. The audit reports it; it can't prevent it.
-- **No timers.** An abandoned claim is freed only when someone needs its paths or asks `next`.
+- **No timers.** An abandoned claim is freed only when someone needs its paths (or claims its work from `backlog`).
 - **Who is landing lives outside Git.** It's a hint in the repo's cache: losing it costs a check run, never a wrong merge.
 - **Containers run Linux.** Checks that need macOS (iOS apps), Windows or a GPU can't run in them.
 
