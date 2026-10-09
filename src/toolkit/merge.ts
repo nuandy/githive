@@ -66,6 +66,8 @@ export interface MergeInput {
 	stampKey?: string;
 	change: string;
 	agent: string;
+	/** A file as the claims records name it, for a change into a branch other than the project's (see branch-scope.ts). */
+	scope?: (file: string) => string;
 	/** How long to wait for the merges ahead in line to land (TURN_WAIT_MS unless set, as tests do). */
 	turnWaitMs?: number;
 }
@@ -85,18 +87,20 @@ export async function mergeChange(input: MergeInput): Promise<MergeOutcome> {
 		const main = await ws.head();
 		const head = await ws.fetch("change", input.source ?? input.remote, `changes/${input.change}`);
 		const files = await ws.changedPaths(await ws.mergeBase(main, head), head);
+		// The same files as the claims records name them: in the branch's own part, for a branch other than the project's.
+		const scoped = input.scope ? files.map(input.scope) : files;
 		// The claims that bear on these files (the change's own, and any covering them), and the votes on its head.
-		const [view, votes] = await Promise.all([input.store.readScope(input.change, files), input.votes.readFor([head])]);
+		const [view, votes] = await Promise.all([input.store.readScope(input.change, scoped), input.votes.readFor([head])]);
 
 		const reasons: string[] = [];
 		const claims = view.claims;
 		const own = claims.find((c) => c.change === input.change);
 		if (!own) reasons.push(`${input.change} holds no claim`);
-		for (const file of files) {
-			const holder = claims.find((c) => c.change !== input.change && inLane(file, c.paths));
+		files.forEach((file, i) => {
+			const holder = claims.find((c) => c.change !== input.change && inLane(scoped[i], c.paths));
 			if (holder) reasons.push(`${file} is inside ${holder.change}'s claim (${holder.agent})`);
-			else if (own && !inLane(file, own.paths)) reasons.push(`${file} is outside ${input.change}'s claim`);
-		}
+			else if (own && !inLane(scoped[i], own.paths)) reasons.push(`${file} is outside ${input.change}'s claim`);
+		});
 		const counted = await countedVotes(votes.votes, input.stampKey);
 		// Distinct reviewers, never the change's author: its claim's agent, and who made the claim.
 		// The policy for what it touches: stricter for dependency, CI and deploy files, say.
@@ -156,7 +160,7 @@ export async function mergeChange(input: MergeInput): Promise<MergeOutcome> {
 			change: input.change,
 			author: input.agent,
 			by: input.stamper?.by,
-			claimsTip: input.store.cite(view, files, own),
+			claimsTip: input.store.cite(view, scoped, own),
 			votesTip: input.votes.cite(votes, head),
 			testedOn: tested?.base,
 			...(tested?.after.length ? { testedAfter: tested.after } : {}),

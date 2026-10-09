@@ -183,7 +183,8 @@ export function nextFor(input: NextInput): NextStep {
 	// An abandoned claim holds nothing back: claiming its paths (or its change) releases it as stale.
 	const live = input.open.filter((o) => !input.abandoned?.has(o.claim.change));
 	const taken = new Set(live.map((o) => o.claim.change));
-	const blocked = (w: WorkItem) => !!w.paths?.some((p) => live.some((o) => o.claim.paths.some((held) => entriesOverlap(p, held))));
+	// Backlog work lands on the project's branch: a claim into another branch stands in its way nowhere.
+	const blocked = (w: WorkItem) => !!w.paths?.some((p) => live.some((o) => !o.claim.into && o.claim.paths.some((held) => entriesOverlap(p, held))));
 	const open = input.work.filter((w) => !taken.has(w.id) && !input.merged.has(w.id) && !blocked(w));
 	if (open.length) {
 		const choices = open.slice(0, width);

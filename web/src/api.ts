@@ -46,6 +46,8 @@ export interface RepoSnapshot {
 		by?: string;
 		/** The change's branch head, null until something is pushed. */
 		head: string | null;
+		/** The branch it lands on, when not the project's (newer servers). */
+		into?: string;
 		approval: { approved: boolean; approvals: number; required: number; vetoedBy: string[]; /** Veto roles that haven't approved yet (newer servers); a change merges only once each has. */ awaiting?: string[] };
 		/** A question for a person about the change (an agent asked, or GitHive's builder failed), until a person votes. */
 		attention?: { reason: string; agent: string; at: string };

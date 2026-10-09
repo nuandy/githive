@@ -34,6 +34,10 @@ export interface MergeRecord {
 	reverts?: string;
 	/** Files the merge changed. */
 	files: string[];
+	/** The branch it landed on, when not the project's. */
+	branch?: string;
+	/** The same files as the claims records name them, for a merge into another branch (see branch-scope.ts); absent, `files`. */
+	claimFiles?: string[];
 }
 
 export interface Violation {
@@ -114,12 +118,13 @@ export async function audit(records: AuditRecords): Promise<Violation[]> {
 		if (!cited) continue;
 		const ownRecords = cited.claims.filter((c) => c.change === merge.change);
 		const own = ownRecords.length ? { ...ownRecords[0], paths: ownRecords.flatMap((c) => c.paths) } : undefined;
-		for (const file of merge.files) {
-			if (cited.uncovered.has(file)) continue;
-			const holder = cited.claims.find((c) => c.change !== merge.change && inLane(file, c.paths));
+		merge.files.forEach((file, i) => {
+			const claimed = merge.claimFiles?.[i] ?? file;
+			if (cited.uncovered.has(claimed)) return;
+			const holder = cited.claims.find((c) => c.change !== merge.change && inLane(claimed, c.paths));
 			if (holder) report("inside-another-claim", `${file} was claimed by ${holder.change} (${holder.agent}) at ${merge.claimsTip}`);
-			else if (!own || !inLane(file, own.paths)) report("outside-claim", `${file} was not in ${merge.change}'s claim at ${merge.claimsTip}`);
-		}
+			else if (!own || !inLane(claimed, own.paths)) report("outside-claim", `${file} was not in ${merge.change}'s claim at ${merge.claimsTip}${merge.branch ? ` (on ${merge.branch})` : ""}`);
+		});
 		for (const { history, tip } of cited.records) checkReleasedAfter(history, tip, merge, report);
 		const settings = settingsFor(records, registryAt, merge);
 		checkApproved(records, settings.policy, votesAt, merge, report, own);
@@ -168,7 +173,7 @@ function citedClaims(records: AuditRecords, registryAt: Map<string, Registry>, m
 		claims.push(...entry.state.claims);
 		cited.push({ shard, history, tip: at });
 	}
-	const uncovered = new Set(merge.files.filter((file) => !cited.some(({ shard }) => shard === "" || inLaneEntry(file, shard))));
+	const uncovered = new Set((merge.claimFiles ?? merge.files).filter((file) => !cited.some(({ shard }) => shard === "" || inLaneEntry(file, shard))));
 	for (const file of uncovered) report("unknown-claims", `${file}: the merge cites no claims shard covering it`);
 	return { claims, records: cited, uncovered };
 }

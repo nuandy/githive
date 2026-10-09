@@ -158,6 +158,12 @@ export class Workspace {
 		return git.commit({ fs: this.fs, dir: DIR, message, author });
 	}
 
+	/** Make branch `name` at this workspace's branch head, and push it (one ref, no new objects). */
+	async pushNewBranch(name: string) {
+		await git.branch({ fs: this.fs, dir: DIR, ref: name, object: await this.head() });
+		await this.push(name);
+	}
+
 	push(ref = this.branch, remote: Remote = this.origin) {
 		return retryTransient(() => git.push({ fs: this.fs, http, dir: DIR, url: remote.url, ref, onAuth: onAuth(remote) }));
 	}

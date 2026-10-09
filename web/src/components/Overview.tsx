@@ -188,7 +188,8 @@ function RegionView({ repo, region }: { repo: string; region: Region }) {
 
 /** What agents hold of the tree, by top-level folder. */
 function Territory({ repo, branch, snapshot, tree, error, line }: { repo: string; branch: string; snapshot: RepoSnapshot; tree?: RepoTree; error?: string; line?: RepoLine }) {
-	const regions = tree ? territory(tree.files, snapshot.claims, { ...(line ? { line } : {}), votes: snapshot.votes }) : [];
+	// The tree is the project's branch: claims into other branches hold nothing of it.
+	const regions = tree ? territory(tree.files, snapshot.claims.filter((c) => !c.into), { ...(line ? { line } : {}), votes: snapshot.votes }) : [];
 	return (
 		<section className="territory" aria-labelledby="territory-title">
 			<div className="overview__head">

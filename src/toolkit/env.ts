@@ -143,12 +143,13 @@ export function toolContextFor(env: Env, by: string | undefined, caller: { agent
 		head: async (repo, branch) => (await headOf(env.ARTIFACTS, repo, branch)) ?? fail(409, `${repo} has no ${branch} branch`),
 		defaultBranch: async (repo) => (await defaultBranch(await remoteFor(env.ARTIFACTS, repo, "read", 3600))) ?? fail(409, `${repo} has no commits`),
 		// Checks run in the repo's line of merges, a record in Git (see line.ts), each in its change's own Gate and container.
-		runChecks: (repo) => {
+		// Each branch changes land on has its own line (the project's at the ref it always had: lineBranch absent).
+		runChecks: (repo, lineBranch) => {
 			const read = () => cached(env, repo, `${repo}|read`, () => remoteFor(env.ARTIFACTS, repo, "read", 3600));
 			const fork = (agent: string) => cached(env, repo, `fork:${repo}:${agent}|read`, () => changeRemote(env, repo, agent, "read", 3600));
 			let branch = "main";
 			const runner = lineCheckRunner({
-				log: new GitCasLog<Line>(() => cached(env, repo, `${repo}|write`, () => remoteFor(env.ARTIFACTS, repo, "write", 3600)), repo, lineRef(repo)),
+				log: new GitCasLog<Line>(() => cached(env, repo, `${repo}|write`, () => remoteFor(env.ARTIFACTS, repo, "write", 3600)), repo, lineRef(repo, lineBranch)),
 				main: async () => headOf(env.ARTIFACTS, repo, branch),
 				check: async ({ change, head, ref, agent, source, commands, base, ahead }) => {
 					const remote = await read();

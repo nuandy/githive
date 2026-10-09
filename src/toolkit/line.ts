@@ -57,8 +57,12 @@ const AUTHOR = "githive";
 
 const emptyLine = (): Line => ({ tip: null, entries: [], left: [] });
 
-/** Where a repo's line is kept. */
-export const lineRef = (repo: string) => `refs/notes/githive-line/${repo}`;
+/**
+ * Where a repo's line into a branch is kept: the project's branch's at the
+ * ref it always had, another branch's beside the others (a ref can't hold
+ * refs inside it, so not under that one).
+ */
+export const lineRef = (repo: string, branch?: string) => (branch ? `refs/notes/githive-lines/${repo}/${encodeURIComponent(branch)}` : `refs/notes/githive-line/${repo}`);
 
 /** Take the merges from `index` on out of the line: the one there `how`, the rest because they were checked after it. */
 function leaveFrom(state: Line, index: number, how: LeftHow, at: string): Line {

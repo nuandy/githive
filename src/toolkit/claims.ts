@@ -22,6 +22,8 @@ export interface ClaimRecord {
 	/** Who made it, as Access verified them, and GitHive's stamp over the record (written through the toolkit). */
 	by?: string;
 	stamp?: string;
+	/** The branch its change lands on, when not the project's: set on claims as the tools give them out, never in the records (see branch-scope.ts). */
+	into?: string;
 }
 
 /** A released claim: who released it, after which merge (if it merged), and whether it was released as stale. */
@@ -40,6 +42,19 @@ export interface ReleaseRecord {
 	stamp?: string;
 }
 
+/** A branch changes land on, besides the project's: made by a claim into it (`from` a branch), or adopted as it was. */
+export interface BranchRecord {
+	/** Its commit when GitHive first had a change land on it: made there from `from`, or found there. */
+	base: string;
+	/** The branch it was made from; absent for a branch that existed before GitHive. */
+	from?: string;
+	at: string;
+	/** The agent whose claim made or adopted it. */
+	agent: string;
+	by?: string;
+	stamp?: string;
+}
+
 /** The registry's state: the claims in force, and every release so far. */
 export interface Registry {
 	claims: ClaimRecord[];
@@ -48,6 +63,12 @@ export interface Registry {
 	branch?: string;
 	/** The branch's commit when GitHive started on it: the audit reads the branch after it. */
 	baseline?: string;
+	/**
+	 * The other branches changes land on, by name (see branch-scope.ts): where
+	 * each started, for the audit to read it after, as `baseline` for the
+	 * project's branch.
+	 */
+	branches?: Record<string, BranchRecord>;
 	/** How many approvals a merge needs, and which roles veto. */
 	policy?: ReviewPolicy;
 	/** The project's checks, run on the branch plus a change before it merges. */
@@ -293,6 +314,21 @@ export function releaseStale(log: CasLog<Registry>, input: { change: string; age
 			text: `${input.agent} releases ${input.change}'s claim, idle for ${Math.round(idle / 60_000)} minutes`,
 		};
 	});
+}
+
+/**
+ * Record a branch changes may land on, at the commit it starts from (once:
+ * a branch already recorded keeps its record, which is returned).
+ */
+export function recordBranch(log: CasLog<Registry>, input: { name: string; base: string; from?: string; agent: string }, stamper?: Stamper) {
+	let record: BranchRecord | undefined;
+	return appendRecord<Registry, "known">(log, input.agent, empty, async (state) => {
+		record = state.branches?.[input.name];
+		if (record) return { refused: "known" };
+		record = await stamped("branch", { base: input.base, ...(input.from ? { from: input.from } : {}), at: new Date().toISOString(), agent: input.agent }, stamper);
+		const how = input.from ? `from ${input.from} at ${input.base.slice(0, 8)}` : `as it was, at ${input.base.slice(0, 8)}`;
+		return { state: { ...state, branches: { ...state.branches, [input.name]: record } }, text: `${input.agent} starts changes landing on ${input.name}, ${how}` };
+	}).then(() => record!);
 }
 
 /**

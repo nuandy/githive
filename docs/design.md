@@ -252,6 +252,41 @@ the rest (a head lives in its agent's fork, not in the records).
 
 A release names the merge it follows (`mergedAs`), when it follows one.
 
+## Branches
+
+A change lands on the project's branch unless its claim names another with
+`into`: a feature branch, a release branch. Everything after the claim reads
+the branch from it: `credentials` says to start from it, `check` tests
+against it, `review_access` diffs against it, and `merge` lands on it,
+through that branch's own line of merges. A change lands on one branch:
+claiming it again keeps it there, and naming another is refused.
+
+Claims are per branch: `lib/auth/` on `main` and on `release/2.x` are
+different code, so two changes holding them don't conflict. The records keep
+a claim into another branch under a first path segment of its own
+(`::<branch>`, see `branch-scope.ts`), so overlap, shards, stale claims and
+the audit's coverage keep branches apart with no rules of their own; the
+tools take and give back plain paths and `into`. No agent may claim a path
+starting with `::`. Claims on the project's branch have no segment, as before.
+
+A branch that doesn't exist is made by the claim into it only when it also
+says `from`, the branch to make it from, so a misspelt name is refused rather
+than made. A branch that exists but GitHive hasn't seen is adopted as it is.
+Either way the registry records the commit it started at (`branches`), and
+the audit reads each branch after that commit, as it reads the project's
+after its baseline. The toolkit writes the branch's ref, never an agent's
+token: agents still push only to their forks. Made first, then recorded, so a
+record that fails is made good by adopting the branch on the next claim.
+
+Work that depends on other unmerged work goes on a feature branch, and the
+project's branch only receives finished features: a feature's pieces merge
+into its branch, and the finished branch merges into the project's in one
+merge, so the project's branch never holds half a feature. (Merging a branch
+into a branch, ordering changes with `after`, per-branch settings and the
+dashboard's branch views come next; until then every branch uses the repo's
+review policy and checks, and the backlog's work lands on the project's
+branch.)
+
 ## Review policy
 
 A policy says how many approvals a commit needs (`required`, 0 for none) and
