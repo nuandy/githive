@@ -501,11 +501,12 @@ The batch size is about one failure per batch, `1/p`, a little larger than
 the size with the fewest check runs. A batch of `n` with a share `p` of
 changes failing fails with probability `1 − (1 − p)^n`, and finding the
 culprit costs about `2·log₂ n` more runs, so the fewest runs per change come
-near `ln 2 / 2p`, about `0.35/p`. Simulating this search (with the passing
-parts that didn't land checked again later) puts the fewest at roughly half
-of `1/p`, with a flat curve around it: at `1/p` a branch spends 4 to 8% more
-check runs (for `p` from 2% to 10%), and in return a batch lands 6 to 13%
-more changes for the time it takes. `p` is the share of the branch's
+near `ln 2 / 2p`, about `0.35/p`. Simulating this search
+(`scripts/batch-size-sim.mjs`, with the passing parts that didn't land
+checked again later) puts the fewest at roughly half of `1/p`, with a flat
+curve around it: at `1/p` a branch spends 3 to 7% more check runs (for `p`
+from 2% to 10%), and in return a batch lands 6 to 14% more changes for the
+time it takes. `p` is the share of the branch's
 recent outcomes (the last 200, kept with the lease) whose checks failed,
 counted with a prior of 1 in 20, so a new branch starts at 20. Between 4 and
 64: a branch where nothing fails takes 64 at a time, a flaky one 4.
