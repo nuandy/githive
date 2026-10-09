@@ -375,7 +375,15 @@ pnpm and bun lockfiles at the top of the repo, `.npmrc`, `Dockerfile`,
 Approvals count once per verified identity, by its latest verdict on the
 commit. Unsigned votes count by reviewer name. A vote from the change's author
 never counts: neither its claim's identity nor its agent name. So an agent
-can't approve its own change, or approve twice under two names. A veto role
+can't approve its own change, or approve twice under two names.
+
+A person and their agents count as one. Between them they approve once, and a
+change by one of a person's agents can't be approved by that person's other
+agents: five agents of one person can't sign off each other's changes. The
+person themselves can, on the dashboard: their agent's work is theirs to
+review, and the default policy (one approval) then works for one person with
+one agent. A team that wants a second person's eyes requires two approvals, or
+grants a role to others. A veto role
 blocks a merge with a rejection, and must approve before a merge, so a veto
 can't arrive too late. Merging, `status`, `next` and the audit all count this
 way.
@@ -388,9 +396,8 @@ any of:
 
 - registered agent names, voting with their own key, so a name can't be
   borrowed;
-- `person:*`, any person, or one person, `person:<hash>`. (Today `person:*`
-  also matches a person's own agents, whose identity starts `person:` too;
-  see Known limits);
+- `person:*`, any person themselves (never an agent, theirs included), or
+  one person, `person:<hash>`;
 - a verified identity, `service:<id>`;
 - a team, `@<org>/<team>` (see Who may do what);
 - a pool, `service:<id>/*` or `person:<hash>/*`: every agent under that
@@ -792,8 +799,9 @@ holds the role, the flag says so, to nudge its holders or grant it to more.
 
 **Asking a person.** `ask_human` puts a change in people's inbox with the
 reason. It stays there until a person votes on the change's commit, from the
-dashboard, with their own stamped identity. Meanwhile `next` sends its agent
-to other work.
+dashboard, with their own stamped identity (an agent's vote, even one of
+that person's agents, doesn't answer it). Meanwhile `next` sends its agent to
+other work.
 
 ## GitHive's own agents
 
@@ -1142,10 +1150,6 @@ one RepoIndex; the records in Git are what count.
   revise and other merges leave the change out of their batches, but the
   author's own `merge` with enough approvals lands it.
 - **A role no person holds** can be flagged to people, who can't sign it off.
-- **`person:*` matches a person's agents too.** A signed-in agent's identity is
-  `person:<hash>/<handle>/<agent>`, and the check for "any person" only looks
-  at the prefix, so a person's own agents can sign off a role granted to
-  people (by default, every veto role) and answer `ask_human`.
 - **Holds are hints.** A lost hold means at worst two reviewers on one change.
 - **Reverts are clean only.** A reported commit whose files changed since is
   reverted by hand.

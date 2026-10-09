@@ -106,7 +106,8 @@ export function flagChange(log: CasLog<Votes>, input: Omit<FlagRecord, "at" | "b
 export function openFlag(state: Pick<Votes, "votes" | "flags"> | null | undefined, change: string, head: string | null) {
 	const flag = (state?.flags ?? []).filter((f) => f.change === change).at(-1);
 	if (!flag) return null;
-	const answered = (state?.votes ?? []).some((v) => v.by?.startsWith("person:") && v.commit === head && v.at >= flag.at);
+	// By a person themselves: an agent, even a person's own, can't answer what was put to people.
+	const answered = (state?.votes ?? []).some((v) => isPerson(v.by) && v.commit === head && v.at >= flag.at);
 	return answered ? null : flag;
 }
 
@@ -122,7 +123,7 @@ export interface ReviewPolicy {
 	escalate?: { paths: string[]; required?: number; vetoes?: string[] }[];
 	/**
 	 * Who may vote as each role that can block a merge (a veto role): registered
-	 * agent names, "person:*" (anyone signed in through Access), a verified
+	 * agent names, "person:*" (any person themselves, never their agents), a verified
 	 * identity as the records show it ("person:<who>", "service:<id>"), a pool
 	 * of the agents registered under one ("service:<id>/*": however many there
 	 * are; whoever holds that identity decides who's in it), a team of the
@@ -135,6 +136,17 @@ export interface ReviewPolicy {
 
 /** Who holds a veto role the policy doesn't grant: people, and GitHive's own reviewers. */
 export const DEFAULT_GRANT = ["person:*", "githive"];
+
+/**
+ * The person a verified identity is or acts for: "person:<hash>" for a person
+ * and for each of their agents ("person:<hash>/<handle>/<agent>", or
+ * "person:<hash>/<agent>" with an agent key); null for anything else (a
+ * service token, GitHive's own agents).
+ */
+export const personOf = (by: string | undefined) => by?.match(/^person:[^/]+/)?.[0] ?? null;
+
+/** Whether `by` is a person themselves, not one of their agents. */
+export const isPerson = (by: string | undefined) => !!by && /^person:[^/]+$/.test(by);
 
 /** The identity a pool grant ("service:<id>/*") is of, or null for any other grant. */
 const poolOf = (grant: string) => grant.match(/^((?:person|service):[^/*]+)\/\*$/)?.[1] ?? null;
@@ -151,8 +163,8 @@ export const blockingRoles = (policy: ReviewPolicy) => [...new Set([...policy.ve
 export function grantWarnings(policy: ReviewPolicy): string[] {
 	return blockingRoles(policy).flatMap((role) => {
 		const holders = policy.grants?.[role] ?? DEFAULT_GRANT;
-		// A team is people, however many it has.
-		const people = holders.some((h) => h.startsWith("person:") || h.startsWith("@"));
+		// A team is people, however many it has; a pool of one person's agents isn't.
+		const people = holders.some((h) => h === "person:*" || isPerson(h) || h.startsWith("@"));
 		const many = holders.some((h) => poolOf(h) || h.startsWith("@")) || holders.length > 1;
 		const warnings: string[] = [];
 		if (!many && !people)
@@ -172,7 +184,8 @@ export function grantWarnings(policy: ReviewPolicy): string[] {
  */
 export function holdsRole(policy: ReviewPolicy, role: string, vote: Pick<VoteRecord, "reviewer" | "by" | "teams">, author?: Pick<Author, "by">) {
 	return (policy.grants?.[role] ?? DEFAULT_GRANT).some((grant) => {
-		if (grant === "person:*") return !!vote.by?.startsWith("person:");
+		// People themselves: not their agents, whose identities start with the same person.
+		if (grant === "person:*") return isPerson(vote.by);
 		// A team: the voter was on it when they voted, as GitHive checked and stamped.
 		if (grant.startsWith("@")) return !!vote.teams?.includes(grant);
 		const pool = poolOf(grant);
@@ -215,8 +228,12 @@ export interface Author {
 /**
  * Whether `commit` may merge under `policy`. Each identity counts once, by its
  * latest verdict: its verified identity (`by`) when the vote is signed, else
- * its reviewer name, so one agent can't approve twice under two names. The
- * author's own approval doesn't count. A veto role's verdict counts as that
+ * its reviewer name, so one agent can't approve twice under two names. A
+ * person and all their agents count as one: they approve once between them.
+ * A change by one of a person's agents can't be approved by their other
+ * agents, so five agents of one person can't sign off each other's changes;
+ * the person themselves can (on the dashboard: their agent's work is theirs
+ * to review). The author's own approval doesn't count. A veto role's verdict counts as that
  * role only from someone granted it (see holdsRole): their rejection blocks,
  * and every veto role must approve (`awaiting` lists those that haven't), so a
  * veto can always stop a merge, however fast the others vote. A verdict under
@@ -228,9 +245,12 @@ export function approval(state: Pick<Votes, "votes"> | null | undefined, commit:
 	const latest = new Map<string, VoteRecord>();
 	for (const v of state?.votes ?? []) if (v.commit === commit) latest.set(v.by ?? `name:${v.reviewer}`, v);
 	const verdicts = [...latest.values()];
-	const isAuthor = (v: VoteRecord) => !!author && ((!!v.by && v.by === author.by) || v.reviewer === author.agent);
+	// The author's person, when the author is one of their agents: the person counts, their other agents don't.
+	const authorPerson = author?.by && !isPerson(author.by) ? personOf(author.by) : null;
+	const isAuthor = (v: VoteRecord) => !!author && ((!!v.by && v.by === author.by) || v.reviewer === author.agent || (!!authorPerson && personOf(v.by) === authorPerson && !isPerson(v.by)));
 	const approving = verdicts.filter((v) => v.verdict === "approve" && !isAuthor(v));
-	const approvals = approving.length;
+	// One approval per person, however many of their agents approve; each other identity once.
+	const approvals = new Set(approving.map((v) => personOf(v.by) ?? v.by ?? `name:${v.reviewer}`)).size;
 	const asRole = (v: VoteRecord) => policy.vetoes.includes(v.role) && holdsRole(base, v.role, v, author);
 	const vetoedBy = verdicts.filter((v) => v.verdict === "reject" && asRole(v)).map((v) => v.reviewer);
 	const awaiting = policy.vetoes.filter((role) => !approving.some((v) => v.role === role && asRole(v)));

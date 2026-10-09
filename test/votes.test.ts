@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { approval, effectivePolicy, vote, type VoteRecord, type Votes } from "../src/toolkit/votes";
+import { approval, effectivePolicy, grantWarnings, holdsRole, openFlag, vote, type VoteRecord, type Votes } from "../src/toolkit/votes";
 import { MemoryLog } from "./helpers/memory-log";
 
 // Review: reviewers append verdicts on the exact commit they
@@ -80,6 +80,54 @@ describe("votes count per verified identity, never the author's", () => {
 	it("falls back to reviewer names when votes aren't signed", () => {
 		const votes = { votes: [cast("rev-1", undefined), cast("rev-2", undefined)] };
 		expect(approval(votes, head, policy)).toEqual({ approved: true, approvals: 2, vetoedBy: [], awaiting: [] });
+	});
+});
+
+describe("a person and their agents count as one", () => {
+	const policy = { required: 1, vetoes: [] as string[] };
+	const cast = (reviewer: string, by: string, verdict: "approve" | "reject" = "approve", role = "tests"): VoteRecord => ({ commit: head, reviewer, role, verdict, evidence: "ok", at: "2026-10-10T00:00:00.000Z", by });
+	const alice = "person:a11ce0000000";
+	const bob = "person:b0b000000000";
+	// A change by one of Alice's agents, signed in to GitHive.
+	const author = { agent: "alice/a1", by: `${alice}/alice/a1` };
+
+	it("so one person's agents can't approve each other's changes, but the person can", () => {
+		const agents = [cast("alice/a2", `${alice}/alice/a2`), cast("alice/a3", `${alice}/alice/a3`), cast("a4", `${alice}/a4`)];
+		expect(approval({ votes: agents }, head, policy, author)).toEqual({ approved: false, approvals: 0, vetoedBy: [], awaiting: [] });
+		// Alice herself, on the dashboard: her agent's work is hers to review. Once, with her agents.
+		expect(approval({ votes: [...agents, cast("alice", alice)] }, head, policy, author)).toEqual({ approved: true, approvals: 1, vetoedBy: [], awaiting: [] });
+		// Someone else's approval counts too.
+		expect(approval({ votes: [...agents, cast("bob/b1", `${bob}/bob/b1`)] }, head, policy, author)).toMatchObject({ approved: true, approvals: 1 });
+	});
+
+	it("and a person's own change (made as themselves) isn't theirs to approve", () => {
+		expect(approval({ votes: [cast("alice", alice)] }, head, policy, { agent: "alice", by: alice })).toMatchObject({ approved: false, approvals: 0 });
+	});
+
+	it("and another person's agents approve once between them", () => {
+		const votes = { votes: [cast("bob/b1", `${bob}/bob/b1`), cast("bob/b2", `${bob}/bob/b2`), cast("bob", bob)] };
+		expect(approval(votes, head, { required: 2, vetoes: [] }, author)).toMatchObject({ approved: false, approvals: 1 });
+	});
+
+	it("so a role granted to people (as every veto role is by default) is signed off by a person, never an agent", () => {
+		const security = { required: 1, vetoes: ["security"] };
+		expect(holdsRole(security, "security", { reviewer: "bob", by: bob })).toBe(true);
+		expect(holdsRole(security, "security", { reviewer: "bob/b1", by: `${bob}/bob/b1` })).toBe(false);
+		expect(holdsRole(security, "security", { reviewer: "b2", by: `${bob}/b2` })).toBe(false);
+		const votes = { votes: [cast("bob/b1", `${bob}/bob/b1`), cast("bob/b2", `${bob}/bob/b2`, "approve", "security")] };
+		expect(approval(votes, head, security, author)).toMatchObject({ approved: false, awaiting: ["security"], ungranted: ["bob/b2 (security)"] });
+	});
+
+	it("and only a person answers what an agent put to people (ask_human)", () => {
+		const flag = { change: "c", agent: "alice/a1", reason: "a trade-off", at: "2026-10-09T00:00:00.000Z" };
+		const state = (by: string) => ({ votes: [cast("x", by)], flags: [flag] }) as unknown as Votes;
+		expect(openFlag(state(`${bob}/bob/b1`), "c", head)).not.toBeNull();
+		expect(openFlag(state(bob), "c", head)).toBeNull();
+	});
+
+	it("and a pool of one person's agents isn't people, for the warnings", () => {
+		expect(grantWarnings({ required: 1, vetoes: ["security"], grants: { security: [`${bob}/*`] } })).toContainEqual(expect.stringContaining("no person holds security"));
+		expect(grantWarnings({ required: 1, vetoes: ["security"], grants: { security: [`${bob}/*`, bob] } })).toEqual([]);
 	});
 });
 
