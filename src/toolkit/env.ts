@@ -52,6 +52,8 @@ const logs = new Map<string, GitCasLog<unknown>>();
 
 /** How long a kept copy of the claims stays fresh with no write in between. */
 const KEPT_CLAIMS_MS = 30_000;
+/** How long a branch's head stays fresh for the merges watching it. */
+const KEPT_BRANCH_HEAD_MS = 2_000;
 /** How long the open changes' heads stay fresh for next (pushes to forks don't ping, so this is all that ages them). */
 const KEPT_HEADS_MS = 10_000;
 /** How long a record's tip stays kept with no write clearing it (in case a write couldn't). */
@@ -126,6 +128,8 @@ export function toolContextFor(env: Env, by: string | undefined, caller: { agent
 		// The claims for advice, kept in the repo's LiveFeed so a busy repo isn't read whole on every call.
 		keptClaims: (repo, read) => keptRead(env, repo, "claims-advice", KEPT_CLAIMS_MS, read),
 		keptHeads: (repo, read) => keptRead(env, repo, "open-heads", KEPT_HEADS_MS, read),
+		// A branch's head, kept a moment for every merge watching it (see MergeInput.branchHead).
+		branchHead: (repo, branch) => keptRead(env, repo, `head:${branch}`, KEPT_BRANCH_HEAD_MS, () => headOf(env.ARTIFACTS, repo, branch)),
 		// Forks made in the background, paced, before agents need them: the seeds when GitHive starts, an agent's when it registers.
 		prepareForks: async (repo, items) => void (await env.LIVE?.getByName(`repo:${repo}`).queueForks(repo, items === "seeds" ? seedItems() : items.map((agent) => `agent:${agent}`))),
 		// Review holds are a record in Git (see review-holds.ts), like the claims and votes.
@@ -151,7 +155,8 @@ export function toolContextFor(env: Env, by: string | undefined, caller: { agent
 			const fork = (agent: string) => cached(env, repo, `fork:${repo}:${agent}|read`, () => changeRemote(env, repo, agent, "read", 3600));
 			let branch = "main";
 			const runner = lineCheckRunner({
-				log: new GitCasLog<Line>(() => cached(env, repo, `${repo}|write`, () => remoteFor(env.ARTIFACTS, repo, "write", 3600)), repo, lineRef(repo, lineBranch)),
+				// Kept tips and states like every record (see recordsLog): merges waiting in line read it every few seconds.
+				log: recordsLog<Line>(env, repo, lineRef(repo, lineBranch)),
 				main: async () => headOf(env.ARTIFACTS, repo, branch),
 				check: async ({ change, head, ref, agent, source, commands, base, ahead }) => {
 					const remote = await read();

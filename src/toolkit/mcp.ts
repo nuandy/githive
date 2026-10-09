@@ -82,6 +82,8 @@ export interface ToolContext {
 	keptClaims?: (repo: string, read: () => Promise<ClaimsAdvice>) => Promise<ClaimsAdvice>;
 	/** The open changes' pushed heads, by change, kept a few seconds the same way (for next). */
 	keptHeads?: (repo: string, read: () => Promise<Record<string, string | null>>) => Promise<Record<string, string | null>>;
+	/** A branch's head, kept a moment for every merge watching it (see MergeInput.branchHead). */
+	branchHead?: (repo: string, branch: string) => Promise<string | null>;
 	/** Ask for forks to be made in the background: the repo's seeds, or these agents' own (see LiveFeed's fork queue). */
 	prepareForks?: (repo: string, items: "seeds" | string[]) => Promise<void>;
 	/** Review holds, so next doesn't send two agents to a review that needs one (see review-holds.ts). */
@@ -1044,6 +1046,7 @@ async function runTool(name: string, args: Args, ctx: ToolContext): Promise<unkn
 				policy: branchSettings(registry, into).policy,
 				verify: branchSettings(registry, into).verify,
 				runChecks: ctx.runChecks?.(repo, into === branch ? undefined : into),
+				...(ctx.branchHead ? { branchHead: () => ctx.branchHead!(repo, into) } : {}),
 				stamper,
 				stampKey: registry?.stampKey,
 				source: await changeSource(holder ?? agentArg("agent"), "read", change),

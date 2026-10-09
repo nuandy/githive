@@ -68,6 +68,13 @@ export interface MergeInput {
 	agent: string;
 	/** A file as the claims records name it, for a change into a branch other than the project's (see branch-scope.ts). */
 	scope?: (file: string) => string;
+	/**
+	 * The branch's head, as kept a moment for every merge watching it (a crowd
+	 * waiting in line would otherwise list it every few seconds each). Absent:
+	 * listed each time. A head a moment old is safe: a merge pushes by
+	 * compare-and-swap, and tries again when the branch moved.
+	 */
+	branchHead?: () => Promise<string | null>;
 	/** How long to wait for the merges ahead in line to land (TURN_WAIT_MS unless set, as tests do). */
 	turnWaitMs?: number;
 }
@@ -83,7 +90,9 @@ export type MergeOutcome =
  */
 export async function mergeChange(input: MergeInput): Promise<MergeOutcome> {
 	for (let attempt = 1; ; attempt++) {
-		const ws = await Workspace.clone(input.remote, input.branch);
+		// From the branch as kept for the isolate (see Workspace.at): one listing, no clone.
+		const listed = (await headOf(input)) ?? fail409(`there's no branch ${input.branch}`);
+		const ws = await Workspace.at(input.remote, input.branch, listed);
 		const main = await ws.head();
 		const head = await ws.fetch("change", input.source ?? input.remote, `changes/${input.change}`);
 		const files = await ws.changedPaths(await ws.mergeBase(main, head), head);
@@ -209,14 +218,21 @@ export async function mergeChange(input: MergeInput): Promise<MergeOutcome> {
  * or the merge lost its place in line (`inLine`: one ahead left it): then
  * the merge checks again.
  */
+/** The branch's head: as kept for every merge watching it, or listed. */
+const headOf = (input: MergeInput) => (input.branchHead ? input.branchHead() : branchHead(input.remote, input.branch));
+
+const fail409 = (message: string): never => {
+	throw new Error(`[409] ${message}`);
+};
+
 async function awaitTurn(input: MergeInput, tested: { base: string; after: string[] }, inLine?: () => Promise<boolean>): Promise<Workspace | null> {
 	const until = Date.now() + (input.turnWaitMs ?? TURN_WAIT_MS);
 	for (let seen: string | null = null; ; await new Promise((resolve) => setTimeout(resolve, TURN_POLL_MS))) {
 		if (inLine && !(await inLine().catch(() => true))) return null;
-		const now = await branchHead(input.remote, input.branch);
+		const now = await headOf(input);
 		if (now && now !== seen) {
 			seen = now;
-			const ws = await Workspace.clone(input.remote, input.branch);
+			const ws = await Workspace.at(input.remote, input.branch, now);
 			const landed = await landedSince(ws, await ws.head(), tested.base, tested.after.length);
 			if (!landed || landed.some((head, i) => head !== tested.after[i])) return null;
 			if (landed.length === tested.after.length) return ws;
