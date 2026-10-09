@@ -75,8 +75,11 @@ const PUSH_RETRY_MS = 1_500;
 /** Whether a push was refused only because the repo was taking another one. */
 export const pushBusy = (output: string) => /receive_pack_busy|repository is busy|try again later/i.test(output);
 
-/** How many of a batch's forks are fetched at once. */
-const FETCHES_AT_ONCE = 8;
+/**
+ * How many of a batch's forks are fetched at once: each from its own fork, so
+ * no one repo is busier. 8 at a time, a batch of 64 took 84 to 95 s to read.
+ */
+const FETCHES_AT_ONCE = 16;
 /** The platform stops a container left this long, in case GitHive's own stop never comes. */
 const SAFETY_MS = 30 * 60_000;
 /** A container warmed this recently isn't warmed again. */
@@ -646,9 +649,9 @@ done`;
 	 * change's Gate that had to set up from scratch. Returns at once; the
 	 * alarm does the work.
 	 */
-	async warmUp(input: WarmUp & { why?: "checked" | "approved" | "set up" }) {
-		// Without checks, only for landing (see warm): asked for when a merge is near, never at set up, minutes before one.
-		if (!input.checks.length && input.why !== "checked" && input.why !== "approved") return;
+	async warmUp(input: WarmUp & { why?: "claimed" | "checked" | "approved" | "set up" }) {
+		// Without checks, only for landing (see warm): asked for once work starts (a claim), never at set up, minutes before.
+		if (!input.checks.length && input.why === "set up") return;
 		const { why, ...warming } = input;
 		if ((why === "checked" || why === "approved") && (await this.snapshot())) return;
 		await this.ctx.storage.put("warmUp", warming);

@@ -551,7 +551,7 @@ trusted neither with what a change touched nor with the token that writes the
 branch. The push names the commit the branch must still be at
 (`--force-with-lease`): a plain push refuses only what isn't a fast-forward,
 and a change branched from a newer main would make a batch on an older one a
-fast-forward of it. Each fetches a batch's forks 8 at a time, in one
+fast-forward of it. Each fetches a batch's forks 16 at a time, in one
 command, each fetch tried three times: the repo's Gate to read and land it,
 and the batch's check container, which fetches only what it doesn't have yet
 (one at a time, the fetches were most of a big batch's check).
@@ -577,8 +577,11 @@ batch, lands this one first.
 about one check failure per batch (see `batchSize`), and nothing fails a batch
 that isn't checked. At 200 agents with no checks, batches sized for checks (8,
 24, 52) left 130 ready changes waiting. The repo's Gate, which lands it, is
-warmed when a merge is near (a change checked, or approved) with checks or
-without: cold, the first batch also waited for the container and a clone.
+warmed once work starts (a claim) when there are no checks, and when a merge
+is near (a change checked, or approved) either way: cold, the first batch also
+waited for the container and a clone, and warmed only at the first check, it
+still did, the merge coming seconds after. A batch reads the votes on all its
+changes' heads once, then checks each change against its claim 8 at a time.
 
 **A batch's merges hear it landed as soon as it's pushed**, and its claims are
 released once the lease is handed on: a write per change, a few at a time, it

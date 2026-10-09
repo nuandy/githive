@@ -147,8 +147,8 @@ export const ANSWER_WITHIN_MS = 10 * 60_000;
 const ROUNDS = 4;
 /** Who a change's failed checks are recorded as: a rejection of the head they failed on, which sends it back to its agent. */
 export const CHECKS_REVIEWER = "githive-checks";
-/** How many changes of a batch are checked against their claims and votes at once. */
-const VALIDATIONS_AT_ONCE = 4;
+/** How many changes of a batch are checked against their claims at once (their votes are read once, for all). 4 at a time, each reading its votes too, took 20 to 28 s for 64. */
+const VALIDATIONS_AT_ONCE = 8;
 /** How long a batch read ahead is worth reusing: its changes' heads are compared again before it is. */
 const AHEAD_KEPT_MS = 10 * 60_000;
 /** The most a batch read ahead keeps: a change with more files than this is read again, and none past the size. */
@@ -409,9 +409,11 @@ async function landBatch(input: MergeInput, landing: Landing, holding: Holding, 
 		await holding.step(STEP_MS.records);
 		const own = read[0];
 		if ("error" in own) return { ok: false, reasons: [`${input.change} couldn't be read: ${own.error}`] };
-		// Each against its claim and votes: a few at once (a Worker request holds only so many connections open).
+		// Each against its claim and votes: a few at once (a Worker request holds only so many connections open), the votes
+		// on all their heads read once.
+		const seen = await input.votes.readFor(read.flatMap((r) => ("error" in r ? [] : [r.head])));
 		const checked = await atMost(VALIDATIONS_AT_ONCE, read, async (r, i) => {
-			if (!("error" in r)) return validated(input, { ...sources[i], head: r.head, files: r.files, mine: i === 0 });
+			if (!("error" in r)) return validated(input, { ...sources[i], head: r.head, files: r.files, mine: i === 0 }, seen);
 			console.error(`${r.change} can't land with the others now: ${r.error}`);
 			return null;
 		});
@@ -649,12 +651,13 @@ async function readAhead(input: MergeInput, landing: Landing, batchGit: BatchGit
  * own agent would merge it: not over a reviewer who asked for changes. Reads only the
  * records; whether it merges cleanly is the batch's to find.
  */
-async function validated(input: MergeInput, c: BatchSource & { head: string; files: string[]; mine: boolean }): Promise<{ ok: true; ready: Ready } | Refused> {
+async function validated(input: MergeInput, c: BatchSource & { head: string; files: string[]; mine: boolean }, seen?: VotesView): Promise<{ ok: true; ready: Ready } | Refused> {
 	const { head, files } = c;
 	// The same files as the claims records name them: in the branch's own part, for a branch other than the project's.
 	const scoped = input.scope ? files.map(input.scope) : files;
-	// The claims that bear on these files (the change's own, and any covering them), and the votes on its head.
-	const [claims, votes] = await Promise.all([input.store.readScope(c.change, scoped), input.votes.readFor([head])]);
+	// The claims that bear on these files (the change's own, and any covering them), and the votes on its head (as read
+	// for its whole batch, if they were).
+	const [claims, votes] = await Promise.all([input.store.readScope(c.change, scoped), seen ?? input.votes.readFor([head])]);
 
 	const reasons: string[] = [];
 	const own = claims.claims.find((x) => x.change === c.change);
