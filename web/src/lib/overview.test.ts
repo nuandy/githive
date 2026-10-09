@@ -24,10 +24,11 @@ describe("a claim's lamp", () => {
 		expect(lampOf(claim("a", ["x/"]), { now: soon })).toBe("building");
 		expect(lampOf(claim("a", ["x/"], pushed), { now: soon })).toBe("review");
 		expect(lampOf(claim("a", ["x/"], approved), { now: soon })).toBe("approved");
-		const line = { entries: [{ id: "1", change: "a", head: "h", agent: "a", since: "", active: "", status: "checking" as const }] };
-		expect(lampOf(claim("a", ["x/"], approved), { line, now: soon })).toBe("checking");
-		expect(lampOf(claim("a", ["x/"], approved), { line: { entries: [{ ...line.entries[0], status: "passed" }] }, now: soon })).toBe("passed");
-		expect(lampOf(claim("a", ["x/"], { ...approved, attention: { reason: "?", agent: "a", at: "" } }), { line, now: soon })).toBe("attention");
+		const landing = { checking: { base: "m", since: "", changes: [{ change: "a", head: approved.head, agent: "a" }] } };
+		expect(lampOf(claim("a", ["x/"], approved), { landing, now: soon })).toBe("checking");
+		// Only its head as it's being checked: a newer push waits for review again.
+		expect(lampOf(claim("a", ["x/"], { ...pushed, head: "b".repeat(40) }), { landing, now: soon })).toBe("review");
+		expect(lampOf(claim("a", ["x/"], { ...approved, attention: { reason: "?", agent: "a", at: "" } }), { landing, now: soon })).toBe("attention");
 		expect(lampOf(claim("a", ["x/"], { ...pushed, approval: { approved: false, approvals: 0, required: 1, vetoedBy: ["security"] } }), { now: soon })).toBe("attention");
 	});
 
@@ -38,9 +39,9 @@ describe("a claim's lamp", () => {
 		const votes = [{ commit: pushed.head, reviewer: "r", role: "review", verdict: "approve" as const, evidence: "", at: "2026-10-09T00:00:00.000Z" }];
 		expect(lampOf(claim("a", ["x/"], approved), { votes, now: hours(1) })).toBe("approved");
 		expect(lampOf(claim("a", ["x/"], approved), { votes, now: hours(3) })).toBe("abandoned");
-		// Failed in the line, like check-cost's l2: handed back to its agent, then abandoned.
-		const left = [{ change: "a", head: pushed.head, how: "failed" as const, at: "2026-10-09T00:00:00.000Z" }];
-		expect(lampOf(claim("a", ["x/"], pushed), { line: { entries: [], left }, now: hours(3) })).toBe("abandoned");
+		// Its checks failed, which rejects its head: handed back to its agent, then abandoned.
+		const failed = [{ commit: pushed.head, reviewer: "githive-checks", role: "checks", verdict: "reject" as const, evidence: "", at: "2026-10-09T00:00:00.000Z" }];
+		expect(lampOf(claim("a", ["x/"], pushed), { votes: failed, now: hours(3) })).toBe("abandoned");
 	});
 
 	it("is counted per lamp", () => {

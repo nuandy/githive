@@ -100,6 +100,7 @@ export async function readMainMerges(remote: Remote, baseline: string, branch: s
 			votesTip: trailer(commit.message, "GitHive-Votes"),
 			testedOn: trailer(commit.message, "GitHive-Tested"),
 			testedAfter: trailer(commit.message, "GitHive-Tested-After")?.split(/\s+/).filter(Boolean),
+			testedWith: trailer(commit.message, "GitHive-Tested-With")?.split(/\s+/).filter(Boolean),
 			by: trailer(commit.message, "GitHive-By"),
 			stamp: trailer(commit.message, "GitHive-Stamp"),
 			reverts: trailer(commit.message, "GitHive-Reverts"),

@@ -29,7 +29,7 @@ const snapshot: RepoSnapshot = {
 	claims: [claim("on-main"), claim("on-feature", { into: "feature/checkout" }), claim("another-feature", { into: "feature/checkout" })],
 	votes: [],
 };
-const api = { tree: async () => ({ ref: "main", commit: "c", files: [], truncated: false }), line: async () => ({ tip: null, entries: [], left: [] }), makeBranch: async () => ({ name: "x" }) };
+const api = { tree: async () => ({ ref: "main", commit: "c", files: [], truncated: false }), landing: async () => ({ branch: "main", checking: null, recent: [] }), makeBranch: async () => ({ name: "x" }) };
 
 describe("the overview of one branch", () => {
 	it("offers every branch changes land on, and counts only the claims on the one shown", () => {

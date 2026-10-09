@@ -250,9 +250,8 @@ code.track__detail {
 	border: 2px solid var(--lamp);
 }
 
-/* In the line: ringed in ink, like the lamps on the track. */
-.cell.cell--checking,
-.cell.cell--passed {
+/* Being checked to land: ringed in ink, like the lamps on the track. */
+.cell.cell--checking {
 	border: 2px solid var(--text);
 }
 

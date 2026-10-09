@@ -1,5 +1,6 @@
 import { DurableObject } from "cloudflare:workers";
 import { makeAgentFork, makeSeed } from "./toolkit/env";
+import { type Checking, dropLease, emptyLanding, type LandingState, renewLease, type Settled, settleOutcomes, takeTurn } from "./toolkit/landing";
 
 // One per repo ("repo:<repo>"), for the dashboard:
 //
@@ -16,6 +17,11 @@ import { makeAgentFork, makeSeed } from "./toolkit/env";
 // background (one at a time), and pages are told when it's ready. Views also
 // age out, for what reaches Git without a ping. Git stays the truth: a view
 // is only a copy of what was read from it.
+//
+// Landing. Each branch's lease (which merge is landing a batch into it), the
+// batch being checked, and what changes came to lately, for the merges
+// waiting on a batch (see toolkit/landing.ts). A hint like the views: the
+// branch and the audit are the truth, and losing it costs a check.
 
 interface View {
 	/** The view as JSON, as served. */
@@ -204,6 +210,49 @@ export class LiveFeed extends DurableObject<Env> {
 		if (rest.length) await this.ctx.storage.setAlarm(Date.now() + 1_000);
 	}
 
+	/** What `change` at `head` came to in `branch`, or whether `holder` holds its lease now (see Landing.turn). */
+	async landingTurn(branch: string, holder: string, change: string, head: string, since: number, ttlMs: number) {
+		const taken = takeTurn(await this.landing(branch), holder, change, head, since, ttlMs);
+		if ("lease" in taken.turn && taken.turn.lease) await this.keepLanding(branch, taken.state);
+		return taken.turn;
+	}
+
+	async renewLanding(branch: string, holder: string, ttlMs: number) {
+		const renewed = renewLease(await this.landing(branch), holder, ttlMs);
+		if (renewed.held) await this.keepLanding(branch, renewed.state);
+		return renewed.held;
+	}
+
+	async dropLanding(branch: string, holder: string) {
+		await this.keepLanding(branch, dropLease(await this.landing(branch), holder));
+		this.broadcast("landing");
+	}
+
+	async landingChecking(branch: string, batch: Checking | null) {
+		await this.keepLanding(branch, { ...(await this.landing(branch)), checking: batch });
+		this.broadcast("landing");
+	}
+
+	async landingSettled(branch: string, outcomes: Settled[]) {
+		if (!outcomes.length) return;
+		await this.keepLanding(branch, settleOutcomes(await this.landing(branch), outcomes));
+		this.broadcast("landing");
+	}
+
+	/** What's being checked into `branch` now, and what changes came to lately. */
+	async landingView(branch: string) {
+		const { checking, recent } = await this.landing(branch);
+		return { checking, recent };
+	}
+
+	private async landing(branch: string) {
+		return (await this.ctx.storage.get<LandingState>(`landing:${branch}`)) ?? emptyLanding();
+	}
+
+	private async keepLanding(branch: string, state: LandingState) {
+		await this.ctx.storage.put(`landing:${branch}`, state);
+	}
+
 	/** Forget the kept views: the repo was deleted. */
 	async clearViews() {
 		const kept = await this.ctx.storage.list({ prefix: "view:" });
@@ -211,7 +260,8 @@ export class LiveFeed extends DurableObject<Env> {
 		const records = await this.ctx.storage.list({ prefix: "record:" });
 		const tips = await this.ctx.storage.list({ prefix: "tip:" });
 		const forks = await this.ctx.storage.list({ prefix: "forks:" });
-		await this.ctx.storage.delete([...kept.keys(), ...building.keys(), ...records.keys(), ...tips.keys(), ...forks.keys()]);
+		const landing = await this.ctx.storage.list({ prefix: "landing:" });
+		await this.ctx.storage.delete([...kept.keys(), ...building.keys(), ...records.keys(), ...tips.keys(), ...forks.keys(), ...landing.keys()]);
 	}
 
 	private async writes() {

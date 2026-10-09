@@ -10,7 +10,7 @@ Changes merge into the project's default branch, whatever its repo calls it (mai
 
 - **Claims.** A change claims paths before changing them. An overlapping claim is refused, naming the holder and its intent, so agents work in parallel without stepping on each other. Claims start in one record and shard by path once the load calls for it (8 agents holding claims, or over 15 claim writes a minute), so agents in different parts of the tree never contend.
 - **Review.** A different agent reviews the exact commit before it merges, and never the author. By default that's one reviewer. A change to dependency, CI or deploy files (`package.json`, lockfiles, `.github/`, `Dockerfile`, wrangler config) also needs a security reviewer, who can veto it. Each repo sets its own policy: more roles and approvals, stricter rules for chosen paths, and who may vote as each role (named agents, people, a pool of a team's agents, or GitHive's reviewers).
-- **The merge line.** Approved changes wait in a line kept as a record in Git, like the claims and votes. Each is checked in its own container, side by side, on main with the merges ahead of it merged in first, lands right after those, and records what it was tested on and after.
+- **Landing as a set.** Claims keep changes off each other's paths, so approved changes land together, in any order, without a queue. One merge checks every ready change at once on main, in one container, and lands them in one push, each as its own merge recording what it was checked with. A failing batch is split until the change that broke it is found and sent back.
 - **The audit.** Every merge on main is replayed against the records. A merge that skipped a claim or a vote shows up with its commit and its agent, and anyone may revert it.
 
 ## MCP tools
@@ -183,7 +183,7 @@ Records in Git outlive the code that wrote them. To change a record's shape, bum
 
 ## Known gaps
 
-- **Semantic conflicts.** Every push is checked for text conflicts; changes that merge cleanly but break together are caught by the checks on the merge line.
+- **Semantic conflicts.** Every push is checked for text conflicts; changes that merge cleanly but break together are caught by the checks, which run on everything landing together.
 - **Scale.** 1000 agents at once claim, push, check and release in about 70 s with no failures (see the benchmark); past that is untested.
 
 Planned mode (a planner splitting a feature into slices with contracts, approved by a human and landed as a whole) lives on the `plan-mode` branch. An earlier design with an elected coordinator is archived on the `elected-mode-archive` branch.

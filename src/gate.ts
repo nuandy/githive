@@ -1,15 +1,20 @@
 import { DurableObject } from "cloudflare:workers";
 import { type InstanceSize, type SetupSnapshot, WORKDIR, bootContainer, clip, gitWithToken, installToolchains, outOfMemory, run } from "./container";
 import { statusOf } from "./errors";
+import { BOT } from "./git";
 import { DEPENDENCIES, DEPENDENCY_FILES } from "./toolchains";
+import { type MergeClaim, mergeMessage } from "./toolkit/merge-commit";
+import { makeStamper } from "./toolkit/stamp";
 
-// The project's checks, run before a merge lands: the change merged onto the
-// project's branch (after the merges ahead of it in line) and the checks run
-// on the combined code, in a container. No model is involved.
+// The project's checks, run before changes land: a batch of changes merged
+// onto the project's branch, in order, and the checks run on the combined
+// code, in a container. No model is involved.
 //
-// A repo's Gate keeps its line of merges waiting for checks and runs them in
-// batches, itself and the Gates beside it each checking one (see
-// toolkit/check-line.ts), in containers it keeps warm: dependencies stay
+// A change's Gate checks the batches that end in it (see toolkit/merge.ts).
+// The repo's own Gate reads a batch's changes and lands them (inspectBatch,
+// landBatch): it never runs a change's code, so it can be trusted with what a
+// change touched and with the token that writes the project's branch. Each
+// runs in a container started from the repo's snapshot: dependencies stay
 // installed between runs, and an install is skipped while what it depends on
 // is unchanged. Python, Go and Rust are installed when the repo uses them
 // (see toolchains.ts), with their dependencies.
@@ -42,7 +47,7 @@ interface CheckPlan {
 	base: { remote: string; token: string };
 	/** Where the change is: its branch in its author's fork. */
 	fork: { remote: string; token: string; ref: string };
-	/** Merges ahead in the line: merged in, in order, before the commit checked (see check-line.ts). */
+	/** The batch's other changes: merged in, in order, before the commit checked (see toolkit/merge.ts). */
 	ahead?: { head: string; remote: string; token: string; ref?: string }[];
 	checks: string[];
 }
@@ -61,6 +66,10 @@ export function withInstall(checks: string[], project: { packageJson: boolean; n
 }
 /** How long a container stays up after its last run: long enough for a check that follows at once (a merge checking again, say). */
 export const GRACE_MS = 60_000;
+/** How long the repo's own Gate keeps a batch it read fetched, for its landing after the batch's checks. */
+const BATCH_HOLD_MS = 5 * 60_000;
+/** How many of a batch's forks are fetched at once. */
+const FETCHES_AT_ONCE = 8;
 /** The platform stops a container left this long, in case GitHive's own stop never comes. */
 const SAFETY_MS = 30 * 60_000;
 /** A container warmed this recently isn't warmed again. */
@@ -87,6 +96,14 @@ export interface WarmUp {
 	branch?: string;
 	base: { remote: string; token: string };
 	checks: string[];
+}
+
+/** A change of a batch, and where its branch lives: a fork, and the token to read it. */
+export interface BatchSource {
+	change: string;
+	remote: string;
+	token: string;
+	ref: string;
 }
 
 /** A merge's checks: the project's branch and checks, and the change's fork and commit. */
@@ -119,9 +136,9 @@ export class Gate extends DurableObject<Env> {
 	}
 
 	/**
-	 * Check one commit now: merge `head` onto `baseHead` (after the merges
-	 * ahead) and run `checks`, returning the result. A change's own Gate
-	 * (repo:<repo>:change:<change>) runs its checks in the line (see line.ts).
+	 * Check one commit now: merge `head` onto `baseHead` (after the batch's
+	 * other changes, `ahead`) and run `checks`, returning the result. The
+	 * Gate of a batch's last change (repo:<repo>:change:<change>) runs them.
 	 */
 	checkCommit(input: ChangeCheck & { baseHead: string; ahead?: CheckPlan["ahead"] }): Promise<GateResult> {
 		const plan: CheckPlan = { ...(input.repo ? { repo: input.repo } : {}), baseHead: input.baseHead, branch: input.branch, base: input.base, fork: input.fork, ...(input.ahead?.length ? { ahead: input.ahead } : {}), checks: input.checks };
@@ -135,6 +152,134 @@ export class Gate extends DurableObject<Env> {
 		});
 	}
 
+	/**
+	 * Read a batch's changes, in this, the repo's own Gate: each change's head
+	 * now (its branch's tip) and the files it changed since it left
+	 * `baseHead`, or why it couldn't be read. Never in a change's Gate: one
+	 * that ran a change's code can't be trusted to say what a change touched.
+	 */
+	inspectBatch(input: { repo: string; branch: string; base: { remote: string; token: string }; baseHead: string; changes: BatchSource[] }): Promise<({ change: string; head: string; files: string[] } | { change: string; error: string })[]> {
+		return this.inTurn(async () => {
+			const container = this.landingContainer(input.repo);
+			await this.fetchBatch(container, input);
+			const failed = await this.fetchChanges(container, input.changes.map((c, k) => ({ k, ...c })));
+			// Each change's head, then the files it changed since it left main, NUL-separated (any name survives); one command for all.
+			const fetched = input.changes.map((_, k) => k).filter((k) => !failed.has(k));
+			const script = fetched
+				.map((k) => `if h=$(git rev-parse refs/remotes/batch-${k}/head) && b=$(git merge-base ${input.baseHead} "$h"); then printf '%s %s\\0' ${k} "$h"; git diff --name-only --no-renames -z "$b" "$h"; else printf '%s -\\0' ${k}; fi; printf '\\0'`)
+				.join("\n");
+			const listed = new Map<number, { head: string; files: string[] }>();
+			if (fetched.length) {
+				const r = await run(container, ["bash", "-c", script]);
+				for (const record of r.output.split("\0\0").filter(Boolean)) {
+					const [first, ...files] = record.split("\0");
+					const [k, head] = first.split(" ");
+					if (head && head !== "-") listed.set(Number(k), { head, files: files.filter(Boolean) });
+				}
+			}
+			// The repo's own Gate keeps them fetched for the batch's landing, after its checks.
+			await this.ctx.storage.put("holdUntil", Date.now() + BATCH_HOLD_MS);
+			return input.changes.map((c, k) => {
+				const read = listed.get(k);
+				if (read) return { change: c.change, ...read };
+				return { change: c.change, error: failed.has(k) ? `fetch of its branch failed: ${failed.get(k)}` : "its branch couldn't be read" };
+			});
+		});
+	}
+
+	/**
+	 * Land a batch, in this, the repo's own Gate: each change merged onto
+	 * `baseHead` in order as its own merge commit (its trailers from `claimed`,
+	 * its base the commit before it, stamped by GitHive as `by`), then pushed
+	 * to the branch in one push, so the branch is never partway through a
+	 * batch. "moved" if the branch isn't at `baseHead` any more.
+	 */
+	landBatch(input: { repo: string; branch: string; base: { remote: string; token: string }; baseHead: string; merges: (BatchSource & { head: string; claimed: Omit<MergeClaim, "base"> })[]; by?: string }): Promise<{ commits: string[] } | { moved: true } | { error: string }> {
+		return this.inTurn(async () => {
+			const container = this.landingContainer(input.repo);
+			await this.fetchBatch(container, input);
+			// Read for this batch, they're here already (see inspectBatch): only what's missing is fetched.
+			const missing = await run(container, ["bash", "-c", input.merges.map((m, k) => `git cat-file -e ${m.head}^{commit} 2>/dev/null || echo ${k}`).join("\n")]);
+			const fetch = missing.output.split("\n").filter(Boolean).map(Number);
+			const failed = await this.fetchChanges(container, fetch.map((k) => ({ k, ...input.merges[k] })));
+			for (const [k, why] of failed) return { error: `fetch of ${input.merges[k].change} failed: ${why}` };
+			const absent = await run(container, ["bash", "-c", input.merges.map((m) => `git cat-file -e ${m.head}^{commit} 2>/dev/null || echo ${m.change}`).join("\n")]);
+			if (absent.output.trim()) return { error: `not on their branches: ${absent.output.trim().split("\n").join(", ")}` };
+			await run(container, ["bash", "-lc", `git merge --abort 2>/dev/null; git checkout -q -f --detach ${input.baseHead} && git clean -fdq`]);
+			const stamper = this.env.STAMP_KEY && input.by ? await makeStamper(this.env.STAMP_KEY, input.by) : undefined;
+			const as = ["-c", `user.name=${BOT.name}`, "-c", `user.email=${BOT.email}`];
+			for (const m of input.merges) {
+				// The commit before it (its merge's base), then the merge itself, uncommitted: one command.
+				const merged = await run(container, ["bash", "-c", `base=$(git rev-parse HEAD) && git merge -q --no-ff --no-commit ${m.head} >/tmp/merge.out 2>&1 && echo "$base" || { echo CONFLICT; git diff --name-only --diff-filter=U; cat /tmp/merge.out; git merge --abort; exit 1; }`]);
+				const base = merged.output.trim();
+				if (merged.exitCode !== 0) return { error: `merging ${m.change} onto the batch failed: ${clip(merged.output.replace(/^CONFLICT\n/, ""), 500)}` };
+				// Always a merge commit, never a fast-forward: the merge's trailers are what the audit reads.
+				const committed = await run(container, ["git", ...as, "commit", "-q", "--no-verify", "-F", "-"], WORKDIR, await mergeMessage({ ...m.claimed, base }, stamper));
+				if (committed.exitCode !== 0) return { error: `committing ${m.change}'s merge failed: ${clip(committed.output, 500)}` };
+			}
+			const commits = (await run(container, ["git", "rev-list", "--reverse", "--first-parent", `${input.baseHead}..HEAD`])).output.split("\n").filter(Boolean);
+			// Pushed only if the branch is still exactly at the base. A plain push isn't enough: it only refuses a push that
+			// isn't a fast-forward, and a change branched from a newer main would make this one a fast-forward of it.
+			const pushed = await gitWithToken(container, input.base.token, ["push", "-q", `--force-with-lease=refs/heads/${input.branch}:${input.baseHead}`, input.base.remote, `HEAD:refs/heads/${input.branch}`]);
+			if (pushed.exitCode !== 0) return /rejected|non-fast-forward|fetch first|stale info/i.test(pushed.output) ? { moved: true } : { error: `the push failed: ${clip(pushed.output, 500)}` };
+			await this.ctx.storage.delete("holdUntil");
+			return { commits };
+		});
+	}
+
+	/** The container a batch is read and landed in: this Gate's, which must be the repo's own. */
+	private landingContainer(repo: string) {
+		const container = this.ctx.container;
+		if (!container) throw new Error("no container is configured for Gate");
+		if (!this.ownsSnapshot(repo)) throw new Error("only the repo's own Gate reads and lands batches: a change's Gate runs that change's code");
+		return container;
+	}
+
+	/** Ready to read or land a batch on `baseHead`: running, the branch fetched, and no hook (none is ever written here) can run. */
+	private async fetchBatch(container: Container, input: { repo: string; branch: string; base: { remote: string; token: string }; baseHead: string }) {
+		await this.prepare(container, input.base, input.repo);
+		// No hook can run (none is ever written here), and every merge and commit is GitHive's: a container has no git identity of its own.
+		await run(container, ["bash", "-c", `git config core.hooksPath /dev/null && git config user.name "${BOT.name}" && git config user.email "${BOT.email}"`]);
+		const fetched = await gitWithToken(container, input.base.token, ["fetch", "-q", input.base.remote, `${input.branch}:refs/remotes/base/${input.branch}`, "--force"]);
+		if (fetched.exitCode !== 0) throw new Error(`fetch of the project's ${input.branch} failed: ${clip(fetched.output, 2_000)}`);
+		if ((await run(container, ["git", "cat-file", "-e", `${input.baseHead}^{commit}`])).exitCode !== 0) throw new Error(`${input.branch} at ${input.baseHead} isn't in the project`);
+	}
+
+	/**
+	 * Fetch each change's branch into refs/remotes/batch-<k>/head, a few at a
+	 * time, each tried three times: one command for them all. Returns the ones
+	 * that failed, and why. The tokens go in on stdin, not on the command line.
+	 */
+	private async fetchChanges(container: Container, changes: { k: number; remote: string; token: string; ref: string }[]): Promise<Map<number, string>> {
+		if (!changes.length) return new Map();
+		const script = [
+			"fetch_one() {",
+			'  for try in 1 2 3; do',
+			'    if out=$(git -c gc.auto=0 -c "http.extraHeader=Authorization: Bearer $4" fetch -q --no-write-fetch-head "$2" "$3:refs/remotes/batch-$1/head" --force 2>&1); then return 0; fi',
+			"    sleep $((try * 2))",
+			"  done",
+			'  printf "%s %s\\n" "$1" "$(printf %s "$out" | tr "\\n" " " | cut -c1-300)" > "/tmp/batch-failed-$1"',
+			"}",
+			"rm -f /tmp/batch-failed-*",
+			"while IFS=$'\\t' read -r k remote ref token; do",
+			'  fetch_one "$k" "$remote" "$ref" "$token" &',
+			`  while [ "$(jobs -rp | wc -l)" -ge ${FETCHES_AT_ONCE} ]; do wait -n; done`,
+			"done",
+			"wait",
+			"cat /tmp/batch-failed-* 2>/dev/null; rm -f /tmp/batch-failed-*; true",
+		].join("\n");
+		const stdin = changes.map((c) => [c.k, c.remote, c.ref, c.token.split("?expires=")[0]].join("\t")).join("\n") + "\n";
+		const r = await run(container, ["bash", "-c", script], WORKDIR, stdin);
+		const failed = new Map<number, string>();
+		for (const line of r.output.split("\n").filter(Boolean)) {
+			const space = line.indexOf(" ");
+			const k = Number(line.slice(0, space));
+			if (Number.isInteger(k)) failed.set(k, line.slice(space + 1));
+		}
+		if (r.exitCode !== 0 && !failed.size) for (const c of changes) failed.set(c.k, clip(r.output, 300));
+		return failed;
+	}
+
 	/** Make sure an alarm comes by `at` (an earlier one stays). */
 	private async alarmBy(at: number) {
 		const current = await this.ctx.storage.getAlarm();
@@ -144,7 +289,7 @@ export class Gate extends DurableObject<Env> {
 	/** Plan the container's stop: an alarm a grace after its last run; none while it isn't running. */
 	private async scheduleStop() {
 		if (!this.ctx.container?.running) return;
-		await this.alarmBy(((await this.ctx.storage.get<number>("lastActive")) ?? Date.now()) + GRACE_MS);
+		await this.alarmBy(Math.max(((await this.ctx.storage.get<number>("lastActive")) ?? Date.now()) + GRACE_MS, (await this.ctx.storage.get<number>("holdUntil")) ?? 0));
 	}
 
 	async alarm() {
@@ -166,12 +311,13 @@ export class Gate extends DurableObject<Env> {
 		const container = this.ctx.container;
 		if (!container?.running) return;
 		if (this.active > 0) return this.alarmBy(Date.now() + GRACE_MS);
-		const at = ((await this.ctx.storage.get<number>("lastActive")) ?? 0) + GRACE_MS;
+		// A batch read and not landed yet keeps it up a while longer: its landing finds the changes already fetched.
+		const at = Math.max(((await this.ctx.storage.get<number>("lastActive")) ?? 0) + GRACE_MS, (await this.ctx.storage.get<number>("holdUntil")) ?? 0);
 		if (at > Date.now()) return this.alarmBy(at);
 		await container.destroy("nothing to check");
 		const started = await this.ctx.storage.get<{ at: number; repo: string | null; own: boolean; size: InstanceSize }>("started");
 		if (started) console.log(JSON.stringify({ event: "check container stopped", repo: started.repo, gate: started.own ? "repo" : "change", size: started.size, seconds: Math.round((Date.now() - started.at) / 1000) }));
-		await this.ctx.storage.delete(["prepared", "started"]);
+		await this.ctx.storage.delete(["prepared", "started", "holdUntil"]);
 	}
 
 	private async check(head: string, plan: CheckPlan): Promise<GateResult> {
@@ -199,12 +345,12 @@ export class Gate extends DurableObject<Env> {
 		if (known.exitCode !== 0) throw new Error(`the approved commit ${head} is not on the change's branch`);
 		for (const [k, ahead] of (plan.ahead ?? []).entries()) {
 			const f = await gitWithToken(container, ahead.token, ["fetch", "-q", ahead.remote, `${ahead.ref ?? branch}:refs/remotes/ahead-${k}/head`, "--force"]);
-			if (f.exitCode !== 0) throw new Error(`fetch of a merge ahead in line failed: ${clip(f.output, 2_000)}`);
+			if (f.exitCode !== 0) throw new Error(`fetch of a change in the batch failed: ${clip(f.output, 2_000)}`);
 		}
 
 		// A clean checkout of the base; ignored files (node_modules) survive `git clean -fd`.
 		await run(container, ["bash", "-lc", `git merge --abort 2>/dev/null; git checkout -q -f --detach ${plan.baseHead} && git clean -fdq`]);
-		// Merge the merges ahead in line, in order, then the change, onto the base.
+		// Merge the batch's other changes, in order, then the last, onto the base.
 		for (const commit of [...(plan.ahead ?? []).map((a) => a.head), head]) {
 			const merge = await run(container, ["git", "-c", "user.name=gate", "-c", "user.email=gate@githive.invalid", "merge", "-q", "--no-edit", commit]);
 			if (merge.exitCode !== 0) {

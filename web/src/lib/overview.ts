@@ -1,10 +1,10 @@
-import type { RepoLine, RepoSnapshot } from "../api";
+import type { RepoLanding, RepoSnapshot } from "../api";
 import { abandoned } from "../../../src/toolkit/staleness";
 import { claimAgent, claimTitle } from "./claimStatus";
 import { normalizePath } from "./tree";
 
-// The repo's overview, drawn as a signal box's track plan: the line of merges
-// into the project's branch, and the territory (the tree) with the parts
+// The repo's overview, drawn as a signal box's track plan: the changes landing
+// on the project's branch, and the territory (the tree) with the parts
 // agents hold lit by where their change is. A lamp means the same thing
 // everywhere: amber while work is under way, green once it passed, red when
 // it failed or waits on a person.
@@ -12,47 +12,43 @@ import { normalizePath } from "./tree";
 type Claim = RepoSnapshot["claims"][number];
 
 /** Where a claim's change is, most urgent first (the order a cell held by several shows). */
-export const LAMPS = ["attention", "abandoned", "checking", "passed", "approved", "review", "building"] as const;
+export const LAMPS = ["attention", "abandoned", "checking", "approved", "review", "building"] as const;
 export type Lamp = (typeof LAMPS)[number];
 
 /** How each lamp reads, in a sentence's words. */
 export const LAMP_WORDS: Record<Lamp, string> = {
 	attention: "needs a person",
 	abandoned: "abandoned, free to take",
-	checking: "checking in line",
-	passed: "passed, landing",
+	checking: "being checked to land",
 	approved: "approved",
 	review: "waiting for review",
 	building: "being built",
 };
 
 /** Which of the three lamp colors a state shows. */
-export const lampColor = (lamp: Lamp): "red" | "amber" | "green" => (lamp === "attention" ? "red" : lamp === "passed" || lamp === "approved" ? "green" : "amber");
+export const lampColor = (lamp: Lamp): "red" | "amber" | "green" => (lamp === "attention" ? "red" : lamp === "approved" ? "green" : "amber");
 
-/** What else a lamp reads: the line, the votes (for when a change's turn came back to its agent), and the time. */
+/** What else a lamp reads: what's being checked to land, the votes (for when a change's turn came back to its agent), and the time. */
 export interface LampContext {
-	line?: Pick<RepoLine, "entries"> & Partial<Pick<RepoLine, "left">>;
+	landing?: Pick<RepoLanding, "checking">;
 	votes?: RepoSnapshot["votes"];
 	now?: number;
 }
 
-/** How a line's leaving hands a change back to its agent (as the toolkit counts it). */
-const LEFT_TO_AGENT = new Set(["failed", "gave up", "went quiet"]);
-
 /**
  * Where a claim's change is: waiting on a person, abandoned by its agent (see
- * staleness.ts: the toolkit frees it the same way), in line, approved, pushed
- * for review, or still being built.
+ * staleness.ts: the toolkit frees it the same way), being checked to land,
+ * approved, pushed for review, or still being built. Failed checks reject its
+ * head, which hands it back to its agent like any rejection.
  */
 export function lampOf(claim: Claim, context: LampContext = {}): Lamp {
 	if (claim.attention || claim.approval.vetoedBy.length) return "attention";
-	const { line, votes = [], now = Date.now() } = context;
-	const inLine = line?.entries.find((e) => e.change === claim.change);
-	const left = claim.head ? line?.left?.filter((l) => l.change === claim.change && l.head === claim.head && LEFT_TO_AGENT.has(l.how)).at(-1) : undefined;
+	const { landing, votes = [], now = Date.now() } = context;
+	const checking = !!claim.head && !!landing?.checking?.changes.some((c) => c.change === claim.change && c.head === claim.head);
 	const onHead = claim.head ? votes.filter((v) => v.commit === claim.head && v.reviewer !== claim.agent) : [];
-	const signs = { active: claim.active, head: claim.head, votes: onHead.map((v) => ({ verdict: v.verdict, at: v.at })), approved: claim.approval.approved, inLine: !!inLine, asked: false, ...(left ? { leftLineAt: left.at } : {}) };
+	const signs = { active: claim.active, head: claim.head, votes: onHead.map((v) => ({ verdict: v.verdict, at: v.at })), approved: claim.approval.approved, landing: checking, asked: false };
 	if (abandoned(signs, now).abandoned) return "abandoned";
-	if (inLine) return inLine.status === "passed" ? "passed" : "checking";
+	if (checking) return "checking";
 	if (claim.approval.approved) return "approved";
 	return claim.head ? "review" : "building";
 }

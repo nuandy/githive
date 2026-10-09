@@ -13,9 +13,10 @@ Here main means the project's default branch, whatever its repo calls it (main,
 master, ...): `start` reads it from the repo and records it.
 
 Nothing outside Git decides anything, and nothing outside Git orders the
-agents' work: the line of merges and the review holds are records in Git like
-the claims and votes. Durable Objects only keep the dashboard's views and run
-containers. The
+agents' work: the review holds are records in Git like the claims and votes,
+and what's ready to land is read from the votes. Durable Objects only keep the
+dashboard's views, run containers, and keep each branch's landing lease, which
+says which merge is checking a batch and orders nothing (see Landing). The
 cost is that every call reads and writes its state in Git (see Benchmark).
 
 ## The conventions
@@ -235,14 +236,15 @@ abandoned claim is freed by the next agent that needs its paths (`next` hands
 its work out again), or by anyone with `release` and `stale: true`.
 
 Abandoned is decided by whose turn it is (`staleness.ts`), not by quiet alone.
-An agent that pushed and waits for review, whose change is in the merge line,
-or that asked a person, is waiting its turn, and keeps its paths however long
-that takes. Only a change waiting on its own agent can be abandoned: nothing
-pushed for 30 minutes, or no answer for 2 hours after changes were asked for,
-its checks failed in the line, or it was approved and not merged. The clock
+An agent that pushed and waits for review, whose change is being checked to
+land, or that asked a person, is waiting its turn, and keeps its paths however
+long that takes. Only a change waiting on its own agent can be abandoned:
+nothing pushed for 30 minutes, or no answer for 2 hours after changes were
+asked for (failed checks reject its head too), or it was approved and not
+merged. The clock
 starts at the later of the agent's last claim and what handed the turn back. A
 push moves the turn on (a new head waits for review). The toolkit reads the
-change's head, its votes and the line fresh before releasing; the dashboard
+change's head, its votes and the batch being checked fresh before releasing; the dashboard
 shows the same lamp from the same rule.
 
 The audit flags a claim released by someone else while still in use. It checks
@@ -258,7 +260,7 @@ A change lands on the project's branch unless its claim names another with
 `into`: a feature branch, a release branch. Everything after the claim reads
 the branch from it: `credentials` says to start from it, `check` tests
 against it, `review_access` diffs against it, and `merge` lands on it,
-through that branch's own line of merges. A change lands on one branch:
+with that branch's other ready changes. A change lands on one branch:
 claiming it again keeps it there, and naming another is refused.
 
 Claims are per branch: `lib/auth/` on `main` and on `release/2.x` are
@@ -296,7 +298,7 @@ A finished branch merges into another as one change: a claim with `source`
 (the branch to merge) and `into`. Its claim is what the source changed since
 it left the target: the files, or their folders, deepest first, when there
 are more than a claim holds. The toolkit pushes the source's tip to the
-claiming agent's fork as the change's branch, so review, `check`, the line,
+claiming agent's fork as the change's branch, so review, `check`, landing,
 `merge`, `status`, `next`, abandoned claims and the audit treat it as any
 change, and the merge commit's second parent is the source's tip: the target
 gets the whole branch in one merge. The claim holds those paths on the target
@@ -382,8 +384,8 @@ it off.
 3. it merges into main without conflicts. A conflict comes back as the files,
    and what to do: merge main into the branch, resolve inside the claim, push,
    and get the new commit approved;
-4. the project's checks pass on main with the change merged in, run in a
-   container (see The line of merges).
+4. the project's checks pass on main with the change merged in, with the
+   other changes landing in the same batch, run in a container (see Landing).
 
 Then it makes a merge commit, never a fast-forward, since the merge's trailers
 are what the audit reads:
@@ -392,16 +394,20 @@ are what the audit reads:
 - `GitHive-Claims`: the claims tips it checked;
 - `GitHive-Votes`: the votes tips it counted;
 - `GitHive-Tested`: the main its checks passed on;
-- `GitHive-Tested-After`: the merges ahead in line its checks merged in first;
+- `GitHive-Tested-With`: every change its checks ran with, in landing order,
+  when it landed in a batch with others (merges from before batches have
+  `GitHive-Tested-After` instead: the merges ahead in line);
 - `GitHive-By` and `GitHive-Stamp`: who asked, and GitHive's stamp over all of
   the above and the two commits the merge joins.
 
-If main moved before the push landed, it checks again on top of it, up to
-three times. After the push it releases the claim, naming the merge.
+If main moved before the batch's push landed, it checks again on top of it,
+up to three times. After the push it releases the claims, each naming its
+merge.
 
 Anyone may merge a change whose conventions hold. It merges under its claim's
 agent, and the stamp says who asked. This is how GitHive's reviewers merge the
-builder's changes.
+builder's changes, and how a batch lands every ready change, whichever merge
+holds the lease.
 
 `check` is the early version, any time before merging: does the change still
 merge cleanly into main, and which files are outside its claim. It doesn't
@@ -425,48 +431,96 @@ from the top like `site/*.html`), or `[]` to always run them. `merge` says
 when it skipped them, and the audit applies the same rule with the list in
 force when the change merged (`check-scope.ts`).
 
-## The line of merges
+## Landing
 
 Every merge must be tested on exactly the code it lands on (the audit checks
 `GitHive-Tested`). Checking merges one at a time costs a check run each, in a
-row (about 90 s each on Express). Checking them side by side on one main gains
-nothing: the first to land makes the others' results stale.
+row (about 90 s each on Express). A queue that checks each merge on the ones
+ahead of it costs a check run each too, and a record every merge writes
+several times while it waits: with 200 agents merging, the writes to that
+record were what failed, and nothing landed.
 
-So merges wait in a line, kept as a record in Git (`refs/notes/githive-line/<repo>`,
-`line.ts`) and written by compare-and-swap by whichever merge is acting, as
-the claims are. Nobody runs it. The record holds the merges in line, in
-landing order, and its tip: the main a merge joining now is checked on (the
-last merge landed from the line, or main as it was when the line was empty).
+So there's no queue. Claims keep the changes in flight off each other's
+paths, so the ready ones merge in any order to the same code: what lands is a
+set, not a sequence. A change is ready once it's approved, which the votes
+already record, so asking to merge writes nothing new.
 
-A merge joins at the end and is checked on the tip with the merges ahead of
-it merged in first, in its own container (its change's Gate, started from
-the repo's snapshot), side by side with the others. Its result says what it
-was tested on and after; it waits until exactly those merges have landed,
-then lands, listing their heads in `GitHive-Tested-After`, and moves the tip
-to its merge commit. Nothing waits for a batch: every merge in line is
-checked at once, up to 8 in line (more wait for room, up to 5 minutes). A
-merge that fails, gives up, or goes quiet for 2 minutes (one in line shows
-it's still at it every 30 s) leaves the line and takes every merge behind it
-along: they were checked assuming it would land, and check again. A merge
-waiting for its turn sees at once that it lost its place. A merge whose
-merges ahead don't land within 5 minutes, or whose main went another way,
-checks again. A change that joins again gives up its earlier place. Ten
-merges ready at once are checked side by side, about one check run's time
-for all ten.
+A merge first checks its own change (its claim, its approvals, a clean merge
+onto main) and refuses at once if it isn't ready. Then it takes the branch's
+lease, or waits for whoever holds it. The merge holding the lease lands a
+batch: every change ready to land into the branch (claims in force whose
+dependencies have merged, with heads approved and not sent back), oldest
+claims first, as many as the batch size, each checked the same way. The checks run once, on
+main with the whole batch merged in, in the Gate of the batch's last change.
+Passing, each change becomes its own merge commit on main, one after another,
+and the batch lands in one push, so main is never code that wasn't checked.
+Each records the main the checks ran on (`GitHive-Tested`) and the changes
+checked together (`GitHive-Tested-With`, in landing order). Then their claims
+are released, each naming its merge.
 
-The audit checks each merge as landed (`testedAsLanded`): exactly the merges
-its trailer lists, in that order, and nothing else, came between the main its
-checks ran on and the merge.
+The batch size keeps the branch's check runs fewest: about one failure per
+batch. A batch of `n` with a share `p` of changes failing fails with
+probability `1 − (1 − p)^n`, and finding the culprit costs about `2·log₂ n`
+more runs, so the best size is near `1/p`. `p` is the share of the branch's
+recent outcomes (the last 200, kept with the lease) whose checks failed,
+counted with a prior of 1 in 20, so a new branch starts at 20. Between 4 and
+64: a branch where nothing fails takes 64 at a time, a flaky one 4.
 
-The line decides nothing: it says where each merge is checked, and the
-merge's trailers say what it was tested on and after, which the audit checks.
-Each agent's merge lands itself.
+A batch that fails is split, and its halves are checked side by side. Each
+half was checked on main alone, so only one passing part can land as checked
+(the bigger); the rest wait for the next batch. A change that fails alone is
+checked once more (a flaky run isn't a verdict), then put out:
+`githive-checks` rejects its head, with the failing command's output as
+evidence. That sends it back to its agent through `next` like any rejection,
+and keeps it out of later batches until it has a new commit: `merge` refuses
+that commit at once, with the failure, rather than check it a third time.
+
+A batch's git work runs in the repo's own Gate's container, with real git on
+a disk: fetching each change, listing the files it changed since it left
+main, making the merge commits (stamped there: the Gate is the same Worker,
+with GitHive's key) and pushing them. The Worker only reads the records:
+claims, votes and approvals. Done in the Worker, in memory, one request did
+every change's share of the work, and a batch of 20 ran past its 30 s of CPU.
+It's the repo's own Gate, never a change's: a change's Gate runs that change's
+code (its installs and tests), which could tamper with git there, so it's
+trusted neither with what a change touched nor with the token that writes the
+branch. The push names the commit the branch must still be at
+(`--force-with-lease`): a plain push refuses only what isn't a fast-forward,
+and a change branched from a newer main would make a batch on an older one a
+fast-forward of it.
+
+The lease is a hint, kept in the repo's LiveFeed with what changes came to
+lately (`landing.ts`): it keeps two merges from checking the same changes side
+by side, and the merges waiting on a batch read what their change came to
+there, never Git. No clock decides how long a merge waits: it waits for as
+long as another merge holds the lease, and takes the lease once it's free or
+ran out, and its own batch always takes its own change. Oldest claims go
+first, so every batch brings a waiting change closer. The merge holding the
+lease keeps it as each step starts, for as long as that step can take: a few
+minutes to read or land a batch in the Gate, two to read or write records,
+and for a check run, ten minutes per command (the Gate stops a command
+there) with two more for an install and setting up. A step stuck past its
+bound lets the lease run out, and a waiting merge takes over. A merge hands
+the lease on once its own change has settled, after at most 4 batches.
+Main's compare-and-swap keeps the branch right: a batch whose push finds main
+moved checks again on top of it, up to three times. Asked again about a
+change that already landed, `merge` answers with its commit. Each branch has its own lease: a
+change lands on the branch its claim names, with that branch's other ready
+changes.
+
+The audit checks each batch as landed (`landedAsBatch`): on the main its
+checks ran on, exactly the changes `GitHive-Tested-With` names, in that
+order, one after another, and nothing else. A change checked alone carries no
+`GitHive-Tested-With`, and lands right on the main its checks ran on. Merges
+from before batches, checked in a line after the merges ahead of them
+(`GitHive-Tested-After`), are audited as they were (`testedAsLanded`).
 
 **Check containers.** A Gate's container starts small (1 vCPU, 3 GiB: memory
 is paid for while it runs, CPU only while it works) and moves to 2 vCPU, 6 GiB
 for good once a repo's checks are killed for memory, checking again there.
-Each change has its own Gate (`repo:<repo>:change:<change>`), which runs its
-merge's checks and stops its container a minute after the last run; a
+Each change has its own Gate (`repo:<repo>:change:<change>`), which runs the
+checks of batches that end in it and stops its container a minute after the
+last run; a
 30-minute inactivity timeout is only the backstop. The repo's own Gate never
 runs a change's checks: it warms on main to keep the repo's snapshot.
 
@@ -498,7 +552,7 @@ and `settings`, after `check` or an approving vote while the repo has no
 usable snapshot, and when a change's Gate had to set up from scratch or
 install what the snapshot didn't have; it saves a new snapshot only when one
 is due. A container warmed in the last minute isn't warmed again.
-`GET /repos/<owner>/<name>/line` shows the line and the snapshot.
+`GET /repos/<owner>/<name>/landing?branch=` shows the batch being checked into a branch, what changes came to lately, and the snapshot.
 
 ## Audit
 
@@ -886,11 +940,15 @@ one RepoIndex; the records in Git are what count.
 - **Holds are hints.** A lost hold means at worst two reviewers on one change.
 - **Reverts are clean only.** A reported commit whose files changed since is
   reverted by hand.
-- **Merges wait for the line.** A merge waits up to 5 minutes for the merges
-  ahead of it to land before it checks again, and up to 5 minutes for room
-  in a full line (8 merges).
-- **One quiet merge holds up those behind it** for up to 2 minutes, until
-  it's taken to have gone and they check again.
+- **A failing batch lands one part.** Its halves are checked on main side by
+  side, and only the bigger passing part lands as checked: the other waits for
+  the next batch, and is checked again.
+- **A stuck merge holds the lease** until the step it's stuck in runs past its
+  bound (up to 50 minutes for a check run of three commands), then a waiting
+  merge takes over.
+- **The lease is outside Git.** Losing it (the LiveFeed reset) costs a batch
+  checked twice, never a wrong landing: main's compare-and-swap and the audit
+  don't depend on it.
 - **Without a stamp key** nothing is stamped or verified, and the audit takes
   names as written.
 

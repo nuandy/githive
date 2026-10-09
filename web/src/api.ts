@@ -83,13 +83,17 @@ export interface RepoSnapshot {
 	audit?: RepoAudit;
 }
 
-/** A repo's line of merges into its branch (GET /repos/:repo/line): a record in Git, in landing order. */
-export interface RepoLine {
-	/** The commit a merge joining now is checked on. */
-	tip: string | null;
-	entries: { id: string; change: string; head: string; agent: string; since: string; active: string; status: "checking" | "passed" }[];
-	/** The last merges to leave it, newest last. */
-	left: { change: string; head: string; how: "landed" | "failed" | "gave up" | "went quiet" | "behind one that left"; at: string; commit?: string }[];
+/**
+ * What's landing on a branch (GET /repos/:repo/landing): the changes being
+ * checked together now, and what changes came to lately. Approved changes
+ * land as a set, checked once together, in one push.
+ */
+export interface RepoLanding {
+	branch: string;
+	/** The batch being checked now, on `base`. */
+	checking: { base: string; since: string; changes: { change: string; head: string; agent: string }[] } | null;
+	/** The changes settled last, newest last: landed (as `commit`), or put out because their checks failed. */
+	recent: { change: string; head: string; agent: string; how: "landed" | "failed"; at: string; commit?: string; reasons?: string[] }[];
 }
 
 /** A person's vote from the dashboard. */
@@ -269,9 +273,9 @@ export const api = {
 	summaries: () => call<Summaries>("GET", "/summaries"),
 	snapshot: (repo: string) => call<RepoSnapshot>("GET", `/repos/${repoPath(repo)}`),
 	audit: (repo: string) => call<RepoAudit>("GET", `/repos/${repoPath(repo)}/audit`),
-	/** The repo's line of merges into its branch, or into another. */
-	line: (repo: string, branch?: string) => call<RepoLine>("GET", `/repos/${repoPath(repo)}/line${branch ? `?branch=${encodeURIComponent(branch)}` : ""}`),
-	/** A person merges a change: through its branch's line, as its agent, stamped with the person's name. */
+	/** What's landing on a branch of the repo. */
+	landing: (repo: string, branch: string) => call<RepoLanding>("GET", `/repos/${repoPath(repo)}/landing?branch=${encodeURIComponent(branch)}`),
+	/** A person merges a change: it lands with the branch's other ready changes, as its agent, stamped with the person's name. */
 	merge: (repo: string, change: string) => call<{ ok: boolean; commit?: string; reasons?: string[]; conflicts?: string[] }>("POST", `/repos/${repoPath(repo)}/changes/${encodeURIComponent(change)}/merge`, {}),
 	/** A person makes a branch changes can land on, from another. */
 	makeBranch: (repo: string, name: string, from: string) => call<{ name: string; made?: string }>("POST", `/repos/${repoPath(repo)}/branches`, { name, from }),

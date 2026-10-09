@@ -1,7 +1,7 @@
 import { useState } from "react";
 import "./RepoPage.css";
 import type { VoteApi } from "./VoteForm";
-import type { ChangeHistory, RepoAccess, RepoLine, RepoSnapshot } from "../api";
+import type { ChangeHistory, RepoAccess, RepoLanding, RepoSnapshot } from "../api";
 import { canVote, canWrite } from "../lib/permissions";
 import { messageOf } from "./Confirm";
 import { BranchRules } from "./BranchRules";
@@ -27,8 +27,8 @@ export type RepoView =
 /** Everything a repo's pages call. The dashboard's api object satisfies it; tests pass stand-ins. */
 export type RepoPageApi = CodeApi &
 	VoteApi & {
-		/** The line of merges into a branch, for the overview (stand-ins may leave it out). */
-		line?: (repo: string, branch?: string) => Promise<RepoLine>;
+		/** What's landing on a branch, for the overview (stand-ins may leave it out). */
+		landing?: (repo: string, branch: string) => Promise<RepoLanding>;
 		/** People who can write: make a branch, merge a change. */
 		makeBranch?: (repo: string, name: string, from: string) => Promise<{ name: string; made?: string }>;
 		merge?: (repo: string, change: string) => Promise<{ ok: boolean; commit?: string; reasons?: string[]; conflicts?: string[] }>;

@@ -17,8 +17,10 @@ import { initialFiles, parseInit, writeFirstCommit } from "./repo-init";
 import { Timing } from "./timing";
 import { defaultBranch } from "./git";
 import { changeRepoName, toolContextFor } from "./toolkit/env";
-import { type Line, lineRef } from "./toolkit/line";
+import type { Registry } from "./toolkit/claims";
 import { GitCasLog } from "./record-log";
+import { projectBranch } from "./project-branch";
+import { rpc } from "./rpc";
 
 export { Builder } from "./builder";
 export { Reviewer } from "./reviewer";
@@ -84,7 +86,7 @@ app.get("/api", (c) =>
 			"GET  /repos/:owner/:name  (claims and votes, from Git); /access (your permission)",
 			"GET  /repos/:owner/:name/changes/:change  (one change's history)",
 			"POST /repos/:owner/:name/changes/:change/votes {role, verdict, evidence}  (a person's vote; review)",
-			"GET  /repos/:owner/:name/audit | /line | /tree?ref= | /file?path=&ref= | /live (WebSocket)",
+			"GET  /repos/:owner/:name/audit | /landing?branch= | /tree?ref= | /file?path=&ref= | /live (WebSocket)",
 			"PATCH /repos/:owner/:name {visibility}, GET|PUT|DELETE /repos/:owner/:name/collaborators[/:handle]  (admin)",
 			"DELETE /repos/:owner/:name  (admin)",
 			"Access admins: POST /repos/import, /repos/_/<id>/..., GET /admin/repos, POST /admin/repos/:id/adopt {owner, name}, GET|POST|DELETE /admin/invites",
@@ -259,14 +261,16 @@ app.get("/repos/:owner/:name/changes/:change", async (c) => {
 	const change = c.req.param("change");
 	return keptView(c, `repo:${repo.id}`, `change:${change}`, 60_000, (timing) => changeHistory({ ...toolContext(c.env, c.get("principal")), timing }, repo.id, change));
 });
-// The repo's line of merges (a record in Git: see toolkit/line.ts), and the snapshot its check containers start from.
-app.get("/repos/:owner/:name/line", async (c) => {
+// What's being checked to land into a branch of the repo now, and what changes came to lately (kept in its
+// LiveFeed: see toolkit/landing.ts), with the snapshot its check containers start from.
+app.get("/repos/:owner/:name/landing", async (c) => {
 	const repo = await routeRepo(c, "read");
-	const read = await remoteFor(c.env.ARTIFACTS, repo.id, "read", 3600);
-	// ?branch=<name>: the line into another branch than the project's.
-	const branch = c.req.query("branch")?.trim() || undefined;
-	const [line, snapshot] = await Promise.all([new GitCasLog<Line>(async () => read, repo.id, lineRef(repo.id, branch)).read(), c.env.GATE.getByName(`repo:${repo.id}`).snapshotInfo()]);
-	return c.json({ ...(line?.commit.state ?? { tip: null, entries: [], left: [] }), snapshot });
+	// ?branch=<name> (the dashboard always says); absent, the project's, from its claims registry.
+	const branch =
+		c.req.query("branch")?.trim() ||
+		projectBranch((await new GitCasLog<Registry>(() => remoteFor(c.env.ARTIFACTS, repo.id, "read", 3600), repo.id, `refs/notes/githive-claims/${repo.id}`).read())?.commit.state);
+	const [landing, snapshot] = await Promise.all([rpc(c.env.LIVE.getByName(`repo:${repo.id}`).landingView(branch)), rpc(c.env.GATE.getByName(`repo:${repo.id}`).snapshotInfo())]);
+	return c.json({ branch, ...landing, snapshot });
 });
 app.get("/repos/:owner/:name/audit", async (c) => {
 	const repo = await routeRepo(c, "read");
@@ -274,13 +278,13 @@ app.get("/repos/:owner/:name/audit", async (c) => {
 });
 app.get("/repos/:owner/:name/builders/:change", async (c) => {
 	const repo = await routeRepo(c, "read");
-	return c.json(await c.env.BUILDER.getByName(changeRepoName(repo.id, c.req.param("change"))).state());
+	return c.json(await rpc(c.env.BUILDER.getByName(changeRepoName(repo.id, c.req.param("change"))).state()));
 });
 // A hosted reviewer's state, by the commit it reviews (the vote's commit) and its role.
 app.get("/repos/:owner/:name/reviewers/:change/:head/:role", async (c) => {
 	const repo = await routeRepo(c, "read");
 	const { change, head, role } = c.req.param();
-	return c.json(await c.env.REVIEWER.getByName(reviewerName(changeRepoName(repo.id, change), role, head)).state());
+	return c.json(await rpc(c.env.REVIEWER.getByName(reviewerName(changeRepoName(repo.id, change), role, head)).state()));
 });
 // Live updates for a repo: a WebSocket on its feed, which pings when its records change.
 app.get("/repos/:owner/:name/live", async (c) => {
@@ -332,7 +336,7 @@ app.on(["GET", "DELETE"], "/mcp", (c) => c.body(null, 405, { Allow: "POST" }));
 // background, a few per request.
 app.get("/summaries", async (c) => {
 	const index = repoIndex(c.env);
-	const [listed, visible] = await Promise.all([index.summaries(), visibleRepos(c.env, c.get("principal"))]);
+	const [listed, visible] = await Promise.all([rpc(index.summaries()), visibleRepos(c.env, c.get("principal"))]);
 	const summaries = new Map(listed.repos.map((r) => [r.repo, r]));
 	// Every repo the caller can see, named as people name it, with its counts if GitHive has started on it.
 	const repos = visible.map((r) => ({ repo: r.fullName, id: r.id, since: summaries.get(r.id)?.since ?? r.createdAt, summary: summaries.get(r.id)?.summary ?? null, started: summaries.has(r.id) }));

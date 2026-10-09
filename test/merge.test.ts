@@ -13,8 +13,8 @@ import { startGitServer, type GitServer } from "./helpers/git-server";
 
 // The toolkit's merge: it test-merges the change into main first and reports a
 // conflict as something the agent can act on, and it runs the project's checks
-// on main plus the change before merging. The check runner is injected here;
-// live, it is the Gate's container.
+// on main plus the change (and whatever else is ready to land with it) before
+// merging. The check runner is injected here; live, it is the Gate's container.
 
 let server: GitServer;
 let work: string;
@@ -71,12 +71,13 @@ describe("merge", { timeout: 60_000 }, () => {
 		expect(await merge("a-1")).toEqual({ ok: false, reasons: [`${head} has 0 of 1 approvals from reviewers other than its author`] });
 	});
 
-	it("runs the checks on main plus the change, and refuses to merge when they fail", async () => {
+	it("runs the checks on main plus the change, and refuses to merge when they fail twice", async () => {
 		const head = await readyChange("a-1", { "src/a.txt": "a\n" });
 		const main = server.git("rev-parse", "main").trim();
 		const failing: CheckRunner = vi.fn(async () => ({ passed: false, results: [{ command: "npm test", exitCode: 1, output: "1 failing" }] }));
 		expect(await merge("a-1", failing)).toEqual({ ok: false, reasons: ["checks failed: npm test exited 1"], checks: [{ command: "npm test", exitCode: 1, output: "1 failing" }] });
-		expect(failing).toHaveBeenCalledWith({ change: "a-1", base: main, branch: "main", head, ref: "changes/a-1", commands: ["npm test"], agent: "agent-a-1" });
+		expect(failing).toHaveBeenCalledWith({ base: main, branch: "main", changes: [{ change: "a-1", head, ref: "changes/a-1", agent: "agent-a-1" }], commands: ["npm test"] });
+		expect(failing).toHaveBeenCalledTimes(2);
 		expect(server.git("rev-parse", "main").trim()).toBe(main);
 	});
 

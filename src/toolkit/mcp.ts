@@ -11,13 +11,13 @@ import { checkChange } from "./check";
 import { claimStore, type ClaimStore } from "./claim-store";
 import { changeSettings, recordBranch, registerAgent, shardClaims, shardingReason, startRepo, type ClaimRecord, type Registry } from "./claims";
 import { readMainMerges, readRecordHistory, readRefHistories, readShardHistories } from "./git-records";
-import { type CheckRunner, mergeChange } from "./merge";
+import { type BatchGit, type Candidate, type CheckRunner, mergeChange } from "./merge";
+import type { Landing, LandingView } from "./landing";
 import { revertViolation } from "./revert";
 import type { Stamper } from "./stamp";
 import { SENSITIVE_PATHS, approval, countedVotes, DEFAULT_GRANT, effectivePolicy, grantWarnings, openFlag, shardVotes, votesShardingReason, type ReviewPolicy, type VoteRecord, type Votes } from "./votes";
 import { VOTE_BUCKETS, type VoteStore, voteStore, votesPrefix } from "./vote-store";
 import { addWork, holdKey, type NextStep, nextFor, ROLE_WAIT_MS, type Work, waitingRoleReviews, workId } from "./work";
-import { type Line, lineRef } from "./line";
 import { abandoned, BUILDING_IDLE_MS, type ChangeSigns } from "./staleness";
 import { claimInto, isReservedPath, presentClaim, scopeFile, scopePaths } from "./branch-scope";
 import { BRANCH_PATTERN, type BranchRule, settingsForBranch } from "./branch-rules";
@@ -46,9 +46,12 @@ export interface ToolContext {
 	head: (repo: string, branch: string) => Promise<string>;
 	/** A project repo's default branch, where its HEAD points (main, master, ...); without it, main. */
 	defaultBranch?: (repo: string) => Promise<string>;
-	/** Runs a repo's checks on its branch plus a change (live, the Gate's container). */
-	/** Checks in the repo's line into `branch` (absent: the project's branch). */
-	runChecks?: (repo: string, branch?: string) => CheckRunner;
+	/** Runs a repo's checks on its branch plus a batch of changes (live, the Gate's container). */
+	runChecks?: (repo: string) => CheckRunner;
+	/** Where a batch's git work runs (live, the repo's own Gate's container); absent, in memory. */
+	batchGit?: (repo: string) => BatchGit;
+	/** Who's landing a batch into a repo's branch, and what changes came to (live, the repo's LiveFeed); absent, each merge only knows its own. */
+	landing?: (repo: string, branch: string) => Landing;
 	/** Stamps what this caller writes with their verified identity (GitHive's key), and the agent name their key is for; without it, nothing is stamped. */
 	stamper?: (agent?: string) => Promise<Stamper | undefined>;
 	/** The caller's agent key (register), from the X-GitHive-Agent-Key header. */
@@ -128,8 +131,8 @@ Work that depends on other unmerged work goes on a feature branch, and the proje
 2. Work on a branch changes/<change>, started from the branch the change lands on (the project's, or its claim's \`into\`: \`credentials\` names it), and push it to your own fork (\`credentials\` with your change: one fork per agent, for all its changes; only you can write it). The project's branch (\`start\` names it: main, master, ...) is written only through the toolkit.
 3. Reviewers get the change's code with \`review_access\` (read-only: its branch in the author's fork, and the project to diff against), then \`vote\` on the exact commit they reviewed. A change merges with the policy's approvals, including every veto role's, and no veto; a veto role counts only from whoever \`start\` granted it (by default people and GitHive's reviewers), so \`register\` with your key to vote as one. Approvals count once per verified identity (register reviewers so each is its own), and never the change's author. \`status\` shows your change's votes, with the evidence for any rejection to fix, and what's still needed.
 4. Run \`check\` after you push: it test-merges your change with the branch it lands on and lists files outside your claim, so you hear about problems before merging.
-5. \`merge\` merges your branch with trailers recording the claims and votes it checked, then releases your claim. Merge by hand only with the same trailers.
-6. Claiming again (same paths) keeps your claim active. A claim is freed only when its change waits on its own agent and gets no answer: 30 minutes with nothing pushed, or 2 hours after changes were asked for, its checks failed in the merge line, or it was approved and not merged. Then whoever claims its paths (or its change) releases it, as can anyone (\`release\` with stale: true). A change waiting for review, in the merge line, or on a person is never freed.
+5. \`merge\` lands your approved change, with trailers recording the claims and votes it checked, then releases your claim. It lands together with every other approved change into the same branch, checked once as a batch, and returns when yours has landed or been sent back (its checks failed: \`next\` shows the output). Merge by hand only with the same trailers.
+6. Claiming again (same paths) keeps your claim active. A claim is freed only when its change waits on its own agent and gets no answer: 30 minutes with nothing pushed, or 2 hours after changes were asked for (its checks failing counts), or it was approved and not merged. Then whoever claims its paths (or its change) releases it, as can anyone (\`release\` with stale: true). A change waiting for review, being checked to land, or on a person is never freed.
 7. Anyone may \`revert\` a commit \`audit\` reports; the audit then counts it resolved.
 8. Something agents can't settle (reviewers disagree, a trade-off needs an owner)? \`ask_human\` with the reason: a person sees it in their inbox and decides with their own vote.
 9. \`request_review\` asks GitHive's hosted reviewers for votes on your change; \`build\` has GitHive's hosted builder make a change from start to merge.
@@ -143,7 +146,7 @@ const TOOL_LIST = [
 	{ name: "credentials", description: "Git access. With your change: a write token for its own fork, where its branch changes/<change> lives. Without: read access to the project repo.", inputSchema: { type: "object", properties: { repo: str, change: str }, required: ["repo"] } },
 	{ name: "claims", description: "The claims in force: who holds which paths, and why.", inputSchema: { type: "object", properties: { repo: str }, required: ["repo"] } },
 	{ name: "claim", description: "Claim paths for your change (again to extend it, or to keep it active). Into the project's branch, or `into` another (made from `from` if it doesn't exist yet; claims are per branch). `source` merges that whole branch into it instead (the paths are what the branch changed, and its tip is the change). `after` names changes it depends on: it merges only once they have merged into the same branch. Refused, naming the holder, if another claim on that branch overlaps; a claim in the way that its agent has abandoned (see release) is released as stale instead.", inputSchema: { type: "object", properties: { repo: str, change: str, agent: str, paths: { type: "array", items: str }, intent: str, into: str, from: str, after: { type: "array", items: str }, source: str }, required: ["repo", "change", "agent", "intent"] } },
-	{ name: "release", description: "Release a claim: yours, or with stale: true another agent's it has abandoned: its change waits on that agent, unanswered for 30 minutes with nothing pushed, or 2 hours after changes were asked for, a failed check in the merge line, or approval without a merge. Never one waiting for review, in the merge line, or on a person.", inputSchema: { type: "object", properties: { repo: str, change: str, agent: str, reason: str, stale: { type: "boolean" } }, required: ["repo", "change", "agent"] } },
+	{ name: "release", description: "Release a claim: yours, or with stale: true another agent's it has abandoned: its change waits on that agent, unanswered for 30 minutes with nothing pushed, or 2 hours after changes were asked for, failed checks, or approval without a merge. Never one waiting for review, being checked to land, or on a person.", inputSchema: { type: "object", properties: { repo: str, change: str, agent: str, reason: str, stale: { type: "boolean" } }, required: ["repo", "change", "agent"] } },
 	{ name: "next", description: "What you should do next, for any agent without a set role: merge your change if it's approved, revise it if a reviewer asked for changes, finish it if nothing is pushed; else review a change that's waiting (never your own, and a role that can block only if you hold it); else build a piece of the backlog nobody has taken; else wait. Says how to do it.", inputSchema: { type: "object", properties: { repo: str, agent: str }, required: ["repo", "agent"] } },
 	{ name: "add_work", description: "Add a piece of work to the repo's backlog, for next to hand to an agent: a title, what it should do (intent), and the paths it's likely to touch. Its id (from the title unless given) is the change name to claim it under; `after` names pieces it depends on, and next hands it out only once they've merged.", inputSchema: { type: "object", properties: { repo: str, title: str, intent: str, paths: { type: "array", items: str }, after: { type: "array", items: str }, id: str, agent: str }, required: ["repo", "title", "intent", "agent"] } },
 	{ name: "review_access", description: "Read access to a change you'll review: a read-only token for the author's fork, the change's branch (changes/<change>) and its pushed head, and read access to the project to diff against. Anyone may review; each grant is logged.", inputSchema: { type: "object", properties: { repo: str, change: str }, required: ["repo", "change"] } },
@@ -427,51 +430,42 @@ async function changeStatus(ctx: ToolContext, repo: string, registry: Registry |
 	return { head, votes: cast, approval: { ...outcome, required }, ...(hosted ? { hosted } : {}) };
 }
 
-/** How a line's leaving hands a change back to its agent (see staleness.ts): it didn't land and its agent has to act. */
-const LEFT_TO_AGENT = new Set(["failed", "gave up", "went quiet"]);
-
 /**
  * What's known of a change for whose turn it is: its head, the votes on it
  * that count (`counted`, stamps already checked), a question waiting
- * (`record`: the votes record, for its flags), and the line.
+ * (`record`: the votes record, for its flags), and the batch being checked to land into its branch.
  */
-export function changeSigns(input: { claim: ClaimRecord; head: string | null; counted: VoteRecord[]; record: Pick<Votes, "votes" | "flags">; line?: Line | null; policy: ReviewPolicy }): ChangeSigns {
+export function changeSigns(input: { claim: ClaimRecord; head: string | null; counted: VoteRecord[]; record: Pick<Votes, "votes" | "flags">; landing?: Pick<LandingView, "checking"> | null; policy: ReviewPolicy }): ChangeSigns {
 	const { claim, head } = input;
 	const counted = head ? input.counted.filter((v) => v.commit === head && v.reviewer !== claim.agent) : [];
 	const outcome = head ? approval({ votes: counted }, head, input.policy, { agent: claim.agent, ...(claim.by ? { by: claim.by } : {}) }, claim.paths) : undefined;
-	const left = head ? input.line?.left.filter((l) => l.change === claim.change && l.head === head && LEFT_TO_AGENT.has(l.how)).at(-1) : undefined;
 	return {
 		active: claim.active,
 		head,
 		votes: counted.map((v) => ({ verdict: v.verdict, at: v.at })),
 		approved: !!outcome?.approved,
 		vetoed: !!outcome?.vetoedBy.length,
-		inLine: !!input.line?.entries.some((e) => e.change === claim.change),
+		landing: !!head && !!input.landing?.checking?.changes.some((c) => c.change === claim.change && c.head === head),
 		asked: !!openFlag(input.record, claim.change, head),
-		...(left ? { leftLineAt: left.at } : {}),
 	};
 }
 
 /**
  * Whether a claim is abandoned on its agent's own turn, as the toolkit decides
  * it when a claim is in the way or asked to be released as stale: its head as
- * its fork has it now, the votes on it, and the line, read fresh (a release
+ * its fork has it now, the votes on it, and the batch being checked into its branch, read fresh (a release
  * can't be undone).
  */
 function abandonedRule(ctx: ToolContext, repo: string, registered: Registry | null | undefined, votes: VoteStore): Abandoned {
-	let line: Promise<Line | null> | undefined;
 	return async (claim) => {
-		line ??= (async () => {
-			const log = recordLog<Line>(ctx, repo, lineRef(repo));
-			return ((await (log.readFresh?.() ?? log.read()))?.commit.state ?? null) as Line | null;
-		})().catch(() => null);
 		const head = await changeSourceFor(ctx, repo)(claim.agent, "read", claim.change)
 			.then((fork) => branchHead(fork, `changes/${claim.change}`))
 			.catch(() => null);
 		const view = await votes.readFor(head ? [head] : []);
 		const counted = head ? await countedVotes(view.votes.filter((v) => v.commit === head), registered?.stampKey) : [];
 		const shown = presentClaim(claim, projectBranch(registered));
-		const signs = changeSigns({ claim: shown, head, counted, record: view, line: await line, policy: branchSettings(registered, shown.into).policy });
+		const landing = await ctx.landing?.(repo, shown.into ?? projectBranch(registered)).view().catch(() => null);
+		const signs = changeSigns({ claim: shown, head, counted, record: view, landing, policy: branchSettings(registered, shown.into).policy });
 		const outcome = abandoned(signs, Date.now());
 		return { abandoned: outcome.abandoned, why: outcome.waiting.why };
 	};
@@ -481,7 +475,7 @@ function abandonedRule(ctx: ToolContext, repo: string, registered: Registry | nu
  * A change that merges branch `source` into `into` whole: the files `source`
  * changed since it left `into`, as a claim (folders, when there are many: see
  * claimCovering), and its tip, which the change pushes to its agent's fork as
- * its branch, so review, check, the line and merge treat it as any change.
+ * its branch, so review, check and merge treat it as any change.
  */
 async function branchMerge(ctx: ToolContext, repo: string, source: string, into: string) {
 	if (source === into) throw new Error(`[400] a change can't merge ${into} into itself`);
@@ -675,7 +669,7 @@ export async function makeBranch(ctx: ToolContext, repo: string, input: { name: 
 
 /**
  * A person merging a change from the dashboard: the same merge an agent asks
- * for (through the branch's line, with its checks), as the change's agent,
+ * for (landing with the branch's other ready changes, checked), as the change's agent,
  * stamped with the person who asked.
  */
 export async function mergeAsPerson(ctx: ToolContext, repo: string, change: string, person: string) {
@@ -839,6 +833,18 @@ async function runTool(name: string, args: Args, ctx: ToolContext): Promise<unkn
 			)
 		).filter((w): w is string => !!w);
 	const changeSource = changeSourceFor(ctx, repo);
+	/** A claim's pushed head, from its agent's fork (null: nothing pushed). */
+	const pushedHead = (claim: ClaimRecord) => changeSource(claim.agent, "read", claim.change).then((fork) => branchHead(fork, `changes/${claim.change}`)).catch(() => null);
+	/**
+	 * Open changes' pushed heads, as kept a few seconds when the context keeps
+	 * them (one request per open change, which a crowd asking would otherwise
+	 * make on every call), else read now; `fresh` ones always read now.
+	 */
+	const openHeads = async (claims: ClaimRecord[], fresh: (claim: ClaimRecord) => boolean = () => false) => {
+		const kept = ctx.keptHeads && claims.some((c) => !fresh(c)) ? await ctx.keptHeads(repo, async () => Object.fromEntries(await Promise.all(claims.map(async (c) => [c.change, await pushedHead(c)])))).catch(() => undefined) : undefined;
+		const heads = new Map(await Promise.all(claims.map(async (c) => [c.change, fresh(c) || !kept ? await pushedHead(c) : (kept[c.change] ?? null)] as const)));
+		return (claim: ClaimRecord) => heads.get(claim.change) ?? null;
+	};
 	/** Warm the check container for a merge to come (only where the repo has checks): why, and for which change or commit. */
 	const warmChecks = async (expect: "checked" | "approved", key: string) => {
 		if (registered?.verify?.length) await ctx.warmChecks?.(repo, { branch: projectBranch(registered), checks: registered.verify, expect, key }).catch(() => undefined);
@@ -883,19 +889,16 @@ async function runTool(name: string, args: Args, ctx: ToolContext): Promise<unkn
 		}
 		case "next": {
 			const agent = actAs("agent");
-			const [inForce, cast, backlog, line] = await Promise.all([
+			const [inForce, cast, backlog, landing] = await Promise.all([
 				adviceView(),
 				votes.read(),
 				recordLog<Work>(ctx, repo, workRef(repo)).read(),
 				// For whose turn each change is (kept a moment: next only advises, and the claim decides).
-				recordLog<Line>(ctx, repo, lineRef(repo)).read().then((l) => l?.commit.state ?? null).catch(() => null),
+				ctx.landing?.(repo, branch).view().catch(() => null) ?? null,
 			]);
-			// Each open change's pushed head, from its author's fork: the caller's own now, the others' as kept a few
-			// seconds (one request per open change, which a crowd asking next would otherwise make on every call).
-			const headOf = (claim: ClaimRecord) => changeSource(claim.agent, "read", claim.change).then((fork) => branchHead(fork, `changes/${claim.change}`)).catch(() => null);
-			const others = inForce.claims.filter((c) => c.agent !== agent);
-			const kept = ctx.keptHeads && others.length ? await ctx.keptHeads(repo, async () => Object.fromEntries(await Promise.all(inForce.claims.map(async (c) => [c.change, await headOf(c)])))).catch(() => undefined) : undefined;
-			const open = await Promise.all(inForce.claims.map(async (claim) => ({ claim, head: claim.agent === agent || !kept ? await headOf(claim) : (kept[claim.change] ?? null) })));
+			// Each open change's pushed head, from its author's fork: the caller's own now, the others' as kept a few seconds.
+			const heads = await openHeads(inForce.claims, (c) => c.agent === agent);
+			const open = inForce.claims.map((claim) => ({ claim, head: heads(claim) }));
 			const counted = await countedVotes(cast.votes, registered?.stampKey);
 			const teams = (await ctx.teamsOf?.(repo)) ?? [];
 			const decide = (held?: Record<string, string[]>) => nextFor({
@@ -913,7 +916,7 @@ async function runTool(name: string, args: Args, ctx: ToolContext): Promise<unkn
 				work: backlog?.commit.state.items ?? [],
 				...(held ? { held } : {}),
 				crowd: Math.max(Object.keys(registered?.agents ?? {}).length, new Set(inForce.claims.map((c) => c.agent)).size),
-				abandoned: new Set(open.filter((o) => abandoned(changeSigns({ claim: o.claim, head: o.head, counted, record: cast, line, policy: branchSettings(registered, o.claim.into).policy }), Date.now()).abandoned).map((o) => o.claim.change)),
+				abandoned: new Set(open.filter((o) => abandoned(changeSigns({ claim: o.claim, head: o.head, counted, record: cast, landing: o.claim.into ? null : landing, policy: branchSettings(registered, o.claim.into).policy }), Date.now()).abandoned).map((o) => o.claim.change)),
 			});
 			// A review is held for this agent before it's handed out, so two agents aren't sent to one that needs one review.
 			if (!ctx.reviews) return decide();
@@ -1041,7 +1044,7 @@ async function runTool(name: string, args: Args, ctx: ToolContext): Promise<unkn
 			const own = await claimOf(change);
 			const holder = own?.agent;
 			if (holder && holder !== agentArg("agent")) throw new Error(`[409] ${change} is ${holder}'s change: merge it as ${holder}`);
-			// Onto the branch its claim names, through that branch's own line.
+			// Onto the branch its claim names, with every other change ready to land there.
 			const into = own?.into ?? branch;
 			// Not before what it depends on has merged into that same branch.
 			const waits = await waitingOn(own?.after ?? [], into);
@@ -1056,8 +1059,19 @@ async function runTool(name: string, args: Args, ctx: ToolContext): Promise<unkn
 				policy: branchSettings(registry, into).policy,
 				verify: branchSettings(registry, into).verify,
 				...(registry?.skipChecks ? { skipChecks: registry.skipChecks } : {}),
-				runChecks: ctx.runChecks?.(repo, into === branch ? undefined : into),
+				runChecks: ctx.runChecks?.(repo),
 				...(ctx.branchHead ? { branchHead: () => ctx.branchHead!(repo, into) } : {}),
+				...(ctx.landing ? { landing: ctx.landing(repo, into) } : {}),
+				...(ctx.batchGit ? { batchGit: ctx.batchGit(repo) } : {}),
+				// The other changes into the branch, as kept a moment (the batch checks each again): claims in force whose
+				// dependencies have merged, with their heads.
+				others: async (): Promise<Candidate[]> => {
+					const inForce = await adviceView();
+					const merged = new Set(inForce.merged);
+					const sameBranch = inForce.claims.filter((c) => (c.into ?? branch) === into && c.change !== change && (c.after ?? []).every((dep) => merged.has(dep)));
+					const heads = await openHeads(inForce.claims);
+					return sameBranch.map((claim) => ({ claim, head: heads(claim), source: () => changeSource(claim.agent, "read", claim.change) }));
+				},
 				stamper,
 				stampKey: registry?.stampKey,
 				source: await changeSource(holder ?? agentArg("agent"), "read", change),

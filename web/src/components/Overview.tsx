@@ -1,15 +1,15 @@
 import "./Overview.css";
 import { useState } from "react";
-import type { RepoLine, RepoSnapshot, RepoTree } from "../api";
+import type { RepoLanding, RepoSnapshot, RepoTree } from "../api";
 import { usePoll } from "../hooks/usePoll";
 import { type Cell, cellLamp, LAMP_WORDS, type Lamp, lampColor, lampCounts, LAMPS, type Region, territory } from "../lib/overview";
 import { timeAgo } from "../lib/relativeTime";
 import { href } from "../lib/routes";
 
-/** What the overview reads: the repo's files, and its line when the server has one; and, for people who can write, making a branch. */
+/** What the overview reads: the repo's files, and what's landing when the server says; and, for people who can write, making a branch. */
 export interface OverviewApi {
 	tree(repo: string, ref?: string): Promise<RepoTree>;
-	line?(repo: string, branch?: string): Promise<RepoLine>;
+	landing?(repo: string, branch: string): Promise<RepoLanding>;
 	makeBranch?(repo: string, name: string, from: string): Promise<{ name: string; made?: string }>;
 }
 
@@ -107,19 +107,14 @@ function BranchBar({ repo, branch, shown, snapshot, api, canWrite, onBranchMade 
 /** A region with no more entries than this lists them by name; a bigger one is a grid of lamps. */
 const NAMED_CELLS = 16;
 
-const LEFT_COLOR: Record<RepoLine["left"][number]["how"], "green" | "red" | "neutral"> = {
-	landed: "green",
-	failed: "red",
-	"gave up": "neutral",
-	"went quiet": "neutral",
-	"behind one that left": "neutral",
-};
+/** How each outcome lights. */
+const SETTLED_COLOR: Record<RepoLanding["recent"][number]["how"], "green" | "red"> = { landed: "green", failed: "red" };
 
 /** The claims in force, in a sentence: how many, and where their changes are. */
-function Summary({ snapshot, line }: { snapshot: RepoSnapshot; line?: RepoLine }) {
+function Summary({ snapshot, landing }: { snapshot: RepoSnapshot; landing?: RepoLanding }) {
 	const total = snapshot.claims.length;
 	if (!total) return <p className="overview__summary">No claims in force. When an agent claims part of the tree, it lights up below.</p>;
-	const counts = lampCounts(snapshot.claims, { ...(line ? { line } : {}), votes: snapshot.votes });
+	const counts = lampCounts(snapshot.claims, { ...(landing ? { landing } : {}), votes: snapshot.votes });
 	const parts = LAMPS.filter((lamp) => counts[lamp]).map((lamp) => (
 		<span key={lamp} className={`overview__count lamp--${lampColor(lamp)}`}>
 			<span className="lamp" aria-hidden="true" />
@@ -136,18 +131,22 @@ function Summary({ snapshot, line }: { snapshot: RepoSnapshot; line?: RepoLine }
 	);
 }
 
-/** The line of merges, drawn as a track into the project's branch: the next to land nearest it. */
-function Track({ repo, branch, snapshot, line, error }: { repo: string; branch: string; snapshot: RepoSnapshot; line?: RepoLine; error?: string }) {
-	const inLine = new Set(line?.entries.map((e) => e.change));
-	const waiting = snapshot.claims.filter((c) => c.approval.approved && !inLine.has(c.change)).length;
-	// The last time each change left (one that left behind another, then landed, shows as landed), newest first.
-	const left = [...new Map((line?.left ?? []).map((l) => [l.change, l])).values()].sort((a, b) => b.at.localeCompare(a.at)).slice(0, 6);
+/**
+ * What's landing on the branch, drawn as a track into it: the changes being
+ * checked together nearest it, the approved ones waiting for the next batch.
+ */
+function Track({ repo, branch, snapshot, landing, error }: { repo: string; branch: string; snapshot: RepoSnapshot; landing?: RepoLanding; error?: string }) {
+	const checking = landing?.checking?.changes ?? [];
+	const inBatch = new Set(checking.map((c) => c.change));
+	const waiting = snapshot.claims.filter((c) => c.approval.approved && !inBatch.has(c.change)).length;
+	// Each change's last outcome, newest first.
+	const recent = [...new Map((landing?.recent ?? []).map((s) => [s.change, s])).values()].sort((a, b) => b.at.localeCompare(a.at)).slice(0, 6);
 	return (
 		<section className="track" aria-labelledby="track-title">
 			<div className="overview__head">
-				<h2 id="track-title">Merge line</h2>
+				<h2 id="track-title">Landing</h2>
 				<p className="muted">
-					Changes land on {branch} in this order, each checked on top of the ones ahead of it
+					Approved changes land on {branch} together: checked once as a batch
 					{snapshot.verify.length ? " by running " : ""}
 					{snapshot.verify.map((command, i) => (
 						<span key={command}>
@@ -155,41 +154,37 @@ function Track({ repo, branch, snapshot, line, error }: { repo: string; branch: 
 							<code className="nowrap">{command}</code>
 						</span>
 					))}
-					.
+					, then landed in one push.
 				</p>
 			</div>
-			{error && !line ? <p className="muted">The line couldn't be read: {error}</p> : null}
+			{error && !landing ? <p className="muted">What's landing couldn't be read: {error}</p> : null}
 			<ol className="track__plan">
 				<li className="track__end">
 					<span className="track__buffer" aria-hidden="true" />
 					<span className="track__name">{branch}</span>
-					{line?.tip ? <code className="track__detail">{line.tip.slice(0, 7)}</code> : null}
+					{landing?.checking ? <code className="track__detail">{landing.checking.base.slice(0, 7)}</code> : null}
 				</li>
-				{line?.entries.map((entry, index) => (
-					<li key={entry.id} className={`track__station lamp--${entry.status === "passed" ? "green" : "amber"}`}>
+				{checking.map((c) => (
+					<li key={c.change} className="track__station lamp--amber">
 						<span className="lamp lamp--track" aria-hidden="true" />
-						<a className="track__name" href={href.change(repo, entry.change)}>
-							{entry.change}
+						<a className="track__name" href={href.change(repo, c.change)}>
+							{c.change}
 						</a>
-						<span className="track__detail">{entry.status === "passed" ? "passed, landing" : "checking"}</span>
-						<span className="track__detail muted">{index === 0 ? "lands next" : `${index + 1} to land`}, {entry.agent}</span>
+						<span className="track__detail">checking</span>
+						<span className="track__detail muted">{c.agent}</span>
 					</li>
 				))}
-				{waiting ? (
-					<li className="track__waiting">
-						{waiting} approved, not in line yet
-					</li>
-				) : null}
+				{waiting ? <li className="track__waiting">{waiting} approved, landing with the next batch</li> : null}
 			</ol>
-			{line && !line.entries.length ? <p className="track__empty muted">Nothing in line. An approved change joins it when its agent merges.</p> : null}
-			{left.length ? (
+			{landing && !checking.length ? <p className="track__empty muted">Nothing being checked. Approved changes land with the next batch, once one of them merges.</p> : null}
+			{recent.length ? (
 				<div className="track__left">
-					<h3>Recently left the line</h3>
+					<h3>Lately</h3>
 					<ul>
-						{left.map((l) => (
-							<li key={`${l.change}-${l.at}`} className={`lamp--${LEFT_COLOR[l.how]}`}>
+						{recent.map((s) => (
+							<li key={`${s.change}-${s.at}`} className={`lamp--${SETTLED_COLOR[s.how]}`}>
 								<span className="lamp" aria-hidden="true" />
-								<a href={href.change(repo, l.change)}>{l.change}</a> {l.how} <span className="muted">{timeAgo(l.at)}</span>
+								<a href={href.change(repo, s.change)}>{s.change}</a> {s.how === "landed" ? "landed" : "put out: its checks failed"} <span className="muted">{timeAgo(s.at)}</span>
 							</li>
 						))}
 					</ul>
@@ -273,8 +268,8 @@ function RegionView({ repo, region }: { repo: string; region: Region }) {
 }
 
 /** What agents hold of the tree, by top-level folder. */
-function Territory({ repo, branch, snapshot, tree, error, line }: { repo: string; branch: string; snapshot: RepoSnapshot; tree?: RepoTree; error?: string; line?: RepoLine }) {
-	const regions = tree ? territory(tree.files, snapshot.claims, { ...(line ? { line } : {}), votes: snapshot.votes }) : [];
+function Territory({ repo, branch, snapshot, tree, error, landing }: { repo: string; branch: string; snapshot: RepoSnapshot; tree?: RepoTree; error?: string; landing?: RepoLanding }) {
+	const regions = tree ? territory(tree.files, snapshot.claims, { ...(landing ? { landing } : {}), votes: snapshot.votes }) : [];
 	return (
 		<section className="territory" aria-labelledby="territory-title">
 			<div className="overview__head">
@@ -308,13 +303,13 @@ function Territory({ repo, branch, snapshot, tree, error, line }: { repo: string
 
 /**
  * A repo at a glance, on one of its branches: the claims on it in a sentence,
- * its line of merges, and its territory.
+ * what's landing on it, and its territory.
  */
 export function Overview({ repo, branch, shown: asked, snapshot, api, canWrite = false, onBranchMade }: OverviewProps) {
 	const known = asked === undefined || asked === branch || (snapshot.branches ?? []).some((b) => b.name === asked);
 	const shown = asked && known ? asked : branch;
 	const other = shown === branch ? undefined : shown;
-	const line = usePoll(api.line ? `line:${repo}:${shown}` : null, () => api.line!(repo, other), 5_000);
+	const landing = usePoll(api.landing ? `landing:${repo}:${shown}` : null, () => api.landing!(repo, shown), 5_000);
 	const tree = usePoll(`tree:${repo}:${shown}`, () => api.tree(repo, other), 60_000);
 	// The claims on this branch only: a change lands on one.
 	const onBranch = { ...snapshot, claims: snapshot.claims.filter((c) => (c.into ?? branch) === shown) };
@@ -323,9 +318,9 @@ export function Overview({ repo, branch, shown: asked, snapshot, api, canWrite =
 		<div className="overview">
 			{many ? <BranchBar repo={repo} branch={branch} shown={shown} snapshot={snapshot} api={api} canWrite={canWrite} {...(onBranchMade ? { onBranchMade } : {})} /> : null}
 			{!known ? <p className="callout callout--warn">There's no branch {asked} taking changes here: showing {branch}.</p> : null}
-			<Summary snapshot={onBranch} line={line.data} />
-			{api.line ? <Track repo={repo} branch={shown} snapshot={onBranch} line={line.data} error={line.error} /> : null}
-			<Territory repo={repo} branch={shown} snapshot={onBranch} tree={tree.data} error={tree.error} line={line.data} />
+			<Summary snapshot={onBranch} landing={landing.data} />
+			{api.landing ? <Track repo={repo} branch={shown} snapshot={onBranch} landing={landing.data} error={landing.error} /> : null}
+			<Territory repo={repo} branch={shown} snapshot={onBranch} tree={tree.data} error={tree.error} landing={landing.data} />
 		</div>
 	);
 }

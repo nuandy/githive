@@ -308,7 +308,7 @@ export function release(log: CasLog<Registry>, input: { change: string; agent: s
 /**
  * Whether a claim is abandoned on its agent's own turn, and if not, what its
  * change waits on (see staleness.ts). The caller knows the change's head, votes
- * and the line; the records here don't.
+ * and whether it's being checked to land; the records here don't.
  */
 export type Abandoned = (claim: ClaimRecord) => Promise<{ abandoned: boolean; why: string }>;
 

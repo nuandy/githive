@@ -27,8 +27,10 @@ export interface MergeRecord {
 	base?: string;
 	/** From its GitHive-Tested trailer: the main the checks passed on. */
 	testedOn?: string;
-	/** From its GitHive-Tested-After trailer: the changes (their heads) merged in before it in the check, ahead of it in line. */
+	/** From its GitHive-Tested-After trailer (merges from before batches): the changes (their heads) merged in before it in the check, ahead of it in line. */
 	testedAfter?: string[];
+	/** From its GitHive-Tested-With trailer: every change (its head) checked together with it, in landing order, itself among them. */
+	testedWith?: string[];
 	/** From its GitHive-By and GitHive-Stamp trailers: who asked the toolkit to merge, as Access verified them, and GitHive's stamp. */
 	by?: string;
 	stamp?: string;
@@ -60,9 +62,9 @@ export function revertStampPayload(revert: { base?: string; reverts?: string; au
 }
 
 /** What GitHive stamps on a merge: everything its trailers claim, and the commits it joins. */
-export function mergeStampPayload(merge: Pick<MergeRecord, "base" | "head" | "change" | "author" | "by" | "claimsTip" | "votesTip" | "testedOn" | "testedAfter">) {
-	const { base, head, change, author, by, claimsTip, votesTip, testedOn, testedAfter } = merge;
-	return stampPayload("merge", { base, head, change, agent: author, by, claimsTip, votesTip, testedOn: testedOn ?? null, ...(testedAfter?.length ? { testedAfter } : {}) });
+export function mergeStampPayload(merge: Pick<MergeRecord, "base" | "head" | "change" | "author" | "by" | "claimsTip" | "votesTip" | "testedOn" | "testedAfter" | "testedWith">) {
+	const { base, head, change, author, by, claimsTip, votesTip, testedOn, testedAfter, testedWith } = merge;
+	return stampPayload("merge", { base, head, change, agent: author, by, claimsTip, votesTip, testedOn: testedOn ?? null, ...(testedAfter?.length ? { testedAfter } : {}), ...(testedWith?.length ? { testedWith } : {}) });
 }
 
 /** Claims idle longer than this may be released by anyone. */
@@ -96,6 +98,8 @@ export async function audit(records: AuditRecords): Promise<Violation[]> {
 
 	const registryAt = new Map(records.registry.map((r) => [r.tip, r.state]));
 	const byCommit = new Map(records.merges.map((m) => [m.commit, m]));
+	/** Each merge by the one before it on its branch: what landed next. */
+	const byBase = new Map(records.merges.filter((m) => m.base).map((m) => [m.base!, m]));
 	/** Stamped reverts: what each undid, settled once every commit has been checked. */
 	const reverts: MergeRecord[] = [];
 	for (const merge of records.merges) {
@@ -139,9 +143,10 @@ export async function audit(records: AuditRecords): Promise<Violation[]> {
 		// Checks it needed: none for a change that only touched what they skip, as the settings then said.
 		if (settings.verify?.length && !skipsChecks(merge.files, settings.skipChecks)) {
 			if (!merge.testedOn) report("untested", "the merge records no checks run (GitHive-Tested)");
-			else if (!testedAsLanded(merge, byCommit)) {
+			else if (merge.testedWith?.length ? !landedAsBatch(merge, byCommit, byBase) : !testedAsLanded(merge, byCommit)) {
 				const after = merge.testedAfter?.length ? ` after ${merge.testedAfter.map((h) => h.slice(0, 8)).join(", ")}` : "";
-				report("untested", `checks ran on ${merge.testedOn}${after}, but the merge went onto ${merge.base}`);
+				const batch = merge.testedWith?.length ? ` with ${merge.testedWith.map((h) => h.slice(0, 8)).join(", ")}` : "";
+				report("untested", batch ? `checks ran on ${merge.testedOn}${batch}, but those didn't land on it as checked, in one batch` : `checks ran on ${merge.testedOn}${after}, but the merge went onto ${merge.base}`);
 			}
 		}
 	}
@@ -307,8 +312,9 @@ function checkApproved(records: AuditRecords, policy: ReviewPolicy | undefined, 
 
 /**
  * Whether a merge went onto the code its checks ran on: right onto the main
- * they ran on, or, checked in line after other merges, onto that main with
- * exactly those merges (and nothing else) landed on it since, in order.
+ * they ran on, or, checked in a line after other merges (before batches),
+ * onto that main with exactly those merges (and nothing else) landed on it
+ * since, in order.
  */
 function testedAsLanded(merge: MergeRecord, byCommit: Map<string, MergeRecord>) {
 	const after = merge.testedAfter ?? [];
@@ -320,6 +326,31 @@ function testedAsLanded(merge: MergeRecord, byCommit: Map<string, MergeRecord>) 
 		at = between.base;
 	}
 	return landed.length === after.length && landed.every((head, i) => head === after[i]);
+}
+
+/**
+ * Whether a merge checked together with other changes landed as checked:
+ * right on the main the checks ran on, the batch's merges one after another,
+ * exactly the changes it names, in its order, and nothing in between. (They
+ * land in one push, so main never stops partway through a batch.)
+ */
+function landedAsBatch(merge: MergeRecord, byCommit: Map<string, MergeRecord>, byBase: Map<string, MergeRecord>) {
+	const heads = merge.testedWith!;
+	const sameBatch = (m: MergeRecord | undefined): m is MergeRecord => !!m && m.testedOn === merge.testedOn && m.testedWith?.join(" ") === heads.join(" ");
+	// Back to the main the checks ran on, through the batch's merges before this one.
+	let first = merge;
+	for (let steps = 0; first.base !== merge.testedOn; steps++) {
+		const before = first.base ? byCommit.get(first.base) : undefined;
+		if (steps >= heads.length || !sameBatch(before)) return false;
+		first = before;
+	}
+	// From there, exactly the batch.
+	let at: MergeRecord | undefined = first;
+	for (const head of heads) {
+		if (!sameBatch(at) || at.head !== head) return false;
+		at = byBase.get(at.commit);
+	}
+	return true;
 }
 
 /** Releases of another agent's claim that wasn't stale yet. */

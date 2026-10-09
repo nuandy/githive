@@ -63,7 +63,7 @@ const here = dirname(planPath);
 const at = (path) => (path && !isAbsolute(path) ? join(here, path) : path);
 const vars = Object.fromEntries(readFileSync(join(root, ".dev.vars"), "utf8").split("\n").map((l) => l.match(/^([A-Z_]+)=(.*)$/)).filter(Boolean).map(([, k, v]) => [k, v.replace(/^"|"$/g, "")]));
 const access = { "CF-Access-Client-Id": vars.CF_ACCESS_CLIENT_ID, "CF-Access-Client-Secret": vars.CF_ACCESS_CLIENT_SECRET };
-// A merge can wait in line for minutes: no client-side timeouts.
+// A merge can wait for its batch for minutes: no client-side timeouts.
 const patient = new Agent({ headersTimeout: 0, bodyTimeout: 0 });
 /** The whole run gives up after this long. */
 const RUN_LIMIT_MS = 60 * 60_000;
@@ -129,6 +129,28 @@ const settlePiece = (id, outcome) => {
 	lastSettled = Date.now();
 };
 const allSettled = () => plan.backlog.every((p) => settled.has(p.id));
+/**
+ * Pieces that landed in another merge's batch: a merge lands every approved
+ * change into the branch, so a piece's own agent may never be told to merge
+ * it. Read from what the repo's landing says changes came to, every few
+ * seconds at most.
+ */
+let landingsReadAt = 0;
+async function settleLanded() {
+	if (Date.now() - landingsReadAt < 5_000) return;
+	landingsReadAt = Date.now();
+	const landing = await fetch(`${BASE}/repos/_/${plan.repo}/landing?branch=${encodeURIComponent(branch)}`, { headers: access, dispatcher: patient })
+		.then((r) => (r.ok ? r.json() : null))
+		.catch(() => null);
+	for (const s of landing?.recent ?? []) {
+		if (s.how !== "landed" || settled.has(s.change) || !timeline.has(s.change)) continue;
+		const t = timeline.get(s.change);
+		t.merged ??= Date.parse(s.at) - started;
+		t.commit = s.commit;
+		settlePiece(s.change, `merged ${s.commit.slice(0, 8)}`);
+		say("swarm", `${s.change} landed as ${s.commit.slice(0, 8)}, in another merge's batch`);
+	}
+}
 
 /** One agent's hands: build, review, revise and merge, as next says. */
 function agentFor(spec) {
@@ -302,6 +324,7 @@ function agentFor(spec) {
 				next = await call("next", { agent: name });
 				if (next.kind === "wait") {
 					did.get(name).wait++;
+					await settleLanded();
 					if (allSettled()) break;
 					// Asked again soon: a merge or a review can free work any moment.
 					await sleep(Math.min(next.retryAfterSeconds ?? 30, 5) * 1000);
@@ -385,11 +408,11 @@ await inBatches(plan.backlog, 1, async (piece) => {
 if (plan.setup?.verify?.length) {
 	const until = Date.now() + 6 * 60_000;
 	for (;;) {
-		const line = await fetch(`${BASE}/repos/_/${plan.repo}/line`, { headers: access, dispatcher: patient })
+		const landing = await fetch(`${BASE}/repos/_/${plan.repo}/landing?branch=${encodeURIComponent(branch)}`, { headers: access, dispatcher: patient })
 			.then((r) => (r.ok ? r.json() : {}))
 			.catch(() => ({}));
-		if (line.snapshot) {
-			say("swarm", `the repo's snapshot is ready (${Math.round(line.snapshot.size / 1e6)} MB)`);
+		if (landing.snapshot) {
+			say("swarm", `the repo's snapshot is ready (${Math.round(landing.snapshot.size / 1e6)} MB)`);
 			break;
 		}
 		if (Date.now() > until) {

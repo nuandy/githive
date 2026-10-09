@@ -2,14 +2,16 @@ import { DEFAULT_POLICY, hostedRoles } from "./mcp";
 import { effectivePolicy } from "./votes";
 import { ensureRepo, forkAndWait, headOf, remoteFor, reviewerName } from "../artifacts";
 import { GitCasLog } from "../record-log";
+import { rpc } from "../rpc";
 import { fail } from "../errors";
 import { defaultBranch, type Remote, Workspace } from "../git";
 import { projectBranch } from "../project-branch";
 import { claimStore } from "./claim-store";
-import { type Line, lineCheckRunner, lineRef } from "./line";
 import { type ReviewHolds, reviewHolds, reviewsRef } from "./review-holds";
 import type { Registry } from "./claims";
 import type { ToolContext, HostedStatus } from "./mcp";
+import type { BatchSource } from "./merge";
+import type { Settled } from "./landing";
 import { recordsRepoName } from "./shards";
 import { makeStamper } from "./stamp";
 
@@ -35,7 +37,7 @@ async function cached(env: Env, project: string, key: string, mint: () => Promis
 	const hit = remotes.get(key);
 	if (hit && Date.now() < hit.until) return hit.remote;
 	const store = env.TOKENS?.getByName(project);
-	const kept = await store?.get(key).catch(() => null);
+	const kept = store ? await rpc(store.get(key)).catch(() => null) : null;
 	if (kept) {
 		remotes.set(key, { remote: kept.remote, until: Math.min(kept.until, Date.now() + ISOLATE_MS) });
 		return kept.remote;
@@ -83,7 +85,7 @@ export async function keptRead<T>(env: Env, repo: string, name: string, maxAgeMs
 		}
 	};
 	for (const until = Date.now() + 10_000; ; ) {
-		const kept = await feed.view(name, maxAgeMs);
+		const kept = await rpc(feed.view(name, maxAgeMs));
 		if (kept.json !== undefined) {
 			if (kept.fresh || kept.building || !(await feed.startBuild(name))) return JSON.parse(kept.json) as T;
 			return rebuild(kept.writes);
@@ -101,9 +103,9 @@ function recordsLog<S>(env: Env, repo: string, ref: string) {
 	if (!log) {
 		// What other Worker instances already read of the project repo's records, by tip, in its LiveFeed.
 		const feed = () => env.LIVE.getByName(`repo:${repo}`);
-		const states = { get: (r: string, tip: string) => feed().recordAt(r, tip), put: (r: string, tip: string, json: string) => feed().keepRecord(r, tip, json) };
+		const states = { get: (r: string, tip: string) => rpc(feed().recordAt(r, tip)), put: (r: string, tip: string, json: string) => feed().keepRecord(r, tip, json) };
 		// And where its ref points, so that a read needn't list it on the busy project repo.
-		const tips = { get: (r: string, stateKey: string) => feed().tipOf(r, stateKey, KEPT_TIP_MS), keep: (r: string, tip: string | null, gen: number) => feed().keepTip(r, tip, gen), landed: (r: string, parent: string | null, tip: string) => feed().landedTip(r, parent, tip), stale: (r: string, parent: string | null) => feed().staleTip(r, parent) };
+		const tips = { get: (r: string, stateKey: string) => rpc(feed().tipOf(r, stateKey, KEPT_TIP_MS)), keep: (r: string, tip: string | null, gen: number) => feed().keepTip(r, tip, gen), landed: (r: string, parent: string | null, tip: string) => feed().landedTip(r, parent, tip), stale: (r: string, parent: string | null) => feed().staleTip(r, parent) };
 		logs.set(ref, (log = new GitCasLog<unknown>(() => cached(env, repo, `${repo}|write`, () => remoteFor(env.ARTIFACTS, repo, "write", 3600)), repo, ref, { states, tips })));
 	}
 	return log as GitCasLog<S>;
@@ -148,28 +150,65 @@ export function toolContextFor(env: Env, by: string | undefined, caller: { agent
 		agentStatus: (repo, change, head, roles) => hostedAgentStatus(env, repo, change, head, roles),
 		head: async (repo, branch) => (await headOf(env.ARTIFACTS, repo, branch)) ?? fail(409, `${repo} has no ${branch} branch`),
 		defaultBranch: async (repo) => (await defaultBranch(await remoteFor(env.ARTIFACTS, repo, "read", 3600))) ?? fail(409, `${repo} has no commits`),
-		// Checks run in the repo's line of merges, a record in Git (see line.ts), each in its change's own Gate and container.
-		// Each branch changes land on has its own line (the project's at the ref it always had: lineBranch absent).
-		runChecks: (repo, lineBranch) => {
+		// A batch's checks, each in a change's own Gate and container (the batch's last change's: halves of a batch, checked
+		// side by side, end in different changes), on main with the batch's changes merged in, in order.
+		runChecks: (repo) => {
 			const read = () => cached(env, repo, `${repo}|read`, () => remoteFor(env.ARTIFACTS, repo, "read", 3600));
 			const fork = (agent: string) => cached(env, repo, `fork:${repo}:${agent}|read`, () => changeRemote(env, repo, agent, "read", 3600));
-			let branch = "main";
-			const runner = lineCheckRunner({
-				// Kept tips and states like every record (see recordsLog): merges waiting in line read it every few seconds.
-				log: recordsLog<Line>(env, repo, lineRef(repo, lineBranch)),
-				main: async () => headOf(env.ARTIFACTS, repo, branch),
-				check: async ({ change, head, ref, agent, source, commands, base, ahead }) => {
-					const remote = await read();
-					const from = source ?? (await fork(agent));
-					const merges = await Promise.all(ahead.map(async (a) => ({ head: a.head, ref: `changes/${a.change}`, ...(await fork(a.agent).then((r) => ({ remote: r.url, token: r.token }))) })));
-					const result = await env.GATE.getByName(`repo:${repo}:change:${change}`).checkCommit({ repo, branch, base: { remote: remote.url, token: remote.token }, fork: { remote: from.url, token: from.token, ref }, head, checks: commands, baseHead: base, ahead: merges });
-					const conflict = result.mergeConflict ? [{ command: "(merging onto main and the merges ahead in line)", exitCode: 1, output: `conflicts in ${result.mergeConflict.join(", ")}` }] : [];
-					return { passed: result.passed, results: [...conflict, ...result.results.map((r) => ({ command: r.command, exitCode: r.exitCode, output: r.output }))] };
+			return async ({ base, branch, changes, commands }) => {
+				const remote = await read();
+				const sourceOf = async (c: (typeof changes)[number]) => {
+					const from = c.source ?? (await fork(c.agent));
+					return { remote: from.url, token: from.token, ref: c.ref };
+				};
+				const last = changes.at(-1)!;
+				const ahead = await Promise.all(changes.slice(0, -1).map(async (c) => ({ head: c.head, ...(await sourceOf(c)) })));
+				const result = await rpc(env.GATE.getByName(`repo:${repo}:change:${last.change}`).checkCommit({ repo, branch, base: { remote: remote.url, token: remote.token }, fork: await sourceOf(last), head: last.head, checks: commands, baseHead: base, ahead }));
+				const conflict = result.mergeConflict ? [{ command: "(merging the batch onto main)", exitCode: 1, output: `conflicts in ${result.mergeConflict.join(", ")}` }] : [];
+				return { passed: result.passed, results: [...conflict, ...result.results.map((r) => ({ command: r.command, exitCode: r.exitCode, output: r.output }))] };
+			};
+		},
+		// A batch's git work (reading its changes, landing them) in the repo's own Gate's container, which never runs a
+		// change's code: the Worker only reads the records (see BatchGit).
+		batchGit: (repo) => {
+			const gate = () => env.GATE.getByName(`repo:${repo}`);
+			const project = (scope: "read" | "write") => cached(env, repo, `${repo}|${scope}`, () => remoteFor(env.ARTIFACTS, repo, scope, 3600));
+			const fork = (agent: string) => cached(env, repo, `fork:${repo}:${agent}|read`, () => changeRemote(env, repo, agent, "read", 3600));
+			const sourceOf = async (c: BatchSource) => {
+				const from = c.source ?? (await fork(c.agent));
+				return { change: c.change, remote: from.url, token: from.token, ref: c.ref };
+			};
+			return {
+				inspect: async ({ base, branch, changes }) => {
+					const read = await project("read");
+					return rpc(gate().inspectBatch({ repo, branch, base: { remote: read.url, token: read.token }, baseHead: base, changes: await Promise.all(changes.map(sourceOf)) }));
 				},
-			});
-			return (input) => {
-				branch = input.branch ?? branch;
-				return runner(input);
+				land: async ({ base, branch, merges, by }) => {
+					const write = await project("write");
+					const landed = await rpc<{ commits: string[] } | { moved: true } | { error: string }>(gate().landBatch({
+						repo,
+						branch,
+						base: { remote: write.url, token: write.token },
+						baseHead: base,
+						merges: await Promise.all(merges.map(async (m) => ({ ...(await sourceOf(m)), head: m.head, claimed: m.claimed }))),
+						...(by ? { by } : {}),
+					}));
+					if ("moved" in landed) return "moved";
+					if ("error" in landed) throw new Error(`[500] landing the batch failed: ${landed.error}`);
+					return { commits: landed.commits };
+				},
+			};
+		},
+		// Who's landing a batch into each branch, and what changes came to: kept in the repo's LiveFeed (see landing.ts).
+		landing: (repo, branch) => {
+			const feed = () => env.LIVE.getByName(`repo:${repo}`);
+			return {
+				turn: (holder, change, head, since, ttlMs) => rpc<{ settled: Settled } | { lease: boolean }>(feed().landingTurn(branch, holder, change, head, since, ttlMs)),
+				renew: (holder, ttlMs) => rpc(feed().renewLanding(branch, holder, ttlMs)),
+				drop: (holder) => rpc(feed().dropLanding(branch, holder)),
+				checking: (batch) => rpc(feed().landingChecking(branch, batch)),
+				settle: (outcomes) => rpc(feed().landingSettled(branch, outcomes)),
+				view: () => rpc(feed().landingView(branch)),
 			};
 		},
 	};
@@ -229,7 +268,7 @@ export async function makeAgentFork(env: Env, repo: string, agent: string) {
 	const name = await forkName(repo, agent);
 	if (await remoteFor(env.ARTIFACTS, name, "read", 60).then(() => true, () => false)) return;
 	const feed = env.LIVE?.getByName(`repo:${repo}`);
-	const ready = (await feed?.readySeeds().catch(() => [] as number[])) ?? [];
+	const ready = (feed ? await rpc(feed.readySeeds()).catch(() => [] as number[]) : []) ?? [];
 	if (!ready.length) await feed?.queueForks(repo, seedItems()).catch(() => undefined);
 	const own = seedOf(agent);
 	const seeds = [...ready].sort((a, b) => ((a - own + FORK_SEEDS) % FORK_SEEDS) - ((b - own + FORK_SEEDS) % FORK_SEEDS)).map((k) => seedName(repo, k));
@@ -329,8 +368,8 @@ export async function builderCredentials(env: Env, repo: string, change: string)
 export async function hostedAgentStatus(env: Env, repo: string, change: string, head: string | null, roles: string[]): Promise<HostedStatus> {
 	const name = changeRepoName(repo, change);
 	const [builder, reviewers] = await Promise.all([
-		env.BUILDER.getByName(name).state(),
-		head ? Promise.all(roles.map(async (role) => ({ role, state: await env.REVIEWER.getByName(reviewerName(name, role, head)).state() }))) : [],
+		rpc(env.BUILDER.getByName(name).state()),
+		head ? Promise.all(roles.map(async (role) => ({ role, state: await rpc(env.REVIEWER.getByName(reviewerName(name, role, head)).state()) }))) : [],
 	]);
 	return {
 		...(builder ? { builder: { status: builder.status, revisions: builder.revisions, ...(builder.error ? { error: builder.error } : {}) } } : {}),
