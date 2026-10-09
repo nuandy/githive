@@ -56,7 +56,7 @@
 		{ "tag": "v5", "new_sqlite_classes": ["TaskIndex"] },
 		{ "tag": "v6", "new_sqlite_classes": ["ContractChecker"] },
 		{ "tag": "v7", "new_sqlite_classes": ["Peer"] },
-		// Planned mode (contracts) is gone; it lives on the plan-mode branch.
+		// Planned mode (contracts) is gone; 926c4b2 is the last version with it.
 		{ "tag": "v8", "deleted_classes": ["ContractChecker"] },
 		// The dashboard's live updates.
 		{ "tag": "v9", "new_sqlite_classes": ["LiveFeed"] },

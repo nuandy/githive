@@ -186,7 +186,18 @@ Records in Git outlive the code that wrote them. To change a record's shape, bum
 - **Semantic conflicts.** Every push is checked for text conflicts; changes that merge cleanly but break together are caught by the checks, which run on everything landing together.
 - **Scale.** 1000 agents at once claim, push, check and release in about 70 s with no failures (see the benchmark); past that is untested.
 
-Planned mode (a planner splitting a feature into slices with contracts, approved by a human and landed as a whole) lives on the `plan-mode` branch. An earlier design with an elected coordinator is archived on the `elected-mode-archive` branch.
+## How this was built
+
+GitHive started on 2 October 2026 as Blueprint, with a coordinator at its centre, and lost the coordinator one step at a time. The full history is here: `git log --reverse`. The steps that changed the design:
+
+1. **A coordinator, and agents building with it** (2 Oct, [`6fb708b`](https://github.com/nuandy/githive/commit/6fb708b)). One Durable Object planned the work, split it into slices and decided what merged. Its hosted agents then built parts of its own dashboard: 131 of the repo's commits are theirs, by authors like `builder dashboard-shell` ([`df784ab`](https://github.com/nuandy/githive/commit/df784ab)).
+2. **Every decision recorded in Git** (2 Oct, [`5c40175`](https://github.com/nuandy/githive/commit/5c40175)). The coordinator still decided, but each decision went into Git notes, where anyone could read it. This idea is what grew into the rest.
+3. **An elected coordinator** (4–6 Oct, [`20ac14c`](https://github.com/nuandy/githive/commit/20ac14c)). To end the single point of failure, peers elected a leader whose log lived in Git, with leases and failover. It worked, but there was still a leader, and every call waited on it.
+4. **No coordinator at all** (5 Oct, [`c8953c2`](https://github.com/nuandy/githive/commit/c8953c2)). Claims, votes and merges became records that each agent's call writes to Git by compare-and-swap, with an audit that replays them ([`518be69`](https://github.com/nuandy/githive/commit/518be69)). The rest of that day went to scale: claims sharded by path ([`59dd250`](https://github.com/nuandy/githive/commit/59dd250)) and spread over records repos, up to 1,000 agents at once ([`97c0805`](https://github.com/nuandy/githive/commit/97c0805)).
+5. **One design** (8 Oct, [`6b3f711`](https://github.com/nuandy/githive/commit/6b3f711)). The elected coordinator was removed (archived on the `elected-mode-archive` branch, tag `elected-mode-final`) and the project was renamed GitHive ([`5846f9a`](https://github.com/nuandy/githive/commit/5846f9a)). Sign-in, agents with their own tokens, and orgs followed the same day.
+6. **The last central pieces into Git** (9 Oct). The line of merges became a record in Git ([`5466ca8`](https://github.com/nuandy/githive/commit/5466ca8)), then review holds ([`9c4a6c6`](https://github.com/nuandy/githive/commit/9c4a6c6)), and then the line went altogether: approved changes land as a set ([`542cb54`](https://github.com/nuandy/githive/commit/542cb54)). Changes can land on any branch ([`dacd4a3`](https://github.com/nuandy/githive/commit/dacd4a3)), and real Claude Code agents now work on GitHive repos ([`9fbc3e9`](https://github.com/nuandy/githive/commit/9fbc3e9)).
+
+Planned mode (a planner splitting a feature into slices with contracts, approved by a human and landed as a whole) was removed in [`5526dec`](https://github.com/nuandy/githive/commit/5526dec); [`926c4b2`](https://github.com/nuandy/githive/tree/926c4b2) is the last version with it.
 
 ## License
 
