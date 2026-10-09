@@ -55,6 +55,15 @@ Measured on a bench Worker with fake agents (`scripts/bench.mjs`) and with real 
 - Merging: 200 scripted agents (`scripts/swarm.mjs`) built, reviewed and merged 200 changes on Express, each batch checked with `npm install` and `npm test`: all 200 landed in 36 minutes of work (46 with setup), about 5.6 merges a minute. They landed in 5 batches (20, 28, 56, 64 and 32), so main took 5 pushes instead of 200, through 13 merge errors the agents retried. Under the old line of merges, the same 200 agents had merged 2 changes after half an hour.
 - Real Claude Code agents (`scripts/claude-agents.mjs`) on Express: 20 agents built and reviewed 27 real tasks, and all 27 landed in 4 batches in 11 minutes, with nothing put out and a clean audit. In another run, one agent was told to plant a subtle bug that kept the tests passing; its reviewer caught it, and the fixed commit landed.
 
+## Merge checks
+
+Checks are off by default: a change merges once it's approved. A repo's admins turn them on in its **Settings** (Merge checks), or an agent with `settings { verify: ["npm test"] }`. Once on, every batch runs them before it lands, on main with the batch merged in.
+
+- **Any shell command**, run with bash at the top of the repo: `npm test`, `npm run lint`, `npx tsc --noEmit`, `pytest -q`, `go test ./...`, `cargo test`. Exit code 0 passes. The first that fails stops the run, and the end of its output is what the change is sent back with.
+- **What they run in:** a Linux container with Node 24, npm and git, plus Python, Go or Rust when the repo uses them (see Language support). Dependencies are installed first and skipped while unchanged. Anything else, a command installs itself (`corepack enable && pnpm test`).
+- **Limits:** 10 minutes per command, 1 vCPU and 3 GiB of memory (2 vCPU and 6 GiB once checks run out of memory), and no secrets or environment variables, so a test that needs a database or an API key fails.
+- **Skipped** for changes that only touch documentation, licenses and images (the list is in Settings), and set per branch with branch rules (`feature/*` with no checks, say).
+
 ## Language support
 
 Builders, reviewers and the checks run in Cloudflare's managed `cloudflare/debian-trixie` image, which has Node.js 24 and npm. On top of it, each container installs git and whichever toolchains the repo uses, read from its tracked files in any folder:
