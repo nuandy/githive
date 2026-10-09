@@ -714,6 +714,19 @@ a project-repo 500) and in 86 s with 2, both the bench's own `git push`
 timing out against Artifacts. No fork failed in either run, and exactly one
 racer won each time.
 
+- **Kept record tips**: every call still listed the claims registry's ref on
+  the project repo. A record's tip is now kept in the project's LiveFeed with
+  its state, so a read asks the LiveFeed, not Git. Every write that lands
+  clears the kept tip before it returns, so no read sees a tip older than a
+  finished write; a listing that began before a write isn't kept (a
+  generation per ref says so); and a tip goes stale after 10 s in case a
+  write couldn't clear it. A claim's check of the registry after writing its
+  shards still reads Git (`readFresh`): that check is what keeps two claims
+  from overlapping.
+
+With that, 1000 agents ran in 67 s and 71 s with **no failures**, no claims
+left over, and one racer winning each time (200 agents: 49 s, none).
+
 Small runs pay for sharding: one agent takes 35.5 s against 27.3 s with one
 record, since a read lists the shards before fetching. Sharding on demand
 avoids that cost until the load calls for it.

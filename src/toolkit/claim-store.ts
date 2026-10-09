@@ -343,8 +343,8 @@ class Claims implements ClaimStore {
 		const everything = belowOf.includes(ROOT);
 		const listed = everything ? [] : (await Promise.all(belowOf.map((s) => this.list(`${shardRef(this.input.repo, s)}%2F`)))).flat();
 		const [root, shards] = await Promise.all([
-			// The registry fresh: it's the level every claim checks.
-			above.has(ROOT) ? this.input.root.read().then((head) => (head ? [{ shard: ROOT, tip: head.tip, state: head.commit.state }] : [])) : Promise.resolve([] as Entry[]),
+			// The registry fresh, as Git has it now: it's the level every claim checks.
+			above.has(ROOT) ? (this.input.root.readFresh?.() ?? this.input.root.read()).then((head) => (head ? [{ shard: ROOT, tip: head.tip, state: head.commit.state }] : [])) : Promise.resolve([] as Entry[]),
 			everything ? this.readAll() : this.readShards([...above, ...listed]),
 		]);
 		const live: Conflict[] = [];

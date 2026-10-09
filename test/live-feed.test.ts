@@ -70,3 +70,35 @@ describe("forgetting a deleted repo's views", () => {
 	});
 });
 
+
+describe("kept record tips", () => {
+	it("serves a kept tip, with its state when kept for that tip", async () => {
+		const { live } = feed();
+		expect(await live.tipOf("refs/r", "refs/r@1", 10_000)).toEqual({ gen: 0 });
+		await live.keepTip("refs/r", "a".repeat(40), 0);
+		expect(await live.tipOf("refs/r", "refs/r@1", 10_000)).toEqual({ tip: "a".repeat(40), gen: 0 });
+		await live.keepRecord("refs/r@1", "a".repeat(40), "{}");
+		expect(await live.tipOf("refs/r", "refs/r@1", 10_000)).toEqual({ tip: "a".repeat(40), gen: 0, json: "{}" });
+		// No ref is kept too: an empty log.
+		await live.keepTip("refs/empty", null, 0);
+		expect(await live.tipOf("refs/empty", "refs/empty@1", 10_000)).toEqual({ tip: null, gen: 0 });
+	});
+
+	it("forgets a tip when its ref moves, and drops a listing that began before", async () => {
+		const { live } = feed();
+		await live.keepTip("refs/r", "a".repeat(40), 0);
+		const { gen } = await live.tipOf("refs/s", "refs/s@1", 10_000);
+		await live.movedTip("refs/r");
+		await live.movedTip("refs/s");
+		expect(await live.tipOf("refs/r", "refs/r@1", 10_000)).toEqual({ gen: 1 });
+		// Listed before the move: it may show the old tip, so it isn't kept.
+		await live.keepTip("refs/s", "b".repeat(40), gen);
+		expect(await live.tipOf("refs/s", "refs/s@1", 10_000)).toEqual({ gen: 1 });
+	});
+
+	it("ages a tip out", async () => {
+		const { live } = feed();
+		await live.keepTip("refs/r", "a".repeat(40), 0);
+		expect(await live.tipOf("refs/r", "refs/r@1", -1)).toEqual({ gen: 0 });
+	});
+});

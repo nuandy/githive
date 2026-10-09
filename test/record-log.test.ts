@@ -168,6 +168,49 @@ describe("record states shared by readers, by tip", () => {
 	});
 });
 
+describe("record tips kept for readers", () => {
+	const listings = () => server.requests.filter((r) => r.startsWith("GET refs")).length;
+	const kept = async () => {
+		const { LiveFeed } = await import("../src/live-feed");
+		const { FakeStorage } = await import("./fakes/env");
+		const live = new LiveFeed({ storage: new FakeStorage(), getWebSockets: () => [] } as never, {} as never);
+		const states = { get: (r: string, tip: string) => live.recordAt(r, tip), put: (r: string, tip: string, json: string) => live.keepRecord(r, tip, json) };
+		const tips = { get: (r: string, key: string) => live.tipOf(r, key, 10_000), keep: (r: string, tip: string | null, gen: number) => live.keepTip(r, tip, gen), moved: (r: string) => live.movedTip(r) };
+		return () => new GitCasLog<State>(async () => ({ url: server.url, token: "unused" }), "t1", "refs/notes/githive/t1", { states, tips });
+	};
+	const settle = () => new Promise((resolve) => setTimeout(resolve, 10));
+
+	it("lets readers skip listing the ref once one has", async () => {
+		const reader = await kept();
+		const tip = await reader().append(null, commit({ state: { claims: { "src/x/": "agent-a" } } }));
+		await reader().read();
+		await settle();
+		const before = listings();
+		expect(await reader().read()).toMatchObject({ tip, commit: { state: { claims: { "src/x/": "agent-a" } } } });
+		expect(listings()).toBe(before);
+	});
+
+	it("never serves a tip older than a write that finished", async () => {
+		const reader = await kept();
+		const writer = reader();
+		const first = await writer.append(null, commit({ state: { claims: { "src/x/": "agent-a" } } }));
+		await reader().read();
+		await settle();
+		const second = await writer.append(first, commit({ state: { claims: { "src/y/": "agent-b" } } }));
+		expect((await reader().read())?.tip).toBe(second);
+	});
+
+	it("reads fresh from Git when asked", async () => {
+		const reader = await kept();
+		await reader().append(null, commit());
+		await reader().read();
+		await settle();
+		const before = listings();
+		await reader().readFresh();
+		expect(listings()).toBe(before + 1);
+	});
+});
+
 describe("a rehearsed change of record format", () => {
 	type V1 = { claims: Record<string, string> };
 	type V2 = { claims: Record<string, { holder: string }> };

@@ -52,6 +52,8 @@ const logs = new Map<string, GitCasLog<unknown>>();
 
 /** How long a kept copy of the claims stays fresh with no write in between. */
 const KEPT_CLAIMS_MS = 30_000;
+/** How long a record's tip stays kept with no write clearing it (in case a write couldn't). */
+const KEPT_TIP_MS = 10_000;
 /** The largest view a LiveFeed keeps. */
 const MAX_KEPT = 1_000_000;
 
@@ -96,7 +98,9 @@ function recordsLog<S>(env: Env, repo: string, ref: string) {
 		// What other Worker instances already read of the project repo's records, by tip, in its LiveFeed.
 		const feed = () => env.LIVE.getByName(`repo:${repo}`);
 		const states = { get: (r: string, tip: string) => feed().recordAt(r, tip), put: (r: string, tip: string, json: string) => feed().keepRecord(r, tip, json) };
-		logs.set(ref, (log = new GitCasLog<unknown>(() => cached(env, repo, `${repo}|write`, () => remoteFor(env.ARTIFACTS, repo, "write", 3600)), repo, ref, { states })));
+		// And where its ref points, so that a read needn't list it on the busy project repo.
+		const tips = { get: (r: string, stateKey: string) => feed().tipOf(r, stateKey, KEPT_TIP_MS), keep: (r: string, tip: string | null, gen: number) => feed().keepTip(r, tip, gen), moved: (r: string) => feed().movedTip(r) };
+		logs.set(ref, (log = new GitCasLog<unknown>(() => cached(env, repo, `${repo}|write`, () => remoteFor(env.ARTIFACTS, repo, "write", 3600)), repo, ref, { states, tips })));
 	}
 	return log as GitCasLog<S>;
 }

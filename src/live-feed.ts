@@ -85,12 +85,39 @@ export class LiveFeed extends DurableObject<Env> {
 		await this.ctx.storage.put(`record:${ref}`, { tip, json });
 	}
 
+	/**
+	 * Where a record's ref points, as last listed and kept (see TipCache in
+	 * record-log.ts), with its state when kept for that tip; or none, when
+	 * nothing is kept or it's older than `maxAgeMs`, with the generation a new
+	 * listing is kept under.
+	 */
+	async tipOf(ref: string, stateKey: string, maxAgeMs: number) {
+		const kept = await this.ctx.storage.get<{ tip?: string | null; at?: number; gen: number }>(`tip:${ref}`);
+		const gen = kept?.gen ?? 0;
+		if (kept?.tip === undefined || Date.now() - (kept.at ?? 0) > maxAgeMs) return { gen };
+		const state = kept.tip ? await this.ctx.storage.get<{ tip: string; json: string }>(`record:${stateKey}`) : undefined;
+		return { tip: kept.tip, gen, ...(state?.tip === kept.tip ? { json: state.json } : {}) };
+	}
+
+	/** Keep a listing of a record's ref, unless it moved since the listing began (its generation is past `gen`). */
+	async keepTip(ref: string, tip: string | null, gen: number) {
+		const kept = await this.ctx.storage.get<{ gen: number }>(`tip:${ref}`);
+		if ((kept?.gen ?? 0) === gen) await this.ctx.storage.put(`tip:${ref}`, { tip, at: Date.now(), gen });
+	}
+
+	/** A record's ref moved: forget its tip, and any listing still under way. */
+	async movedTip(ref: string) {
+		const kept = await this.ctx.storage.get<{ gen: number }>(`tip:${ref}`);
+		await this.ctx.storage.put(`tip:${ref}`, { gen: (kept?.gen ?? 0) + 1 });
+	}
+
 	/** Forget the kept views: the repo was deleted. */
 	async clearViews() {
 		const kept = await this.ctx.storage.list({ prefix: "view:" });
 		const building = await this.ctx.storage.list({ prefix: "building:" });
 		const records = await this.ctx.storage.list({ prefix: "record:" });
-		await this.ctx.storage.delete([...kept.keys(), ...building.keys(), ...records.keys()]);
+		const tips = await this.ctx.storage.list({ prefix: "tip:" });
+		await this.ctx.storage.delete([...kept.keys(), ...building.keys(), ...records.keys(), ...tips.keys()]);
 	}
 
 	private async writes() {

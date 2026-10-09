@@ -184,7 +184,7 @@ Records in Git outlive the code that wrote them. To change a record's shape, bum
 ## Known gaps
 
 - **Semantic conflicts.** Every push is checked for text conflicts; changes that merge cleanly but break together are caught by the checks on the merge line.
-- **Scale.** 200 agents at once run cleanly; 1000 run in 70–90 s with a handful of calls failing on busy Git servers (see the benchmark).
+- **Scale.** 1000 agents at once claim, push, check and release in about 70 s with no failures (see the benchmark); past that is untested.
 
 Planned mode (a planner splitting a feature into slices with contracts, approved by a human and landed as a whole) lives on the `plan-mode` branch. An earlier design with an elected coordinator is archived on the `elected-mode-archive` branch.
 

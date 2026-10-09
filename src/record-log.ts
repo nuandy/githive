@@ -49,10 +49,27 @@ export interface StateCache {
 	put(ref: string, tip: string, json: string): Promise<void>;
 }
 
+/**
+ * Where a log's ref points, kept for its readers across Worker instances so
+ * that they needn't list the ref on every read. Every write that lands clears
+ * it before it returns, so a read never sees a tip older than a finished
+ * write; a listing is kept only under the generation it began in, so one that
+ * raced a write is dropped. What's kept also goes stale after a few seconds,
+ * in case a write couldn't clear it.
+ */
+export interface TipCache {
+	/** The tip kept for `ref` (null: no ref), with its state when kept under `stateKey`; or none, and the generation to keep a listing under. */
+	get(ref: string, stateKey: string): Promise<{ tip?: string | null; json?: string; gen: number }>;
+	keep(ref: string, tip: string | null, gen: number): Promise<void>;
+	moved(ref: string): Promise<void>;
+}
+
 /** The log as compare-and-swap storage. */
 export interface CasLog<S> {
 	/** The tip and its commit, or null when nothing has been written. */
 	read(): Promise<{ tip: string; commit: LogCommit<S> } | null>;
+	/** As read, but from the ref as Git has it now, never a kept tip (see TipCache). */
+	readFresh?(): Promise<{ tip: string; commit: LogCommit<S> } | null>;
 	/** Append on top of `parent` (null for an empty log): the new tip, or null when the tip had moved. */
 	append(parent: string | null, commit: LogCommit<S>): Promise<string | null>;
 	/** Why the last append didn't land: another writer moved the tip, or the server stayed busy. */
@@ -204,24 +221,46 @@ export class GitCasLog<S> implements CasLog<S> {
 	private readonly upgrades: Readonly<Record<number, Upgrade>>;
 	/** Commits this log's other readers (other Worker instances) already read, by tip (see StateCache). */
 	private readonly states?: StateCache;
+	/** Where its ref points, as other readers last listed it (see TipCache). */
+	private readonly tips?: TipCache;
 
 	/** The log at `ref` in the repo `remote` reaches (`_repo` names it, for callers' readability). */
 	constructor(
 		private readonly remote: () => Promise<Remote>,
 		_repo: string,
 		ref: string,
-		options: { format?: number; upgrades?: Readonly<Record<number, Upgrade>>; states?: StateCache } = {},
+		options: { format?: number; upgrades?: Readonly<Record<number, Upgrade>>; states?: StateCache; tips?: TipCache } = {},
 	) {
 		this.ref = ref;
 		this.format = options.format ?? RECORD_FORMAT;
 		this.upgrades = options.upgrades ?? UPGRADES;
 		if (options.states) this.states = options.states;
+		if (options.tips) this.tips = options.tips;
 	}
 
 	async read(): Promise<{ tip: string; commit: LogCommit<S> } | null> {
+		if (!this.tips) return this.readFresh();
+		const kept = await this.tips.get(this.ref, this.stateKey).catch(() => null);
+		if (kept?.tip !== undefined) {
+			// Kept with its state: no Git request at all.
+			if (kept.tip && kept.json && this.held?.tip !== kept.tip) return { tip: kept.tip, commit: JSON.parse(kept.json) as LogCommit<S> };
+			return this.readAt(kept.tip);
+		}
+		const remote = await this.remote();
+		const tip = await retryTransient(() => serverTip(remote, this.ref));
+		if (kept) void this.tips.keep(this.ref, tip, kept.gen).catch(() => undefined);
+		return this.readAt(tip);
+	}
+
+	async readFresh(): Promise<{ tip: string; commit: LogCommit<S> } | null> {
 		const remote = await this.remote();
 		// Reads change nothing, so a brief server failure is simply retried.
 		return this.readAt(await retryTransient(() => serverTip(remote, this.ref)));
+	}
+
+	/** States are kept with the format they were read in, so a GitHive reading another format never takes one. */
+	private get stateKey() {
+		return `${this.ref}@${this.format}`;
 	}
 
 	/** Read the log, already knowing where its ref points (from a listing): no need to ask the server again. */
@@ -230,7 +269,7 @@ export class GitCasLog<S> implements CasLog<S> {
 		if (!current) return null;
 		// Another reader already read this tip: a commit never changes, so its state is the same (no fetch).
 		if (this.held?.tip !== current && this.states) {
-			const json = await this.states.get(`${this.ref}@${this.format}`, current).catch(() => undefined);
+			const json = await this.states.get(this.stateKey, current).catch(() => undefined);
 			if (json) return { tip: current, commit: JSON.parse(json) as LogCommit<S> };
 		}
 		// Fetch only if the tip moved since this log last saw it.
@@ -255,8 +294,7 @@ export class GitCasLog<S> implements CasLog<S> {
 			},
 		};
 		// For the other readers: kept by tip, so it's never stale.
-		// Keyed with the format it was read in, so a GitHive reading another format never takes it.
-		if (this.states) void this.states.put(`${this.ref}@${this.format}`, tip, JSON.stringify(read.commit)).catch(() => undefined);
+		if (this.states) void this.states.put(this.stateKey, tip, JSON.stringify(read.commit)).catch(() => undefined);
 		return read;
 	}
 
@@ -311,6 +349,9 @@ export class GitCasLog<S> implements CasLog<S> {
 			this.held = null;
 			throw err;
 		}
+		// Moved, by this write or another: readers must list it again. Before returning, so that
+		// anything this write's caller does next reads it (see TipCache).
+		if (landed !== "busy") await this.tips?.moved(this.ref).catch(() => undefined);
 		// Not landed: the ref moved since `tip` and compare-and-swap lost, or the server stayed busy.
 		this.held = landed === true ? { fs, tip: oid } : null;
 		this.lastRefusal = landed === true ? null : landed === "busy" ? "busy" : "moved";
