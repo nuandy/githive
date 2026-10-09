@@ -245,9 +245,11 @@ async function landedAlready(landing: Landing, change: string, head?: string): P
 }
 
 /**
- * The batch size that keeps a branch's check runs fewest: about one failure
- * per batch, 1/p, with p the share of its recent changes whose checks failed
- * (counted with a prior of 1 in 20, so a new branch starts at 20). Between
+ * The batch size: about one failure per batch, 1/p, with p the share of its
+ * recent changes whose checks failed. The fewest check runs come at about half
+ * that, with a flat curve: 1/p spends a few percent more runs for batches that
+ * land more changes at once (see docs/design.md, Landing). p is counted with a
+ * prior of 1 in 20, so a new branch starts at 20. Between
  * MIN_BATCH and MAX_BATCH.
  */
 export function batchSize(recent: Pick<Settled, "how">[]) {
@@ -337,7 +339,7 @@ async function landBatch(input: MergeInput, landing: Landing, holding: Holding):
 		await holding.step(STEP_MS.records);
 		const main = (await headOf(input)) ?? fail409(`there's no branch ${input.branch}`);
 		const batchGit = input.batchGit ?? memoryBatchGit(input.remote, input.stamper);
-		// As many as keeps the branch's check runs fewest, from what its recent changes came to.
+		// About one failure per batch, from what the branch's recent changes came to (see batchSize).
 		const size = batchSize((await landing.view()).recent);
 		// This merge's own change, and the others approved as last seen: their heads and files read in one go.
 		const mine: BatchSource = { change: input.change, ref: `changes/${input.change}`, ...(input.source ? { source: input.source } : {}), agent: input.agent };
