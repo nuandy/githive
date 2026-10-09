@@ -53,6 +53,10 @@ export interface Landing {
 	checking(batch: Checking | null): Promise<void>;
 	settle(outcomes: Settled[]): Promise<void>;
 	view(): Promise<LandingView>;
+	/** Whether `heads`, merged onto `base` in this order, passed the checks already: then the same code needn't be checked again. */
+	passed(base: string, heads: string[]): Promise<boolean>;
+	/** `heads` merged onto `base` in this order passed the checks. */
+	checked(base: string, heads: string[]): Promise<void>;
 }
 
 /** How many settled changes are kept: enough for a merge waiting on a batch to find its own. */
@@ -63,7 +67,22 @@ export interface LandingState {
 	lease?: { holder: string; until: number };
 	checking: Checking | null;
 	recent: Settled[];
+	/**
+	 * Batches (and parts of them) that passed the checks lately: a main, and
+	 * the changes merged onto it in order. A batch whose merge went away before
+	 * it landed (Cloudflare dropped it, say) is checked again by the next merge
+	 * on the same code; this spares that.
+	 */
+	passed?: { base: string; heads: string; at: string }[];
 }
+
+/** How many passed checks are kept. */
+export const PASSED_KEPT = 100;
+
+export const wasChecked = (state: LandingState, base: string, heads: string[]) => !!state.passed?.some((p) => p.base === base && p.heads === heads.join(" "));
+
+export const markChecked = (state: LandingState, base: string, heads: string[], now = new Date()): LandingState =>
+	wasChecked(state, base, heads) ? state : { ...state, passed: [...(state.passed ?? []), { base, heads: heads.join(" "), at: now.toISOString() }].slice(-PASSED_KEPT) };
 
 export const emptyLanding = (): LandingState => ({ checking: null, recent: [] });
 
@@ -111,5 +130,9 @@ export function memoryLanding(): Landing {
 			state = settleOutcomes(state, outcomes);
 		},
 		view: async () => ({ checking: state.checking, recent: state.recent }),
+		passed: async (base, heads) => wasChecked(state, base, heads),
+		checked: async (base, heads) => {
+			state = markChecked(state, base, heads);
+		},
 	};
 }

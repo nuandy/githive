@@ -561,13 +561,17 @@ there, never Git. No clock decides how long a merge waits: it waits for as
 long as another merge holds the lease, and takes the lease once it's free or
 ran out, and its own batch always takes its own change. Oldest claims go
 first, so every batch brings a waiting change closer. The merge holding the
-lease keeps it as each step starts, for as long as that step can take: five
-minutes to read or land a batch in the Gate, two to read or write records,
-and for a check run, ten minutes per command (the Gate stops a command
-there) with twenty more for an install and setting up. A merge takes the
-lease for three minutes, until its first step starts, and a waiting merge
-looks again every 3 s. A step stuck past its bound lets the lease run out, and
-a waiting merge takes over. A merge hands the lease on once its own change has
+lease keeps it by a heartbeat: every 30 s it keeps the lease 2 minutes ahead,
+but only while the step it's on is within that step's bound: five minutes to
+read or land a batch in the Gate, two to read or write records, and for a
+check run, ten minutes per command (the Gate stops a command there) with
+twenty more for an install and setting up. A merge that died (Cloudflare
+dropped its request, say) lets the lease run out within 2 minutes, and one
+stuck in a step that soon after the step's bound; a waiting merge, looking
+again every 3 s, takes over. A merge takes the lease for three minutes, until
+its heartbeat starts. And what passed the checks is kept with the lease (the
+last 100 passes: a main, and the changes merged onto it in order), so a merge
+taking over a batch whose merge died doesn't check the same code again. A merge hands the lease on once its own change has
 settled, or after 4 batches if it hasn't, and then waits its turn. Only the
 request has a clock: Cloudflare drops one held open past about 20 minutes (at
 200 agents, four waiting merges got a 502 after 21-25 minutes), so a merge

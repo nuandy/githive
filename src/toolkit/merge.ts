@@ -117,9 +117,9 @@ const PRIOR_OUTCOMES = 20;
 export const LEASE_MS = 3 * 60_000;
 /**
  * The longest each step of landing a batch can take. The merge holding the
- * lease keeps it that long as each step starts: a step stuck past its bound
- * lets the lease run out, and a waiting merge takes over. No clock decides
- * anything else: a merge waits for as long as someone holds the lease.
+ * lease keeps it by a heartbeat only while the step running is within its
+ * bound: a step stuck past it lets the lease run out soon after, and a merge
+ * that died lets it run out within LEASE_TTL_MS; a waiting merge takes over.
  */
 const STEP_MS = {
 	/** In the repo's Gate: starting its container, then reading every change of a batch, or landing them. */
@@ -130,6 +130,9 @@ const STEP_MS = {
 	checkCommand: 10 * 60_000,
 };
 const POLL_MS = 3_000;
+/** How often a merge holding the lease shows it's alive, and how far ahead each time keeps the lease. */
+const HEARTBEAT_MS = 30_000;
+export const LEASE_TTL_MS = 2 * 60_000;
 /**
  * How long a merge waits before it answers "still waiting" (merging again
  * waits on), and how long one holding the lease goes on starting batches.
@@ -193,6 +196,9 @@ export interface MergeInput {
 	pollMs?: number;
 	/** How long before a merge answers, landed or not (ANSWER_WITHIN_MS unless set, as tests do). */
 	answerWithinMs?: number;
+	/** The lease's heartbeat and how far ahead each beat keeps it (HEARTBEAT_MS and LEASE_TTL_MS unless set, as tests do). */
+	heartbeatMs?: number;
+	leaseTtlMs?: number;
 }
 
 export type MergeOutcome =
@@ -312,7 +318,7 @@ function outcomeOf(settled: Settled): MergeOutcome {
 	return { ok: false, reasons: settled.reasons ?? ["it didn't land"], ...(settled.checks ? { checks: settled.checks } : {}) };
 }
 
-/** The branch's lease, held by this merge: kept as each step starts, for as long as that step can take (see STEP_MS). */
+/** The branch's lease, held by this merge: kept by its heartbeat while the step running is within its bound (see STEP_MS). */
 interface Holding {
 	step(ms: number): Promise<void>;
 	/** False once the lease ran out and another merge took it. */
@@ -327,12 +333,21 @@ interface Holding {
  */
 async function landWhileHeld(input: MergeInput, landing: Landing, holder: string, answerBy: number): Promise<MergeOutcome | null> {
 	let held = true;
+	// Until when the step running now may take (the longest, with steps side by side): the heartbeat stops past it.
+	let stepUntil = Date.now() + LEASE_MS;
+	const keep = async () => {
+		if (held && Date.now() < stepUntil) held &&= await landing.renew(holder, input.leaseTtlMs ?? LEASE_TTL_MS).catch(() => held);
+	};
+	// While this merge is alive and its step within its bound, the lease is kept a little ahead: a merge that died (its
+	// request dropped, say) lets it run out within LEASE_TTL_MS, and one stuck in a step that soon after the step's bound.
+	const beat = setInterval(() => void keep(), input.heartbeatMs ?? HEARTBEAT_MS);
 	const holding: Holding = {
 		get held() {
 			return held;
 		},
 		step: async (ms) => {
-			held &&= await landing.renew(holder, ms).catch(() => held);
+			stepUntil = Math.max(stepUntil, Date.now() + ms);
+			await keep();
 		},
 	};
 	try {
@@ -345,6 +360,7 @@ async function landWhileHeld(input: MergeInput, landing: Landing, holder: string
 		}
 		return null;
 	} finally {
+		clearInterval(beat);
 		await landing.drop(holder).catch(() => undefined);
 	}
 }
@@ -403,7 +419,7 @@ async function landBatch(input: MergeInput, landing: Landing, holding: Holding):
 		if (tested) {
 			if (!input.runChecks) throw new Error("[500] checks are configured but nothing can run them");
 			await landing.checking({ base: main, since: new Date().toISOString(), changes: batch.map((r) => ({ change: r.change, head: r.head, agent: r.agent })) });
-			const failed = await checkBatch(input, main, batch, holding, place, found);
+			const failed = await checkBatch(input, landing, main, batch, holding, place, found);
 			await holding.step(STEP_MS.records);
 			for (const { ready, results } of failed) settled.push(await putOut(input, ready, results));
 		} else found(batch);
@@ -423,22 +439,29 @@ async function landBatch(input: MergeInput, landing: Landing, holding: Holding):
 
 /**
  * Check `batch` on main, in its `place`: each part found passing is `found`
- * (the batch, if it passes whole). Failing, its halves are checked side by
+ * (the batch, if it passes whole). A part that passed already, on the same
+ * main in the same order, isn't checked again. Failing, its halves are checked side by
  * side. One change failing alone is checked once more, then is one of those
  * returned, to be put out.
  */
-async function checkBatch(input: MergeInput, main: string, batch: Ready[], holding: Holding, place: Place, found: (part: Ready[]) => void): Promise<{ ready: Ready; results: CheckResult[] }[]> {
+async function checkBatch(input: MergeInput, landing: Landing, main: string, batch: Ready[], holding: Holding, place: Place, found: (part: Ready[]) => void): Promise<{ ready: Ready; results: CheckResult[] }[]> {
+	const heads = batch.map((r) => r.head);
 	// A check run is its commands, an install the Gate may add, and setting up: each as long as the Gate lets a command run.
-	const run = async () => (
-		await holding.step((input.verify!.length + 2) * STEP_MS.checkCommand),
-		input.runChecks!({
+	const run = async () => {
+		await holding.step((input.verify!.length + 2) * STEP_MS.checkCommand);
+		const checked = await input.runChecks!({
 			base: main,
 			branch: input.branch,
 			changes: batch.map((r) => ({ change: r.change, head: r.head, ref: r.ref, ...(r.source ? { source: r.source } : {}), agent: r.agent })),
 			commands: input.verify!,
 			gate: `${place.search}-${place.slot}`,
-		})
-	);
+		});
+		// Kept, so a merge that takes this batch over (this one's request dropped before it landed) needn't check it again.
+		if (checked.passed) await landing.checked(main, heads).catch(() => undefined);
+		return checked;
+	};
+	// The same changes on the same main, in the same order, passed already: the same code, so no check.
+	if (await landing.passed(main, heads).catch(() => false)) return (found(batch), []);
 	const first = await run();
 	if (first.passed) return (found(batch), []);
 	if (batch.length === 1) {
@@ -448,7 +471,7 @@ async function checkBatch(input: MergeInput, main: string, batch: Ready[], holdi
 	const half = Math.ceil(batch.length / 2);
 	// The first half stays in this container, where its changes ran just now; the second takes another, and keeps it for its own halves.
 	const second = { ...place, slot: place.slots.next++ };
-	const [a, b] = await Promise.all([checkBatch(input, main, batch.slice(0, half), holding, place, found), checkBatch(input, main, batch.slice(half), holding, second, found)]);
+	const [a, b] = await Promise.all([checkBatch(input, landing, main, batch.slice(0, half), holding, place, found), checkBatch(input, landing, main, batch.slice(half), holding, second, found)]);
 	return [...a, ...b];
 }
 

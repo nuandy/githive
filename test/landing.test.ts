@@ -201,6 +201,31 @@ describe("landing ready changes together", { timeout: 120_000 }, () => {
 		expect(landed()).toEqual(["a-1"]);
 	});
 
+	it("doesn't check again what passed on the same main, in the same order (a merge that took over a dropped one's batch)", async () => {
+		const head = await readyChange("a-1", { "src/a.txt": "a\n" });
+		const landing = memoryLanding();
+		await landing.checked(server.git("rev-parse", "main").trim(), [head]);
+		const runs: string[][] = [];
+		expect(await merge("a-1", runner(new Set(), runs), landing)).toMatchObject({ ok: true });
+		expect(runs).toEqual([]);
+		expect(landed()).toEqual(["a-1"]);
+	});
+
+	it("keeps the lease by a heartbeat through a long check: a merge waiting doesn't take over and check again", async () => {
+		for (const x of ["a", "b"]) await readyChange(`${x}-1`, { [`src/${x}.txt`]: `${x}\n` });
+		const landing = memoryLanding();
+		const runs: string[][] = [];
+		// Checks far longer than the lease lasts without a beat.
+		const slow: CheckRunner = async (input) => (await new Promise((resolve) => setTimeout(resolve, 600)), runner(new Set(), runs)(input));
+		const go = (change: string) =>
+			mergeChange({ remote: remote(), branch: "main", store: store(), votes: voteStore({ repo: "t1", root: votes(), remote: async () => remote() }), policy, verify: ["npm test"], runChecks: slow, change, agent: `agent-${change}`, others, landing, pollMs: 20, heartbeatMs: 50, leaseTtlMs: 150 });
+		const [a, b] = await Promise.all([go("a-1"), go("b-1")]);
+		expect(a).toMatchObject({ ok: true });
+		expect(b).toMatchObject({ ok: true });
+		// One batch, checked once: the waiting merge never took the lease from the one checking.
+		expect(runs).toEqual([["a-1", "b-1"]]);
+	});
+
 	it("starts no batch once it should be answering: the lease goes to a merge that's waiting", async () => {
 		await readyChange("a-1", { "src/a.txt": "a\n" });
 		const runs: string[][] = [];

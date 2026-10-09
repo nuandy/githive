@@ -220,6 +220,8 @@ export function toolContextFor(env: Env, by: string | undefined, caller: { agent
 				checking: (batch) => rpcRetried(() => cache().landingChecking(branch, batch)),
 				settle: (outcomes) => rpcRetried(() => cache().landingSettled(branch, outcomes)),
 				view: () => rpcRetried(() => cache().landingView(branch)),
+				passed: (base, heads) => rpcRetried(() => cache().landingPassed(branch, base, heads)),
+				checked: (base, heads) => rpcRetried(() => cache().landingChecked(branch, base, heads)),
 			};
 		},
 	};
