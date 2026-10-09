@@ -340,12 +340,14 @@ export class Gate extends DurableObject<Env> {
 		// The batch's changes, its others and then the change, fetched at once (one at a time, they were most of a big
 		// batch's check). Branches, not bare commits (fetching a hash depends on server settings): each approved commit
 		// is in its branch's history.
+		// A container a batch's search reuses has most of them already: only what's missing is fetched.
 		const sources = [...(plan.ahead ?? []).map((a) => ({ remote: a.remote, token: a.token, ref: a.ref ?? branch })), plan.fork];
-		const failed = await this.fetchChanges(container, sources.map((source, k) => ({ k, ...source })));
-		for (const [k, why] of failed) throw new Error(`fetch of ${k === sources.length - 1 ? "the change" : "a change in the batch"} failed: ${why}`);
 		const commits = [...(plan.ahead ?? []).map((a) => a.head), head];
-		const missing = await run(container, ["bash", "-c", commits.map((c) => `git cat-file -e ${c}^{commit} 2>/dev/null || echo ${c}`).join("\n")]);
-		if (missing.output.trim()) throw new Error(`approved commits not on their branches: ${missing.output.trim().split("\n").join(", ")}`);
+		const absent = async () => (await run(container, ["bash", "-c", commits.map((c, k) => `git cat-file -e ${c}^{commit} 2>/dev/null || echo ${k}`).join("\n")])).output.split("\n").filter(Boolean).map(Number);
+		const failed = await this.fetchChanges(container, (await absent()).map((k) => ({ k, ...sources[k] })));
+		for (const [k, why] of failed) throw new Error(`fetch of ${k === sources.length - 1 ? "the change" : "a change in the batch"} failed: ${why}`);
+		const missing = await absent();
+		if (missing.length) throw new Error(`approved commits not on their branches: ${missing.map((k) => commits[k]).join(", ")}`);
 
 		// A clean checkout of the base; ignored files (node_modules) survive `git clean -fd`.
 		await run(container, ["bash", "-lc", `git merge --abort 2>/dev/null; git checkout -q -f --detach ${plan.baseHead} && git clean -fdq`]);

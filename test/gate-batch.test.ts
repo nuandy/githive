@@ -121,8 +121,14 @@ describe("reading and landing a batch in the repo's own Gate", { timeout: 60_000
 		// Both changes merged onto main: the check sees both files.
 		expect(await changeGate.checkCommit({ ...batch, checks: ["test -f src/a.txt && test -f src/b.txt"] })).toMatchObject({ passed: true, head: b, baseHead: main });
 		expect(await changeGate.checkCommit({ ...batch, checks: ["test -f src/missing.txt"] })).toMatchObject({ passed: false });
-		// A change whose branch can't be fetched fails the check's setup, naming it.
-		const lost = await changeGate.checkCommit({ ...batch, ahead: [{ head: a, ...source("gone-1") }], checks: ["true"] });
+		// Checked again in the same container (a batch's search reuses it): its commits are here, so nothing is fetched,
+		// not even from a branch that's gone since.
+		const again = await changeGate.checkCommit({ ...batch, ahead: [{ head: a, ...source("gone-1") }], checks: ["test -f src/a.txt && test -f src/b.txt"] });
+		expect(again).toMatchObject({ passed: true });
+		// A change whose branch can't be fetched, and isn't here, fails the check's setup, naming it.
+		const c = await pushChange(server.url, work, "agent-c-1", "c-1", { "src/c.txt": "c\n" });
+		server.git("update-ref", "-d", "refs/heads/changes/c-1");
+		const lost = await changeGate.checkCommit({ ...batch, ahead: [{ head: c, ...source("c-1") }], checks: ["true"] });
 		expect(lost).toMatchObject({ passed: false, results: [{ command: "(gate setup)", output: expect.stringContaining("fetch of a change in the batch failed") }] });
 	});
 

@@ -155,7 +155,7 @@ export function toolContextFor(env: Env, by: string | undefined, caller: { agent
 		runChecks: (repo) => {
 			const read = () => cached(env, repo, `${repo}|read`, () => remoteFor(env.ARTIFACTS, repo, "read", 3600));
 			const fork = (agent: string) => cached(env, repo, `fork:${repo}:${agent}|read`, () => changeRemote(env, repo, agent, "read", 3600));
-			return async ({ base, branch, changes, commands }) => {
+			return async ({ base, branch, changes, commands, gate }) => {
 				const remote = await read();
 				const sourceOf = async (c: (typeof changes)[number]) => {
 					const from = c.source ?? (await fork(c.agent));
@@ -164,7 +164,9 @@ export function toolContextFor(env: Env, by: string | undefined, caller: { agent
 				const last = changes.at(-1)!;
 				const ahead = await Promise.all(changes.slice(0, -1).map(async (c) => ({ head: c.head, ...(await sourceOf(c)) })));
 				const forkOf = await sourceOf(last);
-				const result = await rpcRetried(() => env.GATE.getByName(`repo:${repo}:change:${last.change}`).checkCommit({ repo, branch, base: { remote: remote.url, token: remote.token }, fork: forkOf, head: last.head, checks: commands, baseHead: base, ahead }));
+				// The batch's own Gates (see checkBatch's Place), or the last change's.
+				const name = gate ? `repo:${repo}:check:${gate}` : `repo:${repo}:change:${last.change}`;
+				const result = await rpcRetried(() => env.GATE.getByName(name).checkCommit({ repo, branch, base: { remote: remote.url, token: remote.token }, fork: forkOf, head: last.head, checks: commands, baseHead: base, ahead }));
 				const conflict = result.mergeConflict ? [{ command: "(merging the batch onto main)", exitCode: 1, output: `conflicts in ${result.mergeConflict.join(", ")}` }] : [];
 				return { passed: result.passed, results: [...conflict, ...result.results.map((r) => ({ command: r.command, exitCode: r.exitCode, output: r.output }))] };
 			};

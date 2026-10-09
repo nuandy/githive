@@ -56,10 +56,24 @@ export interface BatchChange {
 
 /**
  * Runs the project's checks on `base` (main) with `changes` merged in, in
- * order: what main becomes with all of them landed. Live, in the Gate's
- * container (the last change's).
+ * order: what main becomes with all of them landed. Live, in a Gate's
+ * container: the one named `gate` (see checkBatch), else the last change's.
  */
-export type CheckRunner = (input: { base: string; branch: string; changes: BatchChange[]; commands: string[] }) => Promise<{ passed: boolean; results: CheckResult[] }>;
+export type CheckRunner = (input: { base: string; branch: string; changes: BatchChange[]; commands: string[]; gate?: string }) => Promise<{ passed: boolean; results: CheckResult[] }>;
+
+/**
+ * Where a batch's checks run: a few containers of its own, named for the
+ * batch (`search`) and a place in its search for a failure (`slot`), so each
+ * round of the search finds its container running, with the batch fetched and
+ * its dependencies installed. Only that batch's code ever runs in them, and
+ * they stop a minute after its search, as every check container does.
+ */
+interface Place {
+	search: string;
+	slot: number;
+	/** The next slot free in this search. */
+	slots: { next: number };
+}
 
 /** A change in a batch, before its head is read: its branch, and where it lives. */
 export type BatchSource = Omit<BatchChange, "head">;
@@ -345,7 +359,7 @@ async function landBatch(input: MergeInput, landing: Landing, holding: Holding):
 		if (tested) {
 			if (!input.runChecks) throw new Error("[500] checks are configured but nothing can run them");
 			await landing.checking({ base: main, since: new Date().toISOString(), changes: batch.map((r) => ({ change: r.change, head: r.head, agent: r.agent })) });
-			const checked = await checkBatch(input, main, batch, holding);
+			const checked = await checkBatch(input, main, batch, holding, { search: crypto.randomUUID().slice(0, 12), slot: 0, slots: { next: 1 } });
 			pass = checked.pass;
 			await holding.step(STEP_MS.records);
 			for (const { ready, results } of checked.failed) settled.push(await putOut(input, ready, results));
@@ -369,14 +383,24 @@ async function landBatch(input: MergeInput, landing: Landing, holding: Holding):
 }
 
 /**
- * Check `batch` on main. Passing, it lands whole. Failing, its halves are
- * checked side by side; each was checked on main alone, so only one passing
- * part can land as checked (the bigger), and the rest wait for the next
- * batch. One change failing alone is checked once more, then put out.
+ * Check `batch` on main, in its `place`. Passing, it lands whole. Failing,
+ * its halves are checked side by side; each was checked on main alone, so
+ * only one passing part can land as checked (the bigger), and the rest wait
+ * for the next batch. One change failing alone is checked once more, then put
+ * out.
  */
-async function checkBatch(input: MergeInput, main: string, batch: Ready[], holding: Holding): Promise<{ pass: Ready[]; failed: { ready: Ready; results: Awaited<ReturnType<CheckRunner>>["results"] }[] }> {
+async function checkBatch(input: MergeInput, main: string, batch: Ready[], holding: Holding, place: Place): Promise<{ pass: Ready[]; failed: { ready: Ready; results: Awaited<ReturnType<CheckRunner>>["results"] }[] }> {
 	// A check run is its commands, an install the Gate may add, and setting up: each as long as the Gate lets a command run.
-	const run = async () => (await holding.step((input.verify!.length + 2) * STEP_MS.checkCommand), input.runChecks!({ base: main, branch: input.branch, changes: batch.map((r) => ({ change: r.change, head: r.head, ref: r.ref, ...(r.source ? { source: r.source } : {}), agent: r.agent })), commands: input.verify! }));
+	const run = async () => (
+		await holding.step((input.verify!.length + 2) * STEP_MS.checkCommand),
+		input.runChecks!({
+			base: main,
+			branch: input.branch,
+			changes: batch.map((r) => ({ change: r.change, head: r.head, ref: r.ref, ...(r.source ? { source: r.source } : {}), agent: r.agent })),
+			commands: input.verify!,
+			gate: `${place.search}-${place.slot}`,
+		})
+	);
 	const first = await run();
 	if (first.passed) return { pass: batch, failed: [] };
 	if (batch.length === 1) {
@@ -384,7 +408,9 @@ async function checkBatch(input: MergeInput, main: string, batch: Ready[], holdi
 		return again.passed ? { pass: batch, failed: [] } : { pass: [], failed: [{ ready: batch[0], results: again.results }] };
 	}
 	const half = Math.ceil(batch.length / 2);
-	const [a, b] = await Promise.all([checkBatch(input, main, batch.slice(0, half), holding), checkBatch(input, main, batch.slice(half), holding)]);
+	// The first half stays in this container, where its changes ran just now; the second takes another, and keeps it for its own halves.
+	const second = { ...place, slot: place.slots.next++ };
+	const [a, b] = await Promise.all([checkBatch(input, main, batch.slice(0, half), holding, place), checkBatch(input, main, batch.slice(half), holding, second)]);
 	return { pass: a.pass.length >= b.pass.length ? a.pass : b.pass, failed: [...a.failed, ...b.failed] };
 }
 

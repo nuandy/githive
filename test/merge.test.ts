@@ -76,7 +76,7 @@ describe("merge", { timeout: 60_000 }, () => {
 		const main = server.git("rev-parse", "main").trim();
 		const failing: CheckRunner = vi.fn(async () => ({ passed: false, results: [{ command: "npm test", exitCode: 1, output: "1 failing" }] }));
 		expect(await merge("a-1", failing)).toEqual({ ok: false, reasons: ["checks failed: npm test exited 1"], checks: [{ command: "npm test", exitCode: 1, output: "1 failing" }] });
-		expect(failing).toHaveBeenCalledWith({ base: main, branch: "main", changes: [{ change: "a-1", head, ref: "changes/a-1", agent: "agent-a-1" }], commands: ["npm test"] });
+		expect(failing).toHaveBeenCalledWith({ base: main, branch: "main", changes: [{ change: "a-1", head, ref: "changes/a-1", agent: "agent-a-1" }], commands: ["npm test"], gate: expect.stringMatching(/-0$/) });
 		expect(failing).toHaveBeenCalledTimes(2);
 		expect(server.git("rev-parse", "main").trim()).toBe(main);
 	});

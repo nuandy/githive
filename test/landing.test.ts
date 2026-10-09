@@ -49,10 +49,11 @@ describe("landing ready changes together", { timeout: 120_000 }, () => {
 	}
 
 	/** Checks that fail when a change in `failing` is among what they ran (and, once, when `flaky` is), slowly enough for merges to meet. */
-	function runner(failing = new Set<string>(), runs: string[][] = [], flaky?: string): CheckRunner {
+	function runner(failing = new Set<string>(), runs: string[][] = [], flaky?: string, gates: string[] = []): CheckRunner {
 		let flaked = false;
-		return async ({ changes }) => {
+		return async ({ changes, gate }) => {
 			runs.push(changes.map((c) => c.change));
+			gates.push(gate ?? "");
 			await new Promise((resolve) => setTimeout(resolve, 50));
 			const flake = !!flaky && !flaked && changes.some((c) => c.change === flaky);
 			flaked ||= flake;
@@ -110,8 +111,17 @@ describe("landing ready changes together", { timeout: 120_000 }, () => {
 		const heads: Record<string, string> = {};
 		for (const x of ["a", "b", "c", "d"]) heads[x] = await readyChange(`${x}-1`, { [`src/${x}.txt`]: `${x}\n` });
 		const runs: string[][] = [];
-		expect(await merge("a-1", runner(new Set(["b-1"]), runs))).toMatchObject({ ok: true });
+		const gates: string[] = [];
+		expect(await merge("a-1", runner(new Set(["b-1"]), runs, undefined, gates))).toMatchObject({ ok: true });
 		expect(landed().sort()).toEqual(["a-1", "c-1", "d-1"]);
+		// The search reused the batch's own containers: a half stays where its batch ran, the other takes one more.
+		const first = runs.findIndex((r) => r.length === 4);
+		const search = gates[first].replace(/-0$/, "");
+		const where = (changes: string[]) => gates.filter((_, i) => runs[i].join() === changes.join());
+		expect(where(["a-1", "b-1", "c-1", "d-1"])).toEqual([`${search}-0`]);
+		expect(where(["a-1", "b-1"])).toEqual([`${search}-0`]);
+		expect(where(["c-1", "d-1"])).toEqual([`${search}-1`]);
+		expect(where(["b-1"])).toEqual([`${search}-2`, `${search}-2`]);
 		// b was checked alone twice (a failing run isn't trusted once) before it was put out.
 		expect(runs.filter((r) => r.length === 1 && r[0] === "b-1").length).toBe(2);
 		const rejected = (await votes().read())!.commit.state.votes.filter((v) => v.reviewer === CHECKS_REVIEWER);
