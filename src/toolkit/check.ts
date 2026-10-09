@@ -1,4 +1,4 @@
-import { branchHead, type Remote, Workspace } from "../git";
+import { branchHead, inWorkspaceTurn, type Remote, Workspace } from "../git";
 import { inLane } from "../claim-paths";
 import type { ClaimRecord } from "./claims";
 
@@ -35,19 +35,22 @@ export async function checkChange(input: CheckInput) {
 	// Workspace.at).
 	const listed = (input.branchHead ? await input.branchHead().catch(() => undefined) : undefined) ?? (await branchHead(input.project, input.branch));
 	if (!listed) throw new Error(`[409] ${input.branch} doesn't exist yet`);
-	const ws = await Workspace.at(input.project, input.branch, listed);
-	const main = await ws.head();
-	const head = await ws.fetch("change", input.source, `changes/${change}`).catch(() => null);
-	if (!head) throw new Error(`[409] changes/${change} has nothing pushed to check`);
-	const files = (await ws.changedPaths(await ws.mergeBase(main, head), head)).sort();
-	const own = claims.find((c) => c.change === change);
-	const withMain = await ws.tryMerge(main, head);
-	return {
-		change,
-		head,
-		/** The project's branch it was checked against (the result's `main` is that branch, whatever its name). */
-		branch: ws.branch,
-		main: withMain.clean ? { head: main, clean: true } : { head: main, clean: false, conflicts: withMain.files },
-		outsideClaim: files.filter((f) => !own || !inLane(f, own.paths)),
-	};
+	// Its Git work in turn with the isolate's other calls (see inWorkspaceTurn).
+	return inWorkspaceTurn(async () => {
+		const ws = await Workspace.at(input.project, input.branch, listed);
+		const main = await ws.head();
+		const head = await ws.fetch("change", input.source, `changes/${change}`).catch(() => null);
+		if (!head) throw new Error(`[409] changes/${change} has nothing pushed to check`);
+		const files = (await ws.changedPaths(await ws.mergeBase(main, head), head)).sort();
+		const own = claims.find((c) => c.change === change);
+		const withMain = await ws.tryMerge(main, head);
+		return {
+			change,
+			head,
+			/** The project's branch it was checked against (the result's `main` is that branch, whatever its name). */
+			branch: ws.branch,
+			main: withMain.clean ? { head: main, clean: true } : { head: main, clean: false, conflicts: withMain.files },
+			outsideClaim: files.filter((f) => !own || !inLane(f, own.paths)),
+		};
+	});
 }

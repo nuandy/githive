@@ -1,5 +1,5 @@
 import git from "isomorphic-git";
-import { BOT, branchHead, type Remote, Workspace } from "../git";
+import { BOT, branchHead, inWorkspaceTurn, type Remote, Workspace } from "../git";
 import { inLane } from "../claim-paths";
 import { skipsChecks } from "./check-scope";
 import type { ClaimRecord } from "./claims";
@@ -301,14 +301,17 @@ export function batchSize(recent: Pick<Settled, "how">[]) {
 /** The change, as ready as it is on the branch now: refused at once if not, so the agent can act. Read here: one change's worth. */
 async function readyNow(input: MergeInput): Promise<{ ok: true; ready: Ready } | { ok: false; refused: Refused; head: string }> {
 	const main = (await headOf(input)) ?? fail409(`there's no branch ${input.branch}`);
-	// From the branch as kept for the isolate (see Workspace.at): one listing, no clone.
-	const ws = await Workspace.at(input.remote, input.branch, main);
 	const ref = `changes/${input.change}`;
-	const head = await ws.fetch("change", input.source ?? input.remote, ref);
-	const files = await ws.changedPaths(await ws.mergeBase(main, head), head);
+	// Its Git work in turn (see inWorkspaceTurn), from the branch as kept for the isolate (see Workspace.at): one
+	// listing, no clone. Its records are read after, the workspace let go.
+	const { head, files, tried, branch } = await inWorkspaceTurn(async () => {
+		const ws = await Workspace.at(input.remote, input.branch, main);
+		const head = await ws.fetch("change", input.source ?? input.remote, ref);
+		const files = await ws.changedPaths(await ws.mergeBase(main, head), head);
+		return { head, files, tried: await ws.tryMerge(main, head), branch: ws.branch };
+	});
 	const ready = await validated(input, { change: input.change, agent: input.agent, ref, ...(input.source ? { source: input.source } : {}), head, files, mine: true });
 	if (!ready.ok) return { ok: false, refused: ready, head };
-	const tried = await ws.tryMerge(main, head);
 	if (!tried.clean) {
 		const conflicts = tried.files ?? [];
 		return {
@@ -317,7 +320,7 @@ async function readyNow(input: MergeInput): Promise<{ ok: true; ready: Ready } |
 			refused: {
 				ok: false,
 				conflicts,
-				reasons: [`changes/${input.change} conflicts with ${ws.branch} in ${conflicts.join(", ")}: merge ${ws.branch} into your branch, resolve inside your claim, push, and get the new commit approved`],
+				reasons: [`changes/${input.change} conflicts with ${branch} in ${conflicts.join(", ")}: merge ${branch} into your branch, resolve inside your claim, push, and get the new commit approved`],
 			},
 		};
 	}

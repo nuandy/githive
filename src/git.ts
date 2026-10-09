@@ -48,6 +48,31 @@ export const SHALLOW_DEPTH = 64;
 /** Past this depth a deepening fetch is asking for all of history anyway. */
 const FULL_DEPTH = 1 << 20;
 
+/**
+ * How many calls in this isolate work in a workspace at once: each holds its
+ * copy of the project and what it fetched, about 3.5 MB of Express's (0 to 9
+ * MB), until it ends. An isolate has 128 MB for all its requests, and at 200
+ * agents enough merges and checks at once in one went past it ("Worker
+ * exceeded memory limit"), failing every request in it. The rest wait their turn.
+ */
+const WORKSPACES_AT_ONCE = 6;
+let inWorkspaces = 0;
+const waitingForWorkspace: (() => void)[] = [];
+
+/** Do `work`, which uses a workspace, in turn: at most WORKSPACES_AT_ONCE at once in this isolate. */
+export async function inWorkspaceTurn<T>(work: () => Promise<T>): Promise<T> {
+	if (inWorkspaces >= WORKSPACES_AT_ONCE) await new Promise<void>((resolve) => waitingForWorkspace.push(resolve));
+	else inWorkspaces++;
+	try {
+		return await work();
+	} finally {
+		// The turn goes straight to the next waiting, if any; else it's free.
+		const next = waitingForWorkspace.shift();
+		if (next) next();
+		else inWorkspaces--;
+	}
+}
+
 /** Workspaces kept for the isolate by `Workspace.at`, by origin and branch, the most recently used last. */
 const kept = new Map<string, { head: string; ws: Workspace }>();
 const KEPT_WORKSPACES = 4;

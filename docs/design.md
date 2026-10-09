@@ -616,6 +616,15 @@ read that failed notes nothing, so a known head isn't taken for "nothing
 pushed". Artifacts can publish a `pushed` event to a Queue, which would make
 this exact, but only from a subscription on one named repo, one per fork.
 
+**Workspaces in turn.** A merge's first look at its change and a check each
+copy the project as kept for the isolate (Express shallow: 3.6 MB), fetch
+the change into it, and try the merge: about 3.5 MB a call (0 to 9) until it
+ends, all freed after. An isolate has 128 MB for all its requests, and at 200
+agents enough at once in one went past it ("Worker exceeded memory limit"),
+failing every request in it. At most 6 calls an isolate do this at once; the
+rest wait their turn, and a merge reads its records after it's let go of its
+workspace.
+
 A call to the Gate or the RepoCache that failed only because its Durable
 Object or container was briefly away (reset by a runtime update, or a
 container connection briefly unavailable) is tried once more, two seconds
