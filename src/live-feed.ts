@@ -1,4 +1,5 @@
 import { DurableObject } from "cloudflare:workers";
+import { makeAgentFork, makeSeed } from "./toolkit/env";
 
 // One per repo ("repo:<repo>"), for the dashboard:
 //
@@ -38,6 +39,17 @@ interface KeptTip {
 
 /** How long one caller's listing of a ref stands before another is sent. */
 const TIP_LISTING_MS = 3_000;
+
+/** A fork the queue is to make, and how often it has tried. */
+interface ForkJob {
+	item: string;
+	tries: number;
+}
+
+/** Agents' forks the queue makes at once (seeds: one at a time). */
+const AGENT_FORKS_AT_ONCE = 4;
+/** Tries per fork before the queue gives up on it (an agent's own credentials still make it). */
+const FORK_TRIES = 3;
 
 export class LiveFeed extends DurableObject<Env> {
 	async fetch(request: Request) {
@@ -144,13 +156,62 @@ export class LiveFeed extends DurableObject<Env> {
 		if (kept && kept.tip === parent) await this.ctx.storage.put(`tip:${ref}`, { gen: kept.gen + 1 });
 	}
 
+	/**
+	 * Forks to make for this repo in the background: its seeds ("seed:<k>")
+	 * and agents' own ("agent:<name>"), queued once each. Its alarm makes them,
+	 * seeds one at a time (a burst of forks from one repo stalls Artifacts' fork
+	 * jobs), then agents' a few at a time. It only paces fork creation: an
+	 * agent that needs its fork sooner makes it itself, and waits for one the
+	 * queue is making.
+	 */
+	async queueForks(repo: string, items: string[]) {
+		const queue = (await this.ctx.storage.get<ForkJob[]>("forks:queue")) ?? [];
+		const ready = new Set(((await this.ctx.storage.get<number[]>("forks:seeds")) ?? []).map((k) => `seed:${k}`));
+		const fresh = items.filter((item) => !ready.has(item) && !queue.some((job) => job.item === item));
+		if (!fresh.length) return;
+		await this.ctx.storage.put("forks:queue", [...queue, ...fresh.map((item) => ({ item, tries: 0 }))]);
+		await this.ctx.storage.put("forks:repo", repo);
+		if (!(await this.ctx.storage.getAlarm())) await this.ctx.storage.setAlarm(Date.now() + 100);
+	}
+
+	/** The seeds made so far, by number. */
+	async readySeeds() {
+		return (await this.ctx.storage.get<number[]>("forks:seeds")) ?? [];
+	}
+
+	async alarm() {
+		const repo = await this.ctx.storage.get<string>("forks:repo");
+		const queue = (await this.ctx.storage.get<ForkJob[]>("forks:queue")) ?? [];
+		if (!repo || !queue.length) return;
+		const seeds = queue.filter((job) => job.item.startsWith("seed:"));
+		const batch = seeds.length ? seeds.slice(0, 1) : queue.slice(0, AGENT_FORKS_AT_ONCE);
+		const outcomes = await Promise.allSettled(
+			batch.map((job) => (job.item.startsWith("seed:") ? makeSeed(this.env, repo, Number(job.item.slice(5))) : makeAgentFork(this.env, repo, job.item.slice(6)))),
+		);
+		const ready = (await this.ctx.storage.get<number[]>("forks:seeds")) ?? [];
+		const retry: ForkJob[] = [];
+		batch.forEach((job, i) => {
+			if (outcomes[i].status === "fulfilled") {
+				if (job.item.startsWith("seed:")) ready.push(Number(job.item.slice(5)));
+			} else if (job.tries + 1 < FORK_TRIES) retry.push({ ...job, tries: job.tries + 1 });
+			else console.error(`fork queue for ${repo} gave up on ${job.item}: ${String((outcomes[i] as PromiseRejectedResult).reason).slice(0, 200)}`);
+		});
+		// Read again: callers may have queued more meanwhile.
+		const now = (await this.ctx.storage.get<ForkJob[]>("forks:queue")) ?? [];
+		const rest = [...now.filter((job) => !batch.some((b) => b.item === job.item)), ...retry];
+		await this.ctx.storage.put("forks:seeds", [...new Set(ready)].sort((a, b) => a - b));
+		await this.ctx.storage.put("forks:queue", rest);
+		if (rest.length) await this.ctx.storage.setAlarm(Date.now() + 1_000);
+	}
+
 	/** Forget the kept views: the repo was deleted. */
 	async clearViews() {
 		const kept = await this.ctx.storage.list({ prefix: "view:" });
 		const building = await this.ctx.storage.list({ prefix: "building:" });
 		const records = await this.ctx.storage.list({ prefix: "record:" });
 		const tips = await this.ctx.storage.list({ prefix: "tip:" });
-		await this.ctx.storage.delete([...kept.keys(), ...building.keys(), ...records.keys(), ...tips.keys()]);
+		const forks = await this.ctx.storage.list({ prefix: "forks:" });
+		await this.ctx.storage.delete([...kept.keys(), ...building.keys(), ...records.keys(), ...tips.keys(), ...forks.keys()]);
 	}
 
 	private async writes() {

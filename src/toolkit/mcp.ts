@@ -82,6 +82,8 @@ export interface ToolContext {
 	keptClaims?: (repo: string, read: () => Promise<ClaimsAdvice>) => Promise<ClaimsAdvice>;
 	/** The open changes' pushed heads, by change, kept a few seconds the same way (for next). */
 	keptHeads?: (repo: string, read: () => Promise<Record<string, string | null>>) => Promise<Record<string, string | null>>;
+	/** Ask for forks to be made in the background: the repo's seeds, or these agents' own (see LiveFeed's fork queue). */
+	prepareForks?: (repo: string, items: "seeds" | string[]) => Promise<void>;
 	/** Review holds, so next doesn't send two agents to a review that needs one (see review-holds.ts). */
 	reviews?: {
 		held(repo: string): Promise<Record<string, string[]>>;
@@ -846,6 +848,8 @@ async function runTool(name: string, args: Args, ctx: ToolContext): Promise<unkn
 			const sharding = asked ? { shardDepth: asked, recordsRepos } : asked === 0 ? {} : { autoShard: { depth: DEFAULT_SHARD_DEPTH, recordsRepos: spread } };
 			await startRepo(claims, { baseline: await ctx.head(repo, branch), branch, policy, verify, stampKey: stamper?.publicKey, ...sharding });
 			await ctx.register?.(repo);
+			// Agents' forks are made from seeds, made one at a time from now, before agents arrive.
+			await ctx.prepareForks?.(repo, "seeds").catch(() => undefined);
 			const registry = (await claims.read())?.commit.state;
 			// The check containers warm up while agents start: the first merge is minutes away, and a fresh install takes them.
 			if (registry?.verify?.length) await ctx.warmChecks?.(repo, { branch: projectBranch(registry), checks: registry.verify, expect: "set up" }).catch(() => undefined);
@@ -1103,6 +1107,8 @@ async function runTool(name: string, args: Args, ctx: ToolContext): Promise<unkn
 			const newKey = `${agent}.${secret}`;
 			const outcome = await registerAgent(claims, { agent, keyHash: await sha256(newKey), ...(acting ? { holder: acting } : {}) }, stamper);
 			if (!outcome.ok) throw new Error(`[409] ${outcome.refused}`);
+			// Its fork, made in the background now rather than in a crowd on its first push.
+			await ctx.prepareForks?.(repo, [agent]).catch(() => undefined);
 			return { agent, key: newKey, note: "Keep this key secret; it is shown once. Send it as X-GitHive-Agent-Key (or agent_key) with every call." };
 		}
 		default:

@@ -126,6 +126,8 @@ export function toolContextFor(env: Env, by: string | undefined, caller: { agent
 		// The claims for advice, kept in the repo's LiveFeed so a busy repo isn't read whole on every call.
 		keptClaims: (repo, read) => keptRead(env, repo, "claims-advice", KEPT_CLAIMS_MS, read),
 		keptHeads: (repo, read) => keptRead(env, repo, "open-heads", KEPT_HEADS_MS, read),
+		// Forks made in the background, paced, before agents need them: the seeds when GitHive starts, an agent's when it registers.
+		prepareForks: async (repo, items) => void (await env.LIVE?.getByName(`repo:${repo}`).queueForks(repo, items === "seeds" ? seedItems() : items.map((agent) => `agent:${agent}`))),
 		// Review holds are a record in Git (see review-holds.ts), like the claims and votes.
 		reviews: reviewHolds((repo) => recordsLog<ReviewHolds>(env, repo, reviewsRef(repo))),
 		requestReview: (input) => startHostedReviewers(env, input),
@@ -188,46 +190,64 @@ export async function forkName(repo: string, agent: string) {
  * How many seed forks a project's agents' forks are made from. A fork copies
  * its source repo, and a crowd of agents arriving at once would otherwise all
  * copy the project's repo at once (200 forks of Express left it answering
- * nothing else); from seeds, each seed is copied by a sixteenth of them.
+ * nothing else). The seeds are made one at a time in the background when
+ * GitHive starts on the project (see LiveFeed's fork queue): 16 asked for at
+ * once left some of Artifacts' fork jobs stalled for good.
  */
-export const FORK_SEEDS = 16;
-/** A project's seed fork `k`: made from the project once, when an agent's fork first needs it. */
+export const FORK_SEEDS = 8;
+/** A project's seed fork `k`. */
 export const seedName = (repo: string, k: number) => `fork--${repo}--seed--${k}`;
 
-/** Which seed an agent's fork is made from: a stable hash of its name. */
+/** Which seed an agent's fork is made from, when it's ready: a stable hash of its name. */
 function seedOf(agent: string) {
 	let h = 0x811c9dc5;
 	for (let i = 0; i < agent.length; i++) h = Math.imul(h ^ agent.charCodeAt(i), 0x01000193);
 	return (h >>> 0) % FORK_SEEDS;
 }
 
-/** Seeds known to exist, for the isolate. */
-const seeds = new Set<string>();
+/** The forks a repo's fork queue makes: its seeds, all of them. */
+export const seedItems = () => Array.from({ length: FORK_SEEDS }, (_, k) => `seed:${k}`);
 
-/** A seed fork of the project, made if it isn't there yet (two agents asking at once share one). */
-async function ensureSeed(env: Env, repo: string, k: number) {
+/** Make seed `k` of `repo` (or wait for it, if it's being made), from the project's repo. */
+export async function makeSeed(env: Env, repo: string, k: number) {
 	const name = seedName(repo, k);
-	if (seeds.has(name)) return name;
-	// Many agents arriving at once need the same seed: one makes it, the rest wait for it.
 	await remoteFor(env.ARTIFACTS, name, "read", 60).catch(() => forkAndWait(env.ARTIFACTS, repo, name, `seed ${k} for forks of ${repo}`, { shared: true }));
-	seeds.add(name);
-	return name;
 }
 
 /**
- * Credentials for an agent's own fork of the project repo; writing to it
- * first creates the fork (once, for all its changes), from one of the
- * project's seeds (see FORK_SEEDS). A seed's branch is the project's as it
- * was when the seed was made: what the fork lacks of the project's since, an
- * agent's first push sends.
+ * Make an agent's fork of `repo`, or wait for it if it's being made (by the
+ * fork queue, say): from its own seed if that's ready, else another that is,
+ * else the project itself (seeds not made yet: asked for now). A source whose
+ * fork fails is passed over for the next.
  */
+export async function makeAgentFork(env: Env, repo: string, agent: string) {
+	const name = await forkName(repo, agent);
+	if (await remoteFor(env.ARTIFACTS, name, "read", 60).then(() => true, () => false)) return;
+	const feed = env.LIVE?.getByName(`repo:${repo}`);
+	const ready = (await feed?.readySeeds().catch(() => [] as number[])) ?? [];
+	if (!ready.length) await feed?.queueForks(repo, seedItems()).catch(() => undefined);
+	const own = seedOf(agent);
+	const seeds = [...ready].sort((a, b) => ((a - own + FORK_SEEDS) % FORK_SEEDS) - ((b - own + FORK_SEEDS) % FORK_SEEDS)).map((k) => seedName(repo, k));
+	let failure: unknown;
+	for (const source of [...seeds, repo]) {
+		try {
+			await forkAndWait(env.ARTIFACTS, source, name, `${agent}'s fork of ${repo}`, { shared: true });
+			return;
+		} catch (err) {
+			failure = err;
+		}
+	}
+	throw failure;
+}
+
+/** Credentials for an agent's own fork of the project repo; writing to it first creates the fork (once, for all its changes). */
 export async function changeRemote(env: Env, repo: string, agent: string, scope: "read" | "write", ttlSeconds: number) {
 	const name = await forkName(repo, agent);
 	try {
 		return await remoteFor(env.ARTIFACTS, name, scope, ttlSeconds);
 	} catch (err) {
 		if (scope === "read") throw new Error(`[409] ${agent} has no fork yet: nothing has been pushed`);
-		await forkAndWait(env.ARTIFACTS, await ensureSeed(env, repo, seedOf(agent)), name, `${agent}'s fork of ${repo}`);
+		await makeAgentFork(env, repo, agent);
 		return remoteFor(env.ARTIFACTS, name, scope, ttlSeconds);
 	}
 }
