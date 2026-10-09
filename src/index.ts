@@ -26,7 +26,7 @@ export { Builder } from "./builder";
 export { Reviewer } from "./reviewer";
 export { Gate } from "./gate";
 export { RepoIndex } from "./repo-index";
-export { LiveFeed } from "./live-feed";
+export { RepoCache } from "./repo-cache";
 export { TokenCache } from "./token-cache";
 
 type AppEnv = { Bindings: Env; Variables: { principal?: Principal } };
@@ -176,23 +176,23 @@ const toolContext = (env: Env, principal: Principal | undefined, agentKey?: stri
 const MAX_KEPT_VIEW = 1_000_000;
 
 /**
- * A dashboard view kept in the repo's live feed (see live-feed.ts): served as
+ * A dashboard view kept in the repo's cache (see repo-cache.ts): served as
  * kept while fresh; when stale, served as kept while one fresh build runs in
  * the background, and pages are pinged when it's ready; built now only when
  * none is kept, or the reader asks for it fresh. Server-Timing says which
  * ("view;desc=fresh|stale|built").
  */
 async function keptView(c: Context<AppEnv>, key: string, name: string, maxAgeMs: number, build: (timing: Timing) => Promise<unknown>) {
-	const feed = c.env.LIVE.getByName(key);
-	const kept = await feed.view(name, maxAgeMs);
+	const cache = c.env.REPO_CACHE.getByName(key);
+	const kept = await cache.view(name, maxAgeMs);
 	const rebuild = async (timing: Timing) => {
 		try {
 			const json = JSON.stringify(await timing.time("total", () => build(timing)));
-			if (json.length <= MAX_KEPT_VIEW) await feed.keep(name, json, kept.writes);
-			else await feed.buildFailed(name);
+			if (json.length <= MAX_KEPT_VIEW) await cache.keep(name, json, kept.writes);
+			else await cache.buildFailed(name);
 			return json;
 		} catch (err) {
-			await feed.buildFailed(name).catch(() => undefined);
+			await cache.buildFailed(name).catch(() => undefined);
 			throw err;
 		}
 	};
@@ -200,11 +200,11 @@ async function keptView(c: Context<AppEnv>, key: string, name: string, maxAgeMs:
 	// "Cache-Control: no-cache" (say, right after the reader's own write): build it now.
 	const now = /no-cache/.test(c.req.header("Cache-Control") ?? "");
 	if (kept.json !== undefined && !now) {
-		if (!kept.fresh && !kept.building && (await feed.startBuild(name))) c.executionCtx.waitUntil(rebuild(new Timing()).catch((err) => console.error(`rebuilding ${key} ${name} failed`, String(err))));
+		if (!kept.fresh && !kept.building && (await cache.startBuild(name))) c.executionCtx.waitUntil(rebuild(new Timing()).catch((err) => console.error(`rebuilding ${key} ${name} failed`, String(err))));
 		return send(kept.json, `view;desc=${kept.fresh ? "fresh" : "stale"}`);
 	}
 	const timing = new Timing();
-	await feed.startBuild(name);
+	await cache.startBuild(name);
 	const json = await rebuild(timing);
 	return send(json, `view;desc=built, ${timing.header()}`);
 }
@@ -214,7 +214,7 @@ app.get("/repos/:owner/:name", async (c) => {
 	const repo = await routeRepo(c, "read");
 	return keptView(c, `repo:${repo.id}`, "snapshot", 20_000, (timing) => repoSnapshot({ ...toolContext(c.env, c.get("principal")), timing }, repo.id));
 });
-// Who the caller is in a repo: its full name, id (the live feed's key), what they may do, and its default branch.
+// Who the caller is in a repo: its full name, id (its cache's key), what they may do, and its default branch.
 app.get("/repos/:owner/:name/access", async (c) => {
 	const repo = await routeRepo(c, "read");
 	const [meta, branch] = await Promise.all([c.env.DB ? new OrgStore(c.env.DB).repoById(repo.id) : null, remoteFor(c.env.ARTIFACTS, repo.id, "read").then(defaultBranch).catch(() => null)]);
@@ -262,14 +262,14 @@ app.get("/repos/:owner/:name/changes/:change", async (c) => {
 	return keptView(c, `repo:${repo.id}`, `change:${change}`, 60_000, (timing) => changeHistory({ ...toolContext(c.env, c.get("principal")), timing }, repo.id, change));
 });
 // What's being checked to land into a branch of the repo now, and what changes came to lately (kept in its
-// LiveFeed: see toolkit/landing.ts), with the snapshot its check containers start from.
+// RepoCache: see toolkit/landing.ts), with the snapshot its check containers start from.
 app.get("/repos/:owner/:name/landing", async (c) => {
 	const repo = await routeRepo(c, "read");
 	// ?branch=<name> (the dashboard always says); absent, the project's, from its claims registry.
 	const branch =
 		c.req.query("branch")?.trim() ||
 		projectBranch((await new GitCasLog<Registry>(() => remoteFor(c.env.ARTIFACTS, repo.id, "read", 3600), repo.id, `refs/notes/githive-claims/${repo.id}`).read())?.commit.state);
-	const [landing, snapshot] = await Promise.all([rpc(c.env.LIVE.getByName(`repo:${repo.id}`).landingView(branch)), rpc(c.env.GATE.getByName(`repo:${repo.id}`).snapshotInfo())]);
+	const [landing, snapshot] = await Promise.all([rpc(c.env.REPO_CACHE.getByName(`repo:${repo.id}`).landingView(branch)), rpc(c.env.GATE.getByName(`repo:${repo.id}`).snapshotInfo())]);
 	return c.json({ branch, ...landing, snapshot });
 });
 app.get("/repos/:owner/:name/audit", async (c) => {
@@ -289,7 +289,7 @@ app.get("/repos/:owner/:name/reviewers/:change/:head/:role", async (c) => {
 // Live updates for a repo: a WebSocket on its feed, which pings when its records change.
 app.get("/repos/:owner/:name/live", async (c) => {
 	const repo = await routeRepo(c, "read");
-	return c.env.LIVE.getByName(`repo:${repo.id}`).fetch(c.req.raw);
+	return c.env.REPO_CACHE.getByName(`repo:${repo.id}`).fetch(c.req.raw);
 });
 // A repo's settings: private or public (admins of the repo).
 app.patch("/repos/:owner/:name", async (c) => {
@@ -381,7 +381,7 @@ const isProject = (name: string) => !name.startsWith("fork--") && !name.startsWi
 async function forgetRepo(env: Env, repo: string) {
 	await Promise.resolve()
 		// Its snapshot too: nothing starts from it again, and Containers drops it within 30 days (there's no deleting one sooner).
-		.then(() => Promise.all([env.TOKENS?.getByName(repo).clear(), env.LIVE?.getByName(`repo:${repo}`).clearViews(), env.GATE?.getByName(`repo:${repo}`).forgetSnapshot()]))
+		.then(() => Promise.all([env.TOKENS?.getByName(repo).clear(), env.REPO_CACHE?.getByName(`repo:${repo}`).clearViews(), env.GATE?.getByName(`repo:${repo}`).forgetSnapshot()]))
 		.catch((err) => console.error(`forgetting ${repo}'s tokens, views and snapshot failed`, String(err)));
 }
 
@@ -434,7 +434,7 @@ app.get("/live/:key", async (c) => {
 	requireAccess(c);
 	const key = c.req.param("key");
 	if (!/^repo:[A-Za-z0-9._-]+$/.test(key)) return c.json({ error: "not a feed" }, 400);
-	return c.env.LIVE.getByName(key).fetch(c.req.raw);
+	return c.env.REPO_CACHE.getByName(key).fetch(c.req.raw);
 });
 
 // Browse a repo's code: its files, and one file's text, at a branch or commit (the repo's default branch if none).

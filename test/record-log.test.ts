@@ -197,9 +197,9 @@ describe("a push whose answer was lost", () => {
 describe("record tips kept for readers", () => {
 	const listings = () => server.requests.filter((r) => r.startsWith("GET refs")).length;
 	const kept = async (wrap: (tips: TipCache) => TipCache = (tips) => tips) => {
-		const { LiveFeed } = await import("../src/live-feed");
+		const { RepoCache } = await import("../src/repo-cache");
 		const { FakeStorage } = await import("./fakes/env");
-		const live = new LiveFeed({ storage: new FakeStorage(), getWebSockets: () => [] } as never, {} as never);
+		const live = new RepoCache({ storage: new FakeStorage(), getWebSockets: () => [] } as never, {} as never);
 		const states = { get: (r: string, tip: string) => live.recordAt(r, tip), put: (r: string, tip: string, json: string) => live.keepRecord(r, tip, json) };
 		const tips = { get: (r: string, key: string) => live.tipOf(r, key, 10_000), keep: (r: string, tip: string | null, gen: number) => live.keepTip(r, tip, gen), landed: (r: string, parent: string | null, tip: string) => live.landedTip(r, parent, tip), stale: (r: string, parent: string | null) => live.staleTip(r, parent) };
 		return () => new GitCasLog<State>(async () => ({ url: server.url, token: "unused" }), "t1", "refs/notes/githive/t1", { states, tips: wrap(tips) });

@@ -2,13 +2,13 @@ import { describe, expect, it, vi } from "vitest";
 import { FakeStorage } from "./fakes/env";
 
 // Reads that tolerate a moment's staleness (the claims for the claims tool and
-// next), kept in the repo's LiveFeed: many callers at once read the repo once.
+// next), kept in the repo's RepoCache: many callers at once read the repo once.
 
-const { LiveFeed } = await import("../src/live-feed");
+const { RepoCache } = await import("../src/repo-cache");
 const { keptRead } = await import("../src/toolkit/env");
 
 const world = () => {
-	const live = new LiveFeed({ storage: new FakeStorage(), getWebSockets: () => [] } as never, {} as never);
+	const live = new RepoCache({ storage: new FakeStorage(), getWebSockets: () => [] } as never, {} as never);
 	// As the runtime does: a Durable Object's storage calls within one call aren't interleaved with another call's.
 	let turn: Promise<unknown> = Promise.resolve();
 	const serial = new Proxy(live, {
@@ -22,7 +22,7 @@ const world = () => {
 			};
 		},
 	});
-	return { live, env: { LIVE: { getByName: () => serial } } as never };
+	return { live, env: { REPO_CACHE: { getByName: () => serial } } as never };
 };
 
 describe("a kept read", () => {

@@ -60,37 +60,37 @@ const KEPT_BRANCH_HEAD_MS = 2_000;
 const KEPT_HEADS_MS = 10_000;
 /** How long a record's tip stays kept with no write clearing it (in case a write couldn't). */
 const KEPT_TIP_MS = 10_000;
-/** The largest view a LiveFeed keeps. */
+/** The largest view a RepoCache keeps. */
 const MAX_KEPT = 1_000_000;
 
 /**
- * A view of a repo kept in its LiveFeed, for reads that tolerate a moment's
+ * A view of a repo kept in its RepoCache, for reads that tolerate a moment's
  * staleness: fresh, served as is; stale, served as is while one caller
  * rebuilds it (that caller gets the new one); none yet, one caller builds it
  * and the others wait for it a few seconds, so many callers at once read the
  * repo once, not once each. Writes make it stale (their pings count them).
  */
 export async function keptRead<T>(env: Env, repo: string, name: string, maxAgeMs: number, read: () => Promise<T>): Promise<T> {
-	const feed = env.LIVE.getByName(`repo:${repo}`);
+	const cache = env.REPO_CACHE.getByName(`repo:${repo}`);
 	const rebuild = async (writes: number) => {
 		try {
 			const value = await read();
 			const json = JSON.stringify(value);
-			if (json.length <= MAX_KEPT) await feed.keep(name, json, writes);
-			else await feed.buildFailed(name);
+			if (json.length <= MAX_KEPT) await cache.keep(name, json, writes);
+			else await cache.buildFailed(name);
 			return value;
 		} catch (err) {
-			await feed.buildFailed(name).catch(() => undefined);
+			await cache.buildFailed(name).catch(() => undefined);
 			throw err;
 		}
 	};
 	for (const until = Date.now() + 10_000; ; ) {
-		const kept = await rpc(feed.view(name, maxAgeMs));
+		const kept = await rpc(cache.view(name, maxAgeMs));
 		if (kept.json !== undefined) {
-			if (kept.fresh || kept.building || !(await feed.startBuild(name))) return JSON.parse(kept.json) as T;
+			if (kept.fresh || kept.building || !(await cache.startBuild(name))) return JSON.parse(kept.json) as T;
 			return rebuild(kept.writes);
 		}
-		if (!kept.building && (await feed.startBuild(name))) return rebuild(kept.writes);
+		if (!kept.building && (await cache.startBuild(name))) return rebuild(kept.writes);
 		// Another caller is building the first one: wait for it, a few seconds at most.
 		if (Date.now() > until) return read();
 		await new Promise((resolve) => setTimeout(resolve, 250));
@@ -101,11 +101,11 @@ export async function keptRead<T>(env: Env, repo: string, name: string, maxAgeMs
 function recordsLog<S>(env: Env, repo: string, ref: string) {
 	let log = logs.get(ref);
 	if (!log) {
-		// What other Worker instances already read of the project repo's records, by tip, in its LiveFeed.
-		const feed = () => env.LIVE.getByName(`repo:${repo}`);
-		const states = { get: (r: string, tip: string) => rpc(feed().recordAt(r, tip)), put: (r: string, tip: string, json: string) => feed().keepRecord(r, tip, json) };
+		// What other Worker instances already read of the project repo's records, by tip, in its RepoCache.
+		const cache = () => env.REPO_CACHE.getByName(`repo:${repo}`);
+		const states = { get: (r: string, tip: string) => rpc(cache().recordAt(r, tip)), put: (r: string, tip: string, json: string) => cache().keepRecord(r, tip, json) };
 		// And where its ref points, so that a read needn't list it on the busy project repo.
-		const tips = { get: (r: string, stateKey: string) => rpc(feed().tipOf(r, stateKey, KEPT_TIP_MS)), keep: (r: string, tip: string | null, gen: number) => feed().keepTip(r, tip, gen), landed: (r: string, parent: string | null, tip: string) => feed().landedTip(r, parent, tip), stale: (r: string, parent: string | null) => feed().staleTip(r, parent) };
+		const tips = { get: (r: string, stateKey: string) => rpc(cache().tipOf(r, stateKey, KEPT_TIP_MS)), keep: (r: string, tip: string | null, gen: number) => cache().keepTip(r, tip, gen), landed: (r: string, parent: string | null, tip: string) => cache().landedTip(r, parent, tip), stale: (r: string, parent: string | null) => cache().staleTip(r, parent) };
 		logs.set(ref, (log = new GitCasLog<unknown>(() => cached(env, repo, `${repo}|write`, () => remoteFor(env.ARTIFACTS, repo, "write", 3600)), repo, ref, { states, tips })));
 	}
 	return log as GitCasLog<S>;
@@ -121,19 +121,19 @@ export function toolContextFor(env: Env, by: string | undefined, caller: { agent
 		...caller,
 		register: async (repo) => env.REPO_INDEX.getByName("all").addRepo(repo),
 		summarize: (repo, patch) => env.REPO_INDEX.getByName("all").summarize(`repo:${repo}`, patch),
-		ping: async (repo) => void (await env.LIVE?.getByName(`repo:${repo}`).ping("records")),
+		ping: async (repo) => void (await env.REPO_CACHE?.getByName(`repo:${repo}`).ping("records")),
 		// The repo's own Gate keeps its snapshot fresh (see Gate.warmUp): the merges' checks run in their changes' Gates.
 		warmChecks: async (repo, { expect, ...input }) => {
 			const remote = await cached(env, repo, `${repo}|read`, () => remoteFor(env.ARTIFACTS, repo, "read", 3600));
 			await env.GATE.getByName(`repo:${repo}`).warmUp({ repo, ...input, base: { remote: remote.url, token: remote.token }, why: expect });
 		},
-		// The claims for advice, kept in the repo's LiveFeed so a busy repo isn't read whole on every call.
+		// The claims for advice, kept in the repo's RepoCache so a busy repo isn't read whole on every call.
 		keptClaims: (repo, read) => keptRead(env, repo, "claims-advice", KEPT_CLAIMS_MS, read),
 		keptHeads: (repo, read) => keptRead(env, repo, "open-heads", KEPT_HEADS_MS, read),
 		// A branch's head, kept a moment for every merge watching it (see MergeInput.branchHead).
 		branchHead: (repo, branch) => keptRead(env, repo, `head:${branch}`, KEPT_BRANCH_HEAD_MS, () => headOf(env.ARTIFACTS, repo, branch)),
 		// Forks made in the background, paced, before agents need them: the seeds when GitHive starts, an agent's when it registers.
-		prepareForks: async (repo, items) => void (await env.LIVE?.getByName(`repo:${repo}`).queueForks(repo, items === "seeds" ? seedItems() : items.map((agent) => `agent:${agent}`))),
+		prepareForks: async (repo, items) => void (await env.REPO_CACHE?.getByName(`repo:${repo}`).queueForks(repo, items === "seeds" ? seedItems() : items.map((agent) => `agent:${agent}`))),
 		// Review holds are a record in Git (see review-holds.ts), like the claims and votes.
 		reviews: reviewHolds((repo) => recordsLog<ReviewHolds>(env, repo, reviewsRef(repo))),
 		requestReview: (input) => startHostedReviewers(env, input),
@@ -205,16 +205,16 @@ export function toolContextFor(env: Env, by: string | undefined, caller: { agent
 				},
 			};
 		},
-		// Who's landing a batch into each branch, and what changes came to: kept in the repo's LiveFeed (see landing.ts).
+		// Who's landing a batch into each branch, and what changes came to: kept in the repo's RepoCache (see landing.ts).
 		landing: (repo, branch) => {
-			const feed = () => env.LIVE.getByName(`repo:${repo}`);
+			const cache = () => env.REPO_CACHE.getByName(`repo:${repo}`);
 			return {
-				turn: (holder, change, head, since, ttlMs) => rpcRetried<{ settled: Settled } | { lease: boolean }>(() => feed().landingTurn(branch, holder, change, head, since, ttlMs)),
-				renew: (holder, ttlMs) => rpcRetried(() => feed().renewLanding(branch, holder, ttlMs)),
-				drop: (holder) => rpcRetried(() => feed().dropLanding(branch, holder)),
-				checking: (batch) => rpcRetried(() => feed().landingChecking(branch, batch)),
-				settle: (outcomes) => rpcRetried(() => feed().landingSettled(branch, outcomes)),
-				view: () => rpcRetried(() => feed().landingView(branch)),
+				turn: (holder, change, head, since, ttlMs) => rpcRetried<{ settled: Settled } | { lease: boolean }>(() => cache().landingTurn(branch, holder, change, head, since, ttlMs)),
+				renew: (holder, ttlMs) => rpcRetried(() => cache().renewLanding(branch, holder, ttlMs)),
+				drop: (holder) => rpcRetried(() => cache().dropLanding(branch, holder)),
+				checking: (batch) => rpcRetried(() => cache().landingChecking(branch, batch)),
+				settle: (outcomes) => rpcRetried(() => cache().landingSettled(branch, outcomes)),
+				view: () => rpcRetried(() => cache().landingView(branch)),
 			};
 		},
 	};
@@ -241,7 +241,7 @@ export async function forkName(repo: string, agent: string) {
  * its source repo, and a crowd of agents arriving at once would otherwise all
  * copy the project's repo at once (200 forks of Express left it answering
  * nothing else). The seeds are made one at a time in the background when
- * GitHive starts on the project (see LiveFeed's fork queue): 16 asked for at
+ * GitHive starts on the project (see RepoCache's fork queue): 16 asked for at
  * once left some of Artifacts' fork jobs stalled for good.
  */
 export const FORK_SEEDS = 8;
@@ -273,9 +273,9 @@ export async function makeSeed(env: Env, repo: string, k: number) {
 export async function makeAgentFork(env: Env, repo: string, agent: string) {
 	const name = await forkName(repo, agent);
 	if (await remoteFor(env.ARTIFACTS, name, "read", 60).then(() => true, () => false)) return;
-	const feed = env.LIVE?.getByName(`repo:${repo}`);
-	const ready = (feed ? await rpc(feed.readySeeds()).catch(() => [] as number[]) : []) ?? [];
-	if (!ready.length) await feed?.queueForks(repo, seedItems()).catch(() => undefined);
+	const cache = env.REPO_CACHE?.getByName(`repo:${repo}`);
+	const ready = (cache ? await rpc(cache.readySeeds()).catch(() => [] as number[]) : []) ?? [];
+	if (!ready.length) await cache?.queueForks(repo, seedItems()).catch(() => undefined);
 	const own = seedOf(agent);
 	const seeds = [...ready].sort((a, b) => ((a - own + FORK_SEEDS) % FORK_SEEDS) - ((b - own + FORK_SEEDS) % FORK_SEEDS)).map((k) => seedName(repo, k));
 	let failure: unknown;

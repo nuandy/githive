@@ -2,7 +2,9 @@ import { DurableObject } from "cloudflare:workers";
 import { makeAgentFork, makeSeed } from "./toolkit/env";
 import { type Checking, dropLease, emptyLanding, type LandingState, renewLease, type Settled, settleOutcomes, takeTurn } from "./toolkit/landing";
 
-// One per repo ("repo:<repo>"), for the dashboard:
+// One per repo ("repo:<repo>"): what GitHive keeps of the repo between calls,
+// all of it a copy or a hint. Git stays the truth, and throwing any of it away
+// costs only speed: nothing here decides what lands.
 //
 // Live updates. Pages hold a WebSocket open; the toolkit pings the feed after
 // each write, and every page refreshes at once instead of waiting
@@ -22,6 +24,14 @@ import { type Checking, dropLease, emptyLanding, type LandingState, renewLease, 
 // batch being checked, and what changes came to lately, for the merges
 // waiting on a batch (see toolkit/landing.ts). A hint like the views: the
 // branch and the audit are the truth, and losing it costs a check.
+//
+// Records. Each record's state by tip (a commit never changes, so it's never
+// stale) and where its ref points, so a read needn't list the project repo. A
+// write that lands updates the tip before it returns; a write built on a stale
+// tip is refused by Git and retried.
+//
+// Forks. The queue that makes a project's seed forks one at a time, then
+// agents' forks a few at a time. Lost, agents make their own forks.
 
 interface View {
 	/** The view as JSON, as served. */
@@ -57,7 +67,7 @@ const AGENT_FORKS_AT_ONCE = 4;
 /** Tries per fork before the queue gives up on it (an agent's own credentials still make it). */
 const FORK_TRIES = 3;
 
-export class LiveFeed extends DurableObject<Env> {
+export class RepoCache extends DurableObject<Env> {
 	async fetch(request: Request) {
 		if (request.headers.get("Upgrade") !== "websocket") return new Response("expected a WebSocket", { status: 426 });
 		const { 0: client, 1: server } = new WebSocketPair();

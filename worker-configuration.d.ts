@@ -17,13 +17,13 @@ interface __BaseEnv_Env {
 	REVIEWER: DurableObjectNamespace<import("./src/index").Reviewer>;
 	GATE: DurableObjectNamespace<import("./src/index").Gate>;
 	REPO_INDEX: DurableObjectNamespace<import("./src/index").RepoIndex>;
-	LIVE: DurableObjectNamespace<import("./src/index").LiveFeed>;
+	REPO_CACHE: DurableObjectNamespace<import("./src/index").RepoCache>;
 	TOKENS: DurableObjectNamespace<import("./src/index").TokenCache>;
 }
 declare namespace Cloudflare {
 	interface GlobalProps {
 		mainModule: typeof import("./src/index");
-		durableNamespaces: "Builder" | "Reviewer" | "Gate" | "LiveFeed" | "TokenCache" | "RepoIndex";
+		durableNamespaces: "Builder" | "Reviewer" | "Gate" | "RepoCache" | "TokenCache" | "RepoIndex";
 	}
 	interface Env extends __BaseEnv_Env {}
 }

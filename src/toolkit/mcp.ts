@@ -52,7 +52,7 @@ export interface ToolContext {
 	batchGit?: (repo: string) => BatchGit;
 	/** Starts a batch's first check container while the batch is read (live, a Gate's). */
 	prepareChecks?: (repo: string) => (gate: string) => Promise<void>;
-	/** Who's landing a batch into a repo's branch, and what changes came to (live, the repo's LiveFeed); absent, each merge only knows its own. */
+	/** Who's landing a batch into a repo's branch, and what changes came to (live, the repo's RepoCache); absent, each merge only knows its own. */
 	landing?: (repo: string, branch: string) => Landing;
 	/** Stamps what this caller writes with their verified identity (GitHive's key), and the agent name their key is for; without it, nothing is stamped. */
 	stamper?: (agent?: string) => Promise<Stamper | undefined>;
@@ -90,7 +90,7 @@ export interface ToolContext {
 	keptHeads?: (repo: string, read: () => Promise<Record<string, string | null>>) => Promise<Record<string, string | null>>;
 	/** A branch's head, kept a moment for every merge watching it (see MergeInput.branchHead). */
 	branchHead?: (repo: string, branch: string) => Promise<string | null>;
-	/** Ask for forks to be made in the background: the repo's seeds, or these agents' own (see LiveFeed's fork queue). */
+	/** Ask for forks to be made in the background: the repo's seeds, or these agents' own (see RepoCache's fork queue). */
 	prepareForks?: (repo: string, items: "seeds" | string[]) => Promise<void>;
 	/** Review holds, so next doesn't send two agents to a review that needs one (see review-holds.ts). */
 	reviews?: {

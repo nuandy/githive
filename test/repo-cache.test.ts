@@ -1,16 +1,16 @@
 import { describe, expect, it, vi } from "vitest";
 import { FakeStorage } from "./fakes/env";
 
-const { LiveFeed } = await import("../src/live-feed");
+const { RepoCache } = await import("../src/repo-cache");
 
-// The dashboard's ready-made views, kept in a repo's live feed: a write makes
+// The dashboard's ready-made views, kept in a repo's cache: a write makes
 // them stale, a stale view is still served while one build runs, and a view
 // built before a write that landed during its build stays stale.
 
 const feed = () => {
 	const sent: string[] = [];
 	const socket = { send: (message: string) => sent.push(JSON.parse(message).kind) };
-	return { live: new LiveFeed({ storage: new FakeStorage(), getWebSockets: () => [socket] } as never, {} as never), sent };
+	return { live: new RepoCache({ storage: new FakeStorage(), getWebSockets: () => [socket] } as never, {} as never), sent };
 };
 
 describe("kept views", () => {

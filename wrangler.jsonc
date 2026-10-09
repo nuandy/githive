@@ -39,7 +39,7 @@
 			{ "name": "REVIEWER", "class_name": "Reviewer" },
 			{ "name": "GATE", "class_name": "Gate" },
 			{ "name": "REPO_INDEX", "class_name": "RepoIndex" },
-			{ "name": "LIVE", "class_name": "LiveFeed" },
+			{ "name": "REPO_CACHE", "class_name": "RepoCache" },
 			{ "name": "TOKENS", "class_name": "TokenCache" }
 		]
 	},
@@ -70,6 +70,8 @@
 		// Elected mode is frozen (branch elected-mode-archive); its task state goes.
 		{ "tag": "v11", "deleted_classes": ["Coordinator", "Peer"] },
 		// GitHive: the repo index starts fresh under its new name.
-		{ "tag": "v12", "deleted_classes": ["TaskIndex"], "new_sqlite_classes": ["RepoIndex"] }
+		{ "tag": "v12", "deleted_classes": ["TaskIndex"], "new_sqlite_classes": ["RepoIndex"] },
+		// The repo's live feed became its cache, too (views, record tips, the fork queue, landing): the same objects and storage, renamed.
+		{ "tag": "v13", "renamed_classes": [{ "from": "LiveFeed", "to": "RepoCache" }] }
 	]
 }

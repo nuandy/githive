@@ -6,7 +6,7 @@ import type { CheckResult } from "./merge";
 // the branch at once, checked together (see mergeChange). The lease only
 // keeps two merges from checking the same changes side by side: what keeps
 // the branch right is its compare-and-swap, and the audit. Live, it's kept in
-// the repo's LiveFeed (see live-feed.ts); losing it costs a merge checking
+// the repo's RepoCache (see repo-cache.ts); losing it costs a merge checking
 // again, nothing more.
 
 /** What a change's head came to. */
@@ -58,7 +58,7 @@ export interface Landing {
 /** How many settled changes are kept: enough for a merge waiting on a batch to find its own. */
 export const RECENT_KEPT = 200;
 
-/** A branch's landing as data, for LiveFeed and memoryLanding to keep alike. */
+/** A branch's landing as data, for RepoCache and memoryLanding to keep alike. */
 export interface LandingState {
 	lease?: { holder: string; until: number };
 	checking: Checking | null;
@@ -87,7 +87,7 @@ export const dropLease = (state: LandingState, holder: string): LandingState => 
 
 export const settleOutcomes = (state: LandingState, outcomes: Settled[]): LandingState => ({ ...state, recent: [...state.recent, ...outcomes].slice(-RECENT_KEPT) });
 
-/** One branch's landing kept in memory: in tests, and wherever no LiveFeed keeps it (then only merges in this isolate share it). */
+/** One branch's landing kept in memory: in tests, and wherever no RepoCache keeps it (then only merges in this isolate share it). */
 export function memoryLanding(): Landing {
 	let state = emptyLanding();
 	return {

@@ -21,14 +21,14 @@ vi.mock("../src/artifacts", async (importOriginal) => ({
 }));
 
 const { changeRemote, FORK_SEEDS, seedItems, seedName } = await import("../src/toolkit/env");
-const { LiveFeed } = await import("../src/live-feed");
+const { RepoCache } = await import("../src/repo-cache");
 
-/** An env whose repo has a fork queue (a real LiveFeed on fake storage) with these seeds ready. */
+/** An env whose repo has a fork queue (a real RepoCache on fake storage) with these seeds ready. */
 function envWith(ready: number[]) {
 	const storage = new FakeStorage();
 	void storage.put("forks:seeds", ready);
-	const live = new LiveFeed({ storage, getWebSockets: () => [] } as never, {} as never);
-	const env = { LIVE: { getByName: () => live } } as unknown as Env;
+	const live = new RepoCache({ storage, getWebSockets: () => [] } as never, {} as never);
+	const env = { REPO_CACHE: { getByName: () => live } } as unknown as Env;
 	// The queue's own forks go through this env too.
 	(live as unknown as { env: Env }).env = env;
 	return { env, live, storage };

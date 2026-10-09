@@ -503,13 +503,13 @@ command: the repo's Gate to read and land it, and the check, in the Gate of
 the batch's last change (one at a time, they were most of a big batch's
 check).
 
-A call to the Gate or the LiveFeed that failed only because its Durable
+A call to the Gate or the RepoCache that failed only because its Durable
 Object or container was briefly away (reset by a runtime update, or a
 container connection briefly unavailable) is tried once more, two seconds
 later, before the merge gives up. Even landing: its push names the main it
 lands on, so a batch that did land the first time finds main moved.
 
-The lease is a hint, kept in the repo's LiveFeed with what changes came to
+The lease is a hint, kept in the repo's RepoCache with what changes came to
 lately (`landing.ts`): it keeps two merges from checking the same changes side
 by side, and the merges waiting on a batch read what their change came to
 there, never Git. No clock decides how long a merge waits: it waits for as
@@ -870,10 +870,10 @@ busy repo answers `INTERNAL_ERROR` rather than 429. So the work since has
 been taking requests off the busiest repos:
 
 - **Kept claim views**: the claims list is built once per 30 s per project
-  (in its LiveFeed Durable Object) and served to every caller meanwhile;
+  (in its RepoCache Durable Object) and served to every caller meanwhile;
   `next` reads its advice from the same view.
 - **Shared record states**: a record log's state at a tip is kept in the
-  project's LiveFeed, so a Worker isolate that hasn't read a log yet doesn't
+  project's RepoCache, so a Worker isolate that hasn't read a log yet doesn't
   fetch it from Git again (the tip is still listed, so a state is never
   stale).
 - **One registry read per claim**: `claim` reuses the caller's read to see
@@ -902,8 +902,8 @@ timing out against Artifacts. No fork failed in either run, and exactly one
 racer won each time.
 
 - **Kept record tips**: every call still listed the claims registry's ref on
-  the project repo. A record's tip is now kept in the project's LiveFeed with
-  its state, so a read asks the LiveFeed, not Git. Every write that lands
+  the project repo. A record's tip is now kept in the project's RepoCache with
+  its state, so a read asks the RepoCache, not Git. Every write that lands
   clears the kept tip before it returns, so no read sees a tip older than a
   finished write; a listing that began before a write isn't kept (a
   generation per ref says so); and a tip goes stale after 10 s in case a
@@ -938,7 +938,7 @@ The tools are on the same `/mcp` endpoint as the dashboard's routes, behind
 the same Access policy. The dashboard lists repos and shows each one's
 settings, how its claims and votes are kept, the claims with where each change
 stands, recent votes, people's inbox, and the audit. People vote from it. Its
-views of a repo are read from Git and kept in the repo's LiveFeed: a stale
+views of a repo are read from Git and kept in the repo's RepoCache: a stale
 view is served at once while a fresh one is built, and the toolkit pings open
 pages after each write. The list of repos and their counts is a hint kept in
 one RepoIndex; the records in Git are what count.
@@ -968,7 +968,7 @@ one RepoIndex; the records in Git are what count.
 - **A stuck merge holds the lease** until the step it's stuck in runs past its
   bound (up to 50 minutes for a check run of three commands), then a waiting
   merge takes over.
-- **The lease is outside Git.** Losing it (the LiveFeed reset) costs a batch
+- **The lease is outside Git.** Losing it (the RepoCache reset) costs a batch
   checked twice, never a wrong landing: main's compare-and-swap and the audit
   don't depend on it.
 - **Without a stamp key** nothing is stamped or verified, and the audit takes
