@@ -1176,7 +1176,8 @@ async function runTool(name: string, args: Args, ctx: ToolContext): Promise<unkn
 			const own = await claimOf(change);
 			const source = own ? await changeSource(own.agent, "read", change).catch(() => null) : null;
 			if (!source) throw new Error(`[409] changes/${change} has nothing pushed to check`);
-			const checked = await checkChange({ project: await ctx.remote(repo, "read"), branch: own?.into ?? branch, source, claims: own ? [own] : [], change });
+			const into = own?.into ?? branch;
+			const checked = await checkChange({ project: await ctx.remote(repo, "read"), branch: into, source, claims: own ? [own] : [], change, ...(ctx.branchHead ? { branchHead: () => ctx.branchHead!(repo, into) } : {}) });
 			// The head just read, for next and merge to take as current (see openHeads): agents check after each push.
 			await ctx.noteHeads?.(repo, { [change]: checked.head }).catch(() => undefined);
 			// Pushed and checked: a merge is likely within minutes, so its check container warms up meanwhile.

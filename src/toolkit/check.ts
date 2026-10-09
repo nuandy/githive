@@ -24,12 +24,16 @@ export interface CheckInput {
 	source: Remote;
 	claims: ClaimRecord[];
 	change: string;
+	/** The branch's head as kept a moment for every call reading it (see ToolContext.branchHead), if there is one: then no listing. */
+	branchHead?: () => Promise<string | null>;
 }
 
 export async function checkChange(input: CheckInput) {
 	const { change, claims } = input;
-	// One ref listing on the project; its branch's objects are kept between checks (see Workspace.at).
-	const listed = await branchHead(input.project, input.branch);
+	// The branch's head as kept a moment (an early check needn't be on main as of this second), else one ref listing on
+	// the project, which made check the busiest reader of a busy project repo; its objects are kept between checks (see
+	// Workspace.at).
+	const listed = (input.branchHead ? await input.branchHead().catch(() => undefined) : undefined) ?? (await branchHead(input.project, input.branch));
 	if (!listed) throw new Error(`[409] ${input.branch} doesn't exist yet`);
 	const ws = await Workspace.at(input.project, input.branch, listed);
 	const main = await ws.head();
