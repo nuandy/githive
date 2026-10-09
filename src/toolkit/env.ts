@@ -249,6 +249,8 @@ export function toolContextFor(env: Env, by: string | undefined, caller: { agent
 				view: () => rpcRetried(() => cache().landingView(branch)),
 				passed: (base, heads) => rpcRetried(() => cache().landingPassed(branch, base, heads)),
 				checked: (base, heads) => rpcRetried(() => cache().landingChecked(branch, base, heads)),
+				keepAhead: (ahead) => rpcRetried(() => cache().landingKeepAhead(branch, ahead)),
+				ahead: () => rpcRetried(() => cache().landingAhead(branch)),
 			};
 		},
 	};

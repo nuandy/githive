@@ -1,6 +1,6 @@
 import { DurableObject } from "cloudflare:workers";
 import { makeAgentFork, makeSeed } from "./toolkit/env";
-import { type Checking, dropLease, emptyLanding, type LandingState, markChecked, renewLease, type Settled, settleOutcomes, takeTurn, wasChecked } from "./toolkit/landing";
+import { type Ahead, type Checking, dropLease, emptyLanding, type LandingState, markChecked, renewLease, type Settled, settleOutcomes, takeTurn, wasChecked } from "./toolkit/landing";
 
 // One per repo ("repo:<repo>"): what GitHive keeps of the repo between calls,
 // all of it a copy or a hint. Git stays the truth, and throwing any of it away
@@ -21,9 +21,10 @@ import { type Checking, dropLease, emptyLanding, type LandingState, markChecked,
 // is only a copy of what was read from it.
 //
 // Landing. Each branch's lease (which merge is landing a batch into it), the
-// batch being checked, and what changes came to lately, for the merges
-// waiting on a batch (see toolkit/landing.ts). A hint like the views: the
-// branch and the audit are the truth, and losing it costs a check.
+// batch being checked, the next batch read ahead, and what changes came to
+// lately, for the merges waiting on a batch (see toolkit/landing.ts). A hint
+// like the views: the branch and the audit are the truth, and losing it costs
+// a check.
 //
 // Records. Each record's state by tip (a commit never changes, so it's never
 // stale) and where its ref points, so a read needn't list the project repo. A
@@ -262,6 +263,15 @@ export class RepoCache extends DurableObject<Env> {
 
 	async landingChecked(branch: string, base: string, heads: string[]) {
 		await this.keepLanding(branch, markChecked(await this.landing(branch), base, heads));
+	}
+
+	/** The next batch into `branch`, read ahead (see Ahead in toolkit/landing.ts). */
+	async landingKeepAhead(branch: string, ahead: Ahead) {
+		await this.keepLanding(branch, { ...(await this.landing(branch)), ahead });
+	}
+
+	async landingAhead(branch: string) {
+		return (await this.landing(branch)).ahead ?? null;
 	}
 
 	private async landing(branch: string) {

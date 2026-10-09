@@ -4,7 +4,7 @@ import { inLane } from "../claim-paths";
 import { skipsChecks } from "./check-scope";
 import type { ClaimRecord } from "./claims";
 import type { ClaimStore, ClaimsView } from "./claim-store";
-import { type Landing, memoryLanding, type Settled } from "./landing";
+import { type Ahead, type Landing, memoryLanding, type Settled } from "./landing";
 import { type MergeClaim, mergeMessage } from "./merge-commit";
 import type { Stamper } from "./stamp";
 import type { VoteStore, VotesView } from "./vote-store";
@@ -28,7 +28,9 @@ import { type ReviewPolicy, approval, countedVotes, effectivePolicy } from "./vo
 // The other merges wait for what their change came to, reading the lease,
 // never Git. A batch that fails is split and its halves checked side by
 // side; one change failing alone is checked once more (a flaky run isn't a
-// verdict), then put out with a rejection from the checks on its head.
+// verdict), then put out with a rejection from the checks on its head. While
+// a batch is checked, the next is read ahead (each change's head and the files
+// it changed), for whichever merge lands it.
 //
 // A batch's git work (fetching each change, the files it changed, the merges,
 // the push) runs in the repo's own Gate's container, with real git on a disk
@@ -147,6 +149,11 @@ const ROUNDS = 4;
 export const CHECKS_REVIEWER = "githive-checks";
 /** How many changes of a batch are checked against their claims and votes at once. */
 const VALIDATIONS_AT_ONCE = 4;
+/** How long a batch read ahead is worth reusing: its changes' heads are compared again before it is. */
+const AHEAD_KEPT_MS = 10 * 60_000;
+/** The most a batch read ahead keeps: a change with more files than this is read again, and none past the size. */
+const AHEAD_MOST_FILES = 500;
+const AHEAD_MOST_CHARS = 200_000;
 /** How many landed changes' claims are released at once. */
 const RELEASES_AT_ONCE = 4;
 /** How much of a failed check's output its outcome keeps, for the merges waiting on it. */
@@ -192,6 +199,8 @@ export interface MergeInput {
 	batchGit?: BatchGit;
 	/** Start the container of a batch's first check (`gate`, see Place) while the batch is read, so the check finds it running. */
 	prepareChecks?: (gate: string) => Promise<void>;
+	/** The most changes in a batch, below what batchSize says (tests set a few, to make batches follow each other). */
+	maxBatch?: number;
 	/** How often a merge waiting for its change to land looks (POLL_MS unless set). */
 	pollMs?: number;
 	/** How long before a merge answers, landed or not (ANSWER_WITHIN_MS unless set, as tests do). */
@@ -247,7 +256,7 @@ export async function mergeChange(input: MergeInput): Promise<MergeOutcome> {
 		const turn = await landing.turn(holder, input.change, head, started, LEASE_MS);
 		if ("settled" in turn) return outcomeOf(turn.settled);
 		if (turn.lease) {
-			const outcome = await landWhileHeld(input, landing, holder, answerBy);
+			const outcome = await landWhileHeld(input, landing, holder, answerBy, head);
 			// Refused because it isn't ready any more: another batch may have landed it (its claim's released then).
 			if (outcome && !outcome.ok) return (await landedAlready(landing, input.change, head)) ?? outcome;
 			if (outcome) return outcome;
@@ -331,7 +340,7 @@ interface Holding {
  * none after `answerBy`. Null if it hasn't settled by then, or the lease ran
  * out.
  */
-async function landWhileHeld(input: MergeInput, landing: Landing, holder: string, answerBy: number): Promise<MergeOutcome | null> {
+async function landWhileHeld(input: MergeInput, landing: Landing, holder: string, answerBy: number, head: string): Promise<MergeOutcome | null> {
 	let held = true;
 	// Until when the step running now may take (the longest, with steps side by side): the heartbeat stops past it.
 	let stepUntil = Date.now() + LEASE_MS;
@@ -353,7 +362,7 @@ async function landWhileHeld(input: MergeInput, landing: Landing, holder: string
 	try {
 		// No new batch once this merge should be answering (a batch takes minutes): the lease goes to a waiting merge.
 		for (let round = 0; round < ROUNDS && held && Date.now() < answerBy; round++) {
-			const done = await landBatch(input, landing, holding);
+			const done = await landBatch(input, landing, holding, head);
 			if (!done.ok) return done;
 			const mine = done.settled.find((s) => s.change === input.change);
 			if (mine) return outcomeOf(mine);
@@ -367,11 +376,11 @@ async function landWhileHeld(input: MergeInput, landing: Landing, holder: string
 
 /**
  * One batch: every change ready to land into the branch now (this merge's
- * own among them), checked together on main, and landed in one push.
- * Returns what each change that settled came to; this change refused if it
- * isn't ready any more.
+ * own among them, asked for at `head`), checked together on main, and landed
+ * in one push. Returns what each change that settled came to; this change
+ * refused if it isn't ready any more.
  */
-async function landBatch(input: MergeInput, landing: Landing, holding: Holding): Promise<{ ok: true; settled: Settled[] } | Refused> {
+async function landBatch(input: MergeInput, landing: Landing, holding: Holding, head: string): Promise<{ ok: true; settled: Settled[] } | Refused> {
 	for (let attempt = 1; ; attempt++) {
 		const from = Date.now();
 		// Where its checks will run: the first container starts now, while the batch is read.
@@ -381,12 +390,13 @@ async function landBatch(input: MergeInput, landing: Landing, holding: Holding):
 		const main = (await headOf(input)) ?? fail409(`there's no branch ${input.branch}`);
 		const batchGit = input.batchGit ?? memoryBatchGit(input.remote, input.stamper);
 		// About one failure per batch, from what the branch's recent changes came to (see batchSize).
-		const size = batchSize((await landing.view()).recent);
-		// This merge's own change, and the others approved as last seen: their heads and files read in one go.
-		const mine: BatchSource = { change: input.change, ref: `changes/${input.change}`, ...(input.source ? { source: input.source } : {}), agent: input.agent };
-		const sources = [mine, ...(await candidates(input, size))];
-		await holding.step(STEP_MS.gate);
-		const read = await batchGit.inspect({ base: main, branch: input.branch, changes: sources });
+		const size = Math.min(batchSize((await landing.view()).recent), input.maxBatch ?? MAX_BATCH);
+		// This merge's own change, and the others approved as last seen, with the heads they were seen at.
+		const mine: BatchSource & { seen: string } = { change: input.change, ref: `changes/${input.change}`, ...(input.source ? { source: input.source } : {}), agent: input.agent, seen: head };
+		const sources = [mine, ...(await candidates(input, size - 1))];
+		// Their heads and files: as read ahead while the batch before was checked, for each still at the head it was
+		// seen at; the rest read now, in one go.
+		const read = await readBatch(input, landing, batchGit, main, sources, holding);
 		await holding.step(STEP_MS.records);
 		const own = read[0];
 		if ("error" in own) return { ok: false, reasons: [`${input.change} couldn't be read: ${own.error}`] };
@@ -416,6 +426,8 @@ async function landBatch(input: MergeInput, landing: Landing, holding: Holding):
 			})();
 		};
 		const settled: Settled[] = [];
+		// The next batch, read while this one is checked, for whichever merge lands it (see Ahead).
+		const readingAhead = tested ? readAhead(input, landing, batchGit, main, size, new Set(batch.map((r) => r.change))) : undefined;
 		if (tested) {
 			if (!input.runChecks) throw new Error("[500] checks are configured but nothing can run them");
 			await landing.checking({ base: main, since: new Date().toISOString(), changes: batch.map((r) => ({ change: r.change, head: r.head, agent: r.agent })) });
@@ -428,6 +440,7 @@ async function landBatch(input: MergeInput, landing: Landing, holding: Holding):
 		console.log(`batch of ${batch.length} (at most ${size}) into ${input.branch}: gathering ${gathered - from} ms, checks ${checkedAt - gathered} ms, landing ${done.landed === null ? "lost the race" : `${done.landed.length}`} ${done.ms} ms`);
 		await landing.settle(settled);
 		await landing.checking(null);
+		await readingAhead;
 		if (done.landed === null) {
 			// The branch moved under the batch (a merge outside it): what passed was checked on another main.
 			if (attempt < ATTEMPTS) continue;
@@ -533,13 +546,13 @@ async function land(input: MergeInput, batchGit: BatchGit, main: string, batch: 
 
 /**
  * The other changes that may be ready to land with this one: approved as last
- * seen and not sent back (the rest aren't worth reading). Oldest claims
- * first, up to a batch of `size` with this one. Each is read and checked
- * again before it lands.
+ * seen and not sent back (the rest aren't worth reading), and not in
+ * `leaving`. Oldest claims first, `count` at most, each with the head it was
+ * seen at. Each is read and checked again before it lands.
  */
-async function candidates(input: MergeInput, size: number): Promise<BatchSource[]> {
+async function candidates(input: MergeInput, count: number, leaving = new Set<string>()): Promise<(BatchSource & { seen: string })[]> {
 	const others = ((await input.others?.().catch((err) => (console.error("reading the other changes to land failed", String(err)), []))) ?? []).filter(
-		(c): c is Candidate & { head: string } => c.claim.change !== input.change && !!c.head,
+		(c): c is Candidate & { head: string } => c.claim.change !== input.change && !leaving.has(c.claim.change) && !!c.head,
 	);
 	if (!others.length) return [];
 	const seen = await input.votes.readFor(others.map((c) => c.head));
@@ -551,13 +564,54 @@ async function candidates(input: MergeInput, size: number): Promise<BatchSource[
 			return approval({ votes: counted }, c.head, input.policy, author, c.claim.paths).approved;
 		})
 		.sort((a, b) => a.claim.since.localeCompare(b.claim.since))
-		.slice(0, size - 1);
-	const sources: BatchSource[] = [];
+		.slice(0, Math.max(0, count));
+	const sources: (BatchSource & { seen: string })[] = [];
 	for (const c of likely) {
 		const source = await c.source().catch((err) => (console.error(`${c.claim.change}'s fork can't be read`, String(err)), null));
-		if (source) sources.push({ change: c.claim.change, ref: `changes/${c.claim.change}`, source, agent: c.claim.agent });
+		if (source) sources.push({ change: c.claim.change, ref: `changes/${c.claim.change}`, source, agent: c.claim.agent, seen: c.head });
 	}
 	return sources;
+}
+
+/**
+ * Each of `sources`' head and the files it changed since it left `main`: as
+ * read ahead (see Ahead), for a change whose head is still the one it was
+ * seen at; the rest read now, in the repo's Gate. In `sources`' order.
+ */
+async function readBatch(input: MergeInput, landing: Landing, batchGit: BatchGit, main: string, sources: (BatchSource & { seen: string })[], holding: Holding): Promise<Inspected[]> {
+	const ahead = await landing.ahead().catch(() => null);
+	const fresh = ahead && Date.now() - Date.parse(ahead.at) < AHEAD_KEPT_MS ? ahead : null;
+	// Read ahead on an older main: the files a change changed since it left main are the same on this one, unless it
+	// took in something since, which would make a new head.
+	const reused = sources.map((s) => fresh?.read.find((r) => r.change === s.change && r.head === s.seen) ?? null);
+	const unread = sources.filter((_, i) => !reused[i]);
+	let readNow: Inspected[] = [];
+	if (unread.length) {
+		await holding.step(STEP_MS.gate);
+		readNow = await batchGit.inspect({ base: main, branch: input.branch, changes: unread.map(({ seen: _, ...s }) => s) });
+	}
+	if (fresh) console.log(`batch read ahead: ${reused.filter(Boolean).length} of ${sources.length} reused, ${unread.length} read now`);
+	let next = 0;
+	return sources.map((_, i) => reused[i] ?? readNow[next++]);
+}
+
+/**
+ * Read the next batch into the branch while this one is checked: the changes
+ * ready to land that aren't `leaving` with this batch, as many as `size`,
+ * read on `main` and kept with the lease (see Ahead). Its failures only cost
+ * the next batch a read.
+ */
+async function readAhead(input: MergeInput, landing: Landing, batchGit: BatchGit, main: string, size: number, leaving: Set<string>): Promise<void> {
+	try {
+		const next = await candidates(input, size, leaving);
+		if (!next.length) return;
+		const read = await batchGit.inspect({ base: main, branch: input.branch, changes: next.map(({ seen: _, ...s }) => s) });
+		let kept = read.flatMap((r) => ("error" in r || r.files.length > AHEAD_MOST_FILES ? [] : [r]));
+		while (kept.length && JSON.stringify(kept).length > AHEAD_MOST_CHARS) kept = kept.slice(0, Math.floor(kept.length / 2));
+		await landing.keepAhead({ base: main, at: new Date().toISOString(), read: kept } satisfies Ahead);
+	} catch (err) {
+		console.error("reading the next batch ahead failed", String(err));
+	}
 }
 
 /**

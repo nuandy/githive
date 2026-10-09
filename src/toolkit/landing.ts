@@ -32,6 +32,19 @@ export interface Checking {
 	changes: { change: string; head: string; agent: string }[];
 }
 
+/**
+ * The next batch's changes, read ahead while a batch was checked: each one's
+ * head and the files it changed since it left `base`. The merge that lands
+ * the next batch reuses a change's read when its head is still the one it
+ * last saw, and reads the rest; it validates every change against the
+ * records, and checks the batch on the main it lands on, as ever.
+ */
+export interface Ahead {
+	base: string;
+	at: string;
+	read: { change: string; head: string; files: string[] }[];
+}
+
 export interface LandingView {
 	checking: Checking | null;
 	/** The changes settled last, newest last. */
@@ -57,6 +70,10 @@ export interface Landing {
 	passed(base: string, heads: string[]): Promise<boolean>;
 	/** `heads` merged onto `base` in this order passed the checks. */
 	checked(base: string, heads: string[]): Promise<void>;
+	/** Keep the next batch's changes as read ahead (see Ahead), in place of any read before. */
+	keepAhead(ahead: Ahead): Promise<void>;
+	/** The next batch's changes as read ahead last, if any. */
+	ahead(): Promise<Ahead | null>;
 }
 
 /** How many settled changes are kept: enough for a merge waiting on a batch to find its own. */
@@ -74,6 +91,8 @@ export interface LandingState {
 	 * on the same code; this spares that.
 	 */
 	passed?: { base: string; heads: string; at: string }[];
+	/** The next batch's changes, read ahead (see Ahead). */
+	ahead?: Ahead;
 }
 
 /** How many passed checks are kept. */
@@ -134,5 +153,9 @@ export function memoryLanding(): Landing {
 		checked: async (base, heads) => {
 			state = markChecked(state, base, heads);
 		},
+		keepAhead: async (ahead) => {
+			state = { ...state, ahead };
+		},
+		ahead: async () => state.ahead ?? null,
 	};
 }

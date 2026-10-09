@@ -9,7 +9,7 @@ import { claimStore } from "../src/toolkit/claim-store";
 import { claim, startRepo, type Registry } from "../src/toolkit/claims";
 import { readMainMerges, readRecordHistory } from "../src/toolkit/git-records";
 import { type Landing, memoryLanding, renewLease } from "../src/toolkit/landing";
-import { batchSize, type Candidate, CHECKS_REVIEWER, type CheckRunner, mergeChange } from "../src/toolkit/merge";
+import { type BatchGit, batchSize, type Candidate, CHECKS_REVIEWER, type CheckRunner, type MergeInput, memoryBatchGit, mergeChange } from "../src/toolkit/merge";
 import { voteStore } from "../src/toolkit/vote-store";
 import { vote, type Votes } from "../src/toolkit/votes";
 import { pushChange } from "./helpers/agents";
@@ -68,7 +68,7 @@ describe("landing ready changes together", { timeout: 120_000 }, () => {
 		return Promise.all(held.map(async (c) => ({ claim: c, head: await branchHead(remote(), `changes/${c.change}`).catch(() => null), source: async () => remote() })));
 	};
 
-	const merge = (change: string, runChecks: CheckRunner, landing: Landing = memoryLanding()) =>
+	const merge = (change: string, runChecks: CheckRunner, landing: Landing = memoryLanding(), more: Partial<MergeInput> = {}) =>
 		mergeChange({
 			remote: remote(),
 			branch: "main",
@@ -82,7 +82,14 @@ describe("landing ready changes together", { timeout: 120_000 }, () => {
 			others,
 			landing,
 			pollMs: 20,
+			...more,
 		});
+
+	/** The batch's git work in memory, noting which changes each read was of. */
+	const readsNoted = (reads: string[][]): BatchGit => {
+		const git = memoryBatchGit(remote());
+		return { ...git, inspect: async (input) => (reads.push(input.changes.map((c) => c.change)), git.inspect(input)) };
+	};
 
 	const auditNow = async () => {
 		const registry = await readRecordHistory<Registry>(remote(), "refs/notes/githive-claims/t1");
@@ -165,6 +172,45 @@ describe("landing ready changes together", { timeout: 120_000 }, () => {
 			["a-1", "landed"],
 			["b-1", "landed"],
 		]);
+		expect(await auditNow()).toEqual([]);
+	});
+
+	it("reads the next batch while one is checked, and the merge that lands it reads none of it again", async () => {
+		for (const x of ["a", "b", "c", "d"]) await readyChange(`${x}-1`, { [`src/${x}.txt`]: `${x}\n` });
+		const landing = memoryLanding();
+		const reads: string[][] = [];
+		const runs: string[][] = [];
+		const more = { maxBatch: 2, batchGit: readsNoted(reads) };
+		expect(await merge("a-1", runner(new Set(), runs), landing, more)).toMatchObject({ ok: true });
+		// Its own batch, then the next one, read while its own was checked.
+		expect(reads).toEqual([
+			["a-1", "b-1"],
+			["c-1", "d-1"],
+		]);
+		expect((await landing.ahead())?.read.map((r) => r.change)).toEqual(["c-1", "d-1"]);
+		// The next merge lands what was read ahead, on the main the first batch left, without reading it again.
+		expect(await merge("c-1", runner(new Set(), runs), landing, more)).toMatchObject({ ok: true });
+		expect(reads.length).toBe(2);
+		expect(runs).toEqual([
+			["a-1", "b-1"],
+			["c-1", "d-1"],
+		]);
+		expect(landed()).toEqual(["a-1", "b-1", "c-1", "d-1"]);
+		expect(await auditNow()).toEqual([]);
+	});
+
+	it("reads a change again when it has a new head since it was read ahead", async () => {
+		for (const x of ["a", "b", "c", "d"]) await readyChange(`${x}-1`, { [`src/${x}.txt`]: `${x}\n` });
+		const landing = memoryLanding();
+		const reads: string[][] = [];
+		const more = { maxBatch: 2, batchGit: readsNoted(reads) };
+		expect(await merge("a-1", runner(), landing, more)).toMatchObject({ ok: true });
+		// d pushes again, and its new commit is approved: what was read ahead of it is out of date.
+		const newer = await pushChange(server.url, work, "agent-d-1", "d-1", { "src/d.txt": "d, again\n" }, "origin/changes/d-1");
+		await vote(votes(), { commit: newer, reviewer: "rev", role: "tests", verdict: "approve", evidence: "ok" });
+		expect(await merge("c-1", runner(), landing, more)).toMatchObject({ ok: true });
+		expect(reads.slice(2)).toEqual([["d-1"]]);
+		expect(server.git("log", "-1", "--format=%(trailers:key=GitHive-Tested-With,valueonly)", "main").trim().split(" ").at(-1)).toBe(newer);
 		expect(await auditNow()).toEqual([]);
 	});
 

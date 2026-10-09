@@ -553,6 +553,21 @@ command, each fetch tried three times: the repo's Gate to read and land it,
 and the batch's check container, which fetches only what it doesn't have yet
 (one at a time, the fetches were most of a big batch's check).
 
+**The next batch is read ahead.** Reading a batch (each change's credentials,
+its head, the files it changed) took 25 to 65 s of every batch, and batches
+follow one another. So while a batch is checked, the merge holding the lease
+also reads the next one: the oldest ready changes not in its own batch, as
+many as a batch holds, read in the repo's Gate on the main it has, and kept
+with the lease in the RepoCache (`Ahead` in `landing.ts`). The merge that
+lands the next batch, usually another one, since a merge hands the lease on
+once its own change settles, reuses a change's read when the change's head is
+still the one it last saw, and reads only the rest. A change at the same head
+changed the same files since it left main, whichever main it lands on (one
+that took in something since has a new head, and is read again). Every change is still validated against its
+claim and votes, and the batch is checked on exactly the main it lands on, so
+the audit is unchanged. What was read ahead is a hint like the lease: kept 10
+minutes, and losing it costs a read.
+
 A call to the Gate or the RepoCache that failed only because its Durable
 Object or container was briefly away (reset by a runtime update, or a
 container connection briefly unavailable) is tried once more, two seconds
