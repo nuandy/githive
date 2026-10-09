@@ -8,7 +8,7 @@
 // up first, with the same plan:
 //
 //   node scripts/swarm.mjs <plan.json> --setup-only
-//   node scripts/claude-agents.mjs <plan.json> [--base URL] [--model claude-sonnet-5-5] [--minutes 45]
+//   node scripts/claude-agents.mjs <plan.json> [--base URL] [--model claude-sonnet-5-5] [--minutes 45] [--only agent-7]
 //
 // Each agent works in its own folder (<plan dir>/agents-work/<agent>), and
 // its session's events go to <agent>.jsonl there. The run ends when every
@@ -38,12 +38,17 @@ const started = Date.now();
 const clock = () => `${((Date.now() - started) / 1000).toFixed(0).padStart(5)}s`;
 const say = (who, text) => console.log(`${clock()}  ${who.padEnd(10)} ${text}`);
 
+// --only <agent>[,<agent>]: those agents alone (one that stopped early, say), the others' folders left as they are.
+const only = flag("only")?.split(",");
+/** How many agents the plan runs in all, as each is told (with --only too). */
+const total = plan.agents.length;
+if (only) plan.agents = plan.agents.filter((a) => only.includes(a.agent));
 const work = join(here, "agents-work");
-rmSync(work, { recursive: true, force: true });
+if (!only) rmSync(work, { recursive: true, force: true });
 mkdirSync(work, { recursive: true });
 
 /** What every agent is told: who it is, the loop, and how to use git with GitHive. */
-const prompt = (agent, dir, keyFile) => `You are ${agent}, one of ${plan.agents.length} independent AI agents working at the same time on the GitHive repo "${plan.repo}": a copy of Express (Node.js). GitHive coordinates you through its MCP tools (server "githive"); read its instructions. Pass repo "${plan.repo}" and agent "${agent}" wherever a tool asks for them.
+const prompt = (agent, dir, keyFile) => `You are ${agent}, one of ${total} independent AI agents working at the same time on the GitHive repo "${plan.repo}": a copy of Express (Node.js). GitHive coordinates you through its MCP tools (server "githive"); read its instructions. Pass repo "${plan.repo}" and agent "${agent}" wherever a tool asks for them. You're registered already, and your key goes with every call: never call register.
 
 Work in a loop:
 1. Call next. Do exactly what it says:
@@ -91,6 +96,9 @@ function runAgent(spec) {
 			"--strict-mcp-config",
 			"--allowedTools",
 			"Bash,Read,Edit,Write,Glob,Grep,mcp__githive",
+			// Registering again would give it a new key, and the one it calls with would stop working.
+			"--disallowedTools",
+			"mcp__githive__register",
 			"--permission-mode",
 			"acceptEdits",
 			"--output-format",
