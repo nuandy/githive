@@ -59,9 +59,12 @@ what Git said.
   (`skip_checks`).
   The registry keeps every version, and each merge cites the registry state
   it checked, so the audit holds it to the settings in force when it merged.
-- `register`: register an agent name and get its key, or rotate the key.
+- `register`: register an agent name and get its key, or rotate the key; or
+  many new names at once (`agents`), in one write, each with its own key.
 - `next`: what this agent should do now.
-- `add_work`: add a piece of work to the repo's backlog.
+- `add_work`: add a piece of work to the repo's backlog, or many at once
+  (`items`), in one write. One write each, 200 agents and a backlog of 200
+  took 10 minutes to set up, one after another.
 - `claims`: the claims in force.
 - `claim`: claim paths for a change, or extend or refresh its claim: on the
   project's branch or `into` another, `after` the changes it depends on, or
@@ -566,7 +569,18 @@ changed the same files since it left main, whichever main it lands on (one
 that took in something since has a new head, and is read again). Every change is still validated against its
 claim and votes, and the batch is checked on exactly the main it lands on, so
 the audit is unchanged. What was read ahead is a hint like the lease: kept 10
-minutes, and losing it costs a read.
+minutes, and losing it costs a read. Without checks, the next batch is read
+once this one is pushed, while its claims are released: the repo's Gate does
+one thing at a time, and reading first would hold up the push.
+
+**A batch's merges hear it landed as soon as it's pushed**, and its claims are
+released after. Releasing them is a write per change, a few at a time, so it
+grows with the batch, and the merges waiting needn't wait for it. The lease is held until they're
+released, so no batch takes up a change that just landed, and a merge asked
+again meanwhile finds its change landed. Each batch asks for its forks' read
+access 6 at a time, and every call reads open changes' heads 6 at a time: a
+Worker request holds 6 connections open, and with 170 open changes read at
+once, the runtime cancelled reads to break the stall.
 
 A call to the Gate or the RepoCache that failed only because its Durable
 Object or container was briefly away (reset by a runtime update, or a

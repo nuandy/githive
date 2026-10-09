@@ -49,6 +49,22 @@ export function addWork(log: CasLog<Work>, input: Omit<WorkItem, "at">) {
 	);
 }
 
+/**
+ * Add several pieces of work at once: one write for a backlog filed together.
+ * Those whose ids are in the backlog already are left as they are, and named.
+ */
+export async function addWorks(log: CasLog<Work>, by: string, items: Omit<WorkItem, "at" | "by">[]) {
+	let already: string[] = [];
+	const added = await appendRecord<Work, string>(log, by, () => ({ items: [] }), (state) => {
+		already = items.filter((i) => state.items.some((s) => s.id === i.id)).map((i) => i.id);
+		const fresh = items.filter((i) => !already.includes(i.id));
+		if (!fresh.length) return { refused: "all of them are in the backlog already" };
+		const at = new Date().toISOString();
+		return { state: { items: [...state.items, ...fresh.map((i) => ({ ...i, by, at }))] }, text: `${by} adds ${fresh.map((i) => i.id).join(", ")} to the backlog` };
+	});
+	return { ok: added.ok, added: added.ok ? items.map((i) => i.id).filter((id) => !already.includes(id)) : [], already };
+}
+
 export type NextStep =
 	| { kind: "merge"; change: string; head: string; next: string }
 	| { kind: "revise"; change: string; head: string; reviewer: string; evidence: string; next: string }

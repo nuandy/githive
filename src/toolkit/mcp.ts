@@ -9,15 +9,15 @@ import { changeId, claimCovering, normalizeClaim } from "../claim-paths";
 import { audit } from "./audit";
 import { checkChange } from "./check";
 import { claimStore, type ClaimStore } from "./claim-store";
-import { changeSettings, recordBranch, registerAgent, shardClaims, shardingReason, startRepo, type ClaimRecord, type Registry } from "./claims";
+import { changeSettings, recordBranch, registerAgent, registerAgents, shardClaims, shardingReason, startRepo, type ClaimRecord, type Registry } from "./claims";
 import { mergeRecordOf, readMainMerges, readRecordHistory, readRefHistories, readShardHistories, type BranchCommit } from "./git-records";
-import { type BatchGit, type Candidate, type CheckRunner, mergeChange } from "./merge";
+import { atMost, type BatchGit, type Candidate, type CheckRunner, mergeChange } from "./merge";
 import type { Landing, LandingView } from "./landing";
 import { revertViolation } from "./revert";
 import type { Stamper } from "./stamp";
 import { SENSITIVE_PATHS, approval, countedVotes, DEFAULT_GRANT, effectivePolicy, grantWarnings, openFlag, shardVotes, votesShardingReason, type ReviewPolicy, type VoteRecord, type Votes } from "./votes";
 import { VOTE_BUCKETS, type VoteStore, voteStore, votesPrefix } from "./vote-store";
-import { addWork, holdKey, type NextStep, nextFor, ROLE_WAIT_MS, type Work, waitingRoleReviews, workId } from "./work";
+import { addWork, addWorks, holdKey, type NextStep, nextFor, ROLE_WAIT_MS, type Work, waitingRoleReviews, workId } from "./work";
 import { abandoned, BUILDING_IDLE_MS, type ChangeSigns } from "./staleness";
 import { claimInto, isReservedPath, presentClaim, scopeFile, scopePaths } from "./branch-scope";
 import { BRANCH_PATTERN, type BranchRule, settingsForBranch } from "./branch-rules";
@@ -122,6 +122,10 @@ const DEFAULT_SHARD_DEPTH = 2;
 const DEFAULT_RECORDS_REPOS = 16;
 /** The floor: no claim is stale sooner than this after its agent last claimed (see staleness.ts for the rest of the rule). */
 const STALE_AFTER_MS = BUILDING_IDLE_MS;
+/** How many forks' heads a call reads at once (a Worker request holds only six connections open; past that, the runtime cancels some). */
+const HEAD_READS_AT_ONCE = 6;
+/** The most agents register, or pieces of work add_work adds, in one call. */
+const MOST_AT_ONCE = 500;
 const claimsRef = (repo: string) => `refs/notes/githive-claims/${repo}`;
 const votesRef = (repo: string) => `refs/notes/githive-votes/${repo}`;
 const workRef = (repo: string) => `refs/notes/githive-work/${repo}`;
@@ -152,7 +156,7 @@ const TOOL_LIST = [
 	{ name: "claim", description: "Claim paths for your change (again to extend it, or to keep it active). Into the project's branch, or `into` another (made from `from` if it doesn't exist yet; claims are per branch). `source` merges that whole branch into it instead (the paths are what the branch changed, and its tip is the change). `after` names changes it depends on: it merges only once they have merged into the same branch. Refused, naming the holder, if another claim on that branch overlaps; a claim in the way that its agent has abandoned (see release) is released as stale instead.", inputSchema: { type: "object", properties: { repo: str, change: str, agent: str, paths: { type: "array", items: str }, intent: str, into: str, from: str, after: { type: "array", items: str }, source: str }, required: ["repo", "change", "agent", "intent"] } },
 	{ name: "release", description: "Release a claim: yours, or with stale: true another agent's it has abandoned: its change waits on that agent, unanswered for 30 minutes with nothing pushed, or 2 hours after changes were asked for, failed checks, or approval without a merge. Never one waiting for review, being checked to land, or on a person.", inputSchema: { type: "object", properties: { repo: str, change: str, agent: str, reason: str, stale: { type: "boolean" } }, required: ["repo", "change", "agent"] } },
 	{ name: "next", description: "What you should do next, for any agent without a set role: merge your change if it's approved, revise it if a reviewer asked for changes, finish it if nothing is pushed; else review a change that's waiting (never your own, and a role that can block only if you hold it); else build a piece of the backlog nobody has taken; else wait. Says how to do it.", inputSchema: { type: "object", properties: { repo: str, agent: str }, required: ["repo", "agent"] } },
-	{ name: "add_work", description: "Add a piece of work to the repo's backlog, for next to hand to an agent: a title, what it should do (intent), and the paths it's likely to touch. Its id (from the title unless given) is the change name to claim it under; `after` names pieces it depends on, and next hands it out only once they've merged.", inputSchema: { type: "object", properties: { repo: str, title: str, intent: str, paths: { type: "array", items: str }, after: { type: "array", items: str }, id: str, agent: str }, required: ["repo", "title", "intent", "agent"] } },
+	{ name: "add_work", description: "Add a piece of work to the repo's backlog, for next to hand to an agent: a title, what it should do (intent), and the paths it's likely to touch. Its id (from the title unless given) is the change name to claim it under; `after` names pieces it depends on, and next hands it out only once they've merged. Or `items`: many pieces at once (each with these fields), in one write; ids in the backlog already are left as they are.", inputSchema: { type: "object", properties: { repo: str, title: str, intent: str, paths: { type: "array", items: str }, after: { type: "array", items: str }, id: str, items: { type: "array", items: { type: "object", properties: { title: str, intent: str, paths: { type: "array", items: str }, after: { type: "array", items: str }, id: str }, required: ["title", "intent"] } }, agent: str }, required: ["repo", "agent"] } },
 	{ name: "review_access", description: "Read access to a change you'll review: a read-only token for the author's fork, the change's branch (changes/<change>) and its pushed head, and read access to the project to diff against. Anyone may review; each grant is logged.", inputSchema: { type: "object", properties: { repo: str, change: str }, required: ["repo", "change"] } },
 	{ name: "vote", description: "Record your review verdict on the exact commit you reviewed.", inputSchema: { type: "object", properties: { repo: str, commit: str, reviewer: str, role: str, verdict: { type: "string", enum: ["approve", "reject"] }, evidence: str }, required: ["repo", "commit", "reviewer", "role", "verdict", "evidence"] } },
 	{ name: "merge", description: "Merge changes/<change> into the project's branch if the conventions hold, recording what was checked, then release the claim.", inputSchema: { type: "object", properties: { repo: str, change: str, agent: str }, required: ["repo", "change", "agent"] } },
@@ -163,7 +167,7 @@ const TOOL_LIST = [
 	{ name: "status", description: "Where a change stands: its claim (or how it ended), its branch head, the votes on that head with their evidence, the approvals still needed, and what GitHive's hosted agents on it are doing.", inputSchema: { type: "object", properties: { repo: str, change: str }, required: ["repo", "change"] } },
 	{ name: "check", description: "An early check on your change, any time before merging: whether it still merges cleanly into the project's branch, and any files outside your claim. (Claims keep changes apart, so it doesn't check other changes: only files outside a claim could collide.) Reports only.", inputSchema: { type: "object", properties: { repo: str, change: str }, required: ["repo", "change"] } },
 	{ name: "ask_human", description: "Ask a person to decide something about a change you can't settle among agents (reviewers disagree, a trade-off needs an owner). It waits in their inbox until a person votes on the change's commit.", inputSchema: { type: "object", properties: { repo: str, change: str, agent: str, reason: str }, required: ["repo", "change", "agent", "reason"] } },
-	{ name: "register", description: "Register your agent name and get its secret key (shown once), so what you write is attributed to you even if you share an Access identity. With your current key, rotates it.", inputSchema: { type: "object", properties: { repo: str, agent: str }, required: ["repo", "agent"] } },
+	{ name: "register", description: "Register your agent name and get its secret key (shown once), so what you write is attributed to you even if you share an Access identity. With your current key, rotates it. Or `agents`: several new names at once (none registered yet), in one write, each with its own key.", inputSchema: { type: "object", properties: { repo: str, agent: str, agents: { type: "array", items: str } }, required: ["repo"] } },
 ];
 // Every tool takes the caller's agent key, for clients that can't set the header.
 export const TOOLS = annotate(
@@ -501,6 +505,16 @@ async function branchMerge(ctx: ToolContext, repo: string, source: string, into:
 }
 
 /** A list of change ids from an argument (none when it's absent). */
+/** A piece of work as add_work takes it (alone, or as one of its items). */
+function workItemFrom(args: Record<string, unknown>) {
+	const title = requiredString(args, "title");
+	const id = typeof args.id === "string" && args.id.trim() ? args.id.trim() : workId(title);
+	if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(id)) throw new Error("[400] a work id is letters, digits, dots, dashes and underscores");
+	const paths = args.paths === undefined ? undefined : normalizeClaim(requiredPaths(args, "paths"));
+	const after = changeList(args.after, "after");
+	return { id, title, intent: requiredString(args, "intent"), ...(paths ? { paths } : {}), ...(after.length ? { after } : {}) };
+}
+
 function changeList(value: unknown, field: string): string[] {
 	if (value === undefined) return [];
 	if (!Array.isArray(value) || value.some((v) => typeof v !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(v))) throw new Error(`[400] ${field} is a list of change ids`);
@@ -844,11 +858,13 @@ async function runTool(name: string, args: Args, ctx: ToolContext): Promise<unkn
 	/**
 	 * Open changes' pushed heads, as kept a few seconds when the context keeps
 	 * them (one request per open change, which a crowd asking would otherwise
-	 * make on every call), else read now; `fresh` ones always read now.
+	 * make on every call), else read now; `fresh` ones always read now. A few
+	 * at a time: all at once, a crowd's 170 open changes went past what a Worker
+	 * request holds open, and the runtime cancelled the rest.
 	 */
 	const openHeads = async (claims: ClaimRecord[], fresh: (claim: ClaimRecord) => boolean = () => false) => {
-		const kept = ctx.keptHeads && claims.some((c) => !fresh(c)) ? await ctx.keptHeads(repo, async () => Object.fromEntries(await Promise.all(claims.map(async (c) => [c.change, await pushedHead(c)])))).catch(() => undefined) : undefined;
-		const heads = new Map(await Promise.all(claims.map(async (c) => [c.change, fresh(c) || !kept ? await pushedHead(c) : (kept[c.change] ?? null)] as const)));
+		const kept = ctx.keptHeads && claims.some((c) => !fresh(c)) ? await ctx.keptHeads(repo, async () => Object.fromEntries(await atMost(HEAD_READS_AT_ONCE, claims, async (c) => [c.change, await pushedHead(c)] as const))).catch(() => undefined) : undefined;
+		const heads = new Map(await atMost(HEAD_READS_AT_ONCE, claims, async (c) => [c.change, fresh(c) || !kept ? await pushedHead(c) : (kept[c.change] ?? null)] as const));
 		return (claim: ClaimRecord) => heads.get(claim.change) ?? null;
 	};
 	/** Warm the check container for a merge to come (only where the repo has checks): why, and for which change or commit. */
@@ -937,13 +953,19 @@ async function runTool(name: string, args: Args, ctx: ToolContext): Promise<unkn
 			return { kind: "wait", reason: "other agents just took the reviews that were waiting", retryAfterSeconds: 15, next: "Call next again in a little while." } satisfies NextStep;
 		}
 		case "add_work": {
-			const title = requiredString(args, "title");
-			const id = typeof args.id === "string" && args.id.trim() ? args.id.trim() : workId(title);
-			if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(id)) throw new Error("[400] a work id is letters, digits, dots, dashes and underscores");
-			const paths = args.paths === undefined ? undefined : normalizeClaim(requiredPaths(args, "paths"));
-			const after = changeList(args.after, "after");
-			const added = await addWork(recordLog<Work>(ctx, repo, workRef(repo)), { id, title, intent: requiredString(args, "intent"), ...(paths ? { paths } : {}), ...(after.length ? { after } : {}), by: actAs("agent") });
-			return added.ok ? { ok: true, id } : { ok: false, reason: added.refused };
+			const by = actAs("agent");
+			if (args.items !== undefined) {
+				if (!Array.isArray(args.items) || !args.items.length || args.items.length > MOST_AT_ONCE) throw new Error(`[400] items is a list of 1 to ${MOST_AT_ONCE} pieces of work`);
+				const items = args.items.map((item) => workItemFrom(item as Record<string, unknown>));
+				const ids = items.map((i) => i.id);
+				const twice = ids.filter((id, i) => ids.indexOf(id) !== i);
+				if (twice.length) throw new Error(`[400] each piece needs its own id: ${[...new Set(twice)].join(", ")} more than once`);
+				const added = await addWorks(recordLog<Work>(ctx, repo, workRef(repo)), by, items);
+				return { ok: added.ok, added: added.added, ...(added.already.length ? { already: added.already } : {}) };
+			}
+			const item = workItemFrom(args);
+			const added = await addWork(recordLog<Work>(ctx, repo, workRef(repo)), { ...item, by });
+			return added.ok ? { ok: true, id: item.id } : { ok: false, reason: added.refused };
 		}
 		case "review_access": {
 			// Anyone may review: a read-only view of the change's branch in its author's fork (or its own fork, from before forks were per agent).
@@ -1135,16 +1157,30 @@ async function runTool(name: string, args: Args, ctx: ToolContext): Promise<unkn
 		}
 		case "register": {
 			if (ctx.agent) throw new Error(`[409] you're signed in as ${ctx.agent}: what you write is already attributed to you, with no key`);
-			const agent = requiredString(args, "agent");
-			if (agent.includes("/")) throw new Error("[400] names with \"/\" are signed-in agents' (<handle>/<agent>); register a name without one");
-			if (agent.startsWith(HOSTED_PREFIX) && !ctx.hosted) throw new Error("[403] githive- names are GitHive's hosted agents'");
-			const secret = btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(24)))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
-			const newKey = `${agent}.${secret}`;
+			const nameOk = (agent: string) => {
+				if (agent.includes("/")) throw new Error("[400] names with \"/\" are signed-in agents' (<handle>/<agent>); register a name without one");
+				if (agent.startsWith(HOSTED_PREFIX) && !ctx.hosted) throw new Error("[403] githive- names are GitHive's hosted agents'");
+				return agent;
+			};
+			const keyFor = (agent: string) => `${agent}.${btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(24)))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "")}`;
+			const note = "Keep each key secret; it is shown once. Send it as X-GitHive-Agent-Key (or agent_key) with every call.";
+			if (args.agents !== undefined) {
+				if (!Array.isArray(args.agents) || !args.agents.length || args.agents.length > MOST_AT_ONCE) throw new Error(`[400] agents is a list of 1 to ${MOST_AT_ONCE} names`);
+				const names = args.agents.map((a) => (typeof a === "string" && a.trim() ? nameOk(a.trim()) : fail(400, "each of agents is a name")));
+				if (new Set(names).size !== names.length) throw new Error("[400] agents names a name more than once");
+				const keys = names.map(keyFor);
+				const outcome = await registerAgents(claims, await Promise.all(names.map(async (agent, i) => ({ agent, keyHash: await sha256(keys[i]) }))), stamper);
+				if (!outcome.ok) throw new Error(`[409] ${outcome.refused}`);
+				await ctx.prepareForks?.(repo, names).catch(() => undefined);
+				return { agents: names.map((agent, i) => ({ agent, key: keys[i] })), note };
+			}
+			const agent = nameOk(requiredString(args, "agent"));
+			const newKey = keyFor(agent);
 			const outcome = await registerAgent(claims, { agent, keyHash: await sha256(newKey), ...(acting ? { holder: acting } : {}) }, stamper);
 			if (!outcome.ok) throw new Error(`[409] ${outcome.refused}`);
 			// Its fork, made in the background now rather than in a crowd on its first push.
 			await ctx.prepareForks?.(repo, [agent]).catch(() => undefined);
-			return { agent, key: newKey, note: "Keep this key secret; it is shown once. Send it as X-GitHive-Agent-Key (or agent_key) with every call." };
+			return { agent, key: newKey, note: note.replace("each key", "this key") };
 		}
 		default:
 			throw new Error(`[400] unknown tool ${name}`);

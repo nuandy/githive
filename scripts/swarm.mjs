@@ -388,6 +388,9 @@ if (plan.setup) {
  * each registration and backlog item is a write to one record, and hundreds
  * at once would only contend.
  */
+/** `items` in lists of `n`. */
+const chunks = (items, n) => Array.from({ length: Math.ceil(items.length / n) }, (_, i) => items.slice(i * n, (i + 1) * n));
+
 async function inBatches(items, n, fn) {
 	const queue = [...items];
 	const again = async (item) => {
@@ -404,21 +407,24 @@ async function inBatches(items, n, fn) {
 		while (queue.length) await again(queue.shift());
 	}));
 }
-// Registered side by side, then the backlog filed side by side, a few at a time: setup takes seconds.
+// Registered a list at a time, then the backlog filed a list at a time: one write each, where one per agent and per
+// piece, in turn, took 10 minutes for 200.
+const LIST_AT_ONCE = 250;
 const unregistered = [...plan.agents, ...(plan.planner ? [plan.planner] : [])].filter((who) => who.keyFile && !existsSync(at(who.keyFile)));
-await inBatches(unregistered, 1, async (who) => {
-	{
+await inBatches(chunks(unregistered, LIST_AT_ONCE), 1, async (list) => {
+	const { agents } = await tool("register", { agents: list.map((who) => who.agent) });
+	for (const who of list) {
 		mkdirSync(dirname(at(who.keyFile)), { recursive: true });
-		const { key } = await tool("register", { agent: who.agent });
-		writeFileSync(at(who.keyFile), key);
+		writeFileSync(at(who.keyFile), agents.find((a) => a.agent === who.agent).key);
 		chmodSync(at(who.keyFile), 0o600);
 	}
 });
-if (unregistered.length) say("swarm", `registered ${unregistered.map((w) => w.agent).join(", ")}`);
+if (unregistered.length) say("swarm", `registered ${unregistered.length} agents (${unregistered[0].agent} to ${unregistered.at(-1).agent})`);
 const planner = plan.planner ?? plan.agents[0];
-await inBatches(plan.backlog, 1, async (piece) => {
-	const added = await tool("add_work", { id: piece.id, title: piece.title ?? piece.id, intent: piece.intent, ...(piece.paths ? { paths: piece.paths } : {}), agent: planner.agent }, planner.keyFile);
-	if (!added.ok && !/already/.test(added.reason ?? "")) throw new Error(`adding ${piece.id} failed: ${added.reason}`);
+await inBatches(chunks(plan.backlog, LIST_AT_ONCE), 1, async (list) => {
+	const items = list.map((piece) => ({ id: piece.id, title: piece.title ?? piece.id, intent: piece.intent, ...(piece.paths ? { paths: piece.paths } : {}) }));
+	const added = await tool("add_work", { items, agent: planner.agent }, planner.keyFile);
+	if (!added.ok && !added.already?.length) throw new Error(`adding ${list[0].id} to ${list.at(-1).id} failed: ${JSON.stringify(added)}`);
 });
 // Setup ends once the repo has a snapshot for check containers to start from, as on a repo that's been running: the work clock starts then.
 if (plan.setup?.verify?.length) {

@@ -349,6 +349,21 @@ export function recordBranch(log: CasLog<Registry>, input: { name: string; base:
 }
 
 /**
+ * Register several new agent names at once, each with the hash of its new
+ * key: one write for a crowd set up together, where one each took 2 s apiece
+ * in turn. Refused, naming them, if any is registered already.
+ */
+export function registerAgents(log: CasLog<Registry>, agents: { agent: string; keyHash: string }[], stamper?: Stamper) {
+	return appendRecord<Registry, string>(log, agents[0].agent, empty, async (state) => {
+		const taken = agents.filter((a) => state.agents?.[a.agent]).map((a) => a.agent);
+		if (taken.length) return { refused: `already registered: ${taken.join(", ")} (register each alone, with its agent key, to rotate it)` };
+		const at = new Date().toISOString();
+		const records = await Promise.all(agents.map(async (a) => [a.agent, await stamped("agent", { agent: a.agent, keyHash: a.keyHash, at }, stamper)] as const));
+		return { state: { ...state, agents: { ...state.agents, ...Object.fromEntries(records) } }, text: `${agents.map((a) => a.agent).join(", ")} register` };
+	});
+}
+
+/**
  * Register an agent name with the hash of its new key, or rotate the key of a
  * name the caller already holds (`holder`: the name its current key is for).
  * A name, once registered, is never given to anyone else.

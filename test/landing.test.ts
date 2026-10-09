@@ -199,6 +199,40 @@ describe("landing ready changes together", { timeout: 120_000 }, () => {
 		expect(await auditNow()).toEqual([]);
 	});
 
+	it("without checks, reads the next batch once this one is pushed, and the merge that lands it reads none of it again", async () => {
+		for (const x of ["a", "b", "c", "d"]) await readyChange(`${x}-1`, { [`src/${x}.txt`]: `${x}\n` });
+		const landing = memoryLanding();
+		// What the repo's Gate is asked to do, in order: it does one thing at a time, so reading the next batch first would hold up the push.
+		const asked: string[] = [];
+		const git = memoryBatchGit(remote());
+		const batchGit: BatchGit = {
+			inspect: async (input) => (asked.push(`read ${input.changes.map((c) => c.change)}`), git.inspect(input)),
+			land: async (input) => (asked.push(`land ${input.merges.map((m) => m.change)}`), git.land(input)),
+		};
+		const more = { maxBatch: 2, batchGit, verify: [], runChecks: undefined };
+		expect(await merge("a-1", runner(), landing, more)).toMatchObject({ ok: true });
+		expect(asked).toEqual(["read a-1,b-1", "land a-1,b-1", "read c-1,d-1"]);
+		expect(await merge("c-1", runner(), landing, more)).toMatchObject({ ok: true });
+		expect(asked.slice(3)).toEqual(["land c-1,d-1"]);
+		expect(landed()).toEqual(["a-1", "b-1", "c-1", "d-1"]);
+	});
+
+	it("tells the merges waiting on a batch that it landed before their claims are released", async () => {
+		for (const x of ["a", "b"]) await readyChange(`${x}-1`, { [`src/${x}.txt`]: `${x}\n` });
+		const landing = memoryLanding();
+		const claimStore = store();
+		const release = claimStore.release.bind(claimStore);
+		const heard: string[] = [];
+		claimStore.release = async (r, stamper) => {
+			if ((await landing.view()).recent.some((s) => s.change === r.change && s.how === "landed")) heard.push(r.change);
+			return release(r, stamper);
+		};
+		expect(await merge("a-1", runner(), landing, { store: claimStore })).toMatchObject({ ok: true });
+		expect(heard).toEqual(["a-1", "b-1"]);
+		expect((await store().read()).claims).toEqual([]);
+		expect(await auditNow()).toEqual([]);
+	});
+
 	it("reads a change again when it has a new head since it was read ahead", async () => {
 		for (const x of ["a", "b", "c", "d"]) await readyChange(`${x}-1`, { [`src/${x}.txt`]: `${x}\n` });
 		const landing = memoryLanding();
