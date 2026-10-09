@@ -363,7 +363,11 @@ export class RepoCache extends DurableObject<Env> {
 		const tips = await this.ctx.storage.list({ prefix: "tip:" });
 		const forks = await this.ctx.storage.list({ prefix: "forks:" });
 		const landing = await this.ctx.storage.list({ prefix: "landing:" });
-		await this.ctx.storage.delete([...kept.keys(), ...building.keys(), ...records.keys(), ...tips.keys(), ...forks.keys(), ...landing.keys()]);
+		// The heads last seen on changes' branches (see knownHeads): a repo made again under the name reuses change names.
+		const heads = await this.ctx.storage.list({ prefix: "head:" });
+		const keys = [...kept.keys(), ...building.keys(), ...records.keys(), ...tips.keys(), ...forks.keys(), ...landing.keys(), ...heads.keys()];
+		// Storage deletes 128 keys at a time.
+		for (let i = 0; i < keys.length; i += 128) await this.ctx.storage.delete(keys.slice(i, i + 128));
 	}
 
 	private async writes() {

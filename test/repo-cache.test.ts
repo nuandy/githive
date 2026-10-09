@@ -59,6 +59,16 @@ describe("kept views", () => {
 });
 
 describe("forgetting a deleted repo's views", () => {
+	it("drops everything kept for it, however much, the heads seen on its changes among it", async () => {
+		const { live } = feed();
+		await live.noteHeads(Object.fromEntries(Array.from({ length: 300 }, (_, i) => [`note-${i}`, `h${i}`])));
+		await live.landingSettled("master", [{ change: "note-1", head: "h1", agent: "a", how: "landed", at: new Date().toISOString(), commit: "m1" }]);
+		expect(Object.keys(await live.knownHeads(Array.from({ length: 300 }, (_, i) => `note-${i}`)))).toHaveLength(300);
+		await live.clearViews();
+		expect(await live.knownHeads(["note-1", "note-299"])).toEqual({});
+		expect((await live.landingView("master")).recent).toEqual([]);
+	});
+
 	it("drops kept views and builds, and keeps counting writes", async () => {
 		const { live } = feed();
 		await live.keep("snapshot", "{}", 0);
