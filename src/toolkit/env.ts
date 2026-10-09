@@ -7,7 +7,7 @@ import { fail } from "../errors";
 import { defaultBranch, type Remote, Workspace } from "../git";
 import { projectBranch } from "../project-branch";
 import { claimStore } from "./claim-store";
-import { type ReviewHolds, reviewHolds, reviewsRef } from "./review-holds";
+import { type ReviewHolds, reviewHolds, reviewsRef, reviewsRepoOf } from "./review-holds";
 import type { Registry } from "./claims";
 import type { ToolContext, HostedStatus } from "./mcp";
 import type { BatchSource } from "./merge";
@@ -112,6 +112,29 @@ function recordsLog<S>(env: Env, repo: string, ref: string) {
 }
 
 /**
+ * A record kept in records repo `k` of `repo`, not the project repo (review
+ * holds, say), kept for the isolate like recordsLog's, its tips in the repo's
+ * RepoCache under the records repo's name (the same ref may be in the
+ * project repo too, from before).
+ */
+function recordsLogIn<S>(env: Env, repo: string, k: number, ref: string) {
+	const key = `${recordsRepoName(repo, k)}:${ref}`;
+	let log = logs.get(key);
+	if (!log) {
+		const cache = () => env.REPO_CACHE.getByName(`repo:${repo}`);
+		const states = { get: (r: string, tip: string) => rpc(cache().recordAt(r, tip)), put: (r: string, tip: string, json: string) => cache().keepRecord(r, tip, json) };
+		const tips = {
+			get: (r: string, stateKey: string) => rpc(cache().tipOf(key, stateKey, KEPT_TIP_MS)),
+			keep: (r: string, tip: string | null, gen: number) => cache().keepTip(key, tip, gen),
+			landed: (r: string, parent: string | null, tip: string) => cache().landedTip(key, parent, tip),
+			stale: (r: string, parent: string | null) => cache().staleTip(key, parent),
+		};
+		logs.set(key, (log = new GitCasLog<unknown>(() => cached(env, repo, `${recordsRepoName(repo, k)}|write`, () => remoteFor(env.ARTIFACTS, recordsRepoName(repo, k), "write", 3600)), repo, ref, { states, tips })));
+	}
+	return log as GitCasLog<S>;
+}
+
+/**
  * The context for one actor: `by` is who it is (as Access or GitHive's
  * sign-in verified them, or a hosted agent's own name), and stamps carry it,
  * with the agent name its key or token is for. Hosted agents (`hosted`) act under githive- names.
@@ -135,7 +158,11 @@ export function toolContextFor(env: Env, by: string | undefined, caller: { agent
 		// Forks made in the background, paced, before agents need them: the seeds when GitHive starts, an agent's when it registers.
 		prepareForks: async (repo, items) => void (await env.REPO_CACHE?.getByName(`repo:${repo}`).queueForks(repo, items === "seeds" ? seedItems() : items.map((agent) => `agent:${agent}`))),
 		// Review holds are a record in Git (see review-holds.ts), like the claims and votes.
-		reviews: reviewHolds((repo) => recordsLog<ReviewHolds>(env, repo, reviewsRef(repo))),
+		// In one of the repo's records repos once it has them (see review-holds.ts), else beside the claims and votes.
+		reviews: reviewHolds(async (repo) => {
+			const spread = (await recordsLog<Registry>(env, repo, claimsRef(repo)).read())?.commit.state.recordsRepos ?? 0;
+			return spread ? recordsLogIn<ReviewHolds>(env, repo, reviewsRepoOf(spread), reviewsRef(repo)) : recordsLog<ReviewHolds>(env, repo, reviewsRef(repo));
+		}),
 		requestReview: (input) => startHostedReviewers(env, input),
 		startBuilder: (input) => startHostedBuilder(env, input),
 		stamper: async (agent) => (env.STAMP_KEY && by ? makeStamper(env.STAMP_KEY, agent ? `${by}/${agent}` : by) : undefined),

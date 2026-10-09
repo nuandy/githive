@@ -1,9 +1,14 @@
 import type { CasLog } from "../record-log";
 import type { ToolContext } from "./mcp";
 import { appendRecord } from "./records";
+import { recordsRepoOf } from "./shards";
 
 // Review holds, kept as a record in Git like the claims and votes, written by
 // compare-and-swap by whichever agent's next is acting. Nobody runs them.
+// Once a repo has records repos, the record is in one of them (see
+// reviewsRepoOf), not the project repo: every review handed out writes it, and
+// at 200 agents those writes kept the project repo busy, which refused the
+// batches landing on its branch.
 //
 // A hold says an agent is reviewing a commit in a role (keyed as work.ts
 // holdKey), until it votes or the hold runs out: next hands a review out only
@@ -33,8 +38,11 @@ export interface ReviewHolds {
 const AUTHOR = "githive";
 const empty = (): ReviewHolds => ({ holds: {}, waits: {} });
 
-/** Where a repo's review holds are kept. */
+/** Where a repo's review holds are kept: this ref, in the project repo or the records repo reviewsRepoOf picks. */
 export const reviewsRef = (repo: string) => `refs/notes/githive-reviews/${repo}`;
+
+/** Which of a repo's `count` records repos holds its review holds (the same one always, for that count). */
+export const reviewsRepoOf = (count: number) => recordsRepoOf("reviews", count);
 
 /** The holds that haven't run out. */
 function live(holds: ReviewHolds["holds"], now: number): ReviewHolds["holds"] {
@@ -104,13 +112,13 @@ export async function roleWaitTold(log: CasLog<ReviewHolds>, key: string) {
 	});
 }
 
-/** The review holds as next and vote use them (ToolContext.reviews), kept in the repo's record. */
-export function reviewHolds(log: (repo: string) => CasLog<ReviewHolds>): NonNullable<ToolContext["reviews"]> {
+/** The review holds as next and vote use them (ToolContext.reviews), kept in the repo's record (`log`: wherever it is). */
+export function reviewHolds(log: (repo: string) => CasLog<ReviewHolds> | Promise<CasLog<ReviewHolds>>): NonNullable<ToolContext["reviews"]> {
 	return {
-		held: (repo) => heldReviews(log(repo)),
-		hold: (repo, key, agent, needed) => holdReview(log(repo), key, agent, needed),
-		release: (repo, key, agent) => releaseReview(log(repo), key, agent),
-		waits: (repo, keys) => roleWaits(log(repo), keys),
-		told: (repo, key) => roleWaitTold(log(repo), key),
+		held: async (repo) => heldReviews(await log(repo)),
+		hold: async (repo, key, agent, needed) => holdReview(await log(repo), key, agent, needed),
+		release: async (repo, key, agent) => releaseReview(await log(repo), key, agent),
+		waits: async (repo, keys) => roleWaits(await log(repo), keys),
+		told: async (repo, key) => roleWaitTold(await log(repo), key),
 	};
 }

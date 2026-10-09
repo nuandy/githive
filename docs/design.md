@@ -113,7 +113,12 @@ In the project repo:
   hand out (`add_work`). An id can be added once.
 - **Review holds** `refs/notes/githive-reviews/<repo>`: which agent is
   reviewing which commit in which role, so `next` doesn't send two agents to
-  one review. It binds nobody, and the audit never reads it.
+  one review. It binds nobody, and the audit never reads it. Once the repo
+  has records repos it's kept in one of them instead (the same one always,
+  picked by a hash): every review handed out writes it, and in the project
+  repo those writes kept the repo busy for the batches landing on its branch.
+  The holds in the project repo from before are left behind; they're hints,
+  and lapse within 15 minutes anyway.
 - **Main** and the other branches changes land on: written only by the
   toolkit (merges, reverts, and making a branch a claim names with `from`).
 
