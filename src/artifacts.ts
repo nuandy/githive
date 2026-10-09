@@ -1,5 +1,6 @@
 import type { Remote } from "./git";
 import { isTransientFailure, retryTransient, sleep, transientDelay } from "./retry";
+import { rpc } from "./rpc";
 
 /**
  * One reviewer instance per (slice, role, commit). A new commit never collides
@@ -44,8 +45,8 @@ export async function remoteFor(
 ): Promise<Remote> {
 	return withRepo(artifacts, name, async (repo) => {
 		const [info, token] = await Promise.all([
-			retryArtifacts(() => repo.info()),
-			retryArtifacts(() => repo.createToken(scope, ttlSeconds)),
+			retryArtifacts(() => rpc(repo.info())),
+			retryArtifacts(() => rpc(repo.createToken(scope, ttlSeconds))),
 		]);
 		return { url: info.remote, token: token.plaintext };
 	});
@@ -53,7 +54,7 @@ export async function remoteFor(
 
 export async function headOf(artifacts: Artifacts, name: string, ref: string) {
 	return withRepo(artifacts, name, async (repo) => {
-		const [latest] = await retryTransient(() => repo.log({ ref, limit: 1 }));
+		const [latest] = await retryTransient(() => rpc(repo.log({ ref, limit: 1 })));
 		return latest?.hash;
 	});
 }
@@ -111,7 +112,7 @@ export async function forkAndWait(artifacts: Artifacts, source: string, name: st
 		withRepo(artifacts, source, async (repo) => {
 			for (let attempt = 1; ; attempt++) {
 				try {
-					return await repo.fork(name, { description, defaultBranchOnly: true });
+					return await rpc(repo.fork(name, { description, defaultBranchOnly: true }));
 				} catch (err) {
 					if ((again || attempt > 1) && alreadyExists(err)) return null;
 					const internal = isInternalError(err);

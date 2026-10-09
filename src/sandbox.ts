@@ -1,4 +1,5 @@
 import { DurableObject } from "cloudflare:workers";
+import { rpc } from "./rpc";
 import OpenAI from "openai";
 import type { ResponseInputItem } from "openai/resources/responses/responses";
 import { z } from "zod";
@@ -309,7 +310,7 @@ export abstract class SandboxAgent<J extends SandboxJob, S extends AgentState> e
 		this.note(state, restart ? "container restarted; re-cloning" : "starting container");
 		// The project's snapshot, when it has one: its checkout with main's dependencies installed, in seconds.
 		const project = (job as Partial<ChangeJob>).project;
-		const snapshot = project ? await this.env.GATE.getByName(`repo:${project}`).snapshot().catch(() => null) : null;
+		const snapshot = project ? await rpc(this.env.GATE.getByName(`repo:${project}`).snapshot()).catch(() => null) : null;
 		const booted = await bootContainer(container, "standard-1", snapshot);
 		if (booted === "restored") {
 			// Its checkout, pointed at this job's remote; afterClone fetches what the job needs from it.
