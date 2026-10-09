@@ -17,12 +17,15 @@ export async function rpc<T>(call: PromiseLike<T>): Promise<T> {
 /**
  * Whether an RPC failed only because its Durable Object or container was
  * briefly away: reset by a runtime update ("Durable Object reset because its
- * code was updated"), or a container connection briefly unavailable. The
- * runtime marks such errors retryable, unless the object is overloaded.
+ * code was updated"), a container connection briefly unavailable, or
+ * Cloudflare's own "internal error; reference = ..." (which killed a merge
+ * landing a batch at 200 agents). The runtime marks such errors retryable,
+ * unless the object is overloaded.
  */
 export function briefOutage(err: unknown) {
 	const e = err as { retryable?: boolean; overloaded?: boolean } | null;
-	return (!!e?.retryable && !e?.overloaded) || /Durable Object reset|temporarily unavailable/i.test(String(err));
+	if (e?.overloaded) return false;
+	return !!e?.retryable || /Durable Object reset|temporarily unavailable|internal error; reference =/i.test(String(err));
 }
 
 /** How long to wait before trying an RPC again after a brief outage. */
