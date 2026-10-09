@@ -10,7 +10,8 @@
 //   node scripts/swarm.mjs <plan.json> --setup-only
 //   node scripts/claude-agents.mjs <plan.json> [--base URL] [--model claude-sonnet-5-5] [--minutes 45] [--only agent-7]
 //
-// Each agent works in its own folder (<plan dir>/agents-work/<agent>), and
+// An agent in the plan may have a "brief": more it's told, after the rest
+// (a part to play in a test, say). Each agent works in its own folder (<plan dir>/agents-work/<agent>), and
 // its session's events go to <agent>.jsonl there. The run ends when every
 // agent has stopped (each stops once next has nothing for it, or at
 // --minutes), then prints what each did, what landed, and the audit. Tokens
@@ -47,8 +48,8 @@ const work = join(here, "agents-work");
 if (!only) rmSync(work, { recursive: true, force: true });
 mkdirSync(work, { recursive: true });
 
-/** What every agent is told: who it is, the loop, and how to use git with GitHive. */
-const prompt = (agent, dir, keyFile) => `You are ${agent}, one of ${total} independent AI agents working at the same time on the GitHive repo "${plan.repo}": a copy of Express (Node.js). GitHive coordinates you through its MCP tools (server "githive"); read its instructions. Pass repo "${plan.repo}" and agent "${agent}" wherever a tool asks for them. You're registered already, and your key goes with every call: never call register.
+/** What every agent is told: who it is, the loop, and how to use git with GitHive; and its own `brief`, if the plan gives it one. */
+const prompt = (agent, dir, keyFile, brief) => `You are ${agent}, one of ${total} independent AI agents working at the same time on the GitHive repo "${plan.repo}": a copy of Express (Node.js). GitHive coordinates you through its MCP tools (server "githive"); read its instructions. Pass repo "${plan.repo}" and agent "${agent}" wherever a tool asks for them. You're registered already, and your key goes with every call: never call register.
 
 Work in a loop:
 1. Call next. Do exactly what it says:
@@ -66,7 +67,7 @@ Git, without ever printing a token (the helper keeps credentials in each clone's
       fresh write access for that clone, if a push is refused for authentication.
   node ${root}scripts/mcp-agent.mjs review-clone <dir> --repo ${plan.repo} --change <change> --key-file ${keyFile}
       a change to review: the project, with the change checked out at its pushed head ("origin/<branch>" is what it lands on).
-Make every clone inside ${dir}, a new folder each time. Run \`npm install --no-audit --no-fund\` in a clone before \`npm test\`. Never rewrite pushed commits; to take in the project's branch, merge it. Don't use GitHive's hosted agents (the build and request_review tools).`;
+Make every clone inside ${dir}, a new folder each time. Run \`npm install --no-audit --no-fund\` in a clone before \`npm test\`. Never rewrite pushed commits; to take in the project's branch, merge it. Don't use GitHive's hosted agents (the build and request_review tools).${brief ? `\n\n${brief}` : ""}`;
 
 /** This environment without an API key: the CLI then uses what it's signed in with. */
 function withoutApiKey() {
@@ -88,7 +89,7 @@ function runAgent(spec) {
 		"claude",
 		[
 			"-p",
-			prompt(spec.agent, dir, keyFile),
+			prompt(spec.agent, dir, keyFile, spec.brief),
 			"--model",
 			model,
 			"--mcp-config",
