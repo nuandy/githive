@@ -106,7 +106,13 @@ switch (command) {
 		execFileSync("git", ["-C", dir, "config", `http.${access.project.url}.extraHeader`, `Authorization: Bearer ${access.project.token.split("?")[0]}`]);
 		execFileSync("git", ["-C", dir, "remote", "add", "change", access.url]);
 		execFileSync("git", ["-C", dir, "config", `http.${access.url}.extraHeader`, `Authorization: Bearer ${access.token.split("?")[0]}`]);
-		execFileSync("git", ["-C", dir, "fetch", "--quiet", "--depth", "50", "change", `${access.branch}:refs/remotes/change/${access.branch}`], { stdio: "inherit" });
+		// Shallow, unless Artifacts refuses it: some shallow fetches of a fork's branch fail there ("expected no other
+		// sections to be sent after no 'ready'", or "expected shallow list" over protocol v0), where a whole one works.
+		try {
+			execFileSync("git", ["-C", dir, "fetch", "--quiet", "--depth", "50", "change", `${access.branch}:refs/remotes/change/${access.branch}`], { stdio: "pipe" });
+		} catch {
+			execFileSync("git", ["-C", dir, "fetch", "--quiet", "change", `${access.branch}:refs/remotes/change/${access.branch}`], { stdio: "inherit" });
+		}
 		execFileSync("git", ["-C", dir, "checkout", "--quiet", access.head]);
 		console.log(JSON.stringify({ dir, change: access.change, author: access.author, head: access.head, base: `origin/${access.project.branch}` }));
 		break;
