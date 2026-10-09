@@ -1,6 +1,6 @@
 import git from "isomorphic-git";
 import { GitCasLog } from "../record-log";
-import { fail, requiredPaths, requiredString } from "../errors";
+import { fail, requiredPaths, requiredString, statusOf } from "../errors";
 import { branchHead, type Remote, Workspace } from "../git";
 import { projectBranch } from "../project-branch";
 import { Timing } from "../timing";
@@ -88,8 +88,10 @@ export interface ToolContext {
 	 * which read their own records in Git. Unset: read every time.
 	 */
 	keptClaims?: (repo: string, read: () => Promise<ClaimsAdvice>) => Promise<ClaimsAdvice>;
-	/** The open changes' pushed heads, by change, kept a few seconds the same way (for next). */
-	keptHeads?: (repo: string, read: () => Promise<Record<string, string | null>>) => Promise<Record<string, string | null>>;
+	/** The latest commit seen on each of these changes' branches (null: nothing pushed), and when, kept in the repo's RepoCache (see openHeads). */
+	knownHeads?: (repo: string, changes: string[]) => Promise<Record<string, { head: string | null; at: number }>>;
+	/** Note the latest commits seen on changes' branches, wherever a tool read them (null: nothing pushed). */
+	noteHeads?: (repo: string, seen: Record<string, string | null>) => Promise<void>;
 	/** A branch's head, kept a moment for every merge watching it (see MergeInput.branchHead). */
 	branchHead?: (repo: string, branch: string) => Promise<string | null>;
 	/** Ask for forks to be made in the background: the repo's seeds, or these agents' own (see RepoCache's fork queue). */
@@ -122,6 +124,10 @@ const DEFAULT_SHARD_DEPTH = 2;
 const DEFAULT_RECORDS_REPOS = 16;
 /** The floor: no claim is stale sooner than this after its agent last claimed (see staleness.ts for the rest of the rule). */
 const STALE_AFTER_MS = BUILDING_IDLE_MS;
+/** How long a change's head, once seen, is taken as current (see openHeads). */
+const HEAD_SEEN_MS = 5 * 60_000;
+/** How many of the open changes' heads unseen or older than HEAD_SEEN_MS a call reads (see openHeads). */
+const HEADS_READ_A_CALL = 6;
 /** How many forks' heads a call reads at once (a Worker request holds only six connections open; past that, the runtime cancels some). */
 const HEAD_READS_AT_ONCE = 6;
 /** The most agents register, or pieces of work add_work adds, in one call. */
@@ -427,6 +433,8 @@ async function changeStatus(ctx: ToolContext, repo: string, registry: Registry |
 		.then(() => changeSourceFor(ctx, repo)(agent ?? fail(409, `${change} has no agent`), "read", change))
 		.then((source) => branchHead(source, `changes/${change}`))
 		.catch(() => null);
+	// Read now: noted, for next and merge (see openHeads).
+	if (head) await ctx.noteHeads?.(repo, { [change]: head }).catch(() => undefined);
 	// The policy for the paths it claims: stricter for dependency, CI and deploy files, say.
 	const paths = author?.paths ?? [];
 	// The branch it lands on decides the policy too (see branch-rules.ts).
@@ -854,18 +862,30 @@ async function runTool(name: string, args: Args, ctx: ToolContext): Promise<unkn
 		).filter((w): w is string => !!w);
 	const changeSource = changeSourceFor(ctx, repo);
 	/** A claim's pushed head, from its agent's fork (null: nothing pushed). */
-	const pushedHead = (claim: ClaimRecord) => changeSource(claim.agent, "read", claim.change).then((fork) => branchHead(fork, `changes/${claim.change}`)).catch(() => null);
+	// Null when nothing's pushed (no fork, or no branch on it); undefined when the read failed, which says nothing.
+	const pushedHead = (claim: ClaimRecord) =>
+		changeSource(claim.agent, "read", claim.change)
+			.then((fork) => branchHead(fork, `changes/${claim.change}`))
+			.catch((err): null | undefined => (statusOf(err).status === 409 ? null : undefined));
 	/**
-	 * Open changes' pushed heads, as kept a few seconds when the context keeps
-	 * them (one request per open change, which a crowd asking would otherwise
-	 * make on every call), else read now; `fresh` ones always read now. A few
-	 * at a time: all at once, a crowd's 170 open changes went past what a Worker
-	 * request holds open, and the runtime cancelled the rest.
+	 * Open changes' pushed heads: `fresh` ones read now (the caller's own), the
+	 * rest as GitHive last saw them (see knownHeads). A head seen within
+	 * HEAD_SEEN_MS is taken as current: an agent calls check after each push,
+	 * which notes it. Of those unseen or older, a few are read each call, the
+	 * least lately seen first. Read every call, all of them, they were most of
+	 * GitHive's Git requests (8 fork reads a call of next at 200 agents), and
+	 * they grow with the crowd. Without a place to keep them, all are read.
 	 */
 	const openHeads = async (claims: ClaimRecord[], fresh: (claim: ClaimRecord) => boolean = () => false) => {
-		const kept = ctx.keptHeads && claims.some((c) => !fresh(c)) ? await ctx.keptHeads(repo, async () => Object.fromEntries(await atMost(HEAD_READS_AT_ONCE, claims, async (c) => [c.change, await pushedHead(c)] as const))).catch(() => undefined) : undefined;
-		const heads = new Map(await atMost(HEAD_READS_AT_ONCE, claims, async (c) => [c.change, fresh(c) || !kept ? await pushedHead(c) : (kept[c.change] ?? null)] as const));
-		return (claim: ClaimRecord) => heads.get(claim.change) ?? null;
+		const known = ctx.knownHeads ? await ctx.knownHeads(repo, claims.map((c) => c.change)).catch(() => undefined) : undefined;
+		const now = Date.now();
+		const seenAt = (c: ClaimRecord) => known?.[c.change]?.at ?? 0;
+		const due = claims.filter((c) => !fresh(c) && now - seenAt(c) > HEAD_SEEN_MS).sort((a, b) => seenAt(a) - seenAt(b));
+		const reading = known ? [...claims.filter(fresh), ...due.slice(0, HEADS_READ_A_CALL)] : claims;
+		const read = new Map(await atMost(HEAD_READS_AT_ONCE, reading, async (c) => [c.change, await pushedHead(c)] as const));
+		const seen = Object.fromEntries([...read].filter((r): r is [string, string | null] => r[1] !== undefined));
+		if (Object.keys(seen).length) await ctx.noteHeads?.(repo, seen).catch(() => undefined);
+		return (claim: ClaimRecord) => read.get(claim.change) ?? known?.[claim.change]?.head ?? null;
 	};
 	/** Warm the repo's Gate for a merge to come (its checks, or with none, its landing): why, and for which change or commit. */
 	const warmChecks = async (expect: "claimed" | "checked" | "approved", key: string) => {
@@ -1157,6 +1177,8 @@ async function runTool(name: string, args: Args, ctx: ToolContext): Promise<unkn
 			const source = own ? await changeSource(own.agent, "read", change).catch(() => null) : null;
 			if (!source) throw new Error(`[409] changes/${change} has nothing pushed to check`);
 			const checked = await checkChange({ project: await ctx.remote(repo, "read"), branch: own?.into ?? branch, source, claims: own ? [own] : [], change });
+			// The head just read, for next and merge to take as current (see openHeads): agents check after each push.
+			await ctx.noteHeads?.(repo, { [change]: checked.head }).catch(() => undefined);
 			// Pushed and checked: a merge is likely within minutes, so its check container warms up meanwhile.
 			await warmChecks("checked", change);
 			return checked;

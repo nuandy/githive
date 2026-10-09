@@ -598,10 +598,23 @@ released once the lease is handed on: a write per change, a few at a time, it
 grew with the batch and held up the next one. Until a claim is released, no
 batch takes its change up again: the lease's recent outcomes say it landed at
 that head, and a merge asked again meanwhile finds it landed. Each batch asks
-for its forks' read
-access 6 at a time, and every call reads open changes' heads 6 at a time: a
-Worker request holds 6 connections open, and with 170 open changes read at
-once, the runtime cancelled reads to break the stall.
+for its forks' read access 6 at a time: a Worker request holds 6 connections
+open.
+
+**Open changes' heads, as last seen.** `next` and `merge` need each open
+change's pushed head, and GitHive doesn't see pushes: they go to the agent's
+fork. Read from every fork on every call, they were most of GitHive's Git
+requests (8 fork reads a call of `next` at 200 agents), growing with the
+crowd. Now the repo's RepoCache keeps the head last seen on each change's
+branch, and when: `check` (which agents call after each push) and `status`
+note the head they read, and so do the reads below. A call reads the
+caller's own changes' heads now, takes a head seen in the last 5 minutes as
+current, and reads at most 6 of the rest, the least lately seen first. A
+head taken this way is only advice (what to review, what to batch): a merge
+reads its own change, and a batch every change in it, before it lands. A
+read that failed notes nothing, so a known head isn't taken for "nothing
+pushed". Artifacts can publish a `pushed` event to a Queue, which would make
+this exact, but only from a subscription on one named repo, one per fork.
 
 A call to the Gate or the RepoCache that failed only because its Durable
 Object or container was briefly away (reset by a runtime update, or a

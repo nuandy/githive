@@ -58,6 +58,12 @@ interface KeptTip {
 const TIP_LISTING_MS = 3_000;
 
 /** A fork the queue is to make, and how often it has tried. */
+/** The latest commit seen on a change's branch (null: nothing pushed), and when. */
+interface KnownHead {
+	head: string | null;
+	at: number;
+}
+
 interface ForkJob {
 	item: string;
 	tries: number;
@@ -87,6 +93,27 @@ export class RepoCache extends DurableObject<Env> {
 	async ping(kind: string, write = true) {
 		if (write) await this.ctx.storage.put("writes", (await this.writes()) + 1);
 		this.broadcast(kind);
+	}
+
+	/**
+	 * The latest commit GitHive has seen on each of these changes' branches
+	 * (null: nothing pushed), and when: one key a change, read a few at a time
+	 * (storage reads 128 keys at once). See openHeads in mcp.ts.
+	 */
+	async knownHeads(changes: string[]) {
+		const known: Record<string, KnownHead> = {};
+		for (let i = 0; i < changes.length; i += 128) {
+			const got = await this.ctx.storage.get<KnownHead>(changes.slice(i, i + 128).map((c) => `head:${c}`));
+			for (const [key, seen] of got) known[key.slice(5)] = seen;
+		}
+		return known;
+	}
+
+	/** Note the latest commits seen on changes' branches (null: nothing pushed), as of now. */
+	async noteHeads(seen: Record<string, string | null>) {
+		const at = Date.now();
+		const entries = Object.entries(seen).map(([change, head]) => [`head:${change}`, { head, at }] as const);
+		for (let i = 0; i < entries.length; i += 128) await this.ctx.storage.put(Object.fromEntries(entries.slice(i, i + 128)));
 	}
 
 	/** The kept view `name`: its JSON, whether it's still fresh, whether a build is running, and the write count now. */

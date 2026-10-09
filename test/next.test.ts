@@ -310,6 +310,63 @@ describe("a review a role waits for too long", { timeout: 120_000 }, () => {
 	});
 });
 
+describe("open changes' heads, as GitHive last saw them", { timeout: 120_000 }, () => {
+	it("reads a few unseen ones a call, none once all were seen lately, takes check's, and keeps one a failed read can't tell", async () => {
+		const server = await startGitServer();
+		const work = mkdtempSync(join(tmpdir(), "githive-heads-"));
+		try {
+			const known = new Map<string, { head: string | null; at: number }>();
+			let forkReads = 0;
+			let failing = "";
+			const ctx = (agentKey?: string): ToolContext => ({
+				remote: async () => ({ url: server.url, token: "unused" }),
+				changeRemote: async (_repo, agent) => {
+					forkReads++;
+					if (agent === failing) throw new Error("[500] Artifacts is busy");
+					return { url: server.url, token: "unused" };
+				},
+				head: async () => server.git("rev-parse", "main").trim(),
+				knownHeads: async (_repo, changes) => Object.fromEntries(changes.flatMap((c) => (known.has(c) ? [[c, known.get(c)!]] : []))),
+				noteHeads: async (_repo, seen) => void Object.entries(seen).forEach(([c, head]) => known.set(c, { head, at: Date.now() })),
+				...(agentKey ? { agentKey } : {}),
+			});
+			const call = async (name: string, args: Record<string, unknown>, key?: string) => (await callTool(name, { repo: "p", ...args }, ctx(key))) as Record<string, unknown>;
+			await call("start", { required: 1, vetoes: [] });
+			const agents = Array.from({ length: 10 }, (_, i) => `a${i}`);
+			const keys: Record<string, string> = {};
+			for (const agent of [...agents, "z"]) keys[agent] = ((await call("register", { agent })) as { key: string }).key;
+			for (const agent of agents) {
+				await call("claim", { change: `c-${agent}`, agent, paths: [`src/${agent}/`], intent: "x" }, keys[agent]);
+				await pushChange(server.url, work, agent, `c-${agent}`, { [`src/${agent}/x.js`]: `${agent}\n` });
+			}
+			// None seen yet: each call reads 6 of them, then the rest, then none.
+			const readsOf = async () => {
+				const before = forkReads;
+				await call("next", { agent: "z" }, keys.z);
+				return forkReads - before;
+			};
+			expect(await readsOf()).toBe(6);
+			expect(await readsOf()).toBe(4);
+			expect(await readsOf()).toBe(0);
+			expect(known.size).toBe(10);
+			// A new push, checked: the head check read is noted, and next takes it without reading the fork.
+			const newer = await pushChange(server.url, work, "a0", "c-a0", { "src/a0/x.js": "again\n" }, "origin/changes/c-a0");
+			await call("check", { change: "c-a0" }, keys.a0);
+			expect(known.get("c-a0")?.head).toBe(newer);
+			expect(await readsOf()).toBe(0);
+			// Seen long ago, and its read fails: what was seen stays, not "nothing pushed".
+			const seen = known.get("c-a1")!;
+			known.set("c-a1", { ...seen, at: 0 });
+			failing = "a1";
+			expect(await readsOf()).toBe(1);
+			expect(known.get("c-a1")).toEqual({ ...seen, at: 0 });
+		} finally {
+			await server.close();
+			rmSync(work, { recursive: true, force: true });
+		}
+	});
+});
+
 describe("next through the toolkit", { timeout: 120_000 }, () => {
 	let server: GitServer;
 	let work: string;
