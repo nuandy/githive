@@ -25,6 +25,40 @@
 	pointer-events: none;
 }
 
+.repo-list__heading {
+	display: grid;
+	gap: 8px;
+	min-width: 0;
+}
+
+.repo-list__summary {
+	font-size: 15px;
+}
+
+/* The groups: what needs a person first, then work under way, then the quiet repos. */
+.repo-list__groups {
+	display: grid;
+	gap: 32px;
+}
+
+.repo-group {
+	border-top: 2px solid var(--text);
+}
+
+.repo-group__title {
+	display: flex;
+	align-items: baseline;
+	gap: 8px;
+	padding: 10px 2px 9px;
+	border-bottom: 1px solid var(--border);
+	font-size: 15px;
+}
+
+.repo-group__title .muted {
+	font-weight: 400;
+	font-variant-numeric: tabular-nums;
+}
+
 .repo-list__rows {
 	margin: 0;
 	padding: 0;
@@ -34,13 +68,24 @@
 .repo-row {
 	display: flex;
 	align-items: flex-start;
-	gap: 12px;
-	padding: 16px;
+	gap: 14px;
+	padding: 14px 2px;
 }
 
-.repo-row__icon {
-	flex-shrink: 0;
-	margin-top: 3px;
+.repo-row + .repo-row {
+	border-top: 1px solid var(--border);
+}
+
+.repo-row__lamp {
+	width: 11px;
+	height: 11px;
+	margin-top: 7px;
+}
+
+/* A quiet repo's lamp is unlit: an empty ring rather than a grey dot. */
+.repo-row__lamp.lamp--neutral {
+	background: none;
+	box-shadow: inset 0 0 0 1.5px var(--border-strong);
 }
 
 .repo-row__main {
@@ -48,33 +93,16 @@
 	min-width: 0;
 }
 
-.repo-row__title {
-	display: flex;
-	align-items: center;
-	flex-wrap: wrap;
-	gap: 8px;
-}
-
-.repo-row__title a {
-	font-size: 16px;
-	font-weight: 600;
+.repo-row__name {
+	color: var(--text);
+	font-size: 17px;
+	font-weight: 700;
 	overflow-wrap: anywhere;
 }
 
 .repo-row__meta {
-	margin: 4px 0 0;
-	color: var(--text-muted);
-	font-size: 13px;
-}
-
-.repo-row__needs {
-	flex-shrink: 0;
-	align-self: center;
-}
-
-.repo-row__needs:hover {
-	text-decoration: none;
-	filter: brightness(0.97);
+	margin: 2px 0 0;
+	font-size: 14px;
 }
 
 .open-repo {
@@ -110,21 +138,6 @@
 
 .dialog::backdrop {
 	background: rgba(15, 18, 22, 0.45);
-}
-
-@media (max-width: 560px) {
-	.repo-row {
-		flex-wrap: wrap;
-	}
-
-	/* The "needs you" pill goes under the text instead of squeezing it. */
-	.repo-row__main {
-		flex-basis: calc(100% - 40px);
-	}
-
-	.repo-row__needs {
-		margin-left: 28px;
-	}
 }
 
 .repo-list__actions {

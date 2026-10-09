@@ -1,0 +1,365 @@
+/* The repo's overview: a track plan of the line of merges, and the territory as a board of lamps. */
+
+.overview {
+	display: grid;
+	gap: 36px;
+	margin-bottom: 44px;
+}
+
+.overview__head {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: baseline;
+	gap: 4px 18px;
+	padding-top: 10px;
+	margin-bottom: 20px;
+	border-top: 2px solid var(--text);
+}
+
+.overview__head h2 {
+	font-size: 19px;
+}
+
+.overview__head p {
+	margin: 0;
+	max-width: 72ch;
+}
+
+/* The track: the branch's buffer stop at the left, the next to land beside it, then the rest. */
+
+.track__plan {
+	display: flex;
+	align-items: flex-start;
+	margin: 0;
+	padding: 0 0 6px;
+	list-style: none;
+	overflow-x: auto;
+}
+
+.track__plan > li {
+	position: relative;
+	flex: none;
+	min-width: 168px;
+	padding: 30px 28px 0 0;
+}
+
+/* The rails: one continuous rule through every stop, dashed where changes aren't in line yet. */
+.track__plan > li::before {
+	content: "";
+	position: absolute;
+	top: 10px;
+	left: 0;
+	right: 0;
+	height: 3px;
+	background: var(--text);
+}
+
+.track__end {
+	min-width: 120px !important;
+}
+
+.track__end::before {
+	left: 4px !important;
+}
+
+.track__buffer {
+	position: absolute;
+	top: 0;
+	left: 0;
+	width: 7px;
+	height: 23px;
+	background: var(--text);
+}
+
+.track__end .track__name {
+	font-size: 17px;
+}
+
+.lamp--track {
+	position: absolute;
+	top: 3px;
+	left: 0;
+	width: 17px;
+	height: 17px;
+	border: 3px solid var(--text);
+}
+
+.track__name {
+	display: block;
+	font-weight: 700;
+	overflow-wrap: anywhere;
+}
+
+a.track__name {
+	color: var(--text);
+}
+
+.track__detail {
+	display: block;
+	font-size: 13px;
+}
+
+code.track__detail {
+	display: inline-block;
+	margin-top: 2px;
+	background: none;
+	padding: 0;
+	color: var(--text-muted);
+}
+
+.track__waiting {
+	padding-top: 30px !important;
+	color: var(--text-muted);
+	font-size: 13.5px;
+}
+
+.track__waiting::before {
+	background: repeating-linear-gradient(90deg, var(--text-muted) 0 7px, transparent 7px 13px) !important;
+}
+
+.track__empty {
+	margin: 12px 0 0;
+}
+
+.track__left {
+	margin-top: 20px;
+}
+
+.track__left h3 {
+	margin-bottom: 6px;
+	font-size: 14px;
+	font-weight: 600;
+	color: var(--text-muted);
+}
+
+.track__left ul {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 6px 24px;
+	margin: 0;
+	padding: 0;
+	list-style: none;
+	font-size: 14px;
+}
+
+.track__left li {
+	display: inline-flex;
+	align-items: center;
+	gap: 7px;
+}
+
+/* The territory: a region per top-level folder, sized by how much is in it. */
+
+.territory__legend {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 6px 18px;
+	margin: 0 0 18px;
+	padding: 0;
+	list-style: none;
+	font-size: 13px;
+	color: var(--text-muted);
+}
+
+.territory__legend li {
+	display: inline-flex;
+	align-items: center;
+	gap: 7px;
+}
+
+.territory__regions {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 22px 30px;
+}
+
+.region {
+	flex: 1 1 220px;
+	min-width: 0;
+}
+
+.region--grid {
+	flex: 0 1 auto;
+	min-width: 180px;
+	max-width: 100%;
+}
+
+.region__name {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: baseline;
+	gap: 2px 10px;
+	margin-bottom: 10px;
+	padding-bottom: 6px;
+	border-bottom: 1px solid var(--border);
+	font-size: 14px;
+	font-weight: 600;
+}
+
+.region__name code {
+	padding: 0;
+	background: none;
+	font-weight: 600;
+}
+
+.region__name .muted {
+	font-weight: 400;
+	font-size: 13px;
+}
+
+.region__whole {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	margin: 0 0 10px;
+	font-size: 13.5px;
+}
+
+/* A cell: a dark slot when nobody holds it, the lamp's color when someone does. */
+.cell {
+	display: block;
+	flex: none;
+	width: 14px;
+	height: 14px;
+	border: 1px solid var(--surface-3);
+	border-radius: 2px;
+	background: var(--surface-3);
+	transition: background-color 0.3s ease, border-color 0.3s ease;
+}
+
+/* Named entries nobody holds show no lamp at all: only what's lit draws the eye. */
+.region__list .cell:not([class*="lamp--"]) {
+	visibility: hidden;
+}
+
+.cell[class*="lamp--"] {
+	border-color: var(--lamp);
+	background: var(--lamp);
+}
+
+/* Claimed, nothing pushed yet: hatched, not lit. */
+.cell.cell--building {
+	background: repeating-linear-gradient(135deg, var(--lamp) 0 2px, transparent 2px 5px);
+}
+
+/* Abandoned by its agent, free to take: an unlit amber ring. */
+.cell.cell--abandoned {
+	background: none;
+	border: 2px solid var(--lamp);
+}
+
+/* In the line: ringed in ink, like the lamps on the track. */
+.cell.cell--checking,
+.cell.cell--passed {
+	border: 2px solid var(--text);
+}
+
+.region__grid {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 4px;
+	margin: 0;
+	padding: 0;
+	list-style: none;
+}
+
+.region__grid a {
+	display: block;
+	line-height: 0;
+	border-radius: 2px;
+}
+
+.region__list {
+	display: grid;
+	gap: 5px;
+	margin: 0;
+	padding: 0;
+	list-style: none;
+}
+
+.region__list li {
+	display: flex;
+	align-items: center;
+	gap: 9px;
+	min-width: 0;
+}
+
+.region__entry {
+	overflow: hidden;
+	color: var(--text-muted);
+	font-family: var(--mono);
+	font-size: 13px;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.region__entry--held {
+	color: var(--text);
+	font-weight: 600;
+}
+
+.region__holder {
+	margin-left: auto;
+	font-size: 12.5px;
+	white-space: nowrap;
+}
+
+.region__more {
+	margin: 8px 0 0;
+	font-size: 13px;
+}
+
+@media (max-width: 640px) {
+	/* The track runs down the page: the branch at the top. */
+	.track__plan {
+		flex-direction: column;
+		overflow: visible;
+	}
+
+	.track__plan > li,
+	.track__end,
+	.track__waiting {
+		min-width: 0 !important;
+		padding: 0 0 20px 34px !important;
+	}
+
+	.track__plan > li::before {
+		top: 0;
+		bottom: 0;
+		left: 7px !important;
+		right: auto;
+		width: 3px;
+		height: auto;
+	}
+
+	.track__plan > li:last-child::before {
+		bottom: auto;
+		height: 12px;
+	}
+
+	.track__waiting::before {
+		background: repeating-linear-gradient(180deg, var(--text-muted) 0 7px, transparent 7px 13px) !important;
+	}
+
+	.track__buffer {
+		top: -4px;
+		left: 0;
+		width: 17px;
+		height: 7px;
+	}
+
+	.lamp--track {
+		top: 1px;
+	}
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.lamp,
+	.cell {
+		transition: none;
+	}
+}
+
+.nowrap {
+	white-space: nowrap;
+}

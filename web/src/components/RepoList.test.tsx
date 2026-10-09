@@ -16,7 +16,10 @@ describe("the Repositories page", () => {
 		expect(html).toContain('href="#/repos/acme/my-app"');
 		expect(html).toContain('href="#/repos/acme/docs-site"');
 		expect(html).toContain("3 open");
-		expect(html).toContain("1 needs you");
+		expect(html).toContain("1 change needs you");
+		// What needs a person comes first.
+		expect(html.indexOf("Needs you")).toBeLessThan(html.indexOf("At work"));
+		expect(html.indexOf("acme/</span>my-app")).toBeLessThan(html.indexOf("acme/</span>docs-site"));
 		expect(html).toContain("1 open");
 		expect(html).toContain("Find a repository");
 		expect(html).not.toMatch(/elected/);
@@ -33,7 +36,7 @@ describe("the Repositories page", () => {
 	it("shows each repo's owner, and offers making only to people signed in", () => {
 		const row = { name: "acme/web", open: 0, needsYou: 0, merged: 0, violations: 0, detailed: false };
 		const html = renderToStaticMarkup(<RepoList rows={[row]} loaded />);
-		expect(html).toContain('<a href="#/repos/acme/web"><span class="repo-row__owner">acme/</span>web</a>');
+		expect(html).toContain('<a class="repo-row__name" href="#/repos/acme/web"><span class="repo-row__owner">acme/</span>web</a>');
 		expect(html).not.toContain("New repository");
 	});
 });

@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { filterRepos, repoCounts, type RepoRow } from "../lib/repos";
+import { type ReactNode, useState } from "react";
+import { filterRepos, groupRepos, type RepoRow, type RepoState, repoState } from "../lib/repos";
 import { splitRepo } from "../lib/repoName";
 import { href } from "../lib/routes";
 import { timeAgo } from "../lib/relativeTime";
@@ -13,7 +13,71 @@ export interface RepoListProps {
 	canCreate?: boolean;
 }
 
-/** The home page: every repo the reader can see, by owner and name. */
+const LAMP: Record<RepoState, string> = { "needs-you": "lamp--red", "at-work": "lamp--amber", quiet: "lamp--neutral" };
+
+/** Every repo in a line: how many, how many need you, and how much is open across them. */
+function Summary({ rows }: { rows: RepoRow[] }) {
+	const needsYou = rows.reduce((n, row) => n + row.needsYou, 0);
+	const violations = rows.reduce((n, row) => n + row.violations, 0);
+	const open = rows.reduce((n, row) => n + row.open, 0);
+	return (
+		<p className="overview__summary repo-list__summary">
+			<strong>
+				{rows.length} {rows.length === 1 ? "repository" : "repositories"}
+			</strong>
+			{needsYou ? (
+				<span className="overview__count lamp--red">
+					<span className="lamp" aria-hidden="true" />
+					{needsYou} {needsYou === 1 ? "change needs" : "changes need"} you
+				</span>
+			) : null}
+			{violations ? (
+				<span className="overview__count lamp--red">
+					<span className="lamp" aria-hidden="true" />
+					{violations} audit {violations === 1 ? "violation" : "violations"}
+				</span>
+			) : null}
+			<span className="overview__count lamp--amber">
+				<span className="lamp" aria-hidden="true" />
+				{open} open {open === 1 ? "change" : "changes"}
+			</span>
+		</p>
+	);
+}
+
+/** One repo: its lamp, its name, and what's going on in it, in a sentence. */
+function RepoLine({ row }: { row: RepoRow }) {
+	const { owner, name } = splitRepo(row.name);
+	const state = repoState(row);
+	const parts: ReactNode[] = [];
+	if (row.needsYou) parts.push(<strong key="needs" className="tone-needs">{row.needsYou} {row.needsYou === 1 ? "change needs" : "changes need"} you</strong>);
+	if (row.violations) parts.push(<strong key="violations" className="tone-bad">{row.violations} audit {row.violations === 1 ? "violation" : "violations"}</strong>);
+	if (row.open) parts.push(<span key="open">{row.open} open</span>);
+	if (row.merged) parts.push(<span key="merged">{row.merged} merged</span>);
+	return (
+		<li className="repo-row">
+			<span className={`lamp repo-row__lamp ${LAMP[state]}`} aria-hidden="true" />
+			<div className="repo-row__main">
+				<a className="repo-row__name" href={href.repo(row.name)}>
+					<span className="repo-row__owner">{owner}/</span>
+					{name}
+				</a>
+				<p className="repo-row__meta">
+					{parts.map((part, i) => (
+						<span key={i}>
+							{i ? ", " : ""}
+							{part}
+						</span>
+					))}
+					{parts.length ? ". " : ""}
+					{row.lastActivity ? <span className="muted">Active {timeAgo(row.lastActivity)}.</span> : null}
+				</p>
+			</div>
+		</li>
+	);
+}
+
+/** The home page: every repo the reader can see, those that need a person first, then those at work, then the quiet ones. */
 export function RepoList({ rows, loaded, canCreate = false }: RepoListProps) {
 	const [query, setQuery] = useState("");
 	const shown = filterRepos(rows, query);
@@ -21,7 +85,10 @@ export function RepoList({ rows, loaded, canCreate = false }: RepoListProps) {
 	return (
 		<main className="page repo-list" id="main">
 			<div className="page__header repo-list__header">
-				<h1>Repositories</h1>
+				<div className="repo-list__heading">
+					<h1>Repositories</h1>
+					{rows.length ? <Summary rows={rows} /> : null}
+				</div>
 				{canCreate ? (
 					<div className="repo-list__actions">
 						<a className="button" href={href.orgs()}>
@@ -44,7 +111,7 @@ export function RepoList({ rows, loaded, canCreate = false }: RepoListProps) {
 				</div>
 			) : null}
 
-			<section className="box" aria-label="Repositories">
+			<div className="repo-list__groups" aria-label="Repositories">
 				{!loaded && rows.length === 0 ? (
 					<p className="box__row muted" role="status">
 						Loading repositories…
@@ -68,38 +135,20 @@ export function RepoList({ rows, loaded, canCreate = false }: RepoListProps) {
 				) : shown.length === 0 ? (
 					<p className="box__row muted">No repositories match “{query}”.</p>
 				) : (
-					<ul className="repo-list__rows">
-						{shown.map((row) => (
-							<li key={row.name} className="box__row repo-row">
-								<Icon name="repo" className="repo-row__icon muted" />
-								<div className="repo-row__main">
-									<div className="repo-row__title">
-										<a href={href.repo(row.name)}>
-											<span className="repo-row__owner">{splitRepo(row.name).owner}/</span>
-											{splitRepo(row.name).name}
-										</a>
-									</div>
-									<p className="repo-row__meta">
-										{row.detailed ? (
-											<>
-												<span>{repoCounts(row)}</span>
-												{row.merged ? <span> · {row.merged} merged</span> : null}
-											</>
-										) : null}
-										{row.lastActivity ? <span>{row.detailed ? " · " : ""}updated {timeAgo(row.lastActivity)}</span> : null}
-									</p>
-								</div>
-								{row.needsYou ? (
-									<a className="pill pill--needs repo-row__needs" href={href.repo(row.name)}>
-										<Icon name="alert" size={13} />
-										{row.needsYou} needs you
-									</a>
-								) : null}
-							</li>
-						))}
-					</ul>
+					groupRepos(shown).map((group) => (
+						<section key={group.state} className="repo-group" aria-labelledby={`repos-${group.state}`}>
+							<h2 id={`repos-${group.state}`} className="repo-group__title">
+								{group.title} <span className="muted">{group.rows.length}</span>
+							</h2>
+							<ul className="repo-list__rows">
+								{group.rows.map((row) => (
+									<RepoLine key={row.name} row={row} />
+								))}
+							</ul>
+						</section>
+					))
 				)}
-			</section>
+			</div>
 		</main>
 	);
 }

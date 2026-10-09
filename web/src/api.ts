@@ -57,6 +57,15 @@ export interface RepoSnapshot {
 	audit?: RepoAudit;
 }
 
+/** A repo's line of merges into its branch (GET /repos/:repo/line): a record in Git, in landing order. */
+export interface RepoLine {
+	/** The commit a merge joining now is checked on. */
+	tip: string | null;
+	entries: { id: string; change: string; head: string; agent: string; since: string; active: string; status: "checking" | "passed" }[];
+	/** The last merges to leave it, newest last. */
+	left: { change: string; head: string; how: "landed" | "failed" | "gave up" | "went quiet" | "behind one that left"; at: string; commit?: string }[];
+}
+
 /** A person's vote from the dashboard. */
 export interface VoteInput {
 	role: string;
@@ -234,6 +243,8 @@ export const api = {
 	summaries: () => call<Summaries>("GET", "/summaries"),
 	snapshot: (repo: string) => call<RepoSnapshot>("GET", `/repos/${repoPath(repo)}`),
 	audit: (repo: string) => call<RepoAudit>("GET", `/repos/${repoPath(repo)}/audit`),
+	/** The repo's line of merges. */
+	line: (repo: string) => call<RepoLine>("GET", `/repos/${repoPath(repo)}/line`),
 	/** A repo's files at a branch or commit (its default branch if none). */
 	tree: (repo: string, ref?: string) => call<RepoTree>("GET", `/repos/${repoPath(repo)}/tree${ref ? `?ref=${encodeURIComponent(ref)}` : ""}`),
 	/** One file's text at a branch or commit. */

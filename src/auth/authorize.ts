@@ -11,39 +11,46 @@ import { identityStore } from "./principal";
 
 const escape = (value: string) => value.replace(/[&<>"']/g, (char) => `&#${char.charCodeAt(0)};`);
 
-const HIVE = `<svg width="28" height="28" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="7" fill="#f2a516"/><g fill="#fff" stroke="#f2a516" stroke-width="1.2"><rect x="12" y="5.5" width="8" height="5" rx="2.5"/><rect x="9" y="10" width="14" height="5" rx="2.5"/><rect x="7" y="14.5" width="18" height="5" rx="2.5"/><rect x="6" y="19" width="20" height="5.5" rx="2.75"/></g><rect x="4.5" y="24.2" width="23" height="2.6" rx="1.3" fill="#fff"/><path d="M13.6 24.4a2.4 2.4 0 0 1 4.8 0z" fill="#7a4a06"/></svg>`;
+const HIVE = `<svg width="28" height="28" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="7" style="fill: var(--mark-tile)"/><path d="M10.2 6.5h11.6l5.8 9.5-5.8 9.5H10.2L4.4 16z" fill="none" stroke-width="2.6" stroke-linejoin="round" style="stroke: var(--mark-line)"/><path d="M4.4 16H12" stroke-width="2.6" stroke-linecap="round" style="stroke: var(--mark-line)"/><circle cx="16" cy="16" r="4" fill="#e59a0b"/></svg>`;
 
 function page(title: string, body: string, script = "") {
 	return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${escape(title)} · GitHive</title>
 <style>
-:root { --bg: #f6f7f9; --surface: #fff; --line: #dfe3e8; --fg: #1b1f24; --muted: #5b6573; --honey: #f2a516; --honey-ink: #9a5b00; --honey-soft: #fdf1d9; --on-honey: #2b1c00; --warn: #c2410c; --warn-soft: #fef3ec; color-scheme: light dark; }
-@media (prefers-color-scheme: dark) { :root { --bg: #0f1216; --surface: #171b21; --line: #2b323c; --fg: #e6e9ee; --muted: #98a2b3; --honey-ink: #f6b840; --honey-soft: #33270f; --on-honey: #1f1400; --warn: #f2894f; --warn-soft: #36211a; } }
+/* The dashboard's look (web/src/styles.css): ink on cool paper, ruled rather than boxed, amber and red lamps for notes and warnings. */
+@font-face { font-family: "Overpass"; src: url("/fonts/overpass.woff2") format("woff2"); font-weight: 100 900; font-display: swap; unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD; }
+@font-face { font-family: "Overpass Mono"; src: url("/fonts/overpass-mono.woff2") format("woff2"); font-weight: 300 700; font-display: swap; unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD; }
+@font-face { font-family: "Separator"; src: local("Helvetica Neue"), local("HelveticaNeue"), local("Segoe UI"), local("Arial"), local("Roboto"); unicode-range: U+00B7; }
+:root { --bg: #f5f6f4; --surface: #fbfcfb; --surface-2: #eef0ee; --line: #d3d9d6; --line-strong: #b7c0bc; --fg: #1e2b33; --muted: #56636b; --link: #23506e; --ink-fill: #1e2b33; --on-ink: #f5f6f4; --amber: #e59a0b; --amber-soft: #fbf0d9; --bad: #c03a2b; --bad-soft: #f8e4e1; --mark-tile: #1e2b33; --mark-line: #f5f6f4; color-scheme: light dark; }
+@media (prefers-color-scheme: dark) { :root { --bg: #121a1f; --surface: #172127; --surface-2: #1d282f; --line: #2c3a41; --line-strong: #3d4d55; --fg: #e4e9e7; --muted: #9aa8a6; --link: #8cc0e0; --ink-fill: #e4e9e7; --on-ink: #121a1f; --amber: #f2b13a; --amber-soft: #33270f; --bad: #e5604f; --bad-soft: #3a1d1a; --mark-tile: #f5f6f4; --mark-line: #1e2b33; } }
 * { box-sizing: border-box; }
-body { margin: 0; background: var(--bg); color: var(--fg); font: 15px/1.55 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; padding: 48px 16px; }
-main { max-width: 460px; margin: 0 auto; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 28px; display: grid; gap: 16px; }
-.brand { display: flex; align-items: center; gap: 10px; font-weight: 700; }
-h1 { font-size: 20px; line-height: 1.3; margin: 0; }
+body { margin: 0; background: var(--bg); color: var(--fg); font: 15px/1.55 "Separator", "Overpass", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; padding: 56px 16px; }
+main { max-width: 460px; margin: 0 auto; display: grid; gap: 16px; }
+.brand { display: flex; align-items: center; gap: 10px; font-weight: 800; font-size: 17px; letter-spacing: -0.01em; padding-bottom: 14px; border-bottom: 2px solid var(--fg); }
+h1 { font-size: 22px; line-height: 1.25; margin: 4px 0 0; font-weight: 800; letter-spacing: -0.01em; text-wrap: balance; }
 p { margin: 0; }
+a { color: var(--link); }
 .muted { color: var(--muted); }
-.warn { background: var(--warn-soft); color: var(--warn); border-radius: 8px; padding: 10px 12px; }
-.note { background: var(--honey-soft); border-radius: 8px; padding: 10px 12px; }
-fieldset { border: 1px solid var(--line); border-radius: 8px; padding: 10px 14px 12px; margin: 0; display: grid; gap: 8px; }
-legend { padding: 0 4px; font-weight: 600; }
+.warn { background: var(--bad-soft); border-left: 3px solid var(--bad); padding: 10px 12px; }
+.note { background: var(--amber-soft); border-left: 3px solid var(--amber); padding: 10px 12px; }
+fieldset { border: 0; border-top: 1px solid var(--line); padding: 12px 0 0; margin: 0; display: grid; gap: 10px; }
+legend { padding: 0 8px 0 0; font-weight: 700; }
 label { display: flex; align-items: center; gap: 8px; }
-input[type=text] { font: inherit; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--fg); min-width: 0; flex: 1; }
-.actions { display: flex; gap: 10px; flex-wrap: wrap; }
-button, .button { font: inherit; font-weight: 600; padding: 8px 16px; border-radius: 8px; border: 1px solid var(--line); background: var(--surface); color: var(--fg); cursor: pointer; text-decoration: none; display: inline-block; }
-button.primary, .button.primary { background: var(--honey); border-color: var(--honey); color: var(--on-honey); }
-button:hover:not(:disabled), .button:hover { filter: brightness(0.95); }
-button:active:not(:disabled), .button:active { transform: translateY(1px); filter: brightness(0.9); }
+input[type=radio] { accent-color: var(--ink-fill); }
+input[type=text] { font: inherit; padding: 6px 10px; border: 1px solid var(--line-strong); border-radius: 4px; background: var(--surface); color: var(--fg); min-width: 0; flex: 1; }
+.actions { display: flex; gap: 10px; flex-wrap: wrap; padding-top: 4px; }
+button, .button { font: inherit; font-weight: 600; padding: 8px 16px 7px; border-radius: 4px; border: 1px solid var(--line-strong); background: var(--surface); color: var(--fg); cursor: pointer; text-decoration: none; display: inline-block; }
+button.primary, .button.primary { background: var(--ink-fill); border-color: var(--ink-fill); color: var(--on-ink); }
+button:hover:not(:disabled), .button:hover { background: var(--surface-2); }
+button.primary:hover:not(:disabled), .button.primary:hover { background: color-mix(in srgb, var(--ink-fill) 88%, var(--bg)); }
+button:active:not(:disabled), .button:active { transform: translateY(1px); }
 button:disabled { cursor: progress; opacity: 0.75; }
 button[aria-busy="true"]::before { content: ""; display: inline-block; width: 0.8em; height: 0.8em; margin-right: 8px; vertical-align: -0.08em; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: spin 0.7s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { button[aria-busy="true"]::before { animation: none; } }
-button:focus-visible, .button:focus-visible, input:focus-visible { outline: 2px solid var(--honey-ink); outline-offset: 2px; }
-code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9em; }
+button:focus-visible, .button:focus-visible, input:focus-visible { outline: 2px solid var(--link); outline-offset: 2px; }
+code { font-family: "Overpass Mono", ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9em; }
 </style></head>
 <body><main><div class="brand">${HIVE} GitHive</div>${body}</main>${script}</body></html>`;
 }
@@ -67,7 +74,7 @@ export function formAction(redirectUri?: string) {
 const html = (body: string, status = 200, headers?: Headers, redirectUri?: string, nonce?: string) => {
 	const h = new Headers(headers);
 	h.set("Content-Type", "text/html; charset=utf-8");
-	h.set("Content-Security-Policy", `default-src 'none'; style-src 'unsafe-inline'; img-src data:;${nonce ? ` script-src 'nonce-${nonce}';` : ""} form-action ${formAction(redirectUri)}; frame-ancestors 'none'`);
+	h.set("Content-Security-Policy", `default-src 'none'; style-src 'unsafe-inline'; font-src 'self'; img-src data:;${nonce ? ` script-src 'nonce-${nonce}';` : ""} form-action ${formAction(redirectUri)}; frame-ancestors 'none'`);
 	return new Response(body, { status, headers: h });
 };
 

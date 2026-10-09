@@ -1,7 +1,7 @@
 import { useState } from "react";
 import "./RepoPage.css";
 import type { VoteApi } from "./VoteForm";
-import type { ChangeHistory, RepoAccess, RepoSnapshot } from "../api";
+import type { ChangeHistory, RepoAccess, RepoLine, RepoSnapshot } from "../api";
 import { canVote } from "../lib/permissions";
 import { messageOf } from "./Confirm";
 import { MergeSettings } from "./MergeSettings";
@@ -14,6 +14,7 @@ import { AgentsTab } from "./Agents";
 import { ClaimsTab } from "./ClaimsMap";
 import { CodeTab, type CodeApi } from "./CodeBrowser";
 import { AuditTab, ChangeList, ChangePage, SettingsTab } from "./RepoTabs";
+import { Overview } from "./Overview";
 import { RepoHeader } from "./RepoHeader";
 import { ShardingBadge } from "./StatusPill";
 import type { TabItem } from "./Tabs";
@@ -23,7 +24,7 @@ export type RepoView =
 	| { kind: "change"; change: string; tab: ChangeTab };
 
 /** Everything a repo's pages call. The dashboard's api object satisfies it; tests pass stand-ins. */
-export type RepoPageApi = CodeApi & VoteApi;
+export type RepoPageApi = CodeApi & VoteApi & { /** The line of merges, for the overview (stand-ins may leave it out). */ line?: (repo: string) => Promise<RepoLine> };
 
 export interface RepoPageProps {
 	repo: string;
@@ -154,7 +155,10 @@ export function RepoPage({ repo, view, snapshot, changeHistory, liveStatus = "of
 						}
 					/>
 				) : (
-					<ChangeList snapshot={snapshot} repo={repo} />
+					<>
+						<Overview repo={repo} branch={branch} snapshot={snapshot} api={api} />
+						<ChangeList snapshot={snapshot} repo={repo} />
+					</>
 				)}
 			</main>
 		</>

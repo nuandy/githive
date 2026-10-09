@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { ago } from "../test/fixtures";
-import { buildRepoRows, filterRepos, repoCounts, type Summaries } from "./repos";
+import { buildRepoRows, filterRepos, groupRepos, repoCounts, repoState, type Summaries } from "./repos";
 
 describe("the repositories list", () => {
 	const summaries: Summaries = {
@@ -16,7 +16,7 @@ describe("the repositories list", () => {
 		expect(rows[0]).toMatchObject({ open: 2, needsYou: 1, merged: 1, lastActivity: ago(2), detailed: true });
 		expect(rows[1]).toMatchObject({ open: 1, violations: 1, merged: 3, lastActivity: ago(5), detailed: true });
 		expect(repoCounts(rows[0])).toBe("2 open");
-		expect(repoCounts(rows[1])).toBe("1 open · 1 violation");
+		expect(repoCounts(rows[1])).toBe("1 open, 1 audit violation");
 	});
 
 	it("marks repos the server hasn't counted yet", () => {
@@ -29,3 +29,21 @@ describe("the repositories list", () => {
 		expect(filterRepos(rows, "  ")).toHaveLength(2);
 	});
 });
+
+describe("the groups on the Repositories page", () => {
+	const row = (name: string, over: Partial<Parameters<typeof repoState>[0]> = {}) => ({ name, open: 0, needsYou: 0, merged: 0, violations: 0, detailed: true, ...over });
+
+	it("puts what needs a person first, then work under way, then the quiet repos, keeping each group's order", () => {
+		const rows = [row("a/quiet"), row("a/busy", { open: 2 }), row("a/asks", { open: 1, needsYou: 1 }), row("a/audit", { violations: 1 }), row("a/busier", { open: 5 })];
+		expect(groupRepos(rows).map((g) => [g.state, g.rows.map((r) => r.name)])).toEqual([
+			["needs-you", ["a/asks", "a/audit"]],
+			["at-work", ["a/busy", "a/busier"]],
+			["quiet", ["a/quiet"]],
+		]);
+	});
+
+	it("leaves out a group with nothing in it", () => {
+		expect(groupRepos([row("a/busy", { open: 1 })]).map((g) => g.state)).toEqual(["at-work"]);
+	});
+});
+

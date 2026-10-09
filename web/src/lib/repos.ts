@@ -58,9 +58,28 @@ export function filterRepos(rows: RepoRow[], query: string): RepoRow[] {
 	return q ? rows.filter((row) => row.name.toLowerCase().includes(q)) : rows;
 }
 
-/** One line under a repo's name: "3 open · 1 violation". (What needs you has its own badge.) */
+/** Its open changes and audit violations, in words: "3 open, 1 audit violation". */
 export function repoCounts(row: RepoRow): string {
 	const parts = [`${row.open} open`];
-	if (row.violations) parts.push(`${row.violations} ${row.violations === 1 ? "violation" : "violations"}`);
-	return parts.join(" · ");
+	if (row.violations) parts.push(`${row.violations} audit ${row.violations === 1 ? "violation" : "violations"}`);
+	return parts.join(", ");
+}
+
+/** What a repo needs, as its lamp: a person (a question waits, or the audit found something), work under way, or nothing. */
+export type RepoState = "needs-you" | "at-work" | "quiet";
+
+export function repoState(row: RepoRow): RepoState {
+	if (row.needsYou || row.violations) return "needs-you";
+	return row.open ? "at-work" : "quiet";
+}
+
+/** The groups the Repositories page shows, in order, each with the repos in it (empty groups left out). */
+export const REPO_GROUPS: { state: RepoState; title: string }[] = [
+	{ state: "needs-you", title: "Needs you" },
+	{ state: "at-work", title: "At work" },
+	{ state: "quiet", title: "Quiet" },
+];
+
+export function groupRepos(rows: RepoRow[]): { state: RepoState; title: string; rows: RepoRow[] }[] {
+	return REPO_GROUPS.map((group) => ({ ...group, rows: rows.filter((row) => repoState(row) === group.state) })).filter((group) => group.rows.length);
 }

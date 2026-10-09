@@ -12,5 +12,5 @@
 		"verbatimModuleSyntax": true,
 		"types": ["vite/client"]
 	},
-	"include": ["src", "../src/types.ts", "../src/gate-plan.ts"]
+	"include": ["src", "../src/types.ts", "../src/gate-plan.ts", "../src/toolkit/staleness.ts"]
 }

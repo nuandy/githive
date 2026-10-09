@@ -39,7 +39,7 @@ const jsonArgs = async (c: { req: { json<T>(): Promise<T> } }) => {
 };
 
 /** Served to anyone: the dashboard's page and files (it asks people to sign in), sign-in itself, and OAuth's own endpoints. */
-const isPublic = (path: string) => path === "/" || path === "/index.html" || path.startsWith("/assets/") || path.startsWith("/auth/") || path.startsWith("/.well-known/") || path === "/authorize";
+const isPublic = (path: string) => path === "/" || path === "/index.html" || path.startsWith("/assets/") || path.startsWith("/fonts/") || path.startsWith("/auth/") || path.startsWith("/.well-known/") || path === "/authorize";
 
 // Authenticate before routing: Access, an agent token, or a session cookie (see auth/principal.ts).
 app.use("*", async (c, next) => {
