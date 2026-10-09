@@ -1,5 +1,5 @@
 import git from "isomorphic-git";
-import { http } from "../git-http";
+import { gitAuth, http } from "../git-http";
 import { isEmptyRepo, type Remote, Workspace } from "../git";
 import { fetchCommits } from "../git-fetch";
 import { formatOf, RECORD_FORMAT, upgradeState } from "../record-format";
@@ -13,12 +13,11 @@ import { decodeShard, shardsPrefix } from "./shards";
 // started, with their trailers and the files each changed.
 
 const DIR = "/records";
-const onAuth = (remote: Remote) => () => ({ username: "x", password: remote.token.split("?expires=")[0] });
 const decoder = new TextDecoder();
 
 /** Every state a record ref has had, oldest first, with the commit that set it. */
 export async function readRecordHistory<S>(remote: Remote, ref: string): Promise<{ tip: string; state: S }[]> {
-	const refs = await git.listServerRefs({ http, url: remote.url, protocolVersion: 1, prefix: ref, onAuth: onAuth(remote) }).catch((err) => (isEmptyRepo(err) ? [] : Promise.reject(err)));
+	const refs = await git.listServerRefs({ http, url: remote.url, protocolVersion: 1, prefix: ref, ...gitAuth(remote) }).catch((err) => (isEmptyRepo(err) ? [] : Promise.reject(err)));
 	const tip = refs.find((r) => r.ref === ref)?.oid;
 	if (!tip) return [];
 	const { fs } = await retryTransient(() => fetchCommits(remote, [tip], DIR, { history: true }));
@@ -98,7 +97,7 @@ async function inTurns<R>(n: number, tasks: (() => Promise<R>)[]): Promise<R[]> 
 /** The refs under `prefix`, and their histories in one fetch; listed again if one moves in between (its old tip is no longer served). */
 async function listAndFetch(remote: Remote, prefix: string) {
 	for (let attempt = 1; ; attempt++) {
-		const refs = (await retryTransient(() => git.listServerRefs({ http, url: remote.url, protocolVersion: 1, prefix, onAuth: onAuth(remote) }).catch((err) => (isEmptyRepo(err) ? [] : Promise.reject(err))))).filter((r) => r.ref.startsWith(prefix));
+		const refs = (await retryTransient(() => git.listServerRefs({ http, url: remote.url, protocolVersion: 1, prefix, ...gitAuth(remote) }).catch((err) => (isEmptyRepo(err) ? [] : Promise.reject(err))))).filter((r) => r.ref.startsWith(prefix));
 		try {
 			const { fs } = await retryTransient(() => fetchCommits(remote, [...new Set(refs.map((r) => r.oid))], DIR, { history: true }));
 			return { refs, fs };

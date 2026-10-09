@@ -1,5 +1,5 @@
 import git from "isomorphic-git";
-import { http } from "./git-http";
+import { gitAuth, http } from "./git-http";
 import { BOT, isEmptyRepo, type Remote } from "./git";
 import { fetchCommits } from "./git-fetch";
 import { MemoryFS } from "./memory-fs";
@@ -95,7 +95,6 @@ const decoder = new TextDecoder();
 const isCommitId = (id: string) => /^[0-9a-f]{40}$/.test(id);
 const signature = () => ({ ...BOT, timestamp: Math.floor(Date.now() / 1000), timezoneOffset: 0 });
 
-const onAuth = (remote: Remote) => () => ({ username: "x", password: remote.token.split("?expires=")[0] });
 
 const ZERO_OID = "0".repeat(40);
 
@@ -198,7 +197,7 @@ async function landedBehind(remote: Remote, ref: string, oid: string) {
 /** Where the ref points on the server, or null if it doesn't exist (one request). */
 async function serverTip(remote: Remote, ref: string) {
 	// Ask the server whether the log exists, rather than reading a fetch error as "empty".
-	const refs = await git.listServerRefs({ http, url: remote.url, protocolVersion: 1, prefix: ref, onAuth: onAuth(remote) }).catch((err) => (isEmptyRepo(err) ? [] : Promise.reject(err)));
+	const refs = await git.listServerRefs({ http, url: remote.url, protocolVersion: 1, prefix: ref, ...gitAuth(remote) }).catch((err) => (isEmptyRepo(err) ? [] : Promise.reject(err)));
 	return refs.find((r) => r.ref === ref)?.oid ?? null;
 }
 

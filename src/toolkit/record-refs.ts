@@ -1,5 +1,5 @@
 import git from "isomorphic-git";
-import { http } from "../git-http";
+import { gitAuth, http } from "../git-http";
 import { isEmptyRepo, type Remote } from "../git";
 import { fetchCommits } from "../git-fetch";
 import { retryTransient } from "../retry";
@@ -20,13 +20,13 @@ const decoder = new TextDecoder();
  * all the refs whose tips aren't known yet. Brief server failures are retried.
  */
 export async function readAllShards<S>(remote: Remote, prefix: string) {
-	return readListed<S>(remote, async (onAuth) => (await listRefs(remote, prefix, onAuth)).filter((r) => r.ref.startsWith(prefix)));
+	return readListed<S>(remote, async () => (await listRefs(remote, prefix)).filter((r) => r.ref.startsWith(prefix)));
 }
 
 /** These refs (where they exist) at their tips: one listing (of the prefix they share), then one fetch for the commits not known yet. */
 export async function readRefs<S>(remote: Remote, refs: string[]) {
 	const wanted = new Set(refs);
-	return readListed<S>(remote, async (onAuth) => (await listRefs(remote, sharedPrefix(refs), onAuth)).filter((r) => wanted.has(r.ref)));
+	return readListed<S>(remote, async () => (await listRefs(remote, sharedPrefix(refs))).filter((r) => wanted.has(r.ref)));
 }
 
 /** The longest prefix every ref starts with. */
@@ -36,14 +36,13 @@ function sharedPrefix(refs: string[]) {
 	return prefix;
 }
 
-const listRefs = (remote: Remote, prefix: string, onAuth: () => { username: string; password: string }) =>
-	retryTransient(() => git.listServerRefs({ http, url: remote.url, protocolVersion: 1, prefix, onAuth }).catch((err) => (isEmptyRepo(err) ? [] : Promise.reject(err))));
+const listRefs = (remote: Remote, prefix: string) =>
+	retryTransient(() => git.listServerRefs({ http, url: remote.url, protocolVersion: 1, prefix, ...gitAuth(remote) }).catch((err) => (isEmptyRepo(err) ? [] : Promise.reject(err))));
 
 /** Refs as `list` finds them, with their states: commits not known yet are fetched in one request. */
-async function readListed<S>(remote: Remote, list: (onAuth: () => { username: string; password: string }) => Promise<{ ref: string; oid: string }[]>): Promise<{ ref: string; tip: string; state: S }[]> {
-	const onAuth = () => ({ username: "x", password: remote.token.split("?expires=")[0] });
+async function readListed<S>(remote: Remote, list: () => Promise<{ ref: string; oid: string }[]>): Promise<{ ref: string; tip: string; state: S }[]> {
 	for (let attempt = 1; ; attempt++) {
-		const listed = await list(onAuth);
+		const listed = await list();
 		const missing = [...new Set(listed.map((r) => r.oid).filter((oid) => !states.has(oid)))];
 		try {
 			if (missing.length) {

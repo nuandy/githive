@@ -1,5 +1,5 @@
 import git from "isomorphic-git";
-import { http } from "./git-http";
+import { gitAuth, http } from "./git-http";
 import { MemoryFS } from "./memory-fs";
 import { retryTransient } from "./retry";
 
@@ -16,10 +16,6 @@ export interface Remote {
 }
 
 // Artifacts tokens look like art_v1_<secret>?expires=<unix>; Git auth wants only the secret.
-const onAuth = (remote: Remote) => () => ({
-	username: "x",
-	password: remote.token.split("?expires=")[0],
-});
 
 /** Whether a ref listing failed only because the repo is empty (no HEAD yet): it then has no refs. */
 export const isEmptyRepo = (err: unknown) => (err as { code?: string })?.code === "NotFoundError" && /HEAD/.test(String((err as Error)?.message));
@@ -29,14 +25,14 @@ export const isEmptyRepo = (err: unknown) => (err as { code?: string })?.code ==
  * an empty repo. A project's branch is whatever this is (main, master, ...).
  */
 export async function defaultBranch(remote: Remote): Promise<string | null> {
-	const refs = await retryTransient(() => git.listServerRefs({ http, url: remote.url, prefix: "HEAD", symrefs: true, onAuth: onAuth(remote) })).catch((err) => (isEmptyRepo(err) ? [] : Promise.reject(err)));
+	const refs = await retryTransient(() => git.listServerRefs({ http, url: remote.url, prefix: "HEAD", symrefs: true, ...gitAuth(remote) })).catch((err) => (isEmptyRepo(err) ? [] : Promise.reject(err)));
 	const target = refs.find((r) => r.ref === "HEAD")?.target;
 	return target?.startsWith("refs/heads/") ? target.slice("refs/heads/".length) : null;
 }
 
 /** A branch's head on a remote, without cloning (one ls-remote), or null when it doesn't exist. */
 export async function branchHead(remote: Remote, branch: string): Promise<string | null> {
-	const refs = await retryTransient(() => git.listServerRefs({ http, url: remote.url, protocolVersion: 1, prefix: `refs/heads/${branch}`, onAuth: onAuth(remote) }));
+	const refs = await retryTransient(() => git.listServerRefs({ http, url: remote.url, protocolVersion: 1, prefix: `refs/heads/${branch}`, ...gitAuth(remote) }));
 	return refs.find((r) => r.ref === `refs/heads/${branch}`)?.oid ?? null;
 }
 
@@ -93,7 +89,7 @@ export class Workspace {
 			// A failed clone may have populated part of the object database, refs, or
 			// worktree. Each attempt must therefore begin with an entirely fresh FS.
 			const fs = new MemoryFS();
-			await git.clone({ fs, http, dir: DIR, url: origin.url, ref: branch, singleBranch: true, depth, onAuth: onAuth(origin) });
+			await git.clone({ fs, http, dir: DIR, url: origin.url, ref: branch, singleBranch: true, depth, ...gitAuth(origin) });
 			const ws = new Workspace(fs, origin, branch, depth);
 			ws.sources.push({ remote: "origin", origin, ref: branch });
 			return ws;
@@ -115,7 +111,7 @@ export class Workspace {
 		let ws: Workspace;
 		if (hit) {
 			ws = hit.ws.copy(origin);
-			const result = await retryTransient(() => git.fetch({ fs: ws.fs, http, dir: DIR, remote: "origin", ref: branch, singleBranch: true, depth: ws.depth, onAuth: onAuth(origin) }));
+			const result = await retryTransient(() => git.fetch({ fs: ws.fs, http, dir: DIR, remote: "origin", ref: branch, singleBranch: true, depth: ws.depth, ...gitAuth(origin) }));
 			if (!result.fetchHead) throw new Error(`fetch of origin/${branch} returned no head`);
 			// The worktree stays where it was: reading needs the branch, not the files.
 			await git.writeRef({ fs: ws.fs, dir: DIR, ref: `refs/heads/${branch}`, value: result.fetchHead, force: true });
@@ -138,7 +134,7 @@ export class Workspace {
 		if (this.depth >= FULL_DEPTH) return false;
 		this.depth = Math.min(this.depth * 4, FULL_DEPTH);
 		for (const source of this.sources)
-			await retryTransient(() => git.fetch({ fs: this.fs, http, dir: DIR, remote: source.remote, ref: source.ref, singleBranch: true, depth: this.depth, onAuth: onAuth(source.origin) }));
+			await retryTransient(() => git.fetch({ fs: this.fs, http, dir: DIR, remote: source.remote, ref: source.ref, singleBranch: true, depth: this.depth, ...gitAuth(source.origin) }));
 		return true;
 	}
 
@@ -172,11 +168,11 @@ export class Workspace {
 
 	/** Push local ref `from` (a branch fetched, say) to `to` on `remote`, replacing what's there. */
 	pushAs(from: string, to: string, remote: Remote) {
-		return retryTransient(() => git.push({ fs: this.fs, http, dir: DIR, url: remote.url, ref: from, remoteRef: to, force: true, onAuth: onAuth(remote) }));
+		return retryTransient(() => git.push({ fs: this.fs, http, dir: DIR, url: remote.url, ref: from, remoteRef: to, force: true, ...gitAuth(remote) }));
 	}
 
 	push(ref = this.branch, remote: Remote = this.origin) {
-		return retryTransient(() => git.push({ fs: this.fs, http, dir: DIR, url: remote.url, ref, onAuth: onAuth(remote) }));
+		return retryTransient(() => git.push({ fs: this.fs, http, dir: DIR, url: remote.url, ref, ...gitAuth(remote) }));
 	}
 
 	/** Fetch `ref` from another repo into refs/remotes/<name>/<ref>; returns its commit. */
@@ -190,7 +186,7 @@ export class Workspace {
 			ref,
 			singleBranch: true,
 			depth: this.depth,
-			onAuth: onAuth(remote),
+			...gitAuth(remote),
 		}));
 		if (!result.fetchHead) throw new Error(`fetch of ${name}/${ref} returned no head`);
 		this.sources.push({ remote: name, origin: remote, ref });

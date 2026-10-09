@@ -1,5 +1,5 @@
 import git from "isomorphic-git";
-import { http } from "../git-http";
+import { gitAuth, http } from "../git-http";
 import type { CasLog } from "../record-log";
 import { GitCasLog } from "../record-log";
 import { isEmptyRepo, type Remote } from "../git";
@@ -178,7 +178,7 @@ class Claims implements ClaimStore {
 				const remote = await pending;
 				const refs = await retryTransient(() =>
 					git
-						.listServerRefs({ http, url: remote.url, protocolVersion: 1, prefix, onAuth: () => ({ username: "x", password: remote.token.split("?expires=")[0] }) })
+						.listServerRefs({ http, url: remote.url, protocolVersion: 1, prefix, ...gitAuth(remote) })
 						.catch((err) => (isEmptyRepo(err) ? [] : Promise.reject(err))),
 				);
 				return refs.filter((r) => r.ref.startsWith(prefix)).map((r) => decodeShard(r.ref.slice(base.length)));
