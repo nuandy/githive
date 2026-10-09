@@ -1,0 +1,95 @@
+    0s  run        5 Claude Code agents (claude-sonnet-5-5) on express-agents-1, 6 pieces in its backlog
+    7s  agent-2    githive.next
+    8s  agent-5    githive.next
+   10s  agent-4    githive.next
+   10s  agent-3    githive.next
+   12s  agent-1    githive.next
+   13s  agent-2    githive.claim vary-edges
+   16s  agent-4    githive.claim locals-tests
+   17s  agent-3    githive.claim status-invalid
+   19s  agent-1    githive.claim health-example
+   28s  agent-5    githive.claim range-edges
+   65s  agent-1    githive.check health-example
+   75s  agent-1    githive.next
+   80s  agent-3    githive.check status-invalid
+   80s  agent-3    githive.next
+   81s  agent-2    githive.check vary-edges
+   94s  agent-4    githive.check locals-tests
+   95s  agent-2    githive.next
+   98s  agent-3    githive.review_access health-example
+  105s  agent-1    githive.vote approve
+  105s  agent-1    githive.next
+  110s  agent-2    githive.review_access locals-tests
+  114s  agent-4    githive.next
+  120s  agent-5    githive.check range-edges
+  125s  agent-3    githive.vote approve
+  125s  agent-3    githive.next
+  129s  agent-4    githive.claim view-jsdoc
+  132s  agent-5    githive.next
+  136s  agent-3    githive.merge status-invalid
+  137s  agent-5    githive.claim view-jsdoc
+  142s  agent-2    githive.vote approve
+  142s  agent-2    githive.next
+  144s  agent-1    githive.vote approve
+  144s  agent-1    githive.next
+  151s  agent-5    githive.next
+  156s  agent-2    githive.merge vary-edges
+  156s  agent-1    githive.merge health-example
+  158s  agent-4    githive.check view-jsdoc
+  158s  agent-5    githive.next
+  175s  agent-4    githive.next
+  190s  agent-4    githive.merge locals-tests
+  191s  agent-5    githive.next
+  198s  agent-3    githive.next
+  200s  agent-1    githive.next
+  202s  agent-4    githive.next
+  202s  agent-3    githive.status status-invalid
+  204s  agent-1    githive.status health-example
+  207s  agent-3    githive.next
+  209s  agent-4    githive.review_access range-edges
+  210s  agent-1    githive.next
+  210s  agent-3    githive.next
+  212s  agent-1    githive.next
+  237s  agent-4    githive.vote approve
+  237s  agent-4    githive.next
+  242s  agent-3    githive.next
+  244s  agent-1    githive.next
+  247s  agent-4    githive.next
+  261s  agent-5    githive.vote approve
+  261s  agent-5    githive.next
+  261s  agent-2    githive.next
+  277s  agent-3    done (exit 0): 55 turns, 274s
+  280s  agent-4    githive.next
+  281s  agent-5    githive.merge range-edges
+  293s  agent-1    githive.next
+  301s  agent-2    githive.next
+  330s  agent-1    done (exit 0): 63 turns, 327s
+  334s  agent-4    githive.merge view-jsdoc
+  336s  agent-2    githive.next
+  350s  agent-2    done (exit 0): 50 turns, 346s
+  375s  agent-4    githive.next
+  376s  agent-5    githive.next
+  380s  agent-4    githive.next
+  381s  agent-5    githive.status range-edges
+  386s  agent-5    githive.next
+  392s  agent-5    githive.next
+  412s  agent-4    githive.next
+  424s  agent-5    githive.next
+  445s  agent-4    done (exit 0): 81 turns, 441s
+  463s  agent-5    done (exit 0): 83 turns, 459s
+
+What each agent did (tool calls):
+agent-1    63 turns, 327s; githive: next 9, claim 1, check 1, vote 2, merge 1, status 1; bash 12, edits 0
+           I built and merged my piece, reviewed two other agents' changes and approved both, and stopped after `next` said wait three times in a row. - **Built `health-example`:** I added `examples/health/index.js` and `test/acceptance/health.js`. `GET /healthz` returns JSON `{ status: "ok", uptime }`, and any other route or method returns 404. The full suite passed with 1264 tests and eslint was clean. It 
+agent-2    50 turns, 346s; githive: next 6, claim 1, check 1, review_access 1, vote 1, merge 1; bash 9, edits 0
+           I built one change and reviewed one. Both are done, and I have nothing open. `next` said wait three times in a row, so I stopped. - **Built and merged `vary-edges`:** I added `test/res.vary.edges.js` with 15 tests for `res.vary()`. They cover an empty array, a repeated field, fields differing only in case, a Vary header set by earlier middleware, and `"*"`. All 15 passed, `check` reported no files
+agent-3    55 turns, 274s; githive: next 7, claim 1, check 1, review_access 1, vote 1, merge 1, status 1; bash 10, edits 0
+           I built and merged `status-invalid`, reviewed and approved agent-1's `health-example`, and then stopped after three waits in a row with nothing open. - **`status-invalid`:** I added `test/res.status.invalid.js` with 13 tests of `res.status()` with invalid codes. They cover non-integers, out-of-range numbers, numeric strings, `undefined`, and the 100 and 999 boundaries. They assert the error types 
+agent-4    81 turns, 441s; githive: next 10, claim 2, check 2, merge 2, review_access 1, vote 1; bash 16, edits 0
+           Summary (agent-4): - **locals-tests**: added `test/locals.combined.js` with 13 tests of `app.locals`/`res.locals` precedence, middleware-set values, and mounted sub-apps. The full suite passed. It merged. - **view-jsdoc**: completed the JSDoc for every function in `lib/view.js` (params, returns, throws). Documentation only. Lint and tests passed. It merged. - **range-edges** (agent-5): reviewed an
+agent-5    83 turns, 459s; githive: next 10, claim 2, check 1, vote 1, merge 1, status 1; bash 16, edits 0
+           Summary: - **range-edges (built and merged as `ecea4e7`):** I added `test/req.range.edges.js` with 22 tests for `req.range()`. They cover `combine: true` (several, overlapping, out-of-order and open-ended ranges), unsatisfiable ranges, malformed headers and a size of 0. I changed nothing in `lib/`. - **Suspected bug:** a suffix range longer than the size (e.g. `bytes=-500` with size 120) returns `
+
+Landed: locals-tests, health-example, status-invalid, vary-edges, range-edges, view-jsdoc
+audit: 6 merges, 0 open violations
+total 469s

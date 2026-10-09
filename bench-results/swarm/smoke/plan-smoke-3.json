@@ -1,0 +1,324 @@
+{
+	"repo": "express-smoke-3",
+	"work": "swarm-work",
+	"seed": 200,
+	"timing": {
+		"arrive": [
+			0,
+			120
+		],
+		"edit": [
+			5,
+			30
+		],
+		"fix": [
+			5,
+			20
+		],
+		"review": [
+			5,
+			20
+		]
+	},
+	"setup": {
+		"import": "https://github.com/expressjs/express",
+		"branch": "master",
+		"template": "express-template",
+		"verify": [
+			"npm install --no-audit --no-fund",
+			"npm test"
+		],
+		"required": 1,
+		"shardDepth": 2
+	},
+	"planner": {
+		"agent": "planner",
+		"keyFile": "keys-smoke-3/planner.key"
+	},
+	"agents": [
+		{
+			"agent": "agent-1",
+			"keyFile": "keys-smoke-3/agent-1.key"
+		},
+		{
+			"agent": "agent-2",
+			"keyFile": "keys-smoke-3/agent-2.key"
+		},
+		{
+			"agent": "agent-3",
+			"keyFile": "keys-smoke-3/agent-3.key"
+		},
+		{
+			"agent": "agent-4",
+			"keyFile": "keys-smoke-3/agent-4.key"
+		},
+		{
+			"agent": "agent-5",
+			"keyFile": "keys-smoke-3/agent-5.key"
+		},
+		{
+			"agent": "agent-6",
+			"keyFile": "keys-smoke-3/agent-6.key"
+		},
+		{
+			"agent": "agent-7",
+			"keyFile": "keys-smoke-3/agent-7.key"
+		},
+		{
+			"agent": "agent-8",
+			"keyFile": "keys-smoke-3/agent-8.key"
+		},
+		{
+			"agent": "agent-9",
+			"keyFile": "keys-smoke-3/agent-9.key"
+		},
+		{
+			"agent": "agent-10",
+			"keyFile": "keys-smoke-3/agent-10.key"
+		},
+		{
+			"agent": "agent-11",
+			"keyFile": "keys-smoke-3/agent-11.key"
+		},
+		{
+			"agent": "agent-12",
+			"keyFile": "keys-smoke-3/agent-12.key"
+		},
+		{
+			"agent": "agent-13",
+			"keyFile": "keys-smoke-3/agent-13.key"
+		},
+		{
+			"agent": "agent-14",
+			"keyFile": "keys-smoke-3/agent-14.key"
+		},
+		{
+			"agent": "agent-15",
+			"keyFile": "keys-smoke-3/agent-15.key"
+		},
+		{
+			"agent": "agent-16",
+			"keyFile": "keys-smoke-3/agent-16.key"
+		},
+		{
+			"agent": "agent-17",
+			"keyFile": "keys-smoke-3/agent-17.key"
+		},
+		{
+			"agent": "agent-18",
+			"keyFile": "keys-smoke-3/agent-18.key"
+		},
+		{
+			"agent": "agent-19",
+			"keyFile": "keys-smoke-3/agent-19.key"
+		},
+		{
+			"agent": "agent-20",
+			"keyFile": "keys-smoke-3/agent-20.key"
+		}
+	],
+	"backlog": [
+		{
+			"id": "note-1",
+			"title": "Swarm note 1",
+			"intent": "Add swarm/p1/note.js",
+			"paths": [
+				"swarm/p1/"
+			],
+			"edit": "mkdir -p swarm/p1 && printf 'module.exports = \"Note 1 from the swarm.\";\\n' > swarm/p1/note.js",
+			"message": "Add swarm note 1"
+		},
+		{
+			"id": "note-2",
+			"title": "Swarm note 2",
+			"intent": "Add swarm/p2/note.js",
+			"paths": [
+				"swarm/p2/"
+			],
+			"edit": "mkdir -p swarm/p2 && printf 'module.exports = \"Note 2 from the swarm.\";\\n' > swarm/p2/note.js",
+			"message": "Add swarm note 2"
+		},
+		{
+			"id": "note-3",
+			"title": "Swarm note 3",
+			"intent": "Add swarm/p3/note.js",
+			"paths": [
+				"swarm/p3/"
+			],
+			"edit": "mkdir -p swarm/p3 && printf 'module.exports = \"Note 3 from the swarm.\";\\n' > swarm/p3/note.js",
+			"message": "Add swarm note 3"
+		},
+		{
+			"id": "note-4",
+			"title": "Swarm note 4",
+			"intent": "Add swarm/p4/note.js",
+			"paths": [
+				"swarm/p4/"
+			],
+			"edit": "mkdir -p swarm/p4 && printf 'module.exports = \"Note 4 from the swarm.\";\\n' > swarm/p4/note.js",
+			"message": "Add swarm note 4"
+		},
+		{
+			"id": "note-5",
+			"title": "Swarm note 5",
+			"intent": "Add swarm/p5/note.js",
+			"paths": [
+				"swarm/p5/"
+			],
+			"edit": "mkdir -p swarm/p5 && printf 'module.exports = \"Note 5 from the swarm.\";\\n' > swarm/p5/note.js",
+			"message": "Add swarm note 5"
+		},
+		{
+			"id": "note-6",
+			"title": "Swarm note 6",
+			"intent": "Add swarm/p6/note.js",
+			"paths": [
+				"swarm/p6/"
+			],
+			"edit": "mkdir -p swarm/p6 && printf 'module.exports = \"Note 6 from the swarm.\";\\n' > swarm/p6/note.js",
+			"message": "Add swarm note 6"
+		},
+		{
+			"id": "note-7",
+			"title": "Swarm note 7",
+			"intent": "Add swarm/p7/note.js",
+			"paths": [
+				"swarm/p7/"
+			],
+			"edit": "mkdir -p swarm/p7 && printf 'module.exports = \"Note 7 from the swarm.\";\\n' > swarm/p7/note.js",
+			"message": "Add swarm note 7"
+		},
+		{
+			"id": "note-8",
+			"title": "Swarm note 8",
+			"intent": "Add swarm/p8/note.js",
+			"paths": [
+				"swarm/p8/"
+			],
+			"edit": "mkdir -p swarm/p8 && printf 'module.exports = \"Note 8 from the swarm.\";\\n' > swarm/p8/note.js",
+			"message": "Add swarm note 8"
+		},
+		{
+			"id": "note-9",
+			"title": "Swarm note 9",
+			"intent": "Add swarm/p9/note.js",
+			"paths": [
+				"swarm/p9/"
+			],
+			"edit": "mkdir -p swarm/p9 && printf 'module.exports = \"Note 9 from the swarm.\";\\n' > swarm/p9/note.js",
+			"message": "Add swarm note 9"
+		},
+		{
+			"id": "note-10",
+			"title": "Swarm note 10",
+			"intent": "Add swarm/p10/note.js",
+			"paths": [
+				"swarm/p10/"
+			],
+			"edit": "mkdir -p swarm/p10 && printf 'module.exports = \"Note 10 from the swarm.\";\\n' > swarm/p10/note.js",
+			"message": "Add swarm note 10"
+		},
+		{
+			"id": "note-11",
+			"title": "Swarm note 11",
+			"intent": "Add swarm/p11/note.js",
+			"paths": [
+				"swarm/p11/"
+			],
+			"edit": "mkdir -p swarm/p11 && printf 'module.exports = \"Note 11 from the swarm.\";\\n' > swarm/p11/note.js",
+			"message": "Add swarm note 11"
+		},
+		{
+			"id": "note-12",
+			"title": "Swarm note 12",
+			"intent": "Add swarm/p12/note.js",
+			"paths": [
+				"swarm/p12/"
+			],
+			"edit": "mkdir -p swarm/p12 && printf 'module.exports = \"Note 12 from the swarm.\";\\n' > swarm/p12/note.js",
+			"message": "Add swarm note 12"
+		},
+		{
+			"id": "break-13",
+			"title": "Swarm piece that breaks the checks",
+			"intent": "Add test/swarm-fail.js, failing on purpose",
+			"paths": [
+				"test/swarm-fail.js"
+			],
+			"edit": "printf \"describe('swarm smoke', function () {\\n  it('fails on purpose', function () {\\n    throw new Error('this piece breaks the checks on purpose')\\n  })\\n})\\n\" > test/swarm-fail.js",
+			"message": "Add a test that fails on purpose",
+			"fix": "printf \"describe('swarm smoke', function () {\\n  it('passes once fixed', function () {})\\n})\\n\" > test/swarm-fail.js",
+			"onReject": "fix"
+		},
+		{
+			"id": "note-14",
+			"title": "Swarm note 14",
+			"intent": "Add swarm/p14/note.js",
+			"paths": [
+				"swarm/p14/"
+			],
+			"edit": "mkdir -p swarm/p14 && printf 'module.exports = \"Note 14 from the swarm.\";\\n' > swarm/p14/note.js",
+			"message": "Add swarm note 14"
+		},
+		{
+			"id": "note-15",
+			"title": "Swarm note 15",
+			"intent": "Add swarm/p15/note.js",
+			"paths": [
+				"swarm/p15/"
+			],
+			"edit": "mkdir -p swarm/p15 && printf 'module.exports = \"Note 15 from the swarm.\";\\n' > swarm/p15/note.js",
+			"message": "Add swarm note 15"
+		},
+		{
+			"id": "note-16",
+			"title": "Swarm note 16",
+			"intent": "Add swarm/p16/note.js",
+			"paths": [
+				"swarm/p16/"
+			],
+			"edit": "mkdir -p swarm/p16 && printf 'module.exports = \"Note 16 from the swarm.\";\\n' > swarm/p16/note.js",
+			"message": "Add swarm note 16"
+		},
+		{
+			"id": "note-17",
+			"title": "Swarm note 17",
+			"intent": "Add swarm/p17/note.js",
+			"paths": [
+				"swarm/p17/"
+			],
+			"edit": "mkdir -p swarm/p17 && printf 'module.exports = \"Note 17 from the swarm.\";\\n' > swarm/p17/note.js",
+			"message": "Add swarm note 17"
+		},
+		{
+			"id": "note-18",
+			"title": "Swarm note 18",
+			"intent": "Add swarm/p18/note.js",
+			"paths": [
+				"swarm/p18/"
+			],
+			"edit": "mkdir -p swarm/p18 && printf 'module.exports = \"Note 18 from the swarm.\";\\n' > swarm/p18/note.js",
+			"message": "Add swarm note 18"
+		},
+		{
+			"id": "note-19",
+			"title": "Swarm note 19",
+			"intent": "Add swarm/p19/note.js",
+			"paths": [
+				"swarm/p19/"
+			],
+			"edit": "mkdir -p swarm/p19 && printf 'module.exports = \"Note 19 from the swarm.\";\\n' > swarm/p19/note.js",
+			"message": "Add swarm note 19"
+		},
+		{
+			"id": "note-20",
+			"title": "Swarm note 20",
+			"intent": "Add swarm/p20/note.js",
+			"paths": [
+				"swarm/p20/"
+			],
+			"edit": "mkdir -p swarm/p20 && printf 'module.exports = \"Note 20 from the swarm.\";\\n' > swarm/p20/note.js",
+			"message": "Add swarm note 20"
+		}
+	]
+}

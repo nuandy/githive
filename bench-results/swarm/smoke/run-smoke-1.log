@@ -1,0 +1,109 @@
+  23s  swarm        copying express-template as express-smoke-1
+  45s  swarm        express-smoke-1 on master: checks ["npm install --no-audit --no-fund","npm test"], grants {}, claims {"since":"2026-10-09T09:30:27.022Z","because":"asked for at the start"}
+  89s  swarm        registered agent-1, agent-2, agent-3, agent-4, agent-5, agent-6, agent-7, agent-8, agent-9, agent-10, agent-11, agent-12, agent-13, agent-14, agent-15, agent-16, agent-17, agent-18, agent-19, agent-20, planner
+ 142s  swarm        the repo's snapshot is ready (183 MB)
+ 142s  swarm        20 pieces in the backlog; 20 agents, all alike
+ 165s  agent-20     arrives
+ 173s  agent-20     builds note-20 (1 path(s))
+ 173s  agent-14     arrives
+ 175s  agent-8      arrives
+ 178s  agent-14     builds note-15 (1 path(s))
+ 179s  agent-1      arrives
+ 180s  agent-10     arrives
+ 183s  agent-8      builds note-4 (1 path(s))
+ 185s  agent-1      builds note-11 (1 path(s))
+ 188s  agent-10     builds note-3 (1 path(s))
+ 193s  agent-18     arrives
+ 197s  agent-6      arrives
+ 201s  agent-3      arrives
+ 207s  agent-18     builds note-17 (1 path(s))
+ 209s  agent-3      builds note-5 (1 path(s))
+ 209s  agent-6      couldn't claim note-4: claim: note-4 is agent-8's change: claim under a change name of your own
+ 215s  agent-2      arrives
+ 219s  agent-20     pushed note-20 3e76b1d: 1 file changed, 1 insertion(+)
+ 220s  agent-4      arrives
+ 223s  agent-8      pushed note-4 c97955c: 1 file changed, 1 insertion(+)
+ 223s  agent-6      builds note-1 (1 path(s))
+ 224s  agent-2      builds note-14 (1 path(s))
+ 227s  agent-17     arrives
+ 230s  agent-1      pushed note-11 d328699: 1 file changed, 1 insertion(+)
+ 231s  agent-14     pushed note-15 685c2e4: 1 file changed, 1 insertion(+)
+ 233s  agent-3      pushed note-5 cdf15ad: 1 file changed, 1 insertion(+)
+ 237s  agent-5      arrives
+ 240s  agent-10     pushed note-3 4df9b15: 1 file changed, 1 insertion(+)
+ 242s  agent-12     arrives
+ 245s  agent-18     pushed note-17 8e3ab2b: 1 file changed, 1 insertion(+)
+ 246s  agent-11     arrives
+ 246s  agent-13     arrives
+ 247s  agent-12     builds note-6 (1 path(s))
+ 249s  agent-14     builds note-8 (1 path(s))
+ 249s  agent-3      builds note-16 (1 path(s))
+ 251s  agent-9      arrives
+ 252s  agent-4      approves note-4 (c97955c)
+ 253s  agent-2      pushed note-14 0876e6d: 1 file changed, 1 insertion(+)
+ 254s  agent-19     arrives
+ 254s  agent-7      arrives
+ 258s  agent-16     arrives
+ 258s  agent-15     arrives
+ 259s  agent-18     builds note-2 (1 path(s))
+ 260s  agent-11     builds note-10 (1 path(s))
+ 262s  agent-4      builds note-19 (1 path(s))
+ 262s  agent-10     couldn't claim note-2: claim: note-2 is agent-18's change: claim under a change name of your own
+ 263s  agent-19     couldn't claim note-10: claim: note-10 is agent-11's change: claim under a change name of your own
+ 263s  agent-16     builds note-9 (1 path(s))
+ 264s  agent-17     approves note-15 (685c2e4)
+ 265s  agent-7      couldn't claim note-9: claim: note-9 is agent-16's change: claim under a change name of your own
+ 265s  agent-15     couldn't claim note-19: claim: note-19 is agent-4's change: claim under a change name of your own
+ 265s  agent-5      approves note-20 (3e76b1d)
+ 267s  agent-19     couldn't claim note-9: claim: note-9 is agent-16's change: claim under a change name of your own
+ 269s  agent-5      builds note-7 (1 path(s))
+ 269s  agent-17     builds break-13 (1 path(s))
+ 270s  agent-2      couldn't claim note-9: claim: note-9 is agent-16's change: claim under a change name of your own
+ 271s  agent-15     couldn't claim note-7: claim: note-7 is agent-5's change: claim under a change name of your own
+ 272s  agent-7      couldn't claim break-13: claim: break-13 is agent-17's change: claim under a change name of your own
+ 274s  agent-19     couldn't claim note-9: claim: note-9 is agent-16's change: claim under a change name of your own
+ 274s  agent-10     couldn't claim note-7: claim: note-7 is agent-5's change: claim under a change name of your own
+ 275s  agent-7      couldn't claim break-13: claim: break-13 is agent-17's change: claim under a change name of your own
+ 275s  agent-6      pushed note-1 e33f9db: 1 file changed, 1 insertion(+)
+ 276s  agent-20     approves note-11 (d328699)
+ 277s  agent-14     pushed note-8 ba0288f: 1 file changed, 1 insertion(+)
+ 278s  agent-13     approves note-3 (4df9b15)
+ 278s  agent-2      builds note-18 (1 path(s))
+ 280s  agent-19     couldn't claim note-18: claim: note-18 is agent-2's change: claim under a change name of your own
+ 280s  agent-15     couldn't claim note-18: claim: note-18 is agent-2's change: claim under a change name of your own
+ 280s  agent-12     pushed note-6 b793e22: 1 file changed, 1 insertion(+)
+ 281s  agent-10     builds note-12 (1 path(s))
+ 281s  agent-16     pushed note-9 06eb260: 1 file changed, 1 insertion(+)
+ 282s  agent-3      pushed note-16 a243fc8: 1 file changed, 1 insertion(+)
+ 282s  agent-8      approves note-5 (cdf15ad)
+ 283s  agent-7      couldn't claim note-12: claim: note-12 is agent-10's change: claim under a change name of your own
+ 284s  agent-1      approves note-17 (8e3ab2b)
+ 285s  agent-15     couldn't claim note-12: claim: note-12 is agent-10's change: claim under a change name of your own
+ 288s  agent-11     pushed note-10 7927087: 1 file changed, 1 insertion(+)
+ 289s  agent-9      approves note-14 (0876e6d)
+ 291s  agent-18     pushed note-2 67cb856: 1 file changed, 1 insertion(+)
+ 297s  agent-4      pushed note-19 b8e5d85: 1 file changed, 1 insertion(+)
+ 298s  agent-10     pushed note-12 51bbe00: 1 file changed, 1 insertion(+)
+ 301s  agent-5      pushed note-7 e4eb87b: 1 file changed, 1 insertion(+)
+ 306s  agent-13     approves note-8 (ba0288f)
+ 307s  agent-17     pushed break-13 dc2a155: 1 file changed, 5 insertions(+)
+ 312s  agent-2      pushed note-18 a96d9e6: 1 file changed, 1 insertion(+)
+ 316s  agent-15     approves note-9 (06eb260)
+ 318s  agent-9      approves note-16 (a243fc8)
+ 322s  agent-12     approves note-1 (e33f9db)
+ 326s  agent-6      approves note-6 (b793e22)
+ 331s  agent-11     approves note-2 (67cb856)
+ 337s  agent-16     approves note-10 (7927087)
+ 340s  agent-13     approves note-7 (e4eb87b)
+ 343s  agent-4      approves note-12 (51bbe00)
+ 345s  agent-7      approves break-13 (dc2a155)
+ 348s  agent-19     approves note-18 (a96d9e6)
+ 350s  agent-15     approves note-19 (b8e5d85)
+ 471s  agent-20     merge note-20 failed: merge: HTTP 503 <!DOCTYPE html>
+<!--[if lt IE 7]> <html class="no-js ie6 oldie" lang="en-US"> <![endif]-->
+<!--[if IE 7]>    <html class="no-js ie7 oldie" lang="en-US"> <![endif]-->
+<!--[if IE 8]>    <html class="no-
+ 775s  agent-10     merge note-3 failed: merge: HTTP 503 <!DOCTYPE html>
+<!--[if lt IE 7]> <html class="no-js ie6 oldie" lang="en-US"> <![endif]-->
+<!--[if IE 7]>    <html class="no-js ie7 oldie" lang="en-US"> <![endif]-->
+<!--[if IE 8]>    <html class="no-

@@ -1,0 +1,381 @@
+    6s  run        20 Claude Code agents (claude-sonnet-5-5) on express-agents-2, 27 pieces in its backlog
+   15s  agent-8    githive.next
+   16s  agent-3    githive.next
+   16s  agent-19   githive.next
+   16s  agent-18   githive.next
+   16s  agent-14   githive.next
+   16s  agent-10   githive.next
+   17s  agent-2    githive.next
+   17s  agent-5    githive.next
+   17s  agent-6    githive.next
+   17s  agent-1    githive.next
+   17s  agent-4    githive.next
+   18s  agent-9    githive.next
+   18s  agent-17   githive.next
+   18s  agent-15   githive.next
+   18s  agent-20   githive.next
+   19s  agent-16   githive.next
+   19s  agent-7    githive.register
+   19s  agent-13   githive.next
+   19s  agent-12   githive.next
+   21s  agent-11   githive.next
+   24s  agent-7    githive.next
+   27s  agent-5    githive.claim accepts-edges
+   27s  agent-6    githive.claim route-edges
+   27s  agent-11   githive.claim languages-edges
+   27s  agent-14   githive.claim router-edges
+   27s  agent-8    githive.claim hostname-edges
+   27s  agent-10   githive.claim static-edges
+   28s  agent-20   githive.claim fresh-edges
+   28s  agent-15   githive.claim accepts-edges
+   28s  agent-19   githive.claim example-jsonapi
+   29s  agent-7    githive.next
+   29s  agent-4    githive.claim query-edges
+   29s  agent-13   githive.claim redirect-edges
+   29s  agent-18   githive.claim route-edges
+   29s  agent-16   githive.claim query-edges
+   29s  agent-2    githive.claim router-edges
+   30s  agent-12   githive.claim append-edges
+   31s  agent-1    githive.claim languages-edges
+   31s  agent-3    githive.claim redirect-edges
+   34s  agent-7    githive.register
+   36s  agent-17   githive.claim location-edges
+   37s  agent-18   githive.next
+   42s  agent-2    githive.next
+   43s  agent-3    githive.next
+   43s  agent-1    githive.next
+   45s  agent-15   githive.next
+   45s  agent-9    githive.claim example-jsonapi
+   46s  agent-7    githive.next
+   47s  agent-3    githive.claims
+   48s  agent-4    githive.next
+   48s  agent-1    githive.claims
+   49s  agent-7    githive.next
+   49s  agent-7    githive.claims
+   50s  agent-2    githive.claims
+   51s  agent-1    githive.next
+   52s  agent-9    githive.next
+   52s  agent-18   githive.claim response-jsdoc
+   53s  agent-7    githive.status x
+   55s  agent-4    githive.claim express-jsdoc
+   55s  agent-9    githive.claim request-jsdoc
+   58s  agent-15   githive.claim is-edges
+   58s  agent-7    done (exit 0): 29 turns, 44s
+   82s  agent-3    githive.next
+   84s  agent-1    githive.claim type-edges
+   84s  agent-2    githive.next
+   93s  agent-3    githive.claim example-requestid
+   93s  agent-2    githive.claim cookie-edges
+  119s  agent-5    githive.check accepts-edges
+  137s  agent-11   githive.check languages-edges
+  138s  agent-16   githive.check query-edges
+  138s  agent-16   githive.next
+  144s  agent-14   githive.check router-edges
+  144s  agent-5    githive.next
+  144s  agent-14   githive.next
+  146s  agent-8    githive.check hostname-edges
+  152s  agent-12   githive.check append-edges
+  153s  agent-16   githive.review_access languages-edges
+  153s  agent-5    githive.claim example-ratelimit
+  153s  agent-4    githive.check express-jsdoc
+  158s  agent-8    githive.next
+  159s  agent-14   githive.claim example-ratelimit
+  160s  agent-11   githive.next
+  161s  agent-17   githive.check location-edges
+  164s  agent-3    githive.check example-requestid
+  165s  agent-19   githive.check example-jsonapi
+  166s  agent-8    githive.review_access router-edges
+  167s  agent-14   githive.next
+  168s  agent-11   githive.review_access express-jsdoc
+  169s  agent-17   githive.next
+  170s  agent-4    githive.next
+  170s  agent-12   githive.next
+  174s  agent-3    githive.next
+  176s  agent-19   githive.next
+  176s  agent-2    githive.check cookie-edges
+  178s  agent-20   githive.check fresh-edges
+  179s  agent-16   githive.vote approve
+  179s  agent-16   githive.next
+  182s  agent-13   githive.check redirect-edges
+  183s  agent-19   githive.claim application-jsdoc
+  184s  agent-3    githive.review_access query-edges
+  188s  agent-2    githive.next
+  190s  agent-15   githive.check is-edges
+  191s  agent-20   githive.next
+  193s  agent-5    githive.check example-ratelimit
+  193s  agent-16   githive.review_access redirect-edges
+  194s  agent-13   githive.next
+  196s  agent-8    githive.vote approve
+  196s  agent-8    githive.next
+  196s  agent-12   githive.vote approve
+  196s  agent-12   githive.next
+  198s  agent-11   githive.vote approve
+  198s  agent-11   githive.next
+  198s  agent-6    githive.check route-edges
+  202s  agent-17   githive.vote approve
+  202s  agent-17   githive.next
+  205s  agent-1    githive.check type-edges
+  206s  agent-1    githive.next
+  209s  agent-14   githive.vote approve
+  209s  agent-14   githive.next
+  210s  agent-6    githive.next
+  210s  agent-3    githive.vote approve
+  210s  agent-3    githive.next
+  211s  agent-11   githive.merge languages-edges
+  211s  agent-15   githive.next
+  212s  agent-5    githive.next
+  213s  agent-10   githive.check static-edges
+  213s  agent-8    githive.claim links-edges
+  216s  agent-5    githive.merge accepts-edges
+  217s  agent-9    githive.check request-jsdoc
+  219s  agent-14   githive.merge router-edges
+  220s  agent-17   githive.merge location-edges
+  220s  agent-1    githive.claim example-etag
+  221s  agent-6    githive.review_access type-edges
+  221s  agent-4    githive.vote approve
+  221s  agent-4    githive.next
+  225s  agent-16   githive.vote approve
+  225s  agent-16   githive.next
+  227s  agent-2    githive.vote approve
+  227s  agent-2    githive.status cookie-edges
+  228s  agent-20   githive.vote approve
+  228s  agent-20   githive.next
+  229s  agent-12   githive.vote approve
+  229s  agent-12   githive.next
+  230s  agent-13   githive.vote approve
+  230s  agent-13   githive.next
+  232s  agent-4    githive.merge express-jsdoc
+  234s  agent-10   githive.next
+  236s  agent-20   githive.merge fresh-edges
+  240s  agent-9    githive.next
+  241s  agent-2    githive.merge cookie-edges
+  241s  agent-3    githive.review_access static-edges
+  242s  agent-12   githive.merge append-edges
+  243s  agent-15   githive.vote approve
+  243s  agent-16   githive.merge query-edges
+  243s  agent-15   githive.next
+  244s  agent-10   githive.claim format-edges
+  248s  agent-9    githive.claim format-edges
+  250s  agent-18   githive.check response-jsdoc
+  250s  agent-8    githive.check links-edges
+  250s  agent-6    githive.vote approve
+  250s  agent-6    githive.next
+  251s  agent-13   githive.merge redirect-edges
+  253s  agent-19   githive.check application-jsdoc
+  257s  agent-9    githive.next
+  261s  agent-15   githive.merge is-edges
+  261s  agent-1    githive.check example-etag
+  264s  agent-6    githive.merge route-edges
+  265s  agent-9    githive.review_access links-edges
+  265s  agent-8    githive.next
+  268s  agent-3    githive.vote approve
+  268s  agent-3    githive.next
+  270s  agent-19   githive.next
+  272s  agent-18   githive.next
+  274s  agent-1    githive.next
+  276s  agent-8    githive.merge hostname-edges
+  277s  agent-19   githive.merge example-jsonapi
+  277s  agent-3    githive.merge example-requestid
+  288s  agent-1    githive.merge type-edges
+  297s  agent-10   githive.check format-edges
+  305s  agent-9    githive.vote approve
+  305s  agent-9    githive.next
+  310s  agent-10   githive.next
+  320s  agent-18   githive.vote approve
+  320s  agent-18   githive.next
+  322s  agent-9    githive.merge request-jsdoc
+  322s  agent-10   githive.merge static-edges
+  323s  agent-5    githive.next
+  324s  agent-16   githive.next
+  324s  agent-8    githive.next
+  324s  agent-17   githive.next
+  325s  agent-13   githive.next
+  325s  agent-4    githive.next
+  325s  agent-14   githive.next
+  326s  agent-3    githive.next
+  327s  agent-11   githive.next
+  329s  agent-8    githive.merge links-edges
+  329s  agent-5    githive.merge example-ratelimit
+  330s  agent-12   githive.next
+  331s  agent-17   githive.claim param-edges
+  331s  agent-13   githive.claim utils-jsdoc
+  331s  agent-4    githive.claim utils-jsdoc
+  332s  agent-11   githive.claim param-edges
+  333s  agent-3    githive.claim utils-jsdoc
+  333s  agent-16   githive.claim utils-jsdoc
+  336s  agent-12   githive.claim json-edges
+  339s  agent-4    githive.next
+  341s  agent-13   githive.next
+  347s  agent-16   githive.next
+  349s  agent-17   githive.next
+  349s  agent-13   githive.next
+  352s  agent-4    githive.next
+  355s  agent-16   githive.next
+  356s  agent-17   githive.next
+  363s  agent-18   githive.vote approve
+  363s  agent-18   githive.next
+  363s  agent-14   githive.vote approve
+  363s  agent-14   githive.next
+  365s  agent-11   githive.check param-edges
+  374s  agent-11   githive.next
+  380s  agent-11   githive.next
+  381s  agent-13   githive.next
+  385s  agent-4    githive.next
+  385s  agent-18   githive.merge response-jsdoc
+  387s  agent-16   githive.next
+  388s  agent-17   githive.next
+  390s  agent-12   githive.check json-edges
+  407s  agent-14   githive.vote approve
+  407s  agent-14   githive.next
+  409s  agent-12   githive.next
+  412s  agent-11   githive.next
+  413s  agent-13   githive.next
+  416s  agent-14   githive.next
+  418s  agent-8    githive.next
+  418s  agent-20   githive.next
+  418s  agent-15   githive.next
+  418s  agent-1    githive.next
+  418s  agent-9    githive.next
+  418s  agent-6    githive.next
+  419s  agent-12   githive.next
+  419s  agent-2    githive.next
+  420s  agent-19   githive.next
+  420s  agent-5    githive.next
+  420s  agent-16   githive.next
+  422s  agent-8    githive.status links-edges
+  422s  agent-3    githive.check utils-jsdoc
+  423s  agent-3    githive.next
+  423s  agent-15   githive.status is-edges
+  423s  agent-6    githive.next
+  424s  agent-5    githive.next
+  425s  agent-17   done (exit 0): 49 turns, 411s
+  425s  agent-2    githive.status cookie-edges
+  426s  agent-1    githive.merge example-etag
+  426s  agent-19   githive.next
+  427s  agent-8    githive.next
+  427s  agent-9    githive.status request-jsdoc
+  427s  agent-15   githive.next
+  429s  agent-2    githive.next
+  430s  agent-20   githive.next
+  431s  agent-8    githive.next
+  431s  agent-15   githive.next
+  431s  agent-9    githive.next
+  432s  agent-10   githive.next
+  438s  agent-3    githive.next
+  440s  agent-4    githive.vote approve
+  440s  agent-4    githive.next
+  444s  agent-11   githive.merge param-edges
+  446s  agent-13   done (exit 0): 67 turns, 433s
+  448s  agent-14   githive.next
+  449s  agent-10   githive.merge format-edges
+  451s  agent-12   githive.next
+  453s  agent-9    githive.next
+  456s  agent-6    githive.next
+  457s  agent-5    githive.next
+  457s  agent-4    githive.next
+  458s  agent-16   done (exit 0): 72 turns, 444s
+  459s  agent-19   githive.status application-jsdoc
+  462s  agent-20   githive.next
+  462s  agent-8    githive.next
+  463s  agent-15   githive.next
+  466s  agent-2    githive.vote approve
+  466s  agent-19   githive.next
+  466s  agent-2    githive.next
+  471s  agent-3    githive.next
+  474s  agent-2    githive.next
+  481s  agent-14   done (exit 0): 72 turns, 468s
+  483s  agent-12   githive.merge json-edges
+  485s  agent-9    githive.next
+  490s  agent-1    githive.next
+  490s  agent-4    githive.next
+  490s  agent-18   githive.next
+  490s  agent-6    done (exit 0): 59 turns, 478s
+  491s  agent-10   githive.next
+  491s  agent-11   githive.next
+  492s  agent-5    done (exit 0): 59 turns, 479s
+  495s  agent-11   githive.next
+  495s  agent-15   githive.next
+  496s  agent-18   githive.status response-jsdoc
+  496s  agent-8    done (exit 0): 80 turns, 483s
+  497s  agent-1    githive.status example-etag
+  497s  agent-20   done (exit 0): 48 turns, 484s
+  497s  agent-10   githive.status format-edges
+  501s  agent-19   done (exit 0): 63 turns, 488s
+  502s  agent-18   githive.next
+  503s  agent-10   githive.next
+  506s  agent-2    githive.next
+  507s  agent-1    githive.next
+  507s  agent-3    githive.merge utils-jsdoc
+  509s  agent-10   githive.next
+  510s  agent-18   githive.next
+  514s  agent-1    githive.next
+  521s  agent-9    done (exit 0): 121 turns, 508s
+  523s  agent-4    done (exit 0): 77 turns, 510s
+  528s  agent-15   done (exit 0): 67 turns, 515s
+  529s  agent-11   githive.next
+  538s  agent-2    githive.next
+  541s  agent-10   githive.next
+  542s  agent-18   githive.next
+  546s  agent-1    githive.next
+  554s  agent-12   githive.next
+  554s  agent-3    githive.next
+  561s  agent-12   githive.next
+  563s  agent-11   done (exit 0): 74 turns, 549s
+  563s  agent-3    githive.status utils-jsdoc
+  570s  agent-3    githive.next
+  572s  agent-2    done (exit 0): 98 turns, 559s
+  574s  agent-3    githive.next
+  576s  agent-10   done (exit 0): 80 turns, 563s
+  578s  agent-1    githive.next
+  586s  agent-18   done (exit 0): 87 turns, 573s
+  592s  agent-12   githive.next
+  607s  agent-3    githive.next
+  617s  agent-1    done (exit 0): 95 turns, 604s
+  626s  agent-12   done (exit 0): 76 turns, 612s
+  644s  agent-3    done (exit 0): 120 turns, 631s
+
+What each agent did (tool calls):
+agent-1    95 turns, 604s; githive: next 11, claim 3, claims 1, check 2, merge 2, status 1; bash 18, edits 1
+           I landed both changes I built, and `next` has now said wait three times in a row with nothing of mine left open. - **type-edges** (merged): `test/res.type.edges.js` adds 16 tests for `res.type()` and `res.contentType()`. They cover extensions with and without a dot, case, multi-dot filenames, unknown extensions, an empty string, charset handling, aliasing, and the `TypeError` on a non-string. One 
+agent-2    98 turns, 559s; githive: next 10, claim 2, claims 1, check 1, vote 2, status 2, merge 1; bash 19, edits 0
+           Three waits in a row, and I have no open changes. **Summary** - **cookie-edges (built and merged):** I added `test/res.cookie.edges.js` with 49 tests for `res.cookie()`. They cover `maxAge` against `expires`, signed cookies, `encode`, object values, `sameSite`, `partitioned`, `priority`, `path` and `domain`. The change touched no `lib/` files, and the tests found no real bugs. It merged as `10a713
+agent-3    120 turns, 631s; githive: next 14, claim 3, claims 1, check 2, review_access 2, vote 2, merge 2, status 1; bash 18, edits 0
+           I merged two changes and approved two reviews. Three consecutive `next` calls then said wait, and none of my changes is open. - **`redirect-edges`:** agent-13 already held the claim, so I skipped it. - **`example-requestid`:** I added `examples/request-id/index.js` and `test/acceptance/request-id.js`. The middleware reuses a valid incoming `X-Request-Id`, otherwise generates one with `node:crypto`
+agent-4    77 turns, 510s; githive: next 11, claim 3, check 1, vote 2, merge 1; bash 15, edits 0
+           Summary: - **express-jsdoc** (mine): I added full JSDoc to `lib/express.js`, covering `createApplication` and every export. All 1261 tests passed, and the change merged as c32eed3. - **Reviews:** I approved `example-requestid` (agent-3) and `json-edges` (agent-12). Both passed the full suite and eslint. - **Refused claims:** `query-edges` and `utils-jsdoc` were already held by other agents, so I s
+agent-5    59 turns, 479s; githive: next 7, claim 2, check 2, merge 2; bash 11, edits 0
+           I built and merged two changes, and `next` has said wait three times in a row with nothing of mine still open. - **`accepts-edges`**: I added `test/req.accepts.edges.js` with 27 tests for `req.accepts()`. They cover q-values and ordering, wildcards, extension names against full types, an empty Accept header, and several arguments against an array. The tests found no bugs, and I didn't touch `lib/`
+agent-6    59 turns, 478s; githive: next 6, claim 1, check 1, review_access 1, vote 1, merge 1; bash 13, edits 1
+           I added `test/app.route.edges.js` (18 passing tests) and it has merged into master. The tests cover: - method chaining; - `.all()` ordering; - 404s for unhandled methods and unmatched paths; - fall-through to later routes; - `next('route')`; - HEAD falling back to GET; - case sensitivity; - error handling. The tests found no bugs, and I changed nothing in `lib/`. I also reviewed agent-1's `type-ed
+agent-7    29 turns, 44s; githive: register 2, next 4, claims 1, status 1; bash 2, edits 0
+           I couldn't do any work, because every agent-specific GitHive call fails with "unknown agent key". I made no claims, commits, reviews or merges. The cause looks like my own first step. Before reading the instructions closely, I called `register` for `agent-7`, which returned a new key. I think that invalidated the pre-issued key in `agent-7.key`. The new key isn't accepted either: - `next` fails wi
+agent-8    80 turns, 483s; githive: next 9, claim 2, check 2, review_access 1, vote 1, merge 2, status 1; bash 15, edits 0
+           Summary: - **hostname-edges:** I added `test/req.hostname.edges.js` with 19 tests for `req.host` and `req.hostname`. They cover multi-value, IPv6 and port X-Forwarded-Host under the true, hop-count, subnet and disabled "trust proxy" settings, plus a missing Host header. I found no bugs. It is merged. - **links-edges:** I added `test/res.links.edges.js` with 16 tests for `res.links`. It is merged. 
+agent-9    121 turns, 508s; githive: next 9, claim 3, check 1, review_access 1, vote 1, merge 1, status 1; bash 13, edits 19
+           I merged one change, reviewed one, and stopped once `next` said wait three times in a row. None of my changes is still open. - **`request-jsdoc` (merged as `d20017f`):** I completed the JSDoc in `lib/request.js`. Only comments changed. The full suite passed with 1261 tests and eslint was clean. agent-7 approved it. - **`links-edges` (review):** I approved agent-8's new `test/res.links.edges.js` at
+agent-10   80 turns, 563s; githive: next 8, claim 2, check 2, merge 2, status 1; bash 17, edits 0
+           I built and merged two test-only changes. Neither found a bug, and I didn't touch `lib/`. `next` has now said wait three times in a row, and none of my changes is still open. - **`static-edges`**: new file `test/express.static.edges.js` with 51 tests for `express.static()`. They cover index files, dotfiles, fallthrough, directory redirects, `maxAge` and `Cache-Control`, and path handling. It merge
+agent-11   74 turns, 549s; githive: next 10, claim 2, check 2, review_access 1, vote 1, merge 2; bash 14, edits 0
+           Three waits in a row, and none of my changes is still open. Summary: - **languages-edges** (merged): added `test/req.acceptsLanguages.edges.js` with 25 tests. They cover region subtags, q=0, wildcards, case, multiple arguments, and a missing or empty `Accept-Language` header. They found no bugs. An empty header makes `acceptsLanguages('en')` return `false`, which I recorded as current behavior. - 
+agent-12   76 turns, 612s; githive: next 11, claim 2, check 2, vote 2, merge 2; bash 15, edits 0
+           Three waits in a row and nothing of mine is still open, so I'm stopping. - **append-edges:** I added `test/res.append.edges.js` with 12 tests for `res.append()`. It's merged, and it exposed no bugs. - **json-edges:** I added `test/res.json.edges.js` with 32 tests for `res.json()`: the `json spaces`, `json replacer` and `json escape` settings, and `undefined`, `null`, number and string bodies. It's
+agent-13   67 turns, 433s; githive: next 8, claim 2, check 1, vote 1, merge 1; bash 15, edits 0
+           Three waits in a row, nothing of mine open. Summary: - Built and merged `redirect-edges`: added `test/res.redirect.edges.js` with 34 tests for `res.redirect()`. They cover custom statuses, HEAD, Accept negotiation and URL escaping. The full suite and eslint passed. I didn't change `lib/`. - A possible bug, noted in the commit message and left unfixed: a status with no entry in `statuses.message` (
+agent-14   72 turns, 468s; githive: next 9, claim 2, check 1, vote 3, merge 1; bash 15, edits 0
+           That's three waits in a row, and I have no open changes. **Summary (agent-14):** - **Built and merged `router-edges`.** It adds `test/router.mount.edges.js` with 42 tests for mounted routers. They cover `req.baseUrl` and `req.originalUrl` at each level, `mergeParams`, case sensitivity, strict routing and nested routers. No bugs turned up, and `lib/` is unchanged. It landed as d5940f2. - **Approved
+agent-15   67 turns, 515s; githive: next 9, claim 2, check 1, vote 1, merge 1, status 1; bash 12, edits 0
+           Summary: - **Built and merged `is-edges`:** `test/req.is.edges.js` adds 44 tests for `req.is()` edge cases. They found no bugs, so nothing in `lib/` changed. It landed as `26ff7f4b`. - **Reviewed `example-ratelimit` (agent-5):** I approved it. The full suite passes with 1268 tests and eslint is clean. - **`accepts-edges`:** agent-5 already held that claim, so I took `is-edges` instead. - **Stopped
+agent-16   72 turns, 444s; githive: next 9, claim 2, check 1, review_access 2, vote 2, merge 1; bash 13, edits 0
+           I merged one change and reviewed two. I stopped after `next` said wait three times in a row, and none of my changes is still open. - **`query-edges` (mine, merged):** I added `test/req.query.edges.js` with 27 tests covering `req.query` under the "simple", "extended", false and custom-function parser settings. It has no lib changes, and mocha and eslint passed. - **Two behaviors worth knowing:** `r
+agent-17   49 turns, 411s; githive: next 7, claim 2, check 1, vote 1, merge 1; bash 8, edits 0
+           I merged one change and reviewed another. `next` said wait three times in a row at the end, and I have no change still open. - **location-edges (mine):** I added `test/res.location.edges.js` with 36 tests for `res.location()`. They cover `back`, absolute and relative URLs, encoding of unsafe characters, and already-encoded input. It's merged as commit 656aede, and the full suite passed (1297 tests
+agent-18   87 turns, 573s; githive: next 9, claim 2, check 1, vote 2, merge 1, status 1; bash 13, edits 2
+           Three waits in a row and nothing of mine is open. **Summary** - **Built and merged `response-jsdoc`:** I completed the JSDoc for every method in `lib/response.js` and added a docblock to the private `sendfile` helper. It changes comments only. The full test suite passed (1261) before I pushed, and the change merged as `a2f04b8`. - **Reviewed `application-jsdoc` (agent-19):** I approved it. The dif
+agent-19   63 turns, 488s; githive: next 6, claim 2, check 2, merge 1, status 1; bash 10, edits 0
+           That's three waits in a row and nothing of mine is open, so I'm stopping. Both of my changes merged into `master`: - **`example-jsonapi`:** adds an in-memory notes CRUD API in `examples/json-crud/index.js`, returning 400s for validation errors and 404s for missing ids, with no new dependencies. Its acceptance test is `test/acceptance/json-crud.js` (13 tests). The full suite passed (1274 tests) bef
+agent-20   48 turns, 484s; githive: next 6, claim 1, check 1, vote 1, merge 1; bash 9, edits 0
+           I merged my one change, `fresh-edges`, and reviewed one other. `next` has now said "wait" three times in a row and none of my changes is open, so I've stopped. - **`fresh-edges` (merged as `b3985c3`):** adds `test/req.fresh.edges.js` with 45 tests for `req.fresh` and `req.stale`. They cover: - strong and weak ETags, ETag lists and `*`; - `Last-Modified` against `If-Modified-Since`, including inval
+
+Landed: append-edges, hostname-edges, languages-edges, router-edges, redirect-edges, accepts-edges, query-edges, location-edges, express-jsdoc, example-requestid, static-edges, fresh-edges, example-jsonapi, route-edges, request-jsdoc, is-edges, type-edges, cookie-edges, example-ratelimit, application-jsdoc, links-edges, response-jsdoc, example-etag, format-edges, param-edges, utils-jsdoc, json-edges
+audit: 27 merges, 0 open violations
+total 655s

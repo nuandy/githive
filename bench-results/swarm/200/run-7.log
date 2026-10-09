@@ -1,0 +1,17 @@
+  30s  swarm        express-swarm-202 on master: checks ["npm install --no-audit --no-fund","npm test"], grants {}, claims {"since":"2026-10-09T02:18:46.524Z","because":"asked for at the start"}
+file:///Users/inbase210810/cloudflare/blueprint-free/scripts/swarm.mjs:103
+	if (reply.result.isError) throw new Error(`${name}: ${text.slice(0, 300)}`);
+	                                ^
+
+Error: register: agent-91 is registered: call with its agent key to rotate it
+    at tool (file:///Users/inbase210810/cloudflare/blueprint-free/scripts/swarm.mjs:103:34)
+    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+    at async file:///Users/inbase210810/cloudflare/blueprint-free/scripts/swarm.mjs:373:19
+    at async again (file:///Users/inbase210810/cloudflare/blueprint-free/scripts/swarm.mjs:357:12)
+    at async file:///Users/inbase210810/cloudflare/blueprint-free/scripts/swarm.mjs:365:24
+    at async Promise.all (index 3)
+    at async inBatches (file:///Users/inbase210810/cloudflare/blueprint-free/scripts/swarm.mjs:364:2)
+    at async file:///Users/inbase210810/cloudflare/blueprint-free/scripts/swarm.mjs:370:1
+
+Node.js v22.12.0
+exit 1

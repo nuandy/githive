@@ -1,0 +1,11 @@
+  24s  swarm        importing https://github.com/expressjs/express as express-template, once
+file:///Users/inbase210810/cloudflare/blueprint-free/scripts/swarm.mjs:335
+			if (!imported.ok) throw new Error(`import failed: HTTP ${imported.status}`);
+			                        ^
+
+Error: import failed: HTTP 500
+    at file:///Users/inbase210810/cloudflare/blueprint-free/scripts/swarm.mjs:335:28
+    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+
+Node.js v22.12.0
+exit 1

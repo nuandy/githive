@@ -1,0 +1,232 @@
+  26s  swarm        copying express-template as express-smoke-4
+  52s  swarm        express-smoke-4 on master: checks ["npm install --no-audit --no-fund","npm test"], grants {}, claims {"since":"2026-10-09T11:55:26.882Z","because":"asked for at the start"}
+ 117s  swarm        registered agent-1, agent-2, agent-3, agent-4, agent-5, agent-6, agent-7, agent-8, agent-9, agent-10, agent-11, agent-12, agent-13, agent-14, agent-15, agent-16, agent-17, agent-18, agent-19, agent-20, planner
+ 164s  swarm        the repo's snapshot is ready (183 MB)
+ 164s  swarm        20 pieces in the backlog; 20 agents, all alike
+ 188s  agent-20     arrives
+ 196s  agent-14     arrives
+ 197s  agent-8      arrives
+ 201s  agent-1      arrives
+ 202s  agent-20     builds note-20 (1 path(s))
+ 202s  agent-10     arrives
+ 204s  agent-14     builds note-17 (1 path(s))
+ 205s  agent-8      builds note-16 (1 path(s))
+ 208s  agent-1      builds note-5 (1 path(s))
+ 214s  agent-10     builds note-6 (1 path(s))
+ 215s  agent-18     arrives
+ 220s  agent-6      arrives
+ 223s  agent-3      arrives
+ 227s  agent-18     builds note-15 (1 path(s))
+ 229s  agent-6      couldn't claim note-15: claim: note-15 is agent-18's change: claim under a change name of your own
+ 230s  agent-3      builds note-3 (1 path(s))
+ 237s  agent-2      arrives
+ 242s  agent-4      arrives
+ 242s  agent-6      builds note-1 (1 path(s))
+ 249s  agent-17     arrives
+ 250s  agent-1      pushed note-5 ed8e325: 1 file changed, 1 insertion(+)
+ 250s  agent-4      builds note-18 (1 path(s))
+ 253s  agent-14     pushed note-17 c031838: 1 file changed, 1 insertion(+)
+ 253s  agent-2      builds note-4 (1 path(s))
+ 260s  agent-5      arrives
+ 264s  agent-12     arrives
+ 265s  agent-20     pushed note-20 cf9995c: 1 file changed, 1 insertion(+)
+ 265s  agent-8      pushed note-16 3ea5ebc: 1 file changed, 1 insertion(+)
+ 267s  agent-18     pushed note-15 0e73fde: 1 file changed, 1 insertion(+)
+ 267s  agent-10     pushed note-6 e6c6351: 1 file changed, 1 insertion(+)
+ 268s  agent-11     arrives
+ 268s  agent-13     arrives
+ 270s  agent-2      pushed note-4 cf71899: 1 file changed, 1 insertion(+)
+ 270s  agent-12     builds note-14 (1 path(s))
+ 270s  agent-14     builds note-12 (1 path(s))
+ 273s  agent-9      arrives
+ 276s  agent-3      pushed note-3 e881c40: 1 file changed, 1 insertion(+)
+ 276s  agent-19     arrives
+ 277s  agent-7      arrives
+ 280s  agent-16     arrives
+ 280s  agent-15     arrives
+ 281s  agent-4      pushed note-18 ee9905a: 1 file changed, 1 insertion(+)
+ 284s  agent-18     builds note-2 (1 path(s))
+ 286s  agent-9      couldn't claim note-2: claim: note-2 is agent-18's change: claim under a change name of your own
+ 287s  agent-15     builds note-19 (1 path(s))
+ 290s  agent-8      builds note-9 (1 path(s))
+ 290s  agent-9      couldn't claim note-2: claim: note-2 is agent-18's change: claim under a change name of your own
+ 292s  agent-1      approves note-17 (c031838)
+ 292s  agent-6      pushed note-1 d85c8e5: 1 file changed, 1 insertion(+)
+ 293s  agent-20     couldn't claim note-9: claim: note-9 is agent-8's change: claim under a change name of your own
+ 294s  agent-17     approves note-5 (ed8e325)
+ 297s  agent-9      builds note-8 (1 path(s))
+ 298s  agent-17     builds note-11 (1 path(s))
+ 298s  agent-2      couldn't claim note-8: claim: note-8 is agent-9's change: claim under a change name of your own
+ 299s  agent-3      couldn't claim note-9: claim: note-9 is agent-8's change: claim under a change name of your own
+ 300s  agent-11     approves note-16 (3ea5ebc)
+ 301s  agent-4      builds break-13 (1 path(s))
+ 303s  agent-5      approves note-20 (cf9995c)
+ 306s  agent-14     pushed note-12 a4f0042: 1 file changed, 1 insertion(+)
+ 307s  agent-7      approves note-6 (e6c6351)
+ 309s  agent-11     builds note-10 (1 path(s))
+ 309s  agent-20     couldn't claim break-13: claim: break-13 is agent-4's change: claim under a change name of your own
+ 309s  agent-13     approves note-4 (cf71899)
+ 311s  agent-3      couldn't claim note-10: claim: note-10 is agent-11's change: claim under a change name of your own
+ 313s  agent-7      builds note-7 (1 path(s))
+ 314s  agent-16     approves note-3 (e881c40)
+ 314s  agent-9      pushed note-8 140e9f5: 1 file changed, 1 insertion(+)
+ 315s  agent-19     approves note-15 (0e73fde)
+ 315s  agent-18     pushed note-2 703230b: 1 file changed, 1 insertion(+)
+ 316s  agent-13     couldn't claim note-10: claim: note-10 is agent-11's change: claim under a change name of your own
+ 317s  agent-10     approves note-18 (ee9905a)
+ 319s  agent-16     couldn't claim note-7: claim: note-7 is agent-7's change: claim under a change name of your own
+ 320s  agent-5      couldn't claim note-7: claim: note-7 is agent-7's change: claim under a change name of your own
+ 321s  agent-12     pushed note-14 fea055a: 1 file changed, 1 insertion(+)
+ 321s  agent-13     couldn't claim note-7: claim: note-7 is agent-7's change: claim under a change name of your own
+ 322s  agent-8      pushed note-9 3319c6b: 1 file changed, 1 insertion(+)
+ 324s  agent-11     pushed note-10 05e67be: 1 file changed, 1 insertion(+)
+ 326s  agent-17     pushed note-11 c704d7c: 1 file changed, 1 insertion(+)
+ 331s  agent-15     pushed note-19 0e37d38: 1 file changed, 1 insertion(+)
+ 332s  agent-2      approves note-1 (d85c8e5)
+ 336s  agent-4      pushed break-13 a8104a3: 1 file changed, 5 insertions(+)
+ 337s  agent-6      approves note-12 (a4f0042)
+ 343s  agent-7      pushed note-7 da3dfb1: 1 file changed, 1 insertion(+)
+ 346s  agent-19     approves note-8 (140e9f5)
+ 355s  agent-5      approves note-14 (fea055a)
+ 357s  agent-9      approves note-2 (703230b)
+ 362s  agent-11     approves break-13 (a8104a3)
+ 366s  agent-12     approves note-9 (3319c6b)
+ 369s  agent-16     approves note-11 (c704d7c)
+ 370s  agent-17     approves note-10 (05e67be)
+ 373s  agent-13     approves note-7 (da3dfb1)
+ 375s  agent-19     approves note-19 (0e37d38)
+ 678s  agent-3      merge note-3 failed: fetch failed
+ 756s  agent-1      merge note-5 failed: merge: Durable Object reset because its code was updated.
+1194s  agent-10     merged note-6 as a0c1c395
+1195s  agent-20     merged note-20 as fa9497e5
+1195s  agent-6      merged note-1 as c0eca9e8
+1195s  agent-4      merged note-18 as f33580a9
+1195s  agent-18     merged note-15 as b3c6cd04
+1195s  agent-2      merged note-4 as 67dd40b9
+1196s  agent-1      merged note-5 as 09b79823
+1196s  agent-8      merged note-16 as 9cddd1ec
+1197s  agent-14     merged note-17 as ecc05b70
+1197s  agent-3      merged note-3 as 48595028
+1198s  agent-4      githive-checks asks for changes to break-13: checks failed: npm test exited 1 on a8104a3f, checked alone on the branch, twice:
+s
+      ✔ should d
+1208s  agent-20     merged note-20 as fa9497e5
+1208s  agent-18     merged note-15 as b3c6cd04
+1208s  agent-6      merged note-1 as c0eca9e8
+1209s  agent-8      merged note-16 as 9cddd1ec
+1209s  agent-3      merged note-3 as 48595028
+1210s  agent-2      merged note-4 as 67dd40b9
+1210s  agent-1      merged note-5 as 09b79823
+1219s  agent-4      pushed break-13 239ab4f: 1 file changed, 1 insertion(+), 3 deletions(-)
+1254s  agent-1      approves break-13 (239ab4f)
+1336s  agent-9      merged note-8 as 0e69df7c
+1338s  agent-14     merged note-12 as 7bd42f27
+1338s  swarm        note-14 landed as 9fe6ee9b, in another merge's batch
+1338s  swarm        note-2 landed as 90a3e3f9, in another merge's batch
+1338s  swarm        note-19 landed as 7ebe9b75, in another merge's batch
+1338s  swarm        note-9 landed as 0e895669, in another merge's batch
+1338s  agent-15     merged note-19 as 7ebe9b75
+1338s  agent-8      merged note-9 as 0e895669
+1339s  agent-18     merged note-2 as 90a3e3f9
+1339s  agent-12     merged note-14 as 9fe6ee9b
+1352s  agent-14     merged note-12 as 7bd42f27
+1354s  agent-12     merged note-14 as 9fe6ee9b
+1354s  agent-9      merged note-8 as 0e69df7c
+1356s  agent-15     merged note-19 as 7ebe9b75
+1359s  agent-18     merged note-2 as 90a3e3f9
+1359s  agent-8      merged note-9 as 0e895669
+1446s  agent-17     merged note-11 as ea7a7302
+1446s  agent-4      merged break-13 as eb4f6311
+1446s  agent-7      merged note-7 as d4844b6a
+1447s  agent-11     merged note-10 as 232a4c52
+1447s  agent-10     done
+1448s  agent-14     done
+1449s  agent-2      done
+1449s  agent-1      done
+1449s  agent-15     done
+1449s  agent-5      done
+1450s  agent-8      done
+1450s  agent-3      done
+1450s  agent-6      done
+1450s  agent-16     done
+1451s  agent-20     done
+1451s  agent-19     done
+1452s  agent-12     done
+1452s  agent-13     done
+1452s  agent-9      done
+1455s  agent-18     done
+1463s  agent-4      merged break-13 as eb4f6311
+1466s  agent-11     merged note-10 as 232a4c52
+1469s  agent-11     done
+1469s  agent-17     merged note-11 as ea7a7302
+1470s  agent-4      done
+1471s  agent-17     done
+1472s  agent-7      merged note-7 as d4844b6a
+1476s  agent-7      done
+
+piece            builder     claimed  pushed revised approved merged  outcome
+note-1           agent-6     242s  292s     -   340s 1195s  merged c0eca9e8
+                 reviews: agent-2: approve
+note-2           agent-18    284s  315s     -  1211s 1331s  merged 90a3e3f9
+                 reviews: agent-9: approve
+note-3           agent-3     230s  276s     -   318s 1197s  merged 48595028
+                 reviews: agent-16: approve; merge failed
+note-4           agent-2     253s  270s     -   334s 1195s  merged 67dd40b9
+                 reviews: agent-13: approve
+note-5           agent-1     208s  250s     -   296s 1196s  merged 09b79823
+                 reviews: agent-17: approve; merge failed
+note-6           agent-10    214s  267s     -   325s 1194s  merged a0c1c395
+                 reviews: agent-7: approve
+note-7           agent-7     313s  343s     -   386s 1446s  merged d4844b6a
+                 reviews: agent-13: approve
+note-8           agent-9     297s  314s     -   361s 1336s  merged 0e69df7c
+                 reviews: agent-19: approve
+note-9           agent-8     290s  322s     -  1212s 1331s  merged 0e895669
+                 reviews: agent-12: approve
+note-10          agent-11    309s  324s     -   386s 1447s  merged 232a4c52
+                 reviews: agent-17: approve
+note-11          agent-17    298s  326s     -   379s 1446s  merged ea7a7302
+                 reviews: agent-16: approve
+note-12          agent-14    270s  306s     -  1200s 1338s  merged 7bd42f27
+                 reviews: agent-6: approve
+break-13         agent-4     301s  336s 1219s  1263s 1446s  merged eb4f6311
+                 reviews: agent-11: approve, agent-1: approve; rejected by githive-checks
+note-14          agent-12    270s  321s     -   375s 1331s  merged 9fe6ee9b
+                 reviews: agent-5: approve
+note-15          agent-18    227s  267s     -   328s 1195s  merged b3c6cd04
+                 reviews: agent-19: approve
+note-16          agent-8     205s  265s     -   334s 1196s  merged 9cddd1ec
+                 reviews: agent-11: approve
+note-17          agent-14    204s  253s     -   317s 1197s  merged ecc05b70
+                 reviews: agent-1: approve
+note-18          agent-4     250s  281s     -   350s 1195s  merged f33580a9
+                 reviews: agent-10: approve
+note-19          agent-15    287s  331s     -   384s 1331s  merged 7ebe9b75
+                 reviews: agent-19: approve
+note-20          agent-20    202s  265s     -   312s 1195s  merged fa9497e5
+                 reviews: agent-5: approve
+
+agent        build review revise merge wait
+agent-1          1      2      0     3   30
+agent-2          2      1      0     2   33
+agent-3          3      0      0     3   35
+agent-4          2      0      1     3    5
+agent-5          1      2      0     0  139
+agent-6          2      1      0     2   34
+agent-7          1      1      0     2    3
+agent-8          2      0      0     4   14
+agent-9          3      1      0     2   15
+agent-10         1      1      0     1   34
+agent-11         1      2      0     2    2
+agent-12         1      1      0     2   15
+agent-13         2      2      0     0  136
+agent-14         2      0      0     3   14
+agent-15         1      0      0     2   18
+agent-16         1      2      0     0  139
+agent-17         1      2      0     2    1
+agent-18         2      0      0     4   14
+agent-19         0      3      0     0  136
+agent-20         3      0      0     2   34
+
+20 of 20 merged. Setup 164s (once per repo); work 1308s (agents released to the last piece settled); total 1476s
+audit: 20 merges, 0 open violations

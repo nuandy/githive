@@ -1,0 +1,238 @@
+{
+ "repo": "express-swarm-6",
+ "work": "swarm-work",
+ "test": "npm test",
+ "nodeModules": "upstream/node_modules",
+ "seed": 7,
+ "timing": {
+  "arrive": [
+   0,
+   40
+  ],
+  "edit": [
+   10,
+   60
+  ],
+  "fix": [
+   10,
+   40
+  ],
+  "review": [
+   10,
+   30
+  ]
+ },
+ "setup": {
+  "import": "https://github.com/expressjs/express",
+  "branch": "master",
+  "verify": [
+   "npm install --no-audit --no-fund",
+   "npm test"
+  ],
+  "required": 1,
+  "grants": {
+   "security": [
+    "agent-3",
+    "agent-6"
+   ]
+  },
+  "template": "express-template"
+ },
+ "planner": {
+  "agent": "planner",
+  "keyFile": "swarm-keys-6/planner.key"
+ },
+ "agents": [
+  {
+   "agent": "agent-1",
+   "keyFile": "swarm-keys-6/agent-1.key"
+  },
+  {
+   "agent": "agent-2",
+   "keyFile": "swarm-keys-6/agent-2.key"
+  },
+  {
+   "agent": "agent-3",
+   "keyFile": "swarm-keys-6/agent-3.key"
+  },
+  {
+   "agent": "agent-4",
+   "keyFile": "swarm-keys-6/agent-4.key"
+  },
+  {
+   "agent": "agent-5",
+   "keyFile": "swarm-keys-6/agent-5.key"
+  },
+  {
+   "agent": "agent-6",
+   "keyFile": "swarm-keys-6/agent-6.key"
+  }
+ ],
+ "backlog": [
+  {
+   "intent": "Use const for require() bindings in lib/",
+   "paths": [
+    "lib/application.js",
+    "lib/express.js",
+    "lib/request.js",
+    "lib/response.js",
+    "lib/utils.js",
+    "lib/view.js"
+   ],
+   "edit": "node $PLAN/edits/const-requires.mjs . lib",
+   "message": "Use const for require() bindings in lib/\n\nNone of them is reassigned.",
+   "id": "const-lib",
+   "title": "Use const for require() bindings in lib/"
+  },
+  {
+   "intent": "Use const for require() bindings in the examples",
+   "paths": [
+    "examples/auth/index.js",
+    "examples/content-negotiation/index.js",
+    "examples/content-negotiation/users.js",
+    "examples/cookie-sessions/index.js",
+    "examples/cookies/index.js",
+    "examples/downloads/index.js",
+    "examples/ejs/index.js",
+    "examples/error-pages/index.js",
+    "examples/error/index.js",
+    "examples/hello-world/index.js",
+    "examples/markdown/index.js",
+    "examples/multi-router/controllers/api_v1.js",
+    "examples/multi-router/controllers/api_v2.js",
+    "examples/multi-router/index.js",
+    "examples/mvc/controllers/pet/index.js",
+    "examples/mvc/controllers/user-pet/index.js",
+    "examples/mvc/controllers/user/index.js",
+    "examples/mvc/index.js",
+    "examples/mvc/lib/boot.js",
+    "examples/online/index.js",
+    "examples/params/index.js",
+    "examples/resource/index.js",
+    "examples/route-map/index.js",
+    "examples/route-middleware/index.js",
+    "examples/route-separation/index.js",
+    "examples/search/index.js",
+    "examples/session/index.js",
+    "examples/session/redis.js",
+    "examples/static-files/index.js",
+    "examples/vhost/index.js",
+    "examples/view-constructor/github-view.js",
+    "examples/view-constructor/index.js",
+    "examples/view-locals/index.js",
+    "examples/web-service/index.js"
+   ],
+   "edit": "node $PLAN/edits/const-requires.mjs . examples",
+   "message": "Use const for require() bindings in the examples",
+   "id": "const-examples",
+   "title": "Use const for require() bindings in the examples"
+  },
+  {
+   "intent": "Use assert.strictEqual in the test suite",
+   "paths": [
+    "test/app.js",
+    "test/app.render.js",
+    "test/config.js",
+    "test/exports.js",
+    "test/res.send.js",
+    "test/Router.js"
+   ],
+   "edit": "node $PLAN/edits/strict-asserts.mjs .",
+   "message": "Use assert.strictEqual in the test suite\n\nA test should not pass through type coercion (\"1\" == 1).",
+   "id": "strict-asserts",
+   "title": "Use assert.strictEqual in the test suite",
+   "fix": "node $PLAN/edits/history-note.mjs . \"Tests compare with assert.strictEqual, so a value can't pass through type coercion\"",
+   "onReject": "fix",
+   "rejectFirst": "Please also record this in History.md under Unreleased Changes: contributors should know the suite now compares strictly."
+  },
+  {
+   "intent": "Add a README to every example app",
+   "paths": [
+    "examples/auth/README.md",
+    "examples/content-negotiation/README.md",
+    "examples/cookie-sessions/README.md",
+    "examples/cookies/README.md",
+    "examples/downloads/README.md",
+    "examples/ejs/README.md",
+    "examples/error-pages/README.md",
+    "examples/error/README.md",
+    "examples/hello-world/README.md",
+    "examples/markdown/README.md",
+    "examples/multi-router/README.md",
+    "examples/mvc/README.md",
+    "examples/online/README.md",
+    "examples/params/README.md",
+    "examples/resource/README.md",
+    "examples/route-map/README.md",
+    "examples/route-middleware/README.md",
+    "examples/route-separation/README.md",
+    "examples/search/README.md",
+    "examples/session/README.md",
+    "examples/static-files/README.md",
+    "examples/vhost/README.md",
+    "examples/view-constructor/README.md",
+    "examples/view-locals/README.md",
+    "examples/web-service/README.md"
+   ],
+   "edit": "node $PLAN/edits/example-readmes.mjs .",
+   "message": "Add a README to every example app",
+   "id": "example-readmes",
+   "title": "Add a README to every example app"
+  },
+  {
+   "intent": "Add an .editorconfig stating the code style",
+   "paths": [
+    ".editorconfig"
+   ],
+   "edit": "node $PLAN/edits/editorconfig.mjs .",
+   "message": "Add an .editorconfig stating the code style",
+   "id": "editorconfig",
+   "title": "Add an .editorconfig stating the code style",
+   "onReject": "ask",
+   "rejectFirst": "This widens the 2-space rule from *.js, *.json and *.yml to every file, templates and Markdown too, and adds LF endings: a style call for the maintainers, not for us."
+  },
+  {
+   "intent": "Replace the deprecated module.parent check (DEP0144) with require.main === module in the examples",
+   "paths": [
+    "examples/auth/index.js",
+    "examples/content-negotiation/index.js",
+    "examples/cookie-sessions/index.js",
+    "examples/cookies/index.js",
+    "examples/downloads/index.js",
+    "examples/ejs/index.js",
+    "examples/error-pages/index.js",
+    "examples/error/index.js",
+    "examples/hello-world/index.js",
+    "examples/markdown/index.js",
+    "examples/multi-router/index.js",
+    "examples/mvc/index.js",
+    "examples/online/index.js",
+    "examples/params/index.js",
+    "examples/resource/index.js",
+    "examples/route-map/index.js",
+    "examples/route-middleware/index.js",
+    "examples/route-separation/index.js",
+    "examples/search/index.js",
+    "examples/session/index.js",
+    "examples/vhost/index.js",
+    "examples/view-constructor/index.js",
+    "examples/view-locals/index.js",
+    "examples/web-service/index.js"
+   ],
+   "edit": "node $PLAN/edits/require-main.mjs .",
+   "message": "Replace the deprecated module.parent check with require.main === module\n\nmodule.parent is deprecated (DEP0144); require.main === module says the same thing.",
+   "id": "require-main",
+   "title": "Replace the deprecated module.parent check (DEP0144) with require.main === module in the examples"
+  },
+  {
+   "intent": "Add a test:watch script",
+   "paths": [
+    "package.json"
+   ],
+   "edit": "node $PLAN/edits/test-watch-script.mjs .",
+   "message": "Add a test:watch script that reruns the suite on every change",
+   "id": "test-watch",
+   "title": "Add a test:watch script"
+  }
+ ]
+}

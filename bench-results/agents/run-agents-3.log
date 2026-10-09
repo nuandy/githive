@@ -1,0 +1,89 @@
+   37s  run        5 Claude Code agents (claude-sonnet-5-5) on express-agents-3, 5 pieces in its backlog
+   43s  agent-3    githive.next
+   43s  agent-1    githive.next
+   45s  agent-2    githive.next
+   47s  agent-5    githive.next
+   49s  agent-4    githive.next
+   50s  agent-3    githive.claim powered-by-value
+   50s  agent-2    githive.claim req-wants-json
+   50s  agent-1    githive.claim example-file-server
+   52s  agent-5    githive.claim res-cache-control
+   54s  agent-4    githive.claim example-file-server
+   63s  agent-4    githive.next
+   79s  agent-4    githive.claim example-todo
+   97s  agent-1    githive.check example-file-server
+   98s  agent-2    githive.check req-wants-json
+  110s  agent-1    githive.next
+  116s  agent-2    githive.next
+  118s  agent-5    githive.check res-cache-control
+  130s  agent-5    githive.next
+  131s  agent-4    githive.check example-todo
+  139s  agent-1    githive.vote approve
+  139s  agent-1    githive.next
+  144s  agent-4    githive.check example-todo
+  155s  agent-2    githive.vote reject
+  155s  agent-2    githive.next
+  156s  agent-4    githive.next
+  164s  agent-4    githive.next
+  165s  agent-2    githive.merge req-wants-json
+  166s  agent-5    githive.vote approve
+  173s  agent-5    githive.next
+  176s  agent-1    githive.vote approve
+  176s  agent-1    githive.next
+  187s  agent-5    githive.next
+  195s  agent-5    githive.next
+  196s  agent-1    githive.merge example-file-server
+  197s  agent-4    githive.next
+  215s  agent-3    githive.check powered-by-value
+  223s  agent-2    githive.next
+  223s  agent-1    githive.next
+  225s  agent-3    githive.next
+  227s  agent-5    githive.next
+  229s  agent-4    githive.merge example-todo
+  231s  agent-1    githive.status example-file-server
+  238s  agent-1    githive.next
+  254s  agent-3    githive.vote approve
+  254s  agent-3    githive.next
+  260s  agent-2    githive.vote approve
+  260s  agent-2    githive.next
+  260s  agent-1    githive.next
+  269s  agent-3    githive.next
+  275s  agent-5    githive.next
+  275s  agent-2    githive.next
+  293s  agent-1    githive.next
+  298s  agent-4    githive.next
+  306s  agent-4    githive.next
+  307s  agent-3    githive.merge powered-by-value
+  307s  agent-2    githive.next
+  329s  agent-1    done (exit 0): 58 turns, 288s
+  336s  agent-5    githive.merge res-cache-control
+  338s  agent-4    githive.next
+  342s  agent-2    githive.next
+  368s  agent-3    githive.next
+  369s  agent-5    githive.next
+  373s  agent-4    done (exit 0): 53 turns, 332s
+  374s  agent-5    githive.status res-cache-control
+  375s  agent-3    githive.next
+  376s  agent-2    done (exit 0): 56 turns, 335s
+  378s  agent-5    githive.next
+  391s  agent-5    githive.next
+  409s  agent-3    githive.next
+  424s  agent-5    githive.next
+  445s  agent-3    done (exit 0): 50 turns, 404s
+  458s  agent-5    done (exit 0): 74 turns, 417s
+
+What each agent did (tool calls):
+agent-1    58 turns, 288s; githive: next 8, claim 1, check 1, vote 2, merge 1, status 1; bash 9, edits 0
+           I built and merged one change, reviewed two others, and stopped after `next` said wait three times in a row with nothing of mine still open. - **Built `example-file-server`:** It adds `examples/file-server/` with `GET /file?path=<name>`, two small text files, and `test/acceptance/file-server.js`. It merged as `ba5f95f`. The 6 acceptance tests pass and eslint is clean. - **Deviation from the intent
+agent-2    56 turns, 335s; githive: next 8, claim 1, check 1, vote 2, merge 1; bash 11, edits 0
+           Summary: - **Built and merged `req-wants-json`.** It adds the `req.wantsJson` getter in `lib/request.js` with docs, plus `test/req.wantsJson.js`. A request with no Accept header gives false. The full suite (1267 tests) and lint passed before I pushed. - **Rejected `res-cache-control` (agent-5).** `res.cacheControl({ maxAge: 0 })` drops the `max-age=0` directive, because the code skips every falsy 
+agent-3    50 turns, 404s; githive: next 7, claim 1, check 1, vote 1, merge 1; bash 10, edits 0
+           I built and merged `powered-by-value` (commit b74ec70). `app.set('x-powered-by', value)` now accepts three values: - `true` (the default) sends `Express`. - `false` sends no header. - A non-empty string sends that string. `app.enable` and `app.disable` work as before, and an empty string also sends no header. The change is in `lib/application.js`, with six tests in `test/app.poweredBy.js`. The ful
+agent-4    53 turns, 332s; githive: next 8, claim 2, check 2, merge 1; bash 9, edits 0
+           I built and merged one change, `example-todo`. It's an in-memory to-do JSON API in `examples/todo-api/index.js` with list, create, read, update and delete. Invalid input returns 400 and unknown ids return 404. It adds no dependencies. The 16 tests in `test/acceptance/todo-api.js` pass and lint is clean. Before that, `next` offered `example-file-server`, but my claim was refused because agent-1 alr
+agent-5    74 turns, 417s; githive: next 11, claim 1, check 1, vote 1, merge 1, status 1; bash 12, edits 2
+           Three waits in a row and nothing of mine is open, so I'm stopping. **Summary** - I built and merged `res-cache-control`, which adds `res.cacheControl()` in `lib/response.js` with 8 tests in `test/res.cacheControl.js`. It landed as 076fb329. - I reviewed and approved agent-1's `example-file-server`. I ran its 6 tests and eslint, and both passed. **The planted bug.** In `res.cacheControl`, the first
+
+Landed: example-file-server, req-wants-json, example-todo, powered-by-value, res-cache-control
+audit: 5 merges, 0 open violations
+total 465s

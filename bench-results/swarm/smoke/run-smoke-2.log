@@ -1,0 +1,1126 @@
+  30s  swarm        copying express-template as express-smoke-2
+  55s  swarm        express-smoke-2 on master: checks ["npm install --no-audit --no-fund","npm test"], grants {}, claims {"since":"2026-10-09T09:53:22.254Z","because":"asked for at the start"}
+ 116s  swarm        registered agent-1, agent-2, agent-3, agent-4, agent-5, agent-6, agent-7, agent-8, agent-9, agent-10, agent-11, agent-12, agent-13, agent-14, agent-15, agent-16, agent-17, agent-18, agent-19, agent-20, planner
+ 162s  swarm        the repo's snapshot is ready (183 MB)
+ 162s  swarm        20 pieces in the backlog; 20 agents, all alike
+ 186s  agent-20     arrives
+ 194s  agent-14     arrives
+ 196s  agent-8      arrives
+ 199s  agent-1      arrives
+ 200s  agent-20     builds note-20 (1 path(s))
+ 201s  agent-10     arrives
+ 202s  agent-14     builds note-17 (1 path(s))
+ 205s  agent-8      builds note-16 (1 path(s))
+ 206s  agent-10     builds note-1 (1 path(s))
+ 213s  agent-18     arrives
+ 218s  agent-6      arrives
+ 220s  agent-1      builds note-14 (1 path(s))
+ 221s  agent-3      arrives
+ 225s  agent-18     builds note-10 (1 path(s))
+ 227s  agent-3      builds note-4 (1 path(s))
+ 230s  agent-6      builds note-3 (1 path(s))
+ 235s  agent-2      arrives
+ 240s  agent-4      arrives
+ 246s  agent-4      builds note-19 (1 path(s))
+ 247s  agent-17     arrives
+ 249s  agent-2      builds note-5 (1 path(s))
+ 258s  agent-5      arrives
+ 259s  agent-14     pushed note-17 a179f4f: 1 file changed, 1 insertion(+)
+ 261s  agent-20     pushed note-20 6345ad5: 1 file changed, 1 insertion(+)
+ 261s  agent-17     builds note-8 (1 path(s))
+ 262s  agent-12     arrives
+ 263s  agent-1      pushed note-14 b2eb4ef: 1 file changed, 1 insertion(+)
+ 265s  agent-5      builds note-2 (1 path(s))
+ 267s  agent-11     arrives
+ 267s  agent-13     arrives
+ 269s  agent-10     pushed note-1 9a535dd: 1 file changed, 1 insertion(+)
+ 270s  agent-18     pushed note-10 aa1bd7d: 1 file changed, 1 insertion(+)
+ 270s  agent-6      pushed note-3 6eeecc1: 1 file changed, 1 insertion(+)
+ 271s  agent-9      arrives
+ 272s  agent-12     builds note-15 (1 path(s))
+ 273s  agent-13     builds break-13 (1 path(s))
+ 275s  agent-19     arrives
+ 275s  agent-7      arrives
+ 276s  agent-8      pushed note-16 6c90b0b: 1 file changed, 1 insertion(+)
+ 278s  agent-16     arrives
+ 279s  agent-15     arrives
+ 281s  agent-14     builds note-12 (1 path(s))
+ 282s  agent-3      pushed note-4 9a2ee23: 1 file changed, 1 insertion(+)
+ 282s  agent-7      couldn't claim note-12: claim: note-12 is agent-14's change: claim under a change name of your own
+ 282s  agent-2      pushed note-5 8cf8dff: 1 file changed, 1 insertion(+)
+ 288s  agent-15     builds note-11 (1 path(s))
+ 288s  agent-8      builds note-6 (1 path(s))
+ 295s  agent-6      builds note-9 (1 path(s))
+ 295s  agent-3      couldn't claim note-9: claim: note-9 is agent-6's change: claim under a change name of your own
+ 297s  agent-17     pushed note-8 ae34ffe: 1 file changed, 1 insertion(+)
+ 297s  agent-4      pushed note-19 d9c2fc1: 1 file changed, 1 insertion(+)
+ 299s  agent-2      couldn't claim note-9: claim: note-9 is agent-6's change: claim under a change name of your own
+ 299s  agent-5      pushed note-2 32f11fe: 1 file changed, 1 insertion(+)
+ 305s  agent-2      builds note-18 (1 path(s))
+ 306s  agent-16     approves note-10 (aa1bd7d)
+ 308s  agent-11     approves note-17 (a179f4f)
+ 311s  agent-14     pushed note-12 89f9396: 1 file changed, 1 insertion(+)
+ 313s  agent-7      approves note-5 (8cf8dff)
+ 314s  agent-17     builds note-7 (1 path(s))
+ 314s  agent-12     pushed note-15 7d1e7c4: 1 file changed, 1 insertion(+)
+ 315s  agent-9      approves note-20 (6345ad5)
+ 317s  agent-10     approves note-3 (6eeecc1)
+ 318s  agent-7      couldn't claim note-7: claim: note-7 is agent-17's change: claim under a change name of your own
+ 319s  agent-18     approves note-4 (9a2ee23)
+ 320s  agent-9      couldn't claim note-7: claim: note-7 is agent-17's change: claim under a change name of your own
+ 320s  agent-2      pushed note-18 09e4301: 1 file changed, 1 insertion(+)
+ 322s  agent-8      pushed note-6 4169416: 1 file changed, 1 insertion(+)
+ 322s  agent-13     pushed break-13 576a1f8: 1 file changed, 5 insertions(+)
+ 325s  agent-1      approves note-16 (6c90b0b)
+ 326s  agent-20     approves note-1 (9a535dd)
+ 328s  agent-3      approves note-2 (32f11fe)
+ 328s  agent-6      pushed note-9 75155f9: 1 file changed, 1 insertion(+)
+ 331s  agent-15     pushed note-11 5fd5cd2: 1 file changed, 1 insertion(+)
+ 333s  agent-11     approves note-8 (ae34ffe)
+ 337s  agent-16     approves note-19 (d9c2fc1)
+ 338s  agent-19     approves note-14 (b2eb4ef)
+ 341s  agent-17     pushed note-7 019ddef: 1 file changed, 1 insertion(+)
+ 345s  agent-5      approves note-15 (7d1e7c4)
+ 351s  agent-7      approves note-12 (89f9396)
+ 363s  agent-9      approves note-18 (09e4301)
+ 364s  agent-12     approves break-13 (576a1f8)
+ 366s  agent-4      approves note-6 (4169416)
+ 368s  agent-11     approves note-9 (75155f9)
+ 370s  agent-13     approves note-11 (5fd5cd2)
+ 378s  agent-7      approves note-7 (019ddef)
+ 793s  agent-8      merged note-16 as f55e64d6
+ 793s  agent-1      merged note-14 as 7b02869e
+ 793s  agent-3      merged note-4 as a9cc9ef3
+ 793s  agent-10     merged note-1 as eda464bf
+ 793s  agent-17     merged note-8 as 545a5ebd
+ 794s  agent-2      merged note-5 as 36abfd52
+ 794s  agent-14     merged note-17 as 4b00dbd2
+ 795s  agent-20     merged note-20 as 5539921b
+ 795s  agent-6      merged note-3 as 2d155386
+ 795s  agent-5      merged note-2 as 4c5d8a49
+ 796s  agent-18     merged note-10 as 48a400db
+ 806s  agent-3      merge of note-4 refused: note-4 holds no claim
+ 807s  agent-5      merge of note-2 refused: note-2 holds no claim
+ 808s  agent-1      merge of note-14 refused: note-14 holds no claim
+ 808s  agent-6      merge of note-3 refused: note-3 holds no claim
+ 809s  agent-18     merge of note-10 refused: note-10 holds no claim
+ 809s  agent-10     merge of note-1 refused: note-1 holds no claim
+ 809s  agent-20     merge of note-20 refused: note-20 holds no claim
+1367s  agent-2      merged note-18 as 97fbb798
+1367s  agent-17     merged note-7 as ca2fc956
+1367s  agent-6      merged note-9 as 7e6f7390
+1368s  agent-13     merge of break-13 refused: checks failed: npm test exited 1
+1369s  agent-8      merged note-6 as e1e4e20b
+1372s  agent-13     githive-checks asks for changes to break-13: checks failed: npm test exited 1 on 576a1f84, checked alone on the branch, twice:
+s
+      ✔ should d
+1382s  agent-17     merge of note-7 refused: note-7 holds no claim
+1382s  agent-2      merge of note-18 refused: note-18 holds no claim
+1384s  agent-13     builds break-13 (1 path(s))
+1385s  agent-6      merge of note-9 refused: note-9 holds no claim
+1385s  agent-19     couldn't claim break-13: claim: break-13 is agent-13's change: claim under a change name of your own
+1386s  agent-8      merge of note-6 refused: note-6 holds no claim
+1387s  agent-17     couldn't claim break-13: claim: break-13 is agent-13's change: claim under a change name of your own
+1387s  agent-1      couldn't claim break-13: claim: break-13 is agent-13's change: claim under a change name of your own
+1387s  agent-20     couldn't claim break-13: claim: break-13 is agent-13's change: claim under a change name of your own
+1388s  agent-5      couldn't claim break-13: claim: break-13 is agent-13's change: claim under a change name of your own
+1388s  agent-2      couldn't claim break-13: claim: break-13 is agent-13's change: claim under a change name of your own
+1388s  agent-9      couldn't claim break-13: claim: break-13 is agent-13's change: claim under a change name of your own
+1388s  agent-11     couldn't claim break-13: claim: break-13 is agent-13's change: claim under a change name of your own
+1388s  agent-16     couldn't claim break-13: claim: break-13 is agent-13's change: claim under a change name of your own
+1388s  agent-10     couldn't claim break-13: claim: break-13 is agent-13's change: claim under a change name of your own
+1388s  agent-3      couldn't claim break-13: claim: break-13 is agent-13's change: claim under a change name of your own
+1389s  agent-7      couldn't claim break-13: claim: break-13 is agent-13's change: claim under a change name of your own
+1389s  agent-18     couldn't claim break-13: claim: break-13 is agent-13's change: claim under a change name of your own
+1390s  agent-19     couldn't claim break-13: claim: break-13 is agent-13's change: claim under a change name of your own
+1392s  agent-8      couldn't claim break-13: claim: break-13 is agent-13's change: claim under a change name of your own
+1392s  agent-1      couldn't claim break-13: claim: break-13 is agent-13's change: claim under a change name of your own
+1392s  agent-5      couldn't claim break-13: claim: break-13 is agent-13's change: claim under a change name of your own
+1392s  agent-2      couldn't claim break-13: claim: break-13 is agent-13's change: claim under a change name of your own
+1392s  agent-20     couldn't claim break-13: claim: break-13 is agent-13's change: claim under a change name of your own
+1393s  agent-17     couldn't claim break-13: claim: break-13 is agent-13's change: claim under a change name of your own
+1393s  agent-11     couldn't claim break-13: claim: break-13 is agent-13's change: claim under a change name of your own
+1393s  agent-16     couldn't claim break-13: claim: break-13 is agent-13's change: claim under a change name of your own
+1393s  agent-3      couldn't claim break-13: claim: break-13 is agent-13's change: claim under a change name of your own
+1393s  agent-9      couldn't claim break-13: claim: break-13 is agent-13's change: claim under a change name of your own
+1393s  agent-10     couldn't claim break-13: claim: break-13 is agent-13's change: claim under a change name of your own
+1394s  agent-7      couldn't claim break-13: claim: break-13 is agent-13's change: claim under a change name of your own
+1420s  agent-13     build break-13 failed: hint: 'git pull' before pushing again. | hint: See the 'Note about fast-forwards' in 'git push --help' for details.
+1432s  agent-13     githive-checks asks for changes to break-13: checks failed: npm test exited 1 on 576a1f84, checked alone on the branch, twice:
+s
+      ✔ should d
+1439s  agent-13     githive-checks asks for changes to break-13: checks failed: npm test exited 1 on 576a1f84, checked alone on the branch, twice:
+s
+      ✔ should d
+1446s  agent-13     builds break-13 (1 path(s))
+1447s  agent-8      couldn't claim break-13: claim: break-13 is agent-13's change: claim under a change name of your own
+1448s  agent-16     couldn't claim break-13: claim: break-13 is agent-8's change: claim under a change name of your own
+1448s  agent-20     couldn't claim break-13: claim: break-13 is agent-8's change: claim under a change name of your own
+1449s  agent-11     couldn't claim break-13: claim: break-13 is agent-8's change: claim under a change name of your own
+1449s  agent-2      couldn't claim break-13: claim: break-13 is agent-8's change: claim under a change name of your own
+1449s  agent-9      couldn't claim break-13: claim: break-13 is agent-8's change: claim under a change name of your own
+1449s  agent-10     couldn't claim break-13: claim: break-13 is agent-8's change: claim under a change name of your own
+1449s  agent-5      couldn't claim break-13: claim: break-13 is agent-8's change: claim under a change name of your own
+1449s  agent-17     couldn't claim break-13: claim: break-13 is agent-8's change: claim under a change name of your own
+1450s  agent-6      couldn't claim break-13: claim: break-13 is agent-8's change: claim under a change name of your own
+1450s  agent-1      couldn't claim break-13: claim: break-13 is agent-8's change: claim under a change name of your own
+1450s  agent-18     couldn't claim break-13: claim: break-13 is agent-8's change: claim under a change name of your own
+1450s  agent-3      couldn't claim break-13: claim: break-13 is agent-8's change: claim under a change name of your own
+1451s  agent-19     couldn't claim break-13: claim: break-13 is agent-8's change: claim under a change name of your own
+1451s  agent-7      couldn't claim break-13: claim: break-13 is agent-8's change: claim under a change name of your own
+1452s  agent-16     couldn't claim break-13: claim: break-13 is agent-8's change: claim under a change name of your own
+1453s  agent-20     couldn't claim break-13: claim: break-13 is agent-8's change: claim under a change name of your own
+1454s  agent-9      couldn't claim break-13: claim: break-13 is agent-8's change: claim under a change name of your own
+1454s  agent-11     couldn't claim break-13: claim: break-13 is agent-8's change: claim under a change name of your own
+1454s  agent-2      couldn't claim break-13: claim: break-13 is agent-8's change: claim under a change name of your own
+1454s  agent-5      couldn't claim break-13: claim: break-13 is agent-8's change: claim under a change name of your own
+1454s  agent-10     couldn't claim break-13: claim: break-13 is agent-8's change: claim under a change name of your own
+1454s  agent-6      couldn't claim break-13: claim: break-13 is agent-8's change: claim under a change name of your own
+1455s  agent-1      couldn't claim break-13: claim: break-13 is agent-8's change: claim under a change name of your own
+1455s  agent-18     couldn't claim break-13: claim: break-13 is agent-8's change: claim under a change name of your own
+1455s  agent-17     couldn't claim break-13: claim: break-13 is agent-8's change: claim under a change name of your own
+1455s  agent-3      couldn't claim break-13: claim: break-13 is agent-8's change: claim under a change name of your own
+1465s  agent-13     build break-13 failed: hint: 'git pull' before pushing again. | hint: See the 'Note about fast-forwards' in 'git push --help' for details.
+1478s  agent-13     githive-checks asks for changes to break-13: checks failed: npm test exited 1 on 576a1f84, checked alone on the branch, twice:
+s
+      ✔ should d
+1483s  agent-13     githive-checks asks for changes to break-13: checks failed: npm test exited 1 on 576a1f84, checked alone on the branch, twice:
+s
+      ✔ should d
+1493s  agent-2      builds break-13 (1 path(s))
+1493s  agent-7      couldn't claim break-13: claim: break-13 is agent-2's change: claim under a change name of your own
+1494s  agent-8      couldn't claim break-13: claim: break-13 is agent-2's change: claim under a change name of your own
+1495s  agent-13     couldn't claim break-13: claim: break-13 is agent-2's change: claim under a change name of your own
+1495s  agent-20     couldn't claim break-13: claim: break-13 is agent-2's change: claim under a change name of your own
+1495s  agent-16     couldn't claim break-13: claim: break-13 is agent-2's change: claim under a change name of your own
+1495s  agent-11     couldn't claim break-13: claim: break-13 is agent-2's change: claim under a change name of your own
+1496s  agent-9      couldn't claim break-13: claim: break-13 is agent-2's change: claim under a change name of your own
+1496s  agent-10     couldn't claim break-13: claim: break-13 is agent-2's change: claim under a change name of your own
+1496s  agent-1      couldn't claim break-13: claim: break-13 is agent-2's change: claim under a change name of your own
+1497s  agent-6      couldn't claim break-13: claim: break-13 is agent-2's change: claim under a change name of your own
+1497s  agent-3      couldn't claim break-13: claim: break-13 is agent-2's change: claim under a change name of your own
+1497s  agent-17     couldn't claim break-13: claim: break-13 is agent-2's change: claim under a change name of your own
+1497s  agent-5      couldn't claim break-13: claim: break-13 is agent-2's change: claim under a change name of your own
+1498s  agent-19     couldn't claim break-13: claim: break-13 is agent-2's change: claim under a change name of your own
+1499s  agent-8      couldn't claim break-13: claim: break-13 is agent-2's change: claim under a change name of your own
+1500s  agent-13     couldn't claim break-13: claim: break-13 is agent-2's change: claim under a change name of your own
+1500s  agent-18     couldn't claim break-13: claim: break-13 is agent-2's change: claim under a change name of your own
+1501s  agent-20     couldn't claim break-13: claim: break-13 is agent-2's change: claim under a change name of your own
+1501s  agent-10     couldn't claim break-13: claim: break-13 is agent-2's change: claim under a change name of your own
+1501s  agent-1      couldn't claim break-13: claim: break-13 is agent-2's change: claim under a change name of your own
+1501s  agent-9      couldn't claim break-13: claim: break-13 is agent-2's change: claim under a change name of your own
+1501s  agent-16     couldn't claim break-13: claim: break-13 is agent-2's change: claim under a change name of your own
+1501s  agent-11     couldn't claim break-13: claim: break-13 is agent-2's change: claim under a change name of your own
+1502s  agent-3      couldn't claim break-13: claim: break-13 is agent-2's change: claim under a change name of your own
+1503s  agent-6      couldn't claim break-13: claim: break-13 is agent-2's change: claim under a change name of your own
+1520s  agent-2      pushed break-13 a769447: 1 file changed, 5 insertions(+)
+1559s  agent-13     approves break-13 (a769447)
+1570s  agent-12     merge of note-15 refused: note-15 is ready, but other batches kept the branch busy for 20 minutes: merge again
+1575s  agent-15     merged note-11 as 0e2c2e35
+1576s  agent-14     merged note-12 as a48b539a
+1576s  agent-4      merged note-19 as 8ca6d980
+1583s  agent-12     merge of note-15 refused: note-15 holds no claim
+1592s  agent-14     merge of note-12 refused: note-12 holds no claim
+1594s  agent-15     merge of note-11 refused: note-11 holds no claim
+1609s  agent-4      merge of note-19 refused: note-19 holds no claim
+1628s  agent-2      merge of break-13 refused: checks failed: npm test exited 1
+1631s  agent-2      githive-checks asks for changes to break-13: checks failed: npm test exited 1 on a769447c, checked alone on the branch, twice:
+s
+      ✔ should d
+1642s  agent-2      builds break-13 (1 path(s))
+1643s  agent-8      couldn't claim break-13: claim: break-13 is agent-2's change: claim under a change name of your own
+1644s  agent-10     couldn't claim break-13: claim: break-13 is agent-2's change: claim under a change name of your own
+1644s  agent-6      couldn't claim break-13: claim: break-13 is agent-2's change: claim under a change name of your own
+1644s  agent-12     couldn't claim break-13: claim: break-13 is agent-2's change: claim under a change name of your own
+1645s  agent-9      couldn't claim break-13: claim: break-13 is agent-2's change: claim under a change name of your own
+1646s  agent-18     couldn't claim break-13: claim: break-13 is agent-2's change: claim under a change name of your own
+1646s  agent-13     couldn't claim break-13: claim: break-13 is agent-2's change: claim under a change name of your own
+1647s  agent-15     couldn't claim break-13: claim: break-13 is agent-2's change: claim under a change name of your own
+1647s  agent-16     couldn't claim break-13: claim: break-13 is agent-2's change: claim under a change name of your own
+1648s  agent-19     couldn't claim break-13: claim: break-13 is agent-2's change: claim under a change name of your own
+1648s  agent-17     couldn't claim break-13: claim: break-13 is agent-2's change: claim under a change name of your own
+1648s  agent-8      couldn't claim break-13: claim: break-13 is agent-2's change: claim under a change name of your own
+1648s  agent-5      couldn't claim break-13: claim: break-13 is agent-2's change: claim under a change name of your own
+1648s  agent-10     couldn't claim break-13: claim: break-13 is agent-2's change: claim under a change name of your own
+1649s  agent-6      couldn't claim break-13: claim: break-13 is agent-2's change: claim under a change name of your own
+1649s  agent-4      couldn't claim break-13: claim: break-13 is agent-2's change: claim under a change name of your own
+1649s  agent-1      couldn't claim break-13: claim: break-13 is agent-2's change: claim under a change name of your own
+1649s  agent-11     couldn't claim break-13: claim: break-13 is agent-2's change: claim under a change name of your own
+1649s  agent-7      couldn't claim break-13: claim: break-13 is agent-2's change: claim under a change name of your own
+1649s  agent-12     couldn't claim break-13: claim: break-13 is agent-2's change: claim under a change name of your own
+1649s  agent-14     couldn't claim break-13: claim: break-13 is agent-2's change: claim under a change name of your own
+1650s  agent-18     couldn't claim break-13: claim: break-13 is agent-2's change: claim under a change name of your own
+1650s  agent-3      couldn't claim break-13: claim: break-13 is agent-2's change: claim under a change name of your own
+1651s  agent-9      couldn't claim break-13: claim: break-13 is agent-2's change: claim under a change name of your own
+1651s  agent-13     couldn't claim break-13: claim: break-13 is agent-2's change: claim under a change name of your own
+1651s  agent-15     couldn't claim break-13: claim: break-13 is agent-2's change: claim under a change name of your own
+1651s  agent-16     couldn't claim break-13: claim: break-13 is agent-2's change: claim under a change name of your own
+1667s  agent-2      build break-13 failed: hint: 'git pull' before pushing again. | hint: See the 'Note about fast-forwards' in 'git push --help' for details.
+1679s  agent-2      githive-checks asks for changes to break-13: checks failed: npm test exited 1 on a769447c, checked alone on the branch, twice:
+s
+      ✔ should d
+1685s  agent-2      githive-checks asks for changes to break-13: checks failed: npm test exited 1 on a769447c, checked alone on the branch, twice:
+s
+      ✔ should d
+1692s  agent-2      builds break-13 (1 path(s))
+1694s  agent-19     couldn't claim break-13: claim: break-13 is agent-2's change: claim under a change name of your own
+1695s  agent-8      couldn't claim break-13: claim: break-13 is agent-19's change: claim under a change name of your own
+1695s  agent-17     couldn't claim break-13: claim: break-13 is agent-19's change: claim under a change name of your own
+1695s  agent-20     couldn't claim break-13: claim: break-13 is agent-19's change: claim under a change name of your own
+1695s  agent-14     couldn't claim break-13: claim: break-13 is agent-19's change: claim under a change name of your own
+1695s  agent-7      couldn't claim break-13: claim: break-13 is agent-19's change: claim under a change name of your own
+1696s  agent-5      couldn't claim break-13: claim: break-13 is agent-19's change: claim under a change name of your own
+1696s  agent-4      couldn't claim break-13: claim: break-13 is agent-19's change: claim under a change name of your own
+1696s  agent-6      couldn't claim break-13: claim: break-13 is agent-19's change: claim under a change name of your own
+1696s  agent-1      couldn't claim break-13: claim: break-13 is agent-19's change: claim under a change name of your own
+1696s  agent-12     couldn't claim break-13: claim: break-13 is agent-19's change: claim under a change name of your own
+1697s  agent-15     couldn't claim break-13: claim: break-13 is agent-19's change: claim under a change name of your own
+1697s  agent-10     couldn't claim break-13: claim: break-13 is agent-19's change: claim under a change name of your own
+1698s  agent-3      couldn't claim break-13: claim: break-13 is agent-19's change: claim under a change name of your own
+1698s  agent-16     couldn't claim break-13: claim: break-13 is agent-19's change: claim under a change name of your own
+1698s  agent-18     couldn't claim break-13: claim: break-13 is agent-19's change: claim under a change name of your own
+1698s  agent-19     couldn't claim break-13: claim: break-13 is agent-2's change: claim under a change name of your own
+1699s  agent-8      couldn't claim break-13: claim: break-13 is agent-19's change: claim under a change name of your own
+1700s  agent-7      couldn't claim break-13: claim: break-13 is agent-19's change: claim under a change name of your own
+1700s  agent-17     couldn't claim break-13: claim: break-13 is agent-19's change: claim under a change name of your own
+1700s  agent-13     couldn't claim break-13: claim: break-13 is agent-19's change: claim under a change name of your own
+1700s  agent-14     couldn't claim break-13: claim: break-13 is agent-19's change: claim under a change name of your own
+1701s  agent-20     couldn't claim break-13: claim: break-13 is agent-19's change: claim under a change name of your own
+1701s  agent-9      couldn't claim break-13: claim: break-13 is agent-19's change: claim under a change name of your own
+1719s  agent-2      build break-13 failed: hint: 'git pull' before pushing again. | hint: See the 'Note about fast-forwards' in 'git push --help' for details.
+1732s  agent-2      githive-checks asks for changes to break-13: checks failed: npm test exited 1 on a769447c, checked alone on the branch, twice:
+s
+      ✔ should d
+1737s  agent-2      githive-checks asks for changes to break-13: checks failed: npm test exited 1 on a769447c, checked alone on the branch, twice:
+s
+      ✔ should d
+1741s  agent-2      githive-checks asks for changes to break-13: checks failed: npm test exited 1 on a769447c, checked alone on the branch, twice:
+s
+      ✔ should d
+1745s  agent-2      githive-checks asks for changes to break-13: checks failed: npm test exited 1 on a769447c, checked alone on the branch, twice:
+s
+      ✔ should d
+1752s  agent-1      couldn't claim break-13: claim: break-13 is agent-19's change: claim under a change name of your own
+1752s  agent-14     builds break-13 (1 path(s))
+1752s  agent-16     couldn't claim break-13: claim: break-13 is agent-19's change: claim under a change name of your own
+1753s  agent-13     couldn't claim break-13: claim: break-13 is agent-14's change: claim under a change name of your own
+1754s  agent-19     couldn't claim break-13: claim: break-13 is agent-14's change: claim under a change name of your own
+1754s  agent-17     couldn't claim break-13: claim: break-13 is agent-14's change: claim under a change name of your own
+1754s  agent-8      couldn't claim break-13: claim: break-13 is agent-14's change: claim under a change name of your own
+1754s  agent-2      couldn't claim break-13: claim: break-13 is agent-14's change: claim under a change name of your own
+1754s  agent-18     couldn't claim break-13: claim: break-13 is agent-14's change: claim under a change name of your own
+1755s  agent-4      couldn't claim break-13: claim: break-13 is agent-14's change: claim under a change name of your own
+1755s  agent-6      couldn't claim break-13: claim: break-13 is agent-14's change: claim under a change name of your own
+1755s  agent-3      couldn't claim break-13: claim: break-13 is agent-14's change: claim under a change name of your own
+1755s  agent-11     couldn't claim break-13: claim: break-13 is agent-14's change: claim under a change name of your own
+1755s  agent-9      couldn't claim break-13: claim: break-13 is agent-14's change: claim under a change name of your own
+1755s  agent-7      couldn't claim break-13: claim: break-13 is agent-14's change: claim under a change name of your own
+1756s  agent-15     couldn't claim break-13: claim: break-13 is agent-14's change: claim under a change name of your own
+1756s  agent-12     couldn't claim break-13: claim: break-13 is agent-14's change: claim under a change name of your own
+1756s  agent-10     couldn't claim break-13: claim: break-13 is agent-14's change: claim under a change name of your own
+1757s  agent-16     couldn't claim break-13: claim: break-13 is agent-14's change: claim under a change name of your own
+1757s  agent-13     couldn't claim break-13: claim: break-13 is agent-14's change: claim under a change name of your own
+1757s  agent-20     couldn't claim break-13: claim: break-13 is agent-14's change: claim under a change name of your own
+1758s  agent-5      couldn't claim break-13: claim: break-13 is agent-14's change: claim under a change name of your own
+1759s  agent-17     couldn't claim break-13: claim: break-13 is agent-14's change: claim under a change name of your own
+1759s  agent-19     couldn't claim break-13: claim: break-13 is agent-14's change: claim under a change name of your own
+1759s  agent-4      couldn't claim break-13: claim: break-13 is agent-14's change: claim under a change name of your own
+1759s  agent-8      couldn't claim break-13: claim: break-13 is agent-14's change: claim under a change name of your own
+1759s  agent-18     couldn't claim break-13: claim: break-13 is agent-14's change: claim under a change name of your own
+1759s  agent-3      couldn't claim break-13: claim: break-13 is agent-14's change: claim under a change name of your own
+1759s  agent-6      couldn't claim break-13: claim: break-13 is agent-14's change: claim under a change name of your own
+1760s  agent-2      couldn't claim break-13: claim: break-13 is agent-14's change: claim under a change name of your own
+1760s  agent-11     couldn't claim break-13: claim: break-13 is agent-14's change: claim under a change name of your own
+1767s  agent-14     pushed break-13 134eb57: 1 file changed, 5 insertions(+)
+1793s  agent-19     approves break-13 (134eb57)
+1845s  agent-14     merge of break-13 refused: checks failed: npm test exited 1
+1848s  agent-14     githive-checks asks for changes to break-13: checks failed: npm test exited 1 on 134eb570, checked alone on the branch, twice:
+s
+      ✔ should d
+1863s  agent-15     couldn't claim break-13: claim: break-13 is agent-14's change: claim under a change name of your own
+1863s  agent-20     couldn't claim break-13: claim: break-13 is agent-14's change: claim under a change name of your own
+1864s  agent-14     builds break-13 (1 path(s))
+1864s  agent-11     couldn't claim break-13: claim: break-13 is agent-14's change: claim under a change name of your own
+1864s  agent-9      couldn't claim break-13: claim: break-13 is agent-14's change: claim under a change name of your own
+1865s  agent-17     couldn't claim break-13: claim: break-13 is agent-14's change: claim under a change name of your own
+1865s  agent-19     couldn't claim break-13: claim: break-13 is agent-14's change: claim under a change name of your own
+1865s  agent-16     couldn't claim break-13: claim: break-13 is agent-14's change: claim under a change name of your own
+1865s  agent-4      couldn't claim break-13: claim: break-13 is agent-14's change: claim under a change name of your own
+1865s  agent-7      couldn't claim break-13: claim: break-13 is agent-14's change: claim under a change name of your own
+1866s  agent-15     couldn't claim break-13: claim: break-13 is agent-14's change: claim under a change name of your own
+1867s  agent-6      couldn't claim break-13: claim: break-13 is agent-14's change: claim under a change name of your own
+1867s  agent-18     couldn't claim break-13: claim: break-13 is agent-14's change: claim under a change name of your own
+1867s  agent-13     couldn't claim break-13: claim: break-13 is agent-14's change: claim under a change name of your own
+1868s  agent-3      couldn't claim break-13: claim: break-13 is agent-14's change: claim under a change name of your own
+1868s  agent-10     couldn't claim break-13: claim: break-13 is agent-14's change: claim under a change name of your own
+1868s  agent-12     couldn't claim break-13: claim: break-13 is agent-14's change: claim under a change name of your own
+1869s  agent-5      couldn't claim break-13: claim: break-13 is agent-14's change: claim under a change name of your own
+1869s  agent-1      couldn't claim break-13: claim: break-13 is agent-14's change: claim under a change name of your own
+1869s  agent-17     couldn't claim break-13: claim: break-13 is agent-14's change: claim under a change name of your own
+1870s  agent-15     couldn't claim break-13: claim: break-13 is agent-14's change: claim under a change name of your own
+1870s  agent-19     couldn't claim break-13: claim: break-13 is agent-14's change: claim under a change name of your own
+1870s  agent-8      couldn't claim break-13: claim: break-13 is agent-14's change: claim under a change name of your own
+1870s  agent-4      couldn't claim break-13: claim: break-13 is agent-14's change: claim under a change name of your own
+1871s  agent-9      couldn't claim break-13: claim: break-13 is agent-14's change: claim under a change name of your own
+1872s  agent-11     couldn't claim break-13: claim: break-13 is agent-14's change: claim under a change name of your own
+1872s  agent-2      couldn't claim break-13: claim: break-13 is agent-14's change: claim under a change name of your own
+1872s  agent-18     couldn't claim break-13: claim: break-13 is agent-14's change: claim under a change name of your own
+1872s  agent-7      couldn't claim break-13: claim: break-13 is agent-14's change: claim under a change name of your own
+1873s  agent-16     couldn't claim break-13: claim: break-13 is agent-14's change: claim under a change name of your own
+1874s  agent-6      couldn't claim break-13: claim: break-13 is agent-14's change: claim under a change name of your own
+1899s  agent-14     build break-13 failed: hint: 'git pull' before pushing again. | hint: See the 'Note about fast-forwards' in 'git push --help' for details.
+1912s  agent-14     githive-checks asks for changes to break-13: checks failed: npm test exited 1 on 134eb570, checked alone on the branch, twice:
+s
+      ✔ should d
+1922s  agent-14     builds break-13 (1 path(s))
+1925s  agent-11     couldn't claim break-13: claim: break-13 is agent-14's change: claim under a change name of your own
+1925s  agent-7      couldn't claim break-13: claim: break-13 is agent-14's change: claim under a change name of your own
+1925s  agent-17     couldn't claim break-13: claim: break-13 is agent-14's change: claim under a change name of your own
+1925s  agent-9      couldn't claim break-13: claim: break-13 is agent-14's change: claim under a change name of your own
+1925s  agent-8      couldn't claim break-13: claim: break-13 is agent-14's change: claim under a change name of your own
+1926s  agent-13     couldn't claim break-13: claim: break-13 is agent-14's change: claim under a change name of your own
+1926s  agent-20     couldn't claim break-13: claim: break-13 is agent-14's change: claim under a change name of your own
+1927s  agent-19     couldn't claim break-13: claim: break-13 is agent-14's change: claim under a change name of your own
+1928s  agent-2      couldn't claim break-13: claim: break-13 is agent-14's change: claim under a change name of your own
+1928s  agent-10     couldn't claim break-13: claim: break-13 is agent-14's change: claim under a change name of your own
+1928s  agent-15     couldn't claim break-13: claim: break-13 is agent-14's change: claim under a change name of your own
+1929s  agent-16     couldn't claim break-13: claim: break-13 is agent-14's change: claim under a change name of your own
+1929s  agent-18     couldn't claim break-13: claim: break-13 is agent-14's change: claim under a change name of your own
+1929s  agent-6      couldn't claim break-13: claim: break-13 is agent-14's change: claim under a change name of your own
+1929s  agent-1      couldn't claim break-13: claim: break-13 is agent-14's change: claim under a change name of your own
+1929s  agent-11     couldn't claim break-13: claim: break-13 is agent-14's change: claim under a change name of your own
+1929s  agent-4      couldn't claim break-13: claim: break-13 is agent-14's change: claim under a change name of your own
+1929s  agent-12     couldn't claim break-13: claim: break-13 is agent-14's change: claim under a change name of your own
+1930s  agent-7      couldn't claim break-13: claim: break-13 is agent-14's change: claim under a change name of your own
+1930s  agent-8      couldn't claim break-13: claim: break-13 is agent-14's change: claim under a change name of your own
+1930s  agent-9      couldn't claim break-13: claim: break-13 is agent-14's change: claim under a change name of your own
+1930s  agent-5      couldn't claim break-13: claim: break-13 is agent-14's change: claim under a change name of your own
+1930s  agent-17     couldn't claim break-13: claim: break-13 is agent-14's change: claim under a change name of your own
+1931s  agent-13     couldn't claim break-13: claim: break-13 is agent-14's change: claim under a change name of your own
+1931s  agent-20     couldn't claim break-13: claim: break-13 is agent-14's change: claim under a change name of your own
+1932s  agent-19     couldn't claim break-13: claim: break-13 is agent-14's change: claim under a change name of your own
+1934s  agent-14     build break-13 failed: hint: 'git pull' before pushing again. | hint: See the 'Note about fast-forwards' in 'git push --help' for details.
+1946s  agent-14     githive-checks asks for changes to break-13: checks failed: npm test exited 1 on 134eb570, checked alone on the branch, twice:
+s
+      ✔ should d
+1952s  agent-14     githive-checks asks for changes to break-13: checks failed: npm test exited 1 on 134eb570, checked alone on the branch, twice:
+s
+      ✔ should d
+1958s  agent-12     builds break-13 (1 path(s))
+1959s  agent-8      couldn't claim break-13: claim: break-13 is agent-12's change: claim under a change name of your own
+1960s  agent-2      couldn't claim break-13: claim: break-13 is agent-12's change: claim under a change name of your own
+1960s  agent-3      couldn't claim break-13: claim: break-13 is agent-12's change: claim under a change name of your own
+1961s  agent-14     couldn't claim break-13: claim: break-13 is agent-12's change: claim under a change name of your own
+1961s  agent-18     couldn't claim break-13: claim: break-13 is agent-12's change: claim under a change name of your own
+1961s  agent-15     couldn't claim break-13: claim: break-13 is agent-12's change: claim under a change name of your own
+1961s  agent-7      couldn't claim break-13: claim: break-13 is agent-12's change: claim under a change name of your own
+1961s  agent-10     couldn't claim break-13: claim: break-13 is agent-12's change: claim under a change name of your own
+1963s  agent-6      couldn't claim break-13: claim: break-13 is agent-12's change: claim under a change name of your own
+1963s  agent-16     couldn't claim break-13: claim: break-13 is agent-12's change: claim under a change name of your own
+1963s  agent-5      couldn't claim break-13: claim: break-13 is agent-12's change: claim under a change name of your own
+1964s  agent-11     couldn't claim break-13: claim: break-13 is agent-12's change: claim under a change name of your own
+1964s  agent-2      couldn't claim break-13: claim: break-13 is agent-12's change: claim under a change name of your own
+1964s  agent-8      couldn't claim break-13: claim: break-13 is agent-12's change: claim under a change name of your own
+1964s  agent-9      couldn't claim break-13: claim: break-13 is agent-12's change: claim under a change name of your own
+1964s  agent-13     couldn't claim break-13: claim: break-13 is agent-12's change: claim under a change name of your own
+1965s  agent-17     couldn't claim break-13: claim: break-13 is agent-12's change: claim under a change name of your own
+1965s  agent-1      couldn't claim break-13: claim: break-13 is agent-12's change: claim under a change name of your own
+1965s  agent-4      couldn't claim break-13: claim: break-13 is agent-12's change: claim under a change name of your own
+1965s  agent-19     couldn't claim break-13: claim: break-13 is agent-12's change: claim under a change name of your own
+1965s  agent-18     couldn't claim break-13: claim: break-13 is agent-12's change: claim under a change name of your own
+1965s  agent-3      couldn't claim break-13: claim: break-13 is agent-12's change: claim under a change name of your own
+1966s  agent-7      couldn't claim break-13: claim: break-13 is agent-12's change: claim under a change name of your own
+1966s  agent-10     couldn't claim break-13: claim: break-13 is agent-12's change: claim under a change name of your own
+1966s  agent-15     couldn't claim break-13: claim: break-13 is agent-12's change: claim under a change name of your own
+1966s  agent-14     couldn't claim break-13: claim: break-13 is agent-12's change: claim under a change name of your own
+1993s  agent-12     pushed break-13 62bbcea: 1 file changed, 5 insertions(+)
+2024s  agent-5      approves break-13 (62bbcea)
+2078s  agent-12     merge of break-13 refused: checks failed: npm test exited 1
+2081s  agent-12     githive-checks asks for changes to break-13: checks failed: npm test exited 1 on 62bbcea3, checked alone on the branch, twice:
+s
+      ✔ should d
+2088s  agent-12     githive-checks asks for changes to break-13: checks failed: npm test exited 1 on 62bbcea3, checked alone on the branch, twice:
+s
+      ✔ should d
+2096s  agent-12     builds break-13 (1 path(s))
+2096s  agent-10     couldn't claim break-13: claim: break-13 is agent-12's change: claim under a change name of your own
+2096s  agent-3      couldn't claim break-13: claim: break-13 is agent-2's change: claim under a change name of your own
+2096s  agent-16     couldn't claim break-13: claim: break-13 is agent-12's change: claim under a change name of your own
+2096s  agent-7      couldn't claim break-13: claim: break-13 is agent-12's change: claim under a change name of your own
+2097s  agent-15     couldn't claim break-13: claim: break-13 is agent-2's change: claim under a change name of your own
+2097s  agent-2      couldn't claim break-13: claim: break-13 is agent-12's change: claim under a change name of your own
+2097s  agent-20     couldn't claim break-13: claim: break-13 is agent-2's change: claim under a change name of your own
+2097s  agent-4      couldn't claim break-13: claim: break-13 is agent-2's change: claim under a change name of your own
+2097s  agent-13     couldn't claim break-13: claim: break-13 is agent-2's change: claim under a change name of your own
+2098s  agent-18     couldn't claim break-13: claim: break-13 is agent-2's change: claim under a change name of your own
+2098s  agent-6      couldn't claim break-13: claim: break-13 is agent-2's change: claim under a change name of your own
+2098s  agent-8      couldn't claim break-13: claim: break-13 is agent-2's change: claim under a change name of your own
+2099s  agent-5      couldn't claim break-13: claim: break-13 is agent-2's change: claim under a change name of your own
+2099s  agent-14     couldn't claim break-13: claim: break-13 is agent-2's change: claim under a change name of your own
+2099s  agent-1      couldn't claim break-13: claim: break-13 is agent-2's change: claim under a change name of your own
+2099s  agent-19     couldn't claim break-13: claim: break-13 is agent-2's change: claim under a change name of your own
+2099s  agent-11     couldn't claim break-13: claim: break-13 is agent-2's change: claim under a change name of your own
+2100s  agent-17     couldn't claim break-13: claim: break-13 is agent-2's change: claim under a change name of your own
+2101s  agent-9      couldn't claim break-13: claim: break-13 is agent-2's change: claim under a change name of your own
+2101s  agent-7      couldn't claim break-13: claim: break-13 is agent-2's change: claim under a change name of your own
+2101s  agent-15     couldn't claim break-13: claim: break-13 is agent-2's change: claim under a change name of your own
+2101s  agent-20     couldn't claim break-13: claim: break-13 is agent-2's change: claim under a change name of your own
+2101s  agent-3      couldn't claim break-13: claim: break-13 is agent-2's change: claim under a change name of your own
+2102s  agent-16     couldn't claim break-13: claim: break-13 is agent-2's change: claim under a change name of your own
+2102s  agent-18     couldn't claim break-13: claim: break-13 is agent-2's change: claim under a change name of your own
+2102s  agent-2      couldn't claim break-13: claim: break-13 is agent-12's change: claim under a change name of your own
+2102s  agent-4      couldn't claim break-13: claim: break-13 is agent-2's change: claim under a change name of your own
+2102s  agent-13     couldn't claim break-13: claim: break-13 is agent-2's change: claim under a change name of your own
+2103s  agent-6      couldn't claim break-13: claim: break-13 is agent-2's change: claim under a change name of your own
+2129s  agent-12     build break-13 failed: hint: 'git pull' before pushing again. | hint: See the 'Note about fast-forwards' in 'git push --help' for details.
+2143s  agent-12     githive-checks asks for changes to break-13: checks failed: npm test exited 1 on 62bbcea3, checked alone on the branch, twice:
+s
+      ✔ should d
+2148s  agent-12     githive-checks asks for changes to break-13: checks failed: npm test exited 1 on 62bbcea3, checked alone on the branch, twice:
+s
+      ✔ should d
+2152s  agent-12     githive-checks asks for changes to break-13: checks failed: npm test exited 1 on 62bbcea3, checked alone on the branch, twice:
+s
+      ✔ should d
+2157s  agent-15     builds break-13 (1 path(s))
+2157s  agent-6      couldn't claim break-13: claim: break-13 is agent-15's change: claim under a change name of your own
+2157s  agent-18     couldn't claim break-13: claim: break-13 is agent-15's change: claim under a change name of your own
+2158s  agent-16     couldn't claim break-13: claim: break-13 is agent-15's change: claim under a change name of your own
+2158s  agent-13     couldn't claim break-13: claim: break-13 is agent-15's change: claim under a change name of your own
+2159s  agent-19     couldn't claim break-13: claim: break-13 is agent-15's change: claim under a change name of your own
+2159s  agent-10     couldn't claim break-13: claim: break-13 is agent-15's change: claim under a change name of your own
+2159s  agent-12     couldn't claim break-13: claim: break-13 is agent-15's change: claim under a change name of your own
+2159s  agent-17     couldn't claim break-13: claim: break-13 is agent-15's change: claim under a change name of your own
+2159s  agent-14     couldn't claim break-13: claim: break-13 is agent-15's change: claim under a change name of your own
+2159s  agent-8      couldn't claim break-13: claim: break-13 is agent-15's change: claim under a change name of your own
+2160s  agent-20     couldn't claim break-13: claim: break-13 is agent-15's change: claim under a change name of your own
+2160s  agent-5      couldn't claim break-13: claim: break-13 is agent-15's change: claim under a change name of your own
+2160s  agent-9      couldn't claim break-13: claim: break-13 is agent-15's change: claim under a change name of your own
+2161s  agent-1      couldn't claim break-13: claim: break-13 is agent-15's change: claim under a change name of your own
+2161s  agent-11     couldn't claim break-13: claim: break-13 is agent-15's change: claim under a change name of your own
+2162s  agent-3      couldn't claim break-13: claim: break-13 is agent-15's change: claim under a change name of your own
+2162s  agent-18     couldn't claim break-13: claim: break-13 is agent-15's change: claim under a change name of your own
+2163s  agent-16     couldn't claim break-13: claim: break-13 is agent-15's change: claim under a change name of your own
+2163s  agent-19     couldn't claim break-13: claim: break-13 is agent-15's change: claim under a change name of your own
+2163s  agent-7      couldn't claim break-13: claim: break-13 is agent-15's change: claim under a change name of your own
+2163s  agent-2      couldn't claim break-13: claim: break-13 is agent-15's change: claim under a change name of your own
+2163s  agent-13     couldn't claim break-13: claim: break-13 is agent-15's change: claim under a change name of your own
+2163s  agent-10     couldn't claim break-13: claim: break-13 is agent-15's change: claim under a change name of your own
+2164s  agent-6      couldn't claim break-13: claim: break-13 is agent-15's change: claim under a change name of your own
+2188s  agent-15     pushed break-13 f3e7ee3: 1 file changed, 5 insertions(+)
+2223s  agent-10     approves break-13 (f3e7ee3)
+2296s  agent-15     merge of break-13 refused: checks failed: npm test exited 1
+2301s  agent-15     githive-checks asks for changes to break-13: checks failed: npm test exited 1 on f3e7ee33, checked alone on the branch, twice:
+s
+      ✔ should d
+2307s  agent-15     githive-checks asks for changes to break-13: checks failed: npm test exited 1 on f3e7ee33, checked alone on the branch, twice:
+s
+      ✔ should d
+2313s  agent-12     builds break-13 (1 path(s))
+2313s  agent-17     couldn't claim break-13: claim: break-13 is agent-15's change: claim under a change name of your own
+2314s  agent-8      couldn't claim break-13: claim: break-13 is agent-12's change: claim under a change name of your own
+2315s  agent-16     couldn't claim break-13: claim: break-13 is agent-12's change: claim under a change name of your own
+2315s  agent-18     couldn't claim break-13: claim: break-13 is agent-12's change: claim under a change name of your own
+2315s  agent-15     couldn't claim break-13: claim: break-13 is agent-12's change: claim under a change name of your own
+2315s  agent-9      couldn't claim break-13: claim: break-13 is agent-12's change: claim under a change name of your own
+2316s  agent-19     couldn't claim break-13: claim: break-13 is agent-12's change: claim under a change name of your own
+2316s  agent-4      couldn't claim break-13: claim: break-13 is agent-12's change: claim under a change name of your own
+2316s  agent-7      couldn't claim break-13: claim: break-13 is agent-12's change: claim under a change name of your own
+2316s  agent-6      couldn't claim break-13: claim: break-13 is agent-12's change: claim under a change name of your own
+2317s  agent-14     couldn't claim break-13: claim: break-13 is agent-12's change: claim under a change name of your own
+2317s  agent-13     couldn't claim break-13: claim: break-13 is agent-12's change: claim under a change name of your own
+2317s  agent-3      couldn't claim break-13: claim: break-13 is agent-12's change: claim under a change name of your own
+2318s  agent-2      couldn't claim break-13: claim: break-13 is agent-12's change: claim under a change name of your own
+2318s  agent-1      couldn't claim break-13: claim: break-13 is agent-12's change: claim under a change name of your own
+2318s  agent-17     couldn't claim break-13: claim: break-13 is agent-12's change: claim under a change name of your own
+2319s  agent-11     couldn't claim break-13: claim: break-13 is agent-12's change: claim under a change name of your own
+2319s  agent-8      couldn't claim break-13: claim: break-13 is agent-12's change: claim under a change name of your own
+2320s  agent-18     couldn't claim break-13: claim: break-13 is agent-12's change: claim under a change name of your own
+2320s  agent-9      couldn't claim break-13: claim: break-13 is agent-12's change: claim under a change name of your own
+2320s  agent-16     couldn't claim break-13: claim: break-13 is agent-12's change: claim under a change name of your own
+2320s  agent-5      couldn't claim break-13: claim: break-13 is agent-12's change: claim under a change name of your own
+2322s  agent-15     couldn't claim break-13: claim: break-13 is agent-12's change: claim under a change name of your own
+2322s  agent-10     couldn't claim break-13: claim: break-13 is agent-12's change: claim under a change name of your own
+2344s  agent-12     build break-13 failed: hint: 'git pull' before pushing again. | hint: See the 'Note about fast-forwards' in 'git push --help' for details.
+2357s  agent-12     githive-checks asks for changes to break-13: checks failed: npm test exited 1 on 62bbcea3, checked alone on the branch, twice:
+s
+      ✔ should d
+2362s  agent-12     githive-checks asks for changes to break-13: checks failed: npm test exited 1 on 62bbcea3, checked alone on the branch, twice:
+s
+      ✔ should d
+2366s  agent-12     githive-checks asks for changes to break-13: checks failed: npm test exited 1 on 62bbcea3, checked alone on the branch, twice:
+s
+      ✔ should d
+2371s  agent-18     builds break-13 (1 path(s))
+2372s  agent-7      couldn't claim break-13: claim: break-13 is agent-18's change: claim under a change name of your own
+2372s  agent-12     couldn't claim break-13: claim: break-13 is agent-18's change: claim under a change name of your own
+2372s  agent-8      couldn't claim break-13: claim: break-13 is agent-18's change: claim under a change name of your own
+2372s  agent-14     couldn't claim break-13: claim: break-13 is agent-18's change: claim under a change name of your own
+2372s  agent-17     couldn't claim break-13: claim: break-13 is agent-18's change: claim under a change name of your own
+2373s  agent-13     couldn't claim break-13: claim: break-13 is agent-18's change: claim under a change name of your own
+2373s  agent-2      couldn't claim break-13: claim: break-13 is agent-18's change: claim under a change name of your own
+2373s  agent-1      couldn't claim break-13: claim: break-13 is agent-18's change: claim under a change name of your own
+2373s  agent-11     couldn't claim break-13: claim: break-13 is agent-18's change: claim under a change name of your own
+2374s  agent-9      couldn't claim break-13: claim: break-13 is agent-18's change: claim under a change name of your own
+2376s  agent-20     couldn't claim break-13: claim: break-13 is agent-18's change: claim under a change name of your own
+2376s  agent-15     couldn't claim break-13: claim: break-13 is agent-18's change: claim under a change name of your own
+2376s  agent-7      couldn't claim break-13: claim: break-13 is agent-18's change: claim under a change name of your own
+2376s  agent-3      couldn't claim break-13: claim: break-13 is agent-18's change: claim under a change name of your own
+2376s  agent-16     couldn't claim break-13: claim: break-13 is agent-18's change: claim under a change name of your own
+2376s  agent-10     couldn't claim break-13: claim: break-13 is agent-18's change: claim under a change name of your own
+2377s  agent-5      couldn't claim break-13: claim: break-13 is agent-18's change: claim under a change name of your own
+2377s  agent-12     couldn't claim break-13: claim: break-13 is agent-18's change: claim under a change name of your own
+2377s  agent-4      couldn't claim break-13: claim: break-13 is agent-18's change: claim under a change name of your own
+2377s  agent-8      couldn't claim break-13: claim: break-13 is agent-18's change: claim under a change name of your own
+2377s  agent-14     couldn't claim break-13: claim: break-13 is agent-18's change: claim under a change name of your own
+2377s  agent-17     couldn't claim break-13: claim: break-13 is agent-18's change: claim under a change name of your own
+2377s  agent-6      couldn't claim break-13: claim: break-13 is agent-18's change: claim under a change name of your own
+2378s  agent-11     couldn't claim break-13: claim: break-13 is agent-18's change: claim under a change name of your own
+2378s  agent-13     couldn't claim break-13: claim: break-13 is agent-18's change: claim under a change name of your own
+2378s  agent-2      couldn't claim break-13: claim: break-13 is agent-18's change: claim under a change name of your own
+2378s  agent-1      couldn't claim break-13: claim: break-13 is agent-18's change: claim under a change name of your own
+2409s  agent-18     pushed break-13 dbefcdd: 1 file changed, 5 insertions(+)
+2441s  agent-9      approves break-13 (dbefcdd)
+2494s  agent-18     merge of break-13 refused: checks failed: npm test exited 1
+2497s  agent-18     githive-checks asks for changes to break-13: checks failed: npm test exited 1 on dbefcddd, checked alone on the branch, twice:
+s
+      ✔ should d
+2508s  agent-18     builds break-13 (1 path(s))
+2509s  agent-4      couldn't claim break-13: claim: break-13 is agent-18's change: claim under a change name of your own
+2509s  agent-7      couldn't claim break-13: claim: break-13 is agent-18's change: claim under a change name of your own
+2509s  agent-16     couldn't claim break-13: claim: break-13 is agent-18's change: claim under a change name of your own
+2509s  agent-1      couldn't claim break-13: claim: break-13 is agent-18's change: claim under a change name of your own
+2510s  agent-2      couldn't claim break-13: claim: break-13 is agent-18's change: claim under a change name of your own
+2510s  agent-11     couldn't claim break-13: claim: break-13 is agent-18's change: claim under a change name of your own
+2510s  agent-14     couldn't claim break-13: claim: break-13 is agent-18's change: claim under a change name of your own
+2511s  agent-9      couldn't claim break-13: claim: break-13 is agent-18's change: claim under a change name of your own
+2511s  agent-12     couldn't claim break-13: claim: break-13 is agent-18's change: claim under a change name of your own
+2512s  agent-10     couldn't claim break-13: claim: break-13 is agent-18's change: claim under a change name of your own
+2513s  agent-6      couldn't claim break-13: claim: break-13 is agent-18's change: claim under a change name of your own
+2513s  agent-15     couldn't claim break-13: claim: break-13 is agent-18's change: claim under a change name of your own
+2513s  agent-7      couldn't claim break-13: claim: break-13 is agent-18's change: claim under a change name of your own
+2513s  agent-16     couldn't claim break-13: claim: break-13 is agent-18's change: claim under a change name of your own
+2513s  agent-17     couldn't claim break-13: claim: break-13 is agent-18's change: claim under a change name of your own
+2514s  agent-1      couldn't claim break-13: claim: break-13 is agent-18's change: claim under a change name of your own
+2514s  agent-19     couldn't claim break-13: claim: break-13 is agent-18's change: claim under a change name of your own
+2514s  agent-4      couldn't claim break-13: claim: break-13 is agent-18's change: claim under a change name of your own
+2514s  agent-20     couldn't claim break-13: claim: break-13 is agent-18's change: claim under a change name of your own
+2515s  agent-11     couldn't claim break-13: claim: break-13 is agent-18's change: claim under a change name of your own
+2515s  agent-3      couldn't claim break-13: claim: break-13 is agent-18's change: claim under a change name of your own
+2515s  agent-13     couldn't claim break-13: claim: break-13 is agent-18's change: claim under a change name of your own
+2515s  agent-2      couldn't claim break-13: claim: break-13 is agent-18's change: claim under a change name of your own
+2516s  agent-8      couldn't claim break-13: claim: break-13 is agent-18's change: claim under a change name of your own
+2516s  agent-9      couldn't claim break-13: claim: break-13 is agent-18's change: claim under a change name of your own
+2516s  agent-14     couldn't claim break-13: claim: break-13 is agent-18's change: claim under a change name of your own
+2527s  agent-18     build break-13 failed: hint: 'git pull' before pushing again. | hint: See the 'Note about fast-forwards' in 'git push --help' for details.
+2540s  agent-18     githive-checks asks for changes to break-13: checks failed: npm test exited 1 on dbefcddd, checked alone on the branch, twice:
+s
+      ✔ should d
+2546s  agent-18     githive-checks asks for changes to break-13: checks failed: npm test exited 1 on dbefcddd, checked alone on the branch, twice:
+s
+      ✔ should d
+2550s  agent-19     builds break-13 (1 path(s))
+2552s  agent-5      couldn't claim break-13: claim: break-13 is agent-19's change: claim under a change name of your own
+2555s  agent-16     couldn't claim break-13: claim: break-13 is agent-19's change: claim under a change name of your own
+2555s  agent-15     couldn't claim break-13: claim: break-13 is agent-19's change: claim under a change name of your own
+2555s  agent-10     couldn't claim break-13: claim: break-13 is agent-19's change: claim under a change name of your own
+2555s  agent-12     couldn't claim break-13: claim: break-13 is agent-19's change: claim under a change name of your own
+2555s  agent-17     couldn't claim break-13: claim: break-13 is agent-19's change: claim under a change name of your own
+2555s  agent-1      couldn't claim break-13: claim: break-13 is agent-19's change: claim under a change name of your own
+2555s  agent-11     couldn't claim break-13: claim: break-13 is agent-19's change: claim under a change name of your own
+2555s  agent-6      couldn't claim break-13: claim: break-13 is agent-19's change: claim under a change name of your own
+2555s  agent-18     couldn't claim break-13: claim: break-13 is agent-19's change: claim under a change name of your own
+2555s  agent-7      couldn't claim break-13: claim: break-13 is agent-19's change: claim under a change name of your own
+2557s  agent-5      couldn't claim break-13: claim: break-13 is agent-19's change: claim under a change name of your own
+2557s  agent-4      couldn't claim break-13: claim: break-13 is agent-19's change: claim under a change name of your own
+2557s  agent-13     couldn't claim break-13: claim: break-13 is agent-19's change: claim under a change name of your own
+2558s  agent-2      couldn't claim break-13: claim: break-13 is agent-19's change: claim under a change name of your own
+2558s  agent-20     couldn't claim break-13: claim: break-13 is agent-19's change: claim under a change name of your own
+2558s  agent-9      couldn't claim break-13: claim: break-13 is agent-19's change: claim under a change name of your own
+2558s  agent-3      couldn't claim break-13: claim: break-13 is agent-19's change: claim under a change name of your own
+2558s  agent-14     couldn't claim break-13: claim: break-13 is agent-19's change: claim under a change name of your own
+2589s  agent-19     pushed break-13 9b05f37: 1 file changed, 5 insertions(+)
+2613s  agent-9      approves break-13 (9b05f37)
+2668s  agent-19     merge of break-13 refused: checks failed: npm test exited 1
+2671s  agent-19     githive-checks asks for changes to break-13: checks failed: npm test exited 1 on 9b05f37f, checked alone on the branch, twice:
+s
+      ✔ should d
+2676s  agent-19     githive-checks asks for changes to break-13: checks failed: npm test exited 1 on 9b05f37f, checked alone on the branch, twice:
+s
+      ✔ should d
+2683s  agent-15     builds break-13 (1 path(s))
+2684s  agent-11     couldn't claim break-13: claim: break-13 is agent-15's change: claim under a change name of your own
+2684s  agent-12     couldn't claim break-13: claim: break-13 is agent-15's change: claim under a change name of your own
+2684s  agent-13     couldn't claim break-13: claim: break-13 is agent-15's change: claim under a change name of your own
+2685s  agent-4      couldn't claim break-13: claim: break-13 is agent-15's change: claim under a change name of your own
+2685s  agent-5      couldn't claim break-13: claim: break-13 is agent-15's change: claim under a change name of your own
+2685s  agent-8      couldn't claim break-13: claim: break-13 is agent-15's change: claim under a change name of your own
+2685s  agent-2      couldn't claim break-13: claim: break-13 is agent-15's change: claim under a change name of your own
+2685s  agent-18     couldn't claim break-13: claim: break-13 is agent-15's change: claim under a change name of your own
+2685s  agent-1      couldn't claim break-13: claim: break-13 is agent-15's change: claim under a change name of your own
+2686s  agent-14     couldn't claim break-13: claim: break-13 is agent-15's change: claim under a change name of your own
+2686s  agent-19     couldn't claim break-13: claim: break-13 is agent-15's change: claim under a change name of your own
+2686s  agent-17     couldn't claim break-13: claim: break-13 is agent-15's change: claim under a change name of your own
+2687s  agent-10     couldn't claim break-13: claim: break-13 is agent-15's change: claim under a change name of your own
+2687s  agent-16     couldn't claim break-13: claim: break-13 is agent-15's change: claim under a change name of your own
+2687s  agent-3      couldn't claim break-13: claim: break-13 is agent-15's change: claim under a change name of your own
+2688s  agent-11     couldn't claim break-13: claim: break-13 is agent-15's change: claim under a change name of your own
+2689s  agent-13     couldn't claim break-13: claim: break-13 is agent-15's change: claim under a change name of your own
+2689s  agent-6      couldn't claim break-13: claim: break-13 is agent-15's change: claim under a change name of your own
+2689s  agent-20     couldn't claim break-13: claim: break-13 is agent-15's change: claim under a change name of your own
+2689s  agent-1      couldn't claim break-13: claim: break-13 is agent-15's change: claim under a change name of your own
+2689s  agent-4      couldn't claim break-13: claim: break-13 is agent-15's change: claim under a change name of your own
+2690s  agent-18     couldn't claim break-13: claim: break-13 is agent-15's change: claim under a change name of your own
+2690s  agent-5      couldn't claim break-13: claim: break-13 is agent-15's change: claim under a change name of your own
+2690s  agent-12     couldn't claim break-13: claim: break-13 is agent-15's change: claim under a change name of your own
+2690s  agent-14     couldn't claim break-13: claim: break-13 is agent-15's change: claim under a change name of your own
+2690s  agent-2      couldn't claim break-13: claim: break-13 is agent-15's change: claim under a change name of your own
+2691s  agent-8      couldn't claim break-13: claim: break-13 is agent-15's change: claim under a change name of your own
+2691s  agent-19     couldn't claim break-13: claim: break-13 is agent-15's change: claim under a change name of your own
+2692s  agent-9      couldn't claim break-13: claim: break-13 is agent-15's change: claim under a change name of your own
+2711s  agent-15     build break-13 failed: hint: 'git pull' before pushing again. | hint: See the 'Note about fast-forwards' in 'git push --help' for details.
+2724s  agent-15     githive-checks asks for changes to break-13: checks failed: npm test exited 1 on f3e7ee33, checked alone on the branch, twice:
+s
+      ✔ should d
+2735s  agent-15     builds break-13 (1 path(s))
+2735s  agent-3      couldn't claim break-13: claim: break-13 is agent-15's change: claim under a change name of your own
+2736s  agent-6      couldn't claim break-13: claim: break-13 is agent-15's change: claim under a change name of your own
+2736s  agent-14     couldn't claim break-13: claim: break-13 is agent-15's change: claim under a change name of your own
+2736s  agent-2      couldn't claim break-13: claim: break-13 is agent-15's change: claim under a change name of your own
+2737s  agent-8      couldn't claim break-13: claim: break-13 is agent-15's change: claim under a change name of your own
+2737s  agent-18     couldn't claim break-13: claim: break-13 is agent-15's change: claim under a change name of your own
+2737s  agent-4      couldn't claim break-13: claim: break-13 is agent-15's change: claim under a change name of your own
+2737s  agent-9      couldn't claim break-13: claim: break-13 is agent-15's change: claim under a change name of your own
+2737s  agent-20     couldn't claim break-13: claim: break-13 is agent-15's change: claim under a change name of your own
+2738s  agent-19     couldn't claim break-13: claim: break-13 is agent-15's change: claim under a change name of your own
+2738s  agent-5      couldn't claim break-13: claim: break-13 is agent-15's change: claim under a change name of your own
+2738s  agent-1      couldn't claim break-13: claim: break-13 is agent-15's change: claim under a change name of your own
+2739s  agent-12     couldn't claim break-13: claim: break-13 is agent-15's change: claim under a change name of your own
+2739s  agent-10     couldn't claim break-13: claim: break-13 is agent-15's change: claim under a change name of your own
+2739s  agent-17     couldn't claim break-13: claim: break-13 is agent-15's change: claim under a change name of your own
+2740s  agent-7      couldn't claim break-13: claim: break-13 is agent-15's change: claim under a change name of your own
+2741s  agent-2      couldn't claim break-13: claim: break-13 is agent-15's change: claim under a change name of your own
+2741s  agent-6      couldn't claim break-13: claim: break-13 is agent-15's change: claim under a change name of your own
+2741s  agent-14     couldn't claim break-13: claim: break-13 is agent-15's change: claim under a change name of your own
+2741s  agent-13     couldn't claim break-13: claim: break-13 is agent-15's change: claim under a change name of your own
+2741s  agent-4      couldn't claim break-13: claim: break-13 is agent-15's change: claim under a change name of your own
+2742s  agent-19     couldn't claim break-13: claim: break-13 is agent-15's change: claim under a change name of your own
+2742s  agent-20     couldn't claim break-13: claim: break-13 is agent-15's change: claim under a change name of your own
+2742s  agent-8      couldn't claim break-13: claim: break-13 is agent-15's change: claim under a change name of your own
+2742s  agent-9      couldn't claim break-13: claim: break-13 is agent-15's change: claim under a change name of your own
+2742s  agent-18     couldn't claim break-13: claim: break-13 is agent-15's change: claim under a change name of your own
+2742s  agent-3      couldn't claim break-13: claim: break-13 is agent-15's change: claim under a change name of your own
+2743s  agent-11     couldn't claim break-13: claim: break-13 is agent-15's change: claim under a change name of your own
+2743s  agent-5      couldn't claim break-13: claim: break-13 is agent-15's change: claim under a change name of your own
+2759s  agent-15     build break-13 failed: hint: 'git pull' before pushing again. | hint: See the 'Note about fast-forwards' in 'git push --help' for details.
+2773s  agent-15     githive-checks asks for changes to break-13: checks failed: npm test exited 1 on f3e7ee33, checked alone on the branch, twice:
+s
+      ✔ should d
+2779s  agent-15     githive-checks asks for changes to break-13: checks failed: npm test exited 1 on f3e7ee33, checked alone on the branch, twice:
+s
+      ✔ should d
+2783s  agent-15     githive-checks asks for changes to break-13: checks failed: npm test exited 1 on f3e7ee33, checked alone on the branch, twice:
+s
+      ✔ should d
+2791s  agent-13     builds break-13 (1 path(s))
+2792s  agent-7      couldn't claim break-13: claim: break-13 is agent-13's change: claim under a change name of your own
+2792s  agent-20     couldn't claim break-13: claim: break-13 is agent-13's change: claim under a change name of your own
+2792s  agent-8      couldn't claim break-13: claim: break-13 is agent-13's change: claim under a change name of your own
+2792s  agent-15     couldn't claim break-13: claim: break-13 is agent-13's change: claim under a change name of your own
+2792s  agent-18     couldn't claim break-13: claim: break-13 is agent-13's change: claim under a change name of your own
+2792s  agent-19     couldn't claim break-13: claim: break-13 is agent-13's change: claim under a change name of your own
+2792s  agent-12     couldn't claim break-13: claim: break-13 is agent-13's change: claim under a change name of your own
+2792s  agent-16     couldn't claim break-13: claim: break-13 is agent-13's change: claim under a change name of your own
+2793s  agent-5      couldn't claim break-13: claim: break-13 is agent-13's change: claim under a change name of your own
+2794s  agent-4      couldn't claim break-13: claim: break-13 is agent-13's change: claim under a change name of your own
+2794s  agent-1      couldn't claim break-13: claim: break-13 is agent-13's change: claim under a change name of your own
+2795s  agent-10     couldn't claim break-13: claim: break-13 is agent-13's change: claim under a change name of your own
+2795s  agent-6      couldn't claim break-13: claim: break-13 is agent-13's change: claim under a change name of your own
+2795s  agent-11     couldn't claim break-13: claim: break-13 is agent-13's change: claim under a change name of your own
+2796s  agent-14     couldn't claim break-13: claim: break-13 is agent-13's change: claim under a change name of your own
+2796s  agent-17     couldn't claim break-13: claim: break-13 is agent-13's change: claim under a change name of your own
+2797s  agent-18     couldn't claim break-13: claim: break-13 is agent-13's change: claim under a change name of your own
+2797s  agent-12     couldn't claim break-13: claim: break-13 is agent-13's change: claim under a change name of your own
+2797s  agent-20     couldn't claim break-13: claim: break-13 is agent-13's change: claim under a change name of your own
+2797s  agent-8      couldn't claim break-13: claim: break-13 is agent-13's change: claim under a change name of your own
+2797s  agent-16     couldn't claim break-13: claim: break-13 is agent-13's change: claim under a change name of your own
+2797s  agent-15     couldn't claim break-13: claim: break-13 is agent-13's change: claim under a change name of your own
+2798s  agent-5      couldn't claim break-13: claim: break-13 is agent-13's change: claim under a change name of your own
+2798s  agent-3      couldn't claim break-13: claim: break-13 is agent-13's change: claim under a change name of your own
+2798s  agent-9      couldn't claim break-13: claim: break-13 is agent-13's change: claim under a change name of your own
+2798s  agent-4      couldn't claim break-13: claim: break-13 is agent-13's change: claim under a change name of your own
+2799s  agent-1      couldn't claim break-13: claim: break-13 is agent-13's change: claim under a change name of your own
+2800s  agent-2      couldn't claim break-13: claim: break-13 is agent-13's change: claim under a change name of your own
+2800s  agent-19     couldn't claim break-13: claim: break-13 is agent-13's change: claim under a change name of your own
+2825s  agent-13     build break-13 failed: hint: 'git pull' before pushing again. | hint: See the 'Note about fast-forwards' in 'git push --help' for details.
+2840s  agent-13     githive-checks asks for changes to break-13: checks failed: npm test exited 1 on 576a1f84, checked alone on the branch, twice:
+s
+      ✔ should d
+2845s  agent-13     githive-checks asks for changes to break-13: checks failed: npm test exited 1 on 576a1f84, checked alone on the branch, twice:
+s
+      ✔ should d
+2851s  agent-3      builds break-13 (1 path(s))
+2852s  agent-2      couldn't claim break-13: claim: break-13 is agent-3's change: claim under a change name of your own
+2852s  agent-1      couldn't claim break-13: claim: break-13 is agent-3's change: claim under a change name of your own
+2852s  agent-8      couldn't claim break-13: claim: break-13 is agent-3's change: claim under a change name of your own
+2853s  agent-12     couldn't claim break-13: claim: break-13 is agent-3's change: claim under a change name of your own
+2853s  agent-5      couldn't claim break-13: claim: break-13 is agent-3's change: claim under a change name of your own
+2853s  agent-16     couldn't claim break-13: claim: break-13 is agent-3's change: claim under a change name of your own
+2854s  agent-14     couldn't claim break-13: claim: break-13 is agent-3's change: claim under a change name of your own
+2854s  agent-13     couldn't claim break-13: claim: break-13 is agent-3's change: claim under a change name of your own
+2854s  agent-4      couldn't claim break-13: claim: break-13 is agent-3's change: claim under a change name of your own
+2854s  agent-11     couldn't claim break-13: claim: break-13 is agent-3's change: claim under a change name of your own
+2854s  agent-10     couldn't claim break-13: claim: break-13 is agent-3's change: claim under a change name of your own
+2855s  agent-19     couldn't claim break-13: claim: break-13 is agent-3's change: claim under a change name of your own
+2855s  agent-6      couldn't claim break-13: claim: break-13 is agent-3's change: claim under a change name of your own
+2856s  agent-9      couldn't claim break-13: claim: break-13 is agent-3's change: claim under a change name of your own
+2856s  agent-7      couldn't claim break-13: claim: break-13 is agent-3's change: claim under a change name of your own
+2857s  agent-15     couldn't claim break-13: claim: break-13 is agent-3's change: claim under a change name of your own
+2857s  agent-1      couldn't claim break-13: claim: break-13 is agent-3's change: claim under a change name of your own
+2857s  agent-2      couldn't claim break-13: claim: break-13 is agent-3's change: claim under a change name of your own
+2857s  agent-8      couldn't claim break-13: claim: break-13 is agent-3's change: claim under a change name of your own
+2858s  agent-20     couldn't claim break-13: claim: break-13 is agent-3's change: claim under a change name of your own
+2858s  agent-14     couldn't claim break-13: claim: break-13 is agent-3's change: claim under a change name of your own
+2859s  agent-10     couldn't claim break-13: claim: break-13 is agent-3's change: claim under a change name of your own
+2859s  agent-13     couldn't claim break-13: claim: break-13 is agent-3's change: claim under a change name of your own
+2860s  agent-5      couldn't claim break-13: claim: break-13 is agent-3's change: claim under a change name of your own
+2860s  agent-6      couldn't claim break-13: claim: break-13 is agent-3's change: claim under a change name of your own
+2860s  agent-9      couldn't claim break-13: claim: break-13 is agent-3's change: claim under a change name of your own
+2860s  agent-19     couldn't claim break-13: claim: break-13 is agent-3's change: claim under a change name of your own
+2860s  agent-12     couldn't claim break-13: claim: break-13 is agent-3's change: claim under a change name of your own
+2861s  agent-16     couldn't claim break-13: claim: break-13 is agent-3's change: claim under a change name of your own
+2861s  agent-11     couldn't claim break-13: claim: break-13 is agent-3's change: claim under a change name of your own
+2861s  agent-7      couldn't claim break-13: claim: break-13 is agent-3's change: claim under a change name of your own
+2861s  agent-4      couldn't claim break-13: claim: break-13 is agent-3's change: claim under a change name of your own
+2861s  agent-2      couldn't claim break-13: claim: break-13 is agent-3's change: claim under a change name of your own
+2862s  agent-1      couldn't claim break-13: claim: break-13 is agent-3's change: claim under a change name of your own
+2862s  agent-8      couldn't claim break-13: claim: break-13 is agent-3's change: claim under a change name of your own
+2863s  agent-15     couldn't claim break-13: claim: break-13 is agent-3's change: claim under a change name of your own
+2863s  agent-17     couldn't claim break-13: claim: break-13 is agent-3's change: claim under a change name of your own
+2873s  agent-3      pushed break-13 e6384c6: 1 file changed, 5 insertions(+)
+2906s  agent-12     approves break-13 (e6384c6)
+2956s  agent-3      merge of break-13 refused: checks failed: npm test exited 1
+2959s  agent-3      githive-checks asks for changes to break-13: checks failed: npm test exited 1 on e6384c69, checked alone on the branch, twice:
+s
+      ✔ should d
+2965s  agent-3      githive-checks asks for changes to break-13: checks failed: npm test exited 1 on e6384c69, checked alone on the branch, twice:
+s
+      ✔ should d
+2973s  agent-3      builds break-13 (1 path(s))
+2973s  agent-2      couldn't claim break-13: claim: break-13 is agent-12's change: claim under a change name of your own
+2974s  agent-6      couldn't claim break-13: claim: break-13 is agent-12's change: claim under a change name of your own
+2974s  agent-12     couldn't claim break-13: claim: break-13 is agent-3's change: claim under a change name of your own
+2975s  agent-17     couldn't claim break-13: claim: break-13 is agent-12's change: claim under a change name of your own
+2975s  agent-1      couldn't claim break-13: claim: break-13 is agent-12's change: claim under a change name of your own
+2975s  agent-18     couldn't claim break-13: claim: break-13 is agent-12's change: claim under a change name of your own
+2975s  agent-5      couldn't claim break-13: claim: break-13 is agent-12's change: claim under a change name of your own
+2975s  agent-13     couldn't claim break-13: claim: break-13 is agent-12's change: claim under a change name of your own
+2976s  agent-20     couldn't claim break-13: claim: break-13 is agent-12's change: claim under a change name of your own
+2976s  agent-9      couldn't claim break-13: claim: break-13 is agent-12's change: claim under a change name of your own
+2977s  agent-16     couldn't claim break-13: claim: break-13 is agent-12's change: claim under a change name of your own
+2977s  agent-14     couldn't claim break-13: claim: break-13 is agent-12's change: claim under a change name of your own
+2978s  agent-19     couldn't claim break-13: claim: break-13 is agent-12's change: claim under a change name of your own
+2978s  agent-8      couldn't claim break-13: claim: break-13 is agent-12's change: claim under a change name of your own
+2978s  agent-4      couldn't claim break-13: claim: break-13 is agent-12's change: claim under a change name of your own
+2978s  agent-6      couldn't claim break-13: claim: break-13 is agent-12's change: claim under a change name of your own
+2978s  agent-10     couldn't claim break-13: claim: break-13 is agent-12's change: claim under a change name of your own
+2979s  agent-7      couldn't claim break-13: claim: break-13 is agent-12's change: claim under a change name of your own
+2980s  agent-17     couldn't claim break-13: claim: break-13 is agent-12's change: claim under a change name of your own
+2980s  agent-15     couldn't claim break-13: claim: break-13 is agent-12's change: claim under a change name of your own
+2980s  agent-11     couldn't claim break-13: claim: break-13 is agent-12's change: claim under a change name of your own
+2980s  agent-1      couldn't claim break-13: claim: break-13 is agent-12's change: claim under a change name of your own
+2980s  agent-13     couldn't claim break-13: claim: break-13 is agent-12's change: claim under a change name of your own
+2980s  agent-20     couldn't claim break-13: claim: break-13 is agent-12's change: claim under a change name of your own
+2981s  agent-5      couldn't claim break-13: claim: break-13 is agent-12's change: claim under a change name of your own
+2981s  agent-12     couldn't claim break-13: claim: break-13 is agent-3's change: claim under a change name of your own
+2981s  agent-18     couldn't claim break-13: claim: break-13 is agent-12's change: claim under a change name of your own
+2991s  agent-3      build break-13 failed: hint: 'git pull' before pushing again. | hint: See the 'Note about fast-forwards' in 'git push --help' for details.
+3003s  agent-3      githive-checks asks for changes to break-13: checks failed: npm test exited 1 on e6384c69, checked alone on the branch, twice:
+s
+      ✔ should d
+3010s  agent-3      githive-checks asks for changes to break-13: checks failed: npm test exited 1 on e6384c69, checked alone on the branch, twice:
+s
+      ✔ should d
+3015s  agent-17     builds break-13 (1 path(s))
+3016s  agent-9      couldn't claim break-13: claim: break-13 is agent-17's change: claim under a change name of your own
+3017s  agent-20     couldn't claim break-13: claim: break-13 is agent-17's change: claim under a change name of your own
+3017s  agent-4      couldn't claim break-13: claim: break-13 is agent-17's change: claim under a change name of your own
+3017s  agent-12     couldn't claim break-13: claim: break-13 is agent-17's change: claim under a change name of your own
+3017s  agent-16     couldn't claim break-13: claim: break-13 is agent-17's change: claim under a change name of your own
+3018s  agent-8      couldn't claim break-13: claim: break-13 is agent-17's change: claim under a change name of your own
+3018s  agent-3      couldn't claim break-13: claim: break-13 is agent-17's change: claim under a change name of your own
+3019s  agent-15     couldn't claim break-13: claim: break-13 is agent-17's change: claim under a change name of your own
+3019s  agent-6      couldn't claim break-13: claim: break-13 is agent-17's change: claim under a change name of your own
+3019s  agent-19     couldn't claim break-13: claim: break-13 is agent-17's change: claim under a change name of your own
+3019s  agent-7      couldn't claim break-13: claim: break-13 is agent-17's change: claim under a change name of your own
+3020s  agent-13     couldn't claim break-13: claim: break-13 is agent-17's change: claim under a change name of your own
+3020s  agent-14     couldn't claim break-13: claim: break-13 is agent-17's change: claim under a change name of your own
+3020s  agent-1      couldn't claim break-13: claim: break-13 is agent-17's change: claim under a change name of your own
+3020s  agent-11     couldn't claim break-13: claim: break-13 is agent-17's change: claim under a change name of your own
+3021s  agent-20     couldn't claim break-13: claim: break-13 is agent-17's change: claim under a change name of your own
+3021s  agent-9      couldn't claim break-13: claim: break-13 is agent-17's change: claim under a change name of your own
+3022s  agent-2      couldn't claim break-13: claim: break-13 is agent-17's change: claim under a change name of your own
+3022s  agent-4      couldn't claim break-13: claim: break-13 is agent-17's change: claim under a change name of your own
+3022s  agent-8      couldn't claim break-13: claim: break-13 is agent-17's change: claim under a change name of your own
+3023s  agent-16     couldn't claim break-13: claim: break-13 is agent-17's change: claim under a change name of your own
+3023s  agent-12     couldn't claim break-13: claim: break-13 is agent-17's change: claim under a change name of your own
+3023s  agent-15     couldn't claim break-13: claim: break-13 is agent-17's change: claim under a change name of your own
+3023s  agent-5      couldn't claim break-13: claim: break-13 is agent-17's change: claim under a change name of your own
+3023s  agent-19     couldn't claim break-13: claim: break-13 is agent-17's change: claim under a change name of your own
+3023s  agent-3      couldn't claim break-13: claim: break-13 is agent-17's change: claim under a change name of your own
+3023s  agent-10     couldn't claim break-13: claim: break-13 is agent-17's change: claim under a change name of your own
+3024s  agent-6      couldn't claim break-13: claim: break-13 is agent-17's change: claim under a change name of your own
+3024s  agent-7      couldn't claim break-13: claim: break-13 is agent-17's change: claim under a change name of your own
+3024s  agent-13     couldn't claim break-13: claim: break-13 is agent-17's change: claim under a change name of your own
+3052s  agent-17     pushed break-13 740db7d: 1 file changed, 5 insertions(+)
+3073s  agent-5      approves break-13 (740db7d)
+3115s  agent-17     merge of break-13 refused: checks failed: npm test exited 1
+3118s  agent-17     githive-checks asks for changes to break-13: checks failed: npm test exited 1 on 740db7dc, checked alone on the branch, twice:
+s
+      ✔ should d
+3129s  agent-17     builds break-13 (1 path(s))
+3131s  agent-20     couldn't claim break-13: claim: break-13 is agent-17's change: claim under a change name of your own
+3131s  agent-12     couldn't claim break-13: claim: break-13 is agent-17's change: claim under a change name of your own
+3131s  agent-9      couldn't claim break-13: claim: break-13 is agent-17's change: claim under a change name of your own
+3132s  agent-7      couldn't claim break-13: claim: break-13 is agent-17's change: claim under a change name of your own
+3132s  agent-2      couldn't claim break-13: claim: break-13 is agent-17's change: claim under a change name of your own
+3132s  agent-4      couldn't claim break-13: claim: break-13 is agent-17's change: claim under a change name of your own
+3132s  agent-19     couldn't claim break-13: claim: break-13 is agent-17's change: claim under a change name of your own
+3133s  agent-10     couldn't claim break-13: claim: break-13 is agent-17's change: claim under a change name of your own
+3134s  agent-13     couldn't claim break-13: claim: break-13 is agent-17's change: claim under a change name of your own
+3135s  agent-18     couldn't claim break-13: claim: break-13 is agent-17's change: claim under a change name of your own
+3135s  agent-14     couldn't claim break-13: claim: break-13 is agent-17's change: claim under a change name of your own
+3135s  agent-8      couldn't claim break-13: claim: break-13 is agent-17's change: claim under a change name of your own
+3135s  agent-20     couldn't claim break-13: claim: break-13 is agent-17's change: claim under a change name of your own
+3135s  agent-6      couldn't claim break-13: claim: break-13 is agent-17's change: claim under a change name of your own
+3135s  agent-12     couldn't claim break-13: claim: break-13 is agent-17's change: claim under a change name of your own
+3135s  agent-9      couldn't claim break-13: claim: break-13 is agent-17's change: claim under a change name of your own
+3135s  agent-3      couldn't claim break-13: claim: break-13 is agent-17's change: claim under a change name of your own
+3135s  agent-5      couldn't claim break-13: claim: break-13 is agent-17's change: claim under a change name of your own
+3136s  agent-16     couldn't claim break-13: claim: break-13 is agent-17's change: claim under a change name of your own
+3136s  agent-11     couldn't claim break-13: claim: break-13 is agent-17's change: claim under a change name of your own
+3136s  agent-1      couldn't claim break-13: claim: break-13 is agent-17's change: claim under a change name of your own
+3137s  agent-4      couldn't claim break-13: claim: break-13 is agent-17's change: claim under a change name of your own
+3137s  agent-2      couldn't claim break-13: claim: break-13 is agent-17's change: claim under a change name of your own
+3137s  agent-7      couldn't claim break-13: claim: break-13 is agent-17's change: claim under a change name of your own
+3137s  agent-19     couldn't claim break-13: claim: break-13 is agent-17's change: claim under a change name of your own
+3138s  agent-10     couldn't claim break-13: claim: break-13 is agent-17's change: claim under a change name of your own
+3139s  agent-13     couldn't claim break-13: claim: break-13 is agent-17's change: claim under a change name of your own
+3150s  agent-17     build break-13 failed: hint: 'git pull' before pushing again. | hint: See the 'Note about fast-forwards' in 'git push --help' for details.
+3163s  agent-17     githive-checks asks for changes to break-13: checks failed: npm test exited 1 on 740db7dc, checked alone on the branch, twice:
+s
+      ✔ should d
+3169s  agent-17     githive-checks asks for changes to break-13: checks failed: npm test exited 1 on 740db7dc, checked alone on the branch, twice:
+s
+      ✔ should d
+3177s  agent-8      couldn't claim break-13: claim: break-13 is agent-2's change: claim under a change name of your own
+3177s  agent-2      builds break-13 (1 path(s))
+3177s  agent-17     couldn't claim break-13: claim: break-13 is agent-2's change: claim under a change name of your own
+3177s  agent-12     couldn't claim break-13: claim: break-13 is agent-2's change: claim under a change name of your own
+3177s  agent-18     couldn't claim break-13: claim: break-13 is agent-2's change: claim under a change name of your own
+3178s  agent-15     couldn't claim break-13: claim: break-13 is agent-2's change: claim under a change name of your own
+3178s  agent-5      couldn't claim break-13: claim: break-13 is agent-2's change: claim under a change name of your own
+3178s  agent-6      couldn't claim break-13: claim: break-13 is agent-2's change: claim under a change name of your own
+3178s  agent-11     couldn't claim break-13: claim: break-13 is agent-2's change: claim under a change name of your own
+3178s  agent-20     couldn't claim break-13: claim: break-13 is agent-2's change: claim under a change name of your own
+3179s  agent-3      couldn't claim break-13: claim: break-13 is agent-2's change: claim under a change name of your own
+3179s  agent-19     couldn't claim break-13: claim: break-13 is agent-2's change: claim under a change name of your own
+3179s  agent-16     couldn't claim break-13: claim: break-13 is agent-2's change: claim under a change name of your own
+3179s  agent-13     couldn't claim break-13: claim: break-13 is agent-2's change: claim under a change name of your own
+3179s  agent-4      couldn't claim break-13: claim: break-13 is agent-2's change: claim under a change name of your own
+3179s  agent-9      couldn't claim break-13: claim: break-13 is agent-2's change: claim under a change name of your own
+3180s  agent-7      couldn't claim break-13: claim: break-13 is agent-2's change: claim under a change name of your own
+3180s  agent-1      couldn't claim break-13: claim: break-13 is agent-2's change: claim under a change name of your own
+3180s  agent-10     couldn't claim break-13: claim: break-13 is agent-2's change: claim under a change name of your own
+3180s  agent-14     couldn't claim break-13: claim: break-13 is agent-2's change: claim under a change name of your own
+3182s  agent-15     couldn't claim break-13: claim: break-13 is agent-2's change: claim under a change name of your own
+3182s  agent-6      couldn't claim break-13: claim: break-13 is agent-2's change: claim under a change name of your own
+3183s  agent-11     couldn't claim break-13: claim: break-13 is agent-2's change: claim under a change name of your own
+3183s  agent-20     couldn't claim break-13: claim: break-13 is agent-2's change: claim under a change name of your own
+3183s  agent-5      couldn't claim break-13: claim: break-13 is agent-2's change: claim under a change name of your own
+3184s  agent-16     couldn't claim break-13: claim: break-13 is agent-2's change: claim under a change name of your own
+3184s  agent-18     couldn't claim break-13: claim: break-13 is agent-2's change: claim under a change name of your own
+3184s  agent-3      couldn't claim break-13: claim: break-13 is agent-2's change: claim under a change name of your own
+3184s  agent-13     couldn't claim break-13: claim: break-13 is agent-2's change: claim under a change name of your own
+3185s  agent-9      couldn't claim break-13: claim: break-13 is agent-2's change: claim under a change name of your own
+3185s  agent-12     couldn't claim break-13: claim: break-13 is agent-2's change: claim under a change name of your own
+3185s  agent-19     couldn't claim break-13: claim: break-13 is agent-2's change: claim under a change name of your own
+3185s  agent-17     couldn't claim break-13: claim: break-13 is agent-2's change: claim under a change name of your own
+3201s  agent-2      build break-13 failed: hint: 'git pull' before pushing again. | hint: See the 'Note about fast-forwards' in 'git push --help' for details.
+3213s  agent-2      githive-checks asks for changes to break-13: checks failed: npm test exited 1 on a769447c, checked alone on the branch, twice:
+s
+      ✔ should d
+3226s  agent-2      builds break-13 (1 path(s))
+3227s  agent-12     couldn't claim break-13: claim: break-13 is agent-2's change: claim under a change name of your own
+3228s  agent-6      couldn't claim break-13: claim: break-13 is agent-2's change: claim under a change name of your own
+3229s  agent-15     couldn't claim break-13: claim: break-13 is agent-2's change: claim under a change name of your own
+3229s  agent-4      couldn't claim break-13: claim: break-13 is agent-2's change: claim under a change name of your own
+3229s  agent-17     couldn't claim break-13: claim: break-13 is agent-2's change: claim under a change name of your own
+3230s  agent-10     couldn't claim break-13: claim: break-13 is agent-2's change: claim under a change name of your own
+3230s  agent-7      couldn't claim break-13: claim: break-13 is agent-2's change: claim under a change name of your own
+3230s  agent-16     couldn't claim break-13: claim: break-13 is agent-2's change: claim under a change name of your own
+3230s  agent-18     couldn't claim break-13: claim: break-13 is agent-2's change: claim under a change name of your own
+3230s  agent-5      couldn't claim break-13: claim: break-13 is agent-2's change: claim under a change name of your own
+3231s  agent-11     couldn't claim break-13: claim: break-13 is agent-2's change: claim under a change name of your own
+3232s  agent-1      couldn't claim break-13: claim: break-13 is agent-2's change: claim under a change name of your own
+3232s  agent-12     couldn't claim break-13: claim: break-13 is agent-2's change: claim under a change name of your own
+3232s  agent-6      couldn't claim break-13: claim: break-13 is agent-2's change: claim under a change name of your own
+3232s  agent-20     couldn't claim break-13: claim: break-13 is agent-2's change: claim under a change name of your own
+3232s  agent-19     couldn't claim break-13: claim: break-13 is agent-2's change: claim under a change name of your own
+3233s  agent-13     couldn't claim break-13: claim: break-13 is agent-2's change: claim under a change name of your own
+3233s  agent-9      couldn't claim break-13: claim: break-13 is agent-2's change: claim under a change name of your own
+3233s  agent-15     couldn't claim break-13: claim: break-13 is agent-2's change: claim under a change name of your own
+3234s  agent-14     couldn't claim break-13: claim: break-13 is agent-2's change: claim under a change name of your own
+3234s  agent-4      couldn't claim break-13: claim: break-13 is agent-2's change: claim under a change name of your own
+3234s  agent-17     couldn't claim break-13: claim: break-13 is agent-2's change: claim under a change name of your own
+3236s  agent-8      couldn't claim break-13: claim: break-13 is agent-2's change: claim under a change name of your own
+3248s  agent-2      build break-13 failed: hint: 'git pull' before pushing again. | hint: See the 'Note about fast-forwards' in 'git push --help' for details.
+3261s  agent-2      githive-checks asks for changes to break-13: checks failed: npm test exited 1 on a769447c, checked alone on the branch, twice:
+s
+      ✔ should d
+3272s  agent-2      builds break-13 (1 path(s))
+3273s  agent-14     couldn't claim break-13: claim: break-13 is agent-2's change: claim under a change name of your own
+3273s  agent-13     couldn't claim break-13: claim: break-13 is agent-2's change: claim under a change name of your own
+3274s  agent-9      couldn't claim break-13: claim: break-13 is agent-2's change: claim under a change name of your own
+3274s  agent-6      couldn't claim break-13: claim: break-13 is agent-2's change: claim under a change name of your own
+3274s  agent-15     couldn't claim break-13: claim: break-13 is agent-2's change: claim under a change name of your own
+3274s  agent-17     couldn't claim break-13: claim: break-13 is agent-2's change: claim under a change name of your own
+3275s  agent-3      couldn't claim break-13: claim: break-13 is agent-2's change: claim under a change name of your own
+3276s  agent-4      couldn't claim break-13: claim: break-13 is agent-2's change: claim under a change name of your own
+3276s  agent-16     couldn't claim break-13: claim: break-13 is agent-2's change: claim under a change name of your own
+3276s  agent-8      couldn't claim break-13: claim: break-13 is agent-2's change: claim under a change name of your own
+3276s  agent-18     couldn't claim break-13: claim: break-13 is agent-2's change: claim under a change name of your own
+3277s  agent-19     couldn't claim break-13: claim: break-13 is agent-2's change: claim under a change name of your own
+3277s  agent-10     couldn't claim break-13: claim: break-13 is agent-2's change: claim under a change name of your own
+3277s  agent-7      couldn't claim break-13: claim: break-13 is agent-2's change: claim under a change name of your own
+3278s  agent-14     couldn't claim break-13: claim: break-13 is agent-2's change: claim under a change name of your own
+3278s  agent-13     couldn't claim break-13: claim: break-13 is agent-2's change: claim under a change name of your own
+3278s  agent-11     couldn't claim break-13: claim: break-13 is agent-2's change: claim under a change name of your own
+3278s  agent-1      couldn't claim break-13: claim: break-13 is agent-2's change: claim under a change name of your own
+3279s  agent-6      couldn't claim break-13: claim: break-13 is agent-2's change: claim under a change name of your own
+3279s  agent-12     couldn't claim break-13: claim: break-13 is agent-2's change: claim under a change name of your own
+3279s  agent-17     couldn't claim break-13: claim: break-13 is agent-2's change: claim under a change name of your own
+3279s  agent-15     couldn't claim break-13: claim: break-13 is agent-2's change: claim under a change name of your own
+3279s  agent-20     couldn't claim break-13: claim: break-13 is agent-2's change: claim under a change name of your own
+3280s  agent-3      couldn't claim break-13: claim: break-13 is agent-2's change: claim under a change name of your own
+3280s  agent-16     couldn't claim break-13: claim: break-13 is agent-2's change: claim under a change name of your own
+3280s  agent-4      couldn't claim break-13: claim: break-13 is agent-2's change: claim under a change name of your own
+3280s  agent-8      couldn't claim break-13: claim: break-13 is agent-2's change: claim under a change name of your own
+3281s  agent-9      couldn't claim break-13: claim: break-13 is agent-2's change: claim under a change name of your own
+3282s  agent-18     couldn't claim break-13: claim: break-13 is agent-2's change: claim under a change name of your own
+3284s  agent-2      build break-13 failed: hint: 'git pull' before pushing again. | hint: See the 'Note about fast-forwards' in 'git push --help' for details.
+3297s  agent-2      githive-checks asks for changes to break-13: checks failed: npm test exited 1 on a769447c, checked alone on the branch, twice:
+s
+      ✔ should d
+3302s  agent-2      githive-checks asks for changes to break-13: checks failed: npm test exited 1 on a769447c, checked alone on the branch, twice:
+s
+      ✔ should d
+3309s  agent-6      builds break-13 (1 path(s))
+3310s  agent-19     couldn't claim break-13: claim: break-13 is agent-6's change: claim under a change name of your own
+3310s  agent-2      couldn't claim break-13: claim: break-13 is agent-6's change: claim under a change name of your own
+3311s  agent-14     couldn't claim break-13: claim: break-13 is agent-6's change: claim under a change name of your own
+3311s  agent-5      couldn't claim break-13: claim: break-13 is agent-6's change: claim under a change name of your own
+3311s  agent-7      couldn't claim break-13: claim: break-13 is agent-6's change: claim under a change name of your own
+3311s  agent-10     couldn't claim break-13: claim: break-13 is agent-6's change: claim under a change name of your own
+3311s  agent-1      couldn't claim break-13: claim: break-13 is agent-6's change: claim under a change name of your own
+3312s  agent-13     couldn't claim break-13: claim: break-13 is agent-6's change: claim under a change name of your own
+3312s  agent-11     couldn't claim break-13: claim: break-13 is agent-6's change: claim under a change name of your own
+3312s  agent-20     couldn't claim break-13: claim: break-13 is agent-6's change: claim under a change name of your own
+3313s  agent-17     couldn't claim break-13: claim: break-13 is agent-6's change: claim under a change name of your own
+3313s  agent-8      couldn't claim break-13: claim: break-13 is agent-6's change: claim under a change name of your own
+3313s  agent-4      couldn't claim break-13: claim: break-13 is agent-6's change: claim under a change name of your own
+3314s  agent-9      couldn't claim break-13: claim: break-13 is agent-6's change: claim under a change name of your own
+3314s  agent-12     couldn't claim break-13: claim: break-13 is agent-6's change: claim under a change name of your own
+3314s  agent-16     couldn't claim break-13: claim: break-13 is agent-6's change: claim under a change name of your own
+3314s  agent-15     couldn't claim break-13: claim: break-13 is agent-6's change: claim under a change name of your own
+3315s  agent-2      couldn't claim break-13: claim: break-13 is agent-6's change: claim under a change name of your own
+3315s  agent-19     couldn't claim break-13: claim: break-13 is agent-6's change: claim under a change name of your own
+3315s  agent-3      couldn't claim break-13: claim: break-13 is agent-6's change: claim under a change name of your own
+3315s  agent-5      couldn't claim break-13: claim: break-13 is agent-6's change: claim under a change name of your own
+3316s  agent-7      couldn't claim break-13: claim: break-13 is agent-6's change: claim under a change name of your own
+3316s  agent-14     couldn't claim break-13: claim: break-13 is agent-6's change: claim under a change name of your own
+3316s  agent-1      couldn't claim break-13: claim: break-13 is agent-6's change: claim under a change name of your own
+3316s  agent-10     couldn't claim break-13: claim: break-13 is agent-6's change: claim under a change name of your own
+3317s  agent-13     couldn't claim break-13: claim: break-13 is agent-6's change: claim under a change name of your own
+3317s  agent-11     couldn't claim break-13: claim: break-13 is agent-6's change: claim under a change name of your own
+3317s  agent-20     couldn't claim break-13: claim: break-13 is agent-6's change: claim under a change name of your own
+3338s  agent-6      pushed break-13 d4a74cc: 1 file changed, 5 insertions(+)
+3355s  agent-2      approves break-13 (d4a74cc)
+3409s  agent-6      merge of break-13 refused: checks failed: npm test exited 1
+3412s  agent-6      githive-checks asks for changes to break-13: checks failed: npm test exited 1 on d4a74cc4, checked alone on the branch, twice:
+s
+      ✔ should d
+3423s  agent-6      builds break-13 (1 path(s))
+3424s  agent-7      couldn't claim break-13: claim: break-13 is agent-6's change: claim under a change name of your own
+3425s  agent-3      couldn't claim break-13: claim: break-13 is agent-6's change: claim under a change name of your own
+3425s  agent-15     couldn't claim break-13: claim: break-13 is agent-6's change: claim under a change name of your own
+3425s  agent-13     couldn't claim break-13: claim: break-13 is agent-6's change: claim under a change name of your own
+3425s  agent-19     couldn't claim break-13: claim: break-13 is agent-6's change: claim under a change name of your own
+3425s  agent-8      couldn't claim break-13: claim: break-13 is agent-6's change: claim under a change name of your own
+3426s  agent-11     couldn't claim break-13: claim: break-13 is agent-6's change: claim under a change name of your own
+3427s  agent-20     couldn't claim break-13: claim: break-13 is agent-6's change: claim under a change name of your own
+3428s  agent-10     couldn't claim break-13: claim: break-13 is agent-6's change: claim under a change name of your own
+3428s  agent-2      couldn't claim break-13: claim: break-13 is agent-6's change: claim under a change name of your own
+3428s  agent-18     couldn't claim break-13: claim: break-13 is agent-6's change: claim under a change name of your own
+3428s  agent-4      couldn't claim break-13: claim: break-13 is agent-6's change: claim under a change name of your own
+3429s  agent-12     couldn't claim break-13: claim: break-13 is agent-6's change: claim under a change name of your own
+3429s  agent-9      couldn't claim break-13: claim: break-13 is agent-6's change: claim under a change name of your own
+3429s  agent-17     couldn't claim break-13: claim: break-13 is agent-6's change: claim under a change name of your own
+3429s  agent-7      couldn't claim break-13: claim: break-13 is agent-6's change: claim under a change name of your own
+3429s  agent-15     couldn't claim break-13: claim: break-13 is agent-6's change: claim under a change name of your own
+3429s  agent-13     couldn't claim break-13: claim: break-13 is agent-6's change: claim under a change name of your own
+3429s  agent-19     couldn't claim break-13: claim: break-13 is agent-6's change: claim under a change name of your own
+3430s  agent-1      couldn't claim break-13: claim: break-13 is agent-6's change: claim under a change name of your own
+3430s  agent-3      couldn't claim break-13: claim: break-13 is agent-6's change: claim under a change name of your own
+3430s  agent-8      couldn't claim break-13: claim: break-13 is agent-6's change: claim under a change name of your own
+3431s  agent-5      couldn't claim break-13: claim: break-13 is agent-6's change: claim under a change name of your own
+3431s  agent-14     couldn't claim break-13: claim: break-13 is agent-6's change: claim under a change name of your own
+3435s  agent-6      build break-13 failed: hint: 'git pull' before pushing again. | hint: See the 'Note about fast-forwards' in 'git push --help' for details.
+3448s  agent-6      githive-checks asks for changes to break-13: checks failed: npm test exited 1 on d4a74cc4, checked alone on the branch, twice:
+s
+      ✔ should d
+3453s  agent-6      githive-checks asks for changes to break-13: checks failed: npm test exited 1 on d4a74cc4, checked alone on the branch, twice:
+s
+      ✔ should d
+3457s  agent-6      githive-checks asks for changes to break-13: checks failed: npm test exited 1 on d4a74cc4, checked alone on the branch, twice:
+s
+      ✔ should d
+3464s  agent-8      builds break-13 (1 path(s))
+3464s  agent-6      couldn't claim break-13: claim: break-13 is agent-8's change: claim under a change name of your own
+3464s  agent-19     couldn't claim break-13: claim: break-13 is agent-8's change: claim under a change name of your own
+3465s  agent-14     couldn't claim break-13: claim: break-13 is agent-8's change: claim under a change name of your own
+3465s  agent-13     couldn't claim break-13: claim: break-13 is agent-6's change: claim under a change name of your own
+3465s  agent-7      couldn't claim break-13: claim: break-13 is agent-8's change: claim under a change name of your own
+3465s  agent-3      couldn't claim break-13: claim: break-13 is agent-8's change: claim under a change name of your own
+3465s  agent-12     couldn't claim break-13: claim: break-13 is agent-8's change: claim under a change name of your own
+3466s  agent-1      couldn't claim break-13: claim: break-13 is agent-8's change: claim under a change name of your own
+3466s  agent-5      couldn't claim break-13: claim: break-13 is agent-8's change: claim under a change name of your own
+3466s  agent-11     couldn't claim break-13: claim: break-13 is agent-8's change: claim under a change name of your own
+3467s  agent-20     couldn't claim break-13: claim: break-13 is agent-8's change: claim under a change name of your own
+3467s  agent-2      couldn't claim break-13: claim: break-13 is agent-8's change: claim under a change name of your own
+3467s  agent-10     couldn't claim break-13: claim: break-13 is agent-8's change: claim under a change name of your own
+3467s  agent-18     couldn't claim break-13: claim: break-13 is agent-8's change: claim under a change name of your own
+3468s  agent-4      couldn't claim break-13: claim: break-13 is agent-8's change: claim under a change name of your own
+3468s  agent-9      couldn't claim break-13: claim: break-13 is agent-8's change: claim under a change name of your own
+3468s  agent-16     couldn't claim break-13: claim: break-13 is agent-8's change: claim under a change name of your own
+3469s  agent-13     couldn't claim break-13: claim: break-13 is agent-8's change: claim under a change name of your own
+3469s  agent-3      couldn't claim break-13: claim: break-13 is agent-8's change: claim under a change name of your own
+3469s  agent-14     couldn't claim break-13: claim: break-13 is agent-8's change: claim under a change name of your own
+3469s  agent-15     couldn't claim break-13: claim: break-13 is agent-8's change: claim under a change name of your own
+3470s  agent-17     couldn't claim break-13: claim: break-13 is agent-8's change: claim under a change name of your own
+3470s  agent-7      couldn't claim break-13: claim: break-13 is agent-8's change: claim under a change name of your own
+3470s  agent-12     couldn't claim break-13: claim: break-13 is agent-8's change: claim under a change name of your own
+3471s  agent-11     couldn't claim break-13: claim: break-13 is agent-8's change: claim under a change name of your own
+3471s  agent-20     couldn't claim break-13: claim: break-13 is agent-8's change: claim under a change name of your own
+3471s  agent-19     couldn't claim break-13: claim: break-13 is agent-8's change: claim under a change name of your own
+3472s  agent-1      couldn't claim break-13: claim: break-13 is agent-8's change: claim under a change name of your own
+3472s  agent-5      couldn't claim break-13: claim: break-13 is agent-8's change: claim under a change name of your own
+3494s  agent-8      pushed break-13 62f4116: 1 file changed, 5 insertions(+)
+3530s  agent-2      approves break-13 (62f4116)
+3587s  agent-8      merge of break-13 refused: checks failed: npm test exited 1
+3590s  agent-8      githive-checks asks for changes to break-13: checks failed: npm test exited 1 on 62f41161, checked alone on the branch, twice:
+s
+      ✔ should d
+3596s  agent-8      githive-checks asks for changes to break-13: checks failed: npm test exited 1 on 62f41161, checked alone on the branch, twice:
+s
+      ✔ should d

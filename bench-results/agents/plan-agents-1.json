@@ -1,0 +1,93 @@
+{
+	"repo": "express-agents-1",
+	"work": "swarm-work",
+	"seed": 1,
+	"setup": {
+		"import": "https://github.com/expressjs/express",
+		"branch": "master",
+		"template": "express-template",
+		"verify": [
+			"npm install --no-audit --no-fund",
+			"npm test"
+		],
+		"required": 1,
+		"shardDepth": 2
+	},
+	"planner": {
+		"agent": "planner",
+		"keyFile": "keys-agents-1/planner.key"
+	},
+	"agents": [
+		{
+			"agent": "agent-1",
+			"keyFile": "keys-agents-1/agent-1.key"
+		},
+		{
+			"agent": "agent-2",
+			"keyFile": "keys-agents-1/agent-2.key"
+		},
+		{
+			"agent": "agent-3",
+			"keyFile": "keys-agents-1/agent-3.key"
+		},
+		{
+			"agent": "agent-4",
+			"keyFile": "keys-agents-1/agent-4.key"
+		},
+		{
+			"agent": "agent-5",
+			"keyFile": "keys-agents-1/agent-5.key"
+		}
+	],
+	"backlog": [
+		{
+			"id": "range-edges",
+			"title": "Test req.range() edge cases",
+			"intent": "Add a new test file covering req.range() cases the existing tests miss: several ranges with { combine: true }, overlapping and out-of-order ranges, an unsatisfiable range, a malformed Range header, and a size of 0. Only add tests; if one exposes a real bug, say so in the commit message instead of changing lib/.",
+			"paths": [
+				"test/req.range.edges.js"
+			]
+		},
+		{
+			"id": "vary-edges",
+			"title": "Test res.vary() edge cases",
+			"intent": "Add a new test file covering res.vary() cases the existing tests miss: an empty array, the same field twice, fields differing only in case, a Vary header already set by earlier middleware, and \"*\". Only add tests.",
+			"paths": [
+				"test/res.vary.edges.js"
+			]
+		},
+		{
+			"id": "status-invalid",
+			"title": "Test res.status() with invalid codes",
+			"intent": "Add a new test file checking how res.status() treats invalid codes in Express 5: non-integers, numbers out of range, numeric strings, and undefined. Assert the errors it throws (type and message) as the code actually behaves today.",
+			"paths": [
+				"test/res.status.invalid.js"
+			]
+		},
+		{
+			"id": "view-jsdoc",
+			"title": "Complete the JSDoc in lib/view.js",
+			"intent": "Give every function and method in lib/view.js complete, accurate JSDoc: what it does, each parameter with its type, the return value, and what it throws. Documentation only: no change in behavior, and the tests must still pass.",
+			"paths": [
+				"lib/view.js"
+			]
+		},
+		{
+			"id": "health-example",
+			"title": "A health-check example",
+			"intent": "Add an example app in examples/health/index.js, in the style of the other examples, serving GET /healthz with JSON { status: \"ok\", uptime: <seconds> } and a 404 for anything else, plus an acceptance test for it in test/acceptance/health.js like the other acceptance tests.",
+			"paths": [
+				"examples/health/",
+				"test/acceptance/health.js"
+			]
+		},
+		{
+			"id": "locals-tests",
+			"title": "Test app.locals and res.locals together",
+			"intent": "Add a new test file showing how app.locals and res.locals combine when rendering: res.locals overriding app.locals, values set by middleware, and a mounted sub-app with its own app.locals. Use the test fixtures the existing render tests use. Only add tests.",
+			"paths": [
+				"test/locals.combined.js"
+			]
+		}
+	]
+}

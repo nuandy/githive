@@ -1,0 +1,92 @@
+   2s  swarm        importing https://github.com/expressjs/express as express-swarm-2
+  80s  swarm        express-swarm-2 on master: checks ["npm install --no-audit --no-fund","npm test"], grants {"security":["agent-3"]}, claims "on demand"
+  85s  swarm        registered agent-1
+  86s  swarm        registered agent-2
+  88s  swarm        registered agent-3
+  90s  swarm        registered agent-4
+  92s  swarm        registered agent-5
+  93s  swarm        registered agent-6
+  95s  swarm        registered planner
+ 109s  swarm        7 pieces in the backlog; 6 agents, all alike
+ 110s  agent-1      arrives
+ 114s  agent-1      builds const-examples (34 path(s))
+ 116s  agent-2      arrives
+ 136s  agent-2      builds strict-asserts (6 path(s))
+ 158s  agent-6      arrives
+ 168s  agent-6      builds const-lib (6 path(s))
+ 172s  agent-5      arrives
+ 191s  agent-5      builds example-readmes (25 path(s))
+ 193s  agent-4      arrives
+ 211s  agent-4      builds test-watch (1 path(s))
+ 226s  agent-3      arrives
+ 238s  agent-3      builds editorconfig (1 path(s))
+ 259s  agent-1      pushed const-examples 07e0769: 34 files changed, 84 insertions(+), 84 deletions(-)
+ 259s  agent-2      pushed strict-asserts 005e658: 6 files changed, 82 insertions(+), 82 deletions(-)
+ 328s  agent-6      pushed const-lib 3cf51b7: 6 files changed, 55 insertions(+), 55 deletions(-)
+ 330s  agent-4      pushed test-watch d678cd7: 1 file changed, 1 insertion(+)
+ 338s  agent-3      pushed editorconfig 6c23fba: 1 file changed, 5 insertions(+), 3 deletions(-)
+ 347s  agent-2      approves const-examples (07e0769)
+ 362s  agent-1      rejects strict-asserts (005e658)
+ 373s  agent-5      pushed example-readmes ae69e2f: 25 files changed, 285 insertions(+)
+ 393s  agent-6      approves const-examples (07e0769)
+ 410s  agent-4      approves const-lib (3cf51b7)
+ 415s  agent-2      approves test-watch (d678cd7)
+ 418s  agent-2      agent-1 asks for changes to strict-asserts: Please also record this in History.md under Unreleased Changes: contributors should know the suite n
+ 426s  agent-3      approves test-watch (d678cd7) as security
+ 450s  agent-5      approves const-lib (3cf51b7)
+ 461s  agent-1      merged const-examples as 4bd0530b
+ 471s  agent-2      pushed strict-asserts a1db58f: 1 file changed, 1 insertion(+)
+ 477s  agent-3      approves example-readmes (ae69e2f)
+ 482s  agent-2      extends strict-asserts's claim to History.md
+ 501s  agent-5      rejects editorconfig (6c23fba)
+ 507s  agent-1      approves example-readmes (ae69e2f)
+ 509s  agent-6      approves example-readmes (ae69e2f)
+ 511s  agent-4      approves editorconfig (6c23fba)
+ 534s  agent-3      approves strict-asserts (a1db58f)
+ 536s  agent-3      agent-5 asks for changes to editorconfig: This widens the 2-space rule from *.js, *.json and *.yml to every file, templates and Markdown too, 
+ 538s  agent-3      asks a person about editorconfig
+ 542s  agent-3      builds require-main (24 path(s))
+ 557s  agent-5      merged example-readmes as cb0a4980
+ 565s  agent-2      approves editorconfig (6c23fba)
+ 589s  agent-3      pushed require-main eb9f55a: 24 files changed, 31 insertions(+), 31 deletions(-)
+ 598s  agent-1      approves strict-asserts (a1db58f)
+ 673s  agent-1      approves require-main (eb9f55a)
+ 677s  agent-6      merged const-lib as 20b1769f
+ 687s  agent-4      merged test-watch as 50ccbf74
+ 697s  agent-5      approves require-main (eb9f55a)
+ 735s  agent-2      merged strict-asserts as f873225f
+ 783s  agent-3      merged require-main as b9e7867a
+ 785s  agent-6      done
+ 785s  agent-3      done
+ 789s  agent-5      done
+ 790s  agent-2      done
+ 797s  agent-4      done
+ 801s  agent-1      done
+
+piece            builder     claimed  pushed revised approved merged  outcome
+const-lib        agent-6     168s  328s     -   511s  677s  merged 20b1769f
+                 reviews: agent-4: approve, agent-5: approve
+const-examples   agent-1     114s  259s     -   365s  461s  merged 4bd0530b
+                 reviews: agent-2: approve, agent-6: approve
+strict-asserts   agent-2     136s  259s  471s   569s  735s  merged f873225f
+                 reviews: agent-1: reject, agent-3: approve, agent-1: approve; rejected by agent-1; extended claim at check (1)
+example-readmes  agent-5     191s  373s     -   506s  557s  merged cb0a4980
+                 reviews: agent-3: approve, agent-1: approve, agent-6: approve
+editorconfig     agent-3     238s  338s     -      -     -  waits on a person
+                 reviews: agent-5: reject, agent-4: approve, agent-2: approve; rejected by agent-5; asked a person
+require-main     agent-3     542s  589s     -   677s  783s  merged b9e7867a
+                 reviews: agent-1: approve, agent-5: approve
+test-watch       agent-4     211s  330s     -   514s  687s  merged 50ccbf74
+                 reviews: agent-2: approve, agent-3 as security: approve
+
+agent        build review revise merge wait
+agent-1          1      4      0     1    8
+agent-2          1      3      1     1    4
+agent-3          2      3      1     1    5
+agent-4          1      2      0     1    7
+agent-5          1      3      0     1    8
+agent-6          1      2      0     1    7
+
+6 of 7 merged in 801s
+audit: 6 merges, 0 open violations
+exit 0

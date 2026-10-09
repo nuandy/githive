@@ -1,0 +1,19 @@
+  42s  swarm        copying express-template as express-swarm-203
+  69s  swarm        express-swarm-203 on master: checks ["npm install --no-audit --no-fund","npm test"], grants {}, claims {"since":"2026-10-09T02:50:37.185Z","because":"asked for at the start"}
+ 312s  swarm        registered agent-1, agent-2, agent-3, agent-4, agent-5, agent-6, agent-7, agent-8, agent-9, agent-10, agent-11, agent-12, agent-13, agent-14, agent-15, agent-16, agent-17, agent-18, agent-19, agent-20, agent-21, agent-22, agent-23, agent-24, agent-25, agent-26, agent-27, agent-28, agent-29, agent-30, agent-31, agent-32, agent-33, agent-34, agent-35, agent-36, agent-37, agent-38, agent-39, agent-40, agent-41, agent-42, agent-43, agent-44, agent-45, agent-46, agent-47, agent-48, agent-49, agent-50, agent-51, agent-52, agent-53, agent-54, agent-55, agent-56, agent-57, agent-58, agent-59, agent-60, agent-61, agent-62, agent-63, agent-64, agent-65, agent-66, agent-67, agent-68, agent-69, agent-70, agent-71, agent-72, agent-73, agent-74, agent-75, agent-76, agent-77, agent-78, agent-79, agent-80, agent-81, agent-82, agent-83, agent-84, agent-85, agent-86, agent-87, agent-88, agent-89, agent-90, agent-91, agent-92, agent-93, agent-94, agent-95, agent-96, agent-97, agent-98, agent-99, agent-100, agent-101, agent-102, agent-103, agent-104, agent-105, agent-106, agent-107, agent-108, agent-109, agent-110, agent-111, agent-112, agent-113, agent-114, agent-115, agent-116, agent-117, agent-118, agent-119, agent-120, agent-121, agent-122, agent-123, agent-124, agent-125, agent-126, agent-127, agent-128, agent-129, agent-130, agent-131, agent-132, agent-133, agent-134, agent-135, agent-136, agent-137, agent-138, agent-139, agent-140, agent-141, agent-142, agent-143, agent-144, agent-145, agent-146, agent-147, agent-148, agent-149, agent-150, agent-151, agent-152, agent-153, agent-154, agent-155, agent-156, agent-157, agent-158, agent-159, agent-160, agent-161, agent-162, agent-163, agent-164, agent-165, agent-166, agent-167, agent-168, agent-169, agent-170, agent-171, agent-172, agent-173, agent-174, agent-175, agent-176, agent-177, agent-178, agent-179, agent-180, agent-181, agent-182, agent-183, agent-184, agent-185, agent-186, agent-187, agent-188, agent-189, agent-190, agent-191, agent-192, agent-193, agent-194, agent-195, agent-196, agent-197, agent-198, agent-199, agent-200, planner
+file:///Users/inbase210810/cloudflare/blueprint-free/scripts/swarm.mjs:103
+	if (reply.result.isError) throw new Error(`${name}: ${text.slice(0, 300)}`);
+	                                ^
+
+Error: add_work: the record kept moving (refs/notes/githive-work/express-swarm-203); try again
+    at tool (file:///Users/inbase210810/cloudflare/blueprint-free/scripts/swarm.mjs:103:34)
+    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+    at async file:///Users/inbase210810/cloudflare/blueprint-free/scripts/swarm.mjs:381:16
+    at async again (file:///Users/inbase210810/cloudflare/blueprint-free/scripts/swarm.mjs:357:12)
+    at async file:///Users/inbase210810/cloudflare/blueprint-free/scripts/swarm.mjs:365:24
+    at async Promise.all (index 1)
+    at async inBatches (file:///Users/inbase210810/cloudflare/blueprint-free/scripts/swarm.mjs:364:2)
+    at async file:///Users/inbase210810/cloudflare/blueprint-free/scripts/swarm.mjs:380:1
+
+Node.js v22.12.0
+exit 1
