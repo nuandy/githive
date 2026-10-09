@@ -56,20 +56,23 @@ const FULL_DEPTH = 1 << 20;
  * exceeded memory limit"), failing every request in it. The rest wait their turn.
  */
 const WORKSPACES_AT_ONCE = 6;
+/** How often a call waiting for its turn looks again. */
+const WORKSPACE_TURN_POLL_MS = 50;
 let inWorkspaces = 0;
-const waitingForWorkspace: (() => void)[] = [];
 
-/** Do `work`, which uses a workspace, in turn: at most WORKSPACES_AT_ONCE at once in this isolate. */
+/**
+ * Do `work`, which uses a workspace, in turn: at most WORKSPACES_AT_ONCE at
+ * once in this isolate. A call waiting looks again on a timer: waiting on a
+ * promise another request resolves, it had nothing of its own pending, and
+ * the runtime cancelled it as hung (12 checks and merges of a 200-agent run).
+ */
 export async function inWorkspaceTurn<T>(work: () => Promise<T>): Promise<T> {
-	if (inWorkspaces >= WORKSPACES_AT_ONCE) await new Promise<void>((resolve) => waitingForWorkspace.push(resolve));
-	else inWorkspaces++;
+	while (inWorkspaces >= WORKSPACES_AT_ONCE) await new Promise((resolve) => setTimeout(resolve, WORKSPACE_TURN_POLL_MS * (0.5 + Math.random())));
+	inWorkspaces++;
 	try {
 		return await work();
 	} finally {
-		// The turn goes straight to the next waiting, if any; else it's free.
-		const next = waitingForWorkspace.shift();
-		if (next) next();
-		else inWorkspaces--;
+		inWorkspaces--;
 	}
 }
 
