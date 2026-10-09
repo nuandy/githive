@@ -4,6 +4,7 @@ import { decodeShard } from "./shards";
 import { stampPayload, verifyStamp } from "./stamp";
 import { approval, type Author, type ReviewPolicy, type VoteRecord, type Votes, effectivePolicy } from "./votes";
 import { settingsForBranch } from "./branch-rules";
+import { skipsChecks } from "./check-scope";
 
 // The audit (see docs/design.md). Nothing stops an
 // agent from breaking a convention, so this replays the records and reports
@@ -135,7 +136,8 @@ export async function audit(records: AuditRecords): Promise<Violation[]> {
 		for (const { history, tip } of cited.records) checkReleasedAfter(history, tip, merge, report);
 		const settings = settingsFor(records, registryAt, merge);
 		checkApproved(records, settings.policy, votesAt, merge, report, own);
-		if (settings.verify?.length) {
+		// Checks it needed: none for a change that only touched what they skip, as the settings then said.
+		if (settings.verify?.length && !skipsChecks(merge.files, settings.skipChecks)) {
 			if (!merge.testedOn) report("untested", "the merge records no checks run (GitHive-Tested)");
 			else if (!testedAsLanded(merge, byCommit)) {
 				const after = merge.testedAfter?.length ? ` after ${merge.testedAfter.map((h) => h.slice(0, 8)).join(", ")}` : "";
@@ -275,15 +277,15 @@ function citedVotes(records: AuditRecords, votesAt: Map<string, Votes>, merge: M
  * registry state it cites (the registry itself, "", among shards), since
  * settings can change; the records' own when it cites none.
  */
-function settingsFor(records: AuditRecords, registryAt: Map<string, Registry>, merge: MergeRecord): { policy?: ReviewPolicy; verify?: string[] } {
+function settingsFor(records: AuditRecords, registryAt: Map<string, Registry>, merge: MergeRecord): { policy?: ReviewPolicy; verify?: string[]; skipChecks?: string[] } {
 	const cited = merge.claimsTip!;
 	const tip = cited.includes("=") ? cited.split(/\s+/).map((pair) => pair.split("=")).find(([shard]) => decodeShard(shard) === "")?.[1] : cited;
 	const state = tip ? registryAt.get(tip) : undefined;
-	const repo = { policy: state?.policy ?? records.policy, verify: state?.verify ?? records.verify };
+	const repo = { policy: state?.policy ?? records.policy, verify: state?.verify ?? records.verify, ...(state?.skipChecks ? { skipChecks: state.skipChecks } : {}) };
 	// A merge into another branch had that branch's settings: the repo's, with what its rule changed then.
 	if (!merge.branch || !state?.branchRules?.length || !repo.policy) return repo;
 	const settings = settingsForBranch({ policy: repo.policy, verify: repo.verify ?? [], rules: state.branchRules, project: state.branch ?? "main" }, merge.branch);
-	return { policy: settings.policy, verify: settings.verify };
+	return { policy: settings.policy, verify: settings.verify, ...(repo.skipChecks ? { skipChecks: repo.skipChecks } : {}) };
 }
 
 /** The merged commit must have had the policy's approvals from reviewers other than its author, every veto role's among them, and no veto, in the votes the merge cites. */

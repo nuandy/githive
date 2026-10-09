@@ -6,7 +6,7 @@ import { Icon } from "./Icon";
 import "./RepoSettings.css";
 
 export interface MergeSettingsProps {
-	snapshot: Pick<RepoSnapshot, "policy" | "verify" | "branch">;
+	snapshot: Pick<RepoSnapshot, "policy" | "verify" | "branch" | "skipChecks">;
 	/** The settings tool, for this repo. */
 	save(settings: SettingsInput): Promise<SavedMergeSettings>;
 	/** After a save: refresh what the page shows. */
@@ -17,7 +17,7 @@ const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
 
 /** How changes merge, for the repo's admins to change: the review policy, who may block, stricter rules for paths, and the checks. */
 export function MergeSettings({ snapshot, save, onSaved }: MergeSettingsProps) {
-	const fresh = draftFrom(snapshot.policy, snapshot.verify);
+	const fresh = draftFrom(snapshot.policy, snapshot.verify, snapshot.skipChecks);
 	const freshKey = JSON.stringify(fresh);
 	const [draft, setDraft] = useState<MergeDraft>(fresh);
 	const [baseKey, setBaseKey] = useState(freshKey);
@@ -56,7 +56,7 @@ export function MergeSettings({ snapshot, save, onSaved }: MergeSettingsProps) {
 				setErrors([]);
 				try {
 					const done = await save(result.settings);
-					const next = draftFrom(done.policy, done.verify);
+					const next = draftFrom(done.policy, done.verify, done.skipChecks);
 					setDraft(next);
 					setBaseKey(JSON.stringify(next));
 					setSaved(done);
@@ -179,6 +179,11 @@ export function MergeSettings({ snapshot, save, onSaved }: MergeSettingsProps) {
 							<Icon name="plus" />
 							Add a check
 						</button>
+					</div>
+					<div className="repo-settings__field">
+						<label htmlFor="skip-checks">Skipped for changes that only touch</label>
+						<textarea id="skip-checks" className="repo-settings__command" value={draft.skipChecks} onChange={(e) => update({ skipChecks: e.target.value })} spellCheck={false} disabled={busy} />
+						<p className="muted">One pattern a line: a name (*.md, LICENSE*), a folder anywhere (docs/), or a path from the top (site/*.html). A file under test/, fixtures/ or examples/ always runs the checks. Empty: they always run.</p>
 					</div>
 				</div>
 			</section>

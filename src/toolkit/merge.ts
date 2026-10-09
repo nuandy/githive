@@ -2,6 +2,7 @@ import { FORMAT_TRAILER, RECORD_FORMAT } from "../record-format";
 import git from "isomorphic-git";
 import { BOT, branchHead, type Remote, Workspace } from "../git";
 import { inLane } from "../claim-paths";
+import { skipsChecks } from "./check-scope";
 import type { ClaimStore } from "./claim-store";
 import { mergeStampPayload } from "./audit";
 import type { Stamper } from "./stamp";
@@ -59,6 +60,8 @@ export interface MergeInput {
 	policy: ReviewPolicy;
 	/** The project's checks; none means the merge isn't tested. */
 	verify?: string[];
+	/** What the checks skip (see check-scope.ts): absent, the defaults. */
+	skipChecks?: string[];
 	runChecks?: CheckRunner;
 	/** Stamps the merge (and the release) with the caller's verified identity. */
 	stamper?: Stamper;
@@ -80,7 +83,7 @@ export interface MergeInput {
 }
 
 export type MergeOutcome =
-	| { ok: true; commit: string }
+	| { ok: true; commit: string; /** Why no checks ran, when they're configured. */ checks?: string }
 	| { ok: false; reasons: string[]; conflicts?: string[]; checks?: CheckResult[] };
 
 /**
@@ -130,8 +133,10 @@ export async function mergeChange(input: MergeInput): Promise<MergeOutcome> {
 			};
 		}
 
-		// The project's checks, on main with the change merged in: what main would become.
-		const verify = input.verify ?? [];
+		// The project's checks, on main with the change merged in: what main would become. None for a change
+		// that only touches what they skip (documentation and the like: see check-scope.ts).
+		const skipped = !!input.verify?.length && skipsChecks(files, input.skipChecks);
+		const verify = skipped ? [] : (input.verify ?? []);
 		const checksFrom = Date.now();
 		let onto = ws;
 		let tested: { base: string; after: string[] } | undefined;
@@ -206,7 +211,7 @@ export async function mergeChange(input: MergeInput): Promise<MergeOutcome> {
 		const releaseFrom = Date.now();
 		await input.store.release({ change: input.change, agent: input.agent, reason: "merged", mergedAs: oid }, input.stamper);
 		console.log(`merged ${input.change} as ${oid.slice(0, 8)}: checks and push ${releaseFrom - checksFrom} ms, releasing its claim ${Date.now() - releaseFrom} ms`);
-		return { ok: true, commit: oid };
+		return { ok: true, commit: oid, ...(skipped ? { checks: "skipped: it only touches files the checks skip" } : {}) };
 	}
 }
 

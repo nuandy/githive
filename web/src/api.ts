@@ -11,6 +11,8 @@ export interface SettingsInput {
 	escalate?: { paths: string[]; required?: number; vetoes?: string[] }[];
 	grants?: Record<string, string[]>;
 	verify?: string[];
+	/** What the checks skip: patterns like *.md or docs/ ([] for nothing). */
+	skip_checks?: string[];
 	/** Other branches' settings by pattern: each changes only what it sets ([] clears them). */
 	branch_rules?: { pattern: string; required?: number; vetoes?: string[]; grants?: Record<string, string[]>; verify?: string[] }[];
 }
@@ -26,6 +28,7 @@ export interface BranchRule {
 export interface SavedMergeSettings {
 	policy: RepoSnapshot["policy"];
 	verify: string[];
+	skipChecks?: string[];
 	branchRules?: BranchRule[];
 	warnings?: string[];
 }
@@ -42,6 +45,8 @@ export interface RepoSnapshot {
 	verified: boolean;
 	/** Other branches' settings by pattern (newer servers). */
 	branchRules?: BranchRule[];
+	/** What the checks skip: a change touching only these merges without them (newer servers). */
+	skipChecks?: string[];
 	/** The other branches changes land on (newer servers): where each started. */
 	branches?: { name: string; base: string; from?: string; at: string }[];
 	/** How claims are kept (newer servers): in one record until the load calls for shards ("on demand"), always ("never"), or sharded since `since`. */

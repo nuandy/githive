@@ -5,8 +5,8 @@ describe("the merge settings form", () => {
 	const policy = { required: 1, vetoes: ["security"], escalate: [{ paths: ["package.json", ".github/"], required: 2, vetoes: ["ops"] }], grants: { security: ["@acme/security", "githive"] } };
 
 	it("gives back what it was given, untouched", () => {
-		expect(settingsFrom(draftFrom(policy, ["npm ci", "npm test"]))).toEqual({
-			settings: { required: 1, vetoes: ["security"], escalate: [{ paths: ["package.json", ".github/"], required: 2, vetoes: ["ops"] }], grants: { security: ["@acme/security", "githive"] }, verify: ["npm ci", "npm test"] },
+		expect(settingsFrom(draftFrom(policy, ["npm ci", "npm test"], ["*.md", "docs/"]))).toEqual({
+			settings: { required: 1, vetoes: ["security"], escalate: [{ paths: ["package.json", ".github/"], required: 2, vetoes: ["ops"] }], grants: { security: ["@acme/security", "githive"] }, verify: ["npm ci", "npm test"], skip_checks: ["*.md", "docs/"] },
 			errors: [],
 		});
 	});
@@ -39,5 +39,11 @@ describe("the merge settings form", () => {
 		const draft = draftFrom(policy, []);
 		draft.escalate[0].required = "";
 		expect(settingsFrom(draft).settings?.escalate).toEqual([{ paths: ["package.json", ".github/"], vetoes: ["ops"] }]);
+	});
+
+	it("keeps the server's skip list when it didn't send one, so saving never turns skipping off unasked", async () => {
+		const { DEFAULT_SKIP_CHECKS } = await import("../../../src/toolkit/check-scope");
+		expect(settingsFrom(draftFrom(policy, ["npm test"])).settings?.skip_checks).toEqual(DEFAULT_SKIP_CHECKS);
+		expect(settingsFrom({ ...draftFrom(policy, ["npm test"]), skipChecks: "" }).settings?.skip_checks).toEqual([]);
 	});
 });

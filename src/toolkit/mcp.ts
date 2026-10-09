@@ -21,6 +21,7 @@ import { type Line, lineRef } from "./line";
 import { abandoned, BUILDING_IDLE_MS, type ChangeSigns } from "./staleness";
 import { claimInto, isReservedPath, presentClaim, scopeFile, scopePaths } from "./branch-scope";
 import { BRANCH_PATTERN, type BranchRule, settingsForBranch } from "./branch-rules";
+import { DEFAULT_SKIP_CHECKS, SKIP_PATTERN } from "./check-scope";
 import type { Abandoned } from "./claims";
 
 // GitHive's MCP tools (see docs/design.md). Stateless: each
@@ -138,7 +139,7 @@ Work that depends on other unmerged work goes on a feature branch, and the proje
 const str = { type: "string" } as const;
 const TOOL_LIST = [
 	{ name: "start", description: "Start GitHive on a project repo (harmless if started; change a started repo's policy or checks with settings): the review policy, the checks run before each merge (each change lives in its own fork, and only the toolkit writes the project), grants: who may vote as each role that can block a merge (registered agent names, 'person:*', a verified identity like 'person:<who>' or 'service:<id>', a pool 'service:<id>/*' (every agent registered under it, never on its own team's changes), 'githive' for GitHive's reviewers; unlisted roles: people and GitHive's reviewers), how claims are kept: in one record until the load calls for more (8 agents holding claims, or over 15 claim writes a minute), then sharded per path 2 segments deep over 16 records repos, so agents in different parts of the tree never contend. shard_depth shards now, this deep (0: never), and records_repos is how many repos the shards are spread over, since a repo takes one push at a time. Returns them.", inputSchema: { type: "object", properties: { repo: str, required: { type: "number" }, vetoes: { type: "array", items: str }, escalate: { type: "array", items: { type: "object", properties: { paths: { type: "array", items: str }, required: { type: "number" }, vetoes: { type: "array", items: str } }, required: ["paths"] } }, grants: { type: "object", additionalProperties: { type: "array", items: str } }, verify: { type: "array", items: str }, shard_depth: { type: "number" }, records_repos: { type: "number" } }, required: ["repo"] } },
-	{ name: "settings", description: "Change a started repo's review policy or its checks; whatever you leave out stays as it is. The same fields as start: required approvals, vetoes, escalate (stricter rules for chosen paths), grants (who may vote as each role), verify (the checks run before each merge; [] for none). Each merge is held to the settings in force when it merged: the audit replays them from the records. Returns the settings now. branch_rules sets other branches' settings by pattern (feature/*, release/*, a name), the first match winning: each changes only the policy fields and checks it names (verify [] for none; left out, the repo's); [] clears them. The project's branch always has the repo's settings.", inputSchema: { type: "object", properties: { repo: str, required: { type: "number" }, vetoes: { type: "array", items: str }, escalate: { type: "array", items: { type: "object", properties: { paths: { type: "array", items: str }, required: { type: "number" }, vetoes: { type: "array", items: str } }, required: ["paths"] } }, grants: { type: "object", additionalProperties: { type: "array", items: str } }, verify: { type: "array", items: str }, branch_rules: { type: "array", items: { type: "object", properties: { pattern: str, required: { type: "number" }, vetoes: { type: "array", items: str }, grants: { type: "object", additionalProperties: { type: "array", items: str } }, verify: { type: "array", items: str } }, required: ["pattern"] } } }, required: ["repo"] } },
+	{ name: "settings", description: "Change a started repo's review policy or its checks; whatever you leave out stays as it is. The same fields as start: required approvals, vetoes, escalate (stricter rules for chosen paths), grants (who may vote as each role), verify (the checks run before each merge; [] for none). Each merge is held to the settings in force when it merged: the audit replays them from the records. Returns the settings now. branch_rules sets other branches' settings by pattern (feature/*, release/*, a name), the first match winning: each changes only the policy fields and checks it names (verify [] for none; left out, the repo's); [] clears them. The project's branch always has the repo's settings. skip_checks lists what the checks skip: a change touching only these merges without them (*.md, docs/, licenses and images by default; a file under test/, fixtures/ or examples/ always runs them); [] makes them always run.", inputSchema: { type: "object", properties: { repo: str, required: { type: "number" }, vetoes: { type: "array", items: str }, escalate: { type: "array", items: { type: "object", properties: { paths: { type: "array", items: str }, required: { type: "number" }, vetoes: { type: "array", items: str } }, required: ["paths"] } }, grants: { type: "object", additionalProperties: { type: "array", items: str } }, verify: { type: "array", items: str }, skip_checks: { type: "array", items: str }, branch_rules: { type: "array", items: { type: "object", properties: { pattern: str, required: { type: "number" }, vetoes: { type: "array", items: str }, grants: { type: "object", additionalProperties: { type: "array", items: str } }, verify: { type: "array", items: str } }, required: ["pattern"] } } }, required: ["repo"] } },
 	{ name: "credentials", description: "Git access. With your change: a write token for its own fork, where its branch changes/<change> lives. Without: read access to the project repo.", inputSchema: { type: "object", properties: { repo: str, change: str }, required: ["repo"] } },
 	{ name: "claims", description: "The claims in force: who holds which paths, and why.", inputSchema: { type: "object", properties: { repo: str }, required: ["repo"] } },
 	{ name: "claim", description: "Claim paths for your change (again to extend it, or to keep it active). Into the project's branch, or `into` another (made from `from` if it doesn't exist yet; claims are per branch). `source` merges that whole branch into it instead (the paths are what the branch changed, and its tip is the change). `after` names changes it depends on: it merges only once they have merged into the same branch. Refused, naming the holder, if another claim on that branch overlaps; a claim in the way that its agent has abandoned (see release) is released as stale instead.", inputSchema: { type: "object", properties: { repo: str, change: str, agent: str, paths: { type: "array", items: str }, intent: str, into: str, from: str, after: { type: "array", items: str }, source: str }, required: ["repo", "change", "agent", "intent"] } },
@@ -259,6 +260,12 @@ function branchRulesFrom(value: unknown, base: ReviewPolicy): BranchRule<ReviewP
 		if (!Object.keys(policy).length && !verify) throw new Error(`[400] branch_rules[${i}] (${pattern}) changes nothing: set required, vetoes, escalate, grants or verify`);
 		return { pattern, ...(Object.keys(policy).length ? { policy } : {}), ...(verify ? { verify } : {}) };
 	});
+}
+
+/** What the checks skip, from settings' skip_checks: patterns like *.md or docs/ ([] for nothing: the checks always run). */
+function skipPatternsFrom(value: unknown): string[] {
+	if (!Array.isArray(value) || value.some((p) => typeof p !== "string" || !SKIP_PATTERN.test(p.trim()))) throw new Error("[400] skip_checks is a list of patterns, like *.md or docs/ ([] for nothing)");
+	return [...new Set((value as string[]).map((p) => p.trim()))];
 }
 
 /** A review policy from start's or settings' arguments, each one left out kept from `base`. */
@@ -723,6 +730,8 @@ export async function repoSnapshot(ctx: ToolContext, repo: string) {
 		repo,
 		/** The project's branch changes merge into. */
 		branch: projectBranch(state),
+		/** What the checks skip (see check-scope.ts). */
+		skipChecks: state.skipChecks ?? DEFAULT_SKIP_CHECKS,
 		/** Other branches' settings by pattern (see branch-rules.ts). */
 		...(state.branchRules?.length ? { branchRules: state.branchRules } : {}),
 		/** The other branches changes land on: where each started. */
@@ -863,13 +872,14 @@ async function runTool(name: string, args: Args, ctx: ToolContext): Promise<unkn
 			const policy = POLICY_FIELDS.some((f) => args[f] !== undefined) ? policyFrom(args, registered.policy ?? DEFAULT_POLICY) : undefined;
 			const verify = args.verify === undefined ? undefined : checksFrom(args.verify);
 			const branchRules = args.branch_rules === undefined ? undefined : branchRulesFrom(args.branch_rules, registered.policy ?? DEFAULT_POLICY);
-			if (!policy && !verify && !branchRules) throw new Error(`[400] name what to change: ${[...POLICY_FIELDS, "verify", "branch_rules"].join(", ")}`);
-			await changeSettings(claims, { ...(policy ? { policy } : {}), ...(verify ? { verify } : {}), ...(branchRules ? { branchRules } : {}), ...(stamper?.by ? { by: stamper.by } : {}) });
+			const skipChecks = args.skip_checks === undefined ? undefined : skipPatternsFrom(args.skip_checks);
+			if (!policy && !verify && !branchRules && !skipChecks) throw new Error(`[400] name what to change: ${[...POLICY_FIELDS, "verify", "branch_rules", "skip_checks"].join(", ")}`);
+			await changeSettings(claims, { ...(policy ? { policy } : {}), ...(verify ? { verify } : {}), ...(branchRules ? { branchRules } : {}), ...(skipChecks ? { skipChecks } : {}), ...(stamper?.by ? { by: stamper.by } : {}) });
 			const registry = (await claims.read())?.commit.state;
 			// New checks may install something new: warm the containers for them.
 			if (verify?.length) await ctx.warmChecks?.(repo, { branch: projectBranch(registry), checks: verify, expect: "set up" }).catch(() => undefined);
 			const warnings = grantWarnings(registry?.policy ?? DEFAULT_POLICY);
-			return { repo, branch: projectBranch(registry), policy: registry?.policy ?? DEFAULT_POLICY, verify: registry?.verify ?? [], ...(registry?.branchRules?.length ? { branchRules: registry.branchRules } : {}), ...(warnings.length ? { warnings } : {}) };
+			return { repo, branch: projectBranch(registry), policy: registry?.policy ?? DEFAULT_POLICY, verify: registry?.verify ?? [], skipChecks: registry?.skipChecks ?? DEFAULT_SKIP_CHECKS, ...(registry?.branchRules?.length ? { branchRules: registry.branchRules } : {}), ...(warnings.length ? { warnings } : {}) };
 		}
 		case "next": {
 			const agent = actAs("agent");
@@ -1045,6 +1055,7 @@ async function runTool(name: string, args: Args, ctx: ToolContext): Promise<unkn
 				// The branch's settings: the repo's, with what a branch rule changes.
 				policy: branchSettings(registry, into).policy,
 				verify: branchSettings(registry, into).verify,
+				...(registry?.skipChecks ? { skipChecks: registry.skipChecks } : {}),
 				runChecks: ctx.runChecks?.(repo, into === branch ? undefined : into),
 				...(ctx.branchHead ? { branchHead: () => ctx.branchHead!(repo, into) } : {}),
 				stamper,

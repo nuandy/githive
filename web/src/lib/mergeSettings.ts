@@ -1,4 +1,5 @@
 import type { RepoSnapshot, SettingsInput } from "../api";
+import { DEFAULT_SKIP_CHECKS } from "../../../src/toolkit/check-scope";
 
 // The Settings tab's form for how changes merge: the review policy and the
 // checks, as text fields while they're edited, and back to what the settings
@@ -19,6 +20,8 @@ export interface MergeDraft {
 	/** Stricter rules for chosen paths: approvals blank for the repo's own. */
 	escalate: { paths: string; required: string; vetoes: string }[];
 	verify: string[];
+	/** What the checks skip, one pattern a line (blank: nothing, the checks always run). */
+	skipChecks: string;
 }
 
 export function splitList(text: string): string[] {
@@ -32,8 +35,10 @@ export function splitList(text: string): string[] {
 	];
 }
 
-export function draftFrom(policy: Policy, verify: string[]): MergeDraft {
+/** The form's fields from the settings; what the checks skip, the server's defaults when it didn't say (so a save never turns skipping off unasked). */
+export function draftFrom(policy: Policy, verify: string[], skipChecks: string[] = DEFAULT_SKIP_CHECKS): MergeDraft {
 	return {
+		skipChecks: skipChecks.join("\n"),
 		required: String(policy.required),
 		vetoes: policy.vetoes.join(", "),
 		grants: Object.fromEntries(Object.entries(policy.grants ?? {}).map(([role, holders]) => [role, holders.join(", ")])),
@@ -74,6 +79,8 @@ export function settingsFrom(draft: MergeDraft): { settings: SettingsInput; erro
 		if (holders.length) grants[role] = holders;
 	}
 	const verify = draft.verify.map((c) => c.trim()).filter(Boolean);
+	const skipChecks = splitList(draft.skipChecks);
+	for (const pattern of skipChecks) if (!/^[A-Za-z0-9._/*@+-]+$/.test(pattern)) errors.push(`"${pattern}" isn't a pattern: a path or name, with * for any run of characters (*.md, docs/).`);
 	if (errors.length) return { errors: [...new Set(errors)] };
-	return { settings: { required: required!, vetoes, escalate, grants, verify }, errors: [] };
+	return { settings: { required: required!, vetoes, escalate, grants, verify, skip_checks: skipChecks }, errors: [] };
 }

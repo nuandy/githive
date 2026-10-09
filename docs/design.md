@@ -410,6 +410,21 @@ outside them, so two changes that can both merge touch disjoint files and
 can't conflict. An overlap means someone is outside their claim, which their
 own `check` shows them. So `check` costs the same at any scale.
 
+### Changes the checks skip
+
+A change that only touches documentation and other files no check reads
+merges without running the checks: by default Markdown and other doc formats
+(`*.md`, `*.mdx`, `*.markdown`, `*.rst`, `*.adoc`), `docs/` and `doc/`
+folders, licenses and notices, and images. Not `*.txt`: `requirements.txt`
+and `CMakeLists.txt` are code as far as the checks go. A file under a folder
+tests read (`test/`, `tests/`, `__tests__/`, `spec/`, `fixtures/`,
+`examples/`) always runs them, whatever it is: Express's tests render
+`examples/markdown/views/index.md`. A repo sets its own list with `settings`
+`skip_checks` (a name like `*.md`, a folder anywhere like `docs/`, or a path
+from the top like `site/*.html`), or `[]` to always run them. `merge` says
+when it skipped them, and the audit applies the same rule with the list in
+force when the change merged (`check-scope.ts`).
+
 ## The line of merges
 
 Every merge must be tested on exactly the code it lands on (the audit checks
