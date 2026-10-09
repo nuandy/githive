@@ -23,6 +23,16 @@ const merge = (overrides: Partial<MergeRecord>): MergeRecord => ({ commit: "m1",
 const records = (merges: MergeRecord[], reg = registry) => ({ registry: reg, votes, policy, merges });
 
 describe("the audit", () => {
+	it("reports a merge that landed before a change its claim waited on (after), on the same branch", async () => {
+		const waiting = [{ tip: "r1", state: at([claimB]) }, { tip: "r2", state: at([{ ...claimA, after: ["docs-3c4d"] }, claimB]) }];
+		const docs = merge({ commit: "m0", author: "agent-b", change: "docs-3c4d", files: ["docs/x.md"] });
+		const dependencyRule = async (merges: MergeRecord[]) => (await audit(records(merges, waiting))).filter((v) => v.rule === "merged-before-dependency");
+		expect(await dependencyRule([merge({})])).toEqual([{ commit: "m1", author: "agent-a", rule: "merged-before-dependency", detail: "stats-1a2b waits on docs-3c4d, which hadn't merged into the project's branch before it" }]);
+		expect(await dependencyRule([docs, merge({})])).toEqual([]);
+		// Merged first, but on another branch: it doesn't count.
+		expect(await dependencyRule([{ ...docs, branch: "feature/docs" }, merge({})])).toHaveLength(1);
+	});
+
 	it("finds nothing wrong with a merge inside its own claim", async () => {
 		expect(await audit(records([merge({})]))).toEqual([]);
 	});

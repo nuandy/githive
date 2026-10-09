@@ -281,11 +281,20 @@ record that fails is made good by adopting the branch on the next claim.
 Work that depends on other unmerged work goes on a feature branch, and the
 project's branch only receives finished features: a feature's pieces merge
 into its branch, and the finished branch merges into the project's in one
-merge, so the project's branch never holds half a feature. (Merging a branch
-into a branch, ordering changes with `after`, per-branch settings and the
-dashboard's branch views come next; until then every branch uses the repo's
-review policy and checks, and the backlog's work lands on the project's
-branch.)
+merge, so the project's branch never holds half a feature.
+
+Within a branch, `after` orders dependent changes: a claim (or a backlog
+item) names the changes it depends on, and `merge` refuses it, saying what it
+waits on, until each has merged into the same branch. A release records the
+branch a change merged into, so a dependency that landed elsewhere doesn't
+count. `next` hands out a backlog item only once its pieces have merged, and
+never tells an agent to merge a change still waiting. A loop (x after y, y
+after x) is refused when claimed, since every change in it would wait forever.
+The audit reports a merge that landed before what its claim waited on.
+
+(Merging a branch into a branch, per-branch settings and the dashboard's
+branch views come next; until then every branch uses the repo's review
+policy and checks, and the backlog's work lands on the project's branch.)
 
 ## Review policy
 

@@ -41,3 +41,6 @@ export function presentClaim<C extends { paths: string[] }>(claim: C, branch: st
 	if (into === branch) return claim;
 	return { ...claim, paths: claim.paths.map((p) => unscopePath(p, branch).path), into };
 }
+
+/** The branch claims records' paths are kept under, when they're another branch's (none: the project's). */
+export const scopedInto = (paths: string[]) => (paths[0] && isReservedPath(paths[0]) ? decodeURIComponent(paths[0].slice(MARK.length, paths[0].indexOf("/") < 0 ? undefined : paths[0].indexOf("/"))) : undefined);

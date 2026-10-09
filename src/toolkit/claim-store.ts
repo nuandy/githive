@@ -28,6 +28,8 @@ export interface ClaimInput {
 	agent: string;
 	paths: string[];
 	intent: string;
+	/** Changes it depends on (see ClaimRecord.after). */
+	after?: string[];
 	/** A claim in the way idle this long is released as stale, if `abandoned` (when given) says it is. */
 	staleAfterMs?: number;
 	abandoned?: Abandoned;
@@ -457,6 +459,7 @@ function mergeByChange(records: ClaimRecord[]): ClaimRecord[] {
 			continue;
 		}
 		seen.paths.push(...record.paths);
+		if (record.after) seen.after = [...new Set([...(seen.after ?? []), ...record.after])];
 		if (record.since < seen.since) seen.since = record.since;
 		if (record.active > seen.active) seen.active = record.active;
 	}

@@ -118,7 +118,7 @@ Name a repo as <owner>/<name> (a person's or an org's), as on GitHub; what you m
 Not sure what to do? Call \`next\`: it tells you the most useful thing for you now: merge or revise your own change, review someone else's, or build a piece of the backlog (\`add_work\` adds to it). Do it, then ask again.
 Conventions:
 1. \`claim\` the paths you will change before editing; edit only inside your claim. A refusal names who holds what: narrow your claim, or ask them. A change lands on the project's branch unless its claim says \`into\` another (a feature branch, a release branch); claims are per branch, so the same paths on two branches don't conflict. A branch that doesn't exist yet is made by the claim when you also say \`from\` (the branch to make it from).
-Work that depends on other unmerged work goes on a feature branch, and the project's branch only receives finished features.
+Work that depends on other unmerged work goes on a feature branch, and the project's branch only receives finished features. Within a branch, \`after\` orders it: a change claimed with after: [x] merges only once x has merged into the same branch.
 2. Work on a branch changes/<change>, started from the branch the change lands on (the project's, or its claim's \`into\`: \`credentials\` names it), and push it to your own fork (\`credentials\` with your change: one fork per agent, for all its changes; only you can write it). The project's branch (\`start\` names it: main, master, ...) is written only through the toolkit.
 3. Reviewers get the change's code with \`review_access\` (read-only: its branch in the author's fork, and the project to diff against), then \`vote\` on the exact commit they reviewed. A change merges with the policy's approvals, including every veto role's, and no veto; a veto role counts only from whoever \`start\` granted it (by default people and GitHive's reviewers), so \`register\` with your key to vote as one. Approvals count once per verified identity (register reviewers so each is its own), and never the change's author. \`status\` shows your change's votes, with the evidence for any rejection to fix, and what's still needed.
 4. Run \`check\` after you push: it test-merges your change with the branch it lands on and lists files outside your claim, so you hear about problems before merging.
@@ -136,10 +136,10 @@ const TOOL_LIST = [
 	{ name: "settings", description: "Change a started repo's review policy or its checks; whatever you leave out stays as it is. The same fields as start: required approvals, vetoes, escalate (stricter rules for chosen paths), grants (who may vote as each role), verify (the checks run before each merge; [] for none). Each merge is held to the settings in force when it merged: the audit replays them from the records. Returns the settings now.", inputSchema: { type: "object", properties: { repo: str, required: { type: "number" }, vetoes: { type: "array", items: str }, escalate: { type: "array", items: { type: "object", properties: { paths: { type: "array", items: str }, required: { type: "number" }, vetoes: { type: "array", items: str } }, required: ["paths"] } }, grants: { type: "object", additionalProperties: { type: "array", items: str } }, verify: { type: "array", items: str } }, required: ["repo"] } },
 	{ name: "credentials", description: "Git access. With your change: a write token for its own fork, where its branch changes/<change> lives. Without: read access to the project repo.", inputSchema: { type: "object", properties: { repo: str, change: str }, required: ["repo"] } },
 	{ name: "claims", description: "The claims in force: who holds which paths, and why.", inputSchema: { type: "object", properties: { repo: str }, required: ["repo"] } },
-	{ name: "claim", description: "Claim paths for your change (again to extend it, or to keep it active). Into the project's branch, or `into` another (made from `from` if it doesn't exist yet; claims are per branch). Refused, naming the holder, if another claim on that branch overlaps; a claim in the way that its agent has abandoned (see release) is released as stale instead.", inputSchema: { type: "object", properties: { repo: str, change: str, agent: str, paths: { type: "array", items: str }, intent: str, into: str, from: str }, required: ["repo", "change", "agent", "paths", "intent"] } },
+	{ name: "claim", description: "Claim paths for your change (again to extend it, or to keep it active). Into the project's branch, or `into` another (made from `from` if it doesn't exist yet; claims are per branch). `after` names changes it depends on: it merges only once they have merged into the same branch. Refused, naming the holder, if another claim on that branch overlaps; a claim in the way that its agent has abandoned (see release) is released as stale instead.", inputSchema: { type: "object", properties: { repo: str, change: str, agent: str, paths: { type: "array", items: str }, intent: str, into: str, from: str, after: { type: "array", items: str } }, required: ["repo", "change", "agent", "paths", "intent"] } },
 	{ name: "release", description: "Release a claim: yours, or with stale: true another agent's it has abandoned: its change waits on that agent, unanswered for 30 minutes with nothing pushed, or 2 hours after changes were asked for, a failed check in the merge line, or approval without a merge. Never one waiting for review, in the merge line, or on a person.", inputSchema: { type: "object", properties: { repo: str, change: str, agent: str, reason: str, stale: { type: "boolean" } }, required: ["repo", "change", "agent"] } },
 	{ name: "next", description: "What you should do next, for any agent without a set role: merge your change if it's approved, revise it if a reviewer asked for changes, finish it if nothing is pushed; else review a change that's waiting (never your own, and a role that can block only if you hold it); else build a piece of the backlog nobody has taken; else wait. Says how to do it.", inputSchema: { type: "object", properties: { repo: str, agent: str }, required: ["repo", "agent"] } },
-	{ name: "add_work", description: "Add a piece of work to the repo's backlog, for next to hand to an agent: a title, what it should do (intent), and the paths it's likely to touch. Its id (from the title unless given) is the change name to claim it under.", inputSchema: { type: "object", properties: { repo: str, title: str, intent: str, paths: { type: "array", items: str }, id: str, agent: str }, required: ["repo", "title", "intent", "agent"] } },
+	{ name: "add_work", description: "Add a piece of work to the repo's backlog, for next to hand to an agent: a title, what it should do (intent), and the paths it's likely to touch. Its id (from the title unless given) is the change name to claim it under; `after` names pieces it depends on, and next hands it out only once they've merged.", inputSchema: { type: "object", properties: { repo: str, title: str, intent: str, paths: { type: "array", items: str }, after: { type: "array", items: str }, id: str, agent: str }, required: ["repo", "title", "intent", "agent"] } },
 	{ name: "review_access", description: "Read access to a change you'll review: a read-only token for the author's fork, the change's branch (changes/<change>) and its pushed head, and read access to the project to diff against. Anyone may review; each grant is logged.", inputSchema: { type: "object", properties: { repo: str, change: str }, required: ["repo", "change"] } },
 	{ name: "vote", description: "Record your review verdict on the exact commit you reviewed.", inputSchema: { type: "object", properties: { repo: str, commit: str, reviewer: str, role: str, verdict: { type: "string", enum: ["approve", "reject"] }, evidence: str }, required: ["repo", "commit", "reviewer", "role", "verdict", "evidence"] } },
 	{ name: "merge", description: "Merge changes/<change> into the project's branch if the conventions hold, recording what was checked, then release the claim.", inputSchema: { type: "object", properties: { repo: str, change: str, agent: str }, required: ["repo", "change", "agent"] } },
@@ -436,6 +436,31 @@ function abandonedRule(ctx: ToolContext, repo: string, registered: Registry | nu
 	};
 }
 
+/** A list of change ids from an argument (none when it's absent). */
+function changeList(value: unknown, field: string): string[] {
+	if (value === undefined) return [];
+	if (!Array.isArray(value) || value.some((v) => typeof v !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(v))) throw new Error(`[400] ${field} is a list of change ids`);
+	return [...new Set(value as string[])];
+}
+
+/**
+ * A loop `change` would close by waiting on `after`: the changes from it back
+ * to itself, or none. Follows what each change waits on (as far as 50 changes).
+ */
+async function dependencyLoop(change: string, after: string[], afterOf: (change: string) => Promise<string[]>): Promise<string[] | undefined> {
+	const paths: string[][] = after.map((dep) => [change, dep]);
+	const seen = new Set<string>();
+	while (paths.length && seen.size < 50) {
+		const path = paths.shift()!;
+		const last = path.at(-1)!;
+		if (last === change) return path;
+		if (seen.has(last)) continue;
+		seen.add(last);
+		for (const next of await afterOf(last)) paths.push([...path, next]);
+	}
+	return undefined;
+}
+
 /** A branch name changes may land on: letters, digits, dots, dashes, underscores and slashes, as Git allows them. */
 const BRANCH_NAME = /^(?![-/.])(?!.*\.\.)(?!.*\/\/)(?!.*\.lock$)(?!.*[/.]$)[A-Za-z0-9._/-]+$/;
 
@@ -697,6 +722,18 @@ async function runTool(name: string, args: Args, ctx: ToolContext): Promise<unkn
 		return changes.get(change)!;
 	};
 	const claimOf = async (change: string) => (await changeOf(change)).claim;
+	/** What of `after` hasn't merged into `into` yet, each in words (none: nothing to wait for). */
+	const waitingOn = async (after: string[], into: string) =>
+		(
+			await Promise.all(
+				after.map(async (dep) => {
+					const merged = (await changeOf(dep)).released.filter((r) => r.mergedAs).at(-1);
+					if (!merged) return `waits on ${dep}, which hasn't merged yet`;
+					const landed = merged.into ?? branch;
+					return landed === into ? null : `waits on ${dep}, which merged into ${landed}, not ${into}`;
+				}),
+			)
+		).filter((w): w is string => !!w);
 	const changeSource = changeSourceFor(ctx, repo);
 	/** Warm the check container for a merge to come (only where the repo has checks): why, and for which change or commit. */
 	const warmChecks = async (expect: "checked" | "approved", key: string) => {
@@ -785,7 +822,8 @@ async function runTool(name: string, args: Args, ctx: ToolContext): Promise<unkn
 			const id = typeof args.id === "string" && args.id.trim() ? args.id.trim() : workId(title);
 			if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(id)) throw new Error("[400] a work id is letters, digits, dots, dashes and underscores");
 			const paths = args.paths === undefined ? undefined : normalizeClaim(requiredPaths(args, "paths"));
-			const added = await addWork(recordLog<Work>(ctx, repo, workRef(repo)), { id, title, intent: requiredString(args, "intent"), ...(paths ? { paths } : {}), by: actAs("agent") });
+			const after = changeList(args.after, "after");
+			const added = await addWork(recordLog<Work>(ctx, repo, workRef(repo)), { id, title, intent: requiredString(args, "intent"), ...(paths ? { paths } : {}), ...(after.length ? { after } : {}), by: actAs("agent") });
 			return added.ok ? { ok: true, id } : { ok: false, reason: added.refused };
 		}
 		case "review_access": {
@@ -839,7 +877,12 @@ async function runTool(name: string, args: Args, ctx: ToolContext): Promise<unkn
 			const into = asked ?? held?.into ?? branch;
 			if (held && (held.into ?? branch) !== into) throw new Error(`[409] ${change} lands on ${held.into ?? branch}: a change lands on one branch; claim another change for ${into}`);
 			const made = into === branch || held ? undefined : await targetBranch(ctx, repo, { into, from: typeof args.from === "string" && args.from.trim() ? args.from.trim() : undefined, registered, claims, agent, stamper });
-			const input = { change, agent, paths: scopePaths(paths, into, branch), intent: requiredString(args, "intent"), staleAfterMs: STALE_AFTER_MS, abandoned: abandonedRule(ctx, repo, registered, votes) };
+			const after = changeList(args.after, "after");
+			if (after.includes(change)) throw new Error(`[400] ${change} can't wait on itself`);
+			// A loop would leave every change in it waiting forever: refused.
+			const loop = after.length ? await dependencyLoop(change, after, async (dep) => (await claimOf(dep))?.after ?? []) : undefined;
+			if (loop) throw new Error(`[409] after ${loop.at(1)}, ${change} would wait on itself: ${loop.join(" waits on ")}`);
+			const input = { change, agent, paths: scopePaths(paths, into, branch), intent: requiredString(args, "intent"), ...(after.length ? { after } : {}), staleAfterMs: STALE_AFTER_MS, abandoned: abandonedRule(ctx, repo, registered, votes) };
 			// Busy enough that one record would hold agents up: shard first, then claim in the shards.
 			const sharded = await shardIfBusy(ctx, repo, claims, registered, input.agent);
 			const outcome = await (sharded ? storeFor(ctx, repo, sharded) : store).claim(input, stamper);
@@ -881,6 +924,9 @@ async function runTool(name: string, args: Args, ctx: ToolContext): Promise<unkn
 			if (holder && holder !== agentArg("agent")) throw new Error(`[409] ${change} is ${holder}'s change: merge it as ${holder}`);
 			// Onto the branch its claim names, through that branch's own line.
 			const into = own?.into ?? branch;
+			// Not before what it depends on has merged into that same branch.
+			const waits = await waitingOn(own?.after ?? [], into);
+			if (waits.length) return { ok: false, reasons: waits };
 			return mergeChange({
 				remote: await write(),
 				branch: into,
@@ -930,7 +976,8 @@ async function runTool(name: string, args: Args, ctx: ToolContext): Promise<unkn
 			const held = (await claimOf(change)) ?? null;
 			const released = held ? undefined : (await changeOf(change)).released.at(-1);
 			const votesOn = async (head: string) => (await votes.readFor([head])).votes;
-			return { change, claim: held, ...(released ? { released } : {}), ...(await changeStatus(ctx, repo, registered, votesOn, change, held ?? undefined, held?.agent ?? released?.agent)) };
+			const waits = held?.after?.length ? await waitingOn(held.after, held.into ?? branch) : [];
+			return { change, claim: held, ...(released ? { released } : {}), ...(waits.length ? { waitsOn: waits } : {}), ...(await changeStatus(ctx, repo, registered, votesOn, change, held ?? undefined, held?.agent ?? released?.agent)) };
 		}
 		case "check":
 		{

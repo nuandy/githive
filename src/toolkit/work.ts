@@ -22,6 +22,8 @@ export interface WorkItem {
 	intent: string;
 	/** What it's likely to touch: the claim to start from. */
 	paths?: string[];
+	/** Pieces it depends on: it's handed out only once each has merged (and its claim says so, see ClaimRecord.after). */
+	after?: string[];
 	by: string;
 	at: string;
 }
@@ -132,8 +134,10 @@ export function nextFor(input: NextInput): NextStep {
 		if (head && rejection)
 			return { kind: "revise", change: claim.change, head, reviewer: rejection.reviewer, evidence: rejection.evidence, next: `Revise ${claim.change}: ${rejection.reviewer} asked for changes (see evidence). Push the fix to changes/${claim.change}; reviewers look at the new commit. If it's not yours to settle, ask_human.` };
 	}
+	// Approved, and nothing it depends on still to merge (it would be refused): merge it.
+	const waitsOn = (claim: ClaimRecord) => (claim.after ?? []).filter((dep) => !input.merged.has(dep));
 	for (const { claim, head } of own) {
-		if (head && approval({ votes }, head, policy, authorOf(claim), claim.paths).approved)
+		if (head && !waitsOn(claim).length && approval({ votes }, head, policy, authorOf(claim), claim.paths).approved)
 			return { kind: "merge", change: claim.change, head, next: `merge your change ${claim.change}: its commit ${head.slice(0, 8)} is approved.` };
 	}
 	const unpushed = own.find((o) => !o.head);
@@ -185,7 +189,9 @@ export function nextFor(input: NextInput): NextStep {
 	const taken = new Set(live.map((o) => o.claim.change));
 	// Backlog work lands on the project's branch: a claim into another branch stands in its way nowhere.
 	const blocked = (w: WorkItem) => !!w.paths?.some((p) => live.some((o) => !o.claim.into && o.claim.paths.some((held) => entriesOverlap(p, held))));
-	const open = input.work.filter((w) => !taken.has(w.id) && !input.merged.has(w.id) && !blocked(w));
+	// A piece whose dependencies haven't all merged waits: built now, it couldn't merge.
+	const ready = (w: WorkItem) => (w.after ?? []).every((dep) => input.merged.has(dep));
+	const open = input.work.filter((w) => !taken.has(w.id) && !input.merged.has(w.id) && !blocked(w) && ready(w));
 	if (open.length) {
 		const choices = open.slice(0, width);
 		const work = choices[spread(agent, choices.length)];
@@ -193,18 +199,24 @@ export function nextFor(input: NextInput): NextStep {
 		return {
 			kind: "build",
 			work,
-			next: `Build ${work.id}: claim with change "${work.id}"${work.paths?.length ? ` and the paths it needs (likely ${work.paths.join(", ")})` : " and the paths it needs"}; if the claim is refused as someone else's change, call next again.${takenOver ? ` ${takenOver.claim.agent} started it and abandoned it: your claim releases theirs. Start from the project's branch; their branch may hold a partial start.` : ""} Then credentials, branch changes/${work.id} from the project's branch, make the change, push it to your fork and check.`,
+			next: `Build ${work.id}: claim with change "${work.id}"${work.paths?.length ? ` and the paths it needs (likely ${work.paths.join(", ")})` : " and the paths it needs"}${work.after?.length ? `, and after: [${work.after.join(", ")}] (what it depends on)` : ""}; if the claim is refused as someone else's change, call next again.${takenOver ? ` ${takenOver.claim.agent} started it and abandoned it: your claim releases theirs. Start from the project's branch; their branch may hold a partial start.` : ""} Then credentials, branch changes/${work.id} from the project's branch, make the change, push it to your fork and check.`,
 		};
 	}
 
-	const waiting = own.filter((o) => o.head).map((o) => o.claim.change);
-	const later = input.work.filter((w) => !taken.has(w.id) && !input.merged.has(w.id) && blocked(w)).map((w) => w.id);
+	const pushed = own.filter((o) => o.head);
+	const forVotes = pushed.filter((o) => !waitsOn(o.claim).length).map((o) => o.claim.change);
+	const forPieces = pushed.filter((o) => waitsOn(o.claim).length).map((o) => `${o.claim.change} waits on ${waitsOn(o.claim).join(", ")} to merge`);
+	const pending = input.work.filter((w) => !taken.has(w.id) && !input.merged.has(w.id));
+	const overlapping = pending.filter((w) => blocked(w)).map((w) => w.id);
+	const unready = pending.filter((w) => !blocked(w) && !ready(w)).map((w) => `${w.id} waits on ${(w.after ?? []).filter((dep) => !input.merged.has(dep)).join(", ")}`);
+	const yours = [...(forVotes.length ? [`${forVotes.join(", ")} ${forVotes.length === 1 ? "waits" : "wait"} for votes`] : []), ...forPieces];
+	const backlog = [...(overlapping.length ? [`the rest of the backlog (${overlapping.join(", ")}) overlaps claims in force`] : []), ...(unready.length ? [`the backlog's ${unready.join("; ")}`] : [])];
 	return {
 		kind: "wait",
-		reason: waiting.length
-			? `your ${waiting.join(", ")} ${waiting.length === 1 ? "waits" : "wait"} for votes, and nothing else needs you`
-			: later.length
-				? `the rest of the backlog (${later.join(", ")}) overlaps claims in force`
+		reason: yours.length
+			? `your ${yours.join("; ")}, and nothing else needs you`
+			: backlog.length
+				? backlog.join("; ")
 				: "no reviews are waiting and the backlog is empty",
 		retryAfterSeconds: 30,
 		next: "Call next again in a little while.",

@@ -125,6 +125,12 @@ export async function audit(records: AuditRecords): Promise<Violation[]> {
 			if (holder) report("inside-another-claim", `${file} was claimed by ${holder.change} (${holder.agent}) at ${merge.claimsTip}`);
 			else if (!own || !inLane(claimed, own.paths)) report("outside-claim", `${file} was not in ${merge.change}'s claim at ${merge.claimsTip}${merge.branch ? ` (on ${merge.branch})` : ""}`);
 		});
+		// What its claim waited on merged into the same branch first (each branch's merges are read oldest first).
+		for (const dep of own?.after ?? []) {
+			const at = records.merges.indexOf(merge);
+			const before = records.merges.some((m, i) => i < at && m.change === dep && (m.branch ?? "") === (merge.branch ?? ""));
+			if (!before) report("merged-before-dependency", `${merge.change} waits on ${dep}, which hadn't merged into ${merge.branch ?? "the project's branch"} before it`);
+		}
 		for (const { history, tip } of cited.records) checkReleasedAfter(history, tip, merge, report);
 		const settings = settingsFor(records, registryAt, merge);
 		checkApproved(records, settings.policy, votesAt, merge, report, own);

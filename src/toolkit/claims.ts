@@ -1,6 +1,7 @@
 import type { CasLog } from "../record-log";
 import { entriesOverlap } from "../claim-paths";
 import { appendRecord } from "./records";
+import { scopedInto } from "./branch-scope";
 import { type Stamper, stampPayload } from "./stamp";
 import type { ReviewPolicy } from "./votes";
 
@@ -24,6 +25,8 @@ export interface ClaimRecord {
 	stamp?: string;
 	/** The branch its change lands on, when not the project's: set on claims as the tools give them out, never in the records (see branch-scope.ts). */
 	into?: string;
+	/** Changes it depends on: it merges only once each has merged into the branch it lands on. */
+	after?: string[];
 }
 
 /** A released claim: who released it, after which merge (if it merged), and whether it was released as stale. */
@@ -34,6 +37,8 @@ export interface ReleaseRecord {
 	at: string;
 	reason: string;
 	mergedAs?: string;
+	/** The branch it merged into, when not the project's (for changes that wait on it, see `after`). */
+	into?: string;
 	stale?: boolean;
 	/** The holder's last activity, for the audit to check a stale release against. */
 	lastActive: string;
@@ -210,7 +215,7 @@ async function stamped<T extends object>(kind: string, record: T, stamper: Stamp
  * a claim in the way that has been idle that long is released as stale in the
  * same record, so an abandoned claim frees itself when someone needs its paths.
  */
-export async function claim(log: CasLog<Registry>, input: { change: string; agent: string; paths: string[]; intent: string; staleAfterMs?: number; abandoned?: Abandoned; now?: number }, stamper?: Stamper) {
+export async function claim(log: CasLog<Registry>, input: { change: string; agent: string; paths: string[]; intent: string; after?: string[]; staleAfterMs?: number; abandoned?: Abandoned; now?: number }, stamper?: Stamper) {
 	const { staleAfterMs, abandoned, now: at, ...wanted } = input;
 	/** The change's paths here before this claim (null: it had none), for a claim that must back out. */
 	let previous: string[] | null = null;
@@ -244,7 +249,9 @@ export async function claim(log: CasLog<Registry>, input: { change: string; agen
 		const { by: _by, stamp: _stamp, ...base } = existing ?? ({} as Partial<ClaimRecord>);
 		const record = await stamped(
 			"claim",
-			existing ? { ...(base as ClaimRecord), paths: [...existing.paths, ...wanted.paths.filter((p) => !existing.paths.includes(p))], active: now } : { ...wanted, since: now, active: now },
+			existing
+				? { ...(base as ClaimRecord), paths: [...existing.paths, ...wanted.paths.filter((p) => !existing.paths.includes(p))], active: now, ...(existing.after || wanted.after ? { after: [...new Set([...(existing.after ?? []), ...(wanted.after ?? [])])] } : {}) }
+				: { ...wanted, since: now, active: now },
 			stamper,
 		);
 		const claims = existing ? remaining.map((c) => (c.change === wanted.change ? record : c)) : [...remaining, record];
@@ -276,7 +283,8 @@ export function release(log: CasLog<Registry>, input: { change: string; agent: s
 	return appendRecord<Registry, string>(log, input.agent, empty, async (state) => {
 		const held = state.claims.find((c) => c.change === input.change);
 		if (!held) return { refused: `${input.change} holds no claim` };
-		const record: ReleaseRecord = { change: input.change, agent: held.agent, by: input.agent, at: new Date().toISOString(), reason: input.reason, lastActive: held.active, ...(input.mergedAs ? { mergedAs: input.mergedAs } : {}) };
+		const into = input.mergedAs ? scopedInto(held.paths) : undefined;
+		const record: ReleaseRecord = { change: input.change, agent: held.agent, by: input.agent, at: new Date().toISOString(), reason: input.reason, lastActive: held.active, ...(input.mergedAs ? { mergedAs: input.mergedAs } : {}), ...(into ? { into } : {}) };
 		return {
 			state: {
 				...state,
