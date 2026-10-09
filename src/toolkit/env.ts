@@ -2,7 +2,7 @@ import { DEFAULT_POLICY, hostedRoles } from "./mcp";
 import { effectivePolicy } from "./votes";
 import { ensureRepo, forkAndWait, headOf, remoteFor, reviewerName } from "../artifacts";
 import { GitCasLog } from "../record-log";
-import { rpc } from "../rpc";
+import { rpc, rpcRetried } from "../rpc";
 import { fail } from "../errors";
 import { defaultBranch, type Remote, Workspace } from "../git";
 import { projectBranch } from "../project-branch";
@@ -163,7 +163,8 @@ export function toolContextFor(env: Env, by: string | undefined, caller: { agent
 				};
 				const last = changes.at(-1)!;
 				const ahead = await Promise.all(changes.slice(0, -1).map(async (c) => ({ head: c.head, ...(await sourceOf(c)) })));
-				const result = await rpc(env.GATE.getByName(`repo:${repo}:change:${last.change}`).checkCommit({ repo, branch, base: { remote: remote.url, token: remote.token }, fork: await sourceOf(last), head: last.head, checks: commands, baseHead: base, ahead }));
+				const forkOf = await sourceOf(last);
+				const result = await rpcRetried(() => env.GATE.getByName(`repo:${repo}:change:${last.change}`).checkCommit({ repo, branch, base: { remote: remote.url, token: remote.token }, fork: forkOf, head: last.head, checks: commands, baseHead: base, ahead }));
 				const conflict = result.mergeConflict ? [{ command: "(merging the batch onto main)", exitCode: 1, output: `conflicts in ${result.mergeConflict.join(", ")}` }] : [];
 				return { passed: result.passed, results: [...conflict, ...result.results.map((r) => ({ command: r.command, exitCode: r.exitCode, output: r.output }))] };
 			};
@@ -181,18 +182,16 @@ export function toolContextFor(env: Env, by: string | undefined, caller: { agent
 			return {
 				inspect: async ({ base, branch, changes }) => {
 					const read = await project("read");
-					return rpc(gate().inspectBatch({ repo, branch, base: { remote: read.url, token: read.token }, baseHead: base, changes: await Promise.all(changes.map(sourceOf)) }));
+					const sources = await Promise.all(changes.map(sourceOf));
+					return rpcRetried(() => gate().inspectBatch({ repo, branch, base: { remote: read.url, token: read.token }, baseHead: base, changes: sources }));
 				},
 				land: async ({ base, branch, merges, by }) => {
 					const write = await project("write");
-					const landed = await rpc<{ commits: string[] } | { moved: true } | { error: string }>(gate().landBatch({
-						repo,
-						branch,
-						base: { remote: write.url, token: write.token },
-						baseHead: base,
-						merges: await Promise.all(merges.map(async (m) => ({ ...(await sourceOf(m)), head: m.head, claimed: m.claimed }))),
-						...(by ? { by } : {}),
-					}));
+					const sources = await Promise.all(merges.map(async (m) => ({ ...(await sourceOf(m)), head: m.head, claimed: m.claimed })));
+					// Tried again after a brief outage too: the push names the main it lands on, so a batch that did land finds main moved.
+					const landed = await rpcRetried<{ commits: string[] } | { moved: true } | { error: string }>(() =>
+						gate().landBatch({ repo, branch, base: { remote: write.url, token: write.token }, baseHead: base, merges: sources, ...(by ? { by } : {}) }),
+					);
 					if ("moved" in landed) return "moved";
 					if ("error" in landed) throw new Error(`[500] landing the batch failed: ${landed.error}`);
 					return { commits: landed.commits };
@@ -203,12 +202,12 @@ export function toolContextFor(env: Env, by: string | undefined, caller: { agent
 		landing: (repo, branch) => {
 			const feed = () => env.LIVE.getByName(`repo:${repo}`);
 			return {
-				turn: (holder, change, head, since, ttlMs) => rpc<{ settled: Settled } | { lease: boolean }>(feed().landingTurn(branch, holder, change, head, since, ttlMs)),
-				renew: (holder, ttlMs) => rpc(feed().renewLanding(branch, holder, ttlMs)),
-				drop: (holder) => rpc(feed().dropLanding(branch, holder)),
-				checking: (batch) => rpc(feed().landingChecking(branch, batch)),
-				settle: (outcomes) => rpc(feed().landingSettled(branch, outcomes)),
-				view: () => rpc(feed().landingView(branch)),
+				turn: (holder, change, head, since, ttlMs) => rpcRetried<{ settled: Settled } | { lease: boolean }>(() => feed().landingTurn(branch, holder, change, head, since, ttlMs)),
+				renew: (holder, ttlMs) => rpcRetried(() => feed().renewLanding(branch, holder, ttlMs)),
+				drop: (holder) => rpcRetried(() => feed().dropLanding(branch, holder)),
+				checking: (batch) => rpcRetried(() => feed().landingChecking(branch, batch)),
+				settle: (outcomes) => rpcRetried(() => feed().landingSettled(branch, outcomes)),
+				view: () => rpcRetried(() => feed().landingView(branch)),
 			};
 		},
 	};

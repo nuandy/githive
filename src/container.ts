@@ -7,6 +7,9 @@ import { INSTALL, MARKER_PATHSPECS, PROFILE, type Toolchain, detectToolchains } 
 export const IMAGE = "cloudflare/debian-trixie";
 export const WORKDIR = "/work";
 export const COMMAND_TIMEOUT_S = 300;
+/** Starts from a snapshot tried before the image, and the wait between them. */
+const SNAPSHOT_STARTS = 2;
+export const SNAPSHOT_RETRY_MS = 2_000;
 
 /**
  * The sizes GitHive starts containers at. Memory is paid for as long as a
@@ -43,21 +46,27 @@ export interface SetupSnapshot {
  * Start the container if needed, at `size`: from the repo's snapshot when
  * there is one ("restored": its checkout and dependencies are there), or
  * from the image with git installed ("fresh": the managed image has Node 24
- * but no git). A snapshot that won't start, or starts without its checkout,
- * is given up on for the image.
+ * but no git). A snapshot whose start fails is tried once more, a moment
+ * later: Containers is sometimes briefly unavailable ("The container
+ * connection is temporarily unavailable"), and the image costs a minute more
+ * (git, the clone, the install). One that won't start twice, or starts
+ * without its checkout, is given up on for the image.
  */
 export async function bootContainer(container: Container, size: InstanceSize = "standard-1", snapshot?: SetupSnapshot | null): Promise<"running" | "restored" | "fresh"> {
 	if (container.running) return "running";
 	const options = { entrypoint: ["sleep", "infinity"], enableInternet: true, instance: INSTANCE_SIZES[size] };
-	if (snapshot) {
+	for (let attempt = 1; snapshot && attempt <= SNAPSHOT_STARTS; attempt++) {
 		try {
 			container.start({ ...options, containerSnapshot: { id: snapshot.id } });
 			const ready = await run(container, ["bash", "-c", `command -v git >/dev/null && test -d ${WORKDIR}/.git`], "/");
 			if (ready.exitCode === 0) return "restored";
+			// Started, without its checkout: trying again won't help.
+			attempt = SNAPSHOT_STARTS;
 		} catch (err) {
-			console.error("starting from a snapshot failed", err instanceof Error ? err.message : String(err));
+			console.error(`starting from a snapshot failed (try ${attempt} of ${SNAPSHOT_STARTS})`, err instanceof Error ? err.message : String(err));
 		}
 		if (container.running) await container.destroy("the snapshot was unusable").catch(() => undefined);
+		if (attempt < SNAPSHOT_STARTS) await new Promise((resolve) => setTimeout(resolve, SNAPSHOT_RETRY_MS));
 	}
 	container.start({ ...options, image: IMAGE });
 	// WORKDIR doesn't exist until a clone, so setup runs from /.

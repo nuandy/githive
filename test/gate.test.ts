@@ -118,6 +118,29 @@ describe("a repo's snapshot", () => {
 		expect(snapshotDue(snapshot, { lockHash: "l1" }, 1_000 + 7 * 24 * 3600_000)).toBe(true);
 	});
 
+	it("tries a snapshot once more when Containers is briefly unavailable, before the image", async () => {
+		const { bootContainer, IMAGE } = await import("../src/container");
+		// The first start's connection is lost; the second restores.
+		const flaky = fakeContainer();
+		let lost = 1;
+		const exec = flaky.exec;
+		flaky.exec = async (cmd: string[]) => {
+			if (lost-- > 0) throw new Error("The container connection is temporarily unavailable, try again shortly");
+			return exec(cmd);
+		};
+		expect(await bootContainer(flaky as never, "small", snapshot)).toBe("restored");
+		expect(flaky.starts).toEqual([expect.objectContaining({ containerSnapshot: { id: "s1" } }), expect.objectContaining({ containerSnapshot: { id: "s1" } })]);
+		// Lost twice: the image.
+		const gone = fakeContainer();
+		gone.exec = async (cmd: string[]) => {
+			if (cmd.join(" ").includes("command -v git")) throw new Error("The container connection is temporarily unavailable, try again shortly");
+			return exec(cmd);
+		};
+		expect(await bootContainer(gone as never, "small", snapshot)).toBe("fresh");
+		expect(gone.starts.map((s) => (s.image ? "image" : "snapshot"))).toEqual(["snapshot", "snapshot", "image"]);
+		expect(gone.starts.at(-1)).toMatchObject({ image: IMAGE });
+	});
+
 	it("starts a container in seconds, and an unusable one falls back to the image", async () => {
 		const { bootContainer, IMAGE } = await import("../src/container");
 		const restored = fakeContainer();

@@ -489,6 +489,12 @@ branch. The push names the commit the branch must still be at
 and a change branched from a newer main would make a batch on an older one a
 fast-forward of it.
 
+A call to the Gate or the LiveFeed that failed only because its Durable
+Object or container was briefly away (reset by a runtime update, or a
+container connection briefly unavailable) is tried once more, two seconds
+later, before the merge gives up. Even landing: its push names the main it
+lands on, so a batch that did land the first time finds main moved.
+
 The lease is a hint, kept in the repo's LiveFeed with what changes came to
 lately (`landing.ts`): it keeps two merges from checking the same changes side
 by side, and the merges waiting on a batch read what their change came to
@@ -533,8 +539,10 @@ change's code (installers, scripts, tests) never is, so a change can't plant
 anything later containers would start with. The changes' Gates, builders and
 reviewers start from the snapshot in seconds (2.5 s for cors, against 28 s
 from the image), fetch what they need, and install only what differs from
-what it has. A snapshot that won't start is forgotten and the container
-starts from the image. Containers keeps a snapshot 30 days after it was
+what it has. A snapshot start that fails is tried once more, two seconds
+later: Containers is sometimes briefly unavailable ("The container connection
+is temporarily unavailable"), and the image costs a minute more. A snapshot
+that won't start twice is forgotten and the container starts from the image. Containers keeps a snapshot 30 days after it was
 taken or last restored and has no way to delete one sooner: deleting a repo
 forgets its snapshot, so nothing starts from it again. An install is skipped while `package.json`'s
 dependency sections and the lockfile are unchanged since the last one. If no
