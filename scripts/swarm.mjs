@@ -13,7 +13,7 @@
 // happens, then a timeline per piece of work, what each agent did, and the
 // audit.
 //
-//   node scripts/swarm.mjs <plan.json> [--base URL] [--speed N]
+//   node scripts/swarm.mjs <plan.json> [--base URL] [--speed N] [--setup-only]
 //
 // The plan (paths in it are relative to the plan's own directory):
 //   {
@@ -424,6 +424,11 @@ if (plan.setup?.verify?.length) {
 }
 const workStarted = Date.now();
 const setupSeconds = ((workStarted - started) / 1000).toFixed(0);
+// Set up for other agents to work on (real ones, see claude-agents.mjs): the repo, its agents and backlog, nothing run.
+if (args.includes("--setup-only")) {
+	say("swarm", `set up in ${setupSeconds}s; --setup-only, so no scripted agents run`);
+	process.exit(0);
+}
 /** When the last piece settled (merged, waiting on a person, or stopped): the end of the work. */
 let lastSettled = workStarted;
 say("swarm", `${plan.backlog.length} pieces in the backlog; ${plan.agents.length} agents, all alike${speed !== 1 ? `, at ${speed}x speed` : ""}`);
