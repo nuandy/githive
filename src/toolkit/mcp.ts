@@ -20,6 +20,7 @@ import { addWork, holdKey, type NextStep, nextFor, ROLE_WAIT_MS, type Work, wait
 import { type Line, lineRef } from "./line";
 import { abandoned, BUILDING_IDLE_MS, type ChangeSigns } from "./staleness";
 import { claimInto, isReservedPath, presentClaim, scopeFile, scopePaths } from "./branch-scope";
+import { BRANCH_PATTERN, type BranchRule, settingsForBranch } from "./branch-rules";
 import type { Abandoned } from "./claims";
 
 // GitHive's MCP tools (see docs/design.md). Stateless: each
@@ -118,7 +119,7 @@ Name a repo as <owner>/<name> (a person's or an org's), as on GitHub; what you m
 Not sure what to do? Call \`next\`: it tells you the most useful thing for you now: merge or revise your own change, review someone else's, or build a piece of the backlog (\`add_work\` adds to it). Do it, then ask again.
 Conventions:
 1. \`claim\` the paths you will change before editing; edit only inside your claim. A refusal names who holds what: narrow your claim, or ask them. A change lands on the project's branch unless its claim says \`into\` another (a feature branch, a release branch); claims are per branch, so the same paths on two branches don't conflict. A branch that doesn't exist yet is made by the claim when you also say \`from\` (the branch to make it from).
-Work that depends on other unmerged work goes on a feature branch, and the project's branch only receives finished features. Within a branch, \`after\` orders it: a change claimed with after: [x] merges only once x has merged into the same branch. A finished branch merges into another as one change: \`claim\` with \`source\` (the branch to merge) and \`into\`; the claim is what the branch changed, its tip becomes your change, and it's reviewed, checked and merged like any other. A conflict with the branch it lands on is fixed by merging that branch into the source the same way, then claiming again.
+Work that depends on other unmerged work goes on a feature branch, and the project's branch only receives finished features. Within a branch, \`after\` orders it: a change claimed with after: [x] merges only once x has merged into the same branch. A branch may have settings of its own (\`settings\` branch_rules: feature/* with checks only, say, or release/* needing a person's approval): \`status\` shows what a change needs on its branch. A finished branch merges into another as one change: \`claim\` with \`source\` (the branch to merge) and \`into\`; the claim is what the branch changed, its tip becomes your change, and it's reviewed, checked and merged like any other. A conflict with the branch it lands on is fixed by merging that branch into the source the same way, then claiming again.
 2. Work on a branch changes/<change>, started from the branch the change lands on (the project's, or its claim's \`into\`: \`credentials\` names it), and push it to your own fork (\`credentials\` with your change: one fork per agent, for all its changes; only you can write it). The project's branch (\`start\` names it: main, master, ...) is written only through the toolkit.
 3. Reviewers get the change's code with \`review_access\` (read-only: its branch in the author's fork, and the project to diff against), then \`vote\` on the exact commit they reviewed. A change merges with the policy's approvals, including every veto role's, and no veto; a veto role counts only from whoever \`start\` granted it (by default people and GitHive's reviewers), so \`register\` with your key to vote as one. Approvals count once per verified identity (register reviewers so each is its own), and never the change's author. \`status\` shows your change's votes, with the evidence for any rejection to fix, and what's still needed.
 4. Run \`check\` after you push: it test-merges your change with the branch it lands on and lists files outside your claim, so you hear about problems before merging.
@@ -133,7 +134,7 @@ Work that depends on other unmerged work goes on a feature branch, and the proje
 const str = { type: "string" } as const;
 const TOOL_LIST = [
 	{ name: "start", description: "Start GitHive on a project repo (harmless if started; change a started repo's policy or checks with settings): the review policy, the checks run before each merge (each change lives in its own fork, and only the toolkit writes the project), grants: who may vote as each role that can block a merge (registered agent names, 'person:*', a verified identity like 'person:<who>' or 'service:<id>', a pool 'service:<id>/*' (every agent registered under it, never on its own team's changes), 'githive' for GitHive's reviewers; unlisted roles: people and GitHive's reviewers), how claims are kept: in one record until the load calls for more (8 agents holding claims, or over 15 claim writes a minute), then sharded per path 2 segments deep over 16 records repos, so agents in different parts of the tree never contend. shard_depth shards now, this deep (0: never), and records_repos is how many repos the shards are spread over, since a repo takes one push at a time. Returns them.", inputSchema: { type: "object", properties: { repo: str, required: { type: "number" }, vetoes: { type: "array", items: str }, escalate: { type: "array", items: { type: "object", properties: { paths: { type: "array", items: str }, required: { type: "number" }, vetoes: { type: "array", items: str } }, required: ["paths"] } }, grants: { type: "object", additionalProperties: { type: "array", items: str } }, verify: { type: "array", items: str }, shard_depth: { type: "number" }, records_repos: { type: "number" } }, required: ["repo"] } },
-	{ name: "settings", description: "Change a started repo's review policy or its checks; whatever you leave out stays as it is. The same fields as start: required approvals, vetoes, escalate (stricter rules for chosen paths), grants (who may vote as each role), verify (the checks run before each merge; [] for none). Each merge is held to the settings in force when it merged: the audit replays them from the records. Returns the settings now.", inputSchema: { type: "object", properties: { repo: str, required: { type: "number" }, vetoes: { type: "array", items: str }, escalate: { type: "array", items: { type: "object", properties: { paths: { type: "array", items: str }, required: { type: "number" }, vetoes: { type: "array", items: str } }, required: ["paths"] } }, grants: { type: "object", additionalProperties: { type: "array", items: str } }, verify: { type: "array", items: str } }, required: ["repo"] } },
+	{ name: "settings", description: "Change a started repo's review policy or its checks; whatever you leave out stays as it is. The same fields as start: required approvals, vetoes, escalate (stricter rules for chosen paths), grants (who may vote as each role), verify (the checks run before each merge; [] for none). Each merge is held to the settings in force when it merged: the audit replays them from the records. Returns the settings now. branch_rules sets other branches' settings by pattern (feature/*, release/*, a name), the first match winning: each changes only the policy fields and checks it names (verify [] for none; left out, the repo's); [] clears them. The project's branch always has the repo's settings.", inputSchema: { type: "object", properties: { repo: str, required: { type: "number" }, vetoes: { type: "array", items: str }, escalate: { type: "array", items: { type: "object", properties: { paths: { type: "array", items: str }, required: { type: "number" }, vetoes: { type: "array", items: str } }, required: ["paths"] } }, grants: { type: "object", additionalProperties: { type: "array", items: str } }, verify: { type: "array", items: str }, branch_rules: { type: "array", items: { type: "object", properties: { pattern: str, required: { type: "number" }, vetoes: { type: "array", items: str }, grants: { type: "object", additionalProperties: { type: "array", items: str } }, verify: { type: "array", items: str } }, required: ["pattern"] } } }, required: ["repo"] } },
 	{ name: "credentials", description: "Git access. With your change: a write token for its own fork, where its branch changes/<change> lives. Without: read access to the project repo.", inputSchema: { type: "object", properties: { repo: str, change: str }, required: ["repo"] } },
 	{ name: "claims", description: "The claims in force: who holds which paths, and why.", inputSchema: { type: "object", properties: { repo: str }, required: ["repo"] } },
 	{ name: "claim", description: "Claim paths for your change (again to extend it, or to keep it active). Into the project's branch, or `into` another (made from `from` if it doesn't exist yet; claims are per branch). `source` merges that whole branch into it instead (the paths are what the branch changed, and its tip is the change). `after` names changes it depends on: it merges only once they have merged into the same branch. Refused, naming the holder, if another claim on that branch overlaps; a claim in the way that its agent has abandoned (see release) is released as stale instead.", inputSchema: { type: "object", properties: { repo: str, change: str, agent: str, paths: { type: "array", items: str }, intent: str, into: str, from: str, after: { type: "array", items: str }, source: str }, required: ["repo", "change", "agent", "intent"] } },
@@ -229,6 +230,33 @@ async function advice(ctx: ToolContext, repo: string): Promise<ClaimsAdvice> {
 /** The arguments start and settings take for the review policy. */
 const POLICY_FIELDS = ["required", "vetoes", "escalate", "grants"] as const;
 
+/** A branch's review policy and checks: the repo's, with what a branch rule for it changes (see branch-rules.ts). */
+export function branchSettings(registry: Registry | null | undefined, branch: string | undefined) {
+	const project = projectBranch(registry);
+	return settingsForBranch({ policy: registry?.policy ?? DEFAULT_POLICY, verify: registry?.verify ?? [], ...(registry?.branchRules ? { rules: registry.branchRules } : {}), project }, branch ?? project);
+}
+
+/**
+ * Branch rules from settings' arguments: each a pattern, the policy fields it
+ * changes (as start takes them) and its checks (verify; left out, the repo's).
+ * An empty list clears them.
+ */
+function branchRulesFrom(value: unknown, base: ReviewPolicy): BranchRule<ReviewPolicy>[] {
+	if (!Array.isArray(value)) throw new Error("[400] branch_rules is a list of rules: each a pattern, and what it changes");
+	return value.map((raw, i) => {
+		if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw new Error(`[400] branch_rules[${i}] is a rule: a pattern, and what it changes`);
+		const rule = raw as Args;
+		const pattern = typeof rule.pattern === "string" ? rule.pattern.trim() : "";
+		if (!pattern || !BRANCH_PATTERN.test(pattern)) throw new Error(`[400] branch_rules[${i}].pattern is a branch name, with * for any run of characters (feature/*)`);
+		// Only the fields it sets: the rest stay the repo's, as the repo's change.
+		const full = policyFrom(rule, base);
+		const policy = Object.fromEntries(POLICY_FIELDS.filter((f) => rule[f] !== undefined).map((f) => [f, full[f]])) as Partial<ReviewPolicy>;
+		const verify = rule.verify === undefined ? undefined : checksFrom(rule.verify);
+		if (!Object.keys(policy).length && !verify) throw new Error(`[400] branch_rules[${i}] (${pattern}) changes nothing: set required, vetoes, escalate, grants or verify`);
+		return { pattern, ...(Object.keys(policy).length ? { policy } : {}), ...(verify ? { verify } : {}) };
+	});
+}
+
 /** A review policy from start's or settings' arguments, each one left out kept from `base`. */
 function policyFrom(args: Args, base: ReviewPolicy): ReviewPolicy {
 	const required = typeof args.required === "number" ? args.required : base.required;
@@ -267,9 +295,9 @@ function validGrants(value: unknown): Record<string, string[]> {
  * GitHive's own reviewers: if no person holds the role, the flag says so,
  * so its holders can be nudged or more granted.
  */
-async function tellPeopleOfWaitingRoles(ctx: ToolContext, repo: string, votes: VoteStore, policy: ReviewPolicy, open: { claim: ClaimRecord; head: string | null }[], counted: VoteRecord[]) {
+async function tellPeopleOfWaitingRoles(ctx: ToolContext, repo: string, votes: VoteStore, policy: ReviewPolicy, open: { claim: ClaimRecord; head: string | null }[], counted: VoteRecord[], policyOf?: (claim: ClaimRecord) => ReviewPolicy) {
 	if (!ctx.reviews?.waits || !ctx.reviews.told) return;
-	const waiting = waitingRoleReviews({ policy, open, votes: counted, held: await ctx.reviews.held(repo) });
+	const waiting = waitingRoleReviews({ policy, ...(policyOf ? { policyOf } : {}), open, votes: counted, held: await ctx.reviews.held(repo) });
 	const seen = await ctx.reviews.waits(repo, waiting.map((w) => holdKey(w.head, w.role)));
 	let told = false;
 	for (const w of waiting) {
@@ -379,7 +407,8 @@ async function changeStatus(ctx: ToolContext, repo: string, registry: Registry |
 		.catch(() => null);
 	// The policy for the paths it claims: stricter for dependency, CI and deploy files, say.
 	const paths = author?.paths ?? [];
-	const policy = registry?.policy ?? DEFAULT_POLICY;
+	// The branch it lands on decides the policy too (see branch-rules.ts).
+	const policy = branchSettings(registry, author?.into).policy;
 	const { required, vetoes } = effectivePolicy(policy, paths);
 	const cast = head ? (await votesOn(head)).filter((v) => v.commit === head) : [];
 	const outcome = head ? approval({ votes: await countedVotes(cast, registry?.stampKey) }, head, policy, author, paths) : { approved: false, approvals: 0, vetoedBy: [], awaiting: vetoes };
@@ -430,7 +459,8 @@ function abandonedRule(ctx: ToolContext, repo: string, registered: Registry | nu
 			.catch(() => null);
 		const view = await votes.readFor(head ? [head] : []);
 		const counted = head ? await countedVotes(view.votes.filter((v) => v.commit === head), registered?.stampKey) : [];
-		const signs = changeSigns({ claim: presentClaim(claim, projectBranch(registered)), head, counted, record: view, line: await line, policy: registered?.policy ?? DEFAULT_POLICY });
+		const shown = presentClaim(claim, projectBranch(registered));
+		const signs = changeSigns({ claim: shown, head, counted, record: view, line: await line, policy: branchSettings(registered, shown.into).policy });
 		const outcome = abandoned(signs, Date.now());
 		return { abandoned: outcome.abandoned, why: outcome.waiting.why };
 	};
@@ -689,6 +719,8 @@ export async function repoSnapshot(ctx: ToolContext, repo: string) {
 		repo,
 		/** The project's branch changes merge into. */
 		branch: projectBranch(state),
+		/** Other branches' settings by pattern (see branch-rules.ts). */
+		...(state.branchRules?.length ? { branchRules: state.branchRules } : {}),
 		/** The other branches changes land on: where each started. */
 		branches: Object.entries(state.branches ?? {}).map(([name, b]) => ({ name, base: b.base, ...(b.from ? { from: b.from } : {}), at: b.at })),
 		policy: state.policy ?? DEFAULT_POLICY,
@@ -824,13 +856,14 @@ async function runTool(name: string, args: Args, ctx: ToolContext): Promise<unkn
 			if (!registered?.baseline) throw new Error(`[409] GitHive hasn't started on ${repo}: start it first`);
 			const policy = POLICY_FIELDS.some((f) => args[f] !== undefined) ? policyFrom(args, registered.policy ?? DEFAULT_POLICY) : undefined;
 			const verify = args.verify === undefined ? undefined : checksFrom(args.verify);
-			if (!policy && !verify) throw new Error(`[400] name what to change: ${[...POLICY_FIELDS, "verify"].join(", ")}`);
-			await changeSettings(claims, { ...(policy ? { policy } : {}), ...(verify ? { verify } : {}), ...(stamper?.by ? { by: stamper.by } : {}) });
+			const branchRules = args.branch_rules === undefined ? undefined : branchRulesFrom(args.branch_rules, registered.policy ?? DEFAULT_POLICY);
+			if (!policy && !verify && !branchRules) throw new Error(`[400] name what to change: ${[...POLICY_FIELDS, "verify", "branch_rules"].join(", ")}`);
+			await changeSettings(claims, { ...(policy ? { policy } : {}), ...(verify ? { verify } : {}), ...(branchRules ? { branchRules } : {}), ...(stamper?.by ? { by: stamper.by } : {}) });
 			const registry = (await claims.read())?.commit.state;
 			// New checks may install something new: warm the containers for them.
 			if (verify?.length) await ctx.warmChecks?.(repo, { branch: projectBranch(registry), checks: verify, expect: "set up" }).catch(() => undefined);
 			const warnings = grantWarnings(registry?.policy ?? DEFAULT_POLICY);
-			return { repo, branch: projectBranch(registry), policy: registry?.policy ?? DEFAULT_POLICY, verify: registry?.verify ?? [], ...(warnings.length ? { warnings } : {}) };
+			return { repo, branch: projectBranch(registry), policy: registry?.policy ?? DEFAULT_POLICY, verify: registry?.verify ?? [], ...(registry?.branchRules?.length ? { branchRules: registry.branchRules } : {}), ...(warnings.length ? { warnings } : {}) };
 		}
 		case "next": {
 			const agent = actAs("agent");
@@ -854,6 +887,8 @@ async function runTool(name: string, args: Args, ctx: ToolContext): Promise<unkn
 				...(stamper?.by ? { by: stamper.by } : {}),
 				...(teams.length ? { teams } : {}),
 				policy: registered?.policy ?? DEFAULT_POLICY,
+				// Each change's by the branch it lands on.
+				policyOf: (claim: ClaimRecord) => branchSettings(registered, claim.into).policy,
 				open,
 				votes: counted,
 				merged: new Set(inForce.merged),
@@ -862,12 +897,12 @@ async function runTool(name: string, args: Args, ctx: ToolContext): Promise<unkn
 				work: backlog?.commit.state.items ?? [],
 				...(held ? { held } : {}),
 				crowd: Math.max(Object.keys(registered?.agents ?? {}).length, new Set(inForce.claims.map((c) => c.agent)).size),
-				abandoned: new Set(open.filter((o) => abandoned(changeSigns({ claim: o.claim, head: o.head, counted, record: cast, line, policy: registered?.policy ?? DEFAULT_POLICY }), Date.now()).abandoned).map((o) => o.claim.change)),
+				abandoned: new Set(open.filter((o) => abandoned(changeSigns({ claim: o.claim, head: o.head, counted, record: cast, line, policy: branchSettings(registered, o.claim.into).policy }), Date.now()).abandoned).map((o) => o.claim.change)),
 			});
 			// A review is held for this agent before it's handed out, so two agents aren't sent to one that needs one review.
 			if (!ctx.reviews) return decide();
 			// Reviews a role that can block has waited too long for: people hear of it (whoever asks next notices; no timer).
-			await tellPeopleOfWaitingRoles(ctx, repo, votes, registered?.policy ?? DEFAULT_POLICY, open, counted).catch((err) => console.error(`checking ${repo}'s waiting reviews failed`, String(err)));
+			await tellPeopleOfWaitingRoles(ctx, repo, votes, registered?.policy ?? DEFAULT_POLICY, open, counted, (claim) => branchSettings(registered, claim.into).policy).catch((err) => console.error(`checking ${repo}'s waiting reviews failed`, String(err)));
 			for (let attempt = 0; attempt < 3; attempt++) {
 				const next = decide(await ctx.reviews.held(repo).catch(() => ({})));
 				// A hold that couldn't be written isn't taken: handing the review out anyway sent a crowd to one review.
@@ -1001,8 +1036,9 @@ async function runTool(name: string, args: Args, ctx: ToolContext): Promise<unkn
 				...(into !== branch ? { scope: (file: string) => scopeFile(file, into, branch) } : {}),
 				store,
 				votes,
-				policy: registry?.policy ?? DEFAULT_POLICY,
-				verify: registry?.verify ?? [],
+				// The branch's settings: the repo's, with what a branch rule changes.
+				policy: branchSettings(registry, into).policy,
+				verify: branchSettings(registry, into).verify,
 				runChecks: ctx.runChecks?.(repo, into === branch ? undefined : into),
 				stamper,
 				stampKey: registry?.stampKey,
@@ -1026,7 +1062,7 @@ async function runTool(name: string, args: Args, ctx: ToolContext): Promise<unkn
 			const registry = registered;
 			if (!(await claimOf(change))) throw new Error(`[409] ${change} holds no claim: claim the change's paths first`);
 			if (!ctx.requestReview) throw new Error("[501] hosted reviewers aren't available here");
-			const policy = registry?.policy ?? DEFAULT_POLICY;
+			const policy = branchSettings(registry, (await claimOf(change))?.into).policy;
 			// By default a general review, and every role that can veto a change to these paths.
 			const roles = Array.isArray(args.roles) && args.roles.length ? (args.roles as string[]) : hostedRoles(effectivePolicy(policy, (await claimOf(change))?.paths ?? []).vetoes);
 			return ctx.requestReview({ repo, change, roles, ...(typeof args.summary === "string" ? { summary: args.summary } : {}) });

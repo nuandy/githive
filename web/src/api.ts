@@ -11,12 +11,22 @@ export interface SettingsInput {
 	escalate?: { paths: string[]; required?: number; vetoes?: string[] }[];
 	grants?: Record<string, string[]>;
 	verify?: string[];
+	/** Other branches' settings by pattern: each changes only what it sets ([] clears them). */
+	branch_rules?: { pattern: string; required?: number; vetoes?: string[]; grants?: Record<string, string[]>; verify?: string[] }[];
+}
+
+/** A branch rule as the server keeps it: a pattern, the policy fields it changes, and its checks (absent: the repo's). */
+export interface BranchRule {
+	pattern: string;
+	policy?: Partial<RepoSnapshot["policy"]>;
+	verify?: string[];
 }
 
 /** The settings after a change, and anything to know about the grants. */
 export interface SavedMergeSettings {
 	policy: RepoSnapshot["policy"];
 	verify: string[];
+	branchRules?: BranchRule[];
 	warnings?: string[];
 }
 
@@ -30,6 +40,8 @@ export interface RepoSnapshot {
 	branch?: string;
 	/** Whether records and merges are stamped with verified identity. */
 	verified: boolean;
+	/** Other branches' settings by pattern (newer servers). */
+	branchRules?: BranchRule[];
 	/** The other branches changes land on (newer servers): where each started. */
 	branches?: { name: string; base: string; from?: string; at: string }[];
 	/** How claims are kept (newer servers): in one record until the load calls for shards ("on demand"), always ("never"), or sharded since `since`. */

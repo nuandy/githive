@@ -314,9 +314,20 @@ with `from` would), and merge an approved change that waits on nothing: the
 same merge an agent asks for, through its branch's line with its checks, as
 its agent, stamped with the person who asked.
 
-(Per-branch settings come next; until then every branch uses the repo's
-review policy and checks, and the backlog's work lands on the project's
-branch.)
+A repo's review policy and checks are its project branch's, and every other
+branch's unless a branch rule says otherwise (`settings` with `branch_rules`,
+or the dashboard's Settings tab). A rule names branches by pattern
+(`feature/*`, `release/*`, a name; `*` is any run of characters) and changes
+only what it sets: the policy fields it names, and its checks (`[]` for
+none). What it leaves out stays the repo's, and follows the repo's when they
+change. The first matching rule applies; the project's branch always has the
+repo's own settings. So `feature/*` can merge on its checks alone while a
+feature's merge into `main` gets the full review, and `release/*` can need a
+role only people hold. `merge`, `status`, `next`, the abandoned rule and the
+audit all read a change's settings from the branch it lands on; the audit
+from the rules in force when it merged. A merge whose settings need no
+approvals and no role needs no votes to cite. (The backlog's work lands on
+the project's branch.)
 
 ## Review policy
 

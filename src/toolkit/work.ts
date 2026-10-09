@@ -64,6 +64,8 @@ export interface NextInput {
 	teams?: string[];
 	by?: string;
 	policy: ReviewPolicy;
+	/** A change's policy, by the branch it lands on (see branch-rules.ts); absent, `policy` for all. */
+	policyOf?: (claim: ClaimRecord) => ReviewPolicy;
 	/** The claims in force, each with its change's pushed head (null: nothing pushed). */
 	open: { claim: ClaimRecord; head: string | null }[];
 	/** The votes that count. */
@@ -95,12 +97,12 @@ export const ROLE_WAIT_MS = 10 * 60_000;
  * The reviews roles that can block are waiting for, that no one holds: on
  * changes pushed, not sent back, and still awaiting that role's approval.
  */
-export function waitingRoleReviews(input: Pick<NextInput, "policy" | "open" | "votes" | "held">) {
+export function waitingRoleReviews(input: Pick<NextInput, "policy" | "policyOf" | "open" | "votes" | "held">) {
 	return input.open.flatMap(({ claim, head }) => {
 		if (!head) return [];
 		const author: Author = { agent: claim.agent, ...(claim.by ? { by: claim.by } : {}) };
 		if (input.votes.some((v) => v.commit === head && v.verdict === "reject" && v.reviewer !== author.agent)) return [];
-		const { awaiting } = approval({ votes: input.votes }, head, input.policy, author, claim.paths);
+		const { awaiting } = approval({ votes: input.votes }, head, input.policyOf?.(claim) ?? input.policy, author, claim.paths);
 		return awaiting.filter((role) => !input.held?.[holdKey(head, role)]?.length).map((role) => ({ change: claim.change, head, role }));
 	});
 }
@@ -120,7 +122,8 @@ function spread(agent: string, n: number) {
 const SPREAD = 3;
 
 export function nextFor(input: NextInput): NextStep {
-	const { agent, policy, votes } = input;
+	const { agent, votes } = input;
+	const policyOf = (claim: ClaimRecord) => input.policyOf?.(claim) ?? input.policy;
 	const width = Math.max(SPREAD, input.crowd ?? 0);
 	const authorOf = (c: ClaimRecord): Author => ({ agent: c.agent, ...(c.by ? { by: c.by } : {}) });
 	const on = (head: string) => votes.filter((v) => v.commit === head);
@@ -137,7 +140,7 @@ export function nextFor(input: NextInput): NextStep {
 	// Approved, and nothing it depends on still to merge (it would be refused): merge it.
 	const waitsOn = (claim: ClaimRecord) => (claim.after ?? []).filter((dep) => !input.merged.has(dep));
 	for (const { claim, head } of own) {
-		if (head && !waitsOn(claim).length && approval({ votes }, head, policy, authorOf(claim), claim.paths).approved)
+		if (head && !waitsOn(claim).length && approval({ votes }, head, policyOf(claim), authorOf(claim), claim.paths).approved)
 			return { kind: "merge", change: claim.change, head, next: `merge your change ${claim.change}: its commit ${head.slice(0, 8)} is approved.` };
 	}
 	const unpushed = own.find((o) => !o.head);
@@ -150,6 +153,7 @@ export function nextFor(input: NextInput): NextStep {
 			const cast = on(head);
 			if (cast.some((v) => v.reviewer === agent || (!!input.by && v.by === input.by))) return [];
 			if (rejectionOf(head, authorOf(claim))) return [];
+			const policy = policyOf(claim);
 			const outcome = approval({ votes }, head, policy, authorOf(claim), claim.paths);
 			if (outcome.approved) return [];
 			// A role that can block, if it holds one the change still needs; else an ordinary review, if more are needed.

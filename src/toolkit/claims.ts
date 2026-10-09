@@ -2,6 +2,7 @@ import type { CasLog } from "../record-log";
 import { entriesOverlap } from "../claim-paths";
 import { appendRecord } from "./records";
 import { scopedInto } from "./branch-scope";
+import type { BranchRule } from "./branch-rules";
 import { type Stamper, stampPayload } from "./stamp";
 import type { ReviewPolicy } from "./votes";
 
@@ -76,6 +77,8 @@ export interface Registry {
 	 * project's branch.
 	 */
 	branches?: Record<string, BranchRecord>;
+	/** Settings for other branches, by pattern, the first matching (see branch-rules.ts): absent, every branch has the repo's. */
+	branchRules?: BranchRule<ReviewPolicy>[];
 	/** How many approvals a merge needs, and which roles veto. */
 	policy?: ReviewPolicy;
 	/** The project's checks, run on the branch plus a change before it merges. */
@@ -142,14 +145,15 @@ export async function startRepo(log: CasLog<Registry>, input: { baseline: string
  * registry's history keeps every version, and the audit holds each merge to
  * the settings in the registry state it cites.
  */
-export async function changeSettings(log: CasLog<Registry>, input: { policy?: ReviewPolicy; verify?: string[]; by?: string }) {
+export async function changeSettings(log: CasLog<Registry>, input: { policy?: ReviewPolicy; verify?: string[]; branchRules?: BranchRule<ReviewPolicy>[]; by?: string }) {
 	const outcome = await appendRecord<Registry, "not started" | "unchanged">(log, "githive", empty, (state) => {
 		if (!state.baseline) return { refused: "not started" };
 		const policy = input.policy && JSON.stringify(input.policy) !== JSON.stringify(state.policy) ? input.policy : undefined;
 		const verify = input.verify && JSON.stringify(input.verify) !== JSON.stringify(state.verify ?? []) ? input.verify : undefined;
-		if (!policy && !verify) return { refused: "unchanged" };
-		const next: Registry = { ...state, ...(policy ? { policy } : {}), ...(verify ? { verify } : {}) };
-		const what = [policy && "the review policy", verify && `the checks (${verify.join("; ") || "none"})`].filter(Boolean).join(" and ");
+		const rules = input.branchRules && JSON.stringify(input.branchRules) !== JSON.stringify(state.branchRules ?? []) ? input.branchRules : undefined;
+		if (!policy && !verify && !rules) return { refused: "unchanged" };
+		const next: Registry = { ...state, ...(policy ? { policy } : {}), ...(verify ? { verify } : {}), ...(rules ? { branchRules: rules } : {}) };
+		const what = [policy && "the review policy", verify && `the checks (${verify.join("; ") || "none"})`, rules && `the branch rules (${rules.map((r) => r.pattern).join(", ") || "none"})`].filter(Boolean).join(" and ");
 		return { state: next, text: `Settings: ${what} changed${input.by ? ` by ${input.by}` : ""}` };
 	});
 	return outcome.ok ? { changed: true as const } : { changed: false as const, refused: outcome.refused };

@@ -3,6 +3,7 @@ import type { ClaimRecord, Registry } from "./claims";
 import { decodeShard } from "./shards";
 import { stampPayload, verifyStamp } from "./stamp";
 import { approval, type Author, type ReviewPolicy, type VoteRecord, type Votes, effectivePolicy } from "./votes";
+import { settingsForBranch } from "./branch-rules";
 
 // The audit (see docs/design.md). Nothing stops an
 // agent from breaking a convention, so this replays the records and reports
@@ -278,12 +279,19 @@ function settingsFor(records: AuditRecords, registryAt: Map<string, Registry>, m
 	const cited = merge.claimsTip!;
 	const tip = cited.includes("=") ? cited.split(/\s+/).map((pair) => pair.split("=")).find(([shard]) => decodeShard(shard) === "")?.[1] : cited;
 	const state = tip ? registryAt.get(tip) : undefined;
-	return { policy: state?.policy ?? records.policy, verify: state?.verify ?? records.verify };
+	const repo = { policy: state?.policy ?? records.policy, verify: state?.verify ?? records.verify };
+	// A merge into another branch had that branch's settings: the repo's, with what its rule changed then.
+	if (!merge.branch || !state?.branchRules?.length || !repo.policy) return repo;
+	const settings = settingsForBranch({ policy: repo.policy, verify: repo.verify ?? [], rules: state.branchRules, project: state.branch ?? "main" }, merge.branch);
+	return { policy: settings.policy, verify: settings.verify };
 }
 
 /** The merged commit must have had the policy's approvals from reviewers other than its author, every veto role's among them, and no veto, in the votes the merge cites. */
 function checkApproved(records: AuditRecords, policy: ReviewPolicy | undefined, votesAt: Map<string, Votes>, merge: MergeRecord, report: (rule: string, detail: string) => void, author?: Author) {
 	if (!policy) return;
+	// A policy that needs no approvals and no role's sign-off needs no votes to cite (there may be no votes yet at all).
+	const needs = effectivePolicy(policy, merge.files);
+	if (merge.head && !merge.votesTip && needs.required === 0 && !needs.vetoes.length) return;
 	if (!merge.head || !merge.votesTip) return report("undeclared", "the merge names no reviewed commit or votes it counted (GitHive-Votes)");
 	const votes = citedVotes(records, votesAt, merge, report);
 	if (!votes) return;

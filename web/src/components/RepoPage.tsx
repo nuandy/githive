@@ -4,6 +4,7 @@ import type { VoteApi } from "./VoteForm";
 import type { ChangeHistory, RepoAccess, RepoLine, RepoSnapshot } from "../api";
 import { canVote, canWrite } from "../lib/permissions";
 import { messageOf } from "./Confirm";
+import { BranchRules } from "./BranchRules";
 import { MergeSettings } from "./MergeSettings";
 import { RepoAdmin, type RepoManageApi } from "./RepoAdmin";
 import { holdersFromSnapshot } from "../lib/claimsMap";
@@ -158,7 +159,10 @@ export function RepoPage({ repo, view, snapshot, changeHistory, liveStatus = "of
 						access={manage ? <RepoAdmin repo={repo} access={access} manage={manage} onChanged={() => onAccessChanged?.()} onDeleted={() => onDeleted?.()} /> : undefined}
 						editor={
 							access?.level === "admin" && manage?.changeSettings ? (
-								<MergeSettings snapshot={snapshot} save={(settings) => manage.changeSettings!(repo, settings)} {...(onSettingsChanged ? { onSaved: onSettingsChanged } : {})} />
+								<>
+									<MergeSettings snapshot={snapshot} save={(settings) => manage.changeSettings!(repo, settings)} {...(onSettingsChanged ? { onSaved: onSettingsChanged } : {})} />
+									<BranchRules branch={branch} rules={snapshot.branchRules} save={(settings) => manage.changeSettings!(repo, settings)} {...(onSettingsChanged ? { onSaved: onSettingsChanged } : {})} />
+								</>
 							) : undefined
 						}
 					/>
