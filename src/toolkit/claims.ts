@@ -27,6 +27,8 @@ export interface ClaimRecord {
 	into?: string;
 	/** Changes it depends on: it merges only once each has merged into the branch it lands on. */
 	after?: string[];
+	/** For a change that merges a whole branch into the one it lands on: that branch (its tip is the change's head). */
+	source?: string;
 }
 
 /** A released claim: who released it, after which merge (if it merged), and whether it was released as stale. */
@@ -215,7 +217,7 @@ async function stamped<T extends object>(kind: string, record: T, stamper: Stamp
  * a claim in the way that has been idle that long is released as stale in the
  * same record, so an abandoned claim frees itself when someone needs its paths.
  */
-export async function claim(log: CasLog<Registry>, input: { change: string; agent: string; paths: string[]; intent: string; after?: string[]; staleAfterMs?: number; abandoned?: Abandoned; now?: number }, stamper?: Stamper) {
+export async function claim(log: CasLog<Registry>, input: { change: string; agent: string; paths: string[]; intent: string; after?: string[]; source?: string; staleAfterMs?: number; abandoned?: Abandoned; now?: number }, stamper?: Stamper) {
 	const { staleAfterMs, abandoned, now: at, ...wanted } = input;
 	/** The change's paths here before this claim (null: it had none), for a claim that must back out. */
 	let previous: string[] | null = null;
@@ -250,7 +252,7 @@ export async function claim(log: CasLog<Registry>, input: { change: string; agen
 		const record = await stamped(
 			"claim",
 			existing
-				? { ...(base as ClaimRecord), paths: [...existing.paths, ...wanted.paths.filter((p) => !existing.paths.includes(p))], active: now, ...(existing.after || wanted.after ? { after: [...new Set([...(existing.after ?? []), ...(wanted.after ?? [])])] } : {}) }
+				? { ...(base as ClaimRecord), paths: [...existing.paths, ...wanted.paths.filter((p) => !existing.paths.includes(p))], active: now, ...(existing.after || wanted.after ? { after: [...new Set([...(existing.after ?? []), ...(wanted.after ?? [])])] } : {}), ...(wanted.source ? { source: wanted.source } : {}) }
 				: { ...wanted, since: now, active: now },
 			stamper,
 		);

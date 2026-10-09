@@ -164,6 +164,11 @@ export class Workspace {
 		await this.push(name);
 	}
 
+	/** Push local ref `from` (a branch fetched, say) to `to` on `remote`, replacing what's there. */
+	pushAs(from: string, to: string, remote: Remote) {
+		return retryTransient(() => git.push({ fs: this.fs, http, dir: DIR, url: remote.url, ref: from, remoteRef: to, force: true, onAuth: onAuth(remote) }));
+	}
+
 	push(ref = this.branch, remote: Remote = this.origin) {
 		return retryTransient(() => git.push({ fs: this.fs, http, dir: DIR, url: remote.url, ref, onAuth: onAuth(remote) }));
 	}

@@ -292,9 +292,22 @@ never tells an agent to merge a change still waiting. A loop (x after y, y
 after x) is refused when claimed, since every change in it would wait forever.
 The audit reports a merge that landed before what its claim waited on.
 
-(Merging a branch into a branch, per-branch settings and the dashboard's
-branch views come next; until then every branch uses the repo's review
-policy and checks, and the backlog's work lands on the project's branch.)
+A finished branch merges into another as one change: a claim with `source`
+(the branch to merge) and `into`. Its claim is what the source changed since
+it left the target: the files, or their folders, deepest first, when there
+are more than a claim holds. The toolkit pushes the source's tip to the
+claiming agent's fork as the change's branch, so review, `check`, the line,
+`merge`, `status`, `next`, abandoned claims and the audit treat it as any
+change, and the merge commit's second parent is the source's tip: the target
+gets the whole branch in one merge. The claim holds those paths on the target
+while the merge is under way, so the target can't change under it. If the
+source moves on, claiming again brings the change up to its new tip (a new
+head, so a new review). A conflict with the target is fixed the same way in
+the other direction: merge the target into the source, then claim again.
+
+(Per-branch settings and the dashboard's branch views come next; until then
+every branch uses the repo's review policy and checks, and the backlog's work
+lands on the project's branch.)
 
 ## Review policy
 

@@ -30,6 +30,8 @@ export interface ClaimInput {
 	intent: string;
 	/** Changes it depends on (see ClaimRecord.after). */
 	after?: string[];
+	/** The branch it merges whole (see ClaimRecord.source). */
+	source?: string;
 	/** A claim in the way idle this long is released as stale, if `abandoned` (when given) says it is. */
 	staleAfterMs?: number;
 	abandoned?: Abandoned;

@@ -49,3 +49,23 @@ export function changeId(title: string) {
 	const suffix = crypto.randomUUID().replace(/-/g, "").slice(0, 4);
 	return `${words || "change"}-${suffix}`;
 }
+
+/**
+ * A claim covering `files` in at most `max` entries: the files themselves, or,
+ * when there are too many, their folders, the deepest lifted first, level by
+ * level (so a merge of a whole branch claims src/billing/ rather than its 80
+ * files). Null when even the top-level entries are too many.
+ */
+export function claimCovering(files: string[], max = MAX_CLAIM_PATHS): string[] | null {
+	const depth = (entry: string) => entry.replace(/\/$/, "").split("/").length;
+	const parent = (entry: string) => `${entry.replace(/\/$/, "").split("/").slice(0, -1).join("/")}/`;
+	let entries = [...new Set(files)];
+	while (entries.length > max) {
+		const deepest = Math.max(...entries.map(depth));
+		if (deepest <= 1) return null;
+		const lifted = [...new Set(entries.map((e) => (depth(e) === deepest ? parent(e) : e)))];
+		// What a lifted folder covers needn't be listed apart.
+		entries = lifted.filter((e) => !lifted.some((folder) => folder !== e && folder.endsWith("/") && inLaneEntry(e, folder)));
+	}
+	return entries.sort();
+}

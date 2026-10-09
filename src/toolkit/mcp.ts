@@ -5,7 +5,7 @@ import { branchHead, type Remote, Workspace } from "../git";
 import { projectBranch } from "../project-branch";
 import { Timing } from "../timing";
 import { annotate, destroys, reads, writes } from "../tool-annotations";
-import { changeId, normalizeClaim } from "../claim-paths";
+import { changeId, claimCovering, normalizeClaim } from "../claim-paths";
 import { audit } from "./audit";
 import { checkChange } from "./check";
 import { claimStore, type ClaimStore } from "./claim-store";
@@ -118,7 +118,7 @@ Name a repo as <owner>/<name> (a person's or an org's), as on GitHub; what you m
 Not sure what to do? Call \`next\`: it tells you the most useful thing for you now: merge or revise your own change, review someone else's, or build a piece of the backlog (\`add_work\` adds to it). Do it, then ask again.
 Conventions:
 1. \`claim\` the paths you will change before editing; edit only inside your claim. A refusal names who holds what: narrow your claim, or ask them. A change lands on the project's branch unless its claim says \`into\` another (a feature branch, a release branch); claims are per branch, so the same paths on two branches don't conflict. A branch that doesn't exist yet is made by the claim when you also say \`from\` (the branch to make it from).
-Work that depends on other unmerged work goes on a feature branch, and the project's branch only receives finished features. Within a branch, \`after\` orders it: a change claimed with after: [x] merges only once x has merged into the same branch.
+Work that depends on other unmerged work goes on a feature branch, and the project's branch only receives finished features. Within a branch, \`after\` orders it: a change claimed with after: [x] merges only once x has merged into the same branch. A finished branch merges into another as one change: \`claim\` with \`source\` (the branch to merge) and \`into\`; the claim is what the branch changed, its tip becomes your change, and it's reviewed, checked and merged like any other. A conflict with the branch it lands on is fixed by merging that branch into the source the same way, then claiming again.
 2. Work on a branch changes/<change>, started from the branch the change lands on (the project's, or its claim's \`into\`: \`credentials\` names it), and push it to your own fork (\`credentials\` with your change: one fork per agent, for all its changes; only you can write it). The project's branch (\`start\` names it: main, master, ...) is written only through the toolkit.
 3. Reviewers get the change's code with \`review_access\` (read-only: its branch in the author's fork, and the project to diff against), then \`vote\` on the exact commit they reviewed. A change merges with the policy's approvals, including every veto role's, and no veto; a veto role counts only from whoever \`start\` granted it (by default people and GitHive's reviewers), so \`register\` with your key to vote as one. Approvals count once per verified identity (register reviewers so each is its own), and never the change's author. \`status\` shows your change's votes, with the evidence for any rejection to fix, and what's still needed.
 4. Run \`check\` after you push: it test-merges your change with the branch it lands on and lists files outside your claim, so you hear about problems before merging.
@@ -136,7 +136,7 @@ const TOOL_LIST = [
 	{ name: "settings", description: "Change a started repo's review policy or its checks; whatever you leave out stays as it is. The same fields as start: required approvals, vetoes, escalate (stricter rules for chosen paths), grants (who may vote as each role), verify (the checks run before each merge; [] for none). Each merge is held to the settings in force when it merged: the audit replays them from the records. Returns the settings now.", inputSchema: { type: "object", properties: { repo: str, required: { type: "number" }, vetoes: { type: "array", items: str }, escalate: { type: "array", items: { type: "object", properties: { paths: { type: "array", items: str }, required: { type: "number" }, vetoes: { type: "array", items: str } }, required: ["paths"] } }, grants: { type: "object", additionalProperties: { type: "array", items: str } }, verify: { type: "array", items: str } }, required: ["repo"] } },
 	{ name: "credentials", description: "Git access. With your change: a write token for its own fork, where its branch changes/<change> lives. Without: read access to the project repo.", inputSchema: { type: "object", properties: { repo: str, change: str }, required: ["repo"] } },
 	{ name: "claims", description: "The claims in force: who holds which paths, and why.", inputSchema: { type: "object", properties: { repo: str }, required: ["repo"] } },
-	{ name: "claim", description: "Claim paths for your change (again to extend it, or to keep it active). Into the project's branch, or `into` another (made from `from` if it doesn't exist yet; claims are per branch). `after` names changes it depends on: it merges only once they have merged into the same branch. Refused, naming the holder, if another claim on that branch overlaps; a claim in the way that its agent has abandoned (see release) is released as stale instead.", inputSchema: { type: "object", properties: { repo: str, change: str, agent: str, paths: { type: "array", items: str }, intent: str, into: str, from: str, after: { type: "array", items: str } }, required: ["repo", "change", "agent", "paths", "intent"] } },
+	{ name: "claim", description: "Claim paths for your change (again to extend it, or to keep it active). Into the project's branch, or `into` another (made from `from` if it doesn't exist yet; claims are per branch). `source` merges that whole branch into it instead (the paths are what the branch changed, and its tip is the change). `after` names changes it depends on: it merges only once they have merged into the same branch. Refused, naming the holder, if another claim on that branch overlaps; a claim in the way that its agent has abandoned (see release) is released as stale instead.", inputSchema: { type: "object", properties: { repo: str, change: str, agent: str, paths: { type: "array", items: str }, intent: str, into: str, from: str, after: { type: "array", items: str }, source: str }, required: ["repo", "change", "agent", "intent"] } },
 	{ name: "release", description: "Release a claim: yours, or with stale: true another agent's it has abandoned: its change waits on that agent, unanswered for 30 minutes with nothing pushed, or 2 hours after changes were asked for, a failed check in the merge line, or approval without a merge. Never one waiting for review, in the merge line, or on a person.", inputSchema: { type: "object", properties: { repo: str, change: str, agent: str, reason: str, stale: { type: "boolean" } }, required: ["repo", "change", "agent"] } },
 	{ name: "next", description: "What you should do next, for any agent without a set role: merge your change if it's approved, revise it if a reviewer asked for changes, finish it if nothing is pushed; else review a change that's waiting (never your own, and a role that can block only if you hold it); else build a piece of the backlog nobody has taken; else wait. Says how to do it.", inputSchema: { type: "object", properties: { repo: str, agent: str }, required: ["repo", "agent"] } },
 	{ name: "add_work", description: "Add a piece of work to the repo's backlog, for next to hand to an agent: a title, what it should do (intent), and the paths it's likely to touch. Its id (from the title unless given) is the change name to claim it under; `after` names pieces it depends on, and next hands it out only once they've merged.", inputSchema: { type: "object", properties: { repo: str, title: str, intent: str, paths: { type: "array", items: str }, after: { type: "array", items: str }, id: str, agent: str }, required: ["repo", "title", "intent", "agent"] } },
@@ -433,6 +433,31 @@ function abandonedRule(ctx: ToolContext, repo: string, registered: Registry | nu
 		const signs = changeSigns({ claim: presentClaim(claim, projectBranch(registered)), head, counted, record: view, line: await line, policy: registered?.policy ?? DEFAULT_POLICY });
 		const outcome = abandoned(signs, Date.now());
 		return { abandoned: outcome.abandoned, why: outcome.waiting.why };
+	};
+}
+
+/**
+ * A change that merges branch `source` into `into` whole: the files `source`
+ * changed since it left `into`, as a claim (folders, when there are many: see
+ * claimCovering), and its tip, which the change pushes to its agent's fork as
+ * its branch, so review, check, the line and merge treat it as any change.
+ */
+async function branchMerge(ctx: ToolContext, repo: string, source: string, into: string) {
+	if (source === into) throw new Error(`[400] a change can't merge ${into} into itself`);
+	const project = await ctx.remote(repo, "read");
+	const ws = await Workspace.clone(project, into).catch(() => fail(409, `there's no branch ${into}`));
+	const tip = await ws.fetch("source", project, source).catch(() => fail(409, `there's no branch ${source}`));
+	const files = await ws.changedPaths(await ws.mergeBase(await ws.head(), tip), tip);
+	if (!files.length) throw new Error(`[409] ${source} has nothing ${into} doesn't have`);
+	const paths = claimCovering(files) ?? fail(409, `${source} changes too much of ${into} to claim at once: merge it in parts`);
+	return {
+		tip,
+		paths,
+		/** Push the tip to the fork as changes/<change>: from this shallow workspace, or with the source's whole history if the fork lacks what it leaves out. */
+		push: async (fork: Remote, change: string) => {
+			const to = `refs/heads/changes/${change}`;
+			await ws.pushAs(`refs/remotes/source/${source}`, to, fork).catch(async () => (await Workspace.clone(project, source, { depth: 1 << 20 })).pushAs(`refs/heads/${source}`, to, fork));
+		},
 	};
 }
 
@@ -868,8 +893,10 @@ async function runTool(name: string, args: Args, ctx: ToolContext): Promise<unkn
 		case "claim": {
 			const change = requiredString(args, "change");
 			const agent = actAs("agent");
-			const paths = normalizeClaim(requiredPaths(args, "paths"));
-			const reserved = paths.find(isReservedPath);
+			// A whole branch merged into the one the change lands on: its tip is the change, its diff the claim (see branchMerge).
+			const source = typeof args.source === "string" && args.source.trim() ? args.source.trim() : undefined;
+			const given = source ? [] : normalizeClaim(requiredPaths(args, "paths"));
+			const reserved = given.find(isReservedPath);
 			if (reserved) throw new Error(`[400] ${reserved}: a path can't start with "::"`);
 			// A change lands on one branch: claiming again keeps it there, and naming another is refused.
 			const held = await claimOf(change);
@@ -877,18 +904,25 @@ async function runTool(name: string, args: Args, ctx: ToolContext): Promise<unkn
 			const into = asked ?? held?.into ?? branch;
 			if (held && (held.into ?? branch) !== into) throw new Error(`[409] ${change} lands on ${held.into ?? branch}: a change lands on one branch; claim another change for ${into}`);
 			const made = into === branch || held ? undefined : await targetBranch(ctx, repo, { into, from: typeof args.from === "string" && args.from.trim() ? args.from.trim() : undefined, registered, claims, agent, stamper });
+			const merging = source ? await branchMerge(ctx, repo, source, into) : undefined;
+			const paths = merging ? merging.paths : given;
 			const after = changeList(args.after, "after");
 			if (after.includes(change)) throw new Error(`[400] ${change} can't wait on itself`);
 			// A loop would leave every change in it waiting forever: refused.
 			const loop = after.length ? await dependencyLoop(change, after, async (dep) => (await claimOf(dep))?.after ?? []) : undefined;
 			if (loop) throw new Error(`[409] after ${loop.at(1)}, ${change} would wait on itself: ${loop.join(" waits on ")}`);
-			const input = { change, agent, paths: scopePaths(paths, into, branch), intent: requiredString(args, "intent"), ...(after.length ? { after } : {}), staleAfterMs: STALE_AFTER_MS, abandoned: abandonedRule(ctx, repo, registered, votes) };
+			const input = { change, agent, paths: scopePaths(paths, into, branch), intent: requiredString(args, "intent"), ...(after.length ? { after } : {}), ...(source ? { source } : {}), staleAfterMs: STALE_AFTER_MS, abandoned: abandonedRule(ctx, repo, registered, votes) };
 			// Busy enough that one record would hold agents up: shard first, then claim in the shards.
 			const sharded = await shardIfBusy(ctx, repo, claims, registered, input.agent);
 			const outcome = await (sharded ? storeFor(ctx, repo, sharded) : store).claim(input, stamper);
 			// Conflicts name paths as agents gave them; a claim into another branch says so.
 			const conflicts = outcome.ok ? undefined : outcome.conflicts.map((c) => ({ ...c, path: presentClaim({ paths: [c.path] }, branch).paths[0], held: presentClaim({ paths: [c.held] }, branch).paths[0] }));
-			return { ...outcome, ...(conflicts ? { conflicts } : {}), ...(into !== branch ? { into } : {}), ...(made ? { branch: made } : {}) };
+			// Claimed: the source's tip becomes the change's branch in the agent's fork, for review, check and merge like any change.
+			if (outcome.ok && merging) await merging.push(await changeSource(agent, "write"), change);
+			const merged = merging
+				? { source, head: merging.tip, claimed: paths, note: `${change} merges ${source} at ${merging.tip.slice(0, 8)} into ${into}: its branch changes/${change} is that commit, in your fork. Get it reviewed, check and merge it like any change. If ${source} moves on, claim again to bring the change up to its new tip (a new head, so a new review).` }
+				: {};
+			return { ...outcome, ...(conflicts ? { conflicts } : {}), ...(into !== branch ? { into } : {}), ...(made ? { branch: made } : {}), ...merged };
 		}
 		case "release": {
 			const change = requiredString(args, "change");
