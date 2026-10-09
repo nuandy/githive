@@ -68,6 +68,13 @@ export function withInstall(checks: string[], project: { packageJson: boolean; n
 export const GRACE_MS = 60_000;
 /** How long the repo's own Gate keeps a batch it read fetched, for its landing after the batch's checks. */
 const BATCH_HOLD_MS = 5 * 60_000;
+/** How often a batch's push is tried while the repo is busy with another, and the first wait (each after is longer). */
+const PUSH_TRIES = 8;
+const PUSH_RETRY_MS = 1_500;
+
+/** Whether a push was refused only because the repo was taking another one. */
+export const pushBusy = (output: string) => /receive_pack_busy|repository is busy|try again later/i.test(output);
+
 /** How many of a batch's forks are fetched at once. */
 const FETCHES_AT_ONCE = 8;
 /** The platform stops a container left this long, in case GitHive's own stop never comes. */
@@ -220,10 +227,52 @@ export class Gate extends DurableObject<Env> {
 			const commits = (await run(container, ["git", "rev-list", "--reverse", "--first-parent", `${input.baseHead}..HEAD`])).output.split("\n").filter(Boolean);
 			// Pushed only if the branch is still exactly at the base. A plain push isn't enough: it only refuses a push that
 			// isn't a fast-forward, and a change branched from a newer main would make this one a fast-forward of it.
-			const pushed = await gitWithToken(container, input.base.token, ["push", "-q", `--force-with-lease=refs/heads/${input.branch}:${input.baseHead}`, input.base.remote, `HEAD:refs/heads/${input.branch}`]);
+			// A repo takes one push at a time: busy with another (a crowd's records, say), Artifacts refuses this one, which
+			// lost two batches in a row at 200 agents. Tried again, waiting longer each time, up to about 100 s in all.
+			let pushed = await gitWithToken(container, input.base.token, ["push", "-q", `--force-with-lease=refs/heads/${input.branch}:${input.baseHead}`, input.base.remote, `HEAD:refs/heads/${input.branch}`]);
+			for (let attempt = 1; pushed.exitCode !== 0 && pushBusy(pushed.output) && attempt < PUSH_TRIES; attempt++) {
+				await new Promise((resolve) => setTimeout(resolve, PUSH_RETRY_MS * 1.6 ** attempt * (0.75 + Math.random() / 2)));
+				pushed = await gitWithToken(container, input.base.token, ["push", "-q", `--force-with-lease=refs/heads/${input.branch}:${input.baseHead}`, input.base.remote, `HEAD:refs/heads/${input.branch}`]);
+			}
 			if (pushed.exitCode !== 0) return /rejected|non-fast-forward|fetch first|stale info/i.test(pushed.output) ? { moved: true } : { error: `the push failed: ${clip(pushed.output, 500)}` };
 			await this.ctx.storage.delete("holdUntil");
 			return { commits };
+		});
+	}
+
+	/**
+	 * A branch's commits since `baseline`, oldest first, following first
+	 * parents: each one's parents, author, message, and the files it changed
+	 * from its first parent. What the audit replays, read here with git: read
+	 * in a Worker's memory, 200 merges of Express took 12 s and most of its
+	 * 128 MB. In this, the repo's own Gate.
+	 */
+	readBranch(input: { repo: string; branch: string; base: { remote: string; token: string }; baseline: string }): Promise<{ commit: string; parents: string[]; author: string; message: string; files: string[] }[]> {
+		return this.inTurn(async () => {
+			const container = this.landingContainer(input.repo);
+			await this.prepare(container, input.base, input.repo);
+			const fetched = await gitWithToken(container, input.base.token, ["fetch", "-q", input.base.remote, `${input.branch}:refs/remotes/base/${input.branch}`, "--force"]);
+			if (fetched.exitCode !== 0) throw new Error(`fetch of the project's ${input.branch} failed: ${clip(fetched.output, 2_000)}`);
+			// One record per commit: \x1e before it, then its hash and parents, its author, its message, and its files, each
+			// after a \x1f (the files NUL-separated). Neither separator turns up in a message.
+			const script = `set -e
+git log --first-parent --reverse --format='%H %P' "${input.baseline}..refs/remotes/base/${input.branch}" | while read -r c parents; do
+  first=\${parents%% *}
+  printf '\\036%s %s\\037' "$c" "$parents"
+  git log -1 --format='%an%x1f%B' "$c"
+  printf '\\037'
+  if [ -n "$first" ]; then git diff-tree --no-commit-id --name-only -r -z "$first" "$c"; fi
+done`;
+			const listed = await run(container, ["bash", "-c", script], WORKDIR, undefined, 600);
+			if (listed.exitCode !== 0) throw new Error(`reading ${input.branch}'s history failed: ${clip(listed.output, 2_000)}`);
+			return listed.output
+				.split("\x1e")
+				.filter(Boolean)
+				.map((record) => {
+					const [ids, author, message, files] = record.split("\x1f");
+					const [commit, ...parents] = ids.trim().split(" ").filter(Boolean);
+					return { commit, parents, author, message: message.replace(/\n+$/, ""), files: (files ?? "").split("\0").filter(Boolean) };
+				});
 		});
 	}
 

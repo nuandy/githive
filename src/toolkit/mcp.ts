@@ -10,7 +10,7 @@ import { audit } from "./audit";
 import { checkChange } from "./check";
 import { claimStore, type ClaimStore } from "./claim-store";
 import { changeSettings, recordBranch, registerAgent, shardClaims, shardingReason, startRepo, type ClaimRecord, type Registry } from "./claims";
-import { readMainMerges, readRecordHistory, readRefHistories, readShardHistories } from "./git-records";
+import { mergeRecordOf, readMainMerges, readRecordHistory, readRefHistories, readShardHistories, type BranchCommit } from "./git-records";
 import { type BatchGit, type Candidate, type CheckRunner, mergeChange } from "./merge";
 import type { Landing, LandingView } from "./landing";
 import { revertViolation } from "./revert";
@@ -48,6 +48,8 @@ export interface ToolContext {
 	defaultBranch?: (repo: string) => Promise<string>;
 	/** Runs a repo's checks on its branch plus a batch of changes (live, the Gate's container). */
 	runChecks?: (repo: string) => CheckRunner;
+	/** A branch's commits since `baseline`, for the audit (live, read with git in the repo's own Gate's container); absent, read in memory. */
+	readBranch?: (repo: string, baseline: string, branch: string) => Promise<BranchCommit[]>;
 	/** Where a batch's git work runs (live, the repo's own Gate's container); absent, in memory. */
 	batchGit?: (repo: string) => BatchGit;
 	/** Starts a batch's first check container while the batch is read (live, a Gate's). */
@@ -563,8 +565,10 @@ async function runAudit(ctx: ToolContext, repo: string) {
 	const start = registry[0].state;
 	// Sharded since the start, or since the load called for it: the latest state says.
 	const latest = registry.at(-1)!.state;
+	// A branch's merges: read with git in the repo's Gate where there's one (in memory, 200 merges took most of a Worker's).
+	const branchMerges = (from: string, branch: string) => (ctx.readBranch ? ctx.readBranch(repo, from, branch).then((commits) => commits.map(mergeRecordOf)) : readMainMerges(remote, from, branch));
 	const [merges, shards, votesHistory] = await Promise.all([
-		t.time("merges", () => readMainMerges(remote, baseline, projectBranch(start))),
+		t.time("merges", () => branchMerges(baseline, projectBranch(start))),
 		latest.shardDepth
 			? t.time("shards", async () => readShardHistories(latest.recordsRepos && ctx.recordsRemote ? await Promise.all(Array.from({ length: latest.recordsRepos }, (_, k) => ctx.recordsRemote!(repo, k, "read"))) : [remote], repo))
 			: undefined,
@@ -583,7 +587,7 @@ async function runAudit(ctx: ToolContext, repo: string) {
 		await t.time("branches", () =>
 			Promise.all(
 				Object.entries(latest.branches ?? {}).map(async ([name, record]) =>
-					(await readMainMerges(remote, record.base, name)).map((m) => ({ ...m, branch: name, claimFiles: m.files.map((f) => scopeFile(f, name, project)) })),
+					(await branchMerges(record.base, name)).map((m) => ({ ...m, branch: name, claimFiles: m.files.map((f) => scopeFile(f, name, project)) })),
 				),
 			),
 		)

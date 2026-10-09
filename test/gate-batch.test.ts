@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { pushChange } from "./helpers/agents";
 import { startGitServer, type GitServer } from "./helpers/git-server";
 import { FakeStorage } from "./fakes/env";
+import { mergeRecordOf, readMainMerges } from "../src/toolkit/git-records";
 
 // The repo's own Gate reads a batch's changes and lands them, with real git
 // in its container. Here the "container" runs its commands with this
@@ -132,8 +133,35 @@ describe("reading and landing a batch in the repo's own Gate", { timeout: 60_000
 		expect(lost).toMatchObject({ passed: false, results: [{ command: "(gate setup)", output: expect.stringContaining("fetch of a change in the batch failed") }] });
 	});
 
+	it("reads a branch's merges for the audit with git, exactly as the in-memory reader does", async () => {
+		const main = server.git("rev-parse", "main").trim();
+		const a = await pushChange(server.url, work, "agent-a-1", "a-1", { "src/a.txt": "a\n", "src/deep/x.txt": "x\n" });
+		const b = await pushChange(server.url, work, "agent-b-1", "b-1", { "src/b.txt": "b\n" });
+		const merges = [
+			{ ...source("a-1"), head: a, claimed: { ...claimed("a-1", a), testedOn: main, testedWith: [a, b] } },
+			{ ...source("b-1"), head: b, claimed: { ...claimed("b-1", b), testedOn: main, testedWith: [a, b] } },
+		];
+		expect(await gate.landBatch({ repo: "t1", branch: "main", base: base(), baseHead: main, merges })).toMatchObject({ commits: expect.any(Array) });
+		const read = (await gate.readBranch({ repo: "t1", branch: "main", base: base(), baseline: main })).map(mergeRecordOf);
+		expect(read.map((m) => [m.change, m.head, m.files])).toEqual([
+			["a-1", a, ["src/a.txt", "src/deep/x.txt"]],
+			["b-1", b, ["src/b.txt"]],
+		]);
+		expect(read[1].testedWith).toEqual([a, b]);
+		expect(read).toEqual(await readMainMerges({ url: server.url, token: "unused" }, main, "main"));
+	});
+
 	it("is only ever done by the repo's own Gate, never a change's, which runs that change's code", async () => {
 		const changeGate = new Gate({ storage: new FakeStorage(), container: localContainer(checkout), id: { equals: () => false } } as never, { GATE: { idFromName: () => ({}) } } as never);
 		await expect(changeGate.inspectBatch({ repo: "t1", branch: "main", base: base(), baseHead: "x", changes: [] })).rejects.toThrow(/only the repo's own Gate/);
+	});
+});
+
+describe("a batch's push refused while the repo is busy", () => {
+	it("is told apart from a push refused because main moved", async () => {
+		const { pushBusy } = await import("../src/gate");
+		expect(pushBusy("remote: artifacts_git_receive_pack_busy")).toBe(true);
+		expect(pushBusy(" ! [rejected]        HEAD -> master (stale info)")).toBe(false);
+		expect(pushBusy("fatal: Authentication failed")).toBe(false);
 	});
 });

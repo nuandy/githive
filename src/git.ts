@@ -66,6 +66,12 @@ const KEPT_WORKSPACES = 4;
 export class Workspace {
 	/** What has been fetched, to deepen: remote name, URL and credentials, and branch. */
 	private readonly sources: { remote: string; origin: Remote; ref: string }[] = [];
+	/**
+	 * isomorphic-git's cache for this repo's reads: without one, every read
+	 * loads the packfile again (reading 200 merges took 22 s, and reads at once
+	 * held a copy each).
+	 */
+	private readonly cache = {};
 
 	private constructor(
 		readonly fs: MemoryFS,
@@ -140,7 +146,7 @@ export class Workspace {
 	async ensureCommit(oid: string) {
 		for (;;) {
 			try {
-				return await git.readCommit({ fs: this.fs, dir: DIR, oid });
+				return await git.readCommit({ fs: this.fs, dir: DIR, oid, cache: this.cache });
 			} catch (err) {
 				if (!(err instanceof git.Errors.NotFoundError) || !(await this.deepen())) throw err;
 			}
@@ -198,7 +204,7 @@ export class Workspace {
 	/** The best common ancestor of two commits, deepening history until it shows. */
 	async mergeBase(a: string, b: string) {
 		for (;;) {
-			const [oid] = await git.findMergeBase({ fs: this.fs, dir: DIR, oids: [await this.oid(a), await this.oid(b)] }).catch((err) => {
+			const [oid] = await git.findMergeBase({ fs: this.fs, dir: DIR, oids: [await this.oid(a), await this.oid(b)], cache: this.cache }).catch((err) => {
 				if (err instanceof git.Errors.NotFoundError) return [];
 				throw err;
 			});
@@ -216,7 +222,7 @@ export class Workspace {
 		// A merge needs the commits' common ancestor here.
 		await this.mergeBase(ours, theirs);
 		try {
-			await git.merge({ fs: this.fs, dir: DIR, ours, theirs, dryRun: true, abortOnConflict: true, author: BOT });
+			await git.merge({ fs: this.fs, dir: DIR, ours, theirs, dryRun: true, abortOnConflict: true, author: BOT, cache: this.cache });
 			return { clean: true };
 		} catch (err) {
 			if (err instanceof git.Errors.MergeConflictError) return { clean: false, files: err.data.filepaths };
@@ -227,7 +233,7 @@ export class Workspace {
 	/** Merge `theirs` into the local branch. Throws MergeConflictError on conflict. */
 	async merge(theirs: string, message: string) {
 		await this.mergeBase(this.branch, theirs);
-		return git.merge({ fs: this.fs, dir: DIR, ours: this.branch, theirs, message, author: BOT, abortOnConflict: true });
+		return git.merge({ fs: this.fs, dir: DIR, ours: this.branch, theirs, message, author: BOT, abortOnConflict: true, cache: this.cache });
 	}
 
 	/** Paths whose content differs between two commits. */
@@ -239,6 +245,7 @@ export class Workspace {
 		await git.walk({
 			fs: this.fs,
 			dir: DIR,
+			cache: this.cache,
 			trees: [git.TREE({ ref: from }), git.TREE({ ref: to })],
 			map: async (path, [a, b]) => {
 				if (path === ".") return true;
@@ -247,6 +254,8 @@ export class Workspace {
 				// descend into, so keep the blob path and still visit descendants.
 				if (typeA === "tree" || typeB === "tree") {
 					if ((typeA === "blob" || typeB === "blob") && typeA !== typeB) changed.push(path);
+					// The same folder on both sides holds the same files: nothing in it changed, so it isn't walked.
+					else if (typeA === typeB && (await a?.oid()) === (await b?.oid())) return null;
 					return true;
 				}
 				if ((await a?.oid()) !== (await b?.oid())) changed.push(path);
@@ -266,12 +275,13 @@ export class Workspace {
 			if (!entry || type !== "blob") return null;
 			const oid = await entry.oid();
 			if (!oid) return null;
-			const { blob } = await git.readBlob({ fs: this.fs, dir: DIR, oid });
+			const { blob } = await git.readBlob({ fs: this.fs, dir: DIR, oid, cache: this.cache });
 			return new TextDecoder().decode(blob);
 		};
 		await git.walk({
 			fs: this.fs,
 			dir: DIR,
+			cache: this.cache,
 			trees: [git.TREE({ ref: from }), git.TREE({ ref: to })],
 			map: async (path, [a, b]) => {
 				if (path === ".") return true;

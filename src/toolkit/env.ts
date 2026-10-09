@@ -171,6 +171,11 @@ export function toolContextFor(env: Env, by: string | undefined, caller: { agent
 				return { passed: result.passed, results: [...conflict, ...result.results.map((r) => ({ command: r.command, exitCode: r.exitCode, output: r.output }))] };
 			};
 		},
+		// A branch's commits for the audit, read with git in the repo's own Gate (see Gate.readBranch).
+		readBranch: async (repo, baseline, branch) => {
+			const read = await cached(env, repo, `${repo}|read`, () => remoteFor(env.ARTIFACTS, repo, "read", 3600));
+			return rpcRetried(() => env.GATE.getByName(`repo:${repo}`).readBranch({ repo, branch, base: { remote: read.url, token: read.token }, baseline }));
+		},
 		// A batch's first check container, started while the batch is read (see MergeInput.prepareChecks).
 		prepareChecks: (repo) => async (gate) => {
 			const read = await cached(env, repo, `${repo}|read`, () => remoteFor(env.ARTIFACTS, repo, "read", 3600));
