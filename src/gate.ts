@@ -594,6 +594,9 @@ done`;
 				const branch = input.branch ?? "main";
 				const fetched = await gitWithToken(container, input.base.token, ["fetch", "-q", input.base.remote, `${branch}:refs/remotes/base/${branch}`, "--force"]);
 				if (fetched.exitCode !== 0) return;
+				// No checks: warm only to land batches, the project cloned and its branch fetched. Cold, the first batch of 200
+				// agents' run waited for both: 8 changes took as long as 24 did later.
+				if (!input.checks.length) return void (await this.ctx.storage.put("warmedAt", Date.now()));
 				await run(container, ["bash", "-lc", `git merge --abort 2>/dev/null; git checkout -q -f --detach refs/remotes/base/${branch} && git clean -fdq`]);
 				await this.setUpToolchains(container);
 				const install = (await this.checksFor(container, input.checks)).find((c) => INSTALLS.test(c.trim()));
@@ -644,7 +647,8 @@ done`;
 	 * alarm does the work.
 	 */
 	async warmUp(input: WarmUp & { why?: "checked" | "approved" | "set up" }) {
-		if (!input.checks.length) return;
+		// Without checks, only for landing (see warm): asked for when a merge is near, never at set up, minutes before one.
+		if (!input.checks.length && input.why !== "checked" && input.why !== "approved") return;
 		const { why, ...warming } = input;
 		if ((why === "checked" || why === "approved") && (await this.snapshot())) return;
 		await this.ctx.storage.put("warmUp", warming);

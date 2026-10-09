@@ -867,9 +867,10 @@ async function runTool(name: string, args: Args, ctx: ToolContext): Promise<unkn
 		const heads = new Map(await atMost(HEAD_READS_AT_ONCE, claims, async (c) => [c.change, fresh(c) || !kept ? await pushedHead(c) : (kept[c.change] ?? null)] as const));
 		return (claim: ClaimRecord) => heads.get(claim.change) ?? null;
 	};
-	/** Warm the check container for a merge to come (only where the repo has checks): why, and for which change or commit. */
+	/** Warm the repo's Gate for a merge to come (its checks, or with none, its landing): why, and for which change or commit. */
 	const warmChecks = async (expect: "checked" | "approved", key: string) => {
-		if (registered?.verify?.length) await ctx.warmChecks?.(repo, { branch: projectBranch(registered), checks: registered.verify, expect, key }).catch(() => undefined);
+		// With no checks, the repo's Gate still lands the batch: warmed for that alone (see Gate.warm).
+		if (registered?.baseline) await ctx.warmChecks?.(repo, { branch: projectBranch(registered), checks: registered.verify ?? [], expect, key }).catch(() => undefined);
 	};
 	switch (name) {
 		case "start": {

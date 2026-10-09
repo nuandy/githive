@@ -222,7 +222,7 @@ describe("review holds through the toolkit", { timeout: 120_000 }, () => {
 });
 
 describe("warming the checks when a merge is near", { timeout: 60_000 }, () => {
-	it("warms at the start, after a check and after an approval, where the repo has checks", async () => {
+	it("warms at the start, after a check and after an approval; without checks, only for landing, after a check and an approval", async () => {
 		const server = await startGitServer();
 		const work = mkdtempSync(join(tmpdir(), "githive-warm-"));
 		try {
@@ -246,11 +246,14 @@ describe("warming the checks when a merge is near", { timeout: 60_000 }, () => {
 				await call(repo, "vote", { commit: head, reviewer: "rev", role: "review", verdict: "approve", evidence: "ok" });
 				await call(repo, "vote", { commit: head, reviewer: "rev-2", role: "review", verdict: "reject", evidence: "no" });
 			}
-			// The start, the check and the approval warm, each saying what merge to expect; the rejection and the repo without checks don't.
+			// The start, the check and the approval warm, each saying what merge to expect; the rejection doesn't. Without checks
+			// the repo's Gate still lands the batch, so it warms for that, but not at the start: the first merge is minutes away.
 			expect(warmed).toEqual([
 				{ branch: "main", checks: ["npm test"], expect: "set up" },
 				{ branch: "main", checks: ["npm test"], expect: "checked", key: "c-checked" },
 				{ branch: "main", checks: ["npm test"], expect: "approved", key: heads.checked },
+				{ branch: "main", checks: [], expect: "checked", key: "c-unchecked" },
+				{ branch: "main", checks: [], expect: "approved", key: heads.unchecked },
 			]);
 		} finally {
 			await server.close();

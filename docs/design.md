@@ -569,15 +569,23 @@ changed the same files since it left main, whichever main it lands on (one
 that took in something since has a new head, and is read again). Every change is still validated against its
 claim and votes, and the batch is checked on exactly the main it lands on, so
 the audit is unchanged. What was read ahead is a hint like the lease: kept 10
-minutes, and losing it costs a read. Without checks, the next batch is read
-once this one is pushed, while its claims are released: the repo's Gate does
-one thing at a time, and reading first would hold up the push.
+minutes, and losing it costs a read. Without checks nothing is read ahead:
+there's nothing to read beside, since the repo's Gate, which reads the next
+batch, lands this one first.
+
+**Without checks, a batch takes all that's ready**, up to 64: its size is
+about one check failure per batch (see `batchSize`), and nothing fails a batch
+that isn't checked. At 200 agents with no checks, batches sized for checks (8,
+24, 52) left 130 ready changes waiting. The repo's Gate, which lands it, is
+warmed when a merge is near (a change checked, or approved) with checks or
+without: cold, the first batch also waited for the container and a clone.
 
 **A batch's merges hear it landed as soon as it's pushed**, and its claims are
-released after. Releasing them is a write per change, a few at a time, so it
-grows with the batch, and the merges waiting needn't wait for it. The lease is held until they're
-released, so no batch takes up a change that just landed, and a merge asked
-again meanwhile finds its change landed. Each batch asks for its forks' read
+released once the lease is handed on: a write per change, a few at a time, it
+grew with the batch and held up the next one. Until a claim is released, no
+batch takes its change up again: the lease's recent outcomes say it landed at
+that head, and a merge asked again meanwhile finds it landed. Each batch asks
+for its forks' read
 access 6 at a time, and every call reads open changes' heads 6 at a time: a
 Worker request holds 6 connections open, and with 170 open changes read at
 once, the runtime cancelled reads to break the stall.

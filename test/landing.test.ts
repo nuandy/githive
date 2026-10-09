@@ -199,22 +199,43 @@ describe("landing ready changes together", { timeout: 120_000 }, () => {
 		expect(await auditNow()).toEqual([]);
 	});
 
-	it("without checks, reads the next batch once this one is pushed, and the merge that lands it reads none of it again", async () => {
-		for (const x of ["a", "b", "c", "d"]) await readyChange(`${x}-1`, { [`src/${x}.txt`]: `${x}\n` });
+	it("without checks, takes every ready change into one batch, and releases their claims once the lease is handed on", async () => {
+		const ids = Array.from({ length: 6 }, (_, i) => `n-${i}`);
+		for (const id of ids) await readyChange(id, { [`src/${id}.txt`]: `${id}\n` });
 		const landing = memoryLanding();
-		// What the repo's Gate is asked to do, in order: it does one thing at a time, so reading the next batch first would hold up the push.
-		const asked: string[] = [];
-		const git = memoryBatchGit(remote());
-		const batchGit: BatchGit = {
-			inspect: async (input) => (asked.push(`read ${input.changes.map((c) => c.change)}`), git.inspect(input)),
-			land: async (input) => (asked.push(`land ${input.merges.map((m) => m.change)}`), git.land(input)),
-		};
-		const more = { maxBatch: 2, batchGit, verify: [], runChecks: undefined };
-		expect(await merge("a-1", runner(), landing, more)).toMatchObject({ ok: true });
-		expect(asked).toEqual(["read a-1,b-1", "land a-1,b-1", "read c-1,d-1"]);
-		expect(await merge("c-1", runner(), landing, more)).toMatchObject({ ok: true });
-		expect(asked.slice(3)).toEqual(["land c-1,d-1"]);
-		expect(landed()).toEqual(["a-1", "b-1", "c-1", "d-1"]);
+		// Checks failed often here lately: with checks, a batch would hold 4 (see batchSize).
+		await landing.settle(Array.from({ length: 10 }, (_, i) => ({ change: `old-${i}`, head: `h${i}`, agent: "x", how: "failed" as const, at: new Date().toISOString() })));
+		expect(batchSize((await landing.view()).recent)).toBe(4);
+		const reads: string[][] = [];
+		// What happens, in order: the lease handed on, then the claims released.
+		const order: string[] = [];
+		const drop = landing.drop.bind(landing);
+		landing.drop = async (holder) => (order.push("lease handed on"), drop(holder));
+		const claimStore = store();
+		const release = claimStore.release.bind(claimStore);
+		claimStore.release = async (r, stamper) => (order.push(`released ${r.change}`), release(r, stamper));
+		expect(await merge("n-0", runner(), landing, { verify: [], runChecks: undefined, batchGit: readsNoted(reads), store: claimStore })).toMatchObject({ ok: true });
+		// Without checks, one batch of all 6.
+		expect(reads).toEqual([ids]);
+		expect(landed()).toEqual(ids);
+		expect(order[0]).toBe("lease handed on");
+		expect(order.slice(1).sort()).toEqual(ids.map((id) => `released ${id}`).sort());
+		expect((await store().read()).claims).toEqual([]);
+	});
+
+	it("leaves a change that landed out of the next batch while its claim isn't released yet", async () => {
+		for (const x of ["a", "b"]) await readyChange(`${x}-1`, { [`src/${x}.txt`]: `${x}\n` });
+		const landing = memoryLanding();
+		const reads: string[][] = [];
+		// a-1's batch landed, and its claim's release hasn't come yet.
+		const claimStore = store();
+		claimStore.release = async () => ({ ok: true }) as never;
+		expect(await merge("a-1", runner(), landing, { maxBatch: 1, batchGit: readsNoted(reads), store: claimStore })).toMatchObject({ ok: true });
+		expect((await store().read()).claims.map((c) => c.change)).toEqual(["a-1", "b-1"]);
+		// b-1's batch doesn't take a-1 up again.
+		expect(await merge("b-1", runner(), landing, { batchGit: readsNoted(reads) })).toMatchObject({ ok: true });
+		expect(reads).toEqual([["a-1"], ["b-1"]]);
+		expect(landed()).toEqual(["a-1", "b-1"]);
 	});
 
 	it("tells the merges waiting on a batch that it landed before their claims are released", async () => {
