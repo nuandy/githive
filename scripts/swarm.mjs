@@ -88,14 +88,30 @@ const draw = (step) => {
 	return ((min + random() * (max - min)) * 1000) / speed;
 };
 
+/** How often a call whose connection dropped is tried, in all. */
+const CALL_TRIES = 4;
+
 async function tool(name, toolArgs, keyFile) {
 	const key = keyFile ? readFileSync(at(keyFile), "utf8").trim() : undefined;
-	const response = await fetch(`${BASE}/mcp`, {
-		method: "POST",
-		dispatcher: patient,
-		headers: { ...access, "Content-Type": "application/json", ...(key ? { "X-GitHive-Agent-Key": key } : {}) },
-		body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name, arguments: { repo: plan.repo, ...toolArgs } } }),
-	});
+	const request = () =>
+		fetch(`${BASE}/mcp`, {
+			method: "POST",
+			dispatcher: patient,
+			headers: { ...access, "Content-Type": "application/json", ...(key ? { "X-GitHive-Agent-Key": key } : {}) },
+			body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name, arguments: { repo: plan.repo, ...toolArgs } } }),
+		});
+	// A dropped connection (a reset, say) is tried again: one killed a 200-agent run while it filed its backlog. Only the
+	// network's failures (fetch throws a TypeError), never GitHive's answers; the calls a run makes are safe to repeat.
+	let response;
+	for (let attempt = 1; ; attempt++) {
+		try {
+			response = await request();
+			break;
+		} catch (err) {
+			if (!(err instanceof TypeError) || attempt === CALL_TRIES) throw err;
+			await sleep(1_000 * attempt);
+		}
+	}
 	if (!response.ok) throw new Error(`${name}: HTTP ${response.status} ${(await response.text()).slice(0, 200)}`);
 	const reply = await response.json();
 	if (reply.error) throw new Error(`${name}: ${reply.error.message}`);
