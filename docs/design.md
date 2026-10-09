@@ -487,7 +487,10 @@ trusted neither with what a change touched nor with the token that writes the
 branch. The push names the commit the branch must still be at
 (`--force-with-lease`): a plain push refuses only what isn't a fast-forward,
 and a change branched from a newer main would make a batch on an older one a
-fast-forward of it.
+fast-forward of it. Each fetches a batch's forks 8 at a time, in one
+command: the repo's Gate to read and land it, and the check, in the Gate of
+the batch's last change (one at a time, they were most of a big batch's
+check).
 
 A call to the Gate or the LiveFeed that failed only because its Durable
 Object or container was briefly away (reset by a runtime update, or a

@@ -111,6 +111,21 @@ describe("reading and landing a batch in the repo's own Gate", { timeout: 60_000
 		expect(server.git("rev-parse", "main").trim()).toBe(second);
 	});
 
+	it("checks a batch with all its changes fetched at once, in a change's Gate", async () => {
+		const main = server.git("rev-parse", "main").trim();
+		const a = await pushChange(server.url, work, "agent-a-1", "a-1", { "src/a.txt": "a\n" });
+		const b = await pushChange(server.url, work, "agent-b-1", "b-1", { "src/b.txt": "b\n" });
+		const env = { GATE: { idFromName: () => ({}), getByName: () => ({ snapshot: async () => null, warmUp: async () => undefined }) } };
+		const changeGate = new Gate({ storage: new FakeStorage(), container: localContainer(join(work, "change-checkout")), id: { equals: () => false } } as never, env as never);
+		const batch = { repo: "t1", branch: "main", base: base(), baseHead: main, ahead: [{ head: a, ...source("a-1") }], fork: source("b-1"), head: b };
+		// Both changes merged onto main: the check sees both files.
+		expect(await changeGate.checkCommit({ ...batch, checks: ["test -f src/a.txt && test -f src/b.txt"] })).toMatchObject({ passed: true, head: b, baseHead: main });
+		expect(await changeGate.checkCommit({ ...batch, checks: ["test -f src/missing.txt"] })).toMatchObject({ passed: false });
+		// A change whose branch can't be fetched fails the check's setup, naming it.
+		const lost = await changeGate.checkCommit({ ...batch, ahead: [{ head: a, ...source("gone-1") }], checks: ["true"] });
+		expect(lost).toMatchObject({ passed: false, results: [{ command: "(gate setup)", output: expect.stringContaining("fetch of a change in the batch failed") }] });
+	});
+
 	it("is only ever done by the repo's own Gate, never a change's, which runs that change's code", async () => {
 		const changeGate = new Gate({ storage: new FakeStorage(), container: localContainer(checkout), id: { equals: () => false } } as never, { GATE: { idFromName: () => ({}) } } as never);
 		await expect(changeGate.inspectBatch({ repo: "t1", branch: "main", base: base(), baseHead: "x", changes: [] })).rejects.toThrow(/only the repo's own Gate/);

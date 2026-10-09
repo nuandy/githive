@@ -337,16 +337,15 @@ export class Gate extends DurableObject<Env> {
 		const branch = plan.branch ?? "main";
 		const base = await gitWithToken(container, plan.base.token, ["fetch", "-q", plan.base.remote, `${branch}:refs/remotes/base/${branch}`, "--force"]);
 		if (base.exitCode !== 0) throw new Error(`fetch of the project's ${branch} failed: ${clip(base.output, 2_000)}`);
-		// Fetch the change's branch (fetching a bare commit hash depends on server settings);
-		// the approved commit is in its history.
-		const fork = await gitWithToken(container, plan.fork.token, ["fetch", "-q", plan.fork.remote, `${plan.fork.ref}:refs/remotes/change/head`, "--force"]);
-		if (fork.exitCode !== 0) throw new Error(`fetch of the change failed: ${clip(fork.output, 2_000)}`);
-		const known = await run(container, ["git", "cat-file", "-e", `${head}^{commit}`]);
-		if (known.exitCode !== 0) throw new Error(`the approved commit ${head} is not on the change's branch`);
-		for (const [k, ahead] of (plan.ahead ?? []).entries()) {
-			const f = await gitWithToken(container, ahead.token, ["fetch", "-q", ahead.remote, `${ahead.ref ?? branch}:refs/remotes/ahead-${k}/head`, "--force"]);
-			if (f.exitCode !== 0) throw new Error(`fetch of a change in the batch failed: ${clip(f.output, 2_000)}`);
-		}
+		// The batch's changes, its others and then the change, fetched at once (one at a time, they were most of a big
+		// batch's check). Branches, not bare commits (fetching a hash depends on server settings): each approved commit
+		// is in its branch's history.
+		const sources = [...(plan.ahead ?? []).map((a) => ({ remote: a.remote, token: a.token, ref: a.ref ?? branch })), plan.fork];
+		const failed = await this.fetchChanges(container, sources.map((source, k) => ({ k, ...source })));
+		for (const [k, why] of failed) throw new Error(`fetch of ${k === sources.length - 1 ? "the change" : "a change in the batch"} failed: ${why}`);
+		const commits = [...(plan.ahead ?? []).map((a) => a.head), head];
+		const missing = await run(container, ["bash", "-c", commits.map((c) => `git cat-file -e ${c}^{commit} 2>/dev/null || echo ${c}`).join("\n")]);
+		if (missing.output.trim()) throw new Error(`approved commits not on their branches: ${missing.output.trim().split("\n").join(", ")}`);
 
 		// A clean checkout of the base; ignored files (node_modules) survive `git clean -fd`.
 		await run(container, ["bash", "-lc", `git merge --abort 2>/dev/null; git checkout -q -f --detach ${plan.baseHead} && git clean -fdq`]);
