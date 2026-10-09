@@ -8,7 +8,7 @@ import { audit, type MergeRecord } from "../src/toolkit/audit";
 import { claimStore } from "../src/toolkit/claim-store";
 import { claim, startRepo, type Registry } from "../src/toolkit/claims";
 import { readMainMerges, readRecordHistory } from "../src/toolkit/git-records";
-import { type Landing, memoryLanding } from "../src/toolkit/landing";
+import { type Landing, memoryLanding, renewLease } from "../src/toolkit/landing";
 import { batchSize, type Candidate, CHECKS_REVIEWER, type CheckRunner, mergeChange } from "../src/toolkit/merge";
 import { voteStore } from "../src/toolkit/vote-store";
 import { vote, type Votes } from "../src/toolkit/votes";
@@ -112,8 +112,17 @@ describe("landing ready changes together", { timeout: 120_000 }, () => {
 		for (const x of ["a", "b", "c", "d"]) heads[x] = await readyChange(`${x}-1`, { [`src/${x}.txt`]: `${x}\n` });
 		const runs: string[][] = [];
 		const gates: string[] = [];
-		expect(await merge("a-1", runner(new Set(["b-1"]), runs, undefined, gates))).toMatchObject({ ok: true });
+		const landing = memoryLanding();
+		expect(await merge("a-1", runner(new Set(["b-1"]), runs, undefined, gates), landing)).toMatchObject({ ok: true });
 		expect(landed().sort()).toEqual(["a-1", "c-1", "d-1"]);
+		// The half found passing landed at once, before the search had found what failed; this merge's own change, in the
+		// other half, waited for the next batch.
+		expect((await landing.view()).recent.map((s) => [s.change, s.how])).toEqual([
+			["c-1", "landed"],
+			["d-1", "landed"],
+			["b-1", "failed"],
+			["a-1", "landed"],
+		]);
 		// The search reused the batch's own containers: a half stays where its batch ran, the other takes one more.
 		const first = runs.findIndex((r) => r.length === 4);
 		const search = gates[first].replace(/-0$/, "");
@@ -224,5 +233,15 @@ describe("the size of a batch", () => {
 	it("grows to its most on a branch where nothing fails, and shrinks to its least on a flaky one", () => {
 		expect(batchSize(outcomes(200, 0))).toBe(64);
 		expect(batchSize(outcomes(10, 10))).toBe(4);
+	});
+});
+
+describe("the branch's lease", () => {
+	it("is kept as long as the longest step running needs, never shortened by a shorter one", () => {
+		const held = { checking: null, recent: [], lease: { holder: "m", until: 1_000 + 50 * 60_000 } };
+		// A landing's step (5 minutes) while a check (50) runs alongside it.
+		expect(renewLease(held, "m", 5 * 60_000, 1_000).state.lease).toEqual({ holder: "m", until: 1_000 + 50 * 60_000 });
+		expect(renewLease(held, "m", 60 * 60_000, 1_000).state.lease).toEqual({ holder: "m", until: 1_000 + 60 * 60_000 });
+		expect(renewLease(held, "other", 60_000, 1_000).held).toBe(false);
 	});
 });

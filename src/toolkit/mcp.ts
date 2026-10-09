@@ -50,6 +50,8 @@ export interface ToolContext {
 	runChecks?: (repo: string) => CheckRunner;
 	/** Where a batch's git work runs (live, the repo's own Gate's container); absent, in memory. */
 	batchGit?: (repo: string) => BatchGit;
+	/** Starts a batch's first check container while the batch is read (live, a Gate's). */
+	prepareChecks?: (repo: string) => (gate: string) => Promise<void>;
 	/** Who's landing a batch into a repo's branch, and what changes came to (live, the repo's LiveFeed); absent, each merge only knows its own. */
 	landing?: (repo: string, branch: string) => Landing;
 	/** Stamps what this caller writes with their verified identity (GitHive's key), and the agent name their key is for; without it, nothing is stamped. */
@@ -1063,6 +1065,7 @@ async function runTool(name: string, args: Args, ctx: ToolContext): Promise<unkn
 				...(ctx.branchHead ? { branchHead: () => ctx.branchHead!(repo, into) } : {}),
 				...(ctx.landing ? { landing: ctx.landing(repo, into) } : {}),
 				...(ctx.batchGit ? { batchGit: ctx.batchGit(repo) } : {}),
+				...(ctx.prepareChecks ? { prepareChecks: ctx.prepareChecks(repo) } : {}),
 				// The other changes into the branch, as kept a moment (the batch checks each again): claims in force whose
 				// dependencies have merged, with their heads.
 				others: async (): Promise<Candidate[]> => {

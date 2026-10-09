@@ -118,6 +118,15 @@ describe("a repo's snapshot", () => {
 		expect(snapshotDue(snapshot, { lockHash: "l1" }, 1_000 + 7 * 24 * 3600_000)).toBe(true);
 	});
 
+	it("boots a batch's check container from the snapshot while the batch is read, before its check", async () => {
+		const storage = new FakeStorage();
+		const container = fakeContainer();
+		const gate = new Gate({ storage, container, id: { equals: () => false } } as never, { GATE: { idFromName: () => ({}), getByName: () => ({ snapshot: async () => snapshot }) } } as never);
+		await gate.boot({ repo: "acme--web", base: { remote: "https://git.test/web.git", token: "t" } });
+		expect(container.starts).toEqual([expect.objectContaining({ containerSnapshot: { id: "s1" } })]);
+		expect(await storage.get("prepared")).toBe(true);
+	});
+
 	it("tries a snapshot once more when Containers is briefly unavailable, before the image", async () => {
 		const { bootContainer, IMAGE } = await import("../src/container");
 		// The first start's connection is lost; the second restores.

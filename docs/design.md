@@ -467,13 +467,16 @@ counted with a prior of 1 in 20, so a new branch starts at 20. Between 4 and
 64: a branch where nothing fails takes 64 at a time, a flaky one 4.
 
 A batch that fails is split, and its halves are checked side by side. Each
-half was checked on main alone, so only one passing part can land as checked
-(the bigger); the rest wait for the next batch. A batch's checks run in a few
+half was checked on main alone, so only one passing part can land as checked:
+the first one found passing, which lands at once while the search goes on for
+what failed (its changes don't wait for someone else's); the rest wait for
+the next batch. A batch's checks run in a few
 containers of its own, named for the batch and a place in its search: a half
 stays in its parent's container, where its changes ran just now, and the
 other takes one more, kept for its own halves. Each round then finds its
 container running, with the batch fetched and its dependencies installed,
-and fetches only what it lacks. Only that batch's code ever runs in them (a
+and fetches only what it lacks. The first of them starts while the batch is
+read, so its first check doesn't wait for a container either. Only that batch's code ever runs in them (a
 hostile change gains nothing it didn't have in the batch's first check), and
 they stop a minute after the search, like every check container: nothing is
 kept warm waiting for a fix, which a later batch checks afresh. A change that fails alone is

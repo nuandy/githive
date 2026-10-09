@@ -77,9 +77,10 @@ export function takeTurn(state: LandingState, holder: string, change: string, he
 	return { state: { ...state, checking, lease: { holder, until: now + ttlMs } }, turn: { lease: true } };
 }
 
+/** Keep the lease `ttlMs` more, never less than it has: steps running side by side (a search, a landing) each keep it as long as they need. */
 export function renewLease(state: LandingState, holder: string, ttlMs: number, now = Date.now()): { state: LandingState; held: boolean } {
 	if (state.lease?.holder !== holder) return { state, held: false };
-	return { state: { ...state, lease: { holder, until: now + ttlMs } }, held: true };
+	return { state: { ...state, lease: { holder, until: Math.max(state.lease.until, now + ttlMs) } }, held: true };
 }
 
 export const dropLease = (state: LandingState, holder: string): LandingState => (state.lease?.holder === holder ? { ...state, lease: undefined, checking: null } : state);

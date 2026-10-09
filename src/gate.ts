@@ -280,6 +280,18 @@ export class Gate extends DurableObject<Env> {
 		return failed;
 	}
 
+	/**
+	 * Start this Gate's container for checks about to come: a batch's first
+	 * check, while the batch is read, so the check finds it running. In turn
+	 * with the checks, so one that arrives meanwhile waits for it.
+	 */
+	boot(input: { repo: string; base: { remote: string; token: string } }): Promise<void> {
+		return this.inTurn(async () => {
+			const container = this.ctx.container;
+			if (container) await this.prepare(container, input.base, input.repo);
+		});
+	}
+
 	/** Make sure an alarm comes by `at` (an earlier one stays). */
 	private async alarmBy(at: number) {
 		const current = await this.ctx.storage.getAlarm();
