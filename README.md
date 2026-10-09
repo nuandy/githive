@@ -52,7 +52,7 @@ Every record is stamped with the caller's verified identity (GitHive's sign-in o
 Measured on a bench Worker with fake agents (`scripts/bench.mjs`) and with real ones. Every run's plan and log is in [`bench-results/`](bench-results/README.md):
 
 - Claims over 16 records repos: 1,000 agents at once claim, push, check and release in 67 to 106 s with none failing, and 200 in 49 s; exactly one of five racers wins a contested path every time (`bench-results/kept-tips-*`, `landed-tips-*`, 9 Oct).
-- Merging: 200 scripted agents (`scripts/swarm.mjs`) built, reviewed and merged 200 changes on Express, each batch checked with `npm test`: 200 of 200 landed in 36 minutes of work, through 13 merge errors the agents retried.
+- Merging: 200 scripted agents (`scripts/swarm.mjs`) built, reviewed and merged 200 changes on Express, each batch checked with `npm install` and `npm test`: all 200 landed in 36 minutes of work (46 with setup), about 5.6 merges a minute. They landed in 5 batches (20, 28, 56, 64 and 32), so main took 5 pushes instead of 200, through 13 merge errors the agents retried. Under the old line of merges, the same 200 agents had merged 2 changes after half an hour.
 - Real Claude Code agents (`scripts/claude-agents.mjs`) on Express: 20 agents built and reviewed 27 real tasks, and all 27 landed in 4 batches in 11 minutes, with nothing put out and a clean audit. In another run, one agent was told to plant a subtle bug that kept the tests passing; its reviewer caught it, and the fixed commit landed.
 
 ## Language support
