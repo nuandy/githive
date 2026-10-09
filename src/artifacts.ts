@@ -105,7 +105,7 @@ const FORK_READY_MS = 60_000;
  * Each loop below does its own retrying, with no retry loop inside it, so a
  * fork is requested at most FORK_ATTEMPTS times per ask.
  */
-export async function forkAndWait(artifacts: Artifacts, source: string, name: string, description: string) {
+export async function forkAndWait(artifacts: Artifacts, source: string, name: string, description: string, { shared = false }: { /** Others may be making the same fork at once (a seed): one that exists already is theirs, waited for. */ shared?: boolean } = {}) {
 	/** Request the fork; null when it turns out to exist already (a failed or lost request made it after all). */
 	const requestFork = (again: boolean) =>
 		withRepo(artifacts, source, async (repo) => {
@@ -124,7 +124,7 @@ export async function forkAndWait(artifacts: Artifacts, source: string, name: st
 			}
 		});
 
-	let forked = await requestFork(false);
+	let forked = await requestFork(shared);
 	const started = Date.now();
 	// Jittered, so forks lost together aren't all asked for again together.
 	const lostAfter = () => FORK_LOST_MS * (0.75 + Math.random() / 2);

@@ -208,7 +208,8 @@ const seeds = new Set<string>();
 async function ensureSeed(env: Env, repo: string, k: number) {
 	const name = seedName(repo, k);
 	if (seeds.has(name)) return name;
-	await remoteFor(env.ARTIFACTS, name, "read", 60).catch(() => forkAndWait(env.ARTIFACTS, repo, name, `seed ${k} for forks of ${repo}`));
+	// Many agents arriving at once need the same seed: one makes it, the rest wait for it.
+	await remoteFor(env.ARTIFACTS, name, "read", 60).catch(() => forkAndWait(env.ARTIFACTS, repo, name, `seed ${k} for forks of ${repo}`, { shared: true }));
 	seeds.add(name);
 	return name;
 }

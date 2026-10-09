@@ -377,7 +377,7 @@ await inBatches(unregistered, 1, async (who) => {
 });
 if (unregistered.length) say("swarm", `registered ${unregistered.map((w) => w.agent).join(", ")}`);
 const planner = plan.planner ?? plan.agents[0];
-await inBatches(plan.backlog, 2, async (piece) => {
+await inBatches(plan.backlog, 1, async (piece) => {
 	const added = await tool("add_work", { id: piece.id, title: piece.title ?? piece.id, intent: piece.intent, ...(piece.paths ? { paths: piece.paths } : {}), agent: planner.agent }, planner.keyFile);
 	if (!added.ok && !/already/.test(added.reason ?? "")) throw new Error(`adding ${piece.id} failed: ${added.reason}`);
 });

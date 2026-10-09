@@ -155,6 +155,17 @@ describe("Artifacts transient failures", () => {
 		vi.unstubAllGlobals();
 	});
 
+	it("waits for a shared fork that another caller is making, instead of failing as it already exists", async () => {
+		vi.stubGlobal("scheduler", { wait: vi.fn(async () => {}) });
+		const exists = Object.assign(new Error("repo already exists: seed"), { code: "ALREADY_EXISTS" });
+		const source = { fork: vi.fn().mockRejectedValue(exists) };
+		const made = { info: vi.fn(async () => ({ remote: "https://git.test/seed.git" })), createToken: vi.fn(async () => ({ plaintext: "fresh" })) };
+		const artifacts = { get: vi.fn(async (name: string) => (name === "source" ? source : made)) } as never;
+		await expect(forkAndWait(artifacts, "source", "seed", "a seed")).rejects.toThrow(/already exists/);
+		await expect(forkAndWait(artifacts, "source", "seed", "a seed", { shared: true })).resolves.toEqual({ name: "seed", remote: "https://git.test/seed.git", token: "fresh" });
+		vi.unstubAllGlobals();
+	});
+
 	it("gives up on a fork that keeps failing", async () => {
 		vi.stubGlobal("scheduler", { wait: vi.fn(async () => {}) });
 		const internal = Object.assign(new Error("An internal error occurred."), { code: "INTERNAL_ERROR" });
