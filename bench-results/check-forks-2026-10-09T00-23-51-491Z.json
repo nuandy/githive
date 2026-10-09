@@ -1,0 +1,138 @@
+{
+	"label": "check-forks",
+	"rampSeconds": 0,
+	"base": "https://blueprint-bench.nuandy.workers.dev",
+	"repo": "bench-check-forks",
+	"racers": 5,
+	"at": "2026-10-09T00:23:51.491Z",
+	"levels": [
+		{
+			"agents": 200,
+			"wallMs": 55747.32737500001,
+			"calls": 1205,
+			"callsPerSecond": 21.61538600575827,
+			"errors": 0,
+			"failures": [],
+			"race": {
+				"winners": 1,
+				"unexpected": []
+			},
+			"leftoverClaims": 0,
+			"tools": {
+				"claims": {
+					"n": 400,
+					"p50": 4838.668665999998,
+					"p95": 5215.676749999999,
+					"p99": 5227.128875000002,
+					"max": 5832.507708999998
+				},
+				"race": {
+					"n": 5,
+					"p50": 9391.126584000005,
+					"p95": 9937.457750000001,
+					"p99": 9937.457750000001,
+					"max": 9937.457750000001
+				},
+				"claim": {
+					"n": 200,
+					"p50": 16558.318542,
+					"p95": 19668.253624999998,
+					"p99": 21056.878459,
+					"max": 30134.888584
+				},
+				"check": {
+					"n": 200,
+					"p50": 6758.202375000001,
+					"p95": 8700.846624999998,
+					"p99": 9295.623791999999,
+					"max": 11455.079874999996
+				},
+				"status": {
+					"n": 200,
+					"p50": 3537.070083000006,
+					"p95": 6098.370375000013,
+					"p99": 6874.744665999999,
+					"max": 7342.848916999996
+				},
+				"release": {
+					"n": 200,
+					"p50": 3901.649458,
+					"p95": 5200.125958000004,
+					"p99": 5848.095625000002,
+					"max": 6096.345916999999
+				}
+			}
+		},
+		{
+			"agents": 1000,
+			"wallMs": 69097.22112500001,
+			"calls": 5966,
+			"callsPerSecond": 86.34211192382449,
+			"errors": 11,
+			"failures": [
+				"claims: HTTP Error: 500 Internal Server Error (bench-check-forks)",
+				"check: HTTP Error: 500 Internal Server Error (bench-check-forks)",
+				"check: HTTP Error: 500 Internal Server Error (bench-check-forks)",
+				"check: HTTP Error: 500 Internal Server Error (bench-check-forks)",
+				"check: HTTP Error: 500 Internal Server Error (bench-check-forks)",
+				"check: HTTP Error: 500 Internal Server Error (bench-check-forks)",
+				"check: HTTP Error: 500 Internal Server Error (bench-check-forks)",
+				"Request timed out",
+				"check: HTTP Error: 500 Internal Server Error (bench-check-forks)",
+				"Request timed out",
+				"check: HTTP Error: 500 Internal Server Error (bench-check-forks)",
+				"check: HTTP Error: 500 Internal Server Error (bench-check-forks)",
+				"check: HTTP Error: 500 Internal Server Error (bench-check-forks)"
+			],
+			"race": {
+				"winners": 1,
+				"unexpected": []
+			},
+			"leftoverClaims": 13,
+			"tools": {
+				"claims": {
+					"n": 1988,
+					"p50": 1378.7462499999965,
+					"p95": 5580.249291999993,
+					"p99": 5595.981791999991,
+					"max": 8921.225791999997
+				},
+				"race": {
+					"n": 5,
+					"p50": 10655.288916000005,
+					"p95": 19137.02633400001,
+					"p99": 19137.02633400001,
+					"max": 19137.02633400001
+				},
+				"claim": {
+					"n": 1000,
+					"p50": 19509.860916999998,
+					"p95": 30936.56345799999,
+					"p99": 36682.35375000001,
+					"max": 47211.624790999995
+				},
+				"check": {
+					"n": 998,
+					"p50": 8267.600957999995,
+					"p95": 14453.941542000015,
+					"p99": 16450.054166999995,
+					"max": 20430.687250000003
+				},
+				"status": {
+					"n": 988,
+					"p50": 4292.914041999989,
+					"p95": 8752.837750000006,
+					"p99": 10786.364207999999,
+					"max": 11995.801542000001
+				},
+				"release": {
+					"n": 987,
+					"p50": 4329.182208000013,
+					"p95": 7818.847165999992,
+					"p99": 11948.233707999985,
+					"max": 13638.96645800001
+				}
+			}
+		}
+	]
+}

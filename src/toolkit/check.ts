@@ -1,4 +1,4 @@
-import { type Remote, Workspace } from "../git";
+import { branchHead, type Remote, Workspace } from "../git";
 import { inLane } from "../claim-paths";
 import type { ClaimRecord } from "./claims";
 
@@ -10,6 +10,10 @@ import type { ClaimRecord } from "./claims";
 // outside them, so two changes that can both merge touch disjoint files and
 // can't conflict; an overlap means someone is outside their claim, which their
 // own check shows them. Checking every other change would cost a fetch each.
+//
+// Many agents check at once, so a check doesn't clone the project: it lists
+// the branch's head and reads the branch from a copy kept while it hasn't
+// moved.
 
 export interface CheckInput {
 	/** The project repo. */
@@ -24,7 +28,10 @@ export interface CheckInput {
 
 export async function checkChange(input: CheckInput) {
 	const { change, claims } = input;
-	const ws = await Workspace.clone(input.project, input.branch);
+	// One ref listing on the project; its branch's objects are kept between checks (see Workspace.at).
+	const listed = await branchHead(input.project, input.branch);
+	if (!listed) throw new Error(`[409] ${input.branch} doesn't exist yet`);
+	const ws = await Workspace.at(input.project, input.branch, listed);
 	const main = await ws.head();
 	const head = await ws.fetch("change", input.source, `changes/${change}`).catch(() => null);
 	if (!head) throw new Error(`[409] changes/${change} has nothing pushed to check`);

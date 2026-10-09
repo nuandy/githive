@@ -698,9 +698,21 @@ been taking requests off the busiest repos:
 
 With these, 1000 agents ran in 73 s with 20 failures (all client-side
 "fetch failed") and in 81 s with 178 failures, against 213 s and 218
-before. 200 agents ran in 50 s with none. What fails now is the project repo
-(`check` clones it on every call, and every call lists the registry) and the
-agents' forks being made all at once on their first `credentials`.
+before. 200 agents ran in 50 s with none. What failed then was the project
+repo (`check` cloned it on every call) and the agents' forks, made all at once
+on their first `credentials`: Artifacts accepted some forks that never
+appeared.
+
+- **Kept main for checks**: a check lists the branch's head and reads the
+  branch from a workspace kept in the Worker isolate (`Workspace.at`), copied
+  per check, fetched into when the branch moves, cloned only the first time.
+- **Lost forks asked for again**: every ~8 s (jittered) a fork stays missing,
+  for up to a minute, instead of once within 30 s.
+
+With these, 1000 agents ran in 69 s with 13 failures (10 of them `check` on
+a project-repo 500) and in 86 s with 2, both the bench's own `git push`
+timing out against Artifacts. No fork failed in either run, and exactly one
+racer won each time.
 
 Small runs pay for sharding: one agent takes 35.5 s against 27.3 s with one
 record, since a read lists the shards before fetching. Sharding on demand

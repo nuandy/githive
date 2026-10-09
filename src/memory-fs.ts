@@ -218,6 +218,16 @@ export class MemoryFS {
 		this.requireDir(this.parent(target)).children.delete(this.basename(target));
 	}
 
+	/**
+	 * An independent copy. Writes replace a file's bytes rather than change
+	 * them, so the copy shares them; only directories' listings are copied.
+	 */
+	copy() {
+		const copy = new MemoryFS();
+		copy.entries = new Map([...this.entries].map(([path, entry]) => [path, entry.kind === "dir" ? { ...entry, children: new Set(entry.children) } : entry]));
+		return copy;
+	}
+
 	async stat(path: string) {
 		return new MemoryStats(this.requireEntry(path));
 	}

@@ -90,9 +90,13 @@ const notFoundYet = (err: unknown) => /NOT_FOUND/.test(codeOf(err)) || /not foun
 
 const FORK_ATTEMPTS = 5;
 
-/** How long a new fork may read as missing before it is asked for again, and how long to wait for it in all. */
+/**
+ * How long a new fork may read as missing before it is asked for again (and
+ * again, each time it stays missing that long), and how long to wait for it
+ * in all. Under a burst of forks, some accepted forks never appear.
+ */
 const FORK_LOST_MS = 8_000;
-const FORK_READY_MS = 30_000;
+const FORK_READY_MS = 60_000;
 
 /**
  * Fork `source` and wait until the fork is ready, since get() throws while a
@@ -121,8 +125,10 @@ export async function forkAndWait(artifacts: Artifacts, source: string, name: st
 		});
 
 	let forked = await requestFork(false);
-	let askedAgain = false;
 	const started = Date.now();
+	// Jittered, so forks lost together aren't all asked for again together.
+	const lostAfter = () => FORK_LOST_MS * (0.75 + Math.random() / 2);
+	let askAgainAt = started + lostAfter();
 	for (let delay = 100; ; delay = Math.min(delay * 2, 2_000)) {
 		try {
 			// One try: this loop already waits out transient failures.
@@ -132,9 +138,9 @@ export async function forkAndWait(artifacts: Artifacts, source: string, name: st
 			return { name, remote: remote.url, token: remote.token };
 		} catch (err) {
 			if (!isTransientFailure(err) && !isForkPending(err) && !notFoundYet(err)) throw err;
-			if (notFoundYet(err) && !askedAgain && Date.now() - started > FORK_LOST_MS) {
-				askedAgain = true;
+			if (notFoundYet(err) && Date.now() > askAgainAt && Date.now() - started < FORK_READY_MS) {
 				forked = (await requestFork(true)) ?? forked;
+				askAgainAt = Date.now() + lostAfter();
 				continue;
 			}
 			if (Date.now() - started > FORK_READY_MS) throw new Error(`fork ${name} not ready after ${FORK_READY_MS / 1000}s: ${err}`);

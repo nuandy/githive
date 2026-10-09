@@ -52,6 +52,10 @@ export const SHALLOW_DEPTH = 64;
 /** Past this depth a deepening fetch is asking for all of history anyway. */
 const FULL_DEPTH = 1 << 20;
 
+/** Workspaces kept for the isolate by `Workspace.at`, by origin and branch, the most recently used last. */
+const kept = new Map<string, { head: string; ws: Workspace }>();
+const KEPT_WORKSPACES = 4;
+
 /**
  * A repo in memory. It starts shallow, the last SHALLOW_DEPTH commits of each
  * branch it fetches, since a whole project's history may not fit (a Durable
@@ -88,6 +92,39 @@ export class Workspace {
 			ws.sources.push({ remote: "origin", origin, ref: branch });
 			return ws;
 		});
+	}
+
+	/**
+	 * A workspace with `branch` at `head`, for reading (a check, say): copied
+	 * from one kept for the isolate when the branch hasn't moved, brought up
+	 * to date with one fetch when it has, cloned only the first time. Each
+	 * caller gets its own copy, so what one fetches the others never see. The
+	 * branch may have moved again since `head` was read: it is then wherever
+	 * the fetch found it.
+	 */
+	static async at(origin: Remote, branch: string, head: string) {
+		const key = `${origin.url}|${branch}`;
+		const hit = kept.get(key);
+		if (hit?.head === head) return hit.ws.copy(origin);
+		let ws: Workspace;
+		if (hit) {
+			ws = hit.ws.copy(origin);
+			const result = await retryTransient(() => git.fetch({ fs: ws.fs, http, dir: DIR, remote: "origin", ref: branch, singleBranch: true, depth: ws.depth, onAuth: onAuth(origin) }));
+			if (!result.fetchHead) throw new Error(`fetch of origin/${branch} returned no head`);
+			// The worktree stays where it was: reading needs the branch, not the files.
+			await git.writeRef({ fs: ws.fs, dir: DIR, ref: `refs/heads/${branch}`, value: result.fetchHead, force: true });
+		} else ws = await Workspace.clone(origin, branch);
+		kept.delete(key);
+		kept.set(key, { head: await ws.head(), ws });
+		while (kept.size > KEPT_WORKSPACES) kept.delete(kept.keys().next().value!);
+		return ws.copy(origin);
+	}
+
+	/** An independent copy, fetching and deepening with `origin`'s credentials. */
+	private copy(origin: Remote) {
+		const copy = new Workspace(this.fs.copy(), origin, this.branch, this.depth);
+		copy.sources.push(...this.sources.map((s) => (s.remote === "origin" ? { ...s, origin } : s)));
+		return copy;
 	}
 
 	/** Fetch every branch fetched so far four times deeper. Returns false once history is whole. */
