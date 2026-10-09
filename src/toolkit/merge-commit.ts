@@ -24,6 +24,9 @@ export interface MergeClaim {
 }
 
 export async function mergeMessage(claimed: MergeClaim, stamper?: Stamper) {
+	// No votes record at all (no review asked for, none cast): no trailer, and the stamp over none, as the audit reads it.
+	// An empty trailer reads back as none, so a stamp over "" never verified: 200 merges without review all unverified.
+	const signed = { ...claimed, votesTip: claimed.votesTip || undefined };
 	return [
 		`Merge ${claimed.change} by ${claimed.author}`,
 		"",
@@ -31,13 +34,13 @@ export async function mergeMessage(claimed: MergeClaim, stamper?: Stamper) {
 		`${FORMAT_TRAILER}: ${RECORD_FORMAT}`,
 		`GitHive-Agent: ${claimed.author}`,
 		`GitHive-Claims: ${claimed.claimsTip}`,
-		`GitHive-Votes: ${claimed.votesTip}`,
+		...(signed.votesTip ? [`GitHive-Votes: ${signed.votesTip}`] : []),
 		// Which main the checks passed on.
 		...(claimed.testedOn ? [`GitHive-Tested: ${claimed.testedOn}`] : []),
 		// The changes checked together on it, in landing order: exactly these landed on it, in one push.
 		...(claimed.testedWith?.length ? [`GitHive-Tested-With: ${claimed.testedWith.join(" ")}`] : []),
 		// Who asked for it, as Access verified them, and GitHive's stamp over all of the above.
-		...(stamper ? [`GitHive-By: ${stamper.by}`, `GitHive-Stamp: ${await stamper.stamp(mergeStampPayload({ ...claimed, by: stamper.by }))}`] : []),
+		...(stamper ? [`GitHive-By: ${stamper.by}`, `GitHive-Stamp: ${await stamper.stamp(mergeStampPayload({ ...signed, by: stamper.by }))}`] : []),
 		"",
 	].join("\n");
 }

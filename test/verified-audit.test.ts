@@ -1,7 +1,9 @@
 import { beforeAll, describe, expect, it } from "vitest";
 import { audit, type MergeRecord, mergeStampPayload, revertStampPayload } from "../src/toolkit/audit";
 import type { ClaimRecord, Registry } from "../src/toolkit/claims";
-import { generateStampKey, makeStamper, stampPayload, type Stamper } from "../src/toolkit/stamp";
+import { mergeRecordOf } from "../src/toolkit/git-records";
+import { mergeMessage } from "../src/toolkit/merge-commit";
+import { generateStampKey, makeStamper, stampPayload, type Stamper, verifyStamp } from "../src/toolkit/stamp";
 import type { VoteRecord, Votes } from "../src/toolkit/votes";
 
 // With a stamp key in the registry, the audit trusts only what GitHive
@@ -47,6 +49,13 @@ describe("the audit, with stamps", () => {
 			merges: [await stampedMerge()],
 		};
 		expect(await audit(records)).toEqual([]);
+	});
+
+	it("verifies the stamp of a merge that counted no votes (none asked for, none cast)", async () => {
+		const message = await mergeMessage({ base: "b0", head: "h1", change: "a-1", author: "agent-a", claimsTip: "c1", votesTip: "" }, toolkit);
+		expect(message).not.toMatch(/GitHive-Votes/);
+		const merge = mergeRecordOf({ commit: "m1", parents: ["b0", "h1"], author: "GitHive", message, files: ["src/a.txt"] });
+		expect(await verifyStamp(key.publicKey, mergeStampPayload(merge), merge.stamp)).toBe(true);
 	});
 
 	it("reports a merge without a valid stamp: its agent and trailers can't be trusted", async () => {
