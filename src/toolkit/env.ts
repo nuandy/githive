@@ -52,6 +52,8 @@ const logs = new Map<string, GitCasLog<unknown>>();
 
 /** How long a kept copy of the claims stays fresh with no write in between. */
 const KEPT_CLAIMS_MS = 30_000;
+/** How long the open changes' heads stay fresh for next (pushes to forks don't ping, so this is all that ages them). */
+const KEPT_HEADS_MS = 10_000;
 /** How long a record's tip stays kept with no write clearing it (in case a write couldn't). */
 const KEPT_TIP_MS = 10_000;
 /** The largest view a LiveFeed keeps. */
@@ -99,7 +101,7 @@ function recordsLog<S>(env: Env, repo: string, ref: string) {
 		const feed = () => env.LIVE.getByName(`repo:${repo}`);
 		const states = { get: (r: string, tip: string) => feed().recordAt(r, tip), put: (r: string, tip: string, json: string) => feed().keepRecord(r, tip, json) };
 		// And where its ref points, so that a read needn't list it on the busy project repo.
-		const tips = { get: (r: string, stateKey: string) => feed().tipOf(r, stateKey, KEPT_TIP_MS), keep: (r: string, tip: string | null, gen: number) => feed().keepTip(r, tip, gen), moved: (r: string) => feed().movedTip(r) };
+		const tips = { get: (r: string, stateKey: string) => feed().tipOf(r, stateKey, KEPT_TIP_MS), keep: (r: string, tip: string | null, gen: number) => feed().keepTip(r, tip, gen), landed: (r: string, parent: string | null, tip: string) => feed().landedTip(r, parent, tip), stale: (r: string, parent: string | null) => feed().staleTip(r, parent) };
 		logs.set(ref, (log = new GitCasLog<unknown>(() => cached(env, repo, `${repo}|write`, () => remoteFor(env.ARTIFACTS, repo, "write", 3600)), repo, ref, { states, tips })));
 	}
 	return log as GitCasLog<S>;
@@ -123,6 +125,7 @@ export function toolContextFor(env: Env, by: string | undefined, caller: { agent
 		},
 		// The claims for advice, kept in the repo's LiveFeed so a busy repo isn't read whole on every call.
 		keptClaims: (repo, read) => keptRead(env, repo, "claims-advice", KEPT_CLAIMS_MS, read),
+		keptHeads: (repo, read) => keptRead(env, repo, "open-heads", KEPT_HEADS_MS, read),
 		// Review holds are a record in Git (see review-holds.ts), like the claims and votes.
 		reviews: reviewHolds((repo) => recordsLog<ReviewHolds>(env, repo, reviewsRef(repo))),
 		requestReview: (input) => startHostedReviewers(env, input),
@@ -180,14 +183,49 @@ export async function forkName(repo: string, agent: string) {
 	return `fork--${repo}--agent--${slug}-${[...digest.slice(0, 3)].map((b) => b.toString(16).padStart(2, "0")).join("")}`;
 }
 
-/** Credentials for an agent's own fork of the project repo; writing to it first creates the fork (once, for all its changes). */
+/**
+ * How many seed forks a project's agents' forks are made from. A fork copies
+ * its source repo, and a crowd of agents arriving at once would otherwise all
+ * copy the project's repo at once (200 forks of Express left it answering
+ * nothing else); from seeds, each seed is copied by a sixteenth of them.
+ */
+export const FORK_SEEDS = 16;
+/** A project's seed fork `k`: made from the project once, when an agent's fork first needs it. */
+export const seedName = (repo: string, k: number) => `fork--${repo}--seed--${k}`;
+
+/** Which seed an agent's fork is made from: a stable hash of its name. */
+function seedOf(agent: string) {
+	let h = 0x811c9dc5;
+	for (let i = 0; i < agent.length; i++) h = Math.imul(h ^ agent.charCodeAt(i), 0x01000193);
+	return (h >>> 0) % FORK_SEEDS;
+}
+
+/** Seeds known to exist, for the isolate. */
+const seeds = new Set<string>();
+
+/** A seed fork of the project, made if it isn't there yet (two agents asking at once share one). */
+async function ensureSeed(env: Env, repo: string, k: number) {
+	const name = seedName(repo, k);
+	if (seeds.has(name)) return name;
+	await remoteFor(env.ARTIFACTS, name, "read", 60).catch(() => forkAndWait(env.ARTIFACTS, repo, name, `seed ${k} for forks of ${repo}`));
+	seeds.add(name);
+	return name;
+}
+
+/**
+ * Credentials for an agent's own fork of the project repo; writing to it
+ * first creates the fork (once, for all its changes), from one of the
+ * project's seeds (see FORK_SEEDS). A seed's branch is the project's as it
+ * was when the seed was made: what the fork lacks of the project's since, an
+ * agent's first push sends.
+ */
 export async function changeRemote(env: Env, repo: string, agent: string, scope: "read" | "write", ttlSeconds: number) {
 	const name = await forkName(repo, agent);
 	try {
 		return await remoteFor(env.ARTIFACTS, name, scope, ttlSeconds);
 	} catch (err) {
 		if (scope === "read") throw new Error(`[409] ${agent} has no fork yet: nothing has been pushed`);
-		await forkAndWait(env.ARTIFACTS, repo, name, `${agent}'s fork of ${repo}`);
+		await forkAndWait(env.ARTIFACTS, await ensureSeed(env, repo, seedOf(agent)), name, `${agent}'s fork of ${repo}`);
 		return remoteFor(env.ARTIFACTS, name, scope, ttlSeconds);
 	}
 }

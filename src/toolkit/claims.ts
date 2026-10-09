@@ -189,8 +189,8 @@ async function stamped<T extends object>(kind: string, record: T, stamper: Stamp
  * a claim in the way that has been idle that long is released as stale in the
  * same record, so an abandoned claim frees itself when someone needs its paths.
  */
-export async function claim(log: CasLog<Registry>, input: { change: string; agent: string; paths: string[]; intent: string; staleAfterMs?: number; now?: number }, stamper?: Stamper) {
-	const { staleAfterMs, now: at, ...wanted } = input;
+export async function claim(log: CasLog<Registry>, input: { change: string; agent: string; paths: string[]; intent: string; staleAfterMs?: number; abandoned?: Abandoned; now?: number }, stamper?: Stamper) {
+	const { staleAfterMs, abandoned, now: at, ...wanted } = input;
 	/** The change's paths here before this claim (null: it had none), for a claim that must back out. */
 	let previous: string[] | null = null;
 	/** The state the claim was written onto: whether the registry was sharded by then. */
@@ -198,17 +198,24 @@ export async function claim(log: CasLog<Registry>, input: { change: string; agen
 	const outcome = await appendRecord<Registry, Conflict[]>(log, wanted.agent, empty, async (state) => {
 		seen = state;
 		const time = at ?? Date.now();
-		const isStale = (c: ClaimRecord) => staleAfterMs !== undefined && time - Date.parse(c.active) > staleAfterMs;
 		const conflicts = conflictsWith(state, wanted.paths, wanted.change);
-		const blocking = conflicts.filter((c) => !isStale(state.claims.find((held) => held.change === c.change)!));
+		// Stale: idle past the floor, and (when the caller can tell) abandoned on its agent's own turn.
+		// The change's own name under another agent counts too: an abandoned change can be taken over.
+		const sameName = state.claims.find((c) => c.change === wanted.change && c.agent !== wanted.agent);
+		const stale = new Set<string>();
+		for (const change of new Set([...conflicts.map((c) => c.change), ...(sameName ? [sameName.change] : [])])) {
+			const held = state.claims.find((c) => c.change === change)!;
+			if (staleAfterMs !== undefined && time - Date.parse(held.active) > staleAfterMs && (!abandoned || (await abandoned(held)).abandoned)) stale.add(change);
+		}
+		const blocking = conflicts.filter((c) => !stale.has(c.change));
 		if (blocking.length) return { refused: blocking };
 		const now = new Date(time).toISOString();
 		// Stale claims in the way: released, each with its own stamped release record.
-		const stale = state.claims.filter((c) => conflicts.some((x) => x.change === c.change));
+		const freedClaims = state.claims.filter((c) => stale.has(c.change));
 		const releases: ReleaseRecord[] = [];
-		for (const held of stale)
+		for (const held of freedClaims)
 			releases.push(await stamped("release", { change: held.change, agent: held.agent, by: wanted.agent, at: now, reason: "stale", stale: true, lastActive: held.active } as ReleaseRecord, stamper, "verifiedBy"));
-		const remaining = state.claims.filter((c) => !stale.includes(c));
+		const remaining = state.claims.filter((c) => !freedClaims.includes(c));
 		const existing = remaining.find((c) => c.change === wanted.change);
 		// A change is its agent's: another agent claiming under its name would extend someone else's claim.
 		if (existing && existing.agent !== wanted.agent) throw new Error(changeTaken(wanted.change, existing.agent));
@@ -220,7 +227,7 @@ export async function claim(log: CasLog<Registry>, input: { change: string; agen
 			stamper,
 		);
 		const claims = existing ? remaining.map((c) => (c.change === wanted.change ? record : c)) : [...remaining, record];
-		const freed = stale.length ? ` (releasing stale ${stale.map((c) => c.change).join(", ")})` : "";
+		const freed = freedClaims.length ? ` (releasing stale ${freedClaims.map((c) => c.change).join(", ")})` : "";
 		return { state: { ...state, claims, released: [...state.released, ...releases] }, text: `${wanted.agent} claims ${wanted.paths.join(", ")} for ${wanted.change}: ${wanted.intent}${freed}` };
 	});
 	return outcome.ok ? { ...outcome, previous, seen } : { ok: false as const, conflicts: outcome.refused };
@@ -260,14 +267,23 @@ export function release(log: CasLog<Registry>, input: { change: string; agent: s
 	});
 }
 
-/** Release another agent's claim, if it has been idle longer than `staleAfterMs`. */
-export function releaseStale(log: CasLog<Registry>, input: { change: string; agent: string; staleAfterMs: number; now?: number }, stamper?: Stamper) {
+/**
+ * Whether a claim is abandoned on its agent's own turn, and if not, what its
+ * change waits on (see staleness.ts). The caller knows the change's head, votes
+ * and the line; the records here don't.
+ */
+export type Abandoned = (claim: ClaimRecord) => Promise<{ abandoned: boolean; why: string }>;
+
+/** Release another agent's claim, if it has been idle longer than `staleAfterMs` and (when the caller can tell) is abandoned. */
+export function releaseStale(log: CasLog<Registry>, input: { change: string; agent: string; staleAfterMs: number; abandoned?: Abandoned; now?: number }, stamper?: Stamper) {
 	const now = input.now ?? Date.now();
 	return appendRecord<Registry, string>(log, input.agent, empty, async (state) => {
 		const held = state.claims.find((c) => c.change === input.change);
 		if (!held) return { refused: `${input.change} holds no claim` };
 		const idle = now - Date.parse(held.active);
 		if (idle <= input.staleAfterMs) return { refused: `${input.change}'s claim was active ${Math.round(idle / 1000)}s ago; it isn't stale` };
+		const turn = input.abandoned ? await input.abandoned(held) : undefined;
+		if (turn && !turn.abandoned) return { refused: `${input.change} isn't abandoned: it ${turn.why}` };
 		return {
 			state: {
 				...state,

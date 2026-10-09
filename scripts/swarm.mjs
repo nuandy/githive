@@ -34,7 +34,8 @@
 //     "setup": { "import": "https://github.com/expressjs/express", "branch": "master",
 //                "template": "express-template",   imported once; each run's repo is a copy of it (seconds, not a minute)
 //                "verify": ["npm install", "npm test"], "required": 1,
-//                "grants": { "security": ["agent-3"] } }   optional: make the repo first
+//                "grants": { "security": ["agent-3"] },
+//                "shardDepth": 2 }                  optional: shard the claims from the start; make the repo first
 //   }
 //
 // Agents whose keyFile doesn't exist yet are registered first (register),
@@ -314,7 +315,9 @@ function agentFor(spec) {
 				else if (next.kind === "merge") await merge(next);
 			} catch (err) {
 				const id = next?.change ?? next?.work?.id;
-				say(name, `${next?.kind ?? "next"}${id ? ` ${id}` : ""} failed: ${String(err.message ?? err).slice(0, 200)}`);
+				// A command's own message is mostly its command line: what it printed last says why it failed.
+				const why = err.stderr ? String(err.stderr).trim().split("\n").slice(-2).join(" | ") : String(err.message ?? err);
+				say(name, `${next?.kind ?? "next"}${id ? ` ${id}` : ""} failed: ${why.slice(0, 300)}`);
 				if (id && timeline.has(id)) note(id, `${next.kind} failed`);
 				await sleep(10_000);
 			}
@@ -325,7 +328,7 @@ function agentFor(spec) {
 
 const post = (path, body) => fetch(`${BASE}${path}`, { method: "POST", dispatcher: patient, headers: { ...access, "Content-Type": "application/json" }, body: JSON.stringify(body) });
 if (plan.setup) {
-	const repos = new Set((await (await fetch(`${BASE}/repos`, { headers: access, dispatcher: patient })).json()).map((r) => r.name));
+	const repos = new Set((await (await fetch(`${BASE}/repos`, { headers: access, dispatcher: patient })).json()).map((r) => r.name.replace(/^_\//, "")));
 	if (!repos.has(plan.repo)) {
 		const template = plan.setup.template;
 		if (template && !repos.has(template)) {
@@ -337,28 +340,47 @@ if (plan.setup) {
 		const made = template ? await post(`/repos/_/${template}/copy`, { name: plan.repo }) : await post("/repos/import", { url: plan.setup.import, name: plan.repo, branch: plan.setup.branch });
 		if (!made.ok) throw new Error(`making ${plan.repo} failed: HTTP ${made.status} ${(await made.text()).slice(0, 200)}`);
 	}
-	const startedMode = await tool("start", { required: plan.setup.required ?? 1, ...(plan.setup.verify ? { verify: plan.setup.verify } : {}), ...(plan.setup.grants ? { grants: plan.setup.grants } : {}) });
+	const startedMode = await tool("start", { required: plan.setup.required ?? 1, ...(plan.setup.verify ? { verify: plan.setup.verify } : {}), ...(plan.setup.grants ? { grants: plan.setup.grants } : {}), ...(plan.setup.shardDepth !== undefined ? { shard_depth: plan.setup.shardDepth } : {}) });
 	branch = startedMode.branch;
 	say("swarm", `${plan.repo} on ${branch}: checks ${JSON.stringify(startedMode.verify)}, grants ${JSON.stringify(startedMode.policy?.grants ?? {})}, claims ${JSON.stringify(startedMode.sharding)}`);
 }
-// Registered side by side, then the backlog filed side by side: setup takes seconds.
+/**
+ * Run `fn` over `items`, `n` at a time, trying one again when GitHive says to:
+ * each registration and backlog item is a write to one record, and hundreds
+ * at once would only contend.
+ */
+async function inBatches(items, n, fn) {
+	const queue = [...items];
+	const again = async (item) => {
+		for (let attempt = 1; ; attempt++) {
+			try {
+				return await fn(item);
+			} catch (err) {
+				if (attempt === 5 || !/try again/.test(String(err.message ?? err))) throw err;
+				await sleep(1_000 * attempt * (0.5 + Math.random()));
+			}
+		}
+	};
+	await Promise.all(Array.from({ length: Math.min(n, queue.length) }, async () => {
+		while (queue.length) await again(queue.shift());
+	}));
+}
+// Registered side by side, then the backlog filed side by side, a few at a time: setup takes seconds.
 const unregistered = [...plan.agents, ...(plan.planner ? [plan.planner] : [])].filter((who) => who.keyFile && !existsSync(at(who.keyFile)));
-await Promise.all(
-	unregistered.map(async (who) => {
+await inBatches(unregistered, 1, async (who) => {
+	{
 		mkdirSync(dirname(at(who.keyFile)), { recursive: true });
 		const { key } = await tool("register", { agent: who.agent });
 		writeFileSync(at(who.keyFile), key);
 		chmodSync(at(who.keyFile), 0o600);
-	}),
-);
+	}
+});
 if (unregistered.length) say("swarm", `registered ${unregistered.map((w) => w.agent).join(", ")}`);
 const planner = plan.planner ?? plan.agents[0];
-await Promise.all(
-	plan.backlog.map(async (piece) => {
-		const added = await tool("add_work", { id: piece.id, title: piece.title ?? piece.id, intent: piece.intent, ...(piece.paths ? { paths: piece.paths } : {}), agent: planner.agent }, planner.keyFile);
-		if (!added.ok && !/already/.test(added.reason ?? "")) throw new Error(`adding ${piece.id} failed: ${added.reason}`);
-	}),
-);
+await inBatches(plan.backlog, 2, async (piece) => {
+	const added = await tool("add_work", { id: piece.id, title: piece.title ?? piece.id, intent: piece.intent, ...(piece.paths ? { paths: piece.paths } : {}), agent: planner.agent }, planner.keyFile);
+	if (!added.ok && !/already/.test(added.reason ?? "")) throw new Error(`adding ${piece.id} failed: ${added.reason}`);
+});
 // Setup ends once the repo has a snapshot for check containers to start from, as on a repo that's been running: the work clock starts then.
 if (plan.setup?.verify?.length) {
 	const until = Date.now() + 6 * 60_000;

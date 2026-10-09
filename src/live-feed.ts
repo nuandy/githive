@@ -28,6 +28,17 @@ interface View {
 const BUILD_LEASE_MS = 2 * 60_000;
 
 
+/** A record's tip as kept: where its ref points (null: nowhere) and when that was known, its generation, and when a listing began. */
+interface KeptTip {
+	tip?: string | null;
+	at?: number;
+	gen: number;
+	listing?: number;
+}
+
+/** How long one caller's listing of a ref stands before another is sent. */
+const TIP_LISTING_MS = 3_000;
+
 export class LiveFeed extends DurableObject<Env> {
 	async fetch(request: Request) {
 		if (request.headers.get("Upgrade") !== "websocket") return new Response("expected a WebSocket", { status: 426 });
@@ -86,29 +97,51 @@ export class LiveFeed extends DurableObject<Env> {
 	}
 
 	/**
-	 * Where a record's ref points, as last listed and kept (see TipCache in
-	 * record-log.ts), with its state when kept for that tip; or none, when
-	 * nothing is kept or it's older than `maxAgeMs`, with the generation a new
-	 * listing is kept under.
+	 * Where a record's ref points, as kept (see TipCache in record-log.ts),
+	 * with its state when kept for that tip, and the generation a listing is
+	 * kept under. One caller at a time is sent to list the ref: when nothing
+	 * is kept (the others are told to wait for it), or when what's kept is
+	 * older than `maxAgeMs` (the others take it meanwhile: a write would have
+	 * moved it, so it only ages in case one couldn't).
 	 */
-	async tipOf(ref: string, stateKey: string, maxAgeMs: number) {
-		const kept = await this.ctx.storage.get<{ tip?: string | null; at?: number; gen: number }>(`tip:${ref}`);
-		const gen = kept?.gen ?? 0;
-		if (kept?.tip === undefined || Date.now() - (kept.at ?? 0) > maxAgeMs) return { gen };
+	async tipOf(ref: string, stateKey: string, maxAgeMs: number): Promise<{ tip?: string | null; json?: string; gen: number; wait?: boolean }> {
+		const key = `tip:${ref}`;
+		const kept = (await this.ctx.storage.get<KeptTip>(key)) ?? { gen: 0 };
+		const now = Date.now();
+		const listing = kept.listing !== undefined && now - kept.listing < TIP_LISTING_MS;
+		if (kept.tip === undefined || now - (kept.at ?? 0) > maxAgeMs) {
+			if (!listing) {
+				await this.ctx.storage.put(key, { ...kept, listing: now });
+				return { gen: kept.gen };
+			}
+			if (kept.tip === undefined) return { gen: kept.gen, wait: true };
+		}
 		const state = kept.tip ? await this.ctx.storage.get<{ tip: string; json: string }>(`record:${stateKey}`) : undefined;
-		return { tip: kept.tip, gen, ...(state?.tip === kept.tip ? { json: state.json } : {}) };
+		return { tip: kept.tip, gen: kept.gen, ...(state?.tip === kept.tip ? { json: state.json } : {}) };
 	}
 
 	/** Keep a listing of a record's ref, unless it moved since the listing began (its generation is past `gen`). */
 	async keepTip(ref: string, tip: string | null, gen: number) {
-		const kept = await this.ctx.storage.get<{ gen: number }>(`tip:${ref}`);
+		const kept = await this.ctx.storage.get<KeptTip>(`tip:${ref}`);
 		if ((kept?.gen ?? 0) === gen) await this.ctx.storage.put(`tip:${ref}`, { tip, at: Date.now(), gen });
 	}
 
-	/** A record's ref moved: forget its tip, and any listing still under way. */
-	async movedTip(ref: string) {
-		const kept = await this.ctx.storage.get<{ gen: number }>(`tip:${ref}`);
-		await this.ctx.storage.put(`tip:${ref}`, { gen: (kept?.gen ?? 0) + 1 });
+	/**
+	 * A write moved a record's ref from `parent` to `tip`. Kept as the tip if
+	 * the kept one is its parent; otherwise writes are arriving out of order
+	 * (or one was lost), and the tip is forgotten until it's listed again.
+	 * Either way a listing under way is dropped.
+	 */
+	async landedTip(ref: string, parent: string | null, tip: string) {
+		const kept = (await this.ctx.storage.get<KeptTip>(`tip:${ref}`)) ?? { gen: 0 };
+		const gen = kept.gen + 1;
+		await this.ctx.storage.put(`tip:${ref}`, kept.tip === parent ? { tip, at: Date.now(), gen } : { gen });
+	}
+
+	/** A write built on `parent` found the ref had moved on: if that's the tip kept, it's out of date. */
+	async staleTip(ref: string, parent: string | null) {
+		const kept = await this.ctx.storage.get<KeptTip>(`tip:${ref}`);
+		if (kept && kept.tip === parent) await this.ctx.storage.put(`tip:${ref}`, { gen: kept.gen + 1 });
 	}
 
 	/** Forget the kept views: the repo was deleted. */

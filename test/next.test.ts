@@ -129,6 +129,25 @@ describe("what an agent should do next", () => {
 	});
 });
 
+describe("a crowd asking at once", () => {
+	const agents = Array.from({ length: 40 }, (_, i) => `agent-${i}`);
+
+	it("is spread over as many pieces of the backlog as there are agents, not the first few", () => {
+		const work = Array.from({ length: 40 }, (_, i) => item(`w${i}`));
+		const picks = agents.map((agent) => nextFor(base({ agent, work, crowd: agents.length }))).map((n) => (n.kind === "build" ? n.work.id : n.kind));
+		expect(new Set(picks).size).toBeGreaterThan(15);
+		// A small team still takes the backlog's first pieces.
+		const few = ["a", "b"].map((agent) => nextFor(base({ agent, work, crowd: 2 }))).map((n) => (n.kind === "build" ? n.work.id : n.kind));
+		expect(few.every((id) => ["w0", "w1", "w2"].includes(id))).toBe(true);
+	});
+
+	it("is spread over every review waiting alike", () => {
+		const open = Array.from({ length: 20 }, (_, i) => ({ claim: claimOf(`c${i}`, "author", `2026-10-07T10:${String(i).padStart(2, "0")}:00.000Z`), head: `h${i}` }));
+		const picks = agents.map((agent) => nextFor(base({ agent, open, crowd: agents.length }))).map((n) => (n.kind === "review" ? n.change : n.kind));
+		expect(new Set(picks).size).toBeGreaterThan(10);
+	});
+});
+
 describe("a change is its first agent's", { timeout: 60_000 }, () => {
 	let server: GitServer;
 	const remote = async () => ({ url: server.url, token: "unused" });
@@ -177,6 +196,9 @@ describe("review holds through the toolkit", { timeout: 120_000 }, () => {
 				await call("claim", { change: c, agent: "author", paths: [`src/${c}/`], intent: c }, keys.author);
 				heads.push(await pushChange(server.url, work, "author", c, { [`src/${c}/x.js`]: `${c}\n` }));
 			}
+			// A hold that can't be written (the record stayed busy) isn't taken: the review isn't handed out.
+			const failing = callTool("next", { repo: "p", agent: "rev-1" }, { ...ctx(keys["rev-1"]), reviews: { ...reviews, hold: async () => { throw new Error("the Git server stayed busy"); } } });
+			expect(await failing).toMatchObject({ kind: "wait" });
 			const [one, two] = await Promise.all(["rev-1", "rev-2"].map((a) => call("next", { agent: a }, keys[a])));
 			expect(one.kind).toBe("review");
 			expect(two.kind).toBe("review");

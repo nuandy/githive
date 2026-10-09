@@ -5,7 +5,7 @@ import { GitCasLog } from "../record-log";
 import { isEmptyRepo, type Remote } from "../git";
 import { retryTransient } from "../retry";
 import { readAllShards, readRefs } from "./record-refs";
-import { activeClaims, changeTaken, claim, conflictsWith, release, releaseStale, withdraw, type ClaimRecord, type Conflict, type Registry, type ReleaseRecord } from "./claims";
+import { activeClaims, type Abandoned, changeTaken, claim, conflictsWith, release, releaseStale, withdraw, type ClaimRecord, type Conflict, type Registry, type ReleaseRecord } from "./claims";
 import { appendRecord } from "./records";
 import { ancestorsOf, changeRef, changeRepoOf, decodeShard, encodeShard, isWide, recordsRepoOf, shardOf, shardRef, shardsPrefix } from "./shards";
 import type { Stamper } from "./stamp";
@@ -28,8 +28,9 @@ export interface ClaimInput {
 	agent: string;
 	paths: string[];
 	intent: string;
-	/** A claim in the way idle this long is released as stale. */
+	/** A claim in the way idle this long is released as stale, if `abandoned` (when given) says it is. */
 	staleAfterMs?: number;
+	abandoned?: Abandoned;
 	now?: number;
 }
 
@@ -51,7 +52,7 @@ export interface ClaimStore {
 	readScope(change: string, files: string[]): Promise<ClaimsView>;
 	claim(input: ClaimInput, stamper?: Stamper): Promise<ClaimOutcome>;
 	release(input: { change: string; agent: string; reason: string; mergedAs?: string }, stamper?: Stamper): Promise<ReleaseOutcome>;
-	releaseStale(input: { change: string; agent: string; staleAfterMs: number; now?: number }, stamper?: Stamper): Promise<ReleaseOutcome>;
+	releaseStale(input: { change: string; agent: string; staleAfterMs: number; abandoned?: Abandoned; now?: number }, stamper?: Stamper): Promise<ReleaseOutcome>;
 	/** What a merge of `files` cites as the claims it checked (the GitHive-Claims trailer), from the view it checked them in. */
 	cite(view: ClaimsView, files: string[], own?: ClaimRecord): string;
 }
@@ -293,8 +294,18 @@ class Claims implements ClaimStore {
 				new GitCasLog<{ shards: string[]; agent?: string }>(() => this.indexRemote(input.change), this.input.repo, changeRef(this.input.repo, input.change)),
 				input.agent,
 				() => ({ shards: [] }),
-				(state) => {
-					if (state.agent && state.agent !== input.agent) throw new Error(changeTaken(input.change, state.agent));
+				async (state) => {
+					// Another agent's name on the change: refused while that agent holds a claim under it. Once its
+					// claim is released (given up, or stale), the name is free again, as are its paths.
+					if (state.agent && state.agent !== input.agent) {
+						const held = await this.holding(input.change);
+						const stale = held && input.staleAfterMs !== undefined && (input.now ?? Date.now()) - Date.parse(held.own.active) > input.staleAfterMs && (!input.abandoned || (await input.abandoned(held.own)).abandoned);
+						// Still held, and not abandoned: it's that agent's. (An abandoned claim is released as stale by the shard claims below.)
+						if (held && !stale) throw new Error(changeTaken(input.change, state.agent));
+						// Abandoned: released in every shard it holds, not only those this claim reaches.
+						if (held) await this.releaseStale({ change: input.change, agent: input.agent, staleAfterMs: input.staleAfterMs!, ...(input.now !== undefined ? { now: input.now } : {}) }, stamper);
+						return { state: { shards: below, agent: input.agent }, text: `${input.agent} takes over ${input.change} (released by ${state.agent}), in ${below.join(", ")}` };
+					}
 					if (state.agent && below.every((s) => state.shards.includes(s))) return { refused: "known" };
 					return { state: { shards: [...new Set([...state.shards, ...below])].sort(), agent: state.agent ?? input.agent }, text: `${input.change} claims in ${below.join(", ")}` };
 				},
@@ -353,7 +364,7 @@ class Claims implements ClaimStore {
 			const paths = [...placed].flatMap(([shard, p]) => (shard === entry.shard ? [] : p));
 			for (const conflict of conflictsWith(entry.state, paths, input.change)) {
 				const holder = entry.state.claims.find((c) => c.change === conflict.change)!;
-				const stale = input.staleAfterMs !== undefined && (input.now ?? Date.now()) - Date.parse(holder.active) > input.staleAfterMs;
+				const stale = input.staleAfterMs !== undefined && (input.now ?? Date.now()) - Date.parse(holder.active) > input.staleAfterMs && (!input.abandoned || (await input.abandoned(holder)).abandoned);
 				if (stale) {
 					const freed = await releaseStale(this.logOf(entry.shard), { change: conflict.change, agent: input.agent, staleAfterMs: input.staleAfterMs!, now: input.now }, stamper);
 					if (freed.ok || /holds no claim/.test(freed.refused)) continue;
@@ -377,13 +388,16 @@ class Claims implements ClaimStore {
 		return this.eachShard(held.shards, (shard) => release(this.logOf(shard), input, stamper));
 	}
 
-	async releaseStale(input: { change: string; agent: string; staleAfterMs: number; now?: number }, stamper?: Stamper): Promise<ReleaseOutcome> {
+	async releaseStale(input: { change: string; agent: string; staleAfterMs: number; abandoned?: Abandoned; now?: number }, stamper?: Stamper): Promise<ReleaseOutcome> {
 		const held = await this.holding(input.change);
 		if (!held) return { ok: false, refused: `${input.change} holds no claim` };
-		// Stale as a whole: by its latest activity in any record.
+		// Stale as a whole: by its latest activity in any record, and abandoned as a whole (once, not per shard).
 		const idle = (input.now ?? Date.now()) - Date.parse(held.own.active);
 		if (idle <= input.staleAfterMs) return { ok: false, refused: `${input.change}'s claim was active ${Math.round(idle / 1000)}s ago; it isn't stale` };
-		return this.eachShard(held.shards, (shard) => releaseStale(this.logOf(shard), input, stamper));
+		const turn = input.abandoned ? await input.abandoned(held.own) : undefined;
+		if (turn && !turn.abandoned) return { ok: false, refused: `${input.change} isn't abandoned: it ${turn.why}` };
+		const { abandoned: _abandoned, ...rest } = input;
+		return this.eachShard(held.shards, (shard) => releaseStale(this.logOf(shard), rest, stamper));
 	}
 
 	/**

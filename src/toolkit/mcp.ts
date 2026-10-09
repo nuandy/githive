@@ -17,6 +17,9 @@ import type { Stamper } from "./stamp";
 import { SENSITIVE_PATHS, approval, countedVotes, DEFAULT_GRANT, effectivePolicy, grantWarnings, openFlag, shardVotes, votesShardingReason, type ReviewPolicy, type VoteRecord, type Votes } from "./votes";
 import { VOTE_BUCKETS, type VoteStore, voteStore, votesPrefix } from "./vote-store";
 import { addWork, holdKey, type NextStep, nextFor, ROLE_WAIT_MS, type Work, waitingRoleReviews, workId } from "./work";
+import { type Line, lineRef } from "./line";
+import { abandoned, BUILDING_IDLE_MS, type ChangeSigns } from "./staleness";
+import type { Abandoned } from "./claims";
 
 // GitHive's MCP tools (see docs/design.md). Stateless: each
 // tool reads or writes the repo's records in Git and reports what Git said.
@@ -74,6 +77,8 @@ export interface ToolContext {
 	 * which read their own records in Git. Unset: read every time.
 	 */
 	keptClaims?: (repo: string, read: () => Promise<ClaimsAdvice>) => Promise<ClaimsAdvice>;
+	/** The open changes' pushed heads, by change, kept a few seconds the same way (for next). */
+	keptHeads?: (repo: string, read: () => Promise<Record<string, string | null>>) => Promise<Record<string, string | null>>;
 	/** Review holds, so next doesn't send two agents to a review that needs one (see review-holds.ts). */
 	reviews?: {
 		held(repo: string): Promise<Record<string, string[]>>;
@@ -100,7 +105,8 @@ const HOSTED_PREFIX = "githive-";
 const DEFAULT_SHARD_DEPTH = 2;
 /** Records repos per sharded repo, where they're available: Artifacts takes one push at a time per repo. */
 const DEFAULT_RECORDS_REPOS = 16;
-const STALE_AFTER_MS = 30 * 60_000;
+/** The floor: no claim is stale sooner than this after its agent last claimed (see staleness.ts for the rest of the rule). */
+const STALE_AFTER_MS = BUILDING_IDLE_MS;
 const claimsRef = (repo: string) => `refs/notes/githive-claims/${repo}`;
 const votesRef = (repo: string) => `refs/notes/githive-votes/${repo}`;
 const workRef = (repo: string) => `refs/notes/githive-work/${repo}`;
@@ -114,7 +120,7 @@ Conventions:
 3. Reviewers get the change's code with \`review_access\` (read-only: its branch in the author's fork, and the project to diff against), then \`vote\` on the exact commit they reviewed. A change merges with the policy's approvals, including every veto role's, and no veto; a veto role counts only from whoever \`start\` granted it (by default people and GitHive's reviewers), so \`register\` with your key to vote as one. Approvals count once per verified identity (register reviewers so each is its own), and never the change's author. \`status\` shows your change's votes, with the evidence for any rejection to fix, and what's still needed.
 4. Run \`check\` after you push: it test-merges your change with the project's branch and lists files outside your claim, so you hear about problems before merging.
 5. \`merge\` merges your branch with trailers recording the claims and votes it checked, then releases your claim. Merge by hand only with the same trailers.
-6. Claiming again (same paths) keeps your claim active. A claim idle for 30 minutes is released by whoever claims its paths, or by anyone (\`release\` with stale: true).
+6. Claiming again (same paths) keeps your claim active. A claim is freed only when its change waits on its own agent and gets no answer: 30 minutes with nothing pushed, or 2 hours after changes were asked for, its checks failed in the merge line, or it was approved and not merged. Then whoever claims its paths (or its change) releases it, as can anyone (\`release\` with stale: true). A change waiting for review, in the merge line, or on a person is never freed.
 7. Anyone may \`revert\` a commit \`audit\` reports; the audit then counts it resolved.
 8. Something agents can't settle (reviewers disagree, a trade-off needs an owner)? \`ask_human\` with the reason: a person sees it in their inbox and decides with their own vote.
 9. \`request_review\` asks GitHive's hosted reviewers for votes on your change; \`build\` has GitHive's hosted builder make a change from start to merge.
@@ -127,8 +133,8 @@ const TOOL_LIST = [
 	{ name: "settings", description: "Change a started repo's review policy or its checks; whatever you leave out stays as it is. The same fields as start: required approvals, vetoes, escalate (stricter rules for chosen paths), grants (who may vote as each role), verify (the checks run before each merge; [] for none). Each merge is held to the settings in force when it merged: the audit replays them from the records. Returns the settings now.", inputSchema: { type: "object", properties: { repo: str, required: { type: "number" }, vetoes: { type: "array", items: str }, escalate: { type: "array", items: { type: "object", properties: { paths: { type: "array", items: str }, required: { type: "number" }, vetoes: { type: "array", items: str } }, required: ["paths"] } }, grants: { type: "object", additionalProperties: { type: "array", items: str } }, verify: { type: "array", items: str } }, required: ["repo"] } },
 	{ name: "credentials", description: "Git access. With your change: a write token for its own fork, where its branch changes/<change> lives. Without: read access to the project repo.", inputSchema: { type: "object", properties: { repo: str, change: str }, required: ["repo"] } },
 	{ name: "claims", description: "The claims in force: who holds which paths, and why.", inputSchema: { type: "object", properties: { repo: str }, required: ["repo"] } },
-	{ name: "claim", description: "Claim paths for your change (again to extend it, or to keep it active). Refused, naming the holder, if another claim overlaps; a claim in the way idle for 30 minutes is released as stale instead.", inputSchema: { type: "object", properties: { repo: str, change: str, agent: str, paths: { type: "array", items: str }, intent: str }, required: ["repo", "change", "agent", "paths", "intent"] } },
-	{ name: "release", description: "Release a claim: yours, or another's idle for 30 minutes with stale: true.", inputSchema: { type: "object", properties: { repo: str, change: str, agent: str, reason: str, stale: { type: "boolean" } }, required: ["repo", "change", "agent"] } },
+	{ name: "claim", description: "Claim paths for your change (again to extend it, or to keep it active). Refused, naming the holder, if another claim overlaps; a claim in the way that its agent has abandoned (see release) is released as stale instead.", inputSchema: { type: "object", properties: { repo: str, change: str, agent: str, paths: { type: "array", items: str }, intent: str }, required: ["repo", "change", "agent", "paths", "intent"] } },
+	{ name: "release", description: "Release a claim: yours, or with stale: true another agent's it has abandoned: its change waits on that agent, unanswered for 30 minutes with nothing pushed, or 2 hours after changes were asked for, a failed check in the merge line, or approval without a merge. Never one waiting for review, in the merge line, or on a person.", inputSchema: { type: "object", properties: { repo: str, change: str, agent: str, reason: str, stale: { type: "boolean" } }, required: ["repo", "change", "agent"] } },
 	{ name: "next", description: "What you should do next, for any agent without a set role: merge your change if it's approved, revise it if a reviewer asked for changes, finish it if nothing is pushed; else review a change that's waiting (never your own, and a role that can block only if you hold it); else build a piece of the backlog nobody has taken; else wait. Says how to do it.", inputSchema: { type: "object", properties: { repo: str, agent: str }, required: ["repo", "agent"] } },
 	{ name: "add_work", description: "Add a piece of work to the repo's backlog, for next to hand to an agent: a title, what it should do (intent), and the paths it's likely to touch. Its id (from the title unless given) is the change name to claim it under.", inputSchema: { type: "object", properties: { repo: str, title: str, intent: str, paths: { type: "array", items: str }, id: str, agent: str }, required: ["repo", "title", "intent", "agent"] } },
 	{ name: "review_access", description: "Read access to a change you'll review: a read-only token for the author's fork, the change's branch (changes/<change>) and its pushed head, and read access to the project to diff against. Anyone may review; each grant is logged.", inputSchema: { type: "object", properties: { repo: str, change: str }, required: ["repo", "change"] } },
@@ -375,6 +381,55 @@ async function changeStatus(ctx: ToolContext, repo: string, registry: Registry |
 	const outcome = head ? approval({ votes: await countedVotes(cast, registry?.stampKey) }, head, policy, author, paths) : { approved: false, approvals: 0, vetoedBy: [], awaiting: vetoes };
 	const hosted = ctx.agentStatus ? await ctx.agentStatus(repo, change, head, hostedRoles(vetoes)).catch(() => undefined) : undefined;
 	return { head, votes: cast, approval: { ...outcome, required }, ...(hosted ? { hosted } : {}) };
+}
+
+/** How a line's leaving hands a change back to its agent (see staleness.ts): it didn't land and its agent has to act. */
+const LEFT_TO_AGENT = new Set(["failed", "gave up", "went quiet"]);
+
+/**
+ * What's known of a change for whose turn it is: its head, the votes on it
+ * that count (`counted`, stamps already checked), a question waiting
+ * (`record`: the votes record, for its flags), and the line.
+ */
+export function changeSigns(input: { claim: ClaimRecord; head: string | null; counted: VoteRecord[]; record: Pick<Votes, "votes" | "flags">; line?: Line | null; policy: ReviewPolicy }): ChangeSigns {
+	const { claim, head } = input;
+	const counted = head ? input.counted.filter((v) => v.commit === head && v.reviewer !== claim.agent) : [];
+	const outcome = head ? approval({ votes: counted }, head, input.policy, { agent: claim.agent, ...(claim.by ? { by: claim.by } : {}) }, claim.paths) : undefined;
+	const left = head ? input.line?.left.filter((l) => l.change === claim.change && l.head === head && LEFT_TO_AGENT.has(l.how)).at(-1) : undefined;
+	return {
+		active: claim.active,
+		head,
+		votes: counted.map((v) => ({ verdict: v.verdict, at: v.at })),
+		approved: !!outcome?.approved,
+		vetoed: !!outcome?.vetoedBy.length,
+		inLine: !!input.line?.entries.some((e) => e.change === claim.change),
+		asked: !!openFlag(input.record, claim.change, head),
+		...(left ? { leftLineAt: left.at } : {}),
+	};
+}
+
+/**
+ * Whether a claim is abandoned on its agent's own turn, as the toolkit decides
+ * it when a claim is in the way or asked to be released as stale: its head as
+ * its fork has it now, the votes on it, and the line, read fresh (a release
+ * can't be undone).
+ */
+function abandonedRule(ctx: ToolContext, repo: string, registered: Registry | null | undefined, votes: VoteStore): Abandoned {
+	let line: Promise<Line | null> | undefined;
+	return async (claim) => {
+		line ??= (async () => {
+			const log = recordLog<Line>(ctx, repo, lineRef(repo));
+			return ((await (log.readFresh?.() ?? log.read()))?.commit.state ?? null) as Line | null;
+		})().catch(() => null);
+		const head = await changeSourceFor(ctx, repo)(claim.agent, "read", claim.change)
+			.then((fork) => branchHead(fork, `changes/${claim.change}`))
+			.catch(() => null);
+		const view = await votes.readFor(head ? [head] : []);
+		const counted = head ? await countedVotes(view.votes.filter((v) => v.commit === head), registered?.stampKey) : [];
+		const signs = changeSigns({ claim, head, counted, record: view, line: await line, policy: registered?.policy ?? DEFAULT_POLICY });
+		const outcome = abandoned(signs, Date.now());
+		return { abandoned: outcome.abandoned, why: outcome.waiting.why };
+	};
 }
 
 /** Replay a repo's records from Git: how many commits on the project's branch since GitHive started on it, and what broke which convention. */
@@ -633,9 +688,19 @@ async function runTool(name: string, args: Args, ctx: ToolContext): Promise<unkn
 		}
 		case "next": {
 			const agent = actAs("agent");
-			const [inForce, cast, backlog] = await Promise.all([adviceView(), votes.read(), recordLog<Work>(ctx, repo, workRef(repo)).read()]);
-			// Each open change's pushed head, from its author's fork.
-			const open = await Promise.all(inForce.claims.map(async (claim) => ({ claim, head: await changeSource(claim.agent, "read", claim.change).then((fork) => branchHead(fork, `changes/${claim.change}`)).catch(() => null) })));
+			const [inForce, cast, backlog, line] = await Promise.all([
+				adviceView(),
+				votes.read(),
+				recordLog<Work>(ctx, repo, workRef(repo)).read(),
+				// For whose turn each change is (kept a moment: next only advises, and the claim decides).
+				recordLog<Line>(ctx, repo, lineRef(repo)).read().then((l) => l?.commit.state ?? null).catch(() => null),
+			]);
+			// Each open change's pushed head, from its author's fork: the caller's own now, the others' as kept a few
+			// seconds (one request per open change, which a crowd asking next would otherwise make on every call).
+			const headOf = (claim: ClaimRecord) => changeSource(claim.agent, "read", claim.change).then((fork) => branchHead(fork, `changes/${claim.change}`)).catch(() => null);
+			const others = inForce.claims.filter((c) => c.agent !== agent);
+			const kept = ctx.keptHeads && others.length ? await ctx.keptHeads(repo, async () => Object.fromEntries(await Promise.all(inForce.claims.map(async (c) => [c.change, await headOf(c)])))).catch(() => undefined) : undefined;
+			const open = await Promise.all(inForce.claims.map(async (claim) => ({ claim, head: claim.agent === agent || !kept ? await headOf(claim) : (kept[claim.change] ?? null) })));
 			const counted = await countedVotes(cast.votes, registered?.stampKey);
 			const teams = (await ctx.teamsOf?.(repo)) ?? [];
 			const decide = (held?: Record<string, string[]>) => nextFor({
@@ -650,6 +715,8 @@ async function runTool(name: string, args: Args, ctx: ToolContext): Promise<unkn
 				asked: new Set(open.filter((o) => o.claim.agent === agent && openFlag(cast, o.claim.change, o.head) && !openFlag(cast, o.claim.change, o.head)?.role).map((o) => o.claim.change)),
 				work: backlog?.commit.state.items ?? [],
 				...(held ? { held } : {}),
+				crowd: Math.max(Object.keys(registered?.agents ?? {}).length, new Set(inForce.claims.map((c) => c.agent)).size),
+				abandoned: new Set(open.filter((o) => abandoned(changeSigns({ claim: o.claim, head: o.head, counted, record: cast, line, policy: registered?.policy ?? DEFAULT_POLICY }), Date.now()).abandoned).map((o) => o.claim.change)),
 			});
 			// A review is held for this agent before it's handed out, so two agents aren't sent to one that needs one review.
 			if (!ctx.reviews) return decide();
@@ -657,7 +724,8 @@ async function runTool(name: string, args: Args, ctx: ToolContext): Promise<unkn
 			await tellPeopleOfWaitingRoles(ctx, repo, votes, registered?.policy ?? DEFAULT_POLICY, open, counted).catch((err) => console.error(`checking ${repo}'s waiting reviews failed`, String(err)));
 			for (let attempt = 0; attempt < 3; attempt++) {
 				const next = decide(await ctx.reviews.held(repo).catch(() => ({})));
-				if (next.kind !== "review" || (await ctx.reviews.hold(repo, holdKey(next.head, next.role), agent, next.needed).catch(() => true))) return next;
+				// A hold that couldn't be written isn't taken: handing the review out anyway sent a crowd to one review.
+				if (next.kind !== "review" || (await ctx.reviews.hold(repo, holdKey(next.head, next.role), agent, next.needed).catch(() => false))) return next;
 			}
 			// Others kept taking the reviews first: they're covered.
 			return { kind: "wait", reason: "other agents just took the reviews that were waiting", retryAfterSeconds: 15, next: "Call next again in a little while." } satisfies NextStep;
@@ -707,7 +775,7 @@ async function runTool(name: string, args: Args, ctx: ToolContext): Promise<unkn
 		case "claims":
 			return (await adviceView()).claims;
 		case "claim": {
-			const input = { change: requiredString(args, "change"), agent: actAs("agent"), paths: normalizeClaim(requiredPaths(args, "paths")), intent: requiredString(args, "intent"), staleAfterMs: STALE_AFTER_MS };
+			const input = { change: requiredString(args, "change"), agent: actAs("agent"), paths: normalizeClaim(requiredPaths(args, "paths")), intent: requiredString(args, "intent"), staleAfterMs: STALE_AFTER_MS, abandoned: abandonedRule(ctx, repo, registered, votes) };
 			// Busy enough that one record would hold agents up: shard first, then claim in the shards.
 			const sharded = await shardIfBusy(ctx, repo, claims, registered, input.agent);
 			return (sharded ? storeFor(ctx, repo, sharded) : store).claim(input, stamper);
@@ -715,7 +783,7 @@ async function runTool(name: string, args: Args, ctx: ToolContext): Promise<unkn
 		case "release": {
 			const change = requiredString(args, "change");
 			const agent = actAs("agent");
-			if (args.stale === true) return store.releaseStale({ change, agent, staleAfterMs: STALE_AFTER_MS }, stamper);
+			if (args.stale === true) return store.releaseStale({ change, agent, staleAfterMs: STALE_AFTER_MS, abandoned: abandonedRule(ctx, repo, registered, votes) }, stamper);
 			return store.release({ change, agent, reason: typeof args.reason === "string" ? args.reason : "released" }, stamper);
 		}
 		case "ask_human": {
@@ -763,7 +831,7 @@ async function runTool(name: string, args: Args, ctx: ToolContext): Promise<unkn
 			if (ctx.mayUseHosted && !(await ctx.mayUseHosted())) throw new Error("[403] GitHive's hosted agents are by invitation: ask an admin to add you");
 			const intent = requiredString(args, "intent");
 			const change = changeId(intent);
-			const claimed = await store.claim({ change, agent: "githive-builder", paths: normalizeClaim(requiredPaths(args, "paths")), intent, staleAfterMs: STALE_AFTER_MS }, stamper);
+			const claimed = await store.claim({ change, agent: "githive-builder", paths: normalizeClaim(requiredPaths(args, "paths")), intent, staleAfterMs: STALE_AFTER_MS, abandoned: abandonedRule(ctx, repo, registered, votes) }, stamper);
 			if (!claimed.ok) return claimed;
 			return ctx.startBuilder({ repo, change });
 		}

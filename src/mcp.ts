@@ -58,7 +58,10 @@ export async function handleRpc(msg: RpcRequest, ctx: McpContext): Promise<objec
 				return reply(msg.id, { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] });
 			} catch (err) {
 				// Tool failures go back to the agent as results it can act on, not protocol errors.
-				return reply(msg.id, { content: [{ type: "text", text: statusOf(err).message }], isError: true });
+				const failed = statusOf(err);
+				// GitHive's own failures are logged with where they came from: the agent's answer says only what failed.
+				if (failed.status >= 500) console.error(`${name} failed: ${err instanceof Error ? err.stack : failed.message}`);
+				return reply(msg.id, { content: [{ type: "text", text: failed.message }], isError: true });
 			}
 		}
 		default:

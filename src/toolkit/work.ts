@@ -73,6 +73,10 @@ export interface NextInput {
 	/** Reviews other agents are on now, by commit and role (review holds, see holdKey): a review already held as often as it's needed is left to them. */
 	held?: Record<string, string[]>;
 	work: WorkItem[];
+	/** How many agents may be asking at once (those registered, or holding claims): they're spread over about as many choices. */
+	crowd?: number;
+	/** Changes whose agents abandoned them (see staleness.ts): their claims stand in nobody's way, and their work is free to take. */
+	abandoned?: Set<string>;
 }
 
 /**
@@ -106,11 +110,16 @@ function spread(agent: string, n: number) {
 	return (h >>> 0) % n;
 }
 
-/** How many equally good choices agents are spread over. */
+/**
+ * How many equally good choices agents are spread over, at least: as many as
+ * there are agents, past that, so a crowd asking at once isn't sent to the
+ * same few (in a run of 200, one review drew 71 reviewers).
+ */
 const SPREAD = 3;
 
 export function nextFor(input: NextInput): NextStep {
 	const { agent, policy, votes } = input;
+	const width = Math.max(SPREAD, input.crowd ?? 0);
 	const authorOf = (c: ClaimRecord): Author => ({ agent: c.agent, ...(c.by ? { by: c.by } : {}) });
 	const on = (head: string) => votes.filter((v) => v.commit === head);
 	const rejectionOf = (head: string, author: Author) => on(head).find((v) => v.verdict === "reject" && v.reviewer !== author.agent);
@@ -155,7 +164,7 @@ export function nextFor(input: NextInput): NextStep {
 		})
 		.sort((a, b) => Number(b.mine) - Number(a.mine) || Number(b.blocking) - Number(a.blocking) || a.approvals - b.approvals || a.claim.since.localeCompare(b.claim.since));
 	if (reviews.length) {
-		const best = reviews[0].mine ? [reviews[0]] : reviews.filter((r) => r.blocking === reviews[0].blocking && r.approvals === reviews[0].approvals).slice(0, SPREAD);
+		const best = reviews[0].mine ? [reviews[0]] : reviews.filter((r) => r.blocking === reviews[0].blocking && r.approvals === reviews[0].approvals).slice(0, width);
 		const pick = best[spread(agent, best.length)];
 		return {
 			kind: "review",
@@ -171,16 +180,19 @@ export function nextFor(input: NextInput): NextStep {
 	}
 
 	// A piece of the backlog nobody has taken, and that a claim in force doesn't stand in the way of (it would be refused).
-	const taken = new Set(input.open.map((o) => o.claim.change));
-	const blocked = (w: WorkItem) => !!w.paths?.some((p) => input.open.some((o) => o.claim.paths.some((held) => entriesOverlap(p, held))));
+	// An abandoned claim holds nothing back: claiming its paths (or its change) releases it as stale.
+	const live = input.open.filter((o) => !input.abandoned?.has(o.claim.change));
+	const taken = new Set(live.map((o) => o.claim.change));
+	const blocked = (w: WorkItem) => !!w.paths?.some((p) => live.some((o) => o.claim.paths.some((held) => entriesOverlap(p, held))));
 	const open = input.work.filter((w) => !taken.has(w.id) && !input.merged.has(w.id) && !blocked(w));
 	if (open.length) {
-		const choices = open.slice(0, SPREAD);
+		const choices = open.slice(0, width);
 		const work = choices[spread(agent, choices.length)];
+		const takenOver = input.open.find((o) => o.claim.change === work.id && input.abandoned?.has(work.id));
 		return {
 			kind: "build",
 			work,
-			next: `Build ${work.id}: claim with change "${work.id}"${work.paths?.length ? ` and the paths it needs (likely ${work.paths.join(", ")})` : " and the paths it needs"}; if the claim is refused as someone else's change, call next again. Then credentials, branch changes/${work.id} from the project's branch, make the change, push it to your fork and check.`,
+			next: `Build ${work.id}: claim with change "${work.id}"${work.paths?.length ? ` and the paths it needs (likely ${work.paths.join(", ")})` : " and the paths it needs"}; if the claim is refused as someone else's change, call next again.${takenOver ? ` ${takenOver.claim.agent} started it and abandoned it: your claim releases theirs. Start from the project's branch; their branch may hold a partial start.` : ""} Then credentials, branch changes/${work.id} from the project's branch, make the change, push it to your fork and check.`,
 		};
 	}
 

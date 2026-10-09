@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { GitCasLog, type LogCommit } from "../src/record-log";
+import { GitCasLog, type LogCommit, type TipCache } from "../src/record-log";
 import { startGitServer, type GitServer } from "./helpers/git-server";
 
 // A record log in Git, against a real Git server (git http-backend): reads,
@@ -168,15 +168,41 @@ describe("record states shared by readers, by tip", () => {
 	});
 });
 
+describe("a push whose answer was lost", () => {
+	it("counts as landed when another writer moved the ref on before it could tell", async () => {
+		const remote = async () => ({ url: server.url, token: "unused" });
+		const first = await log.append(null, commit());
+		const other = new GitCasLog<State>(remote, "t1", "refs/notes/githive/t1");
+		const real = globalThis.fetch;
+		let lost = false;
+		// The push applies; before its answer arrives, another writer lands on top; then the answer is a 500.
+		const spy = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+			const response = await real(input, init);
+			if (lost || !String(input).endsWith("/git-receive-pack")) return response;
+			lost = true;
+			await response.arrayBuffer();
+			const tip = (await other.read())!.tip;
+			expect(await other.append(tip, commit({ batch: "other", state: { claims: { "src/y/": "agent-b" } } }))).toBeTruthy();
+			return new Response("", { status: 500 });
+		});
+		try {
+			expect(await log.append(first, commit({ batch: "mine", state: { claims: { "src/x/": "agent-a" } } }))).toBeTruthy();
+		} finally {
+			spy.mockRestore();
+		}
+		expect((await log.read())?.commit.batch).toBe("other");
+	});
+});
+
 describe("record tips kept for readers", () => {
 	const listings = () => server.requests.filter((r) => r.startsWith("GET refs")).length;
-	const kept = async () => {
+	const kept = async (wrap: (tips: TipCache) => TipCache = (tips) => tips) => {
 		const { LiveFeed } = await import("../src/live-feed");
 		const { FakeStorage } = await import("./fakes/env");
 		const live = new LiveFeed({ storage: new FakeStorage(), getWebSockets: () => [] } as never, {} as never);
 		const states = { get: (r: string, tip: string) => live.recordAt(r, tip), put: (r: string, tip: string, json: string) => live.keepRecord(r, tip, json) };
-		const tips = { get: (r: string, key: string) => live.tipOf(r, key, 10_000), keep: (r: string, tip: string | null, gen: number) => live.keepTip(r, tip, gen), moved: (r: string) => live.movedTip(r) };
-		return () => new GitCasLog<State>(async () => ({ url: server.url, token: "unused" }), "t1", "refs/notes/githive/t1", { states, tips });
+		const tips = { get: (r: string, key: string) => live.tipOf(r, key, 10_000), keep: (r: string, tip: string | null, gen: number) => live.keepTip(r, tip, gen), landed: (r: string, parent: string | null, tip: string) => live.landedTip(r, parent, tip), stale: (r: string, parent: string | null) => live.staleTip(r, parent) };
+		return () => new GitCasLog<State>(async () => ({ url: server.url, token: "unused" }), "t1", "refs/notes/githive/t1", { states, tips: wrap(tips) });
 	};
 	const settle = () => new Promise((resolve) => setTimeout(resolve, 10));
 
@@ -198,6 +224,31 @@ describe("record tips kept for readers", () => {
 		await settle();
 		const second = await writer.append(first, commit({ state: { claims: { "src/y/": "agent-b" } } }));
 		expect((await reader().read())?.tip).toBe(second);
+	});
+
+	it("keeps a write's tip and state, so the next reader needs no Git request", async () => {
+		const reader = await kept();
+		const writer = reader();
+		const first = await writer.append(null, commit({ state: { claims: { "src/x/": "agent-a" } } }));
+		await reader().read();
+		await settle();
+		const second = await writer.append(first, commit({ state: { claims: { "src/y/": "agent-b" } } }));
+		const before = server.requests.length;
+		expect(await reader().read()).toEqual({ tip: second, commit: { ...commit({ state: { claims: { "src/y/": "agent-b" } } }), format: 1 } });
+		expect(server.requests.length).toBe(before);
+	});
+
+	it("lets writers racing on one record all land, a few times each, even when keeping a write's tip fails", { timeout: 60_000 }, async () => {
+		const { appendRecord } = await import("../src/toolkit/records");
+		// Half the writes' tips are never kept (the call to keep it failed): the tip kept is then out of date.
+		const reader = await kept((tips) => ({ ...tips, landed: async (r, parent, tip) => (Math.random() < 0.5 ? Promise.reject(new Error("lost")) : tips.landed(r, parent, tip)) }));
+		// Each writer its own log, as each Worker instance has its own.
+		const writers = Array.from({ length: 6 }, (_, i) => ({ name: `w${i}`, log: reader() }));
+		await Promise.all(writers.map(async ({ name, log }) => {
+			for (let n = 0; n < 2; n++)
+				await appendRecord<State, never>(log, name, () => ({ claims: {} }), (state) => ({ state: { claims: { ...state.claims, [`${name}-${n}`]: name } }, text: `${name} ${n}` }));
+		}));
+		expect(Object.keys((await reader().readFresh())!.commit.state.claims)).toHaveLength(12);
 	});
 
 	it("reads fresh from Git when asked", async () => {

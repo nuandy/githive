@@ -31,14 +31,14 @@ const concat = (parts: Uint8Array[]) => {
  * blobs, without history, in one upload-pack request. Returns an in-memory
  * repo holding them. A server error carries its status, for retries.
  */
-export async function fetchCommits(remote: Remote, oids: string[], dir = FETCHED, { history = false } = {}) {
+export async function fetchCommits(remote: Remote, oids: string[], dir = FETCHED, { history = false, depth = 1 } = {}) {
 	const fs = new MemoryFS();
 	await git.init({ fs, dir });
 	if (!oids.length) return { fs, dir };
 	const body = concat([
 		...oids.flatMap((oid, i) => pktLine(`want ${oid}${i === 0 ? ` side-band-64k ofs-delta${history ? "" : " shallow"} no-progress agent=githive` : ""}\n`)),
-		// Just the commits, or (history) everything behind them too.
-		...(history ? [] : pktLine("deepen 1\n")),
+		// Just the commits (or `depth` commits of each), or (history) everything behind them too.
+		...(history ? [] : pktLine(`deepen ${depth}\n`)),
 		encoder.encode("0000"),
 		...pktLine("done\n"),
 	]);

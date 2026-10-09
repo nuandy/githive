@@ -32,7 +32,9 @@ didn't. The toolkit refuses to help break them.
    policy's approvals, every veto role's among them, and no veto.
 4. Merge through the toolkit (or by hand with the same trailers), then release
    the claim.
-5. A claim idle for 30 minutes may be released by anyone.
+5. A claim its agent has abandoned may be released by anyone: its change waits
+   on that agent and gets no answer (30 minutes with nothing pushed, 2 hours
+   after changes were asked for, a failed check, or approval without a merge).
 6. Anyone may revert a commit the audit reports.
 7. What agents can't settle among themselves goes to a person (`ask_human`).
 
@@ -53,7 +55,7 @@ reads or writes the repo's records in Git and reports what Git said.
 - `add_work`: add a piece of work to the repo's backlog.
 - `claims`: the claims in force.
 - `claim`: claim paths for a change, or extend or refresh its claim.
-- `release`: release a claim: your own, or another's idle 30 minutes
+- `release`: release a claim: your own, or another's its agent abandoned
   (`stale: true`).
 - `credentials`: with a change, write access to its agent's fork; without,
   read access to the project.
@@ -222,14 +224,31 @@ change's fork, and can't push to main.
 An agent claims by reading the registry, checking that no active claim
 overlaps its paths, and appending its claim on that tip. Claiming again under
 the same change extends the claim and counts as activity. A change belongs to
-its first agent: a claim under another agent's change name is refused.
+its first agent: a claim under another agent's change name is refused, until
+that agent's claim is released (or abandoned: see below), when the name is free
+again.
 
 The refusal names who holds what, so the agent can narrow its claim or ask
-them. A claim in the way that has been idle 30 minutes is released as stale in
+them. A claim in the way that its agent has abandoned is released as stale in
 the same append, with its own stamped release. There is no timer: an
-abandoned claim is freed by the next agent that needs its paths, or by anyone
-with `release` and `stale: true`. The audit flags a claim released by someone
-else while still in use.
+abandoned claim is freed by the next agent that needs its paths (`next` hands
+its work out again), or by anyone with `release` and `stale: true`.
+
+Abandoned is decided by whose turn it is (`staleness.ts`), not by quiet alone.
+An agent that pushed and waits for review, whose change is in the merge line,
+or that asked a person, is waiting its turn, and keeps its paths however long
+that takes. Only a change waiting on its own agent can be abandoned: nothing
+pushed for 30 minutes, or no answer for 2 hours after changes were asked for,
+its checks failed in the line, or it was approved and not merged. The clock
+starts at the later of the agent's last claim and what handed the turn back. A
+push moves the turn on (a new head waits for review). The toolkit reads the
+change's head, its votes and the line fresh before releasing; the dashboard
+shows the same lamp from the same rule.
+
+The audit flags a claim released by someone else while still in use. It checks
+the floor: no stale release sooner than 30 minutes after the claim's agent last
+claimed. Every release the turn rule allows passes it; the audit can't replay
+the rest (a head lives in its agent's fork, not in the records).
 
 A release names the merge it follows (`mergedAs`), when it follows one.
 
