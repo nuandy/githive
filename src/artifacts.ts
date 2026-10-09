@@ -97,7 +97,16 @@ const FORK_ATTEMPTS = 5;
  * in all. Under a burst of forks, some accepted forks never appear.
  */
 const FORK_LOST_MS = 8_000;
-const FORK_READY_MS = 60_000;
+const FORK_READY_MS = 90_000;
+/**
+ * How long a fork may stay "in progress" before it's taken to be stuck. A fork
+ * of a seed takes about 13 s, of a project 20-30 s; under a burst, Artifacts
+ * has left one in progress for good (45 minutes, until it was deleted).
+ */
+const FORK_STUCK_MS = 45_000;
+
+/** A fork that didn't become ready in time: asking again later may find it made. */
+export const isForkNotReady = (err: unknown) => codeOf(err) === "FORK_NOT_READY";
 
 /**
  * Fork `source` and wait until the fork is ready, since get() throws while a
@@ -127,6 +136,9 @@ export async function forkAndWait(artifacts: Artifacts, source: string, name: st
 
 	let forked = await requestFork(shared);
 	const started = Date.now();
+	// Since when the fork has read as still forking, and whether it was deleted for staying so (once).
+	let forkingSince: number | undefined;
+	let unstuck = false;
 	// Jittered, so forks lost together aren't all asked for again together.
 	const lostAfter = () => FORK_LOST_MS * (0.75 + Math.random() / 2);
 	let askAgainAt = started + lostAfter();
@@ -139,12 +151,21 @@ export async function forkAndWait(artifacts: Artifacts, source: string, name: st
 			return { name, remote: remote.url, token: remote.token };
 		} catch (err) {
 			if (!isTransientFailure(err) && !isForkPending(err) && !notFoundYet(err)) throw err;
+			if (isForkPending(err)) forkingSince ??= Date.now();
+			if (isForkPending(err) && !unstuck && Date.now() - (forkingSince ?? Date.now()) > FORK_STUCK_MS) {
+				// Stuck forking. Deleting it has been seen to let it finish at once; else it's gone, and asked for again now.
+				unstuck = true;
+				console.log(`fork ${name} still forking after ${Math.round((Date.now() - forkingSince!) / 1000)}s: deleting it, so it finishes or is made again`);
+				await artifacts.delete(name).catch((deleting) => console.error(`deleting the stuck fork ${name} failed`, String(deleting)));
+				askAgainAt = Date.now();
+				continue;
+			}
 			if (notFoundYet(err) && Date.now() > askAgainAt && Date.now() - started < FORK_READY_MS) {
 				forked = (await requestFork(true)) ?? forked;
 				askAgainAt = Date.now() + lostAfter();
 				continue;
 			}
-			if (Date.now() - started > FORK_READY_MS) throw new Error(`fork ${name} not ready after ${FORK_READY_MS / 1000}s: ${err}`);
+			if (Date.now() - started > FORK_READY_MS) throw Object.assign(new Error(`fork ${name} not ready after ${FORK_READY_MS / 1000}s: ${err}`), { code: "FORK_NOT_READY" });
 			await scheduler.wait(delay);
 		}
 	}

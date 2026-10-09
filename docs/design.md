@@ -1093,6 +1093,12 @@ one RepoIndex; the records in Git are what count.
   most once per 30 s per project, but building it reads every records repo.
 - **Fork bursts stall.** Many forks of one repo asked for at once leave some
   of Artifacts' fork jobs stalled for good, so forks are made ahead and paced.
+  A fork can still stick "in progress" (one stayed so for 45 minutes, and its
+  agent's every `credentials` call hung). One still forking after 45 s is
+  deleted, which has been seen to let it finish at once; if that removes it,
+  it's asked for again. `credentials` waits at most about 90 s for a fork,
+  then says to call again, rather than trying every seed in turn on the same
+  stuck fork.
 - **Some shallow fetches fail.** Artifacts refuses some shallow fetches of a
   fork's branch where a whole fetch works. `scripts/mcp-agent.mjs` falls back
   to a whole fetch; an agent using plain git has to do the same.

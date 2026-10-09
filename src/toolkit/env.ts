@@ -1,6 +1,6 @@
 import { DEFAULT_POLICY, hostedRoles } from "./mcp";
 import { effectivePolicy } from "./votes";
-import { ensureRepo, forkAndWait, headOf, remoteFor, reviewerName } from "../artifacts";
+import { ensureRepo, forkAndWait, headOf, isForkNotReady, remoteFor, reviewerName } from "../artifacts";
 import { GitCasLog } from "../record-log";
 import { rpc, rpcRetried } from "../rpc";
 import { fail } from "../errors";
@@ -157,8 +157,8 @@ export function toolContextFor(env: Env, by: string | undefined, caller: { agent
 		branchHead: (repo, branch) => keptRead(env, repo, `head:${branch}`, KEPT_BRANCH_HEAD_MS, () => headOf(env.ARTIFACTS, repo, branch)),
 		// Forks made in the background, paced, before agents need them: the seeds when GitHive starts, an agent's when it registers.
 		prepareForks: async (repo, items) => void (await env.REPO_CACHE?.getByName(`repo:${repo}`).queueForks(repo, items === "seeds" ? seedItems() : items.map((agent) => `agent:${agent}`))),
-		// Review holds are a record in Git (see review-holds.ts), like the claims and votes.
-		// In one of the repo's records repos once it has them (see review-holds.ts), else beside the claims and votes.
+		// Review holds are a record in Git: in one of the repo's records repos once it has them (see review-holds.ts), else
+		// beside the claims and votes.
 		reviews: reviewHolds(async (repo) => {
 			const spread = (await recordsLog<Registry>(env, repo, claimsRef(repo)).read())?.commit.state.recordsRepos ?? 0;
 			return spread ? recordsLogIn<ReviewHolds>(env, repo, reviewsRepoOf(spread), reviewsRef(repo)) : recordsLog<ReviewHolds>(env, repo, reviewsRef(repo));
@@ -320,6 +320,8 @@ export async function makeAgentFork(env: Env, repo: string, agent: string) {
 			await forkAndWait(env.ARTIFACTS, source, name, `${agent}'s fork of ${repo}`, { shared: true });
 			return;
 		} catch (err) {
+			// Asked for, but not ready in time: another source would only wait on the same fork. Said so, to ask again.
+			if (isForkNotReady(err)) throw new Error(`[503] ${agent}'s fork of ${repo} is still being made: call again in a minute`);
 			failure = err;
 		}
 	}

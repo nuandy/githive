@@ -406,6 +406,35 @@ app.post("/admin/repos/:id/adopt", async (c) => {
 	return c.json(await orgs.addRepo(org, String(name ?? c.req.param("id")), null, { id: c.req.param("id") }), 201);
 });
 
+// Bench only: what Artifacts says of one repo name (whether its listing has it,
+// and what get() answers, with the error's code), to tell a fork that never
+// finished from one that's missing.
+app.get("/admin/artifacts/:name", async (c) => {
+	if ((c.env as unknown as { BENCH_WIPE?: string }).BENCH_WIPE !== "allowed") return c.json({ error: "not available here" }, 404);
+	if (c.get("principal")?.kind !== "access") return c.json({ error: "only through Cloudflare Access" }, 403);
+	const name = c.req.param("name");
+	const listed = (await listRepoNames(c.env.ARTIFACTS)).includes(name);
+	const got = await c.env.ARTIFACTS.get(name).then(
+		() => ({ ok: true as const }),
+		(err: unknown) => ({ ok: false as const, ...artifactsError(err) }),
+	);
+	return c.json({ name, listed, get: got });
+});
+
+// Bench only: delete one repo (a fork stuck forking, say), and say what Artifacts answered.
+app.delete("/admin/artifacts/:name", async (c) => {
+	if ((c.env as unknown as { BENCH_WIPE?: string }).BENCH_WIPE !== "allowed") return c.json({ error: "not available here" }, 404);
+	if (c.get("principal")?.kind !== "access") return c.json({ error: "only through Cloudflare Access" }, 403);
+	const name = c.req.param("name");
+	const deleted = await c.env.ARTIFACTS.delete(name).then(
+		() => ({ ok: true as const }),
+		(err: unknown) => ({ ok: false as const, ...artifactsError(err) }),
+	);
+	return c.json({ name, deleted });
+});
+
+const artifactsError = (err: unknown) => ({ code: err && typeof err === "object" && "code" in err ? String(err.code) : null, message: err instanceof Error ? err.message : String(err) });
+
 // Bench only (BENCH_WIPE, set in wrangler.bench.jsonc and never on production):
 // delete every repo in the namespace, a batch per call (a request can make only
 // so many subrequests), and forget every repo the dashboard lists.

@@ -155,6 +155,75 @@ describe("Artifacts transient failures", () => {
 		vi.unstubAllGlobals();
 	});
 
+	describe("a fork stuck forking", () => {
+		const forking = () => Object.assign(new Error('Repository "fork" is currently being forked from "source". Retry after 5 seconds.'), { code: "FORK_IN_PROGRESS" });
+		const missing = () => Object.assign(new Error("Repository not found: fork"), { code: "NOT_FOUND" });
+		const made = { info: vi.fn(async () => ({ remote: "https://git.test/fork.git" })), createToken: vi.fn(async () => ({ plaintext: "fresh" })) };
+		let now = 0;
+		const clock = () => {
+			now = 0;
+			vi.spyOn(Date, "now").mockImplementation(() => now);
+			vi.stubGlobal("scheduler", { wait: vi.fn(async (ms: number) => void (now += ms)) });
+		};
+		const done = () => {
+			vi.restoreAllMocks();
+			vi.unstubAllGlobals();
+		};
+
+		it("is deleted once it has forked for too long, and used when that lets it finish (as Artifacts did on bench)", async () => {
+			clock();
+			const source = { fork: vi.fn(async () => ({ name: "fork", remote: "https://git.test/fork.git", token: "token" })) };
+			let deleted = false;
+			const artifacts = {
+				get: vi.fn(async (name: string) => {
+					if (name === "source") return source;
+					if (!deleted) throw forking();
+					return made;
+				}),
+				delete: vi.fn(async () => void (deleted = true)),
+			} as never;
+			await expect(forkAndWait(artifacts, "source", "fork", "test fork")).resolves.toMatchObject({ name: "fork" });
+			expect((artifacts as { delete: ReturnType<typeof vi.fn> }).delete).toHaveBeenCalledTimes(1);
+			// Not before it had forked for 45 s: a fork can take 20-30 s.
+			expect(now).toBeGreaterThan(45_000);
+			done();
+		});
+
+		it("is asked for again at once when deleting it removed it", async () => {
+			clock();
+			const source = { fork: vi.fn(async () => ({ name: "fork", remote: "https://git.test/fork.git", token: "token" })) };
+			let deleted = false;
+			const artifacts = {
+				get: vi.fn(async (name: string) => {
+					if (name === "source") return source;
+					if (!deleted) throw forking();
+					// Gone after the delete, until it's asked for again.
+					if (source.fork.mock.calls.length < 2) throw missing();
+					return made;
+				}),
+				delete: vi.fn(async () => void (deleted = true)),
+			} as never;
+			await expect(forkAndWait(artifacts, "source", "fork", "test fork")).resolves.toMatchObject({ name: "fork" });
+			expect(source.fork).toHaveBeenCalledTimes(2);
+			done();
+		});
+
+		it("gives up as not ready (to be asked for again later), deleted once, when it stays stuck", async () => {
+			clock();
+			const source = { fork: vi.fn(async () => ({ name: "fork", remote: "https://git.test/fork.git", token: "token" })) };
+			const artifacts = {
+				get: vi.fn(async (name: string) => {
+					if (name === "source") return source;
+					throw forking();
+				}),
+				delete: vi.fn(async () => undefined),
+			} as never;
+			await expect(forkAndWait(artifacts, "source", "fork", "test fork")).rejects.toMatchObject({ code: "FORK_NOT_READY" });
+			expect((artifacts as { delete: ReturnType<typeof vi.fn> }).delete).toHaveBeenCalledTimes(1);
+			done();
+		});
+	});
+
 	it("waits for a shared fork that another caller is making, instead of failing as it already exists", async () => {
 		vi.stubGlobal("scheduler", { wait: vi.fn(async () => {}) });
 		const exists = Object.assign(new Error("repo already exists: seed"), { code: "ALREADY_EXISTS" });
