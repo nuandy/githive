@@ -393,7 +393,9 @@ async function landBatch(input: MergeInput, landing: Landing, holding: Holding, 
 		const place: Place = { search: crypto.randomUUID().slice(0, 12), slot: 0, slots: { next: 1 } };
 		if (input.verify?.length) void input.prepareChecks?.(`${place.search}-0`).catch((err) => console.error("starting a batch's check container early failed", String(err)));
 		await holding.step(STEP_MS.records);
-		const main = (await headOf(input)) ?? fail409(`there's no branch ${input.branch}`);
+		// Read now, not as kept a moment for the crowd asking (see branchHead): the batch before may have landed a second ago,
+		// and a batch built on the main before it is refused at its push, its gathering lost (47 s of 200 agents' run).
+		const main = (await branchHead(input.remote, input.branch)) ?? fail409(`there's no branch ${input.branch}`);
 		const batchGit = input.batchGit ?? memoryBatchGit(input.remote, input.stamper);
 		// About one failure per batch, from what the branch's recent changes came to (see batchSize). Without checks nothing
 		// fails a batch, so it takes all that's ready: in 200 agents' run, batches of 24 and 52 left 130 ready changes waiting.

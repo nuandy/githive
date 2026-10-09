@@ -223,6 +223,18 @@ describe("landing ready changes together", { timeout: 120_000 }, () => {
 		expect((await store().read()).claims).toEqual([]);
 	});
 
+	it("builds a batch on main as it is now, not as kept a moment for the crowd asking", async () => {
+		for (const x of ["a", "b"]) await readyChange(`${x}-1`, { [`src/${x}.txt`]: `${x}\n` });
+		const before = server.git("rev-parse", "main").trim();
+		const landing = memoryLanding();
+		const reads: string[][] = [];
+		expect(await merge("a-1", runner(), landing, { maxBatch: 1, batchGit: readsNoted(reads) })).toMatchObject({ ok: true });
+		// Kept from before a-1 landed: a batch built on it would be refused at its push, and gathered again.
+		expect(await merge("b-1", runner(), landing, { batchGit: readsNoted(reads), branchHead: async () => before })).toMatchObject({ ok: true });
+		expect(reads).toEqual([["a-1"], ["b-1"]]);
+		expect(landed()).toEqual(["a-1", "b-1"]);
+	});
+
 	it("leaves a change that landed out of the next batch while its claim isn't released yet", async () => {
 		for (const x of ["a", "b"]) await readyChange(`${x}-1`, { [`src/${x}.txt`]: `${x}\n` });
 		const landing = memoryLanding();
