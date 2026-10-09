@@ -1,5 +1,5 @@
 import git from "isomorphic-git";
-import { gitAuth, http } from "./git-http";
+import { gitAuth, http, noteGitRequest } from "./git-http";
 import { BOT, isEmptyRepo, type Remote } from "./git";
 import { fetchCommits } from "./git-fetch";
 import { MemoryFS } from "./memory-fs";
@@ -156,6 +156,7 @@ async function pushDirect(remote: Remote, ref: string, from: string | null, to: 
 			},
 			body,
 		});
+		noteGitRequest(`${remote.url}/git-receive-pack`, response.status);
 		if (response.status >= 500 && attempt < BUSY_ATTEMPTS) {
 			// The server failed, perhaps after applying the push: if the ref is now at `to`, it landed.
 			await response.body?.cancel();

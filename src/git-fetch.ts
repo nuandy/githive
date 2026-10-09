@@ -1,5 +1,6 @@
 import git from "isomorphic-git";
 import type { Remote } from "./git";
+import { noteGitRequest } from "./git-http";
 import { MemoryFS } from "./memory-fs";
 
 // Fetching several commits in one request. isomorphic-git fetches one ref at a
@@ -51,6 +52,7 @@ export async function fetchCommits(remote: Remote, oids: string[], dir = FETCHED
 		},
 		body,
 	});
+	noteGitRequest(`${remote.url}/git-upload-pack`, response.status);
 	if (!response.ok) throw Object.assign(new Error(`fetch failed: ${response.status} ${(await response.text()).slice(0, 200)}`), { status: response.status });
 	const bytes = new Uint8Array(await response.arrayBuffer());
 

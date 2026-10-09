@@ -110,6 +110,8 @@ function hasRecognizableNetworkFailure(error: unknown): boolean {
  * network-looking messages on the same wrapped error.
  */
 export function isTransientFailure(error: unknown): boolean {
+	// Tried again already, as long as is worth it (a Git request a busy server failed, see git-http.ts): not again here.
+	if ((error as { retried?: boolean } | null)?.retried) return false;
 	const statuses = statusesOf(error);
 	if (statuses.length > 0) {
 		return statuses.every((status) => TRANSIENT_HTTP_STATUSES.has(status) || status >= 500);

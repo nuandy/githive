@@ -1,10 +1,12 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import base from "isomorphic-git/http/web";
 import type { Remote } from "./git";
 
-// isomorphic-git's HTTP client, with one change: a Git server's error (5xx)
-// names the repo it came from, so a failure under load says which Git server
-// it was (the project, a records repo, an agent's fork). Its status stays on
-// the error, so retryTransient still treats it as transient.
+// isomorphic-git's HTTP client, with these changes: a Git server's error (5xx)
+// is tried again for a few seconds (Artifacts answers 500 while a repo is
+// busy), then names the repo it came from, so a failure under load says which
+// Git server it was (the project, a records repo, an agent's fork); and every
+// request is counted by repo, for the call it's made in (see gitRequests).
 
 type Request = Parameters<typeof base.request>[0];
 
@@ -39,13 +41,63 @@ async function drained(body: AsyncIterableIterator<Uint8Array> | undefined) {
 	})();
 }
 
+/** Git requests by repo, and how many failed (5xx), for the call they're made in. */
+export type GitRequests = Map<string, { requests: number; failed: number }>;
+const counted = new AsyncLocalStorage<GitRequests>();
+
+/** Run `work`, counting the Git requests it makes by repo (see noteGitRequest). */
+export function countingGitRequests<T>(work: () => Promise<T>): { done: Promise<T>; requests: GitRequests } {
+	const requests: GitRequests = new Map();
+	return { done: counted.run(requests, work), requests };
+}
+
+/** Count a Git request to `url` (and whether the server failed it) for the call it's made in, if any is counting. */
+export function noteGitRequest(url: string, status: number) {
+	const requests = counted.getStore();
+	if (!requests) return;
+	const repo = repoOfUrl(url);
+	const seen = requests.get(repo) ?? { requests: 0, failed: 0 };
+	requests.set(repo, { requests: seen.requests + 1, failed: seen.failed + (status >= 500 ? 1 : 0) });
+}
+
+/**
+ * How many times a Git request a server failed (5xx) is made in all, each
+ * wait twice the last (from GIT_RETRY_MS, with jitter): about 6 s, where a
+ * busy Artifacts repo's 500s outlasted the few tries in half a second that
+ * callers made, and reached agents. Given up on, the error says so, and no
+ * caller tries it again (see isTransientFailure).
+ */
+const GIT_TRIES = 5;
+const GIT_RETRY_MS = 400;
+
 export const http = {
 	async request(request: Request) {
-		const response = await base.request(request);
-		// A failure's body is read now: left for later (a 401 asked again, a 5xx thrown), it holds a connection open.
-		if (response.statusCode >= 400) response.body = await drained(response.body);
-		if (response.statusCode >= 500)
-			throw Object.assign(new Error(`HTTP Error: ${response.statusCode} ${response.statusMessage} (${repoOfUrl(request.url)})`), { status: response.statusCode });
-		return response;
+		// Collected once, to send again (the client collects it anyway: no streaming uploads).
+		const body = request.body ? [await collected(request.body)] : undefined;
+		for (let attempt = 1; ; attempt++) {
+			const response = await base.request({ ...request, ...(body ? { body: body as never } : {}) });
+			noteGitRequest(request.url, response.statusCode);
+			// A failure's body is read now: left for later (a 401 asked again, a 5xx thrown), it holds a connection open.
+			if (response.statusCode >= 400) response.body = await drained(response.body);
+			if (response.statusCode < 500) return response;
+			if (attempt < GIT_TRIES) {
+				await new Promise((resolve) => setTimeout(resolve, GIT_RETRY_MS * 2 ** (attempt - 1) * (0.5 + Math.random())));
+				continue;
+			}
+			throw Object.assign(new Error(`HTTP Error: ${response.statusCode} ${response.statusMessage} (${repoOfUrl(request.url)}, ${GIT_TRIES} tries)`), { status: response.statusCode, retried: true });
+		}
 	},
 };
+
+/** A request body as one array of bytes. */
+async function collected(body: AsyncIterable<Uint8Array> | Iterable<Uint8Array>) {
+	const chunks: Uint8Array[] = [];
+	for await (const chunk of body) chunks.push(chunk);
+	const all = new Uint8Array(chunks.reduce((n, c) => n + c.length, 0));
+	let at = 0;
+	for (const c of chunks) {
+		all.set(c, at);
+		at += c.length;
+	}
+	return all;
+}

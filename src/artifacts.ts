@@ -81,8 +81,14 @@ const codeOf = (err: unknown) => (err && typeof err === "object" && "code" in er
 /** Artifacts fails some forks of one repo when many run at once (INTERNAL_ERROR, 10400); they succeed when tried again. */
 const isInternalError = (err: unknown) => codeOf(err) === "INTERNAL_ERROR";
 
-/** Retry an Artifacts call through transient failures and the internal errors Artifacts returns under load. */
-const retryArtifacts = <T>(operation: () => Promise<T>) => retryTransient(operation, { retryable: (err) => isTransientFailure(err) || isInternalError(err) });
+/**
+ * Artifacts' calls, tried again through transient failures and the internal
+ * errors it returns under load: 5 tries over about 4.5 s. A busy repo's
+ * "internal error" outlasted the default's 4 in 0.7 s, and reached agents (4
+ * merges of a 200-agent run).
+ */
+const retryArtifacts = <T>(operation: () => Promise<T>) =>
+	retryTransient(operation, { maxAttempts: 5, baseDelayMs: 300, maxDelayMs: 3_000, retryable: (err) => isTransientFailure(err) || isInternalError(err) });
 
 const alreadyExists = (err: unknown) => /EXISTS/.test(codeOf(err)) || /already exists/i.test(err instanceof Error ? err.message : "");
 

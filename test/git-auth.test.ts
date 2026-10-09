@@ -2,6 +2,7 @@ import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { afterEach, describe, expect, it } from "vitest";
 import { branchHead } from "../src/git";
+import { countingGitRequests } from "../src/git-http";
 
 // isomorphic-git asks a Git server without credentials first, gets a 401, and
 // asks again, leaving the 401's body unread; in a Worker, a few such reads side
@@ -14,11 +15,15 @@ const OID = "1234567890abcdef1234567890abcdef12345678";
 let close: (() => void) | undefined;
 afterEach(() => close?.());
 
-/** A Git server that refuses a request without credentials, and lists one branch to one with them. */
-async function guarded() {
+/** A Git server that refuses a request without credentials, and lists one branch to one with them; busy (500) for the first `busy` requests. */
+async function guarded(busy = 0) {
 	const seen: (string | undefined)[] = [];
 	const server = createServer((req, res) => {
 		seen.push(req.headers.authorization);
+		if (seen.length <= busy) {
+			res.writeHead(500).end("busy");
+			return;
+		}
 		if (!req.headers.authorization) {
 			res.writeHead(401, { "WWW-Authenticate": 'Basic realm="git"' }).end("credentials, please");
 			return;
@@ -36,5 +41,21 @@ describe("a Git server asking for credentials", () => {
 		const { url, seen } = await guarded();
 		expect(await branchHead({ url, token: "secret?expires=1" }, "main")).toBe(OID);
 		expect(seen).toEqual([`Basic ${btoa("x:secret")}`]);
+	});
+});
+
+describe("a busy Git server", { timeout: 30_000 }, () => {
+	it("is asked again for a few seconds, and each request is counted for the call it's made in", async () => {
+		const { url, seen } = await guarded(2);
+		const counting = countingGitRequests(() => branchHead({ url, token: "secret" }, "main"));
+		expect(await counting.done).toBe(OID);
+		expect(seen).toHaveLength(3);
+		expect(counting.requests.get("project")).toEqual({ requests: 3, failed: 2 });
+	});
+
+	it("is given up on after 5 tries, and no caller tries again on top", async () => {
+		const { url, seen } = await guarded(100);
+		await expect(branchHead({ url, token: "secret" }, "main")).rejects.toThrow(/500.*\(project, 5 tries\)/);
+		expect(seen).toHaveLength(5);
 	});
 });
