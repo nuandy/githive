@@ -30,6 +30,8 @@ export interface RepoSnapshot {
 	branch?: string;
 	/** Whether records and merges are stamped with verified identity. */
 	verified: boolean;
+	/** The other branches changes land on (newer servers): where each started. */
+	branches?: { name: string; base: string; from?: string; at: string }[];
 	/** How claims are kept (newer servers): in one record until the load calls for shards ("on demand"), always ("never"), or sharded since `since`. */
 	sharding?: "on demand" | "never" | { since?: string; because?: string };
 	/** How many path segments deep claims are sharded, once they are. */
@@ -48,6 +50,11 @@ export interface RepoSnapshot {
 		head: string | null;
 		/** The branch it lands on, when not the project's (newer servers). */
 		into?: string;
+		/** For a change that merges a whole branch: that branch. */
+		source?: string;
+		/** Changes it depends on (after), and those of them not merged into its branch yet. */
+		after?: string[];
+		waitsOn?: string[];
 		approval: { approved: boolean; approvals: number; required: number; vetoedBy: string[]; /** Veto roles that haven't approved yet (newer servers); a change merges only once each has. */ awaiting?: string[] };
 		/** A question for a person about the change (an agent asked, or GitHive's builder failed), until a person votes. */
 		attention?: { reason: string; agent: string; at: string };
@@ -245,8 +252,12 @@ export const api = {
 	summaries: () => call<Summaries>("GET", "/summaries"),
 	snapshot: (repo: string) => call<RepoSnapshot>("GET", `/repos/${repoPath(repo)}`),
 	audit: (repo: string) => call<RepoAudit>("GET", `/repos/${repoPath(repo)}/audit`),
-	/** The repo's line of merges. */
-	line: (repo: string) => call<RepoLine>("GET", `/repos/${repoPath(repo)}/line`),
+	/** The repo's line of merges into its branch, or into another. */
+	line: (repo: string, branch?: string) => call<RepoLine>("GET", `/repos/${repoPath(repo)}/line${branch ? `?branch=${encodeURIComponent(branch)}` : ""}`),
+	/** A person merges a change: through its branch's line, as its agent, stamped with the person's name. */
+	merge: (repo: string, change: string) => call<{ ok: boolean; commit?: string; reasons?: string[]; conflicts?: string[] }>("POST", `/repos/${repoPath(repo)}/changes/${encodeURIComponent(change)}/merge`, {}),
+	/** A person makes a branch changes can land on, from another. */
+	makeBranch: (repo: string, name: string, from: string) => call<{ name: string; made?: string }>("POST", `/repos/${repoPath(repo)}/branches`, { name, from }),
 	/** A repo's files at a branch or commit (its default branch if none). */
 	tree: (repo: string, ref?: string) => call<RepoTree>("GET", `/repos/${repoPath(repo)}/tree${ref ? `?ref=${encodeURIComponent(ref)}` : ""}`),
 	/** One file's text at a branch or commit. */

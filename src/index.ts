@@ -11,7 +11,7 @@ import { ensureRepo, forkAndWait, leftoversOf, listRepoNames, remoteFor, reviewe
 import { fail, statusOf } from "./errors";
 import { retryTransient } from "./retry";
 import { handleMcpBody } from "./mcp";
-import { type ToolContext, callTool, repoAudit, changeHistory, openCount, repoSnapshot, voteAsPerson } from "./toolkit/mcp";
+import { type ToolContext, callTool, repoAudit, changeHistory, makeBranch, mergeAsPerson, openCount, repoSnapshot, voteAsPerson } from "./toolkit/mcp";
 import { listTree, readFile } from "./code-browse";
 import { initialFiles, parseInit, writeFirstCommit } from "./repo-init";
 import { Timing } from "./timing";
@@ -238,6 +238,22 @@ app.post("/repos/:owner/:name/changes/:change/votes", async (c) => {
 	const { role, verdict, evidence } = await jsonArgs(c);
 	return c.json(await voteAsPerson(toolContext(c.env, actor), repo.id, c.req.param("change"), { role: String(role ?? ""), verdict: verdict as "approve" | "reject", evidence: String(evidence ?? "") }, byOf(actor)));
 });
+// A person merges a change from the dashboard: the same merge an agent asks for, stamped with their name.
+app.post("/repos/:owner/:name/changes/:change/merge", async (c) => {
+	const actor = c.get("principal") ?? fail(401, "no identity");
+	if (!isPerson(actor)) fail(403, "a merge from the dashboard is a person's: agents merge through MCP");
+	const repo = await routeRepo(c, "write");
+	return c.json(await mergeAsPerson(toolContext(c.env, actor), repo.id, c.req.param("change"), byOf(actor)));
+});
+// A person makes a branch changes can land on, from another.
+app.post("/repos/:owner/:name/branches", async (c) => {
+	const actor = c.get("principal") ?? fail(401, "no identity");
+	if (!isPerson(actor)) fail(403, "a branch from the dashboard is a person's: agents make one with claim (into and from)");
+	const repo = await routeRepo(c, "write");
+	const { name, from } = await jsonArgs(c);
+	if (typeof name !== "string" || !name.trim() || typeof from !== "string" || !from.trim()) fail(400, "a branch needs a name and the branch to make it from");
+	return c.json(await makeBranch(toolContext(c.env, actor), repo.id, { name: name.trim(), from: from.trim() }, byOf(actor)));
+});
 app.get("/repos/:owner/:name/changes/:change", async (c) => {
 	const repo = await routeRepo(c, "read");
 	const change = c.req.param("change");
@@ -247,7 +263,9 @@ app.get("/repos/:owner/:name/changes/:change", async (c) => {
 app.get("/repos/:owner/:name/line", async (c) => {
 	const repo = await routeRepo(c, "read");
 	const read = await remoteFor(c.env.ARTIFACTS, repo.id, "read", 3600);
-	const [line, snapshot] = await Promise.all([new GitCasLog<Line>(async () => read, repo.id, lineRef(repo.id)).read(), c.env.GATE.getByName(`repo:${repo.id}`).snapshotInfo()]);
+	// ?branch=<name>: the line into another branch than the project's.
+	const branch = c.req.query("branch")?.trim() || undefined;
+	const [line, snapshot] = await Promise.all([new GitCasLog<Line>(async () => read, repo.id, lineRef(repo.id, branch)).read(), c.env.GATE.getByName(`repo:${repo.id}`).snapshotInfo()]);
 	return c.json({ ...(line?.commit.state ?? { tip: null, entries: [], left: [] }), snapshot });
 });
 app.get("/repos/:owner/:name/audit", async (c) => {

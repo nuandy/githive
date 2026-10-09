@@ -132,7 +132,7 @@ export function Dashboard({ me, onSignOut }: { me: Me; onSignOut: () => void }) 
 
 	const view: RepoView | null =
 		route.page === "repo"
-			? { kind: "repo", tab: route.tab, ...(route.path !== undefined ? { path: route.path } : {}), ...(route.ref ? { ref: route.ref } : {}) }
+			? { kind: "repo", tab: route.tab, ...(route.path !== undefined ? { path: route.path } : {}), ...(route.ref ? { ref: route.ref } : {}), ...(route.branch ? { branch: route.branch } : {}) }
 			: route.page === "change"
 				? { kind: "change", change: route.change, tab: route.tab }
 				: null;

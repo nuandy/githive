@@ -618,6 +618,35 @@ export async function voteAsPerson(ctx: ToolContext, repo: string, change: strin
 	return { commit: head, role: input.role, verdict: input.verdict };
 }
 
+/**
+ * A branch made (or adopted) by a person from the dashboard: what a claim
+ * with into and from does, without the claim. Recorded with the person's name.
+ */
+export async function makeBranch(ctx: ToolContext, repo: string, input: { name: string; from: string }, person: string) {
+	const claims = recordLog<Registry>(ctx, repo, claimsRef(repo));
+	const registered = (await claims.read())?.commit.state;
+	if (!registered?.baseline) throw new Error(`[409] GitHive hasn't started on ${repo}`);
+	if (input.name === projectBranch(registered) || registered.branches?.[input.name]) throw new Error(`[409] ${input.name} takes changes already`);
+	const made = await targetBranch(ctx, repo, { into: input.name, from: input.from, registered, claims, agent: person, ...(ctx.stamper ? { stamper: await ctx.stamper() } : {}) });
+	await ctx.ping?.(repo).catch(() => undefined);
+	return { name: input.name, made };
+}
+
+/**
+ * A person merging a change from the dashboard: the same merge an agent asks
+ * for (through the branch's line, with its checks), as the change's agent,
+ * stamped with the person who asked.
+ */
+export async function mergeAsPerson(ctx: ToolContext, repo: string, change: string, person: string) {
+	if (!person.startsWith("person:")) throw new Error("[403] only a person merges from the dashboard; agents use merge");
+	const registry = (await recordLog<Registry>(ctx, repo, claimsRef(repo)).read())?.commit.state;
+	const { claim } = await storeFor(ctx, repo, registry).readChange(change);
+	if (!claim) throw new Error(`[409] ${change} holds no claim: there's nothing to merge`);
+	const outcome = await callTool("merge", { repo, change, agent: claim.agent }, ctx);
+	await ctx.ping?.(repo).catch(() => undefined);
+	return outcome;
+}
+
 /** The roles GitHive's own reviewers take on a change: one general review, and every role that can veto. */
 export const hostedRoles = (vetoes: string[]) => [...new Set(["review", ...vetoes])];
 
@@ -643,7 +672,10 @@ export async function repoSnapshot(ctx: ToolContext, repo: string) {
 			const asked = openFlag(votes, c.change, head);
 			const flag = asked?.role && !approval.awaiting?.includes(asked.role) ? null : asked;
 			const attention = flag ? { reason: flag.reason, agent: flag.agent, at: flag.at } : hosted?.builder?.status === "failed" ? { reason: `GitHive's builder failed${hosted.builder.error ? `: ${hosted.builder.error.slice(0, 160)}` : ""}`, agent: "githive-builder", at: c.active } : null;
-			return { ...c, head, approval, ...(hosted ? { hosted } : {}), ...(attention ? { attention } : {}) };
+			// What it waits on (after) that hasn't merged into the branch it lands on yet.
+			const into = c.into ?? projectBranch(state);
+			const waitsOn = (c.after ?? []).filter((dep) => !held.released.some((r) => r.change === dep && r.mergedAs && (r.into ?? projectBranch(state)) === into));
+			return { ...c, head, approval, ...(hosted ? { hosted } : {}), ...(attention ? { attention } : {}), ...(waitsOn.length ? { waitsOn } : {}) };
 		}),
 	));
 	const waiting = claims.filter((c) => c.attention);
@@ -657,6 +689,8 @@ export async function repoSnapshot(ctx: ToolContext, repo: string) {
 		repo,
 		/** The project's branch changes merge into. */
 		branch: projectBranch(state),
+		/** The other branches changes land on: where each started. */
+		branches: Object.entries(state.branches ?? {}).map(([name, b]) => ({ name, base: b.base, ...(b.from ? { from: b.from } : {}), at: b.at })),
 		policy: state.policy ?? DEFAULT_POLICY,
 		verify: state.verify ?? [],
 		/** Whether records and merges are stamped with verified identity. */

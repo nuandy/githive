@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { type ReactNode, useState } from "react";
 import { VoteForm, type VoteApi } from "./VoteForm";
 import type { RepoAudit, ChangeHistory, RepoSnapshot } from "../api";
 import { identityName } from "../lib/agent";
@@ -36,8 +36,29 @@ function Approvals({ claim }: { claim: Claim }) {
 }
 
 /** The Changes tab: claims in force, each a change in progress. */
-export function ChangeList({ snapshot, repo }: { snapshot: RepoSnapshot; repo: string }) {
-	const claims = [...snapshot.claims].sort((a, b) => Date.parse(b.since) - Date.parse(a.since));
+/** Where a change lands and what holds it back, when that isn't the plain case: into another branch, a whole branch merged, waiting on others. */
+export function ChangeLabels({ claim }: { claim: Pick<Claim, "into" | "source" | "waitsOn"> }) {
+	return (
+		<>
+			{claim.source ? (
+				<span className="pill pill--outline">
+					merges <code>{claim.source}</code>
+				</span>
+			) : null}
+			{claim.into ? (
+				<span className="pill pill--outline">
+					into <code>{claim.into}</code>
+				</span>
+			) : null}
+			{claim.waitsOn?.length ? <span className="pill pill--warn">waits on {claim.waitsOn.join(", ")}</span> : null}
+		</>
+	);
+}
+
+/** The open changes, newest first: on one branch (`shown`, when given: the one the overview shows), or all. */
+export function ChangeList({ snapshot, repo, shown }: { snapshot: RepoSnapshot; repo: string; shown?: string }) {
+	const project = snapshot.branch ?? "main";
+	const claims = [...snapshot.claims].filter((c) => !shown || (c.into ?? project) === shown).sort((a, b) => Date.parse(b.since) - Date.parse(a.since));
 	return (
 		<section className="box change-list" aria-labelledby="changes-title">
 			<div className="box__header change-list__filters">
@@ -69,6 +90,7 @@ export function ChangeList({ snapshot, repo }: { snapshot: RepoSnapshot; repo: s
 									<div className="change-row__title">
 										<a href={href.change(repo, claim.change)}>{claimTitle(claim)}</a>
 										{status.kind !== "in-review" ? <StatusPill status={status} /> : null}
+										<ChangeLabels claim={claim} />
 									</div>
 									<p className="change-row__meta">
 										<span className="change-row__id">{claim.change}</span>
@@ -292,11 +314,43 @@ export interface ChangePageProps {
 	api?: VoteApi;
 	/** Whether the reader may vote (review or more in the repo); without it, no vote form. */
 	canVote?: boolean;
+	/** A person merging the change (write or more in the repo): through its branch's line, as its agent, stamped with their name. */
+	merge?: (repo: string, change: string) => Promise<{ ok: boolean; commit?: string; reasons?: string[]; conflicts?: string[] }>;
+}
+
+/** Merge, for a person, once a change is approved and waits on nothing: the same merge an agent asks for, checks and all. */
+function MergeButton({ repo, change, merge }: { repo: string; change: string; merge: NonNullable<ChangePageProps["merge"]> }) {
+	const [busy, setBusy] = useState(false);
+	const [outcome, setOutcome] = useState<{ ok: boolean; text: string } | null>(null);
+	const go = async () => {
+		setBusy(true);
+		setOutcome(null);
+		try {
+			const merged = await merge(repo, change);
+			setOutcome(merged.ok ? { ok: true, text: `Merged as ${merged.commit?.slice(0, 8)}.` } : { ok: false, text: (merged.reasons ?? ["It couldn't merge."]).join(" ") });
+		} catch (err) {
+			setOutcome({ ok: false, text: err instanceof Error ? err.message : String(err) });
+		} finally {
+			setBusy(false);
+		}
+	};
+	return (
+		<div className="change-merge">
+			<button type="button" className="primary" onClick={go} disabled={busy}>
+				{busy ? "Merging… (its checks run first)" : "Merge"}
+			</button>
+			{outcome ? (
+				<p className={outcome.ok ? "tone-good" : "error"} role="status">
+					{outcome.text}
+				</p>
+			) : null}
+		</div>
+	);
 }
 
 /** A change, shown like a pull request: in force, merged or released. */
-export function ChangePage({ snapshot, changeId, claim, history, repo, tab, api, canVote = true }: ChangePageProps) {
-	const branch = history?.branch || snapshot.branch || "main";
+export function ChangePage({ snapshot, changeId, claim, history, repo, tab, api, canVote = true, merge }: ChangePageProps) {
+	const branch = claim?.into || history?.branch || snapshot.branch || "main";
 	const record = claim ?? history?.claim ?? undefined;
 	const ending = history ? changeEnding(history) : null;
 	const status = claim ? claimStatus(claim) : history ? historyStatus(history) : null;
@@ -304,7 +358,8 @@ export function ChangePage({ snapshot, changeId, claim, history, repo, tab, api,
 	const title = (record?.intent ?? "").split("\n")[0].trim() || changeId;
 	const votes = claim ? votesForClaim(claim, history?.votes ?? snapshot.votes) : (history?.votes ?? []);
 	const builder = claim?.hosted?.builder;
-	const branchCode = <code className="change-header__branch">changes/{changeId}</code>;
+	// A change merging a whole branch shows that branch; any other, its own.
+	const branchCode = <code className="change-header__branch">{claim?.source ?? `changes/${changeId}`}</code>;
 	const into = <code className="change-header__branch">{branch}</code>;
 	const timeline = history ? buildTimeline(history, repo).filter((item) => item.kind !== "opened") : [];
 
@@ -350,6 +405,8 @@ export function ChangePage({ snapshot, changeId, claim, history, repo, tab, api,
 							</>
 						)}
 					</span>
+					{claim?.waitsOn?.length ? <span className="pill pill--warn">waits on {claim.waitsOn.join(", ")}</span> : null}
+					{claim && merge && claim.approval.approved && !claim.waitsOn?.length ? <MergeButton repo={repo} change={changeId} merge={merge} /> : null}
 				</div>
 			</div>
 			<Tabs

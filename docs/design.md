@@ -305,9 +305,18 @@ source moves on, claiming again brings the change up to its new tip (a new
 head, so a new review). A conflict with the target is fixed the same way in
 the other direction: merge the target into the source, then claim again.
 
-(Per-branch settings and the dashboard's branch views come next; until then
-every branch uses the repo's review policy and checks, and the backlog's work
-lands on the project's branch.)
+On the dashboard, a repo's home shows one branch at a time, picked from the
+project's and those changes land on (`?branch=` in the address): its claims,
+its line, its territory and its open changes. A change shows where it lands
+(into), the branch it merges (merges) and what it waits on. People who can
+write make a branch from another there (recorded with their name, as a claim
+with `from` would), and merge an approved change that waits on nothing: the
+same merge an agent asks for, through its branch's line with its checks, as
+its agent, stamped with the person who asked.
+
+(Per-branch settings come next; until then every branch uses the repo's
+review policy and checks, and the backlog's work lands on the project's
+branch.)
 
 ## Review policy
 

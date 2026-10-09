@@ -2,7 +2,7 @@ import { useState } from "react";
 import "./RepoPage.css";
 import type { VoteApi } from "./VoteForm";
 import type { ChangeHistory, RepoAccess, RepoLine, RepoSnapshot } from "../api";
-import { canVote } from "../lib/permissions";
+import { canVote, canWrite } from "../lib/permissions";
 import { messageOf } from "./Confirm";
 import { MergeSettings } from "./MergeSettings";
 import { RepoAdmin, type RepoManageApi } from "./RepoAdmin";
@@ -20,11 +20,18 @@ import { ShardingBadge } from "./StatusPill";
 import type { TabItem } from "./Tabs";
 
 export type RepoView =
-	| { kind: "repo"; tab: RepoTab; /** Code tab */ path?: string; ref?: string }
+	| { kind: "repo"; tab: RepoTab; /** Code tab */ path?: string; ref?: string; /** Changes tab: the branch shown, when not the project's. */ branch?: string }
 	| { kind: "change"; change: string; tab: ChangeTab };
 
 /** Everything a repo's pages call. The dashboard's api object satisfies it; tests pass stand-ins. */
-export type RepoPageApi = CodeApi & VoteApi & { /** The line of merges, for the overview (stand-ins may leave it out). */ line?: (repo: string) => Promise<RepoLine> };
+export type RepoPageApi = CodeApi &
+	VoteApi & {
+		/** The line of merges into a branch, for the overview (stand-ins may leave it out). */
+		line?: (repo: string, branch?: string) => Promise<RepoLine>;
+		/** People who can write: make a branch, merge a change. */
+		makeBranch?: (repo: string, name: string, from: string) => Promise<{ name: string; made?: string }>;
+		merge?: (repo: string, change: string) => Promise<{ ok: boolean; commit?: string; reasons?: string[]; conflicts?: string[] }>;
+	};
 
 export interface RepoPageProps {
 	repo: string;
@@ -135,6 +142,7 @@ export function RepoPage({ repo, view, snapshot, changeHistory, liveStatus = "of
 						tab={view.tab}
 						api={api}
 						canVote={voting}
+						{...(canWrite(access?.level) && api.merge ? { merge: api.merge } : {})}
 					/>
 				) : current === "audit" ? (
 					<AuditTab snapshot={snapshot} />
@@ -156,8 +164,16 @@ export function RepoPage({ repo, view, snapshot, changeHistory, liveStatus = "of
 					/>
 				) : (
 					<>
-						<Overview repo={repo} branch={branch} snapshot={snapshot} api={api} />
-						<ChangeList snapshot={snapshot} repo={repo} />
+						<Overview
+							repo={repo}
+							branch={branch}
+							{...(view.kind === "repo" && view.branch ? { shown: view.branch } : {})}
+							snapshot={snapshot}
+							api={api}
+							canWrite={canWrite(access?.level)}
+							{...(onSettingsChanged ? { onBranchMade: onSettingsChanged } : {})}
+						/>
+						<ChangeList snapshot={snapshot} repo={repo} shown={view.kind === "repo" && view.branch && (snapshot.branches ?? []).some((b) => b.name === view.branch) ? view.branch : branch} />
 					</>
 				)}
 			</main>

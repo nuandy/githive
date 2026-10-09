@@ -1,21 +1,107 @@
 import "./Overview.css";
+import { useState } from "react";
 import type { RepoLine, RepoSnapshot, RepoTree } from "../api";
 import { usePoll } from "../hooks/usePoll";
 import { type Cell, cellLamp, LAMP_WORDS, type Lamp, lampColor, lampCounts, LAMPS, type Region, territory } from "../lib/overview";
 import { timeAgo } from "../lib/relativeTime";
 import { href } from "../lib/routes";
 
-/** What the overview reads: the repo's files, and its line when the server has one. */
+/** What the overview reads: the repo's files, and its line when the server has one; and, for people who can write, making a branch. */
 export interface OverviewApi {
 	tree(repo: string, ref?: string): Promise<RepoTree>;
-	line?(repo: string): Promise<RepoLine>;
+	line?(repo: string, branch?: string): Promise<RepoLine>;
+	makeBranch?(repo: string, name: string, from: string): Promise<{ name: string; made?: string }>;
 }
 
 export interface OverviewProps {
 	repo: string;
+	/** The project's branch. */
 	branch: string;
+	/** The branch shown, when not the project's (from the address). */
+	shown?: string;
 	snapshot: RepoSnapshot;
 	api: OverviewApi;
+	/** May make branches (write). */
+	canWrite?: boolean;
+	/** After a branch is made: read the snapshot again. */
+	onBranchMade?: () => void;
+}
+
+/** Which branch the overview shows, and making another (for people who can write). */
+function BranchBar({ repo, branch, shown, snapshot, api, canWrite, onBranchMade }: { repo: string; branch: string; shown: string; snapshot: RepoSnapshot; api: OverviewApi; canWrite: boolean; onBranchMade?: () => void }) {
+	const names = [branch, ...(snapshot.branches ?? []).map((b) => b.name).filter((n) => n !== branch).sort()];
+	const [making, setMaking] = useState(false);
+	const [name, setName] = useState("");
+	const [from, setFrom] = useState(shown);
+	const [busy, setBusy] = useState(false);
+	const [error, setError] = useState<string | null>(null);
+	const go = (to: string) => {
+		window.location.hash = href.repo(repo, "changes", to === branch ? undefined : to);
+	};
+	const make = async (event: React.FormEvent) => {
+		event.preventDefault();
+		if (!api.makeBranch || !name.trim()) return;
+		setBusy(true);
+		setError(null);
+		try {
+			const made = await api.makeBranch(repo, name.trim(), from);
+			setMaking(false);
+			setName("");
+			onBranchMade?.();
+			go(made.name);
+		} catch (err) {
+			setError(err instanceof Error ? err.message : String(err));
+		} finally {
+			setBusy(false);
+		}
+	};
+	return (
+		<div className="branch-bar">
+			<label className="branch-bar__pick">
+				<span>Branch</span>
+				<select id="overview-branch" value={shown} onChange={(event) => go(event.target.value)}>
+					{names.map((n) => (
+						<option key={n} value={n}>
+							{n}
+							{n === branch ? " (project)" : ""}
+						</option>
+					))}
+				</select>
+			</label>
+			{canWrite && api.makeBranch && !making ? (
+				<button type="button" onClick={() => setMaking(true)}>
+					New branch
+				</button>
+			) : null}
+			{making ? (
+				<form className="branch-bar__new" onSubmit={make}>
+					<label className="sr-only" htmlFor="new-branch-name">
+						Name of the new branch
+					</label>
+					<input id="new-branch-name" placeholder="feature/checkout" value={name} onChange={(event) => setName(event.target.value)} autoFocus />
+					<label htmlFor="new-branch-from">from</label>
+					<select id="new-branch-from" value={from} onChange={(event) => setFrom(event.target.value)}>
+						{names.map((n) => (
+							<option key={n} value={n}>
+								{n}
+							</option>
+						))}
+					</select>
+					<button type="submit" className="accent" disabled={busy || !name.trim()}>
+						{busy ? "Making…" : "Make branch"}
+					</button>
+					<button type="button" onClick={() => setMaking(false)} disabled={busy}>
+						Cancel
+					</button>
+				</form>
+			) : null}
+			{error ? (
+				<p className="error branch-bar__error" role="alert">
+					{error}
+				</p>
+			) : null}
+		</div>
+	);
 }
 
 /** A region with no more entries than this lists them by name; a bigger one is a grid of lamps. */
@@ -188,8 +274,7 @@ function RegionView({ repo, region }: { repo: string; region: Region }) {
 
 /** What agents hold of the tree, by top-level folder. */
 function Territory({ repo, branch, snapshot, tree, error, line }: { repo: string; branch: string; snapshot: RepoSnapshot; tree?: RepoTree; error?: string; line?: RepoLine }) {
-	// The tree is the project's branch: claims into other branches hold nothing of it.
-	const regions = tree ? territory(tree.files, snapshot.claims.filter((c) => !c.into), { ...(line ? { line } : {}), votes: snapshot.votes }) : [];
+	const regions = tree ? territory(tree.files, snapshot.claims, { ...(line ? { line } : {}), votes: snapshot.votes }) : [];
 	return (
 		<section className="territory" aria-labelledby="territory-title">
 			<div className="overview__head">
@@ -221,15 +306,26 @@ function Territory({ repo, branch, snapshot, tree, error, line }: { repo: string
 	);
 }
 
-/** A repo at a glance: its claims in a sentence, the line of merges, and the territory. */
-export function Overview({ repo, branch, snapshot, api }: OverviewProps) {
-	const line = usePoll(api.line ? `line:${repo}` : null, () => api.line!(repo), 5_000);
-	const tree = usePoll(`tree:${repo}`, () => api.tree(repo), 60_000);
+/**
+ * A repo at a glance, on one of its branches: the claims on it in a sentence,
+ * its line of merges, and its territory.
+ */
+export function Overview({ repo, branch, shown: asked, snapshot, api, canWrite = false, onBranchMade }: OverviewProps) {
+	const known = asked === undefined || asked === branch || (snapshot.branches ?? []).some((b) => b.name === asked);
+	const shown = asked && known ? asked : branch;
+	const other = shown === branch ? undefined : shown;
+	const line = usePoll(api.line ? `line:${repo}:${shown}` : null, () => api.line!(repo, other), 5_000);
+	const tree = usePoll(`tree:${repo}:${shown}`, () => api.tree(repo, other), 60_000);
+	// The claims on this branch only: a change lands on one.
+	const onBranch = { ...snapshot, claims: snapshot.claims.filter((c) => (c.into ?? branch) === shown) };
+	const many = (snapshot.branches ?? []).length > 0 || canWrite;
 	return (
 		<div className="overview">
-			<Summary snapshot={snapshot} line={line.data} />
-			{api.line ? <Track repo={repo} branch={branch} snapshot={snapshot} line={line.data} error={line.error} /> : null}
-			<Territory repo={repo} branch={branch} snapshot={snapshot} tree={tree.data} error={tree.error} line={line.data} />
+			{many ? <BranchBar repo={repo} branch={branch} shown={shown} snapshot={snapshot} api={api} canWrite={canWrite} {...(onBranchMade ? { onBranchMade } : {})} /> : null}
+			{!known ? <p className="callout callout--warn">There's no branch {asked} taking changes here: showing {branch}.</p> : null}
+			<Summary snapshot={onBranch} line={line.data} />
+			{api.line ? <Track repo={repo} branch={shown} snapshot={onBranch} line={line.data} error={line.error} /> : null}
+			<Territory repo={repo} branch={shown} snapshot={onBranch} tree={tree.data} error={tree.error} line={line.data} />
 		</div>
 	);
 }

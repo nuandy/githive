@@ -208,11 +208,13 @@ code.track__detail {
 }
 
 .region__whole {
-	display: flex;
-	align-items: center;
-	gap: 8px;
 	margin: 0 0 10px;
 	font-size: 13.5px;
+}
+
+.region__whole .lamp {
+	margin-right: 7px;
+	vertical-align: 0.05em;
 }
 
 /* A cell: a dark slot when nobody holds it, the lamp's color when someone does. */
@@ -362,4 +364,47 @@ code.track__detail {
 
 .nowrap {
 	white-space: nowrap;
+}
+
+/* Which branch the overview shows, and making another. */
+.branch-bar {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 10px 14px;
+}
+
+.branch-bar__pick {
+	display: inline-flex;
+	align-items: center;
+	gap: 8px;
+}
+
+.branch-bar__pick select,
+.branch-bar__new select {
+	font-family: var(--mono);
+	font-size: 13.5px;
+}
+
+.branch-bar__new {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 8px;
+}
+
+.branch-bar__new input {
+	font-family: var(--mono);
+	font-size: 13.5px;
+	min-width: 12ch;
+}
+
+.branch-bar__new label {
+	font-weight: 400;
+	color: var(--text-muted);
+}
+
+.branch-bar__error {
+	flex-basis: 100%;
+	margin: 0;
 }

@@ -347,6 +347,13 @@ label {
 .pill--solid.pill--accent { background: var(--accent-fill); color: var(--on-accent); }
 .pill--solid.pill--neutral { background: var(--neutral); color: var(--surface); }
 
+/* A branch or path named in a pill: the pill's own face, no box of its own. */
+.pill code {
+	padding: 0;
+	background: none;
+	font-size: inherit;
+}
+
 .pill--outline {
 	background: transparent;
 	border-color: var(--border-strong);

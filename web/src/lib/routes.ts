@@ -4,7 +4,7 @@
 //   #/inbox                                   what waits on a person, across repos
 //   #/orgs                                    your organizations, and making one
 //   #/orgs/:org                               an organization (or your own namespace)
-//   #/repos/:owner/:name[/claims|/agents|/audit|/settings]
+//   #/repos/:owner/:name[/claims|/agents|/audit|/settings][?branch=<branch>]
 //   #/repos/:owner/:name/code[/<path>][?ref=<branch or commit>]
 //   #/repos/:owner/:name/changes/:id[/commits]
 //   #/settings/agents                         your agents, their tokens, and connected apps
@@ -23,7 +23,7 @@ export type Route =
 	| { page: "inbox" }
 	| { page: "agents-settings" }
 	| { page: "admin" }
-	| { page: "repo"; repo: string; tab: RepoTab; /** Code tab: the file or folder shown, "" for the top. */ path?: string; /** Code tab: a branch or commit other than the project's branch. */ ref?: string }
+	| { page: "repo"; repo: string; tab: RepoTab; /** Code tab: the file or folder shown, "" for the top. */ path?: string; /** Code tab: a branch or commit other than the project's branch. */ ref?: string; /** Changes tab: the branch shown, when not the project's. */ branch?: string }
 	| { page: "change"; repo: string; change: string; tab: ChangeTab }
 	| { page: "not-found" };
 
@@ -70,7 +70,8 @@ export function parseRoute(hash: string): Route {
 			return { page: "repo", repo, tab: "code", path: segments.join("/"), ...(ref ? { ref } : {}) };
 		}
 		if (rest.length === 0 || (rest.length === 1 && REPO_TABS.includes(rest[0] as RepoTab))) {
-			return { page: "repo", repo, tab: (rest[0] as RepoTab | undefined) ?? "changes" };
+			const branch = params.get("branch") || undefined;
+			return { page: "repo", repo, tab: (rest[0] as RepoTab | undefined) ?? "changes", ...(branch ? { branch } : {}) };
 		}
 		if (rest[0] === "changes" && rest.length >= 2 && rest.length <= 3) {
 			const change = decode(rest[1]);
@@ -86,7 +87,7 @@ const enc = encodeURIComponent;
 
 export const href = {
 	repos: () => "#/",
-	repo: (repo: string, tab: RepoTab = "changes") => `#/repos/${repoPath(repo)}${tab === "changes" ? "" : `/${tab}`}`,
+	repo: (repo: string, tab: RepoTab = "changes", branch?: string) => `#/repos/${repoPath(repo)}${tab === "changes" ? "" : `/${tab}`}${branch ? `?branch=${enc(branch)}` : ""}`,
 	change: (repo: string, change: string, tab: ChangeTab = "conversation") =>
 		`#/repos/${repoPath(repo)}/changes/${enc(change)}${tab === "conversation" ? "" : `/${tab}`}`,
 	/** A file or folder in the Code tab; each path segment is encoded, so the path reads naturally in the address bar. */

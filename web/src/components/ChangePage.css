@@ -161,3 +161,16 @@
 		font-size: 21px;
 	}
 }
+
+/* A person's Merge, beside the change's status. */
+.change-merge {
+	display: inline-flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 8px 12px;
+}
+
+.change-merge p {
+	margin: 0;
+	font-size: 13.5px;
+}

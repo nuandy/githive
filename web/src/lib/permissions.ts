@@ -21,3 +21,5 @@ export const LEVEL_WORDS: Record<Level, string> = {
 export const canVote = (level: Level | null | undefined) => atLeast(level, "review");
 /** A repo's settings (visibility, collaborators, deleting) need admin. */
 export const canAdminister = (level: Level | null | undefined) => atLeast(level, "admin");
+/** Making a branch, or merging a change, from the dashboard needs write. */
+export const canWrite = (level: Level | null | undefined) => atLeast(level, "write");

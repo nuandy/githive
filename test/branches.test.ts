@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { claimInto, isReservedPath, presentClaim, scopeFile, scopePaths, unscopePath } from "../src/toolkit/branch-scope";
-import { callTool, type ToolContext } from "../src/toolkit/mcp";
+import { callTool, makeBranch, mergeAsPerson, repoSnapshot, type ToolContext } from "../src/toolkit/mcp";
 import { pushChange } from "./helpers/agents";
 import { startGitServer, type GitServer } from "./helpers/git-server";
 
@@ -121,4 +121,26 @@ describe.each([
 			await expect(call("claim", { change: "x", agent: "a", paths: ["::feature%2Fdude/src/"], intent: "x" }, "a")).rejects.toThrow(/can't start with "::"/);
 		});
 	});
+
+describe("people, from the dashboard", () => {
+	it("make a branch from another, and see it, with what each change waits on, in the snapshot", async () => {
+		expect(await makeBranch(ctx(), "p", { name: "release/2.x", from: "main" }, "person:ada@example.com")).toMatchObject({ name: "release/2.x", made: expect.stringContaining("made release/2.x from main") });
+		expect(tip("release/2.x")).toBe(tip("main"));
+		await expect(makeBranch(ctx(), "p", { name: "release/2.x", from: "main" }, "person:ada@example.com")).rejects.toThrow(/takes changes already/);
+		await call("claim", { change: "fix", agent: "a", paths: ["src/f/"], intent: "fix", into: "release/2.x", after: ["other"] }, "a");
+		const snapshot = await repoSnapshot(ctx(), "p");
+		expect(snapshot.branches).toEqual([expect.objectContaining({ name: "release/2.x", from: "main" })]);
+		expect(snapshot.claims).toEqual([expect.objectContaining({ change: "fix", into: "release/2.x", paths: ["src/f/"], waitsOn: ["other"] })]);
+	});
+
+	it("merge an approved change, through the same merge an agent asks for", async () => {
+		await call("claim", { change: "f1", agent: "a", paths: ["src/f/"], intent: "f", into: "feature/dude", from: "main" }, "a");
+		const head = await pushChange(server.url, work, "a", "f1", { "src/f/x.js": "x\n" }, "origin/feature/dude");
+		await expect(mergeAsPerson(ctx(), "p", "f1", "agent-b")).rejects.toThrow(/only a person/);
+		expect(await mergeAsPerson(ctx(), "p", "f1", "person:ada@example.com")).toMatchObject({ ok: false, reasons: [expect.stringContaining("0 of 1 approvals")] });
+		await call("vote", { commit: head, reviewer: "reviewer", role: "review", verdict: "approve", evidence: "ok" }, "reviewer");
+		expect(await mergeAsPerson(ctx(), "p", "f1", "person:ada@example.com")).toMatchObject({ ok: true });
+		expect(server.git("log", "-1", "--format=%P", "feature/dude").trim().split(" ")).toContain(head);
+	});
+});
 });
