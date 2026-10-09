@@ -577,10 +577,13 @@ batch, lands this one first.
 about one check failure per batch (see `batchSize`), and nothing fails a batch
 that isn't checked. At 200 agents with no checks, batches sized for checks (8,
 24, 52) left 130 ready changes waiting. The repo's Gate, which lands it, is
-warmed once work starts (a claim) when there are no checks, and when a merge
-is near (a change checked, or approved) either way: cold, the first batch also
-waited for the container and a clone, and warmed only at the first check, it
-still did, the merge coming seconds after. A batch reads the votes on all its
+warmed at `start` with checks or without, and saves the repo's snapshot (with
+nothing installed, when there are no checks): cold, it then restores in
+seconds. Without one, the first batch of a 200-agent run read 3 or 4 changes
+in 42 to 61 s, behind the container starting from its image and Express
+cloning, however early it was warmed: the Gate stops after a minute idle, and
+an agent went from claim to merge in 30 to 40 s. Until the snapshot is saved,
+a claim (without checks), a check or an approval warms the Gate too. A batch reads the votes on all its
 changes' heads once, then checks each change against its claim 8 at a time.
 
 **A batch's merges hear it landed as soon as it's pushed**, and its claims are

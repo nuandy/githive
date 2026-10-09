@@ -891,8 +891,9 @@ async function runTool(name: string, args: Args, ctx: ToolContext): Promise<unkn
 			// Agents' forks are made from seeds, made one at a time from now, before agents arrive.
 			await ctx.prepareForks?.(repo, "seeds").catch(() => undefined);
 			const registry = (await claims.read())?.commit.state;
-			// The check containers warm up while agents start: the first merge is minutes away, and a fresh install takes them.
-			if (registry?.verify?.length) await ctx.warmChecks?.(repo, { branch: projectBranch(registry), checks: registry.verify, expect: "set up" }).catch(() => undefined);
+			// The repo's Gate warms up while agents start, and saves the snapshot containers start from: the first merge is
+			// minutes away, and a fresh install takes them. Without checks too: it lands the batches, and cold, it took a minute.
+			await ctx.warmChecks?.(repo, { branch: projectBranch(registry), checks: registry?.verify ?? [], expect: "set up" }).catch(() => undefined);
 			const warnings = grantWarnings(registry?.policy ?? policy);
 			return { repo, branch: projectBranch(registry), policy: registry?.policy ?? policy, verify: registry?.verify ?? [], ...shardingOf(registry), ...(warnings.length ? { warnings } : {}), instructions: INSTRUCTIONS };
 		}

@@ -597,9 +597,14 @@ done`;
 				const branch = input.branch ?? "main";
 				const fetched = await gitWithToken(container, input.base.token, ["fetch", "-q", input.base.remote, `${branch}:refs/remotes/base/${branch}`, "--force"]);
 				if (fetched.exitCode !== 0) return;
-				// No checks: warm only to land batches, the project cloned and its branch fetched. Cold, the first batch of 200
-				// agents' run waited for both: 8 changes took as long as 24 did later.
-				if (!input.checks.length) return void (await this.ctx.storage.put("warmedAt", Date.now()));
+				// No checks: warm only to land batches, the project cloned and its branch fetched, and saved as the repo's
+				// snapshot (with nothing installed), so a cold Gate restores it in seconds. Without one, the first batch of 200
+				// agents' runs read 3 or 4 changes in 42 to 61 s, behind the container starting and Express cloning.
+				if (!input.checks.length) {
+					await this.ctx.storage.put("warmedAt", Date.now());
+					await this.snapshotIfDue(container, input.repo);
+					return;
+				}
 				await run(container, ["bash", "-lc", `git merge --abort 2>/dev/null; git checkout -q -f --detach refs/remotes/base/${branch} && git clean -fdq`]);
 				await this.setUpToolchains(container);
 				const install = (await this.checksFor(container, input.checks)).find((c) => INSTALLS.test(c.trim()));
@@ -650,10 +655,9 @@ done`;
 	 * alarm does the work.
 	 */
 	async warmUp(input: WarmUp & { why?: "claimed" | "checked" | "approved" | "set up" }) {
-		// Without checks, only for landing (see warm): asked for once work starts (a claim), never at set up, minutes before.
-		if (!input.checks.length && input.why === "set up") return;
 		const { why, ...warming } = input;
-		if ((why === "checked" || why === "approved") && (await this.snapshot())) return;
+		// With a snapshot, a cold container restores in seconds: a merge near needs no head start.
+		if ((why === "claimed" || why === "checked" || why === "approved") && (await this.snapshot())) return;
 		await this.ctx.storage.put("warmUp", warming);
 		await this.ctx.storage.setAlarm(Date.now());
 	}
