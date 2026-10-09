@@ -182,8 +182,8 @@ describe("sharding on demand through the toolkit", { timeout: 120_000 }, () => {
 		expect(created).toEqual([]);
 		// The eighth: sharded first, then claimed in its shard.
 		expect(await call("claim", { change: "c-last", agent: "agent-last", paths: ["last/one/"], intent: "x" })).toMatchObject({ ok: true });
-		expect(await registry()).toMatchObject({ shardDepth: 2, recordsRepos: 8, shardedBecause: `${SHARD_WHEN.agents} agents hold claims` });
-		expect(created).toEqual([8]);
+		expect(await registry()).toMatchObject({ shardDepth: 2, recordsRepos: 16, shardedBecause: `${SHARD_WHEN.agents} agents hold claims` });
+		expect(created).toEqual([16]);
 		expect(((await call("claims", {})) as unknown as { change: string }[]).map((c) => c.change)).toContain("c-last");
 
 		// A change claimed before the switch merges, citing the registry, and is released from it.

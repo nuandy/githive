@@ -156,8 +156,8 @@ describe("sharding votes on demand through the toolkit", { timeout: 120_000 }, (
 		expect((await root().read())?.commit.state.buckets).toBeUndefined();
 		// The eighth: sharded first, then cast in the commit's bucket.
 		await call("vote", { commit: head, reviewer: "rev-last", role: "review", verdict: "reject", evidence: "not yet" });
-		expect((await root().read())?.commit.state).toMatchObject({ buckets: VOTE_BUCKETS, recordsRepos: 8, shardedBecause: `${SHARD_VOTES_WHEN.reviewers} reviewers voting` });
-		expect(created).toEqual([8]);
+		expect((await root().read())?.commit.state).toMatchObject({ buckets: VOTE_BUCKETS, recordsRepos: 16, shardedBecause: `${SHARD_VOTES_WHEN.reviewers} reviewers voting` });
+		expect(created).toEqual([16]);
 		expect(((await call("status", { change: "c-1" })) as { votes: { reviewer: string }[] }).votes.map((v) => v.reviewer)).toContain("rev-last");
 
 		expect(await call("merge", { change: "c-1", agent: "agent-a" })).toMatchObject({ ok: true });

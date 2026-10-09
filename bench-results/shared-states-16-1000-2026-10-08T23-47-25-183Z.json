@@ -1,0 +1,88 @@
+{
+	"label": "shared-states-16-1000",
+	"rampSeconds": 0,
+	"base": "https://blueprint-bench.nuandy.workers.dev",
+	"repo": "bench-shared-states-16-1000",
+	"racers": 5,
+	"at": "2026-10-08T23:47:25.183Z",
+	"levels": [
+		{
+			"agents": 1000,
+			"wallMs": 73395.73604199999,
+			"calls": 5905,
+			"callsPerSecond": 80.45426503551816,
+			"errors": 20,
+			"failures": [
+				"fetch failed",
+				"fetch failed",
+				"fetch failed",
+				"fetch failed",
+				"fetch failed",
+				"fetch failed",
+				"fetch failed",
+				"fetch failed",
+				"fetch failed",
+				"fetch failed",
+				"fetch failed",
+				"fetch failed",
+				"fetch failed",
+				"fetch failed",
+				"fetch failed",
+				"fetch failed",
+				"fetch failed",
+				"fetch failed",
+				"fetch failed",
+				"fetch failed"
+			],
+			"race": {
+				"winners": 1,
+				"unexpected": []
+			},
+			"leftoverClaims": 0,
+			"tools": {
+				"race": {
+					"n": 5,
+					"p50": 6785.374166000001,
+					"p95": 7142.095459,
+					"p99": 7142.095459,
+					"max": 7142.095459
+				},
+				"claims": {
+					"n": 1980,
+					"p50": 7408.303833000002,
+					"p95": 10751.115124999997,
+					"p99": 13315.936667000002,
+					"max": 17291.393291
+				},
+				"claim": {
+					"n": 980,
+					"p50": 19313.005791000003,
+					"p95": 32168.648291999998,
+					"p99": 37057.765374999995,
+					"max": 41133.508041999994
+				},
+				"check": {
+					"n": 980,
+					"p50": 4753.133375000005,
+					"p95": 9943.331292000003,
+					"p99": 11007.992958000003,
+					"max": 12131.534124999998
+				},
+				"status": {
+					"n": 980,
+					"p50": 2922.9546249999985,
+					"p95": 6298.7701249999955,
+					"p99": 7774.716832999999,
+					"max": 10256.092833000002
+				},
+				"release": {
+					"n": 980,
+					"p50": 3103.962415999995,
+					"p95": 5896.837750000006,
+					"p99": 7612.878291000001,
+					"max": 9698.51883300001
+				}
+			}
+		}
+	]
+}

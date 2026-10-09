@@ -144,6 +144,30 @@ describe("GitCasLog", () => {
 	});
 });
 
+describe("record states shared by readers, by tip", () => {
+	const shared = () => {
+		const kept = new Map<string, { tip: string; json: string }>();
+		return { kept, states: { get: async (ref: string, tip: string) => (kept.get(ref)?.tip === tip ? kept.get(ref)!.json : undefined), put: async (ref: string, tip: string, json: string) => void kept.set(ref, { tip, json }) } };
+	};
+
+	it("lets a reader take what another read at the same tip, and fetch once the tip moves", async () => {
+		const { kept, states } = shared();
+		const remote = async () => ({ url: server.url, token: "unused" });
+		const first = new GitCasLog<State>(remote, "t1", "refs/notes/githive/t1", { states });
+		const tip = await first.append(null, commit({ state: { claims: { "src/x/": "agent-a" } } }));
+		// A reader that fetched it keeps it for the others, under its ref and record format.
+		await new GitCasLog<State>(remote, "t1", "refs/notes/githive/t1", { states }).read();
+		await new Promise((resolve) => setTimeout(resolve, 10));
+		expect(kept.get("refs/notes/githive/t1@1")?.tip).toBe(tip);
+		// Another reader takes it from there: shown here by what it was kept as.
+		kept.set("refs/notes/githive/t1@1", { tip: tip!, json: JSON.stringify(commit({ state: { claims: { kept: "yes" } } })) });
+		expect((await new GitCasLog<State>(remote, "t1", "refs/notes/githive/t1", { states }).read())?.commit.state).toEqual({ claims: { kept: "yes" } });
+		// The tip moved: what was kept is for another tip, so the reader fetches.
+		await first.append(tip!, commit({ state: { claims: { "src/y/": "agent-b" } } }));
+		expect((await new GitCasLog<State>(remote, "t1", "refs/notes/githive/t1", { states }).read())?.commit.state).toEqual({ claims: { "src/y/": "agent-b" } });
+	});
+});
+
 describe("a rehearsed change of record format", () => {
 	type V1 = { claims: Record<string, string> };
 	type V2 = { claims: Record<string, { holder: string }> };

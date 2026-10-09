@@ -1,5 +1,5 @@
 import git from "isomorphic-git";
-import http from "isomorphic-git/http/web";
+import { http } from "../git-http";
 import { isEmptyRepo, type Remote } from "../git";
 import { fetchCommits } from "../git-fetch";
 import { retryTransient } from "../retry";

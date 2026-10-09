@@ -92,7 +92,12 @@ export async function keptRead<T>(env: Env, repo: string, name: string, maxAgeMs
 /** A repo's record log at `ref`, one per ref in the isolate. */
 function recordsLog<S>(env: Env, repo: string, ref: string) {
 	let log = logs.get(ref);
-	if (!log) logs.set(ref, (log = new GitCasLog<unknown>(() => cached(env, repo, `${repo}|write`, () => remoteFor(env.ARTIFACTS, repo, "write", 3600)), repo, ref)));
+	if (!log) {
+		// What other Worker instances already read of the project repo's records, by tip, in its LiveFeed.
+		const feed = () => env.LIVE.getByName(`repo:${repo}`);
+		const states = { get: (r: string, tip: string) => feed().recordAt(r, tip), put: (r: string, tip: string, json: string) => feed().keepRecord(r, tip, json) };
+		logs.set(ref, (log = new GitCasLog<unknown>(() => cached(env, repo, `${repo}|write`, () => remoteFor(env.ARTIFACTS, repo, "write", 3600)), repo, ref, { states })));
+	}
 	return log as GitCasLog<S>;
 }
 

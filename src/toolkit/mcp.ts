@@ -99,7 +99,7 @@ export const DEFAULT_POLICY: ReviewPolicy = { required: 1, vetoes: [], escalate:
 const HOSTED_PREFIX = "githive-";
 const DEFAULT_SHARD_DEPTH = 2;
 /** Records repos per sharded repo, where they're available: Artifacts takes one push at a time per repo. */
-const DEFAULT_RECORDS_REPOS = 8;
+const DEFAULT_RECORDS_REPOS = 16;
 const STALE_AFTER_MS = 30 * 60_000;
 const claimsRef = (repo: string) => `refs/notes/githive-claims/${repo}`;
 const votesRef = (repo: string) => `refs/notes/githive-votes/${repo}`;
@@ -123,7 +123,7 @@ Conventions:
 
 const str = { type: "string" } as const;
 const TOOL_LIST = [
-	{ name: "start", description: "Start GitHive on a project repo (harmless if started; change a started repo's policy or checks with settings): the review policy, the checks run before each merge (each change lives in its own fork, and only the toolkit writes the project), grants: who may vote as each role that can block a merge (registered agent names, 'person:*', a verified identity like 'person:<who>' or 'service:<id>', a pool 'service:<id>/*' (every agent registered under it, never on its own team's changes), 'githive' for GitHive's reviewers; unlisted roles: people and GitHive's reviewers), how claims are kept: in one record until the load calls for more (8 agents holding claims, or over 15 claim writes a minute), then sharded per path 2 segments deep over 8 records repos, so agents in different parts of the tree never contend. shard_depth shards now, this deep (0: never), and records_repos is how many repos the shards are spread over, since a repo takes one push at a time. Returns them.", inputSchema: { type: "object", properties: { repo: str, required: { type: "number" }, vetoes: { type: "array", items: str }, escalate: { type: "array", items: { type: "object", properties: { paths: { type: "array", items: str }, required: { type: "number" }, vetoes: { type: "array", items: str } }, required: ["paths"] } }, grants: { type: "object", additionalProperties: { type: "array", items: str } }, verify: { type: "array", items: str }, shard_depth: { type: "number" }, records_repos: { type: "number" } }, required: ["repo"] } },
+	{ name: "start", description: "Start GitHive on a project repo (harmless if started; change a started repo's policy or checks with settings): the review policy, the checks run before each merge (each change lives in its own fork, and only the toolkit writes the project), grants: who may vote as each role that can block a merge (registered agent names, 'person:*', a verified identity like 'person:<who>' or 'service:<id>', a pool 'service:<id>/*' (every agent registered under it, never on its own team's changes), 'githive' for GitHive's reviewers; unlisted roles: people and GitHive's reviewers), how claims are kept: in one record until the load calls for more (8 agents holding claims, or over 15 claim writes a minute), then sharded per path 2 segments deep over 16 records repos, so agents in different parts of the tree never contend. shard_depth shards now, this deep (0: never), and records_repos is how many repos the shards are spread over, since a repo takes one push at a time. Returns them.", inputSchema: { type: "object", properties: { repo: str, required: { type: "number" }, vetoes: { type: "array", items: str }, escalate: { type: "array", items: { type: "object", properties: { paths: { type: "array", items: str }, required: { type: "number" }, vetoes: { type: "array", items: str } }, required: ["paths"] } }, grants: { type: "object", additionalProperties: { type: "array", items: str } }, verify: { type: "array", items: str }, shard_depth: { type: "number" }, records_repos: { type: "number" } }, required: ["repo"] } },
 	{ name: "settings", description: "Change a started repo's review policy or its checks; whatever you leave out stays as it is. The same fields as start: required approvals, vetoes, escalate (stricter rules for chosen paths), grants (who may vote as each role), verify (the checks run before each merge; [] for none). Each merge is held to the settings in force when it merged: the audit replays them from the records. Returns the settings now.", inputSchema: { type: "object", properties: { repo: str, required: { type: "number" }, vetoes: { type: "array", items: str }, escalate: { type: "array", items: { type: "object", properties: { paths: { type: "array", items: str }, required: { type: "number" }, vetoes: { type: "array", items: str } }, required: ["paths"] } }, grants: { type: "object", additionalProperties: { type: "array", items: str } }, verify: { type: "array", items: str } }, required: ["repo"] } },
 	{ name: "credentials", description: "Git access. With your change: a write token for its own fork, where its branch changes/<change> lives. Without: read access to the project repo.", inputSchema: { type: "object", properties: { repo: str, change: str }, required: ["repo"] } },
 	{ name: "claims", description: "The claims in force: who holds which paths, and why.", inputSchema: { type: "object", properties: { repo: str }, required: ["repo"] } },
@@ -208,6 +208,14 @@ function recordLog<S>(ctx: ToolContext, repo: string, ref: string): GitCasLog<S>
 }
 
 /** A repo's claims, where its registry says they are: in the registry itself, or split into per-path shards. */
+/** The claims in force and the changes merged, read now from the records (see keptClaims). */
+async function advice(ctx: ToolContext, repo: string): Promise<ClaimsAdvice> {
+	const log = recordLog<Registry>(ctx, repo, claimsRef(repo));
+	const head = await log.read();
+	const view = await storeFor(ctx, repo, head?.commit.state, { log, head }).read();
+	return { claims: view.claims, merged: view.released.filter((r) => r.mergedAs).map((r) => r.change) };
+}
+
 /** The arguments start and settings take for the review policy. */
 const POLICY_FIELDS = ["required", "vetoes", "escalate", "grants"] as const;
 
@@ -545,6 +553,9 @@ export async function openCount(ctx: ToolContext, repo: string) {
 
 async function runTool(name: string, args: Args, ctx: ToolContext): Promise<unknown> {
 	const repo = requiredString(args, "repo");
+	// The claims tool is advice: from the kept copy when the context keeps one, without reading the registry
+	// first (on a busy repo, every call reading the project repo is what overloads it).
+	if (name === "claims" && ctx.keptClaims) return (await ctx.keptClaims(repo, () => advice(ctx, repo))).claims;
 	const write = () => ctx.remote(repo, "write");
 	const claims = recordLog<Registry>(ctx, repo, claimsRef(repo));
 	const votes = votesFor(ctx, repo);

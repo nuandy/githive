@@ -73,11 +73,24 @@ export class LiveFeed extends DurableObject<Env> {
 		await this.ctx.storage.delete(`building:${name}`);
 	}
 
+	/** A record's state at `tip`, if a reader kept it (see record-log.ts StateCache). */
+	async recordAt(ref: string, tip: string) {
+		const kept = await this.ctx.storage.get<{ tip: string; json: string }>(`record:${ref}`);
+		return kept?.tip === tip ? kept.json : undefined;
+	}
+
+	/** Keep a record's state at `tip`, its latest: a newer tip replaces it. */
+	async keepRecord(ref: string, tip: string, json: string) {
+		if (json.length > 1_000_000) return;
+		await this.ctx.storage.put(`record:${ref}`, { tip, json });
+	}
+
 	/** Forget the kept views: the repo was deleted. */
 	async clearViews() {
 		const kept = await this.ctx.storage.list({ prefix: "view:" });
 		const building = await this.ctx.storage.list({ prefix: "building:" });
-		await this.ctx.storage.delete([...kept.keys(), ...building.keys()]);
+		const records = await this.ctx.storage.list({ prefix: "record:" });
+		await this.ctx.storage.delete([...kept.keys(), ...building.keys(), ...records.keys()]);
 	}
 
 	private async writes() {

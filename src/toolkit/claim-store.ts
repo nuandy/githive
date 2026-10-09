@@ -1,5 +1,5 @@
 import git from "isomorphic-git";
-import http from "isomorphic-git/http/web";
+import { http } from "../git-http";
 import type { CasLog } from "../record-log";
 import { GitCasLog } from "../record-log";
 import { isEmptyRepo, type Remote } from "../git";
@@ -281,8 +281,11 @@ class Claims implements ClaimStore {
 		const shards = [...placed.keys()].sort();
 		const below = shards.filter((s) => s !== ROOT);
 		if (below.length) {
-			// A change claimed in the registry before sharding is its agent's too.
-			const held = (await this.input.root.read())?.commit.state.claims.find((c) => c.change === input.change);
+			// A change claimed in the registry before sharding is its agent's too. The registry as the caller
+			// just read it will do: what this guards was written before sharding (the check after writing, below,
+			// reads the registry again, fresh).
+			const root = this.known !== undefined ? this.known : await this.input.root.read();
+			const held = root?.commit.state.claims.find((c) => c.change === input.change);
 			if (held && held.agent !== input.agent) throw new Error(changeTaken(input.change, held.agent));
 			// The change's index first, so it always covers every shard the change holds below the registry.
 			// It names the change's agent: another agent's claim under the same name is refused.

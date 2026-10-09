@@ -1,5 +1,5 @@
 import git from "isomorphic-git";
-import http from "isomorphic-git/http/web";
+import { http } from "./git-http";
 import { BOT, isEmptyRepo, type Remote } from "./git";
 import { fetchCommits } from "./git-fetch";
 import { MemoryFS } from "./memory-fs";
@@ -37,6 +37,16 @@ export interface LogCommit<S> {
 	batch: string;
 	/** The record format it was written in (as read; a write is always in the current one). */
 	format?: number;
+}
+
+/**
+ * Record states shared by a log's readers across Worker instances, by ref and
+ * tip. A commit never changes, so what's kept for a tip is never stale; only
+ * the latest tip per ref need be kept.
+ */
+export interface StateCache {
+	get(ref: string, tip: string): Promise<string | undefined>;
+	put(ref: string, tip: string, json: string): Promise<void>;
 }
 
 /** The log as compare-and-swap storage. */
@@ -177,7 +187,8 @@ async function openTip(remote: Remote, ref: string) {
 }
 
 export class GitCasLog<S> implements CasLog<S> {
-	private readonly ref: string;
+	/** The ref this log is kept at: named in errors, so a failure says which record it was. */
+	readonly ref: string;
 
 	/**
 	 * The in-memory repo this log last wrote or read, at that tip. A writer
@@ -191,17 +202,20 @@ export class GitCasLog<S> implements CasLog<S> {
 	/** The format this log writes and upgrades to, and how; tests rehearse other formats. */
 	private readonly format: number;
 	private readonly upgrades: Readonly<Record<number, Upgrade>>;
+	/** Commits this log's other readers (other Worker instances) already read, by tip (see StateCache). */
+	private readonly states?: StateCache;
 
 	/** The log at `ref` in the repo `remote` reaches (`_repo` names it, for callers' readability). */
 	constructor(
 		private readonly remote: () => Promise<Remote>,
 		_repo: string,
 		ref: string,
-		options: { format?: number; upgrades?: Readonly<Record<number, Upgrade>> } = {},
+		options: { format?: number; upgrades?: Readonly<Record<number, Upgrade>>; states?: StateCache } = {},
 	) {
 		this.ref = ref;
 		this.format = options.format ?? RECORD_FORMAT;
 		this.upgrades = options.upgrades ?? UPGRADES;
+		if (options.states) this.states = options.states;
 	}
 
 	async read(): Promise<{ tip: string; commit: LogCommit<S> } | null> {
@@ -214,6 +228,11 @@ export class GitCasLog<S> implements CasLog<S> {
 	async readAt(current: string | null): Promise<{ tip: string; commit: LogCommit<S> } | null> {
 		const remote = await this.remote();
 		if (!current) return null;
+		// Another reader already read this tip: a commit never changes, so its state is the same (no fetch).
+		if (this.held?.tip !== current && this.states) {
+			const json = await this.states.get(`${this.ref}@${this.format}`, current).catch(() => undefined);
+			if (json) return { tip: current, commit: JSON.parse(json) as LogCommit<S> };
+		}
 		// Fetch only if the tip moved since this log last saw it.
 		const { fs, tip } = this.held?.tip === current ? this.held : await retryTransient(() => fetchAt(remote, this.ref, current));
 		if (!tip) return null;
@@ -223,7 +242,7 @@ export class GitCasLog<S> implements CasLog<S> {
 		const json = async (filepath: string) => JSON.parse(decoder.decode((await git.readBlob({ fs, dir: DIR, oid: tip, filepath })).blob));
 		const format = formatOf(commit.message);
 		const raw = await json(STATE_FILE);
-		return {
+		const read = {
 			tip,
 			commit: {
 				author: trailer(TRAILERS.author),
@@ -235,6 +254,10 @@ export class GitCasLog<S> implements CasLog<S> {
 				format,
 			},
 		};
+		// For the other readers: kept by tip, so it's never stale.
+		// Keyed with the format it was read in, so a GitHive reading another format never takes it.
+		if (this.states) void this.states.put(`${this.ref}@${this.format}`, tip, JSON.stringify(read.commit)).catch(() => undefined);
+		return read;
 	}
 
 	/** Where the ref points now, without reading what's there. */

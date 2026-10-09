@@ -1,5 +1,5 @@
 import git from "isomorphic-git";
-import http from "isomorphic-git/http/web";
+import { http } from "./git-http";
 import { MemoryFS } from "./memory-fs";
 import { retryTransient } from "./retry";
 

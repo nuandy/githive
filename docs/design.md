@@ -545,7 +545,7 @@ a write there costs 1.6 s when nobody else is writing. A sharded write costs
 about 5 s (an index, the shard, and the checks above it) at any load. From
 8 agents claiming at once, sharded claims land first.
 
-So `start` records `autoShard`: shard 2 segments deep, over 8 records repos.
+So `start` records `autoShard`: shard 2 segments deep, over 16 records repos.
 A claim shards the registry first when 8 agents would hold claims, or more
 than 15 claims and releases were written a minute over the last 5 minutes
 (`shardingReason`). Sharding makes the records repos, then is one
@@ -610,7 +610,7 @@ must win.
                            [--base https://blueprint-bench.nuandy.workers.dev] [--repo bench-<name>]
 
 `--shard-depth 0` keeps every claim in one record; `--shard-depth 2` shards
-from the start, over 8 records repos. Without it, a new repo shards on demand.
+from the start, over 16 records repos. Without it, a new repo shards on demand.
 The flag only applies to a repo's first `start`. To shard in the project repo
 itself, start the repo first with `shard_depth: 2` and `records_repos: 0`,
 then pass it with `--repo`. `--ramp` spreads the agents' starts over that many
@@ -676,6 +676,31 @@ a half minutes, so they still overlap, and the errors came from every repo
 involved (records repos, the project repo, the agents' forks). That suggests a
 throughput limit across Artifacts for the namespace, not one busy repo:
 roughly 5,000 calls in three and a half minutes, each several Git requests.
+
+A probe later showed otherwise: Artifacts throttles each busy repo, not the
+namespace (a second namespace beside a saturated one saw no errors), and a
+busy repo answers `INTERNAL_ERROR` rather than 429. So the work since has
+been taking requests off the busiest repos:
+
+- **Kept claim views**: the claims list is built once per 30 s per project
+  (in its LiveFeed Durable Object) and served to every caller meanwhile;
+  `next` reads its advice from the same view.
+- **Shared record states**: a record log's state at a tip is kept in the
+  project's LiveFeed, so a Worker isolate that hasn't read a log yet doesn't
+  fetch it from Git again (the tip is still listed, so a state is never
+  stale).
+- **One registry read per claim**: `claim` reuses the caller's read to see
+  whether the repo was claimed before sharding.
+- **16 records repos** by default. 40 made it worse (509 failed): every
+  listing fanned out to all 40.
+- Errors name the repo or record that refused, so a run can be broken down by
+  repo.
+
+With these, 1000 agents ran in 73 s with 20 failures (all client-side
+"fetch failed") and in 81 s with 178 failures, against 213 s and 218
+before. 200 agents ran in 50 s with none. What fails now is the project repo
+(`check` clones it on every call, and every call lists the registry) and the
+agents' forks being made all at once on their first `credentials`.
 
 Small runs pay for sharding: one agent takes 35.5 s against 27.3 s with one
 record, since a read lists the shards before fetching. Sharding on demand

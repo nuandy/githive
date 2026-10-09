@@ -13,9 +13,11 @@ export const reviewerName = (sliceRepo: string, role: string, head: string) => `
  * because the caller retries itself.
  */
 async function withRepo<T>(artifacts: Artifacts, name: string, operation: (repo: ArtifactsRepo) => Promise<T>, { retry = true } = {}): Promise<T> {
-	const repo = await (retry ? retryArtifacts(() => artifacts.get(name)) : artifacts.get(name));
+	const repo = await (retry ? retryArtifacts(() => artifacts.get(name)) : artifacts.get(name)).catch((err) => Promise.reject(naming(err, name)));
 	try {
 		return await operation(repo);
+	} catch (err) {
+		throw naming(err, name);
 	} finally {
 		// The binding provides disposable handles; optional invocation also keeps
 		// lightweight test doubles compatible with the same operation contract.
@@ -25,6 +27,12 @@ async function withRepo<T>(artifacts: Artifacts, name: string, operation: (repo:
 			if (typeof dispose === "function") dispose.call(repo);
 		}
 	}
+}
+
+/** An Artifacts failure, saying which repo it was about (its code and status kept, for retries). */
+function naming(err: unknown, name: string) {
+	if (err instanceof Error && !err.message.includes(`(${name})`)) err.message = `${err.message} (${name})`;
+	return err;
 }
 
 /** A short-lived Git credential for an existing repo. */
