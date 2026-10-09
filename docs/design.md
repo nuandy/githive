@@ -974,4 +974,4 @@ one RepoIndex; the records in Git are what count.
 - **Without a stamp key** nothing is stamped or verified, and the audit takes
   names as written.
 
-An earlier elected-coordinator design is archived on the `elected-mode-archive` branch.
+An earlier elected-coordinator design is kept as the tag `elected-mode-final`.
