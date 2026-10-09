@@ -568,7 +568,12 @@ there) with twenty more for an install and setting up. A merge takes the
 lease for three minutes, until its first step starts, and a waiting merge
 looks again every 3 s. A step stuck past its bound lets the lease run out, and
 a waiting merge takes over. A merge hands the lease on once its own change has
-settled, or after 4 batches if it hasn't, and then waits its turn. Main's
+settled, or after 4 batches if it hasn't, and then waits its turn. Only the
+request has a clock: Cloudflare drops one held open past about 20 minutes (at
+200 agents, four waiting merges got a 502 after 21-25 minutes), so a merge
+answers within 10: landed, refused, or still waiting ("ready and waiting to
+land": merging again waits on, and answers with its commit once it lands).
+A merge holding the lease starts no new batch past its 10 minutes either. Main's
 compare-and-swap keeps the branch right: a batch whose push finds main moved
 checks again on top of it, up to three tries in all; then `merge` refuses,
 asking to merge again. Asked again about a

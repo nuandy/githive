@@ -130,6 +130,14 @@ const STEP_MS = {
 	checkCommand: 10 * 60_000,
 };
 const POLL_MS = 3_000;
+/**
+ * How long a merge waits before it answers "still waiting" (merging again
+ * waits on), and how long one holding the lease goes on starting batches.
+ * Not a limit on landing, which waits as long as the lease is held: Cloudflare
+ * drops a request held open past about 20 minutes (a 502, after 21-25 minutes
+ * at 200 agents), so every answer comes well before.
+ */
+export const ANSWER_WITHIN_MS = 10 * 60_000;
 /** How many batches a merge holding the lease checks before handing it on, if its own change hasn't settled. */
 const ROUNDS = 4;
 /** Who a change's failed checks are recorded as: a rejection of the head they failed on, which sends it back to its agent. */
@@ -183,11 +191,13 @@ export interface MergeInput {
 	prepareChecks?: (gate: string) => Promise<void>;
 	/** How often a merge waiting for its change to land looks (POLL_MS unless set). */
 	pollMs?: number;
+	/** How long before a merge answers, landed or not (ANSWER_WITHIN_MS unless set, as tests do). */
+	answerWithinMs?: number;
 }
 
 export type MergeOutcome =
 	| { ok: true; commit: string; /** Why no checks ran, when they're configured. */ checks?: string }
-	| { ok: false; reasons: string[]; conflicts?: string[]; checks?: CheckResult[] };
+	| { ok: false; reasons: string[]; conflicts?: string[]; checks?: CheckResult[]; /** Still waiting to land, not refused: merging again waits on. */ pending?: true };
 
 type Refused = Extract<MergeOutcome, { ok: false }>;
 
@@ -226,16 +236,29 @@ export async function mergeChange(input: MergeInput): Promise<MergeOutcome> {
 	const mine = await readyNow(input);
 	if (!mine.ok) return (await landedAlready(landing, input.change, mine.head)) ?? mine.refused;
 	const head = mine.ready.head;
+	const answerBy = started + (input.answerWithinMs ?? ANSWER_WITHIN_MS);
 	for (;;) {
 		const turn = await landing.turn(holder, input.change, head, started, LEASE_MS);
 		if ("settled" in turn) return outcomeOf(turn.settled);
 		if (turn.lease) {
-			const outcome = await landWhileHeld(input, landing, holder);
+			const outcome = await landWhileHeld(input, landing, holder, answerBy);
 			// Refused because it isn't ready any more: another batch may have landed it (its claim's released then).
 			if (outcome && !outcome.ok) return (await landedAlready(landing, input.change, head)) ?? outcome;
 			if (outcome) return outcome;
-		} else await sleep(input.pollMs ?? POLL_MS);
+		}
+		// Not landed yet: say so, before the request is held open long enough for Cloudflare to drop it.
+		if (Date.now() >= answerBy) return stillWaiting(input.change, head, Date.now() - started);
+		if (!turn.lease) await sleep(input.pollMs ?? POLL_MS);
 	}
+}
+
+/** A change that's ready and waiting to land, not refused: merging again (with the same commit) waits on, and answers with its commit once it lands. */
+function stillWaiting(change: string, head: string, waitedMs: number): MergeOutcome {
+	return {
+		ok: false,
+		pending: true,
+		reasons: [`${change} is ready and waiting to land (${head.slice(0, 8)}): others' batches came first in the ${Math.round(waitedMs / 60_000)} minutes this merge waited. Call merge again to go on waiting; it lands with a coming batch.`],
+	};
 }
 
 /** What the change came to if it landed lately (at `head`, when known): asked again after it landed, its claim is gone. */
@@ -298,10 +321,11 @@ interface Holding {
 
 /**
  * Holding the branch's lease: land batches until this merge's own change has
- * settled (then it hands the lease on), for at most ROUNDS batches. Null if
- * it hasn't settled by then, or the lease ran out.
+ * settled (then it hands the lease on), for at most ROUNDS batches, starting
+ * none after `answerBy`. Null if it hasn't settled by then, or the lease ran
+ * out.
  */
-async function landWhileHeld(input: MergeInput, landing: Landing, holder: string): Promise<MergeOutcome | null> {
+async function landWhileHeld(input: MergeInput, landing: Landing, holder: string, answerBy: number): Promise<MergeOutcome | null> {
 	let held = true;
 	const holding: Holding = {
 		get held() {
@@ -312,7 +336,8 @@ async function landWhileHeld(input: MergeInput, landing: Landing, holder: string
 		},
 	};
 	try {
-		for (let round = 0; round < ROUNDS && held; round++) {
+		// No new batch once this merge should be answering (a batch takes minutes): the lease goes to a waiting merge.
+		for (let round = 0; round < ROUNDS && held && Date.now() < answerBy; round++) {
 			const done = await landBatch(input, landing, holding);
 			if (!done.ok) return done;
 			const mine = done.settled.find((s) => s.change === input.change);

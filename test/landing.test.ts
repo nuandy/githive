@@ -186,6 +186,29 @@ describe("landing ready changes together", { timeout: 120_000 }, () => {
 		expect(Date.now() - from).toBeGreaterThanOrEqual(250);
 	});
 
+	it("answers that a change is still waiting before the request is held too long, and lands it when merged again", async () => {
+		await readyChange("a-1", { "src/a.txt": "a\n" });
+		const landing = memoryLanding();
+		// Another merge holds the lease, landing its batch, for longer than this merge may wait to answer.
+		expect(await landing.turn("other", "x-1", "h", 0, 60_000)).toEqual({ lease: true });
+		const runs: string[][] = [];
+		const waiting = await mergeChange({ remote: remote(), branch: "main", store: store(), votes: voteStore({ repo: "t1", root: votes(), remote: async () => remote() }), policy, verify: ["npm test"], runChecks: runner(new Set(), runs), change: "a-1", agent: "agent-a-1", landing, pollMs: 20, answerWithinMs: 300 });
+		expect(waiting).toMatchObject({ ok: false, pending: true, reasons: [expect.stringMatching(/^a-1 is ready and waiting to land .* Call merge again/)] });
+		expect(runs).toEqual([]);
+		// The other batch is done: merging again lands it.
+		await landing.drop("other");
+		expect(await merge("a-1", runner(new Set(), runs), landing)).toMatchObject({ ok: true });
+		expect(landed()).toEqual(["a-1"]);
+	});
+
+	it("starts no batch once it should be answering: the lease goes to a merge that's waiting", async () => {
+		await readyChange("a-1", { "src/a.txt": "a\n" });
+		const runs: string[][] = [];
+		const answer = await mergeChange({ remote: remote(), branch: "main", store: store(), votes: voteStore({ repo: "t1", root: votes(), remote: async () => remote() }), policy, verify: ["npm test"], runChecks: runner(new Set(), runs), change: "a-1", agent: "agent-a-1", pollMs: 20, answerWithinMs: 0 });
+		expect(answer).toMatchObject({ ok: false, pending: true });
+		expect(runs).toEqual([]);
+	});
+
 	it("leaves out a change that isn't approved, and a change sent back, and lands only what's ready", async () => {
 		await readyChange("a-1", { "src/a.txt": "a\n" });
 		await claim(claims(), { change: "b-1", agent: "agent-b-1", paths: ["src/b.txt"], intent: "b" });
