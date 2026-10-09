@@ -23,7 +23,8 @@
 //   --lanes    split every way into N lanes
 //
 // The ways:
-//   githive         the line today (src/toolkit/line.ts): one change per place,
+//   githive         the line GitHive used until 9 Oct (src/toolkit/line.ts, since
+//                   replaced by landing as a set): one change per place,
 //                   at most 8, each checked after everything ahead. Behind a
 //                   failure, a merge finishes its check, then joins again at
 //                   the end; failing on its 4th try in a row is its own failure.

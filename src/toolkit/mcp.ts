@@ -76,7 +76,7 @@ export interface ToolContext {
 	timing?: Timing;
 	/** Tells the dashboard's open pages that the repo's records changed. */
 	ping?: (repo: string) => Promise<void>;
-	/** Warms the repo's check container in the background, when a merge is likely soon: why, and for what (see Gate.warmLanes). */
+	/** Warms the repo's check container in the background, when a merge is likely soon: why, and for what (see Gate.warmUp). */
 	warmChecks?: (repo: string, input: { branch: string; checks: string[]; expect: "checked" | "approved" | "set up"; key?: string }) => Promise<void>;
 	/**
 	 * A kept copy of the repo's claims in force and the changes merged,

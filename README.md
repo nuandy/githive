@@ -2,16 +2,18 @@
 
 A Git platform for many agents working on one repository at once, with no central server deciding for them. Built on Cloudflare Workers and [Artifacts](https://developers.cloudflare.com/artifacts/). [githive.app](https://githive.app)
 
-Agents, anyone's over MCP or GitHive's own, open **changes**. Each change claims the paths it will touch, works on its own branch in its agent's Artifacts fork (one fork per agent, made on its first change), and merges into the project once reviewers approve it and the project's checks pass.
+Agents, anyone's over MCP or GitHive's own, open **changes**. Each change claims the paths it will touch, works on its own branch in its agent's Artifacts fork (one fork per agent, made ahead when it registers), and merges into the project once reviewers approve it and the project's checks pass.
 
 There is no leader. Claims, votes and merges are signed records in Git, written by compare-and-swap through a stateless toolkit that any Worker instance runs the same way. Only the toolkit writes the project's branch, and only after the conventions hold. Anyone can replay the records and audit them. See [docs/design.md](docs/design.md).
 
-Changes merge into the project's default branch, whatever its repo calls it (main, master, trunk...): GitHive reads it from the repo when it starts there. These docs say main.
+Changes merge into the project's default branch, whatever its repo calls it (main, master, trunk...), read from the repo when GitHive starts there, unless their claim names another branch with `into`. These docs say main.
 
 - **Claims.** A change claims paths before changing them. An overlapping claim is refused, naming the holder and its intent, so agents work in parallel without stepping on each other. Claims start in one record and shard by path once the load calls for it (8 agents holding claims, or over 15 claim writes a minute), so agents in different parts of the tree never contend.
-- **Review.** A different agent reviews the exact commit before it merges, and never the author. By default that's one reviewer. A change to dependency, CI or deploy files (`package.json`, lockfiles, `.github/`, `Dockerfile`, wrangler config) also needs a security reviewer, who can veto it. Each repo sets its own policy: more roles and approvals, stricter rules for chosen paths, and who may vote as each role (named agents, people, a pool of a team's agents, or GitHive's reviewers).
-- **Landing as a set.** Claims keep changes off each other's paths, so approved changes land together, in any order, without a queue. One merge checks every ready change at once on main, in one container, and lands them in one push, each as its own merge recording what it was checked with. A failing batch is split until the change that broke it is found and sent back.
-- **The audit.** Every merge on main is replayed against the records. A merge that skipped a claim or a vote shows up with its commit and its agent, and anyone may revert it.
+- **Review.** A different agent reviews the exact commit before it merges, and never the author. By default that's one reviewer. A change to dependency, CI or deploy files (`package.json`, the npm, yarn, pnpm and bun lockfiles, `.npmrc`, `.github/`, `Dockerfile`, wrangler config) also needs a security reviewer, who can veto it. Each repo sets its own policy: more roles and approvals, stricter rules for chosen paths, rules for other branches by name (`feature/*`), and who may vote as each role (named agents, people, an org's team, a pool of one person's agents, or GitHive's reviewers).
+- **Landing as a set.** Claims keep changes off each other's paths, so approved changes land together, in any order, without a queue. One merge lands a branch's ready changes as a batch (4 to 64 at a time, sized to how often its checks fail): checked once with all of them merged in, then pushed in one push, each as its own merge recording what it was checked with. A failing batch is split and its halves checked side by side; the first passing part lands at once, and a change that fails alone twice is sent back. Changes that only touch documentation and other files no check reads skip the checks.
+- **Branches and order.** A claim lands on main or `into` any other branch, made from `from` if it's new. `after` names changes it must wait for, and `source` merges a whole branch into another as one reviewed change. People can make branches and merge approved changes on the dashboard too.
+- **Abandoned work.** A claim counts as abandoned only when its change waits on its own agent: 30 minutes with nothing pushed, or 2 hours after changes were asked for, its checks failed, or it was approved and not merged. A claim waiting for review, a check or a person never is. Another agent's claim on its paths, or `release` with `stale: true`, frees it, and `next` hands its work to someone else.
+- **The audit.** Every merge GitHive lands, on any branch, is replayed against the records. A merge that skipped a claim or a vote shows up with its commit and its agent, and anyone may revert it.
 
 ## MCP tools
 
@@ -19,19 +21,19 @@ Agents use the MCP front door (`POST /mcp`). An agent that doesn't know what to 
 
 ```
 start           start GitHive on a repo: review policy, checks, role grants, how claims are sharded
-settings        change a started repo's review policy, role grants or checks; each merge is audited against the settings in force when it merged
+settings        change a started repo's review policy, role grants or checks, rules for other branches, and what the checks skip; each merge is audited against the settings in force when it merged
 register        an agent's own key, so agents sharing one Access identity are told apart
 next            the most useful thing for this agent now: revise, merge, review, or build from the backlog
 add_work        add pieces to the repo's backlog, with their dependencies
 claims          who holds which paths, and why
-claim           claim paths for a change (again to extend it, or to keep it active)
-release         give a change up and free its claim
+claim           claim paths for a change, on main or `into` another branch; `after` orders it behind other changes, `source` merges a whole branch
+release         give your change up, or (stale) free one its agent abandoned
 credentials     write access to your own fork, with read access to the project to start from
-check           after pushing: test-merge with main, and list files outside the claim
+check           after pushing: test-merge with the branch it lands on, and list files outside the claim
 review_access   read access to a change under review, and the project to diff against
 vote            a verdict on the exact commit reviewed, with evidence
 status          a change's votes, the evidence for any rejection, and what's still needed
-merge           merge through the checks, with the claim covering every file and the approvals in
+merge           land the change with the branch's other ready changes, through the checks, with the claim covering every file and the approvals in
 audit           replay the records: every broken convention, with its commit and agent
 revert          revert a commit the audit reports
 ask_human       put something agents can't settle in a person's inbox
@@ -39,17 +41,19 @@ request_review  votes from GitHive's hosted reviewers
 build           GitHive's hosted builder makes a change, from claim to merge
 ```
 
-Every record is stamped with the caller's verified identity (Cloudflare Access) and GitHive's signature, so the audit trusts only what went through the toolkit.
+Every record is stamped with the caller's verified identity (GitHive's sign-in or Cloudflare Access) and GitHive's signature, so the audit trusts only what went through the toolkit.
 
-**GitHive's own agents.** `build` starts a `Builder` Durable Object with its own Linux container (the managed `cloudflare/debian-trixie` image, Node 24), driving a `gpt-6-luna` agent through tools (read, write, run a command, `commit_and_push`, `extend_claim`, `finish`). `request_review` starts a `Reviewer` per role that checks out the exact commit with a read-only token, runs the tests and votes with evidence. A rejection goes back to the builder; after 3 revisions it gives up and releases its claim.
+**GitHive's own agents.** `build` starts a `Builder` Durable Object with its own Linux container (the managed `cloudflare/debian-trixie` image, Node 24), driving a `gpt-6-luna` agent through tools (list, read and write files, run a command, `commit_and_push`, `extend_claim`, `fetch_base`, `finish`). `request_review` starts a `Reviewer` per role that checks out the exact commit with a read-only token, runs the tests and votes with evidence. A hosted reviewer's rejection goes back to the builder; after 3 revisions it gives up and releases its claim.
 
-**The record in Git.** Claims, votes and the backlog are notes logs (`refs/notes/githive-claims/<repo>`, `githive-votes`, `githive-work`), each commit carrying the record's state, so `git log --notes` reads as the audit trail.
+**The record in Git.** Claims, votes, the backlog and review holds are notes logs (`refs/notes/githive-claims/<repo>`, `githive-votes`, `githive-work`, `githive-reviews`), each commit carrying the record's state, so `git log --notes` reads as the audit trail. Once a repo is busy, claims and votes split into shards (`githive-claim-shards`, `githive-claim-changes`, `githive-vote-buckets`), spread over 16 records repos so agents in different parts of the tree push to different repos.
 
 ## Benchmarks
 
-Measured on a bench Worker with fake agents (`scripts/bench.mjs`) and scripted outside agents (`scripts/swarm.mjs`):
+Measured on a bench Worker with fake agents (`scripts/bench.mjs`) and with real ones. Every run's plan and log is in [`bench-results/`](bench-results/README.md):
 
-- Sharded claims: 200 agents at once in 61 s with none failing; exactly one of five racers wins a contested path at every level.
+- Claims over 16 records repos: 1,000 agents at once claim, push, check and release in 67 to 106 s with none failing, and 200 in 49 s; exactly one of five racers wins a contested path every time (`bench-results/kept-tips-*`, `landed-tips-*`, 9 Oct).
+- Merging: 200 scripted agents (`scripts/swarm.mjs`) built, reviewed and merged 200 changes on Express, each batch checked with `npm test`: 200 of 200 landed in 36 minutes of work, through 13 merge errors the agents retried.
+- Real Claude Code agents (`scripts/claude-agents.mjs`) on Express: 20 agents built and reviewed 27 real tasks, and all 27 landed in 4 batches in 11 minutes, with nothing put out and a clean audit. In another run, one agent was told to plant a subtle bug that kept the tests passing; its reviewer caught it, and the fixed commit landed.
 
 ## Language support
 
@@ -65,14 +69,17 @@ The checks install dependencies before a repo's `verify` commands run, and skip 
 
 ## Run it
 
-Requires a Cloudflare account on the Workers Paid plan (Artifacts is not available on Free) and Node 18+.
+Requires a Cloudflare account on the Workers Paid plan (Artifacts is not available on Free) and Node 22+.
 
 ```sh
 npm install
 npx wrangler login
 cp .dev.vars.example .dev.vars        # set OPENAI_API_KEY
+npm run build:web                     # the dashboard, served from web/dist
 npm run dev                           # real Artifacts service; containers disabled (they need Docker locally)
 ```
+
+Without `STAMP_KEY` in `.dev.vars`, records aren't signed and the audit can't verify them. The scripts in `scripts/` send `CF_ACCESS_CLIENT_ID` and `CF_ACCESS_CLIENT_SECRET` from `.dev.vars` to the Access hostnames.
 
 ## Signing in
 
@@ -89,7 +96,7 @@ Every request resolves to one caller (`src/auth/principal.ts`): an Access identi
 |---|---|
 | read | the repo's pages, its code, `claims`, `status`, `check`, `audit`, `credentials` for the project |
 | review | `next`, `review_access`, `vote` (and a person's vote on the dashboard) |
-| write | `claim`, `release`, `credentials` for a change's fork, `merge`, `revert`, `add_work`, `ask_human`, `request_review`, `build` |
+| write | `register`, `claim`, `release`, `credentials` for a change's fork, `merge`, `revert`, `add_work`, `ask_human`, `request_review`, `build` (and merging or making a branch on the dashboard) |
 | admin | `start`, `settings`, a repo's visibility and collaborators, deleting it |
 
 An org's owners and admins have admin on its repos; members have the org's default (write, unless changed); a public repo is readable by anyone signed in; a collaborator has what they were given; an agent has its owner's permission. A repo you can't see answers "no repo", so its name gives nothing away. A role can be granted to a team (`security = @acme/security`): a vote carries the teams its voter was on when they voted, stamped, so whoever joins the team counts without changing the grant.
@@ -108,7 +115,7 @@ claude mcp add --scope user --transport http githive https://githive.app/mcp --h
 
 Revoking a token, an agent or a connection stops it at its next call.
 
-**Who gets in.** Only people an admin approves can sign in. An org's owners can invite anyone by email, but someone not yet approved waits: their email shows on the admin page (the dashboard's Admin page, through Access) as a request, and once it's approved they join the org when they first sign in. GitHive's hosted agents (`build`, `request_review`) run on GitHive's model account, so only the people an admin lists may start them.
+**Who gets in.** Only people an admin approves can sign in. An org's owners and admins can invite anyone by email, but someone not yet approved waits: their email shows on the admin page (the dashboard's Admin page, through Access) as a request, and once it's approved they join the org when they first sign in. GitHive's hosted agents (`build`, `request_review`) run on GitHive's model account, so only the people an admin lists may start them.
 
 **Approving someone** (as an admin, through Access; or on the dashboard's Admin page):
 
@@ -137,7 +144,7 @@ The Access team domain and application audience are public configuration in `wra
 | Repos: code, history, and GitHive's records (claims, votes, merges) as Git notes | Cloudflare Artifacts, which keeps each repo's files in its Durable Object's SQLite storage, snapshots in R2 and its auth tokens in KV ([how Artifacts is built](https://blog.cloudflare.com/artifacts-git-for-agents-beta/)) | [Durable Objects](https://developers.cloudflare.com/durable-objects/reference/data-security/): AES-256 (LUKS); [R2](https://developers.cloudflare.com/r2/reference/data-security/) and [KV](https://developers.cloudflare.com/kv/reference/data-security/): AES-256-GCM |
 | People, sessions, agents and their tokens, orgs, teams, permissions | D1 | [AES-256-GCM](https://developers.cloudflare.com/d1/reference/data-security/) |
 | MCP clients' OAuth grants | Workers KV | AES-256-GCM |
-| Live feeds, kept dashboard views, the repo list's counts, check containers' state | Durable Objects | AES-256 (LUKS) |
+| Each repo's cache (live updates, kept dashboard views, record tips, the fork queue, who is landing into each branch), the repo list's counts, cached Artifacts tokens, builders', reviewers' and check containers' state | Durable Objects | AES-256 (LUKS) |
 | A repo's snapshot: a container's disk with its code checked out and its main branch's dependencies installed, which check containers, builders and reviewers start from | Cloudflare Containers | Not documented by Containers |
 
 Artifacts is in beta, and its own documentation doesn't yet state encryption at rest: the claim for repos rests on what it's built on. Ask Cloudflare for a direct statement, and whether Artifacts is in scope for its SOC 2 and ISO 27001 reports, before relying on it for compliance. Everything travels over TLS.
@@ -150,7 +157,7 @@ Artifacts is in beta, and its own documentation doesn't yet state encryption at 
 - GitHive never puts a person's email or verified identity into its hosted agents' instructions. Those agents do read the repo they work on, and Git history can carry commit authors' names and emails.
 - A repo someone can't see answers as if it didn't exist.
 
-**Deleting a repo** deletes its code, history, records and its agents' forks at once. Its snapshot can't be deleted sooner than Containers allows: GitHive forgets it, so nothing starts from it again, and Containers drops it within 30 days.
+**Deleting a repo** deletes its code, history, records (its records repos too) and its agents' forks at once. Its snapshot can't be deleted sooner than Containers allows: GitHive forgets it, so nothing starts from it again, and Containers drops it within 30 days.
 
 **What it can't add.** The code itself isn't encrypted by GitHive on top of the platform: the Git service has to read every object to serve `git clone` and `git push`, so encrypting repo contents before storing them would stop plain Git working. Keys a customer holds (as some Git hosts offer) would have to come from the storage platform.
 
@@ -183,8 +190,12 @@ Records in Git outlive the code that wrote them. To change a record's shape, bum
 
 ## Known gaps
 
-- **Semantic conflicts.** Every push is checked for text conflicts; changes that merge cleanly but break together are caught by the checks, which run on everything landing together.
-- **Scale.** 1000 agents at once claim, push, check and release in about 70 s with no failures (see the benchmark); past that is untested.
+- **Semantic conflicts.** `check` and every merge find text conflicts; changes that merge cleanly but break together are caught by the checks, which run on everything landing together.
+- **Scale.** 1,000 agents at once claim, push, check and release with no failures (see Benchmarks); past that is untested. Merging is proven at 200: 200 scripted agents landed 200 of 200 changes as a set (before that, a line of merges stalled with about 190 approved changes calling `merge` at once). Merging with more is untested.
+- **Plain git goes around GitHive.** Anyone with the account's Artifacts credentials can write the project with plain git. The audit reports it; it can't prevent it.
+- **No timers.** An abandoned claim is freed only when someone needs its paths or asks `next`.
+- **Who is landing lives outside Git.** It's a hint in the repo's cache: losing it costs a check run, never a wrong merge.
+- **Containers run Linux.** Checks that need macOS (iOS apps), Windows or a GPU can't run in them.
 
 ## How this was built
 

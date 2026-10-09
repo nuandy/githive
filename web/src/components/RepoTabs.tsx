@@ -314,7 +314,7 @@ export interface ChangePageProps {
 	api?: VoteApi;
 	/** Whether the reader may vote (review or more in the repo); without it, no vote form. */
 	canVote?: boolean;
-	/** A person merging the change (write or more in the repo): through its branch's line, as its agent, stamped with their name. */
+	/** A person merging the change (write or more in the repo): landing in a batch with the branch's other ready changes, as its agent, stamped with their name. */
 	merge?: (repo: string, change: string) => Promise<{ ok: boolean; commit?: string; reasons?: string[]; conflicts?: string[] }>;
 }
 

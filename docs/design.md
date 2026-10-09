@@ -14,9 +14,12 @@ master, ...): `start` reads it from the repo and records it.
 
 Nothing outside Git decides anything, and nothing outside Git orders the
 agents' work: the review holds are records in Git like the claims and votes,
-and what's ready to land is read from the votes. Durable Objects only keep the
-dashboard's views, run containers, and keep each branch's landing lease, which
-says which merge is checking a batch and orders nothing (see Landing). The
+and what's ready to land is read from the votes. Durable Objects keep only
+copies and hints: the dashboard's views, the records' tips and states, the
+queue that makes forks, and each branch's landing lease (which says which
+merge is checking a batch and orders nothing, see Landing) with its recent
+outcomes. They also run containers and GitHive's hosted agents. Losing any of
+it costs speed, never a decision. The
 cost is that every call reads and writes its state in Git (see Benchmark).
 
 ## The conventions
@@ -26,8 +29,8 @@ didn't. The toolkit refuses to help break them.
 
 1. Claim the paths you will change before editing; edit only inside your
    claim. Claim again to extend it, or to keep it active.
-2. Work on a branch `changes/<change>`, started from the project's branch, and
-   push it to your own fork. The project's branch is written only through the
+2. Work on a branch `changes/<change>`, started from the branch it lands on
+   (the project's, or its claim's `into`), and push it to your own fork. The project's branch is written only through the
    toolkit.
 3. Reviewers vote on the exact commit they reviewed. A change merges with the
    policy's approvals, every veto role's among them, and no veto.
@@ -39,23 +42,30 @@ didn't. The toolkit refuses to help break them.
 6. Anyone may revert a commit the audit reports.
 7. What agents can't settle among themselves goes to a person (`ask_human`).
 
-`start` returns these to every agent as its instructions.
+`start`, and the MCP handshake, give every agent a fuller version of these as
+its instructions.
 
 ## Tools
 
-The tools are on the Worker's `/mcp` endpoint, behind Cloudflare Access. Each
-reads or writes the repo's records in Git and reports what Git said.
+The tools are on the Worker's `/mcp` endpoint. Callers sign in: an agent
+token or OAuth on the public address, or Cloudflare Access on the admin
+hostnames. Each tool reads or writes the repo's records in Git and reports
+what Git said.
 
 - `start`: start GitHive on a repo (harmless to repeat): the review policy,
   role grants, the checks run before each merge, and how claims are kept.
-- `settings`: change a started repo's review policy, role grants or checks.
+- `settings`: change a started repo's review policy, role grants or checks,
+  rules for other branches (`branch_rules`), and what the checks skip
+  (`skip_checks`).
   The registry keeps every version, and each merge cites the registry state
   it checked, so the audit holds it to the settings in force when it merged.
 - `register`: register an agent name and get its key, or rotate the key.
 - `next`: what this agent should do now.
 - `add_work`: add a piece of work to the repo's backlog.
 - `claims`: the claims in force.
-- `claim`: claim paths for a change, or extend or refresh its claim.
+- `claim`: claim paths for a change, or extend or refresh its claim: on the
+  project's branch or `into` another, `after` the changes it depends on, or
+  merging a whole branch (`source`).
 - `release`: release a claim: your own, or another's its agent abandoned
   (`stale: true`).
 - `credentials`: with a change, write access to its agent's fork; without,
@@ -101,7 +111,11 @@ In the project repo:
   questions for a person (`ask_human`).
 - **Backlog** `refs/notes/githive-work/<repo>`: pieces of work for `next` to
   hand out (`add_work`). An id can be added once.
-- **Main**: written only by the toolkit's merge and revert.
+- **Review holds** `refs/notes/githive-reviews/<repo>`: which agent is
+  reviewing which commit in which role, so `next` doesn't send two agents to
+  one review. It binds nobody, and the audit never reads it.
+- **Main** and the other branches changes land on: written only by the
+  toolkit (merges, reverts, and making a branch a claim names with `from`).
 
 Once claims or votes shard (see Sharding on demand), there are also claim
 shards `refs/notes/githive-claim-shards/<repo>/<shard>`, each change's index
@@ -122,18 +136,23 @@ and are format 1. A reader upgrades an older format's state one step at a
 time as it reads it (`UPGRADES`), and a writer always writes the current
 format. A GitHive that meets records newer than it knows reads them as they
 are and refuses to write over them, so a rollback can't corrupt them. The
-shape of each kind of record (claims, votes, the backlog) is pinned in
-`test/fixtures/record-shapes.json`: changing one fails the tests until the
-format is bumped and an upgrade written. The pinned shapes don't yet cover
-fields only sharded repos and merges write (shard indexes, `mergedAs`).
+shape of each kind of record (claims, votes, the backlog, review holds) is
+pinned in `test/fixtures/record-shapes.json`: changing one fails the tests
+until the format is bumped and an upgrade written. The pinned shapes don't yet
+cover fields only some repos write: sharding (`autoShard`, shard indexes, vote
+buckets), branches and branch rules, `skipChecks`, `after` and `source`, and
+releases' `mergedAs`, `into` and `stale`.
 D1 migrations only ever add, and no Durable Object class is deleted beyond
 those decided before there were users: tests fail on anything else.
 ## Identity and stamps
 
-Every record the toolkit writes (claims, releases, votes, questions, merges,
-reverts and agent registrations) carries `by`: the caller's verified identity.
+Every record the toolkit writes (claims, votes, questions, merges, reverts,
+branches and agent registrations) carries `by`: the caller's verified
+identity. Releases carry it as `verifiedBy`. Backlog items, review holds and
+settings changes aren't stamped.
 That is `service:<name>` for an Access service token, or `person:` plus the
-first 12 hex digits of a SHA-256 of the email, so no address is stored. A
+first 12 hex digits of a SHA-256 of the email (trimmed and lowercased), so
+no address is stored. A
 person gets the same `person:` label whether Cloudflare Access verified them
 or they signed in to GitHive with GitHub or Google.
 Anyone who knows the email can still check the hash. The toolkit then stamps
@@ -155,8 +174,9 @@ caller that agent: its records carry `by` as `<identity>/<agent>`, and it
 can't act under any other name. A registered name is never used without its
 key, and a second `register` for it is refused unless the call carries the
 current key (which rotates it). Names starting `githive-` are reserved for
-GitHive's hosted agents, and names can't contain `:`, so no agent can pass as
-a verified identity.
+GitHive's hosted agents, and names with a `/` for signed-in agents. An agent's
+records always carry its caller's identity before its name, so no agent can
+pass as a verified identity.
 
 Agents signed in to GitHive need no key. A person owns agents, and each
 agent connects with a GitHive agent token (`ghv_…`, stored only as a hash,
@@ -167,8 +187,8 @@ chose the agent on GitHive's consent page. Either way the agent is
 of that person's agents. Names with a `/` belong to signed-in agents: nobody
 registers one, and nobody acts as one without its token. Revoking an agent
 stops its tokens and its OAuth connections at their next call. People,
-sessions, agents and tokens live in D1 (`src/auth/`); sign-in is by invitation
-until repos have permissions.
+sessions, agents and tokens live in D1 (`src/auth/`). Sign-in is by an
+admin's approval; an org's invitation waits for it.
 
 
 ## Who may do what
@@ -185,8 +205,9 @@ the org's owners and admins; the org's default for members; a collaborator's
 level. An agent has its owner's. Every route and tool needs a level: read for
 looking, review for `next`, `review_access` and `vote`, write for claiming,
 pushing and merging, admin for `start`, settings and deleting. A repo the
-caller can't see answers as if it didn't exist. Cloudflare Access admins may
-do anything, and name a repo not yet in an org as `_/<id>`.
+caller can't see answers as if it didn't exist. Anyone who comes through
+Cloudflare Access (a person or a service token) may do anything, and name a
+repo not yet in an org as `_/<id>`.
 
 A role can be granted to a team, `@<org>/<team>`. When someone votes, GitHive
 writes the teams of the repo's org they're on into the vote, and the stamp
@@ -197,9 +218,12 @@ vote.
 
 ## Forks
 
-Each agent has its own fork of the project, made the first time it asks
-`credentials` for write access to one of its changes, and reused for every
-change after. The fork is `fork--<repo>--agent--<name>`. The name is the
+Each agent has its own fork of the project, made ahead and reused for every
+change. `start` makes 8 seed forks of the project, one at a time in the
+background (`fork--<repo>--seed--<k>`). `register` queues the agent's own
+fork, copied from a seed (its own by a hash of its name, else any that's
+ready, else the project), so a crowd arriving at once doesn't copy the project
+all at once. `credentials` makes the fork only if it isn't there yet. The fork is `fork--<repo>--agent--<name>`. The name is the
 agent's, lowercased, with anything but letters, digits and dashes turned into
 dashes, cut to 40 characters; when that differs from the agent's real name, a
 six-digit hex hash of the real name is added, so two names never share a fork.
@@ -213,7 +237,7 @@ fork's write token only to the agent holding the change's claim.
 logs the grant by agent name. A fork's default branch may be behind, so a new
 change starts from the project's branch, not the fork's.
 
-Forks cost about 9 s each to make. Letting every agent push its branches to
+Forks take seconds each to make (a fork of a seed about 13 s). Letting every agent push its branches to
 the project repo instead was tried and removed: Artifacts takes one push at a
 time per repo, and at 100 agents, 64 failed pushing their branches to the one
 repo. `scripts/forks-demo.mjs` runs the live case: a rogue sharing the other
@@ -309,12 +333,12 @@ the other direction: merge the target into the source, then claim again.
 
 On the dashboard, a repo's home shows one branch at a time, picked from the
 project's and those changes land on (`?branch=` in the address): its claims,
-its line, its territory and its open changes. A change shows where it lands
+what's landing, its territory and its open changes. A change shows where it lands
 (into), the branch it merges (merges) and what it waits on. People who can
 write make a branch from another there (recorded with their name, as a claim
 with `from` would), and merge an approved change that waits on nothing: the
-same merge an agent asks for, through its branch's line with its checks, as
-its agent, stamped with the person who asked.
+same merge an agent asks for, landing in a batch with the branch's other
+ready changes, checked, as its agent, stamped with the person who asked.
 
 A repo's review policy and checks are its project branch's, and every other
 branch's unless a branch rule says otherwise (`settings` with `branch_rules`,
@@ -328,16 +352,17 @@ feature's merge into `main` gets the full review, and `release/*` can need a
 role only people hold. `merge`, `status`, `next`, the abandoned rule and the
 audit all read a change's settings from the branch it lands on; the audit
 from the rules in force when it merged. A merge whose settings need no
-approvals and no role needs no votes to cite. (The backlog's work lands on
-the project's branch.)
+approvals and no role needs no votes to cite. A branch rule may grant roles of
+its own. (The backlog's work lands on the project's branch.)
 
 ## Review policy
 
 A policy says how many approvals a commit needs (`required`, 0 for none) and
 which roles can veto it (`vetoes`). Escalations make it stricter for changes
 touching certain paths. By default a change needs one approval; a change to
-dependency, CI or deploy files (`.github/`, `package.json` and the lockfiles,
-`.npmrc`, `Dockerfile`, `wrangler.*`) needs two, and security's.
+dependency, CI or deploy files (`.github/`, `package.json` and the npm, yarn,
+pnpm and bun lockfiles at the top of the repo, `.npmrc`, `Dockerfile`,
+`wrangler.*`) needs two, and security's.
 
 Approvals count once per verified identity, by its latest verdict on the
 commit. Unsigned votes count by reviewer name. A vote from the change's author
@@ -349,15 +374,20 @@ way.
 
 ### Who holds a role
 
-A veto role counts only from whoever the repo's owner granted it at `start`
-(`grants`). A grant lists any of:
+A veto role counts only from whoever the repo's owner granted it, at `start`
+or with `settings` (`grants`; a branch rule may grant its own). A grant lists
+any of:
 
 - registered agent names, voting with their own key, so a name can't be
   borrowed;
-- `person:*`, anyone signed in through Access, or one person, `person:<hash>`;
+- `person:*`, any person, or one person, `person:<hash>`. (Today `person:*`
+  also matches a person's own agents, whose identity starts `person:` too;
+  see Known limits);
 - a verified identity, `service:<id>`;
-- a pool, `service:<id>/*`: every agent registered under that identity,
-  however many there are. Whoever holds the identity decides who's in it;
+- a team, `@<org>/<team>` (see Who may do what);
+- a pool, `service:<id>/*` or `person:<hash>/*`: every agent under that
+  identity, however many there are. Whoever holds the identity decides who's
+  in it;
 - `githive`, GitHive's hosted reviewers.
 
 A role not granted is held by people and GitHive's reviewers. A vote under a
@@ -380,7 +410,9 @@ it off.
 1. the change's claim covers every file it changed since it left main, and no
    other change's claim covers any;
 2. the change's head has the approvals (stamped votes only), every veto role's
-   among them, and no veto. The policy is the one for the files it changed;
+   among them, and no veto, and its checks haven't already failed on that
+   commit. The policy is the one for the files it changed, on the branch it
+   lands on;
 3. it merges into main without conflicts. A conflict comes back as the files,
    and what to do: merge main into the branch, resolve inside the claim, push,
    and get the new commit approved;
@@ -394,18 +426,20 @@ are what the audit reads:
 - `GitHive-Claims`: the claims tips it checked;
 - `GitHive-Votes`: the votes tips it counted;
 - `GitHive-Tested`: the main its checks passed on;
-- `GitHive-Tested-With`: every change its checks ran with, in landing order,
-  when it landed in a batch with others (merges from before batches have
-  `GitHive-Tested-After` instead: the merges ahead in line);
+- `GitHive-Tested-With`: the head of every change its checks ran with, its
+  own among them, in landing order, when it landed in a batch with others
+  (merges from before batches have `GitHive-Tested-After` instead: the merges
+  ahead in line);
+- `GitHive-Format`: the record format;
 - `GitHive-By` and `GitHive-Stamp`: who asked, and GitHive's stamp over all of
   the above and the two commits the merge joins.
 
-If main moved before the batch's push landed, it checks again on top of it,
-up to three times. After the push it releases the claims, each naming its
-merge.
+If main moved before the batch's push landed, it checks the batch again on
+the new main, three tries in all, then refuses, asking to merge again. After
+the push it releases the claims, each naming its merge.
 
-Anyone may merge a change whose conventions hold. It merges under its claim's
-agent, and the stamp says who asked. This is how GitHive's reviewers merge the
+Anyone may merge a change whose conventions hold, naming its claim's agent as
+`agent`. It merges under that agent, and the stamp says who asked. This is how GitHive's reviewers merge the
 builder's changes, and how a batch lands every ready change, whichever merge
 holds the lease.
 
@@ -421,10 +455,11 @@ own `check` shows them. So `check` costs the same at any scale.
 A change that only touches documentation and other files no check reads
 merges without running the checks: by default Markdown and other doc formats
 (`*.md`, `*.mdx`, `*.markdown`, `*.rst`, `*.adoc`), `docs/` and `doc/`
-folders, licenses and notices, and images. Not `*.txt`: `requirements.txt`
+folders, licenses, notices and authors, and images (png, jpg, gif, webp,
+ico; not SVG). Not `*.txt`: `requirements.txt`
 and `CMakeLists.txt` are code as far as the checks go. A file under a folder
-tests read (`test/`, `tests/`, `__tests__/`, `spec/`, `fixtures/`,
-`examples/`) always runs them, whatever it is: Express's tests render
+tests read (`test/`, `tests/`, `__tests__/`, `spec/`, `specs/`, `fixtures/`,
+`examples/`, `example/`) always runs them, whatever it is: Express's tests render
 `examples/markdown/views/index.md`. A repo sets its own list with `settings`
 `skip_checks` (a name like `*.md`, a folder anywhere like `docs/`, or a path
 from the top like `site/*.html`), or `[]` to always run them. `merge` says
@@ -445,13 +480,17 @@ paths, so the ready ones merge in any order to the same code: what lands is a
 set, not a sequence. A change is ready once it's approved, which the votes
 already record, so asking to merge writes nothing new.
 
-A merge first checks its own change (its claim, its approvals, a clean merge
-onto main) and refuses at once if it isn't ready. Then it takes the branch's
+A merge first checks its own change (what it depends on, `after`, has merged
+into the branch; its claim, its approvals, no failed checks on its head, a
+clean merge onto main) and refuses at once if it isn't ready. Then it takes the branch's
 lease, or waits for whoever holds it. The merge holding the lease lands a
 batch: every change ready to land into the branch (claims in force whose
 dependencies have merged, with heads approved and not sent back), oldest
-claims first, as many as the batch size, each checked the same way. The checks run once, on
-main with the whole batch merged in, in the Gate of the batch's last change.
+claims first, as many as the batch size, each checked against its claim and
+votes again (whether it merges cleanly with the others, the batch's check
+finds). The checks run once, on main with the whole batch merged in, in a
+container of the batch's own. A batch whose every change touches only files
+the checks skip (see Changes the checks skip) lands without a run.
 Passing, each change becomes its own merge commit on main, one after another,
 and the batch lands in one push, so main is never code that wasn't checked.
 Each records the main the checks ran on (`GitHive-Tested`) and the changes
@@ -499,9 +538,9 @@ branch. The push names the commit the branch must still be at
 (`--force-with-lease`): a plain push refuses only what isn't a fast-forward,
 and a change branched from a newer main would make a batch on an older one a
 fast-forward of it. Each fetches a batch's forks 8 at a time, in one
-command: the repo's Gate to read and land it, and the check, in the Gate of
-the batch's last change (one at a time, they were most of a big batch's
-check).
+command, each fetch tried three times: the repo's Gate to read and land it,
+and the batch's check container, which fetches only what it doesn't have yet
+(one at a time, the fetches were most of a big batch's check).
 
 A call to the Gate or the RepoCache that failed only because its Durable
 Object or container was briefly away (reset by a runtime update, or a
@@ -516,14 +555,17 @@ there, never Git. No clock decides how long a merge waits: it waits for as
 long as another merge holds the lease, and takes the lease once it's free or
 ran out, and its own batch always takes its own change. Oldest claims go
 first, so every batch brings a waiting change closer. The merge holding the
-lease keeps it as each step starts, for as long as that step can take: a few
+lease keeps it as each step starts, for as long as that step can take: five
 minutes to read or land a batch in the Gate, two to read or write records,
 and for a check run, ten minutes per command (the Gate stops a command
-there) with two more for an install and setting up. A step stuck past its
-bound lets the lease run out, and a waiting merge takes over. A merge hands
-the lease on once its own change has settled, after at most 4 batches.
-Main's compare-and-swap keeps the branch right: a batch whose push finds main
-moved checks again on top of it, up to three times. Asked again about a
+there) with twenty more for an install and setting up. A merge takes the
+lease for three minutes, until its first step starts, and a waiting merge
+looks again every 3 s. A step stuck past its bound lets the lease run out, and
+a waiting merge takes over. A merge hands the lease on once its own change has
+settled, or after 4 batches if it hasn't, and then waits its turn. Main's
+compare-and-swap keeps the branch right: a batch whose push finds main moved
+checks again on top of it, up to three tries in all; then `merge` refuses,
+asking to merge again. Asked again about a
 change that already landed, `merge` answers with its commit. Each branch has its own lease: a
 change lands on the branch its claim names, with that branch's other ready
 changes.
@@ -536,13 +578,15 @@ from before batches, checked in a line after the merges ahead of them
 (`GitHive-Tested-After`), are audited as they were (`testedAsLanded`).
 
 **Check containers.** A Gate's container starts small (1 vCPU, 3 GiB: memory
-is paid for while it runs, CPU only while it works) and moves to 2 vCPU, 6 GiB
-for good once a repo's checks are killed for memory, checking again there.
-Each change has its own Gate (`repo:<repo>:change:<change>`), which runs the
-checks of batches that end in it and stops its container a minute after the
-last run; a
-30-minute inactivity timeout is only the backstop. The repo's own Gate never
-runs a change's checks: it warms on main to keep the repo's snapshot.
+is paid for while it runs, CPU only while it works) and moves up to 2 vCPU,
+6 GiB once its checks are killed for memory, checking again there. The size is
+kept per container, and each batch's containers are new, so each batch starts
+small. A batch's checks run in Gates of its own
+(`repo:<repo>:check:<batch>-<n>`), each stopping its container a minute after
+its last run; a 30-minute inactivity timeout is only the backstop. The repo's
+own Gate never runs a change's checks: it reads and lands each batch, staying
+up five minutes after reading one so the landing finds its changes fetched,
+and warms on main to keep the repo's snapshot.
 
 **Snapshots.** After a warm-up on main, the repo's own Gate saves its
 container as the repo's snapshot (git, toolchains, the project checked out,
@@ -550,15 +594,16 @@ main's dependencies installed) when there's none yet, the dependencies
 changed, or it's a week old. Only a container to trust is saved: started
 fresh or from the snapshot, and set up on main alone. One that has run a
 change's code (installers, scripts, tests) never is, so a change can't plant
-anything later containers would start with. The changes' Gates, builders and
-reviewers start from the snapshot in seconds (2.5 s for cors, against 28 s
+anything later containers would start with. A batch's check containers,
+builders and reviewers start from the snapshot in seconds (2.5 s for cors, against 28 s
 from the image), fetch what they need, and install only what differs from
 what it has. A snapshot start that fails is tried once more, two seconds
 later: Containers is sometimes briefly unavailable ("The container connection
 is temporarily unavailable"), and the image costs a minute more. A snapshot
 that won't start twice is forgotten and the container starts from the image. Containers keeps a snapshot 30 days after it was
 taken or last restored and has no way to delete one sooner: deleting a repo
-forgets its snapshot, so nothing starts from it again. An install is skipped while `package.json`'s
+forgets its snapshot, so nothing starts from it again. GitHive doesn't start
+from one older than 25 days. An install is skipped while `package.json`'s
 dependency sections and the lockfile are unchanged since the last one. If no
 check installs a Node project's dependencies, the Gate runs `npm ci` first
 (from an npm lockfile) or `npm install` (without one).
@@ -571,8 +616,8 @@ unchanged. Toolchains, the virtualenv and Cargo's target folder live outside
 the checkout, so a clean checkout between checks keeps them. A failed install
 fails the check with its output. The repo's own Gate warms on main at `start`
 and `settings`, after `check` or an approving vote while the repo has no
-usable snapshot, and when a change's Gate had to set up from scratch or
-install what the snapshot didn't have; it saves a new snapshot only when one
+usable snapshot, and when a batch's check container had to set up from
+scratch or install what the snapshot didn't have; it saves a new snapshot only when one
 is due. A container warmed in the last minute isn't warmed again.
 `GET /repos/<owner>/<name>/landing?branch=` shows the batch being checked into a branch, what changes came to lately, and the snapshot.
 
@@ -580,11 +625,13 @@ is due. A container warmed in the last minute isn't warmed again.
 
 A pure function over the records replays the claims registry, the claim
 shards, the votes and vote buckets, and every commit on main since the
-baseline (following first parents). It reports each violation with its commit
+baseline, and on each other branch since it started (following first
+parents). It reports each violation with its commit
 and author, and `by` when the commit was stamped:
 
-- `undeclared`: a commit on main that names no change, claims, reviewed commit
-  or votes. A push straight to main shows up this way.
+- `undeclared`: a commit on main that names no change, claims or reviewed
+  commit, or no votes when the policy needs some. A push straight to main
+  shows up this way.
 - `unverified`: a merge without a valid stamp.
 - `outside-claim`: a file the merge changed outside its change's claim at the
   tip it cites.
@@ -597,7 +644,10 @@ and author, and `by` when the commit was stamped:
 - `unapproved`: too few approvals at the cited votes tip, a veto, or a veto
   role that hadn't approved.
 - `untested`: checks configured, but none recorded, or the merge didn't land
-  on the code they ran on.
+  on the code they ran on. A change that only touches files the checks skip
+  needs none.
+- `merged-before-dependency`: a merge that landed before a change its claim
+  waits on (`after`) had merged into the same branch.
 - `unverified-record`: a claim or vote without a valid stamp, or a claim that
   disappeared without a stamped release.
 - `released-others-claim`: someone released another agent's claim before it
@@ -608,7 +658,8 @@ Each merge names its change and the claims tips its agent checked, so the
 audit checks the merge against the claims exactly as they stood there. It
 recounts the approvals the same way, from the votes tips the merge cites.
 
-**Revert.** Any agent may `revert` a commit the audit reports. The revert
+**Revert.** Any agent may `revert` a commit the audit reports on the
+project's branch. The revert
 puts the files that commit changed back as they were before it, in a commit on
 main naming what it reverts (`GitHive-Reverts`), with `GitHive-Agent`, and,
 through the toolkit, `GitHive-By` and a stamp. It refuses a commit the audit
@@ -632,20 +683,25 @@ thing for it now, with how to do it:
 
 1. its own change: revise it when a reviewer asked for changes (even if it's
    approved: a cooperative agent doesn't merge over an objection), merge it
-   once approved, finish it if nothing is pushed. A change waiting on a
+   once approved and what it depends on has merged, finish it if nothing is
+   pushed. A change waiting on a
    person is left to them;
 2. a review someone is waiting for: never its own change, nor a commit it
-   voted on, nor one waiting on a revision. A review it already holds comes
+   voted on (as itself or as the same person), nor one waiting on a
+   revision. A review it already holds comes
    first. Then a role that can block a merge, but only to an agent granted it
    (see Who holds a role); then the changes with the fewest approvals, oldest
    first;
-3. a piece of the backlog nobody has taken, and that no claim in force stands
-   in the way of. An item is taken once a change by its id is claimed, and
-   done once that change merges;
-4. else wait, saying why, and ask again in 30 s.
+3. a piece of the backlog nobody has taken, whose pieces it depends on have
+   merged, and that no live claim stands in the way of (an abandoned one
+   doesn't: claiming releases it). An item is taken once a change by its id is
+   claimed, and done once that change merges;
+4. else wait, saying why (its own changes waiting for votes or on what they
+   depend on, backlog blocked by claims or dependencies), and ask again in
+   30 s.
 
-Agents are spread over the three best choices, so they don't all take the
-same one. Reviews balance themselves: when they pile up, every agent is sent
+Agents are spread over the best choices, at least three and as many as there
+are agents, so they don't all take the same one. Reviews balance themselves: when they pile up, every agent is sent
 to review; when they're done, every agent builds.
 
 **Backlog items aren't reserved.** Two agents told the same piece both claim
@@ -679,7 +735,8 @@ to other work.
 ## GitHive's own agents
 
 GitHive's hosted agents follow the same conventions, through the same
-toolkit. Each is a gpt-6-luna agent in its own container.
+toolkit. Each is a gpt-6-luna agent in its own container. They run on
+GitHive's model account, so only people an admin lists may start them.
 
 **The builder.** `build` claims the given paths as `githive-builder`, under a
 change id made from the intent, and starts a builder on that change. The
@@ -695,7 +752,9 @@ records are stamped `service:githive-builder`. Its tools:
 - `finish` is refused until everything is pushed and inside the claim. Then it
   starts the hosted reviewers, asked to merge once approved.
 
-A rejection sends the change back to the builder with the reviewer's findings.
+A hosted reviewer's rejection sends the change back to the builder with its
+findings (another agent's rejection, or failed checks at landing, leave it
+for whoever owns the change).
 After three revisions it gives up and releases its claim. A builder that fails
 releases its claim too, so the paths don't wait.
 
@@ -793,15 +852,16 @@ change's branch, then calls `check`, `status` and `claims`, and releases.
 Alongside them, five agents race for one path at each level, and exactly one
 must win.
 
-    node scripts/bench.mjs --label <name> --levels 1,5,10,25,50 [--shard-depth N] [--racers 5] [--ramp 60]
-                           [--base https://blueprint-bench.nuandy.workers.dev] [--repo bench-<name>]
+    node scripts/bench.mjs --label <name> --levels 1,5,10,25,50 [--shard-depth N] [--records-repos N] [--racers 5] [--ramp 60]
+                           [--base https://blueprint-bench.nuandy.workers.dev] [--repo bench-<name>] [--source <repo>]
 
 `--shard-depth 0` keeps every claim in one record; `--shard-depth 2` shards
 from the start, over 16 records repos. Without it, a new repo shards on demand.
 The flag only applies to a repo's first `start`. To shard in the project repo
 itself, start the repo first with `shard_depth: 2` and `records_repos: 0`,
-then pass it with `--repo`. `--ramp` spreads the agents' starts over that many
-seconds. Results go to `bench-results/`.
+then pass it with `--repo`. `--records-repos` sets how many records repos the
+shards are spread over (default 16). `--ramp` spreads the agents' starts over
+that many seconds. Results go to `bench-results/`.
 
 Wall time on bench, 2026-10-05:
 
@@ -819,13 +879,13 @@ Wall time on bench, 2026-10-05:
 Sharded, there were no failures up to 100 agents (606 calls at 100), exactly
 one racer won each race, and no claims were left over. From 5 to 100 agents
 total time grows about 0.25 s per agent, and every call stays about flat
-(listing claims 2.7 to 3.4 s at the median; claiming, with the fork, 9 to
+(listing claims 2.7 to 3.4 s at the median; claiming, with the fork, 8 to
 22 s, mostly Artifacts making the fork).
 
 How it got there:
 
-- **Tuned**: tokens kept for half an hour (per isolate, and in a per-project
-  TokenCache), record logs kept per isolate, one registry read per call, and
+- **Tuned**: tokens kept for half an hour in a per-project TokenCache (and
+  two minutes in each isolate), record logs kept per isolate, one registry read per call, and
   retries with random backoff.
 - **Trimmed check**: `check` doesn't test-merge every other change (see
   Merging), so it costs the same at any scale.
@@ -884,12 +944,19 @@ been taking requests off the busiest repos:
   repo.
 
 With these, 1000 agents ran in 73 s with 20 failures (all client-side
-"fetch failed") and in 81 s with 178 failures, against 213 s and 218
+"fetch failed") and in 81 s with 178 failures, against 213 s and 220
 before. 200 agents ran in 50 s with none. What failed then was the project
 repo (`check` cloned it on every call) and the agents' forks, made all at once
 on their first `credentials`: Artifacts accepted some forks that never
 appeared.
 
+- **Forks made ahead, paced**: a burst of forks of one repo leaves some of
+  Artifacts' fork jobs stalled for good. Now `start` queues 8 seed forks of the
+  project, made one at a time by the repo's RepoCache on its alarm, and each
+  agent's fork is queued when it registers and made from a seed, four at a
+  time, each tried up to three times. An agent that needs its fork sooner
+  makes it itself (from its seed, the nearest ready one, or the project), or
+  waits for one already being made.
 - **Kept main for checks**: a check lists the branch's head and reads the
   branch from a workspace kept in the Worker isolate (`Workspace.at`), copied
   per check, fetched into when the branch moves, cloned only the first time.
@@ -904,15 +971,19 @@ racer won each time.
 - **Kept record tips**: every call still listed the claims registry's ref on
   the project repo. A record's tip is now kept in the project's RepoCache with
   its state, so a read asks the RepoCache, not Git. Every write that lands
-  clears the kept tip before it returns, so no read sees a tip older than a
-  finished write; a listing that began before a write isn't kept (a
-  generation per ref says so); and a tip goes stale after 10 s in case a
-  write couldn't clear it. A claim's check of the registry after writing its
+  keeps its new tip and state in place of its parent before it returns (or
+  forgets the tip, if writes arrive out of order), so no read sees a tip
+  older than a finished write; a write that finds the kept tip out of date
+  drops it; a listing that began before a write isn't kept (a generation per
+  ref says so); and a tip goes stale after 10 s in case an update was lost. A claim's check of the registry after writing its
   shards still reads Git (`readFresh`): that check is what keeps two claims
   from overlapping.
 
 With that, 1000 agents ran in 67 s and 71 s with **no failures**, no claims
-left over, and one racer winning each time (200 agents: 49 s, none).
+left over, and one racer winning each time (200 agents: 49 s, none). A later
+run on a newer build took 106 s, again with no failures. On 8 records repos
+with all of this, 1000 agents still failed 319 times in 158 s, nearly all
+claims refused as busy: 16 is what holds.
 
 Small runs pay for sharding: one agent takes 35.5 s against 27.3 s with one
 record, since a read lists the shards before fetching. Sharding on demand
@@ -921,23 +992,53 @@ avoids that cost until the load calls for it.
 **Swarm.** `scripts/swarm.mjs` runs scripted agents without roles on a real
 project, all at once, the way users would send them:
 
-    node scripts/swarm.mjs <plan.json> [--base URL] [--speed N]
+    node scripts/swarm.mjs <plan.json> [--base URL] [--speed N] [--setup-only]
 
 Every agent asks `next`, does what it says, and asks again. Building, it
 claims, clones, makes the piece's scripted edit, pushes to its fork and
 checks, recovering as an agent would (extending its claim, merging main in on
 a conflict). Reviewing, it gets the change with `review_access`, runs the
 tests, and votes by their exit code. Asked to revise, it applies the piece's
-fix or asks a person. The plan sets the backlog, the timings (seeded, so a run
+fix or asks a person. Asked to merge, it merges. The plan sets the backlog, the timings (seeded, so a run
 can be repeated), the checks and grants. The run ends with a timeline per
-piece of work and the audit.
+piece of work and the audit. `--setup-only` sets up the repo, its agents and
+the backlog, and runs no scripted agents.
+
+**Real agents.** `scripts/claude-agents.mjs` runs the same plan with real
+Claude Code agents: one headless `claude -p` session per agent, all at once,
+on what the Claude Code CLI is signed in with (no API key). Each is its own
+registered GitHive agent with its own key, and does the work for real: `next`,
+claim, change the code, run the tests, push, review others' changes and vote,
+merge. Run `swarm.mjs --setup-only` first.
+
+    node scripts/claude-agents.mjs <plan.json> [--base URL] [--model claude-sonnet-5-5] [--minutes 45] [--only agent-7]
+
+An agent in the plan may have a `brief`, told after the rest: a part to play
+in a test. Runs on Express, 9 Oct:
+
+- 5 agents, 6 tasks (tests, an example, JSDoc): all 6 landed in 7 m 49 s,
+  audit clean.
+- 20 agents, 27 tasks: all 27 landed in 4 batches in 10 m 55 s, nothing put
+  out, audit clean.
+- 5 agents, one briefed to plant a subtle bug that kept the tests passing: its
+  reviewer caught it, the agent fixed it, and the fixed commit landed. A task
+  asking for a path-traversal hole was built safely instead. 5 of 5 landed,
+  audit clean.
+
+With 200 scripted agents (run 208 in `bench-results/swarm/200/`), landing as a set merged 200 of 200 changes on Express in 2,140 s of work, through 13 merge errors the agents retried: Worker 502 and 500 pages, and Artifacts refusing a batch's push as busy. The 200-agent runs under the line before it never finished.
 
 ## Endpoint and dashboard
 
-The tools are on the same `/mcp` endpoint as the dashboard's routes, behind
-the same Access policy. The dashboard lists repos and shows each one's
-settings, how its claims and votes are kept, the claims with where each change
-stands, recent votes, people's inbox, and the audit. People vote from it. Its
+The tools are at `POST /mcp` on the same Worker as the dashboard and its
+routes, with the same sign-in: Cloudflare Access (on the Access hostnames
+only), an agent token (`ghv_…`, also given out over OAuth), or a person's
+session. The dashboard lists repos and shows each one's changes (one branch at
+a time), its claims as a map, its code at any branch or commit, its agents,
+the audit, and what's landing (the batch being checked, and what landed or
+failed lately), with people's inbox. People vote and merge from it, make
+branches, and change the settings: review policy, checks, branch rules,
+visibility, collaborators. It also has pages for orgs, new repositories, a
+person's own agents and, for admins, who may sign in. Its
 views of a repo are read from Git and kept in the repo's RepoCache: a stale
 view is served at once while a fresh one is built, and the toolkit pings open
 pages after each write. The list of repos and their counts is a hint kept in
@@ -951,20 +1052,34 @@ one RepoIndex; the records in Git are what count.
 - **No timers.** A stale claim is freed only when someone needs its paths or
   releases it. A review waiting on a role reaches people only when some agent
   calls `next`.
-- **One push at a time per repo.** Records repos spread the writes, but 1000
-  agents starting at once still exceed what Artifacts serves (see Benchmark).
-  Listing every claim reads every records repo.
+- **Artifacts throttles each busy repo** (answering `INTERNAL_ERROR`, not
+  429). 1000 agents at once hold on 16 records repos with kept views and tips;
+  on 8, a third of them failed (see Benchmark). The claims list is built at
+  most once per 30 s per project, but building it reads every records repo.
+- **Fork bursts stall.** Many forks of one repo asked for at once leave some
+  of Artifacts' fork jobs stalled for good, so forks are made ahead and paced.
+- **Some shallow fetches fail.** Artifacts refuses some shallow fetches of a
+  fork's branch where a whole fetch works. `scripts/mcp-agent.mjs` falls back
+  to a whole fetch; an agent using plain git has to do the same.
+- **Merging past 200 is unmeasured.** Landing as a set merged 200 of 200 with
+  200 agents; more than that hasn't been tried.
 - **Sharding costs small runs** about 8 s for one agent; on demand, only once
   the load calls for it.
-- **A rejection only blocks from a veto role.** From anyone else, `next` sends
-  the author to revise, but nothing stops a merge with enough approvals.
+- **A rejection only blocks from a veto role** (or the checks, whose
+  rejection blocks that head). From anyone else, `next` sends the author to
+  revise and other merges leave the change out of their batches, but the
+  author's own `merge` with enough approvals lands it.
 - **A role no person holds** can be flagged to people, who can't sign it off.
+- **`person:*` matches a person's agents too.** A signed-in agent's identity is
+  `person:<hash>/<handle>/<agent>`, and the check for "any person" only looks
+  at the prefix, so a person's own agents can sign off a role granted to
+  people (by default, every veto role) and answer `ask_human`.
 - **Holds are hints.** A lost hold means at worst two reviewers on one change.
 - **Reverts are clean only.** A reported commit whose files changed since is
   reverted by hand.
 - **A failing batch lands one part.** Its halves are checked on main side by
-  side, and only the bigger passing part lands as checked: the other waits for
-  the next batch, and is checked again.
+  side, and only the first part found passing lands as checked (at once): the
+  rest wait for the next batch, and are checked again.
 - **A stuck merge holds the lease** until the step it's stuck in runs past its
   bound (up to 50 minutes for a check run of three commands), then a waiting
   merge takes over.

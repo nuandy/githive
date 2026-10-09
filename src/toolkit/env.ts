@@ -122,7 +122,7 @@ export function toolContextFor(env: Env, by: string | undefined, caller: { agent
 		register: async (repo) => env.REPO_INDEX.getByName("all").addRepo(repo),
 		summarize: (repo, patch) => env.REPO_INDEX.getByName("all").summarize(`repo:${repo}`, patch),
 		ping: async (repo) => void (await env.REPO_CACHE?.getByName(`repo:${repo}`).ping("records")),
-		// The repo's own Gate keeps its snapshot fresh (see Gate.warmUp): the merges' checks run in their changes' Gates.
+		// The repo's own Gate keeps its snapshot fresh (see Gate.warmUp): a batch's checks run in Gates of the batch's own.
 		warmChecks: async (repo, { expect, ...input }) => {
 			const remote = await cached(env, repo, `${repo}|read`, () => remoteFor(env.ARTIFACTS, repo, "read", 3600));
 			await env.GATE.getByName(`repo:${repo}`).warmUp({ repo, ...input, base: { remote: remote.url, token: remote.token }, why: expect });
@@ -150,8 +150,8 @@ export function toolContextFor(env: Env, by: string | undefined, caller: { agent
 		agentStatus: (repo, change, head, roles) => hostedAgentStatus(env, repo, change, head, roles),
 		head: async (repo, branch) => (await headOf(env.ARTIFACTS, repo, branch)) ?? fail(409, `${repo} has no ${branch} branch`),
 		defaultBranch: async (repo) => (await defaultBranch(await remoteFor(env.ARTIFACTS, repo, "read", 3600))) ?? fail(409, `${repo} has no commits`),
-		// A batch's checks, each in a change's own Gate and container (the batch's last change's: halves of a batch, checked
-		// side by side, end in different changes), on main with the batch's changes merged in, in order.
+		// A batch's checks, in Gates named for the batch and a place in its search (a half stays in its parent's, the
+		// other takes the next), on main with the batch's changes merged in, in order; or the last change's Gate when unnamed.
 		runChecks: (repo) => {
 			const read = () => cached(env, repo, `${repo}|read`, () => remoteFor(env.ARTIFACTS, repo, "read", 3600));
 			const fork = (agent: string) => cached(env, repo, `fork:${repo}:${agent}|read`, () => changeRemote(env, repo, agent, "read", 3600));
