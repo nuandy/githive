@@ -121,8 +121,40 @@ async function tool(name, toolArgs, keyFile) {
 }
 
 const sh = (cwd, command) => run("bash", ["-lc", command], { cwd, maxBuffer: 64 * 1024 * 1024, env: { ...process.env, PLAN: here } });
-const git = (cwd, ...rest) => run("git", ["-C", cwd, ...rest], { maxBuffer: 64 * 1024 * 1024 });
-const helper = (...rest) => run("node", [join(root, "scripts/mcp-agent.mjs"), ...rest, "--base", BASE], { maxBuffer: 16 * 1024 * 1024 });
+/**
+ * Git's network work (and the helper's clones), at most NETWORK_AT_ONCE at
+ * once on this machine, each tried again on a local network failure: 200
+ * agents' Git at once ran out this machine's DNS ("Could not resolve host",
+ * 12 builds of a run), which says nothing about GitHive.
+ */
+const NETWORK_AT_ONCE = 32;
+const NETWORK_TRIES = 3;
+const LOCAL_NETWORK = /Could not resolve host|Failed to connect|Connection reset|SSL_ERROR_SYSCALL|Recv failure/i;
+let networking = 0;
+const waitingForNetwork = [];
+async function onNetwork(work) {
+	if (networking >= NETWORK_AT_ONCE) await new Promise((resolve) => waitingForNetwork.push(resolve));
+	networking++;
+	try {
+		for (let attempt = 1; ; attempt++) {
+			try {
+				return await work();
+			} catch (err) {
+				if (attempt === NETWORK_TRIES || !LOCAL_NETWORK.test(String(err.stderr ?? err.message ?? err))) throw err;
+				await sleep(2_000 * attempt);
+			}
+		}
+	} finally {
+		networking--;
+		waitingForNetwork.shift()?.();
+	}
+}
+const NETWORK_GIT = new Set(["push", "fetch", "pull", "clone", "ls-remote"]);
+const git = (cwd, ...rest) => {
+	const call = () => run("git", ["-C", cwd, ...rest], { maxBuffer: 64 * 1024 * 1024 });
+	return NETWORK_GIT.has(rest.find((r) => !r.startsWith("-"))) ? onNetwork(call) : call();
+};
+const helper = (...rest) => onNetwork(() => run("node", [join(root, "scripts/mcp-agent.mjs"), ...rest, "--base", BASE], { maxBuffer: 16 * 1024 * 1024 }));
 
 const work = at(plan.work ?? "swarm-work");
 rmSync(work, { recursive: true, force: true });
