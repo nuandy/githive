@@ -444,6 +444,32 @@ if (plan.setup?.verify?.length) {
 		await sleep(5_000);
 	}
 }
+// And once its agents' forks are made, as on a repo that's been running: GitHive makes them as agents register, a few at
+// a time, and agents released before then wait on their forks (92 builds failed so in a run of 200).
+{
+	const until = Date.now() + 30 * 60_000;
+	let said = 0;
+	for (;;) {
+		const forks = await fetch(`${BASE}/repos/_/${plan.repo}/landing?branch=${encodeURIComponent(branch)}`, { headers: access, dispatcher: patient })
+			.then((r) => (r.ok ? r.json() : {}))
+			.then((landing) => landing.forks)
+			.catch(() => undefined);
+		const left = forks ? forks.seedsQueued + forks.agentsQueued : undefined;
+		if (left === 0) {
+			say("swarm", `the agents' forks are made (${forks.seedsReady} seeds)`);
+			break;
+		}
+		if (Date.now() > until) {
+			say("swarm", `starting with ${left ?? "an unknown number of"} forks still to make after 30 minutes`);
+			break;
+		}
+		if (Date.now() - said > 60_000) {
+			say("swarm", forks ? `waiting for forks: ${forks.seedsQueued} seeds and ${forks.agentsQueued} agents' forks to make` : "waiting for forks");
+			said = Date.now();
+		}
+		await sleep(5_000);
+	}
+}
 const workStarted = Date.now();
 const setupSeconds = ((workStarted - started) / 1000).toFixed(0);
 // Set up for other agents to work on (real ones, see claude-agents.mjs): the repo, its agents and backlog, nothing run.

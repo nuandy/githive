@@ -269,8 +269,9 @@ app.get("/repos/:owner/:name/landing", async (c) => {
 	const branch =
 		c.req.query("branch")?.trim() ||
 		projectBranch((await new GitCasLog<Registry>(() => remoteFor(c.env.ARTIFACTS, repo.id, "read", 3600), repo.id, `refs/notes/githive-claims/${repo.id}`).read())?.commit.state);
-	const [landing, snapshot] = await Promise.all([rpc(c.env.REPO_CACHE.getByName(`repo:${repo.id}`).landingView(branch)), rpc(c.env.GATE.getByName(`repo:${repo.id}`).snapshotInfo())]);
-	return c.json({ branch, ...landing, snapshot });
+	const cache = c.env.REPO_CACHE.getByName(`repo:${repo.id}`);
+	const [landing, leaseHeld, forks, snapshot] = await Promise.all([rpc(cache.landingView(branch)), cache.landingLeaseHeld(branch), rpc(cache.forkQueue()), rpc(c.env.GATE.getByName(`repo:${repo.id}`).snapshotInfo())]);
+	return c.json({ branch, leaseHeld, ...landing, forks, snapshot });
 });
 app.get("/repos/:owner/:name/audit", async (c) => {
 	const repo = await routeRepo(c, "read");

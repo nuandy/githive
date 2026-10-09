@@ -1010,8 +1010,11 @@ appeared.
 - **Forks made ahead, paced**: a burst of forks of one repo leaves some of
   Artifacts' fork jobs stalled for good. Now `start` queues 8 seed forks of the
   project, made one at a time by the repo's RepoCache on its alarm, and each
-  agent's fork is queued when it registers and made from a seed, four at a
-  time, each tried up to three times. An agent that needs its fork sooner
+  agent's fork is queued when it registers and made from a seed, 16 at a
+  time (each next one started as one finishes), each tried up to three times.
+  Four at a time, each four waiting on its slowest, 200 agents' forks came at
+  about 4 every 30 to 60 s; 16 at a time, they took about 170 s, with no fork
+  failing, and 200 agents were set up, forks and all, in 268 s. An agent that needs its fork sooner
   makes it itself (from its seed, the nearest ready one, or the project), or
   waits for one already being made.
 - **Kept main for checks**: a check lists the branch's head and reads the

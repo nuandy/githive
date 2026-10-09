@@ -32,7 +32,7 @@ import { type Ahead, type Checking, dropLease, emptyLanding, type LandingState, 
 // tip is refused by Git and retried.
 //
 // Forks. The queue that makes a project's seed forks one at a time, then
-// agents' forks a few at a time. Lost, agents make their own forks.
+// agents' forks 16 at a time. Lost, agents make their own forks.
 
 interface View {
 	/** The view as JSON, as served. */
@@ -63,8 +63,15 @@ interface ForkJob {
 	tries: number;
 }
 
-/** Agents' forks the queue makes at once (seeds: one at a time). */
-const AGENT_FORKS_AT_ONCE = 4;
+/**
+ * Agents' forks the queue makes at once (seeds: one at a time), each next one
+ * started as one finishes: about two per seed, each agent's from its own. Four
+ * at a time, each four waiting on its slowest, made 200 agents' forks at about
+ * 4 every 30 to 60 s: half an hour before the last could push.
+ */
+const AGENT_FORKS_AT_ONCE = 16;
+/** How long one alarm keeps starting forks; those started finish, then the next alarm goes on. */
+const FORK_ROUND_MS = 60_000;
 /** Tries per fork before the queue gives up on it (an agent's own credentials still make it). */
 const FORK_TRIES = 3;
 
@@ -177,18 +184,28 @@ export class RepoCache extends DurableObject<Env> {
 	 * Forks to make for this repo in the background: its seeds ("seed:<k>")
 	 * and agents' own ("agent:<name>"), queued once each. Its alarm makes them,
 	 * seeds one at a time (a burst of forks from one repo stalls Artifacts' fork
-	 * jobs), then agents' a few at a time. It only paces fork creation: an
-	 * agent that needs its fork sooner makes it itself, and waits for one the
-	 * queue is making.
+	 * jobs), then agents' AGENT_FORKS_AT_ONCE at a time, from the seeds. It only
+	 * paces fork creation: an agent that needs its fork sooner makes it itself,
+	 * and waits for one the queue is making.
 	 */
 	async queueForks(repo: string, items: string[]) {
-		const queue = (await this.ctx.storage.get<ForkJob[]>("forks:queue")) ?? [];
-		const ready = new Set(((await this.ctx.storage.get<number[]>("forks:seeds")) ?? []).map((k) => `seed:${k}`));
-		const fresh = items.filter((item) => !ready.has(item) && !queue.some((job) => job.item === item));
-		if (!fresh.length) return;
-		await this.ctx.storage.put("forks:queue", [...queue, ...fresh.map((item) => ({ item, tries: 0 }))]);
-		await this.ctx.storage.put("forks:repo", repo);
-		if (!(await this.ctx.storage.getAlarm())) await this.ctx.storage.setAlarm(Date.now() + 100);
+		await this.inQueueTurn(async () => {
+			const queue = (await this.ctx.storage.get<ForkJob[]>("forks:queue")) ?? [];
+			const ready = new Set(((await this.ctx.storage.get<number[]>("forks:seeds")) ?? []).map((k) => `seed:${k}`));
+			const fresh = items.filter((item) => !ready.has(item) && !queue.some((job) => job.item === item));
+			if (!fresh.length) return;
+			await this.ctx.storage.put("forks:queue", [...queue, ...fresh.map((item) => ({ item, tries: 0 }))]);
+			await this.ctx.storage.put("forks:repo", repo);
+			if (!(await this.ctx.storage.getAlarm())) await this.ctx.storage.setAlarm(Date.now() + 100);
+		});
+	}
+
+	/** The fork queue's changes, one at a time: forks finish side by side, and agents queue theirs meanwhile. */
+	private queueTurn: Promise<unknown> = Promise.resolve();
+	private inQueueTurn<T>(change: () => Promise<T>): Promise<T> {
+		const run = this.queueTurn.then(change);
+		this.queueTurn = run.catch(() => undefined);
+		return run;
 	}
 
 	/** The seeds made so far, by number. */
@@ -196,29 +213,52 @@ export class RepoCache extends DurableObject<Env> {
 		return (await this.ctx.storage.get<number[]>("forks:seeds")) ?? [];
 	}
 
+	/** How far the forks queue has got: seeds ready, and seeds and agents' forks still to make (for the landing view, and a test waiting on them). */
+	async forkQueue() {
+		const [queue, seeds] = await Promise.all([this.ctx.storage.get<ForkJob[]>("forks:queue"), this.readySeeds()]);
+		const queued = queue ?? [];
+		const seedsQueued = queued.filter((job) => job.item.startsWith("seed:")).length;
+		return { seedsReady: seeds.length, seedsQueued, agentsQueued: queued.length - seedsQueued };
+	}
+
 	async alarm() {
 		const repo = await this.ctx.storage.get<string>("forks:repo");
 		const queue = (await this.ctx.storage.get<ForkJob[]>("forks:queue")) ?? [];
 		if (!repo || !queue.length) return;
-		const seeds = queue.filter((job) => job.item.startsWith("seed:"));
-		const batch = seeds.length ? seeds.slice(0, 1) : queue.slice(0, AGENT_FORKS_AT_ONCE);
-		const outcomes = await Promise.allSettled(
-			batch.map((job) => (job.item.startsWith("seed:") ? makeSeed(this.env, repo, Number(job.item.slice(5))) : makeAgentFork(this.env, repo, job.item.slice(6)))),
-		);
-		const ready = (await this.ctx.storage.get<number[]>("forks:seeds")) ?? [];
-		const retry: ForkJob[] = [];
-		batch.forEach((job, i) => {
-			if (outcomes[i].status === "fulfilled") {
-				if (job.item.startsWith("seed:")) ready.push(Number(job.item.slice(5)));
-			} else if (job.tries + 1 < FORK_TRIES) retry.push({ ...job, tries: job.tries + 1 });
-			else console.error(`fork queue for ${repo} gave up on ${job.item}: ${String((outcomes[i] as PromiseRejectedResult).reason).slice(0, 200)}`);
-		});
-		// Read again: callers may have queued more meanwhile.
-		const now = (await this.ctx.storage.get<ForkJob[]>("forks:queue")) ?? [];
-		const rest = [...now.filter((job) => !batch.some((b) => b.item === job.item)), ...retry];
-		await this.ctx.storage.put("forks:seeds", [...new Set(ready)].sort((a, b) => a - b));
-		await this.ctx.storage.put("forks:queue", rest);
-		if (rest.length) await this.ctx.storage.setAlarm(Date.now() + 1_000);
+		// Seeds first, one an alarm; then agents' forks, side by side, until the queue is empty or the round is up.
+		const seeding = queue.some((job) => job.item.startsWith("seed:"));
+		const until = Date.now() + FORK_ROUND_MS;
+		const making = new Set<string>();
+		const next = () =>
+			this.inQueueTurn(async () => {
+				const now = (await this.ctx.storage.get<ForkJob[]>("forks:queue")) ?? [];
+				// Seeds queued while agents' forks are made (by an agent that found none ready) wait for the next alarm.
+				const job = now.find((j) => !making.has(j.item) && j.item.startsWith("seed:") === seeding);
+				if (job) making.add(job.item);
+				return job;
+			});
+		const worker = async () => {
+			for (let job = await next(); job; job = seeding || Date.now() > until ? undefined : await next()) {
+				const made = await (job.item.startsWith("seed:") ? makeSeed(this.env, repo, Number(job.item.slice(5))) : makeAgentFork(this.env, repo, job.item.slice(6))).then(
+					() => null,
+					(err: unknown) => err,
+				);
+				await this.inQueueTurn(async () => {
+					const now = (await this.ctx.storage.get<ForkJob[]>("forks:queue")) ?? [];
+					const rest = now.filter((j) => j.item !== job!.item);
+					if (made === null && job!.item.startsWith("seed:")) {
+						const ready = (await this.ctx.storage.get<number[]>("forks:seeds")) ?? [];
+						await this.ctx.storage.put("forks:seeds", [...new Set([...ready, Number(job!.item.slice(5))])].sort((a, b) => a - b));
+					}
+					if (made !== null && job!.tries + 1 < FORK_TRIES) rest.push({ ...job!, tries: job!.tries + 1 });
+					else if (made !== null) console.error(`fork queue for ${repo} gave up on ${job!.item}: ${String(made).slice(0, 200)}`);
+					await this.ctx.storage.put("forks:queue", rest);
+				});
+				making.delete(job.item);
+			}
+		};
+		await Promise.all(Array.from({ length: seeding ? 1 : AGENT_FORKS_AT_ONCE }, worker));
+		if (((await this.ctx.storage.get<ForkJob[]>("forks:queue")) ?? []).length) await this.ctx.storage.setAlarm(Date.now() + 1_000);
 	}
 
 	/** What `change` at `head` came to in `branch`, or whether `holder` holds its lease now (see Landing.turn). */
@@ -254,6 +294,12 @@ export class RepoCache extends DurableObject<Env> {
 	async landingView(branch: string) {
 		const { checking, recent } = await this.landing(branch);
 		return { checking, recent };
+	}
+
+	/** Whether a merge holds `branch`'s lease now (who holds it stays here). */
+	async landingLeaseHeld(branch: string) {
+		const { lease } = await this.landing(branch);
+		return !!lease && lease.until > Date.now();
 	}
 
 	/** Whether these changes, merged onto `base` in this order, passed the checks into `branch` already (see LandingState.passed). */
