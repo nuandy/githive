@@ -1,6 +1,6 @@
 // Helpers for the Durable Objects that run work in a Linux container: builders, reviewers and the gate.
 
-import { retryTransient } from "./retry";
+import { retryTransient, sleep } from "./retry";
 import { INSTALL, MARKER_PATHSPECS, PROFILE, type Toolchain, detectToolchains } from "./toolchains";
 
 export const IMAGE = "cloudflare/debian-trixie";
@@ -63,7 +63,7 @@ export async function bootContainer(
 			);
 		}
 		if (container.running) await container.destroy("the snapshot was unusable").catch(() => undefined);
-		if (attempt < SNAPSHOT_STARTS) await new Promise((resolve) => setTimeout(resolve, SNAPSHOT_RETRY_MS));
+		if (attempt < SNAPSHOT_STARTS) await sleep(SNAPSHOT_RETRY_MS);
 	}
 	container.start({ ...options, image: IMAGE });
 	// WORKDIR doesn't exist until a clone, so setup runs from /.

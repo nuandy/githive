@@ -1,5 +1,6 @@
 import type { GitHubLink, WorkflowRun } from "../github";
 import type { BatchGit, CheckResult, CheckRunner } from "./merge";
+import { sleep } from "../retry";
 
 // Checks on GitHub Actions, for a repo connected to GitHub with verify ["github-actions"]. The Gate merges a
 // batch onto main as it will land and pushes that commit to githive/checks/<id>, where the repo's workflows run.
@@ -13,8 +14,6 @@ export const onActions = (verify: string[] | undefined) => !!verify?.includes(AC
 const RUNS_WITHIN_MS = 30 * 60_000;
 const POLL_MS = 10_000;
 const FIRST_RUN_WITHIN_MS = 3 * 60_000;
-
-const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /** A check runner that runs each batch on the connected GitHub repo's workflows. */
 export function actionsChecks(
