@@ -2,9 +2,8 @@ import type { Hono } from "hono";
 import { type Level, type Org, OrgStore, type Role } from "./orgs";
 import type { Principal } from "./principal";
 
-// Orgs and their people: make an org, see one, and manage its members,
-// invitations and teams. Owners and admins manage; only owners make or
-// unmake owners; anyone may leave. Access admins may do all of it.
+// Org routes: create and view orgs, and manage members, invitations and teams. Owners and admins manage, only
+// owners grant or remove the owner role, and anyone may leave. Access admins may do all of it.
 
 type OrgEnv = { Bindings: Env; Variables: { principal?: Principal } };
 
@@ -31,14 +30,15 @@ export function orgRoutes(app: Hono<OrgEnv>) {
 		if (role !== "owner" && role !== "admin") fail(403, `only ${org.slug}'s owners and admins can do that`);
 		return role;
 	};
-	const actorLabel = (principal: Principal | undefined) => (principal?.kind === "access" ? principal.identity.value : principal ? principal.user.handle : "");
+	const actorLabel = (principal: Principal | undefined) =>
+		principal?.kind === "access" ? principal.identity.value : principal ? principal.user.handle : "";
 
-	// The caller's orgs, with their role in each; their own namespace first.
+	// The caller's orgs with their role in each, personal org first.
 	app.get("/orgs", async (c) => {
 		const principal = c.get("principal");
 		if (principal?.kind === "access" || !principal) return c.json([]);
 		const orgs = store(c.env);
-		// Someone who signed in before orgs existed gets their own namespace now.
+		// People who signed in before orgs existed get their personal org here.
 		await orgs.personalOrg(principal.user);
 		return c.json(await orgs.orgsOf(principal.user.id));
 	});
@@ -47,10 +47,17 @@ export function orgRoutes(app: Hono<OrgEnv>) {
 		const principal = c.get("principal");
 		if (principal?.kind !== "user") fail(403, "a person signed in to GitHive makes an org");
 		const { slug, name } = await body(c);
-		return c.json(await store(c.env).createOrg((principal as Extract<Principal, { kind: "user" }>).user, String(slug ?? ""), typeof name === "string" ? name : null), 201);
+		return c.json(
+			await store(c.env).createOrg(
+				(principal as Extract<Principal, { kind: "user" }>).user,
+				String(slug ?? ""),
+				typeof name === "string" ? name : null,
+			),
+			201,
+		);
 	});
 
-	// An org: its repos the caller can see; to its members, its people and teams too.
+	// An org and the repos the caller can see. Members also see its people and teams.
 	app.get("/orgs/:org", async (c) => {
 		const orgs = store(c.env);
 		const org = await orgs.orgOrFail(c.req.param("org"));
@@ -59,10 +66,19 @@ export function orgRoutes(app: Hono<OrgEnv>) {
 		const repos =
 			principal?.kind === "access"
 				? await orgs.orgRepos(org.id)
-				: (await orgs.visibleRepos((principal as Exclude<Principal, { kind: "access" }>).user.id)).filter((r) => r.org === org.slug);
+				: (await orgs.visibleRepos((principal as Exclude<Principal, { kind: "access" }>).user.id)).filter(
+						(r) => r.org === org.slug,
+					);
 		const member = role !== null;
-		const [members, teams, invites] = member ? await Promise.all([orgs.members(org.id), orgs.teams(org.id), role === "owner" || role === "admin" ? orgs.invites(org.id) : Promise.resolve([])]) : [[], [], []];
-		const canCreate = principal?.kind === "access" || (principal ? await orgs.mayCreateRepo(org, principal.user.id) : false);
+		const [members, teams, invites] = member
+			? await Promise.all([
+					orgs.members(org.id),
+					orgs.teams(org.id),
+					role === "owner" || role === "admin" ? orgs.invites(org.id) : Promise.resolve([]),
+				])
+			: [[], [], []];
+		const canCreate =
+			principal?.kind === "access" || (principal ? await orgs.mayCreateRepo(org, principal.user.id) : false);
 		return c.json({ ...org, role, canCreateRepos: canCreate, repos, members, teams, invites });
 	});
 
@@ -70,7 +86,11 @@ export function orgRoutes(app: Hono<OrgEnv>) {
 		const orgs = store(c.env);
 		const org = await orgs.orgOrFail(c.req.param("org"));
 		await managing(orgs, org, c.get("principal"));
-		const { name, default_permission: defaultPermission, members_can_create_repos: membersCanCreateRepos } = await body(c);
+		const {
+			name,
+			default_permission: defaultPermission,
+			members_can_create_repos: membersCanCreateRepos,
+		} = await body(c);
 		await orgs.updateOrg(org.id, {
 			...(name !== undefined ? { name: name === null ? null : String(name) } : {}),
 			...(defaultPermission !== undefined ? { defaultPermission: defaultPermission as Level } : {}),
@@ -79,7 +99,7 @@ export function orgRoutes(app: Hono<OrgEnv>) {
 		return c.json(await orgs.org(org.slug));
 	});
 
-	// Members: add by email (at once if they've signed in, else as an invitation), change a role, remove.
+	// Members are added by email. Someone who hasn't signed in yet gets an invitation.
 	app.post("/orgs/:org/members", async (c) => {
 		const orgs = store(c.env);
 		const org = await orgs.orgOrFail(c.req.param("org"));
@@ -93,10 +113,12 @@ export function orgRoutes(app: Hono<OrgEnv>) {
 		const orgs = store(c.env);
 		const org = await orgs.orgOrFail(c.req.param("org"));
 		const role = await managing(orgs, org, c.get("principal"));
-		const user = (await orgs.userByHandle(c.req.param("handle"))) ?? fail(404, `no one is called ${c.req.param("handle")}`);
+		const user =
+			(await orgs.userByHandle(c.req.param("handle"))) ?? fail(404, `no one is called ${c.req.param("handle")}`);
 		const { role: newRole } = await body(c);
 		const current = await orgs.roleIn(org.id, user.id);
-		if ((newRole === "owner" || current === "owner") && role !== "owner") fail(403, "only an owner can make or unmake an owner");
+		if ((newRole === "owner" || current === "owner") && role !== "owner")
+			fail(403, "only an owner can make or unmake an owner");
 		await orgs.setRole(org.id, user.id, newRole as Role);
 		return c.json({ member: user.handle, role: newRole });
 	});
@@ -105,11 +127,13 @@ export function orgRoutes(app: Hono<OrgEnv>) {
 		const orgs = store(c.env);
 		const org = await orgs.orgOrFail(c.req.param("org"));
 		const principal = c.get("principal");
-		const user = (await orgs.userByHandle(c.req.param("handle"))) ?? fail(404, `no one is called ${c.req.param("handle")}`);
+		const user =
+			(await orgs.userByHandle(c.req.param("handle"))) ?? fail(404, `no one is called ${c.req.param("handle")}`);
 		const leaving = principal?.kind !== "access" && principal?.user.id === user.id;
 		if (!leaving) {
 			const role = await managing(orgs, org, principal);
-			if ((await orgs.roleIn(org.id, user.id)) === "owner" && role !== "owner") fail(403, "only an owner can remove an owner");
+			if ((await orgs.roleIn(org.id, user.id)) === "owner" && role !== "owner")
+				fail(403, "only an owner can remove an owner");
 		}
 		await orgs.removeMember(org.id, user.id);
 		return c.json({ removed: user.handle });
@@ -123,7 +147,7 @@ export function orgRoutes(app: Hono<OrgEnv>) {
 		return c.json({ uninvited: c.req.param("email") });
 	});
 
-	// Teams: named groups of members, which grants name as @<org>/<team>.
+	// Teams are named groups of members. Grants refer to them as @<org>/<team>.
 	app.post("/orgs/:org/teams", async (c) => {
 		const orgs = store(c.env);
 		const org = await orgs.orgOrFail(c.req.param("org"));

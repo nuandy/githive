@@ -226,7 +226,9 @@ code.track__detail {
 	border: 1px solid var(--surface-3);
 	border-radius: 2px;
 	background: var(--surface-3);
-	transition: background-color 0.3s ease, border-color 0.3s ease;
+	transition:
+		background-color 0.3s ease,
+		border-color 0.3s ease;
 }
 
 /* Named entries nobody holds show no lamp at all: only what's lit draws the eye. */

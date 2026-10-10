@@ -20,7 +20,7 @@ import { href, parseRoute, type Route } from "./lib/routes";
 import { type Provider, signinErrorMessage, signinErrorOf, withoutSigninError } from "./lib/session";
 import "./App.css";
 
-/** Where a route points, ignoring tabs: moving to a different place scrolls to the top; switching tabs doesn't. */
+/** Where a route points, ignoring tabs. Moving to a new place scrolls to the top; switching tabs doesn't. */
 export function routePlace(route: Route): string {
 	if (route.page === "repo") return `repo:${route.repo}`;
 	if (route.page === "change") return `change:${route.repo}:${route.change}`;
@@ -31,7 +31,8 @@ export function routePlace(route: Route): string {
 export function useHashRoute(): Route {
 	const [route, setRoute] = useState<Route>(() => parseRoute(window.location.hash));
 	// Moving between files in the Code tab scrolls to the top too, without remounting the page.
-	const scrollPlace = (r: Route) => `${routePlace(r)}${r.page === "repo" && r.tab === "code" ? `:code:${r.path ?? ""}:${r.ref ?? ""}` : ""}`;
+	const scrollPlace = (r: Route) =>
+		`${routePlace(r)}${r.page === "repo" && r.tab === "code" ? `:code:${r.path ?? ""}:${r.ref ?? ""}` : ""}`;
 	const place = useRef(scrollPlace(route));
 	useEffect(() => {
 		const onChange = () => {
@@ -69,7 +70,8 @@ export function App() {
 	// Read once, then dropped from the address bar so a reload doesn't show it again.
 	const [signinError] = useState(() => signinErrorMessage(signinErrorOf(window.location.search)));
 	useEffect(() => {
-		if (signinErrorOf(window.location.search)) window.history.replaceState(null, "", withoutSigninError(window.location.href));
+		if (signinErrorOf(window.location.search))
+			window.history.replaceState(null, "", withoutSigninError(window.location.href));
 	}, []);
 	useEffect(() => {
 		fetchMe().then(setMe, (err: unknown) => setBootError(err instanceof Error ? err.message : String(err)));
@@ -109,13 +111,13 @@ export function Dashboard({ me, onSignOut }: { me: Me; onSignOut: () => void }) 
 	const onRepos = route.page === "repos";
 	const repoName = route.page === "repo" || route.page === "change" ? route.repo : null;
 
-	// Every repo's counts in one read: the Repositories list, and the Inbox count on every page.
+	// Every repo's counts in one read, for the Repositories list and the Inbox count on every page.
 	const summaries = usePoll("summaries", api.summaries, onRepos || route.page === "inbox" ? 15_000 : 30_000);
 	// For GitHive's operators (Access): orgs' requests waiting for approval, counted on the Admin link.
 	const adminRequests = usePoll(me.kind === "access" ? "admin:requests:count" : null, admin.requests, 60_000);
 	const inbox = buildInbox(summaries.data);
 
-	// The repo's live feed: while it's connected, a ping triggers each refresh and polling slows to a safety net.
+	// While the repo's live feed is connected, each ping triggers a refresh and polling slows to a safety net.
 	const feedKey = repoName;
 	const refreshers = useRef<(() => void)[]>([]);
 	const liveStatus = useLiveFeed(feedKey, () => refreshers.current.forEach((refresh) => refresh()));
@@ -124,15 +126,25 @@ export function Dashboard({ me, onSignOut }: { me: Me; onSignOut: () => void }) 
 	const snapshot = usePoll(repoName !== null ? `repo:${repoName}` : null, () => api.snapshot(repoName!), every(5_000));
 	// The audit replays every record in Git, so it loads on its own and less often.
 	const audit = usePoll(repoName !== null ? `audit:${repoName}` : null, () => api.audit(repoName!), 60_000);
-	// What the reader may do here: the vote form and the settings they can change.
+	// What the reader may do here decides the vote form and which settings they can change.
 	const access = usePoll(repoName !== null ? `access:${repoName}` : null, () => api.access(repoName!), 60_000);
 	const changeId = route.page === "change" ? route.change : null;
-	const change = usePoll(changeId ? `change:${repoName}:${changeId}` : null, () => api.change(repoName!, changeId!), every(10_000));
+	const change = usePoll(
+		changeId ? `change:${repoName}:${changeId}` : null,
+		() => api.change(repoName!, changeId!),
+		every(10_000),
+	);
 	refreshers.current = [snapshot.refresh, audit.refresh, change.refresh];
 
 	const view: RepoView | null =
 		route.page === "repo"
-			? { kind: "repo", tab: route.tab, ...(route.path !== undefined ? { path: route.path } : {}), ...(route.ref ? { ref: route.ref } : {}), ...(route.branch ? { branch: route.branch } : {}) }
+			? {
+					kind: "repo",
+					tab: route.tab,
+					...(route.path !== undefined ? { path: route.path } : {}),
+					...(route.ref ? { ref: route.ref } : {}),
+					...(route.branch ? { branch: route.branch } : {}),
+				}
 			: route.page === "change"
 				? { kind: "change", change: route.change, tab: route.tab }
 				: null;
@@ -174,7 +186,10 @@ export function Dashboard({ me, onSignOut }: { me: Me; onSignOut: () => void }) 
 		document.title = title;
 	}, [title]);
 
-	const errors = [summaries.error && `Repositories: ${summaries.error}`, snapshot.data && snapshot.error && `${repoName}: ${snapshot.error}`].filter((error): error is string => !!error);
+	const errors = [
+		summaries.error && `Repositories: ${summaries.error}`,
+		snapshot.data && snapshot.error && `${repoName}: ${snapshot.error}`,
+	].filter((error): error is string => !!error);
 
 	/** For pages that belong to a person signed in to GitHive, not an Access caller. */
 	const forPeople = (what: string) => (
@@ -182,7 +197,8 @@ export function Dashboard({ me, onSignOut }: { me: Me; onSignOut: () => void }) 
 			<div className="box empty">
 				<h2>{what} belong to people signed in to GitHive</h2>
 				<p>
-					Through Cloudflare Access you see every repository, but have no namespace or organizations of your own. <a href={href.repos()}>Back to Repositories</a>.
+					Through Cloudflare Access you see every repository, but have no namespace or organizations of your own.{" "}
+					<a href={href.repos()}>Back to Repositories</a>.
 				</p>
 			</div>
 		</main>
@@ -198,13 +214,19 @@ export function Dashboard({ me, onSignOut }: { me: Me; onSignOut: () => void }) 
 					<div className="box empty">
 						<h2>Admin is for GitHive's operators</h2>
 						<p>
-							It's reached through Cloudflare Access, on GitHive's admin address. <a href={href.repos()}>Back to Repositories</a>.
+							It's reached through Cloudflare Access, on GitHive's admin address.{" "}
+							<a href={href.repos()}>Back to Repositories</a>.
 						</p>
 					</div>
 				</main>
 			);
 	} else if (route.page === "new-repo") {
-		page = me.kind === "user" ? <NewRepoPage manage={manage} {...(route.owner ? { owner: route.owner } : {})} /> : forPeople("New repositories");
+		page =
+			me.kind === "user" ? (
+				<NewRepoPage manage={manage} {...(route.owner ? { owner: route.owner } : {})} />
+			) : (
+				forPeople("New repositories")
+			);
 	} else if (route.page === "orgs") {
 		page = me.kind === "user" ? <OrgsPage me={me} manage={manage} /> : forPeople("Organizations");
 	} else if (route.page === "org") {
@@ -218,7 +240,8 @@ export function Dashboard({ me, onSignOut }: { me: Me; onSignOut: () => void }) 
 					<div className="box empty">
 						<h2>Agents belong to people signed in to GitHive</h2>
 						<p>
-							Through Cloudflare Access there are no agents of your own. Sign in to GitHive on its own address to make some. <a href={href.repos()}>Back to Repositories</a>.
+							Through Cloudflare Access there are no agents of your own. Sign in to GitHive on its own address to make
+							some. <a href={href.repos()}>Back to Repositories</a>.
 						</p>
 					</div>
 				</main>
@@ -226,9 +249,15 @@ export function Dashboard({ me, onSignOut }: { me: Me; onSignOut: () => void }) 
 	} else if (route.page === "inbox") {
 		page = <InboxPage groups={inbox.groups} loaded={summaries.loaded} error={summaries.error} />;
 	} else if (route.page === "repos") {
-		page = <RepoList rows={summaries.data ? buildRepoRows(summaries.data) : []} loaded={summaries.loaded} canCreate={me.kind === "user"} />;
+		page = (
+			<RepoList
+				rows={summaries.data ? buildRepoRows(summaries.data) : []}
+				loaded={summaries.loaded}
+				canCreate={me.kind === "user"}
+			/>
+		);
 	} else if (repoName !== null && view) {
-		// GitHive not started on it yet: the repo still shows, with its code and settings, and a way to start.
+		// GitHive hasn't started on this repo yet. It still shows its code, its settings and a way to start.
 		const notStarted = !snapshot.data && !!snapshot.error && !/^no repo /.test(snapshot.error);
 		if (snapshot.data || notStarted) {
 			page = (
@@ -262,9 +291,16 @@ export function Dashboard({ me, onSignOut }: { me: Me; onSignOut: () => void }) 
 			page = (
 				<main className="page" id="main">
 					<div className="box empty">
-						<h2>{/^no repo /.test(snapshot.error) ? `There's no ${repoName} you can see` : `${repoName} isn't open for agents yet`}</h2>
+						<h2>
+							{/^no repo /.test(snapshot.error)
+								? `There's no ${repoName} you can see`
+								: `${repoName} isn't open for agents yet`}
+						</h2>
 						<p>
-							{/^no repo /.test(snapshot.error) ? "It doesn't exist, or you aren't one of the people who can see it." : snapshot.error} <a href={href.repos()}>Back to Repositories</a>.
+							{/^no repo /.test(snapshot.error)
+								? "It doesn't exist, or you aren't one of the people who can see it."
+								: snapshot.error}{" "}
+							<a href={href.repos()}>Back to Repositories</a>.
 						</p>
 					</div>
 				</main>

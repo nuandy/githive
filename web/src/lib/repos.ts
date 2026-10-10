@@ -65,7 +65,7 @@ export function repoCounts(row: RepoRow): string {
 	return parts.join(", ");
 }
 
-/** What a repo needs, as its lamp: a person (a question waits, or the audit found something), work under way, or nothing. */
+/** What a repo needs, as its lamp: a person (a question or an audit finding), work under way, or nothing. */
 export type RepoState = "needs-you" | "at-work" | "quiet";
 
 export function repoState(row: RepoRow): RepoState {
@@ -81,5 +81,7 @@ export const REPO_GROUPS: { state: RepoState; title: string }[] = [
 ];
 
 export function groupRepos(rows: RepoRow[]): { state: RepoState; title: string; rows: RepoRow[] }[] {
-	return REPO_GROUPS.map((group) => ({ ...group, rows: rows.filter((row) => repoState(row) === group.state) })).filter((group) => group.rows.length);
+	return REPO_GROUPS.map((group) => ({ ...group, rows: rows.filter((row) => repoState(row) === group.state) })).filter(
+		(group) => group.rows.length,
+	);
 }

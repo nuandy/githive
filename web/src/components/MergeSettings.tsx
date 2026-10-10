@@ -15,7 +15,10 @@ export interface MergeSettingsProps {
 
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
 
-/** How changes merge, for the repo's admins to change: the review policy, who may block, stricter rules for paths, and the checks. */
+/**
+ * How changes merge, for the repo's admins to change: the review policy, who may block, stricter rules for
+ * paths, and the checks.
+ */
 export function MergeSettings({ snapshot, save, onSaved }: MergeSettingsProps) {
 	const fresh = draftFrom(snapshot.policy, snapshot.verify, snapshot.skipChecks);
 	const freshKey = JSON.stringify(fresh);
@@ -27,7 +30,7 @@ export function MergeSettings({ snapshot, save, onSaved }: MergeSettingsProps) {
 	const dirty = JSON.stringify(draft) !== baseKey;
 	const branch = snapshot.branch ?? "main";
 
-	// Someone else changed the settings: follow them, unless this form has edits of its own.
+	// If someone else changed the settings, follow them unless this form has edits of its own.
 	const dirtyRef = useRef(dirty);
 	dirtyRef.current = dirty;
 	useEffect(() => {
@@ -75,18 +78,42 @@ export function MergeSettings({ snapshot, save, onSaved }: MergeSettingsProps) {
 				<div className="box__body repo-settings__fields">
 					<div className="repo-settings__field">
 						<label htmlFor="settings-required">Required approvals</label>
-						<input id="settings-required" type="number" min={0} inputMode="numeric" value={draft.required} onChange={(e) => update({ required: e.target.value })} disabled={busy} />
-						<p className="muted">From reviewers other than the change's author. 0 merges a change on its checks alone (a role that can block must still approve).</p>
+						<input
+							id="settings-required"
+							type="number"
+							min={0}
+							inputMode="numeric"
+							value={draft.required}
+							onChange={(e) => update({ required: e.target.value })}
+							disabled={busy}
+						/>
+						<p className="muted">
+							From reviewers other than the change's author. 0 merges a change on its checks alone (a role that can
+							block must still approve).
+						</p>
 					</div>
 					<div className="repo-settings__field">
 						<label htmlFor="settings-vetoes">Roles that can block any change</label>
-						<input id="settings-vetoes" value={draft.vetoes} onChange={(e) => update({ vetoes: e.target.value })} placeholder="security" autoComplete="off" spellCheck={false} disabled={busy} />
-						<p className="muted">Comma-separated, like security or api-design. Each must approve, and one rejection blocks the merge.</p>
+						<input
+							id="settings-vetoes"
+							value={draft.vetoes}
+							onChange={(e) => update({ vetoes: e.target.value })}
+							placeholder="security"
+							autoComplete="off"
+							spellCheck={false}
+							disabled={busy}
+						/>
+						<p className="muted">
+							Comma-separated, like security or api-design. Each must approve, and one rejection blocks the merge.
+						</p>
 					</div>
 					{blocking.length ? (
 						<fieldset className="repo-settings__roles" disabled={busy}>
 							<legend>Who may vote as each role that can block</legend>
-							<p className="muted">Agent names, person:* for people, @org/team, or githive for GitHive's reviewers. Blank: people and GitHive's reviewers.</p>
+							<p className="muted">
+								Agent names, person:* for people, @org/team, or githive for GitHive's reviewers. Blank: people and
+								GitHive's reviewers.
+							</p>
 							{blocking.map((role) => (
 								<div key={role} className="repo-settings__field">
 									<label htmlFor={`grant-${role}`}>
@@ -112,34 +139,67 @@ export function MergeSettings({ snapshot, save, onSaved }: MergeSettingsProps) {
 					<h2 id="settings-escalate">Stricter rules for paths</h2>
 				</div>
 				<div className="box__body repo-settings__fields">
-					<p className="muted">A change touching any of these paths needs at least this many approvals, and these roles can block it.</p>
+					<p className="muted">
+						A change touching any of these paths needs at least this many approvals, and these roles can block it.
+					</p>
 					{draft.escalate.map((row, index) => {
-						const set = (patch: Partial<typeof row>) => update({ escalate: draft.escalate.map((r, i) => (i === index ? { ...r, ...patch } : r)) });
+						const set = (patch: Partial<typeof row>) =>
+							update({ escalate: draft.escalate.map((r, i) => (i === index ? { ...r, ...patch } : r)) });
 						return (
 							<fieldset key={index} className="repo-settings__rule" disabled={busy}>
 								<legend>Rule {index + 1}</legend>
 								<div className="repo-settings__field">
 									<label htmlFor={`rule-${index}-paths`}>Paths</label>
-									<textarea id={`rule-${index}-paths`} rows={3} value={row.paths} onChange={(e) => set({ paths: e.target.value })} placeholder={"package.json\n.github/"} spellCheck={false} />
+									<textarea
+										id={`rule-${index}-paths`}
+										rows={3}
+										value={row.paths}
+										onChange={(e) => set({ paths: e.target.value })}
+										placeholder={"package.json\n.github/"}
+										spellCheck={false}
+									/>
 								</div>
 								<div className="repo-settings__rule-grid">
 									<div className="repo-settings__field">
 										<label htmlFor={`rule-${index}-required`}>Approvals</label>
-										<input id={`rule-${index}-required`} type="number" min={0} inputMode="numeric" value={row.required} onChange={(e) => set({ required: e.target.value })} placeholder="same" />
+										<input
+											id={`rule-${index}-required`}
+											type="number"
+											min={0}
+											inputMode="numeric"
+											value={row.required}
+											onChange={(e) => set({ required: e.target.value })}
+											placeholder="same"
+										/>
 									</div>
 									<div className="repo-settings__field">
 										<label htmlFor={`rule-${index}-vetoes`}>Can block</label>
-										<input id={`rule-${index}-vetoes`} value={row.vetoes} onChange={(e) => set({ vetoes: e.target.value })} placeholder="security" autoComplete="off" spellCheck={false} />
+										<input
+											id={`rule-${index}-vetoes`}
+											value={row.vetoes}
+											onChange={(e) => set({ vetoes: e.target.value })}
+											placeholder="security"
+											autoComplete="off"
+											spellCheck={false}
+										/>
 									</div>
 								</div>
-								<button type="button" className="link repo-settings__remove" onClick={() => update({ escalate: draft.escalate.filter((_, i) => i !== index) })}>
+								<button
+									type="button"
+									className="link repo-settings__remove"
+									onClick={() => update({ escalate: draft.escalate.filter((_, i) => i !== index) })}
+								>
 									Remove rule {index + 1}
 								</button>
 							</fieldset>
 						);
 					})}
 					<div>
-						<button type="button" onClick={() => update({ escalate: [...draft.escalate, { paths: "", required: "", vetoes: "" }] })} disabled={busy}>
+						<button
+							type="button"
+							onClick={() => update({ escalate: [...draft.escalate, { paths: "", required: "", vetoes: "" }] })}
+							disabled={busy}
+						>
 							<Icon name="plus" />
 							Add a rule
 						</button>
@@ -153,7 +213,8 @@ export function MergeSettings({ snapshot, save, onSaved }: MergeSettingsProps) {
 				</div>
 				<div className="box__body repo-settings__fields">
 					<p className="muted">
-						Commands that must pass on a change merged into {branch} before it lands, run by GitHive in its own container. None: a change merges once approved, and no container runs.
+						Commands that must pass on a change merged into {branch} before it lands, run by GitHive in its own
+						container. None: a change merges once approved, and no container runs.
 					</p>
 					{draft.verify.map((command, index) => (
 						<div key={index} className="repo-settings__add">
@@ -169,7 +230,13 @@ export function MergeSettings({ snapshot, save, onSaved }: MergeSettingsProps) {
 								spellCheck={false}
 								disabled={busy}
 							/>
-							<button type="button" className="link" onClick={() => update({ verify: draft.verify.filter((_, i) => i !== index) })} disabled={busy} aria-label={`Remove check ${index + 1}`}>
+							<button
+								type="button"
+								className="link"
+								onClick={() => update({ verify: draft.verify.filter((_, i) => i !== index) })}
+								disabled={busy}
+								aria-label={`Remove check ${index + 1}`}
+							>
 								Remove
 							</button>
 						</div>
@@ -182,25 +249,48 @@ export function MergeSettings({ snapshot, save, onSaved }: MergeSettingsProps) {
 					</div>
 					<div className="repo-settings__field">
 						<label htmlFor="skip-checks">Skipped for changes that only touch</label>
-						<textarea id="skip-checks" className="repo-settings__command" value={draft.skipChecks} onChange={(e) => update({ skipChecks: e.target.value })} spellCheck={false} disabled={busy} />
-						<p className="muted">One pattern a line: a name (*.md, LICENSE*), a folder anywhere (docs/), or a path from the top (site/*.html). A file under test/, fixtures/ or examples/ always runs the checks. Empty: they always run.</p>
+						<textarea
+							id="skip-checks"
+							className="repo-settings__command"
+							value={draft.skipChecks}
+							onChange={(e) => update({ skipChecks: e.target.value })}
+							spellCheck={false}
+							disabled={busy}
+						/>
+						<p className="muted">
+							One pattern a line: a name (*.md, LICENSE*), a folder anywhere (docs/), or a path from the top
+							(site/*.html). A file under test/, fixtures/ or examples/ always runs the checks. Empty: they always run.
+						</p>
 					</div>
 					<details className="repo-settings__details">
 						<summary>What the checks run in</summary>
 						<p>
-							Each check is a shell command, run with bash at the top of the repo, on {branch} with the changes merged in. Exit code 0 passes. The first that fails stops the run, and the end of its output is what the change is sent back with.
+							Each check is a shell command, run with bash at the top of the repo, on {branch} with the changes merged
+							in. Exit code 0 passes. The first that fails stops the run, and the end of its output is what the change
+							is sent back with.
 						</p>
 						<ul>
-							<li>Debian, with Node 24, npm and git. Python 3 (with uv), Go and Rust too, when the repo has a pyproject.toml or requirements.txt, a go.mod, or a Cargo.toml.</li>
-							<li>Dependencies installed first: npm ci (npm install without a lockfile) unless a check installs them, and Python's, Go's and Rust's. Skipped while they're unchanged.</li>
-							<li>Up to 10 minutes per command, in 1 vCPU and 3 GiB of memory (2 vCPU and 6 GiB once checks run out of memory).</li>
+							<li>
+								Debian, with Node 24, npm and git. Python 3 (with uv), Go and Rust too, when the repo has a
+								pyproject.toml or requirements.txt, a go.mod, or a Cargo.toml.
+							</li>
+							<li>
+								Dependencies installed first: npm ci (npm install without a lockfile) unless a check installs them, and
+								Python's, Go's and Rust's. Skipped while they're unchanged.
+							</li>
+							<li>
+								Up to 10 minutes per command, in 1 vCPU and 3 GiB of memory (2 vCPU and 6 GiB once checks run out of
+								memory).
+							</li>
 							<li>No secrets or environment variables: a test that needs a database or an API key fails.</li>
 							<li>
-								Nothing else: Java, .NET, Ruby and Swift aren't installed, and iOS apps can't be built. A command can install what it needs itself, as in <code>corepack enable &amp;&amp; pnpm test</code>.
+								Nothing else: Java, .NET, Ruby and Swift aren't installed, and iOS apps can't be built. A command can
+								install what it needs itself, as in <code>corepack enable &amp;&amp; pnpm test</code>.
 							</li>
 						</ul>
 						<p>
-							For example: <code>npm test</code>, <code>npm run lint</code>, <code>npx tsc --noEmit</code>, <code>pytest -q</code>, <code>go test ./...</code>, <code>cargo test</code>.
+							For example: <code>npm test</code>, <code>npm run lint</code>, <code>npx tsc --noEmit</code>,{" "}
+							<code>pytest -q</code>, <code>go test ./...</code>, <code>cargo test</code>.
 						</p>
 					</details>
 				</div>

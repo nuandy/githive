@@ -24,7 +24,8 @@ const ctx = (agentKey?: string): ToolContext => ({
 	head: async () => server.git("rev-parse", "main").trim(),
 	...(agentKey ? { agentKey } : {}),
 });
-const call = (name: string, args: Record<string, unknown>, as?: string) => callTool(name, { repo: "p", ...args }, ctx(as ? keys[as] : undefined)) as Promise<Record<string, unknown>>;
+const call = (name: string, args: Record<string, unknown>, as?: string) =>
+	callTool(name, { repo: "p", ...args }, ctx(as ? keys[as] : undefined)) as Promise<Record<string, unknown>>;
 const later = (ms: number) => vi.setSystemTime((now += ms));
 
 beforeEach(async () => {
@@ -51,14 +52,17 @@ describe.each([
 			vetoes: [],
 			...(shardDepth ? { shard_depth: shardDepth } : {}),
 		});
-		for (const agent of ["author", "other", "reviewer"]) keys[agent] = ((await call("register", { agent })) as { key: string }).key;
+		for (const agent of ["author", "other", "reviewer"])
+			keys[agent] = ((await call("register", { agent })) as { key: string }).key;
 	});
 
 	describe("a claim whose agent is quiet", () => {
 		it("is freed after 30 minutes when nothing is pushed", async () => {
 			await call("claim", { change: "a", agent: "author", paths: ["src/a/"], intent: "a" }, "author");
 			later(BUILDING_IDLE_MS + 60_000);
-			expect(await call("claim", { change: "b", agent: "other", paths: ["src/a/"], intent: "b" }, "other")).toMatchObject({ ok: true });
+			expect(
+				await call("claim", { change: "b", agent: "other", paths: ["src/a/"], intent: "b" }, "other"),
+			).toMatchObject({ ok: true });
 		});
 
 		it("keeps its paths while it waits for review, however long", async () => {
@@ -67,7 +71,9 @@ describe.each([
 				"src/a/x.js": "a\n",
 			});
 			later(AGENT_TURN_IDLE_MS * 3);
-			expect(await call("claim", { change: "b", agent: "other", paths: ["src/a/"], intent: "b" }, "other")).toMatchObject({ ok: false, conflicts: [{ change: "a" }] });
+			expect(
+				await call("claim", { change: "b", agent: "other", paths: ["src/a/"], intent: "b" }, "other"),
+			).toMatchObject({ ok: false, conflicts: [{ change: "a" }] });
 			expect(await call("release", { change: "a", agent: "other", stale: true }, "other")).toMatchObject({
 				ok: false,
 				refused: "a isn't abandoned: it waits for review",
@@ -115,10 +121,17 @@ describe.each([
 			);
 			await call("claim", { change: "a", agent: "author", paths: ["src/a/"], intent: "a" }, "author");
 			// While author is at it, it isn't free to build.
-			expect(await call("backlog", { agent: "other" }, "other")).toMatchObject({ open: [], waiting: [{ id: "a", reason: "claimed by author" }] });
+			expect(await call("backlog", { agent: "other" }, "other")).toMatchObject({
+				open: [],
+				waiting: [{ id: "a", reason: "claimed by author" }],
+			});
 			later(BUILDING_IDLE_MS + 60_000);
-			expect(await call("backlog", { agent: "other" }, "other")).toMatchObject({ open: [{ id: "a", abandonedBy: "author" }] });
-			expect(await call("claim", { change: "a", agent: "other", paths: ["src/a/"], intent: "a" }, "other")).toMatchObject({ ok: true });
+			expect(await call("backlog", { agent: "other" }, "other")).toMatchObject({
+				open: [{ id: "a", abandonedBy: "author" }],
+			});
+			expect(
+				await call("claim", { change: "a", agent: "other", paths: ["src/a/"], intent: "a" }, "other"),
+			).toMatchObject({ ok: true });
 			expect(
 				(
 					(await call("claims", {})) as unknown as {

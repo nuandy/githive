@@ -8,34 +8,32 @@ import type { checkChange } from "./toolkit/check";
 import { callTool } from "./toolkit/mcp";
 import { inLane } from "./claim-paths";
 
-// GitHive's hosted builder, one per change it's asked to make (build):
-// a gpt-6-luna agent in its own container, on the change's branch in its
-// fork. It pushes only through commit_and_push, extends its claim when it
-// needs more, and finishing asks GitHive's reviewers, who merge the change
-// once it's approved and checked. A rejection brings it back with why.
+// The hosted builder: one agent per change, working on the change's branch in its fork.
+// It pushes only through commit_and_push, and finishing hands the change to the hosted reviewers.
 
 /** How many times review may send a change back before its builder gives up. */
 const MAX_REVISIONS = 3;
 const LAST_PUSHED_HEAD = "builder-last-pushed-head";
 
 export interface BuildJob extends ChangeJob {
-	/** Read access to the project, for merging what has merged meanwhile. */
+	/** Read access to the project, for merging in what has landed since. */
 	base: { remote: string; token: string };
 }
 
 export interface BuilderState extends AgentState {
 	pushes: number;
-	/** Times review sent the change back. */
 	revisions: number;
 	summary?: string;
-	/** The last push's report: what finish checks before accepting. */
+	/** The last push's report, which finish checks before accepting. */
 	lastReport?: { outOfLane: string[]; conflicts: string[] };
 }
 
 const PushArgs = z.strictObject({ message: z.string().describe("Commit message") });
 const NoArgs = z.strictObject({});
 const ExtendArgs = z.strictObject({ paths: z.array(z.string()).describe("Paths to add to your claim") });
-const FinishArgs = z.strictObject({ summary: z.string().describe("What you built and how you verified it, for the reviewers") });
+const FinishArgs = z.strictObject({
+	summary: z.string().describe("What you built and how you verified it, for the reviewers"),
+});
 
 export class Builder extends SandboxAgent<BuildJob, BuilderState> {
 	protected readonly kind = "builder";
@@ -71,21 +69,28 @@ How to work:
 	}
 
 	/**
-	 * A reviewer rejected the change: resume with its findings, as a revision,
-	 * in a fresh container with refreshed tokens. After MAX_REVISIONS the
-	 * builder gives up and releases its claim instead, so the paths don't wait
-	 * for a change that keeps failing review.
+	 * Resume with a reviewer's findings in a fresh container with new tokens. After
+	 * MAX_REVISIONS the builder releases its claim so the paths don't stay blocked.
 	 */
 	async revise(feedback: string): Promise<"revising" | "released"> {
 		const { job, state } = await this.load();
 		if (!job || !state) throw new Error("[409] builder has never run");
 		if (state.revisions >= MAX_REVISIONS) {
-			await callTool("release", { repo: job.project, change: job.change, agent: job.agent, reason: `rejected after ${state.revisions} revisions: ${feedback.split("\n")[0].slice(0, 200)}` }, this.toolContext());
+			await callTool(
+				"release",
+				{
+					repo: job.project,
+					change: job.change,
+					agent: job.agent,
+					reason: `rejected after ${state.revisions} revisions: ${feedback.split("\n")[0].slice(0, 200)}`,
+				},
+				this.toolContext(),
+			);
 			this.note(state, `gave up after ${state.revisions} revisions; claim released`);
 			await this.save(state);
 			return "released";
 		}
-		// Two rejections at once: the second joins the first's revision.
+		// A second rejection while revising joins the current revision.
 		if (state.status === "queued" || state.status === "working") {
 			await this.notify(feedback);
 			return "revising";
@@ -99,7 +104,7 @@ How to work:
 		state.nudges = 0;
 		state.turnsAtRunStart = state.turns;
 		state.revisions++;
-		// The finish call's output is still owed to the model, so it goes first.
+		// The model is still owed the finish call's output, so that goes first.
 		state.pending = [...(state.pending ?? []), { role: "user", content: feedback }];
 		this.note(state, `sent back (revision ${state.revisions}): ${feedback.split("\n")[0].slice(0, 160)}`);
 		await this.save(state);
@@ -115,7 +120,7 @@ How to work:
 		return builderGitCommandBlockReason(command, state.pushes > 0);
 	}
 
-	/** Pushes are checked here, on the authenticated path; run_command's check is only a nudge. */
+	/** Pushes are enforced here, on the authenticated path. run_command's check is only a hint. */
 	protected override async git(job: BuildJob, args: string[], cwd = WORKDIR, token = job.token) {
 		if (args[0] !== "push") return super.git(job, args, cwd, token);
 		const refusal = await this.pushRefusal(job, args, cwd, token);
@@ -128,15 +133,21 @@ How to work:
 		return result;
 	}
 
-	/** Why a push must not run: anything but HEAD to the change's branch, or a push that would discard pushed history. */
+	/** Only HEAD to the change's branch may be pushed, and never in a way that discards pushed history. */
 	private async pushRefusal(job: BuildJob, args: string[], cwd: string, token: string): Promise<string | undefined> {
 		const pushArgs = args.slice(1);
 		const forcePush = pushArgs.some(
-			(arg) => arg === "--force" || arg.startsWith("--force-with-lease") || (/^-[^-]/.test(arg) && arg.includes("f")) || arg.startsWith("+"),
+			(arg) =>
+				arg === "--force" ||
+				arg.startsWith("--force-with-lease") ||
+				(/^-[^-]/.test(arg) && arg.includes("f")) ||
+				arg.startsWith("+"),
 		);
 		const branch = `refs/heads/${job.ref}`;
-		const expectedPush = pushArgs.includes("origin") && (pushArgs.includes(`HEAD:${branch}`) || pushArgs.includes(`HEAD:${job.ref}`));
-		if (!expectedPush) return `Refusing an unrecognized builder push. Use commit_and_push to push to origin/${job.ref}.`;
+		const expectedPush =
+			pushArgs.includes("origin") && (pushArgs.includes(`HEAD:${branch}`) || pushArgs.includes(`HEAD:${job.ref}`));
+		if (!expectedPush)
+			return `Refusing an unrecognized builder push. Use commit_and_push to push to origin/${job.ref}.`;
 
 		const pushedState = await this.ctx.storage.get<{ pushes?: number }>("state");
 		const lastPushedHead = await this.ctx.storage.get<string>(LAST_PUSHED_HEAD);
@@ -163,23 +174,32 @@ How to work:
 
 	protected async onFailed(job: BuildJob, state: BuilderState) {
 		// A failed builder gives its paths back rather than leave them to go stale.
-		await callTool("release", { repo: job.project, change: job.change, agent: job.agent, reason: `the hosted builder failed: ${state.error}` }, this.toolContext());
+		await callTool(
+			"release",
+			{ repo: job.project, change: job.change, agent: job.agent, reason: `the hosted builder failed: ${state.error}` },
+			this.toolContext(),
+		);
 	}
 
 	protected async afterClone(job: BuildJob) {
 		await this.exec(["git", "config", "user.name", `builder ${job.change}`]);
 		await this.exec(["git", "config", "user.email", `${job.change}@builders.githive.invalid`]);
-		// Continue the change's branch if it has been pushed, or start it from the project's branch:
-		// the builder's fork is shared by its changes and may be behind.
+		// Continue the change's branch if it was pushed, or else start from the project's branch,
+		// because the fork is shared by the builder's changes and may be behind.
 		const fetched = await this.git(job, ["fetch", "-q", "origin", `+${job.ref}:refs/remotes/origin/${job.ref}`]);
 		if (fetched.exitCode === 0) await this.exec(["git", "checkout", "-q", "-B", job.ref, `origin/${job.ref}`]);
 		else {
-			const base = await this.git(job, ["fetch", "-q", job.base.remote, `${job.branch}:refs/remotes/base/${job.branch}`], undefined, job.base.token);
+			const base = await this.git(
+				job,
+				["fetch", "-q", job.base.remote, `${job.branch}:refs/remotes/base/${job.branch}`],
+				undefined,
+				job.base.token,
+			);
 			await this.exec(["git", "checkout", "-q", "-b", job.ref, ...(base.exitCode === 0 ? [`base/${job.branch}`] : [])]);
 		}
 	}
 
-	/** Why the change can't be handed to reviewers yet: not all pushed, or outside its claim. */
+	/** Why the change can't go to review yet: unpushed work, or files outside its claim. */
 	private async handOffRefusal(state: BuilderState): Promise<string | undefined> {
 		const dirty = await this.exec(["git", "status", "--porcelain"]);
 		if (dirty.exitCode !== 0) return `Could not verify the working tree: ${clip(dirty.output, 2_000)}`;
@@ -189,16 +209,15 @@ How to work:
 		const count = Number(ahead.output.trim());
 		if (count > 0) return `${count} local commit(s) are not pushed yet. Call commit_and_push first.`;
 		if (!state.pushes) return "Nothing has been pushed yet.";
-		if (state.lastReport?.outOfLane.length) return `Your last push changed files outside your claim: ${state.lastReport.outOfLane.join(", ")}. Extend your claim (extend_claim) or revert them, and push again.`;
+		if (state.lastReport?.outOfLane.length)
+			return `Your last push changed files outside your claim: ${state.lastReport.outOfLane.join(", ")}. Extend your claim (extend_claim) or revert them, and push again.`;
 		return undefined;
 	}
 
-	/** `git rev-list --count` of local commits not yet pushed to the change's branch. */
 	private commitsAhead() {
 		return this.exec(["git", "rev-list", "--count", "HEAD", "--not", "--remotes=origin"]);
 	}
 
-	/** The toolkit, acting as GitHive's hosted builder. */
 	private toolContext() {
 		return toolContextFor(this.env, "service:githive-builder", { hosted: true });
 	}
@@ -214,11 +233,17 @@ How to work:
 			}),
 			tool({
 				name: "extend_claim",
-				description: "Claim more paths for your change, before changing them. Refused, naming the holder, if another agent holds them.",
+				description:
+					"Claim more paths for your change, before changing them. Refused, naming the holder, if another agent holds them.",
 				schema: ExtendArgs,
 				run: async ({ paths }) => {
-					const outcome = (await callTool("claim", { repo: job.project, change: job.change, agent: job.agent, paths, intent: job.intent }, this.toolContext())) as { ok: boolean; conflicts?: { path: string; change: string; intent: string }[] };
-					if (!outcome.ok) return `Refused: ${(outcome.conflicts ?? []).map((c) => `${c.path} is held by ${c.change} (${c.intent})`).join("; ")}`;
+					const outcome = (await callTool(
+						"claim",
+						{ repo: job.project, change: job.change, agent: job.agent, paths, intent: job.intent },
+						this.toolContext(),
+					)) as { ok: boolean; conflicts?: { path: string; change: string; intent: string }[] };
+					if (!outcome.ok)
+						return `Refused: ${(outcome.conflicts ?? []).map((c) => `${c.path} is held by ${c.change} (${c.intent})`).join("; ")}`;
 					job.claim = [...job.claim, ...paths.filter((p) => !job.claim.includes(p))];
 					await this.ctx.storage.put("job", job);
 					return `Your claim now covers ${job.claim.join(", ")}.`;
@@ -229,13 +254,21 @@ How to work:
 				description: `Fetch ${job.branch} (work that has merged meanwhile) into base/${job.branch}. Merge it with \`git merge base/${job.branch}\`, re-run your tests, then commit_and_push.`,
 				schema: NoArgs,
 				run: async () => {
-					const r = await this.git(job, ["fetch", "-q", job.base.remote, `${job.branch}:refs/remotes/base/${job.branch}`], undefined, job.base.token);
-					return r.exitCode === 0 ? `Fetched ${job.branch} into base/${job.branch}. Merge it with \`git merge base/${job.branch}\`, re-run your tests, then call commit_and_push.` : `Fetch failed:\n${clip(r.output, 4_000)}`;
+					const r = await this.git(
+						job,
+						["fetch", "-q", job.base.remote, `${job.branch}:refs/remotes/base/${job.branch}`],
+						undefined,
+						job.base.token,
+					);
+					return r.exitCode === 0
+						? `Fetched ${job.branch} into base/${job.branch}. Merge it with \`git merge base/${job.branch}\`, re-run your tests, then call commit_and_push.`
+						: `Fetch failed:\n${clip(r.output, 4_000)}`;
 				},
 			}),
 			tool({
 				name: "finish",
-				description: "Declare the change complete: only when everything is pushed and inside your claim. GitHive's reviewers then review it, and it merges once approved and checked.",
+				description:
+					"Declare the change complete: only when everything is pushed and inside your claim. GitHive's reviewers then review it, and it merges once approved and checked.",
 				schema: FinishArgs,
 				run: async ({ summary }) => {
 					const refusal = await this.handOffRefusal(state);
@@ -244,7 +277,12 @@ How to work:
 					state.summary = summary;
 					this.note(state, "finished");
 					try {
-						const { reviewers } = await startHostedReviewers(this.env, { repo: job.project, change: job.change, summary, mergeWhenApproved: true });
+						const { reviewers } = await startHostedReviewers(this.env, {
+							repo: job.project,
+							change: job.change,
+							summary,
+							mergeWhenApproved: true,
+						});
 						this.note(state, `review started: ${reviewers.join(", ")}`);
 					} catch (err) {
 						this.note(state, `could not start review: ${err instanceof Error ? err.message : String(err)}`);
@@ -264,32 +302,54 @@ How to work:
 		} else if (!(await this.unpushed())) {
 			return "Nothing new to commit or push.";
 		}
-		// Otherwise there are commits made outside this tool (a merge of the project's branch, say) to push.
+		// Otherwise there are commits made outside this tool to push, such as a merge of the base branch.
 		const push = await this.git(job, ["push", "-q", "origin", `HEAD:refs/heads/${job.ref}`]);
 		if (push.exitCode !== 0) return `Push failed:\n${clip(push.output, 4_000)}`;
 		state.pushes++;
 		this.note(state, `pushed: ${message.slice(0, 120)}`);
-		// Claiming its paths again is the claim's heartbeat: a builder at work never looks abandoned.
-		const refreshed = (await callTool("claim", { repo: job.project, change: job.change, agent: job.agent, paths: job.claim, intent: job.intent }, this.toolContext())) as { ok: boolean };
-		if (!refreshed.ok) this.note(state, "could not refresh the claim: it was released as stale and its paths are taken");
-		// The files this change touches, against where it left the project's branch:
-		// the project's own, since origin is the change's fork and the branch may have been merged in.
-		const fetched = await this.git(job, ["fetch", "-q", job.base.remote, `${job.branch}:refs/remotes/base/${job.branch}`], undefined, job.base.token);
-		const changed = await this.exec(["git", "diff", "--name-only", `${fetched.exitCode === 0 ? "base" : "origin"}/${job.branch}...HEAD`]);
-		const outOfLane = changed.output.split("\n").map((f) => f.trim()).filter((f) => f && !inLane(f, job.claim));
-		// The builder's own early check: does the change still merge into the project's branch.
-		const check = (await callTool("check", { repo: job.project, change: job.change }, this.toolContext()).catch(() => null)) as Awaited<ReturnType<typeof checkChange>> | null;
+		// Re-claiming the paths is the claim's heartbeat, so a working builder never looks abandoned.
+		const refreshed = (await callTool(
+			"claim",
+			{ repo: job.project, change: job.change, agent: job.agent, paths: job.claim, intent: job.intent },
+			this.toolContext(),
+		)) as { ok: boolean };
+		if (!refreshed.ok)
+			this.note(state, "could not refresh the claim: it was released as stale and its paths are taken");
+		// Diff against the project's own branch, not the fork's copy, which may be stale.
+		const fetched = await this.git(
+			job,
+			["fetch", "-q", job.base.remote, `${job.branch}:refs/remotes/base/${job.branch}`],
+			undefined,
+			job.base.token,
+		);
+		const changed = await this.exec([
+			"git",
+			"diff",
+			"--name-only",
+			`${fetched.exitCode === 0 ? "base" : "origin"}/${job.branch}...HEAD`,
+		]);
+		const outOfLane = changed.output
+			.split("\n")
+			.map((f) => f.trim())
+			.filter((f) => f && !inLane(f, job.claim));
+		// An early check that the change still merges cleanly.
+		const check = (await callTool("check", { repo: job.project, change: job.change }, this.toolContext()).catch(
+			() => null,
+		)) as Awaited<ReturnType<typeof checkChange>> | null;
 		const conflicts = check && !check.main.clean ? (check.main.conflicts ?? []) : [];
 		state.lastReport = { outOfLane, conflicts };
 		return [
 			outOfLane.length
 				? `Pushed to ${job.ref}. Files outside your claim: ${outOfLane.join(", ")}. Extend your claim (extend_claim) if you need them, or revert them.`
 				: `Pushed to ${job.ref}. Everything is inside your claim.`,
-			...(conflicts.length ? [`Your change conflicts with ${job.branch} in ${conflicts.join(", ")}: fetch_base, merge what it fetched, resolve inside your claim, and push.`] : []),
+			...(conflicts.length
+				? [
+						`Your change conflicts with ${job.branch} in ${conflicts.join(", ")}: fetch_base, merge what it fetched, resolve inside your claim, and push.`,
+					]
+				: []),
 		].join("\n");
 	}
 
-	/** Local commits not yet on the change's branch. */
 	private async unpushed() {
 		const r = await this.commitsAhead();
 		return r.exitCode === 0 ? Number(r.output.trim()) : 0;

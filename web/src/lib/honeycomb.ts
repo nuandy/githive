@@ -99,9 +99,15 @@ export function honeycomb(files: string[], claims: Claim[], context: LampContext
 		else top.subs.set(parts[1], (top.subs.get(parts[1]) ?? 0) + 1);
 	}
 
-	const claimed = claims.flatMap((claim) => claim.paths.map((raw) => ({ raw, parts: segments(raw), folder: raw.endsWith("/") })));
+	const claimed = claims.flatMap((claim) =>
+		claim.paths.map((raw) => ({ raw, parts: segments(raw), folder: raw.endsWith("/") })),
+	);
 	const claimedBelow = (top: string) => claimed.some((c) => c.parts.length >= 2 && c.parts[0] === top);
-	const split = new Set([...tops].filter(([name, top]) => top.subs.size > 0 && (top.files > big || claimedBelow(name))).map(([name]) => name));
+	const split = new Set(
+		[...tops]
+			.filter(([name, top]) => top.subs.size > 0 && (top.files > big || claimedBelow(name)))
+			.map(([name]) => name),
+	);
 
 	const hexes = new Map<string, Hex>();
 	const add = (hex: Hex) => {
@@ -123,7 +129,16 @@ export function honeycomb(files: string[], claims: Claim[], context: LampContext
 			continue;
 		}
 		if (top.direct) add(filesHex(name, top.direct, false));
-		for (const [sub, count] of top.subs) add({ key: `${name}/${sub}`, path: `${name}/${sub}`, kind: "folder", name: sub, parent: name, files: count, holders: [] });
+		for (const [sub, count] of top.subs)
+			add({
+				key: `${name}/${sub}`,
+				path: `${name}/${sub}`,
+				kind: "folder",
+				name: sub,
+				parent: name,
+				files: count,
+				holders: [],
+			});
 	}
 	if (rootFiles) add(filesHex("", rootFiles, false));
 
@@ -134,17 +149,29 @@ export function honeycomb(files: string[], claims: Claim[], context: LampContext
 		const top = tops.get(first);
 		const isFolderClaim = folder || parts.length > 1;
 		if (!top) {
-			if (isFolderClaim) add({ key: first, path: first, kind: "folder", name: first, files: 0, planned: true, holders: [] });
+			if (isFolderClaim)
+				add({ key: first, path: first, kind: "folder", name: first, files: 0, planned: true, holders: [] });
 			else if (!hexes.has("*")) add(filesHex("", 0, true));
 			continue;
 		}
 		if (!split.has(first) || parts.length < 2) continue;
 		if (top.subs.has(second)) continue;
-		if (parts.length > 2 || folder) add({ key: `${first}/${second}`, path: `${first}/${second}`, kind: "folder", name: second, parent: first, files: 0, planned: true, holders: [] });
+		if (parts.length > 2 || folder)
+			add({
+				key: `${first}/${second}`,
+				path: `${first}/${second}`,
+				kind: "folder",
+				name: second,
+				parent: first,
+				files: 0,
+				planned: true,
+				holders: [],
+			});
 		else if (!hexes.has(`${first}/*`)) add(filesHex(first, 0, true));
 	}
 
-	const isSub = (top: string, name: string) => hexes.has(`${top}/${name}`) && hexes.get(`${top}/${name}`)!.kind === "folder";
+	const isSub = (top: string, name: string) =>
+		hexes.has(`${top}/${name}`) && hexes.get(`${top}/${name}`)!.kind === "folder";
 	const isTopFolder = (name: string) => hexes.get(name)?.kind === "folder" || tops.has(name);
 	/** How a claimed path meets a cell: covering all of it, inside it, or not at all. */
 	const meet = (hex: Hex, raw: string): "whole" | "part" | undefined => {
@@ -154,7 +181,7 @@ export function honeycomb(files: string[], claims: Claim[], context: LampContext
 			if (covers(path, hex.path)) return "whole";
 			return path.startsWith(`${hex.path}/`) ? "part" : undefined;
 		}
-		// The files directly in a folder: a claim on the folder (or above) covers them; one on a file directly in it is inside.
+		// For a folder's own files, a claim on the folder or above covers the cell; one on a file in it is inside.
 		if (!path || (hex.path && covers(path, hex.path))) return "whole";
 		const depth = hex.path ? segments(hex.path).length + 1 : 1;
 		if (parts.length !== depth || raw.endsWith("/")) return undefined;
@@ -163,13 +190,22 @@ export function honeycomb(files: string[], claims: Claim[], context: LampContext
 	};
 
 	for (const claim of claims) {
-		const base = { change: claim.change, title: claimTitle(claim), intent: claim.intent ?? "", agent: claimAgent(claim), since: claim.since, color: agentColor(claimAgent(claim)), lamp: lampOf(claim, context) };
+		const base = {
+			change: claim.change,
+			title: claimTitle(claim),
+			intent: claim.intent ?? "",
+			agent: claimAgent(claim),
+			since: claim.since,
+			color: agentColor(claimAgent(claim)),
+			lamp: lampOf(claim, context),
+		};
 		for (const hex of hexes.values()) {
 			let whole: string | undefined;
 			const inside: string[] = [];
 			for (const raw of claim.paths) {
 				const how = meet(hex, raw);
-				if (how === "whole" && (whole === undefined || normalizePath(raw).length > normalizePath(whole).length)) whole = raw;
+				if (how === "whole" && (whole === undefined || normalizePath(raw).length > normalizePath(whole).length))
+					whole = raw;
 				else if (how === "part") inside.push(raw);
 			}
 			if (whole !== undefined) hex.holders.push({ ...base, whole: true, paths: [whole] });
@@ -185,7 +221,11 @@ export function honeycomb(files: string[], claims: Claim[], context: LampContext
 				a.since.localeCompare(b.since) ||
 				a.change.localeCompare(b.change),
 		);
-		const landing: HexLanding | undefined = hex.holders.some((h) => h.lamp === "checking") ? "checking" : hex.holders.some((h) => h.lamp === "approved") ? "queued" : undefined;
+		const landing: HexLanding | undefined = hex.holders.some((h) => h.lamp === "checking")
+			? "checking"
+			: hex.holders.some((h) => h.lamp === "approved")
+				? "queued"
+				: undefined;
 		if (landing) hex.landing = landing;
 	}
 
@@ -200,13 +240,33 @@ export function honeycomb(files: string[], claims: Claim[], context: LampContext
 }
 
 /** The agents holding cells, each with its color and changes, in name order. */
-export function hiveAgents(claims: Claim[], context: LampContext = {}): { agent: string; color: number; changes: { change: string; title: string; intent: string; since: string; lamp: Lamp }[] }[] {
-	const agents = new Map<string, { agent: string; color: number; changes: { change: string; title: string; intent: string; since: string; lamp: Lamp }[] }>();
+export function hiveAgents(
+	claims: Claim[],
+	context: LampContext = {},
+): {
+	agent: string;
+	color: number;
+	changes: { change: string; title: string; intent: string; since: string; lamp: Lamp }[];
+}[] {
+	const agents = new Map<
+		string,
+		{
+			agent: string;
+			color: number;
+			changes: { change: string; title: string; intent: string; since: string; lamp: Lamp }[];
+		}
+	>();
 	for (const claim of claims) {
 		const agent = claimAgent(claim);
 		let entry = agents.get(agent);
 		if (!entry) agents.set(agent, (entry = { agent, color: agentColor(agent), changes: [] }));
-		entry.changes.push({ change: claim.change, title: claimTitle(claim), intent: claim.intent ?? "", since: claim.since, lamp: lampOf(claim, context) });
+		entry.changes.push({
+			change: claim.change,
+			title: claimTitle(claim),
+			intent: claim.intent ?? "",
+			since: claim.since,
+			lamp: lampOf(claim, context),
+		});
 	}
 	return [...agents.values()].sort((a, b) => a.agent.localeCompare(b.agent));
 }
@@ -223,8 +283,12 @@ export function hexPoints(cx: number, cy: number, radius: number): string {
 
 const round = (n: number) => Math.round(n * 100) / 100;
 
-/** Where each of `count` cells sits in rows of `columns`, every other row shifted half a cell: centers, and the whole map's size. */
-export function hexGrid(count: number, columns: number, radius: number): { centers: { x: number; y: number }[]; width: number; height: number } {
+/** Cell centers for `count` cells in rows of `columns`, every other row shifted half a cell, and the map's size. */
+export function hexGrid(
+	count: number,
+	columns: number,
+	radius: number,
+): { centers: { x: number; y: number }[]; width: number; height: number } {
 	const cols = Math.max(1, Math.min(columns, count || 1));
 	const w = Math.sqrt(3) * radius;
 	const rowHeight = 1.5 * radius;
@@ -234,5 +298,9 @@ export function hexGrid(count: number, columns: number, radius: number): { cente
 		const col = i % cols;
 		return { x: round(w / 2 + col * w + (row % 2 ? w / 2 : 0)), y: round(radius + row * rowHeight) };
 	});
-	return { centers, width: round(cols * w + (rows > 1 ? w / 2 : 0)), height: round(2 * radius + (rows - 1) * rowHeight) };
+	return {
+		centers,
+		width: round(cols * w + (rows > 1 ? w / 2 : 0)),
+		height: round(2 * radius + (rows - 1) * rowHeight),
+	};
 }

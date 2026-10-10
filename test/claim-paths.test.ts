@@ -24,7 +24,8 @@ describe("lane matching by whole path segments", () => {
 describe("claims", () => {
 	it("normalizes paths and refuses unsafe ones", () => {
 		expect(normalizeClaim(["./src/a/", "src/a/", " src/b.ts "])).toEqual(["src/a/", "src/b.ts"]);
-		for (const bad of [[], ["/etc"], ["src/../x"], ["src//x"], [""], [3]]) expect(() => normalizeClaim(bad)).toThrow(/\[400\]/);
+		for (const bad of [[], ["/etc"], ["src/../x"], ["src//x"], [""], [3]])
+			expect(() => normalizeClaim(bad)).toThrow(/\[400\]/);
 	});
 
 	it("makes slug ids that fit repo names", () => {

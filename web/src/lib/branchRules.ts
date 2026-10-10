@@ -17,7 +17,14 @@ export interface RuleDraft {
 	verify: string;
 }
 
-export const emptyRule = (): RuleDraft => ({ pattern: "", required: "", vetoes: "", grants: "", checks: "repo", verify: "" });
+export const emptyRule = (): RuleDraft => ({
+	pattern: "",
+	required: "",
+	vetoes: "",
+	grants: "",
+	checks: "repo",
+	verify: "",
+});
 
 export function ruleDraftsFrom(rules: BranchRule[] | undefined): RuleDraft[] {
 	return (rules ?? []).map((rule) => {
@@ -38,18 +45,25 @@ export function ruleDraftsFrom(rules: BranchRule[] | undefined): RuleDraft[] {
 const PATTERN = /^[A-Za-z0-9._/*-]+$/;
 
 /** What the settings tool takes, from the drafts; or what's wrong with them. */
-export function branchRulesFrom(drafts: RuleDraft[]): { rules: NonNullable<SettingsInput["branch_rules"]>; errors: [] } | { rules?: undefined; errors: string[] } {
+export function branchRulesFrom(
+	drafts: RuleDraft[],
+): { rules: NonNullable<SettingsInput["branch_rules"]>; errors: [] } | { rules?: undefined; errors: string[] } {
 	const errors: string[] = [];
 	const rules = drafts.map((draft, i) => {
 		const name = draft.pattern.trim() || `Rule ${i + 1}`;
-		if (!PATTERN.test(draft.pattern.trim())) errors.push(`${name}: the pattern is a branch name, with * for any run of characters (feature/*).`);
+		if (!PATTERN.test(draft.pattern.trim()))
+			errors.push(`${name}: the pattern is a branch name, with * for any run of characters (feature/*).`);
 		const required = draft.required.trim();
-		if (required && !/^\d+$/.test(required)) errors.push(`${name}: approvals is a whole number, or blank for the repo's.`);
+		if (required && !/^\d+$/.test(required))
+			errors.push(`${name}: approvals is a whole number, or blank for the repo's.`);
 		const vetoes = splitList(draft.vetoes);
-		for (const role of vetoes) if (!ROLE.test(role)) errors.push(`${name}: "${role}" isn't a role name: lowercase words joined by hyphens.`);
+		for (const role of vetoes)
+			if (!ROLE.test(role)) errors.push(`${name}: "${role}" isn't a role name: lowercase words joined by hyphens.`);
 		const holders = splitList(draft.grants);
-		if (holders.length && !vetoes.length) errors.push(`${name}: say which roles can block before who may vote as them.`);
-		const verify = draft.checks === "repo" ? undefined : draft.checks === "none" ? [] : splitList(draft.verify.replace(/\n/g, ","));
+		if (holders.length && !vetoes.length)
+			errors.push(`${name}: say which roles can block before who may vote as them.`);
+		const verify =
+			draft.checks === "repo" ? undefined : draft.checks === "none" ? [] : splitList(draft.verify.replace(/\n/g, ","));
 		if (draft.checks === "these" && !verify?.length) errors.push(`${name}: list its checks, or choose none.`);
 		const changes = !!required || vetoes.length > 0 || verify !== undefined;
 		if (!changes) errors.push(`${name} changes nothing: set approvals, roles or checks, or remove it.`);

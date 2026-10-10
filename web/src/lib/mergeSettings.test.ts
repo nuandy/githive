@@ -2,20 +2,40 @@ import { describe, expect, it } from "vitest";
 import { blockingRolesOf, draftFrom, settingsFrom } from "./mergeSettings";
 
 describe("the merge settings form", () => {
-	const policy = { required: 1, vetoes: ["security"], escalate: [{ paths: ["package.json", ".github/"], required: 2, vetoes: ["ops"] }], grants: { security: ["@acme/security", "githive"] } };
+	const policy = {
+		required: 1,
+		vetoes: ["security"],
+		escalate: [{ paths: ["package.json", ".github/"], required: 2, vetoes: ["ops"] }],
+		grants: { security: ["@acme/security", "githive"] },
+	};
 
 	it("gives back what it was given, untouched", () => {
 		expect(settingsFrom(draftFrom(policy, ["npm ci", "npm test"], ["*.md", "docs/"]))).toEqual({
-			settings: { required: 1, vetoes: ["security"], escalate: [{ paths: ["package.json", ".github/"], required: 2, vetoes: ["ops"] }], grants: { security: ["@acme/security", "githive"] }, verify: ["npm ci", "npm test"], skip_checks: ["*.md", "docs/"] },
+			settings: {
+				required: 1,
+				vetoes: ["security"],
+				escalate: [{ paths: ["package.json", ".github/"], required: 2, vetoes: ["ops"] }],
+				grants: { security: ["@acme/security", "githive"] },
+				verify: ["npm ci", "npm test"],
+				skip_checks: ["*.md", "docs/"],
+			},
 			errors: [],
 		});
 	});
 
 	it("reads lists from commas or lines, and drops blanks and repeats", () => {
-		const draft = { ...draftFrom(policy, []), vetoes: "security, ops,,security", verify: ["  npm test ", "", "npm run lint"] };
+		const draft = {
+			...draftFrom(policy, []),
+			vetoes: "security, ops,,security",
+			verify: ["  npm test ", "", "npm run lint"],
+		};
 		draft.escalate[0].paths = "package.json\n\n.github/, Dockerfile";
 		const { settings } = settingsFrom(draft);
-		expect(settings).toMatchObject({ vetoes: ["security", "ops"], verify: ["npm test", "npm run lint"], escalate: [{ paths: ["package.json", ".github/", "Dockerfile"] }] });
+		expect(settings).toMatchObject({
+			vetoes: ["security", "ops"],
+			verify: ["npm test", "npm run lint"],
+			escalate: [{ paths: ["package.json", ".github/", "Dockerfile"] }],
+		});
 	});
 
 	it("keeps grants only for roles that can still block, a blank one meaning the default", () => {

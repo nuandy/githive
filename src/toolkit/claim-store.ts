@@ -5,21 +5,44 @@ import { GitCasLog } from "../record-log";
 import { isEmptyRepo, type Remote } from "../git";
 import { retryTransient } from "../retry";
 import { readAllShards, readRefs } from "./record-refs";
-import { activeClaims, type Abandoned, changeTaken, claim, conflictsWith, release, releaseStale, withdraw, type ClaimRecord, type Conflict, type Registry, type ReleaseRecord } from "./claims";
+import {
+	activeClaims,
+	type Abandoned,
+	changeTaken,
+	claim,
+	conflictsWith,
+	release,
+	releaseStale,
+	withdraw,
+	type ClaimRecord,
+	type Conflict,
+	type Registry,
+	type ReleaseRecord,
+} from "./claims";
 import { appendRecord } from "./records";
-import { ancestorsOf, changeRef, changeRepoOf, decodeShard, encodeShard, isWide, recordsRepoOf, shardOf, shardRef, shardsPrefix } from "./shards";
+import {
+	ancestorsOf,
+	changeRef,
+	changeRepoOf,
+	decodeShard,
+	encodeShard,
+	isWide,
+	recordsRepoOf,
+	shardOf,
+	shardRef,
+	shardsPrefix,
+} from "./shards";
 import type { Stamper } from "./stamp";
 
-// Where a repo's claims are kept: in its claims registry until the load calls
-// for more, then also split by path into shards below it (see shards.ts).
-// Callers see the same thing either way: the claims in force, one per change.
+// Where a repo's claims live: in its claims registry until load calls for more, then also in per-path shards
+// below it (see shards.ts). Callers see the same view either way: the claims in force, one per change.
 
 export interface ClaimsView {
-	/** The claims in force, one per change (a change's records across shards as one). */
+	/** The claims in force, one per change, merging a change's records across shards. */
 	claims: ClaimRecord[];
-	/** Every release recorded, in the shards read. */
+	/** Every release in the records read. */
 	released: ReleaseRecord[];
-	/** Each record ref read, by shard ("" for the registry itself), at the tip read: what a merge cites. */
+	/** The tip read for each record, by shard ("" for the registry). A merge cites these. */
 	tips: Map<string, string>;
 }
 
@@ -32,13 +55,13 @@ export interface ClaimInput {
 	after?: string[];
 	/** The branch it merges whole (see ClaimRecord.source). */
 	source?: string;
-	/** A claim in the way idle this long is released as stale, if `abandoned` (when given) says it is. */
+	/** A claim in the way idle this long is released as stale, if `abandoned` agrees. */
 	staleAfterMs?: number;
 	abandoned?: Abandoned;
 	now?: number;
 }
 
-/** A claim made, or refused: its conflicts, and any records backing out of it couldn't undo (they still hold its paths). */
+/** A refused claim lists its conflicts and any records the back-out couldn't undo, which still hold its paths. */
 export type ClaimOutcome = { ok: true } | { ok: false; conflicts: Conflict[]; stillHeld?: string[] };
 export type ReleaseOutcome = { ok: true } | { ok: false; refused: string };
 
@@ -49,51 +72,54 @@ export interface ChangeView {
 }
 
 export interface ClaimStore {
-	/** Every claim in force. */
 	read(): Promise<ClaimsView>;
-	/** One change's claim and releases, reading only what holds them where it can. */
+	/** One change's claim and releases, reading only the records that hold them where possible. */
 	readChange(change: string): Promise<ChangeView>;
-	/** What bears on merging `files` for `change`: its own claim and any covering the files, at the tips read (for citing). */
+	/** Everything bearing on merging `files` for `change`: its own claim and any covering the files. */
 	readScope(change: string, files: string[]): Promise<ClaimsView>;
 	claim(input: ClaimInput, stamper?: Stamper): Promise<ClaimOutcome>;
-	release(input: { change: string; agent: string; reason: string; mergedAs?: string }, stamper?: Stamper): Promise<ReleaseOutcome>;
-	releaseStale(input: { change: string; agent: string; staleAfterMs: number; abandoned?: Abandoned; now?: number }, stamper?: Stamper): Promise<ReleaseOutcome>;
-	/** What a merge of `files` cites as the claims it checked (the GitHive-Claims trailer), from the view it checked them in. */
+	release(
+		input: { change: string; agent: string; reason: string; mergedAs?: string },
+		stamper?: Stamper,
+	): Promise<ReleaseOutcome>;
+	releaseStale(
+		input: { change: string; agent: string; staleAfterMs: number; abandoned?: Abandoned; now?: number },
+		stamper?: Stamper,
+	): Promise<ReleaseOutcome>;
+	/** The GitHive-Claims trailer for a merge of `files`, from the view its claims were checked in. */
 	cite(view: ClaimsView, files: string[], own?: ClaimRecord): string;
 }
 
 export interface StoreInput {
 	repo: string;
-	/** The claims registry's state: whether, and how deep, its claims are sharded. */
+	/** The claims registry's state, which says whether and how deep claims are sharded. */
 	registry: Registry | null | undefined;
 	/** The claims registry's log, and its head if the caller has just read it. */
 	root: CasLog<Registry>;
 	rootHead?: Awaited<ReturnType<CasLog<Registry>["read"]>>;
 	remote: () => Promise<Remote>;
-	/** A records repo's credentials, when the registry spreads shards over records repos. */
+	/** Credentials for a records repo, when shards are spread over records repos. */
 	recordsRemote?: (k: number) => Promise<Remote>;
-	/** A shard's log in the project repo, if the caller keeps them across calls. */
+	/** A shard's log in the project repo, if the caller caches logs across calls. */
 	log?: (ref: string) => CasLog<Registry> & Pick<GitCasLog<Registry>, "readAt">;
 }
 
-/** How many records repos a release writes to at once. */
 const RELEASE_REPOS_AT_ONCE = 4;
-/** How many times backing a refused claim out of a record is tried before it's reported as still held. */
 const BACK_OUT_TRIES = 3;
 
 export function claimStore(input: StoreInput): ClaimStore {
 	return new Claims(input);
 }
 
-/** The registry, as a shard: above every other. */
+// The registry, as the shard above every other.
 const ROOT = "";
 
-/** A claim whose paths fall in more shards than this is written once, in the shard that holds all of them. */
+// A claim spanning more shards than this is written once, in the shard that holds them all.
 const MAX_SPREAD = 4;
 
 type Entry = { shard: string; tip: string; state: Registry };
 
-/** The shard every one of `shards` is in (ROOT if they share no first segment). */
+// The shard containing all of `shards`, or ROOT if they share no first segment.
 function commonShard(shards: string[]) {
 	const split = shards.map((s) => s.split("/"));
 	const common: string[] = [];
@@ -101,17 +127,9 @@ function commonShard(shards: string[]) {
 	return common.join("/");
 }
 
-/**
- * A repo's claims, in its registry and, once sharded, in per-path shards
- * below it. Unsharded, every claim is a write to the registry: the cheapest
- * there is while few agents write. Sharded, a claim is written to the shard of
- * its paths (or, spread over many, the one shard holding them all), and
- * checks, once written, the shards above it (the registry among them) and, if
- * it covers more than its own shard, below it. Of two overlapping claims at
- * different levels at least one sees the other, since each writes before it
- * looks. The registry is sharded at most once (see shardClaims); a claim that
- * lands in the registry after that checks every shard, like any claim there.
- */
+// A repo's claims, in its registry and, once sharded, in per-path shards below it. A sharded claim is written to
+// its paths' shards first, then checks the levels above and below. Each claim writes before it looks, so of two
+// overlapping claims at different levels at least one sees the other.
 class Claims implements ClaimStore {
 	private readonly logs = new Map<string, CasLog<Registry> & Pick<GitCasLog<Registry>, "readAt">>();
 	private depth: number;
@@ -130,7 +148,7 @@ class Claims implements ClaimStore {
 		return this.depth > 0;
 	}
 
-	/** Learn from a registry state read or written on whether it's sharded: it only ever turns on. */
+	// Sharding only ever turns on, so the first sharded state seen is final.
 	private learn(state: Registry | null | undefined) {
 		if (!state?.shardDepth || this.sharded) return;
 		this.depth = state.shardDepth;
@@ -138,12 +156,11 @@ class Claims implements ClaimStore {
 		this.alwaysIndexed = !!state.shardedAt;
 	}
 
-	/** How many records repos the shards are spread over (0: they're in the project repo). */
 	private get spread() {
 		return this.input.recordsRemote ? this.recordsRepos : 0;
 	}
 
-	/** Which repo holds a shard: -1 for the project repo (the registry, and shards when they aren't spread), else a records repo. */
+	// -1 for the project repo (the registry, and shards when not spread), otherwise a records repo index.
 	private repoOf(shard: string) {
 		return shard !== ROOT && this.spread ? recordsRepoOf(shard, this.spread) : -1;
 	}
@@ -152,20 +169,27 @@ class Claims implements ClaimStore {
 		return k < 0 ? this.input.remote() : this.input.recordsRemote!(k);
 	}
 
-	/** Every repo that holds shards. */
 	private remotes() {
-		return this.spread ? Array.from({ length: this.spread }, (_, k) => this.input.recordsRemote!(k)) : [this.input.remote()];
+		return this.spread
+			? Array.from({ length: this.spread }, (_, k) => this.input.recordsRemote!(k))
+			: [this.input.remote()];
 	}
 
 	private logOf(shard: string) {
 		if (shard === ROOT) return this.input.root;
 		const ref = shardRef(this.input.repo, shard);
 		let log = this.logs.get(ref);
-		if (!log) this.logs.set(ref, (log = (!this.spread && this.input.log?.(ref)) || new GitCasLog<Registry>(() => this.remote(this.repoOf(shard)), this.input.repo, ref)));
+		if (!log)
+			this.logs.set(
+				ref,
+				(log =
+					(!this.spread && this.input.log?.(ref)) ||
+					new GitCasLog<Registry>(() => this.remote(this.repoOf(shard)), this.input.repo, ref)),
+			);
 		return log;
 	}
 
-	/** The registry: the head the caller just read, once; after that, the ref again. */
+	// Uses the head the caller just read once, then reads the ref again.
 	private async readRoot(): Promise<Entry[]> {
 		const head = this.known !== undefined ? this.known : await this.input.root.read();
 		this.known = undefined;
@@ -173,7 +197,7 @@ class Claims implements ClaimStore {
 		return head ? [{ shard: ROOT, tip: head.tip, state: head.commit.state }] : [];
 	}
 
-	/** The shards whose refs start with `prefix`, with their tips: one listing per repo holding shards. */
+	// The shards whose refs start with `prefix`, with one listing per repo holding shards.
 	private async list(prefix = shardsPrefix(this.input.repo)) {
 		const base = shardsPrefix(this.input.repo);
 		const listed = await Promise.all(
@@ -190,32 +214,40 @@ class Claims implements ClaimStore {
 		return listed.flat();
 	}
 
-	/** Every shard at its tip: per repo, one listing and one fetch. */
 	private async readAll(): Promise<Entry[]> {
 		const prefix = shardsPrefix(this.input.repo);
-		const shards = (await Promise.all(this.remotes().map(async (remote) => readAllShards<Registry>(await remote, prefix)))).flat();
+		const shards = (
+			await Promise.all(this.remotes().map(async (remote) => readAllShards<Registry>(await remote, prefix)))
+		).flat();
 		return shards.map(({ ref, tip, state }) => ({ shard: decodeShard(ref.slice(prefix.length)), tip, state }));
 	}
 
-	/** These shards (where they exist) at their tips: per repo, one listing and one fetch. */
 	private async readShards(shards: string[]): Promise<Entry[]> {
 		const byRepo = new Map<number, string[]>();
-		for (const shard of new Set(shards)) if (shard !== ROOT) byRepo.set(this.repoOf(shard), [...(byRepo.get(this.repoOf(shard)) ?? []), shard]);
-		const read = await Promise.all([...byRepo].map(async ([k, group]) => readRefs<Registry>(await this.remote(k), group.map((s) => shardRef(this.input.repo, s)))));
+		for (const shard of new Set(shards))
+			if (shard !== ROOT) byRepo.set(this.repoOf(shard), [...(byRepo.get(this.repoOf(shard)) ?? []), shard]);
+		const read = await Promise.all(
+			[...byRepo].map(async ([k, group]) =>
+				readRefs<Registry>(
+					await this.remote(k),
+					group.map((s) => shardRef(this.input.repo, s)),
+				),
+			),
+		);
 		const prefix = shardsPrefix(this.input.repo);
-		return read.flat().map((entry) => ({ shard: decodeShard(entry.ref.slice(prefix.length)), tip: entry.tip, state: entry.state }));
+		return read
+			.flat()
+			.map((entry) => ({ shard: decodeShard(entry.ref.slice(prefix.length)), tip: entry.tip, state: entry.state }));
 	}
 
-	/** The registry and, sharded, every shard. */
 	private async readEverything(): Promise<Entry[]> {
 		const early = this.sharded ? this.readAll() : null;
 		early?.catch(() => undefined);
 		const root = await this.readRoot();
-		// Unsharded as far as this store knew, but the registry says otherwise: read the shards too.
+		// The registry may show sharding this store didn't know about, and then the shards are read too.
 		return [...root, ...(early ? await early : this.sharded ? await this.readAll() : [])];
 	}
 
-	/** The view of some records: their claims (one per change), releases and tips. */
 	private viewOf(entries: Entry[]): ClaimsView {
 		return {
 			claims: mergeByChange(entries.flatMap((e) => activeClaims(e.state))),
@@ -228,29 +260,29 @@ class Claims implements ClaimStore {
 		return this.viewOf(await this.readEverything());
 	}
 
-	/** The repo holding a change's index. */
 	private indexRemote(change: string) {
 		return this.spread ? this.input.recordsRemote!(changeRepoOf(change, this.spread)) : this.input.remote();
 	}
 
-	/** The shards a change has claimed in below the registry, from its index (null: it has none). */
+	// The shards a change has claimed in below the registry, from its index, or null if it has none.
 	private async indexed(change: string): Promise<string[] | null> {
-		const [entry] = await readRefs<{ shards?: string[] }>(await this.indexRemote(change), [changeRef(this.input.repo, change)]);
+		const [entry] = await readRefs<{ shards?: string[] }>(await this.indexRemote(change), [
+			changeRef(this.input.repo, change),
+		]);
 		return entry ? (entry.state.shards ?? []) : null;
 	}
 
-	/**
-	 * The records that may hold a change's claim: the registry and the shards
-	 * its index names (and `also`, the shards a caller wants besides). With no
-	 * index, it has claimed only in the registry, unless its shards date from
-	 * before changes were indexed: then every shard.
-	 */
+	// The records that may hold a change's claim: the registry, the shards its index names, and `also`. A change
+	// with no index has claimed only in the registry, unless its shards predate indexing; then every shard is read.
 	private async changeEntries(change: string, also: () => string[] = () => []): Promise<Entry[]> {
-		// Every records repo's credentials meanwhile, for the shards the index names.
+		// Fetch every records repo's credentials while the index is read.
 		if (this.sharded) for (const remote of this.remotes()) remote.catch(() => undefined);
-		const [index, root] = await Promise.all([this.sharded ? this.indexed(change) : Promise.resolve(undefined), this.readRoot()]);
+		const [index, root] = await Promise.all([
+			this.sharded ? this.indexed(change) : Promise.resolve(undefined),
+			this.readRoot(),
+		]);
 		if (!this.sharded) return root;
-		// Sharded since this store was made: the index too.
+		// Sharded since this store was made, so read the index now.
 		const own = index === undefined ? await this.indexed(change) : index;
 		if (own === null && !this.alwaysIndexed) return [...root, ...(await this.readAll())];
 		return [...root, ...(await this.readShards([...(own ?? []), ...also()]))];
@@ -258,7 +290,10 @@ class Claims implements ClaimStore {
 
 	async readChange(change: string): Promise<ChangeView> {
 		const view = this.viewOf(await this.changeEntries(change));
-		return { claim: view.claims.find((c) => c.change === change), released: view.released.filter((r) => r.change === change) };
+		return {
+			claim: view.claims.find((c) => c.change === change),
+			released: view.released.filter((r) => r.change === change),
+		};
 	}
 
 	async readScope(change: string, files: string[]): Promise<ClaimsView> {
@@ -273,7 +308,8 @@ class Claims implements ClaimStore {
 		);
 	}
 
-	/** Where a claim's paths are written: the registry, unsharded; else each path's shard, or, spread wide, the one shard holding them all. */
+	// Unsharded, a claim goes in the registry. Sharded, each path goes in its shard, or all of them in one common
+	// shard if they are spread too wide.
 	private place(paths: string[]): Map<string, string[]> {
 		if (!this.sharded) return new Map([[ROOT, paths]]);
 		const groups = new Map<string, string[]>();
@@ -289,44 +325,70 @@ class Claims implements ClaimStore {
 		const shards = [...placed.keys()].sort();
 		const below = shards.filter((s) => s !== ROOT);
 		if (below.length) {
-			// A change claimed in the registry before sharding is its agent's too. The registry as the caller
-			// just read it will do: what this guards was written before sharding (the check after writing, below,
-			// reads the registry again, fresh).
+			// A change claimed in the registry before sharding belongs to its agent too. The caller's recent read is
+			// enough here, since the check after writing reads the registry fresh.
 			const root = this.known !== undefined ? this.known : await this.input.root.read();
 			const held = root?.commit.state.claims.find((c) => c.change === input.change);
 			if (held && held.agent !== input.agent) throw new Error(changeTaken(input.change, held.agent));
-			// The change's index first, so it always covers every shard the change holds below the registry.
-			// It names the change's agent: another agent's claim under the same name is refused.
+			// Write the change's index first so it always covers every shard the change holds. It names the change's
+			// agent, so another agent's claim under the same name is refused.
 			await appendRecord<{ shards: string[]; agent?: string }, "known">(
-				new GitCasLog<{ shards: string[]; agent?: string }>(() => this.indexRemote(input.change), this.input.repo, changeRef(this.input.repo, input.change)),
+				new GitCasLog<{ shards: string[]; agent?: string }>(
+					() => this.indexRemote(input.change),
+					this.input.repo,
+					changeRef(this.input.repo, input.change),
+				),
 				input.agent,
 				() => ({ shards: [] }),
 				async (state) => {
-					// Another agent's name on the change: refused while that agent holds a claim under it. Once its
-					// claim is released (given up, or stale), the name is free again, as are its paths.
+					// Another agent's name is on the change. Refuse while that agent holds a claim under it; once the
+					// claim is released, the name and its paths are free again.
 					if (state.agent && state.agent !== input.agent) {
 						const held = await this.holding(input.change);
-						const stale = held && input.staleAfterMs !== undefined && (input.now ?? Date.now()) - Date.parse(held.own.active) > input.staleAfterMs && (!input.abandoned || (await input.abandoned(held.own)).abandoned);
-						// Still held, and not abandoned: it's that agent's. (An abandoned claim is released as stale by the shard claims below.)
+						const stale =
+							held &&
+							input.staleAfterMs !== undefined &&
+							(input.now ?? Date.now()) - Date.parse(held.own.active) > input.staleAfterMs &&
+							(!input.abandoned || (await input.abandoned(held.own)).abandoned);
+						// Still held and not abandoned, so the change is that agent's.
 						if (held && !stale) throw new Error(changeTaken(input.change, state.agent));
-						// Abandoned: released in every shard it holds, not only those this claim reaches.
-						if (held) await this.releaseStale({ change: input.change, agent: input.agent, staleAfterMs: input.staleAfterMs!, ...(input.now !== undefined ? { now: input.now } : {}) }, stamper);
-						return { state: { shards: below, agent: input.agent }, text: `${input.agent} takes over ${input.change} (released by ${state.agent}), in ${below.join(", ")}` };
+						// Abandoned: release it in every shard it holds, not only those this claim reaches.
+						if (held)
+							await this.releaseStale(
+								{
+									change: input.change,
+									agent: input.agent,
+									staleAfterMs: input.staleAfterMs!,
+									...(input.now !== undefined ? { now: input.now } : {}),
+								},
+								stamper,
+							);
+						return {
+							state: { shards: below, agent: input.agent },
+							text: `${input.agent} takes over ${input.change} (released by ${state.agent}), in ${below.join(", ")}`,
+						};
 					}
 					if (state.agent && below.every((s) => state.shards.includes(s))) return { refused: "known" };
-					return { state: { shards: [...new Set([...state.shards, ...below])].sort(), agent: state.agent ?? input.agent }, text: `${input.change} claims in ${below.join(", ")}` };
+					return {
+						state: { shards: [...new Set([...state.shards, ...below])].sort(), agent: state.agent ?? input.agent },
+						text: `${input.change} claims in ${below.join(", ")}`,
+					};
 				},
 			);
 		}
 		const written: { shard: string; previous: string[] | null }[] = [];
-		// Each part written undone, a few tries each: a part left behind holds paths the agent is told it doesn't have, so
-		// those it couldn't undo are named in the refusal.
+		// Undo each written part, retrying a few times. A part left behind holds paths the agent is told it doesn't
+		// have, so those are named in the refusal.
 		const backOut = async (reason: string) => {
 			const stuck: string[] = [];
 			for (const { shard, previous } of written.reverse()) {
 				for (let attempt = 1; ; attempt++) {
 					try {
-						await withdraw(this.logOf(shard), { change: input.change, agent: input.agent, keep: previous, reason }, stamper);
+						await withdraw(
+							this.logOf(shard),
+							{ change: input.change, agent: input.agent, keep: previous, reason },
+							stamper,
+						);
 						break;
 					} catch (err) {
 						if (attempt === BACK_OUT_TRIES) {
@@ -343,48 +405,64 @@ class Claims implements ClaimStore {
 
 		for (const shard of shards) {
 			const outcome = await claim(this.logOf(shard), { ...input, paths: placed.get(shard)! }, stamper);
-			if (!outcome.ok) return { ...outcome, ...(await backOut(`part of the claim is held by ${outcome.conflicts[0]?.change}`)) };
-			// Written in the registry after it was sharded: a claim above every shard, which must look below.
+			if (!outcome.ok)
+				return { ...outcome, ...(await backOut(`part of the claim is held by ${outcome.conflicts[0]?.change}`)) };
+			// Written in the registry after sharding, so it sits above every shard and must look below.
 			if (shard === ROOT) this.learn(outcome.seen);
 			written.push({ shard, previous: outcome.previous });
 		}
 		if (!this.sharded) return { ok: true };
 
-		// Written: now look at the other levels.
+		// Now that it's written, check the other levels.
 		const conflicts = await this.othersOverlapping(input, placed, stamper);
-		if (conflicts.length) return { ok: false, conflicts, ...(await backOut(`overlaps ${conflicts[0].change}'s claim`)) };
+		if (conflicts.length)
+			return { ok: false, conflicts, ...(await backOut(`overlaps ${conflicts[0].change}'s claim`)) };
 		return { ok: true };
 	}
 
-	/**
-	 * The claims at other levels overlapping a claim just written: in the
-	 * shards above each part (the registry first), and below a part that
-	 * covers more than its own shard (a wide path, a claim spread wide, or one
-	 * in the registry). Stale ones in the way are released.
-	 */
-	private async othersOverlapping(input: ClaimInput, placed: Map<string, string[]>, stamper?: Stamper): Promise<Conflict[]> {
+	// Claims at other levels overlapping a claim just written: in the shards above each part, and below any part
+	// wider than its own shard. Stale claims in the way are released.
+	private async othersOverlapping(
+		input: ClaimInput,
+		placed: Map<string, string[]>,
+		stamper?: Stamper,
+	): Promise<Conflict[]> {
 		const above = new Set<string>();
 		const belowOf: string[] = [];
 		for (const [shard, paths] of placed) {
 			if (shard !== ROOT) for (const s of [ROOT, ...ancestorsOf(shard)]) above.add(s);
-			if (shard === ROOT || paths.some((p) => isWide(p, this.depth) || shardOf(p, this.depth) !== shard)) belowOf.push(shard);
+			if (shard === ROOT || paths.some((p) => isWide(p, this.depth) || shardOf(p, this.depth) !== shard))
+				belowOf.push(shard);
 		}
 		const everything = belowOf.includes(ROOT);
-		const listed = everything ? [] : (await Promise.all(belowOf.map((s) => this.list(`${shardRef(this.input.repo, s)}%2F`)))).flat();
+		const listed = everything
+			? []
+			: (await Promise.all(belowOf.map((s) => this.list(`${shardRef(this.input.repo, s)}%2F`)))).flat();
 		const [root, shards] = await Promise.all([
-			// The registry fresh, as Git has it now: it's the level every claim checks.
-			above.has(ROOT) ? (this.input.root.readFresh?.() ?? this.input.root.read()).then((head) => (head ? [{ shard: ROOT, tip: head.tip, state: head.commit.state }] : [])) : Promise.resolve([] as Entry[]),
+			// Read the registry fresh, since every claim checks it.
+			above.has(ROOT)
+				? (this.input.root.readFresh?.() ?? this.input.root.read()).then((head) =>
+						head ? [{ shard: ROOT, tip: head.tip, state: head.commit.state }] : [],
+					)
+				: Promise.resolve([] as Entry[]),
 			everything ? this.readAll() : this.readShards([...above, ...listed]),
 		]);
 		const live: Conflict[] = [];
 		for (const entry of [...root, ...shards]) {
-			// The paths written elsewhere: those written here were checked against it as they were written.
+			// Only paths written elsewhere; those written here were checked as they were written.
 			const paths = [...placed].flatMap(([shard, p]) => (shard === entry.shard ? [] : p));
 			for (const conflict of conflictsWith(entry.state, paths, input.change)) {
 				const holder = entry.state.claims.find((c) => c.change === conflict.change)!;
-				const stale = input.staleAfterMs !== undefined && (input.now ?? Date.now()) - Date.parse(holder.active) > input.staleAfterMs && (!input.abandoned || (await input.abandoned(holder)).abandoned);
+				const stale =
+					input.staleAfterMs !== undefined &&
+					(input.now ?? Date.now()) - Date.parse(holder.active) > input.staleAfterMs &&
+					(!input.abandoned || (await input.abandoned(holder)).abandoned);
 				if (stale) {
-					const freed = await releaseStale(this.logOf(entry.shard), { change: conflict.change, agent: input.agent, staleAfterMs: input.staleAfterMs!, now: input.now }, stamper);
+					const freed = await releaseStale(
+						this.logOf(entry.shard),
+						{ change: conflict.change, agent: input.agent, staleAfterMs: input.staleAfterMs!, now: input.now },
+						stamper,
+					);
 					if (freed.ok || /holds no claim/.test(freed.refused)) continue;
 				}
 				live.push(conflict);
@@ -393,39 +471,47 @@ class Claims implements ClaimStore {
 		return live;
 	}
 
-	/** Where a change's claim is held now (each record holding it), and the claim as one. */
+	// Every record holding a change's claim, and the claim merged into one.
 	private async holding(change: string) {
 		const entries = (await this.changeEntries(change)).filter((e) => e.state.claims.some((c) => c.change === change));
 		const own = mergeByChange(entries.flatMap((e) => e.state.claims.filter((c) => c.change === change)))[0];
 		return own ? { own, shards: entries.map((e) => e.shard) } : null;
 	}
 
-	async release(input: { change: string; agent: string; reason: string; mergedAs?: string }, stamper?: Stamper): Promise<ReleaseOutcome> {
+	async release(
+		input: { change: string; agent: string; reason: string; mergedAs?: string },
+		stamper?: Stamper,
+	): Promise<ReleaseOutcome> {
 		const held = await this.holding(input.change);
 		if (!held) return { ok: false, refused: `${input.change} holds no claim` };
 		return this.eachShard(held.shards, (shard) => release(this.logOf(shard), input, stamper));
 	}
 
-	async releaseStale(input: { change: string; agent: string; staleAfterMs: number; abandoned?: Abandoned; now?: number }, stamper?: Stamper): Promise<ReleaseOutcome> {
+	async releaseStale(
+		input: { change: string; agent: string; staleAfterMs: number; abandoned?: Abandoned; now?: number },
+		stamper?: Stamper,
+	): Promise<ReleaseOutcome> {
 		const held = await this.holding(input.change);
 		if (!held) return { ok: false, refused: `${input.change} holds no claim` };
-		// Stale as a whole: by its latest activity in any record, and abandoned as a whole (once, not per shard).
+		// Judge staleness once for the whole claim, by its latest activity in any record.
 		const idle = (input.now ?? Date.now()) - Date.parse(held.own.active);
-		if (idle <= input.staleAfterMs) return { ok: false, refused: `${input.change}'s claim was active ${Math.round(idle / 1000)}s ago; it isn't stale` };
+		if (idle <= input.staleAfterMs)
+			return {
+				ok: false,
+				refused: `${input.change}'s claim was active ${Math.round(idle / 1000)}s ago; it isn't stale`,
+			};
 		const turn = input.abandoned ? await input.abandoned(held.own) : undefined;
 		if (turn && !turn.abandoned) return { ok: false, refused: `${input.change} isn't abandoned: it ${turn.why}` };
 		const { abandoned: _abandoned, ...rest } = input;
 		return this.eachShard(held.shards, (shard) => releaseStale(this.logOf(shard), rest, stamper));
 	}
 
-	/**
-	 * Release in each record: a few repos at a time, each one's records in
-	 * turn. A record that no longer holds the claim is fine; the first other
-	 * refusal is the outcome (the other repos' records are still released).
-	 * Workers lets a request keep 6 connections open; more, and it cancels
-	 * stalled ones, so RELEASE_REPOS_AT_ONCE stays under that.
-	 */
-	private async eachShard(shards: string[], step: (shard: string) => Promise<{ ok: true } | { ok: false; refused: string }>): Promise<ReleaseOutcome> {
+	// Releases in each record, a few repos at a time. A record that no longer holds the claim is fine, and the first
+	// other refusal is returned. Workers cancels stalled connections past 6 per request, so stay under that.
+	private async eachShard(
+		shards: string[],
+		step: (shard: string) => Promise<{ ok: true } | { ok: false; refused: string }>,
+	): Promise<ReleaseOutcome> {
 		const byRepo = new Map<number, string[]>();
 		for (const shard of shards) byRepo.set(this.repoOf(shard), [...(byRepo.get(this.repoOf(shard)) ?? []), shard]);
 		const groups = [...byRepo.values()];
@@ -444,11 +530,8 @@ class Claims implements ClaimStore {
 		return refused ?? { ok: true };
 	}
 
-	/**
-	 * What a merge cites as the claims it checked (its GitHive-Claims
-	 * trailer): unsharded, the registry's tip; sharded, `shard=tip` for the
-	 * registry ("") and each shard its files and claim are in, and those above.
-	 */
+	// Unsharded: the registry's tip. Sharded: `shard=tip` for the registry and each shard holding the files or
+	// claim, plus their ancestors.
 	cite(view: ClaimsView, files: string[], own?: ClaimRecord) {
 		if (!this.sharded) return view.tips.get(ROOT) ?? "";
 		const shards = new Set<string>([ROOT]);
@@ -464,7 +547,7 @@ class Claims implements ClaimStore {
 	}
 }
 
-/** A change's records across shards as one claim: all its paths, its first claim, its latest activity. */
+// A change's records across shards as one claim: all its paths, its first claim and its latest activity.
 function mergeByChange(records: ClaimRecord[]): ClaimRecord[] {
 	const byChange = new Map<string, ClaimRecord>();
 	for (const record of records) {
@@ -479,5 +562,7 @@ function mergeByChange(records: ClaimRecord[]): ClaimRecord[] {
 		if (record.since < seen.since) seen.since = record.since;
 		if (record.active > seen.active) seen.active = record.active;
 	}
-	return [...byChange.values()].map((c) => ({ ...c, paths: [...new Set(c.paths)].sort() })).sort((a, b) => a.change.localeCompare(b.change));
+	return [...byChange.values()]
+		.map((c) => ({ ...c, paths: [...new Set(c.paths)].sort() }))
+		.sort((a, b) => a.change.localeCompare(b.change));
 }

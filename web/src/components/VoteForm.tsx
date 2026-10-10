@@ -15,11 +15,20 @@ export function voteRoles(policy: RepoSnapshot["policy"]): string[] {
 }
 
 /**
- * A person's vote on a change, from its page: on its current
- * commit, stamped with their verified identity, counted like any reviewer's,
- * and answering an agent's question about it. The server's words show on refusal.
+ * A person's vote on a change's current commit, from its page. It is stamped with their verified identity,
+ * counts like any reviewer's, and answers an agent's question about the change. A refusal shows the server's words.
  */
-export function VoteForm({ repo, claim, policy, api }: { repo: string; claim: Claim; policy: RepoSnapshot["policy"]; api: VoteApi }) {
+export function VoteForm({
+	repo,
+	claim,
+	policy,
+	api,
+}: {
+	repo: string;
+	claim: Claim;
+	policy: RepoSnapshot["policy"];
+	api: VoteApi;
+}) {
 	const roles = voteRoles(policy);
 	const [role, setRole] = useState(roles[0]);
 	const [verdict, setVerdict] = useState<"approve" | "reject">("approve");
@@ -71,22 +80,44 @@ export function VoteForm({ repo, claim, policy, api }: { repo: string; claim: Cl
 				<fieldset className="review-form__verdict" disabled={busy}>
 					<legend className="sr-only">Verdict</legend>
 					<label className={`review-form__choice${verdict === "approve" ? " is-selected" : ""}`}>
-						<input type="radio" name="verdict" value="approve" checked={verdict === "approve"} onChange={() => setVerdict("approve")} />
+						<input
+							type="radio"
+							name="verdict"
+							value="approve"
+							checked={verdict === "approve"}
+							onChange={() => setVerdict("approve")}
+						/>
 						<span>
 							<strong>Approve</strong>
 							<span className="muted">These changes can merge.</span>
 						</span>
 					</label>
 					<label className={`review-form__choice${verdict === "reject" ? " is-selected" : ""}`}>
-						<input type="radio" name="verdict" value="reject" checked={verdict === "reject"} onChange={() => setVerdict("reject")} />
+						<input
+							type="radio"
+							name="verdict"
+							value="reject"
+							checked={verdict === "reject"}
+							onChange={() => setVerdict("reject")}
+						/>
 						<span>
 							<strong>Request changes</strong>
-							<span className="muted">{policy.vetoes.includes(role) ? "Blocks the merge." : "The agent should address this before merging."}</span>
+							<span className="muted">
+								{policy.vetoes.includes(role) ? "Blocks the merge." : "The agent should address this before merging."}
+							</span>
 						</span>
 					</label>
 				</fieldset>
 				<label htmlFor="vote-evidence">What you checked</label>
-				<textarea id="vote-evidence" rows={3} required value={evidence} onChange={(event) => setEvidence(event.target.value)} placeholder="What you looked at, and what you found" disabled={busy} />
+				<textarea
+					id="vote-evidence"
+					rows={3}
+					required
+					value={evidence}
+					onChange={(event) => setEvidence(event.target.value)}
+					placeholder="What you looked at, and what you found"
+					disabled={busy}
+				/>
 				{error ? (
 					<p className="tone-bad review-form__feedback" role="alert">
 						{error}
@@ -98,7 +129,11 @@ export function VoteForm({ repo, claim, policy, api }: { repo: string; claim: Cl
 					</p>
 				) : null}
 				<div className="review-form__actions">
-					<button type="submit" className={verdict === "approve" ? "primary" : "danger"} disabled={busy || !evidence.trim()}>
+					<button
+						type="submit"
+						className={verdict === "approve" ? "primary" : "danger"}
+						disabled={busy || !evidence.trim()}
+					>
 						<Icon name={verdict === "approve" ? "check" : "x"} />
 						{busy ? "Submitting…" : "Submit vote"}
 					</button>

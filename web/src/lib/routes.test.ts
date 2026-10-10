@@ -18,8 +18,14 @@ describe("hash routes", () => {
 		expect(parseRoute("#/orgs/acme")).toEqual({ page: "org", org: "acme" });
 		expect(parseRoute("#/repos/acme/web")).toEqual({ page: "repo", repo: "acme/web", tab: "changes" });
 		expect(parseRoute("#/repos/acme/web/settings")).toMatchObject({ repo: "acme/web", tab: "settings" });
-		for (const tab of ["claims", "agents", "audit"]) expect(parseRoute(`#/repos/acme/web/${tab}`)).toMatchObject({ page: "repo", tab });
-		expect(parseRoute("#/repos/acme/web/changes/add-stats")).toEqual({ page: "change", repo: "acme/web", change: "add-stats", tab: "conversation" });
+		for (const tab of ["claims", "agents", "audit"])
+			expect(parseRoute(`#/repos/acme/web/${tab}`)).toMatchObject({ page: "repo", tab });
+		expect(parseRoute("#/repos/acme/web/changes/add-stats")).toEqual({
+			page: "change",
+			repo: "acme/web",
+			change: "add-stats",
+			tab: "conversation",
+		});
 		expect(parseRoute("#/repos/acme/web/changes/add-stats/commits")).toMatchObject({ page: "change", tab: "commits" });
 		// A repo not yet in an org, as an Access admin sees it.
 		expect(parseRoute("#/repos/_/walkthrough-01774")).toMatchObject({ page: "repo", repo: "_/walkthrough-01774" });
@@ -46,7 +52,11 @@ describe("hash routes", () => {
 		expect(href.newRepo()).toBe("#/new");
 		expect(href.newRepo("acme")).toBe("#/new?owner=acme");
 		expect(href.org("acme")).toBe("#/orgs/acme");
-		for (const link of [href.repo("acme/a b", "settings"), href.change("acme/web", "c d", "commits"), href.org("x y")]) {
+		for (const link of [
+			href.repo("acme/a b", "settings"),
+			href.change("acme/web", "c d", "commits"),
+			href.org("x y"),
+		]) {
 			expect(parseRoute(link).page).not.toBe("not-found");
 		}
 		expect(parseRoute(href.change("acme/a b", "c d"))).toMatchObject({ repo: "acme/a b", change: "c d" });
@@ -57,7 +67,11 @@ describe("hash routes", () => {
 		expect(href.code("acme/web")).toBe("#/repos/acme/web/code");
 		expect(href.code("acme/web", "src/a b.ts")).toBe("#/repos/acme/web/code/src/a%20b.ts");
 		expect(href.code("acme/web", "", "abc")).toBe("#/repos/acme/web/code?ref=abc");
-		expect(parseRoute(href.code("acme/web", "src/x#y.ts", "feature/1"))).toMatchObject({ repo: "acme/web", path: "src/x#y.ts", ref: "feature/1" });
+		expect(parseRoute(href.code("acme/web", "src/x#y.ts", "feature/1"))).toMatchObject({
+			repo: "acme/web",
+			path: "src/x#y.ts",
+			ref: "feature/1",
+		});
 	});
 });
 

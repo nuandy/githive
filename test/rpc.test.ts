@@ -21,7 +21,9 @@ describe("an RPC that failed for a brief outage", () => {
 		expect(briefOutage(reset())).toBe(true);
 		expect(briefOutage(new Error("The container connection is temporarily unavailable, try again shortly"))).toBe(true);
 		expect(briefOutage(new Error("internal error; reference = 6p8ol0u6bt9lt3vveg4l3lp2"))).toBe(true);
-		expect(briefOutage(Object.assign(new Error("Durable Object is overloaded."), { retryable: true, overloaded: true }))).toBe(false);
+		expect(
+			briefOutage(Object.assign(new Error("Durable Object is overloaded."), { retryable: true, overloaded: true })),
+		).toBe(false);
 		expect(briefOutage(new Error("[409] there's no branch main"))).toBe(false);
 	});
 

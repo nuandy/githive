@@ -72,7 +72,9 @@ export function AdminView({ requests, invites, hosted, error, actions, now = Dat
 			<header className="manage__header">
 				<div>
 					<h1>Admin</h1>
-					<p className="muted manage__lede">Who may sign in to GitHive, and who may start its hosted agents. Only through Cloudflare Access.</p>
+					<p className="muted manage__lede">
+						Who may sign in to GitHive, and who may start its hosted agents. Only through Cloudflare Access.
+					</p>
 				</div>
 			</header>
 			{error ? (
@@ -109,7 +111,12 @@ export function AdminView({ requests, invites, hosted, error, actions, now = Dat
 										{errorFor(key)}
 									</div>
 									<div className="manage__row-actions">
-										<button type="button" className="accent manage__small" disabled={busy !== null} onClick={() => run(key, () => actions.approve(r.email), rowFailed(key))}>
+										<button
+											type="button"
+											className="accent manage__small"
+											disabled={busy !== null}
+											onClick={() => run(key, () => actions.approve(r.email), rowFailed(key))}
+										>
 											{busy === key ? "Approving…" : "Approve"}
 										</button>
 										<ConfirmButton
@@ -138,12 +145,22 @@ export function AdminView({ requests, invites, hosted, error, actions, now = Dat
 						<label htmlFor="admin-email" className="sr-only">
 							Email to approve
 						</label>
-						<input id="admin-email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="person@example.com" autoComplete="off" />
+						<input
+							id="admin-email"
+							type="email"
+							value={email}
+							onChange={(e) => setEmail(e.target.value)}
+							placeholder="person@example.com"
+							autoComplete="off"
+						/>
 						<button type="submit" className="accent" disabled={!email.trim() || busy === "approve-email"}>
 							{busy === "approve-email" ? "Approving…" : "Approve an email"}
 						</button>
 					</div>
-					<p className="manage__hint">They sign in with GitHub or Google, with this email verified there. Removing one doesn't sign out someone already signed in.</p>
+					<p className="manage__hint">
+						They sign in with GitHub or Google, with this email verified there. Removing one doesn't sign out someone
+						already signed in.
+					</p>
 					{emailError ? (
 						<p className="error manage__note" role="alert">
 							{emailError}
@@ -190,12 +207,23 @@ export function AdminView({ requests, invites, hosted, error, actions, now = Dat
 					<h2 id="admin-hosted">Hosted agents</h2>
 				</div>
 				<form className="box__body manage__form" onSubmit={allowPerson}>
-					<p className="manage__hint">GitHive's hosted agents (build, request_review) run on GitHive's model account, so only the people listed here can start them.</p>
+					<p className="manage__hint">
+						GitHive's hosted agents (build, request_review) run on GitHive's model account, so only the people listed
+						here can start them.
+					</p>
 					<div className="manage__inline">
 						<label htmlFor="admin-hosted-handle" className="sr-only">
 							Handle to allow
 						</label>
-						<input id="admin-hosted-handle" type="text" value={handle} onChange={(e) => setHandle(e.target.value)} placeholder="handle" autoComplete="off" spellCheck={false} />
+						<input
+							id="admin-hosted-handle"
+							type="text"
+							value={handle}
+							onChange={(e) => setHandle(e.target.value)}
+							placeholder="handle"
+							autoComplete="off"
+							spellCheck={false}
+						/>
 						<button type="submit" className="accent" disabled={!handle.trim() || busy === "allow-hosted"}>
 							{busy === "allow-hosted" ? "Allowing…" : "Allow a person"}
 						</button>
@@ -254,7 +282,9 @@ function requestWords(request: InviteRequest) {
 	if (!tried) return invitedBy.join("; ");
 	const who = tried.login ? ` as ${tried.login}` : "";
 	const times = tried.tries === 1 ? "once" : `${tried.tries} times`;
-	return [...invitedBy, `tried to sign in with ${PROVIDERS[tried.provider] ?? tried.provider}${who}, ${times}`].join("; ");
+	return [...invitedBy, `tried to sign in with ${PROVIDERS[tried.provider] ?? tried.provider}${who}, ${times}`].join(
+		"; ",
+	);
 }
 
 /** The Admin page: loads requests, approved emails and the hosted-agent list, and refreshes them after each action. */
@@ -278,5 +308,13 @@ export function AdminPage({ admin }: { admin: AdminApi }) {
 		allowHosted: after(admin.allowHosted),
 		disallowHosted: after(admin.disallowHosted),
 	};
-	return <AdminView requests={requests.data} invites={invites.data} hosted={hosted.data} error={requests.error ?? invites.error ?? hosted.error} actions={actions} />;
+	return (
+		<AdminView
+			requests={requests.data}
+			invites={invites.data}
+			hosted={hosted.data}
+			error={requests.error ?? invites.error ?? hosted.error}
+			actions={actions}
+		/>
+	);
 }

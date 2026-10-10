@@ -4,11 +4,10 @@ import type { BuildJob, BuilderState } from "../src/builder";
 import type { ReviewJob, ReviewerState } from "../src/reviewer";
 import { FakeStorage } from "./fakes/env";
 
-// GitHive's hosted agents the builder works on a
-// branch of the project repo within its claim and asks for review when done;
-// a reviewer votes, and, asked to, then tries the merge (which the toolkit
-// refuses until the approvals are in). The
-// container is stubbed: its git and shell calls are recorded and answered.
+// GitHive's hosted agents. The builder works on a branch of the project repo
+// within its claim and asks for review when done. A reviewer votes and, when
+// asked, tries the merge, which the toolkit refuses until the approvals are in.
+// The container is stubbed: its git and shell calls are recorded and answered.
 
 const hosted = vi.hoisted(() => ({
 	startHostedReviewers: vi.fn(async () => ({ head: "h1", reviewers: ["tests"] })),
@@ -21,7 +20,10 @@ const hosted = vi.hoisted(() => ({
 
 vi.mock("../src/toolkit/env", () => ({
 	startHostedReviewers: hosted.startHostedReviewers,
-	builderCredentials: async () => ({ token: "fork-write", base: { remote: "https://git.test/project.git", token: "read" } }),
+	builderCredentials: async () => ({
+		token: "fork-write",
+		base: { remote: "https://git.test/project.git", token: "read" },
+	}),
 	toolContextFor: (_env: unknown, by: string) => ({ by }),
 	changeRepoName: (repo: string, change: string) => `fork--${repo}--${change}`,
 }));
@@ -42,12 +44,22 @@ const { Reviewer } = await import("../src/reviewer");
 
 const env = {};
 const job: BuildJob = {
-	project: "project", branch: "main", verify: ["npm test"], change: "stats-1a2b", ref: "changes/stats-1a2b", agent: "githive-builder",
-	intent: "Add stats", claim: ["src/stats/"], others: [], repo: "fork--project--stats-1a2b",
-	remote: "https://git.test/project.git", token: "write", base: { remote: "https://git.test/project.git", token: "read" },
+	project: "project",
+	branch: "main",
+	verify: ["npm test"],
+	change: "stats-1a2b",
+	ref: "changes/stats-1a2b",
+	agent: "githive-builder",
+	intent: "Add stats",
+	claim: ["src/stats/"],
+	others: [],
+	repo: "fork--project--stats-1a2b",
+	remote: "https://git.test/project.git",
+	token: "write",
+	base: { remote: "https://git.test/project.git", token: "read" },
 };
 
-/** A builder whose container answers: `outputs` maps a command (joined) to its output; everything else succeeds quietly. */
+/** A builder whose container maps each command (joined) to its output in `outputs`; anything else succeeds quietly. */
 function builder(outputs: Record<string, string> = {}) {
 	const agent = new Builder({ storage: new FakeStorage() } as never, env as never);
 	const ran: string[][] = [];
@@ -76,7 +88,8 @@ describe("GitHive's builder", () => {
 	it("has its tools, and none of the old lane-request tools", () => {
 		const names = builder().tools.map((t) => t.name);
 		expect(names).toEqual(expect.arrayContaining(["commit_and_push", "fetch_base", "extend_claim", "finish"]));
-		for (const oldTool of ["request_lane_change", "answer_lane_change", "propose_contract_change", "wait_for_requests"]) expect(names).not.toContain(oldTool);
+		for (const oldTool of ["request_lane_change", "answer_lane_change", "propose_contract_change", "wait_for_requests"])
+			expect(names).not.toContain(oldTool);
 	});
 
 	it("pushes to its change branch, and reports files outside its claim", async () => {
@@ -90,7 +103,11 @@ describe("GitHive's builder", () => {
 	});
 
 	it("checks its change against main after each push, and tells the model what would conflict", async () => {
-		hosted.check = { head: "h9", main: { head: "m1", clean: false, conflicts: ["src/stats/index.ts"] }, outsideClaim: [] };
+		hosted.check = {
+			head: "h9",
+			main: { head: "m1", clean: false, conflicts: ["src/stats/index.ts"] },
+			outsideClaim: [],
+		};
 		const b = builder({ "rev-list --count": "1" });
 		const said = await b.run("commit_and_push", { message: "stats" });
 		expect(said).toMatch(/conflicts with main in src\/stats\/index\.ts/);
@@ -100,18 +117,52 @@ describe("GitHive's builder", () => {
 	it("refreshes its claim with each push, so a working builder's claim never goes stale", async () => {
 		const b = builder({ "rev-list --count": "1" });
 		await b.run("commit_and_push", { message: "stats" });
-		expect(hosted.claims).toEqual([{ args: { repo: "project", change: "stats-1a2b", agent: "githive-builder", paths: ["src/stats/"], intent: "Add stats" }, by: "service:githive-builder" }]);
+		expect(hosted.claims).toEqual([
+			{
+				args: {
+					repo: "project",
+					change: "stats-1a2b",
+					agent: "githive-builder",
+					paths: ["src/stats/"],
+					intent: "Add stats",
+				},
+				by: "service:githive-builder",
+			},
+		]);
 	});
 
 	it("releases its claim when it fails, so the paths don't wait to go stale", async () => {
 		const agent = new Builder({ storage: new FakeStorage() } as never, env as never);
-		await (agent as unknown as { onFailed(job: BuildJob, state: BuilderState): Promise<void> }).onFailed(job, { error: "out of turns" } as BuilderState);
-		expect(hosted.releases).toEqual([{ args: { repo: "project", change: "stats-1a2b", agent: "githive-builder", reason: "the hosted builder failed: out of turns" }, by: "service:githive-builder" }]);
+		await (agent as unknown as { onFailed(job: BuildJob, state: BuilderState): Promise<void> }).onFailed(job, {
+			error: "out of turns",
+		} as BuilderState);
+		expect(hosted.releases).toEqual([
+			{
+				args: {
+					repo: "project",
+					change: "stats-1a2b",
+					agent: "githive-builder",
+					reason: "the hosted builder failed: out of turns",
+				},
+				by: "service:githive-builder",
+			},
+		]);
 	});
 
 	it("extends its claim as itself", async () => {
 		await builder().run("extend_claim", { paths: ["docs/stats.md"] });
-		expect(hosted.claims).toEqual([{ args: { repo: "project", change: "stats-1a2b", agent: "githive-builder", paths: ["docs/stats.md"], intent: "Add stats" }, by: "service:githive-builder" }]);
+		expect(hosted.claims).toEqual([
+			{
+				args: {
+					repo: "project",
+					change: "stats-1a2b",
+					agent: "githive-builder",
+					paths: ["docs/stats.md"],
+					intent: "Add stats",
+				},
+				by: "service:githive-builder",
+			},
+		]);
 	});
 
 	it("finishes only with everything pushed, then asks the hosted reviewers, who merge once approved", async () => {
@@ -123,7 +174,15 @@ describe("GitHive's builder", () => {
 		const b = builder({ "rev-list --count": "0" });
 		b.state.pushes = 1;
 		expect(await b.run("finish", { summary: "adds stats" })).toMatch(/review/i);
-		expect(hosted.startHostedReviewers).toHaveBeenCalledWith(env, expect.objectContaining({ repo: "project", change: "stats-1a2b", summary: "adds stats", mergeWhenApproved: true }));
+		expect(hosted.startHostedReviewers).toHaveBeenCalledWith(
+			env,
+			expect.objectContaining({
+				repo: "project",
+				change: "stats-1a2b",
+				summary: "adds stats",
+				mergeWhenApproved: true,
+			}),
+		);
 	});
 });
 
@@ -133,7 +192,17 @@ describe("GitHive's builder, sent back by review", () => {
 		const storage = new FakeStorage();
 		const agent = new Builder({ storage } as never, env as never);
 		await storage.put("job", job);
-		await storage.put("state", { status: "done", startedAt: "", turns: 3, toolCalls: 3, nudges: 0, usage: {}, log: [], pushes: 1, revisions } as unknown as BuilderState);
+		await storage.put("state", {
+			status: "done",
+			startedAt: "",
+			turns: 3,
+			toolCalls: 3,
+			nudges: 0,
+			usage: {},
+			log: [],
+			pushes: 1,
+			revisions,
+		} as unknown as BuilderState);
 		return { agent, state: async () => (await storage.get<BuilderState>("state"))! };
 	}
 
@@ -149,29 +218,75 @@ describe("GitHive's builder, sent back by review", () => {
 		const b = await finished(3);
 		expect(await b.agent.revise("rejected again")).toBe("released");
 		expect((await b.state()).status).toBe("done");
-		expect(hosted.releases).toEqual([{ args: { repo: "project", change: "stats-1a2b", agent: "githive-builder", reason: "rejected after 3 revisions: rejected again" }, by: "service:githive-builder" }]);
+		expect(hosted.releases).toEqual([
+			{
+				args: {
+					repo: "project",
+					change: "stats-1a2b",
+					agent: "githive-builder",
+					reason: "rejected after 3 revisions: rejected again",
+				},
+				by: "service:githive-builder",
+			},
+		]);
 	});
 });
 
 describe("GitHive's reviewer", () => {
 	it("votes, then tries the merge as the change's agent when asked to", async () => {
 		const reviewer = new Reviewer({ storage: new FakeStorage() } as never, env as never);
-		const review = { ...job, role: "tests", head: "h1", baseCommit: "b0", mergeWhenApproved: true } as unknown as ReviewJob;
+		const review = {
+			...job,
+			role: "tests",
+			head: "h1",
+			baseCommit: "b0",
+			mergeWhenApproved: true,
+		} as unknown as ReviewJob;
 		const state = { log: [] } as unknown as ReviewerState;
-		const tools = (reviewer as unknown as { tools(job: ReviewJob, state: ReviewerState): AgentTool[] }).tools(review, state);
-		await tools.find((t) => t.name === "submit_verdict")!.run({ verdict: "approve", summary: "fine", evidence: "npm test passes" } as never);
-		expect(hosted.votes).toEqual([expect.objectContaining({ commit: "h1", reviewer: "githive-tests", role: "tests", verdict: "approve" })]);
-		expect(hosted.merges).toEqual([{ args: { repo: "project", change: "stats-1a2b", agent: "githive-builder" }, by: "service:githive-reviewer:tests" }]);
+		const tools = (reviewer as unknown as { tools(job: ReviewJob, state: ReviewerState): AgentTool[] }).tools(
+			review,
+			state,
+		);
+		await tools
+			.find((t) => t.name === "submit_verdict")!
+			.run({ verdict: "approve", summary: "fine", evidence: "npm test passes" } as never);
+		expect(hosted.votes).toEqual([
+			expect.objectContaining({ commit: "h1", reviewer: "githive-tests", role: "tests", verdict: "approve" }),
+		]);
+		expect(hosted.merges).toEqual([
+			{
+				args: { repo: "project", change: "stats-1a2b", agent: "githive-builder" },
+				by: "service:githive-reviewer:tests",
+			},
+		]);
 	});
 
 	it("rejects, then sends the change back to GitHive's builder instead of merging", async () => {
 		const revise = vi.fn(async () => "revising");
-		const reviewer = new Reviewer({ storage: new FakeStorage() } as never, { ...env, BUILDER: { getByName: (name: string) => (name === "fork--project--stats-1a2b" ? { revise } : null) } } as never);
-		const review = { ...job, role: "tests", head: "h1", baseCommit: "b0", mergeWhenApproved: true } as unknown as ReviewJob;
-		const tools = (reviewer as unknown as { tools(job: ReviewJob, state: ReviewerState): AgentTool[] }).tools(review, { log: [] } as unknown as ReviewerState);
-		await tools.find((t) => t.name === "submit_verdict")!.run({ verdict: "reject", summary: "no tests", evidence: "src/stats has no test file" } as never);
+		const reviewer = new Reviewer(
+			{ storage: new FakeStorage() } as never,
+			{
+				...env,
+				BUILDER: { getByName: (name: string) => (name === "fork--project--stats-1a2b" ? { revise } : null) },
+			} as never,
+		);
+		const review = {
+			...job,
+			role: "tests",
+			head: "h1",
+			baseCommit: "b0",
+			mergeWhenApproved: true,
+		} as unknown as ReviewJob;
+		const tools = (reviewer as unknown as { tools(job: ReviewJob, state: ReviewerState): AgentTool[] }).tools(review, {
+			log: [],
+		} as unknown as ReviewerState);
+		await tools
+			.find((t) => t.name === "submit_verdict")!
+			.run({ verdict: "reject", summary: "no tests", evidence: "src/stats has no test file" } as never);
 		expect(hosted.votes).toEqual([expect.objectContaining({ commit: "h1", verdict: "reject" })]);
 		expect(hosted.merges).toEqual([]);
-		expect(revise).toHaveBeenCalledWith(expect.stringMatching(/tests reviewer rejected h1[\s\S]*no tests[\s\S]*src\/stats has no test file/));
+		expect(revise).toHaveBeenCalledWith(
+			expect.stringMatching(/tests reviewer rejected h1[\s\S]*no tests[\s\S]*src\/stats has no test file/),
+		);
 	});
 });

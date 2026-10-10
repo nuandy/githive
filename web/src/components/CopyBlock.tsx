@@ -16,7 +16,7 @@ export function CopyBlock({ text, label = "Copy" }: { text: string; label?: stri
 		setCopied("selected");
 	};
 	const copy = () => {
-		// Called inside the click, so the browser allows it; some refuse anyway, and then the text is selected to copy by hand.
+		// Called inside the click so the browser allows it. If a browser refuses anyway, the text is selected instead.
 		try {
 			navigator.clipboard.writeText(text).then(() => setCopied("copied"), selectText);
 		} catch {
@@ -28,7 +28,12 @@ export function CopyBlock({ text, label = "Copy" }: { text: string; label?: stri
 			<pre>
 				<code ref={codeRef}>{text}</code>
 			</pre>
-			<button type="button" className="copy-block__button" onClick={copy} aria-label={`${label}: ${text.length > 40 ? `${text.slice(0, 40)}…` : text}`}>
+			<button
+				type="button"
+				className="copy-block__button"
+				onClick={copy}
+				aria-label={`${label}: ${text.length > 40 ? `${text.slice(0, 40)}…` : text}`}
+			>
 				{copied === "copied" ? "Copied" : copied === "selected" ? "Selected: press ⌘C" : label}
 			</button>
 		</div>

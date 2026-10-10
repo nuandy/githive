@@ -1,9 +1,8 @@
 #!/usr/bin/env node
-// Load benchmark: fake agents drive the MCP front door at rising concurrency,
-// the way real agents would, without calling a model. Each agent claims its own
-// directory, pushes a commit to its change branch, checks it, reads its status
-// and the claims, and releases. Alongside them, a few agents race for one shared
-// path, and exactly one must win (Git's compare-and-swap decides).
+// Load benchmark: fake agents drive the MCP endpoint at rising concurrency
+// without calling a model. Each agent claims its own directory, pushes a commit,
+// checks it, reads its status and the claims, and releases. A few racers claim
+// one shared path at the same time, and exactly one must win.
 //
 //   node scripts/bench.mjs [--label baseline] [--levels 1,5,10,25] [--racers 5]
 //                          [--base https://blueprint-bench.nuandy.workers.dev] [--repo bench-<label>]
@@ -24,7 +23,9 @@ import { join } from "node:path";
 const root = new URL("..", import.meta.url).pathname;
 
 const args = Object.fromEntries(
-	process.argv.slice(2).reduce((pairs, arg, i, all) => (arg.startsWith("--") ? [...pairs, [arg.slice(2), all[i + 1]]] : pairs), []),
+	process.argv
+		.slice(2)
+		.reduce((pairs, arg, i, all) => (arg.startsWith("--") ? [...pairs, [arg.slice(2), all[i + 1]]] : pairs), []),
 );
 const BASE = args.base ?? "https://blueprint-bench.nuandy.workers.dev";
 const LABEL = args.label ?? "baseline";
@@ -40,7 +41,9 @@ const RAMP_MS = Number(args.ramp ?? 0) * 1000;
 try {
 	const { Agent, setGlobalDispatcher } = await import("undici");
 	// Enough connections that the client doesn't queue calls agents would make at once.
-	setGlobalDispatcher(new Agent({ headersTimeout: 0, bodyTimeout: 0, connections: Math.max(256, 4 * Math.max(...LEVELS)) }));
+	setGlobalDispatcher(
+		new Agent({ headersTimeout: 0, bodyTimeout: 0, connections: Math.max(256, 4 * Math.max(...LEVELS)) }),
+	);
 } catch {
 	console.warn("undici not found: requests use Node's default 5-minute timeout");
 }
@@ -59,21 +62,30 @@ const headers = {
 };
 
 async function api(method, path, body) {
-	const response = await fetch(`${BASE}${path}`, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
+	const response = await fetch(`${BASE}${path}`, {
+		method,
+		headers,
+		body: body === undefined ? undefined : JSON.stringify(body),
+	});
 	const text = await response.text();
 	if (!response.ok) throw new Error(`${method} ${path}: ${response.status} ${text.slice(0, 300)}`);
 	return JSON.parse(text);
 }
 
-/** Every timed MCP call, for the tables: {level, tool, ms, ok}. */
+/** Every timed MCP call: {level, tool, ms, ok}. */
 const calls = [];
 
-/** Call an MCP tool, timing it (under `as`; null leaves it untimed). Tool errors throw with the tool's message. */
+/** Calls an MCP tool, timed under `as` unless it is null. Tool errors throw with the tool's message. */
 async function tool(level, name, args, as = name) {
 	const start = performance.now();
 	let ok = false;
 	try {
-		const reply = await api("POST", "/mcp", { jsonrpc: "2.0", id: 1, method: "tools/call", params: { name, arguments: args } });
+		const reply = await api("POST", "/mcp", {
+			jsonrpc: "2.0",
+			id: 1,
+			method: "tools/call",
+			params: { name, arguments: args },
+		});
 		if (reply.error) throw new Error(`${name}: ${reply.error.message}`);
 		const text = reply.result.content[0].text;
 		if (reply.result.isError) throw Object.assign(new Error(`${name}: ${text}`), { toolError: true });
@@ -84,7 +96,7 @@ async function tool(level, name, args, as = name) {
 	}
 }
 
-/** Time several calls as one step, under one name. */
+/** Times several calls as one named step. */
 async function step(level, as, fn) {
 	const start = performance.now();
 	let ok = false;
@@ -97,21 +109,26 @@ async function step(level, as, fn) {
 	}
 }
 
-/** One fake agent: claim and get its change's fork, push, check, read its status and the claims, release. */
+/** One fake agent's full cycle, from claim to release. */
 async function agent(level, runId, i, scratch) {
 	const ids = { repo: REPO };
 	const change_id = `${runId}-a${i}`;
 	const agentName = `bench-${runId}-a${i}`;
 	await tool(level, "claims", ids);
 	const fork = await step(level, "claim", async () => {
-		// Each agent in its own directory, as agents splitting work would be: two segments deep, so its own claims shard.
-		const claimed = await tool(level, "claim", { ...ids, change: change_id, agent: agentName, paths: [`bench-${runId}/a${i}/`], intent: "benchmark agent" }, null);
+		// A directory two segments deep, so each agent's claims shard.
+		const claimed = await tool(
+			level,
+			"claim",
+			{ ...ids, change: change_id, agent: agentName, paths: [`bench-${runId}/a${i}/`], intent: "benchmark agent" },
+			null,
+		);
 		if (!claimed.ok) throw new Error(`claim refused: ${JSON.stringify(claimed)}`);
 		return tool(level, "credentials", { ...ids, change: change_id }, null);
 	});
 	const token = fork.token.replace(/\?.*$/, "");
 	const dir = join(scratch, `a${i}`);
-	// In-process git (isomorphic-git): a thousand agents' git processes would exceed this machine's process limit.
+	// In-process git (isomorphic-git), since a git process per agent can exceed the machine's process limit.
 	const onAuth = () => ({ username: "x", password: token });
 	await igit.clone({ fs, http: ihttp, dir, url: fork.url, depth: 1, singleBranch: true, onAuth });
 	const file = `bench-${runId}/a${i}/note.txt`;
@@ -119,27 +136,58 @@ async function agent(level, runId, i, scratch) {
 	await writeFile(join(dir, file), `agent ${i} of ${runId}\n`);
 	await igit.add({ fs, dir, filepath: file });
 	await igit.commit({ fs, dir, message: `bench ${runId} ${i}`, author: { name: "bench", email: "bench@example.com" } });
-	await igit.push({ fs, http: ihttp, dir, url: fork.url, ref: "main", remoteRef: `refs/heads/changes/${change_id}`, onAuth });
+	await igit.push({
+		fs,
+		http: ihttp,
+		dir,
+		url: fork.url,
+		ref: "main",
+		remoteRef: `refs/heads/changes/${change_id}`,
+		onAuth,
+	});
 	const checked = await tool(level, "check", { ...ids, change: change_id });
 	await tool(level, "status", { ...ids, change: change_id });
 	await tool(level, "claims", ids);
-	const released = await tool(level, "release", { ...ids, change: change_id, agent: agentName, reason: "benchmark done" });
+	const released = await tool(level, "release", {
+		...ids,
+		change: change_id,
+		agent: agentName,
+		reason: "benchmark done",
+	});
 	if (!released.ok) throw new Error(`release refused: ${JSON.stringify(released)}`);
 	return checked;
 }
 
-/** Several agents claim the same path at once: Git's compare-and-swap lets exactly one win. */
+/** Several agents claim the same path at once, and exactly one may win. */
 async function race(level, runId) {
 	const results = await Promise.allSettled(
 		Array.from({ length: RACERS }, (_, i) =>
-			tool(level, "claim", { repo: REPO, change: `${runId}-r${i}`, agent: `bench-${runId}-r${i}`, paths: [`bench-${runId}/race/`], intent: "benchmark race" }, "race").then((r) => ({ ...r, i })),
+			tool(
+				level,
+				"claim",
+				{
+					repo: REPO,
+					change: `${runId}-r${i}`,
+					agent: `bench-${runId}-r${i}`,
+					paths: [`bench-${runId}/race/`],
+					intent: "benchmark race",
+				},
+				"race",
+			).then((r) => ({ ...r, i })),
 		),
 	);
 	const won = results.filter((r) => r.status === "fulfilled" && r.value.ok).map((r) => r.value.i);
-	const unexpected = results.filter((r) => r.status === "rejected" || (!r.value.ok && !r.value.conflicts?.length)).map((r) => (r.status === "rejected" ? r.reason.message : JSON.stringify(r.value)));
-	// A failed release is recorded with the rest, not allowed to end the run.
+	const unexpected = results
+		.filter((r) => r.status === "rejected" || (!r.value.ok && !r.value.conflicts?.length))
+		.map((r) => (r.status === "rejected" ? r.reason.message : JSON.stringify(r.value)));
+	// Record a failed release rather than ending the run.
 	for (const i of won)
-		await tool(level, "release", { repo: REPO, change: `${runId}-r${i}`, agent: `bench-${runId}-r${i}`, reason: "benchmark race done" }, null).catch((err) => unexpected.push(`release: ${err.message}`));
+		await tool(
+			level,
+			"release",
+			{ repo: REPO, change: `${runId}-r${i}`, agent: `bench-${runId}-r${i}`, reason: "benchmark race done" },
+			null,
+		).catch((err) => unexpected.push(`release: ${err.message}`));
 	return { winners: won.length, unexpected };
 }
 
@@ -148,7 +196,13 @@ const pct = (values, p) => {
 	const sorted = [...values].sort((a, b) => a - b);
 	return sorted[Math.min(sorted.length - 1, Math.ceil((p / 100) * sorted.length) - 1)];
 };
-const summary = (values) => ({ n: values.length, p50: pct(values, 50), p95: pct(values, 95), p99: pct(values, 99), max: values.length ? Math.max(...values) : null });
+const summary = (values) => ({
+	n: values.length,
+	p50: pct(values, 50),
+	p95: pct(values, 95),
+	p99: pct(values, 99),
+	max: values.length ? Math.max(...values) : null,
+});
 
 async function main() {
 	const repos = await api("GET", "/repos");
@@ -160,15 +214,31 @@ async function main() {
 			if (!/exist/i.test(err.message)) throw err;
 		});
 	}
-	// The repo's first settings start GitHive on it; on a repo it had started on already, its claims stay as they're kept.
-	const started = await tool(0, "settings", { repo: REPO, ...(SHARD_DEPTH === undefined ? {} : { shard_depth: SHARD_DEPTH }), ...(RECORDS_REPOS === undefined ? {} : { records_repos: RECORDS_REPOS }) }).catch((err) => {
+	// The first settings call starts GitHive on the repo. On a started repo, existing claims are kept.
+	const started = await tool(0, "settings", {
+		repo: REPO,
+		...(SHARD_DEPTH === undefined ? {} : { shard_depth: SHARD_DEPTH }),
+		...(RECORDS_REPOS === undefined ? {} : { records_repos: RECORDS_REPOS }),
+	}).catch((err) => {
 		if (!/has started on|set when GitHive starts/.test(err.message)) throw err;
 		return null;
 	});
-	console.log(started ? `${REPO} at ${BASE} (claims sharded ${started.shardDepth ? `${started.shardDepth} deep, over ${started.recordsRepos || "no"} records repos` : "not at all"})` : `${REPO} at ${BASE} (GitHive had started on it: its claims are kept as they were)`);
+	console.log(
+		started
+			? `${REPO} at ${BASE} (claims sharded ${started.shardDepth ? `${started.shardDepth} deep, over ${started.recordsRepos || "no"} records repos` : "not at all"})`
+			: `${REPO} at ${BASE} (GitHive had started on it: its claims are kept as they were)`,
+	);
 
 	const levels = [];
-	const result = { label: LABEL, rampSeconds: RAMP_MS / 1000, base: BASE, repo: REPO, racers: RACERS, at: new Date().toISOString(), levels };
+	const result = {
+		label: LABEL,
+		rampSeconds: RAMP_MS / 1000,
+		base: BASE,
+		repo: REPO,
+		racers: RACERS,
+		at: new Date().toISOString(),
+		levels,
+	};
 	await mkdir(join(root, "bench-results"), { recursive: true });
 	const file = join(root, "bench-results", `${LABEL}-${result.at.replace(/[:.]/g, "-")}.json`);
 	const save = () => writeFile(file, JSON.stringify(result, null, "\t") + "\n");
@@ -179,7 +249,7 @@ async function main() {
 		const [agents, raced] = await Promise.all([
 			Promise.allSettled(
 				Array.from({ length: n }, async (_, i) => {
-					// Arrivals spread over the ramp, like agents starting work, rather than all at one instant.
+					// Spread arrivals over the ramp instead of starting all at once.
 					if (RAMP_MS) await new Promise((resolve) => setTimeout(resolve, (RAMP_MS * i) / n));
 					return agent(n, runId, i, scratch);
 				}),
@@ -192,7 +262,12 @@ async function main() {
 		const failures = agents.filter((a) => a.status === "rejected").map((a) => a.reason.message.slice(0, 200));
 		const leftover = (await tool(n, "claims", { repo: REPO }, null)).filter((c) => c.change.startsWith(runId));
 		const levelCalls = calls.filter((c) => c.level === n);
-		const tools = Object.fromEntries([...new Set(levelCalls.map((c) => c.tool))].map((name) => [name, summary(levelCalls.filter((c) => c.tool === name).map((c) => c.ms))]));
+		const tools = Object.fromEntries(
+			[...new Set(levelCalls.map((c) => c.tool))].map((name) => [
+				name,
+				summary(levelCalls.filter((c) => c.tool === name).map((c) => c.ms)),
+			]),
+		);
 		const level = {
 			agents: n,
 			wallMs,
@@ -207,16 +282,29 @@ async function main() {
 		};
 		levels.push(level);
 		await save();
-		console.log(`n=${n}: ${(wallMs / 1000).toFixed(1)}s, ${level.calls} calls, race winners ${raced.winners}, failures ${failures.length}, leftover claims ${leftover.length}`);
+		console.log(
+			`n=${n}: ${(wallMs / 1000).toFixed(1)}s, ${level.calls} calls, race winners ${raced.winners}, failures ${failures.length}, leftover claims ${leftover.length}`,
+		);
 	}
 
-	const ms = (v) => (v === null ? "-" : v >= 10_000 ? `${(v / 1000).toFixed(0)}s` : v >= 1000 ? `${(v / 1000).toFixed(1)}s` : `${Math.round(v)}ms`);
+	const ms = (v) =>
+		v === null
+			? "-"
+			: v >= 10_000
+				? `${(v / 1000).toFixed(0)}s`
+				: v >= 1000
+					? `${(v / 1000).toFixed(1)}s`
+					: `${Math.round(v)}ms`;
 	console.log(`\n${LABEL}\n`);
-	console.log("| agents | wall | calls/s | claims p50/p95 | claim p50/p95 | check p50/p95 | status p50/p95 | release p50/p95 | race winners | failures |");
+	console.log(
+		"| agents | wall | calls/s | claims p50/p95 | claim p50/p95 | check p50/p95 | status p50/p95 | release p50/p95 | race winners | failures |",
+	);
 	console.log("|---|---|---|---|---|---|---|---|---|---|");
 	for (const l of levels) {
 		const t = (name) => `${ms(l.tools[name]?.p50 ?? null)} / ${ms(l.tools[name]?.p95 ?? null)}`;
-		console.log(`| ${l.agents} | ${ms(l.wallMs)} | ${l.callsPerSecond.toFixed(1)} | ${t("claims")} | ${t("claim")} | ${t("check")} | ${t("status")} | ${t("release")} | ${l.race.winners}/${RACERS} | ${l.failures.length} |`);
+		console.log(
+			`| ${l.agents} | ${ms(l.wallMs)} | ${l.callsPerSecond.toFixed(1)} | ${t("claims")} | ${t("claim")} | ${t("check")} | ${t("status")} | ${t("release")} | ${l.race.winners}/${RACERS} | ${l.failures.length} |`,
+		);
 	}
 	console.log(`\nfull results: ${file}`);
 }

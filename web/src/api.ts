@@ -4,20 +4,26 @@ import type { Summaries } from "./lib/repos";
 
 // The dashboard's calls to the Worker.
 
-/** How changes merge, as the settings tool takes it: each field left out stays as it is. */
+/** How changes merge, as the settings tool takes it. Fields left out stay as they are. */
 export interface SettingsInput {
 	required?: number;
 	vetoes?: string[];
 	escalate?: { paths: string[]; required?: number; vetoes?: string[] }[];
 	grants?: Record<string, string[]>;
 	verify?: string[];
-	/** What the checks skip: patterns like *.md or docs/ ([] for nothing). */
+	/** Paths the checks skip, as patterns like *.md or docs/. An empty list skips nothing. */
 	skip_checks?: string[];
-	/** Other branches' settings by pattern: each changes only what it sets ([] clears them). */
-	branch_rules?: { pattern: string; required?: number; vetoes?: string[]; grants?: Record<string, string[]>; verify?: string[] }[];
+	/** Settings for other branches, by pattern. Each rule changes only what it sets; an empty list clears them. */
+	branch_rules?: {
+		pattern: string;
+		required?: number;
+		vetoes?: string[];
+		grants?: Record<string, string[]>;
+		verify?: string[];
+	}[];
 }
 
-/** A branch rule as the server keeps it: a pattern, the policy fields it changes, and its checks (absent: the repo's). */
+/** A branch rule as the server stores it. Without checks of its own, the repo's apply. */
 export interface BranchRule {
 	pattern: string;
 	policy?: Partial<RepoSnapshot["policy"]>;
@@ -36,24 +42,38 @@ export interface SavedMergeSettings {
 /** A repo, as the dashboard shows it (GET /repos/:owner/:name). */
 export interface RepoSnapshot {
 	repo: string;
-	/** `grants`: who may vote as each role that can block a merge (newer servers; unlisted: people and GitHive's reviewers). */
-	policy: { required: number; vetoes: string[]; escalate?: { paths: string[]; required?: number; vetoes?: string[] }[]; grants?: Record<string, string[]> };
+	/**
+	 * `grants` names who may vote as each role that can block a merge. A role it leaves out goes to people and
+	 * GitHive's reviewers. Older servers omit it.
+	 */
+	policy: {
+		required: number;
+		vetoes: string[];
+		escalate?: { paths: string[]; required?: number; vetoes?: string[] }[];
+		grants?: Record<string, string[]>;
+	};
 	verify: string[];
-	/** The project's branch changes merge into (older servers: absent, main). */
+	/** The project's branch, which changes merge into. Older servers omit it, meaning main. */
 	branch?: string;
 	/** Whether records and merges are stamped with verified identity. */
 	verified: boolean;
 	/** Other branches' settings by pattern (newer servers). */
 	branchRules?: BranchRule[];
-	/** What the checks skip: a change touching only these merges without them (newer servers). */
+	/** Paths the checks skip. A change touching only these merges without checks (newer servers). */
 	skipChecks?: string[];
-	/** The other branches changes land on (newer servers): where each started. */
+	/** Other branches that changes land on, and where each started (newer servers). */
 	branches?: { name: string; base: string; from?: string; at: string }[];
-	/** How claims are kept (newer servers): in one record until the load calls for shards ("on demand"), always ("never"), or sharded since `since`. */
+	/**
+	 * How claims are stored (newer servers): in one record until the load calls for shards ("on demand"),
+	 * always in one record ("never"), or sharded since `since`.
+	 */
 	sharding?: "on demand" | "never" | { since?: string; because?: string };
 	/** How many path segments deep claims are sharded, once they are. */
 	shardDepth?: number;
-	/** How votes are kept (newer servers): in one record until the load calls for buckets ("on demand"), always ("never"), or in buckets since `since`. */
+	/**
+	 * How votes are stored (newer servers): in one record until the load calls for buckets ("on demand"),
+	 * always in one record ("never"), or in buckets since `since`.
+	 */
 	votesSharding?: "on demand" | "never" | { since?: string; because?: string };
 	claims: {
 		change: string;
@@ -72,14 +92,31 @@ export interface RepoSnapshot {
 		/** Changes it depends on (after), and those of them not merged into its branch yet. */
 		after?: string[];
 		waitsOn?: string[];
-		approval: { approved: boolean; approvals: number; required: number; vetoedBy: string[]; /** Veto roles that haven't approved yet (newer servers); a change merges only once each has. */ awaiting?: string[] };
-		/** A question for a person about the change (an agent asked, or GitHive's builder failed), until a person votes. */
+		approval: {
+			approved: boolean;
+			approvals: number;
+			required: number;
+			vetoedBy: string[];
+			/** Veto roles still to approve; the change merges once each has (newer servers). */ awaiting?: string[];
+		};
+		/** A question for a person, from an agent or a failed GitHive builder. It stays until a person votes. */
 		attention?: { reason: string; agent: string; at: string };
 		/** GitHive's hosted agents on the change. */
-		hosted?: { builder?: { status: string; revisions: number; error?: string }; reviewers: { role: string; status: string; verdict?: string }[] };
+		hosted?: {
+			builder?: { status: string; revisions: number; error?: string };
+			reviewers: { role: string; status: string; verdict?: string }[];
+		};
 	}[];
-	votes: { commit: string; reviewer: string; role: string; verdict: "approve" | "reject"; evidence: string; at: string; by?: string }[];
-	/** Loaded apart (GET /repos/:repo/audit): it replays every record, so it comes slower and less often. */
+	votes: {
+		commit: string;
+		reviewer: string;
+		role: string;
+		verdict: "approve" | "reject";
+		evidence: string;
+		at: string;
+		by?: string;
+	}[];
+	/** Loaded separately (GET /repos/:repo/audit) and less often, because it replays every record. */
 	audit?: RepoAudit;
 }
 
@@ -92,8 +129,16 @@ export interface RepoLanding {
 	branch: string;
 	/** The batch being checked now, on `base`. */
 	checking: { base: string; since: string; changes: { change: string; head: string; agent: string }[] } | null;
-	/** The changes settled last, newest last: landed (as `commit`), or put out because their checks failed. */
-	recent: { change: string; head: string; agent: string; how: "landed" | "failed"; at: string; commit?: string; reasons?: string[] }[];
+	/** Recently settled changes, newest last: landed as `commit`, or removed because their checks failed. */
+	recent: {
+		change: string;
+		head: string;
+		agent: string;
+		how: "landed" | "failed";
+		at: string;
+		commit?: string;
+		reasons?: string[];
+	}[];
 }
 
 /** A person's vote from the dashboard. */
@@ -172,7 +217,15 @@ export interface ChangeHistory {
 
 /** Who is looking at the dashboard (GET /me). */
 export type Me =
-	| { kind: "user"; handle: string; name: string | null; email: string; avatarUrl: string | null; by: string; /** Whether they may start GitHive's hosted agents (newer servers). */ hostedAgents?: boolean }
+	| {
+			kind: "user";
+			handle: string;
+			name: string | null;
+			email: string;
+			avatarUrl: string | null;
+			by: string;
+			/** Whether they may start GitHive's hosted agents (newer servers). */ hostedAgents?: boolean;
+	  }
 	/** Through Cloudflare Access, on the admin hostnames: no sign-in and no agents of their own. */
 	| { kind: "access"; label: string; by: string; hostedAgents?: boolean }
 	| { kind: "agent"; handle: string; agent: string; by: string };
@@ -273,7 +326,9 @@ export type Gitignore = "node" | "python" | "go" | "rust";
 export const SIGNED_OUT_EVENT = "githive:signed-out";
 
 function asRecord(value: unknown): Record<string, unknown> | null {
-	return value !== null && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
+	return value !== null && typeof value === "object" && !Array.isArray(value)
+		? (value as Record<string, unknown>)
+		: null;
 }
 
 async function call<T>(method: string, path: string, body?: unknown): Promise<T> {
@@ -285,39 +340,58 @@ async function call<T>(method: string, path: string, body?: unknown): Promise<T>
 	try {
 		data = text ? JSON.parse(text) : null;
 	} catch {
-		// Not JSON: an older server without this route answers with the dashboard page.
+		// An older server without this route answers with the dashboard page, which isn't JSON.
 		throw new Error(res.ok ? `Unexpected response from ${path}` : `${res.status} ${res.statusText}`);
 	}
 	if (!res.ok) {
 		const detail = asRecord(data)?.error;
 		if (res.status === 401 && typeof window !== "undefined") window.dispatchEvent(new Event(SIGNED_OUT_EVENT));
-		throw new Error(res.status === 401 ? "Your session ended: sign in to GitHive again." : typeof detail === "string" ? detail : `${res.status} ${res.statusText}`);
+		throw new Error(
+			res.status === 401
+				? "Your session ended: sign in to GitHive again."
+				: typeof detail === "string"
+					? detail
+					: `${res.status} ${res.statusText}`,
+		);
 	}
 	return data as T;
 }
 
 export const api = {
-	/** Every repo with its counts, for the Repositories list and the Inbox (one read, kept by the server). */
+	/** Every repo with its counts, for the Repositories list and the Inbox. The server keeps them, so it's one read. */
 	summaries: () => call<Summaries>("GET", "/summaries"),
 	snapshot: (repo: string) => call<RepoSnapshot>("GET", `/repos/${repoPath(repo)}`),
 	audit: (repo: string) => call<RepoAudit>("GET", `/repos/${repoPath(repo)}/audit`),
 	history: (repo: string, branch: string) =>
 		call<BranchHistory>("GET", `/repos/${repoPath(repo)}/history?branch=${encodeURIComponent(branch)}`),
 	/** What's landing on a branch of the repo. */
-	landing: (repo: string, branch: string) => call<RepoLanding>("GET", `/repos/${repoPath(repo)}/landing?branch=${encodeURIComponent(branch)}`),
-	/** A person merges a change: it lands with the branch's other ready changes, as its agent, stamped with the person's name. */
-	merge: (repo: string, change: string) => call<{ ok: boolean; commit?: string; reasons?: string[]; conflicts?: string[] }>("POST", `/repos/${repoPath(repo)}/changes/${encodeURIComponent(change)}/merge`, {}),
-	/** A person makes a branch changes can land on, from another. */
-	makeBranch: (repo: string, name: string, from: string) => call<{ name: string; made?: string }>("POST", `/repos/${repoPath(repo)}/branches`, { name, from }),
+	landing: (repo: string, branch: string) =>
+		call<RepoLanding>("GET", `/repos/${repoPath(repo)}/landing?branch=${encodeURIComponent(branch)}`),
+	/** A person merges a change. It lands as its agent, with the branch's other ready changes, under their name. */
+	merge: (repo: string, change: string) =>
+		call<{ ok: boolean; commit?: string; reasons?: string[]; conflicts?: string[] }>(
+			"POST",
+			`/repos/${repoPath(repo)}/changes/${encodeURIComponent(change)}/merge`,
+			{},
+		),
+	/** A person makes a new branch from another, for changes to land on. */
+	makeBranch: (repo: string, name: string, from: string) =>
+		call<{ name: string; made?: string }>("POST", `/repos/${repoPath(repo)}/branches`, { name, from }),
 	/** A repo's files at a branch or commit (its default branch if none). */
-	tree: (repo: string, ref?: string) => call<RepoTree>("GET", `/repos/${repoPath(repo)}/tree${ref ? `?ref=${encodeURIComponent(ref)}` : ""}`),
+	tree: (repo: string, ref?: string) =>
+		call<RepoTree>("GET", `/repos/${repoPath(repo)}/tree${ref ? `?ref=${encodeURIComponent(ref)}` : ""}`),
 	/** One file's text at a branch or commit. */
 	file: (repo: string, path: string, ref?: string) =>
-		call<RepoFile>("GET", `/repos/${repoPath(repo)}/file?path=${encodeURIComponent(path)}${ref ? `&ref=${encodeURIComponent(ref)}` : ""}`),
+		call<RepoFile>(
+			"GET",
+			`/repos/${repoPath(repo)}/file?path=${encodeURIComponent(path)}${ref ? `&ref=${encodeURIComponent(ref)}` : ""}`,
+		),
 	/** A person's vote on a change's current commit. */
-	vote: (repo: string, change: string, vote: VoteInput) => call<unknown>("POST", `/repos/${repoPath(repo)}/changes/${encodeURIComponent(change)}/votes`, vote),
+	vote: (repo: string, change: string, vote: VoteInput) =>
+		call<unknown>("POST", `/repos/${repoPath(repo)}/changes/${encodeURIComponent(change)}/votes`, vote),
 	/** One change: its claim or how it ended, its commits and the votes on them. */
-	change: (repo: string, change: string) => call<ChangeHistory>("GET", `/repos/${repoPath(repo)}/changes/${encodeURIComponent(change)}`),
+	change: (repo: string, change: string) =>
+		call<ChangeHistory>("GET", `/repos/${repoPath(repo)}/changes/${encodeURIComponent(change)}`),
 	/** What the caller may do in a repo, and whether it's private or public. */
 	access: (repo: string) => call<RepoAccess>("GET", `/repos/${repoPath(repo)}/access`),
 };
@@ -327,33 +401,54 @@ export const manage = {
 	/** Every repo the caller can see, by full name. */
 	repos: () => call<{ name: string; id: string; visibility: "private" | "public" }[]>("GET", "/repos"),
 	createRepo: (input: NewRepoInput) => call<RepoRecord>("POST", "/repos", input),
-	setVisibility: (repo: string, visibility: "private" | "public") => call<RepoRecord>("PATCH", `/repos/${repoPath(repo)}`, { visibility }),
+	setVisibility: (repo: string, visibility: "private" | "public") =>
+		call<RepoRecord>("PATCH", `/repos/${repoPath(repo)}`, { visibility }),
 	deleteRepo: (repo: string) => call<unknown>("DELETE", `/repos/${repoPath(repo)}`),
-	/** Start GitHive on a repo with the default policy (its admins). */
-	// A repo's first settings start GitHive on it: none given, the defaults.
+	/** Start GitHive on a repo with the default policy (admins only). Saving empty first settings starts it. */
 	startRepo: (repo: string) => call<unknown>("POST", `/repos/${repoPath(repo)}/settings`, {}),
-	/** Change a started repo's review policy or checks (its admins); what's left out stays. */
-	changeSettings: (repo: string, settings: SettingsInput) => call<SavedMergeSettings>("POST", `/repos/${repoPath(repo)}/settings`, settings),
-	collaborators: (repo: string) => call<{ handle: string; permission: Level }[]>("GET", `/repos/${repoPath(repo)}/collaborators`),
-	setCollaborator: (repo: string, handle: string, permission: Level) => call<unknown>("PUT", `/repos/${repoPath(repo)}/collaborators/${encodeURIComponent(handle)}`, { permission }),
-	removeCollaborator: (repo: string, handle: string) => call<unknown>("DELETE", `/repos/${repoPath(repo)}/collaborators/${encodeURIComponent(handle)}`),
+	/** Change a started repo's review policy or checks (admins only). Fields left out stay as they are. */
+	changeSettings: (repo: string, settings: SettingsInput) =>
+		call<SavedMergeSettings>("POST", `/repos/${repoPath(repo)}/settings`, settings),
+	collaborators: (repo: string) =>
+		call<{ handle: string; permission: Level }[]>("GET", `/repos/${repoPath(repo)}/collaborators`),
+	setCollaborator: (repo: string, handle: string, permission: Level) =>
+		call<unknown>("PUT", `/repos/${repoPath(repo)}/collaborators/${encodeURIComponent(handle)}`, { permission }),
+	removeCollaborator: (repo: string, handle: string) =>
+		call<unknown>("DELETE", `/repos/${repoPath(repo)}/collaborators/${encodeURIComponent(handle)}`),
 	orgs: () => call<MyOrg[]>("GET", "/orgs"),
 	createOrg: (slug: string, name: string) => call<Org>("POST", "/orgs", { slug, name }),
 	org: (slug: string) => call<OrgDetail>("GET", `/orgs/${encodeURIComponent(slug)}`),
-	updateOrg: (slug: string, patch: { name?: string | null; default_permission?: Level; members_can_create_repos?: boolean }) => call<Org>("PATCH", `/orgs/${encodeURIComponent(slug)}`, patch),
-	addMember: (slug: string, email: string, role: OrgRole) => call<AddedMember>("POST", `/orgs/${encodeURIComponent(slug)}/members`, { email, role }),
-	setRole: (slug: string, handle: string, role: OrgRole) => call<unknown>("PATCH", `/orgs/${encodeURIComponent(slug)}/members/${encodeURIComponent(handle)}`, { role }),
-	removeMember: (slug: string, handle: string) => call<unknown>("DELETE", `/orgs/${encodeURIComponent(slug)}/members/${encodeURIComponent(handle)}`),
-	cancelInvite: (slug: string, email: string) => call<unknown>("DELETE", `/orgs/${encodeURIComponent(slug)}/invites/${encodeURIComponent(email)}`),
-	createTeam: (slug: string, team: string, name: string) => call<{ team: string }>("POST", `/orgs/${encodeURIComponent(slug)}/teams`, { slug: team, name }),
-	deleteTeam: (slug: string, team: string) => call<unknown>("DELETE", `/orgs/${encodeURIComponent(slug)}/teams/${encodeURIComponent(team)}`),
-	addTeamMember: (slug: string, team: string, handle: string) => call<unknown>("PUT", `/orgs/${encodeURIComponent(slug)}/teams/${encodeURIComponent(team)}/members/${encodeURIComponent(handle)}`),
-	removeTeamMember: (slug: string, team: string, handle: string) => call<unknown>("DELETE", `/orgs/${encodeURIComponent(slug)}/teams/${encodeURIComponent(team)}/members/${encodeURIComponent(handle)}`),
+	updateOrg: (
+		slug: string,
+		patch: { name?: string | null; default_permission?: Level; members_can_create_repos?: boolean },
+	) => call<Org>("PATCH", `/orgs/${encodeURIComponent(slug)}`, patch),
+	addMember: (slug: string, email: string, role: OrgRole) =>
+		call<AddedMember>("POST", `/orgs/${encodeURIComponent(slug)}/members`, { email, role }),
+	setRole: (slug: string, handle: string, role: OrgRole) =>
+		call<unknown>("PATCH", `/orgs/${encodeURIComponent(slug)}/members/${encodeURIComponent(handle)}`, { role }),
+	removeMember: (slug: string, handle: string) =>
+		call<unknown>("DELETE", `/orgs/${encodeURIComponent(slug)}/members/${encodeURIComponent(handle)}`),
+	cancelInvite: (slug: string, email: string) =>
+		call<unknown>("DELETE", `/orgs/${encodeURIComponent(slug)}/invites/${encodeURIComponent(email)}`),
+	createTeam: (slug: string, team: string, name: string) =>
+		call<{ team: string }>("POST", `/orgs/${encodeURIComponent(slug)}/teams`, { slug: team, name }),
+	deleteTeam: (slug: string, team: string) =>
+		call<unknown>("DELETE", `/orgs/${encodeURIComponent(slug)}/teams/${encodeURIComponent(team)}`),
+	addTeamMember: (slug: string, team: string, handle: string) =>
+		call<unknown>(
+			"PUT",
+			`/orgs/${encodeURIComponent(slug)}/teams/${encodeURIComponent(team)}/members/${encodeURIComponent(handle)}`,
+		),
+	removeTeamMember: (slug: string, team: string, handle: string) =>
+		call<unknown>(
+			"DELETE",
+			`/orgs/${encodeURIComponent(slug)}/teams/${encodeURIComponent(team)}/members/${encodeURIComponent(handle)}`,
+		),
 };
 
 export type ManageApi = typeof manage;
 
-/** Who is looking, or null when nobody is signed in (a 401 here is the normal signed-out answer, not an error). */
+/** Who is looking, or null when nobody is signed in. A 401 here is the normal signed-out answer. */
 export async function fetchMe(): Promise<Me | null> {
 	const res = await fetch("/me");
 	if (res.status === 401) return null;
@@ -369,7 +464,8 @@ export const account = {
 	agents: () => call<MyAgent[]>("GET", "/me/agents"),
 	createAgent: (name: string) => call<MyAgent>("POST", "/me/agents", { name }),
 	revokeAgent: (id: string) => call<unknown>("DELETE", `/me/agents/${encodeURIComponent(id)}`),
-	createToken: (agentId: string, expiresInDays: number | null) => call<IssuedToken>("POST", `/me/agents/${encodeURIComponent(agentId)}/tokens`, { expires_in_days: expiresInDays }),
+	createToken: (agentId: string, expiresInDays: number | null) =>
+		call<IssuedToken>("POST", `/me/agents/${encodeURIComponent(agentId)}/tokens`, { expires_in_days: expiresInDays }),
 	revokeToken: (id: string) => call<unknown>("DELETE", `/me/tokens/${encodeURIComponent(id)}`),
 	connections: () => call<Connection[]>("GET", "/me/connections"),
 	disconnect: (id: string) => call<unknown>("DELETE", `/me/connections/${encodeURIComponent(id)}`),
@@ -377,7 +473,7 @@ export const account = {
 
 export type AccountApi = typeof account;
 
-/** What adding a member by email did: added at once, or invited (waiting for an admin's approval, if they can't sign in yet). */
+/** Adding a member by email adds them, or invites them if they can't sign in yet (pending an admin's approval). */
 export interface AddedMember {
 	added?: string;
 	invited?: string;
@@ -392,7 +488,7 @@ export interface ApprovedEmail {
 	createdAt: string;
 }
 
-/** Someone orgs asked to have who can't sign in until an admin approves them. */
+/** Someone orgs want to add, who can't sign in until an admin approves them. */
 export interface InviteRequest {
 	email: string;
 	orgs: { org: string; role: string; invitedBy: string }[];
@@ -416,7 +512,8 @@ export const admin = {
 	requests: () => call<InviteRequest[]>("GET", "/admin/invite-requests"),
 	decline: (email: string) => call<unknown>("DELETE", `/admin/invite-requests/${encodeURIComponent(email)}`),
 	hosted: () => call<HostedUser[]>("GET", "/admin/hosted-agents"),
-	allowHosted: (handle: string) => call<{ allowed: string }>("PUT", `/admin/hosted-agents/${encodeURIComponent(handle)}`),
+	allowHosted: (handle: string) =>
+		call<{ allowed: string }>("PUT", `/admin/hosted-agents/${encodeURIComponent(handle)}`),
 	disallowHosted: (handle: string) => call<unknown>("DELETE", `/admin/hosted-agents/${encodeURIComponent(handle)}`),
 };
 

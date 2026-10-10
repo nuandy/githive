@@ -1,14 +1,19 @@
 import { describe, expect, it, vi } from "vitest";
 import { FakeStorage } from "./fakes/env";
 
-// The Gate, without real containers: the repo's own Gate warms on main to
-// keep the repo's snapshot, a change's Gate runs its checks, and each stops
-// its container once nothing needs it.
+// The Gate, without real containers. The repo's own Gate warms on main to keep
+// the repo's snapshot, a change's Gate runs its checks, and each stops its
+// container once nothing needs it.
 
 const { Gate } = await import("../src/gate");
 
 describe("warming the repo's own Gate", () => {
-	const input = { repo: "express", branch: "master", base: { remote: "https://git.test/express.git", token: "read" }, checks: ["npm install", "npm test"] };
+	const input = {
+		repo: "express",
+		branch: "master",
+		base: { remote: "https://git.test/express.git", token: "read" },
+		checks: ["npm install", "npm test"],
+	};
 
 	it("returns at once and warms in the background when the checks are set up", async () => {
 		const storage = new FakeStorage();
@@ -53,8 +58,13 @@ describe("installing a Node project's dependencies before its checks", () => {
 
 	it("leaves the checks as they are when one installs, or the project isn't a Node one", async () => {
 		const { withInstall } = await import("../src/gate");
-		expect(withInstall(["npm install", "npm test"], { packageJson: true, npmLockfile: true })).toEqual(["npm install", "npm test"]);
-		expect(withInstall(["pnpm install --frozen-lockfile", "pnpm test"], { packageJson: true, npmLockfile: false })).toEqual(["pnpm install --frozen-lockfile", "pnpm test"]);
+		expect(withInstall(["npm install", "npm test"], { packageJson: true, npmLockfile: true })).toEqual([
+			"npm install",
+			"npm test",
+		]);
+		expect(
+			withInstall(["pnpm install --frozen-lockfile", "pnpm test"], { packageJson: true, npmLockfile: false }),
+		).toEqual(["pnpm install --frozen-lockfile", "pnpm test"]);
 		expect(withInstall(["cargo test"], { packageJson: false, npmLockfile: false })).toEqual(["cargo test"]);
 	});
 });
@@ -104,7 +114,9 @@ function fakeContainer(fails: (cmd: string[]) => boolean = () => false) {
 		},
 		destroy: vi.fn(async () => void (container.running = false)),
 		setInactivityTimeout: vi.fn(async () => undefined),
-		exec: async (cmd: string[]) => ({ output: async () => ({ exitCode: fails(cmd) ? 1 : 0, stdout: new Uint8Array() }) }),
+		exec: async (cmd: string[]) => ({
+			output: async () => ({ exitCode: fails(cmd) ? 1 : 0, stdout: new Uint8Array() }),
+		}),
 		snapshotContainer: async () => ({ id: `snap-${++container.snapshots}`, size: 123e6 }),
 	};
 	return container;
@@ -125,7 +137,10 @@ describe("a repo's snapshot", () => {
 	it("boots a batch's check container from the snapshot while the batch is read, before its check", async () => {
 		const storage = new FakeStorage();
 		const container = fakeContainer();
-		const gate = new Gate({ storage, container, id: { equals: () => false } } as never, { GATE: { idFromName: () => ({}), getByName: () => ({ snapshot: async () => snapshot }) } } as never);
+		const gate = new Gate(
+			{ storage, container, id: { equals: () => false } } as never,
+			{ GATE: { idFromName: () => ({}), getByName: () => ({ snapshot: async () => snapshot }) } } as never,
+		);
 		await gate.boot({ repo: "acme--web", base: { remote: "https://git.test/web.git", token: "t" } });
 		expect(container.starts).toEqual([expect.objectContaining({ containerSnapshot: { id: "s1" } })]);
 		expect(await storage.get("prepared")).toBe(true);
@@ -142,11 +157,15 @@ describe("a repo's snapshot", () => {
 			return exec(cmd);
 		};
 		expect(await bootContainer(flaky as never, "small", snapshot)).toBe("restored");
-		expect(flaky.starts).toEqual([expect.objectContaining({ containerSnapshot: { id: "s1" } }), expect.objectContaining({ containerSnapshot: { id: "s1" } })]);
-		// Lost twice: the image.
+		expect(flaky.starts).toEqual([
+			expect.objectContaining({ containerSnapshot: { id: "s1" } }),
+			expect.objectContaining({ containerSnapshot: { id: "s1" } }),
+		]);
+		// Lost twice, so it falls back to the image.
 		const gone = fakeContainer();
 		gone.exec = async (cmd: string[]) => {
-			if (cmd.join(" ").includes("command -v git")) throw new Error("The container connection is temporarily unavailable, try again shortly");
+			if (cmd.join(" ").includes("command -v git"))
+				throw new Error("The container connection is temporarily unavailable, try again shortly");
 			return exec(cmd);
 		};
 		expect(await bootContainer(gone as never, "small", snapshot)).toBe("fresh");
@@ -159,7 +178,8 @@ describe("a repo's snapshot", () => {
 		const restored = fakeContainer();
 		expect(await bootContainer(restored as never, "small", snapshot)).toBe("restored");
 		expect(restored.starts).toEqual([expect.objectContaining({ containerSnapshot: { id: "s1" } })]);
-		// Started without its checkout (expired, say): destroyed, and started from the image with git installed.
+		// A container started without its checkout, for example because it expired, is destroyed and started again
+		// from the image with git installed.
 		const unusable = fakeContainer((cmd) => cmd.join(" ").includes("command -v git"));
 		expect(await bootContainer(unusable as never, "small", snapshot)).toBe("fresh");
 		expect(unusable.destroy).toHaveBeenCalledOnce();
@@ -173,10 +193,18 @@ describe("a repo's snapshot", () => {
 		const storage = new FakeStorage();
 		const container = fakeContainer();
 		const id = { equals: () => own };
-		const gate = new Gate({ storage, container, id } as never, { GATE: { idFromName: () => ({}), getByName: () => ({ snapshot: async () => null }) } } as never);
+		const gate = new Gate(
+			{ storage, container, id } as never,
+			{ GATE: { idFromName: () => ({}), getByName: () => ({ snapshot: async () => null }) } } as never,
+		);
 		return { storage, container, gate };
 	};
-	const warmInput = { repo: "acme--web", branch: "main", base: { remote: "https://git.test/web.git", token: "t" }, checks: ["npm test"] };
+	const warmInput = {
+		repo: "acme--web",
+		branch: "main",
+		base: { remote: "https://git.test/web.git", token: "t" },
+		checks: ["npm test"],
+	};
 
 	it("is taken by the repo's own Gate after a warm-up on main, from a fresh container", async () => {
 		const { storage, container, gate } = gateFor(true);

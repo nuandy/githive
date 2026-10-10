@@ -18,13 +18,21 @@ describe("dashboard change API", () => {
 	const originalFetch = globalThis.fetch;
 
 	it("browses code, reads a change and posts a person's vote", async () => {
-		const request = mockFetch(new Map<string, unknown>([
-			["/repos/team/app/tree?ref=master", { ref: "master", commit: "abc", files: ["a.ts"], truncated: false }],
-			["/repos/team/app/tree", { ref: "main", commit: "abc", files: [], truncated: false }],
-			["/repos/team/app/file?path=src%2Fa%20b.ts&ref=abc", { ref: "abc", commit: "abc", path: "src/a b.ts", size: 3, text: "hi\n" }],
-			["/repos/acme/docs/changes/c-1", { change: "c-1", branch: "main", claim: null, released: [], commits: [], votes: [] }],
-			["/repos/acme/docs/changes/c-1/votes", { commit: "h1", role: "security", verdict: "reject" }],
-		]));
+		const request = mockFetch(
+			new Map<string, unknown>([
+				["/repos/team/app/tree?ref=master", { ref: "master", commit: "abc", files: ["a.ts"], truncated: false }],
+				["/repos/team/app/tree", { ref: "main", commit: "abc", files: [], truncated: false }],
+				[
+					"/repos/team/app/file?path=src%2Fa%20b.ts&ref=abc",
+					{ ref: "abc", commit: "abc", path: "src/a b.ts", size: 3, text: "hi\n" },
+				],
+				[
+					"/repos/acme/docs/changes/c-1",
+					{ change: "c-1", branch: "main", claim: null, released: [], commits: [], votes: [] },
+				],
+				["/repos/acme/docs/changes/c-1/votes", { commit: "h1", role: "security", verdict: "reject" }],
+			]),
+		);
 		try {
 			await api.tree("team/app", "master");
 			await api.tree("team/app");
@@ -33,23 +41,37 @@ describe("dashboard change API", () => {
 			await api.vote("acme/docs", "c-1", { role: "security", verdict: "reject", evidence: "Leaks the token" });
 			const calls = request.mock.calls.map(([input, init]) => [String(input), init?.method ?? "GET"]);
 			expect(calls.map(([, method]) => method)).toEqual(["GET", "GET", "GET", "GET", "POST"]);
-			expect(JSON.parse(String(request.mock.calls[4][1]?.body))).toEqual({ role: "security", verdict: "reject", evidence: "Leaks the token" });
+			expect(JSON.parse(String(request.mock.calls[4][1]?.body))).toEqual({
+				role: "security",
+				verdict: "reject",
+				evidence: "Leaks the token",
+			});
 		} finally {
 			globalThis.fetch = originalFetch;
 		}
 	});
 
 	it("shows the server's words when a vote is refused", async () => {
-		globalThis.fetch = (async () => Response.json({ error: "only a person signed in through Access votes from the dashboard" }, { status: 403 })) as unknown as typeof fetch;
+		globalThis.fetch = (async () =>
+			Response.json(
+				{ error: "only a person signed in through Access votes from the dashboard" },
+				{ status: 403 },
+			)) as unknown as typeof fetch;
 		try {
-			await expect(api.vote("docs", "c-1", { role: "review", verdict: "approve", evidence: "ok" })).rejects.toThrow("only a person signed in through Access votes from the dashboard");
+			await expect(api.vote("docs", "c-1", { role: "review", verdict: "approve", evidence: "ok" })).rejects.toThrow(
+				"only a person signed in through Access votes from the dashboard",
+			);
 		} finally {
 			globalThis.fetch = originalFetch;
 		}
 	});
 
 	it("opens a repo's live feed on the same host", () => {
-		expect(liveFeedUrl("acme/docs", { protocol: "https:", host: "githive.example" })).toBe("wss://githive.example/repos/acme/docs/live");
-		expect(liveFeedUrl("acme/my docs", { protocol: "http:", host: "localhost:5173" })).toBe("ws://localhost:5173/repos/acme/my%20docs/live");
+		expect(liveFeedUrl("acme/docs", { protocol: "https:", host: "githive.example" })).toBe(
+			"wss://githive.example/repos/acme/docs/live",
+		);
+		expect(liveFeedUrl("acme/my docs", { protocol: "http:", host: "localhost:5173" })).toBe(
+			"ws://localhost:5173/repos/acme/my%20docs/live",
+		);
 	});
 });

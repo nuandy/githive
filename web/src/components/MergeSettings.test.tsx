@@ -5,7 +5,11 @@ import { MergeSettings } from "./MergeSettings";
 
 describe("merge settings", () => {
 	it("say what the checks run in: any shell command, the tools there, the limits, and no secrets", () => {
-		const snapshot = { branch: "main", policy: { required: 1, vetoes: [] }, verify: ["npm test"] } as unknown as RepoSnapshot;
+		const snapshot = {
+			branch: "main",
+			policy: { required: 1, vetoes: [] },
+			verify: ["npm test"],
+		} as unknown as RepoSnapshot;
 		const html = renderToStaticMarkup(<MergeSettings snapshot={snapshot} save={async () => ({}) as never} />);
 		expect(html).toContain("<summary>What the checks run in</summary>");
 		expect(html).toMatch(/shell command, run with bash at the top of the repo, on main/);

@@ -18,7 +18,7 @@ let summarized: { repo: string; patch: Record<string, unknown> }[] = [];
 let pinged: string[] = [];
 let reviewRequests: { repo: string; change: string; roles: string[]; summary?: string }[] = [];
 let builds: { repo: string; change: string }[] = [];
-/** Agents' forks there, but unreadable (Artifacts busy); otherwise there are none here. */
+/** When set, agents' forks exist but can't be read because Artifacts is busy. Otherwise there are none. */
 let forksDown = false;
 const ctx = () => ({
 	toolkit: {
@@ -40,7 +40,10 @@ const ctx = () => ({
 	},
 });
 const call = async (name: string, args: Record<string, unknown>) => {
-	const reply = (await handleRpc({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name, arguments: args } }, ctx() as never)) as {
+	const reply = (await handleRpc(
+		{ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name, arguments: args } },
+		ctx() as never,
+	)) as {
 		result: { content: { text: string }[]; isError?: boolean };
 	};
 	const text = reply.result.content[0].text;
@@ -57,17 +60,26 @@ afterEach(async () => {
 
 describe("GitHive's MCP tools", () => {
 	it("are listed by the main MCP endpoint, beside the other tools", async () => {
-		const reply = (await handleRpc({ jsonrpc: "2.0", id: 1, method: "tools/list" }, ctx() as never)) as { result: { tools: { name: string }[] } };
+		const reply = (await handleRpc({ jsonrpc: "2.0", id: 1, method: "tools/list" }, ctx() as never)) as {
+			result: { tools: { name: string }[] };
+		};
 		expect(reply.result.tools.map((t) => t.name)).toEqual(TOOLS.map((t) => t.name));
 	});
 
 	it("starts the mode, claims, refuses an overlapping claim, and audits a clean repo", async () => {
 		// By default no reviews and no checks, as on GitHub: a claimed, pushed change merges as it is.
-		const started = (await call("settings", { repo: "project" })) as { policy: Record<string, unknown>; verify: string[] };
+		const started = (await call("settings", { repo: "project" })) as {
+			policy: Record<string, unknown>;
+			verify: string[];
+		};
 		expect(started).toMatchObject({ repo: "project", policy: { required: 0, vetoes: [] }, verify: [] });
 		expect(started.policy).not.toHaveProperty("escalate");
-		expect(await call("claim", { repo: "project", change: "a-1", agent: "agent-a", paths: ["src/a/"], intent: "a" })).toMatchObject({ ok: true });
-		expect(await call("claim", { repo: "project", change: "b-1", agent: "agent-b", paths: ["src/a/x.ts"], intent: "b" })).toMatchObject({
+		expect(
+			await call("claim", { repo: "project", change: "a-1", agent: "agent-a", paths: ["src/a/"], intent: "a" }),
+		).toMatchObject({ ok: true });
+		expect(
+			await call("claim", { repo: "project", change: "b-1", agent: "agent-b", paths: ["src/a/x.ts"], intent: "b" }),
+		).toMatchObject({
 			ok: false,
 			conflicts: [{ change: "a-1", agent: "agent-a" }],
 		});
@@ -76,22 +88,47 @@ describe("GitHive's MCP tools", () => {
 	});
 
 	it("starts GitHive and sets the rest at once when the first settings also name files to skip", async () => {
-		expect(await call("settings", { repo: "project", verify: ["npm test"], skip_checks: ["docs/"] })).toMatchObject({ verify: ["npm test"], skipChecks: ["docs/"], instructions: expect.any(String) });
-		expect(await call("settings", { repo: "project", required: 1 })).toMatchObject({ verify: ["npm test"], skipChecks: ["docs/"] });
+		expect(await call("settings", { repo: "project", verify: ["npm test"], skip_checks: ["docs/"] })).toMatchObject({
+			verify: ["npm test"],
+			skipChecks: ["docs/"],
+			instructions: expect.any(String),
+		});
+		expect(await call("settings", { repo: "project", required: 1 })).toMatchObject({
+			verify: ["npm test"],
+			skipChecks: ["docs/"],
+		});
 	});
 
 	it("starts GitHive on a repo with its first settings, then changes them, keeping what it leaves out, and says so in the records", async () => {
 		// The first settings start GitHive on the repo, and tell the caller how agents work in it.
-		expect(await call("settings", { repo: "project", required: 2, vetoes: ["security"], verify: ["npm test"] })).toMatchObject({ policy: { required: 2, vetoes: ["security"] }, verify: ["npm test"], instructions: expect.any(String) });
+		expect(
+			await call("settings", { repo: "project", required: 2, vetoes: ["security"], verify: ["npm test"] }),
+		).toMatchObject({
+			policy: { required: 2, vetoes: ["security"] },
+			verify: ["npm test"],
+			instructions: expect.any(String),
+		});
 		// Once started, settings changes what it names, and how claims are kept is no longer one of them.
-		expect(await call("settings", { repo: "project" })).toMatchObject({ error: expect.stringContaining("name what to change") });
-		expect(await call("settings", { repo: "project", shard_depth: 2 })).toMatchObject({ error: expect.stringContaining("set when GitHive starts") });
-		expect(await call("settings", { repo: "project", verify: ["npm install", "npm test"] })).toMatchObject({ policy: { required: 2, vetoes: ["security"] }, verify: ["npm install", "npm test"] });
+		expect(await call("settings", { repo: "project" })).toMatchObject({
+			error: expect.stringContaining("name what to change"),
+		});
+		expect(await call("settings", { repo: "project", shard_depth: 2 })).toMatchObject({
+			error: expect.stringContaining("set when GitHive starts"),
+		});
+		expect(await call("settings", { repo: "project", verify: ["npm install", "npm test"] })).toMatchObject({
+			policy: { required: 2, vetoes: ["security"] },
+			verify: ["npm install", "npm test"],
+		});
 		pinged = [];
-		expect(await call("settings", { repo: "project", required: 1 })).toMatchObject({ policy: { required: 1, vetoes: ["security"] }, verify: ["npm install", "npm test"] });
+		expect(await call("settings", { repo: "project", required: 1 })).toMatchObject({
+			policy: { required: 1, vetoes: ["security"] },
+			verify: ["npm install", "npm test"],
+		});
 		// The dashboard's views of the repo rebuild with the new settings.
 		expect(pinged).toEqual(["project"]);
-		expect(await call("settings", { repo: "project", verify: "npm test" })).toMatchObject({ error: expect.stringContaining("verify is a list") });
+		expect(await call("settings", { repo: "project", verify: "npm test" })).toMatchObject({
+			error: expect.stringContaining("verify is a list"),
+		});
 		const log = server.git("log", "--format=%B", "refs/notes/githive-claims/project");
 		expect(log).toContain("Settings: the checks (npm install; npm test) changed");
 		expect(log).toContain("Settings: the review policy changed");
@@ -100,8 +137,14 @@ describe("GitHive's MCP tools", () => {
 	it("answers the claims tool from the kept copy when the context keeps one", async () => {
 		await call("settings", { repo: "project" });
 		await call("claim", { repo: "project", change: "a-1", agent: "agent-a", paths: ["src/a/"], intent: "a" });
-		const kept = { claims: [{ change: "kept-1", agent: "agent-k", paths: ["src/k/"], intent: "k", since: "", active: "" }], merged: [] };
-		const reply = (await handleRpc({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "claims", arguments: { repo: "project" } } }, { toolkit: { ...ctx().toolkit, keptClaims: async () => kept } } as never)) as { result: { content: { text: string }[] } };
+		const kept = {
+			claims: [{ change: "kept-1", agent: "agent-k", paths: ["src/k/"], intent: "k", since: "", active: "" }],
+			merged: [],
+		};
+		const reply = (await handleRpc(
+			{ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "claims", arguments: { repo: "project" } } },
+			{ toolkit: { ...ctx().toolkit, keptClaims: async () => kept } } as never,
+		)) as { result: { content: { text: string }[] } };
 		expect(JSON.parse(reply.result.content[0].text).map((c: { change: string }) => c.change)).toEqual(["kept-1"]);
 		// Without one, the claims are read from Git.
 		expect((await call("claims", { repo: "project" })).map((c: { change: string }) => c.change)).toEqual(["a-1"]);
@@ -109,28 +152,58 @@ describe("GitHive's MCP tools", () => {
 
 	it("lets claim take paths from a claim idle for 30 minutes, releasing it as stale", async () => {
 		await call("settings", { repo: "project" });
-		const registry = new GitCasLog<Registry>(async () => ({ url: server.url, token: "unused" }), "project", "refs/notes/githive-claims/project");
-		await claim(registry, { change: "old-1", agent: "agent-gone", paths: ["src/a/"], intent: "abandoned", now: Date.now() - 31 * 60_000 });
-		expect(await call("claim", { repo: "project", change: "a-1", agent: "agent-a", paths: ["src/a/x.ts"], intent: "a" })).toMatchObject({ ok: true });
+		const registry = new GitCasLog<Registry>(
+			async () => ({ url: server.url, token: "unused" }),
+			"project",
+			"refs/notes/githive-claims/project",
+		);
+		await claim(registry, {
+			change: "old-1",
+			agent: "agent-gone",
+			paths: ["src/a/"],
+			intent: "abandoned",
+			now: Date.now() - 31 * 60_000,
+		});
+		expect(
+			await call("claim", { repo: "project", change: "a-1", agent: "agent-a", paths: ["src/a/x.ts"], intent: "a" }),
+		).toMatchObject({ ok: true });
 		expect((await call("claims", { repo: "project" })).map((c: { change: string }) => c.change)).toEqual(["a-1"]);
 		expect(await call("audit", { repo: "project" })).toEqual({ merges: 0, open: 0, violations: [] });
 	});
 
 	it("releases nothing as abandoned while its head can't be read: live work isn't released on a failed read", async () => {
 		await call("settings", { repo: "project" });
-		const registry = new GitCasLog<Registry>(async () => ({ url: server.url, token: "unused" }), "project", "refs/notes/githive-claims/project");
-		await claim(registry, { change: "old-1", agent: "agent-gone", paths: ["src/a/"], intent: "quiet, maybe pushed", now: Date.now() - 31 * 60_000 });
+		const registry = new GitCasLog<Registry>(
+			async () => ({ url: server.url, token: "unused" }),
+			"project",
+			"refs/notes/githive-claims/project",
+		);
+		await claim(registry, {
+			change: "old-1",
+			agent: "agent-gone",
+			paths: ["src/a/"],
+			intent: "quiet, maybe pushed",
+			now: Date.now() - 31 * 60_000,
+		});
 		forksDown = true;
-		expect(await call("claim", { repo: "project", change: "a-1", agent: "agent-a", paths: ["src/a/x.ts"], intent: "a" })).toMatchObject({ ok: false });
-		expect(await call("release", { repo: "project", change: "old-1", agent: "agent-a", stale: true })).toMatchObject({ ok: false });
+		expect(
+			await call("claim", { repo: "project", change: "a-1", agent: "agent-a", paths: ["src/a/x.ts"], intent: "a" }),
+		).toMatchObject({ ok: false });
+		expect(await call("release", { repo: "project", change: "old-1", agent: "agent-a", stale: true })).toMatchObject({
+			ok: false,
+		});
 		expect((await call("claims", { repo: "project" })).map((c: { change: string }) => c.change)).toEqual(["old-1"]);
 	});
 
 	it("lets only a claim's own agent give it up; another releases it only as stale", async () => {
 		await call("settings", { repo: "project" });
 		await call("claim", { repo: "project", change: "a-1", agent: "agent-a", paths: ["src/a/"], intent: "a" });
-		expect(await call("release", { repo: "project", change: "a-1", agent: "agent-b" })).toMatchObject({ error: expect.stringContaining("only its agent releases it") });
-		expect(await call("release", { repo: "project", change: "a-1", agent: "agent-b", stale: true })).toMatchObject({ ok: false });
+		expect(await call("release", { repo: "project", change: "a-1", agent: "agent-b" })).toMatchObject({
+			error: expect.stringContaining("only its agent releases it"),
+		});
+		expect(await call("release", { repo: "project", change: "a-1", agent: "agent-b", stale: true })).toMatchObject({
+			ok: false,
+		});
 		expect(await call("release", { repo: "project", change: "a-1", agent: "agent-a" })).toMatchObject({ ok: true });
 	});
 
@@ -157,7 +230,10 @@ describe("GitHive's MCP tools", () => {
 			await rogue.run("commit", "--quiet", "-m", "hotfix");
 			await rogue.run("push", "--quiet", "origin", "main");
 			const bad = await rogue.run("rev-parse", "HEAD");
-			expect(await call("audit", { repo: "project" })).toMatchObject({ open: 1, violations: [{ commit: bad, rule: "undeclared" }] });
+			expect(await call("audit", { repo: "project" })).toMatchObject({
+				open: 1,
+				violations: [{ commit: bad, rule: "undeclared" }],
+			});
 			expect(await call("revert", { repo: "project", commit: bad, agent: "agent-c" })).toMatchObject({ ok: true });
 			const after = await call("audit", { repo: "project" });
 			expect(after).toMatchObject({ open: 0, violations: [{ commit: bad, rule: "undeclared" }] });
@@ -172,7 +248,14 @@ describe("GitHive's MCP tools", () => {
 		await call("settings", { repo: "project", required: 1, verify: ["npm test"] });
 		expect(registered).toEqual(["project"]);
 		await call("claim", { repo: "project", change: "a-1", agent: "agent-a", paths: ["src/a/"], intent: "a" });
-		await call("vote", { repo: "project", commit: "h1", reviewer: "rev-1", role: "tests", verdict: "approve", evidence: "ok" });
+		await call("vote", {
+			repo: "project",
+			commit: "h1",
+			reviewer: "rev-1",
+			role: "tests",
+			verdict: "approve",
+			evidence: "ok",
+		});
 		const snapshot = await repoSnapshot(ctx().toolkit, "project");
 		expect(snapshot).toMatchObject({
 			repo: "project",
@@ -180,7 +263,16 @@ describe("GitHive's MCP tools", () => {
 			verify: ["npm test"],
 			verified: false,
 			// Each claim with where its change stands, and what GitHive's hosted agents on it are doing.
-			claims: [{ change: "a-1", agent: "agent-a", paths: ["src/a/"], head: null, approval: { approved: false, approvals: 0, required: 1 }, hosted: { builder: { status: "working" } } }],
+			claims: [
+				{
+					change: "a-1",
+					agent: "agent-a",
+					paths: ["src/a/"],
+					head: null,
+					approval: { approved: false, approvals: 0, required: 1 },
+					hosted: { builder: { status: "working" } },
+				},
+			],
 			votes: [{ commit: "h1", reviewer: "rev-1", verdict: "approve" }],
 		});
 		// The audit replays every record, so it's read on its own.
@@ -189,7 +281,7 @@ describe("GitHive's MCP tools", () => {
 	});
 
 	it("keeps the repo's summary for the dashboard: activity on writes, counts when they're read", async () => {
-		// Its own repo: activity is noted at most every 10 seconds per repo, and other tests write "project".
+		// Use a separate repo, since activity is noted at most every 10 seconds per repo and other tests write "project".
 		summarized = [];
 		await call("settings", { repo: "summed" });
 		await call("claim", { repo: "summed", change: "a-1", agent: "agent-a", paths: ["src/a/"], intent: "a" });
@@ -197,7 +289,10 @@ describe("GitHive's MCP tools", () => {
 		expect(pinged).toContain("summed");
 		expect(await openCount(ctx().toolkit, "summed")).toBe(1);
 		await repoSnapshot(ctx().toolkit, "summed");
-		expect(summarized.at(-1)).toMatchObject({ repo: "summed", patch: { open: 1, needsYou: 0, countedAt: expect.any(String) } });
+		expect(summarized.at(-1)).toMatchObject({
+			repo: "summed",
+			patch: { open: 1, needsYou: 0, countedAt: expect.any(String) },
+		});
 		await repoAudit(ctx().toolkit, "summed");
 		expect(summarized.at(-1)).toEqual({ repo: "summed", patch: { merged: 0, violations: 0 } });
 		expect(await openCount(ctx().toolkit, "elsewhere")).toBeNull();
@@ -207,11 +302,18 @@ describe("GitHive's MCP tools", () => {
 		reviewRequests = [];
 		await call("settings", { repo: "project", required: 2, vetoes: ["security"] });
 		await call("claim", { repo: "project", change: "a-1", agent: "agent-a", paths: ["src/a/"], intent: "a" });
-		expect(await call("request_review", { repo: "project", change: "a-1", summary: "adds a" })).toEqual({ head: "h1", reviewers: ["review", "security"] });
-		expect(reviewRequests).toEqual([{ repo: "project", change: "a-1", roles: ["review", "security"], summary: "adds a" }]);
+		expect(await call("request_review", { repo: "project", change: "a-1", summary: "adds a" })).toEqual({
+			head: "h1",
+			reviewers: ["review", "security"],
+		});
+		expect(reviewRequests).toEqual([
+			{ repo: "project", change: "a-1", roles: ["review", "security"], summary: "adds a" },
+		]);
 		await call("request_review", { repo: "project", change: "a-1", roles: ["api"] });
 		expect(reviewRequests[1].roles).toEqual(["api"]);
-		expect(await call("request_review", { repo: "project", change: "nope" })).toEqual({ error: "nope holds no claim: claim the change's paths first" });
+		expect(await call("request_review", { repo: "project", change: "nope" })).toEqual({
+			error: "nope holds no claim: claim the change's paths first",
+		});
 	});
 
 	it("claims paths for a new change and starts GitHive's hosted builder on it", async () => {
@@ -220,9 +322,17 @@ describe("GitHive's MCP tools", () => {
 		const started = await call("build", { repo: "project", intent: "Add a stats page", paths: ["src/stats/"] });
 		expect(started.change).toMatch(/^add-a-stats-page-[0-9a-f]{4}$/);
 		expect(builds).toEqual([{ repo: "project", change: started.change }]);
-		expect((await call("claims", { repo: "project" }))[0]).toMatchObject({ change: started.change, agent: "githive-builder", paths: ["src/stats/"], intent: "Add a stats page" });
+		expect((await call("claims", { repo: "project" }))[0]).toMatchObject({
+			change: started.change,
+			agent: "githive-builder",
+			paths: ["src/stats/"],
+			intent: "Add a stats page",
+		});
 		// Paths someone holds aren't built on.
-		expect(await call("build", { repo: "project", intent: "More stats", paths: ["src/stats/x.ts"] })).toMatchObject({ ok: false, conflicts: [{ change: started.change }] });
+		expect(await call("build", { repo: "project", intent: "More stats", paths: ["src/stats/x.ts"] })).toMatchObject({
+			ok: false,
+			conflicts: [{ change: started.change }],
+		});
 		expect(builds).toHaveLength(1);
 	});
 });

@@ -6,20 +6,17 @@ import { changeRepoName, toolContextFor } from "./toolkit/env";
 import { callTool, votesFor } from "./toolkit/mcp";
 import { makeStamper } from "./toolkit/stamp";
 
-// GitHive's hosted reviewer, one per (change, role, commit), asked for with
-// request_review (or by GitHive's builder when it finishes): a
-// gpt-6-luna agent that checks out the exact commit under review in its own
-// container, with a read-only token, runs the code, and votes with evidence,
-// stamped as GitHive's reviewer for its role.
+// The hosted reviewer: one agent per change, role and commit. It checks out the exact commit
+// with a read-only token, runs the code, and votes with evidence.
 
 export interface ReviewJob extends ChangeJob {
 	role: string;
 	/** The commit under review. Votes count only for this commit. */
 	head: string;
-	/** Where the change left the project's branch; `git diff baseCommit head` is the change. */
+	/** Where the change branched from the project's branch. */
 	baseCommit: string;
 	buildSummary?: string;
-	/** Merge once approved: the toolkit refuses until the approvals are in, so the last vote's attempt lands. */
+	/** Try to merge after approving. The toolkit refuses until all approvals are in, so the last vote's attempt lands. */
 	mergeWhenApproved?: boolean;
 }
 
@@ -40,30 +37,34 @@ const FOCUS: Record<string, string> = {
 	api: "Check the interface: routes, types and function signatures match the intent, follow the project's existing conventions, handle errors consistently, and won't surprise callers.",
 	performance:
 		"Look for work that grows badly with data size, unbounded fan-out, repeated I/O in loops, missing pagination, and anything that blocks a request for long.",
-	correctness: "Check the logic against the intent: edge cases, error paths, off-by-one errors, and behaviour the intent asks for but the code doesn't do.",
+	correctness:
+		"Check the logic against the intent: edge cases, error paths, off-by-one errors, and behaviour the intent asks for but the code doesn't do.",
 };
 
-const focusFor = (role: string) => FOCUS[role] ?? `Review the change from the perspective of ${role}, as an expert in that area would.`;
+const focusFor = (role: string) =>
+	FOCUS[role] ?? `Review the change from the perspective of ${role}, as an expert in that area would.`;
 
 const VerdictArgs = z.strictObject({
 	verdict: z.enum(["approve", "reject"]),
 	summary: z.string().describe("One or two sentences: what you checked and your conclusion"),
-	evidence: z.string().describe("Commands you ran with their key output, or file:line references. For a rejection, what must change."),
+	evidence: z
+		.string()
+		.describe("Commands you ran with their key output, or file:line references. For a rejection, what must change."),
 });
 
 export class Reviewer extends SandboxAgent<ReviewJob, ReviewerState> {
 	protected readonly kind = "reviewer";
 
-	/** The toolkit, acting as GitHive's reviewer for this role. */
 	private toolContext(job: ReviewJob) {
 		return toolContextFor(this.env, `service:githive-reviewer:${job.role}`, { hosted: true });
 	}
 
-	/** Cast the verdict as a vote on the commit, stamped as this reviewer when GitHive has a key. */
+	/** Vote on the commit, stamped as this reviewer when a stamp key is configured. */
 	private async vote(job: ReviewJob, verdict: "approve" | "reject", evidence: string) {
-		// The repo's votes, wherever they're kept now: their record, or the commit's bucket once sharded.
 		const votes = votesFor(toolContextFor(this.env, undefined, { hosted: true }), job.project);
-		const stamper = this.env.STAMP_KEY ? await makeStamper(this.env.STAMP_KEY, `service:githive-reviewer:${job.role}`) : undefined;
+		const stamper = this.env.STAMP_KEY
+			? await makeStamper(this.env.STAMP_KEY, `service:githive-reviewer:${job.role}`)
+			: undefined;
 		await votes.vote({ commit: job.head, reviewer: `githive-${job.role}`, role: job.role, verdict, evidence }, stamper);
 	}
 
@@ -103,7 +104,6 @@ How to work:
 	}
 
 	protected async afterClone(job: ReviewJob) {
-		// The change is its own branch in its author's fork.
 		const fetched = await this.git(job, ["fetch", "-q", "origin", job.ref]);
 		if (fetched.exitCode !== 0) throw new Error(`could not fetch ${job.ref}: ${fetched.output}`);
 		const checkout = await this.exec(["git", "checkout", "-q", job.head]);
@@ -122,14 +122,24 @@ How to work:
 					Object.assign(state, { status: "done", verdict, summary, evidence });
 					this.note(state, `voted ${verdict} on ${job.head}`);
 					if (job.mergeWhenApproved && verdict === "approve") {
-						const merged = (await callTool("merge", { repo: job.project, change: job.change, agent: job.agent }, this.toolContext(job))) as { ok: boolean; reasons?: string[] };
-						this.note(state, merged.ok ? "merged the change" : `not merged yet: ${(merged.reasons ?? []).join("; ").slice(0, 200)}`);
+						const merged = (await callTool(
+							"merge",
+							{ repo: job.project, change: job.change, agent: job.agent },
+							this.toolContext(job),
+						)) as { ok: boolean; reasons?: string[] };
+						this.note(
+							state,
+							merged.ok ? "merged the change" : `not merged yet: ${(merged.reasons ?? []).join("; ").slice(0, 200)}`,
+						);
 					}
-					// A rejected change built by GitHive's builder goes back to it, with why.
+					// A rejected change from the hosted builder goes back to it with the findings.
 					if (verdict === "reject" && job.agent === "githive-builder") {
 						const feedback = `The ${job.role} reviewer rejected ${job.head}:\n\n${summary}\n\n${evidence}\n\nFix it inside your claim, commit_and_push, then finish again for a new review.`;
 						const outcome = await this.env.BUILDER.getByName(changeRepoName(job.project, job.change)).revise(feedback);
-						this.note(state, outcome === "revising" ? "sent the change back to its builder" : "its builder gave up; claim released");
+						this.note(
+							state,
+							outcome === "revising" ? "sent the change back to its builder" : "its builder gave up; claim released",
+						);
 					}
 					return "Vote recorded.";
 				},

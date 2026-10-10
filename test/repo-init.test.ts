@@ -10,7 +10,13 @@ describe("a new repo's first files", () => {
 	const base = { fullName: "acme/web", holder: "Acme", year: 2026 };
 
 	it("are a README with the repo's name and description, a .gitignore and a license, as asked", () => {
-		const files = initialFiles({ ...base, readme: true, description: "The website.", gitignore: "node", license: "mit" });
+		const files = initialFiles({
+			...base,
+			readme: true,
+			description: "The website.",
+			gitignore: "node",
+			license: "mit",
+		});
 		expect(Object.keys(files).sort()).toEqual([".gitignore", "LICENSE", "README.md"]);
 		expect(files["README.md"]).toBe("# web\n\nThe website.\n");
 		expect(files[".gitignore"]).toContain("node_modules/");
@@ -28,7 +34,12 @@ describe("a new repo's first files", () => {
 	});
 
 	it("take only the options GitHive knows", () => {
-		expect(parseInit({ readme: true, description: "  x  ", gitignore: "rust", license: "mit" })).toEqual({ readme: true, description: "x", gitignore: "rust", license: "mit" });
+		expect(parseInit({ readme: true, description: "  x  ", gitignore: "rust", license: "mit" })).toEqual({
+			readme: true,
+			description: "x",
+			gitignore: "rust",
+			license: "mit",
+		});
 		expect(parseInit(undefined)).toEqual({});
 		expect(() => parseInit({ gitignore: "cobol" })).toThrow(/gitignore is one of node, python, go, rust/);
 		expect(() => parseInit({ license: "gpl" })).toThrow(/license is mit/);
@@ -43,11 +54,17 @@ describe("the first commit", { timeout: 60_000 }, () => {
 			const url = server.repo("fresh");
 			const remote = { url, token: "unused" };
 			expect(await defaultBranch(remote)).toBeNull();
-			const oid = await writeFirstCommit(remote, initialFiles({ fullName: "acme/fresh", holder: "acme", year: 2026, readme: true, gitignore: "python" }), { name: "ada", email: "ada@users.githive.app" });
+			const oid = await writeFirstCommit(
+				remote,
+				initialFiles({ fullName: "acme/fresh", holder: "acme", year: 2026, readme: true, gitignore: "python" }),
+				{ name: "ada", email: "ada@users.githive.app" },
+			);
 			expect(await branchHead(remote, "main")).toBe(oid);
 			expect(await defaultBranch(remote)).toBe("main");
 			expect(server.gitIn("fresh", "show", "main:README.md")).toBe("# fresh\n");
-			expect(server.gitIn("fresh", "log", "-1", "--format=%an <%ae>%n%s", "main").trim()).toBe("ada <ada@users.githive.app>\nStart README.md, .gitignore");
+			expect(server.gitIn("fresh", "log", "-1", "--format=%an <%ae>%n%s", "main").trim()).toBe(
+				"ada <ada@users.githive.app>\nStart README.md, .gitignore",
+			);
 		} finally {
 			await server.close();
 		}

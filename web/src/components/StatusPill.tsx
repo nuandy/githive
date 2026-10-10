@@ -16,7 +16,13 @@ export function statusIconName(kind: StatusKind): IconName {
 	}
 }
 
-export function StatusIcon({ status, size = 16 }: { status: Pick<ChangeStatus, "kind" | "tone" | "label">; size?: number }) {
+export function StatusIcon({
+	status,
+	size = 16,
+}: {
+	status: Pick<ChangeStatus, "kind" | "tone" | "label">;
+	size?: number;
+}) {
 	return (
 		<span className={`status-icon tone-${status.tone}`} title={status.label}>
 			<Icon name={statusIconName(status.kind)} size={size} label={status.label} />
@@ -25,7 +31,15 @@ export function StatusIcon({ status, size = 16 }: { status: Pick<ChangeStatus, "
 }
 
 /** A colored status pill, e.g. "● Open", "Merged", "Needs you". */
-export function StatusPill({ status, size = "md", solid = false }: { status: Pick<ChangeStatus, "kind" | "tone" | "label">; size?: "md" | "lg"; solid?: boolean }) {
+export function StatusPill({
+	status,
+	size = "md",
+	solid = false,
+}: {
+	status: Pick<ChangeStatus, "kind" | "tone" | "label">;
+	size?: "md" | "lg";
+	solid?: boolean;
+}) {
 	return (
 		<span className={`pill pill--${status.tone}${solid ? " pill--solid" : ""}${size === "lg" ? " pill--lg" : ""}`}>
 			<Icon name={statusIconName(status.kind)} size={size === "lg" ? 16 : 13} />
@@ -47,7 +61,10 @@ export function TonePill({ tone, children, icon }: { tone: Tone; children: React
 export function ShardingBadge({ summary }: { summary: { label: string; sharded: boolean; detail: string } | null }) {
 	if (!summary) return null;
 	return (
-		<span className={`pill pill--outline mode-badge${summary.sharded ? " mode-badge--sharded" : ""}`} title={summary.detail}>
+		<span
+			className={`pill pill--outline mode-badge${summary.sharded ? " mode-badge--sharded" : ""}`}
+			title={summary.detail}
+		>
 			{summary.label}
 			<span className="sr-only">: {summary.detail}</span>
 		</span>

@@ -20,7 +20,13 @@ describe("the repo index", () => {
 		await index.summarize("repo:docs", { open: 3 });
 		await index.summarize("repo:docs", { mergedBy: 1, lastActivity: "2026-10-06T11:00:00.000Z" });
 		await index.summarize("repo:docs", { mergedBy: 1 });
-		expect((await index.summaries()).repos).toEqual([{ repo: "docs", since: expect.any(String), summary: { open: 3, merged: 2, lastActivity: "2026-10-06T11:00:00.000Z" } }]);
+		expect((await index.summaries()).repos).toEqual([
+			{
+				repo: "docs",
+				since: expect.any(String),
+				summary: { open: 3, merged: 2, lastActivity: "2026-10-06T11:00:00.000Z" },
+			},
+		]);
 	});
 
 	it("forgets everything when cleared", async () => {

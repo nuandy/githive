@@ -1,13 +1,17 @@
 import type { Context } from "hono";
-import { AuthorizationError, CimdFetchError, type ConsentDescription, type OAuthHelpers } from "@cloudflare/workers-oauth-provider";
+import {
+	AuthorizationError,
+	CimdFetchError,
+	type ConsentDescription,
+	type OAuthHelpers,
+} from "@cloudflare/workers-oauth-provider";
 import type { AuthEnv } from "./routes";
 import { type Agent, type User, randomSecret } from "./store";
 import { identityStore } from "./principal";
 
-// The page an MCP client sends a person to (OAuth's authorize endpoint): sign
-// in to GitHive, then choose which of your agents the client acts as, or make
-// one. The library keeps the request server-side and binds the form to this
-// browser; everything the client chose about itself is escaped.
+// OAuth's authorize page for MCP clients. A person signs in to GitHive and picks, or creates, the agent the
+// client acts as. The library keeps the request server-side and binds the form to this browser. Everything the
+// client says about itself is escaped.
 
 const escape = (value: string) => value.replace(/[&<>"']/g, (char) => `&#${char.charCodeAt(0)};`);
 
@@ -56,9 +60,8 @@ code { font-family: "Overpass Mono", ui-monospace, SFMono-Regular, Menlo, monosp
 }
 
 /**
- * Where a form on the page may lead: GitHive, and the one app this request
- * goes back to. Browsers apply form-action to the redirect after a submit, so
- * without the app's origin, Allow's redirect back to it is silently blocked.
+ * The form-action sources: GitHive and the app this request returns to. Browsers apply form-action to the
+ * redirect after a submit, so without the app's origin the redirect back is silently blocked.
  */
 export function formAction(redirectUri?: string) {
 	if (!redirectUri) return "'self'";
@@ -74,15 +77,30 @@ export function formAction(redirectUri?: string) {
 const html = (body: string, status = 200, headers?: Headers, redirectUri?: string, nonce?: string) => {
 	const h = new Headers(headers);
 	h.set("Content-Type", "text/html; charset=utf-8");
-	h.set("Content-Security-Policy", `default-src 'none'; style-src 'unsafe-inline'; font-src 'self'; img-src data:;${nonce ? ` script-src 'nonce-${nonce}';` : ""} form-action ${formAction(redirectUri)}; frame-ancestors 'none'`);
+	h.set(
+		"Content-Security-Policy",
+		`default-src 'none'; style-src 'unsafe-inline'; font-src 'self'; img-src data:;${nonce ? ` script-src 'nonce-${nonce}';` : ""} form-action ${formAction(redirectUri)}; frame-ancestors 'none'`,
+	);
 	return new Response(body, { status, headers: h });
 };
 
-const problem = (message: string, status = 400) => html(page("Can't connect", `<h1>Can't connect this app</h1><p>${escape(message)}</p><p class="muted">Start connecting again from the app.</p>`), status);
+const problem = (message: string, status = 400) =>
+	html(
+		page(
+			"Can't connect",
+			`<h1>Can't connect this app</h1><p>${escape(message)}</p><p class="muted">Start connecting again from the app.</p>`,
+		),
+		status,
+	);
 
 function signInPage(details: ConsentDescription, returnTo: string, providers: string[]) {
 	const names: Record<string, string> = { github: "GitHub", google: "Google" };
-	const buttons = providers.map((p) => `<a class="button${p === "github" ? " primary" : ""}" href="/auth/${p}?return=${encodeURIComponent(returnTo)}">Sign in with ${names[p]}</a>`).join("");
+	const buttons = providers
+		.map(
+			(p) =>
+				`<a class="button${p === "github" ? " primary" : ""}" href="/auth/${p}?return=${encodeURIComponent(returnTo)}">Sign in with ${names[p]}</a>`,
+		)
+		.join("");
 	return page(
 		"Sign in",
 		`<h1>Sign in to connect ${escape(details.clientName)}</h1>
@@ -92,10 +110,8 @@ function signInPage(details: ConsentDescription, returnTo: string, providers: st
 }
 
 /**
- * Feedback once Allow or Deny is clicked: the button says what's happening,
- * and both are disabled so the choice is sent once. A disabled button isn't
- * submitted, so the choice goes in a hidden field first. Coming back to the
- * page (the browser's Back) makes them usable again.
+ * Disables both buttons after a click so the choice is sent once. A disabled button isn't submitted, so the
+ * choice is copied to a hidden field first. Returning with the browser's Back button reloads the page.
  */
 export const SUBMIT_FEEDBACK = `const form = document.querySelector("form");
 form.addEventListener("submit", (event) => {
@@ -116,7 +132,7 @@ window.addEventListener("pageshow", (event) => {
 
 const feedbackScript = (nonce: string) => `<script nonce="${nonce}">${SUBMIT_FEEDBACK}</script>`;
 
-/** A name for a new agent from the app's own name: "Claude Code (githive)" is claude-code. */
+/** A new agent's name derived from the app's name, so "Claude Code (githive)" becomes claude-code. */
 export function suggestedAgentName(clientName: string) {
 	return clientName
 		.replace(/\([^)]*\)/g, " ")
@@ -127,16 +143,30 @@ export function suggestedAgentName(clientName: string) {
 		.replace(/-+$/, "");
 }
 
-function consentPage(details: ConsentDescription, handle: string, user: User, agents: Agent[], nonce: string, error?: string) {
+function consentPage(
+	details: ConsentDescription,
+	handle: string,
+	user: User,
+	agents: Agent[],
+	nonce: string,
+	error?: string,
+) {
 	const name = escape(details.clientName);
 	const suggested = suggestedAgentName(details.clientName);
-	// The agent this app has acted as before, by its name; otherwise a new one named for the app.
+	// Preselect the agent named for this app, if there is one. Otherwise suggest a new one.
 	const match = agents.find((a) => a.name === suggested);
-	const who = details.clientDomain ? `${name}, published by <strong>${escape(details.clientDomain)}</strong>` : `${name}`;
+	const who = details.clientDomain
+		? `${name}, published by <strong>${escape(details.clientDomain)}</strong>`
+		: `${name}`;
 	// The redirect's host is always shown, as the MCP spec requires.
-	const where = details.redirectIsLoopback ? `an app on this computer (<strong>${escape(details.redirectHost)}</strong>)` : `<strong>${escape(details.redirectHost)}</strong>`;
+	const where = details.redirectIsLoopback
+		? `an app on this computer (<strong>${escape(details.redirectHost)}</strong>)`
+		: `<strong>${escape(details.redirectHost)}</strong>`;
 	const choices = agents
-		.map((a) => `<label><input type="radio" name="agent" value="${escape(a.id)}"${a === match ? " checked" : ""}> <code>${escape(user.handle)}/${escape(a.name)}</code></label>`)
+		.map(
+			(a) =>
+				`<label><input type="radio" name="agent" value="${escape(a.id)}"${a === match ? " checked" : ""}> <code>${escape(user.handle)}/${escape(a.name)}</code></label>`,
+		)
 		.join("");
 	return page(
 		`Connect ${details.clientName}`,
@@ -160,7 +190,6 @@ ${choices}
 
 const oauthOf = (env: Env) => (env as unknown as { OAUTH_PROVIDER?: OAuthHelpers }).OAUTH_PROVIDER;
 
-/** GET and POST /authorize. */
 export async function authorize(c: Context<AuthEnv>) {
 	const oauth = oauthOf(c.env);
 	const ids = identityStore(c.env);
@@ -171,7 +200,9 @@ export async function authorize(c: Context<AuthEnv>) {
 		const principal = c.get("principal");
 		if (principal?.kind !== "user") {
 			const url = new URL(c.req.url);
-			const providers = (["github", "google"] as const).filter((p) => (c.env as unknown as Record<string, unknown>)[`${p.toUpperCase()}_CLIENT_ID`]);
+			const providers = (["github", "google"] as const).filter(
+				(p) => (c.env as unknown as Record<string, unknown>)[`${p.toUpperCase()}_CLIENT_ID`],
+			);
 			return html(signInPage(details, `${url.pathname}${url.search}`, providers));
 		}
 		const user = principal.user;
@@ -180,7 +211,13 @@ export async function authorize(c: Context<AuthEnv>) {
 		if (c.req.method === "GET") {
 			const consent = await oauth.beginConsent(request);
 			const nonce = randomSecret(16);
-			return html(consentPage(details, consent.handle, user, await active(), nonce), 200, consent.headers, details.redirectUri, nonce);
+			return html(
+				consentPage(details, consent.handle, user, await active(), nonce),
+				200,
+				consent.headers,
+				details.redirectUri,
+				nonce,
+			);
 		}
 
 		const form = await c.req.formData();
@@ -189,18 +226,40 @@ export async function authorize(c: Context<AuthEnv>) {
 			const denied = await oauth.denyConsent(c.req.raw, handle);
 			return new Response(null, { status: 302, headers: denied.headers });
 		}
-		// The agent first: a bad name shows the form again, with the handle still unused.
+		// Resolve the agent first, so a bad name shows the form again while the consent handle is still unused.
 		const choice = String(form.get("agent") ?? "");
 		let agent: Agent | undefined;
 		try {
-			agent = choice === "new" ? await ids.createAgent(user.id, String(form.get("new_name") ?? "")) : (await active()).find((a) => a.id === choice);
+			agent =
+				choice === "new"
+					? await ids.createAgent(user.id, String(form.get("new_name") ?? ""))
+					: (await active()).find((a) => a.id === choice);
 		} catch (err) {
 			const nonce = randomSecret(16);
-			return html(consentPage(details, handle, user, await active(), nonce, (err instanceof Error ? err.message : String(err)).replace(/^\[\d+\]\s*/, "")), 400, undefined, details.redirectUri, nonce);
+			return html(
+				consentPage(
+					details,
+					handle,
+					user,
+					await active(),
+					nonce,
+					(err instanceof Error ? err.message : String(err)).replace(/^\[\d+\]\s*/, ""),
+				),
+				400,
+				undefined,
+				details.redirectUri,
+				nonce,
+			);
 		}
 		if (!agent) {
 			const nonce = randomSecret(16);
-			return html(consentPage(details, handle, user, await active(), nonce, "Choose one of your agents, or name a new one."), 400, undefined, details.redirectUri, nonce);
+			return html(
+				consentPage(details, handle, user, await active(), nonce, "Choose one of your agents, or name a new one."),
+				400,
+				undefined,
+				details.redirectUri,
+				nonce,
+			);
 		}
 		const approved = await oauth.approveConsent(c.req.raw, handle, { scope: request.scope });
 		const { redirectTo } = await oauth.completeAuthorization({
@@ -214,7 +273,8 @@ export async function authorize(c: Context<AuthEnv>) {
 		return new Response(null, { status: 302, headers: approved.headers });
 	} catch (error) {
 		if (error instanceof AuthorizationError && error.redirectTo) return Response.redirect(error.redirectTo, 302);
-		if (error instanceof AuthorizationError) return problem(error.description ?? "This request has expired or was already used.");
+		if (error instanceof AuthorizationError)
+			return problem(error.description ?? "This request has expired or was already used.");
 		if (error instanceof CimdFetchError) return problem("This app could not be verified.");
 		throw error;
 	}

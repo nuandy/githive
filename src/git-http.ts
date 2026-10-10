@@ -2,15 +2,13 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import base from "isomorphic-git/http/web";
 import type { Remote } from "./git";
 
-// isomorphic-git's HTTP client, with these changes: a Git server's error (5xx)
-// is tried again for a few seconds (Artifacts answers 500 while a repo is
-// busy), then names the repo it came from, so a failure under load says which
-// Git server it was (the project, a records repo, an agent's fork); and every
-// request is counted by repo, for the call it's made in (see gitRequests).
+// isomorphic-git's HTTP client, adapted for Artifacts. Server errors (5xx) are retried for a few
+// seconds, because Artifacts answers 500 while a repo is busy, and a final failure names the repo.
+// Every request is also counted by repo for the call that made it.
 
 type Request = Parameters<typeof base.request>[0];
 
-/** The repo a Git URL is for: the path segment ending in .git, or the one before the protocol's own (info/refs, git-upload-pack...). */
+/** The repo a Git URL is for: the segment ending in .git, or the one before info/refs or git-upload-pack. */
 export function repoOfUrl(url: string) {
 	const path = new URL(url).pathname.split("/").filter(Boolean);
 	const git = path.find((p) => p.endsWith(".git"));
@@ -20,20 +18,19 @@ export function repoOfUrl(url: string) {
 }
 
 /**
- * Credentials for an isomorphic-git call to `remote`, sent with the first
- * request. With only onAuth, it asks without them, gets a 401, and asks
- * again, leaving the 401's body unread: a Worker request holds 6 connections
- * open, and with a few reads side by side those held them all, so the
- * runtime cancelled responses to break the stall (2,585 times in a 200-agent
- * run, in next (now reviews and backlog) and merge). onAuth stays, should a server ask anyway.
+ * Credentials for an isomorphic-git call, sent with the first request. With only onAuth, each request
+ * first gets a 401 whose unread body holds one of the Worker's 6 connections, and parallel reads stall.
  */
 export function gitAuth(remote: Remote) {
 	const password = remote.token.split("?expires=")[0];
 	const username = remote.user ?? "x";
-	return { headers: { Authorization: `Basic ${btoa(`${username}:${password}`)}` }, onAuth: () => ({ username, password }) };
+	return {
+		headers: { Authorization: `Basic ${btoa(`${username}:${password}`)}` },
+		onAuth: () => ({ username, password }),
+	};
 }
 
-/** A response's body, read to the end now (its connection freed), and given back to be read again. */
+/** Read a response body to the end, freeing its connection, and return it to be read again. */
 async function drained(body: AsyncIterableIterator<Uint8Array> | undefined) {
 	const chunks: Uint8Array[] = [];
 	if (body) for await (const chunk of body) chunks.push(chunk);
@@ -42,20 +39,22 @@ async function drained(body: AsyncIterableIterator<Uint8Array> | undefined) {
 	})();
 }
 
-/** Git requests by repo, and how many failed (5xx), for the call they're made in. */
 export type GitRequests = Map<string, { requests: number; failed: number }>;
-/** Artifacts API calls (the binding's, not Git's) by method and repo ("<method> <repo>"), and how many failed, for the call they're made in. */
+/** Artifacts binding calls (not Git requests), keyed by "<method> <repo>". */
 export type ArtifactsCalls = Map<string, { calls: number; failed: number }>;
 const counted = new AsyncLocalStorage<{ git: GitRequests; artifacts: ArtifactsCalls }>();
 
-/** Run `work`, counting the Git requests (see noteGitRequest) and Artifacts calls (see noteArtifactsCall) it makes. */
-export function countingRequests<T>(work: () => Promise<T>): { done: Promise<T>; requests: GitRequests; artifacts: ArtifactsCalls } {
+/** Run `work`, counting the Git requests and Artifacts calls it makes. */
+export function countingRequests<T>(work: () => Promise<T>): {
+	done: Promise<T>;
+	requests: GitRequests;
+	artifacts: ArtifactsCalls;
+} {
 	const requests: GitRequests = new Map();
 	const artifacts: ArtifactsCalls = new Map();
 	return { done: counted.run({ git: requests, artifacts }, work), requests, artifacts };
 }
 
-/** Count a Git request to `url` (and whether the server failed it) for the call it's made in, if any is counting. */
 export function noteGitRequest(url: string, status: number) {
 	const requests = counted.getStore()?.git;
 	if (!requests) return;
@@ -64,7 +63,7 @@ export function noteGitRequest(url: string, status: number) {
 	requests.set(repo, { requests: seen.requests + 1, failed: seen.failed + (status >= 500 ? 1 : 0) });
 }
 
-/** Count an Artifacts call, `method` on `repo` (the namespace's own: "-"), for the call it's made in, if any is counting. */
+/** Count an Artifacts call. Calls on the namespace itself use the repo name "-". */
 export function noteArtifactsCall(method: string, repo: string, failed: boolean) {
 	const calls = counted.getStore()?.artifacts;
 	if (!calls) return;
@@ -73,7 +72,7 @@ export function noteArtifactsCall(method: string, repo: string, failed: boolean)
 	calls.set(key, { calls: seen.calls + 1, failed: seen.failed + (failed ? 1 : 0) });
 }
 
-/** The kind of repo a name is, for counts: the project (`project`, its id; unknown: any other name), its records repos, agents' forks (seeds among them), or another. */
+/** The kind of repo a name is, for counts. With no `project` given, any unrecognized name counts as the project. */
 export function repoKind(name: string, project: string | undefined) {
 	if (name.startsWith("records--")) return "records";
 	if (name.startsWith("fork--")) return "forks";
@@ -81,11 +80,7 @@ export function repoKind(name: string, project: string | undefined) {
 	return project === undefined || name === project ? "project" : "other";
 }
 
-/**
- * Counts as one log line: Git requests by kind of repo, and Artifacts calls by
- * method and kind ("git: project 4, forks 2 (1 failed); artifacts: get 3
- * (project 2, records 1), createToken 3 (...)"). Empty when nothing was made.
- */
+/** Counts as one log line, such as "git: project 4, forks 2 (1 failed); artifacts 3: get 3 (project 2, records 1)". */
 export function describeCounts(project: string | undefined, git: GitRequests, artifacts: ArtifactsCalls) {
 	const parts: string[] = [];
 	if (git.size) {
@@ -95,7 +90,9 @@ export function describeCounts(project: string | undefined, git: GitRequests, ar
 			const sum = kinds.get(kind) ?? { requests: 0, failed: 0 };
 			kinds.set(kind, { requests: sum.requests + seen.requests, failed: sum.failed + seen.failed });
 		}
-		parts.push(`git: ${[...kinds].map(([kind, n]) => `${kind} ${n.requests}${n.failed ? ` (${n.failed} failed)` : ""}`).join(", ")}`);
+		parts.push(
+			`git: ${[...kinds].map(([kind, n]) => `${kind} ${n.requests}${n.failed ? ` (${n.failed} failed)` : ""}`).join(", ")}`,
+		);
 	}
 	if (artifacts.size) {
 		const methods = new Map<string, { calls: number; failed: number; kinds: Map<string, number> }>();
@@ -110,35 +107,30 @@ export function describeCounts(project: string | undefined, git: GitRequests, ar
 			methods.set(method, sum);
 		}
 		const total = [...methods.values()].reduce((n, m) => n + m.calls, 0);
-		parts.push(`artifacts ${total}: ${[...methods].map(([method, m]) => `${method} ${m.calls} (${[...m.kinds].map(([kind, n]) => `${kind} ${n}`).join(", ")}${m.failed ? `; ${m.failed} failed` : ""})`).join(", ")}`);
+		parts.push(
+			`artifacts ${total}: ${[...methods].map(([method, m]) => `${method} ${m.calls} (${[...m.kinds].map(([kind, n]) => `${kind} ${n}`).join(", ")}${m.failed ? `; ${m.failed} failed` : ""})`).join(", ")}`,
+		);
 	}
 	return parts.join("; ");
 }
 
 /**
- * How many times a Git request a server failed (5xx) is made in all, each
- * wait twice the last (from GIT_RETRY_MS, with jitter): about 6 s, where a
- * busy Artifacts repo's 500s outlasted the few tries in half a second that
- * callers made, and reached agents. Given up on, the error says so, and no
- * caller tries it again (see isTransientFailure).
+ * Attempts for a Git request that fails with a 5xx, with doubling backoff over about 6 s.
+ * A busy Artifacts repo keeps failing for longer than a short burst of retries.
+ * The final error is marked as retried so callers don't retry again (see isTransientFailure).
  */
 const GIT_TRIES = 5;
 const GIT_RETRY_MS = 400;
 
 /**
- * How long a Git request may go unanswered before it's taken for a server
- * failure (504) and tried again like one. Without a limit, a request a busy
- * repo accepted and never answered held its call for good: after 1,000
- * agents' run left the project repo failing, adding the next run's backlog
- * waited 703 s on one (run 1000-2). A Worker's Git requests are small (a
- * shallow copy of Express is 3.6 MB), answered in seconds when the server is
- * well. (Tests set less.)
+ * How long a Git request may go unanswered before it's treated as a server failure (504) and retried.
+ * A busy repo can accept a request and never answer it. Tests lower the limit.
  */
 export const gitTimeout = { ms: 45_000 };
 
 const timedOut = (err: unknown) => err instanceof Error && (err.name === "TimeoutError" || err.name === "AbortError");
 
-/** fetch for a Git request: one unanswered for gitTimeout.ms comes back as a 504, which callers handle as a server failure. */
+/** fetch for a Git request, returning a 504 if it goes unanswered for gitTimeout.ms. */
 export async function gitFetch(url: string, init: RequestInit): Promise<Response> {
 	try {
 		return await fetch(url, { ...init, signal: AbortSignal.timeout(gitTimeout.ms) });
@@ -150,36 +142,51 @@ export async function gitFetch(url: string, init: RequestInit): Promise<Response
 
 export const http = {
 	async request(request: Request) {
-		// Collected once, to send again (the client collects it anyway: no streaming uploads).
+		// Collect the body once so it can be sent again. The client doesn't stream uploads anyway.
 		const body = request.body ? [await collected(request.body)] : undefined;
 		for (let attempt = 1; ; attempt++) {
-			// Unanswered for gitTimeout.ms: a 504, tried again below like any server failure.
-			const response = await base.request({ ...request, ...(body ? { body: body as never } : {}), signal: AbortSignal.timeout(gitTimeout.ms) }).catch((err) => {
-				if (!timedOut(err)) throw err;
-				return { url: request.url, method: request.method, statusCode: 504, statusMessage: `no answer in ${gitTimeout.ms / 1000} s`, headers: {}, body: undefined } as unknown as Awaited<ReturnType<typeof base.request>>;
-			});
-			// A fetch's answer that's empty though it says 200: Artifacts answers some (shallow) fetches so, 3 of 8 in a row on
-			// a busy project repo (run 1000-3), and git then fails ("expected 'packfile'"). A real one is never empty: a
-			// server failure, tried again like one.
+			const response = await base
+				.request({ ...request, ...(body ? { body: body as never } : {}), signal: AbortSignal.timeout(gitTimeout.ms) })
+				.catch((err) => {
+					if (!timedOut(err)) throw err;
+					return {
+						url: request.url,
+						method: request.method,
+						statusCode: 504,
+						statusMessage: `no answer in ${gitTimeout.ms / 1000} s`,
+						headers: {},
+						body: undefined,
+					} as unknown as Awaited<ReturnType<typeof base.request>>;
+				});
+			// A busy Artifacts repo sometimes answers a fetch with 200 and an empty body, which git rejects
+			// ("expected 'packfile'"). A real answer is never empty, so treat it as a server failure.
 			if (request.url.endsWith("/git-upload-pack") && response.statusCode === 200) {
 				const chunks: Uint8Array[] = [];
 				for await (const chunk of (await drained(response.body)) as AsyncIterable<Uint8Array>) chunks.push(chunk);
-				if (!chunks.some((c) => c.length)) Object.assign(response, { statusCode: 502, statusMessage: "empty answer to a fetch" });
+				if (!chunks.some((c) => c.length))
+					Object.assign(response, { statusCode: 502, statusMessage: "empty answer to a fetch" });
 				else
 					response.body = (async function* () {
 						yield* chunks;
 					})();
 			}
 			noteGitRequest(request.url, response.statusCode);
-			// A failure's body is read now: left for later (a 401 asked again, a 5xx thrown), it holds a connection open.
+			// Read a failure's body now; left unread, it holds a connection open.
 			if (response.statusCode >= 400) response.body = await drained(response.body);
-			// A push's answer, small, read now: Artifacts refuses one while the repo takes another with an ERR line that
-			// isomorphic-git can't read ("Expected unpack ok"), so it's said here, for the pusher to try again.
+			// Artifacts refuses a push while the repo takes another, with an ERR line isomorphic-git can't parse
+			// ("Expected unpack ok"). Detect it here so the pusher can retry.
 			else if (request.url.endsWith("/git-receive-pack")) {
 				const chunks: Uint8Array[] = [];
 				for await (const chunk of (await drained(response.body)) as AsyncIterable<Uint8Array>) chunks.push(chunk);
-				if (/receive_pack_busy/.test(new TextDecoder().decode(chunks.length === 1 ? chunks[0] : await new Blob(chunks).arrayBuffer())))
-					throw Object.assign(new Error(`push refused: ${repoOfUrl(request.url)} is busy with another (artifacts_git_receive_pack_busy)`), { code: "RECEIVE_PACK_BUSY" });
+				if (
+					/receive_pack_busy/.test(
+						new TextDecoder().decode(chunks.length === 1 ? chunks[0] : await new Blob(chunks).arrayBuffer()),
+					)
+				)
+					throw Object.assign(
+						new Error(`push refused: ${repoOfUrl(request.url)} is busy with another (artifacts_git_receive_pack_busy)`),
+						{ code: "RECEIVE_PACK_BUSY" },
+					);
 				response.body = (async function* () {
 					yield* chunks;
 				})();
@@ -189,12 +196,16 @@ export const http = {
 				await new Promise((resolve) => setTimeout(resolve, GIT_RETRY_MS * 2 ** (attempt - 1) * (0.5 + Math.random())));
 				continue;
 			}
-			throw Object.assign(new Error(`HTTP Error: ${response.statusCode} ${response.statusMessage} (${repoOfUrl(request.url)}, ${GIT_TRIES} tries)`), { status: response.statusCode, retried: true });
+			throw Object.assign(
+				new Error(
+					`HTTP Error: ${response.statusCode} ${response.statusMessage} (${repoOfUrl(request.url)}, ${GIT_TRIES} tries)`,
+				),
+				{ status: response.statusCode, retried: true },
+			);
 		}
 	},
 };
 
-/** A request body as one array of bytes. */
 async function collected(body: AsyncIterable<Uint8Array> | Iterable<Uint8Array>) {
 	const chunks: Uint8Array[] = [];
 	for await (const chunk of body) chunks.push(chunk);

@@ -8,8 +8,7 @@ import type { MergeRecord } from "./audit";
 import type { Registry } from "./claims";
 import { decodeShard, shardsPrefix } from "./shards";
 
-// Reading the records back out of Git for the audit: the full
-// history of a record ref (claims, votes), and main's commits since GitHive
+// Reads the records back out of Git for the audit: the full history of a record ref, and main's commits since GitHive
 // started, with their trailers and the files each changed.
 
 const DIR = "/records";
@@ -17,18 +16,24 @@ const decoder = new TextDecoder();
 
 /** Every state a record ref has had, oldest first, with the commit that set it. */
 export async function readRecordHistory<S>(remote: Remote, ref: string): Promise<{ tip: string; state: S }[]> {
-	const refs = await git.listServerRefs({ http, url: remote.url, protocolVersion: 1, prefix: ref, ...gitAuth(remote) }).catch((err) => (isEmptyRepo(err) ? [] : Promise.reject(err)));
+	const refs = await git
+		.listServerRefs({ http, url: remote.url, protocolVersion: 1, prefix: ref, ...gitAuth(remote) })
+		.catch((err) => (isEmptyRepo(err) ? [] : Promise.reject(err)));
 	const tip = refs.find((r) => r.ref === ref)?.oid;
 	if (!tip) return [];
 	const { fs } = await retryTransient(() => fetchCommits(remote, [tip], DIR, { history: true }));
-	// One cache for every read: without it, each read loads the packfile again, and a history read all at once held
-	// hundreds of copies (a 202-state registry, 6 MB of JSON, took 572 MB: far past a Worker's 128).
+	// One cache for every read. Without it, each read loads the packfile again, and a long history read at once holds
+	// hundreds of copies, far more than a Worker's memory.
 	const cache = {};
 	const history = (await git.log({ fs, dir: DIR, ref: tip, cache })).reverse();
 	return Promise.all(
 		history.map(async (entry) => ({
 			tip: entry.oid,
-			state: stateOf<S>(entry.commit.message, decoder.decode((await git.readBlob({ fs, dir: DIR, oid: entry.oid, filepath: "state.json", cache })).blob), ref),
+			state: stateOf<S>(
+				entry.commit.message,
+				decoder.decode((await git.readBlob({ fs, dir: DIR, oid: entry.oid, filepath: "state.json", cache })).blob),
+				ref,
+			),
 		})),
 	);
 }
@@ -40,19 +45,18 @@ function stateOf<S>(message: string, text: string, ref: string): S {
 	return format > RECORD_FORMAT ? (raw as S) : upgradeState<S>(raw, format, ref);
 }
 
-/**
- * Every claims shard's history (see shards.ts), by shard, from every repo that
- * holds shards: per repo, one listing and one fetch of every shard's history.
- */
+/** Every claims shard's history by shard (see shards.ts), with one listing and one fetch per repo. */
 export async function readShardHistories(remotes: Remote[], repo: string) {
 	const prefix = shardsPrefix(repo);
-	return new Map([...(await readRefHistories<Registry>(remotes, prefix))].map(([name, history]) => [decodeShard(name), history]));
+	return new Map(
+		[...(await readRefHistories<Registry>(remotes, prefix))].map(([name, history]) => [decodeShard(name), history]),
+	);
 }
 
-/** Every record ref's history under `prefix` (vote buckets, say), by the rest of its name: per repo, one listing and one fetch. */
+/** Every record ref's history under `prefix`, by the rest of its name, with one listing and one fetch per repo. */
 export async function readRefHistories<S>(remotes: Remote[], prefix: string) {
-	// A few repos at a time: a Worker request holds only 6 connections open, and 16 records repos read at once stalled
-	// and were cancelled (the audit reads two kinds of records, shards and vote buckets, side by side).
+	// A few repos at a time, because a Worker request holds only 6 connections open and the audit reads shards and
+	// vote buckets side by side. Reading every records repo at once stalls.
 	const perRepo = await inTurns(
 		REPOS_AT_ONCE,
 		remotes.map((remote) => async () => {
@@ -65,7 +69,13 @@ export async function readRefHistories<S>(remotes: Remote[], prefix: string) {
 					const states = await Promise.all(
 						history.map(async (entry) => ({
 							tip: entry.oid,
-							state: stateOf<S>(entry.commit.message, decoder.decode((await git.readBlob({ fs, dir: DIR, oid: entry.oid, filepath: "state.json", cache })).blob), r.ref),
+							state: stateOf<S>(
+								entry.commit.message,
+								decoder.decode(
+									(await git.readBlob({ fs, dir: DIR, oid: entry.oid, filepath: "state.json", cache })).blob,
+								),
+								r.ref,
+							),
 						})),
 					);
 					return [r.ref.slice(prefix.length), states] as const;
@@ -76,10 +86,10 @@ export async function readRefHistories<S>(remotes: Remote[], prefix: string) {
 	return new Map(perRepo.flat());
 }
 
-/** How many records repos one read of histories fetches from at once. */
+// How many records repos one read of histories fetches from at once.
 const REPOS_AT_ONCE = 2;
 
-/** Run `tasks`, at most `n` at a time; their results in order. */
+// Runs `tasks` at most `n` at a time, returning their results in order.
 async function inTurns<R>(n: number, tasks: (() => Promise<R>)[]): Promise<R[]> {
 	const results: R[] = new Array(tasks.length);
 	let next = 0;
@@ -94,12 +104,21 @@ async function inTurns<R>(n: number, tasks: (() => Promise<R>)[]): Promise<R[]> 
 	return results;
 }
 
-/** The refs under `prefix`, and their histories in one fetch; listed again if one moves in between (its old tip is no longer served). */
+// The refs under `prefix` and their histories in one fetch. If a ref moves in between, its old tip is no longer
+// served, so the refs are listed again.
 async function listAndFetch(remote: Remote, prefix: string) {
 	for (let attempt = 1; ; attempt++) {
-		const refs = (await retryTransient(() => git.listServerRefs({ http, url: remote.url, protocolVersion: 1, prefix, ...gitAuth(remote) }).catch((err) => (isEmptyRepo(err) ? [] : Promise.reject(err))))).filter((r) => r.ref.startsWith(prefix));
+		const refs = (
+			await retryTransient(() =>
+				git
+					.listServerRefs({ http, url: remote.url, protocolVersion: 1, prefix, ...gitAuth(remote) })
+					.catch((err) => (isEmptyRepo(err) ? [] : Promise.reject(err))),
+			)
+		).filter((r) => r.ref.startsWith(prefix));
 		try {
-			const { fs } = await retryTransient(() => fetchCommits(remote, [...new Set(refs.map((r) => r.oid))], DIR, { history: true }));
+			const { fs } = await retryTransient(() =>
+				fetchCommits(remote, [...new Set(refs.map((r) => r.oid))], DIR, { history: true }),
+			);
 			return { refs, fs };
 		} catch (err) {
 			if (attempt < 3 && /not our ref|fetch refused/i.test(String(err))) continue;
@@ -108,26 +127,38 @@ async function listAndFetch(remote: Remote, prefix: string) {
 	}
 }
 
-/** A trailer's value, from the message's last paragraph only: text above it, written by agents, can't pose as one. */
+/** A trailer's value, read from the message's last paragraph only, so text written by agents can't pose as one. */
 export function trailer(message: string, name: string) {
-	const block = message.trimEnd().split(/\n[ \t]*\n/).at(-1) ?? "";
+	const block =
+		message
+			.trimEnd()
+			.split(/\n[ \t]*\n/)
+			.at(-1) ?? "";
 	return block.match(new RegExp(`^${name}: (.+)$`, "m"))?.[1]?.trim();
 }
 
-/** The project branch's commits after `baseline`, oldest first, following first parents: every one is audited. */
+/** The branch's first-parent commits after `baseline`, oldest first. Every one is audited. */
 export async function readMainMerges(remote: Remote, baseline: string, branch: string): Promise<MergeRecord[]> {
 	const ws = await Workspace.clone(remote, branch);
 	const records: MergeRecord[] = [];
-	for (let oid = await ws.head(); oid && oid !== baseline; ) {
+	for (let oid = await ws.head(); oid && oid !== baseline;) {
 		const { commit } = await ws.ensureCommit(oid);
 		const [first] = commit.parent;
-		records.push(mergeRecordOf({ commit: oid, parents: commit.parent, author: commit.author.name, message: commit.message, files: first ? await ws.changedPaths(first, oid) : [] }));
+		records.push(
+			mergeRecordOf({
+				commit: oid,
+				parents: commit.parent,
+				author: commit.author.name,
+				message: commit.message,
+				files: first ? await ws.changedPaths(first, oid) : [],
+			}),
+		);
 		oid = first;
 	}
 	return records.reverse();
 }
 
-/** A commit on a branch as git tells it: its parents, its author's name, its message, and the files it changed from its first parent. */
+/** A commit on a branch, with the files it changed from its first parent. */
 export interface BranchCommit {
 	commit: string;
 	parents: string[];
@@ -136,7 +167,7 @@ export interface BranchCommit {
 	files: string[];
 }
 
-/** A commit on a branch as the audit reads it: what its trailers say, and what it joins. */
+/** A commit on a branch as the audit reads it: what its trailers say and which commits it joins. */
 export function mergeRecordOf(c: BranchCommit): MergeRecord {
 	const [first, second] = c.parents;
 	return {

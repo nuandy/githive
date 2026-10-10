@@ -1,13 +1,11 @@
 import { type Level, OrgStore, atLeast } from "./orgs";
 import type { Principal } from "./principal";
 
-// What a caller may do in a repo, checked at every route and tool. People and
-// agents name repos <owner>/<name>; an agent has its owner's permission. An
-// Access admin may do anything, and may name a repo by its id as _/<id>,
-// including an older repo that isn't in an org yet. A repo the caller can't
-// see answers 404, so its name gives nothing away.
+// What a caller may do in a repo, checked at every route and tool. An agent has its owner's permission. An Access
+// admin may do anything and may name a repo as _/<id>, which covers older repos that aren't in an org. A repo the
+// caller can't see answers 404, so its name gives nothing away.
 
-/** What each MCP tool needs. credentials needs write only for a change's fork; for the project alone, read. */
+/** What each MCP tool needs. credentials needs write for a change's fork and read for the project alone. */
 export const TOOL_LEVEL: Record<string, Level> = {
 	claims: "read",
 	backlog: "read",
@@ -36,9 +34,9 @@ export function toolLevel(tool: string, args: Record<string, unknown>): Level {
 }
 
 export interface RepoRef {
-	/** Its Artifacts name, and the key its records are kept under. */
+	/** The Artifacts name, which is also the key for the repo's records. */
 	id: string;
-	/** What people call it: <owner>/<name>, or _/<id> for one not in an org. */
+	/** <owner>/<name>, or _/<id> for a repo that isn't in an org. */
 	fullName: string;
 	level: Level;
 }
@@ -48,7 +46,12 @@ const fail = (status: number, message: string): never => {
 };
 
 /** The repo a caller names, if they may do `needed` in it. */
-export async function resolveRepo(env: Env, principal: Principal | undefined, repo: string, needed: Level): Promise<RepoRef> {
+export async function resolveRepo(
+	env: Env,
+	principal: Principal | undefined,
+	repo: string,
+	needed: Level,
+): Promise<RepoRef> {
 	if (!principal) return fail(401, "sign in to GitHive first");
 	const slash = repo.indexOf("/");
 	const owner = slash < 0 ? "_" : repo.slice(0, slash);
@@ -57,7 +60,8 @@ export async function resolveRepo(env: Env, principal: Principal | undefined, re
 	const orgs = env.DB ? new OrgStore(env.DB) : null;
 
 	if (principal.kind === "access") {
-		if (owner === "_") return { id: name, fullName: (await orgs?.repoById(name))?.fullName ?? `_/${name}`, level: "admin" };
+		if (owner === "_")
+			return { id: name, fullName: (await orgs?.repoById(name))?.fullName ?? `_/${name}`, level: "admin" };
 		const found = (await orgs?.repo(owner, name)) ?? fail(404, `no repo ${owner}/${name}`);
 		return { id: found.id, fullName: found.fullName, level: "admin" };
 	}

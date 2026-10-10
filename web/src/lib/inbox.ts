@@ -28,7 +28,11 @@ export function buildInbox(summaries: Summaries | undefined): { groups: InboxGro
 			repo: repo.repo,
 			repoHref: href.repo(repo.repo),
 			lastActivity: repo.summary?.lastActivity,
-			items: waiting.map((item) => ({ ...item, title: item.title || item.change, href: href.change(repo.repo, item.change) })),
+			items: waiting.map((item) => ({
+				...item,
+				title: item.title || item.change,
+				href: href.change(repo.repo, item.change),
+			})),
 		});
 	}
 	groups.sort((a, b) => (timeOf(b.lastActivity) ?? 0) - (timeOf(a.lastActivity) ?? 0) || a.repo.localeCompare(b.repo));

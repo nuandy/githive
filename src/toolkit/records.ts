@@ -1,25 +1,25 @@
 import type { CasLog, LogCommit } from "../record-log";
 
-// The records (claims, votes) are append-only logs in Git.
-// An author reads the tip, works out the next state itself, and appends on
-// that tip; the append is compare-and-swap, so a concurrent author's entry
-// makes it read again and redo its check.
+// The records (claims, votes) are append-only logs in Git. An author reads the tip, computes the next state and
+// appends with compare-and-swap, so a concurrent append makes it read and check again.
 
-// Under load every claim, release and refresh contends for the one ref: keep
-// trying, with random, growing backoff so the losers don't collide again.
+// Under load every claim, release and refresh contends for one ref. Random, growing backoff keeps the losers
+// from colliding again.
 const ATTEMPTS = 12;
-const backoff = (attempt: number) => new Promise((resolve) => setTimeout(resolve, Math.random() * Math.min(25 * 2 ** attempt, 1_000)));
+const backoff = (attempt: number) =>
+	new Promise((resolve) => setTimeout(resolve, Math.random() * Math.min(25 * 2 ** attempt, 1_000)));
 
 /**
- * Append to a record on the tip `next` was computed from. `next` returns the
- * new state and a line saying what happened, or a refusal (anything else),
- * which is returned as is. Retries when another author's append got there first.
+ * Appends the state `next` computes from the current tip, retrying when another author appended first.
+ * A refusal from `next` is returned as is.
  */
 export async function appendRecord<S, Refusal>(
 	log: CasLog<S>,
 	author: string,
 	empty: () => S,
-	next: (state: S) => { state: S; text: string } | { refused: Refusal } | Promise<{ state: S; text: string } | { refused: Refusal }>,
+	next: (
+		state: S,
+	) => { state: S; text: string } | { refused: Refusal } | Promise<{ state: S; text: string } | { refused: Refusal }>,
 ): Promise<{ ok: true; tip: string } | { ok: false; refused: Refusal }> {
 	for (let attempt = 1; ; attempt++) {
 		const head = await log.read();
@@ -36,7 +36,11 @@ export async function appendRecord<S, Refusal>(
 		if (tip) return { ok: true, tip };
 		if (attempt === ATTEMPTS) {
 			const which = (log as { ref?: string }).ref ? ` (${(log as { ref?: string }).ref})` : "";
-			throw new Error(log.lastRefusal === "busy" ? `[503] the Git server stayed busy${which}; try again` : `[503] the record kept moving${which}; try again`);
+			throw new Error(
+				log.lastRefusal === "busy"
+					? `[503] the Git server stayed busy${which}; try again`
+					: `[503] the record kept moving${which}; try again`,
+			);
 		}
 		await backoff(attempt);
 	}

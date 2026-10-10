@@ -28,7 +28,12 @@ const policy = { required: 1, vetoes: [] };
 
 async function records() {
 	const registry = await readRecordHistory<Registry>(remote(), "refs/notes/githive-claims/t1");
-	return { registry, votes: await readRecordHistory<Votes>(remote(), "refs/notes/githive-votes/t1"), policy, merges: await readMainMerges(remote(), registry[0].state.baseline!, "main") };
+	return {
+		registry,
+		votes: await readRecordHistory<Votes>(remote(), "refs/notes/githive-votes/t1"),
+		policy,
+		merges: await readMainMerges(remote(), registry[0].state.baseline!, "main"),
+	};
 }
 
 /** A rogue pushes straight to main, editing inside c's claim. */
@@ -61,7 +66,16 @@ describe("revert", { timeout: 60_000 }, () => {
 		const before = await audit(await records());
 		expect(before.map((v) => [v.commit, v.rule])).toEqual([[bad, "undeclared"]]);
 
-		const reverted = await revertViolation({ remote: remote(), branch: "main", claims: claims(), votes: voteStore({ repo: "t1", root: votes(), remote: async () => remote() }), stamper, target: bad, violations: before, agent: "agent-c" });
+		const reverted = await revertViolation({
+			remote: remote(),
+			branch: "main",
+			claims: claims(),
+			votes: voteStore({ repo: "t1", root: votes(), remote: async () => remote() }),
+			stamper,
+			target: bad,
+			violations: before,
+			agent: "agent-c",
+		});
 		expect(reverted).toMatchObject({ ok: true });
 		expect(server.git("ls-tree", "-r", "--name-only", "main").includes("src/c/z.txt")).toBe(false);
 
@@ -71,7 +85,18 @@ describe("revert", { timeout: 60_000 }, () => {
 
 	it("refuses to revert a commit the audit doesn't report", async () => {
 		const main = server.git("rev-parse", "main").trim();
-		expect(await revertViolation({ remote: remote(), branch: "main", claims: claims(), votes: voteStore({ repo: "t1", root: votes(), remote: async () => remote() }), stamper, target: main, violations: [], agent: "agent-c" })).toEqual({
+		expect(
+			await revertViolation({
+				remote: remote(),
+				branch: "main",
+				claims: claims(),
+				votes: voteStore({ repo: "t1", root: votes(), remote: async () => remote() }),
+				stamper,
+				target: main,
+				violations: [],
+				agent: "agent-c",
+			}),
+		).toEqual({
 			ok: false,
 			reasons: [`${main} has no reported violations to revert`],
 		});
@@ -81,7 +106,18 @@ describe("revert", { timeout: 60_000 }, () => {
 		const bad = await rogueEdit("first\n");
 		await rogueEdit("second\n");
 		const violations = await audit(await records());
-		expect(await revertViolation({ remote: remote(), branch: "main", claims: claims(), votes: voteStore({ repo: "t1", root: votes(), remote: async () => remote() }), stamper, target: bad, violations, agent: "agent-c" })).toEqual({
+		expect(
+			await revertViolation({
+				remote: remote(),
+				branch: "main",
+				claims: claims(),
+				votes: voteStore({ repo: "t1", root: votes(), remote: async () => remote() }),
+				stamper,
+				target: bad,
+				violations,
+				agent: "agent-c",
+			}),
+		).toEqual({
 			ok: false,
 			reasons: ["src/c/z.txt has changed since; revert it by hand"],
 		});

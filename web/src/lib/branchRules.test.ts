@@ -27,7 +27,11 @@ describe("branch rule drafts", () => {
 	});
 
 	it("say what's wrong: a bad pattern, a rule that changes nothing, voters without roles", () => {
-		const { errors } = branchRulesFrom([{ ...emptyRule(), pattern: "feature x", required: "1" }, { ...emptyRule(), pattern: "hotfix/*" }, { ...emptyRule(), pattern: "r/*", grants: "person:*" }]);
+		const { errors } = branchRulesFrom([
+			{ ...emptyRule(), pattern: "feature x", required: "1" },
+			{ ...emptyRule(), pattern: "hotfix/*" },
+			{ ...emptyRule(), pattern: "r/*", grants: "person:*" },
+		]);
 		expect(errors).toEqual([
 			"feature x: the pattern is a branch name, with * for any run of characters (feature/*).",
 			"hotfix/* changes nothing: set approvals, roles or checks, or remove it.",

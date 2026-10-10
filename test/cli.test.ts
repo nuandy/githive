@@ -18,14 +18,33 @@ let answers: Record<string, Answer> = {};
 let calls: { name: string; args: Record<string, unknown>; auth?: string }[] = [];
 let tmp = "";
 
-const identity = { GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@example.invalid", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@example.invalid" };
-const gitIn = (dir: string, ...args: string[]) => execFileSync("git", ["-C", dir, ...args], { encoding: "utf8", env: { ...process.env, ...identity } }).trim();
+const identity = {
+	GIT_AUTHOR_NAME: "t",
+	GIT_AUTHOR_EMAIL: "t@example.invalid",
+	GIT_COMMITTER_NAME: "t",
+	GIT_COMMITTER_EMAIL: "t@example.invalid",
+};
+const gitIn = (dir: string, ...args: string[]) =>
+	execFileSync("git", ["-C", dir, ...args], { encoding: "utf8", env: { ...process.env, ...identity } }).trim();
 
 /** Runs the CLI (async: the fake server answers in this process), with its exit code. */
 function cli(args: string[], cwd = tmp): Promise<{ code: number; stdout: string; stderr: string }> {
 	return new Promise((resolve) => {
-		execFile("node", [CLI, ...args], { cwd, env: { ...process.env, ...identity, GITHIVE_URL: base, GITHIVE_TOKEN: "ghv_test", GITHIVE_KEY: "", GITHIVE_AGENT: "" } }, (err, stdout, stderr) =>
-			resolve({ code: err ? ((err as { code?: number }).code ?? 1) : 0, stdout, stderr }),
+		execFile(
+			"node",
+			[CLI, ...args],
+			{
+				cwd,
+				env: {
+					...process.env,
+					...identity,
+					GITHIVE_URL: base,
+					GITHIVE_TOKEN: "ghv_test",
+					GITHIVE_KEY: "",
+					GITHIVE_AGENT: "",
+				},
+			},
+			(err, stdout, stderr) => resolve({ code: err ? ((err as { code?: number }).code ?? 1) : 0, stdout, stderr }),
 		);
 	});
 }
@@ -41,7 +60,16 @@ beforeAll(async () => {
 			const result = typeof answer === "function" ? answer(params.arguments) : answer;
 			const failed = result instanceof Error;
 			res.setHeader("Content-Type", "application/json");
-			res.end(JSON.stringify({ jsonrpc: "2.0", id, result: { content: [{ type: "text", text: failed ? result.message : JSON.stringify(result) }], ...(failed ? { isError: true } : {}) } }));
+			res.end(
+				JSON.stringify({
+					jsonrpc: "2.0",
+					id,
+					result: {
+						content: [{ type: "text", text: failed ? result.message : JSON.stringify(result) }],
+						...(failed ? { isError: true } : {}),
+					},
+				}),
+			);
 		});
 	});
 	await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
@@ -90,7 +118,16 @@ describe("githive CLI", () => {
 	});
 
 	it("lists claims readably, sending the agent token", async () => {
-		answers.claims = [{ change: "fix-login", agent: "ann/bot", paths: ["src/auth/"], intent: "Fix the login loop\nmore detail", since: "x", active: "x" }];
+		answers.claims = [
+			{
+				change: "fix-login",
+				agent: "ann/bot",
+				paths: ["src/auth/"],
+				intent: "Fix the login loop\nmore detail",
+				since: "x",
+				active: "x",
+			},
+		];
 		const out = await cli(["claims", "acme/app"]);
 		expect(out.code).toBe(0);
 		expect(out.stdout).toContain("fix-login (ann/bot): src/auth/");
@@ -101,7 +138,18 @@ describe("githive CLI", () => {
 	});
 
 	it("shows who holds what when a claim is refused, and clones nothing", async () => {
-		answers.claim = { ok: false, conflicts: [{ path: "src/auth/login.ts", held: "src/auth/", change: "fix-login", agent: "ann/bot", intent: "Fix the login loop" }] };
+		answers.claim = {
+			ok: false,
+			conflicts: [
+				{
+					path: "src/auth/login.ts",
+					held: "src/auth/",
+					change: "fix-login",
+					agent: "ann/bot",
+					intent: "Fix the login loop",
+				},
+			],
+		};
 		const out = await cli(["start", "acme/app", "rate-limit", "Rate-limit logins", "src/auth/login.ts"]);
 		expect(out.code).toBe(1);
 		expect(out.stdout).toContain("src/auth/login.ts overlaps src/auth/: ann/bot's fix-login");
@@ -113,7 +161,12 @@ describe("githive CLI", () => {
 	it("starts a change, then land pushes it to the fork, checks, and says to land again while pending", async () => {
 		const { project, fork, forkPath } = repos();
 		answers.claim = { ok: true };
-		answers.credentials = { url: fork, token: "fork-secret?exp=1", branch: "changes/rate-limit", project: { url: project, token: "project-secret", branch: "main" } };
+		answers.credentials = {
+			url: fork,
+			token: "fork-secret?exp=1",
+			branch: "changes/rate-limit",
+			project: { url: project, token: "project-secret", branch: "main" },
+		};
 		const started = await cli(["start", "acme/app", "rate-limit", "Rate-limit logins", "src/auth/"]);
 		expect(started.code).toBe(0);
 		expect(started.stdout).toContain("claimed src/auth/ for rate-limit");
@@ -135,7 +188,9 @@ describe("githive CLI", () => {
 		expect(landed.stdout).toContain("pending: rate-limit is ready and waiting to land");
 		expect(landed.stdout).toContain("next: githive land");
 		expect(landed.code).toBe(3);
-		expect(execFileSync("git", ["-C", forkPath, "rev-parse", "changes/rate-limit"], { encoding: "utf8" }).trim()).toBe(head);
+		expect(execFileSync("git", ["-C", forkPath, "rev-parse", "changes/rate-limit"], { encoding: "utf8" }).trim()).toBe(
+			head,
+		);
 		expect(calls.slice(-3).map((c) => [c.name, c.args])).toEqual([
 			["credentials", { repo: "acme/app", change: "rate-limit" }],
 			["check", { repo: "acme/app", change: "rate-limit" }],
@@ -153,7 +208,10 @@ describe("githive CLI", () => {
 	it("sync merges the project's branch into the change branch, never rebasing", async () => {
 		const { project, fork, seed } = repos();
 		answers.claim = { ok: true };
-		answers.credentials = (args: Record<string, unknown>) => (args.change ? { url: fork, token: "f", project: { url: project, token: "p", branch: "main" } } : { url: project, token: "p" });
+		answers.credentials = (args: Record<string, unknown>) =>
+			args.change
+				? { url: fork, token: "f", project: { url: project, token: "p", branch: "main" } }
+				: { url: project, token: "p" };
 		await cli(["start", "acme/app", "docs", "Docs", "docs/"]);
 		const clone = join(tmp, "docs");
 		writeFileSync(join(clone, "notes.md"), "mine\n");

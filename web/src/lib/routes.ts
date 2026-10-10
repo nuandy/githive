@@ -23,7 +23,14 @@ export type Route =
 	| { page: "inbox" }
 	| { page: "agents-settings" }
 	| { page: "admin" }
-	| { page: "repo"; repo: string; tab: RepoTab; /** Code tab: the file or folder shown, "" for the top. */ path?: string; /** Code tab: a branch or commit other than the project's branch. */ ref?: string; /** Changes tab: the branch shown, when not the project's. */ branch?: string }
+	| {
+			page: "repo";
+			repo: string;
+			tab: RepoTab;
+			/** Code tab: the file or folder shown, "" for the top. */ path?: string;
+			/** Code tab: a branch or commit other than the project's branch. */ ref?: string;
+			/** Changes tab: the branch shown, when not the project's. */ branch?: string;
+	  }
 	| { page: "change"; repo: string; change: string; tab: ChangeTab }
 	| { page: "not-found" };
 
@@ -87,10 +94,11 @@ const enc = encodeURIComponent;
 
 export const href = {
 	repos: () => "#/",
-	repo: (repo: string, tab: RepoTab = "changes", branch?: string) => `#/repos/${repoPath(repo)}${tab === "changes" ? "" : `/${tab}`}${branch ? `?branch=${enc(branch)}` : ""}`,
+	repo: (repo: string, tab: RepoTab = "changes", branch?: string) =>
+		`#/repos/${repoPath(repo)}${tab === "changes" ? "" : `/${tab}`}${branch ? `?branch=${enc(branch)}` : ""}`,
 	change: (repo: string, change: string, tab: ChangeTab = "conversation") =>
 		`#/repos/${repoPath(repo)}/changes/${enc(change)}${tab === "conversation" ? "" : `/${tab}`}`,
-	/** A file or folder in the Code tab; each path segment is encoded, so the path reads naturally in the address bar. */
+	/** A file or folder in the Code tab. Each segment is encoded separately, so the path reads naturally. */
 	code: (repo: string, path = "", ref?: string) =>
 		`#/repos/${repoPath(repo)}/code${path ? `/${path.split("/").filter(Boolean).map(enc).join("/")}` : ""}${ref ? `?ref=${enc(ref)}` : ""}`,
 	newRepo: (owner?: string) => `#/new${owner ? `?owner=${enc(owner)}` : ""}`,

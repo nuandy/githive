@@ -11,7 +11,9 @@
 	src: url("/fonts/overpass.woff2") format("woff2");
 	font-weight: 100 900;
 	font-display: swap;
-	unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+	unicode-range:
+		U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC,
+		U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
 }
 
 @font-face {
@@ -19,7 +21,9 @@
 	src: url("/fonts/overpass-mono.woff2") format("woff2");
 	font-weight: 300 700;
 	font-display: swap;
-	unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+	unicode-range:
+		U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC,
+		U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
 }
 
 /* Overpass sets its middle dot hard against the next letter; the dashboard's "a · b" separators take it from the system face. */
@@ -224,7 +228,9 @@ button,
 	cursor: pointer;
 	text-decoration: none;
 	white-space: nowrap;
-	transition: background-color 0.12s ease, border-color 0.12s ease;
+	transition:
+		background-color 0.12s ease,
+		border-color 0.12s ease;
 }
 
 button:hover:not(:disabled),
@@ -333,19 +339,55 @@ label {
 	border: 1px solid transparent;
 }
 
-.pill--good { background: var(--good-soft); color: var(--good); }
-.pill--bad { background: var(--bad-soft); color: var(--bad); }
-.pill--warn { background: var(--warn-soft); color: var(--warn); }
-.pill--needs { background: var(--needs-soft); color: var(--needs); }
-.pill--accent { background: var(--accent-soft); color: var(--accent); }
-.pill--neutral { background: var(--neutral-soft); color: var(--neutral); }
+.pill--good {
+	background: var(--good-soft);
+	color: var(--good);
+}
+.pill--bad {
+	background: var(--bad-soft);
+	color: var(--bad);
+}
+.pill--warn {
+	background: var(--warn-soft);
+	color: var(--warn);
+}
+.pill--needs {
+	background: var(--needs-soft);
+	color: var(--needs);
+}
+.pill--accent {
+	background: var(--accent-soft);
+	color: var(--accent);
+}
+.pill--neutral {
+	background: var(--neutral-soft);
+	color: var(--neutral);
+}
 
-.pill--solid.pill--good { background: var(--good); color: #fff; }
-.pill--solid.pill--bad { background: var(--bad); color: #fff; }
-.pill--solid.pill--warn { background: var(--warn); color: #fff; }
-.pill--solid.pill--needs { background: var(--needs); color: #fff; }
-.pill--solid.pill--accent { background: var(--accent-fill); color: var(--on-accent); }
-.pill--solid.pill--neutral { background: var(--neutral); color: var(--surface); }
+.pill--solid.pill--good {
+	background: var(--good);
+	color: #fff;
+}
+.pill--solid.pill--bad {
+	background: var(--bad);
+	color: #fff;
+}
+.pill--solid.pill--warn {
+	background: var(--warn);
+	color: #fff;
+}
+.pill--solid.pill--needs {
+	background: var(--needs);
+	color: #fff;
+}
+.pill--solid.pill--accent {
+	background: var(--accent-fill);
+	color: var(--on-accent);
+}
+.pill--solid.pill--neutral {
+	background: var(--neutral);
+	color: var(--surface);
+}
 
 /* A branch or path named in a pill: the pill's own face, no box of its own. */
 .pill code {
@@ -386,19 +428,39 @@ label {
 	text-align: center;
 }
 
-.tone-good { color: var(--good); }
-.tone-bad { color: var(--bad); }
-.tone-warn { color: var(--warn); }
-.tone-needs { color: var(--needs); }
-.tone-accent { color: var(--accent); }
-.tone-neutral { color: var(--neutral); }
+.tone-good {
+	color: var(--good);
+}
+.tone-bad {
+	color: var(--bad);
+}
+.tone-warn {
+	color: var(--warn);
+}
+.tone-needs {
+	color: var(--needs);
+}
+.tone-accent {
+	color: var(--accent);
+}
+.tone-neutral {
+	color: var(--neutral);
+}
 
 /* Lamps: one of three colors, set by the lamp--<color> class on the lamp or anything around it. */
 
-.lamp--amber { --lamp: var(--amber); }
-.lamp--green { --lamp: var(--good); }
-.lamp--red { --lamp: var(--bad); }
-.lamp--neutral { --lamp: var(--border-strong); }
+.lamp--amber {
+	--lamp: var(--amber);
+}
+.lamp--green {
+	--lamp: var(--good);
+}
+.lamp--red {
+	--lamp: var(--bad);
+}
+.lamp--neutral {
+	--lamp: var(--border-strong);
+}
 
 .lamp {
 	display: inline-block;
@@ -474,10 +536,22 @@ label {
 	margin-top: 2px;
 }
 
-.callout--bad { border-color: var(--bad); background: var(--bad-soft); }
-.callout--warn { border-color: var(--amber); background: var(--warn-soft); }
-.callout--needs { border-color: var(--needs); background: var(--needs-soft); }
-.callout--good { border-color: var(--good); background: var(--good-soft); }
+.callout--bad {
+	border-color: var(--bad);
+	background: var(--bad-soft);
+}
+.callout--warn {
+	border-color: var(--amber);
+	background: var(--warn-soft);
+}
+.callout--needs {
+	border-color: var(--needs);
+	background: var(--needs-soft);
+}
+.callout--good {
+	border-color: var(--good);
+	background: var(--good-soft);
+}
 
 .callout p {
 	margin: 2px 0 0;
@@ -518,14 +592,30 @@ details > summary {
 }
 
 /* Claim colors: one per open change on the Claims map, in order. Readable on both themes. */
-.claim-c0 { --claim: #3b82f6; }
-.claim-c1 { --claim: #f59e0b; }
-.claim-c2 { --claim: #14b8a6; }
-.claim-c3 { --claim: #ec4899; }
-.claim-c4 { --claim: #8b5cf6; }
-.claim-c5 { --claim: #22c55e; }
-.claim-c6 { --claim: #ef4444; }
-.claim-c7 { --claim: #06b6d4; }
+.claim-c0 {
+	--claim: #3b82f6;
+}
+.claim-c1 {
+	--claim: #f59e0b;
+}
+.claim-c2 {
+	--claim: #14b8a6;
+}
+.claim-c3 {
+	--claim: #ec4899;
+}
+.claim-c4 {
+	--claim: #8b5cf6;
+}
+.claim-c5 {
+	--claim: #22c55e;
+}
+.claim-c6 {
+	--claim: #ef4444;
+}
+.claim-c7 {
+	--claim: #06b6d4;
+}
 
 /* Cards and bars for the Insights and Agents tabs. */
 .stat-grid {
@@ -597,9 +687,15 @@ details > summary {
 	background: var(--accent-fill);
 }
 
-.bar__fill--good { background: var(--good); }
-.bar__fill--bad { background: var(--bad); }
-.bar__fill--warn { background: var(--warn); }
+.bar__fill--good {
+	background: var(--good);
+}
+.bar__fill--bad {
+	background: var(--bad);
+}
+.bar__fill--warn {
+	background: var(--warn);
+}
 
 .bar__value {
 	color: var(--text-muted);

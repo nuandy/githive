@@ -4,4 +4,5 @@
 export const staysInRepo = (path: string) => !path.startsWith("/") && !path.split("/").includes("..");
 
 /** Stricter: also no empty or "." segments, so a path has one spelling (not "a//b", "./a" or "a/"). */
-export const isPlainPath = (path: string) => staysInRepo(path) && path.split("/").every((segment) => segment && segment !== ".");
+export const isPlainPath = (path: string) =>
+	staysInRepo(path) && path.split("/").every((segment) => segment && segment !== ".");

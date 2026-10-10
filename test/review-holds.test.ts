@@ -1,11 +1,19 @@
 import { describe, expect, it } from "vitest";
-import { heldReviews, holdReview, releaseReview, type ReviewHolds, roleWaits, roleWaitTold } from "../src/toolkit/review-holds";
+import {
+	heldReviews,
+	holdReview,
+	releaseReview,
+	type ReviewHolds,
+	roleWaits,
+	roleWaitTold,
+} from "../src/toolkit/review-holds";
 import { MemoryLog } from "./helpers/memory-log";
 
-// Review holds as a record in Git: next hands a review out only while fewer
+// Review holds as a record in Git. next hands a review out only while fewer
 // agents hold it than it needs, so two agents aren't sent to one review that
-// needs one. Beside them, when each review a role that can block awaits was
-// first seen waiting, so people hear of one that waited too long, once.
+// needs one. The record also keeps when each review awaited by a blocking role
+// was first seen waiting, so people are told once about a review that waited too
+// long.
 
 describe("review holds, as a record", () => {
 	it("holds a review for as many agents as it needs, by compare-and-swap, until they vote or the hold runs out", async () => {
@@ -41,9 +49,13 @@ describe("reviews a role waits for, as a record", () => {
 	it("remembers when each was first seen waiting, forgets one that stops waiting, and whether people were told", async () => {
 		const log = new MemoryLog<ReviewHolds>();
 		const first = await roleWaits(log, ["h1#security"]);
-		expect((await roleWaits(log, ["h1#security", "h2#security"]))["h1#security"].since).toBe(first["h1#security"].since);
+		expect((await roleWaits(log, ["h1#security", "h2#security"]))["h1#security"].since).toBe(
+			first["h1#security"].since,
+		);
 		await roleWaitTold(log, "h1#security");
-		expect(await roleWaits(log, ["h1#security"])).toEqual({ "h1#security": { since: first["h1#security"].since, told: true } });
+		expect(await roleWaits(log, ["h1#security"])).toEqual({
+			"h1#security": { since: first["h1#security"].since, told: true },
+		});
 		// h1's review was taken; when it waits again, its clock starts over.
 		await roleWaits(log, []);
 		expect((await roleWaits(log, ["h1#security"]))["h1#security"].told).toBeUndefined();

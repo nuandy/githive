@@ -48,7 +48,19 @@ export async function startGitServer({ branch = "main" }: { branch?: string } = 
 	// Like any project repo, it has a default branch with a commit.
 	const work = join(root, "work");
 	execFileSync("git", ["init", "--quiet", "-b", branch, work]);
-	execFileSync("git", ["-C", work, "-c", "user.name=test", "-c", "user.email=test@example.com", "commit", "--quiet", "--allow-empty", "-m", "Initial commit"]);
+	execFileSync("git", [
+		"-C",
+		work,
+		"-c",
+		"user.name=test",
+		"-c",
+		"user.email=test@example.com",
+		"commit",
+		"--quiet",
+		"--allow-empty",
+		"-m",
+		"Initial commit",
+	]);
 	execFileSync("git", ["-C", work, "push", "--quiet", repo, branch]);
 	execFileSync("git", ["-C", repo, "symbolic-ref", "HEAD", `refs/heads/${branch}`]);
 
@@ -63,7 +75,9 @@ export async function startGitServer({ branch = "main" }: { branch?: string } = 
 	const server: Server = createServer(async (req, res) => {
 		const url = new URL(req.url ?? "/", "http://localhost");
 		requests.push(`${req.method} ${url.pathname.split("/").pop()}${url.search}`);
-		requestsTo.push(`${url.pathname.split("/")[1]?.replace(/\.git$/, "")} ${req.method} ${url.pathname.split("/").pop()}`);
+		requestsTo.push(
+			`${url.pathname.split("/")[1]?.replace(/\.git$/, "")} ${req.method} ${url.pathname.split("/").pop()}`,
+		);
 		const isPush = req.method === "POST" && url.pathname.endsWith("/git-receive-pack");
 		if (req.method === "POST" && url.pathname.endsWith("/git-upload-pack") && failingFetches > 0) {
 			failingFetches--;
@@ -80,7 +94,8 @@ export async function startGitServer({ branch = "main" }: { branch?: string } = 
 			res.end(`${(line.length + 4).toString(16).padStart(4, "0")}${line}`);
 			return;
 		}
-		const failThisPush = isPush && failingPushes.count > 0 ? (failingPushes.count--, failingPushes.applied ? "after" : "before") : null;
+		const failThisPush =
+			isPush && failingPushes.count > 0 ? (failingPushes.count--, failingPushes.applied ? "after" : "before") : null;
 		if (failThisPush === "before") {
 			req.resume();
 			res.statusCode = 500;

@@ -26,7 +26,15 @@ describe("the Commits tab", () => {
 
 describe("the Inbox", () => {
 	const summaries = {
-		repos: [{ repo: "acme/my-app", since: ago(10), summary: { waiting: [{ change: "fix-login", title: "Fix login", reason: "Reviewers disagree after 3 revisions" }] } }],
+		repos: [
+			{
+				repo: "acme/my-app",
+				since: ago(10),
+				summary: {
+					waiting: [{ change: "fix-login", title: "Fix login", reason: "Reviewers disagree after 3 revisions" }],
+				},
+			},
+		],
 	};
 
 	it("lists what waits on you, grouped by repo, each linking to its change", () => {
@@ -61,9 +69,18 @@ describe("the repo header", () => {
 		expect(renderToStaticMarkup(<LiveDot status="live" />)).toMatch(/live-dot--live.*Live/);
 		expect(renderToStaticMarkup(<LiveDot status="reconnecting" />)).toContain("Reconnecting");
 		expect(renderToStaticMarkup(<LiveDot status="off" />)).toBe("");
-		const page = renderToStaticMarkup(<RepoPage repo="acme/docs-site" view={{ kind: "repo", tab: "changes" }} snapshot={repoSnapshot} liveStatus="live" api={stubApi()} />);
+		const page = renderToStaticMarkup(
+			<RepoPage
+				repo="acme/docs-site"
+				view={{ kind: "repo", tab: "changes" }}
+				snapshot={repoSnapshot}
+				liveStatus="live"
+				api={stubApi()}
+			/>,
+		);
 		expect(page).toContain("live-dot--live");
-		for (const tab of ["Changes", "Claims", "Code", "Agents", "Audit", "Settings"]) expect(page).toContain(`<span>${tab}</span>`);
+		for (const tab of ["Changes", "Claims", "Code", "Agents", "Audit", "Settings"])
+			expect(page).toContain(`<span>${tab}</span>`);
 		expect(page).not.toMatch(/elected|Insights|Activity/);
 	});
 });
@@ -76,7 +93,10 @@ describe("Settings", () => {
 	});
 
 	it("shows a team granted a role as the grant names it", () => {
-		const granted = { ...repoSnapshot, policy: { ...repoSnapshot.policy, vetoes: ["security"], grants: { security: ["@acme/security", "person:*"] } } };
+		const granted = {
+			...repoSnapshot,
+			policy: { ...repoSnapshot.policy, vetoes: ["security"], grants: { security: ["@acme/security", "person:*"] } },
+		};
 		expect(renderToStaticMarkup(<SettingsTab snapshot={granted} />)).toContain("security: @acme/security, people");
 	});
 });

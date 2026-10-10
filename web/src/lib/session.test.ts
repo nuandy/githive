@@ -1,9 +1,24 @@
 import { describe, expect, it } from "vitest";
-import { DEFAULT_TOKEN_DAYS, TOKEN_EXPIRY, expiryDate, expiryFromValue, expiryValue, connectSteps, tokenSteps, signInHref, signinErrorMessage, signinErrorOf, tokenLabel, withoutSigninError } from "./session";
+import {
+	DEFAULT_TOKEN_DAYS,
+	TOKEN_EXPIRY,
+	expiryDate,
+	expiryFromValue,
+	expiryValue,
+	connectSteps,
+	tokenSteps,
+	signInHref,
+	signinErrorMessage,
+	signinErrorOf,
+	tokenLabel,
+	withoutSigninError,
+} from "./session";
 
 describe("signing in", () => {
 	it("says what each failed sign-in means", () => {
-		expect(signinErrorMessage("not-invited")).toBe("GitHive is invite-only for now. Your request to join is noted: once an admin approves it, sign in again.");
+		expect(signinErrorMessage("not-invited")).toBe(
+			"GitHive is invite-only for now. Your request to join is noted: once an admin approves it, sign in again.",
+		);
 		expect(signinErrorMessage("expired")).toBe("That sign-in took too long or was opened in another tab. Try again.");
 		expect(signinErrorMessage("cancelled")).toBe("Sign-in was cancelled.");
 		expect(signinErrorMessage("unverified-email")).toBe("Your account's email isn't verified with the provider.");
@@ -46,7 +61,11 @@ describe("agent tokens", () => {
 	});
 
 	it("connects Codex over OAuth: codex mcp add, then codex mcp login", () => {
-		expect(connectSteps("codex", "https://githive.app").map((s) => s.copy).filter(Boolean)).toEqual(["codex mcp add githive --url https://githive.app/mcp", "codex mcp login githive"]);
+		expect(
+			connectSteps("codex", "https://githive.app")
+				.map((s) => s.copy)
+				.filter(Boolean),
+		).toEqual(["codex mcp add githive --url https://githive.app/mcp", "codex mcp login githive"]);
 	});
 
 	it("tells any other client the server's address", () => {
@@ -54,10 +73,19 @@ describe("agent tokens", () => {
 	});
 
 	it("fills a new token into each client's setup, and never leaves a placeholder", () => {
-		expect(tokenSteps("claude-code", "https://githive.app", "ghv_x")[0].copy).toBe('claude mcp add --scope user --transport http githive https://githive.app/mcp --header "Authorization: Bearer ghv_x"');
+		expect(tokenSteps("claude-code", "https://githive.app", "ghv_x")[0].copy).toBe(
+			'claude mcp add --scope user --transport http githive https://githive.app/mcp --header "Authorization: Bearer ghv_x"',
+		);
 		const codex = tokenSteps("codex", "https://githive.app", "ghv_x").map((s) => s.copy);
-		expect(codex).toEqual(["export GITHIVE_TOKEN=ghv_x", '[mcp_servers.githive]\nurl = "https://githive.app/mcp"\nbearer_token_env_var = "GITHIVE_TOKEN"']);
-		expect(tokenSteps("other", "https://githive.app", "ghv_x").map((s) => s.copy)).toEqual(["https://githive.app/mcp", "Authorization: Bearer ghv_x"]);
-		for (const client of ["claude-code", "codex", "other"] as const) expect(JSON.stringify(tokenSteps(client, "https://githive.app", "ghv_x"))).not.toContain("<token>");
+		expect(codex).toEqual([
+			"export GITHIVE_TOKEN=ghv_x",
+			'[mcp_servers.githive]\nurl = "https://githive.app/mcp"\nbearer_token_env_var = "GITHIVE_TOKEN"',
+		]);
+		expect(tokenSteps("other", "https://githive.app", "ghv_x").map((s) => s.copy)).toEqual([
+			"https://githive.app/mcp",
+			"Authorization: Bearer ghv_x",
+		]);
+		for (const client of ["claude-code", "codex", "other"] as const)
+			expect(JSON.stringify(tokenSteps(client, "https://githive.app", "ghv_x"))).not.toContain("<token>");
 	});
 });

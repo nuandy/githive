@@ -3,7 +3,8 @@ import { IdentityStore, type ProviderProfile, sha256Hex } from "../src/auth/stor
 import { fakeD1 } from "./fakes/d1";
 
 // GitHive's own identity, against a real SQLite database with the migrations
-// applied: who may sign in, how accounts link, sessions, agents and tokens.
+// applied. Covers who may sign in, how accounts link, sessions, agents and
+// tokens.
 
 let clock = Date.parse("2026-10-08T12:00:00.000Z");
 const now = () => new Date(clock);
@@ -11,7 +12,13 @@ const store = () => {
 	const db = fakeD1();
 	return { db, ids: new IdentityStore(db, now) };
 };
-const github: ProviderProfile = { provider: "github", providerId: "101", email: "Ada@Example.com", name: "Ada", login: "ada" };
+const github: ProviderProfile = {
+	provider: "github",
+	providerId: "101",
+	email: "Ada@Example.com",
+	name: "Ada",
+	login: "ada",
+};
 
 describe("signing in", () => {
 	it("refuses anyone not invited, and lets an invited person in with their GitHub login as handle", async () => {
@@ -28,7 +35,9 @@ describe("signing in", () => {
 		clock += 60_000;
 		await ids.signIn(github);
 		const requested = { provider: "github", name: "Ada", login: "ada", tries: 2, lastAt: "2026-10-08T12:01:00.000Z" };
-		expect(await ids.inviteRequests()).toEqual([{ email: "ada@example.com", orgs: [], createdAt: expect.any(String), signIn: requested }]);
+		expect(await ids.inviteRequests()).toEqual([
+			{ email: "ada@example.com", orgs: [], createdAt: expect.any(String), signIn: requested },
+		]);
 		await ids.invite("ada@example.com", "person:admin");
 		expect(await ids.inviteRequests()).toEqual([]);
 		const { ids: other } = store();
@@ -42,10 +51,18 @@ describe("signing in", () => {
 		await ids.invite("ada@example.com", "person:admin");
 		const first = (await ids.signIn(github)) as { user: { id: string } };
 		expect(((await ids.signIn(github)) as { user: { id: string } }).user.id).toBe(first.user.id);
-		const google = (await ids.signIn({ provider: "google", providerId: "g-9", email: "ada@example.com" })) as { user: { id: string } };
+		const google = (await ids.signIn({ provider: "google", providerId: "g-9", email: "ada@example.com" })) as {
+			user: { id: string };
+		};
 		expect(google.user.id).toBe(first.user.id);
-		// Linked now: a changed email at Google still finds the same person.
-		expect(((await ids.signIn({ provider: "google", providerId: "g-9", email: "other@example.com" })) as { user: { id: string } }).user.id).toBe(first.user.id);
+		// Once the accounts are linked, a changed email at Google still finds the same person.
+		expect(
+			(
+				(await ids.signIn({ provider: "google", providerId: "g-9", email: "other@example.com" })) as {
+					user: { id: string };
+				}
+			).user.id,
+		).toBe(first.user.id);
 	});
 
 	it("never makes a handle from an email: a Google sign-in gets u-<hex>, and a taken login does too", async () => {
@@ -53,10 +70,17 @@ describe("signing in", () => {
 		await ids.invite("grace@example.com", "person:admin");
 		await ids.invite("ada@example.com", "person:admin");
 		await ids.invite("imposter@example.com", "person:admin");
-		const grace = (await ids.signIn({ provider: "google", providerId: "g-1", email: "grace@example.com" })) as { user: { handle: string } };
+		const grace = (await ids.signIn({ provider: "google", providerId: "g-1", email: "grace@example.com" })) as {
+			user: { handle: string };
+		};
 		expect(grace.user.handle).toMatch(/^u-[0-9a-f]{6}$/);
 		await ids.signIn(github);
-		const clash = (await ids.signIn({ provider: "github", providerId: "202", email: "imposter@example.com", login: "ada" })) as { user: { handle: string } };
+		const clash = (await ids.signIn({
+			provider: "github",
+			providerId: "202",
+			email: "imposter@example.com",
+			login: "ada",
+		})) as { user: { handle: string } };
 		expect(clash.user.handle).toMatch(/^u-[0-9a-f]{6}$/);
 	});
 });
@@ -68,7 +92,9 @@ describe("sessions", () => {
 		const { user } = (await ids.signIn(github)) as { user: { id: string; handle: string } };
 		const secret = await ids.createSession(user.id);
 		expect((await ids.sessionUser(secret))?.handle).toBe("ada");
-		const stored = (db as unknown as { raw: { prepare(s: string): { get(): Record<string, string> } } }).raw.prepare("SELECT id_hash FROM sessions").get();
+		const stored = (db as unknown as { raw: { prepare(s: string): { get(): Record<string, string> } } }).raw
+			.prepare("SELECT id_hash FROM sessions")
+			.get();
 		expect(stored.id_hash).toBe(await sha256Hex(secret));
 		await ids.endSession(secret);
 		expect(await ids.sessionUser(secret)).toBeNull();
@@ -96,7 +122,10 @@ describe("agents and their tokens", () => {
 		expect(issued.expiresAt).toBe("2027-01-06T12:00:00.000Z");
 		const found = await ids.tokenPrincipal(issued.token);
 		expect(found).toMatchObject({ user: { handle: "ada" }, agent: { name: "builder" } });
-		expect((await ids.agents(user.id))[0].tokens[0]).toMatchObject({ prefix: issued.token.slice(4, 12), lastUsedAt: "2026-10-08T12:00:00.000Z" });
+		expect((await ids.agents(user.id))[0].tokens[0]).toMatchObject({
+			prefix: issued.token.slice(4, 12),
+			lastUsedAt: "2026-10-08T12:00:00.000Z",
+		});
 		expect(await ids.tokenPrincipal("ghv_not-a-real-token")).toBeNull();
 	});
 
@@ -129,7 +158,12 @@ describe("agents and their tokens", () => {
 	it("keeps one person's agents and tokens from another", async () => {
 		const { ids, user } = await signedIn();
 		await ids.invite("eve@example.com", "person:admin");
-		const { user: eve } = (await ids.signIn({ provider: "github", providerId: "666", email: "eve@example.com", login: "eve" })) as { user: { id: string } };
+		const { user: eve } = (await ids.signIn({
+			provider: "github",
+			providerId: "666",
+			email: "eve@example.com",
+			login: "eve",
+		})) as { user: { id: string } };
 		const agent = await ids.createAgent(user.id, "builder");
 		const issued = await ids.createToken(user.id, agent.id);
 		await expect(ids.createToken(eve.id, agent.id)).rejects.toThrow(/\[404\]/);

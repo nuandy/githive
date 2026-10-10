@@ -53,15 +53,19 @@ describe("Git network retries", () => {
 	});
 
 	it("retries a clone with a distinct, clean MemoryFS after a partial first attempt", async () => {
-		let firstFs: { promises: { writeFile(path: string, content: string): Promise<void> }; entries: Map<string, unknown> } | undefined;
+		let firstFs:
+			| { promises: { writeFile(path: string, content: string): Promise<void> }; entries: Map<string, unknown> }
+			| undefined;
 		let retryStartedClean = false;
-		io.clone.mockImplementationOnce(async ({ fs }: { fs: typeof firstFs }) => {
-			firstFs = fs;
-			await fs!.promises.writeFile("/repo/partial-clone-data", "left by failed attempt");
-			throw unavailable();
-		}).mockImplementationOnce(async ({ fs }: { fs: typeof firstFs }) => {
-			retryStartedClean = fs !== firstFs && !fs!.entries.has("/repo/partial-clone-data");
-		});
+		io.clone
+			.mockImplementationOnce(async ({ fs }: { fs: typeof firstFs }) => {
+				firstFs = fs;
+				await fs!.promises.writeFile("/repo/partial-clone-data", "left by failed attempt");
+				throw unavailable();
+			})
+			.mockImplementationOnce(async ({ fs }: { fs: typeof firstFs }) => {
+				retryStartedClean = fs !== firstFs && !fs!.entries.has("/repo/partial-clone-data");
+			});
 
 		const workspace = await Workspace.clone(remote, "main");
 
@@ -77,7 +81,10 @@ describe("Git network retries", () => {
 			{ exitCode: 0, output: "pushed" },
 		]);
 
-		await expect(gitWithToken(container as never, "secret", ["push", "origin", "HEAD"])).resolves.toMatchObject({ exitCode: 0, output: "pushed" });
+		await expect(gitWithToken(container as never, "secret", ["push", "origin", "HEAD"])).resolves.toMatchObject({
+			exitCode: 0,
+			output: "pushed",
+		});
 		expect(container.exec).toHaveBeenCalledTimes(2);
 	});
 

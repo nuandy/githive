@@ -84,7 +84,9 @@ function Reviewers({ reviewers }: { reviewers: ReviewerStats[] }) {
 export function AgentsTab({ snapshot }: { snapshot: RepoSnapshot }) {
 	return (
 		<div className="agents">
-			<p className="muted agents__note">Repos keep no list of agents: these come from the claims in force and the latest votes.</p>
+			<p className="muted agents__note">
+				Repos keep no list of agents: these come from the claims in force and the latest votes.
+			</p>
 			<Authors authors={authorStats(snapshot)} />
 			<Reviewers reviewers={reviewerStats(snapshot)} />
 		</div>

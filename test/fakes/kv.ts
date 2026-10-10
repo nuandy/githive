@@ -21,10 +21,21 @@ export function fakeKV() {
 		async getWithMetadata(key: string, options?: string | { type?: string }) {
 			const entry = live(key);
 			const type = typeof options === "string" ? options : options?.type;
-			return { value: entry ? (type === "json" ? JSON.parse(entry.value) : entry.value) : null, metadata: entry?.metadata ?? null };
+			return {
+				value: entry ? (type === "json" ? JSON.parse(entry.value) : entry.value) : null,
+				metadata: entry?.metadata ?? null,
+			};
 		},
-		async put(key: string, value: string, options?: { expirationTtl?: number; expiration?: number; metadata?: unknown }) {
-			const expires = options?.expirationTtl ? Date.now() + options.expirationTtl * 1000 : options?.expiration ? options.expiration * 1000 : undefined;
+		async put(
+			key: string,
+			value: string,
+			options?: { expirationTtl?: number; expiration?: number; metadata?: unknown },
+		) {
+			const expires = options?.expirationTtl
+				? Date.now() + options.expirationTtl * 1000
+				: options?.expiration
+					? options.expiration * 1000
+					: undefined;
 			store.set(key, { value: String(value), metadata: options?.metadata, expires });
 		},
 		async delete(key: string) {
@@ -36,7 +47,11 @@ export function fakeKV() {
 			const limit = options.limit ?? 1000;
 			const page = keys.slice(start, start + limit);
 			const complete = start + limit >= keys.length;
-			return { keys: page.map((name) => ({ name, metadata: store.get(name)?.metadata })), list_complete: complete, ...(complete ? {} : { cursor: String(start + limit) }) };
+			return {
+				keys: page.map((name) => ({ name, metadata: store.get(name)?.metadata })),
+				list_complete: complete,
+				...(complete ? {} : { cursor: String(start + limit) }),
+			};
 		},
 	} as unknown as KVNamespace;
 }

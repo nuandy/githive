@@ -1,8 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 import { FakeStorage } from "./fakes/env";
 
-// Reads that tolerate a moment's staleness (the claims for the claims tool and
-// next), kept in the repo's RepoCache: many callers at once read the repo once.
+// Reads that tolerate brief staleness, such as the claims for the claims tool
+// and next, are cached in the repo's RepoCache, so many callers at once read the
+// repo once.
 
 const { RepoCache } = await import("../src/repo-cache");
 const { keptRead } = await import("../src/toolkit/env");
@@ -29,11 +30,22 @@ describe("a kept read", () => {
 	it("reads the repo itself when the RepoCache doesn't answer, or can't keep what was read", async () => {
 		const down = () => Promise.reject(new Error("Durable Object is overloaded. Requests queued for too long."));
 		const read = vi.fn(async () => ({ claims: ["a"] }));
-		const unreachable = { REPO_CACHE: { getByName: () => ({ view: down, startBuild: down, keep: down, buildFailed: down }) } } as never;
+		const unreachable = {
+			REPO_CACHE: { getByName: () => ({ view: down, startBuild: down, keep: down, buildFailed: down }) },
+		} as never;
 		expect(await keptRead(unreachable, "p", "claims-advice", 30_000, read)).toEqual({ claims: ["a"] });
 		const errors = vi.spyOn(console, "error").mockImplementation(() => undefined);
 		try {
-			const cantKeep = { REPO_CACHE: { getByName: () => ({ view: async () => ({ json: undefined, fresh: false, building: false, writes: 0 }), startBuild: async () => true, keep: down, buildFailed: down }) } } as never;
+			const cantKeep = {
+				REPO_CACHE: {
+					getByName: () => ({
+						view: async () => ({ json: undefined, fresh: false, building: false, writes: 0 }),
+						startBuild: async () => true,
+						keep: down,
+						buildFailed: down,
+					}),
+				},
+			} as never;
 			expect(await keptRead(cantKeep, "p", "claims-advice", 30_000, read)).toEqual({ claims: ["a"] });
 		} finally {
 			errors.mockRestore();
@@ -64,7 +76,7 @@ describe("a kept read", () => {
 		await live.ping("records");
 		const rebuilding = keptRead(env, "p", "claims-advice", 30_000, read);
 		await new Promise((resolve) => setTimeout(resolve, 10));
-		// The build is running: another caller gets the copy kept before the write, at once.
+		// While the build runs, another caller gets the copy cached before the write at once.
 		expect(await keptRead(env, "p", "claims-advice", 30_000, read)).toEqual({ claims: ["v1"] });
 		release();
 		expect(await rebuilding).toEqual({ claims: ["v2"] });
@@ -78,7 +90,9 @@ describe("a kept read", () => {
 			await new Promise((resolve) => setTimeout(resolve, 300));
 			return { claims: ["a"] };
 		});
-		const results = await Promise.all(Array.from({ length: 20 }, () => keptRead(env, "p", "claims-advice", 30_000, read)));
+		const results = await Promise.all(
+			Array.from({ length: 20 }, () => keptRead(env, "p", "claims-advice", 30_000, read)),
+		);
 		expect(results.every((r) => r.claims[0] === "a")).toBe(true);
 		expect(read).toHaveBeenCalledTimes(1);
 	});

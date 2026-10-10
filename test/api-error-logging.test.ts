@@ -11,7 +11,13 @@ describe("API error logging", () => {
 	it("logs the underlying unexpected error object while returning a 500", async () => {
 		const failure = new Error("listing failed");
 		const errorLog = vi.spyOn(console, "error").mockImplementation(() => {});
-		const env = { ARTIFACTS: { list: async () => { throw failure; } } };
+		const env = {
+			ARTIFACTS: {
+				list: async () => {
+					throw failure;
+				},
+			},
+		};
 
 		const response = await worker.fetch(new Request("https://githive.test/repos"), env as never, {} as never);
 

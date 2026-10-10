@@ -1,8 +1,7 @@
 import { type Remote, Workspace } from "./git";
 
-// A new repo's first commit: a README, a .gitignore for its toolchain, a
-// license. Without a first commit a repo has no branch, so GitHive can't start
-// on it and agents have nothing to branch from.
+// A new repo's first commit: a README, a .gitignore for its toolchain, and a license. A repo with no commit has
+// no branch, so agents would have nothing to branch from.
 
 export type GitignoreTemplate = "node" | "python" | "go" | "rust";
 export type LicenseTemplate = "mit";
@@ -96,12 +95,14 @@ const fail = (message: string): never => {
 	throw new Error(`[400] ${message}`);
 };
 
-/** The init options a request asked for, checked. */
+/** Validates the init options a request asked for. */
 export function parseInit(value: unknown): InitOptions {
 	if (value === undefined || value === null) return {};
-	if (typeof value !== "object" || Array.isArray(value)) return fail("init is {readme, description, gitignore, license}");
+	if (typeof value !== "object" || Array.isArray(value))
+		return fail("init is {readme, description, gitignore, license}");
 	const v = value as Record<string, unknown>;
-	if (v.gitignore !== undefined && v.gitignore !== null && !(String(v.gitignore) in GITIGNORE)) fail(`gitignore is one of ${Object.keys(GITIGNORE).join(", ")}`);
+	if (v.gitignore !== undefined && v.gitignore !== null && !(String(v.gitignore) in GITIGNORE))
+		fail(`gitignore is one of ${Object.keys(GITIGNORE).join(", ")}`);
 	if (v.license !== undefined && v.license !== null && v.license !== "mit") fail("license is mit");
 	const description = typeof v.description === "string" ? v.description.trim().slice(0, 300) : "";
 	return {
@@ -113,16 +114,23 @@ export function parseInit(value: unknown): InitOptions {
 }
 
 /** The first commit's files, or none when nothing was asked for. */
-export function initialFiles(input: { fullName: string; holder: string; year: number } & InitOptions): Record<string, string> {
+export function initialFiles(
+	input: { fullName: string; holder: string; year: number } & InitOptions,
+): Record<string, string> {
 	const files: Record<string, string> = {};
-	if (input.readme) files["README.md"] = `# ${input.fullName.split("/").pop()}\n${input.description ? `\n${input.description}\n` : ""}`;
+	if (input.readme)
+		files["README.md"] = `# ${input.fullName.split("/").pop()}\n${input.description ? `\n${input.description}\n` : ""}`;
 	if (input.gitignore) files[".gitignore"] = GITIGNORE[input.gitignore];
 	if (input.license === "mit") files.LICENSE = mit(input.year, input.holder);
 	return files;
 }
 
 /** Write the first commit to a new, empty repo's main branch. */
-export async function writeFirstCommit(remote: Remote, files: Record<string, string>, author: { name: string; email: string }) {
+export async function writeFirstCommit(
+	remote: Remote,
+	files: Record<string, string>,
+	author: { name: string; email: string },
+) {
 	const ws = await Workspace.init(remote, "main");
 	await ws.write(files);
 	const oid = await ws.commit(`Start ${Object.keys(files).join(", ")}`, author);

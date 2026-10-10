@@ -13,28 +13,34 @@ export const BOT = { name: "GitHive", email: "bot@githive.invalid" };
 export interface Remote {
 	url: string;
 	token: string;
-	/** The user git authenticates as with the token: any for Artifacts, x-access-token for a GitHub App's. */
+	/** Username sent with the token. Artifacts accepts any; GitHub App tokens need x-access-token. */
 	user?: string;
 }
 
-// Artifacts tokens look like art_v1_<secret>?expires=<unix>; Git auth wants only the secret.
+/** Whether a ref listing failed only because the repo is empty and has no HEAD yet. */
+export const isEmptyRepo = (err: unknown) =>
+	(err as { code?: string })?.code === "NotFoundError" && /HEAD/.test(String((err as Error)?.message));
 
-/** Whether a ref listing failed only because the repo is empty (no HEAD yet): it then has no refs. */
-export const isEmptyRepo = (err: unknown) => (err as { code?: string })?.code === "NotFoundError" && /HEAD/.test(String((err as Error)?.message));
-
-/**
- * The repo's default branch: where its HEAD points (one request), or null for
- * an empty repo. A project's branch is whatever this is (main, master, ...).
- */
+/** The branch the repo's HEAD points to, or null for an empty repo. This is the project's branch. */
 export async function defaultBranch(remote: Remote): Promise<string | null> {
-	const refs = await retryTransient(() => git.listServerRefs({ http, url: remote.url, prefix: "HEAD", symrefs: true, ...gitAuth(remote) })).catch((err) => (isEmptyRepo(err) ? [] : Promise.reject(err)));
+	const refs = await retryTransient(() =>
+		git.listServerRefs({ http, url: remote.url, prefix: "HEAD", symrefs: true, ...gitAuth(remote) }),
+	).catch((err) => (isEmptyRepo(err) ? [] : Promise.reject(err)));
 	const target = refs.find((r) => r.ref === "HEAD")?.target;
 	return target?.startsWith("refs/heads/") ? target.slice("refs/heads/".length) : null;
 }
 
-/** A branch's head on a remote, without cloning (one ls-remote), or null when it doesn't exist. */
+/** A branch's head on a remote without cloning, or null when the branch doesn't exist. */
 export async function branchHead(remote: Remote, branch: string): Promise<string | null> {
-	const refs = await retryTransient(() => git.listServerRefs({ http, url: remote.url, protocolVersion: 1, prefix: `refs/heads/${branch}`, ...gitAuth(remote) }));
+	const refs = await retryTransient(() =>
+		git.listServerRefs({
+			http,
+			url: remote.url,
+			protocolVersion: 1,
+			prefix: `refs/heads/${branch}`,
+			...gitAuth(remote),
+		}),
+	);
 	return refs.find((r) => r.ref === `refs/heads/${branch}`)?.oid ?? null;
 }
 
@@ -45,31 +51,28 @@ export interface ChangedFileText {
 	after: string | null;
 }
 
-/** Commits of history a workspace starts with; it fetches more only when Git needs older commits. */
+/** Commits of history a workspace starts with. It fetches more only when Git needs older commits. */
 export const SHALLOW_DEPTH = 64;
-/** Past this depth a deepening fetch is asking for all of history anyway. */
+/** Deep enough to mean all of history. */
 const FULL_DEPTH = 1 << 20;
 
 /**
- * How many calls in this isolate work in a workspace at once: each holds its
- * copy of the project and what it fetched, about 3.5 MB of Express's (0 to 9
- * MB), until it ends. An isolate has 128 MB for all its requests, and at 200
- * agents enough merges and checks at once in one went past it ("Worker
- * exceeded memory limit"), failing every request in it. The rest wait their turn.
+ * Each workspace holds a copy of the project in memory, and an isolate shares
+ * 128 MB across all its requests. Going over fails every request in the isolate,
+ * so only this many work at once and the rest wait their turn.
  */
 const WORKSPACES_AT_ONCE = 6;
-/** How often a call waiting for its turn looks again. */
 const WORKSPACE_TURN_POLL_MS = 50;
 let inWorkspaces = 0;
 
 /**
- * Do `work`, which uses a workspace, in turn: at most WORKSPACES_AT_ONCE at
- * once in this isolate. A call waiting looks again on a timer: waiting on a
- * promise another request resolves, it had nothing of its own pending, and
- * the runtime cancelled it as hung (12 checks and merges of a 200-agent run).
+ * Run `work` once fewer than WORKSPACES_AT_ONCE workspaces are in use. Waiting
+ * polls on a timer: a request that only awaits a promise another request
+ * resolves has nothing of its own pending, and the runtime cancels it as hung.
  */
 export async function inWorkspaceTurn<T>(work: () => Promise<T>): Promise<T> {
-	while (inWorkspaces >= WORKSPACES_AT_ONCE) await new Promise((resolve) => setTimeout(resolve, WORKSPACE_TURN_POLL_MS * (0.5 + Math.random())));
+	while (inWorkspaces >= WORKSPACES_AT_ONCE)
+		await new Promise((resolve) => setTimeout(resolve, WORKSPACE_TURN_POLL_MS * (0.5 + Math.random())));
 	inWorkspaces++;
 	try {
 		return await work();
@@ -78,31 +81,25 @@ export async function inWorkspaceTurn<T>(work: () => Promise<T>): Promise<T> {
 	}
 }
 
-/** Workspaces kept for the isolate by `Workspace.at`, by origin and branch, the most recently used last. */
+/** Workspaces reused by `Workspace.at`, keyed by origin and branch, most recently used last. */
 const kept = new Map<string, { head: string; ws: Workspace }>();
 const KEPT_WORKSPACES = 4;
 
 /**
- * A repo in memory. It starts shallow, the last SHALLOW_DEPTH commits of each
- * branch it fetches, since a whole project's history may not fit (a Durable
- * Object has 128 MB). When an operation needs an older commit (the merge base
- * of a change that branched long ago, say), every branch fetched is deepened,
- * four times deeper each round, until Git has it.
+ * A repo in memory. It starts shallow because a whole project's history may not
+ * fit in 128 MB. When an operation needs an older commit, such as the merge base
+ * of a long-lived change, every fetched branch is deepened until Git has it.
  */
 export class Workspace {
-	/** What has been fetched, to deepen: remote name, URL and credentials, and branch. */
+	/** What has been fetched, so it can be fetched again deeper. */
 	private readonly sources: { remote: string; origin: Remote; ref: string }[] = [];
-	/**
-	 * isomorphic-git's cache for this repo's reads: without one, every read
-	 * loads the packfile again (reading 200 merges took 22 s, and reads at once
-	 * held a copy each).
-	 */
+	/** isomorphic-git's read cache. Without it every read loads the packfile again. */
 	private readonly cache = {};
 
 	private constructor(
 		readonly fs: MemoryFS,
 		readonly origin: Remote,
-		/** The branch cloned (the project's branch, say main or master): head, merge and push default to it. */
+		/** The project's branch. head, merge and push default to it. */
 		readonly branch: string,
 		private depth: number,
 	) {}
@@ -116,10 +113,18 @@ export class Workspace {
 
 	static async clone(origin: Remote, branch: string, { depth = SHALLOW_DEPTH }: { depth?: number } = {}) {
 		return retryTransient(async () => {
-			// A failed clone may have populated part of the object database, refs, or
-			// worktree. Each attempt must therefore begin with an entirely fresh FS.
+			// A failed clone can leave partial objects or refs behind, so each attempt starts fresh.
 			const fs = new MemoryFS();
-			await git.clone({ fs, http, dir: DIR, url: origin.url, ref: branch, singleBranch: true, depth, ...gitAuth(origin) });
+			await git.clone({
+				fs,
+				http,
+				dir: DIR,
+				url: origin.url,
+				ref: branch,
+				singleBranch: true,
+				depth,
+				...gitAuth(origin),
+			});
 			const ws = new Workspace(fs, origin, branch, depth);
 			ws.sources.push({ remote: "origin", origin, ref: branch });
 			return ws;
@@ -127,12 +132,9 @@ export class Workspace {
 	}
 
 	/**
-	 * A workspace with `branch` at `head`, for reading (a check, say): copied
-	 * from one kept for the isolate when the branch hasn't moved, brought up
-	 * to date with one fetch when it has, cloned only the first time. Each
-	 * caller gets its own copy, so what one fetches the others never see. The
-	 * branch may have moved again since `head` was read: it is then wherever
-	 * the fetch found it.
+	 * A read-only workspace with `branch` at `head`, such as for a check. It reuses a
+	 * cached workspace when it can, fetching only what changed, and gives each caller
+	 * its own copy. If the branch moved after `head` was read, it holds the newer head.
 	 */
 	static async at(origin: Remote, branch: string, head: string) {
 		const key = `${origin.url}|${branch}`;
@@ -141,9 +143,20 @@ export class Workspace {
 		let ws: Workspace;
 		if (hit) {
 			ws = hit.ws.copy(origin);
-			const result = await retryTransient(() => git.fetch({ fs: ws.fs, http, dir: DIR, remote: "origin", ref: branch, singleBranch: true, depth: ws.depth, ...gitAuth(origin) }));
+			const result = await retryTransient(() =>
+				git.fetch({
+					fs: ws.fs,
+					http,
+					dir: DIR,
+					remote: "origin",
+					ref: branch,
+					singleBranch: true,
+					depth: ws.depth,
+					...gitAuth(origin),
+				}),
+			);
 			if (!result.fetchHead) throw new Error(`fetch of origin/${branch} returned no head`);
-			// The worktree stays where it was: reading needs the branch, not the files.
+			// The worktree is left as it was. Reading needs the branch, not the files.
 			await git.writeRef({ fs: ws.fs, dir: DIR, ref: `refs/heads/${branch}`, value: result.fetchHead, force: true });
 		} else ws = await Workspace.clone(origin, branch);
 		kept.delete(key);
@@ -159,16 +172,26 @@ export class Workspace {
 		return copy;
 	}
 
-	/** Fetch every branch fetched so far four times deeper. Returns false once history is whole. */
+	/** Fetch every known branch four times deeper. Returns false once history is complete. */
 	private async deepen() {
 		if (this.depth >= FULL_DEPTH) return false;
 		this.depth = Math.min(this.depth * 4, FULL_DEPTH);
 		for (const source of this.sources)
-			await retryTransient(() => git.fetch({ fs: this.fs, http, dir: DIR, remote: source.remote, ref: source.ref, singleBranch: true, depth: this.depth, ...gitAuth(source.origin) }));
+			await retryTransient(() =>
+				git.fetch({
+					fs: this.fs,
+					http,
+					dir: DIR,
+					remote: source.remote,
+					ref: source.ref,
+					singleBranch: true,
+					depth: this.depth,
+					...gitAuth(source.origin),
+				}),
+			);
 		return true;
 	}
 
-	/** Make sure a commit is here, deepening history until it is. */
 	async ensureCommit(oid: string) {
 		for (;;) {
 			try {
@@ -190,15 +213,26 @@ export class Workspace {
 		return git.commit({ fs: this.fs, dir: DIR, message, author });
 	}
 
-	/** Make branch `name` at this workspace's branch head, and push it (one ref, no new objects). */
+	/** Create branch `name` at the current head and push it. */
 	async pushNewBranch(name: string) {
 		await git.branch({ fs: this.fs, dir: DIR, ref: name, object: await this.head() });
 		await this.push(name);
 	}
 
-	/** Push local ref `from` (a branch fetched, say) to `to` on `remote`, replacing what's there. */
+	/** Force-push local ref `from` to `to` on `remote`. */
 	pushAs(from: string, to: string, remote: Remote) {
-		return retryTransient(() => git.push({ fs: this.fs, http, dir: DIR, url: remote.url, ref: from, remoteRef: to, force: true, ...gitAuth(remote) }));
+		return retryTransient(() =>
+			git.push({
+				fs: this.fs,
+				http,
+				dir: DIR,
+				url: remote.url,
+				ref: from,
+				remoteRef: to,
+				force: true,
+				...gitAuth(remote),
+			}),
+		);
 	}
 
 	push(ref = this.branch, remote: Remote = this.origin) {
@@ -208,16 +242,18 @@ export class Workspace {
 	/** Fetch `ref` from another repo into refs/remotes/<name>/<ref>; returns its commit. */
 	async fetch(name: string, remote: Remote, ref = this.branch) {
 		await git.addRemote({ fs: this.fs, dir: DIR, remote: name, url: remote.url, force: true });
-		const result = await retryTransient(() => git.fetch({
-			fs: this.fs,
-			http,
-			dir: DIR,
-			remote: name,
-			ref,
-			singleBranch: true,
-			depth: this.depth,
-			...gitAuth(remote),
-		}));
+		const result = await retryTransient(() =>
+			git.fetch({
+				fs: this.fs,
+				http,
+				dir: DIR,
+				remote: name,
+				ref,
+				singleBranch: true,
+				depth: this.depth,
+				...gitAuth(remote),
+			}),
+		);
 		if (!result.fetchHead) throw new Error(`fetch of ${name}/${ref} returned no head`);
 		this.sources.push({ remote: name, origin: remote, ref });
 		return result.fetchHead;
@@ -227,13 +263,15 @@ export class Workspace {
 		return git.resolveRef({ fs: this.fs, dir: DIR, ref });
 	}
 
-	/** The best common ancestor of two commits, deepening history until it shows. */
+	/** The best common ancestor of two commits, deepening history until it is found. */
 	async mergeBase(a: string, b: string) {
 		for (;;) {
-			const [oid] = await git.findMergeBase({ fs: this.fs, dir: DIR, oids: [await this.oid(a), await this.oid(b)], cache: this.cache }).catch((err) => {
-				if (err instanceof git.Errors.NotFoundError) return [];
-				throw err;
-			});
+			const [oid] = await git
+				.findMergeBase({ fs: this.fs, dir: DIR, oids: [await this.oid(a), await this.oid(b)], cache: this.cache })
+				.catch((err) => {
+					if (err instanceof git.Errors.NotFoundError) return [];
+					throw err;
+				});
 			if (oid) return oid as string;
 			if (!(await this.deepen())) throw new Error(`no common ancestor for ${a} and ${b}`);
 		}
@@ -245,10 +283,19 @@ export class Workspace {
 
 	/** Test-merge two refs without touching any branch. */
 	async tryMerge(ours: string, theirs: string): Promise<MergeOutcome> {
-		// A merge needs the commits' common ancestor here.
+		// Fetches the merge base if history is too shallow.
 		await this.mergeBase(ours, theirs);
 		try {
-			await git.merge({ fs: this.fs, dir: DIR, ours, theirs, dryRun: true, abortOnConflict: true, author: BOT, cache: this.cache });
+			await git.merge({
+				fs: this.fs,
+				dir: DIR,
+				ours,
+				theirs,
+				dryRun: true,
+				abortOnConflict: true,
+				author: BOT,
+				cache: this.cache,
+			});
 			return { clean: true };
 		} catch (err) {
 			if (err instanceof git.Errors.MergeConflictError) return { clean: false, files: err.data.filepaths };
@@ -259,12 +306,21 @@ export class Workspace {
 	/** Merge `theirs` into the local branch. Throws MergeConflictError on conflict. */
 	async merge(theirs: string, message: string) {
 		await this.mergeBase(this.branch, theirs);
-		return git.merge({ fs: this.fs, dir: DIR, ours: this.branch, theirs, message, author: BOT, abortOnConflict: true, cache: this.cache });
+		return git.merge({
+			fs: this.fs,
+			dir: DIR,
+			ours: this.branch,
+			theirs,
+			message,
+			author: BOT,
+			abortOnConflict: true,
+			cache: this.cache,
+		});
 	}
 
 	/** Paths whose content differs between two commits. */
 	async changedPaths(from: string, to: string) {
-		// One after the other: each may deepen history.
+		// Sequential because each may deepen history.
 		await this.ensureCommit(await this.oid(from));
 		await this.ensureCommit(await this.oid(to));
 		const changed: string[] = [];
@@ -276,11 +332,11 @@ export class Workspace {
 			map: async (path, [a, b]) => {
 				if (path === ".") return true;
 				const [typeA, typeB] = [await a?.type(), await b?.type()];
-				// A tree/blob collision is both a changed file and a directory to
-				// descend into, so keep the blob path and still visit descendants.
+				// A file replaced by a directory, or the reverse, is a changed path whose
+				// descendants still need visiting.
 				if (typeA === "tree" || typeB === "tree") {
 					if ((typeA === "blob" || typeB === "blob") && typeA !== typeB) changed.push(path);
-					// The same folder on both sides holds the same files: nothing in it changed, so it isn't walked.
+					// Identical trees need no walk.
 					else if (typeA === typeB && (await a?.oid()) === (await b?.oid())) return null;
 					return true;
 				}
@@ -293,7 +349,6 @@ export class Workspace {
 
 	/** Obtain UTF-8 old/new text for every changed file between two commits. */
 	async changedFiles(from: string, to: string): Promise<ChangedFileText[]> {
-		// One after the other: each may deepen history.
 		await this.ensureCommit(await this.oid(from));
 		await this.ensureCommit(await this.oid(to));
 		const changed: ChangedFileText[] = [];
@@ -313,8 +368,7 @@ export class Workspace {
 				if (path === ".") return true;
 				const [typeA, typeB] = [await a?.type(), await b?.type()];
 				if (typeA === "tree" || typeB === "tree") {
-					// Report the file on the blob side of a file/directory replacement,
-					// while returning true lets the walker include all tree descendants.
+					// Report the file side of a file/directory swap and still visit the directory.
 					if ((typeA === "blob" || typeB === "blob") && typeA !== typeB) {
 						changed.push({ path, before: await textAt(a, typeA), after: await textAt(b, typeB) });
 					}

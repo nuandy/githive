@@ -27,7 +27,8 @@ afterEach(async () => {
 const as = (agentKey?: string, hosted = false): ToolContext => ({
 	remote: async () => ({ url: server.url, token: "unused" }),
 	head: async () => server.git("rev-parse", "main").trim(),
-	stamper: (agent?: string) => makeStamper(privateKey, `service:${hosted ? "githive-builder" : "shared"}${agent ? `/${agent}` : ""}`),
+	stamper: (agent?: string) =>
+		makeStamper(privateKey, `service:${hosted ? "githive-builder" : "shared"}${agent ? `/${agent}` : ""}`),
 	...(agentKey ? { agentKey } : {}),
 	...(hosted ? { hosted } : {}),
 });
@@ -68,13 +69,17 @@ describe("agent identity", () => {
 	it("refuses a registered name without its key, and a key acting as another name", async () => {
 		const { key } = (await call(as(), "register", { agent: "agent-a" })) as { key: string };
 		expect(await call(as(), "claim", claimA)).toEqual({ error: "agent-a is registered: call with its agent key" });
-		expect(await call(as(key), "claim", { ...claimA, agent: "agent-c" })).toEqual({ error: "you act as agent-a; you can't act as agent-c" });
+		expect(await call(as(key), "claim", { ...claimA, agent: "agent-c" })).toEqual({
+			error: "you act as agent-a; you can't act as agent-c",
+		});
 		expect(await call(as("agent-a.forged"), "claim", claimA)).toEqual({ error: "unknown agent key" });
 	});
 
 	it("never gives a registered name to anyone else; its holder can rotate the key", async () => {
 		const first = (await call(as(), "register", { agent: "agent-a" })) as { key: string };
-		expect(await call(as(), "register", { agent: "agent-a" })).toEqual({ error: "agent-a is registered: call with its agent key to rotate it" });
+		expect(await call(as(), "register", { agent: "agent-a" })).toEqual({
+			error: "agent-a is registered: call with its agent key to rotate it",
+		});
 		const rotated = (await call(as(first.key), "register", { agent: "agent-a" })) as { key: string };
 		expect(rotated.key).not.toBe(first.key);
 		expect(await call(as(first.key), "claim", claimA)).toEqual({ error: "unknown agent key" });
@@ -82,18 +87,28 @@ describe("agent identity", () => {
 	});
 
 	it("registers many names in one call, each with its own key, and none already registered", async () => {
-		const { agents } = (await call(as(), "register", { agents: ["agent-a", "agent-b", "agent-c"] })) as { agents: { agent: string; key: string }[] };
+		const { agents } = (await call(as(), "register", { agents: ["agent-a", "agent-b", "agent-c"] })) as {
+			agents: { agent: string; key: string }[];
+		};
 		expect(agents.map((a) => a.agent)).toEqual(["agent-a", "agent-b", "agent-c"]);
 		expect(new Set(agents.map((a) => a.key)).size).toBe(3);
 		// Each key acts as its own name only.
 		await call(as(agents[1].key), "claim", { change: "b-1", agent: "agent-b", paths: ["src/b/"], intent: "b" });
 		expect(((await call(as(), "claims", {})) as { by: string }[]).map((c) => c.by)).toEqual(["service:shared/agent-b"]);
-		expect(await call(as(agents[0].key), "claim", { change: "c-1", agent: "agent-c", paths: ["src/c/"], intent: "c" })).toMatchObject({ error: expect.any(String) });
+		expect(
+			await call(as(agents[0].key), "claim", { change: "c-1", agent: "agent-c", paths: ["src/c/"], intent: "c" }),
+		).toMatchObject({ error: expect.any(String) });
 		// A list with a registered name in it registers none of it.
-		expect(await call(as(), "register", { agents: ["agent-d", "agent-b"] })).toEqual({ error: "already registered: agent-b (register each alone, with its agent key, to rotate it)" });
+		expect(await call(as(), "register", { agents: ["agent-d", "agent-b"] })).toEqual({
+			error: "already registered: agent-b (register each alone, with its agent key, to rotate it)",
+		});
 		expect(await call(as(), "register", { agent: "agent-d" })).toMatchObject({ agent: "agent-d" });
-		expect(await call(as(), "register", { agents: ["x", "x"] })).toEqual({ error: "agents names a name more than once" });
-		expect(await call(as(), "register", { agents: ["githive-builder"] })).toEqual({ error: "githive- names are GitHive's hosted agents'" });
+		expect(await call(as(), "register", { agents: ["x", "x"] })).toEqual({
+			error: "agents names a name more than once",
+		});
+		expect(await call(as(), "register", { agents: ["githive-builder"] })).toEqual({
+			error: "githive- names are GitHive's hosted agents'",
+		});
 	});
 
 	it("adds many pieces of work in one call, leaving those already in the backlog as they are", async () => {
@@ -102,17 +117,41 @@ describe("agent identity", () => {
 			{ title: "Add the greeting", intent: "a greeting module", paths: ["src/greet/"] },
 			{ id: "bye", title: "Add the farewell", intent: "a farewell module", paths: ["src/bye/"] },
 		];
-		expect(await call(as(key), "add_work", { agent: "agent-a", items })).toEqual({ ok: true, added: ["add-the-greeting", "bye"] });
-		expect(await call(as(key), "add_work", { agent: "agent-a", items: [...items, { id: "wave", title: "Wave", intent: "a wave" }] })).toEqual({ ok: true, added: ["wave"], already: ["add-the-greeting", "bye"] });
-		expect(await call(as(key), "add_work", { agent: "agent-a", items })).toEqual({ ok: false, added: [], already: ["add-the-greeting", "bye"] });
-		expect(await call(as(key), "add_work", { agent: "agent-a", items: [items[1], items[1]] })).toEqual({ error: "each piece needs its own id: bye more than once" });
-		expect(((await call(as(key), "backlog", { agent: "agent-a" })) as { open: { id: string }[] }).open.map((w) => w.id).sort()).toEqual(["add-the-greeting", "bye", "wave"]);
+		expect(await call(as(key), "add_work", { agent: "agent-a", items })).toEqual({
+			ok: true,
+			added: ["add-the-greeting", "bye"],
+		});
+		expect(
+			await call(as(key), "add_work", {
+				agent: "agent-a",
+				items: [...items, { id: "wave", title: "Wave", intent: "a wave" }],
+			}),
+		).toEqual({ ok: true, added: ["wave"], already: ["add-the-greeting", "bye"] });
+		expect(await call(as(key), "add_work", { agent: "agent-a", items })).toEqual({
+			ok: false,
+			added: [],
+			already: ["add-the-greeting", "bye"],
+		});
+		expect(await call(as(key), "add_work", { agent: "agent-a", items: [items[1], items[1]] })).toEqual({
+			error: "each piece needs its own id: bye more than once",
+		});
+		expect(
+			((await call(as(key), "backlog", { agent: "agent-a" })) as { open: { id: string }[] }).open
+				.map((w) => w.id)
+				.sort(),
+		).toEqual(["add-the-greeting", "bye", "wave"]);
 	});
 
 	it("keeps githive- names for GitHive's hosted agents", async () => {
-		expect(await call(as(), "register", { agent: "githive-builder" })).toEqual({ error: "githive- names are GitHive's hosted agents'" });
-		expect(await call(as(), "claim", { ...claimA, agent: "githive-builder" })).toEqual({ error: "githive- names are GitHive's hosted agents'" });
-		expect(await call(as(undefined, true), "claim", { ...claimA, agent: "githive-builder" })).toMatchObject({ ok: true });
+		expect(await call(as(), "register", { agent: "githive-builder" })).toEqual({
+			error: "githive- names are GitHive's hosted agents'",
+		});
+		expect(await call(as(), "claim", { ...claimA, agent: "githive-builder" })).toEqual({
+			error: "githive- names are GitHive's hosted agents'",
+		});
+		expect(await call(as(undefined, true), "claim", { ...claimA, agent: "githive-builder" })).toMatchObject({
+			ok: true,
+		});
 	});
 
 	it("lets unregistered names act as before, attributed to the Access identity alone", async () => {
@@ -142,19 +181,31 @@ describe("signed-in agents", () => {
 	});
 
 	it("act as their verified name with no key, may leave the agent argument out, and are stamped under their owner", async () => {
-		expect(await call(signedIn("ada/builder"), "claim", { change: "a-1", paths: ["src/a/"], intent: "a" })).toMatchObject({ ok: true });
+		expect(
+			await call(signedIn("ada/builder"), "claim", { change: "a-1", paths: ["src/a/"], intent: "a" }),
+		).toMatchObject({ ok: true });
 		const claims = (await call(as(), "claims", {})) as { change: string; agent: string; by: string }[];
-		expect(claims.map((c) => [c.change, c.agent, c.by])).toEqual([["a-1", "ada/builder", "person:ada000000000/ada/builder"]]);
+		expect(claims.map((c) => [c.change, c.agent, c.by])).toEqual([
+			["a-1", "ada/builder", "person:ada000000000/ada/builder"],
+		]);
 	});
 
 	it("can't act as another name, and nobody else can act as theirs", async () => {
-		expect(await call(signedIn("ada/builder"), "claim", { ...claimA, agent: "agent-a" })).toEqual({ error: "you act as ada/builder; you can't act as agent-a" });
-		expect(await call(as(), "claim", { ...claimA, agent: "ada/builder" })).toEqual({ error: "ada/builder is a signed-in agent's name: sign in to GitHive as it to act as it" });
+		expect(await call(signedIn("ada/builder"), "claim", { ...claimA, agent: "agent-a" })).toEqual({
+			error: "you act as ada/builder; you can't act as agent-a",
+		});
+		expect(await call(as(), "claim", { ...claimA, agent: "ada/builder" })).toEqual({
+			error: "ada/builder is a signed-in agent's name: sign in to GitHive as it to act as it",
+		});
 	});
 
 	it("need no register, and nobody registers a name with a slash", async () => {
-		expect(await call(signedIn("ada/builder"), "register", { agent: "x" })).toEqual({ error: "you're signed in as ada/builder: what you write is already attributed to you, with no key" });
-		expect(await call(as(), "register", { agent: "ada/builder" })).toEqual({ error: "names with \"/\" are signed-in agents' (<handle>/<agent>); register a name without one" });
+		expect(await call(signedIn("ada/builder"), "register", { agent: "x" })).toEqual({
+			error: "you're signed in as ada/builder: what you write is already attributed to you, with no key",
+		});
+		expect(await call(as(), "register", { agent: "ada/builder" })).toEqual({
+			error: 'names with "/" are signed-in agents\' (<handle>/<agent>); register a name without one',
+		});
 	});
 });
 
@@ -171,9 +222,13 @@ describe("GitHive's hosted agents", () => {
 
 	it("are only for the people an admin lists: build and request_review refuse anyone else", async () => {
 		const refusal = "GitHive's hosted agents are by invitation: ask an admin to add you";
-		expect(await call(listed(false), "build", { intent: "Add stats", paths: ["src/stats/"] })).toEqual({ error: refusal });
+		expect(await call(listed(false), "build", { intent: "Add stats", paths: ["src/stats/"] })).toEqual({
+			error: refusal,
+		});
 		expect(await call(listed(false), "request_review", { change: "a-1" })).toEqual({ error: refusal });
-		// On the list, they get past the gate (here: request_review finds no claim).
-		expect(await call(listed(true), "request_review", { change: "a-1" })).toEqual({ error: "a-1 holds no claim: claim the change's paths first" });
+		// On the list, they get past the gate; here request_review then finds no claim.
+		expect(await call(listed(true), "request_review", { change: "a-1" })).toEqual({
+			error: "a-1 holds no claim: claim the change's paths first",
+		});
 	});
 });

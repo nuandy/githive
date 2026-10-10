@@ -21,16 +21,40 @@ export const repoSnapshot: RepoSnapshot = {
 			by: "service:abc/agent-c",
 			head: "b1c2d3e4f5a6",
 			approval: { approved: false, approvals: 1, required: 2, vetoedBy: [] },
-			hosted: { builder: { status: "working", revisions: 1 }, reviewers: [{ role: "security", status: "done", verdict: "reject" }] },
+			hosted: {
+				builder: { status: "working", revisions: 1 },
+				reviewers: [{ role: "security", status: "done", verdict: "reject" }],
+			},
 		},
 	],
-	votes: [{ commit: "b1c2d3e4f5a6", reviewer: "rev-1", role: "tests", verdict: "approve", evidence: "suite passes", at: ago(20), by: "service:rev-1" }],
+	votes: [
+		{
+			commit: "b1c2d3e4f5a6",
+			reviewer: "rev-1",
+			role: "tests",
+			verdict: "approve",
+			evidence: "suite passes",
+			at: ago(20),
+			by: "service:rev-1",
+		},
+	],
 	audit: {
 		merges: 3,
 		open: 1,
 		violations: [
-			{ commit: "e7b6bf97aaaa", author: "agent-b", rule: "inside-another-claim", detail: "src/c/z.txt was claimed by c-1 (agent-c) at c8f1529b", resolvedBy: "ee872a30bbbb" },
-			{ commit: "41664f1dcccc", author: "agent-b-rogue", rule: "undeclared", detail: "the merge names no change or claims it checked" },
+			{
+				commit: "e7b6bf97aaaa",
+				author: "agent-b",
+				rule: "inside-another-claim",
+				detail: "src/c/z.txt was claimed by c-1 (agent-c) at c8f1529b",
+				resolvedBy: "ee872a30bbbb",
+			},
+			{
+				commit: "41664f1dcccc",
+				author: "agent-b-rogue",
+				rule: "undeclared",
+				detail: "the merge names no change or claims it checked",
+			},
 		],
 	},
 };
@@ -57,11 +81,29 @@ export function stubApi(): import("../components/RepoPage").RepoPageApi {
 export const historyFixture: import("../api").ChangeHistory = {
 	change: "c-1",
 	branch: "main",
-	claim: { change: "c-1", agent: "agent-c", paths: ["src/c/"], intent: "Rewrite the C section", since: ago(120), active: ago(5), by: "service:abc/agent-c" },
+	claim: {
+		change: "c-1",
+		agent: "agent-c",
+		paths: ["src/c/"],
+		intent: "Rewrite the C section",
+		since: ago(120),
+		active: ago(5),
+		by: "service:abc/agent-c",
+	},
 	released: [],
 	commits: [
 		{ commit: "b1c2d3e4f5a6", message: "Tighten the wording\n\nAnd fix two links.", author: "agent-c", at: ago(30) },
 		{ commit: "a0a0a0a0a0a0", message: "First draft of section C", author: "agent-c", at: ago(90) },
 	],
-	votes: [{ commit: "b1c2d3e4f5a6", reviewer: "rev-1", role: "tests", verdict: "approve", evidence: "suite passes", at: ago(20), by: "service:rev-1" }],
+	votes: [
+		{
+			commit: "b1c2d3e4f5a6",
+			reviewer: "rev-1",
+			role: "tests",
+			verdict: "approve",
+			evidence: "suite passes",
+			at: ago(20),
+			by: "service:rev-1",
+		},
+	],
 };

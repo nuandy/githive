@@ -1,9 +1,7 @@
 #!/usr/bin/env node
-// Simulate ways of lining merges up for checks, on the same stream of
-// changes, and compare what each spends on checks and how long a change
-// waits to land. Nothing here touches a repo: changes arrive at random, some
-// are bad, checks take minutes and sometimes fail for no reason, and each way
-// of queuing decides what to check, on what, and what lands.
+// Simulates ways of queuing merges for checks on the same stream of changes,
+// and compares check cost and time to land. Nothing touches a repo. Changes
+// arrive at random, some are bad, and checks take minutes and sometimes flake.
 //
 //   node scripts/queue-sim.mjs [--rate 20] [--fail 0.05] [--flaky 0.01] [--ci 10]
 //                              [--runners 8] [--hours 24] [--seeds 5]
@@ -11,41 +9,31 @@
 //                              [--retry on|off] [--lanes N]
 //
 //   --rate     changes arriving per hour
-//   --fail     chance a change is bad (its checks fail with it in, every time)
+//   --fail     chance a change is bad (checks containing it always fail)
 //   --flaky    chance a check of only good changes fails anyway
-//   --ci       minutes a check takes (each one 80-120% of that)
-//   --runners  checks that can run at once (the GitHive line ignores this:
-//              every merge checks in its own container)
-//   --hours    how long changes keep arriving; then the queues drain
-//   --seeds    runs per way, pooled (the same seeds for every way)
+//   --ci       minutes per check (each takes 80-120% of that)
+//   --runners  checks that can run at once (ignored by githive, which uses a container per merge)
+//   --hours    how long changes keep arriving before the queues drain
+//   --seeds    runs per way, pooled; every way gets the same seeds
 //   --sweep    run every way once per value of one setting
-//   --retry    check every culprit again (on) or none (off), whatever the way does
+//   --retry    recheck every culprit (on) or none (off), overriding the way
 //   --lanes    split every way into N lanes
 //
 // The ways:
-//   githive         the line GitHive used until 9 Oct (src/toolkit/line.ts, since
-//                   replaced by landing as a set): one change per place,
-//                   at most 8, each checked after everything ahead. Behind a
-//                   failure, a merge finishes its check, then joins again at
-//                   the end; failing on its 4th try in a row is its own failure.
-//   github          GitHub's merge queue: the same, but checks behind a failure
-//                   are cancelled and rebuilt in place.
-//   github-lenient  and a later group passing lands the groups ahead of it.
-//   bisect          one batch at a time (about 1/failure-rate changes), checked
-//                   whole; red, a binary search finds the first failing prefix,
-//                   lands what's before it and puts the rest back.
-//   kary            the same, searching with every runner at once.
-//   hybrid          up to 3 batches checked at once, each on the ones ahead; a
-//                   red head leaves the line to be bisected aside, and the line
-//                   goes on without it. (Binary: wider searches spend runners the
-//                   line needs, and aside, more rounds only delay the red batch.)
-//   hybrid-lanes    hybrid, with changes split into 4 lanes that can't break
-//                   each other (as if split by what they touch).
+//   githive         GitHive's former line (since replaced by set landing): one change
+//                   per place, at most 8, each checked on everything ahead. A merge
+//                   behind a failure rejoins at the end; a 4th failure in a row is its own.
+//   github          GitHub's merge queue: checks behind a failure are cancelled and rebuilt.
+//   github-lenient  github, but a later passing group lands the groups ahead of it.
+//   bisect          one batch at a time, checked whole. On failure, a binary search
+//                   finds the first failing prefix and lands what precedes it.
+//   kary            bisect, searching with every runner at once.
+//   hybrid          up to 3 batches checked at once, each on those ahead. A failing
+//                   head is bisected aside while the line continues.
+//   hybrid-lanes    hybrid, with changes split into 4 independent lanes.
 //
-// A check fails if any change in it is bad, so a change that only breaks
-// alongside another one is found the same way: the first prefix that fails.
-// The new ways check a culprit again before putting it out (a flaky failure
-// costs one more check, not a good change); GitHub's and the line don't.
+// A check fails if any change in it is bad. The new ways recheck a culprit
+// before removing it, so a flake costs one check rather than a good change.
 
 const args = process.argv.slice(2);
 const flag = (name) => (args.includes(`--${name}`) ? args[args.indexOf(`--${name}`) + 1] : undefined);
@@ -67,13 +55,40 @@ const WAYS = {
 	github: (c) => ({ batch: 1, depth: c.runners, k: 1, cancel: true, displaced: "front" }),
 	"github-lenient": (c) => ({ batch: 1, depth: c.runners, k: 1, cancel: true, displaced: "front", lenient: true }),
 	bisect: (c) => ({ batch: "adaptive", depth: 1, k: 1, cancel: true, displaced: "front", retry: true, pause: true }),
-	kary: (c) => ({ batch: "adaptive", depth: 1, k: c.runners, cancel: true, displaced: "front", retry: true, pause: true }),
-	hybrid: (c) => ({ batch: "adaptive", depth: 3, k: 1, cancel: true, displaced: "front", retry: true, pause: true, aside: true }),
-	"hybrid-lanes": (c) => ({ batch: "adaptive", depth: 3, k: 1, cancel: true, displaced: "front", retry: true, pause: true, aside: true, lanes: 4 }),
+	kary: (c) => ({
+		batch: "adaptive",
+		depth: 1,
+		k: c.runners,
+		cancel: true,
+		displaced: "front",
+		retry: true,
+		pause: true,
+	}),
+	hybrid: (c) => ({
+		batch: "adaptive",
+		depth: 3,
+		k: 1,
+		cancel: true,
+		displaced: "front",
+		retry: true,
+		pause: true,
+		aside: true,
+	}),
+	"hybrid-lanes": (c) => ({
+		batch: "adaptive",
+		depth: 3,
+		k: 1,
+		cancel: true,
+		displaced: "front",
+		retry: true,
+		pause: true,
+		aside: true,
+		lanes: 4,
+	}),
 };
 /** The biggest batch the adaptive ways make. */
 const MAX_BATCH = 64;
-/** How fast the failure rate a batch size is picked from follows what's been seen. */
+/** How quickly the estimated failure rate, which sets the batch size, tracks observed failures. */
 const LEARN = 0.05;
 
 // Seeded (mulberry32), so every way sees the same changes for a seed.
@@ -91,7 +106,7 @@ class Events {
 	push(time, fn) {
 		const h = this.heap;
 		h.push({ time, seq: this.seq++, fn });
-		for (let i = h.length - 1; i > 0; ) {
+		for (let i = h.length - 1; i > 0;) {
 			const p = (i - 1) >> 1;
 			if (!this.before(h[i], h[p])) break;
 			[h[i], h[p]] = [h[p], h[i]];
@@ -104,7 +119,7 @@ class Events {
 		const last = h.pop();
 		if (h.length) {
 			h[0] = last;
-			for (let i = 0; ; ) {
+			for (let i = 0; ;) {
 				const l = 2 * i + 1;
 				const r = l + 1;
 				let m = i;
@@ -122,7 +137,7 @@ class Events {
 	}
 }
 
-/** One run of one way: changes arrive, are checked, land or are put out. */
+/** Runs one way once: changes arrive, are checked, and land or are put out. */
 function simulate(c, way, seed) {
 	const random = seeded(seed);
 	const events = new Events();
@@ -130,7 +145,7 @@ function simulate(c, way, seed) {
 	const changes = [];
 	const lanes = Array.from({ length: way.lanes ?? 1 }, () => new Line(sim, way, c.fail));
 
-	/** Start a check of `state` for `line`, if a runner is free. */
+	/** Starts a check of `state` for `line` if a runner is free. */
 	sim.start = (line, what, state) => {
 		if (sim.free <= 0) return null;
 		sim.free--;
@@ -176,18 +191,16 @@ function simulate(c, way, seed) {
 }
 
 /**
- * A line into one branch (or one lane of it). Batches are checked in order,
- * each on the trunk with every batch ahead of it merged in first; the head
- * lands when its check passes. A red head is searched for the first failing
- * prefix: the green prefix before it lands, its last change is put out, the
- * rest go back to wait. Searched aside, the red batch leaves the line, which
- * goes on without it; once the culprit is out, the rest go back to wait (what
- * passed was checked on a trunk that has moved since).
+ * A line into one branch or lane. Each batch is checked on the trunk plus every
+ * batch ahead of it, and the head lands when its check passes. A failing head is
+ * searched for its first failing prefix. The passing prefix lands, the culprit is
+ * put out, and the rest wait again. A batch searched aside leaves the line, and
+ * its passing prefix waits again too, since the trunk has moved since its check.
  */
 class Line {
 	pending = [];
 	batches = [];
-	/** The head's search in place, while it's red: prefix `lo` passed, prefix `hi` failed. */
+	/** The failing head's search in place. Prefix `lo` passed and prefix `hi` failed. */
 	search = null;
 	/** Searches of red batches taken out of the line. */
 	aside = [];
@@ -198,10 +211,11 @@ class Line {
 	}
 
 	size() {
-		return this.way.batch === 1 ? 1 : Math.max(1, Math.min(MAX_BATCH, Math.round(1 / Math.max(this.failRate, 1 / MAX_BATCH))));
+		return this.way.batch === 1
+			? 1
+			: Math.max(1, Math.min(MAX_BATCH, Math.round(1 / Math.max(this.failRate, 1 / MAX_BATCH))));
 	}
 
-	/** What batch `i`'s check runs on: every change ahead of it, then its own. */
 	stateOf(i) {
 		return this.batches.slice(0, i + 1).flatMap((b) => b.changes);
 	}
@@ -214,7 +228,7 @@ class Line {
 		}
 	}
 
-	/** Start checks: the searches' and the head's when `urgent`, else the ones behind it. */
+	/** Starts the searches' and head's checks when `urgent`, otherwise the checks behind the head. */
 	fill(urgent) {
 		if (urgent) {
 			for (const s of this.search ? [this.search, ...this.aside] : this.aside) {
@@ -254,7 +268,7 @@ class Line {
 				this.land(b.changes);
 			}
 		}
-		// The line: a merge failing its 4th try in a row takes it as its own, whatever's ahead.
+		// In the githive way, a merge that fails `tries` times in a row counts as its own failure.
 		if (!passed && i > 0 && this.way.tries && batch.changes[0].attempt >= this.way.tries) {
 			this.batches.splice(i, 1);
 			this.putOut(batch.changes[0]);
@@ -263,7 +277,7 @@ class Line {
 		this.advance();
 	}
 
-	/** Behind a failure, the line lets a merge finish its check before it joins again, at the end. */
+	/** A merge displaced by a failure finishes its check, then rejoins at the end. */
 	orphaned(batch, passed) {
 		const [ch] = batch.changes;
 		if (passed) ch.attempt = 0;
@@ -298,7 +312,7 @@ class Line {
 		this.narrow(s);
 	}
 
-	/** The next round of a search: up to k prefixes between lo and hi, or the culprit found. */
+	/** Starts the next search round of up to k prefixes between lo and hi, or resolves the culprit. */
 	narrow(s) {
 		if (s.hi - s.lo > 1) {
 			const at = new Set();
@@ -324,9 +338,8 @@ class Line {
 	}
 
 	/**
-	 * The first `lo` changes passed: in place, they land; aside, they were
-	 * checked on a trunk that's moved since, so they go back to wait. The next
-	 * one is put out if it's the `culprit`, and the rest go back to wait.
+	 * The first `lo` changes passed. In place they land; aside they wait again
+	 * because the trunk has moved. The next change is put out if it is the culprit.
 	 */
 	resolve(s, lo, culprit) {
 		const rest = s.changes.slice(lo + (culprit ? 1 : 0));
@@ -343,7 +356,7 @@ class Line {
 		this.advance();
 	}
 
-	/** Take batches from `from` on out of the line: they were checked on what's now changed. */
+	/** Removes batches from `from` onward, whose checks ran on a state that has changed. */
 	displace(from) {
 		const back = [];
 		for (const b of this.batches.splice(from)) {
@@ -377,11 +390,20 @@ const pct = (xs, q) => {
 	const s = [...xs].sort((a, b) => a - b);
 	return s[Math.min(s.length - 1, Math.floor(q * s.length))];
 };
-const mins = (m) => (Number.isNaN(m) ? "-" : m < 60 ? `${Math.round(m)}m` : `${Math.floor(m / 60)}h${String(Math.round(m % 60)).padStart(2, "0")}`);
+const mins = (m) =>
+	Number.isNaN(m)
+		? "-"
+		: m < 60
+			? `${Math.round(m)}m`
+			: `${Math.floor(m / 60)}h${String(Math.round(m % 60)).padStart(2, "0")}`;
 
 function compare(c, names) {
 	const rows = names.map((name) => {
-		const way = { ...WAYS[name](c), ...(c.retry ? { retry: c.retry === "on" } : {}), ...(c.lanes ? { lanes: c.lanes } : {}) };
+		const way = {
+			...WAYS[name](c),
+			...(c.retry ? { retry: c.retry === "on" } : {}),
+			...(c.lanes ? { lanes: c.lanes } : {}),
+		};
 		let checks = 0;
 		let minutes = 0;
 		const all = [];
@@ -402,12 +424,26 @@ function compare(c, names) {
 			Math.round(minutes / landed.length).toString(),
 			mins(pct(wait, 0.5)),
 			mins(pct(wait, 0.95)),
-			mins(pct(bad.filter((ch) => ch.out !== undefined).map((ch) => ch.out - ch.arrived), 0.5)),
+			mins(
+				pct(
+					bad.filter((ch) => ch.out !== undefined).map((ch) => ch.out - ch.arrived),
+					0.5,
+				),
+			),
 			good.length ? `${((100 * good.filter((ch) => ch.out !== undefined).length) / good.length).toFixed(1)}%` : "-",
 			left ? `${Math.round(left / c.seeds)}` : "0",
 		];
 	});
-	const head = ["way", "checks/landed", "CI min/landed", "land p50", "land p95", "bad out p50", "good put out", "never done"];
+	const head = [
+		"way",
+		"checks/landed",
+		"CI min/landed",
+		"land p50",
+		"land p95",
+		"bad out p50",
+		"good put out",
+		"never done",
+	];
 	const widths = head.map((h, i) => Math.max(h.length, ...rows.map((r) => r[i].length)));
 	const line = (r) => r.map((v, i) => (i ? v.padStart(widths[i]) : v.padEnd(widths[i]))).join("  ");
 	console.log(line(head));

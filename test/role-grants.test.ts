@@ -10,10 +10,19 @@ import { startGitServer } from "./helpers/git-server";
 // Anyone else's verdict under that role counts as an ordinary one.
 
 const head = "h1";
-const cast = (reviewer: string, by: string | undefined, role = "review", verdict: "approve" | "reject" = "approve"): VoteRecord => ({ commit: head, reviewer, role, verdict, evidence: "ok", at: "", ...(by ? { by } : {}) });
+const cast = (
+	reviewer: string,
+	by: string | undefined,
+	role = "review",
+	verdict: "approve" | "reject" = "approve",
+): VoteRecord => ({ commit: head, reviewer, role, verdict, evidence: "ok", at: "", ...(by ? { by } : {}) });
 
 describe("who holds a role", () => {
-	const granted = { required: 1, vetoes: ["security"], grants: { security: ["security-1", "person:*", "service:sec-token"] } };
+	const granted = {
+		required: 1,
+		vetoes: ["security"],
+		grants: { security: ["security-1", "person:*", "service:sec-token"] },
+	};
 	const ungranted = { required: 1, vetoes: ["security"] };
 
 	it("by default: people and GitHive's own reviewer for the role, no agent", () => {
@@ -36,8 +45,16 @@ describe("who holds a role", () => {
 
 	it("counts a verdict under a role from someone not granted it as an ordinary one, and says so", () => {
 		const policy = { required: 1, vetoes: ["security"], grants: { security: ["security-1"] } };
-		const votes = { votes: [cast("rev-1", "service:x/rev-1", "security"), cast("rev-2", "service:x/rev-2", "security", "reject")] };
-		expect(approval(votes, head, policy)).toEqual({ approved: false, approvals: 1, vetoedBy: [], awaiting: ["security"], ungranted: ["rev-1 (security)", "rev-2 (security)"] });
+		const votes = {
+			votes: [cast("rev-1", "service:x/rev-1", "security"), cast("rev-2", "service:x/rev-2", "security", "reject")],
+		};
+		expect(approval(votes, head, policy)).toEqual({
+			approved: false,
+			approvals: 1,
+			vetoedBy: [],
+			awaiting: ["security"],
+			ungranted: ["rev-1 (security)", "rev-2 (security)"],
+		});
 		const held = { votes: [...votes.votes, cast("security-1", "service:x/security-1", "security")] };
 		expect(approval(held, head, policy)).toMatchObject({ approved: true, approvals: 2, awaiting: [] });
 	});
@@ -47,7 +64,12 @@ describe("pools of agents holding a role", () => {
 	const policy = { required: 1, vetoes: ["security"], grants: { security: ["service:sec-team/*"] } };
 
 	it("counts any agent registered under the pool's identity, voting with its key, however many there are", () => {
-		for (const n of [1, 2, 9]) expect(holdsRole(policy, "security", cast(`sec-${n}`, `service:sec-team/sec-${n}`), { by: "service:dev-team/builder" })).toBe(true);
+		for (const n of [1, 2, 9])
+			expect(
+				holdsRole(policy, "security", cast(`sec-${n}`, `service:sec-team/sec-${n}`), {
+					by: "service:dev-team/builder",
+				}),
+			).toBe(true);
 		// Not the identity itself without an agent key, nor another identity, nor a name that looks the part.
 		expect(holdsRole(policy, "security", cast("sec", "service:sec-team"))).toBe(false);
 		expect(holdsRole(policy, "security", cast("sec-1", "service:other/sec-1"))).toBe(false);
@@ -55,10 +77,19 @@ describe("pools of agents holding a role", () => {
 	});
 
 	it("never counts a pool member as the role on its own team's change", () => {
-		expect(holdsRole(policy, "security", cast("sec-1", "service:sec-team/sec-1"), { by: "service:sec-team/sec-2" })).toBe(false);
+		expect(
+			holdsRole(policy, "security", cast("sec-1", "service:sec-team/sec-1"), { by: "service:sec-team/sec-2" }),
+		).toBe(false);
 		const votes = { votes: [cast("sec-1", "service:sec-team/sec-1", "security")] };
-		expect(approval(votes, head, policy, { agent: "sec-2", by: "service:sec-team/sec-2" })).toMatchObject({ approved: false, awaiting: ["security"], ungranted: ["sec-1 (security)"] });
-		expect(approval(votes, head, policy, { agent: "builder", by: "service:dev-team/builder" })).toMatchObject({ approved: true, awaiting: [] });
+		expect(approval(votes, head, policy, { agent: "sec-2", by: "service:sec-team/sec-2" })).toMatchObject({
+			approved: false,
+			awaiting: ["security"],
+			ungranted: ["sec-1 (security)"],
+		});
+		expect(approval(votes, head, policy, { agent: "builder", by: "service:dev-team/builder" })).toMatchObject({
+			approved: true,
+			awaiting: [],
+		});
 	});
 });
 
@@ -69,8 +100,17 @@ describe("warnings about who holds a role", () => {
 			expect.stringMatching(/^security is held by sec-1 alone: its reviews wait whenever it's busy/),
 			expect.stringMatching(/^no person holds security/),
 		]);
-		expect(grantWarnings({ required: 1, vetoes: [], escalate: [{ paths: ["package.json"], vetoes: ["security"] }], grants: { security: ["service:sec-team/*"] } })).toEqual([expect.stringMatching(/^no person holds security/)]);
-		expect(grantWarnings({ required: 1, vetoes: ["security"], grants: { security: ["sec-1", "sec-2", "person:*"] } })).toEqual([]);
+		expect(
+			grantWarnings({
+				required: 1,
+				vetoes: [],
+				escalate: [{ paths: ["package.json"], vetoes: ["security"] }],
+				grants: { security: ["service:sec-team/*"] },
+			}),
+		).toEqual([expect.stringMatching(/^no person holds security/)]);
+		expect(
+			grantWarnings({ required: 1, vetoes: ["security"], grants: { security: ["sec-1", "sec-2", "person:*"] } }),
+		).toEqual([]);
 	});
 });
 
@@ -78,20 +118,51 @@ describe("granting roles through the toolkit", { timeout: 60_000 }, () => {
 	it("records grants at the start, refuses bad ones, and counts the granted agent's vote only", async () => {
 		const server = await startGitServer();
 		try {
-			const ctx: ToolContext = { remote: async () => ({ url: server.url, token: "unused" }), head: async () => server.git("rev-parse", "main").trim() };
+			const ctx: ToolContext = {
+				remote: async () => ({ url: server.url, token: "unused" }),
+				head: async () => server.git("rev-parse", "main").trim(),
+			};
 			const call = async (name: string, args: Record<string, unknown>, agentKey?: string) => {
 				try {
-					return (await callTool(name, { repo: "p", ...args }, { ...ctx, ...(agentKey ? { agentKey } : {}) })) as Record<string, unknown>;
+					return (await callTool(
+						name,
+						{ repo: "p", ...args },
+						{ ...ctx, ...(agentKey ? { agentKey } : {}) },
+					)) as Record<string, unknown>;
 				} catch (err) {
 					return { error: statusOf(err).message };
 				}
 			};
-			expect(await call("settings", { required: 1, vetoes: ["security"], grants: { security: "security-1" } })).toEqual({ error: expect.stringMatching(/grants.security is a list/) });
-			expect(await call("settings", { required: 1, vetoes: ["security"], grants: { security: ["security-1"] } })).toMatchObject({ policy: { grants: { security: ["security-1"] } }, warnings: [expect.stringMatching(/held by security-1 alone/), expect.stringMatching(/no person holds security/)] });
+			expect(await call("settings", { required: 1, vetoes: ["security"], grants: { security: "security-1" } })).toEqual(
+				{ error: expect.stringMatching(/grants.security is a list/) },
+			);
+			expect(
+				await call("settings", { required: 1, vetoes: ["security"], grants: { security: ["security-1"] } }),
+			).toMatchObject({
+				policy: { grants: { security: ["security-1"] } },
+				warnings: [
+					expect.stringMatching(/held by security-1 alone/),
+					expect.stringMatching(/no person holds security/),
+				],
+			});
 			// Nothing signs these records here, so roles go by name; a registered name needs its key.
 			const { key } = (await call("register", { agent: "security-1" })) as { key: string };
-			expect(await call("vote", { commit: head, reviewer: "security-1", role: "security", verdict: "approve", evidence: "ok" })).toEqual({ error: expect.stringMatching(/registered/) });
-			expect(await call("vote", { commit: head, reviewer: "security-1", role: "security", verdict: "approve", evidence: "ok" }, key)).toMatchObject({ ok: true });
+			expect(
+				await call("vote", {
+					commit: head,
+					reviewer: "security-1",
+					role: "security",
+					verdict: "approve",
+					evidence: "ok",
+				}),
+			).toEqual({ error: expect.stringMatching(/registered/) });
+			expect(
+				await call(
+					"vote",
+					{ commit: head, reviewer: "security-1", role: "security", verdict: "approve", evidence: "ok" },
+					key,
+				),
+			).toMatchObject({ ok: true });
 		} finally {
 			await server.close();
 		}
@@ -100,14 +171,20 @@ describe("granting roles through the toolkit", { timeout: 60_000 }, () => {
 
 describe("roles granted to a team", () => {
 	const policy = { required: 1, vetoes: ["security"], grants: { security: ["@acme/security"] } };
-	const onTeam = (reviewer: string, teams: string[]): VoteRecord => ({ ...cast(reviewer, `person:${reviewer}`, "security"), ...(teams.length ? { teams } : {}) });
+	const onTeam = (reviewer: string, teams: string[]): VoteRecord => ({
+		...cast(reviewer, `person:${reviewer}`, "security"),
+		...(teams.length ? { teams } : {}),
+	});
 
 	it("counts the vote of whoever was on the team when they voted, and nobody else's", () => {
 		expect(holdsRole(policy, "security", onTeam("ana", ["@acme/security"]))).toBe(true);
 		expect(holdsRole(policy, "security", onTeam("bob", []))).toBe(false);
 		// Another org's team of the same name is another team.
 		expect(holdsRole(policy, "security", onTeam("cy", ["@other/security"]))).toBe(false);
-		expect(approval({ votes: [onTeam("ana", ["@acme/security"])] }, head, policy)).toMatchObject({ approved: true, awaiting: [] });
+		expect(approval({ votes: [onTeam("ana", ["@acme/security"])] }, head, policy)).toMatchObject({
+			approved: true,
+			awaiting: [],
+		});
 	});
 
 	it("needs no warning: a team is people, however many", () => {
@@ -121,15 +198,31 @@ describe("team grants through the toolkit", { timeout: 60_000 }, () => {
 		const server = await startGitServer();
 		try {
 			const teams = new Map<string, string[]>([["ada/sec", ["@acme/security"]]]);
-			const as = (agent: string): ToolContext => ({ remote: async () => ({ url: server.url, token: "unused" }), head: async () => server.git("rev-parse", "main").trim(), agent, teamsOf: async () => teams.get(agent) ?? [] });
-			const call = (agent: string, name: string, args: Record<string, unknown>) => callTool(name, { repo: "p", ...args }, as(agent));
-			expect(await call("ada/sec", "settings", { required: 1, vetoes: ["security"], grants: { security: ["@acme/security"] } })).toMatchObject({ policy: { grants: { security: ["@acme/security"] } } });
+			const as = (agent: string): ToolContext => ({
+				remote: async () => ({ url: server.url, token: "unused" }),
+				head: async () => server.git("rev-parse", "main").trim(),
+				agent,
+				teamsOf: async () => teams.get(agent) ?? [],
+			});
+			const call = (agent: string, name: string, args: Record<string, unknown>) =>
+				callTool(name, { repo: "p", ...args }, as(agent));
+			expect(
+				await call("ada/sec", "settings", {
+					required: 1,
+					vetoes: ["security"],
+					grants: { security: ["@acme/security"] },
+				}),
+			).toMatchObject({ policy: { grants: { security: ["@acme/security"] } } });
 			await call("ada/sec", "vote", { commit: head, role: "security", verdict: "approve", evidence: "ok" });
 			await call("bob/sec", "vote", { commit: head, role: "security", verdict: "approve", evidence: "ok" });
 			// bob joins the team; the grant stays as it was.
 			teams.set("bob/sec", ["@acme/security"]);
 			await call("bob/sec", "vote", { commit: "h2", role: "security", verdict: "approve", evidence: "ok" });
-			const votes = (await new GitCasLog<{ votes: VoteRecord[] }>(async () => ({ url: server.url, token: "unused" }), "p", "refs/notes/githive-votes/p").read())!.commit.state.votes;
+			const votes = (await new GitCasLog<{ votes: VoteRecord[] }>(
+				async () => ({ url: server.url, token: "unused" }),
+				"p",
+				"refs/notes/githive-votes/p",
+			).read())!.commit.state.votes;
 			expect(votes.map((v) => [v.reviewer, v.commit, v.teams ?? []])).toEqual([
 				["ada/sec", head, ["@acme/security"]],
 				["bob/sec", head, []],

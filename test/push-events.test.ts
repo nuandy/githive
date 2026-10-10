@@ -12,7 +12,13 @@ const A = "a".repeat(40);
 const B = "b".repeat(40);
 const ZERO = "0".repeat(40);
 
-const event = (repoName: string, ref: string, after: string, at = "2026-10-10T12:00:00.000Z", namespace = "blueprint"): PushedEvent => ({
+const event = (
+	repoName: string,
+	ref: string,
+	after: string,
+	at = "2026-10-10T12:00:00.000Z",
+	namespace = "blueprint",
+): PushedEvent => ({
 	type: "cf.artifacts.repo.pushed",
 	source: { namespace, repoName },
 	payload: { ref, after },
@@ -21,9 +27,16 @@ const event = (repoName: string, ref: string, after: string, at = "2026-10-10T12
 
 describe("a push event's change", () => {
 	it("is a push to changes/<change> on an agent's fork, in this namespace", () => {
-		expect(changePushOf(event("fork--nuandy--web--agent--agent-7", "refs/heads/changes/fix-nav", A), "blueprint")).toEqual({
+		expect(
+			changePushOf(event("fork--nuandy--web--agent--agent-7", "refs/heads/changes/fix-nav", A), "blueprint"),
+		).toEqual({
 			projects: ["nuandy--web"],
-			push: { change: "fix-nav", fork: "fork--nuandy--web--agent--agent-7", head: A, at: Date.parse("2026-10-10T12:00:00.000Z") },
+			push: {
+				change: "fix-nav",
+				fork: "fork--nuandy--web--agent--agent-7",
+				head: A,
+				at: Date.parse("2026-10-10T12:00:00.000Z"),
+			},
 		});
 	});
 
@@ -32,7 +45,10 @@ describe("a push event's change", () => {
 	});
 
 	it("names every project a fork's name may belong to, when a name holds --agent-- twice", () => {
-		expect(changePushOf(event("fork--x--agent--agent--a", "refs/heads/changes/c", A), "blueprint")?.projects).toEqual(["x", "x--agent"]);
+		expect(changePushOf(event("fork--x--agent--agent--a", "refs/heads/changes/c", A), "blueprint")?.projects).toEqual([
+			"x",
+			"x--agent",
+		]);
 	});
 
 	it("is nothing for another namespace, a project, a seed, another branch, or a malformed event", () => {
@@ -54,8 +70,18 @@ describe("a push event's change", () => {
 
 describe("the queue consumer", () => {
 	const message = (body: unknown) => ({ body, ack: vi.fn(), retry: vi.fn() });
-	const envWith = (notePushes: (project: string, pushes: unknown[]) => Promise<void>, namespace: string | null = "blueprint") =>
-		({ ...(namespace ? { ARTIFACTS_NAMESPACE: namespace } : {}), REPO_CACHE: { getByName: (name: string) => ({ notePushes: (pushes: unknown[]) => notePushes(name.replace(/^repo:/, ""), pushes) }) } }) as unknown as Env;
+	const envWith = (
+		notePushes: (project: string, pushes: unknown[]) => Promise<void>,
+		namespace: string | null = "blueprint",
+	) =>
+		({
+			...(namespace ? { ARTIFACTS_NAMESPACE: namespace } : {}),
+			REPO_CACHE: {
+				getByName: (name: string) => ({
+					notePushes: (pushes: unknown[]) => notePushes(name.replace(/^repo:/, ""), pushes),
+				}),
+			},
+		}) as unknown as Env;
 
 	it("notes a batch's pushes with one call a project, and acks every message", async () => {
 		const calls: [string, number][] = [];
@@ -65,7 +91,10 @@ describe("the queue consumer", () => {
 			message(event("fork--q--agent--a", "refs/heads/changes/c3", A)),
 			message(event("p", "refs/heads/main", A)),
 		];
-		await notePushEvents({ messages } as unknown as MessageBatch<unknown>, envWith(async (project, pushes) => void calls.push([project, pushes.length])));
+		await notePushEvents(
+			{ messages } as unknown as MessageBatch<unknown>,
+			envWith(async (project, pushes) => void calls.push([project, pushes.length])),
+		);
 		expect(calls.sort()).toEqual([
 			["p", 2],
 			["q", 1],
@@ -74,7 +103,10 @@ describe("the queue consumer", () => {
 	});
 
 	it("has the messages a project's noting failed for delivered again, once each", async () => {
-		const messages = [message(event("fork--x--agent--agent--a", "refs/heads/changes/c", A)), message(event("fork--y--agent--a", "refs/heads/changes/d", A))];
+		const messages = [
+			message(event("fork--x--agent--agent--a", "refs/heads/changes/c", A)),
+			message(event("fork--y--agent--a", "refs/heads/changes/d", A)),
+		];
 		await notePushEvents(
 			{ messages } as unknown as MessageBatch<unknown>,
 			envWith(async (project) => {
@@ -130,7 +162,10 @@ describe("heads kept from reads and pushes", () => {
 			{ change: "unseen", agent: "a" },
 		];
 		const forkOf = vi.fn(async (agent: string) => `fork--p--agent--${agent}`);
-		expect(await headsForClaims(kept, claims, forkOf)).toEqual({ read: { head: A, at: 1 }, own: { head: A, at: 2, pushed: true } });
+		expect(await headsForClaims(kept, claims, forkOf)).toEqual({
+			read: { head: A, at: 1 },
+			own: { head: A, at: 2, pushed: true },
+		});
 		expect(forkOf).toHaveBeenCalledTimes(1);
 	});
 });

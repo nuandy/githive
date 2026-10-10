@@ -18,9 +18,7 @@
 					"by": "string",
 					"change": "string",
 					"intent": "string",
-					"paths": [
-						"string"
-					],
+					"paths": ["string"],
 					"since": "string",
 					"stamp": "string"
 				}
@@ -28,21 +26,15 @@
 			"policy": {
 				"escalate": [
 					{
-						"paths": [
-							"string"
-						],
+						"paths": ["string"],
 						"required": "number"
 					}
 				],
 				"grants": {
-					"security": [
-						"string"
-					]
+					"security": ["string"]
 				},
 				"required": "number",
-				"vetoes": [
-					"string"
-				]
+				"vetoes": ["string"]
 			},
 			"released": [
 				{
@@ -57,9 +49,7 @@
 				}
 			],
 			"stampKey": "string",
-			"verify": [
-				"string"
-			]
+			"verify": ["string"]
 		},
 		"votes": {
 			"flags": [
@@ -81,9 +71,7 @@
 					"reviewer": "string",
 					"role": "string",
 					"stamp": "string",
-					"teams": [
-						"string"
-					],
+					"teams": ["string"],
 					"verdict": "string"
 				}
 			]
@@ -95,9 +83,7 @@
 					"by": "string",
 					"id": "string",
 					"intent": "string",
-					"paths": [
-						"string"
-					],
+					"paths": ["string"],
 					"title": "string"
 				}
 			]

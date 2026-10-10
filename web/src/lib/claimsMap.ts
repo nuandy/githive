@@ -18,7 +18,7 @@ export interface ClaimHolder {
 	href: string;
 	/** 0-based index into the claim colors. */
 	color: number;
-	/** Files where it conflicts with another open change or the project's branch (none known here: claims keep no conflicts). */
+	/** Files conflicting with another open change or the project's branch. None are known, since claims keep none. */
 	conflicts: string[];
 }
 

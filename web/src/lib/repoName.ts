@@ -10,7 +10,9 @@ export interface RepoName {
 /** The owner and name of a full name; a name with no owner is a repo outside any org (_). */
 export function splitRepo(fullName: string): RepoName {
 	const slash = fullName.indexOf("/");
-	return slash < 0 ? { owner: "_", name: fullName } : { owner: fullName.slice(0, slash), name: fullName.slice(slash + 1) };
+	return slash < 0
+		? { owner: "_", name: fullName }
+		: { owner: fullName.slice(0, slash), name: fullName.slice(slash + 1) };
 }
 
 /** The repo's two URL segments, each encoded: "acme/web" → "acme/web", "a b/c" → "a%20b/c". */

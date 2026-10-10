@@ -15,7 +15,7 @@ const remote = () => ({ url: server.url, token: "unused" });
 beforeEach(async () => {
 	server = await startGitServer({ branch: "master" });
 	work = mkdtempSync(join(tmpdir(), "code-browse-"));
-	// Built by path: git over HTTP would wait on this process's own server.
+	// Built by path, because git over HTTP would wait on this process's own server.
 	const repos = join(server.git("rev-parse", "--absolute-git-dir").trim(), "..");
 	execFileSync("git", ["clone", "--quiet", join(repos, "project.git"), work]);
 	mkdirSync(join(work, "lib"));
@@ -23,7 +23,18 @@ beforeEach(async () => {
 	writeFileSync(join(work, "README.md"), "# Hello\n");
 	writeFileSync(join(work, "logo.png"), Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x00, 0x01]));
 	execFileSync("git", ["-C", work, "add", "-A"]);
-	execFileSync("git", ["-C", work, "-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "--quiet", "-m", "files"]);
+	execFileSync("git", [
+		"-C",
+		work,
+		"-c",
+		"user.name=t",
+		"-c",
+		"user.email=t@example.com",
+		"commit",
+		"--quiet",
+		"-m",
+		"files",
+	]);
 	execFileSync("git", ["-C", work, "push", "--quiet", "origin", "master"]);
 });
 afterEach(async () => {
@@ -34,8 +45,16 @@ afterEach(async () => {
 describe("browsing a repo's code", () => {
 	it("lists the files at a branch, and reads one", async () => {
 		const tree = await listTree(remote(), "master");
-		expect(tree).toEqual({ commit: server.git("rev-parse", "master").trim(), files: ["README.md", "lib/app.js", "logo.png"], truncated: false });
-		expect(await readFile(remote(), "master", "lib/app.js")).toMatchObject({ path: "lib/app.js", text: "module.exports = 1;\n", size: 20 });
+		expect(tree).toEqual({
+			commit: server.git("rev-parse", "master").trim(),
+			files: ["README.md", "lib/app.js", "logo.png"],
+			truncated: false,
+		});
+		expect(await readFile(remote(), "master", "lib/app.js")).toMatchObject({
+			path: "lib/app.js",
+			text: "module.exports = 1;\n",
+			size: 20,
+		});
 		expect(await readFile(remote(), tree.commit, "logo.png")).toMatchObject({ binary: true });
 	});
 

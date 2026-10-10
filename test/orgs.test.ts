@@ -13,7 +13,12 @@ const people: Record<string, U> = {};
 
 async function person(handle: string) {
 	await ids.invite(`${handle}@example.com`, "admin@example.com");
-	const { user } = (await ids.signIn({ provider: "github", providerId: handle, email: `${handle}@example.com`, login: handle })) as { user: U };
+	const { user } = (await ids.signIn({
+		provider: "github",
+		providerId: handle,
+		email: `${handle}@example.com`,
+		login: handle,
+	})) as { user: U };
 	await orgs.personalOrg(user);
 	await orgs.acceptInvites(user);
 	return (people[handle] = user);
@@ -38,21 +43,28 @@ describe("orgs", () => {
 		expect(await orgs.roleIn(acme.id, people.ada.id)).toBe("owner");
 		await expect(orgs.createOrg(people.bob, "acme")).rejects.toThrow(/\[409\]/);
 		await expect(orgs.createOrg(people.bob, "ada")).rejects.toThrow(/taken/);
-		for (const bad of ["fork", "a--b", "-x", "Admin", "x".repeat(40)]) await expect(orgs.createOrg(people.bob, bad)).rejects.toThrow(/\[(400|409)\]/);
+		for (const bad of ["fork", "a--b", "-x", "Admin", "x".repeat(40)])
+			await expect(orgs.createOrg(people.bob, bad)).rejects.toThrow(/\[(400|409)\]/);
 		expect(validSlug("a")).toBe(true);
 	});
 
 	it("adds a member at once by email if they've signed in, else when they first sign in, once an admin approves them", async () => {
 		const acme = await orgs.createOrg(people.ada, "acme");
 		expect(await orgs.addMember(acme, "BOB@example.com", "member", "ada")).toEqual({ added: "bob", role: "member" });
-		expect(await orgs.addMember(acme, "dan@example.com", "admin", "ada")).toEqual({ invited: "dan@example.com", role: "admin", awaitingApproval: true });
+		expect(await orgs.addMember(acme, "dan@example.com", "admin", "ada")).toEqual({
+			invited: "dan@example.com",
+			role: "admin",
+			awaitingApproval: true,
+		});
 		// An org's invitation alone doesn't let dan in: it's a request the admin sees.
 		const profile = { provider: "github" as const, providerId: "dan", email: "dan@example.com", login: "dan" };
 		expect(await ids.signIn(profile)).toEqual({ refused: "not-invited" });
 		// One request: the org's invitation, and his own try at signing in.
 		const orgInvite = { org: "acme", role: "admin", invitedBy: "ada" };
 		const tried = expect.objectContaining({ provider: "github", login: "dan", tries: 1 });
-		expect(await ids.inviteRequests()).toEqual([{ email: "dan@example.com", orgs: [orgInvite], createdAt: expect.any(String), signIn: tried }]);
+		expect(await ids.inviteRequests()).toEqual([
+			{ email: "dan@example.com", orgs: [orgInvite], createdAt: expect.any(String), signIn: tried },
+		]);
 		// Approved, he signs in and joins.
 		await ids.invite("dan@example.com", "admin");
 		expect(await ids.inviteRequests()).toEqual([]);
@@ -74,7 +86,10 @@ describe("orgs", () => {
 	it("says an invitation for someone already approved needs nothing more", async () => {
 		const acme = await orgs.createOrg(people.ada, "acme");
 		await ids.invite("fay@example.com", "admin");
-		expect(await orgs.addMember(acme, "fay@example.com", "member", "ada")).toEqual({ invited: "fay@example.com", role: "member" });
+		expect(await orgs.addMember(acme, "fay@example.com", "member", "ada")).toEqual({
+			invited: "fay@example.com",
+			role: "member",
+		});
 	});
 
 	it("never leaves an org without an owner", async () => {
@@ -180,11 +195,18 @@ describe("what a person may do in a repo", () => {
 describe("someone who signed in before orgs existed", () => {
 	it("gets their own namespace the first time it's needed, once", async () => {
 		await ids.invite("old@example.com", "admin");
-		const { user } = (await ids.signIn({ provider: "github", providerId: "old", email: "old@example.com", login: "old" })) as { user: U };
+		const { user } = (await ids.signIn({
+			provider: "github",
+			providerId: "old",
+			email: "old@example.com",
+			login: "old",
+		})) as { user: U };
 		expect(await orgs.orgsOf(user.id)).toEqual([]);
 		await orgs.personalOrg(user);
 		await orgs.personalOrg(user);
-		expect(await orgs.orgsOf(user.id)).toEqual([expect.objectContaining({ slug: "old", personal: true, role: "owner" })]);
+		expect(await orgs.orgsOf(user.id)).toEqual([
+			expect.objectContaining({ slug: "old", personal: true, role: "owner" }),
+		]);
 	});
 });
 
@@ -193,7 +215,9 @@ describe("who may use GitHive's hosted agents", () => {
 		expect(await ids.mayUseHosted(people.ada.id)).toBe(false);
 		expect(await ids.allowHosted("Ada", "admin@example.com")).toBe("ada");
 		expect(await ids.mayUseHosted(people.ada.id)).toBe(true);
-		expect(await ids.hostedUsers()).toEqual([{ handle: "ada", grantedBy: "admin@example.com", createdAt: expect.any(String) }]);
+		expect(await ids.hostedUsers()).toEqual([
+			{ handle: "ada", grantedBy: "admin@example.com", createdAt: expect.any(String) },
+		]);
 		await expect(ids.allowHosted("nobody", "admin")).rejects.toThrow(/need to have signed in/);
 		await ids.disallowHosted("ada");
 		expect(await ids.mayUseHosted(people.ada.id)).toBe(false);

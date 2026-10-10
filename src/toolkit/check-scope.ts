@@ -1,13 +1,9 @@
-// Which changes the checks are for. A change that only touches documentation
-// and other files no check reads (Markdown, docs/, licenses, images) merges
-// without running them; anything else runs them. A file under a folder that
-// tests read (test/, fixtures/, examples/...) always runs them, whatever it
-// is: Express's tests render examples/markdown/views/index.md, say.
-//
-// Pure, with no imports: merge and the audit decide with it, and the
-// dashboard shows it.
+// Which changes need the checks. A change that only touches files no check reads (Markdown, docs/, licenses,
+// images) merges without running them. A file under a folder that tests read, such as test/ or examples/, always
+// runs them; Express's tests, for example, render a Markdown file under examples/. The module has no imports so
+// the dashboard can use it too.
 
-/** What a repo's checks skip unless its settings say otherwise ([] in settings: they never skip). */
+/** Patterns the checks skip unless a repo's settings say otherwise. [] in settings means they never skip. */
 export const DEFAULT_SKIP_CHECKS = [
 	"*.md",
 	"*.mdx",
@@ -33,15 +29,20 @@ export const DEFAULT_SKIP_CHECKS = [
 /** Folders whose files tests may read: a change inside one always runs the checks. */
 export const ALWAYS_CHECKED_IN = ["test", "tests", "__tests__", "spec", "specs", "fixtures", "examples", "example"];
 
-/** A pattern's characters: a path's, and * for any run of them within a name. */
+/** A path's characters, plus * for any run of them within a name. */
 export const SKIP_PATTERN = /^[A-Za-z0-9._/*@+-]+$/;
 
-const glob = (pattern: string) => new RegExp(`^${pattern.split("*").map((p) => p.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("[^/]*")}$`);
+const glob = (pattern: string) =>
+	new RegExp(
+		`^${pattern
+			.split("*")
+			.map((p) => p.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+			.join("[^/]*")}$`,
+	);
 
 /**
- * Whether a pattern covers a file: "name/" a folder of that name anywhere, a
- * pattern with a slash otherwise a path from the top, and one without a name
- * anywhere (* for any run of characters within a name).
+ * Whether `pattern` covers `file`. "name/" matches a folder anywhere, a pattern with a slash matches a path from
+ * the top, and any other pattern matches a file name anywhere.
  */
 export function skipsFile(pattern: string, file: string): boolean {
 	const segments = file.split("/");
@@ -50,8 +51,14 @@ export function skipsFile(pattern: string, file: string): boolean {
 	return glob(pattern).test(segments.at(-1)!);
 }
 
-/** Whether a change touching `files` merges without its checks: every file skipped, and none where tests read. */
+/** Whether a change can skip its checks: every file is skipped and none is in a folder tests read. */
 export function skipsChecks(files: string[], patterns: string[] = DEFAULT_SKIP_CHECKS): boolean {
 	if (!files.length || !patterns.length) return false;
-	return files.every((file) => !file.split("/").slice(0, -1).some((dir) => ALWAYS_CHECKED_IN.includes(dir)) && patterns.some((p) => skipsFile(p, file)));
+	return files.every(
+		(file) =>
+			!file
+				.split("/")
+				.slice(0, -1)
+				.some((dir) => ALWAYS_CHECKED_IN.includes(dir)) && patterns.some((p) => skipsFile(p, file)),
+	);
 }

@@ -30,7 +30,19 @@ describe("shards", () => {
 	});
 
 	it("puts any two overlapping claims in the same shard, or in an ancestor and its descendant", () => {
-		const entries = ["src/", "src", "src/stats/", "src/stats/index.ts", "src/stats/deep/x.ts", "src/router.ts", "docs/", "docs/a.md", "README.md", "a/b/c/d.ts", "a/"];
+		const entries = [
+			"src/",
+			"src",
+			"src/stats/",
+			"src/stats/index.ts",
+			"src/stats/deep/x.ts",
+			"src/router.ts",
+			"docs/",
+			"docs/a.md",
+			"README.md",
+			"a/b/c/d.ts",
+			"a/",
+		];
 		for (const depth of [1, 2, 3])
 			for (const a of entries)
 				for (const b of entries) {

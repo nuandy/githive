@@ -14,7 +14,7 @@ export interface BranchRulesProps {
 	onSaved?(): void;
 }
 
-/** Other branches' settings, for the repo's admins: each rule names branches by pattern and changes only what it sets. */
+/** Other branches' settings, for admins. Each rule matches branches by pattern and changes only what it sets. */
 export function BranchRules({ branch, rules, save, onSaved }: BranchRulesProps) {
 	const freshKey = JSON.stringify(ruleDraftsFrom(rules));
 	const [drafts, setDrafts] = useState<RuleDraft[]>(() => JSON.parse(freshKey) as RuleDraft[]);
@@ -24,7 +24,7 @@ export function BranchRules({ branch, rules, save, onSaved }: BranchRulesProps) 
 	const [saved, setSaved] = useState(false);
 	const dirty = JSON.stringify(drafts) !== baseKey;
 
-	// Someone else changed the rules: follow them, unless this form has edits of its own.
+	// If someone else changed the rules, follow them unless this form has edits of its own.
 	const dirtyRef = useRef(dirty);
 	dirtyRef.current = dirty;
 	useEffect(() => {
@@ -67,32 +67,59 @@ export function BranchRules({ branch, rules, save, onSaved }: BranchRulesProps) 
 				</div>
 				<div className="box__body repo-settings__fields">
 					<p className="muted">
-						Settings for other branches than {branch}, by name: feature/* for every feature branch, say. A field left blank keeps the repo's setting above, and follows it when it
-						changes. The first rule that matches a branch is its rule; {branch} always has the repo's own.
+						Settings for other branches than {branch}, by name: feature/* for every feature branch, say. A field left
+						blank keeps the repo's setting above, and follows it when it changes. The first rule that matches a branch
+						is its rule; {branch} always has the repo's own.
 					</p>
 					{drafts.map((draft, index) => (
 						<fieldset key={index} className="repo-settings__rule" disabled={busy}>
 							<legend className="sr-only">Rule {index + 1}</legend>
 							<div className="repo-settings__field">
 								<label htmlFor={`rule-pattern-${index}`}>Branches</label>
-								<input id={`rule-pattern-${index}`} className="repo-settings__command" placeholder="feature/*" value={draft.pattern} onChange={(event) => edit(index, { pattern: event.target.value })} />
+								<input
+									id={`rule-pattern-${index}`}
+									className="repo-settings__command"
+									placeholder="feature/*"
+									value={draft.pattern}
+									onChange={(event) => edit(index, { pattern: event.target.value })}
+								/>
 							</div>
 							<div className="branch-rule__grid">
 								<div className="repo-settings__field">
 									<label htmlFor={`rule-required-${index}`}>Required approvals</label>
-									<input id={`rule-required-${index}`} inputMode="numeric" placeholder="the repo's" value={draft.required} onChange={(event) => edit(index, { required: event.target.value })} />
+									<input
+										id={`rule-required-${index}`}
+										inputMode="numeric"
+										placeholder="the repo's"
+										value={draft.required}
+										onChange={(event) => edit(index, { required: event.target.value })}
+									/>
 								</div>
 								<div className="repo-settings__field">
 									<label htmlFor={`rule-vetoes-${index}`}>Roles that can block</label>
-									<input id={`rule-vetoes-${index}`} placeholder="the repo's" value={draft.vetoes} onChange={(event) => edit(index, { vetoes: event.target.value })} />
+									<input
+										id={`rule-vetoes-${index}`}
+										placeholder="the repo's"
+										value={draft.vetoes}
+										onChange={(event) => edit(index, { vetoes: event.target.value })}
+									/>
 								</div>
 								<div className="repo-settings__field">
 									<label htmlFor={`rule-grants-${index}`}>Who may vote as them</label>
-									<input id={`rule-grants-${index}`} placeholder="person:* for people only" value={draft.grants} onChange={(event) => edit(index, { grants: event.target.value })} />
+									<input
+										id={`rule-grants-${index}`}
+										placeholder="person:* for people only"
+										value={draft.grants}
+										onChange={(event) => edit(index, { grants: event.target.value })}
+									/>
 								</div>
 								<div className="repo-settings__field">
 									<label htmlFor={`rule-checks-${index}`}>Checks</label>
-									<select id={`rule-checks-${index}`} value={draft.checks} onChange={(event) => edit(index, { checks: event.target.value as RuleDraft["checks"] })}>
+									<select
+										id={`rule-checks-${index}`}
+										value={draft.checks}
+										onChange={(event) => edit(index, { checks: event.target.value as RuleDraft["checks"] })}
+									>
 										<option value="repo">The repo's</option>
 										<option value="none">None</option>
 										<option value="these">These</option>
@@ -102,10 +129,19 @@ export function BranchRules({ branch, rules, save, onSaved }: BranchRulesProps) 
 							{draft.checks === "these" ? (
 								<div className="repo-settings__field">
 									<label htmlFor={`rule-verify-${index}`}>Its checks, one command a line</label>
-									<textarea id={`rule-verify-${index}`} className="repo-settings__command" value={draft.verify} onChange={(event) => edit(index, { verify: event.target.value })} />
+									<textarea
+										id={`rule-verify-${index}`}
+										className="repo-settings__command"
+										value={draft.verify}
+										onChange={(event) => edit(index, { verify: event.target.value })}
+									/>
 								</div>
 							) : null}
-							<button type="button" className="link repo-settings__remove" onClick={() => setDrafts((current) => current.filter((_, i) => i !== index))}>
+							<button
+								type="button"
+								className="link repo-settings__remove"
+								onClick={() => setDrafts((current) => current.filter((_, i) => i !== index))}
+							>
 								Remove this rule
 							</button>
 						</fieldset>

@@ -8,7 +8,8 @@ export interface TreeNode {
 	children: TreeNode[];
 }
 
-const byKindThenName = (a: TreeNode, b: TreeNode) => (a.kind === b.kind ? a.name.localeCompare(b.name) : a.kind === "dir" ? -1 : 1);
+const byKindThenName = (a: TreeNode, b: TreeNode) =>
+	a.kind === b.kind ? a.name.localeCompare(b.name) : a.kind === "dir" ? -1 : 1;
 
 /** The folder tree of a list of file paths: folders first, then files, each by name. */
 export function buildTree(files: string[]): TreeNode[] {
@@ -66,7 +67,7 @@ export function listDir(files: string[], path: string): TreeNode[] {
 	return [...entries.values()].sort(byKindThenName);
 }
 
-/** "src/stats/page.tsx" → [{name: "src", path: "src"}, {name: "stats", path: "src/stats"}, {name: "page.tsx", …}] */
+/** "src/stats/page.tsx" → [{name: "src", path: "src"}, {name: "stats", path: "src/stats"}, …] */
 export function pathCrumbs(path: string): { name: string; path: string }[] {
 	const parts = normalizePath(path).split("/").filter(Boolean);
 	return parts.map((name, i) => ({ name, path: parts.slice(0, i + 1).join("/") }));

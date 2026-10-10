@@ -3,9 +3,8 @@ import { branchHead, type Remote } from "./git";
 import { fetchCommits } from "./git-fetch";
 import { fail } from "./errors";
 
-// Browsing a repo's code for the dashboard: its files at a branch or commit,
-// and one file's text. One commit is fetched alone (no history), and the last
-// few are kept, so moving between files of the same commit costs nothing.
+// Code browsing for the dashboard: the files at a branch or commit, and one file's text. Each commit is fetched
+// without history, and the last few are cached so moving between files of one commit is free.
 
 const MAX_FILES = 5_000;
 const MAX_FILE_BYTES = 512 * 1024;
@@ -44,10 +43,12 @@ export async function listTree(remote: Remote, ref: string) {
 export async function readFile(remote: Remote, ref: string, path: string) {
 	if (!path || path.startsWith("/") || path.split("/").includes("..")) fail(400, "path must be a file in the repo");
 	const { fs, dir, commit } = await snapshot(remote, ref);
-	const { blob } = await git.readBlob({ fs, dir, oid: commit, filepath: path }).catch(() => fail(404, `no file ${path} at ${commit.slice(0, 8)}`));
+	const { blob } = await git
+		.readBlob({ fs, dir, oid: commit, filepath: path })
+		.catch(() => fail(404, `no file ${path} at ${commit.slice(0, 8)}`));
 	const base = { commit, path, size: blob.length };
 	if (blob.length > MAX_FILE_BYTES) return { ...base, tooBig: true as const };
-	// NUL bytes in the first 8 KB: binary, as Git decides.
+	// Like Git, treat a NUL byte in the first 8 KB as binary.
 	if (blob.subarray(0, 8192).includes(0)) return { ...base, binary: true as const };
 	return { ...base, text: new TextDecoder().decode(blob) };
 }

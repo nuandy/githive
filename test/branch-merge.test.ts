@@ -8,10 +8,10 @@ import { pushChange } from "./helpers/agents";
 import { startGitServer, type GitServer } from "./helpers/git-server";
 import { memoryBatchGit } from "./helpers/memory-batch-git";
 
-// A finished branch merges into another as one change: claimed with source,
-// its claim is what the branch changed and its tip is the change, reviewed,
-// checked and merged like any other. The branch it lands on never holds half
-// of it.
+// A finished branch merges into another as one change. It is claimed with
+// `source`: the claim covers what the branch changed, and the branch tip is the
+// change, reviewed, checked and merged like any other. The target branch never
+// holds half of it.
 
 describe("a claim covering a branch's changes", () => {
 	it("is the files when they fit, and their folders, deepest first, when they don't", () => {
@@ -33,12 +33,19 @@ const ctx = (agentKey?: string): ToolContext => ({
 	head: async (_repo, branch) => server.git("rev-parse", branch).trim(),
 	...(agentKey ? { agentKey } : {}),
 });
-const call = (name: string, args: Record<string, unknown>, as?: string) => callTool(name, { repo: "p", ...args }, ctx(as ? keys[as] : undefined)) as Promise<Record<string, unknown>>;
+const call = (name: string, args: Record<string, unknown>, as?: string) =>
+	callTool(name, { repo: "p", ...args }, ctx(as ? keys[as] : undefined)) as Promise<Record<string, unknown>>;
 const tip = (branch: string) => server.git("rev-parse", branch).trim();
-const approve = (head: string) => call("vote", { commit: head, reviewer: "reviewer", role: "review", verdict: "approve", evidence: "ok" }, "reviewer");
+const approve = (head: string) =>
+	call("vote", { commit: head, reviewer: "reviewer", role: "review", verdict: "approve", evidence: "ok" }, "reviewer");
 
 /** A piece of the feature, claimed into feature/f, pushed, approved and merged there. */
-async function piece(change: string, agent: string, files: Record<string, string>, extra: Record<string, unknown> = {}) {
+async function piece(
+	change: string,
+	agent: string,
+	files: Record<string, string>,
+	extra: Record<string, unknown> = {},
+) {
 	await call("claim", { change, agent, paths: Object.keys(files), intent: change, into: "feature/f", ...extra }, agent);
 	const head = await pushChange(server.url, work, agent, change, files, "origin/feature/f");
 	await approve(head);
@@ -60,7 +67,8 @@ describe.each([
 ])("with claims %s", (_mode, shardDepth) => {
 	beforeEach(async () => {
 		await call("settings", { required: 1, vetoes: [], ...(shardDepth ? { shard_depth: shardDepth } : {}) });
-		for (const agent of ["a", "b", "lander", "other", "reviewer"]) keys[agent] = ((await call("register", { agent })) as { key: string }).key;
+		for (const agent of ["a", "b", "lander", "other", "reviewer"])
+			keys[agent] = ((await call("register", { agent })) as { key: string }).key;
 		await piece("api", "a", { "api/field.js": "the field\n" }, { from: "main" });
 		await piece("consumer", "b", { "web/field.js": "uses the field\n" }, { after: ["api"] });
 	});
@@ -68,9 +76,18 @@ describe.each([
 	describe("merging a branch into another", () => {
 		it("lands the whole branch on main in one merge, after review, and the audit finds nothing wrong", async () => {
 			const main = tip("main");
-			const claimed = await call("claim", { change: "land-f", agent: "lander", source: "feature/f", intent: "land the field" }, "lander");
-			expect(claimed).toMatchObject({ ok: true, source: "feature/f", head: tip("feature/f"), claimed: ["api/field.js", "web/field.js"] });
-			// Its tip is the change: in the lander's fork, as changes/land-f.
+			const claimed = await call(
+				"claim",
+				{ change: "land-f", agent: "lander", source: "feature/f", intent: "land the field" },
+				"lander",
+			);
+			expect(claimed).toMatchObject({
+				ok: true,
+				source: "feature/f",
+				head: tip("feature/f"),
+				claimed: ["api/field.js", "web/field.js"],
+			});
+			// Its tip is the change, in the lander's fork as changes/land-f.
 			expect(tip("changes/land-f")).toBe(tip("feature/f"));
 			// main had neither piece until now.
 			expect(server.git("ls-tree", "-r", "--name-only", "main")).not.toContain("api/field.js");
@@ -85,15 +102,21 @@ describe.each([
 
 		it("holds what the branch changed on main while it's under way", async () => {
 			await call("claim", { change: "land-f", agent: "lander", source: "feature/f", intent: "land" }, "lander");
-			expect(await call("claim", { change: "tweak", agent: "other", paths: ["api/field.js"], intent: "tweak" }, "other")).toMatchObject({ ok: false, conflicts: [{ change: "land-f" }] });
-			expect(await call("claim", { change: "elsewhere", agent: "other", paths: ["docs/"], intent: "docs" }, "other")).toMatchObject({ ok: true });
+			expect(
+				await call("claim", { change: "tweak", agent: "other", paths: ["api/field.js"], intent: "tweak" }, "other"),
+			).toMatchObject({ ok: false, conflicts: [{ change: "land-f" }] });
+			expect(
+				await call("claim", { change: "elsewhere", agent: "other", paths: ["docs/"], intent: "docs" }, "other"),
+			).toMatchObject({ ok: true });
 		});
 
 		it("comes up to the branch's new tip when claimed again after it moved", async () => {
 			await call("claim", { change: "land-f", agent: "lander", source: "feature/f", intent: "land" }, "lander");
 			const first = tip("changes/land-f");
 			await piece("polish", "a", { "web/style.css": "polish\n" });
-			expect(await call("claim", { change: "land-f", agent: "lander", source: "feature/f", intent: "land" }, "lander")).toMatchObject({ ok: true, head: tip("feature/f") });
+			expect(
+				await call("claim", { change: "land-f", agent: "lander", source: "feature/f", intent: "land" }, "lander"),
+			).toMatchObject({ ok: true, head: tip("feature/f") });
 			expect(tip("changes/land-f")).not.toBe(first);
 			expect(tip("changes/land-f")).toBe(tip("feature/f"));
 		});
@@ -103,16 +126,28 @@ describe.each([
 			await call("claim", { change: "docs", agent: "other", paths: ["docs/"], intent: "docs" }, "other");
 			await approve(await pushChange(server.url, work, "other", "docs", { "docs/new.md": "new\n" }));
 			expect(await call("merge", { change: "docs", agent: "other" }, "other")).toMatchObject({ ok: true });
-			expect(await call("claim", { change: "sync-f", agent: "lander", source: "main", into: "feature/f", intent: "bring main in" }, "lander")).toMatchObject({ ok: true, into: "feature/f", claimed: ["docs/new.md"] });
+			expect(
+				await call(
+					"claim",
+					{ change: "sync-f", agent: "lander", source: "main", into: "feature/f", intent: "bring main in" },
+					"lander",
+				),
+			).toMatchObject({ ok: true, into: "feature/f", claimed: ["docs/new.md"] });
 			await approve(tip("main"));
 			expect(await call("merge", { change: "sync-f", agent: "lander" }, "lander")).toMatchObject({ ok: true });
 			expect(server.git("ls-tree", "-r", "--name-only", "feature/f")).toContain("docs/new.md");
 		});
 
 		it("is refused when the branch has nothing new, or doesn't exist", async () => {
-			await expect(call("claim", { change: "x", agent: "lander", source: "main", into: "feature/f", intent: "x" }, "lander")).rejects.toThrow(/main has nothing feature\/f doesn't have/);
-			await expect(call("claim", { change: "y", agent: "lander", source: "feature/nope", intent: "y" }, "lander")).rejects.toThrow(/there's no branch feature\/nope/);
-			await expect(call("claim", { change: "z", agent: "lander", source: "main", intent: "z" }, "lander")).rejects.toThrow(/can't merge main into itself/);
+			await expect(
+				call("claim", { change: "x", agent: "lander", source: "main", into: "feature/f", intent: "x" }, "lander"),
+			).rejects.toThrow(/main has nothing feature\/f doesn't have/);
+			await expect(
+				call("claim", { change: "y", agent: "lander", source: "feature/nope", intent: "y" }, "lander"),
+			).rejects.toThrow(/there's no branch feature\/nope/);
+			await expect(
+				call("claim", { change: "z", agent: "lander", source: "main", intent: "z" }, "lander"),
+			).rejects.toThrow(/can't merge main into itself/);
 		});
 	});
 });

@@ -14,7 +14,12 @@ describe("the sign-in screen", () => {
 	});
 
 	it("says why the last sign-in failed", () => {
-		const html = renderToStaticMarkup(<SignIn providers={["github"]} error="This email isn't invited to GitHive yet. Ask an admin for an invitation." />);
+		const html = renderToStaticMarkup(
+			<SignIn
+				providers={["github"]}
+				error="This email isn't invited to GitHive yet. Ask an admin for an invitation."
+			/>,
+		);
 		expect(html).toContain('role="alert"');
 		expect(visibleText(html)).toContain("invited to GitHive yet. Ask an admin for an invitation.");
 	});

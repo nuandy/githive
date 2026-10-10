@@ -56,7 +56,11 @@ export function CodeView({ repo, path, refParam, branch, tree, treeError, file, 
 						{pathCrumbs(clean).map((crumb, index, all) => (
 							<span key={crumb.path}>
 								<span className="code__slash">/</span>
-								{index === all.length - 1 ? <strong aria-current="page">{crumb.name}</strong> : <a href={link(crumb.path)}>{crumb.name}</a>}
+								{index === all.length - 1 ? (
+									<strong aria-current="page">{crumb.name}</strong>
+								) : (
+									<a href={link(crumb.path)}>{crumb.name}</a>
+								)}
 							</span>
 						))}
 					</h2>
@@ -97,7 +101,10 @@ export function CodeView({ repo, path, refParam, branch, tree, treeError, file, 
 						{listDir(tree.files, clean).map((entry) => (
 							<li key={entry.path}>
 								<a href={link(entry.path)} className="code__entry">
-									<Icon name={entry.kind === "dir" ? "folder" : "file"} className={entry.kind === "dir" ? "code__folder" : "muted"} />
+									<Icon
+										name={entry.kind === "dir" ? "folder" : "file"}
+										className={entry.kind === "dir" ? "code__folder" : "muted"}
+									/>
 									<span>{entry.name}</span>
 								</a>
 							</li>
@@ -107,7 +114,9 @@ export function CodeView({ repo, path, refParam, branch, tree, treeError, file, 
 			) : (
 				<FileView file={file} error={fileError} path={clean} />
 			)}
-			{tree?.truncated ? <p className="muted code__note">This repo is very large: only part of its file list is shown.</p> : null}
+			{tree?.truncated ? (
+				<p className="muted code__note">This repo is very large: only part of its file list is shown.</p>
+			) : null}
 		</section>
 	);
 }
@@ -163,13 +172,28 @@ function FileView({ file, error, path }: { file?: RepoFile; error?: string; path
 }
 
 /** The Code tab with its loading: the listing at the project's branch (or the address's ref), and the file shown. */
-export function CodeTab({ repo, path, refParam, branch, api }: Omit<CodeViewProps, "tree" | "treeError" | "file" | "fileError"> & { api: CodeApi }) {
+export function CodeTab({
+	repo,
+	path,
+	refParam,
+	branch,
+	api,
+}: Omit<CodeViewProps, "tree" | "treeError" | "file" | "fileError"> & { api: CodeApi }) {
 	const ref = refParam ?? branch;
 	const tree = usePoll(`tree:${repo}:${ref}`, () => api.tree(repo, ref), 60_000);
 	const clean = normalizePath(path);
 	const isFile = !!tree.data && pathKind(tree.data.files, clean) === "file";
 	const file = usePoll(isFile ? `file:${repo}:${ref}:${clean}` : null, () => api.file(repo, clean, ref), 60_000);
 	return (
-		<CodeView repo={repo} path={path} refParam={refParam} branch={branch} tree={tree.data} treeError={tree.data ? undefined : tree.error} file={file.data} fileError={file.data ? undefined : file.error} />
+		<CodeView
+			repo={repo}
+			path={path}
+			refParam={refParam}
+			branch={branch}
+			tree={tree.data}
+			treeError={tree.data ? undefined : tree.error}
+			file={file.data}
+			fileError={file.data ? undefined : file.error}
+		/>
 	);
 }
