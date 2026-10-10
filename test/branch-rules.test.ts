@@ -3,10 +3,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { matchesBranch, ruleFor, settingsForBranch } from "../src/toolkit/branch-rules";
-import { callTool, repoSnapshot, type ToolContext } from "../src/toolkit/mcp";
+import { repoSnapshot } from "../src/toolkit/mcp";
 import { pushChange } from "./helpers/agents";
 import { startGitServer, type GitServer } from "./helpers/git-server";
-import { memoryBatchGit } from "./helpers/memory-batch-git";
+import { toolCalls } from "./helpers/tool-calls";
 
 // A branch may have settings of its own, by pattern: feature/* with checks
 // only, release/* needing a person's approval. A rule changes only what it
@@ -46,16 +46,7 @@ describe("branch rules", () => {
 
 let server: GitServer;
 let work: string;
-const keys: Record<string, string> = {};
-const ctx = (agentKey?: string): ToolContext => ({
-	remote: async () => ({ url: server.url, token: "unused" }),
-	batchGit: () => memoryBatchGit({ url: server.url, token: "unused" }),
-	changeRemote: async () => ({ url: server.url, token: "unused" }),
-	head: async (_repo, branch) => server.git("rev-parse", branch).trim(),
-	...(agentKey ? { agentKey } : {}),
-});
-const call = (name: string, args: Record<string, unknown>, as?: string) =>
-	callTool(name, { repo: "p", ...args }, ctx(as ? keys[as] : undefined)) as Promise<Record<string, unknown>>;
+const { ctx, call, register, approve } = toolCalls(() => server);
 
 /** Claims a change into `into` (made from main if it's new), pushes it and returns its head. */
 async function pushed(change: string, into?: string) {
@@ -78,7 +69,7 @@ beforeEach(async () => {
 	server = await startGitServer();
 	work = mkdtempSync(join(tmpdir(), "githive-branch-rules-"));
 	await call("settings", { required: 1, vetoes: [], verify: ["npm test"] });
-	for (const agent of ["a", "reviewer"]) keys[agent] = ((await call("register", { agent })) as { key: string }).key;
+	await register("a", "reviewer");
 });
 afterEach(async () => {
 	await server.close();
@@ -110,11 +101,7 @@ describe("a repo's branch rules", () => {
 			branch_rules: [{ pattern: "release/*", vetoes: ["release"], grants: { release: ["person:*"] } }],
 		});
 		const head = await pushed("fix", "release/2.x");
-		await call(
-			"vote",
-			{ commit: head, reviewer: "reviewer", role: "review", verdict: "approve", evidence: "ok" },
-			"reviewer",
-		);
+		await approve(head);
 		expect(await call("merge", { change: "fix", agent: "a" }, "a")).toMatchObject({
 			ok: false,
 			reasons: [expect.stringContaining("still needs approval from release")],

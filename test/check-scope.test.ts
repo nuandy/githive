@@ -3,10 +3,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { skipsChecks, skipsFile } from "../src/toolkit/check-scope";
-import { callTool, type ToolContext } from "../src/toolkit/mcp";
 import { pushChange } from "./helpers/agents";
 import { startGitServer, type GitServer } from "./helpers/git-server";
-import { memoryBatchGit } from "./helpers/memory-batch-git";
+import { toolCalls } from "./helpers/tool-calls";
 
 // A change that only touches documentation and other files no check reads
 // merges without running the checks; anything else runs them, and so does a
@@ -33,33 +32,20 @@ describe("what the checks skip", () => {
 
 let server: GitServer;
 let work: string;
-const keys: Record<string, string> = {};
+const { call, register, approve } = toolCalls(() => server);
 // There is no check runner here, so a merge that needs its checks is refused and
 // one that skips them merges.
-const ctx = (agentKey?: string): ToolContext => ({
-	remote: async () => ({ url: server.url, token: "unused" }),
-	batchGit: () => memoryBatchGit({ url: server.url, token: "unused" }),
-	changeRemote: async () => ({ url: server.url, token: "unused" }),
-	head: async (_repo, branch) => server.git("rev-parse", branch).trim(),
-	...(agentKey ? { agentKey } : {}),
-});
-const call = (name: string, args: Record<string, unknown>, as?: string) =>
-	callTool(name, { repo: "p", ...args }, ctx(as ? keys[as] : undefined)) as Promise<Record<string, unknown>>;
 async function approved(change: string, files: Record<string, string>) {
 	await call("claim", { change, agent: "a", paths: Object.keys(files), intent: change }, "a");
 	const head = await pushChange(server.url, work, "a", change, files);
-	await call(
-		"vote",
-		{ commit: head, reviewer: "reviewer", role: "review", verdict: "approve", evidence: "ok" },
-		"reviewer",
-	);
+	await approve(head);
 }
 
 beforeEach(async () => {
 	server = await startGitServer();
 	work = mkdtempSync(join(tmpdir(), "githive-check-scope-"));
 	await call("settings", { required: 1, vetoes: [], verify: ["npm test"] });
-	for (const agent of ["a", "reviewer"]) keys[agent] = ((await call("register", { agent })) as { key: string }).key;
+	await register("a", "reviewer");
 });
 afterEach(async () => {
 	await server.close();

@@ -10,10 +10,10 @@ import {
 	scopePaths,
 	unscopePath,
 } from "../src/toolkit/branch-scope";
-import { callTool, makeBranch, mergeAsPerson, repoSnapshot, type ToolContext } from "../src/toolkit/mcp";
+import { makeBranch, mergeAsPerson, repoSnapshot } from "../src/toolkit/mcp";
 import { pushChange } from "./helpers/agents";
 import { startGitServer, type GitServer } from "./helpers/git-server";
-import { memoryBatchGit } from "./helpers/memory-batch-git";
+import { toolCalls } from "./helpers/tool-calls";
 
 // Changes land on the project's branch, or on another their claim names
 // (`into`). Claims are per branch: the same paths on two branches don't
@@ -39,16 +39,7 @@ describe("claims kept per branch", () => {
 
 let server: GitServer;
 let work: string;
-const keys: Record<string, string> = {};
-const ctx = (agentKey?: string): ToolContext => ({
-	remote: async () => ({ url: server.url, token: "unused" }),
-	batchGit: () => memoryBatchGit({ url: server.url, token: "unused" }),
-	changeRemote: async () => ({ url: server.url, token: "unused" }),
-	head: async (_repo, branch) => server.git("rev-parse", branch).trim(),
-	...(agentKey ? { agentKey } : {}),
-});
-const call = (name: string, args: Record<string, unknown>, as?: string) =>
-	callTool(name, { repo: "p", ...args }, ctx(as ? keys[as] : undefined)) as Promise<Record<string, unknown>>;
+const { ctx, call, register, approve } = toolCalls(() => server);
 const tip = (branch: string) => server.git("rev-parse", branch).trim();
 
 beforeEach(async () => {
@@ -66,8 +57,7 @@ describe.each([
 ])("with claims %s", (_mode, shardDepth) => {
 	beforeEach(async () => {
 		await call("settings", { required: 1, vetoes: [], ...(shardDepth ? { shard_depth: shardDepth } : {}) });
-		for (const agent of ["a", "b", "reviewer"])
-			keys[agent] = ((await call("register", { agent })) as { key: string }).key;
+		await register("a", "b", "reviewer");
 	});
 
 	describe("a change into another branch", () => {
@@ -146,11 +136,7 @@ describe.each([
 			expect(await call("status", { change: "f1" }, "a")).toMatchObject({
 				merge: { into: "feature/dude", clean: true, outsideClaim: [] },
 			});
-			await call(
-				"vote",
-				{ commit: head, reviewer: "reviewer", role: "review", verdict: "approve", evidence: "ok" },
-				"reviewer",
-			);
+			await approve(head);
 			const main = tip("main");
 			const merged = await call("merge", { change: "f1", agent: "a" }, "a");
 			expect(merged).toMatchObject({ ok: true });
@@ -174,11 +160,7 @@ describe.each([
 				{ "src/f/x.js": "x\n", "README.md": "changed\n" },
 				"origin/feature/dude",
 			);
-			await call(
-				"vote",
-				{ commit: head, reviewer: "reviewer", role: "review", verdict: "approve", evidence: "ok" },
-				"reviewer",
-			);
+			await approve(head);
 			expect(await call("merge", { change: "f1", agent: "a" }, "a")).toMatchObject({
 				ok: false,
 				reasons: [expect.stringContaining("README.md is outside f1's claim")],
@@ -236,11 +218,7 @@ describe.each([
 				ok: false,
 				reasons: [expect.stringContaining("0 of 1 approvals")],
 			});
-			await call(
-				"vote",
-				{ commit: head, reviewer: "reviewer", role: "review", verdict: "approve", evidence: "ok" },
-				"reviewer",
-			);
+			await approve(head);
 			expect(await mergeAsPerson(ctx(), "p", "f1", "person:ada@example.com")).toMatchObject({ ok: true });
 			expect(server.git("log", "-1", "--format=%P", "feature/dude").trim().split(" ")).toContain(head);
 		});

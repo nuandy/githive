@@ -3,14 +3,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { GitCasLog } from "../src/record-log";
-import { statusOf } from "../src/errors";
 import { audit } from "../src/toolkit/audit";
-import { callTool, type ToolContext } from "../src/toolkit/mcp";
 import { bucketOf, VOTE_BUCKETS, voteStore, votesPrefix } from "../src/toolkit/vote-store";
 import { openFlag, SHARD_VOTES_WHEN, shardVotes, type Votes, votesShardingReason } from "../src/toolkit/votes";
 import { pushChange } from "./helpers/agents";
 import { startGitServer, type GitServer } from "./helpers/git-server";
-import { memoryBatchGit } from "./helpers/memory-batch-git";
+import { shardingToolCalls } from "./helpers/tool-calls";
 
 // Votes start in one record and are sharded when the load calls for it: new
 // votes go to a bucket by commit, each its own ref. Votes never conflict, so
@@ -190,22 +188,7 @@ describe("the audit of sharded votes", () => {
 });
 
 describe("sharding votes on demand through the toolkit", { timeout: 120_000 }, () => {
-	const created: number[] = [];
-	const ctx = (): ToolContext => ({
-		remote,
-		changeRemote: remote,
-		batchGit: () => memoryBatchGit({ url: server.url, token: "unused" }),
-		head: async () => server.git("rev-parse", "main").trim(),
-		recordsRemote: async (_repo, k) => ({ url: server.repo(`rec-${k}`), token: "unused" }),
-		createRecordsRepos: async (_repo, count) => void created.push(count),
-	});
-	const call = async (name: string, args: Record<string, unknown>) => {
-		try {
-			return (await callTool(name, { repo: "p", ...args }, ctx())) as Record<string, unknown> & { ok?: boolean };
-		} catch (err) {
-			return { error: statusOf(err).message };
-		}
-	};
+	const { call, created } = shardingToolCalls(() => server);
 
 	it("shards the votes when the eighth reviewer votes, merges counting both, and audits clean", async () => {
 		expect(await call("settings", { required: 1, vetoes: [] })).toMatchObject({ sharding: "on demand" });
