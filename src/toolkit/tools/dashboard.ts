@@ -36,7 +36,10 @@ export async function tellPeopleOfWaitingRoles(
 		...(policyOf ? { policyOf } : {}),
 		open,
 		votes: counted,
-		held: await ctx.reviews.held(repo),
+		held: await ctx.reviews.held(
+			repo,
+			open.flatMap((entry) => (entry.head ? [entry.head] : [])),
+		),
 	});
 	const waits = await ctx.reviews.waits(
 		repo,

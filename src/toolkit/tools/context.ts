@@ -130,7 +130,8 @@ export interface ToolContext {
 	 * (see review-holds.ts).
 	 */
 	reviews?: {
-		held(repo: string): Promise<Record<string, string[]>>;
+		/** The holds on these heads, by holdKey; on every head when none are named. */
+		held(repo: string, heads?: string[]): Promise<Record<string, string[]>>;
 		hold(repo: string, head: string, agent: string, needed: number): Promise<boolean>;
 		release(repo: string, head: string, agent: string): Promise<void>;
 		/** When each waiting blocking-role review (by holdKey) was first seen, and whether people were told. */

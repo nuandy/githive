@@ -16,7 +16,8 @@ export const workTools: ToolHandlers = {
 	async reviews({ ctx, repo, votes, registered, actAs, openWork }) {
 		const agent = actAs("agent");
 		const state = await openWork(agent);
-		const held = ctx.reviews ? await ctx.reviews.held(repo).catch(() => ({})) : {};
+		const heads = state.open.flatMap((entry) => (entry.head ? [entry.head] : []));
+		const held = ctx.reviews ? await ctx.reviews.held(repo, heads).catch(() => ({})) : {};
 		// Tell people about blocking-role reviews that waited too long. It runs when someone looks; no timer.
 		if (ctx.reviews)
 			await tellPeopleOfWaitingRoles(

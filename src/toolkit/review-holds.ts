@@ -2,6 +2,7 @@ import type { CasLog } from "../record-log";
 import type { ToolContext } from "./mcp";
 import { appendRecord } from "./records";
 import { recordsRepoOf } from "./shards";
+import { bucketOf } from "./vote-store";
 
 // Review holds, a record in Git like the claims and votes, written by compare-and-swap. Once a repo has records
 // repos the record lives in one of them, because every review handed out writes it and those writes kept the
@@ -10,6 +11,11 @@ import { recordsRepoOf } from "./shards";
 // A hold says an agent is reviewing a commit in a role until it votes or the hold expires. A review is offered
 // only while fewer agents hold it than it needs, so agents don't pile onto one. Holds bind nobody, and the audit
 // ignores them.
+//
+// Every review handed out writes a hold and every vote shortens one, so the holds are split by commit into
+// buckets, each its own ref: in one record, agents taking different reviews retried each other's writes for
+// seconds, and others were offered the review meanwhile. Waits on blocking roles are written rarely and stay in
+// the repo's one reviews record.
 
 /** How long a review hold lasts if its agent never votes. */
 export const REVIEW_HOLD_MS = 15 * 60_000;
@@ -33,6 +39,18 @@ const empty = (): ReviewHolds => ({ holds: {}, waits: {} });
 export const reviewsRef = (repo: string) => `refs/notes/githive-reviews/${repo}`;
 
 export const reviewsRepoOf = (count: number) => recordsRepoOf("reviews", count);
+
+/** How many buckets the holds are split into, by the commit under review. */
+export const HOLD_BUCKETS = 16;
+
+/** Where one bucket of a repo's holds is kept. */
+export const holdsRef = (repo: string, bucket: string) => `refs/notes/githive-review-holds/${repo}/${bucket}`;
+
+/** Which of a repo's `count` records repos holds a bucket of its holds. */
+export const holdsRepoOf = (bucket: string, count: number) => recordsRepoOf(`holds:${bucket}`, count);
+
+/** The bucket a hold's key (commit#role) is kept in. */
+const holdBucketOf = (key: string) => bucketOf(key.split("#")[0] ?? key, HOLD_BUCKETS);
 
 // Drops expired holds.
 function live(holds: ReviewHolds["holds"], now: number): ReviewHolds["holds"] {
@@ -122,15 +140,28 @@ export async function roleWaitTold(log: CasLog<ReviewHolds>, key: string) {
 	});
 }
 
-/** Review holds for the review tools (ToolContext.reviews), kept in each repo's record. */
-export function reviewHolds(
-	log: (repo: string) => CasLog<ReviewHolds> | Promise<CasLog<ReviewHolds>>,
-): NonNullable<ToolContext["reviews"]> {
+type HoldsLog = CasLog<ReviewHolds> | Promise<CasLog<ReviewHolds>>;
+
+/** Where a repo's review records are: its one reviews record (the waits), and each bucket of its holds. */
+export interface ReviewLogs {
+	waits(repo: string): HoldsLog;
+	holds(repo: string, bucket: string): HoldsLog;
+}
+
+/** Review holds for the review tools (ToolContext.reviews). */
+export function reviewHolds(logs: ReviewLogs): NonNullable<ToolContext["reviews"]> {
+	const holdsFor = (repo: string, key: string) => logs.holds(repo, holdBucketOf(key));
 	return {
-		held: async (repo) => heldReviews(await log(repo)),
-		hold: async (repo, key, agent, needed) => holdReview(await log(repo), key, agent, needed),
-		release: async (repo, key, agent) => releaseReview(await log(repo), key, agent),
-		waits: async (repo, keys) => roleWaits(await log(repo), keys),
-		told: async (repo, key) => roleWaitTold(await log(repo), key),
+		// The holds on these heads (every bucket when none are named), read bucket by bucket.
+		held: async (repo, heads) => {
+			const every = Array.from({ length: HOLD_BUCKETS }, (_, bucket) => String(bucket));
+			const buckets = heads ? [...new Set(heads.map((head) => bucketOf(head, HOLD_BUCKETS)))] : every;
+			const read = await Promise.all(buckets.map(async (bucket) => heldReviews(await logs.holds(repo, bucket))));
+			return Object.assign({}, ...read);
+		},
+		hold: async (repo, key, agent, needed) => holdReview(await holdsFor(repo, key), key, agent, needed),
+		release: async (repo, key, agent) => releaseReview(await holdsFor(repo, key), key, agent),
+		waits: async (repo, keys) => roleWaits(await logs.waits(repo), keys),
+		told: async (repo, key) => roleWaitTold(await logs.waits(repo), key),
 	};
 }

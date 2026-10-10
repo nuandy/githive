@@ -10,7 +10,7 @@ import { callTool, type ToolContext, repoSnapshot } from "../src/toolkit/mcp";
 import type { VoteRecord } from "../src/toolkit/votes";
 import { backlogFor, reviewsFor, type WorkInput, type WorkItem, workId } from "../src/toolkit/work";
 import { memoryLanding } from "../src/toolkit/landing";
-import { type ReviewHolds, reviewHolds, reviewsRef } from "../src/toolkit/review-holds";
+import { holdsRef, type ReviewHolds, reviewHolds, reviewsRef } from "../src/toolkit/review-holds";
 import { pushChange } from "./helpers/agents";
 import { startGitServer, type GitServer } from "./helpers/git-server";
 import { memoryBatchGit } from "./helpers/memory-batch-git";
@@ -51,6 +51,15 @@ const base = (over: Partial<WorkInput>): WorkInput => ({
 	...over,
 });
 const changes = (input: WorkInput) => reviewsFor(input).map((r) => r.change);
+
+/** The review records kept in Git as the Worker keeps them: the waits in one record, the holds in buckets. */
+const gitReviewLogs = (server: GitServer) => {
+	const remote = async () => ({ url: server.url, token: "unused" });
+	return {
+		waits: (repo: string) => new GitCasLog<ReviewHolds>(remote, repo, reviewsRef(repo)),
+		holds: (repo: string, bucket: string) => new GitCasLog<ReviewHolds>(remote, repo, holdsRef(repo, bucket)),
+	};
+};
 
 describe("the reviews an agent may give", () => {
 	it("never its own, a commit it voted on, one sent back, one approved or one not pushed", () => {
@@ -254,10 +263,7 @@ describe("review holds through the toolkit", { timeout: 120_000 }, () => {
 		const work = mkdtempSync(join(tmpdir(), "githive-holds-"));
 		try {
 			// Holds kept as the record in Git, as the Worker keeps them.
-			const reviews = reviewHolds(
-				(repo) =>
-					new GitCasLog<ReviewHolds>(async () => ({ url: server.url, token: "unused" }), repo, reviewsRef(repo)),
-			);
+			const reviews = reviewHolds(gitReviewLogs(server));
 			const ctx = (agentKey?: string): ToolContext => ({
 				remote: async () => ({ url: server.url, token: "unused" }),
 				batchGit: () => memoryBatchGit({ url: server.url, token: "unused" }),
@@ -397,10 +403,7 @@ describe("a review a role waits for too long", { timeout: 120_000 }, () => {
 		const server = await startGitServer();
 		const work = mkdtempSync(join(tmpdir(), "githive-role-wait-"));
 		try {
-			const reviews = reviewHolds(
-				(repo) =>
-					new GitCasLog<ReviewHolds>(async () => ({ url: server.url, token: "unused" }), repo, reviewsRef(repo)),
-			);
+			const reviews = reviewHolds(gitReviewLogs(server));
 			const ctx = (agentKey?: string): ToolContext => ({
 				remote: async () => ({ url: server.url, token: "unused" }),
 				batchGit: () => memoryBatchGit({ url: server.url, token: "unused" }),

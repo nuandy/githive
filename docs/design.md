@@ -122,8 +122,10 @@ In the project repo:
   questions for a person (`ask_human`).
 - **Backlog** `refs/notes/githive-work/<repo>`: pieces of work for agents to take (`backlog`) and
   hand out (`add_work`). An id can be added once.
-- **Review holds** `refs/notes/githive-reviews/<repo>`: which agent is
-  reviewing which commit in which role, marked by the reviewer
+- **Review holds** `refs/notes/githive-review-holds/<repo>/<bucket>`, split
+  by commit into 16 buckets (waits on blocking roles in
+  `refs/notes/githive-reviews/<repo>`): which agent is reviewing which commit
+  in which role, marked by the reviewer
   (`credentials` for that change), so others looking at `reviews` don't pile onto one review. It binds nobody, and the audit never reads it. Once the repo
   has records repos it's kept in one of them instead (the same one always,
   picked by a hash): every review handed out writes it, and in the project
@@ -922,8 +924,13 @@ the change (in the role it names), so others looking at `reviews` see it taken.
 The mark is written first, on the head GitHive already knows from push events,
 before the reads that take seconds; written last, it left those seconds in
 which every agent looking was offered the same review. Holds are
-kept by commit and role in a record in Git
-(`refs/notes/githive-reviews/<repo>`, `review-holds.ts`). A hold lasts 15
+kept by commit and role in records in Git, split by commit into 16 buckets
+(`refs/notes/githive-review-holds/<repo>/<bucket>`, `review-holds.ts`): every
+review handed out writes a hold and every vote shortens one, and in one record
+agents taking different reviews retried each other's writes for seconds, while
+others were offered the review meanwhile (smoke run 7: two approvals a change
+where one was needed). Waits on blocking roles stay in one record,
+`refs/notes/githive-reviews/<repo>`. A hold lasts 15
 minutes, or a minute once its agent has voted (a new vote can take a moment to
 show in every read). A hold binds nobody: a review counts with or without one,
 and the audit never reads holds. The same record keeps when each review a role
