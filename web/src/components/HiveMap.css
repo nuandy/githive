@@ -1,0 +1,269 @@
+/* The hive map: the repo's folders as a honeycomb, each cell in its holding agent's claim color (claim-cN sets --claim). */
+
+.hive__legend {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 8px 24px;
+	margin: 0 0 12px;
+	padding: 0;
+	list-style: none;
+	font-size: 14px;
+}
+
+.hive__legend li {
+	display: inline-flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 4px 7px;
+	min-width: 0;
+	overflow-wrap: anywhere;
+}
+
+.hive__legend-change {
+	min-width: 0;
+}
+
+.hive__swatch {
+	border-radius: 2px;
+}
+
+.hive__key {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 6px 18px;
+	margin: 0 0 18px;
+	padding: 0;
+	list-style: none;
+	font-size: 13px;
+	color: var(--text-muted);
+}
+
+.hive__key li {
+	display: inline-flex;
+	align-items: center;
+	gap: 7px;
+}
+
+.hive__key-shape {
+	fill: var(--surface-3);
+	stroke: var(--border-strong);
+	stroke-width: 1;
+}
+
+.hive__key-shape--part {
+	fill: color-mix(in srgb, var(--claim) 22%, var(--surface));
+	stroke: var(--claim);
+	stroke-width: 1.5;
+}
+
+.hive__key-ring {
+	fill: none;
+	stroke: var(--text);
+	stroke-width: 1.5;
+	stroke-dasharray: 2.5 1.5;
+}
+
+.hive__key-lamp {
+	fill: var(--amber);
+	stroke: var(--text);
+	stroke-width: 0.75;
+}
+
+.hive__body {
+	display: grid;
+	grid-template-columns: minmax(0, 1fr) minmax(240px, 320px);
+	gap: 20px 28px;
+	align-items: start;
+}
+
+.hive__board {
+	min-width: 0;
+}
+
+.hive__svg {
+	display: block;
+	overflow: visible;
+}
+
+/* A cell: neutral until held; held whole, filled in its agent's color; held in part, pale. */
+
+.hive__cell {
+	cursor: pointer;
+	outline: none;
+}
+
+.hive__shape {
+	fill: var(--surface-3);
+	stroke: var(--border-strong);
+	stroke-width: 1;
+	transition: fill 0.3s ease, stroke 0.3s ease, stroke-width 0.12s ease;
+}
+
+.hive__cell--held .hive__shape {
+	fill: color-mix(in srgb, var(--claim) 50%, var(--surface));
+	stroke: var(--claim);
+	stroke-width: 2.5;
+}
+
+.hive__cell--part .hive__shape {
+	fill: color-mix(in srgb, var(--claim) 18%, var(--surface));
+	stroke-dasharray: none;
+}
+
+.hive__cell--planned .hive__shape {
+	stroke-dasharray: 5 3;
+}
+
+.hive__cell:hover .hive__shape {
+	stroke: var(--text);
+	stroke-width: 2.5;
+}
+
+.hive__cell:focus-visible .hive__shape,
+.hive__cell--active .hive__shape {
+	stroke: var(--accent);
+	stroke-width: 4;
+}
+
+/* Landing: an ink ring inside the cell; being checked adds a lamp that breathes. */
+
+.hive__ring {
+	fill: none;
+	stroke: var(--text);
+	stroke-width: 2;
+	stroke-dasharray: 5 3;
+	pointer-events: none;
+}
+
+.hive__lamp {
+	fill: var(--amber);
+	stroke: var(--text);
+	stroke-width: 1.5;
+	pointer-events: none;
+	animation: hive-breathe 1.6s ease-in-out infinite;
+}
+
+@keyframes hive-breathe {
+	50% {
+		opacity: 0.35;
+	}
+}
+
+.hive__cell text {
+	pointer-events: none;
+	text-anchor: middle;
+	dominant-baseline: middle;
+	fill: var(--text);
+}
+
+.hive__name {
+	font: 600 11.5px var(--mono);
+}
+
+.hive__parent,
+.hive__count {
+	font: 9.5px var(--font);
+	fill: var(--text-muted) !important;
+}
+
+.hive__cell--held .hive__parent,
+.hive__cell--held .hive__count {
+	fill: var(--text) !important;
+}
+
+/* What the shown cell holds. */
+
+.hive__details {
+	position: sticky;
+	top: 12px;
+	min-width: 0;
+	padding-top: 8px;
+	border-top: 1px solid var(--border);
+	font-size: 14px;
+}
+
+.hive__hint {
+	margin: 0;
+}
+
+.hive__details-body h3 {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: baseline;
+	gap: 2px 10px;
+	margin-bottom: 8px;
+	font-size: 14px;
+	font-weight: 600;
+}
+
+.hive__details-body h3 code {
+	padding: 0;
+	background: none;
+}
+
+.hive__details-body h3 a {
+	font-weight: 400;
+	font-size: 13px;
+}
+
+.hive__details-body p {
+	margin: 0;
+}
+
+.hive__landing {
+	display: flex;
+	align-items: center;
+	gap: 7px;
+	margin-bottom: 8px !important;
+}
+
+.hive__holders {
+	display: grid;
+	gap: 10px;
+	margin: 0;
+	padding: 0;
+	list-style: none;
+}
+
+.hive__holders li {
+	display: flex;
+	align-items: flex-start;
+	gap: 8px;
+}
+
+.hive__holders .hive__swatch {
+	margin-top: 5px;
+}
+
+.hive__holder {
+	min-width: 0;
+	overflow-wrap: anywhere;
+}
+
+.hive__holder code {
+	font-size: 12px;
+}
+
+.hive__intent {
+	white-space: pre-line;
+}
+
+@media (max-width: 720px) {
+	.hive__body {
+		grid-template-columns: minmax(0, 1fr);
+	}
+
+	.hive__details {
+		position: static;
+	}
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.hive__shape {
+		transition: none;
+	}
+
+	.hive__lamp {
+		animation: none;
+	}
+}

@@ -13,3 +13,4 @@ export { CodeTab, CodeView } from "./CodeBrowser";
 export { ChangeCommits } from "./Commits";
 export { InboxPage } from "./InboxPage";
 export { VoteForm } from "./VoteForm";
+export { HiveMap } from "./HiveMap";

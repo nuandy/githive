@@ -2,6 +2,7 @@ import "./Overview.css";
 import { useState } from "react";
 import type { RepoLanding, RepoSnapshot, RepoTree } from "../api";
 import { usePoll } from "../hooks/usePoll";
+import { HiveMap } from "./HiveMap";
 import { type Cell, cellLamp, LAMP_WORDS, type Lamp, lampColor, lampCounts, LAMPS, type Region, territory } from "../lib/overview";
 import { timeAgo } from "../lib/relativeTime";
 import { href } from "../lib/routes";
@@ -303,7 +304,7 @@ function Territory({ repo, branch, snapshot, tree, error, landing }: { repo: str
 
 /**
  * A repo at a glance, on one of its branches: the claims on it in a sentence,
- * what's landing on it, and its territory.
+ * what's landing on it, its hive map and its territory.
  */
 export function Overview({ repo, branch, shown: asked, snapshot, api, canWrite = false, onBranchMade }: OverviewProps) {
 	const known = asked === undefined || asked === branch || (snapshot.branches ?? []).some((b) => b.name === asked);
@@ -320,6 +321,7 @@ export function Overview({ repo, branch, shown: asked, snapshot, api, canWrite =
 			{!known ? <p className="callout callout--warn">There's no branch {asked} taking changes here: showing {branch}.</p> : null}
 			<Summary snapshot={onBranch} landing={landing.data} />
 			{api.landing ? <Track repo={repo} branch={shown} snapshot={onBranch} landing={landing.data} error={landing.error} /> : null}
+			<HiveMap repo={repo} branch={shown} snapshot={onBranch} tree={tree.data} error={tree.error} landing={landing.data} />
 			<Territory repo={repo} branch={shown} snapshot={onBranch} tree={tree.data} error={tree.error} landing={landing.data} />
 		</div>
 	);
