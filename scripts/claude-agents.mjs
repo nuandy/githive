@@ -44,6 +44,7 @@ const access = {
 const started = Date.now();
 const clock = () => `${((Date.now() - started) / 1000).toFixed(0).padStart(5)}s`;
 const say = (who, text) => console.log(`${clock()}  ${who.padEnd(10)} ${text}`);
+const turnsAndTime = (result) => `${result.num_turns} turns, ${Math.round(result.duration_ms / 1000)}s`;
 
 // --only <agent>[,<agent>] runs just those agents, for example to restart one, and keeps the other folders.
 const only = flag("only")?.split(",");
@@ -55,33 +56,54 @@ if (!only) rmSync(work, { recursive: true, force: true });
 mkdirSync(work, { recursive: true });
 
 /** The prompt every agent gets: who it is, the loop, how to use git with GitHive, and its `brief`. */
-const prompt = (
-	agent,
-	dir,
-	keyFile,
-	brief,
-) => `You are ${agent}, one of ${total} independent AI agents working at the same time on the GitHive repo "${plan.repo}": a copy of Express (Node.js). GitHive coordinates you through its MCP tools (server "githive"); read its instructions. Pass repo "${plan.repo}" and agent "${agent}" wherever a tool asks for them. You're registered already, and your key goes with every call: never call register.
-
-Nobody assigns you work: you look, and choose. Work in a loop:
-1. Your own changes first. For each change you hold, call status:
-   - landed (or its claim released as merged): it's done.
-   - nothing pushed: finish it (below, build).
-   - a reviewer asked for changes, or the checks failed: revise it: fix what they asked, commit, push the new commit.
-   - nothing more needed (approved, or the repo asks for no reviews): call merge. It lands your change together with the others ready, after the repo's checks if it has any; it can take a few minutes. If it refuses, do what the reasons say.
-   - otherwise it's waiting for reviews: leave it.
-2. Then reviews: the reviews you may give, in an order of your own so agents spread out: take the first that suits you, unless you have a reason not to. Get its code with review-clone (below, which also marks you reviewing it), read the diff against the project's branch carefully, and vote on that exact commit in the role it names: approve if it's correct and inside its claim, reject with specific evidence if not.
-3. Then backlog: pieces of work free to build, in an order of your own so agents spread out: take the first that suits you, unless you have a reason not to (in a run, four of five agents first picked the same piece). Build it: claim its paths (its id as the change), then make the change for real: read the surrounding code and tests, and write good code (and tests where it fits). Commit on the branch changes/<change>, push it to your fork, then call check. Stay inside your claim. If the claim is refused because another agent took it first, pick another.
-4. Nothing to do: run \`sleep 30\`, then look again.
-Stop when you've looked three times in a row with nothing to do and none of your changes is still open, or when ${minutes} minutes have passed. Then print a short summary of what you did.
-
-Git, without ever printing a token (the helper keeps credentials in each clone's own config):
-  node ${root}scripts/mcp-agent.mjs clone <dir> --repo ${plan.repo} --change <change> --key-file ${keyFile}
-      a clone of the project, with your fork as the remote "fork": push changes/<change> to "fork". Claim first.
-  node ${root}scripts/mcp-agent.mjs auth <dir> --repo ${plan.repo} --change <change> --key-file ${keyFile}
-      fresh write access for that clone, if a push is refused for authentication.
-  node ${root}scripts/mcp-agent.mjs review-clone <dir> --repo ${plan.repo} --change <change> --role <role> --key-file ${keyFile}
-      a change to review: the project, with the change checked out at its pushed head ("origin/<branch>" is what it lands on); marks you reviewing it in that role.
-Make every clone inside ${dir}, a new folder each time. Don't run the test suite as a matter of course: running tests is the repo's checks' job, if it has any, when the change lands. If you do run a test, run \`npm install --no-audit --no-fund\` in the clone first. Never rewrite pushed commits; to take in the project's branch, merge it. Don't use GitHive's hosted agents (the build and request_review tools).${brief ? `\n\n${brief}` : ""}`;
+const prompt = (agent, dir, keyFile, brief) =>
+	[
+		`You are ${agent}, one of ${total} independent AI agents working at the same time on the GitHive repo ` +
+			`"${plan.repo}": a copy of Express (Node.js). GitHive coordinates you through its MCP tools (server "githive"); read ` +
+			`its instructions. Pass repo "${plan.repo}" and agent "${agent}" wherever a tool asks for them. You're ` +
+			"registered already, and your key goes with every call: never call register.",
+		"",
+		"Nobody assigns you work: you look, and choose. Work in a loop:",
+		"1. Your own changes first. For each change you hold, call status:",
+		"   - landed (or its claim released as merged): it's done.",
+		"   - nothing pushed: finish it (below, build).",
+		"   - a reviewer asked for changes, or the checks failed: revise it: fix what they asked, commit, push " +
+			"the new commit.",
+		"   - nothing more needed (approved, or the repo asks for no reviews): call merge. It lands your " +
+			"change together with the others ready, after the repo's checks if it has any; it can take a few " +
+			"minutes. If it refuses, do what the reasons say.",
+		"   - otherwise it's waiting for reviews: leave it.",
+		"2. Then reviews: the reviews you may give, in an order of your own so agents spread out: take the " +
+			"first that suits you, unless you have a reason not to. Get its code with review-clone (below, which " +
+			"also marks you reviewing it), read the diff against the project's branch carefully, and vote on that " +
+			"exact commit in the role it names: approve if it's correct and inside its claim, reject with specific " +
+			"evidence if not.",
+		"3. Then backlog: pieces of work free to build, in an order of your own so agents spread out: take the " +
+			"first that suits you, unless you have a reason not to (in a run, four of five agents first picked the " +
+			"same piece). Build it: claim its paths (its id as the change), then make the change for real: read " +
+			"the surrounding code and tests, and write good code (and tests where it fits). Commit on the branch " +
+			"changes/<change>, push it to your fork, then call check. Stay inside your claim. If the claim is " +
+			"refused because another agent took it first, pick another.",
+		`4. Nothing to do: run \`sleep 30\`, then look again.`,
+		"Stop when you've looked three times in a row with nothing to do and none of your changes is still " +
+			`open, or when ${minutes} minutes have passed. Then print a short summary of what you did.`,
+		"",
+		"Git, without ever printing a token (the helper keeps credentials in each clone's own config):",
+		`  node ${root}scripts/mcp-agent.mjs clone <dir> --repo ${plan.repo} --change <change> --key-file ${keyFile}`,
+		`      a clone of the project, with your fork as the remote "fork": push changes/<change> to "fork". ` +
+			"Claim first.",
+		`  node ${root}scripts/mcp-agent.mjs auth <dir> --repo ${plan.repo} --change <change> --key-file ${keyFile}`,
+		"      fresh write access for that clone, if a push is refused for authentication.",
+		`  node ${root}scripts/mcp-agent.mjs review-clone <dir> --repo ${plan.repo} --change <change> --role ` +
+			`<role> --key-file ${keyFile}`,
+		"      a change to review: the project, with the change checked out at its pushed head " +
+			`("origin/<branch>" is what it lands on); marks you reviewing it in that role.`,
+		`Make every clone inside ${dir}, a new folder each time. Don't run the test suite as a matter of ` +
+			"course: running tests is the repo's checks' job, if it has any, when the change lands. If you do run " +
+			`a test, run \`npm install --no-audit --no-fund\` in the clone first. Never rewrite pushed commits; to ` +
+			"take in the project's branch, merge it. Don't use GitHive's hosted agents (the build and " +
+			`request_review tools).${brief ? `\n\n${brief}` : ""}`,
+	].join("\n");
 
 /** The environment without an API key, so the CLI uses its signed-in subscription. */
 function withoutApiKey() {
@@ -152,11 +174,10 @@ function runAgent(spec) {
 				const name = part.name.replace(/^mcp__githive__/, "githive.");
 				summary.tools[name] = (summary.tools[name] ?? 0) + 1;
 				// Log GitHive calls, which show what the agent is doing.
-				if (name.startsWith("githive."))
-					say(
-						spec.agent,
-						`${name}${part.input?.change ? ` ${part.input.change}` : ""}${part.input?.verdict ? ` ${part.input.verdict}` : ""}`,
-					);
+				if (name.startsWith("githive.")) {
+					const details = [name, part.input?.change, part.input?.verdict].filter(Boolean);
+					say(spec.agent, details.join(" "));
+				}
 			}
 			if (event.type === "result") summary.result = event;
 		}
@@ -174,10 +195,8 @@ function runAgent(spec) {
 			clearTimeout(limit);
 			events.end();
 			rmSync(config, { force: true });
-			say(
-				spec.agent,
-				`done (exit ${code})${summary.result ? `: ${summary.result.num_turns} turns, ${Math.round(summary.result.duration_ms / 1000)}s` : ""}`,
-			);
+			const took = summary.result ? `: ${turnsAndTime(summary.result)}` : "";
+			say(spec.agent, `done (exit ${code})${took}`);
 			done(summary);
 		}),
 	);
@@ -198,8 +217,10 @@ for (const s of summaries) {
 		.filter(([n]) => n.startsWith("githive."))
 		.map(([n, c]) => `${n.slice(8)} ${c}`)
 		.join(", ");
+	const took = s.result ? turnsAndTime(s.result) : "no result";
+	const edits = (s.tools.Edit ?? 0) + (s.tools.Write ?? 0);
 	console.log(
-		`${s.agent.padEnd(10)} ${s.result ? `${s.result.num_turns} turns, ${Math.round(s.result.duration_ms / 1000)}s` : "no result"}; githive: ${githive || "none"}; bash ${s.tools.Bash ?? 0}, edits ${(s.tools.Edit ?? 0) + (s.tools.Write ?? 0)}`,
+		`${s.agent.padEnd(10)} ${took}; githive: ${githive || "none"}; bash ${s.tools.Bash ?? 0}, edits ${edits}`,
 	);
 	if (s.result?.result) console.log(`           ${String(s.result.result).replace(/\s+/g, " ").slice(0, 400)}`);
 }
@@ -219,7 +240,6 @@ console.log(
 const failed = (landing?.recent ?? []).filter((s) => s.how === "failed");
 if (failed.length) console.log(`Put out (checks failed): ${failed.map((s) => s.change).join(", ")}`);
 const audit = await get(`/repos/_/${plan.repo}/audit`);
-console.log(
-	`audit: ${audit.merges} merges, ${audit.open} open violations${audit.violations?.length ? `: ${JSON.stringify(audit.violations).slice(0, 400)}` : ""}`,
-);
+const violations = audit.violations?.length ? `: ${JSON.stringify(audit.violations).slice(0, 400)}` : "";
+console.log(`audit: ${audit.merges} merges, ${audit.open} open violations${violations}`);
 console.log(`total ${((Date.now() - started) / 1000).toFixed(0)}s`);

@@ -97,7 +97,7 @@ describe("votes before and after sharding", { timeout: 60_000 }, () => {
 		expect(store().cite(view, commitA)).toBe(view.tips.get(""));
 	});
 
-	it("shards once, keeping the votes cast before, and reads a commit's votes from the record and its bucket", async () => {
+	it("shards once, keeping earlier votes, and reads a commit's votes from the record and its bucket", async () => {
 		await store().vote(ballot(commitA, "rev-1"));
 		await store().flag({ change: "c-1", agent: "agent-c", reason: "reviewers disagree" });
 		expect(await shardVotes(root(), { buckets: VOTE_BUCKETS, recordsRepos: 0, reason: "test" })).toMatchObject({
@@ -176,7 +176,7 @@ describe("the audit of sharded votes", () => {
 		expect(await audit(records)).toEqual([]);
 	});
 
-	it("reports a cited bucket tip that isn't in the bucket's history, and approvals the cited votes don't hold", async () => {
+	it("reports a cited bucket tip not in the bucket's history, and approvals the cited votes don't hold", async () => {
 		const records = {
 			registry,
 			votes: [{ tip: "v1", state: { votes: [] } }],

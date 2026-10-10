@@ -24,7 +24,7 @@ describe("Artifacts transient failures", () => {
 		expect(repo.createToken).toHaveBeenCalledTimes(2);
 	});
 
-	it("retries token minting, and getting the repo, when Artifacts fails them with an internal error under load", async () => {
+	it("retries minting a token and getting the repo when Artifacts fails them with an internal error", async () => {
 		const internal = () =>
 			Object.assign(new Error("An internal error occurred."), { code: "INTERNAL_ERROR", numericCode: 10400 });
 		const repo = {
@@ -197,7 +197,7 @@ describe("Artifacts transient failures", () => {
 			vi.unstubAllGlobals();
 		};
 
-		it("is deleted once it has forked for too long, and used when that lets it finish (as Artifacts did on bench)", async () => {
+		it("is deleted once it has forked for too long, and used if that lets it finish", async () => {
 			clock();
 			const source = {
 				fork: vi.fn(async () => ({ name: "fork", remote: "https://git.test/fork.git", token: "token" })),
@@ -298,7 +298,7 @@ describe("Artifacts transient failures", () => {
 		expect((await del("missing")).status).toBe(404);
 	});
 
-	it("lists project repos from every page, without forks, as _/<id> to an Access admin until they join an org", async () => {
+	it("lists project repos from every page, without forks, as _/<id> to an Access admin not yet in an org", async () => {
 		const list = vi
 			.fn()
 			.mockResolvedValueOnce({ repos: [{ name: "fork--zeta--a-1" }, { name: "zeta" }], cursor: "next" })

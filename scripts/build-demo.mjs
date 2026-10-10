@@ -82,8 +82,10 @@ for (let waited = 0; waited < 1800; waited += 20) {
 	const builder = await api("GET", `/repos/_/${REPO}/builders/${change}`);
 	const held = snapshot.claims.find((c) => c.change === change);
 	const votes = snapshot.votes.map((v) => `${v.reviewer}:${v.verdict}`).join(" ");
+	const claim = held ? "held" : "released";
 	say(
-		`builder ${builder.status} (${builder.pushes} pushes); claim ${held ? "held" : "released"}; merges ${snapshot.audit.merges}; votes ${votes || "none"}`,
+		`builder ${builder.status} (${builder.pushes} pushes); claim ${claim}; merges ${snapshot.audit.merges}; ` +
+			`votes ${votes || "none"}`,
 	);
 	if (builder.status === "failed") {
 		say(

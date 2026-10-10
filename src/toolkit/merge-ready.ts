@@ -104,7 +104,8 @@ async function conflictRefusal(
 		conflicts,
 		...(causes.length ? { causes } : {}),
 		reasons: [
-			`changes/${input.change} conflicts with ${branch} in ${where}: merge ${branch} into your branch, resolve inside your claim, push, and get the new commit approved`,
+			`changes/${input.change} conflicts with ${branch} in ${where}: merge ${branch} into your ` +
+				"branch, resolve inside your claim, push, and get the new commit approved",
 		],
 	};
 }

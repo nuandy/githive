@@ -37,7 +37,12 @@ describe("the Code tab", () => {
 			/>,
 		);
 		expect(html).toMatch(
-			/<a href="#\/repos\/acme\/my-app\/code">my-app<\/a>.*<a href="#\/repos\/acme\/my-app\/code\/src">src<\/a>.*<a href="#\/repos\/acme\/my-app\/code\/src\/stats">stats<\/a>.*<strong aria-current="page">page\.tsx<\/strong>/,
+			new RegExp(
+				'<a href="#/repos/acme/my-app/code">my-app</a>.*' +
+					'<a href="#/repos/acme/my-app/code/src">src</a>.*' +
+					'<a href="#/repos/acme/my-app/code/src/stats">stats</a>.*' +
+					'<strong aria-current="page">page\\.tsx</strong>',
+			),
 		);
 		expect(html).toContain("2 lines");
 		expect(html).toMatch(/<td class="code__no" aria-hidden="true">1<\/td><td class="code__text">const a = 1;<\/td>/);

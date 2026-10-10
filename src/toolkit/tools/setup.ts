@@ -31,7 +31,9 @@ export const setupTools: ToolHandlers = {
 			);
 		const nameOk = (agent: string) => {
 			if (agent.includes("/"))
-				throw new Error('[400] names with "/" are signed-in agents\' (<handle>/<agent>); register a name without one');
+				throw new Error(
+					'[400] names with "/" are signed-in agents\' (<handle>/<agent>); register a name without ' + "one",
+				);
 			if (agent.startsWith(HOSTED_PREFIX) && !ctx.hosted)
 				throw new Error("[403] githive- names are GitHive's hosted agents'");
 			return agent;
@@ -148,7 +150,7 @@ function shardingAtStart(asked: number | undefined, recordsRepos: number, spread
 async function changeRepoSettings({ args, ctx, repo, claims, stamper }: ToolCall, registered: Registry) {
 	if (args.shard_depth !== undefined || args.records_repos !== undefined)
 		throw new Error(
-			"[409] how claims are kept is set when GitHive starts on a repo: since, they shard as the load calls for it",
+			"[409] how claims are kept is set when GitHive starts on a repo: since, they shard as the load " + "calls for it",
 		);
 	const policy = POLICY_FIELDS.some((field) => args[field] !== undefined)
 		? policyFrom(args, registered.policy ?? DEFAULT_POLICY)
@@ -160,10 +162,10 @@ async function changeRepoSettings({ args, ctx, repo, claims, stamper }: ToolCall
 			: branchRulesFrom(args.branch_rules, registered.policy ?? DEFAULT_POLICY);
 	const skipChecks = args.skip_checks === undefined ? undefined : skipPatternsFrom(args.skip_checks);
 	const github = args.github === undefined ? undefined : await githubFrom(ctx, args.github);
-	if (!policy && !verify && !branchRules && !skipChecks && github === undefined)
-		throw new Error(
-			`[400] GitHive has started on ${repo}: name what to change: ${[...POLICY_FIELDS, "verify", "branch_rules", "skip_checks", "github"].join(", ")}`,
-		);
+	if (!policy && !verify && !branchRules && !skipChecks && github === undefined) {
+		const fields = [...POLICY_FIELDS, "verify", "branch_rules", "skip_checks", "github"].join(", ");
+		throw new Error(`[400] GitHive has started on ${repo}: name what to change: ${fields}`);
+	}
 	// Checks on Actions need the GitHub repo they run in. A github of null disconnects it.
 	const connected = github === undefined ? registered.github : github;
 	if (onActions(verify ?? registered.verify) && !connected)

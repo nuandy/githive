@@ -45,7 +45,10 @@ describe("the Claims map", () => {
 	it("colors claimed files and folders, links them to their change, and marks conflicts", () => {
 		const html = renderToStaticMarkup(<ClaimsMap branch="master" holders={holders} tree={tree} />);
 		expect(html).toMatch(
-			/<a href="#\/repos\/acme\/my-app\/changes\/readme" class="claims__item claims__item--held claim-c1"[^>]*>.*README\.md.*aria-label="conflict"/,
+			new RegExp(
+				'<a href="#/repos/acme/my-app/changes/readme" class="claims__item claims__item--held claim-c1"[^>]*>' +
+					'.*README\\.md.*aria-label="conflict"',
+			),
 		);
 		expect(html).toMatch(/<summary class="claims__item claims__dir claims__item--held claim-c0"[^>]*>.*stats/);
 		expect(html).toMatch(

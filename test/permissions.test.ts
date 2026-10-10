@@ -146,7 +146,7 @@ describe("every repo route, for each person", () => {
 
 describe("every MCP tool, for each person's agent", () => {
 	for (const [person, level] of Object.entries(EXPECTED)) {
-		it(`lets ${person}'s agent (with ${person}'s ${level ?? "nothing"}) use exactly the tools that need no more`, async () => {
+		it(`lets ${person}'s agent (with ${level ?? "nothing"}) use exactly the tools that need no more`, async () => {
 			const { env, people } = await world();
 			for (const [name, needs] of Object.entries(TOOL_LEVEL)) {
 				// credentials with a change needs review access: another's change is read to review it, and the

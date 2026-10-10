@@ -76,7 +76,9 @@ function stillWaiting(change: string, head: string, waitedMs: number): MergeOutc
 		ok: false,
 		pending: true,
 		reasons: [
-			`${change} is ready and waiting to land (${head.slice(0, 8)}): others' batches came first in the ${Math.round(waitedMs / 60_000)} minutes this merge waited. Call merge again to go on waiting; it lands with a coming batch.`,
+			`${change} is ready and waiting to land (${head.slice(0, 8)}): others' batches came first in ` +
+				`the ${Math.round(waitedMs / 60_000)} minutes this merge waited. Call merge again to go on ` +
+				"waiting; it lands with a coming batch.",
 		],
 	};
 }

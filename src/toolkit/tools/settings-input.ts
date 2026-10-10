@@ -29,7 +29,8 @@ export function branchRulesFrom(value: unknown, base: ReviewPolicy): BranchRule<
 		const verify = rule.verify === undefined ? undefined : checksFrom(rule.verify);
 		if (!Object.keys(policy).length && !verify)
 			throw new Error(
-				`[400] branch_rules[${index}] (${pattern}) changes nothing: set required, vetoes, escalate, grants or verify`,
+				`[400] branch_rules[${index}] (${pattern}) changes nothing: set required, vetoes, ` +
+					"escalate, grants or verify",
 			);
 		return { pattern, ...(Object.keys(policy).length ? { policy } : {}), ...(verify ? { verify } : {}) };
 	});
@@ -83,7 +84,8 @@ function validGrants(value: unknown): Record<string, string[]> {
 	for (const [role, who] of Object.entries(value)) {
 		if (!Array.isArray(who) || !who.every((holder) => typeof holder === "string" && holder.trim()))
 			throw new Error(
-				`[400] grants.${role} is a list: agent names, "person:*", "person:<who>", "service:<id>", a team "@<org>/<team>" or "githive"`,
+				`[400] grants.${role} is a list: agent names, "person:*", "person:<who>", "service:<id>", ` +
+					`a team "@<org>/<team>" or "githive"`,
 			);
 		grants[role] = who.map((holder) => holder.trim());
 	}

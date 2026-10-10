@@ -83,7 +83,7 @@ describe("the honeycomb", () => {
 		expect(keys(honeycomb(files, [], { now, big: 3 }))).toEqual(["docs", "src/*", "src/auth", "src/stats", "web", "*"]);
 	});
 
-	it("puts the most specific whole claim first, a top-level file claim on the top-level files, and a whole-repo claim everywhere", () => {
+	it("puts the most specific whole claim first, top-level file claims on top-level files, repo claims on all", () => {
 		const hexes = honeycomb(
 			files,
 			[

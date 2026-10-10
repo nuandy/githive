@@ -23,7 +23,7 @@ describe("whose turn a change is", () => {
 		expect(waitingOn(signs())).toMatchObject({ turn: "reviewers" });
 	});
 
-	it("goes back to the agent when changes are asked for (failed checks reject its head too), or it's approved and not merged", () => {
+	it("goes back to the agent when changes are asked for (failed checks count) or it's approved and not merged", () => {
 		expect(waitingOn(signs({ votes: [{ verdict: "reject", at: at(minutes(5)) }] }))).toMatchObject({
 			turn: "agent",
 			since: at(minutes(5)),

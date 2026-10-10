@@ -83,11 +83,14 @@ app.get("/api", (c) =>
 			"POST /mcp         (the MCP front door: JSON-RPC over HTTP; repo is <owner>/<name>)",
 			"GET  /me          (who you are)",
 			"GET  /auth/:provider  (sign in with github or google)",
-			"GET|POST /me/agents, DELETE /me/agents/:id, POST /me/agents/:id/tokens, DELETE /me/tokens/:id  (your agents and their tokens)",
+			"GET|POST /me/agents, DELETE /me/agents/:id, POST /me/agents/:id/tokens, DELETE " +
+				"/me/tokens/:id  (your agents and their tokens)",
 			"GET|DELETE /me/connections  (MCP clients connected as your agents)",
 			"GET|POST /orgs, GET|PATCH /orgs/:org  (your orgs; one's repos, members and teams)",
-			"POST /orgs/:org/members {email, role}, PATCH|DELETE /orgs/:org/members/:handle, DELETE /orgs/:org/invites/:email",
-			"POST /orgs/:org/teams {slug}, DELETE /orgs/:org/teams/:team, PUT|DELETE /orgs/:org/teams/:team/members/:handle",
+			"POST /orgs/:org/members {email, role}, PATCH|DELETE /orgs/:org/members/:handle, DELETE " +
+				"/orgs/:org/invites/:email",
+			"POST /orgs/:org/teams {slug}, DELETE /orgs/:org/teams/:team, PUT|DELETE " +
+				"/orgs/:org/teams/:team/members/:handle",
 			"GET  /repos       (the repos you can see)",
 			"POST /repos {owner, name, import_url? | copy_from?, visibility?}  (a new repo)",
 			"GET  /summaries   (every repo you can see, with its counts)",
@@ -95,9 +98,11 @@ app.get("/api", (c) =>
 			"GET  /repos/:owner/:name/changes/:change  (one change's history)",
 			"POST /repos/:owner/:name/changes/:change/votes {role, verdict, evidence}  (a person's vote; review)",
 			"GET  /repos/:owner/:name/audit | /landing?branch= | /tree?ref= | /file?path=&ref= | /live (WebSocket)",
-			"PATCH /repos/:owner/:name {visibility}, GET|PUT|DELETE /repos/:owner/:name/collaborators[/:handle]  (admin)",
+			"PATCH /repos/:owner/:name {visibility}, GET|PUT|DELETE " +
+				"/repos/:owner/:name/collaborators[/:handle]  (admin)",
 			"DELETE /repos/:owner/:name  (admin)",
-			"Access admins: POST /repos/import, /repos/_/<id>/..., GET /admin/repos, POST /admin/repos/:id/adopt {owner, name}, GET|POST|DELETE /admin/invites",
+			"Access admins: POST /repos/import, /repos/_/<id>/..., GET /admin/repos, POST " +
+				"/admin/repos/:id/adopt {owner, name}, GET|POST|DELETE /admin/invites",
 		],
 	}),
 );

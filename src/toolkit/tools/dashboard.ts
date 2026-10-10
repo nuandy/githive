@@ -53,7 +53,9 @@ export async function tellPeopleOfWaitingRoles(
 		const next = people
 			? `You can review it as ${review.role} from the dashboard.`
 			: `No person holds ${review.role}, so you can't sign it off: nudge its holders, or grant it to more.`;
-		const reason = `${review.change}'s ${review.role} review has waited ${minutes} minutes and none of its holders (${holders.join(", ")}) has taken it. ${next}`;
+		const reason =
+			`${review.change}'s ${review.role} review has waited ${minutes} minutes and none of its holders ` +
+			`(${holders.join(", ")}) has taken it. ${next}`;
 		await votes.flag({ change: review.change, agent: "githive", role: review.role, reason });
 		await ctx.reviews.told(repo, key);
 		told = true;

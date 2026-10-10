@@ -39,7 +39,7 @@ describe("the dashboard's repos", () => {
 		expect(list).toHaveBeenCalledTimes(2);
 	});
 
-	it("answers from the index, and counts a repo whose counts are older than its last activity in the background", async () => {
+	it("answers from the index, recounting in the background a repo whose counts predate its last activity", async () => {
 		const fresh = { open: 1, countedAt: "2026-10-06T10:00:00.000Z", lastActivity: "2026-10-06T09:00:00.000Z" };
 		const index = {
 			summaries: vi.fn(async () => ({

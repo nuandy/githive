@@ -115,7 +115,7 @@ describe("Cloudflare Access JWT verification", () => {
 });
 
 describe("Worker ingress authentication", () => {
-	it("refuses unauthenticated requests for the API, MCP and writes, but serves the page that asks people to sign in", async () => {
+	it("refuses unauthenticated API, MCP and write requests, but serves the page asking people to sign in", async () => {
 		const worker = (await import("../../src/index")).default;
 		const assets = { fetch: async () => new Response("<!doctype html>the dashboard") };
 		const env = { ACCESS_TEAM_DOMAIN: config.teamDomain, ACCESS_AUD: config.audience, ASSETS: assets } as never;

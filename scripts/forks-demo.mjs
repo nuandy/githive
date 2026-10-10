@@ -6,7 +6,8 @@
 //
 //   node scripts/forks-demo.mjs [--base https://blueprint-bench.nuandy.workers.dev] [--repo forks-demo]
 //
-// Credentials come from .dev.vars (CF_ACCESS_CLIENT_ID, CF_ACCESS_CLIENT_SECRET) and are never printed; nor are agent keys.
+// Credentials come from .dev.vars (CF_ACCESS_CLIENT_ID, CF_ACCESS_CLIENT_SECRET) and are never printed;
+// nor are agent keys.
 
 import { execFile } from "node:child_process";
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";

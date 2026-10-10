@@ -174,11 +174,14 @@ export function grantWarnings(policy: ReviewPolicy): string[] {
 		const warnings: string[] = [];
 		if (!many && !people)
 			warnings.push(
-				`${role} is held by ${holders[0]} alone: its reviews wait whenever it's busy. Grant it to two or more agents, or a pool ("service:<id>/*": every agent registered under that identity).`,
+				`${role} is held by ${holders[0]} alone: its reviews wait whenever it's busy. Grant it to ` +
+					`two or more agents, or a pool ("service:<id>/*": every agent registered under that ` +
+					"identity).",
 			);
 		if (!people)
 			warnings.push(
-				`no person holds ${role}: when its reviews wait 10 minutes people are told, but can't sign them off. Add "person:*" to let them.`,
+				`no person holds ${role}: when its reviews wait 10 minutes people are told, but can't sign ` +
+					`them off. Add "person:*" to let them.`,
 			);
 		return warnings;
 	});

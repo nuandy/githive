@@ -165,7 +165,8 @@ function requestFork(artifacts: Artifacts, source: string, name: string, descrip
 /** Deleting a stuck fork often lets it finish at once. Otherwise it's gone and is requested again. */
 async function deleteStuckFork(artifacts: Artifacts, name: string, forkingSince: number) {
 	console.log(
-		`fork ${name} still forking after ${Math.round((Date.now() - forkingSince) / 1000)}s: deleting it, so it finishes or is made again`,
+		`fork ${name} still forking after ${Math.round((Date.now() - forkingSince) / 1000)}s: deleting it, ` +
+			"so it finishes or is made again",
 	);
 	await call("delete", name, () => artifacts.delete(name)).catch((deleting) =>
 		console.error(`deleting the stuck fork ${name} failed`, String(deleting)),

@@ -48,7 +48,7 @@ describe("orgs", () => {
 		expect(validSlug("a")).toBe(true);
 	});
 
-	it("adds a member at once by email if they've signed in, else when they first sign in, once an admin approves them", async () => {
+	it("adds a member by email: at once if they've signed in, else at first sign-in once an admin approves", async () => {
 		const acme = await orgs.createOrg(people.ada, "acme");
 		expect(await orgs.addMember(acme, "BOB@example.com", "member", "ada")).toEqual({ added: "bob", role: "member" });
 		expect(await orgs.addMember(acme, "dan@example.com", "admin", "ada")).toEqual({

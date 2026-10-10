@@ -220,7 +220,8 @@ function checkDependencies(merges: MergeRecord[], merge: MergeRecord, own: Claim
 		if (!before)
 			report(
 				"merged-before-dependency",
-				`${merge.change} waits on ${dependency}, which hadn't merged into ${merge.branch ?? "the project's branch"} before it`,
+				`${merge.change} waits on ${dependency}, which hadn't merged into ${merge.branch ?? "the project's branch"} ` +
+					"before it",
 			);
 	}
 }
@@ -347,7 +348,7 @@ async function verifiedVotes(records: AuditRecords, verified: Verify) {
 						commit: tip,
 						author: vote.reviewer,
 						rule: "unverified-record",
-						detail: `${vote.reviewer}'s vote on ${vote.commit} has no valid GitHive stamp, so it doesn't count`,
+						detail: `${vote.reviewer}'s vote on ${vote.commit} has no valid GitHive stamp, so it ` + "doesn't count",
 					});
 			}
 			if (checked.get(id)) counted.push(vote);
@@ -522,7 +523,9 @@ function othersClaimsReleased(history: History, staleAfterMs?: number): Violatio
 					commit: entry.tip,
 					author: release.by,
 					rule: "released-others-claim",
-					detail: `${release.by} released ${release.change} (${release.agent}), active ${Math.round(idle / 60_000)} minutes before, not stale`,
+					detail:
+						`${release.by} released ${release.change} (${release.agent}), active ${Math.round(idle / 60_000)} ` +
+						"minutes before, not stale",
 				});
 		}
 		checked = entry.state.released.length;

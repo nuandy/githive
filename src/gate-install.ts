@@ -22,7 +22,8 @@ export async function checksFor(container: Container, checks: string[]) {
 	const found = await run(container, [
 		"bash",
 		"-c",
-		"[ -f package.json ] && echo package.json; [ -f package-lock.json ] || [ -f npm-shrinkwrap.json ] && echo lockfile; true",
+		"[ -f package.json ] && echo package.json; [ -f package-lock.json ] || [ -f npm-shrinkwrap.json ] " +
+			"&& echo lockfile; true",
 	]);
 	return withInstall(checks, {
 		packageJson: found.output.includes("package.json"),
@@ -35,11 +36,15 @@ export async function checksFor(container: Container, checks: string[]) {
  * registry again, so skipping an unchanged install matters.
  */
 export async function lockHash(container: Container) {
-	const deps = `node -e 'try { const p = require("./package.json"); console.log(JSON.stringify(["dependencies", "devDependencies", "optionalDependencies", "peerDependencies", "overrides", "resolutions", "workspaces"].map((k) => p[k] ?? null))) } catch { console.log("none") }'`;
+	const deps =
+		`node -e 'try { const p = require("./package.json"); console.log(JSON.stringify(["dependencies", ` +
+		`"devDependencies", "optionalDependencies", "peerDependencies", "overrides", "resolutions", ` +
+		`"workspaces"].map((k) => p[k] ?? null))) } catch { console.log("none") }'`;
 	const hashed = await run(container, [
 		"bash",
 		"-lc",
-		`{ ${deps}; cat package-lock.json npm-shrinkwrap.json yarn.lock pnpm-lock.yaml 2>/dev/null; } | sha256sum | cut -d' ' -f1`,
+		`{ ${deps}; cat package-lock.json npm-shrinkwrap.json yarn.lock pnpm-lock.yaml 2>/dev/null; } | ` +
+			"sha256sum | cut -d' ' -f1",
 	]);
 	return hashed.output.trim();
 }
@@ -56,7 +61,8 @@ async function dependenciesHash(container: Container, installed: { toolchain: To
 	const hashed = await run(container, [
 		"bash",
 		"-c",
-		`{ echo ${installed.map((i) => i.toolchain).join(",")}; cat ${DEPENDENCY_FILES} 2>/dev/null; } | sha256sum | cut -d' ' -f1`,
+		`{ echo ${installed.map((i) => i.toolchain).join(",")}; cat ${DEPENDENCY_FILES} 2>/dev/null; } | ` +
+			"sha256sum | cut -d' ' -f1",
 	]);
 	return hashed.output.trim();
 }

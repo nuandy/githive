@@ -74,7 +74,8 @@ describe("agent tokens", () => {
 
 	it("fills a new token into each client's setup, and never leaves a placeholder", () => {
 		expect(tokenSteps("claude-code", "https://githive.app", "ghv_x")[0].copy).toBe(
-			'claude mcp add --scope user --transport http githive https://githive.app/mcp --header "Authorization: Bearer ghv_x"',
+			"claude mcp add --scope user --transport http githive https://githive.app/mcp --header " +
+				'"Authorization: Bearer ghv_x"',
 		);
 		const codex = tokenSteps("codex", "https://githive.app", "ghv_x").map((s) => s.copy);
 		expect(codex).toEqual([

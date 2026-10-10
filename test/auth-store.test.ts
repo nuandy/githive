@@ -29,7 +29,7 @@ describe("signing in", () => {
 		expect(signed).toMatchObject({ user: { handle: "ada", email: "ada@example.com", name: "Ada" } });
 	});
 
-	it("notes who tried to sign in uninvited as a request, counting each try, until they're let in or turned down", async () => {
+	it("notes an uninvited sign-in as a request, counting each try, until they're let in or turned down", async () => {
 		const { ids } = store();
 		await ids.signIn(github);
 		clock += 60_000;

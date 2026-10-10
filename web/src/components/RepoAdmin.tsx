@@ -312,7 +312,7 @@ function DeleteRepository({
 			<h2>Delete this repository</h2>
 			<p className="manage__note">
 				This deletes its code, its history, GitHive's record of its claims, votes and merges, and its agents' forks. It
-				can't be undone. The saved setup its containers start from is never used again, and is gone within 30 days. Type{" "}
+				can't be undone. The saved setup its containers start from is never used again and is gone within 30 days. Type{" "}
 				<code>{repo}</code> to confirm.
 			</p>
 			<div className="manage__inline">

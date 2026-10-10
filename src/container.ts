@@ -110,7 +110,8 @@ export async function takeGitRequests(
 ): Promise<{ paths: Map<string, number>; failed: number } | null> {
 	const script = [
 		`f=${GIT_TRACE_FILE}; [ -f "$f" ] || exit 0; mv "$f" "$f.taken"`,
-		`grep -oE "=> Send header: (GET|POST) [^ ]+" "$f.taken" | awk '{print $5}' | sed -E 's/\?.*//' | sort | uniq -c`,
+		`grep -oE "=> Send header: (GET|POST) [^ ]+" "$f.taken" | awk '{print $5}' | sed -E 's/\?.*//' | ` +
+			"sort | uniq -c",
 		`echo "failed $(grep -cE '<= Recv header: HTTP/[0-9.]+ 5[0-9][0-9]' "$f.taken")"`,
 		`rm -f "$f.taken"`,
 	].join("\n");
@@ -186,14 +187,31 @@ function isNetworkGitCommand(args: string[]) {
 	return args[0] === "clone" || args[0] === "fetch" || args[0] === "push";
 }
 
+const NETWORK_FAILURE = new RegExp(
+	"\\b(?:" +
+		[
+			"could not resolve (?:host|proxy)",
+			"failed to connect",
+			"connection (?:timed out|reset|refused)",
+			"operation timed out",
+			"network is unreachable",
+			"temporary failure in name resolution",
+			"recv failure",
+			"send failure",
+			"remote end hung up unexpectedly",
+			"unexpected disconnect",
+			"early eof",
+		].join("|") +
+		")\\b",
+	"i",
+);
+
 /** Only transport errors are retried. Local and permanent Git failures pass through. */
 function isTransientGitOutput(output: string) {
 	return (
 		/\bHTTP(?:\/\d(?:\.\d)?)?\s+(?:408|429|5\d\d)\b/i.test(output) ||
 		/returned error:\s*(?:408|429|5\d\d)\b/i.test(output) ||
-		/\b(?:could not resolve (?:host|proxy)|failed to connect|connection (?:timed out|reset|refused)|operation timed out|network is unreachable|temporary failure in name resolution|recv failure|send failure|remote end hung up unexpectedly|unexpected disconnect|early eof)\b/i.test(
-			output,
-		) ||
+		NETWORK_FAILURE.test(output) ||
 		/\bcurl\s*\(?\s*(?:7|28|35|52|56)\)?\b/i.test(output)
 	);
 }

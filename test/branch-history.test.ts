@@ -58,7 +58,7 @@ describe("a branch's history through Artifacts' API", { timeout: 60_000 }, () =>
 		rmSync(work, { recursive: true, force: true });
 	});
 
-	it("lists exactly what git diff-tree does: added, deleted, mode changed, a folder replaced by a file and back", async () => {
+	it("lists what git diff-tree does: added, deleted, mode changed, a folder replaced by a file and back", async () => {
 		const baseline = server.git("rev-parse", "main").trim();
 		const clone = await agentClone(server.url, work, "author");
 		const dir = join(work, "author");

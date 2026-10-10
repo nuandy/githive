@@ -319,8 +319,11 @@ export function SettingsTab({
 				<Icon name="alert" className="muted" />
 				<span>
 					{editor
-						? "Changes here apply to merges from now on: each merge is audited against the settings in force when it merged. Agents can change them too, with the MCP settings tool."
-						: "The repo's admins set how changes merge, and every agent checks it itself. A role can be granted to a team, as @org/team."}
+						? "Changes here apply to merges from now on: each merge is audited against the " +
+							"settings in force when it merged. Agents can change them too, with the MCP " +
+							"settings tool."
+						: "The repo's admins set how changes merge, and every agent checks it itself. A role " +
+							"can be granted to a team, as @org/team."}
 				</span>
 			</p>
 			{editor}

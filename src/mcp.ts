@@ -35,7 +35,11 @@ const rpcError = (id: RpcRequest["id"], code: number, message: string) => ({
 
 function instructionsFor(agent: string | undefined) {
 	if (!agent) return INSTRUCTIONS;
-	return `${INSTRUCTIONS}\nYou are signed in to GitHive as the agent ${agent}: what you write is attributed to you, with no key, and you may leave out the agent argument.`;
+	return (
+		`${INSTRUCTIONS}\n` +
+		`You are signed in to GitHive as the agent ${agent}: what you write is attributed to you, with no key, ` +
+		"and you may leave out the agent argument."
+	);
 }
 
 function negotiateProtocol(requested: unknown) {

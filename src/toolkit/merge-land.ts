@@ -42,7 +42,8 @@ export async function land(
 	const plural = batch.length === 1 ? "" : "s";
 	const how = tested ? "checked together" : "no checks";
 	console.log(
-		`landed ${batch.length} change${plural} on ${input.branch} (${how}): merged and pushed ${pushedAt - startedAt} ms, told ${Date.now() - pushedAt} ms`,
+		`landed ${batch.length} change${plural} on ${input.branch} (${how}): merged and pushed ${pushedAt - startedAt} ` +
+			`ms, told ${Date.now() - pushedAt} ms`,
 	);
 	return { settled, release: () => releaseLanded(input, batch, commits) };
 }
@@ -108,7 +109,8 @@ async function releaseLanded(input: MergeInput, batch: Ready[], commits: string[
 	);
 	const plural = batch.length === 1 ? "" : "s";
 	console.log(
-		`released the claims of ${batch.length} change${plural} landed on ${input.branch}, after the lease was handed on: ${Date.now() - startedAt} ms`,
+		`released the claims of ${batch.length} change${plural} landed on ${input.branch}, after the lease ` +
+			`was handed on: ${Date.now() - startedAt} ms`,
 	);
 	if (!input.afterLanding) return;
 	const afterFrom = Date.now();

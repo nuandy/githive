@@ -97,7 +97,7 @@ describe("pushes", () => {
 		expect(box.ran).toEqual([]);
 	});
 
-	it("a builder pushes to its change branch, checking that branch on origin first, and remembers what it pushed", async () => {
+	it("a builder pushes to its change branch, checking it on origin first, and remembers what it pushed", async () => {
 		const result = await builder.callGit(["push", "-q", "origin", "HEAD:refs/heads/changes/a-1"]);
 		expect(result.exitCode).toBe(0);
 		expect(box.ran.find((args) => args.includes("ls-remote"))).toContain("refs/heads/changes/a-1");

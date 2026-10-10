@@ -76,8 +76,9 @@ console.log(`${"fail".padEnd(6)}${sizes.map((n) => String(n).padStart(7)).join("
 for (const { p, at } of results) {
 	const costs = at.map((r) => r.runsPerChange);
 	const best = sizes[costs.indexOf(Math.min(...costs))];
+	const columns = costs.map(cell).join("");
 	console.log(
-		`${String(p).padEnd(6)}${costs.map(cell).join("")}   ${String(best).padStart(9)}   ${String(githiveSize(p)).padStart(13)}`,
+		`${String(p).padEnd(6)}${columns}   ${String(best).padStart(9)}   ${String(githiveSize(p)).padStart(13)}`,
 	);
 }
 
@@ -94,6 +95,7 @@ for (const { p } of results) {
 	const ours = all.find((r) => r.n === size);
 	const pct = (x) => `${x >= 0 ? "+" : ""}${Math.round(100 * x)}%`;
 	console.log(
-		`fail ${p}: fewest at ${best.n}; at ${size}, ${pct(ours.runsPerChange / best.runsPerChange - 1)} runs, ${pct(ours.perTime / best.perTime - 1)} changes per time`,
+		`fail ${p}: fewest at ${best.n}; at ${size}, ${pct(ours.runsPerChange / best.runsPerChange - 1)} ` +
+			`runs, ${pct(ours.perTime / best.perTime - 1)} changes per time`,
 	);
 }

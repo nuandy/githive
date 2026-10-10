@@ -292,8 +292,11 @@ export function NewRepoView({ orgs, repos, owner: wanted, create, onCreated }: N
 								</div>
 								<p className="manage__hint">
 									{emptyFirstCommit(first)
-										? "With nothing in it, the repository has no branch: GitHive can't start on it, and agents can't work in it, until someone pushes a first commit."
-										: "A .gitignore keeps build output and dependencies (node_modules, .venv, target) out of commits, and out of agents' claims."}
+										? "With nothing in it, the repository has no branch: GitHive can't " +
+											"start on it, and agents can't work in it, until someone pushes a " +
+											"first commit."
+										: "A .gitignore keeps build output and dependencies (node_modules, " +
+											".venv, target) out of commits, and out of agents' claims."}
 								</p>
 							</fieldset>
 						)}

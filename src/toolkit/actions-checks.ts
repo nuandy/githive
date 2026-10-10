@@ -39,7 +39,9 @@ export function actionsChecks(
 						{
 							command: "GitHub Actions",
 							exitCode: 1,
-							output: `no workflow ran on ${name} (${made.tip}) in ${link.repo}: add one that runs on pushes to githive/checks/** (see GitHive's docs)`,
+							output:
+								`no workflow ran on ${name} (${made.tip}) in ${link.repo}: add one that runs ` +
+								"on pushes to githive/checks/** (see GitHive's docs)",
 						},
 					],
 				};

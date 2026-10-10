@@ -422,13 +422,14 @@ export function release(
 			...(input.mergedAs ? { mergedAs: input.mergedAs } : {}),
 			...(into ? { into } : {}),
 		};
+		const merged = input.mergedAs ? ` after merging ${input.mergedAs}` : "";
 		return {
 			state: {
 				...state,
 				claims: state.claims.filter((c) => c.change !== input.change),
 				released: [...state.released, await stamped("release", record, stamper, "verifiedBy")],
 			},
-			text: `${input.agent} releases ${input.change}${input.mergedAs ? ` after merging ${input.mergedAs}` : ""}: ${input.reason}`,
+			text: `${input.agent} releases ${input.change}${merged}: ${input.reason}`,
 		};
 	});
 }
@@ -504,7 +505,7 @@ export function registerAgents(log: CasLog<Registry>, agents: { agent: string; k
 		const taken = agents.filter((a) => state.agents?.[a.agent]).map((a) => a.agent);
 		if (taken.length)
 			return {
-				refused: `already registered: ${taken.join(", ")} (register each alone, with its agent key, to rotate it)`,
+				refused: `already registered: ${taken.join(", ")} (register each alone, with its agent key, to ` + "rotate it)",
 			};
 		const at = new Date().toISOString();
 		const records = await Promise.all(

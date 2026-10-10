@@ -34,6 +34,7 @@ export function upgradeState<S>(
 
 export function newerFormat(found: number, known: number = RECORD_FORMAT) {
 	return new Error(
-		`[409] these records are format ${found}, newer than this GitHive knows (${known}): it reads them but won't write over them`,
+		`[409] these records are format ${found}, newer than this GitHive knows (${known}): it reads them ` +
+			"but won't write over them",
 	);
 }

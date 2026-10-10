@@ -453,7 +453,8 @@ function compare(c, names) {
 const names = flag("only")?.split(",") ?? Object.keys(WAYS);
 for (const n of names) if (!WAYS[n]) throw new Error(`no way called ${n}: ${Object.keys(WAYS).join(", ")}`);
 const describe = (c) =>
-	`${c.rate}/h arriving for ${c.hours}h, ${c.fail * 100}% bad, ${c.flaky * 100}% flaky, ${c.ci}m checks, ${c.runners} runners, ${c.seeds} seeds` +
+	`${c.rate}/h arriving for ${c.hours}h, ${c.fail * 100}% bad, ${c.flaky * 100}% flaky, ${c.ci}m checks, ${c.runners} ` +
+	`runners, ${c.seeds} seeds` +
 	(c.retry ? `, retry ${c.retry}` : "") +
 	(c.lanes ? `, ${c.lanes} lanes` : "");
 const sweep = flag("sweep");

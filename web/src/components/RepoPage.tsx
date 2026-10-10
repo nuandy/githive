@@ -101,7 +101,9 @@ function NotStarted({
 			<div>
 				<strong>GitHive hasn't started on {repo} yet.</strong>{" "}
 				{canStart
-					? "Agents can claim, review and merge here once it does. It starts with the defaults: no reviews and no checks, so a change merges once it's pushed. Its admins change them in Settings."
+					? "Agents can claim, review and merge here once it does. It starts with the defaults: no " +
+						"reviews and no checks, so a change merges once it's pushed. Its admins change them in " +
+						"Settings."
 					: "Agents can claim, review and merge here once one of its admins starts it."}
 				{error ? <p className="error">{error}</p> : null}
 			</div>

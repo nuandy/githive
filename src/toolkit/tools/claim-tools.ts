@@ -63,7 +63,8 @@ export const claimTools: ToolHandlers = {
 		const held = args.stale === true ? null : await claimOf(change);
 		if (held && held.agent !== agent)
 			throw new Error(
-				`[403] ${change} is ${held.agent}'s claim: only its agent releases it, or anyone once it's abandoned (release with stale: true)`,
+				`[403] ${change} is ${held.agent}'s claim: only its agent releases it, or anyone once it's ` +
+					"abandoned (release with stale: true)",
 			);
 		if (args.stale === true)
 			return store.releaseStale(
@@ -105,7 +106,8 @@ async function landingBranch(call: ToolCall, change: string, agent: string) {
 	const into = optionalString(args, "into") ?? held?.into ?? branch;
 	if (held && (held.into ?? branch) !== into)
 		throw new Error(
-			`[409] ${change} lands on ${held.into ?? branch}: a change lands on one branch; claim another change for ${into}`,
+			`[409] ${change} lands on ${held.into ?? branch}: a change lands on one branch; claim another ` +
+				`change for ${into}`,
 		);
 	if (into === branch || held) return { into, made: undefined };
 	const from = optionalString(args, "from");
@@ -142,14 +144,19 @@ function claimReply(
 				source,
 				head: merging.tip,
 				claimed: paths,
-				note: `${change} merges ${source} at ${merging.tip.slice(0, 8)} into ${into}: its branch changes/${change} is that commit, in your fork. Get it reviewed, check and merge it like any change. If ${source} moves on, claim again to bring the change up to its new tip (a new head, so a new review).`,
+				note:
+					`${change} merges ${source} at ${merging.tip.slice(0, 8)} into ${into}: its branch changes/${change} ` +
+					`is that commit, in your fork. Get it reviewed, check and merge it like any change. If ${source} ` +
+					"moves on, claim again to bring the change up to its new tip (a new head, so a new review).",
 			}
 		: {};
 	// A refused claim that couldn't be fully backed out still holds paths: releasing the change frees them.
 	const stuck =
 		!outcome.ok && outcome.stillHeld?.length
 			? {
-					note: `part of ${change}'s claim couldn't be undone and still holds paths (${outcome.stillHeld.length} record(s)): release ${change} to free them`,
+					note:
+						`part of ${change}'s claim couldn't be undone and still holds paths (${outcome.stillHeld.length} ` +
+						`record(s)): release ${change} to free them`,
 				}
 			: {};
 	const reply: Record<string, unknown> = { ...outcome };

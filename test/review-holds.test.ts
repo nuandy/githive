@@ -16,7 +16,7 @@ import { MemoryLog } from "./helpers/memory-log";
 // long.
 
 describe("review holds, as a record", () => {
-	it("holds a review for as many agents as it needs, by compare-and-swap, until they vote or the hold runs out", async () => {
+	it("holds a review for as many agents as it needs, by compare-and-swap, until they vote or it expires", async () => {
 		const log = new MemoryLog<ReviewHolds>();
 		const t0 = 1_000_000;
 		const at = (ms: number) => () => t0 + ms;
@@ -46,7 +46,7 @@ describe("review holds, as a record", () => {
 });
 
 describe("reviews a role waits for, as a record", () => {
-	it("remembers when each was first seen waiting, forgets one that stops waiting, and whether people were told", async () => {
+	it("remembers when each was first seen waiting and whether people were told, forgetting one that stops", async () => {
 		const log = new MemoryLog<ReviewHolds>();
 		const first = await roleWaits(log, ["h1#security"]);
 		expect((await roleWaits(log, ["h1#security", "h2#security"]))["h1#security"].since).toBe(

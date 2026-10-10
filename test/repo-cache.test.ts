@@ -62,7 +62,7 @@ describe("kept views", () => {
 });
 
 describe("news of what landed", () => {
-	it("tells an agent what others landed since it was last told, nothing old on its first call, never its own", async () => {
+	it("tells an agent what others landed since it last heard, nothing old on its first call, never its own", async () => {
 		const { live } = feed();
 		const landed = (change: string, agent: string, at: string) => ({
 			change,

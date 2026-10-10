@@ -33,7 +33,13 @@ export const TURN_IN_FLIGHT = "sandbox-turn-in-flight";
 export const TURN_STARTED = "sandbox-turn-started-at";
 export const INBOX = "inbox";
 
-export const ENVIRONMENT = `The repository is checked out at ${WORKDIR} in a Linux container with Node.js 24, npm and git, plus whichever of these the repository uses: Python 3 with uv (a virtualenv at /opt/venv is active: python, pip and uv pip install into it; uv sync installs the project), Go (go mod download), and Rust with cargo, clippy and rustfmt (cargo fetch). Dependencies may already be installed from the project's main branch; install them again if the change touches what they come from (package.json, a lockfile, pyproject.toml, go.mod, Cargo.toml...). Commands time out after ${COMMAND_TIMEOUT_S} seconds.`;
+export const ENVIRONMENT =
+	`The repository is checked out at ${WORKDIR} in a Linux container with Node.js 24, npm and git, plus ` +
+	"whichever of these the repository uses: Python 3 with uv (a virtualenv at /opt/venv is active: python, " +
+	"pip and uv pip install into it; uv sync installs the project), Go (go mod download), and Rust with cargo, " +
+	"clippy and rustfmt (cargo fetch). Dependencies may already be installed from the project's main branch; " +
+	"install them again if the change touches what they come from (package.json, a lockfile, pyproject.toml, " +
+	`go.mod, Cargo.toml...). Commands time out after ${COMMAND_TIMEOUT_S} seconds.`;
 
 export interface SandboxJob {
 	/** The agent's own name, such as <project>--<change>. It keys the prompt cache. */
@@ -60,11 +66,14 @@ export interface ChangeJob extends SandboxJob {
 
 /** The change's context, worded the same way for every agent. */
 export function changeContext(job: ChangeJob) {
-	return `Change: ${job.change}. What it should do: ${job.intent}
-Its claim (the only paths this change may touch): ${job.claim.join(", ")}
-Before it merges, the project's checks must pass with it merged into ${job.branch}: ${job.verify.length ? job.verify.join("; ") : "no checks configured; run the project's own tests"}
-Other changes in progress at the same time:
-${job.others.map((other) => `- ${other.change} (claims ${other.claim.join(", ")})`).join("\n") || "- none"}`;
+	const checks = job.verify.length ? job.verify.join("; ") : "no checks configured; run the project's own tests";
+	return [
+		`Change: ${job.change}. What it should do: ${job.intent}`,
+		`Its claim (the only paths this change may touch): ${job.claim.join(", ")}`,
+		`Before it merges, the project's checks must pass with it merged into ${job.branch}: ${checks}`,
+		"Other changes in progress at the same time:",
+		job.others.map((other) => `- ${other.change} (claims ${other.claim.join(", ")})`).join("\n") || "- none",
+	].join("\n");
 }
 
 export interface AgentState {
@@ -413,7 +422,8 @@ export abstract class SandboxAgent<J extends SandboxJob, S extends AgentState> e
 			}),
 			tool({
 				name: "run_command",
-				description: `Run a bash command in ${WORKDIR}. Use it for npm install, tests, type checks, git and inspection.`,
+				description:
+					`Run a bash command in ${WORKDIR}. Use it for npm install, tests, type checks, git and ` + "inspection.",
 				schema: RunArgs,
 				run: async ({ command }) => {
 					const reason = this.commandRefusal(command, state);

@@ -158,7 +158,7 @@ describe("claims before and after sharding", { timeout: 60_000 }, () => {
 		expect(await (await store(before)).claim(want("e-1", ["etc/"]))).toMatchObject({ ok: true });
 	});
 
-	it("never lets a claim in the registry and one in a shard below both stand, made at once across the switch", async () => {
+	it("never lets a registry claim and a shard claim below it both stand, made at once across the switch", async () => {
 		const before = await registry();
 		await shard();
 		for (let round = 0; round < 3; round++) {

@@ -5,7 +5,8 @@
 //
 //   node scripts/seed-demo.mjs [--base https://blueprint-bench.nuandy.workers.dev] [--repo demo-<time>]
 //
-// Credentials come from .dev.vars (CF_ACCESS_CLIENT_ID, CF_ACCESS_CLIENT_SECRET) and are never printed; nor are agent keys.
+// Credentials come from .dev.vars (CF_ACCESS_CLIENT_ID, CF_ACCESS_CLIENT_SECRET) and are never printed;
+// nor are agent keys.
 
 import fs from "node:fs";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
@@ -118,7 +119,11 @@ async function seedRepo() {
 			write(
 				dir,
 				"CONTRIBUTING.md",
-				"# Contributing\n\n1. Fork this repository.\n2. Make your change on a branch.\n3. Open a pull request describing what you changed and why.\n",
+				"# Contributing\n" +
+					"\n" +
+					"1. Fork this repository.\n" +
+					"2. Make your change on a branch.\n" +
+					"3. Open a pull request describing what you changed and why.\n",
 			),
 	});
 	await vote(
@@ -151,7 +156,16 @@ async function seedRepo() {
 			write(
 				dir,
 				"styles.css",
-				"@import url(http://example.com/fonts.css);\n\n* {\n  margin: 0;\n  padding: 0;\n}\n\nh1 {\n  text-align: center;\n}\n",
+				"@import url(http://example.com/fonts.css);\n" +
+					"\n" +
+					"* {\n" +
+					"  margin: 0;\n" +
+					"  padding: 0;\n" +
+					"}\n" +
+					"\n" +
+					"h1 {\n" +
+					"  text-align: center;\n" +
+					"}\n",
 			),
 	});
 	await vote(
@@ -166,7 +180,8 @@ async function seedRepo() {
 		"security-reviewer",
 		"security",
 		"reject",
-		"styles.css now imports a stylesheet over plain http from example.com, a third-party host; drop the import or serve the font locally.",
+		"styles.css now imports a stylesheet over plain http from example.com, a third-party host; drop " +
+			"the import or serve the font locally.",
 	);
 	say("  center-title: changes requested");
 
@@ -179,7 +194,9 @@ async function seedRepo() {
 			write(
 				dir,
 				"README.md",
-				"### Well hello there!\n\nThis repository is meant to provide an example for *forking* a repository on GitHub.\n",
+				"### Well hello there!\n" +
+					"\n" +
+					"This repository is meant to provide an example for *forking* a repository on GitHub.\n",
 			),
 	});
 	await vote(readme, "tests-reviewer", "tests", "approve", "README only; nothing to run.");
@@ -191,7 +208,11 @@ async function seedRepo() {
 		intent: "Respect the reader's dark-mode preference",
 		paths: ["dark.css"],
 		edit: (dir) =>
-			write(dir, "dark.css", "@media (prefers-color-scheme: dark) {\n  body { background: #111; color: #eee; }\n}\n"),
+			write(
+				dir,
+				"dark.css",
+				"@media (prefers-color-scheme: dark) {\n" + "  body { background: #111; color: #eee; }\n" + "}\n",
+			),
 	});
 	say("  dark-mode: in progress");
 

@@ -26,7 +26,7 @@ describe("the context's caches", () => {
 		expect(artifacts.mints.filter((m) => m.startsWith("cache-p|"))).toEqual(["cache-p|read", "cache-p|write"]);
 	});
 
-	it("never hands one call a token another call is still minting: in Workers, a request can't wait on another's I/O", async () => {
+	it("never hands a call a token another is still minting: a Workers request can't wait on another's I/O", async () => {
 		const env = {} as Env;
 		await Promise.all([
 			toolContextFor(env, "service:a").remote("cache-s", "read"),

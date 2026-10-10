@@ -41,6 +41,18 @@ beforeEach(async () => {
 	session = `__Host-githive_session=${encodeURIComponent(await ids.createSession(userId))}`;
 });
 
+/** The authorize page's URL, as an MCP client builds it. */
+const authorizePath = (clientId: string, challenge: string, extra: Record<string, string> = {}) =>
+	`/authorize?${new URLSearchParams({
+		response_type: "code",
+		client_id: clientId,
+		redirect_uri: CLIENT_REDIRECT,
+		scope: "mcp",
+		state: "st",
+		code_challenge: challenge,
+		code_challenge_method: "S256",
+		...extra,
+	})}`;
 const call = (path: string, init: RequestInit = {}) =>
 	worker.fetch(
 		new Request(path.startsWith("http") ? path : `${ORIGIN}${path}`, init),
@@ -80,7 +92,7 @@ async function startConnecting() {
 		}),
 	);
 	const { verifier, challenge } = await pkce();
-	const authorizeUrl = `/authorize?${new URLSearchParams({ response_type: "code", client_id: registered.client_id, redirect_uri: CLIENT_REDIRECT, scope: "mcp", state: "st", code_challenge: challenge, code_challenge_method: "S256", resource: `${ORIGIN}/mcp` })}`;
+	const authorizeUrl = authorizePath(registered.client_id, challenge, { resource: `${ORIGIN}/mcp` });
 	return { clientId: registered.client_id as string, authorizeUrl, verifier };
 }
 
@@ -126,7 +138,7 @@ describe("connecting an MCP client over OAuth", () => {
 		expect(page).toContain(`/auth/github?return=${encodeURIComponent(authorizeUrl)}`);
 	});
 
-	it("shows the client, where access goes, and a warning for a local app; and escapes what the client chose", async () => {
+	it("shows the client, where access goes and a warning for a local app, escaping what the client chose", async () => {
 		const registered = await json(
 			call("/oauth/register", {
 				method: "POST",
@@ -139,7 +151,7 @@ describe("connecting an MCP client over OAuth", () => {
 			}),
 		);
 		const { challenge } = await pkce();
-		const url = `/authorize?${new URLSearchParams({ response_type: "code", client_id: registered.client_id, redirect_uri: CLIENT_REDIRECT, scope: "mcp", state: "st", code_challenge: challenge, code_challenge_method: "S256" })}`;
+		const url = authorizePath(registered.client_id, challenge);
 		const page = await call(url, { headers: { Cookie: session } });
 		const text = await page.text();
 		expect(text).not.toContain("<script>x</script>");
@@ -162,7 +174,7 @@ describe("connecting an MCP client over OAuth", () => {
 		expect(again).not.toMatch(/value="new" checked/);
 	});
 
-	it("issues a token for the agent the person chose, which calls MCP as <handle>/<agent> until the agent is revoked", async () => {
+	it("issues a token for the chosen agent, which calls MCP as <handle>/<agent> until the agent is revoked", async () => {
 		const { clientId, authorizeUrl, verifier } = await startConnecting();
 		const approved = await allow(authorizeUrl, "new", "claude-code");
 		expect(approved.status).toBe(302);
@@ -296,7 +308,7 @@ describe("where the consent form may lead", () => {
 			);
 			const { challenge } = await pkce();
 			return {
-				authorizeUrl: `/authorize?${new URLSearchParams({ response_type: "code", client_id: registered.client_id, redirect_uri: CLIENT_REDIRECT, scope: "mcp", state: "st", code_challenge: challenge, code_challenge_method: "S256" })}`,
+				authorizeUrl: authorizePath(registered.client_id, challenge),
 			};
 		})();
 		const page = await call(authorizeUrl, { headers: { Cookie: session } });
@@ -362,7 +374,7 @@ describe("feedback on Allow and Deny", () => {
 			}),
 		);
 		const { challenge } = await pkce();
-		const url = `/authorize?${new URLSearchParams({ response_type: "code", client_id: registered.client_id, redirect_uri: CLIENT_REDIRECT, scope: "mcp", state: "st", code_challenge: challenge, code_challenge_method: "S256" })}`;
+		const url = authorizePath(registered.client_id, challenge);
 		const nonceOf = async () => {
 			const response = await call(url, { headers: { Cookie: session } });
 			const policy = response.headers.get("Content-Security-Policy")!;

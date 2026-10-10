@@ -31,7 +31,8 @@ export async function fetchBatchBase(container: Container, input: BatchBase) {
 	await run(container, [
 		"bash",
 		"-c",
-		`git config core.hooksPath /dev/null && git config user.name "${BOT.name}" && git config user.email "${BOT.email}"`,
+		`git config core.hooksPath /dev/null && git config user.name "${BOT.name}" && git config ` +
+			`user.email "${BOT.email}"`,
 	]);
 	await requireBase(container, input.base, input.branch);
 	const found = await run(container, ["git", "cat-file", "-e", `${input.baseHead}^{commit}`]);
@@ -66,7 +67,9 @@ async function listChangedFiles(container: Container, baseHead: string, fetched:
 	const script = fetched
 		.map(
 			(index) =>
-				`if h=$(git rev-parse refs/remotes/batch-${index}/head) && b=$(git merge-base ${baseHead} "$h"); then printf '%s %s\\0' ${index} "$h"; git diff --name-only --no-renames -z "$b" "$h"; else printf '%s -\\0' ${index}; fi; printf '\\0'`,
+				`if h=$(git rev-parse refs/remotes/batch-${index}/head) && b=$(git merge-base ${baseHead} ` +
+				`"$h"); then printf '%s %s\\0' ${index} "$h"; git diff --name-only --no-renames -z "$b" ` +
+				`"$h"; else printf '%s -\\0' ${index}; fi; printf '\\0'`,
 		)
 		.join("\n");
 	const listed = new Map<number, { head: string; files: string[] }>();
@@ -124,7 +127,9 @@ async function commitMerge(container: Container, merge: LandingMerge, stamper: S
 	const merged = await run(container, [
 		"bash",
 		"-c",
-		`base=$(git rev-parse HEAD) && git merge -q --no-ff --no-commit ${merge.head} >/tmp/merge.out 2>&1 && echo "$base" || { echo CONFLICT; git diff --name-only --diff-filter=U; cat /tmp/merge.out; git merge --abort; exit 1; }`,
+		`base=$(git rev-parse HEAD) && git merge -q --no-ff --no-commit ${merge.head} >/tmp/merge.out 2>&1 ` +
+			`&& echo "$base" || { echo CONFLICT; git diff --name-only --diff-filter=U; cat /tmp/merge.out; git ` +
+			"merge --abort; exit 1; }",
 	]);
 	const base = merged.output.trim();
 	if (merged.exitCode !== 0)
@@ -185,7 +190,9 @@ export async function pushForChecks(
 		const merged = await run(container, [
 			"bash",
 			"-c",
-			`git merge -q --no-ff -m "Check ${change.change} with the batch" ${change.head} >/tmp/merge.out 2>&1 || { git diff --name-only --diff-filter=U; cat /tmp/merge.out; git merge --abort; exit 1; }`,
+			`git merge -q --no-ff -m "Check ${change.change} with the batch" ${change.head} ` +
+				">/tmp/merge.out 2>&1 || { git diff --name-only --diff-filter=U; cat /tmp/merge.out; git merge " +
+				"--abort; exit 1; }",
 		]);
 		if (merged.exitCode !== 0)
 			return { failed: `${change.change} doesn't merge onto the batch: ${clip(merged.output, 500)}` };

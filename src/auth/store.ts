@@ -120,7 +120,9 @@ export class IdentityStore {
 		const address = normalizeEmail(email);
 		if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(address)) fail(400, `not an email address: ${email}`);
 		await this.db
-			.prepare("INSERT INTO invites (email, invited_by, created_at) VALUES (?, ?, ?) ON CONFLICT (email) DO NOTHING")
+			.prepare(
+				"INSERT INTO invites (email, invited_by, created_at) VALUES (?, ?, ?) ON CONFLICT (email) DO " + "NOTHING",
+			)
 			.bind(address, invitedBy, this.iso())
 			.run();
 		return address;
@@ -145,7 +147,9 @@ export class IdentityStore {
 	async inviteRequests() {
 		const { results } = await this.db
 			.prepare(
-				"SELECT oi.email, o.slug, oi.role, oi.invited_by, oi.created_at FROM org_invites oi JOIN orgs o ON o.id = oi.org_id WHERE oi.email NOT IN (SELECT email FROM invites) AND oi.email NOT IN (SELECT email FROM users) ORDER BY oi.created_at",
+				"SELECT oi.email, o.slug, oi.role, oi.invited_by, oi.created_at FROM org_invites oi JOIN " +
+					"orgs o ON o.id = oi.org_id WHERE oi.email NOT IN (SELECT email FROM invites) AND oi.email " +
+					"NOT IN (SELECT email FROM users) ORDER BY oi.created_at",
 			)
 			.all<Row>();
 		const byEmail = new Map<string, InviteRequest>();
@@ -166,7 +170,8 @@ export class IdentityStore {
 	private async signInRequests() {
 		const waiting =
 			"SELECT email, provider, name, login, first_at, last_at, tries FROM sign_in_requests " +
-			"WHERE email NOT IN (SELECT email FROM invites) AND email NOT IN (SELECT email FROM users) ORDER BY first_at";
+			("WHERE email NOT IN (SELECT email FROM invites) AND email NOT IN (SELECT email FROM users) " +
+				"ORDER BY first_at");
 		const { results } = await this.db.prepare(waiting).all<Row>();
 		return results.map((row) => ({
 			email: String(row.email),
@@ -199,7 +204,8 @@ export class IdentityStore {
 	async hostedUsers() {
 		const { results } = await this.db
 			.prepare(
-				"SELECT u.handle, h.granted_by, h.created_at FROM hosted_agent_users h JOIN users u ON u.id = h.user_id ORDER BY u.handle",
+				"SELECT u.handle, h.granted_by, h.created_at FROM hosted_agent_users h JOIN users u ON " +
+					"u.id = h.user_id ORDER BY u.handle",
 			)
 			.all<Row>();
 		return results.map((r) => ({
@@ -217,7 +223,8 @@ export class IdentityStore {
 		if (!user) fail(404, `no one is called ${handle}: they need to have signed in once`);
 		await this.db
 			.prepare(
-				"INSERT INTO hosted_agent_users (user_id, granted_by, created_at) VALUES (?, ?, ?) ON CONFLICT (user_id) DO NOTHING",
+				"INSERT INTO hosted_agent_users (user_id, granted_by, created_at) VALUES (?, ?, ?) ON " +
+					"CONFLICT (user_id) DO NOTHING",
 			)
 			.bind(user!.id, grantedBy, this.iso())
 			.run();
@@ -244,7 +251,9 @@ export class IdentityStore {
 	async signIn(profile: ProviderProfile): Promise<{ user: User } | { refused: "not-invited" }> {
 		const email = normalizeEmail(profile.email);
 		const linked = await this.db
-			.prepare("SELECT u.* FROM accounts a JOIN users u ON u.id = a.user_id WHERE a.provider = ? AND a.provider_id = ?")
+			.prepare(
+				"SELECT u.* FROM accounts a JOIN users u ON u.id = a.user_id WHERE a.provider = ? AND " + "a.provider_id = ?",
+			)
 			.bind(profile.provider, profile.providerId)
 			.first<Row>();
 		if (linked) return { user: toUser(linked) };
@@ -268,7 +277,7 @@ export class IdentityStore {
 		};
 		await this.db.batch([
 			this.db
-				.prepare("INSERT INTO users (id, handle, email, name, avatar_url, created_at) VALUES (?, ?, ?, ?, ?, ?)")
+				.prepare("INSERT INTO users (id, handle, email, name, avatar_url, created_at) VALUES (?, ?, ?, ?, " + "?, ?)")
 				.bind(user.id, user.handle, user.email, user.name, user.avatarUrl, user.createdAt),
 			this.db
 				.prepare("INSERT INTO accounts (provider, provider_id, user_id, created_at) VALUES (?, ?, ?, ?)")
@@ -281,7 +290,8 @@ export class IdentityStore {
 	private async noteSignInRequest(email: string, profile: ProviderProfile) {
 		const now = this.iso();
 		const upsert =
-			"INSERT INTO sign_in_requests (email, provider, name, login, first_at, last_at) VALUES (?, ?, ?, ?, ?, ?) " +
+			"INSERT INTO sign_in_requests (email, provider, name, login, first_at, last_at) VALUES (?, ?, " +
+			"?, ?, ?, ?) " +
 			"ON CONFLICT (email) DO UPDATE SET last_at = excluded.last_at, tries = tries + 1";
 		const values = [email, profile.provider, profile.name ?? null, profile.login ?? null, now, now];
 		await this.db
@@ -293,7 +303,8 @@ export class IdentityStore {
 	private async link(userId: string, profile: ProviderProfile) {
 		await this.db
 			.prepare(
-				"INSERT INTO accounts (provider, provider_id, user_id, created_at) VALUES (?, ?, ?, ?) ON CONFLICT DO NOTHING",
+				"INSERT INTO accounts (provider, provider_id, user_id, created_at) VALUES (?, ?, ?, ?) ON " +
+					"CONFLICT DO NOTHING",
 			)
 			.bind(profile.provider, profile.providerId, userId, this.iso())
 			.run();
@@ -310,7 +321,8 @@ export class IdentityStore {
 				.first());
 		if (login && HANDLE.test(login) && !(await taken(login))) return login;
 		for (;;) {
-			const handle = `u-${Array.from(crypto.getRandomValues(new Uint8Array(3)), (b) => b.toString(16).padStart(2, "0")).join("")}`;
+			const bytes = crypto.getRandomValues(new Uint8Array(3));
+			const handle = `u-${Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("")}`;
 			if (!(await taken(handle))) return handle;
 		}
 	}
@@ -334,7 +346,9 @@ export class IdentityStore {
 
 	async sessionUser(secret: string) {
 		const row = await this.db
-			.prepare("SELECT u.* FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.id_hash = ? AND s.expires_at > ?")
+			.prepare(
+				"SELECT u.* FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.id_hash = ? AND " + "s.expires_at > ?",
+			)
 			.bind(await sha256Hex(secret), this.iso())
 			.first<Row>();
 		return row ? toUser(row) : null;
@@ -353,7 +367,7 @@ export class IdentityStore {
 	async createAgent(ownerId: string, name: string): Promise<Agent> {
 		const agentName = name.trim().toLowerCase();
 		if (!AGENT_NAME.test(agentName))
-			fail(400, "an agent's name is 1 to 32 lowercase letters, digits or dashes, starting with a letter or digit");
+			fail(400, "an agent's name is 1 to 32 lowercase letters, digits or dashes, starting with a letter or " + "digit");
 		const existing = await this.db
 			.prepare("SELECT * FROM agents WHERE owner_id = ? AND name = ?")
 			.bind(ownerId, agentName)
@@ -377,7 +391,8 @@ export class IdentityStore {
 			this.db.prepare("SELECT * FROM agents WHERE owner_id = ? ORDER BY created_at").bind(ownerId).all<Row>(),
 			this.db
 				.prepare(
-					"SELECT t.* FROM agent_tokens t JOIN agents a ON a.id = t.agent_id WHERE a.owner_id = ? ORDER BY t.created_at",
+					"SELECT t.* FROM agent_tokens t JOIN agents a ON a.id = t.agent_id WHERE a.owner_id = " +
+						"? ORDER BY t.created_at",
 				)
 				.bind(ownerId)
 				.all<Row>(),
@@ -401,7 +416,9 @@ export class IdentityStore {
 	async activeAgent(agentId: string) {
 		const row = await this.db
 			.prepare(
-				"SELECT a.id AS agent_id, a.owner_id, a.name AS agent_name, a.created_at AS agent_created_at, u.* FROM agents a JOIN users u ON u.id = a.owner_id WHERE a.id = ? AND a.revoked_at IS NULL",
+				"SELECT a.id AS agent_id, a.owner_id, a.name AS agent_name, a.created_at AS " +
+					"agent_created_at, u.* FROM agents a JOIN users u ON u.id = a.owner_id WHERE a.id = ? AND " +
+					"a.revoked_at IS NULL",
 			)
 			.bind(agentId)
 			.first<Row>();
@@ -452,7 +469,8 @@ export class IdentityStore {
 		};
 		await this.db
 			.prepare(
-				"INSERT INTO agent_tokens (id, agent_id, token_hash, prefix, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?)",
+				"INSERT INTO agent_tokens (id, agent_id, token_hash, prefix, created_at, expires_at) " +
+					"VALUES (?, ?, ?, ?, ?, ?)",
 			)
 			.bind(token.id, agentId, await sha256Hex(secret), token.prefix, token.createdAt, token.expiresAt)
 			.run();
@@ -461,7 +479,9 @@ export class IdentityStore {
 
 	async revokeToken(ownerId: string, tokenId: string) {
 		const row = await this.db
-			.prepare("SELECT t.id FROM agent_tokens t JOIN agents a ON a.id = t.agent_id WHERE t.id = ? AND a.owner_id = ?")
+			.prepare(
+				"SELECT t.id FROM agent_tokens t JOIN agents a ON a.id = t.agent_id WHERE t.id = ? AND " + "a.owner_id = ?",
+			)
 			.bind(tokenId, ownerId)
 			.first<Row>();
 		if (!row) fail(404, "no such token");
@@ -476,7 +496,10 @@ export class IdentityStore {
 		if (!secret.startsWith("ghv_")) return null;
 		const row = await this.db
 			.prepare(
-				"SELECT t.id AS token_id, t.expires_at AS token_expires_at, t.last_used_at, a.id AS agent_id, a.owner_id, a.name AS agent_name, a.created_at AS agent_created_at, u.* FROM agent_tokens t JOIN agents a ON a.id = t.agent_id JOIN users u ON u.id = a.owner_id WHERE t.token_hash = ? AND t.revoked_at IS NULL AND a.revoked_at IS NULL",
+				"SELECT t.id AS token_id, t.expires_at AS token_expires_at, t.last_used_at, a.id AS " +
+					"agent_id, a.owner_id, a.name AS agent_name, a.created_at AS agent_created_at, u.* FROM " +
+					"agent_tokens t JOIN agents a ON a.id = t.agent_id JOIN users u ON u.id = a.owner_id WHERE " +
+					"t.token_hash = ? AND t.revoked_at IS NULL AND a.revoked_at IS NULL",
 			)
 			.bind(await sha256Hex(secret))
 			.first<Row>();

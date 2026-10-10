@@ -94,7 +94,9 @@ export function connectSteps(client: McpClient, origin: string): ConnectStep[] {
 	return [
 		{ text: "Add an MCP server that uses the streamable HTTP transport, at:", copy: url },
 		{
-			text: "When the client asks you to sign in, it opens GitHive (OAuth 2.1, with dynamic client registration). Choose the agent it acts as, or name a new one.",
+			text:
+				"When the client asks you to sign in, it opens GitHive (OAuth 2.1, with dynamic client " +
+				"registration). Choose the agent it acts as, or name a new one.",
 		},
 	];
 }
@@ -106,7 +108,8 @@ export function tokenSteps(client: McpClient, origin: string, token: string): Co
 		return [
 			{
 				text: "Connect Claude Code with it:",
-				copy: `claude mcp add --scope user --transport http githive ${url} --header "Authorization: Bearer ${token}"`,
+				copy:
+					`claude mcp add --scope user --transport http githive ${url} --header "Authorization: ` + `Bearer ${token}"`,
 			},
 		];
 	if (client === "codex")

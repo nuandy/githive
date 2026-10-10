@@ -37,7 +37,7 @@ describe("warming the repo's own Gate", () => {
 		expect(storage.alarm).toBeNull();
 	});
 
-	it("warms a repo with no checks too, its Gate landing the batches, and not for a merge once it has a snapshot", async () => {
+	it("warms a repo with no checks too (its Gate lands the batches), but not for a merge after a snapshot", async () => {
 		const storage = new FakeStorage();
 		const gate = new Gate({ storage } as never, {} as never);
 		await gate.warmUp({ repo: "express", base: { remote: "r", token: "t" }, checks: [], why: "set up" });

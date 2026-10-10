@@ -180,7 +180,7 @@ describe("signed-in agents", () => {
 		await call(as(), "settings", {});
 	});
 
-	it("act as their verified name with no key, may leave the agent argument out, and are stamped under their owner", async () => {
+	it("act as their verified name with no key or agent argument, and are stamped under their owner", async () => {
 		expect(
 			await call(signedIn("ada/builder"), "claim", { change: "a-1", paths: ["src/a/"], intent: "a" }),
 		).toMatchObject({ ok: true });

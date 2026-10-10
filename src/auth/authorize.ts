@@ -7,6 +7,7 @@ import {
 } from "@cloudflare/workers-oauth-provider";
 import type { AuthEnv } from "./routes";
 import { type Agent, type User, randomSecret } from "./store";
+import { PAGE_STYLE } from "./page-style";
 import { identityStore } from "./principal";
 
 // OAuth's authorize page for MCP clients. A person signs in to GitHive and picks, or creates, the agent the
@@ -15,47 +16,18 @@ import { identityStore } from "./principal";
 
 const escape = (value: string) => value.replace(/[&<>"']/g, (char) => `&#${char.charCodeAt(0)};`);
 
-const HIVE = `<svg width="28" height="28" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="7" style="fill: var(--mark-tile)"/><path d="M10.2 6.5h11.6l5.8 9.5-5.8 9.5H10.2L4.4 16z" fill="none" stroke-width="2.6" stroke-linejoin="round" style="stroke: var(--mark-line)"/><path d="M4.4 16H12" stroke-width="2.6" stroke-linecap="round" style="stroke: var(--mark-line)"/><circle cx="16" cy="16" r="4" fill="#e59a0b"/></svg>`;
+const HIVE =
+	`<svg width="28" height="28" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="7" ` +
+	`style="fill: var(--mark-tile)"/><path d="M10.2 6.5h11.6l5.8 9.5-5.8 9.5H10.2L4.4 16z" fill="none" ` +
+	`stroke-width="2.6" stroke-linejoin="round" style="stroke: var(--mark-line)"/><path d="M4.4 16H12" ` +
+	`stroke-width="2.6" stroke-linecap="round" style="stroke: var(--mark-line)"/><circle cx="16" cy="16" r="4" ` +
+	`fill="#e59a0b"/></svg>`;
 
 function page(title: string, body: string, script = "") {
 	return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${escape(title)} · GitHive</title>
-<style>
-/* The dashboard's look (web/src/styles.css): ink on cool paper, ruled rather than boxed, amber and red lamps for notes and warnings. */
-@font-face { font-family: "Overpass"; src: url("/fonts/overpass.woff2") format("woff2"); font-weight: 100 900; font-display: swap; unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD; }
-@font-face { font-family: "Overpass Mono"; src: url("/fonts/overpass-mono.woff2") format("woff2"); font-weight: 300 700; font-display: swap; unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD; }
-@font-face { font-family: "Separator"; src: local("Helvetica Neue"), local("HelveticaNeue"), local("Segoe UI"), local("Arial"), local("Roboto"); unicode-range: U+00B7; }
-:root { --bg: #f5f6f4; --surface: #fbfcfb; --surface-2: #eef0ee; --line: #d3d9d6; --line-strong: #b7c0bc; --fg: #1e2b33; --muted: #56636b; --link: #23506e; --ink-fill: #1e2b33; --on-ink: #f5f6f4; --amber: #e59a0b; --amber-soft: #fbf0d9; --bad: #c03a2b; --bad-soft: #f8e4e1; --mark-tile: #1e2b33; --mark-line: #f5f6f4; color-scheme: light dark; }
-@media (prefers-color-scheme: dark) { :root { --bg: #121a1f; --surface: #172127; --surface-2: #1d282f; --line: #2c3a41; --line-strong: #3d4d55; --fg: #e4e9e7; --muted: #9aa8a6; --link: #8cc0e0; --ink-fill: #e4e9e7; --on-ink: #121a1f; --amber: #f2b13a; --amber-soft: #33270f; --bad: #e5604f; --bad-soft: #3a1d1a; --mark-tile: #f5f6f4; --mark-line: #1e2b33; } }
-* { box-sizing: border-box; }
-body { margin: 0; background: var(--bg); color: var(--fg); font: 15px/1.55 "Separator", "Overpass", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; padding: 56px 16px; }
-main { max-width: 460px; margin: 0 auto; display: grid; gap: 16px; }
-.brand { display: flex; align-items: center; gap: 10px; font-weight: 800; font-size: 17px; letter-spacing: -0.01em; padding-bottom: 14px; border-bottom: 2px solid var(--fg); }
-h1 { font-size: 22px; line-height: 1.25; margin: 4px 0 0; font-weight: 800; letter-spacing: -0.01em; text-wrap: balance; }
-p { margin: 0; }
-a { color: var(--link); }
-.muted { color: var(--muted); }
-.warn { background: var(--bad-soft); border-left: 3px solid var(--bad); padding: 10px 12px; }
-.note { background: var(--amber-soft); border-left: 3px solid var(--amber); padding: 10px 12px; }
-fieldset { border: 0; border-top: 1px solid var(--line); padding: 12px 0 0; margin: 0; display: grid; gap: 10px; }
-legend { padding: 0 8px 0 0; font-weight: 700; }
-label { display: flex; align-items: center; gap: 8px; }
-input[type=radio] { accent-color: var(--ink-fill); }
-input[type=text] { font: inherit; padding: 6px 10px; border: 1px solid var(--line-strong); border-radius: 4px; background: var(--surface); color: var(--fg); min-width: 0; flex: 1; }
-.actions { display: flex; gap: 10px; flex-wrap: wrap; padding-top: 4px; }
-button, .button { font: inherit; font-weight: 600; padding: 8px 16px 7px; border-radius: 4px; border: 1px solid var(--line-strong); background: var(--surface); color: var(--fg); cursor: pointer; text-decoration: none; display: inline-block; }
-button.primary, .button.primary { background: var(--ink-fill); border-color: var(--ink-fill); color: var(--on-ink); }
-button:hover:not(:disabled), .button:hover { background: var(--surface-2); }
-button.primary:hover:not(:disabled), .button.primary:hover { background: color-mix(in srgb, var(--ink-fill) 88%, var(--bg)); }
-button:active:not(:disabled), .button:active { transform: translateY(1px); }
-button:disabled { cursor: progress; opacity: 0.75; }
-button[aria-busy="true"]::before { content: ""; display: inline-block; width: 0.8em; height: 0.8em; margin-right: 8px; vertical-align: -0.08em; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: spin 0.7s linear infinite; }
-@keyframes spin { to { transform: rotate(360deg); } }
-@media (prefers-reduced-motion: reduce) { button[aria-busy="true"]::before { animation: none; } }
-button:focus-visible, .button:focus-visible, input:focus-visible { outline: 2px solid var(--link); outline-offset: 2px; }
-code { font-family: "Overpass Mono", ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9em; }
-</style></head>
+<style>${PAGE_STYLE}</style></head>
 <body><main><div class="brand">${HIVE} GitHive</div>${body}</main>${script}</body></html>`;
 }
 
@@ -80,7 +52,8 @@ const html = (body: string, status = 200, headers?: Headers, redirectUri?: strin
 	const scriptSource = nonce ? ` script-src 'nonce-${nonce}';` : "";
 	responseHeaders.set(
 		"Content-Security-Policy",
-		`default-src 'none'; style-src 'unsafe-inline'; font-src 'self'; img-src data:;${scriptSource} form-action ${formAction(redirectUri)}; frame-ancestors 'none'`,
+		`default-src 'none'; style-src 'unsafe-inline'; font-src 'self'; img-src data:;${scriptSource} ` +
+			`form-action ${formAction(redirectUri)}; frame-ancestors 'none'`,
 	);
 	return new Response(body, { status, headers: responseHeaders });
 };
@@ -89,19 +62,20 @@ const problem = (message: string, status = 400) =>
 	html(
 		page(
 			"Can't connect",
-			`<h1>Can't connect this app</h1><p>${escape(message)}</p><p class="muted">Start connecting again from the app.</p>`,
+			`<h1>Can't connect this app</h1><p>${escape(message)}</p><p class="muted">Start connecting ` +
+				"again from the app.</p>",
 		),
 		status,
 	);
 
 function signInPage(details: ConsentDescription, returnTo: string, providers: string[]) {
 	const names: Record<string, string> = { github: "GitHub", google: "Google" };
-	const buttons = providers
-		.map(
-			(provider) =>
-				`<a class="button${provider === "github" ? " primary" : ""}" href="/auth/${provider}?return=${encodeURIComponent(returnTo)}">Sign in with ${names[provider]}</a>`,
-		)
-		.join("");
+	const button = (provider: string) => {
+		const kind = provider === "github" ? "button primary" : "button";
+		const href = `/auth/${provider}?return=${encodeURIComponent(returnTo)}`;
+		return `<a class="${kind}" href="${href}">Sign in with ${names[provider]}</a>`;
+	};
+	const buttons = providers.map(button).join("");
 	return page(
 		"Sign in",
 		`<h1>Sign in to connect ${escape(details.clientName)}</h1>
@@ -144,6 +118,13 @@ export function suggestedAgentName(clientName: string) {
 		.replace(/-+$/, "");
 }
 
+const WHAT_AN_AGENT_DOES =
+	"it can claim paths, push, review, vote and merge, and what it does is attributed to that agent.";
+
+const DECISION_BUTTONS =
+	'<div class="actions"><button class="primary" name="decision" value="approve">Allow</button>' +
+	'<button name="decision" value="deny">Deny</button></div>';
+
 function consentPage(
 	details: ConsentDescription,
 	handle: string,
@@ -166,24 +147,36 @@ function consentPage(
 	const choices = agents
 		.map(
 			(agent) =>
-				`<label><input type="radio" name="agent" value="${escape(agent.id)}"${agent === match ? " checked" : ""}> <code>${escape(user.handle)}/${escape(agent.name)}</code></label>`,
+				`<label><input type="radio" name="agent" value="${escape(agent.id)}"${agent === match ? " checked" : ""}> ` +
+				`<code>${escape(user.handle)}/${escape(agent.name)}</code></label>`,
 		)
 		.join("");
+	const unconfirmed = details.clientDomain ? "" : "The app gave itself this name; GitHive can't confirm it. ";
+	const newAgent =
+		`<label><input type="radio" name="agent" value="new"${match ? "" : " checked"}> a new agent ` +
+		`<code>${escape(user.handle)}/</code><input type="text" name="new_name" aria-label="New agent's name" ` +
+		`value="${match ? "" : escape(suggested)}" pattern="[a-z0-9][a-z0-9\\-]{0,31}" autocomplete="off" ` +
+		`spellcheck="false"></label>`;
 	return page(
 		`Connect ${details.clientName}`,
 		`<h1>Connect ${name} to GitHive</h1>
-<p>${who} will work in GitHive as one of your agents: it can claim paths, push, review, vote and merge, and what it does is attributed to that agent.</p>
-<p class="muted">${details.clientDomain ? "" : "The app gave itself this name; GitHive can't confirm it. "}Access goes to ${where}.</p>
-${details.redirectIsLoopback ? '<p class="note">Claude Code, Codex and similar apps run on your computer, so this is expected if you just started connecting from one. If you didn\'t, choose Deny.</p>' : ""}
+<p>${who} will work in GitHive as one of your agents: ${WHAT_AN_AGENT_DOES}</p>
+<p class="muted">${unconfirmed}Access goes to ${where}.</p>
+${
+	details.redirectIsLoopback
+		? '<p class="note">Claude Code, Codex and similar apps run on your computer, so this is expected if you just ' +
+			"started connecting from one. If you didn't, choose Deny.</p>"
+		: ""
+}
 ${error ? `<p class="warn" role="alert">${escape(error)}</p>` : ""}
 <form method="post">
 <input type="hidden" name="handle" value="${escape(handle)}">
 <fieldset><legend>Act as</legend>
 ${choices}
-<label><input type="radio" name="agent" value="new"${match ? "" : " checked"}> a new agent <code>${escape(user.handle)}/</code><input type="text" name="new_name" aria-label="New agent's name" value="${match ? "" : escape(suggested)}" pattern="[a-z0-9][a-z0-9\\-]{0,31}" autocomplete="off" spellcheck="false"></label>
+${newAgent}
 </fieldset>
 <p class="muted">You can revoke it any time on your Agents page.</p>
-<div class="actions"><button class="primary" name="decision" value="approve">Allow</button><button name="decision" value="deny">Deny</button></div>
+${DECISION_BUTTONS}
 </form>`,
 		feedbackScript(nonce),
 	);

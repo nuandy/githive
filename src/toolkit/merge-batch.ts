@@ -102,7 +102,9 @@ export async function landBatch(
 		const landedCount = done.landed === null ? "lost the race" : `${done.landed.settled.length}`;
 		const { size, foundAt, readAt } = gathered;
 		console.log(
-			`batch of ${batch.length} (at most ${size}) into ${input.branch}: gathering ${gatheredAt - startedAt} ms (finding ${foundAt - startedAt}, reading ${readAt - foundAt}, validating ${gatheredAt - readAt}), checks ${checkedAt - gatheredAt} ms, landing ${landedCount} ${done.ms} ms`,
+			`batch of ${batch.length} (at most ${size}) into ${input.branch}: gathering ${gatheredAt - startedAt} ` +
+				`ms (finding ${foundAt - startedAt}, reading ${readAt - foundAt}, validating ${gatheredAt - readAt}), ` +
+				`checks ${checkedAt - gatheredAt} ms, landing ${landedCount} ${done.ms} ms`,
 		);
 		await landing.settle(failures);
 		await landing.checking(null);
@@ -112,7 +114,7 @@ export async function landBatch(
 			return {
 				ok: false,
 				reasons: [
-					`the project's branch kept moving while ${input.change} merged (other merges landed first): merge again`,
+					`the project's branch kept moving while ${input.change} merged (other merges landed ` + "first): merge again",
 				],
 			};
 		}

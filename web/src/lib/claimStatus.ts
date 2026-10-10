@@ -104,7 +104,9 @@ export function shardingSummary(
 			label: "One claims record",
 			sharded: false,
 			detail:
-				"Claims are kept in one record, the fastest while few agents write. They are sharded by path automatically once 8 agents hold claims, or claims are written more than 15 times a minute.",
+				"Claims are kept in one record, the fastest while few agents write. They are sharded by " +
+				"path automatically once 8 agents hold claims, or claims are written more than 15 times a " +
+				"minute.",
 		};
 	if (sharding === "never")
 		return {
@@ -120,7 +122,9 @@ export function shardingSummary(
 	return {
 		label: "Sharded claims",
 		sharded: true,
-		detail: `Claims are sharded by path${deep}${since}${because}, so agents in different parts of the tree never wait on each other. Claims made before stay in the top record, above every shard.`,
+		detail:
+			`Claims are sharded by path${deep}${since}${because}, so agents in different parts of the tree ` +
+			"never wait on each other. Claims made before stay in the top record, above every shard.",
 	};
 }
 
@@ -140,7 +144,8 @@ export function votesShardingSummary(
 		return {
 			sharded: false,
 			detail:
-				"Votes are kept in one record. They are split by commit automatically once 8 reviewers vote within 5 minutes, or votes come more than 15 times a minute.",
+				"Votes are kept in one record. They are split by commit automatically once 8 reviewers " +
+				"vote within 5 minutes, or votes come more than 15 times a minute.",
 		};
 	if (votesSharding === "never")
 		return { sharded: false, detail: "Votes are kept in one record; this repo was set never to split them." };
@@ -148,7 +153,9 @@ export function votesShardingSummary(
 	const because = votesSharding.because ? ` (${votesSharding.because})` : "";
 	return {
 		sharded: true,
-		detail: `Votes are split by commit${since}${because}, so reviewers of different changes never wait on each other. Votes cast before stay in the top record.`,
+		detail:
+			`Votes are split by commit${since}${because}, so reviewers of different changes never wait on each ` +
+			"other. Votes cast before stay in the top record.",
 	};
 }
 

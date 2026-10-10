@@ -149,7 +149,7 @@ describe("landing ready changes together", { timeout: 120_000 }, () => {
 		expect(await auditNow()).toEqual([]);
 	});
 
-	it("lands every ready change in one batch, checked once, each as its own merge in one push, and audits clean", async () => {
+	it("lands all ready changes in one checked batch, each its own merge in one push, and audits clean", async () => {
 		const heads = [];
 		for (const x of ["a", "b", "c"]) heads.push(await readyChange(`${x}-1`, { [`src/${x}.txt`]: `${x}\n` }));
 		const main = server.git("rev-parse", "main").trim();
@@ -187,7 +187,7 @@ describe("landing ready changes together", { timeout: 120_000 }, () => {
 		expect(await auditNow()).toEqual([]);
 	});
 
-	it("starts the repo's Gate as each batch begins, while the batch is read, so its landing finds it running", async () => {
+	it("starts the repo's Gate as each batch begins, while it's read, so the landing finds it running", async () => {
 		for (const x of ["a", "b"]) await readyChange(`${x}-1`, { [`src/${x}.txt`]: `${x}\n` });
 		const started: string[] = [];
 		const reads: string[][] = [];
@@ -203,7 +203,7 @@ describe("landing ready changes together", { timeout: 120_000 }, () => {
 		expect(landed()).toEqual(["a-1", "b-1"]);
 	});
 
-	it("records a change main merged already (a push that applied though the server failed it) as landed, and lands the rest", async () => {
+	it("records a change main already has (its push applied, though it failed) as landed, then the rest", async () => {
 		const a = await readyChange("a-1", { "src/a.txt": "a\n" });
 		// a-1 lands on main behind GitHive's back, like a push that applied despite a 500. Its claim is still held.
 		const lander = await agentClone(server.url, work, "lander");
@@ -286,7 +286,7 @@ describe("landing ready changes together", { timeout: 120_000 }, () => {
 		expect(await auditNow()).toEqual([]);
 	});
 
-	it("without checks, takes every ready change into one batch, and releases their claims once the lease is handed on", async () => {
+	it("without checks, batches every ready change and releases their claims once the lease is handed on", async () => {
 		const ids = Array.from({ length: 6 }, (_, i) => `n-${i}`);
 		for (const id of ids) await readyChange(id, { [`src/${id}.txt`]: `${id}\n` });
 		const landing = memoryLanding();
@@ -469,7 +469,7 @@ describe("landing ready changes together", { timeout: 120_000 }, () => {
 		expect(Date.now() - from).toBeGreaterThanOrEqual(250);
 	});
 
-	it("answers that a change is still waiting before the request is held too long, and lands it when merged again", async () => {
+	it("says a change is still waiting before the request is held too long, and lands it when merged again", async () => {
 		await readyChange("a-1", { "src/a.txt": "a\n" });
 		const landing = memoryLanding();
 		// Another merge holds the lease, landing its batch, for longer than this merge may wait to answer.
@@ -514,7 +514,7 @@ describe("landing ready changes together", { timeout: 120_000 }, () => {
 		expect(server.git("rev-parse", "main").trim()).toBe(before);
 	});
 
-	it("keeps the lease by a heartbeat through a long check: a merge waiting doesn't take over and check again", async () => {
+	it("keeps the lease by heartbeat through a long check: a waiting merge doesn't take over and recheck", async () => {
 		for (const x of ["a", "b"]) await readyChange(`${x}-1`, { [`src/${x}.txt`]: `${x}\n` });
 		const landing = memoryLanding();
 		const runs: string[][] = [];

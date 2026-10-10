@@ -202,7 +202,7 @@ describe("the audit", () => {
 		]);
 	});
 
-	it("reports a merge that records no checks, or checks run on a different main, when checks are configured", async () => {
+	it("reports a merge that records no checks, or checks of a different main, when checks are configured", async () => {
 		const withChecks = (m: MergeRecord) => ({ ...records([m]), verify: ["npm test"] });
 		expect(await audit(withChecks(merge({ base: "p1" })))).toEqual([
 			{ commit: "m1", author: "agent-a", rule: "untested", detail: "the merge records no checks run (GitHive-Tested)" },
