@@ -1,6 +1,4 @@
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -15,6 +13,7 @@ import { vote, type Votes } from "../src/toolkit/votes";
 import { voteStore } from "../src/toolkit/vote-store";
 import { startGitServer, type GitServer } from "./helpers/git-server";
 import { memoryBatchGit } from "./helpers/memory-batch-git";
+import { agentClone, pushChange } from "./helpers/agents";
 
 // GitHive end to end, on a real Git server. Cooperative agents
 // claim, review and merge by convention through the toolkit; a rogue agent
@@ -30,36 +29,6 @@ const votes = () => new GitCasLog<Votes>(async () => remote(), "t1", "refs/notes
 const policy = { required: 2, vetoes: ["security"], grants: { security: ["service:rev-2"] } };
 // Each agent acts through the toolkit as itself, as Access verified it.
 let as: Record<"a" | "b" | "c" | "rev1" | "rev2", Stamper>;
-
-// The Git server runs in this process: git must run asynchronously, or the
-// server can't answer it.
-const exec = promisify(execFile);
-
-/** An agent's own clone, driven with plain git. */
-async function agentClone(name: string) {
-	const dir = join(work, name);
-	await exec("git", ["clone", "--quiet", server.url, dir]);
-	const run = async (...args: string[]) =>
-		(
-			await exec("git", ["-C", dir, "-c", `user.name=${name}`, "-c", `user.email=${name}@example.com`, ...args])
-		).stdout.trim();
-	const write = (path: string, text: string) => {
-		mkdirSync(join(dir, path, ".."), { recursive: true });
-		writeFileSync(join(dir, path), text);
-	};
-	return { run, write };
-}
-
-/** Push a change branch with the given files, and return its head. */
-async function pushChange(agent: string, change: string, files: Record<string, string>) {
-	const clone = await agentClone(`${agent}-${change}`);
-	await clone.run("checkout", "--quiet", "-b", `changes/${change}`);
-	for (const [path, text] of Object.entries(files)) clone.write(path, text);
-	await clone.run("add", "-A");
-	await clone.run("commit", "--quiet", "-m", `${change}: work`);
-	await clone.run("push", "--quiet", "origin", `changes/${change}`);
-	return clone.run("rev-parse", "HEAD");
-}
 
 beforeEach(async () => {
 	server = await startGitServer();
@@ -85,7 +54,7 @@ describe("GitHive, end to end", { timeout: 60_000 }, () => {
 	it("lets cooperative agents merge by convention, and the audit catches a rogue that didn't", async () => {
 		// Agent a: claims, pushes, gets two approvals, merges through the toolkit.
 		await claim(claims(), { change: "a-1", agent: "agent-a", paths: ["src/a/"], intent: "a's work" }, as.a);
-		const aHead = await pushChange("agent-a", "a-1", { "src/a/x.txt": "a\n" });
+		const aHead = await pushChange(server.url, work, "agent-a", "a-1", { "src/a/x.txt": "a\n" });
 		await vote(
 			votes(),
 			{ commit: aHead, reviewer: "rev-1", role: "tests", verdict: "approve", evidence: "ok" },
@@ -116,13 +85,16 @@ describe("GitHive, end to end", { timeout: 60_000 }, () => {
 		// Agent b claims src/b/, but also edits inside c's claim, gets one approval
 		// of two, and merges by hand with trailers citing real tips.
 		await claim(claims(), { change: "b-1", agent: "agent-b", paths: ["src/b/"], intent: "b's work" }, as.b);
-		const bHead = await pushChange("agent-b", "b-1", { "src/b/y.txt": "b\n", "src/c/z.txt": "not b's\n" });
+		const bHead = await pushChange(server.url, work, "agent-b", "b-1", {
+			"src/b/y.txt": "b\n",
+			"src/c/z.txt": "not b's\n",
+		});
 		await vote(
 			votes(),
 			{ commit: bHead, reviewer: "rev-1", role: "tests", verdict: "approve", evidence: "ok" },
 			as.rev1,
 		);
-		const rogue = await agentClone("agent-b-rogue");
+		const rogue = await agentClone(server.url, work, "agent-b-rogue");
 		await rogue.run("fetch", "--quiet", "origin", "changes/b-1");
 		const claimsTip = (await claims().read())!.tip;
 		const votesTip = (await votes().read())!.tip;
@@ -176,7 +148,10 @@ describe("GitHive, end to end", { timeout: 60_000 }, () => {
 
 	it("refuses, in the toolkit, to merge a change that breaks a convention", async () => {
 		await claim(claims(), { change: "a-1", agent: "agent-a", paths: ["src/a/"], intent: "a's work" }, as.a);
-		const aHead = await pushChange("agent-a", "a-1", { "src/a/x.txt": "a\n", "src/elsewhere.txt": "outside\n" });
+		const aHead = await pushChange(server.url, work, "agent-a", "a-1", {
+			"src/a/x.txt": "a\n",
+			"src/elsewhere.txt": "outside\n",
+		});
 		await vote(votes(), { commit: aHead, reviewer: "rev-1", role: "tests", verdict: "approve", evidence: "ok" });
 		const outcome = await mergeChange({
 			remote: remote(),

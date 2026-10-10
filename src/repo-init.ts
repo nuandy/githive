@@ -1,4 +1,5 @@
 import { type Remote, Workspace } from "./git";
+import { fail } from "./errors";
 
 // A new repo's first commit: a README, a .gitignore for its toolchain, and a license. A repo with no commit has
 // no branch, so agents would have nothing to branch from.
@@ -91,20 +92,16 @@ export interface InitOptions {
 	license?: LicenseTemplate;
 }
 
-const fail = (message: string): never => {
-	throw new Error(`[400] ${message}`);
-};
-
 /** Validates the init options a request asked for. */
 export function parseInit(value: unknown): InitOptions {
 	if (value === undefined || value === null) return {};
 	if (typeof value !== "object" || Array.isArray(value))
-		return fail("init is {readme, description, gitignore, license}");
+		return fail(400, "init is {readme, description, gitignore, license}");
 	const requested = value as Record<string, unknown>;
 	const isSet = (option: unknown) => option !== undefined && option !== null;
 	if (isSet(requested.gitignore) && !(String(requested.gitignore) in GITIGNORE))
-		fail(`gitignore is one of ${Object.keys(GITIGNORE).join(", ")}`);
-	if (isSet(requested.license) && requested.license !== "mit") fail("license is mit");
+		fail(400, `gitignore is one of ${Object.keys(GITIGNORE).join(", ")}`);
+	if (isSet(requested.license) && requested.license !== "mit") fail(400, "license is mit");
 	const description = typeof requested.description === "string" ? requested.description.trim().slice(0, 300) : "";
 	const init: InitOptions = {};
 	if (requested.readme) init.readme = true;

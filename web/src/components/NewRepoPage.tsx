@@ -3,7 +3,7 @@ import type { Gitignore, ManageApi, MyOrg, NewRepoInput, RepoRecord } from "../a
 import { usePoll } from "../hooks/usePoll";
 import { creatableOwners, repoNameProblem } from "../lib/orgs";
 import { href } from "../lib/routes";
-import { messageOf } from "./Confirm";
+import { messageOf } from "../lib/errors";
 import "./Manage.css";
 
 type Source = "import" | "copy" | "empty";

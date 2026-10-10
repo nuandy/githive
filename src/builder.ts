@@ -6,6 +6,7 @@ import { gitGuidance } from "./git-guidance";
 import { builderCredentials, toolContextFor, startHostedReviewers } from "./toolkit/env";
 import { callTool } from "./toolkit/mcp";
 import { inLane } from "./claim-paths";
+import { fail } from "./errors";
 
 // The hosted builder: one agent per change, working on the change's branch in its fork.
 // It pushes only through commit_and_push, and finishing hands the change to the hosted reviewers.
@@ -83,7 +84,7 @@ export class Builder extends SandboxAgent<BuildJob, BuilderState> {
 	 */
 	async revise(feedback: string): Promise<"revising" | "released"> {
 		const { job, state } = await this.load();
-		if (!job || !state) throw new Error("[409] builder has never run");
+		if (!job || !state) fail(409, "builder has never run");
 		if (state.revisions >= MAX_REVISIONS) {
 			await callTool(
 				"release",

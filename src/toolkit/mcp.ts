@@ -1,4 +1,4 @@
-import { requiredString } from "../errors";
+import { fail, requiredString } from "../errors";
 import { projectBranch } from "../project-branch";
 import type { Registry } from "./claims";
 import { type Args, openCall, type ToolContext, type ToolHandlers } from "./tools/context";
@@ -25,10 +25,10 @@ export { changeHistory, makeBranch, openCount, repoAudit, repoSnapshot, voteAsPe
  * made as the change's agent and stamped with the person who asked.
  */
 export async function mergeAsPerson(ctx: ToolContext, repo: string, change: string, person: string) {
-	if (!person.startsWith("person:")) throw new Error("[403] only a person merges from the dashboard; agents use merge");
+	if (!person.startsWith("person:")) fail(403, "only a person merges from the dashboard; agents use merge");
 	const registry = (await recordLog<Registry>(ctx, repo, claimsRef(repo)).read())?.commit.state;
 	const { claim } = await storeFor(ctx, repo, registry).readChange(change);
-	if (!claim) throw new Error(`[409] ${change} holds no claim: there's nothing to merge`);
+	if (!claim) fail(409, `${change} holds no claim: there's nothing to merge`);
 	const outcome = await callTool("merge", { repo, change, agent: claim.agent }, ctx);
 	await ctx.ping?.(repo).catch(() => undefined);
 	return outcome;
@@ -104,6 +104,6 @@ async function runTool(name: string, args: Args, ctx: ToolContext): Promise<unkn
 	if (name === "claims" && ctx.keptClaims) return (await ctx.keptClaims(repo, () => advice(ctx, repo))).claims;
 	const call = await openCall(args, ctx, runTool);
 	const handler = Object.hasOwn(handlers, name) ? handlers[name] : undefined;
-	if (!handler) throw new Error(`[400] unknown tool ${name}`);
+	if (!handler) fail(400, `unknown tool ${name}`);
 	return handler(call);
 }

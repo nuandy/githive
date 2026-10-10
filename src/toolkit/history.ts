@@ -4,6 +4,7 @@ import { readBranchHistory } from "./branch-history";
 import type { Registry } from "./claims";
 import { type BranchCommit, trailer } from "./git-records";
 import { type ToolContext, votesFor } from "./mcp";
+import { fail } from "../errors";
 
 // A branch's landed changes for the dashboard's History tab: each merge GitHive made, with its intent and reviews.
 // It's read from Git alone, so it tells the same story as `git log` and the audit.
@@ -48,10 +49,10 @@ const FILES_MOST = 20;
 // The branch's commits since GitHive started on it, or since it was made, oldest first.
 async function branchCommits(ctx: ToolContext, repo: string, registry: Registry, branch: string) {
 	const from = branch === projectBranch(registry) ? registry.baseline : registry.branches?.[branch]?.base;
-	if (!from) throw new Error(`[404] GitHive lands nothing on ${branch}`);
+	if (!from) fail(404, `GitHive lands nothing on ${branch}`);
 	if (ctx.readBranch) return ctx.readBranch(repo, from, branch);
 	if (ctx.history) return ctx.history(repo, (source) => readBranchHistory(source, from, branch));
-	throw new Error("[501] reading a branch's history isn't available here");
+	fail(501, "reading a branch's history isn't available here");
 }
 
 // A merge GitHive made as a landed change, without reviews or time yet. Null for any other commit.
@@ -76,7 +77,7 @@ function landedOf(commit: BranchCommit): LandedChange | null {
 export async function branchHistory(ctx: ToolContext, repo: string, branch?: string): Promise<BranchHistory> {
 	const claims = new GitCasLog<Registry>(() => ctx.remote(repo, "read"), repo, `refs/notes/githive-claims/${repo}`);
 	const registry = (await claims.read())?.commit.state;
-	if (!registry?.baseline) throw new Error(`[404] GitHive hasn't started on ${repo}`);
+	if (!registry?.baseline) fail(404, `GitHive hasn't started on ${repo}`);
 	const shown = branch || projectBranch(registry);
 	const commits = await branchCommits(ctx, repo, registry, shown);
 	const landed = commits.flatMap((commit) => landedOf(commit) ?? []).reverse();

@@ -1,5 +1,5 @@
 import { claimCovering, normalizeClaim } from "../../claim-paths";
-import { fail, requiredPaths, requiredString } from "../../errors";
+import { fail, optionalString, requiredPaths, requiredString } from "../../errors";
 import { branchHead, type Remote, Workspace } from "../../git";
 import { projectBranch } from "../../project-branch";
 import { GitCasLog } from "../../record-log";
@@ -15,12 +15,12 @@ import type { ToolContext } from "./context";
  * it left `into`, and its tip becomes the change's branch, so it's reviewed, checked and merged as usual.
  */
 export async function branchMerge(ctx: ToolContext, repo: string, source: string, into: string) {
-	if (source === into) throw new Error(`[400] a change can't merge ${into} into itself`);
+	if (source === into) fail(400, `a change can't merge ${into} into itself`);
 	const project = await ctx.remote(repo, "read");
 	const workspace = await Workspace.clone(project, into).catch(() => fail(409, `there's no branch ${into}`));
 	const tip = await workspace.fetch("source", project, source).catch(() => fail(409, `there's no branch ${source}`));
 	const files = await workspace.changedPaths(await workspace.mergeBase(await workspace.head(), tip), tip);
-	if (!files.length) throw new Error(`[409] ${source} has nothing ${into} doesn't have`);
+	if (!files.length) fail(409, `${source} has nothing ${into} doesn't have`);
 	const paths =
 		claimCovering(files) ?? fail(409, `${source} changes too much of ${into} to claim at once: merge it in parts`);
 	return {
@@ -41,9 +41,8 @@ export async function branchMerge(ctx: ToolContext, repo: string, source: string
 /** Parses a work item for add_work, given alone or as one of its items. */
 export function workItemFrom(args: Record<string, unknown>) {
 	const title = requiredString(args, "title");
-	const id = typeof args.id === "string" && args.id.trim() ? args.id.trim() : workId(title);
-	if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(id))
-		throw new Error("[400] a work id is letters, digits, dots, dashes and underscores");
+	const id = optionalString(args, "id") ?? workId(title);
+	if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(id)) fail(400, "a work id is letters, digits, dots, dashes and underscores");
 	const paths = args.paths === undefined ? undefined : normalizeClaim(requiredPaths(args, "paths"));
 	const after = changeList(args.after, "after");
 	return {
@@ -58,7 +57,7 @@ export function workItemFrom(args: Record<string, unknown>) {
 export function changeList(value: unknown, field: string): string[] {
 	if (value === undefined) return [];
 	const isChangeId = (item: unknown) => typeof item === "string" && /^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(item);
-	if (!Array.isArray(value) || !value.every(isChangeId)) throw new Error(`[400] ${field} is a list of change ids`);
+	if (!Array.isArray(value) || !value.every(isChangeId)) fail(400, `${field} is a list of change ids`);
 	return [...new Set(value as string[])];
 }
 
@@ -102,7 +101,7 @@ export async function targetBranch(
 	},
 ): Promise<string | undefined> {
 	const { into, from, registered, claims, agent, stamper } = input;
-	if (!BRANCH_NAME.test(into)) throw new Error(`[400] ${into} isn't a branch name changes can land on`);
+	if (!BRANCH_NAME.test(into)) fail(400, `${into} isn't a branch name changes can land on`);
 	if (registered?.branches?.[into]) return undefined;
 	const found = await branchHead(await ctx.remote(repo, "read"), into);
 	if (found) {
@@ -110,8 +109,9 @@ export async function targetBranch(
 		return `changes land on ${into} from now on, as it is at ${found.slice(0, 8)}`;
 	}
 	if (!from)
-		throw new Error(
-			`[409] ${into} doesn't exist: claim again with from (the branch to make it from, ${projectBranch(registered)} say)`,
+		fail(
+			409,
+			`${into} doesn't exist: claim again with from (the branch to make it from, ${projectBranch(registered)} say)`,
 		);
 	const workspace = await Workspace.clone(await ctx.remote(repo, "write"), from, { depth: 1 }).catch(() =>
 		fail(409, `can't make ${into} from ${from}: there's no branch ${from}`),

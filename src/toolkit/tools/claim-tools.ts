@@ -1,5 +1,5 @@
 import { changeId, normalizeClaim } from "../../claim-paths";
-import { requiredPaths, requiredString } from "../../errors";
+import { fail, requiredPaths, requiredString } from "../../errors";
 import { isReservedPath, presentClaim, scopePaths } from "../branch-scope";
 import { abandonedRule } from "./change-state";
 import { branchMerge, changeList, dependencyLoop, targetBranch } from "./claim-input";
@@ -26,16 +26,16 @@ export const claimTools: ToolHandlers = {
 		const source = optionalString(args, "source");
 		const given = source ? [] : normalizeClaim(requiredPaths(args, "paths"));
 		const reserved = given.find(isReservedPath);
-		if (reserved) throw new Error(`[400] ${reserved}: a path can't start with "::"`);
+		if (reserved) fail(400, `${reserved}: a path can't start with "::"`);
 		const { into, made } = await landingBranch(call, change, agent);
 		const merging = source ? await branchMerge(ctx, repo, source, into) : undefined;
 		const paths = merging ? merging.paths : given;
 		const after = changeList(args.after, "after");
-		if (after.includes(change)) throw new Error(`[400] ${change} can't wait on itself`);
+		if (after.includes(change)) fail(400, `${change} can't wait on itself`);
 		// Refuse a dependency loop, which would leave every change in it waiting forever.
 		const afterOf = async (dependency: string) => (await call.claimOf(dependency))?.after ?? [];
 		const loop = after.length ? await dependencyLoop(change, after, afterOf) : undefined;
-		if (loop) throw new Error(`[409] after ${loop.at(1)}, ${change} would wait on itself: ${loop.join(" waits on ")}`);
+		if (loop) fail(409, `after ${loop.at(1)}, ${change} would wait on itself: ${loop.join(" waits on ")}`);
 		const input = {
 			change,
 			agent,
@@ -62,8 +62,9 @@ export const claimTools: ToolHandlers = {
 		// Only a claim's agent may release it; anyone else may release it only as stale, once abandoned.
 		const held = args.stale === true ? null : await claimOf(change);
 		if (held && held.agent !== agent)
-			throw new Error(
-				`[403] ${change} is ${held.agent}'s claim: only its agent releases it, or anyone once it's ` +
+			fail(
+				403,
+				`${change} is ${held.agent}'s claim: only its agent releases it, or anyone once it's ` +
 					"abandoned (release with stale: true)",
 			);
 		if (args.stale === true)
@@ -77,9 +78,9 @@ export const claimTools: ToolHandlers = {
 		);
 	},
 	async build({ args, ctx, repo, votes, registered, stamper, store }) {
-		if (!ctx.startBuilder) throw new Error("[501] hosted builders aren't available here");
+		if (!ctx.startBuilder) fail(501, "hosted builders aren't available here");
 		if (ctx.mayUseHosted && !(await ctx.mayUseHosted()))
-			throw new Error("[403] GitHive's hosted agents are by invitation: ask an admin to add you");
+			fail(403, "GitHive's hosted agents are by invitation: ask an admin to add you");
 		const intent = requiredString(args, "intent");
 		const change = changeId(intent);
 		const claimed = await store.claim(
@@ -105,9 +106,9 @@ async function landingBranch(call: ToolCall, change: string, agent: string) {
 	const held = await call.claimOf(change);
 	const into = optionalString(args, "into") ?? held?.into ?? branch;
 	if (held && (held.into ?? branch) !== into)
-		throw new Error(
-			`[409] ${change} lands on ${held.into ?? branch}: a change lands on one branch; claim another ` +
-				`change for ${into}`,
+		fail(
+			409,
+			`${change} lands on ${held.into ?? branch}: a change lands on one branch; claim another ` + `change for ${into}`,
 		);
 	if (into === branch || held) return { into, made: undefined };
 	const from = optionalString(args, "from");

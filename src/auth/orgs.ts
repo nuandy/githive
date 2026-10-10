@@ -1,4 +1,5 @@
 import { normalizeEmail } from "./store";
+import { fail } from "../errors";
 
 // Orgs, their members and repos, and what a person may do in a repo. Every person has a personal org named for
 // their handle. A repo's id is its Artifacts name and the key for its records. People and agents call it
@@ -100,10 +101,6 @@ function roleLevel(role: Role | null, defaultPermission: Level): Level | null {
 	if (role === "member") return defaultPermission;
 	return null;
 }
-
-const fail = (status: number, message: string): never => {
-	throw new Error(`[${status}] ${message}`);
-};
 
 const REPO_SELECT = "SELECT r.*, o.slug AS org_slug FROM repos r JOIN orgs o ON o.id = r.org_id";
 
@@ -323,9 +320,7 @@ export class OrgStore {
 		await this.db.batch([
 			this.db.prepare("DELETE FROM org_members WHERE org_id = ? AND user_id = ?").bind(orgId, userId),
 			this.db
-				.prepare(
-					"DELETE FROM team_members WHERE user_id = ? AND team_id IN (SELECT id FROM teams WHERE " + "org_id = ?)",
-				)
+				.prepare("DELETE FROM team_members WHERE user_id = ? AND team_id IN (SELECT id FROM teams WHERE org_id = ?)")
 				.bind(userId, orgId),
 		]);
 	}
@@ -469,9 +464,7 @@ export class OrgStore {
 		const id = options.id ?? repoIdFor(org.slug, name);
 		if (await this.repoById(id)) fail(409, `that repo already belongs to an org`);
 		await this.db
-			.prepare(
-				"INSERT INTO repos (id, org_id, name, visibility, created_by, created_at) VALUES (?, ?, ?, ?, " + "?, ?)",
-			)
+			.prepare("INSERT INTO repos (id, org_id, name, visibility, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?)")
 			.bind(id, org.id, name, options.visibility ?? "private", createdBy, this.iso())
 			.run();
 		return (await this.repoById(id))!;

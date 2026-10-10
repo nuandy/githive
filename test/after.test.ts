@@ -2,10 +2,9 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { callTool, type ToolContext } from "../src/toolkit/mcp";
 import { pushChange } from "./helpers/agents";
 import { startGitServer, type GitServer } from "./helpers/git-server";
-import { memoryBatchGit } from "./helpers/memory-batch-git";
+import { toolCalls } from "./helpers/tool-calls";
 
 // A change can name changes it depends on (after): it merges only once each
 // has merged into the branch it lands on, and next hands out backlog work
@@ -13,16 +12,7 @@ import { memoryBatchGit } from "./helpers/memory-batch-git";
 
 let server: GitServer;
 let work: string;
-const keys: Record<string, string> = {};
-const ctx = (agentKey?: string): ToolContext => ({
-	remote: async () => ({ url: server.url, token: "unused" }),
-	batchGit: () => memoryBatchGit({ url: server.url, token: "unused" }),
-	changeRemote: async () => ({ url: server.url, token: "unused" }),
-	head: async (_repo, branch) => server.git("rev-parse", branch).trim(),
-	...(agentKey ? { agentKey } : {}),
-});
-const call = (name: string, args: Record<string, unknown>, as?: string) =>
-	callTool(name, { repo: "p", ...args }, ctx(as ? keys[as] : undefined)) as Promise<Record<string, unknown>>;
+const { call, register, approve } = toolCalls(() => server);
 
 /** Claim, push and get approved, so the change is ready to merge except for what it waits on. */
 async function approved(
@@ -41,11 +31,7 @@ async function approved(
 		files,
 		typeof extra.into === "string" ? `origin/${extra.into}` : undefined,
 	);
-	await call(
-		"vote",
-		{ commit: head, reviewer: "reviewer", role: "review", verdict: "approve", evidence: "ok" },
-		"reviewer",
-	);
+	await approve(head);
 	return head;
 }
 
@@ -53,8 +39,7 @@ beforeEach(async () => {
 	server = await startGitServer();
 	work = mkdtempSync(join(tmpdir(), "githive-after-"));
 	await call("settings", { required: 1, vetoes: [] });
-	for (const agent of ["a", "b", "reviewer"])
-		keys[agent] = ((await call("register", { agent })) as { key: string }).key;
+	await register("a", "b", "reviewer");
 });
 afterEach(async () => {
 	await server.close();

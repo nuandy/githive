@@ -33,7 +33,7 @@ const FORKS_PER_AGENT_SINCE = "2026-10-08T00:00:00Z";
  */
 export function changeSourceFor(ctx: ToolContext, repo: string) {
 	return async (agent: string, scope: "read" | "write", change?: string, since?: string): Promise<Remote> => {
-		if (!ctx.changeRemote) throw new Error("[501] change forks aren't available here");
+		if (!ctx.changeRemote) fail(501, "change forks aren't available here");
 		const legacy = !!change && !!ctx.legacyChangeRemote && !(since && since >= FORKS_PER_AGENT_SINCE);
 		if (scope === "write" || !legacy) return ctx.changeRemote(repo, agent, scope);
 		const fork = await ctx.changeRemote(repo, agent, "read").catch(() => null);

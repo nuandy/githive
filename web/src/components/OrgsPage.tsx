@@ -3,7 +3,7 @@ import type { ManageApi, MyOrg, Org } from "../api";
 import { usePoll } from "../hooks/usePoll";
 import { realOrgs, SLUG_HINT, slugProblem } from "../lib/orgs";
 import { href } from "../lib/routes";
-import { messageOf } from "./Confirm";
+import { messageOf } from "../lib/errors";
 import { Icon } from "./Icon";
 import "./Manage.css";
 

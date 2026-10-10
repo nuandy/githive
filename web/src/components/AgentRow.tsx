@@ -9,19 +9,14 @@ import {
 	tokenLabel,
 	tokenSteps,
 } from "../lib/session";
+import type { RunAction } from "../hooks/useRowActions";
 import type { AgentActions } from "./AgentsPage";
 import { Steps } from "./AgentsConnect";
+import { ConfirmButton } from "./Confirm";
 import { CopyBlock } from "./CopyBlock";
 import { Icon } from "./Icon";
 
 type Token = MyAgent["tokens"][number];
-
-/** Runs one action, keyed so its button shows it's busy; resolves to whether it worked. */
-export type RunAction = (
-	key: string,
-	work: () => Promise<unknown>,
-	onError: (text: string) => void,
-) => Promise<boolean>;
 
 /** What every row on the Agents page shares: the actions, which is busy, and which "Revoke" is asking. */
 export interface RowShared {
@@ -31,43 +26,6 @@ export interface RowShared {
 	confirming: string | null;
 	setConfirming: (id: string | null) => void;
 	now: number;
-}
-
-/** A "Revoke" that asks once more, in the page. */
-export function ConfirmButton({
-	id,
-	confirming,
-	setConfirming,
-	label,
-	question,
-	busy,
-	onConfirm,
-}: {
-	id: string;
-	confirming: string | null;
-	setConfirming: (id: string | null) => void;
-	label: string;
-	question: string;
-	busy: boolean;
-	onConfirm: () => void;
-}) {
-	if (confirming !== id)
-		return (
-			<button type="button" className="danger agents__small" onClick={() => setConfirming(id)} disabled={busy}>
-				{label}
-			</button>
-		);
-	return (
-		<span className="agents__confirm" role="group" aria-label={question}>
-			<span>{question}</span>
-			<button type="button" className="danger agents__small" onClick={onConfirm} disabled={busy}>
-				{busy ? "Working…" : `Yes, ${label.toLowerCase()}`}
-			</button>
-			<button type="button" className="agents__small" onClick={() => setConfirming(null)} disabled={busy}>
-				Cancel
-			</button>
-		</span>
-	);
 }
 
 interface AgentRowProps extends RowShared {
@@ -176,6 +134,7 @@ function AgentControls({
 				{busy === tokenKey ? "Making…" : "New token"}
 			</button>
 			<ConfirmButton
+				block="agents"
 				id={agentKey}
 				confirming={confirming}
 				setConfirming={setConfirming}
@@ -240,6 +199,7 @@ function TokenStatus({
 	const key = `token:${token.id}`;
 	return (
 		<ConfirmButton
+			block="agents"
 			id={key}
 			confirming={confirming}
 			setConfirming={setConfirming}

@@ -78,22 +78,24 @@ async function pkce() {
 	};
 }
 
-/** The client registers and opens /authorize; returns the URL it opened and its PKCE verifier. */
-async function startConnecting() {
+/** Registers an MCP client the way Claude Code does, and returns its id. */
+async function registerClient(name = "Claude Code"): Promise<string> {
 	const registered = await json(
 		call("/oauth/register", {
 			method: "POST",
 			headers: { "Content-Type": "application/json" },
-			body: JSON.stringify({
-				client_name: "Claude Code",
-				redirect_uris: [CLIENT_REDIRECT],
-				token_endpoint_auth_method: "none",
-			}),
+			body: JSON.stringify({ client_name: name, redirect_uris: [CLIENT_REDIRECT], token_endpoint_auth_method: "none" }),
 		}),
 	);
+	return registered.client_id as string;
+}
+
+/** The client registers and opens /authorize; returns the URL it opened and its PKCE verifier. */
+async function startConnecting() {
+	const clientId = await registerClient();
 	const { verifier, challenge } = await pkce();
-	const authorizeUrl = authorizePath(registered.client_id, challenge, { resource: `${ORIGIN}/mcp` });
-	return { clientId: registered.client_id as string, authorizeUrl, verifier };
+	const authorizeUrl = authorizePath(clientId, challenge, { resource: `${ORIGIN}/mcp` });
+	return { clientId, authorizeUrl, verifier };
 }
 
 /** The person allows the client as `agent` (an agent id, or "new" with a name). Returns the client's code. */
@@ -139,19 +141,9 @@ describe("connecting an MCP client over OAuth", () => {
 	});
 
 	it("shows the client, where access goes and a warning for a local app, escaping what the client chose", async () => {
-		const registered = await json(
-			call("/oauth/register", {
-				method: "POST",
-				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify({
-					client_name: "<script>x</script>",
-					redirect_uris: [CLIENT_REDIRECT],
-					token_endpoint_auth_method: "none",
-				}),
-			}),
-		);
+		const clientId = await registerClient("<script>x</script>");
 		const { challenge } = await pkce();
-		const url = authorizePath(registered.client_id, challenge);
+		const url = authorizePath(clientId, challenge);
 		const page = await call(url, { headers: { Cookie: session } });
 		const text = await page.text();
 		expect(text).not.toContain("<script>x</script>");
@@ -294,23 +286,8 @@ describe("where the consent form may lead", () => {
 	});
 
 	it("sends that policy with the consent page", async () => {
-		const { authorizeUrl } = await (async () => {
-			const registered = await json(
-				call("/oauth/register", {
-					method: "POST",
-					headers: { "Content-Type": "application/json" },
-					body: JSON.stringify({
-						client_name: "Claude Code",
-						redirect_uris: [CLIENT_REDIRECT],
-						token_endpoint_auth_method: "none",
-					}),
-				}),
-			);
-			const { challenge } = await pkce();
-			return {
-				authorizeUrl: authorizePath(registered.client_id, challenge),
-			};
-		})();
+		const { challenge } = await pkce();
+		const authorizeUrl = authorizePath(await registerClient(), challenge);
 		const page = await call(authorizeUrl, { headers: { Cookie: session } });
 		expect(page.headers.get("Content-Security-Policy")).toContain("form-action 'self' http://127.0.0.1:33418;");
 	});
@@ -362,19 +339,9 @@ describe("feedback on Allow and Deny", () => {
 	});
 
 	it("is allowed by a nonce in the page's policy, fresh for each page", async () => {
-		const registered = await json(
-			call("/oauth/register", {
-				method: "POST",
-				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify({
-					client_name: "Claude Code",
-					redirect_uris: [CLIENT_REDIRECT],
-					token_endpoint_auth_method: "none",
-				}),
-			}),
-		);
+		const clientId = await registerClient();
 		const { challenge } = await pkce();
-		const url = authorizePath(registered.client_id, challenge);
+		const url = authorizePath(clientId, challenge);
 		const nonceOf = async () => {
 			const response = await call(url, { headers: { Cookie: session } });
 			const policy = response.headers.get("Content-Security-Policy")!;

@@ -11,6 +11,7 @@ export function ConfirmButton({
 	question,
 	busy,
 	onConfirm,
+	block = "manage",
 }: {
 	id: string;
 	confirming: string | null;
@@ -19,25 +20,24 @@ export function ConfirmButton({
 	question: string;
 	busy: boolean;
 	onConfirm: () => void;
+	/** The CSS block its classes belong to: manage__small and manage__confirm by default. */
+	block?: string;
 }) {
 	if (confirming !== id)
 		return (
-			<button type="button" className="danger manage__small" onClick={() => setConfirming(id)} disabled={busy}>
+			<button type="button" className={`danger ${block}__small`} onClick={() => setConfirming(id)} disabled={busy}>
 				{label}
 			</button>
 		);
 	return (
-		<span className="manage__confirm" role="group" aria-label={question}>
+		<span className={`${block}__confirm`} role="group" aria-label={question}>
 			<span>{question}</span>
-			<button type="button" className="danger manage__small" onClick={onConfirm} disabled={busy}>
+			<button type="button" className={`danger ${block}__small`} onClick={onConfirm} disabled={busy}>
 				{busy ? "Working…" : `Yes, ${label.toLowerCase()}`}
 			</button>
-			<button type="button" className="manage__small" onClick={() => setConfirming(null)} disabled={busy}>
+			<button type="button" className={`${block}__small`} onClick={() => setConfirming(null)} disabled={busy}>
 				Cancel
 			</button>
 		</span>
 	);
 }
-
-/** An error from the server, worded as it said, for a form or a row. */
-export const messageOf = (err: unknown) => (err instanceof Error ? err.message : String(err));

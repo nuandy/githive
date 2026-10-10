@@ -8,52 +8,18 @@
 // Credentials come from .dev.vars (CF_ACCESS_CLIENT_ID, CF_ACCESS_CLIENT_SECRET) and are never printed.
 
 import { execFile } from "node:child_process";
-import { readFile } from "node:fs/promises";
 import { promisify } from "node:util";
-import { join } from "node:path";
+import { BENCH_BASE, githiveClient, parseFlags } from "./lib/bench-client.mjs";
 
-const root = new URL("..", import.meta.url).pathname;
-const args = Object.fromEntries(
-	process.argv
-		.slice(2)
-		.reduce((pairs, arg, i, all) => (arg.startsWith("--") ? [...pairs, [arg.slice(2), all[i + 1]]] : pairs), []),
-);
-const BASE = args.base ?? "https://blueprint-bench.nuandy.workers.dev";
+const args = parseFlags();
+const BASE = args.base ?? BENCH_BASE;
 const REPO = args.repo ?? `build-demo-${Date.now().toString(36)}`;
 
-const vars = Object.fromEntries(
-	(await readFile(join(root, ".dev.vars"), "utf8"))
-		.split("\n")
-		.map((l) => l.match(/^([A-Z_]+)=(.*)$/))
-		.filter(Boolean)
-		.map(([, k, v]) => [k, v.replace(/^"|"$/g, "")]),
-);
-const headers = {
-	"CF-Access-Client-Id": vars.CF_ACCESS_CLIENT_ID,
-	"CF-Access-Client-Secret": vars.CF_ACCESS_CLIENT_SECRET,
-	"Content-Type": "application/json",
-};
-
-async function api(method, path, body) {
-	const response = await fetch(`${BASE}${path}`, {
-		method,
-		headers,
-		body: body === undefined ? undefined : JSON.stringify(body),
-	});
-	const text = await response.text();
-	if (!response.ok) throw new Error(`${method} ${path}: ${response.status} ${text.slice(0, 300)}`);
-	return JSON.parse(text);
-}
+const { api, toolReply } = githiveClient(BASE);
 
 async function tool(name, args) {
-	const reply = await api("POST", "/mcp", {
-		jsonrpc: "2.0",
-		id: 1,
-		method: "tools/call",
-		params: { name, arguments: { repo: REPO, ...args } },
-	});
-	const text = reply.result.content[0].text.replace(/[\u0000-\u0008\u000b-\u001f]/g, "");
-	if (reply.result.isError) throw new Error(`${name}: ${text}`);
+	const { text, isError } = await toolReply(name, { repo: REPO, ...args });
+	if (isError) throw new Error(`${name}: ${text}`);
 	return JSON.parse(text);
 }
 

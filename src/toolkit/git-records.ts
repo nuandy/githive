@@ -4,7 +4,7 @@ import { isEmptyRepo, type Remote, Workspace } from "../git";
 import { fetchCommits } from "../git-fetch";
 import { formatOf, RECORD_FORMAT, upgradeState } from "../record-format";
 import { checkedState } from "../record-schemas";
-import { retryTransient } from "../retry";
+import { retryTransient, whileRefsMove } from "../retry";
 import type { MergeRecord } from "./audit";
 import type { Registry } from "./claims";
 import { decodeShard, shardsPrefix } from "./shards";
@@ -99,25 +99,18 @@ async function inTurns<R>(limit: number, tasks: (() => Promise<R>)[]): Promise<R
 
 // The refs under `prefix` and their histories in one fetch. If a ref moves in between, its old tip is no longer
 // served, so the refs are listed again.
-async function listAndFetch(remote: Remote, prefix: string) {
-	for (let attempt = 1; ; attempt++) {
-		const refs = (
-			await retryTransient(() =>
-				git
-					.listServerRefs({ http, url: remote.url, protocolVersion: 1, prefix, ...gitAuth(remote) })
-					.catch((err) => (isEmptyRepo(err) ? [] : Promise.reject(err))),
-			)
-		).filter((r) => r.ref.startsWith(prefix));
-		try {
-			const { fs } = await retryTransient(() =>
-				fetchCommits(remote, [...new Set(refs.map((r) => r.oid))], DIR, { history: true }),
-			);
-			return { refs, fs };
-		} catch (err) {
-			if (attempt < 3 && /not our ref|fetch refused/i.test(String(err))) continue;
-			throw err;
-		}
-	}
+function listAndFetch(remote: Remote, prefix: string) {
+	return whileRefsMove(async () => {
+		const listed = await retryTransient(() =>
+			git
+				.listServerRefs({ http, url: remote.url, protocolVersion: 1, prefix, ...gitAuth(remote) })
+				.catch((err) => (isEmptyRepo(err) ? [] : Promise.reject(err))),
+		);
+		const refs = listed.filter((r) => r.ref.startsWith(prefix));
+		const tips = [...new Set(refs.map((r) => r.oid))];
+		const { fs } = await retryTransient(() => fetchCommits(remote, tips, DIR, { history: true }));
+		return { refs, fs };
+	});
 }
 
 /** A trailer's value, read from the message's last paragraph only, so text written by agents can't pose as one. */

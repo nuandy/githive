@@ -3,10 +3,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { claimCovering } from "../src/claim-paths";
-import { callTool, type ToolContext } from "../src/toolkit/mcp";
 import { pushChange } from "./helpers/agents";
 import { startGitServer, type GitServer } from "./helpers/git-server";
-import { memoryBatchGit } from "./helpers/memory-batch-git";
+import { toolCalls } from "./helpers/tool-calls";
 
 // A finished branch merges into another as one change. It is claimed with
 // `source`: the claim covers what the branch changed, and the branch tip is the
@@ -25,19 +24,8 @@ describe("a claim covering a branch's changes", () => {
 
 let server: GitServer;
 let work: string;
-const keys: Record<string, string> = {};
-const ctx = (agentKey?: string): ToolContext => ({
-	remote: async () => ({ url: server.url, token: "unused" }),
-	batchGit: () => memoryBatchGit({ url: server.url, token: "unused" }),
-	changeRemote: async () => ({ url: server.url, token: "unused" }),
-	head: async (_repo, branch) => server.git("rev-parse", branch).trim(),
-	...(agentKey ? { agentKey } : {}),
-});
-const call = (name: string, args: Record<string, unknown>, as?: string) =>
-	callTool(name, { repo: "p", ...args }, ctx(as ? keys[as] : undefined)) as Promise<Record<string, unknown>>;
+const { call, register, approve } = toolCalls(() => server);
 const tip = (branch: string) => server.git("rev-parse", branch).trim();
-const approve = (head: string) =>
-	call("vote", { commit: head, reviewer: "reviewer", role: "review", verdict: "approve", evidence: "ok" }, "reviewer");
 
 /** A piece of the feature, claimed into feature/f, pushed, approved and merged there. */
 async function piece(
@@ -67,8 +55,7 @@ describe.each([
 ])("with claims %s", (_mode, shardDepth) => {
 	beforeEach(async () => {
 		await call("settings", { required: 1, vetoes: [], ...(shardDepth ? { shard_depth: shardDepth } : {}) });
-		for (const agent of ["a", "b", "lander", "other", "reviewer"])
-			keys[agent] = ((await call("register", { agent })) as { key: string }).key;
+		await register("a", "b", "lander", "other", "reviewer");
 		await piece("api", "a", { "api/field.js": "the field\n" }, { from: "main" });
 		await piece("consumer", "b", { "web/field.js": "uses the field\n" }, { after: ["api"] });
 	});

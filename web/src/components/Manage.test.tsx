@@ -28,6 +28,26 @@ const manageApi: RepoManageApi = {
 	removeCollaborator: noop,
 };
 
+/** Ada's own namespace, as her org list shows it. */
+const ADA: MyOrg = {
+	id: "p",
+	slug: "ada",
+	name: null,
+	personal: true,
+	defaultPermission: "admin",
+	membersCanCreateRepos: false,
+	role: "owner",
+};
+/** Acme in someone's org list, where they have `role`. */
+const acmeMembership = (role: MyOrg["role"]): MyOrg => ({
+	id: "o1",
+	slug: "acme",
+	name: "Acme",
+	personal: false,
+	defaultPermission: "write",
+	membersCanCreateRepos: true,
+	role,
+});
 const acme = (role: OrgDetail["role"], extra: Partial<OrgDetail> = {}): OrgDetail => ({
 	id: "o1",
 	slug: "acme",
@@ -51,24 +71,8 @@ const acme = (role: OrgDetail["role"], extra: Partial<OrgDetail> = {}): OrgDetai
 
 describe("a new repository", () => {
 	const orgs: MyOrg[] = [
-		{
-			id: "p",
-			slug: "ada",
-			name: null,
-			personal: true,
-			defaultPermission: "admin",
-			membersCanCreateRepos: false,
-			role: "owner",
-		},
-		{
-			id: "o1",
-			slug: "acme",
-			name: "Acme",
-			personal: false,
-			defaultPermission: "write",
-			membersCanCreateRepos: true,
-			role: "member",
-		},
+		ADA,
+		acmeMembership("member"),
 		{
 			id: "o2",
 			slug: "strict",
@@ -141,26 +145,7 @@ describe("a new repository", () => {
 
 describe("your organizations", () => {
 	it("lists your own repositories first, never as an org, then your orgs, and offers making one", () => {
-		const orgs: MyOrg[] = [
-			{
-				id: "p",
-				slug: "ada",
-				name: null,
-				personal: true,
-				defaultPermission: "admin",
-				membersCanCreateRepos: false,
-				role: "owner",
-			},
-			{
-				id: "o1",
-				slug: "acme",
-				name: "Acme",
-				personal: false,
-				defaultPermission: "write",
-				membersCanCreateRepos: true,
-				role: "admin",
-			},
-		];
+		const orgs: MyOrg[] = [ADA, acmeMembership("admin")];
 		const text = visibleText(
 			renderToStaticMarkup(<OrgsView me={{ handle: "ada" }} orgs={orgs} createOrg={noop} onCreated={() => {}} />),
 		);

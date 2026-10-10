@@ -1,6 +1,7 @@
 import type { Landing, Settled } from "./landing";
 import { type Holding, STEP_MS } from "./merge-lease";
 import type { BatchChange, CheckResult, MergeInput, Ready } from "./merge-types";
+import { fail } from "../errors";
 
 /** The reviewer failed checks are recorded as. Its rejection of the failing head sends the change back to its agent. */
 export const CHECKS_REVIEWER = "githive-checks";
@@ -45,7 +46,7 @@ export async function checkAndPutOut(
 	place: Place,
 	found: (part: Ready[]) => void,
 ): Promise<Settled[]> {
-	if (!input.runChecks) throw new Error("[500] checks are configured but nothing can run them");
+	if (!input.runChecks) fail(500, "checks are configured but nothing can run them");
 	await landing.checking({
 		base: baseHead,
 		since: new Date().toISOString(),

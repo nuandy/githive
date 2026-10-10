@@ -3,7 +3,9 @@ import type { AccountApi, Connection, IssuedToken, Me, MyAgent } from "../api";
 import { usePoll } from "../hooks/usePoll";
 import { timeAgo } from "../lib/relativeTime";
 import { DEFAULT_TOKEN_DAYS, MCP_CLIENTS, type McpClient } from "../lib/session";
-import { AgentRow, ConfirmButton, type RowShared } from "./AgentRow";
+import { useRowActions } from "../hooks/useRowActions";
+import { AgentRow, type RowShared } from "./AgentRow";
+import { ConfirmButton } from "./Confirm";
 import { ConnectSection, rememberClient, rememberedClient } from "./AgentsConnect";
 import "./AgentsPage.css";
 
@@ -17,8 +19,6 @@ export interface AgentActions {
 	revokeToken(id: string): Promise<unknown>;
 	disconnect(id: string): Promise<unknown>;
 }
-
-const message = (err: unknown) => (err instanceof Error ? err.message : String(err));
 
 type Issued = { agentId: string; token: string };
 
@@ -45,9 +45,7 @@ export function AgentsView({
 }) {
 	const [newName, setNewName] = useState("");
 	const [createError, setCreateError] = useState<string | null>(null);
-	const [rowError, setRowError] = useState<{ id: string; text: string } | null>(null);
-	const [confirming, setConfirming] = useState<string | null>(null);
-	const [busy, setBusy] = useState<string | null>(null);
+	const { run, busy, confirming, setConfirming, failed: showError, errorText: errorFor } = useRowActions();
 	const [expiry, setExpiry] = useState<Record<string, number | null>>({});
 	const [issued, setIssued] = useState<Issued | null>(initialIssued);
 	const [client, setClient] = useState<McpClient>(rememberedClient);
@@ -65,22 +63,6 @@ export function AgentsView({
 	const daysFor = (agentId: string) => {
 		const chosen = expiry[agentId];
 		return chosen === undefined ? DEFAULT_TOKEN_DAYS : chosen;
-	};
-	const errorFor = (id: string) => (rowError?.id === id ? rowError.text : null);
-	const showError = (id: string) => (text: string) => setRowError({ id, text });
-
-	const run = async (key: string, work: () => Promise<unknown>, onError: (text: string) => void) => {
-		setBusy(key);
-		try {
-			await work();
-			setConfirming(null);
-			return true;
-		} catch (err) {
-			onError(message(err));
-			return false;
-		} finally {
-			setBusy(null);
-		}
 	};
 	const shared: RowShared = { actions, run, busy, confirming, setConfirming, now };
 
@@ -239,6 +221,7 @@ function ConnectedApps({
 							<span className="muted agents__meta"> · connected {timeAgo(connection.createdAt, now)}</span>
 						</div>
 						<ConfirmButton
+							block="agents"
 							id={key}
 							confirming={confirming}
 							setConfirming={setConfirming}

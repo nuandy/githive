@@ -1,3 +1,5 @@
+import { fail } from "../errors";
+
 // GitHive's identity store in D1: people, their sign-in accounts and sessions, their agents and agent tokens,
 // and sign-in invitations. Session ids and agent tokens are stored only as SHA-256 hashes.
 
@@ -73,10 +75,6 @@ export function randomSecret(bytes = 32) {
 		.replace(/=+$/, "");
 }
 
-const fail = (status: number, message: string): never => {
-	throw new Error(`[${status}] ${message}`);
-};
-
 type Row = Record<string, unknown>;
 const str = (v: unknown) => (v === null || v === undefined ? null : String(v));
 const toUser = (r: Row): User => ({
@@ -93,6 +91,14 @@ const toAgent = (r: Row): Agent => ({
 	name: String(r.name),
 	createdAt: String(r.created_at),
 	revokedAt: str(r.revoked_at),
+});
+// An active agent from a query that joins it to its owner, with its columns renamed (agent_id, agent_name, …).
+const toActiveAgent = (r: Row): Agent => ({
+	id: String(r.agent_id),
+	ownerId: String(r.owner_id),
+	name: String(r.agent_name),
+	createdAt: String(r.agent_created_at),
+	revokedAt: null,
 });
 const toToken = (r: Row): AgentToken => ({
 	id: String(r.id),
@@ -120,9 +126,7 @@ export class IdentityStore {
 		const address = normalizeEmail(email);
 		if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(address)) fail(400, `not an email address: ${email}`);
 		await this.db
-			.prepare(
-				"INSERT INTO invites (email, invited_by, created_at) VALUES (?, ?, ?) ON CONFLICT (email) DO " + "NOTHING",
-			)
+			.prepare("INSERT INTO invites (email, invited_by, created_at) VALUES (?, ?, ?) ON CONFLICT (email) DO NOTHING")
 			.bind(address, invitedBy, this.iso())
 			.run();
 		return address;
@@ -251,9 +255,7 @@ export class IdentityStore {
 	async signIn(profile: ProviderProfile): Promise<{ user: User } | { refused: "not-invited" }> {
 		const email = normalizeEmail(profile.email);
 		const linked = await this.db
-			.prepare(
-				"SELECT u.* FROM accounts a JOIN users u ON u.id = a.user_id WHERE a.provider = ? AND " + "a.provider_id = ?",
-			)
+			.prepare("SELECT u.* FROM accounts a JOIN users u ON u.id = a.user_id WHERE a.provider = ? AND a.provider_id = ?")
 			.bind(profile.provider, profile.providerId)
 			.first<Row>();
 		if (linked) return { user: toUser(linked) };
@@ -277,7 +279,7 @@ export class IdentityStore {
 		};
 		await this.db.batch([
 			this.db
-				.prepare("INSERT INTO users (id, handle, email, name, avatar_url, created_at) VALUES (?, ?, ?, ?, " + "?, ?)")
+				.prepare("INSERT INTO users (id, handle, email, name, avatar_url, created_at) VALUES (?, ?, ?, ?, ?, ?)")
 				.bind(user.id, user.handle, user.email, user.name, user.avatarUrl, user.createdAt),
 			this.db
 				.prepare("INSERT INTO accounts (provider, provider_id, user_id, created_at) VALUES (?, ?, ?, ?)")
@@ -346,9 +348,7 @@ export class IdentityStore {
 
 	async sessionUser(secret: string) {
 		const row = await this.db
-			.prepare(
-				"SELECT u.* FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.id_hash = ? AND " + "s.expires_at > ?",
-			)
+			.prepare("SELECT u.* FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.id_hash = ? AND s.expires_at > ?")
 			.bind(await sha256Hex(secret), this.iso())
 			.first<Row>();
 		return row ? toUser(row) : null;
@@ -367,7 +367,7 @@ export class IdentityStore {
 	async createAgent(ownerId: string, name: string): Promise<Agent> {
 		const agentName = name.trim().toLowerCase();
 		if (!AGENT_NAME.test(agentName))
-			fail(400, "an agent's name is 1 to 32 lowercase letters, digits or dashes, starting with a letter or " + "digit");
+			fail(400, "an agent's name is 1 to 32 lowercase letters, digits or dashes, starting with a letter or digit");
 		const existing = await this.db
 			.prepare("SELECT * FROM agents WHERE owner_id = ? AND name = ?")
 			.bind(ownerId, agentName)
@@ -423,16 +423,7 @@ export class IdentityStore {
 			.bind(agentId)
 			.first<Row>();
 		if (!row) return null;
-		return {
-			user: toUser(row),
-			agent: {
-				id: String(row.agent_id),
-				ownerId: String(row.owner_id),
-				name: String(row.agent_name),
-				createdAt: String(row.agent_created_at),
-				revokedAt: null,
-			} as Agent,
-		};
+		return { user: toUser(row), agent: toActiveAgent(row) };
 	}
 
 	async revokeAgent(ownerId: string, agentId: string) {
@@ -479,9 +470,7 @@ export class IdentityStore {
 
 	async revokeToken(ownerId: string, tokenId: string) {
 		const row = await this.db
-			.prepare(
-				"SELECT t.id FROM agent_tokens t JOIN agents a ON a.id = t.agent_id WHERE t.id = ? AND " + "a.owner_id = ?",
-			)
+			.prepare("SELECT t.id FROM agent_tokens t JOIN agents a ON a.id = t.agent_id WHERE t.id = ? AND a.owner_id = ?")
 			.bind(tokenId, ownerId)
 			.first<Row>();
 		if (!row) fail(404, "no such token");
@@ -508,15 +497,6 @@ export class IdentityStore {
 		if (row.token_expires_at && String(row.token_expires_at) <= now) return null;
 		if (!row.last_used_at || Date.parse(String(row.last_used_at)) < this.now().getTime() - TOUCH_MS)
 			await this.db.prepare("UPDATE agent_tokens SET last_used_at = ? WHERE id = ?").bind(now, row.token_id).run();
-		return {
-			user: toUser(row),
-			agent: {
-				id: String(row.agent_id),
-				ownerId: String(row.owner_id),
-				name: String(row.agent_name),
-				createdAt: String(row.agent_created_at),
-				revokedAt: null,
-			} as Agent,
-		};
+		return { user: toUser(row), agent: toActiveAgent(row) };
 	}
 }

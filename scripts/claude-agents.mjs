@@ -18,28 +18,18 @@
 import { spawn } from "node:child_process";
 import { chmodSync, createWriteStream, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, join, resolve } from "node:path";
+import { BENCH_BASE, ROOT, accessHeaders, parseFlags } from "./lib/bench-client.mjs";
 
-const root = new URL("..", import.meta.url).pathname;
 const args = process.argv.slice(2);
 const planPath = resolve(args[0] ?? "");
-const flag = (name) => (args.includes(`--${name}`) ? args[args.indexOf(`--${name}`) + 1] : undefined);
-const BASE = flag("base") ?? "https://blueprint-bench.nuandy.workers.dev";
-const model = flag("model") ?? "claude-sonnet-5-5";
-const minutes = Number(flag("minutes") ?? 45);
+const flags = parseFlags(args);
+const BASE = flags.base ?? BENCH_BASE;
+const model = flags.model ?? "claude-sonnet-5-5";
+const minutes = Number(flags.minutes ?? 45);
 const plan = JSON.parse(readFileSync(planPath, "utf8"));
 const here = dirname(planPath);
 const at = (path) => (path && !isAbsolute(path) ? join(here, path) : path);
-const vars = Object.fromEntries(
-	readFileSync(join(root, ".dev.vars"), "utf8")
-		.split("\n")
-		.map((l) => l.match(/^([A-Z_]+)=(.*)$/))
-		.filter(Boolean)
-		.map(([, k, v]) => [k, v.replace(/^"|"$/g, "")]),
-);
-const access = {
-	"CF-Access-Client-Id": vars.CF_ACCESS_CLIENT_ID,
-	"CF-Access-Client-Secret": vars.CF_ACCESS_CLIENT_SECRET,
-};
+const access = accessHeaders();
 
 const started = Date.now();
 const clock = () => `${((Date.now() - started) / 1000).toFixed(0).padStart(5)}s`;
@@ -47,7 +37,7 @@ const say = (who, text) => console.log(`${clock()}  ${who.padEnd(10)} ${text}`);
 const turnsAndTime = (result) => `${result.num_turns} turns, ${Math.round(result.duration_ms / 1000)}s`;
 
 // --only <agent>[,<agent>] runs just those agents, for example to restart one, and keeps the other folders.
-const only = flag("only")?.split(",");
+const only = flags.only?.split(",");
 /** The plan's full agent count, which each agent is told even with --only. */
 const total = plan.agents.length;
 if (only) plan.agents = plan.agents.filter((a) => only.includes(a.agent));
@@ -90,12 +80,12 @@ const prompt = (agent, dir, keyFile, brief) =>
 			`open, or when ${minutes} minutes have passed. Then print a short summary of what you did.`,
 		"",
 		"Git, without ever printing a token (the helper keeps credentials in each clone's own config):",
-		`  node ${root}scripts/mcp-agent.mjs clone <dir> --repo ${plan.repo} --change <change> --key-file ${keyFile}`,
+		`  node ${ROOT}scripts/mcp-agent.mjs clone <dir> --repo ${plan.repo} --change <change> --key-file ${keyFile}`,
 		`      a clone of the project, with your fork as the remote "fork": push changes/<change> to "fork". ` +
 			"Claim first.",
-		`  node ${root}scripts/mcp-agent.mjs auth <dir> --repo ${plan.repo} --change <change> --key-file ${keyFile}`,
+		`  node ${ROOT}scripts/mcp-agent.mjs auth <dir> --repo ${plan.repo} --change <change> --key-file ${keyFile}`,
 		"      fresh write access for that clone, if a push is refused for authentication.",
-		`  node ${root}scripts/mcp-agent.mjs review-clone <dir> --repo ${plan.repo} --change <change> --role ` +
+		`  node ${ROOT}scripts/mcp-agent.mjs review-clone <dir> --repo ${plan.repo} --change <change> --role ` +
 			`<role> --key-file ${keyFile}`,
 		"      a change to review: the project, with the change checked out at its pushed head " +
 			`("origin/<branch>" is what it lands on); marks you reviewing it in that role.`,

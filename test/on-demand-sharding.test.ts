@@ -3,15 +3,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { GitCasLog } from "../src/record-log";
-import { statusOf } from "../src/errors";
 import { claimStore } from "../src/toolkit/claim-store";
 import { type Registry, SHARD_WHEN, shardClaims, shardingReason } from "../src/toolkit/claims";
-import { callTool, type ToolContext } from "../src/toolkit/mcp";
 import { changeRef, shardsPrefix } from "../src/toolkit/shards";
 import { entriesOverlap } from "../src/claim-paths";
 import { pushChange } from "./helpers/agents";
 import { startGitServer, type GitServer } from "./helpers/git-server";
-import { memoryBatchGit } from "./helpers/memory-batch-git";
+import { shardingToolCalls } from "./helpers/tool-calls";
 
 // Claims start in one record, the registry, and are sharded when the load
 // calls for it. Once sharded, the registry is the shard above every other:
@@ -238,22 +236,7 @@ describe("claims before and after sharding", { timeout: 60_000 }, () => {
 });
 
 describe("sharding on demand through the toolkit", { timeout: 120_000 }, () => {
-	const created: number[] = [];
-	const ctx = (): ToolContext => ({
-		remote,
-		changeRemote: remote,
-		batchGit: () => memoryBatchGit({ url: server.url, token: "unused" }),
-		head: async () => server.git("rev-parse", "main").trim(),
-		recordsRemote: async (_repo, k) => ({ url: server.repo(`rec-${k}`), token: "unused" }),
-		createRecordsRepos: async (_repo, count) => void created.push(count),
-	});
-	const call = async (name: string, args: Record<string, unknown>) => {
-		try {
-			return (await callTool(name, { repo: "p", ...args }, ctx())) as Record<string, unknown> & { ok?: boolean };
-		} catch (err) {
-			return { error: statusOf(err).message };
-		}
-	};
+	const { call, created } = shardingToolCalls(() => server);
 
 	it("starts in one record, shards when the eighth agent claims, and audits clean across the switch", async () => {
 		expect(await call("settings", { required: 1, vetoes: [] })).toMatchObject({ shardDepth: 0, sharding: "on demand" });

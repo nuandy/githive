@@ -1,10 +1,10 @@
-import { type ReactNode, useState } from "react";
+import type { ReactNode } from "react";
 import type { AdminApi, ApprovedEmail, HostedUser, InviteRequest } from "../api";
 import { usePoll } from "../hooks/usePoll";
+import { type RunAction, useRowActions } from "../hooks/useRowActions";
 import { AdminHosted } from "./AdminHosted";
 import { AdminInvites } from "./AdminInvites";
 import { AdminRequests } from "./AdminRequests";
-import { messageOf } from "./Confirm";
 import "./Manage.css";
 
 export type AdminActions = Pick<AdminApi, "approve" | "removeInvite" | "decline" | "allowHosted" | "disallowHosted">;
@@ -21,19 +21,12 @@ export interface AdminViewProps {
 	now?: number;
 }
 
-/** Runs one action, keyed so its button shows it's busy; resolves to whether it worked. */
-export type RunAction = (
-	key: string,
-	work: () => Promise<unknown>,
-	onError: (text: string) => void,
-) => Promise<boolean>;
-
 /** What each section of the Admin page gets from the page: the actions, the busy and error state, and the time. */
 export interface AdminSectionProps {
 	actions: AdminActions;
 	run: RunAction;
 	/** Shows a failed action's message under the row with this key. */
-	rowFailed: (key: string) => (text: string) => void;
+	failed: (key: string) => (text: string) => void;
 	errorFor: (key: string) => ReactNode;
 	busy: string | null;
 	confirming: string | null;
@@ -46,7 +39,7 @@ export interface AdminSectionProps {
  * someone in, who may sign in, and who may start GitHive's hosted agents.
  */
 export function AdminView({ requests, invites, hosted, error, actions, now = Date.now() }: AdminViewProps) {
-	const sectionProps: AdminSectionProps = { actions, now, ...useAdminRun() };
+	const sectionProps: AdminSectionProps = { actions, now, ...useRowActions() };
 	return (
 		<main className="page manage" id="main">
 			<header className="manage__header">
@@ -67,38 +60,6 @@ export function AdminView({ requests, invites, hosted, error, actions, now = Dat
 			<AdminHosted hosted={hosted} {...sectionProps} />
 		</main>
 	);
-}
-
-/** The state the Admin page's sections share: which action is busy, which question is open, and a row's error. */
-function useAdminRun() {
-	const [busy, setBusy] = useState<string | null>(null);
-	const [confirming, setConfirming] = useState<string | null>(null);
-	const [rowError, setRowError] = useState<{ key: string; text: string } | null>(null);
-
-	const run: RunAction = async (key, work, onError) => {
-		setBusy(key);
-		setRowError(null);
-		try {
-			await work();
-			setConfirming(null);
-			return true;
-		} catch (err) {
-			onError(messageOf(err));
-			return false;
-		} finally {
-			setBusy(null);
-		}
-	};
-	const rowFailed = (key: string) => (text: string) => setRowError({ key, text });
-	const errorFor = (key: string) => {
-		if (rowError?.key !== key) return null;
-		return (
-			<p className="error manage__note" role="alert">
-				{rowError.text}
-			</p>
-		);
-	};
-	return { run, rowFailed, errorFor, busy, confirming, setConfirming };
 }
 
 /** The Admin page: loads requests, approved emails and the hosted-agent list, and refreshes them after each action. */

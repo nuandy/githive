@@ -1,4 +1,4 @@
-import { requiredString } from "../../errors";
+import { fail, requiredString } from "../../errors";
 import { branchHead } from "../../git";
 import { effectivePolicy } from "../votes";
 import { holdKey } from "../work";
@@ -10,7 +10,7 @@ import { branchSettings, hostedRoles, shardVotesIfBusy, votesFor } from "./repo"
 export const reviewTools: ToolHandlers = {
 	async vote({ args, ctx, repo, registered, actAs, stamper, warmChecks }) {
 		const verdict = requiredString(args, "verdict");
-		if (verdict !== "approve" && verdict !== "reject") throw new Error("[400] verdict is approve or reject");
+		if (verdict !== "approve" && verdict !== "reject") fail(400, "verdict is approve or reject");
 		const reviewer = actAs("reviewer");
 		// If one record would hold reviewers up, shard the votes first.
 		const commit = requiredString(args, "commit");
@@ -33,12 +33,12 @@ export const reviewTools: ToolHandlers = {
 	},
 	async request_review({ args, ctx, repo, registered, claimOf }) {
 		if (ctx.mayUseHosted && !(await ctx.mayUseHosted()))
-			throw new Error("[403] GitHive's hosted agents are by invitation: ask an admin to add you");
+			fail(403, "GitHive's hosted agents are by invitation: ask an admin to add you");
 		const change = requiredString(args, "change");
 		const registry = registered;
 		const claim = await claimOf(change);
-		if (!claim) throw new Error(`[409] ${change} holds no claim: claim the change's paths first`);
-		if (!ctx.requestReview) throw new Error("[501] hosted reviewers aren't available here");
+		if (!claim) fail(409, `${change} holds no claim: claim the change's paths first`);
+		if (!ctx.requestReview) fail(501, "hosted reviewers aren't available here");
 		const policy = branchSettings(registry, claim.into).policy;
 		// By default a general review, and every role that can veto a change to these paths.
 		const roles =
@@ -54,7 +54,7 @@ export const reviewTools: ToolHandlers = {
 	},
 	async ask_human({ args, votes, actAs, stamper, claimOf }) {
 		const change = requiredString(args, "change");
-		if (!(await claimOf(change))) throw new Error(`[409] ${change} holds no claim`);
+		if (!(await claimOf(change))) fail(409, `${change} holds no claim`);
 		return votes.flag({ change, agent: actAs("agent"), reason: requiredString(args, "reason") }, stamper);
 	},
 };

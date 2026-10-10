@@ -1,5 +1,6 @@
 import { type Level, OrgStore, atLeast } from "./orgs";
 import type { Principal } from "./principal";
+import { fail } from "../errors";
 
 // What a caller may do in a repo, checked at every route and tool. An agent has its owner's permission. An Access
 // admin may do anything and may name a repo as _/<id>, which covers older repos that aren't in an org. A repo the
@@ -41,10 +42,6 @@ export interface RepoRef {
 	fullName: string;
 	level: Level;
 }
-
-const fail = (status: number, message: string): never => {
-	throw new Error(`[${status}] ${message}`);
-};
 
 /** The repo a caller names, if they may do `needed` in it. */
 export async function resolveRepo(

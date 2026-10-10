@@ -3,6 +3,7 @@ import { landBatch } from "./merge-batch";
 import { holdLease, LEASE_MS } from "./merge-lease";
 import { landedAlready, outcomeOf, readyNow } from "./merge-ready";
 import type { MergeInput, MergeOutcome } from "./merge-types";
+import { sleep } from "../retry";
 
 // The toolkit's merge for a cooperative agent. It checks the conventions the agent follows (its claim covers what it
 // changed, its head has the approvals, it merges cleanly and the checks pass) and refuses to help break them. It binds
@@ -39,8 +40,6 @@ const POLL_MS = 3_000;
 export const ANSWER_WITHIN_MS = 10 * 60_000;
 // How many batches a lease holder lands before handing the lease on, if its own change hasn't settled.
 const ROUNDS = 4;
-
-const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /**
  * Lands `changes/<change>` together with every other ready change, then releases their claims. Returns once this

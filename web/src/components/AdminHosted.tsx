@@ -10,7 +10,6 @@ export function AdminHosted({
 	hosted,
 	actions,
 	run,
-	rowFailed,
 	errorFor,
 	busy,
 	confirming,
@@ -82,7 +81,7 @@ export function AdminHosted({
 								label="Remove"
 								question={`Stop ${person.handle} starting hosted agents?`}
 								busy={busy === key}
-								onConfirm={() => run(key, () => actions.disallowHosted(person.handle), rowFailed(key))}
+								onConfirm={() => run(key, () => actions.disallowHosted(person.handle))}
 							/>
 						</AdminRow>
 					);

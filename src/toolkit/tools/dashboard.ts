@@ -13,6 +13,7 @@ import { changeHead, changeSourceFor, changeStatus } from "./change-state";
 import { targetBranch } from "./claim-input";
 import type { HostedStatus, ToolContext } from "./context";
 import { claimsRef, DEFAULT_POLICY, recordLog, shardingOf, shardVotesIfBusy, storeFor, votesFor } from "./repo";
+import { fail } from "../../errors";
 
 // What the dashboard reads and does through the toolkit: a repo's snapshot and audit, a change's
 // history, and votes, branches and counts on a person's behalf.
@@ -77,11 +78,11 @@ export async function changeHistory(ctx: ToolContext, repo: string, change: stri
 	const timing = ctx.timing ?? new Timing();
 	const registry = (await timing.time("registry", () => recordLog<Registry>(ctx, repo, claimsRef(repo)).read()))?.commit
 		.state;
-	if (!registry?.baseline) throw new Error(`[404] GitHive hasn't started on ${repo}`);
+	if (!registry?.baseline) fail(404, `GitHive hasn't started on ${repo}`);
 	const { claim: record, released } = await timing.time("change", () =>
 		storeFor(ctx, repo, registry).readChange(change),
 	);
-	if (!record && !released.length) throw new Error(`[404] no change ${change} on ${repo}`);
+	if (!record && !released.length) fail(404, `no change ${change} on ${repo}`);
 	// The change's own commits are those since it left the branch it lands on.
 	const branch = record ? claimInto(record, projectBranch(registry)) : projectBranch(registry);
 	const claim = record ? presentClaim(record, projectBranch(registry)) : undefined;
@@ -144,16 +145,16 @@ export async function voteAsPerson(
 	person: string,
 ) {
 	if (!person.startsWith("person:"))
-		throw new Error("[403] only a person signed in through Access votes from the dashboard; agents use vote");
-	if (!input.role?.trim()) throw new Error("[400] a vote needs a role");
-	if (input.verdict !== "approve" && input.verdict !== "reject") throw new Error("[400] verdict is approve or reject");
+		fail(403, "only a person signed in through Access votes from the dashboard; agents use vote");
+	if (!input.role?.trim()) fail(400, "a vote needs a role");
+	if (input.verdict !== "approve" && input.verdict !== "reject") fail(400, "verdict is approve or reject");
 	if (typeof input.evidence !== "string" || !input.evidence.trim())
-		throw new Error("[400] a vote needs evidence: what you checked");
+		fail(400, "a vote needs evidence: what you checked");
 	const registry = (await recordLog<Registry>(ctx, repo, claimsRef(repo)).read())?.commit.state;
 	const { claim } = await storeFor(ctx, repo, registry).readChange(change);
-	if (!claim) throw new Error(`[409] ${change} holds no claim: there's nothing to vote on`);
+	if (!claim) fail(409, `${change} holds no claim: there's nothing to vote on`);
 	const head = await changeHead(ctx, repo, claim.agent, change, claim.since).catch(() => null);
-	if (!head) throw new Error(`[409] ${change} has nothing pushed to vote on`);
+	if (!head) fail(409, `${change} has nothing pushed to vote on`);
 	const stamper = await ctx.stamper?.();
 	const teams = (await ctx.teamsOf?.(repo)) ?? [];
 	await votesFor(ctx, repo, await shardVotesIfBusy(ctx, repo, registry, person)).vote(
@@ -183,10 +184,9 @@ export async function makeBranch(
 ) {
 	const claims = recordLog<Registry>(ctx, repo, claimsRef(repo));
 	const registered = (await claims.read())?.commit.state;
-	if (!registered?.baseline)
-		throw new Error(`[409] GitHive hasn't started on ${repo}: its admins start it with settings`);
+	if (!registered?.baseline) fail(409, `GitHive hasn't started on ${repo}: its admins start it with settings`);
 	if (input.name === projectBranch(registered) || registered.branches?.[input.name])
-		throw new Error(`[409] ${input.name} takes changes already`);
+		fail(409, `${input.name} takes changes already`);
 	const made = await targetBranch(ctx, repo, {
 		into: input.name,
 		from: input.from,
@@ -214,7 +214,7 @@ export async function repoSnapshot(ctx: ToolContext, repo: string) {
 		Promise.all([recordLog<Registry>(ctx, repo, claimsRef(repo)).read(), votesFor(ctx, repo).read()]),
 	);
 	const state = registry?.commit.state;
-	if (!state?.baseline) throw new Error(`[404] GitHive hasn't started on ${repo}`);
+	if (!state?.baseline) fail(404, `GitHive hasn't started on ${repo}`);
 	const held = await timing.time("claims", () => storeFor(ctx, repo, state).read());
 	const claims = await timing.time("status", () =>
 		Promise.all(held.claims.map((record) => claimSnapshot(ctx, repo, state, votes, held.released, record))),

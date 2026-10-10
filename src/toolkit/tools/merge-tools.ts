@@ -1,4 +1,4 @@
-import { fail, requiredString } from "../../errors";
+import { fail, optionalString, requiredString } from "../../errors";
 import { branchHead } from "../../git";
 import type { GitHubLink } from "../../github";
 import { actionsChecks, mirrorTo, onActions } from "../actions-checks";
@@ -25,8 +25,7 @@ export const mergeTools: ToolHandlers = {
 		const change = requiredString(args, "change");
 		const own = await claimOf(change);
 		const holder = own?.agent;
-		if (holder && holder !== agentArg("agent"))
-			throw new Error(`[409] ${change} is ${holder}'s change: merge it as ${holder}`);
+		if (holder && holder !== agentArg("agent")) fail(409, `${change} is ${holder}'s change: merge it as ${holder}`);
 		// It lands on the branch its claim names, together with every other change ready there.
 		const into = own?.into ?? branch;
 		// Not before its dependencies have merged into that same branch.
@@ -81,12 +80,12 @@ export const mergeTools: ToolHandlers = {
 		}
 		const change = requiredString(args, "change");
 		const { claim: held, released } = await changeOf(change);
-		const named = typeof args.agent === "string" && args.agent.trim() ? args.agent.trim() : undefined;
+		const named = optionalString(args, "agent");
 		const caller = acting ?? named;
 		// Your own change gets write access to your fork; anyone else's, read-only access to review it.
 		if (held && (caller === undefined || caller === held.agent)) return ownChangeAccess(call, change, held);
 		const author = held?.agent ?? released.at(-1)?.agent;
-		if (!author) throw new Error(`[404] no change ${change} on ${repo}`);
+		if (!author) fail(404, `no change ${change} on ${repo}`);
 		return reviewAccess(call, change, author, held, caller);
 	},
 };
@@ -176,7 +175,7 @@ async function reviewAccess(
 	reviewer?: string,
 ) {
 	const { args, ctx, repo, branch, changeSource } = call;
-	const role = typeof args.role === "string" && args.role.trim() ? args.role.trim() : "review";
+	const role = optionalString(args, "role") ?? "review";
 	const hold = (head: string) =>
 		reviewer
 			? ctx.reviews?.hold(repo, holdKey(head, role), reviewer, Number.POSITIVE_INFINITY).catch(() => undefined)
@@ -192,7 +191,7 @@ async function reviewAccess(
 	]);
 	const head = await branchHead(fork, `changes/${change}`).catch(() => null);
 	await holding;
-	if (!head) throw new Error(`[409] ${change} has nothing pushed to review yet`);
+	if (!head) fail(409, `${change} has nothing pushed to review yet`);
 	if (head !== knownHead) await hold(head);
 	// Agent names only: a person's identity stays in the records, out of logs.
 	console.log(`review access to ${repo} ${change} (${author}) for ${reviewer ?? "an unregistered caller"}`);

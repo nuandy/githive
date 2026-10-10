@@ -61,9 +61,7 @@ const VerdictArgs = z.strictObject({
 	summary: z.string().describe("One or two sentences: what you checked and your conclusion"),
 	evidence: z
 		.string()
-		.describe(
-			"Commands you ran with their key output, or file:line references. For a rejection, what must " + "change.",
-		),
+		.describe("Commands you ran with their key output, or file:line references. For a rejection, what must change."),
 });
 
 export class Reviewer extends SandboxAgent<ReviewJob, ReviewerState> {
@@ -100,7 +98,7 @@ export class Reviewer extends SandboxAgent<ReviewJob, ReviewerState> {
 			focusFor(job.role),
 			"",
 			"How to work:",
-			"- Read the diff and the code around it. Install dependencies and run the project's tests and " + "type checks.",
+			"- Read the diff and the code around it. Install dependencies and run the project's tests and type checks.",
 			"- Gather concrete evidence: command output, a reproduction, file and line references.",
 			"- Approve when the change does what its intent asks and you found no serious problem within " +
 				"your focus. Reject only for real problems within your focus, or for the change clearly " +
