@@ -1,3 +1,5 @@
+import { fail } from "../errors";
+
 // GitHive's identity store in D1: people, their sign-in accounts and sessions, their agents and agent tokens,
 // and sign-in invitations. Session ids and agent tokens are stored only as SHA-256 hashes.
 
@@ -73,10 +75,6 @@ export function randomSecret(bytes = 32) {
 		.replace(/=+$/, "");
 }
 
-const fail = (status: number, message: string): never => {
-	throw new Error(`[${status}] ${message}`);
-};
-
 type Row = Record<string, unknown>;
 const str = (v: unknown) => (v === null || v === undefined ? null : String(v));
 const toUser = (r: Row): User => ({
@@ -93,6 +91,14 @@ const toAgent = (r: Row): Agent => ({
 	name: String(r.name),
 	createdAt: String(r.created_at),
 	revokedAt: str(r.revoked_at),
+});
+// An active agent from a query that joins it to its owner, with its columns renamed (agent_id, agent_name, …).
+const toActiveAgent = (r: Row): Agent => ({
+	id: String(r.agent_id),
+	ownerId: String(r.owner_id),
+	name: String(r.agent_name),
+	createdAt: String(r.agent_created_at),
+	revokedAt: null,
 });
 const toToken = (r: Row): AgentToken => ({
 	id: String(r.id),
@@ -417,16 +423,7 @@ export class IdentityStore {
 			.bind(agentId)
 			.first<Row>();
 		if (!row) return null;
-		return {
-			user: toUser(row),
-			agent: {
-				id: String(row.agent_id),
-				ownerId: String(row.owner_id),
-				name: String(row.agent_name),
-				createdAt: String(row.agent_created_at),
-				revokedAt: null,
-			} as Agent,
-		};
+		return { user: toUser(row), agent: toActiveAgent(row) };
 	}
 
 	async revokeAgent(ownerId: string, agentId: string) {
@@ -500,15 +497,6 @@ export class IdentityStore {
 		if (row.token_expires_at && String(row.token_expires_at) <= now) return null;
 		if (!row.last_used_at || Date.parse(String(row.last_used_at)) < this.now().getTime() - TOUCH_MS)
 			await this.db.prepare("UPDATE agent_tokens SET last_used_at = ? WHERE id = ?").bind(now, row.token_id).run();
-		return {
-			user: toUser(row),
-			agent: {
-				id: String(row.agent_id),
-				ownerId: String(row.owner_id),
-				name: String(row.agent_name),
-				createdAt: String(row.agent_created_at),
-				revokedAt: null,
-			} as Agent,
-		};
+		return { user: toUser(row), agent: toActiveAgent(row) };
 	}
 }

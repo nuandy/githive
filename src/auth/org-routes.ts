@@ -1,15 +1,12 @@
 import type { Hono } from "hono";
 import { type Level, type Org, OrgStore, type Role } from "./orgs";
 import type { Principal } from "./principal";
+import { fail } from "../errors";
 
 // Org routes: create and view orgs, and manage members, invitations and teams. Owners and admins manage, only
 // owners grant or remove the owner role, and anyone may leave. Access admins may do all of it.
 
 type OrgEnv = { Bindings: Env; Variables: { principal?: Principal } };
-
-const fail = (status: number, message: string): never => {
-	throw new Error(`[${status}] ${message}`);
-};
 
 const jsonBody = async (c: { req: { json<T>(): Promise<T> } }) => {
 	const parsed = await c.req.json<Record<string, unknown> | null>().catch(() => null);
