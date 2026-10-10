@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { pushChange } from "./helpers/agents";
 import { startGitServer, type GitServer } from "./helpers/git-server";
 import { FakeStorage } from "./fakes/env";
+import { type HistorySource, type KeptFiles, readBranchHistory } from "../src/toolkit/branch-history";
 import { mergeRecordOf, readMainMerges } from "../src/toolkit/git-records";
 
 // The repo's own Gate reads a batch's changes and lands them, with real git
@@ -133,7 +134,7 @@ describe("reading and landing a batch in the repo's own Gate", { timeout: 60_000
 		expect(lost).toMatchObject({ passed: false, results: [{ command: "(gate setup)", output: expect.stringContaining("fetch of a change in the batch failed") }] });
 	});
 
-	it("reads a branch's merges for the audit with git, exactly as the in-memory reader does", async () => {
+	it("leaves the audit's reading to Artifacts' API: the branch's merges read exactly as git and the in-memory reader tell them", async () => {
 		const main = server.git("rev-parse", "main").trim();
 		const a = await pushChange(server.url, work, "agent-a-1", "a-1", { "src/a.txt": "a\n", "src/deep/x.txt": "x\n" });
 		const b = await pushChange(server.url, work, "agent-b-1", "b-1", { "src/b.txt": "b\n" });
@@ -142,13 +143,38 @@ describe("reading and landing a batch in the repo's own Gate", { timeout: 60_000
 			{ ...source("b-1"), head: b, claimed: { ...claimed("b-1", b), testedOn: main, testedWith: [a, b] } },
 		];
 		expect(await gate.landBatch({ repo: "t1", branch: "main", base: base(), baseHead: main, merges })).toMatchObject({ commits: expect.any(Array) });
-		const read = (await gate.readBranch({ repo: "t1", branch: "main", base: base(), baseline: main })).map(mergeRecordOf);
+		// Artifacts' log, readCommit and readTree, answered by git on the server.
+		let treesRead = 0;
+		const meta = (line: string) => {
+			const [hash, treeHash, name, parents, message] = line.split("\x1f");
+			return { hash, treeHash, author: { name }, parents: parents.split(" ").filter(Boolean), message: message.replace(/\n$/, "") };
+		};
+		const FORMAT = "--format=%H%x1f%T%x1f%an%x1f%P%x1f%B%x1e";
+		const history: HistorySource = {
+			log: async (ref, limit, offset) => server.git("log", "--first-parent", `--skip=${offset}`, `-n${limit}`, FORMAT, ref).split("\x1e").map((l) => l.replace(/^\n/, "")).filter(Boolean).map(meta),
+			readCommit: async (hash) => meta(server.git("log", "-1", FORMAT, hash).split("\x1e")[0]),
+			readTree: async (hash) => (
+				treesRead++,
+				server.git("ls-tree", hash).split("\n").filter(Boolean).map((l) => {
+					const [info, name] = l.split("\t");
+					const [mode, type, oid] = info.split(" ");
+					return { name, mode, hash: oid, type: type === "commit" ? "gitlink" : type };
+				})
+			),
+		};
+		const kept = new Map<string, string[]>();
+		const keep: KeptFiles = { get: async (cs) => Object.fromEntries(cs.flatMap((c) => (kept.has(c) ? [[c, kept.get(c)!]] : []))), put: async (f) => void Object.entries(f).forEach(([c, p]) => kept.set(c, p)) };
+		const read = (await readBranchHistory(history, main, "main", keep)).map(mergeRecordOf);
 		expect(read.map((m) => [m.change, m.head, m.files])).toEqual([
 			["a-1", a, ["src/a.txt", "src/deep/x.txt"]],
 			["b-1", b, ["src/b.txt"]],
 		]);
 		expect(read[1].testedWith).toEqual([a, b]);
 		expect(read).toEqual(await readMainMerges({ url: server.url, token: "unused" }, main, "main"));
+		// The files each merge changed are kept by commit: read again, no tree is read.
+		const before = treesRead;
+		expect((await readBranchHistory(history, main, "main", keep)).map(mergeRecordOf)).toEqual(read);
+		expect(treesRead).toBe(before);
 	});
 
 	it("is only ever done by the repo's own Gate, never a change's, which runs that change's code", async () => {

@@ -1,6 +1,7 @@
+import { readBranchHistory } from "./branch-history";
 import { DEFAULT_POLICY, hostedRoles } from "./mcp";
 import { effectivePolicy } from "./votes";
-import { ensureRepo, forkAndWait, headOf, isForkNotReady, remoteFor, reviewerName } from "../artifacts";
+import { ensureRepo, forkAndWait, headOf, isForkNotReady, remoteFor, reviewerName, withHistory } from "../artifacts";
 import { GitCasLog } from "../record-log";
 import { rpc, rpcRetried } from "../rpc";
 import { fail } from "../errors";
@@ -198,10 +199,11 @@ export function toolContextFor(env: Env, by: string | undefined, caller: { agent
 				return { passed: result.passed, results: [...conflict, ...result.results.map((r) => ({ command: r.command, exitCode: r.exitCode, output: r.output }))] };
 			};
 		},
-		// A branch's commits for the audit, read with git in the repo's own Gate (see Gate.readBranch).
-		readBranch: async (repo, baseline, branch) => {
-			const read = await cached(env, repo, `${repo}|read`, () => remoteFor(env.ARTIFACTS, repo, "read", 3600));
-			return rpcRetried(() => env.GATE.getByName(`repo:${repo}`).readBranch({ repo, branch, base: { remote: read.url, token: read.token }, baseline }));
+		// A branch's commits for the audit, read through Artifacts' own API, each merge's files worked out once and kept in the
+		// repo's RepoCache (see branch-history.ts): no clone, and no container.
+		readBranch: (repo, baseline, branch) => {
+			const cache = () => env.REPO_CACHE.getByName(`repo:${repo}`);
+			return withHistory(env.ARTIFACTS, repo, (source) => readBranchHistory(source, baseline, branch, { get: (commits) => rpc(cache().keptFiles(commits)), put: (files) => cache().keepFiles(files) }));
 		},
 		// A batch's first check container, started while the batch is read (see MergeInput.prepareChecks).
 		prepareChecks: (repo) => async (gate) => {

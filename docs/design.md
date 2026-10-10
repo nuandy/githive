@@ -547,7 +547,24 @@ evidence. Its agent sees it in `status` like any rejection,
 and keeps it out of later batches until it has a new commit: `merge` refuses
 that commit at once, with the failure, rather than check it a third time.
 
-A batch's git work runs in the repo's own Gate's container, with real git on
+**Without checks, no container runs.** A branch without checks lands its
+batches in the Worker, in memory (`memoryBatchGit`): it reads each change,
+merges it and pushes the batch, with the Worker's CPU limit raised to 5
+minutes for it. A push Artifacts refuses as busy is tried again, waiting
+longer each time; isomorphic-git can't read that refusal ("Expected unpack
+ok"), so GitHive's Git client reads a push's answer and says it. The audit
+reads the branch's history through Artifacts' own API, not a clone:
+`log` lists the first-parent chain (a page at a time, until the baseline),
+and each merge's files changed from its first parent come from comparing
+their trees with `readTree`, reading only the folders that differ. A commit's
+files are its own for good, so they're kept in the repo's RepoCache by
+commit, and an audit after reads trees only for merges new since. (Read in a
+Worker with a clone, 200 merges had taken 12 s and most of its memory, so the
+audit had read them with git in the repo's Gate.) So a repo without checks
+never starts a container: GitHive's hosted agents are the only other use, and
+they're optional.
+
+With checks, a batch's git work runs in the repo's own Gate's container, with real git on
 a disk: fetching each change, listing the files it changed since it left
 main, making the merge commits (stamped there: the Gate is the same Worker,
 with GitHive's key) and pushing them. The Worker only reads the records:

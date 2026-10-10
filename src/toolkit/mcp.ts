@@ -79,7 +79,7 @@ export interface ToolContext {
 	/** Tells the dashboard's open pages that the repo's records changed. */
 	ping?: (repo: string) => Promise<void>;
 	/** Warms the repo's check container in the background, when a merge is likely soon: why, and for what (see Gate.warmUp). */
-	warmChecks?: (repo: string, input: { branch: string; checks: string[]; expect: "claimed" | "checked" | "approved" | "set up"; key?: string }) => Promise<void>;
+	warmChecks?: (repo: string, input: { branch: string; checks: string[]; expect: "checked" | "approved" | "set up"; key?: string }) => Promise<void>;
 	/**
 	 * A kept copy of the repo's claims in force and the changes merged,
 	 * rebuilt after writes (stale while one caller rebuilds it): for advice
@@ -928,9 +928,8 @@ async function runTool(name: string, args: Args, ctx: ToolContext): Promise<unkn
 		};
 	};
 	/** Warm the repo's Gate for a merge to come (its checks, or with none, its landing): why, and for which change or commit. */
-	const warmChecks = async (expect: "claimed" | "checked" | "approved", key: string) => {
-		// With no checks, the repo's Gate still lands the batch: warmed for that alone (see Gate.warm).
-		if (registered?.baseline) await ctx.warmChecks?.(repo, { branch: projectBranch(registered), checks: registered.verify ?? [], expect, key }).catch(() => undefined);
+	const warmChecks = async (expect: "checked" | "approved", key: string) => {
+		if (registered?.verify?.length) await ctx.warmChecks?.(repo, { branch: projectBranch(registered), checks: registered.verify, expect, key }).catch(() => undefined);
 	};
 	switch (name) {
 		case "start": {
@@ -951,9 +950,9 @@ async function runTool(name: string, args: Args, ctx: ToolContext): Promise<unkn
 			// Agents' forks are made from seeds, made one at a time from now, before agents arrive.
 			await ctx.prepareForks?.(repo, "seeds").catch(() => undefined);
 			const registry = (await claims.read())?.commit.state;
-			// The repo's Gate warms up while agents start, and saves the snapshot containers start from: the first merge is
-			// minutes away, and a fresh install takes them. Without checks too: it lands the batches, and cold, it took a minute.
-			await ctx.warmChecks?.(repo, { branch: projectBranch(registry), checks: registry?.verify ?? [], expect: "set up" }).catch(() => undefined);
+			// The check containers warm up while agents start: the first merge is minutes away, and a fresh install takes them.
+			// Without checks no container runs at all: a batch lands in the Worker, and the audit reads through Artifacts.
+			if (registry?.verify?.length) await ctx.warmChecks?.(repo, { branch: projectBranch(registry), checks: registry.verify, expect: "set up" }).catch(() => undefined);
 			const warnings = grantWarnings(registry?.policy ?? policy);
 			return { repo, branch: projectBranch(registry), policy: registry?.policy ?? policy, verify: registry?.verify ?? [], ...shardingOf(registry), ...(warnings.length ? { warnings } : {}), instructions: INSTRUCTIONS };
 		}
@@ -1072,10 +1071,6 @@ async function runTool(name: string, args: Args, ctx: ToolContext): Promise<unkn
 			const conflicts = outcome.ok ? undefined : outcome.conflicts.map((c) => ({ ...c, path: presentClaim({ paths: [c.path] }, branch).paths[0], held: presentClaim({ paths: [c.held] }, branch).paths[0] }));
 			// Claimed: the source's tip becomes the change's branch in the agent's fork, for review, check and merge like any change.
 			if (outcome.ok && merging) await merging.push(await changeSource(agent, "write"), change);
-			// Without checks, the repo's Gate lands it in a few minutes: warmed from now. Warmed only at its check, the first
-			// batch of 200 agents' run read 3 changes in 61 s, behind the Gate starting cold. (With checks, a claim is too
-			// early to install for: they warm at the check, as before.)
-			if (outcome.ok && !registered?.verify?.length) await warmChecks("claimed", change);
 			const merged = merging
 				? { source, head: merging.tip, claimed: paths, note: `${change} merges ${source} at ${merging.tip.slice(0, 8)} into ${into}: its branch changes/${change} is that commit, in your fork. Get it reviewed, check and merge it like any change. If ${source} moves on, claim again to bring the change up to its new tip (a new head, so a new review).` }
 				: {};

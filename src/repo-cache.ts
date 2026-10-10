@@ -109,6 +109,21 @@ export class RepoCache extends DurableObject<Env> {
 		return known;
 	}
 
+	/** Commits' files changed from their first parent, as the audit worked them out (see branch-history.ts): one key a commit. */
+	async keptFiles(commits: string[]) {
+		const kept: Record<string, string[]> = {};
+		for (let i = 0; i < commits.length; i += 128) {
+			const got = await this.ctx.storage.get<string[]>(commits.slice(i, i + 128).map((c) => `files:${c}`));
+			for (const [key, files] of got) kept[key.slice(6)] = files;
+		}
+		return kept;
+	}
+
+	async keepFiles(files: Record<string, string[]>) {
+		const entries = Object.entries(files).map(([commit, paths]) => [`files:${commit}`, paths] as const);
+		for (let i = 0; i < entries.length; i += 128) await this.ctx.storage.put(Object.fromEntries(entries.slice(i, i + 128)));
+	}
+
 	/** Note the latest commits seen on changes' branches (null: nothing pushed), as of now. */
 	async noteHeads(seen: Record<string, string | null>) {
 		const at = Date.now();
@@ -365,7 +380,9 @@ export class RepoCache extends DurableObject<Env> {
 		const landing = await this.ctx.storage.list({ prefix: "landing:" });
 		// The heads last seen on changes' branches (see knownHeads): a repo made again under the name reuses change names.
 		const heads = await this.ctx.storage.list({ prefix: "head:" });
-		const keys = [...kept.keys(), ...building.keys(), ...records.keys(), ...tips.keys(), ...forks.keys(), ...landing.keys(), ...heads.keys()];
+		// And the files commits changed, as the audit worked them out: a commit's are its own for good, but the repo's gone.
+		const files = await this.ctx.storage.list({ prefix: "files:" });
+		const keys = [...kept.keys(), ...building.keys(), ...records.keys(), ...tips.keys(), ...forks.keys(), ...landing.keys(), ...heads.keys(), ...files.keys()];
 		// Storage deletes 128 keys at a time.
 		for (let i = 0; i < keys.length; i += 128) await this.ctx.storage.delete(keys.slice(i, i + 128));
 	}

@@ -1,4 +1,5 @@
 import type { Remote } from "./git";
+import type { HistorySource } from "./toolkit/branch-history";
 import { isTransientFailure, retryTransient, sleep, transientDelay } from "./retry";
 import { rpc } from "./rpc";
 
@@ -50,6 +51,17 @@ export async function remoteFor(
 		]);
 		return { url: info.remote, token: token.plaintext };
 	});
+}
+
+/** Read a repo's history through Artifacts' own API (log, readCommit, readTree), each call tried again through its transient failures. */
+export async function withHistory<T>(artifacts: Artifacts, name: string, read: (source: HistorySource) => Promise<T>): Promise<T> {
+	return withRepo(artifacts, name, (repo) =>
+		read({
+			log: (ref, limit, offset) => retryArtifacts(() => rpc(repo.log({ ref, limit, offset }))),
+			readCommit: (hash) => retryArtifacts(() => rpc(repo.readCommit(hash))),
+			readTree: (hash) => retryArtifacts(() => rpc(repo.readTree(hash))),
+		}),
+	);
 }
 
 export async function headOf(artifacts: Artifacts, name: string, ref: string) {

@@ -243,42 +243,6 @@ export class Gate extends DurableObject<Env> {
 		});
 	}
 
-	/**
-	 * A branch's commits since `baseline`, oldest first, following first
-	 * parents: each one's parents, author, message, and the files it changed
-	 * from its first parent. What the audit replays, read here with git: read
-	 * in a Worker's memory, 200 merges of Express took 12 s and most of its
-	 * 128 MB. In this, the repo's own Gate.
-	 */
-	readBranch(input: { repo: string; branch: string; base: { remote: string; token: string }; baseline: string }): Promise<{ commit: string; parents: string[]; author: string; message: string; files: string[] }[]> {
-		return this.inTurn(async () => {
-			const container = this.landingContainer(input.repo);
-			await this.prepare(container, input.base, input.repo);
-			const fetched = await gitWithToken(container, input.base.token, ["fetch", "-q", input.base.remote, `${input.branch}:refs/remotes/base/${input.branch}`, "--force"]);
-			if (fetched.exitCode !== 0) throw new Error(`fetch of the project's ${input.branch} failed: ${clip(fetched.output, 2_000)}`);
-			// One record per commit: \x1e before it, then its hash and parents, its author, its message, and its files, each
-			// after a \x1f (the files NUL-separated). Neither separator turns up in a message.
-			const script = `set -e
-git log --first-parent --reverse --format='%H %P' "${input.baseline}..refs/remotes/base/${input.branch}" | while read -r c parents; do
-  first=\${parents%% *}
-  printf '\\036%s %s\\037' "$c" "$parents"
-  git log -1 --format='%an%x1f%B' "$c"
-  printf '\\037'
-  if [ -n "$first" ]; then git diff-tree --no-commit-id --name-only -r -z "$first" "$c"; fi
-done`;
-			const listed = await run(container, ["bash", "-c", script], WORKDIR, undefined, 600);
-			if (listed.exitCode !== 0) throw new Error(`reading ${input.branch}'s history failed: ${clip(listed.output, 2_000)}`);
-			return listed.output
-				.split("\x1e")
-				.filter(Boolean)
-				.map((record) => {
-					const [ids, author, message, files] = record.split("\x1f");
-					const [commit, ...parents] = ids.trim().split(" ").filter(Boolean);
-					return { commit, parents, author, message: message.replace(/\n+$/, ""), files: (files ?? "").split("\0").filter(Boolean) };
-				});
-		});
-	}
-
 	/** The container a batch is read and landed in: this Gate's, which must be the repo's own. */
 	private landingContainer(repo: string) {
 		const container = this.ctx.container;
@@ -597,14 +561,6 @@ done`;
 				const branch = input.branch ?? "main";
 				const fetched = await gitWithToken(container, input.base.token, ["fetch", "-q", input.base.remote, `${branch}:refs/remotes/base/${branch}`, "--force"]);
 				if (fetched.exitCode !== 0) return;
-				// No checks: warm only to land batches, the project cloned and its branch fetched, and saved as the repo's
-				// snapshot (with nothing installed), so a cold Gate restores it in seconds. Without one, the first batch of 200
-				// agents' runs read 3 or 4 changes in 42 to 61 s, behind the container starting and Express cloning.
-				if (!input.checks.length) {
-					await this.ctx.storage.put("warmedAt", Date.now());
-					await this.snapshotIfDue(container, input.repo);
-					return;
-				}
 				await run(container, ["bash", "-lc", `git merge --abort 2>/dev/null; git checkout -q -f --detach refs/remotes/base/${branch} && git clean -fdq`]);
 				await this.setUpToolchains(container);
 				const install = (await this.checksFor(container, input.checks)).find((c) => INSTALLS.test(c.trim()));
@@ -654,10 +610,12 @@ done`;
 	 * change's Gate that had to set up from scratch. Returns at once; the
 	 * alarm does the work.
 	 */
-	async warmUp(input: WarmUp & { why?: "claimed" | "checked" | "approved" | "set up" }) {
+	async warmUp(input: WarmUp & { why?: "checked" | "approved" | "set up" }) {
+		// Without checks there's nothing to warm: a batch lands in the Worker, and the audit reads through Artifacts.
+		if (!input.checks.length) return;
 		const { why, ...warming } = input;
 		// With a snapshot, a cold container restores in seconds: a merge near needs no head start.
-		if ((why === "claimed" || why === "checked" || why === "approved") && (await this.snapshot())) return;
+		if ((why === "checked" || why === "approved") && (await this.snapshot())) return;
 		await this.ctx.storage.put("warmUp", warming);
 		await this.ctx.storage.setAlarm(Date.now());
 	}
