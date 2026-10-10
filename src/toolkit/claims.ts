@@ -83,8 +83,10 @@ export interface Registry {
 	branchRules?: BranchRule<ReviewPolicy>[];
 	/** How many approvals a merge needs, and which roles veto. */
 	policy?: ReviewPolicy;
-	/** The project's checks, run on the branch plus a change before it merges. */
+	/** The project's checks, run on the branch plus a change before it merges (["github-actions"]: on GitHub Actions). */
 	verify?: string[];
+	/** The GitHub repo this one is connected to (owner/name), through GitHive's App: main is pushed back to it after every landing, and checks can run on its Actions. */
+	github?: { repo: string };
 	/** GitHive's public key, to check the stamps on records and merges with. */
 	stampKey?: string;
 	/**
@@ -147,16 +149,26 @@ export async function startRepo(log: CasLog<Registry>, input: { baseline: string
  * registry's history keeps every version, and the audit holds each merge to
  * the settings in the registry state it cites.
  */
-export async function changeSettings(log: CasLog<Registry>, input: { policy?: ReviewPolicy; verify?: string[]; branchRules?: BranchRule<ReviewPolicy>[]; skipChecks?: string[]; by?: string }) {
+export async function changeSettings(log: CasLog<Registry>, input: { policy?: ReviewPolicy; verify?: string[]; branchRules?: BranchRule<ReviewPolicy>[]; skipChecks?: string[]; github?: { repo: string } | null; by?: string }) {
 	const outcome = await appendRecord<Registry, "not started" | "unchanged">(log, "githive", empty, (state) => {
 		if (!state.baseline) return { refused: "not started" };
 		const policy = input.policy && JSON.stringify(input.policy) !== JSON.stringify(state.policy) ? input.policy : undefined;
 		const verify = input.verify && JSON.stringify(input.verify) !== JSON.stringify(state.verify ?? []) ? input.verify : undefined;
 		const rules = input.branchRules && JSON.stringify(input.branchRules) !== JSON.stringify(state.branchRules ?? []) ? input.branchRules : undefined;
 		const skip = input.skipChecks && JSON.stringify(input.skipChecks) !== JSON.stringify(state.skipChecks) ? input.skipChecks : undefined;
-		if (!policy && !verify && !rules && !skip) return { refused: "unchanged" };
-		const next: Registry = { ...state, ...(policy ? { policy } : {}), ...(verify ? { verify } : {}), ...(rules ? { branchRules: rules } : {}), ...(skip ? { skipChecks: skip } : {}) };
-		const what = [policy && "the review policy", verify && `the checks (${verify.join("; ") || "none"})`, rules && `the branch rules (${rules.map((r) => r.pattern).join(", ") || "none"})`, skip && `what the checks skip (${skip.join(", ") || "nothing"})`].filter(Boolean).join(" and ");
+		const github = input.github !== undefined && input.github?.repo !== state.github?.repo ? input.github : undefined;
+		if (!policy && !verify && !rules && !skip && github === undefined) return { refused: "unchanged" };
+		const { github: _, ...rest } = state;
+		const next: Registry = { ...(github === null ? rest : state), ...(policy ? { policy } : {}), ...(verify ? { verify } : {}), ...(rules ? { branchRules: rules } : {}), ...(skip ? { skipChecks: skip } : {}), ...(github ? { github } : {}) };
+		const what = [
+			policy && "the review policy",
+			verify && `the checks (${verify.join("; ") || "none"})`,
+			rules && `the branch rules (${rules.map((r) => r.pattern).join(", ") || "none"})`,
+			skip && `what the checks skip (${skip.join(", ") || "nothing"})`,
+			github !== undefined && (github ? `the GitHub repo (${github.repo})` : "the GitHub repo (none)"),
+		]
+			.filter(Boolean)
+			.join(" and ");
 		return { state: next, text: `Settings: ${what} changed${input.by ? ` by ${input.by}` : ""}` };
 	});
 	return outcome.ok ? { changed: true as const } : { changed: false as const, refused: outcome.refused };

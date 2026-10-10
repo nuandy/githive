@@ -1,3 +1,5 @@
+import type { GitHubLink } from "../github";
+import { actionsChecks, mirrorTo, onActions } from "./actions-checks";
 import git from "isomorphic-git";
 import { GitCasLog } from "../record-log";
 import { fail, requiredPaths, requiredString, statusOf } from "../errors";
@@ -12,7 +14,7 @@ import { claimStore, type ClaimStore } from "./claim-store";
 import { changeSettings, recordBranch, registerAgent, registerAgents, shardClaims, shardingReason, startRepo, type ClaimRecord, type Registry } from "./claims";
 import { mergeRecordOf, readMainMerges, readRecordHistory, readRefHistories, readShardHistories, type BranchCommit } from "./git-records";
 import { atMost, type BatchGit, type Candidate, type CheckRunner, mergeChange } from "./merge";
-import type { Landing, LandingView } from "./landing";
+import { type Landed, type Landing, type LandingView, lastLandedOn } from "./landing";
 import { revertViolation } from "./revert";
 import type { Stamper } from "./stamp";
 import { SENSITIVE_PATHS, approval, countedVotes, DEFAULT_GRANT, effectivePolicy, grantWarnings, openFlag, shardVotes, votesShardingReason, type ReviewPolicy, type VoteRecord, type Votes } from "./votes";
@@ -92,6 +94,10 @@ export interface ToolContext {
 	knownHeads?: (repo: string, changes: string[]) => Promise<Record<string, { head: string | null; at: number }>>;
 	/** Note the latest commits seen on changes' branches, wherever a tool read them (null: nothing pushed). */
 	noteHeads?: (repo: string, seen: Record<string, string | null>) => Promise<void>;
+	/** The GitHub repo `repo` (owner/name) through GitHive's App: null if the App isn't installed there. Unset, GitHub isn't configured. */
+	github?: (repo: string) => Promise<GitHubLink | null>;
+	/** What landed on a branch since this agent was last told (see RepoCache.landingNews): every reply carries it. */
+	news?: (repo: string, branch: string, agent: string) => Promise<Landed[]>;
 	/** A branch's head, kept a moment for every merge watching it (see MergeInput.branchHead). */
 	branchHead?: (repo: string, branch: string) => Promise<string | null>;
 	/** Ask for forks to be made in the background: the repo's seeds, or these agents' own (see RepoCache's fork queue). */
@@ -158,7 +164,7 @@ Work that depends on other unmerged work goes on a feature branch, and the proje
 const str = { type: "string" } as const;
 const TOOL_LIST = [
 	{ name: "start", description: "Start GitHive on a project repo (harmless if started; change a started repo's policy or checks with settings): the review policy, the checks run before each merge (verify: shell commands; see settings for what they run in; none by default) (each change lives in its own fork, and only the toolkit writes the project), grants: who may vote as each role that can block a merge (registered agent names, 'person:*', a verified identity like 'person:<who>' or 'service:<id>', a pool 'service:<id>/*' (every agent registered under it, never on its own team's changes), 'githive' for GitHive's reviewers; unlisted roles: people and GitHive's reviewers), how claims are kept: in one record until the load calls for more (8 agents holding claims, or over 15 claim writes a minute), then sharded per path 2 segments deep over 16 records repos, so agents in different parts of the tree never contend. shard_depth shards now, this deep (0: never), and records_repos is how many repos the shards are spread over, since a repo takes one push at a time. Returns them.", inputSchema: { type: "object", properties: { repo: str, required: { type: "number" }, vetoes: { type: "array", items: str }, escalate: { type: "array", items: { type: "object", properties: { paths: { type: "array", items: str }, required: { type: "number" }, vetoes: { type: "array", items: str } }, required: ["paths"] } }, grants: { type: "object", additionalProperties: { type: "array", items: str } }, verify: { type: "array", items: str }, shard_depth: { type: "number" }, records_repos: { type: "number" } }, required: ["repo"] } },
-	{ name: "settings", description: "Change a started repo's review policy or its checks; whatever you leave out stays as it is. The same fields as start: required approvals, vetoes, escalate (stricter rules for chosen paths), grants (who may vote as each role), verify (the checks run before each merge; [] for none). Each check is a shell command, run with bash at the repo's top on the merged code (exit 0 passes, the first failure stops the run) in a Linux container with Node 24, npm and git, plus Python, Go or Rust when the repo uses them; dependencies are installed first; up to 10 minutes per command; no secrets or environment variables, so a test needing a database or an API key fails. Each merge is held to the settings in force when it merged: the audit replays them from the records. Returns the settings now. branch_rules sets other branches' settings by pattern (feature/*, release/*, a name), the first match winning: each changes only the policy fields and checks it names (verify [] for none; left out, the repo's); [] clears them. The project's branch always has the repo's settings. skip_checks lists what the checks skip: a change touching only these merges without them (*.md, docs/, licenses and images by default; a file under test/, fixtures/ or examples/ always runs them); [] makes them always run.", inputSchema: { type: "object", properties: { repo: str, required: { type: "number" }, vetoes: { type: "array", items: str }, escalate: { type: "array", items: { type: "object", properties: { paths: { type: "array", items: str }, required: { type: "number" }, vetoes: { type: "array", items: str } }, required: ["paths"] } }, grants: { type: "object", additionalProperties: { type: "array", items: str } }, verify: { type: "array", items: str }, skip_checks: { type: "array", items: str }, branch_rules: { type: "array", items: { type: "object", properties: { pattern: str, required: { type: "number" }, vetoes: { type: "array", items: str }, grants: { type: "object", additionalProperties: { type: "array", items: str } }, verify: { type: "array", items: str } }, required: ["pattern"] } } }, required: ["repo"] } },
+	{ name: "settings", description: "Change a started repo's review policy or its checks; whatever you leave out stays as it is. The same fields as start: required approvals, vetoes, escalate (stricter rules for chosen paths), grants (who may vote as each role), verify (the checks run before each merge; [] for none). Each check is a shell command, run with bash at the repo's top on the merged code (exit 0 passes, the first failure stops the run) in a Linux container with Node 24, npm and git, plus Python, Go or Rust when the repo uses them; dependencies are installed first; up to 10 minutes per command; no secrets or environment variables, so a test needing a database or an API key fails. Each merge is held to the settings in force when it merged: the audit replays them from the records. Returns the settings now. branch_rules sets other branches' settings by pattern (feature/*, release/*, a name), the first match winning: each changes only the policy fields and checks it names (verify [] for none; left out, the repo's); [] clears them. The project's branch always has the repo's settings. skip_checks lists what the checks skip: a change touching only these merges without them (*.md, docs/, licenses and images by default; a file under test/, fixtures/ or examples/ always runs them); [] makes them always run. github connects a GitHub repo ('owner/name', '' for none) through GitHive's GitHub app, installed there: main is pushed back to it after every landing, and verify ['github-actions'] runs the checks on its Actions instead of in containers (a workflow that runs on pushes to githive/checks/**).", inputSchema: { type: "object", properties: { repo: str, github: str, required: { type: "number" }, vetoes: { type: "array", items: str }, escalate: { type: "array", items: { type: "object", properties: { paths: { type: "array", items: str }, required: { type: "number" }, vetoes: { type: "array", items: str } }, required: ["paths"] } }, grants: { type: "object", additionalProperties: { type: "array", items: str } }, verify: { type: "array", items: str }, skip_checks: { type: "array", items: str }, branch_rules: { type: "array", items: { type: "object", properties: { pattern: str, required: { type: "number" }, vetoes: { type: "array", items: str }, grants: { type: "object", additionalProperties: { type: "array", items: str } }, verify: { type: "array", items: str } }, required: ["pattern"] } } }, required: ["repo"] } },
 	{ name: "credentials", description: "Git access. With your change: a write token for its own fork, where its branch changes/<change> lives. Without: read access to the project repo.", inputSchema: { type: "object", properties: { repo: str, change: str }, required: ["repo"] } },
 	{ name: "claims", description: "The claims in force: who holds which paths, and why.", inputSchema: { type: "object", properties: { repo: str }, required: ["repo"] } },
 	{ name: "claim", description: "Claim paths for your change (again to extend it, or to keep it active). Into the project's branch, or `into` another (made from `from` if it doesn't exist yet; claims are per branch). `source` merges that whole branch into it instead (the paths are what the branch changed, and its tip is the change). `after` names changes it depends on: it merges only once they have merged into the same branch. Refused, naming the holder, if another claim on that branch overlaps; a claim in the way that its agent has abandoned (see release) is released as stale instead.", inputSchema: { type: "object", properties: { repo: str, change: str, agent: str, paths: { type: "array", items: str }, intent: str, into: str, from: str, after: { type: "array", items: str }, source: str }, required: ["repo", "change", "agent", "intent"] } },
@@ -302,6 +308,16 @@ function policyFrom(args: Args, base: ReviewPolicy): ReviewPolicy {
 		// No grants: every role keeps the default holders.
 		...(grants && Object.keys(grants).length ? { grants } : {}),
 	};
+}
+
+/** The GitHub repo settings connects to ("owner/name"; "" for none): refused unless GitHive's App is installed there. */
+async function githubFrom(ctx: ToolContext, value: unknown): Promise<{ repo: string } | null> {
+	if (value === "" || value === null) return null;
+	if (typeof value !== "string" || !/^[\w.-]+\/[\w.-]+$/.test(value.trim())) throw new Error('[400] github is "owner/name", or "" for none');
+	if (!ctx.github) throw new Error("[501] GitHub isn't set up on this GitHive (its App's ID and key)");
+	const repo = value.trim();
+	if (!(await ctx.github(repo))) throw new Error(`[409] GitHive's GitHub app isn't installed on ${repo}: install it there first`);
+	return { repo };
 }
 
 /** The checks run before each merge, as start and settings take them. */
@@ -784,7 +800,7 @@ const noted = new Map<string, number>();
 
 /** Run one tool, and note what it wrote in the repo's summary. */
 export async function callTool(name: string, args: Args, ctx: ToolContext): Promise<unknown> {
-	const result = await runTool(name, args, ctx);
+	const result = await withNews(name, args, ctx, await runTool(name, args, ctx));
 	if (WRITES.has(name) && (result as { ok?: boolean } | null)?.ok !== false) await ctx.ping?.(requiredString(args, "repo")).catch(() => undefined);
 	if (ctx.summarize && WRITES.has(name) && (result as { ok?: boolean } | null)?.ok !== false) {
 		const repo = requiredString(args, "repo");
@@ -798,6 +814,22 @@ export async function callTool(name: string, args: Args, ctx: ToolContext): Prom
 		if (name === "ask_human") await repoSnapshot(ctx, repo).catch((err) => console.error(`updating ${repo}'s inbox failed`, String(err)));
 	}
 	return result;
+}
+
+/**
+ * A reply with what landed on the project's branch since this agent was last
+ * told: "main changed invoice.ts: note-7 by agent-3, add refunds", so it hears
+ * of main moving without asking. Only on a reply that's an object (a list
+ * stays a list), for an agent that's named, and never failing the call.
+ */
+async function withNews(name: string, args: Args, ctx: ToolContext, result: unknown) {
+	const agent = ctx.agent ?? (typeof args.agent === "string" ? args.agent : undefined);
+	if (!ctx.news || !agent || name === "register" || !result || typeof result !== "object" || Array.isArray(result)) return result;
+	const repo = requiredString(args, "repo");
+	const registry = await recordLog<Registry>(ctx, repo, claimsRef(repo)).read().catch(() => null);
+	if (!registry?.commit.state.baseline) return result;
+	const news = await ctx.news(repo, projectBranch(registry.commit.state), agent).catch(() => []);
+	return news.length ? { ...(result as Record<string, unknown>), news: news.map((n) => ({ ...n, says: `${projectBranch(registry.commit.state)} changed ${n.files.join(", ")}${n.filesMore ? ` and ${n.filesMore} more` : ""}: ${n.change} by ${n.agent}${n.intent ? `, "${n.intent}"` : ""}` })) } : result;
 }
 
 /** How many claims are in force on a repo, read from its records alone: the repo list's count. Null before GitHive starts on it. */
@@ -929,7 +961,7 @@ async function runTool(name: string, args: Args, ctx: ToolContext): Promise<unkn
 	};
 	/** Warm the repo's Gate for a merge to come (its checks, or with none, its landing): why, and for which change or commit. */
 	const warmChecks = async (expect: "checked" | "approved", key: string) => {
-		if (registered?.verify?.length) await ctx.warmChecks?.(repo, { branch: projectBranch(registered), checks: registered.verify, expect, key }).catch(() => undefined);
+		if (registered?.verify?.length && !onActions(registered.verify)) await ctx.warmChecks?.(repo, { branch: projectBranch(registered), checks: registered.verify, expect, key }).catch(() => undefined);
 	};
 	switch (name) {
 		case "start": {
@@ -952,7 +984,7 @@ async function runTool(name: string, args: Args, ctx: ToolContext): Promise<unkn
 			const registry = (await claims.read())?.commit.state;
 			// The check containers warm up while agents start: the first merge is minutes away, and a fresh install takes them.
 			// Without checks no container runs at all: a batch lands in the Worker, and the audit reads through Artifacts.
-			if (registry?.verify?.length) await ctx.warmChecks?.(repo, { branch: projectBranch(registry), checks: registry.verify, expect: "set up" }).catch(() => undefined);
+			if (registry?.verify?.length && !onActions(registry.verify)) await ctx.warmChecks?.(repo, { branch: projectBranch(registry), checks: registry.verify, expect: "set up" }).catch(() => undefined);
 			const warnings = grantWarnings(registry?.policy ?? policy);
 			return { repo, branch: projectBranch(registry), policy: registry?.policy ?? policy, verify: registry?.verify ?? [], ...shardingOf(registry), ...(warnings.length ? { warnings } : {}), instructions: INSTRUCTIONS };
 		}
@@ -962,13 +994,16 @@ async function runTool(name: string, args: Args, ctx: ToolContext): Promise<unkn
 			const verify = args.verify === undefined ? undefined : checksFrom(args.verify);
 			const branchRules = args.branch_rules === undefined ? undefined : branchRulesFrom(args.branch_rules, registered.policy ?? DEFAULT_POLICY);
 			const skipChecks = args.skip_checks === undefined ? undefined : skipPatternsFrom(args.skip_checks);
-			if (!policy && !verify && !branchRules && !skipChecks) throw new Error(`[400] name what to change: ${[...POLICY_FIELDS, "verify", "branch_rules", "skip_checks"].join(", ")}`);
-			await changeSettings(claims, { ...(policy ? { policy } : {}), ...(verify ? { verify } : {}), ...(branchRules ? { branchRules } : {}), ...(skipChecks ? { skipChecks } : {}), ...(stamper?.by ? { by: stamper.by } : {}) });
+			const github = args.github === undefined ? undefined : await githubFrom(ctx, args.github);
+			if (!policy && !verify && !branchRules && !skipChecks && github === undefined) throw new Error(`[400] name what to change: ${[...POLICY_FIELDS, "verify", "branch_rules", "skip_checks", "github"].join(", ")}`);
+			// Checks on Actions need the GitHub repo they run in.
+			if (onActions(verify ?? registered.verify) && !(github ?? (github === null ? null : registered.github))) throw new Error(`[409] checks on GitHub Actions need a connected GitHub repo: set github ("owner/name") too`);
+			await changeSettings(claims, { ...(policy ? { policy } : {}), ...(verify ? { verify } : {}), ...(branchRules ? { branchRules } : {}), ...(skipChecks ? { skipChecks } : {}), ...(github !== undefined ? { github } : {}), ...(stamper?.by ? { by: stamper.by } : {}) });
 			const registry = (await claims.read())?.commit.state;
-			// New checks may install something new: warm the containers for them.
-			if (verify?.length) await ctx.warmChecks?.(repo, { branch: projectBranch(registry), checks: verify, expect: "set up" }).catch(() => undefined);
+			// New checks may install something new: warm the containers for them (on Actions, there are none).
+			if (verify?.length && !onActions(verify)) await ctx.warmChecks?.(repo, { branch: projectBranch(registry), checks: verify, expect: "set up" }).catch(() => undefined);
 			const warnings = grantWarnings(registry?.policy ?? DEFAULT_POLICY);
-			return { repo, branch: projectBranch(registry), policy: registry?.policy ?? DEFAULT_POLICY, verify: registry?.verify ?? [], skipChecks: registry?.skipChecks ?? DEFAULT_SKIP_CHECKS, ...(registry?.branchRules?.length ? { branchRules: registry.branchRules } : {}), ...(warnings.length ? { warnings } : {}) };
+			return { repo, branch: projectBranch(registry), policy: registry?.policy ?? DEFAULT_POLICY, verify: registry?.verify ?? [], skipChecks: registry?.skipChecks ?? DEFAULT_SKIP_CHECKS, ...(registry?.branchRules?.length ? { branchRules: registry.branchRules } : {}), ...(registry?.github ? { github: registry.github.repo } : {}), ...(warnings.length ? { warnings } : {}) };
 		}
 		case "reviews": {
 			const agent = actAs("agent");
@@ -1113,8 +1148,13 @@ async function runTool(name: string, args: Args, ctx: ToolContext): Promise<unkn
 			// Not before what it depends on has merged into that same branch.
 			const waits = await waitingOn(own?.after ?? [], into);
 			if (waits.length) return { ok: false, reasons: waits };
+			// Checks on GitHub Actions, and main pushed back to GitHub after every landing, for a repo connected to one.
+			const checksHere = branchSettings(registry, into).verify;
+			const link = registry?.github && ctx.github ? await ctx.github(registry.github.repo).catch((err) => (console.error(`reaching ${registry.github!.repo} on GitHub failed`, String(err)), null)) : null;
+			if (onActions(checksHere) && !link) return { ok: false, reasons: [`checks run on GitHub Actions, but ${registry?.github ? `GitHive can't reach ${registry.github.repo}: is the GitHive app installed there?` : "no GitHub repo is connected (settings github)"}`] };
+			const project = await write();
 			return mergeChange({
-				remote: await write(),
+				remote: project,
 				branch: into,
 				...(into !== branch ? { scope: (file: string) => scopeFile(file, into, branch) } : {}),
 				store,
@@ -1123,13 +1163,15 @@ async function runTool(name: string, args: Args, ctx: ToolContext): Promise<unkn
 				policy: branchSettings(registry, into).policy,
 				verify: branchSettings(registry, into).verify,
 				...(registry?.skipChecks ? { skipChecks: registry.skipChecks } : {}),
-				runChecks: ctx.runChecks?.(repo),
+				runChecks: onActions(checksHere) && link ? actionsChecks(project, link) : ctx.runChecks?.(repo),
 				...(ctx.branchHead ? { branchHead: () => ctx.branchHead!(repo, into) } : {}),
 				...(ctx.landing ? { landing: ctx.landing(repo, into) } : {}),
 				// The repo's Gate (a container, real git) reads and lands a batch where the branch has checks, which run in
 				// containers anyway; without checks, the Worker does it in memory (see memoryBatchGit), and no container runs.
-				...(ctx.batchGit && branchSettings(registry, into).verify?.length ? { batchGit: ctx.batchGit(repo) } : {}),
-				...(ctx.prepareChecks ? { prepareChecks: ctx.prepareChecks(repo) } : {}),
+				...(ctx.batchGit && checksHere?.length && !onActions(checksHere) ? { batchGit: ctx.batchGit(repo) } : {}),
+				...(ctx.prepareChecks && !onActions(checksHere) ? { prepareChecks: ctx.prepareChecks(repo) } : {}),
+				// The project's branch, landed, pushed back to GitHub (a fast-forward; refused if someone pushed there directly).
+				...(link && into === branch ? { afterLanding: (commit: string) => mirrorTo(project, link, into, commit) } : {}),
 				// The other changes into the branch, as kept a moment (the batch checks each again): claims in force whose
 				// dependencies have merged, with their heads.
 				others: async (): Promise<Candidate[]> => {
@@ -1194,11 +1236,14 @@ async function runTool(name: string, args: Args, ctx: ToolContext): Promise<unkn
 			if (!source) throw new Error(`[409] changes/${change} has nothing pushed to check`);
 			const into = own?.into ?? branch;
 			const checked = await checkChange({ project: await ctx.remote(repo, "read"), branch: into, source, claims: own ? [own] : [], change, ...(ctx.branchHead ? { branchHead: () => ctx.branchHead!(repo, into) } : {}) });
+			// In conflict with the branch: who changed each file last, as the landing recalls.
+			const conflicting = checked.main.clean ? [] : (checked.main.conflicts ?? []);
+			const causes = conflicting.length && ctx.landing ? lastLandedOn((await ctx.landing(repo, into).view().catch(() => null))?.recent ?? [], conflicting) : [];
 			// The head just read, for reviews, backlog and merge to take as current (see openHeads): agents check after each push.
 			await ctx.noteHeads?.(repo, { [change]: checked.head }).catch(() => undefined);
 			// Pushed and checked: a merge is likely within minutes, so its check container warms up meanwhile.
 			await warmChecks("checked", change);
-			return checked;
+			return causes.length ? { ...checked, causes } : checked;
 		}
 		case "register": {
 			if (ctx.agent) throw new Error(`[409] you're signed in as ${ctx.agent}: what you write is already attributed to you, with no key`);

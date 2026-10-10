@@ -1,6 +1,6 @@
 import { DurableObject } from "cloudflare:workers";
 import { makeAgentFork, makeSeed } from "./toolkit/env";
-import { type Ahead, type Checking, dropLease, emptyLanding, type LandingState, markChecked, renewLease, type Settled, settleOutcomes, takeTurn, wasChecked } from "./toolkit/landing";
+import { type Ahead, asNews, type Checking, dropLease, emptyLanding, type LandingState, markChecked, renewLease, type Settled, settleOutcomes, takeTurn, wasChecked } from "./toolkit/landing";
 
 // One per repo ("repo:<repo>"): what GitHive keeps of the repo between calls,
 // all of it a copy or a hint. Git stays the truth, and throwing any of it away
@@ -58,6 +58,9 @@ interface KeptTip {
 const TIP_LISTING_MS = 3_000;
 
 /** A fork the queue is to make, and how often it has tried. */
+/** The most landings one reply tells an agent of: past it, the newest. */
+const NEWS_MOST = 20;
+
 /** The latest commit seen on a change's branch (null: nothing pushed), and when. */
 interface KnownHead {
 	head: string | null;
@@ -338,6 +341,21 @@ export class RepoCache extends DurableObject<Env> {
 		return { checking, recent };
 	}
 
+	/**
+	 * What landed on `branch` since `agent` was last told, others' changes
+	 * only, newest last (at most NEWS_MOST); and from now on, nothing before
+	 * this. An agent's first call tells it nothing old: news starts there.
+	 */
+	async landingNews(branch: string, agent: string) {
+		const { recent } = await this.landing(branch);
+		const key = `news:${branch}:${agent}`;
+		const told = await this.ctx.storage.get<string>(key);
+		const latest = recent.at(-1)?.at;
+		if (latest && latest !== told) await this.ctx.storage.put(key, latest);
+		if (!told) return [];
+		return asNews(recent.filter((s) => s.at > told && s.agent !== agent)).slice(-NEWS_MOST);
+	}
+
 	/** Whether a merge holds `branch`'s lease now (who holds it stays here). */
 	async landingLeaseHeld(branch: string) {
 		const { lease } = await this.landing(branch);
@@ -382,7 +400,8 @@ export class RepoCache extends DurableObject<Env> {
 		const heads = await this.ctx.storage.list({ prefix: "head:" });
 		// And the files commits changed, as the audit worked them out: a commit's are its own for good, but the repo's gone.
 		const files = await this.ctx.storage.list({ prefix: "files:" });
-		const keys = [...kept.keys(), ...building.keys(), ...records.keys(), ...tips.keys(), ...forks.keys(), ...landing.keys(), ...heads.keys(), ...files.keys()];
+		const news = await this.ctx.storage.list({ prefix: "news:" });
+		const keys = [...kept.keys(), ...building.keys(), ...records.keys(), ...tips.keys(), ...forks.keys(), ...landing.keys(), ...heads.keys(), ...files.keys(), ...news.keys()];
 		// Storage deletes 128 keys at a time.
 		for (let i = 0; i < keys.length; i += 128) await this.ctx.storage.delete(keys.slice(i, i + 128));
 	}

@@ -18,6 +18,11 @@ export interface Settled {
 	at: string;
 	/** Its merge commit, landed. */
 	commit?: string;
+	/** Landed: the files it changed (the first LANDED_FILES_KEPT, and how many more) and its intent, for the news told to
+	 * other agents and for saying who last changed a file a merge conflicts on. */
+	files?: string[];
+	filesMore?: number;
+	intent?: string;
 	/** Landed without checks: it only touched what they skip. */
 	skipped?: boolean;
 	/** Why it didn't land, failed. */
@@ -78,6 +83,38 @@ export interface Landing {
 
 /** How many settled changes are kept: enough for a merge waiting on a batch to find its own. */
 export const RECENT_KEPT = 200;
+/** How many of a landed change's files its outcome keeps, and how much of its intent: 200 outcomes stay a small record. */
+export const LANDED_FILES_KEPT = 12;
+export const LANDED_INTENT_CHARS = 140;
+
+/** A change landed lately, as told to other agents (news) and when a merge conflicts on its files. */
+export interface Landed {
+	change: string;
+	agent: string;
+	commit?: string;
+	at: string;
+	files: string[];
+	filesMore?: number;
+	intent?: string;
+}
+
+/** Outcomes that landed, as news: what changed, by whom, and why. */
+export const asNews = (outcomes: Settled[]): Landed[] =>
+	outcomes.filter((s) => s.how === "landed").map((s) => ({ change: s.change, agent: s.agent, at: s.at, files: s.files ?? [], ...(s.commit ? { commit: s.commit } : {}), ...(s.filesMore ? { filesMore: s.filesMore } : {}), ...(s.intent ? { intent: s.intent } : {}) }));
+
+/** For each of `files`, the change that last landed on it, as the landing recalls: who to ask about a conflict there. */
+export const lastLandedOn = (outcomes: Settled[], files: string[]) =>
+	files.flatMap((file) => {
+		const last = asNews(outcomes).findLast((l) => l.files.includes(file));
+		return last ? [{ file, change: last.change, agent: last.agent, ...(last.commit ? { commit: last.commit } : {}), ...(last.intent ? { intent: last.intent } : {}) }] : [];
+	});
+
+/** A conflict's causes in words: `a.ts (changed by note-7, agent-3: "add refunds", 2f56723d)`. */
+export const conflictWords = (files: string[], causes: ReturnType<typeof lastLandedOn>) =>
+	files.map((file) => {
+		const c = causes.find((x) => x.file === file);
+		return c ? `${file} (changed by ${c.change}, ${c.agent}${c.intent ? `: "${c.intent}"` : ""}${c.commit ? `, ${c.commit.slice(0, 8)}` : ""})` : file;
+	});
 
 /** A branch's landing as data, for RepoCache and memoryLanding to keep alike. */
 export interface LandingState {

@@ -4,7 +4,7 @@ import { inLane } from "../claim-paths";
 import { skipsChecks } from "./check-scope";
 import type { ClaimRecord } from "./claims";
 import type { ClaimStore, ClaimsView } from "./claim-store";
-import { type Ahead, type Landing, memoryLanding, type Settled } from "./landing";
+import { type Ahead, conflictWords, LANDED_FILES_KEPT, LANDED_INTENT_CHARS, type Landing, lastLandedOn, memoryLanding, type Settled } from "./landing";
 import { type MergeClaim, mergeMessage } from "./merge-commit";
 import type { Stamper } from "./stamp";
 import type { VoteStore, VotesView } from "./vote-store";
@@ -203,6 +203,8 @@ export interface MergeInput {
 	prepareChecks?: (gate: string) => Promise<void>;
 	/** The most changes in a batch, below what batchSize says (tests set a few, to make batches follow each other). */
 	maxBatch?: number;
+	/** Once a batch has landed and its claims are released: with the branch's new head (main pushed back to GitHub, say). Its failure is logged, never the merge's. */
+	afterLanding?: (commit: string) => Promise<void>;
 	/** How often a merge waiting for its change to land looks (POLL_MS unless set). */
 	pollMs?: number;
 	/** How long before a merge answers, landed or not (ANSWER_WITHIN_MS unless set, as tests do). */
@@ -214,7 +216,15 @@ export interface MergeInput {
 
 export type MergeOutcome =
 	| { ok: true; commit: string; /** Why no checks ran, when they're configured. */ checks?: string }
-	| { ok: false; reasons: string[]; conflicts?: string[]; checks?: CheckResult[]; /** Still waiting to land, not refused: merging again waits on. */ pending?: true };
+	| {
+			ok: false;
+			reasons: string[];
+			conflicts?: string[];
+			/** For each file in conflict that a change landed on lately: that change, its agent, its intent and commit. */
+			causes?: ReturnType<typeof lastLandedOn>;
+			checks?: CheckResult[];
+			/** Still waiting to land, not refused: merging again waits on. */ pending?: true;
+	  };
 
 type Refused = Extract<MergeOutcome, { ok: false }>;
 
@@ -250,7 +260,7 @@ export async function mergeChange(input: MergeInput): Promise<MergeOutcome> {
 	const holder = crypto.randomUUID();
 	const started = Date.now();
 	// Whether it's ready now: refused at once if not, so the agent can act (unless it's landed: then its commit).
-	const mine = await readyNow(input);
+	const mine = await readyNow(input, landing);
 	if (!mine.ok) return (await landedAlready(landing, input.change, mine.head)) ?? mine.refused;
 	const head = mine.ready.head;
 	const answerBy = started + (input.answerWithinMs ?? ANSWER_WITHIN_MS);
@@ -299,7 +309,7 @@ export function batchSize(recent: Pick<Settled, "how">[]) {
 }
 
 /** The change, as ready as it is on the branch now: refused at once if not, so the agent can act. Read here: one change's worth. */
-async function readyNow(input: MergeInput): Promise<{ ok: true; ready: Ready } | { ok: false; refused: Refused; head: string }> {
+async function readyNow(input: MergeInput, landing: Landing): Promise<{ ok: true; ready: Ready } | { ok: false; refused: Refused; head: string }> {
 	const main = (await headOf(input)) ?? fail409(`there's no branch ${input.branch}`);
 	const ref = `changes/${input.change}`;
 	// Its Git work in turn (see inWorkspaceTurn), from the branch as kept for the isolate (see Workspace.at): one
@@ -314,13 +324,16 @@ async function readyNow(input: MergeInput): Promise<{ ok: true; ready: Ready } |
 	if (!ready.ok) return { ok: false, refused: ready, head };
 	if (!tried.clean) {
 		const conflicts = tried.files ?? [];
+		// Who changed each file last, as the landing recalls: the agent knows what it's reconciling with, and whom to ask.
+		const causes = lastLandedOn((await landing.view().catch(() => null))?.recent ?? [], conflicts);
 		return {
 			ok: false,
 			head,
 			refused: {
 				ok: false,
 				conflicts,
-				reasons: [`changes/${input.change} conflicts with ${branch} in ${conflicts.join(", ")}: merge ${branch} into your branch, resolve inside your claim, push, and get the new commit approved`],
+				...(causes.length ? { causes } : {}),
+				reasons: [`changes/${input.change} conflicts with ${branch} in ${conflictWords(conflicts, causes).join(", ")}: merge ${branch} into your branch, resolve inside your claim, push, and get the new commit approved`],
 			},
 		};
 	}
@@ -559,7 +572,18 @@ async function land(input: MergeInput, landing: Landing, batchGit: BatchGit, mai
 	const pushedAt = Date.now();
 	await holding.step(STEP_MS.records);
 	const at = new Date().toISOString();
-	const settled: Settled[] = batch.map((r, i) => ({ change: r.change, head: r.head, agent: r.agent, how: "landed", at, commit: commits[i], ...(r.skipped && input.verify?.length ? { skipped: true } : {}) }));
+	const settled: Settled[] = batch.map((r, i) => ({
+		change: r.change,
+		head: r.head,
+		agent: r.agent,
+		how: "landed",
+		at,
+		commit: commits[i],
+		...(r.skipped && input.verify?.length ? { skipped: true } : {}),
+		files: r.files.slice(0, LANDED_FILES_KEPT),
+		...(r.files.length > LANDED_FILES_KEPT ? { filesMore: r.files.length - LANDED_FILES_KEPT } : {}),
+		...(r.own.intent ? { intent: r.own.intent.slice(0, LANDED_INTENT_CHARS) } : {}),
+	}));
 	// Told at once: a merge asked again before its claim is released finds its change landed (see landedAlready).
 	await landing.settle(settled);
 	console.log(`landed ${batch.length} change${batch.length === 1 ? "" : "s"} on ${input.branch} (${tested ? "checked together" : "no checks"}): merged and pushed ${pushedAt - from} ms, told ${Date.now() - pushedAt} ms`);
@@ -573,6 +597,13 @@ async function land(input: MergeInput, landing: Landing, batchGit: BatchGit, mai
 				),
 			);
 		console.log(`released the claims of ${batch.length} change${batch.length === 1 ? "" : "s"} landed on ${input.branch}, after the lease was handed on: ${Date.now() - releaseFrom} ms`);
+		if (input.afterLanding) {
+			const from = Date.now();
+			await input
+				.afterLanding(commits.at(-1)!)
+				.then(() => console.log(`after landing on ${input.branch} (main pushed to GitHub, say): ${Date.now() - from} ms`))
+				.catch((err) => console.error(`after landing on ${input.branch} failed (main not pushed to GitHub, say)`, String(err)));
+		}
 	};
 	return { settled, release };
 }

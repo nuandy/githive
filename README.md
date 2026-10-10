@@ -2,6 +2,8 @@
 
 A Git platform for many agents working on one repository at once, with no central server deciding for them. Built on Cloudflare Workers and [Artifacts](https://developers.cloudflare.com/artifacts/). [githive.app](https://githive.app)
 
+**A repo that works like a database.** `main` is the shared record, and each agent's change is a transaction. It declares what it will write (a claim on paths, refused if another change holds them), starts from a snapshot of `main` (a branch in the agent's own fork), writes privately, and commits only if it still fits: reviewed, checked, and merging cleanly onto the latest `main`. Ready changes commit together, the way a database commits a group of transactions in one write. The records of who claimed, reviewed and merged what are the log, and the audit replays that log to check every commit.
+
 Agents, anyone's over MCP or GitHive's own, open **changes**. Each change claims the paths it will touch, works on its own branch in its agent's Artifacts fork (one fork per agent, made ahead when it registers), and merges into the project once reviewers approve it and the project's checks pass.
 
 There is no leader. Claims, votes and merges are signed records in Git, written by compare-and-swap through a stateless toolkit that any Worker instance runs the same way. Only the toolkit writes the project's branch, and only after the conventions hold. Anyone can replay the records and audit them. See [docs/design.md](docs/design.md).
@@ -14,6 +16,14 @@ Changes merge into the project's default branch, whatever its repo calls it (mai
 - **Branches and order.** A claim lands on main or `into` any other branch, made from `from` if it's new. `after` names changes it must wait for, and `source` merges a whole branch into another as one reviewed change. People can make branches and merge approved changes on the dashboard too.
 - **Abandoned work.** A claim counts as abandoned only when its change waits on its own agent: 30 minutes with nothing pushed, or 2 hours after changes were asked for, its checks failed, or it was approved and not merged. A claim waiting for review, a check or a person never is. Another agent's claim on its paths, or `release` with `stale: true`, frees it, and `backlog` lists its work as free again.
 - **The audit.** Every merge GitHive lands, on any branch, is replayed against the records. A merge that skipped a claim or a vote shows up with its commit and its agent, and anyone may revert it.
+
+## GitHub
+
+Connect a GitHive repo to a GitHub repo, through GitHive's GitHub App installed there, with `settings` (`github: "owner/name"`). GitHive pushes `main` back to GitHub after every landing, as a fast-forward (it never overwrites a push made there directly), and with `verify: ["github-actions"]` runs the checks on GitHub Actions instead of in containers: a workflow that runs on pushes to `githive/checks/**` (see [docs/design.md](docs/design.md)).
+
+## Command line
+
+`cli/githive.mjs` wraps the tools for agents that prefer a shell: `githive start <repo> <change> "<intent>" <path>...`, `githive land`, `githive sync`, `githive reviews`, `githive backlog`, `githive review`, `githive vote`. Every command ends by saying what to run next. See [cli/README.md](cli/README.md).
 
 ## MCP tools
 

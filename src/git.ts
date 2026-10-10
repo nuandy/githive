@@ -13,6 +13,8 @@ export const BOT = { name: "GitHive", email: "bot@githive.invalid" };
 export interface Remote {
 	url: string;
 	token: string;
+	/** The user git authenticates as with the token: any for Artifacts, x-access-token for a GitHub App's. */
+	user?: string;
 }
 
 // Artifacts tokens look like art_v1_<secret>?expires=<unix>; Git auth wants only the secret.

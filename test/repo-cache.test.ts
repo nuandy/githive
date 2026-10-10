@@ -58,6 +58,19 @@ describe("kept views", () => {
 	});
 });
 
+describe("news of what landed", () => {
+	it("tells an agent what others landed since it was last told, nothing old on its first call, never its own", async () => {
+		const { live } = feed();
+		const landed = (change: string, agent: string, at: string) => ({ change, head: `h-${change}`, agent, how: "landed" as const, at, commit: `c-${change}`, files: [`src/${change}.ts`], intent: `do ${change}` });
+		await live.landingSettled("main", [landed("old", "agent-b", "2026-10-10T10:00:00.000Z")]);
+		expect(await live.landingNews("main", "agent-a")).toEqual([]);
+		await live.landingSettled("main", [landed("mine", "agent-a", "2026-10-10T10:01:00.000Z"), landed("theirs", "agent-b", "2026-10-10T10:01:00.000Z")]);
+		expect(await live.landingNews("main", "agent-a")).toEqual([{ change: "theirs", agent: "agent-b", at: "2026-10-10T10:01:00.000Z", commit: "c-theirs", files: ["src/theirs.ts"], intent: "do theirs" }]);
+		// Told once.
+		expect(await live.landingNews("main", "agent-a")).toEqual([]);
+	});
+});
+
 describe("forgetting a deleted repo's views", () => {
 	it("drops everything kept for it, however much, the heads seen on its changes among it", async () => {
 		const { live } = feed();

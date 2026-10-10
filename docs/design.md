@@ -9,6 +9,14 @@ an agent can't push around them. Anything written around the toolkit anyway
 (by whoever holds the account's credentials) is visible: anyone can replay the
 records and get the list of what broke which rule, and who did it.
 
+Think of the repo as a database. `main` is the shared record, and each change
+is a transaction: it declares what it will write (its claim), starts from a
+snapshot of `main` (a branch in its agent's fork), writes privately, and
+commits only if it still fits the latest `main` and the conventions hold.
+Ready changes commit together as a batch, as a database commits a group of
+transactions in one write (see Landing). The records are the log, and the
+audit replays it.
+
 Here main means the project's default branch, whatever its repo calls it (main,
 master, ...): `start` reads it from the repo and records it.
 
@@ -564,7 +572,41 @@ audit had read them with git in the repo's Gate.) So a repo without checks
 never starts a container: GitHive's hosted agents are the only other use, and
 they're optional.
 
-With checks, a batch's git work runs in the repo's own Gate's container, with real git on
+**Connected to GitHub.** A repo can be connected to a GitHub repo through
+GitHive's GitHub App (`settings` with `github: "owner/name"`; refused unless the
+App is installed there). The App's ID and private key (PKCS#8) are Worker
+secrets; GitHive signs a short JWT with the key and exchanges it for an
+installation token scoped to that one repo, kept for the isolate until near its
+hour (`github.ts`). Then:
+
+- **main goes back to GitHub after every landing**, once the batch's claims are
+  released, so off the critical path. It's a fast-forward only: if someone
+  pushed to GitHub's copy directly, the push is refused and logged, never
+  forced. GitHub stays the copy people browse, and a backup.
+- **Checks can run on GitHub Actions** instead of in containers (`verify:
+  ["github-actions"]`, `actions-checks.ts`). For a batch, the Worker merges its
+  changes onto main in memory, the way they'll land, pushes that commit to
+  `githive/checks/<id>` on GitHub, waits for every workflow run on it (one must
+  start within 3 minutes; all must finish within 30), and passes the batch
+  when they all succeed; the branch is deleted after. The batch then lands in
+  the Worker too, so no container runs. A repo without GitHub keeps checks in
+  containers. Its workflow just runs on those branches:
+
+  ```yaml
+  # .github/workflows/githive.yml
+  on: { push: { branches: ["githive/checks/**"] } }
+  jobs:
+    test:
+      runs-on: ubuntu-latest
+      steps:
+        - uses: actions/checkout@v4
+        - run: npm ci && npm test
+  ```
+
+  A failing run sends the batch's search for the culprit on as a failing check
+  does: halves checked side by side, each a run of its own.
+
+With checks in containers, a batch's git work runs in the repo's own Gate's container, with real git on
 a disk: fetching each change, listing the files it changed since it left
 main, making the merge commits (stamped there: the Gate is the same Worker,
 with GitHive's key) and pushing them. The Worker only reads the records:
@@ -820,6 +862,17 @@ Until GitHive had these reads, a tool, `next`, picked one step for each agent
 and placed its review hold for it. It bound nobody, but every agent asked it
 and did what it said, so it ran the crowd: a stale answer once sent 80 agents
 to merge changes that had landed, all at once. It's gone.
+
+**News, and who a conflict is with.** Every reply that's an object carries
+`news`: what landed on the project's branch since that agent was last told,
+others' changes only, each with its files, agent, intent and commit, and a
+line saying it ("main changed src/billing/invoice.ts: c-7 by agent-b, \"add
+partial refunds\""). The repo's RepoCache keeps where each agent was last told;
+its first call tells it nothing old. A merge or a check that conflicts with
+the branch names, for each file in conflict, the change that last landed on it,
+with its agent, intent and commit (each landing's outcome keeps its files and
+intent, a dozen paths and 140 characters at most), so the agent knows what it's
+reconciling with and whom to ask.
 
 **Backlog items aren't reserved.** Two agents picking the same piece both
 claim it under its id, and the claim decides: the second is refused as

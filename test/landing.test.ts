@@ -260,6 +260,22 @@ describe("landing ready changes together", { timeout: 120_000 }, () => {
 		expect(landed()).toEqual(["a-1", "b-1"]);
 	});
 
+	it("names who last changed each file a merge conflicts on: their change, agent, intent and commit", async () => {
+		const landing = memoryLanding();
+		await readyChange("a-1", { "src/shared.txt": "from a\n" });
+		const landedA = await merge("a-1", runner(), landing);
+		expect(landedA).toMatchObject({ ok: true });
+		// b-1 started from the main before a-1 landed, and changed the same file.
+		const refused = await (async () => {
+			await claim(claims(), { change: "b-1", agent: "agent-b-1", paths: ["src/shared.txt"], intent: "b-1" });
+			const head = await pushChange(server.url, work, "agent-b-1", "b-1", { "src/shared.txt": "from b\n" }, `${landed().length ? "main~1" : "main"}`);
+			await vote(votes(), { commit: head, reviewer: "rev", role: "tests", verdict: "approve", evidence: "ok" });
+			return merge("b-1", runner(), landing);
+		})();
+		expect(refused).toMatchObject({ ok: false, conflicts: ["src/shared.txt"], causes: [{ file: "src/shared.txt", change: "a-1", agent: "agent-a-1", intent: "a-1", commit: (landedA as { commit: string }).commit }] });
+		expect((refused as { reasons: string[] }).reasons[0]).toMatch(/src\/shared\.txt \(changed by a-1, agent-a-1: "a-1", [0-9a-f]{8}\)/);
+	});
+
 	it("tells the merges waiting on a batch that it landed before their claims are released", async () => {
 		for (const x of ["a", "b"]) await readyChange(`${x}-1`, { [`src/${x}.txt`]: `${x}\n` });
 		const landing = memoryLanding();

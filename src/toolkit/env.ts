@@ -1,3 +1,4 @@
+import { linkTo } from "../github";
 import { readBranchHistory } from "./branch-history";
 import { DEFAULT_POLICY, hostedRoles } from "./mcp";
 import { effectivePolicy } from "./votes";
@@ -154,6 +155,9 @@ export function toolContextFor(env: Env, by: string | undefined, caller: { agent
 		keptClaims: (repo, read) => keptRead(env, repo, "claims-advice", KEPT_CLAIMS_MS, read),
 		knownHeads: (repo, changes) => rpc(env.REPO_CACHE.getByName(`repo:${repo}`).knownHeads(changes)),
 		noteHeads: (repo, seen) => env.REPO_CACHE.getByName(`repo:${repo}`).noteHeads(seen),
+		news: (repo, branch, agent) => rpc(env.REPO_CACHE.getByName(`repo:${repo}`).landingNews(branch, agent)),
+		// GitHive's GitHub App, when its ID and key are set: a repo connects to GitHub through it (see github.ts).
+		...(env.GITHUB_APP_ID && env.GITHUB_APP_PRIVATE_KEY ? { github: (repo: string) => linkTo({ appId: env.GITHUB_APP_ID!, privateKey: env.GITHUB_APP_PRIVATE_KEY! }, repo) } : {}),
 		// A branch's head, kept a moment for every merge watching it (see MergeInput.branchHead).
 		branchHead: (repo, branch) => keptRead(env, repo, `head:${branch}`, KEPT_BRANCH_HEAD_MS, () => headOf(env.ARTIFACTS, repo, branch)),
 		// Forks made in the background, paced, before agents need them: the seeds when GitHive starts, an agent's when it registers.

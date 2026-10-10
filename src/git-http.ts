@@ -29,7 +29,8 @@ export function repoOfUrl(url: string) {
  */
 export function gitAuth(remote: Remote) {
 	const password = remote.token.split("?expires=")[0];
-	return { headers: { Authorization: `Basic ${btoa(`x:${password}`)}` }, onAuth: () => ({ username: "x", password }) };
+	const username = remote.user ?? "x";
+	return { headers: { Authorization: `Basic ${btoa(`${username}:${password}`)}` }, onAuth: () => ({ username, password }) };
 }
 
 /** A response's body, read to the end now (its connection freed), and given back to be read again. */

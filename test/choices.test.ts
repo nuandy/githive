@@ -341,6 +341,30 @@ describe("open changes' heads, as GitHive last saw them", { timeout: 120_000 }, 
 	});
 });
 
+describe("news of main moving", { timeout: 120_000 }, () => {
+	it("comes with every reply that's an object, saying what changed, by whom and why; a list stays a list", async () => {
+		const server = await startGitServer();
+		try {
+			const asked: string[] = [];
+			const ctx = (agentKey?: string): ToolContext => ({
+				remote: async () => ({ url: server.url, token: "unused" }),
+				changeRemote: async () => ({ url: server.url, token: "unused" }),
+				head: async () => server.git("rev-parse", "main").trim(),
+				news: async (_repo, branch, agent) => (asked.push(`${branch} ${agent}`), [{ change: "c-7", agent: "agent-b", at: "2026-10-10T10:00:00.000Z", commit: "2f56723d0000", files: ["src/billing/invoice.ts"], intent: "add partial refunds" }]),
+				...(agentKey ? { agentKey } : {}),
+			});
+			const call = async (name: string, args: Record<string, unknown>, key?: string) => callTool(name, { repo: "p", ...args }, ctx(key));
+			await call("start", { required: 1, vetoes: [] });
+			const { key } = (await call("register", { agent: "agent-a" })) as { key: string };
+			expect(await call("backlog", { agent: "agent-a" }, key)).toMatchObject({ open: [], news: [{ change: "c-7", says: 'main changed src/billing/invoice.ts: c-7 by agent-b, "add partial refunds"' }] });
+			expect(Array.isArray(await call("claims", {}, key))).toBe(true);
+			expect(asked).toContain("main agent-a");
+		} finally {
+			await server.close();
+		}
+	});
+});
+
 describe("a change that landed before its claim was released", { timeout: 120_000 }, () => {
 	it("is offered for review no more, and its piece of the backlog counts as merged", async () => {
 		const server = await startGitServer();
