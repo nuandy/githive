@@ -116,7 +116,9 @@ export function SignIn({
 				) : null}
 				<ProviderButtons providers={providers} hash={hash} invite={invite} />
 				<p className="signin__note">
-					GitHive is invitation-only for now. You'll be signed in with the email your account has verified.
+					{takesInviteCode
+						? "GitHive is invite-only for now. Have an invite code? Enter it, then continue."
+						: "GitHive is invite-only for now. If you aren't invited yet, signing in asks an admin to let you in."}
 				</p>
 			</div>
 		</main>
