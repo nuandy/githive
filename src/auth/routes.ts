@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import { type Principal, SESSION_COOKIE, cookie, describe, identityStore } from "./principal";
 import { PROVIDERS, type ProviderConfig, type ProviderName, isProvider, pkceChallenge } from "./providers";
 import { OrgStore } from "./orgs";
-import { type IdentityStore, SESSION_DAYS, randomSecret } from "./store";
+import { type IdentityStore, type ProviderProfile, SESSION_DAYS, randomSecret } from "./store";
 import { fail } from "../errors";
 
 // Sign-in with GitHub or Google, and a signed-in person's own agents, tokens and connected MCP clients.
@@ -39,6 +39,38 @@ const signedInUser = (principal: Principal | undefined) => {
 };
 
 export function authRoutes(app: Hono<AuthEnv>) {
+	signInRoutes(app);
+	accountRoutes(app);
+	adminRoutes(app);
+}
+
+type PendingSignIn = { provider: string; state: string; verifier: string; return: string };
+
+/** The sign-in this browser started, from its cookie, or null if there's none or it can't be read. */
+function pendingSignIn(request: Request): PendingSignIn | null {
+	try {
+		return JSON.parse(cookie(request, SIGNIN_COOKIE) ?? "null");
+	} catch {
+		return null;
+	}
+}
+
+/**
+ * Signs in the person the provider vouched for, with their personal org and any org invitations, and returns a
+ * new session id, or null when they aren't invited.
+ */
+async function startSession(env: Env, profile: ProviderProfile) {
+	const ids = store(env);
+	const signed = await ids.signIn(profile);
+	if ("refused" in signed) return null;
+	const orgs = new OrgStore(env.DB);
+	await orgs.personalOrg(signed.user);
+	await orgs.acceptInvites(signed.user);
+	return ids.createSession(signed.user.id);
+}
+
+/** Signing in with GitHub or Google, and out. */
+function signInRoutes(app: Hono<AuthEnv>) {
 	app.get("/auth/providers", (c) =>
 		c.json({ providers: (["github", "google"] as const).filter((p) => providerConfig(c.env, p)) }),
 	);
@@ -75,12 +107,7 @@ export function authRoutes(app: Hono<AuthEnv>) {
 		if (!isProvider(name)) return c.json({ error: `no sign-in with ${name}` }, 404);
 		const config = providerConfig(c.env, name);
 		if (!config) return c.json({ error: `sign-in with ${name} isn't set up here` }, 404);
-		let pending: { provider: string; state: string; verifier: string; return: string } | null = null;
-		try {
-			pending = JSON.parse(cookie(c.req.raw, SIGNIN_COOKIE) ?? "null");
-		} catch {
-			pending = null;
-		}
+		const pending = pendingSignIn(c.req.raw);
 		const code = c.req.query("code");
 		if (c.req.query("error")) return back("cancelled");
 		if (!pending || pending.provider !== name || !code || c.req.query("state") !== pending.state)
@@ -98,13 +125,8 @@ export function authRoutes(app: Hono<AuthEnv>) {
 			console.error(`sign-in with ${name} failed`, err instanceof Error ? err.message : String(err));
 			return back(/\[403\]/.test(String(err)) ? "unverified-email" : "provider-failed");
 		}
-		const ids = store(c.env);
-		const signed = await ids.signIn(profile);
-		if ("refused" in signed) return back("not-invited");
-		const orgs = new OrgStore(c.env.DB);
-		await orgs.personalOrg(signed.user);
-		await orgs.acceptInvites(signed.user);
-		const session = await ids.createSession(signed.user.id);
+		const session = await startSession(c.env, profile);
+		if (!session) return back("not-invited");
 		c.header("Set-Cookie", cookieHeader(SIGNIN_COOKIE, "", 0));
 		c.header("Set-Cookie", cookieHeader(SESSION_COOKIE, session, SESSION_DAYS * 86_400), { append: true });
 		return c.redirect(safeReturn(pending.return), 302);
@@ -116,7 +138,10 @@ export function authRoutes(app: Hono<AuthEnv>) {
 		c.header("Set-Cookie", cookieHeader(SESSION_COOKIE, "", 0));
 		return c.json({ signedOut: true });
 	});
+}
 
+/** A signed-in person's own account: who they are, their agents and tokens, and the apps connected as them. */
+function accountRoutes(app: Hono<AuthEnv>) {
 	app.get("/me", async (c) => {
 		const principal = c.get("principal");
 		if (!principal) return c.json({ error: "sign in to GitHive first" }, 401);
@@ -141,7 +166,7 @@ export function authRoutes(app: Hono<AuthEnv>) {
 		const agentId = c.req.param("id");
 		await store(c.env).revokeAgent(user.id, agentId);
 		// Revoke the agent's MCP grants too. Each grant's metadata names the agent it acts as.
-		const helpers = (c.env as unknown as { OAUTH_PROVIDER?: OAuthHelpersLike }).OAUTH_PROVIDER;
+		const helpers = oauthHelpers(c.env);
 		if (helpers)
 			for (const grant of await listGrants(helpers, user.id))
 				if (grant.metadata?.agentId === agentId) await helpers.revokeGrant(grant.id, user.id);
@@ -167,76 +192,65 @@ export function authRoutes(app: Hono<AuthEnv>) {
 	// MCP clients connected through OAuth, each acting as one of your agents.
 	app.get("/me/connections", async (c) => {
 		const user = signedInUser(c.get("principal"));
-		const helpers = (c.env as unknown as { OAUTH_PROVIDER?: OAuthHelpersLike }).OAUTH_PROVIDER;
-		if (!helpers) return c.json([]);
-		const grants = await listGrants(helpers, user.id);
-		const clients = new Map<string, string>();
-		for (const g of grants)
-			if (!clients.has(g.clientId))
-				clients.set(g.clientId, (await helpers.lookupClient(g.clientId))?.clientName ?? g.clientId);
-		return c.json(
-			grants.map((g) => ({
-				id: g.id,
-				client: clients.get(g.clientId),
-				agentId: g.metadata?.agentId ?? null,
-				agent: g.metadata?.agent ?? null,
-				createdAt: new Date(g.createdAt * 1000).toISOString(),
-			})),
-		);
+		const helpers = oauthHelpers(c.env);
+		return c.json(helpers ? await connections(helpers, user.id) : []);
 	});
 
 	app.delete("/me/connections/:id", async (c) => {
 		const user = signedInUser(c.get("principal"));
-		const helpers = (c.env as unknown as { OAUTH_PROVIDER?: OAuthHelpersLike }).OAUTH_PROVIDER;
+		const helpers = oauthHelpers(c.env);
 		if (!helpers) return c.json({ error: "no such connection" }, 404);
 		await helpers.revokeGrant(c.req.param("id"), user.id);
 		return c.json({ revoked: c.req.param("id") });
 	});
+}
 
-	// Sign-in invitations. Only an admin, through Access, manages them.
-	const admin = (principal: Principal | undefined) => {
-		if (principal?.kind !== "access") fail(403, "invitations are managed by an admin, through Cloudflare Access");
-		return principal.identity.kind === "person"
-			? principal.identity.value
-			: `service token ${principal.identity.value}`;
-	};
+/** Only an admin, through Access, manages these. Returns who the admin is, as the records name them. */
+function requireAdmin(principal: Principal | undefined) {
+	if (principal?.kind !== "access") fail(403, "invitations are managed by an admin, through Cloudflare Access");
+	return principal.identity.kind === "person" ? principal.identity.value : `service token ${principal.identity.value}`;
+}
+
+/** Sign-in invitations, the requests to join, and who may use the hosted agents. */
+function adminRoutes(app: Hono<AuthEnv>) {
+	// Sign-in invitations.
 	app.get("/admin/invites", async (c) => {
-		admin(c.get("principal"));
+		requireAdmin(c.get("principal"));
 		return c.json(await store(c.env).invites());
 	});
 	app.post("/admin/invites", async (c) => {
-		const by = admin(c.get("principal"));
+		const by = requireAdmin(c.get("principal"));
 		const { email } = await c.req.json<{ email?: string }>().catch(() => ({ email: undefined }));
 		return c.json({ invited: await store(c.env).invite(String(email ?? ""), by) }, 201);
 	});
 	app.delete("/admin/invites/:email", async (c) => {
-		admin(c.get("principal"));
+		requireAdmin(c.get("principal"));
 		await store(c.env).uninvite(c.req.param("email"));
 		return c.json({ uninvited: c.req.param("email") });
 	});
 
 	// Org invitations whose email an admin hasn't approved yet. Approve with POST /admin/invites, or decline here.
 	app.get("/admin/invite-requests", async (c) => {
-		admin(c.get("principal"));
+		requireAdmin(c.get("principal"));
 		return c.json(await store(c.env).inviteRequests());
 	});
 	app.delete("/admin/invite-requests/:email", async (c) => {
-		admin(c.get("principal"));
+		requireAdmin(c.get("principal"));
 		await store(c.env).declineRequest(c.req.param("email"));
 		return c.json({ declined: c.req.param("email") });
 	});
 
 	// Who may use the hosted agents (build, request_review). They spend GitHive's model account.
 	app.get("/admin/hosted-agents", async (c) => {
-		admin(c.get("principal"));
+		requireAdmin(c.get("principal"));
 		return c.json(await store(c.env).hostedUsers());
 	});
 	app.put("/admin/hosted-agents/:handle", async (c) => {
-		const by = admin(c.get("principal"));
+		const by = requireAdmin(c.get("principal"));
 		return c.json({ allowed: await store(c.env).allowHosted(c.req.param("handle"), by) });
 	});
 	app.delete("/admin/hosted-agents/:handle", async (c) => {
-		admin(c.get("principal"));
+		requireAdmin(c.get("principal"));
 		await store(c.env).disallowHosted(c.req.param("handle"));
 		return c.json({ disallowed: c.req.param("handle") });
 	});
@@ -260,6 +274,24 @@ export interface OAuthHelpersLike {
 	}>;
 	revokeGrant(grantId: string, userId: string): Promise<void>;
 	lookupClient(clientId: string): Promise<{ clientName?: string } | null>;
+}
+
+const oauthHelpers = (env: Env) => (env as unknown as { OAUTH_PROVIDER?: OAuthHelpersLike }).OAUTH_PROVIDER;
+
+/** The MCP clients connected as one of this person's agents, each named as it registered. */
+async function connections(helpers: OAuthHelpersLike, userId: string) {
+	const grants = await listGrants(helpers, userId);
+	const clients = new Map<string, string>();
+	for (const grant of grants)
+		if (!clients.has(grant.clientId))
+			clients.set(grant.clientId, (await helpers.lookupClient(grant.clientId))?.clientName ?? grant.clientId);
+	return grants.map((grant) => ({
+		id: grant.id,
+		client: clients.get(grant.clientId),
+		agentId: grant.metadata?.agentId ?? null,
+		agent: grant.metadata?.agent ?? null,
+		createdAt: new Date(grant.createdAt * 1000).toISOString(),
+	}));
 }
 
 async function listGrants(helpers: OAuthHelpersLike, userId: string) {
