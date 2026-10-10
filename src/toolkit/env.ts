@@ -209,6 +209,8 @@ export function toolContextFor(env: Env, by: string | undefined, caller: { agent
 			const cache = () => env.REPO_CACHE.getByName(`repo:${repo}`);
 			return withHistory(env.ARTIFACTS, repo, (source) => readBranchHistory(source, baseline, branch, { get: (commits) => rpc(cache().keptFiles(commits)), put: (files) => cache().keepFiles(files) }));
 		},
+		// Any repo's history (a project's, an agent's fork) through Artifacts' own API: a batch's changes are read that way.
+		history: (name, read) => withHistory(env.ARTIFACTS, name, read),
 		// A batch's first check container, started while the batch is read (see MergeInput.prepareChecks).
 		prepareChecks: (repo) => async (gate) => {
 			const read = await cached(env, repo, `${repo}|read`, () => remoteFor(env.ARTIFACTS, repo, "read", 3600));

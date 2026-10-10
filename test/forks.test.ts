@@ -119,7 +119,7 @@ describe("forks (the default)", () => {
 
 describe("status", () => {
 	it("tells an agent where its change stands: its claim, its branch head, the votes on it, and what's still needed", async () => {
-		await call("start", {});
+		await call("start", { required: 1 });
 		await call("claim", { change: "a-1", agent: "agent-a", paths: ["src/a/"], intent: "a" });
 		expect(await call("status", { change: "a-1" })).toMatchObject({ change: "a-1", claim: { agent: "agent-a", paths: ["src/a/"] }, head: null, votes: [] });
 

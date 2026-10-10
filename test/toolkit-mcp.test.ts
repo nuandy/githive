@@ -58,8 +58,10 @@ describe("GitHive's MCP tools", () => {
 	});
 
 	it("starts the mode, claims, refuses an overlapping claim, and audits a clean repo", async () => {
-		// By default one approval; security, who can veto, too for dependency, CI and deploy files.
-		expect(await call("start", { repo: "project" })).toMatchObject({ repo: "project", policy: { required: 1, vetoes: [], escalate: [{ required: 2, vetoes: ["security"], paths: expect.arrayContaining(["package.json", ".github/"]) }] } });
+		// By default no reviews and no checks, as on GitHub: a claimed, pushed change merges as it is.
+		const started = (await call("start", { repo: "project" })) as { policy: Record<string, unknown>; verify: string[] };
+		expect(started).toMatchObject({ repo: "project", policy: { required: 0, vetoes: [] }, verify: [] });
+		expect(started.policy).not.toHaveProperty("escalate");
 		expect(await call("claim", { repo: "project", change: "a-1", agent: "agent-a", paths: ["src/a/"], intent: "a" })).toMatchObject({ ok: true });
 		expect(await call("claim", { repo: "project", change: "b-1", agent: "agent-b", paths: ["src/a/x.ts"], intent: "b" })).toMatchObject({
 			ok: false,
@@ -140,7 +142,7 @@ describe("GitHive's MCP tools", () => {
 
 	it("notes a repo for the dashboard when the mode starts, and snapshots it", async () => {
 		registered = [];
-		await call("start", { repo: "project", verify: ["npm test"] });
+		await call("start", { repo: "project", required: 1, verify: ["npm test"] });
 		expect(registered).toEqual(["project"]);
 		await call("claim", { repo: "project", change: "a-1", agent: "agent-a", paths: ["src/a/"], intent: "a" });
 		await call("vote", { repo: "project", commit: "h1", reviewer: "rev-1", role: "tests", verdict: "approve", evidence: "ok" });

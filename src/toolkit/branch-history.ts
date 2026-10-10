@@ -94,6 +94,16 @@ export async function readBranchHistory(source: HistorySource, baseline: string,
 	return chain.map((c) => ({ commit: c.hash, parents: c.parents, author: c.author.name, message: c.message.replace(/\n+$/, ""), files: files[c.hash] ?? [] }));
 }
 
+/** The paths that differ between trees `a` and `b` (null: none), sorted, read through `source` (see changedFiles). */
+export async function filesBetween(source: HistorySource, a: string | null, b: string | null): Promise<string[]> {
+	const read = new Map<string, Promise<TreeEntry[]>>();
+	const tree = (hash: string) => {
+		if (!read.has(hash)) read.set(hash, source.readTree(hash).then((entries) => entries ?? []));
+		return read.get(hash)!;
+	};
+	return (await changedFiles(tree, a, b)).sort();
+}
+
 /**
  * The paths that differ between trees `a` and `b` (null: none), reading only
  * the folders whose hashes differ: what `git diff-tree -r --name-only` lists

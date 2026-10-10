@@ -15,6 +15,8 @@ import { vote, type Votes } from "../src/toolkit/votes";
 import { pushChange } from "./helpers/agents";
 import { startGitServer, type GitServer } from "./helpers/git-server";
 import { memoryBatchGit } from "./helpers/memory-batch-git";
+import { gitHistory } from "./helpers/git-history";
+import { artifactsInspect } from "../src/toolkit/batch-reads";
 
 // Landing without a line: claims keep changes off each other's paths, so the
 // ready ones (approved) land as a set. The merge that takes the branch's lease
@@ -113,6 +115,16 @@ describe("landing ready changes together", { timeout: 120_000 }, () => {
 		expect(server.git("log", "-1", "--format=%(trailers:key=GitHive-Tested-With,valueonly)", "main").trim()).toBe(heads.join(" "));
 		// Their claims are released, naming their merges.
 		expect((await store().read()).claims).toEqual([]);
+		expect(await auditNow()).toEqual([]);
+	});
+
+	it("reads a batch through Artifacts' API, and lands it in the Gate, which reads nothing", async () => {
+		for (const x of ["a", "b"]) await readyChange(`${x}-1`, { [`src/${x}.txt`]: `${x}\n` });
+		const reads: string[][] = [];
+		const gate = readsNoted(reads);
+		expect(await merge("a-1", runner(), memoryLanding(), { batchGit: { ...gate, inspect: artifactsInspect(gitHistory(server.git), "project", gate.inspect) } })).toMatchObject({ ok: true });
+		expect(reads).toEqual([]);
+		expect(landed()).toEqual(["a-1", "b-1"]);
 		expect(await auditNow()).toEqual([]);
 	});
 

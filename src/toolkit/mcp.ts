@@ -13,11 +13,12 @@ import { checkChange } from "./check";
 import { claimStore, type ClaimStore } from "./claim-store";
 import { changeSettings, recordBranch, registerAgent, registerAgents, shardClaims, shardingReason, startRepo, type ClaimRecord, type Registry } from "./claims";
 import { mergeRecordOf, readMainMerges, readRecordHistory, readRefHistories, readShardHistories, type BranchCommit } from "./git-records";
+import { artifactsInspect, type ReadHistory } from "./batch-reads";
 import { atMost, type BatchGit, type Candidate, type CheckRunner, mergeChange } from "./merge";
 import { type Landed, type Landing, type LandingView, lastLandedOn } from "./landing";
 import { revertViolation } from "./revert";
 import type { Stamper } from "./stamp";
-import { SENSITIVE_PATHS, approval, countedVotes, DEFAULT_GRANT, effectivePolicy, grantWarnings, openFlag, shardVotes, votesShardingReason, type ReviewPolicy, type VoteRecord, type Votes } from "./votes";
+import { approval, countedVotes, DEFAULT_GRANT, effectivePolicy, grantWarnings, openFlag, shardVotes, votesShardingReason, type ReviewPolicy, type VoteRecord, type Votes } from "./votes";
 import { VOTE_BUCKETS, type VoteStore, voteStore, votesPrefix } from "./vote-store";
 import { addWork, addWorks, backlogFor, holdKey, ROLE_WAIT_MS, reviewsFor, type Work, waitingRoleReviews, workId } from "./work";
 import { abandoned, BUILDING_IDLE_MS, type ChangeSigns } from "./staleness";
@@ -54,6 +55,8 @@ export interface ToolContext {
 	readBranch?: (repo: string, baseline: string, branch: string) => Promise<BranchCommit[]>;
 	/** Where a batch's git work runs (live, the repo's own Gate's container): without it, nothing can land. */
 	batchGit?: (repo: string) => BatchGit;
+	/** Reads a repo's history through Artifacts' API, by name (live): a batch's changes are read that way, the Gate reading only what it can't place. */
+	history?: ReadHistory;
 	/** Starts a batch's first check container while the batch is read (live, a Gate's). */
 	prepareChecks?: (repo: string) => (gate: string) => Promise<void>;
 	/** Who's landing a batch into a repo's branch, and what changes came to (live, the repo's RepoCache); absent, each merge only knows its own. */
@@ -122,8 +125,12 @@ export interface HostedStatus {
 	reviewers: { role: string; status: string; verdict?: string }[];
 }
 
-/** One approval by default; a change to dependency, CI or deploy files also needs security's, who can veto it. */
-export const DEFAULT_POLICY: ReviewPolicy = { required: 1, vetoes: [], escalate: [{ paths: SENSITIVE_PATHS, required: 2, vetoes: ["security"] }] };
+/**
+ * None by default, as on GitHub: a claimed, pushed change merges as it is. A
+ * repo asks for reviews with start or settings (required, vetoes, escalate:
+ * SENSITIVE_PATHS with security's veto, say), and for checks with verify.
+ */
+export const DEFAULT_POLICY: ReviewPolicy = { required: 0, vetoes: [] };
 const HOSTED_PREFIX = "githive-";
 const DEFAULT_SHARD_DEPTH = 2;
 /** Records repos per sharded repo, where they're available: Artifacts takes one push at a time per repo. */
@@ -166,7 +173,7 @@ Work that depends on other unmerged work goes on a feature branch, and the proje
 
 const str = { type: "string" } as const;
 const TOOL_LIST = [
-	{ name: "start", description: "Start GitHive on a project repo (harmless if started; change a started repo's policy or checks with settings): the review policy, the checks run before each merge (verify: shell commands; see settings for what they run in; none by default) (each change lives in its own fork, and only the toolkit writes the project), grants: who may vote as each role that can block a merge (registered agent names, 'person:*', a verified identity like 'person:<who>' or 'service:<id>', a pool 'service:<id>/*' (every agent registered under it, never on its own team's changes), 'githive' for GitHive's reviewers; unlisted roles: people and GitHive's reviewers), how claims are kept: in one record until the load calls for more (8 agents holding claims, or over 15 claim writes a minute), then sharded per path 2 segments deep over 16 records repos, so agents in different parts of the tree never contend. shard_depth shards now, this deep (0: never), and records_repos is how many repos the shards are spread over, since a repo takes one push at a time. Returns them.", inputSchema: { type: "object", properties: { repo: str, required: { type: "number" }, vetoes: { type: "array", items: str }, escalate: { type: "array", items: { type: "object", properties: { paths: { type: "array", items: str }, required: { type: "number" }, vetoes: { type: "array", items: str } }, required: ["paths"] } }, grants: { type: "object", additionalProperties: { type: "array", items: str } }, verify: { type: "array", items: str }, shard_depth: { type: "number" }, records_repos: { type: "number" } }, required: ["repo"] } },
+	{ name: "start", description: "Start GitHive on a project repo (harmless if started; change a started repo's policy or checks with settings): the review policy (required approvals, vetoes, escalate; none by default, so a change merges as soon as it's pushed), the checks run before each merge (verify: shell commands; see settings for what they run in; none by default) (each change lives in its own fork, and only the toolkit writes the project), grants: who may vote as each role that can block a merge (registered agent names, 'person:*', a verified identity like 'person:<who>' or 'service:<id>', a pool 'service:<id>/*' (every agent registered under it, never on its own team's changes), 'githive' for GitHive's reviewers; unlisted roles: people and GitHive's reviewers), how claims are kept: in one record until the load calls for more (8 agents holding claims, or over 15 claim writes a minute), then sharded per path 2 segments deep over 16 records repos, so agents in different parts of the tree never contend. shard_depth shards now, this deep (0: never), and records_repos is how many repos the shards are spread over, since a repo takes one push at a time. Returns them.", inputSchema: { type: "object", properties: { repo: str, required: { type: "number" }, vetoes: { type: "array", items: str }, escalate: { type: "array", items: { type: "object", properties: { paths: { type: "array", items: str }, required: { type: "number" }, vetoes: { type: "array", items: str } }, required: ["paths"] } }, grants: { type: "object", additionalProperties: { type: "array", items: str } }, verify: { type: "array", items: str }, shard_depth: { type: "number" }, records_repos: { type: "number" } }, required: ["repo"] } },
 	{ name: "settings", description: "Change a started repo's review policy or its checks; whatever you leave out stays as it is. The same fields as start: required approvals, vetoes, escalate (stricter rules for chosen paths), grants (who may vote as each role), verify (the checks run before each merge; [] for none). Each check is a shell command, run with bash at the repo's top on the merged code (exit 0 passes, the first failure stops the run) in a Linux container with Node 24, npm and git, plus Python, Go or Rust when the repo uses them; dependencies are installed first; up to 10 minutes per command; no secrets or environment variables, so a test needing a database or an API key fails. Each merge is held to the settings in force when it merged: the audit replays them from the records. Returns the settings now. branch_rules sets other branches' settings by pattern (feature/*, release/*, a name), the first match winning: each changes only the policy fields and checks it names (verify [] for none; left out, the repo's); [] clears them. The project's branch always has the repo's settings. skip_checks lists what the checks skip: a change touching only these merges without them (*.md, docs/, licenses and images by default; a file under test/, fixtures/ or examples/ always runs them); [] makes them always run. github connects a GitHub repo ('owner/name', '' for none) through GitHive's GitHub app, installed there: main is pushed back to it after every landing, and verify ['github-actions'] runs the checks on its Actions instead of in containers (a workflow that runs on pushes to githive/checks/**).", inputSchema: { type: "object", properties: { repo: str, github: str, required: { type: "number" }, vetoes: { type: "array", items: str }, escalate: { type: "array", items: { type: "object", properties: { paths: { type: "array", items: str }, required: { type: "number" }, vetoes: { type: "array", items: str } }, required: ["paths"] } }, grants: { type: "object", additionalProperties: { type: "array", items: str } }, verify: { type: "array", items: str }, skip_checks: { type: "array", items: str }, branch_rules: { type: "array", items: { type: "object", properties: { pattern: str, required: { type: "number" }, vetoes: { type: "array", items: str }, grants: { type: "object", additionalProperties: { type: "array", items: str } }, verify: { type: "array", items: str } }, required: ["pattern"] } } }, required: ["repo"] } },
 	{ name: "credentials", description: "Git access. With your change: a write token for its own fork, where its branch changes/<change> lives. Without: read access to the project repo.", inputSchema: { type: "object", properties: { repo: str, change: str }, required: ["repo"] } },
 	{ name: "claims", description: "The claims in force: who holds which paths, and why.", inputSchema: { type: "object", properties: { repo: str }, required: ["repo"] } },
@@ -1160,8 +1167,10 @@ async function runTool(name: string, args: Args, ctx: ToolContext): Promise<unkn
 			const link = registry?.github && ctx.github ? await ctx.github(registry.github.repo).catch((err) => (console.error(`reaching ${registry.github!.repo} on GitHub failed`, String(err)), null)) : null;
 			if (onActions(checksHere) && !link) return { ok: false, reasons: [`checks run on GitHub Actions, but ${registry?.github ? `GitHive can't reach ${registry.github.repo}: is the GitHive app installed there?` : "no GitHub repo is connected (settings github)"}`] };
 			const project = await write();
-			// The repo's Gate (a container, real git) reads and lands every batch, checks or not, and does its GitHub pushes.
+			// The repo's Gate (a container, real git) lands every batch, checks or not, and does its GitHub pushes. A batch's
+			// changes are read through Artifacts' API, here, the Gate reading only those it can't place (see artifactsInspect).
 			const gate = ctx.batchGit ? ctx.batchGit(repo) : fail(503, "GitHive can't land changes here: no Gate is set up to land them");
+			const batchGit = ctx.history ? { ...gate, inspect: artifactsInspect(ctx.history, repo, gate.inspect) } : gate;
 			return mergeChange({
 				remote: project,
 				branch: into,
@@ -1175,7 +1184,7 @@ async function runTool(name: string, args: Args, ctx: ToolContext): Promise<unkn
 				runChecks: onActions(checksHere) && link ? actionsChecks(gate, link) : ctx.runChecks?.(repo),
 				...(ctx.branchHead ? { branchHead: () => ctx.branchHead!(repo, into) } : {}),
 				...(ctx.landing ? { landing: ctx.landing(repo, into) } : {}),
-				batchGit: gate,
+				batchGit,
 				...(ctx.prepareChecks && !onActions(checksHere) ? { prepareChecks: ctx.prepareChecks(repo) } : {}),
 				// The project's branch, landed, pushed back to GitHub (a fast-forward; refused if someone pushed there directly).
 				...(link && into === branch ? { afterLanding: (commit: string) => mirrorTo(gate, link, into, commit) } : {}),

@@ -56,10 +56,10 @@ Nobody assigns you work: you look, and choose. Work in a loop:
    - landed (or its claim released as merged): it's done.
    - nothing pushed: finish it (below, build).
    - a reviewer asked for changes, or the checks failed: revise it: fix what they asked, commit, push the new commit.
-   - approved: call merge. It lands your change together with the others ready, after their checks run; it can take a few minutes. If it refuses, do what the reasons say.
+   - nothing more needed (approved, or the repo asks for no reviews): call merge. It lands your change together with the others ready, after the repo's checks if it has any; it can take a few minutes. If it refuses, do what the reasons say.
    - otherwise it's waiting for reviews: leave it.
-2. Then reviews: the reviews you may give, in an order of your own so agents spread out: take the first that suits you, unless you have a reason not to. Get its code with review-clone (below, which also marks you reviewing it), read the diff against the project's branch carefully, run the tests, and vote on that exact commit in the role it names: approve if it's correct, tested and inside its claim, reject with specific evidence if not.
-3. Then backlog: pieces of work free to build, in an order of your own so agents spread out: take the first that suits you, unless you have a reason not to (in a run, four of five agents first picked the same piece). Build it: claim its paths (its id as the change), then make the change for real: read the surrounding code and tests, write good code (and tests where it fits), and run the tests. Commit on the branch changes/<change>, push it to your fork, then call check. Stay inside your claim. If the claim is refused because another agent took it first, pick another.
+2. Then reviews: the reviews you may give, in an order of your own so agents spread out: take the first that suits you, unless you have a reason not to. Get its code with review-clone (below, which also marks you reviewing it), read the diff against the project's branch carefully, and vote on that exact commit in the role it names: approve if it's correct and inside its claim, reject with specific evidence if not.
+3. Then backlog: pieces of work free to build, in an order of your own so agents spread out: take the first that suits you, unless you have a reason not to (in a run, four of five agents first picked the same piece). Build it: claim its paths (its id as the change), then make the change for real: read the surrounding code and tests, and write good code (and tests where it fits). Commit on the branch changes/<change>, push it to your fork, then call check. Stay inside your claim. If the claim is refused because another agent took it first, pick another.
 4. Nothing to do: run \`sleep 30\`, then look again.
 Stop when you've looked three times in a row with nothing to do and none of your changes is still open, or when ${minutes} minutes have passed. Then print a short summary of what you did.
 
@@ -70,7 +70,7 @@ Git, without ever printing a token (the helper keeps credentials in each clone's
       fresh write access for that clone, if a push is refused for authentication.
   node ${root}scripts/mcp-agent.mjs review-clone <dir> --repo ${plan.repo} --change <change> --role <role> --key-file ${keyFile}
       a change to review: the project, with the change checked out at its pushed head ("origin/<branch>" is what it lands on); marks you reviewing it in that role.
-Make every clone inside ${dir}, a new folder each time. Run \`npm install --no-audit --no-fund\` in a clone before \`npm test\`. Never rewrite pushed commits; to take in the project's branch, merge it. Don't use GitHive's hosted agents (the build and request_review tools).${brief ? `\n\n${brief}` : ""}`;
+Make every clone inside ${dir}, a new folder each time. Don't run the test suite as a matter of course: running tests is the repo's checks' job, if it has any, when the change lands. If you do run a test, run \`npm install --no-audit --no-fund\` in the clone first. Never rewrite pushed commits; to take in the project's branch, merge it. Don't use GitHive's hosted agents (the build and request_review tools).${brief ? `\n\n${brief}` : ""}`;
 
 /** This environment without an API key: the CLI then uses what it's signed in with. */
 function withoutApiKey() {

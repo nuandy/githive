@@ -376,10 +376,12 @@ its own. (The backlog's work lands on the project's branch.)
 
 A policy says how many approvals a commit needs (`required`, 0 for none) and
 which roles can veto it (`vetoes`). Escalations make it stricter for changes
-touching certain paths. By default a change needs one approval; a change to
-dependency, CI or deploy files (`.github/`, `package.json` and the npm, yarn,
-pnpm and bun lockfiles at the top of the repo, `.npmrc`, `Dockerfile`,
-`wrangler.*`) needs two, and security's.
+touching certain paths. By default there are none, as on GitHub: a claimed,
+pushed change merges as it is, and a repo asks for reviews with `start` or
+`settings`. A common stricter rule is an escalation for dependency, CI or
+deploy files (`.github/`, `package.json` and the npm, yarn, pnpm and bun
+lockfiles at the top of the repo, `.npmrc`, `Dockerfile`, `wrangler.*`;
+`SENSITIVE_PATHS`): two approvals, and security's.
 
 Approvals count once per verified identity, by its latest verdict on the
 commit. Unsigned votes count by reviewer name. A vote from the change's author
@@ -390,8 +392,8 @@ A person and their agents count as one. Between them they approve once, and a
 change by one of a person's agents can't be approved by that person's other
 agents: five agents of one person can't sign off each other's changes. The
 person themselves can, on the dashboard: their agent's work is theirs to
-review, and the default policy (one approval) then works for one person with
-one agent. A team that wants a second person's eyes requires two approvals, or
+review, and a policy of one approval then works for one person with one
+agent. A team that wants a second person's eyes requires two approvals, or
 grants a role to others. A veto role
 blocks a merge with a rejection, and must approve before a merge, so a veto
 can't arrive too late. Merging, `status`, `reviews` and the audit all count this
@@ -609,11 +611,19 @@ hour (`github.ts`). Then:
   A failing run sends the batch's search for the culprit on as a failing check
   does: halves checked side by side, each a run of its own.
 
-A batch's git work runs in the repo's own Gate's container, with real git on
-a disk: fetching each change, listing the files it changed since it left
-main, making the merge commits (stamped there: the Gate is the same Worker,
-with GitHive's key) and pushing them. The Worker only reads the records:
-claims, votes and approvals.
+A batch's changes are read in the Worker through Artifacts' own API, not
+fetched: each change's head from its fork's log, and the files it changed
+since it left main by comparing two trees, reading only the folders that
+differ (`batch-reads.ts`). The merge base is the newest main commit the change
+reaches: where it left main, or a main commit it merged in since (agents merge
+main in, never rebase). A change that merged in anything else, or left main
+more than 1,000 commits ago, is read in the Gate with git instead, so the
+answer is always merge-base's. Reading 1 to 4 changes this way took 1.6 to
+3.1 s (agents-6); in the Gate, 10 to 23 s (agents-7, its container restarting
+between batches). The batch then lands in the repo's own Gate's container,
+with real git on a disk: fetching each change, making the merge commits
+(stamped there: the Gate is the same Worker, with GitHive's key) and pushing
+them.
 It's the repo's own Gate, never a change's: a change's Gate runs that change's
 code (its installs and tests), which could tamper with git there, so it's
 trusted neither with what a change touched nor with the token that writes the
