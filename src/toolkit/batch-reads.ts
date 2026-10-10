@@ -178,6 +178,33 @@ export async function changeAgainst(
 	};
 }
 
+/** A change placed on the branch: its head, its merge base with the branch, and the files it changed since. */
+export type Placed = { head: CommitMeta; base: CommitMeta; files: string[] };
+
+/**
+ * Every change in a batch placed on the branch at `base`, with the branch's commit there, or null if any change
+ * can't be placed exactly (only git can tell then), or couldn't be read.
+ */
+export async function placeBatch(
+	history: ReadHistory,
+	project: string,
+	branch: string,
+	base: string,
+	changes: { ref: string; source?: { url: string } }[],
+): Promise<{ tip: CommitMeta; placed: Placed[] } | null> {
+	const chain = await branchChain(history, project, branch, base);
+	const tip = chain?.[0];
+	if (!chain || !tip) return null;
+	const onBranch = positions(chain);
+	const placed = await atMost(READS_AT_ONCE, changes, (change) =>
+		history(change.source ? repoOfUrl(change.source.url) : project, (source) =>
+			placeChange(source, change.ref, chain, onBranch),
+		).catch(() => null),
+	);
+	if (placed.some((each) => !each || "error" in each)) return null;
+	return { tip, placed: placed as Placed[] };
+}
+
 /**
  * Which of `heads` the branch at `main` already merged, each with its merge commit. A busy repo can answer a
  * push with a server error even though it applied, and later batches then took those changes up again and failed.

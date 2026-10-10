@@ -15,6 +15,7 @@ import type { ToolContext, HostedStatus } from "./mcp";
 import type { BatchGit, BatchSource, CheckRunner } from "./merge";
 import { recordsRepoName } from "./shards";
 import { makeStamper } from "./stamp";
+import { treeLanding } from "./tree-landing";
 import { headsForClaims } from "../push-events";
 import { gitLanding, LANDING_RECORDS_REPO, landingRef, lazyLog, type LeaseRecord } from "./landing-lease";
 
@@ -268,6 +269,8 @@ function gateParts(env: Env) {
 	return {
 		// The repo's own Gate keeps its snapshot fresh (see Gate.warmUp); a batch's checks run in the batch's own Gates.
 		warmChecks: async (repo, { expect, ...input }) => {
+			// Without checks the repo's Gate would only land batches, which trees do.
+			if (treeLandingOn(env) && !input.checks.length) return;
 			const remote = await projectRemote(env, repo, "read");
 			await env.GATE.getByName(`repo:${repo}`).warmUp({
 				repo,
@@ -282,7 +285,10 @@ function gateParts(env: Env) {
 		// Start a batch's first check container while the batch is read (see MergeInput.prepareChecks).
 		prepareChecks: (repo) => (gate) => bootGate(env, repo, `repo:${repo}:check:${gate}`),
 		// Start the repo's own Gate while a batch is read, so landing finds it running (see MergeInput.prepareLanding).
-		prepareLanding: (repo) => bootGate(env, repo, `repo:${repo}`),
+		prepareLanding: async (repo) => {
+			if (treeLandingOn(env)) return;
+			await bootGate(env, repo, `repo:${repo}`);
+		},
 		// A batch's Git work runs in the repo's own Gate container, which never runs a change's code (see BatchGit).
 		batchGit: (repo) => batchGitFor(env, repo),
 		// The landing lease is a record in the repo's first records repo (see landingLog). Outcomes are cached in the
@@ -406,7 +412,7 @@ function batchGitFor(env: Env, repo: string): BatchGit {
 		return { change: entry.change, remote: from.url, token: from.token, ref: entry.ref };
 	};
 	const pushTarget = (to: Remote) => ({ remote: to.url, token: to.token, ...(to.user ? { user: to.user } : {}) });
-	return {
+	const inGate: BatchGit = {
 		inspect: async ({ base, branch, changes }) => {
 			const read = await project("read");
 			const sources = await Promise.all(changes.map(sourceOf));
@@ -472,7 +478,20 @@ function batchGitFor(env: Env, repo: string): BatchGit {
 			if ("refused" in pushed) throw new Error(`pushing ${branch} to ${to.url} was refused: ${pushed.refused}`);
 		},
 	};
+	if (!treeLandingOn(env)) return inGate;
+	// Batches land with trees in the Worker, and in the Gate only when one needs a real merge (see tree-landing.ts).
+	const land = treeLanding({
+		history: (name, read) => withHistory(env.ARTIFACTS, name, read),
+		project: repo,
+		remote: (scope) => projectRemote(env, repo, scope),
+		...(env.STAMP_KEY ? { stampKey: env.STAMP_KEY } : {}),
+		fallback: inGate.land,
+	});
+	return { ...inGate, land };
 }
+
+/** Whether batches land with trees in the Worker rather than in the repo's Gate container. */
+const treeLandingOn = (env: Env) => env.TREE_LANDING === "on";
 
 // Records repos made for landing leases, once per isolate.
 const landingRepos = new Map<string, Promise<void>>();

@@ -10,12 +10,12 @@ const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 const FETCHED = "/fetched";
 
-const pktLine = (line: string) => {
+export const pktLine = (line: string) => {
 	const payload = encoder.encode(line);
 	return [encoder.encode((payload.length + 4).toString(16).padStart(4, "0")), payload];
 };
 
-const concat = (parts: Uint8Array[]) => {
+export const concat = (parts: Uint8Array[]) => {
 	const out = new Uint8Array(parts.reduce((total, part) => total + part.length, 0));
 	let at = 0;
 	for (const part of parts) {
@@ -68,7 +68,7 @@ function uploadPackRequest(oids: string[], history: boolean, depth: number) {
 }
 
 /** The pack in an upload-pack response, throwing the server's error if it sent one. */
-function packFrom(bytes: Uint8Array) {
+export function packFrom(bytes: Uint8Array) {
 	// Shallow lines and NAK come first, then the pack in side-band packets (1 data, 2 progress, 3 error).
 	const pack: Uint8Array[] = [];
 	let inPack = false;

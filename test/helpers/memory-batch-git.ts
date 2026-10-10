@@ -2,6 +2,11 @@ import git from "isomorphic-git";
 import { BOT, branchHead, type Remote, Workspace } from "../../src/git";
 import { mergeMessage } from "../../src/toolkit/merge-commit";
 import type { BatchGit, Inspected } from "../../src/toolkit/merge";
+import { repoOfUrl } from "../../src/git-http";
+import type { ReadHistory } from "../../src/toolkit/batch-reads";
+import { treeLanding } from "../../src/toolkit/tree-landing";
+import { gitHistory } from "./git-history";
+import { gitAt } from "./git-server";
 
 // A batch's git work in memory, in this process, for tests: what the repo's
 // Gate does with real git in its container (reading and landing batches, and
@@ -13,6 +18,21 @@ import type { BatchGit, Inspected } from "../../src/toolkit/merge";
  * merge commits, stamped by the merge's stamper, in one push.
  */
 export function memoryBatchGit(remote: Remote): BatchGit {
+	const batchGit = inMemory(remote);
+	// TREE_LANDING=1 lands batches with trees, as the Worker would, falling back to this in-memory landing.
+	if (process.env.TREE_LANDING !== "1") return batchGit;
+	const repos = gitAt(remote.url);
+	const history: ReadHistory = (repo, read) => gitHistory(repos(repo))(repo, read);
+	const land = treeLanding({
+		history,
+		project: repoOfUrl(remote.url),
+		remote: async () => remote,
+		fallback: batchGit.land,
+	});
+	return { ...batchGit, land };
+}
+
+function inMemory(remote: Remote): BatchGit {
 	return {
 		inspect: async ({ base, branch, changes }) => {
 			const ws = await Workspace.at(remote, branch, base);

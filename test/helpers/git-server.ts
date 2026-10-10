@@ -37,6 +37,17 @@ export interface GitServer {
 	close: () => Promise<void>;
 }
 
+const reposAt = new Map<string, (name: string) => string>();
+
+/** Runs git in the bare repo a test server serves at `url`. */
+export function gitAt(url: string) {
+	const pathOf = reposAt.get(new URL(url).origin);
+	if (!pathOf) throw new Error(`no test server at ${url}`);
+	return (name: string) =>
+		(...args: string[]) =>
+			execFileSync("git", ["-C", pathOf(name), ...args]).toString();
+}
+
 const backend = join(execFileSync("git", ["--exec-path"]).toString().trim(), "git-http-backend");
 
 /** A server whose project repo has one commit on `branch` (main unless asked), which HEAD names. */
@@ -158,6 +169,9 @@ export async function startGitServer({ branch = "main" }: { branch?: string } = 
 	const address = server.address();
 	if (!address || typeof address === "string") throw new Error("no port");
 
+	const origin = `http://127.0.0.1:${address.port}`;
+	// Lets a test helper find the bare repo behind a URL, to read it as the Artifacts API would.
+	reposAt.set(origin, (name) => join(root, `${name}.git`));
 	return {
 		url: `http://127.0.0.1:${address.port}/project.git`,
 		git: (...args) => execFileSync("git", ["-C", repo, ...args]).toString(),
@@ -178,6 +192,7 @@ export async function startGitServer({ branch = "main" }: { branch?: string } = 
 		},
 		gitIn: (name, ...args) => execFileSync("git", ["-C", join(root, `${name}.git`), ...args]).toString(),
 		close: async () => {
+			reposAt.delete(origin);
 			await new Promise<void>((resolve) => server.close(() => resolve()));
 			rmSync(root, { recursive: true, force: true });
 		},
