@@ -45,12 +45,6 @@ export async function branchHead(remote: Remote, branch: string): Promise<string
 }
 
 export type MergeOutcome = { clean: true } | { clean: false; files: string[] };
-export interface ChangedFileText {
-	path: string;
-	before: string | null;
-	after: string | null;
-}
-
 /** Commits of history a workspace starts with. It fetches more only when Git needs older commits. */
 export const SHALLOW_DEPTH = 64;
 /** Deep enough to mean all of history. */
@@ -346,42 +340,6 @@ export class Workspace {
 					return true;
 				}
 				if ((await fromEntry?.oid()) !== (await toEntry?.oid())) changed.push(path);
-				return true;
-			},
-		});
-		return changed;
-	}
-
-	/** Obtain UTF-8 old/new text for every changed file between two commits. */
-	async changedFiles(from: string, to: string): Promise<ChangedFileText[]> {
-		await this.ensureCommit(await this.oid(from));
-		await this.ensureCommit(await this.oid(to));
-		const changed: ChangedFileText[] = [];
-		const textAt = async (entry: { oid(): Promise<string | null> } | null | undefined, type: string | undefined) => {
-			if (!entry || type !== "blob") return null;
-			const oid = await entry.oid();
-			if (!oid) return null;
-			const { blob } = await git.readBlob({ fs: this.fs, dir: DIR, oid, cache: this.cache });
-			return new TextDecoder().decode(blob);
-		};
-		await git.walk({
-			fs: this.fs,
-			dir: DIR,
-			cache: this.cache,
-			trees: [git.TREE({ ref: from }), git.TREE({ ref: to })],
-			map: async (path, [fromEntry, toEntry]) => {
-				if (path === ".") return true;
-				const [fromType, toType] = [await fromEntry?.type(), await toEntry?.type()];
-				const texts = async () => ({ before: await textAt(fromEntry, fromType), after: await textAt(toEntry, toType) });
-				if (fromType === "tree" || toType === "tree") {
-					// Report the file side of a file/directory swap and still visit the directory.
-					if ((fromType === "blob" || toType === "blob") && fromType !== toType) {
-						changed.push({ path, ...(await texts()) });
-					}
-					return true;
-				}
-				const [fromOid, toOid] = await Promise.all([fromEntry?.oid(), toEntry?.oid()]);
-				if (fromOid !== toOid) changed.push({ path, ...(await texts()) });
 				return true;
 			},
 		});
