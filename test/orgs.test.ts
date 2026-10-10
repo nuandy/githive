@@ -49,7 +49,10 @@ describe("orgs", () => {
 		// An org's invitation alone doesn't let dan in: it's a request the admin sees.
 		const profile = { provider: "github" as const, providerId: "dan", email: "dan@example.com", login: "dan" };
 		expect(await ids.signIn(profile)).toEqual({ refused: "not-invited" });
-		expect(await ids.inviteRequests()).toEqual([{ email: "dan@example.com", orgs: [{ org: "acme", role: "admin", invitedBy: "ada" }], createdAt: expect.any(String) }]);
+		// One request: the org's invitation, and his own try at signing in.
+		const orgInvite = { org: "acme", role: "admin", invitedBy: "ada" };
+		const tried = expect.objectContaining({ provider: "github", login: "dan", tries: 1 });
+		expect(await ids.inviteRequests()).toEqual([{ email: "dan@example.com", orgs: [orgInvite], createdAt: expect.any(String), signIn: tried }]);
 		// Approved, he signs in and joins.
 		await ids.invite("dan@example.com", "admin");
 		expect(await ids.inviteRequests()).toEqual([]);

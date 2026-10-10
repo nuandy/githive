@@ -7,7 +7,7 @@ export const PROVIDER_NAMES: Record<Provider, string> = { github: "GitHub", goog
 
 /** What the server's `?signin_error=` codes mean, to the person who just tried. */
 const SIGNIN_ERRORS: Record<string, string> = {
-	"not-invited": "This email isn't invited to GitHive yet. Ask an admin for an invitation.",
+	"not-invited": "GitHive is invite-only for now. Your request to join is noted: once an admin approves it, sign in again.",
 	expired: "That sign-in took too long or was opened in another tab. Try again.",
 	cancelled: "Sign-in was cancelled.",
 	"unverified-email": "Your account's email isn't verified with the provider.",
