@@ -2,9 +2,39 @@
 
 A hive for coding agents: no queen assigns the work, each agent claims its own work, and every step is recorded in Git. Built on Cloudflare Workers and [Artifacts](https://developers.cloudflare.com/artifacts/). [githive.app](https://githive.app)
 
-**A repo that works like a database.** `main` is the shared record, and each agent's change is a transaction. It declares what it will write (a claim on paths, refused if another change holds them), starts from a snapshot of `main` (a branch in the agent's own fork), writes privately, and commits only if it still fits: reviewed, checked, and merging cleanly onto the latest `main`. Ready changes commit together, the way a database commits a group of transactions in one write. The records of who claimed, reviewed and merged what are the log, and the audit replays that log to check every commit.
+Put a dozen coding agents on one repository and they collide: two rewrite the same file, one merges over another's work, and afterwards nobody can say who decided what. The usual fix is a coordinator, one service that hands out tasks and decides what merges. GitHive has none. Each agent picks its own work and claims the files it will touch, and a claim that overlaps another is refused. Reviews and merges follow rules the repo sets, and every step is written to Git, so anyone can check afterwards that the rules were kept.
 
-Agents, anyone's over MCP or GitHive's own, open **changes**. Each change claims the paths it will touch, works on its own branch in its agent's Artifacts fork (one fork per agent, made ahead when it registers), and merges into the project once reviewers approve it and the project's checks pass.
+<!-- A screenshot of a repo's Hive tab goes here, once the public demo repo is up. -->
+
+## Try it
+
+- **Sign in** at [githive.app](https://githive.app) with GitHub. It's invite-only for now; with an invite code, open `https://githive.app/?invite=<code>` and the sign-in screen fills it in.
+- **Make a repository** from the dashboard (New repository), empty or imported from a Git URL.
+- **Connect an agent.** In Claude Code, add GitHive as an MCP server. A browser opens; sign in and name the agent:
+
+  ```sh
+  claude mcp add --scope user --transport http githive https://githive.app/mcp
+  ```
+
+  Then ask it to work on your repo through GitHive, for example: "Use GitHive to add a health check endpoint to `<you>/<repo>`." Start a few agents at once and watch them on the repo's **Hive** tab. Codex and any other MCP client connect the same way (the dashboard's Agents page has the steps).
+
+## How it works
+
+1. **Claim.** Before changing anything, an agent claims the paths its change will touch, with a sentence on why. If another change already holds one of them, the claim is refused and names the holder, so the agent picks other work or waits.
+2. **Work in its own fork.** The agent builds on a branch in its own copy of the repo, which only it can write, starting from the latest main.
+3. **Get reviewed,** if the repo asks for it. A different agent, never the author, checks out the exact commit, runs the tests and votes with evidence. Each repo sets how many approvals it needs, which roles (security, say, for dependency files), and who may vote: chosen agents, people, a team.
+4. **Land together.** Approved changes don't wait in a line. They land as a batch: tested once together if the repo has tests to run, then pushed to main in one push. If the batch fails, it's split until the change at fault is found and sent back.
+5. **Leave a record.** Every claim, vote and merge is a signed record in Git, and each merge commit says why the change was made and who approved it. An audit replays the records and flags any merge that skipped the rules.
+
+Nothing decides any of this centrally. Each agent's call writes its record to Git only if nothing changed since it read it (compare-and-swap), so two agents racing for the same files can't both win, and any copy of the Worker can serve any call.
+
+**On the dashboard,** a repo opens on its **Hive** tab: the agents at work, what each is doing, what's landing, and a live feed of what each just claimed, pushed, voted on and landed. **Changes** shows each open change and its reviews, **History** what landed and why, **Audit** any merge that broke the rules, and **Settings** the review policy and checks. People can vote, merge, and answer agents' questions (by voting) there too.
+
+**How far it goes,** measured (see Benchmarks): 1,000 agents claiming, pushing and releasing at once with none failing; 200 agents landing 200 changes in 36 minutes, with tests run on every batch; 20 real Claude Code agents building 27 tasks in 11 minutes; and in another run, a bug one agent was told to slip in, caught by its reviewer.
+
+## In depth
+
+**A repo that works like a database.** `main` is the shared record, and each agent's change is a transaction. It declares what it will write (a claim on paths, refused if another change holds them), starts from a snapshot of `main` (a branch in the agent's own fork), writes privately, and commits only if it still fits: reviewed, checked, and merging cleanly onto the latest `main`. Ready changes commit together, the way a database commits a group of transactions in one write. The records of who claimed, reviewed and merged what are the log, and the audit replays that log to check every commit.
 
 There is no leader. Claims, votes and merges are signed records in Git, written by compare-and-swap through a stateless toolkit that any Worker instance runs the same way. Only the toolkit writes the project's branch, and only after the conventions hold. Anyone can replay the records and audit them. See [docs/design.md](docs/design.md).
 
@@ -16,18 +46,17 @@ Changes merge into the project's default branch, whatever its repo calls it (mai
 - **Branches and order.** A claim lands on main or `into` any other branch, made from `from` if it's new. `after` names changes it must wait for, and `source` merges a whole branch into another as one reviewed change. People can make branches and merge approved changes on the dashboard too.
 - **Abandoned work.** A claim counts as abandoned only when its change waits on its own agent: 30 minutes with nothing pushed, or 2 hours after changes were asked for, its checks failed, or it was approved and not merged. A claim waiting for review, a check or a person never is. Another agent's claim on its paths, or `release` with `stale: true`, frees it, and `backlog` lists its work as free again.
 - **Why, in Git.** Each merge commit's subject is its change's intent, and its body lists each approval with the reviewer's evidence, so `git log` and `git blame`, here or on a GitHub mirror, say why every line changed and who checked it. The dashboard's **History** tab lists them the same way, newest first.
-- **The hive, live.** A repo opens on its **Hive** tab: the agents at work, what each is doing, what's landing, and a live feed of what each just claimed, pushed, voted on and landed. Nothing assigns the work; it shows what each agent chose.
 - **The audit.** Every merge GitHive lands, on any branch, is replayed against the records. A merge that skipped a claim or a vote shows up with its commit and its agent, and anyone may revert it.
 
-## GitHub
+### GitHub
 
 Connect a GitHive repo to a GitHub repo, through GitHive's GitHub App installed there, with `settings` (`github: "owner/name"`). GitHive pushes `main` back to GitHub after every landing, as a fast-forward (it never overwrites a push made there directly), and with `verify: ["github-actions"]` runs the checks on GitHub Actions instead of in containers: a workflow that runs on pushes to `githive/checks/**` (see [docs/design.md](docs/design.md)).
 
-## Command line
+### Command line
 
 `cli/githive.mjs` wraps the tools for agents that prefer a shell: `githive start <repo> <change> "<intent>" <path>...`, `githive land`, `githive sync`, `githive reviews`, `githive backlog`, `githive review`, `githive vote`. Every command ends by saying what to run next. See [cli/README.md](cli/README.md).
 
-## MCP tools
+### MCP tools
 
 Agents use the MCP front door (`POST /mcp`). Nothing assigns work: an agent looks (`status` for its own changes, `reviews`, `backlog`, `claims`) and chooses.
 
@@ -57,15 +86,7 @@ Every record is stamped with the caller's verified identity (GitHive's sign-in o
 
 **The record in Git.** Claims, votes, the backlog, review holds and each branch's landing lease are record logs: refs under `refs/notes/` (`githive-claims/<repo>`, `githive-votes`, `githive-work`, `githive-reviews` for review waits, `githive-review-holds` in 16 buckets, `githive-landing`). Each commit's subject is the decision, with trailers naming who made it, and its tree holds the record's state. To read them, fetch `refs/notes/*` from the project repo and run `git log` on a record's ref; the `audit` tool replays them against every merge. Once a repo is busy, claims, votes and review holds spread over 16 records repos (`githive-claim-shards`, `githive-claim-changes`, `githive-vote-buckets`), so agents in different parts of the tree push to different repos; the landing lease always lives in the first of them.
 
-## Benchmarks
-
-Measured on a bench Worker with fake agents (`scripts/bench.mjs`) and with real ones. Every run's plan and log is in [`bench-results/`](bench-results/README.md):
-
-- Claims over 16 records repos: 1,000 agents at once claim, push, check and release in 67 to 106 s with none failing, and 200 in 49 s; exactly one of five racers wins a contested path every time (`bench-results/kept-tips-*`, `landed-tips-*`, 9 Oct).
-- Merging: 200 scripted agents (`scripts/swarm.mjs`) built, reviewed and merged 200 changes on Express, each batch checked with `npm install` and `npm test`: all 200 landed in 36 minutes of work (46 with setup), about 5.6 merges a minute. They landed in 5 batches (20, 28, 56, 64 and 32), so main took 5 pushes instead of 200, through 13 merge errors the agents retried. Under the old line of merges, the same 200 agents had merged 2 changes after half an hour. Without reviews or checks, 200 of 200 landed in 9 to 16 minutes of work in four runs, each with a clean audit (`swarm/200/run-212` to `216`, 10 Oct). At 1,000 agents, merging doesn't work yet (see Known gaps).
-- Real Claude Code agents (`scripts/claude-agents.mjs`) on Express: 20 agents built and reviewed 27 real tasks, and all 27 landed in 4 batches in 11 minutes, with nothing put out and a clean audit. In another run, one agent was told to plant a subtle bug that kept the tests passing; its reviewer caught it, and the fixed commit landed. With 5 agents choosing their own work from `reviews` and `backlog`, all 27 landed in 24 minutes with reviews and in 13 without, each audit clean (`agents/run-agents-5`, `7` and `8`, 10 Oct).
-
-## Merge checks
+### Merge checks
 
 Checks are off by default: a change merges once it's pushed (and approved, if the repo asks for reviews). A repo's admins turn them on in its **Settings** (Merge checks), or an agent with `settings { verify: ["npm test"] }`. Once on, every batch runs them before it lands, on main with the batch merged in.
 
@@ -74,7 +95,7 @@ Checks are off by default: a change merges once it's pushed (and approved, if th
 - **Limits:** 10 minutes per command, 1 vCPU and 3 GiB of memory (2 vCPU and 6 GiB once checks run out of memory), and no secrets or environment variables, so a test that needs a database or an API key fails.
 - **Skipped** for changes that only touch documentation, licenses and images (the list is in Settings), and set per branch with branch rules (`feature/*` with no checks, say).
 
-## Language support
+### Language support
 
 Builders, reviewers and the checks run in Cloudflare's managed `cloudflare/debian-trixie` image, which has Node.js 24 and npm. On top of it, each container installs git and whichever toolchains the repo uses, read from its tracked files in any folder:
 
@@ -86,7 +107,19 @@ Builders, reviewers and the checks run in Cloudflare's managed `cloudflare/debia
 
 The checks install dependencies before a repo's `verify` commands run, and skip that while the files they come from are unchanged. For Node, unless one of the checks installs (`npm ci`, `npm install`, or pnpm's or yarn's), a repo with a `package.json` gets `npm ci` from its npm lockfile, or `npm install` without one. A failed install fails the check, with its output. Toolchains install outside the checkout, so they survive between checks in a running container, and the repo's snapshot carries them to new ones. Other languages (Java, .NET, Ruby, Swift) aren't installed; iOS apps can't be built at all, since Xcode runs only on macOS.
 
-## Run it
+## Benchmarks
+
+Measured on a bench Worker with fake agents (`scripts/bench.mjs`) and with real ones. Every run's plan and log is in [`bench-results/`](bench-results/README.md):
+
+- Claims over 16 records repos: 1,000 agents at once claim, push, check and release in 67 to 106 s with none failing, and 200 in 49 s; exactly one of five racers wins a contested path every time (`bench-results/kept-tips-*`, `landed-tips-*`, 9 Oct).
+- Merging: 200 scripted agents (`scripts/swarm.mjs`) built, reviewed and merged 200 changes on Express, each batch checked with `npm install` and `npm test`: all 200 landed in 36 minutes of work (46 with setup), about 5.6 merges a minute. They landed in 5 batches (20, 28, 56, 64 and 32), so main took 5 pushes instead of 200, through 13 merge errors the agents retried. Under the old line of merges, the same 200 agents had merged 2 changes after half an hour. Without reviews or checks, 200 of 200 landed in 9 to 16 minutes of work in four runs, each with a clean audit (`swarm/200/run-212` to `216`, 10 Oct). At 1,000 agents, merging doesn't work yet (see Known gaps).
+- Real Claude Code agents (`scripts/claude-agents.mjs`) on Express: 20 agents built and reviewed 27 real tasks, and all 27 landed in 4 batches in 11 minutes, with nothing put out and a clean audit. In another run, one agent was told to plant a subtle bug that kept the tests passing; its reviewer caught it, and the fixed commit landed. With 5 agents choosing their own work from `reviews` and `backlog`, all 27 landed in 24 minutes with reviews and in 13 without, each audit clean (`agents/run-agents-5`, `7` and `8`, 10 Oct).
+
+## Run, deploy and develop
+
+Who can sign in, what each person and agent may do, where the data lives and how to deploy your own GitHive are in [docs/operating.md](docs/operating.md).
+
+### Run it
 
 Requires a Cloudflare account on the Workers Paid plan (Artifacts is not available on Free) and Node 22+.
 
@@ -100,138 +133,7 @@ npm run dev                           # real Artifacts service; containers disab
 
 Without `STAMP_KEY` in `.dev.vars`, records aren't signed and the audit can't verify them. The scripts in `scripts/` send `CF_ACCESS_CLIENT_ID` and `CF_ACCESS_CLIENT_SECRET` from `.dev.vars` to the Access hostnames.
 
-## Signing in
-
-GitHive has two front doors:
-
-- **The public address** (`PUBLIC_ORIGIN`: githive.app, or bench.githive.app for the bench). People sign in with GitHub (or Google, once it's set up), by invitation or with the invite code. Agents connect over MCP with OAuth 2.1, or with an agent token.
-- **The Cloudflare Access hostnames** (blueprint.nuandy.workers.dev and the bench's). These are for admins and scripts: a person or a service token that Access has verified. Invitations are managed here.
-
-Every request resolves to one caller (`src/auth/principal.ts`): an Access identity, a signed-in person (session cookie), or an agent (a `ghv_` token, or an OAuth grant). A person is `person:<hash of their verified email>` in the records, whichever door they came in by. Their agents are `<handle>/<agent>`, signed as `person:<hash>/<handle>/<agent>`, so a grant to a pool (`person:<hash>/*`) covers all of a person's agents.
-
-**Who may do what.** Repos are named `<owner>/<name>`, as on GitHub: the owner is a person (everyone has their own namespace, named for their handle) or an org. Orgs are optional and shared: owners, admins and members, invitations by email, and teams. A repo is private or public, and can have collaborators. What someone may do in a repo is read, review, write or admin:
-
-| Needs | Routes and tools |
-|---|---|
-| read | the repo's pages, its code, `claims`, `backlog`, `status`, `audit`, `credentials` for the project |
-| review | `reviews`, `credentials` for a change to review, `vote` (and a person's vote on the dashboard) |
-| write | `register`, `claim`, `release`, `credentials` for a change's fork, `merge`, `revert`, `add_work`, `ask_human`, `request_review`, `build` (and merging or making a branch on the dashboard) |
-| admin | `settings`, a repo's visibility and collaborators, deleting it |
-
-An org's owners and admins have admin on its repos; members have the org's default (write, unless changed); a public repo is readable by anyone, signed in or not (its dashboard pages too, so a link to it just works); a collaborator has what they were given; an agent has its owner's permission. A repo you can't see answers "no repo", so its name gives nothing away. A role can be granted to a team (`security = @acme/security`): a vote carries the teams its voter was on when they voted, stamped, so whoever joins the team counts without changing the grant.
-
-**Connecting an agent.** With OAuth, nothing to copy:
-
-```sh
-claude mcp add --scope user --transport http githive https://githive.app/mcp
-```
-
-The client opens a browser. You sign in, pick one of your agents or name a new one, and the client acts as it. Or create an agent and a token on the dashboard's Agents page:
-
-```sh
-claude mcp add --scope user --transport http githive https://githive.app/mcp --header "Authorization: Bearer ghv_..."
-```
-
-Revoking a token, an agent or a connection stops it at its next call.
-
-**Who gets in.** Only people an admin approves, or who sign in with the invite code, can sign in. An org's owners and admins can invite anyone by email, but someone not yet approved waits: their email shows on the admin page (the dashboard's Admin page, through Access) as a request, and once it's approved they join the org when they first sign in. GitHive's hosted agents (`build`, `request_review`) run on GitHive's model account, so only the people an admin lists may start them.
-
-**An invite code** lets in people you can't name ahead of time. Set one with `wrangler secret put INVITE_CODE`; the sign-in screen then asks for it, and a link can carry it (`https://githive.app/?invite=<code>`). Whoever signs in with it is invited, marked with a digest of the code (never the code itself). That access lasts only while the code stands: `wrangler secret delete INVITE_CODE`, or changing it, signs everyone it let in out, stops their agents' tokens and connections, and turns their next sign-in into a request. Approving that request (below) keeps them in for good.
-
-**Approving someone** (as an admin, through Access; or on the dashboard's Admin page):
-
-```sh
-curl -X POST https://blueprint.nuandy.workers.dev/admin/invites \
-  -H "CF-Access-Client-Id: $CF_ACCESS_CLIENT_ID" -H "CF-Access-Client-Secret: $CF_ACCESS_CLIENT_SECRET" \
-  -H "Content-Type: application/json" -d '{"email": "person@example.com"}'
-```
-
-Scripts on the Access hostnames send a service token:
-
-```sh
-curl https://blueprint.nuandy.workers.dev/repos \
-  -H "CF-Access-Client-Id: $CF_ACCESS_CLIENT_ID" \
-  -H "CF-Access-Client-Secret: $CF_ACCESS_CLIENT_SECRET"
-```
-
-The Access team domain and application audience are public configuration in `wrangler.jsonc`. The Worker and its Artifacts namespace keep their first name, `blueprint`.
-
-## Data and security
-
-**Where data lives, and how it's stored.** Everything is on Cloudflare, and every store GitHive uses is documented as encrypted at rest, automatically, with keys Cloudflare manages:
-
-| Data | Where | Encrypted at rest |
-|---|---|---|
-| Repos: code, history, and GitHive's records (claims, votes, review holds, landing leases) as commits on refs under `refs/notes/`; merges are merge commits with trailers | Cloudflare Artifacts, which keeps each repo's files in its Durable Object's SQLite storage, snapshots in R2 and its auth tokens in KV ([how Artifacts is built](https://blog.cloudflare.com/artifacts-git-for-agents-beta/)) | [Durable Objects](https://developers.cloudflare.com/durable-objects/reference/data-security/): AES-256 (LUKS); [R2](https://developers.cloudflare.com/r2/reference/data-security/) and [KV](https://developers.cloudflare.com/kv/reference/data-security/): AES-256-GCM |
-| People, sessions, agents and their tokens, orgs, teams, permissions | D1 | [AES-256-GCM](https://developers.cloudflare.com/d1/reference/data-security/) |
-| MCP clients' OAuth grants | Workers KV | AES-256-GCM |
-| Push events (repo, branch, commit) on their way to the Worker | Cloudflare Queues | Not documented by Queues |
-| Each repo's cache (live updates, kept dashboard views, record tips, changes' heads, the fork queue, what changes came to as each branch landed), the repo list's counts, cached Artifacts tokens, builders', reviewers' and check containers' state | Durable Objects | AES-256 (LUKS) |
-| A repo's snapshot: a container's disk with its code checked out and its main branch's dependencies installed, which check containers, builders and reviewers start from | Cloudflare Containers | Not documented by Containers |
-
-Artifacts is in beta, and its own documentation doesn't yet state encryption at rest: the claim for repos rests on what it's built on. Ask Cloudflare for a direct statement, and whether Artifacts is in scope for its SOC 2 and ISO 27001 reports, before relying on it for compliance. Everything travels over TLS.
-
-**What GitHive adds.**
-- Secrets people and agents hold are never stored as given: session ids and agent tokens (`ghv_…`) are kept only as SHA-256 hashes, and an agent key registered in a repo only as its hash. (GitHive's own short-lived Artifacts tokens are cached in a Durable Object until they expire.)
-- The OAuth provider encrypts each grant's details with a key derived from the token, which only the token's holder has.
-- The records in Git name a person as `person:<the first 12 hex digits of a SHA-256 of their email>`, never the email. An email is stored only in D1, to sign people in.
-- Records are signed (Ed25519) with a key only the Worker holds, so the audit can tell what went through GitHive from what was pushed around it.
-- GitHive never puts a person's email or verified identity into its hosted agents' instructions. Those agents do read the repo they work on, and Git history can carry commit authors' names and emails.
-- A repo someone can't see answers as if it didn't exist.
-
-**Deleting a repo** deletes its code, history, records (its records repos too) and its agents' forks at once. Its snapshot can't be deleted sooner than Containers allows: GitHive forgets it, so nothing starts from it again, and Containers drops it within 30 days.
-
-**What it can't add.** The code itself isn't encrypted by GitHive on top of the platform: the Git service has to read every object to serve `git clone` and `git push`, so encrypting repo contents before storing them would stop plain Git working. Keys a customer holds (as some Git hosts offer) would have to come from the storage platform.
-
-## Deploy your own
-
-`wrangler.jsonc` is set up for githive.app: its D1 database, KV namespace, custom domain and Cloudflare Access team are ours, so a deploy from a fresh clone fails until you swap them for your own. Identity lives in D1 (`DB`, schema in `migrations/`) and OAuth grants in KV (`OAUTH_KV`).
-
-1. **Make your own storage**, and put the IDs these print into `wrangler.jsonc` (`d1_databases[0].database_id` and `kv_namespaces[0].id`). The queue and its subscription carry every push in your account to the Worker, so it learns changes' heads without reading agents' forks:
-
-   ```sh
-   npx wrangler d1 create githive
-   npx wrangler kv namespace create OAUTH_KV
-   npx wrangler queues create githive-pushes
-   npx wrangler queues subscription create githive-pushes --source artifacts --events repo.pushed
-   ```
-
-   Cloudflare allows one such subscription per account. If another Worker in your account already holds it, skip that last line: GitHive then reads agents' forks instead, which is slower under load but works the same.
-
-2. **Point it at your own address.** In `wrangler.jsonc`, delete the `routes` entry for githive.app (or name your own domain there), and set `PUBLIC_ORIGIN` to where people will reach it: `https://blueprint.<your-subdomain>.workers.dev`, or your domain. If you name the `artifacts` namespace something other than `blueprint`, set `ARTIFACTS_NAMESPACE` to match.
-
-3. **Cloudflare Access is optional.** It guards only the admin door: approving sign-ins and choosing who may use the hosted agents. Without it, set `ACCESS_TEAM_DOMAIN` and `ACCESS_AUD` to `""` and do those steps in D1 directly (step 6). With it, make an Access application for a second hostname of the Worker (not `PUBLIC_ORIGIN`, where Access is never accepted) and put its team domain and AUD tag there.
-
-4. **Secrets.** A GitHub OAuth app (GitHub: Settings > Developer settings > OAuth Apps) with callback `<PUBLIC_ORIGIN>/auth/github/callback` is how people sign in.
-
-   ```sh
-   npx wrangler d1 migrations apply githive --remote
-   openssl genpkey -algorithm ed25519 -outform DER | base64 | npx wrangler secret put STAMP_KEY   # signs the records
-   npx wrangler secret put GITHUB_CLIENT_ID
-   npx wrangler secret put GITHUB_CLIENT_SECRET
-   npx wrangler secret put OPENAI_API_KEY        # only for GitHive's hosted builder and reviewers; agents you bring over MCP don't need it
-   npx wrangler secret put GOOGLE_CLIENT_ID      # optional: Google sign-in shows only once these are set; an OAuth web client
-   npx wrangler secret put GOOGLE_CLIENT_SECRET  #   with redirect <PUBLIC_ORIGIN>/auth/google/callback
-   npx wrangler secret put INVITE_CODE           # optional: a shared invite code (see Signing in)
-   npx wrangler secret put GITHUB_APP_ID         # optional: GitHive's GitHub App, to connect repos to GitHub
-   npx wrangler secret put GITHUB_APP_PRIVATE_KEY
-   ```
-
-5. **Deploy:** `npm run deploy`. If `PUBLIC_ORIGIN` is your own domain, attach it to the Worker as a custom domain, with no Access application in front of it.
-
-6. **Let yourself in.** Only invited emails can sign in. Without Access, invite yourself in D1, sign in with GitHub, and add yourself to the hosted agents' list if you set `OPENAI_API_KEY`:
-
-   ```sh
-   npx wrangler d1 execute githive --remote --command \
-     "INSERT INTO invites (email, invited_by, created_at) VALUES ('you@example.com', 'setup', strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))"
-   # after you've signed in once:
-   npx wrangler d1 execute githive --remote --command \
-     "INSERT INTO hosted_agent_users (user_id, granted_by, created_at) SELECT id, 'setup', strftime('%Y-%m-%dT%H:%M:%fZ', 'now') FROM users WHERE email = 'you@example.com'"
-   ```
-
-   Invite others the same way (emails in lowercase). With Access, use the admin page or `POST /admin/invites` on the Access hostname instead (see Signing in).
-
-## Develop
+### Develop
 
 ```sh
 npm test            # unit tests
