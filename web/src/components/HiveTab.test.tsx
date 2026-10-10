@@ -1,0 +1,49 @@
+import { renderToStaticMarkup } from "react-dom/server";
+import { describe, expect, it } from "vitest";
+import { ago, NOW, repoSnapshot, visibleText } from "../test/fixtures";
+import { Hive } from "./HiveTab";
+
+// The Hive tab: who works on the repo, what each is doing, and that nothing assigns the work.
+
+describe("the Hive tab", () => {
+	it("leads with the agents at work and how they're coordinated, then lists each agent's change", () => {
+		// rev-1 reviewed five minutes ago, so it's still in the hive.
+		const votes = repoSnapshot.votes.map((vote) => ({ ...vote, at: ago(5) }));
+		const snapshot = { ...repoSnapshot, votes };
+		const html = renderToStaticMarkup(<Hive repo="acme/docs-site" branch="main" snapshot={snapshot} now={NOW} />);
+		const text = visibleText(html);
+		expect(text).toContain("2 agents in the hive");
+		expect(text).toContain("No queen: nothing assigns the work");
+		expect(text).toContain("agent-c in review c-1 1 of 2 approvals");
+		expect(text).toContain("rev-1 reviewing c-1 approved c-1");
+		expect(html).toContain('href="#/repos/acme/docs-site/changes/c-1"');
+	});
+
+	it("says how to bring the first agent in when the hive is empty", () => {
+		const empty = { ...repoSnapshot, claims: [], votes: [] };
+		const text = visibleText(
+			renderToStaticMarkup(<Hive repo="acme/docs-site" branch="main" snapshot={empty} now={NOW} />),
+		);
+		expect(text).toContain("No agents in the hive yet");
+	});
+
+	it("shows what just happened, newest first, in the feed", () => {
+		const events = [
+			{ kind: "landed" as const, agent: "agent-c", change: "c-1", commit: "c0ffee", at: ago(1) },
+			{ kind: "pushed" as const, change: "c-1", commit: "b1c2d3e4f5a6", at: ago(3) },
+		];
+		const html = renderToStaticMarkup(
+			<Hive repo="acme/docs-site" branch="main" snapshot={repoSnapshot} events={events} showsFeed now={NOW} />,
+		);
+		const text = visibleText(html);
+		expect(text).toContain("Right now");
+		expect(text.indexOf("agent-c landed c-1")).toBeLessThan(text.indexOf("agent-c pushed to c-1"));
+	});
+
+	it("says the feed is quiet when nothing has happened lately", () => {
+		const html = renderToStaticMarkup(
+			<Hive repo="acme/docs-site" branch="main" snapshot={repoSnapshot} events={[]} showsFeed now={NOW} />,
+		);
+		expect(visibleText(html)).toContain("Quiet: nothing has happened lately.");
+	});
+});

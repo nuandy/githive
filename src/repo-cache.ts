@@ -1,5 +1,6 @@
 import { DurableObject } from "cloudflare:workers";
 import { countingRequests, describeCounts } from "./git-http";
+import { type HiveEvent, pushEvents, settledEvents, withEvents } from "./hive-events";
 import { makeAgentFork, makeSeed } from "./toolkit/env";
 import {
 	asNews,
@@ -99,10 +100,20 @@ export class RepoCache extends DurableObject<Env> {
 		return new Response(null, { status: 101, webSocket: client });
 	}
 
-	/** Tell watching pages that something changed. A write also makes the views stale. */
-	async ping(kind: string, write = true) {
+	/** Tell watching pages that something changed, and what for the hive's feed. A write makes the views stale. */
+	async ping(kind: string, write = true, events: HiveEvent[] = []) {
 		if (write) await this.ctx.storage.put("writes", (await this.writes()) + 1);
+		await this.keepEvents(events);
 		this.broadcast(kind);
+	}
+
+	/** The hive's recent events, oldest first (see hive-events.ts). */
+	async events() {
+		return (await this.ctx.storage.get<HiveEvent[]>("events")) ?? [];
+	}
+
+	private async keepEvents(events: HiveEvent[]) {
+		if (events.length) await this.ctx.storage.put("events", withEvents(await this.events(), events));
 	}
 
 	/** The latest commit seen on each change's branch. */
@@ -153,6 +164,9 @@ export class RepoCache extends DurableObject<Env> {
 	/** Note pushes from push events. Events can arrive late, twice or out of order, so the newest wins. */
 	async notePushes(pushes: ChangePush[]) {
 		await this.keepNewest(pushes.map(({ change, ...known }) => [change, known]));
+		const events = pushEvents(pushes);
+		await this.keepEvents(events);
+		if (events.length) this.broadcast("pushed");
 	}
 
 	private async keepNewest(heads: [string, KnownHead][]) {
@@ -375,6 +389,7 @@ export class RepoCache extends DurableObject<Env> {
 	async landingSettled(branch: string, outcomes: Settled[]) {
 		if (!outcomes.length) return;
 		await this.keepLanding(branch, settleOutcomes(await this.landing(branch), outcomes));
+		await this.keepEvents(settledEvents(outcomes));
 		this.broadcast("landing");
 	}
 

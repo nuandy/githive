@@ -141,6 +141,30 @@ export interface RepoLanding {
 	}[];
 }
 
+/** One thing an agent did in the hive (GET /repos/:repo/events), for the live feed. */
+export interface HiveEvent {
+	kind:
+		| "claimed"
+		| "released"
+		| "pushed"
+		| "voted"
+		| "merging"
+		| "landed"
+		| "failed"
+		| "asked"
+		| "reverted"
+		| "added"
+		| "building";
+	/** Who did it. A push names only its change. */
+	agent?: string;
+	change?: string;
+	commit?: string;
+	verdict?: "approve" | "reject";
+	/** The intent claimed, the role voted as, why a landing failed. */
+	detail?: string;
+	at: string;
+}
+
 /** A person's vote from the dashboard. */
 export interface VoteInput {
 	role: string;
@@ -368,6 +392,8 @@ export const api = {
 	/** What's landing on a branch of the repo. */
 	landing: (repo: string, branch: string) =>
 		call<RepoLanding>("GET", `/repos/${repoPath(repo)}/landing?branch=${encodeURIComponent(branch)}`),
+	/** The hive's recent events, newest first. */
+	events: (repo: string) => call<{ events: HiveEvent[] }>("GET", `/repos/${repoPath(repo)}/events`),
 	/** A person merges a change. It lands as its agent, with the branch's other ready changes, under their name. */
 	merge: (repo: string, change: string) =>
 		call<{ ok: boolean; commit?: string; reasons?: string[]; conflicts?: string[] }>(

@@ -1,4 +1,5 @@
 import { fail, requiredString } from "../errors";
+import { toolEvent } from "../hive-events";
 import { projectBranch } from "../project-branch";
 import type { Registry } from "./claims";
 import { type Args, openCall, type ToolContext, type ToolHandlers } from "./tools/context";
@@ -43,7 +44,8 @@ const noted = new Map<string, number>();
 export async function callTool(name: string, args: Args, ctx: ToolContext): Promise<unknown> {
 	const result = await withNews(name, args, ctx, await runTool(name, args, ctx));
 	const wrote = WRITES.has(name) && (result as { ok?: boolean } | null)?.ok !== false;
-	if (wrote) await ctx.ping?.(requiredString(args, "repo")).catch(() => undefined);
+	const event = wrote ? toolEvent(name, args, ctx.agent) : null;
+	if (wrote) await ctx.ping?.(requiredString(args, "repo"), event ?? undefined).catch(() => undefined);
 	if (ctx.summarize && wrote) {
 		const repo = requiredString(args, "repo");
 		const merged = name === "merge";

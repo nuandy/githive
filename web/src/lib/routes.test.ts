@@ -16,9 +16,9 @@ describe("hash routes", () => {
 		expect(parseRoute("#/new?owner=acme")).toEqual({ page: "new-repo", owner: "acme" });
 		expect(parseRoute("#/orgs")).toEqual({ page: "orgs" });
 		expect(parseRoute("#/orgs/acme")).toEqual({ page: "org", org: "acme" });
-		expect(parseRoute("#/repos/acme/web")).toEqual({ page: "repo", repo: "acme/web", tab: "changes" });
+		expect(parseRoute("#/repos/acme/web")).toEqual({ page: "repo", repo: "acme/web", tab: "hive" });
 		expect(parseRoute("#/repos/acme/web/settings")).toMatchObject({ repo: "acme/web", tab: "settings" });
-		for (const tab of ["claims", "agents", "audit"])
+		for (const tab of ["changes", "history", "claims", "agents", "audit"])
 			expect(parseRoute(`#/repos/acme/web/${tab}`)).toMatchObject({ page: "repo", tab });
 		expect(parseRoute("#/repos/acme/web/changes/add-stats")).toEqual({
 			page: "change",
@@ -47,6 +47,7 @@ describe("hash routes", () => {
 	it("builds links that parse back", () => {
 		expect(href.repo("acme/web")).toBe("#/repos/acme/web");
 		expect(href.repo("acme/web", "audit")).toBe("#/repos/acme/web/audit");
+		expect(href.repo("acme/web", "changes", "next")).toBe("#/repos/acme/web/changes?branch=next");
 		expect(href.repo("_/old-repo")).toBe("#/repos/_/old-repo");
 		expect(href.change("acme/web", "add-stats", "commits")).toBe("#/repos/acme/web/changes/add-stats/commits");
 		expect(href.newRepo()).toBe("#/new");

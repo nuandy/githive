@@ -1,7 +1,15 @@
 import { type ReactNode, useState } from "react";
 import "./RepoPage.css";
 import type { VoteApi } from "./VoteForm";
-import type { BranchHistory, ChangeHistory, RepoAccess, RepoLanding, RepoSnapshot, SettingsInput } from "../api";
+import type {
+	BranchHistory,
+	ChangeHistory,
+	HiveEvent,
+	RepoAccess,
+	RepoLanding,
+	RepoSnapshot,
+	SettingsInput,
+} from "../api";
 import { canVote, canWrite } from "../lib/permissions";
 import { BranchRules } from "./BranchRules";
 import { MergeSettings } from "./MergeSettings";
@@ -14,6 +22,7 @@ import { messageOf } from "../lib/errors";
 import { AgentsTab } from "./Agents";
 import { ClaimsTab } from "./ClaimsMap";
 import { HistoryTab } from "./History";
+import { HiveTab } from "./HiveTab";
 import { CodeTab, type CodeApi } from "./CodeBrowser";
 import { ChangePage } from "./ChangePage";
 import { AuditTab, ChangeList, SettingsTab } from "./RepoTabs";
@@ -37,6 +46,8 @@ export type RepoPageApi = CodeApi &
 	VoteApi & {
 		/** What's landing on a branch, for the overview (stand-ins may leave it out). */
 		landing?: (repo: string, branch: string) => Promise<RepoLanding>;
+		/** The hive's recent events, for the Hive tab's live feed (stand-ins may leave it out). */
+		events?: (repo: string) => Promise<{ events: HiveEvent[] }>;
 		/** The changes landed on a branch, for the History tab (stand-ins may leave it out). */
 		history?: (repo: string, branch: string) => Promise<BranchHistory>;
 		/** People who can write: make a branch, merge a change. */
@@ -207,6 +218,8 @@ function RepoTabContent({
 	switch (current) {
 		case "audit":
 			return <AuditTab snapshot={snapshot} />;
+		case "hive":
+			return <HiveTab repo={repo} branch={branch} snapshot={snapshot} api={api} />;
 		case "history":
 			return <HistoryTab repo={repo} branch={branch} api={api} />;
 		case "claims":
@@ -258,7 +271,8 @@ export function RepoPage({
 	const voting = access ? canVote(access.level) : !manage;
 	const branch = snapshot?.branch ?? access?.branch ?? "main";
 	const tabs: TabItem[] = [
-		{ id: "changes", label: "Changes", icon: "pull", href: href.repo(repo), count: snapshot?.claims.length },
+		{ id: "hive", label: "Hive", icon: "activity", href: href.repo(repo) },
+		{ id: "changes", label: "Changes", icon: "pull", href: href.repo(repo, "changes"), count: snapshot?.claims.length },
 		{ id: "history", label: "History", icon: "commit", href: href.repo(repo, "history") },
 		{ id: "claims", label: "Claims", icon: "folder", href: href.repo(repo, "claims") },
 		{ id: "code", label: "Code", icon: "file", href: href.code(repo, "") },
