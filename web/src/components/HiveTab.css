@@ -27,7 +27,8 @@
 	}
 }
 
-.hive-tab__agents h2 {
+.hive-tab__agents h2,
+.hive-tab__feed h2 {
 	font-size: 14px;
 }
 
@@ -63,6 +64,37 @@
 .hive-tab__row--revising .hive-tab__state,
 .hive-tab__row--asking .hive-tab__state {
 	color: var(--warn);
+}
+
+.hive-tab__event {
+	display: flex;
+	justify-content: space-between;
+	gap: 10px;
+	padding: 6px 16px;
+	border-top: 1px solid var(--border);
+	font-size: 13px;
+}
+
+.hive-tab__event:first-child {
+	border-top: 0;
+}
+
+.hive-tab__event--landed strong {
+	color: var(--good);
+}
+
+.hive-tab__event--failed strong,
+.hive-tab__event--asked strong {
+	color: var(--warn);
+}
+
+.hive-tab__when {
+	white-space: nowrap;
+}
+
+.hive-tab__quiet {
+	padding: 8px 16px;
+	margin: 0;
 }
 
 @media (max-width: 640px) {

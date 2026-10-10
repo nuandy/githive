@@ -122,6 +122,12 @@ function changeViewRoutes(app: Hono<AppEnv>) {
 			changeHistory({ ...toolContext(c.env, c.get("principal")), timing }, repo.id, change),
 		);
 	});
+	// The hive's recent events, newest first, for its live feed (see hive-events.ts).
+	app.get("/repos/:owner/:name/events", async (c) => {
+		const repo = await routeRepo(c, "read");
+		const events = await rpc(c.env.REPO_CACHE.getByName(`repo:${repo.id}`).events()).catch(() => []);
+		return c.json({ events: events.reverse() });
+	});
 	// What is being checked to land on a branch now, what landed recently (see toolkit/landing.ts), whether a merge
 	// holds the landing lease, and the snapshot that check containers start from.
 	app.get("/repos/:owner/:name/landing", async (c) => {

@@ -1,6 +1,7 @@
 import { requiredString, statusOf } from "../../errors";
 import type { Remote } from "../../git";
 import type { GitHubLink } from "../../github";
+import type { HiveEvent } from "../../hive-events";
 import { projectBranch } from "../../project-branch";
 import { GitCasLog } from "../../record-log";
 import { Timing } from "../../timing";
@@ -90,8 +91,8 @@ export interface ToolContext {
 	agentStatus?: (repo: string, change: string, head: string | null, roles: string[]) => Promise<HostedStatus>;
 	/** Times a request's steps, for its Server-Timing header. */
 	timing?: Timing;
-	/** Tells the dashboard's open pages that the repo's records changed. */
-	ping?: (repo: string) => Promise<void>;
+	/** Tells the dashboard's open pages that the repo's records changed, and how, for the hive's feed. */
+	ping?: (repo: string, event?: HiveEvent) => Promise<void>;
 	/** Warms the repo's check container in the background when a merge is likely soon (see Gate.warmUp). */
 	warmChecks?: (
 		repo: string,

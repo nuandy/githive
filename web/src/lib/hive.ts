@@ -1,4 +1,4 @@
-import type { RepoLanding, RepoSnapshot } from "../api";
+import type { HiveEvent, RepoLanding, RepoSnapshot } from "../api";
 
 // The hive: what each agent working on a repo is doing now, worked out from the repo's claims, votes and landing.
 // No one assigns the work; this only shows what each agent chose.
@@ -67,4 +67,54 @@ export function hiveCounts(rows: HiveActivity[]) {
 		inReview: count("in-review"),
 		landing: count("landing", "waiting"),
 	};
+}
+
+/** One line of the hive's live feed: who did what, to which change. */
+export interface FeedLine {
+	kind: HiveEvent["kind"];
+	agent: string;
+	/** What they did, before the change it was done to. */
+	action: string;
+	change?: string;
+	/** The short commit, when no change is known for it. */
+	commit?: string;
+	note?: string;
+	at: string;
+}
+
+const ACTIONS: Record<HiveEvent["kind"], string> = {
+	claimed: "claimed",
+	released: "released",
+	pushed: "pushed to",
+	voted: "voted on",
+	merging: "asked to land",
+	landed: "landed",
+	failed: "failed to land",
+	asked: "asked a person about",
+	reverted: "reverted",
+	added: "added work",
+	building: "started a hosted builder",
+};
+
+/**
+ * An event as a line of the feed. A push names only its change, so its agent is the one claiming the change; a
+ * vote names only its commit, so its change is the claim whose head that is.
+ */
+export function feedLine(event: HiveEvent, snapshot: RepoSnapshot): FeedLine {
+	const claimOf = (change: string | undefined) => snapshot.claims.find((claim) => claim.change === change);
+	const onHead = event.commit ? snapshot.claims.find((claim) => claim.head === event.commit) : undefined;
+	const change = event.change ?? onHead?.change;
+	const agent = event.agent ?? claimOf(change)?.agent ?? "an agent";
+	const line: FeedLine = { kind: event.kind, agent, action: actionOf(event), at: event.at };
+	if (change) line.change = change;
+	else if (event.commit) line.commit = event.commit.slice(0, 8);
+	const note = event.kind === "voted" && event.detail ? `as ${event.detail}` : event.detail;
+	if (note) line.note = note;
+	return line;
+}
+
+function actionOf(event: HiveEvent) {
+	if (event.verdict === "approve") return "approved";
+	if (event.verdict === "reject") return "asked for changes to";
+	return ACTIONS[event.kind];
 }

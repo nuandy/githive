@@ -1,9 +1,11 @@
-import type { RepoLanding, RepoSnapshot, RepoTree } from "../api";
+import type { HiveEvent, RepoLanding, RepoSnapshot, RepoTree } from "../api";
+import { useEffect } from "react";
 import { usePoll } from "../hooks/usePoll";
 import { type HiveActivity, type HiveState, hiveActivity, hiveCounts } from "../lib/hive";
 import { counted } from "../lib/plural";
 import { timeAgo } from "../lib/relativeTime";
 import { href } from "../lib/routes";
+import { HiveFeed } from "./HiveFeed";
 import { HiveMap } from "./HiveMap";
 import { LandingTrack } from "./LandingTrack";
 import "./HiveTab.css";
@@ -11,6 +13,7 @@ import "./HiveTab.css";
 export interface HiveApi {
 	tree(repo: string, ref?: string): Promise<RepoTree>;
 	landing?: (repo: string, branch: string) => Promise<RepoLanding>;
+	events?: (repo: string) => Promise<{ events: HiveEvent[] }>;
 }
 
 /** The Hive tab: the agents working on the repo's branch, what each is doing, and what's landing. */
@@ -28,6 +31,11 @@ export function HiveTab({
 	const load = api.landing;
 	const landing = usePoll(load ? `landing:${repo}:${branch}` : null, () => load!(repo, branch), 5_000);
 	const tree = usePoll(`tree:${repo}:${branch}`, () => api.tree(repo), 60_000);
+	const loadEvents = api.events;
+	const events = usePoll(loadEvents ? `events:${repo}` : null, () => loadEvents!(repo), 10_000);
+	// The snapshot is read again on each ping from the live feed, so the events follow it.
+	const refreshEvents = events.refresh;
+	useEffect(() => refreshEvents(), [snapshot.claims, refreshEvents]);
 	// Only the claims landing on this branch: each change lands on one branch.
 	const onBranch = { ...snapshot, claims: snapshot.claims.filter((claim) => (claim.into ?? branch) === branch) };
 	return (
@@ -39,7 +47,10 @@ export function HiveTab({
 			{...(landing.error ? { landingError: String(landing.error) } : {})}
 			{...(tree.data ? { tree: tree.data } : {})}
 			{...(tree.error ? { treeError: String(tree.error) } : {})}
+			{...(events.data ? { events: events.data.events } : {})}
+			{...(events.error ? { eventsError: String(events.error) } : {})}
 			showsLanding={!!load}
+			showsFeed={!!loadEvents}
 		/>
 	);
 }
@@ -53,6 +64,9 @@ export interface HiveProps {
 	tree?: RepoTree;
 	treeError?: string;
 	showsLanding?: boolean;
+	events?: HiveEvent[];
+	eventsError?: string;
+	showsFeed?: boolean;
 	/** The time "ago" counts from (tests fix it). */
 	now?: number;
 }
@@ -84,7 +98,18 @@ export function Hive(props: HiveProps) {
 					/>
 				) : null}
 			</div>
-			<AgentsAtWork repo={repo} rows={rows} now={now} />
+			<div className="hive-tab__grid">
+				<AgentsAtWork repo={repo} rows={rows} now={now} />
+				{props.showsFeed ? (
+					<HiveFeed
+						repo={repo}
+						snapshot={snapshot}
+						{...(props.events ? { events: props.events } : {})}
+						{...(props.eventsError ? { error: props.eventsError } : {})}
+						now={now}
+					/>
+				) : null}
+			</div>
 		</div>
 	);
 }

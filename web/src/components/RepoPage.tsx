@@ -1,7 +1,15 @@
 import { type ReactNode, useState } from "react";
 import "./RepoPage.css";
 import type { VoteApi } from "./VoteForm";
-import type { BranchHistory, ChangeHistory, RepoAccess, RepoLanding, RepoSnapshot, SettingsInput } from "../api";
+import type {
+	BranchHistory,
+	ChangeHistory,
+	HiveEvent,
+	RepoAccess,
+	RepoLanding,
+	RepoSnapshot,
+	SettingsInput,
+} from "../api";
 import { canVote, canWrite } from "../lib/permissions";
 import { BranchRules } from "./BranchRules";
 import { MergeSettings } from "./MergeSettings";
@@ -38,6 +46,8 @@ export type RepoPageApi = CodeApi &
 	VoteApi & {
 		/** What's landing on a branch, for the overview (stand-ins may leave it out). */
 		landing?: (repo: string, branch: string) => Promise<RepoLanding>;
+		/** The hive's recent events, for the Hive tab's live feed (stand-ins may leave it out). */
+		events?: (repo: string) => Promise<{ events: HiveEvent[] }>;
 		/** The changes landed on a branch, for the History tab (stand-ins may leave it out). */
 		history?: (repo: string, branch: string) => Promise<BranchHistory>;
 		/** People who can write: make a branch, merge a change. */

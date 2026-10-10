@@ -26,4 +26,24 @@ describe("the Hive tab", () => {
 		);
 		expect(text).toContain("No agents in the hive yet");
 	});
+
+	it("shows what just happened, newest first, in the feed", () => {
+		const events = [
+			{ kind: "landed" as const, agent: "agent-c", change: "c-1", commit: "c0ffee", at: ago(1) },
+			{ kind: "pushed" as const, change: "c-1", commit: "b1c2d3e4f5a6", at: ago(3) },
+		];
+		const html = renderToStaticMarkup(
+			<Hive repo="acme/docs-site" branch="main" snapshot={repoSnapshot} events={events} showsFeed now={NOW} />,
+		);
+		const text = visibleText(html);
+		expect(text).toContain("Right now");
+		expect(text.indexOf("agent-c landed c-1")).toBeLessThan(text.indexOf("agent-c pushed to c-1"));
+	});
+
+	it("says the feed is quiet when nothing has happened lately", () => {
+		const html = renderToStaticMarkup(
+			<Hive repo="acme/docs-site" branch="main" snapshot={repoSnapshot} events={[]} showsFeed now={NOW} />,
+		);
+		expect(visibleText(html)).toContain("Quiet: nothing has happened lately.");
+	});
 });
