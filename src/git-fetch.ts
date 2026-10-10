@@ -68,7 +68,7 @@ function uploadPackRequest(oids: string[], history: boolean, depth: number) {
 }
 
 /** The pack in an upload-pack response, throwing the server's error if it sent one. */
-export function packFrom(bytes: Uint8Array) {
+function packFrom(bytes: Uint8Array) {
 	// Shallow lines and NAK come first, then the pack in side-band packets (1 data, 2 progress, 3 error).
 	const pack: Uint8Array[] = [];
 	let inPack = false;

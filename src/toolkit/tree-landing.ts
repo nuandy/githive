@@ -1,7 +1,7 @@
 import git from "isomorphic-git";
 import { BOT, branchHead, type Remote } from "../git";
 import { repoOfUrl } from "../git-http";
-import { fetchPackSince, receivePack, type RefUpdate } from "../git-pack";
+import { Chunks, fetchPackSince, receivePack, type RefUpdate } from "../git-pack";
 import { MemoryFS } from "../memory-fs";
 import { jitteredDelay, sleep } from "../retry";
 import { placeBatch, type Placed, type ReadHistory } from "./batch-reads";
@@ -19,8 +19,11 @@ import { makeStamper, type Stamper } from "./stamp";
 
 const DIR = "/landing";
 
-/** A batch whose changes add more than this lands in the Gate, which streams it, rather than the Worker's memory. */
-const PACKS_MOST = 32 * 1024 * 1024;
+/**
+ * A batch whose changes add more than this lands in the Gate, which streams it, rather than in the Worker. A landing
+ * holds about one copy of what its changes add, and landings for other repos may share the isolate's 128 MB.
+ */
+const PACKS_MOST = 16 * 1024 * 1024;
 
 const FETCHES_AT_ONCE = 4;
 const PUSH_ATTEMPTS = 6;
@@ -49,13 +52,13 @@ export function treeLanding(input: TreeLandingInput): BatchGit["land"] {
 		}
 		const fs = new MemoryFS();
 		await git.init({ fs, dir: DIR });
-		const fetched = await fetchChanges(fs, batch.merges, plan.placed);
+		const fetched = await fetchChanges(batch.merges, plan.placed);
 		if ("gate" in fetched) {
 			console.log(`landing ${batch.merges.length} in the Gate: ${fetched.gate}`);
 			return input.fallback(batch);
 		}
 		const built = await buildMerges(fs, input, batch, plan, await stamperFor(input, batch));
-		return pushMerges(await input.remote("write"), batch, built, fetched.oids);
+		return pushMerges(await input.remote("write"), batch, built, fetched.packs);
 	};
 }
 
@@ -91,28 +94,24 @@ async function stamperFor(input: TreeLandingInput, batch: LandInput): Promise<St
 }
 
 /**
- * Fetches the objects each change adds beyond its merge base from its fork into `fs`, to push with the merges.
- * A change on a branch of the project repo already has them there.
+ * The packs of objects the changes add beyond their merge bases, one fetch per fork, kept as the server sent them
+ * to join into the landing's push. A change on a branch of the project repo already has its objects there.
  */
-async function fetchChanges(
-	fs: MemoryFS,
-	merges: Merge[],
-	placed: Placed[],
-): Promise<{ gate: string } | { oids: string[] }> {
-	const packs = await atMost(FETCHES_AT_ONCE, merges, async (merge, index) => {
-		if (!merge.source) return null;
-		return fetchPackSince(merge.source, merge.head, [placed[index]!.base.hash]);
-	});
-	const size = packs.reduce((total, pack) => total + (pack?.length ?? 0), 0);
-	if (size > PACKS_MOST) return { gate: `the changes add ${Math.round(size / 1e6)} MB` };
-	const oids: string[] = [];
-	for (const [index, pack] of packs.entries()) {
-		if (!pack) continue;
-		const filepath = `.git/objects/pack/pack-change-${index}.pack`;
-		await fs.promises.writeFile(`${DIR}/${filepath}`, pack);
-		oids.push(...(await git.indexPack({ fs, dir: DIR, filepath })).oids);
+async function fetchChanges(merges: Merge[], placed: Placed[]): Promise<{ gate: string } | { packs: Chunks[] }> {
+	const byFork = new Map<string, { source: Remote; wants: Set<string>; haves: Set<string> }>();
+	for (const [index, merge] of merges.entries()) {
+		if (!merge.source) continue;
+		const fork = byFork.get(merge.source.url) ?? { source: merge.source, wants: new Set(), haves: new Set() };
+		fork.wants.add(merge.head);
+		fork.haves.add(placed[index]!.base.hash);
+		byFork.set(merge.source.url, fork);
 	}
-	return { oids };
+	const budget = { bytes: PACKS_MOST };
+	const packs = await atMost(FETCHES_AT_ONCE, [...byFork.values()], (fork) =>
+		fetchPackSince(fork.source, [...fork.wants], [...fork.haves], budget),
+	);
+	if (packs.includes("too big")) return { gate: `the changes add over ${PACKS_MOST / 1e6} MB` };
+	return { packs: packs as Chunks[] };
 }
 
 type Built = { fs: MemoryFS; objects: string[]; commits: string[]; tip: string };
@@ -218,15 +217,14 @@ async function pushMerges(
 	write: Remote,
 	batch: LandInput,
 	built: Built,
-	changeObjects: string[],
+	changePacks: Chunks[],
 ): Promise<{ commits: string[] } | "moved"> {
-	const oids = [...new Set([...changeObjects, ...built.objects])];
-	const { packfile } = await git.packObjects({ fs: built.fs, dir: DIR, oids });
+	const { packfile } = await git.packObjects({ fs: built.fs, dir: DIR, oids: built.objects });
 	const branchRef = `refs/heads/${batch.branch}`;
 	const update = { ref: branchRef, from: batch.base, to: built.tip };
 	let report;
 	try {
-		report = await pushWithRetries(write, [update], packfile);
+		report = await pushWithRetries(write, [update], [...changePacks, new Chunks([packfile!])]);
 	} catch (err) {
 		// A server error may come after the push applied: the branch then tells.
 		const now = await branchHead(write, batch.branch).catch(() => null);
@@ -244,9 +242,9 @@ async function pushMerges(
 }
 
 /** A receive-pack request sent again while the repo answers that it's busy, which applies nothing. */
-async function pushWithRetries(write: Remote, updates: RefUpdate[], pack: Uint8Array | undefined) {
+async function pushWithRetries(write: Remote, updates: RefUpdate[], packs: Chunks[]) {
 	for (let attempt = 1; ; attempt++) {
-		const report = await receivePack(write, updates, pack);
+		const report = await receivePack(write, updates, packs);
 		if (!("busy" in report) || attempt === PUSH_ATTEMPTS) return report;
 		await sleep(jitteredDelay(attempt, 100, 2_000));
 	}

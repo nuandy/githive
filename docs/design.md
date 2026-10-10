@@ -1295,6 +1295,14 @@ comments give the reason; the evidence is here.
   200-agent run those held the Worker request's 6 connections, and the runtime
   cancelled responses to break the stall 2,585 times. Credentials now go with
   the first request.
+- A batch landed with trees in the Worker first held 5 to 9 times what its
+  changes add: each fork's pack copied out of side-band packets, unpacked and
+  packed again, then copied into the push and again to checksum it (a batch
+  adding 20 MB peaked at 120 MB of live memory). Joining the packs byte for
+  byte, without side-band, and streaming the push with an incremental SHA-1
+  brought it to about one copy (that batch peaked at 26 MB; the push itself
+  adds 0.2 MB). The limit of 16 MB per batch leaves room for other landings
+  in the same isolate.
 - Without isomorphic-git's read cache, reading 200 merges took 22 s, and
   concurrent reads each held their own copy of the packfile.
 - In a 200-agent run, 12 checks and merges were cancelled as hung, and
