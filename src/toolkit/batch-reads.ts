@@ -1,6 +1,7 @@
 import { repoOfUrl } from "../git-http";
 import { type CommitMeta, filesBetween, type HistorySource } from "./branch-history";
 import { atMost, type BatchGit, type Inspected } from "./merge";
+import { cachingHistory } from "./tree-reads";
 
 // Reads a batch's changes through the Artifacts API in the Worker instead of fetching them in the repo's Gate:
 // each change's head, and the files it changed since leaving the branch, from comparing two trees. This is much
@@ -26,10 +27,13 @@ export function artifactsInspect(
 		const chain = await branchChain(history, project, branch, base);
 		if (!chain) return fallback({ base, branch, changes });
 		const onBranch = positions(chain);
+		// The batch's changes share most of their trees, so each is read once for all of them.
+		const reads = cachingHistory(history);
+		const where = `${project}|${branch}`;
 		const inspected = await atMost(READS_AT_ONCE, changes, async (entry): Promise<Inspected | null> => {
 			try {
-				return await history(entry.source ? repoOfUrl(entry.source.url) : project, (source) =>
-					readChange(source, entry.change, entry.ref, chain, onBranch),
+				return await reads(entry.source ? repoOfUrl(entry.source.url) : project, (source) =>
+					readChange(source, where, entry.change, entry.ref, chain, onBranch),
 				);
 			} catch (err) {
 				return { change: entry.change, error: String(err) };
@@ -55,8 +59,30 @@ const NEWER_PAGE = 64;
 const chains = new Map<string, Promise<CommitMeta[] | null>>();
 const CHAINS_KEPT = 16;
 
-/** Clears the cached chains, for tests whose repos share names. */
-export const forgetChains = () => chains.clear();
+/** Clears the cached chains and placements, for tests whose repos share names. */
+export const forgetChains = () => {
+	chains.clear();
+	placements.clear();
+};
+
+// Each change head's place on a branch, as last worked out, for the isolate. A head's merge base with the branch, and
+// the files it changed since, stay the same as the branch moves on, so gathering a batch, landing it and fetching a
+// change ahead share one reading of each change.
+const placements = new Map<string, Placed>();
+const PLACEMENTS_KEPT = 2_000;
+
+const placementKey = (where: string, head: string) => `${where}|${head}`;
+
+/** A head's place as last worked out, if its merge base is still on this chain of the branch. */
+function placedBefore(where: string, head: string, onBranch: Map<string, number>) {
+	const kept = placements.get(placementKey(where, head));
+	return kept && onBranch.has(kept.base.hash) ? kept : undefined;
+}
+
+function remember(where: string, placed: Placed) {
+	placements.set(placementKey(where, placed.head.hash), placed);
+	while (placements.size > PLACEMENTS_KEPT) placements.delete(placements.keys().next().value!);
+}
 
 // The branch's first-parent chain from `head`, newest first, or null if `head` is outside the window. When the
 // branch has moved past the cached chain, only the new commits are read.
@@ -98,12 +124,13 @@ async function branchChain(
 
 async function readChange(
 	source: HistorySource,
+	where: string,
 	change: string,
 	ref: string,
 	chain: CommitMeta[],
 	onBranch: Map<string, number>,
 ): Promise<Inspected | null> {
-	const placed = await placeChange(source, ref, chain, onBranch);
+	const placed = await placeChange(source, where, ref, chain, onBranch);
 	if (!placed) return null;
 	if ("error" in placed) return { change, error: placed.error };
 	return { change, head: placed.head.hash, files: placed.files };
@@ -114,13 +141,16 @@ async function readChange(
 // merge the branch in rather than rebase.
 async function placeChange(
 	source: HistorySource,
+	where: string,
 	ref: string,
 	chain: CommitMeta[],
 	onBranch: Map<string, number>,
-): Promise<{ head: CommitMeta; base: CommitMeta; files: string[] } | { error: string } | null> {
+): Promise<Placed | { error: string } | null> {
 	const own = await source.log(ref, CHANGE_WINDOW, 0);
 	const head = own[0];
 	if (!head) return { error: "its branch couldn't be read" };
+	const known = placedBefore(where, head.hash, onBranch);
+	if (known) return known;
 	let newest: number | undefined;
 	const reached = (index: number) => {
 		newest = newest === undefined ? index : Math.min(newest, index);
@@ -142,7 +172,9 @@ async function placeChange(
 	}
 	const base = newest === undefined ? undefined : chain[newest];
 	if (!left || !base) return null;
-	return { head, base, files: await filesBetween(source, base.treeHash, head.treeHash) };
+	const placed = { head, base, files: await filesBetween(source, base.treeHash, head.treeHash) };
+	remember(where, placed);
+	return placed;
 }
 
 /**
@@ -161,7 +193,7 @@ export async function changeAgainst(
 	if (!chain) return null;
 	const onBranch = positions(chain);
 	const placed = await history(change.source ? repoOfUrl(change.source.url) : project, (source) =>
-		placeChange(source, change.ref, chain, onBranch),
+		placeChange(source, `${project}|${branch}`, change.ref, chain, onBranch),
 	);
 	if (!placed || "error" in placed) return placed;
 	// What the branch changed since the change left it, or nothing if it hasn't moved.
@@ -190,17 +222,21 @@ export async function placeBatch(
 	project: string,
 	branch: string,
 	base: string,
-	changes: { ref: string; source?: { url: string } }[],
+	changes: { ref: string; head?: string; source?: { url: string } }[],
 ): Promise<{ tip: CommitMeta; placed: Placed[] } | null> {
 	const chain = await branchChain(history, project, branch, base);
 	const tip = chain?.[0];
 	if (!chain || !tip) return null;
 	const onBranch = positions(chain);
-	const placed = await atMost(READS_AT_ONCE, changes, (change) =>
-		history(change.source ? repoOfUrl(change.source.url) : project, (source) =>
-			placeChange(source, change.ref, chain, onBranch),
-		).catch(() => null),
-	);
+	const where = `${project}|${branch}`;
+	const placed = await atMost(READS_AT_ONCE, changes, async (change) => {
+		// Gathering the batch, or fetching the change ahead, placed this head already.
+		const known = change.head ? placedBefore(where, change.head, onBranch) : undefined;
+		if (known) return known;
+		return history(change.source ? repoOfUrl(change.source.url) : project, (source) =>
+			placeChange(source, where, change.ref, chain, onBranch),
+		).catch(() => null);
+	});
 	if (placed.some((each) => !each || "error" in each)) return null;
 	return { tip, placed: placed as Placed[] };
 }

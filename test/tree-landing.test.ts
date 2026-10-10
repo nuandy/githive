@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { forgetChains, type ReadHistory } from "../src/toolkit/batch-reads";
+import { artifactsInspect, forgetChains, type ReadHistory } from "../src/toolkit/batch-reads";
 import { type ChangePacks, prefetchChange, treeLanding } from "../src/toolkit/tree-landing";
 import { agentClone, pushChange } from "./helpers/agents";
 import { gitHistory } from "./helpers/git-history";
@@ -279,6 +279,48 @@ describe("landing a batch with trees, in the Worker", { timeout: 60_000 }, () =>
 
 		expect(fallback).not.toHaveBeenCalled();
 		expect(Math.max(...reads.values())).toBe(1);
+	});
+
+	it("places a batch it gathered without reading the changes' forks again", async () => {
+		const made = [];
+		for (const name of ["g1", "g2", "g3"])
+			made.push(await forkChange(name, async (clone) => clone.write(`notes/${name}/x.js`, `${name}\n`)));
+		const base = server.git("rev-parse", "main").trim();
+		const forkLogs: string[] = [];
+		const counted: ReadHistory = (repo, read) =>
+			history(repo, (source) =>
+				read({
+					log: (...args) => {
+						if (repo !== "project") forkLogs.push(repo);
+						return source.log(...args);
+					},
+					readCommit: (hash) => source.readCommit(hash),
+					readTree: (hash) => source.readTree(hash),
+				}),
+			);
+		const gateInspect = vi.fn(async () => []);
+		const inspected = await artifactsInspect(
+			counted,
+			"project",
+			gateInspect,
+		)({
+			base,
+			branch: "main",
+			changes: made.map(({ head: _head, ...rest }) => ({ ...rest, ref: `changes/${rest.change}`, agent: "a" })),
+		});
+		expect(inspected.map((each) => ("head" in each ? each.head : each.error))).toEqual(made.map((each) => each.head));
+		const gathered = forkLogs.length;
+		const fallback = vi.fn(async () => ({ commits: [] }));
+
+		await treeLanding({ history: counted, project: "project", remote: async () => project(), fallback })({
+			base,
+			branch: "main",
+			merges: made.map(merge),
+		});
+
+		expect(fallback).not.toHaveBeenCalled();
+		expect(gathered).toBe(3);
+		expect(forkLogs.length).toBe(gathered);
 	});
 
 	it("answers moved when main moved past the base, and lands nothing", async () => {
