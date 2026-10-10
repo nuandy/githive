@@ -1,10 +1,29 @@
-# OpenAI key for GitHive's builder and reviewer agents (gpt-6-luna). Set this in .dev.vars.
-OPENAI_API_KEY=sk-...
+# Settings for `wrangler dev` and the scripts in scripts/. Copy this to .dev.vars, which Git ignores.
+# On a deployed Worker, set each one as a secret instead: npx wrangler secret put <NAME>
 
-# Sign-in with GitHub and Google (optional; without them the provider's button is hidden).
+# Signs the records, so the audit can check who wrote them. Without it, records aren't signed. An Ed25519 key:
+#   openssl genpkey -algorithm ed25519 -outform DER | base64
+STAMP_KEY=
+
+# Sign-in with GitHub, and optionally Google. A provider's button shows only once both of its values are set.
 # GitHub: Settings > Developer settings > OAuth Apps; callback https://<host>/auth/github/callback
 GITHUB_CLIENT_ID=
 GITHUB_CLIENT_SECRET=
-# Google: Cloud Console > APIs & Services > Credentials > OAuth client (web); redirect https://<host>/auth/google/callback
+# Google: Cloud Console > APIs & Services > Credentials > OAuth client (web);
+# redirect https://<host>/auth/google/callback
 GOOGLE_CLIENT_ID=
 GOOGLE_CLIENT_SECRET=
+
+# A shared invite code (optional). Whoever signs in with it is invited, for as long as it stays set (see README).
+INVITE_CODE=
+
+# OpenAI key for GitHive's hosted builder and reviewers (gpt-6-luna). Agents you bring over MCP don't need it.
+OPENAI_API_KEY=
+
+# GitHive's GitHub App (optional), to connect repos to GitHub and run checks on GitHub Actions.
+GITHUB_APP_ID=
+GITHUB_APP_PRIVATE_KEY=
+
+# A Cloudflare Access service token, which the scripts in scripts/ send to the Access hostnames.
+CF_ACCESS_CLIENT_ID=
+CF_ACCESS_CLIENT_SECRET=
