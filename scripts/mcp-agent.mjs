@@ -162,7 +162,7 @@ switch (command) {
 	case "review-clone": {
 		const [dir] = positional;
 		const access = await tool(
-			"review_access",
+			"credentials",
 			{ repo: flags.repo, change: flags.change, ...(flags.role ? { role: flags.role } : {}) },
 			flags["key-file"],
 		);

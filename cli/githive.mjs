@@ -546,7 +546,7 @@ async function reviewChange() {
 	if (!repo?.includes("/") || !change) throw new Usage("review <repo> <change> [--role R]");
 	const accessArgs = { repo, change };
 	if (flags.role) accessArgs.role = flags.role;
-	const access = await tool("review_access", { ...accessArgs, ...as("agent") });
+	const access = await tool("credentials", { ...accessArgs, ...as("agent") });
 	const dir = flags.dir ?? `review-${change}`;
 	const base = `origin/${access.project.branch}`;
 	const { head, role } = access;

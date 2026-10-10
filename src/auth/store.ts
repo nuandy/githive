@@ -49,6 +49,14 @@ const TOUCH_MS = 5 * 60_000;
 const AGENT_NAME = /^[a-z0-9][a-z0-9-]{0,31}$/;
 const HANDLE = /^[a-z0-9][a-z0-9-]{0,38}$/;
 
+/** Someone waiting for an admin to let them in: invited by orgs, or turned away when they tried to sign in. */
+export interface InviteRequest {
+	email: string;
+	orgs: { org: string; role: string; invitedBy: string }[];
+	createdAt: string;
+	signIn?: { provider: string; name: string | null; login: string | null; tries: number; lastAt: string };
+}
+
 export const normalizeEmail = (email: string) => email.trim().toLowerCase();
 
 export async function sha256Hex(text: string) {
@@ -133,29 +141,51 @@ export class IdentityStore {
 		}));
 	}
 
-	/** Emails that orgs have invited but an admin hasn't yet approved for sign-in, each with the inviting orgs. */
+	/** People waiting for an admin to let them in: those orgs invited, and those who tried to sign in uninvited. */
 	async inviteRequests() {
 		const { results } = await this.db
 			.prepare(
 				"SELECT oi.email, o.slug, oi.role, oi.invited_by, oi.created_at FROM org_invites oi JOIN orgs o ON o.id = oi.org_id WHERE oi.email NOT IN (SELECT email FROM invites) AND oi.email NOT IN (SELECT email FROM users) ORDER BY oi.created_at",
 			)
 			.all<Row>();
-		const byEmail = new Map<
-			string,
-			{ email: string; orgs: { org: string; role: string; invitedBy: string }[]; createdAt: string }
-		>();
+		const byEmail = new Map<string, InviteRequest>();
 		for (const r of results) {
 			const email = String(r.email);
 			const entry = byEmail.get(email) ?? { email, orgs: [], createdAt: String(r.created_at) };
 			entry.orgs.push({ org: String(r.slug), role: String(r.role), invitedBy: String(r.invited_by) });
 			byEmail.set(email, entry);
 		}
-		return [...byEmail.values()];
+		for (const { email, firstAt, ...signIn } of await this.signInRequests()) {
+			const entry = byEmail.get(email) ?? { email, orgs: [], createdAt: firstAt };
+			byEmail.set(email, { ...entry, signIn });
+		}
+		return [...byEmail.values()].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
 	}
 
-	/** Declines a request by deleting every org invitation for that email. */
+	/** Those who tried to sign in uninvited, and haven't been let in since. */
+	private async signInRequests() {
+		const waiting =
+			"SELECT email, provider, name, login, first_at, last_at, tries FROM sign_in_requests " +
+			"WHERE email NOT IN (SELECT email FROM invites) AND email NOT IN (SELECT email FROM users) ORDER BY first_at";
+		const { results } = await this.db.prepare(waiting).all<Row>();
+		return results.map((row) => ({
+			email: String(row.email),
+			firstAt: String(row.first_at),
+			provider: String(row.provider),
+			name: row.name === null ? null : String(row.name),
+			login: row.login === null ? null : String(row.login),
+			lastAt: String(row.last_at),
+			tries: Number(row.tries),
+		}));
+	}
+
+	/** Declines a request: every org invitation for that email goes, and its sign-in request. */
 	async declineRequest(email: string) {
-		await this.db.prepare("DELETE FROM org_invites WHERE email = ?").bind(normalizeEmail(email)).run();
+		const address = normalizeEmail(email);
+		await this.db.batch([
+			this.db.prepare("DELETE FROM org_invites WHERE email = ?").bind(address),
+			this.db.prepare("DELETE FROM sign_in_requests WHERE email = ?").bind(address),
+		]);
 	}
 
 	/** Whether an admin has approved this email to sign in. */
@@ -223,9 +253,11 @@ export class IdentityStore {
 			await this.link(String(byEmail.id), profile);
 			return { user: toUser(byEmail) };
 		}
-		// Only an admin's approval lets someone in; an org's invitation waits for it.
-		if (!(await this.db.prepare("SELECT 1 FROM invites WHERE email = ?").bind(email).first()))
+		// Only an admin's approval lets someone in; an org's invitation waits for it. Turned away, they're a request.
+		if (!(await this.db.prepare("SELECT 1 FROM invites WHERE email = ?").bind(email).first())) {
+			await this.noteSignInRequest(email, profile);
 			return { refused: "not-invited" };
+		}
 		const user: User = {
 			id: crypto.randomUUID(),
 			handle: await this.freeHandle(profile),
@@ -243,6 +275,19 @@ export class IdentityStore {
 				.bind(profile.provider, profile.providerId, user.id, user.createdAt),
 		]);
 		return { user };
+	}
+
+	/** Someone turned away at sign-in, for an admin to let in or turn down; trying again counts. */
+	private async noteSignInRequest(email: string, profile: ProviderProfile) {
+		const now = this.iso();
+		const upsert =
+			"INSERT INTO sign_in_requests (email, provider, name, login, first_at, last_at) VALUES (?, ?, ?, ?, ?, ?) " +
+			"ON CONFLICT (email) DO UPDATE SET last_at = excluded.last_at, tries = tries + 1";
+		const values = [email, profile.provider, profile.name ?? null, profile.login ?? null, now, now];
+		await this.db
+			.prepare(upsert)
+			.bind(...values)
+			.run();
 	}
 
 	private async link(userId: string, profile: ProviderProfile) {

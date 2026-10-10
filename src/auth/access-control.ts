@@ -5,7 +5,10 @@ import type { Principal } from "./principal";
 // admin may do anything and may name a repo as _/<id>, which covers older repos that aren't in an org. A repo the
 // caller can't see answers 404, so its name gives nothing away.
 
-/** What each MCP tool needs. credentials needs write for a change's fork and read for the project alone. */
+/**
+ * What each MCP tool needs. credentials needs review for a change (it writes only to the caller's own fork)
+ * and read for the project alone.
+ */
 export const TOOL_LEVEL: Record<string, Level> = {
 	claims: "read",
 	backlog: "read",
@@ -14,7 +17,6 @@ export const TOOL_LEVEL: Record<string, Level> = {
 	check: "read",
 	credentials: "read",
 	reviews: "review",
-	review_access: "review",
 	vote: "review",
 	claim: "write",
 	release: "write",
@@ -29,7 +31,7 @@ export const TOOL_LEVEL: Record<string, Level> = {
 };
 
 export function toolLevel(tool: string, args: Record<string, unknown>): Level {
-	if (tool === "credentials" && typeof args.change === "string" && args.change) return "write";
+	if (tool === "credentials" && typeof args.change === "string" && args.change) return "review";
 	return TOOL_LEVEL[tool] ?? "admin";
 }
 

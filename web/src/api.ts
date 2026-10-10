@@ -493,6 +493,8 @@ export interface InviteRequest {
 	email: string;
 	orgs: { org: string; role: string; invitedBy: string }[];
 	createdAt: string;
+	/** Present when they tried to sign in uninvited. */
+	signIn?: { provider: string; name: string | null; login: string | null; tries: number; lastAt: string };
 }
 
 /** Someone allowed to start GitHive's hosted agents. */

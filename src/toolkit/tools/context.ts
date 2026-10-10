@@ -120,7 +120,7 @@ export interface ToolContext {
 	branchHead?: (repo: string, branch: string) => Promise<string | null>;
 	/** Queues forks to be made in the background: the repo's seeds, or the named agents' own. */
 	prepareForks?: (repo: string, items: "seeds" | string[]) => Promise<void>;
-	/** Review holds set by review_access, so the reviews tool shows which reviews are taken (see review-holds.ts). */
+	/** Review holds set by credentials for a change under review, so the reviews tool shows which are taken (see review-holds.ts). */
 	reviews?: {
 		held(repo: string): Promise<Record<string, string[]>>;
 		hold(repo: string, head: string, agent: string, needed: number): Promise<boolean>;

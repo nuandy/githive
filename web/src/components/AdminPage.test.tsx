@@ -17,6 +17,18 @@ const actions: AdminActions = {
 };
 
 describe("the Admin page", () => {
+	it("lists who tried to sign in uninvited, with how and how often", () => {
+		const signIn = { provider: "github", name: "Eve", login: "eve", tries: 3, lastAt: ago(5) };
+		const requests = [{ email: "eve@example.com", orgs: [], createdAt: ago(90), signIn }];
+		const html = renderToStaticMarkup(
+			<AdminView requests={requests} invites={[]} hosted={[]} actions={actions} now={NOW} />,
+		);
+		const text = visibleText(html);
+		expect(text).toContain("eve@example.com");
+		expect(text).toContain("tried to sign in with GitHub as eve, 3 times");
+		expect(text).toContain("Approve");
+	});
+
 	it("lists orgs' requests with who asked, the approved emails, and who may start hosted agents", () => {
 		const html = renderToStaticMarkup(
 			<AdminView

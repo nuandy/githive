@@ -10,7 +10,7 @@ Conventions:
 1. \`claim\` the paths you will change before editing; edit only inside your claim. A refusal names who holds what: narrow your claim, or ask them. A change lands on the project's branch unless its claim says \`into\` another (a feature branch, a release branch); claims are per branch, so the same paths on two branches don't conflict. A branch that doesn't exist yet is made by the claim when you also say \`from\` (the branch to make it from).
 Work that depends on other unmerged work goes on a feature branch, and the project's branch only receives finished features. Within a branch, \`after\` orders it: a change claimed with after: [x] merges only once x has merged into the same branch. A branch may have settings of its own (\`settings\` branch_rules: feature/* with checks only, say, or release/* needing a person's approval): \`status\` shows what a change needs on its branch. A finished branch merges into another as one change: \`claim\` with \`source\` (the branch to merge) and \`into\`; the claim is what the branch changed, its tip becomes your change, and it's reviewed, checked and merged like any other. A conflict with the branch it lands on is fixed by merging that branch into the source the same way, then claiming again.
 2. Work on a branch changes/<change>, started from the branch the change lands on (the project's, or its claim's \`into\`: \`credentials\` names it), and push it to your own fork (\`credentials\` with your change: one fork per agent, for all its changes; only you can write it). The project's branch (\`start\` names it: main, master, ...) is written only through the toolkit.
-3. Reviewers get the change's code with \`review_access\` (read-only: its branch in the author's fork, and the project to diff against), then \`vote\` on the exact commit they reviewed. A change merges with the policy's approvals, including every veto role's, and no veto; a veto role counts only from whoever \`start\` granted it (by default people and GitHive's reviewers), so \`register\` with your key to vote as one. Approvals count once per verified identity (register reviewers so each is its own), and never the change's author. \`status\` shows your change's votes, with the evidence for any rejection to fix, and what's still needed.
+3. Reviewers get the change's code with \`credentials\` and its change (read-only for a change that isn't yours: its branch in the author's fork, and the project to diff against; it marks the review as yours, so others aren't offered it), then \`vote\` on the exact commit they reviewed. A change merges with the policy's approvals, including every veto role's, and no veto; a veto role counts only from whoever \`settings\` granted it (by default people and GitHive's reviewers), so \`register\` with your key to vote as one. Approvals count once per verified identity (register reviewers so each is its own), and never the change's author. \`status\` shows your change's votes, with the evidence for any rejection to fix, and what's still needed.
 4. Run \`check\` after you push: it test-merges your change with the branch it lands on and lists files outside your claim, so you hear about problems before merging.
 5. \`merge\` lands your approved change, with trailers recording the claims and votes it checked, then releases your claim. It lands together with every other approved change into the same branch, checked once as a batch, and returns when yours has landed or been sent back (its checks failed: \`status\` shows the output), or after 10 minutes saying it's still waiting (pending: call merge again to go on waiting). Another agent's \`merge\` may land your change too, as soon as its head is approved, before you call merge: \`status\` then shows it merged, and there's nothing left to do. Merge by hand only with the same trailers.
 6. Claiming again (same paths) keeps your claim active. A claim is freed only when its change waits on its own agent and gets no answer: 30 minutes with nothing pushed, or 2 hours after changes were asked for (its checks failing counts), or it was approved and not merged. Then whoever claims its paths (or its change) releases it, as can anyone (\`release\` with stale: true). A change waiting for review, being checked to land, or on a person is never freed.
@@ -72,8 +72,12 @@ const TOOL_LIST = [
 	{
 		name: "credentials",
 		description:
-			"Git access. With your change: a write token for its own fork, where its branch changes/<change> lives. Without: read access to the project repo.",
-		inputSchema: { type: "object", properties: { repo: str, change: str }, required: ["repo"] },
+			"Git access. With your own change: a write token for your fork, where its branch changes/<change> lives. With another agent's change, to review it: a read-only token for the author's fork, the change's branch and its pushed head, and read access to the project to diff against; it marks you as reviewing that commit in `role` (review unless you name one that can block), so others looking at reviews see it taken, until you vote or for 15 minutes. Without a change: read access to the project repo.",
+		inputSchema: {
+			type: "object",
+			properties: { repo: str, change: str, role: str, agent: str },
+			required: ["repo"],
+		},
 	},
 	{
 		name: "claims",
@@ -143,19 +147,9 @@ const TOOL_LIST = [
 		},
 	},
 	{
-		name: "review_access",
-		description:
-			"Start reviewing a change: a read-only token for the author's fork, the change's branch (changes/<change>) and its pushed head, and read access to the project to diff against. It marks you as reviewing that commit in `role` (review unless you name one that can block), so others looking at reviews see it taken; the mark goes when you vote, or in 15 minutes. Anyone may review; each grant is logged.",
-		inputSchema: {
-			type: "object",
-			properties: { repo: str, change: str, role: str, agent: str },
-			required: ["repo", "change"],
-		},
-	},
-	{
 		name: "reviews",
 		description:
-			"The reviews you may give now: changes pushed, not yours, not voted on by you and not sent back, still needing approvals you can give (a role that can block, if you hold one it awaits; else ordinary ones), with how many more each needs and who's reviewing it already. Reviews you started first, then roles that can block, fewest approvals, oldest; equals in an order of your own, so agents looking at once don't all take the same. Pick one, review_access it, vote.",
+			"The reviews you may give now: changes pushed, not yours, not voted on by you and not sent back, still needing approvals you can give (a role that can block, if you hold one it awaits; else ordinary ones), with how many more each needs and who's reviewing it already. Reviews you started first, then roles that can block, fewest approvals, oldest; equals in an order of your own, so agents looking at once don't all take the same. Pick one, get it with credentials (its change), vote.",
 		inputSchema: { type: "object", properties: { repo: str, agent: str }, required: ["repo", "agent"] },
 	},
 	{
@@ -279,7 +273,6 @@ export const TOOLS = annotate(
 		settings: writes("Set up a repo's review policy and checks", { idempotent: true }),
 		credentials: writes("Get Git access", { idempotent: true }),
 		claims: reads("List claims"),
-		review_access: writes("Start reviewing a change", { idempotent: true }),
 		reviews: reads("List reviews you may give"),
 		backlog: reads("List the backlog"),
 		add_work: writes("Add work to the backlog"),

@@ -85,8 +85,6 @@ what Git said.
   read access to the project.
 - `check`: does the change still merge cleanly, and is every file it changed
   inside its claim.
-- `review_access`: read access to a change's branch in its author's fork, and
-  to the project to diff against.
 - `vote`: a verdict, approve or reject, with evidence, on one commit.
 - `status`: a change's claim, branch head, votes, the approvals it still needs,
   and what GitHive's hosted agents on it are doing.
@@ -126,7 +124,7 @@ In the project repo:
   hand out (`add_work`). An id can be added once.
 - **Review holds** `refs/notes/githive-reviews/<repo>`: which agent is
   reviewing which commit in which role, marked by the reviewer
-  (`review_access`), so others looking at `reviews` don't pile onto one review. It binds nobody, and the audit never reads it. Once the repo
+  (`credentials` for that change), so others looking at `reviews` don't pile onto one review. It binds nobody, and the audit never reads it. Once the repo
   has records repos it's kept in one of them instead (the same one always,
   picked by a hash): every review handed out writes it, and in the project
   repo those writes kept the repo busy for the batches landing on its branch.
@@ -221,7 +219,7 @@ so an older repo can join an org as it is, records and all.
 What someone may do in a repo is the most of: read if it's public; admin for
 the org's owners and admins; the org's default for members; a collaborator's
 level. An agent has its owner's. Every route and tool needs a level: read for
-looking, review for `reviews`, `review_access` and `vote`, write for claiming,
+looking, review for `reviews`, `credentials` for a change and `vote`, write for claiming,
 pushing and merging, admin for `settings` and deleting. A repo the
 caller can't see answers as if it didn't exist. Anyone who comes through
 Cloudflare Access (a person or a service token) may do anything, and name a
@@ -249,10 +247,10 @@ Each change is a branch `changes/<change>` in it. A change from before forks
 were per agent is still read from its own fork, `fork--<repo>--<change>`.
 
 An agent gets read access to the project and write access only to its own
-fork. So it can't push to main or touch the records. `credentials` hands out a
-fork's write token only to the agent holding the change's claim.
-`review_access` gives anyone a read-only token for the author's fork, and
-logs the grant by agent name. A fork's default branch may be behind, so a new
+fork. So it can't push to main or touch the records. `credentials` with a
+change hands out a fork's write token only to the agent holding the change's
+claim; anyone else asking for that change gets a read-only token for the
+author's fork to review it, and the grant is logged by agent name. A fork's default branch may be behind, so a new
 change starts from the project's branch, not the fork's.
 
 Forks take seconds each to make (a fork of a seed about 13 s). Letting every agent push its branches to
@@ -301,7 +299,7 @@ A release names the merge it follows (`mergedAs`), when it follows one.
 A change lands on the project's branch unless its claim names another with
 `into`: a feature branch, a release branch. Everything after the claim reads
 the branch from it: `credentials` says to start from it, `check` tests
-against it, `review_access` diffs against it, and `merge` lands on it,
+against it, a reviewer's `credentials` diffs against it, and `merge` lands on it,
 with that branch's other ready changes. A change lands on one branch:
 claiming it again keeps it there, and naming another is refused.
 
@@ -915,8 +913,11 @@ reconciling with and whom to ask.
 claim it under its id, and the claim decides: the second is refused as
 someone else's change and picks another.
 
-**Review holds.** An agent starting a review marks it, with `review_access`
-(in the role it names), so others looking at `reviews` see it taken. Holds are
+**Review holds.** An agent starting a review marks it, with `credentials` for
+the change (in the role it names), so others looking at `reviews` see it taken.
+The mark is written first, on the head GitHive already knows from push events,
+before the reads that take seconds; written last, it left those seconds in
+which every agent looking was offered the same review. Holds are
 kept by commit and role in a record in Git
 (`refs/notes/githive-reviews/<repo>`, `review-holds.ts`). A hold lasts 15
 minutes, or a minute once its agent has voted (a new vote can take a moment to
@@ -1206,7 +1207,7 @@ Every agent looks and chooses: its own changes (`status`), then a review it may
 give (`reviews`), then a piece of the backlog (`backlog`), each list's first. Building, it
 claims, clones, makes the piece's scripted edit, pushes to its fork and
 checks, recovering as an agent would (extending its claim, merging main in on
-a conflict). Reviewing, it gets the change with `review_access`, runs the
+a conflict). Reviewing, it gets the change with `credentials`, runs the
 tests, and votes by their exit code. Asked to revise, it applies the piece's
 fix or asks a person. Asked to merge, it merges. The plan sets the backlog, the timings (seeded, so a run
 can be repeated), the checks and grants. The run ends with a timeline per

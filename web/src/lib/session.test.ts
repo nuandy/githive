@@ -17,7 +17,7 @@ import {
 describe("signing in", () => {
 	it("says what each failed sign-in means", () => {
 		expect(signinErrorMessage("not-invited")).toBe(
-			"This email isn't invited to GitHive yet. Ask an admin for an invitation.",
+			"GitHive is invite-only for now. Your request to join is noted: once an admin approves it, sign in again.",
 		);
 		expect(signinErrorMessage("expired")).toBe("That sign-in took too long or was opened in another tab. Try again.");
 		expect(signinErrorMessage("cancelled")).toBe("Sign-in was cancelled.");

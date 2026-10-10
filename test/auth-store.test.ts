@@ -29,6 +29,23 @@ describe("signing in", () => {
 		expect(signed).toMatchObject({ user: { handle: "ada", email: "ada@example.com", name: "Ada" } });
 	});
 
+	it("notes who tried to sign in uninvited as a request, counting each try, until they're let in or turned down", async () => {
+		const { ids } = store();
+		await ids.signIn(github);
+		clock += 60_000;
+		await ids.signIn(github);
+		const requested = { provider: "github", name: "Ada", login: "ada", tries: 2, lastAt: "2026-10-08T12:01:00.000Z" };
+		expect(await ids.inviteRequests()).toEqual([
+			{ email: "ada@example.com", orgs: [], createdAt: expect.any(String), signIn: requested },
+		]);
+		await ids.invite("ada@example.com", "person:admin");
+		expect(await ids.inviteRequests()).toEqual([]);
+		const { ids: other } = store();
+		await other.signIn({ provider: "github", providerId: "202", email: "zed@example.com", login: "zed" });
+		await other.declineRequest("zed@example.com");
+		expect(await other.inviteRequests()).toEqual([]);
+	});
+
 	it("signs the same person in again, and links a second provider with the same verified email", async () => {
 		const { ids } = store();
 		await ids.invite("ada@example.com", "person:admin");

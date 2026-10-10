@@ -89,8 +89,8 @@ export function AdminView({ requests, invites, hosted, error, actions, now = Dat
 				</div>
 				<div className="box__body">
 					<p className="manage__hint">
-						People an organization invited who can't sign in until you approve them. Approved, they join those
-						organizations when they first sign in.
+						People who can't sign in until you approve them: those an organization invited, who join it when they first
+						sign in, and those who tried to sign in uninvited.
 					</p>
 				</div>
 				{requests === undefined ? (
@@ -106,8 +106,7 @@ export function AdminView({ requests, invites, hosted, error, actions, now = Dat
 									<div className="manage__row-main">
 										<strong>{r.email}</strong>
 										<span className="muted">
-											{r.orgs.map((o) => `@${o.org} as ${o.role}, asked by ${o.invitedBy}`).join("; ")} ·{" "}
-											{timeAgo(r.createdAt, now)}
+											{requestWords(r)} · {timeAgo(r.createdAt, now)}
 										</span>
 										{errorFor(key)}
 									</div>
@@ -271,6 +270,20 @@ export function AdminView({ requests, invites, hosted, error, actions, now = Dat
 				)}
 			</section>
 		</main>
+	);
+}
+
+const PROVIDERS: Record<string, string> = { github: "GitHub", google: "Google" };
+
+/** Who asked for someone, or how they asked themselves. */
+function requestWords(request: InviteRequest) {
+	const invitedBy = request.orgs.map((org) => `@${org.org} as ${org.role}, asked by ${org.invitedBy}`);
+	const tried = request.signIn;
+	if (!tried) return invitedBy.join("; ");
+	const who = tried.login ? ` as ${tried.login}` : "";
+	const times = tried.tries === 1 ? "once" : `${tried.tries} times`;
+	return [...invitedBy, `tried to sign in with ${PROVIDERS[tried.provider] ?? tried.provider}${who}, ${times}`].join(
+		"; ",
 	);
 }
 
