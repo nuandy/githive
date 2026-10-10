@@ -497,9 +497,9 @@ await inBatches(chunks(plan.backlog, LIST_AT_ONCE), 1, async (list) => {
 	const added = await tool("add_work", { items, agent: planner.agent }, planner.keyFile);
 	if (!added.ok && !added.already?.length) throw new Error(`adding ${list[0].id} to ${list.at(-1).id} failed: ${JSON.stringify(added)}`);
 });
-// Setup ends once the repo has a snapshot for its check containers to start from, as on a repo that's been running: the
-// work clock starts then. Without checks no container runs, so there's none to wait for.
-if (plan.setup?.verify?.length) {
+// Setup ends once the repo has a snapshot for its containers to start from (checks or not: its Gate lands the batches),
+// as on a repo that's been running: the work clock starts then.
+if (plan.setup) {
 	const until = Date.now() + 6 * 60_000;
 	for (;;) {
 		const landing = await fetch(`${BASE}/repos/_/${plan.repo}/landing?branch=${encodeURIComponent(branch)}`, { headers: access, dispatcher: patient })
