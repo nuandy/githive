@@ -1,4 +1,5 @@
 import { type ReactNode, useState } from "react";
+import { messageOf } from "../lib/errors";
 import { VoteForm, type VoteApi } from "./VoteForm";
 import type { ChangeHistory, RepoSnapshot } from "../api";
 import { identityName } from "../lib/agent";
@@ -72,7 +73,7 @@ function MergeButton({
 					: { ok: false, text: (merged.reasons ?? ["It couldn't merge."]).join(" ") },
 			);
 		} catch (err) {
-			setOutcome({ ok: false, text: err instanceof Error ? err.message : String(err) });
+			setOutcome({ ok: false, text: messageOf(err) });
 		} finally {
 			setBusy(false);
 		}

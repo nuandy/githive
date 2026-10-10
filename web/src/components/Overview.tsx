@@ -1,3 +1,4 @@
+import { messageOf } from "../lib/errors";
 import "./Overview.css";
 import { useState } from "react";
 import type { RepoLanding, RepoSnapshot, RepoTree } from "../api";
@@ -77,7 +78,7 @@ function BranchBar({
 			onBranchMade?.();
 			showBranch(made.name);
 		} catch (err) {
-			setError(err instanceof Error ? err.message : String(err));
+			setError(messageOf(err));
 		} finally {
 			setBusy(false);
 		}

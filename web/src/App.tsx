@@ -1,4 +1,5 @@
 import { type ReactNode, useEffect, useRef, useState } from "react";
+import { messageOf } from "./lib/errors";
 import {
 	SIGNED_OUT_EVENT,
 	account,
@@ -99,7 +100,7 @@ export function App() {
 			window.history.replaceState(null, "", withoutSigninError(window.location.href));
 	}, []);
 	useEffect(() => {
-		const failed = (err: unknown) => setBootError(err instanceof Error ? err.message : String(err));
+		const failed = (err: unknown) => setBootError(messageOf(err));
 		fetchMe().then(setMe, failed);
 		const signedOut = () => setMe(null);
 		window.addEventListener(SIGNED_OUT_EVENT, signedOut);

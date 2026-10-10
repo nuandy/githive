@@ -1,5 +1,6 @@
 import { type FormEvent, useState } from "react";
 import type { RepoSnapshot, VoteInput } from "../api";
+import { messageOf } from "../lib/errors";
 import { shortSha } from "../lib/model";
 import type { Claim } from "../lib/claimStatus";
 import { Icon } from "./Icon";
@@ -32,7 +33,7 @@ export function VoteForm({
 }) {
 	const roles = voteRoles(policy);
 	const [role, setRole] = useState(roles[0] ?? "review");
-	const [verdict, setVerdict] = useState<"approve" | "reject">("approve");
+	const [verdict, setVerdict] = useState<Verdict>("approve");
 	const [evidence, setEvidence] = useState("");
 	const [busy, setBusy] = useState(false);
 	const [error, setError] = useState<string>();
@@ -51,7 +52,7 @@ export function VoteForm({
 			setDone(`Your ${role} vote was recorded.`);
 			setEvidence("");
 		} catch (err) {
-			setError(err instanceof Error ? err.message : String(err));
+			setError(messageOf(err));
 		} finally {
 			setBusy(false);
 		}
@@ -76,37 +77,12 @@ export function VoteForm({
 						))}
 					</select>
 				</div>
-				<fieldset className="review-form__verdict" disabled={busy}>
-					<legend className="sr-only">Verdict</legend>
-					<label className={`review-form__choice${verdict === "approve" ? " is-selected" : ""}`}>
-						<input
-							type="radio"
-							name="verdict"
-							value="approve"
-							checked={verdict === "approve"}
-							onChange={() => setVerdict("approve")}
-						/>
-						<span>
-							<strong>Approve</strong>
-							<span className="muted">These changes can merge.</span>
-						</span>
-					</label>
-					<label className={`review-form__choice${verdict === "reject" ? " is-selected" : ""}`}>
-						<input
-							type="radio"
-							name="verdict"
-							value="reject"
-							checked={verdict === "reject"}
-							onChange={() => setVerdict("reject")}
-						/>
-						<span>
-							<strong>Request changes</strong>
-							<span className="muted">
-								{policy.vetoes.includes(role) ? "Blocks the merge." : "The agent should address this before merging."}
-							</span>
-						</span>
-					</label>
-				</fieldset>
+				<VerdictChoice
+					verdict={verdict}
+					setVerdict={setVerdict}
+					blocks={policy.vetoes.includes(role)}
+					disabled={busy}
+				/>
 				<label htmlFor="vote-evidence">What you checked</label>
 				<textarea
 					id="vote-evidence"
@@ -139,5 +115,45 @@ export function VoteForm({
 				</div>
 			</div>
 		</form>
+	);
+}
+
+type Verdict = "approve" | "reject";
+
+/** Approve, or request changes, which blocks the merge when voting as a veto role. */
+function VerdictChoice(props: {
+	verdict: Verdict;
+	setVerdict: (verdict: Verdict) => void;
+	blocks: boolean;
+	disabled: boolean;
+}) {
+	const { verdict, setVerdict, blocks, disabled } = props;
+	const options: { value: Verdict; title: string; detail: string }[] = [
+		{ value: "approve", title: "Approve", detail: "These changes can merge." },
+		{
+			value: "reject",
+			title: "Request changes",
+			detail: blocks ? "Blocks the merge." : "The agent should address this before merging.",
+		},
+	];
+	return (
+		<fieldset className="review-form__verdict" disabled={disabled}>
+			<legend className="sr-only">Verdict</legend>
+			{options.map((option) => (
+				<label key={option.value} className={`review-form__choice${verdict === option.value ? " is-selected" : ""}`}>
+					<input
+						type="radio"
+						name="verdict"
+						value={option.value}
+						checked={verdict === option.value}
+						onChange={() => setVerdict(option.value)}
+					/>
+					<span>
+						<strong>{option.title}</strong>
+						<span className="muted">{option.detail}</span>
+					</span>
+				</label>
+			))}
+		</fieldset>
 	);
 }
