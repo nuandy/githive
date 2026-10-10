@@ -190,7 +190,7 @@ describe("sharded claims across records repos", { timeout: 60_000 }, () => {
 		const areas = ["alpha", "beta", "gamma", "delta", "epsilon", "zeta", "eta", "theta"];
 		for (const [i, area] of areas.entries())
 			expect(await spread().claim(want(`c-${i}`, [`${area}/x/`]))).toMatchObject({ ok: true });
-		for (const [i, area] of areas.entries())
+		for (const area of areas)
 			expect(refsIn(recordsRepoOf(`${area}/x`, 4))).toContain(`${shardsPrefix("p")}${area}%2Fx`);
 		expect(new Set(areas.map((a) => recordsRepoOf(`${a}/x`, 4))).size).toBeGreaterThan(1);
 		expect(shardRefs()).toEqual([]);

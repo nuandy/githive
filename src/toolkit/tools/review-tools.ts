@@ -1,5 +1,4 @@
 import { fail, requiredString } from "../../errors";
-import { branchHead } from "../../git";
 import { effectivePolicy } from "../votes";
 import { holdKey } from "../work";
 import type { ToolHandlers } from "./context";

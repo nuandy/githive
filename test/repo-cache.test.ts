@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import { FakeStorage } from "./fakes/env";
 
 const { RepoCache } = await import("../src/repo-cache");

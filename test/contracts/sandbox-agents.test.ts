@@ -17,7 +17,6 @@ vi.mock("openai", () => ({
 const { Builder } = await import("../../src/builder");
 const { Reviewer } = await import("../../src/reviewer");
 
-const MINUTE = 60_000;
 const job: BuildJob = {
 	repo: "project--a-1",
 	remote: "https://git.test/a.git",
@@ -79,11 +78,6 @@ let storage: FakeStorage;
 let box: ReturnType<typeof fakeContainer>;
 let builder: BuilderHarness;
 
-const state = async () => (await storage.get<BuilderState>("state"))!;
-async function withState(fields: Partial<BuilderState>) {
-	await builder.start(job);
-	await builder.put({ ...(await state()), ...fields });
-}
 
 beforeEach(() => {
 	vi.clearAllMocks();

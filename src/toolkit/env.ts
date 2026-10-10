@@ -13,7 +13,6 @@ import { holdsRef, holdsRepoOf, type ReviewHolds, reviewHolds, reviewsRef, revie
 import type { Registry } from "./claims";
 import type { ToolContext, HostedStatus } from "./mcp";
 import type { BatchGit, BatchSource, CheckRunner } from "./merge";
-import type { Settled } from "./landing";
 import { recordsRepoName } from "./shards";
 import { makeStamper } from "./stamp";
 import { headsForClaims } from "../push-events";
@@ -659,7 +658,7 @@ export async function startHostedReviewers(
 /** Starts GitHive's hosted builder on a claimed change, working on changes/<change> in the change's fork. */
 export async function startHostedBuilder(env: Env, input: { repo: string; change: string }) {
 	const { repo, change } = input;
-	const { read, own, job, source } = await changeBrief(env, repo, change);
+	const { read, job, source } = await changeBrief(env, repo, change);
 	const write = await source("write");
 	const build = { ...job, remote: write.url, token: write.token, base: { remote: read.url, token: read.token } };
 	await env.BUILDER.getByName(changeRepoName(repo, change)).start(build);

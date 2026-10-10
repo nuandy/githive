@@ -1,5 +1,5 @@
 import { requiredString, statusOf } from "../../errors";
-import { branchHead, type Remote } from "../../git";
+import type { Remote } from "../../git";
 import type { GitHubLink } from "../../github";
 import { projectBranch } from "../../project-branch";
 import { GitCasLog } from "../../record-log";
