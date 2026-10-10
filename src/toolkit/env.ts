@@ -293,7 +293,14 @@ function gateParts(env: Env) {
 			return gitLanding(landingLog(env, repo, branch), {
 				drop: (holder) => rpcRetried(() => cache().dropLanding(branch, holder)),
 				checking: (batch) => rpcRetried(() => cache().landingChecking(branch, batch)),
-				settle: (outcomes) => rpcRetried(() => cache().landingSettled(branch, outcomes)),
+				// The repo list shows the last stretch of work, so it can say "all landed" once one ends.
+				settle: async (outcomes) => {
+					const stretch = await rpcRetried(() => cache().landingSettled(branch, outcomes));
+					if (stretch)
+						await env.REPO_INDEX.getByName("all")
+							.summarize(`repo:${repo}`, { lastStretch: stretch })
+							.catch((err) => console.error(`noting ${repo}'s stretch failed`, String(err)));
+				},
 				view: () => rpcRetried(() => cache().landingView(branch)),
 			});
 		},

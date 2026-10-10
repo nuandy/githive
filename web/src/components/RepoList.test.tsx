@@ -1,7 +1,7 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { buildRepoRows } from "../lib/repos";
-import { ago } from "../test/fixtures";
+import { ago, visibleText } from "../test/fixtures";
 import { RepoList } from "./RepoList";
 
 describe("the Repositories page", () => {
@@ -23,6 +23,18 @@ describe("the Repositories page", () => {
 		expect(html).toContain("1 open");
 		expect(html).toContain("Find a repository");
 		expect(html).not.toMatch(/elected/);
+	});
+
+	it("says a repo's work all landed, how much and when, once its last stretch finishes", () => {
+		const lastStretch = { landed: 200, failed: 0, agents: 200, from: ago(37), to: ago(5) };
+		const rows = buildRepoRows({
+			repos: [{ repo: "acme/web", since: ago(60), summary: { open: 0, merged: 200, lastStretch, countedAt: ago(1) } }],
+		});
+		const text = visibleText(renderToStaticMarkup(<RepoList rows={rows} loaded />));
+		expect(text).toContain("Just finished");
+		expect(text).toContain("✓ All landed");
+		expect(text).toContain("200 changes in 32 minutes, by 200 agents");
+		expect(text).toContain("Finished 5 minutes ago");
 	});
 
 	it("explains what agents do in a repo when there's none, and offers to make one", () => {

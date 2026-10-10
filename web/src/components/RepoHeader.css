@@ -45,6 +45,14 @@
 	margin-bottom: 10px;
 }
 
+.repo-header__done {
+	padding: 2px 10px;
+	border: 1px solid color-mix(in srgb, var(--good) 40%, transparent);
+	border-radius: 999px;
+	font-size: 13px;
+	font-weight: 600;
+}
+
 .repo-header__top .repo-header__title {
 	margin-bottom: 0;
 }

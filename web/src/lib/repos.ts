@@ -1,4 +1,6 @@
+import type { LandingStretch } from "../api";
 import { latest, timeOf } from "./model";
+import { justFinished } from "./stretch";
 
 // The Repositories list: the repos agents work on.
 
@@ -13,6 +15,8 @@ export interface RepoRow {
 	/** Open audit violations. */
 	violations: number;
 	lastActivity?: string;
+	/** Its last stretch of work, once something has landed. */
+	stretch?: LandingStretch;
 	/** False until the server has counted the repo's changes (it does so in the background). */
 	detailed: boolean;
 }
@@ -24,6 +28,7 @@ export interface RepoSummary {
 	merged?: number;
 	violations?: number;
 	lastActivity?: string;
+	lastStretch?: LandingStretch;
 	countedAt?: string;
 	/** Changes waiting on a person, with why: the Inbox. */
 	waiting?: { change: string; title: string; reason: string }[];
@@ -42,6 +47,7 @@ function summaryRow(name: string, since: string, summary: RepoSummary | null): R
 		merged: summary?.merged ?? 0,
 		violations: summary?.violations ?? 0,
 		lastActivity: latest(since, summary?.lastActivity),
+		...(summary?.lastStretch ? { stretch: summary.lastStretch } : {}),
 		detailed: summary?.open !== undefined,
 	};
 }
@@ -71,22 +77,30 @@ export function repoCounts(row: RepoRow): string {
 	return parts.join(", ");
 }
 
-/** What a repo needs, as its lamp: a person (a question or an audit finding), work under way, or nothing. */
-export type RepoState = "needs-you" | "at-work" | "quiet";
+/**
+ * What a repo needs, as its lamp: a person (a question or an audit finding), work under way, nothing now but a
+ * stretch of work that just landed, or nothing.
+ */
+export type RepoState = "needs-you" | "at-work" | "done" | "quiet";
 
-export function repoState(row: RepoRow): RepoState {
+export function repoState(row: RepoRow, now = Date.now()): RepoState {
 	if (row.needsYou || row.violations) return "needs-you";
-	return row.open ? "at-work" : "quiet";
+	if (row.open) return "at-work";
+	return justFinished(row.stretch, now) ? "done" : "quiet";
 }
 
 /** The groups the Repositories page shows, in order, each with the repos in it (empty groups left out). */
 export const REPO_GROUPS: { state: RepoState; title: string }[] = [
 	{ state: "needs-you", title: "Needs you" },
 	{ state: "at-work", title: "At work" },
+	{ state: "done", title: "Just finished" },
 	{ state: "quiet", title: "Quiet" },
 ];
 
-export function groupRepos(rows: RepoRow[]): { state: RepoState; title: string; rows: RepoRow[] }[] {
-	const groups = REPO_GROUPS.map((group) => ({ ...group, rows: rows.filter((row) => repoState(row) === group.state) }));
+export function groupRepos(rows: RepoRow[], now = Date.now()): { state: RepoState; title: string; rows: RepoRow[] }[] {
+	const groups = REPO_GROUPS.map((group) => ({
+		...group,
+		rows: rows.filter((row) => repoState(row, now) === group.state),
+	}));
 	return groups.filter((group) => group.rows.length);
 }

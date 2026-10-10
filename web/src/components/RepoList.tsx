@@ -1,5 +1,6 @@
 import { type ReactNode, useState } from "react";
 import { filterRepos, groupRepos, type RepoRow, type RepoState, repoState } from "../lib/repos";
+import { stretchWords } from "../lib/stretch";
 import { splitRepo } from "../lib/repoName";
 import { href } from "../lib/routes";
 import { timeAgo } from "../lib/relativeTime";
@@ -13,7 +14,12 @@ export interface RepoListProps {
 	canCreate?: boolean;
 }
 
-const LAMP: Record<RepoState, string> = { "needs-you": "lamp--red", "at-work": "lamp--amber", quiet: "lamp--neutral" };
+const LAMP: Record<RepoState, string> = {
+	"needs-you": "lamp--red",
+	"at-work": "lamp--amber",
+	done: "lamp--green",
+	quiet: "lamp--neutral",
+};
 
 /** Every repo in a line: how many, how many need you, and how much is open across them. */
 function Summary({ rows }: { rows: RepoRow[] }) {
@@ -45,6 +51,13 @@ function Summary({ rows }: { rows: RepoRow[] }) {
 	);
 }
 
+/** When the repo was last active, or, once a stretch of work has just landed, when it finished. */
+function LastSeen({ row, done }: { row: RepoRow; done: boolean }) {
+	if (done && row.stretch) return <span className="muted">Finished {timeAgo(row.stretch.to)}.</span>;
+	if (!row.lastActivity) return null;
+	return <span className="muted">Active {timeAgo(row.lastActivity)}.</span>;
+}
+
 /** One repo: its lamp, its name, and what's going on in it, in a sentence. */
 function RepoLine({ row }: { row: RepoRow }) {
 	const { owner, name } = splitRepo(row.name);
@@ -61,6 +74,12 @@ function RepoLine({ row }: { row: RepoRow }) {
 			<strong key="violations" className="tone-bad">
 				{row.violations} audit {row.violations === 1 ? "violation" : "violations"}
 			</strong>,
+		);
+	if (state === "done" && row.stretch)
+		parts.push(
+			<span key="done">
+				<strong className="tone-good">✓ All landed</strong>: {stretchWords(row.stretch)}
+			</span>,
 		);
 	if (row.open) parts.push(<span key="open">{row.open} open</span>);
 	if (row.merged) parts.push(<span key="merged">{row.merged} merged</span>);
@@ -80,7 +99,7 @@ function RepoLine({ row }: { row: RepoRow }) {
 						</span>
 					))}
 					{parts.length ? ". " : ""}
-					{row.lastActivity ? <span className="muted">Active {timeAgo(row.lastActivity)}.</span> : null}
+					<LastSeen row={row} done={state === "done"} />
 				</p>
 			</div>
 		</li>

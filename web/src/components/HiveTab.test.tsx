@@ -46,4 +46,34 @@ describe("the Hive tab", () => {
 		);
 		expect(visibleText(html)).toContain("Quiet: nothing has happened lately.");
 	});
+
+	it("says all its work landed, how much, and what the audit found, once nothing's open", () => {
+		const done = { ...repoSnapshot, claims: [], votes: [], audit: { merges: 200, open: 0, violations: [] } };
+		const landing = {
+			branch: "main",
+			checking: null,
+			recent: [],
+			stretch: { landed: 200, failed: 0, agents: 200, from: ago(37), to: ago(5) },
+		};
+		const text = visibleText(
+			renderToStaticMarkup(<Hive repo="acme/docs-site" branch="main" snapshot={done} landing={landing} now={NOW} />),
+		);
+		expect(text).toContain("✓ All landed. The hive is quiet.");
+		expect(text).toContain("200 changes in 32 minutes, by 200 agents, finished 5 minutes ago. The audit is clean.");
+	});
+
+	it("says when the last work finished once that was hours ago", () => {
+		const quiet = { ...repoSnapshot, claims: [], votes: [] };
+		const landing = {
+			branch: "main",
+			checking: null,
+			recent: [],
+			stretch: { landed: 3, failed: 0, agents: 2, from: ago(300), to: ago(290) },
+		};
+		const text = visibleText(
+			renderToStaticMarkup(<Hive repo="acme/docs-site" branch="main" snapshot={quiet} landing={landing} now={NOW} />),
+		);
+		expect(text).toContain("No agents in the hive now");
+		expect(text).toContain("Its last stretch of work finished");
+	});
 });

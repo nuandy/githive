@@ -68,6 +68,26 @@ describe("the groups on the Repositories page", () => {
 		]);
 	});
 
+	it("puts a repo whose work just landed in its own group, until it's been quiet a few hours", () => {
+		const stretch = (minutes: number) => ({
+			landed: 20,
+			failed: 0,
+			agents: 6,
+			from: ago(minutes + 30),
+			to: ago(minutes),
+		});
+		const rows = [
+			row("a/done", { stretch: stretch(5) }),
+			row("a/long-ago", { stretch: stretch(600) }),
+			row("a/busy", { open: 1, stretch: stretch(5) }),
+		];
+		expect(groupRepos(rows).map((g) => [g.state, g.rows.map((r) => r.name)])).toEqual([
+			["at-work", ["a/busy"]],
+			["done", ["a/done"]],
+			["quiet", ["a/long-ago"]],
+		]);
+	});
+
 	it("leaves out a group with nothing in it", () => {
 		expect(groupRepos([row("a/busy", { open: 1 })]).map((g) => g.state)).toEqual(["at-work"]);
 	});

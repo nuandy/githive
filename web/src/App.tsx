@@ -7,6 +7,7 @@ import {
 	admin,
 	api,
 	type ChangeHistory,
+	type LandingStretch,
 	fetchMe,
 	manage,
 	type Me,
@@ -214,6 +215,7 @@ export function Dashboard({ me, onSignOut }: { me: Me; onSignOut: () => void }) 
 	].filter((error): error is string => !!error);
 
 	const view = repoViewOf(route);
+	const lastStretch = summaries.data?.repos.find((row) => row.repo === repoName)?.summary?.lastStretch;
 	let page;
 	if (route.page === "admin") {
 		page = me.kind === "access" ? <AdminPage admin={admin} /> : <NotAnOperator />;
@@ -243,6 +245,7 @@ export function Dashboard({ me, onSignOut }: { me: Me; onSignOut: () => void }) 
 				view={view}
 				data={{ liveStatus, snapshot, audit, access, change }}
 				refreshSummaries={summaries.refresh}
+				{...(lastStretch ? { lastStretch } : {})}
 			/>
 		);
 	} else {
@@ -309,8 +312,9 @@ function RepoRoute(props: {
 	refreshSummaries?: () => void;
 	/** Read by someone signed out: nothing to manage. */
 	visitor?: boolean;
+	lastStretch?: LandingStretch;
 }) {
-	const { repo, view, refreshSummaries = () => undefined, visitor = false } = props;
+	const { repo, view, refreshSummaries = () => undefined, visitor = false, lastStretch } = props;
 	const { liveStatus, snapshot, audit, access, change } = props.data;
 	// GitHive hasn't started on this repo yet. It still shows its code, its settings and a way to start.
 	const notStarted = !snapshot.data && !!snapshot.error && !/^no repo /.test(snapshot.error);
@@ -327,6 +331,7 @@ function RepoRoute(props: {
 				onSettingsChanged={() => snapshot.refresh()}
 				changeHistory={change.data ?? (change.error ? null : undefined)}
 				liveStatus={liveStatus}
+				{...(lastStretch ? { lastStretch } : {})}
 				api={api}
 				{...(access.data ? { access: access.data } : {})}
 				{...(visitor ? {} : { manage })}
