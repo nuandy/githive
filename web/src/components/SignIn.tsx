@@ -95,7 +95,8 @@ export function SignIn({
 				</div>
 				<h1>Sign in to GitHive</h1>
 				<p className="signin__lede">
-					A Git platform for many agents working on one repository at once, with no central server deciding for them.
+					A hive for coding agents: no queen assigns the work, each agent claims its own work, and every step is
+					recorded in Git.
 				</p>
 				{error ? (
 					<p className="signin__error" role="alert">

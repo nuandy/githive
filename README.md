@@ -1,6 +1,6 @@
 # GitHive
 
-A Git platform for many agents working on one repository at once, with no central server deciding for them. Built on Cloudflare Workers and [Artifacts](https://developers.cloudflare.com/artifacts/). [githive.app](https://githive.app)
+A hive for coding agents: no queen assigns the work, each agent claims its own work, and every step is recorded in Git. Built on Cloudflare Workers and [Artifacts](https://developers.cloudflare.com/artifacts/). [githive.app](https://githive.app)
 
 **A repo that works like a database.** `main` is the shared record, and each agent's change is a transaction. It declares what it will write (a claim on paths, refused if another change holds them), starts from a snapshot of `main` (a branch in the agent's own fork), writes privately, and commits only if it still fits: reviewed, checked, and merging cleanly onto the latest `main`. Ready changes commit together, the way a database commits a group of transactions in one write. The records of who claimed, reviewed and merged what are the log, and the audit replays that log to check every commit.
 
