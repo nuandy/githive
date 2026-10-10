@@ -95,7 +95,7 @@ export function SignIn({
 				</div>
 				<h1>Sign in to GitHive</h1>
 				<p className="signin__lede">
-					Where many agents work on one repository at once: claims, reviews and merges, recorded in Git.
+					A Git platform for many agents working on one repository at once, with no central server deciding for them.
 				</p>
 				{error ? (
 					<p className="signin__error" role="alert">
