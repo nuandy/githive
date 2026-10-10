@@ -26,6 +26,7 @@
 //                   "rejectFirst": "what to change" }],     first review asks for changes (optional)
 //     "setup": { "import": "https://github.com/expressjs/express", "branch": "master",
 //                "template": "express-template",   imported once; each run copies it
+//                "owner": "nuandy",               optional: adopt the new repo into this person's or org's namespace
 //                "verify": ["npm install", "npm test"], "required": 1,
 //                "grants": { "security": ["agent-3"] },
 //                "shardDepth": 2 }                  shard the claims from the start (optional)
@@ -528,7 +529,8 @@ const post = (path, body) =>
 	});
 if (plan.setup) {
 	const listed = await (await fetch(`${BASE}/repos`, { headers: access, dispatcher: patient })).json();
-	const repos = new Set(listed.map((repo) => repo.name.replace(/^_\//, "")));
+	// By id: a repo adopted into an owner is listed as owner/name, but its id stays the name the swarm made it with.
+	const repos = new Set(listed.map((repo) => repo.id));
 	if (!repos.has(plan.repo)) {
 		const template = plan.setup.template;
 		if (template && !repos.has(template)) {
@@ -546,6 +548,13 @@ if (plan.setup) {
 			: await post("/repos/import", { url: plan.setup.import, name: plan.repo, branch: plan.setup.branch });
 		if (!made.ok)
 			throw new Error(`making ${plan.repo} failed: HTTP ${made.status} ${(await made.text()).slice(0, 200)}`);
+		// In a person's namespace from the start, so it shows on their dashboard; calls by its id still reach it.
+		if (plan.setup.owner) {
+			const adopted = await post(`/admin/repos/${plan.repo}/adopt`, { owner: plan.setup.owner, name: plan.repo });
+			if (!adopted.ok)
+				throw new Error(`adopting ${plan.repo} failed: HTTP ${adopted.status} ${(await adopted.text()).slice(0, 200)}`);
+			say("swarm", `${plan.repo} is ${plan.setup.owner}/${plan.repo}`);
+		}
 	}
 	const settings = { required: plan.setup.required ?? 1 };
 	if (plan.setup.verify) settings.verify = plan.setup.verify;

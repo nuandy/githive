@@ -9,7 +9,7 @@ import { fail } from "../errors";
 import { defaultBranch, type Remote, Workspace } from "../git";
 import { projectBranch } from "../project-branch";
 import { claimStore } from "./claim-store";
-import { type ReviewHolds, reviewHolds, reviewsRef, reviewsRepoOf } from "./review-holds";
+import { holdsRef, holdsRepoOf, type ReviewHolds, reviewHolds, reviewsRef, reviewsRepoOf } from "./review-holds";
 import type { Registry } from "./claims";
 import type { ToolContext, HostedStatus } from "./mcp";
 import type { BatchGit, BatchSource, CheckRunner } from "./merge";
@@ -224,7 +224,10 @@ export function toolContextFor(
 			)),
 		// Review holds live in one of the repo's records repos once it has them (see review-holds.ts), otherwise
 		// beside the claims and votes.
-		reviews: reviewHolds((repo) => reviewsLog(env, repo)),
+		reviews: reviewHolds({
+			waits: (repo) => reviewsLog(env, repo),
+			holds: (repo, bucket) => holdsLog(env, repo, bucket),
+		}),
 		requestReview: (input) => startHostedReviewers(env, input),
 		startBuilder: (input) => startHostedBuilder(env, input),
 		stamper: async (agent) => {
@@ -290,6 +293,15 @@ async function reviewsLog(env: Env, repo: string) {
 	return spread
 		? recordsLogIn<ReviewHolds>(env, repo, reviewsRepoOf(spread), reviewsRef(repo))
 		: recordsLog<ReviewHolds>(env, repo, reviewsRef(repo));
+}
+
+/** One bucket of a repo's review holds: in one of its records repos once it has them, else beside the claims. */
+async function holdsLog(env: Env, repo: string, bucket: string) {
+	const registry = (await recordsLog<Registry>(env, repo, claimsRef(repo)).read())?.commit.state;
+	const spread = registry?.recordsRepos ?? 0;
+	return spread
+		? recordsLogIn<ReviewHolds>(env, repo, holdsRepoOf(bucket, spread), holdsRef(repo, bucket))
+		: recordsLog<ReviewHolds>(env, repo, holdsRef(repo, bucket));
 }
 
 function checksRunner(env: Env, repo: string): CheckRunner {

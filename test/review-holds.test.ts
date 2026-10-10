@@ -4,12 +4,13 @@ import {
 	holdReview,
 	releaseReview,
 	type ReviewHolds,
+	reviewHolds,
 	roleWaits,
 	roleWaitTold,
 } from "../src/toolkit/review-holds";
 import { MemoryLog } from "./helpers/memory-log";
 
-// Review holds as a record in Git. next hands a review out only while fewer
+// Review holds as records in Git. reviews offers a review only while fewer
 // agents hold it than it needs, so two agents aren't sent to one review that
 // needs one. The record also keeps when each review awaited by a blocking role
 // was first seen waiting, so people are told once about a review that waited too
@@ -68,5 +69,28 @@ describe("reviews a role waits for, as a record", () => {
 		await roleWaits(log, ["h1#security"]);
 		await roleWaits(log, ["h1#security"]);
 		expect(log.commits.length).toBe(commits);
+	});
+});
+
+describe("review holds, split by commit", () => {
+	it("keeps holds on different commits in different records, and reads only the buckets asked about", async () => {
+		const buckets = new Map<string, MemoryLog<ReviewHolds>>();
+		const read: string[] = [];
+		const logOf = (bucket: string) => {
+			read.push(bucket);
+			if (!buckets.has(bucket)) buckets.set(bucket, new MemoryLog<ReviewHolds>());
+			return buckets.get(bucket) as MemoryLog<ReviewHolds>;
+		};
+		const holds = reviewHolds({ waits: () => new MemoryLog<ReviewHolds>(), holds: (_repo, bucket) => logOf(bucket) });
+		const first = `000001${"a".repeat(34)}`;
+		const second = `000002${"b".repeat(34)}`;
+		expect(await holds.hold("p", `${first}#review`, "agent-a", 1)).toBe(true);
+		expect(await holds.hold("p", `${second}#review`, "agent-b", 1)).toBe(true);
+		expect([...buckets.keys()].sort()).toEqual(["1", "2"]);
+		read.length = 0;
+		expect(await holds.held("p", [first])).toEqual({ [`${first}#review`]: ["agent-a"] });
+		expect(read).toEqual(["1"]);
+		// Named no heads, it reads them all.
+		expect(Object.keys(await holds.held("p")).sort()).toEqual([`${first}#review`, `${second}#review`]);
 	});
 });

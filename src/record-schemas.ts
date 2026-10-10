@@ -49,6 +49,7 @@ const SCHEMAS: [prefix: string, schema: z.ZodType][] = [
 	["refs/notes/githive-vote-buckets/", votesState],
 	["refs/notes/githive-work/", workState],
 	["refs/notes/githive-reviews/", reviewsState],
+	["refs/notes/githive-review-holds/", reviewsState],
 	["refs/notes/githive-landing/", landingState],
 ];
 
