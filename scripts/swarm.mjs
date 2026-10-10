@@ -406,8 +406,10 @@ function agentFor(spec) {
 					if (reviews.length) next = { kind: "review", ...reviews[0] };
 				}
 				if (!next) {
+					// Only this plan's pieces: one the repo had before (a run before this one's) isn't this agent's to build.
 					const { open } = await call("backlog", { agent: name });
-					if (open.length) next = { kind: "build", work: open[0] };
+					const ours = open.filter((item) => pieces.has(item.id));
+					if (ours.length) next = { kind: "build", work: ours[0] };
 				}
 				if (!next) {
 					did.get(name).wait++;
