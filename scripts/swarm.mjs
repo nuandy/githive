@@ -29,7 +29,9 @@
 //                "owner": "nuandy",               optional: adopt the new repo into this person's or org's namespace
 //                "verify": ["npm install", "npm test"], "required": 1,
 //                "grants": { "security": ["agent-3"] },
-//                "shardDepth": 2 }                  shard the claims from the start (optional)
+//                "shardDepth": 2,                   shard the claims from the start (optional)
+//                "snapshot": false }                don't wait for the Gate's snapshot (a Worker landing with trees
+//                                                   starts no Gate on a repo without checks)
 //   }
 //
 // Agents without a key file are registered first and the key is written there.
@@ -617,7 +619,7 @@ await inBatches(chunks(plan.backlog, LIST_AT_ONCE), 1, async (list) => {
 		throw new Error(`adding ${list[0].id} to ${list.at(-1).id} failed: ${JSON.stringify(added)}`);
 });
 // Wait for the repo's container snapshot, as on a repo that has been running. The work clock starts after setup.
-if (plan.setup) {
+if (plan.setup && plan.setup.snapshot !== false) {
 	const until = Date.now() + 6 * 60_000;
 	for (;;) {
 		const landing = await fetch(`${BASE}/repos/_/${plan.repo}/landing?branch=${encodeURIComponent(branch)}`, {
