@@ -245,6 +245,41 @@ function MergeStatus({
 	return null;
 }
 
+/** While a change loads, or when the repo has no change by that name. */
+function ChangeMissing({ changeId, repo, loading }: { changeId: string; repo: string; loading: boolean }) {
+	if (loading)
+		return (
+			<p className="muted" role="status">
+				Loading {changeId}…
+			</p>
+		);
+	return (
+		<div className="box empty">
+			<Icon name="alert" size={28} className="muted" />
+			<h2>Change not found</h2>
+			<p>
+				{repo} has no change named <code>{changeId}</code>. <a href={href.repo(repo)}>See open changes</a>.
+			</p>
+		</div>
+	);
+}
+
+/** The agent's opening of the change: when, which paths it claims, and its intent. */
+function OpeningComment({ agent, record }: { agent: string; record: ChangeRecord | undefined }) {
+	return (
+		<article className="comment comment--outside">
+			<div className="comment__header">
+				<strong>{agent}</strong>{" "}
+				<span className="muted">
+					opened this change{record?.since ? ` ${timeAgo(record.since)}` : ""}
+					{record?.paths.length ? ` · claims ${record.paths.join(", ")}` : ""}
+				</span>
+			</div>
+			<div className="comment__body">{record?.intent || <span className="muted">No description provided.</span>}</div>
+		</article>
+	);
+}
+
 /** A change, shown like a pull request: in force, merged or released. */
 export function ChangePage({
 	snapshot,
@@ -270,40 +305,13 @@ export function ChangePage({
 	const timeline = history ? buildTimeline(history, repo).filter((item) => item.kind !== "opened") : [];
 	const mergeable = claim && merge && claim.approval.approved && !claim.waitsOn?.length;
 
-	if (!record && !ending) {
-		if (history === undefined)
-			return (
-				<p className="muted" role="status">
-					Loading {changeId}…
-				</p>
-			);
-		return (
-			<div className="box empty">
-				<Icon name="alert" size={28} className="muted" />
-				<h2>Change not found</h2>
-				<p>
-					{repo} has no change named <code>{changeId}</code>. <a href={href.repo(repo)}>See open changes</a>.
-				</p>
-			</div>
-		);
-	}
+	if (!record && !ending) return <ChangeMissing changeId={changeId} repo={repo} loading={history === undefined} />;
 
 	const conversation = (
 		<div className="change-layout">
 			<div className="change-layout__main">
 				{claim?.attention ? <AttentionCallout attention={claim.attention} /> : null}
-				<article className="comment comment--outside">
-					<div className="comment__header">
-						<strong>{agent}</strong>{" "}
-						<span className="muted">
-							opened this change{record?.since ? ` ${timeAgo(record.since)}` : ""}
-							{record?.paths.length ? ` · claims ${record.paths.join(", ")}` : ""}
-						</span>
-					</div>
-					<div className="comment__body">
-						{record?.intent || <span className="muted">No description provided.</span>}
-					</div>
-				</article>
+				<OpeningComment agent={agent} record={record} />
 				{history === undefined ? <p className="muted change-layout__loading">Loading history…</p> : null}
 				{history ? <Timeline items={timeline} /> : <LatestPush head={claim?.head} />}
 				{claim && api && canVote ? <VoteForm repo={repo} claim={claim} policy={snapshot.policy} api={api} /> : null}
