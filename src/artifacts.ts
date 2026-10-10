@@ -1,7 +1,7 @@
 import type { Remote } from "./git";
 import { noteArtifactsCall } from "./git-http";
 import type { HistorySource } from "./toolkit/branch-history";
-import { isTransientFailure, retryTransient, sleep, transientDelay } from "./retry";
+import { isTransientFailure, jitteredDelay, retryTransient, sleep, transientDelay } from "./retry";
 import { rpc } from "./rpc";
 
 /** One reviewer per slice, role and commit, so a new commit never collides with a reviewer still finishing. */
@@ -155,7 +155,7 @@ function requestFork(artifacts: Artifacts, source: string, name: string, descrip
 				const internal = isInternalError(err);
 				if ((!internal && !isTransientFailure(err)) || attempt === FORK_ATTEMPTS) throw err;
 				// Jitter spreads out a burst of forks that hit internal errors together.
-				if (internal) await scheduler.wait(Math.min(250 * 2 ** attempt, 4_000) * (0.5 + Math.random()));
+				if (internal) await scheduler.wait(jitteredDelay(attempt, 250, 4_000));
 				else await sleep(transientDelay(attempt));
 			}
 		}

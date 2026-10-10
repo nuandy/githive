@@ -1,6 +1,7 @@
 import type { CasLog } from "../record-log";
 import { type Checking, dropLease, type Landing, type LandingState, renewLease, takeTurn } from "./landing";
 import { appendRecord } from "./records";
+import { retryTransient } from "../retry";
 
 // Who lands changes into a branch right now. Like the claims and votes, this is a record in Git: the branch's
 // lease and the batch its holder is checking. A merge that finds the lease free or expired takes it by
@@ -80,18 +81,12 @@ export function gitLanding(log: CasLog<LeaseRecord>, kept: Omit<Landing, "turn" 
 		},
 		drop: async (holder) => {
 			// Retry, because a lease left held keeps every waiting merge idle until it expires.
-			for (let attempt = 1; ; attempt++) {
-				try {
-					await appendRecord<LeaseRecord, "none">(log, AUTHOR, empty, (record) => {
-						if (record.lease?.holder !== holder) return { refused: "none" };
-						return { state: asRecord(dropLease(asState(record), holder)), text: `${holder} hands the lease on` };
-					});
-					break;
-				} catch (err) {
-					if (attempt === DROP_TRIES) throw err;
-					await new Promise((resolve) => setTimeout(resolve, attempt * 1_000));
-				}
-			}
+			const dropped = () =>
+				appendRecord<LeaseRecord, "none">(log, AUTHOR, empty, (record) => {
+					if (record.lease?.holder !== holder) return { refused: "none" };
+					return { state: asRecord(dropLease(asState(record), holder)), text: `${holder} hands the lease on` };
+				});
+			await retryTransient(dropped, { maxAttempts: DROP_TRIES, retryable: () => true, delayMs: (n) => n * 1_000 });
 			await kept.drop(holder).catch(() => undefined);
 		},
 		// For display only. A batch is checked and lands even if recording it fails.

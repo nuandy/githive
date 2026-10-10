@@ -6,6 +6,8 @@ export interface RetryTransientOptions {
 	sleep?: (ms: number) => Promise<void>;
 	/** Defaults to isTransientFailure. */
 	retryable?: (error: unknown) => boolean;
+	/** The wait before attempt `attempt + 1`. Defaults to transientDelay with baseDelayMs and maxDelayMs. */
+	delayMs?: (attempt: number) => number;
 }
 
 const TRANSIENT_HTTP_STATUSES = new Set([408, 425, 429]);
@@ -128,6 +130,10 @@ export function sleep(ms: number): Promise<void> {
 export const transientDelay = (attempt: number, baseDelayMs = 100, maxDelayMs = 2000) =>
 	Math.min(maxDelayMs, baseDelayMs * 2 ** (attempt - 1));
 
+/** A doubling wait with jitter, so callers that failed together spread out: up to `maxMs`, give or take half. */
+export const jitteredDelay = (attempt: number, baseMs: number, maxMs: number) =>
+	Math.min(baseMs * 2 ** attempt, maxMs) * (0.5 + Math.random());
+
 /** Run an operation again only when its failure is explicitly transient. */
 export async function retryTransient<T>(operation: () => Promise<T>, options: RetryTransientOptions = {}): Promise<T> {
 	const maxAttempts = Number.isFinite(options.maxAttempts) ? Math.max(1, Math.floor(options.maxAttempts!)) : 4;
@@ -140,7 +146,7 @@ export async function retryTransient<T>(operation: () => Promise<T>, options: Re
 			return await operation();
 		} catch (error) {
 			if (attempt >= maxAttempts || !(options.retryable ?? isTransientFailure)(error)) throw error;
-			await wait(transientDelay(attempt, baseDelayMs, maxDelayMs));
+			await wait(options.delayMs ? options.delayMs(attempt) : transientDelay(attempt, baseDelayMs, maxDelayMs));
 		}
 	}
 }

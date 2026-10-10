@@ -68,6 +68,24 @@ describe("retryTransient", () => {
 	});
 });
 
+describe("retryTransient's own delays", () => {
+	it("waits as delayMs says, retrying whatever retryable allows", async () => {
+		const waits: number[] = [];
+		let attempts = 0;
+		const flaky = async () => {
+			if (++attempts < 3) throw new Error("any failure");
+			return "done";
+		};
+		const options = {
+			retryable: () => true,
+			delayMs: (attempt: number) => attempt * 500,
+			sleep: async (ms: number) => void waits.push(ms),
+		};
+		await expect(retryTransient(flaky, options)).resolves.toBe("done");
+		expect(waits).toEqual([500, 1000]);
+	});
+});
+
 describe("whileRefsMove", () => {
 	const moved = () => new Error("fetch failed: want 1a2b not our ref");
 

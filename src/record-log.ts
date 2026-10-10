@@ -13,7 +13,7 @@ import {
 	newerFormat,
 	upgradeState,
 } from "./record-format";
-import { retryTransient } from "./retry";
+import { jitteredDelay, retryTransient, sleep } from "./retry";
 
 // A record log in Git: one ref, appended to by compare-and-swap. An append pushes one commit on the
 // tip it was built on, and Git rejects it if the ref moved, so of two writers only one lands.
@@ -108,8 +108,7 @@ function pktLines(body: Uint8Array) {
 const BUSY_ATTEMPTS = 6;
 
 /** A jittered, growing pause before sending a push again. */
-const pushBackoff = (attempt: number) =>
-	new Promise((resolve) => setTimeout(resolve, Math.min(50 * 2 ** attempt, 1_500) * (0.5 + Math.random())));
+const pushBackoff = (attempt: number) => sleep(jitteredDelay(attempt, 50, 1_500));
 
 /** A receive-pack request body: one ref update command, a flush, then the pack. */
 function receivePackBody(ref: string, from: string | null, to: string, packfile: Uint8Array | undefined) {

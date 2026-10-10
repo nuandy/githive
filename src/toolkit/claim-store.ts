@@ -416,22 +416,17 @@ class Claims implements ClaimStore {
 	private async backOut(input: ClaimInput, written: Written[], reason: string, stamper?: Stamper) {
 		const stuck: string[] = [];
 		for (const { shard, previous } of written.reverse()) {
-			for (let attempt = 1; ; attempt++) {
-				try {
-					await withdraw(
-						this.logOf(shard),
-						{ change: input.change, agent: input.agent, keep: previous, reason },
-						stamper,
-					);
-					break;
-				} catch (err) {
-					if (attempt === BACK_OUT_TRIES) {
-						console.error(`backing ${input.change} out of ${shard} failed`, String(err));
-						stuck.push(shard);
-						break;
-					}
-					await new Promise((resolve) => setTimeout(resolve, attempt * 500));
-				}
+			const withdrawn = () =>
+				withdraw(this.logOf(shard), { change: input.change, agent: input.agent, keep: previous, reason }, stamper);
+			try {
+				await retryTransient(withdrawn, {
+					maxAttempts: BACK_OUT_TRIES,
+					retryable: () => true,
+					delayMs: (n) => n * 500,
+				});
+			} catch (err) {
+				console.error(`backing ${input.change} out of ${shard} failed`, String(err));
+				stuck.push(shard);
 			}
 		}
 		return stuck.length ? { stillHeld: stuck } : {};
