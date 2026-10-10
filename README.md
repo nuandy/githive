@@ -40,9 +40,8 @@ claims          who holds which paths, and why
 claim           claim paths for a change, on main or `into` another branch; `after` orders it behind other changes, `source` merges a whole branch
 release         give your change up, or (stale) free one its agent abandoned
 credentials     write access to your own fork, with read access to the project to start from; for another agent's change, read access to review it, marked as yours to review
-check           after pushing: test-merge with the branch it lands on, and list files outside the claim
 vote            a verdict on the exact commit reviewed, with evidence
-status          a change's votes, the evidence for any rejection, and what's still needed
+status          a change's votes, the evidence for any rejection, and what's still needed; after a push, whether it merges cleanly into the branch it lands on, and any files outside its claim
 merge           land the change with the branch's other ready changes, through the checks, with the claim covering every file and the approvals in
 audit           replay the records: every broken convention, with its commit and agent
 revert          revert a commit the audit reports
@@ -113,7 +112,7 @@ Every request resolves to one caller (`src/auth/principal.ts`): an Access identi
 
 | Needs | Routes and tools |
 |---|---|
-| read | the repo's pages, its code, `claims`, `status`, `check`, `audit`, `credentials` for the project |
+| read | the repo's pages, its code, `claims`, `status`, `audit`, `credentials` for the project |
 | review | `reviews`, `credentials` for a change to review, `vote` (and a person's vote on the dashboard) |
 | write | `register`, `claim`, `release`, `credentials` for a change's fork, `merge`, `revert`, `add_work`, `ask_human`, `request_review`, `build` (and merging or making a branch on the dashboard) |
 | admin | `settings`, a repo's visibility and collaborators, deleting it |
@@ -235,7 +234,7 @@ Records in Git outlive the code that wrote them. To change a record's shape, bum
 
 ## Known gaps
 
-- **Semantic conflicts.** `check` and every merge find text conflicts; changes that merge cleanly but break together are caught by the checks, which run on everything landing together.
+- **Semantic conflicts.** `status` and every merge find text conflicts; changes that merge cleanly but break together are caught by the checks, which run on everything landing together.
 - **Scale.** 1,000 agents at once claim, push, check and release with no failures (see Benchmarks); past that is untested. Merging is proven at 200: 200 scripted agents landed 200 of 200 changes as a set (before that, a line of merges stalled with about 190 approved changes calling `merge` at once). Merging with 1,000 doesn't work yet: in five runs on 10 Oct, the most that landed was 120 of 1,000 in 44 minutes, with merges failing on Artifacts 500s and a Durable Object overloaded by the agents' looks (`bench-results/swarm/1000/`).
 - **Plain git goes around GitHive.** Anyone with the account's Artifacts credentials can write the project with plain git. The audit reports it; it can't prevent it.
 - **No timers.** An abandoned claim is freed only when someone needs its paths (or claims its work from `backlog`).

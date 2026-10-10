@@ -143,10 +143,8 @@ describe.each([
 				project: { branch: "feature/dude" },
 			});
 			const head = await pushChange(server.url, work, "a", "f1", { "src/f/x.js": "x\n" }, "origin/feature/dude");
-			expect(await call("check", { change: "f1" }, "a")).toMatchObject({
-				branch: "feature/dude",
-				main: { clean: true },
-				outsideClaim: [],
+			expect(await call("status", { change: "f1" }, "a")).toMatchObject({
+				merge: { into: "feature/dude", clean: true, outsideClaim: [] },
 			});
 			await call(
 				"vote",

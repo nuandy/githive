@@ -7,8 +7,7 @@
 //   node scripts/bench.mjs [--label baseline] [--levels 1,5,10,25] [--racers 5]
 //                          [--base https://blueprint-bench.nuandy.workers.dev] [--repo bench-<label>]
 //                          [--shard-depth 2] (how deep claims are sharded; 0 keeps them in one record)
-//                          [--records-repos N] (how many records repos the shards are spread over;
-//                                               default the toolkit's)
+//                          [--records-repos N] (how many records repos the shards are spread over; default the toolkit's)
 //                          [--ramp 60]   (agents start spread evenly over this many seconds, instead of all at once)
 //
 // Credentials come from .dev.vars (CF_ACCESS_CLIENT_ID, CF_ACCESS_CLIENT_SECRET) and are never printed.
@@ -146,8 +145,8 @@ async function agent(level, runId, i, scratch) {
 		remoteRef: `refs/heads/changes/${change_id}`,
 		onAuth,
 	});
-	const checked = await tool(level, "check", { ...ids, change: change_id });
-	await tool(level, "status", { ...ids, change: change_id });
+	// status test-merges the change too (its merge section), as check did before it was folded in.
+	const checked = await tool(level, "status", { ...ids, change: change_id });
 	await tool(level, "claims", ids);
 	const released = await tool(level, "release", {
 		...ids,
@@ -224,12 +223,11 @@ async function main() {
 		if (!/has started on|set when GitHive starts/.test(err.message)) throw err;
 		return null;
 	});
-	if (!started) console.log(`${REPO} at ${BASE} (GitHive had started on it: its claims are kept as they were)`);
-	else if (!started.shardDepth) console.log(`${REPO} at ${BASE} (claims sharded not at all)`);
-	else {
-		const repos = started.recordsRepos || "no";
-		console.log(`${REPO} at ${BASE} (claims sharded ${started.shardDepth} deep, over ${repos} records repos)`);
-	}
+	console.log(
+		started
+			? `${REPO} at ${BASE} (claims sharded ${started.shardDepth ? `${started.shardDepth} deep, over ${started.recordsRepos || "no"} records repos` : "not at all"})`
+			: `${REPO} at ${BASE} (GitHive had started on it: its claims are kept as they were)`,
+	);
 
 	const levels = [];
 	const result = {
@@ -285,8 +283,7 @@ async function main() {
 		levels.push(level);
 		await save();
 		console.log(
-			`n=${n}: ${(wallMs / 1000).toFixed(1)}s, ${level.calls} calls, race winners ${raced.winners}, ` +
-				`failures ${failures.length}, leftover claims ${leftover.length}`,
+			`n=${n}: ${(wallMs / 1000).toFixed(1)}s, ${level.calls} calls, race winners ${raced.winners}, failures ${failures.length}, leftover claims ${leftover.length}`,
 		);
 	}
 
@@ -300,16 +297,13 @@ async function main() {
 					: `${Math.round(v)}ms`;
 	console.log(`\n${LABEL}\n`);
 	console.log(
-		"| agents | wall | calls/s | claims p50/p95 | claim p50/p95 | check p50/p95 | status p50/p95 | " +
-			"release p50/p95 | race winners | failures |",
+		"| agents | wall | calls/s | claims p50/p95 | claim p50/p95 | status p50/p95 | release p50/p95 | race winners | failures |",
 	);
-	console.log("|---|---|---|---|---|---|---|---|---|---|");
+	console.log("|---|---|---|---|---|---|---|---|---|");
 	for (const l of levels) {
 		const t = (name) => `${ms(l.tools[name]?.p50 ?? null)} / ${ms(l.tools[name]?.p95 ?? null)}`;
 		console.log(
-			`| ${l.agents} | ${ms(l.wallMs)} | ${l.callsPerSecond.toFixed(1)} | ${t("claims")} | ${t("claim")} ` +
-				`| ${t("check")} | ${t("status")} | ${t("release")} | ${l.race.winners}/${RACERS} | ${l.failures.length} ` +
-				"|",
+			`| ${l.agents} | ${ms(l.wallMs)} | ${l.callsPerSecond.toFixed(1)} | ${t("claims")} | ${t("claim")} | ${t("status")} | ${t("release")} | ${l.race.winners}/${RACERS} | ${l.failures.length} |`,
 		);
 	}
 	console.log(`\nfull results: ${file}`);

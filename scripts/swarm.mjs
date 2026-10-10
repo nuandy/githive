@@ -259,13 +259,13 @@ async function extendClaim(agent, id, files, when) {
 /** After a push, extends the claim to files outside it and merges the project in on a conflict. */
 async function checkPushed(agent, id) {
 	for (let round = 0; round < 3; round++) {
-		const checked = await agent.call("check", { change: id });
+		const { merge: checked = {} } = await agent.call("status", { change: id });
 		mark(id, "checked");
 		if (checked.outsideClaim?.length) {
 			await extendClaim(agent, id, checked.outsideClaim, "at check");
 			continue;
 		}
-		if (checked.main && !checked.main.clean) {
+		if (checked.clean === false) {
 			await mergeProject(agent, id);
 			continue;
 		}

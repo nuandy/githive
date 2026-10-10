@@ -35,18 +35,7 @@ export async function mergeAsPerson(ctx: ToolContext, repo: string, change: stri
 }
 
 // Tools that write records, after which the repo's summary notes the activity.
-const WRITES = new Set([
-	"claim",
-	"release",
-	"merge",
-	"vote",
-	"build",
-	"revert",
-	"ask_human",
-	"check",
-	"add_work",
-	"settings",
-]);
+const WRITES = new Set(["claim", "release", "merge", "vote", "build", "revert", "ask_human", "add_work", "settings"]);
 
 const noted = new Map<string, number>();
 

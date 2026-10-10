@@ -122,7 +122,7 @@ try {
 	await cloneA.run("commit", "--quiet", "-m", "a-1: work");
 	await cloneA.run("push", "--quiet", "origin", "changes/a-1");
 	const aHead = await cloneA.run("rev-parse", "HEAD");
-	say("  check:", JSON.stringify(await tool("check", { change: "a-1" }, a.key)));
+	say("  status:", JSON.stringify((await tool("status", { change: "a-1" }, a.key)).merge));
 
 	say("\nagent-b, sharing the same Access identity, tries to interfere:");
 	say(

@@ -4,17 +4,15 @@ import type { GitHubLink } from "../../github";
 import { actionsChecks, mirrorTo, onActions } from "../actions-checks";
 import { artifactsInspect } from "../batch-reads";
 import { scopeFile } from "../branch-scope";
-import { checkChange } from "../check";
 import type { ClaimRecord, Registry } from "../claims";
-import { lastLandedOn } from "../landing";
 import { type BatchGit, type Candidate, mergeChange, type MergeInput } from "../merge";
 import { holdKey } from "../work";
 import type { ToolCall, ToolContext, ToolHandlers } from "./context";
 import { mayActAs } from "./identity";
 import { branchSettings } from "./repo";
 
-// Tools for landing a change: check, merge, and credentials for a change's branch: your own to push to, or
-// someone else's to review.
+// Tools for landing a change: merge, and credentials for a change's branch: your own to push to, or someone
+// else's to review.
 
 export const mergeTools: ToolHandlers = {
 	async merge(call) {
@@ -67,37 +65,6 @@ export const mergeTools: ToolHandlers = {
 			change,
 			agent: agentArg("agent"),
 		});
-	},
-	async check({ args, ctx, repo, branch, claimOf, changeSource, warmChecks }) {
-		const change = requiredString(args, "change");
-		const own = await claimOf(change);
-		const source = own ? await changeSource(own.agent, "read", change, own.since).catch(() => null) : null;
-		if (!source) throw new Error(`[409] changes/${change} has nothing pushed to check`);
-		const into = own?.into ?? branch;
-		const checked = await checkChange({
-			project: await ctx.remote(repo, "read"),
-			branch: into,
-			source,
-			claims: own ? [own] : [],
-			change,
-			...(ctx.branchHead ? { branchHead: () => ctx.branchHead!(repo, into) } : {}),
-			...(ctx.history ? { history: ctx.history } : {}),
-		});
-		// On a conflict, name who last changed each file, as the landing remembers it.
-		const conflicting = checked.main.clean ? [] : (checked.main.conflicts ?? []);
-		let causes: ReturnType<typeof lastLandedOn> = [];
-		if (conflicting.length && ctx.landing) {
-			const landing = await ctx
-				.landing(repo, into)
-				.view()
-				.catch(() => null);
-			causes = lastLandedOn(landing?.recent ?? [], conflicting);
-		}
-		// Agents check after each push, so note this head for reviews, backlog and merge (see openHeads).
-		await ctx.noteHeads?.(repo, { [change]: checked.head }).catch(() => undefined);
-		// A merge is likely within minutes of a check, so warm the check container now.
-		await warmChecks("checked", change);
-		return causes.length ? { ...checked, causes } : checked;
 	},
 	async credentials(call) {
 		const { args, ctx, repo, acting, changeOf } = call;

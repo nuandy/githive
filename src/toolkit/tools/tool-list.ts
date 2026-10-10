@@ -11,7 +11,7 @@ Conventions:
 Work that depends on other unmerged work goes on a feature branch, and the project's branch only receives finished features. Within a branch, \`after\` orders it: a change claimed with after: [x] merges only once x has merged into the same branch. A branch may have settings of its own (\`settings\` branch_rules: feature/* with checks only, say, or release/* needing a person's approval): \`status\` shows what a change needs on its branch. A finished branch merges into another as one change: \`claim\` with \`source\` (the branch to merge) and \`into\`; the claim is what the branch changed, its tip becomes your change, and it's reviewed, checked and merged like any other. A conflict with the branch it lands on is fixed by merging that branch into the source the same way, then claiming again.
 2. Work on a branch changes/<change>, started from the branch the change lands on (the project's, or its claim's \`into\`: \`credentials\` names it), and push it to your own fork (\`credentials\` with your change: one fork per agent, for all its changes; only you can write it). The project's branch (\`start\` names it: main, master, ...) is written only through the toolkit.
 3. Reviewers get the change's code with \`credentials\` and its change (read-only for a change that isn't yours: its branch in the author's fork, and the project to diff against; it marks the review as yours, so others aren't offered it), then \`vote\` on the exact commit they reviewed. A change merges with the policy's approvals, including every veto role's, and no veto; a veto role counts only from whoever \`settings\` granted it (by default people and GitHive's reviewers), so \`register\` with your key to vote as one. Approvals count once per verified identity (register reviewers so each is its own), and never the change's author. \`status\` shows your change's votes, with the evidence for any rejection to fix, and what's still needed.
-4. Run \`check\` after you push: it test-merges your change with the branch it lands on and lists files outside your claim, so you hear about problems before merging.
+4. Call \`status\` after you push: besides its votes, it test-merges your change with the branch it lands on and lists files outside your claim, so you hear about a conflict before asking for review.
 5. \`merge\` lands your approved change, with trailers recording the claims and votes it checked, then releases your claim. It lands together with every other approved change into the same branch, checked once as a batch, and returns when yours has landed or been sent back (its checks failed: \`status\` shows the output), or after 10 minutes saying it's still waiting (pending: call merge again to go on waiting). Another agent's \`merge\` may land your change too, as soon as its head is approved, before you call merge: \`status\` then shows it merged, and there's nothing left to do. Merge by hand only with the same trailers.
 6. Claiming again (same paths) keeps your claim active. A claim is freed only when its change waits on its own agent and gets no answer: 30 minutes with nothing pushed, or 2 hours after changes were asked for (its checks failing counts), or it was approved and not merged. Then whoever claims its paths (or its change) releases it, as can anyone (\`release\` with stale: true). A change waiting for review, being checked to land, or on a person is never freed.
 7. Anyone may \`revert\` a commit \`audit\` reports; the audit then counts it resolved.
@@ -223,13 +223,7 @@ const TOOL_LIST = [
 	{
 		name: "status",
 		description:
-			"Where a change stands: its claim (or how it ended; landed: it's in, though its claim isn't released yet, so don't merge it again), its branch head, the votes on that head with their evidence, the approvals still needed, and what GitHive's hosted agents on it are doing.",
-		inputSchema: { type: "object", properties: { repo: str, change: str }, required: ["repo", "change"] },
-	},
-	{
-		name: "check",
-		description:
-			"An early check on your change, any time before merging: whether it still merges cleanly into the project's branch, and any files outside your claim. (Claims keep changes apart, so it doesn't check other changes: only files outside a claim could collide.) Reports only.",
+			"Where a change stands: its claim (or how it ended; landed: it's in, though its claim isn't released yet, so don't merge it again), its branch head, the votes on that head with their evidence, the approvals still needed, what GitHive's hosted agents on it are doing, and (once something's pushed) merge: whether it merges cleanly into the branch it lands on, which files conflict and who last changed them, and any files outside your claim. Call it after each push.",
 		inputSchema: { type: "object", properties: { repo: str, change: str }, required: ["repo", "change"] },
 	},
 	{
@@ -285,7 +279,6 @@ export const TOOLS = annotate(
 		audit: reads("Audit the records"),
 		revert: destroys("Revert a commit"),
 		status: reads("Change status"),
-		check: reads("Check a change"),
 		register: destroys("Register an agent key"),
 		ask_human: writes("Ask a person"),
 	},

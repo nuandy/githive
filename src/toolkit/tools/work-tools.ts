@@ -1,9 +1,12 @@
-import { requiredString } from "../../errors";
-import type { Settled } from "../landing";
+import { requiredString, statusOf } from "../../errors";
+import { branchHead } from "../../git";
+import { checkChange } from "../check";
+import type { ClaimRecord } from "../claims";
+import { lastLandedOn, type Settled } from "../landing";
 import { addWork, addWorks, backlogFor, reviewsFor, type Work } from "../work";
 import { changeStatus } from "./change-state";
 import { workItemFrom } from "./claim-input";
-import type { ToolHandlers } from "./context";
+import type { ToolCall, ToolHandlers } from "./context";
 import { tellPeopleOfWaitingRoles } from "./dashboard";
 import { branchSettings, DEFAULT_POLICY, LISTED_AT_MOST, MOST_AT_ONCE, recordLog, workRef } from "./repo";
 
@@ -57,7 +60,8 @@ export const workTools: ToolHandlers = {
 		const added = await addWork(recordLog<Work>(ctx, repo, workRef(repo)), { ...item, by });
 		return added.ok ? { ok: true, id: item.id } : { ok: false, reason: added.refused };
 	},
-	async status({ args, ctx, repo, votes, registered, branch, changeOf, claimOf, waitingOn }) {
+	async status(call) {
+		const { args, ctx, repo, votes, registered, branch, changeOf, claimOf, waitingOn } = call;
 		const change = requiredString(args, "change");
 		const held = (await claimOf(change)) ?? null;
 		const released = held ? undefined : (await changeOf(change)).released.at(-1);
@@ -88,6 +92,60 @@ export const workTools: ToolHandlers = {
 		if (released) reply.released = released;
 		if (landed) reply.landed = { commit: landed.commit, at: landed.at };
 		if (waits.length) reply.waitsOn = waits;
-		return Object.assign(reply, status);
+		Object.assign(reply, status);
+		// Whether it merges cleanly and stays inside its claim: worth knowing before asking for review.
+		if (held && status.head && !landed) {
+			const checked = await mergeCheck(call, change, held, status.head).catch((err) => ({
+				error: statusOf(err).message,
+			}));
+			reply.merge = checked;
+		}
+		return reply;
 	},
 };
+
+/**
+ * Whether a change merges cleanly into the branch it lands on (and who last changed any file it conflicts on),
+ * and its files outside its claim. Worked out once per change head and branch head, so status stays cheap until
+ * the agent pushes or the branch moves; worked out afresh, it warms the merge's check container.
+ */
+async function mergeCheck(call: ToolCall, change: string, own: ClaimRecord, head: string) {
+	const { ctx, repo, branch, changeSource, warmChecks } = call;
+	const into = own.into ?? branch;
+	const project = await ctx.remote(repo, "read");
+	const onto = ctx.branchHead ? await ctx.branchHead(repo, into) : await branchHead(project, into);
+	if (!onto) throw new Error(`[409] ${into} doesn't exist yet`);
+	const kept = await ctx.mergeChecks?.kept(repo, change).catch(() => null);
+	if (kept?.key === `${head} ${onto}`) return kept.result;
+	const source = await changeSource(own.agent, "read", change, own.since);
+	const checked = await checkChange({
+		project,
+		branch: into,
+		source,
+		claims: [own],
+		change,
+		branchHead: async () => onto,
+		...(ctx.history ? { history: ctx.history } : {}),
+	});
+	const conflicts = checked.main.clean ? [] : (checked.main.conflicts ?? []);
+	const result = {
+		into,
+		branchHead: onto,
+		clean: checked.main.clean,
+		...(conflicts.length ? { conflicts, causes: await conflictCauses(call, into, conflicts) } : {}),
+		outsideClaim: checked.outsideClaim,
+	};
+	// Kept under the head the check read, which may be newer than status's.
+	await ctx.mergeChecks?.keep(repo, change, { key: `${checked.head} ${onto}`, result }).catch(() => undefined);
+	await warmChecks("checked", change);
+	return result;
+}
+
+/** Who last changed each conflicting file, as the landing remembers it: whom to ask about the conflict. */
+async function conflictCauses({ ctx, repo }: ToolCall, into: string, conflicts: string[]) {
+	const landing = await ctx
+		.landing?.(repo, into)
+		.view()
+		.catch(() => null);
+	return lastLandedOn(landing?.recent ?? [], conflicts);
+}

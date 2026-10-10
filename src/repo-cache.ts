@@ -72,7 +72,24 @@ const FORK_TRIES = 3;
 const STORAGE_BATCH = 128;
 
 /** What clearViews forgets: everything kept for a repo. */
-const KEPT_PREFIXES = ["view:", "building:", "record:", "tip:", "forks:", "landing:", "head:", "files:", "news:"];
+const KEPT_PREFIXES = [
+	"view:",
+	"building:",
+	"record:",
+	"tip:",
+	"forks:",
+	"landing:",
+	"head:",
+	"files:",
+	"news:",
+	"merge:",
+];
+
+/** A change's merge check as status worked it out, for the change head and branch head in `key`. */
+export interface KeptMergeCheck {
+	key: string;
+	result: unknown;
+}
 
 export class RepoCache extends DurableObject<Env> {
 	async fetch(request: Request) {
@@ -122,6 +139,15 @@ export class RepoCache extends DurableObject<Env> {
 	 */
 	async noteHeads(seen: Record<string, string | null>, readAt = Date.now()) {
 		await this.keepNewest(Object.entries(seen).map(([change, head]) => [change, { head, at: readAt }]));
+	}
+
+	/** A change's merge check, as status last worked it out (see KeptMergeCheck). */
+	async keptMergeCheck(change: string) {
+		return (await this.ctx.storage.get<KeptMergeCheck>(`merge:${change}`)) ?? null;
+	}
+
+	async keepMergeCheck(change: string, kept: KeptMergeCheck) {
+		await this.ctx.storage.put(`merge:${change}`, kept);
 	}
 
 	/** Note pushes from push events. Events can arrive late, twice or out of order, so the newest wins. */
