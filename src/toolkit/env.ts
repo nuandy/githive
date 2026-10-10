@@ -177,19 +177,24 @@ export function toolContextFor(
 ): ToolContext {
 	return {
 		...caller,
+		...repoCacheParts(env),
+		...artifactsParts(env),
+		...gateParts(env),
+		...hostedParts(env),
+		...githubApp(env),
+		stamper: async (agent) => {
+			if (!env.STAMP_KEY || !by) return undefined;
+			return makeStamper(env.STAMP_KEY, agent ? `${by}/${agent}` : by);
+		},
+	};
+}
+
+/** The repo's index entry and its RepoCache: summaries, cached reads, known heads and the fork queue. */
+function repoCacheParts(env: Env) {
+	return {
 		register: async (repo) => env.REPO_INDEX.getByName("all").addRepo(repo),
 		summarize: (repo, patch) => env.REPO_INDEX.getByName("all").summarize(`repo:${repo}`, patch),
 		ping: async (repo) => void (await env.REPO_CACHE?.getByName(`repo:${repo}`).ping("records")),
-		// The repo's own Gate keeps its snapshot fresh (see Gate.warmUp); a batch's checks run in the batch's own Gates.
-		warmChecks: async (repo, { expect, ...input }) => {
-			const remote = await projectRemote(env, repo, "read");
-			await env.GATE.getByName(`repo:${repo}`).warmUp({
-				repo,
-				...input,
-				base: { remote: remote.url, token: remote.token },
-				why: expect,
-			});
-		},
 		// Claims for advice, cached so a busy repo isn't read whole on every call.
 		keptClaims: (repo, read) => keptRead(env, repo, "claims-advice", KEPT_CLAIMS_MS, read),
 		// Heads read from forks, plus those push events reported from the claim holders' forks (see push-events.ts).
@@ -205,7 +210,6 @@ export function toolContextFor(
 			keep: (repo, change, kept) => env.REPO_CACHE.getByName(`repo:${repo}`).keepMergeCheck(change, kept),
 		},
 		news: (repo, branch, agent) => rpc(env.REPO_CACHE.getByName(`repo:${repo}`).landingNews(branch, agent)),
-		...githubApp(env),
 		// A branch's head, briefly cached for every merge watching it (see MergeInput.branchHead).
 		branchHead: (repo, branch) =>
 			keptRead(
@@ -222,18 +226,12 @@ export function toolContextFor(
 				repo,
 				items === "seeds" ? seedItems() : items.map((agent) => `agent:${agent}`),
 			)),
-		// Review holds live in one of the repo's records repos once it has them (see review-holds.ts), otherwise
-		// beside the claims and votes.
-		reviews: reviewHolds({
-			waits: (repo) => reviewsLog(env, repo),
-			holds: (repo, bucket) => holdsLog(env, repo, bucket),
-		}),
-		requestReview: (input) => startHostedReviewers(env, input),
-		startBuilder: (input) => startHostedBuilder(env, input),
-		stamper: async (agent) => {
-			if (!env.STAMP_KEY || !by) return undefined;
-			return makeStamper(env.STAMP_KEY, agent ? `${by}/${agent}` : by);
-		},
+	} satisfies Partial<ToolContext>;
+}
+
+/** Credentials for the project, its forks and records repos, and reads through Artifacts' API. */
+function artifactsParts(env: Env) {
+	return {
 		remote: (repo, scope) => projectRemote(env, repo, scope),
 		changeRemote: (repo, agent, scope) => forkRemote(env, repo, agent, scope),
 		legacyChangeRemote: (repo, change) =>
@@ -252,14 +250,10 @@ export function toolContextFor(
 			);
 		},
 		records: <S>(repo: string, ref: string) => recordsLog<S>(env, repo, ref),
-		agentStatus: (repo, change, head, roles) => hostedAgentStatus(env, repo, change, head, roles),
 		head: async (repo, branch) =>
 			(await headOf(env.ARTIFACTS, repo, branch)) ?? fail(409, `${repo} has no ${branch} branch`),
 		defaultBranch: async (repo) =>
 			(await defaultBranch(await remoteFor(env.ARTIFACTS, repo, "read", 3600))) ?? fail(409, `${repo} has no commits`),
-		// A batch's checks run on main with its changes merged in order, in Gates named for the batch and its place
-		// in the bisection. Without a name they run in the last change's Gate.
-		runChecks: (repo) => checksRunner(env, repo),
 		// A branch's commits for the audit, read through the Artifacts API with each merge's files cached in the
 		// RepoCache (see branch-history.ts).
 		readBranch: (repo, baseline, branch) => readBranchCommits(env, repo, baseline, branch),
@@ -267,6 +261,25 @@ export function toolContextFor(
 		history: (name, read) => withHistory(env.ARTIFACTS, name, read),
 		// A branch's head in an agent's fork, from one Artifacts log call with no token or Git listing.
 		forkHead: (repo, agent, ref) => forkHead(env, repo, agent, ref),
+	} satisfies Partial<ToolContext>;
+}
+
+/** The Gate containers that check and land batches, and the landing lease that orders them. */
+function gateParts(env: Env) {
+	return {
+		// The repo's own Gate keeps its snapshot fresh (see Gate.warmUp); a batch's checks run in the batch's own Gates.
+		warmChecks: async (repo, { expect, ...input }) => {
+			const remote = await projectRemote(env, repo, "read");
+			await env.GATE.getByName(`repo:${repo}`).warmUp({
+				repo,
+				...input,
+				base: { remote: remote.url, token: remote.token },
+				why: expect,
+			});
+		},
+		// A batch's checks run on main with its changes merged in order, in Gates named for the batch and its place
+		// in the bisection. Without a name they run in the last change's Gate.
+		runChecks: (repo) => checksRunner(env, repo),
 		// Start a batch's first check container while the batch is read (see MergeInput.prepareChecks).
 		prepareChecks: (repo) => (gate) => bootGate(env, repo, `repo:${repo}:check:${gate}`),
 		// Start the repo's own Gate while a batch is read, so landing finds it running (see MergeInput.prepareLanding).
@@ -284,7 +297,22 @@ export function toolContextFor(
 				view: () => rpcRetried(() => cache().landingView(branch)),
 			});
 		},
-	};
+	} satisfies Partial<ToolContext>;
+}
+
+/** GitHive's hosted reviewers and builder, and the review holds they share with agents. */
+function hostedParts(env: Env) {
+	return {
+		// Review holds live in one of the repo's records repos once it has them (see review-holds.ts), otherwise
+		// beside the claims and votes.
+		reviews: reviewHolds({
+			waits: (repo) => reviewsLog(env, repo),
+			holds: (repo, bucket) => holdsLog(env, repo, bucket),
+		}),
+		requestReview: (input) => startHostedReviewers(env, input),
+		startBuilder: (input) => startHostedBuilder(env, input),
+		agentStatus: (repo, change, head, roles) => hostedAgentStatus(env, repo, change, head, roles),
+	} satisfies Partial<ToolContext>;
 }
 
 async function reviewsLog(env: Env, repo: string) {

@@ -190,6 +190,46 @@ export async function openCall(args: Args, ctx: ToolContext, run: RunTool) {
 	// Read once per call. Only settings, when it starts GitHive, reads it again after writing it.
 	const rootHead = await claims.read();
 	const registered = rootHead?.commit.state;
+	const { acting, agentArg, actAs } = await callerOf(args, ctx, registered);
+	const stamper = await ctx.stamper?.(acting);
+	const store = storeFor(ctx, repo, registered, { log: claims, head: rootHead });
+	// Changes land on the project's branch unless their claim names another with `into`.
+	const branch = projectBranch(registered);
+	const { adviceView, changeOf, claimOf, waitingOn } = claimViews(ctx, repo, store, branch);
+	const changeSource = changeSourceFor(ctx, repo);
+	const openHeads = (claims: ClaimRecord[], fresh: (claim: ClaimRecord) => boolean = () => false) =>
+		readOpenHeads(ctx, repo, claims, fresh);
+	const openWork = (agent: string) =>
+		readOpenWork({ ctx, repo, branch, registered, stamper, votes, adviceView, openHeads }, agent);
+	const warmChecks = gateWarmer(ctx, repo, registered);
+	return {
+		args,
+		ctx,
+		run,
+		repo,
+		write,
+		claims,
+		votes,
+		registered,
+		acting,
+		agentArg,
+		actAs,
+		stamper,
+		store,
+		branch,
+		adviceView,
+		changeOf,
+		claimOf,
+		waitingOn,
+		changeSource,
+		openHeads,
+		openWork,
+		warmChecks,
+	};
+}
+
+/** Who the call is from: a signed-in agent, or the agent its key names; and the agent each argument names. */
+async function callerOf(args: Args, ctx: ToolContext, registered: Registry | undefined) {
 	const key = ctx.agentKey ?? (typeof args.agent_key === "string" ? args.agent_key : undefined);
 	// A signed-in agent is who its token says; otherwise an agent key names the agent.
 	const acting = ctx.agent ?? (key ? await keyAgent(registered, key) : undefined);
@@ -203,10 +243,11 @@ export async function openCall(args: Args, ctx: ToolContext, run: RunTool) {
 		mayActAs(agent, acting, registered, ctx.hosted);
 		return agent;
 	};
-	const stamper = await ctx.stamper?.(acting);
-	const store = storeFor(ctx, repo, registered, { log: claims, head: rootHead });
-	// Changes land on the project's branch unless their claim names another with `into`.
-	const branch = projectBranch(registered);
+	return { acting, agentArg, actAs };
+}
+
+/** The claims as read once for this call, each change's at most once, presented on the branch they land on. */
+function claimViews(ctx: ToolContext, repo: string, store: ClaimStore, branch: string) {
 	const present = <C extends ClaimRecord>(claim: C) => presentClaim(claim, branch);
 	let viewing: ReturnType<ClaimStore["read"]> | undefined;
 	const view = () => (viewing ??= store.read().then((stored) => ({ ...stored, claims: stored.claims.map(present) })));
@@ -242,13 +283,12 @@ export async function openCall(args: Args, ctx: ToolContext, run: RunTool) {
 		const waits = await Promise.all(after.map((dependency) => dependencyWait(dependency, into)));
 		return waits.filter((wait): wait is string => !!wait);
 	};
-	const changeSource = changeSourceFor(ctx, repo);
-	const openHeads = (claims: ClaimRecord[], fresh: (claim: ClaimRecord) => boolean = () => false) =>
-		readOpenHeads(ctx, repo, claims, fresh);
-	const openWork = (agent: string) =>
-		readOpenWork({ ctx, repo, branch, registered, stamper, votes, adviceView, openHeads }, agent);
-	// Warm the repo's Gate ahead of a likely merge: for its checks, or without any, for its landing.
-	const warmChecks = async (expect: "claimed" | "checked" | "approved", key: string) => {
+	return { adviceView, changeOf, claimOf, waitingOn };
+}
+
+/** Warms the repo's Gate ahead of a likely merge: for its checks, or without any, for its landing. */
+function gateWarmer(ctx: ToolContext, repo: string, registered: Registry | undefined) {
+	return async (expect: "claimed" | "checked" | "approved", key: string) => {
 		if (registered?.baseline)
 			await ctx
 				.warmChecks?.(repo, {
@@ -258,30 +298,6 @@ export async function openCall(args: Args, ctx: ToolContext, run: RunTool) {
 					key,
 				})
 				.catch(() => undefined);
-	};
-	return {
-		args,
-		ctx,
-		run,
-		repo,
-		write,
-		claims,
-		votes,
-		registered,
-		acting,
-		agentArg,
-		actAs,
-		stamper,
-		store,
-		branch,
-		adviceView,
-		changeOf,
-		claimOf,
-		waitingOn,
-		changeSource,
-		openHeads,
-		openWork,
-		warmChecks,
 	};
 }
 
