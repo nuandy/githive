@@ -31,22 +31,24 @@ export function changePushOf(body: PushedEvent, namespace: string): { projects: 
 	const ref = body.payload?.ref ?? "";
 	const after = body.payload?.after ?? "";
 	const at = Date.parse(body.metadata?.eventTimestamp ?? "");
-	if (
-		!fork.startsWith("fork--") ||
-		!ref.startsWith(CHANGE_REF) ||
-		ref.length === CHANGE_REF.length ||
-		!/^[0-9a-f]{40}$/.test(after) ||
-		Number.isNaN(at)
-	)
-		return null;
-	const projects: string[] = [];
-	for (let i = fork.indexOf("--agent--", 6); i > 6; i = fork.indexOf("--agent--", i + 1))
-		if (i + 9 < fork.length) projects.push(fork.slice(6, i));
+	const isChangeRef = ref.startsWith(CHANGE_REF) && ref.length > CHANGE_REF.length;
+	if (!fork.startsWith("fork--") || !isChangeRef || !/^[0-9a-f]{40}$/.test(after) || Number.isNaN(at)) return null;
+	const projects = candidateProjects(fork);
 	if (!projects.length) return null;
 	return {
 		projects,
 		push: { change: ref.slice(CHANGE_REF.length), fork, head: DELETED.test(after) ? null : after, at },
 	};
+}
+
+/** Every project a fork's name could belong to: what precedes each `--agent--` followed by a slug. */
+function candidateProjects(fork: string) {
+	const projects: string[] = [];
+	const prefix = "fork--".length;
+	const marker = "--agent--";
+	for (let at = fork.indexOf(marker, prefix); at > prefix; at = fork.indexOf(marker, at + 1))
+		if (at + marker.length < fork.length) projects.push(fork.slice(prefix, at));
+	return projects;
 }
 
 /** The Worker's queue consumer. It notes each batch's pushes in their projects' RepoCaches, one call per project. */
@@ -73,14 +75,15 @@ export async function notePushEvents(batch: MessageBatch<unknown>, env: Env) {
 				await rpc(env.REPO_CACHE.getByName(`repo:${project}`).notePushes(pushes));
 			} catch (err) {
 				console.error(`noting ${pushes.length} pushes in ${project}'s RepoCache failed: ${String(err)}`);
-				for (const m of messages) failed.add(m);
+				for (const message of messages) failed.add(message);
 			}
 		}),
 	);
 	// Noting is idempotent because the newest push wins, so a message that failed for any project is retried whole.
-	for (const m of new Set([...byProject.values()].flatMap((e) => e.messages))) {
-		if (failed.has(m)) m.retry();
-		else m.ack();
+	const noted = new Set([...byProject.values()].flatMap((entry) => entry.messages));
+	for (const message of noted) {
+		if (failed.has(message)) message.retry();
+		else message.ack();
 	}
 }
 

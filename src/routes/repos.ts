@@ -1,12 +1,13 @@
 import type { Hono } from "hono";
 import type { Principal } from "../auth/principal";
 import { resolveRepo } from "../auth/access-control";
-import { OrgStore, validRepoName } from "../auth/orgs";
+import { type Org, OrgStore, validRepoName } from "../auth/orgs";
 import { ensureRepo, forkAndWait, leftoversOf, listRepoNames, remoteFor } from "../artifacts";
 import { fail } from "../errors";
 import { retryTransient } from "../retry";
-import { callTool, openCount } from "../toolkit/mcp";
-import { initialFiles, parseInit, writeFirstCommit } from "../repo-init";
+import { type ToolContext, callTool, openCount } from "../toolkit/mcp";
+import { type InitOptions, initialFiles, parseInit, writeFirstCommit } from "../repo-init";
+import type { RepoSummary } from "../repo-index";
 import { rpc } from "../rpc";
 import {
 	type AppEnv,
@@ -33,9 +34,82 @@ async function visibleRepos(env: Env, principal: Principal | undefined) {
 	const inOrgs = orgs ? await orgs.allRepos() : [];
 	const ids = new Set(inOrgs.map((r) => r.id));
 	const loose = (await listRepoNames(env.ARTIFACTS))
-		.filter((n) => isProject(n) && !ids.has(n))
+		.filter((name) => isProject(name) && !ids.has(name))
 		.map((id) => ({ id, org: "_", name: id, fullName: `_/${id}`, visibility: "private" as const, createdAt: "" }));
 	return [...inOrgs, ...loose];
+}
+
+/** Where a new repo's content comes from: a repo to copy, a Git URL to import, or the files of a first commit. */
+interface RepoSource {
+	from: unknown;
+	url: unknown;
+	branch: unknown;
+	init: InitOptions;
+}
+
+/** Fills a new, empty repo `id` in `org` from its source. */
+async function fillNewRepo(env: Env, principal: Principal, org: Org, repoName: string, id: string, source: RepoSource) {
+	const { from, url, branch } = source;
+	if (typeof from === "string" && from) {
+		const copied = await resolveRepo(env, principal, from, "read");
+		await forkAndWait(env.ARTIFACTS, copied.id, id, `A copy of ${copied.fullName}`);
+		return;
+	}
+	if (typeof url === "string" && url) {
+		await retryTransient(() =>
+			env.ARTIFACTS.import({
+				source: { url, branch: typeof branch === "string" ? branch : undefined },
+				target: { name: id },
+			}),
+		);
+		return;
+	}
+	await ensureRepo(env.ARTIFACTS, id, `${org.slug}/${repoName}`);
+	// A first commit (README, .gitignore, license) gives it a main branch, so GitHive can start on it at once.
+	const files = initialFiles({
+		fullName: `${org.slug}/${repoName}`,
+		holder: org.name ?? org.slug,
+		year: new Date().getUTCFullYear(),
+		...source.init,
+	});
+	if (Object.keys(files).length) {
+		const handle = principal.kind === "access" ? "githive" : principal.user.handle;
+		await writeFirstCommit(await remoteFor(env.ARTIFACTS, id, "write"), files, {
+			name: handle,
+			email: `${handle}@users.githive.app`,
+		});
+	}
+}
+
+/** One row of the dashboard's repo list, and whether GitHive has started on the repo. */
+interface RepoListing {
+	repo: string;
+	id: string;
+	since: string;
+	summary: RepoSummary | null;
+	started: boolean;
+}
+
+const needsRecount = (listing: RepoListing) =>
+	!listing.summary?.countedAt || (listing.summary.lastActivity ?? "") > listing.summary.countedAt;
+
+const lastActive = (listing: RepoListing) => listing.summary?.lastActivity ?? listing.since;
+
+/** Recounts a few summaries older than their repo's last activity, the most recently active first. */
+async function recountStale(index: ReturnType<typeof repoIndex>, tools: ToolContext, listings: RepoListing[]) {
+	const now = new Date().toISOString();
+	// The most recently active first: those are the rows people look at.
+	const stale = listings
+		.filter((listing) => listing.started)
+		.filter(needsRecount)
+		.sort((a, b) => lastActive(b).localeCompare(lastActive(a)))
+		.slice(0, 3);
+	await Promise.allSettled(
+		stale.map(async (listing) => {
+			const open = await openCount(tools, listing.id).catch(() => null);
+			await index.summarize(`repo:${listing.id}`, open === null ? { countedAt: now } : { open, countedAt: now });
+		}),
+	);
 }
 
 export function repoRoutes(app: Hono<AppEnv>) {
@@ -67,33 +141,7 @@ export function repoRoutes(app: Hono<AppEnv>) {
 		if (userId && !(await orgs.mayCreateRepo(org, userId))) fail(403, `you can't make repos in ${org.slug}`);
 		if (await orgs.repo(org.slug, repoName)) fail(409, `${org.slug}/${repoName} exists`);
 		const id = `${org.slug}--${repoName.toLowerCase()}`;
-		if (typeof from === "string" && from) {
-			const source = await resolveRepo(c.env, principal, from, "read");
-			await forkAndWait(c.env.ARTIFACTS, source.id, id, `A copy of ${source.fullName}`);
-		} else if (typeof url === "string" && url) {
-			await retryTransient(() =>
-				c.env.ARTIFACTS.import({
-					source: { url, branch: typeof branch === "string" ? branch : undefined },
-					target: { name: id },
-				}),
-			);
-		} else {
-			await ensureRepo(c.env.ARTIFACTS, id, `${org.slug}/${repoName}`);
-			// A first commit (README, .gitignore, license) gives it a main branch, so GitHive can start on it at once.
-			const files = initialFiles({
-				fullName: `${org.slug}/${repoName}`,
-				holder: org.name ?? org.slug,
-				year: new Date().getUTCFullYear(),
-				...start,
-			});
-			if (Object.keys(files).length) {
-				const handle = principal.kind === "access" ? "githive" : principal.user.handle;
-				await writeFirstCommit(await remoteFor(c.env.ARTIFACTS, id, "write"), files, {
-					name: handle,
-					email: `${handle}@users.githive.app`,
-				});
-			}
-		}
+		await fillNewRepo(c.env, principal, org, repoName, id, { from, url, branch, init: start });
 		const repo = await orgs.addRepo(org, repoName, userId, {
 			visibility: visibility === "public" ? "public" : "private",
 			id,
@@ -101,7 +149,10 @@ export function repoRoutes(app: Hono<AppEnv>) {
 		// GitHive starts on it at once with default settings. A repo with no branch yet starts with its first settings.
 		const started = await callTool("settings", { repo: id }, toolContext(c.env, principal)).then(
 			() => true,
-			(err) => (console.error(`starting GitHive on ${org.slug}/${repoName} failed`, String(err)), false),
+			(err) => {
+				console.error(`starting GitHive on ${org.slug}/${repoName} failed`, String(err));
+				return false;
+			},
 		);
 		return c.json({ ...repo, started }, 201);
 	});
@@ -125,31 +176,16 @@ export function repoRoutes(app: Hono<AppEnv>) {
 	app.get("/summaries", async (c) => {
 		const index = repoIndex(c.env);
 		const [listed, visible] = await Promise.all([rpc(index.summaries()), visibleRepos(c.env, c.get("principal"))]);
-		const summaries = new Map(listed.repos.map((r) => [r.repo, r]));
-		const repos = visible.map((r) => ({
-			repo: r.fullName,
-			id: r.id,
-			since: summaries.get(r.id)?.since ?? r.createdAt,
-			summary: summaries.get(r.id)?.summary ?? null,
-			started: summaries.has(r.id),
+		const summaries = new Map(listed.repos.map((row) => [row.repo, row]));
+		const listings: RepoListing[] = visible.map((repo) => ({
+			repo: repo.fullName,
+			id: repo.id,
+			since: summaries.get(repo.id)?.since ?? repo.createdAt,
+			summary: summaries.get(repo.id)?.summary ?? null,
+			started: summaries.has(repo.id),
 		}));
-		const now = new Date().toISOString();
-		// The most recently active first: those are the rows people look at.
-		const stale = repos
-			.filter((r) => r.started)
-			.filter((r) => !r.summary?.countedAt || (r.summary.lastActivity ?? "") > r.summary.countedAt)
-			.sort((a, b) => (b.summary?.lastActivity ?? b.since).localeCompare(a.summary?.lastActivity ?? a.since))
-			.slice(0, 3);
-		const ctx = toolContext(c.env, c.get("principal"));
-		c.executionCtx.waitUntil(
-			Promise.allSettled(
-				stale.map(async (r) => {
-					const open = await openCount(ctx, r.id).catch(() => null);
-					await index.summarize(`repo:${r.id}`, open === null ? { countedAt: now } : { open, countedAt: now });
-				}),
-			),
-		);
-		return c.json({ repos: repos.map(({ started: _started, ...r }) => r) });
+		c.executionCtx.waitUntil(recountStale(index, toolContext(c.env, c.get("principal")), listings));
+		return c.json({ repos: listings.map(({ started: _started, ...listing }) => listing) });
 	});
 
 	app.get("/repos", async (c) => {

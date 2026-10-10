@@ -10,11 +10,11 @@ type Request = Parameters<typeof base.request>[0];
 
 /** The repo a Git URL is for: the segment ending in .git, or the one before info/refs or git-upload-pack. */
 export function repoOfUrl(url: string) {
-	const path = new URL(url).pathname.split("/").filter(Boolean);
-	const git = path.find((p) => p.endsWith(".git"));
-	if (git) return git.slice(0, -4);
-	const protocol = path.findIndex((p) => p === "info" || p.startsWith("git-"));
-	return path[protocol > 0 ? protocol - 1 : path.length - 1] ?? url;
+	const segments = new URL(url).pathname.split("/").filter(Boolean);
+	const repoSegment = segments.find((segment) => segment.endsWith(".git"));
+	if (repoSegment) return repoSegment.slice(0, -4);
+	const protocol = segments.findIndex((segment) => segment === "info" || segment.startsWith("git-"));
+	return segments[protocol > 0 ? protocol - 1 : segments.length - 1] ?? url;
 }
 
 /**
@@ -34,9 +34,21 @@ export function gitAuth(remote: Remote) {
 async function drained(body: AsyncIterableIterator<Uint8Array> | undefined) {
 	const chunks: Uint8Array[] = [];
 	if (body) for await (const chunk of body) chunks.push(chunk);
+	return replay(chunks);
+}
+
+/** A response body that yields `chunks` again. */
+function replay(chunks: Uint8Array[]) {
 	return (async function* () {
 		yield* chunks;
 	})();
+}
+
+/** Every chunk of a response body, read to the end. */
+async function bodyChunks(body: AsyncIterableIterator<Uint8Array> | undefined) {
+	const chunks: Uint8Array[] = [];
+	for await (const chunk of (await drained(body)) as AsyncIterable<Uint8Array>) chunks.push(chunk);
+	return chunks;
 }
 
 export type GitRequests = Map<string, { requests: number; failed: number }>;
@@ -83,35 +95,46 @@ export function repoKind(name: string, project: string | undefined) {
 /** Counts as one log line, such as "git: project 4, forks 2 (1 failed); artifacts 3: get 3 (project 2, records 1)". */
 export function describeCounts(project: string | undefined, git: GitRequests, artifacts: ArtifactsCalls) {
 	const parts: string[] = [];
-	if (git.size) {
-		const kinds = new Map<string, { requests: number; failed: number }>();
-		for (const [name, seen] of git) {
-			const kind = repoKind(name, project);
-			const sum = kinds.get(kind) ?? { requests: 0, failed: 0 };
-			kinds.set(kind, { requests: sum.requests + seen.requests, failed: sum.failed + seen.failed });
-		}
-		parts.push(
-			`git: ${[...kinds].map(([kind, n]) => `${kind} ${n.requests}${n.failed ? ` (${n.failed} failed)` : ""}`).join(", ")}`,
-		);
-	}
-	if (artifacts.size) {
-		const methods = new Map<string, { calls: number; failed: number; kinds: Map<string, number> }>();
-		for (const [key, seen] of artifacts) {
-			const space = key.indexOf(" ");
-			const method = key.slice(0, space);
-			const kind = repoKind(key.slice(space + 1), project);
-			const sum = methods.get(method) ?? { calls: 0, failed: 0, kinds: new Map<string, number>() };
-			sum.calls += seen.calls;
-			sum.failed += seen.failed;
-			sum.kinds.set(kind, (sum.kinds.get(kind) ?? 0) + seen.calls);
-			methods.set(method, sum);
-		}
-		const total = [...methods.values()].reduce((n, m) => n + m.calls, 0);
-		parts.push(
-			`artifacts ${total}: ${[...methods].map(([method, m]) => `${method} ${m.calls} (${[...m.kinds].map(([kind, n]) => `${kind} ${n}`).join(", ")}${m.failed ? `; ${m.failed} failed` : ""})`).join(", ")}`,
-		);
-	}
+	if (git.size) parts.push(`git: ${describeGitRequests(project, git)}`);
+	if (artifacts.size) parts.push(describeArtifactsCalls(project, artifacts));
 	return parts.join("; ");
+}
+
+/** Git requests summed by kind of repo, such as "project 4, forks 2 (1 failed)". */
+function describeGitRequests(project: string | undefined, git: GitRequests) {
+	const kinds = new Map<string, { requests: number; failed: number }>();
+	for (const [name, seen] of git) {
+		const kind = repoKind(name, project);
+		const sum = kinds.get(kind) ?? { requests: 0, failed: 0 };
+		kinds.set(kind, { requests: sum.requests + seen.requests, failed: sum.failed + seen.failed });
+	}
+	const described = [...kinds].map(([kind, sum]) => {
+		const failed = sum.failed ? ` (${sum.failed} failed)` : "";
+		return `${kind} ${sum.requests}${failed}`;
+	});
+	return described.join(", ");
+}
+
+/** Artifacts calls summed by method, such as "artifacts 3: get 3 (project 2, records 1)". */
+function describeArtifactsCalls(project: string | undefined, artifacts: ArtifactsCalls) {
+	const methods = new Map<string, { calls: number; failed: number; kinds: Map<string, number> }>();
+	for (const [key, seen] of artifacts) {
+		const space = key.indexOf(" ");
+		const method = key.slice(0, space);
+		const kind = repoKind(key.slice(space + 1), project);
+		const sum = methods.get(method) ?? { calls: 0, failed: 0, kinds: new Map<string, number>() };
+		sum.calls += seen.calls;
+		sum.failed += seen.failed;
+		sum.kinds.set(kind, (sum.kinds.get(kind) ?? 0) + seen.calls);
+		methods.set(method, sum);
+	}
+	const total = [...methods.values()].reduce((calls, sum) => calls + sum.calls, 0);
+	const described = [...methods].map(([method, sum]) => {
+		const kinds = [...sum.kinds].map(([kind, calls]) => `${kind} ${calls}`).join(", ");
+		const failed = sum.failed ? `; ${sum.failed} failed` : "";
+		return `${method} ${sum.calls} (${kinds}${failed})`;
+	});
+	return `artifacts ${total}: ${described.join(", ")}`;
 }
 
 /**
@@ -140,60 +163,23 @@ export async function gitFetch(url: string, init: RequestInit): Promise<Response
 	}
 }
 
+type GitResponse = Awaited<ReturnType<typeof base.request>>;
+
 export const http = {
 	async request(request: Request) {
 		// Collect the body once so it can be sent again. The client doesn't stream uploads anyway.
 		const body = request.body ? [await collected(request.body)] : undefined;
 		for (let attempt = 1; ; attempt++) {
-			const response = await base
-				.request({ ...request, ...(body ? { body: body as never } : {}), signal: AbortSignal.timeout(gitTimeout.ms) })
-				.catch((err) => {
-					if (!timedOut(err)) throw err;
-					return {
-						url: request.url,
-						method: request.method,
-						statusCode: 504,
-						statusMessage: `no answer in ${gitTimeout.ms / 1000} s`,
-						headers: {},
-						body: undefined,
-					} as unknown as Awaited<ReturnType<typeof base.request>>;
-				});
-			// A busy Artifacts repo sometimes answers a fetch with 200 and an empty body, which git rejects
-			// ("expected 'packfile'"). A real answer is never empty, so treat it as a server failure.
-			if (request.url.endsWith("/git-upload-pack") && response.statusCode === 200) {
-				const chunks: Uint8Array[] = [];
-				for await (const chunk of (await drained(response.body)) as AsyncIterable<Uint8Array>) chunks.push(chunk);
-				if (!chunks.some((c) => c.length))
-					Object.assign(response, { statusCode: 502, statusMessage: "empty answer to a fetch" });
-				else
-					response.body = (async function* () {
-						yield* chunks;
-					})();
-			}
+			const response = await requestOnce(request, body);
+			if (request.url.endsWith("/git-upload-pack") && response.statusCode === 200) await failEmptyFetch(response);
 			noteGitRequest(request.url, response.statusCode);
 			// Read a failure's body now; left unread, it holds a connection open.
 			if (response.statusCode >= 400) response.body = await drained(response.body);
-			// Artifacts refuses a push while the repo takes another, with an ERR line isomorphic-git can't parse
-			// ("Expected unpack ok"). Detect it here so the pusher can retry.
-			else if (request.url.endsWith("/git-receive-pack")) {
-				const chunks: Uint8Array[] = [];
-				for await (const chunk of (await drained(response.body)) as AsyncIterable<Uint8Array>) chunks.push(chunk);
-				if (
-					/receive_pack_busy/.test(
-						new TextDecoder().decode(chunks.length === 1 ? chunks[0] : await new Blob(chunks).arrayBuffer()),
-					)
-				)
-					throw Object.assign(
-						new Error(`push refused: ${repoOfUrl(request.url)} is busy with another (artifacts_git_receive_pack_busy)`),
-						{ code: "RECEIVE_PACK_BUSY" },
-					);
-				response.body = (async function* () {
-					yield* chunks;
-				})();
-			}
+			else if (request.url.endsWith("/git-receive-pack")) await refuseBusyPush(request.url, response);
 			if (response.statusCode < 500) return response;
 			if (attempt < GIT_TRIES) {
-				await new Promise((resolve) => setTimeout(resolve, GIT_RETRY_MS * 2 ** (attempt - 1) * (0.5 + Math.random())));
+				const jitter = 0.5 + Math.random();
+				await new Promise((resolve) => setTimeout(resolve, GIT_RETRY_MS * 2 ** (attempt - 1) * jitter));
 				continue;
 			}
 			throw Object.assign(
@@ -206,14 +192,56 @@ export const http = {
 	},
 };
 
+/** One try of a Git request. A request that goes unanswered for gitTimeout.ms comes back as a 504. */
+function requestOnce(request: Request, body: Uint8Array[] | undefined): Promise<GitResponse> {
+	const withBody = body ? { ...request, body: body as never } : request;
+	return base.request({ ...withBody, signal: AbortSignal.timeout(gitTimeout.ms) }).catch((err) => {
+		if (!timedOut(err)) throw err;
+		return {
+			url: request.url,
+			method: request.method,
+			statusCode: 504,
+			statusMessage: `no answer in ${gitTimeout.ms / 1000} s`,
+			headers: {},
+			body: undefined,
+		} as unknown as GitResponse;
+	});
+}
+
+/**
+ * A busy Artifacts repo sometimes answers a fetch with 200 and an empty body, which git rejects
+ * ("expected 'packfile'"). A real answer is never empty, so this marks it as a server failure.
+ */
+async function failEmptyFetch(response: GitResponse) {
+	const chunks = await bodyChunks(response.body);
+	if (!chunks.some((chunk) => chunk.length))
+		Object.assign(response, { statusCode: 502, statusMessage: "empty answer to a fetch" });
+	else response.body = replay(chunks);
+}
+
+/**
+ * Artifacts refuses a push while the repo takes another, with an ERR line isomorphic-git can't parse
+ * ("Expected unpack ok"). This throws for it so the pusher can retry.
+ */
+async function refuseBusyPush(url: string, response: GitResponse) {
+	const chunks = await bodyChunks(response.body);
+	const bytes = chunks.length === 1 ? chunks[0] : await new Blob(chunks).arrayBuffer();
+	if (/receive_pack_busy/.test(new TextDecoder().decode(bytes)))
+		throw Object.assign(
+			new Error(`push refused: ${repoOfUrl(url)} is busy with another (artifacts_git_receive_pack_busy)`),
+			{ code: "RECEIVE_PACK_BUSY" },
+		);
+	response.body = replay(chunks);
+}
+
 async function collected(body: AsyncIterable<Uint8Array> | Iterable<Uint8Array>) {
 	const chunks: Uint8Array[] = [];
 	for await (const chunk of body) chunks.push(chunk);
-	const all = new Uint8Array(chunks.reduce((n, c) => n + c.length, 0));
+	const all = new Uint8Array(chunks.reduce((total, chunk) => total + chunk.length, 0));
 	let at = 0;
-	for (const c of chunks) {
-		all.set(c, at);
-		at += c.length;
+	for (const chunk of chunks) {
+		all.set(chunk, at);
+		at += chunk.length;
 	}
 	return all;
 }

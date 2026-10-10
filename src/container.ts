@@ -89,8 +89,8 @@ export async function installToolchains(container: Container, cwd = WORKDIR) {
 	await run(container, ["bash", "-c", "cat > /etc/profile.d/githive.sh"], "/", PROFILE);
 	const installed = [];
 	for (const toolchain of toolchains) {
-		const r = await run(container, ["bash", "-lc", INSTALL[toolchain]], "/", undefined, 600);
-		installed.push({ toolchain, exitCode: r.exitCode, output: r.output });
+		const ran = await run(container, ["bash", "-lc", INSTALL[toolchain]], "/", undefined, 600);
+		installed.push({ toolchain, exitCode: ran.exitCode, output: ran.output });
 	}
 	return installed;
 }
@@ -114,11 +114,11 @@ export async function takeGitRequests(
 		`echo "failed $(grep -cE '<= Recv header: HTTP/[0-9.]+ 5[0-9][0-9]' "$f.taken")"`,
 		`rm -f "$f.taken"`,
 	].join("\n");
-	const r = await run(container, ["bash", "-c", script]).catch(() => null);
-	if (!r || r.exitCode !== 0) return null;
+	const taken = await run(container, ["bash", "-c", script]).catch(() => null);
+	if (!taken || taken.exitCode !== 0) return null;
 	const paths = new Map<string, number>();
 	let failed = 0;
-	for (const line of r.output.split("\n")) {
+	for (const line of taken.output.split("\n")) {
 		const counted = line.trim().match(/^(\d+) (\/\S*)$/);
 		if (counted) paths.set(counted[2], (paths.get(counted[2]) ?? 0) + Number(counted[1]));
 		const failing = line.match(/^failed (\d+)$/);

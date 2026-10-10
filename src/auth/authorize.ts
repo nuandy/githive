@@ -75,13 +75,14 @@ export function formAction(redirectUri?: string) {
 }
 
 const html = (body: string, status = 200, headers?: Headers, redirectUri?: string, nonce?: string) => {
-	const h = new Headers(headers);
-	h.set("Content-Type", "text/html; charset=utf-8");
-	h.set(
+	const responseHeaders = new Headers(headers);
+	responseHeaders.set("Content-Type", "text/html; charset=utf-8");
+	const scriptSource = nonce ? ` script-src 'nonce-${nonce}';` : "";
+	responseHeaders.set(
 		"Content-Security-Policy",
-		`default-src 'none'; style-src 'unsafe-inline'; font-src 'self'; img-src data:;${nonce ? ` script-src 'nonce-${nonce}';` : ""} form-action ${formAction(redirectUri)}; frame-ancestors 'none'`,
+		`default-src 'none'; style-src 'unsafe-inline'; font-src 'self'; img-src data:;${scriptSource} form-action ${formAction(redirectUri)}; frame-ancestors 'none'`,
 	);
-	return new Response(body, { status, headers: h });
+	return new Response(body, { status, headers: responseHeaders });
 };
 
 const problem = (message: string, status = 400) =>
@@ -97,8 +98,8 @@ function signInPage(details: ConsentDescription, returnTo: string, providers: st
 	const names: Record<string, string> = { github: "GitHub", google: "Google" };
 	const buttons = providers
 		.map(
-			(p) =>
-				`<a class="button${p === "github" ? " primary" : ""}" href="/auth/${p}?return=${encodeURIComponent(returnTo)}">Sign in with ${names[p]}</a>`,
+			(provider) =>
+				`<a class="button${provider === "github" ? " primary" : ""}" href="/auth/${provider}?return=${encodeURIComponent(returnTo)}">Sign in with ${names[provider]}</a>`,
 		)
 		.join("");
 	return page(
@@ -154,7 +155,7 @@ function consentPage(
 	const name = escape(details.clientName);
 	const suggested = suggestedAgentName(details.clientName);
 	// Preselect the agent named for this app, if there is one. Otherwise suggest a new one.
-	const match = agents.find((a) => a.name === suggested);
+	const match = agents.find((agent) => agent.name === suggested);
 	const who = details.clientDomain
 		? `${name}, published by <strong>${escape(details.clientDomain)}</strong>`
 		: `${name}`;
@@ -164,8 +165,8 @@ function consentPage(
 		: `<strong>${escape(details.redirectHost)}</strong>`;
 	const choices = agents
 		.map(
-			(a) =>
-				`<label><input type="radio" name="agent" value="${escape(a.id)}"${a === match ? " checked" : ""}> <code>${escape(user.handle)}/${escape(a.name)}</code></label>`,
+			(agent) =>
+				`<label><input type="radio" name="agent" value="${escape(agent.id)}"${agent === match ? " checked" : ""}> <code>${escape(user.handle)}/${escape(agent.name)}</code></label>`,
 		)
 		.join("");
 	return page(
@@ -190,34 +191,48 @@ ${choices}
 
 const oauthOf = (env: Env) => (env as unknown as { OAUTH_PROVIDER?: OAuthHelpers }).OAUTH_PROVIDER;
 
+/** An error's message without its [status] prefix, to show on the form. */
+function formError(err: unknown) {
+	const message = err instanceof Error ? err.message : String(err);
+	return message.replace(/^\[\d+\]\s*/, "");
+}
+
+function signInResponse(c: Context<AuthEnv>, details: ConsentDescription) {
+	const url = new URL(c.req.url);
+	const providers = (["github", "google"] as const).filter(
+		(provider) => (c.env as unknown as Record<string, unknown>)[`${provider.toUpperCase()}_CLIENT_ID`],
+	);
+	return html(signInPage(details, `${url.pathname}${url.search}`, providers));
+}
+
+/** The consent form, with a fresh nonce for its script. */
+function consentResponse(
+	details: ConsentDescription,
+	handle: string,
+	user: User,
+	agents: Agent[],
+	options: { status?: number; headers?: Headers; error?: string } = {},
+) {
+	const nonce = randomSecret(16);
+	const body = consentPage(details, handle, user, agents, nonce, options.error);
+	return html(body, options.status ?? 200, options.headers, details.redirectUri, nonce);
+}
+
 export async function authorize(c: Context<AuthEnv>) {
 	const oauth = oauthOf(c.env);
-	const ids = identityStore(c.env);
-	if (!oauth || !ids) return problem("Connecting apps isn't set up on this address.", 404);
+	const store = identityStore(c.env);
+	if (!oauth || !store) return problem("Connecting apps isn't set up on this address.", 404);
 	try {
 		const request = await oauth.parseAuthRequest(c.req.raw);
 		const details = await oauth.describeConsent(request);
 		const principal = c.get("principal");
-		if (principal?.kind !== "user") {
-			const url = new URL(c.req.url);
-			const providers = (["github", "google"] as const).filter(
-				(p) => (c.env as unknown as Record<string, unknown>)[`${p.toUpperCase()}_CLIENT_ID`],
-			);
-			return html(signInPage(details, `${url.pathname}${url.search}`, providers));
-		}
+		if (principal?.kind !== "user") return signInResponse(c, details);
 		const user = principal.user;
-		const active = async () => (await ids.agents(user.id)).filter((a) => !a.revokedAt);
+		const activeAgents = async () => (await store.agents(user.id)).filter((agent) => !agent.revokedAt);
 
 		if (c.req.method === "GET") {
 			const consent = await oauth.beginConsent(request);
-			const nonce = randomSecret(16);
-			return html(
-				consentPage(details, consent.handle, user, await active(), nonce),
-				200,
-				consent.headers,
-				details.redirectUri,
-				nonce,
-			);
+			return consentResponse(details, consent.handle, user, await activeAgents(), { headers: consent.headers });
 		}
 
 		const form = await c.req.formData();
@@ -232,34 +247,14 @@ export async function authorize(c: Context<AuthEnv>) {
 		try {
 			agent =
 				choice === "new"
-					? await ids.createAgent(user.id, String(form.get("new_name") ?? ""))
-					: (await active()).find((a) => a.id === choice);
+					? await store.createAgent(user.id, String(form.get("new_name") ?? ""))
+					: (await activeAgents()).find((active) => active.id === choice);
 		} catch (err) {
-			const nonce = randomSecret(16);
-			return html(
-				consentPage(
-					details,
-					handle,
-					user,
-					await active(),
-					nonce,
-					(err instanceof Error ? err.message : String(err)).replace(/^\[\d+\]\s*/, ""),
-				),
-				400,
-				undefined,
-				details.redirectUri,
-				nonce,
-			);
+			return consentResponse(details, handle, user, await activeAgents(), { status: 400, error: formError(err) });
 		}
 		if (!agent) {
-			const nonce = randomSecret(16);
-			return html(
-				consentPage(details, handle, user, await active(), nonce, "Choose one of your agents, or name a new one."),
-				400,
-				undefined,
-				details.redirectUri,
-				nonce,
-			);
+			const error = "Choose one of your agents, or name a new one.";
+			return consentResponse(details, handle, user, await activeAgents(), { status: 400, error });
 		}
 		const approved = await oauth.approveConsent(c.req.raw, handle, { scope: request.scope });
 		const { redirectTo } = await oauth.completeAuthorization({

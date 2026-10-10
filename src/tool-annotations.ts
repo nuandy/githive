@@ -39,8 +39,8 @@ export function annotate<T extends { name: string }>(
 	annotations: Record<string, ToolAnnotations>,
 ) {
 	return tools.map((tool) => {
-		const a = annotations[tool.name];
-		if (!a) throw new Error(`tool ${tool.name} has no annotations`);
-		return { ...tool, title: a.title, annotations: a };
+		const annotation = annotations[tool.name];
+		if (!annotation) throw new Error(`tool ${tool.name} has no annotations`);
+		return { ...tool, title: annotation.title, annotations: annotation };
 	});
 }

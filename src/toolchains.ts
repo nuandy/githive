@@ -22,7 +22,8 @@ export const MARKER_PATHSPECS = [
 ];
 
 export function detectToolchains(files: string[]): Toolchain[] {
-	return (Object.keys(MARKERS) as Toolchain[]).filter((t) => files.some((f) => MARKERS[t].test(f.trim())));
+	const toolchains = Object.keys(MARKERS) as Toolchain[];
+	return toolchains.filter((toolchain) => files.some((file) => MARKERS[toolchain].test(file.trim())));
 }
 
 /** Puts installed tools on the PATH. Every check runs in a login shell, which reads this. */

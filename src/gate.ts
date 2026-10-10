@@ -170,12 +170,17 @@ export class Gate extends DurableObject<Env> {
 	/** Sets an alarm to stop the container a grace period after its last run. */
 	private async scheduleStop() {
 		if (!this.ctx.container?.running) return;
-		await this.alarmBy(
-			Math.max(
-				((await this.ctx.storage.get<number>("lastActive")) ?? Date.now()) + GRACE_MS,
-				(await this.ctx.storage.get<number>("holdUntil")) ?? 0,
-			),
-		);
+		await this.alarmBy(await this.stopTime(Date.now()));
+	}
+
+	/**
+	 * When the idle container may stop: a grace period after its last run, or later while a batch that was read waits
+	 * to land. `lastActiveDefault` stands in when no run was recorded.
+	 */
+	private async stopTime(lastActiveDefault: number) {
+		const lastActive = (await this.ctx.storage.get<number>("lastActive")) ?? lastActiveDefault;
+		const holdUntil = (await this.ctx.storage.get<number>("holdUntil")) ?? 0;
+		return Math.max(lastActive + GRACE_MS, holdUntil);
 	}
 
 	async alarm() {
@@ -193,10 +198,7 @@ export class Gate extends DurableObject<Env> {
 		if (!container?.running) return;
 		if (this.active > 0) return this.alarmBy(Date.now() + GRACE_MS);
 		// A batch that was read but not landed keeps it up longer, so the landing finds its changes fetched.
-		const at = Math.max(
-			((await this.ctx.storage.get<number>("lastActive")) ?? 0) + GRACE_MS,
-			(await this.ctx.storage.get<number>("holdUntil")) ?? 0,
-		);
+		const at = await this.stopTime(0);
 		if (at > Date.now()) return this.alarmBy(at);
 		await container.destroy("nothing to check");
 		const started = await this.ctx.storage.get<ContainerStart>("started");

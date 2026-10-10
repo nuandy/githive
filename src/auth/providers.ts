@@ -34,17 +34,27 @@ async function json(response: Response, what: string) {
 	}
 }
 
-const UA = { "User-Agent": "GitHive", Accept: "application/json" };
+const GITHUB_HEADERS = { "User-Agent": "GitHive", Accept: "application/json" };
 
 export const PROVIDERS: Record<ProviderName, Provider> = {
 	github: {
-		authorizeUrl: ({ clientId, redirectUri, state, challenge }) =>
-			`https://github.com/login/oauth/authorize?${new URLSearchParams({ client_id: clientId, redirect_uri: redirectUri, scope: "read:user user:email", state, code_challenge: challenge, code_challenge_method: "S256", allow_signup: "true" })}`,
+		authorizeUrl: ({ clientId, redirectUri, state, challenge }) => {
+			const query = new URLSearchParams({
+				client_id: clientId,
+				redirect_uri: redirectUri,
+				scope: "read:user user:email",
+				state,
+				code_challenge: challenge,
+				code_challenge_method: "S256",
+				allow_signup: "true",
+			});
+			return `https://github.com/login/oauth/authorize?${query}`;
+		},
 		async profile({ config, code, redirectUri, verifier }) {
 			const token = await json(
 				await fetch("https://github.com/login/oauth/access_token", {
 					method: "POST",
-					headers: { ...UA, "Content-Type": "application/json" },
+					headers: { ...GITHUB_HEADERS, "Content-Type": "application/json" },
 					body: JSON.stringify({
 						client_id: config.clientId,
 						client_secret: config.clientSecret,
@@ -57,13 +67,13 @@ export const PROVIDERS: Record<ProviderName, Provider> = {
 			);
 			if (typeof token.access_token !== "string")
 				fail(`GitHub refused the sign-in: ${token.error_description ?? token.error ?? "no token"}`);
-			const auth = { ...UA, Authorization: `Bearer ${token.access_token}` };
+			const headers = { ...GITHUB_HEADERS, Authorization: `Bearer ${token.access_token}` };
 			const [user, emails] = await Promise.all([
-				json(await fetch("https://api.github.com/user", { headers: auth }), "Reading the GitHub user"),
-				json(await fetch("https://api.github.com/user/emails", { headers: auth }), "Reading the GitHub user's emails"),
+				json(await fetch("https://api.github.com/user", { headers }), "Reading the GitHub user"),
+				json(await fetch("https://api.github.com/user/emails", { headers }), "Reading the GitHub user's emails"),
 			]);
 			const primary = (emails as { email: string; primary: boolean; verified: boolean }[]).find(
-				(e) => e.primary && e.verified,
+				(email) => email.primary && email.verified,
 			);
 			if (!primary) throw new Error("[403] your GitHub account has no verified primary email");
 			return {
@@ -77,8 +87,19 @@ export const PROVIDERS: Record<ProviderName, Provider> = {
 		},
 	},
 	google: {
-		authorizeUrl: ({ clientId, redirectUri, state, challenge }) =>
-			`https://accounts.google.com/o/oauth2/v2/auth?${new URLSearchParams({ client_id: clientId, redirect_uri: redirectUri, response_type: "code", scope: "openid email profile", state, code_challenge: challenge, code_challenge_method: "S256", prompt: "select_account" })}`,
+		authorizeUrl: ({ clientId, redirectUri, state, challenge }) => {
+			const query = new URLSearchParams({
+				client_id: clientId,
+				redirect_uri: redirectUri,
+				response_type: "code",
+				scope: "openid email profile",
+				state,
+				code_challenge: challenge,
+				code_challenge_method: "S256",
+				prompt: "select_account",
+			});
+			return `https://accounts.google.com/o/oauth2/v2/auth?${query}`;
+		},
 		async profile({ config, code, redirectUri, verifier }) {
 			const token = await json(
 				await fetch("https://oauth2.googleapis.com/token", {

@@ -34,8 +34,9 @@ function recordOf(value: unknown): Record<string, unknown> | undefined {
 }
 
 function numericStatus(value: unknown): number | undefined {
-	const status =
-		typeof value === "number" ? value : typeof value === "string" && /^\d{3}$/.test(value) ? Number(value) : NaN;
+	let status = NaN;
+	if (typeof value === "number") status = value;
+	else if (typeof value === "string" && /^\d{3}$/.test(value)) status = Number(value);
 	return Number.isInteger(status) && status >= 100 && status <= 599 ? status : undefined;
 }
 

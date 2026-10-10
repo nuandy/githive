@@ -100,17 +100,18 @@ export function parseInit(value: unknown): InitOptions {
 	if (value === undefined || value === null) return {};
 	if (typeof value !== "object" || Array.isArray(value))
 		return fail("init is {readme, description, gitignore, license}");
-	const v = value as Record<string, unknown>;
-	if (v.gitignore !== undefined && v.gitignore !== null && !(String(v.gitignore) in GITIGNORE))
+	const requested = value as Record<string, unknown>;
+	const isSet = (option: unknown) => option !== undefined && option !== null;
+	if (isSet(requested.gitignore) && !(String(requested.gitignore) in GITIGNORE))
 		fail(`gitignore is one of ${Object.keys(GITIGNORE).join(", ")}`);
-	if (v.license !== undefined && v.license !== null && v.license !== "mit") fail("license is mit");
-	const description = typeof v.description === "string" ? v.description.trim().slice(0, 300) : "";
-	return {
-		...(v.readme ? { readme: true } : {}),
-		...(description ? { description } : {}),
-		...(v.gitignore ? { gitignore: v.gitignore as GitignoreTemplate } : {}),
-		...(v.license ? { license: "mit" as const } : {}),
-	};
+	if (isSet(requested.license) && requested.license !== "mit") fail("license is mit");
+	const description = typeof requested.description === "string" ? requested.description.trim().slice(0, 300) : "";
+	const init: InitOptions = {};
+	if (requested.readme) init.readme = true;
+	if (description) init.description = description;
+	if (requested.gitignore) init.gitignore = requested.gitignore as GitignoreTemplate;
+	if (requested.license) init.license = "mit";
+	return init;
 }
 
 /** The first commit's files, or none when nothing was asked for. */
@@ -118,8 +119,11 @@ export function initialFiles(
 	input: { fullName: string; holder: string; year: number } & InitOptions,
 ): Record<string, string> {
 	const files: Record<string, string> = {};
-	if (input.readme)
-		files["README.md"] = `# ${input.fullName.split("/").pop()}\n${input.description ? `\n${input.description}\n` : ""}`;
+	if (input.readme) {
+		const name = input.fullName.split("/").pop();
+		const description = input.description ? `\n${input.description}\n` : "";
+		files["README.md"] = `# ${name}\n${description}`;
+	}
 	if (input.gitignore) files[".gitignore"] = GITIGNORE[input.gitignore];
 	if (input.license === "mit") files.LICENSE = mit(input.year, input.holder);
 	return files;
@@ -131,9 +135,9 @@ export async function writeFirstCommit(
 	files: Record<string, string>,
 	author: { name: string; email: string },
 ) {
-	const ws = await Workspace.init(remote, "main");
-	await ws.write(files);
-	const oid = await ws.commit(`Start ${Object.keys(files).join(", ")}`, author);
-	await ws.push("main");
+	const workspace = await Workspace.init(remote, "main");
+	await workspace.write(files);
+	const oid = await workspace.commit(`Start ${Object.keys(files).join(", ")}`, author);
+	await workspace.push("main");
 	return oid;
 }

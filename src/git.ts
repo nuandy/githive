@@ -82,7 +82,7 @@ export async function inWorkspaceTurn<T>(work: () => Promise<T>): Promise<T> {
 }
 
 /** Workspaces reused by `Workspace.at`, keyed by origin and branch, most recently used last. */
-const kept = new Map<string, { head: string; ws: Workspace }>();
+const kept = new Map<string, { head: string; workspace: Workspace }>();
 const KEPT_WORKSPACES = 4;
 
 /**
@@ -125,9 +125,9 @@ export class Workspace {
 				depth,
 				...gitAuth(origin),
 			});
-			const ws = new Workspace(fs, origin, branch, depth);
-			ws.sources.push({ remote: "origin", origin, ref: branch });
-			return ws;
+			const workspace = new Workspace(fs, origin, branch, depth);
+			workspace.sources.push({ remote: "origin", origin, ref: branch });
+			return workspace;
 		});
 	}
 
@@ -139,36 +139,42 @@ export class Workspace {
 	static async at(origin: Remote, branch: string, head: string) {
 		const key = `${origin.url}|${branch}`;
 		const hit = kept.get(key);
-		if (hit?.head === head) return hit.ws.copy(origin);
-		let ws: Workspace;
+		if (hit?.head === head) return hit.workspace.copy(origin);
+		let workspace: Workspace;
 		if (hit) {
-			ws = hit.ws.copy(origin);
-			const result = await retryTransient(() =>
-				git.fetch({
-					fs: ws.fs,
-					http,
-					dir: DIR,
-					remote: "origin",
-					ref: branch,
-					singleBranch: true,
-					depth: ws.depth,
-					...gitAuth(origin),
-				}),
-			);
-			if (!result.fetchHead) throw new Error(`fetch of origin/${branch} returned no head`);
-			// The worktree is left as it was. Reading needs the branch, not the files.
-			await git.writeRef({ fs: ws.fs, dir: DIR, ref: `refs/heads/${branch}`, value: result.fetchHead, force: true });
-		} else ws = await Workspace.clone(origin, branch);
+			workspace = hit.workspace.copy(origin);
+			await workspace.refreshBranch(origin);
+		} else workspace = await Workspace.clone(origin, branch);
 		kept.delete(key);
-		kept.set(key, { head: await ws.head(), ws });
+		kept.set(key, { head: await workspace.head(), workspace });
 		while (kept.size > KEPT_WORKSPACES) kept.delete(kept.keys().next().value!);
-		return ws.copy(origin);
+		return workspace.copy(origin);
+	}
+
+	/** Fetches origin's branch and moves the local branch to it. The worktree is left as it was. */
+	private async refreshBranch(origin: Remote) {
+		const branch = this.branch;
+		const result = await retryTransient(() =>
+			git.fetch({
+				fs: this.fs,
+				http,
+				dir: DIR,
+				remote: "origin",
+				ref: branch,
+				singleBranch: true,
+				depth: this.depth,
+				...gitAuth(origin),
+			}),
+		);
+		if (!result.fetchHead) throw new Error(`fetch of origin/${branch} returned no head`);
+		// Reading needs the branch, not the files.
+		await git.writeRef({ fs: this.fs, dir: DIR, ref: `refs/heads/${branch}`, value: result.fetchHead, force: true });
 	}
 
 	/** An independent copy, fetching and deepening with `origin`'s credentials. */
 	private copy(origin: Remote) {
 		const copy = new Workspace(this.fs.copy(), origin, this.branch, this.depth);
-		copy.sources.push(...this.sources.map((s) => (s.remote === "origin" ? { ...s, origin } : s)));
+		copy.sources.push(...this.sources.map((source) => (source.remote === "origin" ? { ...source, origin } : source)));
 		return copy;
 	}
 
@@ -264,16 +270,15 @@ export class Workspace {
 	}
 
 	/** The best common ancestor of two commits, deepening history until it is found. */
-	async mergeBase(a: string, b: string) {
+	async mergeBase(first: string, second: string) {
 		for (;;) {
-			const [oid] = await git
-				.findMergeBase({ fs: this.fs, dir: DIR, oids: [await this.oid(a), await this.oid(b)], cache: this.cache })
-				.catch((err) => {
-					if (err instanceof git.Errors.NotFoundError) return [];
-					throw err;
-				});
+			const oids = [await this.oid(first), await this.oid(second)];
+			const [oid] = await git.findMergeBase({ fs: this.fs, dir: DIR, oids, cache: this.cache }).catch((err) => {
+				if (err instanceof git.Errors.NotFoundError) return [];
+				throw err;
+			});
 			if (oid) return oid as string;
-			if (!(await this.deepen())) throw new Error(`no common ancestor for ${a} and ${b}`);
+			if (!(await this.deepen())) throw new Error(`no common ancestor for ${first} and ${second}`);
 		}
 	}
 
@@ -329,18 +334,18 @@ export class Workspace {
 			dir: DIR,
 			cache: this.cache,
 			trees: [git.TREE({ ref: from }), git.TREE({ ref: to })],
-			map: async (path, [a, b]) => {
+			map: async (path, [fromEntry, toEntry]) => {
 				if (path === ".") return true;
-				const [typeA, typeB] = [await a?.type(), await b?.type()];
+				const [fromType, toType] = [await fromEntry?.type(), await toEntry?.type()];
 				// A file replaced by a directory, or the reverse, is a changed path whose
 				// descendants still need visiting.
-				if (typeA === "tree" || typeB === "tree") {
-					if ((typeA === "blob" || typeB === "blob") && typeA !== typeB) changed.push(path);
+				if (fromType === "tree" || toType === "tree") {
+					if ((fromType === "blob" || toType === "blob") && fromType !== toType) changed.push(path);
 					// Identical trees need no walk.
-					else if (typeA === typeB && (await a?.oid()) === (await b?.oid())) return null;
+					else if (fromType === toType && (await fromEntry?.oid()) === (await toEntry?.oid())) return null;
 					return true;
 				}
-				if ((await a?.oid()) !== (await b?.oid())) changed.push(path);
+				if ((await fromEntry?.oid()) !== (await toEntry?.oid())) changed.push(path);
 				return true;
 			},
 		});
@@ -364,18 +369,19 @@ export class Workspace {
 			dir: DIR,
 			cache: this.cache,
 			trees: [git.TREE({ ref: from }), git.TREE({ ref: to })],
-			map: async (path, [a, b]) => {
+			map: async (path, [fromEntry, toEntry]) => {
 				if (path === ".") return true;
-				const [typeA, typeB] = [await a?.type(), await b?.type()];
-				if (typeA === "tree" || typeB === "tree") {
+				const [fromType, toType] = [await fromEntry?.type(), await toEntry?.type()];
+				const texts = async () => ({ before: await textAt(fromEntry, fromType), after: await textAt(toEntry, toType) });
+				if (fromType === "tree" || toType === "tree") {
 					// Report the file side of a file/directory swap and still visit the directory.
-					if ((typeA === "blob" || typeB === "blob") && typeA !== typeB) {
-						changed.push({ path, before: await textAt(a, typeA), after: await textAt(b, typeB) });
+					if ((fromType === "blob" || toType === "blob") && fromType !== toType) {
+						changed.push({ path, ...(await texts()) });
 					}
 					return true;
 				}
-				const [oidA, oidB] = await Promise.all([a?.oid(), b?.oid()]);
-				if (oidA !== oidB) changed.push({ path, before: await textAt(a, typeA), after: await textAt(b, typeB) });
+				const [fromOid, toOid] = await Promise.all([fromEntry?.oid(), toEntry?.oid()]);
+				if (fromOid !== toOid) changed.push({ path, ...(await texts()) });
 				return true;
 			},
 		});

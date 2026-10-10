@@ -43,12 +43,12 @@ export async function logGitRequests(container: Container | undefined, what: str
 	const taken = await takeGitRequests(container);
 	if (!taken?.paths.size) return;
 	const requests: GitRequests = new Map();
-	for (const [path, n] of taken.paths) {
+	for (const [path, count] of taken.paths) {
 		const name = repoOfUrl(`https://git${path}`);
 		const seen = requests.get(name) ?? { requests: 0, failed: 0 };
-		requests.set(name, { requests: seen.requests + n, failed: 0 });
+		requests.set(name, { requests: seen.requests + count, failed: 0 });
 	}
-	console.log(
-		`gate ${what} on ${repo ?? "-"} ${describeCounts(repo ?? "", requests, new Map())}${taken.failed ? ` (${taken.failed} failed)` : ""}`,
-	);
+	const counts = describeCounts(repo ?? "", requests, new Map());
+	const failures = taken.failed ? ` (${taken.failed} failed)` : "";
+	console.log(`gate ${what} on ${repo ?? "-"} ${counts}${failures}`);
 }

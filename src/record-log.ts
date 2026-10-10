@@ -64,7 +64,7 @@ export interface CasLog<S> {
 
 function noteLine(entry: LogEntry) {
 	const [first, ...rest] = entry.text.trim().split("\n");
-	return [`${entry.at.slice(0, 19).replace("T", " ")}Z  ${first}`, ...rest.map((l) => `    ${l}`)].join("\n");
+	return [`${entry.at.slice(0, 19).replace("T", " ")}Z  ${first}`, ...rest.map((line) => `    ${line}`)].join("\n");
 }
 
 const DIR = "/log";
@@ -106,23 +106,33 @@ function pktLines(body: Uint8Array) {
 /** Attempts while Artifacts refuses a push as busy, before reporting it as not landed. */
 const BUSY_ATTEMPTS = 6;
 
+/** A jittered, growing pause before sending a push again. */
+const pushBackoff = (attempt: number) =>
+	new Promise((resolve) => setTimeout(resolve, Math.min(50 * 2 ** attempt, 1_500) * (0.5 + Math.random())));
+
+/** A receive-pack request body: one ref update command, a flush, then the pack. */
+function receivePackBody(ref: string, from: string | null, to: string, packfile: Uint8Array | undefined) {
+	const parts = [
+		...pktLine(`${from ?? ZERO_OID} ${to} ${ref}\0report-status agent=githive\n`),
+		encoder.encode("0000"),
+		packfile ?? new Uint8Array(),
+	];
+	const body = new Uint8Array(parts.reduce((total, part) => total + part.length, 0));
+	let at = 0;
+	for (const part of parts) {
+		body.set(part, at);
+		at += part.length;
+	}
+	return body;
+}
+
 /**
  * Move `ref` from `from` (null: create it) to `to` in one receive-pack request, skipping ref discovery.
  * The server applies it only if the ref is still at `from`, so this is a compare-and-swap.
  */
 async function pushDirect(remote: Remote, ref: string, from: string | null, to: string, fs: MemoryFS, oids: string[]) {
 	const { packfile } = await git.packObjects({ fs, dir: DIR, oids });
-	const parts = [
-		...pktLine(`${from ?? ZERO_OID} ${to} ${ref}\0report-status agent=githive\n`),
-		encoder.encode("0000"),
-		packfile ?? new Uint8Array(),
-	];
-	const body = new Uint8Array(parts.reduce((n, p) => n + p.length, 0));
-	let at = 0;
-	for (const part of parts) {
-		body.set(part, at);
-		at += part.length;
-	}
+	const body = receivePackBody(ref, from, to, packfile);
 	let report: string[] = [];
 	// After a server error the push may have applied anyway, and another writer may since have moved the ref past it.
 	let unsure = false;
@@ -144,7 +154,7 @@ async function pushDirect(remote: Remote, ref: string, from: string | null, to: 
 			await response.body?.cancel();
 			unsure = true;
 			if ((await serverTip(remote, ref).catch(() => null)) === to) return true;
-			await new Promise((resolve) => setTimeout(resolve, Math.min(50 * 2 ** attempt, 1_500) * (0.5 + Math.random())));
+			await pushBackoff(attempt);
 			continue;
 		}
 		if (!response.ok)
@@ -153,7 +163,7 @@ async function pushDirect(remote: Remote, ref: string, from: string | null, to: 
 		// A busy refusal applied nothing, so it's safe to send again.
 		if (!report.some((line) => line.startsWith("ERR") && /busy/i.test(line))) break;
 		if (attempt === BUSY_ATTEMPTS) return refused("busy" as const);
-		await new Promise((resolve) => setTimeout(resolve, Math.min(50 * 2 ** attempt, 1_500) * (0.5 + Math.random())));
+		await pushBackoff(attempt);
 	}
 	if (!report.includes("unpack ok")) throw new Error(`push to ${ref} failed: ${report.join("; ")}`);
 	if (report.some((line) => line === `ok ${ref}`)) return true;
@@ -170,7 +180,7 @@ async function landedBehind(remote: Remote, ref: string, oid: string) {
 	if (!tip) return false;
 	if (tip === oid) return true;
 	const { fs } = await fetchCommits(remote, [tip], DIR, { depth: LANDED_DEPTH });
-	for (let at: string | undefined = tip, n = 0; at && n < LANDED_DEPTH; n++) {
+	for (let at: string | undefined = tip, depth = 0; at && depth < LANDED_DEPTH; depth++) {
 		if (at === oid) return true;
 		at = (await git.readCommit({ fs, dir: DIR, oid: at }).catch(() => null))?.commit.parent[0];
 	}
@@ -286,6 +296,13 @@ export class GitCasLog<S> implements CasLog<S> {
 			this.held?.tip === current ? this.held : await retryTransient(() => fetchAt(remote, this.ref, current));
 		if (!tip) return null;
 		this.held = { fs, tip };
+		const read = { tip, commit: await this.readCommit(fs, tip) };
+		if (this.states) void this.states.put(this.stateKey, tip, JSON.stringify(read.commit)).catch(() => undefined);
+		return read;
+	}
+
+	/** One commit of the log, its state upgraded to this GitHive's format. */
+	private async readCommit(fs: MemoryFS, tip: string): Promise<LogCommit<S>> {
 		const { commit } = await git.readCommit({ fs, dir: DIR, oid: tip });
 		const trailer = (name: string) =>
 			commit.message.match(new RegExp(`^${name}: (.*)$`, "m"))?.[1] ?? fail(`${tip} has no ${name} trailer`);
@@ -293,20 +310,15 @@ export class GitCasLog<S> implements CasLog<S> {
 			JSON.parse(decoder.decode((await git.readBlob({ fs, dir: DIR, oid: tip, filepath })).blob));
 		const format = formatOf(commit.message);
 		const raw = await json(STATE_FILE);
-		const read = {
-			tip,
-			commit: {
-				author: trailer(TRAILERS.author),
-				kind: trailer(TRAILERS.kind),
-				entries: (await json(DECISIONS_FILE)) as LogEntry[],
-				// This GitHive can't upgrade a newer format, so it's read as is.
-				state: (format > this.format ? raw : upgradeState<S>(raw, format, this.ref, this.format, this.upgrades)) as S,
-				batch: trailer(TRAILERS.batch),
-				format,
-			},
+		return {
+			author: trailer(TRAILERS.author),
+			kind: trailer(TRAILERS.kind),
+			entries: (await json(DECISIONS_FILE)) as LogEntry[],
+			// This GitHive can't upgrade a newer format, so it's read as is.
+			state: (format > this.format ? raw : upgradeState<S>(raw, format, this.ref, this.format, this.upgrades)) as S,
+			batch: trailer(TRAILERS.batch),
+			format,
 		};
-		if (this.states) void this.states.put(this.stateKey, tip, JSON.stringify(read.commit)).catch(() => undefined);
-		return read;
 	}
 
 	async tip(): Promise<string | null> {
@@ -315,14 +327,7 @@ export class GitCasLog<S> implements CasLog<S> {
 
 	async append(parent: string | null, commit: LogCommit<S>): Promise<string | null> {
 		const remote = await this.remote();
-		// Fetch the parent directly, without listing first. A writer that lost a race is then as quick to retry
-		// as the winner; otherwise the same writer could win every time.
-		const { fs, tip } =
-			parent !== null && this.held?.tip === parent
-				? this.held
-				: parent !== null
-					? await retryTransient(() => fetchAt(remote, this.ref, parent))
-					: await openTip(remote, this.ref);
+		const { fs, tip } = await this.openParent(remote, parent);
 		// Built on a stale tip. Drop it from the shared cache, or every writer would build on it until it aged out.
 		if (tip !== parent) {
 			this.lastRefusal = "moved";
@@ -335,35 +340,7 @@ export class GitCasLog<S> implements CasLog<S> {
 			if (found > this.format) throw newerFormat(found, this.format);
 		}
 
-		// Carry the notes forward, adding this commit's entries.
-		const files = new Map<string, string>();
-		// Only the objects this commit adds need to be pushed.
-		const added: string[] = [];
-		const write = async (text: string) => {
-			const oid = await git.writeBlob({ fs, dir: DIR, blob: encoder.encode(text) });
-			added.push(oid);
-			return oid;
-		};
-		if (tip) {
-			const { commit: previous } = await git.readCommit({ fs, dir: DIR, oid: tip });
-			for (const entry of (await git.readTree({ fs, dir: DIR, oid: previous.tree })).tree)
-				files.set(entry.path, entry.oid);
-		}
-		for (const [about, lines] of notesByCommit(commit.entries)) {
-			const existing = files.get(about);
-			const before = existing
-				? `${decoder.decode((await git.readBlob({ fs, dir: DIR, oid: existing })).blob).trimEnd()}\n`
-				: "";
-			files.set(about, await write(`${before}${lines.join("\n")}\n`));
-		}
-		files.set(STATE_FILE, await write(JSON.stringify(commit.state)));
-		files.set(DECISIONS_FILE, await write(JSON.stringify(commit.entries)));
-		const tree = await git.writeTree({
-			fs,
-			dir: DIR,
-			tree: [...files].map(([path, oid]) => ({ mode: "100644", path, oid, type: "blob" as const })),
-		});
-
+		const { tree, added } = await buildTree(fs, tip, commit);
 		const oid = await git.writeCommit({
 			fs,
 			dir: DIR,
@@ -383,7 +360,23 @@ export class GitCasLog<S> implements CasLog<S> {
 			this.held = null;
 			throw err;
 		}
-		// Update the shared caches before returning, so the caller's next read sees this write.
+		await this.noteOutcome(landed, tip, oid, commit);
+		this.held = landed === true ? { fs, tip: oid } : null;
+		return landed === true ? oid : null;
+	}
+
+	/**
+	 * The repo at `parent`, fetched directly without listing first. A writer that lost a race is then as quick to
+	 * retry as the winner; otherwise the same writer could win every time.
+	 */
+	private async openParent(remote: Remote, parent: string | null) {
+		if (parent === null) return openTip(remote, this.ref);
+		if (this.held?.tip === parent) return this.held;
+		return retryTransient(() => fetchAt(remote, this.ref, parent));
+	}
+
+	/** Update the shared caches before returning, so the caller's next read sees this write. */
+	private async noteOutcome(landed: boolean | "busy", tip: string | null, oid: string, commit: LogCommit<S>) {
 		if (landed === true && this.tips) {
 			await this.tips.landed(this.ref, tip, oid).catch(() => undefined);
 			if (this.states)
@@ -391,16 +384,50 @@ export class GitCasLog<S> implements CasLog<S> {
 					.put(this.stateKey, oid, JSON.stringify({ ...commit, format: this.format }))
 					.catch(() => undefined);
 		} else if (landed === false) await this.tips?.stale(this.ref, tip).catch(() => undefined);
-		this.held = landed === true ? { fs, tip: oid } : null;
-		this.lastRefusal = landed === true ? null : landed === "busy" ? "busy" : "moved";
-		return landed === true ? oid : null;
+		if (landed === true) this.lastRefusal = null;
+		else if (landed === "busy") this.lastRefusal = "busy";
+		else this.lastRefusal = "moved";
 	}
+}
+
+/**
+ * The tree for a commit on `tip`: the notes carried forward with this commit's entries added, and its state and
+ * decisions. Returns the new objects too, since only those need to be pushed.
+ */
+async function buildTree<S>(fs: MemoryFS, tip: string | null, commit: LogCommit<S>) {
+	const files = new Map<string, string>();
+	const added: string[] = [];
+	const write = async (text: string) => {
+		const oid = await git.writeBlob({ fs, dir: DIR, blob: encoder.encode(text) });
+		added.push(oid);
+		return oid;
+	};
+	if (tip) {
+		const { commit: previous } = await git.readCommit({ fs, dir: DIR, oid: tip });
+		for (const entry of (await git.readTree({ fs, dir: DIR, oid: previous.tree })).tree)
+			files.set(entry.path, entry.oid);
+	}
+	for (const [about, lines] of notesByCommit(commit.entries)) {
+		const existing = files.get(about);
+		const before = existing
+			? `${decoder.decode((await git.readBlob({ fs, dir: DIR, oid: existing })).blob).trimEnd()}\n`
+			: "";
+		files.set(about, await write(`${before}${lines.join("\n")}\n`));
+	}
+	files.set(STATE_FILE, await write(JSON.stringify(commit.state)));
+	files.set(DECISIONS_FILE, await write(JSON.stringify(commit.entries)));
+	const tree = await git.writeTree({
+		fs,
+		dir: DIR,
+		tree: [...files].map(([path, oid]) => ({ mode: "100644", path, oid, type: "blob" as const })),
+	});
+	return { tree, added };
 }
 
 function message<S>(commit: LogCommit<S>, format: number) {
 	const first = (text: string) => text.trim().split("\n")[0];
 	const title = commit.entries.length ? first(commit.entries[0].text) : commit.kind;
-	const summary = commit.entries.map((e) => `- ${first(e.text)}`).join("\n");
+	const summary = commit.entries.map((entry) => `- ${first(entry.text)}`).join("\n");
 	const trailers = [
 		`${TRAILERS.author}: ${commit.author}`,
 		`${TRAILERS.kind}: ${commit.kind}`,
@@ -413,8 +440,8 @@ function message<S>(commit: LogCommit<S>, format: number) {
 /** Entries not about a commit live only in decisions.json. */
 function notesByCommit(entries: LogEntry[]) {
 	const byCommit = new Map<string, string[]>();
-	for (const e of entries)
-		if (isCommitId(e.commit)) byCommit.set(e.commit, [...(byCommit.get(e.commit) ?? []), noteLine(e)]);
+	for (const entry of entries)
+		if (isCommitId(entry.commit)) byCommit.set(entry.commit, [...(byCommit.get(entry.commit) ?? []), noteLine(entry)]);
 	return byCommit;
 }
 

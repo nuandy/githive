@@ -189,14 +189,20 @@ How to work:
 		const fetched = await this.git(job, ["fetch", "-q", "origin", `+${job.ref}:refs/remotes/origin/${job.ref}`]);
 		if (fetched.exitCode === 0) await this.exec(["git", "checkout", "-q", "-B", job.ref, `origin/${job.ref}`]);
 		else {
-			const base = await this.git(
-				job,
-				["fetch", "-q", job.base.remote, `${job.branch}:refs/remotes/base/${job.branch}`],
-				undefined,
-				job.base.token,
-			);
-			await this.exec(["git", "checkout", "-q", "-b", job.ref, ...(base.exitCode === 0 ? [`base/${job.branch}`] : [])]);
+			const base = await this.fetchBase(job);
+			const startPoint = base.exitCode === 0 ? [`base/${job.branch}`] : [];
+			await this.exec(["git", "checkout", "-q", "-b", job.ref, ...startPoint]);
 		}
+	}
+
+	/** Fetches the project's branch into base/<branch>, with the project's read token. */
+	private fetchBase(job: BuildJob) {
+		return this.git(
+			job,
+			["fetch", "-q", job.base.remote, `${job.branch}:refs/remotes/base/${job.branch}`],
+			undefined,
+			job.base.token,
+		);
 	}
 
 	/** Why the change can't go to review yet: unpushed work, or files outside its claim. */
@@ -236,33 +242,16 @@ How to work:
 				description:
 					"Claim more paths for your change, before changing them. Refused, naming the holder, if another agent holds them.",
 				schema: ExtendArgs,
-				run: async ({ paths }) => {
-					const outcome = (await callTool(
-						"claim",
-						{ repo: job.project, change: job.change, agent: job.agent, paths, intent: job.intent },
-						this.toolContext(),
-					)) as { ok: boolean; conflicts?: { path: string; change: string; intent: string }[] };
-					if (!outcome.ok)
-						return `Refused: ${(outcome.conflicts ?? []).map((c) => `${c.path} is held by ${c.change} (${c.intent})`).join("; ")}`;
-					job.claim = [...job.claim, ...paths.filter((p) => !job.claim.includes(p))];
-					await this.ctx.storage.put("job", job);
-					return `Your claim now covers ${job.claim.join(", ")}.`;
-				},
+				run: async ({ paths }) => this.extendClaim(job, paths),
 			}),
 			tool({
 				name: "fetch_base",
 				description: `Fetch ${job.branch} (work that has merged meanwhile) into base/${job.branch}. Merge it with \`git merge base/${job.branch}\`, re-run your tests, then commit_and_push.`,
 				schema: NoArgs,
 				run: async () => {
-					const r = await this.git(
-						job,
-						["fetch", "-q", job.base.remote, `${job.branch}:refs/remotes/base/${job.branch}`],
-						undefined,
-						job.base.token,
-					);
-					return r.exitCode === 0
-						? `Fetched ${job.branch} into base/${job.branch}. Merge it with \`git merge base/${job.branch}\`, re-run your tests, then call commit_and_push.`
-						: `Fetch failed:\n${clip(r.output, 4_000)}`;
+					const fetched = await this.fetchBase(job);
+					if (fetched.exitCode !== 0) return `Fetch failed:\n${clip(fetched.output, 4_000)}`;
+					return `Fetched ${job.branch} into base/${job.branch}. Merge it with \`git merge base/${job.branch}\`, re-run your tests, then call commit_and_push.`;
 				},
 			}),
 			tool({
@@ -293,6 +282,24 @@ How to work:
 		];
 	}
 
+	/** Claims more paths for the change, or says who holds the ones it can't have. */
+	private async extendClaim(job: BuildJob, paths: string[]) {
+		const outcome = (await callTool(
+			"claim",
+			{ repo: job.project, change: job.change, agent: job.agent, paths, intent: job.intent },
+			this.toolContext(),
+		)) as { ok: boolean; conflicts?: { path: string; change: string; intent: string }[] };
+		if (!outcome.ok) {
+			const held = (outcome.conflicts ?? []).map(
+				(conflict) => `${conflict.path} is held by ${conflict.change} (${conflict.intent})`,
+			);
+			return `Refused: ${held.join("; ")}`;
+		}
+		job.claim = [...job.claim, ...paths.filter((path) => !job.claim.includes(path))];
+		await this.ctx.storage.put("job", job);
+		return `Your claim now covers ${job.claim.join(", ")}.`;
+	}
+
 	private async commitAndPush(job: BuildJob, state: BuilderState, message: string) {
 		await this.exec(["git", "add", "-A"]);
 		const staged = await this.exec(["git", "diff", "--cached", "--quiet"]);
@@ -307,7 +314,22 @@ How to work:
 		if (push.exitCode !== 0) return `Push failed:\n${clip(push.output, 4_000)}`;
 		state.pushes++;
 		this.note(state, `pushed: ${message.slice(0, 120)}`);
-		// Re-claiming the paths is the claim's heartbeat, so a working builder never looks abandoned.
+		await this.refreshClaim(job, state);
+		const outOfLane = await this.outOfLane(job);
+		const conflicts = await this.conflicts(job);
+		state.lastReport = { outOfLane, conflicts };
+		const report = outOfLane.length
+			? `Pushed to ${job.ref}. Files outside your claim: ${outOfLane.join(", ")}. Extend your claim (extend_claim) if you need them, or revert them.`
+			: `Pushed to ${job.ref}. Everything is inside your claim.`;
+		if (!conflicts.length) return report;
+		return [
+			report,
+			`Your change conflicts with ${job.branch} in ${conflicts.join(", ")}: fetch_base, merge what it fetched, resolve inside your claim, and push.`,
+		].join("\n");
+	}
+
+	/** Re-claims the change's paths. That is the claim's heartbeat, so a working builder never looks abandoned. */
+	private async refreshClaim(job: BuildJob, state: BuilderState) {
 		const refreshed = (await callTool(
 			"claim",
 			{ repo: job.project, change: job.change, agent: job.agent, paths: job.claim, intent: job.intent },
@@ -315,43 +337,30 @@ How to work:
 		)) as { ok: boolean };
 		if (!refreshed.ok)
 			this.note(state, "could not refresh the claim: it was released as stale and its paths are taken");
+	}
+
+	/** The pushed files outside the change's claim. */
+	private async outOfLane(job: BuildJob) {
 		// Diff against the project's own branch, not the fork's copy, which may be stale.
-		const fetched = await this.git(
-			job,
-			["fetch", "-q", job.base.remote, `${job.branch}:refs/remotes/base/${job.branch}`],
-			undefined,
-			job.base.token,
-		);
-		const changed = await this.exec([
-			"git",
-			"diff",
-			"--name-only",
-			`${fetched.exitCode === 0 ? "base" : "origin"}/${job.branch}...HEAD`,
-		]);
-		const outOfLane = changed.output
+		const fetched = await this.fetchBase(job);
+		const compareTo = fetched.exitCode === 0 ? "base" : "origin";
+		const changed = await this.exec(["git", "diff", "--name-only", `${compareTo}/${job.branch}...HEAD`]);
+		return changed.output
 			.split("\n")
-			.map((f) => f.trim())
-			.filter((f) => f && !inLane(f, job.claim));
-		// An early check that the change still merges cleanly.
+			.map((file) => file.trim())
+			.filter((file) => file && !inLane(file, job.claim));
+	}
+
+	/** The files where the change conflicts with the project's branch: an early check that it still merges cleanly. */
+	private async conflicts(job: BuildJob) {
 		const check = (await callTool("check", { repo: job.project, change: job.change }, this.toolContext()).catch(
 			() => null,
 		)) as Awaited<ReturnType<typeof checkChange>> | null;
-		const conflicts = check && !check.main.clean ? (check.main.conflicts ?? []) : [];
-		state.lastReport = { outOfLane, conflicts };
-		return [
-			outOfLane.length
-				? `Pushed to ${job.ref}. Files outside your claim: ${outOfLane.join(", ")}. Extend your claim (extend_claim) if you need them, or revert them.`
-				: `Pushed to ${job.ref}. Everything is inside your claim.`,
-			...(conflicts.length
-				? [
-						`Your change conflicts with ${job.branch} in ${conflicts.join(", ")}: fetch_base, merge what it fetched, resolve inside your claim, and push.`,
-					]
-				: []),
-		].join("\n");
+		return check && !check.main.clean ? (check.main.conflicts ?? []) : [];
 	}
 
 	private async unpushed() {
-		const r = await this.commitsAhead();
-		return r.exitCode === 0 ? Number(r.output.trim()) : 0;
+		const ahead = await this.commitsAhead();
+		return ahead.exitCode === 0 ? Number(ahead.output.trim()) : 0;
 	}
 }

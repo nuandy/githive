@@ -121,29 +121,32 @@ How to work:
 					await this.vote(job, verdict, `${summary}\n\n${evidence}`);
 					Object.assign(state, { status: "done", verdict, summary, evidence });
 					this.note(state, `voted ${verdict} on ${job.head}`);
-					if (job.mergeWhenApproved && verdict === "approve") {
-						const merged = (await callTool(
-							"merge",
-							{ repo: job.project, change: job.change, agent: job.agent },
-							this.toolContext(job),
-						)) as { ok: boolean; reasons?: string[] };
-						this.note(
-							state,
-							merged.ok ? "merged the change" : `not merged yet: ${(merged.reasons ?? []).join("; ").slice(0, 200)}`,
-						);
-					}
+					if (job.mergeWhenApproved && verdict === "approve") await this.tryMerge(job, state);
 					// A rejected change from the hosted builder goes back to it with the findings.
-					if (verdict === "reject" && job.agent === "githive-builder") {
-						const feedback = `The ${job.role} reviewer rejected ${job.head}:\n\n${summary}\n\n${evidence}\n\nFix it inside your claim, commit_and_push, then finish again for a new review.`;
-						const outcome = await this.env.BUILDER.getByName(changeRepoName(job.project, job.change)).revise(feedback);
-						this.note(
-							state,
-							outcome === "revising" ? "sent the change back to its builder" : "its builder gave up; claim released",
-						);
-					}
+					if (verdict === "reject" && job.agent === "githive-builder")
+						await this.sendBack(job, state, summary, evidence);
 					return "Vote recorded.";
 				},
 			}),
 		];
+	}
+
+	/** Tries to merge the approved change. It merges only once every approval is in. */
+	private async tryMerge(job: ReviewJob, state: ReviewerState) {
+		const merged = (await callTool(
+			"merge",
+			{ repo: job.project, change: job.change, agent: job.agent },
+			this.toolContext(job),
+		)) as { ok: boolean; reasons?: string[] };
+		if (merged.ok) this.note(state, "merged the change");
+		else this.note(state, `not merged yet: ${(merged.reasons ?? []).join("; ").slice(0, 200)}`);
+	}
+
+	/** Sends a rejected change back to the hosted builder with the findings. */
+	private async sendBack(job: ReviewJob, state: ReviewerState, summary: string, evidence: string) {
+		const feedback = `The ${job.role} reviewer rejected ${job.head}:\n\n${summary}\n\n${evidence}\n\nFix it inside your claim, commit_and_push, then finish again for a new review.`;
+		const outcome = await this.env.BUILDER.getByName(changeRepoName(job.project, job.change)).revise(feedback);
+		if (outcome === "revising") this.note(state, "sent the change back to its builder");
+		else this.note(state, "its builder gave up; claim released");
 	}
 }

@@ -163,16 +163,18 @@ export class MemoryFS {
 		const target = this.normalize(path);
 		await this.mkdir(this.parent(target), { recursive: true });
 
-		const bytes =
-			typeof data === "string" ? this.encoder.encode(data) : data instanceof Uint8Array ? data : new Uint8Array(data);
-
 		this.entries.set(target, {
 			kind: "file",
-			data: bytes,
+			data: this.toBytes(data),
 			mtimeMs: Date.now(),
 		});
 
 		this.requireDir(this.parent(target)).children.add(this.basename(target));
+	}
+
+	toBytes(data: string | Uint8Array | ArrayBuffer) {
+		if (typeof data === "string") return this.encoder.encode(data);
+		return data instanceof Uint8Array ? data : new Uint8Array(data);
 	}
 
 	async readFile(path: string, options?: string | { encoding?: string }) {

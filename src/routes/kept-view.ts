@@ -34,8 +34,8 @@ export async function keptView(
 	const send = (json: string, timing: string) =>
 		c.body(json, 200, { "Content-Type": "application/json", "Server-Timing": timing });
 	// "Cache-Control: no-cache" asks for a fresh build, for example right after the reader's own write.
-	const now = /no-cache/.test(c.req.header("Cache-Control") ?? "");
-	if (kept.json !== undefined && !now) {
+	const wantsFresh = /no-cache/.test(c.req.header("Cache-Control") ?? "");
+	if (kept.json !== undefined && !wantsFresh) {
 		if (!kept.fresh && !kept.building && (await cache.startBuild(name)))
 			c.executionCtx.waitUntil(
 				rebuild(new Timing()).catch((err) => console.error(`rebuilding ${key} ${name} failed`, String(err))),

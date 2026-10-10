@@ -6,8 +6,8 @@ const DISPOSE = (Symbol as unknown as { dispose?: symbol }).dispose;
 /** The result of an RPC `call`, disposed once it arrives. */
 export async function rpc<T>(call: PromiseLike<T>): Promise<T> {
 	const value = await call;
-	const dispose =
-		DISPOSE && value !== null && typeof value === "object" ? (value as Record<symbol, unknown>)[DISPOSE] : undefined;
+	if (!DISPOSE || value === null || typeof value !== "object") return value;
+	const dispose = (value as Record<symbol, unknown>)[DISPOSE];
 	if (typeof dispose === "function") dispose.call(value);
 	return value;
 }
@@ -18,11 +18,10 @@ export async function rpc<T>(call: PromiseLike<T>): Promise<T> {
  * marks such errors retryable unless the object is overloaded.
  */
 export function briefOutage(err: unknown) {
-	const e = err as { retryable?: boolean; overloaded?: boolean } | null;
-	if (e?.overloaded) return false;
-	return (
-		!!e?.retryable || /Durable Object reset|temporarily unavailable|internal error; reference =/i.test(String(err))
-	);
+	const flags = err as { retryable?: boolean; overloaded?: boolean } | null;
+	if (flags?.overloaded) return false;
+	if (flags?.retryable) return true;
+	return /Durable Object reset|temporarily unavailable|internal error; reference =/i.test(String(err));
 }
 
 /** How long to wait before trying an RPC again after a brief outage. */

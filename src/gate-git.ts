@@ -37,7 +37,7 @@ export async function missingCommits(container: Container, commits: string[]): P
 	const missing = await run(container, [
 		"bash",
 		"-c",
-		commits.map((c, k) => `git cat-file -e ${c}^{commit} 2>/dev/null || echo ${k}`).join("\n"),
+		commits.map((commit, index) => `git cat-file -e ${commit}^{commit} 2>/dev/null || echo ${index}`).join("\n"),
 	]);
 	return missing.output.split("\n").filter(Boolean).map(Number);
 }
@@ -80,14 +80,18 @@ export async function fetchChanges(
 		"wait",
 		"cat /tmp/batch-failed-* 2>/dev/null; rm -f /tmp/batch-failed-*; true",
 	].join("\n");
-	const stdin = changes.map((c) => [c.k, c.remote, c.ref, c.token.split("?expires=")[0]].join("\t")).join("\n") + "\n";
+	const lines = changes.map((change) => {
+		const token = change.token.split("?expires=")[0];
+		return [change.k, change.remote, change.ref, token].join("\t");
+	});
+	const stdin = lines.join("\n") + "\n";
 	const ran = await run(container, ["bash", "-c", script], WORKDIR, stdin);
 	const failed = new Map<number, string>();
 	for (const line of ran.output.split("\n").filter(Boolean)) {
 		const space = line.indexOf(" ");
-		const k = Number(line.slice(0, space));
-		if (Number.isInteger(k)) failed.set(k, line.slice(space + 1));
+		const index = Number(line.slice(0, space));
+		if (Number.isInteger(index)) failed.set(index, line.slice(space + 1));
 	}
-	if (ran.exitCode !== 0 && !failed.size) for (const c of changes) failed.set(c.k, clip(ran.output, 300));
+	if (ran.exitCode !== 0 && !failed.size) for (const change of changes) failed.set(change.k, clip(ran.output, 300));
 	return failed;
 }

@@ -42,11 +42,12 @@ export const toolContext = (env: Env, principal: Principal | undefined, agentKey
 		principal && principal.kind !== "access"
 			? async () => !!env.DB && (await new IdentityStore(env.DB).mayUseHosted(principal.user.id))
 			: undefined;
-	return toolContextFor(env, principal ? byOf(principal) : undefined, {
-		...(agent ? { agent } : agentKey ? { agentKey } : {}),
-		...(teamsOf ? { teamsOf } : {}),
-		...(mayUseHosted ? { mayUseHosted } : {}),
-	});
+	const caller: Parameters<typeof toolContextFor>[2] = {};
+	if (agent) caller.agent = agent;
+	else if (agentKey) caller.agentKey = agentKey;
+	if (teamsOf) caller.teamsOf = teamsOf;
+	if (mayUseHosted) caller.mayUseHosted = mayUseHosted;
+	return toolContextFor(env, principal ? byOf(principal) : undefined, caller);
 };
 
 /** Agents' forks and claim records repos aren't projects. */

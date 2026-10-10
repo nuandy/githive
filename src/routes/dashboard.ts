@@ -1,4 +1,4 @@
-import type { Hono } from "hono";
+import type { Context, Hono } from "hono";
 import { byOf, isPerson } from "../auth/principal";
 import { type Level, OrgStore } from "../auth/orgs";
 import { remoteFor, reviewerName } from "../artifacts";
@@ -29,6 +29,32 @@ import { type AppEnv, jsonArgs, routeRepo, toolContext } from "./shared";
 // (vote, merge, make branches), its settings and collaborators, and its code.
 
 export function dashboardRoutes(app: Hono<AppEnv>) {
+	repoSummaryRoutes(app);
+	personActionRoutes(app);
+	changeViewRoutes(app);
+	repoSettingsRoutes(app);
+	codeRoutes(app);
+}
+
+/** The project's branch, from its claims registry. */
+async function registryBranch(env: Env, repoId: string) {
+	const registry = await new GitCasLog<Registry>(
+		() => remoteFor(env.ARTIFACTS, repoId, "read", 3600),
+		repoId,
+		`refs/notes/githive-claims/${repoId}`,
+	).read();
+	return projectBranch(registry?.commit.state);
+}
+
+/** The repo a code route names and the ref to read: ?ref, or the repo's default branch. */
+async function codeRef(c: Context<AppEnv>) {
+	const repo = await routeRepo(c, "read");
+	const remote = await remoteFor(c.env.ARTIFACTS, repo.id, "read");
+	const ref = c.req.query("ref") || ((await defaultBranch(remote)) ?? fail(404, "the repo has no commits"));
+	return { remote, ref };
+}
+
+function repoSummaryRoutes(app: Hono<AppEnv>) {
 	// A repo for the dashboard: a snapshot of its claims and votes, read from Git.
 	app.get("/repos/:owner/:name", async (c) => {
 		const repo = await routeRepo(c, "read");
@@ -47,16 +73,9 @@ export function dashboardRoutes(app: Hono<AppEnv>) {
 		]);
 		return c.json({ ...repo, visibility: meta?.visibility ?? null, branch });
 	});
-	// A repo's admins set its review policy or checks from the dashboard, through the MCP settings tool.
-	app.post("/repos/:owner/:name/settings", async (c) => {
-		const repo = await routeRepo(c, "admin");
-		const changed = (await callTool(
-			"settings",
-			{ ...(await jsonArgs(c)), repo: repo.id },
-			toolContext(c.env, c.get("principal")),
-		)) as Record<string, unknown>;
-		return c.json({ ...changed, repo: repo.fullName });
-	});
+}
+
+function personActionRoutes(app: Hono<AppEnv>) {
 	// A person's vote on a change, from the dashboard: stamped with their verified identity.
 	app.post("/repos/:owner/:name/changes/:change/votes", async (c) => {
 		const actor = c.get("principal") ?? fail(401, "no identity");
@@ -93,6 +112,9 @@ export function dashboardRoutes(app: Hono<AppEnv>) {
 			await makeBranch(toolContext(c.env, actor), repo.id, { name: name.trim(), from: from.trim() }, byOf(actor)),
 		);
 	});
+}
+
+function changeViewRoutes(app: Hono<AppEnv>) {
 	app.get("/repos/:owner/:name/changes/:change", async (c) => {
 		const repo = await routeRepo(c, "read");
 		const change = c.req.param("change");
@@ -105,17 +127,7 @@ export function dashboardRoutes(app: Hono<AppEnv>) {
 	app.get("/repos/:owner/:name/landing", async (c) => {
 		const repo = await routeRepo(c, "read");
 		// Without ?branch, use the project's branch from its claims registry.
-		const branch =
-			c.req.query("branch")?.trim() ||
-			projectBranch(
-				(
-					await new GitCasLog<Registry>(
-						() => remoteFor(c.env.ARTIFACTS, repo.id, "read", 3600),
-						repo.id,
-						`refs/notes/githive-claims/${repo.id}`,
-					).read()
-				)?.commit.state,
-			);
+		const branch = c.req.query("branch")?.trim() || (await registryBranch(c.env, repo.id));
 		const cache = c.env.REPO_CACHE.getByName(`repo:${repo.id}`);
 		const [landing, leaseHeld, forks, snapshot] = await Promise.all([
 			rpc(cache.landingView(branch)).catch(() => ({ checking: null, recent: [] })),
@@ -157,6 +169,19 @@ export function dashboardRoutes(app: Hono<AppEnv>) {
 		const repo = await routeRepo(c, "read");
 		return c.env.REPO_CACHE.getByName(`repo:${repo.id}`).fetch(c.req.raw);
 	});
+}
+
+function repoSettingsRoutes(app: Hono<AppEnv>) {
+	// A repo's admins set its review policy or checks from the dashboard, through the MCP settings tool.
+	app.post("/repos/:owner/:name/settings", async (c) => {
+		const repo = await routeRepo(c, "admin");
+		const changed = (await callTool(
+			"settings",
+			{ ...(await jsonArgs(c)), repo: repo.id },
+			toolContext(c.env, c.get("principal")),
+		)) as Record<string, unknown>;
+		return c.json({ ...changed, repo: repo.fullName });
+	});
 	// A repo's settings: private or public (admins of the repo).
 	app.patch("/repos/:owner/:name", async (c) => {
 		const repo = await routeRepo(c, "admin");
@@ -181,16 +206,16 @@ export function dashboardRoutes(app: Hono<AppEnv>) {
 		await new OrgStore(c.env.DB).removeCollaborator(repo.id, c.req.param("handle"));
 		return c.json({ removed: c.req.param("handle") });
 	});
+}
 
-	// Browse a repo's code: its files, and one file's text, at a branch or commit (the repo's default branch if none).
+// Browse a repo's code: its files, and one file's text, at a branch or commit (the repo's default branch if none).
+function codeRoutes(app: Hono<AppEnv>) {
 	app.get("/repos/:owner/:name/tree", async (c) => {
-		const remote = await remoteFor(c.env.ARTIFACTS, (await routeRepo(c, "read")).id, "read");
-		const ref = c.req.query("ref") || ((await defaultBranch(remote)) ?? fail(404, "the repo has no commits"));
+		const { remote, ref } = await codeRef(c);
 		return c.json({ ref, ...(await listTree(remote, ref)) });
 	});
 	app.get("/repos/:owner/:name/file", async (c) => {
-		const remote = await remoteFor(c.env.ARTIFACTS, (await routeRepo(c, "read")).id, "read");
-		const ref = c.req.query("ref") || ((await defaultBranch(remote)) ?? fail(404, "the repo has no commits"));
+		const { remote, ref } = await codeRef(c);
 		return c.json({ ref, ...(await readFile(remote, ref, c.req.query("path") ?? "")) });
 	});
 }

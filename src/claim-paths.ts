@@ -28,15 +28,15 @@ export function entriesOverlap(a: string, b: string) {
 export function normalizeClaim(paths: unknown): string[] {
 	if (!Array.isArray(paths) || !paths.length) fail(400, "claim at least one path");
 	if (paths.length > MAX_CLAIM_PATHS) fail(400, `claim at most ${MAX_CLAIM_PATHS} paths`);
-	const out: string[] = [];
+	const normalized: string[] = [];
 	for (const raw of paths) {
 		if (typeof raw !== "string") fail(400, "paths must be strings");
 		const path = raw.trim().replace(/^\.\//, "");
 		// A trailing slash marks a directory; the rest must be a plain path.
 		if (!isPlainPath(path.replace(/\/$/, ""))) fail(400, `invalid path: ${raw}`);
-		if (!out.includes(path)) out.push(path);
+		if (!normalized.includes(path)) normalized.push(path);
 	}
-	return out;
+	return normalized;
 }
 
 /** A change id from a title: its words, and a short random suffix so two changes never share one. */
@@ -63,11 +63,11 @@ export function claimCovering(files: string[], max = MAX_CLAIM_PATHS): string[] 
 	while (entries.length > max) {
 		const deepest = Math.max(...entries.map(depth));
 		if (deepest <= 1) return null;
-		const lifted = [...new Set(entries.map((e) => (depth(e) === deepest ? parent(e) : e)))];
+		const lifted = [...new Set(entries.map((entry) => (depth(entry) === deepest ? parent(entry) : entry)))];
 		// Drop entries that a lifted folder already covers.
-		entries = lifted.filter(
-			(e) => !lifted.some((folder) => folder !== e && folder.endsWith("/") && inLaneEntry(e, folder)),
-		);
+		const coveredByFolder = (entry: string) =>
+			lifted.some((folder) => folder !== entry && folder.endsWith("/") && inLaneEntry(entry, folder));
+		entries = lifted.filter((entry) => !coveredByFolder(entry));
 	}
 	return entries.sort();
 }

@@ -25,15 +25,22 @@ export { TokenCache } from "./token-cache";
 
 const app = new Hono<AppEnv>();
 
+const PUBLIC_PATHS = ["/", "/index.html", "/authorize"];
+const PUBLIC_PREFIXES = ["/assets/", "/fonts/", "/auth/", "/.well-known/"];
+
 /** Served without signing in: the dashboard's files (the page asks people to sign in), sign-in, and OAuth. */
-const isPublic = (path: string) =>
-	path === "/" ||
-	path === "/index.html" ||
-	path.startsWith("/assets/") ||
-	path.startsWith("/fonts/") ||
-	path.startsWith("/auth/") ||
-	path.startsWith("/.well-known/") ||
-	path === "/authorize";
+function isPublic(path: string) {
+	if (PUBLIC_PATHS.includes(path)) return true;
+	return PUBLIC_PREFIXES.some((prefix) => path.startsWith(prefix));
+}
+
+const SAFE_METHODS = ["GET", "HEAD", "OPTIONS"];
+
+/** A write whose Origin isn't this site, which a signed-in person's cookie must not authorize. */
+function isCrossSiteWrite(request: Request) {
+	if (SAFE_METHODS.includes(request.method)) return false;
+	return request.headers.get("Origin") !== new URL(request.url).origin;
+}
 
 // Authenticate before routing: Access, an agent token, or a session cookie (see auth/principal.ts).
 app.use("*", async (c, next) => {
@@ -41,11 +48,7 @@ app.use("*", async (c, next) => {
 	if (principal) c.set("principal", principal);
 	else if (!isPublic(c.req.path)) return c.json({ error: "sign in to GitHive first" }, 401);
 	// A session cookie rides along with any request to this site, so a write on one must come from this site's own pages.
-	if (
-		principal?.kind === "user" &&
-		!["GET", "HEAD", "OPTIONS"].includes(c.req.method) &&
-		c.req.header("Origin") !== new URL(c.req.url).origin
-	)
+	if (principal?.kind === "user" && isCrossSiteWrite(c.req.raw))
 		return c.json({ error: "refused: a signed-in write must come from GitHive's own pages" }, 403);
 	await next();
 });

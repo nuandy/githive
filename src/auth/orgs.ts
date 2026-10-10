@@ -11,11 +11,14 @@ export type Visibility = "private" | "public";
 const RANK: Record<Level, number> = { read: 1, review: 2, write: 3, admin: 4 };
 export const LEVELS = Object.keys(RANK) as Level[];
 export const atLeast = (level: Level | null, needed: Level) => !!level && RANK[level] >= RANK[needed];
-const highest = (levels: (Level | null | undefined)[]) =>
-	levels.reduce<Level | null>((best, l) => (l && (!best || RANK[l] > RANK[best]) ? l : best), null);
+function highest(levels: (Level | null | undefined)[]) {
+	let best: Level | null = null;
+	for (const level of levels) if (level && (!best || RANK[level] > RANK[best])) best = level;
+	return best;
+}
 
-export const isLevel = (v: unknown): v is Level => typeof v === "string" && v in RANK;
-export const isRole = (v: unknown): v is Role => v === "owner" || v === "admin" || v === "member";
+export const isLevel = (value: unknown): value is Level => typeof value === "string" && value in RANK;
+export const isRole = (value: unknown): value is Role => value === "owner" || value === "admin" || value === "member";
 
 /** Lowercase letters, digits and single dashes. Never "--", which separates org and name in a repo's id. */
 const SLUG = /^[a-z0-9](?:[a-z0-9]|-(?!-)){0,37}[a-z0-9]$|^[a-z0-9]$/;
@@ -69,22 +72,34 @@ export interface Repo {
 }
 
 type Row = Record<string, unknown>;
-const toOrg = (r: Row): Org => ({
-	id: String(r.id),
-	slug: String(r.slug),
-	name: r.name === null || r.name === undefined ? null : String(r.name),
-	personal: !!r.personal_of,
-	defaultPermission: String(r.default_permission) as Level,
-	membersCanCreateRepos: Number(r.members_can_create_repos) === 1,
-});
-const toRepo = (r: Row): Repo => ({
-	id: String(r.id),
-	org: String(r.org_slug),
-	name: String(r.name),
-	fullName: `${r.org_slug}/${r.name}`,
-	visibility: String(r.visibility) as Visibility,
-	createdAt: String(r.created_at),
-});
+function toOrg(row: Row): Org {
+	return {
+		id: String(row.id),
+		slug: String(row.slug),
+		name: row.name === null || row.name === undefined ? null : String(row.name),
+		personal: !!row.personal_of,
+		defaultPermission: String(row.default_permission) as Level,
+		membersCanCreateRepos: Number(row.members_can_create_repos) === 1,
+	};
+}
+
+function toRepo(row: Row): Repo {
+	return {
+		id: String(row.id),
+		org: String(row.org_slug),
+		name: String(row.name),
+		fullName: `${row.org_slug}/${row.name}`,
+		visibility: String(row.visibility) as Visibility,
+		createdAt: String(row.created_at),
+	};
+}
+
+/** The level an org role gives in the org's repos: admin for owners and admins, the org default for members. */
+function roleLevel(role: Role | null, defaultPermission: Level): Level | null {
+	if (role === "owner" || role === "admin") return "admin";
+	if (role === "member") return defaultPermission;
+	return null;
+}
 
 const fail = (status: number, message: string): never => {
 	throw new Error(`[${status}] ${message}`);
@@ -109,14 +124,14 @@ export class OrgStore {
 		const found = await this.db.prepare("SELECT * FROM orgs WHERE personal_of = ?").bind(user.id).first<Row>();
 		if (found) return toOrg(found);
 		const id = crypto.randomUUID();
-		const at = this.iso();
+		const createdAt = this.iso();
 		await this.db.batch([
 			this.db
 				.prepare("INSERT INTO orgs (id, slug, personal_of, created_at) VALUES (?, ?, ?, ?)")
-				.bind(id, user.handle, user.id, at),
+				.bind(id, user.handle, user.id, createdAt),
 			this.db
 				.prepare("INSERT INTO org_members (org_id, user_id, role, created_at) VALUES (?, ?, 'owner', ?)")
-				.bind(id, user.id, at),
+				.bind(id, user.id, createdAt),
 		]);
 		return toOrg((await this.db.prepare("SELECT * FROM orgs WHERE id = ?").bind(id).first<Row>())!);
 	}
@@ -131,24 +146,24 @@ export class OrgStore {
 	}
 
 	async createOrg(owner: { id: string }, slug: string, name?: string | null) {
-		const s = slug.trim().toLowerCase();
-		if (!validSlug(s))
+		const orgSlug = slug.trim().toLowerCase();
+		if (!validSlug(orgSlug))
 			fail(
 				400,
 				"an org's name is 1 to 39 lowercase letters, digits or single dashes, not starting or ending with a dash, and not one GitHive uses",
 			);
-		if (!(await this.slugFree(s))) fail(409, `${s} is taken`);
+		if (!(await this.slugFree(orgSlug))) fail(409, `${orgSlug} is taken`);
 		const id = crypto.randomUUID();
-		const at = this.iso();
+		const createdAt = this.iso();
 		await this.db.batch([
 			this.db
 				.prepare("INSERT INTO orgs (id, slug, name, created_at) VALUES (?, ?, ?, ?)")
-				.bind(id, s, name?.trim() || null, at),
+				.bind(id, orgSlug, name?.trim() || null, createdAt),
 			this.db
 				.prepare("INSERT INTO org_members (org_id, user_id, role, created_at) VALUES (?, ?, 'owner', ?)")
-				.bind(id, owner.id, at),
+				.bind(id, owner.id, createdAt),
 		]);
-		return (await this.org(s))!;
+		return (await this.org(orgSlug))!;
 	}
 
 	async org(slug: string) {
@@ -177,7 +192,7 @@ export class OrgStore {
 			)
 			.bind(userId)
 			.all<Row>();
-		return results.map((r) => ({ ...toOrg(r), role: String(r.role) as Role }));
+		return results.map((row) => ({ ...toOrg(row), role: String(row.role) as Role }));
 	}
 
 	async updateOrg(
@@ -186,16 +201,14 @@ export class OrgStore {
 	) {
 		if (patch.defaultPermission !== undefined && !isLevel(patch.defaultPermission))
 			fail(400, "default permission is read, review, write or admin");
+		const name = patch.name === undefined ? null : patch.name?.trim() || null;
+		let membersCanCreateRepos: number | null = null;
+		if (patch.membersCanCreateRepos !== undefined) membersCanCreateRepos = patch.membersCanCreateRepos ? 1 : 0;
 		await this.db
 			.prepare(
 				"UPDATE orgs SET name = COALESCE(?, name), default_permission = COALESCE(?, default_permission), members_can_create_repos = COALESCE(?, members_can_create_repos) WHERE id = ?",
 			)
-			.bind(
-				patch.name === undefined ? null : patch.name?.trim() || null,
-				patch.defaultPermission ?? null,
-				patch.membersCanCreateRepos === undefined ? null : patch.membersCanCreateRepos ? 1 : 0,
-				orgId,
-			)
+			.bind(name, patch.defaultPermission ?? null, membersCanCreateRepos, orgId)
 			.run();
 	}
 
@@ -208,12 +221,12 @@ export class OrgStore {
 			)
 			.bind(orgId)
 			.all<Row>();
-		return results.map((r) => ({
-			userId: String(r.id),
-			handle: String(r.handle),
-			name: r.name === null ? null : String(r.name),
-			avatarUrl: r.avatar_url === null ? null : String(r.avatar_url),
-			role: String(r.role) as Role,
+		return results.map((row) => ({
+			userId: String(row.id),
+			handle: String(row.handle),
+			name: row.name === null ? null : String(row.name),
+			avatarUrl: row.avatar_url === null ? null : String(row.avatar_url),
+			role: String(row.role) as Role,
 		}));
 	}
 
@@ -222,10 +235,10 @@ export class OrgStore {
 			.prepare("SELECT email, role, created_at FROM org_invites WHERE org_id = ? ORDER BY created_at")
 			.bind(orgId)
 			.all<Row>();
-		return results.map((r) => ({
-			email: String(r.email),
-			role: String(r.role) as Role,
-			createdAt: String(r.created_at),
+		return results.map((row) => ({
+			email: String(row.email),
+			role: String(row.role) as Role,
+			createdAt: String(row.created_at),
 		}));
 	}
 
@@ -239,13 +252,13 @@ export class OrgStore {
 		const address = normalizeEmail(email);
 		if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(address)) fail(400, `not an email address: ${email}`);
 		const user = await this.db.prepare("SELECT id, handle FROM users WHERE email = ?").bind(address).first<Row>();
-		const at = this.iso();
+		const createdAt = this.iso();
 		if (user) {
 			await this.db
 				.prepare(
 					"INSERT INTO org_members (org_id, user_id, role, created_at) VALUES (?, ?, ?, ?) ON CONFLICT (org_id, user_id) DO UPDATE SET role = excluded.role",
 				)
-				.bind(org.id, user.id, role, at)
+				.bind(org.id, user.id, role, createdAt)
 				.run();
 			return { added: String(user.handle), role };
 		}
@@ -253,7 +266,7 @@ export class OrgStore {
 			.prepare(
 				"INSERT INTO org_invites (org_id, email, role, invited_by, created_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT (org_id, email) DO UPDATE SET role = excluded.role",
 			)
-			.bind(org.id, address, role, invitedBy, at)
+			.bind(org.id, address, role, invitedBy, createdAt)
 			.run();
 		// Someone the GitHive admin hasn't approved can't sign in yet, so the invitation waits.
 		const approved = !!(await this.db.prepare("SELECT 1 FROM invites WHERE email = ?").bind(address).first());
@@ -274,14 +287,14 @@ export class OrgStore {
 			.bind(normalizeEmail(user.email))
 			.all<Row>();
 		if (!results.length) return;
-		const at = this.iso();
+		const createdAt = this.iso();
 		await this.db.batch([
-			...results.map((r) =>
+			...results.map((invite) =>
 				this.db
 					.prepare(
 						"INSERT INTO org_members (org_id, user_id, role, created_at) VALUES (?, ?, ?, ?) ON CONFLICT (org_id, user_id) DO NOTHING",
 					)
-					.bind(r.org_id, user.id, r.role, at),
+					.bind(invite.org_id, user.id, invite.role, createdAt),
 			),
 			this.db.prepare("DELETE FROM org_invites WHERE email = ?").bind(normalizeEmail(user.email)),
 		]);
@@ -337,25 +350,28 @@ export class OrgStore {
 				.bind(orgId)
 				.all<Row>(),
 		]);
-		return teams.results.map((t) => ({
-			id: String(t.id),
-			slug: String(t.slug),
-			name: t.name === null ? null : String(t.name),
-			members: members.results.filter((m) => m.team_id === t.id).map((m) => String(m.handle)),
+		return teams.results.map((team) => ({
+			id: String(team.id),
+			slug: String(team.slug),
+			name: team.name === null ? null : String(team.name),
+			members: members.results.filter((member) => member.team_id === team.id).map((member) => String(member.handle)),
 		}));
 	}
 
 	async createTeam(org: Org, slug: string, name?: string | null) {
 		if (org.personal) fail(400, "a personal org has no teams");
-		const s = slug.trim().toLowerCase();
-		if (!SLUG.test(s)) fail(400, "a team's name is lowercase letters, digits or single dashes");
-		const exists = await this.db.prepare("SELECT 1 FROM teams WHERE org_id = ? AND slug = ?").bind(org.id, s).first();
-		if (exists) fail(409, `@${org.slug}/${s} exists`);
+		const teamSlug = slug.trim().toLowerCase();
+		if (!SLUG.test(teamSlug)) fail(400, "a team's name is lowercase letters, digits or single dashes");
+		const exists = await this.db
+			.prepare("SELECT 1 FROM teams WHERE org_id = ? AND slug = ?")
+			.bind(org.id, teamSlug)
+			.first();
+		if (exists) fail(409, `@${org.slug}/${teamSlug} exists`);
 		await this.db
 			.prepare("INSERT INTO teams (id, org_id, slug, name, created_at) VALUES (?, ?, ?, ?, ?)")
-			.bind(crypto.randomUUID(), org.id, s, name?.trim() || null, this.iso())
+			.bind(crypto.randomUUID(), org.id, teamSlug, name?.trim() || null, this.iso())
 			.run();
-		return { team: `@${org.slug}/${s}` };
+		return { team: `@${org.slug}/${teamSlug}` };
 	}
 
 	private async teamId(orgId: string, slug: string) {
@@ -530,11 +546,7 @@ export class OrgStore {
 		const role = row.role ? (String(row.role) as Role) : null;
 		return highest([
 			row.visibility === "public" ? "read" : null,
-			role === "owner" || role === "admin"
-				? "admin"
-				: role === "member"
-					? (String(row.default_permission) as Level)
-					: null,
+			roleLevel(role, String(row.default_permission) as Level),
 			row.collaborator ? (String(row.collaborator) as Level) : null,
 		]);
 	}

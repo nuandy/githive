@@ -16,7 +16,7 @@ const pktLine = (line: string) => {
 };
 
 const concat = (parts: Uint8Array[]) => {
-	const out = new Uint8Array(parts.reduce((n, p) => n + p.length, 0));
+	const out = new Uint8Array(parts.reduce((total, part) => total + part.length, 0));
 	let at = 0;
 	for (const part of parts) {
 		out.set(part, at);
@@ -33,35 +33,42 @@ export async function fetchCommits(remote: Remote, oids: string[], dir = FETCHED
 	const fs = new MemoryFS();
 	await git.init({ fs, dir });
 	if (!oids.length) return { fs, dir };
-	const body = concat([
-		...oids.flatMap((oid, i) =>
-			pktLine(
-				`want ${oid}${i === 0 ? ` side-band-64k ofs-delta${history ? "" : " shallow"} no-progress agent=githive` : ""}\n`,
-			),
-		),
-		...(history ? [] : pktLine(`deepen ${depth}\n`)),
-		encoder.encode("0000"),
-		...pktLine("done\n"),
-	]);
+	const secret = remote.token.split("?expires=")[0];
 	const response = await gitFetch(`${remote.url}/git-upload-pack`, {
 		method: "POST",
 		headers: {
 			"Content-Type": "application/x-git-upload-pack-request",
 			Accept: "application/x-git-upload-pack-result",
-			Authorization: `Basic ${btoa(`x:${remote.token.split("?expires=")[0]}`)}`,
+			Authorization: `Basic ${btoa(`x:${secret}`)}`,
 		},
-		body,
+		body: uploadPackRequest(oids, history, depth),
 	});
 	noteGitRequest(`${remote.url}/git-upload-pack`, response.status);
-	if (!response.ok)
-		throw Object.assign(new Error(`fetch failed: ${response.status} ${(await response.text()).slice(0, 200)}`), {
-			status: response.status,
-		});
+	if (!response.ok) {
+		const detail = (await response.text()).slice(0, 200);
+		throw Object.assign(new Error(`fetch failed: ${response.status} ${detail}`), { status: response.status });
+	}
 	const bytes = new Uint8Array(await response.arrayBuffer());
 	// An empty 200 is a server failure (see git-http.ts), so callers retry it.
 	if (!bytes.length)
 		throw Object.assign(new Error(`fetch failed: an empty answer from ${remote.url}`), { status: 502 });
+	const filepath = ".git/objects/pack/pack-fetched.pack";
+	await fs.promises.writeFile(`${dir}/${filepath}`, packFrom(bytes));
+	await git.indexPack({ fs, dir, filepath });
+	return { fs, dir };
+}
 
+/** The upload-pack request body: a want line per commit, with the capabilities on the first. */
+function uploadPackRequest(oids: string[], history: boolean, depth: number) {
+	const shallow = history ? "" : " shallow";
+	const capabilities = ` side-band-64k ofs-delta${shallow} no-progress agent=githive`;
+	const wants = oids.flatMap((oid, index) => pktLine(`want ${oid}${index === 0 ? capabilities : ""}\n`));
+	const deepen = history ? [] : pktLine(`deepen ${depth}\n`);
+	return concat([...wants, ...deepen, encoder.encode("0000"), ...pktLine("done\n")]);
+}
+
+/** The pack in an upload-pack response, throwing the server's error if it sent one. */
+function packFrom(bytes: Uint8Array) {
 	// Shallow lines and NAK come first, then the pack in side-band packets (1 data, 2 progress, 3 error).
 	const pack: Uint8Array[] = [];
 	let inPack = false;
@@ -83,8 +90,5 @@ export async function fetchCommits(remote: Remote, oids: string[], dir = FETCHED
 		if (payload[0] === 1) pack.push(payload.subarray(1));
 		else if (payload[0] === 3) throw new Error(`fetch failed: ${decoder.decode(payload.subarray(1)).trim()}`);
 	}
-	const filepath = ".git/objects/pack/pack-fetched.pack";
-	await fs.promises.writeFile(`${dir}/${filepath}`, concat(pack));
-	await git.indexPack({ fs, dir, filepath });
-	return { fs, dir };
+	return concat(pack);
 }

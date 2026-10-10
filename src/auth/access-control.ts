@@ -60,8 +60,10 @@ export async function resolveRepo(
 	const orgs = env.DB ? new OrgStore(env.DB) : null;
 
 	if (principal.kind === "access") {
-		if (owner === "_")
-			return { id: name, fullName: (await orgs?.repoById(name))?.fullName ?? `_/${name}`, level: "admin" };
+		if (owner === "_") {
+			const fullName = (await orgs?.repoById(name))?.fullName ?? `_/${name}`;
+			return { id: name, fullName, level: "admin" };
+		}
 		const found = (await orgs?.repo(owner, name)) ?? fail(404, `no repo ${owner}/${name}`);
 		return { id: found.id, fullName: found.fullName, level: "admin" };
 	}

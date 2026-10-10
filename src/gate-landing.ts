@@ -34,8 +34,8 @@ export async function fetchBatchBase(container: Container, input: BatchBase) {
 		`git config core.hooksPath /dev/null && git config user.name "${BOT.name}" && git config user.email "${BOT.email}"`,
 	]);
 	await requireBase(container, input.base, input.branch);
-	if ((await run(container, ["git", "cat-file", "-e", `${input.baseHead}^{commit}`])).exitCode !== 0)
-		throw new Error(`${input.branch} at ${input.baseHead} isn't in the project`);
+	const found = await run(container, ["git", "cat-file", "-e", `${input.baseHead}^{commit}`]);
+	if (found.exitCode !== 0) throw new Error(`${input.branch} at ${input.baseHead} isn't in the project`);
 }
 
 /** Fetches each change's branch and reads its current head and the files it changed since it left `baseHead`. */
@@ -46,17 +46,17 @@ export async function readChanges(
 ): Promise<ReadChange[]> {
 	const failed = await fetchChanges(
 		container,
-		changes.map((c, k) => ({ k, ...c })),
+		changes.map((source, k) => ({ k, ...source })),
 	);
-	const fetched = changes.map((_, k) => k).filter((k) => !failed.has(k));
+	const fetched = changes.map((_, index) => index).filter((index) => !failed.has(index));
 	const listed = await listChangedFiles(container, baseHead, fetched);
-	return changes.map((c, k) => {
-		const read = listed.get(k);
-		if (read) return { change: c.change, ...read };
-		return {
-			change: c.change,
-			error: failed.has(k) ? `fetch of its branch failed: ${failed.get(k)}` : "its branch couldn't be read",
-		};
+	return changes.map((source, index) => {
+		const read = listed.get(index);
+		if (read) return { change: source.change, ...read };
+		const error = failed.has(index)
+			? `fetch of its branch failed: ${failed.get(index)}`
+			: "its branch couldn't be read";
+		return { change: source.change, error };
 	});
 }
 
@@ -65,8 +65,8 @@ async function listChangedFiles(container: Container, baseHead: string, fetched:
 	// One command lists each change's head and its changed files. NUL separators let any file name through.
 	const script = fetched
 		.map(
-			(k) =>
-				`if h=$(git rev-parse refs/remotes/batch-${k}/head) && b=$(git merge-base ${baseHead} "$h"); then printf '%s %s\\0' ${k} "$h"; git diff --name-only --no-renames -z "$b" "$h"; else printf '%s -\\0' ${k}; fi; printf '\\0'`,
+			(index) =>
+				`if h=$(git rev-parse refs/remotes/batch-${index}/head) && b=$(git merge-base ${baseHead} "$h"); then printf '%s %s\\0' ${index} "$h"; git diff --name-only --no-renames -z "$b" "$h"; else printf '%s -\\0' ${index}; fi; printf '\\0'`,
 		)
 		.join("\n");
 	const listed = new Map<number, { head: string; files: string[] }>();
@@ -74,8 +74,8 @@ async function listChangedFiles(container: Container, baseHead: string, fetched:
 	const ran = await run(container, ["bash", "-c", script]);
 	for (const record of ran.output.split("\0\0").filter(Boolean)) {
 		const [first, ...files] = record.split("\0");
-		const [k, head] = first.split(" ");
-		if (head && head !== "-") listed.set(Number(k), { head, files: files.filter(Boolean) });
+		const [index, head] = first.split(" ");
+		if (head && head !== "-") listed.set(Number(index), { head, files: files.filter(Boolean) });
 	}
 	return listed;
 }
@@ -91,7 +91,7 @@ export async function landMerges(
 ): Promise<LandingResult> {
 	// inspectBatch usually fetched these already, so only missing commits are fetched.
 	const failed = await fetchMissing(container, input.merges);
-	for (const [k, why] of failed) return { error: `fetch of ${input.merges[k].change} failed: ${why}` };
+	for (const [index, why] of failed) return { error: `fetch of ${input.merges[index].change} failed: ${why}` };
 	const absent = await absentChanges(container, input.merges);
 	if (absent) return { error: `not on their branches: ${absent.split("\n").join(", ")}` };
 	await checkoutDetached(container, input.baseHead);
@@ -102,11 +102,9 @@ export async function landMerges(
 	}
 	const commits = await firstParentCommits(container, input.baseHead);
 	const pushed = await pushWithLease(container, input);
-	if (pushed.exitCode !== 0)
-		return /rejected|non-fast-forward|fetch first|stale info/i.test(pushed.output)
-			? { moved: true }
-			: { error: `the push failed: ${clip(pushed.output, 500)}` };
-	return { commits };
+	if (pushed.exitCode === 0) return { commits };
+	if (/rejected|non-fast-forward|fetch first|stale info/i.test(pushed.output)) return { moved: true };
+	return { error: `the push failed: ${clip(pushed.output, 500)}` };
 }
 
 /** The changes whose heads the container doesn't have, one per line. */
@@ -114,14 +112,14 @@ async function absentChanges(container: Container, merges: LandingMerge[]) {
 	const absent = await run(container, [
 		"bash",
 		"-c",
-		merges.map((m) => `git cat-file -e ${m.head}^{commit} 2>/dev/null || echo ${m.change}`).join("\n"),
+		merges.map((merge) => `git cat-file -e ${merge.head}^{commit} 2>/dev/null || echo ${merge.change}`).join("\n"),
 	]);
 	return absent.output.trim();
 }
 
 /** Merges one change onto the checkout and commits it with its claim's trailers. Returns why it failed, if it did. */
 async function commitMerge(container: Container, merge: LandingMerge, stamper: Stamper | undefined) {
-	const as = ["-c", `user.name=${BOT.name}`, "-c", `user.email=${BOT.email}`];
+	const identity = ["-c", `user.name=${BOT.name}`, "-c", `user.email=${BOT.email}`];
 	// Print the merge's base (the commit before it), then merge without committing.
 	const merged = await run(container, [
 		"bash",
@@ -134,7 +132,7 @@ async function commitMerge(container: Container, merge: LandingMerge, stamper: S
 	// Always a merge commit, never a fast-forward, because the audit reads the merge's trailers.
 	const committed = await run(
 		container,
-		["git", ...as, "commit", "-q", "--no-verify", "-F", "-"],
+		["git", ...identity, "commit", "-q", "--no-verify", "-F", "-"],
 		WORKDIR,
 		await mergeMessage({ ...merge.claimed, base }, stamper),
 	);
@@ -164,7 +162,9 @@ async function pushWithLease(container: Container, input: BatchBase) {
 	// Artifacts refuses a push while the repo takes another one, so a busy refusal is retried.
 	let pushed = await push();
 	for (let attempt = 1; pushed.exitCode !== 0 && pushBusy(pushed.output) && attempt < PUSH_TRIES; attempt++) {
-		await new Promise((resolve) => setTimeout(resolve, PUSH_RETRY_MS * 1.6 ** attempt * (0.75 + Math.random() / 2)));
+		const jitter = 0.75 + Math.random() / 2;
+		const wait = PUSH_RETRY_MS * 1.6 ** attempt * jitter;
+		await new Promise((resolve) => setTimeout(resolve, wait));
 		pushed = await push();
 	}
 	return pushed;
@@ -179,7 +179,7 @@ export async function pushForChecks(
 	input: BatchBase & ChecksBranch,
 ): Promise<{ tip: string } | { failed: string }> {
 	const failed = await fetchMissing(container, input.changes);
-	for (const [k, why] of failed) return { failed: `fetch of ${input.changes[k].change} failed: ${why}` };
+	for (const [index, why] of failed) return { failed: `fetch of ${input.changes[index].change} failed: ${why}` };
 	await checkoutDetached(container, input.baseHead);
 	for (const change of input.changes) {
 		const merged = await run(container, [

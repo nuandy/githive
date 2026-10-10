@@ -139,6 +139,42 @@ const FORK_STUCK_MS = 45_000;
 /** The fork wasn't ready in time; asking again later may find it made. */
 export const isForkNotReady = (err: unknown) => codeOf(err) === "FORK_NOT_READY";
 
+interface ForkOptions {
+	/** Others may make the same fork at once, as with seeds, so an existing one is waited for. */
+	shared?: boolean;
+}
+
+/** Request a fork. Returns null when it already exists because an earlier request succeeded after all. */
+function requestFork(artifacts: Artifacts, source: string, name: string, description: string, again: boolean) {
+	return withRepo(artifacts, source, async (repo) => {
+		for (let attempt = 1; ; attempt++) {
+			try {
+				return await call("fork", source, () => rpc(repo.fork(name, { description, defaultBranchOnly: true })));
+			} catch (err) {
+				if ((again || attempt > 1) && alreadyExists(err)) return null;
+				const internal = isInternalError(err);
+				if ((!internal && !isTransientFailure(err)) || attempt === FORK_ATTEMPTS) throw err;
+				// Jitter spreads out a burst of forks that hit internal errors together.
+				if (internal) await scheduler.wait(Math.min(250 * 2 ** attempt, 4_000) * (0.5 + Math.random()));
+				else await sleep(transientDelay(attempt));
+			}
+		}
+	});
+}
+
+/** Deleting a stuck fork often lets it finish at once. Otherwise it's gone and is requested again. */
+async function deleteStuckFork(artifacts: Artifacts, name: string, forkingSince: number) {
+	console.log(
+		`fork ${name} still forking after ${Math.round((Date.now() - forkingSince) / 1000)}s: deleting it, so it finishes or is made again`,
+	);
+	await call("delete", name, () => artifacts.delete(name)).catch((deleting) =>
+		console.error(`deleting the stuck fork ${name} failed`, String(deleting)),
+	);
+}
+
+/** Whether a repo still being made, or not yet visible, may become usable if waited for. */
+const mayBecomeReady = (err: unknown) => isTransientFailure(err) || isForkPending(err) || notFoundYet(err);
+
 /**
  * Fork `source` and wait until the fork is ready, since get() throws while a repo is still forking.
  * Under load Artifacts fails some forks or loses them, so they're requested again.
@@ -148,30 +184,9 @@ export async function forkAndWait(
 	source: string,
 	name: string,
 	description: string,
-	{
-		shared = false,
-	}: {
-		/** Others may make the same fork at once, as with seeds, so an existing one is waited for. */ shared?: boolean;
-	} = {},
+	{ shared = false }: ForkOptions = {},
 ) {
-	/** Request the fork. Returns null when it already exists because an earlier request succeeded after all. */
-	const requestFork = (again: boolean) =>
-		withRepo(artifacts, source, async (repo) => {
-			for (let attempt = 1; ; attempt++) {
-				try {
-					return await call("fork", source, () => rpc(repo.fork(name, { description, defaultBranchOnly: true })));
-				} catch (err) {
-					if ((again || attempt > 1) && alreadyExists(err)) return null;
-					const internal = isInternalError(err);
-					if ((!internal && !isTransientFailure(err)) || attempt === FORK_ATTEMPTS) throw err;
-					// Jitter spreads out a burst of forks that hit internal errors together.
-					if (internal) await scheduler.wait(Math.min(250 * 2 ** attempt, 4_000) * (0.5 + Math.random()));
-					else await sleep(transientDelay(attempt));
-				}
-			}
-		});
-
-	let forked = await requestFork(shared);
+	let forked = await requestFork(artifacts, source, name, description, shared);
 	const started = Date.now();
 	// A fork stuck "in progress" is deleted once.
 	let forkingSince: number | undefined;
@@ -187,22 +202,17 @@ export async function forkAndWait(
 			const remote = await remoteFor(artifacts, name, "write", 3 * 3600);
 			return { name, remote: remote.url, token: remote.token };
 		} catch (err) {
-			if (!isTransientFailure(err) && !isForkPending(err) && !notFoundYet(err)) throw err;
-			if (isForkPending(err)) forkingSince ??= Date.now();
-			if (isForkPending(err) && !unstuck && Date.now() - (forkingSince ?? Date.now()) > FORK_STUCK_MS) {
-				// Deleting a stuck fork often lets it finish at once. Otherwise it's gone and is requested again.
+			if (!mayBecomeReady(err)) throw err;
+			const pending = isForkPending(err);
+			if (pending) forkingSince ??= Date.now();
+			if (pending && !unstuck && Date.now() - (forkingSince ?? Date.now()) > FORK_STUCK_MS) {
 				unstuck = true;
-				console.log(
-					`fork ${name} still forking after ${Math.round((Date.now() - forkingSince!) / 1000)}s: deleting it, so it finishes or is made again`,
-				);
-				await call("delete", name, () => artifacts.delete(name)).catch((deleting) =>
-					console.error(`deleting the stuck fork ${name} failed`, String(deleting)),
-				);
+				await deleteStuckFork(artifacts, name, forkingSince!);
 				askAgainAt = Date.now();
 				continue;
 			}
 			if (notFoundYet(err) && Date.now() > askAgainAt && Date.now() - started < FORK_READY_MS) {
-				forked = (await requestFork(true)) ?? forked;
+				forked = (await requestFork(artifacts, source, name, description, true)) ?? forked;
 				askAgainAt = Date.now() + lostAfter();
 				continue;
 			}
@@ -225,7 +235,7 @@ export async function ensureRepo(artifacts: Artifacts, name: string, description
 		try {
 			return await withRepo(artifacts, name, async () => undefined, { retry: false });
 		} catch (err) {
-			if (!isTransientFailure(err) && !isForkPending(err) && !notFoundYet(err)) throw err;
+			if (!mayBecomeReady(err)) throw err;
 			if (Date.now() - started > FORK_READY_MS)
 				throw new Error(`repo ${name} not ready after ${FORK_READY_MS / 1000}s: ${err}`);
 			await scheduler.wait(delay);
@@ -240,13 +250,15 @@ const escapeRegex = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"
  * Names belonging to a longer repo id, like acme--web when deleting acme, are excluded.
  */
 export function leftoversOf(id: string, names: string[]) {
-	const longer = names.filter((n) => !n.startsWith("fork--") && !n.startsWith("records--") && n.startsWith(`${id}--`));
-	const theirs = (name: string, kind: "fork" | "records") =>
-		longer.some((other) => name.startsWith(`${kind}--${other}--`));
-	const fork = new RegExp(`^fork--${escapeRegex(id)}--.+$`);
-	const shard = new RegExp(`^records--${escapeRegex(id)}--\\d+$`);
+	const isLongerRepo = (name: string) =>
+		!name.startsWith("fork--") && !name.startsWith("records--") && name.startsWith(`${id}--`);
+	const longerRepos = names.filter(isLongerRepo);
+	const belongsToLongerRepo = (name: string, kind: "fork" | "records") =>
+		longerRepos.some((other) => name.startsWith(`${kind}--${other}--`));
+	const forkPattern = new RegExp(`^fork--${escapeRegex(id)}--.+$`);
+	const shardPattern = new RegExp(`^records--${escapeRegex(id)}--\\d+$`);
 	return {
-		forks: names.filter((n) => fork.test(n) && !theirs(n, "fork")),
-		shards: names.filter((n) => shard.test(n) && !theirs(n, "records")),
+		forks: names.filter((name) => forkPattern.test(name) && !belongsToLongerRepo(name, "fork")),
+		shards: names.filter((name) => shardPattern.test(name) && !belongsToLongerRepo(name, "records")),
 	};
 }

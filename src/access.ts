@@ -51,17 +51,42 @@ function identify(claims: AccessJwtClaims): AccessIdentity | null {
 	return null;
 }
 
+function usableConfig(config: AccessConfiguration | undefined | null): config is AccessConfiguration {
+	if (!config || typeof config.teamDomain !== "string" || !validTeamDomain(config.teamDomain)) return false;
+	return typeof config.audience === "string" && !!config.audience.trim();
+}
+
+async function findSigningKey(teamDomain: string, keyId: string) {
+	const jwksResponse = await fetch(`https://${teamDomain}/cdn-cgi/access/certs`);
+	if (!jwksResponse.ok) return null;
+	const jwks = (await jwksResponse.json()) as JsonWebKeySet;
+	if (!jwks || !Array.isArray(jwks.keys)) return null;
+	const jwk = jwks.keys.find(
+		(key) =>
+			key.kid === keyId && key.kty === "RSA" && (!key.use || key.use === "sig") && (!key.alg || key.alg === "RS256"),
+	);
+	return jwk ?? null;
+}
+
+function isFiniteNumber(value: unknown): value is number {
+	return typeof value === "number" && Number.isFinite(value);
+}
+
+function claimsAreValid(claims: AccessJwtClaims, config: AccessConfiguration) {
+	const now = Date.now() / 1000;
+	const audienceMatches =
+		claims.aud === config.audience ||
+		(Array.isArray(claims.aud) && claims.aud.some((audience) => audience === config.audience));
+	if (claims.iss !== `https://${config.teamDomain}` || !audienceMatches) return false;
+	if (!isFiniteNumber(claims.exp) || claims.exp <= now) return false;
+	if (claims.nbf === undefined) return true;
+	return isFiniteNumber(claims.nbf) && claims.nbf <= now;
+}
+
 /** Verify a Cloudflare Access assertion with the signing keys published by its team. */
 export const verifyAccessRequest: AccessVerifier = async (request, config) => {
 	try {
-		if (
-			!config ||
-			typeof config.teamDomain !== "string" ||
-			!validTeamDomain(config.teamDomain) ||
-			typeof config.audience !== "string" ||
-			!config.audience.trim()
-		)
-			return null;
+		if (!usableConfig(config)) return null;
 
 		const assertion = request.headers.get("Cf-Access-Jwt-Assertion");
 		if (!assertion) return null;
@@ -72,17 +97,7 @@ export const verifyAccessRequest: AccessVerifier = async (request, config) => {
 		const signature = decodeBase64Url(segments[2]);
 		if (!header || header.alg !== "RS256" || typeof header.kid !== "string" || !header.kid || !signature) return null;
 
-		const jwksResponse = await fetch(`https://${config.teamDomain}/cdn-cgi/access/certs`);
-		if (!jwksResponse.ok) return null;
-		const jwks = (await jwksResponse.json()) as JsonWebKeySet;
-		if (!jwks || !Array.isArray(jwks.keys)) return null;
-		const jwk = jwks.keys.find(
-			(key) =>
-				key.kid === header.kid &&
-				key.kty === "RSA" &&
-				(!key.use || key.use === "sig") &&
-				(!key.alg || key.alg === "RS256"),
-		);
+		const jwk = await findSigningKey(config.teamDomain, header.kid);
 		if (!jwk) return null;
 
 		const key = await crypto.subtle.importKey("jwk", jwk, { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" }, false, [
@@ -92,20 +107,7 @@ export const verifyAccessRequest: AccessVerifier = async (request, config) => {
 		if (!(await crypto.subtle.verify("RSASSA-PKCS1-v1_5", key, signature, signingInput))) return null;
 
 		const claims = decodeJson<AccessJwtClaims>(segments[1]);
-		if (!claims || typeof claims !== "object") return null;
-		const now = Date.now() / 1000;
-		const audienceMatches =
-			claims.aud === config.audience ||
-			(Array.isArray(claims.aud) && claims.aud.some((audience) => audience === config.audience));
-		if (
-			claims.iss !== `https://${config.teamDomain}` ||
-			!audienceMatches ||
-			typeof claims.exp !== "number" ||
-			!Number.isFinite(claims.exp) ||
-			claims.exp <= now ||
-			(claims.nbf !== undefined && (typeof claims.nbf !== "number" || !Number.isFinite(claims.nbf) || claims.nbf > now))
-		)
-			return null;
+		if (!claims || typeof claims !== "object" || !claimsAreValid(claims, config)) return null;
 
 		return identify(claims);
 	} catch {

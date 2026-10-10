@@ -64,7 +64,7 @@ export function changeContext(job: ChangeJob) {
 Its claim (the only paths this change may touch): ${job.claim.join(", ")}
 Before it merges, the project's checks must pass with it merged into ${job.branch}: ${job.verify.length ? job.verify.join("; ") : "no checks configured; run the project's own tests"}
 Other changes in progress at the same time:
-${job.others.map((o) => `- ${o.change} (claims ${o.claim.join(", ")})`).join("\n") || "- none"}`;
+${job.others.map((other) => `- ${other.change} (claims ${other.claim.join(", ")})`).join("\n") || "- none"}`;
 }
 
 export interface AgentState {
@@ -119,8 +119,8 @@ export abstract class SandboxAgent<J extends SandboxJob, S extends AgentState> e
 	private lifecycleTail: Promise<unknown> = Promise.resolve();
 
 	/** Run storage changes that race with the agent loop (messages) one at a time. */
-	protected lifecycle<T>(fn: () => Promise<T>): Promise<T> {
-		const next = this.lifecycleTail.then(fn, fn);
+	protected lifecycle<T>(work: () => Promise<T>): Promise<T> {
+		const next = this.lifecycleTail.then(work, work);
 		this.lifecycleTail = next.catch(() => {});
 		return next;
 	}
@@ -237,41 +237,9 @@ export abstract class SandboxAgent<J extends SandboxJob, S extends AgentState> e
 		const { job, state } = await this.load();
 		if (!job || !state) return;
 		if (state.status !== "queued" && state.status !== "working") return;
-		if (state.status === "working" && (await this.ctx.storage.get(TURN_IN_FLIGHT))) {
-			// A turn may still be running in an earlier alarm. Wait for it unless it is long overdue.
-			const started = await this.ctx.storage.get<number>(TURN_STARTED);
-			if (started && Date.now() - started < RUN_BUDGET_MS + 30_000) {
-				await this.ctx.storage.setAlarm(Date.now() + 60_000);
-				return;
-			}
-			await this.ctx.storage.delete([TURN_IN_FLIGHT, TURN_STARTED]);
-		}
+		if (state.status === "working" && (await this.waitingForEarlierTurn())) return;
 		try {
-			if (await this.cancelled(state)) throw new Error(state.error);
-			if (state.status === "queued" || !this.ctx.container?.running) {
-				await this.setUp(job, state);
-				state.status = "working";
-				await this.save(state);
-			}
-			await this.ctx.container!.setInactivityTimeout(20 * 60_000);
-			const deadline = Date.now() + RUN_BUDGET_MS;
-			while (state.status === "working" && Date.now() < deadline && !(await this.cancelled(state))) {
-				const turnToken = crypto.randomUUID();
-				await this.lifecycle(async () =>
-					this.ctx.storage.put({ [TURN_IN_FLIGHT]: turnToken, [TURN_STARTED]: Date.now() }),
-				);
-				try {
-					await this.turn(job, state);
-					await this.save(state);
-					await this.afterTurn(job, state, turnToken);
-				} finally {
-					await this.endTurn(turnToken);
-				}
-				// A revision may have brought fresh credentials.
-				const refreshed = await this.ctx.storage.get<J>("job");
-				if (refreshed) Object.assign(job, refreshed);
-			}
-			if (state.status === "working") await this.ctx.storage.setAlarm(Date.now() + 1_000);
+			await this.runSlice(job, state);
 		} catch (err) {
 			state.status = "failed";
 			state.error ??= err instanceof Error ? err.message : String(err);
@@ -284,6 +252,52 @@ export abstract class SandboxAgent<J extends SandboxJob, S extends AgentState> e
 		}
 		await this.save(state);
 		if ((state.status as string) === "failed") await this.onFailed(job, state).catch(() => {});
+	}
+
+	/**
+	 * Whether a turn may still be running in an earlier alarm. The agent waits for it, with a later alarm, unless it is
+	 * long overdue.
+	 */
+	private async waitingForEarlierTurn() {
+		if (!(await this.ctx.storage.get(TURN_IN_FLIGHT))) return false;
+		const started = await this.ctx.storage.get<number>(TURN_STARTED);
+		if (started && Date.now() - started < RUN_BUDGET_MS + 30_000) {
+			await this.ctx.storage.setAlarm(Date.now() + 60_000);
+			return true;
+		}
+		await this.ctx.storage.delete([TURN_IN_FLIGHT, TURN_STARTED]);
+		return false;
+	}
+
+	/** Sets up the container if needed and runs turns for one alarm's budget, scheduling the next slice. */
+	private async runSlice(job: J, state: S) {
+		if (await this.cancelled(state)) throw new Error(state.error);
+		if (state.status === "queued" || !this.ctx.container?.running) {
+			await this.setUp(job, state);
+			state.status = "working";
+			await this.save(state);
+		}
+		await this.ctx.container!.setInactivityTimeout(20 * 60_000);
+		const deadline = Date.now() + RUN_BUDGET_MS;
+		while (state.status === "working" && Date.now() < deadline && !(await this.cancelled(state)))
+			await this.runTurn(job, state);
+		if (state.status === "working") await this.ctx.storage.setAlarm(Date.now() + 1_000);
+	}
+
+	/** Runs one turn, marked in flight so messages wait for it, then picks up any fresh credentials. */
+	private async runTurn(job: J, state: S) {
+		const turnToken = crypto.randomUUID();
+		await this.lifecycle(async () => this.ctx.storage.put({ [TURN_IN_FLIGHT]: turnToken, [TURN_STARTED]: Date.now() }));
+		try {
+			await this.turn(job, state);
+			await this.save(state);
+			await this.afterTurn(job, state, turnToken);
+		} finally {
+			await this.endTurn(turnToken);
+		}
+		// A revision may have brought fresh credentials.
+		const refreshed = await this.ctx.storage.get<J>("job");
+		if (refreshed) Object.assign(job, refreshed);
 	}
 
 	/** Runs after a turn is saved, to apply anything that arrived during it. */
@@ -311,11 +325,7 @@ export abstract class SandboxAgent<J extends SandboxJob, S extends AgentState> e
 			: null;
 		const booted = await bootContainer(container, "standard-1", snapshot);
 		if (booted === "restored") {
-			// Point the snapshot's checkout at this job's remote. afterClone fetches what the job needs.
-			const reset = await run(container, ["bash", "-c", "git checkout -q -f --detach && git clean -fdq"]);
-			const pointed = await run(container, ["git", "remote", "set-url", "origin", job.remote]);
-			if (reset.exitCode !== 0 || pointed.exitCode !== 0)
-				throw new Error(`setting up the snapshot's checkout failed: ${clip(reset.output + pointed.output, 2_000)}`);
+			await this.pointSnapshotAt(container, job);
 			this.note(state, "started from the project's snapshot");
 		} else {
 			// A container that outlived its object, for example across a deploy, still has the last checkout.
@@ -326,13 +336,10 @@ export abstract class SandboxAgent<J extends SandboxJob, S extends AgentState> e
 		}
 		await this.afterClone(job, state);
 		// A failed install is only noted. The agent will find the missing tool for itself.
-		for (const installed of await installToolchains(container))
-			this.note(
-				state,
-				installed.exitCode === 0
-					? `installed ${installed.toolchain}`
-					: `installing ${installed.toolchain} failed: ${clip(installed.output, 300)}`,
-			);
+		for (const installed of await installToolchains(container)) {
+			if (installed.exitCode === 0) this.note(state, `installed ${installed.toolchain}`);
+			else this.note(state, `installing ${installed.toolchain} failed: ${clip(installed.output, 300)}`);
+		}
 		if (restart)
 			state.pending = [
 				...(state.pending ?? []),
@@ -341,6 +348,14 @@ export abstract class SandboxAgent<J extends SandboxJob, S extends AgentState> e
 					content: "The container restarted. Uncommitted changes were lost; the repository was cloned again.",
 				},
 			];
+	}
+
+	/** Points the snapshot's checkout at this job's remote. afterClone fetches what the job needs. */
+	private async pointSnapshotAt(container: Container, job: J) {
+		const reset = await run(container, ["bash", "-c", "git checkout -q -f --detach && git clean -fdq"]);
+		const pointed = await run(container, ["git", "remote", "set-url", "origin", job.remote]);
+		if (reset.exitCode !== 0 || pointed.exitCode !== 0)
+			throw new Error(`setting up the snapshot's checkout failed: ${clip(reset.output + pointed.output, 2_000)}`);
 	}
 
 	protected exec(cmd: string[], cwd = WORKDIR, stdin?: string) {
@@ -358,11 +373,11 @@ export abstract class SandboxAgent<J extends SandboxJob, S extends AgentState> e
 				description: "List files in the repository (tracked and new, ignoring .gitignore'd paths).",
 				schema: ListArgs,
 				run: async ({ prefix }) => {
-					const r = await this.exec(["git", "ls-files", "--cached", "--others", "--exclude-standard"]);
-					const files = r.output.split("\n").filter((f) => f && f.startsWith(prefix));
-					return (
-						files.slice(0, 500).join("\n") + (files.length > 500 ? `\n(${files.length - 500} more)` : "") || "No files."
-					);
+					const listed = await this.exec(["git", "ls-files", "--cached", "--others", "--exclude-standard"]);
+					const files = listed.output.split("\n").filter((file) => file && file.startsWith(prefix));
+					const shown = files.slice(0, 500).join("\n");
+					const more = files.length > 500 ? `\n(${files.length - 500} more)` : "";
+					return shown + more || "No files.";
 				},
 			}),
 			tool({
@@ -370,14 +385,14 @@ export abstract class SandboxAgent<J extends SandboxJob, S extends AgentState> e
 				description: `Read a text file, ${MAX_LINES} numbered lines at a time.`,
 				schema: ReadArgs,
 				run: async ({ path, start_line }) => {
-					const r = await this.exec(["cat", "--", repoPath(path)]);
-					if (r.exitCode !== 0) return r.output;
-					const lines = r.output.split("\n");
+					const read = await this.exec(["cat", "--", repoPath(path)]);
+					if (read.exitCode !== 0) return read.output;
+					const lines = read.output.split("\n");
 					const from = Math.max(1, Math.trunc(start_line));
 					const to = Math.min(lines.length, from + MAX_LINES - 1);
 					const body = lines
 						.slice(from - 1, to)
-						.map((l, i) => `${from + i}\t${l}`)
+						.map((line, index) => `${from + index}\t${line}`)
 						.join("\n");
 					return to < lines.length ? `${body}\n(lines ${from}-${to} of ${lines.length})` : body;
 				},
@@ -388,12 +403,12 @@ export abstract class SandboxAgent<J extends SandboxJob, S extends AgentState> e
 				schema: WriteArgs,
 				run: async ({ path, content }) => {
 					const target = repoPath(path);
-					const r = await this.exec(
+					const written = await this.exec(
 						["bash", "-c", 'mkdir -p "$(dirname "$1")" && cat > "$1"', "write", target],
 						WORKDIR,
 						content,
 					);
-					return r.exitCode === 0 ? `Wrote ${target}.` : r.output;
+					return written.exitCode === 0 ? `Wrote ${target}.` : written.output;
 				},
 			}),
 			tool({
@@ -407,8 +422,8 @@ export abstract class SandboxAgent<J extends SandboxJob, S extends AgentState> e
 						return `Command refused: ${reason}`;
 					}
 					this.note(state, `run: ${command.slice(0, 200)}`);
-					const r = await this.exec(["bash", "-lc", command]);
-					return `exit code ${r.exitCode}\n${clip(r.output)}`;
+					const ran = await this.exec(["bash", "-lc", command]);
+					return `exit code ${ran.exitCode}\n${clip(ran.output)}`;
 				},
 			}),
 		];
@@ -420,10 +435,11 @@ export abstract class SandboxAgent<J extends SandboxJob, S extends AgentState> e
 		const client = new OpenAI({ apiKey: this.env.OPENAI_API_KEY });
 		const tools = this.tools(job, state);
 		const inbox = await this.peekInbox();
-		const input: ResponseInputItem[] = [
-			...(state.previousResponseId ? (state.pending ?? []) : [{ role: "user" as const, content: this.kickoff(job) }]),
-			...inbox.map((content) => ({ role: "user" as const, content })),
-		];
+		// The first turn opens with the kickoff. Later turns send what the previous one left pending.
+		const opening: ResponseInputItem[] = state.previousResponseId
+			? (state.pending ?? [])
+			: [{ role: "user", content: this.kickoff(job) }];
+		const input: ResponseInputItem[] = [...opening, ...inbox.map((content) => ({ role: "user" as const, content }))];
 		const response = await client.responses.create({
 			model: MODEL,
 			instructions: this.instructions(job),

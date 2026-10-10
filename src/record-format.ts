@@ -24,9 +24,9 @@ export function upgradeState<S>(
 	upgrades: Readonly<Record<number, Upgrade>> = UPGRADES,
 ): S {
 	let current = state;
-	for (let f = from; f < to; f++) {
-		const upgrade = upgrades[f];
-		if (!upgrade) throw new Error(`[500] no upgrade from record format ${f} to ${f + 1}`);
+	for (let format = from; format < to; format++) {
+		const upgrade = upgrades[format];
+		if (!upgrade) throw new Error(`[500] no upgrade from record format ${format} to ${format + 1}`);
 		current = upgrade(current, ref);
 	}
 	return current as S;

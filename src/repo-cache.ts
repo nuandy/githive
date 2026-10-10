@@ -68,6 +68,12 @@ const FORK_ROUND_MS = 60_000;
 /** Tries per fork before the queue gives up; the agent can still make its own fork. */
 const FORK_TRIES = 3;
 
+/** Storage reads and writes at most this many keys at once. */
+const STORAGE_BATCH = 128;
+
+/** What clearViews forgets: everything kept for a repo. */
+const KEPT_PREFIXES = ["view:", "building:", "record:", "tip:", "forks:", "landing:", "head:", "files:", "news:"];
+
 export class RepoCache extends DurableObject<Env> {
 	async fetch(request: Request) {
 		if (request.headers.get("Upgrade") !== "websocket") return new Response("expected a WebSocket", { status: 426 });
@@ -82,11 +88,12 @@ export class RepoCache extends DurableObject<Env> {
 		this.broadcast(kind);
 	}
 
-	/** The latest commit seen on each change's branch. Storage reads at most 128 keys at once. */
+	/** The latest commit seen on each change's branch. */
 	async knownHeads(changes: string[]) {
 		const known: Record<string, KnownHead> = {};
-		for (let i = 0; i < changes.length; i += 128) {
-			const got = await this.ctx.storage.get<KnownHead>(changes.slice(i, i + 128).map((c) => `head:${c}`));
+		for (let i = 0; i < changes.length; i += STORAGE_BATCH) {
+			const keys = changes.slice(i, i + STORAGE_BATCH).map((change) => `head:${change}`);
+			const got = await this.ctx.storage.get<KnownHead>(keys);
 			for (const [key, seen] of got) known[key.slice(5)] = seen;
 		}
 		return known;
@@ -95,8 +102,9 @@ export class RepoCache extends DurableObject<Env> {
 	/** The files each commit changed from its first parent, as the audit computed them (see branch-history.ts). */
 	async keptFiles(commits: string[]) {
 		const kept: Record<string, string[]> = {};
-		for (let i = 0; i < commits.length; i += 128) {
-			const got = await this.ctx.storage.get<string[]>(commits.slice(i, i + 128).map((c) => `files:${c}`));
+		for (let i = 0; i < commits.length; i += STORAGE_BATCH) {
+			const keys = commits.slice(i, i + STORAGE_BATCH).map((commit) => `files:${commit}`);
+			const got = await this.ctx.storage.get<string[]>(keys);
 			for (const [key, files] of got) kept[key.slice(6)] = files;
 		}
 		return kept;
@@ -104,8 +112,8 @@ export class RepoCache extends DurableObject<Env> {
 
 	async keepFiles(files: Record<string, string[]>) {
 		const entries = Object.entries(files).map(([commit, paths]) => [`files:${commit}`, paths] as const);
-		for (let i = 0; i < entries.length; i += 128)
-			await this.ctx.storage.put(Object.fromEntries(entries.slice(i, i + 128)));
+		for (let i = 0; i < entries.length; i += STORAGE_BATCH)
+			await this.ctx.storage.put(Object.fromEntries(entries.slice(i, i + STORAGE_BATCH)));
 	}
 
 	/**
@@ -122,13 +130,12 @@ export class RepoCache extends DurableObject<Env> {
 	}
 
 	private async keepNewest(heads: [string, KnownHead][]) {
-		// Storage reads and writes at most 128 keys at a time.
 		const newest = new Map<string, KnownHead>();
 		for (const [change, known] of heads)
 			if ((newest.get(change)?.at ?? -Infinity) <= known.at) newest.set(change, known);
 		const entries = [...newest];
-		for (let i = 0; i < entries.length; i += 128) {
-			const slice = entries.slice(i, i + 128);
+		for (let i = 0; i < entries.length; i += STORAGE_BATCH) {
+			const slice = entries.slice(i, i + STORAGE_BATCH);
 			const kept = await this.ctx.storage.get<KnownHead>(slice.map(([change]) => `head:${change}`));
 			const put = slice
 				.filter(([change, known]) => (kept.get(`head:${change}`)?.at ?? -Infinity) <= known.at)
@@ -205,7 +212,8 @@ export class RepoCache extends DurableObject<Env> {
 		const state = kept.tip
 			? await this.ctx.storage.get<{ tip: string; json: string }>(`record:${stateKey}`)
 			: undefined;
-		return { tip: kept.tip, gen: kept.gen, ...(state?.tip === kept.tip ? { json: state.json } : {}) };
+		if (state?.tip !== kept.tip) return { tip: kept.tip, gen: kept.gen };
+		return { tip: kept.tip, gen: kept.gen, json: state.json };
 	}
 
 	/** Keep a listing of a record's ref, unless a write moved it since the listing began. */
@@ -235,7 +243,7 @@ export class RepoCache extends DurableObject<Env> {
 	async queueForks(repo: string, items: string[]) {
 		await this.inQueueTurn(async () => {
 			const queue = (await this.ctx.storage.get<ForkJob[]>("forks:queue")) ?? [];
-			const ready = new Set(((await this.ctx.storage.get<number[]>("forks:seeds")) ?? []).map((k) => `seed:${k}`));
+			const ready = new Set((await this.readySeeds()).map((seed) => `seed:${seed}`));
 			const fresh = items.filter((item) => !ready.has(item) && !queue.some((job) => job.item === item));
 			if (!fresh.length) return;
 			await this.ctx.storage.put("forks:queue", [...queue, ...fresh.map((item) => ({ item, tries: 0 }))]);
@@ -278,51 +286,53 @@ export class RepoCache extends DurableObject<Env> {
 
 	private async makeForks() {
 		const repo = await this.ctx.storage.get<string>("forks:repo");
-		const queue = (await this.ctx.storage.get<ForkJob[]>("forks:queue")) ?? [];
+		const queue = await this.queuedForks();
 		if (!repo || !queue.length) return;
 		// Seeds first, one per alarm. Then agents' forks side by side until the queue is empty or the round ends.
-		const seeding = queue.some((job) => job.item.startsWith("seed:"));
+		const seeding = queue.some((job) => isSeed(job.item));
 		const until = Date.now() + FORK_ROUND_MS;
 		const making = new Set<string>();
-		const next = () =>
-			this.inQueueTurn(async () => {
-				const now = (await this.ctx.storage.get<ForkJob[]>("forks:queue")) ?? [];
-				// A seed queued during an agents' round waits for the next alarm.
-				const job = now.find((j) => !making.has(j.item) && j.item.startsWith("seed:") === seeding);
-				if (job) making.add(job.item);
-				return job;
-			});
+		const next = () => this.takeForkJob(making, seeding);
 		const worker = async () => {
 			for (let job = await next(); job; job = seeding || Date.now() > until ? undefined : await next()) {
-				const made = await (
-					job.item.startsWith("seed:")
-						? makeSeed(this.env, repo, Number(job.item.slice(5)))
-						: makeAgentFork(this.env, repo, job.item.slice(6))
-				).then(
-					() => null,
-					(err: unknown) => err,
-				);
-				await this.inQueueTurn(async () => {
-					const now = (await this.ctx.storage.get<ForkJob[]>("forks:queue")) ?? [];
-					const rest = now.filter((j) => j.item !== job!.item);
-					if (made === null && job!.item.startsWith("seed:")) {
-						const ready = (await this.ctx.storage.get<number[]>("forks:seeds")) ?? [];
-						await this.ctx.storage.put(
-							"forks:seeds",
-							[...new Set([...ready, Number(job!.item.slice(5))])].sort((a, b) => a - b),
-						);
-					}
-					if (made !== null && job!.tries + 1 < FORK_TRIES) rest.push({ ...job!, tries: job!.tries + 1 });
-					else if (made !== null)
-						console.error(`fork queue for ${repo} gave up on ${job!.item}: ${String(made).slice(0, 200)}`);
-					await this.ctx.storage.put("forks:queue", rest);
-				});
+				const failure = await makeFork(this.env, repo, job.item);
+				await this.finishForkJob(repo, job, failure);
 				making.delete(job.item);
 			}
 		};
 		await Promise.all(Array.from({ length: seeding ? 1 : AGENT_FORKS_AT_ONCE }, worker));
-		if (((await this.ctx.storage.get<ForkJob[]>("forks:queue")) ?? []).length)
-			await this.ctx.storage.setAlarm(Date.now() + 1_000);
+		if ((await this.queuedForks()).length) await this.ctx.storage.setAlarm(Date.now() + 1_000);
+	}
+
+	private async queuedForks() {
+		return (await this.ctx.storage.get<ForkJob[]>("forks:queue")) ?? [];
+	}
+
+	/** The next queued job no worker is making, of this round's kind. */
+	private takeForkJob(making: Set<string>, seeding: boolean) {
+		return this.inQueueTurn(async () => {
+			const queue = await this.queuedForks();
+			// A seed queued during an agents' round waits for the next alarm.
+			const job = queue.find((queued) => !making.has(queued.item) && isSeed(queued.item) === seeding);
+			if (job) making.add(job.item);
+			return job;
+		});
+	}
+
+	/** Take a finished job off the queue: a made seed is ready, and a failed job is tried again or given up on. */
+	private finishForkJob(repo: string, job: ForkJob, failure: unknown) {
+		return this.inQueueTurn(async () => {
+			const rest = (await this.queuedForks()).filter((queued) => queued.item !== job.item);
+			if (failure === null && isSeed(job.item)) {
+				const ready = await this.readySeeds();
+				const seeds = [...new Set([...ready, seedNumber(job.item)])].sort((a, b) => a - b);
+				await this.ctx.storage.put("forks:seeds", seeds);
+			}
+			if (failure !== null && job.tries + 1 < FORK_TRIES) rest.push({ ...job, tries: job.tries + 1 });
+			else if (failure !== null)
+				console.error(`fork queue for ${repo} gave up on ${job.item}: ${String(failure).slice(0, 200)}`);
+			await this.ctx.storage.put("forks:queue", rest);
+		});
 	}
 
 	/** The lease holder handed the lease on (see toolkit/landing-lease.ts), so nothing is being checked. */
@@ -358,7 +368,7 @@ export class RepoCache extends DurableObject<Env> {
 		const latest = recent.at(-1)?.at;
 		if (latest && latest !== told) await this.ctx.storage.put(key, latest);
 		if (!told) return [];
-		return asNews(recent.filter((s) => s.at > told && s.agent !== agent)).slice(-NEWS_MOST);
+		return asNews(recent.filter((settled) => settled.at > told && settled.agent !== agent)).slice(-NEWS_MOST);
 	}
 
 	private async landing(branch: string) {
@@ -371,28 +381,11 @@ export class RepoCache extends DurableObject<Env> {
 
 	/** Forget everything kept for the repo once it's deleted. */
 	async clearViews() {
-		const kept = await this.ctx.storage.list({ prefix: "view:" });
-		const building = await this.ctx.storage.list({ prefix: "building:" });
-		const records = await this.ctx.storage.list({ prefix: "record:" });
-		const tips = await this.ctx.storage.list({ prefix: "tip:" });
-		const forks = await this.ctx.storage.list({ prefix: "forks:" });
-		const landing = await this.ctx.storage.list({ prefix: "landing:" });
-		// A repo created again under the same name reuses change names, so drop the old heads.
-		const heads = await this.ctx.storage.list({ prefix: "head:" });
-		const files = await this.ctx.storage.list({ prefix: "files:" });
-		const news = await this.ctx.storage.list({ prefix: "news:" });
-		const keys = [
-			...kept.keys(),
-			...building.keys(),
-			...records.keys(),
-			...tips.keys(),
-			...forks.keys(),
-			...landing.keys(),
-			...heads.keys(),
-			...files.keys(),
-			...news.keys(),
-		];
-		for (let i = 0; i < keys.length; i += 128) await this.ctx.storage.delete(keys.slice(i, i + 128));
+		// A repo created again under the same name reuses change names, so the old heads go too.
+		const keys: string[] = [];
+		for (const prefix of KEPT_PREFIXES) keys.push(...(await this.ctx.storage.list({ prefix })).keys());
+		for (let i = 0; i < keys.length; i += STORAGE_BATCH)
+			await this.ctx.storage.delete(keys.slice(i, i + STORAGE_BATCH));
 	}
 
 	private async writes() {
@@ -416,4 +409,18 @@ export class RepoCache extends DurableObject<Env> {
 	async webSocketClose(socket: WebSocket, code: number) {
 		socket.close(code === 1005 ? 1000 : code, "closed");
 	}
+}
+
+const isSeed = (item: string) => item.startsWith("seed:");
+const seedNumber = (item: string) => Number(item.slice("seed:".length));
+
+/** Make a queued seed or agent's fork. Returns null when it was made, else the failure. */
+function makeFork(env: Env, repo: string, item: string): Promise<unknown> {
+	const making = isSeed(item)
+		? makeSeed(env, repo, seedNumber(item))
+		: makeAgentFork(env, repo, item.slice("agent:".length));
+	return making.then(
+		() => null,
+		(err: unknown) => err,
+	);
 }

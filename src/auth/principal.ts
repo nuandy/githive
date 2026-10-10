@@ -72,13 +72,11 @@ export async function resolvePrincipal(request: Request, env: Env): Promise<Prin
 
 /** What the dashboard shows about the caller. A person sees their own email; nothing else does. */
 export function describe(principal: Principal) {
-	if (principal.kind === "access")
-		return {
-			kind: "access" as const,
-			label:
-				principal.identity.kind === "person" ? principal.identity.value : `service token ${principal.identity.value}`,
-			by: byOf(principal),
-		};
+	if (principal.kind === "access") {
+		const { identity } = principal;
+		const label = identity.kind === "person" ? identity.value : `service token ${identity.value}`;
+		return { kind: "access" as const, label, by: byOf(principal) };
+	}
 	const { handle, name, email, avatarUrl } = principal.user;
 	if (principal.kind === "user") return { kind: "user" as const, handle, name, email, avatarUrl, by: byOf(principal) };
 	return { kind: "agent" as const, handle, agent: agentNameOf(principal), by: byOf(principal) };

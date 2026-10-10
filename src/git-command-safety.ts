@@ -216,57 +216,81 @@ function parenthesizedCommand(source: string, open: number): { body: string; end
 	return undefined;
 }
 
+/** sudo options whose value is the next word. */
+const SUDO_VALUE_OPTIONS = [
+	"-u",
+	"--user",
+	"-g",
+	"--group",
+	"-h",
+	"--host",
+	"-p",
+	"--prompt",
+	"-C",
+	"--close-from",
+	"--chdir",
+];
+
+/** The index of the word a simple command runs, past assignments, redirects, sudo, env and shell keywords. */
 function executableIndex(words: string[]): number {
-	let i = 0;
-	while (i < words.length) {
-		if (isAssignment(words[i]!)) {
-			i++;
+	let index = skipAssignmentsAndRedirects(words, 0);
+	index = skipPrefixes(words, index);
+	if (words[index] === "env") index = skipEnvOptions(words, index + 1);
+	while (index < words.length && isAssignment(words[index]!)) index++;
+	return index;
+}
+
+/** Skips variable assignments and redirects, with a redirect's target when it is a separate word. */
+function skipAssignmentsAndRedirects(words: string[], start: number) {
+	let index = start;
+	while (index < words.length) {
+		if (isAssignment(words[index]!)) {
+			index++;
 			continue;
 		}
-		if (isRedirect(words[i]!)) {
-			const redirect = words[i++]!;
-			if (/^(?:\d*>>?|\d*<|&>>?)$/.test(redirect) && i < words.length) i++;
-			continue;
-		}
-		break;
+		if (!isRedirect(words[index]!)) break;
+		const redirect = words[index++]!;
+		if (/^(?:\d*>>?|\d*<|&>>?)$/.test(redirect) && index < words.length) index++;
 	}
-	while (i < words.length) {
-		if (words[i] === "sudo") {
-			i++;
-			while (i < words.length && words[i]!.startsWith("-")) {
-				const option = words[i++]!;
-				if (
-					["-u", "--user", "-g", "--group", "-h", "--host", "-p", "--prompt", "-C", "--close-from", "--chdir"].includes(
-						option,
-					)
-				)
-					i++;
-				else if (option === "--") break;
-			}
+	return index;
+}
+
+/** Skips sudo with its options, and shell words that run the command after them, such as `exec` or `if`. */
+function skipPrefixes(words: string[], start: number) {
+	let index = start;
+	while (index < words.length) {
+		if (words[index] === "sudo") {
+			index = skipSudoOptions(words, index + 1);
 			continue;
 		}
-		if (isShellPrefix(words[i]!)) {
-			i++;
-			continue;
-		}
-		break;
+		if (!isShellPrefix(words[index]!)) break;
+		index++;
 	}
-	if (words[i] === "env") {
-		i++;
-		while (
-			i < words.length &&
-			(isAssignment(words[i]!) ||
-				words[i] === "-i" ||
-				words[i] === "--ignore-environment" ||
-				words[i] === "-0" ||
-				words[i] === "--null")
-		)
-			i++;
-		while (words[i] === "-u" || words[i] === "--unset" || words[i] === "-C" || words[i] === "--chdir") i += 2;
-		while (i < words.length && (words[i]!.startsWith("--unset=") || words[i]!.startsWith("--chdir="))) i++;
+	return index;
+}
+
+function skipSudoOptions(words: string[], start: number) {
+	let index = start;
+	while (index < words.length && words[index]!.startsWith("-")) {
+		const option = words[index++]!;
+		if (SUDO_VALUE_OPTIONS.includes(option)) index++;
+		else if (option === "--") break;
 	}
-	while (i < words.length && isAssignment(words[i]!)) i++;
-	return i;
+	return index;
+}
+
+/** Skips env's assignments and options, starting after the word `env`. */
+function skipEnvOptions(words: string[], start: number) {
+	let index = start;
+	const isFlagOrAssignment = (word: string) =>
+		isAssignment(word) || word === "-i" || word === "--ignore-environment" || word === "-0" || word === "--null";
+	while (index < words.length && isFlagOrAssignment(words[index]!)) index++;
+	const takesValue = (word: string | undefined) =>
+		word === "-u" || word === "--unset" || word === "-C" || word === "--chdir";
+	while (takesValue(words[index])) index += 2;
+	while (index < words.length && (words[index]!.startsWith("--unset=") || words[index]!.startsWith("--chdir=")))
+		index++;
+	return index;
 }
 
 function isShellPrefix(word: string) {
@@ -321,46 +345,35 @@ function shellScriptArgument(args: string[]): string | undefined {
 	return undefined;
 }
 
+/** git's global options whose value is the next word. */
+const GIT_VALUE_OPTIONS = ["-C", "-c", "--git-dir", "--work-tree", "--namespace", "--config-env", "--super-prefix"];
+const GIT_FLAGS = [
+	"-p",
+	"-P",
+	"--paginate",
+	"--no-pager",
+	"--bare",
+	"--no-replace-objects",
+	"--no-optional-locks",
+	"--no-lazy-fetch",
+	"--literal-pathspecs",
+];
+
 function gitSubcommand(args: string[]): { subcommand: string; args: string[] } | undefined {
-	let i = 1; // first word is the git executable
-	while (i < args.length) {
-		const arg = args[i]!;
-		if (
-			arg === "-C" ||
-			arg === "-c" ||
-			arg === "--git-dir" ||
-			arg === "--work-tree" ||
-			arg === "--namespace" ||
-			arg === "--config-env" ||
-			arg === "--super-prefix"
-		) {
-			i += 2;
+	let index = 1; // first word is the git executable
+	while (index < args.length) {
+		const arg = args[index]!;
+		if (GIT_VALUE_OPTIONS.includes(arg)) {
+			index += 2;
 			continue;
 		}
-		if (
-			arg === "-p" ||
-			arg === "-P" ||
-			arg === "--paginate" ||
-			arg === "--no-pager" ||
-			arg === "--bare" ||
-			arg === "--no-replace-objects" ||
-			arg === "--no-optional-locks" ||
-			arg === "--no-lazy-fetch" ||
-			arg === "--literal-pathspecs"
-		) {
-			i++;
-			continue;
-		}
-		if ((arg.startsWith("-C") || arg.startsWith("-c")) && arg.length > 2) {
-			i++;
-			continue;
-		}
-		if (arg.startsWith("--")) {
-			i++;
+		const attachedValue = (arg.startsWith("-C") || arg.startsWith("-c")) && arg.length > 2;
+		if (GIT_FLAGS.includes(arg) || attachedValue || arg.startsWith("--")) {
+			index++;
 			continue;
 		}
 		if (arg.startsWith("-")) return undefined;
-		return { subcommand: arg, args: args.slice(i + 1) };
+		return { subcommand: arg, args: args.slice(index + 1) };
 	}
 	return undefined;
 }
