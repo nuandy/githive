@@ -13,12 +13,13 @@
 //        check out a change to review: the project, plus the author's fork as remote "change", at the
 //        change's pushed head; marks you as reviewing
 //
+// clone and review-clone take --as <agent>: the clone commits as that agent, not as whoever runs the script.
 // --base defaults to the bench Worker. Access credentials come from .dev.vars
 // (CF_ACCESS_CLIENT_ID, CF_ACCESS_CLIENT_SECRET).
 
 import { execFileSync } from "node:child_process";
 import { chmodSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { BENCH_BASE, accessHeaders } from "./lib/bench-client.mjs";
+import { agentHeaders, BENCH_BASE } from "./lib/bench-client.mjs";
 
 // Errors can carry git's command line, which may hold a token.
 const redacted = (text) =>
@@ -39,13 +40,12 @@ for (let i = 0; i < rest.length; i++) {
 	else positional.push(rest[i]);
 }
 const BASE = flags.base ?? BENCH_BASE;
-const access = accessHeaders();
 
 async function tool(name, args, keyFile) {
 	const key = keyFile ? readFileSync(keyFile, "utf8").trim() : undefined;
 	const response = await fetch(`${BASE}/mcp`, {
 		method: "POST",
-		headers: { ...access, "Content-Type": "application/json", ...(key ? { "X-GitHive-Agent-Key": key } : {}) },
+		headers: { ...agentHeaders(key), "Content-Type": "application/json" },
 		body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name, arguments: args } }),
 	});
 	if (!response.ok) throw new Error(`${name}: HTTP ${response.status} ${(await response.text()).slice(0, 300)}`);
@@ -67,6 +67,14 @@ async function forkAccess() {
 		flags["key-file"],
 	);
 	return { url, token, project };
+}
+
+/** Commits in this clone name the agent (--as), never the global git identity of whoever runs the script. */
+function commitAs(dir) {
+	if (!flags.as) return;
+	const slug = flags.as.replace(/[^a-z0-9-]+/gi, "-").toLowerCase();
+	execFileSync("git", ["-C", dir, "config", "user.name", flags.as]);
+	execFileSync("git", ["-C", dir, "config", "user.email", `${slug}@agents.githive.app`]);
 }
 
 const header = (token) => `http.extraHeader=Authorization: Bearer ${token.split("?")[0]}`;
@@ -145,6 +153,7 @@ switch (command) {
 			// The token lives only in this clone's config, so plain git push works until it expires. Then run auth.
 			execFileSync("git", ["-C", dir, "config", "http.extraHeader", `Authorization: Bearer ${token.split("?")[0]}`]);
 		}
+		if (command === "clone") commitAs(dir);
 		console.log(
 			`${command === "clone" ? "cloned" : "refreshed"} ${dir}${project ? ' (push your branch to the remote "fork")' : ""}`,
 		);
@@ -166,6 +175,7 @@ switch (command) {
 			`http.${access.project.url}.extraHeader`,
 			`Authorization: Bearer ${access.project.token.split("?")[0]}`,
 		]);
+		commitAs(dir);
 		execFileSync("git", ["-C", dir, "remote", "add", "change", access.url]);
 		execFileSync("git", [
 			"-C",

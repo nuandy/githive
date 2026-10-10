@@ -8,7 +8,9 @@
 //   node scripts/swarm.mjs <plan.json> --setup-only
 //   node scripts/claude-agents.mjs <plan.json> [--base URL] [--model claude-sonnet-5-5] [--minutes 45] [--only agent-7]
 //
-// An agent in the plan may have a "brief", which is appended to its prompt.
+// An agent in the plan may have a "brief", which is appended to its prompt, and the plan a "project", which says
+// what the repo is (a copy of Express by default). An agent whose key file holds a GitHive agent token (ghv_…)
+// signs in with it, as anyone's agent would, and acts under its full name, <handle>/<agent>.
 // Each agent works in <plan dir>/agents-work/<agent> and logs its session to
 // <agent>.jsonl there. The run ends when every agent stops (when next has
 // nothing for it, or at --minutes), then prints what each did, what landed and
@@ -18,7 +20,7 @@
 import { spawn } from "node:child_process";
 import { chmodSync, createWriteStream, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, join, resolve } from "node:path";
-import { BENCH_BASE, ROOT, accessHeaders, parseFlags } from "./lib/bench-client.mjs";
+import { BENCH_BASE, ROOT, agentHeaders, parseFlags } from "./lib/bench-client.mjs";
 
 const args = process.argv.slice(2);
 const planPath = resolve(args[0] ?? "");
@@ -29,7 +31,6 @@ const minutes = Number(flags.minutes ?? 45);
 const plan = JSON.parse(readFileSync(planPath, "utf8"));
 const here = dirname(planPath);
 const at = (path) => (path && !isAbsolute(path) ? join(here, path) : path);
-const access = accessHeaders();
 
 const started = Date.now();
 const clock = () => `${((Date.now() - started) / 1000).toFixed(0).padStart(5)}s`;
@@ -45,14 +46,20 @@ const work = join(here, "agents-work");
 if (!only) rmSync(work, { recursive: true, force: true });
 mkdirSync(work, { recursive: true });
 
+const keyOf = (spec) => readFileSync(at(spec.keyFile), "utf8").trim();
+const project = plan.project ?? "a copy of Express (Node.js)";
+/** The git helper talks to the same Worker as the agents. */
+const baseFlag = flags.base ? ` --base ${flags.base}` : "";
+
 /** The prompt every agent gets: who it is, the loop, how to use git with GitHive, and its `brief`. */
-const prompt = (agent, dir, keyFile, brief) =>
+const prompt = (agent, dir, keyFile, brief, signedIn) =>
 	[
 		`You are ${agent}, one of ${total} independent AI agents working at the same time on the GitHive repo ` +
-			(`"${plan.repo}": a copy of Express (Node.js). GitHive coordinates you through its MCP tools ` +
-				`(server "githive"); read `) +
-			`its instructions. Pass repo "${plan.repo}" and agent "${agent}" wherever a tool asks for them. You're ` +
-			"registered already, and your key goes with every call: never call register.",
+			`"${plan.repo}": ${project}. GitHive coordinates you through its MCP tools (server "githive"); read ` +
+			`its instructions. Pass repo "${plan.repo}" and agent "${agent}" wherever a tool asks for them. ` +
+			(signedIn
+				? "You're signed in as that agent already: never call register."
+				: "You're registered already, and your key goes with every call: never call register."),
 		"",
 		"Nobody assigns you work: you look, and choose. Work in a loop:",
 		"1. Your own changes first. For each change you hold, call status:",
@@ -73,20 +80,22 @@ const prompt = (agent, dir, keyFile, brief) =>
 			"first that suits you, unless you have a reason not to (in a run, four of five agents first picked the " +
 			"same piece). Build it: claim its paths (its id as the change), then make the change for real: read " +
 			"the surrounding code and tests, and write good code (and tests where it fits). Commit on the branch " +
-			"changes/<change>, push it to your fork, then call check. Stay inside your claim. If the claim is " +
+			"changes/<change>, push it to your fork, then call status. Stay inside your claim. If the claim is " +
 			"refused because another agent took it first, pick another.",
 		`4. Nothing to do: run \`sleep 30\`, then look again.`,
 		"Stop when you've looked three times in a row with nothing to do and none of your changes is still " +
 			`open, or when ${minutes} minutes have passed. Then print a short summary of what you did.`,
 		"",
 		"Git, without ever printing a token (the helper keeps credentials in each clone's own config):",
-		`  node ${ROOT}scripts/mcp-agent.mjs clone <dir> --repo ${plan.repo} --change <change> --key-file ${keyFile}`,
+		`  node ${ROOT}scripts/mcp-agent.mjs clone <dir> --repo ${plan.repo} --change <change> --key-file ${keyFile} ` +
+			`--as ${agent}${baseFlag}`,
 		`      a clone of the project, with your fork as the remote "fork": push changes/<change> to "fork". ` +
 			"Claim first.",
-		`  node ${ROOT}scripts/mcp-agent.mjs auth <dir> --repo ${plan.repo} --change <change> --key-file ${keyFile}`,
+		`  node ${ROOT}scripts/mcp-agent.mjs auth <dir> --repo ${plan.repo} --change <change> --key-file ${keyFile}` +
+			baseFlag,
 		"      fresh write access for that clone, if a push is refused for authentication.",
 		`  node ${ROOT}scripts/mcp-agent.mjs review-clone <dir> --repo ${plan.repo} --change <change> --role ` +
-			`<role> --key-file ${keyFile}`,
+			`<role> --key-file ${keyFile} --as ${agent}${baseFlag}`,
 		"      a change to review: the project, with the change checked out at its pushed head " +
 			`("origin/<branch>" is what it lands on); marks you reviewing it in that role.`,
 		`Make every clone inside ${dir}, a new folder each time. Don't run the test suite as a matter of ` +
@@ -105,7 +114,7 @@ function withoutApiKey() {
 
 /** Starts one agent's session with its own MCP config, folder and event log. */
 function runAgent(spec) {
-	const dir = join(work, spec.agent);
+	const dir = join(work, spec.agent.replaceAll("/", "--"));
 	mkdirSync(dir, { recursive: true });
 	const keyFile = at(spec.keyFile);
 	const config = join(dir, ".mcp.json");
@@ -116,7 +125,7 @@ function runAgent(spec) {
 				githive: {
 					type: "http",
 					url: `${BASE}/mcp`,
-					headers: { ...access, "X-GitHive-Agent-Key": readFileSync(keyFile, "utf8").trim() },
+					headers: agentHeaders(keyOf(spec)),
 				},
 			},
 		}),
@@ -127,7 +136,7 @@ function runAgent(spec) {
 		"claude",
 		[
 			"-p",
-			prompt(spec.agent, dir, keyFile, spec.brief),
+			prompt(spec.agent, dir, keyFile, spec.brief, keyOf(spec).startsWith("ghv_")),
 			"--model",
 			model,
 			"--mcp-config",
@@ -195,7 +204,10 @@ function runAgent(spec) {
 
 for (const spec of plan.agents)
 	if (!existsSync(at(spec.keyFile)))
-		throw new Error(`${spec.agent} isn't registered (no ${spec.keyFile}): run swarm.mjs ${args[0]} --setup-only first`);
+		throw new Error(
+			`${spec.agent} has no key (${spec.keyFile}): save its agent token there, or run swarm.mjs ` +
+				`${args[0]} --setup-only to register it`,
+		);
 say(
 	"run",
 	`${plan.agents.length} Claude Code agents (${model}) on ${plan.repo}, ${plan.backlog.length} pieces in its backlog`,
@@ -215,10 +227,13 @@ for (const s of summaries) {
 	);
 	if (s.result?.result) console.log(`           ${String(s.result.result).replace(/\s+/g, " ").slice(0, 400)}`);
 }
-const get = (path) =>
-	fetch(`${BASE}${path}`, { headers: { ...access, "Cache-Control": "no-cache" } }).then((r) => r.json());
+// Read as the first agent: a signed-in agent reads its own repo, and a registered one through Access.
+const readHeaders = { ...agentHeaders(keyOf(plan.agents[0])), "Cache-Control": "no-cache" };
+delete readHeaders["X-GitHive-Agent-Key"];
+const get = (path) => fetch(`${BASE}${path}`, { headers: readHeaders }).then((r) => r.json());
+const repoPath = plan.repo.includes("/") ? plan.repo : `_/${plan.repo}`;
 const landing = await get(
-	`/repos/_/${plan.repo}/landing?branch=${encodeURIComponent(plan.setup?.branch ?? "main")}`,
+	`/repos/${repoPath}/landing?branch=${encodeURIComponent(plan.setup?.branch ?? "main")}`,
 ).catch(() => null);
 console.log(
 	`\nLanded: ${
@@ -230,7 +245,7 @@ console.log(
 );
 const failed = (landing?.recent ?? []).filter((s) => s.how === "failed");
 if (failed.length) console.log(`Put out (checks failed): ${failed.map((s) => s.change).join(", ")}`);
-const audit = await get(`/repos/_/${plan.repo}/audit`);
+const audit = await get(`/repos/${repoPath}/audit`);
 const violations = audit.violations?.length ? `: ${JSON.stringify(audit.violations).slice(0, 400)}` : "";
 console.log(`audit: ${audit.merges} merges, ${audit.open} open violations${violations}`);
 console.log(`total ${((Date.now() - started) / 1000).toFixed(0)}s`);

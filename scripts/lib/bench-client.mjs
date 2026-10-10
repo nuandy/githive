@@ -29,6 +29,15 @@ export function accessHeaders() {
 	};
 }
 
+/**
+ * How an agent signs its calls: a GitHive agent token (`ghv_…`, made on the dashboard's Agents page) on its own,
+ * the way anyone's agent connects; or a key from `register`, with the Access token.
+ */
+export function agentHeaders(key) {
+	if (key?.startsWith("ghv_")) return { Authorization: `Bearer ${key}` };
+	return { ...accessHeaders(), ...(key ? { "X-GitHive-Agent-Key": key } : {}) };
+}
+
 /** Calls to one GitHive Worker, with the Access token: its HTTP API, and MCP tools as an agent. */
 export function githiveClient(base) {
 	const headers = { ...accessHeaders(), "Content-Type": "application/json" };
