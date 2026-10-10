@@ -1,12 +1,24 @@
 import { type FormEvent, type ReactNode, useState } from "react";
-import type { Gitignore, ManageApi, MyOrg, NewRepoInput, RepoRecord } from "../api";
+import type { ManageApi, MyOrg, NewRepoInput, RepoRecord } from "../api";
 import { usePoll } from "../hooks/usePoll";
 import { creatableOwners, repoNameProblem } from "../lib/orgs";
 import { href } from "../lib/routes";
 import { messageOf } from "../lib/errors";
+import {
+	CopySource,
+	DEFAULT_FIRST_COMMIT,
+	emptyFirstCommit,
+	type FirstCommit,
+	FirstCommitFields,
+	ImportSource,
+	NewRepoFrame,
+	OwnerAndName,
+	RadioChoices,
+	type Source,
+	SOURCES,
+	VISIBILITIES,
+} from "./NewRepoFields";
 import "./Manage.css";
-
-type Source = "import" | "copy" | "empty";
 
 export interface NewRepoViewProps {
 	/** The caller's namespaces and orgs; undefined while loading. */
@@ -19,24 +31,6 @@ export interface NewRepoViewProps {
 	/** Where to go once it's made. */
 	onCreated: (repo: RepoRecord) => void;
 }
-
-/** What a fresh repo's first commit holds. */
-export interface FirstCommit {
-	readme: boolean;
-	description: string;
-	gitignore: Gitignore | "";
-	license: "mit" | "";
-}
-export const DEFAULT_FIRST_COMMIT: FirstCommit = { readme: true, description: "", gitignore: "", license: "" };
-const GITIGNORES: { value: Gitignore; label: string }[] = [
-	{ value: "node", label: "Node" },
-	{ value: "python", label: "Python" },
-	{ value: "go", label: "Go" },
-	{ value: "rust", label: "Rust" },
-];
-
-/** Whether a fresh repo would start with no commit (and so no branch for agents to work from). */
-export const emptyFirstCommit = (first: FirstCommit) => !first.readme && !first.gitignore && !first.license;
 
 /** The request a filled-in form makes: only the fields its source needs. */
 export function newRepoInput(form: {
@@ -103,30 +97,22 @@ export function NewRepoView({ orgs, repos, owner: wanted, create, onCreated }: N
 		}
 	};
 
-	const page = (body: ReactNode) => (
-		<main className="page manage" id="main">
-			<header>
-				<h1>New repository</h1>
-				<p className="muted manage__lede">
-					GitHive starts on it as it's made, so agents can claim work in it at once. Its review policy and checks are in
-					its Settings.
-				</p>
-			</header>
-			{body}
-		</main>
-	);
 	if (orgs === undefined)
-		return page(
-			<p className="muted" role="status">
-				Loading…
-			</p>,
+		return (
+			<NewRepoFrame>
+				<p className="muted" role="status">
+					Loading…
+				</p>
+			</NewRepoFrame>
 		);
 	if (owners.length === 0)
-		return page(
-			<div className="box empty">
-				<h2>You can't make repositories here</h2>
-				<p>Ask an owner of an organization to let members make repositories, or make one under your own name.</p>
-			</div>,
+		return (
+			<NewRepoFrame>
+				<div className="box empty">
+					<h2>You can't make repositories here</h2>
+					<p>Ask an owner of an organization to let members make repositories, or make one under your own name.</p>
+				</div>
+			</NewRepoFrame>
 		);
 
 	let nameHint: ReactNode = "Letters, digits, dots, underscores and dashes.";
@@ -135,251 +121,53 @@ export function NewRepoView({ orgs, repos, owner: wanted, create, onCreated }: N
 	let submitLabel = "Make repository";
 	if (busy) submitLabel = source === "import" ? "Importing… (a big project takes a minute)" : "Making…";
 
-	return page(
-		<form className="box manage__form" onSubmit={submit}>
-			<div className="box__body manage__form">
-				<div className="manage__field">
-					<label htmlFor="new-repo-owner">Owner</label>
-					<select id="new-repo-owner" value={chosen} onChange={(e) => setOwner(e.target.value)}>
-						{owners.map((o) => (
-							<option key={o.slug} value={o.slug}>
-								{o.personal ? `${o.slug} (you)` : o.slug}
-							</option>
-						))}
-					</select>
-				</div>
-				<div className="manage__field">
-					<label htmlFor="new-repo-name">Name</label>
-					<input
-						id="new-repo-name"
-						type="text"
-						value={name}
-						onChange={(e) => setName(e.target.value)}
-						autoComplete="off"
-						spellCheck={false}
-						placeholder="my-project"
-						aria-describedby="new-repo-name-hint"
+	return (
+		<NewRepoFrame>
+			<form className="box manage__form" onSubmit={submit}>
+				<div className="box__body manage__form">
+					<OwnerAndName
+						owners={owners}
+						chosen={chosen}
+						setOwner={setOwner}
+						name={name}
+						setName={setName}
+						hint={nameHint}
 					/>
-					<p className="manage__hint" id="new-repo-name-hint">
-						{nameHint}
-					</p>
-				</div>
-				<fieldset className="manage__field manage__choices">
-					<legend className="manage__label">Start from</legend>
-					<label className="manage__choice">
-						<input
-							type="radio"
-							name="new-repo-source"
-							value="import"
-							checked={source === "import"}
-							onChange={() => setSource("import")}
-						/>
-						<span>
-							<strong>A Git repository</strong>
-							<span className="muted">Imported from its URL, for example a public GitHub repository.</span>
-						</span>
-					</label>
-					<label className="manage__choice">
-						<input
-							type="radio"
-							name="new-repo-source"
-							value="copy"
-							checked={source === "copy"}
-							onChange={() => setSource("copy")}
-						/>
-						<span>
-							<strong>A copy of a repository here</strong>
-							<span className="muted">Its default branch, in seconds.</span>
-						</span>
-					</label>
-					<label className="manage__choice">
-						<input
-							type="radio"
-							name="new-repo-source"
-							value="empty"
-							checked={source === "empty"}
-							onChange={() => setSource("empty")}
-						/>
-						<span>
-							<strong>Start fresh</strong>
-							<span className="muted">A new repository with a first commit, ready for agents.</span>
-						</span>
-					</label>
-				</fieldset>
-				{source === "import" ? <ImportSource url={url} setUrl={setUrl} branch={branch} setBranch={setBranch} /> : null}
-				{source === "copy" ? <CopySource repos={repos} copyFrom={copyFrom} setCopyFrom={setCopyFrom} /> : null}
-				{source === "empty" ? <FirstCommitFields first={first} setFirst={setFirst} /> : null}
-				<fieldset className="manage__field manage__choices">
-					<legend className="manage__label">Who can see it</legend>
-					<label className="manage__choice">
-						<input
-							type="radio"
-							name="new-repo-visibility"
-							value="private"
-							checked={visibility === "private"}
-							onChange={() => setVisibility("private")}
-						/>
-						<span>
-							<strong>Private</strong>
-							<span className="muted">Only the owner's members and the collaborators you add.</span>
-						</span>
-					</label>
-					<label className="manage__choice">
-						<input
-							type="radio"
-							name="new-repo-visibility"
-							value="public"
-							checked={visibility === "public"}
-							onChange={() => setVisibility("public")}
-						/>
-						<span>
-							<strong>Public</strong>
-							<span className="muted">Anyone signed in to GitHive can read it; only you choose who works in it.</span>
-						</span>
-					</label>
-				</fieldset>
-				{error ? (
-					<p className="error" role="alert">
-						{error}
-					</p>
-				) : null}
-				<div className="manage__actions">
-					<button type="submit" className="accent" disabled={!ready || busy}>
-						{submitLabel}
-					</button>
-					<a className="button" href={href.repos()}>
-						Cancel
-					</a>
-				</div>
-			</div>
-		</form>,
-	);
-}
-
-/** Where to import from: a Git URL and, optionally, its branch. */
-function ImportSource(props: {
-	url: string;
-	setUrl: (url: string) => void;
-	branch: string;
-	setBranch: (branch: string) => void;
-}) {
-	const { url, setUrl, branch, setBranch } = props;
-	return (
-		<div className="manage__source">
-			<div className="manage__field">
-				<label htmlFor="new-repo-url">Git URL</label>
-				<input
-					id="new-repo-url"
-					type="url"
-					value={url}
-					onChange={(e) => setUrl(e.target.value)}
-					placeholder="https://github.com/octocat/Spoon-Knife"
-					autoComplete="off"
-					spellCheck={false}
-				/>
-			</div>
-			<div className="manage__field manage__source-branch">
-				<label htmlFor="new-repo-branch">Branch (optional)</label>
-				<input
-					id="new-repo-branch"
-					type="text"
-					value={branch}
-					onChange={(e) => setBranch(e.target.value)}
-					placeholder="main"
-					autoComplete="off"
-					spellCheck={false}
-				/>
-			</div>
-		</div>
-	);
-}
-
-/** Which repository here to copy. */
-function CopySource(props: {
-	repos: { name: string }[] | undefined;
-	copyFrom: string;
-	setCopyFrom: (name: string) => void;
-}) {
-	const { repos, copyFrom, setCopyFrom } = props;
-	return (
-		<div className="manage__field">
-			<label htmlFor="new-repo-copy">Repository to copy</label>
-			<select id="new-repo-copy" value={copyFrom} onChange={(e) => setCopyFrom(e.target.value)}>
-				<option value="">Choose one…</option>
-				{(repos ?? []).map((r) => (
-					<option key={r.name} value={r.name}>
-						{r.name}
-					</option>
-				))}
-			</select>
-		</div>
-	);
-}
-
-/** What a fresh repository's first commit holds. */
-function FirstCommitFields({ first, setFirst }: { first: FirstCommit; setFirst: (first: FirstCommit) => void }) {
-	return (
-		<fieldset className="manage__field manage__first">
-			<legend className="manage__label">First commit</legend>
-			<label className="manage__check">
-				<input
-					type="checkbox"
-					checked={first.readme}
-					onChange={(e) => setFirst({ ...first, readme: e.target.checked })}
-				/>
-				<span>Add a README</span>
-			</label>
-			{first.readme ? (
-				<div className="manage__field">
-					<label htmlFor="new-repo-description">Description (optional)</label>
-					<input
-						id="new-repo-description"
-						type="text"
-						value={first.description}
-						onChange={(e) => setFirst({ ...first, description: e.target.value })}
-						placeholder="Shown under the name in the README"
-						maxLength={300}
-						autoComplete="off"
+					<RadioChoices
+						legend="Start from"
+						name="new-repo-source"
+						value={source}
+						onChange={setSource}
+						options={SOURCES}
 					/>
+					{source === "import" ? (
+						<ImportSource url={url} setUrl={setUrl} branch={branch} setBranch={setBranch} />
+					) : null}
+					{source === "copy" ? <CopySource repos={repos} copyFrom={copyFrom} setCopyFrom={setCopyFrom} /> : null}
+					{source === "empty" ? <FirstCommitFields first={first} setFirst={setFirst} /> : null}
+					<RadioChoices
+						legend="Who can see it"
+						name="new-repo-visibility"
+						value={visibility}
+						onChange={setVisibility}
+						options={VISIBILITIES}
+					/>
+					{error ? (
+						<p className="error" role="alert">
+							{error}
+						</p>
+					) : null}
+					<div className="manage__actions">
+						<button type="submit" className="accent" disabled={!ready || busy}>
+							{submitLabel}
+						</button>
+						<a className="button" href={href.repos()}>
+							Cancel
+						</a>
+					</div>
 				</div>
-			) : null}
-			<div className="manage__inline">
-				<div className="manage__field">
-					<label htmlFor="new-repo-gitignore">.gitignore</label>
-					<select
-						id="new-repo-gitignore"
-						value={first.gitignore}
-						onChange={(e) => setFirst({ ...first, gitignore: e.target.value as FirstCommit["gitignore"] })}
-					>
-						<option value="">None</option>
-						{GITIGNORES.map((g) => (
-							<option key={g.value} value={g.value}>
-								{g.label}
-							</option>
-						))}
-					</select>
-				</div>
-				<div className="manage__field">
-					<label htmlFor="new-repo-license">License</label>
-					<select
-						id="new-repo-license"
-						value={first.license}
-						onChange={(e) => setFirst({ ...first, license: e.target.value as FirstCommit["license"] })}
-					>
-						<option value="">None</option>
-						<option value="mit">MIT</option>
-					</select>
-				</div>
-			</div>
-			<p className="manage__hint">
-				{emptyFirstCommit(first)
-					? "With nothing in it, the repository has no branch: GitHive can't " +
-						"start on it, and agents can't work in it, until someone pushes a " +
-						"first commit."
-					: "A .gitignore keeps build output and dependencies (node_modules, " +
-						".venv, target) out of commits, and out of agents' claims."}
-			</p>
-		</fieldset>
+			</form>
+		</NewRepoFrame>
 	);
 }
 
