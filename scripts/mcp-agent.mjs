@@ -15,8 +15,16 @@
 // (CF_ACCESS_CLIENT_ID, CF_ACCESS_CLIENT_SECRET).
 
 import { execFileSync } from "node:child_process";
-import { chmodSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+
+// A failure never prints a token: errors carry git's command line, which may hold one.
+const redacted = (text) => String(text).replace(/(Bearer |Basic )[^\s"'\]]+/g, "$1<redacted>").replace(/art_v2_[A-Za-z0-9_]+/g, "<redacted>");
+for (const event of ["uncaughtException", "unhandledRejection"])
+	process.on(event, (err) => {
+		console.error(redacted(err instanceof Error ? (err.stack ?? err.message) : err));
+		process.exit(1);
+	});
 
 const root = new URL("..", import.meta.url).pathname;
 const [command, ...rest] = process.argv.slice(2);
@@ -55,6 +63,26 @@ async function forkAccess() {
 
 const header = (token) => `http.extraHeader=Authorization: Bearer ${token.split("?")[0]}`;
 
+/**
+ * Clone with a token (git's own stderr shown, never its command line, which
+ * holds the token), tried again a few times: Artifacts answers some shallow
+ * fetches with an empty 200 ("fatal: expected 'packfile'"), 3 of 8 in a row
+ * on a busy project repo (run 1000-3).
+ */
+function cloneWith(token, args, dir) {
+	const CLONE_TRIES = 5;
+	for (let attempt = 1; ; attempt++) {
+		try {
+			execFileSync("git", ["-c", header(token), "clone", "--quiet", ...args, dir], { stdio: ["ignore", "inherit", "inherit"] });
+			return;
+		} catch (err) {
+			rmSync(dir, { recursive: true, force: true });
+			if (attempt === CLONE_TRIES) throw new Error(`git clone failed ${CLONE_TRIES} times (exit ${err.status ?? "?"}): see git's message above`);
+			execFileSync("sleep", [String(0.5 * attempt + Math.random())]);
+		}
+	}
+}
+
 switch (command) {
 	case "call": {
 		const [name, json] = positional;
@@ -77,7 +105,7 @@ switch (command) {
 		if (project) {
 			// the agent's fork is shared by its changes and may be behind, so start from the
 			// project (origin, read-only) and push to the fork (remote "fork"). Each URL gets its own token.
-			if (command === "clone") execFileSync("git", ["-c", header(project.token), "clone", "--quiet", ...depth, "--branch", project.branch, project.url, dir], { stdio: "inherit" });
+			if (command === "clone") cloneWith(project.token, [...depth, "--branch", project.branch, project.url], dir);
 			execFileSync("git", ["-C", dir, "config", `http.${project.url}.extraHeader`, `Authorization: Bearer ${project.token.split("?")[0]}`]);
 			try {
 				execFileSync("git", ["-C", dir, "remote", "remove", "fork"], { stdio: "ignore" });
@@ -86,7 +114,7 @@ switch (command) {
 			}
 		} else if (command === "clone") {
 			// Shallow by default: an agent needs the tip to work on, not the project's whole history (--full for all of it).
-			execFileSync("git", ["-c", header(token), "clone", "--quiet", ...depth, "--no-single-branch", url, dir], { stdio: "inherit" });
+			cloneWith(token, [...depth, "--no-single-branch", url], dir);
 		}
 		if (project) {
 			execFileSync("git", ["-C", dir, "remote", "add", "fork", url]);
@@ -102,7 +130,7 @@ switch (command) {
 		const [dir] = positional;
 		const access = await tool("review_access", { repo: flags.repo, change: flags.change, ...(flags.role ? { role: flags.role } : {}) }, flags["key-file"]);
 		// Deep enough to diff against the project's branch; read-only tokens, each in this clone's own config.
-		execFileSync("git", ["-c", header(access.project.token), "clone", "--quiet", "--depth", "50", "--branch", access.project.branch, access.project.url, dir], { stdio: "inherit" });
+		cloneWith(access.project.token, ["--depth", "50", "--branch", access.project.branch, access.project.url], dir);
 		execFileSync("git", ["-C", dir, "config", `http.${access.project.url}.extraHeader`, `Authorization: Bearer ${access.project.token.split("?")[0]}`]);
 		execFileSync("git", ["-C", dir, "remote", "add", "change", access.url]);
 		execFileSync("git", ["-C", dir, "config", `http.${access.url}.extraHeader`, `Authorization: Bearer ${access.token.split("?")[0]}`]);

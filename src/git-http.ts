@@ -158,6 +158,18 @@ export const http = {
 				if (!timedOut(err)) throw err;
 				return { url: request.url, method: request.method, statusCode: 504, statusMessage: `no answer in ${gitTimeout.ms / 1000} s`, headers: {}, body: undefined } as unknown as Awaited<ReturnType<typeof base.request>>;
 			});
+			// A fetch's answer that's empty though it says 200: Artifacts answers some (shallow) fetches so, 3 of 8 in a row on
+			// a busy project repo (run 1000-3), and git then fails ("expected 'packfile'"). A real one is never empty: a
+			// server failure, tried again like one.
+			if (request.url.endsWith("/git-upload-pack") && response.statusCode === 200) {
+				const chunks: Uint8Array[] = [];
+				for await (const chunk of (await drained(response.body)) as AsyncIterable<Uint8Array>) chunks.push(chunk);
+				if (!chunks.some((c) => c.length)) Object.assign(response, { statusCode: 502, statusMessage: "empty answer to a fetch" });
+				else
+					response.body = (async function* () {
+						yield* chunks;
+					})();
+			}
 			noteGitRequest(request.url, response.statusCode);
 			// A failure's body is read now: left for later (a 401 asked again, a 5xx thrown), it holds a connection open.
 			if (response.statusCode >= 400) response.body = await drained(response.body);

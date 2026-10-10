@@ -55,6 +55,8 @@ export async function fetchCommits(remote: Remote, oids: string[], dir = FETCHED
 	noteGitRequest(`${remote.url}/git-upload-pack`, response.status);
 	if (!response.ok) throw Object.assign(new Error(`fetch failed: ${response.status} ${(await response.text()).slice(0, 200)}`), { status: response.status });
 	const bytes = new Uint8Array(await response.arrayBuffer());
+	// Empty though it says 200 (see git-http.ts): a server failure, for the caller to try again.
+	if (!bytes.length) throw Object.assign(new Error(`fetch failed: an empty answer from ${remote.url}`), { status: 502 });
 
 	// Shallow lines and NAK, then the pack in side-band packets (1: data, 2: progress, 3: error).
 	const pack: Uint8Array[] = [];
