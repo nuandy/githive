@@ -1,7 +1,7 @@
 import { branchHead, inWorkspaceTurn, type Remote, Workspace } from "../git";
 import { inLane } from "../claim-paths";
 import { repoOfUrl } from "../git-http";
-import { changeAgainst, type ReadHistory } from "./batch-reads";
+import { changeAgainst, landedOn, type ReadHistory } from "./batch-reads";
 import { skipsChecks } from "./check-scope";
 import type { ClaimRecord } from "./claims";
 import type { ClaimStore, ClaimsView } from "./claim-store";
@@ -464,7 +464,15 @@ async function landBatch(input: MergeInput, landing: Landing, holding: Holding, 
 		if (checked[0] && !checked[0].ok) return checked[0];
 		const ready = checked.flatMap((c) => (c?.ok ? [c.ready] : []));
 		// Oldest claims first, this merge's own among them.
-		const batch = ready.sort((x, y) => x.own.since.localeCompare(y.own.since));
+		let batch = ready.sort((x, y) => x.own.since.localeCompare(y.own.since));
+		// Any main has merged already (a push answered with a server error though it applied): recorded as landed by the
+		// merge that did, its claim released, and left out; merged again, it came to nothing, and the batch failed.
+		const already = input.history ? await landedOn(input.history, repoOfUrl(input.remote.url), input.branch, main, batch.map((r) => r.head)).catch(() => new Map<string, string>()) : new Map<string, string>();
+		if (already.size) {
+			const settled = await settleLanded(input, landing, batch.filter((r) => already.has(r.head)), already);
+			batch = batch.filter((r) => !already.has(r.head));
+			if (!batch.some((r) => r.change === input.change)) return { ok: true, settled, release: async () => undefined };
+		}
 		const gathered = Date.now();
 		const tested = !!input.verify?.length && batch.some((r) => !r.skipped);
 		// The next batch, read while this one is checked, for whichever merge lands it (see Ahead). Without checks there's
@@ -633,6 +641,19 @@ async function land(input: MergeInput, landing: Landing, batchGit: BatchGit, mai
 		}
 	};
 	return { settled, release };
+}
+
+/** Changes `on` main already (by the merge that merged each head): recorded as landed, and their claims released. */
+async function settleLanded(input: MergeInput, landing: Landing, changes: Ready[], on: Map<string, string>): Promise<Settled[]> {
+	const at = new Date().toISOString();
+	const settled: Settled[] = changes.map((r) => ({ change: r.change, head: r.head, agent: r.agent, how: "landed", at, commit: on.get(r.head)!, files: r.files.slice(0, LANDED_FILES_KEPT), ...(r.files.length > LANDED_FILES_KEPT ? { filesMore: r.files.length - LANDED_FILES_KEPT } : {}) }));
+	await landing.settle(settled);
+	console.log(`${changes.length} change${changes.length === 1 ? " was" : "s were"} on ${input.branch} already, unrecorded: ${changes.map((r) => r.change).join(", ")}`);
+	for (let i = 0; i < changes.length; i += RELEASES_AT_ONCE)
+		await Promise.all(
+			changes.slice(i, i + RELEASES_AT_ONCE).map((r) => input.store.release({ change: r.change, agent: r.agent, reason: "merged", mergedAs: on.get(r.head)! }, input.stamper).catch((err) => console.error(`releasing ${r.change}'s claim, found on ${input.branch} already, failed`, String(err)))),
+		);
+	return settled;
 }
 
 /**

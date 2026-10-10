@@ -12,7 +12,7 @@ import { type Landing, memoryLanding, renewLease } from "../src/toolkit/landing"
 import { type BatchGit, batchSize, type Candidate, CHECKS_REVIEWER, type CheckRunner, type MergeInput, mergeChange } from "../src/toolkit/merge";
 import { voteStore } from "../src/toolkit/vote-store";
 import { vote, type Votes } from "../src/toolkit/votes";
-import { pushChange } from "./helpers/agents";
+import { agentClone, pushChange } from "./helpers/agents";
 import { startGitServer, type GitServer } from "./helpers/git-server";
 import { memoryBatchGit } from "./helpers/memory-batch-git";
 import { gitHistory } from "./helpers/git-history";
@@ -139,6 +139,23 @@ describe("landing ready changes together", { timeout: 120_000 }, () => {
 		expect(await merge("a-1", runner(), memoryLanding(), { batchGit: noted, prepareLanding: async () => void started.push("gate") })).toMatchObject({ ok: true });
 		expect(started.slice(0, 2)).toEqual(["gate", "read"]);
 		expect(landed()).toEqual(["a-1", "b-1"]);
+	});
+
+	it("records a change main merged already (a push that applied though the server failed it) as landed, and lands the rest", async () => {
+		const a = await readyChange("a-1", { "src/a.txt": "a\n" });
+		// a-1 merged into main behind GitHive's back, as a batch's push answered with a 500 had: its claim still held.
+		const lander = await agentClone(server.url, work, "lander");
+		await lander.run("fetch", "--quiet", "origin", "changes/a-1");
+		await lander.run("merge", "--quiet", "--no-ff", "-m", "a-1, pushed though the server failed it", "FETCH_HEAD");
+		await lander.run("push", "--quiet", "origin", "main");
+		const mergedAs = server.git("rev-parse", "main").trim();
+		await readyChange("b-1", { "src/b.txt": "b\n" });
+		const landing = memoryLanding();
+		expect(await merge("b-1", runner(), landing, { history: gitHistory(server.git) })).toMatchObject({ ok: true });
+		expect(landed()).toContain("b-1");
+		expect((await landing.view()).recent).toEqual(expect.arrayContaining([expect.objectContaining({ change: "a-1", head: a, how: "landed", commit: mergedAs })]));
+		// Its claim released, naming the merge that took it in.
+		expect((await store().read()).claims.map((c) => c.change)).not.toContain("a-1");
 	});
 
 	it("puts out the change whose checks fail, with the checks' rejection on its head, and lands the rest", async () => {

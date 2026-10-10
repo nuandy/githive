@@ -159,3 +159,20 @@ export async function changeAgainst(history: ReadHistory, project: string, branc
 	const touches = (a: string, b: string) => a === b || a.startsWith(`${b}/`) || b.startsWith(`${a}/`);
 	return { head: placed.head.hash, files: placed.files, both: placed.files.filter((f) => theirs.some((t) => touches(f, t))) };
 }
+
+/**
+ * Which of `heads` the branch at `main` merged already, each with the merge
+ * commit that did (one whose second parent it is), from the branch's history
+ * as kept (see branchChain): a batch's push a busy repo answered with a server
+ * error though it applied left its changes on main, their claims held and
+ * their landing unrecorded, and every batch after took one of them up, merged
+ * it to nothing and failed (run 1000-4).
+ */
+export async function landedOn(history: ReadHistory, project: string, branch: string, main: string, heads: string[]): Promise<Map<string, string>> {
+	const on = new Map<string, string>();
+	const chain = await branchChain(history, project, branch, main);
+	if (!chain || !heads.length) return on;
+	const wanted = new Set(heads);
+	for (const commit of chain) for (const merged of commit.parents.slice(1)) if (wanted.has(merged) && !on.has(merged)) on.set(merged, commit.hash);
+	return on;
+}
