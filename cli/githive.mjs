@@ -466,7 +466,7 @@ const commands = {
 	async review() {
 		const [repo, change] = positional;
 		if (!repo?.includes("/") || !change) throw new Usage("review <repo> <change> [--role R]");
-		const access = await tool("review_access", {
+		const access = await tool("credentials", {
 			repo,
 			change,
 			...(flags.role ? { role: flags.role } : {}),

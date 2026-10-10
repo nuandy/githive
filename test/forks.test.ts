@@ -55,17 +55,17 @@ describe("forks (the default)", () => {
 		await call("settings", {});
 	});
 
-	it("gives any reviewer read access to a change's branch in its author's fork, once something is pushed", async () => {
+	it("gives any reviewer read access to another agent's change in its fork, once something is pushed", async () => {
 		const { key: keyA } = (await call("register", { agent: "agent-a" })) as { key: string };
 		const { key: keyR } = (await call("register", { agent: "reviewer-1" })) as { key: string };
-		expect(await call("review_access", { change: "a-1" }, keyR)).toEqual({ error: "no change a-1 on project" });
+		expect(await call("credentials", { change: "a-1" }, keyR)).toEqual({ error: "no change a-1 on project" });
 		await call("claim", { change: "a-1", agent: "agent-a", paths: ["src/a.ts"], intent: "a" }, keyA);
-		expect(await call("review_access", { change: "a-1" }, keyR)).toEqual({
+		expect(await call("credentials", { change: "a-1" }, keyR)).toEqual({
 			error: "a-1 has nothing pushed to review yet",
 		});
 		const head = await pushChange(fork.url, work, "agent-a", "a-1", { "src/a.ts": "a\n" });
 		forkRequests = [];
-		expect(await call("review_access", { change: "a-1" }, keyR)).toEqual({
+		expect(await call("credentials", { change: "a-1" }, keyR)).toEqual({
 			change: "a-1",
 			author: "agent-a",
 			url: fork.url,
@@ -75,6 +75,7 @@ describe("forks (the default)", () => {
 			// The reviewer's mark records the role, which defaults to review.
 			role: "review",
 			project: { url: project.url, token: "read", branch: "main" },
+			note: expect.stringMatching(/read-only/),
 		});
 		// Read-only access to the author's fork.
 		expect(forkRequests).toEqual([{ agent: "agent-a", scope: "read" }]);
@@ -86,15 +87,16 @@ describe("forks (the default)", () => {
 			token: "read",
 			note: expect.stringMatching(/read-only/),
 		});
-		expect(await call("credentials", { change: "a-1" })).toEqual({
-			error: "a-1 holds no claim: claim its paths first",
-		});
+		expect(await call("credentials", { change: "a-1" })).toEqual({ error: "no change a-1 on project" });
 		const { key: keyA } = (await call("register", { agent: "agent-a" })) as { key: string };
 		const { key: keyB } = (await call("register", { agent: "agent-b" })) as { key: string };
 		await call("claim", { change: "a-1", agent: "agent-a", paths: ["src/a/"], intent: "a" }, keyA);
+		// Another agent asking for the change gets read access to review it, never write: nothing's pushed yet.
 		expect(await call("credentials", { change: "a-1" }, keyB)).toEqual({
-			error: "you act as agent-b; you can't act as agent-a",
+			error: "a-1 has nothing pushed to review yet",
 		});
+		expect(forkRequests.filter((request) => request.scope === "write")).toEqual([]);
+		forkRequests = [];
 		expect(await call("credentials", { change: "a-1" }, keyA)).toMatchObject({
 			url: fork.url,
 			token: "fork-write",

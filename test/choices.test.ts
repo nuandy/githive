@@ -287,11 +287,28 @@ describe("review holds through the toolkit", { timeout: 120_000 }, () => {
 				},
 			};
 			expect(
-				await callTool("review_access", { repo: "p", change: "c-1" }, { ...ctx(keys["rev-1"]), reviews: busy }),
+				await callTool("credentials", { repo: "p", change: "c-1" }, { ...ctx(keys["rev-1"]), reviews: busy }),
 			).toMatchObject({ change: "c-1", head: heads[0] });
+			// The mark goes on the head GitHive knows before the slow reads, so no one else is offered the review
+			// meanwhile; when the head read differs, the mark moves to it.
+			const events: string[] = [];
+			const watched = (known: string) => ({
+				...ctx(keys["rev-1"]),
+				knownHeads: async () => ({ "c-1": { head: known, at: Date.now(), pushed: true } }),
+				changeRemote: async () => (events.push("fork read"), { url: server.url, token: "unused" }),
+				reviews: {
+					...reviews,
+					hold: async (_repo: string, key: string) => (events.push(`hold ${key.slice(0, 7)}`), true),
+				},
+			});
+			await callTool("credentials", { repo: "p", change: "c-1" }, watched(heads[0]));
+			expect(events).toEqual([`hold ${heads[0].slice(0, 7)}`, "fork read"]);
+			events.length = 0;
+			await callTool("credentials", { repo: "p", change: "c-1" }, watched("0".repeat(40)));
+			expect(events).toEqual(["hold 0000000", "fork read", `hold ${heads[0].slice(0, 7)}`]);
 			// rev-1 starts c-1, rev-2 starts c-2: each marked, so a third sees neither.
-			const one = (await call("review_access", { change: "c-1" }, keys["rev-1"])) as { head: string };
-			const two = (await call("review_access", { change: "c-2" }, keys["rev-2"])) as { head: string };
+			const one = (await call("credentials", { change: "c-1" }, keys["rev-1"])) as { head: string };
+			const two = (await call("credentials", { change: "c-2" }, keys["rev-2"])) as { head: string };
 			keys["rev-3"] = ((await call("register", { agent: "rev-3" })) as { key: string }).key;
 			expect(await listed("rev-3")).toEqual([]);
 			// rev-1 still sees its own, first.
@@ -674,7 +691,7 @@ describe("agents choosing through the toolkit", { timeout: 120_000 }, () => {
 			expect(await call("reviews", { agent }, keys[agent])).toMatchObject({
 				reviews: [{ change: built[other], author: other, head: heads[other], role: "review" }],
 			});
-			await call("review_access", { change: built[other] }, keys[agent]);
+			await call("credentials", { change: built[other] }, keys[agent]);
 			await call(
 				"vote",
 				{ commit: heads[other], reviewer: agent, role: "review", verdict: "approve", evidence: "read it" },

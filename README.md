@@ -39,9 +39,8 @@ add_work        add pieces to the repo's backlog, with their dependencies
 claims          who holds which paths, and why
 claim           claim paths for a change, on main or `into` another branch; `after` orders it behind other changes, `source` merges a whole branch
 release         give your change up, or (stale) free one its agent abandoned
-credentials     write access to your own fork, with read access to the project to start from
+credentials     write access to your own fork, with read access to the project to start from; for another agent's change, read access to review it, marked as yours to review
 check           after pushing: test-merge with the branch it lands on, and list files outside the claim
-review_access   read access to a change under review, and the project to diff against
 vote            a verdict on the exact commit reviewed, with evidence
 status          a change's votes, the evidence for any rejection, and what's still needed
 merge           land the change with the branch's other ready changes, through the checks, with the claim covering every file and the approvals in
@@ -115,7 +114,7 @@ Every request resolves to one caller (`src/auth/principal.ts`): an Access identi
 | Needs | Routes and tools |
 |---|---|
 | read | the repo's pages, its code, `claims`, `status`, `check`, `audit`, `credentials` for the project |
-| review | `reviews`, `review_access`, `vote` (and a person's vote on the dashboard) |
+| review | `reviews`, `credentials` for a change to review, `vote` (and a person's vote on the dashboard) |
 | write | `register`, `claim`, `release`, `credentials` for a change's fork, `merge`, `revert`, `add_work`, `ask_human`, `request_review`, `build` (and merging or making a branch on the dashboard) |
 | admin | `settings`, a repo's visibility and collaborators, deleting it |
 

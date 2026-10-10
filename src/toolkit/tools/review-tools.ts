@@ -5,7 +5,7 @@ import { holdKey } from "../work";
 import type { ToolHandlers } from "./context";
 import { branchSettings, hostedRoles, shardVotesIfBusy, votesFor } from "./repo";
 
-// Tools for reviewing: vote, review_access, request_review, and ask_human.
+// Tools for reviewing: vote, request_review, and ask_human. A reviewer gets a change's code from credentials.
 
 export const reviewTools: ToolHandlers = {
 	async vote({ args, ctx, repo, registered, actAs, stamper, warmChecks }) {
@@ -26,43 +26,10 @@ export const reviewTools: ToolHandlers = {
 			},
 			stamper,
 		);
-		// The review is done, so drop the hold review_access placed.
+		// The review is done, so drop the hold credentials placed when the review began.
 		await ctx.reviews?.release(repo, holdKey(commit, requiredString(args, "role")), reviewer).catch(() => undefined);
 		if (verdict === "approve") await warmChecks("approved", commit);
 		return cast;
-	},
-	async review_access({ args, ctx, repo, acting, branch, changeOf, claimOf, changeSource }) {
-		// Anyone may review, with read-only access to the change's branch in its author's fork.
-		const change = requiredString(args, "change");
-		const { claim: held, released } = await changeOf(change);
-		const author = held?.agent ?? released.at(-1)?.agent;
-		if (!author) throw new Error(`[404] no change ${change} on ${repo}`);
-		const [fork, project] = await Promise.all([
-			changeSource(author, "read", change, held?.since),
-			ctx.remote(repo, "read"),
-		]);
-		const head = await branchHead(fork, `changes/${change}`).catch(() => null);
-		if (!head) throw new Error(`[409] ${change} has nothing pushed to review yet`);
-		// Agent names only: a person's identity stays in the records, out of logs.
-		console.log(`review access to ${repo} ${change} (${author}) for ${acting ?? "an unregistered caller"}`);
-		const into = (await claimOf(change))?.into ?? branch;
-		// Mark this commit and role as under review, so others see it taken. The mark binds nobody
-		// and goes when the reviewer votes, or after 15 minutes.
-		const role = typeof args.role === "string" && args.role.trim() ? args.role.trim() : "review";
-		const reviewer = acting ?? (typeof args.agent === "string" ? args.agent : undefined);
-		if (reviewer)
-			await ctx.reviews?.hold(repo, holdKey(head, role), reviewer, Number.POSITIVE_INFINITY).catch(() => undefined);
-		return {
-			change,
-			author,
-			url: fork.url,
-			token: fork.token,
-			branch: `changes/${change}`,
-			head,
-			role,
-			project: { url: project.url, token: project.token, branch: into },
-			...(into !== branch ? { into } : {}),
-		};
 	},
 	async request_review({ args, ctx, repo, registered, claimOf }) {
 		if (ctx.mayUseHosted && !(await ctx.mayUseHosted()))
