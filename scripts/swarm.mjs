@@ -42,28 +42,18 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, wr
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { Agent, fetch } from "undici";
+import { BENCH_BASE, ROOT, accessHeaders, parseFlags } from "./lib/bench-client.mjs";
 
 const run = promisify(execFile);
-const root = new URL("..", import.meta.url).pathname;
 const args = process.argv.slice(2);
 const planPath = resolve(args[0] ?? "");
-const flag = (name) => (args.includes(`--${name}`) ? args[args.indexOf(`--${name}`) + 1] : undefined);
-const BASE = flag("base") ?? "https://blueprint-bench.nuandy.workers.dev";
-const speed = Number(flag("speed") ?? 1);
+const flags = parseFlags(args);
+const BASE = flags.base ?? BENCH_BASE;
+const speed = Number(flags.speed ?? 1);
 const plan = JSON.parse(readFileSync(planPath, "utf8"));
 const here = dirname(planPath);
 const at = (path) => (path && !isAbsolute(path) ? join(here, path) : path);
-const vars = Object.fromEntries(
-	readFileSync(join(root, ".dev.vars"), "utf8")
-		.split("\n")
-		.map((l) => l.match(/^([A-Z_]+)=(.*)$/))
-		.filter(Boolean)
-		.map(([, k, v]) => [k, v.replace(/^"|"$/g, "")]),
-);
-const access = {
-	"CF-Access-Client-Id": vars.CF_ACCESS_CLIENT_ID,
-	"CF-Access-Client-Secret": vars.CF_ACCESS_CLIENT_SECRET,
-};
+const access = accessHeaders();
 // A merge can wait minutes for its batch, so there are no client-side timeouts.
 const patient = new Agent({ headersTimeout: 0, bodyTimeout: 0 });
 /** The whole run gives up after this long. */
@@ -161,7 +151,7 @@ const git = (cwd, ...rest) => {
 };
 const helper = (...rest) =>
 	onNetwork(() =>
-		run("node", [join(root, "scripts/mcp-agent.mjs"), ...rest, "--base", BASE], { maxBuffer: 16 * 1024 * 1024 }),
+		run("node", [join(ROOT, "scripts/mcp-agent.mjs"), ...rest, "--base", BASE], { maxBuffer: 16 * 1024 * 1024 }),
 	);
 
 const work = at(plan.work ?? "swarm-work");

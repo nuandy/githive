@@ -18,7 +18,7 @@
 
 import { execFileSync } from "node:child_process";
 import { chmodSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { BENCH_BASE, accessHeaders } from "./lib/bench-client.mjs";
 
 // Errors can carry git's command line, which may hold a token.
 const redacted = (text) =>
@@ -31,7 +31,6 @@ for (const event of ["uncaughtException", "unhandledRejection"])
 		process.exit(1);
 	});
 
-const root = new URL("..", import.meta.url).pathname;
 const [command, ...rest] = process.argv.slice(2);
 const flags = {};
 const positional = [];
@@ -39,18 +38,8 @@ for (let i = 0; i < rest.length; i++) {
 	if (rest[i].startsWith("--")) flags[rest[i].slice(2)] = rest[++i];
 	else positional.push(rest[i]);
 }
-const BASE = flags.base ?? "https://blueprint-bench.nuandy.workers.dev";
-const vars = Object.fromEntries(
-	readFileSync(join(root, ".dev.vars"), "utf8")
-		.split("\n")
-		.map((l) => l.match(/^([A-Z_]+)=(.*)$/))
-		.filter(Boolean)
-		.map(([, k, v]) => [k, v.replace(/^"|"$/g, "")]),
-);
-const access = {
-	"CF-Access-Client-Id": vars.CF_ACCESS_CLIENT_ID,
-	"CF-Access-Client-Secret": vars.CF_ACCESS_CLIENT_SECRET,
-};
+const BASE = flags.base ?? BENCH_BASE;
+const access = accessHeaders();
 
 async function tool(name, args, keyFile) {
 	const key = keyFile ? readFileSync(keyFile, "utf8").trim() : undefined;

@@ -17,18 +17,13 @@
 import fs from "node:fs";
 import igit from "isomorphic-git";
 import ihttp from "isomorphic-git/http/node";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { BENCH_BASE, ROOT, githiveClient, parseFlags } from "./lib/bench-client.mjs";
 
-const root = new URL("..", import.meta.url).pathname;
-
-const args = Object.fromEntries(
-	process.argv
-		.slice(2)
-		.reduce((pairs, arg, i, all) => (arg.startsWith("--") ? [...pairs, [arg.slice(2), all[i + 1]]] : pairs), []),
-);
-const BASE = args.base ?? "https://blueprint-bench.nuandy.workers.dev";
+const args = parseFlags();
+const BASE = args.base ?? BENCH_BASE;
 const LABEL = args.label ?? "baseline";
 const REPO = args.repo ?? `bench-${LABEL}`;
 const SOURCE = args.source ?? "https://github.com/octocat/Spoon-Knife";
@@ -49,29 +44,7 @@ try {
 	console.warn("undici not found: requests use Node's default 5-minute timeout");
 }
 
-const vars = Object.fromEntries(
-	(await readFile(join(root, ".dev.vars"), "utf8"))
-		.split("\n")
-		.map((line) => line.match(/^([A-Z_]+)=(.*)$/))
-		.filter(Boolean)
-		.map(([, key, value]) => [key, value.replace(/^"|"$/g, "")]),
-);
-const headers = {
-	"CF-Access-Client-Id": vars.CF_ACCESS_CLIENT_ID,
-	"CF-Access-Client-Secret": vars.CF_ACCESS_CLIENT_SECRET,
-	"Content-Type": "application/json",
-};
-
-async function api(method, path, body) {
-	const response = await fetch(`${BASE}${path}`, {
-		method,
-		headers,
-		body: body === undefined ? undefined : JSON.stringify(body),
-	});
-	const text = await response.text();
-	if (!response.ok) throw new Error(`${method} ${path}: ${response.status} ${text.slice(0, 300)}`);
-	return JSON.parse(text);
-}
+const { api, toolReply } = githiveClient(BASE);
 
 /** Every timed MCP call: {level, tool, ms, ok}. */
 const calls = [];
@@ -81,17 +54,10 @@ async function tool(level, name, args, as = name) {
 	const start = performance.now();
 	let ok = false;
 	try {
-		const reply = await api("POST", "/mcp", {
-			jsonrpc: "2.0",
-			id: 1,
-			method: "tools/call",
-			params: { name, arguments: args },
-		});
-		if (reply.error) throw new Error(`${name}: ${reply.error.message}`);
-		const text = reply.result.content[0].text;
-		if (reply.result.isError) throw Object.assign(new Error(`${name}: ${text}`), { toolError: true });
+		const { text, isError } = await toolReply(name, args);
+		if (isError) throw Object.assign(new Error(`${name}: ${text}`), { toolError: true });
 		ok = true;
-		return JSON.parse(text.replace(/[\u0000-\u0008\u000b-\u001f]/g, ""));
+		return JSON.parse(text);
 	} finally {
 		if (as) calls.push({ level, tool: as, ms: performance.now() - start, ok });
 	}
@@ -241,8 +207,8 @@ async function main() {
 		at: new Date().toISOString(),
 		levels,
 	};
-	await mkdir(join(root, "bench-results"), { recursive: true });
-	const file = join(root, "bench-results", `${LABEL}-${result.at.replace(/[:.]/g, "-")}.json`);
+	await mkdir(join(ROOT, "bench-results"), { recursive: true });
+	const file = join(ROOT, "bench-results", `${LABEL}-${result.at.replace(/[:.]/g, "-")}.json`);
 	const save = () => writeFile(file, JSON.stringify(result, null, "\t") + "\n");
 	for (const n of LEVELS) {
 		const runId = `${LABEL}-n${n}-${Date.now().toString(36)}`;
