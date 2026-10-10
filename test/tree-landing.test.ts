@@ -169,6 +169,34 @@ describe("landing a batch with trees, in the Worker", { timeout: 60_000 }, () =>
 		expect(fallback).toHaveBeenCalledTimes(1);
 	});
 
+	it.each([
+		["sends the push again after a server error that applied nothing", false],
+		["counts a push the server failed but applied as landed", true],
+	])("%s", async (_name, applied) => {
+		const change = await forkChange("retry", async (clone) => clone.write("lib/retry.js", "retry\n"));
+		const base = server.git("rev-parse", "main").trim();
+		const fallback = vi.fn(async () => ({ commits: [] }));
+		const land = treeLanding({ history, project: "project", remote: async () => project(), fallback });
+		server.failPushes(1, applied);
+
+		const landed = await land({ base, branch: "main", merges: [merge(change)] });
+
+		expect(fallback).not.toHaveBeenCalled();
+		if (landed === "moved") throw new Error("moved");
+		expect(server.git("rev-parse", "main").trim()).toBe(landed.commits[0]);
+	});
+
+	it("lands in the Gate when the push keeps failing", async () => {
+		const change = await forkChange("broken", async (clone) => clone.write("lib/broken.js", "broken\n"));
+		const base = server.git("rev-parse", "main").trim();
+		const fallback = vi.fn(async () => ({ commits: ["from the Gate"] }));
+		const land = treeLanding({ history, project: "project", remote: async () => project(), fallback });
+		server.failPushes(20);
+
+		expect(await land({ base, branch: "main", merges: [merge(change)] })).toEqual({ commits: ["from the Gate"] });
+		expect(server.git("rev-parse", "main").trim()).toBe(base);
+	});
+
 	it("answers moved when main moved past the base, and lands nothing", async () => {
 		const change = await forkChange("late", async (clone) => clone.write("lib/late.js", "late\n"));
 		const base = server.git("rev-parse", "main").trim();

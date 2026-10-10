@@ -146,7 +146,7 @@ function packEntries(pack: Chunks) {
 function receivePackBody(updates: RefUpdate[], packs: Chunks[]): Uint8Array[] {
 	const commands = concat([
 		...updates.flatMap((update, index) => {
-			const capabilities = index === 0 ? "\0report-status delete-refs agent=githive" : "";
+			const capabilities = index === 0 ? "\0report-status agent=githive" : "";
 			return pktLine(`${update.from ?? ZERO_OID} ${update.to ?? ZERO_OID} ${update.ref}${capabilities}\n`);
 		}),
 		encoder.encode("0000"),

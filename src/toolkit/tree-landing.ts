@@ -1,7 +1,7 @@
 import git from "isomorphic-git";
 import { BOT, branchHead, type Remote } from "../git";
 import { repoOfUrl } from "../git-http";
-import { Chunks, fetchPackSince, receivePack, type RefUpdate } from "../git-pack";
+import { Chunks, fetchPackSince, receivePack } from "../git-pack";
 import { MemoryFS } from "../memory-fs";
 import { jitteredDelay, sleep } from "../retry";
 import { placeBatch, type Placed, type ReadHistory } from "./batch-reads";
@@ -42,25 +42,69 @@ export interface TreeLandingInput {
 type LandInput = Parameters<BatchGit["land"]>[0];
 type Merge = LandInput["merges"][number];
 
-/** BatchGit's land, done with trees in the Worker; the Gate's when a batch needs a real merge. */
+/**
+ * BatchGit's land, done with trees in the Worker; the Gate's when a batch needs a real merge, or when anything here
+ * fails, so a merge is never refused for this. Logs one line per batch: each step's time and how it ended.
+ */
 export function treeLanding(input: TreeLandingInput): BatchGit["land"] {
 	return async (batch) => {
-		const plan = await planLanding(input, batch);
-		if ("gate" in plan) {
-			console.log(`landing ${batch.merges.length} in the Gate: ${plan.gate}`);
-			return input.fallback(batch);
+		const steps = stepTimer();
+		let gate: string;
+		try {
+			const landed = await landWithTrees(input, batch, steps.mark);
+			if (landed === "moved" || !("gate" in landed)) {
+				console.log(`tree landing of ${batch.merges.length}: ${steps.done()}; ${describe(landed)}`);
+				return landed;
+			}
+			gate = landed.gate;
+		} catch (err) {
+			gate = `it failed: ${err instanceof Error ? err.message : String(err)}`;
 		}
-		const fs = new MemoryFS();
-		await git.init({ fs, dir: DIR });
-		const fetched = await fetchChanges(batch.merges, plan.placed);
-		if ("gate" in fetched) {
-			console.log(`landing ${batch.merges.length} in the Gate: ${fetched.gate}`);
-			return input.fallback(batch);
-		}
-		const built = await buildMerges(fs, input, batch, plan, await stamperFor(input, batch));
-		return pushMerges(await input.remote("write"), batch, built, fetched.packs);
+		console.log(`tree landing of ${batch.merges.length}: ${steps.done()}; in the Gate, because ${gate}`);
+		return input.fallback(batch);
 	};
 }
+
+type TreeLanded = { commits: string[] } | "moved" | { gate: string };
+
+async function landWithTrees(
+	input: TreeLandingInput,
+	batch: LandInput,
+	mark: (step: string) => void,
+): Promise<TreeLanded> {
+	const plan = await planLanding(input, batch);
+	mark("planned");
+	if ("gate" in plan) return plan;
+	const fs = new MemoryFS();
+	await git.init({ fs, dir: DIR });
+	const fetched = await fetchChanges(batch.merges, plan.placed);
+	mark("fetched" + ("packs" in fetched ? ` ${megabytes(fetched.packs)}` : ""));
+	if ("gate" in fetched) return fetched;
+	const built = await buildMerges(fs, input, batch, plan, await stamperFor(input, batch));
+	mark(`built ${built.objects.length} objects`);
+	const pushed = await pushMerges(await input.remote("write"), batch, built, fetched.packs);
+	mark("pushed");
+	return pushed;
+}
+
+/** Each step's time since the one before, for the batch's log line. */
+function stepTimer() {
+	const started = Date.now();
+	let last = started;
+	const steps: string[] = [];
+	return {
+		mark: (step: string) => {
+			steps.push(`${step} ${Date.now() - last} ms`);
+			last = Date.now();
+		},
+		done: () => `${steps.join(", ")} (${Date.now() - started} ms)`,
+	};
+}
+
+const megabytes = (packs: Chunks[]) => `${(packs.reduce((total, pack) => total + pack.length, 0) / 1e6).toFixed(2)} MB`;
+
+const describe = (landed: { commits: string[] } | "moved") =>
+	landed === "moved" ? "the branch moved" : `landed ${landed.commits.length}`;
 
 type Plan = { gate: string } | { baseTree: string; placed: Placed[] };
 
@@ -211,41 +255,28 @@ function cleanMessage(message: string) {
 
 /**
  * Pushes the changes' objects and the merges, and moves the branch from the base to the last merge, in one
- * request. "moved" if the branch is no longer at the base.
+ * request. A server error may come after the push applied, so the branch decides: at the merges it landed, moved
+ * past the base another landing won, and still at the base it's sent again, then left to the Gate.
  */
-async function pushMerges(
-	write: Remote,
-	batch: LandInput,
-	built: Built,
-	changePacks: Chunks[],
-): Promise<{ commits: string[] } | "moved"> {
+async function pushMerges(write: Remote, batch: LandInput, built: Built, changePacks: Chunks[]): Promise<TreeLanded> {
 	const { packfile } = await git.packObjects({ fs: built.fs, dir: DIR, oids: built.objects });
 	const branchRef = `refs/heads/${batch.branch}`;
 	const update = { ref: branchRef, from: batch.base, to: built.tip };
-	let report;
-	try {
-		report = await pushWithRetries(write, [update], [...changePacks, new Chunks([packfile!])]);
-	} catch (err) {
-		// A server error may come after the push applied: the branch then tells.
+	const packs = [...changePacks, new Chunks([packfile!])];
+	let failure = "";
+	for (let attempt = 1; attempt <= PUSH_ATTEMPTS; attempt++) {
+		if (attempt > 1) await sleep(jitteredDelay(attempt, 200, 3_000));
+		const report = await receivePack(write, [update], packs).catch((err: Error) => err);
+		if (!(report instanceof Error) && "busy" in report) {
+			failure = "the project repo was busy";
+			continue;
+		}
+		const result = report instanceof Error ? undefined : report.refs.get(branchRef);
+		if (!(report instanceof Error) && report.unpack === "ok" && result === true) return { commits: built.commits };
+		failure = report instanceof Error ? report.message : `unpack ${report.unpack}, ${String(result)}`;
 		const now = await branchHead(write, batch.branch).catch(() => null);
 		if (now === built.tip) return { commits: built.commits };
-		if (now !== batch.base) return "moved";
-		throw err;
+		if (now !== null && now !== batch.base) return "moved";
 	}
-	if ("busy" in report) throw new Error("[503] the project repo stayed busy, so the batch didn't land");
-	const result = report.refs.get(branchRef);
-	if (report.unpack === "ok" && result === true) return { commits: built.commits };
-	// Refused: most likely the lease, because another landing moved the branch. The branch tells.
-	const now = await branchHead(write, batch.branch).catch(() => null);
-	if (now !== null && now !== batch.base) return "moved";
-	throw new Error(`[500] landing the batch failed: unpack ${report.unpack}, ${batch.branch}: ${String(result)}`);
-}
-
-/** A receive-pack request sent again while the repo answers that it's busy, which applies nothing. */
-async function pushWithRetries(write: Remote, updates: RefUpdate[], packs: Chunks[]) {
-	for (let attempt = 1; ; attempt++) {
-		const report = await receivePack(write, updates, packs);
-		if (!("busy" in report) || attempt === PUSH_ATTEMPTS) return report;
-		await sleep(jitteredDelay(attempt, 100, 2_000));
-	}
+	return { gate: `the push failed ${PUSH_ATTEMPTS} times: ${failure}` };
 }
