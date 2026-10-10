@@ -82,7 +82,27 @@ const segments = (path: string) => normalizePath(path).split("/").filter(Boolean
  * files, plus a cell for any claimed folder that isn't there yet.
  */
 export function honeycomb(files: string[], claims: Claim[], context: LampContext & { big?: number } = {}): Hex[] {
-	const big = context.big ?? BIG_FOLDER;
+	const { tops, rootFiles } = countFiles(files);
+	const claimed = claims.flatMap((claim) =>
+		claim.paths.map((raw) => ({ raw, parts: segments(raw), folder: raw.endsWith("/") })),
+	);
+	const split = foldersToOpen(tops, claimed, context.big ?? BIG_FOLDER);
+	const cells = new Map<string, Hex>();
+	addTreeCells(cells, tops, split, rootFiles);
+	addPlannedCells(cells, tops, split, claimed);
+	for (const claim of claims) addHolders(cells, tops, claim, context);
+	for (const hex of cells.values()) {
+		hex.holders.sort(byHolding);
+		const landing = landingOf(hex.holders);
+		if (landing) hex.landing = landing;
+	}
+	return [...cells.values()].sort(byMapOrder);
+}
+
+type ClaimedPath = { raw: string; parts: string[]; folder: boolean };
+
+/** Files per top-level folder, split into its own files and each subfolder's, and the files at the top. */
+function countFiles(files: string[]) {
 	const tops = new Map<string, Folder>();
 	let rootFiles = 0;
 	for (const file of files) {
@@ -99,130 +119,119 @@ export function honeycomb(files: string[], claims: Claim[], context: LampContext
 		if (parts.length === 2) top.direct++;
 		else top.subs.set(subName, (top.subs.get(subName) ?? 0) + 1);
 	}
+	return { tops, rootFiles };
+}
 
-	const claimed = claims.flatMap((claim) =>
-		claim.paths.map((raw) => ({ raw, parts: segments(raw), folder: raw.endsWith("/") })),
-	);
+/** The top-level folders shown as their subfolders: big ones, and those claimed below the top. */
+function foldersToOpen(tops: Map<string, Folder>, claimed: ClaimedPath[], big: number) {
 	const claimedBelow = (top: string) => claimed.some(({ parts }) => parts.length >= 2 && parts[0] === top);
-	const split = new Set(
-		[...tops]
-			.filter(([name, top]) => top.subs.size > 0 && (top.files > big || claimedBelow(name)))
-			.map(([name]) => name),
-	);
+	const open = [...tops].filter(([name, top]) => top.subs.size > 0 && (top.files > big || claimedBelow(name)));
+	return new Set(open.map(([name]) => name));
+}
 
-	const hexes = new Map<string, Hex>();
-	const add = (hex: Hex) => {
-		if (!hexes.has(hex.key)) hexes.set(hex.key, hex);
-	};
-	const filesHex = (top: string, count: number, planned: boolean): Hex => ({
-		key: top ? `${top}/*` : "*",
-		path: top,
-		kind: "files",
-		name: top ? "files" : "top-level files",
-		...(top ? { parent: top } : {}),
-		files: count,
-		...(planned ? { planned: true } : {}),
-		holders: [],
-	});
+const addCell = (cells: Map<string, Hex>, hex: Hex) => {
+	if (!cells.has(hex.key)) cells.set(hex.key, hex);
+};
+
+const folderCell = (path: string, name: string, files: number, extra: Partial<Hex> = {}): Hex => ({
+	key: path,
+	path,
+	kind: "folder",
+	name,
+	files,
+	holders: [],
+	...extra,
+});
+
+const filesCell = (top: string, count: number, planned: boolean): Hex => ({
+	key: top ? `${top}/*` : "*",
+	path: top,
+	kind: "files",
+	name: top ? "files" : "top-level files",
+	...(top ? { parent: top } : {}),
+	files: count,
+	...(planned ? { planned: true } : {}),
+	holders: [],
+});
+
+/** A cell for each top-level folder, or each subfolder of an opened one plus its own files, and the top files. */
+function addTreeCells(cells: Map<string, Hex>, tops: Map<string, Folder>, split: Set<string>, rootFiles: number) {
 	for (const [name, top] of tops) {
 		if (!split.has(name)) {
-			add({ key: name, path: name, kind: "folder", name, files: top.files, holders: [] });
+			addCell(cells, folderCell(name, name, top.files));
 			continue;
 		}
-		if (top.direct) add(filesHex(name, top.direct, false));
-		for (const [sub, count] of top.subs)
-			add({
-				key: `${name}/${sub}`,
-				path: `${name}/${sub}`,
-				kind: "folder",
-				name: sub,
-				parent: name,
-				files: count,
-				holders: [],
-			});
+		if (top.direct) addCell(cells, filesCell(name, top.direct, false));
+		for (const [sub, count] of top.subs) addCell(cells, folderCell(`${name}/${sub}`, sub, count, { parent: name }));
 	}
-	if (rootFiles) add(filesHex("", rootFiles, false));
+	if (rootFiles) addCell(cells, filesCell("", rootFiles, false));
+}
 
-	// Claims on what isn't there yet: a new folder, or a new file in a split folder or at the top.
+/** Cells for claims on what isn't there yet: a new folder, or a new file in an opened folder or at the top. */
+function addPlannedCells(
+	cells: Map<string, Hex>,
+	tops: Map<string, Folder>,
+	split: Set<string>,
+	claimed: ClaimedPath[],
+) {
 	for (const { parts, folder } of claimed) {
 		const [first, second] = parts;
 		if (first === undefined) continue;
 		const top = tops.get(first);
-		const isFolderClaim = folder || parts.length > 1;
 		if (!top) {
-			if (isFolderClaim)
-				add({ key: first, path: first, kind: "folder", name: first, files: 0, planned: true, holders: [] });
-			else if (!hexes.has("*")) add(filesHex("", 0, true));
+			if (folder || parts.length > 1) addCell(cells, folderCell(first, first, 0, { planned: true }));
+			else if (!cells.has("*")) addCell(cells, filesCell("", 0, true));
 			continue;
 		}
-		if (!split.has(first)) continue;
-		if (second === undefined) continue;
-		if (top.subs.has(second)) continue;
+		if (!split.has(first) || second === undefined || top.subs.has(second)) continue;
 		if (parts.length > 2 || folder)
-			add({
-				key: `${first}/${second}`,
-				path: `${first}/${second}`,
-				kind: "folder",
-				name: second,
-				parent: first,
-				files: 0,
-				planned: true,
-				holders: [],
-			});
-		else if (!hexes.has(`${first}/*`)) add(filesHex(first, 0, true));
+			addCell(cells, folderCell(`${first}/${second}`, second, 0, { parent: first, planned: true }));
+		else if (!cells.has(`${first}/*`)) addCell(cells, filesCell(first, 0, true));
 	}
+}
 
-	const isSub = (top: string, name: string) =>
-		hexes.has(`${top}/${name}`) && hexes.get(`${top}/${name}`)!.kind === "folder";
-	const isTopFolder = (name: string) => hexes.get(name)?.kind === "folder" || tops.has(name);
-	/** How a claimed path meets a cell: covering all of it, inside it, or not at all. */
-	const meet = (hex: Hex, raw: string): "whole" | "part" | undefined => {
-		const path = normalizePath(raw);
-		const parts = segments(raw);
-		if (hex.kind === "folder") {
-			if (covers(path, hex.path)) return "whole";
-			return path.startsWith(`${hex.path}/`) ? "part" : undefined;
-		}
-		// For a folder's own files, a claim on the folder or above covers the cell; one on a file in it is inside.
-		if (!path || (hex.path && covers(path, hex.path))) return "whole";
-		const depth = hex.path ? segments(hex.path).length + 1 : 1;
-		if (parts.length !== depth || raw.endsWith("/")) return undefined;
-		const [first = "", second = ""] = parts;
-		const elsewhere = hex.path ? first !== hex.path || isSub(hex.path, second) : isTopFolder(first);
-		return elsewhere ? undefined : "part";
+/** How a claimed path meets a cell: covering all of it, inside it, or not at all. */
+function meet(cells: Map<string, Hex>, tops: Map<string, Folder>, hex: Hex, raw: string): "whole" | "part" | undefined {
+	const path = normalizePath(raw);
+	const parts = segments(raw);
+	if (hex.kind === "folder") {
+		if (covers(path, hex.path)) return "whole";
+		return path.startsWith(`${hex.path}/`) ? "part" : undefined;
+	}
+	// For a folder's own files, a claim on the folder or above covers the cell; one on a file in it is inside.
+	if (!path || (hex.path && covers(path, hex.path))) return "whole";
+	const depth = hex.path ? segments(hex.path).length + 1 : 1;
+	if (parts.length !== depth || raw.endsWith("/")) return undefined;
+	const [first = "", second = ""] = parts;
+	const isSub = (top: string, name: string) => cells.get(`${top}/${name}`)?.kind === "folder";
+	const isTopFolder = (name: string) => cells.get(name)?.kind === "folder" || tops.has(name);
+	const elsewhere = hex.path ? first !== hex.path || isSub(hex.path, second) : isTopFolder(first);
+	return elsewhere ? undefined : "part";
+}
+
+/** Adds the claim to each cell it meets: as a whole claim on its most specific path, or by the paths inside. */
+function addHolders(cells: Map<string, Hex>, tops: Map<string, Folder>, claim: Claim, context: LampContext) {
+	const base = {
+		change: claim.change,
+		title: claimTitle(claim),
+		intent: claim.intent ?? "",
+		agent: claimAgent(claim),
+		since: claim.since,
+		color: agentColor(claimAgent(claim)),
+		lamp: lampOf(claim, context),
 	};
-
-	for (const claim of claims) {
-		const base = {
-			change: claim.change,
-			title: claimTitle(claim),
-			intent: claim.intent ?? "",
-			agent: claimAgent(claim),
-			since: claim.since,
-			color: agentColor(claimAgent(claim)),
-			lamp: lampOf(claim, context),
-		};
-		for (const hex of hexes.values()) {
-			let whole: string | undefined;
-			const inside: string[] = [];
-			for (const raw of claim.paths) {
-				const how = meet(hex, raw);
-				const moreSpecific = whole === undefined || normalizePath(raw).length > normalizePath(whole).length;
-				if (how === "whole" && moreSpecific) whole = raw;
-				else if (how === "part") inside.push(raw);
-			}
-			if (whole !== undefined) hex.holders.push({ ...base, whole: true, paths: [whole] });
-			else if (inside.length) hex.holders.push({ ...base, whole: false, paths: inside });
+	for (const hex of cells.values()) {
+		let whole: string | undefined;
+		const inside: string[] = [];
+		for (const raw of claim.paths) {
+			const how = meet(cells, tops, hex, raw);
+			const moreSpecific = whole === undefined || normalizePath(raw).length > normalizePath(whole).length;
+			if (how === "whole" && moreSpecific) whole = raw;
+			else if (how === "part") inside.push(raw);
 		}
+		if (whole !== undefined) hex.holders.push({ ...base, whole: true, paths: [whole] });
+		else if (inside.length) hex.holders.push({ ...base, whole: false, paths: inside });
 	}
-
-	for (const hex of hexes.values()) {
-		hex.holders.sort(byHolding);
-		const landing = landingOf(hex.holders);
-		if (landing) hex.landing = landing;
-	}
-
-	return [...hexes.values()].sort(byMapOrder);
 }
 
 /** Whole claims first (the most specific first), then claims inside the cell, oldest first. */
