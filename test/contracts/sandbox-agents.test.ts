@@ -78,7 +78,6 @@ let storage: FakeStorage;
 let box: ReturnType<typeof fakeContainer>;
 let builder: BuilderHarness;
 
-
 beforeEach(() => {
 	vi.clearAllMocks();
 	storage = new FakeStorage();
