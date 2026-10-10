@@ -4,7 +4,8 @@ import { usePoll } from "../hooks/usePoll";
 import { canLeave, canManage } from "../lib/orgs";
 import { LEVELS, type Level } from "../lib/permissions";
 import { href } from "../lib/routes";
-import { ConfirmButton, messageOf } from "./Confirm";
+import { useRowActions } from "../hooks/useRowActions";
+import { ConfirmButton } from "./Confirm";
 import { Icon } from "./Icon";
 import { MembersSection } from "./OrgMembers";
 import { TeamsSection } from "./OrgTeams";
@@ -50,32 +51,7 @@ export type ConfirmProps = { confirming: string | null; setConfirming: (id: stri
 export function OrgView({ org, me, actions, onLeft }: OrgViewProps) {
 	const manager = canManage(org.role);
 	const mine = org.personal && org.slug === me.handle;
-	const [confirming, setConfirming] = useState<string | null>(null);
-	const [busy, setBusy] = useState<string | null>(null);
-	const [rowError, setRowError] = useState<{ id: string; text: string } | null>(null);
-
-	/** Run one action, keyed so its row shows it's busy, and any error next to it. */
-	const run = async (key: string, work: () => Promise<unknown>, onError?: (text: string) => void) => {
-		setBusy(key);
-		setRowError(null);
-		try {
-			await work();
-			setConfirming(null);
-			return true;
-		} catch (err) {
-			const showError = onError ?? ((text: string) => setRowError({ id: key, text }));
-			showError(messageOf(err));
-			return false;
-		} finally {
-			setBusy(null);
-		}
-	};
-	const errorFor = (key: string) =>
-		rowError?.id === key ? (
-			<p className="error manage__note" role="alert">
-				{rowError.text}
-			</p>
-		) : null;
+	const { run, busy, confirming, setConfirming, errorFor } = useRowActions();
 	const leave = () => run("leave", () => actions.removeMember(org.slug, me.handle)).then((ok) => ok && onLeft());
 	const confirm = { confirming, setConfirming };
 

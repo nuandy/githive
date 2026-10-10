@@ -2,7 +2,9 @@ import { type FormEvent, type ReactNode, useEffect, useState } from "react";
 import type { ManageApi, RepoAccess } from "../api";
 import { canAdminister, LEVEL_WORDS, LEVELS, type Level } from "../lib/permissions";
 import { isLoose } from "../lib/repoName";
-import { ConfirmButton, messageOf } from "./Confirm";
+import { messageOf } from "../lib/errors";
+import { useRowActions } from "../hooks/useRowActions";
+import { ConfirmButton } from "./Confirm";
 import "./Manage.css";
 
 /** What the repo's Settings can change. */
@@ -57,9 +59,7 @@ export function RepoAdmin({
 	const loose = isLoose(repo);
 	const [collaborators, setCollaborators] = useState<Collaborator[] | undefined>(undefined);
 	const [listError, setListError] = useState<string | null>(null);
-	const [confirming, setConfirming] = useState<string | null>(null);
-	const [busy, setBusy] = useState<string | null>(null);
-	const [error, setError] = useState<{ key: string; text: string } | null>(null);
+	const { run, busy, confirming, setConfirming, errorFor } = useRowActions();
 	const [handle, setHandle] = useState("");
 	const [level, setLevel] = useState<Level>("write");
 	const [typed, setTyped] = useState("");
@@ -76,26 +76,6 @@ export function RepoAdmin({
 		if (admin && !loose) void load();
 	}, [admin, loose, repo]);
 
-	const run = async (key: string, work: () => Promise<unknown>) => {
-		setBusy(key);
-		setError(null);
-		try {
-			await work();
-			setConfirming(null);
-			return true;
-		} catch (err) {
-			setError({ key, text: messageOf(err) });
-			return false;
-		} finally {
-			setBusy(null);
-		}
-	};
-	const errorFor = (key: string) =>
-		error?.key === key ? (
-			<p className="error manage__note" role="alert">
-				{error.text}
-			</p>
-		) : null;
 	const runProps = { run, busy, errorFor };
 
 	const add = async (event: FormEvent) => {

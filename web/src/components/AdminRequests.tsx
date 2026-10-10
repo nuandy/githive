@@ -11,7 +11,7 @@ export function AdminRequests({
 	requests,
 	actions,
 	run,
-	rowFailed,
+	failed,
 	errorFor,
 	busy,
 	confirming,
@@ -48,7 +48,7 @@ export function AdminRequests({
 								type="button"
 								className="accent manage__small"
 								disabled={busy !== null}
-								onClick={() => run(key, () => actions.approve(request.email), rowFailed(key))}
+								onClick={() => run(key, () => actions.approve(request.email))}
 							>
 								{busy === key ? "Approving…" : "Approve"}
 							</button>
@@ -59,7 +59,7 @@ export function AdminRequests({
 								label="Turn down"
 								question={`Turn down ${request.email}?`}
 								busy={busy === declineKey}
-								onConfirm={() => run(declineKey, () => actions.decline(request.email), rowFailed(key))}
+								onConfirm={() => run(declineKey, () => actions.decline(request.email), failed(key))}
 							/>
 						</AdminRow>
 					);

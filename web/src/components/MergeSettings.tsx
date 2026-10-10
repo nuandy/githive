@@ -1,7 +1,7 @@
 import { type FormEvent, useEffect, useRef, useState } from "react";
 import type { RepoSnapshot, SavedMergeSettings, SettingsInput } from "../api";
 import { blockingRolesOf, draftFrom, type MergeDraft, settingsFrom } from "../lib/mergeSettings";
-import { messageOf } from "./Confirm";
+import { messageOf } from "../lib/errors";
 import { Icon } from "./Icon";
 import { MergeChecks } from "./MergeChecks";
 import "./RepoSettings.css";

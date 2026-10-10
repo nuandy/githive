@@ -1,7 +1,7 @@
 import { type FormEvent, useEffect, useRef, useState } from "react";
 import type { BranchRule, SavedMergeSettings, SettingsInput } from "../api";
 import { branchRulesFrom, emptyRule, type RuleDraft, ruleDraftsFrom } from "../lib/branchRules";
-import { messageOf } from "./Confirm";
+import { messageOf } from "../lib/errors";
 import "./RepoSettings.css";
 import "./BranchRules.css";
 

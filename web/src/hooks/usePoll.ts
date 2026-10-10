@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { messageOf } from "../lib/errors";
 
 export interface Poll<T> {
 	data: T | undefined;
@@ -51,7 +52,7 @@ export function usePoll<T>(
 				const data = await fetcherRef.current();
 				if (active) setState({ key, data, loaded: true });
 			} catch (error) {
-				const message = error instanceof Error ? error.message : String(error);
+				const message = messageOf(error);
 				// Keep the last good data for this key, so a failed refresh doesn't blank the page.
 				const keepFor = (current: typeof state) => (current.key === key ? current : {});
 				if (active) setState((current) => ({ ...keepFor(current), key, error: message, loaded: true }));

@@ -10,7 +10,6 @@ export function AdminInvites({
 	invites,
 	actions,
 	run,
-	rowFailed,
 	errorFor,
 	busy,
 	confirming,
@@ -80,7 +79,7 @@ export function AdminInvites({
 								label="Remove"
 								question={`Stop ${invite.email} signing in?`}
 								busy={busy === key}
-								onConfirm={() => run(key, () => actions.removeInvite(invite.email), rowFailed(key))}
+								onConfirm={() => run(key, () => actions.removeInvite(invite.email))}
 							/>
 						</AdminRow>
 					);
