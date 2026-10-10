@@ -1,5 +1,5 @@
 import git from "isomorphic-git";
-import { gitAuth, http, noteGitRequest } from "./git-http";
+import { gitAuth, gitFetch, http, noteGitRequest } from "./git-http";
 import { BOT, isEmptyRepo, type Remote } from "./git";
 import { fetchCommits } from "./git-fetch";
 import { MemoryFS } from "./memory-fs";
@@ -147,7 +147,7 @@ async function pushDirect(remote: Remote, ref: string, from: string | null, to: 
 	// since, and the ref is no longer at `to`; then it's among the commits just behind the ref.
 	const refused = async <T>(outcome: T) => (unsure && (await landedBehind(remote, ref, to).catch(() => false)) ? true : outcome);
 	for (let attempt = 1; ; attempt++) {
-		const response = await fetch(`${remote.url}/git-receive-pack`, {
+		const response = await gitFetch(`${remote.url}/git-receive-pack`, {
 			method: "POST",
 			headers: {
 				"Content-Type": "application/x-git-receive-pack-request",

@@ -125,12 +125,39 @@ export function describeCounts(project: string | undefined, git: GitRequests, ar
 const GIT_TRIES = 5;
 const GIT_RETRY_MS = 400;
 
+/**
+ * How long a Git request may go unanswered before it's taken for a server
+ * failure (504) and tried again like one. Without a limit, a request a busy
+ * repo accepted and never answered held its call for good: after 1,000
+ * agents' run left the project repo failing, adding the next run's backlog
+ * waited 703 s on one (run 1000-2). A Worker's Git requests are small (a
+ * shallow copy of Express is 3.6 MB), answered in seconds when the server is
+ * well. (Tests set less.)
+ */
+export const gitTimeout = { ms: 45_000 };
+
+const timedOut = (err: unknown) => err instanceof Error && (err.name === "TimeoutError" || err.name === "AbortError");
+
+/** fetch for a Git request: one unanswered for gitTimeout.ms comes back as a 504, which callers handle as a server failure. */
+export async function gitFetch(url: string, init: RequestInit): Promise<Response> {
+	try {
+		return await fetch(url, { ...init, signal: AbortSignal.timeout(gitTimeout.ms) });
+	} catch (err) {
+		if (timedOut(err)) return new Response(`no answer in ${gitTimeout.ms / 1000} s`, { status: 504 });
+		throw err;
+	}
+}
+
 export const http = {
 	async request(request: Request) {
 		// Collected once, to send again (the client collects it anyway: no streaming uploads).
 		const body = request.body ? [await collected(request.body)] : undefined;
 		for (let attempt = 1; ; attempt++) {
-			const response = await base.request({ ...request, ...(body ? { body: body as never } : {}) });
+			// Unanswered for gitTimeout.ms: a 504, tried again below like any server failure.
+			const response = await base.request({ ...request, ...(body ? { body: body as never } : {}), signal: AbortSignal.timeout(gitTimeout.ms) }).catch((err) => {
+				if (!timedOut(err)) throw err;
+				return { url: request.url, method: request.method, statusCode: 504, statusMessage: `no answer in ${gitTimeout.ms / 1000} s`, headers: {}, body: undefined } as unknown as Awaited<ReturnType<typeof base.request>>;
+			});
 			noteGitRequest(request.url, response.statusCode);
 			// A failure's body is read now: left for later (a 401 asked again, a 5xx thrown), it holds a connection open.
 			if (response.statusCode >= 400) response.body = await drained(response.body);
