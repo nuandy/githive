@@ -62,8 +62,21 @@ const TIP_LISTING_MS = 3_000;
 /** The most landings one reply tells an agent of: past it, the newest. */
 const NEWS_MOST = 20;
 
-/** The latest commit seen on a change's branch (null: nothing pushed), and when. */
-interface KnownHead {
+/**
+ * The latest commit seen on a change's branch (null: nothing pushed), and when:
+ * read from its fork (when the read began), or told by a push event (the
+ * event's time, and the fork it was pushed to; see push-events.ts).
+ */
+export interface KnownHead {
+	head: string | null;
+	at: number;
+	fork?: string;
+}
+
+/** A push to a change's branch, from a push event: which fork took it, the head it left (null: the branch deleted), and when. */
+export interface ChangePush {
+	change: string;
+	fork: string;
 	head: string | null;
 	at: number;
 }
@@ -128,11 +141,31 @@ export class RepoCache extends DurableObject<Env> {
 		for (let i = 0; i < entries.length; i += 128) await this.ctx.storage.put(Object.fromEntries(entries.slice(i, i + 128)));
 	}
 
-	/** Note the latest commits seen on changes' branches (null: nothing pushed), as of now. */
-	async noteHeads(seen: Record<string, string | null>) {
-		const at = Date.now();
-		const entries = Object.entries(seen).map(([change, head]) => [`head:${change}`, { head, at }] as const);
-		for (let i = 0; i < entries.length; i += 128) await this.ctx.storage.put(Object.fromEntries(entries.slice(i, i + 128)));
+	/**
+	 * Note the latest commits read on changes' branches (null: nothing pushed),
+	 * as of when the reads began: a push event newer than that is kept, since
+	 * the read may have missed its push.
+	 */
+	async noteHeads(seen: Record<string, string | null>, readAt = Date.now()) {
+		await this.keepNewest(Object.entries(seen).map(([change, head]) => [change, { head, at: readAt }]));
+	}
+
+	/** Note pushes to changes' branches, from push events: each kept unless what's kept is newer (events come late, twice, or out of order). */
+	async notePushes(pushes: ChangePush[]) {
+		await this.keepNewest(pushes.map(({ change, ...known }) => [change, known]));
+	}
+
+	private async keepNewest(heads: [string, KnownHead][]) {
+		// The newest of each change's here, then against what's kept: storage reads and writes 128 keys at a time.
+		const newest = new Map<string, KnownHead>();
+		for (const [change, known] of heads) if ((newest.get(change)?.at ?? -Infinity) <= known.at) newest.set(change, known);
+		const entries = [...newest];
+		for (let i = 0; i < entries.length; i += 128) {
+			const slice = entries.slice(i, i + 128);
+			const kept = await this.ctx.storage.get<KnownHead>(slice.map(([change]) => `head:${change}`));
+			const put = slice.filter(([change, known]) => (kept.get(`head:${change}`)?.at ?? -Infinity) <= known.at).map(([change, known]) => [`head:${change}`, known] as const);
+			if (put.length) await this.ctx.storage.put(Object.fromEntries(put));
+		}
 	}
 
 	/** The kept view `name`: its JSON, whether it's still fresh, whether a build is running, and the write count now. */

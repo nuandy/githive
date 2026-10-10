@@ -185,14 +185,16 @@ Artifacts is in beta, and its own documentation doesn't yet state encryption at 
 
 `wrangler.jsonc` is set up for githive.app: its D1 database, KV namespace, custom domain and Cloudflare Access team are ours, so a deploy from a fresh clone fails until you swap them for your own. Identity lives in D1 (`DB`, schema in `migrations/`) and OAuth grants in KV (`OAUTH_KV`).
 
-1. **Make your own storage**, and put the IDs these print into `wrangler.jsonc` (`d1_databases[0].database_id` and `kv_namespaces[0].id`):
+1. **Make your own storage**, and put the IDs these print into `wrangler.jsonc` (`d1_databases[0].database_id` and `kv_namespaces[0].id`). The queue and its subscription carry every push in your account to the Worker, so it learns changes' heads without reading agents' forks:
 
    ```sh
    npx wrangler d1 create githive
    npx wrangler kv namespace create OAUTH_KV
+   npx wrangler queues create githive-pushes
+   npx wrangler queues subscription create githive-pushes --source artifacts --events repo.pushed
    ```
 
-2. **Point it at your own address.** In `wrangler.jsonc`, delete the `routes` entry for githive.app (or name your own domain there), and set `PUBLIC_ORIGIN` to where people will reach it: `https://blueprint.<your-subdomain>.workers.dev`, or your domain.
+2. **Point it at your own address.** In `wrangler.jsonc`, delete the `routes` entry for githive.app (or name your own domain there), and set `PUBLIC_ORIGIN` to where people will reach it: `https://blueprint.<your-subdomain>.workers.dev`, or your domain. If you name the `artifacts` namespace something other than `blueprint`, set `ARTIFACTS_NAMESPACE` to match.
 
 3. **Cloudflare Access is optional.** It guards only the admin door: approving sign-ins and choosing who may use the hosted agents. Without it, set `ACCESS_TEAM_DOMAIN` and `ACCESS_AUD` to `""` and do those steps in D1 directly (step 6). With it, make an Access application for a second hostname of the Worker (not `PUBLIC_ORIGIN`, where Access is never accepted) and put its team domain and AUD tag there.
 

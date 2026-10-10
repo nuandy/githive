@@ -97,10 +97,13 @@ export interface ToolContext {
 	 * which read their own records in Git. Unset: read every time.
 	 */
 	keptClaims?: (repo: string, read: () => Promise<ClaimsAdvice>) => Promise<ClaimsAdvice>;
-	/** The latest commit seen on each of these changes' branches (null: nothing pushed), and when, kept in the repo's RepoCache (see openHeads). */
-	knownHeads?: (repo: string, changes: string[]) => Promise<Record<string, { head: string | null; at: number }>>;
-	/** Note the latest commits seen on changes' branches, wherever a tool read them (null: nothing pushed). */
-	noteHeads?: (repo: string, seen: Record<string, string | null>) => Promise<void>;
+	/**
+	 * The latest commit seen on each of these claims' branches (null: nothing pushed), and when, kept in the repo's
+	 * RepoCache (see openHeads): read from forks, or `pushed`, told by a push event from the claim's agent's fork.
+	 */
+	knownHeads?: (repo: string, claims: { change: string; agent: string }[]) => Promise<Record<string, { head: string | null; at: number; pushed?: boolean }>>;
+	/** Note the latest commits seen on changes' branches, wherever a tool read them (null: nothing pushed), as of `readAt` (default: now). */
+	noteHeads?: (repo: string, seen: Record<string, string | null>, readAt?: number) => Promise<void>;
 	/** The GitHub repo `repo` (owner/name) through GitHive's App: null if the App isn't installed there. Unset, GitHub isn't configured. */
 	github?: (repo: string) => Promise<GitHubLink | null>;
 	/** What landed on a branch since this agent was last told (see RepoCache.landingNews): every reply carries it. */
@@ -143,6 +146,8 @@ const DEFAULT_RECORDS_REPOS = 16;
 const STALE_AFTER_MS = BUILDING_IDLE_MS;
 /** How long a change's head, once seen, is taken as current (see openHeads). */
 const HEAD_SEEN_MS = 5 * 60_000;
+/** How long a head a push event told of is taken as current: the next push's event replaces it, and reads only catch a lost one. */
+const HEAD_PUSHED_MS = 30 * 60_000;
 /** How many of the open changes' heads unseen or older than HEAD_SEEN_MS a call reads (see openHeads). */
 const HEADS_READ_A_CALL = 6;
 /** How many forks' heads a call reads at once (a Worker request holds only six connections open; past that, the runtime cancels some). */
@@ -937,22 +942,25 @@ async function runTool(name: string, args: Args, ctx: ToolContext): Promise<unkn
 	const pushedHead = (claim: ClaimRecord) => changeHead(ctx, repo, claim.agent, claim.change, claim.since).catch((err): null | undefined => (statusOf(err).status === 409 ? null : undefined));
 	/**
 	 * Open changes' pushed heads: `fresh` ones read now (the caller's own), the
-	 * rest as GitHive last saw them (see knownHeads). A head seen within
-	 * HEAD_SEEN_MS is taken as current: an agent calls check after each push,
-	 * which notes it. Of those unseen or older, a few are read each call, the
-	 * least lately seen first. Read every call, all of them, they were most of
-	 * GitHive's Git requests (8 fork reads a call of next at 200 agents), and
-	 * they grow with the crowd. Without a place to keep them, all are read.
+	 * rest as GitHive last saw them (see knownHeads). A head a push event told
+	 * of is taken as current for HEAD_PUSHED_MS, one read for HEAD_SEEN_MS: an
+	 * agent calls check after each push, which notes it. Of those unseen or
+	 * older, a few are read each call, the least lately seen first. Read every
+	 * call, all of them, they were most of GitHive's Git requests (8 fork reads
+	 * a call of next at 200 agents), and they grow with the crowd. Without a
+	 * place to keep them, all are read.
 	 */
 	const openHeads = async (claims: ClaimRecord[], fresh: (claim: ClaimRecord) => boolean = () => false) => {
-		const known = ctx.knownHeads ? await ctx.knownHeads(repo, claims.map((c) => c.change)).catch(() => undefined) : undefined;
+		const known = ctx.knownHeads ? await ctx.knownHeads(repo, claims.map((c) => ({ change: c.change, agent: c.agent }))).catch(() => undefined) : undefined;
 		const now = Date.now();
 		const seenAt = (c: ClaimRecord) => known?.[c.change]?.at ?? 0;
-		const due = claims.filter((c) => !fresh(c) && now - seenAt(c) > HEAD_SEEN_MS).sort((a, b) => seenAt(a) - seenAt(b));
+		const current = (c: ClaimRecord) => now - seenAt(c) <= (known?.[c.change]?.pushed ? HEAD_PUSHED_MS : HEAD_SEEN_MS);
+		const due = claims.filter((c) => !fresh(c) && !current(c)).sort((a, b) => seenAt(a) - seenAt(b));
 		const reading = known ? [...claims.filter(fresh), ...due.slice(0, HEADS_READ_A_CALL)] : claims;
 		const read = new Map(await atMost(HEAD_READS_AT_ONCE, reading, async (c) => [c.change, await pushedHead(c)] as const));
 		const seen = Object.fromEntries([...read].filter((r): r is [string, string | null] => r[1] !== undefined));
-		if (Object.keys(seen).length) await ctx.noteHeads?.(repo, seen).catch(() => undefined);
+		// As of when the reads began: a push event since then is newer than what they saw.
+		if (Object.keys(seen).length) await ctx.noteHeads?.(repo, seen, now).catch(() => undefined);
 		return (claim: ClaimRecord) => read.get(claim.change) ?? known?.[claim.change]?.head ?? null;
 	};
 	/**

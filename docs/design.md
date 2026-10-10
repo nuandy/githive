@@ -685,8 +685,26 @@ current, and reads at most 6 of the rest, the least lately seen first. A
 head taken this way is only advice (what to review, what to batch): a merge
 reads its own change, and a batch every change in it, before it lands. A
 read that failed notes nothing, so a known head isn't taken for "nothing
-pushed". Artifacts can publish a `pushed` event to a Queue, which would make
-this exact, but only from a subscription on one named repo, one per fork.
+pushed".
+
+**Pushes, as Artifacts reports them.** Artifacts publishes a `repo.pushed`
+event for every push, and one account-wide subscription carries all of them
+to a Queue (`wrangler queues subscription create <queue> --source artifacts
+--events repo.pushed`; the docs only describe one subscription per repo,
+which would mean one per fork, each missing pushes for its first minute).
+The Worker's queue consumer (src/push-events.ts) notes each push to
+`changes/<change>` on an agent's fork in its project's RepoCache, with the
+event's time and the fork it went to, one call a project per batch: a
+change's head is known about two seconds after its push, without reading its
+fork. A head an event told of is taken as current for 30 minutes (the next
+push's event replaces it); reads stay for changes no event told of, and for
+the caller's own. Events come at least once and may come late, so each
+change keeps its newest head, a read counting as of when it began. An agent
+can push any branch to its own fork, so an event's head counts for a change
+only if its fork is the fork of the agent holding the claim; any other is
+read. The subscription sees every namespace in the account, so each Worker
+keeps only its own (`ARTIFACTS_NAMESPACE`), and production and the bench
+each have their own queue, since a queue has one consumer.
 
 **Workspaces in turn.** A merge's first look at its change and a check each
 copy the project as kept for the isolate (Express shallow: 3.6 MB), fetch

@@ -1,6 +1,6 @@
 // The benchmark deployment: the same Worker under another name, so load tests never
-// touch real repos or the dashboard. Fake agents don't need containers,
-// and the event queue can only have one consumer, so both are left out.
+// touch real repos or the dashboard. It has its own Artifacts namespace, D1
+// database, KV namespace and push-events queue.
 // Deploy: npm run build:web && npx wrangler deploy -c wrangler.bench.jsonc
 {
 	"$schema": "./node_modules/wrangler/config-schema.json",
@@ -18,6 +18,8 @@
 		"PUBLIC_ORIGIN": "https://bench.githive.app",
 		"ACCESS_TEAM_DOMAIN": "little-cake-3c64.cloudflareaccess.com",
 		"ACCESS_AUD": "40a0a047944251bc67f3291f138b617f8cdb68f342635bd15582a6d770d1fd52",
+		// The Artifacts namespace below, by name: push events come from every namespace in the account, and only its own count.
+		"ARTIFACTS_NAMESPACE": "blueprint-bench",
 		// Bench only: POST /admin/wipe may delete every repo in this namespace. Never set on production.
 		"BENCH_WIPE": "allowed"
 	},
@@ -43,6 +45,11 @@
 	"d1_databases": [{ "binding": "DB", "database_name": "githive-bench", "database_id": "72e60aef-4f1f-48da-93e4-cc1811443db7", "migrations_dir": "migrations" }],
 	// The OAuth provider's grants and tokens, for MCP clients that sign in.
 	"kv_namespaces": [{ "binding": "OAUTH_KV", "id": "adf3d5a6fa5247f6849af337c4236193" }],
+	// Every push in the account, from one account-wide subscription (see src/push-events.ts):
+	//   wrangler queues create githive-bench-pushes
+	//   wrangler queues subscription create githive-bench-pushes --source artifacts --events repo.pushed
+	// A queue has one consumer, so production and the bench each have their own.
+	"queues": { "consumers": [{ "queue": "githive-bench-pushes", "max_batch_size": 100, "max_batch_timeout": 2, "max_retries": 3 }] },
 	"containers": [
 		{ "class_name": "Gate", "scheduling_policy": "durable_object" },
 		{ "class_name": "Reviewer", "scheduling_policy": "durable_object" },

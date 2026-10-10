@@ -16,6 +16,7 @@ import type { BatchSource } from "./merge";
 import type { Settled } from "./landing";
 import { recordsRepoName } from "./shards";
 import { makeStamper } from "./stamp";
+import { headsForClaims } from "../push-events";
 
 // GitHive wired to Cloudflare: Artifacts for Git, the Gate's
 // container for checks, the repo index for the dashboard, GitHive's hosted
@@ -153,8 +154,9 @@ export function toolContextFor(env: Env, by: string | undefined, caller: { agent
 		},
 		// The claims for advice, kept in the repo's RepoCache so a busy repo isn't read whole on every call.
 		keptClaims: (repo, read) => keptRead(env, repo, "claims-advice", KEPT_CLAIMS_MS, read),
-		knownHeads: (repo, changes) => rpc(env.REPO_CACHE.getByName(`repo:${repo}`).knownHeads(changes)),
-		noteHeads: (repo, seen) => env.REPO_CACHE.getByName(`repo:${repo}`).noteHeads(seen),
+		// Heads read from forks, and those push events told of from the claims' agents' own forks (see push-events.ts).
+		knownHeads: async (repo, claims) => headsForClaims(await rpc(env.REPO_CACHE.getByName(`repo:${repo}`).knownHeads(claims.map((c) => c.change))), claims, (agent) => forkName(repo, agent)),
+		noteHeads: (repo, seen, readAt) => env.REPO_CACHE.getByName(`repo:${repo}`).noteHeads(seen, readAt),
 		news: (repo, branch, agent) => rpc(env.REPO_CACHE.getByName(`repo:${repo}`).landingNews(branch, agent)),
 		// GitHive's GitHub App, when its ID and key are set: a repo connects to GitHub through it (see github.ts).
 		...(env.GITHUB_APP_ID && env.GITHUB_APP_PRIVATE_KEY ? { github: (repo: string) => linkTo({ appId: env.GITHUB_APP_ID!, privateKey: env.GITHUB_APP_PRIVATE_KEY! }, repo) } : {}),

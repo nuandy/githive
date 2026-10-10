@@ -294,11 +294,11 @@ describe("a review a role waits for too long", { timeout: 120_000 }, () => {
 });
 
 describe("open changes' heads, as GitHive last saw them", { timeout: 120_000 }, () => {
-	it("reads a few unseen ones a call, none once all were seen lately, takes check's, and keeps one a failed read can't tell", async () => {
+	it("reads a few unseen ones a call, none once all were seen lately, takes check's, keeps one a failed read can't tell, and trusts a pushed one longer", async () => {
 		const server = await startGitServer();
 		const work = mkdtempSync(join(tmpdir(), "githive-heads-"));
 		try {
-			const known = new Map<string, { head: string | null; at: number }>();
+			const known = new Map<string, { head: string | null; at: number; pushed?: boolean }>();
 			let forkReads = 0;
 			let failing = "";
 			const ctx = (agentKey?: string): ToolContext => ({
@@ -310,7 +310,7 @@ describe("open changes' heads, as GitHive last saw them", { timeout: 120_000 }, 
 					return { url: server.url, token: "unused" };
 				},
 				head: async () => server.git("rev-parse", "main").trim(),
-				knownHeads: async (_repo, changes) => Object.fromEntries(changes.flatMap((c) => (known.has(c) ? [[c, known.get(c)!]] : []))),
+				knownHeads: async (_repo, claims) => Object.fromEntries(claims.flatMap(({ change: c }) => (known.has(c) ? [[c, known.get(c)!]] : []))),
 				noteHeads: async (_repo, seen) => void Object.entries(seen).forEach(([c, head]) => known.set(c, { head, at: Date.now() })),
 				...(agentKey ? { agentKey } : {}),
 			});
@@ -344,6 +344,14 @@ describe("open changes' heads, as GitHive last saw them", { timeout: 120_000 }, 
 			failing = "a1";
 			expect(await readsOf()).toBe(1);
 			expect(known.get("c-a1")).toEqual({ ...seen, at: 0 });
+			failing = "";
+			expect(await readsOf()).toBe(1);
+			// A head a push event told of counts for half an hour, one read for five minutes.
+			const told = known.get("c-a2")!;
+			known.set("c-a2", { ...told, at: Date.now() - 10 * 60_000, pushed: true });
+			expect(await readsOf()).toBe(0);
+			known.set("c-a2", { ...told, at: Date.now() - 31 * 60_000, pushed: true });
+			expect(await readsOf()).toBe(1);
 		} finally {
 			await server.close();
 			rmSync(work, { recursive: true, force: true });

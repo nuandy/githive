@@ -14,7 +14,9 @@
 		// Where people sign in and MCP clients connect over OAuth (no Access in front). The Access hostnames serve as before.
 		"PUBLIC_ORIGIN": "https://githive.app",
 		"ACCESS_TEAM_DOMAIN": "little-cake-3c64.cloudflareaccess.com",
-		"ACCESS_AUD": "40a0a047944251bc67f3291f138b617f8cdb68f342635bd15582a6d770d1fd52"
+		"ACCESS_AUD": "40a0a047944251bc67f3291f138b617f8cdb68f342635bd15582a6d770d1fd52",
+		// The Artifacts namespace below, by name: push events come from every namespace in the account, and only its own count.
+		"ARTIFACTS_NAMESPACE": "blueprint"
 	},
 	// The dashboard (web/, built with `npm run build:web`). The Worker runs first
 	// so API routes win; anything else falls through to these files.
@@ -49,6 +51,11 @@
 	"d1_databases": [{ "binding": "DB", "database_name": "githive", "database_id": "d443038b-ea5c-40e5-9a5f-86adefdbc667", "migrations_dir": "migrations" }],
 	// The OAuth provider's grants and tokens, for MCP clients that sign in.
 	"kv_namespaces": [{ "binding": "OAUTH_KV", "id": "9449f5dfdc074c228358d0bbcd85abf0" }],
+	// Every push in the account, from one account-wide subscription (see src/push-events.ts):
+	//   wrangler queues create githive-pushes
+	//   wrangler queues subscription create githive-pushes --source artifacts --events repo.pushed
+	// A queue has one consumer, so production and the bench each have their own.
+	"queues": { "consumers": [{ "queue": "githive-pushes", "max_batch_size": 100, "max_batch_timeout": 2, "max_retries": 3 }] },
 	"containers": [
 		{ "class_name": "Builder", "scheduling_policy": "durable_object" },
 		{ "class_name": "Reviewer", "scheduling_policy": "durable_object" },

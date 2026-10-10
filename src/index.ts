@@ -11,6 +11,7 @@ import { ensureRepo, forkAndWait, leftoversOf, listRepoNames, remoteFor, reviewe
 import { fail, statusOf } from "./errors";
 import { retryTransient } from "./retry";
 import { handleMcpBody } from "./mcp";
+import { notePushEvents } from "./push-events";
 import { type ToolContext, callTool, repoAudit, changeHistory, makeBranch, mergeAsPerson, openCount, repoSnapshot, voteAsPerson } from "./toolkit/mcp";
 import { listTree, readFile } from "./code-browse";
 import { initialFiles, parseInit, writeFirstCommit } from "./repo-init";
@@ -553,4 +554,6 @@ export default {
 		if (url.pathname === "/mcp" && /^Bearer\s+ghv_/i.test(request.headers.get("Authorization") ?? "")) return app.fetch(request, env, ctx);
 		return oauthFor(origin).fetch(request, env, ctx);
 	},
+	// Pushes Artifacts reports, through the account's push-events queue: changes' heads noted without reading forks.
+	queue: (batch: MessageBatch<unknown>, env: Env) => notePushEvents(batch, env),
 } satisfies ExportedHandler<Env>;
