@@ -1,0 +1,866 @@
+  26s  swarm        copying express-template as express-swarm-209
+  44s  swarm        express-swarm-209 on master: checks [], grants {}, claims {"since":"2026-10-09T17:51:07.891Z","because":"asked for at the start"}
+ 459s  swarm        registered agent-1, agent-2, agent-3, agent-4, agent-5, agent-6, agent-7, agent-8, agent-9, agent-10, agent-11, agent-12, agent-13, agent-14, agent-15, agent-16, agent-17, agent-18, agent-19, agent-20, agent-21, agent-22, agent-23, agent-24, agent-25, agent-26, agent-27, agent-28, agent-29, agent-30, agent-31, agent-32, agent-33, agent-34, agent-35, agent-36, agent-37, agent-38, agent-39, agent-40, agent-41, agent-42, agent-43, agent-44, agent-45, agent-46, agent-47, agent-48, agent-49, agent-50, agent-51, agent-52, agent-53, agent-54, agent-55, agent-56, agent-57, agent-58, agent-59, agent-60, agent-61, agent-62, agent-63, agent-64, agent-65, agent-66, agent-67, agent-68, agent-69, agent-70, agent-71, agent-72, agent-73, agent-74, agent-75, agent-76, agent-77, agent-78, agent-79, agent-80, agent-81, agent-82, agent-83, agent-84, agent-85, agent-86, agent-87, agent-88, agent-89, agent-90, agent-91, agent-92, agent-93, agent-94, agent-95, agent-96, agent-97, agent-98, agent-99, agent-100, agent-101, agent-102, agent-103, agent-104, agent-105, agent-106, agent-107, agent-108, agent-109, agent-110, agent-111, agent-112, agent-113, agent-114, agent-115, agent-116, agent-117, agent-118, agent-119, agent-120, agent-121, agent-122, agent-123, agent-124, agent-125, agent-126, agent-127, agent-128, agent-129, agent-130, agent-131, agent-132, agent-133, agent-134, agent-135, agent-136, agent-137, agent-138, agent-139, agent-140, agent-141, agent-142, agent-143, agent-144, agent-145, agent-146, agent-147, agent-148, agent-149, agent-150, agent-151, agent-152, agent-153, agent-154, agent-155, agent-156, agent-157, agent-158, agent-159, agent-160, agent-161, agent-162, agent-163, agent-164, agent-165, agent-166, agent-167, agent-168, agent-169, agent-170, agent-171, agent-172, agent-173, agent-174, agent-175, agent-176, agent-177, agent-178, agent-179, agent-180, agent-181, agent-182, agent-183, agent-184, agent-185, agent-186, agent-187, agent-188, agent-189, agent-190, agent-191, agent-192, agent-193, agent-194, agent-195, agent-196, agent-197, agent-198, agent-199, agent-200, planner
+ 842s  swarm        200 pieces in the backlog; 200 agents, all alike
+ 842s  agent-95     arrives
+ 843s  agent-70     arrives
+ 843s  agent-199    arrives
+ 844s  agent-149    arrives
+ 844s  agent-89     arrives
+ 849s  agent-180    arrives
+ 849s  agent-29     arrives
+ 849s  agent-99     arrives
+ 849s  agent-116    arrives
+ 850s  agent-156    arrives
+ 850s  agent-93     arrives
+ 850s  agent-49     arrives
+ 852s  agent-162    arrives
+ 854s  agent-156    builds note-116 (1 path(s))
+ 855s  agent-67     arrives
+ 856s  agent-89     builds note-143 (1 path(s))
+ 856s  agent-149    builds note-56 (1 path(s))
+ 856s  agent-99     builds note-140 (1 path(s))
+ 856s  agent-70     builds note-55 (1 path(s))
+ 856s  agent-95     builds note-168 (1 path(s))
+ 857s  agent-29     builds note-129 (1 path(s))
+ 857s  agent-177    arrives
+ 857s  agent-52     arrives
+ 857s  agent-180    builds note-185 (1 path(s))
+ 857s  agent-93     builds note-130 (1 path(s))
+ 857s  agent-96     arrives
+ 857s  agent-49     builds note-51 (1 path(s))
+ 857s  agent-182    arrives
+ 858s  agent-162    builds note-193 (1 path(s))
+ 858s  agent-81     arrives
+ 859s  agent-199    builds note-23 (1 path(s))
+ 860s  agent-116    builds note-96 (1 path(s))
+ 860s  agent-44     arrives
+ 861s  agent-189    arrives
+ 862s  agent-182    couldn't claim note-23: claim: note-23 is agent-199's change: claim under a change name of your own
+ 863s  agent-52     couldn't claim note-51: claim: note-51 is agent-49's change: claim under a change name of your own
+ 863s  agent-177    builds note-183 (1 path(s))
+ 864s  agent-196    arrives
+ 864s  agent-86     arrives
+ 864s  agent-81     builds note-199 (1 path(s))
+ 864s  agent-48     arrives
+ 864s  agent-96     builds note-187 (1 path(s))
+ 866s  agent-20     arrives
+ 869s  agent-182    builds note-134 (1 path(s))
+ 869s  agent-172    arrives
+ 869s  agent-187    arrives
+ 869s  agent-102    arrives
+ 870s  agent-52     builds note-138 (1 path(s))
+ 870s  agent-67     builds note-53 (1 path(s))
+ 870s  agent-138    arrives
+ 870s  agent-194    arrives
+ 871s  agent-178    arrives
+ 871s  agent-167    arrives
+ 871s  agent-70     pushed note-55 a6cb478: 1 file changed, 1 insertion(+)
+ 871s  agent-49     pushed note-51 9a22657: 1 file changed, 1 insertion(+)
+ 871s  agent-189    builds note-100 (1 path(s))
+ 871s  agent-48     builds note-111 (1 path(s))
+ 872s  agent-86     builds note-90 (1 path(s))
+ 872s  agent-44     builds note-22 (1 path(s))
+ 873s  agent-196    builds note-49 (1 path(s))
+ 874s  agent-14     arrives
+ 875s  agent-95     pushed note-168 fdddd55: 1 file changed, 1 insertion(+)
+ 875s  agent-187    couldn't claim note-22: claim: note-22 is agent-44's change: claim under a change name of your own
+ 876s  agent-8      arrives
+ 876s  agent-87     arrives
+ 876s  agent-138    builds note-4 (1 path(s))
+ 876s  agent-178    builds note-109 (1 path(s))
+ 877s  agent-29     pushed note-129 42e91ac: 1 file changed, 1 insertion(+)
+ 877s  agent-136    arrives
+ 877s  agent-193    arrives
+ 877s  agent-167    builds note-60 (1 path(s))
+ 877s  agent-194    couldn't claim note-134: claim: note-134 is agent-182's change: claim under a change name of your own
+ 878s  agent-102    builds note-91 (1 path(s))
+ 878s  agent-179    arrives
+ 879s  agent-172    builds note-58 (1 path(s))
+ 879s  agent-1      arrives
+ 880s  agent-156    pushed note-116 a92dd64: 1 file changed, 1 insertion(+)
+ 880s  agent-183    arrives
+ 880s  agent-115    arrives
+ 881s  agent-10     arrives
+ 881s  agent-163    arrives
+ 881s  agent-89     build note-143 failed: remote: Internal Server Error | fatal: unable to access 'https://0ee623ba24365823196215c72f6c0a78.artifacts.cloudflare.net/git/blueprint-bench/fork--express-swarm-209--agent--agent-89.git/': The requested URL returned error: 500
+ 882s  agent-142    arrives
+ 882s  agent-134    arrives
+ 882s  agent-180    pushed note-185 ba1bd9c: 1 file changed, 1 insertion(+)
+ 883s  agent-187    builds note-14 (1 path(s))
+ 884s  agent-193    builds note-13 (1 path(s))
+ 884s  agent-87     builds note-17 (1 path(s))
+ 884s  agent-26     arrives
+ 884s  agent-85     arrives
+ 884s  agent-8      builds note-162 (1 path(s))
+ 885s  agent-14     builds note-18 (1 path(s))
+ 885s  agent-136    builds note-175 (1 path(s))
+ 885s  agent-10     builds note-131 (1 path(s))
+ 885s  agent-179    builds note-26 (1 path(s))
+ 885s  agent-120    arrives
+ 886s  agent-1      builds note-154 (1 path(s))
+ 886s  agent-32     arrives
+ 886s  agent-99     pushed note-140 ee571d3: 1 file changed, 1 insertion(+)
+ 886s  agent-165    arrives
+ 886s  agent-79     arrives
+ 887s  agent-149    pushed note-56 682925a: 1 file changed, 1 insertion(+)
+ 887s  agent-183    builds note-103 (1 path(s))
+ 887s  agent-22     arrives
+ 887s  agent-142    builds note-114 (1 path(s))
+ 887s  agent-62     arrives
+ 888s  agent-96     pushed note-187 9bb2cef: 1 file changed, 1 insertion(+)
+ 888s  agent-163    couldn't claim note-13: claim: note-13 is agent-193's change: claim under a change name of your own
+ 888s  agent-115    builds note-73 (1 path(s))
+ 889s  agent-133    arrives
+ 889s  agent-20     couldn't claim note-109: claim: note-109 is agent-178's change: claim under a change name of your own
+ 889s  agent-197    arrives
+ 889s  agent-105    arrives
+ 889s  agent-67     pushed note-53 387b47b: 1 file changed, 1 insertion(+)
+ 889s  agent-60     arrives
+ 889s  agent-151    arrives
+ 889s  agent-162    pushed note-193 2c85c9d: 1 file changed, 1 insertion(+)
+ 890s  agent-194    builds note-52 (1 path(s))
+ 890s  agent-109    arrives
+ 891s  agent-32     builds note-135 (1 path(s))
+ 891s  agent-120    builds note-57 (1 path(s))
+ 892s  agent-79     builds note-85 (1 path(s))
+ 892s  agent-26     builds note-61 (1 path(s))
+ 892s  agent-62     builds note-180 (1 path(s))
+ 892s  agent-72     arrives
+ 892s  agent-126    arrives
+ 892s  agent-134    builds note-119 (1 path(s))
+ 893s  agent-68     arrives
+ 893s  agent-93     pushed note-130 8c22554: 1 file changed, 1 insertion(+)
+ 893s  agent-18     arrives
+ 893s  agent-85     builds note-115 (1 path(s))
+ 893s  agent-117    arrives
+ 893s  agent-102    pushed note-91 5f9bccd: 1 file changed, 1 insertion(+)
+ 894s  agent-90     arrives
+ 894s  agent-169    arrives
+ 894s  agent-190    arrives
+ 895s  agent-140    arrives
+ 895s  agent-68     builds note-107 (1 path(s))
+ 895s  agent-166    arrives
+ 895s  agent-81     pushed note-199 13b1da0: 1 file changed, 1 insertion(+)
+ 895s  agent-122    arrives
+ 895s  agent-165    builds note-94 (1 path(s))
+ 895s  agent-133    builds note-121 (1 path(s))
+ 895s  agent-197    builds note-146 (1 path(s))
+ 895s  agent-158    arrives
+ 895s  agent-22     builds note-74 (1 path(s))
+ 895s  agent-131    arrives
+ 896s  agent-117    builds note-50 (1 path(s))
+ 896s  agent-151    builds note-179 (1 path(s))
+ 896s  agent-57     arrives
+ 896s  agent-109    builds note-133 (1 path(s))
+ 896s  agent-59     arrives
+ 896s  agent-20     builds note-147 (1 path(s))
+ 896s  agent-48     pushed note-111 e55bbfc: 1 file changed, 1 insertion(+)
+ 896s  agent-116    pushed note-96 81d2fe8: 1 file changed, 1 insertion(+)
+ 897s  agent-188    arrives
+ 897s  agent-126    builds note-171 (1 path(s))
+ 897s  agent-171    arrives
+ 897s  agent-105    builds note-81 (1 path(s))
+ 898s  agent-18     builds note-144 (1 path(s))
+ 898s  agent-6      arrives
+ 898s  agent-90     builds note-108 (1 path(s))
+ 898s  agent-60     builds note-181 (1 path(s))
+ 898s  agent-166    builds note-27 (1 path(s))
+ 898s  agent-92     arrives
+ 898s  agent-140    couldn't claim note-121: claim: note-121 is agent-133's change: claim under a change name of your own
+ 899s  agent-89     builds note-143 (1 path(s))
+ 899s  agent-125    arrives
+ 900s  agent-6      builds note-159 (1 path(s))
+ 900s  agent-75     arrives
+ 900s  agent-52     pushed note-138 7841cce: 1 file changed, 1 insertion(+)
+ 901s  agent-189    pushed note-100 196c742: 1 file changed, 1 insertion(+)
+ 901s  agent-3      arrives
+ 901s  agent-92     builds note-12 (1 path(s))
+ 901s  agent-140    couldn't claim note-121: claim: note-121 is agent-133's change: claim under a change name of your own
+ 901s  agent-127    arrives
+ 902s  agent-175    arrives
+ 902s  agent-72     builds note-24 (1 path(s))
+ 902s  agent-190    builds note-192 (1 path(s))
+ 902s  agent-182    pushed note-134 1e0ecba: 1 file changed, 1 insertion(+)
+ 902s  agent-91     arrives
+ 902s  agent-122    builds note-41 (1 path(s))
+ 903s  agent-59     builds note-101 (1 path(s))
+ 903s  agent-138    pushed note-4 335098e: 1 file changed, 1 insertion(+)
+ 903s  agent-75     builds note-176 (1 path(s))
+ 903s  agent-125    builds note-89 (1 path(s))
+ 903s  agent-171    builds note-29 (1 path(s))
+ 903s  agent-163    couldn't claim note-17: claim: note-17 is agent-87's change: claim under a change name of your own
+ 903s  agent-158    builds note-36 (1 path(s))
+ 903s  agent-131    builds note-80 (1 path(s))
+ 904s  agent-188    builds note-105 (1 path(s))
+ 904s  agent-155    arrives
+ 904s  agent-87     pushed note-17 2a98907: 1 file changed, 1 insertion(+)
+ 905s  agent-140    builds note-198 (1 path(s))
+ 905s  agent-106    arrives
+ 905s  agent-91     builds note-196 (1 path(s))
+ 906s  agent-169    builds note-150 (1 path(s))
+ 906s  agent-3      builds note-161 (1 path(s))
+ 906s  agent-177    pushed note-183 da0d36a: 1 file changed, 1 insertion(+)
+ 907s  agent-44     pushed note-22 5943d66: 1 file changed, 1 insertion(+)
+ 907s  agent-65     arrives
+ 907s  agent-127    builds note-31 (1 path(s))
+ 907s  agent-1      pushed note-154 3ed4d63: 1 file changed, 1 insertion(+)
+ 907s  agent-142    pushed note-114 506728e: 1 file changed, 1 insertion(+)
+ 907s  agent-86     pushed note-90 f16cbbe: 1 file changed, 1 insertion(+)
+ 907s  agent-106    builds note-122 (1 path(s))
+ 908s  agent-185    arrives
+ 908s  agent-10     pushed note-131 9cf598a: 1 file changed, 1 insertion(+)
+ 908s  agent-32     pushed note-135 1e60e1d: 1 file changed, 1 insertion(+)
+ 908s  agent-178    pushed note-109 501f47d: 1 file changed, 1 insertion(+)
+ 908s  agent-164    arrives
+ 909s  agent-57     couldn't claim note-192: claim: note-192 is agent-190's change: claim under a change name of your own
+ 909s  agent-14     pushed note-18 ddc98f1: 1 file changed, 1 insertion(+)
+ 909s  agent-175    builds note-124 (1 path(s))
+ 909s  agent-28     arrives
+ 909s  agent-62     pushed note-180 839afde: 1 file changed, 1 insertion(+)
+ 910s  agent-111    arrives
+ 910s  agent-37     arrives
+ 910s  agent-174    arrives
+ 911s  agent-185    builds note-48 (1 path(s))
+ 911s  agent-85     pushed note-115 1cc4f29: 1 file changed, 1 insertion(+)
+ 911s  agent-129    arrives
+ 911s  agent-170    arrives
+ 912s  agent-65     builds note-75 (1 path(s))
+ 912s  agent-42     arrives
+ 913s  agent-117    pushed note-50 6102610: 1 file changed, 1 insertion(+)
+ 913s  agent-167    pushed note-60 3f91b4e: 1 file changed, 1 insertion(+)
+ 913s  agent-90     pushed note-108 444393b: 1 file changed, 1 insertion(+)
+ 913s  agent-83     arrives
+ 914s  agent-24     arrives
+ 914s  agent-100    arrives
+ 914s  agent-28     builds note-92 (1 path(s))
+ 914s  agent-174    builds note-7 (1 path(s))
+ 914s  agent-57     builds note-155 (1 path(s))
+ 915s  agent-163    builds note-69 (1 path(s))
+ 915s  agent-79     pushed note-85 8b5069f: 1 file changed, 1 insertion(+)
+ 915s  agent-105    pushed note-81 32f9c12: 1 file changed, 1 insertion(+)
+ 915s  agent-172    pushed note-58 0ee71fb: 1 file changed, 1 insertion(+)
+ 915s  agent-111    builds note-95 (1 path(s))
+ 915s  agent-42     builds note-16 (1 path(s))
+ 915s  agent-144    arrives
+ 915s  agent-2      arrives
+ 916s  agent-37     builds note-160 (1 path(s))
+ 916s  agent-115    pushed note-73 3ad2f12: 1 file changed, 1 insertion(+)
+ 916s  agent-94     arrives
+ 916s  agent-194    pushed note-52 81f8bfb: 1 file changed, 1 insertion(+)
+ 916s  agent-31     arrives
+ 916s  agent-165    pushed note-94 e546944: 1 file changed, 1 insertion(+)
+ 917s  agent-164    builds note-32 (1 path(s))
+ 917s  agent-53     arrives
+ 917s  agent-24     couldn't claim note-16: claim: note-16 is agent-42's change: claim under a change name of your own
+ 917s  agent-166    pushed note-27 678589e: 1 file changed, 1 insertion(+)
+ 917s  agent-120    pushed note-57 dfe6fb1: 1 file changed, 1 insertion(+)
+ 917s  agent-83     builds note-178 (1 path(s))
+ 917s  agent-47     arrives
+ 917s  agent-129    builds note-110 (1 path(s))
+ 918s  agent-66     arrives
+ 918s  agent-25     arrives
+ 918s  agent-50     arrives
+ 918s  agent-143    arrives
+ 918s  agent-134    pushed note-119 75dd717: 1 file changed, 1 insertion(+)
+ 918s  agent-170    builds note-20 (1 path(s))
+ 918s  agent-27     arrives
+ 919s  agent-125    pushed note-89 6e1d536: 1 file changed, 1 insertion(+)
+ 919s  agent-21     arrives
+ 919s  agent-186    arrives
+ 919s  agent-179    pushed note-26 f6a89aa: 1 file changed, 1 insertion(+)
+ 919s  agent-24     builds note-153 (1 path(s))
+ 919s  agent-94     builds note-83 (1 path(s))
+ 919s  agent-139    arrives
+ 920s  agent-161    arrives
+ 920s  agent-192    arrives
+ 920s  agent-8      pushed note-162 809d204: 1 file changed, 1 insertion(+)
+ 920s  agent-26     pushed note-61 245cc10: 1 file changed, 1 insertion(+)
+ 920s  agent-113    arrives
+ 920s  agent-141    arrives
+ 920s  agent-2      couldn't claim note-20: claim: note-20 is agent-170's change: claim under a change name of your own
+ 920s  agent-31     builds note-59 (1 path(s))
+ 920s  agent-100    builds note-44 (1 path(s))
+ 920s  agent-196    pushed note-49 37eeb11: 1 file changed, 1 insertion(+)
+ 920s  agent-4      arrives
+ 921s  agent-98     arrives
+ 921s  agent-144    builds note-28 (1 path(s))
+ 921s  agent-51     arrives
+ 921s  agent-136    pushed note-175 4192322: 1 file changed, 1 insertion(+)
+ 921s  agent-63     arrives
+ 921s  agent-56     arrives
+ 921s  agent-97     arrives
+ 921s  agent-118    arrives
+ 922s  agent-27     builds note-62 (1 path(s))
+ 922s  agent-139    builds note-11 (1 path(s))
+ 922s  agent-53     builds note-104 (1 path(s))
+ 922s  agent-47     builds note-151 (1 path(s))
+ 923s  agent-146    arrives
+ 923s  agent-161    builds note-189 (1 path(s))
+ 923s  agent-98     couldn't claim note-44: claim: note-44 is agent-100's change: claim under a change name of your own
+ 923s  agent-22     pushed note-74 682419b: 1 file changed, 1 insertion(+)
+ 923s  agent-128    arrives
+ 923s  agent-82     arrives
+ 923s  agent-197    pushed note-146 e4e3d49: 1 file changed, 1 insertion(+)
+ 924s  agent-143    builds note-72 (1 path(s))
+ 924s  agent-54     arrives
+ 924s  agent-130    arrives
+ 925s  agent-133    pushed note-121 10007a2: 1 file changed, 1 insertion(+)
+ 925s  agent-181    arrives
+ 925s  agent-113    builds note-157 (1 path(s))
+ 925s  agent-101    arrives
+ 925s  agent-4      builds note-125 (1 path(s))
+ 925s  agent-50     builds note-38 (1 path(s))
+ 925s  agent-92     pushed note-12 aac9e51: 1 file changed, 1 insertion(+)
+ 925s  agent-192    builds note-149 (1 path(s))
+ 925s  agent-109    pushed note-133 fb4a3ec: 1 file changed, 1 insertion(+)
+ 925s  agent-25     couldn't claim note-189: claim: note-189 is agent-161's change: claim under a change name of your own
+ 925s  agent-66     couldn't claim note-44: claim: note-44 is agent-100's change: claim under a change name of your own
+ 925s  agent-63     builds note-65 (1 path(s))
+ 926s  agent-184    arrives
+ 926s  agent-98     builds note-82 (1 path(s))
+ 926s  agent-2      builds note-15 (1 path(s))
+ 926s  agent-171    pushed note-29 5fc29d7: 1 file changed, 1 insertion(+)
+ 927s  agent-200    arrives
+ 927s  agent-137    arrives
+ 927s  agent-193    pushed note-13 ca60e96: 1 file changed, 1 insertion(+)
+ 927s  agent-130    builds note-174 (1 path(s))
+ 927s  agent-146    couldn't claim note-62: claim: note-62 is agent-27's change: claim under a change name of your own
+ 927s  agent-82     builds note-6 (1 path(s))
+ 927s  agent-17     arrives
+ 927s  agent-186    builds note-173 (1 path(s))
+ 928s  agent-21     builds note-98 (1 path(s))
+ 928s  agent-58     arrives
+ 928s  agent-158    pushed note-36 a4fbbe8: 1 file changed, 1 insertion(+)
+ 928s  agent-54     couldn't claim note-184: claim: note-184 is agent-97's change: claim under a change name of your own
+ 928s  agent-20     pushed note-147 61b07be: 1 file changed, 1 insertion(+)
+ 928s  agent-123    arrives
+ 928s  agent-121    arrives
+ 929s  agent-89     pushed note-143 5e649f2: 1 file changed, 1 insertion(+)
+ 929s  agent-183    pushed note-103 b99976c: 1 file changed, 1 insertion(+)
+ 929s  agent-35     arrives
+ 929s  agent-190    pushed note-192 a428b90: 1 file changed, 1 insertion(+)
+ 929s  agent-108    arrives
+ 930s  agent-151    pushed note-179 5147559: 1 file changed, 1 insertion(+)
+ 930s  agent-51     builds note-67 (1 path(s))
+ 930s  agent-200    builds note-169 (1 path(s))
+ 930s  agent-141    builds note-33 (1 path(s))
+ 930s  agent-187    pushed note-14 5fab1e2: 1 file changed, 1 insertion(+)
+ 930s  agent-146    builds note-141 (1 path(s))
+ 930s  agent-97     builds note-184 (1 path(s))
+ 930s  agent-118    builds note-137 (1 path(s))
+ 930s  agent-126    pushed note-171 a1ac758: 1 file changed, 1 insertion(+)
+ 930s  agent-56     builds note-145 (1 path(s))
+ 930s  agent-155    builds note-177 (1 path(s))
+ 930s  agent-106    pushed note-122 b27f9d1: 1 file changed, 1 insertion(+)
+ 931s  agent-132    arrives
+ 931s  agent-101    builds note-77 (1 path(s))
+ 931s  agent-137    builds note-106 (1 path(s))
+ 931s  agent-45     arrives
+ 931s  agent-64     arrives
+ 932s  agent-173    arrives
+ 932s  agent-41     arrives
+ 932s  agent-18     pushed note-144 c24faec: 1 file changed, 1 insertion(+)
+ 933s  agent-128    couldn't claim note-173: claim: note-173 is agent-186's change: claim under a change name of your own
+ 933s  agent-65     pushed note-75 a3dc922: 1 file changed, 1 insertion(+)
+ 933s  agent-6      pushed note-159 961f6f9: 1 file changed, 1 insertion(+)
+ 933s  agent-68     pushed note-107 05176f0: 1 file changed, 1 insertion(+)
+ 933s  agent-152    arrives
+ 934s  agent-122    pushed note-41 463a3ab: 1 file changed, 1 insertion(+)
+ 934s  agent-168    arrives
+ 934s  agent-173    builds note-66 (1 path(s))
+ 934s  agent-132    builds note-47 (1 path(s))
+ 934s  agent-128    builds note-8 (1 path(s))
+ 935s  agent-17     builds note-186 (1 path(s))
+ 935s  agent-54     builds note-165 (1 path(s))
+ 935s  agent-121    builds note-120 (1 path(s))
+ 935s  agent-131    pushed note-80 8ae0563: 1 file changed, 1 insertion(+)
+ 935s  agent-66     builds note-84 (1 path(s))
+ 935s  agent-58     builds note-167 (1 path(s))
+ 935s  agent-25     builds note-132 (1 path(s))
+ 935s  agent-184    builds note-139 (1 path(s))
+ 935s  agent-181    builds note-34 (1 path(s))
+ 935s  agent-76     arrives
+ 935s  agent-140    pushed note-198 2bb6325: 1 file changed, 1 insertion(+)
+ 936s  agent-40     arrives
+ 936s  agent-72     pushed note-24 0c1b213: 1 file changed, 1 insertion(+)
+ 936s  agent-60     pushed note-181 bd6dfb8: 1 file changed, 1 insertion(+)
+ 937s  agent-108    builds note-10 (1 path(s))
+ 937s  agent-123    builds note-88 (1 path(s))
+ 937s  agent-35     builds note-112 (1 path(s))
+ 938s  agent-199    pushed note-23 c721356: 1 file changed, 1 insertion(+)
+ 938s  agent-5      arrives
+ 938s  agent-153    arrives
+ 938s  agent-111    pushed note-95 9ad2ccf: 1 file changed, 1 insertion(+)
+ 938s  agent-176    arrives
+ 938s  agent-74     arrives
+ 938s  agent-150    arrives
+ 939s  agent-64     builds note-42 (1 path(s))
+ 939s  agent-41     builds note-87 (1 path(s))
+ 939s  agent-152    couldn't claim note-10: claim: note-10 is agent-108's change: claim under a change name of your own
+ 939s  agent-169    pushed note-150 5c190cd: 1 file changed, 1 insertion(+)
+ 939s  agent-42     pushed note-16 7f54259: 1 file changed, 1 insertion(+)
+ 940s  agent-43     arrives
+ 940s  agent-127    pushed note-31 25591d2: 1 file changed, 1 insertion(+)
+ 940s  agent-75     pushed note-176 fc0e960: 1 file changed, 1 insertion(+)
+ 940s  agent-78     arrives
+ 940s  agent-76     builds note-37 (1 path(s))
+ 940s  agent-168    builds note-148 (1 path(s))
+ 941s  agent-163    pushed note-69 c7b679f: 1 file changed, 1 insertion(+)
+ 941s  agent-157    arrives
+ 941s  agent-59     pushed note-101 5377ebe: 1 file changed, 1 insertion(+)
+ 942s  agent-175    pushed note-124 fb5311f: 1 file changed, 1 insertion(+)
+ 942s  agent-12     arrives
+ 942s  agent-104    arrives
+ 943s  agent-176    couldn't claim note-87: claim: note-87 is agent-41's change: claim under a change name of your own
+ 943s  agent-145    arrives
+ 943s  agent-74     builds note-99 (1 path(s))
+ 943s  agent-40     builds note-172 (1 path(s))
+ 943s  agent-150    couldn't claim note-42: claim: note-42 is agent-64's change: claim under a change name of your own
+ 943s  agent-55     arrives
+ 944s  agent-24     pushed note-153 22c6cc8: 1 file changed, 1 insertion(+)
+ 944s  agent-174    pushed note-7 78693f8: 1 file changed, 1 insertion(+)
+ 944s  agent-37     pushed note-160 d1ec2eb: 1 file changed, 1 insertion(+)
+ 944s  agent-43     builds note-46 (1 path(s))
+ 945s  agent-91     pushed note-196 d656622: 1 file changed, 1 insertion(+)
+ 945s  agent-5      builds note-64 (1 path(s))
+ 945s  agent-191    arrives
+ 945s  agent-47     pushed note-151 3c87ad6: 1 file changed, 1 insertion(+)
+ 946s  agent-3      pushed note-161 e409191: 1 file changed, 1 insertion(+)
+ 946s  agent-57     pushed note-155 c4501b9: 1 file changed, 1 insertion(+)
+ 946s  agent-11     arrives
+ 946s  agent-188    pushed note-105 6a1fe58: 1 file changed, 1 insertion(+)
+ 947s  agent-13     arrives
+ 947s  agent-153    builds note-163 (1 path(s))
+ 947s  agent-152    builds note-70 (1 path(s))
+ 947s  agent-34     arrives
+ 947s  agent-80     arrives
+ 948s  agent-185    pushed note-48 637ce1a: 1 file changed, 1 insertion(+)
+ 948s  agent-73     arrives
+ 948s  agent-2      pushed note-15 bf001e0: 1 file changed, 1 insertion(+)
+ 949s  agent-145    builds note-93 (1 path(s))
+ 949s  agent-176    builds note-194 (1 path(s))
+ 949s  agent-46     arrives
+ 949s  agent-55     builds note-127 (1 path(s))
+ 949s  agent-4      pushed note-125 f3275da: 1 file changed, 1 insertion(+)
+ 949s  agent-71     arrives
+ 949s  agent-12     builds note-78 (1 path(s))
+ 949s  agent-104    builds note-97 (1 path(s))
+ 949s  agent-78     builds note-45 (1 path(s))
+ 949s  agent-170    pushed note-20 b85d455: 1 file changed, 1 insertion(+)
+ 949s  agent-135    arrives
+ 949s  agent-38     arrives
+ 950s  agent-63     pushed note-65 7ff1611: 1 file changed, 1 insertion(+)
+ 950s  agent-157    builds note-86 (1 path(s))
+ 950s  agent-80     builds note-71 (1 path(s))
+ 950s  agent-36     arrives
+ 951s  agent-45     couldn't claim note-93: claim: note-93 is agent-145's change: claim under a change name of your own
+ 951s  agent-107    arrives
+ 951s  agent-9      arrives
+ 952s  agent-13     builds note-188 (1 path(s))
+ 952s  agent-150    builds note-126 (1 path(s))
+ 952s  agent-191    builds note-197 (1 path(s))
+ 952s  agent-144    pushed note-28 980a6df: 1 file changed, 1 insertion(+)
+ 953s  agent-33     arrives
+ 953s  agent-124    arrives
+ 953s  agent-155    pushed note-177 77e055c: 1 file changed, 1 insertion(+)
+ 953s  agent-110    arrives
+ 954s  agent-84     arrives
+ 954s  agent-164    pushed note-32 273053a: 1 file changed, 1 insertion(+)
+ 954s  agent-71     builds note-113 (1 path(s))
+ 954s  agent-46     builds note-118 (1 path(s))
+ 954s  agent-34     builds note-166 (1 path(s))
+ 954s  agent-73     builds note-5 (1 path(s))
+ 955s  agent-51     pushed note-67 9953915: 1 file changed, 1 insertion(+)
+ 955s  agent-19     arrives
+ 955s  agent-69     arrives
+ 955s  agent-7      arrives
+ 955s  agent-159    arrives
+ 955s  agent-195    arrives
+ 956s  agent-148    arrives
+ 956s  agent-83     pushed note-178 3671730: 1 file changed, 1 insertion(+)
+ 956s  agent-143    pushed note-72 af8c788: 1 file changed, 1 insertion(+)
+ 956s  agent-88     arrives
+ 956s  agent-36     builds note-68 (1 path(s))
+ 956s  agent-160    arrives
+ 956s  agent-135    builds note-79 (1 path(s))
+ 957s  agent-39     arrives
+ 957s  agent-30     arrives
+ 957s  agent-28     pushed note-92 328cbee: 1 file changed, 1 insertion(+)
+ 957s  agent-198    arrives
+ 957s  agent-31     pushed note-59 4e6e618: 1 file changed, 1 insertion(+)
+ 957s  agent-103    arrives
+ 957s  agent-121    pushed note-120 9e9144c: 1 file changed, 1 insertion(+)
+ 957s  agent-119    arrives
+ 957s  agent-107    couldn't claim note-86: claim: note-86 is agent-157's change: claim under a change name of your own
+ 957s  agent-184    pushed note-139 9999db1: 1 file changed, 1 insertion(+)
+ 957s  agent-124    builds note-63 (1 path(s))
+ 958s  agent-154    arrives
+ 958s  agent-101    pushed note-77 0c7b2be: 1 file changed, 1 insertion(+)
+ 958s  agent-16     arrives
+ 959s  agent-35     pushed note-112 81c6f05: 1 file changed, 1 insertion(+)
+ 959s  agent-15     arrives
+ 959s  agent-100    pushed note-44 21818cc: 1 file changed, 1 insertion(+)
+ 959s  agent-195    couldn't claim note-128: claim: note-128 is agent-45's change: claim under a change name of your own
+ 960s  agent-84     builds note-142 (1 path(s))
+ 960s  agent-114    arrives
+ 960s  agent-94     pushed note-83 7400093: 1 file changed, 1 insertion(+)
+ 960s  agent-38     builds note-39 (1 path(s))
+ 960s  agent-39     builds note-191 (1 path(s))
+ 960s  agent-11     builds note-2 (1 path(s))
+ 960s  agent-56     pushed note-145 ff3a4c2: 1 file changed, 1 insertion(+)
+ 960s  agent-19     builds note-25 (1 path(s))
+ 960s  agent-33     builds note-200 (1 path(s))
+ 960s  agent-45     builds note-128 (1 path(s))
+ 960s  agent-9      builds note-102 (1 path(s))
+ 960s  agent-69     couldn't claim note-25: claim: note-25 is agent-19's change: claim under a change name of your own
+ 960s  agent-27     pushed note-62 8fbdcf0: 1 file changed, 1 insertion(+)
+ 960s  agent-147    arrives
+ 960s  agent-192    pushed note-149 68b8897: 1 file changed, 1 insertion(+)
+ 961s  agent-161    pushed note-189 443c907: 1 file changed, 1 insertion(+)
+ 961s  agent-61     arrives
+ 962s  agent-123    pushed note-88 47b6c8f: 1 file changed, 1 insertion(+)
+ 962s  agent-77     arrives
+ 962s  agent-112    arrives
+ 962s  agent-23     arrives
+ 962s  agent-114    couldn't claim note-182: claim: note-182 is agent-110's change: claim under a change name of your own
+ 962s  agent-7      builds note-9 (1 path(s))
+ 962s  agent-154    builds note-21 (1 path(s))
+ 962s  agent-30     builds note-54 (1 path(s))
+ 962s  agent-118    pushed note-137 202c63a: 1 file changed, 1 insertion(+)
+ 962s  agent-110    builds note-182 (1 path(s))
+ 962s  agent-88     couldn't claim note-63: claim: note-63 is agent-124's change: claim under a change name of your own
+ 963s  agent-129    pushed note-110 32dd2ea: 1 file changed, 1 insertion(+)
+ 963s  agent-195    couldn't claim note-128: claim: note-128 is agent-45's change: claim under a change name of your own
+ 963s  agent-160    builds note-170 (1 path(s))
+ 963s  agent-107    builds note-43 (1 path(s))
+ 963s  agent-198    couldn't claim note-191: claim: note-191 is agent-39's change: claim under a change name of your own
+ 963s  agent-148    builds note-195 (1 path(s))
+ 963s  agent-16     builds note-30 (1 path(s))
+ 963s  agent-74     pushed note-99 824cbc5: 1 file changed, 1 insertion(+)
+ 964s  agent-103    couldn't claim note-39: claim: note-39 is agent-38's change: claim under a change name of your own
+ 964s  agent-53     pushed note-104 c9ef089: 1 file changed, 1 insertion(+)
+ 965s  agent-82     pushed note-6 07311c9: 1 file changed, 1 insertion(+)
+ 965s  agent-128    pushed note-8 c4e17f9: 1 file changed, 1 insertion(+)
+ 965s  agent-147    builds note-123 (1 path(s))
+ 965s  agent-113    pushed note-157 4fbee31: 1 file changed, 1 insertion(+)
+ 965s  agent-114    couldn't claim note-123: claim: note-123 is agent-147's change: claim under a change name of your own
+ 965s  agent-5      pushed note-64 1d6391f: 1 file changed, 1 insertion(+)
+ 966s  agent-159    couldn't claim note-182: claim: note-182 is agent-110's change: claim under a change name of your own
+ 966s  agent-137    pushed note-106 819479c: 1 file changed, 1 insertion(+)
+ 966s  agent-50     pushed note-38 f17667f: 1 file changed, 1 insertion(+)
+ 966s  agent-15     builds note-156 (1 path(s))
+ 967s  agent-108    pushed note-10 8df375e: 1 file changed, 1 insertion(+)
+ 967s  agent-69     builds note-164 (1 path(s))
+ 967s  agent-114    couldn't claim note-170: claim: note-170 is agent-160's change: claim under a change name of your own
+ 967s  agent-88     builds note-136 (1 path(s))
+ 968s  agent-181    pushed note-34 81b666e: 1 file changed, 1 insertion(+)
+ 968s  agent-61     builds note-117 (1 path(s))
+ 968s  agent-195    couldn't claim note-9: claim: note-9 is agent-7's change: claim under a change name of your own
+ 968s  agent-141    pushed note-33 c8acc8b: 1 file changed, 1 insertion(+)
+ 968s  agent-139    pushed note-11 aacc53d: 1 file changed, 1 insertion(+)
+ 968s  agent-168    pushed note-148 38d2666: 1 file changed, 1 insertion(+)
+ 969s  agent-119    couldn't claim note-54: claim: note-54 is agent-30's change: claim under a change name of your own
+ 969s  agent-77     builds note-190 (1 path(s))
+ 969s  agent-198    builds note-40 (1 path(s))
+ 969s  agent-130    pushed note-174 f2c6571: 1 file changed, 1 insertion(+)
+ 969s  agent-76     pushed note-37 f464b7d: 1 file changed, 1 insertion(+)
+ 969s  agent-98     pushed note-82 30e8951: 1 file changed, 1 insertion(+)
+ 970s  agent-146    pushed note-141 a5b12f7: 1 file changed, 1 insertion(+)
+ 970s  agent-97     pushed note-184 16e1276: 1 file changed, 1 insertion(+)
+ 970s  agent-112    builds note-19 (1 path(s))
+ 970s  agent-23     couldn't claim note-191: claim: note-191 is agent-39's change: claim under a change name of your own
+ 971s  agent-58     pushed note-167 7b19b4e: 1 file changed, 1 insertion(+)
+ 971s  agent-114    builds note-1 (1 path(s))
+ 971s  agent-173    pushed note-66 499cd10: 1 file changed, 1 insertion(+)
+ 972s  agent-103    builds note-152 (1 path(s))
+ 973s  agent-54     pushed note-165 a819916: 1 file changed, 1 insertion(+)
+ 973s  agent-176    pushed note-194 df790c4: 1 file changed, 1 insertion(+)
+ 973s  agent-195    couldn't claim note-19: claim: note-19 is agent-112's change: claim under a change name of your own
+ 974s  agent-132    pushed note-47 dd69bcf: 1 file changed, 1 insertion(+)
+ 974s  agent-21     pushed note-98 2c46881: 1 file changed, 1 insertion(+)
+ 974s  agent-36     pushed note-68 c58df0a: 1 file changed, 1 insertion(+)
+ 975s  agent-64     pushed note-42 587f351: 1 file changed, 1 insertion(+)
+ 975s  agent-34     pushed note-166 1c8cf88: 1 file changed, 1 insertion(+)
+ 975s  agent-145    pushed note-93 ce753cd: 1 file changed, 1 insertion(+)
+ 976s  agent-66     pushed note-84 ea0ff28: 1 file changed, 1 insertion(+)
+ 976s  agent-119    builds note-35 (1 path(s))
+ 976s  agent-152    pushed note-70 ddf86bc: 1 file changed, 1 insertion(+)
+ 976s  agent-200    pushed note-169 3265656: 1 file changed, 1 insertion(+)
+ 976s  agent-12     pushed note-78 10df485: 1 file changed, 1 insertion(+)
+ 977s  agent-23     couldn't claim note-164: claim: note-164 is agent-69's change: claim under a change name of your own
+ 977s  agent-195    couldn't claim note-19: claim: note-19 is agent-112's change: claim under a change name of your own
+ 978s  agent-159    couldn't claim note-19: claim: note-19 is agent-112's change: claim under a change name of your own
+ 978s  agent-41     pushed note-87 ccd4433: 1 file changed, 1 insertion(+)
+ 979s  agent-40     pushed note-172 6baee33: 1 file changed, 1 insertion(+)
+ 979s  agent-25     pushed note-132 db4f56c: 1 file changed, 1 insertion(+)
+ 979s  agent-15     pushed note-156 40fbb60: 1 file changed, 1 insertion(+)
+ 979s  agent-17     pushed note-186 f9ed0c4: 1 file changed, 1 insertion(+)
+ 980s  agent-147    pushed note-123 5fcc21c: 1 file changed, 1 insertion(+)
+ 981s  agent-148    pushed note-195 673f64a: 1 file changed, 1 insertion(+)
+ 982s  agent-195    builds note-76 (1 path(s))
+ 982s  agent-153    pushed note-163 6429523: 1 file changed, 1 insertion(+)
+ 982s  agent-38     pushed note-39 86617b9: 1 file changed, 1 insertion(+)
+ 982s  agent-135    pushed note-79 9816568: 1 file changed, 1 insertion(+)
+ 982s  agent-46     pushed note-118 888f11e: 1 file changed, 1 insertion(+)
+ 983s  agent-23     couldn't claim note-76: claim: note-76 is agent-195's change: claim under a change name of your own
+ 983s  agent-16     pushed note-30 92d1489: 1 file changed, 1 insertion(+)
+ 984s  agent-186    pushed note-173 31c338c: 1 file changed, 1 insertion(+)
+ 984s  agent-13     pushed note-188 3573a93: 1 file changed, 1 insertion(+)
+ 984s  agent-159    couldn't claim note-76: claim: note-76 is agent-195's change: claim under a change name of your own
+ 985s  agent-150    pushed note-126 5c6afb2: 1 file changed, 1 insertion(+)
+ 985s  agent-73     pushed note-5 fbea0ee: 1 file changed, 1 insertion(+)
+ 986s  agent-61     pushed note-117 60ad1eb: 1 file changed, 1 insertion(+)
+ 986s  agent-78     pushed note-45 0c03b1b: 1 file changed, 1 insertion(+)
+ 986s  agent-43     pushed note-46 d6e642d: 1 file changed, 1 insertion(+)
+ 987s  agent-9      pushed note-102 08b659a: 1 file changed, 1 insertion(+)
+ 987s  agent-112    pushed note-19 fa3f603: 1 file changed, 1 insertion(+)
+ 987s  agent-84     pushed note-142 6132eed: 1 file changed, 1 insertion(+)
+ 988s  agent-23     couldn't claim note-76: claim: note-76 is agent-195's change: claim under a change name of your own
+ 988s  agent-11     pushed note-2 fd97f6d: 1 file changed, 1 insertion(+)
+ 989s  agent-124    pushed note-63 93f2e02: 1 file changed, 1 insertion(+)
+ 990s  agent-156    merged note-116 as 924d926b
+ 990s  agent-107    pushed note-43 8b0ffe5: 1 file changed, 1 insertion(+)
+ 990s  agent-157    pushed note-86 4860832: 1 file changed, 1 insertion(+)
+ 990s  agent-99     merged note-140 as 9ff5303d
+ 991s  agent-19     pushed note-25 c65e808: 1 file changed, 1 insertion(+)
+ 991s  agent-180    merged note-185 as 5810ad9f
+ 991s  agent-29     merged note-129 as 90b29988
+ 991s  agent-88     pushed note-136 d738ec4: 1 file changed, 1 insertion(+)
+ 992s  agent-69     pushed note-164 553c7b0: 1 file changed, 1 insertion(+)
+ 992s  agent-95     merged note-168 as 502bb153
+ 992s  agent-70     merged note-55 as 60751124
+ 992s  agent-49     merged note-51 as bb10ce27
+ 992s  agent-149    merged note-56 as 21000e73
+ 992s  agent-55     pushed note-127 f7ec3ad: 1 file changed, 1 insertion(+)
+ 993s  agent-110    pushed note-182 df5ca44: 1 file changed, 1 insertion(+)
+ 993s  agent-159    builds note-3 (1 path(s))
+ 993s  agent-104    pushed note-97 224221e: 1 file changed, 1 insertion(+)
+ 994s  agent-30     pushed note-54 0aed439: 1 file changed, 1 insertion(+)
+ 994s  agent-23     couldn't claim note-3: claim: note-3 is agent-159's change: claim under a change name of your own
+ 994s  agent-156    builds note-158 (1 path(s))
+ 994s  agent-80     pushed note-71 69ecaa1: 1 file changed, 1 insertion(+)
+ 995s  agent-39     pushed note-191 e35b75c: 1 file changed, 1 insertion(+)
+ 995s  agent-191    pushed note-197 5db21d8: 1 file changed, 1 insertion(+)
+ 996s  agent-71     pushed note-113 47789c9: 1 file changed, 1 insertion(+)
+ 996s  agent-160    pushed note-170 2423b6c: 1 file changed, 1 insertion(+)
+ 996s  agent-33     pushed note-200 f59c457: 1 file changed, 1 insertion(+)
+ 997s  agent-119    pushed note-35 2bd5bb9: 1 file changed, 1 insertion(+)
+ 997s  agent-45     pushed note-128 3b63675: 1 file changed, 1 insertion(+)
+ 997s  agent-154    pushed note-21 dbf40dd: 1 file changed, 1 insertion(+)
+ 997s  agent-149    couldn't claim note-158: claim: note-158 is agent-156's change: claim under a change name of your own
+ 997s  agent-99     couldn't claim note-158: claim: note-158 is agent-156's change: claim under a change name of your own
+ 999s  agent-23     couldn't claim note-3: claim: note-3 is agent-159's change: claim under a change name of your own
+1000s  agent-77     pushed note-190 d31af8b: 1 file changed, 1 insertion(+)
+1000s  agent-70     couldn't claim note-3: claim: note-3 is agent-159's change: claim under a change name of your own
+1001s  agent-149    couldn't claim note-158: claim: note-158 is agent-156's change: claim under a change name of your own
+1002s  agent-103    pushed note-152 d0bed43: 1 file changed, 1 insertion(+)
+1003s  agent-99     couldn't claim note-158: claim: note-158 is agent-156's change: claim under a change name of your own
+1003s  agent-11     build note-2 failed: check: HTTP 500 <!DOCTYPE html>
+<!--[if lt IE 7]> <html class="no-js ie6 oldie" lang="en-US"> <![endif]-->
+<!--[if IE 7]>    <html class="no-js ie7 oldie" lang="en-US"> <![endif]-->
+<!--[if IE 8]>    <html class="no-
+1004s  agent-49     merged note-51 as bb10ce27
+1004s  agent-23     couldn't claim note-3: claim: note-3 is agent-159's change: claim under a change name of your own
+1004s  agent-95     merged note-168 as 502bb153
+1004s  agent-114    pushed note-1 fead747: 1 file changed, 1 insertion(+)
+1005s  agent-29     merged note-129 as 90b29988
+1005s  agent-40     merge note-172 failed: merge: HTTP 500 <!DOCTYPE html>
+<!--[if lt IE 7]> <html class="no-js ie6 oldie" lang="en-US"> <![endif]-->
+<!--[if IE 7]>    <html class="no-js ie7 oldie" lang="en-US"> <![endif]-->
+<!--[if IE 8]>    <html class="no-
+1005s  agent-180    merged note-185 as 5810ad9f
+1005s  agent-104    build note-97 failed: check: HTTP 500 <!DOCTYPE html>
+<!--[if lt IE 7]> <html class="no-js ie6 oldie" lang="en-US"> <![endif]-->
+<!--[if IE 7]>    <html class="no-js ie7 oldie" lang="en-US"> <![endif]-->
+<!--[if IE 8]>    <html class="no-
+1008s  agent-70     couldn't claim note-3: claim: note-3 is agent-159's change: claim under a change name of your own
+1011s  agent-198    pushed note-40 579cf70: 1 file changed, 1 insertion(+)
+1018s  agent-195    pushed note-76 e5a2d38: 1 file changed, 1 insertion(+)
+1029s  agent-156    pushed note-158 4fd6ee9: 1 file changed, 1 insertion(+)
+1034s  agent-159    pushed note-3 063728c: 1 file changed, 1 insertion(+)
+1057s  agent-7      build note-9 failed: remote: Internal Server Error | fatal: unable to access 'https://0ee623ba24365823196215c72f6c0a78.artifacts.cloudflare.net/git/blueprint-bench/fork--express-swarm-209--agent--agent-7.git/': The requested URL returned error: 500
+1111s  agent-93     merged note-130 as 14524189
+1112s  agent-182    merged note-134 as 9de04d8e
+1112s  agent-102    merged note-91 as 030fddf1
+1112s  agent-53     merged note-104 as c923505f
+1112s  agent-86     merged note-90 as 195b5e20
+1112s  agent-172    merged note-58 as 8f72aaa2
+1112s  agent-177    merged note-183 as e70b7730
+1112s  agent-189    merged note-100 as 32735c9e
+1113s  agent-48     merged note-111 as ddd2a020
+1113s  agent-162    merged note-193 as c02f1fd0
+1113s  swarm        note-143 landed as beea7196, in another merge's batch
+1113s  swarm        note-23 landed as d01a4cc6, in another merge's batch
+1113s  swarm        note-96 landed as 1b85181e, in another merge's batch
+1113s  swarm        note-199 landed as f993ec10, in another merge's batch
+1113s  swarm        note-187 landed as f54a45dc, in another merge's batch
+1113s  swarm        note-53 landed as 82cc7bb8, in another merge's batch
+1113s  swarm        note-138 landed as bfbb9105, in another merge's batch
+1113s  swarm        note-22 landed as 3b4dd3d1, in another merge's batch
+1113s  swarm        note-49 landed as 8eb842d7, in another merge's batch
+1113s  swarm        note-4 landed as e6ef0ff3, in another merge's batch
+1113s  swarm        note-60 landed as cbfdce51, in another merge's batch
+1113s  swarm        note-109 landed as 2fab5257, in another merge's batch
+1113s  swarm        note-14 landed as 39503974, in another merge's batch
+1113s  swarm        note-13 landed as 7dae9139, in another merge's batch
+1113s  agent-81     merged note-199 as f993ec10
+1113s  agent-167    merged note-60 as cbfdce51
+1113s  agent-193    merged note-13 as 7dae9139
+1113s  agent-89     merged note-143 as beea7196
+1113s  agent-196    merged note-49 as 8eb842d7
+1113s  agent-52     merged note-138 as bfbb9105
+1114s  agent-96     merged note-187 as f54a45dc
+1114s  agent-199    merged note-23 as d01a4cc6
+1114s  agent-138    merged note-4 as e6ef0ff3
+1114s  agent-116    merged note-96 as 1b85181e
+1114s  agent-44     merged note-22 as 3b4dd3d1
+1114s  agent-187    merged note-14 as 39503974
+1114s  agent-178    merged note-109 as 2fab5257
+1114s  agent-67     merged note-53 as 82cc7bb8
+1115s  agent-7      builds note-9 (1 path(s))
+1147s  agent-7      pushed note-9 a704a69: 1 file changed, 1 insertion(+)
+1388s  agent-6      merged note-159 as e99794a9
+1388s  agent-1      merged note-154 as e9fdb8d0
+1388s  agent-166    merged note-27 as ed0ca86d
+1388s  agent-142    merged note-114 as 93382724
+1388s  agent-87     merged note-17 as 90fa6770
+1388s  agent-105    merged note-81 as da335f27
+1388s  agent-98     merged note-82 as e0be792c
+1388s  agent-127    merged note-31 as a9881c0f
+1388s  agent-169    merged note-150 as fc336855
+1388s  agent-32     merged note-135 as 33511790
+1388s  agent-125    merged note-89 as ee7e1362
+1388s  agent-20     merged note-147 as 24b9ba65
+1388s  agent-190    merged note-192 as 7bed9980
+1388s  agent-14     merged note-18 as 6bdcb1a4
+1388s  agent-18     merged note-144 as 758cbac2
+1388s  agent-117    merged note-50 as 261e96eb
+1389s  agent-59     merged note-101 as f5ae76c8
+1389s  agent-133    merged note-121 as ec3d57cf
+1389s  agent-85     merged note-115 as 8e616078
+1389s  agent-92     merged note-12 as 7e13e863
+1389s  agent-151    merged note-179 as 8e0bb9ed
+1389s  agent-106    merged note-122 as b0e265f0
+1389s  agent-194    merged note-52 as 41c2c541
+1389s  agent-197    merged note-146 as 6670174c
+1389s  agent-90     merged note-108 as a414b221
+1389s  agent-179    merged note-26 as 21730d20
+1389s  agent-183    merged note-103 as d4903970
+1389s  agent-3      merged note-161 as 8c382226
+1389s  agent-26     merged note-61 as d8559ffe
+1389s  agent-109    merged note-133 as 753b8bda
+1389s  agent-134    merged note-119 as 5d9e7391
+1389s  agent-120    merged note-57 as 1bfe38b3
+1389s  agent-91     merged note-196 as 8fca8595
+1389s  agent-60     merged note-181 as 15d8e6a1
+1389s  agent-171    merged note-29 as 18e8a787
+1390s  agent-188    merged note-105 as 99545a0e
+1390s  agent-62     merged note-180 as 60152ae4
+1390s  agent-68     merged note-107 as 62446728
+1390s  agent-158    merged note-36 as 7175d14f
+1390s  agent-115    merged note-73 as 73fd3bea
+1390s  agent-131    merged note-80 as 8c794709
+1390s  agent-79     merged note-85 as b4635134
+1390s  agent-22     merged note-74 as 39b400d7
+1390s  agent-140    merged note-198 as cdc5715d
+1390s  agent-165    merged note-94 as 04d39b6b
+1390s  agent-75     merged note-176 as 45ffe5df
+1390s  agent-136    merged note-175 as 0beb5227
+1390s  agent-72     merged note-24 as 5e016da2
+1390s  agent-126    merged note-171 as c4cbd051
+1390s  swarm        note-162 landed as dbe0a46a, in another merge's batch
+1390s  swarm        note-131 landed as 98e29064, in another merge's batch
+1390s  swarm        note-41 landed as 659d8ba5, in another merge's batch
+1390s  agent-122    merged note-41 as 659d8ba5
+1390s  agent-8      merged note-162 as dbe0a46a
+1391s  agent-10     merged note-131 as 98e29064
+1395s  agent-20     merged note-147 as 24b9ba65
+1398s  agent-125    merged note-89 as ee7e1362
+1400s  agent-197    merged note-146 as 6670174c
+1402s  agent-117    merged note-50 as 261e96eb
+1410s  agent-14     merged note-18 as 6bdcb1a4
+1411s  agent-1      merged note-154 as e9fdb8d0
+1411s  agent-166    merged note-27 as ed0ca86d
+1411s  agent-169    merged note-150 as fc336855
+1415s  agent-190    merged note-192 as 7bed9980
+1417s  agent-6      merged note-159 as e99794a9
+1433s  agent-127    merged note-31 as a9881c0f
+1434s  agent-59     merged note-101 as f5ae76c8
+1439s  agent-133    merged note-121 as ec3d57cf
+1443s  agent-98     merged note-82 as e0be792c
+1444s  agent-32     merged note-135 as 33511790
+1446s  agent-105    merged note-81 as da335f27
+1447s  agent-18     merged note-144 as 758cbac2
+1447s  agent-87     merged note-17 as 90fa6770
+1448s  agent-106    merged note-122 as b0e265f0
+1448s  agent-142    merged note-114 as 93382724
+1462s  agent-151    merged note-179 as 8e0bb9ed
+1463s  agent-194    merged note-52 as 41c2c541
+1470s  agent-90     merged note-108 as a414b221
+1493s  agent-92     merged note-12 as 7e13e863
+1494s  agent-85     merged note-115 as 8e616078
+1543s  agent-65     merge of note-75 refused: note-75 is ready and waiting to land (a3dc9221): others' batches came first in the 10 minutes this merge waited. Call merge again to go on waiting; it lands wit
+1549s  agent-111    merge of note-95 refused: note-95 is ready and waiting to land (9ad2ccf8): others' batches came first in the 10 minutes this merge waited. Call merge again to go on waiting; it lands wit
+1551s  agent-163    merge of note-69 refused: note-69 is ready and waiting to land (c7b679f6): others' batches came first in the 10 minutes this merge waited. Call merge again to go on waiting; it lands wit
+1553s  agent-42     merge of note-16 refused: note-16 is ready and waiting to land (7f54259a): others' batches came first in the 10 minutes this merge waited. Call merge again to go on waiting; it lands wit
+1555s  agent-175    merge of note-124 refused: note-124 is ready and waiting to land (fb5311ff): others' batches came first in the 10 minutes this merge waited. Call merge again to go on waiting; it lands wi
+1559s  agent-24     merge of note-153 refused: note-153 is ready and waiting to land (22c6cc84): others' batches came first in the 10 minutes this merge waited. Call merge again to go on waiting; it lands wi
+1560s  agent-4      merge of note-125 refused: note-125 is ready and waiting to land (f3275da8): others' batches came first in the 10 minutes this merge waited. Call merge again to go on waiting; it lands wi
+1561s  agent-57     merge of note-155 refused: note-155 is ready and waiting to land (c4501b9b): others' batches came first in the 10 minutes this merge waited. Call merge again to go on waiting; it lands wi
+1562s  agent-174    merge of note-7 refused: note-7 is ready and waiting to land (78693f89): others' batches came first in the 10 minutes this merge waited. Call merge again to go on waiting; it lands with
+1562s  agent-170    merge of note-20 refused: note-20 is ready and waiting to land (b85d4553): others' batches came first in the 10 minutes this merge waited. Call merge again to go on waiting; it lands wit
+1562s  agent-185    merge of note-48 refused: note-48 is ready and waiting to land (637ce1a9): others' batches came first in the 10 minutes this merge waited. Call merge again to go on waiting; it lands wit
+1564s  agent-2      merge of note-15 refused: note-15 is ready and waiting to land (bf001e03): others' batches came first in the 10 minutes this merge waited. Call merge again to go on waiting; it lands wit
+1565s  agent-47     merge of note-151 refused: note-151 is ready and waiting to land (3c87ad6e): others' batches came first in the 10 minutes this merge waited. Call merge again to go on waiting; it lands wi
+1565s  agent-144    merge of note-28 refused: note-28 is ready and waiting to land (980a6df1): others' batches came first in the 10 minutes this merge waited. Call merge again to go on waiting; it lands wit
+1568s  agent-63     merge of note-65 refused: note-65 is ready and waiting to land (7ff16113): others' batches came first in the 10 minutes this merge waited. Call merge again to go on waiting; it lands wit
+1569s  agent-51     merge of note-67 refused: note-67 is ready and waiting to land (9953915d): others' batches came first in the 10 minutes this merge waited. Call merge again to go on waiting; it lands wit
+1570s  agent-155    merge of note-177 refused: note-177 is ready and waiting to land (77e055c9): others' batches came first in the 10 minutes this merge waited. Call merge again to go on waiting; it lands wi
+1571s  agent-28     merge of note-92 refused: note-92 is ready and waiting to land (328cbeeb): others' batches came first in the 10 minutes this merge waited. Call merge again to go on waiting; it lands wit
+1571s  agent-100    merge of note-44 refused: note-44 is ready and waiting to land (21818ccd): others' batches came first in the 10 minutes this merge waited. Call merge again to go on waiting; it lands wit
+1572s  agent-184    merge of note-139 refused: note-139 is ready and waiting to land (9999db19): others' batches came first in the 10 minutes this merge waited. Call merge again to go on waiting; it lands wi
+1572s  agent-192    merge of note-149 refused: note-149 is ready and waiting to land (68b88978): others' batches came first in the 10 minutes this merge waited. Call merge again to go on waiting; it lands wi
+1572s  agent-164    merge of note-32 refused: note-32 is ready and waiting to land (273053ad): others' batches came first in the 10 minutes this merge waited. Call merge again to go on waiting; it lands wit
+1573s  agent-94     merge of note-83 refused: note-83 is ready and waiting to land (74000936): others' batches came first in the 10 minutes this merge waited. Call merge again to go on waiting; it lands wit
+1573s  agent-143    merge of note-72 refused: note-72 is ready and waiting to land (af8c7889): others' batches came first in the 10 minutes this merge waited. Call merge again to go on waiting; it lands wit
+1574s  agent-113    merge of note-157 refused: note-157 is ready and waiting to land (4fbee31a): others' batches came first in the 10 minutes this merge waited. Call merge again to go on waiting; it lands wi
+1574s  agent-118    merge of note-137 refused: note-137 is ready and waiting to land (202c63a5): others' batches came first in the 10 minutes this merge waited. Call merge again to go on waiting; it lands wi
+1574s  agent-101    merge of note-77 refused: note-77 is ready and waiting to land (0c7b2bea): others' batches came first in the 10 minutes this merge waited. Call merge again to go on waiting; it lands wit
+1575s  agent-121    merge of note-120 refused: note-120 is ready and waiting to land (9e9144c3): others' batches came first in the 10 minutes this merge waited. Call merge again to go on waiting; it lands wi
+1575s  agent-146    merge of note-141 refused: note-141 is ready and waiting to land (a5b12f74): others' batches came first in the 10 minutes this merge waited. Call merge again to go on waiting; it lands wi
+1575s  agent-82     merge of note-6 refused: note-6 is ready and waiting to land (07311c93): others' batches came first in the 10 minutes this merge waited. Call merge again to go on waiting; it lands with
+1576s  agent-35     merge of note-112 refused: note-112 is ready and waiting to land (81c6f057): others' batches came first in the 10 minutes this merge waited. Call merge again to go on waiting; it lands wi
+1577s  agent-50     merge of note-38 refused: note-38 is ready and waiting to land (f17667fd): others' batches came first in the 10 minutes this merge waited. Call merge again to go on waiting; it lands wit
+1579s  agent-181    merge of note-34 refused: note-34 is ready and waiting to land (81b666ed): others' batches came first in the 10 minutes this merge waited. Call merge again to go on waiting; it lands wit
+1579s  agent-130    merge of note-174 refused: note-174 is ready and waiting to land (f2c65710): others' batches came first in the 10 minutes this merge waited. Call merge again to go on waiting; it lands wi
+1579s  agent-161    merge of note-189 refused: note-189 is ready and waiting to land (443c9072): others' batches came first in the 10 minutes this merge waited. Call merge again to go on waiting; it lands wi
+1581s  agent-129    merge of note-110 refused: note-110 is ready and waiting to land (32dd2ea8): others' batches came first in the 10 minutes this merge waited. Call merge again to go on waiting; it lands wi
+1581s  agent-173    merge of note-66 refused: note-66 is ready and waiting to land (499cd106): others' batches came first in the 10 minutes this merge waited. Call merge again to go on waiting; it lands wit
+1582s  agent-108    merge of note-10 refused: note-10 is ready and waiting to land (8df375ec): others' batches came first in the 10 minutes this merge waited. Call merge again to go on waiting; it lands wit
+1583s  agent-34     merge of note-166 refused: note-166 is ready and waiting to land (1c8cf884): others' batches came first in the 10 minutes this merge waited. Call merge again to go on waiting; it lands wi
+1583s  agent-141    merge of note-33 refused: note-33 is ready and waiting to land (c8acc8b5): others' batches came first in the 10 minutes this merge waited. Call merge again to go on waiting; it lands wit
+1583s  agent-132    merge of note-47 refused: note-47 is ready and waiting to land (dd69bcf3): others' batches came first in the 10 minutes this merge waited. Call merge again to go on waiting; it lands wit
+1584s  agent-54     merge of note-165 refused: note-165 is ready and waiting to land (a819916d): others' batches came first in the 10 minutes this merge waited. Call merge again to go on waiting; it lands wi
+1584s  agent-168    merge of note-148 refused: note-148 is ready and waiting to land (38d2666f): others' batches came first in the 10 minutes this merge waited. Call merge again to go on waiting; it lands wi
+1584s  agent-137    merge of note-106 refused: note-106 is ready and waiting to land (819479cc): others' batches came first in the 10 minutes this merge waited. Call merge again to go on waiting; it lands wi
+1584s  agent-76     merge of note-37 refused: note-37 is ready and waiting to land (f464b7dc): others' batches came first in the 10 minutes this merge waited. Call merge again to go on waiting; it lands wit
+1584s  agent-145    merge of note-93 refused: note-93 is ready and waiting to land (ce753cd8): others' batches came first in the 10 minutes this merge waited. Call merge again to go on waiting; it lands wit
+1585s  agent-139    merge of note-11 refused: note-11 is ready and waiting to land (aacc53d0): others' batches came first in the 10 minutes this merge waited. Call merge again to go on waiting; it lands wit
+1585s  agent-5      merge of note-64 refused: note-64 is ready and waiting to land (1d6391f5): others' batches came first in the 10 minutes this merge waited. Call merge again to go on waiting; it lands wit
+1585s  agent-200    merge of note-169 refused: note-169 is ready and waiting to land (3265656e): others' batches came first in the 10 minutes this merge waited. Call merge again to go on waiting; it lands wi
+1585s  agent-17     merge of note-186 refused: note-186 is ready and waiting to land (f9ed0c45): others' batches came first in the 10 minutes this merge waited. Call merge again to go on waiting; it lands wi
+1588s  agent-66     merge of note-84 refused: note-84 is ready and waiting to land (ea0ff282): others' batches came first in the 10 minutes this merge waited. Call merge again to go on waiting; it lands wit
+1588s  agent-147    merge of note-123 refused: note-123 is ready and waiting to land (5fcc21c2): others' batches came first in the 10 minutes this merge waited. Call merge again to go on waiting; it lands wi
+1589s  agent-58     merge of note-167 refused: note-167 is ready and waiting to land (7b19b4e6): others' batches came first in the 10 minutes this merge waited. Call merge again to go on waiting; it lands wi
+1589s  agent-152    merge of note-70 refused: note-70 is ready and waiting to land (ddf86bc3): others' batches came first in the 10 minutes this merge waited. Call merge again to go on waiting; it lands wit
+1590s  agent-41     merge of note-87 refused: note-87 is ready and waiting to land (ccd44333): others' batches came first in the 10 minutes this merge waited. Call merge again to go on waiting; it lands wit
+1591s  agent-36     merge of note-68 refused: note-68 is ready and waiting to land (c58df0a6): others' batches came first in the 10 minutes this merge waited. Call merge again to go on waiting; it lands wit
+1591s  agent-64     merge of note-42 refused: note-42 is ready and waiting to land (587f3511): others' batches came first in the 10 minutes this merge waited. Call merge again to go on waiting; it lands wit
+1592s  agent-13     merge of note-188 refused: note-188 is ready and waiting to land (3573a93d): others' batches came first in the 10 minutes this merge waited. Call merge again to go on waiting; it lands wi
+1593s  agent-25     merge of note-132 refused: note-132 is ready and waiting to land (db4f56cd): others' batches came first in the 10 minutes this merge waited. Call merge again to go on waiting; it lands wi
+1594s  agent-61     merge of note-117 refused: note-117 is ready and waiting to land (60ad1eb1): others' batches came first in the 10 minutes this merge waited. Call merge again to go on waiting; it lands wi
+1595s  agent-15     merge of note-156 refused: note-156 is ready and waiting to land (40fbb608): others' batches came first in the 10 minutes this merge waited. Call merge again to go on waiting; it lands wi
+1595s  agent-148    merge of note-195 refused: note-195 is ready and waiting to land (673f64ae): others' batches came first in the 10 minutes this merge waited. Call merge again to go on waiting; it lands wi
+1597s  agent-9      merge of note-102 refused: note-102 is ready and waiting to land (08b659a2): others' batches came first in the 10 minutes this merge waited. Call merge again to go on waiting; it lands wi
+1598s  agent-150    merge of note-126 refused: note-126 is ready and waiting to land (5c6afb29): others' batches came first in the 10 minutes this merge waited. Call merge again to go on waiting; it lands wi

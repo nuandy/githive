@@ -1,0 +1,9 @@
+   5s  swarm        copying express-template as express-swarm-211
+  21s  swarm        express-swarm-211 on master: checks [], grants {}, claims {"since":"2026-10-09T19:10:42.949Z","because":"asked for at the start"}
+  28s  swarm        registered 201 agents (agent-1 to planner)
+  31s  swarm        waiting for forks: 8 seeds and 201 agents' forks to make
+  92s  swarm        waiting for forks: 1 seeds and 201 agents' forks to make
+ 155s  swarm        waiting for forks: 0 seeds and 145 agents' forks to make
+ 220s  swarm        waiting for forks: 0 seeds and 88 agents' forks to make
+ 268s  swarm        the agents' forks are made (8 seeds)
+ 268s  swarm        set up in 268s; --setup-only, so no scripted agents run

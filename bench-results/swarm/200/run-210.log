@@ -1,0 +1,1030 @@
+   8s  swarm        importing https://github.com/expressjs/express as express-template, once
+  37s  swarm        copying express-template as express-swarm-210
+  74s  swarm        express-swarm-210 on master: checks [], grants {}, claims {"since":"2026-10-09T18:51:58.224Z","because":"asked for at the start"}
+  76s  swarm        registered 201 agents (agent-1 to planner)
+  87s  swarm        200 pieces in the backlog; 200 agents, all alike
+  87s  agent-95     arrives
+  87s  agent-70     arrives
+  88s  agent-199    arrives
+  89s  agent-149    arrives
+  89s  agent-89     arrives
+  93s  agent-180    arrives
+  93s  agent-29     arrives
+  94s  agent-99     arrives
+  94s  agent-116    arrives
+  94s  agent-156    arrives
+  95s  agent-93     arrives
+  95s  agent-49     arrives
+  96s  agent-162    arrives
+  98s  agent-95     builds note-168 (1 path(s))
+  99s  agent-70     builds note-55 (1 path(s))
+  99s  agent-29     builds note-129 (1 path(s))
+ 100s  agent-67     arrives
+ 100s  agent-149    builds note-56 (1 path(s))
+ 100s  agent-89     builds note-143 (1 path(s))
+ 101s  agent-177    arrives
+ 101s  agent-52     arrives
+ 101s  agent-96     arrives
+ 102s  agent-182    arrives
+ 102s  agent-81     arrives
+ 105s  agent-44     arrives
+ 106s  agent-189    arrives
+ 108s  agent-182    couldn't claim note-23: claim: note-23 is agent-199's change: claim under a change name of your own
+ 108s  agent-196    arrives
+ 108s  agent-86     arrives
+ 109s  agent-48     arrives
+ 109s  agent-52     couldn't claim note-51: claim: note-51 is agent-49's change: claim under a change name of your own
+ 110s  agent-49     builds note-51 (1 path(s))
+ 110s  agent-156    builds note-116 (1 path(s))
+ 110s  agent-116    builds note-96 (1 path(s))
+ 110s  agent-177    builds note-183 (1 path(s))
+ 110s  agent-180    builds note-185 (1 path(s))
+ 110s  agent-99     builds note-140 (1 path(s))
+ 110s  agent-93     builds note-130 (1 path(s))
+ 110s  agent-96     builds note-187 (1 path(s))
+ 110s  agent-162    builds note-193 (1 path(s))
+ 110s  agent-199    builds note-23 (1 path(s))
+ 110s  agent-20     arrives
+ 114s  agent-172    arrives
+ 114s  agent-187    arrives
+ 114s  agent-102    arrives
+ 114s  agent-138    arrives
+ 115s  agent-194    arrives
+ 115s  agent-182    builds note-106 (1 path(s))
+ 115s  agent-86     builds note-68 (1 path(s))
+ 115s  agent-67     builds note-191 (1 path(s))
+ 115s  agent-178    arrives
+ 115s  agent-167    arrives
+ 116s  agent-196    builds note-59 (1 path(s))
+ 116s  agent-52     builds note-82 (1 path(s))
+ 117s  agent-189    builds note-174 (1 path(s))
+ 117s  agent-48     builds note-158 (1 path(s))
+ 118s  agent-172    builds note-117 (1 path(s))
+ 118s  agent-44     builds note-107 (1 path(s))
+ 118s  agent-14     arrives
+ 120s  agent-167    builds note-8 (1 path(s))
+ 120s  agent-20     builds note-46 (1 path(s))
+ 120s  agent-8      arrives
+ 120s  agent-102    builds note-110 (1 path(s))
+ 120s  agent-87     arrives
+ 121s  agent-81     builds note-104 (1 path(s))
+ 121s  agent-178    builds note-61 (1 path(s))
+ 121s  agent-136    arrives
+ 121s  agent-193    arrives
+ 121s  agent-187    builds note-43 (1 path(s))
+ 122s  agent-194    couldn't claim note-59: claim: note-59 is agent-196's change: claim under a change name of your own
+ 122s  agent-179    arrives
+ 123s  agent-1      arrives
+ 124s  agent-138    builds note-172 (1 path(s))
+ 125s  agent-183    arrives
+ 125s  agent-115    arrives
+ 125s  agent-10     arrives
+ 126s  agent-163    arrives
+ 126s  agent-136    builds note-175 (1 path(s))
+ 126s  agent-193    builds note-60 (1 path(s))
+ 126s  agent-142    arrives
+ 126s  agent-87     builds note-17 (1 path(s))
+ 127s  agent-134    arrives
+ 128s  agent-26     arrives
+ 128s  agent-179    builds note-11 (1 path(s))
+ 129s  agent-85     arrives
+ 129s  agent-194    couldn't claim note-61: claim: note-61 is agent-178's change: claim under a change name of your own
+ 129s  agent-8      builds note-50 (1 path(s))
+ 129s  agent-183    builds note-24 (1 path(s))
+ 130s  agent-120    arrives
+ 130s  agent-142    builds note-66 (1 path(s))
+ 131s  agent-14     builds note-141 (1 path(s))
+ 131s  agent-32     arrives
+ 131s  agent-165    arrives
+ 131s  agent-79     arrives
+ 131s  agent-22     arrives
+ 131s  agent-115    builds note-27 (1 path(s))
+ 132s  agent-62     arrives
+ 132s  agent-10     builds note-103 (1 path(s))
+ 133s  agent-133    arrives
+ 133s  agent-1      builds note-28 (1 path(s))
+ 133s  agent-105    arrives
+ 133s  agent-197    arrives
+ 134s  agent-60     arrives
+ 134s  agent-151    arrives
+ 135s  agent-26     couldn't claim note-141: claim: note-141 is agent-14's change: claim under a change name of your own
+ 135s  agent-109    arrives
+ 135s  agent-85     builds note-108 (1 path(s))
+ 135s  agent-120    builds note-155 (1 path(s))
+ 135s  agent-134    builds note-112 (1 path(s))
+ 135s  agent-165    builds note-80 (1 path(s))
+ 136s  agent-194    builds note-200 (1 path(s))
+ 136s  agent-79     builds note-194 (1 path(s))
+ 137s  agent-72     arrives
+ 137s  agent-126    arrives
+ 137s  agent-62     builds note-83 (1 path(s))
+ 137s  agent-68     arrives
+ 137s  agent-22     builds note-100 (1 path(s))
+ 138s  agent-18     arrives
+ 138s  agent-117    arrives
+ 138s  agent-90     arrives
+ 139s  agent-60     builds note-92 (1 path(s))
+ 139s  agent-169    arrives
+ 139s  agent-190    arrives
+ 139s  agent-140    arrives
+ 139s  agent-26     builds note-139 (1 path(s))
+ 139s  agent-151    builds note-145 (1 path(s))
+ 139s  agent-197    builds note-95 (1 path(s))
+ 139s  agent-166    arrives
+ 140s  agent-122    arrives
+ 140s  agent-158    arrives
+ 140s  agent-131    arrives
+ 140s  agent-109    builds note-180 (1 path(s))
+ 140s  agent-105    builds note-88 (1 path(s))
+ 140s  agent-32     builds note-173 (1 path(s))
+ 140s  agent-57     arrives
+ 141s  agent-59     arrives
+ 141s  agent-188    arrives
+ 141s  agent-126    builds note-38 (1 path(s))
+ 141s  agent-68     couldn't claim note-80: claim: note-80 is agent-165's change: claim under a change name of your own
+ 142s  agent-171    arrives
+ 142s  agent-72     couldn't claim note-83: claim: note-83 is agent-62's change: claim under a change name of your own
+ 142s  agent-6      arrives
+ 143s  agent-133    builds note-30 (1 path(s))
+ 143s  agent-90     builds note-32 (1 path(s))
+ 143s  agent-92     arrives
+ 143s  agent-169    builds note-99 (1 path(s))
+ 144s  agent-125    arrives
+ 144s  agent-190    builds note-160 (1 path(s))
+ 144s  agent-140    builds note-151 (1 path(s))
+ 144s  agent-75     arrives
+ 144s  agent-18     builds note-71 (1 path(s))
+ 145s  agent-117    builds note-67 (1 path(s))
+ 145s  agent-122    builds note-197 (1 path(s))
+ 145s  agent-166    builds note-4 (1 path(s))
+ 145s  agent-163    builds note-177 (1 path(s))
+ 145s  agent-131    builds note-186 (1 path(s))
+ 146s  agent-3      arrives
+ 146s  agent-127    arrives
+ 146s  agent-68     builds note-91 (1 path(s))
+ 146s  agent-175    arrives
+ 147s  agent-92     builds note-123 (1 path(s))
+ 147s  agent-91     arrives
+ 147s  agent-171    builds note-154 (1 path(s))
+ 147s  agent-59     builds note-118 (1 path(s))
+ 147s  agent-57     builds note-111 (1 path(s))
+ 148s  agent-72     couldn't claim note-160: claim: note-160 is agent-190's change: claim under a change name of your own
+ 148s  agent-155    arrives
+ 148s  agent-125    builds note-101 (1 path(s))
+ 149s  agent-183    pushed note-24 0629730: 1 file changed, 1 insertion(+)
+ 149s  agent-75     builds note-126 (1 path(s))
+ 149s  agent-106    arrives
+ 150s  agent-44     pushed note-107 5983007: 1 file changed, 1 insertion(+)
+ 150s  agent-158    builds note-69 (1 path(s))
+ 151s  agent-6      builds note-15 (1 path(s))
+ 151s  agent-65     arrives
+ 151s  agent-175    couldn't claim note-126: claim: note-126 is agent-75's change: claim under a change name of your own
+ 152s  agent-127    builds note-29 (1 path(s))
+ 152s  agent-91     builds note-196 (1 path(s))
+ 152s  agent-185    arrives
+ 152s  agent-164    arrives
+ 154s  agent-28     arrives
+ 154s  agent-155    builds note-16 (1 path(s))
+ 154s  agent-3      builds note-182 (1 path(s))
+ 154s  agent-106    builds note-153 (1 path(s))
+ 154s  agent-111    arrives
+ 154s  agent-37     arrives
+ 155s  agent-174    arrives
+ 155s  agent-129    arrives
+ 155s  agent-170    arrives
+ 157s  agent-42     arrives
+ 157s  agent-83     arrives
+ 157s  agent-72     builds note-78 (1 path(s))
+ 158s  agent-185    builds note-165 (1 path(s))
+ 158s  agent-164    builds note-6 (1 path(s))
+ 158s  agent-65     builds note-115 (1 path(s))
+ 158s  agent-24     arrives
+ 159s  agent-100    arrives
+ 159s  agent-175    builds note-37 (1 path(s))
+ 159s  agent-37     builds note-127 (1 path(s))
+ 160s  agent-144    arrives
+ 160s  agent-2      arrives
+ 160s  agent-111    builds note-132 (1 path(s))
+ 160s  agent-170    builds note-133 (1 path(s))
+ 160s  agent-79     pushed note-194 12b5588: 1 file changed, 1 insertion(+)
+ 160s  agent-94     arrives
+ 160s  agent-31     arrives
+ 161s  agent-174    builds note-137 (1 path(s))
+ 161s  agent-53     arrives
+ 162s  agent-47     arrives
+ 162s  agent-129    builds note-34 (1 path(s))
+ 162s  agent-28     builds note-79 (1 path(s))
+ 162s  agent-66     arrives
+ 162s  agent-25     arrives
+ 162s  agent-50     arrives
+ 163s  agent-143    arrives
+ 163s  agent-27     arrives
+ 163s  agent-21     arrives
+ 163s  agent-186    arrives
+ 163s  agent-83     couldn't claim note-79: claim: note-79 is agent-28's change: claim under a change name of your own
+ 164s  agent-144    builds note-31 (1 path(s))
+ 164s  agent-139    arrives
+ 164s  agent-57     pushed note-111 eec1d64: 1 file changed, 1 insertion(+)
+ 164s  agent-161    arrives
+ 164s  agent-192    arrives
+ 164s  agent-113    arrives
+ 164s  agent-141    arrives
+ 165s  agent-100    builds note-21 (1 path(s))
+ 165s  agent-4      arrives
+ 165s  agent-98     arrives
+ 165s  agent-42     builds note-44 (1 path(s))
+ 165s  agent-51     arrives
+ 166s  agent-94     builds note-48 (1 path(s))
+ 166s  agent-63     arrives
+ 166s  agent-56     arrives
+ 166s  agent-97     arrives
+ 166s  agent-118    arrives
+ 166s  agent-2      builds note-77 (1 path(s))
+ 167s  agent-31     builds note-189 (1 path(s))
+ 167s  agent-24     builds note-134 (1 path(s))
+ 167s  agent-146    arrives
+ 168s  agent-128    arrives
+ 168s  agent-25     builds note-13 (1 path(s))
+ 168s  agent-188    builds note-97 (1 path(s))
+ 168s  agent-82     arrives
+ 168s  agent-54     arrives
+ 168s  agent-50     builds note-7 (1 path(s))
+ 168s  agent-21     builds note-87 (1 path(s))
+ 168s  agent-139    builds note-62 (1 path(s))
+ 168s  agent-130    arrives
+ 169s  agent-181    arrives
+ 169s  agent-101    arrives
+ 169s  agent-22     pushed note-100 f2c4d92: 1 file changed, 1 insertion(+)
+ 170s  agent-53     builds note-93 (1 path(s))
+ 170s  agent-143    builds note-84 (1 path(s))
+ 170s  agent-27     builds note-146 (1 path(s))
+ 170s  agent-83     builds note-124 (1 path(s))
+ 170s  agent-66     builds note-54 (1 path(s))
+ 170s  agent-184    arrives
+ 170s  agent-161    builds note-12 (1 path(s))
+ 170s  agent-118    builds note-19 (1 path(s))
+ 171s  agent-192    couldn't claim note-124: claim: note-124 is agent-83's change: claim under a change name of your own
+ 171s  agent-200    arrives
+ 171s  agent-137    arrives
+ 172s  agent-4      builds note-181 (1 path(s))
+ 172s  agent-98     builds note-98 (1 path(s))
+ 172s  agent-63     builds note-20 (1 path(s))
+ 172s  agent-51     builds note-131 (1 path(s))
+ 172s  agent-97     builds note-178 (1 path(s))
+ 172s  agent-186    builds note-10 (1 path(s))
+ 172s  agent-56     builds note-72 (1 path(s))
+ 172s  agent-17     arrives
+ 172s  agent-113    builds note-164 (1 path(s))
+ 172s  agent-58     arrives
+ 172s  agent-141    builds note-166 (1 path(s))
+ 173s  agent-123    arrives
+ 173s  agent-128    builds note-169 (1 path(s))
+ 173s  agent-121    arrives
+ 173s  agent-54     couldn't claim note-178: claim: note-178 is agent-97's change: claim under a change name of your own
+ 173s  agent-35     arrives
+ 174s  agent-108    arrives
+ 174s  agent-181    couldn't claim note-19: claim: note-19 is agent-118's change: claim under a change name of your own
+ 175s  agent-169    pushed note-99 bf948a5: 1 file changed, 1 insertion(+)
+ 175s  agent-130    builds note-170 (1 path(s))
+ 175s  agent-192    couldn't claim note-124: claim: note-124 is agent-83's change: claim under a change name of your own
+ 175s  agent-82     couldn't claim note-7: claim: note-7 is agent-50's change: claim under a change name of your own
+ 175s  agent-132    arrives
+ 175s  agent-45     arrives
+ 176s  agent-64     arrives
+ 176s  agent-101    builds note-22 (1 path(s))
+ 176s  agent-184    builds note-162 (1 path(s))
+ 176s  agent-137    couldn't claim note-72: claim: note-72 is agent-56's change: claim under a change name of your own
+ 176s  agent-200    builds note-63 (1 path(s))
+ 176s  agent-173    arrives
+ 177s  agent-41     arrives
+ 178s  agent-152    arrives
+ 178s  agent-146    builds note-73 (1 path(s))
+ 178s  agent-54     builds note-105 (1 path(s))
+ 178s  agent-123    builds note-120 (1 path(s))
+ 178s  agent-181    couldn't claim note-149: claim: note-149 is agent-121's change: claim under a change name of your own
+ 178s  agent-168    arrives
+ 178s  agent-121    builds note-149 (1 path(s))
+ 179s  agent-58     builds note-150 (1 path(s))
+ 180s  agent-76     arrives
+ 180s  agent-192    builds note-36 (1 path(s))
+ 180s  agent-40     arrives
+ 180s  agent-108    builds note-102 (1 path(s))
+ 180s  agent-132    builds note-94 (1 path(s))
+ 181s  agent-82     builds note-90 (1 path(s))
+ 181s  agent-45     couldn't claim note-22: claim: note-22 is agent-101's change: claim under a change name of your own
+ 181s  agent-125    pushed note-101 ffd3af9: 1 file changed, 1 insertion(+)
+ 181s  agent-120    pushed note-155 73867c2: 1 file changed, 1 insertion(+)
+ 182s  agent-173    builds note-161 (1 path(s))
+ 182s  agent-35     builds note-40 (1 path(s))
+ 182s  agent-5      arrives
+ 182s  agent-41     builds note-114 (1 path(s))
+ 182s  agent-151    pushed note-145 50a93a6: 1 file changed, 1 insertion(+)
+ 182s  agent-153    arrives
+ 182s  agent-176    arrives
+ 182s  agent-17     builds note-26 (1 path(s))
+ 183s  agent-190    pushed note-160 9d99daf: 1 file changed, 1 insertion(+)
+ 183s  agent-74     arrives
+ 183s  agent-150    arrives
+ 183s  agent-168    couldn't claim note-102: claim: note-102 is agent-108's change: claim under a change name of your own
+ 183s  agent-181    couldn't claim note-22: claim: note-22 is agent-101's change: claim under a change name of your own
+ 183s  agent-152    builds note-70 (1 path(s))
+ 184s  agent-137    couldn't claim note-40: claim: note-40 is agent-35's change: claim under a change name of your own
+ 184s  agent-43     arrives
+ 185s  agent-64     builds note-171 (1 path(s))
+ 185s  agent-78     arrives
+ 185s  agent-157    arrives
+ 186s  agent-164    pushed note-6 7332ad5: 1 file changed, 1 insertion(+)
+ 186s  agent-40     builds note-157 (1 path(s))
+ 187s  agent-12     arrives
+ 187s  agent-85     pushed note-108 fe9ad33: 1 file changed, 1 insertion(+)
+ 187s  agent-104    arrives
+ 187s  agent-145    arrives
+ 187s  agent-74     builds note-167 (1 path(s))
+ 187s  agent-153    builds note-128 (1 path(s))
+ 188s  agent-45     builds note-53 (1 path(s))
+ 188s  agent-55     arrives
+ 188s  agent-168    builds note-195 (1 path(s))
+ 188s  agent-150    builds note-58 (1 path(s))
+ 189s  agent-176    couldn't claim note-39: claim: note-39 is agent-5's change: claim under a change name of your own
+ 189s  agent-76     builds note-142 (1 path(s))
+ 189s  agent-43     couldn't claim note-53: claim: note-53 is agent-45's change: claim under a change name of your own
+ 189s  agent-5      builds note-39 (1 path(s))
+ 189s  agent-191    arrives
+ 191s  agent-78     builds note-52 (1 path(s))
+ 191s  agent-11     arrives
+ 191s  agent-13     arrives
+ 191s  agent-12     couldn't claim note-53: claim: note-53 is agent-45's change: claim under a change name of your own
+ 191s  agent-34     arrives
+ 192s  agent-157    builds note-147 (1 path(s))
+ 192s  agent-115    pushed note-27 e0cd117: 1 file changed, 1 insertion(+)
+ 192s  agent-80     arrives
+ 192s  agent-181    builds note-85 (1 path(s))
+ 192s  agent-73     arrives
+ 193s  agent-137    builds note-57 (1 path(s))
+ 193s  agent-145    builds note-163 (1 path(s))
+ 193s  agent-46     arrives
+ 193s  agent-43     couldn't claim note-142: claim: note-142 is agent-76's change: claim under a change name of your own
+ 193s  agent-71     arrives
+ 194s  agent-135    arrives
+ 194s  agent-38     arrives
+ 194s  agent-176    builds note-176 (1 path(s))
+ 194s  agent-63     pushed note-20 bbc8bd8: 1 file changed, 1 insertion(+)
+ 194s  agent-191    couldn't claim note-176: claim: note-176 is agent-176's change: claim under a change name of your own
+ 194s  agent-55     builds note-190 (1 path(s))
+ 195s  agent-36     arrives
+ 195s  agent-11     couldn't claim note-58: claim: note-58 is agent-150's change: claim under a change name of your own
+ 195s  agent-106    pushed note-153 8b7c7c6: 1 file changed, 1 insertion(+)
+ 195s  agent-107    arrives
+ 195s  agent-9      arrives
+ 196s  agent-12     builds note-113 (1 path(s))
+ 196s  agent-13     couldn't claim note-147: claim: note-147 is agent-157's change: claim under a change name of your own
+ 197s  agent-104    builds note-192 (1 path(s))
+ 197s  agent-33     arrives
+ 197s  agent-124    arrives
+ 198s  agent-110    arrives
+ 198s  agent-84     arrives
+ 199s  agent-73     builds note-188 (1 path(s))
+ 199s  agent-142    pushed note-66 27bad42: 1 file changed, 1 insertion(+)
+ 199s  agent-38     builds note-14 (1 path(s))
+ 199s  agent-80     couldn't claim note-190: claim: note-190 is agent-55's change: claim under a change name of your own
+ 199s  agent-47     couldn't claim note-142: claim: note-142 is agent-76's change: claim under a change name of your own
+ 199s  agent-43     builds note-135 (1 path(s))
+ 199s  agent-46     builds note-86 (1 path(s))
+ 199s  agent-19     arrives
+ 199s  agent-69     arrives
+ 199s  agent-66     pushed note-54 35fdd13: 1 file changed, 1 insertion(+)
+ 199s  agent-36     builds note-2 (1 path(s))
+ 199s  agent-7      arrives
+ 199s  agent-2      pushed note-77 6ae8aa2: 1 file changed, 1 insertion(+)
+ 199s  agent-159    arrives
+ 200s  agent-34     builds note-199 (1 path(s))
+ 200s  agent-195    arrives
+ 200s  agent-148    arrives
+ 200s  agent-128    pushed note-169 46e2e31: 1 file changed, 1 insertion(+)
+ 200s  agent-11     builds note-76 (1 path(s))
+ 200s  agent-71     builds note-138 (1 path(s))
+ 200s  agent-88     arrives
+ 201s  agent-160    arrives
+ 201s  agent-135    builds note-35 (1 path(s))
+ 201s  agent-39     arrives
+ 201s  agent-30     arrives
+ 201s  agent-198    arrives
+ 201s  agent-103    arrives
+ 202s  agent-119    arrives
+ 202s  agent-9      builds note-42 (1 path(s))
+ 202s  agent-13     builds note-74 (1 path(s))
+ 202s  agent-124    builds note-81 (1 path(s))
+ 202s  agent-154    arrives
+ 203s  agent-191    builds note-1 (1 path(s))
+ 203s  agent-16     arrives
+ 203s  agent-15     arrives
+ 203s  agent-173    pushed note-161 7cabfd5: 1 file changed, 1 insertion(+)
+ 203s  agent-110    builds note-159 (1 path(s))
+ 203s  agent-19     couldn't claim note-199: claim: note-199 is agent-34's change: claim under a change name of your own
+ 203s  agent-33     couldn't claim note-190: claim: note-190 is agent-55's change: claim under a change name of your own
+ 204s  agent-47     builds note-9 (1 path(s))
+ 204s  agent-7      builds note-41 (1 path(s))
+ 204s  agent-114    arrives
+ 204s  agent-80     couldn't claim note-74: claim: note-74 is agent-13's change: claim under a change name of your own
+ 204s  agent-200    pushed note-63 bf768f1: 1 file changed, 1 insertion(+)
+ 204s  agent-148    couldn't claim note-138: claim: note-138 is agent-71's change: claim under a change name of your own
+ 204s  agent-69     builds note-18 (1 path(s))
+ 205s  agent-147    arrives
+ 205s  agent-186    pushed note-10 ad27198: 1 file changed, 1 insertion(+)
+ 205s  agent-195    couldn't claim note-81: claim: note-81 is agent-124's change: claim under a change name of your own
+ 205s  agent-159    builds note-156 (1 path(s))
+ 205s  agent-84     builds note-184 (1 path(s))
+ 206s  agent-88     builds note-109 (1 path(s))
+ 206s  agent-198    builds note-122 (1 path(s))
+ 206s  agent-61     arrives
+ 206s  agent-77     arrives
+ 206s  agent-30     builds note-64 (1 path(s))
+ 206s  agent-112    arrives
+ 206s  agent-119    couldn't claim note-42: claim: note-42 is agent-9's change: claim under a change name of your own
+ 206s  agent-23     arrives
+ 207s  agent-103    builds note-148 (1 path(s))
+ 207s  agent-19     couldn't claim note-41: claim: note-41 is agent-7's change: claim under a change name of your own
+ 207s  agent-39     couldn't claim note-122: claim: note-122 is agent-198's change: claim under a change name of your own
+ 208s  agent-160    builds note-3 (1 path(s))
+ 208s  agent-16     builds note-25 (1 path(s))
+ 208s  agent-118    pushed note-19 52a6a30: 1 file changed, 1 insertion(+)
+ 209s  agent-27     pushed note-146 b8d5758: 1 file changed, 1 insertion(+)
+ 209s  agent-15     couldn't claim note-74: claim: note-74 is agent-13's change: claim under a change name of your own
+ 209s  agent-148    builds note-121 (1 path(s))
+ 209s  agent-33     builds note-125 (1 path(s))
+ 209s  agent-154    couldn't claim note-41: claim: note-41 is agent-7's change: claim under a change name of your own
+ 210s  agent-195    couldn't claim note-41: claim: note-41 is agent-7's change: claim under a change name of your own
+ 210s  agent-114    builds note-49 (1 path(s))
+ 210s  agent-161    pushed note-12 5fe6335: 1 file changed, 1 insertion(+)
+ 210s  agent-132    pushed note-94 d354be1: 1 file changed, 1 insertion(+)
+ 211s  agent-77     builds note-119 (1 path(s))
+ 211s  agent-61     builds note-47 (1 path(s))
+ 211s  agent-23     couldn't claim note-125: claim: note-125 is agent-33's change: claim under a change name of your own
+ 212s  agent-39     couldn't claim note-47: claim: note-47 is agent-61's change: claim under a change name of your own
+ 212s  agent-123    pushed note-120 73cbc4b: 1 file changed, 1 insertion(+)
+ 212s  agent-112    builds note-65 (1 path(s))
+ 212s  agent-119    couldn't claim note-64: claim: note-64 is agent-30's change: claim under a change name of your own
+ 213s  agent-147    couldn't claim note-49: claim: note-49 is agent-114's change: claim under a change name of your own
+ 213s  agent-154    couldn't claim note-125: claim: note-125 is agent-33's change: claim under a change name of your own
+ 213s  agent-80     builds note-152 (1 path(s))
+ 214s  agent-19     builds note-198 (1 path(s))
+ 214s  agent-183    merged note-24 as a3b7b400
+ 214s  agent-74     pushed note-167 2b86401: 1 file changed, 1 insertion(+)
+ 214s  agent-4      pushed note-181 cf1490f: 1 file changed, 1 insertion(+)
+ 215s  agent-15     builds note-144 (1 path(s))
+ 215s  agent-41     pushed note-114 926d7ec: 1 file changed, 1 insertion(+)
+ 215s  agent-39     couldn't claim note-47: claim: note-47 is agent-61's change: claim under a change name of your own
+ 217s  agent-23     couldn't claim note-49: claim: note-49 is agent-114's change: claim under a change name of your own
+ 217s  agent-147    couldn't claim note-198: claim: note-198 is agent-19's change: claim under a change name of your own
+ 219s  agent-154    builds note-75 (1 path(s))
+ 219s  agent-195    builds note-5 (1 path(s))
+ 220s  agent-39     builds note-136 (1 path(s))
+ 221s  agent-35     pushed note-40 b1e3fce: 1 file changed, 1 insertion(+)
+ 221s  agent-31     pushed note-189 5746feb: 1 file changed, 1 insertion(+)
+ 221s  agent-183    merged note-24 as a3b7b400
+ 221s  agent-23     couldn't claim note-144: claim: note-144 is agent-15's change: claim under a change name of your own
+ 222s  agent-119    couldn't claim note-144: claim: note-144 is agent-15's change: claim under a change name of your own
+ 223s  agent-7      pushed note-41 9659ce7: 1 file changed, 1 insertion(+)
+ 223s  agent-147    builds note-33 (1 path(s))
+ 225s  agent-152    pushed note-70 a67e0ee: 1 file changed, 1 insertion(+)
+ 226s  agent-23     builds note-89 (1 path(s))
+ 226s  agent-183    builds note-45 (1 path(s))
+ 226s  agent-97     pushed note-178 7dc1fb7: 1 file changed, 1 insertion(+)
+ 226s  agent-53     pushed note-93 b3e49f8: 1 file changed, 1 insertion(+)
+ 226s  agent-119    builds note-179 (1 path(s))
+ 227s  agent-13     pushed note-74 41ca580: 1 file changed, 1 insertion(+)
+ 227s  agent-17     pushed note-26 d284830: 1 file changed, 1 insertion(+)
+ 229s  agent-137    pushed note-57 c69b326: 1 file changed, 1 insertion(+)
+ 229s  agent-25     pushed note-13 6991665: 1 file changed, 1 insertion(+)
+ 229s  agent-129    pushed note-34 e7cfad8: 1 file changed, 1 insertion(+)
+ 229s  agent-38     pushed note-14 15e57bd: 1 file changed, 1 insertion(+)
+ 231s  agent-71     pushed note-138 6be14c1: 1 file changed, 1 insertion(+)
+ 231s  agent-169    merged note-99 as 7dda66ba
+ 231s  agent-172    build note-117 failed:  | Node.js v22.12.0
+ 232s  agent-10     build note-103 failed:  | Node.js v22.12.0
+ 232s  agent-148    pushed note-121 2aacd17: 1 file changed, 1 insertion(+)
+ 232s  agent-57     merged note-111 as 7ac9aca4
+ 232s  agent-178    build note-61 failed:  | Node.js v22.12.0
+ 232s  agent-180    build note-185 failed:  | Node.js v22.12.0
+ 232s  agent-179    build note-11 failed:  | Node.js v22.12.0
+ 232s  agent-61     pushed note-47 d6d7ed5: 1 file changed, 1 insertion(+)
+ 232s  agent-176    pushed note-176 c32a523: 1 file changed, 1 insertion(+)
+ 232s  agent-33     pushed note-125 e37cc18: 1 file changed, 1 insertion(+)
+ 232s  agent-79     merged note-194 as b85959d6
+ 232s  agent-1      build note-28 failed:  | Node.js v22.12.0
+ 232s  agent-102    build note-110 failed:  | Node.js v22.12.0
+ 232s  agent-87     build note-17 failed:  | Node.js v22.12.0
+ 233s  agent-89     build note-143 failed:  | Node.js v22.12.0
+ 233s  agent-48     build note-158 failed:  | Node.js v22.12.0
+ 233s  agent-44     merged note-107 as 0651df2d
+ 233s  agent-8      build note-50 failed:  | Node.js v22.12.0
+ 233s  agent-165    build note-80 failed:  | Node.js v22.12.0
+ 233s  agent-49     build note-51 failed:  | Node.js v22.12.0
+ 233s  agent-93     build note-130 failed:  | Node.js v22.12.0
+ 233s  agent-187    build note-43 failed:  | Node.js v22.12.0
+ 233s  agent-156    build note-116 failed:  | Node.js v22.12.0
+ 233s  agent-16     pushed note-25 87b4152: 1 file changed, 1 insertion(+)
+ 233s  agent-164    merged note-6 as 26460510
+ 234s  agent-138    build note-172 failed:  | Node.js v22.12.0
+ 234s  agent-14     build note-141 failed:  | Node.js v22.12.0
+ 234s  agent-199    build note-23 failed:  | Node.js v22.12.0
+ 234s  agent-189    build note-174 failed:  | Node.js v22.12.0
+ 234s  agent-177    build note-183 failed:  | Node.js v22.12.0
+ 234s  agent-136    build note-175 failed:  | Node.js v22.12.0
+ 234s  agent-94     pushed note-48 071d6d0: 1 file changed, 1 insertion(+)
+ 234s  agent-106    merged note-153 as 3c31964f
+ 234s  agent-143    pushed note-84 9714580: 1 file changed, 1 insertion(+)
+ 234s  agent-99     build note-140 failed:  | Node.js v22.12.0
+ 234s  agent-116    build note-96 failed:  | Node.js v22.12.0
+ 235s  agent-80     pushed note-152 c39319d: 1 file changed, 1 insertion(+)
+ 235s  agent-167    build note-8 failed:  | Node.js v22.12.0
+ 235s  agent-95     build note-168 failed:  | Node.js v22.12.0
+ 237s  agent-195    pushed note-5 c4251aa: 1 file changed, 1 insertion(+)
+ 239s  agent-103    pushed note-148 b74f9aa: 1 file changed, 1 insertion(+)
+ 239s  agent-40     pushed note-157 a4740b2: 1 file changed, 1 insertion(+)
+ 240s  agent-114    pushed note-49 16b5eae: 1 file changed, 1 insertion(+)
+ 240s  agent-69     pushed note-18 5f230c0: 1 file changed, 1 insertion(+)
+ 240s  agent-43     pushed note-135 a9243ba: 1 file changed, 1 insertion(+)
+ 242s  agent-76     pushed note-142 a3e4cdb: 1 file changed, 1 insertion(+)
+ 242s  agent-57     merged note-111 as 7ac9aca4
+ 242s  agent-30     pushed note-64 2004bd9: 1 file changed, 1 insertion(+)
+ 244s  agent-79     merged note-194 as b85959d6
+ 244s  agent-88     pushed note-109 b7bfb7f: 1 file changed, 1 insertion(+)
+ 244s  agent-159    pushed note-156 9b24bf1: 1 file changed, 1 insertion(+)
+ 244s  agent-84     pushed note-184 fb2009b: 1 file changed, 1 insertion(+)
+ 245s  agent-44     merged note-107 as 0651df2d
+ 245s  agent-184    pushed note-162 2867a6f: 1 file changed, 1 insertion(+)
+ 246s  agent-77     pushed note-119 05e8e47: 1 file changed, 1 insertion(+)
+ 246s  agent-39     pushed note-136 f9a76f7: 1 file changed, 1 insertion(+)
+ 247s  agent-121    pushed note-149 fdb8ff4: 1 file changed, 1 insertion(+)
+ 248s  agent-153    pushed note-128 6b675f7: 1 file changed, 1 insertion(+)
+ 248s  agent-58     pushed note-150 6268119: 1 file changed, 1 insertion(+)
+ 248s  agent-87     builds note-17 (1 path(s))
+ 248s  agent-50     pushed note-7 575c85f: 1 file changed, 1 insertion(+)
+ 249s  agent-48     builds note-158 (1 path(s))
+ 249s  agent-106    merged note-153 as 3c31964f
+ 249s  agent-198    pushed note-122 56087c7: 1 file changed, 1 insertion(+)
+ 249s  agent-164    merged note-6 as 26460510
+ 249s  agent-27     merged note-146 as 9f2effc5
+ 249s  agent-110    pushed note-159 3cc3979: 1 file changed, 1 insertion(+)
+ 250s  agent-89     builds note-143 (1 path(s))
+ 250s  agent-180    builds note-185 (1 path(s))
+ 250s  agent-5      pushed note-39 c69a027: 1 file changed, 1 insertion(+)
+ 250s  agent-136    builds note-175 (1 path(s))
+ 251s  agent-104    pushed note-192 0264d4c: 1 file changed, 1 insertion(+)
+ 252s  agent-1      builds note-28 (1 path(s))
+ 252s  agent-8      builds note-50 (1 path(s))
+ 252s  agent-116    builds note-96 (1 path(s))
+ 252s  agent-156    builds note-116 (1 path(s))
+ 252s  agent-177    builds note-183 (1 path(s))
+ 252s  agent-135    pushed note-35 ff5f33e: 1 file changed, 1 insertion(+)
+ 252s  agent-179    builds note-11 (1 path(s))
+ 253s  agent-99     builds note-140 (1 path(s))
+ 253s  agent-138    builds note-172 (1 path(s))
+ 253s  agent-102    builds note-110 (1 path(s))
+ 253s  agent-187    builds note-43 (1 path(s))
+ 253s  agent-49     builds note-51 (1 path(s))
+ 254s  agent-199    builds note-23 (1 path(s))
+ 254s  agent-15     pushed note-144 6bc1a96: 1 file changed, 1 insertion(+)
+ 255s  agent-154    pushed note-75 d3c9689: 1 file changed, 1 insertion(+)
+ 255s  agent-150    pushed note-58 ad7ea33: 1 file changed, 1 insertion(+)
+ 255s  agent-10     builds note-103 (1 path(s))
+ 255s  agent-165    builds note-80 (1 path(s))
+ 255s  agent-178    builds note-61 (1 path(s))
+ 255s  agent-189    builds note-174 (1 path(s))
+ 255s  agent-95     builds note-168 (1 path(s))
+ 255s  agent-172    builds note-117 (1 path(s))
+ 255s  agent-167    builds note-8 (1 path(s))
+ 256s  agent-14     builds note-141 (1 path(s))
+ 256s  agent-93     builds note-130 (1 path(s))
+ 259s  agent-183    pushed note-45 69b7abe: 1 file changed, 1 insertion(+)
+ 265s  agent-147    pushed note-33 58417d5: 1 file changed, 1 insertion(+)
+ 265s  agent-107    couldn't claim note-152: claim: note-152 is agent-80's change: claim under a change name of your own
+ 271s  agent-70     build note-55 failed:  | Node.js v22.12.0
+ 275s  agent-122    build note-197 failed:  | Node.js v22.12.0
+ 277s  agent-117    build note-67 failed:  | Node.js v22.12.0
+ 277s  agent-92     build note-123 failed:  | Node.js v22.12.0
+ 277s  agent-60     build note-92 failed:  | Node.js v22.12.0
+ 277s  agent-137    merged note-57 as f778d3d6
+ 277s  agent-27     merged note-146 as 9f2effc5
+ 277s  agent-76     merge note-142 failed: merge: HTTP 500 <!DOCTYPE html>
+<!--[if lt IE 7]> <html class="no-js ie6 oldie" lang="en-US"> <![endif]-->
+<!--[if IE 7]>    <html class="no-js ie7 oldie" lang="en-US"> <![endif]-->
+<!--[if IE 8]>    <html class="no-
+ 277s  agent-170    build note-133 failed:  | Node.js v22.12.0
+ 277s  agent-166    build note-4 failed:  | Node.js v22.12.0
+ 277s  agent-126    build note-38 failed:  | Node.js v22.12.0
+ 277s  agent-68     build note-91 failed:  | Node.js v22.12.0
+ 278s  agent-133    build note-30 failed:  | Node.js v22.12.0
+ 278s  agent-21     build note-87 failed:  | Node.js v22.12.0
+ 278s  agent-158    build note-69 failed:  | Node.js v22.12.0
+ 278s  agent-59     build note-118 failed:  | Node.js v22.12.0
+ 278s  agent-65     build note-115 failed:  | Node.js v22.12.0
+ 278s  agent-72     build note-78 failed:  | Node.js v22.12.0
+ 278s  agent-24     build note-134 failed:  | Node.js v22.12.0
+ 278s  agent-111    build note-132 failed:  | Node.js v22.12.0
+ 278s  agent-98     build note-98 failed:  | Node.js v22.12.0
+ 279s  agent-134    build note-112 failed:  | Node.js v22.12.0
+ 279s  agent-42     build note-44 failed:  | Node.js v22.12.0
+ 279s  agent-32     build note-173 failed:  | Node.js v22.12.0
+ 279s  agent-113    build note-164 failed:  | Node.js v22.12.0
+ 279s  agent-197    build note-95 failed:  | Node.js v22.12.0
+ 279s  agent-18     build note-71 failed:  | Node.js v22.12.0
+ 279s  agent-100    build note-21 failed:  | Node.js v22.12.0
+ 279s  agent-108    build note-102 failed:  | Node.js v22.12.0
+ 279s  agent-83     build note-124 failed:  | Node.js v22.12.0
+ 280s  agent-144    build note-31 failed:  | Node.js v22.12.0
+ 280s  agent-75     build note-126 failed:  | Node.js v22.12.0
+ 280s  agent-139    build note-62 failed:  | Node.js v22.12.0
+ 280s  agent-26     build note-139 failed:  | Node.js v22.12.0
+ 280s  agent-188    build note-97 failed:  | Node.js v22.12.0
+ 280s  agent-51     build note-131 failed:  | Node.js v22.12.0
+ 285s  agent-172    pushed note-117 13f27ac: 1 file changed, 1 insertion(+)
+ 287s  agent-179    pushed note-11 10fdce6: 1 file changed, 1 insertion(+)
+ 287s  agent-136    pushed note-175 121f9b0: 1 file changed, 1 insertion(+)
+ 289s  agent-70     builds note-55 (1 path(s))
+ 292s  agent-14     pushed note-141 6ed0ae4: 1 file changed, 1 insertion(+)
+ 293s  agent-21     builds note-87 (1 path(s))
+ 293s  agent-137    merged note-57 as f778d3d6
+ 293s  agent-167    pushed note-8 ee17d90: 1 file changed, 1 insertion(+)
+ 293s  agent-60     builds note-92 (1 path(s))
+ 293s  agent-122    builds note-197 (1 path(s))
+ 294s  agent-116    pushed note-96 f82147c: 1 file changed, 1 insertion(+)
+ 294s  agent-158    builds note-69 (1 path(s))
+ 295s  agent-197    builds note-95 (1 path(s))
+ 295s  agent-72     builds note-78 (1 path(s))
+ 295s  agent-18     builds note-71 (1 path(s))
+ 295s  agent-108    builds note-102 (1 path(s))
+ 295s  agent-133    builds note-30 (1 path(s))
+ 295s  agent-170    builds note-133 (1 path(s))
+ 295s  agent-113    builds note-164 (1 path(s))
+ 295s  agent-26     builds note-139 (1 path(s))
+ 295s  agent-83     builds note-124 (1 path(s))
+ 295s  agent-100    builds note-21 (1 path(s))
+ 296s  agent-178    pushed note-61 5126ed2: 1 file changed, 1 insertion(+)
+ 296s  agent-126    builds note-38 (1 path(s))
+ 296s  agent-111    builds note-132 (1 path(s))
+ 296s  agent-166    builds note-4 (1 path(s))
+ 296s  agent-92     builds note-123 (1 path(s))
+ 296s  agent-59     builds note-118 (1 path(s))
+ 296s  agent-68     builds note-91 (1 path(s))
+ 297s  agent-187    pushed note-43 46c04f8: 1 file changed, 1 insertion(+)
+ 297s  agent-32     builds note-173 (1 path(s))
+ 297s  agent-75     builds note-126 (1 path(s))
+ 297s  agent-117    builds note-67 (1 path(s))
+ 298s  agent-48     pushed note-158 75495c5: 1 file changed, 1 insertion(+)
+ 298s  agent-188    builds note-97 (1 path(s))
+ 299s  agent-51     builds note-131 (1 path(s))
+ 299s  agent-144    builds note-31 (1 path(s))
+ 299s  agent-134    builds note-112 (1 path(s))
+ 299s  agent-98     builds note-98 (1 path(s))
+ 299s  agent-139    builds note-62 (1 path(s))
+ 300s  agent-65     builds note-115 (1 path(s))
+ 301s  agent-42     builds note-44 (1 path(s))
+ 301s  agent-87     pushed note-17 f1ccaea: 1 file changed, 1 insertion(+)
+ 301s  agent-24     builds note-134 (1 path(s))
+ 302s  agent-95     pushed note-168 4d2e359: 1 file changed, 1 insertion(+)
+ 303s  agent-93     pushed note-130 ff2c7f0: 1 file changed, 1 insertion(+)
+ 304s  agent-165    pushed note-80 ed172fe: 1 file changed, 1 insertion(+)
+ 309s  agent-49     pushed note-51 42a5294: 1 file changed, 1 insertion(+)
+ 311s  agent-141    build note-166 failed:  | Node.js v22.12.0
+ 311s  agent-131    build note-186 failed:  | Node.js v22.12.0
+ 313s  agent-3      build note-182 failed:  | Node.js v22.12.0
+ 313s  agent-155    build note-16 failed:  | Node.js v22.12.0
+ 317s  agent-158    pushed note-69 a4589d6: 1 file changed, 1 insertion(+)
+ 318s  agent-122    pushed note-197 b2dee61: 1 file changed, 1 insertion(+)
+ 319s  agent-51     pushed note-131 9719530: 1 file changed, 1 insertion(+)
+ 319s  agent-24     pushed note-134 1ad1900: 1 file changed, 1 insertion(+)
+ 322s  agent-26     pushed note-139 18391b2: 1 file changed, 1 insertion(+)
+ 323s  agent-117    pushed note-67 ce28984: 1 file changed, 1 insertion(+)
+ 325s  agent-75     pushed note-126 f505e88: 1 file changed, 1 insertion(+)
+ 326s  agent-59     pushed note-118 2fd560e: 1 file changed, 1 insertion(+)
+ 327s  agent-32     pushed note-173 9a0d24d: 1 file changed, 1 insertion(+)
+ 328s  agent-42     pushed note-44 e15a097: 1 file changed, 1 insertion(+)
+ 331s  agent-166    pushed note-4 1cb2879: 1 file changed, 1 insertion(+)
+ 332s  agent-134    pushed note-112 2cb4620: 1 file changed, 1 insertion(+)
+ 333s  agent-68     pushed note-91 28f1193: 1 file changed, 1 insertion(+)
+ 334s  agent-197    pushed note-95 8656edd: 1 file changed, 1 insertion(+)
+ 338s  agent-60     pushed note-92 528cc2e: 1 file changed, 1 insertion(+)
+ 343s  agent-170    pushed note-133 63b449a: 1 file changed, 1 insertion(+)
+ 345s  agent-155    builds note-16 (1 path(s))
+ 346s  agent-3      builds note-182 (1 path(s))
+ 346s  agent-131    builds note-186 (1 path(s))
+ 352s  agent-9      build note-42 failed:  | Node.js v22.12.0
+ 352s  agent-47     build note-9 failed:  | Node.js v22.12.0
+ 353s  agent-1      finish note-28 failed:  | Node.js v22.12.0
+ 355s  agent-141    builds note-166 (1 path(s))
+ 356s  agent-23     build note-89 failed:  | Node.js v22.12.0
+ 356s  agent-45     build note-53 failed:  | Node.js v22.12.0
+ 356s  agent-124    build note-81 failed:  | Node.js v22.12.0
+ 356s  agent-191    build note-1 failed:  | Node.js v22.12.0
+ 357s  agent-168    build note-195 failed:  | Node.js v22.12.0
+ 357s  agent-160    build note-3 failed:  | Node.js v22.12.0
+ 357s  agent-12     build note-113 failed:  | Node.js v22.12.0
+ 357s  agent-89     finish note-143 failed:  | Node.js v22.12.0
+ 357s  agent-34     build note-199 failed:  | Node.js v22.12.0
+ 359s  agent-56     build note-72 failed:  | Node.js v22.12.0
+ 362s  agent-181    build note-85 failed:  | Node.js v22.12.0
+ 363s  agent-28     build note-79 failed:  | Node.js v22.12.0
+ 363s  agent-91     build note-196 failed:  | Node.js v22.12.0
+ 363s  agent-37     build note-127 failed:  | Node.js v22.12.0
+ 363s  agent-11     build note-76 failed:  | Node.js v22.12.0
+ 363s  agent-82     build note-90 failed:  | Node.js v22.12.0
+ 363s  agent-73     build note-188 failed:  | Node.js v22.12.0
+ 363s  agent-55     build note-190 failed:  | Node.js v22.12.0
+ 364s  agent-101    build note-22 failed:  | Node.js v22.12.0
+ 380s  agent-8      finish note-50 failed:  | Node.js v22.12.0
+ 387s  agent-9      builds note-42 (1 path(s))
+ 387s  agent-89     builds note-143 (1 path(s))
+ 387s  agent-47     builds note-9 (1 path(s))
+ 387s  agent-1      builds note-28 (1 path(s))
+ 387s  agent-23     builds note-89 (1 path(s))
+ 387s  agent-6      pushed note-15 3310a8a: 1 file changed, 1 insertion(+)
+ 387s  agent-45     builds note-53 (1 path(s))
+ 388s  agent-56     builds note-72 (1 path(s))
+ 388s  agent-82     builds note-90 (1 path(s))
+ 388s  agent-55     builds note-190 (1 path(s))
+ 388s  agent-124    builds note-81 (1 path(s))
+ 388s  agent-91     builds note-196 (1 path(s))
+ 388s  agent-191    builds note-1 (1 path(s))
+ 388s  agent-181    builds note-85 (1 path(s))
+ 388s  agent-73     builds note-188 (1 path(s))
+ 388s  agent-12     builds note-113 (1 path(s))
+ 391s  agent-10     finish note-103 failed:  | Node.js v22.12.0
+ 391s  agent-180    finish note-185 failed:  | Node.js v22.12.0
+ 394s  agent-34     builds note-199 (1 path(s))
+ 394s  agent-168    builds note-195 (1 path(s))
+ 394s  agent-28     builds note-79 (1 path(s))
+ 394s  agent-11     builds note-76 (1 path(s))
+ 394s  agent-37     builds note-127 (1 path(s))
+ 395s  agent-160    builds note-3 (1 path(s))
+ 395s  agent-101    builds note-22 (1 path(s))
+ 399s  agent-8      builds note-50 (1 path(s))
+ 400s  agent-29     build note-129 failed:  | Node.js v22.12.0
+ 401s  agent-149    build note-56 failed:  | Node.js v22.12.0
+ 401s  agent-126    finish note-38 failed:  | Node.js v22.12.0
+ 402s  agent-83     finish note-124 failed:  | Node.js v22.12.0
+ 405s  agent-140    pushed note-151 6e52be3: 1 file changed, 1 insertion(+)
+ 411s  agent-96     build note-187 failed:  | Node.js v22.12.0
+ 411s  agent-162    build note-193 failed:  | Node.js v22.12.0
+ 412s  agent-180    builds note-185 (1 path(s))
+ 412s  agent-10     builds note-103 (1 path(s))
+ 413s  agent-54     pushed note-105 0852210: 1 file changed, 1 insertion(+)
+ 416s  agent-86     build note-68 failed:  | Node.js v22.12.0
+ 416s  agent-182    build note-106 failed:  | Node.js v22.12.0
+ 416s  agent-67     build note-191 failed:  | Node.js v22.12.0
+ 417s  agent-126    builds note-38 (1 path(s))
+ 417s  agent-196    build note-59 failed:  | Node.js v22.12.0
+ 417s  agent-52     build note-82 failed:  | Node.js v22.12.0
+ 418s  agent-149    builds note-56 (1 path(s))
+ 418s  agent-83     builds note-124 (1 path(s))
+ 421s  agent-29     builds note-129 (1 path(s))
+ 423s  agent-193    pushed note-60 de3266e: 1 file changed, 1 insertion(+)
+ 424s  agent-90     pushed note-32 0622321: 1 file changed, 1 insertion(+)
+ 425s  agent-81     pushed note-104 4fa16d4: 1 file changed, 1 insertion(+)
+ 428s  agent-194    pushed note-200 977152a: 1 file changed, 1 insertion(+)
+ 428s  agent-141    pushed note-166 706b448: 1 file changed, 1 insertion(+)
+ 429s  agent-72     finish note-78 failed:  | Node.js v22.12.0
+ 429s  agent-65     finish note-115 failed:  | Node.js v22.12.0
+ 429s  agent-113    finish note-164 failed:  | Node.js v22.12.0
+ 429s  agent-98     finish note-98 failed:  | Node.js v22.12.0
+ 430s  agent-162    builds note-193 (1 path(s))
+ 431s  agent-96     builds note-187 (1 path(s))
+ 433s  agent-182    builds note-106 (1 path(s))
+ 434s  agent-67     builds note-191 (1 path(s))
+ 434s  agent-86     builds note-68 (1 path(s))
+ 435s  agent-171    pushed note-154 23e6ec8: 1 file changed, 1 insertion(+)
+ 436s  agent-138    finish note-172 failed:  | Node.js v22.12.0
+ 436s  agent-112    build note-65 failed:  | Node.js v22.12.0
+ 437s  agent-109    build note-180 failed:  | Node.js v22.12.0
+ 437s  agent-52     builds note-82 (1 path(s))
+ 437s  agent-127    build note-29 failed:  | Node.js v22.12.0
+ 438s  agent-145    build note-163 failed:  | Node.js v22.12.0
+ 438s  agent-196    builds note-59 (1 path(s))
+ 438s  agent-62     build note-83 failed:  | Node.js v22.12.0
+ 441s  agent-105    build note-88 failed:  | Node.js v22.12.0
+ 443s  agent-20     pushed note-46 1bd9e73: 1 file changed, 1 insertion(+)
+ 444s  agent-72     builds note-78 (1 path(s))
+ 445s  agent-113    builds note-164 (1 path(s))
+ 445s  agent-65     builds note-115 (1 path(s))
+ 446s  agent-163    build note-177 failed:  | Node.js v22.12.0
+ 447s  agent-70     finish note-55 failed:  | Node.js v22.12.0
+ 447s  agent-177    finish note-183 failed:  | Node.js v22.12.0
+ 447s  agent-133    finish note-30 failed:  | Node.js v22.12.0
+ 447s  agent-119    build note-179 failed:  | Node.js v22.12.0
+ 447s  agent-199    finish note-23 failed:  | Node.js v22.12.0
+ 447s  agent-92     finish note-123 failed:  | Node.js v22.12.0
+ 448s  agent-111    finish note-132 failed:  | Node.js v22.12.0
+ 448s  agent-155    finish note-16 failed:  | Node.js v22.12.0
+ 448s  agent-98     builds note-98 (1 path(s))
+ 448s  agent-186    merged note-10 as 142a2820
+ 449s  agent-200    merged note-63 as 34fddf2c
+ 449s  agent-63     merged note-20 as 952eb4c9
+ 449s  agent-71     merged note-138 as f42064b8
+ 449s  agent-159    merged note-156 as de77069a
+ 449s  agent-116    merged note-96 as a5dc2138
+ 449s  agent-118    merged note-19 as fb773957
+ 449s  agent-76     merged note-142 as 07ac7f36
+ 449s  agent-30     merged note-64 as fbd6241e
+ 449s  agent-129    merged note-34 as 9ee21bfa
+ 449s  agent-115    merged note-27 as a7f19f03
+ 449s  agent-198    merged note-122 as 2184ef10
+ 449s  agent-161    merged note-12 as 6dd2f714
+ 449s  agent-123    merged note-120 as b01edd0d
+ 449s  agent-97     merged note-178 as f6ecc717
+ 449s  agent-176    merged note-176 as f18f5f34
+ 449s  agent-136    merged note-175 as 49cccc92
+ 449s  agent-25     merged note-13 as b40ff0c3
+ 449s  agent-5      merged note-39 as 43639d60
+ 449s  agent-84     merged note-184 as 3a0a9d65
+ 449s  agent-7      merged note-41 as e2141224
+ 450s  agent-153    merged note-128 as 4562a1fd
+ 450s  agent-66     merged note-54 as a20eb361
+ 450s  agent-178    merged note-61 as 4010a578
+ 450s  agent-50     merged note-7 as 42b6dea0
+ 450s  agent-58     merged note-150 as 3a8161b4
+ 450s  agent-110    merged note-159 as ae831b36
+ 450s  agent-53     merged note-93 as cec28059
+ 450s  agent-158    merged note-69 as 56b0592d
+ 450s  agent-173    merged note-161 as 924f2c5c
+ 450s  agent-132    merged note-94 as 732e0c3c
+ 450s  agent-4      merged note-181 as f15a6fdd
+ 450s  agent-128    merged note-169 as 6fdeb986
+ 450s  agent-190    merged note-160 as 37394d98
+ 450s  agent-143    merged note-84 as 887c7a03
+ 450s  agent-88     merged note-109 as 26943c64
+ 450s  agent-31     merged note-189 as b5237e56
+ 450s  agent-125    merged note-101 as d9c62cee
+ 450s  agent-104    merged note-192 as 7a7f98b0
+ 450s  agent-40     merged note-157 as 4a84ef1a
+ 450s  agent-41     merged note-114 as c0617ab7
+ 450s  agent-187    merged note-43 as 24f3f47b
+ 451s  agent-120    merged note-155 as 47b29dc5
+ 451s  agent-152    merged note-70 as b0d4200d
+ 451s  agent-135    merged note-35 as 9ff4612c
+ 451s  agent-85     merged note-108 as 73f9f5b4
+ 451s  agent-13     merged note-74 as c04ecfad
+ 451s  agent-142    merged note-66 as 415eb290
+ 451s  agent-151    merged note-145 as ccf061da
+ 451s  agent-38     merged note-14 as 9cefee3b
+ 451s  agent-74     merged note-167 as c631cbf2
+ 451s  agent-150    merged note-58 as fdbd63db
+ 451s  agent-165    merged note-80 as df51cabf
+ 451s  agent-121    merged note-149 as 4207f368
+ 451s  agent-35     merged note-40 as cbc8bc51
+ 452s  agent-69     merged note-18 as 2f68bcd2
+ 452s  agent-94     merged note-48 as c4eeafdb
+ 452s  agent-22     merged note-100 as 63ac9315
+ 452s  agent-167    merged note-8 as 823cb101
+ 452s  agent-49     merged note-51 as d71f5457
+ 452s  agent-17     merged note-26 as e6e28c8a
+ 453s  agent-175    pushed note-37 0b9fa97: 1 file changed, 1 insertion(+)
+ 453s  swarm        note-77 landed as ca4082e9, in another merge's batch
+ 453s  swarm        note-162 landed as 5b818eeb, in another merge's batch
+ 453s  swarm        note-135 landed as 7e063c5b, in another merge's batch
+ 453s  agent-127    builds note-29 (1 path(s))
+ 453s  agent-138    builds note-172 (1 path(s))
+ 454s  agent-109    builds note-180 (1 path(s))
+ 455s  agent-2      merged note-77 as ca4082e9
+ 455s  agent-43     merged note-135 as 7e063c5b
+ 455s  agent-145    builds note-163 (1 path(s))
+ 455s  agent-112    builds note-65 (1 path(s))
+ 456s  agent-62     builds note-83 (1 path(s))
+ 460s  agent-105    builds note-88 (1 path(s))
+ 460s  agent-185    pushed note-165 bc2d7c0: 1 file changed, 1 insertion(+)
+ 462s  agent-174    build note-137 failed:  | Node.js v22.12.0
+ 463s  agent-70     builds note-55 (1 path(s))
+ 463s  agent-199    builds note-23 (1 path(s))
+ 463s  agent-133    builds note-30 (1 path(s))
+ 464s  agent-92     builds note-123 (1 path(s))
+ 464s  agent-163    builds note-177 (1 path(s))
+ 464s  agent-155    builds note-16 (1 path(s))
+ 465s  agent-177    builds note-183 (1 path(s))
+ 466s  agent-119    builds note-179 (1 path(s))
+ 468s  agent-184    merged note-162 as 5b818eeb
+ 469s  agent-144    finish note-31 failed:  | Node.js v22.12.0
+ 469s  agent-131    finish note-186 failed:  | Node.js v22.12.0
+ 470s  agent-139    finish note-62 failed:  | Node.js v22.12.0
+ 471s  agent-115    merged note-27 as a7f19f03
+ 472s  agent-97     merged note-178 as f6ecc717
+ 472s  agent-142    merged note-66 as 415eb290
+ 473s  agent-85     merged note-108 as 73f9f5b4
+ 473s  agent-167    merged note-8 as 823cb101
+ 473s  agent-50     merged note-7 as 42b6dea0
+ 473s  agent-129    merged note-34 as 9ee21bfa
+ 474s  agent-111    builds note-132 (1 path(s))
+ 476s  agent-38     merged note-14 as 9cefee3b
+ 476s  agent-94     merged note-48 as c4eeafdb
+ 476s  agent-130    build note-170 failed:  | Node.js v22.12.0
+ 476s  agent-53     merged note-93 as cec28059
+ 477s  agent-49     merged note-51 as d71f5457
+ 477s  agent-58     merged note-150 as 3a8161b4
+ 477s  agent-5      merged note-39 as 43639d60
+ 479s  agent-146    build note-73 failed:  | Node.js v22.12.0
+ 479s  agent-200    merged note-63 as 34fddf2c
+ 479s  agent-13     merged note-74 as c04ecfad
+ 480s  agent-174    builds note-137 (1 path(s))
+ 481s  agent-192    build note-36 failed:  | Node.js v22.12.0
+ 481s  agent-198    merged note-122 as 2184ef10
+ 481s  agent-63     merged note-20 as 952eb4c9
+ 482s  agent-125    merged note-101 as d9c62cee
+ 483s  agent-165    merged note-80 as df51cabf
+ 484s  agent-88     merged note-109 as 26943c64
+ 484s  agent-116    merged note-96 as a5dc2138
+ 484s  agent-150    merged note-58 as fdbd63db
+ 485s  agent-187    merged note-43 as 24f3f47b
+ 485s  agent-161    merged note-12 as 6dd2f714
+ 485s  agent-190    merged note-160 as 37394d98
+ 485s  agent-144    builds note-31 (1 path(s))
+ 485s  agent-131    builds note-186 (1 path(s))
+ 486s  agent-64     build note-171 failed:  | Node.js v22.12.0
+ 487s  agent-139    builds note-62 (1 path(s))
+ 488s  agent-43     merged note-135 as 7e063c5b
+ 488s  agent-31     merged note-189 as b5237e56
+ 489s  agent-121    merged note-149 as 4207f368
+ 491s  agent-71     merged note-138 as f42064b8
+ 492s  agent-78     build note-52 failed:  | Node.js v22.12.0
+ 492s  agent-120    merged note-155 as 47b29dc5
+ 493s  agent-176    merged note-176 as f18f5f34
+ 494s  agent-104    merged note-192 as 7a7f98b0
+ 495s  agent-186    merged note-10 as 142a2820
+ 497s  agent-108    pushed note-102 905163b: 1 file changed, 1 insertion(+)
+ 498s  agent-146    builds note-73 (1 path(s))
+ 499s  agent-130    builds note-170 (1 path(s))
+ 500s  agent-46     build note-86 failed:  | Node.js v22.12.0
+ 500s  agent-36     build note-2 failed:  | Node.js v22.12.0
+ 502s  agent-86     pushed note-68 dee4b58: 1 file changed, 1 insertion(+)
+ 503s  agent-192    builds note-36 (1 path(s))
+ 507s  agent-64     builds note-171 (1 path(s))
+ 507s  agent-157    pushed note-147 6dd7a04: 1 file changed, 1 insertion(+)
+ 509s  agent-21     pushed note-87 f2700cb: 1 file changed, 1 insertion(+)
+ 510s  agent-78     builds note-52 (1 path(s))
+ 511s  agent-25     merged note-13 as b40ff0c3
+ 512s  agent-136    merged note-175 as 49cccc92
+ 513s  agent-8      finish note-50 failed:  | Node.js v22.12.0
+ 515s  agent-30     merged note-64 as fbd6241e
+ 515s  agent-19     build note-198 failed:  | Node.js v22.12.0
+ 516s  agent-29     finish note-129 failed:  | Node.js v22.12.0
+ 519s  agent-9      finish note-42 failed:  | Node.js v22.12.0
+ 519s  agent-46     builds note-86 (1 path(s))
+ 519s  agent-151    merged note-145 as ccf061da
+ 520s  agent-1      finish note-28 failed:  | Node.js v22.12.0
+ 520s  agent-96     pushed note-187 b6e8914: 1 file changed, 1 insertion(+)
+ 522s  agent-36     builds note-2 (1 path(s))
+ 522s  agent-41     merged note-114 as c0617ab7
+ 528s  agent-11     finish note-76 failed:  | Node.js v22.12.0
+ 529s  agent-8      builds note-50 (1 path(s))
+ 531s  agent-149    pushed note-56 74f6e1c: 1 file changed, 1 insertion(+)
+ 534s  agent-183    merged note-45 as 509eadf9
+ 534s  agent-77     merged note-119 as f0076231
+ 534s  agent-170    merged note-133 as 013b89ba
+ 534s  agent-29     builds note-129 (1 path(s))
+ 534s  agent-61     merged note-47 as dd9cb8ed
+ 534s  agent-14     merged note-141 as db056482
+ 535s  agent-87     merged note-17 as 5a1e0be2
+ 535s  agent-48     merged note-158 as 1fd7d1b4
+ 535s  agent-154    merged note-75 as 01159b1f
+ 535s  agent-147    merged note-33 as 26b1e1f2
+ 535s  agent-16     merged note-25 as e1a40c24
+ 535s  agent-26     merged note-139 as a4cdb2b2
+ 535s  agent-93     merged note-130 as f5931b69
+ 535s  agent-197    merged note-95 as fc517c4d
+ 535s  agent-140    merged note-151 as 6ff3dae9
+ 535s  agent-117    merged note-67 as 1a94cd78
+ 535s  agent-32     merged note-173 as 9a1fa6ef
+ 535s  agent-60     merged note-92 as 0d7e134c
+ 535s  agent-75     merged note-126 as 9da3eee9
+ 535s  agent-51     merged note-131 as 48a3b2a9
+ 535s  agent-42     merged note-44 as 71bf3dc9
+ 535s  agent-122    merged note-197 as 1d97dae7
+ 535s  agent-6      merged note-15 as 652aa7e3
+ 535s  agent-68     merged note-91 as 29b65c78
+ 535s  agent-172    merged note-117 as 157c629a
+ 535s  agent-103    merged note-148 as 4333dbbf
+ 536s  agent-195    merged note-5 as 47d5a2c8
+ 536s  agent-188    pushed note-97 848dc7e: 1 file changed, 1 insertion(+)
+ 536s  agent-59     merged note-118 as ce0521e7
+ 536s  agent-95     merged note-168 as 16a3bbcd
+ 536s  agent-1      builds note-28 (1 path(s))
+ 536s  agent-39     merged note-136 as af00f9a3
+ 536s  agent-24     merged note-134 as 830e2724
+ 536s  agent-114    merged note-49 as 9b497316
+ 536s  agent-19     builds note-198 (1 path(s))
+ 536s  agent-196    pushed note-59 4c4686d: 1 file changed, 1 insertion(+)
+ 536s  agent-33     merged note-125 as 69e6ef8f
+ 537s  agent-90     merged note-32 as 7a900121
+ 537s  agent-179    merged note-11 as 0411c6cc
+ 537s  agent-15     merged note-144 as 3c6f67bc
+ 537s  agent-148    merged note-121 as b8607347
+ 537s  agent-134    merged note-112 as 263a23f6
+ 537s  agent-193    merged note-60 as 00c87f91
+ 537s  agent-166    merged note-4 as 15ae90f8
+ 537s  agent-52     pushed note-82 26b97b6: 1 file changed, 1 insertion(+)
+ 537s  agent-159    merged note-156 as de77069a
+ 537s  agent-40     merged note-157 as 4a84ef1a
+ 538s  swarm        note-152 landed as 624d9eff, in another merge's batch
+ 538s  agent-9      builds note-42 (1 path(s))
+ 542s  agent-29     finish note-129 failed: Command failed: node /Users/inbase210810/cloudflare/blueprint-free/scripts/mcp-agent.mjs clone /Users/inbase210810/cloudflare/blueprint-free/bench-results/swarm/200/swarm-work/note-129 --repo express-swarm-210 --change note-129 --key-file /Users/inbase210810/cloudflare/blueprint-free/bench-results/s
+ 542s  agent-139    finish note-62 failed: Command failed: node /Users/inbase210810/cloudflare/blueprint-free/scripts/mcp-agent.mjs clone /Users/inbase210810/cloudflare/blueprint-free/bench-results/swarm/200/swarm-work/note-62 --repo express-swarm-210 --change note-62 --key-file /Users/inbase210810/cloudflare/blueprint-free/bench-results/swa
+ 542s  agent-8      finish note-50 failed: Command failed: node /Users/inbase210810/cloudflare/blueprint-free/scripts/mcp-agent.mjs clone /Users/inbase210810/cloudflare/blueprint-free/bench-results/swarm/200/swarm-work/note-50 --repo express-swarm-210 --change note-50 --key-file /Users/inbase210810/cloudflare/blueprint-free/bench-results/swa
+ 542s  agent-19     finish note-198 failed: Command failed: node /Users/inbase210810/cloudflare/blueprint-free/scripts/mcp-agent.mjs clone /Users/inbase210810/cloudflare/blueprint-free/bench-results/swarm/200/swarm-work/note-198 --repo express-swarm-210 --change note-198 --key-file /Users/inbase210810/cloudflare/blueprint-free/bench-results/s

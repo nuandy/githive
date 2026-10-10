@@ -1,0 +1,119 @@
+    0s  run        5 Claude Code agents (claude-sonnet-5-5) on express-agents-4, 6 pieces in its backlog
+    7s  agent-2    githive.reviews
+    7s  agent-2    githive.backlog
+    7s  agent-4    githive.reviews
+    7s  agent-4    githive.backlog
+    7s  agent-4    githive.claims
+    7s  agent-5    githive.reviews
+    7s  agent-5    githive.backlog
+    9s  agent-1    githive.reviews
+   10s  agent-3    githive.reviews
+   10s  agent-1    githive.backlog
+   10s  agent-1    githive.claims
+   10s  agent-3    githive.backlog
+   13s  agent-4    githive.claim status-invalid
+   14s  agent-2    githive.claim status-invalid
+   14s  agent-1    githive.claim vary-edges
+   14s  agent-5    githive.claim status-invalid
+   16s  agent-3    githive.claim status-invalid
+   20s  agent-4    githive.claim vary-edges
+   20s  agent-5    githive.claim locals-tests
+   23s  agent-3    githive.claim vary-edges
+   25s  agent-4    githive.claim view-jsdoc
+   26s  agent-3    githive.claim range-edges
+   42s  agent-4    done (exit 0): 19 turns, 39s
+   62s  agent-1    githive.check vary-edges
+   62s  agent-1    githive.status vary-edges
+   70s  agent-2    githive.check status-invalid
+   70s  agent-2    githive.reviews
+   72s  agent-3    githive.check range-edges
+   72s  agent-1    githive.reviews
+   73s  agent-1    githive.backlog
+   79s  agent-5    githive.check locals-tests
+   79s  agent-5    githive.reviews
+   81s  agent-3    githive.reviews
+   82s  agent-3    githive.status range-edges
+   95s  agent-1    githive.vote approve
+  100s  agent-5    githive.vote approve
+  100s  agent-2    githive.vote approve
+  101s  agent-2    githive.status status-invalid
+  104s  agent-3    githive.vote approve
+  105s  agent-3    githive.reviews
+  105s  agent-3    githive.status range-edges
+  112s  agent-2    githive.merge status-invalid
+  116s  agent-1    githive.vote approve
+  116s  agent-1    githive.status vary-edges
+  123s  agent-5    githive.vote approve
+  123s  agent-5    githive.status locals-tests
+  125s  agent-1    githive.merge vary-edges
+  130s  agent-3    githive.vote approve
+  130s  agent-3    githive.status range-edges
+  130s  agent-5    githive.reviews
+  131s  agent-5    githive.backlog
+  140s  agent-3    githive.merge range-edges
+  164s  agent-5    githive.vote reject
+  164s  agent-5    githive.status locals-tests
+  174s  agent-5    githive.merge locals-tests
+  176s  agent-2    githive.reviews
+  176s  agent-2    githive.backlog
+  176s  agent-1    githive.backlog
+  177s  agent-1    githive.reviews
+  180s  agent-2    githive.claim health-example
+  182s  agent-1    githive.claim health-example
+  184s  agent-2    githive.reviews
+  185s  agent-2    githive.backlog
+  208s  agent-3    githive.reviews
+  208s  agent-3    githive.backlog
+  209s  agent-5    githive.reviews
+  209s  agent-5    githive.backlog
+  221s  agent-1    githive.reviews
+  222s  agent-1    githive.backlog
+  227s  agent-5    githive.vote approve
+  230s  agent-3    githive.vote approve
+  230s  agent-3    githive.reviews
+  235s  agent-2    githive.vote approve
+  235s  agent-2    githive.reviews
+  255s  agent-3    githive.vote approve
+  255s  agent-3    githive.reviews
+  255s  agent-3    githive.backlog
+  256s  agent-1    githive.reviews
+  257s  agent-1    githive.backlog
+  262s  agent-5    githive.reviews
+  262s  agent-5    githive.backlog
+  269s  agent-2    githive.reviews
+  270s  agent-2    githive.backlog
+  294s  agent-1    githive.reviews
+  294s  agent-1    githive.backlog
+  297s  agent-3    githive.reviews
+  297s  agent-3    githive.backlog
+  300s  agent-5    githive.reviews
+  300s  agent-5    githive.backlog
+  300s  agent-1    done (exit 0): 89 turns, 297s
+  303s  agent-5    githive.reviews
+  303s  agent-5    githive.backlog
+  312s  agent-2    githive.reviews
+  312s  agent-2    githive.backlog
+  335s  agent-3    githive.reviews
+  335s  agent-3    githive.backlog
+  336s  agent-5    githive.reviews
+  336s  agent-5    githive.backlog
+  360s  agent-2    done (exit 0): 76 turns, 356s
+  369s  agent-5    done (exit 0): 103 turns, 366s
+  370s  agent-3    githive.reviews
+  371s  agent-3    githive.backlog
+  375s  agent-3    done (exit 0): 99 turns, 371s
+
+What each agent did (tool calls):
+agent-1    89 turns, 297s; githive: reviews 6, backlog 6, claims 1, claim 2, check 1, status 2, vote 2, merge 1; bash 13, edits 0
+           Summary: - **Built `vary-edges`:** I added `test/res.vary.edges.js` with 13 tests for `res.vary()`. It covers an empty array, duplicate fields, case differences, a Vary header set by earlier middleware, and `*`. The full suite passed (1274) and the change merged as 440f47c. - **Reviewed `status-invalid` (agent-2):** I approved it. Its 31 tests pass and eslint is clean. - **Reviewed `range-edges` (
+agent-2    76 turns, 356s; githive: reviews 7, backlog 5, claim 2, check 1, vote 2, status 1, merge 1; bash 13, edits 0
+           Three looks in a row found nothing to do, and none of my changes is still open. - **Built:** `status-invalid` adds `test/res.status.invalid.js`, with 31 tests for how `res.status()` handles invalid codes. The error types and messages it asserts are what `lib/response.js` throws today. It merged as 3e4c345. - **Reviewed:** I approved `vary-edges` from agent-1 (13 tests pass, eslint clean). I also a
+agent-3    99 turns, 371s; githive: reviews 9, backlog 6, claim 3, check 1, status 3, vote 4, merge 1; bash 15, edits 0
+           Three empty looks in a row, and my change is merged. Summary: - **Built and merged `range-edges`:** a new `test/req.range.edges.js` with 23 `req.range()` tests. They cover `combine`, overlapping and out-of-order ranges, unsatisfiable ranges (-1), malformed headers (-2), suffix ranges and a size of 0. The new tests and the existing `req.range` tests all pass, and eslint is clean. - **Possible bug, 
+agent-4    19 turns, 39s; githive: reviews 1, backlog 1, claims 1, claim 3; bash 1, edits 0
+agent-5    103 turns, 366s; githive: reviews 8, backlog 7, claim 2, check 1, vote 4, status 2, merge 1; bash 18, edits 0
+           Three empty looks in a row, and none of my changes is still open. Summary: - **Built and merged `locals-tests`:** a new `test/locals.combined.js` with 15 tests of `app.locals` and `res.locals` together. It covers precedence, middleware-set values, per-request isolation and mounted sub-apps. The full suite passed (1276 tests) and lint was clean. It landed with two approvals, from agent-3 and agent-
+
+Landed: languages-edges, query-edges, location-edges, hostname-edges, express-jsdoc, router-edges, fresh-edges, format-edges, is-edges, cookie-edges, example-ratelimit, example-requestid, example-jsonapi, static-edges, accepts-edges, route-edges, append-edges, response-jsdoc, type-edges, application-jsdoc, json-edges, request-jsdoc, utils-jsdoc, links-edges, param-edges, example-etag, status-invalid, vary-edges, locals-tests, range-edges, view-jsdoc, health-example
+audit: 6 merges, 0 open violations
+total 379s

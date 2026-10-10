@@ -1,0 +1,371 @@
+   12s  run        5 Claude Code agents (claude-sonnet-5-5) on express-hive-demo, 27 pieces in its backlog
+   17s  agent-3    githive.reviews
+   17s  agent-2    githive.reviews
+   17s  agent-3    githive.backlog
+   17s  agent-2    githive.backlog
+   18s  agent-4    githive.reviews
+   18s  agent-1    githive.reviews
+   18s  agent-4    githive.backlog
+   18s  agent-5    githive.reviews
+   18s  agent-5    githive.backlog
+   18s  agent-1    githive.backlog
+   25s  agent-3    githive.claim links-edges
+   25s  agent-1    githive.claim links-edges
+   25s  agent-4    githive.claim links-edges
+   26s  agent-5    githive.claim cookie-edges
+   26s  agent-2    githive.claim location-edges
+   31s  agent-1    githive.claim hostname-edges
+   33s  agent-4    githive.claim type-edges
+   69s  agent-3    githive.check links-edges
+   69s  agent-3    githive.reviews
+   77s  agent-2    githive.check location-edges
+   81s  agent-3    githive.status links-edges
+   81s  agent-1    githive.check hostname-edges
+   86s  agent-4    githive.check type-edges
+   91s  agent-1    githive.reviews
+   91s  agent-1    githive.status hostname-edges
+   91s  agent-2    githive.status location-edges
+   91s  agent-2    githive.reviews
+   91s  agent-5    githive.check cookie-edges
+   99s  agent-4    githive.reviews
+   99s  agent-4    githive.status type-edges
+  106s  agent-5    githive.reviews
+  106s  agent-5    githive.status cookie-edges
+  112s  agent-2    githive.vote approve
+  112s  agent-1    githive.vote approve
+  126s  agent-4    githive.vote approve
+  126s  agent-4    githive.review_access location-edges
+  126s  agent-1    githive.vote approve
+  127s  agent-2    githive.vote approve
+  127s  agent-2    githive.status location-edges
+  132s  agent-3    githive.reviews
+  132s  agent-3    githive.status links-edges
+  135s  agent-5    githive.vote approve
+  135s  agent-5    githive.status cookie-edges
+  139s  agent-2    githive.merge location-edges
+  139s  agent-3    githive.merge links-edges
+  143s  agent-5    githive.reviews
+  147s  agent-1    githive.vote approve
+  147s  agent-1    githive.status hostname-edges
+  148s  agent-4    githive.vote approve
+  149s  agent-5    githive.status cookie-edges
+  149s  agent-5    githive.reviews
+  152s  agent-1    githive.merge hostname-edges
+  164s  agent-4    githive.vote approve
+  164s  agent-4    githive.status type-edges
+  176s  agent-4    githive.merge type-edges
+  186s  agent-1    githive.reviews
+  186s  agent-1    githive.backlog
+  187s  agent-2    githive.reviews
+  188s  agent-2    githive.backlog
+  188s  agent-4    githive.reviews
+  188s  agent-4    githive.backlog
+  191s  agent-1    githive.claim query-edges
+  191s  agent-2    githive.claim example-requestid
+  192s  agent-4    githive.claim param-edges
+  201s  agent-3    githive.vote approve
+  201s  agent-3    githive.backlog
+  211s  agent-5    githive.backlog
+  215s  agent-2    githive.check example-requestid
+  216s  agent-3    githive.claim json-edges
+  216s  agent-5    githive.claim is-edges
+  223s  agent-2    githive.reviews
+  223s  agent-1    githive.check query-edges
+  223s  agent-1    githive.reviews
+  228s  agent-2    githive.status example-requestid
+  229s  agent-2    githive.reviews
+  229s  agent-4    githive.check param-edges
+  229s  agent-4    githive.reviews
+  247s  agent-1    githive.vote approve
+  247s  agent-1    githive.status query-edges
+  253s  agent-1    githive.reviews
+  253s  agent-1    githive.status query-edges
+  255s  agent-4    githive.vote approve
+  262s  agent-5    githive.check is-edges
+  263s  agent-5    githive.status cookie-edges
+  263s  agent-5    githive.reviews
+  263s  agent-3    githive.check json-edges
+  263s  agent-3    githive.reviews
+  263s  agent-3    githive.status cookie-edges
+  272s  agent-4    githive.vote approve
+  272s  agent-4    githive.status param-edges
+  273s  agent-5    githive.merge cookie-edges
+  281s  agent-4    githive.reviews
+  281s  agent-4    githive.status param-edges
+  294s  agent-3    githive.vote approve
+  295s  agent-3    githive.vote approve
+  295s  agent-3    githive.status json-edges
+  302s  agent-2    githive.vote approve
+  302s  agent-2    githive.status example-requestid
+  304s  agent-3    githive.reviews
+  309s  agent-2    githive.merge example-requestid
+  313s  agent-1    githive.vote approve
+  313s  agent-1    githive.status query-edges
+  324s  agent-1    githive.merge query-edges
+  324s  agent-1    githive.reviews
+  324s  agent-1    githive.backlog
+  338s  agent-4    githive.vote approve
+  339s  agent-4    githive.vote approve
+  339s  agent-4    githive.status param-edges
+  346s  agent-4    githive.merge param-edges
+  351s  agent-2    githive.reviews
+  351s  agent-2    githive.claims
+  355s  agent-2    githive.claim redirect-edges
+  355s  agent-1    githive.claim fresh-edges
+  366s  agent-3    githive.status json-edges
+  370s  agent-3    githive.merge json-edges
+  378s  agent-5    githive.vote approve
+  378s  agent-5    githive.status is-edges
+  381s  agent-2    githive.check redirect-edges
+  384s  agent-4    githive.reviews
+  384s  agent-3    githive.claim redirect-edges
+  385s  agent-4    githive.backlog
+  393s  agent-3    githive.backlog
+  396s  agent-2    githive.check redirect-edges
+  396s  agent-2    githive.reviews
+  398s  agent-3    githive.claim append-edges
+  401s  agent-1    githive.check fresh-edges
+  401s  agent-1    githive.reviews
+  407s  agent-2    githive.status redirect-edges
+  407s  agent-2    githive.reviews
+  407s  agent-4    githive.vote reject
+  408s  agent-4    githive.claim format-edges
+  410s  agent-5    githive.vote approve
+  410s  agent-5    githive.reviews
+  428s  agent-1    githive.vote approve
+  428s  agent-1    githive.status fresh-edges
+  428s  agent-3    githive.check append-edges
+  429s  agent-3    githive.reviews
+  437s  agent-5    githive.vote approve
+  437s  agent-5    githive.backlog
+  437s  agent-1    githive.status fresh-edges
+  437s  agent-1    githive.reviews
+  438s  agent-3    githive.reviews
+  438s  agent-3    githive.status append-edges
+  441s  agent-5    githive.claim router-edges
+  444s  agent-4    githive.check format-edges
+  444s  agent-4    githive.reviews
+  472s  agent-4    githive.vote approve
+  472s  agent-4    githive.status format-edges
+  479s  agent-4    githive.status format-edges
+  479s  agent-4    githive.reviews
+  480s  agent-1    githive.merge fresh-edges
+  484s  agent-2    githive.vote approve
+  485s  agent-2    githive.status redirect-edges
+  486s  agent-5    githive.check router-edges
+  490s  agent-2    githive.merge redirect-edges
+  498s  agent-5    githive.reviews
+  501s  agent-3    githive.status append-edges
+  501s  agent-3    githive.reviews
+  516s  agent-2    githive.reviews
+  517s  agent-2    githive.claims
+  518s  agent-5    githive.vote approve
+  518s  agent-5    githive.status router-edges
+  523s  agent-5    githive.status router-edges
+  524s  agent-5    githive.reviews
+  525s  agent-1    githive.vote approve
+  525s  agent-1    githive.backlog
+  526s  agent-4    githive.status format-edges
+  526s  agent-4    githive.reviews
+  530s  agent-1    githive.claim languages-edges
+  531s  agent-2    githive.vote approve
+  531s  agent-2    githive.backlog
+  546s  agent-2    githive.claim utils-jsdoc
+  563s  agent-3    githive.merge append-edges
+  569s  agent-1    githive.check languages-edges
+  569s  agent-1    githive.reviews
+  577s  agent-1    githive.status languages-edges
+  577s  agent-1    githive.reviews
+  586s  agent-5    githive.status router-edges
+  586s  agent-5    githive.reviews
+  588s  agent-3    githive.vote approve
+  588s  agent-4    githive.merge format-edges
+  589s  agent-3    githive.vote approve
+  594s  agent-3    githive.claim languages-edges
+  597s  agent-3    githive.claim static-edges
+  609s  agent-2    githive.check utils-jsdoc
+  609s  agent-2    githive.reviews
+  609s  agent-2    githive.status router-edges
+  619s  agent-1    githive.status languages-edges
+  620s  agent-1    githive.reviews
+  626s  agent-4    githive.claim route-edges
+  627s  agent-2    githive.vote approve
+  627s  agent-2    githive.status utils-jsdoc
+  636s  agent-2    githive.status utils-jsdoc
+  636s  agent-2    githive.reviews
+  653s  agent-3    githive.check static-edges
+  653s  agent-3    githive.reviews
+  666s  agent-4    githive.check route-edges
+  666s  agent-4    githive.reviews
+  679s  agent-5    githive.merge router-edges
+  679s  agent-3    githive.vote approve
+  679s  agent-3    githive.status static-edges
+  683s  agent-3    githive.status static-edges
+  683s  agent-3    githive.reviews
+  689s  agent-4    githive.vote approve
+  689s  agent-4    githive.status route-edges
+  698s  agent-5    githive.vote approve
+  698s  agent-5    githive.reviews
+  698s  agent-5    githive.backlog
+  699s  agent-2    githive.status utils-jsdoc
+  699s  agent-2    githive.reviews
+  699s  agent-1    githive.vote approve
+  699s  agent-1    githive.status languages-edges
+  705s  agent-1    githive.merge languages-edges
+  705s  agent-1    githive.reviews
+  705s  agent-1    githive.backlog
+  719s  agent-5    githive.vote approve
+  720s  agent-5    githive.claim accepts-edges
+  744s  agent-1    githive.claim express-jsdoc
+  753s  agent-4    githive.status route-edges
+  754s  agent-4    githive.reviews
+  761s  agent-5    githive.check accepts-edges
+  769s  agent-1    githive.check express-jsdoc
+  769s  agent-1    githive.reviews
+  771s  agent-3    githive.vote approve
+  771s  agent-3    githive.status static-edges
+  773s  agent-5    githive.reviews
+  791s  agent-2    githive.merge utils-jsdoc
+  795s  agent-1    githive.vote approve
+  795s  agent-1    githive.status express-jsdoc
+  811s  agent-2    githive.vote approve
+  811s  agent-2    githive.backlog
+  816s  agent-4    githive.merge route-edges
+  816s  agent-4    githive.backlog
+  819s  agent-2    githive.claim example-ratelimit
+  835s  agent-3    githive.reviews
+  835s  agent-3    githive.backlog
+  839s  agent-1    githive.status express-jsdoc
+  840s  agent-1    githive.reviews
+  846s  agent-2    githive.check example-ratelimit
+  852s  agent-3    githive.vote approve
+  856s  agent-4    githive.claim example-etag
+  857s  agent-3    githive.claim example-etag
+  858s  agent-2    githive.reviews
+  865s  agent-5    githive.vote approve
+  865s  agent-5    githive.status accepts-edges
+  866s  agent-3    githive.claim example-jsonapi
+  873s  agent-5    githive.reviews
+  873s  agent-5    githive.backlog
+  884s  agent-4    githive.check example-etag
+  894s  agent-3    githive.check example-jsonapi
+  895s  agent-4    githive.reviews
+  895s  agent-5    githive.vote approve
+  895s  agent-5    githive.claim example-jsonapi
+  899s  agent-4    githive.status example-etag
+  900s  agent-4    githive.reviews
+  901s  agent-5    githive.claim application-jsdoc
+  902s  agent-1    githive.status express-jsdoc
+  902s  agent-1    githive.reviews
+  904s  agent-3    githive.reviews
+  905s  agent-3    githive.status example-jsonapi
+  921s  agent-2    githive.status example-ratelimit
+  921s  agent-2    githive.reviews
+  926s  agent-2    githive.merge example-ratelimit
+  937s  agent-5    githive.check application-jsdoc
+  937s  agent-5    githive.reviews
+  961s  agent-5    githive.vote approve
+  965s  agent-1    githive.merge express-jsdoc
+  981s  agent-5    githive.vote approve
+  981s  agent-5    githive.status application-jsdoc
+  981s  agent-2    githive.vote approve
+  983s  agent-2    githive.vote approve
+  983s  agent-2    githive.reviews
+  983s  agent-2    githive.backlog
+  986s  agent-3    githive.vote approve
+  986s  agent-3    githive.status example-jsonapi
+  986s  agent-5    githive.status application-jsdoc
+  987s  agent-5    githive.reviews
+  992s  agent-1    githive.vote approve
+ 1009s  agent-1    githive.vote approve
+ 1009s  agent-1    githive.reviews
+ 1009s  agent-1    githive.backlog
+ 1010s  agent-4    githive.vote approve
+ 1010s  agent-4    githive.status example-etag
+ 1017s  agent-2    githive.vote approve
+ 1017s  agent-2    githive.status example-ratelimit
+ 1018s  agent-1    githive.claim request-jsdoc
+ 1027s  agent-2    githive.claim request-jsdoc
+ 1036s  agent-2    githive.claim response-jsdoc
+ 1050s  agent-3    githive.merge example-jsonapi
+ 1050s  agent-3    githive.reviews
+ 1074s  agent-1    githive.check request-jsdoc
+ 1074s  agent-1    githive.reviews
+ 1076s  agent-4    githive.merge example-etag
+ 1076s  agent-4    githive.reviews
+ 1076s  agent-4    githive.backlog
+ 1079s  agent-5    githive.status application-jsdoc
+ 1079s  agent-5    githive.reviews
+ 1086s  agent-2    githive.check response-jsdoc
+ 1087s  agent-1    githive.status request-jsdoc
+ 1087s  agent-1    githive.reviews
+ 1102s  agent-2    githive.reviews
+ 1102s  agent-2    githive.status response-jsdoc
+ 1110s  agent-3    githive.vote approve
+ 1110s  agent-3    githive.backlog
+ 1110s  agent-2    githive.status response-jsdoc
+ 1110s  agent-2    githive.reviews
+ 1116s  agent-4    githive.vote approve
+ 1116s  agent-4    githive.reviews
+ 1116s  agent-4    githive.backlog
+ 1117s  agent-3    githive.reviews
+ 1150s  agent-1    githive.status request-jsdoc
+ 1150s  agent-1    githive.reviews
+ 1167s  agent-3    githive.vote approve
+ 1167s  agent-3    githive.reviews
+ 1186s  agent-4    githive.vote approve
+ 1186s  agent-4    githive.reviews
+ 1186s  agent-4    githive.backlog
+ 1201s  agent-5    githive.merge application-jsdoc
+ 1203s  agent-2    githive.status response-jsdoc
+ 1203s  agent-2    githive.reviews
+ 1204s  agent-3    done (exit 0): 249 turns, 1190s
+ 1215s  agent-5    githive.reviews
+ 1215s  agent-5    githive.backlog
+ 1220s  agent-5    githive.reviews
+ 1220s  agent-5    githive.backlog
+ 1232s  agent-4    githive.reviews
+ 1232s  agent-4    githive.backlog
+ 1243s  agent-1    githive.merge request-jsdoc
+ 1253s  agent-5    githive.reviews
+ 1253s  agent-5    githive.backlog
+ 1264s  agent-4    githive.reviews
+ 1265s  agent-4    githive.backlog
+ 1298s  agent-4    done (exit 0): 281 turns, 1282s
+ 1300s  agent-1    githive.reviews
+ 1300s  agent-1    githive.backlog
+ 1301s  agent-5    githive.reviews
+ 1301s  agent-5    githive.backlog
+ 1306s  agent-1    githive.reviews
+ 1306s  agent-1    githive.backlog
+ 1327s  agent-2    githive.merge response-jsdoc
+ 1327s  agent-2    githive.backlog
+ 1339s  agent-1    githive.reviews
+ 1339s  agent-1    githive.backlog
+ 1350s  agent-5    done (exit 0): 288 turns, 1334s
+ 1351s  agent-2    githive.reviews
+ 1351s  agent-2    githive.backlog
+ 1373s  agent-1    githive.reviews
+ 1373s  agent-1    githive.backlog
+ 1384s  agent-2    githive.reviews
+ 1384s  agent-2    githive.backlog
+ 1409s  agent-1    done (exit 0): 298 turns, 1393s
+ 1418s  agent-2    githive.reviews
+ 1418s  agent-2    githive.backlog
+ 1453s  agent-2    done (exit 0): 304 turns, 1438s
+
+What each agent did (tool calls):
+agent-1    298 turns, 1393s; githive: reviews 23, backlog 10, claim 7, check 6, status 15, vote 11, merge 6; bash 53, edits 0
+           I landed 6 changes and approved 9 from other agents. For the last three looks the backlog and review queue were empty, and none of my changes is still open. **Landed (mine):** - `hostname-edges`: `test/req.hostname.edges.js`, 18 tests - `query-edges`: `test/req.query.edges.js`, 28 tests - `fresh-edges`: `test/req.fresh.edges.js`, 46 tests - `languages-edges`: `test/req.acceptsLanguages.edges.js`, 
+agent-2    304 turns, 1438s; githive: reviews 21, backlog 9, claim 7, check 7, status 15, vote 10, merge 6, claims 2; bash 49, edits 0
+           Five of my changes landed on `express-hive-demo`, and I reviewed and approved 9 changes from other agents. The last three checks found no reviews to give and an empty backlog, and none of my changes is still open. **My changes (all merged):** - `location-edges`: 31 tests for `res.location()`. In this version `"back"` is not special (it is set literally), and I found no bugs. - `example-requestid`:
+agent-3    249 turns, 1190s; githive: reviews 15, backlog 5, claim 8, check 5, status 12, merge 4, vote 11; bash 46, edits 0
+           Backlog is empty, no reviews pending, and none of my changes is still open. **Summary (agent-3):** - **Merged, 4 changes:** `links-edges` (11 tests), `json-edges` (33 tests), `static-edges` (43 tests) and `example-jsonapi` (a JSON CRUD notes example with 15 acceptance tests). - **Not checked:** `append-edges` (16 tests) was also merged. I didn't check the others as they landed. - **Quirk found:** 
+agent-4    281 turns, 1282s; githive: reviews 18, backlog 9, claim 6, check 5, status 12, vote 13, review_access 1, merge 5; bash 52, edits 0
+           Three empty looks in a row, and none of my changes is still open. **Merged (4):** - `type-edges`: tests for `res.type()` and `res.contentType()`. - `param-edges`: tests for `app.param()`. - `format-edges`: tests for `res.format()`. - `route-edges`: tests for `app.route()`. - `example-etag`: a conditional-GET example with an acceptance test. No test exposed a bug in `lib/`. **Reviews:** - **Approve
+agent-5    288 turns, 1334s; githive: reviews 19, backlog 9, claim 6, check 5, status 12, vote 11, merge 3; bash 53, edits 0
+           Three empty looks in a row, with none of my changes open. **Summary (agent-5)** Merged 4 changes of my own: - `cookie-edges`: `test/res.cookie.edges.js`, 40 tests. - `is-edges`: `test/req.is.edges.js`, 37 tests. - `router-edges`: `test/router.mount.edges.js`, 35 tests. - `accepts-edges`: `test/req.accepts.edges.js`, 41 tests. I also merged `application-jsdoc`, which is comments only in `lib/applic
+
+Landed: links-edges, location-edges, hostname-edges, type-edges, cookie-edges, query-edges, example-requestid, param-edges, json-edges, is-edges, fresh-edges, redirect-edges, append-edges, format-edges, router-edges, languages-edges, utils-jsdoc, static-edges, route-edges, accepts-edges, express-jsdoc, example-ratelimit, example-etag, example-jsonapi, application-jsdoc, request-jsdoc, response-jsdoc
+audit: 27 merges, 0 open violations
+total 1458s

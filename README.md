@@ -235,7 +235,7 @@ Records in Git outlive the code that wrote them. To change a record's shape, bum
 ## Known gaps
 
 - **Semantic conflicts.** `check` and every merge find text conflicts; changes that merge cleanly but break together are caught by the checks, which run on everything landing together.
-- **Scale.** 1,000 agents at once claim, push, check and release with no failures (see Benchmarks); past that is untested. Merging is proven at 200: 200 scripted agents landed 200 of 200 changes as a set (before that, a line of merges stalled with about 190 approved changes calling `merge` at once). Merging with more is untested.
+- **Scale.** 1,000 agents at once claim, push, check and release with no failures (see Benchmarks); past that is untested. Merging is proven at 200: 200 scripted agents landed 200 of 200 changes as a set (before that, a line of merges stalled with about 190 approved changes calling `merge` at once). Merging with 1,000 doesn't work yet: in five runs on 10 Oct, the most that landed was 120 of 1,000 in 44 minutes, with merges failing on Artifacts 500s and a Durable Object overloaded by the agents' looks (`bench-results/swarm/1000/`).
 - **Plain git goes around GitHive.** Anyone with the account's Artifacts credentials can write the project with plain git. The audit reports it; it can't prevent it.
 - **No timers.** An abandoned claim is freed only when someone needs its paths (or claims its work from `backlog`).
 - **Who is landing lives outside Git.** It's a hint in the repo's cache: losing it costs a check run, never a wrong merge.

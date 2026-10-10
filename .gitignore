@@ -6,3 +6,5 @@ web/dist/
 
 # Agent keys written by the bench scripts
 bench-results/**/keys-*/
+# Worker log tails captured during bench runs: large, and not kept
+bench-results/**/tail-*
