@@ -143,24 +143,8 @@ export function Dashboard({ me, onSignOut }: { me: Me; onSignOut: () => void }) 
 	const adminRequests = usePoll(me.kind === "access" ? "admin:requests:count" : null, admin.requests, 60_000);
 	const inbox = buildInbox(summaries.data);
 
-	// While the repo's live feed is connected, each ping triggers a refresh and polling slows to a safety net.
-	const feedKey = repoName;
-	const refreshers = useRef<(() => void)[]>([]);
-	const liveStatus = useLiveFeed(feedKey, () => refreshers.current.forEach((refresh) => refresh()));
-	const every = (intervalMs: number) => (liveStatus === "live" ? 30_000 : intervalMs);
-
-	const snapshot = usePoll(repoName !== null ? `repo:${repoName}` : null, () => api.snapshot(repoName!), every(5_000));
-	// The audit replays every record in Git, so it loads on its own and less often.
-	const audit = usePoll(repoName !== null ? `audit:${repoName}` : null, () => api.audit(repoName!), 60_000);
-	// What the reader may do here decides the vote form and which settings they can change.
-	const access = usePoll(repoName !== null ? `access:${repoName}` : null, () => api.access(repoName!), 60_000);
 	const changeId = route.page === "change" ? route.change : null;
-	const change = usePoll(
-		changeId ? `change:${repoName}:${changeId}` : null,
-		() => api.change(repoName!, changeId!),
-		every(10_000),
-	);
-	refreshers.current = [snapshot.refresh, audit.refresh, change.refresh];
+	const { liveStatus, snapshot, audit, access, change } = useRepoData(repoName, changeId);
 
 	const changeLabel = changeId ? changeTitle(changeId, snapshot.data, change.data) : "";
 	const { crumbs, title } = headingOf(route, inbox.count, changeLabel);
@@ -197,39 +181,14 @@ export function Dashboard({ me, onSignOut }: { me: Me; onSignOut: () => void }) 
 			/>
 		);
 	} else if (repoName !== null && view) {
-		// GitHive hasn't started on this repo yet. It still shows its code, its settings and a way to start.
-		const notStarted = !snapshot.data && !!snapshot.error && !/^no repo /.test(snapshot.error);
-		if (snapshot.data || notStarted) {
-			page = (
-				<RepoPage
-					repo={repoName}
-					view={view}
-					snapshot={snapshot.data ? { ...snapshot.data, audit: audit.data } : null}
-					onStarted={() => {
-						snapshot.refresh();
-						summaries.refresh();
-					}}
-					onSettingsChanged={() => snapshot.refresh()}
-					changeHistory={change.data ?? (change.error ? null : undefined)}
-					liveStatus={liveStatus}
-					api={api}
-					{...(access.data ? { access: access.data } : {})}
-					manage={manage}
-					onAccessChanged={() => {
-						access.refresh();
-						summaries.refresh();
-					}}
-					onDeleted={() => {
-						summaries.refresh();
-						window.location.hash = href.repos();
-					}}
-				/>
-			);
-		} else if (!snapshot.error) {
-			page = <Loading what={repoName} />;
-		} else {
-			page = <RepoUnavailable repo={repoName} error={snapshot.error} />;
-		}
+		page = (
+			<RepoRoute
+				repo={repoName}
+				view={view}
+				data={{ liveStatus, snapshot, audit, access, change }}
+				refreshSummaries={summaries.refresh}
+			/>
+		);
 	} else {
 		page = <PageNotFound />;
 	}
@@ -260,6 +219,72 @@ export function Dashboard({ me, onSignOut }: { me: Me; onSignOut: () => void }) 
 			<PageBoundary key={routePlace(route)}>{page}</PageBoundary>
 		</div>
 	);
+}
+
+/**
+ * A repo's data for its page: its snapshot, audit, the reader's access, and the change shown, if any. While the
+ * repo's live feed is connected, each ping refreshes them and polling slows to a safety net.
+ */
+function useRepoData(repoName: string | null, changeId: string | null) {
+	const feedKey = repoName;
+	const refreshers = useRef<(() => void)[]>([]);
+	const liveStatus = useLiveFeed(feedKey, () => refreshers.current.forEach((refresh) => refresh()));
+	const every = (intervalMs: number) => (liveStatus === "live" ? 30_000 : intervalMs);
+
+	const snapshot = usePoll(repoName !== null ? `repo:${repoName}` : null, () => api.snapshot(repoName!), every(5_000));
+	// The audit replays every record in Git, so it loads on its own and less often.
+	const audit = usePoll(repoName !== null ? `audit:${repoName}` : null, () => api.audit(repoName!), 60_000);
+	// What the reader may do here decides the vote form and which settings they can change.
+	const access = usePoll(repoName !== null ? `access:${repoName}` : null, () => api.access(repoName!), 60_000);
+	const change = usePoll(
+		changeId ? `change:${repoName}:${changeId}` : null,
+		() => api.change(repoName!, changeId!),
+		every(10_000),
+	);
+	refreshers.current = [snapshot.refresh, audit.refresh, change.refresh];
+	return { liveStatus, snapshot, audit, access, change };
+}
+
+/** A repo's page, once its snapshot is read; or that it's loading, or why it can't be shown. */
+function RepoRoute(props: {
+	repo: string;
+	view: RepoView;
+	data: ReturnType<typeof useRepoData>;
+	refreshSummaries: () => void;
+}) {
+	const { repo, view, refreshSummaries } = props;
+	const { liveStatus, snapshot, audit, access, change } = props.data;
+	// GitHive hasn't started on this repo yet. It still shows its code, its settings and a way to start.
+	const notStarted = !snapshot.data && !!snapshot.error && !/^no repo /.test(snapshot.error);
+	if (snapshot.data || notStarted) {
+		return (
+			<RepoPage
+				repo={repo}
+				view={view}
+				snapshot={snapshot.data ? { ...snapshot.data, audit: audit.data } : null}
+				onStarted={() => {
+					snapshot.refresh();
+					refreshSummaries();
+				}}
+				onSettingsChanged={() => snapshot.refresh()}
+				changeHistory={change.data ?? (change.error ? null : undefined)}
+				liveStatus={liveStatus}
+				api={api}
+				{...(access.data ? { access: access.data } : {})}
+				manage={manage}
+				onAccessChanged={() => {
+					access.refresh();
+					refreshSummaries();
+				}}
+				onDeleted={() => {
+					refreshSummaries();
+					window.location.hash = href.repos();
+				}}
+			/>
+		);
+	}
+	if (!snapshot.error) return <Loading what={repo} />;
+	return <RepoUnavailable repo={repo} error={snapshot.error} />;
 }
 
 /** What the repo page shows for a route, or null when the route isn't a repo's. */
