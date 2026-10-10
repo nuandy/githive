@@ -90,7 +90,7 @@ export async function fetchPackSince(
 	if (answer === "too big") return answer;
 	if (!answer.length)
 		throw Object.assign(new Error(`fetch failed: an empty answer from ${remote.url}`), { status: 502 });
-	return packAfterLines(answer);
+	return packInAnswer(answer);
 }
 
 /** A response's body as it arrives, or "too big" once it would take the budget below nothing. */
@@ -109,11 +109,14 @@ async function readWithin(response: Response, budget: FetchBudget): Promise<Chun
 	}
 }
 
-/** The pack after an upload-pack answer's NAK or ACK lines; or the server's error. */
-function packAfterLines(answer: Chunks) {
+/**
+ * The pack in an upload-pack answer, after its NAK or ACK lines; or the server's error. Some servers end the answer
+ * with a flush packet after the pack, so the pack's end is found by its checksum.
+ */
+export function packInAnswer(answer: Chunks) {
 	for (let at = 0; at + 4 <= answer.length;) {
 		const head = decoder.decode(answer.bytes(at, at + 4));
-		if (head === "PACK") return new Chunks(answer.slice(at));
+		if (head === "PACK") return checkedPack(new Chunks(answer.slice(at)));
 		const length = Number.parseInt(head, 16);
 		if (!length) {
 			at += 4;
@@ -124,6 +127,22 @@ function packAfterLines(answer: Chunks) {
 		at += length;
 	}
 	throw new Error("fetch failed: the answer had no pack");
+}
+
+/** `bytes` up to the end of the pack they start with: where the SHA-1 of what came before follows it. */
+function checkedPack(bytes: Chunks) {
+	const FLUSH = 4;
+	for (const extra of [0, FLUSH]) {
+		const end = bytes.length - extra;
+		if (end < PACK_HEADER + PACK_TRAILER) break;
+		if (extra && decoder.decode(bytes.bytes(end, bytes.length)) !== "0000") continue;
+		const checksum = createHash("sha1");
+		for (const view of bytes.slice(0, end - PACK_TRAILER)) checksum.update(view);
+		const trailer = bytes.bytes(end - PACK_TRAILER, end);
+		const digest = new Uint8Array(checksum.digest());
+		if (digest.every((byte, index) => byte === trailer[index])) return new Chunks(bytes.slice(0, end));
+	}
+	throw new Error("fetch failed: the pack's checksum doesn't match");
 }
 
 const PACK_HEADER = 12;
