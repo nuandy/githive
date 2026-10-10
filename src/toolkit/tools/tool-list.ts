@@ -153,6 +153,7 @@ const TOOL_LIST = [
 			"author's fork, the change's branch and its pushed head, and read access to the project to " +
 			"diff against; it marks you as reviewing that commit in `role` (review unless you name one " +
 			"that can block), so others looking at reviews see it taken, until you vote or for 15 minutes. " +
+			"It refuses when as many others already review that commit as it needs: take another review. " +
 			"Without a change: read access to the project repo. With a change, `git` holds the commands to " +
 			"run as given: setup and push for your own, setup and diff for a review.",
 		inputSchema: {

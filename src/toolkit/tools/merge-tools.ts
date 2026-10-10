@@ -6,7 +6,8 @@ import { artifactsInspect } from "../batch-reads";
 import { scopeFile } from "../branch-scope";
 import type { ClaimRecord, Registry } from "../claims";
 import { type BatchGit, type Candidate, mergeChange, type MergeInput } from "../merge";
-import { holdKey } from "../work";
+import { countedVotes } from "../votes";
+import { holdKey, reviewersNeeded } from "../work";
 import type { ToolCall, ToolContext, ToolHandlers } from "./context";
 import { ownChangeCommands, reviewCommands } from "./git-commands";
 import { mayActAs } from "./identity";
@@ -163,9 +164,10 @@ async function ownChangeAccess(call: ToolCall, change: string, own: ClaimRecord)
 }
 
 /**
- * Read-only access to another agent's change, to review it, and to the project to diff against. It marks the
- * change as under review before reading anything, on the head GitHive already knows, so others aren't offered
- * the same review while the slower reads run; the mark moves to the head read if that differs.
+ * Read-only access to another agent's change, to review it, and to the project to diff against. It takes the
+ * reviewer's place among the change's reviewers first, on the head GitHive already knows, while the slower reads
+ * run; when as many others already review it as it needs, it refuses, so agents whose list of reviews was a few
+ * seconds old don't all review the same change. The place moves to the head read if that differs.
  */
 async function reviewAccess(
 	call: ToolCall,
@@ -176,23 +178,23 @@ async function reviewAccess(
 ) {
 	const { args, ctx, repo, branch, changeSource } = call;
 	const role = optionalString(args, "role") ?? "review";
-	const hold = (head: string) =>
-		reviewer
-			? ctx.reviews?.hold(repo, holdKey(head, role), reviewer, Number.POSITIVE_INFINITY).catch(() => undefined)
-			: undefined;
+	// A released change can't land, so reading it takes no reviewer's place.
+	const take = async (head: string) => {
+		if (held && reviewer) await takeReview(call, held, head, role, reviewer);
+	};
 	const known = ctx.knownHeads
 		? await ctx.knownHeads(repo, [{ change, agent: author }]).catch(() => undefined)
 		: undefined;
 	const knownHead = known?.[change]?.head ?? undefined;
-	const holding = knownHead ? hold(knownHead) : undefined;
+	const taking = knownHead ? take(knownHead) : undefined;
 	const [fork, project] = await Promise.all([
 		changeSource(author, "read", change, held?.since),
 		ctx.remote(repo, "read"),
+		taking,
 	]);
 	const head = await branchHead(fork, `changes/${change}`).catch(() => null);
-	await holding;
 	if (!head) fail(409, `${change} has nothing pushed to review yet`);
-	if (head !== knownHead) await hold(head);
+	if (head !== knownHead) await take(head);
 	// Agent names only: a person's identity stays in the records, out of logs.
 	console.log(`review access to ${repo} ${change} (${author}) for ${reviewer ?? "an unregistered caller"}`);
 	const into = held?.into ?? branch;
@@ -209,4 +211,27 @@ async function reviewAccess(
 		git: reviewCommands({ project, fork, into, change, head }),
 		note: "read-only: review this commit, then vote on it. Others aren't offered this review while you hold it.",
 	};
+}
+
+/**
+ * Takes `reviewer`'s place among the reviewers `head` still needs in `role`, by compare-and-swap, or refuses when
+ * that many others already hold it. A hold that can't be written (the record busy) doesn't stop the review.
+ */
+async function takeReview(call: ToolCall, claim: ClaimRecord, head: string, role: string, reviewer: string) {
+	const { ctx, repo, registered, votes } = call;
+	if (!ctx.reviews) return;
+	const policy = branchSettings(registered, claim.into).policy;
+	const cast = (await votes.readFor([head])).votes.filter((vote) => vote.commit === head);
+	const counted = await countedVotes(cast, registered?.stampKey);
+	const needed = reviewersNeeded(policy, claim, head, counted, role);
+	const short = head.slice(0, 8);
+	const reviews = role === "review" ? "reviews" : `${role} reviews`;
+	if (needed <= 0) fail(409, `${claim.change} needs no more ${reviews} at ${short}: take another from reviews`);
+	const key = holdKey(head, role);
+	const taken = await ctx.reviews.hold(repo, key, reviewer, needed).catch(() => true);
+	if (taken) return;
+	const held: Record<string, string[]> = await ctx.reviews.held(repo, [head]).catch(() => ({}));
+	const holders = held[key] ?? [];
+	const others = holders.filter((holder) => holder !== reviewer).join(", ") || "others";
+	fail(409, `${claim.change} is already being reviewed by ${others} (${role}, ${short}): take another from reviews`);
 }

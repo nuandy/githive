@@ -296,13 +296,17 @@ describe("review holds through the toolkit", { timeout: 120_000 }, () => {
 			expect(
 				await callTool("credentials", { repo: "p", change: "c-1" }, { ...ctx(keys["rev-1"]), reviews: busy }),
 			).toMatchObject({ change: "c-1", head: heads[0] });
-			// The mark goes on the head GitHive knows before the slow reads, so no one else is offered the review
-			// meanwhile; when the head read differs, the mark moves to it.
+			// The mark goes on the head GitHive knows while the slow reads run, not after them, so no one else is
+			// offered the review meanwhile; when the head read differs, the mark moves to it.
 			const events: string[] = [];
 			const watched = (known: string) => ({
 				...ctx(keys["rev-1"]),
 				knownHeads: async () => ({ "c-1": { head: known, at: Date.now(), pushed: true } }),
-				changeRemote: async () => (events.push("fork read"), { url: server.url, token: "unused" }),
+				changeRemote: async () => {
+					await new Promise((resolve) => setTimeout(resolve, 300));
+					events.push("fork read");
+					return { url: server.url, token: "unused" };
+				},
 				reviews: {
 					...reviews,
 					hold: async (_repo: string, key: string) => (events.push(`hold ${key.slice(0, 7)}`), true),
@@ -320,12 +324,18 @@ describe("review holds through the toolkit", { timeout: 120_000 }, () => {
 			expect(await listed("rev-3")).toEqual([]);
 			// rev-1 still sees its own, first.
 			expect((await listed("rev-1"))[0]!.change).toBe("c-1");
+			// rev-3 asks for c-1 anyway, from a list a few seconds old: it needs one reviewer, rev-1 is that one.
+			await expect(call("credentials", { change: "c-1" }, keys["rev-3"])).rejects.toThrow(
+				"c-1 is already being reviewed by rev-1",
+			);
 			// After rev-1 votes, its hold lasts one more minute, until the vote is visible everywhere, not 15 minutes.
 			await call(
 				"vote",
 				{ commit: one.head, reviewer: "rev-1", role: "review", verdict: "approve", evidence: "ok" },
 				keys["rev-1"],
 			);
+			// Approved, it needs no more reviewers.
+			await expect(call("credentials", { change: "c-1" }, keys["rev-3"])).rejects.toThrow("c-1 needs no more reviews");
 			const later = vi.spyOn(Date, "now").mockReturnValue(Date.now() + 61_000);
 			try {
 				expect(Object.keys(await reviews.held("p"))).toEqual([`${two.head}#review`]);

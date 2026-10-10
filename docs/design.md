@@ -126,7 +126,7 @@ In the project repo:
   by commit into 16 buckets (waits on blocking roles in
   `refs/notes/githive-reviews/<repo>`): which agent is reviewing which commit
   in which role, marked by the reviewer
-  (`credentials` for that change), so others looking at `reviews` don't pile onto one review. It binds nobody, and the audit never reads it. Once the repo
+  (`credentials` for that change), so others looking at `reviews` don't pile onto one review, and `credentials` refuses a review to more reviewers than it needs. A vote counts with or without one, and the audit never reads them. Once the repo
   has records repos it's kept in one of them instead (the same one always,
   picked by a hash): every review handed out writes it, and in the project
   repo those writes kept the repo busy for the batches landing on its branch.
@@ -932,8 +932,12 @@ others were offered the review meanwhile (smoke run 7: two approvals a change
 where one was needed). Waits on blocking roles stay in one record,
 `refs/notes/githive-reviews/<repo>`. A hold lasts 15
 minutes, or a minute once its agent has voted (a new vote can take a moment to
-show in every read). A hold binds nobody: a review counts with or without one,
-and the audit never reads holds. The same record keeps when each review a role
+show in every read). `credentials` takes a reviewer's place by compare-and-swap,
+with the number of reviewers the head still needs, and refuses once that many
+others hold it: a list from `reviews` can be seconds old, and in smoke runs 7
+and 8 agents acting on one took the same review, two approvals a change where
+one was needed. A vote still counts with or without a hold (holds decide who
+is handed a review, not whose vote counts), and the audit never reads holds. The same record keeps when each review a role
 that can block awaits was first seen waiting, so people hear of one that
 waited too long, once; it is written only when the reviews waiting change.
 
