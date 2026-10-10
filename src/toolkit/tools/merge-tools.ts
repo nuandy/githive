@@ -1,4 +1,4 @@
-import { fail, requiredString } from "../../errors";
+import { fail, optionalString, requiredString } from "../../errors";
 import { branchHead } from "../../git";
 import type { GitHubLink } from "../../github";
 import { actionsChecks, mirrorTo, onActions } from "../actions-checks";
@@ -79,7 +79,7 @@ export const mergeTools: ToolHandlers = {
 		}
 		const change = requiredString(args, "change");
 		const { claim: held, released } = await changeOf(change);
-		const named = typeof args.agent === "string" && args.agent.trim() ? args.agent.trim() : undefined;
+		const named = optionalString(args, "agent");
 		const caller = acting ?? named;
 		// Your own change gets write access to your fork; anyone else's, read-only access to review it.
 		if (held && (caller === undefined || caller === held.agent)) return ownChangeAccess(call, change, held);
@@ -173,7 +173,7 @@ async function reviewAccess(
 	reviewer?: string,
 ) {
 	const { args, ctx, repo, branch, changeSource } = call;
-	const role = typeof args.role === "string" && args.role.trim() ? args.role.trim() : "review";
+	const role = optionalString(args, "role") ?? "review";
 	const hold = (head: string) =>
 		reviewer
 			? ctx.reviews?.hold(repo, holdKey(head, role), reviewer, Number.POSITIVE_INFINITY).catch(() => undefined)

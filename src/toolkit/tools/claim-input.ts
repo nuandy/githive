@@ -1,5 +1,5 @@
 import { claimCovering, normalizeClaim } from "../../claim-paths";
-import { fail, requiredPaths, requiredString } from "../../errors";
+import { fail, optionalString, requiredPaths, requiredString } from "../../errors";
 import { branchHead, type Remote, Workspace } from "../../git";
 import { projectBranch } from "../../project-branch";
 import { GitCasLog } from "../../record-log";
@@ -41,7 +41,7 @@ export async function branchMerge(ctx: ToolContext, repo: string, source: string
 /** Parses a work item for add_work, given alone or as one of its items. */
 export function workItemFrom(args: Record<string, unknown>) {
 	const title = requiredString(args, "title");
-	const id = typeof args.id === "string" && args.id.trim() ? args.id.trim() : workId(title);
+	const id = optionalString(args, "id") ?? workId(title);
 	if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(id)) fail(400, "a work id is letters, digits, dots, dashes and underscores");
 	const paths = args.paths === undefined ? undefined : normalizeClaim(requiredPaths(args, "paths"));
 	const after = changeList(args.after, "after");

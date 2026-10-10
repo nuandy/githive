@@ -18,6 +18,12 @@ export function requiredString(args: Record<string, unknown>, key: string): stri
 	return value.trim();
 }
 
+/** An optional string argument, trimmed; undefined when it is missing or blank. */
+export function optionalString(args: Record<string, unknown>, key: string): string | undefined {
+	const value = args[key];
+	return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
 /** A required list of paths. The paths themselves are checked where they are claimed. */
 export function requiredPaths(args: Record<string, unknown>, key: string): string[] {
 	const value = args[key];
