@@ -52,7 +52,11 @@ export interface SetupSnapshot {
  * (git, the clone, the install). One that won't start twice, or starts
  * without its checkout, is given up on for the image.
  */
-export async function bootContainer(container: Container, size: InstanceSize = "standard-1", snapshot?: SetupSnapshot | null): Promise<"running" | "restored" | "fresh"> {
+export async function bootContainer(
+	container: Container,
+	size: InstanceSize = "standard-1",
+	snapshot?: SetupSnapshot | null,
+): Promise<"running" | "restored" | "fresh"> {
 	if (container.running) return "running";
 	const options = { entrypoint: ["sleep", "infinity"], enableInternet: true, instance: INSTANCE_SIZES[size] };
 	for (let attempt = 1; snapshot && attempt <= SNAPSHOT_STARTS; attempt++) {
@@ -63,14 +67,21 @@ export async function bootContainer(container: Container, size: InstanceSize = "
 			// Started, without its checkout: trying again won't help.
 			attempt = SNAPSHOT_STARTS;
 		} catch (err) {
-			console.error(`starting from a snapshot failed (try ${attempt} of ${SNAPSHOT_STARTS})`, err instanceof Error ? err.message : String(err));
+			console.error(
+				`starting from a snapshot failed (try ${attempt} of ${SNAPSHOT_STARTS})`,
+				err instanceof Error ? err.message : String(err),
+			);
 		}
 		if (container.running) await container.destroy("the snapshot was unusable").catch(() => undefined);
 		if (attempt < SNAPSHOT_STARTS) await new Promise((resolve) => setTimeout(resolve, SNAPSHOT_RETRY_MS));
 	}
 	container.start({ ...options, image: IMAGE });
 	// WORKDIR doesn't exist until a clone, so setup runs from /.
-	const apt = await run(container, ["bash", "-lc", "apt-get update -qq && apt-get install -y -qq git ca-certificates >/dev/null"], "/");
+	const apt = await run(
+		container,
+		["bash", "-lc", "apt-get update -qq && apt-get install -y -qq git ca-certificates >/dev/null"],
+		"/",
+	);
 	if (apt.exitCode !== 0) throw new Error(`installing git failed: ${clip(apt.output, 2_000)}`);
 	return "fresh";
 }
@@ -123,7 +134,9 @@ const GIT_TRACE_ENV = { GIT_TRACE_CURL: GIT_TRACE_FILE, GIT_TRACE_CURL_NO_DATA: 
  * path, and how many a server failed (5xx): read from git's trace, which is
  * then cleared. Null if it couldn't be read.
  */
-export async function takeGitRequests(container: Container): Promise<{ paths: Map<string, number>; failed: number } | null> {
+export async function takeGitRequests(
+	container: Container,
+): Promise<{ paths: Map<string, number>; failed: number } | null> {
 	const script = [
 		`f=${GIT_TRACE_FILE}; [ -f "$f" ] || exit 0; mv "$f" "$f.taken"`,
 		`grep -oE "=> Send header: (GET|POST) [^ ]+" "$f.taken" | awk '{print $5}' | sed -E 's/\?.*//' | sort | uniq -c`,
@@ -143,7 +156,13 @@ export async function takeGitRequests(container: Container): Promise<{ paths: Ma
 	return { paths, failed };
 }
 
-export async function run(container: Container, cmd: string[], cwd = WORKDIR, stdin?: string, timeoutS = COMMAND_TIMEOUT_S) {
+export async function run(
+	container: Container,
+	cmd: string[],
+	cwd = WORKDIR,
+	stdin?: string,
+	timeoutS = COMMAND_TIMEOUT_S,
+) {
 	const process = await container.exec(["timeout", "-s", "KILL", String(timeoutS), ...cmd], {
 		cwd,
 		stderr: "combined",
@@ -152,7 +171,10 @@ export async function run(container: Container, cmd: string[], cwd = WORKDIR, st
 	});
 	const result = await process.output();
 	const output = new TextDecoder().decode(result.stdout);
-	return { exitCode: result.exitCode, output: result.exitCode === 137 ? `${output}\n(killed after ${timeoutS}s)` : output };
+	return {
+		exitCode: result.exitCode,
+		output: result.exitCode === 137 ? `${output}\n(killed after ${timeoutS}s)` : output,
+	};
 }
 
 /**
@@ -192,10 +214,14 @@ function isNetworkGitCommand(args: string[]) {
 
 /** Only retry recognizable transport errors; local and permanent Git failures pass through. */
 function isTransientGitOutput(output: string) {
-	return /\bHTTP(?:\/\d(?:\.\d)?)?\s+(?:408|429|5\d\d)\b/i.test(output)
-		|| /returned error:\s*(?:408|429|5\d\d)\b/i.test(output)
-		|| /\b(?:could not resolve (?:host|proxy)|failed to connect|connection (?:timed out|reset|refused)|operation timed out|network is unreachable|temporary failure in name resolution|recv failure|send failure|remote end hung up unexpectedly|unexpected disconnect|early eof)\b/i.test(output)
-		|| /\bcurl\s*\(?\s*(?:7|28|35|52|56)\)?\b/i.test(output);
+	return (
+		/\bHTTP(?:\/\d(?:\.\d)?)?\s+(?:408|429|5\d\d)\b/i.test(output) ||
+		/returned error:\s*(?:408|429|5\d\d)\b/i.test(output) ||
+		/\b(?:could not resolve (?:host|proxy)|failed to connect|connection (?:timed out|reset|refused)|operation timed out|network is unreachable|temporary failure in name resolution|recv failure|send failure|remote end hung up unexpectedly|unexpected disconnect|early eof)\b/i.test(
+			output,
+		) ||
+		/\bcurl\s*\(?\s*(?:7|28|35|52|56)\)?\b/i.test(output)
+	);
 }
 
 /** Keep the start and end of long output; the end usually holds the error. */

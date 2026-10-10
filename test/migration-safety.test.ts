@@ -10,7 +10,9 @@ import { describe, expect, it } from "vitest";
 const root = join(import.meta.dirname, "..");
 
 describe("D1 migrations", () => {
-	const files = readdirSync(join(root, "migrations")).filter((f) => f.endsWith(".sql")).sort();
+	const files = readdirSync(join(root, "migrations"))
+		.filter((f) => f.endsWith(".sql"))
+		.sort();
 
 	it("are numbered in order, one after another", () => {
 		expect(files.map((f) => Number(f.slice(0, 4)))).toEqual(files.map((_, i) => i + 1));
@@ -40,9 +42,13 @@ describe("Durable Object migrations", () => {
 			const text = readFileSync(join(root, config), "utf8").replace(/^\s*\/\/.*$/gm, "");
 			const tags = [...text.matchAll(/\{\s*"tag":\s*"(v\d+)"([^}]*)\}/g)];
 			expect(tags.length).toBeGreaterThan(0);
-			for (const [, tag, rest] of tags) if (/deleted_classes/.test(rest)) expect(DECIDED.has(tag), `${config} ${tag} deletes a Durable Object class`).toBe(true);
+			for (const [, tag, rest] of tags)
+				if (/deleted_classes/.test(rest))
+					expect(DECIDED.has(tag), `${config} ${tag} deletes a Durable Object class`).toBe(true);
 			// Nor renames one away from its data without saying so here.
-			for (const [, tag, rest] of tags) if (/renamed_classes|transferred_classes/.test(rest) && !RENAMES_DECIDED.has(tag)) expect.fail(`${config} ${tag} renames or transfers a class: decide it deliberately and allow it here`);
+			for (const [, tag, rest] of tags)
+				if (/renamed_classes|transferred_classes/.test(rest) && !RENAMES_DECIDED.has(tag))
+					expect.fail(`${config} ${tag} renames or transfers a class: decide it deliberately and allow it here`);
 		});
 	}
 });

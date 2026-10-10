@@ -52,12 +52,17 @@ const DIFFS_AT_ONCE = 6;
  * parent (sorted). What the audit replays, as `git log --first-parent
  * baseline..branch` with `git diff-tree -r --name-only` would tell it.
  */
-export async function readBranchHistory(source: HistorySource, baseline: string, branch: string, kept?: KeptFiles): Promise<BranchCommit[]> {
+export async function readBranchHistory(
+	source: HistorySource,
+	baseline: string,
+	branch: string,
+	kept?: KeptFiles,
+): Promise<BranchCommit[]> {
 	const chain: CommitMeta[] = [];
 	let reached = false;
 	// Page after page until the baseline, or an empty page (the root): a page shorter than asked for isn't taken for the
 	// end, so a page cut short (a smaller cap, say) can't silently drop history from the audit.
-	for (let offset = 0; !reached; ) {
+	for (let offset = 0; !reached;) {
 		const page = await source.log(branch, LOG_PAGE, offset);
 		if (!page.length) break;
 		for (const commit of page) {
@@ -70,7 +75,8 @@ export async function readBranchHistory(source: HistorySource, baseline: string,
 		offset += page.length;
 	}
 	chain.reverse();
-	const known = kept && chain.length ? await kept.get(chain.map((c) => c.hash)).catch(() => ({}) as Record<string, string[]>) : {};
+	const known =
+		kept && chain.length ? await kept.get(chain.map((c) => c.hash)).catch(() => ({}) as Record<string, string[]>) : {};
 	// Each commit's first parent's tree: the commit before it in the chain, or the baseline's for the first.
 	const trees = new Map(chain.map((c) => [c.hash, c.treeHash]));
 	const missing = chain.filter((c) => !known[c.hash]);
@@ -81,24 +87,39 @@ export async function readBranchHistory(source: HistorySource, baseline: string,
 	}
 	const read = new Map<string, Promise<TreeEntry[]>>();
 	const tree = (hash: string) => {
-		if (!read.has(hash)) read.set(hash, source.readTree(hash).then((entries) => entries ?? []));
+		if (!read.has(hash))
+			read.set(
+				hash,
+				source.readTree(hash).then((entries) => entries ?? []),
+			);
 		return read.get(hash)!;
 	};
 	const worked = await atMost(DIFFS_AT_ONCE, missing, async (c) => {
 		const before = c.parents[0] ? trees.get(c.parents[0]) : undefined;
-		if (c.parents[0] && !before) throw new Error(`${c.hash}'s first parent ${c.parents[0]} isn't on ${branch}'s history`);
+		if (c.parents[0] && !before)
+			throw new Error(`${c.hash}'s first parent ${c.parents[0]} isn't on ${branch}'s history`);
 		return [c.hash, (await changedFiles(tree, before ?? null, c.treeHash)).sort()] as const;
 	});
 	const files = { ...known, ...Object.fromEntries(worked) };
 	if (kept && worked.length) await kept.put(Object.fromEntries(worked)).catch(() => undefined);
-	return chain.map((c) => ({ commit: c.hash, parents: c.parents, author: c.author.name, message: c.message.replace(/\n+$/, ""), files: files[c.hash] ?? [] }));
+	return chain.map((c) => ({
+		commit: c.hash,
+		parents: c.parents,
+		author: c.author.name,
+		message: c.message.replace(/\n+$/, ""),
+		files: files[c.hash] ?? [],
+	}));
 }
 
 /** The paths that differ between trees `a` and `b` (null: none), sorted, read through `source` (see changedFiles). */
 export async function filesBetween(source: HistorySource, a: string | null, b: string | null): Promise<string[]> {
 	const read = new Map<string, Promise<TreeEntry[]>>();
 	const tree = (hash: string) => {
-		if (!read.has(hash)) read.set(hash, source.readTree(hash).then((entries) => entries ?? []));
+		if (!read.has(hash))
+			read.set(
+				hash,
+				source.readTree(hash).then((entries) => entries ?? []),
+			);
 		return read.get(hash)!;
 	};
 	return (await changedFiles(tree, a, b)).sort();
@@ -109,7 +130,12 @@ export async function filesBetween(source: HistorySource, a: string | null, b: s
  * the folders whose hashes differ: what `git diff-tree -r --name-only` lists
  * (a mode change counts; a folder replaced by a file lists both).
  */
-async function changedFiles(tree: (hash: string) => Promise<TreeEntry[]>, a: string | null, b: string | null, prefix = ""): Promise<string[]> {
+async function changedFiles(
+	tree: (hash: string) => Promise<TreeEntry[]>,
+	a: string | null,
+	b: string | null,
+	prefix = "",
+): Promise<string[]> {
 	if (a === b) return [];
 	const [before, after] = await Promise.all([a ? tree(a) : [], b ? tree(b) : []]);
 	const was = new Map(before.map((e) => [e.name, e]));
@@ -122,7 +148,8 @@ async function changedFiles(tree: (hash: string) => Promise<TreeEntry[]>, a: str
 		const path = `${prefix}${name}`;
 		const xTree = x?.type === "tree";
 		const yTree = y?.type === "tree";
-		if (xTree || yTree) out.push(...(await changedFiles(tree, xTree ? x!.hash : null, yTree ? y!.hash : null, `${path}/`)));
+		if (xTree || yTree)
+			out.push(...(await changedFiles(tree, xTree ? x!.hash : null, yTree ? y!.hash : null, `${path}/`)));
 		if ((x && !xTree) || (y && !yTree)) out.push(path);
 	}
 	return out;

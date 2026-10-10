@@ -22,11 +22,19 @@ let work: string;
 const remote = async () => ({ url: server.url, token: "unused" });
 const rootRef = "refs/notes/githive-votes/p";
 const root = () => new GitCasLog<Votes>(remote, "p", rootRef);
-const store = (rootHead?: Awaited<ReturnType<GitCasLog<Votes>["read"]>>) => voteStore({ repo: "p", root: root(), remote, ...(rootHead !== undefined ? { rootHead } : {}) });
-const refs = (prefix: string) => server.git("for-each-ref", "--format=%(refname)", prefix).trim().split("\n").filter(Boolean);
+const store = (rootHead?: Awaited<ReturnType<GitCasLog<Votes>["read"]>>) =>
+	voteStore({ repo: "p", root: root(), remote, ...(rootHead !== undefined ? { rootHead } : {}) });
+const refs = (prefix: string) =>
+	server.git("for-each-ref", "--format=%(refname)", prefix).trim().split("\n").filter(Boolean);
 const commitA = "a".repeat(40);
 const commitB = "b".repeat(40);
-const ballot = (commit: string, reviewer: string, verdict: "approve" | "reject" = "approve") => ({ commit, reviewer, role: "review", verdict, evidence: "ok" });
+const ballot = (commit: string, reviewer: string, verdict: "approve" | "reject" = "approve") => ({
+	commit,
+	reviewer,
+	role: "review",
+	verdict,
+	evidence: "ok",
+});
 
 beforeEach(async () => {
 	server = await startGitServer();
@@ -39,22 +47,30 @@ afterEach(async () => {
 
 describe("when to shard the votes", () => {
 	const at = Date.parse("2026-10-07T12:00:00.000Z");
-	const cast = (n: number, when = at) => Array.from({ length: n }, (_, i) => ({ ...ballot(commitA, `rev-${i}`), at: new Date(when).toISOString() }));
+	const cast = (n: number, when = at) =>
+		Array.from({ length: n }, (_, i) => ({ ...ballot(commitA, `rev-${i}`), at: new Date(when).toISOString() }));
 
 	it("shards once as many reviewers vote at once as one record serves well", () => {
 		expect(votesShardingReason({ votes: cast(SHARD_VOTES_WHEN.reviewers - 2) }, "newcomer", at)).toBeNull();
-		expect(votesShardingReason({ votes: cast(SHARD_VOTES_WHEN.reviewers - 1) }, "newcomer", at)).toBe(`${SHARD_VOTES_WHEN.reviewers} reviewers voting`);
+		expect(votesShardingReason({ votes: cast(SHARD_VOTES_WHEN.reviewers - 1) }, "newcomer", at)).toBe(
+			`${SHARD_VOTES_WHEN.reviewers} reviewers voting`,
+		);
 		expect(votesShardingReason({ votes: cast(SHARD_VOTES_WHEN.reviewers - 1) }, "rev-0", at)).toBeNull();
 		// Reviewers sharing one Access identity still each write: counted by name.
 		const shared = cast(SHARD_VOTES_WHEN.reviewers - 1).map((v) => ({ ...v, by: "service:one-token" }));
-		expect(votesShardingReason({ votes: shared }, "newcomer", at)).toBe(`${SHARD_VOTES_WHEN.reviewers} reviewers voting`);
+		expect(votesShardingReason({ votes: shared }, "newcomer", at)).toBe(
+			`${SHARD_VOTES_WHEN.reviewers} reviewers voting`,
+		);
 	});
 
 	it("shards when votes come faster than one record serves well, counting only the last few minutes", () => {
 		const window = SHARD_VOTES_WHEN.windowMs / 60_000;
-		const many = (n: number, when = at) => Array.from({ length: n }, (_, i) => ({ ...ballot(commitA, `rev-${i % 3}`), at: new Date(when).toISOString() }));
+		const many = (n: number, when = at) =>
+			Array.from({ length: n }, (_, i) => ({ ...ballot(commitA, `rev-${i % 3}`), at: new Date(when).toISOString() }));
 		expect(votesShardingReason({ votes: many(SHARD_VOTES_WHEN.writesPerMinute * window) }, "rev-0", at)).toBeNull();
-		expect(votesShardingReason({ votes: many(SHARD_VOTES_WHEN.writesPerMinute * window + 1) }, "rev-0", at)).toMatch(/votes a minute/);
+		expect(votesShardingReason({ votes: many(SHARD_VOTES_WHEN.writesPerMinute * window + 1) }, "rev-0", at)).toMatch(
+			/votes a minute/,
+		);
 		expect(votesShardingReason({ votes: many(200, at - SHARD_VOTES_WHEN.windowMs - 1) }, "rev-0", at)).toBeNull();
 	});
 
@@ -64,7 +80,9 @@ describe("when to shard the votes", () => {
 
 	it("puts a commit's votes in one bucket, always the same", () => {
 		expect(bucketOf(commitA, 16)).toBe(bucketOf(commitA, 16));
-		const seen = new Set(Array.from({ length: 64 }, (_, i) => bucketOf(i.toString(16).padStart(6, "0") + "0".repeat(34), 16)));
+		const seen = new Set(
+			Array.from({ length: 64 }, (_, i) => bucketOf(i.toString(16).padStart(6, "0") + "0".repeat(34), 16)),
+		);
 		expect([...seen].every((b) => Number(b) >= 0 && Number(b) < 16)).toBe(true);
 		expect(seen.size).toBe(16);
 	});
@@ -82,19 +100,30 @@ describe("votes before and after sharding", { timeout: 60_000 }, () => {
 	it("shards once, keeping the votes cast before, and reads a commit's votes from the record and its bucket", async () => {
 		await store().vote(ballot(commitA, "rev-1"));
 		await store().flag({ change: "c-1", agent: "agent-c", reason: "reviewers disagree" });
-		expect(await shardVotes(root(), { buckets: VOTE_BUCKETS, recordsRepos: 0, reason: "test" })).toMatchObject({ ok: true });
-		expect(await shardVotes(root(), { buckets: VOTE_BUCKETS, recordsRepos: 0, reason: "test" })).toMatchObject({ ok: false, refused: "sharded" });
+		expect(await shardVotes(root(), { buckets: VOTE_BUCKETS, recordsRepos: 0, reason: "test" })).toMatchObject({
+			ok: true,
+		});
+		expect(await shardVotes(root(), { buckets: VOTE_BUCKETS, recordsRepos: 0, reason: "test" })).toMatchObject({
+			ok: false,
+			refused: "sharded",
+		});
 		await store().vote(ballot(commitA, "rev-2"));
 		await store().vote(ballot(commitB, "rev-3"));
 		// New votes went to their commits' buckets; the record kept the one from before (and the flag).
-		expect(refs(votesPrefix("p")).map((r) => r.slice(votesPrefix("p").length)).sort()).toEqual([...new Set([bucketOf(commitA, VOTE_BUCKETS), bucketOf(commitB, VOTE_BUCKETS)])].sort());
+		expect(
+			refs(votesPrefix("p"))
+				.map((r) => r.slice(votesPrefix("p").length))
+				.sort(),
+		).toEqual([...new Set([bucketOf(commitA, VOTE_BUCKETS), bucketOf(commitB, VOTE_BUCKETS)])].sort());
 		expect((await root().read())?.commit.state.votes.map((v) => v.reviewer)).toEqual(["rev-1"]);
 		const forA = await store().readFor([commitA]);
 		expect(forA.votes.filter((v) => v.commit === commitA).map((v) => v.reviewer)).toEqual(["rev-1", "rev-2"]);
 		expect(forA.flags.map((f) => f.change)).toEqual(["c-1"]);
 		expect((await store().read()).votes.map((v) => v.reviewer)).toEqual(["rev-1", "rev-2", "rev-3"]);
 		// Cited: the record and the commit's bucket.
-		expect(store().cite(forA, commitA)).toBe(`=${forA.tips.get("")} ${bucketOf(commitA, VOTE_BUCKETS)}=${forA.tips.get(bucketOf(commitA, VOTE_BUCKETS))}`);
+		expect(store().cite(forA, commitA)).toBe(
+			`=${forA.tips.get("")} ${bucketOf(commitA, VOTE_BUCKETS)}=${forA.tips.get(bucketOf(commitA, VOTE_BUCKETS))}`,
+		);
 	});
 
 	it("still counts a vote cast in the record after sharding, by a caller that read it before", async () => {
@@ -115,17 +144,45 @@ describe("votes before and after sharding", { timeout: 60_000 }, () => {
 });
 
 describe("the audit of sharded votes", () => {
-	const merge = (votesTip: string) => ({ commit: "m1", author: "agent-a", change: "c-1", claimsTip: "r1", head: commitA, votesTip, base: "b0", files: ["src/x.ts"] });
-	const registry = [{ tip: "r1", state: { claims: [{ change: "c-1", agent: "agent-a", paths: ["src/"], intent: "x", since: "t", active: "t" }], released: [] } }];
+	const merge = (votesTip: string) => ({
+		commit: "m1",
+		author: "agent-a",
+		change: "c-1",
+		claimsTip: "r1",
+		head: commitA,
+		votesTip,
+		base: "b0",
+		files: ["src/x.ts"],
+	});
+	const registry = [
+		{
+			tip: "r1",
+			state: {
+				claims: [{ change: "c-1", agent: "agent-a", paths: ["src/"], intent: "x", since: "t", active: "t" }],
+				released: [],
+			},
+		},
+	];
 	const vote = { ...ballot(commitA, "rev-1"), at: "2026-10-07T12:00:00.000Z" };
 
 	it("counts the record and the cited bucket together", async () => {
-		const records = { registry, votes: [{ tip: "v1", state: { votes: [] } }], voteBuckets: new Map([["5", [{ tip: "k1", state: { votes: [vote] } }]]]), policy: { required: 1, vetoes: [] }, merges: [merge("=v1 5=k1")] };
+		const records = {
+			registry,
+			votes: [{ tip: "v1", state: { votes: [] } }],
+			voteBuckets: new Map([["5", [{ tip: "k1", state: { votes: [vote] } }]]]),
+			policy: { required: 1, vetoes: [] },
+			merges: [merge("=v1 5=k1")],
+		};
 		expect(await audit(records)).toEqual([]);
 	});
 
 	it("reports a cited bucket tip that isn't in the bucket's history, and approvals the cited votes don't hold", async () => {
-		const records = { registry, votes: [{ tip: "v1", state: { votes: [] } }], voteBuckets: new Map([["5", [{ tip: "k1", state: { votes: [vote] } }]]]), policy: { required: 1, vetoes: [] } };
+		const records = {
+			registry,
+			votes: [{ tip: "v1", state: { votes: [] } }],
+			voteBuckets: new Map([["5", [{ tip: "k1", state: { votes: [vote] } }]]]),
+			policy: { required: 1, vetoes: [] },
+		};
 		expect((await audit({ ...records, merges: [merge("=v1 5=nope")] })).map((v) => v.rule)).toContain("unknown-votes");
 		// Citing only the record, whose votes don't approve it.
 		expect((await audit({ ...records, merges: [merge("=v1")] })).map((v) => v.rule)).toContain("unapproved");
@@ -152,18 +209,29 @@ describe("sharding votes on demand through the toolkit", { timeout: 120_000 }, (
 
 	it("shards the votes when the eighth reviewer votes, merges counting both, and audits clean", async () => {
 		expect(await call("settings", { required: 1, vetoes: [] })).toMatchObject({ sharding: "on demand" });
-		expect(await call("claim", { change: "c-1", agent: "agent-a", paths: ["src/"], intent: "x" })).toMatchObject({ ok: true });
+		expect(await call("claim", { change: "c-1", agent: "agent-a", paths: ["src/"], intent: "x" })).toMatchObject({
+			ok: true,
+		});
 		const head = await pushChange(server.url, work, "agent-a", "c-1", { "src/x.ts": "x\n" });
-		for (let i = 0; i < SHARD_VOTES_WHEN.reviewers - 1; i++) await call("vote", { commit: head, reviewer: `rev-${i}`, role: "review", verdict: "approve", evidence: "ok" });
+		for (let i = 0; i < SHARD_VOTES_WHEN.reviewers - 1; i++)
+			await call("vote", { commit: head, reviewer: `rev-${i}`, role: "review", verdict: "approve", evidence: "ok" });
 		expect((await root().read())?.commit.state.buckets).toBeUndefined();
 		// The eighth: sharded first, then cast in the commit's bucket.
 		await call("vote", { commit: head, reviewer: "rev-last", role: "review", verdict: "reject", evidence: "not yet" });
-		expect((await root().read())?.commit.state).toMatchObject({ buckets: VOTE_BUCKETS, recordsRepos: 16, shardedBecause: `${SHARD_VOTES_WHEN.reviewers} reviewers voting` });
+		expect((await root().read())?.commit.state).toMatchObject({
+			buckets: VOTE_BUCKETS,
+			recordsRepos: 16,
+			shardedBecause: `${SHARD_VOTES_WHEN.reviewers} reviewers voting`,
+		});
 		expect(created).toEqual([16]);
-		expect(((await call("status", { change: "c-1" })) as { votes: { reviewer: string }[] }).votes.map((v) => v.reviewer)).toContain("rev-last");
+		expect(
+			((await call("status", { change: "c-1" })) as { votes: { reviewer: string }[] }).votes.map((v) => v.reviewer),
+		).toContain("rev-last");
 
 		expect(await call("merge", { change: "c-1", agent: "agent-a" })).toMatchObject({ ok: true });
-		expect(server.git("log", "-1", "--format=%(trailers:key=GitHive-Votes,valueonly)", "main").trim()).toMatch(new RegExp(`^=[0-9a-f]{40} ${bucketOf(head, VOTE_BUCKETS)}=[0-9a-f]{40}$`));
+		expect(server.git("log", "-1", "--format=%(trailers:key=GitHive-Votes,valueonly)", "main").trim()).toMatch(
+			new RegExp(`^=[0-9a-f]{40} ${bucketOf(head, VOTE_BUCKETS)}=[0-9a-f]{40}$`),
+		);
 		expect(await call("audit", {})).toEqual({ merges: 1, open: 0, violations: [] });
 	});
 });

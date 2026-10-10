@@ -8,7 +8,8 @@ export interface TreeNode {
 	children: TreeNode[];
 }
 
-const byKindThenName = (a: TreeNode, b: TreeNode) => (a.kind === b.kind ? a.name.localeCompare(b.name) : a.kind === "dir" ? -1 : 1);
+const byKindThenName = (a: TreeNode, b: TreeNode) =>
+	a.kind === b.kind ? a.name.localeCompare(b.name) : a.kind === "dir" ? -1 : 1;
 
 /** The folder tree of a list of file paths: folders first, then files, each by name. */
 export function buildTree(files: string[]): TreeNode[] {

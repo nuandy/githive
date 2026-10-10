@@ -20,7 +20,9 @@ export const inLane = (path: string, owns: string[]) => owns.some((entry) => inL
 export function entriesOverlap(a: string, b: string) {
 	const dirA = a.endsWith("/") ? a : `${a}/`;
 	const dirB = b.endsWith("/") ? b : `${b}/`;
-	return a === b || dirA === dirB || inLaneEntry(b, a) || inLaneEntry(a, b) || dirA.startsWith(dirB) || dirB.startsWith(dirA);
+	return (
+		a === b || dirA === dirB || inLaneEntry(b, a) || inLaneEntry(a, b) || dirA.startsWith(dirB) || dirB.startsWith(dirA)
+	);
 }
 
 /** Normalize and validate claimed paths: relative, no `..`, no empty segments. Throws `[400]` with the reason. */
@@ -65,7 +67,9 @@ export function claimCovering(files: string[], max = MAX_CLAIM_PATHS): string[] 
 		if (deepest <= 1) return null;
 		const lifted = [...new Set(entries.map((e) => (depth(e) === deepest ? parent(e) : e)))];
 		// What a lifted folder covers needn't be listed apart.
-		entries = lifted.filter((e) => !lifted.some((folder) => folder !== e && folder.endsWith("/") && inLaneEntry(e, folder)));
+		entries = lifted.filter(
+			(e) => !lifted.some((folder) => folder !== e && folder.endsWith("/") && inLaneEntry(e, folder)),
+		);
 	}
 	return entries.sort();
 }

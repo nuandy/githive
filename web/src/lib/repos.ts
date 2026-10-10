@@ -81,5 +81,7 @@ export const REPO_GROUPS: { state: RepoState; title: string }[] = [
 ];
 
 export function groupRepos(rows: RepoRow[]): { state: RepoState; title: string; rows: RepoRow[] }[] {
-	return REPO_GROUPS.map((group) => ({ ...group, rows: rows.filter((row) => repoState(row) === group.state) })).filter((group) => group.rows.length);
+	return REPO_GROUPS.map((group) => ({ ...group, rows: rows.filter((row) => repoState(row) === group.state) })).filter(
+		(group) => group.rows.length,
+	);
 }

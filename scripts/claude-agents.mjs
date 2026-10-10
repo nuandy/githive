@@ -32,8 +32,17 @@ const minutes = Number(flag("minutes") ?? 45);
 const plan = JSON.parse(readFileSync(planPath, "utf8"));
 const here = dirname(planPath);
 const at = (path) => (path && !isAbsolute(path) ? join(here, path) : path);
-const vars = Object.fromEntries(readFileSync(join(root, ".dev.vars"), "utf8").split("\n").map((l) => l.match(/^([A-Z_]+)=(.*)$/)).filter(Boolean).map(([, k, v]) => [k, v.replace(/^"|"$/g, "")]));
-const access = { "CF-Access-Client-Id": vars.CF_ACCESS_CLIENT_ID, "CF-Access-Client-Secret": vars.CF_ACCESS_CLIENT_SECRET };
+const vars = Object.fromEntries(
+	readFileSync(join(root, ".dev.vars"), "utf8")
+		.split("\n")
+		.map((l) => l.match(/^([A-Z_]+)=(.*)$/))
+		.filter(Boolean)
+		.map(([, k, v]) => [k, v.replace(/^"|"$/g, "")]),
+);
+const access = {
+	"CF-Access-Client-Id": vars.CF_ACCESS_CLIENT_ID,
+	"CF-Access-Client-Secret": vars.CF_ACCESS_CLIENT_SECRET,
+};
 
 const started = Date.now();
 const clock = () => `${((Date.now() - started) / 1000).toFixed(0).padStart(5)}s`;
@@ -49,7 +58,12 @@ if (!only) rmSync(work, { recursive: true, force: true });
 mkdirSync(work, { recursive: true });
 
 /** What every agent is told: who it is, the loop, and how to use git with GitHive; and its own `brief`, if the plan gives it one. */
-const prompt = (agent, dir, keyFile, brief) => `You are ${agent}, one of ${total} independent AI agents working at the same time on the GitHive repo "${plan.repo}": a copy of Express (Node.js). GitHive coordinates you through its MCP tools (server "githive"); read its instructions. Pass repo "${plan.repo}" and agent "${agent}" wherever a tool asks for them. You're registered already, and your key goes with every call: never call register.
+const prompt = (
+	agent,
+	dir,
+	keyFile,
+	brief,
+) => `You are ${agent}, one of ${total} independent AI agents working at the same time on the GitHive repo "${plan.repo}": a copy of Express (Node.js). GitHive coordinates you through its MCP tools (server "githive"); read its instructions. Pass repo "${plan.repo}" and agent "${agent}" wherever a tool asks for them. You're registered already, and your key goes with every call: never call register.
 
 Nobody assigns you work: you look, and choose. Work in a loop:
 1. Your own changes first. For each change you hold, call status:
@@ -85,7 +99,18 @@ function runAgent(spec) {
 	mkdirSync(dir, { recursive: true });
 	const keyFile = at(spec.keyFile);
 	const config = join(dir, ".mcp.json");
-	writeFileSync(config, JSON.stringify({ mcpServers: { githive: { type: "http", url: `${BASE}/mcp`, headers: { ...access, "X-GitHive-Agent-Key": readFileSync(keyFile, "utf8").trim() } } } }));
+	writeFileSync(
+		config,
+		JSON.stringify({
+			mcpServers: {
+				githive: {
+					type: "http",
+					url: `${BASE}/mcp`,
+					headers: { ...access, "X-GitHive-Agent-Key": readFileSync(keyFile, "utf8").trim() },
+				},
+			},
+		}),
+	);
 	chmodSync(config, 0o600);
 	const events = createWriteStream(join(dir, `${spec.agent}.jsonl`));
 	const child = spawn(
@@ -131,42 +156,74 @@ function runAgent(spec) {
 				const name = part.name.replace(/^mcp__githive__/, "githive.");
 				summary.tools[name] = (summary.tools[name] ?? 0) + 1;
 				// GitHive calls tell the story: which, and for what.
-				if (name.startsWith("githive.")) say(spec.agent, `${name}${part.input?.change ? ` ${part.input.change}` : ""}${part.input?.verdict ? ` ${part.input.verdict}` : ""}`);
+				if (name.startsWith("githive."))
+					say(
+						spec.agent,
+						`${name}${part.input?.change ? ` ${part.input.change}` : ""}${part.input?.verdict ? ` ${part.input.verdict}` : ""}`,
+					);
 			}
 			if (event.type === "result") summary.result = event;
 		}
 	});
 	child.stderr.on("data", (chunk) => events.write(chunk));
-	const limit = setTimeout(() => {
-		say(spec.agent, `still going after ${minutes + 5} minutes: stopped`);
-		child.kill("SIGTERM");
-	}, (minutes + 5) * 60_000);
+	const limit = setTimeout(
+		() => {
+			say(spec.agent, `still going after ${minutes + 5} minutes: stopped`);
+			child.kill("SIGTERM");
+		},
+		(minutes + 5) * 60_000,
+	);
 	return new Promise((done) =>
 		child.on("close", (code) => {
 			clearTimeout(limit);
 			events.end();
 			rmSync(config, { force: true });
-			say(spec.agent, `done (exit ${code})${summary.result ? `: ${summary.result.num_turns} turns, ${Math.round(summary.result.duration_ms / 1000)}s` : ""}`);
+			say(
+				spec.agent,
+				`done (exit ${code})${summary.result ? `: ${summary.result.num_turns} turns, ${Math.round(summary.result.duration_ms / 1000)}s` : ""}`,
+			);
 			done(summary);
 		}),
 	);
 }
 
-for (const spec of plan.agents) if (!existsSync(at(spec.keyFile))) throw new Error(`${spec.agent} isn't registered (no ${spec.keyFile}): run swarm.mjs ${args[0]} --setup-only first`);
-say("run", `${plan.agents.length} Claude Code agents (${model}) on ${plan.repo}, ${plan.backlog.length} pieces in its backlog`);
+for (const spec of plan.agents)
+	if (!existsSync(at(spec.keyFile)))
+		throw new Error(`${spec.agent} isn't registered (no ${spec.keyFile}): run swarm.mjs ${args[0]} --setup-only first`);
+say(
+	"run",
+	`${plan.agents.length} Claude Code agents (${model}) on ${plan.repo}, ${plan.backlog.length} pieces in its backlog`,
+);
 const summaries = await Promise.all(plan.agents.map(runAgent));
 
 console.log("\nWhat each agent did (tool calls):");
 for (const s of summaries) {
-	const githive = Object.entries(s.tools).filter(([n]) => n.startsWith("githive.")).map(([n, c]) => `${n.slice(8)} ${c}`).join(", ");
-	console.log(`${s.agent.padEnd(10)} ${s.result ? `${s.result.num_turns} turns, ${Math.round(s.result.duration_ms / 1000)}s` : "no result"}; githive: ${githive || "none"}; bash ${s.tools.Bash ?? 0}, edits ${(s.tools.Edit ?? 0) + (s.tools.Write ?? 0)}`);
+	const githive = Object.entries(s.tools)
+		.filter(([n]) => n.startsWith("githive."))
+		.map(([n, c]) => `${n.slice(8)} ${c}`)
+		.join(", ");
+	console.log(
+		`${s.agent.padEnd(10)} ${s.result ? `${s.result.num_turns} turns, ${Math.round(s.result.duration_ms / 1000)}s` : "no result"}; githive: ${githive || "none"}; bash ${s.tools.Bash ?? 0}, edits ${(s.tools.Edit ?? 0) + (s.tools.Write ?? 0)}`,
+	);
 	if (s.result?.result) console.log(`           ${String(s.result.result).replace(/\s+/g, " ").slice(0, 400)}`);
 }
-const get = (path) => fetch(`${BASE}${path}`, { headers: { ...access, "Cache-Control": "no-cache" } }).then((r) => r.json());
-const landing = await get(`/repos/_/${plan.repo}/landing?branch=${encodeURIComponent(plan.setup?.branch ?? "main")}`).catch(() => null);
-console.log(`\nLanded: ${(landing?.recent ?? []).filter((s) => s.how === "landed").map((s) => s.change).join(", ") || "nothing"}`);
+const get = (path) =>
+	fetch(`${BASE}${path}`, { headers: { ...access, "Cache-Control": "no-cache" } }).then((r) => r.json());
+const landing = await get(
+	`/repos/_/${plan.repo}/landing?branch=${encodeURIComponent(plan.setup?.branch ?? "main")}`,
+).catch(() => null);
+console.log(
+	`\nLanded: ${
+		(landing?.recent ?? [])
+			.filter((s) => s.how === "landed")
+			.map((s) => s.change)
+			.join(", ") || "nothing"
+	}`,
+);
 const failed = (landing?.recent ?? []).filter((s) => s.how === "failed");
 if (failed.length) console.log(`Put out (checks failed): ${failed.map((s) => s.change).join(", ")}`);
 const audit = await get(`/repos/_/${plan.repo}/audit`);
-console.log(`audit: ${audit.merges} merges, ${audit.open} open violations${audit.violations?.length ? `: ${JSON.stringify(audit.violations).slice(0, 400)}` : ""}`);
+console.log(
+	`audit: ${audit.merges} merges, ${audit.open} open violations${audit.violations?.length ? `: ${JSON.stringify(audit.violations).slice(0, 400)}` : ""}`,
+);
 console.log(`total ${((Date.now() - started) / 1000).toFixed(0)}s`);

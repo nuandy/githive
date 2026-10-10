@@ -27,14 +27,22 @@ const DROP_TRIES = 3;
 const empty = (): LeaseRecord => ({ checking: null });
 
 /** Where a branch's lease is kept: this ref (branch names may hold `/`, which a ref under it can't also be). */
-export const landingRef = (repo: string, branch: string) => `refs/notes/githive-landing/${repo}/${encodeURIComponent(branch)}`;
+export const landingRef = (repo: string, branch: string) =>
+	`refs/notes/githive-landing/${repo}/${encodeURIComponent(branch)}`;
 
 /** Which of a repo's records repos holds its branches' leases: always the first (see landingLog in env.ts). */
 export const LANDING_RECORDS_REPO = 0;
 
 /** As LandingState, for the pure lease steps in landing.ts (the outcomes they read aren't here: see gitLanding's turn). */
-const asState = (record: LeaseRecord): LandingState => ({ ...(record.lease ? { lease: record.lease } : {}), checking: record.checking, recent: [] });
-const asRecord = (state: LandingState): LeaseRecord => ({ ...(state.lease ? { lease: state.lease } : {}), checking: state.checking });
+const asState = (record: LeaseRecord): LandingState => ({
+	...(record.lease ? { lease: record.lease } : {}),
+	checking: record.checking,
+	recent: [],
+});
+const asRecord = (state: LandingState): LeaseRecord => ({
+	...(state.lease ? { lease: state.lease } : {}),
+	checking: state.checking,
+});
 
 /**
  * A branch's landing: its lease and the batch being checked in `log` (a
@@ -47,13 +55,18 @@ export function gitLanding(log: CasLog<LeaseRecord>, kept: Omit<Landing, "turn" 
 		turn: async (holder, change, head, since, ttlMs) => {
 			// What it came to, if the RepoCache recalls (else, see landedAlready in merge.ts).
 			const view = await kept.view().catch(() => null);
-			const settled = view?.recent.findLast((s) => s.change === change && s.head === head && (s.how === "landed" || Date.parse(s.at) >= since));
+			const settled = view?.recent.findLast(
+				(s) => s.change === change && s.head === head && (s.how === "landed" || Date.parse(s.at) >= since),
+			);
 			if (settled) return { settled };
 			// The record busy or unreachable: not this merge's turn yet, it looks again in a moment.
 			const taken = await appendRecord<LeaseRecord, "held">(log, AUTHOR, empty, (record) => {
 				const turn = takeTurn(asState(record), holder, change, head, since, ttlMs);
 				if (!("lease" in turn.turn) || !turn.turn.lease) return { refused: "held" };
-				return { state: asRecord(turn.state), text: `${holder} lands batches${record.lease && record.lease.holder !== holder ? ` (${record.lease.holder}'s lease ran out)` : ""}` };
+				return {
+					state: asRecord(turn.state),
+					text: `${holder} lands batches${record.lease && record.lease.holder !== holder ? ` (${record.lease.holder}'s lease ran out)` : ""}`,
+				};
 			}).catch((err) => {
 				console.error("taking the landing lease failed", String(err));
 				return { ok: false as const };
@@ -75,7 +88,11 @@ export function gitLanding(log: CasLog<LeaseRecord>, kept: Omit<Landing, "turn" 
 			// Tried a few times: a lease left held keeps every waiting merge idle until it runs out.
 			for (let attempt = 1; ; attempt++) {
 				try {
-					await appendRecord<LeaseRecord, "none">(log, AUTHOR, empty, (record) => (record.lease?.holder === holder ? { state: asRecord(dropLease(asState(record), holder)), text: `${holder} hands the lease on` } : { refused: "none" }));
+					await appendRecord<LeaseRecord, "none">(log, AUTHOR, empty, (record) =>
+						record.lease?.holder === holder
+							? { state: asRecord(dropLease(asState(record), holder)), text: `${holder} hands the lease on` }
+							: { refused: "none" },
+					);
 					break;
 				} catch (err) {
 					if (attempt === DROP_TRIES) throw err;
@@ -86,18 +103,25 @@ export function gitLanding(log: CasLog<LeaseRecord>, kept: Omit<Landing, "turn" 
 		},
 		// Shown, never relied on: a batch whose showing failed is checked and lands all the same.
 		checking: async (batch) => {
-			await appendRecord<LeaseRecord, "none">(log, AUTHOR, empty, (record) => ({ state: { ...record, checking: batch }, text: batch ? `checking ${batch.changes.length} change(s) on ${batch.base.slice(0, 8)}` : "checking nothing" })).catch((err) =>
-				console.error("recording the batch being checked failed", String(err)),
-			);
+			await appendRecord<LeaseRecord, "none">(log, AUTHOR, empty, (record) => ({
+				state: { ...record, checking: batch },
+				text: batch ? `checking ${batch.changes.length} change(s) on ${batch.base.slice(0, 8)}` : "checking nothing",
+			})).catch((err) => console.error("recording the batch being checked failed", String(err)));
 			await kept.checking(batch).catch(() => undefined);
 		},
-		settle: (outcomes) => kept.settle(outcomes).catch((err) => console.error(`keeping ${outcomes.length} outcome(s) failed`, String(err))),
+		settle: (outcomes) =>
+			kept.settle(outcomes).catch((err) => console.error(`keeping ${outcomes.length} outcome(s) failed`, String(err))),
 		// What's being checked as the lease record says, while its holder holds it (a holder that died checks nothing);
 		// what changes came to as the RepoCache recalls.
 		view: async () => {
 			const [record, recalled] = await Promise.all([log.read().catch(() => undefined), kept.view().catch(() => null)]);
 			const lease = record?.commit.state.lease;
-			const checking = record === undefined ? (recalled?.checking ?? null) : lease && lease.until > Date.now() ? record?.commit.state.checking ?? null : null;
+			const checking =
+				record === undefined
+					? (recalled?.checking ?? null)
+					: lease && lease.until > Date.now()
+						? (record?.commit.state.checking ?? null)
+						: null;
 			return { checking, recent: recalled?.recent ?? [] };
 		},
 	};

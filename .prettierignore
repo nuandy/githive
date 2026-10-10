@@ -1,0 +1,9 @@
+node_modules
+dist
+web/dist
+.wrangler
+bench-results
+notes
+worker-configuration.d.ts
+package-lock.json
+*.md

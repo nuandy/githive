@@ -31,7 +31,16 @@ export function memoryBatchGit(remote: Remote): BatchGit {
 			for (const m of merges) {
 				await ws.fetch(`change-${m.change}`, m.source ?? remote, m.ref);
 				const message = await mergeMessage({ ...m.claimed, base: await ws.head() }, stamper);
-				const { oid } = await git.merge({ fs: ws.fs, dir: "/repo", ours: ws.branch, theirs: m.head, message, author: BOT, fastForward: false, abortOnConflict: true });
+				const { oid } = await git.merge({
+					fs: ws.fs,
+					dir: "/repo",
+					ours: ws.branch,
+					theirs: m.head,
+					message,
+					author: BOT,
+					fastForward: false,
+					abortOnConflict: true,
+				});
 				if (!oid) throw new Error(`merging ${m.change} made no commit`);
 				commits.push(oid);
 			}

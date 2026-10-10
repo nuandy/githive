@@ -18,22 +18,35 @@ afterAll(async () => {
 });
 
 let refs = 0;
-const leaseLog = () => new GitCasLog<LeaseRecord>(async () => ({ url: server.url, token: "unused" }), "p", landingRef("p", `main-${refs++}`));
+const leaseLog = () =>
+	new GitCasLog<LeaseRecord>(
+		async () => ({ url: server.url, token: "unused" }),
+		"p",
+		landingRef("p", `main-${refs++}`),
+	);
 /** A RepoCache that answers nothing. */
 const unreachable = (): Omit<Landing, "turn" | "renew"> => {
 	const down = () => Promise.reject(new Error("Durable Object is overloaded. Requests queued for too long."));
 	return { drop: down, checking: down, settle: down, view: down };
 };
-const batch = { base: "b".repeat(40), since: "2026-10-10T00:00:00.000Z", changes: [{ change: "c1", head: "a".repeat(40), agent: "agent-1" }] };
+const batch = {
+	base: "b".repeat(40),
+	since: "2026-10-10T00:00:00.000Z",
+	changes: [{ change: "c1", head: "a".repeat(40), agent: "agent-1" }],
+};
 
 describe("the landing lease in Git", { timeout: 60_000 }, () => {
 	it("goes to one of two merges at once, is kept by its holder only, and is handed on", async () => {
 		const log = leaseLog();
 		const a = gitLanding(log, memoryLanding());
 		const b = gitLanding(log, memoryLanding());
-		const [ta, tb] = await Promise.all([a.turn("merge-a", "c1", "1".repeat(40), 0, 60_000), b.turn("merge-b", "c2", "2".repeat(40), 0, 60_000)]);
+		const [ta, tb] = await Promise.all([
+			a.turn("merge-a", "c1", "1".repeat(40), 0, 60_000),
+			b.turn("merge-b", "c2", "2".repeat(40), 0, 60_000),
+		]);
 		expect([ta, tb].filter((t) => "lease" in t && t.lease)).toHaveLength(1);
-		const [holder, other, waiting] = "lease" in ta && ta.lease ? (["merge-a", "merge-b", b] as const) : (["merge-b", "merge-a", a] as const);
+		const [holder, other, waiting] =
+			"lease" in ta && ta.lease ? (["merge-a", "merge-b", b] as const) : (["merge-b", "merge-a", a] as const);
 		expect(await leaseHeld(log)).toBe(true);
 		expect(await waiting.renew(other, 60_000)).toBe(false);
 		// Plenty of it left: kept without a write.
@@ -68,7 +81,14 @@ describe("the landing lease in Git", { timeout: 60_000 }, () => {
 
 	it("tells a merge what its change came to, as the RepoCache recalls, before any lease", async () => {
 		const kept = memoryLanding();
-		const landed: Settled = { change: "c1", head: "1".repeat(40), agent: "agent-1", how: "landed", at: new Date().toISOString(), commit: "m".repeat(40) };
+		const landed: Settled = {
+			change: "c1",
+			head: "1".repeat(40),
+			agent: "agent-1",
+			how: "landed",
+			at: new Date().toISOString(),
+			commit: "m".repeat(40),
+		};
 		await kept.settle([landed]);
 		const log = leaseLog();
 		expect(await gitLanding(log, kept).turn("merge-a", "c1", "1".repeat(40), 0, 60_000)).toEqual({ settled: landed });
@@ -83,7 +103,9 @@ describe("the landing lease in Git", { timeout: 60_000 }, () => {
 			expect(await landing.turn("merge-a", "c1", "1".repeat(40), 0, 60_000)).toEqual({ lease: true });
 			await landing.checking(batch);
 			expect((await log.read())?.commit.state.checking).toEqual(batch);
-			await landing.settle([{ change: "c1", head: "1".repeat(40), agent: "agent-1", how: "landed", at: new Date().toISOString() }]);
+			await landing.settle([
+				{ change: "c1", head: "1".repeat(40), agent: "agent-1", how: "landed", at: new Date().toISOString() },
+			]);
 			// What's being checked comes from the lease record; what changes came to, nowhere to recall it from.
 			expect(await landing.view()).toEqual({ checking: batch, recent: [] });
 			await landing.drop("merge-a");
@@ -94,10 +116,16 @@ describe("the landing lease in Git", { timeout: 60_000 }, () => {
 	});
 
 	it("keeps a merge waiting, not failing, while the record can't be written", async () => {
-		const failing = { read: async () => null, append: async () => Promise.reject(new Error("[503] the Git server stayed busy")), lastRefusal: null };
+		const failing = {
+			read: async () => null,
+			append: async () => Promise.reject(new Error("[503] the Git server stayed busy")),
+			lastRefusal: null,
+		};
 		const errors = vi.spyOn(console, "error").mockImplementation(() => undefined);
 		try {
-			expect(await gitLanding(failing, memoryLanding()).turn("merge-a", "c1", "1".repeat(40), 0, 60_000)).toEqual({ lease: false });
+			expect(await gitLanding(failing, memoryLanding()).turn("merge-a", "c1", "1".repeat(40), 0, 60_000)).toEqual({
+				lease: false,
+			});
 		} finally {
 			errors.mockRestore();
 		}

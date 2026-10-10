@@ -25,8 +25,16 @@ const browserScheduler: PollScheduler = {
  * A null key pauses polling. Requests never overlap, and a hidden tab skips
  * its ticks.
  */
-export function usePoll<T>(key: string | null, fetcher: () => Promise<T>, ms: number, scheduler: PollScheduler = browserScheduler): Poll<T> {
-	const [state, setState] = useState<{ key: string | null; data?: T; error?: string; loaded: boolean }>({ key: null, loaded: false });
+export function usePoll<T>(
+	key: string | null,
+	fetcher: () => Promise<T>,
+	ms: number,
+	scheduler: PollScheduler = browserScheduler,
+): Poll<T> {
+	const [state, setState] = useState<{ key: string | null; data?: T; error?: string; loaded: boolean }>({
+		key: null,
+		loaded: false,
+	});
 	const fetcherRef = useRef(fetcher);
 	fetcherRef.current = fetcher;
 	const runRef = useRef<() => void>(() => undefined);
@@ -44,7 +52,8 @@ export function usePoll<T>(key: string | null, fetcher: () => Promise<T>, ms: nu
 				if (active) setState({ key, data, loaded: true });
 			} catch (error) {
 				const message = error instanceof Error ? error.message : String(error);
-				if (active) setState((current) => ({ ...(current.key === key ? current : {}), key, error: message, loaded: true }));
+				if (active)
+					setState((current) => ({ ...(current.key === key ? current : {}), key, error: message, loaded: true }));
 			} finally {
 				inFlight = false;
 			}

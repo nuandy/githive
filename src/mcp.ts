@@ -30,17 +30,30 @@ interface RpcRequest {
 }
 
 const reply = (id: RpcRequest["id"], result: unknown) => ({ jsonrpc: "2.0", id, result });
-const rpcError = (id: RpcRequest["id"], code: number, message: string) => ({ jsonrpc: "2.0", id: id ?? null, error: { code, message } });
+const rpcError = (id: RpcRequest["id"], code: number, message: string) => ({
+	jsonrpc: "2.0",
+	id: id ?? null,
+	error: { code, message },
+});
 
 /** Handle one JSON-RPC message. Returns null for notifications, which get no response. */
 export async function handleRpc(msg: RpcRequest, ctx: McpContext): Promise<object | null> {
-	if (!msg || typeof msg !== "object" || typeof msg.method !== "string") return rpcError(msg?.id, -32600, "invalid request");
+	if (!msg || typeof msg !== "object" || typeof msg.method !== "string")
+		return rpcError(msg?.id, -32600, "invalid request");
 	if (msg.id === undefined) return null;
 	switch (msg.method) {
 		case "initialize": {
 			const requested = msg.params?.protocolVersion;
-			const protocolVersion = typeof requested === "string" && PROTOCOL_VERSIONS.includes(requested) ? requested : PROTOCOL_VERSIONS[0];
-			return reply(msg.id, { protocolVersion, capabilities: { tools: {} }, serverInfo: { name: "githive", version: "1.0.0" }, instructions: ctx.toolkit.agent ? `${INSTRUCTIONS}\nYou are signed in to GitHive as the agent ${ctx.toolkit.agent}: what you write is attributed to you, with no key, and you may leave out the agent argument.` : INSTRUCTIONS });
+			const protocolVersion =
+				typeof requested === "string" && PROTOCOL_VERSIONS.includes(requested) ? requested : PROTOCOL_VERSIONS[0];
+			return reply(msg.id, {
+				protocolVersion,
+				capabilities: { tools: {} },
+				serverInfo: { name: "githive", version: "1.0.0" },
+				instructions: ctx.toolkit.agent
+					? `${INSTRUCTIONS}\nYou are signed in to GitHive as the agent ${ctx.toolkit.agent}: what you write is attributed to you, with no key, and you may leave out the agent argument.`
+					: INSTRUCTIONS,
+			});
 		}
 		case "ping":
 			return reply(msg.id, {});
@@ -48,11 +61,15 @@ export async function handleRpc(msg: RpcRequest, ctx: McpContext): Promise<objec
 			return reply(msg.id, { tools: TOOLS });
 		case "tools/call": {
 			const name = msg.params?.name;
-			if (typeof name !== "string" || !TOOLS.some((t) => t.name === name)) return rpcError(msg.id, -32602, `unknown tool ${String(name)}`);
+			if (typeof name !== "string" || !TOOLS.some((t) => t.name === name))
+				return rpcError(msg.id, -32602, `unknown tool ${String(name)}`);
 			// Which tool a request ran, first in its logs: what the runtime logs beside it (a stalled response cancelled, say)
 			// is then told apart by tool. The tool and repo only, never who called.
 			const from = Date.now();
-			const repoArg = typeof msg.params?.arguments === "object" && typeof (msg.params.arguments as Args).repo === "string" ? (msg.params.arguments as Args).repo : "-";
+			const repoArg =
+				typeof msg.params?.arguments === "object" && typeof (msg.params.arguments as Args).repo === "string"
+					? (msg.params.arguments as Args).repo
+					: "-";
 			console.log(`mcp ${name} on ${repoArg}`);
 			// Its Git requests and Artifacts calls, by repo: which tools keep the project repo busy (Artifacts fails a busy
 			// repo's requests), and what each costs.
@@ -60,7 +77,8 @@ export async function handleRpc(msg: RpcRequest, ctx: McpContext): Promise<objec
 			let repoId = String(repoArg);
 			try {
 				let args = (msg.params?.arguments as Args) ?? {};
-				const named = typeof args.repo === "string" && ctx.resolveRepo ? await ctx.resolveRepo(args.repo, name, args) : null;
+				const named =
+					typeof args.repo === "string" && ctx.resolveRepo ? await ctx.resolveRepo(args.repo, name, args) : null;
 				if (named) args = { ...args, repo: named.id };
 				repoId = String(args.repo ?? repoArg);
 				counting = countingRequests(() => callTool(name, args, ctx.toolkit));
@@ -68,7 +86,8 @@ export async function handleRpc(msg: RpcRequest, ctx: McpContext): Promise<objec
 				logCounts(name, repoId, counting);
 				if (Date.now() - from >= SLOW_TOOL_MS) console.log(`mcp ${name} took ${Date.now() - from} ms`);
 				// Answer with the name the caller used, not the id.
-				if (named && result && typeof result === "object" && (result as Args).repo === named.id) result = { ...(result as Args), repo: named.fullName };
+				if (named && result && typeof result === "object" && (result as Args).repo === named.id)
+					result = { ...(result as Args), repo: named.fullName };
 				return reply(msg.id, { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] });
 			} catch (err) {
 				if (counting) logCounts(name, repoId, counting);
@@ -97,7 +116,9 @@ const SLOW_TOOL_MS = 5_000;
 /** Handle a POST body: one message or a batch. Null means respond 202 with no body. */
 export async function handleMcpBody(body: unknown, ctx: McpContext): Promise<object | object[] | null> {
 	if (Array.isArray(body)) {
-		const out = (await Promise.all(body.map((m) => handleRpc(m as RpcRequest, ctx)))).filter((r): r is object => r !== null);
+		const out = (await Promise.all(body.map((m) => handleRpc(m as RpcRequest, ctx)))).filter(
+			(r): r is object => r !== null,
+		);
 		return out.length ? out : null;
 	}
 	return handleRpc(body as RpcRequest, ctx);

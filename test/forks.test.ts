@@ -60,7 +60,9 @@ describe("forks (the default)", () => {
 		const { key: keyR } = (await call("register", { agent: "reviewer-1" })) as { key: string };
 		expect(await call("review_access", { change: "a-1" }, keyR)).toEqual({ error: "no change a-1 on project" });
 		await call("claim", { change: "a-1", agent: "agent-a", paths: ["src/a.ts"], intent: "a" }, keyA);
-		expect(await call("review_access", { change: "a-1" }, keyR)).toEqual({ error: "a-1 has nothing pushed to review yet" });
+		expect(await call("review_access", { change: "a-1" }, keyR)).toEqual({
+			error: "a-1 has nothing pushed to review yet",
+		});
 		const head = await pushChange(fork.url, work, "agent-a", "a-1", { "src/a.ts": "a\n" });
 		forkRequests = [];
 		expect(await call("review_access", { change: "a-1" }, keyR)).toEqual({
@@ -79,17 +81,33 @@ describe("forks (the default)", () => {
 	});
 
 	it("gives an agent read access to the project, and write access only to its own fork, shared by its changes", async () => {
-		expect(await call("credentials", {})).toEqual({ url: project.url, token: "read", note: expect.stringMatching(/read-only/) });
-		expect(await call("credentials", { change: "a-1" })).toEqual({ error: "a-1 holds no claim: claim its paths first" });
+		expect(await call("credentials", {})).toEqual({
+			url: project.url,
+			token: "read",
+			note: expect.stringMatching(/read-only/),
+		});
+		expect(await call("credentials", { change: "a-1" })).toEqual({
+			error: "a-1 holds no claim: claim its paths first",
+		});
 		const { key: keyA } = (await call("register", { agent: "agent-a" })) as { key: string };
 		const { key: keyB } = (await call("register", { agent: "agent-b" })) as { key: string };
 		await call("claim", { change: "a-1", agent: "agent-a", paths: ["src/a/"], intent: "a" }, keyA);
-		expect(await call("credentials", { change: "a-1" }, keyB)).toEqual({ error: "you act as agent-b; you can't act as agent-a" });
-		expect(await call("credentials", { change: "a-1" }, keyA)).toMatchObject({ url: fork.url, token: "fork-write", branch: "changes/a-1", project: { url: project.url, token: "read", branch: "main" } });
+		expect(await call("credentials", { change: "a-1" }, keyB)).toEqual({
+			error: "you act as agent-b; you can't act as agent-a",
+		});
+		expect(await call("credentials", { change: "a-1" }, keyA)).toMatchObject({
+			url: fork.url,
+			token: "fork-write",
+			branch: "changes/a-1",
+			project: { url: project.url, token: "read", branch: "main" },
+		});
 		// A second change by the same agent goes to the same fork, a branch of its own.
 		await call("claim", { change: "a-2", agent: "agent-a", paths: ["src/a2/"], intent: "a, again" }, keyA);
 		expect(await call("credentials", { change: "a-2" }, keyA)).toMatchObject({ branch: "changes/a-2" });
-		expect(forkRequests).toEqual([{ agent: "agent-a", scope: "write" }, { agent: "agent-a", scope: "write" }]);
+		expect(forkRequests).toEqual([
+			{ agent: "agent-a", scope: "write" },
+			{ agent: "agent-a", scope: "write" },
+		]);
 	});
 
 	it("merges a change from its fork into the project's main", async () => {
@@ -101,7 +119,14 @@ describe("forks (the default)", () => {
 		await agent.run("commit", "--quiet", "-m", "a");
 		await agent.run("push", "--quiet", "origin", "changes/a-1");
 		const head = await agent.run("rev-parse", "HEAD");
-		for (const reviewer of ["rev-1", "rev-2"]) await call("vote", { commit: head, reviewer, role: reviewer === "rev-1" ? "tests" : "security", verdict: "approve", evidence: "ok" });
+		for (const reviewer of ["rev-1", "rev-2"])
+			await call("vote", {
+				commit: head,
+				reviewer,
+				role: reviewer === "rev-1" ? "tests" : "security",
+				verdict: "approve",
+				evidence: "ok",
+			});
 
 		expect(await call("merge", { change: "a-1", agent: "agent-a" })).toMatchObject({ ok: true });
 		expect(project.git("show", "main:src/a/x.txt")).toBe("a\n");
@@ -110,9 +135,22 @@ describe("forks (the default)", () => {
 
 		// Its page on the dashboard: the commit, the votes on it, and the merge.
 		const history = await changeHistory(ctx(), "project", "a-1");
-		expect(history).toMatchObject({ change: "a-1", branch: "main", claim: null, commits: [{ commit: head, message: "a", author: "agent-a" }] });
-		expect(history.votes.map((v) => [v.reviewer, v.verdict])).toEqual([["rev-1", "approve"], ["rev-2", "approve"]]);
-		expect(history.released).toEqual([expect.objectContaining({ reason: expect.stringMatching(/merged/), mergedAs: expect.stringMatching(/^[0-9a-f]{40}$/) })]);
+		expect(history).toMatchObject({
+			change: "a-1",
+			branch: "main",
+			claim: null,
+			commits: [{ commit: head, message: "a", author: "agent-a" }],
+		});
+		expect(history.votes.map((v) => [v.reviewer, v.verdict])).toEqual([
+			["rev-1", "approve"],
+			["rev-2", "approve"],
+		]);
+		expect(history.released).toEqual([
+			expect.objectContaining({
+				reason: expect.stringMatching(/merged/),
+				mergedAs: expect.stringMatching(/^[0-9a-f]{40}$/),
+			}),
+		]);
 		await expect(changeHistory(ctx(), "project", "nope")).rejects.toThrow(/\[404\] no change nope/);
 	}, 60_000);
 });
@@ -121,7 +159,12 @@ describe("status", () => {
 	it("tells an agent where its change stands: its claim, its branch head, the votes on it, and what's still needed", async () => {
 		await call("settings", { required: 1 });
 		await call("claim", { change: "a-1", agent: "agent-a", paths: ["src/a/"], intent: "a" });
-		expect(await call("status", { change: "a-1" })).toMatchObject({ change: "a-1", claim: { agent: "agent-a", paths: ["src/a/"] }, head: null, votes: [] });
+		expect(await call("status", { change: "a-1" })).toMatchObject({
+			change: "a-1",
+			claim: { agent: "agent-a", paths: ["src/a/"] },
+			head: null,
+			votes: [],
+		});
 
 		const agent = await agentClone(fork.url, work, "agent-a");
 		await agent.run("checkout", "--quiet", "-b", "changes/a-1");
@@ -131,7 +174,13 @@ describe("status", () => {
 		await agent.run("push", "--quiet", "origin", "changes/a-1");
 		const head = await agent.run("rev-parse", "HEAD");
 		await call("vote", { commit: head, reviewer: "rev-1", role: "tests", verdict: "reject", evidence: "no tests" });
-		await call("vote", { commit: "an-older-commit", reviewer: "rev-2", role: "tests", verdict: "approve", evidence: "ok" });
+		await call("vote", {
+			commit: "an-older-commit",
+			reviewer: "rev-2",
+			role: "tests",
+			verdict: "approve",
+			evidence: "ok",
+		});
 
 		expect(await call("status", { change: "a-1" })).toMatchObject({
 			head,
@@ -168,7 +217,11 @@ describe("status", () => {
 		}
 		// Its branch is in its own (older) fork; the agent's fork, here, doesn't have it.
 		const head = await pushChange(fork.url, work, "agent-a", "old-1", { "src/old/x.txt": "x\n" });
-		const older: ToolContext = { ...ctx(), changeRemote: async () => ({ url: project.url, token: "agent-fork" }), legacyChangeRemote: async () => ({ url: fork.url, token: "old-fork" }) };
+		const older: ToolContext = {
+			...ctx(),
+			changeRemote: async () => ({ url: project.url, token: "agent-fork" }),
+			legacyChangeRemote: async () => ({ url: fork.url, token: "old-fork" }),
+		};
 		const status = (await callTool("status", { repo: "project", change: "old-1" }, older)) as { head: string };
 		expect(status.head).toBe(head);
 	}, 60_000);
@@ -179,22 +232,58 @@ describe("status", () => {
 		await call("claim", { change: "a-1", agent: "agent-a", paths: ["src/a/"], intent: "Speed up the a module" }, keyA);
 		const head = await pushChange(fork.url, work, "agent-a", "a-1", { "src/a/x.txt": "a\n" });
 		const summaries: { repo: string; patch: Record<string, unknown> }[] = [];
-		const watched = { ...ctx(), summarize: async (repo: string, patch: Record<string, unknown>) => void summaries.push({ repo, patch }) };
-		expect(await callTool("ask_human", { repo: "project", change: "a-1", agent: "agent-a", reason: "reviewers disagree on the cache size" }, { ...watched, agentKey: keyA })).toMatchObject({ ok: true });
+		const watched = {
+			...ctx(),
+			summarize: async (repo: string, patch: Record<string, unknown>) => void summaries.push({ repo, patch }),
+		};
+		expect(
+			await callTool(
+				"ask_human",
+				{ repo: "project", change: "a-1", agent: "agent-a", reason: "reviewers disagree on the cache size" },
+				{ ...watched, agentKey: keyA },
+			),
+		).toMatchObject({ ok: true });
 		// In the person's inbox at once, before anyone opens the repo.
-		expect(summaries.at(-1)?.patch).toMatchObject({ needsYou: 1, waiting: [{ change: "a-1", reason: "reviewers disagree on the cache size" }] });
+		expect(summaries.at(-1)?.patch).toMatchObject({
+			needsYou: 1,
+			waiting: [{ change: "a-1", reason: "reviewers disagree on the cache size" }],
+		});
 
 		const before = await repoSnapshot(watched, "project");
-		expect(before.claims[0]).toMatchObject({ change: "a-1", attention: { reason: "reviewers disagree on the cache size", agent: "agent-a" } });
-		expect(summaries.at(-1)?.patch).toMatchObject({ needsYou: 1, waiting: [{ change: "a-1", title: "Speed up the a module", reason: "reviewers disagree on the cache size" }] });
+		expect(before.claims[0]).toMatchObject({
+			change: "a-1",
+			attention: { reason: "reviewers disagree on the cache size", agent: "agent-a" },
+		});
+		expect(summaries.at(-1)?.patch).toMatchObject({
+			needsYou: 1,
+			waiting: [{ change: "a-1", title: "Speed up the a module", reason: "reviewers disagree on the cache size" }],
+		});
 
 		// An agent can't pass itself off as a person to answer it.
-		expect(await call("vote", { commit: head, reviewer: "person:abc", role: "review", verdict: "approve", evidence: "ok" })).toEqual({ error: "an agent's name can't contain \":\"" });
+		expect(
+			await call("vote", { commit: head, reviewer: "person:abc", role: "review", verdict: "approve", evidence: "ok" }),
+		).toEqual({ error: "an agent's name can't contain \":\"" });
 		// A person decides, from the dashboard; their vote counts and answers the question.
 		const key = await generateStampKey();
 		const person = { ...ctx(), stamper: async () => makeStamper(key.privateKey, "person:abc") };
-		await expect(voteAsPerson(person, "project", "a-1", { role: "review", verdict: "approve", evidence: "ok" }, "service:a-script")).rejects.toThrow(/only a person/);
-		expect(await voteAsPerson(person, "project", "a-1", { role: "review", verdict: "approve", evidence: "a cache of 64 is fine" }, "person:abc")).toEqual({ commit: head, role: "review", verdict: "approve" });
+		await expect(
+			voteAsPerson(
+				person,
+				"project",
+				"a-1",
+				{ role: "review", verdict: "approve", evidence: "ok" },
+				"service:a-script",
+			),
+		).rejects.toThrow(/only a person/);
+		expect(
+			await voteAsPerson(
+				person,
+				"project",
+				"a-1",
+				{ role: "review", verdict: "approve", evidence: "a cache of 64 is fine" },
+				"person:abc",
+			),
+		).toEqual({ commit: head, role: "review", verdict: "approve" });
 		const after = await repoSnapshot(watched, "project");
 		expect(after.claims[0].attention).toBeUndefined();
 		expect(after.votes[0]).toMatchObject({ commit: head, reviewer: "person:abc", role: "review", verdict: "approve" });
@@ -218,7 +307,10 @@ describe("check (run by the agent itself)", () => {
 		await call("settings", { shard_depth: 0 });
 		await call("claim", { change: "a-1", agent: "agent-a", paths: ["src/a/"], intent: "a" });
 		await call("claim", { change: "b-1", agent: "agent-b", paths: ["src/b/"], intent: "b" });
-		const head = await pushChange(fork.url, work, "agent-a", "a-1", { "src/a/x.txt": "a\n", "README.md": "a's readme\n" });
+		const head = await pushChange(fork.url, work, "agent-a", "a-1", {
+			"src/a/x.txt": "a\n",
+			"README.md": "a's readme\n",
+		});
 		await pushChange(fork.url, work, "agent-b", "b-1", { "src/b/y.txt": "b\n", "README.md": "b's readme\n" });
 		// Main moved under a-1, in a file a-1 changed too.
 		const mainline = await agentClone(project.url, work, "mainline");

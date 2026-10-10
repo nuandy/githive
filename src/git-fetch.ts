@@ -37,7 +37,11 @@ export async function fetchCommits(remote: Remote, oids: string[], dir = FETCHED
 	await git.init({ fs, dir });
 	if (!oids.length) return { fs, dir };
 	const body = concat([
-		...oids.flatMap((oid, i) => pktLine(`want ${oid}${i === 0 ? ` side-band-64k ofs-delta${history ? "" : " shallow"} no-progress agent=githive` : ""}\n`)),
+		...oids.flatMap((oid, i) =>
+			pktLine(
+				`want ${oid}${i === 0 ? ` side-band-64k ofs-delta${history ? "" : " shallow"} no-progress agent=githive` : ""}\n`,
+			),
+		),
 		// Just the commits (or `depth` commits of each), or (history) everything behind them too.
 		...(history ? [] : pktLine(`deepen ${depth}\n`)),
 		encoder.encode("0000"),
@@ -53,15 +57,19 @@ export async function fetchCommits(remote: Remote, oids: string[], dir = FETCHED
 		body,
 	});
 	noteGitRequest(`${remote.url}/git-upload-pack`, response.status);
-	if (!response.ok) throw Object.assign(new Error(`fetch failed: ${response.status} ${(await response.text()).slice(0, 200)}`), { status: response.status });
+	if (!response.ok)
+		throw Object.assign(new Error(`fetch failed: ${response.status} ${(await response.text()).slice(0, 200)}`), {
+			status: response.status,
+		});
 	const bytes = new Uint8Array(await response.arrayBuffer());
 	// Empty though it says 200 (see git-http.ts): a server failure, for the caller to try again.
-	if (!bytes.length) throw Object.assign(new Error(`fetch failed: an empty answer from ${remote.url}`), { status: 502 });
+	if (!bytes.length)
+		throw Object.assign(new Error(`fetch failed: an empty answer from ${remote.url}`), { status: 502 });
 
 	// Shallow lines and NAK, then the pack in side-band packets (1: data, 2: progress, 3: error).
 	const pack: Uint8Array[] = [];
 	let inPack = false;
-	for (let at = 0; at + 4 <= bytes.length; ) {
+	for (let at = 0; at + 4 <= bytes.length;) {
 		const length = Number.parseInt(decoder.decode(bytes.subarray(at, at + 4)), 16);
 		if (!length) {
 			at += 4;

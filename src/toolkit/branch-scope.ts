@@ -23,17 +23,22 @@ export function scopePaths(paths: string[], into: string, branch: string): strin
 }
 
 /** A file, as a merge into `into` touches it, in the claims records' terms. */
-export const scopeFile = (file: string, into: string, branch: string) => (into === branch ? file : `${segmentOf(into)}/${file}`);
+export const scopeFile = (file: string, into: string, branch: string) =>
+	into === branch ? file : `${segmentOf(into)}/${file}`;
 
 /** A path as the claims records keep it: which branch it's in (the project's, `branch`, when it has no segment) and the path in it. */
 export function unscopePath(path: string, branch: string): { into: string; path: string } {
 	if (!isReservedPath(path)) return { into: branch, path };
 	const slash = path.indexOf("/");
-	return { into: decodeURIComponent(path.slice(MARK.length, slash < 0 ? undefined : slash)), path: slash < 0 ? "" : path.slice(slash + 1) };
+	return {
+		into: decodeURIComponent(path.slice(MARK.length, slash < 0 ? undefined : slash)),
+		path: slash < 0 ? "" : path.slice(slash + 1),
+	};
 }
 
 /** The branch a claim's change targets: the one its paths are kept under. */
-export const claimInto = (claim: { paths: string[] }, branch: string) => (claim.paths.length ? unscopePath(claim.paths[0], branch).into : branch);
+export const claimInto = (claim: { paths: string[] }, branch: string) =>
+	claim.paths.length ? unscopePath(claim.paths[0], branch).into : branch;
 
 /** A claim as agents see it: its paths without the segment, and `into` when it isn't the project's branch. */
 export function presentClaim<C extends { paths: string[] }>(claim: C, branch: string): C & { into?: string } {
@@ -43,4 +48,7 @@ export function presentClaim<C extends { paths: string[] }>(claim: C, branch: st
 }
 
 /** The branch claims records' paths are kept under, when they're another branch's (none: the project's). */
-export const scopedInto = (paths: string[]) => (paths[0] && isReservedPath(paths[0]) ? decodeURIComponent(paths[0].slice(MARK.length, paths[0].indexOf("/") < 0 ? undefined : paths[0].indexOf("/"))) : undefined);
+export const scopedInto = (paths: string[]) =>
+	paths[0] && isReservedPath(paths[0])
+		? decodeURIComponent(paths[0].slice(MARK.length, paths[0].indexOf("/") < 0 ? undefined : paths[0].indexOf("/")))
+		: undefined;

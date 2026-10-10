@@ -9,7 +9,18 @@ import { Icon } from "./Icon";
 import "./Manage.css";
 
 /** What the org page can do; the page refreshes after each. */
-export type OrgActions = Pick<ManageApi, "updateOrg" | "addMember" | "setRole" | "removeMember" | "cancelInvite" | "createTeam" | "deleteTeam" | "addTeamMember" | "removeTeamMember">;
+export type OrgActions = Pick<
+	ManageApi,
+	| "updateOrg"
+	| "addMember"
+	| "setRole"
+	| "removeMember"
+	| "cancelInvite"
+	| "createTeam"
+	| "deleteTeam"
+	| "addTeamMember"
+	| "removeTeamMember"
+>;
 
 export interface OrgViewProps {
 	org: OrgDetail;
@@ -63,14 +74,17 @@ export function OrgView({ org, me, actions, onLeft }: OrgViewProps) {
 					<p className="muted manage__lede">
 						{mine ? (
 							<>
-								Repositories under your name, <code>{org.slug}/&lt;name&gt;</code>. Add collaborators to one in its Settings.
+								Repositories under your name, <code>{org.slug}/&lt;name&gt;</code>. Add collaborators to one in its
+								Settings.
 							</>
 						) : org.personal ? (
 							<>{org.slug}'s repositories that you can see.</>
 						) : (
 							<>
 								<code>{org.slug}</code>
-								{org.role ? ` · you're ${org.role === "admin" ? "an admin" : `a${org.role === "owner" ? "n owner" : " member"}`}` : ""}
+								{org.role
+									? ` · you're ${org.role === "admin" ? "an admin" : `a${org.role === "owner" ? "n owner" : " member"}`}`
+									: ""}
 							</>
 						)}
 					</p>
@@ -89,7 +103,9 @@ export function OrgView({ org, me, actions, onLeft }: OrgViewProps) {
 							label="Leave"
 							question={`Leave ${org.slug}?`}
 							busy={busy === "leave"}
-							onConfirm={() => run("leave", () => actions.removeMember(org.slug, me.handle)).then((ok) => ok && onLeft())}
+							onConfirm={() =>
+								run("leave", () => actions.removeMember(org.slug, me.handle)).then((ok) => ok && onLeft())
+							}
 						/>
 					) : null}
 				</div>
@@ -110,7 +126,9 @@ export function OrgView({ org, me, actions, onLeft }: OrgViewProps) {
 									<Icon name="repo" className="muted" />
 									<a href={href.repo(repo.fullName)}>{repo.fullName}</a>
 								</div>
-								<span className={`pill ${repo.visibility === "public" ? "pill--accent" : "pill--neutral"}`}>{repo.visibility === "public" ? "Public" : "Private"}</span>
+								<span className={`pill ${repo.visibility === "public" ? "pill--accent" : "pill--neutral"}`}>
+									{repo.visibility === "public" ? "Public" : "Private"}
+								</span>
 							</li>
 						))}
 					</ul>
@@ -119,8 +137,27 @@ export function OrgView({ org, me, actions, onLeft }: OrgViewProps) {
 
 			{!org.personal && org.role ? (
 				<>
-					<MembersSection org={org} me={me} manager={manager} actions={actions} run={run} busy={busy} confirming={confirming} setConfirming={setConfirming} errorFor={errorFor} />
-					<TeamsSection org={org} manager={manager} actions={actions} run={run} busy={busy} confirming={confirming} setConfirming={setConfirming} errorFor={errorFor} />
+					<MembersSection
+						org={org}
+						me={me}
+						manager={manager}
+						actions={actions}
+						run={run}
+						busy={busy}
+						confirming={confirming}
+						setConfirming={setConfirming}
+						errorFor={errorFor}
+					/>
+					<TeamsSection
+						org={org}
+						manager={manager}
+						actions={actions}
+						run={run}
+						busy={busy}
+						confirming={confirming}
+						setConfirming={setConfirming}
+						errorFor={errorFor}
+					/>
 					{manager ? <SettingsSection org={org} actions={actions} run={run} busy={busy} errorFor={errorFor} /> : null}
 				</>
 			) : null}
@@ -147,7 +184,17 @@ function Avatar({ person }: { person: { handle: string; name: string | null; ava
 	);
 }
 
-function MembersSection({ org, me, manager, actions, run, busy, confirming, setConfirming, errorFor }: SectionProps & ConfirmProps & { me: { handle: string }; manager: boolean }) {
+function MembersSection({
+	org,
+	me,
+	manager,
+	actions,
+	run,
+	busy,
+	confirming,
+	setConfirming,
+	errorFor,
+}: SectionProps & ConfirmProps & { me: { handle: string }; manager: boolean }) {
 	const roles = assignableRoles(org.role);
 	const [email, setEmail] = useState("");
 	const [role, setRole] = useState<OrgRole>("member");
@@ -160,7 +207,11 @@ function MembersSection({ org, me, manager, actions, run, busy, confirming, setC
 		setAdded(null);
 		setAddError(null);
 		let result: { added?: string; invited?: string; awaitingApproval?: boolean } = {};
-		const ok = await run("add-member", async () => (result = await actions.addMember(org.slug, email.trim(), role)), setAddError);
+		const ok = await run(
+			"add-member",
+			async () => (result = await actions.addMember(org.slug, email.trim(), role)),
+			setAddError,
+		);
 		if (ok) {
 			setAdded(addedMessage(result));
 			setEmail("");
@@ -192,7 +243,12 @@ function MembersSection({ org, me, manager, actions, run, busy, confirming, setC
 											<label className="sr-only" htmlFor={`role-${m.handle}`}>
 												{m.handle}'s role
 											</label>
-											<select id={`role-${m.handle}`} value={m.role} disabled={busy === key} onChange={(e) => run(key, () => actions.setRole(org.slug, m.handle, e.target.value as OrgRole))}>
+											<select
+												id={`role-${m.handle}`}
+												value={m.role}
+												disabled={busy === key}
+												onChange={(e) => run(key, () => actions.setRole(org.slug, m.handle, e.target.value as OrgRole))}
+											>
 												{[...new Set([...roles, m.role])].map((r) => (
 													<option key={r} value={r}>
 														{ROLE_WORDS[r]}
@@ -251,7 +307,14 @@ function MembersSection({ org, me, manager, actions, run, busy, confirming, setC
 						<label className="sr-only" htmlFor="add-member-email">
 							Email address
 						</label>
-						<input id="add-member-email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="person@example.com" autoComplete="off" />
+						<input
+							id="add-member-email"
+							type="email"
+							value={email}
+							onChange={(e) => setEmail(e.target.value)}
+							placeholder="person@example.com"
+							autoComplete="off"
+						/>
 						<label className="sr-only" htmlFor="add-member-role">
 							Role
 						</label>
@@ -266,7 +329,10 @@ function MembersSection({ org, me, manager, actions, run, busy, confirming, setC
 							{busy === "add-member" ? "Adding…" : "Add"}
 						</button>
 					</div>
-					<p className="manage__hint">Someone who hasn't signed in yet is invited, and joins when they first sign in to GitHive, once a GitHive admin has approved them.</p>
+					<p className="manage__hint">
+						Someone who hasn't signed in yet is invited, and joins when they first sign in to GitHive, once a GitHive
+						admin has approved them.
+					</p>
 					{added ? (
 						<p className="manage__note" role="status">
 							{added}
@@ -283,7 +349,16 @@ function MembersSection({ org, me, manager, actions, run, busy, confirming, setC
 	);
 }
 
-function TeamsSection({ org, manager, actions, run, busy, confirming, setConfirming, errorFor }: SectionProps & ConfirmProps & { manager: boolean }) {
+function TeamsSection({
+	org,
+	manager,
+	actions,
+	run,
+	busy,
+	confirming,
+	setConfirming,
+	errorFor,
+}: SectionProps & ConfirmProps & { manager: boolean }) {
 	const [slug, setSlug] = useState("");
 	const [name, setName] = useState("");
 	const [createError, setCreateError] = useState<string | null>(null);
@@ -307,7 +382,8 @@ function TeamsSection({ org, manager, actions, run, busy, confirming, setConfirm
 				<h2 id="org-teams">Teams</h2>
 			</div>
 			<p className="box__row muted manage__note">
-				A team can be granted a role when GitHive is started on a repo, like <code>{`security = @${org.slug}/security`}</code>: anyone on the team when they vote counts as that role.
+				A team can be granted a role when GitHive is started on a repo, like{" "}
+				<code>{`security = @${org.slug}/security`}</code>: anyone on the team when they vote counts as that role.
 			</p>
 			{org.teams.length === 0 ? <p className="box__row muted">No teams yet.</p> : null}
 			<ul className="manage__rows">
@@ -341,7 +417,12 @@ function TeamsSection({ org, manager, actions, run, busy, confirming, setConfirm
 									<span key={handle} className="manage__chip">
 										{handle}
 										{manager ? (
-											<button type="button" aria-label={`Take ${handle} off @${org.slug}/${team.slug}`} disabled={busy === key} onClick={() => run(key, () => actions.removeTeamMember(org.slug, team.slug, handle))}>
+											<button
+												type="button"
+												aria-label={`Take ${handle} off @${org.slug}/${team.slug}`}
+												disabled={busy === key}
+												onClick={() => run(key, () => actions.removeTeamMember(org.slug, team.slug, handle))}
+											>
 												×
 											</button>
 										) : null}
@@ -353,7 +434,11 @@ function TeamsSection({ org, manager, actions, run, busy, confirming, setConfirm
 									<label className="sr-only" htmlFor={`team-add-${team.slug}`}>
 										Add to @{org.slug}/{team.slug}
 									</label>
-									<select id={`team-add-${team.slug}`} value={adding[team.slug] ?? ""} onChange={(e) => setAdding({ ...adding, [team.slug]: e.target.value })}>
+									<select
+										id={`team-add-${team.slug}`}
+										value={adding[team.slug] ?? ""}
+										onChange={(e) => setAdding({ ...adding, [team.slug]: e.target.value })}
+									>
 										<option value="">Add a member…</option>
 										{others.map((h) => (
 											<option key={h} value={h}>
@@ -365,7 +450,11 @@ function TeamsSection({ org, manager, actions, run, busy, confirming, setConfirm
 										type="button"
 										className="manage__small"
 										disabled={!adding[team.slug] || busy === key}
-										onClick={() => run(key, () => actions.addTeamMember(org.slug, team.slug, adding[team.slug]!)).then((ok) => ok && setAdding({ ...adding, [team.slug]: "" }))}
+										onClick={() =>
+											run(key, () => actions.addTeamMember(org.slug, team.slug, adding[team.slug]!)).then(
+												(ok) => ok && setAdding({ ...adding, [team.slug]: "" }),
+											)
+										}
 									>
 										Add
 									</button>
@@ -382,16 +471,33 @@ function TeamsSection({ org, manager, actions, run, busy, confirming, setConfirm
 						<label className="sr-only" htmlFor="new-team-slug">
 							Team name
 						</label>
-						<input id="new-team-slug" type="text" value={slug} onChange={(e) => setSlug(e.target.value.toLowerCase())} placeholder="security" autoComplete="off" spellCheck={false} />
+						<input
+							id="new-team-slug"
+							type="text"
+							value={slug}
+							onChange={(e) => setSlug(e.target.value.toLowerCase())}
+							placeholder="security"
+							autoComplete="off"
+							spellCheck={false}
+						/>
 						<label className="sr-only" htmlFor="new-team-name">
 							Display name
 						</label>
-						<input id="new-team-name" type="text" value={name} onChange={(e) => setName(e.target.value)} placeholder="Display name (optional)" autoComplete="off" />
+						<input
+							id="new-team-name"
+							type="text"
+							value={name}
+							onChange={(e) => setName(e.target.value)}
+							placeholder="Display name (optional)"
+							autoComplete="off"
+						/>
 						<button type="submit" className="accent" disabled={!slug || !!problem || busy === "create-team"}>
 							New team
 						</button>
 					</div>
-					<p className="manage__hint">{problem ? <span className="error">{problem}</span> : slug ? `Granted as @${org.slug}/${slug}.` : SLUG_HINT}</p>
+					<p className="manage__hint">
+						{problem ? <span className="error">{problem}</span> : slug ? `Granted as @${org.slug}/${slug}.` : SLUG_HINT}
+					</p>
 					{createError ? (
 						<p className="error manage__note" role="alert">
 							{createError}
@@ -413,7 +519,16 @@ function SettingsSection({ org, actions, run, busy, errorFor }: SectionProps) {
 	const save = async (event: FormEvent) => {
 		event.preventDefault();
 		setSaved(false);
-		if (await run("settings", () => actions.updateOrg(org.slug, { name: name.trim() || null, default_permission: level, members_can_create_repos: create }))) setSaved(true);
+		if (
+			await run("settings", () =>
+				actions.updateOrg(org.slug, {
+					name: name.trim() || null,
+					default_permission: level,
+					members_can_create_repos: create,
+				}),
+			)
+		)
+			setSaved(true);
 	};
 
 	return (
@@ -424,7 +539,14 @@ function SettingsSection({ org, actions, run, busy, errorFor }: SectionProps) {
 			<div className="box__body manage__form">
 				<div className="manage__field">
 					<label htmlFor="org-name">Display name</label>
-					<input id="org-name" type="text" value={name} onChange={(e) => setName(e.target.value)} placeholder={org.slug} autoComplete="off" />
+					<input
+						id="org-name"
+						type="text"
+						value={name}
+						onChange={(e) => setName(e.target.value)}
+						placeholder={org.slug}
+						autoComplete="off"
+					/>
 				</div>
 				<div className="manage__field">
 					<label htmlFor="org-default">What members can do in its repositories</label>
@@ -435,7 +557,10 @@ function SettingsSection({ org, actions, run, busy, errorFor }: SectionProps) {
 							</option>
 						))}
 					</select>
-					<p className="manage__hint">Owners and admins can always do everything. Collaborators added to one repository get what they're given there.</p>
+					<p className="manage__hint">
+						Owners and admins can always do everything. Collaborators added to one repository get what they're given
+						there.
+					</p>
 				</div>
 				<label className="manage__choice">
 					<input type="checkbox" checked={create} onChange={(e) => setCreate(e.target.checked)} />

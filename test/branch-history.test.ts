@@ -16,17 +16,33 @@ export function gitHistory(server: GitServer): HistorySource {
 	const FORMAT = "--format=%H%x1f%T%x1f%an%x1f%P%x1f%B%x1e";
 	const meta = (line: string) => {
 		const [hash, treeHash, name, parents, message] = line.split("\x1f");
-		return { hash, treeHash, author: { name }, parents: parents.split(" ").filter(Boolean), message: message.replace(/\n$/, "") };
+		return {
+			hash,
+			treeHash,
+			author: { name },
+			parents: parents.split(" ").filter(Boolean),
+			message: message.replace(/\n$/, ""),
+		};
 	};
 	return {
-		log: async (ref, limit, offset) => server.git("log", "--first-parent", `--skip=${offset}`, `-n${limit}`, FORMAT, ref).split("\x1e").map((l) => l.replace(/^\n/, "")).filter(Boolean).map(meta),
+		log: async (ref, limit, offset) =>
+			server
+				.git("log", "--first-parent", `--skip=${offset}`, `-n${limit}`, FORMAT, ref)
+				.split("\x1e")
+				.map((l) => l.replace(/^\n/, ""))
+				.filter(Boolean)
+				.map(meta),
 		readCommit: async (hash) => meta(server.git("log", "-1", FORMAT, hash).split("\x1e")[0]),
 		readTree: async (hash) =>
-			server.git("ls-tree", hash).split("\n").filter(Boolean).map((l) => {
-				const [info, name] = l.split("\t");
-				const [mode, type, oid] = info.split(" ");
-				return { name, mode, hash: oid, type: type === "commit" ? "gitlink" : type };
-			}),
+			server
+				.git("ls-tree", hash)
+				.split("\n")
+				.filter(Boolean)
+				.map((l) => {
+					const [info, name] = l.split("\t");
+					const [mode, type, oid] = info.split(" ");
+					return { name, mode, hash: oid, type: type === "commit" ? "gitlink" : type };
+				}),
 	};
 }
 
@@ -73,9 +89,28 @@ describe("a branch's history through Artifacts' API", { timeout: 60_000 }, () =>
 		});
 		await clone.run("push", "-q", "origin", "HEAD:main");
 		const read = await readBranchHistory(gitHistory(server), baseline, "main");
-		expect(read.map((c) => c.message)).toEqual(["add", "delete and modify", "executable", "a folder becomes a file", "and back"]);
-		for (const c of read) expect(c.files).toEqual(server.git("diff-tree", "--no-commit-id", "--name-only", "-r", c.parents[0], c.commit).split("\n").filter(Boolean).sort());
-		expect(read.map((c) => c.files)).toEqual([["a.txt", "d/deep/y.txt", "d/x.txt", "tool.sh"], ["a.txt", "d/deep/y.txt"], ["tool.sh"], ["d", "d/deep/y.txt", "d/x.txt"], ["d", "d/z.txt"]]);
+		expect(read.map((c) => c.message)).toEqual([
+			"add",
+			"delete and modify",
+			"executable",
+			"a folder becomes a file",
+			"and back",
+		]);
+		for (const c of read)
+			expect(c.files).toEqual(
+				server
+					.git("diff-tree", "--no-commit-id", "--name-only", "-r", c.parents[0], c.commit)
+					.split("\n")
+					.filter(Boolean)
+					.sort(),
+			);
+		expect(read.map((c) => c.files)).toEqual([
+			["a.txt", "d/deep/y.txt", "d/x.txt", "tool.sh"],
+			["a.txt", "d/deep/y.txt"],
+			["tool.sh"],
+			["d", "d/deep/y.txt", "d/x.txt"],
+			["d", "d/z.txt"],
+		]);
 	});
 
 	it("reads a long history in pages, and nothing before the baseline", async () => {
@@ -90,7 +125,10 @@ describe("a branch's history through Artifacts' API", { timeout: 60_000 }, () =>
 		// Two commits a page, though more were asked for: read on until the baseline, not taken for the end.
 		const source = gitHistory(server);
 		const pages: number[] = [];
-		const paged: HistorySource = { ...source, log: async (ref, _limit, offset) => (pages.push(offset), source.log(ref, 2, offset)) };
+		const paged: HistorySource = {
+			...source,
+			log: async (ref, _limit, offset) => (pages.push(offset), source.log(ref, 2, offset)),
+		};
 		const read = await readBranchHistory(paged, baseline, "main");
 		expect(read.map((c) => c.message)).toEqual(["c2", "c3", "c4"]);
 		expect(read.map((c) => c.files)).toEqual([["f2.txt"], ["f3.txt"], ["f4.txt"]]);

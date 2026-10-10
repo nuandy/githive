@@ -6,7 +6,15 @@ import { abandoned, AGENT_TURN_IDLE_MS, BUILDING_IDLE_MS, type ChangeSigns, wait
 
 const T0 = Date.parse("2026-10-09T00:00:00.000Z");
 const at = (ms: number) => new Date(T0 + ms).toISOString();
-const signs = (over: Partial<ChangeSigns> = {}): ChangeSigns => ({ active: at(0), head: "h1", votes: [], approved: false, landing: false, asked: false, ...over });
+const signs = (over: Partial<ChangeSigns> = {}): ChangeSigns => ({
+	active: at(0),
+	head: "h1",
+	votes: [],
+	approved: false,
+	landing: false,
+	asked: false,
+	...over,
+});
 const minutes = (n: number) => n * 60_000;
 
 describe("whose turn a change is", () => {
@@ -16,8 +24,15 @@ describe("whose turn a change is", () => {
 	});
 
 	it("goes back to the agent when changes are asked for (failed checks reject its head too), or it's approved and not merged", () => {
-		expect(waitingOn(signs({ votes: [{ verdict: "reject", at: at(minutes(5)) }] }))).toMatchObject({ turn: "agent", since: at(minutes(5)) });
-		expect(waitingOn(signs({ approved: true, votes: [{ verdict: "approve", at: at(minutes(9)) }] }))).toMatchObject({ turn: "agent", since: at(minutes(9)), why: "is approved and not merged" });
+		expect(waitingOn(signs({ votes: [{ verdict: "reject", at: at(minutes(5)) }] }))).toMatchObject({
+			turn: "agent",
+			since: at(minutes(5)),
+		});
+		expect(waitingOn(signs({ approved: true, votes: [{ verdict: "approve", at: at(minutes(9)) }] }))).toMatchObject({
+			turn: "agent",
+			since: at(minutes(9)),
+			why: "is approved and not merged",
+		});
 	});
 
 	it("is the landing's or a person's while it waits on them, whatever else is true", () => {
@@ -26,7 +41,9 @@ describe("whose turn a change is", () => {
 	});
 
 	it("counts from the agent's own last claim when that's later than what handed the turn back", () => {
-		expect(waitingOn(signs({ active: at(minutes(20)), votes: [{ verdict: "reject", at: at(minutes(5)) }] })).since).toBe(at(minutes(20)));
+		expect(
+			waitingOn(signs({ active: at(minutes(20)), votes: [{ verdict: "reject", at: at(minutes(5)) }] })).since,
+		).toBe(at(minutes(20)));
 	});
 });
 
@@ -48,6 +65,11 @@ describe("an abandoned change", () => {
 
 	it("is never sooner than the floor after its agent last claimed", () => {
 		// Handed back long ago, but the agent claimed again a minute ago: it's at work.
-		expect(abandoned(signs({ active: at(AGENT_TURN_IDLE_MS + minutes(9)), votes: [{ verdict: "reject", at: at(0) }] }), T0 + AGENT_TURN_IDLE_MS + minutes(10)).abandoned).toBe(false);
+		expect(
+			abandoned(
+				signs({ active: at(AGENT_TURN_IDLE_MS + minutes(9)), votes: [{ verdict: "reject", at: at(0) }] }),
+				T0 + AGENT_TURN_IDLE_MS + minutes(10),
+			).abandoned,
+		).toBe(false);
 	});
 });

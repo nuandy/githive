@@ -4,7 +4,8 @@ import type { Tone } from "./changeStatus";
 // request's timeline (see changeTimeline.ts, which builds it from a
 // change's history in Git).
 
-export type TimelineKind = "opened" | "pushed" | "review" | "changes-requested" | "needs-you" | "merged" | "abandoned" | "note";
+export type TimelineKind =
+	"opened" | "pushed" | "review" | "changes-requested" | "needs-you" | "merged" | "abandoned" | "note";
 
 /** A vote, shown as a review card. */
 export interface TimelineReview {

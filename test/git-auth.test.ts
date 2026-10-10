@@ -59,7 +59,9 @@ describe("a busy Git server", { timeout: 30_000 }, () => {
 		const server = createServer((req, res) => {
 			if (req.url?.endsWith("/info/refs?service=git-upload-pack")) {
 				res.writeHead(200, { "Content-Type": "application/x-git-upload-pack-advertisement" });
-				res.end(`${pkt("# service=git-upload-pack\n")}0000${pkt(`${OID} refs/heads/main\0side-band-64k shallow\n`)}0000`);
+				res.end(
+					`${pkt("# service=git-upload-pack\n")}0000${pkt(`${OID} refs/heads/main\0side-band-64k shallow\n`)}0000`,
+				);
 				return;
 			}
 			// The fetch itself: empty though it says 200, twice, then a (bad) answer with something in it.
@@ -70,7 +72,14 @@ describe("a busy Git server", { timeout: 30_000 }, () => {
 		await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
 		close = () => server.close();
 		const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}/project.git`;
-		const counting = countingRequests(() => http.request({ url: `${url}/git-upload-pack`, method: "POST", headers: {}, body: [new TextEncoder().encode("0000")] as never }));
+		const counting = countingRequests(() =>
+			http.request({
+				url: `${url}/git-upload-pack`,
+				method: "POST",
+				headers: {},
+				body: [new TextEncoder().encode("0000")] as never,
+			}),
+		);
 		const response = await counting.done;
 		expect(response.statusCode).toBe(200);
 		expect(asked).toBe(3);

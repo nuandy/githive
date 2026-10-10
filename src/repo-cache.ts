@@ -1,7 +1,14 @@
 import { DurableObject } from "cloudflare:workers";
 import { countingRequests, describeCounts } from "./git-http";
 import { makeAgentFork, makeSeed } from "./toolkit/env";
-import { asNews, type Checking, emptyLanding, type LandingState, type Settled, settleOutcomes } from "./toolkit/landing";
+import {
+	asNews,
+	type Checking,
+	emptyLanding,
+	type LandingState,
+	type Settled,
+	settleOutcomes,
+} from "./toolkit/landing";
 
 // One per repo ("repo:<repo>"): what GitHive keeps of the repo between calls,
 // all of it a copy or a hint. Git stays the truth, and throwing any of it away
@@ -45,7 +52,6 @@ interface View {
 
 /** How long a build may run before another caller may start one. */
 const BUILD_LEASE_MS = 2 * 60_000;
-
 
 /** A record's tip as kept: where its ref points (null: nowhere) and when that was known, its generation, and when a listing began. */
 interface KeptTip {
@@ -138,7 +144,8 @@ export class RepoCache extends DurableObject<Env> {
 
 	async keepFiles(files: Record<string, string[]>) {
 		const entries = Object.entries(files).map(([commit, paths]) => [`files:${commit}`, paths] as const);
-		for (let i = 0; i < entries.length; i += 128) await this.ctx.storage.put(Object.fromEntries(entries.slice(i, i + 128)));
+		for (let i = 0; i < entries.length; i += 128)
+			await this.ctx.storage.put(Object.fromEntries(entries.slice(i, i + 128)));
 	}
 
 	/**
@@ -158,19 +165,26 @@ export class RepoCache extends DurableObject<Env> {
 	private async keepNewest(heads: [string, KnownHead][]) {
 		// The newest of each change's here, then against what's kept: storage reads and writes 128 keys at a time.
 		const newest = new Map<string, KnownHead>();
-		for (const [change, known] of heads) if ((newest.get(change)?.at ?? -Infinity) <= known.at) newest.set(change, known);
+		for (const [change, known] of heads)
+			if ((newest.get(change)?.at ?? -Infinity) <= known.at) newest.set(change, known);
 		const entries = [...newest];
 		for (let i = 0; i < entries.length; i += 128) {
 			const slice = entries.slice(i, i + 128);
 			const kept = await this.ctx.storage.get<KnownHead>(slice.map(([change]) => `head:${change}`));
-			const put = slice.filter(([change, known]) => (kept.get(`head:${change}`)?.at ?? -Infinity) <= known.at).map(([change, known]) => [`head:${change}`, known] as const);
+			const put = slice
+				.filter(([change, known]) => (kept.get(`head:${change}`)?.at ?? -Infinity) <= known.at)
+				.map(([change, known]) => [`head:${change}`, known] as const);
 			if (put.length) await this.ctx.storage.put(Object.fromEntries(put));
 		}
 	}
 
 	/** The kept view `name`: its JSON, whether it's still fresh, whether a build is running, and the write count now. */
 	async view(name: string, maxAgeMs: number) {
-		const [writes, kept, building] = await Promise.all([this.writes(), this.ctx.storage.get<View>(`view:${name}`), this.ctx.storage.get<number>(`building:${name}`)]);
+		const [writes, kept, building] = await Promise.all([
+			this.writes(),
+			this.ctx.storage.get<View>(`view:${name}`),
+			this.ctx.storage.get<number>(`building:${name}`),
+		]);
 		return {
 			json: kept?.json,
 			fresh: !!kept && kept.writes === writes && Date.now() - kept.at < maxAgeMs,
@@ -219,7 +233,11 @@ export class RepoCache extends DurableObject<Env> {
 	 * older than `maxAgeMs` (the others take it meanwhile: a write would have
 	 * moved it, so it only ages in case one couldn't).
 	 */
-	async tipOf(ref: string, stateKey: string, maxAgeMs: number): Promise<{ tip?: string | null; json?: string; gen: number; wait?: boolean }> {
+	async tipOf(
+		ref: string,
+		stateKey: string,
+		maxAgeMs: number,
+	): Promise<{ tip?: string | null; json?: string; gen: number; wait?: boolean }> {
 		const key = `tip:${ref}`;
 		const kept = (await this.ctx.storage.get<KeptTip>(key)) ?? { gen: 0 };
 		const now = Date.now();
@@ -231,7 +249,9 @@ export class RepoCache extends DurableObject<Env> {
 			}
 			if (kept.tip === undefined) return { gen: kept.gen, wait: true };
 		}
-		const state = kept.tip ? await this.ctx.storage.get<{ tip: string; json: string }>(`record:${stateKey}`) : undefined;
+		const state = kept.tip
+			? await this.ctx.storage.get<{ tip: string; json: string }>(`record:${stateKey}`)
+			: undefined;
 		return { tip: kept.tip, gen: kept.gen, ...(state?.tip === kept.tip ? { json: state.json } : {}) };
 	}
 
@@ -331,7 +351,11 @@ export class RepoCache extends DurableObject<Env> {
 			});
 		const worker = async () => {
 			for (let job = await next(); job; job = seeding || Date.now() > until ? undefined : await next()) {
-				const made = await (job.item.startsWith("seed:") ? makeSeed(this.env, repo, Number(job.item.slice(5))) : makeAgentFork(this.env, repo, job.item.slice(6))).then(
+				const made = await (
+					job.item.startsWith("seed:")
+						? makeSeed(this.env, repo, Number(job.item.slice(5)))
+						: makeAgentFork(this.env, repo, job.item.slice(6))
+				).then(
 					() => null,
 					(err: unknown) => err,
 				);
@@ -340,17 +364,22 @@ export class RepoCache extends DurableObject<Env> {
 					const rest = now.filter((j) => j.item !== job!.item);
 					if (made === null && job!.item.startsWith("seed:")) {
 						const ready = (await this.ctx.storage.get<number[]>("forks:seeds")) ?? [];
-						await this.ctx.storage.put("forks:seeds", [...new Set([...ready, Number(job!.item.slice(5))])].sort((a, b) => a - b));
+						await this.ctx.storage.put(
+							"forks:seeds",
+							[...new Set([...ready, Number(job!.item.slice(5))])].sort((a, b) => a - b),
+						);
 					}
 					if (made !== null && job!.tries + 1 < FORK_TRIES) rest.push({ ...job!, tries: job!.tries + 1 });
-					else if (made !== null) console.error(`fork queue for ${repo} gave up on ${job!.item}: ${String(made).slice(0, 200)}`);
+					else if (made !== null)
+						console.error(`fork queue for ${repo} gave up on ${job!.item}: ${String(made).slice(0, 200)}`);
 					await this.ctx.storage.put("forks:queue", rest);
 				});
 				making.delete(job.item);
 			}
 		};
 		await Promise.all(Array.from({ length: seeding ? 1 : AGENT_FORKS_AT_ONCE }, worker));
-		if (((await this.ctx.storage.get<ForkJob[]>("forks:queue")) ?? []).length) await this.ctx.storage.setAlarm(Date.now() + 1_000);
+		if (((await this.ctx.storage.get<ForkJob[]>("forks:queue")) ?? []).length)
+			await this.ctx.storage.setAlarm(Date.now() + 1_000);
 	}
 
 	/**
@@ -415,7 +444,17 @@ export class RepoCache extends DurableObject<Env> {
 		// And the files commits changed, as the audit worked them out: a commit's are its own for good, but the repo's gone.
 		const files = await this.ctx.storage.list({ prefix: "files:" });
 		const news = await this.ctx.storage.list({ prefix: "news:" });
-		const keys = [...kept.keys(), ...building.keys(), ...records.keys(), ...tips.keys(), ...forks.keys(), ...landing.keys(), ...heads.keys(), ...files.keys(), ...news.keys()];
+		const keys = [
+			...kept.keys(),
+			...building.keys(),
+			...records.keys(),
+			...tips.keys(),
+			...forks.keys(),
+			...landing.keys(),
+			...heads.keys(),
+			...files.keys(),
+			...news.keys(),
+		];
 		// Storage deletes 128 keys at a time.
 		for (let i = 0; i < keys.length; i += 128) await this.ctx.storage.delete(keys.slice(i, i + 128));
 	}

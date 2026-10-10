@@ -65,7 +65,13 @@ export async function heldReviews(log: CasLog<ReviewHolds>, now = Date.now()): P
  * Hold the review `key` for `agent`, if fewer than `needed` others hold it.
  * Compare-and-swap: two agents asking at once can't both take the last one.
  */
-export async function holdReview(log: CasLog<ReviewHolds>, key: string, agent: string, needed: number, now = () => Date.now()) {
+export async function holdReview(
+	log: CasLog<ReviewHolds>,
+	key: string,
+	agent: string,
+	needed: number,
+	now = () => Date.now(),
+) {
 	const outcome = await appendRecord<ReviewHolds, "taken">(log, AUTHOR, empty, (state) => {
 		const holds = live(state.holds, now());
 		const others = Object.keys(holds[key] ?? {}).filter((a) => a !== agent);
@@ -94,27 +100,42 @@ export async function releaseReview(log: CasLog<ReviewHolds>, key: string, agent
  * waiting are forgotten, so a review that waits again starts over. Written
  * only when the set of waiting reviews changed.
  */
-export async function roleWaits(log: CasLog<ReviewHolds>, waiting: string[], now = () => Date.now()): Promise<Record<string, { since: number; told?: boolean }>> {
+export async function roleWaits(
+	log: CasLog<ReviewHolds>,
+	waiting: string[],
+	now = () => Date.now(),
+): Promise<Record<string, { since: number; told?: boolean }>> {
 	let current: ReviewHolds["waits"] = {};
 	await appendRecord<ReviewHolds, "unchanged">(log, AUTHOR, empty, (state) => {
 		const at = new Date(now()).toISOString();
 		current = Object.fromEntries(waiting.map((key) => [key, state.waits[key] ?? { since: at }]));
-		if (JSON.stringify(Object.keys(current).sort()) === JSON.stringify(Object.keys(state.waits).sort())) return { refused: "unchanged" };
-		return { state: { holds: live(state.holds, now()), waits: current }, text: `${waiting.length} review(s) a role that can block awaits` };
+		if (JSON.stringify(Object.keys(current).sort()) === JSON.stringify(Object.keys(state.waits).sort()))
+			return { refused: "unchanged" };
+		return {
+			state: { holds: live(state.holds, now()), waits: current },
+			text: `${waiting.length} review(s) a role that can block awaits`,
+		};
 	});
-	return Object.fromEntries(Object.entries(current).map(([key, w]) => [key, { since: Date.parse(w.since), ...(w.told ? { told: true } : {}) }]));
+	return Object.fromEntries(
+		Object.entries(current).map(([key, w]) => [key, { since: Date.parse(w.since), ...(w.told ? { told: true } : {}) }]),
+	);
 }
 
 /** People were told about a waiting review: once is enough. */
 export async function roleWaitTold(log: CasLog<ReviewHolds>, key: string) {
 	await appendRecord<ReviewHolds, "none">(log, AUTHOR, empty, (state) => {
 		if (!state.waits[key] || state.waits[key].told) return { refused: "none" };
-		return { state: { ...state, waits: { ...state.waits, [key]: { ...state.waits[key], told: true } } }, text: `people were told ${key} awaits its review` };
+		return {
+			state: { ...state, waits: { ...state.waits, [key]: { ...state.waits[key], told: true } } },
+			text: `people were told ${key} awaits its review`,
+		};
 	});
 }
 
 /** The review holds as review_access, reviews and vote use them (ToolContext.reviews), kept in the repo's record (`log`: wherever it is). */
-export function reviewHolds(log: (repo: string) => CasLog<ReviewHolds> | Promise<CasLog<ReviewHolds>>): NonNullable<ToolContext["reviews"]> {
+export function reviewHolds(
+	log: (repo: string) => CasLog<ReviewHolds> | Promise<CasLog<ReviewHolds>>,
+): NonNullable<ToolContext["reviews"]> {
 	return {
 		held: async (repo) => heldReviews(await log(repo)),
 		hold: async (repo, key, agent, needed) => holdReview(await log(repo), key, agent, needed),

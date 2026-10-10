@@ -35,10 +35,22 @@
 	color: var(--neutral);
 }
 
-.merge-box__icon--good { background: var(--good); color: #fff; }
-.merge-box__icon--bad { background: var(--bad); color: #fff; }
-.merge-box__icon--warn { background: var(--warn-soft); color: var(--warn); }
-.merge-box__icon--needs { background: var(--needs); color: #fff; }
+.merge-box__icon--good {
+	background: var(--good);
+	color: #fff;
+}
+.merge-box__icon--bad {
+	background: var(--bad);
+	color: #fff;
+}
+.merge-box__icon--warn {
+	background: var(--warn-soft);
+	color: var(--warn);
+}
+.merge-box__icon--needs {
+	background: var(--needs);
+	color: #fff;
+}
 
 .merge-box__text {
 	min-width: 0;

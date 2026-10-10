@@ -44,7 +44,9 @@ export async function listTree(remote: Remote, ref: string) {
 export async function readFile(remote: Remote, ref: string, path: string) {
 	if (!path || path.startsWith("/") || path.split("/").includes("..")) fail(400, "path must be a file in the repo");
 	const { fs, dir, commit } = await snapshot(remote, ref);
-	const { blob } = await git.readBlob({ fs, dir, oid: commit, filepath: path }).catch(() => fail(404, `no file ${path} at ${commit.slice(0, 8)}`));
+	const { blob } = await git
+		.readBlob({ fs, dir, oid: commit, filepath: path })
+		.catch(() => fail(404, `no file ${path} at ${commit.slice(0, 8)}`));
 	const base = { commit, path, size: blob.length };
 	if (blob.length > MAX_FILE_BYTES) return { ...base, tooBig: true as const };
 	// NUL bytes in the first 8 KB: binary, as Git decides.

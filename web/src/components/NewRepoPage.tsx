@@ -39,16 +39,31 @@ const GITIGNORES: { value: Gitignore; label: string }[] = [
 export const emptyFirstCommit = (first: FirstCommit) => !first.readme && !first.gitignore && !first.license;
 
 /** The request a filled-in form makes: only the fields its source needs. */
-export function newRepoInput(form: { owner: string; name: string; source: Source; url: string; branch: string; copyFrom: string; visibility: "private" | "public"; first?: FirstCommit }): NewRepoInput {
+export function newRepoInput(form: {
+	owner: string;
+	name: string;
+	source: Source;
+	url: string;
+	branch: string;
+	copyFrom: string;
+	visibility: "private" | "public";
+	first?: FirstCommit;
+}): NewRepoInput {
 	const base = { owner: form.owner, name: form.name.trim(), visibility: form.visibility };
-	if (form.source === "import") return { ...base, import_url: form.url.trim(), ...(form.branch.trim() ? { branch: form.branch.trim() } : {}) };
+	if (form.source === "import")
+		return { ...base, import_url: form.url.trim(), ...(form.branch.trim() ? { branch: form.branch.trim() } : {}) };
 	if (form.source === "copy") return { ...base, copy_from: form.copyFrom };
 	const first = form.first ?? DEFAULT_FIRST_COMMIT;
 	if (emptyFirstCommit(first)) return base;
 	const description = first.readme ? first.description.trim() : "";
 	return {
 		...base,
-		init: { ...(first.readme ? { readme: true } : {}), ...(description ? { description } : {}), ...(first.gitignore ? { gitignore: first.gitignore } : {}), ...(first.license ? { license: first.license } : {}) },
+		init: {
+			...(first.readme ? { readme: true } : {}),
+			...(description ? { description } : {}),
+			...(first.gitignore ? { gitignore: first.gitignore } : {}),
+			...(first.license ? { license: first.license } : {}),
+		},
 	};
 }
 
@@ -56,7 +71,7 @@ export function newRepoInput(form: { owner: string; name: string; source: Source
 export function NewRepoView({ orgs, repos, owner: wanted, create, onCreated }: NewRepoViewProps) {
 	const owners = orgs ? creatableOwners(orgs) : [];
 	const [owner, setOwner] = useState<string | null>(null);
-	const chosen = owner ?? (owners.find((o) => o.slug === wanted)?.slug ?? owners[0]?.slug ?? "");
+	const chosen = owner ?? owners.find((o) => o.slug === wanted)?.slug ?? owners[0]?.slug ?? "";
 	const [name, setName] = useState("");
 	const [source, setSource] = useState<Source>("import");
 	const [url, setUrl] = useState("");
@@ -68,7 +83,12 @@ export function NewRepoView({ orgs, repos, owner: wanted, create, onCreated }: N
 	const [error, setError] = useState<string | null>(null);
 
 	const nameProblem = name ? repoNameProblem(name.trim()) : null;
-	const ready = !!chosen && !!name.trim() && !nameProblem && (source !== "import" || !!url.trim()) && (source !== "copy" || !!copyFrom);
+	const ready =
+		!!chosen &&
+		!!name.trim() &&
+		!nameProblem &&
+		(source !== "import" || !!url.trim()) &&
+		(source !== "copy" || !!copyFrom);
 
 	const submit = async (event: FormEvent) => {
 		event.preventDefault();
@@ -87,7 +107,10 @@ export function NewRepoView({ orgs, repos, owner: wanted, create, onCreated }: N
 		<main className="page manage" id="main">
 			<header>
 				<h1>New repository</h1>
-				<p className="muted manage__lede">GitHive starts on it as it's made, so agents can claim work in it at once. Its review policy and checks are in its Settings.</p>
+				<p className="muted manage__lede">
+					GitHive starts on it as it's made, so agents can claim work in it at once. Its review policy and checks are in
+					its Settings.
+				</p>
 			</header>
 			{orgs === undefined ? (
 				<p className="muted" role="status">
@@ -113,29 +136,62 @@ export function NewRepoView({ orgs, repos, owner: wanted, create, onCreated }: N
 						</div>
 						<div className="manage__field">
 							<label htmlFor="new-repo-name">Name</label>
-							<input id="new-repo-name" type="text" value={name} onChange={(e) => setName(e.target.value)} autoComplete="off" spellCheck={false} placeholder="my-project" aria-describedby="new-repo-name-hint" />
+							<input
+								id="new-repo-name"
+								type="text"
+								value={name}
+								onChange={(e) => setName(e.target.value)}
+								autoComplete="off"
+								spellCheck={false}
+								placeholder="my-project"
+								aria-describedby="new-repo-name-hint"
+							/>
 							<p className="manage__hint" id="new-repo-name-hint">
-								{nameProblem ? <span className="error">{nameProblem}</span> : chosen && name.trim() ? `It will be ${chosen}/${name.trim()}.` : "Letters, digits, dots, underscores and dashes."}
+								{nameProblem ? (
+									<span className="error">{nameProblem}</span>
+								) : chosen && name.trim() ? (
+									`It will be ${chosen}/${name.trim()}.`
+								) : (
+									"Letters, digits, dots, underscores and dashes."
+								)}
 							</p>
 						</div>
 						<fieldset className="manage__field manage__choices">
 							<legend className="manage__label">Start from</legend>
 							<label className="manage__choice">
-								<input type="radio" name="new-repo-source" value="import" checked={source === "import"} onChange={() => setSource("import")} />
+								<input
+									type="radio"
+									name="new-repo-source"
+									value="import"
+									checked={source === "import"}
+									onChange={() => setSource("import")}
+								/>
 								<span>
 									<strong>A Git repository</strong>
 									<span className="muted">Imported from its URL, for example a public GitHub repository.</span>
 								</span>
 							</label>
 							<label className="manage__choice">
-								<input type="radio" name="new-repo-source" value="copy" checked={source === "copy"} onChange={() => setSource("copy")} />
+								<input
+									type="radio"
+									name="new-repo-source"
+									value="copy"
+									checked={source === "copy"}
+									onChange={() => setSource("copy")}
+								/>
 								<span>
 									<strong>A copy of a repository here</strong>
 									<span className="muted">Its default branch, in seconds.</span>
 								</span>
 							</label>
 							<label className="manage__choice">
-								<input type="radio" name="new-repo-source" value="empty" checked={source === "empty"} onChange={() => setSource("empty")} />
+								<input
+									type="radio"
+									name="new-repo-source"
+									value="empty"
+									checked={source === "empty"}
+									onChange={() => setSource("empty")}
+								/>
 								<span>
 									<strong>Start fresh</strong>
 									<span className="muted">A new repository with a first commit, ready for agents.</span>
@@ -146,11 +202,27 @@ export function NewRepoView({ orgs, repos, owner: wanted, create, onCreated }: N
 							<div className="manage__source">
 								<div className="manage__field">
 									<label htmlFor="new-repo-url">Git URL</label>
-									<input id="new-repo-url" type="url" value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://github.com/octocat/Spoon-Knife" autoComplete="off" spellCheck={false} />
+									<input
+										id="new-repo-url"
+										type="url"
+										value={url}
+										onChange={(e) => setUrl(e.target.value)}
+										placeholder="https://github.com/octocat/Spoon-Knife"
+										autoComplete="off"
+										spellCheck={false}
+									/>
 								</div>
 								<div className="manage__field manage__source-branch">
 									<label htmlFor="new-repo-branch">Branch (optional)</label>
-									<input id="new-repo-branch" type="text" value={branch} onChange={(e) => setBranch(e.target.value)} placeholder="main" autoComplete="off" spellCheck={false} />
+									<input
+										id="new-repo-branch"
+										type="text"
+										value={branch}
+										onChange={(e) => setBranch(e.target.value)}
+										placeholder="main"
+										autoComplete="off"
+										spellCheck={false}
+									/>
 								</div>
 							</div>
 						) : source === "copy" ? (
@@ -169,19 +241,35 @@ export function NewRepoView({ orgs, repos, owner: wanted, create, onCreated }: N
 							<fieldset className="manage__field manage__first">
 								<legend className="manage__label">First commit</legend>
 								<label className="manage__check">
-									<input type="checkbox" checked={first.readme} onChange={(e) => setFirst({ ...first, readme: e.target.checked })} />
+									<input
+										type="checkbox"
+										checked={first.readme}
+										onChange={(e) => setFirst({ ...first, readme: e.target.checked })}
+									/>
 									<span>Add a README</span>
 								</label>
 								{first.readme ? (
 									<div className="manage__field">
 										<label htmlFor="new-repo-description">Description (optional)</label>
-										<input id="new-repo-description" type="text" value={first.description} onChange={(e) => setFirst({ ...first, description: e.target.value })} placeholder="Shown under the name in the README" maxLength={300} autoComplete="off" />
+										<input
+											id="new-repo-description"
+											type="text"
+											value={first.description}
+											onChange={(e) => setFirst({ ...first, description: e.target.value })}
+											placeholder="Shown under the name in the README"
+											maxLength={300}
+											autoComplete="off"
+										/>
 									</div>
 								) : null}
 								<div className="manage__inline">
 									<div className="manage__field">
 										<label htmlFor="new-repo-gitignore">.gitignore</label>
-										<select id="new-repo-gitignore" value={first.gitignore} onChange={(e) => setFirst({ ...first, gitignore: e.target.value as FirstCommit["gitignore"] })}>
+										<select
+											id="new-repo-gitignore"
+											value={first.gitignore}
+											onChange={(e) => setFirst({ ...first, gitignore: e.target.value as FirstCommit["gitignore"] })}
+										>
 											<option value="">None</option>
 											{GITIGNORES.map((g) => (
 												<option key={g.value} value={g.value}>
@@ -192,7 +280,11 @@ export function NewRepoView({ orgs, repos, owner: wanted, create, onCreated }: N
 									</div>
 									<div className="manage__field">
 										<label htmlFor="new-repo-license">License</label>
-										<select id="new-repo-license" value={first.license} onChange={(e) => setFirst({ ...first, license: e.target.value as FirstCommit["license"] })}>
+										<select
+											id="new-repo-license"
+											value={first.license}
+											onChange={(e) => setFirst({ ...first, license: e.target.value as FirstCommit["license"] })}
+										>
 											<option value="">None</option>
 											<option value="mit">MIT</option>
 										</select>
@@ -208,17 +300,31 @@ export function NewRepoView({ orgs, repos, owner: wanted, create, onCreated }: N
 						<fieldset className="manage__field manage__choices">
 							<legend className="manage__label">Who can see it</legend>
 							<label className="manage__choice">
-								<input type="radio" name="new-repo-visibility" value="private" checked={visibility === "private"} onChange={() => setVisibility("private")} />
+								<input
+									type="radio"
+									name="new-repo-visibility"
+									value="private"
+									checked={visibility === "private"}
+									onChange={() => setVisibility("private")}
+								/>
 								<span>
 									<strong>Private</strong>
 									<span className="muted">Only the owner's members and the collaborators you add.</span>
 								</span>
 							</label>
 							<label className="manage__choice">
-								<input type="radio" name="new-repo-visibility" value="public" checked={visibility === "public"} onChange={() => setVisibility("public")} />
+								<input
+									type="radio"
+									name="new-repo-visibility"
+									value="public"
+									checked={visibility === "public"}
+									onChange={() => setVisibility("public")}
+								/>
 								<span>
 									<strong>Public</strong>
-									<span className="muted">Anyone signed in to GitHive can read it; only you choose who works in it.</span>
+									<span className="muted">
+										Anyone signed in to GitHive can read it; only you choose who works in it.
+									</span>
 								</span>
 							</label>
 						</fieldset>
@@ -229,7 +335,11 @@ export function NewRepoView({ orgs, repos, owner: wanted, create, onCreated }: N
 						) : null}
 						<div className="manage__actions">
 							<button type="submit" className="accent" disabled={!ready || busy}>
-								{busy ? (source === "import" ? "Importing… (a big project takes a minute)" : "Making…") : "Make repository"}
+								{busy
+									? source === "import"
+										? "Importing… (a big project takes a minute)"
+										: "Making…"
+									: "Make repository"}
 							</button>
 							<a className="button" href={href.repos()}>
 								Cancel

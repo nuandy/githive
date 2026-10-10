@@ -80,7 +80,9 @@
 	color: var(--text);
 	font-weight: 600;
 	text-decoration: none;
-	transition: background-color 0.12s ease, border-color 0.12s ease;
+	transition:
+		background-color 0.12s ease,
+		border-color 0.12s ease;
 }
 
 .signin__button:hover {

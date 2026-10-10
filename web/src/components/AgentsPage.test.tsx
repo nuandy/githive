@@ -5,9 +5,31 @@ import { NOW, ago, visibleText } from "../test/fixtures";
 import { AgentsView, type AgentActions } from "./AgentsPage";
 import { TopBar } from "./TopBar";
 
-const me = { kind: "user" as const, handle: "ada", name: "Ada Lovelace", email: "ada@example.com", avatarUrl: null, by: "person:abc123def456" };
+const me = {
+	kind: "user" as const,
+	handle: "ada",
+	name: "Ada Lovelace",
+	email: "ada@example.com",
+	avatarUrl: null,
+	by: "person:abc123def456",
+};
 const noop = async () => ({});
-const actions: AgentActions = { createAgent: noop, revokeAgent: noop, createToken: async () => ({ token: "ghv_x", id: "t", agentId: "a", prefix: "x", createdAt: ago(0), expiresAt: null, lastUsedAt: null, revokedAt: null }), revokeToken: noop, disconnect: noop };
+const actions: AgentActions = {
+	createAgent: noop,
+	revokeAgent: noop,
+	createToken: async () => ({
+		token: "ghv_x",
+		id: "t",
+		agentId: "a",
+		prefix: "x",
+		createdAt: ago(0),
+		expiresAt: null,
+		lastUsedAt: null,
+		revokedAt: null,
+	}),
+	revokeToken: noop,
+	disconnect: noop,
+};
 
 const agents: MyAgent[] = [
 	{
@@ -17,16 +39,44 @@ const agents: MyAgent[] = [
 		createdAt: ago(60 * 24 * 2),
 		revokedAt: null,
 		tokens: [
-			{ id: "t1", agentId: "a1", prefix: "Ab3dEf9h", createdAt: ago(60), expiresAt: "2027-01-06T12:00:00.000Z", lastUsedAt: ago(5), revokedAt: null },
-			{ id: "t2", agentId: "a1", prefix: "Zz00Yy11", createdAt: ago(120), expiresAt: null, lastUsedAt: null, revokedAt: ago(30) },
+			{
+				id: "t1",
+				agentId: "a1",
+				prefix: "Ab3dEf9h",
+				createdAt: ago(60),
+				expiresAt: "2027-01-06T12:00:00.000Z",
+				lastUsedAt: ago(5),
+				revokedAt: null,
+			},
+			{
+				id: "t2",
+				agentId: "a1",
+				prefix: "Zz00Yy11",
+				createdAt: ago(120),
+				expiresAt: null,
+				lastUsedAt: null,
+				revokedAt: ago(30),
+			},
 		],
 	},
 	{ id: "a2", ownerId: "u1", name: "old-reviewer", createdAt: ago(60 * 24 * 9), revokedAt: ago(60), tokens: [] },
 ];
-const connections: Connection[] = [{ id: "g1", client: "Claude Code", agentId: "a1", agent: "ada/builder", createdAt: ago(10) }];
+const connections: Connection[] = [
+	{ id: "g1", client: "Claude Code", agentId: "a1", agent: "ada/builder", createdAt: ago(10) },
+];
 
 const render = (props: Partial<Parameters<typeof AgentsView>[0]> = {}) =>
-	renderToStaticMarkup(<AgentsView me={me} origin="https://githive.app" agents={agents} connections={connections} actions={actions} now={NOW} {...props} />);
+	renderToStaticMarkup(
+		<AgentsView
+			me={me}
+			origin="https://githive.app"
+			agents={agents}
+			connections={connections}
+			actions={actions}
+			now={NOW}
+			{...props}
+		/>,
+	);
 
 describe("the Agents page", () => {
 	it("explains both ways to connect: Claude Code step by step with this address's command, or a token", () => {
@@ -40,9 +90,21 @@ describe("the Agents page", () => {
 	});
 
 	it("says an agent with no tokens signs in from its connected app, or just that it has none yet", () => {
-		const signedIn: MyAgent = { id: "a3", ownerId: "u1", name: "claude-code", createdAt: ago(30), revokedAt: null, tokens: [] };
+		const signedIn: MyAgent = {
+			id: "a3",
+			ownerId: "u1",
+			name: "claude-code",
+			createdAt: ago(30),
+			revokedAt: null,
+			tokens: [],
+		};
 		const bare: MyAgent = { id: "a4", ownerId: "u1", name: "spare", createdAt: ago(30), revokedAt: null, tokens: [] };
-		const text = visibleText(render({ agents: [signedIn, bare], connections: [{ id: "g2", client: "Claude Code", agentId: "a3", agent: "ada/claude-code", createdAt: ago(5) }] }));
+		const text = visibleText(
+			render({
+				agents: [signedIn, bare],
+				connections: [{ id: "g2", client: "Claude Code", agentId: "a3", agent: "ada/claude-code", createdAt: ago(5) }],
+			}),
+		);
 		expect(text).toContain("Signs in from Claude Code, so it needs no token.");
 		expect(text).toContain("No tokens yet.");
 		expect(text).not.toContain("which needs none");
@@ -96,7 +158,9 @@ describe("the top bar's account menu", () => {
 	});
 
 	it("shows an Access caller's label quietly, with no account menu", () => {
-		const html = renderToStaticMarkup(<TopBar crumbs={[]} me={{ kind: "access", label: "admin@example.com", by: "person:x" }} />);
+		const html = renderToStaticMarkup(
+			<TopBar crumbs={[]} me={{ kind: "access", label: "admin@example.com", by: "person:x" }} />,
+		);
 		expect(visibleText(html)).toContain("admin@example.com");
 		expect(html).not.toContain("Sign out");
 		expect(html).not.toContain("#/settings/agents");

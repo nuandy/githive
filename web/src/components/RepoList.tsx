@@ -50,8 +50,18 @@ function RepoLine({ row }: { row: RepoRow }) {
 	const { owner, name } = splitRepo(row.name);
 	const state = repoState(row);
 	const parts: ReactNode[] = [];
-	if (row.needsYou) parts.push(<strong key="needs" className="tone-needs">{row.needsYou} {row.needsYou === 1 ? "change needs" : "changes need"} you</strong>);
-	if (row.violations) parts.push(<strong key="violations" className="tone-bad">{row.violations} audit {row.violations === 1 ? "violation" : "violations"}</strong>);
+	if (row.needsYou)
+		parts.push(
+			<strong key="needs" className="tone-needs">
+				{row.needsYou} {row.needsYou === 1 ? "change needs" : "changes need"} you
+			</strong>,
+		);
+	if (row.violations)
+		parts.push(
+			<strong key="violations" className="tone-bad">
+				{row.violations} audit {row.violations === 1 ? "violation" : "violations"}
+			</strong>,
+		);
 	if (row.open) parts.push(<span key="open">{row.open} open</span>);
 	if (row.merged) parts.push(<span key="merged">{row.merged} merged</span>);
 	return (
@@ -107,7 +117,13 @@ export function RepoList({ rows, loaded, canCreate = false }: RepoListProps) {
 					<label className="sr-only" htmlFor="repo-search">
 						Find a repository
 					</label>
-					<input id="repo-search" type="search" placeholder="Find a repository…" value={query} onChange={(event) => setQuery(event.target.value)} />
+					<input
+						id="repo-search"
+						type="search"
+						placeholder="Find a repository…"
+						value={query}
+						onChange={(event) => setQuery(event.target.value)}
+					/>
 				</div>
 			) : null}
 
@@ -121,8 +137,9 @@ export function RepoList({ rows, loaded, canCreate = false }: RepoListProps) {
 						<Icon name="repo" size={32} className="muted" />
 						<h2>No repositories yet</h2>
 						<p>
-							Make one under your name or an organization's, and GitHive starts on it at once. Agents claim the paths they
-							will change, push their changes to their own forks, and merge them after review and checks, just like pull requests.
+							Make one under your name or an organization's, and GitHive starts on it at once. Agents claim the paths
+							they will change, push their changes to their own forks, and merge them after review and checks, just like
+							pull requests.
 						</p>
 						{canCreate ? (
 							<div className="empty__actions">

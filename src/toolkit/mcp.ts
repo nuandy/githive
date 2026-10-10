@@ -11,16 +11,55 @@ import { changeId, claimCovering, normalizeClaim } from "../claim-paths";
 import { audit } from "./audit";
 import { checkChange } from "./check";
 import { claimStore, type ClaimStore } from "./claim-store";
-import { changeSettings, recordBranch, registerAgent, registerAgents, shardClaims, shardingReason, startRepo, type ClaimRecord, type Registry } from "./claims";
-import { mergeRecordOf, readMainMerges, readRecordHistory, readRefHistories, readShardHistories, type BranchCommit } from "./git-records";
+import {
+	changeSettings,
+	recordBranch,
+	registerAgent,
+	registerAgents,
+	shardClaims,
+	shardingReason,
+	startRepo,
+	type ClaimRecord,
+	type Registry,
+} from "./claims";
+import {
+	mergeRecordOf,
+	readMainMerges,
+	readRecordHistory,
+	readRefHistories,
+	readShardHistories,
+	type BranchCommit,
+} from "./git-records";
 import { artifactsInspect, type ReadHistory } from "./batch-reads";
 import { atMost, type BatchGit, type Candidate, type CheckRunner, mergeChange } from "./merge";
 import { type Landed, type Landing, type LandingView, lastLandedOn } from "./landing";
 import { revertViolation } from "./revert";
 import type { Stamper } from "./stamp";
-import { approval, countedVotes, DEFAULT_GRANT, effectivePolicy, grantWarnings, openFlag, shardVotes, votesShardingReason, type ReviewPolicy, type VoteRecord, type Votes } from "./votes";
+import {
+	approval,
+	countedVotes,
+	DEFAULT_GRANT,
+	effectivePolicy,
+	grantWarnings,
+	openFlag,
+	shardVotes,
+	votesShardingReason,
+	type ReviewPolicy,
+	type VoteRecord,
+	type Votes,
+} from "./votes";
 import { VOTE_BUCKETS, type VoteStore, voteStore, votesPrefix } from "./vote-store";
-import { addWork, addWorks, backlogFor, holdKey, ROLE_WAIT_MS, reviewsFor, type Work, waitingRoleReviews, workId } from "./work";
+import {
+	addWork,
+	addWorks,
+	backlogFor,
+	holdKey,
+	ROLE_WAIT_MS,
+	reviewsFor,
+	type Work,
+	waitingRoleReviews,
+	workId,
+} from "./work";
 import { abandoned, BUILDING_IDLE_MS, type ChangeSigns } from "./staleness";
 import { claimInto, isReservedPath, presentClaim, scopeFile, scopePaths } from "./branch-scope";
 import { BRANCH_PATTERN, type BranchRule, settingsForBranch } from "./branch-rules";
@@ -80,7 +119,13 @@ export interface ToolContext {
 	/** Notes a repo, so the dashboard can list it. */
 	register?: (repo: string) => Promise<void>;
 	/** Starts GitHive's hosted reviewers on a change's current commit; each votes with vote (and, asked to, then tries to merge it). */
-	requestReview?: (input: { repo: string; change: string; roles: string[]; summary?: string; mergeWhenApproved?: boolean }) => Promise<{ head: string; reviewers: string[] }>;
+	requestReview?: (input: {
+		repo: string;
+		change: string;
+		roles: string[];
+		summary?: string;
+		mergeWhenApproved?: boolean;
+	}) => Promise<{ head: string; reviewers: string[] }>;
 	/** What GitHive's hosted agents on a change are doing: its builder, and the reviewers of its head. */
 	agentStatus?: (repo: string, change: string, head: string | null, roles: string[]) => Promise<HostedStatus>;
 	/** Times a request's steps, for its Server-Timing header. */
@@ -88,7 +133,10 @@ export interface ToolContext {
 	/** Tells the dashboard's open pages that the repo's records changed. */
 	ping?: (repo: string) => Promise<void>;
 	/** Warms the repo's check container in the background, when a merge is likely soon: why, and for what (see Gate.warmUp). */
-	warmChecks?: (repo: string, input: { branch: string; checks: string[]; expect: "claimed" | "checked" | "approved" | "set up"; key?: string }) => Promise<void>;
+	warmChecks?: (
+		repo: string,
+		input: { branch: string; checks: string[]; expect: "claimed" | "checked" | "approved" | "set up"; key?: string },
+	) => Promise<void>;
 	/**
 	 * A kept copy of the repo's claims in force and the changes merged,
 	 * rebuilt after writes (stale while one caller rebuilds it): for advice
@@ -101,7 +149,10 @@ export interface ToolContext {
 	 * The latest commit seen on each of these claims' branches (null: nothing pushed), and when, kept in the repo's
 	 * RepoCache (see openHeads): read from forks, or `pushed`, told by a push event from the claim's agent's fork.
 	 */
-	knownHeads?: (repo: string, claims: { change: string; agent: string }[]) => Promise<Record<string, { head: string | null; at: number; pushed?: boolean }>>;
+	knownHeads?: (
+		repo: string,
+		claims: { change: string; agent: string }[],
+	) => Promise<Record<string, { head: string | null; at: number; pushed?: boolean }>>;
 	/** Note the latest commits seen on changes' branches, wherever a tool read them (null: nothing pushed), as of `readAt` (default: now). */
 	noteHeads?: (repo: string, seen: Record<string, string | null>, readAt?: number) => Promise<void>;
 	/** The GitHub repo `repo` (owner/name) through GitHive's App: null if the App isn't installed there. Unset, GitHub isn't configured. */
@@ -122,7 +173,19 @@ export interface ToolContext {
 		told?(repo: string, key: string): Promise<void>;
 	};
 	/** Updates the repo's summary for the dashboard's list of repos (a hint; Git is what counts). */
-	summarize?: (repo: string, patch: { open?: number; needsYou?: number; waiting?: { change: string; title: string; reason: string }[]; merged?: number; mergedBy?: number; violations?: number; lastActivity?: string; countedAt?: string }) => Promise<void>;
+	summarize?: (
+		repo: string,
+		patch: {
+			open?: number;
+			needsYou?: number;
+			waiting?: { change: string; title: string; reason: string }[];
+			merged?: number;
+			mergedBy?: number;
+			violations?: number;
+			lastActivity?: string;
+			countedAt?: string;
+		},
+	) => Promise<void>;
 	/** Starts GitHive's hosted builder on a claimed change. */
 	startBuilder?: (input: { repo: string; change: string }) => Promise<{ change: string; builder: string }>;
 }
@@ -182,29 +245,257 @@ Work that depends on other unmerged work goes on a feature branch, and the proje
 
 const str = { type: "string" } as const;
 const TOOL_LIST = [
-	{ name: "settings", description: "Set up GitHive on a repo, or change how it's set up; whatever you leave out stays as it is. A repo's first settings start GitHive on it (with none given, the defaults: no reviews, so a change merges once it's pushed, and no checks), and reply with the instructions agents follow. The review policy: required approvals, vetoes, escalate (stricter rules for chosen paths), grants (who may vote as each role that can block a merge: registered agent names, 'person:*', a verified identity like 'person:<who>' or 'service:<id>', a pool 'service:<id>/*' (every agent registered under it, never on its own team's changes), a team '@<org>/<team>', 'githive' for GitHive's reviewers; unlisted roles: people and GitHive's reviewers). verify: the checks run before each merge ([] for none). Each check is a shell command, run with bash at the repo's top on the merged code (exit 0 passes, the first failure stops the run) in a Linux container with Node 24, npm and git, plus Python, Go or Rust when the repo uses them; dependencies are installed first; up to 10 minutes per command; no secrets or environment variables, so a test needing a database or an API key fails. Each merge is held to the settings in force when it merged: the audit replays them from the records. Returns the settings now. branch_rules sets other branches' settings by pattern (feature/*, release/*, a name), the first match winning: each changes only the policy fields and checks it names (verify [] for none; left out, the repo's); [] clears them. The project's branch always has the repo's settings. skip_checks lists what the checks skip: a change touching only these merges without them (*.md, docs/, licenses and images by default; a file under test/, fixtures/ or examples/ always runs them); [] makes them always run. github connects a GitHub repo ('owner/name', '' for none) through GitHive's GitHub app, installed there: main is pushed back to it after every landing, and verify ['github-actions'] runs the checks on its Actions instead of in containers (a workflow that runs on pushes to githive/checks/**). Only when GitHive starts on a repo: how claims are kept. They start in one record and shard per path, 2 segments deep over 16 records repos, once the load calls for it (8 agents holding claims, or over 15 claim writes a minute); shard_depth shards now, this deep (0: never), and records_repos is how many repos the shards are spread over, since a repo takes one push at a time.", inputSchema: { type: "object", properties: { repo: str, github: str, shard_depth: { type: "number" }, records_repos: { type: "number" }, required: { type: "number" }, vetoes: { type: "array", items: str }, escalate: { type: "array", items: { type: "object", properties: { paths: { type: "array", items: str }, required: { type: "number" }, vetoes: { type: "array", items: str } }, required: ["paths"] } }, grants: { type: "object", additionalProperties: { type: "array", items: str } }, verify: { type: "array", items: str }, skip_checks: { type: "array", items: str }, branch_rules: { type: "array", items: { type: "object", properties: { pattern: str, required: { type: "number" }, vetoes: { type: "array", items: str }, grants: { type: "object", additionalProperties: { type: "array", items: str } }, verify: { type: "array", items: str } }, required: ["pattern"] } } }, required: ["repo"] } },
-	{ name: "credentials", description: "Git access. With your change: a write token for its own fork, where its branch changes/<change> lives. Without: read access to the project repo.", inputSchema: { type: "object", properties: { repo: str, change: str }, required: ["repo"] } },
-	{ name: "claims", description: "The claims in force: who holds which paths, and why.", inputSchema: { type: "object", properties: { repo: str }, required: ["repo"] } },
-	{ name: "claim", description: "Claim paths for your change (again to extend it, or to keep it active). Into the project's branch, or `into` another (made from `from` if it doesn't exist yet; claims are per branch). `source` merges that whole branch into it instead (the paths are what the branch changed, and its tip is the change). `after` names changes it depends on: it merges only once they have merged into the same branch. Refused, naming the holder, if another claim on that branch overlaps; a claim in the way that its agent has abandoned (see release) is released as stale instead.", inputSchema: { type: "object", properties: { repo: str, change: str, agent: str, paths: { type: "array", items: str }, intent: str, into: str, from: str, after: { type: "array", items: str }, source: str }, required: ["repo", "change", "agent", "intent"] } },
-	{ name: "release", description: "Release a claim: yours, or with stale: true another agent's it has abandoned: its change waits on that agent, unanswered for 30 minutes with nothing pushed, or 2 hours after changes were asked for, failed checks, or approval without a merge. Never one waiting for review, being checked to land, or on a person.", inputSchema: { type: "object", properties: { repo: str, change: str, agent: str, reason: str, stale: { type: "boolean" } }, required: ["repo", "change", "agent"] } },
-	{ name: "add_work", description: "Add a piece of work to the repo's backlog, for agents to take (see backlog): a title, what it should do (intent), and the paths it's likely to touch. Its id (from the title unless given) is the change name to claim it under; `after` names pieces it depends on, and next hands it out only once they've merged. Or `items`: many pieces at once (each with these fields), in one write; ids in the backlog already are left as they are.", inputSchema: { type: "object", properties: { repo: str, title: str, intent: str, paths: { type: "array", items: str }, after: { type: "array", items: str }, id: str, items: { type: "array", items: { type: "object", properties: { title: str, intent: str, paths: { type: "array", items: str }, after: { type: "array", items: str }, id: str }, required: ["title", "intent"] } }, agent: str }, required: ["repo", "agent"] } },
-	{ name: "review_access", description: "Start reviewing a change: a read-only token for the author's fork, the change's branch (changes/<change>) and its pushed head, and read access to the project to diff against. It marks you as reviewing that commit in `role` (review unless you name one that can block), so others looking at reviews see it taken; the mark goes when you vote, or in 15 minutes. Anyone may review; each grant is logged.", inputSchema: { type: "object", properties: { repo: str, change: str, role: str, agent: str }, required: ["repo", "change"] } },
-	{ name: "reviews", description: "The reviews you may give now: changes pushed, not yours, not voted on by you and not sent back, still needing approvals you can give (a role that can block, if you hold one it awaits; else ordinary ones), with how many more each needs and who's reviewing it already. Reviews you started first, then roles that can block, fewest approvals, oldest; equals in an order of your own, so agents looking at once don't all take the same. Pick one, review_access it, vote.", inputSchema: { type: "object", properties: { repo: str, agent: str }, required: ["repo", "agent"] } },
-	{ name: "backlog", description: "The repo's backlog as you may take it: pieces free to build now (nobody has claimed them, nor their paths, and what they depend on has merged; equally good, in an order of your own), and why the others wait. Build one by claiming it with its id as the change.", inputSchema: { type: "object", properties: { repo: str, agent: str }, required: ["repo", "agent"] } },
-	{ name: "vote", description: "Record your review verdict on the exact commit you reviewed.", inputSchema: { type: "object", properties: { repo: str, commit: str, reviewer: str, role: str, verdict: { type: "string", enum: ["approve", "reject"] }, evidence: str }, required: ["repo", "commit", "reviewer", "role", "verdict", "evidence"] } },
-	{ name: "merge", description: "Merge changes/<change> into the project's branch if the conventions hold, recording what was checked, then release the claim.", inputSchema: { type: "object", properties: { repo: str, change: str, agent: str }, required: ["repo", "change", "agent"] } },
-	{ name: "build", description: "Have GitHive's hosted builder make a change: it claims the paths, builds on changes/<change>, asks the hosted reviewers when done, and the change merges once approved and checked.", inputSchema: { type: "object", properties: { repo: str, intent: str, paths: { type: "array", items: str } }, required: ["repo", "intent", "paths"] } },
-	{ name: "request_review", description: "Ask GitHive's hosted reviewer agents to review your change's current commit (by default a general review, and every role that can veto it); each votes with vote.", inputSchema: { type: "object", properties: { repo: str, change: str, roles: { type: "array", items: str }, summary: str }, required: ["repo", "change"] } },
-	{ name: "audit", description: "Replay the records and list every broken convention, with the commit and the agent (and whether a revert has resolved it).", inputSchema: { type: "object", properties: { repo: str }, required: ["repo"] } },
-	{ name: "revert", description: "Revert a commit the audit reports: its files go back to how they were before it, in a commit naming what it reverts.", inputSchema: { type: "object", properties: { repo: str, commit: str, agent: str }, required: ["repo", "commit", "agent"] } },
-	{ name: "status", description: "Where a change stands: its claim (or how it ended; landed: it's in, though its claim isn't released yet, so don't merge it again), its branch head, the votes on that head with their evidence, the approvals still needed, and what GitHive's hosted agents on it are doing.", inputSchema: { type: "object", properties: { repo: str, change: str }, required: ["repo", "change"] } },
-	{ name: "check", description: "An early check on your change, any time before merging: whether it still merges cleanly into the project's branch, and any files outside your claim. (Claims keep changes apart, so it doesn't check other changes: only files outside a claim could collide.) Reports only.", inputSchema: { type: "object", properties: { repo: str, change: str }, required: ["repo", "change"] } },
-	{ name: "ask_human", description: "Ask a person to decide something about a change you can't settle among agents (reviewers disagree, a trade-off needs an owner). It waits in their inbox until a person votes on the change's commit.", inputSchema: { type: "object", properties: { repo: str, change: str, agent: str, reason: str }, required: ["repo", "change", "agent", "reason"] } },
-	{ name: "register", description: "Register your agent name and get its secret key (shown once), so what you write is attributed to you even if you share an Access identity. With your current key, rotates it. Or `agents`: several new names at once (none registered yet), in one write, each with its own key.", inputSchema: { type: "object", properties: { repo: str, agent: str, agents: { type: "array", items: str } }, required: ["repo"] } },
+	{
+		name: "settings",
+		description:
+			"Set up GitHive on a repo, or change how it's set up; whatever you leave out stays as it is. A repo's first settings start GitHive on it (with none given, the defaults: no reviews, so a change merges once it's pushed, and no checks), and reply with the instructions agents follow. The review policy: required approvals, vetoes, escalate (stricter rules for chosen paths), grants (who may vote as each role that can block a merge: registered agent names, 'person:*', a verified identity like 'person:<who>' or 'service:<id>', a pool 'service:<id>/*' (every agent registered under it, never on its own team's changes), a team '@<org>/<team>', 'githive' for GitHive's reviewers; unlisted roles: people and GitHive's reviewers). verify: the checks run before each merge ([] for none). Each check is a shell command, run with bash at the repo's top on the merged code (exit 0 passes, the first failure stops the run) in a Linux container with Node 24, npm and git, plus Python, Go or Rust when the repo uses them; dependencies are installed first; up to 10 minutes per command; no secrets or environment variables, so a test needing a database or an API key fails. Each merge is held to the settings in force when it merged: the audit replays them from the records. Returns the settings now. branch_rules sets other branches' settings by pattern (feature/*, release/*, a name), the first match winning: each changes only the policy fields and checks it names (verify [] for none; left out, the repo's); [] clears them. The project's branch always has the repo's settings. skip_checks lists what the checks skip: a change touching only these merges without them (*.md, docs/, licenses and images by default; a file under test/, fixtures/ or examples/ always runs them); [] makes them always run. github connects a GitHub repo ('owner/name', '' for none) through GitHive's GitHub app, installed there: main is pushed back to it after every landing, and verify ['github-actions'] runs the checks on its Actions instead of in containers (a workflow that runs on pushes to githive/checks/**). Only when GitHive starts on a repo: how claims are kept. They start in one record and shard per path, 2 segments deep over 16 records repos, once the load calls for it (8 agents holding claims, or over 15 claim writes a minute); shard_depth shards now, this deep (0: never), and records_repos is how many repos the shards are spread over, since a repo takes one push at a time.",
+		inputSchema: {
+			type: "object",
+			properties: {
+				repo: str,
+				github: str,
+				shard_depth: { type: "number" },
+				records_repos: { type: "number" },
+				required: { type: "number" },
+				vetoes: { type: "array", items: str },
+				escalate: {
+					type: "array",
+					items: {
+						type: "object",
+						properties: {
+							paths: { type: "array", items: str },
+							required: { type: "number" },
+							vetoes: { type: "array", items: str },
+						},
+						required: ["paths"],
+					},
+				},
+				grants: { type: "object", additionalProperties: { type: "array", items: str } },
+				verify: { type: "array", items: str },
+				skip_checks: { type: "array", items: str },
+				branch_rules: {
+					type: "array",
+					items: {
+						type: "object",
+						properties: {
+							pattern: str,
+							required: { type: "number" },
+							vetoes: { type: "array", items: str },
+							grants: { type: "object", additionalProperties: { type: "array", items: str } },
+							verify: { type: "array", items: str },
+						},
+						required: ["pattern"],
+					},
+				},
+			},
+			required: ["repo"],
+		},
+	},
+	{
+		name: "credentials",
+		description:
+			"Git access. With your change: a write token for its own fork, where its branch changes/<change> lives. Without: read access to the project repo.",
+		inputSchema: { type: "object", properties: { repo: str, change: str }, required: ["repo"] },
+	},
+	{
+		name: "claims",
+		description: "The claims in force: who holds which paths, and why.",
+		inputSchema: { type: "object", properties: { repo: str }, required: ["repo"] },
+	},
+	{
+		name: "claim",
+		description:
+			"Claim paths for your change (again to extend it, or to keep it active). Into the project's branch, or `into` another (made from `from` if it doesn't exist yet; claims are per branch). `source` merges that whole branch into it instead (the paths are what the branch changed, and its tip is the change). `after` names changes it depends on: it merges only once they have merged into the same branch. Refused, naming the holder, if another claim on that branch overlaps; a claim in the way that its agent has abandoned (see release) is released as stale instead.",
+		inputSchema: {
+			type: "object",
+			properties: {
+				repo: str,
+				change: str,
+				agent: str,
+				paths: { type: "array", items: str },
+				intent: str,
+				into: str,
+				from: str,
+				after: { type: "array", items: str },
+				source: str,
+			},
+			required: ["repo", "change", "agent", "intent"],
+		},
+	},
+	{
+		name: "release",
+		description:
+			"Release a claim: yours, or with stale: true another agent's it has abandoned: its change waits on that agent, unanswered for 30 minutes with nothing pushed, or 2 hours after changes were asked for, failed checks, or approval without a merge. Never one waiting for review, being checked to land, or on a person.",
+		inputSchema: {
+			type: "object",
+			properties: { repo: str, change: str, agent: str, reason: str, stale: { type: "boolean" } },
+			required: ["repo", "change", "agent"],
+		},
+	},
+	{
+		name: "add_work",
+		description:
+			"Add a piece of work to the repo's backlog, for agents to take (see backlog): a title, what it should do (intent), and the paths it's likely to touch. Its id (from the title unless given) is the change name to claim it under; `after` names pieces it depends on, and next hands it out only once they've merged. Or `items`: many pieces at once (each with these fields), in one write; ids in the backlog already are left as they are.",
+		inputSchema: {
+			type: "object",
+			properties: {
+				repo: str,
+				title: str,
+				intent: str,
+				paths: { type: "array", items: str },
+				after: { type: "array", items: str },
+				id: str,
+				items: {
+					type: "array",
+					items: {
+						type: "object",
+						properties: {
+							title: str,
+							intent: str,
+							paths: { type: "array", items: str },
+							after: { type: "array", items: str },
+							id: str,
+						},
+						required: ["title", "intent"],
+					},
+				},
+				agent: str,
+			},
+			required: ["repo", "agent"],
+		},
+	},
+	{
+		name: "review_access",
+		description:
+			"Start reviewing a change: a read-only token for the author's fork, the change's branch (changes/<change>) and its pushed head, and read access to the project to diff against. It marks you as reviewing that commit in `role` (review unless you name one that can block), so others looking at reviews see it taken; the mark goes when you vote, or in 15 minutes. Anyone may review; each grant is logged.",
+		inputSchema: {
+			type: "object",
+			properties: { repo: str, change: str, role: str, agent: str },
+			required: ["repo", "change"],
+		},
+	},
+	{
+		name: "reviews",
+		description:
+			"The reviews you may give now: changes pushed, not yours, not voted on by you and not sent back, still needing approvals you can give (a role that can block, if you hold one it awaits; else ordinary ones), with how many more each needs and who's reviewing it already. Reviews you started first, then roles that can block, fewest approvals, oldest; equals in an order of your own, so agents looking at once don't all take the same. Pick one, review_access it, vote.",
+		inputSchema: { type: "object", properties: { repo: str, agent: str }, required: ["repo", "agent"] },
+	},
+	{
+		name: "backlog",
+		description:
+			"The repo's backlog as you may take it: pieces free to build now (nobody has claimed them, nor their paths, and what they depend on has merged; equally good, in an order of your own), and why the others wait. Build one by claiming it with its id as the change.",
+		inputSchema: { type: "object", properties: { repo: str, agent: str }, required: ["repo", "agent"] },
+	},
+	{
+		name: "vote",
+		description: "Record your review verdict on the exact commit you reviewed.",
+		inputSchema: {
+			type: "object",
+			properties: {
+				repo: str,
+				commit: str,
+				reviewer: str,
+				role: str,
+				verdict: { type: "string", enum: ["approve", "reject"] },
+				evidence: str,
+			},
+			required: ["repo", "commit", "reviewer", "role", "verdict", "evidence"],
+		},
+	},
+	{
+		name: "merge",
+		description:
+			"Merge changes/<change> into the project's branch if the conventions hold, recording what was checked, then release the claim.",
+		inputSchema: {
+			type: "object",
+			properties: { repo: str, change: str, agent: str },
+			required: ["repo", "change", "agent"],
+		},
+	},
+	{
+		name: "build",
+		description:
+			"Have GitHive's hosted builder make a change: it claims the paths, builds on changes/<change>, asks the hosted reviewers when done, and the change merges once approved and checked.",
+		inputSchema: {
+			type: "object",
+			properties: { repo: str, intent: str, paths: { type: "array", items: str } },
+			required: ["repo", "intent", "paths"],
+		},
+	},
+	{
+		name: "request_review",
+		description:
+			"Ask GitHive's hosted reviewer agents to review your change's current commit (by default a general review, and every role that can veto it); each votes with vote.",
+		inputSchema: {
+			type: "object",
+			properties: { repo: str, change: str, roles: { type: "array", items: str }, summary: str },
+			required: ["repo", "change"],
+		},
+	},
+	{
+		name: "audit",
+		description:
+			"Replay the records and list every broken convention, with the commit and the agent (and whether a revert has resolved it).",
+		inputSchema: { type: "object", properties: { repo: str }, required: ["repo"] },
+	},
+	{
+		name: "revert",
+		description:
+			"Revert a commit the audit reports: its files go back to how they were before it, in a commit naming what it reverts.",
+		inputSchema: {
+			type: "object",
+			properties: { repo: str, commit: str, agent: str },
+			required: ["repo", "commit", "agent"],
+		},
+	},
+	{
+		name: "status",
+		description:
+			"Where a change stands: its claim (or how it ended; landed: it's in, though its claim isn't released yet, so don't merge it again), its branch head, the votes on that head with their evidence, the approvals still needed, and what GitHive's hosted agents on it are doing.",
+		inputSchema: { type: "object", properties: { repo: str, change: str }, required: ["repo", "change"] },
+	},
+	{
+		name: "check",
+		description:
+			"An early check on your change, any time before merging: whether it still merges cleanly into the project's branch, and any files outside your claim. (Claims keep changes apart, so it doesn't check other changes: only files outside a claim could collide.) Reports only.",
+		inputSchema: { type: "object", properties: { repo: str, change: str }, required: ["repo", "change"] },
+	},
+	{
+		name: "ask_human",
+		description:
+			"Ask a person to decide something about a change you can't settle among agents (reviewers disagree, a trade-off needs an owner). It waits in their inbox until a person votes on the change's commit.",
+		inputSchema: {
+			type: "object",
+			properties: { repo: str, change: str, agent: str, reason: str },
+			required: ["repo", "change", "agent", "reason"],
+		},
+	},
+	{
+		name: "register",
+		description:
+			"Register your agent name and get its secret key (shown once), so what you write is attributed to you even if you share an Access identity. With your current key, rotates it. Or `agents`: several new names at once (none registered yet), in one write, each with its own key.",
+		inputSchema: {
+			type: "object",
+			properties: { repo: str, agent: str, agents: { type: "array", items: str } },
+			required: ["repo"],
+		},
+	},
 ];
 // Every tool takes the caller's agent key, for clients that can't set the header.
 export const TOOLS = annotate(
-	TOOL_LIST.map((t) => ({ ...t, inputSchema: { ...t.inputSchema, properties: { ...t.inputSchema.properties, agent_key: { type: "string", description: "Your agent key from register, if you can't send the X-GitHive-Agent-Key header" } } } })),
+	TOOL_LIST.map((t) => ({
+		...t,
+		inputSchema: {
+			...t.inputSchema,
+			properties: {
+				...t.inputSchema.properties,
+				agent_key: {
+					type: "string",
+					description: "Your agent key from register, if you can't send the X-GitHive-Agent-Key header",
+				},
+			},
+		},
+	})),
 	{
 		settings: writes("Set up a repo's review policy and checks", { idempotent: true }),
 		credentials: writes("Get Git access", { idempotent: true }),
@@ -228,7 +519,10 @@ export const TOOLS = annotate(
 	},
 );
 
-const sha256 = async (text: string) => Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text))), (b) => b.toString(16).padStart(2, "0")).join("");
+const sha256 = async (text: string) =>
+	Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text))), (b) =>
+		b.toString(16).padStart(2, "0"),
+	).join("");
 
 /** The agent name a key is for, checked against the registry; keys are `<agent>.<secret>`. */
 async function keyAgent(registry: Registry | undefined, key: string) {
@@ -239,7 +533,12 @@ async function keyAgent(registry: Registry | undefined, key: string) {
 }
 
 /** Refuses acting as `name`: another name than the caller's key is for, a registered name without its key, or a hosted agent's name. */
-function mayActAs(name: string, acting: string | undefined, registry: Registry | undefined, hosted: boolean | undefined) {
+function mayActAs(
+	name: string,
+	acting: string | undefined,
+	registry: Registry | undefined,
+	hosted: boolean | undefined,
+) {
 	if (acting) {
 		if (name !== acting) throw new Error(`[403] you act as ${acting}; you can't act as ${name}`);
 		return;
@@ -249,7 +548,8 @@ function mayActAs(name: string, acting: string | undefined, registry: Registry |
 	// "person:…", "service:…" name verified identities, which an agent can't take on.
 	if (name.includes(":")) throw new Error("[403] an agent's name can't contain \":\"");
 	// <handle>/<agent> names are signed-in agents', verified by their token.
-	if (name.includes("/")) throw new Error(`[403] ${name} is a signed-in agent's name: sign in to GitHive as it to act as it`);
+	if (name.includes("/"))
+		throw new Error(`[403] ${name} is a signed-in agent's name: sign in to GitHive as it to act as it`);
 	if (registry?.agents?.[name]) throw new Error(`[403] ${name} is registered: call with its agent key`);
 }
 
@@ -273,7 +573,10 @@ async function advice(ctx: ToolContext, repo: string): Promise<ClaimsAdvice> {
 	const head = await log.read();
 	const view = await storeFor(ctx, repo, head?.commit.state, { log, head }).read();
 	const branch = projectBranch(head?.commit.state);
-	return { claims: view.claims.map((c) => presentClaim(c, branch)), merged: view.released.filter((r) => r.mergedAs).map((r) => r.change) };
+	return {
+		claims: view.claims.map((c) => presentClaim(c, branch)),
+		merged: view.released.filter((r) => r.mergedAs).map((r) => r.change),
+	};
 }
 
 /** The arguments settings takes for the review policy. */
@@ -282,7 +585,15 @@ const POLICY_FIELDS = ["required", "vetoes", "escalate", "grants"] as const;
 /** A branch's review policy and checks: the repo's, with what a branch rule for it changes (see branch-rules.ts). */
 export function branchSettings(registry: Registry | null | undefined, branch: string | undefined) {
 	const project = projectBranch(registry);
-	return settingsForBranch({ policy: registry?.policy ?? DEFAULT_POLICY, verify: registry?.verify ?? [], ...(registry?.branchRules ? { rules: registry.branchRules } : {}), project }, branch ?? project);
+	return settingsForBranch(
+		{
+			policy: registry?.policy ?? DEFAULT_POLICY,
+			verify: registry?.verify ?? [],
+			...(registry?.branchRules ? { rules: registry.branchRules } : {}),
+			project,
+		},
+		branch ?? project,
+	);
 }
 
 /**
@@ -291,31 +602,43 @@ export function branchSettings(registry: Registry | null | undefined, branch: st
  * An empty list clears them.
  */
 function branchRulesFrom(value: unknown, base: ReviewPolicy): BranchRule<ReviewPolicy>[] {
-	if (!Array.isArray(value)) throw new Error("[400] branch_rules is a list of rules: each a pattern, and what it changes");
+	if (!Array.isArray(value))
+		throw new Error("[400] branch_rules is a list of rules: each a pattern, and what it changes");
 	return value.map((raw, i) => {
-		if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw new Error(`[400] branch_rules[${i}] is a rule: a pattern, and what it changes`);
+		if (!raw || typeof raw !== "object" || Array.isArray(raw))
+			throw new Error(`[400] branch_rules[${i}] is a rule: a pattern, and what it changes`);
 		const rule = raw as Args;
 		const pattern = typeof rule.pattern === "string" ? rule.pattern.trim() : "";
-		if (!pattern || !BRANCH_PATTERN.test(pattern)) throw new Error(`[400] branch_rules[${i}].pattern is a branch name, with * for any run of characters (feature/*)`);
+		if (!pattern || !BRANCH_PATTERN.test(pattern))
+			throw new Error(
+				`[400] branch_rules[${i}].pattern is a branch name, with * for any run of characters (feature/*)`,
+			);
 		// Only the fields it sets: the rest stay the repo's, as the repo's change.
 		const full = policyFrom(rule, base);
-		const policy = Object.fromEntries(POLICY_FIELDS.filter((f) => rule[f] !== undefined).map((f) => [f, full[f]])) as Partial<ReviewPolicy>;
+		const policy = Object.fromEntries(
+			POLICY_FIELDS.filter((f) => rule[f] !== undefined).map((f) => [f, full[f]]),
+		) as Partial<ReviewPolicy>;
 		const verify = rule.verify === undefined ? undefined : checksFrom(rule.verify);
-		if (!Object.keys(policy).length && !verify) throw new Error(`[400] branch_rules[${i}] (${pattern}) changes nothing: set required, vetoes, escalate, grants or verify`);
+		if (!Object.keys(policy).length && !verify)
+			throw new Error(
+				`[400] branch_rules[${i}] (${pattern}) changes nothing: set required, vetoes, escalate, grants or verify`,
+			);
 		return { pattern, ...(Object.keys(policy).length ? { policy } : {}), ...(verify ? { verify } : {}) };
 	});
 }
 
 /** What the checks skip, from settings' skip_checks: patterns like *.md or docs/ ([] for nothing: the checks always run). */
 function skipPatternsFrom(value: unknown): string[] {
-	if (!Array.isArray(value) || value.some((p) => typeof p !== "string" || !SKIP_PATTERN.test(p.trim()))) throw new Error("[400] skip_checks is a list of patterns, like *.md or docs/ ([] for nothing)");
+	if (!Array.isArray(value) || value.some((p) => typeof p !== "string" || !SKIP_PATTERN.test(p.trim())))
+		throw new Error("[400] skip_checks is a list of patterns, like *.md or docs/ ([] for nothing)");
 	return [...new Set((value as string[]).map((p) => p.trim()))];
 }
 
 /** A review policy from settings' arguments, each one left out kept from `base`. */
 function policyFrom(args: Args, base: ReviewPolicy): ReviewPolicy {
 	const required = typeof args.required === "number" ? args.required : base.required;
-	if (!Number.isInteger(required) || required < 0) throw new Error("[400] required is a whole number of approvals, 0 for none");
+	if (!Number.isInteger(required) || required < 0)
+		throw new Error("[400] required is a whole number of approvals, 0 for none");
 	const grants = args.grants !== undefined ? validGrants(args.grants) : base.grants;
 	return {
 		required,
@@ -330,10 +653,12 @@ function policyFrom(args: Args, base: ReviewPolicy): ReviewPolicy {
 /** The GitHub repo settings connects to ("owner/name"; "" for none): refused unless GitHive's App is installed there. */
 async function githubFrom(ctx: ToolContext, value: unknown): Promise<{ repo: string } | null> {
 	if (value === "" || value === null) return null;
-	if (typeof value !== "string" || !/^[\w.-]+\/[\w.-]+$/.test(value.trim())) throw new Error('[400] github is "owner/name", or "" for none');
+	if (typeof value !== "string" || !/^[\w.-]+\/[\w.-]+$/.test(value.trim()))
+		throw new Error('[400] github is "owner/name", or "" for none');
 	if (!ctx.github) throw new Error("[501] GitHub isn't set up on this GitHive (its App's ID and key)");
 	const repo = value.trim();
-	if (!(await ctx.github(repo))) throw new Error(`[409] GitHive's GitHub app isn't installed on ${repo}: install it there first`);
+	if (!(await ctx.github(repo)))
+		throw new Error(`[409] GitHive's GitHub app isn't installed on ${repo}: install it there first`);
 	return { repo };
 }
 
@@ -345,10 +670,14 @@ function checksFrom(value: unknown): string[] {
 
 /** Role grants as settings takes them: each role to a list of agent names, "person:*", verified identities, teams (@<org>/<team>) or "githive". */
 function validGrants(value: unknown): Record<string, string[]> {
-	if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("[400] grants maps each role to who may vote as it");
+	if (!value || typeof value !== "object" || Array.isArray(value))
+		throw new Error("[400] grants maps each role to who may vote as it");
 	const grants: Record<string, string[]> = {};
 	for (const [role, who] of Object.entries(value)) {
-		if (!Array.isArray(who) || !who.every((w) => typeof w === "string" && w.trim())) throw new Error(`[400] grants.${role} is a list: agent names, "person:*", "person:<who>", "service:<id>", a team "@<org>/<team>" or "githive"`);
+		if (!Array.isArray(who) || !who.every((w) => typeof w === "string" && w.trim()))
+			throw new Error(
+				`[400] grants.${role} is a list: agent names, "person:*", "person:<who>", "service:<id>", a team "@<org>/<team>" or "githive"`,
+			);
 		grants[role] = who.map((w) => w.trim());
 	}
 	return grants;
@@ -360,10 +689,27 @@ function validGrants(value: unknown): Record<string, string[]> {
  * GitHive's own reviewers: if no person holds the role, the flag says so,
  * so its holders can be nudged or more granted.
  */
-async function tellPeopleOfWaitingRoles(ctx: ToolContext, repo: string, votes: VoteStore, policy: ReviewPolicy, open: { claim: ClaimRecord; head: string | null }[], counted: VoteRecord[], policyOf?: (claim: ClaimRecord) => ReviewPolicy) {
+async function tellPeopleOfWaitingRoles(
+	ctx: ToolContext,
+	repo: string,
+	votes: VoteStore,
+	policy: ReviewPolicy,
+	open: { claim: ClaimRecord; head: string | null }[],
+	counted: VoteRecord[],
+	policyOf?: (claim: ClaimRecord) => ReviewPolicy,
+) {
 	if (!ctx.reviews?.waits || !ctx.reviews.told) return;
-	const waiting = waitingRoleReviews({ policy, ...(policyOf ? { policyOf } : {}), open, votes: counted, held: await ctx.reviews.held(repo) });
-	const seen = await ctx.reviews.waits(repo, waiting.map((w) => holdKey(w.head, w.role)));
+	const waiting = waitingRoleReviews({
+		policy,
+		...(policyOf ? { policyOf } : {}),
+		open,
+		votes: counted,
+		held: await ctx.reviews.held(repo),
+	});
+	const seen = await ctx.reviews.waits(
+		repo,
+		waiting.map((w) => holdKey(w.head, w.role)),
+	);
 	let told = false;
 	for (const w of waiting) {
 		const key = holdKey(w.head, w.role);
@@ -388,7 +734,11 @@ function shardingOf(registry: Registry | null | undefined) {
 	return {
 		shardDepth: registry?.shardDepth ?? 0,
 		recordsRepos: registry?.recordsRepos ?? 0,
-		sharding: registry?.shardDepth ? { since: registry.shardedAt, because: registry.shardedBecause } : registry?.autoShard ? "on demand" : "never",
+		sharding: registry?.shardDepth
+			? { since: registry.shardedAt, because: registry.shardedBecause }
+			: registry?.autoShard
+				? "on demand"
+				: "never",
 	};
 }
 
@@ -397,7 +747,13 @@ function shardingOf(registry: Registry | null | undefined) {
  * makes the records repos, then records the switch in the registry. Returns
  * the registry as it is now, or null if it stays as it was.
  */
-async function shardIfBusy(ctx: ToolContext, repo: string, log: GitCasLog<Registry>, registry: Registry | null | undefined, agent: string) {
+async function shardIfBusy(
+	ctx: ToolContext,
+	repo: string,
+	log: GitCasLog<Registry>,
+	registry: Registry | null | undefined,
+	agent: string,
+) {
 	const reason = shardingReason(registry, agent);
 	if (!reason || !registry?.autoShard) return null;
 	const { depth, recordsRepos } = registry.autoShard;
@@ -409,7 +765,11 @@ async function shardIfBusy(ctx: ToolContext, repo: string, log: GitCasLog<Regist
 }
 
 /** A repo's votes: in its votes record, and in buckets by commit once sharded (see vote-store.ts). */
-export function votesFor(ctx: ToolContext, repo: string, rootHead?: Awaited<ReturnType<GitCasLog<Votes>["read"]>>): VoteStore {
+export function votesFor(
+	ctx: ToolContext,
+	repo: string,
+	rootHead?: Awaited<ReturnType<GitCasLog<Votes>["read"]>>,
+): VoteStore {
 	return voteStore({
 		repo,
 		root: recordLog<Votes>(ctx, repo, votesRef(repo)),
@@ -425,7 +785,12 @@ export function votesFor(ctx: ToolContext, repo: string, rootHead?: Awaited<Retu
  * records repos, then records the switch in the votes record. Returns the
  * votes record's head as it is now, for the vote that follows (undefined: not read).
  */
-async function shardVotesIfBusy(ctx: ToolContext, repo: string, registry: Registry | null | undefined, reviewer: string) {
+async function shardVotesIfBusy(
+	ctx: ToolContext,
+	repo: string,
+	registry: Registry | null | undefined,
+	reviewer: string,
+) {
 	if (!registry?.autoShard && !registry?.shardDepth) return undefined;
 	const log = recordLog<Votes>(ctx, repo, votesRef(repo));
 	const head = await log.read();
@@ -439,13 +804,21 @@ async function shardVotesIfBusy(ctx: ToolContext, repo: string, registry: Regist
 	return log.read();
 }
 
-export function storeFor(ctx: ToolContext, repo: string, registry: Registry | null | undefined, root?: { log: GitCasLog<Registry>; head: Awaited<ReturnType<GitCasLog<Registry>["read"]>> }): ClaimStore {
+export function storeFor(
+	ctx: ToolContext,
+	repo: string,
+	registry: Registry | null | undefined,
+	root?: { log: GitCasLog<Registry>; head: Awaited<ReturnType<GitCasLog<Registry>["read"]>> },
+): ClaimStore {
 	return claimStore({
 		repo,
 		registry,
 		root: root?.log ?? recordLog<Registry>(ctx, repo, claimsRef(repo)),
 		...(root ? { rootHead: root.head } : {}),
-		...(ctx.recordsRemote ? { recordsRemote: (k: number) => ctx.recordsRemote!(repo, k, "write") } : {}), remote: () => ctx.remote(repo, "write"), log: ctx.records ? (ref) => ctx.records!<Registry>(repo, ref) : undefined });
+		...(ctx.recordsRemote ? { recordsRemote: (k: number) => ctx.recordsRemote!(repo, k, "write") } : {}),
+		remote: () => ctx.remote(repo, "write"),
+		log: ctx.records ? (ref) => ctx.records!<Registry>(repo, ref) : undefined,
+	});
 }
 
 /**
@@ -469,7 +842,9 @@ function changeSourceFor(ctx: ToolContext, repo: string) {
 		if (scope === "write" || !legacy) return ctx.changeRemote(repo, agent, scope);
 		const fork = await ctx.changeRemote(repo, agent, "read").catch(() => null);
 		if (fork && (await branchHead(fork, `changes/${change}`).catch(() => null))) return fork;
-		return (await ctx.legacyChangeRemote!(repo, change!).catch(() => null)) ?? fork ?? ctx.changeRemote(repo, agent, "read");
+		return (
+			(await ctx.legacyChangeRemote!(repo, change!).catch(() => null)) ?? fork ?? ctx.changeRemote(repo, agent, "read")
+		);
 	};
 }
 
@@ -480,14 +855,28 @@ function changeSourceFor(ctx: ToolContext, repo: string) {
  * agents, backlog and reviews made 42,000 Git requests and 34,000 Artifacts
  * calls to forks reading heads, run 1000-1); older, wherever its branch is.
  */
-async function changeHead(ctx: ToolContext, repo: string, agent: string, change: string, since?: string): Promise<string | null> {
+async function changeHead(
+	ctx: ToolContext,
+	repo: string,
+	agent: string,
+	change: string,
+	since?: string,
+): Promise<string | null> {
 	const ref = `changes/${change}`;
 	if (ctx.forkHead && since && since >= FORKS_PER_AGENT_SINCE) return ctx.forkHead(repo, agent, ref);
 	return branchHead(await changeSourceFor(ctx, repo)(agent, "read", change, since), ref);
 }
 
 /** Where a change stands: its branch head, the votes on that head, the approvals against the policy, and GitHive's hosted agents on it. */
-async function changeStatus(ctx: ToolContext, repo: string, registry: Registry | null | undefined, votesOn: (head: string) => Promise<VoteRecord[]>, change: string, author: ClaimRecord | undefined, agent = author?.agent) {
+async function changeStatus(
+	ctx: ToolContext,
+	repo: string,
+	registry: Registry | null | undefined,
+	votesOn: (head: string) => Promise<VoteRecord[]>,
+	change: string,
+	author: ClaimRecord | undefined,
+	agent = author?.agent,
+) {
 	// No fork (or no branch on it) means nothing pushed yet.
 	const head = await Promise.resolve()
 		.then(() => changeHead(ctx, repo, agent ?? fail(409, `${change} has no agent`), change, author?.since))
@@ -500,8 +889,12 @@ async function changeStatus(ctx: ToolContext, repo: string, registry: Registry |
 	const policy = branchSettings(registry, author?.into).policy;
 	const { required, vetoes } = effectivePolicy(policy, paths);
 	const cast = head ? (await votesOn(head)).filter((v) => v.commit === head) : [];
-	const outcome = head ? approval({ votes: await countedVotes(cast, registry?.stampKey) }, head, policy, author, paths) : { approved: false, approvals: 0, vetoedBy: [], awaiting: vetoes };
-	const hosted = ctx.agentStatus ? await ctx.agentStatus(repo, change, head, hostedRoles(vetoes)).catch(() => undefined) : undefined;
+	const outcome = head
+		? approval({ votes: await countedVotes(cast, registry?.stampKey) }, head, policy, author, paths)
+		: { approved: false, approvals: 0, vetoedBy: [], awaiting: vetoes };
+	const hosted = ctx.agentStatus
+		? await ctx.agentStatus(repo, change, head, hostedRoles(vetoes)).catch(() => undefined)
+		: undefined;
 	return { head, votes: cast, approval: { ...outcome, required }, ...(hosted ? { hosted } : {}) };
 }
 
@@ -510,10 +903,25 @@ async function changeStatus(ctx: ToolContext, repo: string, registry: Registry |
  * that count (`counted`, stamps already checked), a question waiting
  * (`record`: the votes record, for its flags), and the batch being checked to land into its branch.
  */
-export function changeSigns(input: { claim: ClaimRecord; head: string | null; counted: VoteRecord[]; record: Pick<Votes, "votes" | "flags">; landing?: Pick<LandingView, "checking"> | null; policy: ReviewPolicy }): ChangeSigns {
+export function changeSigns(input: {
+	claim: ClaimRecord;
+	head: string | null;
+	counted: VoteRecord[];
+	record: Pick<Votes, "votes" | "flags">;
+	landing?: Pick<LandingView, "checking"> | null;
+	policy: ReviewPolicy;
+}): ChangeSigns {
 	const { claim, head } = input;
 	const counted = head ? input.counted.filter((v) => v.commit === head && v.reviewer !== claim.agent) : [];
-	const outcome = head ? approval({ votes: counted }, head, input.policy, { agent: claim.agent, ...(claim.by ? { by: claim.by } : {}) }, claim.paths) : undefined;
+	const outcome = head
+		? approval(
+				{ votes: counted },
+				head,
+				input.policy,
+				{ agent: claim.agent, ...(claim.by ? { by: claim.by } : {}) },
+				claim.paths,
+			)
+		: undefined;
 	return {
 		active: claim.active,
 		head,
@@ -531,17 +939,39 @@ export function changeSigns(input: { claim: ClaimRecord; head: string | null; co
  * its fork has it now, the votes on it, and the batch being checked into its branch, read fresh (a release
  * can't be undone).
  */
-function abandonedRule(ctx: ToolContext, repo: string, registered: Registry | null | undefined, votes: VoteStore): Abandoned {
+function abandonedRule(
+	ctx: ToolContext,
+	repo: string,
+	registered: Registry | null | undefined,
+	votes: VoteStore,
+): Abandoned {
 	return async (claim) => {
 		// A head that couldn't be read says nothing: not "nothing pushed", which would let live work be released (a release
 		// can't be undone). Only a fork that doesn't exist yet (or no forks here at all) means nothing's pushed.
-		const head = await changeHead(ctx, repo, claim.agent, claim.change, claim.since).catch((err): null | undefined => ([409, 501].includes(statusOf(err).status) ? null : undefined));
+		const head = await changeHead(ctx, repo, claim.agent, claim.change, claim.since).catch((err): null | undefined =>
+			[409, 501].includes(statusOf(err).status) ? null : undefined,
+		);
 		if (head === undefined) return { abandoned: false, why: `${claim.change}'s head couldn't be read just now` };
 		const view = await votes.readFor(head ? [head] : []);
-		const counted = head ? await countedVotes(view.votes.filter((v) => v.commit === head), registered?.stampKey) : [];
+		const counted = head
+			? await countedVotes(
+					view.votes.filter((v) => v.commit === head),
+					registered?.stampKey,
+				)
+			: [];
 		const shown = presentClaim(claim, projectBranch(registered));
-		const landing = await ctx.landing?.(repo, shown.into ?? projectBranch(registered)).view().catch(() => null);
-		const signs = changeSigns({ claim: shown, head, counted, record: view, landing, policy: branchSettings(registered, shown.into).policy });
+		const landing = await ctx
+			.landing?.(repo, shown.into ?? projectBranch(registered))
+			.view()
+			.catch(() => null);
+		const signs = changeSigns({
+			claim: shown,
+			head,
+			counted,
+			record: view,
+			landing,
+			policy: branchSettings(registered, shown.into).policy,
+		});
 		const outcome = abandoned(signs, Date.now());
 		return { abandoned: outcome.abandoned, why: outcome.waiting.why };
 	};
@@ -560,14 +990,19 @@ async function branchMerge(ctx: ToolContext, repo: string, source: string, into:
 	const tip = await ws.fetch("source", project, source).catch(() => fail(409, `there's no branch ${source}`));
 	const files = await ws.changedPaths(await ws.mergeBase(await ws.head(), tip), tip);
 	if (!files.length) throw new Error(`[409] ${source} has nothing ${into} doesn't have`);
-	const paths = claimCovering(files) ?? fail(409, `${source} changes too much of ${into} to claim at once: merge it in parts`);
+	const paths =
+		claimCovering(files) ?? fail(409, `${source} changes too much of ${into} to claim at once: merge it in parts`);
 	return {
 		tip,
 		paths,
 		/** Push the tip to the fork as changes/<change>: from this shallow workspace, or with the source's whole history if the fork lacks what it leaves out. */
 		push: async (fork: Remote, change: string) => {
 			const to = `refs/heads/changes/${change}`;
-			await ws.pushAs(`refs/remotes/source/${source}`, to, fork).catch(async () => (await Workspace.clone(project, source, { depth: 1 << 20 })).pushAs(`refs/heads/${source}`, to, fork));
+			await ws
+				.pushAs(`refs/remotes/source/${source}`, to, fork)
+				.catch(async () =>
+					(await Workspace.clone(project, source, { depth: 1 << 20 })).pushAs(`refs/heads/${source}`, to, fork),
+				);
 		},
 	};
 }
@@ -577,15 +1012,23 @@ async function branchMerge(ctx: ToolContext, repo: string, source: string, into:
 function workItemFrom(args: Record<string, unknown>) {
 	const title = requiredString(args, "title");
 	const id = typeof args.id === "string" && args.id.trim() ? args.id.trim() : workId(title);
-	if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(id)) throw new Error("[400] a work id is letters, digits, dots, dashes and underscores");
+	if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(id))
+		throw new Error("[400] a work id is letters, digits, dots, dashes and underscores");
 	const paths = args.paths === undefined ? undefined : normalizeClaim(requiredPaths(args, "paths"));
 	const after = changeList(args.after, "after");
-	return { id, title, intent: requiredString(args, "intent"), ...(paths ? { paths } : {}), ...(after.length ? { after } : {}) };
+	return {
+		id,
+		title,
+		intent: requiredString(args, "intent"),
+		...(paths ? { paths } : {}),
+		...(after.length ? { after } : {}),
+	};
 }
 
 function changeList(value: unknown, field: string): string[] {
 	if (value === undefined) return [];
-	if (!Array.isArray(value) || value.some((v) => typeof v !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(v))) throw new Error(`[400] ${field} is a list of change ids`);
+	if (!Array.isArray(value) || value.some((v) => typeof v !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(v)))
+		throw new Error(`[400] ${field} is a list of change ids`);
 	return [...new Set(value as string[])];
 }
 
@@ -593,7 +1036,11 @@ function changeList(value: unknown, field: string): string[] {
  * A loop `change` would close by waiting on `after`: the changes from it back
  * to itself, or none. Follows what each change waits on (as far as 50 changes).
  */
-async function dependencyLoop(change: string, after: string[], afterOf: (change: string) => Promise<string[]>): Promise<string[] | undefined> {
+async function dependencyLoop(
+	change: string,
+	after: string[],
+	afterOf: (change: string) => Promise<string[]>,
+): Promise<string[] | undefined> {
 	const paths: string[][] = after.map((dep) => [change, dep]);
 	const seen = new Set<string>();
 	while (paths.length && seen.size < 50) {
@@ -617,7 +1064,18 @@ const BRANCH_NAME = /^(?![-/.])(?!.*\.\.)(?!.*\/\/)(?!.*\.lock$)(?!.*[/.]$)[A-Za
  * Made first, then recorded: a record that fails is made good by adopting the
  * branch on the next claim. Says what it did, if anything.
  */
-async function targetBranch(ctx: ToolContext, repo: string, input: { into: string; from?: string; registered: Registry | null | undefined; claims: GitCasLog<Registry>; agent: string; stamper?: Stamper }): Promise<string | undefined> {
+async function targetBranch(
+	ctx: ToolContext,
+	repo: string,
+	input: {
+		into: string;
+		from?: string;
+		registered: Registry | null | undefined;
+		claims: GitCasLog<Registry>;
+		agent: string;
+		stamper?: Stamper;
+	},
+): Promise<string | undefined> {
 	const { into, from, registered, claims, agent, stamper } = input;
 	if (!BRANCH_NAME.test(into)) throw new Error(`[400] ${into} isn't a branch name changes can land on`);
 	if (registered?.branches?.[into]) return undefined;
@@ -626,8 +1084,13 @@ async function targetBranch(ctx: ToolContext, repo: string, input: { into: strin
 		await recordBranch(claims, { name: into, base: found, agent }, stamper);
 		return `changes land on ${into} from now on, as it is at ${found.slice(0, 8)}`;
 	}
-	if (!from) throw new Error(`[409] ${into} doesn't exist: claim again with from (the branch to make it from, ${projectBranch(registered)} say)`);
-	const ws = await Workspace.clone(await ctx.remote(repo, "write"), from, { depth: 1 }).catch(() => fail(409, `can't make ${into} from ${from}: there's no branch ${from}`));
+	if (!from)
+		throw new Error(
+			`[409] ${into} doesn't exist: claim again with from (the branch to make it from, ${projectBranch(registered)} say)`,
+		);
+	const ws = await Workspace.clone(await ctx.remote(repo, "write"), from, { depth: 1 }).catch(() =>
+		fail(409, `can't make ${into} from ${from}: there's no branch ${from}`),
+	);
 	await ws.pushNewBranch(into);
 	const base = await ws.head();
 	await recordBranch(claims, { name: into, base, from, agent }, stamper);
@@ -648,11 +1111,23 @@ async function runAudit(ctx: ToolContext, repo: string) {
 	// Sharded since the start, or since the load called for it: the latest state says.
 	const latest = registry.at(-1)!.state;
 	// A branch's merges: read with git in the repo's Gate where there's one (in memory, 200 merges took most of a Worker's).
-	const branchMerges = (from: string, branch: string) => (ctx.readBranch ? ctx.readBranch(repo, from, branch).then((commits) => commits.map(mergeRecordOf)) : readMainMerges(remote, from, branch));
+	const branchMerges = (from: string, branch: string) =>
+		ctx.readBranch
+			? ctx.readBranch(repo, from, branch).then((commits) => commits.map(mergeRecordOf))
+			: readMainMerges(remote, from, branch);
 	const [merges, shards, votesHistory] = await Promise.all([
 		t.time("merges", () => branchMerges(baseline, projectBranch(start))),
 		latest.shardDepth
-			? t.time("shards", async () => readShardHistories(latest.recordsRepos && ctx.recordsRemote ? await Promise.all(Array.from({ length: latest.recordsRepos }, (_, k) => ctx.recordsRemote!(repo, k, "read"))) : [remote], repo))
+			? t.time("shards", async () =>
+					readShardHistories(
+						latest.recordsRepos && ctx.recordsRemote
+							? await Promise.all(
+									Array.from({ length: latest.recordsRepos }, (_, k) => ctx.recordsRemote!(repo, k, "read")),
+								)
+							: [remote],
+						repo,
+					),
+				)
 			: undefined,
 		votesRead,
 	]);
@@ -660,7 +1135,14 @@ async function runAudit(ctx: ToolContext, repo: string) {
 	const votesNow = votesHistory.at(-1)?.state;
 	const voteBuckets = votesNow?.buckets
 		? await t.time("buckets", async () =>
-				readRefHistories<Votes>(votesNow.recordsRepos && ctx.recordsRemote ? await Promise.all(Array.from({ length: votesNow.recordsRepos }, (_, k) => ctx.recordsRemote!(repo, k, "read"))) : [remote], votesPrefix(repo)),
+				readRefHistories<Votes>(
+					votesNow.recordsRepos && ctx.recordsRemote
+						? await Promise.all(
+								Array.from({ length: votesNow.recordsRepos }, (_, k) => ctx.recordsRemote!(repo, k, "read")),
+							)
+						: [remote],
+					votesPrefix(repo),
+				),
 			)
 		: undefined;
 	// The other branches changes land on, each read after the commit it started at, its files named as their claims are.
@@ -669,13 +1151,27 @@ async function runAudit(ctx: ToolContext, repo: string) {
 		await t.time("branches", () =>
 			Promise.all(
 				Object.entries(latest.branches ?? {}).map(async ([name, record]) =>
-					(await branchMerges(record.base, name)).map((m) => ({ ...m, branch: name, claimFiles: m.files.map((f) => scopeFile(f, name, project)) })),
+					(await branchMerges(record.base, name)).map((m) => ({
+						...m,
+						branch: name,
+						claimFiles: m.files.map((f) => scopeFile(f, name, project)),
+					})),
 				),
 			),
 		)
 	).flat();
 	const all = [...merges, ...onBranches];
-	const violations = await t.time("audit", () => audit({ registry, ...(shards ? { shards } : {}), votes: votesHistory, ...(voteBuckets ? { voteBuckets } : {}), policy: start.policy ?? DEFAULT_POLICY, verify: start.verify, merges: all }));
+	const violations = await t.time("audit", () =>
+		audit({
+			registry,
+			...(shards ? { shards } : {}),
+			votes: votesHistory,
+			...(voteBuckets ? { voteBuckets } : {}),
+			policy: start.policy ?? DEFAULT_POLICY,
+			verify: start.verify,
+			merges: all,
+		}),
+	);
 	return { merges: all.length, violations };
 }
 
@@ -687,7 +1183,8 @@ async function runAudit(ctx: ToolContext, repo: string) {
  */
 export async function changeHistory(ctx: ToolContext, repo: string, change: string) {
 	const t = ctx.timing ?? new Timing();
-	const registry = (await t.time("registry", () => recordLog<Registry>(ctx, repo, claimsRef(repo)).read()))?.commit.state;
+	const registry = (await t.time("registry", () => recordLog<Registry>(ctx, repo, claimsRef(repo)).read()))?.commit
+		.state;
 	if (!registry?.baseline) throw new Error(`[404] GitHive hasn't started on ${repo}`);
 	const { claim: record, released } = await t.time("change", () => storeFor(ctx, repo, registry).readChange(change));
 	if (!record && !released.length) throw new Error(`[404] no change ${change} on ${repo}`);
@@ -696,19 +1193,28 @@ export async function changeHistory(ctx: ToolContext, repo: string, change: stri
 	const claim = record ? presentClaim(record, projectBranch(registry)) : undefined;
 	const mergedAs = released.find((r) => r.mergedAs)?.mergedAs;
 	const commits = await Promise.resolve()
-		.then(() => t.time("fork", () => changeSourceFor(ctx, repo)(claim?.agent ?? released.at(-1)!.agent, "read", change)))
+		.then(() =>
+			t.time("fork", () => changeSourceFor(ctx, repo)(claim?.agent ?? released.at(-1)!.agent, "read", change)),
+		)
 		.then(async (source) => {
 			// Shallow: a change is a few commits on a recent project head; finding where it left deepens history if that's further back.
 			const ws = await t.time("clone", () => Workspace.clone(source, `changes/${change}`, { depth: 8 }));
 			const head = await ws.head();
 			// The change's own commits: back to where it left the project's branch (as it was before the merge, if it merged).
-			const projectHead = await t.time("project", async () => ws.fetch("project", await ctx.remote(repo, "read"), branch));
+			const projectHead = await t.time("project", async () =>
+				ws.fetch("project", await ctx.remote(repo, "read"), branch),
+			);
 			const before = mergedAs ? (await ws.ensureCommit(mergedAs)).commit.parent[0] : projectHead;
 			const stop = await t.time("base", () => ws.mergeBase(before, head));
 			const own = [];
 			for (const { oid, commit } of await git.log({ fs: ws.fs, dir: "/repo", ref: head, depth: 50 })) {
 				if (oid === stop) break;
-				own.push({ commit: oid, message: commit.message.trim(), author: commit.author.name, at: new Date(commit.author.timestamp * 1000).toISOString() });
+				own.push({
+					commit: oid,
+					message: commit.message.trim(),
+					author: commit.author.name,
+					at: new Date(commit.author.timestamp * 1000).toISOString(),
+				});
 			}
 			return own;
 		})
@@ -724,11 +1230,19 @@ export async function changeHistory(ctx: ToolContext, repo: string, change: stri
  * commit, stamped with their verified identity (ctx's stamper), counted like
  * any vote (never the author's), and answering any question about it.
  */
-export async function voteAsPerson(ctx: ToolContext, repo: string, change: string, input: { role: string; verdict: "approve" | "reject"; evidence: string }, person: string) {
-	if (!person.startsWith("person:")) throw new Error("[403] only a person signed in through Access votes from the dashboard; agents use vote");
+export async function voteAsPerson(
+	ctx: ToolContext,
+	repo: string,
+	change: string,
+	input: { role: string; verdict: "approve" | "reject"; evidence: string },
+	person: string,
+) {
+	if (!person.startsWith("person:"))
+		throw new Error("[403] only a person signed in through Access votes from the dashboard; agents use vote");
 	if (!input.role?.trim()) throw new Error("[400] a vote needs a role");
 	if (input.verdict !== "approve" && input.verdict !== "reject") throw new Error("[400] verdict is approve or reject");
-	if (typeof input.evidence !== "string" || !input.evidence.trim()) throw new Error("[400] a vote needs evidence: what you checked");
+	if (typeof input.evidence !== "string" || !input.evidence.trim())
+		throw new Error("[400] a vote needs evidence: what you checked");
 	const registry = (await recordLog<Registry>(ctx, repo, claimsRef(repo)).read())?.commit.state;
 	const { claim } = await storeFor(ctx, repo, registry).readChange(change);
 	if (!claim) throw new Error(`[409] ${change} holds no claim: there's nothing to vote on`);
@@ -736,7 +1250,17 @@ export async function voteAsPerson(ctx: ToolContext, repo: string, change: strin
 	if (!head) throw new Error(`[409] ${change} has nothing pushed to vote on`);
 	const stamper = await ctx.stamper?.();
 	const teams = (await ctx.teamsOf?.(repo)) ?? [];
-	await votesFor(ctx, repo, await shardVotesIfBusy(ctx, repo, registry, person)).vote({ commit: head, reviewer: person, role: input.role, verdict: input.verdict, evidence: input.evidence, ...(teams.length ? { teams } : {}) }, stamper);
+	await votesFor(ctx, repo, await shardVotesIfBusy(ctx, repo, registry, person)).vote(
+		{
+			commit: head,
+			reviewer: person,
+			role: input.role,
+			verdict: input.verdict,
+			evidence: input.evidence,
+			...(teams.length ? { teams } : {}),
+		},
+		stamper,
+	);
 	await ctx.ping?.(repo).catch(() => undefined);
 	return { commit: head, role: input.role, verdict: input.verdict };
 }
@@ -745,12 +1269,26 @@ export async function voteAsPerson(ctx: ToolContext, repo: string, change: strin
  * A branch made (or adopted) by a person from the dashboard: what a claim
  * with into and from does, without the claim. Recorded with the person's name.
  */
-export async function makeBranch(ctx: ToolContext, repo: string, input: { name: string; from: string }, person: string) {
+export async function makeBranch(
+	ctx: ToolContext,
+	repo: string,
+	input: { name: string; from: string },
+	person: string,
+) {
 	const claims = recordLog<Registry>(ctx, repo, claimsRef(repo));
 	const registered = (await claims.read())?.commit.state;
-	if (!registered?.baseline) throw new Error(`[409] GitHive hasn't started on ${repo}: its admins start it with settings`);
-	if (input.name === projectBranch(registered) || registered.branches?.[input.name]) throw new Error(`[409] ${input.name} takes changes already`);
-	const made = await targetBranch(ctx, repo, { into: input.name, from: input.from, registered, claims, agent: person, ...(ctx.stamper ? { stamper: await ctx.stamper() } : {}) });
+	if (!registered?.baseline)
+		throw new Error(`[409] GitHive hasn't started on ${repo}: its admins start it with settings`);
+	if (input.name === projectBranch(registered) || registered.branches?.[input.name])
+		throw new Error(`[409] ${input.name} takes changes already`);
+	const made = await targetBranch(ctx, repo, {
+		into: input.name,
+		from: input.from,
+		registered,
+		claims,
+		agent: person,
+		...(ctx.stamper ? { stamper: await ctx.stamper() } : {}),
+	});
 	await ctx.ping?.(repo).catch(() => undefined);
 	return { name: input.name, made };
 }
@@ -783,31 +1321,61 @@ export async function repoAudit(ctx: ToolContext, repo: string) {
 /** What the dashboard shows for a repo, read from the records' tips (the audit is apart, in repoAudit). */
 export async function repoSnapshot(ctx: ToolContext, repo: string) {
 	const t = ctx.timing ?? new Timing();
-	const [registry, votes] = await t.time("records", () => Promise.all([recordLog<Registry>(ctx, repo, claimsRef(repo)).read(), votesFor(ctx, repo).read()]));
+	const [registry, votes] = await t.time("records", () =>
+		Promise.all([recordLog<Registry>(ctx, repo, claimsRef(repo)).read(), votesFor(ctx, repo).read()]),
+	);
 	const state = registry?.commit.state;
 	if (!state?.baseline) throw new Error(`[404] GitHive hasn't started on ${repo}`);
 	const held = await t.time("claims", () => storeFor(ctx, repo, state).read());
-	const claims = await t.time("status", () => Promise.all(
-		held.claims.map(async (record) => {
-			const c = presentClaim(record, projectBranch(state));
-			const { head, approval, hosted } = await changeStatus(ctx, repo, state, async () => votes.votes, c.change, c);
-			// A question for a person, until a person votes on the change's commit (or, for a waiting role's review, until the role signs it off).
-			const asked = openFlag(votes, c.change, head);
-			const flag = asked?.role && !approval.awaiting?.includes(asked.role) ? null : asked;
-			const attention = flag ? { reason: flag.reason, agent: flag.agent, at: flag.at } : hosted?.builder?.status === "failed" ? { reason: `GitHive's builder failed${hosted.builder.error ? `: ${hosted.builder.error.slice(0, 160)}` : ""}`, agent: "githive-builder", at: c.active } : null;
-			// What it waits on (after) that hasn't merged into the branch it lands on yet.
-			const into = c.into ?? projectBranch(state);
-			const waitsOn = (c.after ?? []).filter((dep) => !held.released.some((r) => r.change === dep && r.mergedAs && (r.into ?? projectBranch(state)) === into));
-			return { ...c, head, approval, ...(hosted ? { hosted } : {}), ...(attention ? { attention } : {}), ...(waitsOn.length ? { waitsOn } : {}) };
-		}),
-	));
+	const claims = await t.time("status", () =>
+		Promise.all(
+			held.claims.map(async (record) => {
+				const c = presentClaim(record, projectBranch(state));
+				const { head, approval, hosted } = await changeStatus(ctx, repo, state, async () => votes.votes, c.change, c);
+				// A question for a person, until a person votes on the change's commit (or, for a waiting role's review, until the role signs it off).
+				const asked = openFlag(votes, c.change, head);
+				const flag = asked?.role && !approval.awaiting?.includes(asked.role) ? null : asked;
+				const attention = flag
+					? { reason: flag.reason, agent: flag.agent, at: flag.at }
+					: hosted?.builder?.status === "failed"
+						? {
+								reason: `GitHive's builder failed${hosted.builder.error ? `: ${hosted.builder.error.slice(0, 160)}` : ""}`,
+								agent: "githive-builder",
+								at: c.active,
+							}
+						: null;
+				// What it waits on (after) that hasn't merged into the branch it lands on yet.
+				const into = c.into ?? projectBranch(state);
+				const waitsOn = (c.after ?? []).filter(
+					(dep) =>
+						!held.released.some((r) => r.change === dep && r.mergedAs && (r.into ?? projectBranch(state)) === into),
+				);
+				return {
+					...c,
+					head,
+					approval,
+					...(hosted ? { hosted } : {}),
+					...(attention ? { attention } : {}),
+					...(waitsOn.length ? { waitsOn } : {}),
+				};
+			}),
+		),
+	);
 	const waiting = claims.filter((c) => c.attention);
-	await ctx.summarize?.(repo, {
-		open: claims.length,
-		needsYou: waiting.length,
-		waiting: waiting.slice(0, 20).map((c) => ({ change: c.change, title: c.intent.split("\n")[0].slice(0, 120), reason: c.attention!.reason.slice(0, 500) })),
-		countedAt: new Date().toISOString(),
-	}).catch(() => undefined);
+	await ctx
+		.summarize?.(repo, {
+			open: claims.length,
+			needsYou: waiting.length,
+			waiting: waiting
+				.slice(0, 20)
+				.map((c) => ({
+					change: c.change,
+					title: c.intent.split("\n")[0].slice(0, 120),
+					reason: c.attention!.reason.slice(0, 500),
+				})),
+			countedAt: new Date().toISOString(),
+		})
+		.catch(() => undefined);
 	return {
 		repo,
 		/** The project's branch changes merge into. */
@@ -817,7 +1385,12 @@ export async function repoSnapshot(ctx: ToolContext, repo: string) {
 		/** Other branches' settings by pattern (see branch-rules.ts). */
 		...(state.branchRules?.length ? { branchRules: state.branchRules } : {}),
 		/** The other branches changes land on: where each started. */
-		branches: Object.entries(state.branches ?? {}).map(([name, b]) => ({ name, base: b.base, ...(b.from ? { from: b.from } : {}), at: b.at })),
+		branches: Object.entries(state.branches ?? {}).map(([name, b]) => ({
+			name,
+			base: b.base,
+			...(b.from ? { from: b.from } : {}),
+			at: b.at,
+		})),
 		policy: state.policy ?? DEFAULT_POLICY,
 		verify: state.verify ?? [],
 		/** Whether records and merges are stamped with verified identity. */
@@ -835,23 +1408,38 @@ export async function repoSnapshot(ctx: ToolContext, repo: string) {
 }
 
 // Tools that write records, after which the repo's summary notes the activity.
-const WRITES = new Set(["claim", "release", "merge", "vote", "build", "revert", "ask_human", "check", "add_work", "settings"]);
+const WRITES = new Set([
+	"claim",
+	"release",
+	"merge",
+	"vote",
+	"build",
+	"revert",
+	"ask_human",
+	"check",
+	"add_work",
+	"settings",
+]);
 const noted = new Map<string, number>();
 
 /** Run one tool, and note what it wrote in the repo's summary. */
 export async function callTool(name: string, args: Args, ctx: ToolContext): Promise<unknown> {
 	const result = await withNews(name, args, ctx, await runTool(name, args, ctx));
-	if (WRITES.has(name) && (result as { ok?: boolean } | null)?.ok !== false) await ctx.ping?.(requiredString(args, "repo")).catch(() => undefined);
+	if (WRITES.has(name) && (result as { ok?: boolean } | null)?.ok !== false)
+		await ctx.ping?.(requiredString(args, "repo")).catch(() => undefined);
 	if (ctx.summarize && WRITES.has(name) && (result as { ok?: boolean } | null)?.ok !== false) {
 		const repo = requiredString(args, "repo");
 		const merged = name === "merge";
 		// Activity alone is noted at most every 10 seconds per repo, so a busy repo doesn't queue on the index.
 		if (merged || Date.now() - (noted.get(repo) ?? 0) > 10_000) {
 			noted.set(repo, Date.now());
-			await ctx.summarize(repo, { lastActivity: new Date().toISOString(), ...(merged ? { mergedBy: 1 } : {}) }).catch((err) => console.error(`summarizing ${repo} failed`, String(err)));
+			await ctx
+				.summarize(repo, { lastActivity: new Date().toISOString(), ...(merged ? { mergedBy: 1 } : {}) })
+				.catch((err) => console.error(`summarizing ${repo} failed`, String(err)));
 		}
 		// A question for a person belongs in their inbox now, not when someone next opens the repo: the snapshot updates the summary's waiting list.
-		if (name === "ask_human") await repoSnapshot(ctx, repo).catch((err) => console.error(`updating ${repo}'s inbox failed`, String(err)));
+		if (name === "ask_human")
+			await repoSnapshot(ctx, repo).catch((err) => console.error(`updating ${repo}'s inbox failed`, String(err)));
 	}
 	return result;
 }
@@ -864,12 +1452,23 @@ export async function callTool(name: string, args: Args, ctx: ToolContext): Prom
  */
 async function withNews(name: string, args: Args, ctx: ToolContext, result: unknown) {
 	const agent = ctx.agent ?? (typeof args.agent === "string" ? args.agent : undefined);
-	if (!ctx.news || !agent || name === "register" || !result || typeof result !== "object" || Array.isArray(result)) return result;
+	if (!ctx.news || !agent || name === "register" || !result || typeof result !== "object" || Array.isArray(result))
+		return result;
 	const repo = requiredString(args, "repo");
-	const registry = await recordLog<Registry>(ctx, repo, claimsRef(repo)).read().catch(() => null);
+	const registry = await recordLog<Registry>(ctx, repo, claimsRef(repo))
+		.read()
+		.catch(() => null);
 	if (!registry?.commit.state.baseline) return result;
 	const news = await ctx.news(repo, projectBranch(registry.commit.state), agent).catch(() => []);
-	return news.length ? { ...(result as Record<string, unknown>), news: news.map((n) => ({ ...n, says: `${projectBranch(registry.commit.state)} changed ${n.files.join(", ")}${n.filesMore ? ` and ${n.filesMore} more` : ""}: ${n.change} by ${n.agent}${n.intent ? `, "${n.intent}"` : ""}` })) } : result;
+	return news.length
+		? {
+				...(result as Record<string, unknown>),
+				news: news.map((n) => ({
+					...n,
+					says: `${projectBranch(registry.commit.state)} changed ${n.files.join(", ")}${n.filesMore ? ` and ${n.filesMore} more` : ""}: ${n.change} by ${n.agent}${n.intent ? `, "${n.intent}"` : ""}`,
+				})),
+			}
+		: result;
 }
 
 /** How many claims are in force on a repo, read from its records alone: the repo list's count. Null before GitHive starts on it. */
@@ -894,7 +1493,8 @@ async function runTool(name: string, args: Args, ctx: ToolContext): Promise<unkn
 	// A signed-in agent is who its token says; otherwise an agent key names the agent.
 	const acting = ctx.agent ?? (key ? await keyAgent(registered, key) : undefined);
 	/** The agent named in `field`; a signed-in agent may leave it out. */
-	const agentArg = (field: string) => (ctx.agent && !(typeof args[field] === "string" && args[field].trim()) ? ctx.agent : requiredString(args, field));
+	const agentArg = (field: string) =>
+		ctx.agent && !(typeof args[field] === "string" && args[field].trim()) ? ctx.agent : requiredString(args, field);
 	const actAs = (field: string) => {
 		const agent = agentArg(field);
 		mayActAs(agent, acting, registered, ctx.hosted);
@@ -920,7 +1520,11 @@ async function runTool(name: string, args: Args, ctx: ToolContext): Promise<unkn
 	const changes = new Map<string, ReturnType<ClaimStore["readChange"]>>();
 	/** One change's claim and releases, read at most once per call, and only from what holds them. */
 	const changeOf = (change: string) => {
-		if (!changes.has(change)) changes.set(change, store.readChange(change).then((c) => (c.claim ? { ...c, claim: present(c.claim) } : c)));
+		if (!changes.has(change))
+			changes.set(
+				change,
+				store.readChange(change).then((c) => (c.claim ? { ...c, claim: present(c.claim) } : c)),
+			);
 		return changes.get(change)!;
 	};
 	const claimOf = async (change: string) => (await changeOf(change)).claim;
@@ -940,7 +1544,10 @@ async function runTool(name: string, args: Args, ctx: ToolContext): Promise<unkn
 	/** A claim's pushed head, from its agent's fork (null: nothing pushed). */
 	// Null when nothing's pushed (no fork, or no branch on it); undefined when the read failed, which says nothing. A
 	// change claimed since forks were per agent is read once, from its agent's fork: no second read, no other fork.
-	const pushedHead = (claim: ClaimRecord) => changeHead(ctx, repo, claim.agent, claim.change, claim.since).catch((err): null | undefined => (statusOf(err).status === 409 ? null : undefined));
+	const pushedHead = (claim: ClaimRecord) =>
+		changeHead(ctx, repo, claim.agent, claim.change, claim.since).catch((err): null | undefined =>
+			statusOf(err).status === 409 ? null : undefined,
+		);
 	/**
 	 * Open changes' pushed heads: `fresh` ones read now (the caller's own), the
 	 * rest as GitHive last saw them (see knownHeads). A head a push event told
@@ -952,13 +1559,22 @@ async function runTool(name: string, args: Args, ctx: ToolContext): Promise<unkn
 	 * place to keep them, all are read.
 	 */
 	const openHeads = async (claims: ClaimRecord[], fresh: (claim: ClaimRecord) => boolean = () => false) => {
-		const known = ctx.knownHeads ? await ctx.knownHeads(repo, claims.map((c) => ({ change: c.change, agent: c.agent }))).catch(() => undefined) : undefined;
+		const known = ctx.knownHeads
+			? await ctx
+					.knownHeads(
+						repo,
+						claims.map((c) => ({ change: c.change, agent: c.agent })),
+					)
+					.catch(() => undefined)
+			: undefined;
 		const now = Date.now();
 		const seenAt = (c: ClaimRecord) => known?.[c.change]?.at ?? 0;
 		const current = (c: ClaimRecord) => now - seenAt(c) <= (known?.[c.change]?.pushed ? HEAD_PUSHED_MS : HEAD_SEEN_MS);
 		const due = claims.filter((c) => !fresh(c) && !current(c)).sort((a, b) => seenAt(a) - seenAt(b));
 		const reading = known ? [...claims.filter(fresh), ...due.slice(0, HEADS_READ_A_CALL)] : claims;
-		const read = new Map(await atMost(HEAD_READS_AT_ONCE, reading, async (c) => [c.change, await pushedHead(c)] as const));
+		const read = new Map(
+			await atMost(HEAD_READS_AT_ONCE, reading, async (c) => [c.change, await pushedHead(c)] as const),
+		);
 		const seen = Object.fromEntries([...read].filter((r): r is [string, string | null] => r[1] !== undefined));
 		// As of when the reads began: a push event since then is newer than what they saw.
 		if (Object.keys(seen).length) await ctx.noteHeads?.(repo, seen, now).catch(() => undefined);
@@ -978,10 +1594,15 @@ async function runTool(name: string, args: Args, ctx: ToolContext): Promise<unkn
 			adviceView(),
 			votes.read(),
 			recordLog<Work>(ctx, repo, workRef(repo)).read(),
-			ctx.landing?.(repo, branch).view().catch(() => null) ?? null,
+			ctx
+				.landing?.(repo, branch)
+				.view()
+				.catch(() => null) ?? null,
 		]);
 		const heads = await openHeads(inForce.claims, (c) => c.agent === agent);
-		const landedNow = new Set((landing?.recent ?? []).filter((s) => s.how === "landed").map((s) => `${s.change} ${s.head}`));
+		const landedNow = new Set(
+			(landing?.recent ?? []).filter((s) => s.how === "landed").map((s) => `${s.change} ${s.head}`),
+		);
 		const landedHere = (claim: ClaimRecord) => !claim.into && landedNow.has(`${claim.change} ${heads(claim)}`);
 		const open = inForce.claims.filter((claim) => !landedHere(claim)).map((claim) => ({ claim, head: heads(claim) }));
 		const counted = await countedVotes(cast.votes, registered?.stampKey);
@@ -997,12 +1618,37 @@ async function runTool(name: string, args: Args, ctx: ToolContext): Promise<unkn
 			votes: counted,
 			merged: new Set([...inForce.merged, ...inForce.claims.filter(landedHere).map((c) => c.change)]),
 			work: backlog?.commit.state.items ?? [],
-			abandoned: new Set(open.filter((o) => abandoned(changeSigns({ claim: o.claim, head: o.head, counted, record: cast, landing: o.claim.into ? null : landing, policy: branchSettings(registered, o.claim.into).policy }), Date.now()).abandoned).map((o) => o.claim.change)),
+			abandoned: new Set(
+				open
+					.filter(
+						(o) =>
+							abandoned(
+								changeSigns({
+									claim: o.claim,
+									head: o.head,
+									counted,
+									record: cast,
+									landing: o.claim.into ? null : landing,
+									policy: branchSettings(registered, o.claim.into).policy,
+								}),
+								Date.now(),
+							).abandoned,
+					)
+					.map((o) => o.claim.change),
+			),
 		};
 	};
 	/** Warm the repo's Gate for a merge to come (its checks, or with none, its landing): why, and for which change or commit. */
 	const warmChecks = async (expect: "claimed" | "checked" | "approved", key: string) => {
-		if (registered?.baseline) await ctx.warmChecks?.(repo, { branch: projectBranch(registered), checks: containerChecks(registered.verify), expect, key }).catch(() => undefined);
+		if (registered?.baseline)
+			await ctx
+				.warmChecks?.(repo, {
+					branch: projectBranch(registered),
+					checks: containerChecks(registered.verify),
+					expect,
+					key,
+				})
+				.catch(() => undefined);
 	};
 	switch (name) {
 		case "settings": {
@@ -1013,14 +1659,26 @@ async function runTool(name: string, args: Args, ctx: ToolContext): Promise<unkn
 				// Claims stay in one record until the load calls for shards, unless asked to shard now (or never: 0).
 				const asked = typeof args.shard_depth === "number" ? Math.max(0, Math.floor(args.shard_depth)) : undefined;
 				// Sharded claims are spread over records repos, where they can be made.
-				const wanted = typeof args.records_repos === "number" ? Math.max(0, Math.floor(args.records_repos)) : DEFAULT_RECORDS_REPOS;
+				const wanted =
+					typeof args.records_repos === "number" ? Math.max(0, Math.floor(args.records_repos)) : DEFAULT_RECORDS_REPOS;
 				const spread = ctx.recordsRemote && ctx.createRecordsRepos ? wanted : 0;
 				const recordsRepos = asked ? spread : 0;
 				if (recordsRepos) await ctx.createRecordsRepos!(repo, recordsRepos);
 				// Changes merge into the repo's default branch, whatever it's called.
 				const into = registered?.branch ?? (!ctx.defaultBranch ? "main" : await ctx.defaultBranch(repo));
-				const sharding = asked ? { shardDepth: asked, recordsRepos } : asked === 0 ? {} : { autoShard: { depth: DEFAULT_SHARD_DEPTH, recordsRepos: spread } };
-				await startRepo(claims, { baseline: await ctx.head(repo, into), branch: into, policy, verify, stampKey: stamper?.publicKey, ...sharding });
+				const sharding = asked
+					? { shardDepth: asked, recordsRepos }
+					: asked === 0
+						? {}
+						: { autoShard: { depth: DEFAULT_SHARD_DEPTH, recordsRepos: spread } };
+				await startRepo(claims, {
+					baseline: await ctx.head(repo, into),
+					branch: into,
+					policy,
+					verify,
+					stampKey: stamper?.publicKey,
+					...sharding,
+				});
 				await ctx.register?.(repo);
 				// Agents' forks are made from seeds, made one at a time from now, before agents arrive.
 				await ctx.prepareForks?.(repo, "seeds").catch(() => undefined);
@@ -1028,52 +1686,125 @@ async function runTool(name: string, args: Args, ctx: ToolContext): Promise<unkn
 				// With checks, the repo's Gate warms up while agents start, and saves the snapshot containers start from: the
 				// first merge is minutes away, and a fresh install takes them. Without, nothing runs until an agent claims work
 				// (claim warms it then, see warmChecks): a repo nobody works in costs nothing.
-				if (containerChecks(registry?.verify).length) await ctx.warmChecks?.(repo, { branch: projectBranch(registry), checks: containerChecks(registry?.verify), expect: "set up" }).catch(() => undefined);
+				if (containerChecks(registry?.verify).length)
+					await ctx
+						.warmChecks?.(repo, {
+							branch: projectBranch(registry),
+							checks: containerChecks(registry?.verify),
+							expect: "set up",
+						})
+						.catch(() => undefined);
 				const warnings = grantWarnings(registry?.policy ?? policy);
-				const started = { repo, branch: projectBranch(registry), policy: registry?.policy ?? policy, verify: registry?.verify ?? [], ...shardingOf(registry), ...(warnings.length ? { warnings } : {}), instructions: INSTRUCTIONS };
+				const started = {
+					repo,
+					branch: projectBranch(registry),
+					policy: registry?.policy ?? policy,
+					verify: registry?.verify ?? [],
+					...shardingOf(registry),
+					...(warnings.length ? { warnings } : {}),
+					instructions: INSTRUCTIONS,
+				};
 				// What starting doesn't set (branch rules, skipped files, GitHub), set as on a repo GitHive has started on.
 				const rest = (["branch_rules", "skip_checks", "github"] as const).filter((f) => args[f] !== undefined);
 				if (!rest.length) return started;
-				const more = (await runTool("settings", { repo, ...(args.agent_key !== undefined ? { agent_key: args.agent_key } : {}), ...Object.fromEntries(rest.map((f) => [f, args[f]])) }, ctx)) as Record<string, unknown>;
+				const more = (await runTool(
+					"settings",
+					{
+						repo,
+						...(args.agent_key !== undefined ? { agent_key: args.agent_key } : {}),
+						...Object.fromEntries(rest.map((f) => [f, args[f]])),
+					},
+					ctx,
+				)) as Record<string, unknown>;
 				return { ...started, ...more, instructions: INSTRUCTIONS };
 			}
-			if (args.shard_depth !== undefined || args.records_repos !== undefined) throw new Error("[409] how claims are kept is set when GitHive starts on a repo: since, they shard as the load calls for it");
-			const policy = POLICY_FIELDS.some((f) => args[f] !== undefined) ? policyFrom(args, registered.policy ?? DEFAULT_POLICY) : undefined;
+			if (args.shard_depth !== undefined || args.records_repos !== undefined)
+				throw new Error(
+					"[409] how claims are kept is set when GitHive starts on a repo: since, they shard as the load calls for it",
+				);
+			const policy = POLICY_FIELDS.some((f) => args[f] !== undefined)
+				? policyFrom(args, registered.policy ?? DEFAULT_POLICY)
+				: undefined;
 			const verify = args.verify === undefined ? undefined : checksFrom(args.verify);
-			const branchRules = args.branch_rules === undefined ? undefined : branchRulesFrom(args.branch_rules, registered.policy ?? DEFAULT_POLICY);
+			const branchRules =
+				args.branch_rules === undefined
+					? undefined
+					: branchRulesFrom(args.branch_rules, registered.policy ?? DEFAULT_POLICY);
 			const skipChecks = args.skip_checks === undefined ? undefined : skipPatternsFrom(args.skip_checks);
 			const github = args.github === undefined ? undefined : await githubFrom(ctx, args.github);
-			if (!policy && !verify && !branchRules && !skipChecks && github === undefined) throw new Error(`[400] GitHive has started on ${repo}: name what to change: ${[...POLICY_FIELDS, "verify", "branch_rules", "skip_checks", "github"].join(", ")}`);
+			if (!policy && !verify && !branchRules && !skipChecks && github === undefined)
+				throw new Error(
+					`[400] GitHive has started on ${repo}: name what to change: ${[...POLICY_FIELDS, "verify", "branch_rules", "skip_checks", "github"].join(", ")}`,
+				);
 			// Checks on Actions need the GitHub repo they run in.
-			if (onActions(verify ?? registered.verify) && !(github ?? (github === null ? null : registered.github))) throw new Error(`[409] checks on GitHub Actions need a connected GitHub repo: set github ("owner/name") too`);
-			await changeSettings(claims, { ...(policy ? { policy } : {}), ...(verify ? { verify } : {}), ...(branchRules ? { branchRules } : {}), ...(skipChecks ? { skipChecks } : {}), ...(github !== undefined ? { github } : {}), ...(stamper?.by ? { by: stamper.by } : {}) });
+			if (onActions(verify ?? registered.verify) && !(github ?? (github === null ? null : registered.github)))
+				throw new Error(`[409] checks on GitHub Actions need a connected GitHub repo: set github ("owner/name") too`);
+			await changeSettings(claims, {
+				...(policy ? { policy } : {}),
+				...(verify ? { verify } : {}),
+				...(branchRules ? { branchRules } : {}),
+				...(skipChecks ? { skipChecks } : {}),
+				...(github !== undefined ? { github } : {}),
+				...(stamper?.by ? { by: stamper.by } : {}),
+			});
 			const registry = (await claims.read())?.commit.state;
 			// New checks may install something new: warm the Gate for them (on Actions, it only lands).
-			if (verify) await ctx.warmChecks?.(repo, { branch: projectBranch(registry), checks: containerChecks(verify), expect: "set up" }).catch(() => undefined);
+			if (verify)
+				await ctx
+					.warmChecks?.(repo, { branch: projectBranch(registry), checks: containerChecks(verify), expect: "set up" })
+					.catch(() => undefined);
 			const warnings = grantWarnings(registry?.policy ?? DEFAULT_POLICY);
-			return { repo, branch: projectBranch(registry), policy: registry?.policy ?? DEFAULT_POLICY, verify: registry?.verify ?? [], skipChecks: registry?.skipChecks ?? DEFAULT_SKIP_CHECKS, ...(registry?.branchRules?.length ? { branchRules: registry.branchRules } : {}), ...(registry?.github ? { github: registry.github.repo } : {}), ...(warnings.length ? { warnings } : {}) };
+			return {
+				repo,
+				branch: projectBranch(registry),
+				policy: registry?.policy ?? DEFAULT_POLICY,
+				verify: registry?.verify ?? [],
+				skipChecks: registry?.skipChecks ?? DEFAULT_SKIP_CHECKS,
+				...(registry?.branchRules?.length ? { branchRules: registry.branchRules } : {}),
+				...(registry?.github ? { github: registry.github.repo } : {}),
+				...(warnings.length ? { warnings } : {}),
+			};
 		}
 		case "reviews": {
 			const agent = actAs("agent");
 			const state = await openWork(agent);
 			const held = ctx.reviews ? await ctx.reviews.held(repo).catch(() => ({})) : {};
 			// Reviews a role that can block has waited too long for: people hear of it (whoever looks notices; no timer).
-			if (ctx.reviews) await tellPeopleOfWaitingRoles(ctx, repo, votes, registered?.policy ?? DEFAULT_POLICY, state.open, state.votes, (claim) => branchSettings(registered, claim.into).policy).catch((err) => console.error(`checking ${repo}'s waiting reviews failed`, String(err)));
+			if (ctx.reviews)
+				await tellPeopleOfWaitingRoles(
+					ctx,
+					repo,
+					votes,
+					registered?.policy ?? DEFAULT_POLICY,
+					state.open,
+					state.votes,
+					(claim) => branchSettings(registered, claim.into).policy,
+				).catch((err) => console.error(`checking ${repo}'s waiting reviews failed`, String(err)));
 			const options = reviewsFor({ ...state, held });
-			return { reviews: options.slice(0, LISTED_AT_MOST), ...(options.length > LISTED_AT_MOST ? { more: options.length - LISTED_AT_MOST } : {}) };
+			return {
+				reviews: options.slice(0, LISTED_AT_MOST),
+				...(options.length > LISTED_AT_MOST ? { more: options.length - LISTED_AT_MOST } : {}),
+			};
 		}
 		case "backlog": {
 			const { open, waiting } = backlogFor(await openWork(actAs("agent")));
-			return { open: open.slice(0, LISTED_AT_MOST), ...(open.length > LISTED_AT_MOST ? { more: open.length - LISTED_AT_MOST } : {}), waiting: waiting.slice(0, LISTED_AT_MOST), ...(waiting.length > LISTED_AT_MOST ? { moreWaiting: waiting.length - LISTED_AT_MOST } : {}) };
+			return {
+				open: open.slice(0, LISTED_AT_MOST),
+				...(open.length > LISTED_AT_MOST ? { more: open.length - LISTED_AT_MOST } : {}),
+				waiting: waiting.slice(0, LISTED_AT_MOST),
+				...(waiting.length > LISTED_AT_MOST ? { moreWaiting: waiting.length - LISTED_AT_MOST } : {}),
+			};
 		}
 		case "add_work": {
 			const by = actAs("agent");
 			if (args.items !== undefined) {
-				if (!Array.isArray(args.items) || !args.items.length || args.items.length > MOST_AT_ONCE) throw new Error(`[400] items is a list of 1 to ${MOST_AT_ONCE} pieces of work`);
+				if (!Array.isArray(args.items) || !args.items.length || args.items.length > MOST_AT_ONCE)
+					throw new Error(`[400] items is a list of 1 to ${MOST_AT_ONCE} pieces of work`);
 				const items = args.items.map((item) => workItemFrom(item as Record<string, unknown>));
 				const ids = items.map((i) => i.id);
 				const twice = ids.filter((id, i) => ids.indexOf(id) !== i);
-				if (twice.length) throw new Error(`[400] each piece needs its own id: ${[...new Set(twice)].join(", ")} more than once`);
+				if (twice.length)
+					throw new Error(`[400] each piece needs its own id: ${[...new Set(twice)].join(", ")} more than once`);
 				const added = await addWorks(recordLog<Work>(ctx, repo, workRef(repo)), by, items);
 				return { ok: added.ok, added: added.added, ...(added.already.length ? { already: added.already } : {}) };
 			}
@@ -1087,7 +1818,10 @@ async function runTool(name: string, args: Args, ctx: ToolContext): Promise<unkn
 			const { claim: held, released } = await changeOf(change);
 			const author = held?.agent ?? released.at(-1)?.agent;
 			if (!author) throw new Error(`[404] no change ${change} on ${repo}`);
-			const [fork, project] = await Promise.all([changeSource(author, "read", change, held?.since), ctx.remote(repo, "read")]);
+			const [fork, project] = await Promise.all([
+				changeSource(author, "read", change, held?.since),
+				ctx.remote(repo, "read"),
+			]);
 			const head = await branchHead(fork, `changes/${change}`).catch(() => null);
 			if (!head) throw new Error(`[409] ${change} has nothing pushed to review yet`);
 			// Agent names only: a person's identity stays in the records, out of logs.
@@ -1097,13 +1831,28 @@ async function runTool(name: string, args: Args, ctx: ToolContext): Promise<unkn
 			// and goes once it votes, or in 15 minutes.
 			const role = typeof args.role === "string" && args.role.trim() ? args.role.trim() : "review";
 			const reviewer = acting ?? (typeof args.agent === "string" ? args.agent : undefined);
-			if (reviewer) await ctx.reviews?.hold(repo, holdKey(head, role), reviewer, Number.POSITIVE_INFINITY).catch(() => undefined);
-			return { change, author, url: fork.url, token: fork.token, branch: `changes/${change}`, head, role, project: { url: project.url, token: project.token, branch: into }, ...(into !== branch ? { into } : {}) };
+			if (reviewer)
+				await ctx.reviews?.hold(repo, holdKey(head, role), reviewer, Number.POSITIVE_INFINITY).catch(() => undefined);
+			return {
+				change,
+				author,
+				url: fork.url,
+				token: fork.token,
+				branch: `changes/${change}`,
+				head,
+				role,
+				project: { url: project.url, token: project.token, branch: into },
+				...(into !== branch ? { into } : {}),
+			};
 		}
 		case "credentials": {
 			if (typeof args.change !== "string" || !args.change.trim()) {
 				const remote = await ctx.remote(repo, "read");
-				return { url: remote.url, token: remote.token, note: "read-only: the project repo is written only through the toolkit. Ask with your change for write access to its fork." };
+				return {
+					url: remote.url,
+					token: remote.token,
+					note: "read-only: the project repo is written only through the toolkit. Ask with your change for write access to its fork.",
+				};
 			}
 			const change = requiredString(args, "change");
 			const own = await claimOf(change);
@@ -1137,21 +1886,52 @@ async function runTool(name: string, args: Args, ctx: ToolContext): Promise<unkn
 			const held = await claimOf(change);
 			const asked = typeof args.into === "string" && args.into.trim() ? args.into.trim() : undefined;
 			const into = asked ?? held?.into ?? branch;
-			if (held && (held.into ?? branch) !== into) throw new Error(`[409] ${change} lands on ${held.into ?? branch}: a change lands on one branch; claim another change for ${into}`);
-			const made = into === branch || held ? undefined : await targetBranch(ctx, repo, { into, from: typeof args.from === "string" && args.from.trim() ? args.from.trim() : undefined, registered, claims, agent, stamper });
+			if (held && (held.into ?? branch) !== into)
+				throw new Error(
+					`[409] ${change} lands on ${held.into ?? branch}: a change lands on one branch; claim another change for ${into}`,
+				);
+			const made =
+				into === branch || held
+					? undefined
+					: await targetBranch(ctx, repo, {
+							into,
+							from: typeof args.from === "string" && args.from.trim() ? args.from.trim() : undefined,
+							registered,
+							claims,
+							agent,
+							stamper,
+						});
 			const merging = source ? await branchMerge(ctx, repo, source, into) : undefined;
 			const paths = merging ? merging.paths : given;
 			const after = changeList(args.after, "after");
 			if (after.includes(change)) throw new Error(`[400] ${change} can't wait on itself`);
 			// A loop would leave every change in it waiting forever: refused.
-			const loop = after.length ? await dependencyLoop(change, after, async (dep) => (await claimOf(dep))?.after ?? []) : undefined;
-			if (loop) throw new Error(`[409] after ${loop.at(1)}, ${change} would wait on itself: ${loop.join(" waits on ")}`);
-			const input = { change, agent, paths: scopePaths(paths, into, branch), intent: requiredString(args, "intent"), ...(after.length ? { after } : {}), ...(source ? { source } : {}), staleAfterMs: STALE_AFTER_MS, abandoned: abandonedRule(ctx, repo, registered, votes) };
+			const loop = after.length
+				? await dependencyLoop(change, after, async (dep) => (await claimOf(dep))?.after ?? [])
+				: undefined;
+			if (loop)
+				throw new Error(`[409] after ${loop.at(1)}, ${change} would wait on itself: ${loop.join(" waits on ")}`);
+			const input = {
+				change,
+				agent,
+				paths: scopePaths(paths, into, branch),
+				intent: requiredString(args, "intent"),
+				...(after.length ? { after } : {}),
+				...(source ? { source } : {}),
+				staleAfterMs: STALE_AFTER_MS,
+				abandoned: abandonedRule(ctx, repo, registered, votes),
+			};
 			// Busy enough that one record would hold agents up: shard first, then claim in the shards.
 			const sharded = await shardIfBusy(ctx, repo, claims, registered, input.agent);
 			const outcome = await (sharded ? storeFor(ctx, repo, sharded) : store).claim(input, stamper);
 			// Conflicts name paths as agents gave them; a claim into another branch says so.
-			const conflicts = outcome.ok ? undefined : outcome.conflicts.map((c) => ({ ...c, path: presentClaim({ paths: [c.path] }, branch).paths[0], held: presentClaim({ paths: [c.held] }, branch).paths[0] }));
+			const conflicts = outcome.ok
+				? undefined
+				: outcome.conflicts.map((c) => ({
+						...c,
+						path: presentClaim({ paths: [c.path] }, branch).paths[0],
+						held: presentClaim({ paths: [c.held] }, branch).paths[0],
+					}));
 			// Claimed: the source's tip becomes the change's branch in the agent's fork, for review, check and merge like any change.
 			if (outcome.ok && merging) await merging.push(await changeSource(agent, "write"), change);
 			// Without checks in containers, the repo's Gate lands it in a few minutes: warmed from now. Warmed only at its check,
@@ -1159,20 +1939,47 @@ async function runTool(name: string, args: Args, ctx: ToolContext): Promise<unkn
 			// too early to install for: they warm at the check.)
 			if (outcome.ok && !containerChecks(registered?.verify).length) await warmChecks("claimed", change);
 			const merged = merging
-				? { source, head: merging.tip, claimed: paths, note: `${change} merges ${source} at ${merging.tip.slice(0, 8)} into ${into}: its branch changes/${change} is that commit, in your fork. Get it reviewed, check and merge it like any change. If ${source} moves on, claim again to bring the change up to its new tip (a new head, so a new review).` }
+				? {
+						source,
+						head: merging.tip,
+						claimed: paths,
+						note: `${change} merges ${source} at ${merging.tip.slice(0, 8)} into ${into}: its branch changes/${change} is that commit, in your fork. Get it reviewed, check and merge it like any change. If ${source} moves on, claim again to bring the change up to its new tip (a new head, so a new review).`,
+					}
 				: {};
 			// Refused, and part of it couldn't be backed out: the agent's to free, by releasing the change.
-			const stuck = !outcome.ok && outcome.stillHeld?.length ? { note: `part of ${change}'s claim couldn't be undone and still holds paths (${outcome.stillHeld.length} record(s)): release ${change} to free them` } : {};
-			return { ...outcome, ...(conflicts ? { conflicts } : {}), ...(into !== branch ? { into } : {}), ...(made ? { branch: made } : {}), ...merged, ...stuck };
+			const stuck =
+				!outcome.ok && outcome.stillHeld?.length
+					? {
+							note: `part of ${change}'s claim couldn't be undone and still holds paths (${outcome.stillHeld.length} record(s)): release ${change} to free them`,
+						}
+					: {};
+			return {
+				...outcome,
+				...(conflicts ? { conflicts } : {}),
+				...(into !== branch ? { into } : {}),
+				...(made ? { branch: made } : {}),
+				...merged,
+				...stuck,
+			};
 		}
 		case "release": {
 			const change = requiredString(args, "change");
 			const agent = actAs("agent");
 			// Only its own agent gives a claim up; another's is released only as stale, once its agent has abandoned it.
 			const held = args.stale === true ? null : await claimOf(change);
-			if (held && held.agent !== agent) throw new Error(`[403] ${change} is ${held.agent}'s claim: only its agent releases it, or anyone once it's abandoned (release with stale: true)`);
-			if (args.stale === true) return store.releaseStale({ change, agent, staleAfterMs: STALE_AFTER_MS, abandoned: abandonedRule(ctx, repo, registered, votes) }, stamper);
-			return store.release({ change, agent, reason: typeof args.reason === "string" ? args.reason : "released" }, stamper);
+			if (held && held.agent !== agent)
+				throw new Error(
+					`[403] ${change} is ${held.agent}'s claim: only its agent releases it, or anyone once it's abandoned (release with stale: true)`,
+				);
+			if (args.stale === true)
+				return store.releaseStale(
+					{ change, agent, staleAfterMs: STALE_AFTER_MS, abandoned: abandonedRule(ctx, repo, registered, votes) },
+					stamper,
+				);
+			return store.release(
+				{ change, agent, reason: typeof args.reason === "string" ? args.reason : "released" },
+				stamper,
+			);
 		}
 		case "ask_human": {
 			const change = requiredString(args, "change");
@@ -1186,7 +1993,17 @@ async function runTool(name: string, args: Args, ctx: ToolContext): Promise<unkn
 			// Busy enough that one record would hold reviewers up: shard the votes first.
 			const commit = requiredString(args, "commit");
 			const teams = (await ctx.teamsOf?.(repo)) ?? [];
-			const cast = await votesFor(ctx, repo, await shardVotesIfBusy(ctx, repo, registered, reviewer)).vote({ commit, reviewer, role: requiredString(args, "role"), verdict, evidence: requiredString(args, "evidence"), ...(teams.length ? { teams } : {}) }, stamper);
+			const cast = await votesFor(ctx, repo, await shardVotesIfBusy(ctx, repo, registered, reviewer)).vote(
+				{
+					commit,
+					reviewer,
+					role: requiredString(args, "role"),
+					verdict,
+					evidence: requiredString(args, "evidence"),
+					...(teams.length ? { teams } : {}),
+				},
+				stamper,
+			);
 			// Its review is done: the hold review_access marked goes.
 			await ctx.reviews?.release(repo, holdKey(commit, requiredString(args, "role")), reviewer).catch(() => undefined);
 			if (verdict === "approve") await warmChecks("approved", commit);
@@ -1199,7 +2016,8 @@ async function runTool(name: string, args: Args, ctx: ToolContext): Promise<unkn
 			const change = requiredString(args, "change");
 			const own = await claimOf(change);
 			const holder = own?.agent;
-			if (holder && holder !== agentArg("agent")) throw new Error(`[409] ${change} is ${holder}'s change: merge it as ${holder}`);
+			if (holder && holder !== agentArg("agent"))
+				throw new Error(`[409] ${change} is ${holder}'s change: merge it as ${holder}`);
 			// Onto the branch its claim names, with every other change ready to land there.
 			const into = own?.into ?? branch;
 			// Not before what it depends on has merged into that same branch.
@@ -1207,12 +2025,25 @@ async function runTool(name: string, args: Args, ctx: ToolContext): Promise<unkn
 			if (waits.length) return { ok: false, reasons: waits };
 			// Checks on GitHub Actions, and main pushed back to GitHub after every landing, for a repo connected to one.
 			const checksHere = branchSettings(registry, into).verify;
-			const link = registry?.github && ctx.github ? await ctx.github(registry.github.repo).catch((err) => (console.error(`reaching ${registry.github!.repo} on GitHub failed`, String(err)), null)) : null;
-			if (onActions(checksHere) && !link) return { ok: false, reasons: [`checks run on GitHub Actions, but ${registry?.github ? `GitHive can't reach ${registry.github.repo}: is the GitHive app installed there?` : "no GitHub repo is connected (settings github)"}`] };
+			const link =
+				registry?.github && ctx.github
+					? await ctx
+							.github(registry.github.repo)
+							.catch((err) => (console.error(`reaching ${registry.github!.repo} on GitHub failed`, String(err)), null))
+					: null;
+			if (onActions(checksHere) && !link)
+				return {
+					ok: false,
+					reasons: [
+						`checks run on GitHub Actions, but ${registry?.github ? `GitHive can't reach ${registry.github.repo}: is the GitHive app installed there?` : "no GitHub repo is connected (settings github)"}`,
+					],
+				};
 			const project = await write();
 			// The repo's Gate (a container, real git) lands every batch, checks or not, and does its GitHub pushes. A batch's
 			// changes are read through Artifacts' API, here, the Gate reading only those it can't place (see artifactsInspect).
-			const gate = ctx.batchGit ? ctx.batchGit(repo) : fail(503, "GitHive can't land changes here: no Gate is set up to land them");
+			const gate = ctx.batchGit
+				? ctx.batchGit(repo)
+				: fail(503, "GitHive can't land changes here: no Gate is set up to land them");
 			const batchGit = ctx.history ? { ...gate, inspect: artifactsInspect(ctx.history, repo, gate.inspect) } : gate;
 			return mergeChange({
 				remote: project,
@@ -1238,9 +2069,16 @@ async function runTool(name: string, args: Args, ctx: ToolContext): Promise<unkn
 				others: async (): Promise<Candidate[]> => {
 					const inForce = await adviceView();
 					const merged = new Set(inForce.merged);
-					const sameBranch = inForce.claims.filter((c) => (c.into ?? branch) === into && c.change !== change && (c.after ?? []).every((dep) => merged.has(dep)));
+					const sameBranch = inForce.claims.filter(
+						(c) =>
+							(c.into ?? branch) === into && c.change !== change && (c.after ?? []).every((dep) => merged.has(dep)),
+					);
 					const heads = await openHeads(inForce.claims);
-					return sameBranch.map((claim) => ({ claim, head: heads(claim), source: () => changeSource(claim.agent, "read", claim.change, claim.since) }));
+					return sameBranch.map((claim) => ({
+						claim,
+						head: heads(claim),
+						source: () => changeSource(claim.agent, "read", claim.change, claim.since),
+					}));
 				},
 				stamper,
 				stampKey: registry?.stampKey,
@@ -1251,23 +2089,43 @@ async function runTool(name: string, args: Args, ctx: ToolContext): Promise<unkn
 		}
 		case "build": {
 			if (!ctx.startBuilder) throw new Error("[501] hosted builders aren't available here");
-			if (ctx.mayUseHosted && !(await ctx.mayUseHosted())) throw new Error("[403] GitHive's hosted agents are by invitation: ask an admin to add you");
+			if (ctx.mayUseHosted && !(await ctx.mayUseHosted()))
+				throw new Error("[403] GitHive's hosted agents are by invitation: ask an admin to add you");
 			const intent = requiredString(args, "intent");
 			const change = changeId(intent);
-			const claimed = await store.claim({ change, agent: "githive-builder", paths: normalizeClaim(requiredPaths(args, "paths")), intent, staleAfterMs: STALE_AFTER_MS, abandoned: abandonedRule(ctx, repo, registered, votes) }, stamper);
+			const claimed = await store.claim(
+				{
+					change,
+					agent: "githive-builder",
+					paths: normalizeClaim(requiredPaths(args, "paths")),
+					intent,
+					staleAfterMs: STALE_AFTER_MS,
+					abandoned: abandonedRule(ctx, repo, registered, votes),
+				},
+				stamper,
+			);
 			if (!claimed.ok) return claimed;
 			return ctx.startBuilder({ repo, change });
 		}
 		case "request_review": {
-			if (ctx.mayUseHosted && !(await ctx.mayUseHosted())) throw new Error("[403] GitHive's hosted agents are by invitation: ask an admin to add you");
+			if (ctx.mayUseHosted && !(await ctx.mayUseHosted()))
+				throw new Error("[403] GitHive's hosted agents are by invitation: ask an admin to add you");
 			const change = requiredString(args, "change");
 			const registry = registered;
 			if (!(await claimOf(change))) throw new Error(`[409] ${change} holds no claim: claim the change's paths first`);
 			if (!ctx.requestReview) throw new Error("[501] hosted reviewers aren't available here");
 			const policy = branchSettings(registry, (await claimOf(change))?.into).policy;
 			// By default a general review, and every role that can veto a change to these paths.
-			const roles = Array.isArray(args.roles) && args.roles.length ? (args.roles as string[]) : hostedRoles(effectivePolicy(policy, (await claimOf(change))?.paths ?? []).vetoes);
-			return ctx.requestReview({ repo, change, roles, ...(typeof args.summary === "string" ? { summary: args.summary } : {}) });
+			const roles =
+				Array.isArray(args.roles) && args.roles.length
+					? (args.roles as string[])
+					: hostedRoles(effectivePolicy(policy, (await claimOf(change))?.paths ?? []).vetoes);
+			return ctx.requestReview({
+				repo,
+				change,
+				roles,
+				...(typeof args.summary === "string" ? { summary: args.summary } : {}),
+			});
 		}
 		case "audit": {
 			const { merges, violations } = await runAudit(ctx, repo);
@@ -1275,7 +2133,16 @@ async function runTool(name: string, args: Args, ctx: ToolContext): Promise<unkn
 		}
 		case "revert": {
 			const { violations } = await runAudit(ctx, repo);
-			return revertViolation({ remote: await write(), branch: projectBranch(registered), claims, votes, stamper, target: requiredString(args, "commit"), violations, agent: actAs("agent") });
+			return revertViolation({
+				remote: await write(),
+				branch: projectBranch(registered),
+				claims,
+				votes,
+				stamper,
+				target: requiredString(args, "commit"),
+				violations,
+				agent: actAs("agent"),
+			});
 		}
 		case "status": {
 			const change = requiredString(args, "change");
@@ -1283,23 +2150,64 @@ async function runTool(name: string, args: Args, ctx: ToolContext): Promise<unkn
 			const released = held ? undefined : (await changeOf(change)).released.at(-1);
 			const votesOn = async (head: string) => (await votes.readFor([head])).votes;
 			const waits = held?.after?.length ? await waitingOn(held.after, held.into ?? branch) : [];
-			const status = await changeStatus(ctx, repo, registered, votesOn, change, held ?? undefined, held?.agent ?? released?.agent);
+			const status = await changeStatus(
+				ctx,
+				repo,
+				registered,
+				votesOn,
+				change,
+				held ?? undefined,
+				held?.agent ?? released?.agent,
+			);
 			// Landed at the head it has now, though its claim isn't released yet (that waits for the lease to be handed on):
 			// said, so its agent doesn't merge it again (80 agents of a 200-agent run did, all at once).
-			const landed = held && status.head ? (await ctx.landing?.(repo, held.into ?? branch).view().catch(() => null))?.recent.findLast((s) => s.change === change && s.head === status.head && s.how === "landed") : undefined;
-			return { change, claim: held, ...(released ? { released } : {}), ...(landed ? { landed: { commit: landed.commit, at: landed.at } } : {}), ...(waits.length ? { waitsOn: waits } : {}), ...status };
+			const landed =
+				held && status.head
+					? (
+							await ctx
+								.landing?.(repo, held.into ?? branch)
+								.view()
+								.catch(() => null)
+						)?.recent.findLast((s) => s.change === change && s.head === status.head && s.how === "landed")
+					: undefined;
+			return {
+				change,
+				claim: held,
+				...(released ? { released } : {}),
+				...(landed ? { landed: { commit: landed.commit, at: landed.at } } : {}),
+				...(waits.length ? { waitsOn: waits } : {}),
+				...status,
+			};
 		}
-		case "check":
-		{
+		case "check": {
 			const change = requiredString(args, "change");
 			const own = await claimOf(change);
 			const source = own ? await changeSource(own.agent, "read", change, own.since).catch(() => null) : null;
 			if (!source) throw new Error(`[409] changes/${change} has nothing pushed to check`);
 			const into = own?.into ?? branch;
-			const checked = await checkChange({ project: await ctx.remote(repo, "read"), branch: into, source, claims: own ? [own] : [], change, ...(ctx.branchHead ? { branchHead: () => ctx.branchHead!(repo, into) } : {}), ...(ctx.history ? { history: ctx.history } : {}) });
+			const checked = await checkChange({
+				project: await ctx.remote(repo, "read"),
+				branch: into,
+				source,
+				claims: own ? [own] : [],
+				change,
+				...(ctx.branchHead ? { branchHead: () => ctx.branchHead!(repo, into) } : {}),
+				...(ctx.history ? { history: ctx.history } : {}),
+			});
 			// In conflict with the branch: who changed each file last, as the landing recalls.
 			const conflicting = checked.main.clean ? [] : (checked.main.conflicts ?? []);
-			const causes = conflicting.length && ctx.landing ? lastLandedOn((await ctx.landing(repo, into).view().catch(() => null))?.recent ?? [], conflicting) : [];
+			const causes =
+				conflicting.length && ctx.landing
+					? lastLandedOn(
+							(
+								await ctx
+									.landing(repo, into)
+									.view()
+									.catch(() => null)
+							)?.recent ?? [],
+							conflicting,
+						)
+					: [];
 			// The head just read, for reviews, backlog and merge to take as current (see openHeads): agents check after each push.
 			await ctx.noteHeads?.(repo, { [change]: checked.head }).catch(() => undefined);
 			// Pushed and checked: a merge is likely within minutes, so its check container warms up meanwhile.
@@ -1307,27 +2215,50 @@ async function runTool(name: string, args: Args, ctx: ToolContext): Promise<unkn
 			return causes.length ? { ...checked, causes } : checked;
 		}
 		case "register": {
-			if (ctx.agent) throw new Error(`[409] you're signed in as ${ctx.agent}: what you write is already attributed to you, with no key`);
+			if (ctx.agent)
+				throw new Error(
+					`[409] you're signed in as ${ctx.agent}: what you write is already attributed to you, with no key`,
+				);
 			const nameOk = (agent: string) => {
-				if (agent.includes("/")) throw new Error("[400] names with \"/\" are signed-in agents' (<handle>/<agent>); register a name without one");
-				if (agent.startsWith(HOSTED_PREFIX) && !ctx.hosted) throw new Error("[403] githive- names are GitHive's hosted agents'");
+				if (agent.includes("/"))
+					throw new Error(
+						'[400] names with "/" are signed-in agents\' (<handle>/<agent>); register a name without one',
+					);
+				if (agent.startsWith(HOSTED_PREFIX) && !ctx.hosted)
+					throw new Error("[403] githive- names are GitHive's hosted agents'");
 				return agent;
 			};
-			const keyFor = (agent: string) => `${agent}.${btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(24)))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "")}`;
-			const note = "Keep each key secret; it is shown once. Send it as X-GitHive-Agent-Key (or agent_key) with every call.";
+			const keyFor = (agent: string) =>
+				`${agent}.${btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(24))))
+					.replace(/\+/g, "-")
+					.replace(/\//g, "_")
+					.replace(/=+$/, "")}`;
+			const note =
+				"Keep each key secret; it is shown once. Send it as X-GitHive-Agent-Key (or agent_key) with every call.";
 			if (args.agents !== undefined) {
-				if (!Array.isArray(args.agents) || !args.agents.length || args.agents.length > MOST_AT_ONCE) throw new Error(`[400] agents is a list of 1 to ${MOST_AT_ONCE} names`);
-				const names = args.agents.map((a) => (typeof a === "string" && a.trim() ? nameOk(a.trim()) : fail(400, "each of agents is a name")));
+				if (!Array.isArray(args.agents) || !args.agents.length || args.agents.length > MOST_AT_ONCE)
+					throw new Error(`[400] agents is a list of 1 to ${MOST_AT_ONCE} names`);
+				const names = args.agents.map((a) =>
+					typeof a === "string" && a.trim() ? nameOk(a.trim()) : fail(400, "each of agents is a name"),
+				);
 				if (new Set(names).size !== names.length) throw new Error("[400] agents names a name more than once");
 				const keys = names.map(keyFor);
-				const outcome = await registerAgents(claims, await Promise.all(names.map(async (agent, i) => ({ agent, keyHash: await sha256(keys[i]) }))), stamper);
+				const outcome = await registerAgents(
+					claims,
+					await Promise.all(names.map(async (agent, i) => ({ agent, keyHash: await sha256(keys[i]) }))),
+					stamper,
+				);
 				if (!outcome.ok) throw new Error(`[409] ${outcome.refused}`);
 				await ctx.prepareForks?.(repo, names).catch(() => undefined);
 				return { agents: names.map((agent, i) => ({ agent, key: keys[i] })), note };
 			}
 			const agent = nameOk(requiredString(args, "agent"));
 			const newKey = keyFor(agent);
-			const outcome = await registerAgent(claims, { agent, keyHash: await sha256(newKey), ...(acting ? { holder: acting } : {}) }, stamper);
+			const outcome = await registerAgent(
+				claims,
+				{ agent, keyHash: await sha256(newKey), ...(acting ? { holder: acting } : {}) },
+				stamper,
+			);
 			if (!outcome.ok) throw new Error(`[409] ${outcome.refused}`);
 			// Its fork, made in the background now rather than in a crowd on its first push.
 			await ctx.prepareForks?.(repo, [agent]).catch(() => undefined);

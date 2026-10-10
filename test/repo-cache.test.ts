@@ -10,7 +10,10 @@ const { RepoCache } = await import("../src/repo-cache");
 const feed = () => {
 	const sent: string[] = [];
 	const socket = { send: (message: string) => sent.push(JSON.parse(message).kind) };
-	return { live: new RepoCache({ storage: new FakeStorage(), getWebSockets: () => [socket] } as never, {} as never), sent };
+	return {
+		live: new RepoCache({ storage: new FakeStorage(), getWebSockets: () => [socket] } as never, {} as never),
+		sent,
+	};
 };
 
 describe("kept views", () => {
@@ -61,11 +64,32 @@ describe("kept views", () => {
 describe("news of what landed", () => {
 	it("tells an agent what others landed since it was last told, nothing old on its first call, never its own", async () => {
 		const { live } = feed();
-		const landed = (change: string, agent: string, at: string) => ({ change, head: `h-${change}`, agent, how: "landed" as const, at, commit: `c-${change}`, files: [`src/${change}.ts`], intent: `do ${change}` });
+		const landed = (change: string, agent: string, at: string) => ({
+			change,
+			head: `h-${change}`,
+			agent,
+			how: "landed" as const,
+			at,
+			commit: `c-${change}`,
+			files: [`src/${change}.ts`],
+			intent: `do ${change}`,
+		});
 		await live.landingSettled("main", [landed("old", "agent-b", "2026-10-10T10:00:00.000Z")]);
 		expect(await live.landingNews("main", "agent-a")).toEqual([]);
-		await live.landingSettled("main", [landed("mine", "agent-a", "2026-10-10T10:01:00.000Z"), landed("theirs", "agent-b", "2026-10-10T10:01:00.000Z")]);
-		expect(await live.landingNews("main", "agent-a")).toEqual([{ change: "theirs", agent: "agent-b", at: "2026-10-10T10:01:00.000Z", commit: "c-theirs", files: ["src/theirs.ts"], intent: "do theirs" }]);
+		await live.landingSettled("main", [
+			landed("mine", "agent-a", "2026-10-10T10:01:00.000Z"),
+			landed("theirs", "agent-b", "2026-10-10T10:01:00.000Z"),
+		]);
+		expect(await live.landingNews("main", "agent-a")).toEqual([
+			{
+				change: "theirs",
+				agent: "agent-b",
+				at: "2026-10-10T10:01:00.000Z",
+				commit: "c-theirs",
+				files: ["src/theirs.ts"],
+				intent: "do theirs",
+			},
+		]);
 		// Told once.
 		expect(await live.landingNews("main", "agent-a")).toEqual([]);
 	});
@@ -75,7 +99,9 @@ describe("forgetting a deleted repo's views", () => {
 	it("drops everything kept for it, however much, the heads seen on its changes among it", async () => {
 		const { live } = feed();
 		await live.noteHeads(Object.fromEntries(Array.from({ length: 300 }, (_, i) => [`note-${i}`, `h${i}`])));
-		await live.landingSettled("master", [{ change: "note-1", head: "h1", agent: "a", how: "landed", at: new Date().toISOString(), commit: "m1" }]);
+		await live.landingSettled("master", [
+			{ change: "note-1", head: "h1", agent: "a", how: "landed", at: new Date().toISOString(), commit: "m1" },
+		]);
 		expect(Object.keys(await live.knownHeads(Array.from({ length: 300 }, (_, i) => `note-${i}`)))).toHaveLength(300);
 		await live.clearViews();
 		expect(await live.knownHeads(["note-1", "note-299"])).toEqual({});
@@ -92,7 +118,6 @@ describe("forgetting a deleted repo's views", () => {
 		expect(await live.startBuild("audit")).toBe(true);
 	});
 });
-
 
 describe("kept record tips", () => {
 	const a = "a".repeat(40);

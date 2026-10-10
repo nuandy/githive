@@ -8,10 +8,15 @@ import { hostedAgentStatus } from "../src/toolkit/env";
 describe("hostedAgentStatus", () => {
 	it("reports the builder and each role's reviewer of the head, skipping those that never ran", async () => {
 		const env = {
-			BUILDER: { getByName: (name: string) => ({ state: async () => (name === "fork--p--c-1" ? { status: "working", revisions: 1 } : null) }) },
+			BUILDER: {
+				getByName: (name: string) => ({
+					state: async () => (name === "fork--p--c-1" ? { status: "working", revisions: 1 } : null),
+				}),
+			},
 			REVIEWER: {
 				getByName: (name: string) => ({
-					state: async () => (name === reviewerName("fork--p--c-1", "tests", "h2") ? { status: "done", verdict: "reject" } : null),
+					state: async () =>
+						name === reviewerName("fork--p--c-1", "tests", "h2") ? { status: "done", verdict: "reject" } : null,
 				}),
 			},
 		};

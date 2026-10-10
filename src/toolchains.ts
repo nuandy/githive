@@ -14,7 +14,16 @@ const MARKERS: Record<Toolchain, RegExp> = {
 };
 
 /** `git ls-files` pathspecs for every marker, so listing them is cheap in a large repo. */
-export const MARKER_PATHSPECS = ["*pyproject.toml", "*requirements*.txt", "*setup.py", "*setup.cfg", "*uv.lock", "*Pipfile", "*go.mod", "*Cargo.toml"];
+export const MARKER_PATHSPECS = [
+	"*pyproject.toml",
+	"*requirements*.txt",
+	"*setup.py",
+	"*setup.cfg",
+	"*uv.lock",
+	"*Pipfile",
+	"*go.mod",
+	"*Cargo.toml",
+];
 
 /** The toolchains a repo uses, from its tracked file paths. */
 export function detectToolchains(files: string[]): Toolchain[] {
@@ -63,7 +72,7 @@ export const DEPENDENCIES: Record<Toolchain, { command: string; script: string }
 		command: "uv sync (or uv pip install -r requirements*.txt)",
 		script: [
 			'if [ -f uv.lock ] || grep -qs "^\\[project\\]" pyproject.toml; then uv sync -q --all-extras',
-			"elif ls requirements*.txt >/dev/null 2>&1; then for f in requirements*.txt; do uv pip install -q -r \"$f\" || exit 1; done",
+			'elif ls requirements*.txt >/dev/null 2>&1; then for f in requirements*.txt; do uv pip install -q -r "$f" || exit 1; done',
 			"elif [ -f setup.py ] || [ -f pyproject.toml ]; then uv pip install -q -e .",
 			"fi",
 		].join("; "),
@@ -73,4 +82,5 @@ export const DEPENDENCIES: Record<Toolchain, { command: string; script: string }
 };
 
 /** The files a toolchain's dependencies are installed from: unchanged, an install is skipped. */
-export const DEPENDENCY_FILES = "pyproject.toml uv.lock requirements*.txt setup.py setup.cfg go.mod go.sum Cargo.toml Cargo.lock rust-toolchain rust-toolchain.toml";
+export const DEPENDENCY_FILES =
+	"pyproject.toml uv.lock requirements*.txt setup.py setup.cfg go.mod go.sum Cargo.toml Cargo.lock rust-toolchain rust-toolchain.toml";

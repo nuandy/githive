@@ -77,11 +77,17 @@ export const verifyAccessRequest: AccessVerifier = async (request, config) => {
 		const jwks = (await jwksResponse.json()) as JsonWebKeySet;
 		if (!jwks || !Array.isArray(jwks.keys)) return null;
 		const jwk = jwks.keys.find(
-			(key) => key.kid === header.kid && key.kty === "RSA" && (!key.use || key.use === "sig") && (!key.alg || key.alg === "RS256"),
+			(key) =>
+				key.kid === header.kid &&
+				key.kty === "RSA" &&
+				(!key.use || key.use === "sig") &&
+				(!key.alg || key.alg === "RS256"),
 		);
 		if (!jwk) return null;
 
-		const key = await crypto.subtle.importKey("jwk", jwk, { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" }, false, ["verify"]);
+		const key = await crypto.subtle.importKey("jwk", jwk, { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" }, false, [
+			"verify",
+		]);
 		const signingInput = new TextEncoder().encode(`${segments[0]}.${segments[1]}`);
 		if (!(await crypto.subtle.verify("RSASSA-PKCS1-v1_5", key, signature, signingInput))) return null;
 

@@ -1,7 +1,5 @@
 /** Verified identity extracted from a Cloudflare Access JWT. */
-export type AccessIdentity =
-	| { kind: "person"; value: string }
-	| { kind: "service"; value: string };
+export type AccessIdentity = { kind: "person"; value: string } | { kind: "service"; value: string };
 
 export interface AccessConfiguration {
 	/** Cloudflare Access team hostname, without a scheme. */
@@ -23,10 +21,7 @@ export interface AccessJwtClaims {
 	sub?: string;
 }
 
-export type AccessVerifier = (
-	request: Request,
-	config: AccessConfiguration,
-) => Promise<AccessIdentity | null>;
+export type AccessVerifier = (request: Request, config: AccessConfiguration) => Promise<AccessIdentity | null>;
 
 /** Stable audit label: an email for a person, or an identified Access service token. */
 export function accessIdentityLabel(identity: AccessIdentity): string {

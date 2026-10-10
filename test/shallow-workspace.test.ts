@@ -14,7 +14,10 @@ import { startGitServer, type GitServer } from "./helpers/git-server";
 let server: GitServer;
 let work: string;
 const remote = () => ({ url: server.url, token: "unused" });
-const git = (...args: string[]) => execFileSync("git", ["-C", work, "-c", "user.name=t", "-c", "user.email=t@example.com", ...args]).toString().trim();
+const git = (...args: string[]) =>
+	execFileSync("git", ["-C", work, "-c", "user.name=t", "-c", "user.email=t@example.com", ...args])
+		.toString()
+		.trim();
 
 beforeEach(async () => {
 	server = await startGitServer();

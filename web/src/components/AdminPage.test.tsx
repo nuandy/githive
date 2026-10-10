@@ -8,13 +8,21 @@ import { TopBar } from "./TopBar";
 // approve or turn down, who may sign in, and who may start hosted agents.
 
 const noop = async () => ({}) as never;
-const actions: AdminActions = { approve: noop, removeInvite: noop, decline: noop, allowHosted: noop, disallowHosted: noop };
+const actions: AdminActions = {
+	approve: noop,
+	removeInvite: noop,
+	decline: noop,
+	allowHosted: noop,
+	disallowHosted: noop,
+};
 
 describe("the Admin page", () => {
 	it("lists orgs' requests with who asked, the approved emails, and who may start hosted agents", () => {
 		const html = renderToStaticMarkup(
 			<AdminView
-				requests={[{ email: "dan@example.com", orgs: [{ org: "acme", role: "admin", invitedBy: "ada" }], createdAt: ago(30) }]}
+				requests={[
+					{ email: "dan@example.com", orgs: [{ org: "acme", role: "admin", invitedBy: "ada" }], createdAt: ago(30) },
+				]}
 				invites={[{ email: "ada@example.com", invitedBy: "admin@example.com", createdAt: ago(60 * 24) }]}
 				hosted={[{ handle: "ada", grantedBy: "admin@example.com", createdAt: ago(60) }]}
 				actions={actions}
@@ -33,17 +41,27 @@ describe("the Admin page", () => {
 	});
 
 	it("says when there's nothing waiting, and nobody listed", () => {
-		const text = visibleText(renderToStaticMarkup(<AdminView requests={[]} invites={[]} hosted={[]} actions={actions} now={NOW} />));
+		const text = visibleText(
+			renderToStaticMarkup(<AdminView requests={[]} invites={[]} hosted={[]} actions={actions} now={NOW} />),
+		);
 		expect(text).toContain("No requests waiting.");
 		expect(text).toContain("Nobody is approved yet.");
 		expect(text).toContain("Nobody may start hosted agents yet.");
 	});
 
 	it("is reached from the top bar by Access callers, with the requests waiting counted", () => {
-		const html = renderToStaticMarkup(<TopBar crumbs={[]} me={{ kind: "access", label: "admin@example.com", by: "person:x" }} adminRequests={2} />);
+		const html = renderToStaticMarkup(
+			<TopBar crumbs={[]} me={{ kind: "access", label: "admin@example.com", by: "person:x" }} adminRequests={2} />,
+		);
 		expect(html).toContain('href="#/admin"');
 		expect(html).toContain("Admin, 2 requests waiting");
-		const person = renderToStaticMarkup(<TopBar crumbs={[]} me={{ kind: "user", handle: "ada", name: null, email: "ada@example.com", avatarUrl: null, by: "person:x" }} onSignOut={() => undefined} />);
+		const person = renderToStaticMarkup(
+			<TopBar
+				crumbs={[]}
+				me={{ kind: "user", handle: "ada", name: null, email: "ada@example.com", avatarUrl: null, by: "person:x" }}
+				onSignOut={() => undefined}
+			/>,
+		);
 		expect(person).not.toContain('href="#/admin"');
 	});
 });

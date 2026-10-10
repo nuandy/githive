@@ -39,10 +39,15 @@ describe("retryTransient", () => {
 	it("does not retry permanent client errors or unclassified failures", async () => {
 		for (const failure of [Object.assign(new Error("unauthorized"), { status: 401 }), new Error("bad input")]) {
 			let attempts = 0;
-			await expect(retryTransient(async () => {
-				attempts++;
-				throw failure;
-			}, { sleep: async () => {} })).rejects.toBe(failure);
+			await expect(
+				retryTransient(
+					async () => {
+						attempts++;
+						throw failure;
+					},
+					{ sleep: async () => {} },
+				),
+			).rejects.toBe(failure);
 			expect(attempts).toBe(1);
 		}
 	});
@@ -51,10 +56,13 @@ describe("retryTransient", () => {
 		const failure = Object.assign(new Error("busy"), { statusCode: 429 });
 		let attempts = 0;
 		await expect(
-			retryTransient(async () => {
-				attempts++;
-				throw failure;
-			}, { maxAttempts: 3, sleep: async () => {} }),
+			retryTransient(
+				async () => {
+					attempts++;
+					throw failure;
+				},
+				{ maxAttempts: 3, sleep: async () => {} },
+			),
 		).rejects.toBe(failure);
 		expect(attempts).toBe(3);
 	});

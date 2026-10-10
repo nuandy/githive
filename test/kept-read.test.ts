@@ -29,11 +29,22 @@ describe("a kept read", () => {
 	it("reads the repo itself when the RepoCache doesn't answer, or can't keep what was read", async () => {
 		const down = () => Promise.reject(new Error("Durable Object is overloaded. Requests queued for too long."));
 		const read = vi.fn(async () => ({ claims: ["a"] }));
-		const unreachable = { REPO_CACHE: { getByName: () => ({ view: down, startBuild: down, keep: down, buildFailed: down }) } } as never;
+		const unreachable = {
+			REPO_CACHE: { getByName: () => ({ view: down, startBuild: down, keep: down, buildFailed: down }) },
+		} as never;
 		expect(await keptRead(unreachable, "p", "claims-advice", 30_000, read)).toEqual({ claims: ["a"] });
 		const errors = vi.spyOn(console, "error").mockImplementation(() => undefined);
 		try {
-			const cantKeep = { REPO_CACHE: { getByName: () => ({ view: async () => ({ json: undefined, fresh: false, building: false, writes: 0 }), startBuild: async () => true, keep: down, buildFailed: down }) } } as never;
+			const cantKeep = {
+				REPO_CACHE: {
+					getByName: () => ({
+						view: async () => ({ json: undefined, fresh: false, building: false, writes: 0 }),
+						startBuild: async () => true,
+						keep: down,
+						buildFailed: down,
+					}),
+				},
+			} as never;
 			expect(await keptRead(cantKeep, "p", "claims-advice", 30_000, read)).toEqual({ claims: ["a"] });
 		} finally {
 			errors.mockRestore();
@@ -78,7 +89,9 @@ describe("a kept read", () => {
 			await new Promise((resolve) => setTimeout(resolve, 300));
 			return { claims: ["a"] };
 		});
-		const results = await Promise.all(Array.from({ length: 20 }, () => keptRead(env, "p", "claims-advice", 30_000, read)));
+		const results = await Promise.all(
+			Array.from({ length: 20 }, () => keptRead(env, "p", "claims-advice", 30_000, read)),
+		);
 		expect(results.every((r) => r.claims[0] === "a")).toBe(true);
 		expect(read).toHaveBeenCalledTimes(1);
 	});

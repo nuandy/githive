@@ -51,7 +51,13 @@ export interface Landing {
 	 * `since`: merging again checks again); else whether `holder` holds the
 	 * lease now (taking it if it's free or ran out).
 	 */
-	turn(holder: string, change: string, head: string, since: number, ttlMs: number): Promise<{ settled: Settled } | { lease: boolean }>;
+	turn(
+		holder: string,
+		change: string,
+		head: string,
+		since: number,
+		ttlMs: number,
+	): Promise<{ settled: Settled } | { lease: boolean }>;
 	/** Keep the lease a while longer; false if it isn't `holder`'s any more. */
 	renew(holder: string, ttlMs: number): Promise<boolean>;
 	drop(holder: string): Promise<void>;
@@ -80,20 +86,42 @@ export interface Landed {
 
 /** Outcomes that landed, as news: what changed, by whom, and why. */
 export const asNews = (outcomes: Settled[]): Landed[] =>
-	outcomes.filter((s) => s.how === "landed").map((s) => ({ change: s.change, agent: s.agent, at: s.at, files: s.files ?? [], ...(s.commit ? { commit: s.commit } : {}), ...(s.filesMore ? { filesMore: s.filesMore } : {}), ...(s.intent ? { intent: s.intent } : {}) }));
+	outcomes
+		.filter((s) => s.how === "landed")
+		.map((s) => ({
+			change: s.change,
+			agent: s.agent,
+			at: s.at,
+			files: s.files ?? [],
+			...(s.commit ? { commit: s.commit } : {}),
+			...(s.filesMore ? { filesMore: s.filesMore } : {}),
+			...(s.intent ? { intent: s.intent } : {}),
+		}));
 
 /** For each of `files`, the change that last landed on it, as the landing recalls: who to ask about a conflict there. */
 export const lastLandedOn = (outcomes: Settled[], files: string[]) =>
 	files.flatMap((file) => {
 		const last = asNews(outcomes).findLast((l) => l.files.includes(file));
-		return last ? [{ file, change: last.change, agent: last.agent, ...(last.commit ? { commit: last.commit } : {}), ...(last.intent ? { intent: last.intent } : {}) }] : [];
+		return last
+			? [
+					{
+						file,
+						change: last.change,
+						agent: last.agent,
+						...(last.commit ? { commit: last.commit } : {}),
+						...(last.intent ? { intent: last.intent } : {}),
+					},
+				]
+			: [];
 	});
 
 /** A conflict's causes in words: `a.ts (changed by note-7, agent-3: "add refunds", 2f56723d)`. */
 export const conflictWords = (files: string[], causes: ReturnType<typeof lastLandedOn>) =>
 	files.map((file) => {
 		const c = causes.find((x) => x.file === file);
-		return c ? `${file} (changed by ${c.change}, ${c.agent}${c.intent ? `: "${c.intent}"` : ""}${c.commit ? `, ${c.commit.slice(0, 8)}` : ""})` : file;
+		return c
+			? `${file} (changed by ${c.change}, ${c.agent}${c.intent ? `: "${c.intent}"` : ""}${c.commit ? `, ${c.commit.slice(0, 8)}` : ""})`
+			: file;
 	});
 
 /** A branch's landing as data, for RepoCache and memoryLanding to keep alike. */
@@ -105,8 +133,18 @@ export interface LandingState {
 
 export const emptyLanding = (): LandingState => ({ checking: null, recent: [] });
 
-export function takeTurn(state: LandingState, holder: string, change: string, head: string, since: number, ttlMs: number, now = Date.now()): { state: LandingState; turn: { settled: Settled } | { lease: boolean } } {
-	const settled = state.recent.findLast((s) => s.change === change && s.head === head && (s.how === "landed" || Date.parse(s.at) >= since));
+export function takeTurn(
+	state: LandingState,
+	holder: string,
+	change: string,
+	head: string,
+	since: number,
+	ttlMs: number,
+	now = Date.now(),
+): { state: LandingState; turn: { settled: Settled } | { lease: boolean } } {
+	const settled = state.recent.findLast(
+		(s) => s.change === change && s.head === head && (s.how === "landed" || Date.parse(s.at) >= since),
+	);
 	if (settled) return { state, turn: { settled } };
 	const { lease } = state;
 	if (lease && lease.holder !== holder && lease.until > now) return { state, turn: { lease: false } };
@@ -116,14 +154,23 @@ export function takeTurn(state: LandingState, holder: string, change: string, he
 }
 
 /** Keep the lease `ttlMs` more, never less than it has: steps running side by side (a search, a landing) each keep it as long as they need. */
-export function renewLease(state: LandingState, holder: string, ttlMs: number, now = Date.now()): { state: LandingState; held: boolean } {
+export function renewLease(
+	state: LandingState,
+	holder: string,
+	ttlMs: number,
+	now = Date.now(),
+): { state: LandingState; held: boolean } {
 	if (state.lease?.holder !== holder) return { state, held: false };
 	return { state: { ...state, lease: { holder, until: Math.max(state.lease.until, now + ttlMs) } }, held: true };
 }
 
-export const dropLease = (state: LandingState, holder: string): LandingState => (state.lease?.holder === holder ? { ...state, lease: undefined, checking: null } : state);
+export const dropLease = (state: LandingState, holder: string): LandingState =>
+	state.lease?.holder === holder ? { ...state, lease: undefined, checking: null } : state;
 
-export const settleOutcomes = (state: LandingState, outcomes: Settled[]): LandingState => ({ ...state, recent: [...state.recent, ...outcomes].slice(-RECENT_KEPT) });
+export const settleOutcomes = (state: LandingState, outcomes: Settled[]): LandingState => ({
+	...state,
+	recent: [...state.recent, ...outcomes].slice(-RECENT_KEPT),
+});
 
 /** One branch's landing kept in memory: in tests, and wherever no RepoCache keeps it (then only merges in this isolate share it). */
 export function memoryLanding(): Landing {

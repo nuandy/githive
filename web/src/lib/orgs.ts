@@ -26,7 +26,9 @@ export function repoNameProblem(name: string): string | null {
 
 /** Where a person may make a repo: their own namespace, and orgs where they're an owner or admin, or a member and the org lets members. */
 export function creatableOwners(orgs: MyOrg[]): MyOrg[] {
-	return orgs.filter((o) => o.personal || o.role === "owner" || o.role === "admin" || (o.role === "member" && o.membersCanCreateRepos));
+	return orgs.filter(
+		(o) => o.personal || o.role === "owner" || o.role === "admin" || (o.role === "member" && o.membersCanCreateRepos),
+	);
 }
 
 /** The orgs proper, not a person's own namespace. */
@@ -36,7 +38,8 @@ export const realOrgs = (orgs: MyOrg[]) => orgs.filter((o) => !o.personal);
 export const canManage = (role: OrgRole | null | undefined) => role === "owner" || role === "admin";
 
 /** The roles the caller may give someone: only owners make owners. */
-export const assignableRoles = (role: OrgRole | null | undefined): OrgRole[] => (role === "owner" ? ["owner", "admin", "member"] : role === "admin" ? ["admin", "member"] : []);
+export const assignableRoles = (role: OrgRole | null | undefined): OrgRole[] =>
+	role === "owner" ? ["owner", "admin", "member"] : role === "admin" ? ["admin", "member"] : [];
 
 /** What adding someone did: they joined, or they'll join when they first sign in. */
 export function addedMessage(result: { added?: string; invited?: string; awaitingApproval?: boolean }): string {

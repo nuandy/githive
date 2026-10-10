@@ -17,19 +17,26 @@ describe("Artifacts transient failures", () => {
 		};
 		const artifacts = { get: vi.fn(async () => repo) } as never;
 
-		await expect(remoteFor(artifacts, "repo", "write")).resolves.toEqual({ url: "https://git.test/repo.git", token: "token" });
+		await expect(remoteFor(artifacts, "repo", "write")).resolves.toEqual({
+			url: "https://git.test/repo.git",
+			token: "token",
+		});
 		expect(repo.createToken).toHaveBeenCalledTimes(2);
 	});
 
 	it("retries token minting, and getting the repo, when Artifacts fails them with an internal error under load", async () => {
-		const internal = () => Object.assign(new Error("An internal error occurred."), { code: "INTERNAL_ERROR", numericCode: 10400 });
+		const internal = () =>
+			Object.assign(new Error("An internal error occurred."), { code: "INTERNAL_ERROR", numericCode: 10400 });
 		const repo = {
 			info: vi.fn(async () => ({ remote: "https://git.test/repo.git" })),
 			createToken: vi.fn().mockRejectedValueOnce(internal()).mockResolvedValue({ plaintext: "token" }),
 		};
 		const artifacts = { get: vi.fn().mockRejectedValueOnce(internal()).mockResolvedValue(repo) } as never;
 
-		await expect(remoteFor(artifacts, "repo", "write")).resolves.toEqual({ url: "https://git.test/repo.git", token: "token" });
+		await expect(remoteFor(artifacts, "repo", "write")).resolves.toEqual({
+			url: "https://git.test/repo.git",
+			token: "token",
+		});
 		expect(repo.createToken).toHaveBeenCalledTimes(2);
 	});
 
@@ -42,7 +49,10 @@ describe("Artifacts transient failures", () => {
 		};
 		const artifacts = { get: vi.fn(async () => repo) } as never;
 
-		await expect(remoteFor(artifacts, "repo", "read")).resolves.toEqual({ url: "https://git.test/repo.git", token: "token" });
+		await expect(remoteFor(artifacts, "repo", "read")).resolves.toEqual({
+			url: "https://git.test/repo.git",
+			token: "token",
+		});
 		expect(dispose).toHaveBeenCalledTimes(1);
 	});
 
@@ -50,7 +60,9 @@ describe("Artifacts transient failures", () => {
 		const failure = new Error("permanent read failure");
 		const dispose = vi.fn();
 		const repo = {
-			info: vi.fn(async () => { throw failure; }),
+			info: vi.fn(async () => {
+				throw failure;
+			}),
 			createToken: vi.fn(async () => ({ plaintext: "token" })),
 			[disposeSymbol]: dispose,
 		};
@@ -59,7 +71,6 @@ describe("Artifacts transient failures", () => {
 		await expect(remoteFor(artifacts, "repo", "read")).rejects.toBe(failure);
 		expect(dispose).toHaveBeenCalledTimes(1);
 	});
-
 
 	it("retries a transient fork request", async () => {
 		const forked = { name: "fork", remote: "https://git.test/fork.git", token: "token" };
@@ -74,7 +85,10 @@ describe("Artifacts transient failures", () => {
 	it("retries a fork that Artifacts failed with an internal error", async () => {
 		vi.stubGlobal("scheduler", { wait: vi.fn(async () => {}) });
 		const forked = { name: "fork", remote: "https://git.test/fork.git", token: "token" };
-		const internal = Object.assign(new Error("An internal error occurred."), { code: "INTERNAL_ERROR", numericCode: 10400 });
+		const internal = Object.assign(new Error("An internal error occurred."), {
+			code: "INTERNAL_ERROR",
+			numericCode: 10400,
+		});
 		const source = { fork: vi.fn().mockRejectedValueOnce(internal).mockResolvedValue(forked) };
 		const artifacts = { get: vi.fn(async (name: string) => (name === "source" ? source : {})) } as never;
 
@@ -88,10 +102,17 @@ describe("Artifacts transient failures", () => {
 		const internal = Object.assign(new Error("An internal error occurred."), { code: "INTERNAL_ERROR" });
 		const exists = Object.assign(new Error("repo fork already exists"), { code: "ALREADY_EXISTS" });
 		const source = { fork: vi.fn().mockRejectedValueOnce(internal).mockRejectedValueOnce(exists) };
-		const made = { info: vi.fn(async () => ({ remote: "https://git.test/fork.git" })), createToken: vi.fn(async () => ({ plaintext: "fresh" })) };
+		const made = {
+			info: vi.fn(async () => ({ remote: "https://git.test/fork.git" })),
+			createToken: vi.fn(async () => ({ plaintext: "fresh" })),
+		};
 		const artifacts = { get: vi.fn(async (name: string) => (name === "source" ? source : made)) } as never;
 
-		await expect(forkAndWait(artifacts, "source", "fork", "test fork")).resolves.toEqual({ name: "fork", remote: "https://git.test/fork.git", token: "fresh" });
+		await expect(forkAndWait(artifacts, "source", "fork", "test fork")).resolves.toEqual({
+			name: "fork",
+			remote: "https://git.test/fork.git",
+			token: "fresh",
+		});
 		expect(made.createToken).toHaveBeenCalledWith("write", 3 * 3600);
 		vi.unstubAllGlobals();
 	});
@@ -156,9 +177,15 @@ describe("Artifacts transient failures", () => {
 	});
 
 	describe("a fork stuck forking", () => {
-		const forking = () => Object.assign(new Error('Repository "fork" is currently being forked from "source". Retry after 5 seconds.'), { code: "FORK_IN_PROGRESS" });
+		const forking = () =>
+			Object.assign(new Error('Repository "fork" is currently being forked from "source". Retry after 5 seconds.'), {
+				code: "FORK_IN_PROGRESS",
+			});
 		const missing = () => Object.assign(new Error("Repository not found: fork"), { code: "NOT_FOUND" });
-		const made = { info: vi.fn(async () => ({ remote: "https://git.test/fork.git" })), createToken: vi.fn(async () => ({ plaintext: "fresh" })) };
+		const made = {
+			info: vi.fn(async () => ({ remote: "https://git.test/fork.git" })),
+			createToken: vi.fn(async () => ({ plaintext: "fresh" })),
+		};
 		let now = 0;
 		const clock = () => {
 			now = 0;
@@ -172,7 +199,9 @@ describe("Artifacts transient failures", () => {
 
 		it("is deleted once it has forked for too long, and used when that lets it finish (as Artifacts did on bench)", async () => {
 			clock();
-			const source = { fork: vi.fn(async () => ({ name: "fork", remote: "https://git.test/fork.git", token: "token" })) };
+			const source = {
+				fork: vi.fn(async () => ({ name: "fork", remote: "https://git.test/fork.git", token: "token" })),
+			};
 			let deleted = false;
 			const artifacts = {
 				get: vi.fn(async (name: string) => {
@@ -191,7 +220,9 @@ describe("Artifacts transient failures", () => {
 
 		it("is asked for again at once when deleting it removed it", async () => {
 			clock();
-			const source = { fork: vi.fn(async () => ({ name: "fork", remote: "https://git.test/fork.git", token: "token" })) };
+			const source = {
+				fork: vi.fn(async () => ({ name: "fork", remote: "https://git.test/fork.git", token: "token" })),
+			};
 			let deleted = false;
 			const artifacts = {
 				get: vi.fn(async (name: string) => {
@@ -210,7 +241,9 @@ describe("Artifacts transient failures", () => {
 
 		it("gives up as not ready (to be asked for again later), deleted once, when it stays stuck", async () => {
 			clock();
-			const source = { fork: vi.fn(async () => ({ name: "fork", remote: "https://git.test/fork.git", token: "token" })) };
+			const source = {
+				fork: vi.fn(async () => ({ name: "fork", remote: "https://git.test/fork.git", token: "token" })),
+			};
 			const artifacts = {
 				get: vi.fn(async (name: string) => {
 					if (name === "source") return source;
@@ -218,7 +251,9 @@ describe("Artifacts transient failures", () => {
 				}),
 				delete: vi.fn(async () => undefined),
 			} as never;
-			await expect(forkAndWait(artifacts, "source", "fork", "test fork")).rejects.toMatchObject({ code: "FORK_NOT_READY" });
+			await expect(forkAndWait(artifacts, "source", "fork", "test fork")).rejects.toMatchObject({
+				code: "FORK_NOT_READY",
+			});
 			expect((artifacts as { delete: ReturnType<typeof vi.fn> }).delete).toHaveBeenCalledTimes(1);
 			done();
 		});
@@ -228,10 +263,17 @@ describe("Artifacts transient failures", () => {
 		vi.stubGlobal("scheduler", { wait: vi.fn(async () => {}) });
 		const exists = Object.assign(new Error("repo already exists: seed"), { code: "ALREADY_EXISTS" });
 		const source = { fork: vi.fn().mockRejectedValue(exists) };
-		const made = { info: vi.fn(async () => ({ remote: "https://git.test/seed.git" })), createToken: vi.fn(async () => ({ plaintext: "fresh" })) };
+		const made = {
+			info: vi.fn(async () => ({ remote: "https://git.test/seed.git" })),
+			createToken: vi.fn(async () => ({ plaintext: "fresh" })),
+		};
 		const artifacts = { get: vi.fn(async (name: string) => (name === "source" ? source : made)) } as never;
 		await expect(forkAndWait(artifacts, "source", "seed", "a seed")).rejects.toThrow(/already exists/);
-		await expect(forkAndWait(artifacts, "source", "seed", "a seed", { shared: true })).resolves.toEqual({ name: "seed", remote: "https://git.test/seed.git", token: "fresh" });
+		await expect(forkAndWait(artifacts, "source", "seed", "a seed", { shared: true })).resolves.toEqual({
+			name: "seed",
+			remote: "https://git.test/seed.git",
+			token: "fresh",
+		});
 		vi.unstubAllGlobals();
 	});
 
@@ -249,7 +291,8 @@ describe("Artifacts transient failures", () => {
 	it("deletes a repo, and says when there's none by that name", async () => {
 		const remove = vi.fn(async (name: string) => name === "project");
 		const env = { ARTIFACTS: { delete: remove, list: async () => ({ repos: [] }) } } as never;
-		const del = (repo: string) => worker.fetch(new Request(`https://githive.test/repos/_/${repo}`, { method: "DELETE" }), env, {} as never);
+		const del = (repo: string) =>
+			worker.fetch(new Request(`https://githive.test/repos/_/${repo}`, { method: "DELETE" }), env, {} as never);
 
 		expect(await (await del("project")).json()).toEqual({ deleted: "_/project", forks: 0, shards: 0 });
 		expect((await del("missing")).status).toBe(404);
@@ -260,7 +303,11 @@ describe("Artifacts transient failures", () => {
 			.fn()
 			.mockResolvedValueOnce({ repos: [{ name: "fork--zeta--a-1" }, { name: "zeta" }], cursor: "next" })
 			.mockResolvedValueOnce({ repos: [{ name: "records--zeta--2" }, { name: "githive" }] });
-		const response = await worker.fetch(new Request("https://githive.test/repos"), { ARTIFACTS: { list } } as never, {} as never);
+		const response = await worker.fetch(
+			new Request("https://githive.test/repos"),
+			{ ARTIFACTS: { list } } as never,
+			{} as never,
+		);
 
 		expect(await response.json()).toEqual([
 			{ name: "_/githive", id: "githive", visibility: "private" },
@@ -270,7 +317,10 @@ describe("Artifacts transient failures", () => {
 	});
 
 	it("retries direct Artifacts list calls made by the API", async () => {
-		const list = vi.fn().mockRejectedValueOnce(transient()).mockResolvedValue({ repos: [{ name: "project" }] });
+		const list = vi
+			.fn()
+			.mockRejectedValueOnce(transient())
+			.mockResolvedValue({ repos: [{ name: "project" }] });
 		const response = await worker.fetch(
 			new Request("https://githive.test/repos"),
 			{ ARTIFACTS: { list } } as never,

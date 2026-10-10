@@ -46,16 +46,30 @@ export interface Waiting {
 }
 
 const later = (a: string, b?: string) => (b && Date.parse(b) > Date.parse(a) ? b : a);
-const latest = (times: string[]) => times.reduce<string | undefined>((max, t) => (!max || Date.parse(t) > Date.parse(max) ? t : max), undefined);
+const latest = (times: string[]) =>
+	times.reduce<string | undefined>((max, t) => (!max || Date.parse(t) > Date.parse(max) ? t : max), undefined);
 
 /** Whose turn it is on a change, and since when if it's its agent's. */
 export function waitingOn(signs: ChangeSigns): Waiting {
 	if (signs.asked) return { turn: "person", why: "waits on a person" };
 	if (signs.landing) return { turn: "landing", why: "is being checked to land" };
-	if (!signs.head) return { turn: "agent", since: signs.active, why: "has nothing pushed", idleAfterMs: BUILDING_IDLE_MS };
+	if (!signs.head)
+		return { turn: "agent", since: signs.active, why: "has nothing pushed", idleAfterMs: BUILDING_IDLE_MS };
 	const rejected = latest(signs.votes.filter((v) => v.verdict === "reject").map((v) => v.at));
-	if (rejected || signs.vetoed) return { turn: "agent", since: later(signs.active, rejected), why: "had changes asked for", idleAfterMs: AGENT_TURN_IDLE_MS };
-	if (signs.approved) return { turn: "agent", since: later(signs.active, latest(signs.votes.map((v) => v.at))), why: "is approved and not merged", idleAfterMs: AGENT_TURN_IDLE_MS };
+	if (rejected || signs.vetoed)
+		return {
+			turn: "agent",
+			since: later(signs.active, rejected),
+			why: "had changes asked for",
+			idleAfterMs: AGENT_TURN_IDLE_MS,
+		};
+	if (signs.approved)
+		return {
+			turn: "agent",
+			since: later(signs.active, latest(signs.votes.map((v) => v.at))),
+			why: "is approved and not merged",
+			idleAfterMs: AGENT_TURN_IDLE_MS,
+		};
 	return { turn: "reviewers", why: "waits for review" };
 }
 
@@ -68,5 +82,9 @@ export function abandoned(signs: ChangeSigns, now: number): { abandoned: boolean
 	const waiting = waitingOn(signs);
 	const idleMs = waiting.since ? now - Date.parse(waiting.since) : 0;
 	const floor = now - Date.parse(signs.active) > BUILDING_IDLE_MS;
-	return { abandoned: waiting.turn === "agent" && floor && idleMs > (waiting.idleAfterMs ?? Number.POSITIVE_INFINITY), waiting, idleMs };
+	return {
+		abandoned: waiting.turn === "agent" && floor && idleMs > (waiting.idleAfterMs ?? Number.POSITIVE_INFINITY),
+		waiting,
+		idleMs,
+	};
 }

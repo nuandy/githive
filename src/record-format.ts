@@ -26,7 +26,13 @@ export function formatOf(message: string): number {
 }
 
 /** A state of format `from`, upgraded to `to` one format at a time. */
-export function upgradeState<S>(state: unknown, from: number, ref: string, to: number = RECORD_FORMAT, upgrades: Readonly<Record<number, Upgrade>> = UPGRADES): S {
+export function upgradeState<S>(
+	state: unknown,
+	from: number,
+	ref: string,
+	to: number = RECORD_FORMAT,
+	upgrades: Readonly<Record<number, Upgrade>> = UPGRADES,
+): S {
 	let current = state;
 	for (let f = from; f < to; f++) {
 		const upgrade = upgrades[f];
@@ -38,5 +44,7 @@ export function upgradeState<S>(state: unknown, from: number, ref: string, to: n
 
 /** Refusing to write over records a newer GitHive wrote. */
 export function newerFormat(found: number, known: number = RECORD_FORMAT) {
-	return new Error(`[409] these records are format ${found}, newer than this GitHive knows (${known}): it reads them but won't write over them`);
+	return new Error(
+		`[409] these records are format ${found}, newer than this GitHive knows (${known}): it reads them but won't write over them`,
+	);
 }

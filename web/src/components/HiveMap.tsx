@@ -37,7 +37,10 @@ function place(hex: Hex): string {
 	return `${hex.path}/`;
 }
 
-const LANDING_WORDS = { checking: "a change here is being checked to land", queued: "a change here is approved and waiting to land" } as const;
+const LANDING_WORDS = {
+	checking: "a change here is being checked to land",
+	queued: "a change here is approved and waiting to land",
+} as const;
 
 /** What a cell says to someone who can't see it. */
 export function hexLabel(hex: Hex, now: number = Date.now()): string {
@@ -46,7 +49,9 @@ export function hexLabel(hex: Hex, now: number = Date.now()): string {
 	if (!holder) return `${what}: not claimed`;
 	const others = hex.holders.length > 1 ? `, and ${plural(hex.holders.length - 1, "more change")}` : "";
 	// Said once: unless its holder's own state already says it, another change in it is landing.
-	const said = (hex.landing === "checking" && holder.lamp === "checking") || (hex.landing === "queued" && holder.lamp === "approved");
+	const said =
+		(hex.landing === "checking" && holder.lamp === "checking") ||
+		(hex.landing === "queued" && holder.lamp === "approved");
 	const landing = hex.landing && !said ? `; ${LANDING_WORDS[hex.landing]}` : "";
 	return `${what}: ${holder.whole ? "held" : "partly held"} by ${holder.agent} for ${holder.title}, claimed ${timeAgo(holder.since, now)}, ${LAMP_WORDS[holder.lamp]}${others}${landing}`;
 }
@@ -69,7 +74,23 @@ function Swatch({ color }: { color: number }) {
 }
 
 /** One cell: its hexagon in its holder's color, its name, and a ring when a change in it is landing. */
-function Cell({ hex, x, y, active, onShow, onPick, now }: { hex: Hex; x: number; y: number; active: boolean; onShow: (key: string | null) => void; onPick: (key: string) => void; now: number }) {
+function Cell({
+	hex,
+	x,
+	y,
+	active,
+	onShow,
+	onPick,
+	now,
+}: {
+	hex: Hex;
+	x: number;
+	y: number;
+	active: boolean;
+	onShow: (key: string | null) => void;
+	onPick: (key: string) => void;
+	now: number;
+}) {
 	const holder = hex.holders[0];
 	const className = [
 		"hive__cell",
@@ -128,9 +149,12 @@ function HolderLine({ repo, holder, now }: { repo: string; holder: HexHolder; no
 			<Swatch color={holder.color} />
 			<div className="hive__holder">
 				<p>
-					<strong>{holder.agent}</strong> {holder.whole ? "holds it" : "holds part of it"} for <a href={href.change(repo, holder.change)}>{holder.title}</a>
+					<strong>{holder.agent}</strong> {holder.whole ? "holds it" : "holds part of it"} for{" "}
+					<a href={href.change(repo, holder.change)}>{holder.title}</a>
 				</p>
-				{holder.intent && holder.intent.trim() !== holder.title ? <p className="muted hive__intent">{fit(holder.intent.trim(), 280)}</p> : null}
+				{holder.intent && holder.intent.trim() !== holder.title ? (
+					<p className="muted hive__intent">{fit(holder.intent.trim(), 280)}</p>
+				) : null}
 				<p className="muted">
 					Claimed {timeAgo(holder.since, now)} · {LAMP_WORDS[holder.lamp]} ·{" "}
 					{holder.paths.map((path, i) => (
@@ -147,7 +171,12 @@ function HolderLine({ repo, holder, now }: { repo: string; holder: HexHolder; no
 
 /** What the shown cell holds: its path, its holders, and whether something in it is landing. */
 function Details({ repo, branch, hex, now }: { repo: string; branch: string; hex: Hex | undefined; now: number }) {
-	if (!hex) return <p className="muted hive__hint">Point at a cell, or tab to it, to see who holds it. Select one to keep it here.</p>;
+	if (!hex)
+		return (
+			<p className="muted hive__hint">
+				Point at a cell, or tab to it, to see who holds it. Select one to keep it here.
+			</p>
+		);
 	return (
 		<div className="hive__details-body">
 			<h3>
@@ -158,7 +187,9 @@ function Details({ repo, branch, hex, now }: { repo: string; branch: string; hex
 			{hex.landing ? (
 				<p className={`hive__landing lamp--${hex.landing === "checking" ? "amber" : "green"}`}>
 					<span className="lamp" aria-hidden="true" />
-					{hex.landing === "checking" ? `A change here is being checked to land on ${branch}.` : `A change here is approved, landing on ${branch} with the next batch.`}
+					{hex.landing === "checking"
+						? `A change here is being checked to land on ${branch}.`
+						: `A change here is approved, landing on ${branch} with the next batch.`}
 				</p>
 			) : null}
 			{hex.holders.length ? (
@@ -278,7 +309,9 @@ export function HiveMap({ repo, branch, snapshot, tree, error, landing, now = Da
 							))}
 						</svg>
 						{all.length > hexes.length ? <p className="muted">and {all.length - hexes.length} more folders</p> : null}
-						{tree?.truncated ? <p className="muted">This repo is large: the map shows the first part of its tree.</p> : null}
+						{tree?.truncated ? (
+							<p className="muted">This repo is large: the map shows the first part of its tree.</p>
+						) : null}
 					</div>
 					<div className="hive__details">
 						<Details repo={repo} branch={branch} hex={shown} now={now} />

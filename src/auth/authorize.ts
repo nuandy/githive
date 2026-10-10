@@ -1,5 +1,10 @@
 import type { Context } from "hono";
-import { AuthorizationError, CimdFetchError, type ConsentDescription, type OAuthHelpers } from "@cloudflare/workers-oauth-provider";
+import {
+	AuthorizationError,
+	CimdFetchError,
+	type ConsentDescription,
+	type OAuthHelpers,
+} from "@cloudflare/workers-oauth-provider";
 import type { AuthEnv } from "./routes";
 import { type Agent, type User, randomSecret } from "./store";
 import { identityStore } from "./principal";
@@ -74,15 +79,30 @@ export function formAction(redirectUri?: string) {
 const html = (body: string, status = 200, headers?: Headers, redirectUri?: string, nonce?: string) => {
 	const h = new Headers(headers);
 	h.set("Content-Type", "text/html; charset=utf-8");
-	h.set("Content-Security-Policy", `default-src 'none'; style-src 'unsafe-inline'; font-src 'self'; img-src data:;${nonce ? ` script-src 'nonce-${nonce}';` : ""} form-action ${formAction(redirectUri)}; frame-ancestors 'none'`);
+	h.set(
+		"Content-Security-Policy",
+		`default-src 'none'; style-src 'unsafe-inline'; font-src 'self'; img-src data:;${nonce ? ` script-src 'nonce-${nonce}';` : ""} form-action ${formAction(redirectUri)}; frame-ancestors 'none'`,
+	);
 	return new Response(body, { status, headers: h });
 };
 
-const problem = (message: string, status = 400) => html(page("Can't connect", `<h1>Can't connect this app</h1><p>${escape(message)}</p><p class="muted">Start connecting again from the app.</p>`), status);
+const problem = (message: string, status = 400) =>
+	html(
+		page(
+			"Can't connect",
+			`<h1>Can't connect this app</h1><p>${escape(message)}</p><p class="muted">Start connecting again from the app.</p>`,
+		),
+		status,
+	);
 
 function signInPage(details: ConsentDescription, returnTo: string, providers: string[]) {
 	const names: Record<string, string> = { github: "GitHub", google: "Google" };
-	const buttons = providers.map((p) => `<a class="button${p === "github" ? " primary" : ""}" href="/auth/${p}?return=${encodeURIComponent(returnTo)}">Sign in with ${names[p]}</a>`).join("");
+	const buttons = providers
+		.map(
+			(p) =>
+				`<a class="button${p === "github" ? " primary" : ""}" href="/auth/${p}?return=${encodeURIComponent(returnTo)}">Sign in with ${names[p]}</a>`,
+		)
+		.join("");
 	return page(
 		"Sign in",
 		`<h1>Sign in to connect ${escape(details.clientName)}</h1>
@@ -127,16 +147,30 @@ export function suggestedAgentName(clientName: string) {
 		.replace(/-+$/, "");
 }
 
-function consentPage(details: ConsentDescription, handle: string, user: User, agents: Agent[], nonce: string, error?: string) {
+function consentPage(
+	details: ConsentDescription,
+	handle: string,
+	user: User,
+	agents: Agent[],
+	nonce: string,
+	error?: string,
+) {
 	const name = escape(details.clientName);
 	const suggested = suggestedAgentName(details.clientName);
 	// The agent this app has acted as before, by its name; otherwise a new one named for the app.
 	const match = agents.find((a) => a.name === suggested);
-	const who = details.clientDomain ? `${name}, published by <strong>${escape(details.clientDomain)}</strong>` : `${name}`;
+	const who = details.clientDomain
+		? `${name}, published by <strong>${escape(details.clientDomain)}</strong>`
+		: `${name}`;
 	// The redirect's host is always shown, as the MCP spec requires.
-	const where = details.redirectIsLoopback ? `an app on this computer (<strong>${escape(details.redirectHost)}</strong>)` : `<strong>${escape(details.redirectHost)}</strong>`;
+	const where = details.redirectIsLoopback
+		? `an app on this computer (<strong>${escape(details.redirectHost)}</strong>)`
+		: `<strong>${escape(details.redirectHost)}</strong>`;
 	const choices = agents
-		.map((a) => `<label><input type="radio" name="agent" value="${escape(a.id)}"${a === match ? " checked" : ""}> <code>${escape(user.handle)}/${escape(a.name)}</code></label>`)
+		.map(
+			(a) =>
+				`<label><input type="radio" name="agent" value="${escape(a.id)}"${a === match ? " checked" : ""}> <code>${escape(user.handle)}/${escape(a.name)}</code></label>`,
+		)
 		.join("");
 	return page(
 		`Connect ${details.clientName}`,
@@ -171,7 +205,9 @@ export async function authorize(c: Context<AuthEnv>) {
 		const principal = c.get("principal");
 		if (principal?.kind !== "user") {
 			const url = new URL(c.req.url);
-			const providers = (["github", "google"] as const).filter((p) => (c.env as unknown as Record<string, unknown>)[`${p.toUpperCase()}_CLIENT_ID`]);
+			const providers = (["github", "google"] as const).filter(
+				(p) => (c.env as unknown as Record<string, unknown>)[`${p.toUpperCase()}_CLIENT_ID`],
+			);
 			return html(signInPage(details, `${url.pathname}${url.search}`, providers));
 		}
 		const user = principal.user;
@@ -180,7 +216,13 @@ export async function authorize(c: Context<AuthEnv>) {
 		if (c.req.method === "GET") {
 			const consent = await oauth.beginConsent(request);
 			const nonce = randomSecret(16);
-			return html(consentPage(details, consent.handle, user, await active(), nonce), 200, consent.headers, details.redirectUri, nonce);
+			return html(
+				consentPage(details, consent.handle, user, await active(), nonce),
+				200,
+				consent.headers,
+				details.redirectUri,
+				nonce,
+			);
 		}
 
 		const form = await c.req.formData();
@@ -193,14 +235,36 @@ export async function authorize(c: Context<AuthEnv>) {
 		const choice = String(form.get("agent") ?? "");
 		let agent: Agent | undefined;
 		try {
-			agent = choice === "new" ? await ids.createAgent(user.id, String(form.get("new_name") ?? "")) : (await active()).find((a) => a.id === choice);
+			agent =
+				choice === "new"
+					? await ids.createAgent(user.id, String(form.get("new_name") ?? ""))
+					: (await active()).find((a) => a.id === choice);
 		} catch (err) {
 			const nonce = randomSecret(16);
-			return html(consentPage(details, handle, user, await active(), nonce, (err instanceof Error ? err.message : String(err)).replace(/^\[\d+\]\s*/, "")), 400, undefined, details.redirectUri, nonce);
+			return html(
+				consentPage(
+					details,
+					handle,
+					user,
+					await active(),
+					nonce,
+					(err instanceof Error ? err.message : String(err)).replace(/^\[\d+\]\s*/, ""),
+				),
+				400,
+				undefined,
+				details.redirectUri,
+				nonce,
+			);
 		}
 		if (!agent) {
 			const nonce = randomSecret(16);
-			return html(consentPage(details, handle, user, await active(), nonce, "Choose one of your agents, or name a new one."), 400, undefined, details.redirectUri, nonce);
+			return html(
+				consentPage(details, handle, user, await active(), nonce, "Choose one of your agents, or name a new one."),
+				400,
+				undefined,
+				details.redirectUri,
+				nonce,
+			);
 		}
 		const approved = await oauth.approveConsent(c.req.raw, handle, { scope: request.scope });
 		const { redirectTo } = await oauth.completeAuthorization({
@@ -214,7 +278,8 @@ export async function authorize(c: Context<AuthEnv>) {
 		return new Response(null, { status: 302, headers: approved.headers });
 	} catch (error) {
 		if (error instanceof AuthorizationError && error.redirectTo) return Response.redirect(error.redirectTo, 302);
-		if (error instanceof AuthorizationError) return problem(error.description ?? "This request has expired or was already used.");
+		if (error instanceof AuthorizationError)
+			return problem(error.description ?? "This request has expired or was already used.");
 		if (error instanceof CimdFetchError) return problem("This app could not be verified.");
 		throw error;
 	}

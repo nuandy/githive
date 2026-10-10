@@ -15,15 +15,33 @@ import git from "isomorphic-git";
 import http from "isomorphic-git/http/node";
 
 const root = new URL("..", import.meta.url).pathname;
-const args = Object.fromEntries(process.argv.slice(2).reduce((pairs, arg, i, all) => (arg.startsWith("--") ? [...pairs, [arg.slice(2), all[i + 1]]] : pairs), []));
+const args = Object.fromEntries(
+	process.argv
+		.slice(2)
+		.reduce((pairs, arg, i, all) => (arg.startsWith("--") ? [...pairs, [arg.slice(2), all[i + 1]]] : pairs), []),
+);
 const BASE = args.base ?? "https://blueprint-bench.nuandy.workers.dev";
 const REPO = args.repo ?? `demo-${Date.now().toString(36)}`;
 
-const vars = Object.fromEntries((await readFile(join(root, ".dev.vars"), "utf8")).split("\n").map((l) => l.match(/^([A-Z_]+)=(.*)$/)).filter(Boolean).map(([, k, v]) => [k, v.replace(/^"|"$/g, "")]));
-const headers = { "CF-Access-Client-Id": vars.CF_ACCESS_CLIENT_ID, "CF-Access-Client-Secret": vars.CF_ACCESS_CLIENT_SECRET, "Content-Type": "application/json" };
+const vars = Object.fromEntries(
+	(await readFile(join(root, ".dev.vars"), "utf8"))
+		.split("\n")
+		.map((l) => l.match(/^([A-Z_]+)=(.*)$/))
+		.filter(Boolean)
+		.map(([, k, v]) => [k, v.replace(/^"|"$/g, "")]),
+);
+const headers = {
+	"CF-Access-Client-Id": vars.CF_ACCESS_CLIENT_ID,
+	"CF-Access-Client-Secret": vars.CF_ACCESS_CLIENT_SECRET,
+	"Content-Type": "application/json",
+};
 
 async function api(method, path, body) {
-	const response = await fetch(`${BASE}${path}`, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
+	const response = await fetch(`${BASE}${path}`, {
+		method,
+		headers,
+		body: body === undefined ? undefined : JSON.stringify(body),
+	});
 	const text = await response.text();
 	if (!response.ok) throw new Error(`${method} ${path}: ${response.status} ${text.slice(0, 300)}`);
 	return JSON.parse(text);
@@ -52,7 +70,6 @@ const write = (dir, path, text) => {
 	return { [path]: "add" };
 };
 
-
 /** Claim, push the change to its own fork, and return its head. */
 async function seedChange(repo, agent, { change, intent, paths, edit }) {
 	await tool("claim", { repo, change, agent: agent.name, paths, intent }, agent.key);
@@ -60,8 +77,14 @@ async function seedChange(repo, agent, { change, intent, paths, edit }) {
 	const dir = join(work, `${repo}-${change}`);
 	const onAuth = () => ({ username: "x", password: fork.token.replace(/\?.*$/, "") });
 	await git.clone({ fs, http, dir, url: fork.url, depth: 1, singleBranch: true, onAuth });
-	for (const [path, action] of Object.entries(await edit(dir))) await (action === "remove" ? git.remove({ fs, dir, filepath: path }) : git.add({ fs, dir, filepath: path }));
-	const head = await git.commit({ fs, dir, message: intent, author: { name: agent.name, email: `${agent.name}@example.com` } });
+	for (const [path, action] of Object.entries(await edit(dir)))
+		await (action === "remove" ? git.remove({ fs, dir, filepath: path }) : git.add({ fs, dir, filepath: path }));
+	const head = await git.commit({
+		fs,
+		dir,
+		message: intent,
+		author: { name: agent.name, email: `${agent.name}@example.com` },
+	});
 	await git.push({ fs, http, dir, url: fork.url, ref: "main", remoteRef: `refs/heads/changes/${change}`, onAuth });
 	await tool("check", { repo, change }, agent.key);
 	return head;
@@ -73,19 +96,50 @@ async function seedRepo() {
 	await api("POST", "/repos/import", { url: "https://github.com/octocat/Spoon-Knife", name: repo, branch: "main" });
 	await tool("settings", { repo, required: 2, vetoes: ["security"], verify: ["test -f index.html"] });
 	const agents = {};
-	for (const name of ["docs-agent", "style-agent", "readme-agent", "theme-agent", "layout-agent", "tests-reviewer", "security-reviewer"]) agents[name] = { name, key: (await tool("register", { repo, agent: name })).key };
-	const vote = (commit, reviewer, role, verdict, evidence) => tool("vote", { repo, commit, reviewer, role, verdict, evidence }, agents[reviewer].key);
+	for (const name of [
+		"docs-agent",
+		"style-agent",
+		"readme-agent",
+		"theme-agent",
+		"layout-agent",
+		"tests-reviewer",
+		"security-reviewer",
+	])
+		agents[name] = { name, key: (await tool("register", { repo, agent: name })).key };
+	const vote = (commit, reviewer, role, verdict, evidence) =>
+		tool("vote", { repo, commit, reviewer, role, verdict, evidence }, agents[reviewer].key);
 
 	// Merged: both reviewers approve, the checks pass, and the toolkit merges it.
 	const contributing = await seedChange(repo, agents["docs-agent"], {
 		change: "contributing-guide",
 		intent: "Add a contributing guide explaining how to fork and open a pull request",
 		paths: ["CONTRIBUTING.md"],
-		edit: (dir) => write(dir, "CONTRIBUTING.md", "# Contributing\n\n1. Fork this repository.\n2. Make your change on a branch.\n3. Open a pull request describing what you changed and why.\n"),
+		edit: (dir) =>
+			write(
+				dir,
+				"CONTRIBUTING.md",
+				"# Contributing\n\n1. Fork this repository.\n2. Make your change on a branch.\n3. Open a pull request describing what you changed and why.\n",
+			),
 	});
-	await vote(contributing, "tests-reviewer", "tests", "approve", "CONTRIBUTING.md renders; no code changed, index.html still present.");
-	await vote(contributing, "security-reviewer", "security", "approve", "Documentation only; no scripts, links or secrets.");
-	const merged = await tool("merge", { repo, change: "contributing-guide", agent: "docs-agent" }, agents["docs-agent"].key);
+	await vote(
+		contributing,
+		"tests-reviewer",
+		"tests",
+		"approve",
+		"CONTRIBUTING.md renders; no code changed, index.html still present.",
+	);
+	await vote(
+		contributing,
+		"security-reviewer",
+		"security",
+		"approve",
+		"Documentation only; no scripts, links or secrets.",
+	);
+	const merged = await tool(
+		"merge",
+		{ repo, change: "contributing-guide", agent: "docs-agent" },
+		agents["docs-agent"].key,
+	);
 	say(`  contributing-guide: ${merged.ok ? "merged" : JSON.stringify(merged)}`);
 
 	// Changes requested: the security reviewer vetoes it.
@@ -93,10 +147,27 @@ async function seedRepo() {
 		change: "center-title",
 		intent: "Center the page title",
 		paths: ["styles.css"],
-		edit: (dir) => write(dir, "styles.css", "@import url(http://example.com/fonts.css);\n\n* {\n  margin: 0;\n  padding: 0;\n}\n\nh1 {\n  text-align: center;\n}\n"),
+		edit: (dir) =>
+			write(
+				dir,
+				"styles.css",
+				"@import url(http://example.com/fonts.css);\n\n* {\n  margin: 0;\n  padding: 0;\n}\n\nh1 {\n  text-align: center;\n}\n",
+			),
 	});
-	await vote(title, "tests-reviewer", "tests", "approve", "The heading is centered; index.html still loads styles.css.");
-	await vote(title, "security-reviewer", "security", "reject", "styles.css now imports a stylesheet over plain http from example.com, a third-party host; drop the import or serve the font locally.");
+	await vote(
+		title,
+		"tests-reviewer",
+		"tests",
+		"approve",
+		"The heading is centered; index.html still loads styles.css.",
+	);
+	await vote(
+		title,
+		"security-reviewer",
+		"security",
+		"reject",
+		"styles.css now imports a stylesheet over plain http from example.com, a third-party host; drop the import or serve the font locally.",
+	);
 	say("  center-title: changes requested");
 
 	// In review: one approval of the two required.
@@ -104,7 +175,12 @@ async function seedRepo() {
 		change: "clarify-readme",
 		intent: "Say what the repo is for in the README's first line",
 		paths: ["README.md"],
-		edit: (dir) => write(dir, "README.md", "### Well hello there!\n\nThis repository is meant to provide an example for *forking* a repository on GitHub.\n"),
+		edit: (dir) =>
+			write(
+				dir,
+				"README.md",
+				"### Well hello there!\n\nThis repository is meant to provide an example for *forking* a repository on GitHub.\n",
+			),
 	});
 	await vote(readme, "tests-reviewer", "tests", "approve", "README only; nothing to run.");
 	say("  clarify-readme: in review, one approval of two");
@@ -114,13 +190,22 @@ async function seedRepo() {
 		change: "dark-mode",
 		intent: "Respect the reader's dark-mode preference",
 		paths: ["dark.css"],
-		edit: (dir) => write(dir, "dark.css", "@media (prefers-color-scheme: dark) {\n  body { background: #111; color: #eee; }\n}\n"),
+		edit: (dir) =>
+			write(dir, "dark.css", "@media (prefers-color-scheme: dark) {\n  body { background: #111; color: #eee; }\n}\n"),
 	});
 	say("  dark-mode: in progress");
 
 	// Abandoned: claimed, then released.
-	await tool("claim", { repo, change: "new-layout", agent: "layout-agent", paths: ["layout/"], intent: "Try a new page layout" }, agents["layout-agent"].key);
-	await tool("release", { repo, change: "new-layout", agent: "layout-agent", reason: "Not needed after all." }, agents["layout-agent"].key);
+	await tool(
+		"claim",
+		{ repo, change: "new-layout", agent: "layout-agent", paths: ["layout/"], intent: "Try a new page layout" },
+		agents["layout-agent"].key,
+	);
+	await tool(
+		"release",
+		{ repo, change: "new-layout", agent: "layout-agent", reason: "Not needed after all." },
+		agents["layout-agent"].key,
+	);
 	say("  new-layout: released");
 
 	const audit = await tool("audit", { repo });

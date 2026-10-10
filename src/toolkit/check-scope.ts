@@ -36,7 +36,13 @@ export const ALWAYS_CHECKED_IN = ["test", "tests", "__tests__", "spec", "specs",
 /** A pattern's characters: a path's, and * for any run of them within a name. */
 export const SKIP_PATTERN = /^[A-Za-z0-9._/*@+-]+$/;
 
-const glob = (pattern: string) => new RegExp(`^${pattern.split("*").map((p) => p.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("[^/]*")}$`);
+const glob = (pattern: string) =>
+	new RegExp(
+		`^${pattern
+			.split("*")
+			.map((p) => p.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+			.join("[^/]*")}$`,
+	);
 
 /**
  * Whether a pattern covers a file: "name/" a folder of that name anywhere, a
@@ -53,5 +59,11 @@ export function skipsFile(pattern: string, file: string): boolean {
 /** Whether a change touching `files` merges without its checks: every file skipped, and none where tests read. */
 export function skipsChecks(files: string[], patterns: string[] = DEFAULT_SKIP_CHECKS): boolean {
 	if (!files.length || !patterns.length) return false;
-	return files.every((file) => !file.split("/").slice(0, -1).some((dir) => ALWAYS_CHECKED_IN.includes(dir)) && patterns.some((p) => skipsFile(p, file)));
+	return files.every(
+		(file) =>
+			!file
+				.split("/")
+				.slice(0, -1)
+				.some((dir) => ALWAYS_CHECKED_IN.includes(dir)) && patterns.some((p) => skipsFile(p, file)),
+	);
 }

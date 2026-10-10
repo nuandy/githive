@@ -21,7 +21,13 @@ import { ShardingBadge } from "./StatusPill";
 import type { TabItem } from "./Tabs";
 
 export type RepoView =
-	| { kind: "repo"; tab: RepoTab; /** Code tab */ path?: string; ref?: string; /** Changes tab: the branch shown, when not the project's. */ branch?: string }
+	| {
+			kind: "repo";
+			tab: RepoTab;
+			/** Code tab */ path?: string;
+			ref?: string;
+			/** Changes tab: the branch shown, when not the project's. */ branch?: string;
+	  }
 	| { kind: "change"; change: string; tab: ChangeTab };
 
 /** Everything a repo's pages call. The dashboard's api object satisfies it; tests pass stand-ins. */
@@ -31,7 +37,10 @@ export type RepoPageApi = CodeApi &
 		landing?: (repo: string, branch: string) => Promise<RepoLanding>;
 		/** People who can write: make a branch, merge a change. */
 		makeBranch?: (repo: string, name: string, from: string) => Promise<{ name: string; made?: string }>;
-		merge?: (repo: string, change: string) => Promise<{ ok: boolean; commit?: string; reasons?: string[]; conflicts?: string[] }>;
+		merge?: (
+			repo: string,
+			change: string,
+		) => Promise<{ ok: boolean; commit?: string; reasons?: string[]; conflicts?: string[] }>;
 	};
 
 export interface RepoPageProps {
@@ -58,7 +67,17 @@ export interface RepoPageProps {
 }
 
 /** Above a repo GitHive hasn't started on: what that means, and for its admins, starting it. */
-function NotStarted({ repo, canStart, start, onStarted }: { repo: string; canStart: boolean; start?: (repo: string) => Promise<unknown>; onStarted?: () => void }) {
+function NotStarted({
+	repo,
+	canStart,
+	start,
+	onStarted,
+}: {
+	repo: string;
+	canStart: boolean;
+	start?: (repo: string) => Promise<unknown>;
+	onStarted?: () => void;
+}) {
 	const [busy, setBusy] = useState(false);
 	const [error, setError] = useState<string | null>(null);
 	const go = async () => {
@@ -95,12 +114,27 @@ function NotStarted({ repo, canStart, start, onStarted }: { repo: string; canSta
 const NothingYet = ({ repo }: { repo: string }) => (
 	<div className="box empty">
 		<h2>Nothing here yet</h2>
-		<p>Changes, claims, agents and the audit show once GitHive starts on {repo}. Its code and settings are here already.</p>
+		<p>
+			Changes, claims, agents and the audit show once GitHive starts on {repo}. Its code and settings are here already.
+		</p>
 	</div>
 );
 
 /** A repo: claims in force as its changes, its claims map, code, agents, audit and settings, or one change. */
-export function RepoPage({ repo, view, snapshot, changeHistory, liveStatus = "off", api, access, manage, onAccessChanged, onDeleted, onStarted, onSettingsChanged }: RepoPageProps) {
+export function RepoPage({
+	repo,
+	view,
+	snapshot,
+	changeHistory,
+	liveStatus = "off",
+	api,
+	access,
+	manage,
+	onAccessChanged,
+	onDeleted,
+	onStarted,
+	onSettingsChanged,
+}: RepoPageProps) {
 	// Until the reader's permission is known, no vote form where it would be checked.
 	const voting = access ? canVote(access.level) : !manage;
 	const branch = snapshot?.branch ?? access?.branch ?? "main";
@@ -109,7 +143,13 @@ export function RepoPage({ repo, view, snapshot, changeHistory, liveStatus = "of
 		{ id: "claims", label: "Claims", icon: "folder", href: href.repo(repo, "claims") },
 		{ id: "code", label: "Code", icon: "file", href: href.code(repo, "") },
 		{ id: "agents", label: "Agents", icon: "user", href: href.repo(repo, "agents") },
-		{ id: "audit", label: "Audit", icon: "shield", href: href.repo(repo, "audit"), count: snapshot?.audit?.open || undefined },
+		{
+			id: "audit",
+			label: "Audit",
+			icon: "shield",
+			href: href.repo(repo, "audit"),
+			count: snapshot?.audit?.open || undefined,
+		},
 		{ id: "settings", label: "Settings", icon: "settings", href: href.repo(repo, "settings") },
 	];
 	const current = view.kind === "change" ? "changes" : view.tab;
@@ -124,12 +164,35 @@ export function RepoPage({ repo, view, snapshot, changeHistory, liveStatus = "of
 				live={liveStatus}
 			/>
 			<main className="page" id="main">
-				{!snapshot ? <NotStarted repo={repo} canStart={access?.level === "admin"} {...(manage?.startRepo ? { start: manage.startRepo } : {})} {...(onStarted ? { onStarted } : {})} /> : null}
+				{!snapshot ? (
+					<NotStarted
+						repo={repo}
+						canStart={access?.level === "admin"}
+						{...(manage?.startRepo ? { start: manage.startRepo } : {})}
+						{...(onStarted ? { onStarted } : {})}
+					/>
+				) : null}
 				{!snapshot ? (
 					current === "code" ? (
-						<CodeTab repo={repo} path={view.kind === "repo" ? (view.path ?? "") : ""} refParam={view.kind === "repo" ? view.ref : undefined} branch={branch} api={api} />
+						<CodeTab
+							repo={repo}
+							path={view.kind === "repo" ? (view.path ?? "") : ""}
+							refParam={view.kind === "repo" ? view.ref : undefined}
+							branch={branch}
+							api={api}
+						/>
 					) : current === "settings" ? (
-						manage ? <RepoAdmin repo={repo} access={access} manage={manage} onChanged={() => onAccessChanged?.()} onDeleted={() => onDeleted?.()} /> : <NothingYet repo={repo} />
+						manage ? (
+							<RepoAdmin
+								repo={repo}
+								access={access}
+								manage={manage}
+								onChanged={() => onAccessChanged?.()}
+								onDeleted={() => onDeleted?.()}
+							/>
+						) : (
+							<NothingYet repo={repo} />
+						)
 					) : (
 						<NothingYet repo={repo} />
 					)
@@ -156,12 +219,31 @@ export function RepoPage({ repo, view, snapshot, changeHistory, liveStatus = "of
 				) : current === "settings" ? (
 					<SettingsTab
 						snapshot={snapshot}
-						access={manage ? <RepoAdmin repo={repo} access={access} manage={manage} onChanged={() => onAccessChanged?.()} onDeleted={() => onDeleted?.()} /> : undefined}
+						access={
+							manage ? (
+								<RepoAdmin
+									repo={repo}
+									access={access}
+									manage={manage}
+									onChanged={() => onAccessChanged?.()}
+									onDeleted={() => onDeleted?.()}
+								/>
+							) : undefined
+						}
 						editor={
 							access?.level === "admin" && manage?.changeSettings ? (
 								<>
-									<MergeSettings snapshot={snapshot} save={(settings) => manage.changeSettings!(repo, settings)} {...(onSettingsChanged ? { onSaved: onSettingsChanged } : {})} />
-									<BranchRules branch={branch} rules={snapshot.branchRules} save={(settings) => manage.changeSettings!(repo, settings)} {...(onSettingsChanged ? { onSaved: onSettingsChanged } : {})} />
+									<MergeSettings
+										snapshot={snapshot}
+										save={(settings) => manage.changeSettings!(repo, settings)}
+										{...(onSettingsChanged ? { onSaved: onSettingsChanged } : {})}
+									/>
+									<BranchRules
+										branch={branch}
+										rules={snapshot.branchRules}
+										save={(settings) => manage.changeSettings!(repo, settings)}
+										{...(onSettingsChanged ? { onSaved: onSettingsChanged } : {})}
+									/>
 								</>
 							) : undefined
 						}
@@ -177,7 +259,15 @@ export function RepoPage({ repo, view, snapshot, changeHistory, liveStatus = "of
 							canWrite={canWrite(access?.level)}
 							{...(onSettingsChanged ? { onBranchMade: onSettingsChanged } : {})}
 						/>
-						<ChangeList snapshot={snapshot} repo={repo} shown={view.kind === "repo" && view.branch && (snapshot.branches ?? []).some((b) => b.name === view.branch) ? view.branch : branch} />
+						<ChangeList
+							snapshot={snapshot}
+							repo={repo}
+							shown={
+								view.kind === "repo" && view.branch && (snapshot.branches ?? []).some((b) => b.name === view.branch)
+									? view.branch
+									: branch
+							}
+						/>
 					</>
 				)}
 			</main>

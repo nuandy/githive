@@ -20,21 +20,32 @@ export interface Remote {
 // Artifacts tokens look like art_v1_<secret>?expires=<unix>; Git auth wants only the secret.
 
 /** Whether a ref listing failed only because the repo is empty (no HEAD yet): it then has no refs. */
-export const isEmptyRepo = (err: unknown) => (err as { code?: string })?.code === "NotFoundError" && /HEAD/.test(String((err as Error)?.message));
+export const isEmptyRepo = (err: unknown) =>
+	(err as { code?: string })?.code === "NotFoundError" && /HEAD/.test(String((err as Error)?.message));
 
 /**
  * The repo's default branch: where its HEAD points (one request), or null for
  * an empty repo. A project's branch is whatever this is (main, master, ...).
  */
 export async function defaultBranch(remote: Remote): Promise<string | null> {
-	const refs = await retryTransient(() => git.listServerRefs({ http, url: remote.url, prefix: "HEAD", symrefs: true, ...gitAuth(remote) })).catch((err) => (isEmptyRepo(err) ? [] : Promise.reject(err)));
+	const refs = await retryTransient(() =>
+		git.listServerRefs({ http, url: remote.url, prefix: "HEAD", symrefs: true, ...gitAuth(remote) }),
+	).catch((err) => (isEmptyRepo(err) ? [] : Promise.reject(err)));
 	const target = refs.find((r) => r.ref === "HEAD")?.target;
 	return target?.startsWith("refs/heads/") ? target.slice("refs/heads/".length) : null;
 }
 
 /** A branch's head on a remote, without cloning (one ls-remote), or null when it doesn't exist. */
 export async function branchHead(remote: Remote, branch: string): Promise<string | null> {
-	const refs = await retryTransient(() => git.listServerRefs({ http, url: remote.url, protocolVersion: 1, prefix: `refs/heads/${branch}`, ...gitAuth(remote) }));
+	const refs = await retryTransient(() =>
+		git.listServerRefs({
+			http,
+			url: remote.url,
+			protocolVersion: 1,
+			prefix: `refs/heads/${branch}`,
+			...gitAuth(remote),
+		}),
+	);
 	return refs.find((r) => r.ref === `refs/heads/${branch}`)?.oid ?? null;
 }
 
@@ -69,7 +80,8 @@ let inWorkspaces = 0;
  * the runtime cancelled it as hung (12 checks and merges of a 200-agent run).
  */
 export async function inWorkspaceTurn<T>(work: () => Promise<T>): Promise<T> {
-	while (inWorkspaces >= WORKSPACES_AT_ONCE) await new Promise((resolve) => setTimeout(resolve, WORKSPACE_TURN_POLL_MS * (0.5 + Math.random())));
+	while (inWorkspaces >= WORKSPACES_AT_ONCE)
+		await new Promise((resolve) => setTimeout(resolve, WORKSPACE_TURN_POLL_MS * (0.5 + Math.random())));
 	inWorkspaces++;
 	try {
 		return await work();
@@ -119,7 +131,16 @@ export class Workspace {
 			// A failed clone may have populated part of the object database, refs, or
 			// worktree. Each attempt must therefore begin with an entirely fresh FS.
 			const fs = new MemoryFS();
-			await git.clone({ fs, http, dir: DIR, url: origin.url, ref: branch, singleBranch: true, depth, ...gitAuth(origin) });
+			await git.clone({
+				fs,
+				http,
+				dir: DIR,
+				url: origin.url,
+				ref: branch,
+				singleBranch: true,
+				depth,
+				...gitAuth(origin),
+			});
 			const ws = new Workspace(fs, origin, branch, depth);
 			ws.sources.push({ remote: "origin", origin, ref: branch });
 			return ws;
@@ -141,7 +162,18 @@ export class Workspace {
 		let ws: Workspace;
 		if (hit) {
 			ws = hit.ws.copy(origin);
-			const result = await retryTransient(() => git.fetch({ fs: ws.fs, http, dir: DIR, remote: "origin", ref: branch, singleBranch: true, depth: ws.depth, ...gitAuth(origin) }));
+			const result = await retryTransient(() =>
+				git.fetch({
+					fs: ws.fs,
+					http,
+					dir: DIR,
+					remote: "origin",
+					ref: branch,
+					singleBranch: true,
+					depth: ws.depth,
+					...gitAuth(origin),
+				}),
+			);
 			if (!result.fetchHead) throw new Error(`fetch of origin/${branch} returned no head`);
 			// The worktree stays where it was: reading needs the branch, not the files.
 			await git.writeRef({ fs: ws.fs, dir: DIR, ref: `refs/heads/${branch}`, value: result.fetchHead, force: true });
@@ -164,7 +196,18 @@ export class Workspace {
 		if (this.depth >= FULL_DEPTH) return false;
 		this.depth = Math.min(this.depth * 4, FULL_DEPTH);
 		for (const source of this.sources)
-			await retryTransient(() => git.fetch({ fs: this.fs, http, dir: DIR, remote: source.remote, ref: source.ref, singleBranch: true, depth: this.depth, ...gitAuth(source.origin) }));
+			await retryTransient(() =>
+				git.fetch({
+					fs: this.fs,
+					http,
+					dir: DIR,
+					remote: source.remote,
+					ref: source.ref,
+					singleBranch: true,
+					depth: this.depth,
+					...gitAuth(source.origin),
+				}),
+			);
 		return true;
 	}
 
@@ -198,7 +241,18 @@ export class Workspace {
 
 	/** Push local ref `from` (a branch fetched, say) to `to` on `remote`, replacing what's there. */
 	pushAs(from: string, to: string, remote: Remote) {
-		return retryTransient(() => git.push({ fs: this.fs, http, dir: DIR, url: remote.url, ref: from, remoteRef: to, force: true, ...gitAuth(remote) }));
+		return retryTransient(() =>
+			git.push({
+				fs: this.fs,
+				http,
+				dir: DIR,
+				url: remote.url,
+				ref: from,
+				remoteRef: to,
+				force: true,
+				...gitAuth(remote),
+			}),
+		);
 	}
 
 	push(ref = this.branch, remote: Remote = this.origin) {
@@ -208,16 +262,18 @@ export class Workspace {
 	/** Fetch `ref` from another repo into refs/remotes/<name>/<ref>; returns its commit. */
 	async fetch(name: string, remote: Remote, ref = this.branch) {
 		await git.addRemote({ fs: this.fs, dir: DIR, remote: name, url: remote.url, force: true });
-		const result = await retryTransient(() => git.fetch({
-			fs: this.fs,
-			http,
-			dir: DIR,
-			remote: name,
-			ref,
-			singleBranch: true,
-			depth: this.depth,
-			...gitAuth(remote),
-		}));
+		const result = await retryTransient(() =>
+			git.fetch({
+				fs: this.fs,
+				http,
+				dir: DIR,
+				remote: name,
+				ref,
+				singleBranch: true,
+				depth: this.depth,
+				...gitAuth(remote),
+			}),
+		);
 		if (!result.fetchHead) throw new Error(`fetch of ${name}/${ref} returned no head`);
 		this.sources.push({ remote: name, origin: remote, ref });
 		return result.fetchHead;
@@ -230,10 +286,12 @@ export class Workspace {
 	/** The best common ancestor of two commits, deepening history until it shows. */
 	async mergeBase(a: string, b: string) {
 		for (;;) {
-			const [oid] = await git.findMergeBase({ fs: this.fs, dir: DIR, oids: [await this.oid(a), await this.oid(b)], cache: this.cache }).catch((err) => {
-				if (err instanceof git.Errors.NotFoundError) return [];
-				throw err;
-			});
+			const [oid] = await git
+				.findMergeBase({ fs: this.fs, dir: DIR, oids: [await this.oid(a), await this.oid(b)], cache: this.cache })
+				.catch((err) => {
+					if (err instanceof git.Errors.NotFoundError) return [];
+					throw err;
+				});
 			if (oid) return oid as string;
 			if (!(await this.deepen())) throw new Error(`no common ancestor for ${a} and ${b}`);
 		}
@@ -248,7 +306,16 @@ export class Workspace {
 		// A merge needs the commits' common ancestor here.
 		await this.mergeBase(ours, theirs);
 		try {
-			await git.merge({ fs: this.fs, dir: DIR, ours, theirs, dryRun: true, abortOnConflict: true, author: BOT, cache: this.cache });
+			await git.merge({
+				fs: this.fs,
+				dir: DIR,
+				ours,
+				theirs,
+				dryRun: true,
+				abortOnConflict: true,
+				author: BOT,
+				cache: this.cache,
+			});
 			return { clean: true };
 		} catch (err) {
 			if (err instanceof git.Errors.MergeConflictError) return { clean: false, files: err.data.filepaths };
@@ -259,7 +326,16 @@ export class Workspace {
 	/** Merge `theirs` into the local branch. Throws MergeConflictError on conflict. */
 	async merge(theirs: string, message: string) {
 		await this.mergeBase(this.branch, theirs);
-		return git.merge({ fs: this.fs, dir: DIR, ours: this.branch, theirs, message, author: BOT, abortOnConflict: true, cache: this.cache });
+		return git.merge({
+			fs: this.fs,
+			dir: DIR,
+			ours: this.branch,
+			theirs,
+			message,
+			author: BOT,
+			abortOnConflict: true,
+			cache: this.cache,
+		});
 	}
 
 	/** Paths whose content differs between two commits. */

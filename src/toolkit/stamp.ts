@@ -45,7 +45,16 @@ export interface Stamper {
 export async function makeStamper(privateKey: string, by: string): Promise<Stamper> {
 	const key = await crypto.subtle.importKey("pkcs8", fromBase64(privateKey), ALGORITHM, true, ["sign"]);
 	const jwk = (await crypto.subtle.exportKey("jwk", key)) as JsonWebKey;
-	const publicKey = jwk.x ? toBase64(fromBase64(jwk.x.replace(/-/g, "+").replace(/_/g, "/").padEnd(Math.ceil(jwk.x.length / 4) * 4, "="))) : "";
+	const publicKey = jwk.x
+		? toBase64(
+				fromBase64(
+					jwk.x
+						.replace(/-/g, "+")
+						.replace(/_/g, "/")
+						.padEnd(Math.ceil(jwk.x.length / 4) * 4, "="),
+				),
+			)
+		: "";
 	return {
 		by,
 		publicKey,
@@ -68,6 +77,14 @@ export async function verifyStamp(publicKey: string, payload: string, stamp: str
 export function stampPayload(kind: string, record: object): string {
 	const { stamp: _stamp, ...rest } = record as { stamp?: string };
 	const sorted = (value: unknown): unknown =>
-		Array.isArray(value) ? value.map(sorted) : value && typeof value === "object" ? Object.fromEntries(Object.entries(value).sort(([a], [b]) => a.localeCompare(b)).map(([k, v]) => [k, sorted(v)])) : value;
+		Array.isArray(value)
+			? value.map(sorted)
+			: value && typeof value === "object"
+				? Object.fromEntries(
+						Object.entries(value)
+							.sort(([a], [b]) => a.localeCompare(b))
+							.map(([k, v]) => [k, sorted(v)]),
+					)
+				: value;
 	return `${kind}\n${JSON.stringify(sorted(rest))}`;
 }

@@ -40,15 +40,19 @@ const FOCUS: Record<string, string> = {
 	api: "Check the interface: routes, types and function signatures match the intent, follow the project's existing conventions, handle errors consistently, and won't surprise callers.",
 	performance:
 		"Look for work that grows badly with data size, unbounded fan-out, repeated I/O in loops, missing pagination, and anything that blocks a request for long.",
-	correctness: "Check the logic against the intent: edge cases, error paths, off-by-one errors, and behaviour the intent asks for but the code doesn't do.",
+	correctness:
+		"Check the logic against the intent: edge cases, error paths, off-by-one errors, and behaviour the intent asks for but the code doesn't do.",
 };
 
-const focusFor = (role: string) => FOCUS[role] ?? `Review the change from the perspective of ${role}, as an expert in that area would.`;
+const focusFor = (role: string) =>
+	FOCUS[role] ?? `Review the change from the perspective of ${role}, as an expert in that area would.`;
 
 const VerdictArgs = z.strictObject({
 	verdict: z.enum(["approve", "reject"]),
 	summary: z.string().describe("One or two sentences: what you checked and your conclusion"),
-	evidence: z.string().describe("Commands you ran with their key output, or file:line references. For a rejection, what must change."),
+	evidence: z
+		.string()
+		.describe("Commands you ran with their key output, or file:line references. For a rejection, what must change."),
 });
 
 export class Reviewer extends SandboxAgent<ReviewJob, ReviewerState> {
@@ -63,7 +67,9 @@ export class Reviewer extends SandboxAgent<ReviewJob, ReviewerState> {
 	private async vote(job: ReviewJob, verdict: "approve" | "reject", evidence: string) {
 		// The repo's votes, wherever they're kept now: their record, or the commit's bucket once sharded.
 		const votes = votesFor(toolContextFor(this.env, undefined, { hosted: true }), job.project);
-		const stamper = this.env.STAMP_KEY ? await makeStamper(this.env.STAMP_KEY, `service:githive-reviewer:${job.role}`) : undefined;
+		const stamper = this.env.STAMP_KEY
+			? await makeStamper(this.env.STAMP_KEY, `service:githive-reviewer:${job.role}`)
+			: undefined;
 		await votes.vote({ commit: job.head, reviewer: `githive-${job.role}`, role: job.role, verdict, evidence }, stamper);
 	}
 
@@ -122,14 +128,24 @@ How to work:
 					Object.assign(state, { status: "done", verdict, summary, evidence });
 					this.note(state, `voted ${verdict} on ${job.head}`);
 					if (job.mergeWhenApproved && verdict === "approve") {
-						const merged = (await callTool("merge", { repo: job.project, change: job.change, agent: job.agent }, this.toolContext(job))) as { ok: boolean; reasons?: string[] };
-						this.note(state, merged.ok ? "merged the change" : `not merged yet: ${(merged.reasons ?? []).join("; ").slice(0, 200)}`);
+						const merged = (await callTool(
+							"merge",
+							{ repo: job.project, change: job.change, agent: job.agent },
+							this.toolContext(job),
+						)) as { ok: boolean; reasons?: string[] };
+						this.note(
+							state,
+							merged.ok ? "merged the change" : `not merged yet: ${(merged.reasons ?? []).join("; ").slice(0, 200)}`,
+						);
 					}
 					// A rejected change built by GitHive's builder goes back to it, with why.
 					if (verdict === "reject" && job.agent === "githive-builder") {
 						const feedback = `The ${job.role} reviewer rejected ${job.head}:\n\n${summary}\n\n${evidence}\n\nFix it inside your claim, commit_and_push, then finish again for a new review.`;
 						const outcome = await this.env.BUILDER.getByName(changeRepoName(job.project, job.change)).revise(feedback);
-						this.note(state, outcome === "revising" ? "sent the change back to its builder" : "its builder gave up; claim released");
+						this.note(
+							state,
+							outcome === "revising" ? "sent the change back to its builder" : "its builder gave up; claim released",
+						);
 					}
 					return "Vote recorded.";
 				},

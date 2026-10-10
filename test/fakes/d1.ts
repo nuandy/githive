@@ -15,7 +15,11 @@ class Statement {
 	) {}
 
 	bind(...values: unknown[]) {
-		return new Statement(this.db, this.sql, values.map((v) => (v === undefined ? null : (v as Value))));
+		return new Statement(
+			this.db,
+			this.sql,
+			values.map((v) => (v === undefined ? null : (v as Value))),
+		);
 	}
 
 	async first<T>(column?: string): Promise<T | null> {
@@ -25,7 +29,9 @@ class Statement {
 	}
 
 	async all<T>(): Promise<{ results: T[] }> {
-		return { results: (this.db.prepare(this.sql).all(...this.values) as Record<string, unknown>[]).map((r) => ({ ...r }) as T) };
+		return {
+			results: (this.db.prepare(this.sql).all(...this.values) as Record<string, unknown>[]).map((r) => ({ ...r }) as T),
+		};
 	}
 
 	async run() {
@@ -42,7 +48,10 @@ class Statement {
 export function fakeD1() {
 	const db = new DatabaseSync(":memory:");
 	const dir = join(import.meta.dirname, "..", "..", "migrations");
-	for (const file of readdirSync(dir).filter((f) => f.endsWith(".sql")).sort()) db.exec(readFileSync(join(dir, file), "utf8"));
+	for (const file of readdirSync(dir)
+		.filter((f) => f.endsWith(".sql"))
+		.sort())
+		db.exec(readFileSync(join(dir, file), "utf8"));
 	return {
 		prepare: (sql: string) => new Statement(db, sql),
 		/** All or nothing, as D1's batch is. */

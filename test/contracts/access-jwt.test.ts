@@ -28,7 +28,11 @@ async function token(claims: Partial<AccessJwtClaims> = {}) {
 		...claims,
 	};
 	const signingInput = `${encode(JSON.stringify({ alg: "RS256", kid, typ: "JWT" }))}.${encode(JSON.stringify(payload))}`;
-	const signature = await crypto.subtle.sign("RSASSA-PKCS1-v1_5", pair.privateKey, new TextEncoder().encode(signingInput));
+	const signature = await crypto.subtle.sign(
+		"RSASSA-PKCS1-v1_5",
+		pair.privateKey,
+		new TextEncoder().encode(signingInput),
+	);
 	return `${signingInput}.${encode(signature)}`;
 }
 
@@ -40,12 +44,16 @@ async function verify(jwt: string, overrides: Partial<AccessConfiguration> = {})
 }
 
 beforeAll(async () => {
-	pair = await crypto.subtle.generateKey(
+	pair = (await crypto.subtle.generateKey(
 		{ name: "RSASSA-PKCS1-v1_5", modulusLength: 2048, publicExponent: new Uint8Array([1, 0, 1]), hash: "SHA-256" },
 		true,
 		["sign", "verify"],
-	) as CryptoKeyPair;
-	jwk = Object.assign(await crypto.subtle.exportKey("jwk", pair.publicKey) as JsonWebKey, { kid, alg: "RS256", use: "sig" });
+	)) as CryptoKeyPair;
+	jwk = Object.assign((await crypto.subtle.exportKey("jwk", pair.publicKey)) as JsonWebKey, {
+		kid,
+		alg: "RS256",
+		use: "sig",
+	});
 });
 
 beforeEach(() => {
@@ -62,15 +70,23 @@ describe("Cloudflare Access JWT verification", () => {
 	});
 
 	it("identifies a person's browser session, an app token with their email, as that person", async () => {
-		await expect(verify(await token({ type: "app", sub: "5cded567-0ef8-5e1d-beae-1bfd05aec026" }))).resolves.toEqual({ kind: "person", value: "dev@example.com" });
+		await expect(verify(await token({ type: "app", sub: "5cded567-0ef8-5e1d-beae-1bfd05aec026" }))).resolves.toEqual({
+			kind: "person",
+			value: "dev@example.com",
+		});
 	});
 
 	it("identifies an app token with no email or common name by its subject", async () => {
-		await expect(verify(await token({ type: "app", sub: "app-subject", email: undefined }))).resolves.toEqual({ kind: "service", value: "app-subject" });
+		await expect(verify(await token({ type: "app", sub: "app-subject", email: undefined }))).resolves.toEqual({
+			kind: "service",
+			value: "app-subject",
+		});
 	});
 
 	it("identifies a service token from its signed common_name", async () => {
-		await expect(verify(await token({ type: "app", common_name: "release-script", email: undefined }))).resolves.toEqual({ kind: "service", value: "release-script" });
+		await expect(
+			verify(await token({ type: "app", common_name: "release-script", email: undefined })),
+		).resolves.toEqual({ kind: "service", value: "release-script" });
 	});
 
 	it("rejects an invalid signature, issuer, audience, or expired assertion", async () => {
@@ -87,10 +103,14 @@ describe("Cloudflare Access JWT verification", () => {
 	it("rejects assertions without a usable identity and does not trust an unsigned email header", async () => {
 		const jwt = await token({ email: undefined });
 		await expect(verify(jwt)).resolves.toBeNull();
-		await expect(verifyAccessRequest(
-			new Request("https://blueprint.nuandy.workers.dev/", { headers: { "Cf-Access-Authenticated-User-Email": "spoof@example.com" } }),
-			config,
-		)).resolves.toBeNull();
+		await expect(
+			verifyAccessRequest(
+				new Request("https://blueprint.nuandy.workers.dev/", {
+					headers: { "Cf-Access-Authenticated-User-Email": "spoof@example.com" },
+				}),
+				config,
+			),
+		).resolves.toBeNull();
 	});
 });
 
@@ -99,8 +119,19 @@ describe("Worker ingress authentication", () => {
 		const worker = (await import("../../src/index")).default;
 		const assets = { fetch: async () => new Response("<!doctype html>the dashboard") };
 		const env = { ACCESS_TEAM_DOMAIN: config.teamDomain, ACCESS_AUD: config.audience, ASSETS: assets } as never;
-		for (const [path, method] of [["/api", "GET"], ["/repos", "GET"], ["/me", "GET"], ["/repos/import", "POST"], ["/mcp", "POST"], ["/admin/invites", "GET"]] as const) {
-			const response = await worker.fetch(new Request(`https://blueprint.nuandy.workers.dev${path}`, { method }), env, {} as never);
+		for (const [path, method] of [
+			["/api", "GET"],
+			["/repos", "GET"],
+			["/me", "GET"],
+			["/repos/import", "POST"],
+			["/mcp", "POST"],
+			["/admin/invites", "GET"],
+		] as const) {
+			const response = await worker.fetch(
+				new Request(`https://blueprint.nuandy.workers.dev${path}`, { method }),
+				env,
+				{} as never,
+			);
 			expect(response.status, `${method} ${path}`).toBe(401);
 		}
 		const page = await worker.fetch(new Request("https://blueprint.nuandy.workers.dev/"), env, {} as never);

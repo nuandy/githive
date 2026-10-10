@@ -5,8 +5,16 @@ import { buildRepoRows, filterRepos, groupRepos, repoCounts, repoState, type Sum
 describe("the repositories list", () => {
 	const summaries: Summaries = {
 		repos: [
-			{ repo: "acme/docs-site", since: ago(1000), summary: { open: 1, merged: 3, violations: 1, lastActivity: ago(5), countedAt: ago(1) } },
-			{ repo: "acme/my-app", since: ago(600), summary: { open: 2, needsYou: 1, merged: 1, lastActivity: ago(2), countedAt: ago(1) } },
+			{
+				repo: "acme/docs-site",
+				since: ago(1000),
+				summary: { open: 1, merged: 3, violations: 1, lastActivity: ago(5), countedAt: ago(1) },
+			},
+			{
+				repo: "acme/my-app",
+				since: ago(600),
+				summary: { open: 2, needsYou: 1, merged: 1, lastActivity: ago(2), countedAt: ago(1) },
+			},
 		],
 	};
 
@@ -20,7 +28,11 @@ describe("the repositories list", () => {
 	});
 
 	it("marks repos the server hasn't counted yet", () => {
-		expect(buildRepoRows({ repos: [{ repo: "acme/docs-site", since: ago(10), summary: null }] })[0]).toMatchObject({ detailed: false, open: 0, lastActivity: ago(10) });
+		expect(buildRepoRows({ repos: [{ repo: "acme/docs-site", since: ago(10), summary: null }] })[0]).toMatchObject({
+			detailed: false,
+			open: 0,
+			lastActivity: ago(10),
+		});
 	});
 
 	it("filters by name", () => {
@@ -31,10 +43,24 @@ describe("the repositories list", () => {
 });
 
 describe("the groups on the Repositories page", () => {
-	const row = (name: string, over: Partial<Parameters<typeof repoState>[0]> = {}) => ({ name, open: 0, needsYou: 0, merged: 0, violations: 0, detailed: true, ...over });
+	const row = (name: string, over: Partial<Parameters<typeof repoState>[0]> = {}) => ({
+		name,
+		open: 0,
+		needsYou: 0,
+		merged: 0,
+		violations: 0,
+		detailed: true,
+		...over,
+	});
 
 	it("puts what needs a person first, then work under way, then the quiet repos, keeping each group's order", () => {
-		const rows = [row("a/quiet"), row("a/busy", { open: 2 }), row("a/asks", { open: 1, needsYou: 1 }), row("a/audit", { violations: 1 }), row("a/busier", { open: 5 })];
+		const rows = [
+			row("a/quiet"),
+			row("a/busy", { open: 2 }),
+			row("a/asks", { open: 1, needsYou: 1 }),
+			row("a/audit", { violations: 1 }),
+			row("a/busier", { open: 5 }),
+		];
 		expect(groupRepos(rows).map((g) => [g.state, g.rows.map((r) => r.name)])).toEqual([
 			["needs-you", ["a/asks", "a/audit"]],
 			["at-work", ["a/busy", "a/busier"]],
@@ -46,4 +72,3 @@ describe("the groups on the Repositories page", () => {
 		expect(groupRepos([row("a/busy", { open: 1 })]).map((g) => g.state)).toEqual(["at-work"]);
 	});
 });
-

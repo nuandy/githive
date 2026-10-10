@@ -8,7 +8,8 @@ import { rpc } from "./rpc";
  * One reviewer instance per (slice, role, commit). A new commit never collides
  * with a reviewer that is still finishing on an older one.
  */
-export const reviewerName = (sliceRepo: string, role: string, head: string) => `${sliceRepo}--review-${role}--${head.slice(0, 12)}`;
+export const reviewerName = (sliceRepo: string, role: string, head: string) =>
+	`${sliceRepo}--review-${role}--${head.slice(0, 12)}`;
 
 /** An Artifacts call, `method` on `repo` ("-": the namespace), counted for the call it's made in (see countingRequests), failed or not. */
 async function call<T>(method: string, repo: string, operation: () => PromiseLike<T>): Promise<T> {
@@ -27,7 +28,12 @@ async function call<T>(method: string, repo: string, operation: () => PromiseLik
  * Getting the repo is retried when it fails transiently, unless `retry` is false
  * because the caller retries itself.
  */
-async function withRepo<T>(artifacts: Artifacts, name: string, operation: (repo: ArtifactsRepo) => Promise<T>, { retry = true } = {}): Promise<T> {
+async function withRepo<T>(
+	artifacts: Artifacts,
+	name: string,
+	operation: (repo: ArtifactsRepo) => Promise<T>,
+	{ retry = true } = {},
+): Promise<T> {
 	const get = () => call("get", name, () => artifacts.get(name));
 	const repo = await (retry ? retryArtifacts(get) : get()).catch((err) => Promise.reject(naming(err, name)));
 	try {
@@ -68,7 +74,11 @@ export async function remoteFor(
 }
 
 /** Read a repo's history through Artifacts' own API (log, readCommit, readTree), each call tried again through its transient failures. */
-export async function withHistory<T>(artifacts: Artifacts, name: string, read: (source: HistorySource) => Promise<T>): Promise<T> {
+export async function withHistory<T>(
+	artifacts: Artifacts,
+	name: string,
+	read: (source: HistorySource) => Promise<T>,
+): Promise<T> {
 	return withRepo(artifacts, name, (repo) =>
 		read({
 			log: (ref, limit, offset) => retryArtifacts(() => call("log", name, () => rpc(repo.log({ ref, limit, offset })))),
@@ -114,12 +124,19 @@ const isInternalError = (err: unknown) => codeOf(err) === "INTERNAL_ERROR";
  * merges of a 200-agent run).
  */
 const retryArtifacts = <T>(operation: () => Promise<T>) =>
-	retryTransient(operation, { maxAttempts: 5, baseDelayMs: 300, maxDelayMs: 3_000, retryable: (err) => isTransientFailure(err) || isInternalError(err) });
+	retryTransient(operation, {
+		maxAttempts: 5,
+		baseDelayMs: 300,
+		maxDelayMs: 3_000,
+		retryable: (err) => isTransientFailure(err) || isInternalError(err),
+	});
 
-const alreadyExists = (err: unknown) => /EXISTS/.test(codeOf(err)) || /already exists/i.test(err instanceof Error ? err.message : "");
+const alreadyExists = (err: unknown) =>
+	/EXISTS/.test(codeOf(err)) || /already exists/i.test(err instanceof Error ? err.message : "");
 
 /** Under load a fork that was just made can briefly read as missing; while waiting for it, that means not ready yet. */
-const notFoundYet = (err: unknown) => /NOT_FOUND/.test(codeOf(err)) || /not found/i.test(err instanceof Error ? err.message : "");
+const notFoundYet = (err: unknown) =>
+	/NOT_FOUND/.test(codeOf(err)) || /not found/i.test(err instanceof Error ? err.message : "");
 
 const FORK_ATTEMPTS = 5;
 
@@ -147,7 +164,17 @@ export const isForkNotReady = (err: unknown) => codeOf(err) === "FORK_NOT_READY"
  * Each loop below does its own retrying, with no retry loop inside it, so a
  * fork is requested at most FORK_ATTEMPTS times per ask.
  */
-export async function forkAndWait(artifacts: Artifacts, source: string, name: string, description: string, { shared = false }: { /** Others may be making the same fork at once (a seed): one that exists already is theirs, waited for. */ shared?: boolean } = {}) {
+export async function forkAndWait(
+	artifacts: Artifacts,
+	source: string,
+	name: string,
+	description: string,
+	{
+		shared = false,
+	}: {
+		/** Others may be making the same fork at once (a seed): one that exists already is theirs, waited for. */ shared?: boolean;
+	} = {},
+) {
 	/** Request the fork; null when it turns out to exist already (a failed or lost request made it after all). */
 	const requestFork = (again: boolean) =>
 		withRepo(artifacts, source, async (repo) => {
@@ -187,8 +214,12 @@ export async function forkAndWait(artifacts: Artifacts, source: string, name: st
 			if (isForkPending(err) && !unstuck && Date.now() - (forkingSince ?? Date.now()) > FORK_STUCK_MS) {
 				// Stuck forking. Deleting it has been seen to let it finish at once; else it's gone, and asked for again now.
 				unstuck = true;
-				console.log(`fork ${name} still forking after ${Math.round((Date.now() - forkingSince!) / 1000)}s: deleting it, so it finishes or is made again`);
-				await call("delete", name, () => artifacts.delete(name)).catch((deleting) => console.error(`deleting the stuck fork ${name} failed`, String(deleting)));
+				console.log(
+					`fork ${name} still forking after ${Math.round((Date.now() - forkingSince!) / 1000)}s: deleting it, so it finishes or is made again`,
+				);
+				await call("delete", name, () => artifacts.delete(name)).catch((deleting) =>
+					console.error(`deleting the stuck fork ${name} failed`, String(deleting)),
+				);
 				askAgainAt = Date.now();
 				continue;
 			}
@@ -197,7 +228,10 @@ export async function forkAndWait(artifacts: Artifacts, source: string, name: st
 				askAgainAt = Date.now() + lostAfter();
 				continue;
 			}
-			if (Date.now() - started > FORK_READY_MS) throw Object.assign(new Error(`fork ${name} not ready after ${FORK_READY_MS / 1000}s: ${err}`), { code: "FORK_NOT_READY" });
+			if (Date.now() - started > FORK_READY_MS)
+				throw Object.assign(new Error(`fork ${name} not ready after ${FORK_READY_MS / 1000}s: ${err}`), {
+					code: "FORK_NOT_READY",
+				});
 			await scheduler.wait(delay);
 		}
 	}
@@ -214,7 +248,8 @@ export async function ensureRepo(artifacts: Artifacts, name: string, description
 			return await withRepo(artifacts, name, async () => undefined, { retry: false });
 		} catch (err) {
 			if (!isTransientFailure(err) && !isForkPending(err) && !notFoundYet(err)) throw err;
-			if (Date.now() - started > FORK_READY_MS) throw new Error(`repo ${name} not ready after ${FORK_READY_MS / 1000}s: ${err}`);
+			if (Date.now() - started > FORK_READY_MS)
+				throw new Error(`repo ${name} not ready after ${FORK_READY_MS / 1000}s: ${err}`);
 			await scheduler.wait(delay);
 		}
 	}
@@ -231,7 +266,8 @@ const escapeRegex = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"
  */
 export function leftoversOf(id: string, names: string[]) {
 	const longer = names.filter((n) => !n.startsWith("fork--") && !n.startsWith("records--") && n.startsWith(`${id}--`));
-	const theirs = (name: string, kind: "fork" | "records") => longer.some((other) => name.startsWith(`${kind}--${other}--`));
+	const theirs = (name: string, kind: "fork" | "records") =>
+		longer.some((other) => name.startsWith(`${kind}--${other}--`));
 	const fork = new RegExp(`^fork--${escapeRegex(id)}--.+$`);
 	const shard = new RegExp(`^records--${escapeRegex(id)}--\\d+$`);
 	return {
@@ -239,4 +275,3 @@ export function leftoversOf(id: string, names: string[]) {
 		shards: names.filter((n) => shard.test(n) && !theirs(n, "records")),
 	};
 }
-

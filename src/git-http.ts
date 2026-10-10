@@ -30,7 +30,10 @@ export function repoOfUrl(url: string) {
 export function gitAuth(remote: Remote) {
 	const password = remote.token.split("?expires=")[0];
 	const username = remote.user ?? "x";
-	return { headers: { Authorization: `Basic ${btoa(`${username}:${password}`)}` }, onAuth: () => ({ username, password }) };
+	return {
+		headers: { Authorization: `Basic ${btoa(`${username}:${password}`)}` },
+		onAuth: () => ({ username, password }),
+	};
 }
 
 /** A response's body, read to the end now (its connection freed), and given back to be read again. */
@@ -49,7 +52,11 @@ export type ArtifactsCalls = Map<string, { calls: number; failed: number }>;
 const counted = new AsyncLocalStorage<{ git: GitRequests; artifacts: ArtifactsCalls }>();
 
 /** Run `work`, counting the Git requests (see noteGitRequest) and Artifacts calls (see noteArtifactsCall) it makes. */
-export function countingRequests<T>(work: () => Promise<T>): { done: Promise<T>; requests: GitRequests; artifacts: ArtifactsCalls } {
+export function countingRequests<T>(work: () => Promise<T>): {
+	done: Promise<T>;
+	requests: GitRequests;
+	artifacts: ArtifactsCalls;
+} {
 	const requests: GitRequests = new Map();
 	const artifacts: ArtifactsCalls = new Map();
 	return { done: counted.run({ git: requests, artifacts }, work), requests, artifacts };
@@ -95,7 +102,9 @@ export function describeCounts(project: string | undefined, git: GitRequests, ar
 			const sum = kinds.get(kind) ?? { requests: 0, failed: 0 };
 			kinds.set(kind, { requests: sum.requests + seen.requests, failed: sum.failed + seen.failed });
 		}
-		parts.push(`git: ${[...kinds].map(([kind, n]) => `${kind} ${n.requests}${n.failed ? ` (${n.failed} failed)` : ""}`).join(", ")}`);
+		parts.push(
+			`git: ${[...kinds].map(([kind, n]) => `${kind} ${n.requests}${n.failed ? ` (${n.failed} failed)` : ""}`).join(", ")}`,
+		);
 	}
 	if (artifacts.size) {
 		const methods = new Map<string, { calls: number; failed: number; kinds: Map<string, number> }>();
@@ -110,7 +119,9 @@ export function describeCounts(project: string | undefined, git: GitRequests, ar
 			methods.set(method, sum);
 		}
 		const total = [...methods.values()].reduce((n, m) => n + m.calls, 0);
-		parts.push(`artifacts ${total}: ${[...methods].map(([method, m]) => `${method} ${m.calls} (${[...m.kinds].map(([kind, n]) => `${kind} ${n}`).join(", ")}${m.failed ? `; ${m.failed} failed` : ""})`).join(", ")}`);
+		parts.push(
+			`artifacts ${total}: ${[...methods].map(([method, m]) => `${method} ${m.calls} (${[...m.kinds].map(([kind, n]) => `${kind} ${n}`).join(", ")}${m.failed ? `; ${m.failed} failed` : ""})`).join(", ")}`,
+		);
 	}
 	return parts.join("; ");
 }
@@ -154,17 +165,27 @@ export const http = {
 		const body = request.body ? [await collected(request.body)] : undefined;
 		for (let attempt = 1; ; attempt++) {
 			// Unanswered for gitTimeout.ms: a 504, tried again below like any server failure.
-			const response = await base.request({ ...request, ...(body ? { body: body as never } : {}), signal: AbortSignal.timeout(gitTimeout.ms) }).catch((err) => {
-				if (!timedOut(err)) throw err;
-				return { url: request.url, method: request.method, statusCode: 504, statusMessage: `no answer in ${gitTimeout.ms / 1000} s`, headers: {}, body: undefined } as unknown as Awaited<ReturnType<typeof base.request>>;
-			});
+			const response = await base
+				.request({ ...request, ...(body ? { body: body as never } : {}), signal: AbortSignal.timeout(gitTimeout.ms) })
+				.catch((err) => {
+					if (!timedOut(err)) throw err;
+					return {
+						url: request.url,
+						method: request.method,
+						statusCode: 504,
+						statusMessage: `no answer in ${gitTimeout.ms / 1000} s`,
+						headers: {},
+						body: undefined,
+					} as unknown as Awaited<ReturnType<typeof base.request>>;
+				});
 			// A fetch's answer that's empty though it says 200: Artifacts answers some (shallow) fetches so, 3 of 8 in a row on
 			// a busy project repo (run 1000-3), and git then fails ("expected 'packfile'"). A real one is never empty: a
 			// server failure, tried again like one.
 			if (request.url.endsWith("/git-upload-pack") && response.statusCode === 200) {
 				const chunks: Uint8Array[] = [];
 				for await (const chunk of (await drained(response.body)) as AsyncIterable<Uint8Array>) chunks.push(chunk);
-				if (!chunks.some((c) => c.length)) Object.assign(response, { statusCode: 502, statusMessage: "empty answer to a fetch" });
+				if (!chunks.some((c) => c.length))
+					Object.assign(response, { statusCode: 502, statusMessage: "empty answer to a fetch" });
 				else
 					response.body = (async function* () {
 						yield* chunks;
@@ -178,8 +199,15 @@ export const http = {
 			else if (request.url.endsWith("/git-receive-pack")) {
 				const chunks: Uint8Array[] = [];
 				for await (const chunk of (await drained(response.body)) as AsyncIterable<Uint8Array>) chunks.push(chunk);
-				if (/receive_pack_busy/.test(new TextDecoder().decode(chunks.length === 1 ? chunks[0] : await new Blob(chunks).arrayBuffer())))
-					throw Object.assign(new Error(`push refused: ${repoOfUrl(request.url)} is busy with another (artifacts_git_receive_pack_busy)`), { code: "RECEIVE_PACK_BUSY" });
+				if (
+					/receive_pack_busy/.test(
+						new TextDecoder().decode(chunks.length === 1 ? chunks[0] : await new Blob(chunks).arrayBuffer()),
+					)
+				)
+					throw Object.assign(
+						new Error(`push refused: ${repoOfUrl(request.url)} is busy with another (artifacts_git_receive_pack_busy)`),
+						{ code: "RECEIVE_PACK_BUSY" },
+					);
 				response.body = (async function* () {
 					yield* chunks;
 				})();
@@ -189,7 +217,12 @@ export const http = {
 				await new Promise((resolve) => setTimeout(resolve, GIT_RETRY_MS * 2 ** (attempt - 1) * (0.5 + Math.random())));
 				continue;
 			}
-			throw Object.assign(new Error(`HTTP Error: ${response.statusCode} ${response.statusMessage} (${repoOfUrl(request.url)}, ${GIT_TRIES} tries)`), { status: response.statusCode, retried: true });
+			throw Object.assign(
+				new Error(
+					`HTTP Error: ${response.statusCode} ${response.statusMessage} (${repoOfUrl(request.url)}, ${GIT_TRIES} tries)`,
+				),
+				{ status: response.statusCode, retried: true },
+			);
 		}
 	},
 };

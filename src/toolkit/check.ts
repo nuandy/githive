@@ -39,14 +39,27 @@ export async function checkChange(input: CheckInput) {
 	// The branch's head as kept a moment (an early check needn't be on main as of this second), else one ref listing on
 	// the project, which made check the busiest reader of a busy project repo; its objects are kept between checks (see
 	// Workspace.at).
-	const listed = (input.branchHead ? await input.branchHead().catch(() => undefined) : undefined) ?? (await branchHead(input.project, input.branch));
+	const listed =
+		(input.branchHead ? await input.branchHead().catch(() => undefined) : undefined) ??
+		(await branchHead(input.project, input.branch));
 	if (!listed) throw new Error(`[409] ${input.branch} doesn't exist yet`);
 	const own = claims.find((c) => c.change === change);
 	// Through Artifacts' API: no file changed on both sides, it merges cleanly, with nothing fetched.
-	const read = input.history ? await changeAgainst(input.history, repoOfUrl(input.project.url), input.branch, listed, { ref: `changes/${change}`, source: input.source }).catch(() => null) : null;
+	const read = input.history
+		? await changeAgainst(input.history, repoOfUrl(input.project.url), input.branch, listed, {
+				ref: `changes/${change}`,
+				source: input.source,
+			}).catch(() => null)
+		: null;
 	if (read && "error" in read) throw new Error(`[409] changes/${change} has nothing pushed to check`);
 	if (read && !read.both.length)
-		return { change, head: read.head, branch: input.branch, main: { head: listed, clean: true }, outsideClaim: read.files.filter((f) => !own || !inLane(f, own.paths)) };
+		return {
+			change,
+			head: read.head,
+			branch: input.branch,
+			main: { head: listed, clean: true },
+			outsideClaim: read.files.filter((f) => !own || !inLane(f, own.paths)),
+		};
 	// Its Git work in turn with the isolate's other calls (see inWorkspaceTurn).
 	return inWorkspaceTurn(async () => {
 		const ws = await Workspace.at(input.project, input.branch, listed);

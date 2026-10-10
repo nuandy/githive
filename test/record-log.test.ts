@@ -43,7 +43,11 @@ describe("GitCasLog", () => {
 	it("retries a read the server fails for a moment", async () => {
 		const written = commit({ kind: "decisions" });
 		const tip = await log.append(null, written);
-		const fresh = new GitCasLog<State>(async () => ({ url: server.url, token: "unused" }), "t1", "refs/notes/githive/t1");
+		const fresh = new GitCasLog<State>(
+			async () => ({ url: server.url, token: "unused" }),
+			"t1",
+			"refs/notes/githive/t1",
+		);
 		server.failFetches(1);
 		expect(await fresh.read()).toEqual({ tip, commit: { ...written, format: 1 } });
 	});
@@ -70,7 +74,9 @@ describe("GitCasLog", () => {
 	it("lands exactly one of several appends racing on the same tip", async () => {
 		const first = await log.append(null, commit());
 		const writers = ["agent-b", "agent-c", "agent-d", "agent-e"];
-		const results = await Promise.all(writers.map((author, i) => log.append(first, commit({ author, batch: `race-${i}` }))));
+		const results = await Promise.all(
+			writers.map((author, i) => log.append(first, commit({ author, batch: `race-${i}` }))),
+		);
 		const landed = results.filter((tip) => tip !== null);
 		expect(landed).toHaveLength(1);
 		const head = await log.read();
@@ -105,7 +111,11 @@ describe("GitCasLog", () => {
 	});
 
 	it("reads an unchanged log without fetching it again", async () => {
-		await new GitCasLog<State>(async () => ({ url: server.url, token: "unused" }), "t1", "refs/notes/githive/t1").append(null, commit());
+		await new GitCasLog<State>(
+			async () => ({ url: server.url, token: "unused" }),
+			"t1",
+			"refs/notes/githive/t1",
+		).append(null, commit());
 		server.requests.length = 0;
 		const first = await log.read();
 		const firstRequests = server.requests.length;
@@ -132,8 +142,18 @@ describe("GitCasLog", () => {
 
 	it("records decisions as Git notes that plain git can read", async () => {
 		const project = server.git("rev-parse", "main").trim();
-		await log.append(null, commit({ kind: "decisions", entries: [{ commit: project, text: "change stats-1f2e opened, claiming src/stats/", at: "2026-10-04T12:00:00.000Z" }] }));
-		expect(server.git("notes", "--ref", "githive/t1", "show", project)).toContain("change stats-1f2e opened, claiming src/stats/");
+		await log.append(
+			null,
+			commit({
+				kind: "decisions",
+				entries: [
+					{ commit: project, text: "change stats-1f2e opened, claiming src/stats/", at: "2026-10-04T12:00:00.000Z" },
+				],
+			}),
+		);
+		expect(server.git("notes", "--ref", "githive/t1", "show", project)).toContain(
+			"change stats-1f2e opened, claiming src/stats/",
+		);
 	});
 
 	it("says the record format each commit is in, and reads a commit from before formats as format 1", async () => {
@@ -147,7 +167,13 @@ describe("GitCasLog", () => {
 describe("record states shared by readers, by tip", () => {
 	const shared = () => {
 		const kept = new Map<string, { tip: string; json: string }>();
-		return { kept, states: { get: async (ref: string, tip: string) => (kept.get(ref)?.tip === tip ? kept.get(ref)!.json : undefined), put: async (ref: string, tip: string, json: string) => void kept.set(ref, { tip, json }) } };
+		return {
+			kept,
+			states: {
+				get: async (ref: string, tip: string) => (kept.get(ref)?.tip === tip ? kept.get(ref)!.json : undefined),
+				put: async (ref: string, tip: string, json: string) => void kept.set(ref, { tip, json }),
+			},
+		};
 	};
 
 	it("lets a reader take what another read at the same tip, and fetch once the tip moves", async () => {
@@ -160,11 +186,18 @@ describe("record states shared by readers, by tip", () => {
 		await new Promise((resolve) => setTimeout(resolve, 10));
 		expect(kept.get("refs/notes/githive/t1@1")?.tip).toBe(tip);
 		// Another reader takes it from there: shown here by what it was kept as.
-		kept.set("refs/notes/githive/t1@1", { tip: tip!, json: JSON.stringify(commit({ state: { claims: { kept: "yes" } } })) });
-		expect((await new GitCasLog<State>(remote, "t1", "refs/notes/githive/t1", { states }).read())?.commit.state).toEqual({ claims: { kept: "yes" } });
+		kept.set("refs/notes/githive/t1@1", {
+			tip: tip!,
+			json: JSON.stringify(commit({ state: { claims: { kept: "yes" } } })),
+		});
+		expect(
+			(await new GitCasLog<State>(remote, "t1", "refs/notes/githive/t1", { states }).read())?.commit.state,
+		).toEqual({ claims: { kept: "yes" } });
 		// The tip moved: what was kept is for another tip, so the reader fetches.
 		await first.append(tip!, commit({ state: { claims: { "src/y/": "agent-b" } } }));
-		expect((await new GitCasLog<State>(remote, "t1", "refs/notes/githive/t1", { states }).read())?.commit.state).toEqual({ claims: { "src/y/": "agent-b" } });
+		expect(
+			(await new GitCasLog<State>(remote, "t1", "refs/notes/githive/t1", { states }).read())?.commit.state,
+		).toEqual({ claims: { "src/y/": "agent-b" } });
 	});
 });
 
@@ -182,11 +215,15 @@ describe("a push whose answer was lost", () => {
 			lost = true;
 			await response.arrayBuffer();
 			const tip = (await other.read())!.tip;
-			expect(await other.append(tip, commit({ batch: "other", state: { claims: { "src/y/": "agent-b" } } }))).toBeTruthy();
+			expect(
+				await other.append(tip, commit({ batch: "other", state: { claims: { "src/y/": "agent-b" } } })),
+			).toBeTruthy();
 			return new Response("", { status: 500 });
 		});
 		try {
-			expect(await log.append(first, commit({ batch: "mine", state: { claims: { "src/x/": "agent-a" } } }))).toBeTruthy();
+			expect(
+				await log.append(first, commit({ batch: "mine", state: { claims: { "src/x/": "agent-a" } } })),
+			).toBeTruthy();
 		} finally {
 			spy.mockRestore();
 		}
@@ -200,9 +237,21 @@ describe("record tips kept for readers", () => {
 		const { RepoCache } = await import("../src/repo-cache");
 		const { FakeStorage } = await import("./fakes/env");
 		const live = new RepoCache({ storage: new FakeStorage(), getWebSockets: () => [] } as never, {} as never);
-		const states = { get: (r: string, tip: string) => live.recordAt(r, tip), put: (r: string, tip: string, json: string) => live.keepRecord(r, tip, json) };
-		const tips = { get: (r: string, key: string) => live.tipOf(r, key, 10_000), keep: (r: string, tip: string | null, gen: number) => live.keepTip(r, tip, gen), landed: (r: string, parent: string | null, tip: string) => live.landedTip(r, parent, tip), stale: (r: string, parent: string | null) => live.staleTip(r, parent) };
-		return () => new GitCasLog<State>(async () => ({ url: server.url, token: "unused" }), "t1", "refs/notes/githive/t1", { states, tips: wrap(tips) });
+		const states = {
+			get: (r: string, tip: string) => live.recordAt(r, tip),
+			put: (r: string, tip: string, json: string) => live.keepRecord(r, tip, json),
+		};
+		const tips = {
+			get: (r: string, key: string) => live.tipOf(r, key, 10_000),
+			keep: (r: string, tip: string | null, gen: number) => live.keepTip(r, tip, gen),
+			landed: (r: string, parent: string | null, tip: string) => live.landedTip(r, parent, tip),
+			stale: (r: string, parent: string | null) => live.staleTip(r, parent),
+		};
+		return () =>
+			new GitCasLog<State>(async () => ({ url: server.url, token: "unused" }), "t1", "refs/notes/githive/t1", {
+				states,
+				tips: wrap(tips),
+			});
 	};
 	const settle = () => new Promise((resolve) => setTimeout(resolve, 10));
 
@@ -234,22 +283,40 @@ describe("record tips kept for readers", () => {
 		await settle();
 		const second = await writer.append(first, commit({ state: { claims: { "src/y/": "agent-b" } } }));
 		const before = server.requests.length;
-		expect(await reader().read()).toEqual({ tip: second, commit: { ...commit({ state: { claims: { "src/y/": "agent-b" } } }), format: 1 } });
+		expect(await reader().read()).toEqual({
+			tip: second,
+			commit: { ...commit({ state: { claims: { "src/y/": "agent-b" } } }), format: 1 },
+		});
 		expect(server.requests.length).toBe(before);
 	});
 
-	it("lets writers racing on one record all land, a few times each, even when keeping a write's tip fails", { timeout: 60_000 }, async () => {
-		const { appendRecord } = await import("../src/toolkit/records");
-		// Half the writes' tips are never kept (the call to keep it failed): the tip kept is then out of date.
-		const reader = await kept((tips) => ({ ...tips, landed: async (r, parent, tip) => (Math.random() < 0.5 ? Promise.reject(new Error("lost")) : tips.landed(r, parent, tip)) }));
-		// Each writer its own log, as each Worker instance has its own.
-		const writers = Array.from({ length: 6 }, (_, i) => ({ name: `w${i}`, log: reader() }));
-		await Promise.all(writers.map(async ({ name, log }) => {
-			for (let n = 0; n < 2; n++)
-				await appendRecord<State, never>(log, name, () => ({ claims: {} }), (state) => ({ state: { claims: { ...state.claims, [`${name}-${n}`]: name } }, text: `${name} ${n}` }));
-		}));
-		expect(Object.keys((await reader().readFresh())!.commit.state.claims)).toHaveLength(12);
-	});
+	it(
+		"lets writers racing on one record all land, a few times each, even when keeping a write's tip fails",
+		{ timeout: 60_000 },
+		async () => {
+			const { appendRecord } = await import("../src/toolkit/records");
+			// Half the writes' tips are never kept (the call to keep it failed): the tip kept is then out of date.
+			const reader = await kept((tips) => ({
+				...tips,
+				landed: async (r, parent, tip) =>
+					Math.random() < 0.5 ? Promise.reject(new Error("lost")) : tips.landed(r, parent, tip),
+			}));
+			// Each writer its own log, as each Worker instance has its own.
+			const writers = Array.from({ length: 6 }, (_, i) => ({ name: `w${i}`, log: reader() }));
+			await Promise.all(
+				writers.map(async ({ name, log }) => {
+					for (let n = 0; n < 2; n++)
+						await appendRecord<State, never>(
+							log,
+							name,
+							() => ({ claims: {} }),
+							(state) => ({ state: { claims: { ...state.claims, [`${name}-${n}`]: name } }, text: `${name} ${n}` }),
+						);
+				}),
+			);
+			expect(Object.keys((await reader().readFresh())!.commit.state.claims)).toHaveLength(12);
+		},
+	);
 
 	it("reads fresh from Git when asked", async () => {
 		const reader = await kept();
@@ -266,9 +333,17 @@ describe("a rehearsed change of record format", () => {
 	type V1 = { claims: Record<string, string> };
 	type V2 = { claims: Record<string, { holder: string }> };
 	// Format 2 keeps each holder in an object: the upgrade keeps every claim, holder and all.
-	const upgrades = { 1: (state: unknown) => ({ claims: Object.fromEntries(Object.entries((state as V1).claims).map(([path, holder]) => [path, { holder }])) }) };
+	const upgrades = {
+		1: (state: unknown) => ({
+			claims: Object.fromEntries(Object.entries((state as V1).claims).map(([path, holder]) => [path, { holder }])),
+		}),
+	};
 	const v1 = () => new GitCasLog<V1>(async () => ({ url: server.url, token: "unused" }), "t1", "refs/notes/githive/t1");
-	const v2 = () => new GitCasLog<V2>(async () => ({ url: server.url, token: "unused" }), "t1", "refs/notes/githive/t1", { format: 2, upgrades });
+	const v2 = () =>
+		new GitCasLog<V2>(async () => ({ url: server.url, token: "unused" }), "t1", "refs/notes/githive/t1", {
+			format: 2,
+			upgrades,
+		});
 
 	it("upgrades format 1 records as a format 2 GitHive reads them, losing nothing", async () => {
 		const first = await v1().append(null, commit({ state: { claims: { "src/a/": "agent-a", "docs/": "agent-b" } } }));
@@ -276,19 +351,27 @@ describe("a rehearsed change of record format", () => {
 		expect(read?.commit.format).toBe(1);
 		expect(read?.commit.state).toEqual({ claims: { "src/a/": { holder: "agent-a" }, "docs/": { holder: "agent-b" } } });
 		// It writes on in its own format, on top of the old records.
-		const next = await v2().append(first, { ...commit(), state: { claims: { ...read!.commit.state.claims, "web/": { holder: "agent-c" } } } } as never);
+		const next = await v2().append(first, {
+			...commit(),
+			state: { claims: { ...read!.commit.state.claims, "web/": { holder: "agent-c" } } },
+		} as never);
 		expect(next).toMatch(/^[0-9a-f]{40}$/);
 		expect(server.git("log", "-1", "--format=%B", "refs/notes/githive/t1")).toMatch(/^GitHive-Format: 2$/m);
 		expect((await v2().read())?.commit.state.claims["web/"]).toEqual({ holder: "agent-c" });
 	});
 
 	it("never lets an older GitHive write over newer records: it reads them as they are, and refuses", async () => {
-		const tip = await v2().append(null, { ...commit(), state: { claims: { "src/a/": { holder: "agent-a" } } } } as never);
+		const tip = await v2().append(null, {
+			...commit(),
+			state: { claims: { "src/a/": { holder: "agent-a" } } },
+		} as never);
 		const older = v1();
 		const read = await older.read();
 		expect(read?.commit.format).toBe(2);
 		expect(read?.commit.state).toEqual({ claims: { "src/a/": { holder: "agent-a" } } });
-		await expect(older.append(tip, commit({ batch: "older" }))).rejects.toThrow("these records are format 2, newer than this GitHive knows (1): it reads them but won't write over them");
+		await expect(older.append(tip, commit({ batch: "older" }))).rejects.toThrow(
+			"these records are format 2, newer than this GitHive knows (1): it reads them but won't write over them",
+		);
 		// Nor without reading first.
 		await expect(v1().append(tip, commit({ batch: "older-blind" }))).rejects.toThrow(/newer than this GitHive knows/);
 		expect((await v2().read())?.tip).toBe(tip);
@@ -299,4 +382,3 @@ describe("a rehearsed change of record format", () => {
 		expect(() => upgradeState({}, 1, "refs/x", 3, { 1: (s) => s })).toThrow("no upgrade from record format 2 to 3");
 	});
 });
-

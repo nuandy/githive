@@ -56,7 +56,10 @@ describe("a project whose branch is master", () => {
 			},
 		};
 		const call = async (name: string, args: Record<string, unknown>) => {
-			const reply = (await handleRpc({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name, arguments: args } }, ctx as never)) as { result: { content: { text: string }[]; isError?: boolean } };
+			const reply = (await handleRpc(
+				{ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name, arguments: args } },
+				ctx as never,
+			)) as { result: { content: { text: string }[]; isError?: boolean } };
 			const text = reply.result.content[0].text;
 			return reply.result.isError ? { error: text } : JSON.parse(text);
 		};
@@ -64,9 +67,27 @@ describe("a project whose branch is master", () => {
 		expect(await call("settings", { repo: "project", shard_depth: 0 })).toMatchObject({ branch: "master" });
 		await call("claim", { repo: "project", change: "a-1", agent: "agent-a", paths: ["src/a/"], intent: "a" });
 		const head = await pushChange(forkUrl, work, "agent-a", "a-1", { "src/a/x.txt": "a\n" });
-		expect(await call("check", { repo: "project", change: "a-1" })).toMatchObject({ branch: "master", main: { clean: true }, outsideClaim: [] });
-		await call("vote", { repo: "project", commit: head, reviewer: "rev-1", role: "tests", verdict: "approve", evidence: "ok" });
-		await call("vote", { repo: "project", commit: head, reviewer: "rev-2", role: "security", verdict: "approve", evidence: "ok" });
+		expect(await call("check", { repo: "project", change: "a-1" })).toMatchObject({
+			branch: "master",
+			main: { clean: true },
+			outsideClaim: [],
+		});
+		await call("vote", {
+			repo: "project",
+			commit: head,
+			reviewer: "rev-1",
+			role: "tests",
+			verdict: "approve",
+			evidence: "ok",
+		});
+		await call("vote", {
+			repo: "project",
+			commit: head,
+			reviewer: "rev-2",
+			role: "security",
+			verdict: "approve",
+			evidence: "ok",
+		});
 
 		expect(await call("merge", { repo: "project", change: "a-1", agent: "agent-a" })).toMatchObject({ ok: true });
 		// The merge is on master, which has the change; no main branch was made.

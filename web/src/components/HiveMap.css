@@ -96,7 +96,10 @@
 	fill: var(--surface-3);
 	stroke: var(--border-strong);
 	stroke-width: 1;
-	transition: fill 0.3s ease, stroke 0.3s ease, stroke-width 0.12s ease;
+	transition:
+		fill 0.3s ease,
+		stroke 0.3s ease,
+		stroke-width 0.12s ease;
 }
 
 .hive__cell--held .hive__shape {

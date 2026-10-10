@@ -15,12 +15,33 @@ export interface ToolAnnotations {
 	openWorldHint: false;
 }
 
-export const reads = (title: string): ToolAnnotations => ({ title, readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false });
-export const writes = (title: string, { idempotent = false } = {}): ToolAnnotations => ({ title, readOnlyHint: false, destructiveHint: false, idempotentHint: idempotent, openWorldHint: false });
-export const destroys = (title: string, { idempotent = false } = {}): ToolAnnotations => ({ title, readOnlyHint: false, destructiveHint: true, idempotentHint: idempotent, openWorldHint: false });
+export const reads = (title: string): ToolAnnotations => ({
+	title,
+	readOnlyHint: true,
+	destructiveHint: false,
+	idempotentHint: true,
+	openWorldHint: false,
+});
+export const writes = (title: string, { idempotent = false } = {}): ToolAnnotations => ({
+	title,
+	readOnlyHint: false,
+	destructiveHint: false,
+	idempotentHint: idempotent,
+	openWorldHint: false,
+});
+export const destroys = (title: string, { idempotent = false } = {}): ToolAnnotations => ({
+	title,
+	readOnlyHint: false,
+	destructiveHint: true,
+	idempotentHint: idempotent,
+	openWorldHint: false,
+});
 
 /** A tool definition with its title, at the top level and in its annotations, as MCP clients read either. */
-export function annotate<T extends { name: string }>(tools: readonly T[], annotations: Record<string, ToolAnnotations>) {
+export function annotate<T extends { name: string }>(
+	tools: readonly T[],
+	annotations: Record<string, ToolAnnotations>,
+) {
 	return tools.map((tool) => {
 		const a = annotations[tool.name];
 		if (!a) throw new Error(`tool ${tool.name} has no annotations`);

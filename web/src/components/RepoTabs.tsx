@@ -2,7 +2,17 @@ import { type ReactNode, useState } from "react";
 import { VoteForm, type VoteApi } from "./VoteForm";
 import type { RepoAudit, ChangeHistory, RepoSnapshot } from "../api";
 import { identityName } from "../lib/agent";
-import { claimAgent, claimApprovalLabel, claimTitle, blockingRoles, claimStatus, shardingSummary, votesForClaim, votesShardingSummary, type Claim } from "../lib/claimStatus";
+import {
+	claimAgent,
+	claimApprovalLabel,
+	claimTitle,
+	blockingRoles,
+	claimStatus,
+	shardingSummary,
+	votesForClaim,
+	votesShardingSummary,
+	type Claim,
+} from "../lib/claimStatus";
 import { shortSha, briefPaths } from "../lib/model";
 import { shortAge, timeAgo } from "../lib/relativeTime";
 import { href } from "../lib/routes";
@@ -58,7 +68,9 @@ export function ChangeLabels({ claim }: { claim: Pick<Claim, "into" | "source" |
 /** The open changes, newest first: on one branch (`shown`, when given: the one the overview shows), or all. */
 export function ChangeList({ snapshot, repo, shown }: { snapshot: RepoSnapshot; repo: string; shown?: string }) {
 	const project = snapshot.branch ?? "main";
-	const claims = [...snapshot.claims].filter((c) => !shown || (c.into ?? project) === shown).sort((a, b) => Date.parse(b.since) - Date.parse(a.since));
+	const claims = [...snapshot.claims]
+		.filter((c) => !shown || (c.into ?? project) === shown)
+		.sort((a, b) => Date.parse(b.since) - Date.parse(a.since));
 	return (
 		<section className="box change-list" aria-labelledby="changes-title">
 			<div className="box__header change-list__filters">
@@ -109,7 +121,11 @@ export function ChangeList({ snapshot, repo, shown }: { snapshot: RepoSnapshot; 
 								<div className="change-row__aside">
 									<Approvals claim={claim} />
 									{claim.head ? <code className="muted">{shortSha(claim.head)}</code> : null}
-									<time className="change-row__age muted" dateTime={claim.active} title={`Last active ${new Date(claim.active).toLocaleString()}`}>
+									<time
+										className="change-row__age muted"
+										dateTime={claim.active}
+										title={`Last active ${new Date(claim.active).toLocaleString()}`}
+									>
 										{shortAge(claim.active)}
 									</time>
 								</div>
@@ -131,14 +147,18 @@ function Violations({ title, violations }: { title: string; violations: RepoAudi
 			</div>
 			<ul className="audit-violations">
 				{violations.map((v, i) => (
-					<li key={`${v.commit}-${v.rule}-${i}`} className={`box__row audit-violation${v.resolvedBy ? " audit-violation--resolved" : ""}`}>
+					<li
+						key={`${v.commit}-${v.rule}-${i}`}
+						className={`box__row audit-violation${v.resolvedBy ? " audit-violation--resolved" : ""}`}
+					>
 						<span className={v.resolvedBy ? "tone-neutral" : "tone-bad"}>
 							<Icon name={v.resolvedBy ? "check-circle" : "alert"} />
 						</span>
 						<div>
 							<p>
 								<strong>{v.rule}</strong> by {v.author}
-								<span className="muted"> ({v.by ? identityName(v.by) : "unverified"})</span> in <code>{shortSha(v.commit)}</code>
+								<span className="muted"> ({v.by ? identityName(v.by) : "unverified"})</span> in{" "}
+								<code>{shortSha(v.commit)}</code>
 							</p>
 							<p className="muted">{v.detail}</p>
 							{v.resolvedBy ? <p className="muted">resolved by {shortSha(v.resolvedBy)}</p> : null}
@@ -166,9 +186,14 @@ export function AuditTab({ snapshot }: { snapshot: RepoSnapshot }) {
 			<div className={`callout ${open.length ? "callout--bad" : "callout--good"}`}>
 				<Icon name={open.length ? "alert" : "check-circle"} className={open.length ? "tone-bad" : "tone-good"} />
 				<div>
-					<strong>{open.length ? `${open.length} open ${open.length === 1 ? "violation" : "violations"}` : "No open violations"}</strong>
+					<strong>
+						{open.length
+							? `${open.length} open ${open.length === 1 ? "violation" : "violations"}`
+							: "No open violations"}
+					</strong>
 					<p className="muted">
-						{audit.merges} {audit.merges === 1 ? "commit" : "commits"} on {snapshot.branch ?? "main"} since GitHive started on it.
+						{audit.merges} {audit.merges === 1 ? "commit" : "commits"} on {snapshot.branch ?? "main"} since GitHive
+						started on it.
 						{audit.violations.length === 0 ? " No violations." : ""}
 					</p>
 				</div>
@@ -190,7 +215,8 @@ export function AuditTab({ snapshot }: { snapshot: RepoSnapshot }) {
 								</span>
 								<div>
 									<p>
-										<strong>{v.reviewer}</strong> <span className="muted">({v.role})</span> {v.verdict === "approve" ? "approved" : "rejected"} <code>{shortSha(v.commit)}</code>
+										<strong>{v.reviewer}</strong> <span className="muted">({v.role})</span>{" "}
+										{v.verdict === "approve" ? "approved" : "rejected"} <code>{shortSha(v.commit)}</code>
 										{v.by ? <span className="muted"> · {identityName(v.by)}</span> : null}
 										<span className="muted"> · {timeAgo(v.at)}</span>
 									</p>
@@ -216,7 +242,15 @@ function ruleWords(rule: NonNullable<RepoSnapshot["policy"]["escalate"]>[number]
  * change it; for everyone else, what it is), how the records are kept, and
  * who may do what (`access`).
  */
-export function SettingsTab({ snapshot, access, editor }: { snapshot: RepoSnapshot; /** Who may do what: the reader's permission, visibility, collaborators. */ access?: ReactNode; /** For the repo's admins: the form that changes how changes merge. */ editor?: ReactNode }) {
+export function SettingsTab({
+	snapshot,
+	access,
+	editor,
+}: {
+	snapshot: RepoSnapshot;
+	/** Who may do what: the reader's permission, visibility, collaborators. */ access?: ReactNode;
+	/** For the repo's admins: the form that changes how changes merge. */ editor?: ReactNode;
+}) {
 	const { policy, verify } = snapshot;
 	const sharding = shardingSummary(snapshot);
 	const votesSharding = votesShardingSummary(snapshot);
@@ -277,7 +311,11 @@ export function SettingsTab({ snapshot, access, editor }: { snapshot: RepoSnapsh
 							</>
 						)}
 						<dt>Signed records</dt>
-						<dd>{snapshot.verified ? "Records and merges are stamped with verified identity" : "Records are not stamped: names are as agents give them"}</dd>
+						<dd>
+							{snapshot.verified
+								? "Records and merges are stamped with verified identity"
+								: "Records are not stamped: names are as agents give them"}
+						</dd>
 						{sharding ? (
 							<>
 								<dt>Claims</dt>
@@ -291,7 +329,10 @@ export function SettingsTab({ snapshot, access, editor }: { snapshot: RepoSnapsh
 							</>
 						) : null}
 						<dt>Branches</dt>
-						<dd>Each change works in its own fork: agents can't write {snapshot.branch ?? "main"}; only the toolkit merges, once the conventions hold.</dd>
+						<dd>
+							Each change works in its own fork: agents can't write {snapshot.branch ?? "main"}; only the toolkit
+							merges, once the conventions hold.
+						</dd>
 					</dl>
 				</div>
 			</section>
@@ -315,11 +356,22 @@ export interface ChangePageProps {
 	/** Whether the reader may vote (review or more in the repo); without it, no vote form. */
 	canVote?: boolean;
 	/** A person merging the change (write or more in the repo): landing in a batch with the branch's other ready changes, as its agent, stamped with their name. */
-	merge?: (repo: string, change: string) => Promise<{ ok: boolean; commit?: string; reasons?: string[]; conflicts?: string[] }>;
+	merge?: (
+		repo: string,
+		change: string,
+	) => Promise<{ ok: boolean; commit?: string; reasons?: string[]; conflicts?: string[] }>;
 }
 
 /** Merge, for a person, once a change is approved and waits on nothing: the same merge an agent asks for, checks and all. */
-function MergeButton({ repo, change, merge }: { repo: string; change: string; merge: NonNullable<ChangePageProps["merge"]> }) {
+function MergeButton({
+	repo,
+	change,
+	merge,
+}: {
+	repo: string;
+	change: string;
+	merge: NonNullable<ChangePageProps["merge"]>;
+}) {
 	const [busy, setBusy] = useState(false);
 	const [outcome, setOutcome] = useState<{ ok: boolean; text: string } | null>(null);
 	const go = async () => {
@@ -327,7 +379,11 @@ function MergeButton({ repo, change, merge }: { repo: string; change: string; me
 		setOutcome(null);
 		try {
 			const merged = await merge(repo, change);
-			setOutcome(merged.ok ? { ok: true, text: `Merged as ${merged.commit?.slice(0, 8)}.` } : { ok: false, text: (merged.reasons ?? ["It couldn't merge."]).join(" ") });
+			setOutcome(
+				merged.ok
+					? { ok: true, text: `Merged as ${merged.commit?.slice(0, 8)}.` }
+					: { ok: false, text: (merged.reasons ?? ["It couldn't merge."]).join(" ") },
+			);
 		} catch (err) {
 			setOutcome({ ok: false, text: err instanceof Error ? err.message : String(err) });
 		} finally {
@@ -349,7 +405,17 @@ function MergeButton({ repo, change, merge }: { repo: string; change: string; me
 }
 
 /** A change, shown like a pull request: in force, merged or released. */
-export function ChangePage({ snapshot, changeId, claim, history, repo, tab, api, canVote = true, merge }: ChangePageProps) {
+export function ChangePage({
+	snapshot,
+	changeId,
+	claim,
+	history,
+	repo,
+	tab,
+	api,
+	canVote = true,
+	merge,
+}: ChangePageProps) {
 	const branch = claim?.into || history?.branch || snapshot.branch || "main";
 	const record = claim ?? history?.claim ?? undefined;
 	const ending = history ? changeEnding(history) : null;
@@ -406,7 +472,9 @@ export function ChangePage({ snapshot, changeId, claim, history, repo, tab, api,
 						)}
 					</span>
 					{claim?.waitsOn?.length ? <span className="pill pill--warn">waits on {claim.waitsOn.join(", ")}</span> : null}
-					{claim && merge && claim.approval.approved && !claim.waitsOn?.length ? <MergeButton repo={repo} change={changeId} merge={merge} /> : null}
+					{claim && merge && claim.approval.approved && !claim.waitsOn?.length ? (
+						<MergeButton repo={repo} change={changeId} merge={merge} />
+					) : null}
 				</div>
 			</div>
 			<Tabs
@@ -414,7 +482,13 @@ export function ChangePage({ snapshot, changeId, claim, history, repo, tab, api,
 				current={tab}
 				items={[
 					{ id: "conversation", label: "Conversation", icon: "comment", href: href.change(repo, changeId) },
-					{ id: "commits", label: "Commits", icon: "commit", href: href.change(repo, changeId, "commits"), count: history?.commits.length },
+					{
+						id: "commits",
+						label: "Commits",
+						icon: "commit",
+						href: href.change(repo, changeId, "commits"),
+						count: history?.commits.length,
+					},
 				]}
 			/>
 			<div className="change-page__body">
@@ -433,7 +507,9 @@ export function ChangePage({ snapshot, changeId, claim, history, repo, tab, api,
 									<div>
 										<strong>{claim.attention.agent} asks you</strong>
 										<p>{claim.attention.reason}</p>
-										<p className="muted">Decide with your vote below: it counts like a reviewer's and answers the question.</p>
+										<p className="muted">
+											Decide with your vote below: it counts like a reviewer's and answers the question.
+										</p>
 									</div>
 								</div>
 							) : null}
@@ -445,7 +521,9 @@ export function ChangePage({ snapshot, changeId, claim, history, repo, tab, api,
 										{record?.paths.length ? ` · claims ${record.paths.join(", ")}` : ""}
 									</span>
 								</div>
-								<div className="comment__body">{record?.intent || <span className="muted">No description provided.</span>}</div>
+								<div className="comment__body">
+									{record?.intent || <span className="muted">No description provided.</span>}
+								</div>
 							</article>
 							{history === undefined ? <p className="muted change-layout__loading">Loading history…</p> : null}
 							{history ? (
@@ -457,12 +535,22 @@ export function ChangePage({ snapshot, changeId, claim, history, repo, tab, api,
 											<Icon name="commit" size={14} />
 										</span>
 										<div className="timeline__content">
-											<p className="timeline__line">{claim?.head ? <>latest push <code className="timeline__sha">{shortSha(claim.head)}</code></> : "nothing pushed yet"}</p>
+											<p className="timeline__line">
+												{claim?.head ? (
+													<>
+														latest push <code className="timeline__sha">{shortSha(claim.head)}</code>
+													</>
+												) : (
+													"nothing pushed yet"
+												)}
+											</p>
 										</div>
 									</li>
 								</ol>
 							)}
-							{claim && api && canVote ? <VoteForm repo={repo} claim={claim} policy={snapshot.policy} api={api} /> : null}
+							{claim && api && canVote ? (
+								<VoteForm repo={repo} claim={claim} policy={snapshot.policy} api={api} />
+							) : null}
 							{claim ? (
 								<section className="merge-box" aria-label="Merge status">
 									<div className="merge-box__row">
@@ -471,16 +559,31 @@ export function ChangePage({ snapshot, changeId, claim, history, repo, tab, api,
 										</span>
 										<div className="merge-box__text">
 											<strong>
-												{claim.approval.approvals} of {claim.approval.required} approvals{claim.approval.approved ? "" : claimApprovalLabel(claim).startsWith("Waiting") ? ` · ${claimApprovalLabel(claim)}` : ""}
+												{claim.approval.approvals} of {claim.approval.required} approvals
+												{claim.approval.approved
+													? ""
+													: claimApprovalLabel(claim).startsWith("Waiting")
+														? ` · ${claimApprovalLabel(claim)}`
+														: ""}
 											</strong>
-											<div className="muted">{claim.attention ? `Waiting on your decision: ${claim.attention.agent}'s question is above.` : claimStatus(claim).description}</div>
+											<div className="muted">
+												{claim.attention
+													? `Waiting on your decision: ${claim.attention.agent}'s question is above.`
+													: claimStatus(claim).description}
+											</div>
 										</div>
 									</div>
 								</section>
 							) : ending ? (
-								<section className={`merge-box${ending.kind === "merged" ? " merge-box--merged" : ""}`} aria-label="Merge status">
+								<section
+									className={`merge-box${ending.kind === "merged" ? " merge-box--merged" : ""}`}
+									aria-label="Merge status"
+								>
 									<div className="merge-box__row">
-										<span className={`merge-box__icon merge-box__icon--${ending.kind === "merged" ? "good" : "neutral"}`} aria-hidden="true">
+										<span
+											className={`merge-box__icon merge-box__icon--${ending.kind === "merged" ? "good" : "neutral"}`}
+											aria-hidden="true"
+										>
 											<Icon name={ending.kind === "merged" ? "merge" : "ban"} />
 										</span>
 										<div className="merge-box__text">
@@ -488,7 +591,8 @@ export function ChangePage({ snapshot, changeId, claim, history, repo, tab, api,
 											<div className="muted">
 												{ending.kind === "merged" ? (
 													<>
-														As <a href={href.code(repo, "", ending.release.mergedAs)}>
+														As{" "}
+														<a href={href.code(repo, "", ending.release.mergedAs)}>
 															<code>{shortSha(ending.release.mergedAs)}</code>
 														</a>
 														.
@@ -513,12 +617,18 @@ export function ChangePage({ snapshot, changeId, claim, history, repo, tab, api,
 													<Icon name="shield" size={14} className="muted" />
 													{r.role}
 												</span>
-												<span className={`sidebar-reviewers__state tone-${r.verdict === "approve" ? "good" : r.verdict === "reject" ? "bad" : "neutral"}`}>{r.verdict ?? r.status}</span>
+												<span
+													className={`sidebar-reviewers__state tone-${r.verdict === "approve" ? "good" : r.verdict === "reject" ? "bad" : "neutral"}`}
+												>
+													{r.verdict ?? r.status}
+												</span>
 											</li>
 										))}
 									</ul>
 								) : (
-									<p className="muted">{votes.length ? `${votes.length} ${votes.length === 1 ? "review" : "reviews"}` : "No reviews yet."}</p>
+									<p className="muted">
+										{votes.length ? `${votes.length} ${votes.length === 1 ? "review" : "reviews"}` : "No reviews yet."}
+									</p>
 								)}
 								<p className="muted sidebar-note">{snapshot.policy.required} approvals required</p>
 							</section>
@@ -527,7 +637,9 @@ export function ChangePage({ snapshot, changeId, claim, history, repo, tab, api,
 								<p className="sidebar-agent">
 									<Icon name={builder ? "bot" : "user"} size={14} className="muted" />
 									<strong>{agent}</strong>
-									{record?.by && identityName(record.by) !== agent ? <span className="muted"> · {identityName(record.by)}</span> : null}
+									{record?.by && identityName(record.by) !== agent ? (
+										<span className="muted"> · {identityName(record.by)}</span>
+									) : null}
 								</p>
 								{builder ? (
 									<p className={`sidebar-small tone-${builder.status === "failed" ? "bad" : "neutral"}`}>

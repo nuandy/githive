@@ -2,7 +2,20 @@ import { useState } from "react";
 import type { AccountApi, Connection, IssuedToken, Me, MyAgent } from "../api";
 import { usePoll } from "../hooks/usePoll";
 import { timeAgo } from "../lib/relativeTime";
-import { type ConnectStep, DEFAULT_TOKEN_DAYS, MCP_CLIENTS, type McpClient, TOKEN_EXPIRY, connectSteps, expiryDate, expiryFromValue, expiryValue, isMcpClient, tokenLabel, tokenSteps } from "../lib/session";
+import {
+	type ConnectStep,
+	DEFAULT_TOKEN_DAYS,
+	MCP_CLIENTS,
+	type McpClient,
+	TOKEN_EXPIRY,
+	connectSteps,
+	expiryDate,
+	expiryFromValue,
+	expiryValue,
+	isMcpClient,
+	tokenLabel,
+	tokenSteps,
+} from "../lib/session";
 import { CopyBlock } from "./CopyBlock";
 import { Icon } from "./Icon";
 import "./AgentsPage.css";
@@ -78,11 +91,7 @@ function rememberClient(client: McpClient) {
 
 /** Text with `code` in backticks. */
 function WithCode({ text }: { text: string }) {
-	return (
-		<>
-			{text.split("`").map((part, i) => (i % 2 ? <code key={i}>{part}</code> : <span key={i}>{part}</span>))}
-		</>
-	);
+	return <>{text.split("`").map((part, i) => (i % 2 ? <code key={i}>{part}</code> : <span key={i}>{part}</span>))}</>;
 }
 
 /** Numbered steps, each with what to copy. */
@@ -133,7 +142,9 @@ export function AgentsView({
 	};
 	const clientLabel = MCP_CLIENTS.find((c) => c.id === client)!.label;
 	/** The apps connected as an agent over OAuth, each named once. */
-	const signsInFrom = (agentId: string) => [...new Set((connections ?? []).filter((c) => c.agentId === agentId).map((c) => c.client))];
+	const signsInFrom = (agentId: string) => [
+		...new Set((connections ?? []).filter((c) => c.agentId === agentId).map((c) => c.client)),
+	];
 
 	const run = async (key: string, work: () => Promise<unknown>, onError: (text: string) => void) => {
 		setBusy(key);
@@ -169,14 +180,22 @@ export function AgentsView({
 					<div className="agents__agent-name">
 						<Icon name="bot" size={16} />
 						<code>{full}</code>
-						{active ? <span className="pill pill--good">Active</span> : <span className="pill pill--neutral">Revoked</span>}
+						{active ? (
+							<span className="pill pill--good">Active</span>
+						) : (
+							<span className="pill pill--neutral">Revoked</span>
+						)}
 						<span className="muted agents__meta">made {timeAgo(agent.createdAt, now)}</span>
 					</div>
 					{active ? (
 						<div className="agents__agent-actions">
 							<label className="agents__expiry">
 								<span className="sr-only">New token for {full} lasts</span>
-								<select id={`expiry-${agent.id}`} value={expiryValue(days)} onChange={(e) => setExpiry({ ...expiry, [agent.id]: expiryFromValue(e.target.value) })}>
+								<select
+									id={`expiry-${agent.id}`}
+									value={expiryValue(days)}
+									onChange={(e) => setExpiry({ ...expiry, [agent.id]: expiryFromValue(e.target.value) })}
+								>
 									{TOKEN_EXPIRY.map((choice) => (
 										<option key={expiryValue(choice.days)} value={expiryValue(choice.days)}>
 											{choice.days === null ? "Never expires" : `Expires in ${choice.label}`}
@@ -191,7 +210,8 @@ export function AgentsView({
 								onClick={() =>
 									run(
 										`token:${agent.id}`,
-										async () => setIssued({ agentId: agent.id, token: (await actions.createToken(agent.id, days)).token }),
+										async () =>
+											setIssued({ agentId: agent.id, token: (await actions.createToken(agent.id, days)).token }),
 										(text) => setRowError({ id: agent.id, text }),
 									)
 								}
@@ -205,7 +225,13 @@ export function AgentsView({
 								label="Revoke"
 								question={`Revoke ${full}, its tokens and connected apps?`}
 								busy={busy === `agent:${agent.id}`}
-								onConfirm={() => run(`agent:${agent.id}`, () => actions.revokeAgent(agent.id), (text) => setRowError({ id: agent.id, text }))}
+								onConfirm={() =>
+									run(
+										`agent:${agent.id}`,
+										() => actions.revokeAgent(agent.id),
+										(text) => setRowError({ id: agent.id, text }),
+									)
+								}
 							/>
 						</div>
 					) : null}
@@ -235,7 +261,9 @@ export function AgentsView({
 							<li key={token.id} className={`agents__token${token.revokedAt ? " agents__token--revoked" : ""}`}>
 								<code>{tokenLabel(token.prefix)}</code>
 								<span className="muted agents__meta">
-									made {timeAgo(token.createdAt, now)} · {token.expiresAt ? `expires ${expiryDate(token.expiresAt)}` : "never expires"} · {token.lastUsedAt ? `used ${timeAgo(token.lastUsedAt, now)}` : "never used"}
+									made {timeAgo(token.createdAt, now)} ·{" "}
+									{token.expiresAt ? `expires ${expiryDate(token.expiresAt)}` : "never expires"} ·{" "}
+									{token.lastUsedAt ? `used ${timeAgo(token.lastUsedAt, now)}` : "never used"}
 								</span>
 								{token.revokedAt ? (
 									<span className="pill pill--neutral">Revoked</span>
@@ -249,14 +277,24 @@ export function AgentsView({
 										label="Revoke"
 										question="Revoke this token?"
 										busy={busy === `token:${token.id}`}
-										onConfirm={() => run(`token:${token.id}`, () => actions.revokeToken(token.id), (text) => setRowError({ id: agent.id, text }))}
+										onConfirm={() =>
+											run(
+												`token:${token.id}`,
+												() => actions.revokeToken(token.id),
+												(text) => setRowError({ id: agent.id, text }),
+											)
+										}
 									/>
 								) : null}
 							</li>
 						))}
 					</ul>
 				) : active ? (
-					<p className="muted agents__none">{signsInFrom(agent.id).length ? `Signs in from ${signsInFrom(agent.id).join(" and ")}, so it needs no token.` : "No tokens yet."}</p>
+					<p className="muted agents__none">
+						{signsInFrom(agent.id).length
+							? `Signs in from ${signsInFrom(agent.id).join(" and ")}, so it needs no token.`
+							: "No tokens yet."}
+					</p>
 				) : null}
 			</li>
 		);
@@ -267,7 +305,8 @@ export function AgentsView({
 			<header className="agents__header">
 				<h1>Agents</h1>
 				<p className="muted">
-					Agents act for you in GitHive. Each has its own name, like <code>{me.handle}/builder</code>, and what it writes is attributed to it, under you.
+					Agents act for you in GitHive. Each has its own name, like <code>{me.handle}/builder</code>, and what it
+					writes is attributed to it, under you.
 				</p>
 			</header>
 
@@ -282,7 +321,13 @@ export function AgentsView({
 				<div className="agents__clients" role="radiogroup" aria-label="Your agent's app">
 					{MCP_CLIENTS.map((c) => (
 						<label key={c.id} className={`agents__client${client === c.id ? " is-selected" : ""}`}>
-							<input type="radio" name="mcp-client" value={c.id} checked={client === c.id} onChange={() => chooseClient(c.id)} />
+							<input
+								type="radio"
+								name="mcp-client"
+								value={c.id}
+								checked={client === c.id}
+								onChange={() => chooseClient(c.id)}
+							/>
 							{c.label}
 						</label>
 					))}
@@ -291,7 +336,8 @@ export function AgentsView({
 					<div className="box agents__way">
 						<div className="box__body">
 							<h3>
-								Sign in from {client === "other" ? "the client" : clientLabel} <span className="pill pill--accent">Recommended</span>
+								Sign in from {client === "other" ? "the client" : clientLabel}{" "}
+								<span className="pill pill--accent">Recommended</span>
 							</h3>
 							<Steps steps={connectSteps(client, origin)} />
 						</div>
@@ -299,7 +345,11 @@ export function AgentsView({
 					<div className="box agents__way">
 						<div className="box__body">
 							<h3>Or use a token</h3>
-							<p className="muted">For a client that can't sign in through your browser. Make an agent below and choose New token. GitHive shows the token once, with the setup for {client === "other" ? "your client" : clientLabel} filled in, ready to copy.</p>
+							<p className="muted">
+								For a client that can't sign in through your browser. Make an agent below and choose New token. GitHive
+								shows the token once, with the setup for {client === "other" ? "your client" : clientLabel} filled in,
+								ready to copy.
+							</p>
 						</div>
 					</div>
 				</div>
@@ -315,7 +365,14 @@ export function AgentsView({
 						<span className="agents__new-prefix" aria-hidden="true">
 							{me.handle}/
 						</span>
-						<input id="new-agent-name" value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="builder" autoComplete="off" spellCheck={false} />
+						<input
+							id="new-agent-name"
+							value={newName}
+							onChange={(e) => setNewName(e.target.value)}
+							placeholder="builder"
+							autoComplete="off"
+							spellCheck={false}
+						/>
 						<button type="submit" className="accent agents__small" disabled={busy !== null || !newName.trim()}>
 							{busy === "create" ? "Making…" : "New agent"}
 						</button>
@@ -332,7 +389,10 @@ export function AgentsView({
 					</p>
 				) : agents.length === 0 ? (
 					<div className="box__body agents__empty">
-						<p>No agents yet. Name one above, or connect {client === "other" ? "your client" : clientLabel} and name it while you sign in.</p>
+						<p>
+							No agents yet. Name one above, or connect {client === "other" ? "your client" : clientLabel} and name it
+							while you sign in.
+						</p>
 					</div>
 				) : (
 					<ul className="agents__agents">{[...live, ...revoked].map(agentRow)}</ul>
@@ -364,7 +424,13 @@ export function AgentsView({
 									label="Disconnect"
 									question={`Disconnect ${c.client}?`}
 									busy={busy === `conn:${c.id}`}
-									onConfirm={() => run(`conn:${c.id}`, () => actions.disconnect(c.id), (text) => setRowError({ id: c.id, text }))}
+									onConfirm={() =>
+										run(
+											`conn:${c.id}`,
+											() => actions.disconnect(c.id),
+											(text) => setRowError({ id: c.id, text }),
+										)
+									}
 								/>
 								{rowError?.id === c.id ? (
 									<p className="error agents__row-error" role="alert">
@@ -399,5 +465,14 @@ export function AgentsPage({ me, account }: { me: User; account: AccountApi }) {
 		revokeToken: after(account.revokeToken),
 		disconnect: after(account.disconnect),
 	};
-	return <AgentsView me={me} origin={window.location.origin} agents={agents.data} connections={connections.data} error={agents.error ?? connections.error} actions={actions} />;
+	return (
+		<AgentsView
+			me={me}
+			origin={window.location.origin}
+			agents={agents.data}
+			connections={connections.data}
+			error={agents.error ?? connections.error}
+			actions={actions}
+		/>
+	);
 }

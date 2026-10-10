@@ -28,7 +28,10 @@ describe("the context's caches", () => {
 
 	it("never hands one call a token another call is still minting: in Workers, a request can't wait on another's I/O", async () => {
 		const env = {} as Env;
-		await Promise.all([toolContextFor(env, "service:a").remote("cache-s", "read"), toolContextFor(env, "service:b").remote("cache-s", "read")]);
+		await Promise.all([
+			toolContextFor(env, "service:a").remote("cache-s", "read"),
+			toolContextFor(env, "service:b").remote("cache-s", "read"),
+		]);
 		expect(artifacts.mints.filter((m) => m.startsWith("cache-s|"))).toEqual(["cache-s|read", "cache-s|read"]);
 		// Once minted, it is shared.
 		await toolContextFor(env, "service:c").remote("cache-s", "read");
@@ -39,7 +42,9 @@ describe("the context's caches", () => {
 		const env = {} as Env;
 		await toolContextFor(env, "service:a").changeRemote!("cache-q", "agent-a", "read");
 		await toolContextFor(env, "service:b").changeRemote!("cache-q", "agent-a", "read");
-		expect(artifacts.mints.filter((m) => m.startsWith("fork--cache-q--agent--agent-a"))).toEqual(["fork--cache-q--agent--agent-a|read"]);
+		expect(artifacts.mints.filter((m) => m.startsWith("fork--cache-q--agent--agent-a"))).toEqual([
+			"fork--cache-q--agent--agent-a|read",
+		]);
 	});
 
 	it("names one fork per agent, telling apart names that look alike", async () => {
@@ -53,6 +58,8 @@ describe("the context's caches", () => {
 	it("shares each record's log across callers", () => {
 		const env = {} as Env;
 		const ref = "refs/notes/githive-claims/cache-r";
-		expect(toolContextFor(env, "service:a").records!("cache-r", ref)).toBe(toolContextFor(env, "service:b").records!("cache-r", ref));
+		expect(toolContextFor(env, "service:a").records!("cache-r", ref)).toBe(
+			toolContextFor(env, "service:b").records!("cache-r", ref),
+		);
 	});
 });

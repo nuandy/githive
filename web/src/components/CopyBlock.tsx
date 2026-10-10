@@ -28,7 +28,12 @@ export function CopyBlock({ text, label = "Copy" }: { text: string; label?: stri
 			<pre>
 				<code ref={codeRef}>{text}</code>
 			</pre>
-			<button type="button" className="copy-block__button" onClick={copy} aria-label={`${label}: ${text.length > 40 ? `${text.slice(0, 40)}…` : text}`}>
+			<button
+				type="button"
+				className="copy-block__button"
+				onClick={copy}
+				aria-label={`${label}: ${text.length > 40 ? `${text.slice(0, 40)}…` : text}`}
+			>
 				{copied === "copied" ? "Copied" : copied === "selected" ? "Selected: press ⌘C" : label}
 			</button>
 		</div>

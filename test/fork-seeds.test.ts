@@ -5,7 +5,15 @@ import { FakeStorage } from "./fakes/env";
 // time in the background when GitHive starts on it: a crowd of agents arriving
 // at once then forks from several seeds, not all from the project's repo.
 
-const artifacts = vi.hoisted(() => ({ made: new Set<string>(), forks: [] as string[], failing: new Set<string>(), stuck: new Set<string>(), slowMs: 0, making: 0, most: 0 }));
+const artifacts = vi.hoisted(() => ({
+	made: new Set<string>(),
+	forks: [] as string[],
+	failing: new Set<string>(),
+	stuck: new Set<string>(),
+	slowMs: 0,
+	making: 0,
+	most: 0,
+}));
 vi.mock("../src/artifacts", async (importOriginal) => ({
 	...(await importOriginal<typeof import("../src/artifacts")>()),
 	remoteFor: vi.fn(async (_artifacts: unknown, name: string, scope: string) => {
@@ -18,7 +26,8 @@ vi.mock("../src/artifacts", async (importOriginal) => ({
 		await new Promise((resolve) => setTimeout(resolve, artifacts.slowMs));
 		artifacts.making--;
 		if (artifacts.failing.has(source)) throw new Error(`fork of ${source} failed`);
-		if (artifacts.stuck.has(name)) throw Object.assign(new Error(`fork ${name} not ready after 90s`), { code: "FORK_NOT_READY" });
+		if (artifacts.stuck.has(name))
+			throw Object.assign(new Error(`fork ${name} not ready after 90s`), { code: "FORK_NOT_READY" });
 		artifacts.made.add(name);
 		return { name, remote: `https://git.test/${name}.git`, token: "write" };
 	}),
@@ -70,7 +79,9 @@ describe("an agent's fork", () => {
 	it("isn't asked for from every other seed when it's not ready in time: the agent is told to call again", async () => {
 		const { env } = envWith([0, 3]);
 		artifacts.stuck.add("fork--p--agent--agent-slow");
-		await expect(changeRemote(env, "p", "agent-slow", "write", 60)).rejects.toThrow(/^\[503\] agent-slow's fork of p is still being made: call again in a minute/);
+		await expect(changeRemote(env, "p", "agent-slow", "write", 60)).rejects.toThrow(
+			/^\[503\] agent-slow's fork of p is still being made: call again in a minute/,
+		);
 		// One source tried: the others would have waited on the same fork.
 		expect(artifacts.forks).toHaveLength(1);
 	});
@@ -101,7 +112,10 @@ describe("the fork queue", () => {
 	it("makes 16 agents' forks at a time, starting the next as each finishes, all in one alarm", async () => {
 		const { live, storage } = envWith(Array.from({ length: FORK_SEEDS }, (_, k) => k));
 		artifacts.slowMs = 5;
-		await live.queueForks("p", Array.from({ length: 50 }, (_, i) => `agent:a-${i}`));
+		await live.queueForks(
+			"p",
+			Array.from({ length: 50 }, (_, i) => `agent:a-${i}`),
+		);
 		// Agents queue more while it works: none of theirs is lost.
 		const working = live.alarm();
 		await live.queueForks("p", ["agent:late-1", "agent:late-2"]);

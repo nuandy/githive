@@ -36,7 +36,12 @@ function Node({ node, holders, depth }: { node: TreeNode; holders: ClaimHolder[]
 		return (
 			<li>
 				{holder ? (
-					<a href={holder.href} className={`claims__item claims__item--held claim-c${holder.color}`} aria-label={label} title={`${holder.title} · ${holder.agent}`}>
+					<a
+						href={holder.href}
+						className={`claims__item claims__item--held claim-c${holder.color}`}
+						aria-label={label}
+						title={`${holder.title} · ${holder.agent}`}
+					>
 						{content}
 					</a>
 				) : (
@@ -45,11 +50,15 @@ function Node({ node, holders, depth }: { node: TreeNode; holders: ClaimHolder[]
 			</li>
 		);
 	}
-	const open = depth === 0 ? holdsInside(node.path, holders) || node.children.length < 12 : holdsInside(node.path, holders);
+	const open =
+		depth === 0 ? holdsInside(node.path, holders) || node.children.length < 12 : holdsInside(node.path, holders);
 	return (
 		<li>
 			<details open={open}>
-				<summary className={`claims__item claims__dir${holder ? ` claims__item--held claim-c${holder.color}` : ""}`} title={holder ? `${holder.title} · ${holder.agent}` : undefined}>
+				<summary
+					className={`claims__item claims__dir${holder ? ` claims__item--held claim-c${holder.color}` : ""}`}
+					title={holder ? `${holder.title} · ${holder.agent}` : undefined}
+				>
 					<Icon name="chevron" size={13} className="claims__chevron" />
 					<Icon name="folder" size={14} className="claims__folder" />
 					<span className="claims__name">{node.name}</span>
@@ -86,7 +95,8 @@ export function ClaimsMap({ branch, holders, tree, treeError }: ClaimsMapProps) 
 								</span>
 								{holder.conflicts.length ? (
 									<span className="tone-warn claims__legend-conflict">
-										<Icon name="conflict" size={13} /> conflicts in {holder.conflicts.length} {holder.conflicts.length === 1 ? "file" : "files"}
+										<Icon name="conflict" size={13} /> conflicts in {holder.conflicts.length}{" "}
+										{holder.conflicts.length === 1 ? "file" : "files"}
 									</span>
 								) : null}
 							</li>
@@ -119,7 +129,11 @@ export function ClaimsMap({ branch, holders, tree, treeError }: ClaimsMapProps) 
 						))}
 					</ul>
 				)}
-				{tree?.truncated ? <p className="box__row muted">This repo is very large: only part of its file list is shown, so some claims may not appear.</p> : null}
+				{tree?.truncated ? (
+					<p className="box__row muted">
+						This repo is very large: only part of its file list is shown, so some claims may not appear.
+					</p>
+				) : null}
 			</section>
 
 			{elsewhere.length ? (
@@ -130,7 +144,11 @@ export function ClaimsMap({ branch, holders, tree, treeError }: ClaimsMapProps) 
 					<ul className="claims__tree claims__tree--root">
 						{elsewhere.map(({ path, holder }) => (
 							<li key={`${holder.change}:${path}`}>
-								<a href={holder.href} className={`claims__item claims__item--held claim-c${holder.color}`} title={`${holder.title} · ${holder.agent}`}>
+								<a
+									href={holder.href}
+									className={`claims__item claims__item--held claim-c${holder.color}`}
+									title={`${holder.title} · ${holder.agent}`}
+								>
 									<Icon name={path.endsWith("/") ? "folder" : "file"} size={14} className="muted" />
 									<span className="claims__name">{path}</span>
 									<span className="muted claims__owner">{holder.title}</span>
@@ -145,7 +163,19 @@ export function ClaimsMap({ branch, holders, tree, treeError }: ClaimsMapProps) 
 }
 
 /** The Claims tab with its loading: the file tree at the project's branch. */
-export function ClaimsTab({ repo, branch, holders, api }: { repo: string; branch: string; holders: ClaimHolder[]; api: Pick<CodeApi, "tree"> }) {
+export function ClaimsTab({
+	repo,
+	branch,
+	holders,
+	api,
+}: {
+	repo: string;
+	branch: string;
+	holders: ClaimHolder[];
+	api: Pick<CodeApi, "tree">;
+}) {
 	const tree = usePoll(`tree:${repo}:${branch}`, () => api.tree(repo, branch), 60_000);
-	return <ClaimsMap branch={branch} holders={holders} tree={tree.data} treeError={tree.data ? undefined : tree.error} />;
+	return (
+		<ClaimsMap branch={branch} holders={holders} tree={tree.data} treeError={tree.data ? undefined : tree.error} />
+	);
 }

@@ -3,7 +3,15 @@ import { gitAuth, gitFetch, http, noteGitRequest } from "./git-http";
 import { BOT, isEmptyRepo, type Remote } from "./git";
 import { fetchCommits } from "./git-fetch";
 import { MemoryFS } from "./memory-fs";
-import { FORMAT_TRAILER, RECORD_FORMAT, type Upgrade, UPGRADES, formatOf, newerFormat, upgradeState } from "./record-format";
+import {
+	FORMAT_TRAILER,
+	RECORD_FORMAT,
+	type Upgrade,
+	UPGRADES,
+	formatOf,
+	newerFormat,
+	upgradeState,
+} from "./record-format";
 import { retryTransient } from "./retry";
 
 // A record log in Git: one ref in a repo, appended to by compare-and-swap.
@@ -95,7 +103,6 @@ const decoder = new TextDecoder();
 const isCommitId = (id: string) => /^[0-9a-f]{40}$/.test(id);
 const signature = () => ({ ...BOT, timestamp: Math.floor(Date.now() / 1000), timezoneOffset: 0 });
 
-
 const ZERO_OID = "0".repeat(40);
 
 /** How long a reader waits for another's listing of a ref before listing it too. */
@@ -110,7 +117,7 @@ function pktLine(line: string) {
 /** The pkt-lines of a response body, as text. */
 function pktLines(body: Uint8Array) {
 	const lines: string[] = [];
-	for (let at = 0; at + 4 <= body.length; ) {
+	for (let at = 0; at + 4 <= body.length;) {
 		const length = Number.parseInt(decoder.decode(body.subarray(at, at + 4)), 16);
 		if (!length) {
 			at += 4;
@@ -133,7 +140,11 @@ const BUSY_ATTEMPTS = 6;
 
 async function pushDirect(remote: Remote, ref: string, from: string | null, to: string, fs: MemoryFS, oids: string[]) {
 	const { packfile } = await git.packObjects({ fs, dir: DIR, oids });
-	const parts = [...pktLine(`${from ?? ZERO_OID} ${to} ${ref}\0report-status agent=githive\n`), encoder.encode("0000"), packfile ?? new Uint8Array()];
+	const parts = [
+		...pktLine(`${from ?? ZERO_OID} ${to} ${ref}\0report-status agent=githive\n`),
+		encoder.encode("0000"),
+		packfile ?? new Uint8Array(),
+	];
 	const body = new Uint8Array(parts.reduce((n, p) => n + p.length, 0));
 	let at = 0;
 	for (const part of parts) {
@@ -145,7 +156,8 @@ async function pushDirect(remote: Remote, ref: string, from: string | null, to: 
 	let unsure = false;
 	// Refused, or still busy, after an answer that was lost: if the push applied, another writer may have moved the ref on
 	// since, and the ref is no longer at `to`; then it's among the commits just behind the ref.
-	const refused = async <T>(outcome: T) => (unsure && (await landedBehind(remote, ref, to).catch(() => false)) ? true : outcome);
+	const refused = async <T>(outcome: T) =>
+		unsure && (await landedBehind(remote, ref, to).catch(() => false)) ? true : outcome;
 	for (let attempt = 1; ; attempt++) {
 		const response = await gitFetch(`${remote.url}/git-receive-pack`, {
 			method: "POST",
@@ -165,7 +177,8 @@ async function pushDirect(remote: Remote, ref: string, from: string | null, to: 
 			await new Promise((resolve) => setTimeout(resolve, Math.min(50 * 2 ** attempt, 1_500) * (0.5 + Math.random())));
 			continue;
 		}
-		if (!response.ok) throw new Error(`[${response.status}] push to ${ref} failed: ${(await response.text()).slice(0, 200)}`);
+		if (!response.ok)
+			throw new Error(`[${response.status}] push to ${ref} failed: ${(await response.text()).slice(0, 200)}`);
 		report = pktLines(new Uint8Array(await response.arrayBuffer()));
 		// Busy: the repo is taking another push. Nothing was applied, so it is safe to send again.
 		if (!report.some((line) => line.startsWith("ERR") && /busy/i.test(line))) break;
@@ -198,7 +211,9 @@ async function landedBehind(remote: Remote, ref: string, oid: string) {
 /** Where the ref points on the server, or null if it doesn't exist (one request). */
 async function serverTip(remote: Remote, ref: string) {
 	// Ask the server whether the log exists, rather than reading a fetch error as "empty".
-	const refs = await git.listServerRefs({ http, url: remote.url, protocolVersion: 1, prefix: ref, ...gitAuth(remote) }).catch((err) => (isEmptyRepo(err) ? [] : Promise.reject(err)));
+	const refs = await git
+		.listServerRefs({ http, url: remote.url, protocolVersion: 1, prefix: ref, ...gitAuth(remote) })
+		.catch((err) => (isEmptyRepo(err) ? [] : Promise.reject(err)));
 	return refs.find((r) => r.ref === ref)?.oid ?? null;
 }
 
@@ -256,7 +271,12 @@ export class GitCasLog<S> implements CasLog<S> {
 		private readonly remote: () => Promise<Remote>,
 		_repo: string,
 		ref: string,
-		options: { format?: number; upgrades?: Readonly<Record<number, Upgrade>>; states?: StateCache; tips?: TipCache } = {},
+		options: {
+			format?: number;
+			upgrades?: Readonly<Record<number, Upgrade>>;
+			states?: StateCache;
+			tips?: TipCache;
+		} = {},
 	) {
 		this.ref = ref;
 		this.format = options.format ?? RECORD_FORMAT;
@@ -275,7 +295,8 @@ export class GitCasLog<S> implements CasLog<S> {
 		}
 		if (kept?.tip !== undefined) {
 			// Kept with its state: no Git request at all.
-			if (kept.tip && kept.json && this.held?.tip !== kept.tip) return { tip: kept.tip, commit: JSON.parse(kept.json) as LogCommit<S> };
+			if (kept.tip && kept.json && this.held?.tip !== kept.tip)
+				return { tip: kept.tip, commit: JSON.parse(kept.json) as LogCommit<S> };
 			return this.readAt(kept.tip);
 		}
 		const remote = await this.remote();
@@ -305,12 +326,15 @@ export class GitCasLog<S> implements CasLog<S> {
 			if (json) return { tip: current, commit: JSON.parse(json) as LogCommit<S> };
 		}
 		// Fetch only if the tip moved since this log last saw it.
-		const { fs, tip } = this.held?.tip === current ? this.held : await retryTransient(() => fetchAt(remote, this.ref, current));
+		const { fs, tip } =
+			this.held?.tip === current ? this.held : await retryTransient(() => fetchAt(remote, this.ref, current));
 		if (!tip) return null;
 		this.held = { fs, tip };
 		const { commit } = await git.readCommit({ fs, dir: DIR, oid: tip });
-		const trailer = (name: string) => commit.message.match(new RegExp(`^${name}: (.*)$`, "m"))?.[1] ?? fail(`${tip} has no ${name} trailer`);
-		const json = async (filepath: string) => JSON.parse(decoder.decode((await git.readBlob({ fs, dir: DIR, oid: tip, filepath })).blob));
+		const trailer = (name: string) =>
+			commit.message.match(new RegExp(`^${name}: (.*)$`, "m"))?.[1] ?? fail(`${tip} has no ${name} trailer`);
+		const json = async (filepath: string) =>
+			JSON.parse(decoder.decode((await git.readBlob({ fs, dir: DIR, oid: tip, filepath })).blob));
 		const format = formatOf(commit.message);
 		const raw = await json(STATE_FILE);
 		const read = {
@@ -340,7 +364,12 @@ export class GitCasLog<S> implements CasLog<S> {
 		// Not the tip this log holds: fetch the one it was built on (a read just found it), with no listing first, so
 		// a writer that lost a race is as quick to try again as the one that won (else that one can win every time).
 		// If the ref has moved on, the server says so and the new tip comes back instead.
-		const { fs, tip } = parent !== null && this.held?.tip === parent ? this.held : parent !== null ? await retryTransient(() => fetchAt(remote, this.ref, parent)) : await openTip(remote, this.ref);
+		const { fs, tip } =
+			parent !== null && this.held?.tip === parent
+				? this.held
+				: parent !== null
+					? await retryTransient(() => fetchAt(remote, this.ref, parent))
+					: await openTip(remote, this.ref);
 		// Built on a stale tip: no need to ask the server. If that's the tip kept for readers (a write's
 		// keeping of its own was lost), it's out of date: drop it, or every writer would build on it until it aged out.
 		if (tip !== parent) {
@@ -365,21 +394,34 @@ export class GitCasLog<S> implements CasLog<S> {
 		};
 		if (tip) {
 			const { commit: previous } = await git.readCommit({ fs, dir: DIR, oid: tip });
-			for (const entry of (await git.readTree({ fs, dir: DIR, oid: previous.tree })).tree) files.set(entry.path, entry.oid);
+			for (const entry of (await git.readTree({ fs, dir: DIR, oid: previous.tree })).tree)
+				files.set(entry.path, entry.oid);
 		}
 		for (const [about, lines] of notesByCommit(commit.entries)) {
 			const existing = files.get(about);
-			const before = existing ? `${decoder.decode((await git.readBlob({ fs, dir: DIR, oid: existing })).blob).trimEnd()}\n` : "";
+			const before = existing
+				? `${decoder.decode((await git.readBlob({ fs, dir: DIR, oid: existing })).blob).trimEnd()}\n`
+				: "";
 			files.set(about, await write(`${before}${lines.join("\n")}\n`));
 		}
 		files.set(STATE_FILE, await write(JSON.stringify(commit.state)));
 		files.set(DECISIONS_FILE, await write(JSON.stringify(commit.entries)));
-		const tree = await git.writeTree({ fs, dir: DIR, tree: [...files].map(([path, oid]) => ({ mode: "100644", path, oid, type: "blob" as const })) });
+		const tree = await git.writeTree({
+			fs,
+			dir: DIR,
+			tree: [...files].map(([path, oid]) => ({ mode: "100644", path, oid, type: "blob" as const })),
+		});
 
 		const oid = await git.writeCommit({
 			fs,
 			dir: DIR,
-			commit: { message: message(commit, this.format), tree, parent: tip ? [tip] : [], author: signature(), committer: signature() },
+			commit: {
+				message: message(commit, this.format),
+				tree,
+				parent: tip ? [tip] : [],
+				author: signature(),
+				committer: signature(),
+			},
 		});
 		await git.writeRef({ fs, dir: DIR, ref: this.ref, value: oid, force: true });
 		let landed: boolean | "busy";
@@ -393,7 +435,10 @@ export class GitCasLog<S> implements CasLog<S> {
 		// landed, its tip and state; refused as moved, the tip it built on is out of date.
 		if (landed === true && this.tips) {
 			await this.tips.landed(this.ref, tip, oid).catch(() => undefined);
-			if (this.states) await this.states.put(this.stateKey, oid, JSON.stringify({ ...commit, format: this.format })).catch(() => undefined);
+			if (this.states)
+				await this.states
+					.put(this.stateKey, oid, JSON.stringify({ ...commit, format: this.format }))
+					.catch(() => undefined);
 		} else if (landed === false) await this.tips?.stale(this.ref, tip).catch(() => undefined);
 		// Not landed: the ref moved since `tip` and compare-and-swap lost, or the server stayed busy.
 		this.held = landed === true ? { fs, tip: oid } : null;
@@ -419,7 +464,8 @@ function message<S>(commit: LogCommit<S>, format: number) {
 /** Entry lines grouped by the commit they are about; entries not about a commit live only in decisions.json. */
 function notesByCommit(entries: LogEntry[]) {
 	const byCommit = new Map<string, string[]>();
-	for (const e of entries) if (isCommitId(e.commit)) byCommit.set(e.commit, [...(byCommit.get(e.commit) ?? []), noteLine(e)]);
+	for (const e of entries)
+		if (isCommitId(e.commit)) byCommit.set(e.commit, [...(byCommit.get(e.commit) ?? []), noteLine(e)]);
 	return byCommit;
 }
 

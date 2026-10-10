@@ -14,7 +14,11 @@ describe("which toolchains a repo uses", () => {
 		expect(detectToolchains(["package.json", "src/index.ts"])).toEqual([]);
 		expect(detectToolchains(["pyproject.toml"])).toEqual(["python"]);
 		expect(detectToolchains(["api/requirements-dev.txt"])).toEqual(["python"]);
-		expect(detectToolchains(["services/billing/go.mod", "crates/core/Cargo.toml", "tools/setup.py"])).toEqual(["python", "go", "rust"]);
+		expect(detectToolchains(["services/billing/go.mod", "crates/core/Cargo.toml", "tools/setup.py"])).toEqual([
+			"python",
+			"go",
+			"rust",
+		]);
 	});
 
 	it("isn't fooled by names that only contain a marker", () => {
@@ -22,7 +26,8 @@ describe("which toolchains a repo uses", () => {
 	});
 
 	it("installs and fetches with scripts bash can parse", () => {
-		for (const script of [PROFILE, ...Object.values(INSTALL), ...Object.values(DEPENDENCIES).map((d) => d.script)]) execFileSync("bash", ["-n", "-c", script]);
+		for (const script of [PROFILE, ...Object.values(INSTALL), ...Object.values(DEPENDENCIES).map((d) => d.script)])
+			execFileSync("bash", ["-n", "-c", script]);
 	});
 });
 
@@ -35,14 +40,18 @@ function fakeContainer(rules: [RegExp, { exitCode?: number; output?: string }][]
 			const line = cmd.slice(4).join(" "); // past `timeout -s KILL <s>`
 			ran.push(line);
 			const rule = rules.find(([pattern]) => pattern.test(line))?.[1] ?? {};
-			return { output: async () => ({ exitCode: rule.exitCode ?? 0, stdout: new TextEncoder().encode(rule.output ?? "") }) };
+			return {
+				output: async () => ({ exitCode: rule.exitCode ?? 0, stdout: new TextEncoder().encode(rule.output ?? "") }),
+			};
 		},
 	};
 	return { container, ran };
 }
 
 const setUp = (gate: InstanceType<typeof Gate>, container: unknown) =>
-	(gate as unknown as { setUpToolchains(c: unknown): Promise<{ command: string; exitCode: number; output: string }[]> }).setUpToolchains(container);
+	(
+		gate as unknown as { setUpToolchains(c: unknown): Promise<{ command: string; exitCode: number; output: string }[]> }
+	).setUpToolchains(container);
 
 describe("the Gate's toolchains", () => {
 	it("installs nothing for a Node-only repo", async () => {
@@ -72,7 +81,9 @@ describe("the Gate's toolchains", () => {
 			[/rustup/, { exitCode: 1, output: "curl: (6) Could not resolve host: sh.rustup.rs" }],
 		]);
 		const results = await setUp(new Gate({ storage: new FakeStorage() } as never, {} as never), container);
-		expect(results).toEqual([{ command: "install rust", exitCode: 1, output: expect.stringContaining("Could not resolve host") }]);
+		expect(results).toEqual([
+			{ command: "install rust", exitCode: 1, output: expect.stringContaining("Could not resolve host") },
+		]);
 		expect(ran.some((c) => c.includes("cargo fetch"))).toBe(false);
 	});
 
@@ -83,10 +94,17 @@ describe("the Gate's toolchains", () => {
 			[/sha256sum/, { output: "hash-1\n" }],
 		]);
 		const exec = container.exec;
-		container.exec = async (cmd: string[]) => (cmd.join(" ").includes("uv sync") && fail ? { output: async () => ({ exitCode: 1, stdout: new TextEncoder().encode("No solution found") }) } : exec(cmd));
+		container.exec = async (cmd: string[]) =>
+			cmd.join(" ").includes("uv sync") && fail
+				? { output: async () => ({ exitCode: 1, stdout: new TextEncoder().encode("No solution found") }) }
+				: exec(cmd);
 		const gate = new Gate({ storage: new FakeStorage() } as never, {} as never);
-		expect(await setUp(gate, container)).toEqual([{ command: expect.stringMatching(/^uv sync/), exitCode: 1, output: "No solution found" }]);
+		expect(await setUp(gate, container)).toEqual([
+			{ command: expect.stringMatching(/^uv sync/), exitCode: 1, output: "No solution found" },
+		]);
 		fail = false;
-		expect(await setUp(gate, container)).toEqual([{ command: expect.stringMatching(/^uv sync/), exitCode: 0, output: "" }]);
+		expect(await setUp(gate, container)).toEqual([
+			{ command: expect.stringMatching(/^uv sync/), exitCode: 0, output: "" },
+		]);
 	});
 });

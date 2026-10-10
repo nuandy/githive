@@ -23,7 +23,12 @@ type Shape = string | Shape[] | { [key: string]: Shape };
 /** A value's shape: its keys and the types under them, arrays as the union of their items' shapes. */
 function shapeOf(value: unknown): Shape {
 	if (Array.isArray(value)) return value.length ? [value.map(shapeOf).reduce(union)] : [];
-	if (value && typeof value === "object") return Object.fromEntries(Object.keys(value).sort().map((k) => [k, shapeOf((value as Record<string, unknown>)[k])]));
+	if (value && typeof value === "object")
+		return Object.fromEntries(
+			Object.keys(value)
+				.sort()
+				.map((k) => [k, shapeOf((value as Record<string, unknown>)[k])]),
+		);
 	return value === null ? "null" : typeof value;
 }
 function union(a: Shape, b: Shape): Shape {
@@ -47,13 +52,33 @@ beforeAll(async () => {
 		agent,
 		teamsOf: async () => ["@acme/security"],
 	});
-	const call = (agent: string, name: string, args: Record<string, unknown>) => callTool(name, { repo: "p", ...args }, ctx(agent));
+	const call = (agent: string, name: string, args: Record<string, unknown>) =>
+		callTool(name, { repo: "p", ...args }, ctx(agent));
 	// Every kind of record and every optional field the toolkit writes today.
-	await call("ada/lead", "settings", { required: 1, vetoes: ["security"], grants: { security: ["@acme/security"] }, escalate: [{ paths: ["infra/"], required: 2 }], verify: ["npm test"], shard_depth: 0 });
-	await callTool("register", { repo: "p", agent: "keyed-agent" }, { remote: async () => ({ url: server.url, token: "unused" }), head: async () => server.git("rev-parse", "main").trim() });
+	await call("ada/lead", "settings", {
+		required: 1,
+		vetoes: ["security"],
+		grants: { security: ["@acme/security"] },
+		escalate: [{ paths: ["infra/"], required: 2 }],
+		verify: ["npm test"],
+		shard_depth: 0,
+	});
+	await callTool(
+		"register",
+		{ repo: "p", agent: "keyed-agent" },
+		{
+			remote: async () => ({ url: server.url, token: "unused" }),
+			head: async () => server.git("rev-parse", "main").trim(),
+		},
+	);
 	await call("ada/builder", "claim", { change: "stats-1", paths: ["src/stats/"], intent: "Add stats" });
 	await call("ada/builder", "claim", { change: "docs-1", paths: ["docs/"], intent: "Write docs" });
-	await call("bob/reviewer", "vote", { commit: "1".repeat(40), role: "security", verdict: "approve", evidence: "ran the tests" });
+	await call("bob/reviewer", "vote", {
+		commit: "1".repeat(40),
+		role: "security",
+		verdict: "approve",
+		evidence: "ran the tests",
+	});
 	await call("ada/builder", "ask_human", { change: "stats-1", reason: "Which chart library?" });
 	await call("ada/lead", "add_work", { title: "Add charts", intent: "Charts for stats", paths: ["src/charts/"] });
 	await call("ada/builder", "release", { change: "docs-1", reason: "done elsewhere" });
@@ -63,10 +88,18 @@ beforeAll(async () => {
 	await roleWaits(holds, [`${"1".repeat(40)}#security`]);
 	await roleWaitTold(holds, `${"1".repeat(40)}#security`);
 	// A branch's landing lease, held, with the batch its holder is checking.
-	const lease = gitLanding(new GitCasLog<LeaseRecord>(async () => ({ url: server.url, token: "unused" }), "p", landingRef("p", "main")), memoryLanding());
+	const lease = gitLanding(
+		new GitCasLog<LeaseRecord>(async () => ({ url: server.url, token: "unused" }), "p", landingRef("p", "main")),
+		memoryLanding(),
+	);
 	await lease.turn("merge-1", "stats-1", "1".repeat(40), 0, 60_000);
-	await lease.checking({ base: "2".repeat(40), since: new Date().toISOString(), changes: [{ change: "stats-1", head: "1".repeat(40), agent: "ada/builder" }] });
-	const read = async (ref: string) => (await new GitCasLog<unknown>(async () => ({ url: server.url, token: "unused" }), "p", ref).read())?.commit.state;
+	await lease.checking({
+		base: "2".repeat(40),
+		since: new Date().toISOString(),
+		changes: [{ change: "stats-1", head: "1".repeat(40), agent: "ada/builder" }],
+	});
+	const read = async (ref: string) =>
+		(await new GitCasLog<unknown>(async () => ({ url: server.url, token: "unused" }), "p", ref).read())?.commit.state;
 	shapes = {
 		claims: shapeOf(await read("refs/notes/githive-claims/p")),
 		votes: shapeOf(await read("refs/notes/githive-votes/p")),
@@ -83,7 +116,8 @@ afterAll(async () => {
 describe("the shape of GitHive's records", () => {
 	it(`is what format ${RECORD_FORMAT} says it is: a change needs a new format and an upgrade`, () => {
 		const pinned = { format: RECORD_FORMAT, shapes };
-		if (process.env.UPDATE_RECORD_SHAPES || !existsSync(FIXTURE)) writeFileSync(FIXTURE, `${JSON.stringify(pinned, null, "\t")}\n`);
+		if (process.env.UPDATE_RECORD_SHAPES || !existsSync(FIXTURE))
+			writeFileSync(FIXTURE, `${JSON.stringify(pinned, null, "\t")}\n`);
 		const fixture = JSON.parse(readFileSync(FIXTURE, "utf8"));
 		expect(
 			pinned,

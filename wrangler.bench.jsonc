@@ -21,13 +21,13 @@
 		// The Artifacts namespace below, by name: push events come from every namespace in the account, and only its own count.
 		"ARTIFACTS_NAMESPACE": "blueprint-bench",
 		// Bench only: POST /admin/wipe may delete every repo in this namespace. Never set on production.
-		"BENCH_WIPE": "allowed"
+		"BENCH_WIPE": "allowed",
 	},
 	"assets": {
 		"directory": "./web/dist",
 		"binding": "ASSETS",
 		"run_worker_first": true,
-		"not_found_handling": "single-page-application"
+		"not_found_handling": "single-page-application",
 	},
 	// Its own namespace, so benchmark repos and forks never show up beside real projects.
 	"artifacts": [{ "binding": "ARTIFACTS", "namespace": "blueprint-bench", "remote": true }],
@@ -38,22 +38,31 @@
 			{ "name": "GATE", "class_name": "Gate" },
 			{ "name": "REPO_INDEX", "class_name": "RepoIndex" },
 			{ "name": "REPO_CACHE", "class_name": "RepoCache" },
-			{ "name": "TOKENS", "class_name": "TokenCache" }
-		]
+			{ "name": "TOKENS", "class_name": "TokenCache" },
+		],
 	},
 	// GitHive's own identity: people, sessions, agents and their tokens (migrations/).
-	"d1_databases": [{ "binding": "DB", "database_name": "githive-bench", "database_id": "72e60aef-4f1f-48da-93e4-cc1811443db7", "migrations_dir": "migrations" }],
+	"d1_databases": [
+		{
+			"binding": "DB",
+			"database_name": "githive-bench",
+			"database_id": "72e60aef-4f1f-48da-93e4-cc1811443db7",
+			"migrations_dir": "migrations",
+		},
+	],
 	// The OAuth provider's grants and tokens, for MCP clients that sign in.
 	"kv_namespaces": [{ "binding": "OAUTH_KV", "id": "adf3d5a6fa5247f6849af337c4236193" }],
 	// Every push in the account, from one account-wide subscription (see src/push-events.ts):
 	//   wrangler queues create githive-bench-pushes
 	//   wrangler queues subscription create githive-bench-pushes --source artifacts --events repo.pushed
 	// A queue has one consumer, so production and the bench each have their own.
-	"queues": { "consumers": [{ "queue": "githive-bench-pushes", "max_batch_size": 100, "max_batch_timeout": 2, "max_retries": 3 }] },
+	"queues": {
+		"consumers": [{ "queue": "githive-bench-pushes", "max_batch_size": 100, "max_batch_timeout": 2, "max_retries": 3 }],
+	},
 	"containers": [
 		{ "class_name": "Gate", "scheduling_policy": "durable_object" },
 		{ "class_name": "Reviewer", "scheduling_policy": "durable_object" },
-		{ "class_name": "Builder", "scheduling_policy": "durable_object" }
+		{ "class_name": "Builder", "scheduling_policy": "durable_object" },
 	],
 	"migrations": [
 		{ "tag": "v1", "new_sqlite_classes": ["Coordinator"] },
@@ -73,6 +82,6 @@
 		// GitHive: the repo index starts fresh under its new name.
 		{ "tag": "v12", "deleted_classes": ["TaskIndex"], "new_sqlite_classes": ["RepoIndex"] },
 		// The repo's live feed became its cache, too (views, record tips, the fork queue, landing): the same objects and storage, renamed.
-		{ "tag": "v13", "renamed_classes": [{ "from": "LiveFeed", "to": "RepoCache" }] }
-	]
+		{ "tag": "v13", "renamed_classes": [{ "from": "LiveFeed", "to": "RepoCache" }] },
+	],
 }

@@ -23,7 +23,8 @@ export class PageBoundary extends Component<{ children: ReactNode }, PageBoundar
 					<section className="box empty" role="alert">
 						<h2>This page couldn't be shown</h2>
 						<p>
-							Something in its data was unexpected. The rest of the dashboard still works: <a href="#/">go to Repositories</a> or reload to try again.
+							Something in its data was unexpected. The rest of the dashboard still works:{" "}
+							<a href="#/">go to Repositories</a> or reload to try again.
 						</p>
 					</section>
 				</main>

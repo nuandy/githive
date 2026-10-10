@@ -1,9 +1,27 @@
 import { describe, expect, it } from "vitest";
 import type { MyOrg } from "../api";
-import { addedMessage, assignableRoles, canLeave, canManage, creatableOwners, realOrgs, repoNameProblem, slugProblem } from "./orgs";
+import {
+	addedMessage,
+	assignableRoles,
+	canLeave,
+	canManage,
+	creatableOwners,
+	realOrgs,
+	repoNameProblem,
+	slugProblem,
+} from "./orgs";
 import { atLeast, canAdminister, canVote } from "./permissions";
 
-const org = (slug: string, role: MyOrg["role"], extra: Partial<MyOrg> = {}): MyOrg => ({ id: slug, slug, name: null, personal: false, defaultPermission: "write", membersCanCreateRepos: true, role, ...extra });
+const org = (slug: string, role: MyOrg["role"], extra: Partial<MyOrg> = {}): MyOrg => ({
+	id: slug,
+	slug,
+	name: null,
+	personal: false,
+	defaultPermission: "write",
+	membersCanCreateRepos: true,
+	role,
+	...extra,
+});
 
 describe("permission levels", () => {
 	it("rank read < review < write < admin, and gate voting and settings", () => {
@@ -19,7 +37,12 @@ describe("permission levels", () => {
 
 describe("orgs", () => {
 	it("offers your own namespace, and orgs where you may create, as owners for a new repo", () => {
-		const orgs = [org("ada", "owner", { personal: true }), org("acme", "member"), org("strict", "member", { membersCanCreateRepos: false }), org("lab", "admin")];
+		const orgs = [
+			org("ada", "owner", { personal: true }),
+			org("acme", "member"),
+			org("strict", "member", { membersCanCreateRepos: false }),
+			org("lab", "admin"),
+		];
 		expect(creatableOwners(orgs).map((o) => o.slug)).toEqual(["ada", "acme", "lab"]);
 		expect(realOrgs(orgs).map((o) => o.slug)).toEqual(["acme", "strict", "lab"]);
 	});
@@ -34,7 +57,8 @@ describe("orgs", () => {
 	});
 
 	it("lets anyone leave but an org's last owner", () => {
-		const people = (roles: ("owner" | "admin" | "member")[]) => roles.map((role, i) => ({ userId: `u${i}`, handle: `p${i}`, name: null, avatarUrl: null, role }));
+		const people = (roles: ("owner" | "admin" | "member")[]) =>
+			roles.map((role, i) => ({ userId: `u${i}`, handle: `p${i}`, name: null, avatarUrl: null, role }));
 		expect(canLeave({ role: "member", personal: false, members: people(["owner", "member"]) })).toBe(true);
 		expect(canLeave({ role: "owner", personal: false, members: people(["owner", "member"]) })).toBe(false);
 		expect(canLeave({ role: "owner", personal: false, members: people(["owner", "owner"]) })).toBe(true);
@@ -44,8 +68,12 @@ describe("orgs", () => {
 
 	it("says whether someone joined or was invited", () => {
 		expect(addedMessage({ added: "bob" })).toBe("bob joined.");
-		expect(addedMessage({ invited: "dan@example.com" })).toBe("Invited dan@example.com: they'll join when they first sign in.");
-		expect(addedMessage({ invited: "dan@example.com", awaitingApproval: true })).toBe("Invited dan@example.com. They can sign in once a GitHive admin approves them.");
+		expect(addedMessage({ invited: "dan@example.com" })).toBe(
+			"Invited dan@example.com: they'll join when they first sign in.",
+		);
+		expect(addedMessage({ invited: "dan@example.com", awaitingApproval: true })).toBe(
+			"Invited dan@example.com. They can sign in once a GitHive admin approves them.",
+		);
 	});
 
 	it("checks names as the server does", () => {

@@ -48,7 +48,12 @@ const fail = (status: number, message: string): never => {
 };
 
 /** The repo a caller names, if they may do `needed` in it. */
-export async function resolveRepo(env: Env, principal: Principal | undefined, repo: string, needed: Level): Promise<RepoRef> {
+export async function resolveRepo(
+	env: Env,
+	principal: Principal | undefined,
+	repo: string,
+	needed: Level,
+): Promise<RepoRef> {
 	if (!principal) return fail(401, "sign in to GitHive first");
 	const slash = repo.indexOf("/");
 	const owner = slash < 0 ? "_" : repo.slice(0, slash);
@@ -57,7 +62,8 @@ export async function resolveRepo(env: Env, principal: Principal | undefined, re
 	const orgs = env.DB ? new OrgStore(env.DB) : null;
 
 	if (principal.kind === "access") {
-		if (owner === "_") return { id: name, fullName: (await orgs?.repoById(name))?.fullName ?? `_/${name}`, level: "admin" };
+		if (owner === "_")
+			return { id: name, fullName: (await orgs?.repoById(name))?.fullName ?? `_/${name}`, level: "admin" };
 		const found = (await orgs?.repo(owner, name)) ?? fail(404, `no repo ${owner}/${name}`);
 		return { id: found.id, fullName: found.fullName, level: "admin" };
 	}

@@ -11,7 +11,10 @@ const exec = promisify(execFile);
 export async function agentClone(url: string, work: string, name: string) {
 	const dir = join(work, name);
 	await exec("git", ["clone", "--quiet", url, dir]);
-	const run = async (...args: string[]) => (await exec("git", ["-C", dir, "-c", `user.name=${name}`, "-c", `user.email=${name}@example.com`, ...args])).stdout.trim();
+	const run = async (...args: string[]) =>
+		(
+			await exec("git", ["-C", dir, "-c", `user.name=${name}`, "-c", `user.email=${name}@example.com`, ...args])
+		).stdout.trim();
 	const write = (path: string, text: string) => {
 		mkdirSync(join(dir, path, ".."), { recursive: true });
 		writeFileSync(join(dir, path), text);
@@ -20,7 +23,14 @@ export async function agentClone(url: string, work: string, name: string) {
 }
 
 /** Push a branch changes/<change> with the given files on top of main (or `from`), and return its head. */
-export async function pushChange(url: string, work: string, agent: string, change: string, files: Record<string, string>, from?: string) {
+export async function pushChange(
+	url: string,
+	work: string,
+	agent: string,
+	change: string,
+	files: Record<string, string>,
+	from?: string,
+) {
 	const clone = await agentClone(url, work, `${agent}-${change}-${Math.random().toString(36).slice(2, 6)}`);
 	await clone.run("checkout", "--quiet", "-b", `changes/${change}`, ...(from ? [from] : []));
 	for (const [path, text] of Object.entries(files)) clone.write(path, text);

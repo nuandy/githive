@@ -45,7 +45,11 @@ export async function runCalls(tools: AgentTool[], response: OpenAI.Responses.Re
 	const outputs: ResponseInputItem[] = [];
 	for (const item of response.output) {
 		if (item.type !== "function_call") continue;
-		outputs.push({ type: "function_call_output", call_id: item.call_id, output: await runCall(tools, item.name, item.arguments) });
+		outputs.push({
+			type: "function_call_output",
+			call_id: item.call_id,
+			output: await runCall(tools, item.name, item.arguments),
+		});
 	}
 	return outputs;
 }

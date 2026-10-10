@@ -28,14 +28,20 @@ const READS_AT_ONCE = 6;
  * each change's branch is in its source's repo (its fork), and `fallback`
  * (the Gate's) reads the changes this can't place.
  */
-export function artifactsInspect(history: ReadHistory, project: string, fallback: BatchGit["inspect"]): BatchGit["inspect"] {
+export function artifactsInspect(
+	history: ReadHistory,
+	project: string,
+	fallback: BatchGit["inspect"],
+): BatchGit["inspect"] {
 	return async ({ base, branch, changes }) => {
 		const chain = await branchChain(history, project, branch, base);
 		if (!chain) return fallback({ base, branch, changes });
 		const onBranch = new Map(chain.map((c, i) => [c.hash, i]));
 		const read = await atMost(READS_AT_ONCE, changes, async (c): Promise<Inspected | null> => {
 			try {
-				return await history(c.source ? repoOfUrl(c.source.url) : project, (source) => readChange(source, c.change, c.ref, chain, onBranch));
+				return await history(c.source ? repoOfUrl(c.source.url) : project, (source) =>
+					readChange(source, c.change, c.ref, chain, onBranch),
+				);
 			} catch (err) {
 				return { change: c.change, error: String(err) };
 			}
@@ -43,7 +49,14 @@ export function artifactsInspect(history: ReadHistory, project: string, fallback
 		const unplaced = changes.filter((_, i) => read[i] === null);
 		if (!unplaced.length) return read as Inspected[];
 		const fetched = await fallback({ base, branch, changes: unplaced });
-		return read.map((r, i) => r ?? fetched.find((f) => f.change === changes[i].change) ?? { change: changes[i].change, error: "its branch couldn't be read" });
+		return read.map(
+			(r, i) =>
+				r ??
+				fetched.find((f) => f.change === changes[i].change) ?? {
+					change: changes[i].change,
+					error: "its branch couldn't be read",
+				},
+		);
 	};
 }
 
@@ -67,7 +80,12 @@ export const forgetChains = () => chains.clear();
  * null if `head` isn't within the window read. As kept, if it's the head kept;
  * moved on from it, only the commits on top are read and the rest kept.
  */
-async function branchChain(history: ReadHistory, project: string, branch: string, head: string): Promise<CommitMeta[] | null> {
+async function branchChain(
+	history: ReadHistory,
+	project: string,
+	branch: string,
+	head: string,
+): Promise<CommitMeta[] | null> {
 	const key = `${project}|${branch}`;
 	const kept = await chains.get(key)?.catch(() => null);
 	// `head` on the chain kept: the branch as it was then (a head kept a moment by a caller, say), with nothing read.
@@ -98,7 +116,13 @@ async function branchChain(history: ReadHistory, project: string, branch: string
 }
 
 /** One change's head and files, or null if its history can't be placed (see placeChange). */
-async function readChange(source: HistorySource, change: string, ref: string, chain: CommitMeta[], onBranch: Map<string, number>): Promise<Inspected | null> {
+async function readChange(
+	source: HistorySource,
+	change: string,
+	ref: string,
+	chain: CommitMeta[],
+	onBranch: Map<string, number>,
+): Promise<Inspected | null> {
 	const placed = await placeChange(source, ref, chain, onBranch);
 	if (!placed) return null;
 	if ("error" in placed) return { change, error: placed.error };
@@ -112,7 +136,12 @@ async function readChange(source: HistorySource, change: string, ref: string, ch
  * it merged in since (agents merge the branch in, never rebase), the way git's
  * merge-base finds it.
  */
-async function placeChange(source: HistorySource, ref: string, chain: CommitMeta[], onBranch: Map<string, number>): Promise<{ head: CommitMeta; base: CommitMeta; files: string[] } | { error: string } | null> {
+async function placeChange(
+	source: HistorySource,
+	ref: string,
+	chain: CommitMeta[],
+	onBranch: Map<string, number>,
+): Promise<{ head: CommitMeta; base: CommitMeta; files: string[] } | { error: string } | null> {
 	const own = await source.log(ref, CHANGE_WINDOW, 0);
 	const head = own[0];
 	if (!head) return { error: "its branch couldn't be read" };
@@ -148,16 +177,31 @@ async function placeChange(source: HistorySource, ref: string, chain: CommitMeta
  * in memory, fetching main from the project repo: at 1,000 agents, the project
  * repo failed 4,000 of those requests (run 1000-1).
  */
-export async function changeAgainst(history: ReadHistory, project: string, branch: string, main: string, change: { ref: string; source?: { url: string } }): Promise<{ head: string; files: string[]; both: string[] } | { error: string } | null> {
+export async function changeAgainst(
+	history: ReadHistory,
+	project: string,
+	branch: string,
+	main: string,
+	change: { ref: string; source?: { url: string } },
+): Promise<{ head: string; files: string[]; both: string[] } | { error: string } | null> {
 	const chain = await branchChain(history, project, branch, main);
 	if (!chain) return null;
 	const onBranch = new Map(chain.map((c, i) => [c.hash, i]));
-	const placed = await history(change.source ? repoOfUrl(change.source.url) : project, (source) => placeChange(source, change.ref, chain, onBranch));
+	const placed = await history(change.source ? repoOfUrl(change.source.url) : project, (source) =>
+		placeChange(source, change.ref, chain, onBranch),
+	);
 	if (!placed || "error" in placed) return placed;
 	// What the branch changed since the change left it: none if it hasn't moved since.
-	const theirs = placed.base.hash === main ? [] : await history(project, (source) => filesBetween(source, placed.base.treeHash, chain[0].treeHash));
+	const theirs =
+		placed.base.hash === main
+			? []
+			: await history(project, (source) => filesBetween(source, placed.base.treeHash, chain[0].treeHash));
 	const touches = (a: string, b: string) => a === b || a.startsWith(`${b}/`) || b.startsWith(`${a}/`);
-	return { head: placed.head.hash, files: placed.files, both: placed.files.filter((f) => theirs.some((t) => touches(f, t))) };
+	return {
+		head: placed.head.hash,
+		files: placed.files,
+		both: placed.files.filter((f) => theirs.some((t) => touches(f, t))),
+	};
 }
 
 /**
@@ -168,11 +212,19 @@ export async function changeAgainst(history: ReadHistory, project: string, branc
  * their landing unrecorded, and every batch after took one of them up, merged
  * it to nothing and failed (run 1000-4).
  */
-export async function landedOn(history: ReadHistory, project: string, branch: string, main: string, heads: string[]): Promise<Map<string, string>> {
+export async function landedOn(
+	history: ReadHistory,
+	project: string,
+	branch: string,
+	main: string,
+	heads: string[],
+): Promise<Map<string, string>> {
 	const on = new Map<string, string>();
 	const chain = await branchChain(history, project, branch, main);
 	if (!chain || !heads.length) return on;
 	const wanted = new Set(heads);
-	for (const commit of chain) for (const merged of commit.parents.slice(1)) if (wanted.has(merged) && !on.has(merged)) on.set(merged, commit.hash);
+	for (const commit of chain)
+		for (const merged of commit.parents.slice(1))
+			if (wanted.has(merged) && !on.has(merged)) on.set(merged, commit.hash);
 	return on;
 }

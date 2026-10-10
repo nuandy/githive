@@ -6,7 +6,11 @@ import { ConfirmButton, messageOf } from "./Confirm";
 import "./Manage.css";
 
 /** What the repo's Settings can change. */
-export type RepoManageApi = Pick<ManageApi, "setVisibility" | "deleteRepo" | "collaborators" | "setCollaborator" | "removeCollaborator"> & Partial<Pick<ManageApi, "startRepo" | "changeSettings">>;
+export type RepoManageApi = Pick<
+	ManageApi,
+	"setVisibility" | "deleteRepo" | "collaborators" | "setCollaborator" | "removeCollaborator"
+> &
+	Partial<Pick<ManageApi, "startRepo" | "changeSettings">>;
 
 const label = (level: Level) => level[0].toUpperCase() + level.slice(1);
 
@@ -15,7 +19,19 @@ const label = (level: Level) => level[0].toUpperCase() + level.slice(1);
  * visibility; to its admins, changing visibility, collaborators, and deleting
  * it (typing its name to confirm).
  */
-export function RepoAdmin({ repo, access, manage, onDeleted, onChanged }: { repo: string; access: RepoAccess | undefined; manage: RepoManageApi; onDeleted: () => void; onChanged: () => void }) {
+export function RepoAdmin({
+	repo,
+	access,
+	manage,
+	onDeleted,
+	onChanged,
+}: {
+	repo: string;
+	access: RepoAccess | undefined;
+	manage: RepoManageApi;
+	onDeleted: () => void;
+	onChanged: () => void;
+}) {
 	const admin = canAdminister(access?.level);
 	const loose = isLoose(repo);
 	const [collaborators, setCollaborators] = useState<{ handle: string; permission: Level }[] | undefined>(undefined);
@@ -97,7 +113,11 @@ export function RepoAdmin({ repo, access, manage, onDeleted, onChanged }: { repo
 							type="button"
 							className="manage__small"
 							disabled={busy === "visibility"}
-							onClick={() => run("visibility", () => manage.setVisibility(repo, access.visibility === "public" ? "private" : "public")).then((ok) => ok && onChanged())}
+							onClick={() =>
+								run("visibility", () =>
+									manage.setVisibility(repo, access.visibility === "public" ? "private" : "public"),
+								).then((ok) => ok && onChanged())
+							}
 						>
 							{access.visibility === "public" ? "Private" : "Public"}
 						</button>
@@ -113,7 +133,9 @@ export function RepoAdmin({ repo, access, manage, onDeleted, onChanged }: { repo
 					</div>
 					{listError ? <p className="box__row error">{listError}</p> : null}
 					{collaborators === undefined && !listError ? <p className="box__row muted">Loading…</p> : null}
-					{collaborators?.length === 0 ? <p className="box__row muted">No collaborators: the owner's members have what the owner gives them.</p> : null}
+					{collaborators?.length === 0 ? (
+						<p className="box__row muted">No collaborators: the owner's members have what the owner gives them.</p>
+					) : null}
 					<ul className="manage__rows" aria-labelledby="repo-collaborators">
 						{(collaborators ?? []).map((c) => {
 							const key = `collab:${c.handle}`;
@@ -125,7 +147,16 @@ export function RepoAdmin({ repo, access, manage, onDeleted, onChanged }: { repo
 											<label className="sr-only" htmlFor={`collab-${c.handle}`}>
 												{c.handle}'s permission
 											</label>
-											<select id={`collab-${c.handle}`} value={c.permission} disabled={busy === key} onChange={(e) => run(key, () => manage.setCollaborator(repo, c.handle, e.target.value as Level)).then((ok) => (ok ? load() : undefined))}>
+											<select
+												id={`collab-${c.handle}`}
+												value={c.permission}
+												disabled={busy === key}
+												onChange={(e) =>
+													run(key, () => manage.setCollaborator(repo, c.handle, e.target.value as Level)).then((ok) =>
+														ok ? load() : undefined,
+													)
+												}
+											>
 												{LEVELS.map((l) => (
 													<option key={l} value={l}>
 														{label(l)}
@@ -139,7 +170,11 @@ export function RepoAdmin({ repo, access, manage, onDeleted, onChanged }: { repo
 												label="Remove"
 												question={`Remove ${c.handle}?`}
 												busy={busy === key}
-												onConfirm={() => run(key, () => manage.removeCollaborator(repo, c.handle)).then((ok) => (ok ? load() : undefined))}
+												onConfirm={() =>
+													run(key, () => manage.removeCollaborator(repo, c.handle)).then((ok) =>
+														ok ? load() : undefined,
+													)
+												}
 											/>
 										</div>
 									</div>
@@ -153,7 +188,15 @@ export function RepoAdmin({ repo, access, manage, onDeleted, onChanged }: { repo
 							<label className="sr-only" htmlFor="collab-handle">
 								Handle
 							</label>
-							<input id="collab-handle" type="text" value={handle} onChange={(e) => setHandle(e.target.value)} placeholder="Their handle" autoComplete="off" spellCheck={false} />
+							<input
+								id="collab-handle"
+								type="text"
+								value={handle}
+								onChange={(e) => setHandle(e.target.value)}
+								placeholder="Their handle"
+								autoComplete="off"
+								spellCheck={false}
+							/>
 							<label className="sr-only" htmlFor="collab-level">
 								Permission
 							</label>
@@ -168,7 +211,9 @@ export function RepoAdmin({ repo, access, manage, onDeleted, onChanged }: { repo
 								Add collaborator
 							</button>
 						</div>
-						<p className="manage__hint">They need to have signed in to GitHive once. Their agents act with the same permission.</p>
+						<p className="manage__hint">
+							They need to have signed in to GitHive once. Their agents act with the same permission.
+						</p>
 						{errorFor("add")}
 					</form>
 				</>
@@ -178,14 +223,29 @@ export function RepoAdmin({ repo, access, manage, onDeleted, onChanged }: { repo
 				<div className="box__body manage__form manage__danger">
 					<h2>Delete this repository</h2>
 					<p className="manage__note">
-						This deletes its code, its history, GitHive's record of its claims, votes and merges, and its agents' forks. It can't be undone. The saved setup its containers start from is never used again, and is gone within 30 days. Type <code>{repo}</code> to confirm.
+						This deletes its code, its history, GitHive's record of its claims, votes and merges, and its agents' forks.
+						It can't be undone. The saved setup its containers start from is never used again, and is gone within 30
+						days. Type <code>{repo}</code> to confirm.
 					</p>
 					<div className="manage__inline">
 						<label className="sr-only" htmlFor="delete-confirm">
 							Type {repo} to confirm
 						</label>
-						<input id="delete-confirm" type="text" value={typed} onChange={(e) => setTyped(e.target.value)} placeholder={repo} autoComplete="off" spellCheck={false} />
-						<button type="button" className="danger" disabled={typed !== repo || busy === "delete"} onClick={() => run("delete", () => manage.deleteRepo(repo)).then((ok) => ok && onDeleted())}>
+						<input
+							id="delete-confirm"
+							type="text"
+							value={typed}
+							onChange={(e) => setTyped(e.target.value)}
+							placeholder={repo}
+							autoComplete="off"
+							spellCheck={false}
+						/>
+						<button
+							type="button"
+							className="danger"
+							disabled={typed !== repo || busy === "delete"}
+							onClick={() => run("delete", () => manage.deleteRepo(repo)).then((ok) => ok && onDeleted())}
+						>
 							{busy === "delete" ? "Deleting…" : "Delete repository"}
 						</button>
 					</div>

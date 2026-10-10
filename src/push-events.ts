@@ -41,11 +41,22 @@ export function changePushOf(body: PushedEvent, namespace: string): { projects: 
 	const ref = body.payload?.ref ?? "";
 	const after = body.payload?.after ?? "";
 	const at = Date.parse(body.metadata?.eventTimestamp ?? "");
-	if (!fork.startsWith("fork--") || !ref.startsWith(CHANGE_REF) || ref.length === CHANGE_REF.length || !/^[0-9a-f]{40}$/.test(after) || Number.isNaN(at)) return null;
+	if (
+		!fork.startsWith("fork--") ||
+		!ref.startsWith(CHANGE_REF) ||
+		ref.length === CHANGE_REF.length ||
+		!/^[0-9a-f]{40}$/.test(after) ||
+		Number.isNaN(at)
+	)
+		return null;
 	const projects: string[] = [];
-	for (let i = fork.indexOf("--agent--", 6); i > 6; i = fork.indexOf("--agent--", i + 1)) if (i + 9 < fork.length) projects.push(fork.slice(6, i));
+	for (let i = fork.indexOf("--agent--", 6); i > 6; i = fork.indexOf("--agent--", i + 1))
+		if (i + 9 < fork.length) projects.push(fork.slice(6, i));
 	if (!projects.length) return null;
-	return { projects, push: { change: ref.slice(CHANGE_REF.length), fork, head: DELETED.test(after) ? null : after, at } };
+	return {
+		projects,
+		push: { change: ref.slice(CHANGE_REF.length), fork, head: DELETED.test(after) ? null : after, at },
+	};
 }
 
 /** The Worker's queue consumer: each batch's pushes noted in their projects' RepoCaches, one call a project. */
@@ -90,7 +101,11 @@ export async function notePushEvents(batch: MessageBatch<unknown>, env: Env) {
  * claim (`forkOf`: see forkName). Any other event's head is left out, so its
  * change counts as unseen and is read.
  */
-export async function headsForClaims(kept: Record<string, KnownHead>, claims: { change: string; agent: string }[], forkOf: (agent: string) => Promise<string>) {
+export async function headsForClaims(
+	kept: Record<string, KnownHead>,
+	claims: { change: string; agent: string }[],
+	forkOf: (agent: string) => Promise<string>,
+) {
 	const forks = new Map<string, Promise<string>>();
 	const counted: Record<string, KnownHead & { pushed?: boolean }> = {};
 	for (const { change, agent } of claims) {

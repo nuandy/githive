@@ -58,9 +58,7 @@ class MemoryStats {
 export class MemoryFS {
 	encoder = new TextEncoder();
 	decoder = new TextDecoder();
-	entries = new Map<string, Entry>([
-		["/", { kind: "dir", children: new Set(), mtimeMs: Date.now() }],
-	]);
+	entries = new Map<string, Entry>([["/", { kind: "dir", children: new Set(), mtimeMs: Date.now() }]]);
 
 	promises = {
 		readFile: this.readFile.bind(this),
@@ -137,8 +135,7 @@ export class MemoryFS {
 			return;
 		}
 
-		const recursive =
-			typeof options === "object" && options !== null && options.recursive;
+		const recursive = typeof options === "object" && options !== null && options.recursive;
 		const parent = this.parent(target);
 
 		if (!this.entries.has(parent)) {
@@ -167,11 +164,7 @@ export class MemoryFS {
 		await this.mkdir(this.parent(target), { recursive: true });
 
 		const bytes =
-			typeof data === "string"
-				? this.encoder.encode(data)
-				: data instanceof Uint8Array
-					? data
-					: new Uint8Array(data);
+			typeof data === "string" ? this.encoder.encode(data) : data instanceof Uint8Array ? data : new Uint8Array(data);
 
 		this.entries.set(target, {
 			kind: "file",
@@ -224,7 +217,12 @@ export class MemoryFS {
 	 */
 	copy() {
 		const copy = new MemoryFS();
-		copy.entries = new Map([...this.entries].map(([path, entry]) => [path, entry.kind === "dir" ? { ...entry, children: new Set(entry.children) } : entry]));
+		copy.entries = new Map(
+			[...this.entries].map(([path, entry]) => [
+				path,
+				entry.kind === "dir" ? { ...entry, children: new Set(entry.children) } : entry,
+			]),
+		);
 		return copy;
 	}
 

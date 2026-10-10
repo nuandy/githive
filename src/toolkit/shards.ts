@@ -24,7 +24,8 @@ export function ancestorsOf(shard: string) {
 }
 
 /** A shard as one ref component: every character but letters, digits, _ and - percent-encoded ("/" too). */
-export const encodeShard = (shard: string) => encodeURIComponent(shard).replace(/[!'()*.~]/g, (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`);
+export const encodeShard = (shard: string) =>
+	encodeURIComponent(shard).replace(/[!'()*.~]/g, (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`);
 export const decodeShard = (encoded: string) => decodeURIComponent(encoded);
 
 /** Where a repo's claim shards live: one ref each, side by side, so a shard's descendants share its prefix. */
@@ -50,6 +51,7 @@ export const recordsRepoName = (repo: string, k: number) => `records--${repo}--$
  * claim needn't read every shard. Written before the shards, and only ever
  * added to, so it always covers every shard the change holds.
  */
-export const changeRef = (repo: string, change: string) => `refs/notes/githive-claim-changes/${repo}/${encodeShard(change)}`;
+export const changeRef = (repo: string, change: string) =>
+	`refs/notes/githive-claim-changes/${repo}/${encodeShard(change)}`;
 /** Which records repo holds a change's index. */
 export const changeRepoOf = (change: string, count: number) => recordsRepoOf(`change:${change}`, count);

@@ -40,7 +40,12 @@ export async function mergeMessage(claimed: MergeClaim, stamper?: Stamper) {
 		// The changes checked together on it, in landing order: exactly these landed on it, in one push.
 		...(claimed.testedWith?.length ? [`GitHive-Tested-With: ${claimed.testedWith.join(" ")}`] : []),
 		// Who asked for it, as Access verified them, and GitHive's stamp over all of the above.
-		...(stamper ? [`GitHive-By: ${stamper.by}`, `GitHive-Stamp: ${await stamper.stamp(mergeStampPayload({ ...signed, by: stamper.by }))}`] : []),
+		...(stamper
+			? [
+					`GitHive-By: ${stamper.by}`,
+					`GitHive-Stamp: ${await stamper.stamp(mergeStampPayload({ ...signed, by: stamper.by }))}`,
+				]
+			: []),
 		"",
 	].join("\n");
 }

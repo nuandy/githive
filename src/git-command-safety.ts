@@ -18,7 +18,8 @@ export interface BuilderGitPushHistory {
 
 /** Refuse a token-authenticated push if it would discard an already-pushed commit. */
 export function builderGitPushBlockReason(history: BuilderGitPushHistory): string | undefined {
-	if (history.forcePush) return "Refusing force-push: GitHive pins reviews to exact commits, so pushed history must be preserved. Add a new commit instead.";
+	if (history.forcePush)
+		return "Refusing force-push: GitHive pins reviews to exact commits, so pushed history must be preserved. Add a new commit instead.";
 	const remoteWouldBeRewritten = Boolean(history.remoteHead) && !history.remoteHeadIsAncestor;
 	const lastPushedCommitWasRewritten = Boolean(history.lastPushedHead) && !history.lastPushedHeadIsAncestor;
 	const pushedHeadCannotBeVerified = history.hasPushedHistory && !history.remoteHead && !history.lastPushedHead;
@@ -236,7 +237,12 @@ function executableIndex(words: string[]): number {
 			i++;
 			while (i < words.length && words[i]!.startsWith("-")) {
 				const option = words[i++]!;
-				if (["-u", "--user", "-g", "--group", "-h", "--host", "-p", "--prompt", "-C", "--close-from", "--chdir"].includes(option)) i++;
+				if (
+					["-u", "--user", "-g", "--group", "-h", "--host", "-p", "--prompt", "-C", "--close-from", "--chdir"].includes(
+						option,
+					)
+				)
+					i++;
 				else if (option === "--") break;
 			}
 			continue;
@@ -249,7 +255,15 @@ function executableIndex(words: string[]): number {
 	}
 	if (words[i] === "env") {
 		i++;
-		while (i < words.length && (isAssignment(words[i]!) || words[i] === "-i" || words[i] === "--ignore-environment" || words[i] === "-0" || words[i] === "--null")) i++;
+		while (
+			i < words.length &&
+			(isAssignment(words[i]!) ||
+				words[i] === "-i" ||
+				words[i] === "--ignore-environment" ||
+				words[i] === "-0" ||
+				words[i] === "--null")
+		)
+			i++;
 		while (words[i] === "-u" || words[i] === "--unset" || words[i] === "-C" || words[i] === "--chdir") i += 2;
 		while (i < words.length && (words[i]!.startsWith("--unset=") || words[i]!.startsWith("--chdir="))) i++;
 	}
@@ -258,7 +272,23 @@ function executableIndex(words: string[]): number {
 }
 
 function isShellPrefix(word: string) {
-	return word === "command" || word === "builtin" || word === "exec" || word === "nohup" || word === "time" || word === "!" || word === "if" || word === "then" || word === "else" || word === "elif" || word === "while" || word === "until" || word === "do" || word === "coproc" || word === "sudo";
+	return (
+		word === "command" ||
+		word === "builtin" ||
+		word === "exec" ||
+		word === "nohup" ||
+		word === "time" ||
+		word === "!" ||
+		word === "if" ||
+		word === "then" ||
+		word === "else" ||
+		word === "elif" ||
+		word === "while" ||
+		word === "until" ||
+		word === "do" ||
+		word === "coproc" ||
+		word === "sudo"
+	);
 }
 
 function isRedirect(word: string) {
@@ -297,11 +327,29 @@ function gitSubcommand(args: string[]): { subcommand: string; args: string[] } |
 	let i = 1; // first word is the git executable
 	while (i < args.length) {
 		const arg = args[i]!;
-		if (arg === "-C" || arg === "-c" || arg === "--git-dir" || arg === "--work-tree" || arg === "--namespace" || arg === "--config-env" || arg === "--super-prefix") {
+		if (
+			arg === "-C" ||
+			arg === "-c" ||
+			arg === "--git-dir" ||
+			arg === "--work-tree" ||
+			arg === "--namespace" ||
+			arg === "--config-env" ||
+			arg === "--super-prefix"
+		) {
 			i += 2;
 			continue;
 		}
-		if (arg === "-p" || arg === "-P" || arg === "--paginate" || arg === "--no-pager" || arg === "--bare" || arg === "--no-replace-objects" || arg === "--no-optional-locks" || arg === "--no-lazy-fetch" || arg === "--literal-pathspecs") {
+		if (
+			arg === "-p" ||
+			arg === "-P" ||
+			arg === "--paginate" ||
+			arg === "--no-pager" ||
+			arg === "--bare" ||
+			arg === "--no-replace-objects" ||
+			arg === "--no-optional-locks" ||
+			arg === "--no-lazy-fetch" ||
+			arg === "--literal-pathspecs"
+		) {
 			i++;
 			continue;
 		}
@@ -326,7 +374,14 @@ function isForcePush(args: string[]) {
 			options = false;
 			continue;
 		}
-		if (options && (arg === "--force" || arg.startsWith("--force=") || arg === "--force-with-lease" || arg.startsWith("--force-with-lease="))) return true;
+		if (
+			options &&
+			(arg === "--force" ||
+				arg.startsWith("--force=") ||
+				arg === "--force-with-lease" ||
+				arg.startsWith("--force-with-lease="))
+		)
+			return true;
 		// Git accepts combined short options, such as `-fu`.
 		if (options && /^-[^-]/.test(arg) && arg.slice(1).includes("f")) return true;
 		// A leading + makes a push refspec force-update its destination.

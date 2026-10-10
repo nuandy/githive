@@ -11,7 +11,9 @@
 		"typecheck": "tsc && tsc -p web",
 		"test": "vitest run",
 		"build:web": "vite build --config web/vite.config.ts",
-		"dev:web": "vite --config web/vite.config.ts"
+		"dev:web": "vite --config web/vite.config.ts",
+		"format": "prettier --write .",
+		"format:check": "prettier --check ."
 	},
 	"license": "MIT",
 	"description": "A Git platform for many agents working on one repository at once, with no central server deciding for them. Built on Cloudflare Workers + Artifacts.",
@@ -28,6 +30,7 @@
 		"@types/react": "^19.3.0",
 		"@types/react-dom": "^19.3.0",
 		"@vitejs/plugin-react": "^6.1.1",
+		"prettier": "^3.9.10",
 		"typescript": "^7.0.2",
 		"vite": "^8.3.2",
 		"vitest": "^5.0.3",

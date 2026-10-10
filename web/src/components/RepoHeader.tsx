@@ -6,8 +6,14 @@ import "./RepoHeader.css";
 
 const LIVE_WORDS: Record<Exclude<LiveStatus, "off">, { label: string; title: string }> = {
 	live: { label: "Live", title: "Connected: this page updates as soon as anything changes." },
-	connecting: { label: "Connecting", title: "Connecting to live updates; until then the page refreshes every few seconds." },
-	reconnecting: { label: "Reconnecting", title: "Live updates dropped; reconnecting. Until then the page refreshes every few seconds." },
+	connecting: {
+		label: "Connecting",
+		title: "Connecting to live updates; until then the page refreshes every few seconds.",
+	},
+	reconnecting: {
+		label: "Reconnecting",
+		title: "Live updates dropped; reconnecting. Until then the page refreshes every few seconds.",
+	},
 };
 
 export function LiveDot({ status }: { status: LiveStatus }) {

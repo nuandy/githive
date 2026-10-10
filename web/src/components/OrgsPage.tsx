@@ -40,7 +40,10 @@ export function OrgsView({ me, orgs, createOrg, onCreated }: OrgsViewProps) {
 		<main className="page manage" id="main">
 			<header>
 				<h1>Your organizations</h1>
-				<p className="muted manage__lede">An organization is a shared owner for repositories, with members and teams. You don't need one: your own repositories are under {me.handle}.</p>
+				<p className="muted manage__lede">
+					An organization is a shared owner for repositories, with members and teams. You don't need one: your own
+					repositories are under {me.handle}.
+				</p>
 			</header>
 
 			<section className="box" aria-labelledby="orgs-title">
@@ -81,14 +84,36 @@ export function OrgsView({ me, orgs, createOrg, onCreated }: OrgsViewProps) {
 				<div className="box__body manage__form">
 					<div className="manage__field">
 						<label htmlFor="new-org-slug">Name in URLs</label>
-						<input id="new-org-slug" type="text" value={slug} onChange={(e) => setSlug(e.target.value.toLowerCase())} placeholder="acme" autoComplete="off" spellCheck={false} aria-describedby="new-org-slug-hint" />
+						<input
+							id="new-org-slug"
+							type="text"
+							value={slug}
+							onChange={(e) => setSlug(e.target.value.toLowerCase())}
+							placeholder="acme"
+							autoComplete="off"
+							spellCheck={false}
+							aria-describedby="new-org-slug-hint"
+						/>
 						<p className="manage__hint" id="new-org-slug-hint">
-							{problem ? <span className="error">{problem}</span> : slug ? `Its repositories will be ${slug}/<name>.` : SLUG_HINT}
+							{problem ? (
+								<span className="error">{problem}</span>
+							) : slug ? (
+								`Its repositories will be ${slug}/<name>.`
+							) : (
+								SLUG_HINT
+							)}
 						</p>
 					</div>
 					<div className="manage__field">
 						<label htmlFor="new-org-name">Display name (optional)</label>
-						<input id="new-org-name" type="text" value={name} onChange={(e) => setName(e.target.value)} placeholder="Acme Inc." autoComplete="off" />
+						<input
+							id="new-org-name"
+							type="text"
+							value={name}
+							onChange={(e) => setName(e.target.value)}
+							placeholder="Acme Inc."
+							autoComplete="off"
+						/>
 					</div>
 					{error ? (
 						<p className="error" role="alert">
@@ -100,7 +125,10 @@ export function OrgsView({ me, orgs, createOrg, onCreated }: OrgsViewProps) {
 							{busy ? "Creating…" : "Create organization"}
 						</button>
 					</div>
-					<p className="manage__hint">You'll be its owner. Then add members by email, and make teams to grant roles to, like @{slug || "acme"}/security.</p>
+					<p className="manage__hint">
+						You'll be its owner. Then add members by email, and make teams to grant roles to, like @{slug || "acme"}
+						/security.
+					</p>
 				</div>
 			</form>
 		</main>

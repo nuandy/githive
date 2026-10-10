@@ -50,45 +50,65 @@ const BASE = (flags.url ?? process.env.GITHIVE_URL ?? "https://githive.app").rep
 const TOKEN = process.env.GITHIVE_TOKEN;
 const KEY = process.env.GITHIVE_KEY;
 // A key is <agent>.<secret>: the name it's for. With a token, GitHive knows the name and the argument is left out.
-const AGENT = process.env.GITHIVE_AGENT || (KEY && KEY.lastIndexOf(".") > 0 ? KEY.slice(0, KEY.lastIndexOf(".")) : undefined);
+const AGENT =
+	process.env.GITHIVE_AGENT || (KEY && KEY.lastIndexOf(".") > 0 ? KEY.slice(0, KEY.lastIndexOf(".")) : undefined);
 const as = (field) => (AGENT ? { [field]: AGENT } : {});
 
 class Refused extends Error {}
 class Usage extends Error {}
 
 const short = (sha) => (sha ? String(sha).slice(0, 8) : "-");
-const firstLine = (text, max = 100) => String(text ?? "").split("\n")[0].slice(0, max);
+const firstLine = (text, max = 100) =>
+	String(text ?? "")
+		.split("\n")[0]
+		.slice(0, max);
 const say = (...lines) => console.log(lines.join("\n"));
 const next = (text) => console.log(`next: ${text}`);
-const redact = (value) => JSON.parse(JSON.stringify(value, (k, v) => (k === "token" || k === "key" || k === "agent_key" ? "<redacted>" : v)));
+const redact = (value) =>
+	JSON.parse(JSON.stringify(value, (k, v) => (k === "token" || k === "key" || k === "agent_key" ? "<redacted>" : v)));
 const bearer = (token) => `Authorization: Bearer ${String(token).split("?")[0]}`;
 
 /** One POST, with no timeout of its own: merge holds the request up to 10 minutes, past fetch's default. */
 function post(url, body, headers) {
 	return new Promise((resolve, reject) => {
 		const u = new URL(url);
-		const request = (u.protocol === "https:" ? https : http).request(u, { method: "POST", headers: { ...headers, "Content-Length": Buffer.byteLength(body) } }, (response) => {
-			let text = "";
-			response.setEncoding("utf8");
-			response.on("data", (chunk) => (text += chunk));
-			response.on("end", () => resolve({ status: response.statusCode ?? 0, text }));
-		});
+		const request = (u.protocol === "https:" ? https : http).request(
+			u,
+			{ method: "POST", headers: { ...headers, "Content-Length": Buffer.byteLength(body) } },
+			(response) => {
+				let text = "";
+				response.setEncoding("utf8");
+				response.on("data", (chunk) => (text += chunk));
+				response.on("end", () => resolve({ status: response.statusCode ?? 0, text }));
+			},
+		);
 		request.on("error", reject);
 		request.end(body);
 	});
 }
 
 async function tool(name, args) {
-	if (!TOKEN && !KEY && !process.env.CF_ACCESS_CLIENT_ID) throw new Error("no credentials: set GITHIVE_TOKEN (an agent token from the dashboard) or GITHIVE_KEY");
+	if (!TOKEN && !KEY && !process.env.CF_ACCESS_CLIENT_ID)
+		throw new Error("no credentials: set GITHIVE_TOKEN (an agent token from the dashboard) or GITHIVE_KEY");
 	const headers = {
 		"Content-Type": "application/json",
 		Accept: "application/json, text/event-stream",
 		...(TOKEN ? { Authorization: `Bearer ${TOKEN}` } : {}),
 		...(KEY ? { "X-GitHive-Agent-Key": KEY } : {}),
-		...(process.env.CF_ACCESS_CLIENT_ID ? { "CF-Access-Client-Id": process.env.CF_ACCESS_CLIENT_ID, "CF-Access-Client-Secret": process.env.CF_ACCESS_CLIENT_SECRET ?? "" } : {}),
+		...(process.env.CF_ACCESS_CLIENT_ID
+			? {
+					"CF-Access-Client-Id": process.env.CF_ACCESS_CLIENT_ID,
+					"CF-Access-Client-Secret": process.env.CF_ACCESS_CLIENT_SECRET ?? "",
+				}
+			: {}),
 	};
-	const { status, text } = await post(`${BASE}/mcp`, JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name, arguments: args } }), headers);
-	if (status === 401 || status === 403) throw new Error(`${name}: GitHive said ${status}: check GITHIVE_TOKEN or GITHIVE_KEY`);
+	const { status, text } = await post(
+		`${BASE}/mcp`,
+		JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name, arguments: args } }),
+		headers,
+	);
+	if (status === 401 || status === 403)
+		throw new Error(`${name}: GitHive said ${status}: check GITHIVE_TOKEN or GITHIVE_KEY`);
 	if (status < 200 || status >= 300) throw new Error(`${name}: HTTP ${status} ${text.slice(0, 300)}`);
 	let reply;
 	try {
@@ -111,7 +131,12 @@ function git(args, options = {}) {
 	try {
 		return execFileSync("git", args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], ...options }).trim();
 	} catch (err) {
-		const failed = new Error(`git ${args.filter((a) => !a.startsWith("Authorization")).slice(0, 3).join(" ")}: ${String(err.stderr ?? err.message).trim()}`);
+		const failed = new Error(
+			`git ${args
+				.filter((a) => !a.startsWith("Authorization"))
+				.slice(0, 3)
+				.join(" ")}: ${String(err.stderr ?? err.message).trim()}`,
+		);
 		failed.stderr = String(err.stderr ?? "");
 		throw failed;
 	}
@@ -135,14 +160,21 @@ function gitWith(access, args) {
 }
 
 /** A clone's access to one URL, kept in its own config: plain git push and fetch work there until the token expires. */
-const keepAccess = (dir, url, token) => git(["-C", dir, "config", "--replace-all", `http.${url}.extraHeader`, bearer(token)]);
+const keepAccess = (dir, url, token) =>
+	git(["-C", dir, "config", "--replace-all", `http.${url}.extraHeader`, bearer(token)]);
 
 /** What a clone made by start knows: its repo, change and the branch it lands on (undefined outside one). */
 function here(dir = ".") {
 	if (gitOk(["-C", dir, "rev-parse", "--is-inside-work-tree"]) !== "true") return {};
 	const get = (key) => gitOk(["-C", dir, "config", "--local", "--get", key]) || undefined;
 	const branch = gitOk(["-C", dir, "symbolic-ref", "--short", "HEAD"]);
-	return { repo: get("githive.repo"), change: get("githive.change") ?? branch?.match(/^changes\/(.+)$/)?.[1], onto: get("githive.branch"), branch, clone: true };
+	return {
+		repo: get("githive.repo"),
+		change: get("githive.change") ?? branch?.match(/^changes\/(.+)$/)?.[1],
+		onto: get("githive.branch"),
+		branch,
+		clone: true,
+	};
 }
 
 /** The repo and change a command is about: named (a repo has a "/", a change never does), or the clone's. */
@@ -150,7 +182,8 @@ function target(args) {
 	const local = here();
 	const repo = flags.repo ?? args.find((a) => a.includes("/")) ?? process.env.GITHIVE_REPO ?? local.repo;
 	const change = args.find((a) => !a.includes("/")) ?? local.change;
-	if (!repo || !change) throw new Usage(`${command}: name the repo and change, or run it in a clone made by githive start`);
+	if (!repo || !change)
+		throw new Usage(`${command}: name the repo and change, or run it in a clone made by githive start`);
 	return { repo, change, local: local.repo === repo && local.change === change ? local : undefined };
 }
 
@@ -165,23 +198,38 @@ function printStatus(s, repo) {
 	const lines = [];
 	const approval = s.approval ?? {};
 	const needed = Math.max(0, (approval.required ?? 0) - (approval.approvals ?? 0));
-	if (s.claim) lines.push(`${s.change}: ${s.claim.paths.join(" ")} (${s.claim.agent})${s.claim.into ? `, lands on ${s.claim.into}` : ""}`, `  ${firstLine(s.claim.intent)}`);
-	else if (s.released) lines.push(`${s.change}: claim released ${s.released.at} (${s.released.reason})${s.released.mergedAs ? `, merged as ${short(s.released.mergedAs)}` : ""}`);
+	if (s.claim)
+		lines.push(
+			`${s.change}: ${s.claim.paths.join(" ")} (${s.claim.agent})${s.claim.into ? `, lands on ${s.claim.into}` : ""}`,
+			`  ${firstLine(s.claim.intent)}`,
+		);
+	else if (s.released)
+		lines.push(
+			`${s.change}: claim released ${s.released.at} (${s.released.reason})${s.released.mergedAs ? `, merged as ${short(s.released.mergedAs)}` : ""}`,
+		);
 	else lines.push(`${s.change}: holds no claim`);
 	lines.push(`head: ${s.head ? short(s.head) : "nothing pushed"}`);
-	for (const v of s.votes ?? []) lines.push(`  ${v.verdict} by ${v.reviewer} as ${v.role}: ${firstLine(v.evidence, 300)}`);
-	if (s.head) lines.push(`approvals: ${approval.approvals ?? 0} of ${approval.required ?? "?"}${approval.awaiting?.length ? `; awaiting ${approval.awaiting.join(", ")}` : ""}${approval.vetoedBy?.length ? `; vetoed by ${approval.vetoedBy.join(", ")}` : ""}${approval.approved ? " (approved)" : ""}`);
+	for (const v of s.votes ?? [])
+		lines.push(`  ${v.verdict} by ${v.reviewer} as ${v.role}: ${firstLine(v.evidence, 300)}`);
+	if (s.head)
+		lines.push(
+			`approvals: ${approval.approvals ?? 0} of ${approval.required ?? "?"}${approval.awaiting?.length ? `; awaiting ${approval.awaiting.join(", ")}` : ""}${approval.vetoedBy?.length ? `; vetoed by ${approval.vetoedBy.join(", ")}` : ""}${approval.approved ? " (approved)" : ""}`,
+		);
 	for (const w of s.waitsOn ?? []) lines.push(`  ${w}`);
 	if (s.landed) lines.push(`landed as ${short(s.landed.commit)} at ${s.landed.at}: don't merge it again`);
 	say(...lines);
-	if (s.landed || s.released?.mergedAs) return next(`it's in. Pick more work: githive reviews ${repo}, githive backlog ${repo}`);
+	if (s.landed || s.released?.mergedAs)
+		return next(`it's in. Pick more work: githive reviews ${repo}, githive backlog ${repo}`);
 	if (s.released) return next(`claim it again to go on: githive start ${repo} ${s.change} "<intent>" <paths>`);
 	if (!s.claim) return next(`githive backlog ${repo}`);
 	if (!s.head) return next("commit inside your claim, then githive land");
-	if ((s.votes ?? []).some((v) => v.verdict === "reject") || approval.vetoedBy?.length) return next("fix what the evidence says, commit, githive land (a new commit needs new approvals)");
+	if ((s.votes ?? []).some((v) => v.verdict === "reject") || approval.vetoedBy?.length)
+		return next("fix what the evidence says, commit, githive land (a new commit needs new approvals)");
 	if (s.waitsOn?.length) return next("wait for what it depends on to merge; meanwhile githive reviews " + repo);
 	if (approval.approved) return next("githive land");
-	next(`waiting on ${needed || "more"} approval${needed === 1 ? "" : "s"}${approval.awaiting?.length ? ` (${approval.awaiting.join(", ")})` : ""}; meanwhile review others': githive reviews ${repo}`);
+	next(
+		`waiting on ${needed || "more"} approval${needed === 1 ? "" : "s"}${approval.awaiting?.length ? ` (${approval.awaiting.join(", ")})` : ""}; meanwhile review others': githive reviews ${repo}`,
+	);
 }
 
 const commands = {
@@ -191,11 +239,22 @@ const commands = {
 
 	async start() {
 		const [repo, change, intent, ...paths] = positional;
-		if (!repo?.includes("/") || !change || !intent || !paths.length) throw new Usage('start <repo> <change> "<intent>" <path>...');
-		const claimed = await tool("claim", { repo, change, ...as("agent"), intent, paths, ...(flags.into ? { into: flags.into } : {}), ...(flags.from ? { from: flags.from } : {}), ...(flags.after ? { after: flags.after.split(",") } : {}) });
+		if (!repo?.includes("/") || !change || !intent || !paths.length)
+			throw new Usage('start <repo> <change> "<intent>" <path>...');
+		const claimed = await tool("claim", {
+			repo,
+			change,
+			...as("agent"),
+			intent,
+			paths,
+			...(flags.into ? { into: flags.into } : {}),
+			...(flags.from ? { from: flags.from } : {}),
+			...(flags.after ? { after: flags.after.split(",") } : {}),
+		});
 		if (!claimed.ok) {
 			say(`claim refused: ${change} overlaps claims in force`);
-			for (const c of claimed.conflicts ?? []) say(`  ${c.path} overlaps ${c.held}: ${c.agent}'s ${c.change} (${firstLine(c.intent, 80)})`);
+			for (const c of claimed.conflicts ?? [])
+				say(`  ${c.path} overlaps ${c.held}: ${c.agent}'s ${c.change} (${firstLine(c.intent, 80)})`);
 			next(`narrow your paths and start again, ask the holder, or pick other work: githive backlog ${repo}`);
 			process.exitCode = 1;
 			return;
@@ -214,19 +273,31 @@ const commands = {
 		}
 		if (existsSync(dir)) throw new Error(`${dir} exists and isn't a clone: --dir <another>`);
 		// Shallow by default: an agent needs the tip to work on (--full for the whole history; sync and land deepen if needed).
-		gitWith([project], ["clone", "--quiet", ...(flags.full ? [] : ["--depth", "1"]), "--branch", project.branch, project.url, dir]);
+		gitWith(
+			[project],
+			["clone", "--quiet", ...(flags.full ? [] : ["--depth", "1"]), "--branch", project.branch, project.url, dir],
+		);
 		keepAccess(dir, project.url, project.token);
 		const branch = `changes/${change}`;
 		git(["-C", dir, "checkout", "--quiet", "-b", branch]);
 		git(["-C", dir, "remote", "add", "fork", creds.url]);
 		keepAccess(dir, creds.url, creds.token);
-		for (const [key, value] of [["githive.repo", repo], ["githive.change", change], ["githive.branch", project.branch], [`branch.${branch}.remote`, "fork"], [`branch.${branch}.merge`, `refs/heads/${branch}`]]) git(["-C", dir, "config", key, value]);
+		for (const [key, value] of [
+			["githive.repo", repo],
+			["githive.change", change],
+			["githive.branch", project.branch],
+			[`branch.${branch}.remote`, "fork"],
+			[`branch.${branch}.merge`, `refs/heads/${branch}`],
+		])
+			git(["-C", dir, "config", key, value]);
 		// Containers often have no git identity, and a commit needs one.
 		if (!gitOk(["-C", dir, "config", "user.email"])) {
 			git(["-C", dir, "config", "user.name", AGENT ?? "githive agent"]);
 			git(["-C", dir, "config", "user.email", "agent@githive.invalid"]);
 		}
-		say(`cloned ${dir}: ${project.branch} at ${short(git(["-C", dir, "rev-parse", "HEAD"]))}, on ${branch}; your fork is the remote "fork"`);
+		say(
+			`cloned ${dir}: ${project.branch} at ${short(git(["-C", dir, "rev-parse", "HEAD"]))}, on ${branch}; your fork is the remote "fork"`,
+		);
 		next(`edit only inside your claim (${paths.join(" ")}), commit, then: cd ${dir} && githive land`);
 	},
 
@@ -239,7 +310,8 @@ const commands = {
 		const { repo, change, local } = target(positional);
 		const branch = `changes/${change}`;
 		if (local) {
-			if (local.branch !== branch) throw new Error(`you're on ${local.branch ?? "a detached HEAD"}: git checkout ${branch}, then githive land`);
+			if (local.branch !== branch)
+				throw new Error(`you're on ${local.branch ?? "a detached HEAD"}: git checkout ${branch}, then githive land`);
 			if (git(["status", "--porcelain", "--untracked-files=no"])) {
 				say("uncommitted changes: they aren't part of the change until committed");
 				return next("git add <files> && git commit, then githive land");
@@ -257,7 +329,10 @@ const commands = {
 					push();
 				} catch (err) {
 					if (/shallow/i.test(err.stderr ?? "") && unshallow(".")) push();
-					else if (/rejected|non-fast-forward|fetch first/i.test(err.stderr ?? "")) throw new Error(`your fork's ${branch} has commits you don't: git fetch fork && git merge fork/${branch}, then githive land`);
+					else if (/rejected|non-fast-forward|fetch first/i.test(err.stderr ?? ""))
+						throw new Error(
+							`your fork's ${branch} has commits you don't: git fetch fork && git merge fork/${branch}, then githive land`,
+						);
 					else throw err;
 				}
 				say(`pushed ${short(mine)} to your fork's ${branch}`);
@@ -273,7 +348,9 @@ const commands = {
 		}
 		if (checked.outsideClaim?.length) {
 			say(`${short(checked.head)} changes files outside your claim: ${checked.outsideClaim.join(" ")}`);
-			next(`claim them too (githive start ${repo} ${change} "<intent>" <your paths> <these>), or take them out of the change`);
+			next(
+				`claim them too (githive start ${repo} ${change} "<intent>" <your paths> <these>), or take them out of the change`,
+			);
 			process.exitCode = 1;
 			return;
 		}
@@ -290,7 +367,16 @@ const commands = {
 			return;
 		}
 		say("merge refused:", ...(merged.reasons ?? []).map((r) => `  ${r}`));
-		for (const c of merged.checks ?? []) if (c.exitCode !== 0) say(`  check failed: ${c.command} (exit ${c.exitCode})`, ...String(c.output ?? "").trim().split("\n").slice(-15).map((l) => `    ${l}`));
+		for (const c of merged.checks ?? [])
+			if (c.exitCode !== 0)
+				say(
+					`  check failed: ${c.command} (exit ${c.exitCode})`,
+					...String(c.output ?? "")
+						.trim()
+						.split("\n")
+						.slice(-15)
+						.map((l) => `    ${l}`),
+				);
 		process.exitCode = 1;
 		if (merged.conflicts?.length) return next("githive sync, resolve inside your claim, commit, githive land");
 		if (merged.checks?.length) return next("fix what failed, commit, githive land (a new commit needs new approvals)");
@@ -337,7 +423,11 @@ const commands = {
 			say("no reviews for you now");
 			return next(`githive backlog ${repo}`);
 		}
-		for (const r of reviews) say(`${r.change} by ${r.author} at ${short(r.head)}: ${r.needed} more ${r.role}${r.blocking ? " (can block)" : ""}${r.reviewing?.length ? `; reviewing: ${r.reviewing.join(", ")}` : ""}`, `  ${firstLine(r.intent)}  [${(r.paths ?? []).join(" ")}]`);
+		for (const r of reviews)
+			say(
+				`${r.change} by ${r.author} at ${short(r.head)}: ${r.needed} more ${r.role}${r.blocking ? " (can block)" : ""}${r.reviewing?.length ? `; reviewing: ${r.reviewing.join(", ")}` : ""}`,
+				`  ${firstLine(r.intent)}  [${(r.paths ?? []).join(" ")}]`,
+			);
 		if (more) say(`(${more} more)`);
 		const first = reviews[0];
 		next(`githive review ${repo} ${first.change}${first.role !== "review" ? ` --role ${first.role}` : ""}`);
@@ -348,7 +438,10 @@ const commands = {
 		if (!repo) throw new Usage("backlog <repo>");
 		const { open = [], waiting = [], more, moreWaiting } = await tool("backlog", { repo, ...as("agent") });
 		if (open.length) say("free to take:");
-		for (const w of open) say(`  ${w.id}: ${firstLine(w.title)}${w.paths?.length ? `  [${w.paths.join(" ")}]` : ""}${w.abandonedBy ? ` (abandoned by ${w.abandonedBy})` : ""}`);
+		for (const w of open)
+			say(
+				`  ${w.id}: ${firstLine(w.title)}${w.paths?.length ? `  [${w.paths.join(" ")}]` : ""}${w.abandonedBy ? ` (abandoned by ${w.abandonedBy})` : ""}`,
+			);
 		if (more) say(`  (${more} more)`);
 		if (waiting.length) say("waiting:", ...waiting.map((w) => `  ${w.id}: ${w.reason}`));
 		if (moreWaiting) say(`  (${moreWaiting} more)`);
@@ -357,7 +450,9 @@ const commands = {
 			return next(`githive reviews ${repo}, or githive claims ${repo} and start your own change`);
 		}
 		const first = open[0];
-		next(`githive start ${repo} ${first.id} "${firstLine(first.title).replace(/"/g, "'")}" ${first.paths?.join(" ") || "<paths>"}`);
+		next(
+			`githive start ${repo} ${first.id} "${firstLine(first.title).replace(/"/g, "'")}" ${first.paths?.join(" ") || "<paths>"}`,
+		);
 	},
 
 	async claims() {
@@ -365,37 +460,58 @@ const commands = {
 		if (!repo) throw new Usage("claims <repo>");
 		const claims = await tool("claims", { repo });
 		if (!claims.length) say("no claims in force");
-		for (const c of claims) say(`${c.change} (${c.agent}): ${c.paths.join(" ")}${c.into ? ` -> ${c.into}` : ""}`, `  ${firstLine(c.intent)}`);
+		for (const c of claims)
+			say(`${c.change} (${c.agent}): ${c.paths.join(" ")}${c.into ? ` -> ${c.into}` : ""}`, `  ${firstLine(c.intent)}`);
 		next(`claim paths nobody holds: githive start ${repo} <change> "<intent>" <path>..., or githive backlog ${repo}`);
 	},
 
 	async review() {
 		const [repo, change] = positional;
 		if (!repo?.includes("/") || !change) throw new Usage("review <repo> <change> [--role R]");
-		const access = await tool("review_access", { repo, change, ...(flags.role ? { role: flags.role } : {}), ...as("agent") });
+		const access = await tool("review_access", {
+			repo,
+			change,
+			...(flags.role ? { role: flags.role } : {}),
+			...as("agent"),
+		});
 		const dir = flags.dir ?? `review-${change}`;
 		const base = `origin/${access.project.branch}`;
 		// Deep enough to diff against the project's branch; read-only tokens, each in this clone's own config.
 		const again = existsSync(join(dir, ".git"));
-		if (!again) gitWith([access.project], ["clone", "--quiet", "--depth", "50", "--branch", access.project.branch, access.project.url, dir]);
+		if (!again)
+			gitWith(
+				[access.project],
+				["clone", "--quiet", "--depth", "50", "--branch", access.project.branch, access.project.url, dir],
+			);
 		keepAccess(dir, access.project.url, access.project.token);
 		// Reviewing again (a new head): the project's branch as it is now.
-		if (again) git(["-C", dir, "fetch", "--quiet", "--depth", "50", "origin", `${access.project.branch}:refs/remotes/${base}`]);
-		if (gitOk(["-C", dir, "remote", "get-url", "change"]) === undefined) git(["-C", dir, "remote", "add", "change", access.url]);
+		if (again)
+			git(["-C", dir, "fetch", "--quiet", "--depth", "50", "origin", `${access.project.branch}:refs/remotes/${base}`]);
+		if (gitOk(["-C", dir, "remote", "get-url", "change"]) === undefined)
+			git(["-C", dir, "remote", "add", "change", access.url]);
 		else git(["-C", dir, "remote", "set-url", "change", access.url]);
 		keepAccess(dir, access.url, access.token);
 		const into = `${access.branch}:refs/remotes/change/${access.branch}`;
 		// Shallow, unless Artifacts refuses it: some shallow fetches of a fork's branch fail there, where a whole one works.
-		if (gitOk(["-C", dir, "fetch", "--quiet", "--depth", "50", "change", into]) === undefined) git(["-C", dir, "fetch", "--quiet", "change", into]);
+		if (gitOk(["-C", dir, "fetch", "--quiet", "--depth", "50", "change", into]) === undefined)
+			git(["-C", dir, "fetch", "--quiet", "change", into]);
 		git(["-C", dir, "checkout", "--quiet", "--detach", access.head]);
-		const stat = gitOk(["-C", dir, "diff", "--stat", `${base}...${access.head}`]) ?? `(no merge base in the shallow clone; against ${base} as it is now)\n${git(["-C", dir, "diff", "--stat", base, access.head])}`;
-		say(`reviewing ${change} by ${access.author} at ${short(access.head)} as ${access.role}, in ${dir}`, stat || "(no changes)");
-		next(`read it: git -C ${dir} diff ${base}...HEAD; then githive vote ${repo} ${access.head} approve|reject "<evidence>"${access.role !== "review" ? ` --role ${access.role}` : ""}`);
+		const stat =
+			gitOk(["-C", dir, "diff", "--stat", `${base}...${access.head}`]) ??
+			`(no merge base in the shallow clone; against ${base} as it is now)\n${git(["-C", dir, "diff", "--stat", base, access.head])}`;
+		say(
+			`reviewing ${change} by ${access.author} at ${short(access.head)} as ${access.role}, in ${dir}`,
+			stat || "(no changes)",
+		);
+		next(
+			`read it: git -C ${dir} diff ${base}...HEAD; then githive vote ${repo} ${access.head} approve|reject "<evidence>"${access.role !== "review" ? ` --role ${access.role}` : ""}`,
+		);
 	},
 
 	async vote() {
 		const [repo, commit, verdict, evidence] = positional;
-		if (!repo?.includes("/") || !commit || !["approve", "reject"].includes(verdict) || !evidence) throw new Usage('vote <repo> <commit> approve|reject "<evidence>" [--role R]');
+		if (!repo?.includes("/") || !commit || !["approve", "reject"].includes(verdict) || !evidence)
+			throw new Usage('vote <repo> <commit> approve|reject "<evidence>" [--role R]');
 		const role = flags.role ?? "review";
 		await tool("vote", { repo, commit, verdict, evidence, role, ...as("reviewer") });
 		say(`voted ${verdict} on ${short(commit)} as ${role}`);

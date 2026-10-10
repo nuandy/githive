@@ -1,7 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 
 // Waits are instant here; what matters is how many times a fork is asked for.
-vi.mock("../src/retry", async (importOriginal) => ({ ...(await importOriginal<typeof import("../src/retry")>()), sleep: vi.fn(async () => {}) }));
+vi.mock("../src/retry", async (importOriginal) => ({
+	...(await importOriginal<typeof import("../src/retry")>()),
+	sleep: vi.fn(async () => {}),
+}));
 
 const { forkAndWait } = await import("../src/artifacts");
 
@@ -26,8 +29,15 @@ describe("fork retries", () => {
 	it("uses a fork that a transiently failed request made after all", async () => {
 		const exists = Object.assign(new Error("repo fork already exists"), { code: "ALREADY_EXISTS" });
 		const source = { fork: vi.fn().mockRejectedValueOnce(transient()).mockRejectedValueOnce(exists) };
-		const made = { info: vi.fn(async () => ({ remote: "https://git.test/fork.git" })), createToken: vi.fn(async () => ({ plaintext: "fresh" })) };
+		const made = {
+			info: vi.fn(async () => ({ remote: "https://git.test/fork.git" })),
+			createToken: vi.fn(async () => ({ plaintext: "fresh" })),
+		};
 		const artifacts = { get: vi.fn(async (name: string) => (name === "source" ? source : made)) } as never;
-		await expect(forkAndWait(artifacts, "source", "fork", "test fork")).resolves.toEqual({ name: "fork", remote: "https://git.test/fork.git", token: "fresh" });
+		await expect(forkAndWait(artifacts, "source", "fork", "test fork")).resolves.toEqual({
+			name: "fork",
+			remote: "https://git.test/fork.git",
+			token: "fresh",
+		});
 	});
 });

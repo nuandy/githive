@@ -34,7 +34,9 @@ export class RepoIndex extends DurableObject<Env> {
 
 	/** Repos GitHive works on, oldest first. */
 	async listRepos() {
-		return [...(await this.ctx.storage.list<{ repo: string; since: string }>({ prefix: "repo:" })).values()].sort((a, b) => a.since.localeCompare(b.since));
+		return [...(await this.ctx.storage.list<{ repo: string; since: string }>({ prefix: "repo:" })).values()].sort(
+			(a, b) => a.since.localeCompare(b.since),
+		);
 	}
 
 	/** Update a repo's summary (`repo:<repo>`). `mergedBy` adds to the merged count. */
@@ -48,7 +50,10 @@ export class RepoIndex extends DurableObject<Env> {
 
 	/** Every repo with its summary if it has one: the dashboard's list of repos. */
 	async summaries() {
-		const [repos, summaries] = await Promise.all([this.listRepos(), this.ctx.storage.list<RepoSummary>({ prefix: "summary:" })]);
+		const [repos, summaries] = await Promise.all([
+			this.listRepos(),
+			this.ctx.storage.list<RepoSummary>({ prefix: "summary:" }),
+		]);
 		return { repos: repos.map((repo) => ({ ...repo, summary: summaries.get(`summary:repo:${repo.repo}`) ?? null })) };
 	}
 

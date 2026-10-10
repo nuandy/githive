@@ -1,5 +1,16 @@
 import { DurableObject } from "cloudflare:workers";
-import { type InstanceSize, type SetupSnapshot, WORKDIR, bootContainer, clip, gitWithToken, installToolchains, outOfMemory, run, takeGitRequests } from "./container";
+import {
+	type InstanceSize,
+	type SetupSnapshot,
+	WORKDIR,
+	bootContainer,
+	clip,
+	gitWithToken,
+	installToolchains,
+	outOfMemory,
+	run,
+	takeGitRequests,
+} from "./container";
 import { describeCounts, type GitRequests, repoOfUrl } from "./git-http";
 import { statusOf } from "./errors";
 import { BOT } from "./git";
@@ -91,8 +102,17 @@ const SNAPSHOT_RETAKE_MS = 7 * 24 * 3600_000;
 const SNAPSHOT_USABLE_MS = 25 * 24 * 3600_000;
 
 /** Whether a new snapshot is due: none yet, its dependencies differ from the ones installed now, or it's a week old. */
-export function snapshotDue(current: SetupSnapshot | null, installed: { lockHash?: string; depsHash?: string }, now = Date.now()) {
-	return !current || current.lockHash !== installed.lockHash || current.depsHash !== installed.depsHash || now - current.at >= SNAPSHOT_RETAKE_MS;
+export function snapshotDue(
+	current: SetupSnapshot | null,
+	installed: { lockHash?: string; depsHash?: string },
+	now = Date.now(),
+) {
+	return (
+		!current ||
+		current.lockHash !== installed.lockHash ||
+		current.depsHash !== installed.depsHash ||
+		now - current.at >= SNAPSHOT_RETAKE_MS
+	);
 }
 
 /** A check container's size: small at first, larger once a repo's checks run out of memory in it (see check). */
@@ -157,13 +177,27 @@ export class Gate extends DurableObject<Env> {
 	 * Gate of a batch's last change (repo:<repo>:change:<change>) runs them.
 	 */
 	checkCommit(input: ChangeCheck & { baseHead: string; ahead?: CheckPlan["ahead"] }): Promise<GateResult> {
-		const plan: CheckPlan = { ...(input.repo ? { repo: input.repo } : {}), baseHead: input.baseHead, branch: input.branch, base: input.base, fork: input.fork, ...(input.ahead?.length ? { ahead: input.ahead } : {}), checks: input.checks };
+		const plan: CheckPlan = {
+			...(input.repo ? { repo: input.repo } : {}),
+			baseHead: input.baseHead,
+			branch: input.branch,
+			base: input.base,
+			fork: input.fork,
+			...(input.ahead?.length ? { ahead: input.ahead } : {}),
+			checks: input.checks,
+		};
 		return this.inTurn("check", input.repo, async () => {
 			try {
 				return await this.check(input.head, plan);
 			} catch (err) {
 				await this.ctx.storage.delete("prepared");
-				return { passed: false, head: input.head, baseHead: input.baseHead, results: [{ command: "(gate setup)", exitCode: 1, output: statusOf(err).message }], at: new Date().toISOString() } satisfies GateResult;
+				return {
+					passed: false,
+					head: input.head,
+					baseHead: input.baseHead,
+					results: [{ command: "(gate setup)", exitCode: 1, output: statusOf(err).message }],
+					at: new Date().toISOString(),
+				} satisfies GateResult;
 			}
 		});
 	}
@@ -174,15 +208,27 @@ export class Gate extends DurableObject<Env> {
 	 * `baseHead`, or why it couldn't be read. Never in a change's Gate: one
 	 * that ran a change's code can't be trusted to say what a change touched.
 	 */
-	inspectBatch(input: { repo: string; branch: string; base: { remote: string; token: string }; baseHead: string; changes: BatchSource[] }): Promise<({ change: string; head: string; files: string[] } | { change: string; error: string })[]> {
+	inspectBatch(input: {
+		repo: string;
+		branch: string;
+		base: { remote: string; token: string };
+		baseHead: string;
+		changes: BatchSource[];
+	}): Promise<({ change: string; head: string; files: string[] } | { change: string; error: string })[]> {
 		return this.inTurn("inspectBatch", input.repo, async () => {
 			const container = this.landingContainer(input.repo);
 			await this.fetchBatch(container, input);
-			const failed = await this.fetchChanges(container, input.changes.map((c, k) => ({ k, ...c })));
+			const failed = await this.fetchChanges(
+				container,
+				input.changes.map((c, k) => ({ k, ...c })),
+			);
 			// Each change's head, then the files it changed since it left main, NUL-separated (any name survives); one command for all.
 			const fetched = input.changes.map((_, k) => k).filter((k) => !failed.has(k));
 			const script = fetched
-				.map((k) => `if h=$(git rev-parse refs/remotes/batch-${k}/head) && b=$(git merge-base ${input.baseHead} "$h"); then printf '%s %s\\0' ${k} "$h"; git diff --name-only --no-renames -z "$b" "$h"; else printf '%s -\\0' ${k}; fi; printf '\\0'`)
+				.map(
+					(k) =>
+						`if h=$(git rev-parse refs/remotes/batch-${k}/head) && b=$(git merge-base ${input.baseHead} "$h"); then printf '%s %s\\0' ${k} "$h"; git diff --name-only --no-renames -z "$b" "$h"; else printf '%s -\\0' ${k}; fi; printf '\\0'`,
+				)
 				.join("\n");
 			const listed = new Map<number, { head: string; files: string[] }>();
 			if (fetched.length) {
@@ -198,7 +244,10 @@ export class Gate extends DurableObject<Env> {
 			return input.changes.map((c, k) => {
 				const read = listed.get(k);
 				if (read) return { change: c.change, ...read };
-				return { change: c.change, error: failed.has(k) ? `fetch of its branch failed: ${failed.get(k)}` : "its branch couldn't be read" };
+				return {
+					change: c.change,
+					error: failed.has(k) ? `fetch of its branch failed: ${failed.get(k)}` : "its branch couldn't be read",
+				};
 			});
 		});
 	}
@@ -210,40 +259,97 @@ export class Gate extends DurableObject<Env> {
 	 * to the branch in one push, so the branch is never partway through a
 	 * batch. "moved" if the branch isn't at `baseHead` any more.
 	 */
-	landBatch(input: { repo: string; branch: string; base: { remote: string; token: string }; baseHead: string; merges: (BatchSource & { head: string; claimed: Omit<MergeClaim, "base"> })[]; by?: string }): Promise<{ commits: string[] } | { moved: true } | { error: string }> {
+	landBatch(input: {
+		repo: string;
+		branch: string;
+		base: { remote: string; token: string };
+		baseHead: string;
+		merges: (BatchSource & { head: string; claimed: Omit<MergeClaim, "base"> })[];
+		by?: string;
+	}): Promise<{ commits: string[] } | { moved: true } | { error: string }> {
 		return this.inTurn("landBatch", input.repo, async () => {
 			const container = this.landingContainer(input.repo);
 			await this.fetchBatch(container, input);
 			// Read for this batch, they're here already (see inspectBatch): only what's missing is fetched.
-			const missing = await run(container, ["bash", "-c", input.merges.map((m, k) => `git cat-file -e ${m.head}^{commit} 2>/dev/null || echo ${k}`).join("\n")]);
+			const missing = await run(container, [
+				"bash",
+				"-c",
+				input.merges.map((m, k) => `git cat-file -e ${m.head}^{commit} 2>/dev/null || echo ${k}`).join("\n"),
+			]);
 			const fetch = missing.output.split("\n").filter(Boolean).map(Number);
-			const failed = await this.fetchChanges(container, fetch.map((k) => ({ k, ...input.merges[k] })));
+			const failed = await this.fetchChanges(
+				container,
+				fetch.map((k) => ({ k, ...input.merges[k] })),
+			);
 			for (const [k, why] of failed) return { error: `fetch of ${input.merges[k].change} failed: ${why}` };
-			const absent = await run(container, ["bash", "-c", input.merges.map((m) => `git cat-file -e ${m.head}^{commit} 2>/dev/null || echo ${m.change}`).join("\n")]);
-			if (absent.output.trim()) return { error: `not on their branches: ${absent.output.trim().split("\n").join(", ")}` };
-			await run(container, ["bash", "-lc", `git merge --abort 2>/dev/null; git checkout -q -f --detach ${input.baseHead} && git clean -fdq`]);
+			const absent = await run(container, [
+				"bash",
+				"-c",
+				input.merges.map((m) => `git cat-file -e ${m.head}^{commit} 2>/dev/null || echo ${m.change}`).join("\n"),
+			]);
+			if (absent.output.trim())
+				return { error: `not on their branches: ${absent.output.trim().split("\n").join(", ")}` };
+			await run(container, [
+				"bash",
+				"-lc",
+				`git merge --abort 2>/dev/null; git checkout -q -f --detach ${input.baseHead} && git clean -fdq`,
+			]);
 			const stamper = this.env.STAMP_KEY && input.by ? await makeStamper(this.env.STAMP_KEY, input.by) : undefined;
 			const as = ["-c", `user.name=${BOT.name}`, "-c", `user.email=${BOT.email}`];
 			for (const m of input.merges) {
 				// The commit before it (its merge's base), then the merge itself, uncommitted: one command.
-				const merged = await run(container, ["bash", "-c", `base=$(git rev-parse HEAD) && git merge -q --no-ff --no-commit ${m.head} >/tmp/merge.out 2>&1 && echo "$base" || { echo CONFLICT; git diff --name-only --diff-filter=U; cat /tmp/merge.out; git merge --abort; exit 1; }`]);
+				const merged = await run(container, [
+					"bash",
+					"-c",
+					`base=$(git rev-parse HEAD) && git merge -q --no-ff --no-commit ${m.head} >/tmp/merge.out 2>&1 && echo "$base" || { echo CONFLICT; git diff --name-only --diff-filter=U; cat /tmp/merge.out; git merge --abort; exit 1; }`,
+				]);
 				const base = merged.output.trim();
-				if (merged.exitCode !== 0) return { error: `merging ${m.change} onto the batch failed: ${clip(merged.output.replace(/^CONFLICT\n/, ""), 500)}` };
+				if (merged.exitCode !== 0)
+					return {
+						error: `merging ${m.change} onto the batch failed: ${clip(merged.output.replace(/^CONFLICT\n/, ""), 500)}`,
+					};
 				// Always a merge commit, never a fast-forward: the merge's trailers are what the audit reads.
-				const committed = await run(container, ["git", ...as, "commit", "-q", "--no-verify", "-F", "-"], WORKDIR, await mergeMessage({ ...m.claimed, base }, stamper));
-				if (committed.exitCode !== 0) return { error: `committing ${m.change}'s merge failed: ${clip(committed.output, 500)}` };
+				const committed = await run(
+					container,
+					["git", ...as, "commit", "-q", "--no-verify", "-F", "-"],
+					WORKDIR,
+					await mergeMessage({ ...m.claimed, base }, stamper),
+				);
+				if (committed.exitCode !== 0)
+					return { error: `committing ${m.change}'s merge failed: ${clip(committed.output, 500)}` };
 			}
-			const commits = (await run(container, ["git", "rev-list", "--reverse", "--first-parent", `${input.baseHead}..HEAD`])).output.split("\n").filter(Boolean);
+			const commits = (
+				await run(container, ["git", "rev-list", "--reverse", "--first-parent", `${input.baseHead}..HEAD`])
+			).output
+				.split("\n")
+				.filter(Boolean);
 			// Pushed only if the branch is still exactly at the base. A plain push isn't enough: it only refuses a push that
 			// isn't a fast-forward, and a change branched from a newer main would make this one a fast-forward of it.
 			// A repo takes one push at a time: busy with another (a crowd's records, say), Artifacts refuses this one, which
 			// lost two batches in a row at 200 agents. Tried again, waiting longer each time, up to about 100 s in all.
-			let pushed = await gitWithToken(container, input.base.token, ["push", "-q", `--force-with-lease=refs/heads/${input.branch}:${input.baseHead}`, input.base.remote, `HEAD:refs/heads/${input.branch}`]);
+			let pushed = await gitWithToken(container, input.base.token, [
+				"push",
+				"-q",
+				`--force-with-lease=refs/heads/${input.branch}:${input.baseHead}`,
+				input.base.remote,
+				`HEAD:refs/heads/${input.branch}`,
+			]);
 			for (let attempt = 1; pushed.exitCode !== 0 && pushBusy(pushed.output) && attempt < PUSH_TRIES; attempt++) {
-				await new Promise((resolve) => setTimeout(resolve, PUSH_RETRY_MS * 1.6 ** attempt * (0.75 + Math.random() / 2)));
-				pushed = await gitWithToken(container, input.base.token, ["push", "-q", `--force-with-lease=refs/heads/${input.branch}:${input.baseHead}`, input.base.remote, `HEAD:refs/heads/${input.branch}`]);
+				await new Promise((resolve) =>
+					setTimeout(resolve, PUSH_RETRY_MS * 1.6 ** attempt * (0.75 + Math.random() / 2)),
+				);
+				pushed = await gitWithToken(container, input.base.token, [
+					"push",
+					"-q",
+					`--force-with-lease=refs/heads/${input.branch}:${input.baseHead}`,
+					input.base.remote,
+					`HEAD:refs/heads/${input.branch}`,
+				]);
 			}
-			if (pushed.exitCode !== 0) return /rejected|non-fast-forward|fetch first|stale info/i.test(pushed.output) ? { moved: true } : { error: `the push failed: ${clip(pushed.output, 500)}` };
+			if (pushed.exitCode !== 0)
+				return /rejected|non-fast-forward|fetch first|stale info/i.test(pushed.output)
+					? { moved: true }
+					: { error: `the push failed: ${clip(pushed.output, 500)}` };
 			await this.ctx.storage.delete("holdUntil");
 			return { commits };
 		});
@@ -255,21 +361,51 @@ export class Gate extends DurableObject<Env> {
 	 * in this, the repo's own Gate, with real git, never in a Worker's memory.
 	 * Its tip, or why it couldn't be made or pushed.
 	 */
-	checksBranch(input: { repo: string; branch: string; base: { remote: string; token: string }; baseHead: string; changes: { change: string; remote: string; token: string; ref: string; head: string }[]; to: { remote: string; token: string; user?: string }; ref: string }): Promise<{ tip: string } | { failed: string }> {
+	checksBranch(input: {
+		repo: string;
+		branch: string;
+		base: { remote: string; token: string };
+		baseHead: string;
+		changes: { change: string; remote: string; token: string; ref: string; head: string }[];
+		to: { remote: string; token: string; user?: string };
+		ref: string;
+	}): Promise<{ tip: string } | { failed: string }> {
 		return this.inTurn("checksBranch", input.repo, async () => {
 			const container = this.landingContainer(input.repo);
 			await this.fetchBatch(container, input);
-			const missing = await run(container, ["bash", "-c", input.changes.map((c, k) => `git cat-file -e ${c.head}^{commit} 2>/dev/null || echo ${k}`).join("\n")]);
+			const missing = await run(container, [
+				"bash",
+				"-c",
+				input.changes.map((c, k) => `git cat-file -e ${c.head}^{commit} 2>/dev/null || echo ${k}`).join("\n"),
+			]);
 			const fetch = missing.output.split("\n").filter(Boolean).map(Number);
-			const failed = await this.fetchChanges(container, fetch.map((k) => ({ k, ...input.changes[k] })));
+			const failed = await this.fetchChanges(
+				container,
+				fetch.map((k) => ({ k, ...input.changes[k] })),
+			);
 			for (const [k, why] of failed) return { failed: `fetch of ${input.changes[k].change} failed: ${why}` };
-			await run(container, ["bash", "-lc", `git merge --abort 2>/dev/null; git checkout -q -f --detach ${input.baseHead} && git clean -fdq`]);
+			await run(container, [
+				"bash",
+				"-lc",
+				`git merge --abort 2>/dev/null; git checkout -q -f --detach ${input.baseHead} && git clean -fdq`,
+			]);
 			for (const c of input.changes) {
-				const merged = await run(container, ["bash", "-c", `git merge -q --no-ff -m "Check ${c.change} with the batch" ${c.head} >/tmp/merge.out 2>&1 || { git diff --name-only --diff-filter=U; cat /tmp/merge.out; git merge --abort; exit 1; }`]);
-				if (merged.exitCode !== 0) return { failed: `${c.change} doesn't merge onto the batch: ${clip(merged.output, 500)}` };
+				const merged = await run(container, [
+					"bash",
+					"-c",
+					`git merge -q --no-ff -m "Check ${c.change} with the batch" ${c.head} >/tmp/merge.out 2>&1 || { git diff --name-only --diff-filter=U; cat /tmp/merge.out; git merge --abort; exit 1; }`,
+				]);
+				if (merged.exitCode !== 0)
+					return { failed: `${c.change} doesn't merge onto the batch: ${clip(merged.output, 500)}` };
 			}
 			const tip = (await run(container, ["git", "rev-parse", "HEAD"])).output.trim();
-			const pushed = await gitWithToken(container, input.to.token, ["push", "-q", "--force", input.to.remote, `HEAD:refs/heads/${input.ref}`], WORKDIR, input.to.user);
+			const pushed = await gitWithToken(
+				container,
+				input.to.token,
+				["push", "-q", "--force", input.to.remote, `HEAD:refs/heads/${input.ref}`],
+				WORKDIR,
+				input.to.user,
+			);
 			if (pushed.exitCode !== 0) return { failed: `the push to ${input.ref} failed: ${clip(pushed.output, 500)}` };
 			return { tip };
 		});
@@ -280,11 +416,23 @@ export class Gate extends DurableObject<Env> {
 	 * up to date after every landing) as a fast-forward only: what someone
 	 * pushed there directly is never overwritten. In this, the repo's own Gate.
 	 */
-	pushBranch(input: { repo: string; branch: string; base: { remote: string; token: string }; head: string; to: { remote: string; token: string; user?: string } }): Promise<{ pushed: true } | { refused: string }> {
+	pushBranch(input: {
+		repo: string;
+		branch: string;
+		base: { remote: string; token: string };
+		head: string;
+		to: { remote: string; token: string; user?: string };
+	}): Promise<{ pushed: true } | { refused: string }> {
 		return this.inTurn("pushBranch", input.repo, async () => {
 			const container = this.landingContainer(input.repo);
 			await this.fetchBatch(container, { ...input, baseHead: input.head });
-			const pushed = await gitWithToken(container, input.to.token, ["push", "-q", input.to.remote, `${input.head}:refs/heads/${input.branch}`], WORKDIR, input.to.user);
+			const pushed = await gitWithToken(
+				container,
+				input.to.token,
+				["push", "-q", input.to.remote, `${input.head}:refs/heads/${input.branch}`],
+				WORKDIR,
+				input.to.user,
+			);
 			return pushed.exitCode === 0 ? { pushed: true } : { refused: clip(pushed.output, 500) };
 		});
 	}
@@ -293,31 +441,49 @@ export class Gate extends DurableObject<Env> {
 	private landingContainer(repo: string) {
 		const container = this.ctx.container;
 		if (!container) throw new Error("no container is configured for Gate");
-		if (!this.ownsSnapshot(repo)) throw new Error("only the repo's own Gate reads and lands batches: a change's Gate runs that change's code");
+		if (!this.ownsSnapshot(repo))
+			throw new Error("only the repo's own Gate reads and lands batches: a change's Gate runs that change's code");
 		return container;
 	}
 
 	/** Ready to read or land a batch on `baseHead`: running, the branch fetched, and no hook (none is ever written here) can run. */
-	private async fetchBatch(container: Container, input: { repo: string; branch: string; base: { remote: string; token: string }; baseHead: string }) {
+	private async fetchBatch(
+		container: Container,
+		input: { repo: string; branch: string; base: { remote: string; token: string }; baseHead: string },
+	) {
 		await this.prepare(container, input.base, input.repo);
 		// No hook can run (none is ever written here), and every merge and commit is GitHive's: a container has no git identity of its own.
-		await run(container, ["bash", "-c", `git config core.hooksPath /dev/null && git config user.name "${BOT.name}" && git config user.email "${BOT.email}"`]);
-		const fetched = await gitWithToken(container, input.base.token, ["fetch", "-q", input.base.remote, `${input.branch}:refs/remotes/base/${input.branch}`, "--force"]);
-		if (fetched.exitCode !== 0) throw new Error(`fetch of the project's ${input.branch} failed: ${clip(fetched.output, 2_000)}`);
-		if ((await run(container, ["git", "cat-file", "-e", `${input.baseHead}^{commit}`])).exitCode !== 0) throw new Error(`${input.branch} at ${input.baseHead} isn't in the project`);
+		await run(container, [
+			"bash",
+			"-c",
+			`git config core.hooksPath /dev/null && git config user.name "${BOT.name}" && git config user.email "${BOT.email}"`,
+		]);
+		const fetched = await gitWithToken(container, input.base.token, [
+			"fetch",
+			"-q",
+			input.base.remote,
+			`${input.branch}:refs/remotes/base/${input.branch}`,
+			"--force",
+		]);
+		if (fetched.exitCode !== 0)
+			throw new Error(`fetch of the project's ${input.branch} failed: ${clip(fetched.output, 2_000)}`);
+		if ((await run(container, ["git", "cat-file", "-e", `${input.baseHead}^{commit}`])).exitCode !== 0)
+			throw new Error(`${input.branch} at ${input.baseHead} isn't in the project`);
 	}
-
 
 	/**
 	 * Fetch each change's branch into refs/remotes/batch-<k>/head, a few at a
 	 * time, each tried three times: one command for them all. Returns the ones
 	 * that failed, and why. The tokens go in on stdin, not on the command line.
 	 */
-	private async fetchChanges(container: Container, changes: { k: number; remote: string; token: string; ref: string }[]): Promise<Map<number, string>> {
+	private async fetchChanges(
+		container: Container,
+		changes: { k: number; remote: string; token: string; ref: string }[],
+	): Promise<Map<number, string>> {
 		if (!changes.length) return new Map();
 		const script = [
 			"fetch_one() {",
-			'  for try in 1 2 3; do',
+			"  for try in 1 2 3; do",
 			'    if out=$(git -c gc.auto=0 -c "http.extraHeader=Authorization: Bearer $4" fetch -q --no-write-fetch-head "$2" "$3:refs/remotes/batch-$1/head" --force 2>&1); then return 0; fi',
 			"    sleep $((try * 2))",
 			"  done",
@@ -331,7 +497,8 @@ export class Gate extends DurableObject<Env> {
 			"wait",
 			"cat /tmp/batch-failed-* 2>/dev/null; rm -f /tmp/batch-failed-*; true",
 		].join("\n");
-		const stdin = changes.map((c) => [c.k, c.remote, c.ref, c.token.split("?expires=")[0]].join("\t")).join("\n") + "\n";
+		const stdin =
+			changes.map((c) => [c.k, c.remote, c.ref, c.token.split("?expires=")[0]].join("\t")).join("\n") + "\n";
 		const r = await run(container, ["bash", "-c", script], WORKDIR, stdin);
 		const failed = new Map<number, string>();
 		for (const line of r.output.split("\n").filter(Boolean)) {
@@ -372,7 +539,9 @@ export class Gate extends DurableObject<Env> {
 			const seen = requests.get(name) ?? { requests: 0, failed: 0 };
 			requests.set(name, { requests: seen.requests + n, failed: 0 });
 		}
-		console.log(`gate ${what} on ${repo ?? "-"} ${describeCounts(repo ?? "", requests, new Map())}${taken.failed ? ` (${taken.failed} failed)` : ""}`);
+		console.log(
+			`gate ${what} on ${repo ?? "-"} ${describeCounts(repo ?? "", requests, new Map())}${taken.failed ? ` (${taken.failed} failed)` : ""}`,
+		);
 	}
 
 	/** Make sure an alarm comes by `at` (an earlier one stays). */
@@ -384,7 +553,12 @@ export class Gate extends DurableObject<Env> {
 	/** Plan the container's stop: an alarm a grace after its last run; none while it isn't running. */
 	private async scheduleStop() {
 		if (!this.ctx.container?.running) return;
-		await this.alarmBy(Math.max(((await this.ctx.storage.get<number>("lastActive")) ?? Date.now()) + GRACE_MS, (await this.ctx.storage.get<number>("holdUntil")) ?? 0));
+		await this.alarmBy(
+			Math.max(
+				((await this.ctx.storage.get<number>("lastActive")) ?? Date.now()) + GRACE_MS,
+				(await this.ctx.storage.get<number>("holdUntil")) ?? 0,
+			),
+		);
 	}
 
 	async alarm() {
@@ -407,11 +581,25 @@ export class Gate extends DurableObject<Env> {
 		if (!container?.running) return;
 		if (this.active > 0) return this.alarmBy(Date.now() + GRACE_MS);
 		// A batch read and not landed yet keeps it up a while longer: its landing finds the changes already fetched.
-		const at = Math.max(((await this.ctx.storage.get<number>("lastActive")) ?? 0) + GRACE_MS, (await this.ctx.storage.get<number>("holdUntil")) ?? 0);
+		const at = Math.max(
+			((await this.ctx.storage.get<number>("lastActive")) ?? 0) + GRACE_MS,
+			(await this.ctx.storage.get<number>("holdUntil")) ?? 0,
+		);
 		if (at > Date.now()) return this.alarmBy(at);
 		await container.destroy("nothing to check");
-		const started = await this.ctx.storage.get<{ at: number; repo: string | null; own: boolean; size: InstanceSize }>("started");
-		if (started) console.log(JSON.stringify({ event: "check container stopped", repo: started.repo, gate: started.own ? "repo" : "change", size: started.size, seconds: Math.round((Date.now() - started.at) / 1000) }));
+		const started = await this.ctx.storage.get<{ at: number; repo: string | null; own: boolean; size: InstanceSize }>(
+			"started",
+		);
+		if (started)
+			console.log(
+				JSON.stringify({
+					event: "check container stopped",
+					repo: started.repo,
+					gate: started.own ? "repo" : "change",
+					size: started.size,
+					seconds: Math.round((Date.now() - started.at) / 1000),
+				}),
+			);
 		await this.ctx.storage.delete(["prepared", "started", "holdUntil"]);
 	}
 
@@ -430,25 +618,63 @@ export class Gate extends DurableObject<Env> {
 		const started = await this.prepare(container, plan.base, plan.repo);
 
 		const branch = plan.branch ?? "main";
-		const base = await gitWithToken(container, plan.base.token, ["fetch", "-q", plan.base.remote, `${branch}:refs/remotes/base/${branch}`, "--force"]);
+		const base = await gitWithToken(container, plan.base.token, [
+			"fetch",
+			"-q",
+			plan.base.remote,
+			`${branch}:refs/remotes/base/${branch}`,
+			"--force",
+		]);
 		if (base.exitCode !== 0) throw new Error(`fetch of the project's ${branch} failed: ${clip(base.output, 2_000)}`);
 		// The batch's changes, its others and then the change, fetched at once (one at a time, they were most of a big
 		// batch's check). Branches, not bare commits (fetching a hash depends on server settings): each approved commit
 		// is in its branch's history.
 		// A container a batch's search reuses has most of them already: only what's missing is fetched.
-		const sources = [...(plan.ahead ?? []).map((a) => ({ remote: a.remote, token: a.token, ref: a.ref ?? branch })), plan.fork];
+		const sources = [
+			...(plan.ahead ?? []).map((a) => ({ remote: a.remote, token: a.token, ref: a.ref ?? branch })),
+			plan.fork,
+		];
 		const commits = [...(plan.ahead ?? []).map((a) => a.head), head];
-		const absent = async () => (await run(container, ["bash", "-c", commits.map((c, k) => `git cat-file -e ${c}^{commit} 2>/dev/null || echo ${k}`).join("\n")])).output.split("\n").filter(Boolean).map(Number);
-		const failed = await this.fetchChanges(container, (await absent()).map((k) => ({ k, ...sources[k] })));
-		for (const [k, why] of failed) throw new Error(`fetch of ${k === sources.length - 1 ? "the change" : "a change in the batch"} failed: ${why}`);
+		const absent = async () =>
+			(
+				await run(container, [
+					"bash",
+					"-c",
+					commits.map((c, k) => `git cat-file -e ${c}^{commit} 2>/dev/null || echo ${k}`).join("\n"),
+				])
+			).output
+				.split("\n")
+				.filter(Boolean)
+				.map(Number);
+		const failed = await this.fetchChanges(
+			container,
+			(await absent()).map((k) => ({ k, ...sources[k] })),
+		);
+		for (const [k, why] of failed)
+			throw new Error(`fetch of ${k === sources.length - 1 ? "the change" : "a change in the batch"} failed: ${why}`);
 		const missing = await absent();
-		if (missing.length) throw new Error(`approved commits not on their branches: ${missing.map((k) => commits[k]).join(", ")}`);
+		if (missing.length)
+			throw new Error(`approved commits not on their branches: ${missing.map((k) => commits[k]).join(", ")}`);
 
 		// A clean checkout of the base; ignored files (node_modules) survive `git clean -fd`.
-		await run(container, ["bash", "-lc", `git merge --abort 2>/dev/null; git checkout -q -f --detach ${plan.baseHead} && git clean -fdq`]);
+		await run(container, [
+			"bash",
+			"-lc",
+			`git merge --abort 2>/dev/null; git checkout -q -f --detach ${plan.baseHead} && git clean -fdq`,
+		]);
 		// Merge the batch's other changes, in order, then the last, onto the base.
 		for (const commit of [...(plan.ahead ?? []).map((a) => a.head), head]) {
-			const merge = await run(container, ["git", "-c", "user.name=gate", "-c", "user.email=gate@githive.invalid", "merge", "-q", "--no-edit", commit]);
+			const merge = await run(container, [
+				"git",
+				"-c",
+				"user.name=gate",
+				"-c",
+				"user.email=gate@githive.invalid",
+				"merge",
+				"-q",
+				"--no-edit",
+				commit,
+			]);
 			if (merge.exitCode !== 0) {
 				const conflicts = await run(container, ["git", "diff", "--name-only", "--diff-filter=U"]);
 				await run(container, ["git", "merge", "--abort"]);
@@ -468,7 +694,11 @@ export class Gate extends DurableObject<Env> {
 		const results: CheckResult[] = [];
 		for (const command of checks) {
 			if (INSTALLS.test(command.trim()) && (await this.installUnchanged(container))) {
-				results.push({ command, exitCode: 0, output: "Skipped: package.json and its lockfile are unchanged since the last install in this gate." });
+				results.push({
+					command,
+					exitCode: 0,
+					output: "Skipped: package.json and its lockfile are unchanged since the last install in this gate.",
+				});
 				continue;
 			}
 			const started = Date.now();
@@ -489,9 +719,17 @@ export class Gate extends DurableObject<Env> {
 		const installed = results.some((r) => INSTALLS.test(r.command.trim()) && !r.output.startsWith("Skipped"));
 		if (plan.repo && !this.ownsSnapshot(plan.repo) && (started === "fresh" || installed))
 			void this.env.GATE.getByName(`repo:${plan.repo}`)
-				.warmUp({ repo: plan.repo, ...(plan.branch ? { branch: plan.branch } : {}), base: plan.base, checks: plan.checks })
+				.warmUp({
+					repo: plan.repo,
+					...(plan.branch ? { branch: plan.branch } : {}),
+					base: plan.base,
+					checks: plan.checks,
+				})
 				.catch(() => undefined);
-		return result({ passed: results.length === checks.length && results.every((r) => r.exitCode === 0), results: [...setup, ...results] });
+		return result({
+			passed: results.length === checks.length && results.every((r) => r.exitCode === 0),
+			results: [...setup, ...results],
+		});
 	}
 
 	/**
@@ -502,11 +740,26 @@ export class Gate extends DurableObject<Env> {
 	private async setUpToolchains(container: Container): Promise<CheckResult[]> {
 		const installed = await installToolchains(container);
 		const failed = installed.filter((i) => i.exitCode !== 0);
-		if (failed.length) return failed.map((i) => ({ command: `install ${i.toolchain}`, exitCode: i.exitCode, output: clip(i.output, 6_000) }));
+		if (failed.length)
+			return failed.map((i) => ({
+				command: `install ${i.toolchain}`,
+				exitCode: i.exitCode,
+				output: clip(i.output, 6_000),
+			}));
 		if (!installed.length) return [];
-		const hash = (await run(container, ["bash", "-c", `{ echo ${installed.map((i) => i.toolchain).join(",")}; cat ${DEPENDENCY_FILES} 2>/dev/null; } | sha256sum | cut -d' ' -f1`])).output.trim();
+		const hash = (
+			await run(container, [
+				"bash",
+				"-c",
+				`{ echo ${installed.map((i) => i.toolchain).join(",")}; cat ${DEPENDENCY_FILES} 2>/dev/null; } | sha256sum | cut -d' ' -f1`,
+			])
+		).output.trim();
 		if (hash && (await this.ctx.storage.get<string>("depsHash")) === hash)
-			return installed.map((i) => ({ command: DEPENDENCIES[i.toolchain].command, exitCode: 0, output: "Skipped: the files dependencies come from are unchanged since the last install in this gate." }));
+			return installed.map((i) => ({
+				command: DEPENDENCIES[i.toolchain].command,
+				exitCode: 0,
+				output: "Skipped: the files dependencies come from are unchanged since the last install in this gate.",
+			}));
 		const results: CheckResult[] = [];
 		for (const { toolchain } of installed) {
 			const r = await run(container, ["bash", "-lc", DEPENDENCIES[toolchain].script], WORKDIR, undefined, 600);
@@ -523,22 +776,39 @@ export class Gate extends DurableObject<Env> {
 	 * snapshot when there is one, so it fetches and installs only what
 	 * changed since.
 	 */
-	private async prepare(container: Container, base: { remote: string; token: string }, repo?: string): Promise<"ready" | "restored" | "fresh"> {
+	private async prepare(
+		container: Container,
+		base: { remote: string; token: string },
+		repo?: string,
+	): Promise<"ready" | "restored" | "fresh"> {
 		let started: "ready" | "restored" | "fresh" = "ready";
 		if (!container.running || !(await this.ctx.storage.get<boolean>("prepared"))) {
 			const snapshot = repo ? await this.snapshotFor(repo) : null;
 			const size = await this.size();
 			const booted = await bootContainer(container, size, snapshot);
 			// For the log line when it stops: how long it ran, for whom, at what size (what it cost).
-			if (booted !== "running") await this.ctx.storage.put("started", { at: Date.now(), repo: repo ?? null, own: !!repo && this.ownsSnapshot(repo), size });
+			if (booted !== "running")
+				await this.ctx.storage.put("started", {
+					at: Date.now(),
+					repo: repo ?? null,
+					own: !!repo && this.ownsSnapshot(repo),
+					size,
+				});
 			started = booted === "restored" && snapshot ? "restored" : "fresh";
 			if (booted === "restored" && snapshot) {
 				await this.ctx.storage.delete(["lockHash", "depsHash", "tainted"]);
-				await this.ctx.storage.put({ ...(snapshot.lockHash ? { lockHash: snapshot.lockHash } : {}), ...(snapshot.depsHash ? { depsHash: snapshot.depsHash } : {}) });
+				await this.ctx.storage.put({
+					...(snapshot.lockHash ? { lockHash: snapshot.lockHash } : {}),
+					...(snapshot.depsHash ? { depsHash: snapshot.depsHash } : {}),
+				});
 				console.log(`gate container started at ${size} from ${repo}'s snapshot`);
 			} else {
 				if (snapshot && repo) await this.snapshotUnusable(repo, snapshot.id);
-				const limits = await run(container, ["bash", "-c", "echo $(nproc) cpus, $(awk '/MemTotal/ {print int($2/1024)}' /proc/meminfo) MiB"], "/");
+				const limits = await run(
+					container,
+					["bash", "-c", "echo $(nproc) cpus, $(awk '/MemTotal/ {print int($2/1024)}' /proc/meminfo) MiB"],
+					"/",
+				);
 				console.log(`gate container started at ${size}: ${limits.output.trim()}`);
 				await run(container, ["rm", "-rf", WORKDIR], "/");
 				const clone = await gitWithToken(container, base.token, ["clone", "--quiet", base.remote, WORKDIR], "/");
@@ -564,13 +834,17 @@ export class Gate extends DurableObject<Env> {
 	/** The repo's snapshot to start from, if it has a usable one: this Gate's own, or its first lane's. */
 	private async snapshotFor(repo: string): Promise<SetupSnapshot | null> {
 		if (this.ownsSnapshot(repo)) return this.snapshot();
-		return this.env.GATE.getByName(`repo:${repo}`).snapshot().catch(() => null);
+		return this.env.GATE.getByName(`repo:${repo}`)
+			.snapshot()
+			.catch(() => null);
 	}
 
 	/** A snapshot that wouldn't start: forget it, so the next warm-up on main takes a new one. */
 	private async snapshotUnusable(repo: string, id: string) {
 		if (this.ownsSnapshot(repo)) return this.forgetSnapshot(id);
-		await this.env.GATE.getByName(`repo:${repo}`).forgetSnapshot(id).catch(() => undefined);
+		await this.env.GATE.getByName(`repo:${repo}`)
+			.forgetSnapshot(id)
+			.catch(() => undefined);
 	}
 
 	/**
@@ -598,12 +872,22 @@ export class Gate extends DurableObject<Env> {
 	 */
 	private async snapshotIfDue(container: Container, repo?: string) {
 		if (!repo || !this.ownsSnapshot(repo) || (await this.ctx.storage.get<boolean>("tainted"))) return;
-		const [current, lockHash, depsHash] = await Promise.all([this.ctx.storage.get<SetupSnapshot>("snapshot"), this.ctx.storage.get<string>("lockHash"), this.ctx.storage.get<string>("depsHash")]);
+		const [current, lockHash, depsHash] = await Promise.all([
+			this.ctx.storage.get<SetupSnapshot>("snapshot"),
+			this.ctx.storage.get<string>("lockHash"),
+			this.ctx.storage.get<string>("depsHash"),
+		]);
 		if (!snapshotDue(current ?? null, { lockHash, depsHash })) return;
 		try {
 			const started = Date.now();
 			const taken = await container.snapshotContainer({ name: `githive-${repo}`.slice(0, 64) });
-			await this.ctx.storage.put("snapshot", { id: taken.id, size: taken.size, at: Date.now(), ...(lockHash ? { lockHash } : {}), ...(depsHash ? { depsHash } : {}) } satisfies SetupSnapshot);
+			await this.ctx.storage.put("snapshot", {
+				id: taken.id,
+				size: taken.size,
+				at: Date.now(),
+				...(lockHash ? { lockHash } : {}),
+				...(depsHash ? { depsHash } : {}),
+			} satisfies SetupSnapshot);
 			console.log(`saved ${repo}'s snapshot (${Math.round(taken.size / 1e6)} MB) in ${Date.now() - started} ms`);
 		} catch (err) {
 			console.error(`saving ${repo}'s snapshot failed`, statusOf(err).message);
@@ -626,7 +910,13 @@ export class Gate extends DurableObject<Env> {
 			try {
 				await this.prepare(container, input.base, input.repo);
 				const branch = input.branch ?? "main";
-				const fetched = await gitWithToken(container, input.base.token, ["fetch", "-q", input.base.remote, `${branch}:refs/remotes/base/${branch}`, "--force"]);
+				const fetched = await gitWithToken(container, input.base.token, [
+					"fetch",
+					"-q",
+					input.base.remote,
+					`${branch}:refs/remotes/base/${branch}`,
+					"--force",
+				]);
 				if (fetched.exitCode !== 0) return;
 				// No checks: warm only to land batches, the project cloned and its branch fetched, and saved as the repo's
 				// snapshot (with nothing installed), so a cold Gate restores it in seconds. Without one, the first batch of 200
@@ -636,7 +926,11 @@ export class Gate extends DurableObject<Env> {
 					await this.snapshotIfDue(container, input.repo);
 					return;
 				}
-				await run(container, ["bash", "-lc", `git merge --abort 2>/dev/null; git checkout -q -f --detach refs/remotes/base/${branch} && git clean -fdq`]);
+				await run(container, [
+					"bash",
+					"-lc",
+					`git merge --abort 2>/dev/null; git checkout -q -f --detach refs/remotes/base/${branch} && git clean -fdq`,
+				]);
 				await this.setUpToolchains(container);
 				const install = (await this.checksFor(container, input.checks)).find((c) => INSTALLS.test(c.trim()));
 				if (install && !(await this.installUnchanged(container))) {
@@ -661,7 +955,11 @@ export class Gate extends DurableObject<Env> {
 
 	/** This container's warmth: whether it runs, at what size, when it last finished warming, and whether it's warming now. */
 	async warmth() {
-		const [warmedAt, warmingSince, size] = await Promise.all([this.ctx.storage.get<number>("warmedAt"), this.ctx.storage.get<number>("warmingSince"), this.size()]);
+		const [warmedAt, warmingSince, size] = await Promise.all([
+			this.ctx.storage.get<number>("warmedAt"),
+			this.ctx.storage.get<number>("warmingSince"),
+			this.size(),
+		]);
 		return {
 			running: !!this.ctx.container?.running,
 			size,
@@ -695,8 +993,15 @@ export class Gate extends DurableObject<Env> {
 
 	/** The repo's checks for the checkout here, with the install a Node project needs first (see withInstall). */
 	private async checksFor(container: Container, checks: string[]) {
-		const found = await run(container, ["bash", "-c", "[ -f package.json ] && echo package.json; [ -f package-lock.json ] || [ -f npm-shrinkwrap.json ] && echo lockfile; true"]);
-		return withInstall(checks, { packageJson: found.output.includes("package.json"), npmLockfile: found.output.includes("lockfile") });
+		const found = await run(container, [
+			"bash",
+			"-c",
+			"[ -f package.json ] && echo package.json; [ -f package-lock.json ] || [ -f npm-shrinkwrap.json ] && echo lockfile; true",
+		]);
+		return withInstall(checks, {
+			packageJson: found.output.includes("package.json"),
+			npmLockfile: found.output.includes("lockfile"),
+		});
 	}
 
 	/**
@@ -707,7 +1012,11 @@ export class Gate extends DurableObject<Env> {
 	 */
 	private async lockHash(container: Container) {
 		const deps = `node -e 'try { const p = require("./package.json"); console.log(JSON.stringify(["dependencies", "devDependencies", "optionalDependencies", "peerDependencies", "overrides", "resolutions", "workspaces"].map((k) => p[k] ?? null))) } catch { console.log("none") }'`;
-		const r = await run(container, ["bash", "-lc", `{ ${deps}; cat package-lock.json npm-shrinkwrap.json yarn.lock pnpm-lock.yaml 2>/dev/null; } | sha256sum | cut -d' ' -f1`]);
+		const r = await run(container, [
+			"bash",
+			"-lc",
+			`{ ${deps}; cat package-lock.json npm-shrinkwrap.json yarn.lock pnpm-lock.yaml 2>/dev/null; } | sha256sum | cut -d' ' -f1`,
+		]);
 		return r.output.trim();
 	}
 

@@ -62,9 +62,25 @@ export function revertStampPayload(revert: { base?: string; reverts?: string; au
 }
 
 /** What GitHive stamps on a merge: everything its trailers claim, and the commits it joins. */
-export function mergeStampPayload(merge: Pick<MergeRecord, "base" | "head" | "change" | "author" | "by" | "claimsTip" | "votesTip" | "testedOn" | "testedAfter" | "testedWith">) {
+export function mergeStampPayload(
+	merge: Pick<
+		MergeRecord,
+		"base" | "head" | "change" | "author" | "by" | "claimsTip" | "votesTip" | "testedOn" | "testedAfter" | "testedWith"
+	>,
+) {
 	const { base, head, change, author, by, claimsTip, votesTip, testedOn, testedAfter, testedWith } = merge;
-	return stampPayload("merge", { base, head, change, agent: author, by, claimsTip, votesTip, testedOn: testedOn ?? null, ...(testedAfter?.length ? { testedAfter } : {}), ...(testedWith?.length ? { testedWith } : {}) });
+	return stampPayload("merge", {
+		base,
+		head,
+		change,
+		agent: author,
+		by,
+		claimsTip,
+		votesTip,
+		testedOn: testedOn ?? null,
+		...(testedAfter?.length ? { testedAfter } : {}),
+		...(testedWith?.length ? { testedWith } : {}),
+	});
 }
 
 /** Claims idle longer than this may be released by anyone. */
@@ -91,8 +107,10 @@ export async function audit(records: AuditRecords): Promise<Violation[]> {
 	const violations: Violation[] = [];
 	// With a stamp key, only what GitHive stamped is trusted.
 	const key = records.registry[0]?.state.stampKey;
-	const verified = (kind: string, record: object & { stamp?: string }) => (key ? verifyStamp(key, stampPayload(kind, record), record.stamp) : Promise.resolve(true));
-	for (const history of [records.registry, ...(records.shards?.values() ?? [])]) violations.push(...(await unverifiedClaims(history, verified)));
+	const verified = (kind: string, record: object & { stamp?: string }) =>
+		key ? verifyStamp(key, stampPayload(kind, record), record.stamp) : Promise.resolve(true);
+	for (const history of [records.registry, ...(records.shards?.values() ?? [])])
+		violations.push(...(await unverifiedClaims(history, verified)));
 	const { votesAt, forged } = await verifiedVotes(records, verified);
 	violations.push(...forged);
 
@@ -110,7 +128,14 @@ export async function audit(records: AuditRecords): Promise<Violation[]> {
 			continue;
 		}
 		let stampedBy: string | undefined;
-		const report = (rule: string, detail: string) => violations.push({ commit: merge.commit, author: merge.author, rule, detail, ...(stampedBy ? { by: stampedBy } : {}) });
+		const report = (rule: string, detail: string) =>
+			violations.push({
+				commit: merge.commit,
+				author: merge.author,
+				rule,
+				detail,
+				...(stampedBy ? { by: stampedBy } : {}),
+			});
 		if (!merge.change || !merge.claimsTip) {
 			report("undeclared", "the merge names no change or claims it checked (GitHive-Change, GitHive-Claims)");
 			continue;
@@ -119,7 +144,12 @@ export async function audit(records: AuditRecords): Promise<Violation[]> {
 		// Unstamped: its maker is unverified. What it changed is still a fact in
 		// Git, so the checks below still run against the records it cites.
 		if (key && !stampedBy)
-			violations.push({ commit: merge.commit, author: merge.author, rule: "unverified", detail: "the merge has no valid GitHive stamp: whoever made it, and what its trailers say, is unverified" });
+			violations.push({
+				commit: merge.commit,
+				author: merge.author,
+				rule: "unverified",
+				detail: "the merge has no valid GitHive stamp: whoever made it, and what its trailers say, is unverified",
+			});
 		const cited = citedClaims(records, registryAt, merge, report);
 		if (!cited) continue;
 		const ownRecords = cited.claims.filter((c) => c.change === merge.change);
@@ -128,14 +158,28 @@ export async function audit(records: AuditRecords): Promise<Violation[]> {
 			const claimed = merge.claimFiles?.[i] ?? file;
 			if (cited.uncovered.has(claimed)) return;
 			const holder = cited.claims.find((c) => c.change !== merge.change && inLane(claimed, c.paths));
-			if (holder) report("inside-another-claim", `${file} was claimed by ${holder.change} (${holder.agent}) at ${merge.claimsTip}`);
-			else if (!own || !inLane(claimed, own.paths)) report("outside-claim", `${file} was not in ${merge.change}'s claim at ${merge.claimsTip}${merge.branch ? ` (on ${merge.branch})` : ""}`);
+			if (holder)
+				report(
+					"inside-another-claim",
+					`${file} was claimed by ${holder.change} (${holder.agent}) at ${merge.claimsTip}`,
+				);
+			else if (!own || !inLane(claimed, own.paths))
+				report(
+					"outside-claim",
+					`${file} was not in ${merge.change}'s claim at ${merge.claimsTip}${merge.branch ? ` (on ${merge.branch})` : ""}`,
+				);
 		});
 		// What its claim waited on merged into the same branch first (each branch's merges are read oldest first).
 		for (const dep of own?.after ?? []) {
 			const at = records.merges.indexOf(merge);
-			const before = records.merges.some((m, i) => i < at && m.change === dep && (m.branch ?? "") === (merge.branch ?? ""));
-			if (!before) report("merged-before-dependency", `${merge.change} waits on ${dep}, which hadn't merged into ${merge.branch ?? "the project's branch"} before it`);
+			const before = records.merges.some(
+				(m, i) => i < at && m.change === dep && (m.branch ?? "") === (merge.branch ?? ""),
+			);
+			if (!before)
+				report(
+					"merged-before-dependency",
+					`${merge.change} waits on ${dep}, which hadn't merged into ${merge.branch ?? "the project's branch"} before it`,
+				);
 		}
 		for (const { history, tip } of cited.records) checkReleasedAfter(history, tip, merge, report);
 		const settings = settingsFor(records, registryAt, merge);
@@ -144,18 +188,32 @@ export async function audit(records: AuditRecords): Promise<Violation[]> {
 		if (settings.verify?.length && !skipsChecks(merge.files, settings.skipChecks)) {
 			if (!merge.testedOn) report("untested", "the merge records no checks run (GitHive-Tested)");
 			else if (merge.testedWith?.length ? !landedAsBatch(merge, byCommit, byBase) : !testedAsLanded(merge, byCommit)) {
-				const after = merge.testedAfter?.length ? ` after ${merge.testedAfter.map((h) => h.slice(0, 8)).join(", ")}` : "";
+				const after = merge.testedAfter?.length
+					? ` after ${merge.testedAfter.map((h) => h.slice(0, 8)).join(", ")}`
+					: "";
 				const batch = merge.testedWith?.length ? ` with ${merge.testedWith.map((h) => h.slice(0, 8)).join(", ")}` : "";
-				report("untested", batch ? `checks ran on ${merge.testedOn}${batch}, but those didn't land on it as checked, in one batch` : `checks ran on ${merge.testedOn}${after}, but the merge went onto ${merge.base}`);
+				report(
+					"untested",
+					batch
+						? `checks ran on ${merge.testedOn}${batch}, but those didn't land on it as checked, in one batch`
+						: `checks ran on ${merge.testedOn}${after}, but the merge went onto ${merge.base}`,
+				);
 			}
 		}
 	}
-	for (const history of [records.registry, ...(records.shards?.values() ?? [])]) violations.push(...othersClaimsReleased(history, records.staleAfterMs));
+	for (const history of [records.registry, ...(records.shards?.values() ?? [])])
+		violations.push(...othersClaimsReleased(history, records.staleAfterMs));
 	for (const revert of reverts) {
 		const undone = violations.filter((v) => v.commit === revert.reverts && !v.resolvedBy);
 		for (const v of undone) v.resolvedBy = revert.commit;
 		if (!undone.length)
-			violations.push({ commit: revert.commit, author: revert.author, rule: "unjustified-revert", detail: `reverted ${revert.reverts}, which the audit doesn't report`, ...(revert.by ? { by: revert.by } : {}) });
+			violations.push({
+				commit: revert.commit,
+				author: revert.author,
+				rule: "unjustified-revert",
+				detail: `reverted ${revert.reverts}, which the audit doesn't report`,
+				...(revert.by ? { by: revert.by } : {}),
+			});
 	}
 	return violations;
 }
@@ -169,7 +227,12 @@ type History = { tip: string; state: Registry }[];
  * registry among them as "" (above every shard). Each file must be covered by
  * a cited shard (its own or one above it).
  */
-function citedClaims(records: AuditRecords, registryAt: Map<string, Registry>, merge: MergeRecord, report: (rule: string, detail: string) => void) {
+function citedClaims(
+	records: AuditRecords,
+	registryAt: Map<string, Registry>,
+	merge: MergeRecord,
+	report: (rule: string, detail: string) => void,
+) {
 	const tip = merge.claimsTip!;
 	if (!tip.includes("=")) {
 		const state = registryAt.get(tip);
@@ -187,7 +250,11 @@ function citedClaims(records: AuditRecords, registryAt: Map<string, Registry>, m
 		claims.push(...entry.state.claims);
 		cited.push({ shard, history, tip: at });
 	}
-	const uncovered = new Set((merge.claimFiles ?? merge.files).filter((file) => !cited.some(({ shard }) => shard === "" || inLaneEntry(file, shard))));
+	const uncovered = new Set(
+		(merge.claimFiles ?? merge.files).filter(
+			(file) => !cited.some(({ shard }) => shard === "" || inLaneEntry(file, shard)),
+		),
+	);
 	for (const file of uncovered) report("unknown-claims", `${file}: the merge cites no claims shard covering it`);
 	return { claims, records: cited, uncovered };
 }
@@ -202,13 +269,25 @@ async function unverifiedClaims(history: History, verified: Verify): Promise<Vio
 			const id = `${held.change}|${held.stamp ?? ""}|${held.active}`;
 			if (seen.has(id)) continue;
 			seen.add(id);
-			if (!(await verified("claim", held))) violations.push({ commit: tip, author: held.agent, rule: "unverified-record", detail: `${held.change}'s claim has no valid GitHive stamp` });
+			if (!(await verified("claim", held)))
+				violations.push({
+					commit: tip,
+					author: held.agent,
+					rule: "unverified-record",
+					detail: `${held.change}'s claim has no valid GitHive stamp`,
+				});
 		}
 		if (previous) {
 			const added = state.released.slice(previous.released.length);
 			for (const gone of previous.claims.filter((c) => !state.claims.some((x) => x.change === c.change))) {
 				const release = added.find((r) => r.change === gone.change);
-				if (!release || !(await verified("release", release))) violations.push({ commit: tip, author: gone.agent, rule: "unverified-record", detail: `${gone.change}'s claim was removed at ${tip} without a stamped release` });
+				if (!release || !(await verified("release", release)))
+					violations.push({
+						commit: tip,
+						author: gone.agent,
+						rule: "unverified-record",
+						detail: `${gone.change}'s claim was removed at ${tip} without a stamped release`,
+					});
 			}
 		}
 		previous = state;
@@ -228,7 +307,13 @@ async function verifiedVotes(records: AuditRecords, verified: Verify) {
 			if (!checked.has(id)) {
 				const ok = await verified("vote", cast);
 				checked.set(id, ok);
-				if (!ok) forged.push({ commit: tip, author: cast.reviewer, rule: "unverified-record", detail: `${cast.reviewer}'s vote on ${cast.commit} has no valid GitHive stamp, so it doesn't count` });
+				if (!ok)
+					forged.push({
+						commit: tip,
+						author: cast.reviewer,
+						rule: "unverified-record",
+						detail: `${cast.reviewer}'s vote on ${cast.commit} has no valid GitHive stamp, so it doesn't count`,
+					});
 			}
 			if (checked.get(id)) counted.push(cast);
 		}
@@ -242,14 +327,23 @@ async function verifiedVotes(records: AuditRecords, verified: Verify) {
  * registry state after the cited tip without the claim must be a release that
  * names this merge. Otherwise the agent merged after giving its claim up.
  */
-function checkReleasedAfter(history: History, tip: string, merge: MergeRecord, report: (rule: string, detail: string) => void) {
+function checkReleasedAfter(
+	history: History,
+	tip: string,
+	merge: MergeRecord,
+	report: (rule: string, detail: string) => void,
+) {
 	const from = history.findIndex((r) => r.tip === tip);
 	// Only a record that held the change's claim at the cited tip has a release to check.
 	if (!history[from]?.state.claims.some((c) => c.change === merge.change)) return;
 	for (const later of history.slice(from + 1)) {
 		if (later.state.claims.some((c) => c.change === merge.change)) continue;
 		const release = later.state.released.findLast((r) => r.change === merge.change);
-		if (release?.mergedAs !== merge.commit) report("released-before-merge", `${merge.change}'s claim was released at ${later.tip} without naming ${merge.commit} as its merge`);
+		if (release?.mergedAs !== merge.commit)
+			report(
+				"released-before-merge",
+				`${merge.change}'s claim was released at ${later.tip} without naming ${merge.commit} as its merge`,
+			);
 		return;
 	}
 }
@@ -259,7 +353,12 @@ function checkReleasedAfter(history: History, tip: string, merge: MergeRecord, r
  * the votes record, or, sharded, `=tip` for the record and `bucket=tip` for
  * the bucket of the merged commit, counted together.
  */
-function citedVotes(records: AuditRecords, votesAt: Map<string, Votes>, merge: MergeRecord, report: (rule: string, detail: string) => void): Votes | undefined {
+function citedVotes(
+	records: AuditRecords,
+	votesAt: Map<string, Votes>,
+	merge: MergeRecord,
+	report: (rule: string, detail: string) => void,
+): Votes | undefined {
 	const cited = merge.votesTip!;
 	if (!cited.includes("=")) {
 		const votes = votesAt.get(cited);
@@ -271,7 +370,11 @@ function citedVotes(records: AuditRecords, votesAt: Map<string, Votes>, merge: M
 		const [bucket, tip] = pair.split("=");
 		const history = bucket === "" ? records.votes : records.voteBuckets?.get(bucket);
 		const at = history?.some((e) => e.tip === tip) ? votesAt.get(tip) : undefined;
-		if (!at) return void report("unknown-votes", `${bucket ? `bucket ${bucket}` : "the votes record"} at ${tip} is not in its history`);
+		if (!at)
+			return void report(
+				"unknown-votes",
+				`${bucket ? `bucket ${bucket}` : "the votes record"} at ${tip} is not in its history`,
+			);
 		votes.push(...at.votes);
 	}
 	return { votes };
@@ -282,32 +385,63 @@ function citedVotes(records: AuditRecords, votesAt: Map<string, Votes>, merge: M
  * registry state it cites (the registry itself, "", among shards), since
  * settings can change; the records' own when it cites none.
  */
-function settingsFor(records: AuditRecords, registryAt: Map<string, Registry>, merge: MergeRecord): { policy?: ReviewPolicy; verify?: string[]; skipChecks?: string[] } {
+function settingsFor(
+	records: AuditRecords,
+	registryAt: Map<string, Registry>,
+	merge: MergeRecord,
+): { policy?: ReviewPolicy; verify?: string[]; skipChecks?: string[] } {
 	const cited = merge.claimsTip!;
-	const tip = cited.includes("=") ? cited.split(/\s+/).map((pair) => pair.split("=")).find(([shard]) => decodeShard(shard) === "")?.[1] : cited;
+	const tip = cited.includes("=")
+		? cited
+				.split(/\s+/)
+				.map((pair) => pair.split("="))
+				.find(([shard]) => decodeShard(shard) === "")?.[1]
+		: cited;
 	const state = tip ? registryAt.get(tip) : undefined;
-	const repo = { policy: state?.policy ?? records.policy, verify: state?.verify ?? records.verify, ...(state?.skipChecks ? { skipChecks: state.skipChecks } : {}) };
+	const repo = {
+		policy: state?.policy ?? records.policy,
+		verify: state?.verify ?? records.verify,
+		...(state?.skipChecks ? { skipChecks: state.skipChecks } : {}),
+	};
 	// A merge into another branch had that branch's settings: the repo's, with what its rule changed then.
 	if (!merge.branch || !state?.branchRules?.length || !repo.policy) return repo;
-	const settings = settingsForBranch({ policy: repo.policy, verify: repo.verify ?? [], rules: state.branchRules, project: state.branch ?? "main" }, merge.branch);
-	return { policy: settings.policy, verify: settings.verify, ...(repo.skipChecks ? { skipChecks: repo.skipChecks } : {}) };
+	const settings = settingsForBranch(
+		{ policy: repo.policy, verify: repo.verify ?? [], rules: state.branchRules, project: state.branch ?? "main" },
+		merge.branch,
+	);
+	return {
+		policy: settings.policy,
+		verify: settings.verify,
+		...(repo.skipChecks ? { skipChecks: repo.skipChecks } : {}),
+	};
 }
 
 /** The merged commit must have had the policy's approvals from reviewers other than its author, every veto role's among them, and no veto, in the votes the merge cites. */
-function checkApproved(records: AuditRecords, policy: ReviewPolicy | undefined, votesAt: Map<string, Votes>, merge: MergeRecord, report: (rule: string, detail: string) => void, author?: Author) {
+function checkApproved(
+	records: AuditRecords,
+	policy: ReviewPolicy | undefined,
+	votesAt: Map<string, Votes>,
+	merge: MergeRecord,
+	report: (rule: string, detail: string) => void,
+	author?: Author,
+) {
 	if (!policy) return;
 	// A policy that needs no approvals and no role's sign-off needs no votes to cite (there may be no votes yet at all).
 	const needs = effectivePolicy(policy, merge.files);
 	if (merge.head && !merge.votesTip && needs.required === 0 && !needs.vetoes.length) return;
-	if (!merge.head || !merge.votesTip) return report("undeclared", "the merge names no reviewed commit or votes it counted (GitHive-Votes)");
+	if (!merge.head || !merge.votesTip)
+		return report("undeclared", "the merge names no reviewed commit or votes it counted (GitHive-Votes)");
 	const votes = citedVotes(records, votesAt, merge, report);
 	if (!votes) return;
 	// Distinct verified reviewers, never the change's own author.
 	const outcome = approval(votes, merge.head, policy, author, merge.files);
 	const { required } = effectivePolicy(policy, merge.files);
-	if (outcome.vetoedBy.length) report("unapproved", `${merge.head} was vetoed by ${outcome.vetoedBy.join(", ")} at ${merge.votesTip}`);
-	else if (outcome.approvals < required) report("unapproved", `${merge.head} had ${outcome.approvals} of ${required} approvals at ${merge.votesTip}`);
-	else if (outcome.awaiting.length) report("unapproved", `${merge.head} had no approval from ${outcome.awaiting.join(", ")} at ${merge.votesTip}`);
+	if (outcome.vetoedBy.length)
+		report("unapproved", `${merge.head} was vetoed by ${outcome.vetoedBy.join(", ")} at ${merge.votesTip}`);
+	else if (outcome.approvals < required)
+		report("unapproved", `${merge.head} had ${outcome.approvals} of ${required} approvals at ${merge.votesTip}`);
+	else if (outcome.awaiting.length)
+		report("unapproved", `${merge.head} had no approval from ${outcome.awaiting.join(", ")} at ${merge.votesTip}`);
 }
 
 /**
@@ -319,7 +453,7 @@ function checkApproved(records: AuditRecords, policy: ReviewPolicy | undefined, 
 function testedAsLanded(merge: MergeRecord, byCommit: Map<string, MergeRecord>) {
 	const after = merge.testedAfter ?? [];
 	const landed: string[] = [];
-	for (let at = merge.base; at !== merge.testedOn; ) {
+	for (let at = merge.base; at !== merge.testedOn;) {
 		const between = at ? byCommit.get(at) : undefined;
 		if (!between?.head || landed.length === after.length) return false;
 		landed.unshift(between.head);
@@ -336,7 +470,8 @@ function testedAsLanded(merge: MergeRecord, byCommit: Map<string, MergeRecord>) 
  */
 function landedAsBatch(merge: MergeRecord, byCommit: Map<string, MergeRecord>, byBase: Map<string, MergeRecord>) {
 	const heads = merge.testedWith!;
-	const sameBatch = (m: MergeRecord | undefined): m is MergeRecord => !!m && m.testedOn === merge.testedOn && m.testedWith?.join(" ") === heads.join(" ");
+	const sameBatch = (m: MergeRecord | undefined): m is MergeRecord =>
+		!!m && m.testedOn === merge.testedOn && m.testedWith?.join(" ") === heads.join(" ");
 	// Back to the main the checks ran on, through the batch's merges before this one.
 	let first = merge;
 	for (let steps = 0; first.base !== merge.testedOn; steps++) {
@@ -363,7 +498,12 @@ function othersClaimsReleased(history: History, staleAfterMs?: number): Violatio
 			if (release.by === release.agent) continue;
 			const idle = Date.parse(release.at) - Date.parse(release.lastActive);
 			if (idle <= staleAfter)
-				violations.push({ commit: entry.tip, author: release.by, rule: "released-others-claim", detail: `${release.by} released ${release.change} (${release.agent}), active ${Math.round(idle / 60_000)} minutes before, not stale` });
+				violations.push({
+					commit: entry.tip,
+					author: release.by,
+					rule: "released-others-claim",
+					detail: `${release.by} released ${release.change} (${release.agent}), active ${Math.round(idle / 60_000)} minutes before, not stale`,
+				});
 		}
 		seen = entry.state.released.length;
 	}

@@ -39,10 +39,17 @@ export const workId = (title: string) =>
 
 /** Add a piece of work to the backlog (refused if its id is taken). */
 export function addWork(log: CasLog<Work>, input: Omit<WorkItem, "at">) {
-	return appendRecord<Work, string>(log, input.by, () => ({ items: [] }), (state) =>
-		state.items.some((i) => i.id === input.id)
-			? { refused: `${input.id} is in the backlog already` }
-			: { state: { items: [...state.items, { ...input, at: new Date().toISOString() }] }, text: `${input.by} adds ${input.id} to the backlog: ${input.title}` },
+	return appendRecord<Work, string>(
+		log,
+		input.by,
+		() => ({ items: [] }),
+		(state) =>
+			state.items.some((i) => i.id === input.id)
+				? { refused: `${input.id} is in the backlog already` }
+				: {
+						state: { items: [...state.items, { ...input, at: new Date().toISOString() }] },
+						text: `${input.by} adds ${input.id} to the backlog: ${input.title}`,
+					},
 	);
 }
 
@@ -52,13 +59,21 @@ export function addWork(log: CasLog<Work>, input: Omit<WorkItem, "at">) {
  */
 export async function addWorks(log: CasLog<Work>, by: string, items: Omit<WorkItem, "at" | "by">[]) {
 	let already: string[] = [];
-	const added = await appendRecord<Work, string>(log, by, () => ({ items: [] }), (state) => {
-		already = items.filter((i) => state.items.some((s) => s.id === i.id)).map((i) => i.id);
-		const fresh = items.filter((i) => !already.includes(i.id));
-		if (!fresh.length) return { refused: "all of them are in the backlog already" };
-		const at = new Date().toISOString();
-		return { state: { items: [...state.items, ...fresh.map((i) => ({ ...i, by, at }))] }, text: `${by} adds ${fresh.map((i) => i.id).join(", ")} to the backlog` };
-	});
+	const added = await appendRecord<Work, string>(
+		log,
+		by,
+		() => ({ items: [] }),
+		(state) => {
+			already = items.filter((i) => state.items.some((s) => s.id === i.id)).map((i) => i.id);
+			const fresh = items.filter((i) => !already.includes(i.id));
+			if (!fresh.length) return { refused: "all of them are in the backlog already" };
+			const at = new Date().toISOString();
+			return {
+				state: { items: [...state.items, ...fresh.map((i) => ({ ...i, by, at }))] },
+				text: `${by} adds ${fresh.map((i) => i.id).join(", ")} to the backlog`,
+			};
+		},
+	);
 	return { ok: added.ok, added: added.ok ? items.map((i) => i.id).filter((id) => !already.includes(id)) : [], already };
 }
 
@@ -125,7 +140,9 @@ export function reviewsFor(input: WorkInput): ReviewOption[] {
 			const outcome = approval({ votes }, head, policy, authorOf(claim), claim.paths);
 			if (outcome.approved) return [];
 			// A role that can block, if it holds one the change still needs; else an ordinary review, if more are needed.
-			const role = outcome.awaiting.find((r) => holdsRole(policy, r, { reviewer: agent, by: input.by, teams: input.teams }, authorOf(claim)));
+			const role = outcome.awaiting.find((r) =>
+				holdsRole(policy, r, { reviewer: agent, by: input.by, teams: input.teams }, authorOf(claim)),
+			);
 			const { required } = effectivePolicy(policy, claim.paths);
 			if (!role && outcome.approvals >= required) return [];
 			// As many reviews as it still needs: one for a role that can block; else the approvals missing, less those the
@@ -134,10 +151,37 @@ export function reviewsFor(input: WorkInput): ReviewOption[] {
 			if (needed <= 0) return [];
 			const reviewing = input.held?.[holdKey(head, role ?? "review")] ?? [];
 			if (reviewing.filter((a) => a !== agent).length >= needed) return [];
-			return [{ change: claim.change, author: claim.agent, head, role: role ?? "review", blocking: !!role, intent: claim.intent, paths: claim.paths, approvals: outcome.approvals, needed, reviewing, since: claim.since }];
+			return [
+				{
+					change: claim.change,
+					author: claim.agent,
+					head,
+					role: role ?? "review",
+					blocking: !!role,
+					intent: claim.intent,
+					paths: claim.paths,
+					approvals: outcome.approvals,
+					needed,
+					reviewing,
+					since: claim.since,
+				},
+			];
 		})
-		.sort((a, b) => Number(b.reviewing.includes(agent)) - Number(a.reviewing.includes(agent)) || Number(b.blocking) - Number(a.blocking) || a.approvals - b.approvals || a.since.localeCompare(b.since));
-	return inOwnOrder(agent, options, (a, b) => a.reviewing.includes(agent) === b.reviewing.includes(agent) && a.blocking === b.blocking && a.approvals === b.approvals).map(({ since: _, ...o }) => o);
+		.sort(
+			(a, b) =>
+				Number(b.reviewing.includes(agent)) - Number(a.reviewing.includes(agent)) ||
+				Number(b.blocking) - Number(a.blocking) ||
+				a.approvals - b.approvals ||
+				a.since.localeCompare(b.since),
+		);
+	return inOwnOrder(
+		agent,
+		options,
+		(a, b) =>
+			a.reviewing.includes(agent) === b.reviewing.includes(agent) &&
+			a.blocking === b.blocking &&
+			a.approvals === b.approvals,
+	).map(({ since: _, ...o }) => o);
 }
 
 /** The backlog as the caller may take it: pieces free to build now, and why the rest wait. */
@@ -158,7 +202,8 @@ export function backlogFor(input: WorkInput): BacklogView {
 	const live = input.open.filter((o) => !input.abandoned?.has(o.claim.change));
 	const holder = new Map(live.map((o) => [o.claim.change, o.claim.agent]));
 	// Backlog work lands on the project's branch: a claim into another branch stands in its way nowhere.
-	const overlapping = (w: WorkItem) => live.find((o) => !o.claim.into && w.paths?.some((p) => o.claim.paths.some((held) => entriesOverlap(p, held))));
+	const overlapping = (w: WorkItem) =>
+		live.find((o) => !o.claim.into && w.paths?.some((p) => o.claim.paths.some((held) => entriesOverlap(p, held))));
 	const unmerged = (w: WorkItem) => (w.after ?? []).filter((dep) => !input.merged.has(dep));
 	const open: BacklogView["open"] = [];
 	const waiting: BacklogView["waiting"] = [];
@@ -181,7 +226,7 @@ export function backlogFor(input: WorkInput): BacklogView {
 /** `list` (sorted best first) with each run of equally good items (`same`) started at a place of the agent's own. */
 function inOwnOrder<T>(agent: string, list: T[], same: (a: T, b: T) => boolean): T[] {
 	const out: T[] = [];
-	for (let i = 0; i < list.length; ) {
+	for (let i = 0; i < list.length;) {
 		let j = i + 1;
 		while (j < list.length && same(list[i], list[j])) j++;
 		const run = list.slice(i, j);
@@ -211,8 +256,16 @@ export function waitingRoleReviews(input: Pick<WorkInput, "policy" | "policyOf" 
 		if (!head) return [];
 		const author: Author = { agent: claim.agent, ...(claim.by ? { by: claim.by } : {}) };
 		if (input.votes.some((v) => v.commit === head && v.verdict === "reject" && v.reviewer !== author.agent)) return [];
-		const { awaiting } = approval({ votes: input.votes }, head, input.policyOf?.(claim) ?? input.policy, author, claim.paths);
-		return awaiting.filter((role) => !input.held?.[holdKey(head, role)]?.length).map((role) => ({ change: claim.change, head, role }));
+		const { awaiting } = approval(
+			{ votes: input.votes },
+			head,
+			input.policyOf?.(claim) ?? input.policy,
+			author,
+			claim.paths,
+		);
+		return awaiting
+			.filter((role) => !input.held?.[holdKey(head, role)]?.length)
+			.map((role) => ({ change: claim.change, head, role }));
 	});
 }
 

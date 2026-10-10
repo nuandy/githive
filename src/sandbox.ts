@@ -3,7 +3,17 @@ import { rpc } from "./rpc";
 import OpenAI from "openai";
 import type { ResponseInputItem } from "openai/resources/responses/responses";
 import { z } from "zod";
-import { MODEL, addUsage, assertComplete, emptyUsage, openAITools, runCalls, tool, type AgentTool, type Usage } from "./agent";
+import {
+	MODEL,
+	addUsage,
+	assertComplete,
+	emptyUsage,
+	openAITools,
+	runCalls,
+	tool,
+	type AgentTool,
+	type Usage,
+} from "./agent";
 import { COMMAND_TIMEOUT_S, WORKDIR, bootContainer, clip, gitWithToken, installToolchains, run } from "./container";
 import { staysInRepo } from "./paths";
 
@@ -93,7 +103,9 @@ const WriteArgs = z.strictObject({
 	content: z.string().describe("The complete new file content"),
 });
 const ListArgs = z.strictObject({ prefix: z.string().describe('Only list paths starting with this; "" for all') });
-const RunArgs = z.strictObject({ command: z.string().describe(`A bash command, run in ${WORKDIR} with a ${COMMAND_TIMEOUT_S}s limit`) });
+const RunArgs = z.strictObject({
+	command: z.string().describe(`A bash command, run in ${WORKDIR} with a ${COMMAND_TIMEOUT_S}s limit`),
+});
 
 const MAX_CACHE_KEY = 64;
 
@@ -163,7 +175,8 @@ export abstract class SandboxAgent<J extends SandboxJob, S extends AgentState> e
 
 	async start(job: J) {
 		const { state } = await this.load();
-		if (state && (state.status === "queued" || state.status === "working")) throw new Error(`${this.kind} is already ${state.status}`);
+		if (state && (state.status === "queued" || state.status === "working"))
+			throw new Error(`${this.kind} is already ${state.status}`);
 		const fresh = {
 			status: "queued",
 			startedAt: new Date().toISOString(),
@@ -215,7 +228,8 @@ export abstract class SandboxAgent<J extends SandboxJob, S extends AgentState> e
 	private async acknowledgeInbox(sent: string[], state: S) {
 		if (!sent.length) return;
 		const inbox = (await this.ctx.storage.get<string[]>(INBOX)) ?? [];
-		if (sent.every((message, index) => inbox[index] === message)) await this.ctx.storage.put(INBOX, inbox.slice(sent.length));
+		if (sent.every((message, index) => inbox[index] === message))
+			await this.ctx.storage.put(INBOX, inbox.slice(sent.length));
 		for (const text of sent) this.note(state, "message delivered: " + text.split("\n")[0].slice(0, 160));
 	}
 
@@ -263,7 +277,9 @@ export abstract class SandboxAgent<J extends SandboxJob, S extends AgentState> e
 			const deadline = Date.now() + RUN_BUDGET_MS;
 			while (state.status === "working" && Date.now() < deadline && !(await this.cancelled(state))) {
 				const turnToken = crypto.randomUUID();
-				await this.lifecycle(async () => this.ctx.storage.put({ [TURN_IN_FLIGHT]: turnToken, [TURN_STARTED]: Date.now() }));
+				await this.lifecycle(async () =>
+					this.ctx.storage.put({ [TURN_IN_FLIGHT]: turnToken, [TURN_STARTED]: Date.now() }),
+				);
 				try {
 					await this.turn(job, state);
 					await this.save(state);
@@ -300,7 +316,8 @@ export abstract class SandboxAgent<J extends SandboxJob, S extends AgentState> e
 
 	/** Mark the turn finished, unless a newer one has started. */
 	protected async endTurn(turnToken: string) {
-		if ((await this.ctx.storage.get<string>(TURN_IN_FLIGHT)) === turnToken) await this.ctx.storage.delete([TURN_IN_FLIGHT, TURN_STARTED]);
+		if ((await this.ctx.storage.get<string>(TURN_IN_FLIGHT)) === turnToken)
+			await this.ctx.storage.delete([TURN_IN_FLIGHT, TURN_STARTED]);
 	}
 
 	private async setUp(job: J, state: S) {
@@ -310,13 +327,16 @@ export abstract class SandboxAgent<J extends SandboxJob, S extends AgentState> e
 		this.note(state, restart ? "container restarted; re-cloning" : "starting container");
 		// The project's snapshot, when it has one: its checkout with main's dependencies installed, in seconds.
 		const project = (job as Partial<ChangeJob>).project;
-		const snapshot = project ? await rpc(this.env.GATE.getByName(`repo:${project}`).snapshot()).catch(() => null) : null;
+		const snapshot = project
+			? await rpc(this.env.GATE.getByName(`repo:${project}`).snapshot()).catch(() => null)
+			: null;
 		const booted = await bootContainer(container, "standard-1", snapshot);
 		if (booted === "restored") {
 			// Its checkout, pointed at this job's remote; afterClone fetches what the job needs from it.
 			const reset = await run(container, ["bash", "-c", "git checkout -q -f --detach && git clean -fdq"]);
 			const pointed = await run(container, ["git", "remote", "set-url", "origin", job.remote]);
-			if (reset.exitCode !== 0 || pointed.exitCode !== 0) throw new Error(`setting up the snapshot's checkout failed: ${clip(reset.output + pointed.output, 2_000)}`);
+			if (reset.exitCode !== 0 || pointed.exitCode !== 0)
+				throw new Error(`setting up the snapshot's checkout failed: ${clip(reset.output + pointed.output, 2_000)}`);
 			this.note(state, "started from the project's snapshot");
 		} else {
 			// A container that outlived its object (a deploy, say) still has the last checkout.
@@ -327,11 +347,20 @@ export abstract class SandboxAgent<J extends SandboxJob, S extends AgentState> e
 		}
 		await this.afterClone(job, state);
 		// Toolchains the checkout uses beyond Node; a failed install is noted, and the agent sees the missing tool for itself.
-		for (const installed of await installToolchains(container)) this.note(state, installed.exitCode === 0 ? `installed ${installed.toolchain}` : `installing ${installed.toolchain} failed: ${clip(installed.output, 300)}`);
+		for (const installed of await installToolchains(container))
+			this.note(
+				state,
+				installed.exitCode === 0
+					? `installed ${installed.toolchain}`
+					: `installing ${installed.toolchain} failed: ${clip(installed.output, 300)}`,
+			);
 		if (restart)
 			state.pending = [
 				...(state.pending ?? []),
-				{ role: "user", content: "The container restarted. Uncommitted changes were lost; the repository was cloned again." },
+				{
+					role: "user",
+					content: "The container restarted. Uncommitted changes were lost; the repository was cloned again.",
+				},
 			];
 	}
 
@@ -354,7 +383,9 @@ export abstract class SandboxAgent<J extends SandboxJob, S extends AgentState> e
 				run: async ({ prefix }) => {
 					const r = await this.exec(["git", "ls-files", "--cached", "--others", "--exclude-standard"]);
 					const files = r.output.split("\n").filter((f) => f && f.startsWith(prefix));
-					return files.slice(0, 500).join("\n") + (files.length > 500 ? `\n(${files.length - 500} more)` : "") || "No files.";
+					return (
+						files.slice(0, 500).join("\n") + (files.length > 500 ? `\n(${files.length - 500} more)` : "") || "No files."
+					);
 				},
 			}),
 			tool({
@@ -367,7 +398,10 @@ export abstract class SandboxAgent<J extends SandboxJob, S extends AgentState> e
 					const lines = r.output.split("\n");
 					const from = Math.max(1, Math.trunc(start_line));
 					const to = Math.min(lines.length, from + MAX_LINES - 1);
-					const body = lines.slice(from - 1, to).map((l, i) => `${from + i}\t${l}`).join("\n");
+					const body = lines
+						.slice(from - 1, to)
+						.map((l, i) => `${from + i}\t${l}`)
+						.join("\n");
 					return to < lines.length ? `${body}\n(lines ${from}-${to} of ${lines.length})` : body;
 				},
 			}),
@@ -377,7 +411,11 @@ export abstract class SandboxAgent<J extends SandboxJob, S extends AgentState> e
 				schema: WriteArgs,
 				run: async ({ path, content }) => {
 					const target = repoPath(path);
-					const r = await this.exec(["bash", "-c", 'mkdir -p "$(dirname "$1")" && cat > "$1"', "write", target], WORKDIR, content);
+					const r = await this.exec(
+						["bash", "-c", 'mkdir -p "$(dirname "$1")" && cat > "$1"', "write", target],
+						WORKDIR,
+						content,
+					);
 					return r.exitCode === 0 ? `Wrote ${target}.` : r.output;
 				},
 			}),
@@ -400,7 +438,8 @@ export abstract class SandboxAgent<J extends SandboxJob, S extends AgentState> e
 	}
 
 	private async turn(job: J, state: S) {
-		if (state.turns - (state.turnsAtRunStart ?? 0) >= MAX_TURNS) throw new Error(`stopped after ${MAX_TURNS} turns without finishing`);
+		if (state.turns - (state.turnsAtRunStart ?? 0) >= MAX_TURNS)
+			throw new Error(`stopped after ${MAX_TURNS} turns without finishing`);
 		const client = new OpenAI({ apiKey: this.env.OPENAI_API_KEY });
 		const tools = this.tools(job, state);
 		const inbox = await this.peekInbox();

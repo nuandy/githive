@@ -25,7 +25,10 @@ export interface ReviewerStats {
 	lastActive?: string;
 }
 
-const byActivity = <T extends { opened?: number; approvals?: number; rejections?: number; name: string }>(a: T, b: T) => {
+const byActivity = <T extends { opened?: number; approvals?: number; rejections?: number; name: string }>(
+	a: T,
+	b: T,
+) => {
 	const weight = (x: T) => (x.opened ?? 0) + (x.approvals ?? 0) + (x.rejections ?? 0);
 	return weight(b) - weight(a) || a.name.localeCompare(b.name);
 };

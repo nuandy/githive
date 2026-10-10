@@ -48,7 +48,11 @@ export interface Votes {
 export const SHARD_VOTES_WHEN = { reviewers: 8, writesPerMinute: 15, windowMs: 5 * 60_000 };
 
 /** Why the votes should shard before the next one, or null if they needn't (or are). */
-export function votesShardingReason(state: Votes | null | undefined, reviewer: string, now = Date.now()): string | null {
+export function votesShardingReason(
+	state: Votes | null | undefined,
+	reviewer: string,
+	now = Date.now(),
+): string | null {
 	if (state?.buckets) return null;
 	const since = now - SHARD_VOTES_WHEN.windowMs;
 	const recent = (state?.votes ?? []).filter((v) => Date.parse(v.at) >= since);
@@ -63,13 +67,23 @@ export function votesShardingReason(state: Votes | null | undefined, reviewer: s
 
 /** Shard the votes from here on (once: refused if they are). The votes cast so far stay in this record. */
 export function shardVotes(log: CasLog<Votes>, input: { buckets: number; recordsRepos: number; reason: string }) {
-	return appendRecord<Votes, "sharded">(log, "githive", () => ({ votes: [] }), (state) =>
-		state.buckets
-			? { refused: "sharded" }
-			: {
-					state: { ...state, buckets: input.buckets, ...(input.recordsRepos ? { recordsRepos: input.recordsRepos } : {}), shardedAt: new Date().toISOString(), shardedBecause: input.reason },
-					text: `Votes are sharded from here on, over ${input.buckets} buckets: ${input.reason}`,
-				},
+	return appendRecord<Votes, "sharded">(
+		log,
+		"githive",
+		() => ({ votes: [] }),
+		(state) =>
+			state.buckets
+				? { refused: "sharded" }
+				: {
+						state: {
+							...state,
+							buckets: input.buckets,
+							...(input.recordsRepos ? { recordsRepos: input.recordsRepos } : {}),
+							shardedAt: new Date().toISOString(),
+							shardedBecause: input.reason,
+						},
+						text: `Votes are sharded from here on, over ${input.buckets} buckets: ${input.reason}`,
+					},
 	);
 }
 
@@ -88,14 +102,25 @@ export interface FlagRecord {
 
 /** Ask a person about a change: it waits in their inbox until a person votes on its commit. */
 export function flagChange(log: CasLog<Votes>, input: Omit<FlagRecord, "at" | "by" | "stamp">, stamper?: Stamper) {
-	return appendRecord<Votes, never>(log, input.agent, () => ({ votes: [] }), async (state) => {
-		const record: FlagRecord = { ...input, at: new Date().toISOString() };
-		const asked = stamper ? { ...record, by: stamper.by } : record;
-		return {
-			state: { ...state, flags: [...(state.flags ?? []), stamper ? { ...asked, stamp: await stamper.stamp(stampPayload("flag", asked)) } : asked] },
-			text: `${input.agent} asks a person about ${input.change}: ${input.reason}`,
-		};
-	});
+	return appendRecord<Votes, never>(
+		log,
+		input.agent,
+		() => ({ votes: [] }),
+		async (state) => {
+			const record: FlagRecord = { ...input, at: new Date().toISOString() };
+			const asked = stamper ? { ...record, by: stamper.by } : record;
+			return {
+				state: {
+					...state,
+					flags: [
+						...(state.flags ?? []),
+						stamper ? { ...asked, stamp: await stamper.stamp(stampPayload("flag", asked)) } : asked,
+					],
+				},
+				text: `${input.agent} asks a person about ${input.change}: ${input.reason}`,
+			};
+		},
+	);
 }
 
 /**
@@ -103,7 +128,11 @@ export function flagChange(log: CasLog<Votes>, input: Omit<FlagRecord, "at" | "b
  * person's vote on `head` after it answers it. `state` holds the flags and
  * (at least) the votes on `head`.
  */
-export function openFlag(state: Pick<Votes, "votes" | "flags"> | null | undefined, change: string, head: string | null) {
+export function openFlag(
+	state: Pick<Votes, "votes" | "flags"> | null | undefined,
+	change: string,
+	head: string | null,
+) {
 	const flag = (state?.flags ?? []).filter((f) => f.change === change).at(-1);
 	if (!flag) return null;
 	// By a person themselves: an agent, even a person's own, can't answer what was put to people.
@@ -112,7 +141,19 @@ export function openFlag(state: Pick<Votes, "votes" | "flags"> | null | undefine
 }
 
 /** Paths whose changes need more review by default: dependencies, CI and deployment. */
-export const SENSITIVE_PATHS = [".github/", "package.json", "package-lock.json", "yarn.lock", "pnpm-lock.yaml", "bun.lockb", ".npmrc", "Dockerfile", "wrangler.json", "wrangler.jsonc", "wrangler.toml"];
+export const SENSITIVE_PATHS = [
+	".github/",
+	"package.json",
+	"package-lock.json",
+	"yarn.lock",
+	"pnpm-lock.yaml",
+	"bun.lockb",
+	".npmrc",
+	"Dockerfile",
+	"wrangler.json",
+	"wrangler.jsonc",
+	"wrangler.toml",
+];
 
 export interface ReviewPolicy {
 	/** Approvals a commit needs; 0 merges on the checks alone (unless a veto role must approve). */
@@ -152,7 +193,9 @@ export const isPerson = (by: string | undefined) => !!by && /^person:[^/]+$/.tes
 const poolOf = (grant: string) => grant.match(/^((?:person|service):[^/*]+)\/\*$/)?.[1] ?? null;
 
 /** Every role that can block a merge under `policy`, its own vetoes and its escalations'. */
-export const blockingRoles = (policy: ReviewPolicy) => [...new Set([...policy.vetoes, ...(policy.escalate ?? []).flatMap((e) => e.vetoes ?? [])])];
+export const blockingRoles = (policy: ReviewPolicy) => [
+	...new Set([...policy.vetoes, ...(policy.escalate ?? []).flatMap((e) => e.vetoes ?? [])]),
+];
 
 /**
  * What a policy's owner should know about who holds each role that can
@@ -168,8 +211,13 @@ export function grantWarnings(policy: ReviewPolicy): string[] {
 		const many = holders.some((h) => poolOf(h) || h.startsWith("@")) || holders.length > 1;
 		const warnings: string[] = [];
 		if (!many && !people)
-			warnings.push(`${role} is held by ${holders[0]} alone: its reviews wait whenever it's busy. Grant it to two or more agents, or a pool ("service:<id>/*": every agent registered under that identity).`);
-		if (!people) warnings.push(`no person holds ${role}: when its reviews wait 10 minutes people are told, but can't sign them off. Add "person:*" to let them.`);
+			warnings.push(
+				`${role} is held by ${holders[0]} alone: its reviews wait whenever it's busy. Grant it to two or more agents, or a pool ("service:<id>/*": every agent registered under that identity).`,
+			);
+		if (!people)
+			warnings.push(
+				`no person holds ${role}: when its reviews wait 10 minutes people are told, but can't sign them off. Add "person:*" to let them.`,
+			);
 		return warnings;
 	});
 }
@@ -182,7 +230,12 @@ export function grantWarnings(policy: ReviewPolicy): string[] {
  * member's vote doesn't count as the role on a change whose `author` runs
  * under the same identity: a team doesn't sign off its own changes.
  */
-export function holdsRole(policy: ReviewPolicy, role: string, vote: Pick<VoteRecord, "reviewer" | "by" | "teams">, author?: Pick<Author, "by">) {
+export function holdsRole(
+	policy: ReviewPolicy,
+	role: string,
+	vote: Pick<VoteRecord, "reviewer" | "by" | "teams">,
+	author?: Pick<Author, "by">,
+) {
 	return (policy.grants?.[role] ?? DEFAULT_GRANT).some((grant) => {
 		// People themselves: not their agents, whose identities start with the same person.
 		if (grant === "person:*") return isPerson(vote.by);
@@ -191,7 +244,8 @@ export function holdsRole(policy: ReviewPolicy, role: string, vote: Pick<VoteRec
 		const pool = poolOf(grant);
 		if (pool) return !!vote.by?.startsWith(`${pool}/`) && !author?.by?.startsWith(`${pool}/`);
 		if (/^(person|service):/.test(grant)) return vote.by === grant;
-		if (grant === "githive") return vote.by ? vote.by === `service:githive-reviewer:${role}` : vote.reviewer === `githive-${role}`;
+		if (grant === "githive")
+			return vote.by ? vote.by === `service:githive-reviewer:${role}` : vote.reviewer === `githive-${role}`;
 		return vote.reviewer === grant && (!vote.by || vote.by.endsWith(`/${grant}`));
 	});
 }
@@ -209,14 +263,22 @@ export function effectivePolicy(policy: ReviewPolicy, paths: string[]): { requir
 
 /** Record a reviewer's verdict on a commit. */
 export function vote(log: CasLog<Votes>, input: Omit<VoteRecord, "at" | "by" | "stamp">, stamper?: Stamper) {
-	return appendRecord<Votes, never>(log, input.reviewer, () => ({ votes: [] }), async (state) => {
-		const record: VoteRecord = { ...input, at: new Date().toISOString() };
-		const cast = stamper ? { ...record, by: stamper.by } : record;
-		return {
-			state: { ...state, votes: [...state.votes, stamper ? { ...cast, stamp: await stamper.stamp(stampPayload("vote", cast)) } : cast] },
-			text: `${input.reviewer} (${input.role}) ${input.verdict === "approve" ? "approves" : "rejects"} ${input.commit}: ${input.evidence}`,
-		};
-	});
+	return appendRecord<Votes, never>(
+		log,
+		input.reviewer,
+		() => ({ votes: [] }),
+		async (state) => {
+			const record: VoteRecord = { ...input, at: new Date().toISOString() };
+			const cast = stamper ? { ...record, by: stamper.by } : record;
+			return {
+				state: {
+					...state,
+					votes: [...state.votes, stamper ? { ...cast, stamp: await stamper.stamp(stampPayload("vote", cast)) } : cast],
+				},
+				text: `${input.reviewer} (${input.role}) ${input.verdict === "approve" ? "approves" : "rejects"} ${input.commit}: ${input.evidence}`,
+			};
+		},
+	);
 }
 
 /** A change's author, whose own approval doesn't count: its claim's agent, and who made the claim as Access verified them. */
@@ -240,27 +302,47 @@ export interface Author {
  * a veto role from someone not granted it counts as an ordinary one
  * (`ungranted` lists who).
  */
-export function approval(state: Pick<Votes, "votes"> | null | undefined, commit: string, base: ReviewPolicy, author?: Author, paths: string[] = []) {
+export function approval(
+	state: Pick<Votes, "votes"> | null | undefined,
+	commit: string,
+	base: ReviewPolicy,
+	author?: Author,
+	paths: string[] = [],
+) {
 	const policy = effectivePolicy(base, paths);
 	const latest = new Map<string, VoteRecord>();
 	for (const v of state?.votes ?? []) if (v.commit === commit) latest.set(v.by ?? `name:${v.reviewer}`, v);
 	const verdicts = [...latest.values()];
 	// The author's person, when the author is one of their agents: the person counts, their other agents don't.
 	const authorPerson = author?.by && !isPerson(author.by) ? personOf(author.by) : null;
-	const isAuthor = (v: VoteRecord) => !!author && ((!!v.by && v.by === author.by) || v.reviewer === author.agent || (!!authorPerson && personOf(v.by) === authorPerson && !isPerson(v.by)));
+	const isAuthor = (v: VoteRecord) =>
+		!!author &&
+		((!!v.by && v.by === author.by) ||
+			v.reviewer === author.agent ||
+			(!!authorPerson && personOf(v.by) === authorPerson && !isPerson(v.by)));
 	const approving = verdicts.filter((v) => v.verdict === "approve" && !isAuthor(v));
 	// One approval per person, however many of their agents approve; each other identity once.
 	const approvals = new Set(approving.map((v) => personOf(v.by) ?? v.by ?? `name:${v.reviewer}`)).size;
 	const asRole = (v: VoteRecord) => policy.vetoes.includes(v.role) && holdsRole(base, v.role, v, author);
 	const vetoedBy = verdicts.filter((v) => v.verdict === "reject" && asRole(v)).map((v) => v.reviewer);
 	const awaiting = policy.vetoes.filter((role) => !approving.some((v) => v.role === role && asRole(v)));
-	const ungranted = verdicts.filter((v) => policy.vetoes.includes(v.role) && !asRole(v)).map((v) => `${v.reviewer} (${v.role})`);
-	return { approved: approvals >= policy.required && !vetoedBy.length && !awaiting.length, approvals, vetoedBy, awaiting, ...(ungranted.length ? { ungranted } : {}) };
+	const ungranted = verdicts
+		.filter((v) => policy.vetoes.includes(v.role) && !asRole(v))
+		.map((v) => `${v.reviewer} (${v.role})`);
+	return {
+		approved: approvals >= policy.required && !vetoedBy.length && !awaiting.length,
+		approvals,
+		vetoedBy,
+		awaiting,
+		...(ungranted.length ? { ungranted } : {}),
+	};
 }
 
 /** The votes that count: with the registry's stamp key, only those GitHive stamped. */
 export async function countedVotes(cast: VoteRecord[], stampKey: string | undefined) {
 	if (!stampKey) return cast;
-	const checked = await Promise.all(cast.map(async (v) => ((await verifyStamp(stampKey, stampPayload("vote", v), v.stamp)) ? v : null)));
+	const checked = await Promise.all(
+		cast.map(async (v) => ((await verifyStamp(stampKey, stampPayload("vote", v), v.stamp)) ? v : null)),
+	);
 	return checked.filter((v) => v !== null);
 }

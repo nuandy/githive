@@ -67,9 +67,36 @@ const WAYS = {
 	github: (c) => ({ batch: 1, depth: c.runners, k: 1, cancel: true, displaced: "front" }),
 	"github-lenient": (c) => ({ batch: 1, depth: c.runners, k: 1, cancel: true, displaced: "front", lenient: true }),
 	bisect: (c) => ({ batch: "adaptive", depth: 1, k: 1, cancel: true, displaced: "front", retry: true, pause: true }),
-	kary: (c) => ({ batch: "adaptive", depth: 1, k: c.runners, cancel: true, displaced: "front", retry: true, pause: true }),
-	hybrid: (c) => ({ batch: "adaptive", depth: 3, k: 1, cancel: true, displaced: "front", retry: true, pause: true, aside: true }),
-	"hybrid-lanes": (c) => ({ batch: "adaptive", depth: 3, k: 1, cancel: true, displaced: "front", retry: true, pause: true, aside: true, lanes: 4 }),
+	kary: (c) => ({
+		batch: "adaptive",
+		depth: 1,
+		k: c.runners,
+		cancel: true,
+		displaced: "front",
+		retry: true,
+		pause: true,
+	}),
+	hybrid: (c) => ({
+		batch: "adaptive",
+		depth: 3,
+		k: 1,
+		cancel: true,
+		displaced: "front",
+		retry: true,
+		pause: true,
+		aside: true,
+	}),
+	"hybrid-lanes": (c) => ({
+		batch: "adaptive",
+		depth: 3,
+		k: 1,
+		cancel: true,
+		displaced: "front",
+		retry: true,
+		pause: true,
+		aside: true,
+		lanes: 4,
+	}),
 };
 /** The biggest batch the adaptive ways make. */
 const MAX_BATCH = 64;
@@ -91,7 +118,7 @@ class Events {
 	push(time, fn) {
 		const h = this.heap;
 		h.push({ time, seq: this.seq++, fn });
-		for (let i = h.length - 1; i > 0; ) {
+		for (let i = h.length - 1; i > 0;) {
 			const p = (i - 1) >> 1;
 			if (!this.before(h[i], h[p])) break;
 			[h[i], h[p]] = [h[p], h[i]];
@@ -104,7 +131,7 @@ class Events {
 		const last = h.pop();
 		if (h.length) {
 			h[0] = last;
-			for (let i = 0; ; ) {
+			for (let i = 0; ;) {
 				const l = 2 * i + 1;
 				const r = l + 1;
 				let m = i;
@@ -198,7 +225,9 @@ class Line {
 	}
 
 	size() {
-		return this.way.batch === 1 ? 1 : Math.max(1, Math.min(MAX_BATCH, Math.round(1 / Math.max(this.failRate, 1 / MAX_BATCH))));
+		return this.way.batch === 1
+			? 1
+			: Math.max(1, Math.min(MAX_BATCH, Math.round(1 / Math.max(this.failRate, 1 / MAX_BATCH))));
 	}
 
 	/** What batch `i`'s check runs on: every change ahead of it, then its own. */
@@ -377,11 +406,20 @@ const pct = (xs, q) => {
 	const s = [...xs].sort((a, b) => a - b);
 	return s[Math.min(s.length - 1, Math.floor(q * s.length))];
 };
-const mins = (m) => (Number.isNaN(m) ? "-" : m < 60 ? `${Math.round(m)}m` : `${Math.floor(m / 60)}h${String(Math.round(m % 60)).padStart(2, "0")}`);
+const mins = (m) =>
+	Number.isNaN(m)
+		? "-"
+		: m < 60
+			? `${Math.round(m)}m`
+			: `${Math.floor(m / 60)}h${String(Math.round(m % 60)).padStart(2, "0")}`;
 
 function compare(c, names) {
 	const rows = names.map((name) => {
-		const way = { ...WAYS[name](c), ...(c.retry ? { retry: c.retry === "on" } : {}), ...(c.lanes ? { lanes: c.lanes } : {}) };
+		const way = {
+			...WAYS[name](c),
+			...(c.retry ? { retry: c.retry === "on" } : {}),
+			...(c.lanes ? { lanes: c.lanes } : {}),
+		};
 		let checks = 0;
 		let minutes = 0;
 		const all = [];
@@ -402,12 +440,26 @@ function compare(c, names) {
 			Math.round(minutes / landed.length).toString(),
 			mins(pct(wait, 0.5)),
 			mins(pct(wait, 0.95)),
-			mins(pct(bad.filter((ch) => ch.out !== undefined).map((ch) => ch.out - ch.arrived), 0.5)),
+			mins(
+				pct(
+					bad.filter((ch) => ch.out !== undefined).map((ch) => ch.out - ch.arrived),
+					0.5,
+				),
+			),
 			good.length ? `${((100 * good.filter((ch) => ch.out !== undefined).length) / good.length).toFixed(1)}%` : "-",
 			left ? `${Math.round(left / c.seeds)}` : "0",
 		];
 	});
-	const head = ["way", "checks/landed", "CI min/landed", "land p50", "land p95", "bad out p50", "good put out", "never done"];
+	const head = [
+		"way",
+		"checks/landed",
+		"CI min/landed",
+		"land p50",
+		"land p95",
+		"bad out p50",
+		"good put out",
+		"never done",
+	];
 	const widths = head.map((h, i) => Math.max(h.length, ...rows.map((r) => r[i].length)));
 	const line = (r) => r.map((v, i) => (i ? v.padStart(widths[i]) : v.padEnd(widths[i]))).join("  ");
 	console.log(line(head));

@@ -3,7 +3,8 @@
 
 export type Tone = "good" | "bad" | "warn" | "neutral" | "needs" | "accent";
 
-export type StatusKind = "merged" | "abandoned" | "needs-you" | "approved" | "changes-requested" | "in-review" | "draft";
+export type StatusKind =
+	"merged" | "abandoned" | "needs-you" | "approved" | "changes-requested" | "in-review" | "draft";
 
 export interface ChangeStatus {
 	kind: StatusKind;

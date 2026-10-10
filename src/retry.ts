@@ -37,7 +37,8 @@ function recordOf(value: unknown): Record<string, unknown> | undefined {
 }
 
 function numericStatus(value: unknown): number | undefined {
-	const status = typeof value === "number" ? value : typeof value === "string" && /^\d{3}$/.test(value) ? Number(value) : NaN;
+	const status =
+		typeof value === "number" ? value : typeof value === "string" && /^\d{3}$/.test(value) ? Number(value) : NaN;
 	return Number.isInteger(status) && status >= 100 && status <= 599 ? status : undefined;
 }
 
@@ -96,8 +97,10 @@ function hasRecognizableNetworkFailure(error: unknown): boolean {
 
 		const message = typeof record.message === "string" ? record.message : "";
 		if (/\b(?:timed?\s*out|timeout)\b/i.test(message)) return true;
-		if (/\b(?:fetch failed|failed to fetch|network error|network connection (?:was )?lost)\b/i.test(message)) return true;
-		if (/\b(?:socket hang up|connection (?:was )?(?:reset|refused|aborted|timed? out)|broken pipe)\b/i.test(message)) return true;
+		if (/\b(?:fetch failed|failed to fetch|network error|network connection (?:was )?lost)\b/i.test(message))
+			return true;
+		if (/\b(?:socket hang up|connection (?:was )?(?:reset|refused|aborted|timed? out)|broken pipe)\b/i.test(message))
+			return true;
 		if (/\btemporary failure in name resolution\b/i.test(message)) return true;
 	}
 
@@ -125,16 +128,12 @@ export function sleep(ms: number): Promise<void> {
 }
 
 /** How long retryTransient waits after failed attempt `attempt` (counting from 1), by default. */
-export const transientDelay = (attempt: number, baseDelayMs = 100, maxDelayMs = 2000) => Math.min(maxDelayMs, baseDelayMs * 2 ** (attempt - 1));
+export const transientDelay = (attempt: number, baseDelayMs = 100, maxDelayMs = 2000) =>
+	Math.min(maxDelayMs, baseDelayMs * 2 ** (attempt - 1));
 
 /** Run an operation again only when its failure is explicitly transient. */
-export async function retryTransient<T>(
-	operation: () => Promise<T>,
-	options: RetryTransientOptions = {},
-): Promise<T> {
-	const maxAttempts = Number.isFinite(options.maxAttempts)
-		? Math.max(1, Math.floor(options.maxAttempts!))
-		: 4;
+export async function retryTransient<T>(operation: () => Promise<T>, options: RetryTransientOptions = {}): Promise<T> {
+	const maxAttempts = Number.isFinite(options.maxAttempts) ? Math.max(1, Math.floor(options.maxAttempts!)) : 4;
 	const baseDelayMs = Number.isFinite(options.baseDelayMs) ? Math.max(0, options.baseDelayMs!) : 100;
 	const maxDelayMs = Number.isFinite(options.maxDelayMs) ? Math.max(0, options.maxDelayMs!) : 2000;
 	const wait = options.sleep ?? sleep;

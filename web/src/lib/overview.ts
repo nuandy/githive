@@ -26,7 +26,8 @@ export const LAMP_WORDS: Record<Lamp, string> = {
 };
 
 /** Which of the three lamp colors a state shows. */
-export const lampColor = (lamp: Lamp): "red" | "amber" | "green" => (lamp === "attention" ? "red" : lamp === "approved" ? "green" : "amber");
+export const lampColor = (lamp: Lamp): "red" | "amber" | "green" =>
+	lamp === "attention" ? "red" : lamp === "approved" ? "green" : "amber";
 
 /** What else a lamp reads: what's being checked to land, the votes (for when a change's turn came back to its agent), and the time. */
 export interface LampContext {
@@ -44,9 +45,17 @@ export interface LampContext {
 export function lampOf(claim: Claim, context: LampContext = {}): Lamp {
 	if (claim.attention || claim.approval.vetoedBy.length) return "attention";
 	const { landing, votes = [], now = Date.now() } = context;
-	const checking = !!claim.head && !!landing?.checking?.changes.some((c) => c.change === claim.change && c.head === claim.head);
+	const checking =
+		!!claim.head && !!landing?.checking?.changes.some((c) => c.change === claim.change && c.head === claim.head);
 	const onHead = claim.head ? votes.filter((v) => v.commit === claim.head && v.reviewer !== claim.agent) : [];
-	const signs = { active: claim.active, head: claim.head, votes: onHead.map((v) => ({ verdict: v.verdict, at: v.at })), approved: claim.approval.approved, landing: checking, asked: false };
+	const signs = {
+		active: claim.active,
+		head: claim.head,
+		votes: onHead.map((v) => ({ verdict: v.verdict, at: v.at })),
+		approved: claim.approval.approved,
+		landing: checking,
+		asked: false,
+	};
 	if (abandoned(signs, now).abandoned) return "abandoned";
 	if (checking) return "checking";
 	if (claim.approval.approved) return "approved";
@@ -125,7 +134,12 @@ export function territory(files: string[], claims: Claim[], context: LampContext
 		if (parts.length > 2) cell.folder = true;
 	}
 	for (const claim of claims) {
-		const holder: Holder = { change: claim.change, title: claimTitle(claim), agent: claimAgent(claim), lamp: lampOf(claim, context) };
+		const holder: Holder = {
+			change: claim.change,
+			title: claimTitle(claim),
+			agent: claimAgent(claim),
+			lamp: lampOf(claim, context),
+		};
 		for (const claimed of claim.paths) {
 			const parts = normalizePath(claimed).split("/").filter(Boolean);
 			if (!parts.length) {
@@ -137,7 +151,11 @@ export function territory(files: string[], claims: Claim[], context: LampContext
 			const region = regionOf(isFolder ? parts[0] : "");
 			if (isFolder && parts.length === 1) region.whole.push(holder);
 			else {
-				const cell = cellOf(region, isFolder ? parts[1] : parts[0], !cells.has(isFolder ? `${parts[0]}/${parts[1]}` : parts[0]));
+				const cell = cellOf(
+					region,
+					isFolder ? parts[1] : parts[0],
+					!cells.has(isFolder ? `${parts[0]}/${parts[1]}` : parts[0]),
+				);
 				if (isFolder && (parts.length > 2 || claimed.endsWith("/"))) cell.folder = true;
 				if (!cell.holders.some((h) => h.change === holder.change)) cell.holders.push(holder);
 			}

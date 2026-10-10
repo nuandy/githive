@@ -72,7 +72,9 @@ export function AdminView({ requests, invites, hosted, error, actions, now = Dat
 			<header className="manage__header">
 				<div>
 					<h1>Admin</h1>
-					<p className="muted manage__lede">Who may sign in to GitHive, and who may start its hosted agents. Only through Cloudflare Access.</p>
+					<p className="muted manage__lede">
+						Who may sign in to GitHive, and who may start its hosted agents. Only through Cloudflare Access.
+					</p>
 				</div>
 			</header>
 			{error ? (
@@ -86,7 +88,10 @@ export function AdminView({ requests, invites, hosted, error, actions, now = Dat
 					<h2 id="admin-requests">Requests</h2>
 				</div>
 				<div className="box__body">
-					<p className="manage__hint">People an organization invited who can't sign in until you approve them. Approved, they join those organizations when they first sign in.</p>
+					<p className="manage__hint">
+						People an organization invited who can't sign in until you approve them. Approved, they join those
+						organizations when they first sign in.
+					</p>
 				</div>
 				{requests === undefined ? (
 					<p className="muted box__body">Loading…</p>
@@ -101,12 +106,18 @@ export function AdminView({ requests, invites, hosted, error, actions, now = Dat
 									<div className="manage__row-main">
 										<strong>{r.email}</strong>
 										<span className="muted">
-											{r.orgs.map((o) => `@${o.org} as ${o.role}, asked by ${o.invitedBy}`).join("; ")} · {timeAgo(r.createdAt, now)}
+											{r.orgs.map((o) => `@${o.org} as ${o.role}, asked by ${o.invitedBy}`).join("; ")} ·{" "}
+											{timeAgo(r.createdAt, now)}
 										</span>
 										{errorFor(key)}
 									</div>
 									<div className="manage__row-actions">
-										<button type="button" className="accent manage__small" disabled={busy !== null} onClick={() => run(key, () => actions.approve(r.email), rowFailed(key))}>
+										<button
+											type="button"
+											className="accent manage__small"
+											disabled={busy !== null}
+											onClick={() => run(key, () => actions.approve(r.email), rowFailed(key))}
+										>
 											{busy === key ? "Approving…" : "Approve"}
 										</button>
 										<ConfirmButton
@@ -135,12 +146,22 @@ export function AdminView({ requests, invites, hosted, error, actions, now = Dat
 						<label htmlFor="admin-email" className="sr-only">
 							Email to approve
 						</label>
-						<input id="admin-email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="person@example.com" autoComplete="off" />
+						<input
+							id="admin-email"
+							type="email"
+							value={email}
+							onChange={(e) => setEmail(e.target.value)}
+							placeholder="person@example.com"
+							autoComplete="off"
+						/>
 						<button type="submit" className="accent" disabled={!email.trim() || busy === "approve-email"}>
 							{busy === "approve-email" ? "Approving…" : "Approve an email"}
 						</button>
 					</div>
-					<p className="manage__hint">They sign in with GitHub or Google, with this email verified there. Removing one doesn't sign out someone already signed in.</p>
+					<p className="manage__hint">
+						They sign in with GitHub or Google, with this email verified there. Removing one doesn't sign out someone
+						already signed in.
+					</p>
 					{emailError ? (
 						<p className="error manage__note" role="alert">
 							{emailError}
@@ -187,12 +208,23 @@ export function AdminView({ requests, invites, hosted, error, actions, now = Dat
 					<h2 id="admin-hosted">Hosted agents</h2>
 				</div>
 				<form className="box__body manage__form" onSubmit={allowPerson}>
-					<p className="manage__hint">GitHive's hosted agents (build, request_review) run on GitHive's model account, so only the people listed here can start them.</p>
+					<p className="manage__hint">
+						GitHive's hosted agents (build, request_review) run on GitHive's model account, so only the people listed
+						here can start them.
+					</p>
 					<div className="manage__inline">
 						<label htmlFor="admin-hosted-handle" className="sr-only">
 							Handle to allow
 						</label>
-						<input id="admin-hosted-handle" type="text" value={handle} onChange={(e) => setHandle(e.target.value)} placeholder="handle" autoComplete="off" spellCheck={false} />
+						<input
+							id="admin-hosted-handle"
+							type="text"
+							value={handle}
+							onChange={(e) => setHandle(e.target.value)}
+							placeholder="handle"
+							autoComplete="off"
+							spellCheck={false}
+						/>
 						<button type="submit" className="accent" disabled={!handle.trim() || busy === "allow-hosted"}>
 							{busy === "allow-hosted" ? "Allowing…" : "Allow a person"}
 						</button>
@@ -263,5 +295,13 @@ export function AdminPage({ admin }: { admin: AdminApi }) {
 		allowHosted: after(admin.allowHosted),
 		disallowHosted: after(admin.disallowHosted),
 	};
-	return <AdminView requests={requests.data} invites={invites.data} hosted={hosted.data} error={requests.error ?? invites.error ?? hosted.error} actions={actions} />;
+	return (
+		<AdminView
+			requests={requests.data}
+			invites={invites.data}
+			hosted={hosted.data}
+			error={requests.error ?? invites.error ?? hosted.error}
+			actions={actions}
+		/>
+	);
 }

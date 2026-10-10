@@ -40,7 +40,12 @@ export function historyStatus(history: Pick<ChangeHistory, "claim" | "released">
 	if (!ending) return null;
 	return ending.kind === "merged"
 		? { kind: "merged", label: "Merged", tone: "good", description: "Merged." }
-		: { kind: "abandoned", label: "Released", tone: "neutral", description: `Its claim was released: ${ending.release.reason}` };
+		: {
+				kind: "abandoned",
+				label: "Released",
+				tone: "neutral",
+				description: `Its claim was released: ${ending.release.reason}`,
+			};
 }
 
 export function buildTimeline(history: ChangeHistory, repo: string): TimelineItem[] {
@@ -105,6 +110,8 @@ export function buildTimeline(history: ChangeHistory, repo: string): TimelineIte
 		});
 	}
 	const order = (item: TimelineItem) => timeOf(item.at) ?? (item.kind === "opened" ? -Infinity : Infinity);
-	return items.map((item, index) => ({ item, index })).sort((a, b) => order(a.item) - order(b.item) || a.index - b.index).map(({ item }) => item);
+	return items
+		.map((item, index) => ({ item, index }))
+		.sort((a, b) => order(a.item) - order(b.item) || a.index - b.index)
+		.map(({ item }) => item);
 }
-

@@ -68,7 +68,8 @@ function ReviewCard({ item }: { item: TimelineItem }) {
 			<div className="timeline-card__header">
 				{review.by ? (
 					<>
-						<strong>{identityName(review.by)}</strong> ({review.reviewer} reviewer) {approved ? "approved these changes" : "requested changes"}
+						<strong>{identityName(review.by)}</strong> ({review.reviewer} reviewer){" "}
+						{approved ? "approved these changes" : "requested changes"}
 					</>
 				) : (
 					<>
@@ -97,7 +98,15 @@ function ReviewCard({ item }: { item: TimelineItem }) {
 	);
 }
 
-export function Timeline({ items, ids = [], link }: { items: TimelineItem[]; ids?: string[]; link?: (id: string) => string }) {
+export function Timeline({
+	items,
+	ids = [],
+	link,
+}: {
+	items: TimelineItem[];
+	ids?: string[];
+	link?: (id: string) => string;
+}) {
 	if (!items.length) return null;
 	const text = (value: string) => (link ? linkIds(value, ids, link) : value);
 	return (
@@ -133,7 +142,11 @@ export function Timeline({ items, ids = [], link }: { items: TimelineItem[]; ids
 										</span>
 									) : null}
 								</p>
-								{item.body ? <div className={`timeline__body${item.kind === "pushed" ? " timeline__body--commit" : ""}`}>{text(item.body)}</div> : null}
+								{item.body ? (
+									<div className={`timeline__body${item.kind === "pushed" ? " timeline__body--commit" : ""}`}>
+										{text(item.body)}
+									</div>
+								) : null}
 							</>
 						)}
 					</div>

@@ -23,7 +23,10 @@ const remote = () => ({ url: server.url, token: "unused" });
 const claims = () => new GitCasLog<Registry>(async () => remote(), "t1", "refs/notes/githive-claims/t1");
 const votes = () => new GitCasLog<Votes>(async () => remote(), "t1", "refs/notes/githive-votes/t1");
 const policy = { required: 1, vetoes: [] };
-const passing: CheckRunner = vi.fn(async () => ({ passed: true, results: [{ command: "npm test", exitCode: 0, output: "ok" }] }));
+const passing: CheckRunner = vi.fn(async () => ({
+	passed: true,
+	results: [{ command: "npm test", exitCode: 0, output: "ok" }],
+}));
 
 /** A change on its claim, pushed and approved. */
 async function readyChange(change: string, files: Record<string, string>) {
@@ -34,7 +37,18 @@ async function readyChange(change: string, files: Record<string, string>) {
 }
 
 const merge = (change: string, runChecks: CheckRunner = passing) =>
-	mergeChange({ remote: remote(), batchGit: memoryBatchGit(remote()), branch: "main", store: claimStore({ repo: "t1", registry: undefined, root: claims(), remote: async () => remote() }), votes: voteStore({ repo: "t1", root: votes(), remote: async () => remote() }), policy, verify: ["npm test"], runChecks, change, agent: `agent-${change}` });
+	mergeChange({
+		remote: remote(),
+		batchGit: memoryBatchGit(remote()),
+		branch: "main",
+		store: claimStore({ repo: "t1", registry: undefined, root: claims(), remote: async () => remote() }),
+		votes: voteStore({ repo: "t1", root: votes(), remote: async () => remote() }),
+		policy,
+		verify: ["npm test"],
+		runChecks,
+		change,
+		agent: `agent-${change}`,
+	});
 
 beforeEach(async () => {
 	server = await startGitServer();
@@ -60,7 +74,9 @@ describe("merge", { timeout: 60_000 }, () => {
 		expect(await merge("b-1")).toEqual({
 			ok: false,
 			conflicts: ["shared.txt"],
-			reasons: ["changes/b-1 conflicts with main in shared.txt: merge main into your branch, resolve inside your claim, push, and get the new commit approved"],
+			reasons: [
+				"changes/b-1 conflicts with main in shared.txt: merge main into your branch, resolve inside your claim, push, and get the new commit approved",
+			],
 		});
 		expect(server.git("rev-parse", "main").trim()).toBe(main);
 	});
@@ -68,16 +84,38 @@ describe("merge", { timeout: 60_000 }, () => {
 	it("refuses a change approved only by its own author", async () => {
 		await claim(claims(), { change: "a-1", agent: "agent-a-1", paths: ["src/a.txt"], intent: "a" });
 		const head = await pushChange(server.url, work, "agent-a-1", "a-1", { "src/a.txt": "a\n" });
-		await vote(votes(), { commit: head, reviewer: "agent-a-1", role: "tests", verdict: "approve", evidence: "I checked my own work" });
-		expect(await merge("a-1")).toEqual({ ok: false, reasons: [`${head} has 0 of 1 approvals from reviewers other than its author`] });
+		await vote(votes(), {
+			commit: head,
+			reviewer: "agent-a-1",
+			role: "tests",
+			verdict: "approve",
+			evidence: "I checked my own work",
+		});
+		expect(await merge("a-1")).toEqual({
+			ok: false,
+			reasons: [`${head} has 0 of 1 approvals from reviewers other than its author`],
+		});
 	});
 
 	it("runs the checks on main plus the change, and refuses to merge when they fail twice", async () => {
 		const head = await readyChange("a-1", { "src/a.txt": "a\n" });
 		const main = server.git("rev-parse", "main").trim();
-		const failing: CheckRunner = vi.fn(async () => ({ passed: false, results: [{ command: "npm test", exitCode: 1, output: "1 failing" }] }));
-		expect(await merge("a-1", failing)).toEqual({ ok: false, reasons: ["checks failed: npm test exited 1"], checks: [{ command: "npm test", exitCode: 1, output: "1 failing" }] });
-		expect(failing).toHaveBeenCalledWith({ base: main, branch: "main", changes: [{ change: "a-1", head, ref: "changes/a-1", agent: "agent-a-1" }], commands: ["npm test"], gate: expect.stringMatching(/-0$/) });
+		const failing: CheckRunner = vi.fn(async () => ({
+			passed: false,
+			results: [{ command: "npm test", exitCode: 1, output: "1 failing" }],
+		}));
+		expect(await merge("a-1", failing)).toEqual({
+			ok: false,
+			reasons: ["checks failed: npm test exited 1"],
+			checks: [{ command: "npm test", exitCode: 1, output: "1 failing" }],
+		});
+		expect(failing).toHaveBeenCalledWith({
+			base: main,
+			branch: "main",
+			changes: [{ change: "a-1", head, ref: "changes/a-1", agent: "agent-a-1" }],
+			commands: ["npm test"],
+			gate: expect.stringMatching(/-0$/),
+		});
 		expect(failing).toHaveBeenCalledTimes(2);
 		expect(server.git("rev-parse", "main").trim()).toBe(main);
 	});

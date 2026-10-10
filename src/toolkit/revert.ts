@@ -33,7 +33,8 @@ export interface RevertInput {
 export type RevertOutcome = { ok: true; commit: string } | { ok: false; reasons: string[] };
 
 export async function revertViolation(input: RevertInput): Promise<RevertOutcome> {
-	if (!input.violations.some((v) => v.commit === input.target && !v.resolvedBy)) return { ok: false, reasons: [`${input.target} has no reported violations to revert`] };
+	if (!input.violations.some((v) => v.commit === input.target && !v.resolvedBy))
+		return { ok: false, reasons: [`${input.target} has no reported violations to revert`] };
 	for (let attempt = 1; ; attempt++) {
 		const ws = await Workspace.clone(input.remote, input.branch);
 		const head = await ws.head();
@@ -52,7 +53,9 @@ export async function revertViolation(input: RevertInput): Promise<RevertOutcome
 				throw err;
 			});
 			if (blob) {
-				await ws.fs.promises.mkdir(`${DIR}/${file.split("/").slice(0, -1).join("/")}`, { recursive: true } as never).catch(() => {});
+				await ws.fs.promises
+					.mkdir(`${DIR}/${file.split("/").slice(0, -1).join("/")}`, { recursive: true } as never)
+					.catch(() => {});
 				await ws.fs.promises.writeFile(`${DIR}/${file}`, blob.blob);
 				await git.add({ fs: ws.fs, dir: DIR, filepath: file });
 			} else {
@@ -61,7 +64,11 @@ export async function revertViolation(input: RevertInput): Promise<RevertOutcome
 			}
 		}
 		const rules = [...new Set(input.violations.filter((v) => v.commit === input.target).map((v) => v.rule))].join(", ");
-		const stamp = input.stamper ? await input.stamper.stamp(revertStampPayload({ base: head, reverts: input.target, author: input.agent, by: input.stamper.by })) : undefined;
+		const stamp = input.stamper
+			? await input.stamper.stamp(
+					revertStampPayload({ base: head, reverts: input.target, author: input.agent, by: input.stamper.by }),
+				)
+			: undefined;
 		const message = [
 			`Revert ${input.target.slice(0, 8)} (${rules})`,
 			"",
@@ -76,7 +83,8 @@ export async function revertViolation(input: RevertInput): Promise<RevertOutcome
 			await ws.push();
 		} catch (err) {
 			// Main moved under us: look again on top of it.
-			if (attempt < ATTEMPTS && (err instanceof git.Errors.PushRejectedError || err instanceof git.Errors.GitPushError)) continue;
+			if (attempt < ATTEMPTS && (err instanceof git.Errors.PushRejectedError || err instanceof git.Errors.GitPushError))
+				continue;
 			throw err;
 		}
 		return { ok: true, commit: oid };

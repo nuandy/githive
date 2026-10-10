@@ -7,7 +7,9 @@ export default defineConfig({
 		alias: { "cloudflare:workers": fileURLToPath(new URL("./test/fakes/cloudflare-workers.ts", import.meta.url)) },
 	},
 	// node:sqlite stands in for D1 in tests; Node 22 still keeps it behind a flag.
-	test: { exclude: ["**/node_modules/**", "**/dist/**", "**/.wrangler/**"], execArgv: ["--experimental-sqlite", "--no-warnings=ExperimentalWarning"],
+	test: {
+		exclude: ["**/node_modules/**", "**/dist/**", "**/.wrangler/**"],
+		execArgv: ["--experimental-sqlite", "--no-warnings=ExperimentalWarning"],
 		// Run through Vite, so its cloudflare:workers import gets the stand-in above.
 		server: { deps: { inline: ["@cloudflare/workers-oauth-provider"] } },
 	},

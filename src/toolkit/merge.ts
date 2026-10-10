@@ -5,7 +5,15 @@ import { changeAgainst, landedOn, type ReadHistory } from "./batch-reads";
 import { skipsChecks } from "./check-scope";
 import type { ClaimRecord } from "./claims";
 import type { ClaimStore, ClaimsView } from "./claim-store";
-import { conflictWords, LANDED_FILES_KEPT, LANDED_INTENT_CHARS, type Landing, lastLandedOn, memoryLanding, type Settled } from "./landing";
+import {
+	conflictWords,
+	LANDED_FILES_KEPT,
+	LANDED_INTENT_CHARS,
+	type Landing,
+	lastLandedOn,
+	memoryLanding,
+	type Settled,
+} from "./landing";
 import { type MergeClaim, mergeMessage } from "./merge-commit";
 import type { Stamper } from "./stamp";
 import type { VoteStore, VotesView } from "./vote-store";
@@ -60,7 +68,13 @@ export interface BatchChange {
  * order: what main becomes with all of them landed. Live, in a Gate's
  * container: the one named `gate` (see checkBatch), else the last change's.
  */
-export type CheckRunner = (input: { base: string; branch: string; changes: BatchChange[]; commands: string[]; gate?: string }) => Promise<{ passed: boolean; results: CheckResult[] }>;
+export type CheckRunner = (input: {
+	base: string;
+	branch: string;
+	changes: BatchChange[];
+	commands: string[];
+	gate?: string;
+}) => Promise<{ passed: boolean; results: CheckResult[] }>;
 
 /**
  * Where a batch's checks run: a few containers of its own, named for the
@@ -99,13 +113,25 @@ export interface BatchGit {
 	 * GitHive's stamp as `by`, in one push. Their commits, or "moved" if the
 	 * branch isn't at `base` any more.
 	 */
-	land(input: { base: string; branch: string; merges: (BatchChange & { claimed: Omit<MergeClaim, "base"> })[]; by?: string; stamper?: Stamper }): Promise<{ commits: string[] } | "moved">;
+	land(input: {
+		base: string;
+		branch: string;
+		merges: (BatchChange & { claimed: Omit<MergeClaim, "base"> })[];
+		by?: string;
+		stamper?: Stamper;
+	}): Promise<{ commits: string[] } | "moved">;
 	/**
 	 * `changes` merged onto `base` as they'd land, each its own merge, pushed to
 	 * `ref` on `to` (a connected GitHub repo, for its Actions): the tip, or why
 	 * it couldn't be.
 	 */
-	checksBranch(input: { base: string; branch: string; changes: BatchChange[]; to: Remote; ref: string }): Promise<{ tip: string } | { failed: string }>;
+	checksBranch(input: {
+		base: string;
+		branch: string;
+		changes: BatchChange[];
+		to: Remote;
+		ref: string;
+	}): Promise<{ tip: string } | { failed: string }>;
 	/** Push `branch` at `head` to `to` as a fast-forward only (GitHub's copy): refused, it throws. */
 	pushBranch(input: { branch: string; head: string; to: Remote }): Promise<void>;
 }
@@ -297,7 +323,9 @@ function stillWaiting(change: string, head: string, waitedMs: number): MergeOutc
 	return {
 		ok: false,
 		pending: true,
-		reasons: [`${change} is ready and waiting to land (${head.slice(0, 8)}): others' batches came first in the ${Math.round(waitedMs / 60_000)} minutes this merge waited. Call merge again to go on waiting; it lands with a coming batch.`],
+		reasons: [
+			`${change} is ready and waiting to land (${head.slice(0, 8)}): others' batches came first in the ${Math.round(waitedMs / 60_000)} minutes this merge waited. Call merge again to go on waiting; it lands with a coming batch.`,
+		],
 	};
 }
 
@@ -308,11 +336,17 @@ function stillWaiting(change: string, head: string, waitedMs: number): MergeOutc
  * a merge commit whose second parent is `head`.
  */
 async function landedAlready(input: MergeInput, landing: Landing, head: string): Promise<MergeOutcome | null> {
-	const landed = (await landing.view().catch(() => null))?.recent.findLast((s) => s.change === input.change && s.how === "landed" && s.head === head);
+	const landed = (await landing.view().catch(() => null))?.recent.findLast(
+		(s) => s.change === input.change && s.how === "landed" && s.head === head,
+	);
 	if (landed) return outcomeOf(landed);
 	if (!input.history) return null;
 	const main = await headOf(input).catch(() => null);
-	const commit = main ? (await landedOn(input.history, repoOfUrl(input.remote.url), input.branch, main, [head]).catch(() => null))?.get(head) : undefined;
+	const commit = main
+		? (await landedOn(input.history, repoOfUrl(input.remote.url), input.branch, main, [head]).catch(() => null))?.get(
+				head,
+			)
+		: undefined;
 	return commit ? { ok: true, commit } : null;
 }
 
@@ -331,23 +365,44 @@ export function batchSize(recent: Pick<Settled, "how">[]) {
 }
 
 /** The change, as ready as it is on the branch now: refused at once if not, so the agent can act. Read here: one change's worth. */
-async function readyNow(input: MergeInput, landing: Landing): Promise<{ ok: true; ready: Ready } | { ok: false; refused: Refused; head: string }> {
+async function readyNow(
+	input: MergeInput,
+	landing: Landing,
+): Promise<{ ok: true; ready: Ready } | { ok: false; refused: Refused; head: string }> {
 	const main = (await headOf(input)) ?? fail409(`there's no branch ${input.branch}`);
 	const ref = `changes/${input.change}`;
 	// Through Artifacts' API where it can (see changeAgainst): no file changed on both sides, it merges cleanly, nothing
 	// fetched. Else its Git work in turn (see inWorkspaceTurn), from the branch as kept for the isolate (see
 	// Workspace.at): one listing, no clone. Its records are read after, the workspace let go.
-	const read = input.history ? await changeAgainst(input.history, repoOfUrl(input.remote.url), input.branch, main, { ref, ...(input.source ? { source: input.source } : {}) }).catch(() => null) : null;
+	const read = input.history
+		? await changeAgainst(input.history, repoOfUrl(input.remote.url), input.branch, main, {
+				ref,
+				...(input.source ? { source: input.source } : {}),
+			}).catch(() => null)
+		: null;
 	const { head, files, tried, branch } =
 		read && !("error" in read) && !read.both.length
-			? { head: read.head, files: read.files, tried: { clean: true } as { clean: boolean; files?: string[] }, branch: input.branch }
+			? {
+					head: read.head,
+					files: read.files,
+					tried: { clean: true } as { clean: boolean; files?: string[] },
+					branch: input.branch,
+				}
 			: await inWorkspaceTurn(async () => {
 					const ws = await Workspace.at(input.remote, input.branch, main);
 					const head = await ws.fetch("change", input.source ?? input.remote, ref);
 					const files = await ws.changedPaths(await ws.mergeBase(main, head), head);
 					return { head, files, tried: await ws.tryMerge(main, head), branch: ws.branch };
 				});
-	const ready = await validated(input, { change: input.change, agent: input.agent, ref, ...(input.source ? { source: input.source } : {}), head, files, mine: true });
+	const ready = await validated(input, {
+		change: input.change,
+		agent: input.agent,
+		ref,
+		...(input.source ? { source: input.source } : {}),
+		head,
+		files,
+		mine: true,
+	});
 	if (!ready.ok) return { ok: false, refused: ready, head };
 	if (!tried.clean) {
 		const conflicts = tried.files ?? [];
@@ -360,7 +415,9 @@ async function readyNow(input: MergeInput, landing: Landing): Promise<{ ok: true
 				ok: false,
 				conflicts,
 				...(causes.length ? { causes } : {}),
-				reasons: [`changes/${input.change} conflicts with ${branch} in ${conflictWords(conflicts, causes).join(", ")}: merge ${branch} into your branch, resolve inside your claim, push, and get the new commit approved`],
+				reasons: [
+					`changes/${input.change} conflicts with ${branch} in ${conflictWords(conflicts, causes).join(", ")}: merge ${branch} into your branch, resolve inside your claim, push, and get the new commit approved`,
+				],
 			},
 		};
 	}
@@ -368,8 +425,17 @@ async function readyNow(input: MergeInput, landing: Landing): Promise<{ ok: true
 }
 
 function outcomeOf(settled: Settled): MergeOutcome {
-	if (settled.how === "landed") return { ok: true, commit: settled.commit!, ...(settled.skipped ? { checks: "skipped: it only touches files the checks skip" } : {}) };
-	return { ok: false, reasons: settled.reasons ?? ["it didn't land"], ...(settled.checks ? { checks: settled.checks } : {}) };
+	if (settled.how === "landed")
+		return {
+			ok: true,
+			commit: settled.commit!,
+			...(settled.skipped ? { checks: "skipped: it only touches files the checks skip" } : {}),
+		};
+	return {
+		ok: false,
+		reasons: settled.reasons ?? ["it didn't land"],
+		...(settled.checks ? { checks: settled.checks } : {}),
+	};
 }
 
 /** The branch's lease, held by this merge: kept by its heartbeat while the step running is within its bound (see STEP_MS). */
@@ -385,7 +451,13 @@ interface Holding {
  * none after `answerBy`. Null if it hasn't settled by then, or the lease ran
  * out.
  */
-async function landWhileHeld(input: MergeInput, landing: Landing, holder: string, answerBy: number, head: string): Promise<MergeOutcome | null> {
+async function landWhileHeld(
+	input: MergeInput,
+	landing: Landing,
+	holder: string,
+	answerBy: number,
+	head: string,
+): Promise<MergeOutcome | null> {
 	let held = true;
 	// Until when the lease is known to be this merge's: as taken, then as last renewed. Past it, unrenewed (the record
 	// unreachable, or a step past its bound), another merge may have taken it over.
@@ -438,12 +510,20 @@ async function landWhileHeld(input: MergeInput, landing: Landing, holder: string
  * in one push. Returns what each change that settled came to; this change
  * refused if it isn't ready any more.
  */
-async function landBatch(input: MergeInput, landing: Landing, holding: Holding, head: string): Promise<{ ok: true; settled: Settled[]; release: () => Promise<void> } | Refused> {
+async function landBatch(
+	input: MergeInput,
+	landing: Landing,
+	holding: Holding,
+	head: string,
+): Promise<{ ok: true; settled: Settled[]; release: () => Promise<void> } | Refused> {
 	for (let attempt = 1; ; attempt++) {
 		const from = Date.now();
 		// Where its checks will run: the first container starts now, while the batch is read.
 		const place: Place = { search: crypto.randomUUID().slice(0, 12), slot: 0, slots: { next: 1 } };
-		if (input.verify?.length) void input.prepareChecks?.(`${place.search}-0`).catch((err) => console.error("starting a batch's check container early failed", String(err)));
+		if (input.verify?.length)
+			void input
+				.prepareChecks?.(`${place.search}-0`)
+				.catch((err) => console.error("starting a batch's check container early failed", String(err)));
 		void input.prepareLanding?.().catch((err) => console.error("starting the repo's Gate early failed", String(err)));
 		await holding.step(STEP_MS.records);
 		// Read now, not as kept a moment for the crowd asking (see branchHead): the batch before may have landed a second ago,
@@ -452,9 +532,18 @@ async function landBatch(input: MergeInput, landing: Landing, holding: Holding, 
 		const batchGit = input.batchGit;
 		// About one failure per batch, from what the branch's recent changes came to (see batchSize). Without checks nothing
 		// fails a batch, so it takes all that's ready: in 200 agents' run, batches of 24 and 52 left 130 ready changes waiting.
-		const size = Math.min(input.verify?.length ? batchSize((await landing.view()).recent) : MAX_BATCH, input.maxBatch ?? MAX_BATCH);
+		const size = Math.min(
+			input.verify?.length ? batchSize((await landing.view()).recent) : MAX_BATCH,
+			input.maxBatch ?? MAX_BATCH,
+		);
 		// This merge's own change, and the others approved as last seen, with the heads they were seen at.
-		const mine: BatchSource & { seen: string } = { change: input.change, ref: `changes/${input.change}`, ...(input.source ? { source: input.source } : {}), agent: input.agent, seen: head };
+		const mine: BatchSource & { seen: string } = {
+			change: input.change,
+			ref: `changes/${input.change}`,
+			...(input.source ? { source: input.source } : {}),
+			agent: input.agent,
+			seen: head,
+		};
 		const sources = [mine, ...(await candidates(input, landing, size - 1))];
 		const foundAt = Date.now();
 		// Their heads and files, read now, in one go.
@@ -467,7 +556,8 @@ async function landBatch(input: MergeInput, landing: Landing, holding: Holding, 
 		// on all their heads read once.
 		const seen = await input.votes.readFor(read.flatMap((r) => ("error" in r ? [] : [r.head])));
 		const checked = await atMost(VALIDATIONS_AT_ONCE, read, async (r, i) => {
-			if (!("error" in r)) return validated(input, { ...sources[i], head: r.head, files: r.files, mine: i === 0 }, seen);
+			if (!("error" in r))
+				return validated(input, { ...sources[i], head: r.head, files: r.files, mine: i === 0 }, seen);
 			console.error(`${r.change} can't land with the others now: ${r.error}`);
 			return null;
 		});
@@ -477,9 +567,22 @@ async function landBatch(input: MergeInput, landing: Landing, holding: Holding, 
 		let batch = ready.sort((x, y) => x.own.since.localeCompare(y.own.since));
 		// Any main has merged already (a push answered with a server error though it applied): recorded as landed by the
 		// merge that did, its claim released, and left out; merged again, it came to nothing, and the batch failed.
-		const already = input.history ? await landedOn(input.history, repoOfUrl(input.remote.url), input.branch, main, batch.map((r) => r.head)).catch(() => new Map<string, string>()) : new Map<string, string>();
+		const already = input.history
+			? await landedOn(
+					input.history,
+					repoOfUrl(input.remote.url),
+					input.branch,
+					main,
+					batch.map((r) => r.head),
+				).catch(() => new Map<string, string>())
+			: new Map<string, string>();
 		if (already.size) {
-			const settled = await settleLanded(input, landing, batch.filter((r) => already.has(r.head)), already);
+			const settled = await settleLanded(
+				input,
+				landing,
+				batch.filter((r) => already.has(r.head)),
+				already,
+			);
 			batch = batch.filter((r) => !already.has(r.head));
 			if (!batch.some((r) => r.change === input.change)) return { ok: true, settled, release: async () => undefined };
 		}
@@ -503,7 +606,11 @@ async function landBatch(input: MergeInput, landing: Landing, holding: Holding, 
 		if (!holding.held) return { ok: true, settled: [], release: async () => undefined };
 		if (tested) {
 			if (!input.runChecks) throw new Error("[500] checks are configured but nothing can run them");
-			await landing.checking({ base: main, since: new Date().toISOString(), changes: batch.map((r) => ({ change: r.change, head: r.head, agent: r.agent })) });
+			await landing.checking({
+				base: main,
+				since: new Date().toISOString(),
+				changes: batch.map((r) => ({ change: r.change, head: r.head, agent: r.agent })),
+			});
 			const failed = await checkBatch(input, main, batch, holding, place, found);
 			await holding.step(STEP_MS.records);
 			for (const { ready, results } of failed) settled.push(await putOut(input, ready, results));
@@ -518,7 +625,12 @@ async function landBatch(input: MergeInput, landing: Landing, holding: Holding, 
 		if (done.landed === null) {
 			// The branch moved under the batch (a merge outside it): what passed was checked on another main.
 			if (attempt < ATTEMPTS) continue;
-			return { ok: false, reasons: [`the project's branch kept moving while ${input.change} merged (other merges landed first): merge again`] };
+			return {
+				ok: false,
+				reasons: [
+					`the project's branch kept moving while ${input.change} merged (other merges landed first): merge again`,
+				],
+			};
 		}
 		return { ok: true, settled: [...settled, ...done.landed.settled], release: done.landed.release };
 	}
@@ -530,14 +642,27 @@ async function landBatch(input: MergeInput, landing: Landing, holding: Holding, 
  * side. One change failing alone is checked once more, then is one of those
  * returned, to be put out.
  */
-async function checkBatch(input: MergeInput, main: string, batch: Ready[], holding: Holding, place: Place, found: (part: Ready[]) => void): Promise<{ ready: Ready; results: CheckResult[] }[]> {
+async function checkBatch(
+	input: MergeInput,
+	main: string,
+	batch: Ready[],
+	holding: Holding,
+	place: Place,
+	found: (part: Ready[]) => void,
+): Promise<{ ready: Ready; results: CheckResult[] }[]> {
 	// A check run is its commands, an install the Gate may add, and setting up: each as long as the Gate lets a command run.
 	const run = async () => {
 		await holding.step((input.verify!.length + 2) * STEP_MS.checkCommand);
 		const checked = await input.runChecks!({
 			base: main,
 			branch: input.branch,
-			changes: batch.map((r) => ({ change: r.change, head: r.head, ref: r.ref, ...(r.source ? { source: r.source } : {}), agent: r.agent })),
+			changes: batch.map((r) => ({
+				change: r.change,
+				head: r.head,
+				ref: r.ref,
+				...(r.source ? { source: r.source } : {}),
+				agent: r.agent,
+			})),
 			commands: input.verify!,
 			gate: `${place.search}-${place.slot}`,
 		});
@@ -552,7 +677,10 @@ async function checkBatch(input: MergeInput, main: string, batch: Ready[], holdi
 	const half = Math.ceil(batch.length / 2);
 	// The first half stays in this container, where its changes ran just now; the second takes another, and keeps it for its own halves.
 	const second = { ...place, slot: place.slots.next++ };
-	const [a, b] = await Promise.all([checkBatch(input, main, batch.slice(0, half), holding, place, found), checkBatch(input, main, batch.slice(half), holding, second, found)]);
+	const [a, b] = await Promise.all([
+		checkBatch(input, main, batch.slice(0, half), holding, place, found),
+		checkBatch(input, main, batch.slice(half), holding, second, found),
+	]);
 	return [...a, ...b];
 }
 
@@ -561,10 +689,22 @@ async function putOut(input: MergeInput, ready: Ready, results: CheckResult[]): 
 	const failed = results.find((r) => r.exitCode !== 0);
 	const reasons = [failed ? `checks failed: ${failed.command} exited ${failed.exitCode}` : "checks failed"];
 	const evidence = `${reasons[0]} on ${ready.head.slice(0, 8)}, checked alone on the branch, twice${failed?.output ? `:\n${failed.output.slice(-EVIDENCE_CHARS)}` : ""}`;
-	await input.votes.vote({ commit: ready.head, reviewer: CHECKS_REVIEWER, role: "checks", verdict: "reject", evidence }, input.stamper).catch((err) => console.error(`recording ${ready.change}'s failed checks failed`, String(err)));
+	await input.votes
+		.vote({ commit: ready.head, reviewer: CHECKS_REVIEWER, role: "checks", verdict: "reject", evidence }, input.stamper)
+		.catch((err) => console.error(`recording ${ready.change}'s failed checks failed`, String(err)));
 	// Kept with the lease's recent outcomes: only the command that failed, and the end of what it printed (the rejection has more).
-	const checks = results.filter((r) => r.exitCode !== 0).map((r) => ({ ...r, output: r.output.slice(-OUTCOME_OUTPUT_CHARS) }));
-	return { change: ready.change, head: ready.head, agent: ready.agent, how: "failed", at: new Date().toISOString(), reasons, checks };
+	const checks = results
+		.filter((r) => r.exitCode !== 0)
+		.map((r) => ({ ...r, output: r.output.slice(-OUTCOME_OUTPUT_CHARS) }));
+	return {
+		change: ready.change,
+		head: ready.head,
+		agent: ready.agent,
+		how: "failed",
+		at: new Date().toISOString(),
+		reasons,
+		checks,
+	};
 }
 
 /** A batch that landed: what each change came to, and the release of their claims, for once the lease is handed on. */
@@ -580,7 +720,15 @@ interface Landed {
  * it's pushed; their claims are released later (see Landed), and until then
  * no batch takes them up (see candidates). Null if main moved meanwhile.
  */
-async function land(input: MergeInput, landing: Landing, batchGit: BatchGit, main: string, batch: Ready[], tested: boolean, holding: Holding): Promise<Landed | null> {
+async function land(
+	input: MergeInput,
+	landing: Landing,
+	batchGit: BatchGit,
+	main: string,
+	batch: Ready[],
+	tested: boolean,
+	holding: Holding,
+): Promise<Landed | null> {
 	const from = Date.now();
 	const heads = batch.map((r) => r.head);
 	const landed = await batchGit.land({
@@ -625,37 +773,73 @@ async function land(input: MergeInput, landing: Landing, batchGit: BatchGit, mai
 	}));
 	// Told at once: a merge asked again before its claim is released finds its change landed (see landedAlready).
 	await landing.settle(settled);
-	console.log(`landed ${batch.length} change${batch.length === 1 ? "" : "s"} on ${input.branch} (${tested ? "checked together" : "no checks"}): merged and pushed ${pushedAt - from} ms, told ${Date.now() - pushedAt} ms`);
+	console.log(
+		`landed ${batch.length} change${batch.length === 1 ? "" : "s"} on ${input.branch} (${tested ? "checked together" : "no checks"}): merged and pushed ${pushedAt - from} ms, told ${Date.now() - pushedAt} ms`,
+	);
 	const release = async () => {
 		const releaseFrom = Date.now();
 		// A few at a time: a Worker holds only so many connections open, and stalls past that.
 		for (let i = 0; i < batch.length; i += RELEASES_AT_ONCE)
 			await Promise.all(
-				batch.slice(i, i + RELEASES_AT_ONCE).map((r, j) =>
-					input.store.release({ change: r.change, agent: r.agent, reason: "merged", mergedAs: commits[i + j] }, input.stamper).catch((err) => console.error(`releasing ${r.change}'s claim after it merged failed`, String(err))),
-				),
+				batch
+					.slice(i, i + RELEASES_AT_ONCE)
+					.map((r, j) =>
+						input.store
+							.release({ change: r.change, agent: r.agent, reason: "merged", mergedAs: commits[i + j] }, input.stamper)
+							.catch((err) => console.error(`releasing ${r.change}'s claim after it merged failed`, String(err))),
+					),
 			);
-		console.log(`released the claims of ${batch.length} change${batch.length === 1 ? "" : "s"} landed on ${input.branch}, after the lease was handed on: ${Date.now() - releaseFrom} ms`);
+		console.log(
+			`released the claims of ${batch.length} change${batch.length === 1 ? "" : "s"} landed on ${input.branch}, after the lease was handed on: ${Date.now() - releaseFrom} ms`,
+		);
 		if (input.afterLanding) {
 			const from = Date.now();
 			await input
 				.afterLanding(commits.at(-1)!)
-				.then(() => console.log(`after landing on ${input.branch} (main pushed to GitHub, say): ${Date.now() - from} ms`))
-				.catch((err) => console.error(`after landing on ${input.branch} failed (main not pushed to GitHub, say)`, String(err)));
+				.then(() =>
+					console.log(`after landing on ${input.branch} (main pushed to GitHub, say): ${Date.now() - from} ms`),
+				)
+				.catch((err) =>
+					console.error(`after landing on ${input.branch} failed (main not pushed to GitHub, say)`, String(err)),
+				);
 		}
 	};
 	return { settled, release };
 }
 
 /** Changes `on` main already (by the merge that merged each head): recorded as landed, and their claims released. */
-async function settleLanded(input: MergeInput, landing: Landing, changes: Ready[], on: Map<string, string>): Promise<Settled[]> {
+async function settleLanded(
+	input: MergeInput,
+	landing: Landing,
+	changes: Ready[],
+	on: Map<string, string>,
+): Promise<Settled[]> {
 	const at = new Date().toISOString();
-	const settled: Settled[] = changes.map((r) => ({ change: r.change, head: r.head, agent: r.agent, how: "landed", at, commit: on.get(r.head)!, files: r.files.slice(0, LANDED_FILES_KEPT), ...(r.files.length > LANDED_FILES_KEPT ? { filesMore: r.files.length - LANDED_FILES_KEPT } : {}) }));
+	const settled: Settled[] = changes.map((r) => ({
+		change: r.change,
+		head: r.head,
+		agent: r.agent,
+		how: "landed",
+		at,
+		commit: on.get(r.head)!,
+		files: r.files.slice(0, LANDED_FILES_KEPT),
+		...(r.files.length > LANDED_FILES_KEPT ? { filesMore: r.files.length - LANDED_FILES_KEPT } : {}),
+	}));
 	await landing.settle(settled);
-	console.log(`${changes.length} change${changes.length === 1 ? " was" : "s were"} on ${input.branch} already, unrecorded: ${changes.map((r) => r.change).join(", ")}`);
+	console.log(
+		`${changes.length} change${changes.length === 1 ? " was" : "s were"} on ${input.branch} already, unrecorded: ${changes.map((r) => r.change).join(", ")}`,
+	);
 	for (let i = 0; i < changes.length; i += RELEASES_AT_ONCE)
 		await Promise.all(
-			changes.slice(i, i + RELEASES_AT_ONCE).map((r) => input.store.release({ change: r.change, agent: r.agent, reason: "merged", mergedAs: on.get(r.head)! }, input.stamper).catch((err) => console.error(`releasing ${r.change}'s claim, found on ${input.branch} already, failed`, String(err)))),
+			changes
+				.slice(i, i + RELEASES_AT_ONCE)
+				.map((r) =>
+					input.store
+						.release({ change: r.change, agent: r.agent, reason: "merged", mergedAs: on.get(r.head)! }, input.stamper)
+						.catch((err) =>
+							console.error(`releasing ${r.change}'s claim, found on ${input.branch} already, failed`, String(err)),
+						),
+				),
 		);
 	return settled;
 }
@@ -666,33 +850,60 @@ async function settleLanded(input: MergeInput, landing: Landing, changes: Ready[
  * `leaving`. Oldest claims first, `count` at most, each with the head it was
  * seen at. Each is read and checked again before it lands.
  */
-async function candidates(input: MergeInput, landing: Landing, count: number): Promise<(BatchSource & { seen: string })[]> {
+async function candidates(
+	input: MergeInput,
+	landing: Landing,
+	count: number,
+): Promise<(BatchSource & { seen: string })[]> {
 	// Landed lately at the head seen: its claim may not be released yet (that waits for the lease to be handed on).
-	const landed = new Set(((await landing.view().catch(() => null))?.recent ?? []).filter((s) => s.how === "landed").map((s) => `${s.change} ${s.head}`));
-	const others = ((await input.others?.().catch((err) => (console.error("reading the other changes to land failed", String(err)), []))) ?? []).filter(
-		(c): c is Candidate & { head: string } => c.claim.change !== input.change && !!c.head && !landed.has(`${c.claim.change} ${c.head}`),
+	const landed = new Set(
+		((await landing.view().catch(() => null))?.recent ?? [])
+			.filter((s) => s.how === "landed")
+			.map((s) => `${s.change} ${s.head}`),
+	);
+	const others = (
+		(await input
+			.others?.()
+			.catch((err) => (console.error("reading the other changes to land failed", String(err)), []))) ?? []
+	).filter(
+		(c): c is Candidate & { head: string } =>
+			c.claim.change !== input.change && !!c.head && !landed.has(`${c.claim.change} ${c.head}`),
 	);
 	if (!others.length) return [];
 	const seen = await input.votes.readFor(others.map((c) => c.head));
-	const counted = await countedVotes(seen.votes.filter((v) => others.some((c) => c.head === v.commit)), input.stampKey);
+	const counted = await countedVotes(
+		seen.votes.filter((v) => others.some((c) => c.head === v.commit)),
+		input.stampKey,
+	);
 	const likely = others
 		.filter((c) => {
 			const author = { agent: c.claim.agent, ...(c.claim.by ? { by: c.claim.by } : {}) };
-			if (counted.some((v) => v.commit === c.head && v.verdict === "reject" && v.reviewer !== author.agent)) return false;
+			if (counted.some((v) => v.commit === c.head && v.verdict === "reject" && v.reviewer !== author.agent))
+				return false;
 			return approval({ votes: counted }, c.head, input.policy, author, c.claim.paths).approved;
 		})
 		.sort((a, b) => a.claim.since.localeCompare(b.claim.since))
 		.slice(0, Math.max(0, count));
 	// Read access to each one's fork, a few at a time: asked for one after another, a batch's gathering grew with its size.
 	const sources = await atMost(SOURCES_AT_ONCE, likely, async (c) => {
-		const source = await c.source().catch((err) => (console.error(`${c.claim.change}'s fork can't be read`, String(err)), null));
-		return source ? { change: c.claim.change, ref: `changes/${c.claim.change}`, source, agent: c.claim.agent, seen: c.head } : null;
+		const source = await c
+			.source()
+			.catch((err) => (console.error(`${c.claim.change}'s fork can't be read`, String(err)), null));
+		return source
+			? { change: c.claim.change, ref: `changes/${c.claim.change}`, source, agent: c.claim.agent, seen: c.head }
+			: null;
 	});
 	return sources.filter((s): s is NonNullable<typeof s> => !!s);
 }
 
 /** Each of `sources`' head and the files it changed since it left `main`, read in one go. In `sources`' order. */
-async function readBatch(input: MergeInput, batchGit: BatchGit, main: string, sources: (BatchSource & { seen: string })[], holding: Holding): Promise<Inspected[]> {
+async function readBatch(
+	input: MergeInput,
+	batchGit: BatchGit,
+	main: string,
+	sources: (BatchSource & { seen: string })[],
+	holding: Holding,
+): Promise<Inspected[]> {
 	await holding.step(STEP_MS.gate);
 	return batchGit.inspect({ base: main, branch: input.branch, changes: sources.map(({ seen: _, ...s }) => s) });
 }
@@ -704,13 +915,20 @@ async function readBatch(input: MergeInput, batchGit: BatchGit, main: string, so
  * own agent would merge it: not over a reviewer who asked for changes. Reads only the
  * records; whether it merges cleanly is the batch's to find.
  */
-async function validated(input: MergeInput, c: BatchSource & { head: string; files: string[]; mine: boolean }, seen?: VotesView): Promise<{ ok: true; ready: Ready } | Refused> {
+async function validated(
+	input: MergeInput,
+	c: BatchSource & { head: string; files: string[]; mine: boolean },
+	seen?: VotesView,
+): Promise<{ ok: true; ready: Ready } | Refused> {
 	const { head, files } = c;
 	// The same files as the claims records name them: in the branch's own part, for a branch other than the project's.
 	const scoped = input.scope ? files.map(input.scope) : files;
 	// The claims that bear on these files (the change's own, and any covering them), and the votes on its head (as read
 	// for its whole batch, if they were).
-	const [claims, votes] = await Promise.all([input.store.readScope(c.change, scoped), seen ?? input.votes.readFor([head])]);
+	const [claims, votes] = await Promise.all([
+		input.store.readScope(c.change, scoped),
+		seen ?? input.votes.readFor([head]),
+	]);
 
 	const reasons: string[] = [];
 	const own = claims.claims.find((x) => x.change === c.change);
@@ -720,14 +938,19 @@ async function validated(input: MergeInput, c: BatchSource & { head: string; fil
 		if (holder) reasons.push(`${file} is inside ${holder.change}'s claim (${holder.agent})`);
 		else if (own && !inLane(scoped[i], own.paths)) reasons.push(`${file} is outside ${c.change}'s claim`);
 	});
-	const counted = await countedVotes(votes.votes.filter((v) => v.commit === head), input.stampKey);
+	const counted = await countedVotes(
+		votes.votes.filter((v) => v.commit === head),
+		input.stampKey,
+	);
 	// Distinct reviewers, never the change's author: its claim's agent, and who made the claim.
 	// The policy for what it touches: stricter for dependency, CI and deploy files, say.
 	const outcome = approval({ votes: counted }, head, input.policy, own, files);
 	const { required } = effectivePolicy(input.policy, files);
 	if (outcome.vetoedBy.length) reasons.push(`${head} is vetoed by ${outcome.vetoedBy.join(", ")}`);
-	else if (outcome.approvals < required) reasons.push(`${head} has ${outcome.approvals} of ${required} approvals from reviewers other than its author`);
-	else if (outcome.awaiting.length) reasons.push(`${head} still needs approval from ${outcome.awaiting.join(", ")}, which can veto it`);
+	else if (outcome.approvals < required)
+		reasons.push(`${head} has ${outcome.approvals} of ${required} approvals from reviewers other than its author`);
+	else if (outcome.awaiting.length)
+		reasons.push(`${head} still needs approval from ${outcome.awaiting.join(", ")}, which can veto it`);
 	// Its checks failed on this very commit, checked alone, twice: merging it again would only fail again. A new commit is checked afresh.
 	const failed = counted.find((v) => v.reviewer === CHECKS_REVIEWER && v.verdict === "reject");
 	if (failed) reasons.push(`${failed.evidence.split("\n")[0]}: push a fix (a new commit) and get it approved`);
@@ -738,7 +961,22 @@ async function validated(input: MergeInput, c: BatchSource & { head: string; fil
 	if (reasons.length || !own) return { ok: false, reasons };
 	// None for a change that only touches what the checks skip (documentation and the like: see check-scope.ts).
 	const skipped = !!input.verify?.length && skipsChecks(files, input.skipChecks);
-	return { ok: true, ready: { change: c.change, agent: c.agent, head, ref: c.ref, ...(c.source ? { source: c.source } : {}), files, scoped, claims, own, votes, skipped } };
+	return {
+		ok: true,
+		ready: {
+			change: c.change,
+			agent: c.agent,
+			head,
+			ref: c.ref,
+			...(c.source ? { source: c.source } : {}),
+			files,
+			scoped,
+			claims,
+			own,
+			votes,
+			skipped,
+		},
+	};
 }
 
 /** `f` over `items`, at most `n` at once; the results in the items' order. */

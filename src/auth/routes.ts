@@ -16,7 +16,8 @@ const cookieHeader = (name: string, value: string, maxAgeSeconds: number) =>
 	`${name}=${encodeURIComponent(value)}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${maxAgeSeconds}`;
 
 /** Only a path on this site: never another origin ("//evil", "https://…"). */
-export const safeReturn = (value: string | undefined | null) => (value && value.startsWith("/") && !value.startsWith("//") && !value.startsWith("/\\") ? value : "/");
+export const safeReturn = (value: string | undefined | null) =>
+	value && value.startsWith("/") && !value.startsWith("//") && !value.startsWith("/\\") ? value : "/";
 
 function providerConfig(env: Env, name: ProviderName): ProviderConfig | null {
 	const e = env as unknown as Record<string, string | undefined>;
@@ -25,9 +26,11 @@ function providerConfig(env: Env, name: ProviderName): ProviderConfig | null {
 	return id && secret ? { clientId: id, clientSecret: secret } : null;
 }
 
-const store = (env: Env): IdentityStore => identityStore(env) ?? (() => {
-	throw new Error("[503] sign-in isn't set up here (no identity database)");
-})();
+const store = (env: Env): IdentityStore =>
+	identityStore(env) ??
+	(() => {
+		throw new Error("[503] sign-in isn't set up here (no identity database)");
+	})();
 
 /** The signed-in person (not an agent, not an Access caller), or a 401. */
 const signedInUser = (principal: Principal | undefined) => {
@@ -36,7 +39,9 @@ const signedInUser = (principal: Principal | undefined) => {
 };
 
 export function authRoutes(app: Hono<AuthEnv>) {
-	app.get("/auth/providers", (c) => c.json({ providers: (["github", "google"] as const).filter((p) => providerConfig(c.env, p)) }));
+	app.get("/auth/providers", (c) =>
+		c.json({ providers: (["github", "google"] as const).filter((p) => providerConfig(c.env, p)) }),
+	);
 
 	// Start signing in: to the provider, with a fresh state and PKCE verifier kept in a short-lived cookie.
 	app.get("/auth/:provider", async (c) => {
@@ -49,7 +54,15 @@ export function authRoutes(app: Hono<AuthEnv>) {
 		const origin = new URL(c.req.url).origin;
 		const pending = JSON.stringify({ provider: name, state, verifier, return: safeReturn(c.req.query("return")) });
 		c.header("Set-Cookie", cookieHeader(SIGNIN_COOKIE, pending, 600));
-		return c.redirect(PROVIDERS[name].authorizeUrl({ clientId: config.clientId, redirectUri: `${origin}/auth/${name}/callback`, state, challenge: await pkceChallenge(verifier) }), 302);
+		return c.redirect(
+			PROVIDERS[name].authorizeUrl({
+				clientId: config.clientId,
+				redirectUri: `${origin}/auth/${name}/callback`,
+				state,
+				challenge: await pkceChallenge(verifier),
+			}),
+			302,
+		);
 	});
 
 	// Back from the provider: check the state, learn who signed in, and start a session.
@@ -70,10 +83,16 @@ export function authRoutes(app: Hono<AuthEnv>) {
 		}
 		const code = c.req.query("code");
 		if (c.req.query("error")) return back("cancelled");
-		if (!pending || pending.provider !== name || !code || c.req.query("state") !== pending.state) return back("expired");
+		if (!pending || pending.provider !== name || !code || c.req.query("state") !== pending.state)
+			return back("expired");
 		let profile;
 		try {
-			profile = await PROVIDERS[name].profile({ config, code, redirectUri: `${new URL(c.req.url).origin}/auth/${name}/callback`, verifier: pending.verifier });
+			profile = await PROVIDERS[name].profile({
+				config,
+				code,
+				redirectUri: `${new URL(c.req.url).origin}/auth/${name}/callback`,
+				verifier: pending.verifier,
+			});
 		} catch (err) {
 			// What the provider said (its error, never the code or a secret), for whoever reads the logs.
 			console.error(`sign-in with ${name} failed`, err instanceof Error ? err.message : String(err));
@@ -104,7 +123,8 @@ export function authRoutes(app: Hono<AuthEnv>) {
 		if (!principal) return c.json({ error: "sign in to GitHive first" }, 401);
 		// Someone who signed in before orgs existed gets their own namespace now.
 		if (principal.kind === "user" && c.env.DB) await new OrgStore(c.env.DB).personalOrg(principal.user);
-		const hosted = principal.kind === "access" ? true : c.env.DB ? await store(c.env).mayUseHosted(principal.user.id) : false;
+		const hosted =
+			principal.kind === "access" ? true : c.env.DB ? await store(c.env).mayUseHosted(principal.user.id) : false;
 		return c.json({ ...describe(principal), hostedAgents: hosted });
 	});
 
@@ -122,14 +142,18 @@ export function authRoutes(app: Hono<AuthEnv>) {
 		await store(c.env).revokeAgent(user.id, agentId);
 		// Its MCP connections go too: each grant's props name the agent it acts as.
 		const helpers = (c.env as unknown as { OAUTH_PROVIDER?: OAuthHelpersLike }).OAUTH_PROVIDER;
-		if (helpers) for (const grant of await listGrants(helpers, user.id)) if (grant.metadata?.agentId === agentId) await helpers.revokeGrant(grant.id, user.id);
+		if (helpers)
+			for (const grant of await listGrants(helpers, user.id))
+				if (grant.metadata?.agentId === agentId) await helpers.revokeGrant(grant.id, user.id);
 		return c.json({ revoked: agentId });
 	});
 
 	// A new token for one of your agents: shown once, in this response.
 	app.post("/me/agents/:id/tokens", async (c) => {
 		const user = signedInUser(c.get("principal"));
-		const body = await c.req.json<{ expires_in_days?: number | null }>().catch(() => ({}) as { expires_in_days?: number | null });
+		const body = await c.req
+			.json<{ expires_in_days?: number | null }>()
+			.catch(() => ({}) as { expires_in_days?: number | null });
 		const days = body.expires_in_days === undefined ? undefined : body.expires_in_days;
 		return c.json(await store(c.env).createToken(user.id, c.req.param("id"), days), 201);
 	});
@@ -147,8 +171,18 @@ export function authRoutes(app: Hono<AuthEnv>) {
 		if (!helpers) return c.json([]);
 		const grants = await listGrants(helpers, user.id);
 		const clients = new Map<string, string>();
-		for (const g of grants) if (!clients.has(g.clientId)) clients.set(g.clientId, (await helpers.lookupClient(g.clientId))?.clientName ?? g.clientId);
-		return c.json(grants.map((g) => ({ id: g.id, client: clients.get(g.clientId), agentId: g.metadata?.agentId ?? null, agent: g.metadata?.agent ?? null, createdAt: new Date(g.createdAt * 1000).toISOString() })));
+		for (const g of grants)
+			if (!clients.has(g.clientId))
+				clients.set(g.clientId, (await helpers.lookupClient(g.clientId))?.clientName ?? g.clientId);
+		return c.json(
+			grants.map((g) => ({
+				id: g.id,
+				client: clients.get(g.clientId),
+				agentId: g.metadata?.agentId ?? null,
+				agent: g.metadata?.agent ?? null,
+				createdAt: new Date(g.createdAt * 1000).toISOString(),
+			})),
+		);
 	});
 
 	app.delete("/me/connections/:id", async (c) => {
@@ -161,8 +195,11 @@ export function authRoutes(app: Hono<AuthEnv>) {
 
 	// Invitations: who may sign in, until repos have permissions. Only an admin, through Access.
 	const admin = (principal: Principal | undefined) => {
-		if (principal?.kind !== "access") throw new Error("[403] invitations are managed by an admin, through Cloudflare Access");
-		return principal.identity.kind === "person" ? principal.identity.value : `service token ${principal.identity.value}`;
+		if (principal?.kind !== "access")
+			throw new Error("[403] invitations are managed by an admin, through Cloudflare Access");
+		return principal.identity.kind === "person"
+			? principal.identity.value
+			: `service token ${principal.identity.value}`;
 	};
 	app.get("/admin/invites", async (c) => {
 		admin(c.get("principal"));
@@ -204,12 +241,24 @@ export function authRoutes(app: Hono<AuthEnv>) {
 		await store(c.env).disallowHosted(c.req.param("handle"));
 		return c.json({ disallowed: c.req.param("handle") });
 	});
-
 }
 
 /** The part of the OAuth provider's helpers these routes use. */
 export interface OAuthHelpersLike {
-	listUserGrants(userId: string, options?: { cursor?: string; limit?: number }): Promise<{ items: { id: string; clientId: string; userId: string; scope: string[]; metadata: { agentId?: string; agent?: string } | null; createdAt: number }[]; cursor?: string }>;
+	listUserGrants(
+		userId: string,
+		options?: { cursor?: string; limit?: number },
+	): Promise<{
+		items: {
+			id: string;
+			clientId: string;
+			userId: string;
+			scope: string[];
+			metadata: { agentId?: string; agent?: string } | null;
+			createdAt: number;
+		}[];
+		cursor?: string;
+	}>;
 	revokeGrant(grantId: string, userId: string): Promise<void>;
 	lookupClient(clientId: string): Promise<{ clientName?: string } | null>;
 }

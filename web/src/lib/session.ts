@@ -72,24 +72,52 @@ export interface ConnectStep {
 /** Connecting a client by signing in through the browser (OAuth): nothing secret to copy. */
 export function connectSteps(client: McpClient, origin: string): ConnectStep[] {
 	const url = `${origin}/mcp`;
-	const choose = (who: string) => ({ text: `Your browser opens GitHive: choose the agent ${who} acts as, or name a new one.` });
+	const choose = (who: string) => ({
+		text: `Your browser opens GitHive: choose the agent ${who} acts as, or name a new one.`,
+	});
 	if (client === "claude-code")
-		return [{ text: "Add GitHive to Claude Code, in your terminal:", copy: `claude mcp add --scope user --transport http githive ${url}` }, { text: "In Claude Code, run `/mcp` and choose `githive` to sign in." }, choose("Claude Code")];
-	if (client === "codex") return [{ text: "Add GitHive to Codex, in your terminal:", copy: `codex mcp add githive --url ${url}` }, { text: "Sign in:", copy: "codex mcp login githive" }, choose("Codex")];
+		return [
+			{
+				text: "Add GitHive to Claude Code, in your terminal:",
+				copy: `claude mcp add --scope user --transport http githive ${url}`,
+			},
+			{ text: "In Claude Code, run `/mcp` and choose `githive` to sign in." },
+			choose("Claude Code"),
+		];
+	if (client === "codex")
+		return [
+			{ text: "Add GitHive to Codex, in your terminal:", copy: `codex mcp add githive --url ${url}` },
+			{ text: "Sign in:", copy: "codex mcp login githive" },
+			choose("Codex"),
+		];
 	return [
 		{ text: "Add an MCP server that uses the streamable HTTP transport, at:", copy: url },
-		{ text: "When the client asks you to sign in, it opens GitHive (OAuth 2.1, with dynamic client registration). Choose the agent it acts as, or name a new one." },
+		{
+			text: "When the client asks you to sign in, it opens GitHive (OAuth 2.1, with dynamic client registration). Choose the agent it acts as, or name a new one.",
+		},
 	];
 }
 
 /** Connecting a client with an agent token: what to copy, with the token filled in. */
 export function tokenSteps(client: McpClient, origin: string, token: string): ConnectStep[] {
 	const url = `${origin}/mcp`;
-	if (client === "claude-code") return [{ text: "Connect Claude Code with it:", copy: `claude mcp add --scope user --transport http githive ${url} --header "Authorization: Bearer ${token}"` }];
+	if (client === "claude-code")
+		return [
+			{
+				text: "Connect Claude Code with it:",
+				copy: `claude mcp add --scope user --transport http githive ${url} --header "Authorization: Bearer ${token}"`,
+			},
+		];
 	if (client === "codex")
 		return [
-			{ text: "Put it where Codex can read it, for example in your shell profile:", copy: `export GITHIVE_TOKEN=${token}` },
-			{ text: "Then add GitHive to `~/.codex/config.toml`:", copy: `[mcp_servers.githive]\nurl = "${url}"\nbearer_token_env_var = "GITHIVE_TOKEN"` },
+			{
+				text: "Put it where Codex can read it, for example in your shell profile:",
+				copy: `export GITHIVE_TOKEN=${token}`,
+			},
+			{
+				text: "Then add GitHive to `~/.codex/config.toml`:",
+				copy: `[mcp_servers.githive]\nurl = "${url}"\nbearer_token_env_var = "GITHIVE_TOKEN"`,
+			},
 		];
 	return [
 		{ text: "Point the client at the server:", copy: url },

@@ -9,7 +9,15 @@ import { claimStore } from "../src/toolkit/claim-store";
 import { claim, startRepo, type Registry } from "../src/toolkit/claims";
 import { readMainMerges, readRecordHistory } from "../src/toolkit/git-records";
 import { type Landing, memoryLanding, renewLease } from "../src/toolkit/landing";
-import { type BatchGit, batchSize, type Candidate, CHECKS_REVIEWER, type CheckRunner, type MergeInput, mergeChange } from "../src/toolkit/merge";
+import {
+	type BatchGit,
+	batchSize,
+	type Candidate,
+	CHECKS_REVIEWER,
+	type CheckRunner,
+	type MergeInput,
+	mergeChange,
+} from "../src/toolkit/merge";
 import { voteStore } from "../src/toolkit/vote-store";
 import { vote, type Votes } from "../src/toolkit/votes";
 import { agentClone, pushChange } from "./helpers/agents";
@@ -54,7 +62,12 @@ describe("landing ready changes together", { timeout: 120_000 }, () => {
 	}
 
 	/** Checks that fail when a change in `failing` is among what they ran (and, once, when `flaky` is), slowly enough for merges to meet. */
-	function runner(failing = new Set<string>(), runs: string[][] = [], flaky?: string, gates: string[] = []): CheckRunner {
+	function runner(
+		failing = new Set<string>(),
+		runs: string[][] = [],
+		flaky?: string,
+		gates: string[] = [],
+	): CheckRunner {
 		let flaked = false;
 		return async ({ changes, gate }) => {
 			runs.push(changes.map((c) => c.change));
@@ -63,17 +76,31 @@ describe("landing ready changes together", { timeout: 120_000 }, () => {
 			const flake = !!flaky && !flaked && changes.some((c) => c.change === flaky);
 			flaked ||= flake;
 			const broken = flake || changes.some((c) => failing.has(c.change));
-			return { passed: !broken, results: [{ command: "npm test", exitCode: broken ? 1 : 0, output: broken ? "1 failing" : "" }] };
+			return {
+				passed: !broken,
+				results: [{ command: "npm test", exitCode: broken ? 1 : 0, output: broken ? "1 failing" : "" }],
+			};
 		};
 	}
 
 	/** The other changes into main, as the toolkit finds them: claims in force, with their heads (in the project repo here). */
 	const others = async (): Promise<Candidate[]> => {
 		const { claims: held } = await store().read();
-		return Promise.all(held.map(async (c) => ({ claim: c, head: await branchHead(remote(), `changes/${c.change}`).catch(() => null), source: async () => remote() })));
+		return Promise.all(
+			held.map(async (c) => ({
+				claim: c,
+				head: await branchHead(remote(), `changes/${c.change}`).catch(() => null),
+				source: async () => remote(),
+			})),
+		);
 	};
 
-	const merge = (change: string, runChecks: CheckRunner, landing: Landing = memoryLanding(), more: Partial<MergeInput> = {}) =>
+	const merge = (
+		change: string,
+		runChecks: CheckRunner,
+		landing: Landing = memoryLanding(),
+		more: Partial<MergeInput> = {},
+	) =>
 		mergeChange({
 			remote: remote(),
 			batchGit: memoryBatchGit(remote()),
@@ -100,9 +127,21 @@ describe("landing ready changes together", { timeout: 120_000 }, () => {
 	const auditNow = async () => {
 		const registry = await readRecordHistory<Registry>(remote(), "refs/notes/githive-claims/t1");
 		const merges = await readMainMerges(remote(), registry[0].state.baseline!, "main");
-		return audit({ registry, votes: await readRecordHistory<Votes>(remote(), "refs/notes/githive-votes/t1"), policy, verify: ["npm test"], merges });
+		return audit({
+			registry,
+			votes: await readRecordHistory<Votes>(remote(), "refs/notes/githive-votes/t1"),
+			policy,
+			verify: ["npm test"],
+			merges,
+		});
 	};
-	const landed = () => server.git("log", "--first-parent", "--format=%(trailers:key=GitHive-Change,valueonly)", "main").trim().split("\n").filter(Boolean).reverse();
+	const landed = () =>
+		server
+			.git("log", "--first-parent", "--format=%(trailers:key=GitHive-Change,valueonly)", "main")
+			.trim()
+			.split("\n")
+			.filter(Boolean)
+			.reverse();
 
 	it("lands every ready change in one batch, checked once, each as its own merge in one push, and audits clean", async () => {
 		const heads = [];
@@ -113,8 +152,16 @@ describe("landing ready changes together", { timeout: 120_000 }, () => {
 		expect(runs).toEqual([["a-1", "b-1", "c-1"]]);
 		expect(landed()).toEqual(["a-1", "b-1", "c-1"]);
 		// Each says the main the checks ran on and every change checked with it.
-		expect(server.git("log", "-3", "--first-parent", "--format=%(trailers:key=GitHive-Tested,valueonly)", "main").trim().split("\n").filter(Boolean)).toEqual([main, main, main]);
-		expect(server.git("log", "-1", "--format=%(trailers:key=GitHive-Tested-With,valueonly)", "main").trim()).toBe(heads.join(" "));
+		expect(
+			server
+				.git("log", "-3", "--first-parent", "--format=%(trailers:key=GitHive-Tested,valueonly)", "main")
+				.trim()
+				.split("\n")
+				.filter(Boolean),
+		).toEqual([main, main, main]);
+		expect(server.git("log", "-1", "--format=%(trailers:key=GitHive-Tested-With,valueonly)", "main").trim()).toBe(
+			heads.join(" "),
+		);
 		// Their claims are released, naming their merges.
 		expect((await store().read()).claims).toEqual([]);
 		expect(await auditNow()).toEqual([]);
@@ -124,7 +171,11 @@ describe("landing ready changes together", { timeout: 120_000 }, () => {
 		for (const x of ["a", "b"]) await readyChange(`${x}-1`, { [`src/${x}.txt`]: `${x}\n` });
 		const reads: string[][] = [];
 		const gate = readsNoted(reads);
-		expect(await merge("a-1", runner(), memoryLanding(), { batchGit: { ...gate, inspect: artifactsInspect(gitHistory(server.git), "project", gate.inspect) } })).toMatchObject({ ok: true });
+		expect(
+			await merge("a-1", runner(), memoryLanding(), {
+				batchGit: { ...gate, inspect: artifactsInspect(gitHistory(server.git), "project", gate.inspect) },
+			}),
+		).toMatchObject({ ok: true });
 		expect(reads).toEqual([]);
 		expect(landed()).toEqual(["a-1", "b-1"]);
 		expect(await auditNow()).toEqual([]);
@@ -136,7 +187,12 @@ describe("landing ready changes together", { timeout: 120_000 }, () => {
 		const reads: string[][] = [];
 		const gate = readsNoted(reads);
 		const noted: BatchGit = { ...gate, inspect: async (input) => (started.push("read"), gate.inspect(input)) };
-		expect(await merge("a-1", runner(), memoryLanding(), { batchGit: noted, prepareLanding: async () => void started.push("gate") })).toMatchObject({ ok: true });
+		expect(
+			await merge("a-1", runner(), memoryLanding(), {
+				batchGit: noted,
+				prepareLanding: async () => void started.push("gate"),
+			}),
+		).toMatchObject({ ok: true });
 		expect(started.slice(0, 2)).toEqual(["gate", "read"]);
 		expect(landed()).toEqual(["a-1", "b-1"]);
 	});
@@ -153,7 +209,9 @@ describe("landing ready changes together", { timeout: 120_000 }, () => {
 		const landing = memoryLanding();
 		expect(await merge("b-1", runner(), landing, { history: gitHistory(server.git) })).toMatchObject({ ok: true });
 		expect(landed()).toContain("b-1");
-		expect((await landing.view()).recent).toEqual(expect.arrayContaining([expect.objectContaining({ change: "a-1", head: a, how: "landed", commit: mergedAs })]));
+		expect((await landing.view()).recent).toEqual(
+			expect.arrayContaining([expect.objectContaining({ change: "a-1", head: a, how: "landed", commit: mergedAs })]),
+		);
 		// Its claim released, naming the merge that took it in.
 		expect((await store().read()).claims.map((c) => c.change)).not.toContain("a-1");
 	});
@@ -192,7 +250,10 @@ describe("landing ready changes together", { timeout: 120_000 }, () => {
 		// Merging that commit again is refused at once, with the failure: it isn't checked a third time.
 		const before = runs.length;
 		const again = await merge("b-1", runner(new Set(["b-1"]), runs));
-		expect(again).toMatchObject({ ok: false, reasons: [expect.stringMatching(/^checks failed: npm test exited 1 on .* push a fix \(a new commit\)/)] });
+		expect(again).toMatchObject({
+			ok: false,
+			reasons: [expect.stringMatching(/^checks failed: npm test exited 1 on .* push a fix \(a new commit\)/)],
+		});
 		expect(runs.length).toBe(before);
 	});
 
@@ -224,7 +285,15 @@ describe("landing ready changes together", { timeout: 120_000 }, () => {
 		for (const id of ids) await readyChange(id, { [`src/${id}.txt`]: `${id}\n` });
 		const landing = memoryLanding();
 		// Checks failed often here lately: with checks, a batch would hold 4 (see batchSize).
-		await landing.settle(Array.from({ length: 10 }, (_, i) => ({ change: `old-${i}`, head: `h${i}`, agent: "x", how: "failed" as const, at: new Date().toISOString() })));
+		await landing.settle(
+			Array.from({ length: 10 }, (_, i) => ({
+				change: `old-${i}`,
+				head: `h${i}`,
+				agent: "x",
+				how: "failed" as const,
+				at: new Date().toISOString(),
+			})),
+		);
 		expect(batchSize((await landing.view()).recent)).toBe(4);
 		const reads: string[][] = [];
 		// What happens, in order: the lease handed on, then the claims released.
@@ -234,7 +303,14 @@ describe("landing ready changes together", { timeout: 120_000 }, () => {
 		const claimStore = store();
 		const release = claimStore.release.bind(claimStore);
 		claimStore.release = async (r, stamper) => (order.push(`released ${r.change}`), release(r, stamper));
-		expect(await merge("n-0", runner(), landing, { verify: [], runChecks: undefined, batchGit: readsNoted(reads), store: claimStore })).toMatchObject({ ok: true });
+		expect(
+			await merge("n-0", runner(), landing, {
+				verify: [],
+				runChecks: undefined,
+				batchGit: readsNoted(reads),
+				store: claimStore,
+			}),
+		).toMatchObject({ ok: true });
 		// Without checks, one batch of all 6.
 		expect(reads).toEqual([ids]);
 		expect(landed()).toEqual(ids);
@@ -248,9 +324,13 @@ describe("landing ready changes together", { timeout: 120_000 }, () => {
 		const before = server.git("rev-parse", "main").trim();
 		const landing = memoryLanding();
 		const reads: string[][] = [];
-		expect(await merge("a-1", runner(), landing, { maxBatch: 1, batchGit: readsNoted(reads) })).toMatchObject({ ok: true });
+		expect(await merge("a-1", runner(), landing, { maxBatch: 1, batchGit: readsNoted(reads) })).toMatchObject({
+			ok: true,
+		});
 		// Kept from before a-1 landed: a batch built on it would be refused at its push, and gathered again.
-		expect(await merge("b-1", runner(), landing, { batchGit: readsNoted(reads), branchHead: async () => before })).toMatchObject({ ok: true });
+		expect(
+			await merge("b-1", runner(), landing, { batchGit: readsNoted(reads), branchHead: async () => before }),
+		).toMatchObject({ ok: true });
 		expect(reads).toEqual([["a-1"], ["b-1"]]);
 		expect(landed()).toEqual(["a-1", "b-1"]);
 	});
@@ -262,7 +342,9 @@ describe("landing ready changes together", { timeout: 120_000 }, () => {
 		// a-1's batch landed, and its claim's release hasn't come yet.
 		const claimStore = store();
 		claimStore.release = async () => ({ ok: true }) as never;
-		expect(await merge("a-1", runner(), landing, { maxBatch: 1, batchGit: readsNoted(reads), store: claimStore })).toMatchObject({ ok: true });
+		expect(
+			await merge("a-1", runner(), landing, { maxBatch: 1, batchGit: readsNoted(reads), store: claimStore }),
+		).toMatchObject({ ok: true });
 		expect((await store().read()).claims.map((c) => c.change)).toEqual(["a-1", "b-1"]);
 		// b-1's batch doesn't take a-1 up again.
 		expect(await merge("b-1", runner(), landing, { batchGit: readsNoted(reads) })).toMatchObject({ ok: true });
@@ -278,12 +360,33 @@ describe("landing ready changes together", { timeout: 120_000 }, () => {
 		// b-1 started from the main before a-1 landed, and changed the same file.
 		const refused = await (async () => {
 			await claim(claims(), { change: "b-1", agent: "agent-b-1", paths: ["src/shared.txt"], intent: "b-1" });
-			const head = await pushChange(server.url, work, "agent-b-1", "b-1", { "src/shared.txt": "from b\n" }, `${landed().length ? "main~1" : "main"}`);
+			const head = await pushChange(
+				server.url,
+				work,
+				"agent-b-1",
+				"b-1",
+				{ "src/shared.txt": "from b\n" },
+				`${landed().length ? "main~1" : "main"}`,
+			);
 			await vote(votes(), { commit: head, reviewer: "rev", role: "tests", verdict: "approve", evidence: "ok" });
 			return merge("b-1", runner(), landing);
 		})();
-		expect(refused).toMatchObject({ ok: false, conflicts: ["src/shared.txt"], causes: [{ file: "src/shared.txt", change: "a-1", agent: "agent-a-1", intent: "a-1", commit: (landedA as { commit: string }).commit }] });
-		expect((refused as { reasons: string[] }).reasons[0]).toMatch(/src\/shared\.txt \(changed by a-1, agent-a-1: "a-1", [0-9a-f]{8}\)/);
+		expect(refused).toMatchObject({
+			ok: false,
+			conflicts: ["src/shared.txt"],
+			causes: [
+				{
+					file: "src/shared.txt",
+					change: "a-1",
+					agent: "agent-a-1",
+					intent: "a-1",
+					commit: (landedA as { commit: string }).commit,
+				},
+			],
+		});
+		expect((refused as { reasons: string[] }).reasons[0]).toMatch(
+			/src\/shared\.txt \(changed by a-1, agent-a-1: "a-1", [0-9a-f]{8}\)/,
+		);
 	});
 
 	it("tells the merges waiting on a batch that it landed before their claims are released", async () => {
@@ -308,10 +411,23 @@ describe("landing ready changes together", { timeout: 120_000 }, () => {
 		const more = { maxBatch: 2 };
 		expect(await merge("a-1", runner(), landing, more)).toMatchObject({ ok: true });
 		// d pushes again, and its new commit is approved: the batch that takes it reads it now, at that commit.
-		const newer = await pushChange(server.url, work, "agent-d-1", "d-1", { "src/d.txt": "d, again\n" }, "origin/changes/d-1");
+		const newer = await pushChange(
+			server.url,
+			work,
+			"agent-d-1",
+			"d-1",
+			{ "src/d.txt": "d, again\n" },
+			"origin/changes/d-1",
+		);
 		await vote(votes(), { commit: newer, reviewer: "rev", role: "tests", verdict: "approve", evidence: "ok" });
 		expect(await merge("c-1", runner(), landing, more)).toMatchObject({ ok: true });
-		expect(server.git("log", "-1", "--format=%(trailers:key=GitHive-Tested-With,valueonly)", "main").trim().split(" ").at(-1)).toBe(newer);
+		expect(
+			server
+				.git("log", "-1", "--format=%(trailers:key=GitHive-Tested-With,valueonly)", "main")
+				.trim()
+				.split(" ")
+				.at(-1),
+		).toBe(newer);
 		expect(await auditNow()).toEqual([]);
 	});
 
@@ -327,8 +443,14 @@ describe("landing ready changes together", { timeout: 120_000 }, () => {
 		await readyChange("a-1", { "src/a.txt": "a\n" });
 		const first = await merge("a-1", runner(), memoryLanding());
 		expect(first).toMatchObject({ ok: true });
-		const forgetful: Landing = { ...memoryLanding(), view: () => Promise.reject(new Error("Durable Object is overloaded")) };
-		expect(await merge("a-1", runner(), forgetful, { history: gitHistory(server.git) })).toEqual({ ok: true, commit: (first as { commit: string }).commit });
+		const forgetful: Landing = {
+			...memoryLanding(),
+			view: () => Promise.reject(new Error("Durable Object is overloaded")),
+		};
+		expect(await merge("a-1", runner(), forgetful, { history: gitHistory(server.git) })).toEqual({
+			ok: true,
+			commit: (first as { commit: string }).commit,
+		});
 	});
 
 	it("waits for as long as another merge holds the lease, and takes it over once it runs out", async () => {
@@ -347,8 +469,26 @@ describe("landing ready changes together", { timeout: 120_000 }, () => {
 		// Another merge holds the lease, landing its batch, for longer than this merge may wait to answer.
 		expect(await landing.turn("other", "x-1", "h", 0, 60_000)).toEqual({ lease: true });
 		const runs: string[][] = [];
-		const waiting = await mergeChange({ remote: remote(), batchGit: memoryBatchGit(remote()), branch: "main", store: store(), votes: voteStore({ repo: "t1", root: votes(), remote: async () => remote() }), policy, verify: ["npm test"], runChecks: runner(new Set(), runs), change: "a-1", agent: "agent-a-1", landing, pollMs: 20, answerWithinMs: 300 });
-		expect(waiting).toMatchObject({ ok: false, pending: true, reasons: [expect.stringMatching(/^a-1 is ready and waiting to land .* Call merge again/)] });
+		const waiting = await mergeChange({
+			remote: remote(),
+			batchGit: memoryBatchGit(remote()),
+			branch: "main",
+			store: store(),
+			votes: voteStore({ repo: "t1", root: votes(), remote: async () => remote() }),
+			policy,
+			verify: ["npm test"],
+			runChecks: runner(new Set(), runs),
+			change: "a-1",
+			agent: "agent-a-1",
+			landing,
+			pollMs: 20,
+			answerWithinMs: 300,
+		});
+		expect(waiting).toMatchObject({
+			ok: false,
+			pending: true,
+			reasons: [expect.stringMatching(/^a-1 is ready and waiting to land .* Call merge again/)],
+		});
 		expect(runs).toEqual([]);
 		// The other batch is done: merging again lands it.
 		await landing.drop("other");
@@ -373,9 +513,28 @@ describe("landing ready changes together", { timeout: 120_000 }, () => {
 		const landing = memoryLanding();
 		const runs: string[][] = [];
 		// Checks far longer than the lease lasts without a beat.
-		const slow: CheckRunner = async (input) => (await new Promise((resolve) => setTimeout(resolve, 600)), runner(new Set(), runs)(input));
+		const slow: CheckRunner = async (input) => (
+			await new Promise((resolve) => setTimeout(resolve, 600)),
+			runner(new Set(), runs)(input)
+		);
 		const go = (change: string) =>
-			mergeChange({ remote: remote(), batchGit: memoryBatchGit(remote()), branch: "main", store: store(), votes: voteStore({ repo: "t1", root: votes(), remote: async () => remote() }), policy, verify: ["npm test"], runChecks: slow, change, agent: `agent-${change}`, others, landing, pollMs: 20, heartbeatMs: 50, leaseTtlMs: 150 });
+			mergeChange({
+				remote: remote(),
+				batchGit: memoryBatchGit(remote()),
+				branch: "main",
+				store: store(),
+				votes: voteStore({ repo: "t1", root: votes(), remote: async () => remote() }),
+				policy,
+				verify: ["npm test"],
+				runChecks: slow,
+				change,
+				agent: `agent-${change}`,
+				others,
+				landing,
+				pollMs: 20,
+				heartbeatMs: 50,
+				leaseTtlMs: 150,
+			});
 		const [a, b] = await Promise.all([go("a-1"), go("b-1")]);
 		expect(a).toMatchObject({ ok: true });
 		expect(b).toMatchObject({ ok: true });
@@ -386,7 +545,20 @@ describe("landing ready changes together", { timeout: 120_000 }, () => {
 	it("starts no batch once it should be answering: the lease goes to a merge that's waiting", async () => {
 		await readyChange("a-1", { "src/a.txt": "a\n" });
 		const runs: string[][] = [];
-		const answer = await mergeChange({ remote: remote(), batchGit: memoryBatchGit(remote()), branch: "main", store: store(), votes: voteStore({ repo: "t1", root: votes(), remote: async () => remote() }), policy, verify: ["npm test"], runChecks: runner(new Set(), runs), change: "a-1", agent: "agent-a-1", pollMs: 20, answerWithinMs: 0 });
+		const answer = await mergeChange({
+			remote: remote(),
+			batchGit: memoryBatchGit(remote()),
+			branch: "main",
+			store: store(),
+			votes: voteStore({ repo: "t1", root: votes(), remote: async () => remote() }),
+			policy,
+			verify: ["npm test"],
+			runChecks: runner(new Set(), runs),
+			change: "a-1",
+			agent: "agent-a-1",
+			pollMs: 20,
+			answerWithinMs: 0,
+		});
 		expect(answer).toMatchObject({ ok: false, pending: true });
 		expect(runs).toEqual([]);
 	});
@@ -405,8 +577,22 @@ describe("landing ready changes together", { timeout: 120_000 }, () => {
 });
 
 describe("the audit of changes checked together", () => {
-	const merge = (commit: string, base: string, head: string, extra: Partial<MergeRecord> = {}): MergeRecord => ({ commit, author: "a", change: commit, claimsTip: "r1", head, votesTip: "v1", base, files: [], ...extra });
-	const records = (merges: MergeRecord[]) => ({ registry: [{ tip: "r1", state: { claims: [], released: [] } }], verify: ["npm test"], merges });
+	const merge = (commit: string, base: string, head: string, extra: Partial<MergeRecord> = {}): MergeRecord => ({
+		commit,
+		author: "a",
+		change: commit,
+		claimsTip: "r1",
+		head,
+		votesTip: "v1",
+		base,
+		files: [],
+		...extra,
+	});
+	const records = (merges: MergeRecord[]) => ({
+		registry: [{ tip: "r1", state: { claims: [], released: [] } }],
+		verify: ["npm test"],
+		merges,
+	});
 	const batch = { testedOn: "m0", testedWith: ["ha", "hb"] };
 
 	it("accepts a batch that landed whole on the main it was checked on, in its order", async () => {
@@ -416,7 +602,11 @@ describe("the audit of changes checked together", () => {
 
 	it("reports a batch that landed only in part, after something else, or out of order", async () => {
 		const part = [merge("m1", "m0", "ha", batch)];
-		const after = [merge("m1", "m0", "hx", { testedOn: "m0" }), merge("m2", "m1", "ha", batch), merge("m3", "m2", "hb", batch)];
+		const after = [
+			merge("m1", "m0", "hx", { testedOn: "m0" }),
+			merge("m2", "m1", "ha", batch),
+			merge("m3", "m2", "hb", batch),
+		];
 		const swapped = [merge("m1", "m0", "hb", batch), merge("m2", "m1", "ha", batch)];
 		for (const merges of [part, after, swapped]) {
 			const untested = (await audit(records(merges))).filter((v) => v.rule === "untested").map((v) => v.commit);
@@ -426,7 +616,10 @@ describe("the audit of changes checked together", () => {
 });
 
 describe("the size of a batch", () => {
-	const outcomes = (landed: number, failed: number) => [...Array(landed).fill({ how: "landed" }), ...Array(failed).fill({ how: "failed" })];
+	const outcomes = (landed: number, failed: number) => [
+		...Array(landed).fill({ how: "landed" }),
+		...Array(failed).fill({ how: "failed" }),
+	];
 
 	it("is about one failure per batch, from what the branch's recent changes came to", () => {
 		// A new branch: the prior, 1 in 20.

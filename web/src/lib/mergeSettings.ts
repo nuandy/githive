@@ -41,25 +41,38 @@ export function draftFrom(policy: Policy, verify: string[], skipChecks: string[]
 		skipChecks: skipChecks.join("\n"),
 		required: String(policy.required),
 		vetoes: policy.vetoes.join(", "),
-		grants: Object.fromEntries(Object.entries(policy.grants ?? {}).map(([role, holders]) => [role, holders.join(", ")])),
-		escalate: (policy.escalate ?? []).map((e) => ({ paths: e.paths.join("\n"), required: e.required === undefined ? "" : String(e.required), vetoes: (e.vetoes ?? []).join(", ") })),
+		grants: Object.fromEntries(
+			Object.entries(policy.grants ?? {}).map(([role, holders]) => [role, holders.join(", ")]),
+		),
+		escalate: (policy.escalate ?? []).map((e) => ({
+			paths: e.paths.join("\n"),
+			required: e.required === undefined ? "" : String(e.required),
+			vetoes: (e.vetoes ?? []).join(", "),
+		})),
 		verify: [...verify],
 	};
 }
 
 /** Every role that can block a change in the draft: the repo's own, then those the path rules add. */
 export function blockingRolesOf(draft: MergeDraft): string[] {
-	return [...new Set([...splitList(draft.vetoes), ...draft.escalate.flatMap((e) => splitList(e.vetoes))])].filter((r) => ROLE.test(r));
+	return [...new Set([...splitList(draft.vetoes), ...draft.escalate.flatMap((e) => splitList(e.vetoes))])].filter((r) =>
+		ROLE.test(r),
+	);
 }
 
 const whole = (text: string) => (/^\d+$/.test(text.trim()) ? Number(text.trim()) : null);
 
 /** What the settings tool takes, from the draft; or what's wrong with it. */
-export function settingsFrom(draft: MergeDraft): { settings: SettingsInput; errors: [] } | { settings?: undefined; errors: string[] } {
+export function settingsFrom(
+	draft: MergeDraft,
+): { settings: SettingsInput; errors: [] } | { settings?: undefined; errors: string[] } {
 	const errors: string[] = [];
 	const required = whole(draft.required);
 	if (required === null) errors.push("Required approvals is a whole number, 0 for none.");
-	const badRole = (roles: string[]) => roles.filter((r) => !ROLE.test(r)).map((r) => `"${r}" isn't a role name: use lowercase words joined by hyphens, like "security" or "api-design".`);
+	const badRole = (roles: string[]) =>
+		roles
+			.filter((r) => !ROLE.test(r))
+			.map((r) => `"${r}" isn't a role name: use lowercase words joined by hyphens, like "security" or "api-design".`);
 	const vetoes = splitList(draft.vetoes);
 	errors.push(...badRole(vetoes));
 	const escalate: SettingsInput["escalate"] = [];
@@ -70,7 +83,11 @@ export function settingsFrom(draft: MergeDraft): { settings: SettingsInput; erro
 		if (!paths.length) errors.push(`Rule ${i + 1} names no paths.`);
 		if (rowRequired === null) errors.push(`Rule ${i + 1}'s approvals is a whole number, or blank for the repo's own.`);
 		errors.push(...badRole(rowVetoes));
-		escalate.push({ paths, ...(rowRequired !== undefined && rowRequired !== null ? { required: rowRequired } : {}), ...(rowVetoes.length ? { vetoes: rowVetoes } : {}) });
+		escalate.push({
+			paths,
+			...(rowRequired !== undefined && rowRequired !== null ? { required: rowRequired } : {}),
+			...(rowVetoes.length ? { vetoes: rowVetoes } : {}),
+		});
 	});
 	// Grants only for roles that can still block; a blank one is the default.
 	const grants: Record<string, string[]> = {};
@@ -80,7 +97,9 @@ export function settingsFrom(draft: MergeDraft): { settings: SettingsInput; erro
 	}
 	const verify = draft.verify.map((c) => c.trim()).filter(Boolean);
 	const skipChecks = splitList(draft.skipChecks);
-	for (const pattern of skipChecks) if (!/^[A-Za-z0-9._/*@+-]+$/.test(pattern)) errors.push(`"${pattern}" isn't a pattern: a path or name, with * for any run of characters (*.md, docs/).`);
+	for (const pattern of skipChecks)
+		if (!/^[A-Za-z0-9._/*@+-]+$/.test(pattern))
+			errors.push(`"${pattern}" isn't a pattern: a path or name, with * for any run of characters (*.md, docs/).`);
 	if (errors.length) return { errors: [...new Set(errors)] };
 	return { settings: { required: required!, vetoes, escalate, grants, verify, skip_checks: skipChecks }, errors: [] };
 }

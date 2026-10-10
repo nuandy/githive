@@ -19,9 +19,19 @@ const { Reviewer } = await import("../../src/reviewer");
 
 const MINUTE = 60_000;
 const job: BuildJob = {
-	repo: "project--a-1", remote: "https://git.test/a.git", token: "write-a",
+	repo: "project--a-1",
+	remote: "https://git.test/a.git",
+	token: "write-a",
 	base: { remote: "https://git.test/base.git", token: "read-base" },
-	project: "project", branch: "main", verify: [], change: "a-1", ref: "changes/a-1", agent: "agent-a", intent: "Build A", claim: ["src/a/"], others: [],
+	project: "project",
+	branch: "main",
+	verify: [],
+	change: "a-1",
+	ref: "changes/a-1",
+	agent: "agent-a",
+	intent: "Build A",
+	claim: ["src/a/"],
+	others: [],
 };
 const reviewJob: ReviewJob = { ...job, role: "tests", head: "h1", baseCommit: "b0" };
 
@@ -91,13 +101,18 @@ describe("pushes", () => {
 		const result = await builder.callGit(["push", "-q", "origin", "HEAD:refs/heads/changes/a-1"]);
 		expect(result.exitCode).toBe(0);
 		expect(box.ran.find((args) => args.includes("ls-remote"))).toContain("refs/heads/changes/a-1");
-		expect(box.ran.map((args) => args.find((a) => ["ls-remote", "merge-base", "push", "rev-parse"].includes(a)))).toEqual(["ls-remote", "merge-base", "push", "rev-parse"]);
+		expect(
+			box.ran.map((args) => args.find((a) => ["ls-remote", "merge-base", "push", "rev-parse"].includes(a))),
+		).toEqual(["ls-remote", "merge-base", "push", "rev-parse"]);
 		expect(await storage.get("builder-last-pushed-head")).toBe("def");
 	});
 
 	it("a builder refuses to push to main, without running it", async () => {
 		const result = await builder.callGit(["push", "-q", "origin", "HEAD:main"]);
-		expect(result).toEqual({ exitCode: 1, output: expect.stringMatching(/^Refusing an unrecognized builder push.*changes\/a-1/) });
+		expect(result).toEqual({
+			exitCode: 1,
+			output: expect.stringMatching(/^Refusing an unrecognized builder push.*changes\/a-1/),
+		});
 		expect(box.ran).toEqual([]);
 	});
 
@@ -114,6 +129,12 @@ describe("pushes", () => {
 		expect(await runCall(builder.getTools(fresh), "run_command", command)).toMatch(/^Command refused/);
 		expect(fresh.log.at(-1)?.event).toMatch(/blocked unsafe git command/);
 		const reviewer = new ReviewerHarness({ storage, container: box.container } as never, {} as never);
-		expect(await runCall(reviewer.getTools({ status: "working", log: [] } as unknown as ReviewerState), "run_command", command)).toMatch(/^exit code 0/);
+		expect(
+			await runCall(
+				reviewer.getTools({ status: "working", log: [] } as unknown as ReviewerState),
+				"run_command",
+				command,
+			),
+		).toMatch(/^exit code 0/);
 	});
 });

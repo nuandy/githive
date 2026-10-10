@@ -27,7 +27,10 @@ export function InboxPage({ groups, loaded, error }: { groups: InboxGroup[]; loa
 				<div className="box empty">
 					<Icon name="check-circle" size={32} className="tone-good" />
 					<h2>Nothing waits on you</h2>
-					<p>When a change needs a decision (reviewers disagree, checks keep failing, an agent is stuck), it shows up here.</p>
+					<p>
+						When a change needs a decision (reviewers disagree, checks keep failing, an agent is stuck), it shows up
+						here.
+					</p>
 				</div>
 			) : (
 				groups.map((group) => (
