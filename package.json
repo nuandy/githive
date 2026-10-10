@@ -1,6 +1,9 @@
 {
 	"name": "githive",
 	"version": "0.1.0",
+	"bin": {
+		"githive": "cli/githive.mjs"
+	},
 	"scripts": {
 		"dev": "wrangler dev --enable-containers=false",
 		"deploy": "npm run build:web && wrangler deploy",
