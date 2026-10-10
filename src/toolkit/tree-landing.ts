@@ -6,10 +6,11 @@ import { Chunks, fetchPackSince, receivePack } from "../git-pack";
 import { MemoryFS } from "../memory-fs";
 import { jitteredDelay, sleep } from "../retry";
 import { placeBatch, type Placed, type ReadHistory } from "./batch-reads";
-import { filesBetween, type TreeEntry } from "./branch-history";
+import type { TreeEntry } from "./branch-history";
 import { mergeMessage } from "./merge-commit";
 import { atMost, type BatchChange, type BatchGit } from "./merge";
 import { makeStamper, type Stamper } from "./stamp";
+import { cachingHistory, changedAlong } from "./tree-reads";
 
 // Lands a batch in the Worker, without a container and without a checkout. Claims keep a batch's changes apart, so
 // each merge is main's tree with the change's files put in place: only the trees along those paths are read
@@ -27,6 +28,7 @@ const DIR = "/landing";
 const PACKS_MOST = 16 * 1024 * 1024;
 
 const FETCHES_AT_ONCE = 4;
+const CHECKS_AT_ONCE = 6;
 const PUSH_ATTEMPTS = 6;
 
 /** The packs merges fetched for their changes while they waited, by change head. */
@@ -103,7 +105,9 @@ async function landWithTrees(
 	batch: LandInput,
 	mark: (step: string) => void,
 ): Promise<TreeLanded> {
-	const plan = await planLanding(input, batch);
+	// One read cache for the whole landing: placing, checking and building read many of the same trees.
+	const reads = { ...input, history: cachingHistory(input.history) };
+	const plan = await planLanding(reads, batch);
 	mark("planned");
 	if ("gate" in plan) return plan;
 	const fs = new MemoryFS();
@@ -111,7 +115,7 @@ async function landWithTrees(
 	const fetched = await fetchChanges(input, batch.merges, plan.placed);
 	mark("packs" in fetched ? `fetched ${megabytes(fetched.packs)} (${fetched.kept} kept)` : "fetched");
 	if ("gate" in fetched) return fetched;
-	const built = await buildMerges(fs, input, batch, plan, await stamperFor(input, batch));
+	const built = await buildMerges(fs, reads, batch, plan, await stamperFor(input, batch));
 	mark(`built ${built.objects.length} objects`);
 	const pushed = await pushMerges(await input.remote("write"), batch, built, fetched.packs);
 	mark("pushed");
@@ -140,19 +144,23 @@ const describe = (landed: { commits: string[] } | "moved") =>
 type Plan = { gate: string } | { baseTree: string; placed: Placed[] };
 
 /** Places each change on the branch, and checks no change touches a file main or an earlier change touched. */
-async function planLanding(input: TreeLandingInput, batch: LandInput): Promise<Plan> {
+async function planLanding(input: TreeReads, batch: LandInput): Promise<Plan> {
 	const placing = await placeBatch(input.history, input.project, batch.branch, batch.base, batch.merges);
 	if (!placing) return { gate: "a change can't be placed on the branch through the Artifacts API" };
 	const { tip, placed } = placing;
 	const moved = placed.findIndex((each, index) => each.head.hash !== batch.merges[index]?.head);
 	if (moved >= 0) return { gate: `${batch.merges[moved]?.change}'s branch moved since it was read` };
+	const readTree = (hash: string) => input.history(input.project, (source) => source.readTree(hash));
+	// The branch's side, read only along each change's own paths: what main changed elsewhere doesn't matter.
+	const changedOnBranch = await atMost(CHECKS_AT_ONCE, placed, (each) =>
+		each.base.hash === tip.hash
+			? Promise.resolve([])
+			: changedAlong(readTree, each.base.treeHash, tip.treeHash, each.files),
+	);
 	const landedFirst: string[] = [];
 	for (const [index, each] of placed.entries()) {
-		const sinceLeft =
-			each.base.hash === tip.hash
-				? []
-				: await input.history(input.project, (source) => filesBetween(source, each.base.treeHash, tip.treeHash));
-		const both = each.files.filter((file) => [...sinceLeft, ...landedFirst].some((other) => touches(file, other)));
+		const byEarlier = each.files.filter((file) => landedFirst.some((other) => touches(file, other)));
+		const both = [...changedOnBranch[index]!, ...byEarlier];
 		if (both.length) return { gate: `${batch.merges[index]?.change} and the branch both changed ${both.join(", ")}` };
 		landedFirst.push(...each.files);
 	}

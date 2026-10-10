@@ -225,6 +225,62 @@ describe("landing a batch with trees, in the Worker", { timeout: 60_000 }, () =>
 		expect(server.git("rev-parse", "main").trim()).toBe(base);
 	});
 
+	it("lands a change beside a file main added in the same new folder, as git merges it", async () => {
+		const beside = await forkChange("beside", async (clone) => clone.write("pkg/new/a.js", "a\n"));
+		await moveMain("pkg/new/b.js", "b\n");
+		const base = server.git("rev-parse", "main").trim();
+		const fallback = vi.fn(async () => ({ commits: [] }));
+		const landed = await treeLanding({ history, project: "project", remote: async () => project(), fallback })({
+			base,
+			branch: "main",
+			merges: [merge(beside)],
+		});
+
+		expect(fallback).not.toHaveBeenCalled();
+		if (landed === "moved") throw new Error("moved");
+		expect(server.git("rev-parse", `${landed.commits[0]}^{tree}`).trim()).toBe(await gitMergeTree(base, [beside]));
+	});
+
+	it("lands in the Gate when main put a file where the change has a folder", async () => {
+		const folder = await forkChange("folder", async (clone) => clone.write("conf/settings.json", "{}\n"));
+		await moveMain("conf", "a file now\n");
+		const base = server.git("rev-parse", "main").trim();
+		const fallback = vi.fn(async () => ({ commits: ["from the Gate"] }));
+		const land = treeLanding({ history, project: "project", remote: async () => project(), fallback });
+
+		expect(await land({ base, branch: "main", merges: [merge(folder)] })).toEqual({ commits: ["from the Gate"] });
+	});
+
+	it("reads each tree once in a batch, however many changes share it", async () => {
+		const made = [];
+		for (const name of ["r1", "r2", "r3", "r4"])
+			made.push(await forkChange(name, async (clone) => clone.write(`notes/${name}/x.js`, `${name}\n`)));
+		await moveMain("docs/e.md", "main moved on\n");
+		const base = server.git("rev-parse", "main").trim();
+		const reads = new Map<string, number>();
+		const counted: ReadHistory = (repo, read) =>
+			history(repo, (source) =>
+				read({
+					...source,
+					log: (...args) => source.log(...args),
+					readCommit: (hash) => source.readCommit(hash),
+					readTree: (hash) => {
+						reads.set(hash, (reads.get(hash) ?? 0) + 1);
+						return source.readTree(hash);
+					},
+				}),
+			);
+		const fallback = vi.fn(async () => ({ commits: [] }));
+		await treeLanding({ history: counted, project: "project", remote: async () => project(), fallback })({
+			base,
+			branch: "main",
+			merges: made.map(merge),
+		});
+
+		expect(fallback).not.toHaveBeenCalled();
+		expect(Math.max(...reads.values())).toBe(1);
+	});
+
 	it("answers moved when main moved past the base, and lands nothing", async () => {
 		const change = await forkChange("late", async (clone) => clone.write("lib/late.js", "late\n"));
 		const base = server.git("rev-parse", "main").trim();
