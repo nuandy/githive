@@ -86,7 +86,7 @@ async function seedChange(repo, agent, { change, intent, paths, edit }) {
 		author: { name: agent.name, email: `${agent.name}@example.com` },
 	});
 	await git.push({ fs, http, dir, url: fork.url, ref: "main", remoteRef: `refs/heads/changes/${change}`, onAuth });
-	await tool("check", { repo, change }, agent.key);
+	await tool("status", { repo, change }, agent.key);
 	return head;
 }
 

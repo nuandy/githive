@@ -200,6 +200,10 @@ export function toolContextFor(
 				(agent) => forkName(repo, agent),
 			),
 		noteHeads: (repo, headsRead, readAt) => env.REPO_CACHE.getByName(`repo:${repo}`).noteHeads(headsRead, readAt),
+		mergeChecks: {
+			kept: (repo, change) => rpc(env.REPO_CACHE.getByName(`repo:${repo}`).keptMergeCheck(change)),
+			keep: (repo, change, kept) => env.REPO_CACHE.getByName(`repo:${repo}`).keepMergeCheck(change, kept),
+		},
 		news: (repo, branch, agent) => rpc(env.REPO_CACHE.getByName(`repo:${repo}`).landingNews(branch, agent)),
 		...githubApp(env),
 		// A branch's head, briefly cached for every merge watching it (see MergeInput.branchHead).

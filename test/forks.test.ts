@@ -319,23 +319,41 @@ describe("check (run by the agent itself)", () => {
 		await mainline.run("commit", "--quiet", "-m", "readme");
 		await mainline.run("push", "--quiet", "origin", "main");
 
-		const before = project.requests.length;
-		const beforeFork = fork.requests.length;
-		expect(await call("check", { change: "a-1" })).toEqual({
-			change: "a-1",
+		const branchHead = (await mainline.run("rev-parse", "HEAD")).trim();
+		expect(await call("status", { change: "a-1" })).toMatchObject({
 			head,
-			branch: "main",
-			main: { head: await mainline.run("rev-parse", "HEAD"), clean: false, conflicts: ["README.md"] },
-			outsideClaim: ["README.md"],
+			merge: { into: "main", branchHead, clean: false, conflicts: ["README.md"], outsideClaim: ["README.md"] },
 		});
-		// The claims registry and main come from the project and the change from its fork, with nothing of b-1's.
-		expect(project.requests.slice(before).filter((r) => r === "POST git-upload-pack")).toHaveLength(2);
-		expect(fork.requests.slice(beforeFork).filter((r) => r === "POST git-upload-pack")).toHaveLength(1);
 	}, 60_000);
 
-	it("says when there's nothing pushed to check", async () => {
+	it("works out a change's merge once per change head and branch head, then reads it from the cache", async () => {
+		const kept = new Map<string, { key: string; result: unknown }>();
+		let worked = 0;
+		const caching = (): ToolContext => ({
+			...ctx(),
+			mergeChecks: {
+				kept: async (_repo, change) => kept.get(change) ?? null,
+				keep: async (_repo, change, entry) => void (worked++, kept.set(change, entry)),
+			},
+		});
+		const status = (change: string) =>
+			callTool("status", { repo: "project", change }, caching()) as Promise<Record<string, unknown>>;
+		await call("claim", { change: "a-1", agent: "agent-a", paths: ["src/a/"], intent: "a" });
+		await pushChange(fork.url, work, "agent-a", "a-1", { "src/a/x.ts": "a\n" });
+		expect((await status("a-1")).merge).toMatchObject({ clean: true, outsideClaim: [] });
+		expect((await status("a-1")).merge).toMatchObject({ clean: true });
+		expect(worked).toBe(1);
+		// A new push is a new head: worked out again.
+		await pushChange(fork.url, work, "agent-a", "a-1", { "src/a/x.ts": "a, again\n" }, "origin/changes/a-1");
+		expect((await status("a-1")).merge).toMatchObject({ clean: true });
+		expect(worked).toBe(2);
+	});
+
+	it("says nothing about merging while nothing's pushed", async () => {
 		await call("settings", {});
 		await call("claim", { change: "a-1", agent: "agent-a", paths: ["src/a/"], intent: "a" });
-		expect(await call("check", { change: "a-1" })).toEqual({ error: "changes/a-1 has nothing pushed to check" });
+		const status = (await call("status", { change: "a-1" })) as Record<string, unknown>;
+		expect(status.head).toBeNull();
+		expect(status).not.toHaveProperty("merge");
 	});
 });

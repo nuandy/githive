@@ -112,6 +112,11 @@ export interface ToolContext {
 	) => Promise<Record<string, { head: string | null; at: number; pushed?: boolean }>>;
 	/** Records the heads a tool read (null if nothing is pushed), as of `readAt` (default now). */
 	noteHeads?: (repo: string, headsRead: Record<string, string | null>, readAt?: number) => Promise<void>;
+	/** Each change's merge check as status last worked it out, kept by the heads it was worked out on. */
+	mergeChecks?: {
+		kept: (repo: string, change: string) => Promise<{ key: string; result: unknown } | null>;
+		keep: (repo: string, change: string, kept: { key: string; result: unknown }) => Promise<void>;
+	};
 	/** A GitHub repo (owner/name) through GitHive's App, or null if the App isn't installed. Unset without GitHub. */
 	github?: (repo: string) => Promise<GitHubLink | null>;
 	/** What landed on a branch since this agent was last told (see RepoCache.landingNews). */

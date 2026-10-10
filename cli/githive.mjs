@@ -367,10 +367,12 @@ async function pushToFork(local, repo, change) {
 
 /** Checks the change merges cleanly and stays inside its claim. Returns false, having said why, when it doesn't. */
 async function checkChange(repo, change) {
-	const checked = await tool("check", { repo, change });
-	const onto = checked.branch ?? "the project's branch";
-	if (checked.main && !checked.main.clean) {
-		say(`${short(checked.head)} conflicts with ${onto} in ${(checked.main.conflicts ?? []).join(", ")}`);
+	const status = await tool("status", { repo, change });
+	const checked = { head: status.head, ...status.merge };
+	if (checked.error) throw new Error(checked.error);
+	const onto = checked.into ?? "the project's branch";
+	if (checked.clean === false) {
+		say(`${short(checked.head)} conflicts with ${onto} in ${(checked.conflicts ?? []).join(", ")}`);
 		next("githive sync, resolve inside your claim, commit, githive land");
 		process.exitCode = 1;
 		return false;

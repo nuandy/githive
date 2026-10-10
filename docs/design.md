@@ -83,11 +83,11 @@ what Git said.
   (`stale: true`).
 - `credentials`: with a change, write access to its agent's fork; without,
   read access to the project.
-- `check`: does the change still merge cleanly, and is every file it changed
-  inside its claim.
 - `vote`: a verdict, approve or reject, with evidence, on one commit.
 - `status`: a change's claim, branch head, votes, the approvals it still needs,
-  and what GitHive's hosted agents on it are doing.
+  what GitHive's hosted agents on it are doing, and once something is pushed,
+  whether it merges cleanly into the branch it lands on and which files are
+  outside its claim. Agents call it after each push.
 - `merge`: merge the change if the conventions hold, then release its claim.
 - `audit`: replay the records and list every broken convention.
 - `revert`: revert a commit the audit reports.
@@ -298,7 +298,7 @@ A release names the merge it follows (`mergedAs`), when it follows one.
 
 A change lands on the project's branch unless its claim names another with
 `into`: a feature branch, a release branch. Everything after the claim reads
-the branch from it: `credentials` says to start from it, `check` tests
+the branch from it: `credentials` says to start from it, `status` test-merges
 against it, a reviewer's `credentials` diffs against it, and `merge` lands on it,
 with that branch's other ready changes. A change lands on one branch:
 claiming it again keeps it there, and naming another is refused.
@@ -338,7 +338,7 @@ A finished branch merges into another as one change: a claim with `source`
 (the branch to merge) and `into`. Its claim is what the source changed since
 it left the target: the files, or their folders, deepest first, when there
 are more than a claim holds. The toolkit pushes the source's tip to the
-claiming agent's fork as the change's branch, so review, `check`, landing,
+claiming agent's fork as the change's branch, so review, landing,
 `merge`, `status`, `reviews`, abandoned claims and the audit treat it as any
 change, and the merge commit's second parent is the source's tip: the target
 gets the whole branch in one merge. The claim holds those paths on the target
@@ -474,12 +474,16 @@ Anyone may merge a change whose conventions hold, naming its claim's agent as
 builder's changes, and how a batch lands every ready change, whichever merge
 holds the lease.
 
-`check` is the early version, any time before merging: does the change still
-merge cleanly into main, and which files are outside its claim. It doesn't
-test-merge other agents' changes. Claims are exclusive and merge refuses files
-outside them, so two changes that can both merge touch disjoint files and
-can't conflict. An overlap means someone is outside their claim, which their
-own `check` shows them. So `check` costs the same at any scale.
+`status` gives the early version, any time before merging: does the change
+still merge cleanly into main, and which files are outside its claim. It
+doesn't test-merge other agents' changes. Claims are exclusive and merge
+refuses files outside them, so two changes that can both merge touch disjoint
+files and can't conflict. An overlap means someone is outside their claim,
+which their own `status` shows them. So it costs the same at any scale. The
+answer is kept in the repo's RepoCache by the change's head and the branch's
+head, so a `status` asked again before either moves doesn't test-merge again.
+(It was a tool of its own, `check`, until it folded into `status`: agents
+asked both the same question, where their change stands.)
 
 ### Changes the checks skip
 
@@ -672,8 +676,8 @@ change's pushed head, and GitHive doesn't see pushes: they go to the agent's
 fork. Read from every fork on every call, they were most of GitHive's Git
 requests (8 fork reads a call of `next`, as it was, at 200 agents), growing with the
 crowd. Now the repo's RepoCache keeps the head last seen on each change's
-branch, and when: `check` (which agents call after each push) and `status`
-note the head they read, and so do the reads below. A call reads the
+branch, and when: `status` (which agents call after each push) notes the
+head it read, and so do the reads below. A call reads the
 caller's own changes' heads now, takes a head seen in the last 5 minutes as
 current, and reads at most 6 of the rest, the least lately seen first. A
 head taken this way is only advice (what to review, what to batch): a merge
@@ -802,7 +806,7 @@ installed before the checks and skipped while the files they come from are
 unchanged. Toolchains, the virtualenv and Cargo's target folder live outside
 the checkout, so a clean checkout between checks keeps them. A failed install
 fails the check with its output. The repo's own Gate warms on main when
-GitHive starts with checks and at `settings`, after `check` or an approving vote while the repo has no
+GitHive starts with checks and at `settings`, after a `status` that test-merged a new head or an approving vote while the repo has no
 usable snapshot, and when a batch's check container had to set up from
 scratch or install what the snapshot didn't have; it saves a new snapshot only when one
 is due. A container warmed in the last minute isn't warmed again.
@@ -1018,7 +1022,7 @@ name, so shards in different repos are written side by side.
 **Each change has an index**: the shards it has claimed in, written before the
 shards and only ever added to. It names the change's agent, so another agent
 claiming under the same name is refused there too. Reading one change
-(`status`, `check`, `credentials`, `release`) reads the registry and the
+(`status`, `credentials`, `release`) reads the registry and the
 shards its index names, not every shard. A change with no index has claimed
 only in the registry.
 
@@ -1054,7 +1058,8 @@ audit counts the cited records together.
 `scripts/bench.mjs` runs fake agents through the MCP endpoint at rising
 concurrency, without calling a model. Each agent lists the claims, claims its
 own directory and gets its fork (`credentials`), pushes a commit to its
-change's branch, then calls `check`, `status` and `claims`, and releases.
+change's branch, then calls `status` (which test-merges it) and `claims`, and
+releases. (Runs before `check` folded into `status` called both.)
 Alongside them, five agents race for one path at each level, and exactly one
 must win.
 

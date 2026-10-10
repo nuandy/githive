@@ -14,7 +14,6 @@ export const TOOL_LEVEL: Record<string, Level> = {
 	backlog: "read",
 	status: "read",
 	audit: "read",
-	check: "read",
 	credentials: "read",
 	reviews: "review",
 	vote: "review",

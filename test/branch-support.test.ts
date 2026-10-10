@@ -67,10 +67,8 @@ describe("a project whose branch is master", () => {
 		expect(await call("settings", { repo: "project", shard_depth: 0 })).toMatchObject({ branch: "master" });
 		await call("claim", { repo: "project", change: "a-1", agent: "agent-a", paths: ["src/a/"], intent: "a" });
 		const head = await pushChange(forkUrl, work, "agent-a", "a-1", { "src/a/x.txt": "a\n" });
-		expect(await call("check", { repo: "project", change: "a-1" })).toMatchObject({
-			branch: "master",
-			main: { clean: true },
-			outsideClaim: [],
+		expect(await call("status", { repo: "project", change: "a-1" })).toMatchObject({
+			merge: { into: "master", clean: true, outsideClaim: [] },
 		});
 		await call("vote", {
 			repo: "project",

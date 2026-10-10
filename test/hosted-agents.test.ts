@@ -15,7 +15,7 @@ const hosted = vi.hoisted(() => ({
 	merges: [] as unknown[],
 	votes: [] as unknown[],
 	releases: [] as unknown[],
-	check: { main: { clean: true }, outsideClaim: [] } as unknown,
+	status: { merge: { clean: true, outsideClaim: [] } } as unknown,
 }));
 
 vi.mock("../src/toolkit/env", () => ({
@@ -32,7 +32,7 @@ vi.mock("../src/toolkit/mcp", () => ({
 		if (name === "claim") hosted.claims.push({ args, by: ctx.by });
 		if (name === "merge") hosted.merges.push({ args, by: ctx.by });
 		if (name === "release") hosted.releases.push({ args, by: ctx.by });
-		if (name === "check") return hosted.check;
+		if (name === "status") return hosted.status;
 		return { ok: true };
 	}),
 	// The repo's votes: wherever they're kept, a vote is recorded once.
@@ -81,7 +81,7 @@ beforeEach(() => {
 	hosted.merges = [];
 	hosted.votes = [];
 	hosted.releases = [];
-	hosted.check = { main: { clean: true }, outsideClaim: [] };
+	hosted.status = { merge: { clean: true, outsideClaim: [] } };
 });
 
 describe("GitHive's builder", () => {
@@ -103,10 +103,9 @@ describe("GitHive's builder", () => {
 	});
 
 	it("checks its change against main after each push, and tells the model what would conflict", async () => {
-		hosted.check = {
+		hosted.status = {
 			head: "h9",
-			main: { head: "m1", clean: false, conflicts: ["src/stats/index.ts"] },
-			outsideClaim: [],
+			merge: { into: "main", branchHead: "m1", clean: false, conflicts: ["src/stats/index.ts"], outsideClaim: [] },
 		};
 		const b = builder({ "rev-list --count": "1" });
 		const said = await b.run("commit_and_push", { message: "stats" });

@@ -145,8 +145,8 @@ async function agent(level, runId, i, scratch) {
 		remoteRef: `refs/heads/changes/${change_id}`,
 		onAuth,
 	});
-	const checked = await tool(level, "check", { ...ids, change: change_id });
-	await tool(level, "status", { ...ids, change: change_id });
+	// status test-merges the change too (its merge section), as check did before it was folded in.
+	const checked = await tool(level, "status", { ...ids, change: change_id });
 	await tool(level, "claims", ids);
 	const released = await tool(level, "release", {
 		...ids,
@@ -297,13 +297,13 @@ async function main() {
 					: `${Math.round(v)}ms`;
 	console.log(`\n${LABEL}\n`);
 	console.log(
-		"| agents | wall | calls/s | claims p50/p95 | claim p50/p95 | check p50/p95 | status p50/p95 | release p50/p95 | race winners | failures |",
+		"| agents | wall | calls/s | claims p50/p95 | claim p50/p95 | status p50/p95 | release p50/p95 | race winners | failures |",
 	);
-	console.log("|---|---|---|---|---|---|---|---|---|---|");
+	console.log("|---|---|---|---|---|---|---|---|---|");
 	for (const l of levels) {
 		const t = (name) => `${ms(l.tools[name]?.p50 ?? null)} / ${ms(l.tools[name]?.p95 ?? null)}`;
 		console.log(
-			`| ${l.agents} | ${ms(l.wallMs)} | ${l.callsPerSecond.toFixed(1)} | ${t("claims")} | ${t("claim")} | ${t("check")} | ${t("status")} | ${t("release")} | ${l.race.winners}/${RACERS} | ${l.failures.length} |`,
+			`| ${l.agents} | ${ms(l.wallMs)} | ${l.callsPerSecond.toFixed(1)} | ${t("claims")} | ${t("claim")} | ${t("status")} | ${t("release")} | ${l.race.winners}/${RACERS} | ${l.failures.length} |`,
 		);
 	}
 	console.log(`\nfull results: ${file}`);

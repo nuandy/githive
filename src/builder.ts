@@ -4,7 +4,6 @@ import { builderGitCommandBlockReason, builderGitPushBlockReason } from "./git-c
 import { ENVIRONMENT, SandboxAgent, WORKDIR, changeContext, clip, type AgentState, type ChangeJob } from "./sandbox";
 import { gitGuidance } from "./git-guidance";
 import { builderCredentials, toolContextFor, startHostedReviewers } from "./toolkit/env";
-import type { checkChange } from "./toolkit/check";
 import { callTool } from "./toolkit/mcp";
 import { inLane } from "./claim-paths";
 
@@ -351,12 +350,12 @@ How to work:
 			.filter((file) => file && !inLane(file, job.claim));
 	}
 
-	/** The files where the change conflicts with the project's branch: an early check that it still merges cleanly. */
+	/** The files where the change conflicts with the project's branch, from status's merge section. */
 	private async conflicts(job: BuildJob) {
-		const check = (await callTool("check", { repo: job.project, change: job.change }, this.toolContext()).catch(
+		const status = (await callTool("status", { repo: job.project, change: job.change }, this.toolContext()).catch(
 			() => null,
-		)) as Awaited<ReturnType<typeof checkChange>> | null;
-		return check && !check.main.clean ? (check.main.conflicts ?? []) : [];
+		)) as { merge?: { clean?: boolean; conflicts?: string[] } } | null;
+		return status?.merge?.clean === false ? (status.merge.conflicts ?? []) : [];
 	}
 
 	private async unpushed() {

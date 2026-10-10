@@ -63,14 +63,7 @@ describe("MCP front door", () => {
 				.filter(pick)
 				.map((t) => t.name)
 				.sort();
-		expect(names((t) => t.annotations.readOnlyHint)).toEqual([
-			"audit",
-			"backlog",
-			"check",
-			"claims",
-			"reviews",
-			"status",
-		]);
+		expect(names((t) => t.annotations.readOnlyHint)).toEqual(["audit", "backlog", "claims", "reviews", "status"]);
 		expect(names((t) => t.annotations.destructiveHint)).toEqual(["register", "release", "revert"]);
 	});
 

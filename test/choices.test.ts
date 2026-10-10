@@ -363,7 +363,7 @@ describe("warming the checks when a merge is near", { timeout: 60_000 }, () => {
 				);
 				const head = await pushChange(server.url, work, `a-${repo}`, `c-${repo}`, { [`src/${repo}/x.js`]: "x\n" });
 				heads[repo] = head;
-				await call(repo, "check", { change: `c-${repo}` }, key);
+				await call(repo, "status", { change: `c-${repo}` }, key);
 				await call(repo, "vote", { commit: head, reviewer: "rev", role: "review", verdict: "approve", evidence: "ok" });
 				await call(repo, "vote", {
 					commit: head,
@@ -507,7 +507,7 @@ describe("open changes' heads, as GitHive last saw them", { timeout: 120_000 }, 
 				{ "src/a0/x.js": "again\n" },
 				"origin/changes/c-a0",
 			);
-			await call("check", { change: "c-a0" }, keys.a0);
+			await call("status", { change: "c-a0" }, keys.a0);
 			expect(known.get("c-a0")?.head).toBe(newer);
 			expect(await readsOf()).toBe(0);
 			// Seen long ago and now unreadable, the change keeps what was seen rather than "nothing pushed".

@@ -181,7 +181,11 @@ describe("githive CLI", () => {
 		gitIn(clone, "add", ".");
 		gitIn(clone, "commit", "--quiet", "-m", "Rate-limit logins");
 		const head = gitIn(clone, "rev-parse", "HEAD");
-		answers.check = { change: "rate-limit", head, branch: "main", main: { head: "x", clean: true }, outsideClaim: [] };
+		answers.status = {
+			change: "rate-limit",
+			head,
+			merge: { into: "main", branchHead: "x", clean: true, outsideClaim: [] },
+		};
 		answers.merge = { ok: false, pending: true, reasons: ["rate-limit is ready and waiting to land (abcdef12)"] };
 		const landed = await cli(["land"], clone);
 		expect(landed.stdout).toContain(`pushed ${head.slice(0, 8)}`);
@@ -193,7 +197,7 @@ describe("githive CLI", () => {
 		);
 		expect(calls.slice(-3).map((c) => [c.name, c.args])).toEqual([
 			["credentials", { repo: "acme/app", change: "rate-limit" }],
-			["check", { repo: "acme/app", change: "rate-limit" }],
+			["status", { repo: "acme/app", change: "rate-limit" }],
 			["merge", { repo: "acme/app", change: "rate-limit" }],
 		]);
 
