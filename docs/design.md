@@ -1282,6 +1282,11 @@ comments give the reason; the evidence is here.
   concurrent reads each held their own copy of the packfile.
 - In a 200-agent run, 12 checks and merges were cancelled as hung, and
   Cloudflare's "internal error; reference = …" killed one merge landing a batch.
+- Without a shared read cache, reading a 202-state registry (6 MB of JSON) held
+  572 MB, far past the Worker's 128 MB. Reading 16 records repos at once stalled
+  and the requests were cancelled.
+- Doing a batch's Git work in the Worker's memory pushed a request past its
+  CPU limit as well as its memory.
 
 **Containers and the Gate**
 
@@ -1289,6 +1294,9 @@ comments give the reason; the evidence is here.
   fetches 16 at once.
 - Busy push refusals lost two batches in a row at 200 agents before the Gate
   retried them.
+- With the Gate's container restarting between batches, landing a batch took
+  17–29 s (agents-8); with it already running, 2–3 s (agents-7). A batch now
+  starts the Gate while it's read.
 - The `small` instance (1 vCPU, 3 GiB) has a quarter less memory than
   standard-1 and twice its CPU. The managed image has Node 24 but no git.
 - Express, the benchmark repo, has no lockfile.
@@ -1301,6 +1309,13 @@ comments give the reason; the evidence is here.
   an import.
 - Registering agents one write at a time cost about 2 s each, so `register`
   takes a list.
+- Checking a batch's changes 4 at a time, each reading its own votes, took
+  20–28 s for 64; now 8 at a time, with the votes read once for the batch.
+- A batch built on a cached, older main was refused at its push and its
+  gathering lost (47 s in a 200-agent run), so a batch reads main fresh.
+- A stamp over an empty votes trailer never verified, so 200 merges without
+  review all showed as unverified; the trailer is now left out when there are
+  no votes.
 - An ordinary reviewer's review hold that lingered after its vote once sent the
   only security holder off to build instead, so holds are kept by role.
 

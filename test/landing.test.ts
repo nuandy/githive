@@ -27,12 +27,9 @@ import { gitHistory } from "./helpers/git-history";
 import { artifactsInspect } from "../src/toolkit/batch-reads";
 import { forgetChains } from "../src/toolkit/batch-reads";
 
-// Landing without a line: claims keep changes off each other's paths, so the
-// ready ones (approved) land as a set. The merge that takes the branch's lease
-// checks every ready change together on main, once, and lands them in one
-// push, each as its own merge; a failing batch is split until the change that
-// fails is found, and that one is put out with the checks' rejection on its
-// head. The audit checks that each batch landed exactly as it was checked.
+// Landing as a set: the lease holder checks every ready change together on main and lands them in one push, each as
+// its own merge. A failing batch is split until the failing change is found and put out with the checks' rejection.
+// The audit checks that each batch landed exactly as it was checked.
 
 describe("landing ready changes together", { timeout: 120_000 }, () => {
 	let server: GitServer;
@@ -61,7 +58,7 @@ describe("landing ready changes together", { timeout: 120_000 }, () => {
 		return head;
 	}
 
-	/** Checks that fail when a change in `failing` is among what they ran (and, once, when `flaky` is), slowly enough for merges to meet. */
+	/** Checks that fail when a change in `failing` runs (and once for `flaky`), slowly enough for merges to meet. */
 	function runner(
 		failing = new Set<string>(),
 		runs: string[][] = [],
@@ -83,7 +80,7 @@ describe("landing ready changes together", { timeout: 120_000 }, () => {
 		};
 	}
 
-	/** The other changes into main, as the toolkit finds them: claims in force, with their heads (in the project repo here). */
+	/** The other changes into main as the toolkit finds them: claims in force, with their heads. */
 	const others = async (): Promise<Candidate[]> => {
 		const { claims: held } = await store().read();
 		return Promise.all(
@@ -208,7 +205,7 @@ describe("landing ready changes together", { timeout: 120_000 }, () => {
 
 	it("records a change main merged already (a push that applied though the server failed it) as landed, and lands the rest", async () => {
 		const a = await readyChange("a-1", { "src/a.txt": "a\n" });
-		// a-1 merged into main behind GitHive's back, as a batch's push answered with a 500 had: its claim still held.
+		// a-1 lands on main behind GitHive's back, like a push that applied despite a 500. Its claim is still held.
 		const lander = await agentClone(server.url, work, "lander");
 		await lander.run("fetch", "--quiet", "origin", "changes/a-1");
 		await lander.run("merge", "--quiet", "--no-ff", "-m", "a-1, pushed though the server failed it", "FETCH_HEAD");
@@ -221,7 +218,7 @@ describe("landing ready changes together", { timeout: 120_000 }, () => {
 		expect((await landing.view()).recent).toEqual(
 			expect.arrayContaining([expect.objectContaining({ change: "a-1", head: a, how: "landed", commit: mergedAs })]),
 		);
-		// Its claim released, naming the merge that took it in.
+		// Its claim is released, naming the merge that took it in.
 		expect((await store().read()).claims.map((c) => c.change)).not.toContain("a-1");
 	});
 
@@ -233,8 +230,8 @@ describe("landing ready changes together", { timeout: 120_000 }, () => {
 		const landing = memoryLanding();
 		expect(await merge("a-1", runner(new Set(["b-1"]), runs, undefined, gates), landing)).toMatchObject({ ok: true });
 		expect(landed().sort()).toEqual(["a-1", "c-1", "d-1"]);
-		// The half found passing landed at once, before the search had found what failed; this merge's own change, in the
-		// other half, waited for the next batch.
+		// The passing half landed before the search found the failure. This merge's own change, in the other half,
+		// waited for the next batch.
 		expect((await landing.view()).recent.map((s) => [s.change, s.how])).toEqual([
 			["c-1", "landed"],
 			["d-1", "landed"],
@@ -293,7 +290,7 @@ describe("landing ready changes together", { timeout: 120_000 }, () => {
 		const ids = Array.from({ length: 6 }, (_, i) => `n-${i}`);
 		for (const id of ids) await readyChange(id, { [`src/${id}.txt`]: `${id}\n` });
 		const landing = memoryLanding();
-		// Checks failed often here lately: with checks, a batch would hold 4 (see batchSize).
+		// Checks failed often here lately, so with checks a batch would hold 4 (see batchSize).
 		await landing.settle(
 			Array.from({ length: 10 }, (_, i) => ({
 				change: `old-${i}`,
@@ -305,7 +302,7 @@ describe("landing ready changes together", { timeout: 120_000 }, () => {
 		);
 		expect(batchSize((await landing.view()).recent)).toBe(4);
 		const reads: string[][] = [];
-		// What happens, in order: the lease handed on, then the claims released.
+		// The lease should be handed on first, then the claims released.
 		const order: string[] = [];
 		const drop = landing.drop.bind(landing);
 		landing.drop = async (holder) => (order.push("lease handed on"), drop(holder));
@@ -336,7 +333,7 @@ describe("landing ready changes together", { timeout: 120_000 }, () => {
 		expect(await merge("a-1", runner(), landing, { maxBatch: 1, batchGit: readsNoted(reads) })).toMatchObject({
 			ok: true,
 		});
-		// Kept from before a-1 landed: a batch built on it would be refused at its push, and gathered again.
+		// A cached head from before a-1 landed. A batch built on it would be refused at its push.
 		expect(
 			await merge("b-1", runner(), landing, { batchGit: readsNoted(reads), branchHead: async () => before }),
 		).toMatchObject({ ok: true });
@@ -348,7 +345,7 @@ describe("landing ready changes together", { timeout: 120_000 }, () => {
 		for (const x of ["a", "b"]) await readyChange(`${x}-1`, { [`src/${x}.txt`]: `${x}\n` });
 		const landing = memoryLanding();
 		const reads: string[][] = [];
-		// a-1's batch landed, and its claim's release hasn't come yet.
+		// a-1's batch lands, but its claim isn't released yet.
 		const claimStore = store();
 		claimStore.release = async () => ({ ok: true }) as never;
 		expect(
