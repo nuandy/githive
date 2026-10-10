@@ -1,13 +1,14 @@
 import git from "isomorphic-git";
 import { BOT, branchHead, type Remote } from "../git";
 import { repoOfUrl } from "../git-http";
+import { concat } from "../git-fetch";
 import { Chunks, fetchPackSince, receivePack } from "../git-pack";
 import { MemoryFS } from "../memory-fs";
 import { jitteredDelay, sleep } from "../retry";
 import { placeBatch, type Placed, type ReadHistory } from "./batch-reads";
 import { filesBetween, type TreeEntry } from "./branch-history";
 import { mergeMessage } from "./merge-commit";
-import { atMost, type BatchGit } from "./merge";
+import { atMost, type BatchChange, type BatchGit } from "./merge";
 import { makeStamper, type Stamper } from "./stamp";
 
 // Lands a batch in the Worker, without a container and without a checkout. Claims keep a batch's changes apart, so
@@ -28,15 +29,45 @@ const PACKS_MOST = 16 * 1024 * 1024;
 const FETCHES_AT_ONCE = 4;
 const PUSH_ATTEMPTS = 6;
 
-export interface TreeLandingInput {
+/** The packs merges fetched for their changes while they waited, by change head. */
+export interface ChangePacks {
+	keep(head: string, pack: Uint8Array): Promise<void>;
+	read(heads: string[]): Promise<Record<string, Uint8Array>>;
+}
+
+/** What a landing reads: the repos, through the Artifacts API and Git, and the packs kept for it. */
+export interface TreeReads {
 	history: ReadHistory;
 	/** The project repo's name for the Artifacts API, and its credentials. */
 	project: string;
 	remote: (scope: "read" | "write") => Promise<Remote>;
+	packs?: ChangePacks;
+}
+
+export interface TreeLandingInput extends TreeReads {
 	/** GitHive's key, to stamp each merge for whoever asked, as the Gate does. */
 	stampKey?: string;
 	/** Lands the batch in the Gate, when this can't. */
 	fallback: BatchGit["land"];
+}
+
+/** A change pack bigger than this isn't kept: its landing fetches it. */
+const KEPT_PACK_MOST = 1024 * 1024;
+
+/**
+ * Fetches a merge's own change from its fork while the merge waits for its turn, and keeps it for the batch that
+ * lands it, so that landing, which holds every other merge up, needn't wait on the fork. Artifacts takes seconds to
+ * work out any pack, however small.
+ */
+export async function prefetchChange(input: TreeReads, branch: string, change: BatchChange) {
+	if (!input.packs || !change.source) return;
+	const tip = await branchHead(await input.remote("read"), branch);
+	if (!tip) return;
+	const placing = await placeBatch(input.history, input.project, branch, tip, [change]);
+	const placed = placing?.placed[0];
+	if (!placed || placed.head.hash !== change.head) return;
+	const pack = await fetchPackSince(change.source, [change.head], [placed.base.hash], { bytes: KEPT_PACK_MOST });
+	if (pack !== "too big") await input.packs.keep(change.head, concat(pack.parts));
 }
 
 type LandInput = Parameters<BatchGit["land"]>[0];
@@ -77,8 +108,8 @@ async function landWithTrees(
 	if ("gate" in plan) return plan;
 	const fs = new MemoryFS();
 	await git.init({ fs, dir: DIR });
-	const fetched = await fetchChanges(batch.merges, plan.placed);
-	mark("fetched" + ("packs" in fetched ? ` ${megabytes(fetched.packs)}` : ""));
+	const fetched = await fetchChanges(input, batch.merges, plan.placed);
+	mark("packs" in fetched ? `fetched ${megabytes(fetched.packs)} (${fetched.kept} kept)` : "fetched");
 	if ("gate" in fetched) return fetched;
 	const built = await buildMerges(fs, input, batch, plan, await stamperFor(input, batch));
 	mark(`built ${built.objects.length} objects`);
@@ -138,24 +169,39 @@ async function stamperFor(input: TreeLandingInput, batch: LandInput): Promise<St
 }
 
 /**
- * The packs of objects the changes add beyond their merge bases, one fetch per fork, kept as the server sent them
- * to join into the landing's push. A change on a branch of the project repo already has its objects there.
+ * The packs of objects the changes add beyond their merge bases, kept by the merges that waited for this batch or
+ * else fetched, one fetch per fork, as the server sent them, to join into the landing's push. A fork with several
+ * changes in the batch is fetched once for all of them, so no object is in the push twice. A change on a branch of
+ * the project repo already has its objects there.
  */
-async function fetchChanges(merges: Merge[], placed: Placed[]): Promise<{ gate: string } | { packs: Chunks[] }> {
-	const byFork = new Map<string, { source: Remote; wants: Set<string>; haves: Set<string> }>();
+async function fetchChanges(
+	input: TreeReads,
+	merges: Merge[],
+	placed: Placed[],
+): Promise<{ gate: string } | { packs: Chunks[]; kept: number }> {
+	const byFork = new Map<string, { source: Remote; heads: string[]; haves: Set<string> }>();
 	for (const [index, merge] of merges.entries()) {
 		if (!merge.source) continue;
-		const fork = byFork.get(merge.source.url) ?? { source: merge.source, wants: new Set(), haves: new Set() };
-		fork.wants.add(merge.head);
+		const fork = byFork.get(merge.source.url) ?? { source: merge.source, heads: [], haves: new Set() };
+		fork.heads.push(merge.head);
 		fork.haves.add(placed[index]!.base.hash);
 		byFork.set(merge.source.url, fork);
 	}
+	const forks = [...byFork.values()];
+	const alone = forks.filter((fork) => fork.heads.length === 1).map((fork) => fork.heads[0]!);
+	const kept: Record<string, Uint8Array> =
+		input.packs && alone.length ? await input.packs.read(alone).catch(() => ({})) : {};
 	const budget = { bytes: PACKS_MOST };
-	const packs = await atMost(FETCHES_AT_ONCE, [...byFork.values()], (fork) =>
-		fetchPackSince(fork.source, [...fork.wants], [...fork.haves], budget),
-	);
+	const packs = await atMost(FETCHES_AT_ONCE, forks, async (fork) => {
+		const stored = fork.heads.length === 1 ? kept[fork.heads[0]!] : undefined;
+		if (stored) {
+			budget.bytes -= stored.length;
+			return budget.bytes < 0 ? "too big" : new Chunks([stored]);
+		}
+		return fetchPackSince(fork.source, fork.heads, [...fork.haves], budget);
+	});
 	if (packs.includes("too big")) return { gate: `the changes add over ${PACKS_MOST / 1e6} MB` };
-	return { packs: packs as Chunks[] };
+	return { packs: packs as Chunks[], kept: Object.keys(kept).length };
 }
 
 type Built = { fs: MemoryFS; objects: string[]; commits: string[]; tip: string };

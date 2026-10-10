@@ -15,7 +15,7 @@ import type { ToolContext, HostedStatus } from "./mcp";
 import type { BatchGit, BatchSource, CheckRunner } from "./merge";
 import { recordsRepoName } from "./shards";
 import { makeStamper } from "./stamp";
-import { treeLanding } from "./tree-landing";
+import { prefetchChange, treeLanding, type TreeReads } from "./tree-landing";
 import { headsForClaims } from "../push-events";
 import { gitLanding, LANDING_RECORDS_REPO, landingRef, lazyLog, type LeaseRecord } from "./landing-lease";
 
@@ -290,6 +290,10 @@ function gateParts(env: Env) {
 			if (treeLandingOn(env)) return;
 			await bootGate(env, repo, `repo:${repo}`);
 		},
+		// With trees, a merge fetches its own change while it waits for its turn (see tree-landing.ts).
+		prefetchChange: async (repo, branch, change) => {
+			if (treeLandingOn(env)) await prefetchChange(treeReads(env, repo), branch, change);
+		},
 		// A batch's Git work runs in the repo's own Gate container, which never runs a change's code (see BatchGit).
 		batchGit: (repo) => batchGitFor(env, repo),
 		// The landing lease is a record in the repo's first records repo (see landingLog). Outcomes are cached in the
@@ -482,13 +486,25 @@ function batchGitFor(env: Env, repo: string): BatchGit {
 	if (!treeLandingOn(env)) return inGate;
 	// Batches land with trees in the Worker, and in the Gate only when one needs a real merge (see tree-landing.ts).
 	const land = treeLanding({
-		history: (name, read) => withHistory(env.ARTIFACTS, name, read),
-		project: repo,
-		remote: (scope) => projectRemote(env, repo, scope),
+		...treeReads(env, repo),
 		...(env.STAMP_KEY ? { stampKey: env.STAMP_KEY } : {}),
 		fallback: inGate.land,
 	});
 	return { ...inGate, land };
+}
+
+/** How a landing with trees reads the repo, and the change packs merges kept for it in the RepoCache. */
+function treeReads(env: Env, repo: string): TreeReads {
+	const cache = () => env.REPO_CACHE.getByName(`repo:${repo}`);
+	return {
+		history: (name, read) => withHistory(env.ARTIFACTS, name, read),
+		project: repo,
+		remote: (scope) => projectRemote(env, repo, scope),
+		packs: {
+			keep: (head, pack) => cache().keepChangePack(head, pack),
+			read: (heads) => rpc(cache().changePacks(heads)),
+		},
+	};
 }
 
 /** Whether batches land with trees in the Worker rather than in the repo's Gate container. */

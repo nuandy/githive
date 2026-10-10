@@ -5,10 +5,11 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { forgetChains, type ReadHistory } from "../src/toolkit/batch-reads";
-import { treeLanding } from "../src/toolkit/tree-landing";
-import { agentClone } from "./helpers/agents";
+import { type ChangePacks, prefetchChange, treeLanding } from "../src/toolkit/tree-landing";
+import { agentClone, pushChange } from "./helpers/agents";
 import { gitHistory } from "./helpers/git-history";
 import { startGitServer, type GitServer } from "./helpers/git-server";
+import { toolCalls } from "./helpers/tool-calls";
 
 const exec = promisify(execFile);
 
@@ -146,6 +147,33 @@ describe("landing a batch with trees, in the Worker", { timeout: 60_000 }, () =>
 		expect(() => server.git("fsck", "--connectivity-only", "--no-dangling")).not.toThrow();
 	});
 
+	it("lands a change its merge fetched while waiting without asking its fork again", async () => {
+		const kept = new Map<string, Uint8Array>();
+		const packs: ChangePacks = {
+			keep: async (head, pack) => void kept.set(head, pack),
+			read: async (heads) =>
+				Object.fromEntries(heads.filter((head) => kept.has(head)).map((head) => [head, kept.get(head)!])),
+		};
+		const early = await forkChange("early", async (clone) => clone.write("lib/early.js", "early\n"));
+		await moveMain("docs/d.md", "main moved on\n");
+		const reads = { history, project: "project", remote: async () => project(), packs };
+		await prefetchChange(reads, "main", merge(early));
+		expect([...kept.keys()]).toEqual([early.head]);
+		const base = server.git("rev-parse", "main").trim();
+		const fallback = vi.fn(async () => ({ commits: [] }));
+		const fetchesBefore = server.requestsTo.filter((request) => /fork-early.*git-upload-pack/.test(request)).length;
+		expect(fetchesBefore).toBeGreaterThan(0);
+
+		const landed = await treeLanding({ ...reads, fallback })({ base, branch: "main", merges: [merge(early)] });
+
+		expect(fallback).not.toHaveBeenCalled();
+		expect(server.requestsTo.filter((request) => /fork-early.*git-upload-pack/.test(request)).length).toBe(
+			fetchesBefore,
+		);
+		if (landed === "moved") throw new Error("moved");
+		expect(server.git("rev-parse", `${landed.commits[0]}^{tree}`).trim()).toBe(await gitMergeTree(base, [early]));
+	});
+
 	it("lands in the Gate when a change and main both changed a file", async () => {
 		const readme = await forkChange("readme", async (clone) => clone.write("README.md", "# Mine\n"));
 		await moveMain("README.md", "# Theirs\n");
@@ -211,5 +239,19 @@ describe("landing a batch with trees, in the Worker", { timeout: 60_000 }, () =>
 		expect(await land({ base, branch: "main", merges: [merge(change)] })).toBe("moved");
 		expect(server.git("log", "-1", "--format=%s", "main").trim()).toBe("main: docs/c.md");
 		expect(fallback).not.toHaveBeenCalled();
+	});
+});
+
+describe("a merge fetching its change while it waits", { timeout: 60_000 }, () => {
+	it("asks for its own change, on the branch it lands on", async () => {
+		const prefetchChange = vi.fn(async () => {});
+		const { call, register } = toolCalls(() => server, { prefetchChange });
+		await call("settings", { required: 0, vetoes: [] });
+		await register("a");
+		await call("claim", { change: "pre", agent: "a", paths: ["lib/pre/"], intent: "pre" }, "a");
+		const head = await pushChange(server.url, work, "a", "pre", { "lib/pre/x.js": "x\n" });
+
+		expect(await call("merge", { change: "pre", agent: "a" }, "a")).toMatchObject({ ok: true });
+		expect(prefetchChange).toHaveBeenCalledWith("p", "main", expect.objectContaining({ change: "pre", head }));
 	});
 });

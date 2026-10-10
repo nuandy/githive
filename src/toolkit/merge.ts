@@ -1,5 +1,6 @@
 import { type Landing, memoryLanding } from "./landing";
 import { landBatch } from "./merge-batch";
+import { batchChange } from "./merge-checks";
 import { holdLease, LEASE_MS } from "./merge-lease";
 import { landedAlready, outcomeOf, readyNow } from "./merge-ready";
 import type { MergeInput, MergeOutcome } from "./merge-types";
@@ -53,6 +54,10 @@ export async function mergeChange(input: MergeInput): Promise<MergeOutcome> {
 	const mine = await readyNow(input, landing);
 	if (!mine.ok) return (await landedAlready(input, landing, mine.head)) ?? mine.refused;
 	const head = mine.ready.head;
+	// Its change is fetched while it waits, so the landing that holds every other merge up needn't wait on its fork.
+	void input
+		.prefetch?.(batchChange(mine.ready))
+		.catch((err) => console.error(`prefetching ${input.change} failed`, String(err)));
 	const answerBy = started + (input.answerWithinMs ?? ANSWER_WITHIN_MS);
 	for (;;) {
 		const turn = await landing.turn(holder, input.change, head, started, LEASE_MS);

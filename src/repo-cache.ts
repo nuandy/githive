@@ -84,7 +84,11 @@ const KEPT_PREFIXES = [
 	"files:",
 	"news:",
 	"merge:",
+	"pack:",
 ];
+
+/** How long a change's prefetched pack is kept for its landing. */
+const PACK_KEPT_MS = 2 * 60 * 60_000;
 
 /** A change's merge check as status worked it out, for the change head and branch head in `key`. */
 export interface KeptMergeCheck {
@@ -159,6 +163,26 @@ export class RepoCache extends DurableObject<Env> {
 
 	async keepMergeCheck(change: string, kept: KeptMergeCheck) {
 		await this.ctx.storage.put(`merge:${change}`, kept);
+	}
+
+	/** Keeps the objects a change at `head` adds, as its fork packed them, until its batch lands (see tree-landing.ts). */
+	async keepChangePack(head: string, pack: Uint8Array) {
+		const stale = [...(await this.ctx.storage.list<{ at: number }>({ prefix: "pack:" }))]
+			.filter(([, kept]) => kept.at < Date.now() - PACK_KEPT_MS)
+			.map(([key]) => key);
+		if (stale.length) await this.ctx.storage.delete(stale);
+		await this.ctx.storage.put(`pack:${head}`, { at: Date.now(), pack });
+	}
+
+	/** The packs kept for these heads, by head. */
+	async changePacks(heads: string[]) {
+		const packs: Record<string, Uint8Array> = {};
+		for (let i = 0; i < heads.length; i += STORAGE_BATCH) {
+			const keys = heads.slice(i, i + STORAGE_BATCH).map((head) => `pack:${head}`);
+			const kept = await this.ctx.storage.get<{ at: number; pack: Uint8Array }>(keys);
+			for (const [key, value] of kept) packs[key.slice("pack:".length)] = value.pack;
+		}
+		return packs;
 	}
 
 	/** Note pushes from push events. Events can arrive late, twice or out of order, so the newest wins. */

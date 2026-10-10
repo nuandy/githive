@@ -7,13 +7,14 @@ import { memoryBatchGit } from "./memory-batch-git";
  * GitHive's tools on repo "p", served by a local Git server, called as registered agents. `server` is read at
  * each call, so a test file can start a fresh server per test.
  */
-export function toolCalls(server: () => GitServer) {
+export function toolCalls(server: () => GitServer, extra: Partial<ToolContext> = {}) {
 	const keys: Record<string, string> = {};
 	const ctx = (agentKey?: string): ToolContext => ({
 		remote: async () => ({ url: server().url, token: "unused" }),
 		batchGit: () => memoryBatchGit({ url: server().url, token: "unused" }),
 		changeRemote: async () => ({ url: server().url, token: "unused" }),
 		head: async (_repo, branch) => server().git("rev-parse", branch).trim(),
+		...extra,
 		...(agentKey ? { agentKey } : {}),
 	});
 	/** Calls a tool, as `as`'s registered agent if named. */

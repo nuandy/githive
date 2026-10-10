@@ -11,7 +11,7 @@ import type { ClaimStore } from "../claim-store";
 import type { ClaimRecord, Registry } from "../claims";
 import type { BranchCommit } from "../git-records";
 import type { Landed, Landing } from "../landing";
-import { atMost, type BatchGit, type CheckRunner } from "../merge";
+import { atMost, type BatchChange, type BatchGit, type CheckRunner } from "../merge";
 import { abandoned } from "../staleness";
 import type { Stamper } from "../stamp";
 import type { VoteStore } from "../vote-store";
@@ -63,6 +63,8 @@ export interface ToolContext {
 	prepareChecks?: (repo: string) => (gate: string) => Promise<void>;
 	/** Starts the repo's Gate while a batch is being read, so it's ready to land it. */
 	prepareLanding?: (repo: string) => Promise<void>;
+	/** Fetches a change for its landing on `branch` while its merge waits for its turn. */
+	prefetchChange?: (repo: string, branch: string, change: BatchChange) => Promise<void>;
 	/** The batch landing on a branch and its recent outcomes. Without it, a merge knows only its own. */
 	landing?: (repo: string, branch: string) => Landing;
 	/** Stamps what this caller writes with their verified identity and agent name. Without it, nothing is stamped. */

@@ -116,6 +116,7 @@ function optionalMergeInput(
 	if (ctx.landing) optional.landing = ctx.landing(repo, into);
 	if (ctx.history) optional.history = ctx.history;
 	if (ctx.prepareLanding) optional.prepareLanding = () => ctx.prepareLanding!(repo);
+	if (ctx.prefetchChange) optional.prefetch = (change) => ctx.prefetchChange!(repo, into, change);
 	if (ctx.prepareChecks && !at.checksOnActions) optional.prepareChecks = ctx.prepareChecks(repo);
 	// Push the landed branch back to GitHub as a fast-forward, refused if someone pushed there directly.
 	if (link && into === branch) optional.afterLanding = (commit: string) => mirrorTo(gate, link, into, commit);

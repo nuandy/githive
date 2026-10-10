@@ -122,6 +122,8 @@ export interface MergeInput {
 	prepareChecks?: (gate: string) => Promise<void>;
 	/** Starts the repo's Gate while the batch is read, so landing doesn't wait for its container to start. */
 	prepareLanding?: () => Promise<void>;
+	/** Fetches this merge's change ahead of its landing, while it waits for its turn (see tree-landing.ts). */
+	prefetch?: (change: BatchChange) => Promise<void>;
 	/** Caps what batchSize gives. Tests set a small cap so that batches follow each other. */
 	maxBatch?: number;
 	/** Runs after a batch lands and its claims are released, such as pushing main to GitHub. Failures are logged. */
