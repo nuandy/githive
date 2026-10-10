@@ -1,4 +1,5 @@
 import type { ProviderProfile } from "./store";
+import { fail } from "../errors";
 
 // Sign-in with GitHub and Google through the authorization-code flow with PKCE. Sign-in is refused unless the
 // provider returns a verified email.
@@ -20,17 +21,13 @@ interface Provider {
 	}): Promise<ProviderProfile>;
 }
 
-const fail = (message: string): never => {
-	throw new Error(`[502] ${message}`);
-};
-
 async function json(response: Response, what: string) {
 	const text = await response.text();
-	if (!response.ok) fail(`${what} failed: ${response.status} ${text.slice(0, 200)}`);
+	if (!response.ok) fail(502, `${what} failed: ${response.status} ${text.slice(0, 200)}`);
 	try {
 		return JSON.parse(text);
 	} catch {
-		return fail(`${what} answered with something other than JSON`);
+		return fail(502, `${what} answered with something other than JSON`);
 	}
 }
 
@@ -66,7 +63,7 @@ export const PROVIDERS: Record<ProviderName, Provider> = {
 				"GitHub's token exchange",
 			);
 			if (typeof token.access_token !== "string")
-				fail(`GitHub refused the sign-in: ${token.error_description ?? token.error ?? "no token"}`);
+				fail(502, `GitHub refused the sign-in: ${token.error_description ?? token.error ?? "no token"}`);
 			const headers = { ...GITHUB_HEADERS, Authorization: `Bearer ${token.access_token}` };
 			const [user, emails] = await Promise.all([
 				json(await fetch("https://api.github.com/user", { headers }), "Reading the GitHub user"),
@@ -116,7 +113,7 @@ export const PROVIDERS: Record<ProviderName, Provider> = {
 				}),
 				"Google's token exchange",
 			);
-			if (typeof token.access_token !== "string") fail("Google refused the sign-in");
+			if (typeof token.access_token !== "string") fail(502, "Google refused the sign-in");
 			const user = await json(
 				await fetch("https://openidconnect.googleapis.com/v1/userinfo", {
 					headers: { Authorization: `Bearer ${token.access_token}` },

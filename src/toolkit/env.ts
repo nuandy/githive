@@ -354,7 +354,7 @@ async function forkHead(env: Env, repo: string, agent: string, ref: string) {
 		return (await headOf(env.ARTIFACTS, name, ref)) ?? null;
 	} catch (err) {
 		if (/NOT_FOUND|not found/i.test(`${(err as { code?: string })?.code ?? ""} ${String(err)}`))
-			throw new Error(`[409] ${agent} has no fork yet: nothing has been pushed`);
+			fail(409, `${agent} has no fork yet: nothing has been pushed`);
 		throw err;
 	}
 }
@@ -399,7 +399,7 @@ function batchGitFor(env: Env, repo: string): BatchGit {
 				}),
 			);
 			if ("moved" in landed) return "moved";
-			if ("error" in landed) throw new Error(`[500] landing the batch failed: ${landed.error}`);
+			if ("error" in landed) fail(500, `landing the batch failed: ${landed.error}`);
 			return { commits: landed.commits };
 		},
 		checksBranch: async ({ base, branch, changes, to, ref }) => {
@@ -529,8 +529,7 @@ export async function makeAgentFork(env: Env, repo: string, agent: string) {
 			return;
 		} catch (err) {
 			// Requested but not ready in time. Another source would only wait on the same fork, so ask the caller to retry.
-			if (isForkNotReady(err))
-				throw new Error(`[503] ${agent}'s fork of ${repo} is still being made: call again in a minute`);
+			if (isForkNotReady(err)) fail(503, `${agent}'s fork of ${repo} is still being made: call again in a minute`);
 			failure = err;
 		}
 	}
@@ -543,7 +542,7 @@ export async function changeRemote(env: Env, repo: string, agent: string, scope:
 	try {
 		return await remoteFor(env.ARTIFACTS, name, scope, ttlSeconds);
 	} catch (err) {
-		if (scope === "read") throw new Error(`[409] ${agent} has no fork yet: nothing has been pushed`);
+		if (scope === "read") fail(409, `${agent} has no fork yet: nothing has been pushed`);
 		await makeAgentFork(env, repo, agent);
 		return remoteFor(env.ARTIFACTS, name, scope, ttlSeconds);
 	}

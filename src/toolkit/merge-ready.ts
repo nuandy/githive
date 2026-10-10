@@ -10,6 +10,7 @@ import { CHECKS_REVIEWER } from "./merge-checks";
 import type { BatchSource, MergeInput, MergeOutcome, Ready, Refused } from "./merge-types";
 import type { VotesView } from "./vote-store";
 import { approval, countedVotes, effectivePolicy } from "./votes";
+import { fail } from "../errors";
 
 // A change about to be checked against its claim and votes, at the head and with the files just read.
 type Proposed = BatchSource & { head: string; files: string[]; mine: boolean };
@@ -23,7 +24,7 @@ interface ChangeRead {
 }
 
 export function conflict(message: string): never {
-	throw new Error(`[409] ${message}`);
+	fail(409, `${message}`);
 }
 
 // The branch's head, cached for every merge watching it, or else listed.

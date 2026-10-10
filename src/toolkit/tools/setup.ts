@@ -26,16 +26,11 @@ export const setupTools: ToolHandlers = {
 	},
 	async register({ args, ctx, repo, claims, acting, stamper }) {
 		if (ctx.agent)
-			throw new Error(
-				`[409] you're signed in as ${ctx.agent}: what you write is already attributed to you, with no key`,
-			);
+			fail(409, `you're signed in as ${ctx.agent}: what you write is already attributed to you, with no key`);
 		const nameOk = (agent: string) => {
 			if (agent.includes("/"))
-				throw new Error(
-					'[400] names with "/" are signed-in agents\' (<handle>/<agent>); register a name without ' + "one",
-				);
-			if (agent.startsWith(HOSTED_PREFIX) && !ctx.hosted)
-				throw new Error("[403] githive- names are GitHive's hosted agents'");
+				fail(400, 'names with "/" are signed-in agents\' (<handle>/<agent>); register a name without ' + "one");
+			if (agent.startsWith(HOSTED_PREFIX) && !ctx.hosted) fail(403, "githive- names are GitHive's hosted agents'");
 			return agent;
 		};
 		const keyFor = (agent: string) => {
@@ -49,15 +44,15 @@ export const setupTools: ToolHandlers = {
 			"Keep each key secret; it is shown once. Send it as X-GitHive-Agent-Key (or agent_key) with every call.";
 		if (args.agents !== undefined) {
 			if (!Array.isArray(args.agents) || !args.agents.length || args.agents.length > MOST_AT_ONCE)
-				throw new Error(`[400] agents is a list of 1 to ${MOST_AT_ONCE} names`);
+				fail(400, `agents is a list of 1 to ${MOST_AT_ONCE} names`);
 			const names = args.agents.map((name) =>
 				typeof name === "string" && name.trim() ? nameOk(name.trim()) : fail(400, "each of agents is a name"),
 			);
-			if (new Set(names).size !== names.length) throw new Error("[400] agents names a name more than once");
+			if (new Set(names).size !== names.length) fail(400, "agents names a name more than once");
 			const issued = names.map((agent) => ({ agent, key: keyFor(agent) }));
 			const hashed = await Promise.all(issued.map(async ({ agent, key }) => ({ agent, keyHash: await sha256(key) })));
 			const outcome = await registerAgents(claims, hashed, stamper);
-			if (!outcome.ok) throw new Error(`[409] ${outcome.refused}`);
+			if (!outcome.ok) fail(409, `${outcome.refused}`);
 			await ctx.prepareForks?.(repo, names).catch(() => undefined);
 			return { agents: issued, note };
 		}
@@ -68,7 +63,7 @@ export const setupTools: ToolHandlers = {
 			{ agent, keyHash: await sha256(newKey), ...(acting ? { holder: acting } : {}) },
 			stamper,
 		);
-		if (!outcome.ok) throw new Error(`[409] ${outcome.refused}`);
+		if (!outcome.ok) fail(409, `${outcome.refused}`);
 		// Queue its fork now, rather than making it on its first push alongside everyone else's.
 		await ctx.prepareForks?.(repo, [agent]).catch(() => undefined);
 		return { agent, key: newKey, note: note.replace("each key", "this key") };
@@ -146,8 +141,9 @@ function shardingAtStart(asked: number | undefined, recordsRepos: number, spread
 // Later settings change what they name. How claims are kept was settled at the start.
 async function changeRepoSettings({ args, ctx, repo, claims, stamper }: ToolCall, registered: Registry) {
 	if (args.shard_depth !== undefined || args.records_repos !== undefined)
-		throw new Error(
-			"[409] how claims are kept is set when GitHive starts on a repo: since, they shard as the load " + "calls for it",
+		fail(
+			409,
+			"how claims are kept is set when GitHive starts on a repo: since, they shard as the load " + "calls for it",
 		);
 	const policy = POLICY_FIELDS.some((field) => args[field] !== undefined)
 		? policyFrom(args, registered.policy ?? DEFAULT_POLICY)
@@ -161,12 +157,12 @@ async function changeRepoSettings({ args, ctx, repo, claims, stamper }: ToolCall
 	const github = args.github === undefined ? undefined : await githubFrom(ctx, args.github);
 	if (!policy && !verify && !branchRules && !skipChecks && github === undefined) {
 		const fields = [...POLICY_FIELDS, "verify", "branch_rules", "skip_checks", "github"].join(", ");
-		throw new Error(`[400] GitHive has started on ${repo}: name what to change: ${fields}`);
+		fail(400, `GitHive has started on ${repo}: name what to change: ${fields}`);
 	}
 	// Checks on Actions need the GitHub repo they run in. A github of null disconnects it.
 	const connected = github === undefined ? registered.github : github;
 	if (onActions(verify ?? registered.verify) && !connected)
-		throw new Error(`[409] checks on GitHub Actions need a connected GitHub repo: set github ("owner/name") too`);
+		fail(409, `checks on GitHub Actions need a connected GitHub repo: set github ("owner/name") too`);
 	const changes: Parameters<typeof changeSettings>[1] = {};
 	if (policy) changes.policy = policy;
 	if (verify) changes.verify = verify;

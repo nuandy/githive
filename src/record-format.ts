@@ -1,3 +1,4 @@
+import { fail } from "./errors";
 // The shape of GitHive's records, named in a trailer on every record commit (none means format 1).
 // To change a shape, bump RECORD_FORMAT, add UPGRADES[old] and update test/fixtures/record-shapes.json.
 // A GitHive never overwrites records newer than it knows, so rolling back can't corrupt them.
@@ -26,7 +27,7 @@ export function upgradeState<S>(
 	let current = state;
 	for (let format = from; format < to; format++) {
 		const upgrade = upgrades[format];
-		if (!upgrade) throw new Error(`[500] no upgrade from record format ${format} to ${format + 1}`);
+		if (!upgrade) fail(500, `no upgrade from record format ${format} to ${format + 1}`);
 		current = upgrade(current, ref);
 	}
 	return current as S;

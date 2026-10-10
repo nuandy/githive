@@ -3,6 +3,7 @@ import { type Principal, SESSION_COOKIE, cookie, describe, identityStore } from 
 import { PROVIDERS, type ProviderConfig, type ProviderName, isProvider, pkceChallenge } from "./providers";
 import { OrgStore } from "./orgs";
 import { type IdentityStore, SESSION_DAYS, randomSecret } from "./store";
+import { fail } from "../errors";
 
 // Sign-in with GitHub or Google, and a signed-in person's own agents, tokens and connected MCP clients.
 // Admins behind Access manage invitations here too.
@@ -28,12 +29,12 @@ function providerConfig(env: Env, name: ProviderName): ProviderConfig | null {
 const store = (env: Env): IdentityStore =>
 	identityStore(env) ??
 	(() => {
-		throw new Error("[503] sign-in isn't set up here (no identity database)");
+		fail(503, "sign-in isn't set up here (no identity database)");
 	})();
 
 /** The signed-in person (not an agent, not an Access caller), or a 401. */
 const signedInUser = (principal: Principal | undefined) => {
-	if (principal?.kind !== "user") throw new Error("[401] sign in to GitHive first");
+	if (principal?.kind !== "user") fail(401, "sign in to GitHive first");
 	return principal.user;
 };
 
@@ -194,8 +195,7 @@ export function authRoutes(app: Hono<AuthEnv>) {
 
 	// Sign-in invitations. Only an admin, through Access, manages them.
 	const admin = (principal: Principal | undefined) => {
-		if (principal?.kind !== "access")
-			throw new Error("[403] invitations are managed by an admin, through Cloudflare Access");
+		if (principal?.kind !== "access") fail(403, "invitations are managed by an admin, through Cloudflare Access");
 		return principal.identity.kind === "person"
 			? principal.identity.value
 			: `service token ${principal.identity.value}`;

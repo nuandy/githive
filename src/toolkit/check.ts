@@ -3,6 +3,7 @@ import { repoOfUrl } from "../git-http";
 import { inLane } from "../claim-paths";
 import { changeAgainst, type ReadHistory } from "./batch-reads";
 import type { ClaimRecord } from "./claims";
+import { fail } from "../errors";
 
 // An agent's early check on its own change: does it still merge into the project's branch, and does it stay
 // inside its claim. It reports and decides nothing. It doesn't test-merge other agents' changes, because claims
@@ -31,7 +32,7 @@ export async function checkChange(input: CheckInput) {
 	// of the project repo.
 	const cachedHead = input.branchHead ? await input.branchHead().catch(() => undefined) : undefined;
 	const listed = cachedHead ?? (await branchHead(input.project, input.branch));
-	if (!listed) throw new Error(`[409] ${input.branch} doesn't exist yet`);
+	if (!listed) fail(409, `${input.branch} doesn't exist yet`);
 	const own = claims.find((claim) => claim.change === change);
 	const outsideClaim = (files: string[]) => files.filter((file) => !own || !inLane(file, own.paths));
 	// If no file changed on both sides, the change merges cleanly and nothing needs fetching.
@@ -41,7 +42,7 @@ export async function checkChange(input: CheckInput) {
 				source: input.source,
 			}).catch(() => null)
 		: null;
-	if (compared && "error" in compared) throw new Error(`[409] changes/${change} has nothing pushed to check`);
+	if (compared && "error" in compared) fail(409, `changes/${change} has nothing pushed to check`);
 	if (compared && !compared.both.length)
 		return {
 			change,
@@ -54,7 +55,7 @@ export async function checkChange(input: CheckInput) {
 		const workspace = await Workspace.at(input.project, input.branch, listed);
 		const main = await workspace.head();
 		const head = await workspace.fetch("change", input.source, `changes/${change}`).catch(() => null);
-		if (!head) throw new Error(`[409] changes/${change} has nothing pushed to check`);
+		if (!head) fail(409, `changes/${change} has nothing pushed to check`);
 		const files = (await workspace.changedPaths(await workspace.mergeBase(main, head), head)).sort();
 		const withMain = await workspace.tryMerge(main, head);
 		return {

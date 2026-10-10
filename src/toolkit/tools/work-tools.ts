@@ -1,4 +1,4 @@
-import { requiredString, statusOf } from "../../errors";
+import { fail, requiredString, statusOf } from "../../errors";
 import { branchHead } from "../../git";
 import { checkChange } from "../check";
 import type { ClaimRecord } from "../claims";
@@ -47,12 +47,11 @@ export const workTools: ToolHandlers = {
 		const by = actAs("agent");
 		if (args.items !== undefined) {
 			if (!Array.isArray(args.items) || !args.items.length || args.items.length > MOST_AT_ONCE)
-				throw new Error(`[400] items is a list of 1 to ${MOST_AT_ONCE} pieces of work`);
+				fail(400, `items is a list of 1 to ${MOST_AT_ONCE} pieces of work`);
 			const items = args.items.map((item) => workItemFrom(item as Record<string, unknown>));
 			const ids = items.map((item) => item.id);
 			const twice = ids.filter((id, index) => ids.indexOf(id) !== index);
-			if (twice.length)
-				throw new Error(`[400] each piece needs its own id: ${[...new Set(twice)].join(", ")} more than once`);
+			if (twice.length) fail(400, `each piece needs its own id: ${[...new Set(twice)].join(", ")} more than once`);
 			const added = await addWorks(recordLog<Work>(ctx, repo, workRef(repo)), by, items);
 			return { ok: added.ok, added: added.added, ...(added.already.length ? { already: added.already } : {}) };
 		}
@@ -114,7 +113,7 @@ async function mergeCheck(call: ToolCall, change: string, own: ClaimRecord, head
 	const into = own.into ?? branch;
 	const project = await ctx.remote(repo, "read");
 	const onto = ctx.branchHead ? await ctx.branchHead(repo, into) : await branchHead(project, into);
-	if (!onto) throw new Error(`[409] ${into} doesn't exist yet`);
+	if (!onto) fail(409, `${into} doesn't exist yet`);
 	const kept = await ctx.mergeChecks?.kept(repo, change).catch(() => null);
 	if (kept?.key === `${head} ${onto}`) return kept.result;
 	const source = await changeSource(own.agent, "read", change, own.since);

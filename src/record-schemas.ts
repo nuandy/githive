@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { fail } from "./errors";
 
 // What a record's state must look like for GitHive to read it. Records live in Git, so anyone with the account's
 // Artifacts credentials can write one with plain git; a malformed state should fail as a clear error naming the
@@ -63,5 +64,5 @@ export function checkedState<S>(ref: string, state: unknown): S {
 	const [issue] = checked.error.issues;
 	const where = issue?.path.length ? issue.path.join(".") : "its state";
 	const what = issue?.message ?? "it doesn't parse";
-	throw new Error(`[500] the record at ${ref} is malformed (${where}: ${what}); fix it, or revert its last commit`);
+	fail(500, `the record at ${ref} is malformed (${where}: ${what}); fix it, or revert its last commit`);
 }
