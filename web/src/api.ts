@@ -349,6 +349,9 @@ export type Gitignore = "node" | "python" | "go" | "rust";
 /** Fired when the server says the session is gone, so the dashboard shows the sign-in screen again. */
 export const SIGNED_OUT_EVENT = "githive:signed-out";
 
+/** What a call that needs signing in fails with: a session ended, or someone signed out asked for a private repo. */
+export const SIGNED_OUT_MESSAGE = "Your session ended: sign in to GitHive again.";
+
 function asRecord(value: unknown): Record<string, unknown> | null {
 	const isRecord = value !== null && typeof value === "object" && !Array.isArray(value);
 	return isRecord ? (value as Record<string, unknown>) : null;
@@ -356,7 +359,7 @@ function asRecord(value: unknown): Record<string, unknown> | null {
 
 /** Why a request failed, in words: a session that ended, the server's own error, or the HTTP status. */
 function failureMessage(response: Response, data: unknown): string {
-	if (response.status === 401) return "Your session ended: sign in to GitHive again.";
+	if (response.status === 401) return SIGNED_OUT_MESSAGE;
 	const detail = asRecord(data)?.error;
 	if (typeof detail === "string") return detail;
 	return `${response.status} ${response.statusText}`;

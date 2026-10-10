@@ -4,7 +4,7 @@ import { fail } from "../errors";
 
 // What a caller may do in a repo, checked at every route and tool. An agent has its owner's permission. An Access
 // admin may do anything and may name a repo as _/<id>, which covers older repos that aren't in an org. A repo the
-// caller can't see answers 404, so its name gives nothing away.
+// caller can't see answers 404, so its name gives nothing away. Someone signed out may read a public repo.
 
 /**
  * What each MCP tool needs. credentials needs review for a change (it writes only to the caller's own fork)
@@ -50,7 +50,7 @@ export async function resolveRepo(
 	repo: string,
 	needed: Level,
 ): Promise<RepoRef> {
-	if (!principal) return fail(401, "sign in to GitHive first");
+	if (!principal) return publicRepo(env, repo, needed);
 	const slash = repo.indexOf("/");
 	const owner = slash < 0 ? "_" : repo.slice(0, slash);
 	const name = slash < 0 ? repo : repo.slice(slash + 1);
@@ -72,4 +72,17 @@ export async function resolveRepo(
 	const level = (await orgs.permission(principal.user.id, found.id)) ?? missing();
 	if (!atLeast(level, needed)) fail(403, `you can ${level} in ${found.fullName}; this needs ${needed}`);
 	return { id: found.id, fullName: found.fullName, level };
+}
+
+/**
+ * A public repo, for someone signed out who only reads. Anything else asks them to sign in, whether or not the repo
+ * exists, so a private repo's name gives nothing away.
+ */
+async function publicRepo(env: Env, repo: string, needed: Level): Promise<RepoRef> {
+	const signIn = () => fail(401, "sign in to GitHive first");
+	const slash = repo.indexOf("/");
+	if (needed !== "read" || slash < 1 || !env.DB) return signIn();
+	const found = await new OrgStore(env.DB).repo(repo.slice(0, slash), repo.slice(slash + 1));
+	if (found?.visibility !== "public") return signIn();
+	return { id: found.id, fullName: found.fullName, level: "read" };
 }

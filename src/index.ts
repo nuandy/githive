@@ -28,13 +28,20 @@ const app = new Hono<AppEnv>();
 const PUBLIC_PATHS = ["/", "/index.html", "/authorize"];
 const PUBLIC_PREFIXES = ["/assets/", "/fonts/", "/auth/", "/.well-known/"];
 
-/** Served without signing in: the dashboard's files (the page asks people to sign in), sign-in, and OAuth. */
-function isPublic(path: string) {
+const SAFE_METHODS = ["GET", "HEAD", "OPTIONS"];
+
+/** A read of one repo (/repos/:owner/:name/...). Signed out, it answers only for a public repo (see access-control). */
+const REPO_READ = /^\/repos\/[^/]+\/[^/]+(\/|$)/;
+
+/**
+ * Served without signing in: the dashboard's files (the page asks people to sign in), sign-in, OAuth, and reads of
+ * repos.
+ */
+function isPublic(request: Request, path: string) {
 	if (PUBLIC_PATHS.includes(path)) return true;
+	if (SAFE_METHODS.includes(request.method) && REPO_READ.test(path)) return true;
 	return PUBLIC_PREFIXES.some((prefix) => path.startsWith(prefix));
 }
-
-const SAFE_METHODS = ["GET", "HEAD", "OPTIONS"];
 
 /** A write whose Origin isn't this site, which a signed-in person's cookie must not authorize. */
 function isCrossSiteWrite(request: Request) {
@@ -46,7 +53,7 @@ function isCrossSiteWrite(request: Request) {
 app.use("*", async (c, next) => {
 	const principal = await resolvePrincipal(c.req.raw, c.env);
 	if (principal) c.set("principal", principal);
-	else if (!isPublic(c.req.path)) return c.json({ error: "sign in to GitHive first" }, 401);
+	else if (!isPublic(c.req.raw, c.req.path)) return c.json({ error: "sign in to GitHive first" }, 401);
 	// A session cookie rides along with any request to this site, so a write on one must come from this site's own pages.
 	if (principal?.kind === "user" && isCrossSiteWrite(c.req.raw))
 		return c.json({ error: "refused: a signed-in write must come from GitHive's own pages" }, 403);

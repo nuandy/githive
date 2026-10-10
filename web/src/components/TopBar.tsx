@@ -106,6 +106,22 @@ export function UserMenu({
 }
 
 /** The top bar: the GitHive mark, which leads home, where you are, the Inbox, and who you are. */
+/** The Inbox link, with how many changes wait on the reader. */
+function InboxLink({ inboxCount, inboxCurrent }: { inboxCount?: number | undefined; inboxCurrent: boolean }) {
+	return (
+		<a
+			className="topbar__inbox"
+			href="#/inbox"
+			aria-current={inboxCurrent ? "page" : undefined}
+			aria-label={inboxCount ? `Inbox, ${inboxCount} waiting on you` : "Inbox"}
+		>
+			<Icon name="alert" size={15} />
+			<span className="topbar__inbox-label">Inbox</span>
+			{inboxCount ? <span className="topbar__inbox-count">{inboxCount}</span> : null}
+		</a>
+	);
+}
+
 export function TopBar({
 	crumbs,
 	inboxCount,
@@ -116,6 +132,7 @@ export function TopBar({
 	orgsCurrent = false,
 	adminCurrent = false,
 	adminRequests,
+	onSignIn,
 }: {
 	crumbs: Crumb[];
 	/** Changes waiting on a person, across repos; undefined until known. */
@@ -129,6 +146,8 @@ export function TopBar({
 	adminCurrent?: boolean;
 	/** For an Access caller: orgs' requests waiting for approval, once known. */
 	adminRequests?: number;
+	/** For someone signed out, reading a public repo: no inbox, and a way to sign in. */
+	onSignIn?: () => void;
 }) {
 	return (
 		<header className="topbar">
@@ -155,16 +174,13 @@ export function TopBar({
 						</ol>
 					</nav>
 				) : null}
-				<a
-					className="topbar__inbox"
-					href="#/inbox"
-					aria-current={inboxCurrent ? "page" : undefined}
-					aria-label={inboxCount ? `Inbox, ${inboxCount} waiting on you` : "Inbox"}
-				>
-					<Icon name="alert" size={15} />
-					<span className="topbar__inbox-label">Inbox</span>
-					{inboxCount ? <span className="topbar__inbox-count">{inboxCount}</span> : null}
-				</a>
+				{onSignIn ? (
+					<button type="button" className="accent topbar__signin" onClick={onSignIn}>
+						Sign in
+					</button>
+				) : (
+					<InboxLink inboxCount={inboxCount} inboxCurrent={inboxCurrent} />
+				)}
 				{me?.kind === "user" ? (
 					<UserMenu
 						me={me}
