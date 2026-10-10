@@ -1,4 +1,5 @@
 import { type FormEvent, useEffect, useRef, useState } from "react";
+import { counted } from "../lib/plural";
 import type { RepoSnapshot, SavedMergeSettings, SettingsInput } from "../api";
 import { blockingRolesOf, draftFrom, type MergeDraft, settingsFrom } from "../lib/mergeSettings";
 import { messageOf } from "../lib/errors";
@@ -22,8 +23,6 @@ export interface DraftSectionProps {
 }
 
 type PathRuleDraft = MergeDraft["escalate"][number];
-
-const plural = (count: number, word: string) => `${count} ${word}${count === 1 ? "" : "s"}`;
 
 /**
  * How changes merge, for the repo's admins to change: the review policy, who may block, stricter rules for
@@ -285,11 +284,11 @@ function SaveErrors({ errors }: { errors: string[] }) {
 
 /** What the last save set, and any warnings the server gave with it. */
 function SavedNotice({ saved }: { saved: SavedMergeSettings }) {
-	const checks = saved.verify.length ? ` and pass ${plural(saved.verify.length, "check")}` : ", with no checks";
+	const checks = saved.verify.length ? ` and pass ${counted(saved.verify.length, "check")}` : ", with no checks";
 	return (
 		<div role="status">
 			<p className="tone-good repo-settings__saved">
-				<Icon name="check" /> Saved. Merges from now on need {plural(saved.policy.required, "approval")}
+				<Icon name="check" /> Saved. Merges from now on need {counted(saved.policy.required, "approval")}
 				{checks}.
 			</p>
 			{(saved.warnings ?? []).map((warning) => (

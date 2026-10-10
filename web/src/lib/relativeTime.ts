@@ -1,10 +1,9 @@
+import { counted } from "./plural";
 // Relative times. `now` is injectable so tests are deterministic.
 
 const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
 const DAY = 24 * HOUR;
-
-const plural = (count: number, unit: string) => `${count} ${unit}${count === 1 ? "" : "s"}`;
 
 const millisOf = (now: number | Date) => (now instanceof Date ? now.getTime() : now);
 
@@ -16,9 +15,9 @@ export function timeAgo(isoTime: string | undefined, now: number | Date = Date.n
 	const age = millisOf(now) - timestamp;
 	if (!Number.isFinite(age)) return new Date(timestamp).toLocaleDateString();
 	if (age < MINUTE) return "just now";
-	if (age < HOUR) return `${plural(Math.floor(age / MINUTE), "minute")} ago`;
-	if (age < DAY) return `${plural(Math.floor(age / HOUR), "hour")} ago`;
-	if (age < 30 * DAY) return `${plural(Math.floor(age / DAY), "day")} ago`;
+	if (age < HOUR) return `${counted(Math.floor(age / MINUTE), "minute")} ago`;
+	if (age < DAY) return `${counted(Math.floor(age / HOUR), "hour")} ago`;
+	if (age < 30 * DAY) return `${counted(Math.floor(age / DAY), "day")} ago`;
 	return new Date(timestamp).toLocaleDateString();
 }
 
@@ -42,9 +41,9 @@ export function timeUntil(isoTime: string | undefined, now: number | Date = Date
 	if (!Number.isFinite(timestamp)) return "";
 	const ahead = timestamp - millisOf(now);
 	if (ahead <= 0) return timeAgo(isoTime, now);
-	if (ahead < HOUR) return `in ${plural(Math.max(1, Math.round(ahead / MINUTE)), "minute")}`;
-	if (ahead < DAY) return `in ${plural(Math.round(ahead / HOUR), "hour")}`;
-	return `in ${plural(Math.round(ahead / DAY), "day")}`;
+	if (ahead < HOUR) return `in ${counted(Math.max(1, Math.round(ahead / MINUTE)), "minute")}`;
+	if (ahead < DAY) return `in ${counted(Math.round(ahead / HOUR), "hour")}`;
+	return `in ${counted(Math.round(ahead / DAY), "day")}`;
 }
 
 /** Day heading for grouped activity: "Today", "Yesterday", or a date. */

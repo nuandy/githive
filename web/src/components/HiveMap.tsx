@@ -1,3 +1,4 @@
+import { counted } from "../lib/plural";
 import "./HiveMap.css";
 import { useEffect, useState } from "react";
 import type { RepoLanding, RepoSnapshot, RepoTree } from "../api";
@@ -29,8 +30,6 @@ const COLUMNS = 10;
 /** Short enough to sit inside a cell. */
 const fit = (text: string, max: number) => (text.length > max ? `${text.slice(0, max - 1)}…` : text);
 
-const plural = (count: number, one: string, many = `${one}s`) => `${count} ${count === 1 ? one : many}`;
-
 /** Where a cell is, in words: "src/stats/", "the files in src/", "the top-level files". */
 function place(hex: Hex): string {
 	if (hex.kind === "files") return hex.path ? `the files directly in ${hex.path}/` : "the top-level files";
@@ -59,7 +58,7 @@ export function hexLabel(hex: Hex, now: number = Date.now()): string {
 	const what = `${place(hex)}${hex.planned ? " (new)" : ""}`;
 	const holder = hex.holders[0];
 	if (!holder) return `${what}: not claimed`;
-	const others = hex.holders.length > 1 ? `, and ${plural(hex.holders.length - 1, "more change")}` : "";
+	const others = hex.holders.length > 1 ? `, and ${counted(hex.holders.length - 1, "more change")}` : "";
 	// Mention that a change in the cell is landing only if the holder's own state doesn't already say so.
 	const said =
 		(hex.landing === "checking" && holder.lamp === "checking") ||
@@ -150,7 +149,7 @@ function Cell({
 				{cellName(hex)}
 			</text>
 			<text className="hive__count" x={x} y={y + (hex.parent ? 18 : 15)} aria-hidden="true">
-				{hex.planned ? "new" : plural(hex.files, "file")}
+				{hex.planned ? "new" : counted(hex.files, "file")}
 				{hex.holders.length > 1 ? ` +${hex.holders.length - 1}` : ""}
 			</text>
 		</g>
@@ -196,7 +195,7 @@ function Details({ repo, branch, hex, now }: { repo: string; branch: string; hex
 		<div className="hive__details-body">
 			<h3>
 				<code>{detailsPath(hex)}</code>
-				<span className="muted">{hex.planned ? `new: not on ${branch} yet` : plural(hex.files, "file")}</span>
+				<span className="muted">{hex.planned ? `new: not on ${branch} yet` : counted(hex.files, "file")}</span>
 				{hex.kind === "folder" && !hex.planned ? <a href={href.code(repo, hex.path, branch)}>Open in Code</a> : null}
 			</h3>
 			{hex.landing ? (
@@ -217,6 +216,65 @@ function Details({ repo, branch, hex, now }: { repo: string; branch: string; hex
 				<p className="muted">Not claimed: free for any agent to take.</p>
 			)}
 		</div>
+	);
+}
+
+/** Each agent holding claims, in its color, with its changes and how far along each is. */
+function HiveLegend({ repo, branch, agents }: { repo: string; branch: string; agents: ReturnType<typeof hiveAgents> }) {
+	if (!agents.length) return <p className="muted">No agent holds a claim on {branch}: every folder is free.</p>;
+	return (
+		<ul className="hive__legend" aria-label="Agents holding claims">
+			{agents.map((entry) => (
+				<li key={entry.agent} className={`claim-c${entry.color}`}>
+					<Swatch color={entry.color} />
+					<strong>{entry.agent}</strong>
+					{entry.changes.map((change, index) => (
+						<span key={change.change} className="hive__legend-change">
+							{index ? "; " : ""}
+							<a href={href.change(repo, change.change)} title={change.intent}>
+								{change.title}
+							</a>
+							<span className="muted"> · {LAMP_WORDS[change.lamp]}</span>
+						</span>
+					))}
+				</li>
+			))}
+		</ul>
+	);
+}
+
+/** What a cell's shading, ring and lamp mean. */
+function HiveKey() {
+	return (
+		<ul className="hive__key" aria-label="What the cells mean">
+			<li>
+				<svg viewBox="0 0 20 22" width="16" height="18" aria-hidden="true">
+					<polygon className="hive__key-shape" points={hexPoints(10, 11, 9)} />
+				</svg>
+				not claimed
+			</li>
+			<li>
+				<svg viewBox="0 0 20 22" width="16" height="18" aria-hidden="true" className="hive__cell--part claim-c0">
+					<polygon className="hive__key-shape hive__key-shape--part" points={hexPoints(10, 11, 9)} />
+				</svg>
+				pale: part of it held
+			</li>
+			<li>
+				<svg viewBox="0 0 20 22" width="16" height="18" aria-hidden="true">
+					<polygon className="hive__key-shape" points={hexPoints(10, 11, 9)} />
+					<polygon className="hive__key-ring" points={hexPoints(10, 11, 5.5)} />
+				</svg>
+				ring: approved, waiting to land
+			</li>
+			<li>
+				<svg viewBox="0 0 20 22" width="16" height="18" aria-hidden="true">
+					<polygon className="hive__key-shape" points={hexPoints(10, 11, 9)} />
+					<polygon className="hive__key-ring" points={hexPoints(10, 11, 5.5)} />
+					<circle className="hive__key-lamp" cx={10} cy={11} r={2} />
+				</svg>
+				ring and lamp: being checked to land
+			</li>
+		</ul>
 	);
 }
 
@@ -247,56 +305,8 @@ export function HiveMap({ repo, branch, snapshot, tree, error, landing, now = Da
 					{branch}'s folders, each lit in the color of the agent holding it. A ringed cell has a change landing.
 				</p>
 			</div>
-			{agents.length ? (
-				<ul className="hive__legend" aria-label="Agents holding claims">
-					{agents.map((entry) => (
-						<li key={entry.agent} className={`claim-c${entry.color}`}>
-							<Swatch color={entry.color} />
-							<strong>{entry.agent}</strong>
-							{entry.changes.map((change, index) => (
-								<span key={change.change} className="hive__legend-change">
-									{index ? "; " : ""}
-									<a href={href.change(repo, change.change)} title={change.intent}>
-										{change.title}
-									</a>
-									<span className="muted"> · {LAMP_WORDS[change.lamp]}</span>
-								</span>
-							))}
-						</li>
-					))}
-				</ul>
-			) : (
-				<p className="muted">No agent holds a claim on {branch}: every folder is free.</p>
-			)}
-			<ul className="hive__key" aria-label="What the cells mean">
-				<li>
-					<svg viewBox="0 0 20 22" width="16" height="18" aria-hidden="true">
-						<polygon className="hive__key-shape" points={hexPoints(10, 11, 9)} />
-					</svg>
-					not claimed
-				</li>
-				<li>
-					<svg viewBox="0 0 20 22" width="16" height="18" aria-hidden="true" className="hive__cell--part claim-c0">
-						<polygon className="hive__key-shape hive__key-shape--part" points={hexPoints(10, 11, 9)} />
-					</svg>
-					pale: part of it held
-				</li>
-				<li>
-					<svg viewBox="0 0 20 22" width="16" height="18" aria-hidden="true">
-						<polygon className="hive__key-shape" points={hexPoints(10, 11, 9)} />
-						<polygon className="hive__key-ring" points={hexPoints(10, 11, 5.5)} />
-					</svg>
-					ring: approved, waiting to land
-				</li>
-				<li>
-					<svg viewBox="0 0 20 22" width="16" height="18" aria-hidden="true">
-						<polygon className="hive__key-shape" points={hexPoints(10, 11, 9)} />
-						<polygon className="hive__key-ring" points={hexPoints(10, 11, 5.5)} />
-						<circle className="hive__key-lamp" cx={10} cy={11} r={2} />
-					</svg>
-					ring and lamp: being checked to land
-				</li>
-			</ul>
+			<HiveLegend repo={repo} branch={branch} agents={agents} />
+			<HiveKey />
 			{!tree ? <p className="muted">{treeStatus}</p> : null}
 			{tree && !hexes.length ? <p className="muted">{branch} has no files yet.</p> : null}
 			{hexes.length ? (
@@ -309,7 +319,7 @@ export function HiveMap({ repo, branch, snapshot, tree, error, landing, now = Da
 							height={grid.height}
 							style={{ maxWidth: "100%", height: "auto" }}
 							role="group"
-							aria-label={`${plural(hexes.length, "folder cell")}, ${held} held`}
+							aria-label={`${counted(hexes.length, "folder cell")}, ${held} held`}
 						>
 							{hexes.map((hex, index) => {
 								const center = grid.centers[index];
