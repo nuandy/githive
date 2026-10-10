@@ -72,7 +72,7 @@ export const PROVIDERS: Record<ProviderName, Provider> = {
 			const primary = (emails as { email: string; primary: boolean; verified: boolean }[]).find(
 				(email) => email.primary && email.verified,
 			);
-			if (!primary) throw new Error("[403] your GitHub account has no verified primary email");
+			if (!primary) fail(403, "your GitHub account has no verified primary email");
 			return {
 				provider: "github",
 				providerId: String(user.id),
@@ -120,8 +120,7 @@ export const PROVIDERS: Record<ProviderName, Provider> = {
 				}),
 				"Reading the Google user",
 			);
-			if (!user.email || user.email_verified !== true)
-				throw new Error("[403] your Google account's email isn't verified");
+			if (!user.email || user.email_verified !== true) fail(403, "your Google account's email isn't verified");
 			return {
 				provider: "google",
 				providerId: String(user.sub),
