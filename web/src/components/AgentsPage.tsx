@@ -3,7 +3,7 @@ import type { AccountApi, Connection, IssuedToken, Me, MyAgent } from "../api";
 import { usePoll } from "../hooks/usePoll";
 import { timeAgo } from "../lib/relativeTime";
 import { DEFAULT_TOKEN_DAYS, MCP_CLIENTS, type McpClient } from "../lib/session";
-import { useRowActions } from "../hooks/useRowActions";
+import { type RunAction, useRowActions } from "../hooks/useRowActions";
 import { AgentRow, type RowShared } from "./AgentRow";
 import { ConfirmButton } from "./Confirm";
 import { ConnectSection, rememberClient, rememberedClient } from "./AgentsConnect";
@@ -43,18 +43,10 @@ export function AgentsView({
 	initialIssued?: Issued | null;
 	now?: number;
 }) {
-	const [newName, setNewName] = useState("");
-	const [createError, setCreateError] = useState<string | null>(null);
 	const { run, busy, confirming, setConfirming, failed: showError, errorText: errorFor } = useRowActions();
 	const [expiry, setExpiry] = useState<Record<string, number | null>>({});
 	const [issued, setIssued] = useState<Issued | null>(initialIssued);
-	const [client, setClient] = useState<McpClient>(rememberedClient);
-	const chooseClient = (next: McpClient) => {
-		setClient(next);
-		rememberClient(next);
-	};
-	const clientLabel = MCP_CLIENTS.find((option) => option.id === client)!.label;
-	const yourClient = client === "other" ? "your client" : clientLabel;
+	const { client, chooseClient, clientLabel, yourClient } = useChosenClient();
 	/** The apps connected as an agent over OAuth, each named once. */
 	const signsInFrom = (agentId: string) => {
 		const own = (connections ?? []).filter((connection) => connection.agentId === agentId);
@@ -65,13 +57,6 @@ export function AgentsView({
 		return chosen === undefined ? DEFAULT_TOKEN_DAYS : chosen;
 	};
 	const shared: RowShared = { actions, run, busy, confirming, setConfirming, now };
-
-	const create = async (event: React.FormEvent) => {
-		event.preventDefault();
-		setCreateError(null);
-		const ok = await run("create", () => actions.createAgent(newName.trim()), setCreateError);
-		if (ok) setNewName("");
-	};
 
 	const agentRow = (agent: MyAgent) => (
 		<AgentRow
@@ -116,33 +101,7 @@ export function AgentsView({
 			/>
 
 			<section className="box agents__list" aria-labelledby="agents-title">
-				<div className="box__header agents__list-header">
-					<h2 id="agents-title">Your agents</h2>
-					<form className="agents__new" onSubmit={create}>
-						<label htmlFor="new-agent-name" className="sr-only">
-							New agent's name
-						</label>
-						<span className="agents__new-prefix" aria-hidden="true">
-							{me.handle}/
-						</span>
-						<input
-							id="new-agent-name"
-							value={newName}
-							onChange={(event) => setNewName(event.target.value)}
-							placeholder="builder"
-							autoComplete="off"
-							spellCheck={false}
-						/>
-						<button type="submit" className="accent agents__small" disabled={busy !== null || !newName.trim()}>
-							{busy === "create" ? "Making…" : "New agent"}
-						</button>
-					</form>
-				</div>
-				{createError ? (
-					<p className="error agents__create-error" role="alert">
-						{createError}
-					</p>
-				) : null}
+				<NewAgentForm handle={me.handle} create={(name) => actions.createAgent(name)} run={run} busy={busy} />
 				<AgentList agents={agents} yourClient={yourClient} agentRow={agentRow} />
 			</section>
 
@@ -153,6 +112,67 @@ export function AgentsView({
 				<ConnectedApps connections={connections} {...shared} errorFor={errorFor} showError={showError} />
 			</section>
 		</main>
+	);
+}
+
+/** The MCP client the page explains setup for, remembered for the next visit. */
+function useChosenClient() {
+	const [client, setClient] = useState<McpClient>(rememberedClient);
+	const chooseClient = (next: McpClient) => {
+		setClient(next);
+		rememberClient(next);
+	};
+	const clientLabel = MCP_CLIENTS.find((option) => option.id === client)!.label;
+	const yourClient = client === "other" ? "your client" : clientLabel;
+	return { client, chooseClient, clientLabel, yourClient };
+}
+
+/** Names and makes a new agent under your handle. Its error shows under the list's header. */
+function NewAgentForm(props: {
+	handle: string;
+	create: (name: string) => Promise<unknown>;
+	run: RunAction;
+	busy: string | null;
+}) {
+	const { handle, create, run, busy } = props;
+	const [newName, setNewName] = useState("");
+	const [createError, setCreateError] = useState<string | null>(null);
+	const submit = async (event: React.FormEvent) => {
+		event.preventDefault();
+		setCreateError(null);
+		const ok = await run("create", () => create(newName.trim()), setCreateError);
+		if (ok) setNewName("");
+	};
+	return (
+		<>
+			<div className="box__header agents__list-header">
+				<h2 id="agents-title">Your agents</h2>
+				<form className="agents__new" onSubmit={submit}>
+					<label htmlFor="new-agent-name" className="sr-only">
+						New agent's name
+					</label>
+					<span className="agents__new-prefix" aria-hidden="true">
+						{handle}/
+					</span>
+					<input
+						id="new-agent-name"
+						value={newName}
+						onChange={(event) => setNewName(event.target.value)}
+						placeholder="builder"
+						autoComplete="off"
+						spellCheck={false}
+					/>
+					<button type="submit" className="accent agents__small" disabled={busy !== null || !newName.trim()}>
+						{busy === "create" ? "Making…" : "New agent"}
+					</button>
+				</form>
+			</div>
+			{createError ? (
+				<p className="error agents__create-error" role="alert">
+					{createError}
+				</p>
+			) : null}
+		</>
 	);
 }
 
