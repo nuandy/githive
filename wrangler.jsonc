@@ -6,6 +6,8 @@
 	"main": "src/index.ts",
 	"compatibility_date": "2026-10-01",
 	"compatibility_flags": ["nodejs_compat"],
+	// A merge without checks lands its batch in the Worker, in memory (see memoryBatchGit): up to 5 minutes of CPU.
+	"limits": { "cpu_ms": 300000 },
 	"observability": { "enabled": true },
 	"workers_dev": true,
 	// githive.app: people sign in and MCP clients connect (no Access in front). blueprint.nuandy.workers.dev stays the Access door for admins and scripts.

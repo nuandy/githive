@@ -694,8 +694,10 @@ async function validated(input: MergeInput, c: BatchSource & { head: string; fil
 }
 
 /**
- * A batch's git work in memory, here: for tests, and wherever no Gate does it.
- * One request does every change's share, so it's only for small batches.
+ * A batch's git work in memory, here, in the Worker: for a branch without
+ * checks (no container need run anything, so none does), and in tests. One
+ * request does every change's share, so the Worker's CPU limit is raised for it
+ * (wrangler.jsonc, limits.cpu_ms).
  */
 export function memoryBatchGit(remote: Remote, stamper?: Stamper): BatchGit {
 	return {
@@ -726,18 +728,36 @@ export function memoryBatchGit(remote: Remote, stamper?: Stamper): BatchGit {
 				commits.push(oid);
 			}
 			// Only onto the base: a push alone refuses only what isn't a fast-forward, and a change branched from a newer main
-			// would make this one a fast-forward of it. isomorphic-git can't push with a lease, so it looks just before (the
-			// Gate's push is exact; this is for tests, and wherever no Gate lands).
-			if ((await branchHead(remote, branch)) !== base) return "moved";
-			try {
-				await ws.push();
-			} catch (err) {
-				if (err instanceof git.Errors.PushRejectedError || err instanceof git.Errors.GitPushError) return "moved";
-				throw err;
+			// would make this one a fast-forward of it. isomorphic-git can't push with a lease, so it looks just before, and
+			// its push names the head it saw then (the server takes it only from there); the branch's lease keeps other
+			// batches off meanwhile. A repo takes one push at a time: refused as busy, it's tried again, waiting longer each
+			// time, as the Gate's is (taken for "moved", the batch was gathered again for nothing).
+			for (let attempt = 1; ; attempt++) {
+				if ((await branchHead(remote, branch)) !== base) return "moved";
+				try {
+					await ws.push();
+					return { commits };
+				} catch (err) {
+					if (pushRefusedBusy(err) && attempt < PUSH_TRIES) {
+						await new Promise((resolve) => setTimeout(resolve, PUSH_RETRY_MS * 1.6 ** attempt * (0.75 + Math.random() / 2)));
+						continue;
+					}
+					if (err instanceof git.Errors.PushRejectedError || err instanceof git.Errors.GitPushError) return "moved";
+					throw err;
+				}
 			}
-			return { commits };
 		},
 	};
+}
+
+/** How many times a batch's push is made while its repo is busy with another (the Gate's too), and the first wait. */
+const PUSH_TRIES = 8;
+const PUSH_RETRY_MS = 1_500;
+
+/** Whether Artifacts refused a push only because the repo was busy with another (it answers ERR artifacts_git_receive_pack_busy). */
+export function pushRefusedBusy(err: unknown) {
+	const said = `${err instanceof Error ? err.message : String(err)} ${JSON.stringify((err as { data?: unknown } | null)?.data ?? "")}`;
+	return /receive_pack_busy/.test(said);
 }
 
 /** `f` over `items`, at most `n` at once; the results in the items' order. */

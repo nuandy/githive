@@ -250,6 +250,16 @@ describe("landing ready changes together", { timeout: 120_000 }, () => {
 		expect(landed()).toEqual(["a-1", "b-1"]);
 	});
 
+	it("lands in memory through a repo busy with other pushes, trying the push again rather than gathering again", async () => {
+		for (const x of ["a", "b"]) await readyChange(`${x}-1`, { [`src/${x}.txt`]: `${x}\n` });
+		const reads: string[][] = [];
+		server.busyPushes(2);
+		expect(await merge("a-1", runner(), memoryLanding(), { verify: [], runChecks: undefined, batchGit: readsNoted(reads) })).toMatchObject({ ok: true });
+		// Read once: the push went through on its third try, the batch not gathered again.
+		expect(reads).toEqual([["a-1", "b-1"]]);
+		expect(landed()).toEqual(["a-1", "b-1"]);
+	});
+
 	it("tells the merges waiting on a batch that it landed before their claims are released", async () => {
 		for (const x of ["a", "b"]) await readyChange(`${x}-1`, { [`src/${x}.txt`]: `${x}\n` });
 		const landing = memoryLanding();

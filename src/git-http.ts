@@ -79,6 +79,17 @@ export const http = {
 			noteGitRequest(request.url, response.statusCode);
 			// A failure's body is read now: left for later (a 401 asked again, a 5xx thrown), it holds a connection open.
 			if (response.statusCode >= 400) response.body = await drained(response.body);
+			// A push's answer, small, read now: Artifacts refuses one while the repo takes another with an ERR line that
+			// isomorphic-git can't read ("Expected unpack ok"), so it's said here, for the pusher to try again.
+			else if (request.url.endsWith("/git-receive-pack")) {
+				const chunks: Uint8Array[] = [];
+				for await (const chunk of (await drained(response.body)) as AsyncIterable<Uint8Array>) chunks.push(chunk);
+				if (/receive_pack_busy/.test(new TextDecoder().decode(chunks.length === 1 ? chunks[0] : await new Blob(chunks).arrayBuffer())))
+					throw Object.assign(new Error(`push refused: ${repoOfUrl(request.url)} is busy with another (artifacts_git_receive_pack_busy)`), { code: "RECEIVE_PACK_BUSY" });
+				response.body = (async function* () {
+					yield* chunks;
+				})();
+			}
 			if (response.statusCode < 500) return response;
 			if (attempt < GIT_TRIES) {
 				await new Promise((resolve) => setTimeout(resolve, GIT_RETRY_MS * 2 ** (attempt - 1) * (0.5 + Math.random())));

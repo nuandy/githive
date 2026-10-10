@@ -1131,7 +1131,9 @@ async function runTool(name: string, args: Args, ctx: ToolContext): Promise<unkn
 				runChecks: ctx.runChecks?.(repo),
 				...(ctx.branchHead ? { branchHead: () => ctx.branchHead!(repo, into) } : {}),
 				...(ctx.landing ? { landing: ctx.landing(repo, into) } : {}),
-				...(ctx.batchGit ? { batchGit: ctx.batchGit(repo) } : {}),
+				// The repo's Gate (a container, real git) reads and lands a batch where the branch has checks, which run in
+				// containers anyway; without checks, the Worker does it in memory (see memoryBatchGit), and no container runs.
+				...(ctx.batchGit && branchSettings(registry, into).verify?.length ? { batchGit: ctx.batchGit(repo) } : {}),
 				...(ctx.prepareChecks ? { prepareChecks: ctx.prepareChecks(repo) } : {}),
 				// The other changes into the branch, as kept a moment (the batch checks each again): claims in force whose
 				// dependencies have merged, with their heads.
