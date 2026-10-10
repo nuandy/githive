@@ -164,7 +164,7 @@ The Access team domain and application audience are public configuration in `wra
 | Repos: code, history, and GitHive's records (claims, votes, merges) as Git notes | Cloudflare Artifacts, which keeps each repo's files in its Durable Object's SQLite storage, snapshots in R2 and its auth tokens in KV ([how Artifacts is built](https://blog.cloudflare.com/artifacts-git-for-agents-beta/)) | [Durable Objects](https://developers.cloudflare.com/durable-objects/reference/data-security/): AES-256 (LUKS); [R2](https://developers.cloudflare.com/r2/reference/data-security/) and [KV](https://developers.cloudflare.com/kv/reference/data-security/): AES-256-GCM |
 | People, sessions, agents and their tokens, orgs, teams, permissions | D1 | [AES-256-GCM](https://developers.cloudflare.com/d1/reference/data-security/) |
 | MCP clients' OAuth grants | Workers KV | AES-256-GCM |
-| Each repo's cache (live updates, kept dashboard views, record tips, the fork queue, who is landing into each branch), the repo list's counts, cached Artifacts tokens, builders', reviewers' and check containers' state | Durable Objects | AES-256 (LUKS) |
+| Each repo's cache (live updates, kept dashboard views, record tips, changes' heads, the fork queue, what changes came to as each branch landed), the repo list's counts, cached Artifacts tokens, builders', reviewers' and check containers' state | Durable Objects | AES-256 (LUKS) |
 | A repo's snapshot: a container's disk with its code checked out and its main branch's dependencies installed, which check containers, builders and reviewers start from | Cloudflare Containers | Not documented by Containers |
 
 Artifacts is in beta, and its own documentation doesn't yet state encryption at rest: the claim for repos rests on what it's built on. Ask Cloudflare for a direct statement, and whether Artifacts is in scope for its SOC 2 and ISO 27001 reports, before relying on it for compliance. Everything travels over TLS.
@@ -240,7 +240,6 @@ Records in Git outlive the code that wrote them. To change a record's shape, bum
 - **Scale.** 1,000 agents at once claim, push, check and release with no failures (see Benchmarks); past that is untested. Merging is proven at 200: 200 scripted agents landed 200 of 200 changes as a set (before that, a line of merges stalled with about 190 approved changes calling `merge` at once). Merging with 1,000 doesn't work yet: in five runs on 10 Oct, the most that landed was 120 of 1,000 in 44 minutes, with merges failing on Artifacts 500s and a Durable Object overloaded by the agents' looks (`bench-results/swarm/1000/`).
 - **Plain git goes around GitHive.** Anyone with the account's Artifacts credentials can write the project with plain git. The audit reports it; it can't prevent it.
 - **No timers.** An abandoned claim is freed only when someone needs its paths (or claims its work from `backlog`).
-- **Who is landing lives outside Git.** It's a hint in the repo's cache: losing it costs a check run, never a wrong merge.
 - **Containers run Linux.** Checks that need macOS (iOS apps), Windows or a GPU can't run in them.
 
 ## How this was built

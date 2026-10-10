@@ -5,9 +5,10 @@ import type { CheckResult } from "./merge";
 // say so), and the merge that takes the lease lands every ready change into
 // the branch at once, checked together (see mergeChange). The lease only
 // keeps two merges from checking the same changes side by side: what keeps
-// the branch right is its compare-and-swap, and the audit. Live, it's kept in
-// the repo's RepoCache (see repo-cache.ts); losing it costs a merge checking
-// again, nothing more.
+// the branch right is its compare-and-swap, and the audit. Live, the lease is
+// a record in Git (see landing-lease.ts), and the rest is kept in the repo's
+// RepoCache (see repo-cache.ts) as a help: losing it costs a merge checking
+// again, nothing more. memoryLanding keeps it all in memory, for tests.
 
 /** What a change's head came to. */
 export interface Settled {

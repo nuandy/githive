@@ -6,6 +6,8 @@ import { GitCasLog } from "../src/record-log";
 import { callTool, type ToolContext } from "../src/toolkit/mcp";
 import { generateStampKey, makeStamper } from "../src/toolkit/stamp";
 import { holdReview, type ReviewHolds, reviewsRef, roleWaits, roleWaitTold } from "../src/toolkit/review-holds";
+import { memoryLanding } from "../src/toolkit/landing";
+import { gitLanding, landingRef, type LeaseRecord } from "../src/toolkit/landing-lease";
 import { startGitServer, type GitServer } from "./helpers/git-server";
 
 // The shape of every kind of record GitHive keeps, pinned. Records outlive
@@ -60,12 +62,17 @@ beforeAll(async () => {
 	await holdReview(holds, `${"1".repeat(40)}#review`, "bob/reviewer", 1);
 	await roleWaits(holds, [`${"1".repeat(40)}#security`]);
 	await roleWaitTold(holds, `${"1".repeat(40)}#security`);
+	// A branch's landing lease, held, with the batch its holder is checking.
+	const lease = gitLanding(new GitCasLog<LeaseRecord>(async () => ({ url: server.url, token: "unused" }), "p", landingRef("p", "main")), memoryLanding());
+	await lease.turn("merge-1", "stats-1", "1".repeat(40), 0, 60_000);
+	await lease.checking({ base: "2".repeat(40), since: new Date().toISOString(), changes: [{ change: "stats-1", head: "1".repeat(40), agent: "ada/builder" }] });
 	const read = async (ref: string) => (await new GitCasLog<unknown>(async () => ({ url: server.url, token: "unused" }), "p", ref).read())?.commit.state;
 	shapes = {
 		claims: shapeOf(await read("refs/notes/githive-claims/p")),
 		votes: shapeOf(await read("refs/notes/githive-votes/p")),
 		work: shapeOf(await read("refs/notes/githive-work/p")),
 		reviews: shapeOf(await read(reviewsRef("p"))),
+		landing: shapeOf(await read(landingRef("p", "main"))),
 	};
 }, 60_000);
 

@@ -114,6 +114,23 @@
 					"told": "boolean"
 				}
 			}
+		},
+		"landing": {
+			"checking": {
+				"base": "string",
+				"changes": [
+					{
+						"agent": "string",
+						"change": "string",
+						"head": "string"
+					}
+				],
+				"since": "string"
+			},
+			"lease": {
+				"holder": "string",
+				"until": "number"
+			}
 		}
 	}
 }

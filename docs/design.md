@@ -21,13 +21,14 @@ Here main means the project's default branch, whatever its repo calls it (main,
 master, ...): `start` reads it from the repo and records it.
 
 Nothing outside Git decides anything, and nothing outside Git orders the
-agents' work: the review holds are records in Git like the claims and votes,
-and what's ready to land is read from the votes. Durable Objects keep only
-copies and hints: the dashboard's views, the records' tips and states, the
-queue that makes forks, and each branch's landing lease (which says which
-merge is checking a batch and orders nothing, see Landing) with its recent
-outcomes. They also run containers and GitHive's hosted agents. Losing any of
-it costs speed, never a decision. The
+agents' work: the review holds and each branch's landing lease (which merge
+lands the next batch, see Landing) are records in Git like the claims and
+votes, and what's ready to land is read from the votes. Durable Objects keep
+only copies and hints: the dashboard's views, the records' tips and states,
+changes' heads, the queue that makes forks, and what changes came to as each
+branch landed. They also run containers and GitHive's hosted agents. Losing
+any of it, or a repo's RepoCache not answering, costs speed, never a decision,
+and never stops a merge. The
 cost is that every call reads and writes its state in Git (see Benchmark).
 
 ## The conventions
@@ -533,7 +534,7 @@ checked again later) puts the fewest at roughly half of `1/p`, with a flat
 curve around it: at `1/p` a branch spends 3 to 7% more check runs (for `p`
 from 2% to 10%), and in return a batch lands 6 to 14% more changes for the
 time it takes. `p` is the share of the branch's
-recent outcomes (the last 200, kept with the lease) whose checks failed,
+recent outcomes (the last 200, kept in the RepoCache) whose checks failed,
 counted with a prior of 1 in 20, so a new branch starts at 20. Between 4 and
 64: a branch where nothing fails takes 64 at a time, a flaky one 4.
 
@@ -640,7 +641,7 @@ its head, the files it changed) took 25 to 65 s of every batch, and batches
 follow one another. So while a batch is checked, the merge holding the lease
 also reads the next one: the oldest ready changes not in its own batch, as
 many as a batch holds, read in the repo's Gate on the main it has, and kept
-with the lease in the RepoCache (`Ahead` in `landing.ts`). The merge that
+in the RepoCache (`Ahead` in `landing.ts`). The merge that
 lands the next batch, usually another one, since a merge hands the lease on
 once its own change settles, reuses a change's read when the change's head is
 still the one it last saw, and reads only the rest. A change at the same head
@@ -721,10 +722,17 @@ container connection briefly unavailable) is tried once more, two seconds
 later, before the merge gives up. Even landing: its push names the main it
 lands on, so a batch that did land the first time finds main moved.
 
-The lease is a hint, kept in the repo's RepoCache with what changes came to
-lately (`landing.ts`): it keeps two merges from checking the same changes side
-by side, and the merges waiting on a batch read what their change came to
-there, never Git. No clock decides how long a merge waits: it waits for as
+The lease is a record in Git, like the claims and votes
+(`refs/notes/githive-landing/<repo>/<branch>`, in one of the repo's records
+repos once it has them; `landing-lease.ts`): the merge that finds it free or
+run out takes it by compare-and-swap, so of two at once only one does, and
+the record says which batch its holder is checking. It keeps two merges from
+checking the same changes side by side; what keeps the branch right is its
+own compare-and-swap, and the audit. What changes came to lately is kept in
+the repo's RepoCache as a help (`landing.ts`): the merges waiting on a batch
+read what their change came to there, and when it can't say, from the
+branch's history (a merge commit whose second parent is the change's head).
+No clock decides how long a merge waits: it waits for as
 long as another merge holds the lease, and takes the lease once it's free or
 ran out, and its own batch always takes its own change. Oldest claims go
 first, so every batch brings a waiting change closer. The merge holding the
@@ -736,7 +744,7 @@ twenty more for an install and setting up. A merge that died (Cloudflare
 dropped its request, say) lets the lease run out within 2 minutes, and one
 stuck in a step that soon after the step's bound; a waiting merge, looking
 again every 3 s, takes over. A merge takes the lease for three minutes, until
-its heartbeat starts. And what passed the checks is kept with the lease (the
+its heartbeat starts. And what passed the checks is kept in the RepoCache (the
 last 100 passes: a main, and the changes merged onto it in order), so a merge
 taking over a batch whose merge died doesn't check the same code again. A merge hands the lease on once its own change has
 settled, or after 4 batches if it hasn't, and then waits its turn. Only the
@@ -1287,9 +1295,10 @@ one RepoIndex; the records in Git are what count.
 - **A stuck merge holds the lease** until the step it's stuck in runs past its
   bound (up to 50 minutes for a check run of three commands), then a waiting
   merge takes over.
-- **The lease is outside Git.** Losing it (the RepoCache reset) costs a batch
-  checked twice, never a wrong landing: main's compare-and-swap and the audit
-  don't depend on it.
+- **Without the RepoCache** (reset, or not answering) merges still land: the
+  lease is in Git, and a merge finds out whether its change landed from the
+  branch's history. What it kept costs speed to lose: a batch that passed may
+  be checked again, and the next batch read again.
 - **Without a stamp key** nothing is stamped or verified, and the audit takes
   names as written.
 

@@ -17,6 +17,7 @@ import type { Settled } from "./landing";
 import { recordsRepoName } from "./shards";
 import { makeStamper } from "./stamp";
 import { headsForClaims } from "../push-events";
+import { gitLanding, landingRef, landingRepoOf, lazyLog, type LeaseRecord } from "./landing-lease";
 
 // GitHive wired to Cloudflare: Artifacts for Git, the Gate's
 // container for checks, the repo index for the dashboard, GitHive's hosted
@@ -71,28 +72,40 @@ const MAX_KEPT = 1_000_000;
  * rebuilds it (that caller gets the new one); none yet, one caller builds it
  * and the others wait for it a few seconds, so many callers at once read the
  * repo once, not once each. Writes make it stale (their pings count them).
+ * The RepoCache is only a help: unreachable or overloaded, each caller reads
+ * the repo itself, slower and never wrong.
  */
 export async function keptRead<T>(env: Env, repo: string, name: string, maxAgeMs: number, read: () => Promise<T>): Promise<T> {
 	const cache = env.REPO_CACHE.getByName(`repo:${repo}`);
 	const rebuild = async (writes: number) => {
+		let value: T;
 		try {
-			const value = await read();
-			const json = JSON.stringify(value);
-			if (json.length <= MAX_KEPT) await cache.keep(name, json, writes);
-			else await cache.buildFailed(name);
-			return value;
+			value = await read();
 		} catch (err) {
 			await cache.buildFailed(name).catch(() => undefined);
 			throw err;
 		}
+		// Kept for the next callers if it can be: a cache that can't keep it doesn't fail this read.
+		const json = JSON.stringify(value);
+		await (json.length <= MAX_KEPT ? cache.keep(name, json, writes) : cache.buildFailed(name)).catch((err) => console.error(`keeping ${name} of ${repo} failed`, String(err)));
+		return value;
 	};
+	// Null: the cache didn't answer.
+	const starting = () => cache.startBuild(name).catch(() => null);
 	for (const until = Date.now() + 10_000; ; ) {
-		const kept = await rpc(cache.view(name, maxAgeMs));
+		const kept = await rpc(cache.view(name, maxAgeMs)).catch(() => null);
+		if (!kept) return read();
 		if (kept.json !== undefined) {
-			if (kept.fresh || kept.building || !(await cache.startBuild(name))) return JSON.parse(kept.json) as T;
-			return rebuild(kept.writes);
+			if (kept.fresh || kept.building) return JSON.parse(kept.json) as T;
+			const build = await starting();
+			if (build === null) return read();
+			return build ? rebuild(kept.writes) : (JSON.parse(kept.json) as T);
 		}
-		if (!kept.building && (await cache.startBuild(name))) return rebuild(kept.writes);
+		if (!kept.building) {
+			const build = await starting();
+			if (build === null) return read();
+			if (build) return rebuild(kept.writes);
+		}
 		// Another caller is building the first one: wait for it, a few seconds at most.
 		if (Date.now() > until) return read();
 		await new Promise((resolve) => setTimeout(resolve, 250));
@@ -209,7 +222,8 @@ export function toolContextFor(env: Env, by: string | undefined, caller: { agent
 		// repo's RepoCache (see branch-history.ts): no clone, and no container.
 		readBranch: (repo, baseline, branch) => {
 			const cache = () => env.REPO_CACHE.getByName(`repo:${repo}`);
-			return withHistory(env.ARTIFACTS, repo, (source) => readBranchHistory(source, baseline, branch, { get: (commits) => rpc(cache().keptFiles(commits)), put: (files) => cache().keepFiles(files) }));
+			// Kept files are a help: without the cache, each merge's files are worked out again.
+			return withHistory(env.ARTIFACTS, repo, (source) => readBranchHistory(source, baseline, branch, { get: (commits) => rpc(cache().keptFiles(commits)).catch(() => ({})), put: (files) => cache().keepFiles(files).catch(() => undefined) }));
 		},
 		// Any repo's history (a project's, an agent's fork) through Artifacts' own API: a batch's changes are read that way.
 		history: (name, read) => withHistory(env.ARTIFACTS, name, read),
@@ -272,12 +286,11 @@ export function toolContextFor(env: Env, by: string | undefined, caller: { agent
 				},
 			};
 		},
-		// Who's landing a batch into each branch, and what changes came to: kept in the repo's RepoCache (see landing.ts).
+		// Who's landing a batch into each branch: a record in Git, in one of the repo's records repos once it has them, else
+		// beside the claims (see landing-lease.ts). What changes came to and the rest, in the repo's RepoCache, as a help.
 		landing: (repo, branch) => {
 			const cache = () => env.REPO_CACHE.getByName(`repo:${repo}`);
-			return {
-				turn: (holder, change, head, since, ttlMs) => rpcRetried<{ settled: Settled } | { lease: boolean }>(() => cache().landingTurn(branch, holder, change, head, since, ttlMs)),
-				renew: (holder, ttlMs) => rpcRetried(() => cache().renewLanding(branch, holder, ttlMs)),
+			return gitLanding(landingLog(env, repo, branch), {
 				drop: (holder) => rpcRetried(() => cache().dropLanding(branch, holder)),
 				checking: (batch) => rpcRetried(() => cache().landingChecking(branch, batch)),
 				settle: (outcomes) => rpcRetried(() => cache().landingSettled(branch, outcomes)),
@@ -286,9 +299,17 @@ export function toolContextFor(env: Env, by: string | undefined, caller: { agent
 				checked: (base, heads) => rpcRetried(() => cache().landingChecked(branch, base, heads)),
 				keepAhead: (ahead) => rpcRetried(() => cache().landingKeepAhead(branch, ahead)),
 				ahead: () => rpcRetried(() => cache().landingAhead(branch)),
-			};
+			});
 		},
 	};
+}
+
+/** A branch's landing lease record (see landing-lease.ts): in one of the repo's records repos once it has them, else beside the claims. */
+export function landingLog(env: Env, repo: string, branch: string) {
+	return lazyLog(async () => {
+		const spread = (await recordsLog<Registry>(env, repo, claimsRef(repo)).read())?.commit.state.recordsRepos ?? 0;
+		return spread ? recordsLogIn<LeaseRecord>(env, repo, landingRepoOf(branch, spread), landingRef(repo, branch)) : recordsLog<LeaseRecord>(env, repo, landingRef(repo, branch));
+	});
 }
 
 const claimsRef = (repo: string) => `refs/notes/githive-claims/${repo}`;

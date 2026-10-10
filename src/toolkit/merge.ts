@@ -26,8 +26,8 @@ import { type ReviewPolicy, approval, countedVotes, effectivePolicy } from "./vo
 // takes the branch's lease (see landing.ts) lands every ready change into the
 // branch at once: checked together in one run on main, each as its own merge
 // commit, pushed in one push, so main is only ever code that was checked.
-// The other merges wait for what their change came to, reading the lease,
-// never Git. A batch that fails is split and its halves checked side by
+// The other merges wait for what their change came to, reading the lease (a
+// record in Git, see landing-lease.ts) and the outcomes kept beside it. A batch that fails is split and its halves checked side by
 // side; one change failing alone is checked once more (a flaky run isn't a
 // verdict), then put out with a rejection from the checks on its head. While
 // a batch is checked, the next is read ahead (each change's head and the files
@@ -281,7 +281,7 @@ export async function mergeChange(input: MergeInput): Promise<MergeOutcome> {
 	const started = Date.now();
 	// Whether it's ready now: refused at once if not, so the agent can act (unless it's landed: then its commit).
 	const mine = await readyNow(input, landing);
-	if (!mine.ok) return (await landedAlready(landing, input.change, mine.head)) ?? mine.refused;
+	if (!mine.ok) return (await landedAlready(input, landing, mine.head)) ?? mine.refused;
 	const head = mine.ready.head;
 	const answerBy = started + (input.answerWithinMs ?? ANSWER_WITHIN_MS);
 	for (;;) {
@@ -290,7 +290,7 @@ export async function mergeChange(input: MergeInput): Promise<MergeOutcome> {
 		if (turn.lease) {
 			const outcome = await landWhileHeld(input, landing, holder, answerBy, head);
 			// Refused because it isn't ready any more: another batch may have landed it (its claim's released then).
-			if (outcome && !outcome.ok) return (await landedAlready(landing, input.change, head)) ?? outcome;
+			if (outcome && !outcome.ok) return (await landedAlready(input, landing, head)) ?? outcome;
 			if (outcome) return outcome;
 		}
 		// Not landed yet: say so, before the request is held open long enough for Cloudflare to drop it.
@@ -308,10 +308,19 @@ function stillWaiting(change: string, head: string, waitedMs: number): MergeOutc
 	};
 }
 
-/** What the change came to if it landed lately (at `head`, when known): asked again after it landed, its claim is gone. */
-async function landedAlready(landing: Landing, change: string, head?: string): Promise<MergeOutcome | null> {
-	const landed = (await landing.view()).recent.findLast((s) => s.change === change && s.how === "landed" && (!head || s.head === head));
-	return landed ? outcomeOf(landed) : null;
+/**
+ * What the change came to if it landed lately, at `head`: asked again after it
+ * landed, its claim is gone. As the landing recalls, else (the RepoCache that
+ * recalls it unreachable, or forgetting) from the branch's history in Git:
+ * a merge commit whose second parent is `head`.
+ */
+async function landedAlready(input: MergeInput, landing: Landing, head: string): Promise<MergeOutcome | null> {
+	const landed = (await landing.view().catch(() => null))?.recent.findLast((s) => s.change === input.change && s.how === "landed" && s.head === head);
+	if (landed) return outcomeOf(landed);
+	if (!input.history) return null;
+	const main = await headOf(input).catch(() => null);
+	const commit = main ? (await landedOn(input.history, repoOfUrl(input.remote.url), input.branch, main, [head]).catch(() => null))?.get(head) : undefined;
+	return commit ? { ok: true, commit } : null;
 }
 
 /**

@@ -349,6 +349,14 @@ describe("landing ready changes together", { timeout: 120_000 }, () => {
 		expect(await merge("a-1", runner(), landing)).toEqual(first);
 	});
 
+	it("answers it from the branch's history when the landing can't recall it (its RepoCache unreachable)", async () => {
+		await readyChange("a-1", { "src/a.txt": "a\n" });
+		const first = await merge("a-1", runner(), memoryLanding());
+		expect(first).toMatchObject({ ok: true });
+		const forgetful: Landing = { ...memoryLanding(), view: () => Promise.reject(new Error("Durable Object is overloaded")) };
+		expect(await merge("a-1", runner(), forgetful, { history: gitHistory(server.git) })).toEqual({ ok: true, commit: (first as { commit: string }).commit });
+	});
+
 	it("waits for as long as another merge holds the lease, and takes it over once it runs out", async () => {
 		await readyChange("a-1", { "src/a.txt": "a\n" });
 		const landing = memoryLanding();

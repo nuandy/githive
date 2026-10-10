@@ -18,7 +18,8 @@ import { initialFiles, parseInit, writeFirstCommit } from "./repo-init";
 import { Timing } from "./timing";
 import { defaultBranch } from "./git";
 import { countingRequests, describeCounts } from "./git-http";
-import { changeRepoName, toolContextFor } from "./toolkit/env";
+import { changeRepoName, landingLog, toolContextFor } from "./toolkit/env";
+import { leaseHeld as landingLeaseHeld } from "./toolkit/landing-lease";
 import type { Registry } from "./toolkit/claims";
 import { GitCasLog } from "./record-log";
 import { projectBranch } from "./project-branch";
@@ -276,7 +277,8 @@ app.get("/repos/:owner/:name/changes/:change", async (c) => {
 	return keptView(c, `repo:${repo.id}`, `change:${change}`, 60_000, (timing) => changeHistory({ ...toolContext(c.env, c.get("principal")), timing }, repo.id, change));
 });
 // What's being checked to land into a branch of the repo now, and what changes came to lately (kept in its
-// RepoCache: see toolkit/landing.ts), with the snapshot its check containers start from.
+// RepoCache: see toolkit/landing.ts), whether a merge holds its lease (a record in Git: see toolkit/landing-lease.ts),
+// with the snapshot its check containers start from.
 app.get("/repos/:owner/:name/landing", async (c) => {
 	const repo = await routeRepo(c, "read");
 	// ?branch=<name> (the dashboard always says); absent, the project's, from its claims registry.
@@ -284,7 +286,12 @@ app.get("/repos/:owner/:name/landing", async (c) => {
 		c.req.query("branch")?.trim() ||
 		projectBranch((await new GitCasLog<Registry>(() => remoteFor(c.env.ARTIFACTS, repo.id, "read", 3600), repo.id, `refs/notes/githive-claims/${repo.id}`).read())?.commit.state);
 	const cache = c.env.REPO_CACHE.getByName(`repo:${repo.id}`);
-	const [landing, leaseHeld, forks, snapshot] = await Promise.all([rpc(cache.landingView(branch)), cache.landingLeaseHeld(branch), rpc(cache.forkQueue()), rpc(c.env.GATE.getByName(`repo:${repo.id}`).snapshotInfo())]);
+	const [landing, leaseHeld, forks, snapshot] = await Promise.all([
+		rpc(cache.landingView(branch)).catch(() => ({ checking: null, recent: [] })),
+		landingLeaseHeld(landingLog(c.env, repo.id, branch)).catch(() => false),
+		rpc(cache.forkQueue()).catch(() => null),
+		rpc(c.env.GATE.getByName(`repo:${repo.id}`).snapshotInfo()),
+	]);
 	return c.json({ branch, leaseHeld, ...landing, forks, snapshot });
 });
 app.get("/repos/:owner/:name/audit", async (c) => {

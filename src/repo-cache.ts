@@ -1,7 +1,7 @@
 import { DurableObject } from "cloudflare:workers";
 import { countingRequests, describeCounts } from "./git-http";
 import { makeAgentFork, makeSeed } from "./toolkit/env";
-import { type Ahead, asNews, type Checking, dropLease, emptyLanding, type LandingState, markChecked, renewLease, type Settled, settleOutcomes, takeTurn, wasChecked } from "./toolkit/landing";
+import { type Ahead, asNews, type Checking, emptyLanding, type LandingState, markChecked, type Settled, settleOutcomes, wasChecked } from "./toolkit/landing";
 
 // One per repo ("repo:<repo>"): what GitHive keeps of the repo between calls,
 // all of it a copy or a hint. Git stays the truth, and throwing any of it away
@@ -353,21 +353,12 @@ export class RepoCache extends DurableObject<Env> {
 		if (((await this.ctx.storage.get<ForkJob[]>("forks:queue")) ?? []).length) await this.ctx.storage.setAlarm(Date.now() + 1_000);
 	}
 
-	/** What `change` at `head` came to in `branch`, or whether `holder` holds its lease now (see Landing.turn). */
-	async landingTurn(branch: string, holder: string, change: string, head: string, since: number, ttlMs: number) {
-		const taken = takeTurn(await this.landing(branch), holder, change, head, since, ttlMs);
-		if ("lease" in taken.turn && taken.turn.lease) await this.keepLanding(branch, taken.state);
-		return taken.turn;
-	}
-
-	async renewLanding(branch: string, holder: string, ttlMs: number) {
-		const renewed = renewLease(await this.landing(branch), holder, ttlMs);
-		if (renewed.held) await this.keepLanding(branch, renewed.state);
-		return renewed.held;
-	}
-
-	async dropLanding(branch: string, holder: string) {
-		await this.keepLanding(branch, dropLease(await this.landing(branch), holder));
+	/**
+	 * The lease's holder handed it on (the lease itself is a record in Git: see
+	 * toolkit/landing-lease.ts): what it showed as checking isn't any more.
+	 */
+	async dropLanding(branch: string, _holder: string) {
+		await this.keepLanding(branch, { ...(await this.landing(branch)), checking: null });
 		this.broadcast("landing");
 	}
 
@@ -401,12 +392,6 @@ export class RepoCache extends DurableObject<Env> {
 		if (latest && latest !== told) await this.ctx.storage.put(key, latest);
 		if (!told) return [];
 		return asNews(recent.filter((s) => s.at > told && s.agent !== agent)).slice(-NEWS_MOST);
-	}
-
-	/** Whether a merge holds `branch`'s lease now (who holds it stays here). */
-	async landingLeaseHeld(branch: string) {
-		const { lease } = await this.landing(branch);
-		return !!lease && lease.until > Date.now();
 	}
 
 	/** Whether these changes, merged onto `base` in this order, passed the checks into `branch` already (see LandingState.passed). */
