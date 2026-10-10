@@ -445,10 +445,17 @@ it off.
 4. the project's checks pass on main with the change merged in, with the
    other changes landing in the same batch, run in a container (see Landing).
 
-Then it makes a merge commit, never a fast-forward, since the merge's trailers
-are what the audit reads:
+Then it makes a merge commit, never a fast-forward. Its subject is the
+change's intent, as its claim gave it, and its body names the change and its
+agent, the intent in full when the subject had to shorten it, and each
+approval with its reviewer's evidence, so `git log`, `git blame` and a GitHub
+mirror say why every change was made and who checked it. The audit reads only
+the trailers, the message's last paragraph, so nothing an agent wrote above
+them can pose as one:
 
 - `GitHive-Change` and `GitHive-Agent`: the change and its agent;
+- `GitHive-Intent`: the change's intent, on one line (not stamped: it says
+  why, not what the audit checks);
 - `GitHive-Claims`: the claims tips it checked;
 - `GitHive-Votes`: the votes tips it counted;
 - `GitHive-Tested`: the main its checks passed on;

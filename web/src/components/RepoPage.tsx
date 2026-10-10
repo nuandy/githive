@@ -1,7 +1,7 @@
 import { useState } from "react";
 import "./RepoPage.css";
 import type { VoteApi } from "./VoteForm";
-import type { ChangeHistory, RepoAccess, RepoLanding, RepoSnapshot } from "../api";
+import type { BranchHistory, ChangeHistory, RepoAccess, RepoLanding, RepoSnapshot } from "../api";
 import { canVote, canWrite } from "../lib/permissions";
 import { messageOf } from "./Confirm";
 import { BranchRules } from "./BranchRules";
@@ -13,6 +13,7 @@ import type { LiveStatus } from "../lib/liveFeed";
 import { href, type ChangeTab, type RepoTab } from "../lib/routes";
 import { AgentsTab } from "./Agents";
 import { ClaimsTab } from "./ClaimsMap";
+import { HistoryTab } from "./History";
 import { CodeTab, type CodeApi } from "./CodeBrowser";
 import { AuditTab, ChangeList, ChangePage, SettingsTab } from "./RepoTabs";
 import { Overview } from "./Overview";
@@ -35,6 +36,8 @@ export type RepoPageApi = CodeApi &
 	VoteApi & {
 		/** What's landing on a branch, for the overview (stand-ins may leave it out). */
 		landing?: (repo: string, branch: string) => Promise<RepoLanding>;
+		/** The changes landed on a branch, for the History tab (stand-ins may leave it out). */
+		history?: (repo: string, branch: string) => Promise<BranchHistory>;
 		/** People who can write: make a branch, merge a change. */
 		makeBranch?: (repo: string, name: string, from: string) => Promise<{ name: string; made?: string }>;
 		merge?: (
@@ -140,6 +143,7 @@ export function RepoPage({
 	const branch = snapshot?.branch ?? access?.branch ?? "main";
 	const tabs: TabItem[] = [
 		{ id: "changes", label: "Changes", icon: "pull", href: href.repo(repo), count: snapshot?.claims.length },
+		{ id: "history", label: "History", icon: "commit", href: href.repo(repo, "history") },
 		{ id: "claims", label: "Claims", icon: "folder", href: href.repo(repo, "claims") },
 		{ id: "code", label: "Code", icon: "file", href: href.code(repo, "") },
 		{ id: "agents", label: "Agents", icon: "user", href: href.repo(repo, "agents") },
@@ -210,6 +214,8 @@ export function RepoPage({
 					/>
 				) : current === "audit" ? (
 					<AuditTab snapshot={snapshot} />
+				) : current === "history" ? (
+					<HistoryTab repo={repo} branch={branch} api={api} />
 				) : current === "claims" ? (
 					<ClaimsTab repo={repo} branch={branch} holders={holdersFromSnapshot(snapshot, repo)} api={api} />
 				) : current === "code" ? (

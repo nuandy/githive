@@ -130,7 +130,15 @@ async function listAndFetch(remote: Remote, prefix: string) {
 	}
 }
 
-const trailer = (message: string, name: string) => message.match(new RegExp(`^${name}: (.+)$`, "m"))?.[1]?.trim();
+/** A trailer's value, from the message's last paragraph only: text above it, written by agents, can't pose as one. */
+export function trailer(message: string, name: string) {
+	const block =
+		message
+			.trimEnd()
+			.split(/\n[ \t]*\n/)
+			.at(-1) ?? "";
+	return block.match(new RegExp(`^${name}: (.+)$`, "m"))?.[1]?.trim();
+}
 
 /** The project branch's commits after `baseline`, oldest first, following first parents: every one is audited. */
 export async function readMainMerges(remote: Remote, baseline: string, branch: string): Promise<MergeRecord[]> {

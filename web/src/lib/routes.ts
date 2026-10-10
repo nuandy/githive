@@ -12,7 +12,7 @@
 
 import { repoPath } from "./repoName";
 
-export type RepoTab = "changes" | "claims" | "code" | "agents" | "settings" | "audit";
+export type RepoTab = "changes" | "history" | "claims" | "code" | "agents" | "settings" | "audit";
 export type ChangeTab = "conversation" | "commits";
 
 export type Route =
@@ -34,7 +34,7 @@ export type Route =
 	| { page: "change"; repo: string; change: string; tab: ChangeTab }
 	| { page: "not-found" };
 
-const REPO_TABS: RepoTab[] = ["changes", "claims", "code", "agents", "settings", "audit"];
+const REPO_TABS: RepoTab[] = ["changes", "history", "claims", "code", "agents", "settings", "audit"];
 const CHANGE_TABS: ChangeTab[] = ["commits"];
 
 function decode(segment: string): string | null {

@@ -14,7 +14,7 @@ import {
 	memoryLanding,
 	type Settled,
 } from "./landing";
-import { type MergeClaim, mergeMessage } from "./merge-commit";
+import { type MergeClaim, type MergeReview, mergeMessage } from "./merge-commit";
 import type { Stamper } from "./stamp";
 import type { VoteStore, VotesView } from "./vote-store";
 import { type ReviewPolicy, approval, countedVotes, effectivePolicy } from "./votes";
@@ -713,6 +713,12 @@ interface Landed {
 	release: () => Promise<void>;
 }
 
+/** The approvals a change's head lands with, each reviewer's evidence for the merge commit to tell. */
+function approvalsOn(ready: Ready): MergeReview[] {
+	const approvals = ready.votes.votes.filter((vote) => vote.commit === ready.head && vote.verdict === "approve");
+	return approvals.map((vote) => ({ reviewer: vote.reviewer, role: vote.role, evidence: vote.evidence }));
+}
+
 /**
  * Land `batch` on main: each change as its own merge commit, one after
  * another, pushed in one push. Tested, each records the main the checks ran
@@ -749,6 +755,8 @@ async function land(
 				...(tested ? { testedOn: main } : {}),
 				// Checked with others: every change in the batch, in landing order (alone, the main it ran on says it all).
 				...(tested && heads.length > 1 ? { testedWith: heads } : {}),
+				intent: r.own.intent,
+				reviews: approvalsOn(r),
 			},
 		})),
 		// The Gate stamps with GitHive's key as `by`; an implementation in this process (a test's) with the stamper itself.

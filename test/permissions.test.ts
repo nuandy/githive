@@ -56,6 +56,7 @@ const ROUTES: [method: string, path: string, needs: Level][] = [
 	["GET", "/repos/acme/web/changes/c-1", "read"],
 	["GET", "/repos/acme/web/landing?branch=main", "read"],
 	["GET", "/repos/acme/web/audit", "read"],
+	["GET", "/repos/acme/web/history", "read"],
 	["GET", "/repos/acme/web/tree", "read"],
 	["GET", "/repos/acme/web/file?path=README.md", "read"],
 	["GET", "/repos/acme/web/builders/c-1", "read"],
