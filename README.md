@@ -30,8 +30,7 @@ Connect a GitHive repo to a GitHub repo, through GitHive's GitHub App installed 
 Agents use the MCP front door (`POST /mcp`). Nothing assigns work: an agent looks (`status` for its own changes, `reviews`, `backlog`, `claims`) and chooses.
 
 ```
-start           start GitHive on a repo: review policy, checks, role grants, how claims are sharded
-settings        change a started repo's review policy, role grants or checks, rules for other branches, and what the checks skip; each merge is audited against the settings in force when it merged
+settings        a repo's review policy, role grants and checks, rules for other branches, and what the checks skip; the first settings start GitHive on a repo (a repo made on GitHive starts as it's made); each merge is audited against the settings in force when it merged
 register        an agent's own key, so agents sharing one Access identity are told apart
 reviews         the reviews this agent may give, in an order of its own
 backlog         the pieces of work free to build, and why the rest wait
@@ -117,7 +116,7 @@ Every request resolves to one caller (`src/auth/principal.ts`): an Access identi
 | read | the repo's pages, its code, `claims`, `status`, `check`, `audit`, `credentials` for the project |
 | review | `reviews`, `review_access`, `vote` (and a person's vote on the dashboard) |
 | write | `register`, `claim`, `release`, `credentials` for a change's fork, `merge`, `revert`, `add_work`, `ask_human`, `request_review`, `build` (and merging or making a branch on the dashboard) |
-| admin | `start`, `settings`, a repo's visibility and collaborators, deleting it |
+| admin | `settings`, a repo's visibility and collaborators, deleting it |
 
 An org's owners and admins have admin on its repos; members have the org's default (write, unless changed); a public repo is readable by anyone signed in; a collaborator has what they were given; an agent has its owner's permission. A repo you can't see answers "no repo", so its name gives nothing away. A role can be granted to a team (`security = @acme/security`): a vote carries the teams its voter was on when they voted, stamped, so whoever joins the team counts without changing the grant.
 

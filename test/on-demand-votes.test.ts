@@ -151,7 +151,7 @@ describe("sharding votes on demand through the toolkit", { timeout: 120_000 }, (
 	};
 
 	it("shards the votes when the eighth reviewer votes, merges counting both, and audits clean", async () => {
-		expect(await call("start", { required: 1, vetoes: [] })).toMatchObject({ sharding: "on demand" });
+		expect(await call("settings", { required: 1, vetoes: [] })).toMatchObject({ sharding: "on demand" });
 		expect(await call("claim", { change: "c-1", agent: "agent-a", paths: ["src/"], intent: "x" })).toMatchObject({ ok: true });
 		const head = await pushChange(server.url, work, "agent-a", "c-1", { "src/x.ts": "x\n" });
 		for (let i = 0; i < SHARD_VOTES_WHEN.reviewers - 1; i++) await call("vote", { commit: head, reviewer: `rev-${i}`, role: "review", verdict: "approve", evidence: "ok" });

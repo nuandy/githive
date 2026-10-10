@@ -160,8 +160,12 @@ async function main() {
 			if (!/exist/i.test(err.message)) throw err;
 		});
 	}
-	const started = await tool(0, "start", { repo: REPO, ...(SHARD_DEPTH === undefined ? {} : { shard_depth: SHARD_DEPTH }), ...(RECORDS_REPOS === undefined ? {} : { records_repos: RECORDS_REPOS }) });
-	console.log(`${REPO} at ${BASE} (claims sharded ${started.shardDepth ? `${started.shardDepth} deep, over ${started.recordsRepos || "no"} records repos` : "not at all"})`);
+	// The repo's first settings start GitHive on it; on a repo it had started on already, its claims stay as they're kept.
+	const started = await tool(0, "settings", { repo: REPO, ...(SHARD_DEPTH === undefined ? {} : { shard_depth: SHARD_DEPTH }), ...(RECORDS_REPOS === undefined ? {} : { records_repos: RECORDS_REPOS }) }).catch((err) => {
+		if (!/has started on|set when GitHive starts/.test(err.message)) throw err;
+		return null;
+	});
+	console.log(started ? `${REPO} at ${BASE} (claims sharded ${started.shardDepth ? `${started.shardDepth} deep, over ${started.recordsRepos || "no"} records repos` : "not at all"})` : `${REPO} at ${BASE} (GitHive had started on it: its claims are kept as they were)`);
 
 	const levels = [];
 	const result = { label: LABEL, rampSeconds: RAMP_MS / 1000, base: BASE, repo: REPO, racers: RACERS, at: new Date().toISOString(), levels };

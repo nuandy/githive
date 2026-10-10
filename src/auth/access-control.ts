@@ -27,7 +27,6 @@ export const TOOL_LEVEL: Record<string, Level> = {
 	request_review: "write",
 	build: "write",
 	register: "write",
-	start: "admin",
 	settings: "admin",
 };
 

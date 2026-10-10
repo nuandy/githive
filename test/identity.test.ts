@@ -42,7 +42,7 @@ const claimA = { change: "a-1", agent: "agent-a", paths: ["src/a/"], intent: "a"
 
 describe("agent identity", () => {
 	beforeEach(async () => {
-		await call(as(), "start", {});
+		await call(as(), "settings", {});
 	});
 
 	it("registers a name and stamps what the agent writes with it, though agents share one Access identity", async () => {
@@ -138,7 +138,7 @@ describe("signed-in agents", () => {
 	});
 
 	beforeEach(async () => {
-		await call(as(), "start", {});
+		await call(as(), "settings", {});
 	});
 
 	it("act as their verified name with no key, may leave the agent argument out, and are stamped under their owner", async () => {

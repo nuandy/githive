@@ -54,7 +54,7 @@ async function pushed(change: string, into?: string) {
 beforeEach(async () => {
 	server = await startGitServer();
 	work = mkdtempSync(join(tmpdir(), "githive-branch-rules-"));
-	await call("start", { required: 1, vetoes: [], verify: ["npm test"] });
+	await call("settings", { required: 1, vetoes: [], verify: ["npm test"] });
 	for (const agent of ["a", "reviewer"]) keys[agent] = ((await call("register", { agent })) as { key: string }).key;
 });
 afterEach(async () => {

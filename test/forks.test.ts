@@ -52,7 +52,7 @@ const call = async (name: string, args: Record<string, unknown>, agentKey?: stri
 
 describe("forks (the default)", () => {
 	beforeEach(async () => {
-		await call("start", {});
+		await call("settings", {});
 	});
 
 	it("gives any reviewer read access to a change's branch in its author's fork, once something is pushed", async () => {
@@ -119,7 +119,7 @@ describe("forks (the default)", () => {
 
 describe("status", () => {
 	it("tells an agent where its change stands: its claim, its branch head, the votes on it, and what's still needed", async () => {
-		await call("start", { required: 1 });
+		await call("settings", { required: 1 });
 		await call("claim", { change: "a-1", agent: "agent-a", paths: ["src/a/"], intent: "a" });
 		expect(await call("status", { change: "a-1" })).toMatchObject({ change: "a-1", claim: { agent: "agent-a", paths: ["src/a/"] }, head: null, votes: [] });
 
@@ -141,7 +141,7 @@ describe("status", () => {
 	}, 60_000);
 
 	it("reads a change's head through Artifacts' API, one log on its agent's fork, without a token or a Git listing", async () => {
-		await call("start", {});
+		await call("settings", {});
 		await call("claim", { change: "a-1", agent: "agent-a", paths: ["src/a/"], intent: "a" });
 		const asked: string[] = [];
 		const viaApi: ToolContext = {
@@ -157,7 +157,7 @@ describe("status", () => {
 	});
 
 	it("still finds a change made before forks were per agent, in that change's own fork", async () => {
-		await call("start", {});
+		await call("settings", {});
 		// Claimed before forks were per agent: only such a change can have a fork of its own.
 		vi.useFakeTimers({ toFake: ["Date"] });
 		vi.setSystemTime(new Date("2026-10-05T00:00:00Z"));
@@ -174,7 +174,7 @@ describe("status", () => {
 	}, 60_000);
 
 	it("lets an agent ask a person about a change, until a person votes on its commit", async () => {
-		await call("start", {});
+		await call("settings", {});
 		const { key: keyA } = (await call("register", { agent: "agent-a" })) as { key: string };
 		await call("claim", { change: "a-1", agent: "agent-a", paths: ["src/a/"], intent: "Speed up the a module" }, keyA);
 		const head = await pushChange(fork.url, work, "agent-a", "a-1", { "src/a/x.txt": "a\n" });
@@ -201,7 +201,7 @@ describe("status", () => {
 	}, 60_000);
 
 	it("says how a change ended once its claim is gone", async () => {
-		await call("start", {});
+		await call("settings", {});
 		await call("claim", { change: "a-1", agent: "agent-a", paths: ["src/a/"], intent: "a" });
 		await call("release", { change: "a-1", agent: "agent-a", reason: "gave up" });
 		expect(await call("status", { change: "a-1" })).toMatchObject({ claim: null, released: { reason: "gave up" } });
@@ -215,7 +215,7 @@ describe("check (run by the agent itself)", () => {
 	// is the change against main, and its files against its claim; it never
 	// fetches other changes.
 	it("warns early about conflicts with main and files outside the claim, without fetching other changes", async () => {
-		await call("start", { shard_depth: 0 });
+		await call("settings", { shard_depth: 0 });
 		await call("claim", { change: "a-1", agent: "agent-a", paths: ["src/a/"], intent: "a" });
 		await call("claim", { change: "b-1", agent: "agent-b", paths: ["src/b/"], intent: "b" });
 		const head = await pushChange(fork.url, work, "agent-a", "a-1", { "src/a/x.txt": "a\n", "README.md": "a's readme\n" });
@@ -242,7 +242,7 @@ describe("check (run by the agent itself)", () => {
 	}, 60_000);
 
 	it("says when there's nothing pushed to check", async () => {
-		await call("start", {});
+		await call("settings", {});
 		await call("claim", { change: "a-1", agent: "agent-a", paths: ["src/a/"], intent: "a" });
 		expect(await call("check", { change: "a-1" })).toEqual({ error: "changes/a-1 has nothing pushed to check" });
 	});

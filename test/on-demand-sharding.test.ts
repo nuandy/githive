@@ -178,7 +178,7 @@ describe("sharding on demand through the toolkit", { timeout: 120_000 }, () => {
 	};
 
 	it("starts in one record, shards when the eighth agent claims, and audits clean across the switch", async () => {
-		expect(await call("start", { required: 1, vetoes: [] })).toMatchObject({ shardDepth: 0, sharding: "on demand" });
+		expect(await call("settings", { required: 1, vetoes: [] })).toMatchObject({ shardDepth: 0, sharding: "on demand" });
 		for (let i = 0; i < SHARD_WHEN.agents - 1; i++) expect(await call("claim", { change: `c-${i}`, agent: `agent-${i}`, paths: [`area${i}/`], intent: "x" })).toMatchObject({ ok: true });
 		expect((await registry())?.shardDepth).toBeUndefined();
 		expect(created).toEqual([]);
@@ -201,7 +201,7 @@ describe("sharding on demand through the toolkit", { timeout: 120_000 }, () => {
 	});
 
 	it("never shards a repo started with shard_depth 0", async () => {
-		expect(await call("start", { required: 1, vetoes: [], shard_depth: 0 })).toMatchObject({ shardDepth: 0, sharding: "never" });
+		expect(await call("settings", { required: 1, vetoes: [], shard_depth: 0 })).toMatchObject({ shardDepth: 0, sharding: "never" });
 		for (let i = 0; i < SHARD_WHEN.agents + 1; i++) await call("claim", { change: `c-${i}`, agent: `agent-${i}`, paths: [`area${i}/`], intent: "x" });
 		expect((await registry())?.shardDepth).toBeUndefined();
 	});

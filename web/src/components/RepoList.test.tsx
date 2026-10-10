@@ -25,10 +25,10 @@ describe("the Repositories page", () => {
 		expect(html).not.toMatch(/elected/);
 	});
 
-	it("explains how agents start a repo when there's none, and offers to make one", () => {
+	it("explains what agents do in a repo when there's none, and offers to make one", () => {
 		const html = renderToStaticMarkup(<RepoList rows={[]} loaded canCreate />);
 		expect(html).toContain("No repositories yet");
-		expect(html).toContain("start");
+		expect(html).toContain("GitHive starts on it at once");
 		expect(html).toContain('href="#/new"');
 		expect(html).toContain("Create an organization");
 	});

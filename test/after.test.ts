@@ -34,7 +34,7 @@ async function approved(change: string, agent: string, paths: string[], files: R
 beforeEach(async () => {
 	server = await startGitServer();
 	work = mkdtempSync(join(tmpdir(), "githive-after-"));
-	await call("start", { required: 1, vetoes: [] });
+	await call("settings", { required: 1, vetoes: [] });
 	for (const agent of ["a", "b", "reviewer"]) keys[agent] = ((await call("register", { agent })) as { key: string }).key;
 });
 afterEach(async () => {

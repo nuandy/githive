@@ -300,7 +300,8 @@ export const manage = {
 	setVisibility: (repo: string, visibility: "private" | "public") => call<RepoRecord>("PATCH", `/repos/${repoPath(repo)}`, { visibility }),
 	deleteRepo: (repo: string) => call<unknown>("DELETE", `/repos/${repoPath(repo)}`),
 	/** Start GitHive on a repo with the default policy (its admins). */
-	startRepo: (repo: string) => call<unknown>("POST", `/repos/${repoPath(repo)}/start`, {}),
+	// A repo's first settings start GitHive on it: none given, the defaults.
+	startRepo: (repo: string) => call<unknown>("POST", `/repos/${repoPath(repo)}/settings`, {}),
 	/** Change a started repo's review policy or checks (its admins); what's left out stays. */
 	changeSettings: (repo: string, settings: SettingsInput) => call<SavedMergeSettings>("POST", `/repos/${repoPath(repo)}/settings`, settings),
 	collaborators: (repo: string) => call<{ handle: string; permission: Level }[]>("GET", `/repos/${repoPath(repo)}/collaborators`),

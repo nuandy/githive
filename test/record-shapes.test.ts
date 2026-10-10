@@ -49,7 +49,7 @@ beforeAll(async () => {
 	});
 	const call = (agent: string, name: string, args: Record<string, unknown>) => callTool(name, { repo: "p", ...args }, ctx(agent));
 	// Every kind of record and every optional field the toolkit writes today.
-	await call("ada/lead", "start", { required: 1, vetoes: ["security"], grants: { security: ["@acme/security"] }, escalate: [{ paths: ["infra/"], required: 2 }], verify: ["npm test"], shard_depth: 0 });
+	await call("ada/lead", "settings", { required: 1, vetoes: ["security"], grants: { security: ["@acme/security"] }, escalate: [{ paths: ["infra/"], required: 2 }], verify: ["npm test"], shard_depth: 0 });
 	await callTool("register", { repo: "p", agent: "keyed-agent" }, { remote: async () => ({ url: server.url, token: "unused" }), head: async () => server.git("rev-parse", "main").trim() });
 	await call("ada/builder", "claim", { change: "stats-1", paths: ["src/stats/"], intent: "Add stats" });
 	await call("ada/builder", "claim", { change: "docs-1", paths: ["docs/"], intent: "Write docs" });

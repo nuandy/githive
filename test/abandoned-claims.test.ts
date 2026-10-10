@@ -46,7 +46,7 @@ describe.each([
 ])("claims %s", (_mode, depth) => {
 	beforeEach(async () => {
 		shardDepth = depth;
-		await call("start", {
+		await call("settings", {
 			required: 1,
 			vetoes: [],
 			...(shardDepth ? { shard_depth: shardDepth } : {}),

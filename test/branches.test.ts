@@ -53,7 +53,7 @@ describe.each([
 	["sharded", 2],
 ])("with claims %s", (_mode, shardDepth) => {
 	beforeEach(async () => {
-		await call("start", { required: 1, vetoes: [], ...(shardDepth ? { shard_depth: shardDepth } : {}) });
+		await call("settings", { required: 1, vetoes: [], ...(shardDepth ? { shard_depth: shardDepth } : {}) });
 		for (const agent of ["a", "b", "reviewer"]) keys[agent] = ((await call("register", { agent })) as { key: string }).key;
 	});
 

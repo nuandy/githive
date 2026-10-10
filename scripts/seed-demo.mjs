@@ -71,7 +71,7 @@ async function seedRepo() {
 	const repo = REPO;
 	say(`\n${repo} on ${BASE}`);
 	await api("POST", "/repos/import", { url: "https://github.com/octocat/Spoon-Knife", name: repo, branch: "main" });
-	await tool("start", { repo, required: 2, vetoes: ["security"], verify: ["test -f index.html"] });
+	await tool("settings", { repo, required: 2, vetoes: ["security"], verify: ["test -f index.html"] });
 	const agents = {};
 	for (const name of ["docs-agent", "style-agent", "readme-agent", "theme-agent", "layout-agent", "tests-reviewer", "security-reviewer"]) agents[name] = { name, key: (await tool("register", { repo, agent: name })).key };
 	const vote = (commit, reviewer, role, verdict, evidence) => tool("vote", { repo, commit, reviewer, role, verdict, evidence }, agents[reviewer].key);

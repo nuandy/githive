@@ -160,7 +160,13 @@ app.post("/repos", async (c) => {
 		}
 	}
 	const repo = await orgs.addRepo(org, repoName, userId, { visibility: visibility === "public" ? "public" : "private", id });
-	return c.json(repo, 201);
+	// GitHive starts on it at once, with the defaults (its admins change them in settings), unless it has no branch yet:
+	// then its first settings start it.
+	const started = await callTool("settings", { repo: id }, toolContext(c.env, principal)).then(
+		() => true,
+		(err) => (console.error(`starting GitHive on ${org.slug}/${repoName} failed`, String(err)), false),
+	);
+	return c.json({ ...repo, started }, 201);
 });
 
 // A new repo copied from this one, in the same namespace: for scripts (see POST /repos).
@@ -235,13 +241,8 @@ app.get("/repos/:owner/:name/access", async (c) => {
 	const [meta, branch] = await Promise.all([c.env.DB ? new OrgStore(c.env.DB).repoById(repo.id) : null, remoteFor(c.env.ARTIFACTS, repo.id, "read").then(defaultBranch).catch(() => null)]);
 	return c.json({ ...repo, visibility: meta?.visibility ?? null, branch });
 });
-// Start GitHive on a repo from the dashboard (its admins): the MCP start tool, with the default policy unless told otherwise.
-app.post("/repos/:owner/:name/start", async (c) => {
-	const repo = await routeRepo(c, "admin");
-	const started = (await callTool("start", { ...(await jsonArgs(c)), repo: repo.id }, toolContext(c.env, c.get("principal")))) as Record<string, unknown>;
-	return c.json({ ...started, repo: repo.fullName });
-});
-// Change a started repo's review policy or checks from the dashboard (its admins): the MCP settings tool.
+// Set up a repo's review policy or checks from the dashboard (its admins): the MCP settings tool. A repo's first
+// settings start GitHive on it, with the defaults unless told otherwise.
 app.post("/repos/:owner/:name/settings", async (c) => {
 	const repo = await routeRepo(c, "admin");
 	const changed = (await callTool("settings", { ...(await jsonArgs(c)), repo: repo.id }, toolContext(c.env, c.get("principal")))) as Record<string, unknown>;

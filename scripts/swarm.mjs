@@ -452,7 +452,7 @@ if (plan.setup) {
 		const made = template ? await post(`/repos/_/${template}/copy`, { name: plan.repo }) : await post("/repos/import", { url: plan.setup.import, name: plan.repo, branch: plan.setup.branch });
 		if (!made.ok) throw new Error(`making ${plan.repo} failed: HTTP ${made.status} ${(await made.text()).slice(0, 200)}`);
 	}
-	const startedMode = await tool("start", { required: plan.setup.required ?? 1, ...(plan.setup.verify ? { verify: plan.setup.verify } : {}), ...(plan.setup.grants ? { grants: plan.setup.grants } : {}), ...(plan.setup.shardDepth !== undefined ? { shard_depth: plan.setup.shardDepth } : {}) });
+	const startedMode = await tool("settings", { required: plan.setup.required ?? 1, ...(plan.setup.verify ? { verify: plan.setup.verify } : {}), ...(plan.setup.grants ? { grants: plan.setup.grants } : {}), ...(plan.setup.shardDepth !== undefined ? { shard_depth: plan.setup.shardDepth } : {}) });
 	branch = startedMode.branch;
 	say("swarm", `${plan.repo} on ${branch}: checks ${JSON.stringify(startedMode.verify)}, grants ${JSON.stringify(startedMode.policy?.grants ?? {})}, claims ${JSON.stringify(startedMode.sharding)}`);
 }

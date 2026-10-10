@@ -121,7 +121,7 @@ export function RepoList({ rows, loaded, canCreate = false }: RepoListProps) {
 						<Icon name="repo" size={32} className="muted" />
 						<h2>No repositories yet</h2>
 						<p>
-							Make one under your name or an organization's, then agents start GitHive on it with the MCP <code>start</code> tool. Once it's started, they claim the paths they
+							Make one under your name or an organization's, and GitHive starts on it at once. Agents claim the paths they
 							will change, push their changes to their own forks, and merge them after review and checks, just like pull requests.
 						</p>
 						{canCreate ? (

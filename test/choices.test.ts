@@ -167,7 +167,7 @@ describe("review holds through the toolkit", { timeout: 120_000 }, () => {
 				...(agentKey ? { agentKey } : {}),
 			});
 			const call = (name: string, args: Record<string, unknown>, key?: string) => callTool(name, { repo: "p", ...args }, ctx(key)) as Promise<Record<string, unknown>>;
-			await call("start", { required: 1, vetoes: [] });
+			await call("settings", { required: 1, vetoes: [] });
 			const keys: Record<string, string> = {};
 			for (const a of ["author", "rev-1", "rev-2"]) keys[a] = ((await call("register", { agent: a })) as { key: string }).key;
 			const heads: string[] = [];
@@ -203,7 +203,7 @@ describe("review holds through the toolkit", { timeout: 120_000 }, () => {
 });
 
 describe("warming the checks when a merge is near", { timeout: 60_000 }, () => {
-	it("warms at the start, after a check and after an approval; without checks, for landing, from the claim on too", async () => {
+	it("warms at the start with checks, after a check and after an approval; without checks, for landing, from the claim on, never at the start", async () => {
 		const server = await startGitServer();
 		const work = mkdtempSync(join(tmpdir(), "githive-warm-"));
 		try {
@@ -219,7 +219,7 @@ describe("warming the checks when a merge is near", { timeout: 60_000 }, () => {
 			});
 			const call = (repo: string, name: string, args: Record<string, unknown>, key?: string) => callTool(name, { repo, ...args }, ctx(key)) as Promise<Record<string, unknown>>;
 			for (const [repo, verify] of [["checked", ["npm test"]], ["unchecked", []]] as const) {
-				await call(repo, "start", { required: 1, vetoes: [], verify });
+				await call(repo, "settings", { required: 1, vetoes: [], verify });
 				const { key } = (await call(repo, "register", { agent: `a-${repo}` })) as { key: string };
 				await call(repo, "claim", { change: `c-${repo}`, agent: `a-${repo}`, paths: [`src/${repo}/`], intent: "x" }, key);
 				const head = await pushChange(server.url, work, `a-${repo}`, `c-${repo}`, { [`src/${repo}/x.js`]: "x\n" });
@@ -229,13 +229,12 @@ describe("warming the checks when a merge is near", { timeout: 60_000 }, () => {
 				await call(repo, "vote", { commit: head, reviewer: "rev-2", role: "review", verdict: "reject", evidence: "no" });
 			}
 			// The start, the check and the approval warm, each saying what merge to expect; the rejection doesn't. Without checks
-			// the repo's Gate still lands the batch: it warms at the start (for the snapshot a cold Gate restores) and from the
-			// claim on (the Gate passes over these once it has the snapshot).
+			// the repo's Gate still lands the batch: it warms from the claim on (the Gate passes over these once it has the
+			// snapshot), never at the start, so a repo nobody works in starts no container.
 			expect(warmed).toEqual([
 				{ branch: "main", checks: ["npm test"], expect: "set up" },
 				{ branch: "main", checks: ["npm test"], expect: "checked", key: "c-checked" },
 				{ branch: "main", checks: ["npm test"], expect: "approved", key: heads.checked },
-				{ branch: "main", checks: [], expect: "set up" },
 				{ branch: "main", checks: [], expect: "claimed", key: "c-unchecked" },
 				{ branch: "main", checks: [], expect: "checked", key: "c-unchecked" },
 				{ branch: "main", checks: [], expect: "approved", key: heads.unchecked },
@@ -262,7 +261,7 @@ describe("a review a role waits for too long", { timeout: 120_000 }, () => {
 				...(agentKey ? { agentKey } : {}),
 			});
 			const call = (name: string, args: Record<string, unknown>, key?: string) => callTool(name, { repo: "p", ...args }, ctx(key)) as Promise<Record<string, unknown>>;
-			await call("start", { required: 1, vetoes: ["security"], grants: { security: ["sec-1", "person:*"] } });
+			await call("settings", { required: 1, vetoes: ["security"], grants: { security: ["sec-1", "person:*"] } });
 			const keys: Record<string, string> = {};
 			for (const a of ["author", "rev", "sec-1"]) keys[a] = ((await call("register", { agent: a })) as { key: string }).key;
 			await call("claim", { change: "c-1", agent: "author", paths: ["src/c/"], intent: "c" }, keys.author);
@@ -315,7 +314,7 @@ describe("open changes' heads, as GitHive last saw them", { timeout: 120_000 }, 
 				...(agentKey ? { agentKey } : {}),
 			});
 			const call = async (name: string, args: Record<string, unknown>, key?: string) => (await callTool(name, { repo: "p", ...args }, ctx(key))) as Record<string, unknown>;
-			await call("start", { required: 1, vetoes: [] });
+			await call("settings", { required: 1, vetoes: [] });
 			const agents = Array.from({ length: 10 }, (_, i) => `a${i}`);
 			const keys: Record<string, string> = {};
 			for (const agent of [...agents, "z"]) keys[agent] = ((await call("register", { agent })) as { key: string }).key;
@@ -373,7 +372,7 @@ describe("news of main moving", { timeout: 120_000 }, () => {
 				...(agentKey ? { agentKey } : {}),
 			});
 			const call = async (name: string, args: Record<string, unknown>, key?: string) => callTool(name, { repo: "p", ...args }, ctx(key));
-			await call("start", { required: 1, vetoes: [] });
+			await call("settings", { required: 1, vetoes: [] });
 			const { key } = (await call("register", { agent: "agent-a" })) as { key: string };
 			expect(await call("backlog", { agent: "agent-a" }, key)).toMatchObject({ open: [], news: [{ change: "c-7", says: 'main changed src/billing/invoice.ts: c-7 by agent-b, "add partial refunds"' }] });
 			expect(Array.isArray(await call("claims", {}, key))).toBe(true);
@@ -399,7 +398,7 @@ describe("a change that landed before its claim was released", { timeout: 120_00
 				...(agentKey ? { agentKey } : {}),
 			});
 			const call = async (name: string, args: Record<string, unknown>, key?: string) => (await callTool(name, { repo: "p", ...args }, ctx(key))) as Record<string, unknown>;
-			await call("start", { required: 1, vetoes: [] });
+			await call("settings", { required: 1, vetoes: [] });
 			const keys: Record<string, string> = {};
 			for (const agent of ["a", "b"]) keys[agent] = ((await call("register", { agent })) as { key: string }).key;
 			await call("add_work", { id: "c-1", title: "c-1", intent: "x", paths: ["src/a/"], agent: "a" }, keys.a);
@@ -444,7 +443,7 @@ describe("agents choosing through the toolkit", { timeout: 120_000 }, () => {
 				return { error: statusOf(err).message };
 			}
 		};
-		await call("start", { required: 1, vetoes: [] });
+		await call("settings", { required: 1, vetoes: [] });
 		const keys = Object.fromEntries(await Promise.all(["agent-a", "agent-b"].map(async (a) => [a, ((await call("register", { agent: a })) as { key: string }).key])));
 		expect(await call("add_work", { title: "Add the greeting", intent: "a greeting module", paths: ["src/greet/"], agent: "agent-a" }, keys["agent-a"])).toEqual({ ok: true, id: "add-the-greeting" });
 		expect(await call("add_work", { title: "Add the farewell", intent: "a farewell module", paths: ["src/bye/"], agent: "agent-a" }, keys["agent-a"])).toEqual({ ok: true, id: "add-the-farewell" });

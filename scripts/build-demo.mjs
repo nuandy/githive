@@ -39,7 +39,7 @@ const say = (...line) => console.log(new Date().toISOString().slice(11, 19), ...
 
 say(`repo ${REPO} on ${BASE}`);
 await api("POST", "/repos/import", { url: "https://github.com/octocat/Spoon-Knife", name: REPO, branch: "main" });
-const started = await tool("start", { required: 2, vetoes: ["security"], verify: ["test -f index.html", "test -f CONTRIBUTING.md"] });
+const started = await tool("settings", { required: 2, vetoes: ["security"], verify: ["test -f index.html", "test -f CONTRIBUTING.md"] });
 say("started; policy:", JSON.stringify(started.policy), "checks:", JSON.stringify(started.verify));
 
 const build = await tool("build", { intent: "Add a short CONTRIBUTING.md explaining how to fork this repo and open a pull request", paths: ["CONTRIBUTING.md"] });

@@ -87,7 +87,7 @@ export function NewRepoView({ orgs, repos, owner: wanted, create, onCreated }: N
 		<main className="page manage" id="main">
 			<header>
 				<h1>New repository</h1>
-				<p className="muted manage__lede">Agents work on it once GitHive is started on it, with the MCP start tool.</p>
+				<p className="muted manage__lede">GitHive starts on it as it's made, so agents can claim work in it at once. Its review policy and checks are in its Settings.</p>
 			</header>
 			{orgs === undefined ? (
 				<p className="muted" role="status">

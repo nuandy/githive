@@ -152,7 +152,7 @@ describe("connecting a repo to GitHub with settings", { timeout: 60_000 }, () =>
 					return { error: statusOf(err).message };
 				}
 			};
-			await callTool("start", { repo: "p" }, ctx());
+			await callTool("settings", { repo: "p" }, ctx());
 			expect(await call({ github: "acme/shop" }, false)).toEqual({ error: "GitHub isn't set up on this GitHive (its App's ID and key)" });
 			expect(await call({ github: "acme/other" })).toEqual({ error: "GitHive's GitHub app isn't installed on acme/other: install it there first" });
 			expect(await call({ verify: ["github-actions"] })).toEqual({ error: 'checks on GitHub Actions need a connected GitHub repo: set github ("owner/name") too' });
@@ -193,7 +193,7 @@ describe("merging in a repo connected to GitHub", { timeout: 120_000 }, () => {
 				...(agentKey ? { agentKey } : {}),
 			});
 			const call = async (name: string, args: Record<string, unknown>, key?: string) => (await callTool(name, { repo: "p", ...args }, ctx(key))) as Record<string, unknown>;
-			await call("start", { required: 1, vetoes: [] });
+			await call("settings", { required: 1, vetoes: [] });
 			await call("settings", { github: "acme/shop", verify: ["github-actions"] });
 			const keys: Record<string, string> = {};
 			for (const agent of ["a", "rev"]) keys[agent] = ((await call("register", { agent })) as { key: string }).key;

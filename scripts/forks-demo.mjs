@@ -61,7 +61,7 @@ async function clone(name, { url, token }) {
 try {
 	say(`repo ${REPO} on ${BASE}`);
 	await api("POST", "/repos/import", { url: "https://github.com/octocat/Spoon-Knife", name: REPO, branch: "main" });
-	const started = await tool("start", { required: 2, vetoes: ["security"], verify: ["test -f index.html"] });
+	const started = await tool("settings", { required: 2, vetoes: ["security"], verify: ["test -f index.html"] });
 	say("started; policy:", JSON.stringify(started.policy), "claims sharded", started.shardDepth, "deep over", started.recordsRepos, "records repos");
 
 	say("\nagents register their own names, though they share one Access identity");

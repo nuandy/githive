@@ -59,7 +59,7 @@ describe("GitHive's MCP tools", () => {
 
 	it("starts the mode, claims, refuses an overlapping claim, and audits a clean repo", async () => {
 		// By default no reviews and no checks, as on GitHub: a claimed, pushed change merges as it is.
-		const started = (await call("start", { repo: "project" })) as { policy: Record<string, unknown>; verify: string[] };
+		const started = (await call("settings", { repo: "project" })) as { policy: Record<string, unknown>; verify: string[] };
 		expect(started).toMatchObject({ repo: "project", policy: { required: 0, vetoes: [] }, verify: [] });
 		expect(started.policy).not.toHaveProperty("escalate");
 		expect(await call("claim", { repo: "project", change: "a-1", agent: "agent-a", paths: ["src/a/"], intent: "a" })).toMatchObject({ ok: true });
@@ -71,12 +71,17 @@ describe("GitHive's MCP tools", () => {
 		expect(await call("audit", { repo: "project" })).toEqual({ merges: 0, open: 0, violations: [] });
 	});
 
-	it("changes a started repo's policy or checks with settings, keeping what it leaves out, and says so in the records", async () => {
-		expect(await call("settings", { repo: "project", verify: ["npm test"] })).toMatchObject({ error: expect.stringContaining("hasn't started") });
-		await call("start", { repo: "project", required: 2, vetoes: ["security"], verify: ["npm test"] });
-		// Starting again changes nothing: settings does.
-		expect(await call("start", { repo: "project", verify: ["npm install", "npm test"] })).toMatchObject({ verify: ["npm test"] });
+	it("starts GitHive and sets the rest at once when the first settings also name files to skip", async () => {
+		expect(await call("settings", { repo: "project", verify: ["npm test"], skip_checks: ["docs/"] })).toMatchObject({ verify: ["npm test"], skipChecks: ["docs/"], instructions: expect.any(String) });
+		expect(await call("settings", { repo: "project", required: 1 })).toMatchObject({ verify: ["npm test"], skipChecks: ["docs/"] });
+	});
+
+	it("starts GitHive on a repo with its first settings, then changes them, keeping what it leaves out, and says so in the records", async () => {
+		// The first settings start GitHive on the repo, and tell the caller how agents work in it.
+		expect(await call("settings", { repo: "project", required: 2, vetoes: ["security"], verify: ["npm test"] })).toMatchObject({ policy: { required: 2, vetoes: ["security"] }, verify: ["npm test"], instructions: expect.any(String) });
+		// Once started, settings changes what it names, and how claims are kept is no longer one of them.
 		expect(await call("settings", { repo: "project" })).toMatchObject({ error: expect.stringContaining("name what to change") });
+		expect(await call("settings", { repo: "project", shard_depth: 2 })).toMatchObject({ error: expect.stringContaining("set when GitHive starts") });
 		expect(await call("settings", { repo: "project", verify: ["npm install", "npm test"] })).toMatchObject({ policy: { required: 2, vetoes: ["security"] }, verify: ["npm install", "npm test"] });
 		pinged = [];
 		expect(await call("settings", { repo: "project", required: 1 })).toMatchObject({ policy: { required: 1, vetoes: ["security"] }, verify: ["npm install", "npm test"] });
@@ -89,7 +94,7 @@ describe("GitHive's MCP tools", () => {
 	});
 
 	it("answers the claims tool from the kept copy when the context keeps one", async () => {
-		await call("start", { repo: "project" });
+		await call("settings", { repo: "project" });
 		await call("claim", { repo: "project", change: "a-1", agent: "agent-a", paths: ["src/a/"], intent: "a" });
 		const kept = { claims: [{ change: "kept-1", agent: "agent-k", paths: ["src/k/"], intent: "k", since: "", active: "" }], merged: [] };
 		const reply = (await handleRpc({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "claims", arguments: { repo: "project" } } }, { toolkit: { ...ctx().toolkit, keptClaims: async () => kept } } as never)) as { result: { content: { text: string }[] } };
@@ -99,7 +104,7 @@ describe("GitHive's MCP tools", () => {
 	});
 
 	it("lets claim take paths from a claim idle for 30 minutes, releasing it as stale", async () => {
-		await call("start", { repo: "project" });
+		await call("settings", { repo: "project" });
 		const registry = new GitCasLog<Registry>(async () => ({ url: server.url, token: "unused" }), "project", "refs/notes/githive-claims/project");
 		await claim(registry, { change: "old-1", agent: "agent-gone", paths: ["src/a/"], intent: "abandoned", now: Date.now() - 31 * 60_000 });
 		expect(await call("claim", { repo: "project", change: "a-1", agent: "agent-a", paths: ["src/a/x.ts"], intent: "a" })).toMatchObject({ ok: true });
@@ -108,7 +113,7 @@ describe("GitHive's MCP tools", () => {
 	});
 
 	it("reads the claims registry once for a call that only reads it", async () => {
-		await call("start", { repo: "project", shard_depth: 0 });
+		await call("settings", { repo: "project", shard_depth: 0 });
 		await call("claim", { repo: "project", change: "a-1", agent: "agent-a", paths: ["src/a/"], intent: "a" });
 		const before = server.requests.length;
 		await call("claims", { repo: "project" });
@@ -121,7 +126,7 @@ describe("GitHive's MCP tools", () => {
 	});
 
 	it("reverts a reported commit, after which the audit counts it resolved", async () => {
-		await call("start", { repo: "project" });
+		await call("settings", { repo: "project" });
 		const work = mkdtempSync(join(tmpdir(), "githive-mcp-"));
 		try {
 			const rogue = await agentClone(server.url, work, "rogue");
@@ -142,7 +147,7 @@ describe("GitHive's MCP tools", () => {
 
 	it("notes a repo for the dashboard when the mode starts, and snapshots it", async () => {
 		registered = [];
-		await call("start", { repo: "project", required: 1, verify: ["npm test"] });
+		await call("settings", { repo: "project", required: 1, verify: ["npm test"] });
 		expect(registered).toEqual(["project"]);
 		await call("claim", { repo: "project", change: "a-1", agent: "agent-a", paths: ["src/a/"], intent: "a" });
 		await call("vote", { repo: "project", commit: "h1", reviewer: "rev-1", role: "tests", verdict: "approve", evidence: "ok" });
@@ -164,7 +169,7 @@ describe("GitHive's MCP tools", () => {
 	it("keeps the repo's summary for the dashboard: activity on writes, counts when they're read", async () => {
 		// Its own repo: activity is noted at most every 10 seconds per repo, and other tests write "project".
 		summarized = [];
-		await call("start", { repo: "summed" });
+		await call("settings", { repo: "summed" });
 		await call("claim", { repo: "summed", change: "a-1", agent: "agent-a", paths: ["src/a/"], intent: "a" });
 		expect(summarized.at(-1)).toMatchObject({ repo: "summed", patch: { lastActivity: expect.any(String) } });
 		expect(pinged).toContain("summed");
@@ -178,7 +183,7 @@ describe("GitHive's MCP tools", () => {
 
 	it("asks GitHive's hosted reviewers to review a claimed change, by default a general review and every veto role", async () => {
 		reviewRequests = [];
-		await call("start", { repo: "project", required: 2, vetoes: ["security"] });
+		await call("settings", { repo: "project", required: 2, vetoes: ["security"] });
 		await call("claim", { repo: "project", change: "a-1", agent: "agent-a", paths: ["src/a/"], intent: "a" });
 		expect(await call("request_review", { repo: "project", change: "a-1", summary: "adds a" })).toEqual({ head: "h1", reviewers: ["review", "security"] });
 		expect(reviewRequests).toEqual([{ repo: "project", change: "a-1", roles: ["review", "security"], summary: "adds a" }]);
@@ -189,7 +194,7 @@ describe("GitHive's MCP tools", () => {
 
 	it("claims paths for a new change and starts GitHive's hosted builder on it", async () => {
 		builds = [];
-		await call("start", { repo: "project" });
+		await call("settings", { repo: "project" });
 		const started = await call("build", { repo: "project", intent: "Add a stats page", paths: ["src/stats/"] });
 		expect(started.change).toMatch(/^add-a-stats-page-[0-9a-f]{4}$/);
 		expect(builds).toEqual([{ repo: "project", change: started.change }]);

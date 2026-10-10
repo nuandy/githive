@@ -18,7 +18,7 @@ transactions in one write (see Landing). The records are the log, and the
 audit replays it.
 
 Here main means the project's default branch, whatever its repo calls it (main,
-master, ...): `start` reads it from the repo and records it.
+master, ...): GitHive reads it from the repo when it starts there, and records it.
 
 Nothing outside Git decides anything, and nothing outside Git orders the
 agents' work: the review holds and each branch's landing lease (which merge
@@ -51,7 +51,7 @@ didn't. The toolkit refuses to help break them.
 6. Anyone may revert a commit the audit reports.
 7. What agents can't settle among themselves goes to a person (`ask_human`).
 
-`start`, and the MCP handshake, give every agent a fuller version of these as
+A repo's first `settings`, and the MCP handshake, give every agent a fuller version of these as
 its instructions.
 
 ## Tools
@@ -61,11 +61,11 @@ token or OAuth on the public address, or Cloudflare Access on the admin
 hostnames. Each tool reads or writes the repo's records in Git and reports
 what Git said.
 
-- `start`: start GitHive on a repo (harmless to repeat): the review policy,
-  role grants, the checks run before each merge, and how claims are kept.
-- `settings`: change a started repo's review policy, role grants or checks,
-  rules for other branches (`branch_rules`), and what the checks skip
-  (`skip_checks`).
+- `settings`: set up a repo's review policy, role grants or checks, rules for
+  other branches (`branch_rules`), and what the checks skip (`skip_checks`).
+  A repo's first settings start GitHive on it (with none given, the defaults),
+  and set how its claims are kept (`shard_depth`, `records_repos`); a repo made
+  on GitHive starts as it's made.
   The registry keeps every version, and each merge cites the registry state
   it checked, so the audit holds it to the settings in force when it merged.
 - `register`: register an agent name and get its key, or rotate the key; or
@@ -222,7 +222,7 @@ What someone may do in a repo is the most of: read if it's public; admin for
 the org's owners and admins; the org's default for members; a collaborator's
 level. An agent has its owner's. Every route and tool needs a level: read for
 looking, review for `reviews`, `review_access` and `vote`, write for claiming,
-pushing and merging, admin for `start`, settings and deleting. A repo the
+pushing and merging, admin for `settings` and deleting. A repo the
 caller can't see answers as if it didn't exist. Anyone who comes through
 Cloudflare Access (a person or a service token) may do anything, and name a
 repo not yet in an org as `_/<id>`.
@@ -237,7 +237,7 @@ vote.
 ## Forks
 
 Each agent has its own fork of the project, made ahead and reused for every
-change. `start` makes 8 seed forks of the project, one at a time in the
+change. GitHive starting on a repo makes 8 seed forks of the project, one at a time in the
 background (`fork--<repo>--seed--<k>`). `register` queues the agent's own
 fork, copied from a seed (its own by a hash of its name, else any that's
 ready, else the project), so a crowd arriving at once doesn't copy the project
@@ -378,8 +378,7 @@ its own. (The backlog's work lands on the project's branch.)
 A policy says how many approvals a commit needs (`required`, 0 for none) and
 which roles can veto it (`vetoes`). Escalations make it stricter for changes
 touching certain paths. By default there are none, as on GitHub: a claimed,
-pushed change merges as it is, and a repo asks for reviews with `start` or
-`settings`. A common stricter rule is an escalation for dependency, CI or
+pushed change merges as it is, and a repo asks for reviews with `settings`. A common stricter rule is an escalation for dependency, CI or
 deploy files (`.github/`, `package.json` and the npm, yarn, pnpm and bun
 lockfiles at the top of the repo, `.npmrc`, `Dockerfile`, `wrangler.*`;
 `SENSITIVE_PATHS`): two approvals, and security's.
@@ -402,8 +401,8 @@ way.
 
 ### Who holds a role
 
-A veto role counts only from whoever the repo's owner granted it, at `start`
-or with `settings` (`grants`; a branch rule may grant its own). A grant lists
+A veto role counts only from whoever the repo's owner granted it with
+`settings` (`grants`; a branch rule may grant its own). A grant lists
 any of:
 
 - registered agent names, voting with their own key, so a name can't be
@@ -425,7 +424,7 @@ block a merge; `status` still shows it, for the author to revise.
 A pool member's vote never counts as the role on a change whose author runs
 under the same identity, so a team doesn't sign off its own changes.
 
-`start` warns about grants that will hold reviews up. A role whose only holder
+`settings` warns about grants that will hold reviews up. A role whose only holder
 is one agent or identity (not a person, not a pool) waits whenever that holder
 is busy. A role no person holds can be flagged to people, but they can't sign
 it off.
@@ -657,8 +656,9 @@ batch, lands this one first.
 about one check failure per batch (see `batchSize`), and nothing fails a batch
 that isn't checked. At 200 agents with no checks, batches sized for checks (8,
 24, 52) left 130 ready changes waiting. The repo's Gate, which lands it, is
-warmed at `start` with checks or without, and saves the repo's snapshot (with
-nothing installed, when there are no checks): cold, it then restores in
+warmed when GitHive starts on a repo with checks, or without checks at its first
+claim (so a repo nobody works in starts no container), and saves the repo's
+snapshot (with nothing installed, when there are no checks): cold, it then restores in
 seconds. Without one, the first batch of a 200-agent run read 3 or 4 changes
 in 42 to 61 s, behind the container starting from its image and Express
 cloning, however early it was warmed: the Gate stops after a minute idle, and
@@ -804,8 +804,8 @@ add one. Their dependencies (`uv sync`, `go mod download`, `cargo fetch`) are
 installed before the checks and skipped while the files they come from are
 unchanged. Toolchains, the virtualenv and Cargo's target folder live outside
 the checkout, so a clean checkout between checks keeps them. A failed install
-fails the check with its output. The repo's own Gate warms on main at `start`
-and `settings`, after `check` or an approving vote while the repo has no
+fails the check with its output. The repo's own Gate warms on main when
+GitHive starts with checks and at `settings`, after `check` or an approving vote while the repo has no
 usable snapshot, and when a batch's check container had to set up from
 scratch or install what the snapshot didn't have; it saves a new snapshot only when one
 is due. A container warmed in the last minute isn't warmed again.
@@ -997,12 +997,12 @@ a write there costs 1.6 s when nobody else is writing. A sharded write costs
 about 5 s (an index, the shard, and the checks above it) at any load. From
 8 agents claiming at once, sharded claims land first.
 
-So `start` records `autoShard`: shard 2 segments deep, over 16 records repos.
+So GitHive starting on a repo records `autoShard`: shard 2 segments deep, over 16 records repos.
 A claim shards the registry first when 8 agents would hold claims, or more
 than 15 claims and releases were written a minute over the last 5 minutes
 (`shardingReason`). Sharding makes the records repos, then is one
 compare-and-swap on the registry that sets `shardDepth`, with when and why. It
-happens once. `start` can also be told `shard_depth`: a depth to shard now, or
+happens once. A repo's first `settings` can also be told `shard_depth`: a depth to shard now, or
 0 for never; and `records_repos`, how many records repos to spread the shards
 over (0 keeps them in the project repo).
 
@@ -1063,8 +1063,8 @@ must win.
 
 `--shard-depth 0` keeps every claim in one record; `--shard-depth 2` shards
 from the start, over 16 records repos. Without it, a new repo shards on demand.
-The flag only applies to a repo's first `start`. To shard in the project repo
-itself, start the repo first with `shard_depth: 2` and `records_repos: 0`,
+The flag only applies when GitHive starts on a repo. To shard in the project repo
+itself, start the repo first with `settings` (`shard_depth: 2`, `records_repos: 0`),
 then pass it with `--repo`. `--records-repos` sets how many records repos the
 shards are spread over (default 16). `--ramp` spreads the agents' starts over
 that many seconds. Results go to `bench-results/`.
@@ -1157,7 +1157,7 @@ on their first `credentials`: Artifacts accepted some forks that never
 appeared.
 
 - **Forks made ahead, paced**: a burst of forks of one repo leaves some of
-  Artifacts' fork jobs stalled for good. Now `start` queues 8 seed forks of the
+  Artifacts' fork jobs stalled for good. Now GitHive starting on a repo queues 8 seed forks of the
   project, made one at a time by the repo's RepoCache on its alarm, and each
   agent's fork is queued when it registers and made from a seed, 16 at a
   time (each next one started as one finishes), each tried up to three times.

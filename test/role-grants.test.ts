@@ -86,8 +86,8 @@ describe("granting roles through the toolkit", { timeout: 60_000 }, () => {
 					return { error: statusOf(err).message };
 				}
 			};
-			expect(await call("start", { required: 1, vetoes: ["security"], grants: { security: "security-1" } })).toEqual({ error: expect.stringMatching(/grants.security is a list/) });
-			expect(await call("start", { required: 1, vetoes: ["security"], grants: { security: ["security-1"] } })).toMatchObject({ policy: { grants: { security: ["security-1"] } }, warnings: [expect.stringMatching(/held by security-1 alone/), expect.stringMatching(/no person holds security/)] });
+			expect(await call("settings", { required: 1, vetoes: ["security"], grants: { security: "security-1" } })).toEqual({ error: expect.stringMatching(/grants.security is a list/) });
+			expect(await call("settings", { required: 1, vetoes: ["security"], grants: { security: ["security-1"] } })).toMatchObject({ policy: { grants: { security: ["security-1"] } }, warnings: [expect.stringMatching(/held by security-1 alone/), expect.stringMatching(/no person holds security/)] });
 			// Nothing signs these records here, so roles go by name; a registered name needs its key.
 			const { key } = (await call("register", { agent: "security-1" })) as { key: string };
 			expect(await call("vote", { commit: head, reviewer: "security-1", role: "security", verdict: "approve", evidence: "ok" })).toEqual({ error: expect.stringMatching(/registered/) });
@@ -123,7 +123,7 @@ describe("team grants through the toolkit", { timeout: 60_000 }, () => {
 			const teams = new Map<string, string[]>([["ada/sec", ["@acme/security"]]]);
 			const as = (agent: string): ToolContext => ({ remote: async () => ({ url: server.url, token: "unused" }), head: async () => server.git("rev-parse", "main").trim(), agent, teamsOf: async () => teams.get(agent) ?? [] });
 			const call = (agent: string, name: string, args: Record<string, unknown>) => callTool(name, { repo: "p", ...args }, as(agent));
-			expect(await call("ada/sec", "start", { required: 1, vetoes: ["security"], grants: { security: ["@acme/security"] } })).toMatchObject({ policy: { grants: { security: ["@acme/security"] } } });
+			expect(await call("ada/sec", "settings", { required: 1, vetoes: ["security"], grants: { security: ["@acme/security"] } })).toMatchObject({ policy: { grants: { security: ["@acme/security"] } } });
 			await call("ada/sec", "vote", { commit: head, role: "security", verdict: "approve", evidence: "ok" });
 			await call("bob/sec", "vote", { commit: head, role: "security", verdict: "approve", evidence: "ok" });
 			// bob joins the team; the grant stays as it was.
