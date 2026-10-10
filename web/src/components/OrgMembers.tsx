@@ -42,28 +42,7 @@ export function MembersSection({
 	errorFor,
 }: SectionProps & ConfirmProps & { me: { handle: string }; manager: boolean }) {
 	const roles = assignableRoles(org.role);
-	const [email, setEmail] = useState("");
-	const [role, setRole] = useState<OrgRole>("member");
-	const [added, setAdded] = useState<string | null>(null);
-	const [addError, setAddError] = useState<string | null>(null);
 	const rowProps = { org, actions, run, busy, confirming, setConfirming, errorFor };
-
-	const add = async (event: FormEvent) => {
-		event.preventDefault();
-		if (!email.trim()) return;
-		setAdded(null);
-		setAddError(null);
-		let result: { added?: string; invited?: string; awaitingApproval?: boolean } = {};
-		const ok = await run(
-			"add-member",
-			async () => (result = await actions.addMember(org.slug, email.trim(), role)),
-			setAddError,
-		);
-		if (ok) {
-			setAdded(addedMessage(result));
-			setEmail("");
-		}
-	};
 
 	return (
 		<section className="box" aria-labelledby="org-members">
@@ -88,51 +67,83 @@ export function MembersSection({
 				})}
 				{manager ? org.invites.map((invite) => <InviteRow key={invite.email} {...rowProps} invite={invite} />) : null}
 			</ul>
-			{manager ? (
-				<form className="box__body manage__form" onSubmit={add}>
-					<div className="manage__inline">
-						<label className="sr-only" htmlFor="add-member-email">
-							Email address
-						</label>
-						<input
-							id="add-member-email"
-							type="email"
-							value={email}
-							onChange={(event) => setEmail(event.target.value)}
-							placeholder="person@example.com"
-							autoComplete="off"
-						/>
-						<label className="sr-only" htmlFor="add-member-role">
-							Role
-						</label>
-						<select id="add-member-role" value={role} onChange={(event) => setRole(event.target.value as OrgRole)}>
-							{roles.map((option) => (
-								<option key={option} value={option}>
-									{ROLE_WORDS[option]}
-								</option>
-							))}
-						</select>
-						<button type="submit" className="accent" disabled={!email.trim() || busy === "add-member"}>
-							{busy === "add-member" ? "Adding…" : "Add"}
-						</button>
-					</div>
-					<p className="manage__hint">
-						Someone who hasn't signed in yet is invited, and joins when they first sign in to GitHive, once a GitHive
-						admin has approved them.
-					</p>
-					{added ? (
-						<p className="manage__note" role="status">
-							{added}
-						</p>
-					) : null}
-					{addError ? (
-						<p className="error manage__note" role="alert">
-							{addError}
-						</p>
-					) : null}
-				</form>
-			) : null}
+			{manager ? <AddMemberForm org={org} actions={actions} run={run} busy={busy} roles={roles} /> : null}
 		</section>
+	);
+}
+
+/** Adds a person by email, at once if they've signed in to GitHive, or else as an invitation. */
+function AddMemberForm({
+	org,
+	actions,
+	run,
+	busy,
+	roles,
+}: Pick<SectionProps, "org" | "actions" | "run" | "busy"> & { roles: OrgRole[] }) {
+	const [email, setEmail] = useState("");
+	const [role, setRole] = useState<OrgRole>("member");
+	const [added, setAdded] = useState<string | null>(null);
+	const [addError, setAddError] = useState<string | null>(null);
+	const add = async (event: FormEvent) => {
+		event.preventDefault();
+		if (!email.trim()) return;
+		setAdded(null);
+		setAddError(null);
+		let result: { added?: string; invited?: string; awaitingApproval?: boolean } = {};
+		const ok = await run(
+			"add-member",
+			async () => (result = await actions.addMember(org.slug, email.trim(), role)),
+			setAddError,
+		);
+		if (ok) {
+			setAdded(addedMessage(result));
+			setEmail("");
+		}
+	};
+
+	return (
+		<form className="box__body manage__form" onSubmit={add}>
+			<div className="manage__inline">
+				<label className="sr-only" htmlFor="add-member-email">
+					Email address
+				</label>
+				<input
+					id="add-member-email"
+					type="email"
+					value={email}
+					onChange={(event) => setEmail(event.target.value)}
+					placeholder="person@example.com"
+					autoComplete="off"
+				/>
+				<label className="sr-only" htmlFor="add-member-role">
+					Role
+				</label>
+				<select id="add-member-role" value={role} onChange={(event) => setRole(event.target.value as OrgRole)}>
+					{roles.map((option) => (
+						<option key={option} value={option}>
+							{ROLE_WORDS[option]}
+						</option>
+					))}
+				</select>
+				<button type="submit" className="accent" disabled={!email.trim() || busy === "add-member"}>
+					{busy === "add-member" ? "Adding…" : "Add"}
+				</button>
+			</div>
+			<p className="manage__hint">
+				Someone who hasn't signed in yet is invited, and joins when they first sign in to GitHive, once a GitHive admin
+				has approved them.
+			</p>
+			{added ? (
+				<p className="manage__note" role="status">
+					{added}
+				</p>
+			) : null}
+			{addError ? (
+				<p className="error manage__note" role="alert">
+					{addError}
+				</p>
+			) : null}
+		</form>
 	);
 }
 
