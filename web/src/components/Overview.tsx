@@ -59,29 +59,8 @@ function BranchBar({
 			.sort(),
 	];
 	const [making, setMaking] = useState(false);
-	const [name, setName] = useState("");
-	const [from, setFrom] = useState(shown);
-	const [busy, setBusy] = useState(false);
-	const [error, setError] = useState<string | null>(null);
 	const showBranch = (to: string) => {
 		window.location.hash = href.repo(repo, "changes", to === branch ? undefined : to);
-	};
-	const make = async (event: React.FormEvent) => {
-		event.preventDefault();
-		if (!api.makeBranch || !name.trim()) return;
-		setBusy(true);
-		setError(null);
-		try {
-			const made = await api.makeBranch(repo, name.trim(), from);
-			setMaking(false);
-			setName("");
-			onBranchMade?.();
-			showBranch(made.name);
-		} catch (err) {
-			setError(messageOf(err));
-		} finally {
-			setBusy(false);
-		}
 	};
 	return (
 		<div className="branch-bar">
@@ -101,40 +80,85 @@ function BranchBar({
 					New branch
 				</button>
 			) : null}
-			{making ? (
-				<form className="branch-bar__new" onSubmit={make}>
-					<label className="sr-only" htmlFor="new-branch-name">
-						Name of the new branch
-					</label>
-					<input
-						id="new-branch-name"
-						placeholder="feature/checkout"
-						value={name}
-						onChange={(event) => setName(event.target.value)}
-						autoFocus
-					/>
-					<label htmlFor="new-branch-from">from</label>
-					<select id="new-branch-from" value={from} onChange={(event) => setFrom(event.target.value)}>
-						{names.map((branchName) => (
-							<option key={branchName} value={branchName}>
-								{branchName}
-							</option>
-						))}
-					</select>
-					<button type="submit" className="accent" disabled={busy || !name.trim()}>
-						{busy ? "Making…" : "Make branch"}
-					</button>
-					<button type="button" onClick={() => setMaking(false)} disabled={busy}>
-						Cancel
-					</button>
-				</form>
+			{making && api.makeBranch ? (
+				<NewBranchForm
+					names={names}
+					shown={shown}
+					make={(name, from) => api.makeBranch!(repo, name, from)}
+					onMade={(made) => {
+						setMaking(false);
+						onBranchMade?.();
+						showBranch(made);
+					}}
+					onCancel={() => setMaking(false)}
+				/>
 			) : null}
+		</div>
+	);
+}
+
+/** Names a new branch and what it starts from, and makes it. */
+function NewBranchForm(props: {
+	names: string[];
+	shown: string;
+	make: (name: string, from: string) => Promise<{ name: string }>;
+	onMade: (name: string) => void;
+	onCancel: () => void;
+}) {
+	const { names, shown, make, onMade, onCancel } = props;
+	const [name, setName] = useState("");
+	const [from, setFrom] = useState(shown);
+	const [busy, setBusy] = useState(false);
+	const [error, setError] = useState<string | null>(null);
+	const submit = async (event: React.FormEvent) => {
+		event.preventDefault();
+		if (!name.trim()) return;
+		setBusy(true);
+		setError(null);
+		try {
+			const made = await make(name.trim(), from);
+			setName("");
+			onMade(made.name);
+		} catch (err) {
+			setError(messageOf(err));
+		} finally {
+			setBusy(false);
+		}
+	};
+	return (
+		<>
+			<form className="branch-bar__new" onSubmit={submit}>
+				<label className="sr-only" htmlFor="new-branch-name">
+					Name of the new branch
+				</label>
+				<input
+					id="new-branch-name"
+					placeholder="feature/checkout"
+					value={name}
+					onChange={(event) => setName(event.target.value)}
+					autoFocus
+				/>
+				<label htmlFor="new-branch-from">from</label>
+				<select id="new-branch-from" value={from} onChange={(event) => setFrom(event.target.value)}>
+					{names.map((branchName) => (
+						<option key={branchName} value={branchName}>
+							{branchName}
+						</option>
+					))}
+				</select>
+				<button type="submit" className="accent" disabled={busy || !name.trim()}>
+					{busy ? "Making…" : "Make branch"}
+				</button>
+				<button type="button" onClick={onCancel} disabled={busy}>
+					Cancel
+				</button>
+			</form>
 			{error ? (
 				<p className="error branch-bar__error" role="alert">
 					{error}
 				</p>
 			) : null}
-		</div>
+		</>
 	);
 }
 
