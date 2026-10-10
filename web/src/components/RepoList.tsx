@@ -87,6 +87,49 @@ function RepoLine({ row }: { row: RepoRow }) {
 	);
 }
 
+/** The repos, grouped by whether they need someone; or why there are none to show. */
+function RepoGroups(props: { rows: RepoRow[]; loaded: boolean; shown: RepoRow[]; query: string; canCreate: boolean }) {
+	const { rows, loaded, shown, query, canCreate } = props;
+	if (!loaded && rows.length === 0)
+		return (
+			<p className="box__row muted" role="status">
+				Loading repositories…
+			</p>
+		);
+	if (rows.length === 0)
+		return (
+			<div className="empty">
+				<Icon name="repo" size={32} className="muted" />
+				<h2>No repositories yet</h2>
+				<p>
+					Make one under your name or an organization's, and GitHive starts on it at once. Agents claim the paths they
+					will change, push their changes to their own forks, and merge them after review and checks, just like pull
+					requests.
+				</p>
+				{canCreate ? (
+					<div className="empty__actions">
+						<a className="button" href={href.newRepo()}>
+							<Icon name="plus" size={15} /> New repository
+						</a>
+					</div>
+				) : null}
+			</div>
+		);
+	if (shown.length === 0) return <p className="box__row muted">No repositories match “{query}”.</p>;
+	return groupRepos(shown).map((group) => (
+		<section key={group.state} className="repo-group" aria-labelledby={`repos-${group.state}`}>
+			<h2 id={`repos-${group.state}`} className="repo-group__title">
+				{group.title} <span className="muted">{group.rows.length}</span>
+			</h2>
+			<ul className="repo-list__rows">
+				{group.rows.map((row) => (
+					<RepoLine key={row.name} row={row} />
+				))}
+			</ul>
+		</section>
+	));
+}
+
 /**
  * The home page: every repo the reader can see. Those that need a person come first, then those at work,
  * then the quiet ones.
@@ -131,43 +174,7 @@ export function RepoList({ rows, loaded, canCreate = false }: RepoListProps) {
 			) : null}
 
 			<div className="repo-list__groups" aria-label="Repositories">
-				{!loaded && rows.length === 0 ? (
-					<p className="box__row muted" role="status">
-						Loading repositories…
-					</p>
-				) : rows.length === 0 ? (
-					<div className="empty">
-						<Icon name="repo" size={32} className="muted" />
-						<h2>No repositories yet</h2>
-						<p>
-							Make one under your name or an organization's, and GitHive starts on it at once. Agents claim the paths
-							they will change, push their changes to their own forks, and merge them after review and checks, just like
-							pull requests.
-						</p>
-						{canCreate ? (
-							<div className="empty__actions">
-								<a className="button" href={href.newRepo()}>
-									<Icon name="plus" size={15} /> New repository
-								</a>
-							</div>
-						) : null}
-					</div>
-				) : shown.length === 0 ? (
-					<p className="box__row muted">No repositories match “{query}”.</p>
-				) : (
-					groupRepos(shown).map((group) => (
-						<section key={group.state} className="repo-group" aria-labelledby={`repos-${group.state}`}>
-							<h2 id={`repos-${group.state}`} className="repo-group__title">
-								{group.title} <span className="muted">{group.rows.length}</span>
-							</h2>
-							<ul className="repo-list__rows">
-								{group.rows.map((row) => (
-									<RepoLine key={row.name} row={row} />
-								))}
-							</ul>
-						</section>
-					))
-				)}
+				<RepoGroups rows={rows} loaded={loaded} shown={shown} query={query} canCreate={canCreate} />
 			</div>
 		</main>
 	);

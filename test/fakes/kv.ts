@@ -21,21 +21,18 @@ export function fakeKV() {
 		async getWithMetadata(key: string, options?: string | { type?: string }) {
 			const entry = live(key);
 			const type = typeof options === "string" ? options : options?.type;
-			return {
-				value: entry ? (type === "json" ? JSON.parse(entry.value) : entry.value) : null,
-				metadata: entry?.metadata ?? null,
-			};
+			if (!entry) return { value: null, metadata: null };
+			const value = type === "json" ? JSON.parse(entry.value) : entry.value;
+			return { value, metadata: entry.metadata ?? null };
 		},
 		async put(
 			key: string,
 			value: string,
 			options?: { expirationTtl?: number; expiration?: number; metadata?: unknown },
 		) {
-			const expires = options?.expirationTtl
-				? Date.now() + options.expirationTtl * 1000
-				: options?.expiration
-					? options.expiration * 1000
-					: undefined;
+			let expires: number | undefined;
+			if (options?.expirationTtl) expires = Date.now() + options.expirationTtl * 1000;
+			else if (options?.expiration) expires = options.expiration * 1000;
 			store.set(key, { value: String(value), metadata: options?.metadata, expires });
 		},
 		async delete(key: string) {

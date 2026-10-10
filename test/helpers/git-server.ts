@@ -94,8 +94,11 @@ export async function startGitServer({ branch = "main" }: { branch?: string } = 
 			res.end(`${(line.length + 4).toString(16).padStart(4, "0")}${line}`);
 			return;
 		}
-		const failThisPush =
-			isPush && failingPushes.count > 0 ? (failingPushes.count--, failingPushes.applied ? "after" : "before") : null;
+		let failThisPush: "before" | "after" | null = null;
+		if (isPush && failingPushes.count > 0) {
+			failingPushes.count--;
+			failThisPush = failingPushes.applied ? "after" : "before";
+		}
 		if (failThisPush === "before") {
 			req.resume();
 			res.statusCode = 500;

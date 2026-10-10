@@ -1,6 +1,7 @@
 import type { ChangeHistory, RepoSnapshot } from "../api";
 import { identityName } from "../lib/agent";
 import type { Claim } from "../lib/claimStatus";
+import { counted } from "../lib/plural";
 import { timeAgo } from "../lib/relativeTime";
 import { Icon } from "./Icon";
 import { TonePill } from "./StatusPill";
@@ -17,7 +18,7 @@ function verdictTone(verdict: HostedReviewer["verdict"]): string {
 	return "neutral";
 }
 
-const reviewCount = (count: number) => (count ? `${count} ${count === 1 ? "review" : "reviews"}` : "No reviews yet.");
+const reviewCount = (count: number) => (count ? counted(count, "review") : "No reviews yet.");
 
 /** The change's details beside the conversation: reviewers, agent, claimed paths, and who blocks it. */
 export function ChangeSidebar({

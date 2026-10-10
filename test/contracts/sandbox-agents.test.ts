@@ -45,7 +45,9 @@ function fakeContainer() {
 		exec: vi.fn(async (cmd: string[]) => {
 			const args = cmd.slice(4);
 			ran.push(args);
-			const text = args.includes("ls-remote") ? "abc\trefs/heads/main\n" : args.includes("rev-parse") ? "def\n" : "";
+			let text = "";
+			if (args.includes("ls-remote")) text = "abc\trefs/heads/main\n";
+			else if (args.includes("rev-parse")) text = "def\n";
 			return { output: async () => ({ exitCode: 0, stdout: new TextEncoder().encode(text) }) };
 		}),
 	};

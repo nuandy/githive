@@ -242,7 +242,10 @@ function landingOf(holders: HexHolder[]): HexLanding | undefined {
 /** Folders by name, each split one's cells together (its own files first); the top-level files last. */
 function byMapOrder(a: Hex, b: Hex): number {
 	if ((a.key === "*") !== (b.key === "*")) return a.key === "*" ? 1 : -1;
-	const sortKey = (hex: Hex) => (hex.parent ? [hex.parent, hex.kind === "files" ? "" : hex.name] : [hex.name, ""]);
+	const sortKey = (hex: Hex) => {
+		if (!hex.parent) return [hex.name, ""];
+		return [hex.parent, hex.kind === "files" ? "" : hex.name];
+	};
 	const [aFolder, aCell] = sortKey(a);
 	const [bFolder, bCell] = sortKey(b);
 	const numeric = { numeric: true };

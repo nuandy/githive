@@ -1,6 +1,7 @@
 import type { RepoFile, RepoTree } from "../api";
 import { usePoll } from "../hooks/usePoll";
 import { shortSha } from "../lib/model";
+import { counted } from "../lib/plural";
 import { splitRepo } from "../lib/repoName";
 import { href } from "../lib/routes";
 import { listDir, normalizePath, pathCrumbs, pathKind } from "../lib/tree";
@@ -173,7 +174,7 @@ function FileView({ file, error, path }: { file?: RepoFile; error?: string; path
 			</p>
 		);
 	const lines = file.text !== undefined ? file.text.replace(/\n$/, "").split("\n") : [];
-	const lineCount = file.text !== undefined ? `${lines.length} ${lines.length === 1 ? "line" : "lines"} · ` : "";
+	const lineCount = file.text !== undefined ? `${counted(lines.length, "line")} · ` : "";
 	return (
 		<div className="box code__file">
 			<div className="box__header code__file-header">

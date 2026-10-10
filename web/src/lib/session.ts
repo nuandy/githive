@@ -34,7 +34,8 @@ export function withoutSigninError(url: string): string {
 
 /** Where a sign-in button goes: the provider, then back to the page the person was on (a path on this site). */
 export function signInHref(provider: Provider, hash: string): string {
-	const back = `/${hash.startsWith("#") ? hash : hash ? `#${hash}` : ""}`;
+	const fragment = hash && !hash.startsWith("#") ? `#${hash}` : hash;
+	const back = `/${fragment}`;
 	return `/auth/${provider}?return=${encodeURIComponent(back)}`;
 }
 

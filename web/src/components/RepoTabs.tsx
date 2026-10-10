@@ -13,6 +13,7 @@ import {
 	type Claim,
 } from "../lib/claimStatus";
 import { shortSha, briefPaths } from "../lib/model";
+import { counted } from "../lib/plural";
 import { shortAge, timeAgo } from "../lib/relativeTime";
 import { href } from "../lib/routes";
 import { Icon, type IconName } from "./Icon";
@@ -213,9 +214,7 @@ export function AuditTab({ snapshot }: { snapshot: RepoSnapshot }) {
 		);
 	const open = audit.violations.filter((violation) => !violation.resolvedBy);
 	const resolved = audit.violations.filter((violation) => violation.resolvedBy);
-	const openHeadline = open.length
-		? `${open.length} open ${open.length === 1 ? "violation" : "violations"}`
-		: "No open violations";
+	const openHeadline = open.length ? counted(open.length, "open violation") : "No open violations";
 	return (
 		<div className="audit">
 			<div className={`callout ${open.length ? "callout--bad" : "callout--good"}`}>

@@ -290,14 +290,12 @@ async function main() {
 		);
 	}
 
-	const ms = (v) =>
-		v === null
-			? "-"
-			: v >= 10_000
-				? `${(v / 1000).toFixed(0)}s`
-				: v >= 1000
-					? `${(v / 1000).toFixed(1)}s`
-					: `${Math.round(v)}ms`;
+	const ms = (v) => {
+		if (v === null) return "-";
+		if (v >= 10_000) return `${(v / 1000).toFixed(0)}s`;
+		if (v >= 1000) return `${(v / 1000).toFixed(1)}s`;
+		return `${Math.round(v)}ms`;
+	};
 	console.log(`\n${LABEL}\n`);
 	console.log(
 		"| agents | wall | calls/s | claims p50/p95 | claim p50/p95 | status p50/p95 | release p50/p95 | " +

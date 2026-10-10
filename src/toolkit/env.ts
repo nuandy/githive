@@ -221,8 +221,10 @@ export function toolContextFor(
 		reviews: reviewHolds((repo) => reviewsLog(env, repo)),
 		requestReview: (input) => startHostedReviewers(env, input),
 		startBuilder: (input) => startHostedBuilder(env, input),
-		stamper: async (agent) =>
-			env.STAMP_KEY && by ? makeStamper(env.STAMP_KEY, agent ? `${by}/${agent}` : by) : undefined,
+		stamper: async (agent) => {
+			if (!env.STAMP_KEY || !by) return undefined;
+			return makeStamper(env.STAMP_KEY, agent ? `${by}/${agent}` : by);
+		},
 		remote: (repo, scope) => projectRemote(env, repo, scope),
 		changeRemote: (repo, agent, scope) => forkRemote(env, repo, agent, scope),
 		legacyChangeRemote: (repo, change) =>
@@ -646,9 +648,10 @@ export async function hostedAgentStatus(
 				)
 			: [],
 	]);
-	const reviewerStatus = reviewers.flatMap(({ role, state }) =>
-		state ? [{ role, status: state.status, ...(state.verdict ? { verdict: state.verdict } : {}) }] : [],
-	);
+	const reviewerStatus = reviewers.flatMap(({ role, state }) => {
+		if (!state) return [];
+		return [{ role, status: state.status, ...(state.verdict ? { verdict: state.verdict } : {}) }];
+	});
 	if (!builder) return { reviewers: reviewerStatus };
 	const builderStatus: HostedStatus["builder"] = { status: builder.status, revisions: builder.revisions };
 	if (builder.error) builderStatus.error = builder.error;

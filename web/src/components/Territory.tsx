@@ -1,6 +1,7 @@
 import "./Overview.css";
 import type { RepoLanding, RepoSnapshot, RepoTree } from "../api";
 import { type Cell, cellLamp, LAMP_WORDS, type Lamp, lampColor, LAMPS, type Region, territory } from "../lib/overview";
+import { counted } from "../lib/plural";
 import { href } from "../lib/routes";
 
 /** A region with no more entries than this lists them by name; a bigger one is a grid of lamps. */
@@ -37,7 +38,7 @@ function RegionView({ repo, region }: { repo: string; region: Region }) {
 			<h3 className="region__name">
 				<code>{region.name ? `${region.name}/` : "top level"}</code>
 				<span className="muted">
-					{region.files ? `${region.files} ${region.files === 1 ? "file" : "files"}` : "new"}
+					{region.files ? counted(region.files, "file") : "new"}
 					{held ? `, ${held} held` : ""}
 				</span>
 			</h3>
@@ -103,6 +104,7 @@ export function Territory({
 	landing?: RepoLanding;
 }) {
 	const regions = tree ? territory(tree.files, snapshot.claims, { landing, votes: snapshot.votes }) : [];
+	const treeStatus = error ? `The tree couldn't be read: ${error}` : "Reading the tree…";
 	return (
 		<section className="territory" aria-labelledby="territory-title">
 			<div className="overview__head">
@@ -123,7 +125,7 @@ export function Territory({
 					not claimed
 				</li>
 			</ul>
-			{!tree ? <p className="muted">{error ? `The tree couldn't be read: ${error}` : "Reading the tree…"}</p> : null}
+			{!tree ? <p className="muted">{treeStatus}</p> : null}
 			{tree?.truncated ? (
 				<p className="muted">This repo is large: the territory shows the first part of its tree.</p>
 			) : null}

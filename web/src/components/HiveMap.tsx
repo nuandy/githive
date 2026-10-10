@@ -238,6 +238,7 @@ export function HiveMap({ repo, branch, snapshot, tree, error, landing, now = Da
 	const grid = hexGrid(hexes.length, columns, RADIUS);
 	const shown = hexes.find((hex) => hex.key === (hovered ?? picked));
 	const held = hexes.filter((hex) => hex.holders.length).length;
+	const treeStatus = error ? `The tree couldn't be read: ${error}` : "Reading the tree…";
 	return (
 		<section className="hive" aria-labelledby="hive-title">
 			<div className="overview__head">
@@ -296,7 +297,7 @@ export function HiveMap({ repo, branch, snapshot, tree, error, landing, now = Da
 					ring and lamp: being checked to land
 				</li>
 			</ul>
-			{!tree ? <p className="muted">{error ? `The tree couldn't be read: ${error}` : "Reading the tree…"}</p> : null}
+			{!tree ? <p className="muted">{treeStatus}</p> : null}
 			{tree && !hexes.length ? <p className="muted">{branch} has no files yet.</p> : null}
 			{hexes.length ? (
 				<div className="hive__body">

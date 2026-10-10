@@ -390,12 +390,11 @@ const pct = (xs, q) => {
 	const s = [...xs].sort((a, b) => a - b);
 	return s[Math.min(s.length - 1, Math.floor(q * s.length))];
 };
-const mins = (m) =>
-	Number.isNaN(m)
-		? "-"
-		: m < 60
-			? `${Math.round(m)}m`
-			: `${Math.floor(m / 60)}h${String(Math.round(m % 60)).padStart(2, "0")}`;
+const mins = (m) => {
+	if (Number.isNaN(m)) return "-";
+	if (m < 60) return `${Math.round(m)}m`;
+	return `${Math.floor(m / 60)}h${String(Math.round(m % 60)).padStart(2, "0")}`;
+};
 
 function compare(c, names) {
 	const rows = names.map((name) => {

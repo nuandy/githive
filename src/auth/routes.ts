@@ -121,8 +121,9 @@ export function authRoutes(app: Hono<AuthEnv>) {
 		if (!principal) return c.json({ error: "sign in to GitHive first" }, 401);
 		// People who signed in before orgs existed get their personal org here.
 		if (principal.kind === "user" && c.env.DB) await new OrgStore(c.env.DB).personalOrg(principal.user);
-		const hosted =
-			principal.kind === "access" ? true : c.env.DB ? await store(c.env).mayUseHosted(principal.user.id) : false;
+		let hosted = false;
+		if (principal.kind === "access") hosted = true;
+		else if (c.env.DB) hosted = await store(c.env).mayUseHosted(principal.user.id);
 		return c.json({ ...describe(principal), hostedAgents: hosted });
 	});
 
