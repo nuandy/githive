@@ -1,4 +1,6 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -75,6 +77,7 @@ describe("forks (the default)", () => {
 			// The reviewer's mark records the role, which defaults to review.
 			role: "review",
 			project: { url: project.url, token: "read", branch: "main" },
+			git: { setup: expect.any(Array), diff: `git diff origin/main...${head}` },
 			note: expect.stringMatching(/read-only/),
 		});
 		// Read-only access to the author's fork.
@@ -347,6 +350,34 @@ describe("check (run by the agent itself)", () => {
 		await pushChange(fork.url, work, "agent-a", "a-1", { "src/a/x.ts": "a, again\n" }, "origin/changes/a-1");
 		expect((await status("a-1")).merge).toMatchObject({ clean: true });
 		expect(worked).toBe(2);
+	});
+
+	it("hands out git commands that work as given: to push a change, and to review it", async () => {
+		// Asynchronously: the test's git servers run in this process, so a blocking call would wait on itself.
+		const run = promisify(execFile);
+		const identity = {
+			GIT_AUTHOR_NAME: "a",
+			GIT_AUTHOR_EMAIL: "a@x",
+			GIT_COMMITTER_NAME: "a",
+			GIT_COMMITTER_EMAIL: "a@x",
+		};
+		const shell = async (directory: string, commands: string[]) =>
+			(await run("bash", ["-c", commands.join(" && ")], { cwd: directory, env: { ...process.env, ...identity } }))
+				.stdout;
+		const { key: keyA } = (await call("register", { agent: "agent-a" })) as { key: string };
+		const { key: keyR } = (await call("register", { agent: "reviewer-1" })) as { key: string };
+		await call("claim", { change: "a-1", agent: "agent-a", paths: ["src/a/"], intent: "a" }, keyA);
+		const own = (await call("credentials", { change: "a-1" }, keyA)) as { git: { setup: string[]; push: string } };
+		const author = mkdtempSync(join(work, "author-"));
+		await shell(author, own.git.setup);
+		writeFileSync(join(author, "a-1", "added.txt"), "added\n");
+		await shell(join(author, "a-1"), ["git add added.txt", "git commit -qm add", own.git.push]);
+		const head = fork.git("rev-parse", "changes/a-1").trim();
+		const review = (await call("credentials", { change: "a-1" }, keyR)) as { git: { setup: string[]; diff: string } };
+		const reviewer = mkdtempSync(join(work, "reviewer-"));
+		await shell(reviewer, review.git.setup);
+		expect((await shell(join(reviewer, "review-a-1"), ["git rev-parse HEAD"])).trim()).toBe(head);
+		expect(await shell(join(reviewer, "review-a-1"), [review.git.diff])).toContain("+added");
 	});
 
 	it("says nothing about merging while nothing's pushed", async () => {

@@ -8,6 +8,7 @@ import type { ClaimRecord, Registry } from "../claims";
 import { type BatchGit, type Candidate, mergeChange, type MergeInput } from "../merge";
 import { holdKey } from "../work";
 import type { ToolCall, ToolContext, ToolHandlers } from "./context";
+import { ownChangeCommands, reviewCommands } from "./git-commands";
 import { mayActAs } from "./identity";
 import { branchSettings } from "./repo";
 
@@ -154,6 +155,7 @@ async function ownChangeAccess(call: ToolCall, change: string, own: ClaimRecord)
 		branch: `changes/${change}`,
 		project: { url: project.url, token: project.token, branch: into },
 		...(into !== branch ? { into } : {}),
+		git: ownChangeCommands({ project, fork: remote, into, change }),
 		note:
 			`Your own fork, for all your changes: push this change's branch changes/${change} to it. Start the ` +
 			`branch from the project's ${into} (project), not the fork's, which may be behind${elsewhere}.`,
@@ -204,6 +206,7 @@ async function reviewAccess(
 		role,
 		project: { url: project.url, token: project.token, branch: into },
 		...(into !== branch ? { into } : {}),
+		git: reviewCommands({ project, fork, into, change, head }),
 		note: "read-only: review this commit, then vote on it. Others aren't offered this review while you hold it.",
 	};
 }
