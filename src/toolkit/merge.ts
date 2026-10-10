@@ -1,5 +1,7 @@
 import { branchHead, inWorkspaceTurn, type Remote, Workspace } from "../git";
 import { inLane } from "../claim-paths";
+import { repoOfUrl } from "../git-http";
+import { changeAgainst, type ReadHistory } from "./batch-reads";
 import { skipsChecks } from "./check-scope";
 import type { ClaimRecord } from "./claims";
 import type { ClaimStore, ClaimsView } from "./claim-store";
@@ -208,6 +210,8 @@ export interface MergeInput {
 	landing?: Landing;
 	/** Where a batch's git work runs: the repo's own Gate (see BatchGit). */
 	batchGit: BatchGit;
+	/** Reads repos' history through Artifacts' API: the change is checked that way, without a fetch, where it can be (see changeAgainst). */
+	history?: ReadHistory;
 	/** Start the container of a batch's first check (`gate`, see Place) while the batch is read, so the check finds it running. */
 	prepareChecks?: (gate: string) => Promise<void>;
 	/**
@@ -328,14 +332,19 @@ export function batchSize(recent: Pick<Settled, "how">[]) {
 async function readyNow(input: MergeInput, landing: Landing): Promise<{ ok: true; ready: Ready } | { ok: false; refused: Refused; head: string }> {
 	const main = (await headOf(input)) ?? fail409(`there's no branch ${input.branch}`);
 	const ref = `changes/${input.change}`;
-	// Its Git work in turn (see inWorkspaceTurn), from the branch as kept for the isolate (see Workspace.at): one
-	// listing, no clone. Its records are read after, the workspace let go.
-	const { head, files, tried, branch } = await inWorkspaceTurn(async () => {
-		const ws = await Workspace.at(input.remote, input.branch, main);
-		const head = await ws.fetch("change", input.source ?? input.remote, ref);
-		const files = await ws.changedPaths(await ws.mergeBase(main, head), head);
-		return { head, files, tried: await ws.tryMerge(main, head), branch: ws.branch };
-	});
+	// Through Artifacts' API where it can (see changeAgainst): no file changed on both sides, it merges cleanly, nothing
+	// fetched. Else its Git work in turn (see inWorkspaceTurn), from the branch as kept for the isolate (see
+	// Workspace.at): one listing, no clone. Its records are read after, the workspace let go.
+	const read = input.history ? await changeAgainst(input.history, repoOfUrl(input.remote.url), input.branch, main, { ref, ...(input.source ? { source: input.source } : {}) }).catch(() => null) : null;
+	const { head, files, tried, branch } =
+		read && !("error" in read) && !read.both.length
+			? { head: read.head, files: read.files, tried: { clean: true } as { clean: boolean; files?: string[] }, branch: input.branch }
+			: await inWorkspaceTurn(async () => {
+					const ws = await Workspace.at(input.remote, input.branch, main);
+					const head = await ws.fetch("change", input.source ?? input.remote, ref);
+					const files = await ws.changedPaths(await ws.mergeBase(main, head), head);
+					return { head, files, tried: await ws.tryMerge(main, head), branch: ws.branch };
+				});
 	const ready = await validated(input, { change: input.change, agent: input.agent, ref, ...(input.source ? { source: input.source } : {}), head, files, mine: true });
 	if (!ready.ok) return { ok: false, refused: ready, head };
 	if (!tried.clean) {

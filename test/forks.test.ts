@@ -1,7 +1,7 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { statusOf } from "../src/errors";
 import { generateStampKey, makeStamper } from "../src/toolkit/stamp";
 import { callTool, changeHistory, repoSnapshot, voteAsPerson, type ToolContext } from "../src/toolkit/mcp";
@@ -140,9 +140,32 @@ describe("status", () => {
 		});
 	}, 60_000);
 
+	it("reads a change's head through Artifacts' API, one log on its agent's fork, without a token or a Git listing", async () => {
+		await call("start", {});
+		await call("claim", { change: "a-1", agent: "agent-a", paths: ["src/a/"], intent: "a" });
+		const asked: string[] = [];
+		const viaApi: ToolContext = {
+			...ctx(),
+			forkHead: async (_repo, agent, ref) => (asked.push(`${agent} ${ref}`), "c0ffee"),
+			changeRemote: async () => {
+				throw new Error("a Git remote was asked for");
+			},
+		};
+		const status = (await callTool("status", { repo: "project", change: "a-1" }, viaApi)) as { head: string };
+		expect(status.head).toBe("c0ffee");
+		expect(asked).toEqual(["agent-a changes/a-1"]);
+	});
+
 	it("still finds a change made before forks were per agent, in that change's own fork", async () => {
 		await call("start", {});
-		await call("claim", { change: "old-1", agent: "agent-a", paths: ["src/old/"], intent: "from before" });
+		// Claimed before forks were per agent: only such a change can have a fork of its own.
+		vi.useFakeTimers({ toFake: ["Date"] });
+		vi.setSystemTime(new Date("2026-10-05T00:00:00Z"));
+		try {
+			await call("claim", { change: "old-1", agent: "agent-a", paths: ["src/old/"], intent: "from before" });
+		} finally {
+			vi.useRealTimers();
+		}
 		// Its branch is in its own (older) fork; the agent's fork, here, doesn't have it.
 		const head = await pushChange(fork.url, work, "agent-a", "old-1", { "src/old/x.txt": "x\n" });
 		const older: ToolContext = { ...ctx(), changeRemote: async () => ({ url: project.url, token: "agent-fork" }), legacyChangeRemote: async () => ({ url: fork.url, token: "old-fork" }) };

@@ -17,6 +17,7 @@ import { startGitServer, type GitServer } from "./helpers/git-server";
 import { memoryBatchGit } from "./helpers/memory-batch-git";
 import { gitHistory } from "./helpers/git-history";
 import { artifactsInspect } from "../src/toolkit/batch-reads";
+import { forgetChains } from "../src/toolkit/batch-reads";
 
 // Landing without a line: claims keep changes off each other's paths, so the
 // ready ones (approved) land as a set. The merge that takes the branch's lease
@@ -35,6 +36,7 @@ describe("landing ready changes together", { timeout: 120_000 }, () => {
 	const policy = { required: 1, vetoes: [] };
 
 	beforeEach(async () => {
+		forgetChains();
 		server = await startGitServer();
 		work = mkdtempSync(join(tmpdir(), "githive-landing-"));
 		await startRepo(claims(), { baseline: server.git("rev-parse", "main").trim(), policy });

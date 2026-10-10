@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { artifactsInspect, type ReadHistory } from "../src/toolkit/batch-reads";
+import { artifactsInspect, changeAgainst, forgetChains, type ReadHistory } from "../src/toolkit/batch-reads";
 import type { CommitMeta, HistorySource, TreeEntry } from "../src/toolkit/branch-history";
 import { agentClone, pushChange } from "./helpers/agents";
 import { gitHistory } from "./helpers/git-history";
@@ -37,6 +37,8 @@ function repos(logs: Record<string, Record<string, CommitMeta[]>>): { history: R
 }
 
 const fork = { url: "https://git.test/ns/fork--proj--agent--a.git", token: "t" };
+// The chains kept for the isolate, by repo name: each test's "proj" is its own.
+beforeEach(() => forgetChains());
 const change = (name: string) => ({ change: name, ref: `changes/${name}`, source: fork, agent: "a" });
 
 describe("a batch read through Artifacts' API", () => {
@@ -95,6 +97,64 @@ describe("a batch read through Artifacts' API", () => {
 		const { history, reads } = repos({ proj: { main }, "fork--proj--agent--a": { "changes/one": [commit("c2", ["c1"]), commit("c1", ["m1"]), ...main.slice(2)] } });
 		await artifactsInspect(history, "proj", vi.fn())({ base: "m3", branch: "main", changes: [change("one")] });
 		expect(reads.filter((r) => r.includes(" tree "))).toEqual(["fork--proj--agent--a tree t-m1", "fork--proj--agent--a tree t-c2"]);
+	});
+});
+
+describe("a change against main through Artifacts' API", () => {
+	const trees2: Record<string, TreeEntry[]> = {
+		...trees,
+		// main moved on from m1 in b.txt (m4), or replaced the folder lib with a file (m5).
+		"t-m4": [blob("a.txt", "a1"), blob("b.txt", "b9")],
+		"t-m5": [blob("a.txt", "a1"), blob("b.txt", "b1"), blob("lib", "l0")],
+		"t-c5": [blob("a.txt", "a1"), blob("b.txt", "b1"), { name: "lib", mode: "040000", hash: "t-lib", type: "tree" }],
+		"t-lib": [blob("x.js", "x1")],
+	};
+	const repos2 = (logs: Record<string, Record<string, CommitMeta[]>>): ReadHistory => (repo, read) =>
+		read({ log: async (ref, limit, offset) => (logs[repo]?.[ref] ?? []).slice(offset, offset + limit), readCommit: async () => null, readTree: async (hash) => trees2[hash] ?? null });
+	const m1 = commit("m1", ["m0"]);
+
+	it("finds no file changed on both sides when main moved elsewhere", async () => {
+		const history = repos2({ proj: { main: [commit("m2", ["m1"]), m1] }, "fork--proj--agent--a": { "changes/one": [commit("c1", ["m1"]), m1] } });
+		expect(await changeAgainst(history, "proj", "main", "m2", { ref: "changes/one", source: fork })).toEqual({ head: "c1", files: ["c.txt"], both: [] });
+	});
+
+	it("names a file both changed", async () => {
+		const history = repos2({ proj: { main: [commit("m4", ["m1"]), m1] }, "fork--proj--agent--a": { "changes/one": [commit("c2", ["c1"]), commit("c1", ["m1"]), m1] } });
+		expect(await changeAgainst(history, "proj", "main", "m4", { ref: "changes/one", source: fork })).toEqual({ head: "c2", files: ["b.txt", "c.txt"], both: ["b.txt"] });
+	});
+
+	it("counts a folder one side replaced with a file as changed on both", async () => {
+		const history = repos2({ proj: { main: [commit("m5", ["m1"]), m1] }, "fork--proj--agent--a": { "changes/one": [commit("c5", ["m1"]), m1] } });
+		expect(await changeAgainst(history, "proj", "main", "m5", { ref: "changes/one", source: fork })).toEqual({ head: "c5", files: ["lib/x.js"], both: ["lib/x.js"] });
+	});
+
+	it("can't place a change that merged in something other than main, or says its branch can't be read", async () => {
+		const history = repos2({ proj: { main: [m1] }, "fork--proj--agent--a": { "changes/one": [commit("y1", ["m1", "x1"]), m1] } });
+		expect(await changeAgainst(history, "proj", "main", "m1", { ref: "changes/one", source: fork })).toBeNull();
+		expect(await changeAgainst(history, "proj", "main", "m1", { ref: "changes/none", source: fork })).toEqual({ error: "its branch couldn't be read" });
+	});
+});
+
+describe("the branch's history, kept for the isolate", () => {
+	it("is read once per head of main, then only the commits on top as main moves", async () => {
+		const logs: { ref: string; limit: number }[] = [];
+		let main = [commit("m3", ["m2"]), commit("m2", ["m1"]), commit("m1", ["m0"])];
+		const history: ReadHistory = (repo, read) =>
+			read({
+				log: async (ref, limit, offset) => (logs.push({ ref, limit }), (repo === "proj" ? main : [commit("c1", ["m1"]), commit("m1", ["m0"])]).slice(offset, offset + limit)),
+				readCommit: async () => null,
+				readTree: async (hash) => trees[hash] ?? [],
+			});
+		const project = () => logs.filter((l) => l.ref === "main").map((l) => l.limit);
+		await changeAgainst(history, "proj", "main", "m3", { ref: "changes/one", source: fork });
+		await changeAgainst(history, "proj", "main", "m3", { ref: "changes/one", source: fork });
+		// A caller with a head a moment old: on the chain kept, nothing read.
+		await changeAgainst(history, "proj", "main", "m2", { ref: "changes/one", source: fork });
+		expect(project()).toEqual([1000]);
+		// main moves on: only the page on top is read.
+		main = [commit("m4", ["m3"]), ...main];
+		expect(await changeAgainst(history, "proj", "main", "m4", { ref: "changes/one", source: fork })).toMatchObject({ head: "c1" });
+		expect(project()).toEqual([1000, 64]);
 	});
 });
 

@@ -211,6 +211,16 @@ export function toolContextFor(env: Env, by: string | undefined, caller: { agent
 		},
 		// Any repo's history (a project's, an agent's fork) through Artifacts' own API: a batch's changes are read that way.
 		history: (name, read) => withHistory(env.ARTIFACTS, name, read),
+		// A branch's head in an agent's fork, through Artifacts' API: one log, no token or Git listing.
+		forkHead: async (repo, agent, ref) => {
+			const name = await forkName(repo, agent);
+			try {
+				return (await headOf(env.ARTIFACTS, name, ref)) ?? null;
+			} catch (err) {
+				if (/NOT_FOUND|not found/i.test(`${(err as { code?: string })?.code ?? ""} ${String(err)}`)) throw new Error(`[409] ${agent} has no fork yet: nothing has been pushed`);
+				throw err;
+			}
+		},
 		// A batch's first check container, started while the batch is read (see MergeInput.prepareChecks).
 		prepareChecks: (repo) => async (gate) => {
 			const read = await cached(env, repo, `${repo}|read`, () => remoteFor(env.ARTIFACTS, repo, "read", 3600));
