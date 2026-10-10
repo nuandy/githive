@@ -3,6 +3,7 @@ import { gitAuth, http } from "../git-http";
 import type { CasLog } from "../record-log";
 import { GitCasLog } from "../record-log";
 import { isEmptyRepo, type Remote } from "../git";
+import { RecordsRepos } from "./records-repos";
 import { retryTransient } from "../retry";
 import { readAllShards, readRefs } from "./record-refs";
 import {
@@ -142,8 +143,10 @@ class Claims implements ClaimStore {
 	private recordsRepos: number;
 	private alwaysIndexed: boolean;
 	private known?: Awaited<ReturnType<CasLog<Registry>["read"]>>;
+	private readonly repos: RecordsRepos;
 
 	constructor(private readonly input: StoreInput) {
+		this.repos = new RecordsRepos(input, () => this.recordsRepos);
 		this.depth = input.registry?.shardDepth ?? 0;
 		this.recordsRepos = input.registry?.recordsRepos ?? 0;
 		this.alwaysIndexed = !!input.registry?.shardedAt;
@@ -162,30 +165,14 @@ class Claims implements ClaimStore {
 		this.alwaysIndexed = !!state.shardedAt;
 	}
 
-	private get spread() {
-		return this.input.recordsRemote ? this.recordsRepos : 0;
-	}
-
 	// -1 for the project repo (the registry, and shards when not spread), otherwise a records repo index.
 	private repoOf(shard: string) {
-		return shard !== ROOT && this.spread ? recordsRepoOf(shard, this.spread) : -1;
-	}
-
-	private remote(repoIndex: number) {
-		return repoIndex < 0 ? this.input.remote() : this.input.recordsRemote!(repoIndex);
-	}
-
-	private remotes() {
-		return this.spread
-			? Array.from({ length: this.spread }, (_, repoIndex) => this.input.recordsRemote!(repoIndex))
-			: [this.input.remote()];
+		return shard !== ROOT && this.repos.spread ? recordsRepoOf(shard, this.repos.spread) : -1;
 	}
 
 	// Shards grouped by the repo holding them (see repoOf).
-	private byRepo(shards: Iterable<string>): Map<number, string[]> {
-		const byRepo = new Map<number, string[]>();
-		for (const shard of shards) byRepo.set(this.repoOf(shard), [...(byRepo.get(this.repoOf(shard)) ?? []), shard]);
-		return byRepo;
+	private byRepo(shards: Iterable<string>) {
+		return this.repos.group(shards, (shard) => this.repoOf(shard));
 	}
 
 	private logOf(shard: string) {
@@ -194,8 +181,8 @@ class Claims implements ClaimStore {
 		let log = this.logs.get(ref);
 		if (!log) {
 			log =
-				(!this.spread && this.input.log?.(ref)) ||
-				new GitCasLog<Registry>(() => this.remote(this.repoOf(shard)), this.input.repo, ref);
+				(!this.repos.spread && this.input.log?.(ref)) ||
+				new GitCasLog<Registry>(() => this.repos.remote(this.repoOf(shard)), this.input.repo, ref);
 			this.logs.set(ref, log);
 		}
 		return log;
@@ -213,7 +200,7 @@ class Claims implements ClaimStore {
 	private async list(prefix = shardsPrefix(this.input.repo)) {
 		const base = shardsPrefix(this.input.repo);
 		const listed = await Promise.all(
-			this.remotes().map(async (pending) => {
+			this.repos.all().map(async (pending) => {
 				const remote = await pending;
 				const refs = await retryTransient(() =>
 					git
@@ -229,7 +216,7 @@ class Claims implements ClaimStore {
 	private async readAll(): Promise<Entry[]> {
 		const prefix = shardsPrefix(this.input.repo);
 		const shards = (
-			await Promise.all(this.remotes().map(async (remote) => readAllShards<Registry>(await remote, prefix)))
+			await Promise.all(this.repos.all().map(async (remote) => readAllShards<Registry>(await remote, prefix)))
 		).flat();
 		return shards.map(({ ref, tip, state }) => ({ shard: decodeShard(ref.slice(prefix.length)), tip, state }));
 	}
@@ -239,7 +226,7 @@ class Claims implements ClaimStore {
 		const read = await Promise.all(
 			[...byRepo].map(async ([repoIndex, group]) =>
 				readRefs<Registry>(
-					await this.remote(repoIndex),
+					await this.repos.remote(repoIndex),
 					group.map((shard) => shardRef(this.input.repo, shard)),
 				),
 			),
@@ -272,7 +259,7 @@ class Claims implements ClaimStore {
 	}
 
 	private indexRemote(change: string) {
-		return this.spread ? this.input.recordsRemote!(changeRepoOf(change, this.spread)) : this.input.remote();
+		return this.repos.spread ? this.input.recordsRemote!(changeRepoOf(change, this.repos.spread)) : this.input.remote();
 	}
 
 	// The shards a change has claimed in below the registry, from its index, or null if it has none.
@@ -287,7 +274,7 @@ class Claims implements ClaimStore {
 	// with no index has claimed only in the registry, unless its shards predate indexing; then every shard is read.
 	private async changeEntries(change: string, also: () => string[] = () => []): Promise<Entry[]> {
 		// Fetch every records repo's credentials while the index is read.
-		if (this.sharded) for (const remote of this.remotes()) remote.catch(() => undefined);
+		if (this.sharded) for (const remote of this.repos.all()) remote.catch(() => undefined);
 		const [index, root] = await Promise.all([
 			this.sharded ? this.indexed(change) : Promise.resolve(undefined),
 			this.readRoot(),

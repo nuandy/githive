@@ -2,6 +2,7 @@ import type { CasLog } from "../record-log";
 import { GitCasLog } from "../record-log";
 import type { Remote } from "../git";
 import { readAllShards, readRefs } from "./record-refs";
+import { RecordsRepos } from "./records-repos";
 import { recordsRepoOf } from "./shards";
 import type { Stamper } from "./stamp";
 import { type FlagRecord, flagChange, type VoteRecord, type Votes, vote } from "./votes";
@@ -63,8 +64,10 @@ class BucketedVotes implements VoteStore {
 	private recordsRepos = 0;
 	private sharded?: { since?: string; because?: string };
 	private known?: Awaited<ReturnType<CasLog<Votes>["read"]>>;
+	private readonly repos: RecordsRepos;
 
 	constructor(private readonly input: VoteStoreInput) {
+		this.repos = new RecordsRepos(input, () => this.recordsRepos);
 		this.known = input.rootHead;
 		this.learn(input.rootHead?.commit.state);
 	}
@@ -77,24 +80,16 @@ class BucketedVotes implements VoteStore {
 		this.sharded = { since: state.shardedAt, because: state.shardedBecause };
 	}
 
-	private get spread() {
-		return this.input.recordsRemote ? this.recordsRepos : 0;
-	}
-
 	// -1 is the project repo, otherwise a records repo index.
 	private repoOf(bucket: string) {
-		return this.spread ? recordsRepoOf(`votes:${bucket}`, this.spread) : -1;
-	}
-
-	private remote(repoIndex: number) {
-		return repoIndex < 0 ? this.input.remote() : this.input.recordsRemote!(repoIndex);
+		return this.repos.spread ? recordsRepoOf(`votes:${bucket}`, this.repos.spread) : -1;
 	}
 
 	private logOf(bucket: string) {
 		let log = this.logs.get(bucket);
 		if (!log) {
 			log = new GitCasLog<Votes>(
-				() => this.remote(this.repoOf(bucket)),
+				() => this.repos.remote(this.repoOf(bucket)),
 				this.input.repo,
 				bucketRef(this.input.repo, bucket),
 			);
@@ -113,22 +108,17 @@ class BucketedVotes implements VoteStore {
 
 	private async readAll(): Promise<Entry[]> {
 		const prefix = votesPrefix(this.input.repo);
-		const repos = this.spread ? Array.from({ length: this.spread }, (_, repoIndex) => repoIndex) : [-1];
-		const read = await Promise.all(
-			repos.map(async (repoIndex) => readAllShards<Votes>(await this.remote(repoIndex), prefix)),
-		);
+		const read = await Promise.all(this.repos.all().map(async (remote) => readAllShards<Votes>(await remote, prefix)));
 		return read.flat().map((entry) => ({ bucket: entry.ref.slice(prefix.length), tip: entry.tip, state: entry.state }));
 	}
 
 	private async readBuckets(buckets: string[]): Promise<Entry[]> {
-		const byRepo = new Map<number, string[]>();
-		for (const bucket of new Set(buckets))
-			byRepo.set(this.repoOf(bucket), [...(byRepo.get(this.repoOf(bucket)) ?? []), bucket]);
+		const byRepo = this.repos.group(new Set(buckets), (bucket) => this.repoOf(bucket));
 		const prefix = votesPrefix(this.input.repo);
 		const read = await Promise.all(
 			[...byRepo].map(async ([repoIndex, group]) =>
 				readRefs<Votes>(
-					await this.remote(repoIndex),
+					await this.repos.remote(repoIndex),
 					group.map((bucket) => bucketRef(this.input.repo, bucket)),
 				),
 			),
