@@ -58,7 +58,8 @@ async function seedChange(repo, agent, { change, intent, paths, edit }) {
 	return head;
 }
 
-async function seedRepo() {
+/** Imports the repo, sets its policy, and registers the demo's agents. */
+async function startDemoRepo() {
 	const repo = REPO;
 	say(`\n${repo} on ${BASE}`);
 	await api("POST", "/repos/import", { url: "https://github.com/octocat/Spoon-Knife", name: repo, branch: "main" });
@@ -76,8 +77,11 @@ async function seedRepo() {
 		agents[name] = { name, key: (await tool("register", { repo, agent: name })).key };
 	const vote = (commit, reviewer, role, verdict, evidence) =>
 		tool("vote", { repo, commit, reviewer, role, verdict, evidence }, agents[reviewer].key);
+	return { repo, agents, vote };
+}
 
-	// Merged: both reviewers approve, the checks pass, and the toolkit merges it.
+/** Merged: both reviewers approve, the checks pass, and the toolkit merges it. */
+async function seedMerged({ repo, agents, vote }) {
 	const contributing = await seedChange(repo, agents["docs-agent"], {
 		change: "contributing-guide",
 		intent: "Add a contributing guide explaining how to fork and open a pull request",
@@ -113,8 +117,10 @@ async function seedRepo() {
 		agents["docs-agent"].key,
 	);
 	say(`  contributing-guide: ${merged.ok ? "merged" : JSON.stringify(merged)}`);
+}
 
-	// Changes requested: the security reviewer vetoes it.
+/** Changes requested: the security reviewer vetoes it. */
+async function seedChangesRequested({ repo, agents, vote }) {
 	const title = await seedChange(repo, agents["style-agent"], {
 		change: "center-title",
 		intent: "Center the page title",
@@ -151,8 +157,10 @@ async function seedRepo() {
 			"the import or serve the font locally.",
 	);
 	say("  center-title: changes requested");
+}
 
-	// In review: one approval of the two required.
+/** In review: one approval of the two required. */
+async function seedInReview({ repo, agents, vote }) {
 	const readme = await seedChange(repo, agents["readme-agent"], {
 		change: "clarify-readme",
 		intent: "Say what the repo is for in the README's first line",
@@ -168,8 +176,10 @@ async function seedRepo() {
 	});
 	await vote(readme, "tests-reviewer", "tests", "approve", "README only; nothing to run.");
 	say("  clarify-readme: in review, one approval of two");
+}
 
-	// Working: claimed and pushed, not yet reviewed.
+/** Working: claimed and pushed, not yet reviewed. */
+async function seedInProgress({ repo, agents }) {
 	await seedChange(repo, agents["theme-agent"], {
 		change: "dark-mode",
 		intent: "Respect the reader's dark-mode preference",
@@ -182,8 +192,10 @@ async function seedRepo() {
 			),
 	});
 	say("  dark-mode: in progress");
+}
 
-	// Abandoned: claimed, then released.
+/** Abandoned: claimed, then released. */
+async function seedReleased({ repo, agents }) {
 	await tool(
 		"claim",
 		{ repo, change: "new-layout", agent: "layout-agent", paths: ["layout/"], intent: "Try a new page layout" },
@@ -195,7 +207,12 @@ async function seedRepo() {
 		agents["layout-agent"].key,
 	);
 	say("  new-layout: released");
+}
 
+async function seedRepo() {
+	const demo = await startDemoRepo();
+	for (const seed of [seedMerged, seedChangesRequested, seedInReview, seedInProgress, seedReleased]) await seed(demo);
+	const { repo } = demo;
 	const audit = await tool("audit", { repo });
 	say(`  audit: ${audit.merges} merge(s) on main, ${audit.open} open violations`);
 }
