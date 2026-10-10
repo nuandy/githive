@@ -11,6 +11,7 @@ import { changeRef, shardsPrefix } from "../src/toolkit/shards";
 import { entriesOverlap } from "../src/claim-paths";
 import { pushChange } from "./helpers/agents";
 import { startGitServer, type GitServer } from "./helpers/git-server";
+import { memoryBatchGit } from "./helpers/memory-batch-git";
 
 // Claims start in one record, the registry, and are sharded when the load
 // calls for it. Once sharded, the registry is the shard above every other:
@@ -163,6 +164,7 @@ describe("sharding on demand through the toolkit", { timeout: 120_000 }, () => {
 	const ctx = (): ToolContext => ({
 		remote,
 		changeRemote: remote,
+		batchGit: () => memoryBatchGit({ url: server.url, token: "unused" }),
 		head: async () => server.git("rev-parse", "main").trim(),
 		recordsRemote: async (_repo, k) => ({ url: server.repo(`rec-${k}`), token: "unused" }),
 		createRecordsRepos: async (_repo, count) => void created.push(count),

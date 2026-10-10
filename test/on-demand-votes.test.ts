@@ -10,6 +10,7 @@ import { bucketOf, VOTE_BUCKETS, voteStore, votesPrefix } from "../src/toolkit/v
 import { openFlag, SHARD_VOTES_WHEN, shardVotes, type Votes, votesShardingReason } from "../src/toolkit/votes";
 import { pushChange } from "./helpers/agents";
 import { startGitServer, type GitServer } from "./helpers/git-server";
+import { memoryBatchGit } from "./helpers/memory-batch-git";
 
 // Votes start in one record and are sharded when the load calls for it: new
 // votes go to a bucket by commit, each its own ref. Votes never conflict, so
@@ -136,6 +137,7 @@ describe("sharding votes on demand through the toolkit", { timeout: 120_000 }, (
 	const ctx = (): ToolContext => ({
 		remote,
 		changeRemote: remote,
+		batchGit: () => memoryBatchGit({ url: server.url, token: "unused" }),
 		head: async () => server.git("rev-parse", "main").trim(),
 		recordsRemote: async (_repo, k) => ({ url: server.repo(`rec-${k}`), token: "unused" }),
 		createRecordsRepos: async (_repo, count) => void created.push(count),

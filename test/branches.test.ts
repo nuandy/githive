@@ -6,6 +6,7 @@ import { claimInto, isReservedPath, presentClaim, scopeFile, scopePaths, unscope
 import { callTool, makeBranch, mergeAsPerson, repoSnapshot, type ToolContext } from "../src/toolkit/mcp";
 import { pushChange } from "./helpers/agents";
 import { startGitServer, type GitServer } from "./helpers/git-server";
+import { memoryBatchGit } from "./helpers/memory-batch-git";
 
 // Changes land on the project's branch, or on another their claim names
 // (`into`). Claims are per branch: the same paths on two branches don't
@@ -30,6 +31,7 @@ let work: string;
 const keys: Record<string, string> = {};
 const ctx = (agentKey?: string): ToolContext => ({
 	remote: async () => ({ url: server.url, token: "unused" }),
+	batchGit: () => memoryBatchGit({ url: server.url, token: "unused" }),
 	changeRemote: async () => ({ url: server.url, token: "unused" }),
 	head: async (_repo, branch) => server.git("rev-parse", branch).trim(),
 	...(agentKey ? { agentKey } : {}),

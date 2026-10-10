@@ -6,6 +6,7 @@ import { statusOf } from "../src/errors";
 import { callTool, type ToolContext } from "../src/toolkit/mcp";
 import { pushChange } from "./helpers/agents";
 import { startGitServer, type GitServer } from "./helpers/git-server";
+import { memoryBatchGit } from "./helpers/memory-batch-git";
 
 // The tools on a repo whose claims are sharded from the start:
 // claims in different parts of the tree go to different refs, overlaps across
@@ -16,6 +17,7 @@ let server: GitServer;
 let work: string;
 const ctx: () => ToolContext = () => ({
 	remote: async () => ({ url: server.url, token: "unused" }),
+	batchGit: () => memoryBatchGit({ url: server.url, token: "unused" }),
 	// Each change's fork, on the same test server: the branches are pushed there.
 	changeRemote: async () => ({ url: server.url, token: "unused" }),
 	head: async () => server.git("rev-parse", "main").trim(),

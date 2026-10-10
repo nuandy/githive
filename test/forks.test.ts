@@ -7,6 +7,7 @@ import { generateStampKey, makeStamper } from "../src/toolkit/stamp";
 import { callTool, changeHistory, repoSnapshot, voteAsPerson, type ToolContext } from "../src/toolkit/mcp";
 import { agentClone, pushChange } from "./helpers/agents";
 import { startGitServer, type GitServer } from "./helpers/git-server";
+import { memoryBatchGit } from "./helpers/memory-batch-git";
 
 // Prevention, not just detection: each change lives in its own fork of the
 // project repo, and an agent can write only to its own change's fork. Only the
@@ -33,6 +34,7 @@ afterEach(async () => {
 
 const ctx = (agentKey?: string): ToolContext => ({
 	remote: async (_repo, scope) => ({ url: project.url, token: scope }),
+	batchGit: () => memoryBatchGit({ url: project.url, token: "write" }),
 	changeRemote: async (_repo, agent, scope) => {
 		forkRequests.push({ agent, scope });
 		return { url: fork.url, token: `fork-${scope}` };

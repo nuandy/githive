@@ -1,16 +1,15 @@
-import { inWorkspaceTurn, type Remote, Workspace } from "../git";
 import type { GitHubLink, WorkflowRun } from "../github";
-import type { CheckResult, CheckRunner } from "./merge";
+import type { BatchGit, CheckResult, CheckRunner } from "./merge";
 
 // Checks on GitHub Actions, for a GitHive repo connected to a GitHub repo
-// (settings github, with verify ["github-actions"]): no container runs them.
-// A batch's changes are merged onto main in memory, in the Worker, the way it
-// will land, and that commit is pushed to githive/checks/<id> on GitHub. The
-// repo's workflows run on pushes to githive/checks/** (see the workflow in
-// docs/design.md); GitHive waits for every run on that commit, and the batch
-// passes when they all succeed. The branch is deleted after. And main is
-// pushed back to GitHub after every landing (mirrorTo), so GitHub stays the
-// copy people browse.
+// (settings github, with verify ["github-actions"]): no check container runs
+// them. A batch's changes are merged onto main the way it will land, in the
+// repo's Gate (real git, see BatchGit.checksBranch), and that commit is
+// pushed to githive/checks/<id> on GitHub. The repo's workflows run on pushes
+// to githive/checks/** (see the workflow in docs/design.md); GitHive waits
+// for every run on that commit, and the batch passes when they all succeed.
+// The branch is deleted after. And main is pushed back to GitHub after every
+// landing (mirrorTo), so GitHub stays the copy people browse.
 
 /** The checks setting that runs them on GitHub Actions rather than in containers. */
 export const ACTIONS = "github-actions";
@@ -23,27 +22,16 @@ const FIRST_RUN_WITHIN_MS = 3 * 60_000;
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-/** A check runner on GitHub Actions: `project` is the GitHive repo (Artifacts), `link` the connected GitHub repo. */
-export function actionsChecks(project: Remote, link: GitHubLink, timing: { pollMs?: number; firstRunWithinMs?: number; runsWithinMs?: number } = {}): CheckRunner {
-	return async ({ base, branch, changes, gate }) => {
-		const name = `githive/checks/${gate ?? crypto.randomUUID().slice(0, 12)}`;
+/** A check runner on GitHub Actions: `gate` builds and pushes the batch's commit (the repo's Gate), `link` is the connected GitHub repo. */
+export function actionsChecks(gate: Pick<BatchGit, "checksBranch">, link: GitHubLink, timing: { pollMs?: number; firstRunWithinMs?: number; runsWithinMs?: number } = {}): CheckRunner {
+	return async ({ base, branch, changes, gate: id }) => {
+		const name = `githive/checks/${id ?? crypto.randomUUID().slice(0, 12)}`;
 		// The batch merged onto main as it will land, each change as its own merge, pushed to GitHub for its workflows.
-		const merged = await inWorkspaceTurn(async () => {
-			const ws = await Workspace.at(project, branch, base);
-			for (const c of changes) {
-				const head = await ws.fetch(`change-${c.change}`, c.source ?? project, c.ref).catch((err) => err as Error);
-				if (head instanceof Error) return { failed: `fetch of ${c.change} failed: ${head.message}` };
-				const result = await ws.merge(c.head, `Check ${c.change} with the batch`).catch((err) => err as Error);
-				if (result instanceof Error) return { failed: `${c.change} doesn't merge onto the batch: ${result.message}` };
-			}
-			const tip = await ws.head();
-			await ws.pushAs(ws.branch, `refs/heads/${name}`, link.remote);
-			return { tip };
-		});
-		if ("failed" in merged) return { passed: false, results: [{ command: "(merging the batch)", exitCode: 1, output: merged.failed ?? "" }] };
+		const made = await gate.checksBranch({ base, branch, changes, to: link.remote, ref: name }).catch((err) => ({ failed: String(err) }));
+		if ("failed" in made) return { passed: false, results: [{ command: "(merging the batch)", exitCode: 1, output: made.failed }] };
 		try {
-			const runs = await finishedRuns(link, merged.tip, timing);
-			if (!runs.length) return { passed: false, results: [{ command: "GitHub Actions", exitCode: 1, output: `no workflow ran on ${name} (${merged.tip}) in ${link.repo}: add one that runs on pushes to githive/checks/** (see GitHive's docs)` }] };
+			const runs = await finishedRuns(link, made.tip, timing);
+			if (!runs.length) return { passed: false, results: [{ command: "GitHub Actions", exitCode: 1, output: `no workflow ran on ${name} (${made.tip}) in ${link.repo}: add one that runs on pushes to githive/checks/** (see GitHive's docs)` }] };
 			const results: CheckResult[] = runs.map((r) => ({ command: `GitHub Actions: ${r.name}`, exitCode: passing(r) ? 0 : 1, output: `${r.conclusion ?? r.status}: ${r.url}` }));
 			return { passed: results.every((r) => r.exitCode === 0), results };
 		} finally {
@@ -72,12 +60,10 @@ async function finishedRuns(link: GitHubLink, sha: string, timing: { pollMs?: nu
 
 /**
  * Push `branch` as it is on GitHive (at `head`) to the connected GitHub repo,
- * as a fast-forward only: GitHub keeps a copy, and GitHive never overwrites
- * what someone pushed there directly (refused, it's reported, not forced).
+ * from the repo's Gate, as a fast-forward only: GitHub keeps a copy, and
+ * GitHive never overwrites what someone pushed there directly (refused, it's
+ * reported, not forced).
  */
-export async function mirrorTo(project: Remote, link: GitHubLink, branch: string, head: string) {
-	await inWorkspaceTurn(async () => {
-		const ws = await Workspace.at(project, branch, head);
-		await ws.push(branch, link.remote);
-	});
+export function mirrorTo(gate: Pick<BatchGit, "pushBranch">, link: GitHubLink, branch: string, head: string) {
+	return gate.pushBranch({ branch, head, to: link.remote });
 }

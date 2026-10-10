@@ -11,8 +11,6 @@
 	"routes": [{ "pattern": "bench.githive.app", "custom_domain": true }],
 	"compatibility_date": "2026-10-01",
 	"compatibility_flags": ["nodejs_compat"],
-	// A merge without checks lands its batch in the Worker, in memory (see memoryBatchGit): up to 5 minutes of CPU.
-	"limits": { "cpu_ms": 300000 },
 	"observability": { "enabled": true },
 	"preview_urls": false,
 	"vars": {

@@ -44,21 +44,75 @@ async function drained(body: AsyncIterableIterator<Uint8Array> | undefined) {
 
 /** Git requests by repo, and how many failed (5xx), for the call they're made in. */
 export type GitRequests = Map<string, { requests: number; failed: number }>;
-const counted = new AsyncLocalStorage<GitRequests>();
+/** Artifacts API calls (the binding's, not Git's) by method and repo ("<method> <repo>"), and how many failed, for the call they're made in. */
+export type ArtifactsCalls = Map<string, { calls: number; failed: number }>;
+const counted = new AsyncLocalStorage<{ git: GitRequests; artifacts: ArtifactsCalls }>();
 
-/** Run `work`, counting the Git requests it makes by repo (see noteGitRequest). */
-export function countingGitRequests<T>(work: () => Promise<T>): { done: Promise<T>; requests: GitRequests } {
+/** Run `work`, counting the Git requests (see noteGitRequest) and Artifacts calls (see noteArtifactsCall) it makes. */
+export function countingRequests<T>(work: () => Promise<T>): { done: Promise<T>; requests: GitRequests; artifacts: ArtifactsCalls } {
 	const requests: GitRequests = new Map();
-	return { done: counted.run(requests, work), requests };
+	const artifacts: ArtifactsCalls = new Map();
+	return { done: counted.run({ git: requests, artifacts }, work), requests, artifacts };
 }
 
 /** Count a Git request to `url` (and whether the server failed it) for the call it's made in, if any is counting. */
 export function noteGitRequest(url: string, status: number) {
-	const requests = counted.getStore();
+	const requests = counted.getStore()?.git;
 	if (!requests) return;
 	const repo = repoOfUrl(url);
 	const seen = requests.get(repo) ?? { requests: 0, failed: 0 };
 	requests.set(repo, { requests: seen.requests + 1, failed: seen.failed + (status >= 500 ? 1 : 0) });
+}
+
+/** Count an Artifacts call, `method` on `repo` (the namespace's own: "-"), for the call it's made in, if any is counting. */
+export function noteArtifactsCall(method: string, repo: string, failed: boolean) {
+	const calls = counted.getStore()?.artifacts;
+	if (!calls) return;
+	const key = `${method} ${repo}`;
+	const seen = calls.get(key) ?? { calls: 0, failed: 0 };
+	calls.set(key, { calls: seen.calls + 1, failed: seen.failed + (failed ? 1 : 0) });
+}
+
+/** The kind of repo a name is, for counts: the project (`project`, its id; unknown: any other name), its records repos, agents' forks (seeds among them), or another. */
+export function repoKind(name: string, project: string | undefined) {
+	if (name.startsWith("records--")) return "records";
+	if (name.startsWith("fork--")) return "forks";
+	if (name === "-") return "namespace";
+	return project === undefined || name === project ? "project" : "other";
+}
+
+/**
+ * Counts as one log line: Git requests by kind of repo, and Artifacts calls by
+ * method and kind ("git: project 4, forks 2 (1 failed); artifacts: get 3
+ * (project 2, records 1), createToken 3 (...)"). Empty when nothing was made.
+ */
+export function describeCounts(project: string | undefined, git: GitRequests, artifacts: ArtifactsCalls) {
+	const parts: string[] = [];
+	if (git.size) {
+		const kinds = new Map<string, { requests: number; failed: number }>();
+		for (const [name, seen] of git) {
+			const kind = repoKind(name, project);
+			const sum = kinds.get(kind) ?? { requests: 0, failed: 0 };
+			kinds.set(kind, { requests: sum.requests + seen.requests, failed: sum.failed + seen.failed });
+		}
+		parts.push(`git: ${[...kinds].map(([kind, n]) => `${kind} ${n.requests}${n.failed ? ` (${n.failed} failed)` : ""}`).join(", ")}`);
+	}
+	if (artifacts.size) {
+		const methods = new Map<string, { calls: number; failed: number; kinds: Map<string, number> }>();
+		for (const [key, seen] of artifacts) {
+			const space = key.indexOf(" ");
+			const method = key.slice(0, space);
+			const kind = repoKind(key.slice(space + 1), project);
+			const sum = methods.get(method) ?? { calls: 0, failed: 0, kinds: new Map<string, number>() };
+			sum.calls += seen.calls;
+			sum.failed += seen.failed;
+			sum.kinds.set(kind, (sum.kinds.get(kind) ?? 0) + seen.calls);
+			methods.set(method, sum);
+		}
+		const total = [...methods.values()].reduce((n, m) => n + m.calls, 0);
+		parts.push(`artifacts ${total}: ${[...methods].map(([method, m]) => `${method} ${m.calls} (${[...m.kinds].map(([kind, n]) => `${kind} ${n}`).join(", ")}${m.failed ? `; ${m.failed} failed` : ""})`).join(", ")}`);
+	}
+	return parts.join("; ");
 }
 
 /**

@@ -8,6 +8,7 @@ import { appJwt, type GitHubLink, linkTo, type WorkflowRun } from "../src/github
 import { actionsChecks, mirrorTo } from "../src/toolkit/actions-checks";
 import { pushChange } from "./helpers/agents";
 import { startGitServer, type GitServer } from "./helpers/git-server";
+import { memoryBatchGit } from "./helpers/memory-batch-git";
 
 const run = promisify(execFile);
 
@@ -96,7 +97,7 @@ describe("a repo connected to GitHub", { timeout: 60_000 }, () => {
 		const b = await pushChange(server.url, work, "agent-b", "b-1", { "src/b.txt": "b\n" });
 		const { link, deleted } = await github(() => [{ id: 1, name: "test", status: "completed", conclusion: "success", url: "https://github.com/acme/shop/actions/runs/1" }]);
 		let pushed = "";
-		const checks = actionsChecks(project(), { ...link, runsFor: async (sha) => ((pushed = sha), link.runsFor(sha)) }, timing);
+		const checks = actionsChecks(memoryBatchGit(project()), { ...link, runsFor: async (sha) => ((pushed = sha), link.runsFor(sha)) }, timing);
 		const result = await checks({ base: main, branch: "main", changes: [{ change: "a-1", head: a, ref: "changes/a-1", agent: "agent-a" }, { change: "b-1", head: b, ref: "changes/b-1", agent: "agent-b" }], commands: ["github-actions"], gate: "batch1-0" });
 		expect(result).toEqual({ passed: true, results: [{ command: "GitHub Actions: test", exitCode: 0, output: "success: https://github.com/acme/shop/actions/runs/1" }] });
 		// What ran was both changes merged onto main.
@@ -109,9 +110,9 @@ describe("a repo connected to GitHub", { timeout: 60_000 }, () => {
 		const a = await pushChange(server.url, work, "agent-a", "a-1", { "src/a.txt": "a\n" });
 		const change = [{ change: "a-1", head: a, ref: "changes/a-1", agent: "agent-a" }];
 		const failing = await github((_sha, asked) => [{ id: 2, name: "test", status: asked < 3 ? "in_progress" : "completed", conclusion: asked < 3 ? null : "failure", url: "https://github.com/acme/shop/actions/runs/2" }]);
-		expect(await actionsChecks(project(), failing.link, timing)({ base: main, branch: "main", changes: change, commands: [], gate: "f-0" })).toEqual({ passed: false, results: [{ command: "GitHub Actions: test", exitCode: 1, output: "failure: https://github.com/acme/shop/actions/runs/2" }] });
+		expect(await actionsChecks(memoryBatchGit(project()), failing.link, timing)({ base: main, branch: "main", changes: change, commands: [], gate: "f-0" })).toEqual({ passed: false, results: [{ command: "GitHub Actions: test", exitCode: 1, output: "failure: https://github.com/acme/shop/actions/runs/2" }] });
 		const none = await github(() => []);
-		const silent = await actionsChecks(project(), none.link, timing)({ base: main, branch: "main", changes: change, commands: [], gate: "n-0" });
+		const silent = await actionsChecks(memoryBatchGit(project()), none.link, timing)({ base: main, branch: "main", changes: change, commands: [], gate: "n-0" });
 		expect(silent).toMatchObject({ passed: false, results: [{ command: "GitHub Actions", output: expect.stringMatching(/no workflow ran on githive\/checks\/n-0 .* githive\/checks\/\*\*/) }] });
 	});
 
@@ -120,14 +121,14 @@ describe("a repo connected to GitHub", { timeout: 60_000 }, () => {
 		const a = await pushChange(server.url, work, "agent-a", "a-1", { "src/a.txt": "a\n" });
 		// main moves on GitHive (a change lands): GitHub follows.
 		server.git("update-ref", "refs/heads/main", a);
-		await mirrorTo(project(), link, "main", a);
+		await mirrorTo(memoryBatchGit(project()), link, "main", a);
 		expect(server.gitIn("github", "rev-parse", "main").trim()).toBe(a);
 		// Someone pushes to GitHub directly; GitHive's next push is refused, not forced.
 		const direct = server.gitIn("github", "commit-tree", "-m", "direct", "-p", a, `${a}^{tree}`).trim();
 		server.gitIn("github", "update-ref", "refs/heads/main", direct);
 		const b = await pushChange(server.url, work, "agent-b", "b-1", { "src/b.txt": "b\n" }, "main");
 		server.git("update-ref", "refs/heads/main", b);
-		await expect(mirrorTo(project(), link, "main", b)).rejects.toThrow();
+		await expect(mirrorTo(memoryBatchGit(project()), link, "main", b)).rejects.toThrow();
 		expect(server.gitIn("github", "rev-parse", "main").trim()).toBe(direct);
 	});
 });
@@ -140,6 +141,7 @@ describe("connecting a repo to GitHub with settings", { timeout: 60_000 }, () =>
 		try {
 			const ctx = (withApp = true) => ({
 				remote: async () => ({ url: server.url, token: "unused" }),
+				batchGit: () => memoryBatchGit({ url: server.url, token: "unused" }),
 				head: async () => server.git("rev-parse", "main").trim(),
 				...(withApp ? { github: async (repo: string) => (repo === "acme/shop" ? ({ repo } as GitHubLink) : null) } : {}),
 			});
@@ -180,6 +182,7 @@ describe("merging in a repo connected to GitHub", { timeout: 120_000 }, () => {
 			};
 			const ctx = (agentKey?: string) => ({
 				remote: async () => ({ url: server.url, token: "unused" }),
+				batchGit: () => memoryBatchGit({ url: server.url, token: "unused" }),
 				changeRemote: async () => ({ url: server.url, token: "unused" }),
 				head: async () => server.git("rev-parse", "main").trim(),
 				github: async (repo: string) => (repo === "acme/shop" ? link : null),

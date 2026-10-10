@@ -16,6 +16,7 @@ import { listTree, readFile } from "./code-browse";
 import { initialFiles, parseInit, writeFirstCommit } from "./repo-init";
 import { Timing } from "./timing";
 import { defaultBranch } from "./git";
+import { countingRequests, describeCounts } from "./git-http";
 import { changeRepoName, toolContextFor } from "./toolkit/env";
 import type { Registry } from "./toolkit/claims";
 import { GitCasLog } from "./record-log";
@@ -52,6 +53,18 @@ app.use("*", async (c, next) => {
 	if (principal?.kind === "user" && !["GET", "HEAD", "OPTIONS"].includes(c.req.method) && c.req.header("Origin") !== new URL(c.req.url).origin)
 		return c.json({ error: "refused: a signed-in write must come from GitHive's own pages" }, 403);
 	await next();
+});
+
+// What each request asked of Git and Artifacts, logged after it when it asked anything: the dashboard's views and the
+// API's own (an MCP call logs its own, by tool; see mcp.ts).
+app.use("*", async (c, next) => {
+	const counting = countingRequests(() => next());
+	try {
+		await counting.done;
+	} finally {
+		const counts = describeCounts(undefined, counting.requests, counting.artifacts);
+		if (counts) console.log(`http ${c.req.method} ${c.req.routePath} ${counts}`);
+	}
 });
 
 app.onError((err, c) => {

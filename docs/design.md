@@ -555,22 +555,23 @@ evidence. Its agent sees it in `status` like any rejection,
 and keeps it out of later batches until it has a new commit: `merge` refuses
 that commit at once, with the failure, rather than check it a third time.
 
-**Without checks, no container runs.** A branch without checks lands its
-batches in the Worker, in memory (`memoryBatchGit`): it reads each change,
-merges it and pushes the batch, with the Worker's CPU limit raised to 5
-minutes for it. A push Artifacts refuses as busy is tried again, waiting
-longer each time; isomorphic-git can't read that refusal ("Expected unpack
-ok"), so GitHive's Git client reads a push's answer and says it. The audit
-reads the branch's history through Artifacts' own API, not a clone:
-`log` lists the first-parent chain (a page at a time, until the baseline),
-and each merge's files changed from its first parent come from comparing
-their trees with `readTree`, reading only the folders that differ. A commit's
-files are its own for good, so they're kept in the repo's RepoCache by
-commit, and an audit after reads trees only for merges new since. (Read in a
-Worker with a clone, 200 merges had taken 12 s and most of its memory, so the
-audit had read them with git in the repo's Gate.) So a repo without checks
-never starts a container: GitHive's hosted agents are the only other use, and
-they're optional.
+**Every batch lands in the repo's Gate, checks or not.** The audit reads the
+branch's history through Artifacts' own API, not a clone: `log` lists the
+first-parent chain (a page at a time, until the baseline), and each merge's
+files changed from its first parent come from comparing their trees with
+`readTree`, reading only the folders that differ. A commit's files are its
+own for good, so they're kept in the repo's RepoCache by commit, and an audit
+after reads trees only for merges new since. (Read in a Worker with a clone,
+200 merges had taken 12 s and most of its memory.) Landing was tried in the
+Worker too, in memory, and measured against the Gate: without checks, at 200
+agents, a batch of about 60 ran the Worker out of its 128 MB, which is fixed,
+and every merge waiting in that isolate failed with it (run 217); with
+checks, on Express with 5 agents, batches took 44 to 94 s from merge to
+landed against the Gate's 30 to 35 s (agents-6 against agents-5), the copy of
+the repo made again in each new isolate and the changes fetched one at a
+time, where the Gate has the repo on disk and fetches 16 at once. So a repo
+without checks warms its Gate too, from the start and each claim on, for a
+snapshot a cold Gate restores in seconds.
 
 **Connected to GitHub.** A repo can be connected to a GitHub repo through
 GitHive's GitHub App (`settings` with `github: "owner/name"`; refused unless the
@@ -580,17 +581,19 @@ installation token scoped to that one repo, kept for the isolate until near its
 hour (`github.ts`). Then:
 
 - **main goes back to GitHub after every landing**, once the batch's claims are
-  released, so off the critical path. It's a fast-forward only: if someone
-  pushed to GitHub's copy directly, the push is refused and logged, never
-  forced. GitHub stays the copy people browse, and a backup.
+  released, so off the critical path, from the repo's Gate (real git, the
+  repo on disk). It's a fast-forward only: if someone pushed to GitHub's copy
+  directly, the push is refused and logged, never forced. GitHub stays the
+  copy people browse, and a backup.
 - **Checks can run on GitHub Actions** instead of in containers (`verify:
-  ["github-actions"]`, `actions-checks.ts`). For a batch, the Worker merges its
-  changes onto main in memory, the way they'll land, pushes that commit to
+  ["github-actions"]`, `actions-checks.ts`). For a batch, the repo's Gate
+  merges its changes onto main, the way they'll land, and pushes that commit to
   `githive/checks/<id>` on GitHub, waits for every workflow run on it (one must
   start within 3 minutes; all must finish within 30), and passes the batch
   when they all succeed; the branch is deleted after. The batch then lands in
-  the Worker too, so no container runs. A repo without GitHub keeps checks in
-  containers. Its workflow just runs on those branches:
+  the repo's Gate, as every batch does: no check container runs, and nothing
+  holds a copy of the repo in a Worker's memory. A repo without GitHub keeps
+  checks in containers. Its workflow just runs on those branches:
 
   ```yaml
   # .github/workflows/githive.yml
@@ -606,12 +609,11 @@ hour (`github.ts`). Then:
   A failing run sends the batch's search for the culprit on as a failing check
   does: halves checked side by side, each a run of its own.
 
-With checks in containers, a batch's git work runs in the repo's own Gate's container, with real git on
+A batch's git work runs in the repo's own Gate's container, with real git on
 a disk: fetching each change, listing the files it changed since it left
 main, making the merge commits (stamped there: the Gate is the same Worker,
 with GitHive's key) and pushing them. The Worker only reads the records:
-claims, votes and approvals. Done in the Worker, in memory, one request did
-every change's share of the work, and a batch of 20 ran past its 30 s of CPU.
+claims, votes and approvals.
 It's the repo's own Gate, never a change's: a change's Gate runs that change's
 code (its installs and tests), which could tamper with git there, so it's
 trusted neither with what a change touched nor with the token that writes the

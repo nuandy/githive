@@ -110,12 +110,45 @@ export function outOfMemory(exitCode: number, elapsedMs: number, timeoutS: numbe
  * it, so commands like `npm test` can't outlive their limit.
  * Note: exec() reports a missing `cwd` as "command not found".
  */
+/**
+ * Where git traces its HTTP requests in a container, headers only (no data;
+ * credentials redacted), so the Gate can count what its work asked of Git
+ * servers (see takeGitRequests).
+ */
+const GIT_TRACE_FILE = "/tmp/githive-git-trace";
+const GIT_TRACE_ENV = { GIT_TRACE_CURL: GIT_TRACE_FILE, GIT_TRACE_CURL_NO_DATA: "1", GIT_TRACE_REDACT: "1" };
+
+/**
+ * The Git requests made in `container` since this was last asked, by repo
+ * path, and how many a server failed (5xx): read from git's trace, which is
+ * then cleared. Null if it couldn't be read.
+ */
+export async function takeGitRequests(container: Container): Promise<{ paths: Map<string, number>; failed: number } | null> {
+	const script = [
+		`f=${GIT_TRACE_FILE}; [ -f "$f" ] || exit 0; mv "$f" "$f.taken"`,
+		`grep -oE "=> Send header: (GET|POST) [^ ]+" "$f.taken" | awk '{print $5}' | sed -E 's/\?.*//' | sort | uniq -c`,
+		`echo "failed $(grep -cE '<= Recv header: HTTP/[0-9.]+ 5[0-9][0-9]' "$f.taken")"`,
+		`rm -f "$f.taken"`,
+	].join("\n");
+	const r = await run(container, ["bash", "-c", script]).catch(() => null);
+	if (!r || r.exitCode !== 0) return null;
+	const paths = new Map<string, number>();
+	let failed = 0;
+	for (const line of r.output.split("\n")) {
+		const counted = line.trim().match(/^(\d+) (\/\S*)$/);
+		if (counted) paths.set(counted[2], (paths.get(counted[2]) ?? 0) + Number(counted[1]));
+		const failing = line.match(/^failed (\d+)$/);
+		if (failing) failed = Number(failing[1]);
+	}
+	return { paths, failed };
+}
+
 export async function run(container: Container, cmd: string[], cwd = WORKDIR, stdin?: string, timeoutS = COMMAND_TIMEOUT_S) {
 	const process = await container.exec(["timeout", "-s", "KILL", String(timeoutS), ...cmd], {
 		cwd,
 		stderr: "combined",
 		stdin: stdin === undefined ? undefined : new Response(stdin).body!,
-		env: { HOME: "/root", CI: "true", npm_config_update_notifier: "false" },
+		env: { HOME: "/root", CI: "true", npm_config_update_notifier: "false", ...GIT_TRACE_ENV },
 	});
 	const result = await process.output();
 	const output = new TextDecoder().decode(result.stdout);
@@ -127,9 +160,11 @@ export async function run(container: Container, cmd: string[], cwd = WORKDIR, st
  * Network commands retain their result shape even when a transient failure persists, so
  * callers can report the final command's exit code and output to the builder.
  */
-export async function gitWithToken(container: Container, token: string, args: string[], cwd = WORKDIR) {
+export async function gitWithToken(container: Container, token: string, args: string[], cwd = WORKDIR, user?: string) {
 	const secret = token.split("?expires=")[0];
-	const command = ["git", "-c", `http.extraHeader=Authorization: Bearer ${secret}`, ...args];
+	// A server that takes a user and password (GitHub: x-access-token and an installation token) gets them as Basic auth.
+	const authorization = user ? `Basic ${btoa(`${user}:${secret}`)}` : `Bearer ${secret}`;
+	const command = ["git", "-c", `http.extraHeader=Authorization: ${authorization}`, ...args];
 	if (!isNetworkGitCommand(args)) return run(container, command, cwd);
 
 	try {

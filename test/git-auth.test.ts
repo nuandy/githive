@@ -2,7 +2,7 @@ import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { afterEach, describe, expect, it } from "vitest";
 import { branchHead } from "../src/git";
-import { countingGitRequests } from "../src/git-http";
+import { countingRequests } from "../src/git-http";
 
 // isomorphic-git asks a Git server without credentials first, gets a 401, and
 // asks again, leaving the 401's body unread; in a Worker, a few such reads side
@@ -47,7 +47,7 @@ describe("a Git server asking for credentials", () => {
 describe("a busy Git server", { timeout: 30_000 }, () => {
 	it("is asked again for a few seconds, and each request is counted for the call it's made in", async () => {
 		const { url, seen } = await guarded(2);
-		const counting = countingGitRequests(() => branchHead({ url, token: "secret" }, "main"));
+		const counting = countingRequests(() => branchHead({ url, token: "secret" }, "main"));
 		expect(await counting.done).toBe(OID);
 		expect(seen).toHaveLength(3);
 		expect(counting.requests.get("project")).toEqual({ requests: 3, failed: 2 });

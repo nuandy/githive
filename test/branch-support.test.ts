@@ -6,6 +6,7 @@ import { branchHead, defaultBranch, Workspace } from "../src/git";
 import { handleRpc } from "../src/mcp";
 import { pushChange } from "./helpers/agents";
 import { startGitServer, type GitServer } from "./helpers/git-server";
+import { memoryBatchGit } from "./helpers/memory-batch-git";
 
 // A project's branch is whatever its repo's HEAD names: main, master, trunk.
 // Here the project's only branch is master, and nothing may assume main.
@@ -48,6 +49,7 @@ describe("a project whose branch is master", () => {
 		const ctx = {
 			toolkit: {
 				remote: async () => remote(),
+				batchGit: () => memoryBatchGit(remote()),
 				changeRemote: async () => ({ url: forkUrl, token: "unused" }),
 				head: async (_repo: string, branch: string) => (await branchHead(remote(), branch)) ?? "",
 				defaultBranch: async () => (await defaultBranch(remote()))!,

@@ -177,6 +177,46 @@ describe("reading and landing a batch in the repo's own Gate", { timeout: 60_000
 		expect(treesRead).toBe(before);
 	});
 
+	it("builds a batch's commit for GitHub Actions, each change its own merge onto main, and pushes it to GitHub", async () => {
+		const main = server.git("rev-parse", "main").trim();
+		const a = await pushChange(server.url, work, "agent-a-1", "a-1", { "src/a.txt": "a\n" });
+		const b = await pushChange(server.url, work, "agent-b-1", "b-1", { "src/b.txt": "b\n" });
+		const github = { remote: server.repo("github"), token: "t", user: "x-access-token" };
+		const made = await gate.checksBranch({ repo: "t1", branch: "main", base: base(), baseHead: main, changes: [{ ...source("a-1"), head: a }, { ...source("b-1"), head: b }], to: github, ref: "githive/checks/x-0" });
+		expect(made).toMatchObject({ tip: expect.stringMatching(/^[0-9a-f]{40}$/) });
+		const tip = (made as { tip: string }).tip;
+		expect(server.gitIn("github", "rev-parse", "githive/checks/x-0").trim()).toBe(tip);
+		// Merge b, then merge a, then main.
+		expect(server.gitIn("github", "log", "--first-parent", "-3", "--format=%H %P", tip).trim().split("\n").map((l) => l.split(" "))).toEqual([[tip, expect.any(String), b], [expect.any(String), main, a], [main]]);
+		expect(server.gitIn("github", "ls-tree", "-r", "--name-only", tip).split("\n")).toEqual(expect.arrayContaining(["src/a.txt", "src/b.txt"]));
+	});
+
+	it("says which change doesn't merge onto the batch, and pushes nothing", async () => {
+		const main = server.git("rev-parse", "main").trim();
+		const a = await pushChange(server.url, work, "agent-a-1", "a-1", { "src/same.txt": "a\n" });
+		const b = await pushChange(server.url, work, "agent-b-1", "b-1", { "src/same.txt": "b\n" });
+		const made = await gate.checksBranch({ repo: "t1", branch: "main", base: base(), baseHead: main, changes: [{ ...source("a-1"), head: a }, { ...source("b-1"), head: b }], to: { remote: server.repo("github"), token: "t" }, ref: "githive/checks/y-0" });
+		expect(made).toEqual({ failed: expect.stringMatching(/^b-1 doesn't merge onto the batch: .*src\/same\.txt/s) });
+		expect(server.gitIn("github", "for-each-ref", "--format=%(refname)").trim()).toBe("");
+	});
+
+	it("pushes main back to GitHub as a fast-forward, and never over what someone pushed there directly", async () => {
+		const github = { remote: server.repo("github"), token: "t", user: "x-access-token" };
+		const main = server.git("rev-parse", "main").trim();
+		expect(await gate.pushBranch({ repo: "t1", branch: "main", base: base(), head: main, to: github })).toEqual({ pushed: true });
+		const a = await pushChange(server.url, work, "agent-a-1", "a-1", { "src/a.txt": "a\n" });
+		server.git("update-ref", "refs/heads/main", a);
+		expect(await gate.pushBranch({ repo: "t1", branch: "main", base: base(), head: a, to: github })).toEqual({ pushed: true });
+		expect(server.gitIn("github", "rev-parse", "main").trim()).toBe(a);
+		// Someone pushes to GitHub directly: GitHive's next push is refused, not forced.
+		const direct = server.gitIn("github", "commit-tree", "-m", "direct", "-p", a, `${a}^{tree}`).trim();
+		server.gitIn("github", "update-ref", "refs/heads/main", direct);
+		const b = await pushChange(server.url, work, "agent-b-1", "b-1", { "src/b.txt": "b\n" }, "main");
+		server.git("update-ref", "refs/heads/main", b);
+		expect(await gate.pushBranch({ repo: "t1", branch: "main", base: base(), head: b, to: github })).toEqual({ refused: expect.any(String) });
+		expect(server.gitIn("github", "rev-parse", "main").trim()).toBe(direct);
+	});
+
 	it("is only ever done by the repo's own Gate, never a change's, which runs that change's code", async () => {
 		const changeGate = new Gate({ storage: new FakeStorage(), container: localContainer(checkout), id: { equals: () => false } } as never, { GATE: { idFromName: () => ({}) } } as never);
 		await expect(changeGate.inspectBatch({ repo: "t1", branch: "main", base: base(), baseHead: "x", changes: [] })).rejects.toThrow(/only the repo's own Gate/);

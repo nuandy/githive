@@ -241,6 +241,16 @@ export function toolContextFor(env: Env, by: string | undefined, caller: { agent
 					if ("error" in landed) throw new Error(`[500] landing the batch failed: ${landed.error}`);
 					return { commits: landed.commits };
 				},
+				checksBranch: async ({ base, branch, changes, to, ref }) => {
+					const read = await project("read");
+					const sources = await Promise.all(changes.map(async (c) => ({ ...(await sourceOf(c)), head: c.head })));
+					return rpcRetried<{ tip: string } | { failed: string }>(() => gate().checksBranch({ repo, branch, base: { remote: read.url, token: read.token }, baseHead: base, changes: sources, to: { remote: to.url, token: to.token, ...(to.user ? { user: to.user } : {}) }, ref }));
+				},
+				pushBranch: async ({ branch, head, to }) => {
+					const read = await project("read");
+					const pushed = await rpcRetried<{ pushed: true } | { refused: string }>(() => gate().pushBranch({ repo, branch, base: { remote: read.url, token: read.token }, head, to: { remote: to.url, token: to.token, ...(to.user ? { user: to.user } : {}) } }));
+					if ("refused" in pushed) throw new Error(`pushing ${branch} to ${to.url} was refused: ${pushed.refused}`);
+				},
 			};
 		},
 		// Who's landing a batch into each branch, and what changes came to: kept in the repo's RepoCache (see landing.ts).

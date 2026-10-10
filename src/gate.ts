@@ -1,5 +1,6 @@
 import { DurableObject } from "cloudflare:workers";
-import { type InstanceSize, type SetupSnapshot, WORKDIR, bootContainer, clip, gitWithToken, installToolchains, outOfMemory, run } from "./container";
+import { type InstanceSize, type SetupSnapshot, WORKDIR, bootContainer, clip, gitWithToken, installToolchains, outOfMemory, run, takeGitRequests } from "./container";
+import { describeCounts, type GitRequests, repoOfUrl } from "./git-http";
 import { statusOf } from "./errors";
 import { BOT } from "./git";
 import { DEPENDENCIES, DEPENDENCY_FILES } from "./toolchains";
@@ -133,10 +134,15 @@ export class Gate extends DurableObject<Env> {
 	/** Checks and warm-ups running or waiting their turn: while any is, the container stays up. */
 	private active = 0;
 
-	/** Run `work` in turn with the container's other work, keeping the container up meanwhile, and after it. */
-	private inTurn<T>(work: () => Promise<T>): Promise<T> {
+	/**
+	 * Run `work` in turn with the container's other work, keeping the container
+	 * up meanwhile, and after it. What it asked of Git servers is logged after
+	 * it, as `what` for `repo` (see logGitRequests).
+	 */
+	private inTurn<T>(what: string, repo: string | undefined, work: () => Promise<T>): Promise<T> {
 		this.active++;
 		const run = this.checking.then(work).finally(async () => {
+			await this.logGitRequests(what, repo).catch(() => undefined);
 			this.active--;
 			await this.ctx.storage.put("lastActive", Date.now());
 			await this.scheduleStop();
@@ -152,7 +158,7 @@ export class Gate extends DurableObject<Env> {
 	 */
 	checkCommit(input: ChangeCheck & { baseHead: string; ahead?: CheckPlan["ahead"] }): Promise<GateResult> {
 		const plan: CheckPlan = { ...(input.repo ? { repo: input.repo } : {}), baseHead: input.baseHead, branch: input.branch, base: input.base, fork: input.fork, ...(input.ahead?.length ? { ahead: input.ahead } : {}), checks: input.checks };
-		return this.inTurn(async () => {
+		return this.inTurn("check", input.repo, async () => {
 			try {
 				return await this.check(input.head, plan);
 			} catch (err) {
@@ -169,7 +175,7 @@ export class Gate extends DurableObject<Env> {
 	 * that ran a change's code can't be trusted to say what a change touched.
 	 */
 	inspectBatch(input: { repo: string; branch: string; base: { remote: string; token: string }; baseHead: string; changes: BatchSource[] }): Promise<({ change: string; head: string; files: string[] } | { change: string; error: string })[]> {
-		return this.inTurn(async () => {
+		return this.inTurn("inspectBatch", input.repo, async () => {
 			const container = this.landingContainer(input.repo);
 			await this.fetchBatch(container, input);
 			const failed = await this.fetchChanges(container, input.changes.map((c, k) => ({ k, ...c })));
@@ -205,7 +211,7 @@ export class Gate extends DurableObject<Env> {
 	 * batch. "moved" if the branch isn't at `baseHead` any more.
 	 */
 	landBatch(input: { repo: string; branch: string; base: { remote: string; token: string }; baseHead: string; merges: (BatchSource & { head: string; claimed: Omit<MergeClaim, "base"> })[]; by?: string }): Promise<{ commits: string[] } | { moved: true } | { error: string }> {
-		return this.inTurn(async () => {
+		return this.inTurn("landBatch", input.repo, async () => {
 			const container = this.landingContainer(input.repo);
 			await this.fetchBatch(container, input);
 			// Read for this batch, they're here already (see inspectBatch): only what's missing is fetched.
@@ -243,6 +249,46 @@ export class Gate extends DurableObject<Env> {
 		});
 	}
 
+	/**
+	 * A batch merged onto `baseHead` as it will land, each change its own merge,
+	 * pushed to `ref` on `to` (a connected GitHub repo, whose Actions check it):
+	 * in this, the repo's own Gate, with real git, never in a Worker's memory.
+	 * Its tip, or why it couldn't be made or pushed.
+	 */
+	checksBranch(input: { repo: string; branch: string; base: { remote: string; token: string }; baseHead: string; changes: { change: string; remote: string; token: string; ref: string; head: string }[]; to: { remote: string; token: string; user?: string }; ref: string }): Promise<{ tip: string } | { failed: string }> {
+		return this.inTurn("checksBranch", input.repo, async () => {
+			const container = this.landingContainer(input.repo);
+			await this.fetchBatch(container, input);
+			const missing = await run(container, ["bash", "-c", input.changes.map((c, k) => `git cat-file -e ${c.head}^{commit} 2>/dev/null || echo ${k}`).join("\n")]);
+			const fetch = missing.output.split("\n").filter(Boolean).map(Number);
+			const failed = await this.fetchChanges(container, fetch.map((k) => ({ k, ...input.changes[k] })));
+			for (const [k, why] of failed) return { failed: `fetch of ${input.changes[k].change} failed: ${why}` };
+			await run(container, ["bash", "-lc", `git merge --abort 2>/dev/null; git checkout -q -f --detach ${input.baseHead} && git clean -fdq`]);
+			for (const c of input.changes) {
+				const merged = await run(container, ["bash", "-c", `git merge -q --no-ff -m "Check ${c.change} with the batch" ${c.head} >/tmp/merge.out 2>&1 || { git diff --name-only --diff-filter=U; cat /tmp/merge.out; git merge --abort; exit 1; }`]);
+				if (merged.exitCode !== 0) return { failed: `${c.change} doesn't merge onto the batch: ${clip(merged.output, 500)}` };
+			}
+			const tip = (await run(container, ["git", "rev-parse", "HEAD"])).output.trim();
+			const pushed = await gitWithToken(container, input.to.token, ["push", "-q", "--force", input.to.remote, `HEAD:refs/heads/${input.ref}`], WORKDIR, input.to.user);
+			if (pushed.exitCode !== 0) return { failed: `the push to ${input.ref} failed: ${clip(pushed.output, 500)}` };
+			return { tip };
+		});
+	}
+
+	/**
+	 * Push `branch` at `head` to `to` (a connected GitHub repo, its copy kept
+	 * up to date after every landing) as a fast-forward only: what someone
+	 * pushed there directly is never overwritten. In this, the repo's own Gate.
+	 */
+	pushBranch(input: { repo: string; branch: string; base: { remote: string; token: string }; head: string; to: { remote: string; token: string; user?: string } }): Promise<{ pushed: true } | { refused: string }> {
+		return this.inTurn("pushBranch", input.repo, async () => {
+			const container = this.landingContainer(input.repo);
+			await this.fetchBatch(container, { ...input, baseHead: input.head });
+			const pushed = await gitWithToken(container, input.to.token, ["push", "-q", input.to.remote, `${input.head}:refs/heads/${input.branch}`], WORKDIR, input.to.user);
+			return pushed.exitCode === 0 ? { pushed: true } : { refused: clip(pushed.output, 500) };
+		});
+	}
+
 	/** The container a batch is read and landed in: this Gate's, which must be the repo's own. */
 	private landingContainer(repo: string) {
 		const container = this.ctx.container;
@@ -260,6 +306,7 @@ export class Gate extends DurableObject<Env> {
 		if (fetched.exitCode !== 0) throw new Error(`fetch of the project's ${input.branch} failed: ${clip(fetched.output, 2_000)}`);
 		if ((await run(container, ["git", "cat-file", "-e", `${input.baseHead}^{commit}`])).exitCode !== 0) throw new Error(`${input.branch} at ${input.baseHead} isn't in the project`);
 	}
+
 
 	/**
 	 * Fetch each change's branch into refs/remotes/batch-<k>/head, a few at a
@@ -302,10 +349,29 @@ export class Gate extends DurableObject<Env> {
 	 * with the checks, so one that arrives meanwhile waits for it.
 	 */
 	boot(input: { repo: string; base: { remote: string; token: string } }): Promise<void> {
-		return this.inTurn(async () => {
+		return this.inTurn("boot", input.repo, async () => {
 			const container = this.ctx.container;
 			if (container) await this.prepare(container, input.base, input.repo);
 		});
+	}
+
+	/**
+	 * Log the Git requests this container made for `what` (one unit of work:
+	 * a check, a batch read or landed, a warm-up), by kind of repo, from git's
+	 * trace (see takeGitRequests): "gate landBatch on <repo> git: project 2, forks 5".
+	 */
+	private async logGitRequests(what: string, repo: string | undefined) {
+		const container = this.ctx.container;
+		if (!container?.running) return;
+		const taken = await takeGitRequests(container);
+		if (!taken?.paths.size) return;
+		const requests: GitRequests = new Map();
+		for (const [path, n] of taken.paths) {
+			const name = repoOfUrl(`https://git${path}`);
+			const seen = requests.get(name) ?? { requests: 0, failed: 0 };
+			requests.set(name, { requests: seen.requests + n, failed: 0 });
+		}
+		console.log(`gate ${what} on ${repo ?? "-"} ${describeCounts(repo ?? "", requests, new Map())}${taken.failed ? ` (${taken.failed} failed)` : ""}`);
 	}
 
 	/** Make sure an alarm comes by `at` (an earlier one stays). */
@@ -550,7 +616,7 @@ export class Gate extends DurableObject<Env> {
 	 * In turn with checks (one checkout); skipped if warmed in the last minutes.
 	 */
 	warm(input: Partial<Pick<WarmUp, "repo">> & Omit<WarmUp, "repo">): Promise<void> {
-		return this.inTurn(async () => {
+		return this.inTurn("warm", input.repo, async () => {
 			const container = this.ctx.container;
 			if (!container) return;
 			const at = await this.ctx.storage.get<number>("warmedAt");
@@ -561,6 +627,14 @@ export class Gate extends DurableObject<Env> {
 				const branch = input.branch ?? "main";
 				const fetched = await gitWithToken(container, input.base.token, ["fetch", "-q", input.base.remote, `${branch}:refs/remotes/base/${branch}`, "--force"]);
 				if (fetched.exitCode !== 0) return;
+				// No checks: warm only to land batches, the project cloned and its branch fetched, and saved as the repo's
+				// snapshot (with nothing installed), so a cold Gate restores it in seconds. Without one, the first batch of 200
+				// agents' runs read 3 or 4 changes in 42 to 61 s, behind the container starting and Express cloning.
+				if (!input.checks.length) {
+					await this.ctx.storage.put("warmedAt", Date.now());
+					await this.snapshotIfDue(container, input.repo);
+					return;
+				}
 				await run(container, ["bash", "-lc", `git merge --abort 2>/dev/null; git checkout -q -f --detach refs/remotes/base/${branch} && git clean -fdq`]);
 				await this.setUpToolchains(container);
 				const install = (await this.checksFor(container, input.checks)).find((c) => INSTALLS.test(c.trim()));
@@ -610,12 +684,10 @@ export class Gate extends DurableObject<Env> {
 	 * change's Gate that had to set up from scratch. Returns at once; the
 	 * alarm does the work.
 	 */
-	async warmUp(input: WarmUp & { why?: "checked" | "approved" | "set up" }) {
-		// Without checks there's nothing to warm: a batch lands in the Worker, and the audit reads through Artifacts.
-		if (!input.checks.length) return;
+	async warmUp(input: WarmUp & { why?: "claimed" | "checked" | "approved" | "set up" }) {
 		const { why, ...warming } = input;
 		// With a snapshot, a cold container restores in seconds: a merge near needs no head start.
-		if ((why === "checked" || why === "approved") && (await this.snapshot())) return;
+		if ((why === "claimed" || why === "checked" || why === "approved") && (await this.snapshot())) return;
 		await this.ctx.storage.put("warmUp", warming);
 		await this.ctx.storage.setAlarm(Date.now());
 	}

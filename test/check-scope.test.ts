@@ -6,6 +6,7 @@ import { skipsChecks, skipsFile } from "../src/toolkit/check-scope";
 import { callTool, type ToolContext } from "../src/toolkit/mcp";
 import { pushChange } from "./helpers/agents";
 import { startGitServer, type GitServer } from "./helpers/git-server";
+import { memoryBatchGit } from "./helpers/memory-batch-git";
 
 // A change that only touches documentation and other files no check reads
 // merges without running the checks; anything else runs them, and so does a
@@ -36,6 +37,7 @@ const keys: Record<string, string> = {};
 // No check runner here: a merge that needs its checks is refused, one that skips them merges.
 const ctx = (agentKey?: string): ToolContext => ({
 	remote: async () => ({ url: server.url, token: "unused" }),
+	batchGit: () => memoryBatchGit({ url: server.url, token: "unused" }),
 	changeRemote: async () => ({ url: server.url, token: "unused" }),
 	head: async (_repo, branch) => server.git("rev-parse", branch).trim(),
 	...(agentKey ? { agentKey } : {}),

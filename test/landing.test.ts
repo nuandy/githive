@@ -9,11 +9,12 @@ import { claimStore } from "../src/toolkit/claim-store";
 import { claim, startRepo, type Registry } from "../src/toolkit/claims";
 import { readMainMerges, readRecordHistory } from "../src/toolkit/git-records";
 import { type Landing, memoryLanding, renewLease } from "../src/toolkit/landing";
-import { type BatchGit, batchSize, type Candidate, CHECKS_REVIEWER, type CheckRunner, type MergeInput, memoryBatchGit, mergeChange } from "../src/toolkit/merge";
+import { type BatchGit, batchSize, type Candidate, CHECKS_REVIEWER, type CheckRunner, type MergeInput, mergeChange } from "../src/toolkit/merge";
 import { voteStore } from "../src/toolkit/vote-store";
 import { vote, type Votes } from "../src/toolkit/votes";
 import { pushChange } from "./helpers/agents";
 import { startGitServer, type GitServer } from "./helpers/git-server";
+import { memoryBatchGit } from "./helpers/memory-batch-git";
 
 // Landing without a line: claims keep changes off each other's paths, so the
 // ready ones (approved) land as a set. The merge that takes the branch's lease
@@ -71,6 +72,7 @@ describe("landing ready changes together", { timeout: 120_000 }, () => {
 	const merge = (change: string, runChecks: CheckRunner, landing: Landing = memoryLanding(), more: Partial<MergeInput> = {}) =>
 		mergeChange({
 			remote: remote(),
+			batchGit: memoryBatchGit(remote()),
 			branch: "main",
 			store: store(),
 			votes: voteStore({ repo: "t1", root: votes(), remote: async () => remote() }),
@@ -250,16 +252,6 @@ describe("landing ready changes together", { timeout: 120_000 }, () => {
 		expect(landed()).toEqual(["a-1", "b-1"]);
 	});
 
-	it("lands in memory through a repo busy with other pushes, trying the push again rather than gathering again", async () => {
-		for (const x of ["a", "b"]) await readyChange(`${x}-1`, { [`src/${x}.txt`]: `${x}\n` });
-		const reads: string[][] = [];
-		server.busyPushes(2);
-		expect(await merge("a-1", runner(), memoryLanding(), { verify: [], runChecks: undefined, batchGit: readsNoted(reads) })).toMatchObject({ ok: true });
-		// Read once: the push went through on its third try, the batch not gathered again.
-		expect(reads).toEqual([["a-1", "b-1"]]);
-		expect(landed()).toEqual(["a-1", "b-1"]);
-	});
-
 	it("names who last changed each file a merge conflicts on: their change, agent, intent and commit", async () => {
 		const landing = memoryLanding();
 		await readyChange("a-1", { "src/shared.txt": "from a\n" });
@@ -331,7 +323,7 @@ describe("landing ready changes together", { timeout: 120_000 }, () => {
 		// Another merge holds the lease, landing its batch, for longer than this merge may wait to answer.
 		expect(await landing.turn("other", "x-1", "h", 0, 60_000)).toEqual({ lease: true });
 		const runs: string[][] = [];
-		const waiting = await mergeChange({ remote: remote(), branch: "main", store: store(), votes: voteStore({ repo: "t1", root: votes(), remote: async () => remote() }), policy, verify: ["npm test"], runChecks: runner(new Set(), runs), change: "a-1", agent: "agent-a-1", landing, pollMs: 20, answerWithinMs: 300 });
+		const waiting = await mergeChange({ remote: remote(), batchGit: memoryBatchGit(remote()), branch: "main", store: store(), votes: voteStore({ repo: "t1", root: votes(), remote: async () => remote() }), policy, verify: ["npm test"], runChecks: runner(new Set(), runs), change: "a-1", agent: "agent-a-1", landing, pollMs: 20, answerWithinMs: 300 });
 		expect(waiting).toMatchObject({ ok: false, pending: true, reasons: [expect.stringMatching(/^a-1 is ready and waiting to land .* Call merge again/)] });
 		expect(runs).toEqual([]);
 		// The other batch is done: merging again lands it.
@@ -357,7 +349,7 @@ describe("landing ready changes together", { timeout: 120_000 }, () => {
 		// Checks far longer than the lease lasts without a beat.
 		const slow: CheckRunner = async (input) => (await new Promise((resolve) => setTimeout(resolve, 600)), runner(new Set(), runs)(input));
 		const go = (change: string) =>
-			mergeChange({ remote: remote(), branch: "main", store: store(), votes: voteStore({ repo: "t1", root: votes(), remote: async () => remote() }), policy, verify: ["npm test"], runChecks: slow, change, agent: `agent-${change}`, others, landing, pollMs: 20, heartbeatMs: 50, leaseTtlMs: 150 });
+			mergeChange({ remote: remote(), batchGit: memoryBatchGit(remote()), branch: "main", store: store(), votes: voteStore({ repo: "t1", root: votes(), remote: async () => remote() }), policy, verify: ["npm test"], runChecks: slow, change, agent: `agent-${change}`, others, landing, pollMs: 20, heartbeatMs: 50, leaseTtlMs: 150 });
 		const [a, b] = await Promise.all([go("a-1"), go("b-1")]);
 		expect(a).toMatchObject({ ok: true });
 		expect(b).toMatchObject({ ok: true });
@@ -368,7 +360,7 @@ describe("landing ready changes together", { timeout: 120_000 }, () => {
 	it("starts no batch once it should be answering: the lease goes to a merge that's waiting", async () => {
 		await readyChange("a-1", { "src/a.txt": "a\n" });
 		const runs: string[][] = [];
-		const answer = await mergeChange({ remote: remote(), branch: "main", store: store(), votes: voteStore({ repo: "t1", root: votes(), remote: async () => remote() }), policy, verify: ["npm test"], runChecks: runner(new Set(), runs), change: "a-1", agent: "agent-a-1", pollMs: 20, answerWithinMs: 0 });
+		const answer = await mergeChange({ remote: remote(), batchGit: memoryBatchGit(remote()), branch: "main", store: store(), votes: voteStore({ repo: "t1", root: votes(), remote: async () => remote() }), policy, verify: ["npm test"], runChecks: runner(new Set(), runs), change: "a-1", agent: "agent-a-1", pollMs: 20, answerWithinMs: 0 });
 		expect(answer).toMatchObject({ ok: false, pending: true });
 		expect(runs).toEqual([]);
 	});

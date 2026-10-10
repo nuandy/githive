@@ -1,4 +1,4 @@
-import { countingGitRequests, type GitRequests } from "./git-http";
+import { type ArtifactsCalls, countingRequests, describeCounts, type GitRequests } from "./git-http";
 import { statusOf } from "./errors";
 import { INSTRUCTIONS, TOOLS, callTool, type ToolContext } from "./toolkit/mcp";
 
@@ -54,23 +54,24 @@ export async function handleRpc(msg: RpcRequest, ctx: McpContext): Promise<objec
 			const from = Date.now();
 			const repoArg = typeof msg.params?.arguments === "object" && typeof (msg.params.arguments as Args).repo === "string" ? (msg.params.arguments as Args).repo : "-";
 			console.log(`mcp ${name} on ${repoArg}`);
-			// Its Git requests, by repo: which tools keep the project repo busy (Artifacts fails a busy repo's requests).
-			let counting: ReturnType<typeof countingGitRequests<unknown>> | undefined;
+			// Its Git requests and Artifacts calls, by repo: which tools keep the project repo busy (Artifacts fails a busy
+			// repo's requests), and what each costs.
+			let counting: ReturnType<typeof countingRequests<unknown>> | undefined;
 			let repoId = String(repoArg);
 			try {
 				let args = (msg.params?.arguments as Args) ?? {};
 				const named = typeof args.repo === "string" && ctx.resolveRepo ? await ctx.resolveRepo(args.repo, name, args) : null;
 				if (named) args = { ...args, repo: named.id };
 				repoId = String(args.repo ?? repoArg);
-				counting = countingGitRequests(() => callTool(name, args, ctx.toolkit));
+				counting = countingRequests(() => callTool(name, args, ctx.toolkit));
 				let result = await counting.done;
-				logGitRequests(name, repoId, counting.requests);
+				logCounts(name, repoId, counting);
 				if (Date.now() - from >= SLOW_TOOL_MS) console.log(`mcp ${name} took ${Date.now() - from} ms`);
 				// Answer with the name the caller used, not the id.
 				if (named && result && typeof result === "object" && (result as Args).repo === named.id) result = { ...(result as Args), repo: named.fullName };
 				return reply(msg.id, { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] });
 			} catch (err) {
-				if (counting) logGitRequests(name, repoId, counting.requests);
+				if (counting) logCounts(name, repoId, counting);
 				console.log(`mcp ${name} failed after ${Date.now() - from} ms`);
 				// Tool failures go back to the agent as results it can act on, not protocol errors.
 				const failed = statusOf(err);
@@ -84,16 +85,10 @@ export async function handleRpc(msg: RpcRequest, ctx: McpContext): Promise<objec
 	}
 }
 
-/** A call's Git requests, by kind of repo: the project, its records repos, agents' forks (and how many the server failed). */
-function logGitRequests(tool: string, repo: string, requests: GitRequests) {
-	if (!requests.size) return;
-	const kinds = new Map<string, { requests: number; failed: number }>();
-	for (const [name, seen] of requests) {
-		const kind = name === repo ? "project" : name.startsWith("records--") ? "records" : name.startsWith("fork--") ? "forks" : "other";
-		const sum = kinds.get(kind) ?? { requests: 0, failed: 0 };
-		kinds.set(kind, { requests: sum.requests + seen.requests, failed: sum.failed + seen.failed });
-	}
-	console.log(`mcp ${tool} git: ${[...kinds].map(([kind, n]) => `${kind} ${n.requests}${n.failed ? ` (${n.failed} failed)` : ""}`).join(", ")}`);
+/** A call's Git requests and Artifacts calls, by kind of repo: the project, its records repos, agents' forks (and how many failed). */
+function logCounts(tool: string, repo: string, counting: { requests: GitRequests; artifacts: ArtifactsCalls }) {
+	const counts = describeCounts(repo, counting.requests, counting.artifacts);
+	if (counts) console.log(`mcp ${tool} ${counts}`);
 }
 
 /** A tool call this long is logged with how long it took. */

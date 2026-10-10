@@ -1,4 +1,5 @@
 import { DurableObject } from "cloudflare:workers";
+import { countingRequests, describeCounts } from "./git-http";
 import { makeAgentFork, makeSeed } from "./toolkit/env";
 import { type Ahead, asNews, type Checking, dropLease, emptyLanding, type LandingState, markChecked, renewLease, type Settled, settleOutcomes, takeTurn, wasChecked } from "./toolkit/landing";
 
@@ -267,6 +268,19 @@ export class RepoCache extends DurableObject<Env> {
 	}
 
 	async alarm() {
+		// What a round of forks asks of Artifacts and Git, logged after it: "fork queue for <repo> artifacts 40: fork 8 (...), get 24 (...)".
+		const counting = countingRequests(() => this.makeForks());
+		try {
+			await counting.done;
+		} finally {
+			const repo = await this.ctx.storage.get<string>("forks:repo");
+			const counts = describeCounts(repo ?? "", counting.requests, counting.artifacts);
+			if (counts) console.log(`fork queue for ${repo} ${counts}`);
+		}
+	}
+
+	/** A round of the forks queue: its seeds one at a time, or agents' forks side by side (see alarm). */
+	private async makeForks() {
 		const repo = await this.ctx.storage.get<string>("forks:repo");
 		const queue = (await this.ctx.storage.get<ForkJob[]>("forks:queue")) ?? [];
 		if (!repo || !queue.length) return;

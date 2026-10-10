@@ -1,4 +1,5 @@
 import type { Remote } from "./git";
+import { noteArtifactsCall } from "./git-http";
 import type { HistorySource } from "./toolkit/branch-history";
 import { isTransientFailure, retryTransient, sleep, transientDelay } from "./retry";
 import { rpc } from "./rpc";
@@ -9,13 +10,26 @@ import { rpc } from "./rpc";
  */
 export const reviewerName = (sliceRepo: string, role: string, head: string) => `${sliceRepo}--review-${role}--${head.slice(0, 12)}`;
 
+/** An Artifacts call, `method` on `repo` ("-": the namespace), counted for the call it's made in (see countingRequests), failed or not. */
+async function call<T>(method: string, repo: string, operation: () => PromiseLike<T>): Promise<T> {
+	try {
+		const value = await operation();
+		noteArtifactsCall(method, repo, false);
+		return value;
+	} catch (err) {
+		noteArtifactsCall(method, repo, true);
+		throw err;
+	}
+}
+
 /**
  * Run work against a disposable repo capability, releasing it even on failure.
  * Getting the repo is retried when it fails transiently, unless `retry` is false
  * because the caller retries itself.
  */
 async function withRepo<T>(artifacts: Artifacts, name: string, operation: (repo: ArtifactsRepo) => Promise<T>, { retry = true } = {}): Promise<T> {
-	const repo = await (retry ? retryArtifacts(() => artifacts.get(name)) : artifacts.get(name)).catch((err) => Promise.reject(naming(err, name)));
+	const get = () => call("get", name, () => artifacts.get(name));
+	const repo = await (retry ? retryArtifacts(get) : get()).catch((err) => Promise.reject(naming(err, name)));
 	try {
 		return await operation(repo);
 	} catch (err) {
@@ -46,8 +60,8 @@ export async function remoteFor(
 ): Promise<Remote> {
 	return withRepo(artifacts, name, async (repo) => {
 		const [info, token] = await Promise.all([
-			retryArtifacts(() => rpc(repo.info())),
-			retryArtifacts(() => rpc(repo.createToken(scope, ttlSeconds))),
+			retryArtifacts(() => call("info", name, () => rpc(repo.info()))),
+			retryArtifacts(() => call("createToken", name, () => rpc(repo.createToken(scope, ttlSeconds)))),
 		]);
 		return { url: info.remote, token: token.plaintext };
 	});
@@ -57,16 +71,16 @@ export async function remoteFor(
 export async function withHistory<T>(artifacts: Artifacts, name: string, read: (source: HistorySource) => Promise<T>): Promise<T> {
 	return withRepo(artifacts, name, (repo) =>
 		read({
-			log: (ref, limit, offset) => retryArtifacts(() => rpc(repo.log({ ref, limit, offset }))),
-			readCommit: (hash) => retryArtifacts(() => rpc(repo.readCommit(hash))),
-			readTree: (hash) => retryArtifacts(() => rpc(repo.readTree(hash))),
+			log: (ref, limit, offset) => retryArtifacts(() => call("log", name, () => rpc(repo.log({ ref, limit, offset })))),
+			readCommit: (hash) => retryArtifacts(() => call("readCommit", name, () => rpc(repo.readCommit(hash)))),
+			readTree: (hash) => retryArtifacts(() => call("readTree", name, () => rpc(repo.readTree(hash)))),
 		}),
 	);
 }
 
 export async function headOf(artifacts: Artifacts, name: string, ref: string) {
 	return withRepo(artifacts, name, async (repo) => {
-		const [latest] = await retryTransient(() => rpc(repo.log({ ref, limit: 1 })));
+		const [latest] = await retryTransient(() => call("log", name, () => rpc(repo.log({ ref, limit: 1 }))));
 		return latest?.hash;
 	});
 }
@@ -81,7 +95,7 @@ export async function listRepoNames(artifacts: Artifacts) {
 	const names: string[] = [];
 	let cursor: string | undefined;
 	do {
-		const page = await retryTransient(() => artifacts.list({ limit: 200, cursor }));
+		const page = await retryTransient(() => call("list", "-", () => artifacts.list({ limit: 200, cursor })));
 		names.push(...page.repos.map((r) => r.name));
 		cursor = page.cursor;
 	} while (cursor);
@@ -139,7 +153,7 @@ export async function forkAndWait(artifacts: Artifacts, source: string, name: st
 		withRepo(artifacts, source, async (repo) => {
 			for (let attempt = 1; ; attempt++) {
 				try {
-					return await rpc(repo.fork(name, { description, defaultBranchOnly: true }));
+					return await call("fork", source, () => rpc(repo.fork(name, { description, defaultBranchOnly: true })));
 				} catch (err) {
 					if ((again || attempt > 1) && alreadyExists(err)) return null;
 					const internal = isInternalError(err);
@@ -174,7 +188,7 @@ export async function forkAndWait(artifacts: Artifacts, source: string, name: st
 				// Stuck forking. Deleting it has been seen to let it finish at once; else it's gone, and asked for again now.
 				unstuck = true;
 				console.log(`fork ${name} still forking after ${Math.round((Date.now() - forkingSince!) / 1000)}s: deleting it, so it finishes or is made again`);
-				await artifacts.delete(name).catch((deleting) => console.error(`deleting the stuck fork ${name} failed`, String(deleting)));
+				await call("delete", name, () => artifacts.delete(name)).catch((deleting) => console.error(`deleting the stuck fork ${name} failed`, String(deleting)));
 				askAgainAt = Date.now();
 				continue;
 			}
@@ -191,7 +205,7 @@ export async function forkAndWait(artifacts: Artifacts, source: string, name: st
 
 /** Make a repo unless it exists already, and wait until it can be used. */
 export async function ensureRepo(artifacts: Artifacts, name: string, description: string) {
-	await retryTransient(() => artifacts.create(name, { description })).catch((err) => {
+	await retryTransient(() => call("create", name, () => artifacts.create(name, { description }))).catch((err) => {
 		if (!alreadyExists(err)) throw err;
 	});
 	const started = Date.now();

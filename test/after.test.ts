@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { callTool, type ToolContext } from "../src/toolkit/mcp";
 import { pushChange } from "./helpers/agents";
 import { startGitServer, type GitServer } from "./helpers/git-server";
+import { memoryBatchGit } from "./helpers/memory-batch-git";
 
 // A change can name changes it depends on (after): it merges only once each
 // has merged into the branch it lands on, and next hands out backlog work
@@ -15,6 +16,7 @@ let work: string;
 const keys: Record<string, string> = {};
 const ctx = (agentKey?: string): ToolContext => ({
 	remote: async () => ({ url: server.url, token: "unused" }),
+	batchGit: () => memoryBatchGit({ url: server.url, token: "unused" }),
 	changeRemote: async () => ({ url: server.url, token: "unused" }),
 	head: async (_repo, branch) => server.git("rev-parse", branch).trim(),
 	...(agentKey ? { agentKey } : {}),

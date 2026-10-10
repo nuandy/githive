@@ -10,6 +10,7 @@ import { vote, type Votes } from "../src/toolkit/votes";
 import { voteStore } from "../src/toolkit/vote-store";
 import { pushChange } from "./helpers/agents";
 import { startGitServer, type GitServer } from "./helpers/git-server";
+import { memoryBatchGit } from "./helpers/memory-batch-git";
 
 // The toolkit's merge: it test-merges the change into main first and reports a
 // conflict as something the agent can act on, and it runs the project's checks
@@ -33,7 +34,7 @@ async function readyChange(change: string, files: Record<string, string>) {
 }
 
 const merge = (change: string, runChecks: CheckRunner = passing) =>
-	mergeChange({ remote: remote(), branch: "main", store: claimStore({ repo: "t1", registry: undefined, root: claims(), remote: async () => remote() }), votes: voteStore({ repo: "t1", root: votes(), remote: async () => remote() }), policy, verify: ["npm test"], runChecks, change, agent: `agent-${change}` });
+	mergeChange({ remote: remote(), batchGit: memoryBatchGit(remote()), branch: "main", store: claimStore({ repo: "t1", registry: undefined, root: claims(), remote: async () => remote() }), votes: voteStore({ repo: "t1", root: votes(), remote: async () => remote() }), policy, verify: ["npm test"], runChecks, change, agent: `agent-${change}` });
 
 beforeEach(async () => {
 	server = await startGitServer();

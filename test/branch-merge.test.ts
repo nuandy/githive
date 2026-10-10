@@ -6,6 +6,7 @@ import { claimCovering } from "../src/claim-paths";
 import { callTool, type ToolContext } from "../src/toolkit/mcp";
 import { pushChange } from "./helpers/agents";
 import { startGitServer, type GitServer } from "./helpers/git-server";
+import { memoryBatchGit } from "./helpers/memory-batch-git";
 
 // A finished branch merges into another as one change: claimed with source,
 // its claim is what the branch changed and its tip is the change, reviewed,
@@ -27,6 +28,7 @@ let work: string;
 const keys: Record<string, string> = {};
 const ctx = (agentKey?: string): ToolContext => ({
 	remote: async () => ({ url: server.url, token: "unused" }),
+	batchGit: () => memoryBatchGit({ url: server.url, token: "unused" }),
 	changeRemote: async () => ({ url: server.url, token: "unused" }),
 	head: async (_repo, branch) => server.git("rev-parse", branch).trim(),
 	...(agentKey ? { agentKey } : {}),

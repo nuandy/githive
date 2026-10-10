@@ -6,6 +6,7 @@ import { matchesBranch, ruleFor, settingsForBranch } from "../src/toolkit/branch
 import { callTool, repoSnapshot, type ToolContext } from "../src/toolkit/mcp";
 import { pushChange } from "./helpers/agents";
 import { startGitServer, type GitServer } from "./helpers/git-server";
+import { memoryBatchGit } from "./helpers/memory-batch-git";
 
 // A branch may have settings of its own, by pattern: feature/* with checks
 // only, release/* needing a person's approval. A rule changes only what it
@@ -37,6 +38,7 @@ let work: string;
 const keys: Record<string, string> = {};
 const ctx = (agentKey?: string): ToolContext => ({
 	remote: async () => ({ url: server.url, token: "unused" }),
+	batchGit: () => memoryBatchGit({ url: server.url, token: "unused" }),
 	changeRemote: async () => ({ url: server.url, token: "unused" }),
 	head: async (_repo, branch) => server.git("rev-parse", branch).trim(),
 	...(agentKey ? { agentKey } : {}),

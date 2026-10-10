@@ -52,7 +52,7 @@ export interface ToolContext {
 	runChecks?: (repo: string) => CheckRunner;
 	/** A branch's commits since `baseline`, for the audit (live, read with git in the repo's own Gate's container); absent, read in memory. */
 	readBranch?: (repo: string, baseline: string, branch: string) => Promise<BranchCommit[]>;
-	/** Where a batch's git work runs (live, the repo's own Gate's container); absent, in memory. */
+	/** Where a batch's git work runs (live, the repo's own Gate's container): without it, nothing can land. */
 	batchGit?: (repo: string) => BatchGit;
 	/** Starts a batch's first check container while the batch is read (live, a Gate's). */
 	prepareChecks?: (repo: string) => (gate: string) => Promise<void>;
@@ -81,7 +81,7 @@ export interface ToolContext {
 	/** Tells the dashboard's open pages that the repo's records changed. */
 	ping?: (repo: string) => Promise<void>;
 	/** Warms the repo's check container in the background, when a merge is likely soon: why, and for what (see Gate.warmUp). */
-	warmChecks?: (repo: string, input: { branch: string; checks: string[]; expect: "checked" | "approved" | "set up"; key?: string }) => Promise<void>;
+	warmChecks?: (repo: string, input: { branch: string; checks: string[]; expect: "claimed" | "checked" | "approved" | "set up"; key?: string }) => Promise<void>;
 	/**
 	 * A kept copy of the repo's claims in force and the changes merged,
 	 * rebuilt after writes (stale while one caller rebuilds it): for advice
@@ -142,6 +142,9 @@ const LISTED_AT_MOST = 40;
 const MOST_AT_ONCE = 500;
 const claimsRef = (repo: string) => `refs/notes/githive-claims/${repo}`;
 const votesRef = (repo: string) => `refs/notes/githive-votes/${repo}`;
+/** The checks a repo runs in containers: on GitHub Actions, none (its Gate only lands). */
+const containerChecks = (verify: string[] | undefined) => (onActions(verify) ? [] : (verify ?? []));
+
 const workRef = (repo: string) => `refs/notes/githive-work/${repo}`;
 
 export const INSTRUCTIONS = `GitHive: many agents work on one repository at once. Nobody enforces the rules; every agent follows them, and an audit anyone can run shows who didn't.
@@ -153,7 +156,7 @@ Work that depends on other unmerged work goes on a feature branch, and the proje
 2. Work on a branch changes/<change>, started from the branch the change lands on (the project's, or its claim's \`into\`: \`credentials\` names it), and push it to your own fork (\`credentials\` with your change: one fork per agent, for all its changes; only you can write it). The project's branch (\`start\` names it: main, master, ...) is written only through the toolkit.
 3. Reviewers get the change's code with \`review_access\` (read-only: its branch in the author's fork, and the project to diff against), then \`vote\` on the exact commit they reviewed. A change merges with the policy's approvals, including every veto role's, and no veto; a veto role counts only from whoever \`start\` granted it (by default people and GitHive's reviewers), so \`register\` with your key to vote as one. Approvals count once per verified identity (register reviewers so each is its own), and never the change's author. \`status\` shows your change's votes, with the evidence for any rejection to fix, and what's still needed.
 4. Run \`check\` after you push: it test-merges your change with the branch it lands on and lists files outside your claim, so you hear about problems before merging.
-5. \`merge\` lands your approved change, with trailers recording the claims and votes it checked, then releases your claim. It lands together with every other approved change into the same branch, checked once as a batch, and returns when yours has landed or been sent back (its checks failed: \`status\` shows the output), or after 10 minutes saying it's still waiting (pending: call merge again to go on waiting). Merge by hand only with the same trailers.
+5. \`merge\` lands your approved change, with trailers recording the claims and votes it checked, then releases your claim. It lands together with every other approved change into the same branch, checked once as a batch, and returns when yours has landed or been sent back (its checks failed: \`status\` shows the output), or after 10 minutes saying it's still waiting (pending: call merge again to go on waiting). Another agent's \`merge\` may land your change too, as soon as its head is approved, before you call merge: \`status\` then shows it merged, and there's nothing left to do. Merge by hand only with the same trailers.
 6. Claiming again (same paths) keeps your claim active. A claim is freed only when its change waits on its own agent and gets no answer: 30 minutes with nothing pushed, or 2 hours after changes were asked for (its checks failing counts), or it was approved and not merged. Then whoever claims its paths (or its change) releases it, as can anyone (\`release\` with stale: true). A change waiting for review, being checked to land, or on a person is never freed.
 7. Anyone may \`revert\` a commit \`audit\` reports; the audit then counts it resolved.
 8. Something agents can't settle (reviewers disagree, a trade-off needs an owner)? \`ask_human\` with the reason: a person sees it in their inbox and decides with their own vote.
@@ -960,8 +963,8 @@ async function runTool(name: string, args: Args, ctx: ToolContext): Promise<unkn
 		};
 	};
 	/** Warm the repo's Gate for a merge to come (its checks, or with none, its landing): why, and for which change or commit. */
-	const warmChecks = async (expect: "checked" | "approved", key: string) => {
-		if (registered?.verify?.length && !onActions(registered.verify)) await ctx.warmChecks?.(repo, { branch: projectBranch(registered), checks: registered.verify, expect, key }).catch(() => undefined);
+	const warmChecks = async (expect: "claimed" | "checked" | "approved", key: string) => {
+		if (registered?.baseline) await ctx.warmChecks?.(repo, { branch: projectBranch(registered), checks: containerChecks(registered.verify), expect, key }).catch(() => undefined);
 	};
 	switch (name) {
 		case "start": {
@@ -982,9 +985,9 @@ async function runTool(name: string, args: Args, ctx: ToolContext): Promise<unkn
 			// Agents' forks are made from seeds, made one at a time from now, before agents arrive.
 			await ctx.prepareForks?.(repo, "seeds").catch(() => undefined);
 			const registry = (await claims.read())?.commit.state;
-			// The check containers warm up while agents start: the first merge is minutes away, and a fresh install takes them.
-			// Without checks no container runs at all: a batch lands in the Worker, and the audit reads through Artifacts.
-			if (registry?.verify?.length && !onActions(registry.verify)) await ctx.warmChecks?.(repo, { branch: projectBranch(registry), checks: registry.verify, expect: "set up" }).catch(() => undefined);
+			// The repo's Gate warms up while agents start, and saves the snapshot containers start from: the first merge is
+			// minutes away, and a fresh install takes them. Without checks too: it lands the batches, and cold, it took a minute.
+			await ctx.warmChecks?.(repo, { branch: projectBranch(registry), checks: containerChecks(registry?.verify), expect: "set up" }).catch(() => undefined);
 			const warnings = grantWarnings(registry?.policy ?? policy);
 			return { repo, branch: projectBranch(registry), policy: registry?.policy ?? policy, verify: registry?.verify ?? [], ...shardingOf(registry), ...(warnings.length ? { warnings } : {}), instructions: INSTRUCTIONS };
 		}
@@ -1000,8 +1003,8 @@ async function runTool(name: string, args: Args, ctx: ToolContext): Promise<unkn
 			if (onActions(verify ?? registered.verify) && !(github ?? (github === null ? null : registered.github))) throw new Error(`[409] checks on GitHub Actions need a connected GitHub repo: set github ("owner/name") too`);
 			await changeSettings(claims, { ...(policy ? { policy } : {}), ...(verify ? { verify } : {}), ...(branchRules ? { branchRules } : {}), ...(skipChecks ? { skipChecks } : {}), ...(github !== undefined ? { github } : {}), ...(stamper?.by ? { by: stamper.by } : {}) });
 			const registry = (await claims.read())?.commit.state;
-			// New checks may install something new: warm the containers for them (on Actions, there are none).
-			if (verify?.length && !onActions(verify)) await ctx.warmChecks?.(repo, { branch: projectBranch(registry), checks: verify, expect: "set up" }).catch(() => undefined);
+			// New checks may install something new: warm the Gate for them (on Actions, it only lands).
+			if (verify) await ctx.warmChecks?.(repo, { branch: projectBranch(registry), checks: containerChecks(verify), expect: "set up" }).catch(() => undefined);
 			const warnings = grantWarnings(registry?.policy ?? DEFAULT_POLICY);
 			return { repo, branch: projectBranch(registry), policy: registry?.policy ?? DEFAULT_POLICY, verify: registry?.verify ?? [], skipChecks: registry?.skipChecks ?? DEFAULT_SKIP_CHECKS, ...(registry?.branchRules?.length ? { branchRules: registry.branchRules } : {}), ...(registry?.github ? { github: registry.github.repo } : {}), ...(warnings.length ? { warnings } : {}) };
 		}
@@ -1106,6 +1109,10 @@ async function runTool(name: string, args: Args, ctx: ToolContext): Promise<unkn
 			const conflicts = outcome.ok ? undefined : outcome.conflicts.map((c) => ({ ...c, path: presentClaim({ paths: [c.path] }, branch).paths[0], held: presentClaim({ paths: [c.held] }, branch).paths[0] }));
 			// Claimed: the source's tip becomes the change's branch in the agent's fork, for review, check and merge like any change.
 			if (outcome.ok && merging) await merging.push(await changeSource(agent, "write"), change);
+			// Without checks in containers, the repo's Gate lands it in a few minutes: warmed from now. Warmed only at its check,
+			// the first batch of 200 agents' run read 3 changes in 61 s, behind the Gate starting cold. (With checks, a claim is
+			// too early to install for: they warm at the check.)
+			if (outcome.ok && !containerChecks(registered?.verify).length) await warmChecks("claimed", change);
 			const merged = merging
 				? { source, head: merging.tip, claimed: paths, note: `${change} merges ${source} at ${merging.tip.slice(0, 8)} into ${into}: its branch changes/${change} is that commit, in your fork. Get it reviewed, check and merge it like any change. If ${source} moves on, claim again to bring the change up to its new tip (a new head, so a new review).` }
 				: {};
@@ -1153,6 +1160,8 @@ async function runTool(name: string, args: Args, ctx: ToolContext): Promise<unkn
 			const link = registry?.github && ctx.github ? await ctx.github(registry.github.repo).catch((err) => (console.error(`reaching ${registry.github!.repo} on GitHub failed`, String(err)), null)) : null;
 			if (onActions(checksHere) && !link) return { ok: false, reasons: [`checks run on GitHub Actions, but ${registry?.github ? `GitHive can't reach ${registry.github.repo}: is the GitHive app installed there?` : "no GitHub repo is connected (settings github)"}`] };
 			const project = await write();
+			// The repo's Gate (a container, real git) reads and lands every batch, checks or not, and does its GitHub pushes.
+			const gate = ctx.batchGit ? ctx.batchGit(repo) : fail(503, "GitHive can't land changes here: no Gate is set up to land them");
 			return mergeChange({
 				remote: project,
 				branch: into,
@@ -1163,15 +1172,13 @@ async function runTool(name: string, args: Args, ctx: ToolContext): Promise<unkn
 				policy: branchSettings(registry, into).policy,
 				verify: branchSettings(registry, into).verify,
 				...(registry?.skipChecks ? { skipChecks: registry.skipChecks } : {}),
-				runChecks: onActions(checksHere) && link ? actionsChecks(project, link) : ctx.runChecks?.(repo),
+				runChecks: onActions(checksHere) && link ? actionsChecks(gate, link) : ctx.runChecks?.(repo),
 				...(ctx.branchHead ? { branchHead: () => ctx.branchHead!(repo, into) } : {}),
 				...(ctx.landing ? { landing: ctx.landing(repo, into) } : {}),
-				// The repo's Gate (a container, real git) reads and lands a batch where the branch has checks, which run in
-				// containers anyway; without checks, the Worker does it in memory (see memoryBatchGit), and no container runs.
-				...(ctx.batchGit && checksHere?.length && !onActions(checksHere) ? { batchGit: ctx.batchGit(repo) } : {}),
+				batchGit: gate,
 				...(ctx.prepareChecks && !onActions(checksHere) ? { prepareChecks: ctx.prepareChecks(repo) } : {}),
 				// The project's branch, landed, pushed back to GitHub (a fast-forward; refused if someone pushed there directly).
-				...(link && into === branch ? { afterLanding: (commit: string) => mirrorTo(project, link, into, commit) } : {}),
+				...(link && into === branch ? { afterLanding: (commit: string) => mirrorTo(gate, link, into, commit) } : {}),
 				// The other changes into the branch, as kept a moment (the batch checks each again): claims in force whose
 				// dependencies have merged, with their heads.
 				others: async (): Promise<Candidate[]> => {

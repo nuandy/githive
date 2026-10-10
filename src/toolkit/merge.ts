@@ -1,5 +1,4 @@
-import git from "isomorphic-git";
-import { BOT, branchHead, inWorkspaceTurn, type Remote, Workspace } from "../git";
+import { branchHead, inWorkspaceTurn, type Remote, Workspace } from "../git";
 import { inLane } from "../claim-paths";
 import { skipsChecks } from "./check-scope";
 import type { ClaimRecord } from "./claims";
@@ -84,10 +83,12 @@ export type BatchSource = Omit<BatchChange, "head">;
 export type Inspected = { change: string; head: string; files: string[] } | { change: string; error: string };
 
 /**
- * A batch's git work. Live, in the repo's own Gate's container: real git on a
- * disk, in a container that never runs a change's code, so what it reads and
- * pushes can be trusted (see gate.ts). Without one, in memory here (see
- * memoryBatchGit).
+ * A batch's git work, in the repo's own Gate's container: real git on a disk,
+ * in a container that never runs a change's code, so what it reads and pushes
+ * can be trusted (see gate.ts). Landed in a Worker's memory instead, batches
+ * of 60 ran out of it (run 217), and small ones were slower than the Gate's
+ * (agents-6): the copy of the repo was made again in each new isolate, and
+ * changes were fetched one at a time.
  */
 export interface BatchGit {
 	/** Each change's head now and the files it changed since it left `base`. */
@@ -98,7 +99,15 @@ export interface BatchGit {
 	 * GitHive's stamp as `by`, in one push. Their commits, or "moved" if the
 	 * branch isn't at `base` any more.
 	 */
-	land(input: { base: string; branch: string; merges: (BatchChange & { claimed: Omit<MergeClaim, "base"> })[]; by?: string }): Promise<{ commits: string[] } | "moved">;
+	land(input: { base: string; branch: string; merges: (BatchChange & { claimed: Omit<MergeClaim, "base"> })[]; by?: string; stamper?: Stamper }): Promise<{ commits: string[] } | "moved">;
+	/**
+	 * `changes` merged onto `base` as they'd land, each its own merge, pushed to
+	 * `ref` on `to` (a connected GitHub repo, for its Actions): the tip, or why
+	 * it couldn't be.
+	 */
+	checksBranch(input: { base: string; branch: string; changes: BatchChange[]; to: Remote; ref: string }): Promise<{ tip: string } | { failed: string }>;
+	/** Push `branch` at `head` to `to` as a fast-forward only (GitHub's copy): refused, it throws. */
+	pushBranch(input: { branch: string; head: string; to: Remote }): Promise<void>;
 }
 
 /** Another change that may land with this one: its claim, its head as last seen, and where its branch lives. */
@@ -197,8 +206,8 @@ export interface MergeInput {
 	others?: () => Promise<Candidate[]>;
 	/** The branch's lease, and what changes came to (absent: kept for this merge only). */
 	landing?: Landing;
-	/** Where a batch's git work runs (absent: in memory, here). */
-	batchGit?: BatchGit;
+	/** Where a batch's git work runs: the repo's own Gate (see BatchGit). */
+	batchGit: BatchGit;
 	/** Start the container of a batch's first check (`gate`, see Place) while the batch is read, so the check finds it running. */
 	prepareChecks?: (gate: string) => Promise<void>;
 	/** The most changes in a batch, below what batchSize says (tests set a few, to make batches follow each other). */
@@ -412,7 +421,7 @@ async function landBatch(input: MergeInput, landing: Landing, holding: Holding, 
 		// Read now, not as kept a moment for the crowd asking (see branchHead): the batch before may have landed a second ago,
 		// and a batch built on the main before it is refused at its push, its gathering lost (47 s of 200 agents' run).
 		const main = (await branchHead(input.remote, input.branch)) ?? fail409(`there's no branch ${input.branch}`);
-		const batchGit = input.batchGit ?? memoryBatchGit(input.remote, input.stamper);
+		const batchGit = input.batchGit;
 		// About one failure per batch, from what the branch's recent changes came to (see batchSize). Without checks nothing
 		// fails a batch, so it takes all that's ready: in 200 agents' run, batches of 24 and 52 left 130 ready changes waiting.
 		const size = Math.min(input.verify?.length ? batchSize((await landing.view()).recent) : MAX_BATCH, input.maxBatch ?? MAX_BATCH);
@@ -565,7 +574,8 @@ async function land(input: MergeInput, landing: Landing, batchGit: BatchGit, mai
 				...(tested && heads.length > 1 ? { testedWith: heads } : {}),
 			},
 		})),
-		...(input.stamper ? { by: input.stamper.by } : {}),
+		// The Gate stamps with GitHive's key as `by`; an implementation in this process (a test's) with the stamper itself.
+		...(input.stamper ? { by: input.stamper.by, stamper: input.stamper } : {}),
 	});
 	if (landed === "moved") return null;
 	const { commits } = landed;
@@ -722,73 +732,6 @@ async function validated(input: MergeInput, c: BatchSource & { head: string; fil
 	// None for a change that only touches what the checks skip (documentation and the like: see check-scope.ts).
 	const skipped = !!input.verify?.length && skipsChecks(files, input.skipChecks);
 	return { ok: true, ready: { change: c.change, agent: c.agent, head, ref: c.ref, ...(c.source ? { source: c.source } : {}), files, scoped, claims, own, votes, skipped } };
-}
-
-/**
- * A batch's git work in memory, here, in the Worker: for a branch without
- * checks (no container need run anything, so none does), and in tests. One
- * request does every change's share, so the Worker's CPU limit is raised for it
- * (wrangler.jsonc, limits.cpu_ms).
- */
-export function memoryBatchGit(remote: Remote, stamper?: Stamper): BatchGit {
-	return {
-		inspect: async ({ base, branch, changes }) => {
-			const ws = await Workspace.at(remote, branch, base);
-			const read: Inspected[] = [];
-			// One at a time: they fetch into one workspace.
-			for (const c of changes) {
-				try {
-					const head = await ws.fetch(`change-${c.change}`, c.source ?? remote, c.ref);
-					read.push({ change: c.change, head, files: await ws.changedPaths(await ws.mergeBase(base, head), head) });
-				} catch (err) {
-					read.push({ change: c.change, error: String(err) });
-				}
-			}
-			return read;
-		},
-		land: async ({ base, branch, merges }) => {
-			const ws = await Workspace.at(remote, branch, base);
-			if ((await ws.head()) !== base) return "moved";
-			const commits: string[] = [];
-			for (const m of merges) {
-				await ws.fetch(`change-${m.change}`, m.source ?? remote, m.ref);
-				const message = await mergeMessage({ ...m.claimed, base: await ws.head() }, stamper);
-				// Always a merge commit, never a fast-forward: the merge's trailers are what the audit reads.
-				const { oid } = await git.merge({ fs: ws.fs, dir: "/repo", ours: ws.branch, theirs: m.head, message, author: BOT, fastForward: false, abortOnConflict: true });
-				if (!oid) throw new Error(`merging ${m.change} made no commit`);
-				commits.push(oid);
-			}
-			// Only onto the base: a push alone refuses only what isn't a fast-forward, and a change branched from a newer main
-			// would make this one a fast-forward of it. isomorphic-git can't push with a lease, so it looks just before, and
-			// its push names the head it saw then (the server takes it only from there); the branch's lease keeps other
-			// batches off meanwhile. A repo takes one push at a time: refused as busy, it's tried again, waiting longer each
-			// time, as the Gate's is (taken for "moved", the batch was gathered again for nothing).
-			for (let attempt = 1; ; attempt++) {
-				if ((await branchHead(remote, branch)) !== base) return "moved";
-				try {
-					await ws.push();
-					return { commits };
-				} catch (err) {
-					if (pushRefusedBusy(err) && attempt < PUSH_TRIES) {
-						await new Promise((resolve) => setTimeout(resolve, PUSH_RETRY_MS * 1.6 ** attempt * (0.75 + Math.random() / 2)));
-						continue;
-					}
-					if (err instanceof git.Errors.PushRejectedError || err instanceof git.Errors.GitPushError) return "moved";
-					throw err;
-				}
-			}
-		},
-	};
-}
-
-/** How many times a batch's push is made while its repo is busy with another (the Gate's too), and the first wait. */
-const PUSH_TRIES = 8;
-const PUSH_RETRY_MS = 1_500;
-
-/** Whether Artifacts refused a push only because the repo was busy with another (it answers ERR artifacts_git_receive_pack_busy). */
-export function pushRefusedBusy(err: unknown) {
-	const said = `${err instanceof Error ? err.message : String(err)} ${JSON.stringify((err as { data?: unknown } | null)?.data ?? "")}`;
-	return /receive_pack_busy/.test(said);
 }
 
 /** `f` over `items`, at most `n` at once; the results in the items' order. */

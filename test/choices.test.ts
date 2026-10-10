@@ -13,6 +13,7 @@ import { memoryLanding } from "../src/toolkit/landing";
 import { type ReviewHolds, reviewHolds, reviewsRef } from "../src/toolkit/review-holds";
 import { pushChange } from "./helpers/agents";
 import { startGitServer, type GitServer } from "./helpers/git-server";
+import { memoryBatchGit } from "./helpers/memory-batch-git";
 
 // Agents without set roles look and choose: reviews lists the reviews an
 // agent may give (never its own; a role that can block only if it holds it),
@@ -159,6 +160,7 @@ describe("review holds through the toolkit", { timeout: 120_000 }, () => {
 			const reviews = reviewHolds((repo) => new GitCasLog<ReviewHolds>(async () => ({ url: server.url, token: "unused" }), repo, reviewsRef(repo)));
 			const ctx = (agentKey?: string): ToolContext => ({
 				remote: async () => ({ url: server.url, token: "unused" }),
+				batchGit: () => memoryBatchGit({ url: server.url, token: "unused" }),
 				changeRemote: async () => ({ url: server.url, token: "unused" }),
 				head: async () => server.git("rev-parse", "main").trim(),
 				reviews,
@@ -201,7 +203,7 @@ describe("review holds through the toolkit", { timeout: 120_000 }, () => {
 });
 
 describe("warming the checks when a merge is near", { timeout: 60_000 }, () => {
-	it("warms at the start, after a check and after an approval, where the repo has checks", async () => {
+	it("warms at the start, after a check and after an approval; without checks, for landing, from the claim on too", async () => {
 		const server = await startGitServer();
 		const work = mkdtempSync(join(tmpdir(), "githive-warm-"));
 		try {
@@ -209,6 +211,7 @@ describe("warming the checks when a merge is near", { timeout: 60_000 }, () => {
 			const heads: Record<string, string> = {};
 			const ctx = (agentKey?: string): ToolContext => ({
 				remote: async () => ({ url: server.url, token: "unused" }),
+				batchGit: () => memoryBatchGit({ url: server.url, token: "unused" }),
 				changeRemote: async () => ({ url: server.url, token: "unused" }),
 				head: async () => server.git("rev-parse", "main").trim(),
 				warmChecks: async (_repo, input) => void warmed.push(input),
@@ -225,12 +228,17 @@ describe("warming the checks when a merge is near", { timeout: 60_000 }, () => {
 				await call(repo, "vote", { commit: head, reviewer: "rev", role: "review", verdict: "approve", evidence: "ok" });
 				await call(repo, "vote", { commit: head, reviewer: "rev-2", role: "review", verdict: "reject", evidence: "no" });
 			}
-			// The start, the check and the approval warm, each saying what merge to expect; the rejection and the repo without
-			// checks don't: without checks no container runs (a batch lands in the Worker, the audit reads through Artifacts).
+			// The start, the check and the approval warm, each saying what merge to expect; the rejection doesn't. Without checks
+			// the repo's Gate still lands the batch: it warms at the start (for the snapshot a cold Gate restores) and from the
+			// claim on (the Gate passes over these once it has the snapshot).
 			expect(warmed).toEqual([
 				{ branch: "main", checks: ["npm test"], expect: "set up" },
 				{ branch: "main", checks: ["npm test"], expect: "checked", key: "c-checked" },
 				{ branch: "main", checks: ["npm test"], expect: "approved", key: heads.checked },
+				{ branch: "main", checks: [], expect: "set up" },
+				{ branch: "main", checks: [], expect: "claimed", key: "c-unchecked" },
+				{ branch: "main", checks: [], expect: "checked", key: "c-unchecked" },
+				{ branch: "main", checks: [], expect: "approved", key: heads.unchecked },
 			]);
 		} finally {
 			await server.close();
@@ -247,6 +255,7 @@ describe("a review a role waits for too long", { timeout: 120_000 }, () => {
 			const reviews = reviewHolds((repo) => new GitCasLog<ReviewHolds>(async () => ({ url: server.url, token: "unused" }), repo, reviewsRef(repo)));
 			const ctx = (agentKey?: string): ToolContext => ({
 				remote: async () => ({ url: server.url, token: "unused" }),
+				batchGit: () => memoryBatchGit({ url: server.url, token: "unused" }),
 				changeRemote: async () => ({ url: server.url, token: "unused" }),
 				head: async () => server.git("rev-parse", "main").trim(),
 				reviews,
@@ -294,6 +303,7 @@ describe("open changes' heads, as GitHive last saw them", { timeout: 120_000 }, 
 			let failing = "";
 			const ctx = (agentKey?: string): ToolContext => ({
 				remote: async () => ({ url: server.url, token: "unused" }),
+				batchGit: () => memoryBatchGit({ url: server.url, token: "unused" }),
 				changeRemote: async (_repo, agent) => {
 					forkReads++;
 					if (agent === failing) throw new Error("[500] Artifacts is busy");
@@ -348,6 +358,7 @@ describe("news of main moving", { timeout: 120_000 }, () => {
 			const asked: string[] = [];
 			const ctx = (agentKey?: string): ToolContext => ({
 				remote: async () => ({ url: server.url, token: "unused" }),
+				batchGit: () => memoryBatchGit({ url: server.url, token: "unused" }),
 				changeRemote: async () => ({ url: server.url, token: "unused" }),
 				head: async () => server.git("rev-parse", "main").trim(),
 				news: async (_repo, branch, agent) => (asked.push(`${branch} ${agent}`), [{ change: "c-7", agent: "agent-b", at: "2026-10-10T10:00:00.000Z", commit: "2f56723d0000", files: ["src/billing/invoice.ts"], intent: "add partial refunds" }]),
@@ -373,6 +384,7 @@ describe("a change that landed before its claim was released", { timeout: 120_00
 			const landing = memoryLanding();
 			const ctx = (agentKey?: string): ToolContext => ({
 				remote: async () => ({ url: server.url, token: "unused" }),
+				batchGit: () => memoryBatchGit({ url: server.url, token: "unused" }),
 				changeRemote: async () => ({ url: server.url, token: "unused" }),
 				head: async () => server.git("rev-parse", "main").trim(),
 				landing: () => landing,
@@ -412,6 +424,7 @@ describe("agents choosing through the toolkit", { timeout: 120_000 }, () => {
 	it("lets two agents with no roles build from the backlog, review each other's, and merge", async () => {
 		const ctx = (agentKey?: string): ToolContext => ({
 			remote: async () => ({ url: server.url, token: "unused" }),
+			batchGit: () => memoryBatchGit({ url: server.url, token: "unused" }),
 			changeRemote: async () => ({ url: server.url, token: "unused" }),
 			head: async () => server.git("rev-parse", "main").trim(),
 			...(agentKey ? { agentKey } : {}),
