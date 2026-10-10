@@ -57,36 +57,9 @@ export function RepoAdmin({
 }) {
 	const admin = canAdminister(access?.level);
 	const loose = isLoose(repo);
-	const [collaborators, setCollaborators] = useState<Collaborator[] | undefined>(undefined);
-	const [listError, setListError] = useState<string | null>(null);
 	const { run, busy, confirming, setConfirming, errorFor } = useRowActions();
-	const [handle, setHandle] = useState("");
-	const [level, setLevel] = useState<Level>("write");
-	const [typed, setTyped] = useState("");
-
-	const load = () =>
-		manage.collaborators(repo).then(
-			(list) => {
-				setCollaborators(list);
-				setListError(null);
-			},
-			(err: unknown) => setListError(messageOf(err)),
-		);
-	useEffect(() => {
-		if (admin && !loose) void load();
-	}, [admin, loose, repo]);
 
 	const runProps = { run, busy, errorFor };
-
-	const add = async (event: FormEvent) => {
-		event.preventDefault();
-		if (!handle.trim()) return;
-		const ok = await run("add", () => manage.setCollaborator(repo, handle.trim().toLowerCase(), level));
-		if (ok) {
-			setHandle("");
-			await load();
-		}
-	};
 
 	return (
 		<section className="box" aria-labelledby="repo-access">
@@ -112,72 +85,112 @@ export function RepoAdmin({
 			</div>
 
 			{admin && !loose ? (
-				<>
-					<div className="box__header">
-						<h2 id="repo-collaborators">Collaborators</h2>
-					</div>
-					{listError ? <p className="box__row error">{listError}</p> : null}
-					{collaborators === undefined && !listError ? <p className="box__row muted">Loading…</p> : null}
-					{collaborators?.length === 0 ? (
-						<p className="box__row muted">No collaborators: the owner's members have what the owner gives them.</p>
-					) : null}
-					<ul className="manage__rows" aria-labelledby="repo-collaborators">
-						{(collaborators ?? []).map((collaborator) => (
-							<CollaboratorRow
-								key={collaborator.handle}
-								{...runProps}
-								repo={repo}
-								collaborator={collaborator}
-								manage={manage}
-								reload={load}
-								confirming={confirming}
-								setConfirming={setConfirming}
-							/>
-						))}
-					</ul>
-					<form className="box__body manage__form" onSubmit={add}>
-						<div className="manage__inline">
-							<label className="sr-only" htmlFor="collab-handle">
-								Handle
-							</label>
-							<input
-								id="collab-handle"
-								type="text"
-								value={handle}
-								onChange={(event) => setHandle(event.target.value)}
-								placeholder="Their handle"
-								autoComplete="off"
-								spellCheck={false}
-							/>
-							<label className="sr-only" htmlFor="collab-level">
-								Permission
-							</label>
-							<select id="collab-level" value={level} onChange={(event) => setLevel(event.target.value as Level)}>
-								<LevelOptions />
-							</select>
-							<button type="submit" className="accent" disabled={!handle.trim() || busy === "add"}>
-								Add collaborator
-							</button>
-						</div>
-						<p className="manage__hint">
-							They need to have signed in to GitHive once. Their agents act with the same permission.
-						</p>
-						{errorFor("add")}
-					</form>
-				</>
+				<CollaboratorsSection
+					{...runProps}
+					repo={repo}
+					manage={manage}
+					confirming={confirming}
+					setConfirming={setConfirming}
+				/>
 			) : null}
 
 			{admin ? (
-				<DeleteRepository
-					{...runProps}
-					repo={repo}
-					typed={typed}
-					setTyped={setTyped}
-					deleteRepo={() => manage.deleteRepo(repo)}
-					onDeleted={onDeleted}
-				/>
+				<DeleteRepository {...runProps} repo={repo} deleteRepo={() => manage.deleteRepo(repo)} onDeleted={onDeleted} />
 			) : null}
 		</section>
+	);
+}
+
+interface CollaboratorsSectionProps extends RunProps {
+	repo: string;
+	manage: RepoManageApi;
+	confirming: string | null;
+	setConfirming: (id: string | null) => void;
+}
+
+/** The repo's collaborators, each with their permission, and a form to add one. */
+function CollaboratorsSection({ repo, manage, confirming, setConfirming, ...runProps }: CollaboratorsSectionProps) {
+	const { run, busy, errorFor } = runProps;
+	const [collaborators, setCollaborators] = useState<Collaborator[] | undefined>(undefined);
+	const [listError, setListError] = useState<string | null>(null);
+	const [handle, setHandle] = useState("");
+	const [level, setLevel] = useState<Level>("write");
+	const load = () =>
+		manage.collaborators(repo).then(
+			(list) => {
+				setCollaborators(list);
+				setListError(null);
+			},
+			(err: unknown) => setListError(messageOf(err)),
+		);
+	useEffect(() => {
+		void load();
+	}, [repo]);
+
+	const add = async (event: FormEvent) => {
+		event.preventDefault();
+		if (!handle.trim()) return;
+		const ok = await run("add", () => manage.setCollaborator(repo, handle.trim().toLowerCase(), level));
+		if (ok) {
+			setHandle("");
+			await load();
+		}
+	};
+
+	return (
+		<>
+			<div className="box__header">
+				<h2 id="repo-collaborators">Collaborators</h2>
+			</div>
+			{listError ? <p className="box__row error">{listError}</p> : null}
+			{collaborators === undefined && !listError ? <p className="box__row muted">Loading…</p> : null}
+			{collaborators?.length === 0 ? (
+				<p className="box__row muted">No collaborators: the owner's members have what the owner gives them.</p>
+			) : null}
+			<ul className="manage__rows" aria-labelledby="repo-collaborators">
+				{(collaborators ?? []).map((collaborator) => (
+					<CollaboratorRow
+						key={collaborator.handle}
+						{...runProps}
+						repo={repo}
+						collaborator={collaborator}
+						manage={manage}
+						reload={load}
+						confirming={confirming}
+						setConfirming={setConfirming}
+					/>
+				))}
+			</ul>
+			<form className="box__body manage__form" onSubmit={add}>
+				<div className="manage__inline">
+					<label className="sr-only" htmlFor="collab-handle">
+						Handle
+					</label>
+					<input
+						id="collab-handle"
+						type="text"
+						value={handle}
+						onChange={(event) => setHandle(event.target.value)}
+						placeholder="Their handle"
+						autoComplete="off"
+						spellCheck={false}
+					/>
+					<label className="sr-only" htmlFor="collab-level">
+						Permission
+					</label>
+					<select id="collab-level" value={level} onChange={(event) => setLevel(event.target.value as Level)}>
+						<LevelOptions />
+					</select>
+					<button type="submit" className="accent" disabled={!handle.trim() || busy === "add"}>
+						Add collaborator
+					</button>
+				</div>
+				<p className="manage__hint">
+					They need to have signed in to GitHive once. Their agents act with the same permission.
+				</p>
+				{errorFor("add")}
+			</form>
+		</>
 	);
 }
 
@@ -269,23 +282,12 @@ function CollaboratorRow({
 
 interface DeleteRepositoryProps extends RunProps {
 	repo: string;
-	/** What's typed to confirm, which must be the repo's name. */
-	typed: string;
-	setTyped: (typed: string) => void;
 	deleteRepo: () => Promise<unknown>;
 	onDeleted: () => void;
 }
 
-function DeleteRepository({
-	repo,
-	typed,
-	setTyped,
-	deleteRepo,
-	onDeleted,
-	run,
-	busy,
-	errorFor,
-}: DeleteRepositoryProps) {
+function DeleteRepository({ repo, deleteRepo, onDeleted, run, busy, errorFor }: DeleteRepositoryProps) {
+	const [typed, setTyped] = useState("");
 	const remove = () => run("delete", deleteRepo).then((ok) => ok && onDeleted());
 	return (
 		<div className="box__body manage__form manage__danger">
