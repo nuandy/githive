@@ -144,3 +144,10 @@ export async function retryTransient<T>(operation: () => Promise<T>, options: Re
 		}
 	}
 }
+
+/** A fetch refused because a ref moved after it was listed, so its old tip is no longer served. */
+export const refMoved = (error: unknown) => /not our ref|fetch refused/i.test(String(error));
+
+/** Runs a list-then-fetch again, up to three times in all, while a listed ref moves before it's fetched. */
+export const whileRefsMove = <T>(listThenFetch: () => Promise<T>) =>
+	retryTransient(listThenFetch, { maxAttempts: 3, retryable: refMoved, baseDelayMs: 0 });

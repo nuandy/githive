@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isTransientFailure, retryTransient } from "../src/retry";
+import { isTransientFailure, retryTransient, whileRefsMove } from "../src/retry";
 
 describe("retryTransient", () => {
 	it("retries transient failures with capped exponential delays and returns the successful value", async () => {
@@ -65,5 +65,37 @@ describe("retryTransient", () => {
 			),
 		).rejects.toBe(failure);
 		expect(attempts).toBe(3);
+	});
+});
+
+describe("whileRefsMove", () => {
+	const moved = () => new Error("fetch failed: want 1a2b not our ref");
+
+	it("lists and fetches again while a ref moves, up to three times in all", async () => {
+		let attempts = 0;
+		const twice = async () => {
+			if (++attempts < 3) throw moved();
+			return "fetched";
+		};
+		await expect(whileRefsMove(twice)).resolves.toBe("fetched");
+		expect(attempts).toBe(3);
+
+		attempts = 0;
+		const always = async () => {
+			attempts++;
+			throw moved();
+		};
+		await expect(whileRefsMove(always)).rejects.toThrow("not our ref");
+		expect(attempts).toBe(3);
+	});
+
+	it("doesn't retry any other failure", async () => {
+		let attempts = 0;
+		const failing = async () => {
+			attempts++;
+			throw new Error("repository not found");
+		};
+		await expect(whileRefsMove(failing)).rejects.toThrow("repository not found");
+		expect(attempts).toBe(1);
 	});
 });
