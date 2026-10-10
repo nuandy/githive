@@ -5,4 +5,4 @@ node_modules/
 web/dist/
 
 # Agent keys written by the bench scripts
-bench-results/agents/keys-*/
+bench-results/**/keys-*/
