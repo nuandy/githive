@@ -121,7 +121,9 @@ describe("the shape of GitHive's records", () => {
 		const fixture = JSON.parse(readFileSync(FIXTURE, "utf8"));
 		expect(
 			pinned,
-			"A record's shape changed. Records already in repos keep the old shape: bump RECORD_FORMAT in src/record-format.ts, add an upgrade from the old format, then run with UPDATE_RECORD_SHAPES=1.",
+			"A record's shape changed. Records already in repos keep the old shape: bump RECORD_FORMAT in " +
+				"src/record-format.ts, add an upgrade from the old format, then run with " +
+				"UPDATE_RECORD_SHAPES=1.",
 		).toEqual(fixture);
 	});
 });

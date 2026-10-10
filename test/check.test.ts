@@ -67,7 +67,7 @@ describe("an early check", { timeout: 60_000 }, () => {
 		return server.git("rev-parse", "main").trim();
 	}
 
-	it("reads the change through Artifacts' API, nothing fetched, when no file changed on both sides, and says what git says", async () => {
+	it("reads the change through Artifacts' API, fetching nothing, when no file changed on both sides", async () => {
 		const remote = { url: server.url, token: "unused" };
 		const head = await pushChange(server.url, work, "agent-a", "a-1", { "src/a.txt": "a\n", "lib/x.txt": "x\n" });
 		const main = await mainMoves({ "src/other.txt": "other\n" });

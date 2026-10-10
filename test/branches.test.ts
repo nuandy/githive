@@ -132,7 +132,7 @@ describe.each([
 			});
 		});
 
-		it("starts from that branch, is checked against it, and merges onto it, leaving the project's branch alone", async () => {
+		it("starts from that branch, is checked against and merged onto it, leaving the project's branch alone", async () => {
 			await call(
 				"claim",
 				{ change: "f1", agent: "a", paths: ["src/f/"], intent: "f", into: "feature/dude", from: "main" },

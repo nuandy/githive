@@ -81,7 +81,7 @@ describe("forks (the default)", () => {
 		expect(forkRequests).toEqual([{ agent: "agent-a", scope: "read" }]);
 	});
 
-	it("gives an agent read access to the project, and write access only to its own fork, shared by its changes", async () => {
+	it("gives an agent read access to the project and write access only to its own fork, for every change", async () => {
 		expect(await call("credentials", {})).toEqual({
 			url: project.url,
 			token: "read",
@@ -158,7 +158,7 @@ describe("forks (the default)", () => {
 });
 
 describe("status", () => {
-	it("tells an agent where its change stands: its claim, its branch head, the votes on it, and what's still needed", async () => {
+	it("tells an agent where its change stands: its claim, branch head, votes, and what's still needed", async () => {
 		await call("settings", { required: 1 });
 		await call("claim", { change: "a-1", agent: "agent-a", paths: ["src/a/"], intent: "a" });
 		expect(await call("status", { change: "a-1" })).toMatchObject({
@@ -191,7 +191,7 @@ describe("status", () => {
 		});
 	}, 60_000);
 
-	it("reads a change's head through Artifacts' API, one log on its agent's fork, without a token or a Git listing", async () => {
+	it("reads a change's head with one Artifacts log on its agent's fork, without a token or Git listing", async () => {
 		await call("settings", {});
 		await call("claim", { change: "a-1", agent: "agent-a", paths: ["src/a/"], intent: "a" });
 		const asked: string[] = [];

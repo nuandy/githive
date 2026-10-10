@@ -99,7 +99,7 @@ describe("GitHive's MCP tools", () => {
 		});
 	});
 
-	it("starts GitHive on a repo with its first settings, then changes them, keeping what it leaves out, and says so in the records", async () => {
+	it("starts GitHive with its first settings, then changes them, keeping what's left out, recording each", async () => {
 		// The first settings start GitHive on the repo, and tell the caller how agents work in it.
 		expect(
 			await call("settings", { repo: "project", required: 2, vetoes: ["security"], verify: ["npm test"] }),
@@ -171,7 +171,7 @@ describe("GitHive's MCP tools", () => {
 		expect(await call("audit", { repo: "project" })).toEqual({ merges: 0, open: 0, violations: [] });
 	});
 
-	it("releases nothing as abandoned while its head can't be read: live work isn't released on a failed read", async () => {
+	it("releases nothing as abandoned while its head can't be read", async () => {
 		await call("settings", { repo: "project" });
 		const registry = new GitCasLog<Registry>(
 			async () => ({ url: server.url, token: "unused" }),
@@ -298,7 +298,7 @@ describe("GitHive's MCP tools", () => {
 		expect(await openCount(ctx().toolkit, "elsewhere")).toBeNull();
 	});
 
-	it("asks GitHive's hosted reviewers to review a claimed change, by default a general review and every veto role", async () => {
+	it("asks hosted reviewers to review a claimed change, by default a general review and every veto role", async () => {
 		reviewRequests = [];
 		await call("settings", { repo: "project", required: 2, vetoes: ["security"] });
 		await call("claim", { repo: "project", change: "a-1", agent: "agent-a", paths: ["src/a/"], intent: "a" });

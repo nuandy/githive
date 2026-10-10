@@ -147,7 +147,8 @@ describe("reading and landing a batch in the repo's own Gate", { timeout: 60_000
 				.git(
 					"log",
 					"-1",
-					"--format=%an <%ae>%n%(trailers:key=GitHive-Change,valueonly)%(trailers:key=GitHive-Tested-With,valueonly)",
+					"--format=%an " +
+						"<%ae>%n%(trailers:key=GitHive-Change,valueonly)%(trailers:key=GitHive-Tested-With,valueonly)",
 					second,
 				)
 				.trim()
@@ -219,7 +220,7 @@ describe("reading and landing a batch in the repo's own Gate", { timeout: 60_000
 		});
 	});
 
-	it("leaves the audit's reading to Artifacts' API: the branch's merges read exactly as git and the in-memory reader tell them", async () => {
+	it("leaves the audit's reading to Artifacts' API, which reads the branch's merges exactly as git does", async () => {
 		const main = server.git("rev-parse", "main").trim();
 		const a = await pushChange(server.url, work, "agent-a-1", "a-1", { "src/a.txt": "a\n", "src/deep/x.txt": "x\n" });
 		const b = await pushChange(server.url, work, "agent-b-1", "b-1", { "src/b.txt": "b\n" });
@@ -283,7 +284,7 @@ describe("reading and landing a batch in the repo's own Gate", { timeout: 60_000
 		expect(treesRead).toBe(before);
 	});
 
-	it("builds a batch's commit for GitHub Actions, each change its own merge onto main, and pushes it to GitHub", async () => {
+	it("builds a batch's commit for GitHub Actions, each change its own merge onto main, and pushes it", async () => {
 		const main = server.git("rev-parse", "main").trim();
 		const a = await pushChange(server.url, work, "agent-a-1", "a-1", { "src/a.txt": "a\n" });
 		const b = await pushChange(server.url, work, "agent-b-1", "b-1", { "src/b.txt": "b\n" });

@@ -238,7 +238,8 @@ function nextForStatus(status, repo) {
 	const plural = needed === 1 ? "" : "s";
 	const awaiting = approval.awaiting?.length ? ` (${approval.awaiting.join(", ")})` : "";
 	next(
-		`waiting on ${needed || "more"} approval${plural}${awaiting}; meanwhile review others': githive reviews ${repo}`,
+		`waiting on ${needed || "more"} approval${plural}${awaiting}; meanwhile review others': githive ` +
+			`reviews ${repo}`,
 	);
 }
 
@@ -357,7 +358,8 @@ async function pushToFork(local, repo, change) {
 		if (/shallow/i.test(err.stderr ?? "") && unshallow(".")) push();
 		else if (/rejected|non-fast-forward|fetch first/i.test(err.stderr ?? ""))
 			throw new Error(
-				`your fork's ${branch} has commits you don't: git fetch fork && git merge fork/${branch}, then githive land`,
+				`your fork's ${branch} has commits you don't: git fetch fork && git merge fork/${branch}, ` +
+					"then githive land",
 			);
 		else throw err;
 	}
@@ -380,7 +382,8 @@ async function checkChange(repo, change) {
 	if (checked.outsideClaim?.length) {
 		say(`${short(checked.head)} changes files outside your claim: ${checked.outsideClaim.join(" ")}`);
 		next(
-			`claim them too (githive start ${repo} ${change} "<intent>" <your paths> <these>), or take them out of the change`,
+			`claim them too (githive start ${repo} ${change} "<intent>" <your paths> <these>), or take ` +
+				"them out of the change",
 		);
 		process.exitCode = 1;
 		return false;
@@ -557,7 +560,8 @@ async function reviewChange() {
 	say(`reviewing ${change} by ${access.author} at ${short(head)} as ${role}, in ${dir}`, stat || "(no changes)");
 	const roleFlag = role !== "review" ? ` --role ${role}` : "";
 	next(
-		`read it: git -C ${dir} diff ${base}...HEAD; then githive vote ${repo} ${head} approve|reject "<evidence>"${roleFlag}`,
+		`read it: git -C ${dir} diff ${base}...HEAD; then githive vote ${repo} ${head} approve|reject ` +
+			`"<evidence>"${roleFlag}`,
 	);
 }
 

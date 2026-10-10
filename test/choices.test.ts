@@ -153,7 +153,8 @@ describe("the reviews an agent may give", () => {
 			{ change: "deps", role: "security" },
 			{ change: "plain", role: "review" },
 		]);
-		// Anyone else gets ordinary reviews only. Once deps has its ordinary approvals, only the security holder is offered it.
+		// Anyone else gets ordinary reviews only. Once deps has its ordinary approvals, only the security holder is
+		// offered it.
 		const deps = [vote("h1", "agent-w"), vote("h2", "agent-w"), vote("h2", "agent-v")];
 		expect(reviewsFor(base({ policy, open, votes: deps }))).toEqual([]);
 		expect(reviewsFor(base({ agent: "sec-agent", policy, open, votes: deps }))).toMatchObject([
@@ -333,7 +334,7 @@ describe("review holds through the toolkit", { timeout: 120_000 }, () => {
 });
 
 describe("warming the checks when a merge is near", { timeout: 60_000 }, () => {
-	it("warms at the start with checks, after a check and after an approval; without checks, for landing, from the claim on, never at the start", async () => {
+	it("warms for checks at the start, on status and on approval; for landing, from the claim on", async () => {
 		const server = await startGitServer();
 		const work = mkdtempSync(join(tmpdir(), "githive-warm-"));
 		try {
@@ -456,7 +457,9 @@ describe("a review a role waits for too long", { timeout: 120_000 }, () => {
 });
 
 describe("open changes' heads, as GitHive last saw them", { timeout: 120_000 }, () => {
-	it("reads a few unseen ones a call, none once all were seen lately, takes check's, keeps one a failed read can't tell, and trusts a pushed one longer", async () => {
+	// A few unseen heads are read a call, none once all were seen lately. A head status read is taken as is,
+	// a failed read keeps what was known, and a pushed head is trusted longer.
+	it("reads a few heads a call and keeps what it knew when a read fails", async () => {
 		const server = await startGitServer();
 		const work = mkdtempSync(join(tmpdir(), "githive-heads-"));
 		try {

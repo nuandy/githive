@@ -25,7 +25,10 @@ async function appKey() {
 		["sign", "verify"],
 	)) as CryptoKeyPair;
 	const der = new Uint8Array((await crypto.subtle.exportKey("pkcs8", pair.privateKey)) as ArrayBuffer);
-	const pem = `-----BEGIN PRIVATE KEY-----\n${btoa(String.fromCharCode(...der)).replace(/(.{64})/g, "$1\n")}\n-----END PRIVATE KEY-----\n`;
+	const pem =
+		`-----BEGIN PRIVATE KEY-----\n` +
+		`${btoa(String.fromCharCode(...der)).replace(/(.{64})/g, "$1\n")}\n` +
+		`-----END PRIVATE KEY-----\n`;
 	return { pem, publicKey: pair.publicKey };
 }
 
@@ -140,7 +143,7 @@ describe("a repo connected to GitHub", { timeout: 60_000 }, () => {
 	const project = () => ({ url: server.url, token: "unused" });
 	const timing = { pollMs: 5, firstRunWithinMs: 200, runsWithinMs: 2_000 };
 
-	it("checks a batch on Actions: its merged result pushed to githive/checks/<id>, passing when every run succeeds", async () => {
+	it("checks a batch on Actions, pushing its merged result to githive/checks/<id>: every run must pass", async () => {
 		const main = server.git("rev-parse", "main").trim();
 		const a = await pushChange(server.url, work, "agent-a", "a-1", { "src/a.txt": "a\n" });
 		const b = await pushChange(server.url, work, "agent-b", "b-1", { "src/b.txt": "b\n" });

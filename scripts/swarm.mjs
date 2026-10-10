@@ -680,10 +680,8 @@ if (args.includes("--setup-only")) {
 }
 /** When the last piece settled. This marks the end of the work. */
 let lastSettled = workStarted;
-say(
-	"swarm",
-	`${plan.backlog.length} pieces in the backlog; ${plan.agents.length} agents, all alike${speed !== 1 ? `, at ${speed}x speed` : ""}`,
-);
+const pace = speed !== 1 ? `, at ${speed}x speed` : "";
+say("swarm", `${plan.backlog.length} pieces in the backlog; ${plan.agents.length} agents, all alike${pace}`);
 
 await Promise.all(plan.agents.map((spec) => agentFor(spec)()));
 
@@ -692,9 +690,9 @@ console.log(`\n${"piece".padEnd(16)} builder     claimed  pushed revised approve
 for (const [id, steps] of timeline) {
 	const builder = (steps.builder ?? "-").padEnd(10);
 	const outcome = settled.get(id) ?? "unfinished";
-	console.log(
-		`${id.padEnd(16)} ${builder} ${seconds(steps.claimed)} ${seconds(steps.pushed)} ${seconds(steps.revised)}  ${seconds(steps.approved)} ${seconds(steps.merged)}  ${outcome}`,
-	);
+	const times = [steps.claimed, steps.pushed, steps.revised].map(seconds).join(" ");
+	const ends = [steps.approved, steps.merged].map(seconds).join(" ");
+	console.log(`${id.padEnd(16)} ${builder} ${times}  ${ends}  ${outcome}`);
 	const reviews = steps.reviews.length ? [`reviews: ${steps.reviews.join(", ")}`] : [];
 	const detail = [...reviews, ...steps.events];
 	if (detail.length) console.log(`${"".padEnd(16)} ${detail.join("; ")}`);
@@ -702,20 +700,20 @@ for (const [id, steps] of timeline) {
 console.log(`\n${"agent".padEnd(12)} build review revise merge wait`);
 for (const [name, counts] of did) {
 	const column = (kind, width) => String(counts[kind]).padStart(width);
-	console.log(
-		`${name.padEnd(12)} ${column("build", 5)} ${column("review", 6)} ${column("revise", 6)} ${column("merge", 5)} ${column("wait", 4)}`,
-	);
+	const columns = [column("build", 5), column("review", 6), column("revise", 6), column("merge", 5), column("wait", 4)];
+	console.log(`${name.padEnd(12)} ${columns.join(" ")}`);
 }
 const merged = [...settled.values()].filter((outcome) => outcome.startsWith("merged")).length;
 const workSeconds = ((lastSettled - workStarted) / 1000).toFixed(0);
 const totalSeconds = ((Date.now() - started) / 1000).toFixed(0);
 console.log(
-	`\n${merged} of ${plan.backlog.length} merged. Setup ${setupSeconds}s (once per repo); work ${workSeconds}s (agents released to the last piece settled); total ${totalSeconds}s`,
+	`\n` +
+		`${merged} of ${plan.backlog.length} merged. Setup ${setupSeconds}s (once per repo); work ${workSeconds}s ` +
+		`(agents released to the last piece settled); total ${totalSeconds}s`,
 );
 const audit = await fetch(`${BASE}/repos/_/${plan.repo}/audit`, {
 	headers: { ...access, "Cache-Control": "no-cache" },
 	dispatcher: patient,
 }).then((r) => r.json());
-console.log(
-	`audit: ${audit.merges} merges, ${audit.open} open violations${audit.violations?.length ? `: ${JSON.stringify(audit.violations).slice(0, 400)}` : ""}`,
-);
+const violations = audit.violations?.length ? `: ${JSON.stringify(audit.violations).slice(0, 400)}` : "";
+console.log(`audit: ${audit.merges} merges, ${audit.open} open violations${violations}`);

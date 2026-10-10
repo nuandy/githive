@@ -6,10 +6,12 @@
 //
 //   node scripts/mcp-agent.mjs call <tool> '<json args>' [--key-file F]
 //   node scripts/mcp-agent.mjs register <repo> <agent> <key-file>      register an agent, key to <key-file>
-//   node scripts/mcp-agent.mjs clone <dir> --repo R --change C --key-file F   clone the project; push to remote "fork" (--full x for all history)
+//   node scripts/mcp-agent.mjs clone <dir> --repo R --change C --key-file F
+//        clone the project; push to remote "fork" (--full x for all history)
 //   node scripts/mcp-agent.mjs auth <dir> (same flags as clone)          refresh write access for an existing clone
-//   node scripts/mcp-agent.mjs review-clone <dir> --repo R --change C [--role R] [--key-file F]   check out a change to review
-//        (the project, plus the author's fork as remote "change", at the change's pushed head; marks you as reviewing)
+//   node scripts/mcp-agent.mjs review-clone <dir> --repo R --change C [--role R] [--key-file F]
+//        check out a change to review: the project, plus the author's fork as remote "change", at the
+//        change's pushed head; marks you as reviewing
 //
 // --base defaults to the bench Worker. Access credentials come from .dev.vars
 // (CF_ACCESS_CLIENT_ID, CF_ACCESS_CLIENT_SECRET).

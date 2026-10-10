@@ -73,7 +73,9 @@ export const mergeTools: ToolHandlers = {
 			return {
 				url: remote.url,
 				token: remote.token,
-				note: "read-only: the project repo is written only through the toolkit. Ask with your change for write access to its fork.",
+				note:
+					"read-only: the project repo is written only through the toolkit. Ask with your change for " +
+					"write access to its fork.",
 			};
 		}
 		const change = requiredString(args, "change");
@@ -153,7 +155,9 @@ async function ownChangeAccess(call: ToolCall, change: string, own: ClaimRecord)
 		branch: `changes/${change}`,
 		project: { url: project.url, token: project.token, branch: into },
 		...(into !== branch ? { into } : {}),
-		note: `Your own fork, for all your changes: push this change's branch changes/${change} to it. Start the branch from the project's ${into} (project), not the fork's, which may be behind${elsewhere}.`,
+		note:
+			`Your own fork, for all your changes: push this change's branch changes/${change} to it. Start the ` +
+			`branch from the project's ${into} (project), not the fork's, which may be behind${elsewhere}.`,
 	};
 }
 

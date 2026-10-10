@@ -59,7 +59,8 @@ mkdirSync(work, { recursive: true });
 const prompt = (agent, dir, keyFile, brief) =>
 	[
 		`You are ${agent}, one of ${total} independent AI agents working at the same time on the GitHive repo ` +
-			`"${plan.repo}": a copy of Express (Node.js). GitHive coordinates you through its MCP tools (server "githive"); read ` +
+			(`"${plan.repo}": a copy of Express (Node.js). GitHive coordinates you through its MCP tools ` +
+				`(server "githive"); read `) +
 			`its instructions. Pass repo "${plan.repo}" and agent "${agent}" wherever a tool asks for them. You're ` +
 			"registered already, and your key goes with every call: never call register.",
 		"",

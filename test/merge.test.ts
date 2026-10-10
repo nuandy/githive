@@ -75,7 +75,8 @@ describe("merge", { timeout: 60_000 }, () => {
 			ok: false,
 			conflicts: ["shared.txt"],
 			reasons: [
-				"changes/b-1 conflicts with main in shared.txt: merge main into your branch, resolve inside your claim, push, and get the new commit approved",
+				"changes/b-1 conflicts with main in shared.txt: merge main into your branch, resolve " +
+					"inside your claim, push, and get the new commit approved",
 			],
 		});
 		expect(server.git("rev-parse", "main").trim()).toBe(main);

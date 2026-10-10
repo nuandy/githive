@@ -49,7 +49,8 @@ describe("describeCounts", () => {
 			["createToken proj", { calls: 2, failed: 1 }],
 		]);
 		expect(describeCounts("proj", git, artifacts)).toBe(
-			"git: project 3 (1 failed), forks 4; artifacts 5: get 3 (project 2, records 1), createToken 2 (project 2; 1 failed)",
+			"git: project 3 (1 failed), forks 4; artifacts 5: get 3 (project 2, records 1), createToken 2 " +
+				"(project 2; 1 failed)",
 		);
 	});
 
@@ -64,7 +65,10 @@ describe("describeCounts", () => {
 describe("takeGitRequests", () => {
 	it("reads a container's git trace as requests by repo path, and the server failures", async () => {
 		const output =
-			"      3 /git/ns/proj.git/info/refs\n      2 /git/ns/proj.git/git-upload-pack\n      1 /git/ns/fork--proj--agent--a.git/git-upload-pack\nfailed 1\n";
+			"      3 /git/ns/proj.git/info/refs\n" +
+			"      2 /git/ns/proj.git/git-upload-pack\n" +
+			"      1 /git/ns/fork--proj--agent--a.git/git-upload-pack\n" +
+			"failed 1\n";
 		const exec = vi.fn(async () => ({
 			output: async () => ({ exitCode: 0, stdout: new TextEncoder().encode(output) }),
 		}));
