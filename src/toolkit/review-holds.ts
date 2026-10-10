@@ -9,8 +9,8 @@ import { bucketOf } from "./vote-store";
 // project repo too busy to accept landing batches.
 //
 // A hold says an agent is reviewing a commit in a role until it votes or the hold expires. A review is offered
-// only while fewer agents hold it than it needs, so agents don't pile onto one. Holds bind nobody, and the audit
-// ignores them.
+// only while fewer agents hold it than it needs, and credentials refuses to hand it to more, so agents don't pile
+// onto one. A vote counts with or without a hold, and the audit ignores them.
 //
 // Every review handed out writes a hold and every vote shortens one, so the holds are split by commit into
 // buckets, each its own ref: in one record, agents taking different reviews retried each other's writes for

@@ -136,6 +136,25 @@ export function reviewsFor(input: WorkInput): ReviewOption[] {
 
 const authorOf = (claim: ClaimRecord): Author => ({ agent: claim.agent, ...(claim.by ? { by: claim.by } : {}) });
 
+/**
+ * How many more reviewers `claim`'s `head` needs in `role`: one for a blocking role it still awaits, none for one it
+ * doesn't; for an ordinary review, the approvals still missing beyond those the awaited roles will bring. `votes`
+ * are the votes that count.
+ */
+export function reviewersNeeded(
+	policy: ReviewPolicy,
+	claim: ClaimRecord,
+	head: string,
+	votes: VoteRecord[],
+	role: string,
+) {
+	const outcome = approval({ votes }, head, policy, authorOf(claim), claim.paths);
+	if (outcome.approved) return 0;
+	if (role !== "review") return outcome.awaiting.includes(role) ? 1 : 0;
+	const { required } = effectivePolicy(policy, claim.paths);
+	return Math.max(0, required - outcome.approvals - outcome.awaiting.length);
+}
+
 // The review the caller may give on `claim`'s pushed `head`, with its claim time for sorting, or null if none.
 function reviewOption(input: WorkInput, claim: ClaimRecord, head: string): (ReviewOption & { since: string }) | null {
 	const { agent, votes } = input;
@@ -148,10 +167,7 @@ function reviewOption(input: WorkInput, claim: ClaimRecord, head: string): (Revi
 	// Prefer a blocking role the change still needs; otherwise an ordinary review, if more are needed.
 	const caller = { reviewer: agent, by: input.by, teams: input.teams };
 	const role = outcome.awaiting.find((awaited) => holdsRole(policy, awaited, caller, authorOf(claim)));
-	const { required } = effectivePolicy(policy, claim.paths);
-	if (!role && outcome.approvals >= required) return null;
-	// One review for a blocking role. Otherwise the missing approvals, minus those the awaited roles will bring.
-	const needed = role ? 1 : required - outcome.approvals - outcome.awaiting.length;
+	const needed = reviewersNeeded(policy, claim, head, votes, role ?? "review");
 	if (needed <= 0) return null;
 	const reviewing = input.held?.[holdKey(head, role ?? "review")] ?? [];
 	if (reviewing.filter((reviewer) => reviewer !== agent).length >= needed) return null;
