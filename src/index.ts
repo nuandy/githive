@@ -20,6 +20,7 @@ import { defaultBranch } from "./git";
 import { countingRequests, describeCounts } from "./git-http";
 import { changeRepoName, landingLog, toolContextFor } from "./toolkit/env";
 import { leaseHeld as landingLeaseHeld } from "./toolkit/landing-lease";
+import { branchHistory } from "./toolkit/history";
 import type { Registry } from "./toolkit/claims";
 import { GitCasLog } from "./record-log";
 import { projectBranch } from "./project-branch";
@@ -298,6 +299,13 @@ app.get("/repos/:owner/:name/landing", async (c) => {
 app.get("/repos/:owner/:name/audit", async (c) => {
 	const repo = await routeRepo(c, "read");
 	return keptView(c, `repo:${repo.id}`, "audit", 5 * 60_000, (timing) => repoAudit({ ...toolContext(c.env, c.get("principal")), timing }, repo.id));
+});
+// The changes landed on a branch (?branch=; the project's by default), newest first, each with its intent and reviews.
+app.get("/repos/:owner/:name/history", async (c) => {
+	const repo = await routeRepo(c, "read");
+	const branch = c.req.query("branch")?.trim() ?? "";
+	const read = (timing: Timing) => branchHistory({ ...toolContext(c.env, c.get("principal")), timing }, repo.id, branch);
+	return keptView(c, `repo:${repo.id}`, `history:${branch}`, 60_000, read);
 });
 app.get("/repos/:owner/:name/builders/:change", async (c) => {
 	const repo = await routeRepo(c, "read");

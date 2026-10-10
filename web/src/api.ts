@@ -130,6 +130,34 @@ export interface RepoFile {
 	tooBig?: boolean;
 }
 
+/** A review of a landed change's head. */
+export interface HistoryReview {
+	reviewer: string;
+	role: string;
+	verdict: "approve" | "reject";
+	evidence: string;
+}
+
+/** One change landed on a branch: why it was made, and the reviews it landed with. */
+export interface LandedChange {
+	commit: string;
+	change: string;
+	agent: string;
+	head: string;
+	title: string;
+	intent?: string;
+	files: string[];
+	reviews: HistoryReview[];
+	at?: string;
+}
+
+/** The changes landed on a branch, newest first (GET /repos/:repo/history). */
+export interface BranchHistory {
+	branch: string;
+	total: number;
+	changes: LandedChange[];
+}
+
 /** One change's history (GET /repos/:repo/changes/:change). */
 export interface ChangeHistory {
 	change: string;
@@ -273,6 +301,8 @@ export const api = {
 	summaries: () => call<Summaries>("GET", "/summaries"),
 	snapshot: (repo: string) => call<RepoSnapshot>("GET", `/repos/${repoPath(repo)}`),
 	audit: (repo: string) => call<RepoAudit>("GET", `/repos/${repoPath(repo)}/audit`),
+	history: (repo: string, branch: string) =>
+		call<BranchHistory>("GET", `/repos/${repoPath(repo)}/history?branch=${encodeURIComponent(branch)}`),
 	/** What's landing on a branch of the repo. */
 	landing: (repo: string, branch: string) => call<RepoLanding>("GET", `/repos/${repoPath(repo)}/landing?branch=${encodeURIComponent(branch)}`),
 	/** A person merges a change: it lands with the branch's other ready changes, as its agent, stamped with the person's name. */

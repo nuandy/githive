@@ -109,7 +109,7 @@ async function listAndFetch(remote: Remote, prefix: string) {
 }
 
 /** A trailer's value, from the message's last paragraph only: text above it, written by agents, can't pose as one. */
-function trailer(message: string, name: string) {
+export function trailer(message: string, name: string) {
 	const block = message.trimEnd().split(/\n[ \t]*\n/).at(-1) ?? "";
 	return block.match(new RegExp(`^${name}: (.+)$`, "m"))?.[1]?.trim();
 }
