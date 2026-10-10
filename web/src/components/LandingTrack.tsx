@@ -81,9 +81,11 @@ export function LandingTrack({
 						{recent.map((outcome) => (
 							<li key={`${outcome.change}-${outcome.at}`} className={`lamp--${SETTLED_COLOR[outcome.how]}`}>
 								<span className="lamp" aria-hidden="true" />
-								<a href={href.change(repo, outcome.change)}>{outcome.change}</a>{" "}
-								{outcome.how === "landed" ? "landed" : "put out: its checks failed"}{" "}
-								<span className="muted">{timeAgo(outcome.at)}</span>
+								<span>
+									<a href={href.change(repo, outcome.change)}>{outcome.change}</a>{" "}
+									{outcome.how === "landed" ? "landed" : "put out: its checks failed"}{" "}
+									<span className="muted">{timeAgo(outcome.at)}</span>
+								</span>
 							</li>
 						))}
 					</ul>

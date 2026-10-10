@@ -227,16 +227,18 @@ function HiveLegend({ repo, branch, agents }: { repo: string; branch: string; ag
 			{agents.map((entry) => (
 				<li key={entry.agent} className={`claim-c${entry.color}`}>
 					<Swatch color={entry.color} />
-					<strong>{entry.agent}</strong>
-					{entry.changes.map((change, index) => (
-						<span key={change.change} className="hive__legend-change">
-							{index ? "; " : ""}
-							<a href={href.change(repo, change.change)} title={change.intent}>
-								{change.title}
-							</a>
-							<span className="muted"> · {LAMP_WORDS[change.lamp]}</span>
-						</span>
-					))}
+					<span className="hive__legend-text">
+						<strong>{entry.agent}</strong>{" "}
+						{entry.changes.map((change, index) => (
+							<span key={change.change} className="hive__legend-change">
+								{index ? "; " : ""}
+								<a href={href.change(repo, change.change)} title={change.intent}>
+									{change.title}
+								</a>
+								<span className="muted"> · {LAMP_WORDS[change.lamp]}</span>
+							</span>
+						))}
+					</span>
 				</li>
 			))}
 		</ul>

@@ -73,6 +73,8 @@
 	--font: "Separator", "Overpass", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
 	--mono: "Overpass Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 	--page-width: 1180px;
+	/* How far the sticky top bar reaches down the window; what sticks under it starts below this. */
+	--topbar-height: 56px;
 	/* The mark (HiveMark): an ink tile with paper lines, flipped on dark. */
 	--mark-tile: #1e2b33;
 	--mark-line: #f5f6f4;

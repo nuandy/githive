@@ -16,18 +16,24 @@
 	list-style: none;
 }
 
+/* The swatch, then the change's text, wrapping under itself rather than under the swatch. */
 .claims__legend li {
-	display: flex;
-	align-items: center;
-	flex-wrap: wrap;
-	gap: 4px 8px;
+	display: grid;
+	grid-template-columns: auto minmax(0, 1fr);
+	column-gap: 8px;
 	overflow-wrap: anywhere;
+}
+
+.claims__legend li > .claims__swatch {
+	align-self: start;
+	margin-top: 0.3em;
 }
 
 .claims__legend-conflict {
 	display: inline-flex;
 	align-items: center;
 	gap: 4px;
+	margin-left: 8px;
 	font-size: 12.5px;
 }
 

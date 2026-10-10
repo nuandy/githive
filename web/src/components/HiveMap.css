@@ -1,8 +1,9 @@
 /* The hive map: the repo's folders as a honeycomb, each cell in its holding agent's claim color (claim-cN sets --claim). */
 
+/* Agents in columns of one width, so a long list lines up however many there are. */
 .hive__legend {
-	display: flex;
-	flex-wrap: wrap;
+	display: grid;
+	grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
 	gap: 8px 24px;
 	margin: 0 0 12px;
 	padding: 0;
@@ -10,17 +11,19 @@
 	font-size: 14px;
 }
 
+/* The swatch, then the agent and its changes, wrapping under the agent's name rather than the swatch. */
 .hive__legend li {
-	display: inline-flex;
-	flex-wrap: wrap;
-	align-items: center;
-	gap: 4px 7px;
+	display: grid;
+	grid-template-columns: auto minmax(0, 1fr);
+	column-gap: 7px;
 	min-width: 0;
 	overflow-wrap: anywhere;
 }
 
-.hive__legend-change {
-	min-width: 0;
+/* Level with the first line of text, however many lines follow. */
+.hive__legend li .hive__swatch {
+	align-self: start;
+	margin-top: 0.3em;
 }
 
 .hive__swatch {
@@ -178,7 +181,10 @@
 
 .hive__details {
 	position: sticky;
-	top: 12px;
+	top: calc(var(--topbar-height) + 12px);
+	/* A cell with many holders scrolls inside the panel rather than running off the window. */
+	max-height: calc(100vh - var(--topbar-height) - 24px);
+	overflow-y: auto;
 	min-width: 0;
 	padding-top: 8px;
 	border-top: 1px solid var(--border);

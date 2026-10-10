@@ -132,9 +132,10 @@ code.track__detail {
 	color: var(--text-muted);
 }
 
+/* Columns of one width, so a long list of outcomes lines up. */
 .track__left ul {
-	display: flex;
-	flex-wrap: wrap;
+	display: grid;
+	grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
 	gap: 6px 24px;
 	margin: 0;
 	padding: 0;
@@ -142,10 +143,18 @@ code.track__detail {
 	font-size: 14px;
 }
 
+/* The lamp, then the text, wrapping under itself rather than under the lamp. */
 .track__left li {
-	display: inline-flex;
-	align-items: center;
-	gap: 7px;
+	display: grid;
+	grid-template-columns: auto minmax(0, 1fr);
+	column-gap: 7px;
+	min-width: 0;
+	overflow-wrap: anywhere;
+}
+
+.track__left li > .lamp {
+	align-self: start;
+	margin-top: 0.4em;
 }
 
 /* The territory: a region per top-level folder, sized by how much is in it. */
