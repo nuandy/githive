@@ -65,7 +65,7 @@ function landedOf(commit: BranchCommit): LandedChange | null {
 		change,
 		agent: trailer(commit.message, "GitHive-Agent") ?? commit.author,
 		head,
-		title: commit.message.split("\n")[0],
+		title: commit.message.split("\n")[0] ?? "",
 		...(intent ? { intent } : {}),
 		files: commit.files.slice(0, FILES_MOST),
 		reviews: [],

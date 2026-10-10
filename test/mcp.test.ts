@@ -71,7 +71,7 @@ describe("MCP front door", () => {
 		calls.callTool.mockResolvedValueOnce({ change: "stats-ab12" });
 		const res = await call("status", { repo: "project" });
 		expect(calls.callTool).toHaveBeenLastCalledWith("status", { repo: "project" }, context.toolkit);
-		expect(JSON.parse(res.result.content[0].text)).toEqual({ change: "stats-ab12" });
+		expect(JSON.parse(res.result.content[0]!.text)).toEqual({ change: "stats-ab12" });
 	});
 
 	it("returns a refused call as a tool error the agent can read", async () => {
@@ -80,7 +80,7 @@ describe("MCP front door", () => {
 		);
 		const res = await call("claim", { repo: "project", paths: ["src/a"] });
 		expect(res.result.isError).toBe(true);
-		expect(res.result.content[0].text).toMatch(/^These paths are already claimed/);
+		expect(res.result.content[0]!.text).toMatch(/^These paths are already claimed/);
 	});
 
 	it("refuses a tool it doesn't have", async () => {

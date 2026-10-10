@@ -209,16 +209,18 @@ export function backlogFor(input: WorkInput): BacklogView {
 
 // Rotates each run of equally good items in the sorted `list` to start at a place of the agent's own.
 function inOwnOrder<T>(agent: string, list: T[], same: (a: T, b: T) => boolean): T[] {
-	const ordered: T[] = [];
-	for (let start = 0; start < list.length;) {
-		let end = start + 1;
-		while (end < list.length && same(list[start], list[end])) end++;
-		const run = list.slice(start, end);
-		const at = spread(agent, run.length);
-		ordered.push(...run.slice(at), ...run.slice(0, at));
-		start = end;
+	// Runs of equally good items, in order: each run starts with the item the rest are compared to.
+	const runs: T[][] = [];
+	for (const item of list) {
+		const current = runs.at(-1);
+		const leader = current?.[0];
+		if (current && leader !== undefined && same(leader, item)) current.push(item);
+		else runs.push([item]);
 	}
-	return ordered;
+	return runs.flatMap((run) => {
+		const at = spread(agent, run.length);
+		return [...run.slice(at), ...run.slice(0, at)];
+	});
 }
 
 /**

@@ -123,7 +123,7 @@ describe("landing ready changes together", { timeout: 120_000 }, () => {
 
 	const auditNow = async () => {
 		const registry = await readRecordHistory<Registry>(remote(), "refs/notes/githive-claims/t1");
-		const merges = await readMainMerges(remote(), registry[0].state.baseline!, "main");
+		const merges = await readMainMerges(remote(), registry[0]!.state.baseline!, "main");
 		return audit({
 			registry,
 			votes: await readRecordHistory<Votes>(remote(), "refs/notes/githive-votes/t1"),
@@ -240,8 +240,8 @@ describe("landing ready changes together", { timeout: 120_000 }, () => {
 		]);
 		// The search reused the batch's own containers: a half stays where its batch ran, the other takes one more.
 		const first = runs.findIndex((r) => r.length === 4);
-		const search = gates[first].replace(/-0$/, "");
-		const where = (changes: string[]) => gates.filter((_, i) => runs[i].join() === changes.join());
+		const search = gates[first]!.replace(/-0$/, "");
+		const where = (changes: string[]) => gates.filter((_, i) => runs[i]!.join() === changes.join());
 		expect(where(["a-1", "b-1", "c-1", "d-1"])).toEqual([`${search}-0`]);
 		expect(where(["a-1", "b-1"])).toEqual([`${search}-0`]);
 		expect(where(["c-1", "d-1"])).toEqual([`${search}-1`]);
@@ -250,7 +250,7 @@ describe("landing ready changes together", { timeout: 120_000 }, () => {
 		expect(runs.filter((r) => r.length === 1 && r[0] === "b-1").length).toBe(2);
 		const rejected = (await votes().read())!.commit.state.votes.filter((v) => v.reviewer === CHECKS_REVIEWER);
 		expect(rejected).toMatchObject([{ commit: heads.b, role: "checks", verdict: "reject" }]);
-		expect(rejected[0].evidence).toContain("checks failed: npm test exited 1");
+		expect(rejected[0]!.evidence).toContain("checks failed: npm test exited 1");
 		expect((await store().read()).claims.map((c) => c.change)).toEqual(["b-1"]);
 		expect(await auditNow()).toEqual([]);
 		// Merging that commit again is refused at once, with the failure: it isn't checked a third time.

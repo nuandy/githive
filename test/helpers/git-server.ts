@@ -138,7 +138,7 @@ export async function startGitServer({ branch = "main" }: { branch?: string } = 
 			const headerText = out.subarray(0, split).toString();
 			let status = 200;
 			for (const line of headerText.split("\r\n")) {
-				const [name, ...rest] = line.split(":");
+				const [name = "", ...rest] = line.split(":");
 				const value = rest.join(":").trim();
 				if (name.toLowerCase() === "status") status = Number.parseInt(value, 10);
 				else if (name) res.setHeader(name, value);

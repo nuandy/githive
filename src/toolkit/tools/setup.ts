@@ -54,15 +54,12 @@ export const setupTools: ToolHandlers = {
 				typeof name === "string" && name.trim() ? nameOk(name.trim()) : fail(400, "each of agents is a name"),
 			);
 			if (new Set(names).size !== names.length) throw new Error("[400] agents names a name more than once");
-			const keys = names.map(keyFor);
-			const outcome = await registerAgents(
-				claims,
-				await Promise.all(names.map(async (agent, index) => ({ agent, keyHash: await sha256(keys[index]) }))),
-				stamper,
-			);
+			const issued = names.map((agent) => ({ agent, key: keyFor(agent) }));
+			const hashed = await Promise.all(issued.map(async ({ agent, key }) => ({ agent, keyHash: await sha256(key) })));
+			const outcome = await registerAgents(claims, hashed, stamper);
 			if (!outcome.ok) throw new Error(`[409] ${outcome.refused}`);
 			await ctx.prepareForks?.(repo, names).catch(() => undefined);
-			return { agents: names.map((agent, index) => ({ agent, key: keys[index] })), note };
+			return { agents: issued, note };
 		}
 		const agent = nameOk(requiredString(args, "agent"));
 		const newKey = keyFor(agent);

@@ -23,8 +23,8 @@ describe("the repositories list", () => {
 		expect(rows.map((row) => row.name)).toEqual(["acme/my-app", "acme/docs-site"]);
 		expect(rows[0]).toMatchObject({ open: 2, needsYou: 1, merged: 1, lastActivity: ago(2), detailed: true });
 		expect(rows[1]).toMatchObject({ open: 1, violations: 1, merged: 3, lastActivity: ago(5), detailed: true });
-		expect(repoCounts(rows[0])).toBe("2 open");
-		expect(repoCounts(rows[1])).toBe("1 open, 1 audit violation");
+		expect(repoCounts(rows[0]!)).toBe("2 open");
+		expect(repoCounts(rows[1]!)).toBe("1 open, 1 audit violation");
 	});
 
 	it("marks repos the server hasn't counted yet", () => {

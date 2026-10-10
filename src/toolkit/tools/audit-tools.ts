@@ -21,9 +21,9 @@ export async function runAudit(ctx: ToolContext, repo: string) {
 	const votesRead = timing.time("votes", () => readRecordHistory<Votes>(remote, votesRef(repo)));
 	votesRead.catch(() => undefined);
 	const registry = await timing.time("registry", () => readRecordHistory<Registry>(remote, claimsRef(repo)));
-	const baseline = registry[0]?.state.baseline;
-	if (!baseline) throw new Error(`[409] GitHive hasn't started on ${repo}`);
-	const start = registry[0].state;
+	const start = registry[0]?.state;
+	const baseline = start?.baseline;
+	if (!start || !baseline) throw new Error(`[409] GitHive hasn't started on ${repo}`);
 	// Whether claims are sharded, from the start or later, is in the latest state.
 	const latest = registry.at(-1)!.state;
 	// Read with git in the repo's Gate when there is one: reading many merges in memory exhausts a Worker.

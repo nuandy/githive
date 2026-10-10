@@ -287,7 +287,7 @@ describe("status", () => {
 			),
 		).toEqual({ commit: head, role: "review", verdict: "approve" });
 		const after = await repoSnapshot(watched, "project");
-		expect(after.claims[0].attention).toBeUndefined();
+		expect(after.claims[0]!.attention).toBeUndefined();
 		expect(after.votes[0]).toMatchObject({ commit: head, reviewer: "person:abc", role: "review", verdict: "approve" });
 	}, 60_000);
 

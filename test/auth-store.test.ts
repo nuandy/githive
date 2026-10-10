@@ -122,7 +122,7 @@ describe("agents and their tokens", () => {
 		expect(issued.expiresAt).toBe("2027-01-06T12:00:00.000Z");
 		const found = await ids.tokenPrincipal(issued.token);
 		expect(found).toMatchObject({ user: { handle: "ada" }, agent: { name: "builder" } });
-		expect((await ids.agents(user.id))[0].tokens[0]).toMatchObject({
+		expect((await ids.agents(user.id))[0]!.tokens[0]).toMatchObject({
 			prefix: issued.token.slice(4, 12),
 			lastUsedAt: "2026-10-08T12:00:00.000Z",
 		});

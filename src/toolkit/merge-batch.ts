@@ -57,12 +57,10 @@ export async function atMost<T, R>(
 	run: (item: T, index: number) => Promise<R>,
 ): Promise<R[]> {
 	const results: R[] = new Array(items.length);
-	let next = 0;
+	// One iterator shared by every worker: each takes the next item as it finishes one.
+	const queue = items.entries();
 	const worker = async () => {
-		while (next < items.length) {
-			const index = next++;
-			results[index] = await run(items[index], index);
-		}
+		for (const [index, item] of queue) results[index] = await run(item, index);
 	};
 	await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
 	return results;
@@ -182,6 +180,7 @@ async function gatherBatch(
 	const readAt = Date.now();
 	await holding.step(STEP_MS.records);
 	const own = read[0];
+	if (!own) return { ok: false, reasons: [`${input.change} couldn't be read`] };
 	if ("error" in own) return { ok: false, reasons: [`${input.change} couldn't be read: ${own.error}`] };
 	const checked = await validateAll(input, sources, read);
 	if (checked[0] && !checked[0].ok) return checked[0];
@@ -208,7 +207,9 @@ async function validateAll(input: MergeInput, sources: SeenSource[], read: Inspe
 			console.error(`${inspected.change} can't land with the others now: ${inspected.error}`);
 			return null;
 		}
-		const proposed = { ...sources[index], head: inspected.head, files: inspected.files, mine: index === 0 };
+		const source = sources[index];
+		if (!source) return null;
+		const proposed = { ...source, head: inspected.head, files: inspected.files, mine: index === 0 };
 		return validated(input, proposed, seen);
 	});
 }

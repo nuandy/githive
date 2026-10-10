@@ -74,7 +74,7 @@ export function claimApprovalLabel(claim: Claim): string {
 
 /** The claim's title: the first line of what the agent set out to do, or its id. */
 export function claimTitle(claim: Claim): string {
-	const first = (claim.intent ?? "").split("\n")[0].trim();
+	const first = (claim.intent ?? "").split("\n")[0]?.trim();
 	return first || claim.change;
 }
 

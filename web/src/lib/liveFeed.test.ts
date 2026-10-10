@@ -64,14 +64,14 @@ describe("the live feed", () => {
 	it("connects, and folds a burst of pings into one refresh", () => {
 		const { feed, sockets, statuses, timers, pings } = setup();
 		feed.start();
-		expect(sockets[0].url).toBe("wss://example.test/live/task:abcd1234");
+		expect(sockets[0]!.url).toBe("wss://example.test/live/task:abcd1234");
 		expect(statuses).toEqual(["connecting"]);
-		sockets[0].onopen?.({});
+		sockets[0]!.onopen?.({});
 		expect(statuses.at(-1)).toBe("live");
 		expect(pings()).toBe(0);
-		sockets[0].onmessage?.({});
-		sockets[0].onmessage?.({});
-		sockets[0].onmessage?.({});
+		sockets[0]!.onmessage?.({});
+		sockets[0]!.onmessage?.({});
+		sockets[0]!.onmessage?.({});
 		timers.advance(199);
 		expect(pings()).toBe(0);
 		timers.advance(1);
@@ -81,25 +81,25 @@ describe("the live feed", () => {
 	it("reconnects with growing delays, and refreshes once it is back", () => {
 		const { feed, sockets, statuses, timers, pings } = setup();
 		feed.start();
-		sockets[0].onclose?.({});
+		sockets[0]!.onclose?.({});
 		expect(statuses.at(-1)).toBe("reconnecting");
 		timers.advance(999);
 		expect(sockets).toHaveLength(1);
 		timers.advance(1);
 		expect(sockets).toHaveLength(2);
-		sockets[1].onclose?.({});
+		sockets[1]!.onclose?.({});
 		timers.advance(1_999);
 		expect(sockets).toHaveLength(2);
 		timers.advance(1);
 		expect(sockets).toHaveLength(3);
-		sockets[2].onopen?.({});
+		sockets[2]!.onopen?.({});
 		expect(statuses.at(-1)).toBe("live");
 		// It had been down: anything may have changed. (The first connection doesn't count as "back".)
 		timers.advance(200);
 		expect(pings()).toBe(0);
-		sockets[2].onclose?.({});
+		sockets[2]!.onclose?.({});
 		timers.advance(1_000);
-		sockets[3].onopen?.({});
+		sockets[3]!.onopen?.({});
 		timers.advance(200);
 		expect(pings()).toBe(1);
 	});
@@ -107,15 +107,15 @@ describe("the live feed", () => {
 	it("stops cleanly: closes the socket, cancels the retry, and ignores late events", () => {
 		const { feed, sockets, statuses, timers, pings } = setup();
 		feed.start();
-		sockets[0].onclose?.({});
+		sockets[0]!.onclose?.({});
 		feed.stop();
 		expect(statuses.at(-1)).toBe("off");
 		timers.advance(60_000);
 		expect(sockets).toHaveLength(1);
 		feed.start();
 		feed.stop();
-		expect(sockets[1].closed).toBe(true);
-		sockets[1].onmessage?.({});
+		expect(sockets[1]!.closed).toBe(true);
+		sockets[1]!.onmessage?.({});
 		timers.advance(1_000);
 		expect(pings()).toBe(0);
 	});

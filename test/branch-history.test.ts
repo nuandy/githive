@@ -15,7 +15,7 @@ import { startGitServer, type GitServer } from "./helpers/git-server";
 export function gitHistory(server: GitServer): HistorySource {
 	const FORMAT = "--format=%H%x1f%T%x1f%an%x1f%P%x1f%B%x1e";
 	const meta = (line: string) => {
-		const [hash, treeHash, name, parents, message] = line.split("\x1f");
+		const [hash, treeHash, name, parents, message] = line.split("\x1f") as [string, string, string, string, string];
 		return {
 			hash,
 			treeHash,
@@ -32,15 +32,15 @@ export function gitHistory(server: GitServer): HistorySource {
 				.map((l) => l.replace(/^\n/, ""))
 				.filter(Boolean)
 				.map(meta),
-		readCommit: async (hash) => meta(server.git("log", "-1", FORMAT, hash).split("\x1e")[0]),
+		readCommit: async (hash) => meta(server.git("log", "-1", FORMAT, hash).split("\x1e")[0]!),
 		readTree: async (hash) =>
 			server
 				.git("ls-tree", hash)
 				.split("\n")
 				.filter(Boolean)
 				.map((l) => {
-					const [info, name] = l.split("\t");
-					const [mode, type, oid] = info.split(" ");
+					const [info, name] = l.split("\t") as [string, string];
+					const [mode, type, oid] = info.split(" ") as [string, string, string];
 					return { name, mode, hash: oid, type: type === "commit" ? "gitlink" : type };
 				}),
 	};
@@ -99,7 +99,7 @@ describe("a branch's history through Artifacts' API", { timeout: 60_000 }, () =>
 		for (const c of read)
 			expect(c.files).toEqual(
 				server
-					.git("diff-tree", "--no-commit-id", "--name-only", "-r", c.parents[0], c.commit)
+					.git("diff-tree", "--no-commit-id", "--name-only", "-r", c.parents[0]!, c.commit)
 					.split("\n")
 					.filter(Boolean)
 					.sort(),

@@ -103,7 +103,7 @@ describe("signing in with GitHub", () => {
 		expect(location).toBe("/#/repos");
 		expect(session).toMatch(/^__Host-githive_session=/);
 		// The verifier went to GitHub with the code.
-		expect(JSON.parse(seen[0].body!)).toMatchObject({ code: "abc", code_verifier: expect.any(String) });
+		expect(JSON.parse(seen[0]!.body!)).toMatchObject({ code: "abc", code_verifier: expect.any(String) });
 	});
 
 	it("turns away a person who isn't invited, and one whose email GitHub hasn't verified", async () => {
@@ -190,7 +190,7 @@ describe("a signed-in person", () => {
 			cookie: session,
 		});
 		expect(forged.status).toBe(403);
-		expect(await ids.agents((await ids.sessionUser(decodeURIComponent(session.split("=")[1])))!.id)).toEqual([]);
+		expect(await ids.agents((await ids.sessionUser(decodeURIComponent(session.split("=")[1]!)))!.id)).toEqual([]);
 	});
 
 	it("keeps an agent's token away from a person's routes", async () => {

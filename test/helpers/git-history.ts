@@ -11,7 +11,7 @@ export const gitHistory =
 					.split("\n")
 					.filter(Boolean)
 					.map((line) => {
-						const [hash, tree, ...parents] = line.split(" ");
+						const [hash, tree, ...parents] = line.split(" ") as [string, string, ...string[]];
 						return { hash, treeHash: tree, message: "", author: { name: "" }, parents };
 					}),
 			readCommit: async () => null,
@@ -21,8 +21,8 @@ export const gitHistory =
 					.split("\n")
 					.filter(Boolean)
 					.map((line) => {
-						const [meta, name] = line.split("\t");
-						const [mode, type, oid] = meta.split(" ");
+						const [meta, name] = line.split("\t") as [string, string];
+						const [mode, type, oid] = meta.split(" ") as [string, string, string];
 						return { name, mode, type, hash: oid };
 					}),
 		});

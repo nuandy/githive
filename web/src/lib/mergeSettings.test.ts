@@ -29,7 +29,7 @@ describe("the merge settings form", () => {
 			vetoes: "security, ops,,security",
 			verify: ["  npm test ", "", "npm run lint"],
 		};
-		draft.escalate[0].paths = "package.json\n\n.github/, Dockerfile";
+		draft.escalate[0]!.paths = "package.json\n\n.github/, Dockerfile";
 		const { settings } = settingsFrom(draft);
 		expect(settings).toMatchObject({
 			vetoes: ["security", "ops"],
@@ -57,7 +57,7 @@ describe("the merge settings form", () => {
 
 	it("leaves a rule's approvals out when blank: the repo's own", () => {
 		const draft = draftFrom(policy, []);
-		draft.escalate[0].required = "";
+		draft.escalate[0]!.required = "";
 		expect(settingsFrom(draft).settings?.escalate).toEqual([{ paths: ["package.json", ".github/"], vetoes: ["ops"] }]);
 	});
 

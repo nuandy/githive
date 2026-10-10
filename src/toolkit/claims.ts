@@ -501,7 +501,9 @@ export function recordBranch(
  * Refused if any name is already registered.
  */
 export function registerAgents(log: CasLog<Registry>, agents: { agent: string; keyHash: string }[], stamper?: Stamper) {
-	return appendRecord<Registry, string>(log, agents[0].agent, empty, async (state) => {
+	const [firstAgent] = agents;
+	if (!firstAgent) return Promise.resolve({ ok: false as const, refused: "no agents to register" });
+	return appendRecord<Registry, string>(log, firstAgent.agent, empty, async (state) => {
 		const taken = agents.filter((a) => state.agents?.[a.agent]).map((a) => a.agent);
 		if (taken.length)
 			return {

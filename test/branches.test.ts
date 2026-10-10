@@ -25,7 +25,7 @@ describe("claims kept per branch", () => {
 		const scoped = scopePaths(["lib/auth/", "README.md"], "release/2.x", "main");
 		expect(scoped).toEqual(["::release%2F2.x/lib/auth/", "::release%2F2.x/README.md"]);
 		expect(scoped.every(isReservedPath)).toBe(true);
-		expect(unscopePath(scoped[0], "main")).toEqual({ into: "release/2.x", path: "lib/auth/" });
+		expect(unscopePath(scoped[0]!, "main")).toEqual({ into: "release/2.x", path: "lib/auth/" });
 		expect(unscopePath("lib/auth/", "main")).toEqual({ into: "main", path: "lib/auth/" });
 		expect(claimInto({ paths: scoped }, "main")).toBe("release/2.x");
 		expect(presentClaim({ change: "c", paths: scoped }, "main")).toEqual({

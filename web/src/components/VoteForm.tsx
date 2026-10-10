@@ -31,7 +31,7 @@ export function VoteForm({
 	api: VoteApi;
 }) {
 	const roles = voteRoles(policy);
-	const [role, setRole] = useState(roles[0]);
+	const [role, setRole] = useState(roles[0] ?? "review");
 	const [verdict, setVerdict] = useState<"approve" | "reject">("approve");
 	const [evidence, setEvidence] = useState("");
 	const [busy, setBusy] = useState(false);

@@ -129,7 +129,7 @@ describe("the audit", () => {
 	it("reports a merge without the required approvals, or despite a veto, at the votes it cites", async () => {
 		const vetoed = {
 			tip: "v2",
-			state: { votes: [...votes[0].state.votes, { ...approve("rev-3", "security"), verdict: "reject" as const }] },
+			state: { votes: [...votes[0]!.state.votes, { ...approve("rev-3", "security"), verdict: "reject" as const }] },
 		};
 		expect(await audit({ ...records([merge({ head: "h2" })]) })).toEqual([
 			{ commit: "m1", author: "agent-a", rule: "unapproved", detail: "h2 had 0 of 2 approvals at v1" },
@@ -255,7 +255,7 @@ describe("the audit, with sharded claims", () => {
 	});
 
 	it("holds a merge to the settings in the registry state it cites among its shards", async () => {
-		const raised = [...root, { tip: "r1", state: { ...root[0].state, policy: { ...policy, required: 3 } } }];
+		const raised = [...root, { tip: "r1", state: { ...root[0]!.state, policy: { ...policy, required: 3 } } }];
 		expect(await audit({ ...sharded([merge({ claimsTip: "=r1 src%2Fstats=s1" })]), registry: raised })).toEqual([
 			{ commit: "m1", author: "agent-a", rule: "unapproved", detail: "h1 had 2 of 3 approvals at v1" },
 		]);

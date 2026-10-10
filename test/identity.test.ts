@@ -63,7 +63,7 @@ describe("agent identity", () => {
 	it("takes the key as an argument too, for agents that can't set headers", async () => {
 		const { key } = (await call(as(), "register", { agent: "agent-a" })) as { key: string };
 		await call(as(), "claim", { ...claimA, agent_key: key });
-		expect(((await call(as(), "claims", {})) as { by: string }[])[0].by).toBe("service:shared/agent-a");
+		expect(((await call(as(), "claims", {})) as { by: string }[])[0]!.by).toBe("service:shared/agent-a");
 	});
 
 	it("refuses a registered name without its key, and a key acting as another name", async () => {
@@ -93,10 +93,10 @@ describe("agent identity", () => {
 		expect(agents.map((a) => a.agent)).toEqual(["agent-a", "agent-b", "agent-c"]);
 		expect(new Set(agents.map((a) => a.key)).size).toBe(3);
 		// Each key acts as its own name only.
-		await call(as(agents[1].key), "claim", { change: "b-1", agent: "agent-b", paths: ["src/b/"], intent: "b" });
+		await call(as(agents[1]!.key), "claim", { change: "b-1", agent: "agent-b", paths: ["src/b/"], intent: "b" });
 		expect(((await call(as(), "claims", {})) as { by: string }[]).map((c) => c.by)).toEqual(["service:shared/agent-b"]);
 		expect(
-			await call(as(agents[0].key), "claim", { change: "c-1", agent: "agent-c", paths: ["src/c/"], intent: "c" }),
+			await call(as(agents[0]!.key), "claim", { change: "c-1", agent: "agent-c", paths: ["src/c/"], intent: "c" }),
 		).toMatchObject({ error: expect.any(String) });
 		// A list with a registered name in it registers none of it.
 		expect(await call(as(), "register", { agents: ["agent-d", "agent-b"] })).toEqual({
@@ -156,7 +156,7 @@ describe("agent identity", () => {
 
 	it("lets unregistered names act as before, attributed to the Access identity alone", async () => {
 		await call(as(), "claim", claimA);
-		expect(((await call(as(), "claims", {})) as { by: string }[])[0].by).toBe("service:shared");
+		expect(((await call(as(), "claims", {})) as { by: string }[])[0]!.by).toBe("service:shared");
 	});
 
 	it("records registrations in Git, with a hash of the key, never the key", async () => {

@@ -91,7 +91,7 @@ export class Builder extends SandboxAgent<BuildJob, BuilderState> {
 					repo: job.project,
 					change: job.change,
 					agent: job.agent,
-					reason: `rejected after ${state.revisions} revisions: ${feedback.split("\n")[0].slice(0, 200)}`,
+					reason: `rejected after ${state.revisions} revisions: ${firstLine(feedback).slice(0, 200)}`,
 				},
 				this.toolContext(),
 			);
@@ -115,7 +115,7 @@ export class Builder extends SandboxAgent<BuildJob, BuilderState> {
 		state.revisions++;
 		// The model is still owed the finish call's output, so that goes first.
 		state.pending = [...(state.pending ?? []), { role: "user", content: feedback }];
-		this.note(state, `sent back (revision ${state.revisions}): ${feedback.split("\n")[0].slice(0, 160)}`);
+		this.note(state, `sent back (revision ${state.revisions}): ${firstLine(feedback).slice(0, 160)}`);
 		await this.save(state);
 		await this.ctx.storage.setAlarm(Date.now());
 		return "revising";
@@ -389,4 +389,9 @@ export class Builder extends SandboxAgent<BuildJob, BuilderState> {
 		const ahead = await this.commitsAhead();
 		return ahead.exitCode === 0 ? Number(ahead.output.trim()) : 0;
 	}
+}
+
+/** A text's first line: a reviewer's feedback in brief. */
+function firstLine(text: string) {
+	return text.split("\n")[0] ?? "";
 }

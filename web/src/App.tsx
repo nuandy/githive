@@ -279,7 +279,7 @@ function repoViewOf(route: Route): RepoView | null {
 function changeTitle(changeId: string, snapshot: RepoSnapshot | undefined, history: ChangeHistory | undefined): string {
 	const claim = snapshot?.claims.find((candidate) => candidate.change === changeId);
 	if (claim) return claimTitle(claim);
-	const ended = history?.claim?.intent?.split("\n")[0].trim();
+	const ended = history?.claim?.intent?.split("\n")[0]?.trim();
 	return ended || changeId;
 }
 

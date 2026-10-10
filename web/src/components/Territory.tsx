@@ -25,6 +25,7 @@ function RegionView({ repo, region }: { repo: string; region: Region }) {
 	const held = region.cells.filter((cell) => cellLamp(cell, region)).length;
 	const shown = region.cells.slice(0, 400);
 	const named = region.cells.length <= NAMED_CELLS;
+	const wholeHolder = region.whole[0];
 	const linkOf = (cell: Cell) => {
 		const holder = cell.holders[0] ?? region.whole[0];
 		return holder ? href.change(repo, holder.change) : href.code(repo, cell.path);
@@ -42,11 +43,11 @@ function RegionView({ repo, region }: { repo: string; region: Region }) {
 					{held ? `, ${held} held` : ""}
 				</span>
 			</h3>
-			{region.whole.length ? (
-				<p className={`region__whole lamp--${lampColor(region.whole[0].lamp)}`}>
+			{wholeHolder ? (
+				<p className={`region__whole lamp--${lampColor(wholeHolder.lamp)}`}>
 					<span className="lamp" aria-hidden="true" />
-					<a href={href.change(repo, region.whole[0].change)}>{region.whole[0].title}</a> holds all of it,{" "}
-					{LAMP_WORDS[region.whole[0].lamp]}
+					<a href={href.change(repo, wholeHolder.change)}>{wholeHolder.title}</a> holds all of it,{" "}
+					{LAMP_WORDS[wholeHolder.lamp]}
 				</p>
 			) : null}
 			{named ? (

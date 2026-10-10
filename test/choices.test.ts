@@ -89,7 +89,7 @@ describe("the reviews an agent may give", () => {
 		expect(changes(base({ open, held: { "h1#review": ["agent-z"], "h2#review": ["agent-w"] } }))).toEqual([]);
 		// Two approvals needed: one agent on it leaves room for another, and says who.
 		expect(
-			reviewsFor(base({ policy: { required: 2, vetoes: [] }, open: [open[0]], held: { "h1#review": ["agent-z"] } })),
+			reviewsFor(base({ policy: { required: 2, vetoes: [] }, open: [open[0]!], held: { "h1#review": ["agent-z"] } })),
 		).toMatchObject([{ change: "a", needed: 2, reviewing: ["agent-z"] }]);
 	});
 
@@ -184,7 +184,7 @@ describe("the backlog as an agent may take it", () => {
 			{ id: "w4", reason: "waits on w5 to merge" },
 		]);
 		// Once held is gone, w3 is free.
-		expect(backlogFor(base({ work: [work[2]] })).open.map((w) => w.id)).toEqual(["w3"]);
+		expect(backlogFor(base({ work: [work[2]!] })).open.map((w) => w.id)).toEqual(["w3"]);
 	});
 
 	it("frees a piece whose agent abandoned it, saying whose it was", () => {
@@ -204,7 +204,7 @@ describe("a crowd looking at once", () => {
 
 	it("starts at different pieces of the backlog", () => {
 		const work = Array.from({ length: 40 }, (_, i) => item(`w${i}`));
-		const firsts = agents.map((agent) => backlogFor(base({ agent, work })).open[0].id);
+		const firsts = agents.map((agent) => backlogFor(base({ agent, work })).open[0]!.id);
 		expect(new Set(firsts).size).toBeGreaterThan(15);
 		// Each still sees all of it.
 		expect(backlogFor(base({ agent: "agent-1", work })).open).toHaveLength(40);
@@ -215,7 +215,7 @@ describe("a crowd looking at once", () => {
 			claim: claimOf(`c${i}`, "author", `2026-10-07T10:${String(i).padStart(2, "0")}:00.000Z`),
 			head: `h${i}`,
 		}));
-		const firsts = agents.map((agent) => reviewsFor(base({ agent, open }))[0].change);
+		const firsts = agents.map((agent) => reviewsFor(base({ agent, open }))[0]!.change);
 		expect(new Set(firsts).size).toBeGreaterThan(10);
 	});
 });
@@ -302,18 +302,18 @@ describe("review holds through the toolkit", { timeout: 120_000 }, () => {
 					hold: async (_repo: string, key: string) => (events.push(`hold ${key.slice(0, 7)}`), true),
 				},
 			});
-			await callTool("credentials", { repo: "p", change: "c-1" }, watched(heads[0]));
-			expect(events).toEqual([`hold ${heads[0].slice(0, 7)}`, "fork read"]);
+			await callTool("credentials", { repo: "p", change: "c-1" }, watched(heads[0]!));
+			expect(events).toEqual([`hold ${heads[0]!.slice(0, 7)}`, "fork read"]);
 			events.length = 0;
 			await callTool("credentials", { repo: "p", change: "c-1" }, watched("0".repeat(40)));
-			expect(events).toEqual(["hold 0000000", "fork read", `hold ${heads[0].slice(0, 7)}`]);
+			expect(events).toEqual(["hold 0000000", "fork read", `hold ${heads[0]!.slice(0, 7)}`]);
 			// rev-1 starts c-1, rev-2 starts c-2: each marked, so a third sees neither.
 			const one = (await call("credentials", { change: "c-1" }, keys["rev-1"])) as { head: string };
 			const two = (await call("credentials", { change: "c-2" }, keys["rev-2"])) as { head: string };
 			keys["rev-3"] = ((await call("register", { agent: "rev-3" })) as { key: string }).key;
 			expect(await listed("rev-3")).toEqual([]);
 			// rev-1 still sees its own, first.
-			expect((await listed("rev-1"))[0].change).toBe("c-1");
+			expect((await listed("rev-1"))[0]!.change).toBe("c-1");
 			// After rev-1 votes, its hold lasts one more minute, until the vote is visible everywhere, not 15 minutes.
 			await call(
 				"vote",
@@ -424,7 +424,7 @@ describe("a review a role waits for too long", { timeout: 120_000 }, () => {
 			);
 			// The clock starts when someone first looks; nothing is told before 10 minutes.
 			await call("reviews", { agent: "rev" }, keys.rev);
-			const snapshot = async () => (await repoSnapshot(ctx(), "p")).claims[0].attention;
+			const snapshot = async () => (await repoSnapshot(ctx(), "p")).claims[0]!.attention;
 			expect(await snapshot()).toBeUndefined();
 			const later = vi.spyOn(Date, "now").mockReturnValue(Date.now() + 11 * 60_000);
 			try {
@@ -671,6 +671,7 @@ describe("agents choosing through the toolkit", { timeout: 120_000 }, () => {
 			for (;;) {
 				const { open } = (await call("backlog", { agent }, keys[agent])) as unknown as { open: WorkItem[] };
 				const pick = open[0];
+				if (!pick) throw new Error(`${agent} found nothing in the backlog`);
 				const claimed = await call(
 					"claim",
 					{ change: pick.id, agent, paths: pick.paths, intent: pick.intent },
@@ -685,7 +686,7 @@ describe("agents choosing through the toolkit", { timeout: 120_000 }, () => {
 		expect(new Set(Object.values(built)).size).toBe(2);
 		const heads: Record<string, string> = {};
 		for (const agent of ["agent-a", "agent-b"])
-			heads[agent] = await pushChange(server.url, work, agent, built[agent], {
+			heads[agent] = await pushChange(server.url, work, agent, built[agent]!, {
 				[`src/${built[agent] === "add-the-greeting" ? "greet" : "bye"}/index.js`]: `${agent}\n`,
 			});
 

@@ -3,6 +3,7 @@ import { gitAuth, http } from "../git-http";
 import { isEmptyRepo, type Remote, Workspace } from "../git";
 import { fetchCommits } from "../git-fetch";
 import { formatOf, RECORD_FORMAT, upgradeState } from "../record-format";
+import { checkedState } from "../record-schemas";
 import { retryTransient } from "../retry";
 import type { MergeRecord } from "./audit";
 import type { Registry } from "./claims";
@@ -44,7 +45,8 @@ async function statesFrom<S>(fs: Fetched, tip: string, ref: string, cache: objec
 function stateOf<S>(message: string, text: string, ref: string): S {
 	const format = formatOf(message);
 	const raw = JSON.parse(text);
-	return format > RECORD_FORMAT ? (raw as S) : upgradeState<S>(raw, format, ref);
+	if (format > RECORD_FORMAT) return raw as S;
+	return checkedState<S>(ref, upgradeState<S>(raw, format, ref));
 }
 
 /** Every claims shard's history by shard (see shards.ts), with one listing and one fetch per repo. */
@@ -86,8 +88,9 @@ async function inTurns<R>(limit: number, tasks: (() => Promise<R>)[]): Promise<R
 	await Promise.all(
 		Array.from({ length: Math.min(limit, tasks.length) }, async () => {
 			while (next < tasks.length) {
-				const i = next++;
-				results[i] = await tasks[i]();
+				const index = next++;
+				const task = tasks[index];
+				if (task) results[index] = await task();
 			}
 		}),
 	);
@@ -131,7 +134,7 @@ export function trailer(message: string, name: string) {
 export async function readMainMerges(remote: Remote, baseline: string, branch: string): Promise<MergeRecord[]> {
 	const workspace = await Workspace.clone(remote, branch);
 	const records: MergeRecord[] = [];
-	for (let oid = await workspace.head(); oid && oid !== baseline;) {
+	for (let oid: string | undefined = await workspace.head(); oid && oid !== baseline;) {
 		const { commit } = await workspace.ensureCommit(oid);
 		const [first] = commit.parent;
 		records.push(

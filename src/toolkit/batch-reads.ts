@@ -40,7 +40,7 @@ export function artifactsInspect(
 		const fetched = await fallback({ base, branch, changes: unplaced });
 		const fromGate = (change: string): Inspected =>
 			fetched.find((result) => result.change === change) ?? { change, error: "its branch couldn't be read" };
-		return inspected.map((result, index) => result ?? fromGate(changes[index].change));
+		return changes.map((change, index) => inspected[index] ?? fromGate(change.change));
 	};
 }
 
@@ -72,11 +72,12 @@ async function branchChain(
 	const at = kept?.findIndex((c) => c.hash === head) ?? -1;
 	if (kept && at >= 0) return at === 0 ? kept : kept.slice(at);
 	const reading = (async () => {
-		if (kept?.length) {
+		const keptTip = kept?.[0];
+		if (kept && keptTip) {
 			// Read only the commits on top of the cached chain, if that's all that changed.
 			const newer = await history(project, (source) => source.log(branch, NEWER_PAGE, 0));
 			const from = newer.findIndex((c) => c.hash === head);
-			const joins = newer.findIndex((c) => c.hash === kept[0].hash);
+			const joins = newer.findIndex((c) => c.hash === keptTip.hash);
 			if (from >= 0 && joins >= from) return [...newer.slice(from, joins), ...kept].slice(0, BRANCH_WINDOW);
 		}
 		const listed = await history(project, (source) => source.log(branch, BRANCH_WINDOW, 0));
@@ -139,8 +140,9 @@ async function placeChange(
 			reached(where);
 		}
 	}
-	if (!left || newest === undefined) return null;
-	return { head, base: chain[newest], files: await filesBetween(source, chain[newest].treeHash, head.treeHash) };
+	const base = newest === undefined ? undefined : chain[newest];
+	if (!left || !base) return null;
+	return { head, base, files: await filesBetween(source, base.treeHash, head.treeHash) };
 }
 
 /**
@@ -163,10 +165,11 @@ export async function changeAgainst(
 	);
 	if (!placed || "error" in placed) return placed;
 	// What the branch changed since the change left it, or nothing if it hasn't moved.
-	const theirs =
-		placed.base.hash === main
-			? []
-			: await history(project, (source) => filesBetween(source, placed.base.treeHash, chain[0].treeHash));
+	const branchTip = chain[0];
+	const branchMoved = placed.base.hash !== main;
+	let theirs: string[] = [];
+	if (branchTip && branchMoved)
+		theirs = await history(project, (source) => filesBetween(source, placed.base.treeHash, branchTip.treeHash));
 	const touches = (a: string, b: string) => a === b || a.startsWith(`${b}/`) || b.startsWith(`${a}/`);
 	return {
 		head: placed.head.hash,

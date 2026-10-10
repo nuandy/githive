@@ -208,7 +208,13 @@ export function toolContextFor(
 		...githubApp(env),
 		// A branch's head, briefly cached for every merge watching it (see MergeInput.branchHead).
 		branchHead: (repo, branch) =>
-			keptRead(env, repo, `head:${branch}`, KEPT_BRANCH_HEAD_MS, () => headOf(env.ARTIFACTS, repo, branch)),
+			keptRead(
+				env,
+				repo,
+				`head:${branch}`,
+				KEPT_BRANCH_HEAD_MS,
+				async () => (await headOf(env.ARTIFACTS, repo, branch)) ?? null,
+			),
 		// Make forks in the background before agents need them: the seeds when GitHive starts, an agent's when it
 		// registers.
 		prepareForks: async (repo, items) =>

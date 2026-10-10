@@ -13,13 +13,17 @@ vi.mock("../src/access", () => ({ verifyAccessRequest: vi.fn(async () => null) }
 const worker = (await import("../src/index")).default;
 const ORIGIN = "https://githive.test";
 
+const HANDLES = ["ada", "bob", "cyd", "eve"] as const;
+type Handle = (typeof HANDLES)[number];
+type Person = { id: string; handle: string; email: string; session: string; token: string };
+
 /** acme (ada owns it, bob is a member, cyd reviews web as a collaborator), and eve from outside. */
 async function world() {
 	const DB = fakeD1();
 	const ids = new IdentityStore(DB);
 	const orgs = new OrgStore(DB);
-	const people: Record<string, { id: string; handle: string; email: string; session: string; token: string }> = {};
-	for (const handle of ["ada", "bob", "cyd", "eve"]) {
+	const people = {} as Record<Handle, Person>;
+	for (const handle of HANDLES) {
 		await ids.invite(`${handle}@example.com`, "admin");
 		const { user } = (await ids.signIn({
 			provider: "github",
@@ -45,7 +49,8 @@ async function world() {
 }
 
 /** What each person may do in acme/web. */
-const EXPECTED: Record<string, Level | null> = { ada: "admin", bob: "write", cyd: "review", eve: null };
+const EXPECTED: Record<Handle, Level | null> = { ada: "admin", bob: "write", cyd: "review", eve: null };
+const EXPECTED_ENTRIES = Object.entries(EXPECTED) as [Handle, Level | null][];
 
 /** Turned away: can't see the repo, or can't do this in it. */
 const refused = (error: string | undefined) => !!error && /^(no repo |you can )/.test(error);
@@ -126,11 +131,14 @@ async function tool(env: object, name: string, token: string) {
 		{ waitUntil: () => {} } as never,
 	);
 	const reply = (await response.json()) as { result: { content: { text: string }[]; isError?: boolean } };
-	return reply.result.isError ? reply.result.content[0].text : undefined;
+	if (!reply.result.isError) return undefined;
+	const first = reply.result.content[0];
+	if (!first) throw new Error(`${name} failed with no content`);
+	return first.text;
 }
 
 describe("every repo route, for each person", () => {
-	for (const [person, level] of Object.entries(EXPECTED)) {
+	for (const [person, level] of EXPECTED_ENTRIES) {
 		it(`lets ${person} (${level ?? "nothing"} in acme/web) through exactly the routes that need no more`, async () => {
 			for (const [method, path, needs] of ROUTES) {
 				// A fresh world each time: some routes change it (collaborators, deleting).
@@ -145,7 +153,7 @@ describe("every repo route, for each person", () => {
 });
 
 describe("every MCP tool, for each person's agent", () => {
-	for (const [person, level] of Object.entries(EXPECTED)) {
+	for (const [person, level] of EXPECTED_ENTRIES) {
 		it(`lets ${person}'s agent (with ${level ?? "nothing"}) use exactly the tools that need no more`, async () => {
 			const { env, people } = await world();
 			for (const [name, needs] of Object.entries(TOOL_LEVEL)) {
@@ -163,7 +171,7 @@ describe("what each person can see", () => {
 	it("lists only the repos a person can see, by their full names", async () => {
 		const { env, people, orgs } = await world();
 		await orgs.addRepo((await orgs.org("eve"))!, "notes", people.eve.id);
-		const list = async (who: string) =>
+		const list = async (who: Handle) =>
 			(await (
 				await worker.fetch(
 					new Request(`${ORIGIN}/repos`, { headers: { Cookie: people[who].session } }),
@@ -187,7 +195,7 @@ describe("what each person can see", () => {
 
 	it("shows an org's people and teams only to its members", async () => {
 		const { env, people } = await world();
-		const org = async (who: string) =>
+		const org = async (who: Handle) =>
 			(await (
 				await worker.fetch(
 					new Request(`${ORIGIN}/orgs/acme`, { headers: { Cookie: people[who].session } }),
@@ -205,7 +213,7 @@ describe("what each person can see", () => {
 
 	it("lets an org's owners and admins manage it, and nobody else", async () => {
 		const { env, people } = await world();
-		const asJson = (who: string, method: string, path: string, body: object) =>
+		const asJson = (who: Handle, method: string, path: string, body: object) =>
 			worker.fetch(
 				new Request(`${ORIGIN}${path}`, {
 					method,

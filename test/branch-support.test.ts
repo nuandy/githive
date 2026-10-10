@@ -60,7 +60,7 @@ describe("a project whose branch is master", () => {
 				{ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name, arguments: args } },
 				ctx as never,
 			)) as { result: { content: { text: string }[]; isError?: boolean } };
-			const text = reply.result.content[0].text;
+			const text = reply.result.content[0]!.text;
 			return reply.result.isError ? { error: text } : JSON.parse(text);
 		};
 

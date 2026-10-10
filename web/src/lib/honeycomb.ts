@@ -87,16 +87,17 @@ export function honeycomb(files: string[], claims: Claim[], context: LampContext
 	let rootFiles = 0;
 	for (const file of files) {
 		const parts = segments(file);
-		if (!parts.length) continue;
-		if (parts.length === 1) {
+		const [topName, subName] = parts;
+		if (topName === undefined) continue;
+		if (subName === undefined) {
 			rootFiles++;
 			continue;
 		}
-		let top = tops.get(parts[0]);
-		if (!top) tops.set(parts[0], (top = { files: 0, direct: 0, subs: new Map() }));
+		let top = tops.get(topName);
+		if (!top) tops.set(topName, (top = { files: 0, direct: 0, subs: new Map() }));
 		top.files++;
 		if (parts.length === 2) top.direct++;
-		else top.subs.set(parts[1], (top.subs.get(parts[1]) ?? 0) + 1);
+		else top.subs.set(subName, (top.subs.get(subName) ?? 0) + 1);
 	}
 
 	const claimed = claims.flatMap((claim) =>
@@ -144,8 +145,8 @@ export function honeycomb(files: string[], claims: Claim[], context: LampContext
 
 	// Claims on what isn't there yet: a new folder, or a new file in a split folder or at the top.
 	for (const { parts, folder } of claimed) {
-		if (!parts.length) continue;
 		const [first, second] = parts;
+		if (first === undefined) continue;
 		const top = tops.get(first);
 		const isFolderClaim = folder || parts.length > 1;
 		if (!top) {
@@ -154,7 +155,8 @@ export function honeycomb(files: string[], claims: Claim[], context: LampContext
 			else if (!hexes.has("*")) add(filesHex("", 0, true));
 			continue;
 		}
-		if (!split.has(first) || parts.length < 2) continue;
+		if (!split.has(first)) continue;
+		if (second === undefined) continue;
 		if (top.subs.has(second)) continue;
 		if (parts.length > 2 || folder)
 			add({
@@ -185,7 +187,8 @@ export function honeycomb(files: string[], claims: Claim[], context: LampContext
 		if (!path || (hex.path && covers(path, hex.path))) return "whole";
 		const depth = hex.path ? segments(hex.path).length + 1 : 1;
 		if (parts.length !== depth || raw.endsWith("/")) return undefined;
-		const elsewhere = hex.path ? parts[0] !== hex.path || isSub(hex.path, parts[1]) : isTopFolder(parts[0]);
+		const [first = "", second = ""] = parts;
+		const elsewhere = hex.path ? first !== hex.path || isSub(hex.path, second) : isTopFolder(first);
 		return elsewhere ? undefined : "part";
 	};
 
@@ -224,7 +227,8 @@ export function honeycomb(files: string[], claims: Claim[], context: LampContext
 
 /** Whole claims first (the most specific first), then claims inside the cell, oldest first. */
 function byHolding(a: HexHolder, b: HexHolder): number {
-	const specificFirst = a.whole ? normalizePath(b.paths[0]).length - normalizePath(a.paths[0]).length : 0;
+	const pathLength = (holder: HexHolder) => normalizePath(holder.paths[0] ?? "").length;
+	const specificFirst = a.whole ? pathLength(b) - pathLength(a) : 0;
 	return (
 		Number(b.whole) - Number(a.whole) ||
 		specificFirst ||
@@ -242,7 +246,7 @@ function landingOf(holders: HexHolder[]): HexLanding | undefined {
 /** Folders by name, each split one's cells together (its own files first); the top-level files last. */
 function byMapOrder(a: Hex, b: Hex): number {
 	if ((a.key === "*") !== (b.key === "*")) return a.key === "*" ? 1 : -1;
-	const sortKey = (hex: Hex) => {
+	const sortKey = (hex: Hex): [string, string] => {
 		if (!hex.parent) return [hex.name, ""];
 		return [hex.parent, hex.kind === "files" ? "" : hex.name];
 	};

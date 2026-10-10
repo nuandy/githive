@@ -49,16 +49,16 @@ describe("reviews a role waits for, as a record", () => {
 	it("remembers when each was first seen waiting and whether people were told, forgetting one that stops", async () => {
 		const log = new MemoryLog<ReviewHolds>();
 		const first = await roleWaits(log, ["h1#security"]);
-		expect((await roleWaits(log, ["h1#security", "h2#security"]))["h1#security"].since).toBe(
-			first["h1#security"].since,
+		expect((await roleWaits(log, ["h1#security", "h2#security"]))["h1#security"]!.since).toBe(
+			first["h1#security"]!.since,
 		);
 		await roleWaitTold(log, "h1#security");
 		expect(await roleWaits(log, ["h1#security"])).toEqual({
-			"h1#security": { since: first["h1#security"].since, told: true },
+			"h1#security": { since: first["h1#security"]!.since, told: true },
 		});
 		// h1's review was taken; when it waits again, its clock starts over.
 		await roleWaits(log, []);
-		expect((await roleWaits(log, ["h1#security"]))["h1#security"].told).toBeUndefined();
+		expect((await roleWaits(log, ["h1#security"]))["h1#security"]!.told).toBeUndefined();
 	});
 
 	it("writes only when the reviews waiting change", async () => {

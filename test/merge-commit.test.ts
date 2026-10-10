@@ -39,8 +39,8 @@ describe("a merge commit's message", () => {
 		const reason = "so that logging out on one device ends every session ";
 		const intent = `Move session storage from cookies to the server ${reason.repeat(2)}`;
 		const lines = (await mergeMessage({ ...claimed, intent })).split("\n");
-		expect(lines[0].length).toBeLessThanOrEqual(72);
-		expect(lines[0].endsWith("…")).toBe(true);
+		expect(lines[0]!.length).toBeLessThanOrEqual(72);
+		expect(lines[0]!.endsWith("…")).toBe(true);
 		const body = lines.slice(4, lines.indexOf("", 4));
 		expect(body.every((line) => line.length <= 72)).toBe(true);
 		expect(body.join(" ")).toBe(intent.trim());

@@ -20,8 +20,7 @@ export function buildTree(files: string[]): TreeNode[] {
 	for (const file of files) {
 		const parts = file.split("/").filter(Boolean);
 		let parent = root;
-		for (let depth = 0; depth < parts.length; depth++) {
-			const name = parts[depth];
+		for (const [depth, name] of parts.entries()) {
 			const path = parts.slice(0, depth + 1).join("/");
 			if (depth === parts.length - 1) {
 				parent.children.push({ name, path, kind: "file", children: [] });

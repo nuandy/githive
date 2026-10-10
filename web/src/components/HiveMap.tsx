@@ -311,18 +311,22 @@ export function HiveMap({ repo, branch, snapshot, tree, error, landing, now = Da
 							role="group"
 							aria-label={`${plural(hexes.length, "folder cell")}, ${held} held`}
 						>
-							{hexes.map((hex, index) => (
-								<Cell
-									key={hex.key}
-									hex={hex}
-									x={grid.centers[index].x}
-									y={grid.centers[index].y}
-									active={picked === hex.key}
-									onShow={setHovered}
-									onPick={(key) => setPicked((current) => (current === key ? null : key))}
-									now={now}
-								/>
-							))}
+							{hexes.map((hex, index) => {
+								const center = grid.centers[index];
+								if (!center) return null;
+								return (
+									<Cell
+										key={hex.key}
+										hex={hex}
+										x={center.x}
+										y={center.y}
+										active={picked === hex.key}
+										onShow={setHovered}
+										onPick={(key) => setPicked((current) => (current === key ? null : key))}
+										now={now}
+									/>
+								);
+							})}
 						</svg>
 						{allHexes.length > hexes.length ? (
 							<p className="muted">and {allHexes.length - hexes.length} more folders</p>

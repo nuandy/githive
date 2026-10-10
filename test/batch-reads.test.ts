@@ -116,7 +116,7 @@ describe("a batch read through Artifacts' API", () => {
 			{ change: "one", head: "c2", files: ["b.txt", "c.txt"] },
 			{ change: "two", head: "in-the-gate", files: ["by-git"] },
 		]);
-		expect(gate.mock.calls[0][0].changes.map((c) => c.change)).toEqual(["two"]);
+		expect(gate.mock.calls[0]![0].changes.map((c) => c.change)).toEqual(["two"]);
 	});
 
 	it("has the Gate read them all when main's history doesn't reach the batch's base", async () => {

@@ -6,8 +6,9 @@ export function fail(status: number, message: string): never {
 
 export function statusOf(err: unknown): { status: number; message: string } {
 	const text = err instanceof Error ? err.message : String(err);
-	const match = /^\[(\d{3})\] (.*)$/s.exec(text);
-	return match ? { status: Number(match[1]), message: match[2] } : { status: 500, message: text };
+	const [, status, message] = /^\[(\d{3})\] (.*)$/s.exec(text) ?? [];
+	if (status === undefined || message === undefined) return { status: 500, message: text };
+	return { status: Number(status), message };
 }
 
 /** A required string argument, trimmed. Throws `[400] <key> is required` when it is missing or blank. */

@@ -32,7 +32,7 @@ async function records() {
 		registry,
 		votes: await readRecordHistory<Votes>(remote(), "refs/notes/githive-votes/t1"),
 		policy,
-		merges: await readMainMerges(remote(), registry[0].state.baseline!, "main"),
+		merges: await readMainMerges(remote(), registry[0]!.state.baseline!, "main"),
 	};
 }
 

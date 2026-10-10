@@ -182,17 +182,18 @@ async function settleLanded(
 async function releaseClaims(
 	input: MergeInput,
 	changes: Ready[],
-	mergedAs: (ready: Ready, index: number) => string,
+	mergedAs: (ready: Ready, index: number) => string | undefined,
 	failure: (ready: Ready) => string,
 ) {
 	for (let start = 0; start < changes.length; start += RELEASES_AT_ONCE) {
 		const group = changes.slice(start, start + RELEASES_AT_ONCE);
 		const releases = group.map((ready, offset) => {
+			const merged = mergedAs(ready, start + offset);
 			const release = {
 				change: ready.change,
 				agent: ready.agent,
 				reason: "merged" as const,
-				mergedAs: mergedAs(ready, start + offset),
+				...(merged ? { mergedAs: merged } : {}),
 			};
 			return input.store.release(release, input.stamper).catch((err) => console.error(failure(ready), String(err)));
 		});

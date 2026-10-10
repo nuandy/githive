@@ -191,7 +191,7 @@ function OrgRepos({ org }: { org: OrgDetail }) {
 	);
 }
 
-const capitalized = (level: Level) => level[0].toUpperCase() + level.slice(1);
+const capitalized = (level: Level) => level.charAt(0).toUpperCase() + level.slice(1);
 
 function SettingsSection({ org, actions, run, busy, errorFor }: SectionProps) {
 	const [name, setName] = useState(org.name ?? "");

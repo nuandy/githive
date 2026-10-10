@@ -91,10 +91,11 @@ export const verifyAccessRequest: AccessVerifier = async (request, config) => {
 		const assertion = request.headers.get("Cf-Access-Jwt-Assertion");
 		if (!assertion) return null;
 		const segments = assertion.split(".");
-		if (segments.length !== 3 || segments.some((part) => !part)) return null;
+		const [encodedHeader, encodedClaims, encodedSignature] = segments;
+		if (segments.length !== 3 || !encodedHeader || !encodedClaims || !encodedSignature) return null;
 
-		const header = decodeJson<JwtHeader>(segments[0]);
-		const signature = decodeBase64Url(segments[2]);
+		const header = decodeJson<JwtHeader>(encodedHeader);
+		const signature = decodeBase64Url(encodedSignature);
 		if (!header || header.alg !== "RS256" || typeof header.kid !== "string" || !header.kid || !signature) return null;
 
 		const jwk = await findSigningKey(config.teamDomain, header.kid);
@@ -103,10 +104,10 @@ export const verifyAccessRequest: AccessVerifier = async (request, config) => {
 		const key = await crypto.subtle.importKey("jwk", jwk, { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" }, false, [
 			"verify",
 		]);
-		const signingInput = new TextEncoder().encode(`${segments[0]}.${segments[1]}`);
+		const signingInput = new TextEncoder().encode(`${encodedHeader}.${encodedClaims}`);
 		if (!(await crypto.subtle.verify("RSASSA-PKCS1-v1_5", key, signature, signingInput))) return null;
 
-		const claims = decodeJson<AccessJwtClaims>(segments[1]);
+		const claims = decodeJson<AccessJwtClaims>(encodedClaims);
 		if (!claims || typeof claims !== "object" || !claimsAreValid(claims, config)) return null;
 
 		return identify(claims);

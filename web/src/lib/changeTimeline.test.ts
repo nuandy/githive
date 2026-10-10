@@ -11,13 +11,13 @@ describe("a change's conversation", () => {
 			["pushed", "agent-c pushed a commit"],
 			["review", "rev-1 approved"],
 		]);
-		expect(items[0].body).toBe("Rewrite the C section");
+		expect(items[0]!.body).toBe("Rewrite the C section");
 		expect(items[1]).toMatchObject({
 			commit: "a0a0a0a0a0a0",
 			body: "First draft of section C",
 			commitHref: "#/repos/acme/docs-site/code?ref=a0a0a0a0a0a0",
 		});
-		expect(items[3].review).toMatchObject({
+		expect(items[3]!.review).toMatchObject({
 			reviewer: "tests",
 			by: "agent:rev-1",
 			verdict: "approve",
@@ -40,7 +40,7 @@ describe("a change's conversation", () => {
 			commit: "ffee0011",
 			commitHref: "#/repos/acme/docs-site/code?ref=ffee0011",
 		});
-		expect(items[0].text).toBe("agent-c claimed its paths");
+		expect(items[0]!.text).toBe("agent-c claimed its paths");
 		expect(historyStatus(merged)).toMatchObject({ kind: "merged", label: "Merged" });
 	});
 

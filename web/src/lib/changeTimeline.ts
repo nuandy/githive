@@ -14,7 +14,7 @@ type Release = ChangeHistory["released"][number];
 /** A vote as a review card: the reviewer's name, the role, the evidence. */
 export function voteAsReview(vote: Vote) {
 	const evidence = (vote.evidence ?? "").trim();
-	const firstLine = evidence.split("\n")[0];
+	const firstLine = evidence.split("\n")[0] ?? "";
 	const short = firstLine.length > 240 ? `${firstLine.slice(0, 240)}…` : firstLine;
 	return {
 		reviewer: vote.role,

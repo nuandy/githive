@@ -80,7 +80,8 @@ function packFrom(bytes: Uint8Array) {
 		}
 		const payload = bytes.subarray(at + 4, at + length);
 		at += length;
-		if (!inPack && payload[0] > 3) {
+		const firstByte = payload[0] ?? 0;
+		if (!inPack && firstByte > 3) {
 			const line = decoder.decode(payload);
 			if (line.startsWith("ERR")) throw new Error(`fetch refused: ${line.trim()}`);
 			if (line.startsWith("NAK") || line.startsWith("ACK")) inPack = true;

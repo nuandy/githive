@@ -89,11 +89,11 @@ describe("the territory", () => {
 	it("has a region per top-level folder, the top-level files last, each split one level in", () => {
 		const regions = territory(files, []);
 		expect(regions.map((r) => r.name)).toEqual(["lib", "test", ""]);
-		expect(regions[0].cells.map((c) => [c.name, !!c.folder])).toEqual([
+		expect(regions[0]!.cells.map((c) => [c.name, !!c.folder])).toEqual([
 			["a.js", false],
 			["router", true],
 		]);
-		expect(regions[0].files).toBe(2);
+		expect(regions[0]!.files).toBe(2);
 	});
 
 	it("lights the cell a claim covers, the whole region for a claim on the folder, and new paths as planned", () => {
@@ -117,7 +117,7 @@ describe("the territory", () => {
 		).toBeUndefined();
 		const test = regions.find((r) => r.name === "test")!;
 		expect(test.whole.map((h) => h.change)).toEqual(["t"]);
-		expect(cellLamp(test.cells[0], test)).toBe("approved");
+		expect(cellLamp(test.cells[0]!, test)).toBe("approved");
 		const swarm = regions.find((r) => r.name === "swarm")!;
 		expect(swarm.files).toBe(0);
 		expect(swarm.cells).toMatchObject([{ name: "p1", planned: true, folder: true }]);
@@ -132,7 +132,7 @@ describe("the territory", () => {
 			],
 			{ now: soon },
 		);
-		const router = lib.cells.find((c) => c.name === "router")!;
+		const router = lib!.cells.find((c) => c.name === "router")!;
 		expect(router.holders.map((h) => h.change)).toEqual(["b", "a"]);
 	});
 });

@@ -148,7 +148,7 @@ describe("GitHive, end to end", { timeout: 60_000 }, () => {
 			registry,
 			votes: await readRecordHistory<Votes>(remote(), "refs/notes/githive-votes/t1"),
 			policy,
-			merges: await readMainMerges(remote(), registry[0].state.baseline!, "main"),
+			merges: await readMainMerges(remote(), registry[0]!.state.baseline!, "main"),
 		};
 		expect(records.merges.map((m) => m.change ?? "(none)")).toEqual(["a-1", "b-1", "(none)"]);
 		expect(await audit(records)).toEqual([

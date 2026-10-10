@@ -36,7 +36,7 @@ describe("GitHive's GitHub App", () => {
 	it("signs a JWT GitHub can verify with the App's public key, naming the App, good for under 10 minutes", async () => {
 		const { pem, publicKey } = await appKey();
 		const jwt = await appJwt({ appId: "12345", privateKey: pem }, Date.UTC(2026, 9, 10, 12));
-		const [header, payload, signature] = jwt.split(".");
+		const [header, payload, signature] = jwt.split(".") as [string, string, string];
 		const decode = (s: string) =>
 			Uint8Array.from(atob(s.replace(/-/g, "+").replace(/_/g, "/") + "=".repeat((4 - (s.length % 4)) % 4)), (c) =>
 				c.charCodeAt(0),

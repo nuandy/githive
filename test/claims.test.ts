@@ -54,7 +54,7 @@ describe("claims", () => {
 		const log = new MemoryLog<Registry>();
 		await claim(log, a);
 		expect(await claim(log, { ...a, paths: ["docs/stats.md"] })).toMatchObject({ ok: true });
-		expect(activeClaims((await log.read())!.commit.state)[0].paths).toEqual(["src/stats/", "docs/stats.md"]);
+		expect(activeClaims((await log.read())!.commit.state)[0]!.paths).toEqual(["src/stats/", "docs/stats.md"]);
 	});
 
 	it("on a real Git server, lets only one of two overlapping claims sent at once land", async () => {
@@ -95,7 +95,7 @@ describe("claims", () => {
 	it("lets any agent release a claim gone stale, but not one still in use", async () => {
 		const log = new MemoryLog<Registry>();
 		await claim(log, a);
-		const since = Date.parse((await log.read())!.commit.state.claims[0].active);
+		const since = Date.parse((await log.read())!.commit.state.claims[0]!.active);
 		expect(
 			await releaseStale(log, { change: "stats-1a2b", agent: "agent-b", staleAfterMs: 60_000, now: since + 30_000 }),
 		).toMatchObject({ ok: false });
@@ -111,7 +111,7 @@ describe("claims", () => {
 	it("takes over paths a stale claim holds, releasing it as stale in the same record: no timer needed", async () => {
 		const log = new MemoryLog<Registry>();
 		await claim(log, a);
-		const since = Date.parse((await log.read())!.commit.state.claims[0].active);
+		const since = Date.parse((await log.read())!.commit.state.claims[0]!.active);
 		const commits = log.commits.length;
 		expect(await claim(log, { ...b, staleAfterMs: 60_000, now: since + 60_001 })).toMatchObject({ ok: true });
 		expect(log.commits).toHaveLength(commits + 1);
@@ -125,7 +125,7 @@ describe("claims", () => {
 	it("still refuses paths a claim in use holds", async () => {
 		const log = new MemoryLog<Registry>();
 		await claim(log, a);
-		const since = Date.parse((await log.read())!.commit.state.claims[0].active);
+		const since = Date.parse((await log.read())!.commit.state.claims[0]!.active);
 		expect(await claim(log, { ...b, staleAfterMs: 60_000, now: since + 30_000 })).toMatchObject({
 			ok: false,
 			conflicts: [{ change: "stats-1a2b" }],
@@ -135,10 +135,10 @@ describe("claims", () => {
 	it("counts extending a claim as activity", async () => {
 		const log = new MemoryLog<Registry>();
 		await claim(log, a);
-		const first = (await log.read())!.commit.state.claims[0].active;
+		const first = (await log.read())!.commit.state.claims[0]!.active;
 		await new Promise((resolve) => setTimeout(resolve, 5));
 		await claim(log, { ...a, paths: ["docs/stats.md"] });
-		expect(Date.parse((await log.read())!.commit.state.claims[0].active)).toBeGreaterThan(Date.parse(first));
+		expect(Date.parse((await log.read())!.commit.state.claims[0]!.active)).toBeGreaterThan(Date.parse(first));
 	});
 
 	it("keeps the baseline, policy and checks through claims and releases", async () => {

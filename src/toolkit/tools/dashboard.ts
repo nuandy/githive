@@ -112,7 +112,9 @@ async function ownCommits(
 	const projectHead = await timing.time("project", async () =>
 		workspace.fetch("project", await ctx.remote(repo, "read"), branch),
 	);
-	const before = mergedAs ? (await workspace.ensureCommit(mergedAs)).commit.parent[0] : projectHead;
+	// Merged: its own commits are those since it left the branch as it was before the merge.
+	const beforeMerge = mergedAs ? (await workspace.ensureCommit(mergedAs)).commit.parent[0] : undefined;
+	const before = beforeMerge ?? projectHead;
 	const stop = await timing.time("base", () => workspace.mergeBase(before, head));
 	const own: OwnCommit[] = [];
 	for (const { oid, commit } of await git.log({ fs: workspace.fs, dir: "/repo", ref: head, depth: 50 })) {
@@ -221,7 +223,7 @@ export async function repoSnapshot(ctx: ToolContext, repo: string) {
 			needsYou: waiting.length,
 			waiting: waiting.slice(0, 20).map((claim) => ({
 				change: claim.change,
-				title: claim.intent.split("\n")[0].slice(0, 120),
+				title: (claim.intent.split("\n")[0] ?? "").slice(0, 120),
 				reason: claim.attention!.reason.slice(0, 500),
 			})),
 			countedAt: new Date().toISOString(),

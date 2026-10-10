@@ -120,8 +120,8 @@ export async function takeGitRequests(
 	const paths = new Map<string, number>();
 	let failed = 0;
 	for (const line of taken.output.split("\n")) {
-		const counted = line.trim().match(/^(\d+) (\/\S*)$/);
-		if (counted) paths.set(counted[2], (paths.get(counted[2]) ?? 0) + Number(counted[1]));
+		const [, count, path] = line.trim().match(/^(\d+) (\/\S*)$/) ?? [];
+		if (count && path) paths.set(path, (paths.get(path) ?? 0) + Number(count));
 		const failing = line.match(/^failed (\d+)$/);
 		if (failing) failed = Number(failing[1]);
 	}

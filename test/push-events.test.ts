@@ -113,8 +113,8 @@ describe("the queue consumer", () => {
 				if (project === "x--agent") throw new Error("Durable Object is overloaded");
 			}),
 		);
-		expect([messages[0].ack.mock.calls.length, messages[0].retry.mock.calls.length]).toEqual([0, 1]);
-		expect([messages[1].ack.mock.calls.length, messages[1].retry.mock.calls.length]).toEqual([1, 0]);
+		expect([messages[0]!.ack.mock.calls.length, messages[0]!.retry.mock.calls.length]).toEqual([0, 1]);
+		expect([messages[1]!.ack.mock.calls.length, messages[1]!.retry.mock.calls.length]).toEqual([1, 0]);
 	});
 
 	it("notes nothing without its namespace set", async () => {
@@ -122,7 +122,7 @@ describe("the queue consumer", () => {
 		const messages = [message(event("fork--p--agent--a", "refs/heads/changes/c", A))];
 		await notePushEvents({ messages } as unknown as MessageBatch<unknown>, envWith(noted, null));
 		expect(noted).not.toHaveBeenCalled();
-		expect(messages[0].ack).toHaveBeenCalledOnce();
+		expect(messages[0]!.ack).toHaveBeenCalledOnce();
 	});
 });
 
@@ -146,7 +146,7 @@ describe("heads kept from reads and pushes", () => {
 		expect(await live.knownHeads(["c"])).toEqual({ c: { head: A, at: 3_000 } });
 		// And a deletion pushed later still is noted as nothing pushed.
 		await live.notePushes([{ change: "c", fork: "f", head: null, at: 4_000 }]);
-		expect((await live.knownHeads(["c"])).c.head).toBeNull();
+		expect((await live.knownHeads(["c"])).c!.head).toBeNull();
 	});
 
 	it("counts an event's head only for the agent whose fork took it", async () => {

@@ -261,7 +261,7 @@ export function ChangePage({
 	const ending = history ? changeEnding(history) : null;
 	const status = statusOf(claim, history);
 	const agent = record?.agent || ending?.release.agent || identityName(record?.by) || "agent";
-	const title = (record?.intent ?? "").split("\n")[0].trim() || changeId;
+	const title = (record?.intent ?? "").split("\n")[0]?.trim() || changeId;
 	const votes = claim ? votesForClaim(claim, history?.votes ?? snapshot.votes) : (history?.votes ?? []);
 	// A change merging a whole branch shows that branch; any other, its own.
 	const branchCode = <code className="change-header__branch">{claim?.source ?? `changes/${changeId}`}</code>;

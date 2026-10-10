@@ -37,7 +37,8 @@ export type Route =
 const REPO_TABS: RepoTab[] = ["changes", "history", "claims", "code", "agents", "settings", "audit"];
 const CHANGE_TABS: ChangeTab[] = ["commits"];
 
-function decode(segment: string): string | null {
+function decode(segment: string | undefined): string | null {
+	if (segment === undefined) return null;
 	try {
 		return decodeURIComponent(segment);
 	} catch {
@@ -47,7 +48,7 @@ function decode(segment: string): string | null {
 
 export function parseRoute(hash: string): Route {
 	const raw = hash.replace(/^#/, "");
-	const [path, query = ""] = raw.split("?");
+	const [path = "", query = ""] = raw.split("?");
 	const parts = path.split("/").filter(Boolean);
 	if (parts.length === 0) return { page: "repos" };
 	const params = new URLSearchParams(query);

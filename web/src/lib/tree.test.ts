@@ -14,7 +14,7 @@ describe("the file tree", () => {
 		]);
 		const src = tree.find((n) => n.name === "src")!;
 		expect(src.children.map((n) => n.path)).toEqual(["src/stats", "src/index.ts"]);
-		expect(src.children[0].children.map((n) => n.path)).toEqual(["src/stats/data.ts", "src/stats/page.tsx"]);
+		expect(src.children[0]!.children.map((n) => n.path)).toEqual(["src/stats/data.ts", "src/stats/page.tsx"]);
 	});
 
 	it("lists one folder and tells files from folders", () => {

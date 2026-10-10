@@ -219,7 +219,10 @@ export abstract class SandboxAgent<J extends SandboxJob, S extends AgentState> e
 		const inbox = (await this.ctx.storage.get<string[]>(INBOX)) ?? [];
 		if (sent.every((message, index) => inbox[index] === message))
 			await this.ctx.storage.put(INBOX, inbox.slice(sent.length));
-		for (const text of sent) this.note(state, "message delivered: " + text.split("\n")[0].slice(0, 160));
+		for (const text of sent) {
+			const firstLine = text.split("\n")[0] ?? "";
+			this.note(state, "message delivered: " + firstLine.slice(0, 160));
+		}
 	}
 
 	private async cancelled(state: S) {

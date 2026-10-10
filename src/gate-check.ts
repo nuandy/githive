@@ -30,7 +30,10 @@ async function fetchForCheck(container: Container, head: string, plan: CheckPlan
 	const absent = await missingCommits(container, commits);
 	const failed = await fetchChanges(
 		container,
-		absent.map((k) => ({ k, ...sources[k] })),
+		absent.flatMap((k) => {
+			const source = sources[k];
+			return source ? [{ k, ...source }] : [];
+		}),
 	);
 	for (const [index, why] of failed) {
 		const which = index === sources.length - 1 ? "the change" : "a change in the batch";

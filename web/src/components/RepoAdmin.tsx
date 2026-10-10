@@ -21,7 +21,7 @@ interface RunProps {
 	errorFor: (key: string) => ReactNode;
 }
 
-const label = (level: Level) => level[0].toUpperCase() + level.slice(1);
+const label = (level: Level) => level.charAt(0).toUpperCase() + level.slice(1);
 
 function LevelOptions() {
 	return (

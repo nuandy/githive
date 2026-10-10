@@ -6,6 +6,7 @@
 		"moduleResolution": "bundler",
 		"types": ["./worker-configuration.d.ts"],
 		"strict": true,
+		"noUncheckedIndexedAccess": true,
 		"noEmit": true,
 		"skipLibCheck": true,
 		"isolatedModules": true,

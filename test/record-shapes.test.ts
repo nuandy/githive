@@ -34,9 +34,17 @@ function shapeOf(value: unknown): Shape {
 function union(a: Shape, b: Shape): Shape {
 	if (typeof a === "object" && !Array.isArray(a) && typeof b === "object" && !Array.isArray(b)) {
 		const keys = [...new Set([...Object.keys(a), ...Object.keys(b)])].sort();
-		return Object.fromEntries(keys.map((k) => [k, k in a && k in b ? union(a[k], b[k]) : (a[k] ?? b[k])]));
+		return Object.fromEntries(keys.map((key) => [key, unionAt(a, b, key)]));
 	}
 	return a;
+}
+/** The shape under `key` in either object, joined when both have one. */
+function unionAt(a: { [key: string]: Shape }, b: { [key: string]: Shape }, key: string): Shape {
+	const left = a[key];
+	const right = b[key];
+	if (left === undefined) return right!;
+	if (right === undefined) return left;
+	return union(left, right);
 }
 
 let server: GitServer;

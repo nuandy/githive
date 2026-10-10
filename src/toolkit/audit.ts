@@ -177,7 +177,8 @@ async function auditMerge(merge: MergeRecord, key: string | undefined, indexed: 
 	const cited = citedClaims(records, registryAt, merge, report);
 	if (!cited) return violations;
 	const ownRecords = cited.claims.filter((claim) => claim.change === merge.change);
-	const own = ownRecords.length ? { ...ownRecords[0], paths: ownRecords.flatMap((claim) => claim.paths) } : undefined;
+	const [firstRecord] = ownRecords;
+	const own = firstRecord ? { ...firstRecord, paths: ownRecords.flatMap((claim) => claim.paths) } : undefined;
 	checkFilesClaimed(merge, cited, own, report);
 	checkDependencies(records.merges, merge, own, report);
 	for (const { history, tip } of cited.records) checkReleasedAfter(history, tip, merge, report);
@@ -276,7 +277,8 @@ function citedClaims(
 	const claims: ClaimRecord[] = [];
 	const cited: { shard: string; history: History; tip: string }[] = [];
 	for (const pair of tip.split(/\s+/).filter(Boolean)) {
-		const [encoded, at] = pair.split("=");
+		// A pair without "=" cites no tip, so nothing matches it and it's reported unknown below.
+		const [encoded = "", at = ""] = pair.split("=");
 		const shard = decodeShard(encoded);
 		const history = shard === "" ? records.registry : records.shards?.get(shard);
 		const entry = history?.find((e) => e.tip === at);
@@ -397,7 +399,7 @@ function citedVotes(
 	}
 	const votes: VoteRecord[] = [];
 	for (const pair of cited.split(/\s+/).filter(Boolean)) {
-		const [bucket, tip] = pair.split("=");
+		const [bucket = "", tip = ""] = pair.split("=");
 		const history = bucket === "" ? records.votes : records.voteBuckets?.get(bucket);
 		const at = history?.some((e) => e.tip === tip) ? votesAt.get(tip) : undefined;
 		if (!at)
@@ -443,7 +445,7 @@ function registryTip(cited: string): string | undefined {
 	return cited
 		.split(/\s+/)
 		.map((pair) => pair.split("="))
-		.find(([shard]) => decodeShard(shard) === "")?.[1];
+		.find(([shard = ""]) => decodeShard(shard) === "")?.[1];
 }
 
 // The merged commit needs the policy's approvals from reviewers other than its author, every veto role's included,

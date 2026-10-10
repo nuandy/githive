@@ -107,7 +107,7 @@ describe("a repo", () => {
 		expect(html).toMatch(/Commits<\/span><span class="counter">2<\/span>/);
 		// An agent's question for a person, and a person's vote form.
 		const asked = {
-			...snapshot.claims[0],
+			...snapshot.claims[0]!,
 			attention: { reason: "reviewers disagree on the cache size", agent: "agent-c", at: "" },
 		};
 		const withQuestion = renderToStaticMarkup(
@@ -130,7 +130,7 @@ describe("a repo", () => {
 			<ChangePage
 				snapshot={snapshot}
 				changeId="c-1"
-				claim={{ ...snapshot.claims[0], head: null, hosted: undefined }}
+				claim={{ ...snapshot.claims[0]!, head: null, hosted: undefined }}
 				repo="acme/docs-site"
 				tab="conversation"
 			/>,

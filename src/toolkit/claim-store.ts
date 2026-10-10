@@ -124,8 +124,12 @@ type Written = { shard: string; previous: string[] | null };
 // The shard containing all of `shards`, or ROOT if they share no first segment.
 function commonShard(shards: string[]) {
 	const split = shards.map((shard) => shard.split("/"));
+	const [firstParts = []] = split;
 	const common: string[] = [];
-	for (let i = 0; split.every((parts) => i < parts.length && parts[i] === split[0][i]); i++) common.push(split[0][i]);
+	for (const [index, part] of firstParts.entries()) {
+		if (!split.every((parts) => parts[index] === part)) break;
+		common.push(part);
+	}
 	return common.join("/");
 }
 
@@ -347,8 +351,9 @@ class Claims implements ClaimStore {
 
 		// Now that it's written, check the other levels.
 		const conflicts = await this.othersOverlapping(input, placed, stamper);
-		if (conflicts.length) {
-			const reason = `overlaps ${conflicts[0].change}'s claim`;
+		const [firstConflict] = conflicts;
+		if (firstConflict) {
+			const reason = `overlaps ${firstConflict.change}'s claim`;
 			return { ok: false, conflicts, ...(await this.backOut(input, written, reason, stamper)) };
 		}
 		return { ok: true };

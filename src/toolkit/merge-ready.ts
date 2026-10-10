@@ -172,9 +172,11 @@ function claimReasons(proposed: Proposed, scoped: string[], claims: ClaimsView, 
 	const reasons: string[] = [];
 	if (!own) reasons.push(`${change} holds no claim`);
 	proposed.files.forEach((file, index) => {
-		const holder = claims.claims.find((claim) => claim.change !== change && inLane(scoped[index], claim.paths));
+		// The file as the claims records name it (scoped to its branch); the same list, in the same order.
+		const scopedFile = scoped[index] ?? file;
+		const holder = claims.claims.find((claim) => claim.change !== change && inLane(scopedFile, claim.paths));
 		if (holder) reasons.push(`${file} is inside ${holder.change}'s claim (${holder.agent})`);
-		else if (own && !inLane(scoped[index], own.paths)) reasons.push(`${file} is outside ${change}'s claim`);
+		else if (own && !inLane(scopedFile, own.paths)) reasons.push(`${file} is outside ${change}'s claim`);
 	});
 	return reasons;
 }

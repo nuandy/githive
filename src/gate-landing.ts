@@ -76,7 +76,7 @@ async function listChangedFiles(container: Container, baseHead: string, fetched:
 	if (!fetched.length) return listed;
 	const ran = await run(container, ["bash", "-c", script]);
 	for (const record of ran.output.split("\0\0").filter(Boolean)) {
-		const [first, ...files] = record.split("\0");
+		const [first = "", ...files] = record.split("\0");
 		const [index, head] = first.split(" ");
 		if (head && head !== "-") listed.set(Number(index), { head, files: files.filter(Boolean) });
 	}
@@ -94,7 +94,7 @@ export async function landMerges(
 ): Promise<LandingResult> {
 	// inspectBatch usually fetched these already, so only missing commits are fetched.
 	const failed = await fetchMissing(container, input.merges);
-	for (const [index, why] of failed) return { error: `fetch of ${input.merges[index].change} failed: ${why}` };
+	for (const [index, why] of failed) return { error: `fetch of ${input.merges[index]?.change} failed: ${why}` };
 	const absent = await absentChanges(container, input.merges);
 	if (absent) return { error: `not on their branches: ${absent.split("\n").join(", ")}` };
 	await checkoutDetached(container, input.baseHead);
@@ -184,7 +184,7 @@ export async function pushForChecks(
 	input: BatchBase & ChecksBranch,
 ): Promise<{ tip: string } | { failed: string }> {
 	const failed = await fetchMissing(container, input.changes);
-	for (const [index, why] of failed) return { failed: `fetch of ${input.changes[index].change} failed: ${why}` };
+	for (const [index, why] of failed) return { failed: `fetch of ${input.changes[index]?.change} failed: ${why}` };
 	await checkoutDetached(container, input.baseHead);
 	for (const change of input.changes) {
 		const merged = await run(container, [

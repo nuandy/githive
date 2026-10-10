@@ -85,9 +85,10 @@ async function checkBatch(
 		found(batch);
 		return [];
 	}
-	if (batch.length === 1) {
+	const [only] = batch;
+	if (only && batch.length === 1) {
 		const again = await run();
-		if (!again.passed) return [{ ready: batch[0], results: again.results }];
+		if (!again.passed) return [{ ready: only, results: again.results }];
 		found(batch);
 		return [];
 	}

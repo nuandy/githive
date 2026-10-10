@@ -26,8 +26,11 @@ export function unscopePath(path: string, branch: string): { into: string; path:
 	};
 }
 
-export const claimInto = (claim: { paths: string[] }, branch: string) =>
-	claim.paths.length ? unscopePath(claim.paths[0], branch).into : branch;
+export function claimInto(claim: { paths: string[] }, branch: string) {
+	const [firstPath] = claim.paths;
+	if (firstPath === undefined) return branch;
+	return unscopePath(firstPath, branch).into;
+}
 
 /** A claim as agents see it: paths without the segment, plus `into` when it isn't the project's branch. */
 export function presentClaim<C extends { paths: string[] }>(claim: C, branch: string): C & { into?: string } {

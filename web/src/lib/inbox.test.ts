@@ -26,13 +26,13 @@ describe("the inbox", () => {
 		});
 		expect(count).toBe(2);
 		expect(groups.map((g) => g.repo)).toEqual(["acme/docs site", "acme/my-app"]);
-		expect(groups[0].items[0]).toEqual({
+		expect(groups[0]!.items[0]).toEqual({
 			change: "c-1",
 			title: "c-1",
 			reason: "GitHive's builder failed",
 			href: "#/repos/acme/docs%20site/changes/c-1",
 		});
-		expect(groups[1].items).toEqual([
+		expect(groups[1]!.items).toEqual([
 			{
 				change: "rate-limit",
 				title: "Rate limiter",

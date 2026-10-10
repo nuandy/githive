@@ -51,7 +51,10 @@ export async function fetchMissing(
 	const missing = await missingCommits(container, heads);
 	return fetchChanges(
 		container,
-		missing.map((k) => ({ k, ...changes[k] })),
+		missing.flatMap((k) => {
+			const change = changes[k];
+			return change ? [{ k, ...change }] : [];
+		}),
 	);
 }
 

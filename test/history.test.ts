@@ -30,7 +30,8 @@ function readBranch(_repo: string, baseline: string, branch: string): Promise<Br
 	const commits = log.split("\x1e").filter((entry) => entry.trim());
 	return Promise.resolve(
 		commits.map((entry) => {
-			const [commit, parents, author, message] = entry.replace(/^\n/, "").split("\0");
+			const fields = entry.replace(/^\n/, "").split("\0");
+			const [commit, parents, author, message] = fields as [string, string, string, string];
 			const files = server.git("diff-tree", "--no-commit-id", "-r", "--name-only", `${commit}^1`, commit);
 			return { commit, parents: parents.split(" "), author, message: message.trim(), files: files.trim().split("\n") };
 		}),

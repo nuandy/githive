@@ -275,7 +275,7 @@ describe("a repo's access settings", () => {
 	});
 
 	it("offers a vote on a change only to people who may review", () => {
-		const claim = repoSnapshot.claims[0];
+		const claim = repoSnapshot.claims[0]!;
 		const view = { kind: "change" as const, change: claim.change, tab: "conversation" as const };
 		const page = (level: RepoAccess["level"]) =>
 			renderToStaticMarkup(

@@ -34,7 +34,9 @@ function localContainer(dir: string) {
 					new Promise<{ exitCode: number; stdout: Uint8Array }>((resolve) => {
 						if (installing) return resolve({ exitCode: 0, stdout: new Uint8Array() });
 						// Ignore this machine's git config, such as its identity, since a container has none.
-						const child = spawn(args[0], args.slice(1), {
+						const [command, ...commandArgs] = args;
+						if (command === undefined) throw new Error("an empty command");
+						const child = spawn(command, commandArgs, {
 							cwd: local(options.cwd),
 							env: {
 								...process.env,
@@ -137,7 +139,7 @@ describe("reading and landing a batch in the repo's own Gate", { timeout: 60_000
 		];
 		const landed = await gate.landBatch({ repo: "t1", branch: "main", base: base(), baseHead: main, merges });
 		expect(landed).toEqual({ commits: [expect.any(String), expect.any(String)] });
-		const [first, second] = (landed as { commits: string[] }).commits;
+		const [first, second] = (landed as { commits: [string, string] }).commits;
 		expect(server.git("rev-parse", "main").trim()).toBe(second);
 		// Each a merge of the one before it and its change, with the trailers the audit reads.
 		expect(server.git("rev-list", "--parents", "-1", first).trim()).toBe(`${first} ${main} ${a}`);
@@ -234,7 +236,7 @@ describe("reading and landing a batch in the repo's own Gate", { timeout: 60_000
 		// Artifacts' log, readCommit and readTree, answered by git on the server.
 		let treesRead = 0;
 		const meta = (line: string) => {
-			const [hash, treeHash, name, parents, message] = line.split("\x1f");
+			const [hash, treeHash, name, parents, message] = line.split("\x1f") as [string, string, string, string, string];
 			return {
 				hash,
 				treeHash,
@@ -252,7 +254,7 @@ describe("reading and landing a batch in the repo's own Gate", { timeout: 60_000
 					.map((l) => l.replace(/^\n/, ""))
 					.filter(Boolean)
 					.map(meta),
-			readCommit: async (hash) => meta(server.git("log", "-1", FORMAT, hash).split("\x1e")[0]),
+			readCommit: async (hash) => meta(server.git("log", "-1", FORMAT, hash).split("\x1e")[0]!),
 			readTree: async (hash) => (
 				treesRead++,
 				server
@@ -260,8 +262,8 @@ describe("reading and landing a batch in the repo's own Gate", { timeout: 60_000
 					.split("\n")
 					.filter(Boolean)
 					.map((l) => {
-						const [info, name] = l.split("\t");
-						const [mode, type, oid] = info.split(" ");
+						const [info, name] = l.split("\t") as [string, string];
+						const [mode, type, oid] = info.split(" ") as [string, string, string];
 						return { name, mode, hash: oid, type: type === "commit" ? "gitlink" : type };
 					})
 			),
@@ -276,7 +278,7 @@ describe("reading and landing a batch in the repo's own Gate", { timeout: 60_000
 			["a-1", a, ["src/a.txt", "src/deep/x.txt"]],
 			["b-1", b, ["src/b.txt"]],
 		]);
-		expect(read[1].testedWith).toEqual([a, b]);
+		expect(read[1]!.testedWith).toEqual([a, b]);
 		expect(read).toEqual(await readMainMerges({ url: server.url, token: "unused" }, main, "main"));
 		// The files each merge changed are cached by commit, so reading them again reads no tree.
 		const before = treesRead;

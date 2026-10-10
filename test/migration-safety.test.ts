@@ -43,11 +43,11 @@ describe("Durable Object migrations", () => {
 			const text = readFileSync(join(root, config), "utf8").replace(/^\s*\/\/.*$/gm, "");
 			const tags = [...text.matchAll(/\{\s*"tag":\s*"(v\d+)"([^}]*)\}/g)];
 			expect(tags.length).toBeGreaterThan(0);
-			for (const [, tag, rest] of tags)
+			for (const [, tag = "", rest = ""] of tags)
 				if (/deleted_classes/.test(rest))
 					expect(DECIDED.has(tag), `${config} ${tag} deletes a Durable Object class`).toBe(true);
 			// Nor renames one away from its data without saying so here.
-			for (const [, tag, rest] of tags)
+			for (const [, tag = "", rest = ""] of tags)
 				if (/renamed_classes|transferred_classes/.test(rest) && !RENAMES_DECIDED.has(tag))
 					expect.fail(`${config} ${tag} renames or transfers a class: decide it deliberately and allow it ` + "here");
 		});

@@ -11,7 +11,7 @@ import {
 	recordsBadge,
 } from "./claimStatus";
 
-const claim = repoSnapshot.claims[0];
+const claim = repoSnapshot.claims[0]!;
 
 describe("changes", () => {
 	it("derives a claim's status from its head, approvals and hosted agents", () => {
@@ -63,7 +63,7 @@ describe("changes", () => {
 		expect(votesForClaim(claim, repoSnapshot.votes)).toHaveLength(1);
 		expect(votesForClaim({ ...claim, head: "b1c2d3e4" }, repoSnapshot.votes)).toHaveLength(1);
 		expect(votesForClaim({ ...claim, head: null }, repoSnapshot.votes)).toEqual([]);
-		expect(votesForClaim(claim, [{ ...repoSnapshot.votes[0], commit: "" }])).toEqual([]);
+		expect(votesForClaim(claim, [{ ...repoSnapshot.votes[0]!, commit: "" }])).toEqual([]);
 	});
 });
 

@@ -37,14 +37,16 @@ export function linkIds(text: string, ids: string[], link: (id: string) => strin
 	const parts: ReactNode[] = [];
 	let last = 0;
 	for (const match of text.matchAll(pattern)) {
-		const start = (match.index ?? 0) + match[1].length;
+		const [, before = "", id] = match;
+		if (!id) continue;
+		const start = (match.index ?? 0) + before.length;
 		parts.push(text.slice(last, start));
 		parts.push(
-			<a key={`${start}:${match[2]}`} href={link(match[2])}>
-				{match[2]}
+			<a key={`${start}:${id}`} href={link(id)}>
+				{id}
 			</a>,
 		);
-		last = start + match[2].length;
+		last = start + id.length;
 	}
 	parts.push(text.slice(last));
 	return parts.map((part, index) => <Fragment key={index}>{part}</Fragment>);

@@ -9,9 +9,11 @@ import { fakeD1 } from "./fakes/d1";
 let ids: IdentityStore;
 let orgs: OrgStore;
 type U = { id: string; handle: string; email: string };
-const people: Record<string, U> = {};
+const HANDLES = ["ada", "bob", "cyd", "eve"] as const;
+type Handle = (typeof HANDLES)[number];
+const people = {} as Record<Handle, U>;
 
-async function person(handle: string) {
+async function person(handle: Handle) {
 	await ids.invite(`${handle}@example.com`, "admin@example.com");
 	const { user } = (await ids.signIn({
 		provider: "github",
@@ -28,7 +30,7 @@ beforeEach(async () => {
 	const db = fakeD1();
 	ids = new IdentityStore(db);
 	orgs = new OrgStore(db);
-	for (const h of ["ada", "bob", "cyd", "eve"]) await person(h);
+	for (const h of HANDLES) await person(h);
 });
 
 describe("orgs", () => {

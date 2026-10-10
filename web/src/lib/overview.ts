@@ -135,9 +135,10 @@ export function territory(files: string[], claims: Claim[], context: LampContext
 	};
 	for (const file of files) {
 		const parts = normalizePath(file).split("/");
-		const region = regionOf(parts.length > 1 ? parts[0] : "");
+		const [first = "", second] = parts;
+		const region = regionOf(second === undefined ? "" : first);
 		region.files++;
-		const cell = cellOf(region, parts.length > 1 ? parts[1] : parts[0], false);
+		const cell = cellOf(region, second ?? first, false);
 		if (parts.length > 2) cell.folder = true;
 	}
 	for (const claim of claims) {
@@ -149,17 +150,19 @@ export function territory(files: string[], claims: Claim[], context: LampContext
 		};
 		for (const claimed of claim.paths) {
 			const parts = normalizePath(claimed).split("/").filter(Boolean);
-			if (!parts.length) {
+			const [first, second] = parts;
+			if (first === undefined) {
 				// The whole repo.
 				for (const region of regions.values()) region.whole.push(holder);
 				continue;
 			}
-			const isFolder = claimed.endsWith("/") || parts.length > 1 || regions.has(parts[0]);
-			const region = regionOf(isFolder ? parts[0] : "");
+			const isFolder = claimed.endsWith("/") || parts.length > 1 || regions.has(first);
+			const region = regionOf(isFolder ? first : "");
 			if (isFolder && parts.length === 1) region.whole.push(holder);
 			else {
-				const cellName = isFolder ? parts[1] : parts[0];
-				const cellPath = isFolder ? `${parts[0]}/${parts[1]}` : parts[0];
+				// Here a folder claim has a second segment naming its cell, and a file claim has only its first.
+				const cellName = second ?? first;
+				const cellPath = isFolder ? `${first}/${cellName}` : first;
 				const cell = cellOf(region, cellName, !cells.has(cellPath));
 				if (isFolder && (parts.length > 2 || claimed.endsWith("/"))) cell.folder = true;
 				if (!cell.holders.some((other) => other.change === holder.change)) cell.holders.push(holder);

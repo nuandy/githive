@@ -46,7 +46,7 @@ const call = async (name: string, args: Record<string, unknown>) => {
 	)) as {
 		result: { content: { text: string }[]; isError?: boolean };
 	};
-	const text = reply.result.content[0].text;
+	const text = reply.result.content[0]!.text;
 	return reply.result.isError ? { error: text } : JSON.parse(text);
 };
 
@@ -145,7 +145,7 @@ describe("GitHive's MCP tools", () => {
 			{ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "claims", arguments: { repo: "project" } } },
 			{ toolkit: { ...ctx().toolkit, keptClaims: async () => kept } } as never,
 		)) as { result: { content: { text: string }[] } };
-		expect(JSON.parse(reply.result.content[0].text).map((c: { change: string }) => c.change)).toEqual(["kept-1"]);
+		expect(JSON.parse(reply.result.content[0]!.text).map((c: { change: string }) => c.change)).toEqual(["kept-1"]);
 		// Without one, the claims are read from Git.
 		expect((await call("claims", { repo: "project" })).map((c: { change: string }) => c.change)).toEqual(["a-1"]);
 	});
@@ -310,7 +310,7 @@ describe("GitHive's MCP tools", () => {
 			{ repo: "project", change: "a-1", roles: ["review", "security"], summary: "adds a" },
 		]);
 		await call("request_review", { repo: "project", change: "a-1", roles: ["api"] });
-		expect(reviewRequests[1].roles).toEqual(["api"]);
+		expect(reviewRequests[1]!.roles).toEqual(["api"]);
 		expect(await call("request_review", { repo: "project", change: "nope" })).toEqual({
 			error: "nope holds no claim: claim the change's paths first",
 		});

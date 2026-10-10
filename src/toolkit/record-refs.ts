@@ -3,6 +3,7 @@ import { gitAuth, http } from "../git-http";
 import { isEmptyRepo, type Remote } from "../git";
 import { fetchCommits } from "../git-fetch";
 import { retryTransient } from "../retry";
+import { checkedState } from "../record-schemas";
 
 // Reads many record refs (claims shards, vote buckets) at once, with one listing per repo and one fetch for
 // every tip not read yet.
@@ -50,7 +51,9 @@ async function readListed<S>(
 				const { fs, dir } = await retryTransient(() => fetchCommits(remote, missing));
 				for (const oid of missing) {
 					const { blob } = await git.readBlob({ fs, dir, oid, filepath: "state.json" });
-					states.set(oid, JSON.parse(decoder.decode(blob)));
+					// Checked as the record its ref names (see record-schemas.ts); a commit's state is the same under any ref.
+					const ref = listed.find((entry) => entry.oid === oid)?.ref ?? "";
+					states.set(oid, checkedState(ref, JSON.parse(decoder.decode(blob))));
 				}
 			}
 		} catch (err) {

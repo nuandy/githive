@@ -159,8 +159,8 @@ describe("the honeycomb's geometry", () => {
 		const grid = hexGrid(5, 3, 10);
 		const cellWidth = Math.sqrt(3) * 10;
 		expect(grid.centers[0]).toEqual({ x: Math.round((cellWidth / 2) * 100) / 100, y: 10 });
-		expect(grid.centers[3].y).toBe(25);
-		expect(grid.centers[3].x).toBeCloseTo(cellWidth, 1);
+		expect(grid.centers[3]!.y).toBe(25);
+		expect(grid.centers[3]!.x).toBeCloseTo(cellWidth, 1);
 		expect(grid.width).toBeCloseTo(3.5 * cellWidth, 1);
 		expect(grid.height).toBe(35);
 		// Fewer cells than columns: as wide as the cells.

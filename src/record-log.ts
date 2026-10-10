@@ -3,6 +3,7 @@ import { gitAuth, gitFetch, http, noteGitRequest } from "./git-http";
 import { BOT, isEmptyRepo, type Remote } from "./git";
 import { fetchCommits } from "./git-fetch";
 import { MemoryFS } from "./memory-fs";
+import { checkedState } from "./record-schemas";
 import {
 	FORMAT_TRAILER,
 	RECORD_FORMAT,
@@ -301,6 +302,11 @@ export class GitCasLog<S> implements CasLog<S> {
 		return read;
 	}
 
+	/** A state upgraded to this GitHive's format, checked against what its kind of record must hold. */
+	private checked(state: S): S {
+		return checkedState<S>(this.ref, state);
+	}
+
 	/** One commit of the log, its state upgraded to this GitHive's format. */
 	private async readCommit(fs: MemoryFS, tip: string): Promise<LogCommit<S>> {
 		const { commit } = await git.readCommit({ fs, dir: DIR, oid: tip });
@@ -314,8 +320,11 @@ export class GitCasLog<S> implements CasLog<S> {
 			author: trailer(TRAILERS.author),
 			kind: trailer(TRAILERS.kind),
 			entries: (await json(DECISIONS_FILE)) as LogEntry[],
-			// This GitHive can't upgrade a newer format, so it's read as is.
-			state: (format > this.format ? raw : upgradeState<S>(raw, format, this.ref, this.format, this.upgrades)) as S,
+			// This GitHive can't upgrade a newer format, so it's read as is; one it knows is checked (see record-schemas.ts).
+			state:
+				format > this.format
+					? (raw as S)
+					: this.checked(upgradeState<S>(raw, format, this.ref, this.format, this.upgrades)),
 			batch: trailer(TRAILERS.batch),
 			format,
 		};
@@ -425,8 +434,9 @@ async function buildTree<S>(fs: MemoryFS, tip: string | null, commit: LogCommit<
 }
 
 function message<S>(commit: LogCommit<S>, format: number) {
-	const first = (text: string) => text.trim().split("\n")[0];
-	const title = commit.entries.length ? first(commit.entries[0].text) : commit.kind;
+	const first = (text: string) => text.trim().split("\n")[0] ?? "";
+	const [firstEntry] = commit.entries;
+	const title = firstEntry ? first(firstEntry.text) : commit.kind;
 	const summary = commit.entries.map((entry) => `- ${first(entry.text)}`).join("\n");
 	const trailers = [
 		`${TRAILERS.author}: ${commit.author}`,

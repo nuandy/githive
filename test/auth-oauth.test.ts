@@ -100,7 +100,7 @@ async function startConnecting() {
 async function allow(authorizeUrl: string, agent: string, newName = "") {
 	const pageResponse = await call(authorizeUrl, { headers: { Cookie: session } });
 	expect(pageResponse.status).toBe(200);
-	const handle = (await pageResponse.text()).match(/name="handle" value="([^"]+)"/)![1];
+	const handle = (await pageResponse.text()).match(/name="handle" value="([^"]+)"/)![1]!;
 	const form = new URLSearchParams({ handle, decision: "approve", agent, new_name: newName });
 	const approved = await call(authorizeUrl, {
 		method: "POST",
@@ -219,7 +219,7 @@ describe("connecting an MCP client over OAuth", () => {
 	it("shows the form again for a bad new agent name, and the same form still works after", async () => {
 		const { authorizeUrl } = await startConnecting();
 		const pageResponse = await call(authorizeUrl, { headers: { Cookie: session } });
-		const handle = (await pageResponse.text()).match(/name="handle" value="([^"]+)"/)![1];
+		const handle = (await pageResponse.text()).match(/name="handle" value="([^"]+)"/)![1]!;
 		const headers = {
 			Cookie: `${session}; ${cookiesOf(pageResponse)}`,
 			Origin: ORIGIN,
@@ -243,7 +243,7 @@ describe("connecting an MCP client over OAuth", () => {
 	it("sends the client away with access_denied when the person denies it", async () => {
 		const { authorizeUrl } = await startConnecting();
 		const pageResponse = await call(authorizeUrl, { headers: { Cookie: session } });
-		const handle = (await pageResponse.text()).match(/name="handle" value="([^"]+)"/)![1];
+		const handle = (await pageResponse.text()).match(/name="handle" value="([^"]+)"/)![1]!;
 		const denied = await call(authorizeUrl, {
 			method: "POST",
 			headers: {
@@ -330,7 +330,7 @@ describe("feedback on Allow and Deny", () => {
 				this.attrs[k] = v;
 			},
 		});
-		const buttons = [button("approve"), button("deny")];
+		const buttons = [button("approve"), button("deny")] as const;
 		let submit: (event: unknown) => void = () => {};
 		const form = {
 			addEventListener: (_: string, fn: (event: unknown) => void) => (submit = fn),

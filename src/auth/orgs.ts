@@ -336,7 +336,8 @@ export class OrgStore {
 			.prepare("SELECT user_id FROM org_members WHERE org_id = ? AND role = 'owner'")
 			.bind(orgId)
 			.all<Row>();
-		if (results.length === 1 && String(results[0].user_id) === leaving)
+		const [onlyOwner] = results;
+		if (results.length === 1 && String(onlyOwner?.user_id) === leaving)
 			fail(409, "an org needs an owner: make someone else an owner first");
 	}
 
