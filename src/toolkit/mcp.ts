@@ -59,6 +59,8 @@ export interface ToolContext {
 	history?: ReadHistory;
 	/** Starts a batch's first check container while the batch is read (live, a Gate's). */
 	prepareChecks?: (repo: string) => (gate: string) => Promise<void>;
+	/** Starts the repo's Gate's container while a batch is read, for its landing (live). */
+	prepareLanding?: (repo: string) => Promise<void>;
 	/** Who's landing a batch into a repo's branch, and what changes came to (live, the repo's RepoCache); absent, each merge only knows its own. */
 	landing?: (repo: string, branch: string) => Landing;
 	/** Stamps what this caller writes with their verified identity (GitHive's key), and the agent name their key is for; without it, nothing is stamped. */
@@ -442,17 +444,27 @@ export function storeFor(ctx: ToolContext, repo: string, registry: Registry | nu
 }
 
 /**
+ * When forks became per agent: a change claimed since has no fork of its own,
+ * so none is looked for. Looked for on every change not pushed yet, the missing
+ * fork was 40% of the Artifacts calls backlog and reviews made (a failed get
+ * each, run 217). A day's margin for deploys.
+ */
+const FORKS_PER_AGENT_SINCE = "2026-10-08T00:00:00Z";
+
+/**
  * Where a repo's change branches live: each in its agent's own fork (one per
  * agent, a branch changes/<change> per change). Reading a change made before
- * forks were per agent, its branch is in that change's own fork instead.
+ * forks were per agent (claimed `since` then, or unknown), its branch may be
+ * in that change's own fork instead.
  */
 function changeSourceFor(ctx: ToolContext, repo: string) {
-	return async (agent: string, scope: "read" | "write", change?: string): Promise<Remote> => {
+	return async (agent: string, scope: "read" | "write", change?: string, since?: string): Promise<Remote> => {
 		if (!ctx.changeRemote) throw new Error("[501] change forks aren't available here");
-		if (scope === "write" || !change || !ctx.legacyChangeRemote) return ctx.changeRemote(repo, agent, scope);
+		const legacy = !!change && !!ctx.legacyChangeRemote && !(since && since >= FORKS_PER_AGENT_SINCE);
+		if (scope === "write" || !legacy) return ctx.changeRemote(repo, agent, scope);
 		const fork = await ctx.changeRemote(repo, agent, "read").catch(() => null);
 		if (fork && (await branchHead(fork, `changes/${change}`).catch(() => null))) return fork;
-		return (await ctx.legacyChangeRemote(repo, change).catch(() => null)) ?? fork ?? ctx.changeRemote(repo, agent, "read");
+		return (await ctx.legacyChangeRemote!(repo, change!).catch(() => null)) ?? fork ?? ctx.changeRemote(repo, agent, "read");
 	};
 }
 
@@ -908,11 +920,15 @@ async function runTool(name: string, args: Args, ctx: ToolContext): Promise<unkn
 		).filter((w): w is string => !!w);
 	const changeSource = changeSourceFor(ctx, repo);
 	/** A claim's pushed head, from its agent's fork (null: nothing pushed). */
-	// Null when nothing's pushed (no fork, or no branch on it); undefined when the read failed, which says nothing.
+	// Null when nothing's pushed (no fork, or no branch on it); undefined when the read failed, which says nothing. A
+	// change claimed since forks were per agent is read once, from its agent's fork: no second read, no other fork.
 	const pushedHead = (claim: ClaimRecord) =>
-		changeSource(claim.agent, "read", claim.change)
-			.then((fork) => branchHead(fork, `changes/${claim.change}`))
-			.catch((err): null | undefined => (statusOf(err).status === 409 ? null : undefined));
+		(claim.since >= FORKS_PER_AGENT_SINCE || !ctx.legacyChangeRemote
+			? ctx.changeRemote
+				? ctx.changeRemote(repo, claim.agent, "read").then((fork) => branchHead(fork, `changes/${claim.change}`))
+				: Promise.reject(new Error("[501] change forks aren't available here"))
+			: changeSource(claim.agent, "read", claim.change).then((fork) => branchHead(fork, `changes/${claim.change}`))
+		).catch((err): null | undefined => (statusOf(err).status === 409 ? null : undefined));
 	/**
 	 * Open changes' pushed heads: `fresh` ones read now (the caller's own), the
 	 * rest as GitHive last saw them (see knownHeads). A head seen within
@@ -1049,7 +1065,7 @@ async function runTool(name: string, args: Args, ctx: ToolContext): Promise<unkn
 			const { claim: held, released } = await changeOf(change);
 			const author = held?.agent ?? released.at(-1)?.agent;
 			if (!author) throw new Error(`[404] no change ${change} on ${repo}`);
-			const [fork, project] = await Promise.all([changeSource(author, "read", change), ctx.remote(repo, "read")]);
+			const [fork, project] = await Promise.all([changeSource(author, "read", change, held?.since), ctx.remote(repo, "read")]);
 			const head = await branchHead(fork, `changes/${change}`).catch(() => null);
 			if (!head) throw new Error(`[409] ${change} has nothing pushed to review yet`);
 			// Agent names only: a person's identity stays in the records, out of logs.
@@ -1185,6 +1201,7 @@ async function runTool(name: string, args: Args, ctx: ToolContext): Promise<unkn
 				...(ctx.branchHead ? { branchHead: () => ctx.branchHead!(repo, into) } : {}),
 				...(ctx.landing ? { landing: ctx.landing(repo, into) } : {}),
 				batchGit,
+				...(ctx.prepareLanding ? { prepareLanding: () => ctx.prepareLanding!(repo) } : {}),
 				...(ctx.prepareChecks && !onActions(checksHere) ? { prepareChecks: ctx.prepareChecks(repo) } : {}),
 				// The project's branch, landed, pushed back to GitHub (a fast-forward; refused if someone pushed there directly).
 				...(link && into === branch ? { afterLanding: (commit: string) => mirrorTo(gate, link, into, commit) } : {}),
@@ -1195,11 +1212,11 @@ async function runTool(name: string, args: Args, ctx: ToolContext): Promise<unkn
 					const merged = new Set(inForce.merged);
 					const sameBranch = inForce.claims.filter((c) => (c.into ?? branch) === into && c.change !== change && (c.after ?? []).every((dep) => merged.has(dep)));
 					const heads = await openHeads(inForce.claims);
-					return sameBranch.map((claim) => ({ claim, head: heads(claim), source: () => changeSource(claim.agent, "read", claim.change) }));
+					return sameBranch.map((claim) => ({ claim, head: heads(claim), source: () => changeSource(claim.agent, "read", claim.change, claim.since) }));
 				},
 				stamper,
 				stampKey: registry?.stampKey,
-				source: await changeSource(holder ?? agentArg("agent"), "read", change),
+				source: await changeSource(holder ?? agentArg("agent"), "read", change, own?.since),
 				change,
 				agent: agentArg("agent"),
 			});
@@ -1248,7 +1265,7 @@ async function runTool(name: string, args: Args, ctx: ToolContext): Promise<unkn
 		{
 			const change = requiredString(args, "change");
 			const own = await claimOf(change);
-			const source = own ? await changeSource(own.agent, "read", change).catch(() => null) : null;
+			const source = own ? await changeSource(own.agent, "read", change, own.since).catch(() => null) : null;
 			if (!source) throw new Error(`[409] changes/${change} has nothing pushed to check`);
 			const into = own?.into ?? branch;
 			const checked = await checkChange({ project: await ctx.remote(repo, "read"), branch: into, source, claims: own ? [own] : [], change, ...(ctx.branchHead ? { branchHead: () => ctx.branchHead!(repo, into) } : {}) });

@@ -210,6 +210,13 @@ export interface MergeInput {
 	batchGit: BatchGit;
 	/** Start the container of a batch's first check (`gate`, see Place) while the batch is read, so the check finds it running. */
 	prepareChecks?: (gate: string) => Promise<void>;
+	/**
+	 * Start the repo's Gate's container while the batch is read (through
+	 * Artifacts, in the Worker), so the landing finds it running: left to the
+	 * landing, its restart made landing a batch take 17 to 29 s (agents-8)
+	 * where a running one took 2 to 3 (agents-7).
+	 */
+	prepareLanding?: () => Promise<void>;
 	/** The most changes in a batch, below what batchSize says (tests set a few, to make batches follow each other). */
 	maxBatch?: number;
 	/** Once a batch has landed and its claims are released: with the branch's new head (main pushed back to GitHub, say). Its failure is logged, never the merge's. */
@@ -417,6 +424,7 @@ async function landBatch(input: MergeInput, landing: Landing, holding: Holding, 
 		// Where its checks will run: the first container starts now, while the batch is read.
 		const place: Place = { search: crypto.randomUUID().slice(0, 12), slot: 0, slots: { next: 1 } };
 		if (input.verify?.length) void input.prepareChecks?.(`${place.search}-0`).catch((err) => console.error("starting a batch's check container early failed", String(err)));
+		void input.prepareLanding?.().catch((err) => console.error("starting the repo's Gate early failed", String(err)));
 		await holding.step(STEP_MS.records);
 		// Read now, not as kept a moment for the crowd asking (see branchHead): the batch before may have landed a second ago,
 		// and a batch built on the main before it is refused at its push, its gathering lost (47 s of 200 agents' run).

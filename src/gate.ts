@@ -344,9 +344,10 @@ export class Gate extends DurableObject<Env> {
 	}
 
 	/**
-	 * Start this Gate's container for checks about to come: a batch's first
-	 * check, while the batch is read, so the check finds it running. In turn
-	 * with the checks, so one that arrives meanwhile waits for it.
+	 * Start this Gate's container for work about to come, while the batch is
+	 * read: a batch's first check, or (the repo's own Gate) its landing, so it
+	 * finds the container running. In turn with the rest, so work that arrives
+	 * meanwhile waits for it.
 	 */
 	boot(input: { repo: string; base: { remote: string; token: string } }): Promise<void> {
 		return this.inTurn("boot", input.repo, async () => {

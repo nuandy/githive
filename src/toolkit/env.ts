@@ -216,6 +216,11 @@ export function toolContextFor(env: Env, by: string | undefined, caller: { agent
 			const read = await cached(env, repo, `${repo}|read`, () => remoteFor(env.ARTIFACTS, repo, "read", 3600));
 			await rpcRetried(() => env.GATE.getByName(`repo:${repo}:check:${gate}`).boot({ repo, base: { remote: read.url, token: read.token } }));
 		},
+		// The repo's own Gate started while a batch is read, so its landing finds it running (see MergeInput.prepareLanding).
+		prepareLanding: async (repo) => {
+			const read = await cached(env, repo, `${repo}|read`, () => remoteFor(env.ARTIFACTS, repo, "read", 3600));
+			await rpcRetried(() => env.GATE.getByName(`repo:${repo}`).boot({ repo, base: { remote: read.url, token: read.token } }));
+		},
 		// A batch's git work (reading its changes, landing them) in the repo's own Gate's container, which never runs a
 		// change's code: the Worker only reads the records (see BatchGit).
 		batchGit: (repo) => {

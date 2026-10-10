@@ -128,6 +128,17 @@ describe("landing ready changes together", { timeout: 120_000 }, () => {
 		expect(await auditNow()).toEqual([]);
 	});
 
+	it("starts the repo's Gate as each batch begins, while the batch is read, so its landing finds it running", async () => {
+		for (const x of ["a", "b"]) await readyChange(`${x}-1`, { [`src/${x}.txt`]: `${x}\n` });
+		const started: string[] = [];
+		const reads: string[][] = [];
+		const gate = readsNoted(reads);
+		const noted: BatchGit = { ...gate, inspect: async (input) => (started.push("read"), gate.inspect(input)) };
+		expect(await merge("a-1", runner(), memoryLanding(), { batchGit: noted, prepareLanding: async () => void started.push("gate") })).toMatchObject({ ok: true });
+		expect(started.slice(0, 2)).toEqual(["gate", "read"]);
+		expect(landed()).toEqual(["a-1", "b-1"]);
+	});
+
 	it("puts out the change whose checks fail, with the checks' rejection on its head, and lands the rest", async () => {
 		const heads: Record<string, string> = {};
 		for (const x of ["a", "b", "c", "d"]) heads[x] = await readyChange(`${x}-1`, { [`src/${x}.txt`]: `${x}\n` });
