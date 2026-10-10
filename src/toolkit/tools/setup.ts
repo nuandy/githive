@@ -29,7 +29,7 @@ export const setupTools: ToolHandlers = {
 			fail(409, `you're signed in as ${ctx.agent}: what you write is already attributed to you, with no key`);
 		const nameOk = (agent: string) => {
 			if (agent.includes("/"))
-				fail(400, 'names with "/" are signed-in agents\' (<handle>/<agent>); register a name without ' + "one");
+				fail(400, 'names with "/" are signed-in agents\' (<handle>/<agent>); register a name without one');
 			if (agent.startsWith(HOSTED_PREFIX) && !ctx.hosted) fail(403, "githive- names are GitHive's hosted agents'");
 			return agent;
 		};
@@ -52,7 +52,7 @@ export const setupTools: ToolHandlers = {
 			const issued = names.map((agent) => ({ agent, key: keyFor(agent) }));
 			const hashed = await Promise.all(issued.map(async ({ agent, key }) => ({ agent, keyHash: await sha256(key) })));
 			const outcome = await registerAgents(claims, hashed, stamper);
-			if (!outcome.ok) fail(409, `${outcome.refused}`);
+			if (!outcome.ok) fail(409, outcome.refused);
 			await ctx.prepareForks?.(repo, names).catch(() => undefined);
 			return { agents: issued, note };
 		}
@@ -63,7 +63,7 @@ export const setupTools: ToolHandlers = {
 			{ agent, keyHash: await sha256(newKey), ...(acting ? { holder: acting } : {}) },
 			stamper,
 		);
-		if (!outcome.ok) fail(409, `${outcome.refused}`);
+		if (!outcome.ok) fail(409, outcome.refused);
 		// Queue its fork now, rather than making it on its first push alongside everyone else's.
 		await ctx.prepareForks?.(repo, [agent]).catch(() => undefined);
 		return { agent, key: newKey, note: note.replace("each key", "this key") };
@@ -141,10 +141,7 @@ function shardingAtStart(asked: number | undefined, recordsRepos: number, spread
 // Later settings change what they name. How claims are kept was settled at the start.
 async function changeRepoSettings({ args, ctx, repo, claims, stamper }: ToolCall, registered: Registry) {
 	if (args.shard_depth !== undefined || args.records_repos !== undefined)
-		fail(
-			409,
-			"how claims are kept is set when GitHive starts on a repo: since, they shard as the load " + "calls for it",
-		);
+		fail(409, "how claims are kept is set when GitHive starts on a repo: since, they shard as the load calls for it");
 	const policy = POLICY_FIELDS.some((field) => args[field] !== undefined)
 		? policyFrom(args, registered.policy ?? DEFAULT_POLICY)
 		: undefined;

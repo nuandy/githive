@@ -120,9 +120,7 @@ export class IdentityStore {
 		const address = normalizeEmail(email);
 		if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(address)) fail(400, `not an email address: ${email}`);
 		await this.db
-			.prepare(
-				"INSERT INTO invites (email, invited_by, created_at) VALUES (?, ?, ?) ON CONFLICT (email) DO " + "NOTHING",
-			)
+			.prepare("INSERT INTO invites (email, invited_by, created_at) VALUES (?, ?, ?) ON CONFLICT (email) DO NOTHING")
 			.bind(address, invitedBy, this.iso())
 			.run();
 		return address;
@@ -251,9 +249,7 @@ export class IdentityStore {
 	async signIn(profile: ProviderProfile): Promise<{ user: User } | { refused: "not-invited" }> {
 		const email = normalizeEmail(profile.email);
 		const linked = await this.db
-			.prepare(
-				"SELECT u.* FROM accounts a JOIN users u ON u.id = a.user_id WHERE a.provider = ? AND " + "a.provider_id = ?",
-			)
+			.prepare("SELECT u.* FROM accounts a JOIN users u ON u.id = a.user_id WHERE a.provider = ? AND a.provider_id = ?")
 			.bind(profile.provider, profile.providerId)
 			.first<Row>();
 		if (linked) return { user: toUser(linked) };
@@ -277,7 +273,7 @@ export class IdentityStore {
 		};
 		await this.db.batch([
 			this.db
-				.prepare("INSERT INTO users (id, handle, email, name, avatar_url, created_at) VALUES (?, ?, ?, ?, " + "?, ?)")
+				.prepare("INSERT INTO users (id, handle, email, name, avatar_url, created_at) VALUES (?, ?, ?, ?, ?, ?)")
 				.bind(user.id, user.handle, user.email, user.name, user.avatarUrl, user.createdAt),
 			this.db
 				.prepare("INSERT INTO accounts (provider, provider_id, user_id, created_at) VALUES (?, ?, ?, ?)")
@@ -346,9 +342,7 @@ export class IdentityStore {
 
 	async sessionUser(secret: string) {
 		const row = await this.db
-			.prepare(
-				"SELECT u.* FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.id_hash = ? AND " + "s.expires_at > ?",
-			)
+			.prepare("SELECT u.* FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.id_hash = ? AND s.expires_at > ?")
 			.bind(await sha256Hex(secret), this.iso())
 			.first<Row>();
 		return row ? toUser(row) : null;
@@ -367,7 +361,7 @@ export class IdentityStore {
 	async createAgent(ownerId: string, name: string): Promise<Agent> {
 		const agentName = name.trim().toLowerCase();
 		if (!AGENT_NAME.test(agentName))
-			fail(400, "an agent's name is 1 to 32 lowercase letters, digits or dashes, starting with a letter or " + "digit");
+			fail(400, "an agent's name is 1 to 32 lowercase letters, digits or dashes, starting with a letter or digit");
 		const existing = await this.db
 			.prepare("SELECT * FROM agents WHERE owner_id = ? AND name = ?")
 			.bind(ownerId, agentName)
@@ -479,9 +473,7 @@ export class IdentityStore {
 
 	async revokeToken(ownerId: string, tokenId: string) {
 		const row = await this.db
-			.prepare(
-				"SELECT t.id FROM agent_tokens t JOIN agents a ON a.id = t.agent_id WHERE t.id = ? AND " + "a.owner_id = ?",
-			)
+			.prepare("SELECT t.id FROM agent_tokens t JOIN agents a ON a.id = t.agent_id WHERE t.id = ? AND a.owner_id = ?")
 			.bind(tokenId, ownerId)
 			.first<Row>();
 		if (!row) fail(404, "no such token");

@@ -24,7 +24,7 @@ interface ChangeRead {
 }
 
 export function conflict(message: string): never {
-	fail(409, `${message}`);
+	fail(409, message);
 }
 
 // The branch's head, cached for every merge watching it, or else listed.

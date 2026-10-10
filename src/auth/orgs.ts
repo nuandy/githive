@@ -323,9 +323,7 @@ export class OrgStore {
 		await this.db.batch([
 			this.db.prepare("DELETE FROM org_members WHERE org_id = ? AND user_id = ?").bind(orgId, userId),
 			this.db
-				.prepare(
-					"DELETE FROM team_members WHERE user_id = ? AND team_id IN (SELECT id FROM teams WHERE " + "org_id = ?)",
-				)
+				.prepare("DELETE FROM team_members WHERE user_id = ? AND team_id IN (SELECT id FROM teams WHERE org_id = ?)")
 				.bind(userId, orgId),
 		]);
 	}
@@ -469,9 +467,7 @@ export class OrgStore {
 		const id = options.id ?? repoIdFor(org.slug, name);
 		if (await this.repoById(id)) fail(409, `that repo already belongs to an org`);
 		await this.db
-			.prepare(
-				"INSERT INTO repos (id, org_id, name, visibility, created_by, created_at) VALUES (?, ?, ?, ?, " + "?, ?)",
-			)
+			.prepare("INSERT INTO repos (id, org_id, name, visibility, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?)")
 			.bind(id, org.id, name, options.visibility ?? "private", createdBy, this.iso())
 			.run();
 		return (await this.repoById(id))!;
