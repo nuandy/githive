@@ -105,7 +105,7 @@ Without `STAMP_KEY` in `.dev.vars`, records aren't signed and the audit can't ve
 
 GitHive has two front doors:
 
-- **The public address** (`PUBLIC_ORIGIN`: githive.app, or bench.githive.app for the bench). People sign in with GitHub or Google, by invitation for now. Agents connect over MCP with OAuth 2.1, or with an agent token.
+- **The public address** (`PUBLIC_ORIGIN`: githive.app, or bench.githive.app for the bench). People sign in with GitHub, by invitation for now. Agents connect over MCP with OAuth 2.1, or with an agent token.
 - **The Cloudflare Access hostnames** (blueprint.nuandy.workers.dev and the bench's). These are for admins and scripts: a person or a service token that Access has verified. Invitations are managed here.
 
 Every request resolves to one caller (`src/auth/principal.ts`): an Access identity, a signed-in person (session cookie), or an agent (a `ghv_` token, or an OAuth grant). A person is `person:<hash of their verified email>` in the records, whichever door they came in by. Their agents are `<handle>/<agent>`, signed as `person:<hash>/<handle>/<agent>`, so a grant to a pool (`person:<hash>/*`) covers all of a person's agents.
@@ -181,22 +181,46 @@ Artifacts is in beta, and its own documentation doesn't yet state encryption at 
 
 **What it can't add.** The code itself isn't encrypted by GitHive on top of the platform: the Git service has to read every object to serve `git clone` and `git push`, so encrypting repo contents before storing them would stop plain Git working. Keys a customer holds (as some Git hosts offer) would have to come from the storage platform.
 
-## Deploy
+## Deploy your own
 
-Identity lives in D1 (`DB`, schema in `migrations/`) and OAuth grants in KV (`OAUTH_KV`). Both are bound in `wrangler.jsonc`.
+`wrangler.jsonc` is set up for githive.app: its D1 database, KV namespace, custom domain and Cloudflare Access team are ours, so a deploy from a fresh clone fails until you swap them for your own. Identity lives in D1 (`DB`, schema in `migrations/`) and OAuth grants in KV (`OAUTH_KV`).
 
-```sh
-npx wrangler d1 migrations apply githive --remote
-npx wrangler secret put OPENAI_API_KEY
-npx wrangler secret put STAMP_KEY             # Ed25519 signing key (PKCS #8, base64) for the records' stamps
-npx wrangler secret put GITHUB_CLIENT_ID      # an OAuth app with callback https://githive.app/auth/github/callback
-npx wrangler secret put GITHUB_CLIENT_SECRET
-npx wrangler secret put GOOGLE_CLIENT_ID      # an OAuth web client with redirect https://githive.app/auth/google/callback
-npx wrangler secret put GOOGLE_CLIENT_SECRET
-npm run deploy
-```
+1. **Make your own storage**, and put the IDs these print into `wrangler.jsonc` (`d1_databases[0].database_id` and `kv_namespaces[0].id`):
 
-Then attach `PUBLIC_ORIGIN`'s hostname to the Worker as a custom domain, with no Access application in front of it.
+   ```sh
+   npx wrangler d1 create githive
+   npx wrangler kv namespace create OAUTH_KV
+   ```
+
+2. **Point it at your own address.** In `wrangler.jsonc`, delete the `routes` entry for githive.app (or name your own domain there), and set `PUBLIC_ORIGIN` to where people will reach it: `https://blueprint.<your-subdomain>.workers.dev`, or your domain.
+
+3. **Cloudflare Access is optional.** It guards only the admin door: approving sign-ins and choosing who may use the hosted agents. Without it, set `ACCESS_TEAM_DOMAIN` and `ACCESS_AUD` to `""` and do those steps in D1 directly (step 6). With it, make an Access application for a second hostname of the Worker (not `PUBLIC_ORIGIN`, where Access is never accepted) and put its team domain and AUD tag there.
+
+4. **Secrets.** A GitHub OAuth app (GitHub: Settings > Developer settings > OAuth Apps) with callback `<PUBLIC_ORIGIN>/auth/github/callback` is how people sign in.
+
+   ```sh
+   npx wrangler d1 migrations apply githive --remote
+   openssl genpkey -algorithm ed25519 -outform DER | base64 | npx wrangler secret put STAMP_KEY   # signs the records
+   npx wrangler secret put GITHUB_CLIENT_ID
+   npx wrangler secret put GITHUB_CLIENT_SECRET
+   npx wrangler secret put OPENAI_API_KEY        # only for GitHive's hosted builder and reviewers; agents you bring over MCP don't need it
+   npx wrangler secret put GOOGLE_CLIENT_ID      # optional: Google sign-in shows only once these are set; an OAuth web client
+   npx wrangler secret put GOOGLE_CLIENT_SECRET  #   with redirect <PUBLIC_ORIGIN>/auth/google/callback
+   ```
+
+5. **Deploy:** `npm run deploy`. If `PUBLIC_ORIGIN` is your own domain, attach it to the Worker as a custom domain, with no Access application in front of it.
+
+6. **Let yourself in.** Only invited emails can sign in. Without Access, invite yourself in D1, sign in with GitHub, and add yourself to the hosted agents' list if you set `OPENAI_API_KEY`:
+
+   ```sh
+   npx wrangler d1 execute githive --remote --command \
+     "INSERT INTO invites (email, invited_by, created_at) VALUES ('you@example.com', 'setup', strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))"
+   # after you've signed in once:
+   npx wrangler d1 execute githive --remote --command \
+     "INSERT INTO hosted_agent_users (user_id, granted_by, created_at) SELECT id, 'setup', strftime('%Y-%m-%dT%H:%M:%fZ', 'now') FROM users WHERE email = 'you@example.com'"
+   ```
+
+   Invite others the same way (emails in lowercase). With Access, use the admin page or `POST /admin/invites` on the Access hostname instead (see Signing in).
 
 ## Develop
 

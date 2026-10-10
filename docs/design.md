@@ -171,7 +171,7 @@ That is `service:<name>` for an Access service token, or `person:` plus the
 first 12 hex digits of a SHA-256 of the email (trimmed and lowercased), so
 no address is stored. A
 person gets the same `person:` label whether Cloudflare Access verified them
-or they signed in to GitHive with GitHub or Google.
+or they signed in to GitHive with GitHub (or Google, where it's set up).
 Anyone who knows the email can still check the hash. The toolkit then stamps
 the record: an Ed25519 signature over the whole record, made with a key only
 the Worker holds. The registry's first entry holds the public key, so anyone
