@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { type FormEvent, useEffect, useRef, useState } from "react";
 import type { BranchRule, SavedMergeSettings, SettingsInput } from "../api";
 import { branchRulesFrom, emptyRule, type RuleDraft, ruleDraftsFrom } from "../lib/branchRules";
 import { messageOf } from "./Confirm";
@@ -35,32 +35,32 @@ export function BranchRules({ branch, rules, save, onSaved }: BranchRulesProps) 
 
 	const edit = (index: number, patch: Partial<RuleDraft>) => {
 		setSaved(false);
-		setDrafts((current) => current.map((d, i) => (i === index ? { ...d, ...patch } : d)));
+		setDrafts((current) => current.map((draft, ruleIndex) => (ruleIndex === index ? { ...draft, ...patch } : draft)));
+	};
+	const remove = (index: number) => setDrafts((current) => current.filter((_, ruleIndex) => ruleIndex !== index));
+
+	const submit = async (event: FormEvent) => {
+		event.preventDefault();
+		const result = branchRulesFrom(drafts);
+		if (!result.rules) return setErrors(result.errors);
+		setBusy(true);
+		setErrors([]);
+		try {
+			const done = await save({ branch_rules: result.rules });
+			const next = ruleDraftsFrom(done.branchRules);
+			setDrafts(next);
+			setBaseKey(JSON.stringify(next));
+			setSaved(true);
+			onSaved?.();
+		} catch (err) {
+			setErrors([messageOf(err)]);
+		} finally {
+			setBusy(false);
+		}
 	};
 
 	return (
-		<form
-			className="repo-settings__form"
-			onSubmit={async (event) => {
-				event.preventDefault();
-				const result = branchRulesFrom(drafts);
-				if (!result.rules) return setErrors(result.errors);
-				setBusy(true);
-				setErrors([]);
-				try {
-					const done = await save({ branch_rules: result.rules });
-					const next = ruleDraftsFrom(done.branchRules);
-					setDrafts(next);
-					setBaseKey(JSON.stringify(next));
-					setSaved(true);
-					onSaved?.();
-				} catch (err) {
-					setErrors([messageOf(err)]);
-				} finally {
-					setBusy(false);
-				}
-			}}
-		>
+		<form className="repo-settings__form" onSubmit={submit}>
 			<section className="box" aria-labelledby="settings-branches">
 				<div className="box__header">
 					<h2 id="settings-branches">Branch rules</h2>
@@ -72,79 +72,14 @@ export function BranchRules({ branch, rules, save, onSaved }: BranchRulesProps) 
 						is its rule; {branch} always has the repo's own.
 					</p>
 					{drafts.map((draft, index) => (
-						<fieldset key={index} className="repo-settings__rule" disabled={busy}>
-							<legend className="sr-only">Rule {index + 1}</legend>
-							<div className="repo-settings__field">
-								<label htmlFor={`rule-pattern-${index}`}>Branches</label>
-								<input
-									id={`rule-pattern-${index}`}
-									className="repo-settings__command"
-									placeholder="feature/*"
-									value={draft.pattern}
-									onChange={(event) => edit(index, { pattern: event.target.value })}
-								/>
-							</div>
-							<div className="branch-rule__grid">
-								<div className="repo-settings__field">
-									<label htmlFor={`rule-required-${index}`}>Required approvals</label>
-									<input
-										id={`rule-required-${index}`}
-										inputMode="numeric"
-										placeholder="the repo's"
-										value={draft.required}
-										onChange={(event) => edit(index, { required: event.target.value })}
-									/>
-								</div>
-								<div className="repo-settings__field">
-									<label htmlFor={`rule-vetoes-${index}`}>Roles that can block</label>
-									<input
-										id={`rule-vetoes-${index}`}
-										placeholder="the repo's"
-										value={draft.vetoes}
-										onChange={(event) => edit(index, { vetoes: event.target.value })}
-									/>
-								</div>
-								<div className="repo-settings__field">
-									<label htmlFor={`rule-grants-${index}`}>Who may vote as them</label>
-									<input
-										id={`rule-grants-${index}`}
-										placeholder="person:* for people only"
-										value={draft.grants}
-										onChange={(event) => edit(index, { grants: event.target.value })}
-									/>
-								</div>
-								<div className="repo-settings__field">
-									<label htmlFor={`rule-checks-${index}`}>Checks</label>
-									<select
-										id={`rule-checks-${index}`}
-										value={draft.checks}
-										onChange={(event) => edit(index, { checks: event.target.value as RuleDraft["checks"] })}
-									>
-										<option value="repo">The repo's</option>
-										<option value="none">None</option>
-										<option value="these">These</option>
-									</select>
-								</div>
-							</div>
-							{draft.checks === "these" ? (
-								<div className="repo-settings__field">
-									<label htmlFor={`rule-verify-${index}`}>Its checks, one command a line</label>
-									<textarea
-										id={`rule-verify-${index}`}
-										className="repo-settings__command"
-										value={draft.verify}
-										onChange={(event) => edit(index, { verify: event.target.value })}
-									/>
-								</div>
-							) : null}
-							<button
-								type="button"
-								className="link repo-settings__remove"
-								onClick={() => setDrafts((current) => current.filter((_, i) => i !== index))}
-							>
-								Remove this rule
-							</button>
-						</fieldset>
+						<BranchRuleFields
+							key={index}
+							draft={draft}
+							index={index}
+							busy={busy}
+							edit={(patch) => edit(index, patch)}
+							remove={() => remove(index)}
+						/>
 					))}
 					<div>
 						<button type="button" onClick={() => setDrafts((current) => [...current, emptyRule()])} disabled={busy}>
@@ -156,8 +91,8 @@ export function BranchRules({ branch, rules, save, onSaved }: BranchRulesProps) 
 			<div className="repo-settings__save">
 				{errors.length ? (
 					<ul className="repo-settings__errors" role="alert">
-						{errors.map((e) => (
-							<li key={e}>{e}</li>
+						{errors.map((error) => (
+							<li key={error}>{error}</li>
 						))}
 					</ul>
 				) : null}
@@ -167,5 +102,88 @@ export function BranchRules({ branch, rules, save, onSaved }: BranchRulesProps) 
 				</button>
 			</div>
 		</form>
+	);
+}
+
+interface BranchRuleFieldsProps {
+	draft: RuleDraft;
+	index: number;
+	busy: boolean;
+	edit(patch: Partial<RuleDraft>): void;
+	remove(): void;
+}
+
+/** One branch rule: the branches it matches and what it changes for them. */
+function BranchRuleFields({ draft, index, busy, edit, remove }: BranchRuleFieldsProps) {
+	return (
+		<fieldset className="repo-settings__rule" disabled={busy}>
+			<legend className="sr-only">Rule {index + 1}</legend>
+			<div className="repo-settings__field">
+				<label htmlFor={`rule-pattern-${index}`}>Branches</label>
+				<input
+					id={`rule-pattern-${index}`}
+					className="repo-settings__command"
+					placeholder="feature/*"
+					value={draft.pattern}
+					onChange={(event) => edit({ pattern: event.target.value })}
+				/>
+			</div>
+			<div className="branch-rule__grid">
+				<div className="repo-settings__field">
+					<label htmlFor={`rule-required-${index}`}>Required approvals</label>
+					<input
+						id={`rule-required-${index}`}
+						inputMode="numeric"
+						placeholder="the repo's"
+						value={draft.required}
+						onChange={(event) => edit({ required: event.target.value })}
+					/>
+				</div>
+				<div className="repo-settings__field">
+					<label htmlFor={`rule-vetoes-${index}`}>Roles that can block</label>
+					<input
+						id={`rule-vetoes-${index}`}
+						placeholder="the repo's"
+						value={draft.vetoes}
+						onChange={(event) => edit({ vetoes: event.target.value })}
+					/>
+				</div>
+				<div className="repo-settings__field">
+					<label htmlFor={`rule-grants-${index}`}>Who may vote as them</label>
+					<input
+						id={`rule-grants-${index}`}
+						placeholder="person:* for people only"
+						value={draft.grants}
+						onChange={(event) => edit({ grants: event.target.value })}
+					/>
+				</div>
+				<div className="repo-settings__field">
+					<label htmlFor={`rule-checks-${index}`}>Checks</label>
+					<select
+						id={`rule-checks-${index}`}
+						value={draft.checks}
+						onChange={(event) => edit({ checks: event.target.value as RuleDraft["checks"] })}
+					>
+						<option value="repo">The repo's</option>
+						<option value="none">None</option>
+						<option value="these">These</option>
+					</select>
+				</div>
+			</div>
+			{draft.checks === "these" ? (
+				<div className="repo-settings__field">
+					<label htmlFor={`rule-verify-${index}`}>Its checks, one command a line</label>
+					<textarea
+						id={`rule-verify-${index}`}
+						className="repo-settings__command"
+						value={draft.verify}
+						onChange={(event) => edit({ verify: event.target.value })}
+					/>
+				</div>
+			) : null}
+			<button type="button" className="link repo-settings__remove" onClick={remove}>
+				Remove this rule
+			</button>
+		</fieldset>
 	);
 }

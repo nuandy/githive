@@ -98,6 +98,42 @@ function ReviewCard({ item }: { item: TimelineItem }) {
 	);
 }
 
+/** A commit's short sha, linked when the item says where to. */
+function CommitSha({ commit, commitHref }: { commit: string; commitHref: string | undefined }) {
+	const sha = <code className="timeline__sha">{shortSha(commit)}</code>;
+	return commitHref ? <a href={commitHref}>{sha}</a> : sha;
+}
+
+/** Any item but a review: a line saying what happened, and its body. */
+function TimelineEvent({ item, withLinks }: { item: TimelineItem; withLinks: (value: string) => ReactNode }) {
+	// The line may name the commit already.
+	const commit = item.commit && !item.text.includes(shortSha(item.commit)) ? item.commit : undefined;
+	return (
+		<>
+			<p className="timeline__line">
+				<span>{withLinks(item.text)}</span>
+				{commit ? (
+					<>
+						{" "}
+						<CommitSha commit={commit} commitHref={item.commitHref} />
+					</>
+				) : null}
+				{item.at ? (
+					<span className="muted">
+						{" · "}
+						<When at={item.at} />
+					</span>
+				) : null}
+			</p>
+			{item.body ? (
+				<div className={`timeline__body${item.kind === "pushed" ? " timeline__body--commit" : ""}`}>
+					{withLinks(item.body)}
+				</div>
+			) : null}
+		</>
+	);
+}
+
 export function Timeline({
 	items,
 	ids = [],
@@ -108,7 +144,7 @@ export function Timeline({
 	link?: (id: string) => string;
 }) {
 	if (!items.length) return null;
-	const text = (value: string) => (link ? linkIds(value, ids, link) : value);
+	const withLinks = (value: string) => (link ? linkIds(value, ids, link) : value);
 	return (
 		<ol className="timeline">
 			{items.map((item) => (
@@ -117,38 +153,7 @@ export function Timeline({
 						<Icon name={kindIcon(item.kind, item.tone)} size={14} />
 					</span>
 					<div className="timeline__content">
-						{item.review ? (
-							<ReviewCard item={item} />
-						) : (
-							<>
-								<p className="timeline__line">
-									<span>{text(item.text)}</span>
-									{item.commit && !item.text.includes(shortSha(item.commit)) ? (
-										<>
-											{" "}
-											{item.commitHref ? (
-												<a href={item.commitHref}>
-													<code className="timeline__sha">{shortSha(item.commit)}</code>
-												</a>
-											) : (
-												<code className="timeline__sha">{shortSha(item.commit)}</code>
-											)}
-										</>
-									) : null}
-									{item.at ? (
-										<span className="muted">
-											{" · "}
-											<When at={item.at} />
-										</span>
-									) : null}
-								</p>
-								{item.body ? (
-									<div className={`timeline__body${item.kind === "pushed" ? " timeline__body--commit" : ""}`}>
-										{text(item.body)}
-									</div>
-								) : null}
-							</>
-						)}
+						{item.review ? <ReviewCard item={item} /> : <TimelineEvent item={item} withLinks={withLinks} />}
 					</div>
 				</li>
 			))}

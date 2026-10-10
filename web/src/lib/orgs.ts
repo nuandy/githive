@@ -30,19 +30,26 @@ export function repoNameProblem(name: string): string | null {
  */
 export function creatableOwners(orgs: MyOrg[]): MyOrg[] {
 	return orgs.filter(
-		(o) => o.personal || o.role === "owner" || o.role === "admin" || (o.role === "member" && o.membersCanCreateRepos),
+		(org) =>
+			org.personal ||
+			org.role === "owner" ||
+			org.role === "admin" ||
+			(org.role === "member" && org.membersCanCreateRepos),
 	);
 }
 
 /** The orgs proper, not a person's own namespace. */
-export const realOrgs = (orgs: MyOrg[]) => orgs.filter((o) => !o.personal);
+export const realOrgs = (orgs: MyOrg[]) => orgs.filter((org) => !org.personal);
 
 /** Owners and admins manage an org's people, teams and settings. */
 export const canManage = (role: OrgRole | null | undefined) => role === "owner" || role === "admin";
 
 /** The roles the caller may give someone: only owners make owners. */
-export const assignableRoles = (role: OrgRole | null | undefined): OrgRole[] =>
-	role === "owner" ? ["owner", "admin", "member"] : role === "admin" ? ["admin", "member"] : [];
+export function assignableRoles(role: OrgRole | null | undefined): OrgRole[] {
+	if (role === "owner") return ["owner", "admin", "member"];
+	if (role === "admin") return ["admin", "member"];
+	return [];
+}
 
 /** What adding someone did: they joined, or they'll join when they first sign in. */
 export function addedMessage(result: { added?: string; invited?: string; awaitingApproval?: boolean }): string {
@@ -55,5 +62,5 @@ export function addedMessage(result: { added?: string; invited?: string; awaitin
 export function canLeave(org: Pick<OrgDetail, "role" | "members" | "personal">): boolean {
 	if (org.personal || !org.role) return false;
 	if (org.role !== "owner") return true;
-	return org.members.filter((m) => m.role === "owner").length > 1;
+	return org.members.filter((member) => member.role === "owner").length > 1;
 }

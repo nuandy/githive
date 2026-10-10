@@ -65,14 +65,14 @@ export function holdsInside(dir: string, holders: ClaimHolder[]): boolean {
 
 /** Claimed paths that aren't in the listing yet: new files, or folders a change will create. */
 export function claimedElsewhere(files: string[], holders: ClaimHolder[]): { path: string; holder: ClaimHolder }[] {
-	const out: { path: string; holder: ClaimHolder }[] = [];
+	const elsewhere: { path: string; holder: ClaimHolder }[] = [];
 	for (const holder of holders) {
 		for (const claimed of holder.paths) {
 			const clean = normalizePath(claimed);
 			if (!clean) continue;
 			if (files.some((file) => covers(clean, file))) continue;
-			out.push({ path: claimed, holder });
+			elsewhere.push({ path: claimed, holder });
 		}
 	}
-	return out.sort((a, b) => a.path.localeCompare(b.path));
+	return elsewhere.sort((a, b) => a.path.localeCompare(b.path));
 }

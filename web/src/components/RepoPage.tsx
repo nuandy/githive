@@ -1,7 +1,7 @@
-import { useState } from "react";
+import { type ReactNode, useState } from "react";
 import "./RepoPage.css";
 import type { VoteApi } from "./VoteForm";
-import type { BranchHistory, ChangeHistory, RepoAccess, RepoLanding, RepoSnapshot } from "../api";
+import type { BranchHistory, ChangeHistory, RepoAccess, RepoLanding, RepoSnapshot, SettingsInput } from "../api";
 import { canVote, canWrite } from "../lib/permissions";
 import { messageOf } from "./Confirm";
 import { BranchRules } from "./BranchRules";
@@ -15,7 +15,8 @@ import { AgentsTab } from "./Agents";
 import { ClaimsTab } from "./ClaimsMap";
 import { HistoryTab } from "./History";
 import { CodeTab, type CodeApi } from "./CodeBrowser";
-import { AuditTab, ChangeList, ChangePage, SettingsTab } from "./RepoTabs";
+import { ChangePage } from "./ChangePage";
+import { AuditTab, ChangeList, SettingsTab } from "./RepoTabs";
 import { Overview } from "./Overview";
 import { RepoHeader } from "./RepoHeader";
 import { ShardingBadge } from "./StatusPill";
@@ -83,7 +84,7 @@ function NotStarted({
 }) {
 	const [busy, setBusy] = useState(false);
 	const [error, setError] = useState<string | null>(null);
-	const go = async () => {
+	const startRepo = async () => {
 		if (!start) return;
 		setBusy(true);
 		setError(null);
@@ -105,7 +106,7 @@ function NotStarted({
 				{error ? <p className="error">{error}</p> : null}
 			</div>
 			{canStart && start ? (
-				<button type="button" className="accent" onClick={go} disabled={busy}>
+				<button type="button" className="accent" onClick={startRepo} disabled={busy}>
 					{busy ? "Starting…" : "Start GitHive"}
 				</button>
 			) : null}
@@ -122,6 +123,119 @@ const NothingYet = ({ repo }: { repo: string }) => (
 		</p>
 	</div>
 );
+
+/** For the repo's admins: the forms that change how changes merge. */
+function SettingsEditor({
+	repo,
+	branch,
+	snapshot,
+	manage,
+	onSaved,
+}: {
+	repo: string;
+	branch: string;
+	snapshot: RepoSnapshot;
+	manage: RepoManageApi;
+	onSaved?: () => void;
+}) {
+	const save = (settings: SettingsInput) => manage.changeSettings!(repo, settings);
+	return (
+		<>
+			<MergeSettings snapshot={snapshot} save={save} onSaved={onSaved} />
+			<BranchRules branch={branch} rules={snapshot.branchRules} save={save} onSaved={onSaved} />
+		</>
+	);
+}
+
+interface RepoTabContentProps extends Pick<
+	RepoPageProps,
+	"repo" | "view" | "snapshot" | "changeHistory" | "api" | "access" | "manage"
+> {
+	/** The tab shown: a change's page shows under Changes. */
+	current: RepoTab | "changes";
+	branch: string;
+	/** The repo's access settings, for those who can change them. */
+	admin: ReactNode;
+	voting: boolean;
+	onSettingsChanged?: () => void;
+}
+
+/** The current tab's content: before GitHive starts, only Code and Settings have any. */
+function RepoTabContent({
+	repo,
+	view,
+	current,
+	snapshot,
+	changeHistory,
+	branch,
+	api,
+	access,
+	manage,
+	admin,
+	voting,
+	onSettingsChanged,
+}: RepoTabContentProps) {
+	if (current === "code") {
+		return (
+			<CodeTab
+				repo={repo}
+				path={view.kind === "repo" ? (view.path ?? "") : ""}
+				refParam={view.kind === "repo" ? view.ref : undefined}
+				branch={branch}
+				api={api}
+			/>
+		);
+	}
+	if (!snapshot) return current === "settings" && admin ? admin : <NothingYet repo={repo} />;
+	if (view.kind === "change") {
+		return (
+			<ChangePage
+				snapshot={snapshot}
+				changeId={view.change}
+				claim={snapshot.claims.find((claim) => claim.change === view.change)}
+				history={changeHistory}
+				repo={repo}
+				tab={view.tab}
+				api={api}
+				canVote={voting}
+				merge={canWrite(access?.level) ? api.merge : undefined}
+			/>
+		);
+	}
+	switch (current) {
+		case "audit":
+			return <AuditTab snapshot={snapshot} />;
+		case "history":
+			return <HistoryTab repo={repo} branch={branch} api={api} />;
+		case "claims":
+			return <ClaimsTab repo={repo} branch={branch} holders={holdersFromSnapshot(snapshot, repo)} api={api} />;
+		case "agents":
+			return <AgentsTab snapshot={snapshot} />;
+		case "settings": {
+			const editor =
+				access?.level === "admin" && manage?.changeSettings ? (
+					<SettingsEditor repo={repo} branch={branch} snapshot={snapshot} manage={manage} onSaved={onSettingsChanged} />
+				) : undefined;
+			return <SettingsTab snapshot={snapshot} access={admin} editor={editor} />;
+		}
+	}
+	// The branch asked for in the address, when the repo has it.
+	const asked = view.branch && (snapshot.branches ?? []).some((known) => known.name === view.branch);
+	return (
+		<>
+			<Overview
+				repo={repo}
+				branch={branch}
+				shown={view.branch || undefined}
+				snapshot={snapshot}
+				api={api}
+				canWrite={canWrite(access?.level)}
+				onBranchMade={onSettingsChanged}
+			/>
+			<ChangeList snapshot={snapshot} repo={repo} shown={asked ? view.branch : branch} />
+		</>
+	);
+}
 
 /** A repo: claims in force as its changes, its claims map, code, agents, audit and settings, or one change. */
 export function RepoPage({
@@ -157,6 +271,15 @@ export function RepoPage({
 		{ id: "settings", label: "Settings", icon: "settings", href: href.repo(repo, "settings") },
 	];
 	const current = view.kind === "change" ? "changes" : view.tab;
+	const admin = manage ? (
+		<RepoAdmin
+			repo={repo}
+			access={access}
+			manage={manage}
+			onChanged={() => onAccessChanged?.()}
+			onDeleted={() => onDeleted?.()}
+		/>
+	) : undefined;
 	return (
 		<>
 			<RepoHeader
@@ -172,110 +295,24 @@ export function RepoPage({
 					<NotStarted
 						repo={repo}
 						canStart={access?.level === "admin"}
-						{...(manage?.startRepo ? { start: manage.startRepo } : {})}
-						{...(onStarted ? { onStarted } : {})}
+						start={manage?.startRepo}
+						onStarted={onStarted}
 					/>
 				) : null}
-				{!snapshot ? (
-					current === "code" ? (
-						<CodeTab
-							repo={repo}
-							path={view.kind === "repo" ? (view.path ?? "") : ""}
-							refParam={view.kind === "repo" ? view.ref : undefined}
-							branch={branch}
-							api={api}
-						/>
-					) : current === "settings" ? (
-						manage ? (
-							<RepoAdmin
-								repo={repo}
-								access={access}
-								manage={manage}
-								onChanged={() => onAccessChanged?.()}
-								onDeleted={() => onDeleted?.()}
-							/>
-						) : (
-							<NothingYet repo={repo} />
-						)
-					) : (
-						<NothingYet repo={repo} />
-					)
-				) : view.kind === "change" ? (
-					<ChangePage
-						snapshot={snapshot}
-						changeId={view.change}
-						claim={snapshot.claims.find((c) => c.change === view.change)}
-						history={changeHistory}
-						repo={repo}
-						tab={view.tab}
-						api={api}
-						canVote={voting}
-						{...(canWrite(access?.level) && api.merge ? { merge: api.merge } : {})}
-					/>
-				) : current === "audit" ? (
-					<AuditTab snapshot={snapshot} />
-				) : current === "history" ? (
-					<HistoryTab repo={repo} branch={branch} api={api} />
-				) : current === "claims" ? (
-					<ClaimsTab repo={repo} branch={branch} holders={holdersFromSnapshot(snapshot, repo)} api={api} />
-				) : current === "code" ? (
-					<CodeTab repo={repo} path={view.path ?? ""} refParam={view.ref} branch={branch} api={api} />
-				) : current === "agents" ? (
-					<AgentsTab snapshot={snapshot} />
-				) : current === "settings" ? (
-					<SettingsTab
-						snapshot={snapshot}
-						access={
-							manage ? (
-								<RepoAdmin
-									repo={repo}
-									access={access}
-									manage={manage}
-									onChanged={() => onAccessChanged?.()}
-									onDeleted={() => onDeleted?.()}
-								/>
-							) : undefined
-						}
-						editor={
-							access?.level === "admin" && manage?.changeSettings ? (
-								<>
-									<MergeSettings
-										snapshot={snapshot}
-										save={(settings) => manage.changeSettings!(repo, settings)}
-										{...(onSettingsChanged ? { onSaved: onSettingsChanged } : {})}
-									/>
-									<BranchRules
-										branch={branch}
-										rules={snapshot.branchRules}
-										save={(settings) => manage.changeSettings!(repo, settings)}
-										{...(onSettingsChanged ? { onSaved: onSettingsChanged } : {})}
-									/>
-								</>
-							) : undefined
-						}
-					/>
-				) : (
-					<>
-						<Overview
-							repo={repo}
-							branch={branch}
-							{...(view.kind === "repo" && view.branch ? { shown: view.branch } : {})}
-							snapshot={snapshot}
-							api={api}
-							canWrite={canWrite(access?.level)}
-							{...(onSettingsChanged ? { onBranchMade: onSettingsChanged } : {})}
-						/>
-						<ChangeList
-							snapshot={snapshot}
-							repo={repo}
-							shown={
-								view.kind === "repo" && view.branch && (snapshot.branches ?? []).some((b) => b.name === view.branch)
-									? view.branch
-									: branch
-							}
-						/>
-					</>
-				)}
+				<RepoTabContent
+					repo={repo}
+					view={view}
+					current={current}
+					snapshot={snapshot}
+					changeHistory={changeHistory}
+					branch={branch}
+					api={api}
+					access={access}
+					manage={manage}
+					admin={admin}
+					voting={voting}
+					onSettingsChanged={onSettingsChanged}
+				/>
 			</main>
 		</>
 	);

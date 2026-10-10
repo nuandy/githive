@@ -9,6 +9,7 @@ import type { TimelineItem } from "./timeline";
 // each commit pushed, each vote, and how it ended (merged or released).
 
 export type Vote = ChangeHistory["votes"][number];
+type Release = ChangeHistory["released"][number];
 
 /** A vote as a review card: the reviewer's name, the role, the evidence. */
 export function voteAsReview(vote: Vote) {
@@ -29,23 +30,23 @@ export function voteAsReview(vote: Vote) {
 /** How it ended, if it did: merged (with the merge commit) or released. */
 export function changeEnding(history: Pick<ChangeHistory, "claim" | "released">) {
 	if (history.claim) return null;
-	const merged = history.released.find((r) => r.mergedAs);
+	const merged = history.released.find((release) => release.mergedAs);
 	if (merged) return { kind: "merged" as const, release: merged };
-	const last = [...history.released].sort((a, b) => (timeOf(b.at) ?? 0) - (timeOf(a.at) ?? 0))[0];
+	const newestFirst = (a: Release, b: Release) => (timeOf(b.at) ?? 0) - (timeOf(a.at) ?? 0);
+	const last = [...history.released].sort(newestFirst)[0];
 	return last ? { kind: "released" as const, release: last } : null;
 }
 
 export function historyStatus(history: Pick<ChangeHistory, "claim" | "released">): ChangeStatus | null {
 	const ending = changeEnding(history);
 	if (!ending) return null;
-	return ending.kind === "merged"
-		? { kind: "merged", label: "Merged", tone: "good", description: "Merged." }
-		: {
-				kind: "abandoned",
-				label: "Released",
-				tone: "neutral",
-				description: `Its claim was released: ${ending.release.reason}`,
-			};
+	if (ending.kind === "merged") return { kind: "merged", label: "Merged", tone: "good", description: "Merged." };
+	return {
+		kind: "abandoned",
+		label: "Released",
+		tone: "neutral",
+		description: `Its claim was released: ${ending.release.reason}`,
+	};
 }
 
 export function buildTimeline(history: ChangeHistory, repo: string): TimelineItem[] {
@@ -54,12 +55,14 @@ export function buildTimeline(history: ChangeHistory, repo: string): TimelineIte
 	const release = history.released[0];
 	const opener = claim?.agent || release?.agent || identityName(claim?.by);
 	const paths = claim?.paths ?? [];
+	const openerPrefix = opener ? `${opener} ` : "";
+	const claimedPaths = paths.length ? paths.join(", ") : "its paths";
 	items.push({
 		key: "claimed",
 		kind: "opened",
 		at: claim?.since,
 		tone: "accent",
-		text: `${opener ? `${opener} ` : ""}claimed ${paths.length ? paths.join(", ") : "its paths"}`,
+		text: `${openerPrefix}claimed ${claimedPaths}`,
 		...(claim?.intent ? { body: claim.intent } : {}),
 	});
 	for (const commit of [...history.commits].reverse()) {
@@ -76,12 +79,14 @@ export function buildTimeline(history: ChangeHistory, repo: string): TimelineIte
 	}
 	history.votes.forEach((vote, index) => {
 		const review = voteAsReview(vote);
+		const approved = vote.verdict === "approve";
+		const verdictWords = approved ? "approved" : "requested changes";
 		items.push({
 			key: `vote:${index}`,
 			kind: "review",
 			at: vote.at,
-			tone: vote.verdict === "approve" ? "good" : "bad",
-			text: `${vote.reviewer} ${vote.verdict === "approve" ? "approved" : "requested changes"}`,
+			tone: approved ? "good" : "bad",
+			text: `${vote.reviewer} ${verdictWords}`,
 			commit: vote.commit,
 			review,
 		});
@@ -99,14 +104,16 @@ export function buildTimeline(history: ChangeHistory, repo: string): TimelineIte
 			commitHref: href.code(repo, "", sha),
 		});
 	} else if (ending) {
-		const r = ending.release;
+		const finalRelease = ending.release;
+		const agentPrefix = finalRelease.agent ? `${finalRelease.agent} ` : "";
+		const staleNote = finalRelease.stale ? " (it had gone stale)" : "";
 		items.push({
 			key: "released",
 			kind: "abandoned",
-			at: r.at,
+			at: finalRelease.at,
 			tone: "neutral",
-			text: `${r.agent ? `${r.agent} ` : ""}released the claim${r.stale ? " (it had gone stale)" : ""}`,
-			...(r.reason ? { body: r.reason } : {}),
+			text: `${agentPrefix}released the claim${staleNote}`,
+			...(finalRelease.reason ? { body: finalRelease.reason } : {}),
 		});
 	}
 	const order = (item: TimelineItem) => timeOf(item.at) ?? (item.kind === "opened" ? -Infinity : Infinity);

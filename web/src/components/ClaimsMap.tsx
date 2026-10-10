@@ -17,41 +17,52 @@ function Swatch({ holder }: { holder: ClaimHolder }) {
 	return <span className={`claims__swatch claim-c${holder.color}`} aria-hidden="true" />;
 }
 
-function Node({ node, holders, depth }: { node: TreeNode; holders: ClaimHolder[]; depth: number }) {
+interface NodeProps {
+	node: TreeNode;
+	holders: ClaimHolder[];
+	depth: number;
+}
+
+function Node(props: NodeProps) {
+	return props.node.kind === "file" ? <FileNode {...props} /> : <FolderNode {...props} />;
+}
+
+function FileNode({ node, holders }: NodeProps) {
 	const holder = holderOf(node.path, holders);
-	const label = holder ? `${node.name}, claimed by ${holder.title}` : node.name;
-	if (node.kind === "file") {
-		const conflict = holder?.conflicts.includes(node.path);
-		const content = (
-			<>
-				<Icon name="file" size={14} className="muted" />
-				<span className="claims__name">{node.name}</span>
-				{conflict ? (
-					<span className="claims__conflict tone-warn" title="Open changes conflict in this file">
-						<Icon name="conflict" size={13} label="conflict" />
-					</span>
-				) : null}
-			</>
-		);
-		return (
-			<li>
-				{holder ? (
-					<a
-						href={holder.href}
-						className={`claims__item claims__item--held claim-c${holder.color}`}
-						aria-label={label}
-						title={`${holder.title} · ${holder.agent}`}
-					>
-						{content}
-					</a>
-				) : (
-					<span className="claims__item">{content}</span>
-				)}
-			</li>
-		);
-	}
-	const open =
-		depth === 0 ? holdsInside(node.path, holders) || node.children.length < 12 : holdsInside(node.path, holders);
+	const conflict = holder?.conflicts.includes(node.path);
+	const content = (
+		<>
+			<Icon name="file" size={14} className="muted" />
+			<span className="claims__name">{node.name}</span>
+			{conflict ? (
+				<span className="claims__conflict tone-warn" title="Open changes conflict in this file">
+					<Icon name="conflict" size={13} label="conflict" />
+				</span>
+			) : null}
+		</>
+	);
+	return (
+		<li>
+			{holder ? (
+				<a
+					href={holder.href}
+					className={`claims__item claims__item--held claim-c${holder.color}`}
+					aria-label={`${node.name}, claimed by ${holder.title}`}
+					title={`${holder.title} · ${holder.agent}`}
+				>
+					{content}
+				</a>
+			) : (
+				<span className="claims__item">{content}</span>
+			)}
+		</li>
+	);
+}
+
+function FolderNode({ node, holders, depth }: NodeProps) {
+	const holder = holderOf(node.path, holders);
+	// At the top level, a folder with few entries opens too.
+	const open = holdsInside(node.path, holders) || (depth === 0 && node.children.length < 12);
 	return (
 		<li>
 			<details open={open}>
@@ -71,6 +82,32 @@ function Node({ node, holders, depth }: { node: TreeNode; holders: ClaimHolder[]
 				</ul>
 			</details>
 		</li>
+	);
+}
+
+/** The files on the branch with their holders, or why they aren't shown. */
+function FileTree({ branch, holders, tree, treeError }: ClaimsMapProps) {
+	if (treeError) {
+		return (
+			<p className="box__row tone-bad" role="alert">
+				Couldn't list the files: {treeError}
+			</p>
+		);
+	}
+	if (!tree) {
+		return (
+			<p className="box__row muted" role="status">
+				Loading files…
+			</p>
+		);
+	}
+	if (tree.files.length === 0) return <p className="box__row muted">{branch} has no files yet.</p>;
+	return (
+		<ul className="claims__tree claims__tree--root">
+			{buildTree(tree.files).map((node) => (
+				<Node key={node.path} node={node} holders={holders} depth={0} />
+			))}
+		</ul>
 	);
 }
 
@@ -112,23 +149,7 @@ export function ClaimsMap({ branch, holders, tree, treeError }: ClaimsMapProps) 
 					<h2 id="claims-tree-title">Files on {branch}</h2>
 					{tree ? <span className="muted">{tree.files.length} files</span> : null}
 				</div>
-				{treeError ? (
-					<p className="box__row tone-bad" role="alert">
-						Couldn't list the files: {treeError}
-					</p>
-				) : !tree ? (
-					<p className="box__row muted" role="status">
-						Loading files…
-					</p>
-				) : tree.files.length === 0 ? (
-					<p className="box__row muted">{branch} has no files yet.</p>
-				) : (
-					<ul className="claims__tree claims__tree--root">
-						{buildTree(tree.files).map((node) => (
-							<Node key={node.path} node={node} holders={holders} depth={0} />
-						))}
-					</ul>
-				)}
+				<FileTree branch={branch} holders={holders} tree={tree} treeError={treeError} />
 				{tree?.truncated ? (
 					<p className="box__row muted">
 						This repo is very large: only part of its file list is shown, so some claims may not appear.

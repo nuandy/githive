@@ -21,13 +21,14 @@ function Authors({ authors }: { authors: AuthorStats[] }) {
 							</tr>
 						</thead>
 						<tbody>
-							{authors.map((a) => (
-								<tr key={a.name}>
+							{authors.map((author) => (
+								<tr key={author.name}>
 									<th scope="row">
-										<Icon name={a.name === "GitHive builder" ? "bot" : "user"} size={14} className="muted" /> {a.name}
+										<Icon name={author.name === "GitHive builder" ? "bot" : "user"} size={14} className="muted" />{" "}
+										{author.name}
 									</th>
-									<td>{a.open}</td>
-									<td className="muted">{a.lastActive ? timeAgo(a.lastActive) : "–"}</td>
+									<td>{author.open}</td>
+									<td className="muted">{author.lastActive ? timeAgo(author.lastActive) : "–"}</td>
 								</tr>
 							))}
 						</tbody>
@@ -59,15 +60,15 @@ function Reviewers({ reviewers }: { reviewers: ReviewerStats[] }) {
 							</tr>
 						</thead>
 						<tbody>
-							{reviewers.map((r) => (
-								<tr key={r.name}>
+							{reviewers.map((reviewer) => (
+								<tr key={reviewer.name}>
 									<th scope="row">
-										<Icon name={r.hosted ? "bot" : "shield"} size={14} className="muted" /> {r.name}
+										<Icon name={reviewer.hosted ? "bot" : "shield"} size={14} className="muted" /> {reviewer.name}
 									</th>
-									<td>{r.roles.join(", ")}</td>
-									<td className={r.approvals ? "tone-good" : undefined}>{r.approvals}</td>
-									<td className={r.rejections ? "tone-bad" : undefined}>{r.rejections}</td>
-									<td className="muted">{r.lastActive ? timeAgo(r.lastActive) : "–"}</td>
+									<td>{reviewer.roles.join(", ")}</td>
+									<td className={reviewer.approvals ? "tone-good" : undefined}>{reviewer.approvals}</td>
+									<td className={reviewer.rejections ? "tone-bad" : undefined}>{reviewer.rejections}</td>
+									<td className="muted">{reviewer.lastActive ? timeAgo(reviewer.lastActive) : "–"}</td>
 								</tr>
 							))}
 						</tbody>

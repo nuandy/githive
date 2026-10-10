@@ -29,7 +29,7 @@ const byActivity = <T extends { opened?: number; approvals?: number; rejections?
 	a: T,
 	b: T,
 ) => {
-	const weight = (x: T) => (x.opened ?? 0) + (x.approvals ?? 0) + (x.rejections ?? 0);
+	const weight = (stats: T) => (stats.opened ?? 0) + (stats.approvals ?? 0) + (stats.rejections ?? 0);
 	return weight(b) - weight(a) || a.name.localeCompare(b.name);
 };
 

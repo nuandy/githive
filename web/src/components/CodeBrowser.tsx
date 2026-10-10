@@ -36,8 +36,7 @@ function formatSize(bytes: number): string {
 export function CodeView({ repo, path, refParam, branch, tree, treeError, file, fileError }: CodeViewProps) {
 	const clean = normalizePath(path);
 	const shownRef = refParam ?? branch;
-	const link = (p: string) => href.code(repo, p, refParam);
-	const kind = tree ? pathKind(tree.files, clean) : undefined;
+	const link = (target: string) => href.code(repo, target, refParam);
 	return (
 		<section className="code" aria-labelledby="code-title">
 			<div className="code__bar">
@@ -67,57 +66,92 @@ export function CodeView({ repo, path, refParam, branch, tree, treeError, file, 
 				</nav>
 			</div>
 
-			{treeError ? (
-				<div className="callout callout--bad" role="alert">
-					<Icon name="x" className="tone-bad" />
-					<div>
-						<strong>Couldn't list the files</strong>
-						<p>{treeError}</p>
-					</div>
-				</div>
-			) : !tree ? (
-				<p className="muted" role="status">
-					Loading files…
-				</p>
-			) : kind === "missing" ? (
-				<div className="box empty">
-					<Icon name="file" size={28} className="muted" />
-					<h2>Nothing at this path</h2>
-					<p>
-						<code>{clean}</code> isn't on {shownRef}. <a href={link("")}>Go to the top</a>.
-					</p>
-				</div>
-			) : kind === "dir" ? (
-				<div className="box">
-					<ul className="code__entries">
-						{clean ? (
-							<li>
-								<a href={link(clean.split("/").slice(0, -1).join("/"))} className="code__entry">
-									<Icon name="folder" className="muted" />
-									<span>..</span>
-								</a>
-							</li>
-						) : null}
-						{listDir(tree.files, clean).map((entry) => (
-							<li key={entry.path}>
-								<a href={link(entry.path)} className="code__entry">
-									<Icon
-										name={entry.kind === "dir" ? "folder" : "file"}
-										className={entry.kind === "dir" ? "code__folder" : "muted"}
-									/>
-									<span>{entry.name}</span>
-								</a>
-							</li>
-						))}
-					</ul>
-				</div>
-			) : (
-				<FileView file={file} error={fileError} path={clean} />
-			)}
+			<CodeBody
+				tree={tree}
+				treeError={treeError}
+				path={clean}
+				shownRef={shownRef}
+				link={link}
+				file={file}
+				fileError={fileError}
+			/>
 			{tree?.truncated ? (
 				<p className="muted code__note">This repo is very large: only part of its file list is shown.</p>
 			) : null}
 		</section>
+	);
+}
+
+interface CodeBodyProps {
+	tree: RepoTree | undefined;
+	treeError: string | undefined;
+	/** The normalized path shown. */
+	path: string;
+	shownRef: string;
+	link(path: string): string;
+	file: RepoFile | undefined;
+	fileError: string | undefined;
+}
+
+/** What's at the path: the listing's error or loading, nothing, a folder's entries, or a file. */
+function CodeBody({ tree, treeError, path, shownRef, link, file, fileError }: CodeBodyProps) {
+	if (treeError)
+		return (
+			<div className="callout callout--bad" role="alert">
+				<Icon name="x" className="tone-bad" />
+				<div>
+					<strong>Couldn't list the files</strong>
+					<p>{treeError}</p>
+				</div>
+			</div>
+		);
+	if (!tree)
+		return (
+			<p className="muted" role="status">
+				Loading files…
+			</p>
+		);
+	const kind = pathKind(tree.files, path);
+	if (kind === "missing")
+		return (
+			<div className="box empty">
+				<Icon name="file" size={28} className="muted" />
+				<h2>Nothing at this path</h2>
+				<p>
+					<code>{path}</code> isn't on {shownRef}. <a href={link("")}>Go to the top</a>.
+				</p>
+			</div>
+		);
+	if (kind === "dir") return <FolderView files={tree.files} path={path} link={link} />;
+	return <FileView file={file} error={fileError} path={path} />;
+}
+
+function FolderView({ files, path, link }: { files: string[]; path: string; link(path: string): string }) {
+	const parent = path.split("/").slice(0, -1).join("/");
+	return (
+		<div className="box">
+			<ul className="code__entries">
+				{path ? (
+					<li>
+						<a href={link(parent)} className="code__entry">
+							<Icon name="folder" className="muted" />
+							<span>..</span>
+						</a>
+					</li>
+				) : null}
+				{listDir(files, path).map((entry) => {
+					const isDir = entry.kind === "dir";
+					return (
+						<li key={entry.path}>
+							<a href={link(entry.path)} className="code__entry">
+								<Icon name={isDir ? "folder" : "file"} className={isDir ? "code__folder" : "muted"} />
+								<span>{entry.name}</span>
+							</a>
+						</li>
+					);
+				})}
+			</ul>
+		</div>
 	);
 }
 
@@ -139,34 +173,37 @@ function FileView({ file, error, path }: { file?: RepoFile; error?: string; path
 			</p>
 		);
 	const lines = file.text !== undefined ? file.text.replace(/\n$/, "").split("\n") : [];
+	const lineCount = file.text !== undefined ? `${lines.length} ${lines.length === 1 ? "line" : "lines"} · ` : "";
 	return (
 		<div className="box code__file">
 			<div className="box__header code__file-header">
 				<span>
-					{file.text !== undefined ? `${lines.length} ${lines.length === 1 ? "line" : "lines"} · ` : ""}
+					{lineCount}
 					{formatSize(file.size)}
 				</span>
 			</div>
-			{file.binary ? (
-				<p className="box__row muted">This is a binary file, so it isn't shown.</p>
-			) : file.tooBig ? (
-				<p className="box__row muted">This file is too big to show here.</p>
-			) : (
-				<div className="code__scroll" tabIndex={0} role="region" aria-label={`Contents of ${path}`}>
-					<table className="code__lines">
-						<tbody>
-							{lines.map((line, index) => (
-								<tr key={index}>
-									<td className="code__no" aria-hidden="true">
-										{index + 1}
-									</td>
-									<td className="code__text">{line || " "}</td>
-								</tr>
-							))}
-						</tbody>
-					</table>
-				</div>
-			)}
+			<FileContents file={file} lines={lines} path={path} />
+		</div>
+	);
+}
+
+function FileContents({ file, lines, path }: { file: RepoFile; lines: string[]; path: string }) {
+	if (file.binary) return <p className="box__row muted">This is a binary file, so it isn't shown.</p>;
+	if (file.tooBig) return <p className="box__row muted">This file is too big to show here.</p>;
+	return (
+		<div className="code__scroll" tabIndex={0} role="region" aria-label={`Contents of ${path}`}>
+			<table className="code__lines">
+				<tbody>
+					{lines.map((line, index) => (
+						<tr key={index}>
+							<td className="code__no" aria-hidden="true">
+								{index + 1}
+							</td>
+							<td className="code__text">{line || " "}</td>
+						</tr>
+					))}
+				</tbody>
+			</table>
 		</div>
 	);
 }

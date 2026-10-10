@@ -39,7 +39,7 @@ export function claimStatus(claim: Claim): ChangeStatus {
 			description: "Approved; it merges once its checks pass.",
 		};
 	if (!claim.head) return { kind: "draft", label: "Draft", tone: "neutral", description: "Nothing pushed yet." };
-	if (claim.hosted?.reviewers.some((r) => r.verdict === "reject"))
+	if (claim.hosted?.reviewers.some((reviewer) => reviewer.verdict === "reject"))
 		return {
 			kind: "changes-requested",
 			label: "Changes requested",
@@ -112,12 +112,10 @@ export function shardingSummary(
 			sharded: false,
 			detail: "Claims are kept in one record; this repo was set never to shard them.",
 		};
-	const deep = snapshot.shardDepth
-		? `, ${snapshot.shardDepth} ${snapshot.shardDepth === 1 ? "folder" : "folders"} deep`
-		: "";
-	const since = sharding.since
-		? ` since ${new Date(sharding.since).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })}`
-		: "";
+	const depth = snapshot.shardDepth;
+	const folders = depth === 1 ? "folder" : "folders";
+	const deep = depth ? `, ${depth} ${folders} deep` : "";
+	const since = sharding.since ? ` since ${shardedAt(sharding.since)}` : "";
 	const because = sharding.because ? ` (${sharding.because})` : "";
 	return {
 		label: "Sharded claims",
@@ -125,6 +123,9 @@ export function shardingSummary(
 		detail: `Claims are sharded by path${deep}${since}${because}, so agents in different parts of the tree never wait on each other. Claims made before stay in the top record, above every shard.`,
 	};
 }
+
+const shardedAt = (since: string) =>
+	new Date(since).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
 
 /**
  * How a repo stores its votes, as a sentence: in one record, or in buckets by commit once the load called
@@ -143,9 +144,7 @@ export function votesShardingSummary(
 		};
 	if (votesSharding === "never")
 		return { sharded: false, detail: "Votes are kept in one record; this repo was set never to split them." };
-	const since = votesSharding.since
-		? ` since ${new Date(votesSharding.since).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })}`
-		: "";
+	const since = votesSharding.since ? ` since ${shardedAt(votesSharding.since)}` : "";
 	const because = votesSharding.because ? ` (${votesSharding.because})` : "";
 	return {
 		sharded: true,
@@ -163,36 +162,35 @@ export function recordsBadge(
 	const claims = shardingSummary(snapshot);
 	const votes = votesShardingSummary(snapshot);
 	if (!claims) return null;
-	const label =
-		claims.sharded && votes?.sharded
-			? "Sharded claims & votes"
-			: claims.sharded
-				? "Sharded claims"
-				: votes?.sharded
-					? "Sharded votes"
-					: claims.label;
 	return {
-		label,
+		label: badgeLabel(claims, votes),
 		sharded: claims.sharded || !!votes?.sharded,
 		detail: [claims.detail, votes?.detail].filter(Boolean).join(" "),
 	};
 }
 
+function badgeLabel(claims: { label: string; sharded: boolean }, votes: { sharded: boolean } | null): string {
+	if (claims.sharded && votes?.sharded) return "Sharded claims & votes";
+	if (claims.sharded) return "Sharded claims";
+	if (votes?.sharded) return "Sharded votes";
+	return claims.label;
+}
+
 /** Who may vote as each blocking role, in words: the policy's grants, else people and GitHive's reviewers. */
 export function blockingRoles(policy: RepoSnapshot["policy"]): { role: string; holders: string }[] {
-	const roles = [...new Set([...policy.vetoes, ...(policy.escalate ?? []).flatMap((e) => e.vetoes ?? [])])];
-	const name = (grant: string) =>
-		grant === "person:*"
-			? "people"
-			: grant === "githive"
-				? "GitHive's reviewers"
-				: grant.endsWith("/*")
-					? `any agent under ${grant.startsWith("person:") ? identityName(grant.slice(0, -2)) : grant.slice(0, -2)}`
-					: grant.startsWith("person:")
-						? identityName(grant)
-						: grant;
+	const ruleVetoes = (policy.escalate ?? []).flatMap((rule) => rule.vetoes ?? []);
+	const roles = [...new Set([...policy.vetoes, ...ruleVetoes])];
 	return roles.map((role) => ({
 		role,
-		holders: (policy.grants?.[role] ?? ["person:*", "githive"]).map(name).join(", "),
+		holders: (policy.grants?.[role] ?? ["person:*", "githive"]).map(grantName).join(", "),
 	}));
+}
+
+/** A grant in words: people, GitHive's reviewers, every agent under an owner, or one name. */
+function grantName(grant: string) {
+	if (grant === "person:*") return "people";
+	if (grant === "githive") return "GitHive's reviewers";
+	const readable = (identity: string) => (identity.startsWith("person:") ? identityName(identity) : identity);
+	if (grant.endsWith("/*")) return `any agent under ${readable(grant.slice(0, -2))}`;
+	return readable(grant);
 }

@@ -5,6 +5,8 @@ import { ROLE, splitList } from "./mergeSettings";
 // text fields while they're edited, and back to what the settings tool takes.
 // A field left blank is the repo's own.
 
+type BranchRuleInput = NonNullable<SettingsInput["branch_rules"]>[number];
+
 export interface RuleDraft {
 	pattern: string;
 	/** Blank: the repo's. */
@@ -35,10 +37,22 @@ export function ruleDraftsFrom(rules: BranchRule[] | undefined): RuleDraft[] {
 			required: rule.policy?.required === undefined ? "" : String(rule.policy.required),
 			vetoes: vetoes.join(", "),
 			grants: holders.join(", "),
-			checks: rule.verify === undefined ? "repo" : rule.verify.length ? "these" : "none",
+			checks: checksOf(rule.verify),
 			verify: (rule.verify ?? []).join("\n"),
 		};
 	});
+}
+
+function checksOf(verify: string[] | undefined): RuleDraft["checks"] {
+	if (verify === undefined) return "repo";
+	return verify.length ? "these" : "none";
+}
+
+/** The checks a draft sets: the repo's (undefined), none, or the ones listed. */
+function verifyOf(draft: RuleDraft): string[] | undefined {
+	if (draft.checks === "repo") return undefined;
+	if (draft.checks === "none") return [];
+	return splitList(draft.verify.replace(/\n/g, ","));
 }
 
 /** A pattern's characters: a branch name's, and * for any run of them. */
@@ -49,8 +63,8 @@ export function branchRulesFrom(
 	drafts: RuleDraft[],
 ): { rules: NonNullable<SettingsInput["branch_rules"]>; errors: [] } | { rules?: undefined; errors: string[] } {
 	const errors: string[] = [];
-	const rules = drafts.map((draft, i) => {
-		const name = draft.pattern.trim() || `Rule ${i + 1}`;
+	const rules = drafts.map((draft, index) => {
+		const name = draft.pattern.trim() || `Rule ${index + 1}`;
 		if (!PATTERN.test(draft.pattern.trim()))
 			errors.push(`${name}: the pattern is a branch name, with * for any run of characters (feature/*).`);
 		const required = draft.required.trim();
@@ -62,18 +76,16 @@ export function branchRulesFrom(
 		const holders = splitList(draft.grants);
 		if (holders.length && !vetoes.length)
 			errors.push(`${name}: say which roles can block before who may vote as them.`);
-		const verify =
-			draft.checks === "repo" ? undefined : draft.checks === "none" ? [] : splitList(draft.verify.replace(/\n/g, ","));
+		const verify = verifyOf(draft);
 		if (draft.checks === "these" && !verify?.length) errors.push(`${name}: list its checks, or choose none.`);
 		const changes = !!required || vetoes.length > 0 || verify !== undefined;
 		if (!changes) errors.push(`${name} changes nothing: set approvals, roles or checks, or remove it.`);
-		return {
-			pattern: draft.pattern.trim(),
-			...(required ? { required: Number(required) } : {}),
-			...(vetoes.length ? { vetoes } : {}),
-			...(holders.length ? { grants: Object.fromEntries(vetoes.map((role) => [role, holders])) } : {}),
-			...(verify !== undefined ? { verify } : {}),
-		};
+		const rule: BranchRuleInput = { pattern: draft.pattern.trim() };
+		if (required) rule.required = Number(required);
+		if (vetoes.length) rule.vetoes = vetoes;
+		if (holders.length) rule.grants = Object.fromEntries(vetoes.map((role) => [role, holders]));
+		if (verify !== undefined) rule.verify = verify;
+		return rule;
 	});
 	return errors.length ? { errors: [...new Set(errors)] } : { rules, errors: [] };
 }

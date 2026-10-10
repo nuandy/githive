@@ -88,20 +88,14 @@ export function OrgsView({ me, orgs, createOrg, onCreated }: OrgsViewProps) {
 							id="new-org-slug"
 							type="text"
 							value={slug}
-							onChange={(e) => setSlug(e.target.value.toLowerCase())}
+							onChange={(event) => setSlug(event.target.value.toLowerCase())}
 							placeholder="acme"
 							autoComplete="off"
 							spellCheck={false}
 							aria-describedby="new-org-slug-hint"
 						/>
 						<p className="manage__hint" id="new-org-slug-hint">
-							{problem ? (
-								<span className="error">{problem}</span>
-							) : slug ? (
-								`Its repositories will be ${slug}/<name>.`
-							) : (
-								SLUG_HINT
-							)}
+							<NewOrgHint slug={slug} problem={problem} />
 						</p>
 					</div>
 					<div className="manage__field">
@@ -110,7 +104,7 @@ export function OrgsView({ me, orgs, createOrg, onCreated }: OrgsViewProps) {
 							id="new-org-name"
 							type="text"
 							value={name}
-							onChange={(e) => setName(e.target.value)}
+							onChange={(event) => setName(event.target.value)}
 							placeholder="Acme Inc."
 							autoComplete="off"
 						/>
@@ -133,6 +127,13 @@ export function OrgsView({ me, orgs, createOrg, onCreated }: OrgsViewProps) {
 			</form>
 		</main>
 	);
+}
+
+/** Under the new org's name: what's wrong with it, where its repositories will be, or what a name may be. */
+function NewOrgHint({ slug, problem }: { slug: string; problem: string | null }) {
+	if (problem) return <span className="error">{problem}</span>;
+	if (slug) return <>{`Its repositories will be ${slug}/<name>.`}</>;
+	return <>{SLUG_HINT}</>;
 }
 
 /** The page, with its data. */

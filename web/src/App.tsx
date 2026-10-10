@@ -1,5 +1,15 @@
-import { useEffect, useRef, useState } from "react";
-import { SIGNED_OUT_EVENT, account, admin, api, fetchMe, manage, type Me } from "./api";
+import { type ReactNode, useEffect, useRef, useState } from "react";
+import {
+	SIGNED_OUT_EVENT,
+	account,
+	admin,
+	api,
+	type ChangeHistory,
+	fetchMe,
+	manage,
+	type Me,
+	type RepoSnapshot,
+} from "./api";
 import { AdminPage } from "./components/AdminPage";
 import { AgentsPage } from "./components/AgentsPage";
 import { InboxPage } from "./components/InboxPage";
@@ -28,11 +38,15 @@ export function routePlace(route: Route): string {
 	return route.page;
 }
 
+// Moving between files in the Code tab scrolls to the top too, without remounting the page.
+function scrollPlace(route: Route): string {
+	const inCode = route.page === "repo" && route.tab === "code";
+	const codePlace = inCode ? `:code:${route.path ?? ""}:${route.ref ?? ""}` : "";
+	return `${routePlace(route)}${codePlace}`;
+}
+
 export function useHashRoute(): Route {
 	const [route, setRoute] = useState<Route>(() => parseRoute(window.location.hash));
-	// Moving between files in the Code tab scrolls to the top too, without remounting the page.
-	const scrollPlace = (r: Route) =>
-		`${routePlace(r)}${r.page === "repo" && r.tab === "code" ? `:code:${r.path ?? ""}:${r.ref ?? ""}` : ""}`;
 	const place = useRef(scrollPlace(route));
 	useEffect(() => {
 		const onChange = () => {
@@ -46,6 +60,17 @@ export function useHashRoute(): Route {
 		return () => window.removeEventListener("hashchange", onChange);
 	}, []);
 	return route;
+}
+
+/** A page with nothing to show but a message. */
+function EmptyPage({ role, children }: { role?: "alert"; children: ReactNode }) {
+	return (
+		<main className="page" id="main">
+			<div className="box empty" role={role}>
+				{children}
+			</div>
+		</main>
+	);
 }
 
 function Loading({ what }: { what: string }) {
@@ -74,7 +99,8 @@ export function App() {
 			window.history.replaceState(null, "", withoutSigninError(window.location.href));
 	}, []);
 	useEffect(() => {
-		fetchMe().then(setMe, (err: unknown) => setBootError(err instanceof Error ? err.message : String(err)));
+		const failed = (err: unknown) => setBootError(err instanceof Error ? err.message : String(err));
+		fetchMe().then(setMe, failed);
 		const signedOut = () => setMe(null);
 		window.addEventListener(SIGNED_OUT_EVENT, signedOut);
 		return () => window.removeEventListener(SIGNED_OUT_EVENT, signedOut);
@@ -92,15 +118,15 @@ export function App() {
 		window.location.assign("/");
 	};
 
-	if (me === undefined)
-		return bootError ? (
-			<main className="page" id="main">
-				<div className="box empty" role="alert">
-					<h2>GitHive didn't answer</h2>
-					<p>{bootError}. Reload the page to try again.</p>
-				</div>
-			</main>
-		) : null;
+	if (me === undefined) {
+		if (!bootError) return null;
+		return (
+			<EmptyPage role="alert">
+				<h2>GitHive didn't answer</h2>
+				<p>{bootError}. Reload the page to try again.</p>
+			</EmptyPage>
+		);
+	}
 	if (me === null) return <SignIn providers={providers} error={signinError} hash={window.location.hash} />;
 	return <Dashboard me={me} onSignOut={signOut} />;
 }
@@ -121,7 +147,7 @@ export function Dashboard({ me, onSignOut }: { me: Me; onSignOut: () => void }) 
 	const feedKey = repoName;
 	const refreshers = useRef<(() => void)[]>([]);
 	const liveStatus = useLiveFeed(feedKey, () => refreshers.current.forEach((refresh) => refresh()));
-	const every = (ms: number) => (liveStatus === "live" ? 30_000 : ms);
+	const every = (intervalMs: number) => (liveStatus === "live" ? 30_000 : intervalMs);
 
 	const snapshot = usePoll(repoName !== null ? `repo:${repoName}` : null, () => api.snapshot(repoName!), every(5_000));
 	// The audit replays every record in Git, so it loads on its own and less often.
@@ -136,52 +162,8 @@ export function Dashboard({ me, onSignOut }: { me: Me; onSignOut: () => void }) 
 	);
 	refreshers.current = [snapshot.refresh, audit.refresh, change.refresh];
 
-	const view: RepoView | null =
-		route.page === "repo"
-			? {
-					kind: "repo",
-					tab: route.tab,
-					...(route.path !== undefined ? { path: route.path } : {}),
-					...(route.ref ? { ref: route.ref } : {}),
-					...(route.branch ? { branch: route.branch } : {}),
-				}
-			: route.page === "change"
-				? { kind: "change", change: route.change, tab: route.tab }
-				: null;
-
-	// Breadcrumbs and the window title.
-	const crumbs: Crumb[] = [];
-	let title = "GitHive";
-	if (repoName !== null) {
-		crumbs.push({ label: "Repositories", href: href.repos() }, { label: repoName, href: href.repo(repoName) });
-		title = `${repoName} · GitHive`;
-		if (route.page === "change") {
-			const claim = snapshot.data?.claims.find((c) => c.change === route.change);
-			const ended = !claim ? change.data?.claim?.intent?.split("\n")[0].trim() : undefined;
-			const label = claim ? claimTitle(claim) : ended || route.change;
-			crumbs.push({ label });
-			title = `${label} · ${repoName} · GitHive`;
-		}
-	} else if (onRepos) title = "Repositories · GitHive";
-	else if (route.page === "inbox") {
-		crumbs.push({ label: "Inbox" });
-		title = `Inbox${inbox.count ? ` (${inbox.count})` : ""} · GitHive`;
-	} else if (route.page === "agents-settings") {
-		crumbs.push({ label: "Agents" });
-		title = "Agents · GitHive";
-	} else if (route.page === "admin") {
-		crumbs.push({ label: "Admin" });
-		title = "Admin · GitHive";
-	} else if (route.page === "new-repo") {
-		crumbs.push({ label: "Repositories", href: href.repos() }, { label: "New repository" });
-		title = "New repository · GitHive";
-	} else if (route.page === "orgs") {
-		crumbs.push({ label: "Your organizations" });
-		title = "Your organizations · GitHive";
-	} else if (route.page === "org") {
-		crumbs.push({ label: "Your organizations", href: href.orgs() }, { label: route.org });
-		title = `${route.org} · GitHive`;
-	}
+	const changeLabel = changeId ? changeTitle(changeId, snapshot.data, change.data) : "";
+	const { crumbs, title } = headingOf(route, inbox.count, changeLabel);
 	useEffect(() => {
 		document.title = title;
 	}, [title]);
@@ -191,61 +173,19 @@ export function Dashboard({ me, onSignOut }: { me: Me; onSignOut: () => void }) 
 		snapshot.data && snapshot.error && `${repoName}: ${snapshot.error}`,
 	].filter((error): error is string => !!error);
 
-	/** For pages that belong to a person signed in to GitHive, not an Access caller. */
-	const forPeople = (what: string) => (
-		<main className="page" id="main">
-			<div className="box empty">
-				<h2>{what} belong to people signed in to GitHive</h2>
-				<p>
-					Through Cloudflare Access you see every repository, but have no namespace or organizations of your own.{" "}
-					<a href={href.repos()}>Back to Repositories</a>.
-				</p>
-			</div>
-		</main>
-	);
-
+	const view = repoViewOf(route);
 	let page;
 	if (route.page === "admin") {
-		page =
-			me.kind === "access" ? (
-				<AdminPage admin={admin} />
-			) : (
-				<main className="page" id="main">
-					<div className="box empty">
-						<h2>Admin is for GitHive's operators</h2>
-						<p>
-							It's reached through Cloudflare Access, on GitHive's admin address.{" "}
-							<a href={href.repos()}>Back to Repositories</a>.
-						</p>
-					</div>
-				</main>
-			);
+		page = me.kind === "access" ? <AdminPage admin={admin} /> : <NotAnOperator />;
 	} else if (route.page === "new-repo") {
-		page =
-			me.kind === "user" ? (
-				<NewRepoPage manage={manage} {...(route.owner ? { owner: route.owner } : {})} />
-			) : (
-				forPeople("New repositories")
-			);
+		const owner = route.owner ? { owner: route.owner } : {};
+		page = me.kind === "user" ? <NewRepoPage manage={manage} {...owner} /> : <ForPeople what="New repositories" />;
 	} else if (route.page === "orgs") {
-		page = me.kind === "user" ? <OrgsPage me={me} manage={manage} /> : forPeople("Organizations");
+		page = me.kind === "user" ? <OrgsPage me={me} manage={manage} /> : <ForPeople what="Organizations" />;
 	} else if (route.page === "org") {
 		page = <OrgPage slug={route.org} me={me.kind === "user" ? me : { handle: "" }} manage={manage} />;
 	} else if (route.page === "agents-settings") {
-		page =
-			me.kind === "user" ? (
-				<AgentsPage me={me} account={account} />
-			) : (
-				<main className="page" id="main">
-					<div className="box empty">
-						<h2>Agents belong to people signed in to GitHive</h2>
-						<p>
-							Through Cloudflare Access there are no agents of your own. Sign in to GitHive on its own address to make
-							some. <a href={href.repos()}>Back to Repositories</a>.
-						</p>
-					</div>
-				</main>
-			);
+		page = me.kind === "user" ? <AgentsPage me={me} account={account} /> : <NoAgentsHere />;
 	} else if (route.page === "inbox") {
 		page = <InboxPage groups={inbox.groups} loaded={summaries.loaded} error={summaries.error} />;
 	} else if (route.page === "repos") {
@@ -288,35 +228,10 @@ export function Dashboard({ me, onSignOut }: { me: Me; onSignOut: () => void }) 
 		} else if (!snapshot.error) {
 			page = <Loading what={repoName} />;
 		} else {
-			page = (
-				<main className="page" id="main">
-					<div className="box empty">
-						<h2>
-							{/^no repo /.test(snapshot.error)
-								? `There's no ${repoName} you can see`
-								: `${repoName} isn't open for agents yet`}
-						</h2>
-						<p>
-							{/^no repo /.test(snapshot.error)
-								? "It doesn't exist, or you aren't one of the people who can see it."
-								: snapshot.error}{" "}
-							<a href={href.repos()}>Back to Repositories</a>.
-						</p>
-					</div>
-				</main>
-			);
+			page = <RepoUnavailable repo={repoName} error={snapshot.error} />;
 		}
 	} else {
-		page = (
-			<main className="page" id="main">
-				<div className="box empty">
-					<h2>Page not found</h2>
-					<p>
-						<a href={href.repos()}>Go to Repositories</a>.
-					</p>
-				</div>
-			</main>
-		);
+		page = <PageNotFound />;
 	}
 
 	return (
@@ -344,5 +259,130 @@ export function Dashboard({ me, onSignOut }: { me: Me; onSignOut: () => void }) 
 			) : null}
 			<PageBoundary key={routePlace(route)}>{page}</PageBoundary>
 		</div>
+	);
+}
+
+/** What the repo page shows for a route, or null when the route isn't a repo's. */
+function repoViewOf(route: Route): RepoView | null {
+	if (route.page === "change") return { kind: "change", change: route.change, tab: route.tab };
+	if (route.page !== "repo") return null;
+	return {
+		kind: "repo",
+		tab: route.tab,
+		...(route.path !== undefined ? { path: route.path } : {}),
+		...(route.ref ? { ref: route.ref } : {}),
+		...(route.branch ? { branch: route.branch } : {}),
+	};
+}
+
+/** A change's name in the breadcrumbs: its claim's title, else what it set out to do once it ended, else its id. */
+function changeTitle(changeId: string, snapshot: RepoSnapshot | undefined, history: ChangeHistory | undefined): string {
+	const claim = snapshot?.claims.find((candidate) => candidate.change === changeId);
+	if (claim) return claimTitle(claim);
+	const ended = history?.claim?.intent?.split("\n")[0].trim();
+	return ended || changeId;
+}
+
+/** The breadcrumbs and the window title for a route. */
+function headingOf(route: Route, inboxCount: number, changeLabel: string): { crumbs: Crumb[]; title: string } {
+	switch (route.page) {
+		case "repo":
+		case "change": {
+			const repoName = route.repo;
+			const crumbs: Crumb[] = [
+				{ label: "Repositories", href: href.repos() },
+				{ label: repoName, href: href.repo(repoName) },
+			];
+			if (route.page !== "change") return { crumbs, title: `${repoName} · GitHive` };
+			crumbs.push({ label: changeLabel });
+			return { crumbs, title: `${changeLabel} · ${repoName} · GitHive` };
+		}
+		case "repos":
+			return { crumbs: [], title: "Repositories · GitHive" };
+		case "inbox": {
+			const count = inboxCount ? ` (${inboxCount})` : "";
+			return { crumbs: [{ label: "Inbox" }], title: `Inbox${count} · GitHive` };
+		}
+		case "agents-settings":
+			return { crumbs: [{ label: "Agents" }], title: "Agents · GitHive" };
+		case "admin":
+			return { crumbs: [{ label: "Admin" }], title: "Admin · GitHive" };
+		case "new-repo":
+			return {
+				crumbs: [{ label: "Repositories", href: href.repos() }, { label: "New repository" }],
+				title: "New repository · GitHive",
+			};
+		case "orgs":
+			return { crumbs: [{ label: "Your organizations" }], title: "Your organizations · GitHive" };
+		case "org":
+			return {
+				crumbs: [{ label: "Your organizations", href: href.orgs() }, { label: route.org }],
+				title: `${route.org} · GitHive`,
+			};
+		default:
+			return { crumbs: [], title: "GitHive" };
+	}
+}
+
+/** For pages that belong to a person signed in to GitHive, not an Access caller. */
+function ForPeople({ what }: { what: string }) {
+	return (
+		<EmptyPage>
+			<h2>{what} belong to people signed in to GitHive</h2>
+			<p>
+				Through Cloudflare Access you see every repository, but have no namespace or organizations of your own.{" "}
+				<a href={href.repos()}>Back to Repositories</a>.
+			</p>
+		</EmptyPage>
+	);
+}
+
+function NotAnOperator() {
+	return (
+		<EmptyPage>
+			<h2>Admin is for GitHive's operators</h2>
+			<p>
+				It's reached through Cloudflare Access, on GitHive's admin address.{" "}
+				<a href={href.repos()}>Back to Repositories</a>.
+			</p>
+		</EmptyPage>
+	);
+}
+
+function NoAgentsHere() {
+	return (
+		<EmptyPage>
+			<h2>Agents belong to people signed in to GitHive</h2>
+			<p>
+				Through Cloudflare Access there are no agents of your own. Sign in to GitHive on its own address to make some.{" "}
+				<a href={href.repos()}>Back to Repositories</a>.
+			</p>
+		</EmptyPage>
+	);
+}
+
+/** A repo that couldn't be read: one the reader can't see, or one GitHive can't open. */
+function RepoUnavailable({ repo, error }: { repo: string; error: string }) {
+	const hidden = /^no repo /.test(error);
+	const heading = hidden ? `There's no ${repo} you can see` : `${repo} isn't open for agents yet`;
+	const reason = hidden ? "It doesn't exist, or you aren't one of the people who can see it." : error;
+	return (
+		<EmptyPage>
+			<h2>{heading}</h2>
+			<p>
+				{reason} <a href={href.repos()}>Back to Repositories</a>.
+			</p>
+		</EmptyPage>
+	);
+}
+
+function PageNotFound() {
+	return (
+		<EmptyPage>
+			<h2>Page not found</h2>
+			<p>
+				<a href={href.repos()}>Go to Repositories</a>.
+			</p>
+		</EmptyPage>
 	);
 }

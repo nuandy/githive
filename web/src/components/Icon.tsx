@@ -152,9 +152,10 @@ export function Icon({
 	className?: string;
 	label?: string;
 }) {
+	const classes = ["icon", name === "loader" ? "icon--spin" : "", className ?? ""];
 	return (
 		<svg
-			className={["icon", name === "loader" ? "icon--spin" : "", className ?? ""].filter(Boolean).join(" ")}
+			className={classes.filter(Boolean).join(" ")}
 			width={size}
 			height={size}
 			viewBox="0 0 24 24"

@@ -26,8 +26,11 @@ export const LAMP_WORDS: Record<Lamp, string> = {
 };
 
 /** Which of the three lamp colors a state shows. */
-export const lampColor = (lamp: Lamp): "red" | "amber" | "green" =>
-	lamp === "attention" ? "red" : lamp === "approved" ? "green" : "amber";
+export function lampColor(lamp: Lamp): "red" | "amber" | "green" {
+	if (lamp === "attention") return "red";
+	if (lamp === "approved") return "green";
+	return "amber";
+}
 
 /**
  * What else a lamp reads: what's being checked to land, the votes (for when a change went back to its agent),
@@ -48,13 +51,14 @@ export interface LampContext {
 export function lampOf(claim: Claim, context: LampContext = {}): Lamp {
 	if (claim.attention || claim.approval.vetoedBy.length) return "attention";
 	const { landing, votes = [], now = Date.now() } = context;
-	const checking =
-		!!claim.head && !!landing?.checking?.changes.some((c) => c.change === claim.change && c.head === claim.head);
-	const onHead = claim.head ? votes.filter((v) => v.commit === claim.head && v.reviewer !== claim.agent) : [];
+	const isThisHead = (candidate: { change: string; head: string }) =>
+		candidate.change === claim.change && candidate.head === claim.head;
+	const checking = !!claim.head && !!landing?.checking?.changes.some(isThisHead);
+	const onHead = claim.head ? votes.filter((vote) => vote.commit === claim.head && vote.reviewer !== claim.agent) : [];
 	const signs = {
 		active: claim.active,
 		head: claim.head,
-		votes: onHead.map((v) => ({ verdict: v.verdict, at: v.at })),
+		votes: onHead.map((vote) => ({ verdict: vote.verdict, at: vote.at })),
 		approved: claim.approval.approved,
 		landing: checking,
 		asked: false,
@@ -67,7 +71,7 @@ export function lampOf(claim: Claim, context: LampContext = {}): Lamp {
 
 /** How many claims show each lamp. */
 export function lampCounts(claims: Claim[], context: LampContext = {}): Record<Lamp, number> {
-	const counts = Object.fromEntries(LAMPS.map((l) => [l, 0])) as Record<Lamp, number>;
+	const counts = Object.fromEntries(LAMPS.map((lamp) => [lamp, 0])) as Record<Lamp, number>;
 	for (const claim of claims) counts[lampOf(claim, context)]++;
 	return counts;
 }
@@ -154,13 +158,11 @@ export function territory(files: string[], claims: Claim[], context: LampContext
 			const region = regionOf(isFolder ? parts[0] : "");
 			if (isFolder && parts.length === 1) region.whole.push(holder);
 			else {
-				const cell = cellOf(
-					region,
-					isFolder ? parts[1] : parts[0],
-					!cells.has(isFolder ? `${parts[0]}/${parts[1]}` : parts[0]),
-				);
+				const cellName = isFolder ? parts[1] : parts[0];
+				const cellPath = isFolder ? `${parts[0]}/${parts[1]}` : parts[0];
+				const cell = cellOf(region, cellName, !cells.has(cellPath));
 				if (isFolder && (parts.length > 2 || claimed.endsWith("/"))) cell.folder = true;
-				if (!cell.holders.some((h) => h.change === holder.change)) cell.holders.push(holder);
+				if (!cell.holders.some((other) => other.change === holder.change)) cell.holders.push(holder);
 			}
 		}
 	}
@@ -170,7 +172,8 @@ export function territory(files: string[], claims: Claim[], context: LampContext
 		for (const cell of region.cells) cell.holders.sort(byUrgency);
 	}
 	// Folders first, alphabetically; the top-level files last.
-	return [...regions.values()].sort((a, b) => Number(!a.name) - Number(!b.name) || a.name.localeCompare(b.name));
+	const foldersFirst = (a: Region, b: Region) => Number(!a.name) - Number(!b.name) || a.name.localeCompare(b.name);
+	return [...regions.values()].sort(foldersFirst);
 }
 
 /** The lamp a cell shows: its own most urgent claim's, else its folder's. */

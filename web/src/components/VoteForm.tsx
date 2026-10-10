@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { type FormEvent, useState } from "react";
 import type { RepoSnapshot, VoteInput } from "../api";
 import { shortSha } from "../lib/model";
 import type { Claim } from "../lib/claimStatus";
@@ -11,7 +11,8 @@ export interface VoteApi {
 
 /** The roles a person can vote as: a general review, and every role that can block a change here. */
 export function voteRoles(policy: RepoSnapshot["policy"]): string[] {
-	return [...new Set(["review", ...(policy.vetoes ?? []), ...(policy.escalate ?? []).flatMap((e) => e.vetoes ?? [])])];
+	const pathVetoes = (policy.escalate ?? []).flatMap((rule) => rule.vetoes ?? []);
+	return [...new Set(["review", ...(policy.vetoes ?? []), ...pathVetoes])];
 }
 
 /**
@@ -39,27 +40,25 @@ export function VoteForm({
 	if (!claim.head) return null;
 	const head = claim.head;
 
+	const submit = async (event: FormEvent) => {
+		event.preventDefault();
+		if (!evidence.trim() || busy) return;
+		setBusy(true);
+		setError(undefined);
+		setDone(undefined);
+		try {
+			await api.vote(repo, claim.change, { role, verdict, evidence: evidence.trim() });
+			setDone(`Your ${role} vote was recorded.`);
+			setEvidence("");
+		} catch (err) {
+			setError(err instanceof Error ? err.message : String(err));
+		} finally {
+			setBusy(false);
+		}
+	};
+
 	return (
-		<form
-			className="review-form"
-			aria-labelledby="vote-title"
-			onSubmit={async (event) => {
-				event.preventDefault();
-				if (!evidence.trim() || busy) return;
-				setBusy(true);
-				setError(undefined);
-				setDone(undefined);
-				try {
-					await api.vote(repo, claim.change, { role, verdict, evidence: evidence.trim() });
-					setDone(`Your ${role} vote was recorded.`);
-					setEvidence("");
-				} catch (err) {
-					setError(err instanceof Error ? err.message : String(err));
-				} finally {
-					setBusy(false);
-				}
-			}}
-		>
+		<form className="review-form" aria-labelledby="vote-title" onSubmit={submit}>
 			<div className="review-form__header">
 				<h2 id="vote-title">Review changes</h2>
 				<span className="muted">
@@ -70,9 +69,9 @@ export function VoteForm({
 				<div className="review-form__row">
 					<label htmlFor="vote-role">Vote as</label>
 					<select id="vote-role" value={role} onChange={(event) => setRole(event.target.value)} disabled={busy}>
-						{roles.map((r) => (
-							<option key={r} value={r}>
-								{r} reviewer
+						{roles.map((option) => (
+							<option key={option} value={option}>
+								{option} reviewer
 							</option>
 						))}
 					</select>

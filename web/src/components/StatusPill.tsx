@@ -40,8 +40,10 @@ export function StatusPill({
 	size?: "md" | "lg";
 	solid?: boolean;
 }) {
+	const solidClass = solid ? " pill--solid" : "";
+	const sizeClass = size === "lg" ? " pill--lg" : "";
 	return (
-		<span className={`pill pill--${status.tone}${solid ? " pill--solid" : ""}${size === "lg" ? " pill--lg" : ""}`}>
+		<span className={`pill pill--${status.tone}${solidClass}${sizeClass}`}>
 			<Icon name={statusIconName(status.kind)} size={size === "lg" ? 16 : 13} />
 			{status.label}
 		</span>

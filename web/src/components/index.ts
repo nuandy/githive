@@ -1,4 +1,5 @@
-export { AuditTab, ChangeList, ChangePage, SettingsTab } from "./RepoTabs";
+export { AuditTab, ChangeList, SettingsTab } from "./RepoTabs";
+export { ChangePage } from "./ChangePage";
 export { PageBoundary } from "./PageBoundary";
 export { RepoHeader } from "./RepoHeader";
 export { RepoList } from "./RepoList";

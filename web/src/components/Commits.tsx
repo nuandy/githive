@@ -38,16 +38,17 @@ export function ChangeCommits({ history, repo }: { history: ChangeHistory | unde
 			</div>
 			<ol className="commits__list">
 				{history.commits.map((commit) => {
-					const [subject, ...rest] = commit.message.split("\n");
+					const [subject, ...bodyLines] = commit.message.split("\n");
+					const body = bodyLines.join("\n").trim();
 					return (
 						<li key={commit.commit} className="commits__row">
 							<Icon name="commit" className="muted commits__icon" />
 							<div className="commits__main">
 								<p className="commits__subject">{subject || "(no message)"}</p>
-								{rest.join("\n").trim() ? (
+								{body ? (
 									<details className="commits__more">
 										<summary>More</summary>
-										<pre>{rest.join("\n").trim()}</pre>
+										<pre>{body}</pre>
 									</details>
 								) : null}
 								<p className="muted commits__meta">

@@ -29,7 +29,7 @@ const COLUMNS = 10;
 /** Short enough to sit inside a cell. */
 const fit = (text: string, max: number) => (text.length > max ? `${text.slice(0, max - 1)}…` : text);
 
-const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
+const plural = (count: number, one: string, many = `${one}s`) => `${count} ${count === 1 ? one : many}`;
 
 /** Where a cell is, in words: "src/stats/", "the files in src/", "the top-level files". */
 function place(hex: Hex): string {
@@ -42,6 +42,18 @@ const LANDING_WORDS = {
 	queued: "a change here is approved and waiting to land",
 } as const;
 
+/** A cell's name inside its hexagon. */
+function cellName(hex: Hex): string {
+	if (hex.kind !== "files") return fit(hex.name, 8);
+	return hex.path ? "· files" : "top files";
+}
+
+/** A cell's path in its details: a folder, or the files directly in one. */
+function detailsPath(hex: Hex): string {
+	if (hex.kind !== "files") return `${hex.path}/`;
+	return hex.path ? `${hex.path}/*` : "top-level files";
+}
+
 /** What a cell says to someone who can't see it. */
 export function hexLabel(hex: Hex, now: number = Date.now()): string {
 	const what = `${place(hex)}${hex.planned ? " (new)" : ""}`;
@@ -53,7 +65,10 @@ export function hexLabel(hex: Hex, now: number = Date.now()): string {
 		(hex.landing === "checking" && holder.lamp === "checking") ||
 		(hex.landing === "queued" && holder.lamp === "approved");
 	const landing = hex.landing && !said ? `; ${LANDING_WORDS[hex.landing]}` : "";
-	return `${what}: ${holder.whole ? "held" : "partly held"} by ${holder.agent} for ${holder.title}, claimed ${timeAgo(holder.since, now)}, ${LAMP_WORDS[holder.lamp]}${others}${landing}`;
+	const held = holder.whole ? "held" : "partly held";
+	const claimed = `claimed ${timeAgo(holder.since, now)}`;
+	const state = LAMP_WORDS[holder.lamp];
+	return `${what}: ${held} by ${holder.agent} for ${holder.title}, ${claimed}, ${state}${others}${landing}`;
 }
 
 /** The width of the box the map draws in, once known (a callback ref, since the box shows only once the tree is in). */
@@ -132,7 +147,7 @@ function Cell({
 				</text>
 			) : null}
 			<text className="hive__name" x={x} y={y + (hex.parent ? 4 : 0)} aria-hidden="true">
-				{hex.kind === "files" ? (hex.path ? "· files" : "top files") : fit(hex.name, 8)}
+				{cellName(hex)}
 			</text>
 			<text className="hive__count" x={x} y={y + (hex.parent ? 18 : 15)} aria-hidden="true">
 				{hex.planned ? "new" : plural(hex.files, "file")}
@@ -157,9 +172,9 @@ function HolderLine({ repo, holder, now }: { repo: string; holder: HexHolder; no
 				) : null}
 				<p className="muted">
 					Claimed {timeAgo(holder.since, now)} · {LAMP_WORDS[holder.lamp]} ·{" "}
-					{holder.paths.map((path, i) => (
+					{holder.paths.map((path, index) => (
 						<span key={path}>
-							{i ? ", " : ""}
+							{index ? ", " : ""}
 							<code>{path || "/"}</code>
 						</span>
 					))}
@@ -180,7 +195,7 @@ function Details({ repo, branch, hex, now }: { repo: string; branch: string; hex
 	return (
 		<div className="hive__details-body">
 			<h3>
-				<code>{hex.kind === "files" ? (hex.path ? `${hex.path}/*` : "top-level files") : `${hex.path}/`}</code>
+				<code>{detailsPath(hex)}</code>
 				<span className="muted">{hex.planned ? `new: not on ${branch} yet` : plural(hex.files, "file")}</span>
 				{hex.kind === "folder" && !hex.planned ? <a href={href.code(repo, hex.path, branch)}>Open in Code</a> : null}
 			</h3>
@@ -214,9 +229,9 @@ export function HiveMap({ repo, branch, snapshot, tree, error, landing, now = Da
 	const [boxRef, width] = useWidth<HTMLDivElement>();
 	const [hovered, setHovered] = useState<string | null>(null);
 	const [picked, setPicked] = useState<string | null>(null);
-	const context = { ...(landing ? { landing } : {}), votes: snapshot.votes, now };
-	const all = tree ? honeycomb(tree.files, snapshot.claims, context) : [];
-	const hexes = all.slice(0, MAX_HEXES);
+	const context = { landing, votes: snapshot.votes, now };
+	const allHexes = tree ? honeycomb(tree.files, snapshot.claims, context) : [];
+	const hexes = allHexes.slice(0, MAX_HEXES);
 	const agents = hiveAgents(snapshot.claims, context);
 	const cellWidth = Math.sqrt(3) * RADIUS;
 	const columns = width ? Math.max(2, Math.floor((width - cellWidth / 2) / cellWidth)) : COLUMNS;
@@ -237,9 +252,9 @@ export function HiveMap({ repo, branch, snapshot, tree, error, landing, now = Da
 						<li key={entry.agent} className={`claim-c${entry.color}`}>
 							<Swatch color={entry.color} />
 							<strong>{entry.agent}</strong>
-							{entry.changes.map((change, i) => (
+							{entry.changes.map((change, index) => (
 								<span key={change.change} className="hive__legend-change">
-									{i ? "; " : ""}
+									{index ? "; " : ""}
 									<a href={href.change(repo, change.change)} title={change.intent}>
 										{change.title}
 									</a>
@@ -295,12 +310,12 @@ export function HiveMap({ repo, branch, snapshot, tree, error, landing, now = Da
 							role="group"
 							aria-label={`${plural(hexes.length, "folder cell")}, ${held} held`}
 						>
-							{hexes.map((hex, i) => (
+							{hexes.map((hex, index) => (
 								<Cell
 									key={hex.key}
 									hex={hex}
-									x={grid.centers[i].x}
-									y={grid.centers[i].y}
+									x={grid.centers[index].x}
+									y={grid.centers[index].y}
 									active={picked === hex.key}
 									onShow={setHovered}
 									onPick={(key) => setPicked((current) => (current === key ? null : key))}
@@ -308,7 +323,9 @@ export function HiveMap({ repo, branch, snapshot, tree, error, landing, now = Da
 								/>
 							))}
 						</svg>
-						{all.length > hexes.length ? <p className="muted">and {all.length - hexes.length} more folders</p> : null}
+						{allHexes.length > hexes.length ? (
+							<p className="muted">and {allHexes.length - hexes.length} more folders</p>
+						) : null}
 						{tree?.truncated ? (
 							<p className="muted">This repo is large: the map shows the first part of its tree.</p>
 						) : null}

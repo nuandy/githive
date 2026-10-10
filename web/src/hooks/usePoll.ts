@@ -20,7 +20,7 @@ const browserScheduler: PollScheduler = {
 };
 
 /**
- * Fetch `key`'s data now and every `ms` after, keeping the last good data
+ * Fetch `key`'s data now and every `intervalMs` after, keeping the last good data
  * while a refresh runs or fails, so the page never flashes back to "loading".
  * A null key pauses polling. Requests never overlap, and a hidden tab skips
  * its ticks.
@@ -28,7 +28,7 @@ const browserScheduler: PollScheduler = {
 export function usePoll<T>(
 	key: string | null,
 	fetcher: () => Promise<T>,
-	ms: number,
+	intervalMs: number,
 	scheduler: PollScheduler = browserScheduler,
 ): Poll<T> {
 	const [state, setState] = useState<{ key: string | null; data?: T; error?: string; loaded: boolean }>({
@@ -52,20 +52,21 @@ export function usePoll<T>(
 				if (active) setState({ key, data, loaded: true });
 			} catch (error) {
 				const message = error instanceof Error ? error.message : String(error);
-				if (active)
-					setState((current) => ({ ...(current.key === key ? current : {}), key, error: message, loaded: true }));
+				// Keep the last good data for this key, so a failed refresh doesn't blank the page.
+				const keepFor = (current: typeof state) => (current.key === key ? current : {});
+				if (active) setState((current) => ({ ...keepFor(current), key, error: message, loaded: true }));
 			} finally {
 				inFlight = false;
 			}
 		};
 		runRef.current = () => void run(true);
 		void run(true);
-		const timer = scheduler.setInterval(() => void run(), ms);
+		const timer = scheduler.setInterval(() => void run(), intervalMs);
 		return () => {
 			active = false;
 			scheduler.clearInterval(timer);
 		};
-	}, [key, ms, scheduler]);
+	}, [key, intervalMs, scheduler]);
 
 	const refresh = useCallback(() => runRef.current(), []);
 	const current = state.key === key ? state : undefined;

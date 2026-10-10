@@ -17,6 +17,27 @@ function ProviderMark({ provider }: { provider: Provider }) {
 	);
 }
 
+/** One button per provider, once they're known. */
+function ProviderButtons({ providers, hash }: { providers: Provider[] | undefined; hash: string }) {
+	if (providers === undefined)
+		return (
+			<p className="muted" role="status">
+				Loading…
+			</p>
+		);
+	if (providers.length === 0) return <p className="signin__none">Sign-in isn't set up on this address.</p>;
+	return (
+		<div className="signin__buttons">
+			{providers.map((provider) => (
+				<a key={provider} className={`signin__button signin__button--${provider}`} href={signInHref(provider, hash)}>
+					<ProviderMark provider={provider} />
+					Continue with {PROVIDER_NAMES[provider]}
+				</a>
+			))}
+		</div>
+	);
+}
+
 /**
  * The page everyone who isn't signed in sees: who GitHive is for, and one
  * button per provider set up on this address. A failed sign-in comes back here
@@ -46,26 +67,7 @@ export function SignIn({
 						{error}
 					</p>
 				) : null}
-				{providers === undefined ? (
-					<p className="muted" role="status">
-						Loading…
-					</p>
-				) : providers.length === 0 ? (
-					<p className="signin__none">Sign-in isn't set up on this address.</p>
-				) : (
-					<div className="signin__buttons">
-						{providers.map((provider) => (
-							<a
-								key={provider}
-								className={`signin__button signin__button--${provider}`}
-								href={signInHref(provider, hash)}
-							>
-								<ProviderMark provider={provider} />
-								Continue with {PROVIDER_NAMES[provider]}
-							</a>
-						))}
-					</div>
-				)}
+				<ProviderButtons providers={providers} hash={hash} />
 				<p className="signin__note">
 					GitHive is invitation-only for now. You'll be signed in with the email your account has verified.
 				</p>

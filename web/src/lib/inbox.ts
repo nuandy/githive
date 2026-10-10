@@ -35,6 +35,13 @@ export function buildInbox(summaries: Summaries | undefined): { groups: InboxGro
 			})),
 		});
 	}
-	groups.sort((a, b) => (timeOf(b.lastActivity) ?? 0) - (timeOf(a.lastActivity) ?? 0) || a.repo.localeCompare(b.repo));
-	return { groups, count: groups.reduce((sum, group) => sum + group.items.length, 0) };
+	groups.sort(byLatestActivity);
+	const count = groups.reduce((sum, group) => sum + group.items.length, 0);
+	return { groups, count };
+}
+
+/** Most recently active first, then by name. */
+function byLatestActivity(a: InboxGroup, b: InboxGroup): number {
+	const newer = (timeOf(b.lastActivity) ?? 0) - (timeOf(a.lastActivity) ?? 0);
+	return newer || a.repo.localeCompare(b.repo);
 }

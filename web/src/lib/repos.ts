@@ -48,20 +48,26 @@ function summaryRow(name: string, since: string, summary: RepoSummary | null): R
 
 /** Every repo, most recently active first. */
 export function buildRepoRows(summaries: Summaries): RepoRow[] {
-	return (summaries.repos ?? [])
-		.map((repo) => summaryRow(repo.repo, repo.since, repo.summary))
-		.sort((a, b) => (timeOf(b.lastActivity) ?? 0) - (timeOf(a.lastActivity) ?? 0) || a.name.localeCompare(b.name));
+	return (summaries.repos ?? []).map((repo) => summaryRow(repo.repo, repo.since, repo.summary)).sort(byLatestActivity);
+}
+
+function byLatestActivity(a: RepoRow, b: RepoRow): number {
+	const newer = (timeOf(b.lastActivity) ?? 0) - (timeOf(a.lastActivity) ?? 0);
+	return newer || a.name.localeCompare(b.name);
 }
 
 export function filterRepos(rows: RepoRow[], query: string): RepoRow[] {
-	const q = query.trim().toLowerCase();
-	return q ? rows.filter((row) => row.name.toLowerCase().includes(q)) : rows;
+	const needle = query.trim().toLowerCase();
+	return needle ? rows.filter((row) => row.name.toLowerCase().includes(needle)) : rows;
 }
 
 /** Its open changes and audit violations, in words: "3 open, 1 audit violation". */
 export function repoCounts(row: RepoRow): string {
 	const parts = [`${row.open} open`];
-	if (row.violations) parts.push(`${row.violations} audit ${row.violations === 1 ? "violation" : "violations"}`);
+	if (row.violations) {
+		const noun = row.violations === 1 ? "violation" : "violations";
+		parts.push(`${row.violations} audit ${noun}`);
+	}
 	return parts.join(", ");
 }
 
@@ -81,7 +87,6 @@ export const REPO_GROUPS: { state: RepoState; title: string }[] = [
 ];
 
 export function groupRepos(rows: RepoRow[]): { state: RepoState; title: string; rows: RepoRow[] }[] {
-	return REPO_GROUPS.map((group) => ({ ...group, rows: rows.filter((row) => repoState(row) === group.state) })).filter(
-		(group) => group.rows.length,
-	);
+	const groups = REPO_GROUPS.map((group) => ({ ...group, rows: rows.filter((row) => repoState(row) === group.state) }));
+	return groups.filter((group) => group.rows.length);
 }

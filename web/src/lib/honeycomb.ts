@@ -21,8 +21,8 @@ export const MAX_HEXES = 240;
 export function agentColor(agent: string): number {
 	// FNV-1a: small, and spreads short similar names ("agent-1", "agent-2") well.
 	let hash = 0x811c9dc5;
-	for (let i = 0; i < agent.length; i++) {
-		hash ^= agent.charCodeAt(i);
+	for (let index = 0; index < agent.length; index++) {
+		hash ^= agent.charCodeAt(index);
 		hash = Math.imul(hash, 0x01000193);
 	}
 	return (hash >>> 0) % CLAIM_COLORS;
@@ -102,7 +102,7 @@ export function honeycomb(files: string[], claims: Claim[], context: LampContext
 	const claimed = claims.flatMap((claim) =>
 		claim.paths.map((raw) => ({ raw, parts: segments(raw), folder: raw.endsWith("/") })),
 	);
-	const claimedBelow = (top: string) => claimed.some((c) => c.parts.length >= 2 && c.parts[0] === top);
+	const claimedBelow = (top: string) => claimed.some(({ parts }) => parts.length >= 2 && parts[0] === top);
 	const split = new Set(
 		[...tops]
 			.filter(([name, top]) => top.subs.size > 0 && (top.files > big || claimedBelow(name)))
@@ -185,8 +185,8 @@ export function honeycomb(files: string[], claims: Claim[], context: LampContext
 		if (!path || (hex.path && covers(path, hex.path))) return "whole";
 		const depth = hex.path ? segments(hex.path).length + 1 : 1;
 		if (parts.length !== depth || raw.endsWith("/")) return undefined;
-		if (hex.path ? parts[0] !== hex.path || isSub(hex.path, parts[1]) : isTopFolder(parts[0])) return undefined;
-		return "part";
+		const elsewhere = hex.path ? parts[0] !== hex.path || isSub(hex.path, parts[1]) : isTopFolder(parts[0]);
+		return elsewhere ? undefined : "part";
 	};
 
 	for (const claim of claims) {
@@ -204,8 +204,8 @@ export function honeycomb(files: string[], claims: Claim[], context: LampContext
 			const inside: string[] = [];
 			for (const raw of claim.paths) {
 				const how = meet(hex, raw);
-				if (how === "whole" && (whole === undefined || normalizePath(raw).length > normalizePath(whole).length))
-					whole = raw;
+				const moreSpecific = whole === undefined || normalizePath(raw).length > normalizePath(whole).length;
+				if (how === "whole" && moreSpecific) whole = raw;
 				else if (how === "part") inside.push(raw);
 			}
 			if (whole !== undefined) hex.holders.push({ ...base, whole: true, paths: [whole] });
@@ -214,48 +214,51 @@ export function honeycomb(files: string[], claims: Claim[], context: LampContext
 	}
 
 	for (const hex of hexes.values()) {
-		hex.holders.sort(
-			(a, b) =>
-				Number(b.whole) - Number(a.whole) ||
-				(a.whole ? normalizePath(b.paths[0]).length - normalizePath(a.paths[0]).length : 0) ||
-				a.since.localeCompare(b.since) ||
-				a.change.localeCompare(b.change),
-		);
-		const landing: HexLanding | undefined = hex.holders.some((h) => h.lamp === "checking")
-			? "checking"
-			: hex.holders.some((h) => h.lamp === "approved")
-				? "queued"
-				: undefined;
+		hex.holders.sort(byHolding);
+		const landing = landingOf(hex.holders);
 		if (landing) hex.landing = landing;
 	}
 
-	// Folders by name, each split one's cells together (its own files first); the top-level files last.
-	const order = (hex: Hex) => (hex.parent ? [hex.parent, hex.kind === "files" ? "" : hex.name] : [hex.name, ""]);
-	return [...hexes.values()].sort((a, b) => {
-		if ((a.key === "*") !== (b.key === "*")) return a.key === "*" ? 1 : -1;
-		const [a1, a2] = order(a);
-		const [b1, b2] = order(b);
-		return a1.localeCompare(b1, undefined, { numeric: true }) || a2.localeCompare(b2, undefined, { numeric: true });
-	});
+	return [...hexes.values()].sort(byMapOrder);
 }
 
-/** The agents holding cells, each with its color and changes, in name order. */
-export function hiveAgents(
-	claims: Claim[],
-	context: LampContext = {},
-): {
+/** Whole claims first (the most specific first), then claims inside the cell, oldest first. */
+function byHolding(a: HexHolder, b: HexHolder): number {
+	const specificFirst = a.whole ? normalizePath(b.paths[0]).length - normalizePath(a.paths[0]).length : 0;
+	return (
+		Number(b.whole) - Number(a.whole) ||
+		specificFirst ||
+		a.since.localeCompare(b.since) ||
+		a.change.localeCompare(b.change)
+	);
+}
+
+function landingOf(holders: HexHolder[]): HexLanding | undefined {
+	if (holders.some((holder) => holder.lamp === "checking")) return "checking";
+	if (holders.some((holder) => holder.lamp === "approved")) return "queued";
+	return undefined;
+}
+
+/** Folders by name, each split one's cells together (its own files first); the top-level files last. */
+function byMapOrder(a: Hex, b: Hex): number {
+	if ((a.key === "*") !== (b.key === "*")) return a.key === "*" ? 1 : -1;
+	const sortKey = (hex: Hex) => (hex.parent ? [hex.parent, hex.kind === "files" ? "" : hex.name] : [hex.name, ""]);
+	const [aFolder, aCell] = sortKey(a);
+	const [bFolder, bCell] = sortKey(b);
+	const numeric = { numeric: true };
+	return aFolder.localeCompare(bFolder, undefined, numeric) || aCell.localeCompare(bCell, undefined, numeric);
+}
+
+/** An agent holding cells, with its color and changes. */
+export interface HiveAgent {
 	agent: string;
 	color: number;
 	changes: { change: string; title: string; intent: string; since: string; lamp: Lamp }[];
-}[] {
-	const agents = new Map<
-		string,
-		{
-			agent: string;
-			color: number;
-			changes: { change: string; title: string; intent: string; since: string; lamp: Lamp }[];
-		}
-	>();
+}
+
+/** The agents holding cells, each with its color and changes, in name order. */
+export function hiveAgents(claims: Claim[], context: LampContext = {}): HiveAgent[] {
+	const agents = new Map<string, HiveAgent>();
 	for (const claim of claims) {
 		const agent = claimAgent(claim);
 		let entry = agents.get(agent);
@@ -274,14 +277,16 @@ export function hiveAgents(
 /** A pointy-top hexagon's corners around (cx, cy), as an SVG points list. */
 export function hexPoints(cx: number, cy: number, radius: number): string {
 	const corners: string[] = [];
-	for (let i = 0; i < 6; i++) {
-		const angle = (Math.PI / 180) * (60 * i - 90);
-		corners.push(`${round(cx + radius * Math.cos(angle))},${round(cy + radius * Math.sin(angle))}`);
+	for (let corner = 0; corner < 6; corner++) {
+		const angle = (Math.PI / 180) * (60 * corner - 90);
+		const x = round(cx + radius * Math.cos(angle));
+		const y = round(cy + radius * Math.sin(angle));
+		corners.push(`${x},${y}`);
 	}
 	return corners.join(" ");
 }
 
-const round = (n: number) => Math.round(n * 100) / 100;
+const round = (value: number) => Math.round(value * 100) / 100;
 
 /** Cell centers for `count` cells in rows of `columns`, every other row shifted half a cell, and the map's size. */
 export function hexGrid(
@@ -289,18 +294,19 @@ export function hexGrid(
 	columns: number,
 	radius: number,
 ): { centers: { x: number; y: number }[]; width: number; height: number } {
-	const cols = Math.max(1, Math.min(columns, count || 1));
-	const w = Math.sqrt(3) * radius;
+	const perRow = Math.max(1, Math.min(columns, count || 1));
+	const cellWidth = Math.sqrt(3) * radius;
 	const rowHeight = 1.5 * radius;
-	const rows = Math.max(1, Math.ceil(count / cols));
-	const centers = Array.from({ length: count }, (_, i) => {
-		const row = Math.floor(i / cols);
-		const col = i % cols;
-		return { x: round(w / 2 + col * w + (row % 2 ? w / 2 : 0)), y: round(radius + row * rowHeight) };
+	const rows = Math.max(1, Math.ceil(count / perRow));
+	const centers = Array.from({ length: count }, (_, index) => {
+		const row = Math.floor(index / perRow);
+		const column = index % perRow;
+		const shift = row % 2 ? cellWidth / 2 : 0;
+		return { x: round(cellWidth / 2 + column * cellWidth + shift), y: round(radius + row * rowHeight) };
 	});
 	return {
 		centers,
-		width: round(cols * w + (rows > 1 ? w / 2 : 0)),
+		width: round(perRow * cellWidth + (rows > 1 ? cellWidth / 2 : 0)),
 		height: round(2 * radius + (rows - 1) * rowHeight),
 	};
 }

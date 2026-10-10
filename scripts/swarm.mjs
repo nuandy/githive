@@ -199,298 +199,334 @@ async function settleLanded() {
 	})
 		.then((r) => (r.ok ? r.json() : null))
 		.catch(() => null);
-	for (const s of landing?.recent ?? []) {
-		if (s.how !== "landed" || settled.has(s.change) || !timeline.has(s.change)) continue;
-		const t = timeline.get(s.change);
-		t.merged ??= Date.parse(s.at) - started;
-		t.commit = s.commit;
-		settlePiece(s.change, `merged ${s.commit.slice(0, 8)}`);
-		say("swarm", `${s.change} landed as ${s.commit.slice(0, 8)}, in another merge's batch`);
+	for (const outcome of landing?.recent ?? []) {
+		const { change, commit } = outcome;
+		if (outcome.how !== "landed" || settled.has(change) || !timeline.has(change)) continue;
+		const pieceTimeline = timeline.get(change);
+		pieceTimeline.merged ??= Date.parse(outcome.at) - started;
+		pieceTimeline.commit = commit;
+		settlePiece(change, `merged ${commit.slice(0, 8)}`);
+		say("swarm", `${change} landed as ${commit.slice(0, 8)}, in another merge's batch`);
 	}
+}
+
+const checkoutOf = (id) => join(work, id);
+const keyFileArgs = (agent) => (agent.keyFile ? ["--key-file", at(agent.keyFile)] : []);
+/** Git options that commit as the agent. */
+const identity = (agent) => ["-c", `user.name=${agent.name}`, "-c", `user.email=${agent.name}@agents.example`];
+
+async function commitAndPush(agent, id, message) {
+	const dir = checkoutOf(id);
+	await git(dir, "add", "-A");
+	await git(dir, ...identity(agent), "commit", "-q", "-m", message);
+	await git(dir, "push", "-q", "fork", `HEAD:refs/heads/changes/${id}`);
+	const head = (await git(dir, "rev-parse", "HEAD")).stdout.trim();
+	const { stdout: stat } = await git(dir, "show", "--stat", "--format=", "HEAD");
+	const statSummary = stat.trim().split("\n").at(-1).trim();
+	timeline.get(id).heads.push(head);
+	say(agent.name, `pushed ${id} ${head.slice(0, 7)}: ${statSummary}`);
+}
+
+/** Merges the project's branch in and pushes. The fetch is deep enough to find the merge base. */
+async function mergeProject(agent, id) {
+	const dir = checkoutOf(id);
+	await git(dir, "fetch", "-q", "--depth", "50", "origin", branch);
+	await git(dir, ...identity(agent), "merge", "-q", "--no-edit", `origin/${branch}`).catch(async (err) => {
+		await git(dir, "merge", "--abort").catch(() => undefined);
+		const detail = String(err.stderr ?? err).slice(0, 160);
+		throw new Error(`conflicts with ${branch} it can't resolve inside its claim: ${detail}`);
+	});
+	note(id, `merged ${branch} in`);
+	await git(dir, "push", "-q", "fork", `HEAD:refs/heads/changes/${id}`);
+	const head = (await git(dir, "rev-parse", "HEAD")).stdout.trim();
+	timeline.get(id).heads.push(head);
+	say(agent.name, `merged ${branch} into ${id} and pushed`);
+}
+
+async function extendClaim(agent, id, files, when) {
+	const paths = [...new Set([...(agent.claimed.get(id) ?? []), ...files])];
+	const piece = pieces.get(id);
+	const result = await agent.call("claim", { change: id, agent: agent.name, paths, intent: piece.intent });
+	if (!result.ok) {
+		const detail = JSON.stringify(result.conflicts ?? result).slice(0, 160);
+		throw new Error(`couldn't extend its claim to ${files.join(", ")}: ${detail}`);
+	}
+	agent.claimed.set(id, paths);
+	note(id, `extended claim ${when} (${files.length})`);
+	say(agent.name, `extends ${id}'s claim to ${files.join(", ")}`);
+}
+
+/** After a push, extends the claim to files outside it and merges the project in on a conflict. */
+async function checkPushed(agent, id) {
+	for (let round = 0; round < 3; round++) {
+		const checked = await agent.call("check", { change: id });
+		mark(id, "checked");
+		if (checked.outsideClaim?.length) {
+			await extendClaim(agent, id, checked.outsideClaim, "at check");
+			continue;
+		}
+		if (checked.main && !checked.main.clean) {
+			await mergeProject(agent, id);
+			continue;
+		}
+		return;
+	}
+}
+
+/** Claims a backlog piece for the agent; false when another agent claimed it first. */
+async function claimPiece(agent, piece, paths) {
+	const result = await agent
+		.call("claim", { change: piece.id, agent: agent.name, paths, intent: piece.intent })
+		.catch((err) => ({ ok: false, error: String(err.message ?? err) }));
+	if (!result.ok) {
+		const reason = result.error ?? JSON.stringify(result.conflicts);
+		say(agent.name, `couldn't claim ${piece.id}: ${reason.slice(0, 100)}`);
+		return false;
+	}
+	agent.claimed.set(piece.id, paths);
+	timeline.get(piece.id).builder = agent.name;
+	mark(piece.id, "claimed");
+	return true;
+}
+
+async function buildPiece(agent, item) {
+	const piece = pieces.get(item.id);
+	if (!piece) throw new Error(`the backlog has ${item.id}, which isn't in this plan's`);
+	const paths = piece.paths ?? item.paths ?? [];
+	if (!(await claimPiece(agent, piece, paths))) return;
+	say(agent.name, `builds ${piece.id} (${paths.length} path(s))`);
+	const dir = checkoutOf(piece.id);
+	// A build that failed before pushing starts over from a fresh clone.
+	rmSync(dir, { recursive: true, force: true });
+	await helper("clone", dir, "--repo", plan.repo, "--change", piece.id, ...keyFileArgs(agent));
+	await git(dir, "checkout", "-q", "-b", `changes/${piece.id}`);
+	await sleep(draw("edit"));
+	await sh(dir, piece.edit);
+	await commitAndPush(agent, piece.id, piece.message ?? piece.intent);
+	mark(piece.id, "pushed");
+	await checkPushed(agent, piece.id);
+}
+
+/** Runs the plan's tests in a reviewer's checkout: whether they failed, and the evidence to add for them. */
+async function runTests(dir) {
+	if (plan.nodeModules && !existsSync(join(dir, "node_modules")))
+		symlinkSync(at(plan.nodeModules), join(dir, "node_modules"));
+	// The exit code decides the verdict. The summary lines are the evidence.
+	const { stdout: out } = await sh(
+		dir,
+		`${plan.test} > .swarm-test.log 2>&1; echo "exit=$?"; tail -60 .swarm-test.log`,
+	);
+	const failing = !/^exit=0$/m.test(out);
+	const summary = (out.match(/\d+ passing|\d+ failing|\d+ pending|Tests\s+[^\n]*/g) ?? []).join(", ");
+	const outcome = summary || (failing ? "failed" : "passed");
+	const exitCode = out.match(/^exit=(\d+)$/m)?.[1];
+	const exitNote = failing ? ` (exit ${exitCode})` : "";
+	return { failing, evidence: ` ${plan.test}: ${outcome}${exitNote}.` };
+}
+
+/** The verdict on a change and its evidence: the diff read, the plan's tests, and a rejectFirst ask. */
+async function judge(dir, change, diffStat) {
+	let verdict = "approve";
+	let evidence = `Read the diff (${diffStat.trim().split("\n").at(-1)?.trim() ?? "no changes"}).`;
+	if (plan.test) {
+		const tests = await runTests(dir);
+		if (tests.failing) verdict = "reject";
+		evidence += tests.evidence;
+	}
+	// rejectFirst makes the piece's first review ask for changes.
+	const rejectFirst = pieces.get(change)?.rejectFirst;
+	if (rejectFirst && verdict === "approve" && !askedOnce.has(change)) {
+		askedOnce.add(change);
+		verdict = "reject";
+		evidence = `${rejectFirst} ${evidence}`;
+	}
+	return { verdict, evidence };
+}
+
+async function reviewChange(agent, step) {
+	const dir = join(work, `review-${agent.name}-${step.change}`);
+	rmSync(dir, { recursive: true, force: true });
+	try {
+		const { stdout } = await helper(
+			"review-clone",
+			dir,
+			"--repo",
+			plan.repo,
+			"--change",
+			step.change,
+			"--role",
+			step.role,
+			...keyFileArgs(agent),
+		);
+		const checkout = JSON.parse(stdout.trim().split("\n").at(-1));
+		if (checkout.head !== step.head) return; // pushed again since; ask again
+		const { stdout: diffStat } = await git(dir, "diff", "--stat", `${checkout.base}...HEAD`);
+		await sleep(draw("review"));
+		const { verdict, evidence } = await judge(dir, step.change, diffStat);
+		await agent.call("vote", { commit: step.head, reviewer: agent.name, role: step.role, verdict, evidence });
+		const asRole = step.role !== "review" ? ` as ${step.role}` : "";
+		const action = verdict === "approve" ? "approves" : "rejects";
+		timeline.get(step.change)?.reviews.push(`${agent.name}${asRole}: ${verdict}`);
+		say(agent.name, `${action} ${step.change} (${step.head.slice(0, 7)})${asRole}`);
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+}
+
+async function reviseChange(agent, step) {
+	const piece = pieces.get(step.change);
+	const onReject = piece?.onReject ?? (piece?.fix ? "fix" : "stop");
+	note(step.change, `rejected by ${step.reviewer}`);
+	say(agent.name, `${step.reviewer} asks for changes to ${step.change}: ${step.evidence.slice(0, 100)}`);
+	if (onReject === "fix" && piece?.fix && !timeline.get(step.change).revised) {
+		await sleep(draw("fix"));
+		await sh(checkoutOf(step.change), piece.fix);
+		await commitAndPush(agent, step.change, `Address review: ${step.evidence.slice(0, 60)}`);
+		mark(step.change, "revised");
+		await checkPushed(agent, step.change);
+		return;
+	}
+	if (onReject === "ask") {
+		await agent.call("ask_human", {
+			change: step.change,
+			agent: agent.name,
+			reason: `A reviewer asked for changes I shouldn't decide alone: ${step.evidence}`,
+		});
+		note(step.change, "asked a person");
+		settlePiece(step.change, "waits on a person");
+		say(agent.name, `asks a person about ${step.change}`);
+		return;
+	}
+	settlePiece(step.change, `stopped: changes requested (${step.evidence.slice(0, 60)})`);
+	await agent.call("release", {
+		change: step.change,
+		agent: agent.name,
+		reason: "a reviewer asked for changes I can't make",
+	});
+}
+
+async function mergeChange(agent, step) {
+	mark(step.change, "approved");
+	const merged = await agent.call("merge", { change: step.change, agent: agent.name });
+	if (merged.ok) {
+		mark(step.change, "merged");
+		timeline.get(step.change).commit = merged.commit;
+		settlePiece(step.change, `merged ${merged.commit.slice(0, 8)}`);
+		say(agent.name, `merged ${step.change} as ${merged.commit.slice(0, 8)}`);
+		return;
+	}
+	const reasons = (merged.reasons ?? []).join("; ");
+	const outside = [...reasons.matchAll(/(\S+) is outside /g)].map((match) => match[1]);
+	if (outside.length) return extendClaim(agent, step.change, outside, "at merge");
+	if (merged.conflicts?.length) {
+		await mergeProject(agent, step.change);
+		return checkPushed(agent, step.change);
+	}
+	say(agent.name, `merge of ${step.change} refused: ${reasons.slice(0, 160)}`);
+	note(step.change, `merge refused: ${reasons.slice(0, 60)}`);
+}
+
+/**
+ * Returns the first of the agent's own changes that needs action: revise, merge, or
+ * finish one with nothing pushed. Changes that landed are dropped.
+ */
+async function ownStep(agent) {
+	for (const id of agent.claimed.keys()) {
+		if (settled.has(id)) continue;
+		const status = await agent.call("status", { change: id });
+		const mergedAs = status.landed?.commit ?? status.released?.mergedAs;
+		const over = mergedAs || (!status.claim && status.released);
+		if (over) {
+			agent.claimed.delete(id);
+			if (mergedAs && !settled.has(id)) {
+				mark(id, "merged");
+				timeline.get(id).commit = mergedAs;
+				settlePiece(id, `merged ${mergedAs.slice(0, 8)}`);
+			}
+			continue;
+		}
+		if (!status.head) return { kind: "finish", change: id };
+		const rejection = status.votes.find(
+			(vote) => vote.commit === status.head && vote.verdict === "reject" && vote.reviewer !== agent.name,
+		);
+		if (rejection)
+			return {
+				kind: "revise",
+				change: id,
+				head: status.head,
+				reviewer: rejection.reviewer,
+				evidence: rejection.evidence,
+			};
+		if (status.approval?.approved) return { kind: "merge", change: id, head: status.head };
+	}
+	return null;
+}
+
+/** Nobody assigns work. Own changes come first, then a review, then the backlog; null when there's none. */
+async function nextStep(agent) {
+	const own = await ownStep(agent);
+	if (own) return own;
+	const { reviews } = await agent.call("reviews", { agent: agent.name });
+	if (reviews.length) return { kind: "review", ...reviews[0] };
+	// Skip backlog items left over from earlier runs.
+	const { open } = await agent.call("backlog", { agent: agent.name });
+	const ours = open.filter((item) => pieces.has(item.id));
+	if (ours.length) return { kind: "build", work: ours[0] };
+	return null;
+}
+
+async function takeStep(agent, step) {
+	const kindCounted = step.kind === "finish" ? "build" : step.kind;
+	did.get(agent.name)[kindCounted]++;
+	if (step.kind === "build") await buildPiece(agent, step.work);
+	else if (step.kind === "finish") await buildPiece(agent, { id: step.change });
+	else if (step.kind === "review") await reviewChange(agent, step);
+	else if (step.kind === "revise") await reviseChange(agent, step);
+	else if (step.kind === "merge") await mergeChange(agent, step);
+}
+
+/** Why a step failed. A failed command's message is mostly its command line. Its last output says why it failed. */
+const failureOf = (err) =>
+	err.stderr ? String(err.stderr).trim().split("\n").slice(-2).join(" | ") : String(err.message ?? err);
+
+/** The agent's loop: take the next step, or wait for one, until every piece settles or the run's time is up. */
+async function runAgent(agent) {
+	await sleep(draw("arrive"));
+	say(agent.name, "arrives");
+	const until = started + RUN_LIMIT_MS;
+	while (Date.now() < until) {
+		let step;
+		try {
+			step = await nextStep(agent);
+			if (step) {
+				await takeStep(agent, step);
+				continue;
+			}
+			did.get(agent.name).wait++;
+			await settleLanded();
+			if (allSettled()) break;
+			// A merge or review can free work at any time.
+			await sleep(5_000);
+		} catch (err) {
+			const id = step?.change ?? step?.work?.id;
+			say(agent.name, `${step?.kind ?? "look"}${id ? ` ${id}` : ""} failed: ${failureOf(err).slice(0, 300)}`);
+			if (id && timeline.has(id)) note(id, `${step.kind} failed`);
+			await sleep(10_000);
+		}
+	}
+	say(agent.name, "done");
 }
 
 /** One agent: build, review, revise and merge, as it chooses. */
 function agentFor(spec) {
-	const { agent: name, keyFile: key } = spec;
-	const call = (toolName, toolArgs) => tool(toolName, toolArgs, key);
-	const dirOf = (id) => join(work, id);
-	const claimed = new Map();
-
-	const commitAndPush = async (id, message) => {
-		const dir = dirOf(id);
-		await git(dir, "add", "-A");
-		await git(dir, "-c", `user.name=${name}`, "-c", `user.email=${name}@agents.example`, "commit", "-q", "-m", message);
-		await git(dir, "push", "-q", "fork", `HEAD:refs/heads/changes/${id}`);
-		const head = (await git(dir, "rev-parse", "HEAD")).stdout.trim();
-		const { stdout: stat } = await git(dir, "show", "--stat", "--format=", "HEAD");
-		timeline.get(id).heads.push(head);
-		say(name, `pushed ${id} ${head.slice(0, 7)}: ${stat.trim().split("\n").at(-1).trim()}`);
+	const agent = {
+		name: spec.agent,
+		keyFile: spec.keyFile,
+		/** The paths claimed for each of its changes. */
+		claimed: new Map(),
+		call: (toolName, toolArgs) => tool(toolName, toolArgs, spec.keyFile),
 	};
-	/** Merges the project's branch in and pushes. The fetch is deep enough to find the merge base. */
-	const mergeProject = async (id) => {
-		const dir = dirOf(id);
-		await git(dir, "fetch", "-q", "--depth", "50", "origin", branch);
-		await git(
-			dir,
-			"-c",
-			`user.name=${name}`,
-			"-c",
-			`user.email=${name}@agents.example`,
-			"merge",
-			"-q",
-			"--no-edit",
-			`origin/${branch}`,
-		).catch(async (err) => {
-			await git(dir, "merge", "--abort").catch(() => undefined);
-			throw new Error(
-				`conflicts with ${branch} it can't resolve inside its claim: ${String(err.stderr ?? err).slice(0, 160)}`,
-			);
-		});
-		note(id, `merged ${branch} in`);
-		await git(dir, "push", "-q", "fork", `HEAD:refs/heads/changes/${id}`);
-		timeline.get(id).heads.push((await git(dir, "rev-parse", "HEAD")).stdout.trim());
-		say(name, `merged ${branch} into ${id} and pushed`);
-	};
-	const extendClaim = async (id, files, when) => {
-		const paths = [...new Set([...(claimed.get(id) ?? []), ...files])];
-		const piece = pieces.get(id);
-		const result = await call("claim", { change: id, agent: name, paths, intent: piece.intent });
-		if (!result.ok)
-			throw new Error(
-				`couldn't extend its claim to ${files.join(", ")}: ${JSON.stringify(result.conflicts ?? result).slice(0, 160)}`,
-			);
-		claimed.set(id, paths);
-		note(id, `extended claim ${when} (${files.length})`);
-		say(name, `extends ${id}'s claim to ${files.join(", ")}`);
-	};
-	/** After a push, extends the claim to files outside it and merges the project in on a conflict. */
-	const settle = async (id) => {
-		for (let round = 0; round < 3; round++) {
-			const checked = await call("check", { change: id });
-			mark(id, "checked");
-			if (checked.outsideClaim?.length) {
-				await extendClaim(id, checked.outsideClaim, "at check");
-				continue;
-			}
-			if (checked.main && !checked.main.clean) {
-				await mergeProject(id);
-				continue;
-			}
-			return;
-		}
-	};
-
-	const build = async (item) => {
-		const piece = pieces.get(item.id);
-		if (!piece) throw new Error(`the backlog has ${item.id}, which isn't in this plan's`);
-		const paths = piece.paths ?? item.paths ?? [];
-		const result = await call("claim", { change: piece.id, agent: name, paths, intent: piece.intent }).catch((err) => ({
-			ok: false,
-			error: String(err.message ?? err),
-		}));
-		if (!result.ok) {
-			// Another agent claimed this piece first.
-			say(name, `couldn't claim ${piece.id}: ${(result.error ?? JSON.stringify(result.conflicts)).slice(0, 100)}`);
-			return;
-		}
-		claimed.set(piece.id, paths);
-		timeline.get(piece.id).builder = name;
-		mark(piece.id, "claimed");
-		say(name, `builds ${piece.id} (${paths.length} path(s))`);
-		const dir = dirOf(piece.id);
-		// A build that failed before pushing starts over from a fresh clone.
-		rmSync(dir, { recursive: true, force: true });
-		await helper("clone", dir, "--repo", plan.repo, "--change", piece.id, ...(key ? ["--key-file", at(key)] : []));
-		await git(dir, "checkout", "-q", "-b", `changes/${piece.id}`);
-		await sleep(draw("edit"));
-		await sh(dir, piece.edit);
-		await commitAndPush(piece.id, piece.message ?? piece.intent);
-		mark(piece.id, "pushed");
-		await settle(piece.id);
-	};
-
-	const review = async (next) => {
-		const dir = join(work, `review-${name}-${next.change}`);
-		rmSync(dir, { recursive: true, force: true });
-		try {
-			const { stdout } = await helper(
-				"review-clone",
-				dir,
-				"--repo",
-				plan.repo,
-				"--change",
-				next.change,
-				"--role",
-				next.role,
-				...(key ? ["--key-file", at(key)] : []),
-			);
-			const got = JSON.parse(stdout.trim().split("\n").at(-1));
-			if (got.head !== next.head) return; // pushed again since; ask again
-			const { stdout: stat } = await git(dir, "diff", "--stat", `${got.base}...HEAD`);
-			await sleep(draw("review"));
-			let verdict = "approve";
-			let evidence = `Read the diff (${stat.trim().split("\n").at(-1)?.trim() ?? "no changes"}).`;
-			if (plan.test) {
-				if (plan.nodeModules && !existsSync(join(dir, "node_modules")))
-					symlinkSync(at(plan.nodeModules), join(dir, "node_modules"));
-				// The exit code decides the verdict. The summary lines are the evidence.
-				const { stdout: out } = await sh(
-					dir,
-					`${plan.test} > .swarm-test.log 2>&1; echo "exit=$?"; tail -60 .swarm-test.log`,
-				);
-				const failing = !/^exit=0$/m.test(out);
-				const summary = (out.match(/\d+ passing|\d+ failing|\d+ pending|Tests\s+[^\n]*/g) ?? []).join(", ");
-				if (failing) verdict = "reject";
-				evidence += ` ${plan.test}: ${summary || (failing ? "failed" : "passed")}${failing ? ` (exit ${out.match(/^exit=(\d+)$/m)?.[1]})` : ""}.`;
-			}
-			// rejectFirst makes the piece's first review ask for changes.
-			const ask = pieces.get(next.change)?.rejectFirst;
-			if (ask && verdict === "approve" && !askedOnce.has(next.change)) {
-				askedOnce.add(next.change);
-				verdict = "reject";
-				evidence = `${ask} ${evidence}`;
-			}
-			await call("vote", { commit: next.head, reviewer: name, role: next.role, verdict, evidence });
-			timeline.get(next.change)?.reviews.push(`${name}${next.role !== "review" ? ` as ${next.role}` : ""}: ${verdict}`);
-			say(
-				name,
-				`${verdict === "approve" ? "approves" : "rejects"} ${next.change} (${next.head.slice(0, 7)})${next.role !== "review" ? ` as ${next.role}` : ""}`,
-			);
-		} finally {
-			rmSync(dir, { recursive: true, force: true });
-		}
-	};
-
-	const revise = async (next) => {
-		const piece = pieces.get(next.change);
-		const onReject = piece?.onReject ?? (piece?.fix ? "fix" : "stop");
-		note(next.change, `rejected by ${next.reviewer}`);
-		say(name, `${next.reviewer} asks for changes to ${next.change}: ${next.evidence.slice(0, 100)}`);
-		if (onReject === "fix" && piece?.fix && !timeline.get(next.change).revised) {
-			await sleep(draw("fix"));
-			await sh(dirOf(next.change), piece.fix);
-			await commitAndPush(next.change, `Address review: ${next.evidence.slice(0, 60)}`);
-			mark(next.change, "revised");
-			await settle(next.change);
-			return;
-		}
-		if (onReject === "ask") {
-			await call("ask_human", {
-				change: next.change,
-				agent: name,
-				reason: `A reviewer asked for changes I shouldn't decide alone: ${next.evidence}`,
-			});
-			note(next.change, "asked a person");
-			settlePiece(next.change, "waits on a person");
-			say(name, `asks a person about ${next.change}`);
-			return;
-		}
-		settlePiece(next.change, `stopped: changes requested (${next.evidence.slice(0, 60)})`);
-		await call("release", { change: next.change, agent: name, reason: "a reviewer asked for changes I can't make" });
-	};
-
-	const merge = async (next) => {
-		mark(next.change, "approved");
-		const merged = await call("merge", { change: next.change, agent: name });
-		if (merged.ok) {
-			mark(next.change, "merged");
-			timeline.get(next.change).commit = merged.commit;
-			settlePiece(next.change, `merged ${merged.commit.slice(0, 8)}`);
-			say(name, `merged ${next.change} as ${merged.commit.slice(0, 8)}`);
-			return;
-		}
-		const reasons = (merged.reasons ?? []).join("; ");
-		const outside = [...reasons.matchAll(/(\S+) is outside /g)].map((m) => m[1]);
-		if (outside.length) return extendClaim(next.change, outside, "at merge");
-		if (merged.conflicts?.length) {
-			await mergeProject(next.change);
-			return settle(next.change);
-		}
-		say(name, `merge of ${next.change} refused: ${reasons.slice(0, 160)}`);
-		note(next.change, `merge refused: ${reasons.slice(0, 60)}`);
-	};
-
-	/**
-	 * Returns the first of its own changes that needs action: revise, merge, or
-	 * finish one with nothing pushed. Changes that landed are dropped.
-	 */
-	const ownStep = async () => {
-		for (const id of claimed.keys()) {
-			if (settled.has(id)) continue;
-			const status = await call("status", { change: id });
-			const mergedAs = status.landed?.commit ?? status.released?.mergedAs;
-			if (mergedAs || (!status.claim && status.released)) {
-				claimed.delete(id);
-				if (mergedAs && !settled.has(id)) {
-					mark(id, "merged");
-					timeline.get(id).commit = mergedAs;
-					settlePiece(id, `merged ${mergedAs.slice(0, 8)}`);
-				}
-				continue;
-			}
-			if (!status.head) return { kind: "finish", change: id };
-			const rejection = status.votes.find(
-				(v) => v.commit === status.head && v.verdict === "reject" && v.reviewer !== name,
-			);
-			if (rejection)
-				return {
-					kind: "revise",
-					change: id,
-					head: status.head,
-					reviewer: rejection.reviewer,
-					evidence: rejection.evidence,
-				};
-			if (status.approval?.approved) return { kind: "merge", change: id, head: status.head };
-		}
-		return null;
-	};
-
-	return async () => {
-		await sleep(draw("arrive"));
-		say(name, "arrives");
-		const until = started + RUN_LIMIT_MS;
-		while (Date.now() < until) {
-			// Nobody assigns work. Own changes come first, then a review, then the backlog, else wait.
-			let next;
-			try {
-				next = await ownStep();
-				if (!next) {
-					const { reviews } = await call("reviews", { agent: name });
-					if (reviews.length) next = { kind: "review", ...reviews[0] };
-				}
-				if (!next) {
-					// Skip backlog items left over from earlier runs.
-					const { open } = await call("backlog", { agent: name });
-					const ours = open.filter((item) => pieces.has(item.id));
-					if (ours.length) next = { kind: "build", work: ours[0] };
-				}
-				if (!next) {
-					did.get(name).wait++;
-					await settleLanded();
-					if (allSettled()) break;
-					// A merge or review can free work at any time.
-					await sleep(5_000);
-					continue;
-				}
-				did.get(name)[next.kind === "finish" ? "build" : next.kind]++;
-				if (next.kind === "build") await build(next.work);
-				else if (next.kind === "finish") await build({ id: next.change });
-				else if (next.kind === "review") await review(next);
-				else if (next.kind === "revise") await revise(next);
-				else if (next.kind === "merge") await merge(next);
-			} catch (err) {
-				const id = next?.change ?? next?.work?.id;
-				// A failed command's message is mostly its command line. Its last output says why it failed.
-				const why = err.stderr
-					? String(err.stderr).trim().split("\n").slice(-2).join(" | ")
-					: String(err.message ?? err);
-				say(name, `${next?.kind ?? "look"}${id ? ` ${id}` : ""} failed: ${why.slice(0, 300)}`);
-				if (id && timeline.has(id)) note(id, `${next.kind} failed`);
-				await sleep(10_000);
-			}
-		}
-		say(name, "done");
-	};
+	return () => runAgent(agent);
 }
 
 const post = (path, body) =>
@@ -501,11 +537,8 @@ const post = (path, body) =>
 		body: JSON.stringify(body),
 	});
 if (plan.setup) {
-	const repos = new Set(
-		(await (await fetch(`${BASE}/repos`, { headers: access, dispatcher: patient })).json()).map((r) =>
-			r.name.replace(/^_\//, ""),
-		),
-	);
+	const listed = await (await fetch(`${BASE}/repos`, { headers: access, dispatcher: patient })).json();
+	const repos = new Set(listed.map((repo) => repo.name.replace(/^_\//, "")));
 	if (!repos.has(plan.repo)) {
 		const template = plan.setup.template;
 		if (template && !repos.has(template)) {
@@ -524,17 +557,16 @@ if (plan.setup) {
 		if (!made.ok)
 			throw new Error(`making ${plan.repo} failed: HTTP ${made.status} ${(await made.text()).slice(0, 200)}`);
 	}
-	const startedMode = await tool("settings", {
-		required: plan.setup.required ?? 1,
-		...(plan.setup.verify ? { verify: plan.setup.verify } : {}),
-		...(plan.setup.grants ? { grants: plan.setup.grants } : {}),
-		...(plan.setup.shardDepth !== undefined ? { shard_depth: plan.setup.shardDepth } : {}),
-	});
-	branch = startedMode.branch;
-	say(
-		"swarm",
-		`${plan.repo} on ${branch}: checks ${JSON.stringify(startedMode.verify)}, grants ${JSON.stringify(startedMode.policy?.grants ?? {})}, claims ${JSON.stringify(startedMode.sharding)}`,
-	);
+	const settings = { required: plan.setup.required ?? 1 };
+	if (plan.setup.verify) settings.verify = plan.setup.verify;
+	if (plan.setup.grants) settings.grants = plan.setup.grants;
+	if (plan.setup.shardDepth !== undefined) settings.shard_depth = plan.setup.shardDepth;
+	const applied = await tool("settings", settings);
+	branch = applied.branch;
+	const checks = JSON.stringify(applied.verify);
+	const grants = JSON.stringify(applied.policy?.grants ?? {});
+	const sharding = JSON.stringify(applied.sharding);
+	say("swarm", `${plan.repo} on ${branch}: checks ${checks}, grants ${grants}, claims ${sharding}`);
 }
 const chunks = (items, n) =>
 	Array.from({ length: Math.ceil(items.length / n) }, (_, i) => items.slice(i * n, (i + 1) * n));
@@ -657,21 +689,28 @@ await Promise.all(plan.agents.map((spec) => agentFor(spec)()));
 
 const seconds = (ms) => (ms === undefined ? "    -" : `${(ms / 1000).toFixed(0).padStart(4)}s`);
 console.log(`\n${"piece".padEnd(16)} builder     claimed  pushed revised approved merged  outcome`);
-for (const [id, t] of timeline) {
+for (const [id, steps] of timeline) {
+	const builder = (steps.builder ?? "-").padEnd(10);
+	const outcome = settled.get(id) ?? "unfinished";
 	console.log(
-		`${id.padEnd(16)} ${(t.builder ?? "-").padEnd(10)} ${seconds(t.claimed)} ${seconds(t.pushed)} ${seconds(t.revised)}  ${seconds(t.approved)} ${seconds(t.merged)}  ${settled.get(id) ?? "unfinished"}`,
+		`${id.padEnd(16)} ${builder} ${seconds(steps.claimed)} ${seconds(steps.pushed)} ${seconds(steps.revised)}  ${seconds(steps.approved)} ${seconds(steps.merged)}  ${outcome}`,
 	);
-	const detail = [...(t.reviews.length ? [`reviews: ${t.reviews.join(", ")}`] : []), ...t.events];
+	const reviews = steps.reviews.length ? [`reviews: ${steps.reviews.join(", ")}`] : [];
+	const detail = [...reviews, ...steps.events];
 	if (detail.length) console.log(`${"".padEnd(16)} ${detail.join("; ")}`);
 }
 console.log(`\n${"agent".padEnd(12)} build review revise merge wait`);
-for (const [name, d] of did)
+for (const [name, counts] of did) {
+	const column = (kind, width) => String(counts[kind]).padStart(width);
 	console.log(
-		`${name.padEnd(12)} ${String(d.build).padStart(5)} ${String(d.review).padStart(6)} ${String(d.revise).padStart(6)} ${String(d.merge).padStart(5)} ${String(d.wait).padStart(4)}`,
+		`${name.padEnd(12)} ${column("build", 5)} ${column("review", 6)} ${column("revise", 6)} ${column("merge", 5)} ${column("wait", 4)}`,
 	);
-const merged = [...settled.values()].filter((s) => s.startsWith("merged")).length;
+}
+const merged = [...settled.values()].filter((outcome) => outcome.startsWith("merged")).length;
+const workSeconds = ((lastSettled - workStarted) / 1000).toFixed(0);
+const totalSeconds = ((Date.now() - started) / 1000).toFixed(0);
 console.log(
-	`\n${merged} of ${plan.backlog.length} merged. Setup ${setupSeconds}s (once per repo); work ${((lastSettled - workStarted) / 1000).toFixed(0)}s (agents released to the last piece settled); total ${((Date.now() - started) / 1000).toFixed(0)}s`,
+	`\n${merged} of ${plan.backlog.length} merged. Setup ${setupSeconds}s (once per repo); work ${workSeconds}s (agents released to the last piece settled); total ${totalSeconds}s`,
 );
 const audit = await fetch(`${BASE}/repos/_/${plan.repo}/audit`, {
 	headers: { ...access, "Cache-Control": "no-cache" },

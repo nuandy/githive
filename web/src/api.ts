@@ -326,33 +326,34 @@ export type Gitignore = "node" | "python" | "go" | "rust";
 export const SIGNED_OUT_EVENT = "githive:signed-out";
 
 function asRecord(value: unknown): Record<string, unknown> | null {
-	return value !== null && typeof value === "object" && !Array.isArray(value)
-		? (value as Record<string, unknown>)
-		: null;
+	const isRecord = value !== null && typeof value === "object" && !Array.isArray(value);
+	return isRecord ? (value as Record<string, unknown>) : null;
+}
+
+/** Why a request failed, in words: a session that ended, the server's own error, or the HTTP status. */
+function failureMessage(response: Response, data: unknown): string {
+	if (response.status === 401) return "Your session ended: sign in to GitHive again.";
+	const detail = asRecord(data)?.error;
+	if (typeof detail === "string") return detail;
+	return `${response.status} ${response.statusText}`;
 }
 
 async function call<T>(method: string, path: string, body?: unknown): Promise<T> {
 	const headers: Record<string, string> = {};
 	if (body !== undefined) headers["Content-Type"] = "application/json";
-	const res = await fetch(path, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
-	const text = await res.text();
+	const payload = body === undefined ? undefined : JSON.stringify(body);
+	const response = await fetch(path, { method, headers, body: payload });
+	const text = await response.text();
 	let data: unknown = null;
 	try {
 		data = text ? JSON.parse(text) : null;
 	} catch {
 		// An older server without this route answers with the dashboard page, which isn't JSON.
-		throw new Error(res.ok ? `Unexpected response from ${path}` : `${res.status} ${res.statusText}`);
+		throw new Error(response.ok ? `Unexpected response from ${path}` : `${response.status} ${response.statusText}`);
 	}
-	if (!res.ok) {
-		const detail = asRecord(data)?.error;
-		if (res.status === 401 && typeof window !== "undefined") window.dispatchEvent(new Event(SIGNED_OUT_EVENT));
-		throw new Error(
-			res.status === 401
-				? "Your session ended: sign in to GitHive again."
-				: typeof detail === "string"
-					? detail
-					: `${res.status} ${res.statusText}`,
-		);
+	if (!response.ok) {
+		if (response.status === 401 && typeof window !== "undefined") window.dispatchEvent(new Event(SIGNED_OUT_EVENT));
+		throw new Error(failureMessage(response, data));
 	}
 	return data as T;
 }
@@ -381,11 +382,10 @@ export const api = {
 	tree: (repo: string, ref?: string) =>
 		call<RepoTree>("GET", `/repos/${repoPath(repo)}/tree${ref ? `?ref=${encodeURIComponent(ref)}` : ""}`),
 	/** One file's text at a branch or commit. */
-	file: (repo: string, path: string, ref?: string) =>
-		call<RepoFile>(
-			"GET",
-			`/repos/${repoPath(repo)}/file?path=${encodeURIComponent(path)}${ref ? `&ref=${encodeURIComponent(ref)}` : ""}`,
-		),
+	file: (repo: string, path: string, ref?: string) => {
+		const refQuery = ref ? `&ref=${encodeURIComponent(ref)}` : "";
+		return call<RepoFile>("GET", `/repos/${repoPath(repo)}/file?path=${encodeURIComponent(path)}${refQuery}`);
+	},
 	/** A person's vote on a change's current commit. */
 	vote: (repo: string, change: string, vote: VoteInput) =>
 		call<unknown>("POST", `/repos/${repoPath(repo)}/changes/${encodeURIComponent(change)}/votes`, vote),
@@ -450,10 +450,10 @@ export type ManageApi = typeof manage;
 
 /** Who is looking, or null when nobody is signed in. A 401 here is the normal signed-out answer. */
 export async function fetchMe(): Promise<Me | null> {
-	const res = await fetch("/me");
-	if (res.status === 401) return null;
-	if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
-	return (await res.json()) as Me;
+	const response = await fetch("/me");
+	if (response.status === 401) return null;
+	if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
+	return (await response.json()) as Me;
 }
 
 /** Signing in and out, and a signed-in person's agents, tokens and connected apps. */
@@ -522,5 +522,6 @@ export type DashboardApi = typeof api;
 
 /** The WebSocket URL of a repo's live feed (GET /repos/:owner/:name/live). Each message means "something changed". */
 export function liveFeedUrl(repo: string, location: Pick<Location, "protocol" | "host"> = window.location): string {
-	return `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/repos/${repoPath(repo)}/live`;
+	const scheme = location.protocol === "https:" ? "wss" : "ws";
+	return `${scheme}://${location.host}/repos/${repoPath(repo)}/live`;
 }

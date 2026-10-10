@@ -78,7 +78,8 @@ export function parseRoute(hash: string): Route {
 		}
 		if (rest.length === 0 || (rest.length === 1 && REPO_TABS.includes(rest[0] as RepoTab))) {
 			const branch = params.get("branch") || undefined;
-			return { page: "repo", repo, tab: (rest[0] as RepoTab | undefined) ?? "changes", ...(branch ? { branch } : {}) };
+			const tab = (rest[0] as RepoTab | undefined) ?? "changes";
+			return { page: "repo", repo, tab, ...(branch ? { branch } : {}) };
 		}
 		if (rest[0] === "changes" && rest.length >= 2 && rest.length <= 3) {
 			const change = decode(rest[1]);
@@ -90,20 +91,35 @@ export function parseRoute(hash: string): Route {
 	return { page: "not-found" };
 }
 
-const enc = encodeURIComponent;
+const encode = encodeURIComponent;
+
+function repoHref(repo: string, tab: RepoTab = "changes", branch?: string): string {
+	const tabPart = tab === "changes" ? "" : `/${tab}`;
+	const query = branch ? `?branch=${encode(branch)}` : "";
+	return `#/repos/${repoPath(repo)}${tabPart}${query}`;
+}
+
+function changeHref(repo: string, change: string, tab: ChangeTab = "conversation"): string {
+	const tabPart = tab === "conversation" ? "" : `/${tab}`;
+	return `#/repos/${repoPath(repo)}/changes/${encode(change)}${tabPart}`;
+}
+
+function codeHref(repo: string, path = "", ref?: string): string {
+	const segments = path.split("/").filter(Boolean).map(encode).join("/");
+	const pathPart = path ? `/${segments}` : "";
+	const query = ref ? `?ref=${encode(ref)}` : "";
+	return `#/repos/${repoPath(repo)}/code${pathPart}${query}`;
+}
 
 export const href = {
 	repos: () => "#/",
-	repo: (repo: string, tab: RepoTab = "changes", branch?: string) =>
-		`#/repos/${repoPath(repo)}${tab === "changes" ? "" : `/${tab}`}${branch ? `?branch=${enc(branch)}` : ""}`,
-	change: (repo: string, change: string, tab: ChangeTab = "conversation") =>
-		`#/repos/${repoPath(repo)}/changes/${enc(change)}${tab === "conversation" ? "" : `/${tab}`}`,
+	repo: repoHref,
+	change: changeHref,
 	/** A file or folder in the Code tab. Each segment is encoded separately, so the path reads naturally. */
-	code: (repo: string, path = "", ref?: string) =>
-		`#/repos/${repoPath(repo)}/code${path ? `/${path.split("/").filter(Boolean).map(enc).join("/")}` : ""}${ref ? `?ref=${enc(ref)}` : ""}`,
-	newRepo: (owner?: string) => `#/new${owner ? `?owner=${enc(owner)}` : ""}`,
+	code: codeHref,
+	newRepo: (owner?: string) => `#/new${owner ? `?owner=${encode(owner)}` : ""}`,
 	orgs: () => "#/orgs",
-	org: (org: string) => `#/orgs/${enc(org)}`,
+	org: (org: string) => `#/orgs/${encode(org)}`,
 	inbox: () => "#/inbox",
 	agents: () => "#/settings/agents",
 	admin: () => "#/admin",
