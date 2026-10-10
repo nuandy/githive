@@ -14,6 +14,7 @@ import { messageOf } from "../lib/errors";
 import { AgentsTab } from "./Agents";
 import { ClaimsTab } from "./ClaimsMap";
 import { HistoryTab } from "./History";
+import { HiveTab } from "./HiveTab";
 import { CodeTab, type CodeApi } from "./CodeBrowser";
 import { ChangePage } from "./ChangePage";
 import { AuditTab, ChangeList, SettingsTab } from "./RepoTabs";
@@ -207,6 +208,8 @@ function RepoTabContent({
 	switch (current) {
 		case "audit":
 			return <AuditTab snapshot={snapshot} />;
+		case "hive":
+			return <HiveTab repo={repo} branch={branch} snapshot={snapshot} api={api} />;
 		case "history":
 			return <HistoryTab repo={repo} branch={branch} api={api} />;
 		case "claims":
@@ -259,6 +262,7 @@ export function RepoPage({
 	const branch = snapshot?.branch ?? access?.branch ?? "main";
 	const tabs: TabItem[] = [
 		{ id: "changes", label: "Changes", icon: "pull", href: href.repo(repo), count: snapshot?.claims.length },
+		{ id: "hive", label: "Hive", icon: "activity", href: href.repo(repo, "hive") },
 		{ id: "history", label: "History", icon: "commit", href: href.repo(repo, "history") },
 		{ id: "claims", label: "Claims", icon: "folder", href: href.repo(repo, "claims") },
 		{ id: "code", label: "Code", icon: "file", href: href.code(repo, "") },

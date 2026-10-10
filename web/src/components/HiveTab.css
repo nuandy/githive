@@ -1,0 +1,72 @@
+/* The Hive tab: the swarm on a repo's branch at a glance. */
+
+.hive-tab {
+	display: grid;
+	gap: 16px;
+}
+
+.hive-tab__head h2 {
+	margin: 0;
+	font-size: 18px;
+}
+
+.hive-tab__head p {
+	margin: 4px 0 0;
+}
+
+.hive-tab__grid {
+	display: grid;
+	gap: 16px;
+	grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+	align-items: start;
+}
+
+@media (max-width: 900px) {
+	.hive-tab__grid {
+		grid-template-columns: minmax(0, 1fr);
+	}
+}
+
+.hive-tab__agents h2 {
+	font-size: 14px;
+}
+
+.hive-tab__rows {
+	margin: 0;
+	padding: 0;
+	list-style: none;
+}
+
+.hive-tab__row {
+	display: grid;
+	grid-template-columns: minmax(7em, auto) 9em minmax(6em, auto) 1fr auto;
+	gap: 10px;
+	align-items: baseline;
+	padding: 8px 16px;
+	border-top: 1px solid var(--border);
+	font-size: 13px;
+}
+
+.hive-tab__row:first-child {
+	border-top: 0;
+}
+
+.hive-tab__state {
+	font-weight: 600;
+}
+
+.hive-tab__row--landing .hive-tab__state,
+.hive-tab__row--waiting .hive-tab__state {
+	color: var(--good);
+}
+
+.hive-tab__row--revising .hive-tab__state,
+.hive-tab__row--asking .hive-tab__state {
+	color: var(--warn);
+}
+
+@media (max-width: 640px) {
+	.hive-tab__row {
+		grid-template-columns: 1fr auto;
+	}
+}
