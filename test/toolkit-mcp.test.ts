@@ -18,9 +18,12 @@ let summarized: { repo: string; patch: Record<string, unknown> }[] = [];
 let pinged: string[] = [];
 let reviewRequests: { repo: string; change: string; roles: string[]; summary?: string }[] = [];
 let builds: { repo: string; change: string }[] = [];
+/** Agents' forks there, but unreadable (Artifacts busy); otherwise there are none here. */
+let forksDown = false;
 const ctx = () => ({
 	toolkit: {
 		remote: async () => ({ url: server.url, token: "unused" }),
+		...(forksDown ? { changeRemote: async () => Promise.reject(new Error("[500] Artifacts is busy")) } : {}),
 		head: async () => server.git("rev-parse", "main").trim(),
 		register: async (repo: string) => void registered.push(repo),
 		summarize: async (repo: string, patch: Record<string, unknown>) => void summarized.push({ repo, patch }),
@@ -45,6 +48,7 @@ const call = async (name: string, args: Record<string, unknown>) => {
 };
 
 beforeEach(async () => {
+	forksDown = false;
 	server = await startGitServer();
 });
 afterEach(async () => {
@@ -110,6 +114,24 @@ describe("GitHive's MCP tools", () => {
 		expect(await call("claim", { repo: "project", change: "a-1", agent: "agent-a", paths: ["src/a/x.ts"], intent: "a" })).toMatchObject({ ok: true });
 		expect((await call("claims", { repo: "project" })).map((c: { change: string }) => c.change)).toEqual(["a-1"]);
 		expect(await call("audit", { repo: "project" })).toEqual({ merges: 0, open: 0, violations: [] });
+	});
+
+	it("releases nothing as abandoned while its head can't be read: live work isn't released on a failed read", async () => {
+		await call("settings", { repo: "project" });
+		const registry = new GitCasLog<Registry>(async () => ({ url: server.url, token: "unused" }), "project", "refs/notes/githive-claims/project");
+		await claim(registry, { change: "old-1", agent: "agent-gone", paths: ["src/a/"], intent: "quiet, maybe pushed", now: Date.now() - 31 * 60_000 });
+		forksDown = true;
+		expect(await call("claim", { repo: "project", change: "a-1", agent: "agent-a", paths: ["src/a/x.ts"], intent: "a" })).toMatchObject({ ok: false });
+		expect(await call("release", { repo: "project", change: "old-1", agent: "agent-a", stale: true })).toMatchObject({ ok: false });
+		expect((await call("claims", { repo: "project" })).map((c: { change: string }) => c.change)).toEqual(["old-1"]);
+	});
+
+	it("lets only a claim's own agent give it up; another releases it only as stale", async () => {
+		await call("settings", { repo: "project" });
+		await call("claim", { repo: "project", change: "a-1", agent: "agent-a", paths: ["src/a/"], intent: "a" });
+		expect(await call("release", { repo: "project", change: "a-1", agent: "agent-b" })).toMatchObject({ error: expect.stringContaining("only its agent releases it") });
+		expect(await call("release", { repo: "project", change: "a-1", agent: "agent-b", stale: true })).toMatchObject({ ok: false });
+		expect(await call("release", { repo: "project", change: "a-1", agent: "agent-a" })).toMatchObject({ ok: true });
 	});
 
 	it("reads the claims registry once for a call that only reads it", async () => {

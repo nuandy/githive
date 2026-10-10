@@ -533,7 +533,10 @@ export function changeSigns(input: { claim: ClaimRecord; head: string | null; co
  */
 function abandonedRule(ctx: ToolContext, repo: string, registered: Registry | null | undefined, votes: VoteStore): Abandoned {
 	return async (claim) => {
-		const head = await changeHead(ctx, repo, claim.agent, claim.change, claim.since).catch(() => null);
+		// A head that couldn't be read says nothing: not "nothing pushed", which would let live work be released (a release
+		// can't be undone). Only a fork that doesn't exist yet (or no forks here at all) means nothing's pushed.
+		const head = await changeHead(ctx, repo, claim.agent, claim.change, claim.since).catch((err): null | undefined => ([409, 501].includes(statusOf(err).status) ? null : undefined));
+		if (head === undefined) return { abandoned: false, why: `${claim.change}'s head couldn't be read just now` };
 		const view = await votes.readFor(head ? [head] : []);
 		const counted = head ? await countedVotes(view.votes.filter((v) => v.commit === head), registered?.stampKey) : [];
 		const shown = presentClaim(claim, projectBranch(registered));
@@ -1158,11 +1161,16 @@ async function runTool(name: string, args: Args, ctx: ToolContext): Promise<unkn
 			const merged = merging
 				? { source, head: merging.tip, claimed: paths, note: `${change} merges ${source} at ${merging.tip.slice(0, 8)} into ${into}: its branch changes/${change} is that commit, in your fork. Get it reviewed, check and merge it like any change. If ${source} moves on, claim again to bring the change up to its new tip (a new head, so a new review).` }
 				: {};
-			return { ...outcome, ...(conflicts ? { conflicts } : {}), ...(into !== branch ? { into } : {}), ...(made ? { branch: made } : {}), ...merged };
+			// Refused, and part of it couldn't be backed out: the agent's to free, by releasing the change.
+			const stuck = !outcome.ok && outcome.stillHeld?.length ? { note: `part of ${change}'s claim couldn't be undone and still holds paths (${outcome.stillHeld.length} record(s)): release ${change} to free them` } : {};
+			return { ...outcome, ...(conflicts ? { conflicts } : {}), ...(into !== branch ? { into } : {}), ...(made ? { branch: made } : {}), ...merged, ...stuck };
 		}
 		case "release": {
 			const change = requiredString(args, "change");
 			const agent = actAs("agent");
+			// Only its own agent gives a claim up; another's is released only as stale, once its agent has abandoned it.
+			const held = args.stale === true ? null : await claimOf(change);
+			if (held && held.agent !== agent) throw new Error(`[403] ${change} is ${held.agent}'s claim: only its agent releases it, or anyone once it's abandoned (release with stale: true)`);
 			if (args.stale === true) return store.releaseStale({ change, agent, staleAfterMs: STALE_AFTER_MS, abandoned: abandonedRule(ctx, repo, registered, votes) }, stamper);
 			return store.release({ change, agent, reason: typeof args.reason === "string" ? args.reason : "released" }, stamper);
 		}

@@ -635,22 +635,10 @@ command, each fetch tried three times: the repo's Gate to read and land it,
 and the batch's check container, which fetches only what it doesn't have yet
 (one at a time, the fetches were most of a big batch's check).
 
-**The next batch is read ahead.** Reading a batch (each change's credentials,
-its head, the files it changed) took 25 to 65 s of every batch, and batches
-follow one another. So while a batch is checked, the merge holding the lease
-also reads the next one: the oldest ready changes not in its own batch, as
-many as a batch holds, read in the repo's Gate on the main it has, and kept
-in the RepoCache (`Ahead` in `landing.ts`). The merge that
-lands the next batch, usually another one, since a merge hands the lease on
-once its own change settles, reuses a change's read when the change's head is
-still the one it last saw, and reads only the rest. A change at the same head
-changed the same files since it left main, whichever main it lands on (one
-that took in something since has a new head, and is read again). Every change is still validated against its
-claim and votes, and the batch is checked on exactly the main it lands on, so
-the audit is unchanged. What was read ahead is a hint like the lease: kept 10
-minutes, and losing it costs a read. Without checks nothing is read ahead:
-there's nothing to read beside, since the repo's Gate, which reads the next
-batch, lands this one first.
+**Each batch is read once, when it's gathered**, through Artifacts' API: each
+change's head and the files it changed since it left main, in 1.6 to 3.1 s.
+(Read through the Gate, it took 25 to 65 s, and the next batch was read while
+one was checked; reading through the API made that unnecessary, and it went.)
 
 **Without checks, a batch takes all that's ready**, up to 64: its size is
 about one check failure per batch (see `batchSize`), and nothing fails a batch
@@ -723,10 +711,14 @@ later, before the merge gives up. Even landing: its push names the main it
 lands on, so a batch that did land the first time finds main moved.
 
 The lease is a record in Git, like the claims and votes
-(`refs/notes/githive-landing/<repo>/<branch>`, in one of the repo's records
-repos once it has them; `landing-lease.ts`): the merge that finds it free or
+(`refs/notes/githive-landing/<repo>/<branch>`, always in the repo's first
+records repo, made at first use: never in the busy project repo, and never
+moved when claims shard; `landing-lease.ts`): the merge that finds it free or
 run out takes it by compare-and-swap, so of two at once only one does, and
-the record says which batch its holder is checking. It keeps two merges from
+the record says which batch its holder is checking, which is what decides
+that a change in that batch isn't abandoned. A merge that's refused at a
+renewal, or can't renew in time, counts the lease as lost: it starts no
+checks and lands nothing more, and waits its turn again. It keeps two merges from
 checking the same changes side by side; what keeps the branch right is its
 own compare-and-swap, and the audit. What changes came to lately is kept in
 the repo's RepoCache as a help (`landing.ts`): the merges waiting on a batch
@@ -744,9 +736,9 @@ twenty more for an install and setting up. A merge that died (Cloudflare
 dropped its request, say) lets the lease run out within 2 minutes, and one
 stuck in a step that soon after the step's bound; a waiting merge, looking
 again every 3 s, takes over. A merge takes the lease for three minutes, until
-its heartbeat starts. And what passed the checks is kept in the RepoCache (the
-last 100 passes: a main, and the changes merged onto it in order), so a merge
-taking over a batch whose merge died doesn't check the same code again. A merge hands the lease on once its own change has
+its heartbeat starts. A batch is always checked, even when a merge that died
+had checked the same code (a cache of passes saved that rare run, and could
+outlive a change of checks). A merge hands the lease on once its own change has
 settled, or after 4 batches if it hasn't, and then waits its turn. Only the
 request has a clock: Cloudflare drops one held open past about 20 minutes (at
 200 agents, four waiting merges got a 502 after 21-25 minutes), so a merge

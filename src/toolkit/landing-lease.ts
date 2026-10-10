@@ -1,7 +1,6 @@
 import type { CasLog } from "../record-log";
 import { type Checking, dropLease, type Landing, type LandingState, renewLease, takeTurn } from "./landing";
 import { appendRecord } from "./records";
-import { recordsRepoOf } from "./shards";
 
 // Who lands changes into a branch right now, as a record in Git like the
 // claims, votes and review holds: the branch's lease, and the batch its
@@ -11,12 +10,10 @@ import { recordsRepoOf } from "./shards";
 // who lands what: a merge's own turn, the records, and the branch's
 // compare-and-swap do.
 //
-// The rest of a branch's landing is kept in the repo's RepoCache, as a help:
-// what changes came to lately (a landing is in Git as its merge commit, a
-// failure as its rejection), checks that passed already, and the next batch
-// read ahead. Without the RepoCache a merge still lands: it finds out
-// whether its change landed from the branch's history, and checks again
-// what it can't recall.
+// What changes came to lately is kept in the repo's RepoCache, as a help (a
+// landing is in Git as its merge commit, a failure as its rejection).
+// Without the RepoCache a merge still lands: it finds out whether its change
+// landed from the branch's history.
 
 /** A branch's lease and the batch being checked, as its record keeps them. */
 export interface LeaseRecord {
@@ -25,13 +22,15 @@ export interface LeaseRecord {
 }
 
 const AUTHOR = "githive";
+/** How many times a merge tries to hand the lease on before leaving it to run out. */
+const DROP_TRIES = 3;
 const empty = (): LeaseRecord => ({ checking: null });
 
 /** Where a branch's lease is kept: this ref (branch names may hold `/`, which a ref under it can't also be). */
 export const landingRef = (repo: string, branch: string) => `refs/notes/githive-landing/${repo}/${encodeURIComponent(branch)}`;
 
-/** Which of a repo's `count` records repos holds a branch's lease (the same one always, for that count). */
-export const landingRepoOf = (branch: string, count: number) => recordsRepoOf(`landing:${branch}`, count);
+/** Which of a repo's records repos holds its branches' leases: always the first (see landingLog in env.ts). */
+export const LANDING_RECORDS_REPO = 0;
 
 /** As LandingState, for the pure lease steps in landing.ts (the outcomes they read aren't here: see gitLanding's turn). */
 const asState = (record: LeaseRecord): LandingState => ({ ...(record.lease ? { lease: record.lease } : {}), checking: record.checking, recent: [] });
@@ -73,7 +72,16 @@ export function gitLanding(log: CasLog<LeaseRecord>, kept: Omit<Landing, "turn" 
 			return renewed.ok;
 		},
 		drop: async (holder) => {
-			await appendRecord<LeaseRecord, "none">(log, AUTHOR, empty, (record) => (record.lease?.holder === holder ? { state: asRecord(dropLease(asState(record), holder)), text: `${holder} hands the lease on` } : { refused: "none" }));
+			// Tried a few times: a lease left held keeps every waiting merge idle until it runs out.
+			for (let attempt = 1; ; attempt++) {
+				try {
+					await appendRecord<LeaseRecord, "none">(log, AUTHOR, empty, (record) => (record.lease?.holder === holder ? { state: asRecord(dropLease(asState(record), holder)), text: `${holder} hands the lease on` } : { refused: "none" }));
+					break;
+				} catch (err) {
+					if (attempt === DROP_TRIES) throw err;
+					await new Promise((resolve) => setTimeout(resolve, attempt * 1_000));
+				}
+			}
 			await kept.drop(holder).catch(() => undefined);
 		},
 		// Shown, never relied on: a batch whose showing failed is checked and lands all the same.
@@ -84,11 +92,14 @@ export function gitLanding(log: CasLog<LeaseRecord>, kept: Omit<Landing, "turn" 
 			await kept.checking(batch).catch(() => undefined);
 		},
 		settle: (outcomes) => kept.settle(outcomes).catch((err) => console.error(`keeping ${outcomes.length} outcome(s) failed`, String(err))),
-		view: () => kept.view().catch(() => ({ checking: null, recent: [] })),
-		passed: (base, heads) => kept.passed(base, heads).catch(() => false),
-		checked: (base, heads) => kept.checked(base, heads).catch(() => undefined),
-		keepAhead: (ahead) => kept.keepAhead(ahead).catch(() => undefined),
-		ahead: () => kept.ahead().catch(() => null),
+		// What's being checked as the lease record says, while its holder holds it (a holder that died checks nothing);
+		// what changes came to as the RepoCache recalls.
+		view: async () => {
+			const [record, recalled] = await Promise.all([log.read().catch(() => undefined), kept.view().catch(() => null)]);
+			const lease = record?.commit.state.lease;
+			const checking = record === undefined ? (recalled?.checking ?? null) : lease && lease.until > Date.now() ? record?.commit.state.checking ?? null : null;
+			return { checking, recent: recalled?.recent ?? [] };
+		},
 	};
 }
 

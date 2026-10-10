@@ -17,7 +17,7 @@ import type { Settled } from "./landing";
 import { recordsRepoName } from "./shards";
 import { makeStamper } from "./stamp";
 import { headsForClaims } from "../push-events";
-import { gitLanding, landingRef, landingRepoOf, lazyLog, type LeaseRecord } from "./landing-lease";
+import { gitLanding, LANDING_RECORDS_REPO, landingRef, lazyLog, type LeaseRecord } from "./landing-lease";
 
 // GitHive wired to Cloudflare: Artifacts for Git, the Gate's
 // container for checks, the repo index for the dashboard, GitHive's hosted
@@ -286,8 +286,8 @@ export function toolContextFor(env: Env, by: string | undefined, caller: { agent
 				},
 			};
 		},
-		// Who's landing a batch into each branch: a record in Git, in one of the repo's records repos once it has them, else
-		// beside the claims (see landing-lease.ts). What changes came to and the rest, in the repo's RepoCache, as a help.
+		// Who's landing a batch into each branch: a record in Git, in the repo's first records repo (see landingLog).
+		// What changes came to, in the repo's RepoCache, as a help.
 		landing: (repo, branch) => {
 			const cache = () => env.REPO_CACHE.getByName(`repo:${repo}`);
 			return gitLanding(landingLog(env, repo, branch), {
@@ -295,20 +295,27 @@ export function toolContextFor(env: Env, by: string | undefined, caller: { agent
 				checking: (batch) => rpcRetried(() => cache().landingChecking(branch, batch)),
 				settle: (outcomes) => rpcRetried(() => cache().landingSettled(branch, outcomes)),
 				view: () => rpcRetried(() => cache().landingView(branch)),
-				passed: (base, heads) => rpcRetried(() => cache().landingPassed(branch, base, heads)),
-				checked: (base, heads) => rpcRetried(() => cache().landingChecked(branch, base, heads)),
-				keepAhead: (ahead) => rpcRetried(() => cache().landingKeepAhead(branch, ahead)),
-				ahead: () => rpcRetried(() => cache().landingAhead(branch)),
 			});
 		},
 	};
 }
 
-/** A branch's landing lease record (see landing-lease.ts): in one of the repo's records repos once it has them, else beside the claims. */
+/** The repos the landing leases are in, made once per isolate (see landingLog). */
+const landingRepos = new Map<string, Promise<void>>();
+
+/**
+ * A branch's landing lease record (see landing-lease.ts), always in the repo's
+ * first records repo: never the busy project repo, whose pushes it would wait
+ * behind, and never moved when claims shard (records repo 0 is one of those
+ * they spread over), so no two merges ever read two leases. Made at first use.
+ */
 export function landingLog(env: Env, repo: string, branch: string) {
 	return lazyLog(async () => {
-		const spread = (await recordsLog<Registry>(env, repo, claimsRef(repo)).read())?.commit.state.recordsRepos ?? 0;
-		return spread ? recordsLogIn<LeaseRecord>(env, repo, landingRepoOf(branch, spread), landingRef(repo, branch)) : recordsLog<LeaseRecord>(env, repo, landingRef(repo, branch));
+		const name = recordsRepoName(repo, LANDING_RECORDS_REPO);
+		let made = landingRepos.get(name);
+		if (!made) landingRepos.set(name, (made = ensureRepo(env.ARTIFACTS, name, `Claim records for ${repo}`).catch((err) => (landingRepos.delete(name), Promise.reject(err)))));
+		await made;
+		return recordsLogIn<LeaseRecord>(env, repo, LANDING_RECORDS_REPO, landingRef(repo, branch));
 	});
 }
 

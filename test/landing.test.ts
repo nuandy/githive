@@ -219,30 +219,6 @@ describe("landing ready changes together", { timeout: 120_000 }, () => {
 		expect(await auditNow()).toEqual([]);
 	});
 
-	it("reads the next batch while one is checked, and the merge that lands it reads none of it again", async () => {
-		for (const x of ["a", "b", "c", "d"]) await readyChange(`${x}-1`, { [`src/${x}.txt`]: `${x}\n` });
-		const landing = memoryLanding();
-		const reads: string[][] = [];
-		const runs: string[][] = [];
-		const more = { maxBatch: 2, batchGit: readsNoted(reads) };
-		expect(await merge("a-1", runner(new Set(), runs), landing, more)).toMatchObject({ ok: true });
-		// Its own batch, then the next one, read while its own was checked.
-		expect(reads).toEqual([
-			["a-1", "b-1"],
-			["c-1", "d-1"],
-		]);
-		expect((await landing.ahead())?.read.map((r) => r.change)).toEqual(["c-1", "d-1"]);
-		// The next merge lands what was read ahead, on the main the first batch left, without reading it again.
-		expect(await merge("c-1", runner(new Set(), runs), landing, more)).toMatchObject({ ok: true });
-		expect(reads.length).toBe(2);
-		expect(runs).toEqual([
-			["a-1", "b-1"],
-			["c-1", "d-1"],
-		]);
-		expect(landed()).toEqual(["a-1", "b-1", "c-1", "d-1"]);
-		expect(await auditNow()).toEqual([]);
-	});
-
 	it("without checks, takes every ready change into one batch, and releases their claims once the lease is handed on", async () => {
 		const ids = Array.from({ length: 6 }, (_, i) => `n-${i}`);
 		for (const id of ids) await readyChange(id, { [`src/${id}.txt`]: `${id}\n` });
@@ -326,17 +302,15 @@ describe("landing ready changes together", { timeout: 120_000 }, () => {
 		expect(await auditNow()).toEqual([]);
 	});
 
-	it("reads a change again when it has a new head since it was read ahead", async () => {
+	it("lands a change at the newest head it had approved when its batch is gathered", async () => {
 		for (const x of ["a", "b", "c", "d"]) await readyChange(`${x}-1`, { [`src/${x}.txt`]: `${x}\n` });
 		const landing = memoryLanding();
-		const reads: string[][] = [];
-		const more = { maxBatch: 2, batchGit: readsNoted(reads) };
+		const more = { maxBatch: 2 };
 		expect(await merge("a-1", runner(), landing, more)).toMatchObject({ ok: true });
-		// d pushes again, and its new commit is approved: what was read ahead of it is out of date.
+		// d pushes again, and its new commit is approved: the batch that takes it reads it now, at that commit.
 		const newer = await pushChange(server.url, work, "agent-d-1", "d-1", { "src/d.txt": "d, again\n" }, "origin/changes/d-1");
 		await vote(votes(), { commit: newer, reviewer: "rev", role: "tests", verdict: "approve", evidence: "ok" });
 		expect(await merge("c-1", runner(), landing, more)).toMatchObject({ ok: true });
-		expect(reads.slice(2)).toEqual([["d-1"]]);
 		expect(server.git("log", "-1", "--format=%(trailers:key=GitHive-Tested-With,valueonly)", "main").trim().split(" ").at(-1)).toBe(newer);
 		expect(await auditNow()).toEqual([]);
 	});
@@ -382,14 +356,16 @@ describe("landing ready changes together", { timeout: 120_000 }, () => {
 		expect(landed()).toEqual(["a-1"]);
 	});
 
-	it("doesn't check again what passed on the same main, in the same order (a merge that took over a dropped one's batch)", async () => {
-		const head = await readyChange("a-1", { "src/a.txt": "a\n" });
-		const landing = memoryLanding();
-		await landing.checked(server.git("rev-parse", "main").trim(), [head]);
+	it("neither checks nor lands once its lease is another merge's: it waits its turn again", async () => {
+		await readyChange("a-1", { "src/a.txt": "a\n" });
+		const before = server.git("rev-parse", "main").trim();
 		const runs: string[][] = [];
-		expect(await merge("a-1", runner(new Set(), runs), landing)).toMatchObject({ ok: true });
+		// The lease is taken, then every renewal is refused: another merge has it now.
+		const lost: Landing = { ...memoryLanding(), renew: async () => false };
+		const answer = await merge("a-1", runner(new Set(), runs), lost, { heartbeatMs: 20, answerWithinMs: 300 });
+		expect(answer).toMatchObject({ ok: false, pending: true });
 		expect(runs).toEqual([]);
-		expect(landed()).toEqual(["a-1"]);
+		expect(server.git("rev-parse", "main").trim()).toBe(before);
 	});
 
 	it("keeps the lease by a heartbeat through a long check: a merge waiting doesn't take over and check again", async () => {

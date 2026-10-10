@@ -38,7 +38,8 @@ export interface ClaimInput {
 	now?: number;
 }
 
-export type ClaimOutcome = { ok: true } | { ok: false; conflicts: Conflict[] };
+/** A claim made, or refused: its conflicts, and any records backing out of it couldn't undo (they still hold its paths). */
+export type ClaimOutcome = { ok: true } | { ok: false; conflicts: Conflict[]; stillHeld?: string[] };
 export type ReleaseOutcome = { ok: true } | { ok: false; refused: string };
 
 export interface ChangeView {
@@ -77,6 +78,8 @@ export interface StoreInput {
 
 /** How many records repos a release writes to at once. */
 const RELEASE_REPOS_AT_ONCE = 4;
+/** How many times backing a refused claim out of a record is tried before it's reported as still held. */
+const BACK_OUT_TRIES = 3;
 
 export function claimStore(input: StoreInput): ClaimStore {
 	return new Claims(input);
@@ -316,17 +319,31 @@ class Claims implements ClaimStore {
 			);
 		}
 		const written: { shard: string; previous: string[] | null }[] = [];
+		// Each part written undone, a few tries each: a part left behind holds paths the agent is told it doesn't have, so
+		// those it couldn't undo are named in the refusal.
 		const backOut = async (reason: string) => {
-			for (const { shard, previous } of written.reverse())
-				await withdraw(this.logOf(shard), { change: input.change, agent: input.agent, keep: previous, reason }, stamper).catch(() => undefined);
+			const stuck: string[] = [];
+			for (const { shard, previous } of written.reverse()) {
+				for (let attempt = 1; ; attempt++) {
+					try {
+						await withdraw(this.logOf(shard), { change: input.change, agent: input.agent, keep: previous, reason }, stamper);
+						break;
+					} catch (err) {
+						if (attempt === BACK_OUT_TRIES) {
+							console.error(`backing ${input.change} out of ${shard} failed`, String(err));
+							stuck.push(shard);
+							break;
+						}
+						await new Promise((resolve) => setTimeout(resolve, attempt * 500));
+					}
+				}
+			}
+			return stuck.length ? { stillHeld: stuck } : {};
 		};
 
 		for (const shard of shards) {
 			const outcome = await claim(this.logOf(shard), { ...input, paths: placed.get(shard)! }, stamper);
-			if (!outcome.ok) {
-				await backOut(`part of the claim is held by ${outcome.conflicts[0]?.change}`);
-				return outcome;
-			}
+			if (!outcome.ok) return { ...outcome, ...(await backOut(`part of the claim is held by ${outcome.conflicts[0]?.change}`)) };
 			// Written in the registry after it was sharded: a claim above every shard, which must look below.
 			if (shard === ROOT) this.learn(outcome.seen);
 			written.push({ shard, previous: outcome.previous });
@@ -335,10 +352,7 @@ class Claims implements ClaimStore {
 
 		// Written: now look at the other levels.
 		const conflicts = await this.othersOverlapping(input, placed, stamper);
-		if (conflicts.length) {
-			await backOut(`overlaps ${conflicts[0].change}'s claim`);
-			return { ok: false, conflicts };
-		}
+		if (conflicts.length) return { ok: false, conflicts, ...(await backOut(`overlaps ${conflicts[0].change}'s claim`)) };
 		return { ok: true };
 	}
 

@@ -1,7 +1,7 @@
 import { DurableObject } from "cloudflare:workers";
 import { countingRequests, describeCounts } from "./git-http";
 import { makeAgentFork, makeSeed } from "./toolkit/env";
-import { type Ahead, asNews, type Checking, emptyLanding, type LandingState, markChecked, type Settled, settleOutcomes, wasChecked } from "./toolkit/landing";
+import { asNews, type Checking, emptyLanding, type LandingState, type Settled, settleOutcomes } from "./toolkit/landing";
 
 // One per repo ("repo:<repo>"): what GitHive keeps of the repo between calls,
 // all of it a copy or a hint. Git stays the truth, and throwing any of it away
@@ -392,24 +392,6 @@ export class RepoCache extends DurableObject<Env> {
 		if (latest && latest !== told) await this.ctx.storage.put(key, latest);
 		if (!told) return [];
 		return asNews(recent.filter((s) => s.at > told && s.agent !== agent)).slice(-NEWS_MOST);
-	}
-
-	/** Whether these changes, merged onto `base` in this order, passed the checks into `branch` already (see LandingState.passed). */
-	async landingPassed(branch: string, base: string, heads: string[]) {
-		return wasChecked(await this.landing(branch), base, heads);
-	}
-
-	async landingChecked(branch: string, base: string, heads: string[]) {
-		await this.keepLanding(branch, markChecked(await this.landing(branch), base, heads));
-	}
-
-	/** The next batch into `branch`, read ahead (see Ahead in toolkit/landing.ts). */
-	async landingKeepAhead(branch: string, ahead: Ahead) {
-		await this.keepLanding(branch, { ...(await this.landing(branch)), ahead });
-	}
-
-	async landingAhead(branch: string) {
-		return (await this.landing(branch)).ahead ?? null;
 	}
 
 	private async landing(branch: string) {

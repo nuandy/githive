@@ -22,7 +22,7 @@ const leaseLog = () => new GitCasLog<LeaseRecord>(async () => ({ url: server.url
 /** A RepoCache that answers nothing. */
 const unreachable = (): Omit<Landing, "turn" | "renew"> => {
 	const down = () => Promise.reject(new Error("Durable Object is overloaded. Requests queued for too long."));
-	return { drop: down, checking: down, settle: down, view: down, passed: down, checked: down, keepAhead: down, ahead: down };
+	return { drop: down, checking: down, settle: down, view: down };
 };
 const batch = { base: "b".repeat(40), since: "2026-10-10T00:00:00.000Z", changes: [{ change: "c1", head: "a".repeat(40), agent: "agent-1" }] };
 
@@ -56,8 +56,12 @@ describe("the landing lease in Git", { timeout: 60_000 }, () => {
 		const log = leaseLog();
 		const landing = gitLanding(log, memoryLanding());
 		expect(await landing.turn("dead", "c1", "1".repeat(40), 0, 1_500)).toEqual({ lease: true });
+		await landing.checking(batch);
+		expect((await landing.view()).checking).toEqual(batch);
 		expect(await landing.turn("alive", "c2", "2".repeat(40), 0, 60_000)).toEqual({ lease: false });
 		await new Promise((resolve) => setTimeout(resolve, 1_600));
+		// Its holder gone, what it showed as checking isn't: those changes can be found abandoned again.
+		expect((await landing.view()).checking).toBeNull();
 		expect(await landing.turn("alive", "c2", "2".repeat(40), 0, 60_000)).toEqual({ lease: true });
 		expect(await landing.renew("dead", 60_000)).toBe(false);
 	});
@@ -80,11 +84,8 @@ describe("the landing lease in Git", { timeout: 60_000 }, () => {
 			await landing.checking(batch);
 			expect((await log.read())?.commit.state.checking).toEqual(batch);
 			await landing.settle([{ change: "c1", head: "1".repeat(40), agent: "agent-1", how: "landed", at: new Date().toISOString() }]);
-			expect(await landing.view()).toEqual({ checking: null, recent: [] });
-			expect(await landing.passed("b".repeat(40), ["1".repeat(40)])).toBe(false);
-			await landing.checked("b".repeat(40), ["1".repeat(40)]);
-			await landing.keepAhead({ base: "b".repeat(40), at: new Date().toISOString(), read: [] });
-			expect(await landing.ahead()).toBeNull();
+			// What's being checked comes from the lease record; what changes came to, nowhere to recall it from.
+			expect(await landing.view()).toEqual({ checking: batch, recent: [] });
 			await landing.drop("merge-a");
 			expect(await leaseHeld(log)).toBe(false);
 		} finally {
