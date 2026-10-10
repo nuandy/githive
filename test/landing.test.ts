@@ -104,6 +104,15 @@ describe("landing ready changes together", { timeout: 120_000 }, () => {
 	};
 	const landed = () => server.git("log", "--first-parent", "--format=%(trailers:key=GitHive-Change,valueonly)", "main").trim().split("\n").filter(Boolean).reverse();
 
+	it("tells why each change was made in its merge commit: its intent, and who approved it", async () => {
+		await readyChange("a-1", { "src/a.txt": "a\n" });
+		expect(await merge("a-1", runner())).toMatchObject({ ok: true });
+		expect(server.git("log", "-1", "--format=%s", "main").trim()).toBe("a-1");
+		expect(server.git("log", "-1", "--format=%b", "main")).toContain("- rev (tests): ok");
+		expect(server.git("log", "-1", "--format=%(trailers:key=GitHive-Intent,valueonly)", "main").trim()).toBe("a-1");
+		expect(await auditNow()).toEqual([]);
+	});
+
 	it("lands every ready change in one batch, checked once, each as its own merge in one push, and audits clean", async () => {
 		const heads = [];
 		for (const x of ["a", "b", "c"]) heads.push(await readyChange(`${x}-1`, { [`src/${x}.txt`]: `${x}\n` }));
