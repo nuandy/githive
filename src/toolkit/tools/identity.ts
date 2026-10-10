@@ -3,10 +3,10 @@ import { HOSTED_PREFIX } from "./repo";
 
 // Who a call acts as: an agent key or a sign-in names the agent, and an agent acts only as itself.
 
-export const sha256 = async (text: string) =>
-	Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text))), (b) =>
-		b.toString(16).padStart(2, "0"),
-	).join("");
+export const sha256 = async (text: string) => {
+	const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
+	return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
+};
 
 /** The agent name a key is for, checked against the registry; keys are `<agent>.<secret>`. */
 export async function keyAgent(registry: Registry | undefined, key: string) {

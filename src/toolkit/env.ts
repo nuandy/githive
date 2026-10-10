@@ -12,7 +12,7 @@ import { claimStore } from "./claim-store";
 import { type ReviewHolds, reviewHolds, reviewsRef, reviewsRepoOf } from "./review-holds";
 import type { Registry } from "./claims";
 import type { ToolContext, HostedStatus } from "./mcp";
-import type { BatchSource } from "./merge";
+import type { BatchGit, BatchSource, CheckRunner } from "./merge";
 import type { Settled } from "./landing";
 import { recordsRepoName } from "./shards";
 import { makeStamper } from "./stamp";
@@ -104,65 +104,63 @@ export async function keptRead<T>(
 }
 
 function recordsLog<S>(env: Env, repo: string, ref: string) {
-	let log = logs.get(ref);
+	return cachedLog<S>(env, repo, { key: ref, ref, holder: repo });
+}
+
+// A record in records repo `index` rather than the project repo, cached like recordsLog's. Its tips are cached
+// under the records repo's name, since the same ref may also exist in the project repo from before.
+function recordsLogIn<S>(env: Env, repo: string, index: number, ref: string) {
+	const holder = recordsRepoName(repo, index);
+	const key = `${holder}:${ref}`;
+	return cachedLog<S>(env, repo, { key, ref, holder, tipsKey: key });
+}
+
+// The isolate's log for `ref` in the `holder` repo, made on first use. Its tips are cached under `tipsKey`, or
+// under the ref each call names.
+function cachedLog<S>(env: Env, repo: string, at: { key: string; ref: string; holder: string; tipsKey?: string }) {
+	let log = logs.get(at.key);
 	if (!log) {
-		// Record states other Worker instances already read, by tip, shared through the RepoCache.
 		const cache = () => env.REPO_CACHE.getByName(`repo:${repo}`);
+		// Record states other Worker instances already read, by tip, shared through the RepoCache.
 		const states = {
-			get: (r: string, tip: string) => rpc(cache().recordAt(r, tip)),
-			put: (r: string, tip: string, json: string) => cache().keepRecord(r, tip, json),
+			get: (recordRef: string, tip: string) => rpc(cache().recordAt(recordRef, tip)),
+			put: (recordRef: string, tip: string, json: string) => cache().keepRecord(recordRef, tip, json),
 		};
 		// Cached tips too, so a read needn't list refs on the busy project repo.
+		const tipsKey = (recordRef: string) => at.tipsKey ?? recordRef;
 		const tips = {
-			get: (r: string, stateKey: string) => rpc(cache().tipOf(r, stateKey, KEPT_TIP_MS)),
-			keep: (r: string, tip: string | null, gen: number) => cache().keepTip(r, tip, gen),
-			landed: (r: string, parent: string | null, tip: string) => cache().landedTip(r, parent, tip),
-			stale: (r: string, parent: string | null) => cache().staleTip(r, parent),
+			get: (recordRef: string, stateKey: string) => rpc(cache().tipOf(tipsKey(recordRef), stateKey, KEPT_TIP_MS)),
+			keep: (recordRef: string, tip: string | null, gen: number) => cache().keepTip(tipsKey(recordRef), tip, gen),
+			landed: (recordRef: string, parent: string | null, tip: string) =>
+				cache().landedTip(tipsKey(recordRef), parent, tip),
+			stale: (recordRef: string, parent: string | null) => cache().staleTip(tipsKey(recordRef), parent),
 		};
-		logs.set(
-			ref,
-			(log = new GitCasLog<unknown>(
-				() => cached(env, repo, `${repo}|write`, () => remoteFor(env.ARTIFACTS, repo, "write", 3600)),
-				repo,
-				ref,
-				{ states, tips },
-			)),
-		);
+		const writeRemote = () =>
+			cached(env, repo, `${at.holder}|write`, () => remoteFor(env.ARTIFACTS, at.holder, "write", 3600));
+		log = new GitCasLog<unknown>(writeRemote, repo, at.ref, { states, tips });
+		logs.set(at.key, log);
 	}
 	return log as GitCasLog<S>;
 }
 
-// A record in records repo `k` rather than the project repo, cached like recordsLog's. Its tips are cached under
-// the records repo's name, since the same ref may also exist in the project repo from before.
-function recordsLogIn<S>(env: Env, repo: string, k: number, ref: string) {
-	const key = `${recordsRepoName(repo, k)}:${ref}`;
-	let log = logs.get(key);
-	if (!log) {
-		const cache = () => env.REPO_CACHE.getByName(`repo:${repo}`);
-		const states = {
-			get: (r: string, tip: string) => rpc(cache().recordAt(r, tip)),
-			put: (r: string, tip: string, json: string) => cache().keepRecord(r, tip, json),
-		};
-		const tips = {
-			get: (r: string, stateKey: string) => rpc(cache().tipOf(key, stateKey, KEPT_TIP_MS)),
-			keep: (r: string, tip: string | null, gen: number) => cache().keepTip(key, tip, gen),
-			landed: (r: string, parent: string | null, tip: string) => cache().landedTip(key, parent, tip),
-			stale: (r: string, parent: string | null) => cache().staleTip(key, parent),
-		};
-		logs.set(
-			key,
-			(log = new GitCasLog<unknown>(
-				() =>
-					cached(env, repo, `${recordsRepoName(repo, k)}|write`, () =>
-						remoteFor(env.ARTIFACTS, recordsRepoName(repo, k), "write", 3600),
-					),
-				repo,
-				ref,
-				{ states, tips },
-			)),
-		);
-	}
-	return log as GitCasLog<S>;
+// Credentials for a project repo, and for an agent's fork of it, cached (see cached).
+const projectRemote = (env: Env, repo: string, scope: "read" | "write") =>
+	cached(env, repo, `${repo}|${scope}`, () => remoteFor(env.ARTIFACTS, repo, scope, 3600));
+const forkRemote = (env: Env, repo: string, agent: string, scope: "read" | "write") =>
+	cached(env, repo, `fork:${repo}:${agent}|${scope}`, () => changeRemote(env, repo, agent, scope, 3600));
+
+// GitHive's GitHub App, when its ID and key are set. Repos connect to GitHub through it (see github.ts).
+function githubApp(env: Env): Pick<ToolContext, "github"> {
+	const appId = env.GITHUB_APP_ID;
+	const privateKey = env.GITHUB_APP_PRIVATE_KEY;
+	if (!appId || !privateKey) return {};
+	return { github: (repo: string) => linkTo({ appId, privateKey }, repo) };
+}
+
+// Starts the Gate called `name`, on the repo's branch, before it's needed.
+async function bootGate(env: Env, repo: string, name: string) {
+	const read = await projectRemote(env, repo, "read");
+	await rpcRetried(() => env.GATE.getByName(name).boot({ repo, base: { remote: read.url, token: read.token } }));
 }
 
 /** The tool context for one actor. `by` is its verified identity or a hosted agent's name, and stamps carry it. */
@@ -184,7 +182,7 @@ export function toolContextFor(
 		ping: async (repo) => void (await env.REPO_CACHE?.getByName(`repo:${repo}`).ping("records")),
 		// The repo's own Gate keeps its snapshot fresh (see Gate.warmUp); a batch's checks run in the batch's own Gates.
 		warmChecks: async (repo, { expect, ...input }) => {
-			const remote = await cached(env, repo, `${repo}|read`, () => remoteFor(env.ARTIFACTS, repo, "read", 3600));
+			const remote = await projectRemote(env, repo, "read");
 			await env.GATE.getByName(`repo:${repo}`).warmUp({
 				repo,
 				...input,
@@ -197,19 +195,13 @@ export function toolContextFor(
 		// Heads read from forks, plus those push events reported from the claim holders' forks (see push-events.ts).
 		knownHeads: async (repo, claims) =>
 			headsForClaims(
-				await rpc(env.REPO_CACHE.getByName(`repo:${repo}`).knownHeads(claims.map((c) => c.change))),
+				await rpc(env.REPO_CACHE.getByName(`repo:${repo}`).knownHeads(claims.map((claim) => claim.change))),
 				claims,
 				(agent) => forkName(repo, agent),
 			),
-		noteHeads: (repo, seen, readAt) => env.REPO_CACHE.getByName(`repo:${repo}`).noteHeads(seen, readAt),
+		noteHeads: (repo, headsRead, readAt) => env.REPO_CACHE.getByName(`repo:${repo}`).noteHeads(headsRead, readAt),
 		news: (repo, branch, agent) => rpc(env.REPO_CACHE.getByName(`repo:${repo}`).landingNews(branch, agent)),
-		// GitHive's GitHub App, when its ID and key are set. Repos connect to GitHub through it (see github.ts).
-		...(env.GITHUB_APP_ID && env.GITHUB_APP_PRIVATE_KEY
-			? {
-					github: (repo: string) =>
-						linkTo({ appId: env.GITHUB_APP_ID!, privateKey: env.GITHUB_APP_PRIVATE_KEY! }, repo),
-				}
-			: {}),
+		...githubApp(env),
 		// A branch's head, briefly cached for every merge watching it (see MergeInput.branchHead).
 		branchHead: (repo, branch) =>
 			keptRead(env, repo, `head:${branch}`, KEPT_BRANCH_HEAD_MS, () => headOf(env.ARTIFACTS, repo, branch)),
@@ -222,31 +214,25 @@ export function toolContextFor(
 			)),
 		// Review holds live in one of the repo's records repos once it has them (see review-holds.ts), otherwise
 		// beside the claims and votes.
-		reviews: reviewHolds(async (repo) => {
-			const spread = (await recordsLog<Registry>(env, repo, claimsRef(repo)).read())?.commit.state.recordsRepos ?? 0;
-			return spread
-				? recordsLogIn<ReviewHolds>(env, repo, reviewsRepoOf(spread), reviewsRef(repo))
-				: recordsLog<ReviewHolds>(env, repo, reviewsRef(repo));
-		}),
+		reviews: reviewHolds((repo) => reviewsLog(env, repo)),
 		requestReview: (input) => startHostedReviewers(env, input),
 		startBuilder: (input) => startHostedBuilder(env, input),
 		stamper: async (agent) =>
 			env.STAMP_KEY && by ? makeStamper(env.STAMP_KEY, agent ? `${by}/${agent}` : by) : undefined,
-		remote: (repo, scope) => cached(env, repo, `${repo}|${scope}`, () => remoteFor(env.ARTIFACTS, repo, scope, 3600)),
-		changeRemote: (repo, agent, scope) =>
-			cached(env, repo, `fork:${repo}:${agent}|${scope}`, () => changeRemote(env, repo, agent, scope, 3600)),
+		remote: (repo, scope) => projectRemote(env, repo, scope),
+		changeRemote: (repo, agent, scope) => forkRemote(env, repo, agent, scope),
 		legacyChangeRemote: (repo, change) =>
 			cached(env, repo, `${changeRepoName(repo, change)}|read`, () =>
 				remoteFor(env.ARTIFACTS, changeRepoName(repo, change), "read", 3600),
 			),
-		recordsRemote: (repo, k, scope) =>
-			cached(env, repo, `${recordsRepoName(repo, k)}|${scope}`, () =>
-				remoteFor(env.ARTIFACTS, recordsRepoName(repo, k), scope, 3600),
+		recordsRemote: (repo, index, scope) =>
+			cached(env, repo, `${recordsRepoName(repo, index)}|${scope}`, () =>
+				remoteFor(env.ARTIFACTS, recordsRepoName(repo, index), scope, 3600),
 			),
 		createRecordsRepos: async (repo, count) => {
 			await Promise.all(
-				Array.from({ length: count }, (_, k) =>
-					ensureRepo(env.ARTIFACTS, recordsRepoName(repo, k), `Claim records for ${repo}`),
+				Array.from({ length: count }, (_, index) =>
+					ensureRepo(env.ARTIFACTS, recordsRepoName(repo, index), `Claim records for ${repo}`),
 				),
 			);
 		},
@@ -258,170 +244,20 @@ export function toolContextFor(
 			(await defaultBranch(await remoteFor(env.ARTIFACTS, repo, "read", 3600))) ?? fail(409, `${repo} has no commits`),
 		// A batch's checks run on main with its changes merged in order, in Gates named for the batch and its place
 		// in the bisection. Without a name they run in the last change's Gate.
-		runChecks: (repo) => {
-			const read = () => cached(env, repo, `${repo}|read`, () => remoteFor(env.ARTIFACTS, repo, "read", 3600));
-			const fork = (agent: string) =>
-				cached(env, repo, `fork:${repo}:${agent}|read`, () => changeRemote(env, repo, agent, "read", 3600));
-			return async ({ base, branch, changes, commands, gate }) => {
-				const remote = await read();
-				const sourceOf = async (c: (typeof changes)[number]) => {
-					const from = c.source ?? (await fork(c.agent));
-					return { remote: from.url, token: from.token, ref: c.ref };
-				};
-				const last = changes.at(-1)!;
-				const ahead = await Promise.all(
-					changes.slice(0, -1).map(async (c) => ({ head: c.head, ...(await sourceOf(c)) })),
-				);
-				const forkOf = await sourceOf(last);
-				const name = gate ? `repo:${repo}:check:${gate}` : `repo:${repo}:change:${last.change}`;
-				const result = await rpcRetried(() =>
-					env.GATE.getByName(name).checkCommit({
-						repo,
-						branch,
-						base: { remote: remote.url, token: remote.token },
-						fork: forkOf,
-						head: last.head,
-						checks: commands,
-						baseHead: base,
-						ahead,
-					}),
-				);
-				const conflict = result.mergeConflict
-					? [
-							{
-								command: "(merging the batch onto main)",
-								exitCode: 1,
-								output: `conflicts in ${result.mergeConflict.join(", ")}`,
-							},
-						]
-					: [];
-				return {
-					passed: result.passed,
-					results: [
-						...conflict,
-						...result.results.map((r) => ({ command: r.command, exitCode: r.exitCode, output: r.output })),
-					],
-				};
-			};
-		},
+		runChecks: (repo) => checksRunner(env, repo),
 		// A branch's commits for the audit, read through the Artifacts API with each merge's files cached in the
 		// RepoCache (see branch-history.ts).
-		readBranch: (repo, baseline, branch) => {
-			const cache = () => env.REPO_CACHE.getByName(`repo:${repo}`);
-			// The cache is optional. Without it, each merge's files are worked out again.
-			return withHistory(env.ARTIFACTS, repo, (source) =>
-				readBranchHistory(source, baseline, branch, {
-					get: (commits) => rpc(cache().keptFiles(commits)).catch(() => ({})),
-					put: (files) =>
-						cache()
-							.keepFiles(files)
-							.catch(() => undefined),
-				}),
-			);
-		},
+		readBranch: (repo, baseline, branch) => readBranchCommits(env, repo, baseline, branch),
 		// Any repo's history through the Artifacts API, used to read a batch's changes.
 		history: (name, read) => withHistory(env.ARTIFACTS, name, read),
 		// A branch's head in an agent's fork, from one Artifacts log call with no token or Git listing.
-		forkHead: async (repo, agent, ref) => {
-			const name = await forkName(repo, agent);
-			try {
-				return (await headOf(env.ARTIFACTS, name, ref)) ?? null;
-			} catch (err) {
-				if (/NOT_FOUND|not found/i.test(`${(err as { code?: string })?.code ?? ""} ${String(err)}`))
-					throw new Error(`[409] ${agent} has no fork yet: nothing has been pushed`);
-				throw err;
-			}
-		},
+		forkHead: (repo, agent, ref) => forkHead(env, repo, agent, ref),
 		// Start a batch's first check container while the batch is read (see MergeInput.prepareChecks).
-		prepareChecks: (repo) => async (gate) => {
-			const read = await cached(env, repo, `${repo}|read`, () => remoteFor(env.ARTIFACTS, repo, "read", 3600));
-			await rpcRetried(() =>
-				env.GATE.getByName(`repo:${repo}:check:${gate}`).boot({ repo, base: { remote: read.url, token: read.token } }),
-			);
-		},
+		prepareChecks: (repo) => (gate) => bootGate(env, repo, `repo:${repo}:check:${gate}`),
 		// Start the repo's own Gate while a batch is read, so landing finds it running (see MergeInput.prepareLanding).
-		prepareLanding: async (repo) => {
-			const read = await cached(env, repo, `${repo}|read`, () => remoteFor(env.ARTIFACTS, repo, "read", 3600));
-			await rpcRetried(() =>
-				env.GATE.getByName(`repo:${repo}`).boot({ repo, base: { remote: read.url, token: read.token } }),
-			);
-		},
+		prepareLanding: (repo) => bootGate(env, repo, `repo:${repo}`),
 		// A batch's Git work runs in the repo's own Gate container, which never runs a change's code (see BatchGit).
-		batchGit: (repo) => {
-			const gate = () => env.GATE.getByName(`repo:${repo}`);
-			const project = (scope: "read" | "write") =>
-				cached(env, repo, `${repo}|${scope}`, () => remoteFor(env.ARTIFACTS, repo, scope, 3600));
-			const fork = (agent: string) =>
-				cached(env, repo, `fork:${repo}:${agent}|read`, () => changeRemote(env, repo, agent, "read", 3600));
-			const sourceOf = async (c: BatchSource) => {
-				const from = c.source ?? (await fork(c.agent));
-				return { change: c.change, remote: from.url, token: from.token, ref: c.ref };
-			};
-			return {
-				inspect: async ({ base, branch, changes }) => {
-					const read = await project("read");
-					const sources = await Promise.all(changes.map(sourceOf));
-					return rpcRetried(() =>
-						gate().inspectBatch({
-							repo,
-							branch,
-							base: { remote: read.url, token: read.token },
-							baseHead: base,
-							changes: sources,
-						}),
-					);
-				},
-				land: async ({ base, branch, merges, by }) => {
-					const write = await project("write");
-					const sources = await Promise.all(
-						merges.map(async (m) => ({ ...(await sourceOf(m)), head: m.head, claimed: m.claimed })),
-					);
-					// Retry after a brief outage too. The push names the main it lands on, so a batch that already landed
-					// finds main moved.
-					const landed = await rpcRetried<{ commits: string[] } | { moved: true } | { error: string }>(() =>
-						gate().landBatch({
-							repo,
-							branch,
-							base: { remote: write.url, token: write.token },
-							baseHead: base,
-							merges: sources,
-							...(by ? { by } : {}),
-						}),
-					);
-					if ("moved" in landed) return "moved";
-					if ("error" in landed) throw new Error(`[500] landing the batch failed: ${landed.error}`);
-					return { commits: landed.commits };
-				},
-				checksBranch: async ({ base, branch, changes, to, ref }) => {
-					const read = await project("read");
-					const sources = await Promise.all(changes.map(async (c) => ({ ...(await sourceOf(c)), head: c.head })));
-					return rpcRetried<{ tip: string } | { failed: string }>(() =>
-						gate().checksBranch({
-							repo,
-							branch,
-							base: { remote: read.url, token: read.token },
-							baseHead: base,
-							changes: sources,
-							to: { remote: to.url, token: to.token, ...(to.user ? { user: to.user } : {}) },
-							ref,
-						}),
-					);
-				},
-				pushBranch: async ({ branch, head, to }) => {
-					const read = await project("read");
-					const pushed = await rpcRetried<{ pushed: true } | { refused: string }>(() =>
-						gate().pushBranch({
-							repo,
-							branch,
-							base: { remote: read.url, token: read.token },
-							head,
-							to: { remote: to.url, token: to.token, ...(to.user ? { user: to.user } : {}) },
-						}),
-					);
-					if ("refused" in pushed) throw new Error(`pushing ${branch} to ${to.url} was refused: ${pushed.refused}`);
-				},
-			};
-		},
+		batchGit: (repo) => batchGitFor(env, repo),
 		// The landing lease is a record in the repo's first records repo (see landingLog). Outcomes are cached in the
 		// RepoCache.
 		landing: (repo, branch) => {
@@ -432,6 +268,157 @@ export function toolContextFor(
 				settle: (outcomes) => rpcRetried(() => cache().landingSettled(branch, outcomes)),
 				view: () => rpcRetried(() => cache().landingView(branch)),
 			});
+		},
+	};
+}
+
+async function reviewsLog(env: Env, repo: string) {
+	const registry = (await recordsLog<Registry>(env, repo, claimsRef(repo)).read())?.commit.state;
+	const spread = registry?.recordsRepos ?? 0;
+	return spread
+		? recordsLogIn<ReviewHolds>(env, repo, reviewsRepoOf(spread), reviewsRef(repo))
+		: recordsLog<ReviewHolds>(env, repo, reviewsRef(repo));
+}
+
+function checksRunner(env: Env, repo: string): CheckRunner {
+	return async ({ base, branch, changes, commands, gate }) => {
+		const remote = await projectRemote(env, repo, "read");
+		const sourceOf = async (entry: (typeof changes)[number]) => {
+			const from = entry.source ?? (await forkRemote(env, repo, entry.agent, "read"));
+			return { remote: from.url, token: from.token, ref: entry.ref };
+		};
+		const last = changes.at(-1)!;
+		const ahead = await Promise.all(
+			changes.slice(0, -1).map(async (entry) => ({ head: entry.head, ...(await sourceOf(entry)) })),
+		);
+		const forkOf = await sourceOf(last);
+		const name = gate ? `repo:${repo}:check:${gate}` : `repo:${repo}:change:${last.change}`;
+		const result = await rpcRetried(() =>
+			env.GATE.getByName(name).checkCommit({
+				repo,
+				branch,
+				base: { remote: remote.url, token: remote.token },
+				fork: forkOf,
+				head: last.head,
+				checks: commands,
+				baseHead: base,
+				ahead,
+			}),
+		);
+		const conflict = result.mergeConflict
+			? [
+					{
+						command: "(merging the batch onto main)",
+						exitCode: 1,
+						output: `conflicts in ${result.mergeConflict.join(", ")}`,
+					},
+				]
+			: [];
+		const checks = result.results.map((check) => ({
+			command: check.command,
+			exitCode: check.exitCode,
+			output: check.output,
+		}));
+		return { passed: result.passed, results: [...conflict, ...checks] };
+	};
+}
+
+function readBranchCommits(env: Env, repo: string, baseline: string, branch: string) {
+	const cache = () => env.REPO_CACHE.getByName(`repo:${repo}`);
+	// The cache is optional. Without it, each merge's files are worked out again.
+	const kept = {
+		get: (commits: string[]) => rpc(cache().keptFiles(commits)).catch(() => ({})),
+		put: (files: Record<string, string[]>) =>
+			cache()
+				.keepFiles(files)
+				.catch(() => undefined),
+	};
+	return withHistory(env.ARTIFACTS, repo, (source) => readBranchHistory(source, baseline, branch, kept));
+}
+
+async function forkHead(env: Env, repo: string, agent: string, ref: string) {
+	const name = await forkName(repo, agent);
+	try {
+		return (await headOf(env.ARTIFACTS, name, ref)) ?? null;
+	} catch (err) {
+		if (/NOT_FOUND|not found/i.test(`${(err as { code?: string })?.code ?? ""} ${String(err)}`))
+			throw new Error(`[409] ${agent} has no fork yet: nothing has been pushed`);
+		throw err;
+	}
+}
+
+function batchGitFor(env: Env, repo: string): BatchGit {
+	const gate = () => env.GATE.getByName(`repo:${repo}`);
+	const project = (scope: "read" | "write") => projectRemote(env, repo, scope);
+	const sourceOf = async (entry: BatchSource) => {
+		const from = entry.source ?? (await forkRemote(env, repo, entry.agent, "read"));
+		return { change: entry.change, remote: from.url, token: from.token, ref: entry.ref };
+	};
+	const pushTarget = (to: Remote) => ({ remote: to.url, token: to.token, ...(to.user ? { user: to.user } : {}) });
+	return {
+		inspect: async ({ base, branch, changes }) => {
+			const read = await project("read");
+			const sources = await Promise.all(changes.map(sourceOf));
+			return rpcRetried(() =>
+				gate().inspectBatch({
+					repo,
+					branch,
+					base: { remote: read.url, token: read.token },
+					baseHead: base,
+					changes: sources,
+				}),
+			);
+		},
+		land: async ({ base, branch, merges, by }) => {
+			const write = await project("write");
+			const sources = await Promise.all(
+				merges.map(async (merge) => ({ ...(await sourceOf(merge)), head: merge.head, claimed: merge.claimed })),
+			);
+			// Retry after a brief outage too. The push names the main it lands on, so a batch that already landed
+			// finds main moved.
+			const landed = await rpcRetried<{ commits: string[] } | { moved: true } | { error: string }>(() =>
+				gate().landBatch({
+					repo,
+					branch,
+					base: { remote: write.url, token: write.token },
+					baseHead: base,
+					merges: sources,
+					...(by ? { by } : {}),
+				}),
+			);
+			if ("moved" in landed) return "moved";
+			if ("error" in landed) throw new Error(`[500] landing the batch failed: ${landed.error}`);
+			return { commits: landed.commits };
+		},
+		checksBranch: async ({ base, branch, changes, to, ref }) => {
+			const read = await project("read");
+			const sources = await Promise.all(
+				changes.map(async (entry) => ({ ...(await sourceOf(entry)), head: entry.head })),
+			);
+			return rpcRetried<{ tip: string } | { failed: string }>(() =>
+				gate().checksBranch({
+					repo,
+					branch,
+					base: { remote: read.url, token: read.token },
+					baseHead: base,
+					changes: sources,
+					to: pushTarget(to),
+					ref,
+				}),
+			);
+		},
+		pushBranch: async ({ branch, head, to }) => {
+			const read = await project("read");
+			const pushed = await rpcRetried<{ pushed: true } | { refused: string }>(() =>
+				gate().pushBranch({
+					repo,
+					branch,
+					base: { remote: read.url, token: read.token },
+					head,
+					to: pushTarget(to),
+				}),
+			);
+			if ("refused" in pushed) throw new Error(`pushing ${branch} to ${to.url} was refused: ${pushed.refused}`);
 		},
 	};
 }
@@ -447,13 +434,13 @@ export function landingLog(env: Env, repo: string, branch: string) {
 	return lazyLog(async () => {
 		const name = recordsRepoName(repo, LANDING_RECORDS_REPO);
 		let made = landingRepos.get(name);
-		if (!made)
-			landingRepos.set(
-				name,
-				(made = ensureRepo(env.ARTIFACTS, name, `Claim records for ${repo}`).catch(
-					(err) => (landingRepos.delete(name), Promise.reject(err)),
-				)),
-			);
+		if (!made) {
+			made = ensureRepo(env.ARTIFACTS, name, `Claim records for ${repo}`).catch((err) => {
+				landingRepos.delete(name);
+				return Promise.reject(err);
+			});
+			landingRepos.set(name, made);
+		}
 		await made;
 		return recordsLogIn<LeaseRecord>(env, repo, LANDING_RECORDS_REPO, landingRef(repo, branch));
 	});
@@ -476,7 +463,8 @@ export async function forkName(repo: string, agent: string) {
 			.slice(0, 40) || "agent";
 	if (slug === agent) return `fork--${repo}--agent--${slug}`;
 	const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(agent)));
-	return `fork--${repo}--agent--${slug}-${[...digest.slice(0, 3)].map((b) => b.toString(16).padStart(2, "0")).join("")}`;
+	const hash = [...digest.slice(0, 3)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+	return `fork--${repo}--agent--${slug}-${hash}`;
 }
 
 /**
@@ -484,23 +472,23 @@ export async function forkName(repo: string, agent: string) {
  * seeds are made one at a time in the background when GitHive starts on the project (see RepoCache's fork queue).
  */
 export const FORK_SEEDS = 8;
-export const seedName = (repo: string, k: number) => `fork--${repo}--seed--${k}`;
+export const seedName = (repo: string, index: number) => `fork--${repo}--seed--${index}`;
 
 // The seed an agent's fork prefers, by a stable hash of its name.
 function seedOf(agent: string) {
-	let h = 0x811c9dc5;
-	for (let i = 0; i < agent.length; i++) h = Math.imul(h ^ agent.charCodeAt(i), 0x01000193);
-	return (h >>> 0) % FORK_SEEDS;
+	let hash = 0x811c9dc5;
+	for (let i = 0; i < agent.length; i++) hash = Math.imul(hash ^ agent.charCodeAt(i), 0x01000193);
+	return (hash >>> 0) % FORK_SEEDS;
 }
 
 /** Fork-queue items for all of a repo's seeds. */
-export const seedItems = () => Array.from({ length: FORK_SEEDS }, (_, k) => `seed:${k}`);
+export const seedItems = () => Array.from({ length: FORK_SEEDS }, (_, index) => `seed:${index}`);
 
-/** Makes seed `k` of `repo` from the project repo, or waits for it if it's being made. */
-export async function makeSeed(env: Env, repo: string, k: number) {
-	const name = seedName(repo, k);
+/** Makes seed `index` of `repo` from the project repo, or waits for it if it's being made. */
+export async function makeSeed(env: Env, repo: string, index: number) {
+	const name = seedName(repo, index);
 	await remoteFor(env.ARTIFACTS, name, "read", 60).catch(() =>
-		forkAndWait(env.ARTIFACTS, repo, name, `seed ${k} for forks of ${repo}`, { shared: true }),
+		forkAndWait(env.ARTIFACTS, repo, name, `seed ${index} for forks of ${repo}`, { shared: true }),
 	);
 }
 
@@ -510,20 +498,18 @@ export async function makeSeed(env: Env, repo: string, k: number) {
  */
 export async function makeAgentFork(env: Env, repo: string, agent: string) {
 	const name = await forkName(repo, agent);
-	if (
-		await remoteFor(env.ARTIFACTS, name, "read", 60).then(
-			() => true,
-			() => false,
-		)
-	)
-		return;
+	const exists = await remoteFor(env.ARTIFACTS, name, "read", 60).then(
+		() => true,
+		() => false,
+	);
+	if (exists) return;
 	const cache = env.REPO_CACHE?.getByName(`repo:${repo}`);
 	const ready = (cache ? await rpc(cache.readySeeds()).catch(() => [] as number[]) : []) ?? [];
 	if (!ready.length) await cache?.queueForks(repo, seedItems()).catch(() => undefined);
 	const own = seedOf(agent);
-	const seeds = [...ready]
-		.sort((a, b) => ((a - own + FORK_SEEDS) % FORK_SEEDS) - ((b - own + FORK_SEEDS) % FORK_SEEDS))
-		.map((k) => seedName(repo, k));
+	// Ready seeds in order from the agent's own, wrapping around.
+	const distance = (seed: number) => (seed - own + FORK_SEEDS) % FORK_SEEDS;
+	const seeds = [...ready].sort((a, b) => distance(a) - distance(b)).map((seed) => seedName(repo, seed));
 	let failure: unknown;
 	for (const source of [...seeds, repo]) {
 		try {
@@ -561,7 +547,7 @@ async function changeBrief(env: Env, repo: string, change: string) {
 		registry,
 		root,
 		remote: async () => read,
-		recordsRemote: (k) => remoteFor(env.ARTIFACTS, recordsRepoName(repo, k), "read", 3 * 3600),
+		recordsRemote: (index) => remoteFor(env.ARTIFACTS, recordsRepoName(repo, index), "read", 3 * 3600),
 	}).read();
 	const own = claims.find((c) => c.change === change);
 	return {
@@ -599,9 +585,9 @@ export async function startHostedReviewers(
 	// By default a general review, and every role that can veto a change to its claim's paths.
 	const roles = input.roles?.length ? input.roles : hostedRoles(effectivePolicy(policy, own?.paths ?? []).vetoes);
 	const from = await source("read");
-	const ws = await Workspace.clone(read, branch);
-	const head = await ws.fetch("change", from, ref);
-	const baseCommit = await ws.mergeBase(await ws.head(), head);
+	const workspace = await Workspace.clone(read, branch);
+	const head = await workspace.fetch("change", from, ref);
+	const baseCommit = await workspace.mergeBase(await workspace.head(), head);
 	const review = {
 		...job,
 		remote: from.url,
@@ -656,18 +642,11 @@ export async function hostedAgentStatus(
 				)
 			: [],
 	]);
-	return {
-		...(builder
-			? {
-					builder: {
-						status: builder.status,
-						revisions: builder.revisions,
-						...(builder.error ? { error: builder.error } : {}),
-					},
-				}
-			: {}),
-		reviewers: reviewers.flatMap(({ role, state }) =>
-			state ? [{ role, status: state.status, ...(state.verdict ? { verdict: state.verdict } : {}) }] : [],
-		),
-	};
+	const reviewerStatus = reviewers.flatMap(({ role, state }) =>
+		state ? [{ role, status: state.status, ...(state.verdict ? { verdict: state.verdict } : {}) }] : [],
+	);
+	if (!builder) return { reviewers: reviewerStatus };
+	const builderStatus: HostedStatus["builder"] = { status: builder.status, revisions: builder.revisions };
+	if (builder.error) builderStatus.error = builder.error;
+	return { builder: builderStatus, reviewers: reviewerStatus };
 }

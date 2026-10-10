@@ -15,7 +15,7 @@ export const reviewTools: ToolHandlers = {
 		// If one record would hold reviewers up, shard the votes first.
 		const commit = requiredString(args, "commit");
 		const teams = (await ctx.teamsOf?.(repo)) ?? [];
-		const cast = await votesFor(ctx, repo, await shardVotesIfBusy(ctx, repo, registered, reviewer)).vote(
+		const outcome = await votesFor(ctx, repo, await shardVotesIfBusy(ctx, repo, registered, reviewer)).vote(
 			{
 				commit,
 				reviewer,
@@ -29,7 +29,7 @@ export const reviewTools: ToolHandlers = {
 		// The review is done, so drop the hold review_access placed.
 		await ctx.reviews?.release(repo, holdKey(commit, requiredString(args, "role")), reviewer).catch(() => undefined);
 		if (verdict === "approve") await warmChecks("approved", commit);
-		return cast;
+		return outcome;
 	},
 	async review_access({ args, ctx, repo, acting, branch, changeOf, claimOf, changeSource }) {
 		// Anyone may review, with read-only access to the change's branch in its author's fork.
@@ -69,14 +69,15 @@ export const reviewTools: ToolHandlers = {
 			throw new Error("[403] GitHive's hosted agents are by invitation: ask an admin to add you");
 		const change = requiredString(args, "change");
 		const registry = registered;
-		if (!(await claimOf(change))) throw new Error(`[409] ${change} holds no claim: claim the change's paths first`);
+		const claim = await claimOf(change);
+		if (!claim) throw new Error(`[409] ${change} holds no claim: claim the change's paths first`);
 		if (!ctx.requestReview) throw new Error("[501] hosted reviewers aren't available here");
-		const policy = branchSettings(registry, (await claimOf(change))?.into).policy;
+		const policy = branchSettings(registry, claim.into).policy;
 		// By default a general review, and every role that can veto a change to these paths.
 		const roles =
 			Array.isArray(args.roles) && args.roles.length
 				? (args.roles as string[])
-				: hostedRoles(effectivePolicy(policy, (await claimOf(change))?.paths ?? []).vetoes);
+				: hostedRoles(effectivePolicy(policy, claim.paths).vetoes);
 		return ctx.requestReview({
 			repo,
 			change,

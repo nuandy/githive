@@ -35,7 +35,8 @@ export async function appendRecord<S, Refusal>(
 		const tip = await log.append(head?.tip ?? null, commit);
 		if (tip) return { ok: true, tip };
 		if (attempt === ATTEMPTS) {
-			const which = (log as { ref?: string }).ref ? ` (${(log as { ref?: string }).ref})` : "";
+			const ref = (log as { ref?: string }).ref;
+			const which = ref ? ` (${ref})` : "";
 			throw new Error(
 				log.lastRefusal === "busy"
 					? `[503] the Git server stayed busy${which}; try again`

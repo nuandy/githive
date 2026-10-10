@@ -81,14 +81,14 @@ export async function changeStatus(
 	// The branch it lands on decides the policy too (see branch-rules.ts).
 	const policy = branchSettings(registry, author?.into).policy;
 	const { required, vetoes } = effectivePolicy(policy, paths);
-	const cast = head ? (await votesOn(head)).filter((v) => v.commit === head) : [];
+	const votesCast = head ? (await votesOn(head)).filter((vote) => vote.commit === head) : [];
 	const outcome = head
-		? approval({ votes: await countedVotes(cast, registry?.stampKey) }, head, policy, author, paths)
+		? approval({ votes: await countedVotes(votesCast, registry?.stampKey) }, head, policy, author, paths)
 		: { approved: false, approvals: 0, vetoedBy: [], awaiting: vetoes };
 	const hosted = ctx.agentStatus
 		? await ctx.agentStatus(repo, change, head, hostedRoles(vetoes)).catch(() => undefined)
 		: undefined;
-	return { head, votes: cast, approval: { ...outcome, required }, ...(hosted ? { hosted } : {}) };
+	return { head, votes: votesCast, approval: { ...outcome, required }, ...(hosted ? { hosted } : {}) };
 }
 
 /**
@@ -105,22 +105,18 @@ export function changeSigns(input: {
 }): ChangeSigns {
 	const { claim, head } = input;
 	const counted = head ? input.counted.filter((v) => v.commit === head && v.reviewer !== claim.agent) : [];
-	const outcome = head
-		? approval(
-				{ votes: counted },
-				head,
-				input.policy,
-				{ agent: claim.agent, ...(claim.by ? { by: claim.by } : {}) },
-				claim.paths,
-			)
-		: undefined;
+	const author = { agent: claim.agent, ...(claim.by ? { by: claim.by } : {}) };
+	const outcome = head ? approval({ votes: counted }, head, input.policy, author, claim.paths) : undefined;
+	const batched = input.landing?.checking?.changes.some(
+		(landing) => landing.change === claim.change && landing.head === head,
+	);
 	return {
 		active: claim.active,
 		head,
 		votes: counted.map((v) => ({ verdict: v.verdict, at: v.at })),
 		approved: !!outcome?.approved,
 		vetoed: !!outcome?.vetoedBy.length,
-		landing: !!head && !!input.landing?.checking?.changes.some((c) => c.change === claim.change && c.head === head),
+		landing: !!head && !!batched,
 		asked: !!openFlag(input.record, claim.change, head),
 	};
 }

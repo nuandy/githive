@@ -4,31 +4,19 @@ import { artifactsInspect } from "../batch-reads";
 import { scopeFile } from "../branch-scope";
 import { checkChange } from "../check";
 import { lastLandedOn } from "../landing";
-import { type Candidate, mergeChange } from "../merge";
-import type { ToolHandlers } from "./context";
+import type { GitHubLink } from "../../github";
+import type { ClaimRecord, Registry } from "../claims";
+import { type BatchGit, type Candidate, mergeChange, type MergeInput } from "../merge";
+import type { ToolCall, ToolContext, ToolHandlers } from "./context";
 import { mayActAs } from "./identity";
 import { branchSettings } from "./repo";
 
 // Tools for landing a change: check, merge, and credentials for pushing to a fork.
 
 export const mergeTools: ToolHandlers = {
-	async merge({
-		args,
-		ctx,
-		repo,
-		write,
-		votes,
-		registered,
-		agentArg,
-		stamper,
-		store,
-		branch,
-		adviceView,
-		claimOf,
-		waitingOn,
-		changeSource,
-		openHeads,
-	}) {
+	async merge(call) {
+		const { args, ctx, repo, write, votes, registered, agentArg, stamper, store, branch } = call;
+		const { claimOf, waitingOn, changeSource } = call;
 		// mergeChange reads the claims again itself, when it checks them.
 		const registry = registered;
 		// Anyone may merge a change whose conventions hold. It merges as its agent; the stamp says who asked.
@@ -43,20 +31,15 @@ export const mergeTools: ToolHandlers = {
 		const waits = await waitingOn(own?.after ?? [], into);
 		if (waits.length) return { ok: false, reasons: waits };
 		// A repo connected to GitHub may run its checks on Actions, and gets main pushed back after each landing.
-		const checksHere = branchSettings(registry, into).verify;
-		const link =
-			registry?.github && ctx.github
-				? await ctx
-						.github(registry.github.repo)
-						.catch((err) => (console.error(`reaching ${registry.github!.repo} on GitHub failed`, String(err)), null))
-				: null;
-		if (onActions(checksHere) && !link)
-			return {
-				ok: false,
-				reasons: [
-					`checks run on GitHub Actions, but ${registry?.github ? `GitHive can't reach ${registry.github.repo}: is the GitHive app installed there?` : "no GitHub repo is connected (settings github)"}`,
-				],
-			};
+		const settings = branchSettings(registry, into);
+		const checksOnActions = onActions(settings.verify);
+		const link = await githubLink(ctx, registry);
+		if (checksOnActions && !link) {
+			const why = registry?.github
+				? `GitHive can't reach ${registry.github.repo}: is the GitHive app installed there?`
+				: "no GitHub repo is connected (settings github)";
+			return { ok: false, reasons: [`checks run on GitHub Actions, but ${why}`] };
+		}
 		const project = await write();
 		// The repo's Gate (a container running real git) lands every batch and does its GitHub pushes. Changes are
 		// read through Artifacts' API here; the Gate reads only those it can't place (see artifactsInspect).
@@ -67,36 +50,14 @@ export const mergeTools: ToolHandlers = {
 		return mergeChange({
 			remote: project,
 			branch: into,
-			...(into !== branch ? { scope: (file: string) => scopeFile(file, into, branch) } : {}),
 			store,
 			votes,
-			policy: branchSettings(registry, into).policy,
-			verify: branchSettings(registry, into).verify,
-			...(registry?.skipChecks ? { skipChecks: registry.skipChecks } : {}),
-			runChecks: onActions(checksHere) && link ? actionsChecks(gate, link) : ctx.runChecks?.(repo),
-			...(ctx.branchHead ? { branchHead: () => ctx.branchHead!(repo, into) } : {}),
-			...(ctx.landing ? { landing: ctx.landing(repo, into) } : {}),
+			policy: settings.policy,
+			verify: settings.verify,
+			runChecks: checksOnActions && link ? actionsChecks(gate, link) : ctx.runChecks?.(repo),
 			batchGit,
-			...(ctx.history ? { history: ctx.history } : {}),
-			...(ctx.prepareLanding ? { prepareLanding: () => ctx.prepareLanding!(repo) } : {}),
-			...(ctx.prepareChecks && !onActions(checksHere) ? { prepareChecks: ctx.prepareChecks(repo) } : {}),
-			// Push the landed branch back to GitHub as a fast-forward, refused if someone pushed there directly.
-			...(link && into === branch ? { afterLanding: (commit: string) => mirrorTo(gate, link, into, commit) } : {}),
-			// Other changes ready for this branch, from the cached advice: claims in force whose dependencies
-			// have merged. The batch checks each again before landing.
-			others: async (): Promise<Candidate[]> => {
-				const inForce = await adviceView();
-				const merged = new Set(inForce.merged);
-				const sameBranch = inForce.claims.filter(
-					(c) => (c.into ?? branch) === into && c.change !== change && (c.after ?? []).every((dep) => merged.has(dep)),
-				);
-				const heads = await openHeads(inForce.claims);
-				return sameBranch.map((claim) => ({
-					claim,
-					head: heads(claim),
-					source: () => changeSource(claim.agent, "read", claim.change, claim.since),
-				}));
-			},
+			...optionalMergeInput(call, { into, link, gate, checksOnActions }),
+			others: () => otherCandidates(call, change, into),
 			stamper,
 			stampKey: registry?.stampKey,
 			source: await changeSource(holder ?? agentArg("agent"), "read", change, own?.since),
@@ -121,18 +82,14 @@ export const mergeTools: ToolHandlers = {
 		});
 		// On a conflict, name who last changed each file, as the landing remembers it.
 		const conflicting = checked.main.clean ? [] : (checked.main.conflicts ?? []);
-		const causes =
-			conflicting.length && ctx.landing
-				? lastLandedOn(
-						(
-							await ctx
-								.landing(repo, into)
-								.view()
-								.catch(() => null)
-						)?.recent ?? [],
-						conflicting,
-					)
-				: [];
+		let causes: ReturnType<typeof lastLandedOn> = [];
+		if (conflicting.length && ctx.landing) {
+			const landing = await ctx
+				.landing(repo, into)
+				.view()
+				.catch(() => null);
+			causes = lastLandedOn(landing?.recent ?? [], conflicting);
+		}
 		// Agents check after each push, so note this head for reviews, backlog and merge (see openHeads).
 		await ctx.noteHeads?.(repo, { [change]: checked.head }).catch(() => undefined);
 		// A merge is likely within minutes of a check, so warm the check container now.
@@ -156,13 +113,64 @@ export const mergeTools: ToolHandlers = {
 		// starts from the project's branch, which `project` gives read access to.
 		const [remote, project] = await Promise.all([changeSource(own.agent, "write"), ctx.remote(repo, "read")]);
 		const into = own.into ?? branch;
+		const elsewhere = into !== branch ? `: this change lands on ${into}, not ${branch}` : "";
 		return {
 			url: remote.url,
 			token: remote.token,
 			branch: `changes/${change}`,
 			project: { url: project.url, token: project.token, branch: into },
 			...(into !== branch ? { into } : {}),
-			note: `Your own fork, for all your changes: push this change's branch changes/${change} to it. Start the branch from the project's ${into} (project), not the fork's, which may be behind${into !== branch ? `: this change lands on ${into}, not ${branch}` : ""}.`,
+			note: `Your own fork, for all your changes: push this change's branch changes/${change} to it. Start the branch from the project's ${into} (project), not the fork's, which may be behind${elsewhere}.`,
 		};
 	},
 };
+
+// The connected GitHub repo, or null if there is none or it can't be reached.
+async function githubLink(ctx: ToolContext, registry: Registry | undefined): Promise<GitHubLink | null> {
+	if (!registry?.github || !ctx.github) return null;
+	const repo = registry.github.repo;
+	return ctx.github(repo).catch((err) => {
+		console.error(`reaching ${repo} on GitHub failed`, String(err));
+		return null;
+	});
+}
+
+// The parts of a merge this context and branch provide: branch scoping, cached heads, the landing, early starts and
+// pushing back to GitHub.
+function optionalMergeInput(
+	call: ToolCall,
+	at: { into: string; link: GitHubLink | null; gate: BatchGit; checksOnActions: boolean },
+): Partial<MergeInput> {
+	const { ctx, repo, registered, branch } = call;
+	const { into, link, gate } = at;
+	const optional: Partial<MergeInput> = {};
+	if (into !== branch) optional.scope = (file: string) => scopeFile(file, into, branch);
+	if (registered?.skipChecks) optional.skipChecks = registered.skipChecks;
+	if (ctx.branchHead) optional.branchHead = () => ctx.branchHead!(repo, into);
+	if (ctx.landing) optional.landing = ctx.landing(repo, into);
+	if (ctx.history) optional.history = ctx.history;
+	if (ctx.prepareLanding) optional.prepareLanding = () => ctx.prepareLanding!(repo);
+	if (ctx.prepareChecks && !at.checksOnActions) optional.prepareChecks = ctx.prepareChecks(repo);
+	// Push the landed branch back to GitHub as a fast-forward, refused if someone pushed there directly.
+	if (link && into === branch) optional.afterLanding = (commit: string) => mirrorTo(gate, link, into, commit);
+	return optional;
+}
+
+// Other changes ready for this branch, from the cached advice: claims in force whose dependencies have merged. The
+// batch checks each again before landing.
+async function otherCandidates(call: ToolCall, change: string, into: string): Promise<Candidate[]> {
+	const { adviceView, openHeads, changeSource, branch } = call;
+	const inForce = await adviceView();
+	const merged = new Set(inForce.merged);
+	const ready = (claim: ClaimRecord) =>
+		(claim.into ?? branch) === into &&
+		claim.change !== change &&
+		(claim.after ?? []).every((dependency) => merged.has(dependency));
+	const sameBranch = inForce.claims.filter(ready);
+	const heads = await openHeads(inForce.claims);
+	return sameBranch.map((claim) => ({
+		claim,
+		head: heads(claim),
+		source: () => changeSource(claim.agent, "read", claim.change, claim.since),
+	}));
+}

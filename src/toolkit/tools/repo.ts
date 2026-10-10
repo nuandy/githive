@@ -77,12 +77,13 @@ export function shardingOf(registry: Registry | null | undefined) {
 	return {
 		shardDepth: registry?.shardDepth ?? 0,
 		recordsRepos: registry?.recordsRepos ?? 0,
-		sharding: registry?.shardDepth
-			? { since: registry.shardedAt, because: registry.shardedBecause }
-			: registry?.autoShard
-				? "on demand"
-				: "never",
+		sharding: claimsSharding(registry),
 	};
+}
+
+function claimsSharding(registry: Registry | null | undefined) {
+	if (registry?.shardDepth) return { since: registry.shardedAt, because: registry.shardedBecause };
+	return registry?.autoShard ? "on demand" : "never";
 }
 
 /** Shards the claims if the load calls for it (see shardingReason). Returns the new registry, or null. */
@@ -114,7 +115,7 @@ export function votesFor(
 		root: recordLog<Votes>(ctx, repo, votesRef(repo)),
 		...(rootHead !== undefined ? { rootHead } : {}),
 		remote: () => ctx.remote(repo, "write"),
-		...(ctx.recordsRemote ? { recordsRemote: (k: number) => ctx.recordsRemote!(repo, k, "write") } : {}),
+		...(ctx.recordsRemote ? { recordsRemote: (index: number) => ctx.recordsRemote!(repo, index, "write") } : {}),
 	});
 }
 
@@ -152,7 +153,7 @@ export function storeFor(
 		registry,
 		root: root?.log ?? recordLog<Registry>(ctx, repo, claimsRef(repo)),
 		...(root ? { rootHead: root.head } : {}),
-		...(ctx.recordsRemote ? { recordsRemote: (k: number) => ctx.recordsRemote!(repo, k, "write") } : {}),
+		...(ctx.recordsRemote ? { recordsRemote: (index: number) => ctx.recordsRemote!(repo, index, "write") } : {}),
 		remote: () => ctx.remote(repo, "write"),
 		log: ctx.records ? (ref) => ctx.records!<Registry>(repo, ref) : undefined,
 	});

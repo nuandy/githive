@@ -13,6 +13,7 @@ import type { Landed, Landing } from "../landing";
 import { atMost, type BatchGit, type CheckRunner } from "../merge";
 import { abandoned } from "../staleness";
 import type { Stamper } from "../stamp";
+import type { VoteStore } from "../vote-store";
 import { countedVotes } from "../votes";
 import type { Work } from "../work";
 import { changeHead, changeSigns, changeSourceFor } from "./change-state";
@@ -110,7 +111,7 @@ export interface ToolContext {
 		claims: { change: string; agent: string }[],
 	) => Promise<Record<string, { head: string | null; at: number; pushed?: boolean }>>;
 	/** Records the heads a tool read (null if nothing is pushed), as of `readAt` (default now). */
-	noteHeads?: (repo: string, seen: Record<string, string | null>, readAt?: number) => Promise<void>;
+	noteHeads?: (repo: string, headsRead: Record<string, string | null>, readAt?: number) => Promise<void>;
 	/** A GitHub repo (owner/name) through GitHive's App, or null if the App isn't installed. Unset without GitHub. */
 	github?: (repo: string) => Promise<GitHubLink | null>;
 	/** What landed on a branch since this agent was last told (see RepoCache.landingNews). */
@@ -158,7 +159,7 @@ const HEAD_SEEN_MS = 5 * 60_000;
 const HEAD_PUSHED_MS = 30 * 60_000;
 
 /** How many stale or unseen heads one call reads (see openHeads). */
-const HEADS_READ_A_CALL = 6;
+const HEAD_READS_PER_CALL = 6;
 
 /** Concurrent fork head reads. A Worker request holds at most six connections; the runtime cancels any past that. */
 const HEAD_READS_AT_ONCE = 6;
@@ -184,8 +185,10 @@ export async function openCall(args: Args, ctx: ToolContext, run: RunTool) {
 	// A signed-in agent is who its token says; otherwise an agent key names the agent.
 	const acting = ctx.agent ?? (key ? await keyAgent(registered, key) : undefined);
 	// A signed-in agent may leave its name out.
-	const agentArg = (field: string) =>
-		ctx.agent && !(typeof args[field] === "string" && args[field].trim()) ? ctx.agent : requiredString(args, field);
+	const agentArg = (field: string) => {
+		const given = typeof args[field] === "string" && args[field].trim();
+		return ctx.agent && !given ? ctx.agent : requiredString(args, field);
+	};
 	const actAs = (field: string) => {
 		const agent = agentArg(field);
 		mayActAs(agent, acting, registered, ctx.hosted);
@@ -195,13 +198,14 @@ export async function openCall(args: Args, ctx: ToolContext, run: RunTool) {
 	const store = storeFor(ctx, repo, registered, { log: claims, head: rootHead });
 	// Changes land on the project's branch unless their claim names another with `into`.
 	const branch = projectBranch(registered);
-	const present = <C extends ClaimRecord>(c: C) => presentClaim(c, branch);
+	const present = <C extends ClaimRecord>(claim: C) => presentClaim(claim, branch);
 	let viewing: ReturnType<ClaimStore["read"]> | undefined;
-	const view = () => (viewing ??= store.read().then((v) => ({ ...v, claims: v.claims.map(present) })));
+	const view = () => (viewing ??= store.read().then((stored) => ({ ...stored, claims: stored.claims.map(present) })));
 	const adviceView = async (): Promise<ClaimsAdvice> => {
 		const read = async () => {
-			const v = await view();
-			return { claims: v.claims, merged: v.released.filter((r) => r.mergedAs).map((r) => r.change) };
+			const current = await view();
+			const merged = current.released.filter((release) => release.mergedAs).map((release) => release.change);
+			return { claims: current.claims, merged };
 		};
 		return ctx.keptClaims ? ctx.keptClaims(repo, read) : read();
 	};
@@ -210,106 +214,30 @@ export async function openCall(args: Args, ctx: ToolContext, run: RunTool) {
 		if (!changes.has(change))
 			changes.set(
 				change,
-				store.readChange(change).then((c) => (c.claim ? { ...c, claim: present(c.claim) } : c)),
+				store
+					.readChange(change)
+					.then((stored) => (stored.claim ? { ...stored, claim: present(stored.claim) } : stored)),
 			);
 		return changes.get(change)!;
 	};
 	const claimOf = async (change: string) => (await changeOf(change)).claim;
+	// Why `dependency` still holds up a change into `into`, or null once it merged there.
+	const dependencyWait = async (dependency: string, into: string) => {
+		const merged = (await changeOf(dependency)).released.filter((release) => release.mergedAs).at(-1);
+		if (!merged) return `waits on ${dependency}, which hasn't merged yet`;
+		const landed = merged.into ?? branch;
+		return landed === into ? null : `waits on ${dependency}, which merged into ${landed}, not ${into}`;
+	};
 	// Each dependency in `after` not yet merged into `into`, described for the agent.
-	const waitingOn = async (after: string[], into: string) =>
-		(
-			await Promise.all(
-				after.map(async (dep) => {
-					const merged = (await changeOf(dep)).released.filter((r) => r.mergedAs).at(-1);
-					if (!merged) return `waits on ${dep}, which hasn't merged yet`;
-					const landed = merged.into ?? branch;
-					return landed === into ? null : `waits on ${dep}, which merged into ${landed}, not ${into}`;
-				}),
-			)
-		).filter((w): w is string => !!w);
+	const waitingOn = async (after: string[], into: string) => {
+		const waits = await Promise.all(after.map((dependency) => dependencyWait(dependency, into)));
+		return waits.filter((wait): wait is string => !!wait);
+	};
 	const changeSource = changeSourceFor(ctx, repo);
-	// Null when nothing is pushed (no fork, or no branch on it); undefined when the read failed,
-	// which says nothing either way.
-	const pushedHead = (claim: ClaimRecord) =>
-		changeHead(ctx, repo, claim.agent, claim.change, claim.since).catch((err): null | undefined =>
-			statusOf(err).status === 409 ? null : undefined,
-		);
-	// Open changes' pushed heads: the caller's own (`fresh`) read now, the rest as last seen (see knownHeads).
-	// Reading every fork on every call dominated GitHive's Git traffic, so a call reads only a few stale
-	// heads, least recently seen first. Without knownHeads, all are read.
-	const openHeads = async (claims: ClaimRecord[], fresh: (claim: ClaimRecord) => boolean = () => false) => {
-		const known = ctx.knownHeads
-			? await ctx
-					.knownHeads(
-						repo,
-						claims.map((c) => ({ change: c.change, agent: c.agent })),
-					)
-					.catch(() => undefined)
-			: undefined;
-		const now = Date.now();
-		const seenAt = (c: ClaimRecord) => known?.[c.change]?.at ?? 0;
-		const current = (c: ClaimRecord) => now - seenAt(c) <= (known?.[c.change]?.pushed ? HEAD_PUSHED_MS : HEAD_SEEN_MS);
-		const due = claims.filter((c) => !fresh(c) && !current(c)).sort((a, b) => seenAt(a) - seenAt(b));
-		const reading = known ? [...claims.filter(fresh), ...due.slice(0, HEADS_READ_A_CALL)] : claims;
-		const read = new Map(
-			await atMost(HEAD_READS_AT_ONCE, reading, async (c) => [c.change, await pushedHead(c)] as const),
-		);
-		const seen = Object.fromEntries([...read].filter((r): r is [string, string | null] => r[1] !== undefined));
-		// Timestamped when the reads began, so a push event since then wins.
-		if (Object.keys(seen).length) await ctx.noteHeads?.(repo, seen, now).catch(() => undefined);
-		return (claim: ClaimRecord) => read.get(claim.change) ?? known?.[claim.change]?.head ?? null;
-	};
-	// The repo's open work as `agent` sees it, for reviews and backlog. A change that landed at its current
-	// head counts as merged even before its claim is released, so nobody is offered it to merge again.
-	const openWork = async (agent: string) => {
-		const [inForce, cast, backlog, landing] = await Promise.all([
-			adviceView(),
-			votes.read(),
-			recordLog<Work>(ctx, repo, workRef(repo)).read(),
-			ctx
-				.landing?.(repo, branch)
-				.view()
-				.catch(() => null) ?? null,
-		]);
-		const heads = await openHeads(inForce.claims, (c) => c.agent === agent);
-		const landedNow = new Set(
-			(landing?.recent ?? []).filter((s) => s.how === "landed").map((s) => `${s.change} ${s.head}`),
-		);
-		const landedHere = (claim: ClaimRecord) => !claim.into && landedNow.has(`${claim.change} ${heads(claim)}`);
-		const open = inForce.claims.filter((claim) => !landedHere(claim)).map((claim) => ({ claim, head: heads(claim) }));
-		const counted = await countedVotes(cast.votes, registered?.stampKey);
-		const teams = (await ctx.teamsOf?.(repo)) ?? [];
-		return {
-			agent,
-			...(stamper?.by ? { by: stamper.by } : {}),
-			...(teams.length ? { teams } : {}),
-			policy: registered?.policy ?? DEFAULT_POLICY,
-			// Each change's policy comes from the branch it lands on.
-			policyOf: (claim: ClaimRecord) => branchSettings(registered, claim.into).policy,
-			open,
-			votes: counted,
-			merged: new Set([...inForce.merged, ...inForce.claims.filter(landedHere).map((c) => c.change)]),
-			work: backlog?.commit.state.items ?? [],
-			abandoned: new Set(
-				open
-					.filter(
-						(o) =>
-							abandoned(
-								changeSigns({
-									claim: o.claim,
-									head: o.head,
-									counted,
-									record: cast,
-									landing: o.claim.into ? null : landing,
-									policy: branchSettings(registered, o.claim.into).policy,
-								}),
-								Date.now(),
-							).abandoned,
-					)
-					.map((o) => o.claim.change),
-			),
-		};
-	};
+	const openHeads = (claims: ClaimRecord[], fresh: (claim: ClaimRecord) => boolean = () => false) =>
+		readOpenHeads(ctx, repo, claims, fresh);
+	const openWork = (agent: string) =>
+		readOpenWork({ ctx, repo, branch, registered, stamper, votes, adviceView, openHeads }, agent);
 	// Warm the repo's Gate ahead of a likely merge: for its checks, or without any, for its landing.
 	const warmChecks = async (expect: "claimed" | "checked" | "approved", key: string) => {
 		if (registered?.baseline)
@@ -345,6 +273,112 @@ export async function openCall(args: Args, ctx: ToolContext, run: RunTool) {
 		openHeads,
 		openWork,
 		warmChecks,
+	};
+}
+
+type OpenChange = { claim: ClaimRecord; head: string | null };
+
+// Null when nothing is pushed (no fork, or no branch on it); undefined when the read failed,
+// which says nothing either way.
+const pushedHead = (ctx: ToolContext, repo: string, claim: ClaimRecord) =>
+	changeHead(ctx, repo, claim.agent, claim.change, claim.since).catch((err): null | undefined =>
+		statusOf(err).status === 409 ? null : undefined,
+	);
+
+// Open changes' pushed heads: the caller's own (`fresh`) read now, the rest as last seen (see knownHeads).
+// Reading every fork on every call dominated GitHive's Git traffic, so a call reads only a few stale
+// heads, least recently seen first. Without knownHeads, all are read.
+async function readOpenHeads(
+	ctx: ToolContext,
+	repo: string,
+	claims: ClaimRecord[],
+	fresh: (claim: ClaimRecord) => boolean,
+) {
+	const owners = claims.map((claim) => ({ change: claim.change, agent: claim.agent }));
+	const known = ctx.knownHeads ? await ctx.knownHeads(repo, owners).catch(() => undefined) : undefined;
+	const now = Date.now();
+	const seenAt = (claim: ClaimRecord) => known?.[claim.change]?.at ?? 0;
+	const currentFor = (claim: ClaimRecord) => (known?.[claim.change]?.pushed ? HEAD_PUSHED_MS : HEAD_SEEN_MS);
+	const current = (claim: ClaimRecord) => now - seenAt(claim) <= currentFor(claim);
+	const due = claims.filter((claim) => !fresh(claim) && !current(claim)).sort((a, b) => seenAt(a) - seenAt(b));
+	const reading = known ? [...claims.filter(fresh), ...due.slice(0, HEAD_READS_PER_CALL)] : claims;
+	const read = new Map(
+		await atMost(
+			HEAD_READS_AT_ONCE,
+			reading,
+			async (claim) => [claim.change, await pushedHead(ctx, repo, claim)] as const,
+		),
+	);
+	const headsRead = Object.fromEntries(
+		[...read].filter((entry): entry is [string, string | null] => entry[1] !== undefined),
+	);
+	// Timestamped when the reads began, so a push event since then wins.
+	if (Object.keys(headsRead).length) await ctx.noteHeads?.(repo, headsRead, now).catch(() => undefined);
+	return (claim: ClaimRecord) => read.get(claim.change) ?? known?.[claim.change]?.head ?? null;
+}
+
+// What a call's open work is read from (see readOpenWork).
+interface WorkSources {
+	ctx: ToolContext;
+	repo: string;
+	branch: string;
+	registered: Registry | undefined;
+	stamper: Stamper | undefined;
+	votes: VoteStore;
+	adviceView: () => Promise<ClaimsAdvice>;
+	openHeads: (
+		claims: ClaimRecord[],
+		fresh?: (claim: ClaimRecord) => boolean,
+	) => Promise<(claim: ClaimRecord) => string | null>;
+}
+
+// The repo's open work as `agent` sees it, for reviews and backlog. A change that landed at its current
+// head counts as merged even before its claim is released, so nobody is offered it to merge again.
+async function readOpenWork(sources: WorkSources, agent: string) {
+	const { ctx, repo, branch, registered, stamper, votes, adviceView, openHeads } = sources;
+	const [inForce, votesCast, backlog, landing] = await Promise.all([
+		adviceView(),
+		votes.read(),
+		recordLog<Work>(ctx, repo, workRef(repo)).read(),
+		ctx
+			.landing?.(repo, branch)
+			.view()
+			.catch(() => null) ?? null,
+	]);
+	const heads = await openHeads(inForce.claims, (claim) => claim.agent === agent);
+	const landedNow = new Set(
+		(landing?.recent ?? [])
+			.filter((settled) => settled.how === "landed")
+			.map((settled) => `${settled.change} ${settled.head}`),
+	);
+	const landedHere = (claim: ClaimRecord) => !claim.into && landedNow.has(`${claim.change} ${heads(claim)}`);
+	const open = inForce.claims.filter((claim) => !landedHere(claim)).map((claim) => ({ claim, head: heads(claim) }));
+	const counted = await countedVotes(votesCast.votes, registered?.stampKey);
+	const teams = (await ctx.teamsOf?.(repo)) ?? [];
+	const isAbandoned = ({ claim, head }: OpenChange) =>
+		abandoned(
+			changeSigns({
+				claim,
+				head,
+				counted,
+				record: votesCast,
+				landing: claim.into ? null : landing,
+				policy: branchSettings(registered, claim.into).policy,
+			}),
+			Date.now(),
+		).abandoned;
+	return {
+		agent,
+		...(stamper?.by ? { by: stamper.by } : {}),
+		...(teams.length ? { teams } : {}),
+		policy: registered?.policy ?? DEFAULT_POLICY,
+		// Each change's policy comes from the branch it lands on.
+		policyOf: (claim: ClaimRecord) => branchSettings(registered, claim.into).policy,
+		open,
+		votes: counted,
+		merged: new Set([...inForce.merged, ...inForce.claims.filter(landedHere).map((claim) => claim.change)]),
+		work: backlog?.commit.state.items ?? [],
+		abandoned: new Set(open.filter(isAbandoned).map((change) => change.claim.change)),
 	};
 }
 

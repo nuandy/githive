@@ -25,29 +25,27 @@ export function artifactsInspect(
 	return async ({ base, branch, changes }) => {
 		const chain = await branchChain(history, project, branch, base);
 		if (!chain) return fallback({ base, branch, changes });
-		const onBranch = new Map(chain.map((c, i) => [c.hash, i]));
-		const read = await atMost(READS_AT_ONCE, changes, async (c): Promise<Inspected | null> => {
+		const onBranch = positions(chain);
+		const inspected = await atMost(READS_AT_ONCE, changes, async (entry): Promise<Inspected | null> => {
 			try {
-				return await history(c.source ? repoOfUrl(c.source.url) : project, (source) =>
-					readChange(source, c.change, c.ref, chain, onBranch),
+				return await history(entry.source ? repoOfUrl(entry.source.url) : project, (source) =>
+					readChange(source, entry.change, entry.ref, chain, onBranch),
 				);
 			} catch (err) {
-				return { change: c.change, error: String(err) };
+				return { change: entry.change, error: String(err) };
 			}
 		});
-		const unplaced = changes.filter((_, i) => read[i] === null);
-		if (!unplaced.length) return read as Inspected[];
+		const unplaced = changes.filter((_, index) => inspected[index] === null);
+		if (!unplaced.length) return inspected as Inspected[];
 		const fetched = await fallback({ base, branch, changes: unplaced });
-		return read.map(
-			(r, i) =>
-				r ??
-				fetched.find((f) => f.change === changes[i].change) ?? {
-					change: changes[i].change,
-					error: "its branch couldn't be read",
-				},
-		);
+		const fromGate = (change: string): Inspected =>
+			fetched.find((result) => result.change === change) ?? { change, error: "its branch couldn't be read" };
+		return inspected.map((result, index) => result ?? fromGate(changes[index].change));
 	};
 }
+
+// Each commit's index on the chain, newest first.
+const positions = (chain: CommitMeta[]) => new Map(chain.map((commit, index) => [commit.hash, index]));
 
 // When the branch has moved past the cached chain, this many commits usually cover what landed since.
 const NEWER_PAGE = 64;
@@ -123,7 +121,9 @@ async function placeChange(
 	const head = own[0];
 	if (!head) return { error: "its branch couldn't be read" };
 	let newest: number | undefined;
-	const reached = (i: number) => (newest = newest === undefined ? i : Math.min(newest, i));
+	const reached = (index: number) => {
+		newest = newest === undefined ? index : Math.min(newest, index);
+	};
 	let left = false;
 	for (const commit of own) {
 		const at = onBranch.get(commit.hash);
@@ -157,7 +157,7 @@ export async function changeAgainst(
 ): Promise<{ head: string; files: string[]; both: string[] } | { error: string } | null> {
 	const chain = await branchChain(history, project, branch, main);
 	if (!chain) return null;
-	const onBranch = new Map(chain.map((c, i) => [c.hash, i]));
+	const onBranch = positions(chain);
 	const placed = await history(change.source ? repoOfUrl(change.source.url) : project, (source) =>
 		placeChange(source, change.ref, chain, onBranch),
 	);
@@ -171,7 +171,7 @@ export async function changeAgainst(
 	return {
 		head: placed.head.hash,
 		files: placed.files,
-		both: placed.files.filter((f) => theirs.some((t) => touches(f, t))),
+		both: placed.files.filter((file) => theirs.some((theirFile) => touches(file, theirFile))),
 	};
 }
 
@@ -186,12 +186,12 @@ export async function landedOn(
 	main: string,
 	heads: string[],
 ): Promise<Map<string, string>> {
-	const on = new Map<string, string>();
+	const landed = new Map<string, string>();
 	const chain = await branchChain(history, project, branch, main);
-	if (!chain || !heads.length) return on;
+	if (!chain || !heads.length) return landed;
 	const wanted = new Set(heads);
 	for (const commit of chain)
 		for (const merged of commit.parents.slice(1))
-			if (wanted.has(merged) && !on.has(merged)) on.set(merged, commit.hash);
-	return on;
+			if (wanted.has(merged) && !landed.has(merged)) landed.set(merged, commit.hash);
+	return landed;
 }

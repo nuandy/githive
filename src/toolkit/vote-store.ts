@@ -47,7 +47,7 @@ export interface VoteStoreInput {
 	rootHead?: Awaited<ReturnType<CasLog<Votes>["read"]>>;
 	remote: () => Promise<Remote>;
 	/** Credentials for a records repo, when the buckets are spread over records repos. */
-	recordsRemote?: (k: number) => Promise<Remote>;
+	recordsRemote?: (repoIndex: number) => Promise<Remote>;
 }
 
 type Entry = { bucket: string; tip: string; state: Votes };
@@ -86,21 +86,20 @@ class BucketedVotes implements VoteStore {
 		return this.spread ? recordsRepoOf(`votes:${bucket}`, this.spread) : -1;
 	}
 
-	private remote(k: number) {
-		return k < 0 ? this.input.remote() : this.input.recordsRemote!(k);
+	private remote(repoIndex: number) {
+		return repoIndex < 0 ? this.input.remote() : this.input.recordsRemote!(repoIndex);
 	}
 
 	private logOf(bucket: string) {
 		let log = this.logs.get(bucket);
-		if (!log)
-			this.logs.set(
-				bucket,
-				(log = new GitCasLog<Votes>(
-					() => this.remote(this.repoOf(bucket)),
-					this.input.repo,
-					bucketRef(this.input.repo, bucket),
-				)),
+		if (!log) {
+			log = new GitCasLog<Votes>(
+				() => this.remote(this.repoOf(bucket)),
+				this.input.repo,
+				bucketRef(this.input.repo, bucket),
 			);
+			this.logs.set(bucket, log);
+		}
 		return log;
 	}
 
@@ -114,9 +113,11 @@ class BucketedVotes implements VoteStore {
 
 	private async readAll(): Promise<Entry[]> {
 		const prefix = votesPrefix(this.input.repo);
-		const repos = this.spread ? Array.from({ length: this.spread }, (_, k) => k) : [-1];
-		const read = await Promise.all(repos.map(async (k) => readAllShards<Votes>(await this.remote(k), prefix)));
-		return read.flat().map((e) => ({ bucket: e.ref.slice(prefix.length), tip: e.tip, state: e.state }));
+		const repos = this.spread ? Array.from({ length: this.spread }, (_, repoIndex) => repoIndex) : [-1];
+		const read = await Promise.all(
+			repos.map(async (repoIndex) => readAllShards<Votes>(await this.remote(repoIndex), prefix)),
+		);
+		return read.flat().map((entry) => ({ bucket: entry.ref.slice(prefix.length), tip: entry.tip, state: entry.state }));
 	}
 
 	private async readBuckets(buckets: string[]): Promise<Entry[]> {
@@ -125,14 +126,14 @@ class BucketedVotes implements VoteStore {
 			byRepo.set(this.repoOf(bucket), [...(byRepo.get(this.repoOf(bucket)) ?? []), bucket]);
 		const prefix = votesPrefix(this.input.repo);
 		const read = await Promise.all(
-			[...byRepo].map(async ([k, group]) =>
+			[...byRepo].map(async ([repoIndex, group]) =>
 				readRefs<Votes>(
-					await this.remote(k),
-					group.map((b) => bucketRef(this.input.repo, b)),
+					await this.remote(repoIndex),
+					group.map((bucket) => bucketRef(this.input.repo, bucket)),
 				),
 			),
 		);
-		return read.flat().map((e) => ({ bucket: e.ref.slice(prefix.length), tip: e.tip, state: e.state }));
+		return read.flat().map((entry) => ({ bucket: entry.ref.slice(prefix.length), tip: entry.tip, state: entry.state }));
 	}
 
 	private viewOf(entries: Entry[]): VotesView {
@@ -153,15 +154,15 @@ class BucketedVotes implements VoteStore {
 
 	async readFor(commits: string[]) {
 		const root = await this.readRoot();
-		return this.viewOf([
-			...root,
-			...(this.buckets && commits.length ? await this.readBuckets(commits.map((c) => bucketOf(c, this.buckets))) : []),
-		]);
+		if (!this.buckets || !commits.length) return this.viewOf(root);
+		const buckets = await this.readBuckets(commits.map((commit) => bucketOf(commit, this.buckets)));
+		return this.viewOf([...root, ...buckets]);
 	}
 
 	async vote(input: Omit<VoteRecord, "at" | "by" | "stamp">, stamper?: Stamper) {
 		await this.readRoot();
-		return vote(this.buckets ? this.logOf(bucketOf(input.commit, this.buckets)) : this.input.root, input, stamper);
+		const log = this.buckets ? this.logOf(bucketOf(input.commit, this.buckets)) : this.input.root;
+		return vote(log, input, stamper);
 	}
 
 	flag(input: Omit<FlagRecord, "at" | "by" | "stamp">, stamper?: Stamper) {

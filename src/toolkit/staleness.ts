@@ -34,7 +34,7 @@ export interface Waiting {
 
 const later = (a: string, b?: string) => (b && Date.parse(b) > Date.parse(a) ? b : a);
 const latest = (times: string[]) =>
-	times.reduce<string | undefined>((max, t) => (!max || Date.parse(t) > Date.parse(max) ? t : max), undefined);
+	times.reduce<string | undefined>((max, time) => (!max || Date.parse(time) > Date.parse(max) ? time : max), undefined);
 
 export function waitingOn(signs: ChangeSigns): Waiting {
 	if (signs.asked) return { turn: "person", why: "waits on a person" };

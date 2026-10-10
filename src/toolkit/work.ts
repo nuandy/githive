@@ -38,35 +38,37 @@ export function addWork(log: CasLog<Work>, input: Omit<WorkItem, "at">) {
 		log,
 		input.by,
 		() => ({ items: [] }),
-		(state) =>
-			state.items.some((i) => i.id === input.id)
-				? { refused: `${input.id} is in the backlog already` }
-				: {
-						state: { items: [...state.items, { ...input, at: new Date().toISOString() }] },
-						text: `${input.by} adds ${input.id} to the backlog: ${input.title}`,
-					},
+		(state) => {
+			if (state.items.some((item) => item.id === input.id)) return { refused: `${input.id} is in the backlog already` };
+			return {
+				state: { items: [...state.items, { ...input, at: new Date().toISOString() }] },
+				text: `${input.by} adds ${input.id} to the backlog: ${input.title}`,
+			};
+		},
 	);
 }
 
 /** Adds several items in one write. Items whose ids are taken are left alone and returned in `already`. */
 export async function addWorks(log: CasLog<Work>, by: string, items: Omit<WorkItem, "at" | "by">[]) {
 	let already: string[] = [];
-	const added = await appendRecord<Work, string>(
+	const outcome = await appendRecord<Work, string>(
 		log,
 		by,
 		() => ({ items: [] }),
 		(state) => {
-			already = items.filter((i) => state.items.some((s) => s.id === i.id)).map((i) => i.id);
-			const fresh = items.filter((i) => !already.includes(i.id));
+			const taken = (item: { id: string }) => state.items.some((existing) => existing.id === item.id);
+			already = items.filter(taken).map((item) => item.id);
+			const fresh = items.filter((item) => !already.includes(item.id));
 			if (!fresh.length) return { refused: "all of them are in the backlog already" };
 			const at = new Date().toISOString();
 			return {
-				state: { items: [...state.items, ...fresh.map((i) => ({ ...i, by, at }))] },
-				text: `${by} adds ${fresh.map((i) => i.id).join(", ")} to the backlog`,
+				state: { items: [...state.items, ...fresh.map((item) => ({ ...item, by, at }))] },
+				text: `${by} adds ${fresh.map((item) => item.id).join(", ")} to the backlog`,
 			};
 		},
 	);
-	return { ok: added.ok, added: added.ok ? items.map((i) => i.id).filter((id) => !already.includes(id)) : [], already };
+	const added = outcome.ok ? items.map((item) => item.id).filter((id) => !already.includes(id)) : [];
+	return { ok: outcome.ok, added, already };
 }
 
 export interface WorkInput {
@@ -111,46 +113,10 @@ export interface ReviewOption {
  * need an approval it can give. Its own holds come first, then blocking roles, fewest approvals and oldest.
  */
 export function reviewsFor(input: WorkInput): ReviewOption[] {
-	const { agent, votes } = input;
-	const policyOf = (claim: ClaimRecord) => input.policyOf?.(claim) ?? input.policy;
-	const authorOf = (c: ClaimRecord): Author => ({ agent: c.agent, ...(c.by ? { by: c.by } : {}) });
-	const on = (head: string) => votes.filter((v) => v.commit === head);
+	const { agent } = input;
 	const options = input.open
-		.filter((o): o is { claim: ClaimRecord; head: string } => !!o.head && o.claim.agent !== agent)
-		.flatMap(({ claim, head }) => {
-			const cast = on(head);
-			if (cast.some((v) => v.reviewer === agent || (!!input.by && v.by === input.by))) return [];
-			if (cast.some((v) => v.verdict === "reject" && v.reviewer !== claim.agent)) return [];
-			const policy = policyOf(claim);
-			const outcome = approval({ votes }, head, policy, authorOf(claim), claim.paths);
-			if (outcome.approved) return [];
-			// Prefer a blocking role the change still needs; otherwise an ordinary review, if more are needed.
-			const role = outcome.awaiting.find((r) =>
-				holdsRole(policy, r, { reviewer: agent, by: input.by, teams: input.teams }, authorOf(claim)),
-			);
-			const { required } = effectivePolicy(policy, claim.paths);
-			if (!role && outcome.approvals >= required) return [];
-			// One review for a blocking role. Otherwise the missing approvals, minus those the awaited roles will bring.
-			const needed = role ? 1 : required - outcome.approvals - outcome.awaiting.length;
-			if (needed <= 0) return [];
-			const reviewing = input.held?.[holdKey(head, role ?? "review")] ?? [];
-			if (reviewing.filter((a) => a !== agent).length >= needed) return [];
-			return [
-				{
-					change: claim.change,
-					author: claim.agent,
-					head,
-					role: role ?? "review",
-					blocking: !!role,
-					intent: claim.intent,
-					paths: claim.paths,
-					approvals: outcome.approvals,
-					needed,
-					reviewing,
-					since: claim.since,
-				},
-			];
-		})
+		.filter((open): open is { claim: ClaimRecord; head: string } => !!open.head && open.claim.agent !== agent)
+		.flatMap(({ claim, head }) => reviewOption(input, claim, head) ?? [])
 		.sort(
 			(a, b) =>
 				Number(b.reviewing.includes(agent)) - Number(a.reviewing.includes(agent)) ||
@@ -165,7 +131,43 @@ export function reviewsFor(input: WorkInput): ReviewOption[] {
 			a.reviewing.includes(agent) === b.reviewing.includes(agent) &&
 			a.blocking === b.blocking &&
 			a.approvals === b.approvals,
-	).map(({ since: _, ...o }) => o);
+	).map(({ since: _, ...option }) => option);
+}
+
+const authorOf = (claim: ClaimRecord): Author => ({ agent: claim.agent, ...(claim.by ? { by: claim.by } : {}) });
+
+// The review the caller may give on `claim`'s pushed `head`, with its claim time for sorting, or null if none.
+function reviewOption(input: WorkInput, claim: ClaimRecord, head: string): (ReviewOption & { since: string }) | null {
+	const { agent, votes } = input;
+	const votesCast = votes.filter((vote) => vote.commit === head);
+	if (votesCast.some((vote) => vote.reviewer === agent || (!!input.by && vote.by === input.by))) return null;
+	if (votesCast.some((vote) => vote.verdict === "reject" && vote.reviewer !== claim.agent)) return null;
+	const policy = input.policyOf?.(claim) ?? input.policy;
+	const outcome = approval({ votes }, head, policy, authorOf(claim), claim.paths);
+	if (outcome.approved) return null;
+	// Prefer a blocking role the change still needs; otherwise an ordinary review, if more are needed.
+	const caller = { reviewer: agent, by: input.by, teams: input.teams };
+	const role = outcome.awaiting.find((awaited) => holdsRole(policy, awaited, caller, authorOf(claim)));
+	const { required } = effectivePolicy(policy, claim.paths);
+	if (!role && outcome.approvals >= required) return null;
+	// One review for a blocking role. Otherwise the missing approvals, minus those the awaited roles will bring.
+	const needed = role ? 1 : required - outcome.approvals - outcome.awaiting.length;
+	if (needed <= 0) return null;
+	const reviewing = input.held?.[holdKey(head, role ?? "review")] ?? [];
+	if (reviewing.filter((reviewer) => reviewer !== agent).length >= needed) return null;
+	return {
+		change: claim.change,
+		author: claim.agent,
+		head,
+		role: role ?? "review",
+		blocking: !!role,
+		intent: claim.intent,
+		paths: claim.paths,
+		approvals: outcome.approvals,
+		needed,
+		reviewing,
+		since: claim.since,
+	};
 }
 
 export interface BacklogView {
@@ -178,25 +180,28 @@ export interface BacklogView {
 /** Backlog items free to build, in the caller's own order so a crowd spreads over them, and why the rest wait. */
 export function backlogFor(input: WorkInput): BacklogView {
 	// An abandoned claim holds nothing back, since claiming its paths releases it as stale.
-	const live = input.open.filter((o) => !input.abandoned?.has(o.claim.change));
-	const holder = new Map(live.map((o) => [o.claim.change, o.claim.agent]));
+	const live = input.open.filter((change) => !input.abandoned?.has(change.claim.change));
+	const holder = new Map(live.map((change) => [change.claim.change, change.claim.agent]));
 	// Backlog work lands on the project's branch, so claims into other branches don't block it.
-	const overlapping = (w: WorkItem) =>
-		live.find((o) => !o.claim.into && w.paths?.some((p) => o.claim.paths.some((held) => entriesOverlap(p, held))));
-	const unmerged = (w: WorkItem) => (w.after ?? []).filter((dep) => !input.merged.has(dep));
+	const covers = (claim: ClaimRecord, item: WorkItem) =>
+		item.paths?.some((path) => claim.paths.some((held) => entriesOverlap(path, held)));
+	const overlapping = (item: WorkItem) => live.find((change) => !change.claim.into && covers(change.claim, item));
+	const unmerged = (item: WorkItem) => (item.after ?? []).filter((dependency) => !input.merged.has(dependency));
+	const abandonerOf = (item: WorkItem) =>
+		input.open.find((change) => change.claim.change === item.id && input.abandoned?.has(item.id))?.claim.agent;
 	const open: BacklogView["open"] = [];
 	const waiting: BacklogView["waiting"] = [];
-	for (const w of input.work) {
-		if (input.merged.has(w.id)) continue;
-		const by = holder.get(w.id);
-		const over = overlapping(w);
-		const deps = unmerged(w);
-		if (by) waiting.push({ id: w.id, reason: `claimed by ${by}` });
-		else if (over) waiting.push({ id: w.id, reason: `overlaps ${over.claim.change}'s claim (${over.claim.agent})` });
-		else if (deps.length) waiting.push({ id: w.id, reason: `waits on ${deps.join(", ")} to merge` });
+	for (const item of input.work) {
+		if (input.merged.has(item.id)) continue;
+		const by = holder.get(item.id);
+		const over = overlapping(item);
+		const dependencies = unmerged(item);
+		if (by) waiting.push({ id: item.id, reason: `claimed by ${by}` });
+		else if (over) waiting.push({ id: item.id, reason: `overlaps ${over.claim.change}'s claim (${over.claim.agent})` });
+		else if (dependencies.length) waiting.push({ id: item.id, reason: `waits on ${dependencies.join(", ")} to merge` });
 		else {
-			const abandonedBy = input.open.find((o) => o.claim.change === w.id && input.abandoned?.has(w.id))?.claim.agent;
-			open.push({ ...w, ...(abandonedBy ? { abandonedBy } : {}) });
+			const abandonedBy = abandonerOf(item);
+			open.push({ ...item, ...(abandonedBy ? { abandonedBy } : {}) });
 		}
 	}
 	return { open: inOwnOrder(input.agent, open, () => true), waiting };
@@ -204,16 +209,16 @@ export function backlogFor(input: WorkInput): BacklogView {
 
 // Rotates each run of equally good items in the sorted `list` to start at a place of the agent's own.
 function inOwnOrder<T>(agent: string, list: T[], same: (a: T, b: T) => boolean): T[] {
-	const out: T[] = [];
-	for (let i = 0; i < list.length;) {
-		let j = i + 1;
-		while (j < list.length && same(list[i], list[j])) j++;
-		const run = list.slice(i, j);
+	const ordered: T[] = [];
+	for (let start = 0; start < list.length;) {
+		let end = start + 1;
+		while (end < list.length && same(list[start], list[end])) end++;
+		const run = list.slice(start, end);
 		const at = spread(agent, run.length);
-		out.push(...run.slice(at), ...run.slice(0, at));
-		i = j;
+		ordered.push(...run.slice(at), ...run.slice(0, at));
+		start = end;
 	}
-	return out;
+	return ordered;
 }
 
 /**
@@ -229,8 +234,11 @@ export const ROLE_WAIT_MS = 10 * 60_000;
 export function waitingRoleReviews(input: Pick<WorkInput, "policy" | "policyOf" | "open" | "votes" | "held">) {
 	return input.open.flatMap(({ claim, head }) => {
 		if (!head) return [];
-		const author: Author = { agent: claim.agent, ...(claim.by ? { by: claim.by } : {}) };
-		if (input.votes.some((v) => v.commit === head && v.verdict === "reject" && v.reviewer !== author.agent)) return [];
+		const author = authorOf(claim);
+		const sentBack = input.votes.some(
+			(vote) => vote.commit === head && vote.verdict === "reject" && vote.reviewer !== author.agent,
+		);
+		if (sentBack) return [];
 		const { awaiting } = approval(
 			{ votes: input.votes },
 			head,
@@ -245,8 +253,8 @@ export function waitingRoleReviews(input: Pick<WorkInput, "policy" | "policyOf" 
 }
 
 // A small, stable hash that spreads agents over equally good choices.
-function spread(agent: string, n: number) {
-	let h = 0x811c9dc5;
-	for (let i = 0; i < agent.length; i++) h = Math.imul(h ^ agent.charCodeAt(i), 0x01000193);
-	return (h >>> 0) % n;
+function spread(agent: string, count: number) {
+	let hash = 0x811c9dc5;
+	for (let i = 0; i < agent.length; i++) hash = Math.imul(hash ^ agent.charCodeAt(i), 0x01000193);
+	return (hash >>> 0) % count;
 }

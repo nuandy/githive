@@ -46,17 +46,19 @@ export function gitLanding(log: CasLog<LeaseRecord>, kept: Omit<Landing, "turn" 
 			// The cache may already know how this change came out (otherwise see landedAlready in merge.ts).
 			const view = await kept.view().catch(() => null);
 			const settled = view?.recent.findLast(
-				(s) => s.change === change && s.head === head && (s.how === "landed" || Date.parse(s.at) >= since),
+				(outcome) =>
+					outcome.change === change &&
+					outcome.head === head &&
+					(outcome.how === "landed" || Date.parse(outcome.at) >= since),
 			);
 			if (settled) return { settled };
 			// If the record is busy or unreachable, the merge doesn't get its turn yet and tries again shortly.
 			const taken = await appendRecord<LeaseRecord, "held">(log, AUTHOR, empty, (record) => {
 				const turn = takeTurn(asState(record), holder, change, head, since, ttlMs);
 				if (!("lease" in turn.turn) || !turn.turn.lease) return { refused: "held" };
-				return {
-					state: asRecord(turn.state),
-					text: `${holder} lands batches${record.lease && record.lease.holder !== holder ? ` (${record.lease.holder}'s lease ran out)` : ""}`,
-				};
+				const lapsed =
+					record.lease && record.lease.holder !== holder ? ` (${record.lease.holder}'s lease ran out)` : "";
+				return { state: asRecord(turn.state), text: `${holder} lands batches${lapsed}` };
 			}).catch((err) => {
 				console.error("taking the landing lease failed", String(err));
 				return { ok: false as const };
@@ -70,8 +72,9 @@ export function gitLanding(log: CasLog<LeaseRecord>, kept: Omit<Landing, "turn" 
 			const lease = (await log.read())?.commit.state.lease;
 			if (lease?.holder === holder && lease.until - now > ttlMs / 2) return true;
 			const renewed = await appendRecord<LeaseRecord, "lost">(log, AUTHOR, empty, (record) => {
-				const kept = renewLease(asState(record), holder, ttlMs);
-				return kept.held ? { state: asRecord(kept.state), text: `${holder} keeps the lease` } : { refused: "lost" };
+				const renewal = renewLease(asState(record), holder, ttlMs);
+				if (!renewal.held) return { refused: "lost" };
+				return { state: asRecord(renewal.state), text: `${holder} keeps the lease` };
 			});
 			return renewed.ok;
 		},
@@ -79,11 +82,10 @@ export function gitLanding(log: CasLog<LeaseRecord>, kept: Omit<Landing, "turn" 
 			// Retry, because a lease left held keeps every waiting merge idle until it expires.
 			for (let attempt = 1; ; attempt++) {
 				try {
-					await appendRecord<LeaseRecord, "none">(log, AUTHOR, empty, (record) =>
-						record.lease?.holder === holder
-							? { state: asRecord(dropLease(asState(record), holder)), text: `${holder} hands the lease on` }
-							: { refused: "none" },
-					);
+					await appendRecord<LeaseRecord, "none">(log, AUTHOR, empty, (record) => {
+						if (record.lease?.holder !== holder) return { refused: "none" };
+						return { state: asRecord(dropLease(asState(record), holder)), text: `${holder} hands the lease on` };
+					});
 					break;
 				} catch (err) {
 					if (attempt === DROP_TRIES) throw err;
@@ -105,14 +107,11 @@ export function gitLanding(log: CasLog<LeaseRecord>, kept: Omit<Landing, "turn" 
 		// Trust the record's batch only while its lease is live, since a holder that died checks nothing.
 		view: async () => {
 			const [record, recalled] = await Promise.all([log.read().catch(() => undefined), kept.view().catch(() => null)]);
+			const recent = recalled?.recent ?? [];
+			if (record === undefined) return { checking: recalled?.checking ?? null, recent };
 			const lease = record?.commit.state.lease;
-			const checking =
-				record === undefined
-					? (recalled?.checking ?? null)
-					: lease && lease.until > Date.now()
-						? (record?.commit.state.checking ?? null)
-						: null;
-			return { checking, recent: recalled?.recent ?? [] };
+			const live = lease && lease.until > Date.now();
+			return { checking: live ? (record?.commit.state.checking ?? null) : null, recent };
 		},
 	};
 }
@@ -131,8 +130,8 @@ export function lazyLog<S>(find: () => Promise<CasLog<S>>): CasLog<S> & { readon
 	return {
 		read: async () => (await get()).read(),
 		readFresh: async () => {
-			const l = await get();
-			return l.readFresh ? l.readFresh() : l.read();
+			const resolved = await get();
+			return resolved.readFresh ? resolved.readFresh() : resolved.read();
 		},
 		append: async (parent, commit) => (await get()).append(parent, commit),
 		get lastRefusal() {

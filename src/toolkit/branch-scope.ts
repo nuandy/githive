@@ -33,11 +33,9 @@ export const claimInto = (claim: { paths: string[] }, branch: string) =>
 export function presentClaim<C extends { paths: string[] }>(claim: C, branch: string): C & { into?: string } {
 	const into = claimInto(claim, branch);
 	if (into === branch) return claim;
-	return { ...claim, paths: claim.paths.map((p) => unscopePath(p, branch).path), into };
+	return { ...claim, paths: claim.paths.map((path) => unscopePath(path, branch).path), into };
 }
 
 /** The branch stored paths belong to, or undefined for the project's branch. */
 export const scopedInto = (paths: string[]) =>
-	paths[0] && isReservedPath(paths[0])
-		? decodeURIComponent(paths[0].slice(MARK.length, paths[0].indexOf("/") < 0 ? undefined : paths[0].indexOf("/")))
-		: undefined;
+	paths[0] && isReservedPath(paths[0]) ? unscopePath(paths[0], "").into : undefined;

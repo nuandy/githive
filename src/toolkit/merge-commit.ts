@@ -78,24 +78,21 @@ export async function mergeMessage(claimed: MergeClaim, stamper?: Stamper) {
 	// With no votes record, write no trailer and stamp over none. The audit reads an empty trailer back as none, so a
 	// stamp over "" would never verify.
 	const signed = { ...claimed, votesTip: claimed.votesTip || undefined };
-	return [
-		...storyOf(claimed),
-		`GitHive-Change: ${claimed.change}`,
-		...(claimed.intent ? [`GitHive-Intent: ${oneLine(claimed.intent, INTENT_TRAILER_MOST)}`] : []),
+	const lines = [...storyOf(claimed), `GitHive-Change: ${claimed.change}`];
+	if (claimed.intent) lines.push(`GitHive-Intent: ${oneLine(claimed.intent, INTENT_TRAILER_MOST)}`);
+	lines.push(
 		`${FORMAT_TRAILER}: ${RECORD_FORMAT}`,
 		`GitHive-Agent: ${claimed.author}`,
 		`GitHive-Claims: ${claimed.claimsTip}`,
-		...(signed.votesTip ? [`GitHive-Votes: ${signed.votesTip}`] : []),
-		...(claimed.testedOn ? [`GitHive-Tested: ${claimed.testedOn}`] : []),
-		// The changes checked together, in landing order. Exactly these landed on that main, in one push.
-		...(claimed.testedWith?.length ? [`GitHive-Tested-With: ${claimed.testedWith.join(" ")}`] : []),
-		// Who asked for the merge, as verified, and GitHive's stamp over all of the above.
-		...(stamper
-			? [
-					`GitHive-By: ${stamper.by}`,
-					`GitHive-Stamp: ${await stamper.stamp(mergeStampPayload({ ...signed, by: stamper.by }))}`,
-				]
-			: []),
-		"",
-	].join("\n");
+	);
+	if (signed.votesTip) lines.push(`GitHive-Votes: ${signed.votesTip}`);
+	if (claimed.testedOn) lines.push(`GitHive-Tested: ${claimed.testedOn}`);
+	// The changes checked together, in landing order. Exactly these landed on that main, in one push.
+	if (claimed.testedWith?.length) lines.push(`GitHive-Tested-With: ${claimed.testedWith.join(" ")}`);
+	// Who asked for the merge, as verified, and GitHive's stamp over all of the above.
+	if (stamper) {
+		const stamp = await stamper.stamp(mergeStampPayload({ ...signed, by: stamper.by }));
+		lines.push(`GitHive-By: ${stamper.by}`, `GitHive-Stamp: ${stamp}`);
+	}
+	return [...lines, ""].join("\n");
 }

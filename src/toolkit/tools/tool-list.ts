@@ -262,12 +262,12 @@ const TOOL_LIST = [
 
 // Every tool takes the caller's agent key, for clients that can't set the header.
 export const TOOLS = annotate(
-	TOOL_LIST.map((t) => ({
-		...t,
+	TOOL_LIST.map((tool) => ({
+		...tool,
 		inputSchema: {
-			...t.inputSchema,
+			...tool.inputSchema,
 			properties: {
-				...t.inputSchema.properties,
+				...tool.inputSchema.properties,
 				agent_key: {
 					type: "string",
 					description: "Your agent key from register, if you can't send the X-GitHive-Agent-Key header",

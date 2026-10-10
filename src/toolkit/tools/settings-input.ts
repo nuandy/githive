@@ -12,24 +12,24 @@ export const POLICY_FIELDS = ["required", "vetoes", "escalate", "grants"] as con
 export function branchRulesFrom(value: unknown, base: ReviewPolicy): BranchRule<ReviewPolicy>[] {
 	if (!Array.isArray(value))
 		throw new Error("[400] branch_rules is a list of rules: each a pattern, and what it changes");
-	return value.map((raw, i) => {
+	return value.map((raw, index) => {
 		if (!raw || typeof raw !== "object" || Array.isArray(raw))
-			throw new Error(`[400] branch_rules[${i}] is a rule: a pattern, and what it changes`);
+			throw new Error(`[400] branch_rules[${index}] is a rule: a pattern, and what it changes`);
 		const rule = raw as Args;
 		const pattern = typeof rule.pattern === "string" ? rule.pattern.trim() : "";
 		if (!pattern || !BRANCH_PATTERN.test(pattern))
 			throw new Error(
-				`[400] branch_rules[${i}].pattern is a branch name, with * for any run of characters (feature/*)`,
+				`[400] branch_rules[${index}].pattern is a branch name, with * for any run of characters (feature/*)`,
 			);
 		// Keep only the fields the rule sets, so the rest follow the repo's settings as they change.
 		const full = policyFrom(rule, base);
 		const policy = Object.fromEntries(
-			POLICY_FIELDS.filter((f) => rule[f] !== undefined).map((f) => [f, full[f]]),
+			POLICY_FIELDS.filter((field) => rule[field] !== undefined).map((field) => [field, full[field]]),
 		) as Partial<ReviewPolicy>;
 		const verify = rule.verify === undefined ? undefined : checksFrom(rule.verify);
 		if (!Object.keys(policy).length && !verify)
 			throw new Error(
-				`[400] branch_rules[${i}] (${pattern}) changes nothing: set required, vetoes, escalate, grants or verify`,
+				`[400] branch_rules[${index}] (${pattern}) changes nothing: set required, vetoes, escalate, grants or verify`,
 			);
 		return { pattern, ...(Object.keys(policy).length ? { policy } : {}), ...(verify ? { verify } : {}) };
 	});
@@ -37,9 +37,10 @@ export function branchRulesFrom(value: unknown, base: ReviewPolicy): BranchRule<
 
 /** Parses skip_checks: patterns like *.md or docs/ for files the checks skip. */
 export function skipPatternsFrom(value: unknown): string[] {
-	if (!Array.isArray(value) || value.some((p) => typeof p !== "string" || !SKIP_PATTERN.test(p.trim())))
+	const isPattern = (item: unknown) => typeof item === "string" && SKIP_PATTERN.test(item.trim());
+	if (!Array.isArray(value) || !value.every(isPattern))
 		throw new Error("[400] skip_checks is a list of patterns, like *.md or docs/ ([] for nothing)");
-	return [...new Set((value as string[]).map((p) => p.trim()))];
+	return [...new Set((value as string[]).map((pattern) => pattern.trim()))];
 }
 
 /** A review policy from settings' arguments, falling back to `base` for any left out. */
@@ -71,7 +72,7 @@ export async function githubFrom(ctx: ToolContext, value: unknown): Promise<{ re
 
 export function checksFrom(value: unknown): string[] {
 	if (!Array.isArray(value)) throw new Error("[400] verify is a list of commands, [] for none");
-	return value.filter((c): c is string => typeof c === "string" && !!c.trim());
+	return value.filter((command): command is string => typeof command === "string" && !!command.trim());
 }
 
 /** Validates role grants: each role maps to a list of who may vote as it. */
@@ -80,11 +81,11 @@ function validGrants(value: unknown): Record<string, string[]> {
 		throw new Error("[400] grants maps each role to who may vote as it");
 	const grants: Record<string, string[]> = {};
 	for (const [role, who] of Object.entries(value)) {
-		if (!Array.isArray(who) || !who.every((w) => typeof w === "string" && w.trim()))
+		if (!Array.isArray(who) || !who.every((holder) => typeof holder === "string" && holder.trim()))
 			throw new Error(
 				`[400] grants.${role} is a list: agent names, "person:*", "person:<who>", "service:<id>", a team "@<org>/<team>" or "githive"`,
 			);
-		grants[role] = who.map((w) => w.trim());
+		grants[role] = who.map((holder) => holder.trim());
 	}
 	return grants;
 }

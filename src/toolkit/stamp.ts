@@ -9,7 +9,13 @@ const ALGORITHM = { name: "Ed25519" } as const;
 const encoder = new TextEncoder();
 
 const toBase64 = (bytes: ArrayBuffer | Uint8Array) => btoa(String.fromCharCode(...new Uint8Array(bytes)));
-const fromBase64 = (text: string) => Uint8Array.from(atob(text), (c) => c.charCodeAt(0));
+const fromBase64 = (text: string) => Uint8Array.from(atob(text), (char) => char.charCodeAt(0));
+// A JWK's base64url as plain base64.
+const fromBase64Url = (text: string) =>
+	text
+		.replace(/-/g, "+")
+		.replace(/_/g, "/")
+		.padEnd(Math.ceil(text.length / 4) * 4, "=");
 
 /**
  * Who did something, for the records. A person appears as a hash of their email, because agents and their
@@ -17,7 +23,8 @@ const fromBase64 = (text: string) => Uint8Array.from(atob(text), (c) => c.charCo
  */
 export function identityLabel(identity: AccessIdentity): string {
 	if (identity.kind === "service") return `service:${identity.value}`;
-	return `person:${createHash("sha256").update(identity.value.trim().toLowerCase()).digest("hex").slice(0, 12)}`;
+	const hash = createHash("sha256").update(identity.value.trim().toLowerCase()).digest("hex");
+	return `person:${hash.slice(0, 12)}`;
 }
 
 /** A new key pair in base64: the PKCS #8 private key for the secret, the raw public key for the registry. */
@@ -39,16 +46,7 @@ export interface Stamper {
 export async function makeStamper(privateKey: string, by: string): Promise<Stamper> {
 	const key = await crypto.subtle.importKey("pkcs8", fromBase64(privateKey), ALGORITHM, true, ["sign"]);
 	const jwk = (await crypto.subtle.exportKey("jwk", key)) as JsonWebKey;
-	const publicKey = jwk.x
-		? toBase64(
-				fromBase64(
-					jwk.x
-						.replace(/-/g, "+")
-						.replace(/_/g, "/")
-						.padEnd(Math.ceil(jwk.x.length / 4) * 4, "="),
-				),
-			)
-		: "";
+	const publicKey = jwk.x ? toBase64(fromBase64(fromBase64Url(jwk.x))) : "";
 	return {
 		by,
 		publicKey,
@@ -70,15 +68,13 @@ export async function verifyStamp(publicKey: string, payload: string, stamp: str
 /** A record as a stable string to stamp: its fields sorted, without its stamp. */
 export function stampPayload(kind: string, record: object): string {
 	const { stamp: _stamp, ...rest } = record as { stamp?: string };
-	const sorted = (value: unknown): unknown =>
-		Array.isArray(value)
-			? value.map(sorted)
-			: value && typeof value === "object"
-				? Object.fromEntries(
-						Object.entries(value)
-							.sort(([a], [b]) => a.localeCompare(b))
-							.map(([k, v]) => [k, sorted(v)]),
-					)
-				: value;
-	return `${kind}\n${JSON.stringify(sorted(rest))}`;
+	return `${kind}\n${JSON.stringify(sortedKeys(rest))}`;
+}
+
+// `value` with every object's keys in sorted order, at any depth.
+function sortedKeys(value: unknown): unknown {
+	if (Array.isArray(value)) return value.map(sortedKeys);
+	if (!value || typeof value !== "object") return value;
+	const entries = Object.entries(value).sort(([a], [b]) => a.localeCompare(b));
+	return Object.fromEntries(entries.map(([key, inner]) => [key, sortedKeys(inner)]));
 }

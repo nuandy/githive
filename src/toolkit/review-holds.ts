@@ -63,7 +63,7 @@ export async function holdReview(
 ) {
 	const outcome = await appendRecord<ReviewHolds, "taken">(log, AUTHOR, empty, (state) => {
 		const holds = live(state.holds, now());
-		const others = Object.keys(holds[key] ?? {}).filter((a) => a !== agent);
+		const others = Object.keys(holds[key] ?? {}).filter((holder) => holder !== agent);
 		if (others.length >= needed) return { refused: "taken" };
 		holds[key] = { ...holds[key], [agent]: new Date(now() + REVIEW_HOLD_MS).toISOString() };
 		return { state: { ...state, holds }, text: `${agent} reviews ${key}` };
@@ -104,7 +104,10 @@ export async function roleWaits(
 		};
 	});
 	return Object.fromEntries(
-		Object.entries(current).map(([key, w]) => [key, { since: Date.parse(w.since), ...(w.told ? { told: true } : {}) }]),
+		Object.entries(current).map(([key, wait]) => [
+			key,
+			{ since: Date.parse(wait.since), ...(wait.told ? { told: true } : {}) },
+		]),
 	);
 }
 

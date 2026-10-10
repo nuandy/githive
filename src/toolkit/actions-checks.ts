@@ -43,12 +43,12 @@ export function actionsChecks(
 						},
 					],
 				};
-			const results: CheckResult[] = runs.map((r) => ({
-				command: `GitHub Actions: ${r.name}`,
-				exitCode: passing(r) ? 0 : 1,
-				output: `${r.conclusion ?? r.status}: ${r.url}`,
+			const results: CheckResult[] = runs.map((run) => ({
+				command: `GitHub Actions: ${run.name}`,
+				exitCode: passing(run) ? 0 : 1,
+				output: `${run.conclusion ?? run.status}: ${run.url}`,
 			}));
-			return { passed: results.every((r) => r.exitCode === 0), results };
+			return { passed: results.every((result) => result.exitCode === 0), results };
 		} finally {
 			await link
 				.deleteBranch(name)
@@ -72,10 +72,10 @@ async function finishedRuns(
 	for (;;) {
 		const runs = await link.runsFor(sha);
 		const waited = Date.now() - started;
-		if (runs.length && runs.every((r) => r.status === "completed")) return runs;
+		if (runs.length && runs.every((run) => run.status === "completed")) return runs;
 		if (!runs.length && waited > (timing.firstRunWithinMs ?? FIRST_RUN_WITHIN_MS)) return [];
 		if (waited > (timing.runsWithinMs ?? RUNS_WITHIN_MS))
-			return runs.map((r) => (r.status === "completed" ? r : { ...r, conclusion: "timed_out" }));
+			return runs.map((run) => (run.status === "completed" ? run : { ...run, conclusion: "timed_out" }));
 		await sleep(timing.pollMs ?? POLL_MS);
 	}
 }

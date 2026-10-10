@@ -24,17 +24,19 @@ export async function readRecordHistory<S>(remote: Remote, ref: string): Promise
 	const { fs } = await retryTransient(() => fetchCommits(remote, [tip], DIR, { history: true }));
 	// One cache for every read. Without it, each read loads the packfile again, and a long history read at once holds
 	// hundreds of copies, far more than a Worker's memory.
-	const cache = {};
+	return statesFrom<S>(fs, tip, ref, {});
+}
+
+type Fetched = Awaited<ReturnType<typeof fetchCommits>>["fs"];
+
+// Every state the record `ref` had up to `tip`, oldest first. `cache` is shared by every read from one fetch.
+async function statesFrom<S>(fs: Fetched, tip: string, ref: string, cache: object) {
 	const history = (await git.log({ fs, dir: DIR, ref: tip, cache })).reverse();
 	return Promise.all(
-		history.map(async (entry) => ({
-			tip: entry.oid,
-			state: stateOf<S>(
-				entry.commit.message,
-				decoder.decode((await git.readBlob({ fs, dir: DIR, oid: entry.oid, filepath: "state.json", cache })).blob),
-				ref,
-			),
-		})),
+		history.map(async (entry) => {
+			const { blob } = await git.readBlob({ fs, dir: DIR, oid: entry.oid, filepath: "state.json", cache });
+			return { tip: entry.oid, state: stateOf<S>(entry.commit.message, decoder.decode(blob), ref) };
+		}),
 	);
 }
 
@@ -64,21 +66,9 @@ export async function readRefHistories<S>(remotes: Remote[], prefix: string) {
 			// One cache for every read from this repo (see readRecordHistory).
 			const cache = {};
 			return Promise.all(
-				refs.map(async (r) => {
-					const history = (await git.log({ fs, dir: DIR, ref: r.oid, cache })).reverse();
-					const states = await Promise.all(
-						history.map(async (entry) => ({
-							tip: entry.oid,
-							state: stateOf<S>(
-								entry.commit.message,
-								decoder.decode(
-									(await git.readBlob({ fs, dir: DIR, oid: entry.oid, filepath: "state.json", cache })).blob,
-								),
-								r.ref,
-							),
-						})),
-					);
-					return [r.ref.slice(prefix.length), states] as const;
+				refs.map(async (listed) => {
+					const states = await statesFrom<S>(fs, listed.oid, listed.ref, cache);
+					return [listed.ref.slice(prefix.length), states] as const;
 				}),
 			);
 		}),
@@ -89,12 +79,12 @@ export async function readRefHistories<S>(remotes: Remote[], prefix: string) {
 // How many records repos one read of histories fetches from at once.
 const REPOS_AT_ONCE = 2;
 
-// Runs `tasks` at most `n` at a time, returning their results in order.
-async function inTurns<R>(n: number, tasks: (() => Promise<R>)[]): Promise<R[]> {
+// Runs `tasks` at most `limit` at a time, returning their results in order.
+async function inTurns<R>(limit: number, tasks: (() => Promise<R>)[]): Promise<R[]> {
 	const results: R[] = new Array(tasks.length);
 	let next = 0;
 	await Promise.all(
-		Array.from({ length: Math.min(n, tasks.length) }, async () => {
+		Array.from({ length: Math.min(limit, tasks.length) }, async () => {
 			while (next < tasks.length) {
 				const i = next++;
 				results[i] = await tasks[i]();
@@ -139,10 +129,10 @@ export function trailer(message: string, name: string) {
 
 /** The branch's first-parent commits after `baseline`, oldest first. Every one is audited. */
 export async function readMainMerges(remote: Remote, baseline: string, branch: string): Promise<MergeRecord[]> {
-	const ws = await Workspace.clone(remote, branch);
+	const workspace = await Workspace.clone(remote, branch);
 	const records: MergeRecord[] = [];
-	for (let oid = await ws.head(); oid && oid !== baseline;) {
-		const { commit } = await ws.ensureCommit(oid);
+	for (let oid = await workspace.head(); oid && oid !== baseline;) {
+		const { commit } = await workspace.ensureCommit(oid);
 		const [first] = commit.parent;
 		records.push(
 			mergeRecordOf({
@@ -150,7 +140,7 @@ export async function readMainMerges(remote: Remote, baseline: string, branch: s
 				parents: commit.parent,
 				author: commit.author.name,
 				message: commit.message,
-				files: first ? await ws.changedPaths(first, oid) : [],
+				files: first ? await workspace.changedPaths(first, oid) : [],
 			}),
 		);
 		oid = first;
@@ -168,22 +158,24 @@ export interface BranchCommit {
 }
 
 /** A commit on a branch as the audit reads it: what its trailers say and which commits it joins. */
-export function mergeRecordOf(c: BranchCommit): MergeRecord {
-	const [first, second] = c.parents;
+export function mergeRecordOf(branchCommit: BranchCommit): MergeRecord {
+	const [first, second] = branchCommit.parents;
+	const trailerOf = (name: string) => trailer(branchCommit.message, name);
+	const commitsIn = (name: string) => trailerOf(name)?.split(/\s+/).filter(Boolean);
 	return {
-		commit: c.commit,
-		author: trailer(c.message, "GitHive-Agent") ?? c.author,
-		change: trailer(c.message, "GitHive-Change"),
-		claimsTip: trailer(c.message, "GitHive-Claims"),
-		votesTip: trailer(c.message, "GitHive-Votes"),
-		testedOn: trailer(c.message, "GitHive-Tested"),
-		testedAfter: trailer(c.message, "GitHive-Tested-After")?.split(/\s+/).filter(Boolean),
-		testedWith: trailer(c.message, "GitHive-Tested-With")?.split(/\s+/).filter(Boolean),
-		by: trailer(c.message, "GitHive-By"),
-		stamp: trailer(c.message, "GitHive-Stamp"),
-		reverts: trailer(c.message, "GitHive-Reverts"),
+		commit: branchCommit.commit,
+		author: trailerOf("GitHive-Agent") ?? branchCommit.author,
+		change: trailerOf("GitHive-Change"),
+		claimsTip: trailerOf("GitHive-Claims"),
+		votesTip: trailerOf("GitHive-Votes"),
+		testedOn: trailerOf("GitHive-Tested"),
+		testedAfter: commitsIn("GitHive-Tested-After"),
+		testedWith: commitsIn("GitHive-Tested-With"),
+		by: trailerOf("GitHive-By"),
+		stamp: trailerOf("GitHive-Stamp"),
+		reverts: trailerOf("GitHive-Reverts"),
 		base: first,
 		head: second,
-		files: c.files,
+		files: branchCommit.files,
 	};
 }

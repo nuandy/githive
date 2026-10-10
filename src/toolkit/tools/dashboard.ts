@@ -1,17 +1,17 @@
 import git from "isomorphic-git";
-import { Workspace } from "../../git";
+import { type Remote, Workspace } from "../../git";
 import { projectBranch } from "../../project-branch";
 import { Timing } from "../../timing";
 import { claimInto, presentClaim } from "../branch-scope";
 import { DEFAULT_SKIP_CHECKS } from "../check-scope";
-import type { ClaimRecord, Registry } from "../claims";
-import type { VoteStore } from "../vote-store";
-import { approval, DEFAULT_GRANT, openFlag, type ReviewPolicy, type VoteRecord } from "../votes";
+import type { ClaimRecord, Registry, ReleaseRecord } from "../claims";
+import type { VoteStore, VotesView } from "../vote-store";
+import { DEFAULT_GRANT, type FlagRecord, openFlag, type ReviewPolicy, type VoteRecord } from "../votes";
 import { holdKey, ROLE_WAIT_MS, waitingRoleReviews } from "../work";
 import { runAudit } from "./audit-tools";
 import { changeHead, changeSourceFor, changeStatus } from "./change-state";
 import { targetBranch } from "./claim-input";
-import type { ToolContext } from "./context";
+import type { HostedStatus, ToolContext } from "./context";
 import { claimsRef, DEFAULT_POLICY, recordLog, shardingOf, shardVotesIfBusy, storeFor, votesFor } from "./repo";
 
 // What the dashboard reads and does through the toolkit: a repo's snapshot and audit, a change's
@@ -38,20 +38,23 @@ export async function tellPeopleOfWaitingRoles(
 		votes: counted,
 		held: await ctx.reviews.held(repo),
 	});
-	const seen = await ctx.reviews.waits(
+	const waits = await ctx.reviews.waits(
 		repo,
-		waiting.map((w) => holdKey(w.head, w.role)),
+		waiting.map((review) => holdKey(review.head, review.role)),
 	);
 	let told = false;
-	for (const w of waiting) {
-		const key = holdKey(w.head, w.role);
-		const since = seen[key];
+	for (const review of waiting) {
+		const key = holdKey(review.head, review.role);
+		const since = waits[key];
 		if (!since || since.told || Date.now() - since.since < ROLE_WAIT_MS) continue;
-		const holders = policy.grants?.[w.role] ?? DEFAULT_GRANT;
-		const people = holders.some((h) => h.startsWith("person:"));
+		const holders = policy.grants?.[review.role] ?? DEFAULT_GRANT;
+		const people = holders.some((holder) => holder.startsWith("person:"));
 		const minutes = Math.round((Date.now() - since.since) / 60_000);
-		const reason = `${w.change}'s ${w.role} review has waited ${minutes} minutes and none of its holders (${holders.join(", ")}) has taken it. ${people ? `You can review it as ${w.role} from the dashboard.` : `No person holds ${w.role}, so you can't sign it off: nudge its holders, or grant it to more.`}`;
-		await votes.flag({ change: w.change, agent: "githive", role: w.role, reason });
+		const next = people
+			? `You can review it as ${review.role} from the dashboard.`
+			: `No person holds ${review.role}, so you can't sign it off: nudge its holders, or grant it to more.`;
+		const reason = `${review.change}'s ${review.role} review has waited ${minutes} minutes and none of its holders (${holders.join(", ")}) has taken it. ${next}`;
+		await votes.flag({ change: review.change, agent: "githive", role: review.role, reason });
 		await ctx.reviews.told(repo, key);
 		told = true;
 	}
@@ -66,47 +69,60 @@ export async function tellPeopleOfWaitingRoles(
  * newest first, every vote on them, and its merge if it merged.
  */
 export async function changeHistory(ctx: ToolContext, repo: string, change: string) {
-	const t = ctx.timing ?? new Timing();
-	const registry = (await t.time("registry", () => recordLog<Registry>(ctx, repo, claimsRef(repo)).read()))?.commit
+	const timing = ctx.timing ?? new Timing();
+	const registry = (await timing.time("registry", () => recordLog<Registry>(ctx, repo, claimsRef(repo)).read()))?.commit
 		.state;
 	if (!registry?.baseline) throw new Error(`[404] GitHive hasn't started on ${repo}`);
-	const { claim: record, released } = await t.time("change", () => storeFor(ctx, repo, registry).readChange(change));
+	const { claim: record, released } = await timing.time("change", () =>
+		storeFor(ctx, repo, registry).readChange(change),
+	);
 	if (!record && !released.length) throw new Error(`[404] no change ${change} on ${repo}`);
 	// The change's own commits are those since it left the branch it lands on.
 	const branch = record ? claimInto(record, projectBranch(registry)) : projectBranch(registry);
 	const claim = record ? presentClaim(record, projectBranch(registry)) : undefined;
-	const mergedAs = released.find((r) => r.mergedAs)?.mergedAs;
+	const mergedAs = released.find((release) => release.mergedAs)?.mergedAs;
 	const commits = await Promise.resolve()
 		.then(() =>
-			t.time("fork", () => changeSourceFor(ctx, repo)(claim?.agent ?? released.at(-1)!.agent, "read", change)),
+			timing.time("fork", () => changeSourceFor(ctx, repo)(claim?.agent ?? released.at(-1)!.agent, "read", change)),
 		)
-		.then(async (source) => {
-			// Shallow: a change is a few commits on a recent head, and finding the merge base deepens it if needed.
-			const ws = await t.time("clone", () => Workspace.clone(source, `changes/${change}`, { depth: 8 }));
-			const head = await ws.head();
-			// For a merged change, its base is found from the merge's first parent, not the branch's current head.
-			const projectHead = await t.time("project", async () =>
-				ws.fetch("project", await ctx.remote(repo, "read"), branch),
-			);
-			const before = mergedAs ? (await ws.ensureCommit(mergedAs)).commit.parent[0] : projectHead;
-			const stop = await t.time("base", () => ws.mergeBase(before, head));
-			const own = [];
-			for (const { oid, commit } of await git.log({ fs: ws.fs, dir: "/repo", ref: head, depth: 50 })) {
-				if (oid === stop) break;
-				own.push({
-					commit: oid,
-					message: commit.message.trim(),
-					author: commit.author.name,
-					at: new Date(commit.author.timestamp * 1000).toISOString(),
-				});
-			}
-			return own;
-		})
+		.then((source) => ownCommits(ctx, repo, { change, source, branch, mergedAs, timing }))
 		// Nothing pushed yet (no fork, or no branch on it).
-		.catch(() => [] as { commit: string; message: string; author: string; at: string }[]);
-	const ids = new Set(commits.map((c) => c.commit));
-	const votes = (await votesFor(ctx, repo).readFor([...ids])).votes.filter((v) => ids.has(v.commit));
+		.catch(() => [] as OwnCommit[]);
+	const ids = new Set(commits.map((commit) => commit.commit));
+	const votes = (await votesFor(ctx, repo).readFor([...ids])).votes.filter((vote) => ids.has(vote.commit));
 	return { change, branch, claim: claim ?? null, released, commits, votes };
+}
+
+type OwnCommit = { commit: string; message: string; author: string; at: string };
+
+// A change's last 50 commits, newest first, back to where it left `branch`, or where it left the main its merge
+// went onto once it merged.
+async function ownCommits(
+	ctx: ToolContext,
+	repo: string,
+	at: { change: string; source: Remote; branch: string; mergedAs?: string; timing: Timing },
+): Promise<OwnCommit[]> {
+	const { change, source, branch, mergedAs, timing } = at;
+	// Shallow: a change is a few commits on a recent head, and finding the merge base deepens it if needed.
+	const workspace = await timing.time("clone", () => Workspace.clone(source, `changes/${change}`, { depth: 8 }));
+	const head = await workspace.head();
+	// For a merged change, its base is found from the merge's first parent, not the branch's current head.
+	const projectHead = await timing.time("project", async () =>
+		workspace.fetch("project", await ctx.remote(repo, "read"), branch),
+	);
+	const before = mergedAs ? (await workspace.ensureCommit(mergedAs)).commit.parent[0] : projectHead;
+	const stop = await timing.time("base", () => workspace.mergeBase(before, head));
+	const own: OwnCommit[] = [];
+	for (const { oid, commit } of await git.log({ fs: workspace.fs, dir: "/repo", ref: head, depth: 50 })) {
+		if (oid === stop) break;
+		own.push({
+			commit: oid,
+			message: commit.message.trim(),
+			author: commit.author.name,
+			at: new Date(commit.author.timestamp * 1000).toISOString(),
+		});
+	}
+	return own;
 }
 
 /**
@@ -179,64 +195,32 @@ export async function makeBranch(
 /** The audit for the dashboard. It replays every record, so it runs apart from the snapshot. */
 export async function repoAudit(ctx: ToolContext, repo: string) {
 	const { merges, violations } = await runAudit(ctx, repo);
-	const open = violations.filter((v) => !v.resolvedBy).length;
+	const open = violations.filter((violation) => !violation.resolvedBy).length;
 	await ctx.summarize?.(repo, { merged: merges, violations: open }).catch(() => undefined);
 	return { merges, open, violations };
 }
 
 /** The dashboard's view of a repo, read from the records' tips. The audit is separate (see repoAudit). */
 export async function repoSnapshot(ctx: ToolContext, repo: string) {
-	const t = ctx.timing ?? new Timing();
-	const [registry, votes] = await t.time("records", () =>
+	const timing = ctx.timing ?? new Timing();
+	const [registry, votes] = await timing.time("records", () =>
 		Promise.all([recordLog<Registry>(ctx, repo, claimsRef(repo)).read(), votesFor(ctx, repo).read()]),
 	);
 	const state = registry?.commit.state;
 	if (!state?.baseline) throw new Error(`[404] GitHive hasn't started on ${repo}`);
-	const held = await t.time("claims", () => storeFor(ctx, repo, state).read());
-	const claims = await t.time("status", () =>
-		Promise.all(
-			held.claims.map(async (record) => {
-				const c = presentClaim(record, projectBranch(state));
-				const { head, approval, hosted } = await changeStatus(ctx, repo, state, async () => votes.votes, c.change, c);
-				// A question stays open until a person votes on the change's commit. For a waiting role's review,
-				// it closes once that role signs off.
-				const asked = openFlag(votes, c.change, head);
-				const flag = asked?.role && !approval.awaiting?.includes(asked.role) ? null : asked;
-				const attention = flag
-					? { reason: flag.reason, agent: flag.agent, at: flag.at }
-					: hosted?.builder?.status === "failed"
-						? {
-								reason: `GitHive's builder failed${hosted.builder.error ? `: ${hosted.builder.error.slice(0, 160)}` : ""}`,
-								agent: "githive-builder",
-								at: c.active,
-							}
-						: null;
-				// Dependencies not yet merged into the branch this change lands on.
-				const into = c.into ?? projectBranch(state);
-				const waitsOn = (c.after ?? []).filter(
-					(dep) =>
-						!held.released.some((r) => r.change === dep && r.mergedAs && (r.into ?? projectBranch(state)) === into),
-				);
-				return {
-					...c,
-					head,
-					approval,
-					...(hosted ? { hosted } : {}),
-					...(attention ? { attention } : {}),
-					...(waitsOn.length ? { waitsOn } : {}),
-				};
-			}),
-		),
+	const held = await timing.time("claims", () => storeFor(ctx, repo, state).read());
+	const claims = await timing.time("status", () =>
+		Promise.all(held.claims.map((record) => claimSnapshot(ctx, repo, state, votes, held.released, record))),
 	);
-	const waiting = claims.filter((c) => c.attention);
+	const waiting = claims.filter((claim) => claim.attention);
 	await ctx
 		.summarize?.(repo, {
 			open: claims.length,
 			needsYou: waiting.length,
-			waiting: waiting.slice(0, 20).map((c) => ({
-				change: c.change,
-				title: c.intent.split("\n")[0].slice(0, 120),
-				reason: c.attention!.reason.slice(0, 500),
+			waiting: waiting.slice(0, 20).map((claim) => ({
+				change: claim.change,
+				title: claim.intent.split("\n")[0].slice(0, 120),
+				reason: claim.attention!.reason.slice(0, 500),
 			})),
 			countedAt: new Date().toISOString(),
 		})
@@ -248,11 +232,11 @@ export async function repoSnapshot(ctx: ToolContext, repo: string) {
 		skipChecks: state.skipChecks ?? DEFAULT_SKIP_CHECKS,
 		...(state.branchRules?.length ? { branchRules: state.branchRules } : {}),
 		/** Other branches that changes land on, and where each started. */
-		branches: Object.entries(state.branches ?? {}).map(([name, b]) => ({
+		branches: Object.entries(state.branches ?? {}).map(([name, record]) => ({
 			name,
-			base: b.base,
-			...(b.from ? { from: b.from } : {}),
-			at: b.at,
+			base: record.base,
+			...(record.from ? { from: record.from } : {}),
+			at: record.at,
 		})),
 		policy: state.policy ?? DEFAULT_POLICY,
 		verify: state.verify ?? [],
@@ -266,6 +250,55 @@ export async function repoSnapshot(ctx: ToolContext, repo: string) {
 		claims,
 		votes: votes.votes.slice(-20).reverse(),
 	};
+}
+
+type Attention = { reason: string; agent: string; at: string };
+type ChangeStatus = Awaited<ReturnType<typeof changeStatus>>;
+
+interface ClaimSnapshot extends ClaimRecord {
+	head: string | null;
+	approval: ChangeStatus["approval"];
+	hosted?: HostedStatus;
+	attention?: Attention;
+	waitsOn?: string[];
+}
+
+// A claim as the dashboard shows it: where its change stands, what needs a person, and what it waits on.
+async function claimSnapshot(
+	ctx: ToolContext,
+	repo: string,
+	state: Registry,
+	votes: VotesView,
+	released: ReleaseRecord[],
+	record: ClaimRecord,
+): Promise<ClaimSnapshot> {
+	const claim = presentClaim(record, projectBranch(state));
+	const { head, approval, hosted } = await changeStatus(ctx, repo, state, async () => votes.votes, claim.change, claim);
+	// A question stays open until a person votes on the change's commit. For a waiting role's review,
+	// it closes once that role signs off.
+	const asked = openFlag(votes, claim.change, head);
+	const flag = asked?.role && !approval.awaiting?.includes(asked.role) ? null : asked;
+	const attention = attentionFor(flag, hosted, claim);
+	// Dependencies not yet merged into the branch this change lands on.
+	const into = claim.into ?? projectBranch(state);
+	const mergedInto = (dependency: string) =>
+		released.some(
+			(release) => release.change === dependency && release.mergedAs && (release.into ?? projectBranch(state)) === into,
+		);
+	const waitsOn = (claim.after ?? []).filter((dependency) => !mergedInto(dependency));
+	const snapshot: ClaimSnapshot = { ...claim, head, approval };
+	if (hosted) snapshot.hosted = hosted;
+	if (attention) snapshot.attention = attention;
+	if (waitsOn.length) snapshot.waitsOn = waitsOn;
+	return snapshot;
+}
+
+// What needs a person on a claim: an open question, or a hosted builder that failed.
+function attentionFor(flag: FlagRecord | null, hosted: HostedStatus | undefined, claim: ClaimRecord): Attention | null {
+	if (flag) return { reason: flag.reason, agent: flag.agent, at: flag.at };
+	if (hosted?.builder?.status !== "failed") return null;
+	const error = hosted.builder.error ? `: ${hosted.builder.error.slice(0, 160)}` : "";
+	return { reason: `GitHive's builder failed${error}`, agent: "githive-builder", at: claim.active };
 }
 
 /** The number of claims in force, for the repo list; null before GitHive starts on the repo. */

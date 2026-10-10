@@ -48,11 +48,10 @@ async function readListed<S>(
 		try {
 			if (missing.length) {
 				const { fs, dir } = await retryTransient(() => fetchCommits(remote, missing));
-				for (const oid of missing)
-					states.set(
-						oid,
-						JSON.parse(decoder.decode((await git.readBlob({ fs, dir, oid, filepath: "state.json" })).blob)),
-					);
+				for (const oid of missing) {
+					const { blob } = await git.readBlob({ fs, dir, oid, filepath: "state.json" });
+					states.set(oid, JSON.parse(decoder.decode(blob)));
+				}
 			}
 		} catch (err) {
 			// A ref moved between the listing and the fetch, so its old tip is no longer served. List again.

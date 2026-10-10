@@ -18,7 +18,7 @@ export function ancestorsOf(shard: string) {
 
 /** A shard as one ref component, with everything except letters, digits, _ and - percent-encoded. */
 export const encodeShard = (shard: string) =>
-	encodeURIComponent(shard).replace(/[!'()*.~]/g, (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`);
+	encodeURIComponent(shard).replace(/[!'()*.~]/g, (char) => `%${char.charCodeAt(0).toString(16).toUpperCase()}`);
 export const decodeShard = (encoded: string) => decodeURIComponent(encoded);
 
 /** One ref per shard, side by side, so a shard's descendants share its prefix. */
@@ -36,7 +36,7 @@ export function recordsRepoOf(shard: string, count: number) {
 }
 
 /** A records repo's name, which can't collide with a change fork's (fork--<repo>--<change>). */
-export const recordsRepoName = (repo: string, k: number) => `records--${repo}--${k}`;
+export const recordsRepoName = (repo: string, index: number) => `records--${repo}--${index}`;
 
 /**
  * A change's index of the shards it has claimed in, so reading one claim needn't read every shard. It is

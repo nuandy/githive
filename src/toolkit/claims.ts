@@ -125,16 +125,7 @@ export async function startRepo(
 ) {
 	const outcome = await appendRecord<Registry, "started">(log, "githive", empty, (state) => {
 		if (state.baseline) return { refused: "started" };
-		const sharding: Partial<Registry> = input.shardDepth
-			? {
-					shardDepth: input.shardDepth,
-					...(input.recordsRepos ? { recordsRepos: input.recordsRepos } : {}),
-					shardedAt: new Date().toISOString(),
-					shardedBecause: "asked for at the start",
-				}
-			: input.autoShard
-				? { autoShard: input.autoShard }
-				: {};
+		const sharding = startingSharding(input);
 		return {
 			state: {
 				...state,
@@ -151,6 +142,22 @@ export async function startRepo(
 	return { started: outcome.ok };
 }
 
+function startingSharding(input: {
+	shardDepth?: number;
+	recordsRepos?: number;
+	autoShard?: Registry["autoShard"];
+}): Partial<Registry> {
+	if (input.shardDepth)
+		return {
+			shardDepth: input.shardDepth,
+			...(input.recordsRepos ? { recordsRepos: input.recordsRepos } : {}),
+			shardedAt: new Date().toISOString(),
+			shardedBecause: "asked for at the start",
+		};
+	if (input.autoShard) return { autoShard: input.autoShard };
+	return {};
+}
+
 /** Changes a started repo's settings. The audit holds each merge to the settings in the state it cites. */
 export async function changeSettings(
 	log: CasLog<Registry>,
@@ -165,29 +172,19 @@ export async function changeSettings(
 ) {
 	const outcome = await appendRecord<Registry, "not started" | "unchanged">(log, "githive", empty, (state) => {
 		if (!state.baseline) return { refused: "not started" };
-		const policy =
-			input.policy && JSON.stringify(input.policy) !== JSON.stringify(state.policy) ? input.policy : undefined;
-		const verify =
-			input.verify && JSON.stringify(input.verify) !== JSON.stringify(state.verify ?? []) ? input.verify : undefined;
-		const rules =
-			input.branchRules && JSON.stringify(input.branchRules) !== JSON.stringify(state.branchRules ?? [])
-				? input.branchRules
-				: undefined;
-		const skip =
-			input.skipChecks && JSON.stringify(input.skipChecks) !== JSON.stringify(state.skipChecks)
-				? input.skipChecks
-				: undefined;
+		const policy = ifChanged(input.policy, state.policy);
+		const verify = ifChanged(input.verify, state.verify ?? []);
+		const rules = ifChanged(input.branchRules, state.branchRules ?? []);
+		const skip = ifChanged(input.skipChecks, state.skipChecks);
 		const github = input.github !== undefined && input.github?.repo !== state.github?.repo ? input.github : undefined;
 		if (!policy && !verify && !rules && !skip && github === undefined) return { refused: "unchanged" };
 		const { github: _, ...rest } = state;
-		const next: Registry = {
-			...(github === null ? rest : state),
-			...(policy ? { policy } : {}),
-			...(verify ? { verify } : {}),
-			...(rules ? { branchRules: rules } : {}),
-			...(skip ? { skipChecks: skip } : {}),
-			...(github ? { github } : {}),
-		};
+		const next: Registry = { ...(github === null ? rest : state) };
+		if (policy) next.policy = policy;
+		if (verify) next.verify = verify;
+		if (rules) next.branchRules = rules;
+		if (skip) next.skipChecks = skip;
+		if (github) next.github = github;
 		const what = [
 			policy && "the review policy",
 			verify && `the checks (${verify.join("; ") || "none"})`,
@@ -201,6 +198,10 @@ export async function changeSettings(
 	});
 	return outcome.ok ? { changed: true as const } : { changed: false as const, refused: outcome.refused };
 }
+
+// The wanted setting, if it differs from the current one.
+const ifChanged = <T>(wanted: T | undefined, current: unknown) =>
+	wanted && JSON.stringify(wanted) !== JSON.stringify(current) ? wanted : undefined;
 
 /** When an unsharded registry should shard, based on load measured on Artifacts (see docs/design.md). */
 export const SHARD_WHEN = { agents: 8, writesPerMinute: 15, windowMs: 5 * 60_000 };
@@ -222,20 +223,19 @@ export function shardingReason(state: Registry | null | undefined, agent: string
 
 /** Shards the claims from here on, unless they already are. Claims held now stay in the registry. */
 export function shardClaims(log: CasLog<Registry>, input: { depth: number; recordsRepos: number; reason: string }) {
-	return appendRecord<Registry, "sharded">(log, "githive", empty, (state) =>
-		state.shardDepth
-			? { refused: "sharded" }
-			: {
-					state: {
-						...state,
-						shardDepth: input.depth,
-						...(input.recordsRepos ? { recordsRepos: input.recordsRepos } : {}),
-						shardedAt: new Date().toISOString(),
-						shardedBecause: input.reason,
-					},
-					text: `Claims are sharded from here on, ${input.depth} segments deep: ${input.reason}`,
-				},
-	);
+	return appendRecord<Registry, "sharded">(log, "githive", empty, (state) => {
+		if (state.shardDepth) return { refused: "sharded" };
+		return {
+			state: {
+				...state,
+				shardDepth: input.depth,
+				...(input.recordsRepos ? { recordsRepos: input.recordsRepos } : {}),
+				shardedAt: new Date().toISOString(),
+				shardedBecause: input.reason,
+			},
+			text: `Claims are sharded from here on, ${input.depth} segments deep: ${input.reason}`,
+		};
+	});
 }
 
 export const activeClaims = (state: Registry | null | undefined) => state?.claims ?? [];
@@ -286,72 +286,36 @@ export async function claim(
 	},
 	stamper?: Stamper,
 ) {
-	const { staleAfterMs, abandoned, now: at, ...wanted } = input;
+	const { staleAfterMs, abandoned, now: fixedNow, ...wanted } = input;
 	// The change's paths before this claim, or null, so a claim that must back out can restore them.
 	let previous: string[] | null = null;
 	// The state the claim was written onto, which shows whether the registry was sharded by then.
 	let seen: Registry | undefined;
 	const outcome = await appendRecord<Registry, Conflict[]>(log, wanted.agent, empty, async (state) => {
 		seen = state;
-		const time = at ?? Date.now();
+		const nowMs = fixedNow ?? Date.now();
 		const conflicts = conflictsWith(state, wanted.paths, wanted.change);
-		// Stale means idle past the floor and, when the caller can tell, abandoned on its agent's turn. An abandoned
-		// change under the same name can be taken over this way too.
-		const sameName = state.claims.find((c) => c.change === wanted.change && c.agent !== wanted.agent);
-		const stale = new Set<string>();
-		for (const change of new Set([...conflicts.map((c) => c.change), ...(sameName ? [sameName.change] : [])])) {
-			const held = state.claims.find((c) => c.change === change)!;
-			if (
-				staleAfterMs !== undefined &&
-				time - Date.parse(held.active) > staleAfterMs &&
-				(!abandoned || (await abandoned(held)).abandoned)
-			)
-				stale.add(change);
-		}
-		const blocking = conflicts.filter((c) => !stale.has(c.change));
+		const stale = await staleInTheWay(state, conflicts, wanted, { nowMs, staleAfterMs, abandoned });
+		const blocking = conflicts.filter((conflict) => !stale.has(conflict.change));
 		if (blocking.length) return { refused: blocking };
-		const now = new Date(time).toISOString();
-		const freedClaims = state.claims.filter((c) => stale.has(c.change));
+		const now = new Date(nowMs).toISOString();
+		const freedClaims = state.claims.filter((held) => stale.has(held.change));
 		const releases: ReleaseRecord[] = [];
 		for (const held of freedClaims)
-			releases.push(
-				await stamped(
-					"release",
-					{
-						change: held.change,
-						agent: held.agent,
-						by: wanted.agent,
-						at: now,
-						reason: "stale",
-						stale: true,
-						lastActive: held.active,
-					} as ReleaseRecord,
-					stamper,
-					"verifiedBy",
-				),
-			);
-		const remaining = state.claims.filter((c) => !freedClaims.includes(c));
-		const existing = remaining.find((c) => c.change === wanted.change);
+			releases.push(await stamped("release", staleRelease(held, wanted.agent, now), stamper, "verifiedBy"));
+		const remaining = state.claims.filter((held) => !freedClaims.includes(held));
+		const existing = remaining.find((held) => held.change === wanted.change);
 		// A change belongs to its agent; another agent claiming under its name would extend someone else's claim.
 		if (existing && existing.agent !== wanted.agent) throw new Error(changeTaken(wanted.change, existing.agent));
 		previous = existing ? [...existing.paths] : null;
-		const { by: _by, stamp: _stamp, ...base } = existing ?? ({} as Partial<ClaimRecord>);
 		const record = await stamped(
 			"claim",
-			existing
-				? {
-						...(base as ClaimRecord),
-						paths: [...existing.paths, ...wanted.paths.filter((p) => !existing.paths.includes(p))],
-						active: now,
-						...(existing.after || wanted.after
-							? { after: [...new Set([...(existing.after ?? []), ...(wanted.after ?? [])])] }
-							: {}),
-						...(wanted.source ? { source: wanted.source } : {}),
-					}
-				: { ...wanted, since: now, active: now },
+			existing ? extendedClaim(existing, wanted, now) : { ...wanted, since: now, active: now },
 			stamper,
 		);
-		const claims = existing ? remaining.map((c) => (c.change === wanted.change ? record : c)) : [...remaining, record];
+		const claims = existing
+			? remaining.map((held) => (held.change === wanted.change ? record : held))
+			: [...remaining, record];
 		const freed = freedClaims.length ? ` (releasing stale ${freedClaims.map((c) => c.change).join(", ")})` : "";
 		return {
 			state: { ...state, claims, released: [...state.released, ...releases] },
@@ -359,6 +323,59 @@ export async function claim(
 		};
 	});
 	return outcome.ok ? { ...outcome, previous, seen } : { ok: false as const, conflicts: outcome.refused };
+}
+
+// The changes in the way, by conflicting or by taking the same name, whose claims are stale. Stale means idle past
+// the floor and, when the caller can tell, abandoned on its agent's turn. An abandoned change under the same name
+// can be taken over this way too.
+async function staleInTheWay(
+	state: Registry,
+	conflicts: Conflict[],
+	wanted: { change: string; agent: string },
+	options: { nowMs: number; staleAfterMs?: number; abandoned?: Abandoned },
+): Promise<Set<string>> {
+	const { nowMs, staleAfterMs, abandoned } = options;
+	const sameName = state.claims.find((held) => held.change === wanted.change && held.agent !== wanted.agent);
+	const inTheWay = new Set([...conflicts.map((conflict) => conflict.change), ...(sameName ? [sameName.change] : [])]);
+	const stale = new Set<string>();
+	for (const change of inTheWay) {
+		const held = state.claims.find((claim) => claim.change === change)!;
+		if (
+			staleAfterMs !== undefined &&
+			nowMs - Date.parse(held.active) > staleAfterMs &&
+			(!abandoned || (await abandoned(held)).abandoned)
+		)
+			stale.add(change);
+	}
+	return stale;
+}
+
+const staleRelease = (held: ClaimRecord, by: string, at: string): ReleaseRecord => ({
+	change: held.change,
+	agent: held.agent,
+	by,
+	at,
+	reason: "stale",
+	stale: true,
+	lastActive: held.active,
+});
+
+// `existing` claimed again: the new paths and dependencies added, and active now. Its old stamp no longer applies.
+function extendedClaim(
+	existing: ClaimRecord,
+	wanted: { paths: string[]; after?: string[]; source?: string },
+	now: string,
+): ClaimRecord {
+	const { by: _by, stamp: _stamp, ...base } = existing;
+	const extended: ClaimRecord = {
+		...base,
+		paths: [...existing.paths, ...wanted.paths.filter((path) => !existing.paths.includes(path))],
+		active: now,
+	};
+	if (existing.after || wanted.after)
+		extended.after = [...new Set([...(existing.after ?? []), ...(wanted.after ?? [])])];
+	if (wanted.source) extended.source = wanted.source;
+	return extended;
 }
 
 /**
@@ -440,20 +457,7 @@ export function releaseStale(
 				claims: state.claims.filter((c) => c.change !== input.change),
 				released: [
 					...state.released,
-					await stamped(
-						"release",
-						{
-							change: input.change,
-							agent: held.agent,
-							by: input.agent,
-							at: new Date(now).toISOString(),
-							reason: "stale",
-							stale: true,
-							lastActive: held.active,
-						} as ReleaseRecord,
-						stamper,
-						"verifiedBy",
-					),
+					await stamped("release", staleRelease(held, input.agent, new Date(now).toISOString()), stamper, "verifiedBy"),
 				],
 			},
 			text: `${input.agent} releases ${input.change}'s claim, idle for ${Math.round(idle / 60_000)} minutes`,
@@ -505,7 +509,8 @@ export function registerAgents(log: CasLog<Registry>, agents: { agent: string; k
 		const at = new Date().toISOString();
 		const records = await Promise.all(
 			agents.map(
-				async (a) => [a.agent, await stamped("agent", { agent: a.agent, keyHash: a.keyHash, at }, stamper)] as const,
+				async (entry) =>
+					[entry.agent, await stamped("agent", { agent: entry.agent, keyHash: entry.keyHash, at }, stamper)] as const,
 			),
 		);
 		return {

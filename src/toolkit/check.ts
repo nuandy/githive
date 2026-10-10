@@ -29,41 +29,41 @@ export async function checkChange(input: CheckInput) {
 	const { change, claims } = input;
 	// A slightly stale head is fine for an early check. Listing refs every time made check the busiest reader
 	// of the project repo.
-	const listed =
-		(input.branchHead ? await input.branchHead().catch(() => undefined) : undefined) ??
-		(await branchHead(input.project, input.branch));
+	const cachedHead = input.branchHead ? await input.branchHead().catch(() => undefined) : undefined;
+	const listed = cachedHead ?? (await branchHead(input.project, input.branch));
 	if (!listed) throw new Error(`[409] ${input.branch} doesn't exist yet`);
-	const own = claims.find((c) => c.change === change);
+	const own = claims.find((claim) => claim.change === change);
+	const outsideClaim = (files: string[]) => files.filter((file) => !own || !inLane(file, own.paths));
 	// If no file changed on both sides, the change merges cleanly and nothing needs fetching.
-	const read = input.history
+	const compared = input.history
 		? await changeAgainst(input.history, repoOfUrl(input.project.url), input.branch, listed, {
 				ref: `changes/${change}`,
 				source: input.source,
 			}).catch(() => null)
 		: null;
-	if (read && "error" in read) throw new Error(`[409] changes/${change} has nothing pushed to check`);
-	if (read && !read.both.length)
+	if (compared && "error" in compared) throw new Error(`[409] changes/${change} has nothing pushed to check`);
+	if (compared && !compared.both.length)
 		return {
 			change,
-			head: read.head,
+			head: compared.head,
 			branch: input.branch,
 			main: { head: listed, clean: true },
-			outsideClaim: read.files.filter((f) => !own || !inLane(f, own.paths)),
+			outsideClaim: outsideClaim(compared.files),
 		};
 	return inWorkspaceTurn(async () => {
-		const ws = await Workspace.at(input.project, input.branch, listed);
-		const main = await ws.head();
-		const head = await ws.fetch("change", input.source, `changes/${change}`).catch(() => null);
+		const workspace = await Workspace.at(input.project, input.branch, listed);
+		const main = await workspace.head();
+		const head = await workspace.fetch("change", input.source, `changes/${change}`).catch(() => null);
 		if (!head) throw new Error(`[409] changes/${change} has nothing pushed to check`);
-		const files = (await ws.changedPaths(await ws.mergeBase(main, head), head)).sort();
-		const withMain = await ws.tryMerge(main, head);
+		const files = (await workspace.changedPaths(await workspace.mergeBase(main, head), head)).sort();
+		const withMain = await workspace.tryMerge(main, head);
 		return {
 			change,
 			head,
 			// `main` in the result means this branch, whatever its name.
-			branch: ws.branch,
+			branch: workspace.branch,
 			main: withMain.clean ? { head: main, clean: true } : { head: main, clean: false, conflicts: withMain.files },
-			outsideClaim: files.filter((f) => !own || !inLane(f, own.paths)),
+			outsideClaim: outsideClaim(files),
 		};
 	});
 }

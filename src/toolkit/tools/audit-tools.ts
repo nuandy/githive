@@ -3,7 +3,7 @@ import { projectBranch } from "../../project-branch";
 import { Timing } from "../../timing";
 import { audit } from "../audit";
 import { scopeFile } from "../branch-scope";
-import type { Registry } from "../claims";
+import type { BranchRecord, Registry } from "../claims";
 import { mergeRecordOf, readMainMerges, readRecordHistory, readRefHistories, readShardHistories } from "../git-records";
 import { revertViolation } from "../revert";
 import { votesPrefix } from "../vote-store";
@@ -15,12 +15,12 @@ import { claimsRef, DEFAULT_POLICY, votesRef } from "./repo";
 
 /** Replays a repo's records from Git: the merges since GitHive started on it, and every broken convention. */
 export async function runAudit(ctx: ToolContext, repo: string) {
-	const t = ctx.timing ?? new Timing();
-	const remote = await t.time("token", () => ctx.remote(repo, "read"));
+	const timing = ctx.timing ?? new Timing();
+	const remote = await timing.time("token", () => ctx.remote(repo, "read"));
 	// The votes don't depend on the registry, so read them in parallel.
-	const votesRead = t.time("votes", () => readRecordHistory<Votes>(remote, votesRef(repo)));
+	const votesRead = timing.time("votes", () => readRecordHistory<Votes>(remote, votesRef(repo)));
 	votesRead.catch(() => undefined);
-	const registry = await t.time("registry", () => readRecordHistory<Registry>(remote, claimsRef(repo)));
+	const registry = await timing.time("registry", () => readRecordHistory<Registry>(remote, claimsRef(repo)));
 	const baseline = registry[0]?.state.baseline;
 	if (!baseline) throw new Error(`[409] GitHive hasn't started on ${repo}`);
 	const start = registry[0].state;
@@ -31,53 +31,34 @@ export async function runAudit(ctx: ToolContext, repo: string) {
 		ctx.readBranch
 			? ctx.readBranch(repo, from, branch).then((commits) => commits.map(mergeRecordOf))
 			: readMainMerges(remote, from, branch);
+	// The repos holding sharded records: `count` records repos, or the project repo when there are none.
+	const recordsRemotes = async (count: number | undefined) =>
+		count && ctx.recordsRemote
+			? await Promise.all(Array.from({ length: count }, (_, index) => ctx.recordsRemote!(repo, index, "read")))
+			: [remote];
+	const readShards = async () => readShardHistories(await recordsRemotes(latest.recordsRepos), repo);
 	const [merges, shards, votesHistory] = await Promise.all([
-		t.time("merges", () => branchMerges(baseline, projectBranch(start))),
-		latest.shardDepth
-			? t.time("shards", async () =>
-					readShardHistories(
-						latest.recordsRepos && ctx.recordsRemote
-							? await Promise.all(
-									Array.from({ length: latest.recordsRepos }, (_, k) => ctx.recordsRemote!(repo, k, "read")),
-								)
-							: [remote],
-						repo,
-					),
-				)
-			: undefined,
+		timing.time("merges", () => branchMerges(baseline, projectBranch(start))),
+		latest.shardDepth ? timing.time("shards", readShards) : undefined,
 		votesRead,
 	]);
 	// Once votes are sharded, their buckets are where the latest state says.
 	const votesNow = votesHistory.at(-1)?.state;
-	const voteBuckets = votesNow?.buckets
-		? await t.time("buckets", async () =>
-				readRefHistories<Votes>(
-					votesNow.recordsRepos && ctx.recordsRemote
-						? await Promise.all(
-								Array.from({ length: votesNow.recordsRepos }, (_, k) => ctx.recordsRemote!(repo, k, "read")),
-							)
-						: [remote],
-					votesPrefix(repo),
-				),
-			)
-		: undefined;
+	const readBuckets = async () =>
+		readRefHistories<Votes>(await recordsRemotes(votesNow?.recordsRepos), votesPrefix(repo));
+	const voteBuckets = votesNow?.buckets ? await timing.time("buckets", readBuckets) : undefined;
 	// Merges on other branches, each read from where it started, with files named as their claims name them.
 	const project = projectBranch(start);
-	const onBranches = (
-		await t.time("branches", () =>
-			Promise.all(
-				Object.entries(latest.branches ?? {}).map(async ([name, record]) =>
-					(await branchMerges(record.base, name)).map((m) => ({
-						...m,
-						branch: name,
-						claimFiles: m.files.map((f) => scopeFile(f, name, project)),
-					})),
-				),
-			),
-		)
-	).flat();
+	const mergesOn = async ([name, record]: [string, BranchRecord]) =>
+		(await branchMerges(record.base, name)).map((merge) => ({
+			...merge,
+			branch: name,
+			claimFiles: merge.files.map((file) => scopeFile(file, name, project)),
+		}));
+	const branches = Object.entries(latest.branches ?? {});
+	const onBranches = (await timing.time("branches", () => Promise.all(branches.map(mergesOn)))).flat();
 	const all = [...merges, ...onBranches];
-	const violations = await t.time("audit", () =>
+	const violations = await timing.time("audit", () =>
 		audit({
 			registry,
 			...(shards ? { shards } : {}),
@@ -94,7 +75,7 @@ export async function runAudit(ctx: ToolContext, repo: string) {
 export const auditTools: ToolHandlers = {
 	async audit({ ctx, repo }) {
 		const { merges, violations } = await runAudit(ctx, repo);
-		return { merges, open: violations.filter((v) => !v.resolvedBy).length, violations };
+		return { merges, open: violations.filter((violation) => !violation.resolvedBy).length, violations };
 	},
 	async revert({ args, ctx, repo, write, claims, votes, registered, actAs, stamper }) {
 		const { violations } = await runAudit(ctx, repo);

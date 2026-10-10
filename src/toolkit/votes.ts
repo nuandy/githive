@@ -58,19 +58,19 @@ export function shardVotes(log: CasLog<Votes>, input: { buckets: number; records
 		log,
 		"githive",
 		() => ({ votes: [] }),
-		(state) =>
-			state.buckets
-				? { refused: "sharded" }
-				: {
-						state: {
-							...state,
-							buckets: input.buckets,
-							...(input.recordsRepos ? { recordsRepos: input.recordsRepos } : {}),
-							shardedAt: new Date().toISOString(),
-							shardedBecause: input.reason,
-						},
-						text: `Votes are sharded from here on, over ${input.buckets} buckets: ${input.reason}`,
-					},
+		(state) => {
+			if (state.buckets) return { refused: "sharded" };
+			return {
+				state: {
+					...state,
+					buckets: input.buckets,
+					...(input.recordsRepos ? { recordsRepos: input.recordsRepos } : {}),
+					shardedAt: new Date().toISOString(),
+					shardedBecause: input.reason,
+				},
+				text: `Votes are sharded from here on, over ${input.buckets} buckets: ${input.reason}`,
+			};
+		},
 	);
 }
 
@@ -95,14 +95,9 @@ export function flagChange(log: CasLog<Votes>, input: Omit<FlagRecord, "at" | "b
 		async (state) => {
 			const record: FlagRecord = { ...input, at: new Date().toISOString() };
 			const asked = stamper ? { ...record, by: stamper.by } : record;
+			const flag = stamper ? { ...asked, stamp: await stamper.stamp(stampPayload("flag", asked)) } : asked;
 			return {
-				state: {
-					...state,
-					flags: [
-						...(state.flags ?? []),
-						stamper ? { ...asked, stamp: await stamper.stamp(stampPayload("flag", asked)) } : asked,
-					],
-				},
+				state: { ...state, flags: [...(state.flags ?? []), flag] },
 				text: `${input.agent} asks a person about ${input.change}: ${input.reason}`,
 			};
 		},
@@ -163,7 +158,7 @@ export const isPerson = (by: string | undefined) => !!by && /^person:[^/]+$/.tes
 const poolOf = (grant: string) => grant.match(/^((?:person|service):[^/*]+)\/\*$/)?.[1] ?? null;
 
 export const blockingRoles = (policy: ReviewPolicy) => [
-	...new Set([...policy.vetoes, ...(policy.escalate ?? []).flatMap((e) => e.vetoes ?? [])]),
+	...new Set([...policy.vetoes, ...(policy.escalate ?? []).flatMap((escalation) => escalation.vetoes ?? [])]),
 ];
 
 /**
@@ -174,8 +169,8 @@ export function grantWarnings(policy: ReviewPolicy): string[] {
 	return blockingRoles(policy).flatMap((role) => {
 		const holders = policy.grants?.[role] ?? DEFAULT_GRANT;
 		// A team is people, however many it has; a pool of one person's agents isn't.
-		const people = holders.some((h) => h === "person:*" || isPerson(h) || h.startsWith("@"));
-		const many = holders.some((h) => poolOf(h) || h.startsWith("@")) || holders.length > 1;
+		const people = holders.some((holder) => holder === "person:*" || isPerson(holder) || holder.startsWith("@"));
+		const many = holders.some((holder) => poolOf(holder) || holder.startsWith("@")) || holders.length > 1;
 		const warnings: string[] = [];
 		if (!many && !people)
 			warnings.push(
@@ -215,10 +210,10 @@ export function holdsRole(
 /** The policy for a change touching `paths`, made stricter by every escalation whose paths it touches. */
 export function effectivePolicy(policy: ReviewPolicy, paths: string[]): { required: number; vetoes: string[] } {
 	let { required, vetoes } = policy;
-	for (const e of policy.escalate ?? []) {
-		if (!paths.some((p) => e.paths.some((q) => entriesOverlap(p, q)))) continue;
-		required = Math.max(required, e.required ?? required);
-		vetoes = [...new Set([...vetoes, ...(e.vetoes ?? [])])];
+	for (const escalation of policy.escalate ?? []) {
+		if (!paths.some((path) => escalation.paths.some((entry) => entriesOverlap(path, entry)))) continue;
+		required = Math.max(required, escalation.required ?? required);
+		vetoes = [...new Set([...vetoes, ...(escalation.vetoes ?? [])])];
 	}
 	return { required, vetoes };
 }
@@ -231,12 +226,11 @@ export function vote(log: CasLog<Votes>, input: Omit<VoteRecord, "at" | "by" | "
 		async (state) => {
 			const record: VoteRecord = { ...input, at: new Date().toISOString() };
 			const cast = stamper ? { ...record, by: stamper.by } : record;
+			const stamped = stamper ? { ...cast, stamp: await stamper.stamp(stampPayload("vote", cast)) } : cast;
+			const verb = input.verdict === "approve" ? "approves" : "rejects";
 			return {
-				state: {
-					...state,
-					votes: [...state.votes, stamper ? { ...cast, stamp: await stamper.stamp(stampPayload("vote", cast)) } : cast],
-				},
-				text: `${input.reviewer} (${input.role}) ${input.verdict === "approve" ? "approves" : "rejects"} ${input.commit}: ${input.evidence}`,
+				state: { ...state, votes: [...state.votes, stamped] },
+				text: `${input.reviewer} (${input.role}) ${verb} ${input.commit}: ${input.evidence}`,
 			};
 		},
 	);
@@ -262,24 +256,25 @@ export function approval(
 ) {
 	const policy = effectivePolicy(base, paths);
 	const latest = new Map<string, VoteRecord>();
-	for (const v of state?.votes ?? []) if (v.commit === commit) latest.set(v.by ?? `name:${v.reviewer}`, v);
+	for (const vote of state?.votes ?? [])
+		if (vote.commit === commit) latest.set(vote.by ?? `name:${vote.reviewer}`, vote);
 	const verdicts = [...latest.values()];
 	// When the author is one of a person's agents, the person may approve but their other agents may not.
 	const authorPerson = author?.by && !isPerson(author.by) ? personOf(author.by) : null;
-	const isAuthor = (v: VoteRecord) =>
+	const isAuthor = (vote: VoteRecord) =>
 		!!author &&
-		((!!v.by && v.by === author.by) ||
-			v.reviewer === author.agent ||
-			(!!authorPerson && personOf(v.by) === authorPerson && !isPerson(v.by)));
-	const approving = verdicts.filter((v) => v.verdict === "approve" && !isAuthor(v));
+		((!!vote.by && vote.by === author.by) ||
+			vote.reviewer === author.agent ||
+			(!!authorPerson && personOf(vote.by) === authorPerson && !isPerson(vote.by)));
+	const approving = verdicts.filter((vote) => vote.verdict === "approve" && !isAuthor(vote));
 	// One approval per person, however many of their agents approve.
-	const approvals = new Set(approving.map((v) => personOf(v.by) ?? v.by ?? `name:${v.reviewer}`)).size;
-	const asRole = (v: VoteRecord) => policy.vetoes.includes(v.role) && holdsRole(base, v.role, v, author);
-	const vetoedBy = verdicts.filter((v) => v.verdict === "reject" && asRole(v)).map((v) => v.reviewer);
-	const awaiting = policy.vetoes.filter((role) => !approving.some((v) => v.role === role && asRole(v)));
+	const approvals = new Set(approving.map((vote) => personOf(vote.by) ?? vote.by ?? `name:${vote.reviewer}`)).size;
+	const asRole = (vote: VoteRecord) => policy.vetoes.includes(vote.role) && holdsRole(base, vote.role, vote, author);
+	const vetoedBy = verdicts.filter((vote) => vote.verdict === "reject" && asRole(vote)).map((vote) => vote.reviewer);
+	const awaiting = policy.vetoes.filter((role) => !approving.some((vote) => vote.role === role && asRole(vote)));
 	const ungranted = verdicts
-		.filter((v) => policy.vetoes.includes(v.role) && !asRole(v))
-		.map((v) => `${v.reviewer} (${v.role})`);
+		.filter((vote) => policy.vetoes.includes(vote.role) && !asRole(vote))
+		.map((vote) => `${vote.reviewer} (${vote.role})`);
 	return {
 		approved: approvals >= policy.required && !vetoedBy.length && !awaiting.length,
 		approvals,
@@ -290,10 +285,9 @@ export function approval(
 }
 
 /** The votes that count. With a stamp key in the registry, only those GitHive stamped. */
-export async function countedVotes(cast: VoteRecord[], stampKey: string | undefined) {
-	if (!stampKey) return cast;
-	const checked = await Promise.all(
-		cast.map(async (v) => ((await verifyStamp(stampKey, stampPayload("vote", v), v.stamp)) ? v : null)),
-	);
-	return checked.filter((v) => v !== null);
+export async function countedVotes(votesCast: VoteRecord[], stampKey: string | undefined) {
+	if (!stampKey) return votesCast;
+	const stamped = async (vote: VoteRecord) => verifyStamp(stampKey, stampPayload("vote", vote), vote.stamp);
+	const checked = await Promise.all(votesCast.map(async (vote) => ((await stamped(vote)) ? vote : null)));
+	return checked.filter((vote) => vote !== null);
 }

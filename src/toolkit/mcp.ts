@@ -53,9 +53,9 @@ const noted = new Map<string, number>();
 /** Runs one tool and notes any write in the repo's summary. */
 export async function callTool(name: string, args: Args, ctx: ToolContext): Promise<unknown> {
 	const result = await withNews(name, args, ctx, await runTool(name, args, ctx));
-	if (WRITES.has(name) && (result as { ok?: boolean } | null)?.ok !== false)
-		await ctx.ping?.(requiredString(args, "repo")).catch(() => undefined);
-	if (ctx.summarize && WRITES.has(name) && (result as { ok?: boolean } | null)?.ok !== false) {
+	const wrote = WRITES.has(name) && (result as { ok?: boolean } | null)?.ok !== false;
+	if (wrote) await ctx.ping?.(requiredString(args, "repo")).catch(() => undefined);
+	if (ctx.summarize && wrote) {
 		const repo = requiredString(args, "repo");
 		const merged = name === "merge";
 		// Activity alone is noted at most every 10 seconds per repo, so a busy repo doesn't queue on the index.
@@ -85,16 +85,18 @@ async function withNews(name: string, args: Args, ctx: ToolContext, result: unkn
 		.read()
 		.catch(() => null);
 	if (!registry?.commit.state.baseline) return result;
-	const news = await ctx.news(repo, projectBranch(registry.commit.state), agent).catch(() => []);
-	return news.length
-		? {
-				...(result as Record<string, unknown>),
-				news: news.map((n) => ({
-					...n,
-					says: `${projectBranch(registry.commit.state)} changed ${n.files.join(", ")}${n.filesMore ? ` and ${n.filesMore} more` : ""}: ${n.change} by ${n.agent}${n.intent ? `, "${n.intent}"` : ""}`,
-				})),
-			}
-		: result;
+	const branch = projectBranch(registry.commit.state);
+	const news = await ctx.news(repo, branch, agent).catch(() => []);
+	if (!news.length) return result;
+	const says = (landed: (typeof news)[number]) => {
+		const more = landed.filesMore ? ` and ${landed.filesMore} more` : "";
+		const intent = landed.intent ? `, "${landed.intent}"` : "";
+		return `${branch} changed ${landed.files.join(", ")}${more}: ${landed.change} by ${landed.agent}${intent}`;
+	};
+	return {
+		...(result as Record<string, unknown>),
+		news: news.map((landed) => ({ ...landed, says: says(landed) })),
+	};
 }
 
 const handlers: ToolHandlers = {

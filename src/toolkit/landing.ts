@@ -76,42 +76,40 @@ export interface Landed {
 
 /** Outcomes that landed, as news: what changed, by whom, and why. */
 export const asNews = (outcomes: Settled[]): Landed[] =>
-	outcomes
-		.filter((s) => s.how === "landed")
-		.map((s) => ({
-			change: s.change,
-			agent: s.agent,
-			at: s.at,
-			files: s.files ?? [],
-			...(s.commit ? { commit: s.commit } : {}),
-			...(s.filesMore ? { filesMore: s.filesMore } : {}),
-			...(s.intent ? { intent: s.intent } : {}),
-		}));
+	outcomes.filter((outcome) => outcome.how === "landed").map(newsOf);
+
+function newsOf(outcome: Settled): Landed {
+	const news: Landed = { change: outcome.change, agent: outcome.agent, at: outcome.at, files: outcome.files ?? [] };
+	if (outcome.commit) news.commit = outcome.commit;
+	if (outcome.filesMore) news.filesMore = outcome.filesMore;
+	if (outcome.intent) news.intent = outcome.intent;
+	return news;
+}
 
 /** For each file, the change that last landed on it, so agents know who to ask about a conflict there. */
 export const lastLandedOn = (outcomes: Settled[], files: string[]) =>
 	files.flatMap((file) => {
-		const last = asNews(outcomes).findLast((l) => l.files.includes(file));
-		return last
-			? [
-					{
-						file,
-						change: last.change,
-						agent: last.agent,
-						...(last.commit ? { commit: last.commit } : {}),
-						...(last.intent ? { intent: last.intent } : {}),
-					},
-				]
-			: [];
+		const last = asNews(outcomes).findLast((landed) => landed.files.includes(file));
+		if (!last) return [];
+		return [
+			{
+				file,
+				change: last.change,
+				agent: last.agent,
+				...(last.commit ? { commit: last.commit } : {}),
+				...(last.intent ? { intent: last.intent } : {}),
+			},
+		];
 	});
 
 /** A conflict's causes in words: `a.ts (changed by note-7, agent-3: "add refunds", 2f56723d)`. */
 export const conflictWords = (files: string[], causes: ReturnType<typeof lastLandedOn>) =>
 	files.map((file) => {
-		const c = causes.find((x) => x.file === file);
-		return c
-			? `${file} (changed by ${c.change}, ${c.agent}${c.intent ? `: "${c.intent}"` : ""}${c.commit ? `, ${c.commit.slice(0, 8)}` : ""})`
-			: file;
+		const cause = causes.find((candidate) => candidate.file === file);
+		if (!cause) return file;
+		const intent = cause.intent ? `: "${cause.intent}"` : "";
+		const commit = cause.commit ? `, ${cause.commit.slice(0, 8)}` : "";
+		return `${file} (changed by ${cause.change}, ${cause.agent}${intent}${commit})`;
 	});
 
 /** A branch's landing as plain data, shared by RepoCache and memoryLanding. */
@@ -133,7 +131,10 @@ export function takeTurn(
 	now = Date.now(),
 ): { state: LandingState; turn: { settled: Settled } | { lease: boolean } } {
 	const settled = state.recent.findLast(
-		(s) => s.change === change && s.head === head && (s.how === "landed" || Date.parse(s.at) >= since),
+		(outcome) =>
+			outcome.change === change &&
+			outcome.head === head &&
+			(outcome.how === "landed" || Date.parse(outcome.at) >= since),
 	);
 	if (settled) return { state, turn: { settled } };
 	const { lease } = state;

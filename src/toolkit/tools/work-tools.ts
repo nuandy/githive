@@ -1,4 +1,5 @@
 import { requiredString } from "../../errors";
+import type { Settled } from "../landing";
 import { addWork, addWorks, backlogFor, reviewsFor, type Work } from "../work";
 import { changeStatus } from "./change-state";
 import { workItemFrom } from "./claim-input";
@@ -45,8 +46,8 @@ export const workTools: ToolHandlers = {
 			if (!Array.isArray(args.items) || !args.items.length || args.items.length > MOST_AT_ONCE)
 				throw new Error(`[400] items is a list of 1 to ${MOST_AT_ONCE} pieces of work`);
 			const items = args.items.map((item) => workItemFrom(item as Record<string, unknown>));
-			const ids = items.map((i) => i.id);
-			const twice = ids.filter((id, i) => ids.indexOf(id) !== i);
+			const ids = items.map((item) => item.id);
+			const twice = ids.filter((id, index) => ids.indexOf(id) !== index);
 			if (twice.length)
 				throw new Error(`[400] each piece needs its own id: ${[...new Set(twice)].join(", ")} more than once`);
 			const added = await addWorks(recordLog<Work>(ctx, repo, workRef(repo)), by, items);
@@ -73,22 +74,20 @@ export const workTools: ToolHandlers = {
 		);
 		// A change can land before its claim is released (that waits for the lease to be handed on).
 		// Report it, so its agent doesn't try to merge it again.
-		const landed =
-			held && status.head
-				? (
-						await ctx
-							.landing?.(repo, held.into ?? branch)
-							.view()
-							.catch(() => null)
-					)?.recent.findLast((s) => s.change === change && s.head === status.head && s.how === "landed")
-				: undefined;
-		return {
-			change,
-			claim: held,
-			...(released ? { released } : {}),
-			...(landed ? { landed: { commit: landed.commit, at: landed.at } } : {}),
-			...(waits.length ? { waitsOn: waits } : {}),
-			...status,
-		};
+		let landed: Settled | undefined;
+		if (held && status.head) {
+			const landing = await ctx
+				.landing?.(repo, held.into ?? branch)
+				.view()
+				.catch(() => null);
+			landed = landing?.recent.findLast(
+				(outcome) => outcome.change === change && outcome.head === status.head && outcome.how === "landed",
+			);
+		}
+		const reply: Record<string, unknown> = { change, claim: held };
+		if (released) reply.released = released;
+		if (landed) reply.landed = { commit: landed.commit, at: landed.at };
+		if (waits.length) reply.waitsOn = waits;
+		return Object.assign(reply, status);
 	},
 };

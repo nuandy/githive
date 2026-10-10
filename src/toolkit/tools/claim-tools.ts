@@ -3,64 +3,38 @@ import { requiredPaths, requiredString } from "../../errors";
 import { isReservedPath, presentClaim, scopePaths } from "../branch-scope";
 import { abandonedRule } from "./change-state";
 import { branchMerge, changeList, dependencyLoop, targetBranch } from "./claim-input";
-import type { ToolHandlers } from "./context";
+import type { ClaimOutcome } from "../claim-store";
+import type { Args, ToolCall, ToolHandlers } from "./context";
 import { containerChecks, shardIfBusy, STALE_AFTER_MS, storeFor } from "./repo";
 
 // Tools for claims: claim, release, claims, and build (a claim worked by GitHive's hosted builder).
+
+// A string argument with its whitespace trimmed, or undefined if it's missing or blank.
+const optionalString = (args: Args, field: string) =>
+	typeof args[field] === "string" && args[field].trim() ? args[field].trim() : undefined;
 
 export const claimTools: ToolHandlers = {
 	async claims({ adviceView }) {
 		return (await adviceView()).claims;
 	},
-	async claim({
-		args,
-		ctx,
-		repo,
-		claims,
-		votes,
-		registered,
-		actAs,
-		stamper,
-		store,
-		branch,
-		claimOf,
-		changeSource,
-		warmChecks,
-	}) {
+	async claim(call) {
+		const { args, ctx, repo, claims, votes, registered, actAs, stamper, store, branch, changeSource, warmChecks } =
+			call;
 		const change = requiredString(args, "change");
 		const agent = actAs("agent");
 		// With `source`, the change merges a whole branch, claiming what it changed (see branchMerge).
-		const source = typeof args.source === "string" && args.source.trim() ? args.source.trim() : undefined;
+		const source = optionalString(args, "source");
 		const given = source ? [] : normalizeClaim(requiredPaths(args, "paths"));
 		const reserved = given.find(isReservedPath);
 		if (reserved) throw new Error(`[400] ${reserved}: a path can't start with "::"`);
-		// A change lands on one branch: claiming again keeps it there, and naming another is refused.
-		const held = await claimOf(change);
-		const asked = typeof args.into === "string" && args.into.trim() ? args.into.trim() : undefined;
-		const into = asked ?? held?.into ?? branch;
-		if (held && (held.into ?? branch) !== into)
-			throw new Error(
-				`[409] ${change} lands on ${held.into ?? branch}: a change lands on one branch; claim another change for ${into}`,
-			);
-		const made =
-			into === branch || held
-				? undefined
-				: await targetBranch(ctx, repo, {
-						into,
-						from: typeof args.from === "string" && args.from.trim() ? args.from.trim() : undefined,
-						registered,
-						claims,
-						agent,
-						stamper,
-					});
+		const { into, made } = await landingBranch(call, change, agent);
 		const merging = source ? await branchMerge(ctx, repo, source, into) : undefined;
 		const paths = merging ? merging.paths : given;
 		const after = changeList(args.after, "after");
 		if (after.includes(change)) throw new Error(`[400] ${change} can't wait on itself`);
 		// Refuse a dependency loop, which would leave every change in it waiting forever.
-		const loop = after.length
-			? await dependencyLoop(change, after, async (dep) => (await claimOf(dep))?.after ?? [])
-			: undefined;
+		const afterOf = async (dependency: string) => (await call.claimOf(dependency))?.after ?? [];
+		const loop = after.length ? await dependencyLoop(change, after, afterOf) : undefined;
 		if (loop) throw new Error(`[409] after ${loop.at(1)}, ${change} would wait on itself: ${loop.join(" waits on ")}`);
 		const input = {
 			change,
@@ -75,42 +49,12 @@ export const claimTools: ToolHandlers = {
 		// If one record would hold agents up, shard first, then claim in the shards.
 		const sharded = await shardIfBusy(ctx, repo, claims, registered, input.agent);
 		const outcome = await (sharded ? storeFor(ctx, repo, sharded) : store).claim(input, stamper);
-		// Report conflicting paths as agents wrote them, without the branch scoping.
-		const conflicts = outcome.ok
-			? undefined
-			: outcome.conflicts.map((c) => ({
-					...c,
-					path: presentClaim({ paths: [c.path] }, branch).paths[0],
-					held: presentClaim({ paths: [c.held] }, branch).paths[0],
-				}));
 		// Once claimed, the source's tip becomes the change's branch in the agent's fork.
 		if (outcome.ok && merging) await merging.push(await changeSource(agent, "write"), change);
 		// Without container checks, the Gate lands the change within minutes, so warm it from the claim. A cold
 		// Gate holds up the first batch. With checks, a claim is too early to install for; they warm at the check.
 		if (outcome.ok && !containerChecks(registered?.verify).length) await warmChecks("claimed", change);
-		const merged = merging
-			? {
-					source,
-					head: merging.tip,
-					claimed: paths,
-					note: `${change} merges ${source} at ${merging.tip.slice(0, 8)} into ${into}: its branch changes/${change} is that commit, in your fork. Get it reviewed, check and merge it like any change. If ${source} moves on, claim again to bring the change up to its new tip (a new head, so a new review).`,
-				}
-			: {};
-		// A refused claim that couldn't be fully backed out still holds paths: releasing the change frees them.
-		const stuck =
-			!outcome.ok && outcome.stillHeld?.length
-				? {
-						note: `part of ${change}'s claim couldn't be undone and still holds paths (${outcome.stillHeld.length} record(s)): release ${change} to free them`,
-					}
-				: {};
-		return {
-			...outcome,
-			...(conflicts ? { conflicts } : {}),
-			...(into !== branch ? { into } : {}),
-			...(made ? { branch: made } : {}),
-			...merged,
-			...stuck,
-		};
+		return claimReply(outcome, { change, into, branch, made, source, merging, paths });
 	},
 	async release({ args, ctx, repo, votes, registered, actAs, stamper, store, claimOf }) {
 		const change = requiredString(args, "change");
@@ -152,3 +96,65 @@ export const claimTools: ToolHandlers = {
 		return ctx.startBuilder({ repo, change });
 	},
 };
+
+// The branch a claim lands on, and how it was made ready if it's new. A change lands on one branch: claiming again
+// keeps it there, and naming another is refused.
+async function landingBranch(call: ToolCall, change: string, agent: string) {
+	const { args, ctx, repo, registered, claims, stamper, branch } = call;
+	const held = await call.claimOf(change);
+	const into = optionalString(args, "into") ?? held?.into ?? branch;
+	if (held && (held.into ?? branch) !== into)
+		throw new Error(
+			`[409] ${change} lands on ${held.into ?? branch}: a change lands on one branch; claim another change for ${into}`,
+		);
+	if (into === branch || held) return { into, made: undefined };
+	const from = optionalString(args, "from");
+	const made = await targetBranch(ctx, repo, { into, from, registered, claims, agent, stamper });
+	return { into, made };
+}
+
+// What a claim reports: its outcome with conflicting paths as agents wrote them, where the change lands, and a note
+// on a branch merge or on paths a refused claim still holds.
+function claimReply(
+	outcome: ClaimOutcome,
+	claimed: {
+		change: string;
+		into: string;
+		branch: string;
+		made?: string;
+		source?: string;
+		merging?: { tip: string };
+		paths: string[];
+	},
+) {
+	const { change, into, branch, made, source, merging, paths } = claimed;
+	// Report conflicting paths as agents wrote them, without the branch scoping.
+	const asWritten = (path: string) => presentClaim({ paths: [path] }, branch).paths[0];
+	const conflicts = outcome.ok
+		? undefined
+		: outcome.conflicts.map((conflict) => ({
+				...conflict,
+				path: asWritten(conflict.path),
+				held: asWritten(conflict.held),
+			}));
+	const merged = merging
+		? {
+				source,
+				head: merging.tip,
+				claimed: paths,
+				note: `${change} merges ${source} at ${merging.tip.slice(0, 8)} into ${into}: its branch changes/${change} is that commit, in your fork. Get it reviewed, check and merge it like any change. If ${source} moves on, claim again to bring the change up to its new tip (a new head, so a new review).`,
+			}
+		: {};
+	// A refused claim that couldn't be fully backed out still holds paths: releasing the change frees them.
+	const stuck =
+		!outcome.ok && outcome.stillHeld?.length
+			? {
+					note: `part of ${change}'s claim couldn't be undone and still holds paths (${outcome.stillHeld.length} record(s)): release ${change} to free them`,
+				}
+			: {};
+	const reply: Record<string, unknown> = { ...outcome };
+	if (conflicts) reply.conflicts = conflicts;
+	if (into !== branch) reply.into = into;
+	if (made) reply.branch = made;
+	return Object.assign(reply, merged, stuck);
+}
