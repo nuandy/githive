@@ -4,7 +4,8 @@
 //   #/inbox                                   what waits on a person, across repos
 //   #/orgs                                    your organizations, and making one
 //   #/orgs/:org                               an organization (or your own namespace)
-//   #/repos/:owner/:name[/claims|/agents|/audit|/settings][?branch=<branch>]
+//   #/repos/:owner/:name[/changes|/history|/claims|/agents|/audit|/settings][?branch=<branch>]
+//                                             (the Hive tab without one)
 //   #/repos/:owner/:name/code[/<path>][?ref=<branch or commit>]
 //   #/repos/:owner/:name/changes/:id[/commits]
 //   #/settings/agents                         your agents, their tokens, and connected apps
@@ -12,7 +13,7 @@
 
 import { repoPath } from "./repoName";
 
-export type RepoTab = "changes" | "hive" | "history" | "claims" | "code" | "agents" | "settings" | "audit";
+export type RepoTab = "hive" | "changes" | "history" | "claims" | "code" | "agents" | "settings" | "audit";
 export type ChangeTab = "conversation" | "commits";
 
 export type Route =
@@ -34,7 +35,7 @@ export type Route =
 	| { page: "change"; repo: string; change: string; tab: ChangeTab }
 	| { page: "not-found" };
 
-const REPO_TABS: RepoTab[] = ["changes", "hive", "history", "claims", "code", "agents", "settings", "audit"];
+const REPO_TABS: RepoTab[] = ["hive", "changes", "history", "claims", "code", "agents", "settings", "audit"];
 const CHANGE_TABS: ChangeTab[] = ["commits"];
 
 function decode(segment: string | undefined): string | null {
@@ -79,7 +80,7 @@ export function parseRoute(hash: string): Route {
 		}
 		if (rest.length === 0 || (rest.length === 1 && REPO_TABS.includes(rest[0] as RepoTab))) {
 			const branch = params.get("branch") || undefined;
-			const tab = (rest[0] as RepoTab | undefined) ?? "changes";
+			const tab = (rest[0] as RepoTab | undefined) ?? "hive";
 			return { page: "repo", repo, tab, ...(branch ? { branch } : {}) };
 		}
 		if (rest[0] === "changes" && rest.length >= 2 && rest.length <= 3) {
@@ -94,8 +95,8 @@ export function parseRoute(hash: string): Route {
 
 const encode = encodeURIComponent;
 
-function repoHref(repo: string, tab: RepoTab = "changes", branch?: string): string {
-	const tabPart = tab === "changes" ? "" : `/${tab}`;
+function repoHref(repo: string, tab: RepoTab = "hive", branch?: string): string {
+	const tabPart = tab === "hive" ? "" : `/${tab}`;
 	const query = branch ? `?branch=${encode(branch)}` : "";
 	return `#/repos/${repoPath(repo)}${tabPart}${query}`;
 }

@@ -258,7 +258,7 @@ function ChangeMissing({ changeId, repo, loading }: { changeId: string; repo: st
 			<Icon name="alert" size={28} className="muted" />
 			<h2>Change not found</h2>
 			<p>
-				{repo} has no change named <code>{changeId}</code>. <a href={href.repo(repo)}>See open changes</a>.
+				{repo} has no change named <code>{changeId}</code>. <a href={href.repo(repo, "changes")}>See open changes</a>.
 			</p>
 		</div>
 	);

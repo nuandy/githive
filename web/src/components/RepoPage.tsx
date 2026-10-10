@@ -271,8 +271,8 @@ export function RepoPage({
 	const voting = access ? canVote(access.level) : !manage;
 	const branch = snapshot?.branch ?? access?.branch ?? "main";
 	const tabs: TabItem[] = [
-		{ id: "changes", label: "Changes", icon: "pull", href: href.repo(repo), count: snapshot?.claims.length },
-		{ id: "hive", label: "Hive", icon: "activity", href: href.repo(repo, "hive") },
+		{ id: "hive", label: "Hive", icon: "activity", href: href.repo(repo) },
+		{ id: "changes", label: "Changes", icon: "pull", href: href.repo(repo, "changes"), count: snapshot?.claims.length },
 		{ id: "history", label: "History", icon: "commit", href: href.repo(repo, "history") },
 		{ id: "claims", label: "Claims", icon: "folder", href: href.repo(repo, "claims") },
 		{ id: "code", label: "Code", icon: "file", href: href.code(repo, "") },
