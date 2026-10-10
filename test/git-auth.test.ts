@@ -5,9 +5,10 @@ import { branchHead } from "../src/git";
 import { countingRequests, gitFetch, gitTimeout, http } from "../src/git-http";
 
 // isomorphic-git asks a Git server without credentials first, gets a 401, and
-// asks again, leaving the 401's body unread; in a Worker, a few such reads side
-// by side held every connection a request may open, and the runtime cancelled
-// responses to break the stall. GitHive sends its credentials with the first request.
+// asks again, leaving the 401's body unread. In a Worker, a few such reads in
+// parallel can hold every connection a request may open, and the runtime cancels
+// responses to break the stall. So GitHive sends its credentials with the first
+// request.
 
 const pkt = (line: string) => `${(line.length + 4).toString(16).padStart(4, "0")}${line}`;
 const OID = "1234567890abcdef1234567890abcdef12345678";
@@ -15,7 +16,10 @@ const OID = "1234567890abcdef1234567890abcdef12345678";
 let close: (() => void) | undefined;
 afterEach(() => close?.());
 
-/** A Git server that refuses a request without credentials, and lists one branch to one with them; busy (500) for the first `busy` requests, silent (never answering) for the first `silent`. */
+/**
+ * A Git server that refuses a request without credentials and lists one branch to one with them.
+ * It answers 500 to the first `busy` requests and never answers the first `silent` ones.
+ */
 async function guarded(busy = 0, silent = 0) {
 	const seen: (string | undefined)[] = [];
 	const server = createServer((req, res) => {

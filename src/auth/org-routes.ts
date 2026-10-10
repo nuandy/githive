@@ -2,9 +2,8 @@ import type { Hono } from "hono";
 import { type Level, type Org, OrgStore, type Role } from "./orgs";
 import type { Principal } from "./principal";
 
-// Orgs and their people: make an org, see one, and manage its members,
-// invitations and teams. Owners and admins manage; only owners make or
-// unmake owners; anyone may leave. Access admins may do all of it.
+// Org routes: create and view orgs, and manage members, invitations and teams. Owners and admins manage, only
+// owners grant or remove the owner role, and anyone may leave. Access admins may do all of it.
 
 type OrgEnv = { Bindings: Env; Variables: { principal?: Principal } };
 
@@ -34,12 +33,12 @@ export function orgRoutes(app: Hono<OrgEnv>) {
 	const actorLabel = (principal: Principal | undefined) =>
 		principal?.kind === "access" ? principal.identity.value : principal ? principal.user.handle : "";
 
-	// The caller's orgs, with their role in each; their own namespace first.
+	// The caller's orgs with their role in each, personal org first.
 	app.get("/orgs", async (c) => {
 		const principal = c.get("principal");
 		if (principal?.kind === "access" || !principal) return c.json([]);
 		const orgs = store(c.env);
-		// Someone who signed in before orgs existed gets their own namespace now.
+		// People who signed in before orgs existed get their personal org here.
 		await orgs.personalOrg(principal.user);
 		return c.json(await orgs.orgsOf(principal.user.id));
 	});
@@ -58,7 +57,7 @@ export function orgRoutes(app: Hono<OrgEnv>) {
 		);
 	});
 
-	// An org: its repos the caller can see; to its members, its people and teams too.
+	// An org and the repos the caller can see. Members also see its people and teams.
 	app.get("/orgs/:org", async (c) => {
 		const orgs = store(c.env);
 		const org = await orgs.orgOrFail(c.req.param("org"));
@@ -100,7 +99,7 @@ export function orgRoutes(app: Hono<OrgEnv>) {
 		return c.json(await orgs.org(org.slug));
 	});
 
-	// Members: add by email (at once if they've signed in, else as an invitation), change a role, remove.
+	// Members are added by email. Someone who hasn't signed in yet gets an invitation.
 	app.post("/orgs/:org/members", async (c) => {
 		const orgs = store(c.env);
 		const org = await orgs.orgOrFail(c.req.param("org"));
@@ -148,7 +147,7 @@ export function orgRoutes(app: Hono<OrgEnv>) {
 		return c.json({ uninvited: c.req.param("email") });
 	});
 
-	// Teams: named groups of members, which grants name as @<org>/<team>.
+	// Teams are named groups of members. Grants refer to them as @<org>/<team>.
 	app.post("/orgs/:org/teams", async (c) => {
 		const orgs = store(c.env);
 		const org = await orgs.orgOrFail(c.req.param("org"));

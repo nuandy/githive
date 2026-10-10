@@ -15,7 +15,7 @@ const remote = () => ({ url: server.url, token: "unused" });
 beforeEach(async () => {
 	server = await startGitServer({ branch: "master" });
 	work = mkdtempSync(join(tmpdir(), "code-browse-"));
-	// Built by path: git over HTTP would wait on this process's own server.
+	// Built by path, because git over HTTP would wait on this process's own server.
 	const repos = join(server.git("rev-parse", "--absolute-git-dir").trim(), "..");
 	execFileSync("git", ["clone", "--quiet", join(repos, "project.git"), work]);
 	mkdirSync(join(work, "lib"));

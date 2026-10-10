@@ -24,7 +24,7 @@ const ctx = (agentKey?: string): ToolContext => ({
 const call = (name: string, args: Record<string, unknown>, as?: string) =>
 	callTool(name, { repo: "p", ...args }, ctx(as ? keys[as] : undefined)) as Promise<Record<string, unknown>>;
 
-/** Claim, push and get approved: ready to merge but for what it waits on. */
+/** Claim, push and get approved, so the change is ready to merge except for what it waits on. */
 async function approved(
 	change: string,
 	agent: string,
@@ -111,7 +111,7 @@ describe("backlog work that waits on other pieces", () => {
 			waiting: [{ id: "consumer", reason: "waits on api to merge" }],
 		});
 		await approved("api", "a", ["api/"], { "api/x.js": "the field\n" });
-		// Claimed, not merged: consumer still waits.
+		// Claimed but not merged, so the consumer still waits.
 		expect(await call("backlog", { agent: "b" }, "b")).toMatchObject({
 			open: [],
 			waiting: [{ id: "api", reason: "claimed by a" }, { id: "consumer" }],

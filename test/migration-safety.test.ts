@@ -34,7 +34,7 @@ describe("D1 migrations", () => {
 describe("Durable Object migrations", () => {
 	// Deleting a class deletes every object's storage. These were decided by a person, before there were users.
 	const DECIDED = new Set(["v8", "v11", "v12"]);
-	// Renaming keeps each object's storage under the new name; these were decided by a person too (v13: LiveFeed became RepoCache).
+	// Renaming keeps each object's storage under the new name. A person decided these too (v13: LiveFeed became RepoCache).
 	const RENAMES_DECIDED = new Set(["v13"]);
 
 	for (const config of ["wrangler.jsonc", "wrangler.bench.jsonc"]) {

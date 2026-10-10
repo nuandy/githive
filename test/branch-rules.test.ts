@@ -57,7 +57,7 @@ const ctx = (agentKey?: string): ToolContext => ({
 const call = (name: string, args: Record<string, unknown>, as?: string) =>
 	callTool(name, { repo: "p", ...args }, ctx(as ? keys[as] : undefined)) as Promise<Record<string, unknown>>;
 
-/** A change claimed into `into` (made from main if it's new) and pushed: its head. */
+/** Claims a change into `into` (made from main if it's new), pushes it and returns its head. */
 async function pushed(change: string, into?: string) {
 	await call(
 		"claim",

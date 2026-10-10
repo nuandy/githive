@@ -181,7 +181,7 @@ export function honeycomb(files: string[], claims: Claim[], context: LampContext
 			if (covers(path, hex.path)) return "whole";
 			return path.startsWith(`${hex.path}/`) ? "part" : undefined;
 		}
-		// The files directly in a folder: a claim on the folder (or above) covers them; one on a file directly in it is inside.
+		// For a folder's own files, a claim on the folder or above covers the cell; one on a file in it is inside.
 		if (!path || (hex.path && covers(path, hex.path))) return "whole";
 		const depth = hex.path ? segments(hex.path).length + 1 : 1;
 		if (parts.length !== depth || raw.endsWith("/")) return undefined;
@@ -283,7 +283,7 @@ export function hexPoints(cx: number, cy: number, radius: number): string {
 
 const round = (n: number) => Math.round(n * 100) / 100;
 
-/** Where each of `count` cells sits in rows of `columns`, every other row shifted half a cell: centers, and the whole map's size. */
+/** Cell centers for `count` cells in rows of `columns`, every other row shifted half a cell, and the map's size. */
 export function hexGrid(
 	count: number,
 	columns: number,

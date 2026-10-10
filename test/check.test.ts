@@ -8,9 +8,10 @@ import { gitHistory } from "./helpers/git-history";
 import { startGitServer, type GitServer } from "./helpers/git-server";
 import { forgetChains } from "../src/toolkit/batch-reads";
 
-// An early check of a change against the project's branch. With the branch's
-// head kept a moment for every call reading it, it doesn't list the project
-// repo itself: check was the busiest reader of a busy project repo.
+// An early check of a change against the project's branch. The branch's head is
+// cached briefly and shared by every call that reads it, so check doesn't list
+// the project repo itself, which would make it the busiest reader of a busy
+// repo.
 
 describe("an early check", { timeout: 60_000 }, () => {
 	let server: GitServer;
@@ -50,7 +51,7 @@ describe("an early check", { timeout: 60_000 }, () => {
 		});
 		expect(asked).toBe(1);
 		expect(checked).toMatchObject({ head, main: { head: main, clean: true }, outsideClaim: ["lib/x.txt"] });
-		// Without one, it lists the branch itself, as before.
+		// Without branchHead, it lists the branch itself.
 		expect(await checkChange({ project: remote, branch: "main", source: remote, claims, change: "a-1" })).toMatchObject(
 			{ head, main: { head: main } },
 		);

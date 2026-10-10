@@ -9,10 +9,9 @@ import type { AuthEnv } from "./routes";
 import { type Agent, type User, randomSecret } from "./store";
 import { identityStore } from "./principal";
 
-// The page an MCP client sends a person to (OAuth's authorize endpoint): sign
-// in to GitHive, then choose which of your agents the client acts as, or make
-// one. The library keeps the request server-side and binds the form to this
-// browser; everything the client chose about itself is escaped.
+// OAuth's authorize page for MCP clients. A person signs in to GitHive and picks, or creates, the agent the
+// client acts as. The library keeps the request server-side and binds the form to this browser. Everything the
+// client says about itself is escaped.
 
 const escape = (value: string) => value.replace(/[&<>"']/g, (char) => `&#${char.charCodeAt(0)};`);
 
@@ -61,9 +60,8 @@ code { font-family: "Overpass Mono", ui-monospace, SFMono-Regular, Menlo, monosp
 }
 
 /**
- * Where a form on the page may lead: GitHive, and the one app this request
- * goes back to. Browsers apply form-action to the redirect after a submit, so
- * without the app's origin, Allow's redirect back to it is silently blocked.
+ * The form-action sources: GitHive and the app this request returns to. Browsers apply form-action to the
+ * redirect after a submit, so without the app's origin the redirect back is silently blocked.
  */
 export function formAction(redirectUri?: string) {
 	if (!redirectUri) return "'self'";
@@ -112,10 +110,8 @@ function signInPage(details: ConsentDescription, returnTo: string, providers: st
 }
 
 /**
- * Feedback once Allow or Deny is clicked: the button says what's happening,
- * and both are disabled so the choice is sent once. A disabled button isn't
- * submitted, so the choice goes in a hidden field first. Coming back to the
- * page (the browser's Back) makes them usable again.
+ * Disables both buttons after a click so the choice is sent once. A disabled button isn't submitted, so the
+ * choice is copied to a hidden field first. Returning with the browser's Back button reloads the page.
  */
 export const SUBMIT_FEEDBACK = `const form = document.querySelector("form");
 form.addEventListener("submit", (event) => {
@@ -136,7 +132,7 @@ window.addEventListener("pageshow", (event) => {
 
 const feedbackScript = (nonce: string) => `<script nonce="${nonce}">${SUBMIT_FEEDBACK}</script>`;
 
-/** A name for a new agent from the app's own name: "Claude Code (githive)" is claude-code. */
+/** A new agent's name derived from the app's name, so "Claude Code (githive)" becomes claude-code. */
 export function suggestedAgentName(clientName: string) {
 	return clientName
 		.replace(/\([^)]*\)/g, " ")
@@ -157,7 +153,7 @@ function consentPage(
 ) {
 	const name = escape(details.clientName);
 	const suggested = suggestedAgentName(details.clientName);
-	// The agent this app has acted as before, by its name; otherwise a new one named for the app.
+	// Preselect the agent named for this app, if there is one. Otherwise suggest a new one.
 	const match = agents.find((a) => a.name === suggested);
 	const who = details.clientDomain
 		? `${name}, published by <strong>${escape(details.clientDomain)}</strong>`
@@ -194,7 +190,6 @@ ${choices}
 
 const oauthOf = (env: Env) => (env as unknown as { OAUTH_PROVIDER?: OAuthHelpers }).OAUTH_PROVIDER;
 
-/** GET and POST /authorize. */
 export async function authorize(c: Context<AuthEnv>) {
 	const oauth = oauthOf(c.env);
 	const ids = identityStore(c.env);
@@ -231,7 +226,7 @@ export async function authorize(c: Context<AuthEnv>) {
 			const denied = await oauth.denyConsent(c.req.raw, handle);
 			return new Response(null, { status: 302, headers: denied.headers });
 		}
-		// The agent first: a bad name shows the form again, with the handle still unused.
+		// Resolve the agent first, so a bad name shows the form again while the consent handle is still unused.
 		const choice = String(form.get("agent") ?? "");
 		let agent: Agent | undefined;
 		try {

@@ -47,13 +47,13 @@ const app = new Hono<AppEnv>();
 
 const repoIndex = (env: Env) => env.REPO_INDEX.getByName("all");
 
-/** A JSON body as arguments to check, or none when it is missing or not JSON. */
+/** The request's JSON object body, or an empty object when it is missing or not JSON. */
 const jsonArgs = async (c: { req: { json<T>(): Promise<T> } }) => {
 	const body = await c.req.json<Record<string, unknown> | null>().catch(() => null);
 	return body && typeof body === "object" ? body : {};
 };
 
-/** Served to anyone: the dashboard's page and files (it asks people to sign in), sign-in itself, and OAuth's own endpoints. */
+/** Served without signing in: the dashboard's files (the page asks people to sign in), sign-in, and OAuth. */
 const isPublic = (path: string) =>
 	path === "/" ||
 	path === "/index.html" ||
@@ -78,8 +78,7 @@ app.use("*", async (c, next) => {
 	await next();
 });
 
-// What each request asked of Git and Artifacts, logged after it when it asked anything: the dashboard's views and the
-// API's own (an MCP call logs its own, by tool; see mcp.ts).
+// Log what each request asked of Git and Artifacts. MCP calls log their own, by tool (see mcp.ts).
 app.use("*", async (c, next) => {
 	const counting = countingRequests(() => next());
 	try {
@@ -96,9 +95,7 @@ app.onError((err, c) => {
 	return c.json({ error: message }, status as 400);
 });
 
-// Sign-in, the caller's own agents and tokens, and invitations.
 authRoutes(app);
-// Orgs, their members and teams.
 orgRoutes(app);
 // Where an MCP client sends a person to connect it as one of their agents (OAuth).
 app.on(["GET", "POST"], "/authorize", authorize);
@@ -130,7 +127,7 @@ app.get("/api", (c) =>
 	}),
 );
 
-/** Only through Cloudflare Access: GitHive's operators and their scripts. */
+/** Allows only callers through Cloudflare Access: GitHive's operators and their scripts. */
 const requireAccess = (c: Context<AppEnv>) => {
 	if (c.get("principal")?.kind !== "access") fail(403, "only through Cloudflare Access");
 };
@@ -139,7 +136,7 @@ const requireAccess = (c: Context<AppEnv>) => {
 const routeRepo = (c: Context<AppEnv>, needed: Level): Promise<RepoRef> =>
 	resolveRepo(c.env, c.get("principal"), `${c.req.param("owner")}/${c.req.param("name")}`, needed);
 
-/** Import a repo under an id that isn't in an org: for Access admins and their scripts (an org's repo is made with POST /repos). */
+/** Imports a repo outside any org, for Access admins and their scripts. An org's repo is made with POST /repos. */
 app.post("/repos/import", async (c) => {
 	requireAccess(c);
 	const { url, name, branch } = await c.req.json<{ url: string; name: string; branch?: string }>();
@@ -148,9 +145,8 @@ app.post("/repos/import", async (c) => {
 });
 
 /**
- * A new repo in an org (or your own namespace): imported from a Git URL, or
- * copied from a repo you can read (its default branch: seconds, where an
- * import takes a minute or more), or empty.
+ * Makes a repo in an org or your own namespace. It is imported from a Git URL, copied from a repo you can read, or
+ * left empty. A copy takes only the default branch and is much faster than an import.
  */
 app.post("/repos", async (c) => {
 	const principal = c.get("principal") ?? fail(401, "sign in to GitHive first");
@@ -199,8 +195,7 @@ app.post("/repos", async (c) => {
 		visibility: visibility === "public" ? "public" : "private",
 		id,
 	});
-	// GitHive starts on it at once, with the defaults (its admins change them in settings), unless it has no branch yet:
-	// then its first settings start it.
+	// GitHive starts on it at once with default settings. A repo with no branch yet starts with its first settings.
 	const started = await callTool("settings", { repo: id }, toolContext(c.env, principal)).then(
 		() => true,
 		(err) => (console.error(`starting GitHive on ${org.slug}/${repoName} failed`, String(err)), false),
@@ -214,7 +209,7 @@ app.post("/repos/:owner/:name/copy", async (c) => {
 	const { name } = await jsonArgs(c);
 	if (typeof name !== "string" || !name) fail(400, "name the new repo");
 	if (c.get("principal")?.kind === "access" && c.req.param("owner") === "_") {
-		// An Access admin copying a repo that isn't in an org: the copy isn't in one either.
+		// An Access admin's copy of a repo outside any org stays outside one too.
 		if (!isProject(String(name))) fail(400, "name the new repo: not a fork's or a records repo's name");
 		const copied = await forkAndWait(c.env.ARTIFACTS, source.id, String(name), `A copy of ${source.fullName}`);
 		return c.json({ name, remote: copied.remote });
@@ -222,15 +217,15 @@ app.post("/repos/:owner/:name/copy", async (c) => {
 	fail(400, "copy into an org with POST /repos {owner, name, copy_from}");
 });
 
-/** GitHive's tools for this caller (see docs/design.md): stateless, Git only. A signed-in agent needs no key. */
+/** GitHive's tools for this caller. A signed-in agent needs no key. */
 const toolContext = (env: Env, principal: Principal | undefined, agentKey?: string): ToolContext => {
 	const agent = principal && agentNameOf(principal);
-	// A person's (or their agent's) teams in the repo's org go into their votes, for roles granted to a team.
+	// A person's teams in the repo's org go into their votes, for roles granted to a team.
 	const teamsOf =
 		principal && principal.kind !== "access" && env.DB
 			? (repo: string) => new OrgStore(env.DB).teamsForRepo(principal.user.id, repo)
 			: undefined;
-	// GitHive's hosted agents spend its model account: only the people an admin lists (Access callers always).
+	// Hosted agents spend GitHive's model account, so only people an admin lists may use them.
 	const mayUseHosted =
 		principal && principal.kind !== "access"
 			? async () => !!env.DB && (await new IdentityStore(env.DB).mayUseHosted(principal.user.id))
@@ -246,11 +241,8 @@ const toolContext = (env: Env, principal: Principal | undefined, agentKey?: stri
 const MAX_KEPT_VIEW = 1_000_000;
 
 /**
- * A dashboard view kept in the repo's cache (see repo-cache.ts): served as
- * kept while fresh; when stale, served as kept while one fresh build runs in
- * the background, and pages are pinged when it's ready; built now only when
- * none is kept, or the reader asks for it fresh. Server-Timing says which
- * ("view;desc=fresh|stale|built").
+ * Serves a dashboard view kept in the repo's cache (see repo-cache.ts). A stale view is served while one rebuild runs
+ * in the background. A view is built on the spot only when none is kept or the reader asks for a fresh one.
  */
 async function keptView(
 	c: Context<AppEnv>,
@@ -274,7 +266,7 @@ async function keptView(
 	};
 	const send = (json: string, timing: string) =>
 		c.body(json, 200, { "Content-Type": "application/json", "Server-Timing": timing });
-	// "Cache-Control: no-cache" (say, right after the reader's own write): build it now.
+	// "Cache-Control: no-cache" asks for a fresh build, for example right after the reader's own write.
 	const now = /no-cache/.test(c.req.header("Cache-Control") ?? "");
 	if (kept.json !== undefined && !now) {
 		if (!kept.fresh && !kept.building && (await cache.startBuild(name)))
@@ -296,7 +288,7 @@ app.get("/repos/:owner/:name", async (c) => {
 		repoSnapshot({ ...toolContext(c.env, c.get("principal")), timing }, repo.id),
 	);
 });
-// Who the caller is in a repo: its full name, id (its cache's key), what they may do, and its default branch.
+// What the caller may do in a repo, with its id and default branch.
 app.get("/repos/:owner/:name/access", async (c) => {
 	const repo = await routeRepo(c, "read");
 	const [meta, branch] = await Promise.all([
@@ -307,8 +299,7 @@ app.get("/repos/:owner/:name/access", async (c) => {
 	]);
 	return c.json({ ...repo, visibility: meta?.visibility ?? null, branch });
 });
-// Set up a repo's review policy or checks from the dashboard (its admins): the MCP settings tool. A repo's first
-// settings start GitHive on it, with the defaults unless told otherwise.
+// A repo's admins set its review policy or checks from the dashboard, through the MCP settings tool.
 app.post("/repos/:owner/:name/settings", async (c) => {
 	const repo = await routeRepo(c, "admin");
 	const changed = (await callTool(
@@ -361,12 +352,11 @@ app.get("/repos/:owner/:name/changes/:change", async (c) => {
 		changeHistory({ ...toolContext(c.env, c.get("principal")), timing }, repo.id, change),
 	);
 });
-// What's being checked to land into a branch of the repo now, and what changes came to lately (kept in its
-// RepoCache: see toolkit/landing.ts), whether a merge holds its lease (a record in Git: see toolkit/landing-lease.ts),
-// with the snapshot its check containers start from.
+// What is being checked to land on a branch now, what landed recently (see toolkit/landing.ts), whether a merge holds
+// the landing lease, and the snapshot that check containers start from.
 app.get("/repos/:owner/:name/landing", async (c) => {
 	const repo = await routeRepo(c, "read");
-	// ?branch=<name> (the dashboard always says); absent, the project's, from its claims registry.
+	// Without ?branch, use the project's branch from its claims registry.
 	const branch =
 		c.req.query("branch")?.trim() ||
 		projectBranch(
@@ -452,14 +442,12 @@ async function mcpResponse(request: Request, env: Env, principal: Principal | un
 app.post("/mcp", (c) => mcpResponse(c.req.raw, c.env, c.get("principal")));
 app.on(["GET", "DELETE"], "/mcp", (c) => c.body(null, 405, { Allow: "POST" }));
 
-// The dashboard's list of repos in one read: every repo with its summary.
-// Summaries older than the repo's last activity are counted again in the
-// background, a few per request.
+// The dashboard's repo list in one read. Summaries older than a repo's last activity are recounted in the background,
+// a few per request.
 app.get("/summaries", async (c) => {
 	const index = repoIndex(c.env);
 	const [listed, visible] = await Promise.all([rpc(index.summaries()), visibleRepos(c.env, c.get("principal"))]);
 	const summaries = new Map(listed.repos.map((r) => [r.repo, r]));
-	// Every repo the caller can see, named as people name it, with its counts if GitHive has started on it.
 	const repos = visible.map((r) => ({
 		repo: r.fullName,
 		id: r.id,
@@ -487,9 +475,8 @@ app.get("/summaries", async (c) => {
 });
 
 /**
- * The repos a caller can see: for a person or their agent, their orgs',
- * their collaborations and public ones; for an Access admin, every repo in an
- * org and every project repo that isn't in one yet (as _/<id>).
+ * The repos a caller can see. A person or their agent sees their orgs' repos, their collaborations and public repos.
+ * An Access admin sees every repo, with those outside an org named _/<id>.
  */
 async function visibleRepos(env: Env, principal: Principal | undefined) {
 	if (!principal) return [];
@@ -503,13 +490,13 @@ async function visibleRepos(env: Env, principal: Principal | undefined) {
 	return [...inOrgs, ...loose];
 }
 
-/** Not a project: an agent's fork, or a repo's claim records. */
+/** Agents' forks and claim records repos aren't projects. */
 const isProject = (name: string) => !name.startsWith("fork--") && !name.startsWith("records--");
 
 /** A deleted project's tokens and kept dashboard views go with it, so a new repo by its name starts clean. */
 async function forgetRepo(env: Env, repo: string) {
 	await Promise.resolve()
-		// Its snapshot too: nothing starts from it again, and Containers drops it within 30 days (there's no deleting one sooner).
+		// Forget the snapshot too. Containers can't delete one early and drops it within 30 days.
 		.then(() =>
 			Promise.all([
 				env.TOKENS?.getByName(repo).clear(),
@@ -529,7 +516,7 @@ app.get("/repos", async (c) => {
 	);
 });
 
-// Older repos that aren't in an org yet, and taking one into an org as it is (records and all): Access admins.
+// Access admins list older repos outside any org and adopt one into an org with its records.
 app.get("/admin/repos", async (c) => {
 	requireAccess(c);
 	return c.json((await visibleRepos(c.env, c.get("principal"))).filter((r) => r.org === "_").map((r) => r.id));
@@ -538,16 +525,14 @@ app.post("/admin/repos/:id/adopt", async (c) => {
 	requireAccess(c);
 	const { owner, name } = await jsonArgs(c);
 	const orgs = new OrgStore(c.env.DB);
-	// A person's own namespace may not exist yet if they haven't been back since orgs arrived.
+	// A person's own namespace may not exist yet if they haven't signed in since orgs were added.
 	const person = await orgs.userByHandle(String(owner ?? ""));
 	if (person && !(await orgs.org(person.handle))) await orgs.personalOrg(person);
 	const org = await orgs.orgOrFail(String(owner ?? ""));
 	return c.json(await orgs.addRepo(org, String(name ?? c.req.param("id")), null, { id: c.req.param("id") }), 201);
 });
 
-// Bench only: what Artifacts says of one repo name (whether its listing has it,
-// and what get() answers, with the error's code), to tell a fork that never
-// finished from one that's missing.
+// Bench only: whether Artifacts lists a repo and what get() answers, to tell an unfinished fork from a missing one.
 app.get("/admin/artifacts/:name", async (c) => {
 	if ((c.env as unknown as { BENCH_WIPE?: string }).BENCH_WIPE !== "allowed")
 		return c.json({ error: "not available here" }, 404);
@@ -561,7 +546,7 @@ app.get("/admin/artifacts/:name", async (c) => {
 	return c.json({ name, listed, get: got });
 });
 
-// Bench only: delete one repo (a fork stuck forking, say), and say what Artifacts answered.
+// Bench only: delete one repo, such as a fork stuck forking, and report what Artifacts answered.
 app.delete("/admin/artifacts/:name", async (c) => {
 	if ((c.env as unknown as { BENCH_WIPE?: string }).BENCH_WIPE !== "allowed")
 		return c.json({ error: "not available here" }, 404);
@@ -579,10 +564,8 @@ const artifactsError = (err: unknown) => ({
 	message: err instanceof Error ? err.message : String(err),
 });
 
-// Bench only (BENCH_WIPE, set in wrangler.bench.jsonc and never on production):
-// delete every repo in the namespace, a batch per call (a request can make only
-// so many subrequests), and forget every repo the dashboard lists.
-// Call again until nothing remains.
+// Bench only (BENCH_WIPE is never set in production): delete every repo in the namespace. Each call deletes one batch
+// because a request can make only so many subrequests, so call again until nothing remains.
 const WIPE_CONFIRMATION = "delete every repo in the bench namespace";
 const WIPE_BATCH = 400;
 const WIPE_PARALLEL = 8;
@@ -596,7 +579,7 @@ app.post("/admin/wipe", async (c) => {
 	const names = await listRepoNames(c.env.ARTIFACTS);
 	const batch = names.slice(0, typeof size === "number" && size > 0 ? Math.min(size, WIPE_BATCH) : WIPE_BATCH);
 	const failed: string[] = [];
-	// A few at a time: one by one, a batch outlasts the caller's patience.
+	// Delete a few at a time, since one by one a batch takes too long.
 	for (let i = 0; i < batch.length; i += WIPE_PARALLEL)
 		await Promise.all(
 			batch.slice(i, i + WIPE_PARALLEL).map((name) =>
@@ -647,7 +630,7 @@ app.delete("/repos/:owner/:name", async (c) => {
 	if (!deleted) return c.json({ error: `no repo ${repo.fullName}` }, 404);
 	if (c.env.DB) await new OrgStore(c.env.DB).removeRepo(repo.id);
 	await forgetRepo(c.env, repo.id);
-	// Its agents' forks hold copies of its code, and its claim shards its records: they go with it.
+	// Its agents' forks hold copies of its code and its claim shards hold its records, so they go too.
 	const { forks, shards } = leftoversOf(repo.id, await listRepoNames(c.env.ARTIFACTS));
 	const failed: string[] = [];
 	for (const name of [...forks, ...shards])
@@ -665,11 +648,8 @@ app.delete("/repos/:owner/:name", async (c) => {
 app.get("*", (c) => c.env.ASSETS.fetch(c.req.raw));
 
 /**
- * MCP over OAuth, on the public origin only (PUBLIC_ORIGIN: githive.app, or
- * bench.githive.app): a client discovers GitHive's authorization server from
- * /mcp's 401, registers, and sends a person to /authorize. Every call with a
- * grant checks its agent is still active. The Access hostnames are served as
- * before, and an agent token on /mcp needs no OAuth.
+ * MCP over OAuth, on the public origin only. A client finds the authorization server from /mcp's 401, registers, and
+ * sends a person to /authorize. Every call with a grant checks that its agent is still active.
  */
 const providers = new Map<string, OAuthProvider<Env>>();
 function oauthFor(origin: string) {
@@ -709,6 +689,6 @@ export default {
 			return app.fetch(request, env, ctx);
 		return oauthFor(origin).fetch(request, env, ctx);
 	},
-	// Pushes Artifacts reports, through the account's push-events queue: changes' heads noted without reading forks.
+	// Artifacts' push events, so changes' heads are known without reading forks.
 	queue: (batch: MessageBatch<unknown>, env: Env) => notePushEvents(batch, env),
 } satisfies ExportedHandler<Env>;

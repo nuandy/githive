@@ -1,22 +1,19 @@
 #!/usr/bin/env node
-// Run real Claude Code agents on a GitHive repo: one headless `claude -p`
-// session per agent in the plan, on whatever the Claude Code CLI is signed in
-// with (a Claude subscription: no API key), all at once. Each is its own
-// registered GitHive agent, talks to GitHive over MCP with its own key, and
-// does the work for real: asks next, claims, reads and changes the code, runs
-// the tests, pushes, reviews others' changes and votes, merges. Set the repo
-// up first, with the same plan:
+// Runs real Claude Code agents on a GitHive repo, one headless `claude -p`
+// session per agent in the plan, using the CLI's signed-in subscription rather
+// than an API key. Each agent has its own GitHive key and does the work for
+// real: it claims, edits, pushes, reviews and merges. Set the repo up first
+// with the same plan:
 //
 //   node scripts/swarm.mjs <plan.json> --setup-only
 //   node scripts/claude-agents.mjs <plan.json> [--base URL] [--model claude-sonnet-5-5] [--minutes 45] [--only agent-7]
 //
-// An agent in the plan may have a "brief": more it's told, after the rest
-// (a part to play in a test, say). Each agent works in its own folder (<plan dir>/agents-work/<agent>), and
-// its session's events go to <agent>.jsonl there. The run ends when every
-// agent has stopped (each stops once next has nothing for it, or at
-// --minutes), then prints what each did, what landed, and the audit. Tokens
-// and keys are never printed: an agent's MCP config, with its key, is a file
-// only it reads.
+// An agent in the plan may have a "brief", which is appended to its prompt.
+// Each agent works in <plan dir>/agents-work/<agent> and logs its session to
+// <agent>.jsonl there. The run ends when every agent stops (when next has
+// nothing for it, or at --minutes), then prints what each did, what landed and
+// the audit. Tokens and keys are never printed. Each agent's MCP config, which
+// holds its key, is readable only by that agent.
 
 import { spawn } from "node:child_process";
 import { chmodSync, createWriteStream, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -48,16 +45,16 @@ const started = Date.now();
 const clock = () => `${((Date.now() - started) / 1000).toFixed(0).padStart(5)}s`;
 const say = (who, text) => console.log(`${clock()}  ${who.padEnd(10)} ${text}`);
 
-// --only <agent>[,<agent>]: those agents alone (one that stopped early, say), the others' folders left as they are.
+// --only <agent>[,<agent>] runs just those agents, for example to restart one, and keeps the other folders.
 const only = flag("only")?.split(",");
-/** How many agents the plan runs in all, as each is told (with --only too). */
+/** The plan's full agent count, which each agent is told even with --only. */
 const total = plan.agents.length;
 if (only) plan.agents = plan.agents.filter((a) => only.includes(a.agent));
 const work = join(here, "agents-work");
 if (!only) rmSync(work, { recursive: true, force: true });
 mkdirSync(work, { recursive: true });
 
-/** What every agent is told: who it is, the loop, and how to use git with GitHive; and its own `brief`, if the plan gives it one. */
+/** The prompt every agent gets: who it is, the loop, how to use git with GitHive, and its `brief`. */
 const prompt = (
 	agent,
 	dir,
@@ -86,14 +83,14 @@ Git, without ever printing a token (the helper keeps credentials in each clone's
       a change to review: the project, with the change checked out at its pushed head ("origin/<branch>" is what it lands on); marks you reviewing it in that role.
 Make every clone inside ${dir}, a new folder each time. Don't run the test suite as a matter of course: running tests is the repo's checks' job, if it has any, when the change lands. If you do run a test, run \`npm install --no-audit --no-fund\` in the clone first. Never rewrite pushed commits; to take in the project's branch, merge it. Don't use GitHive's hosted agents (the build and request_review tools).${brief ? `\n\n${brief}` : ""}`;
 
-/** This environment without an API key: the CLI then uses what it's signed in with. */
+/** The environment without an API key, so the CLI uses its signed-in subscription. */
 function withoutApiKey() {
 	const env = { ...process.env };
 	delete env.ANTHROPIC_API_KEY;
 	return env;
 }
 
-/** One agent's session: its MCP config (with its key, readable only by it), its folder, its events. */
+/** Starts one agent's session with its own MCP config, folder and event log. */
 function runAgent(spec) {
 	const dir = join(work, spec.agent);
 	mkdirSync(dir, { recursive: true });
@@ -125,7 +122,7 @@ function runAgent(spec) {
 			"--strict-mcp-config",
 			"--allowedTools",
 			"Bash,Read,Edit,Write,Glob,Grep,mcp__githive",
-			// Registering again would give it a new key, and the one it calls with would stop working.
+			// Registering again would issue a new key and invalidate the one it uses.
 			"--disallowedTools",
 			"mcp__githive__register",
 			"--permission-mode",
@@ -134,7 +131,6 @@ function runAgent(spec) {
 			"stream-json",
 			"--verbose",
 		],
-		// Its subscription, never an API key.
 		{ cwd: dir, env: withoutApiKey(), stdio: ["ignore", "pipe", "pipe"] },
 	);
 	const summary = { agent: spec.agent, tools: {}, result: null };
@@ -155,7 +151,7 @@ function runAgent(spec) {
 				if (part.type !== "tool_use") continue;
 				const name = part.name.replace(/^mcp__githive__/, "githive.");
 				summary.tools[name] = (summary.tools[name] ?? 0) + 1;
-				// GitHive calls tell the story: which, and for what.
+				// Log GitHive calls, which show what the agent is doing.
 				if (name.startsWith("githive."))
 					say(
 						spec.agent,

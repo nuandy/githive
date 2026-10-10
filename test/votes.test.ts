@@ -170,7 +170,7 @@ describe("a person and their agents count as one", () => {
 			vetoedBy: [],
 			awaiting: [],
 		});
-		// Alice herself, on the dashboard: her agent's work is hers to review. Once, with her agents.
+		// Alice herself may review her agent's work from the dashboard. Her vote and her agents' count once together.
 		expect(approval({ votes: [...agents, cast("alice", alice)] }, head, policy, author)).toEqual({
 			approved: true,
 			approvals: 1,

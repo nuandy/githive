@@ -4,10 +4,10 @@ import { memoryLanding, type Landing, type Settled } from "../src/toolkit/landin
 import { gitLanding, landingRef, leaseHeld, type LeaseRecord } from "../src/toolkit/landing-lease";
 import { startGitServer, type GitServer } from "./helpers/git-server";
 
-// A branch's landing lease as a record in Git: of two merges at once only one
-// takes it, it runs out unless its holder keeps it, and what the RepoCache
-// keeps beside it (outcomes, checks passed, the batch read ahead) is a help
-// whose failure never stops a merge.
+// A branch's landing lease as a record in Git. Of two merges at once only one
+// takes it, and it runs out unless its holder renews it. What the RepoCache
+// keeps beside it (outcomes, checks passed, the batch read ahead) only helps,
+// and its failure never stops a merge.
 
 let server: GitServer;
 beforeAll(async () => {
@@ -106,7 +106,8 @@ describe("the landing lease in Git", { timeout: 60_000 }, () => {
 			await landing.settle([
 				{ change: "c1", head: "1".repeat(40), agent: "agent-1", how: "landed", at: new Date().toISOString() },
 			]);
-			// What's being checked comes from the lease record; what changes came to, nowhere to recall it from.
+			// What's being checked comes from the lease record. The changes' outcomes can't be recalled from
+			// anywhere.
 			expect(await landing.view()).toEqual({ checking: batch, recent: [] });
 			await landing.drop("merge-a");
 			expect(await leaseHeld(log)).toBe(false);

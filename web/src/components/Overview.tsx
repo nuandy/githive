@@ -17,7 +17,10 @@ import {
 import { timeAgo } from "../lib/relativeTime";
 import { href } from "../lib/routes";
 
-/** What the overview reads: the repo's files, and what's landing when the server says; and, for people who can write, making a branch. */
+/**
+ * What the overview reads: the repo's files and, when the server reports it, what's landing. People who can
+ * write can also make a branch.
+ */
 export interface OverviewApi {
 	tree(repo: string, ref?: string): Promise<RepoTree>;
 	landing?(repo: string, branch: string): Promise<RepoLanding>;
@@ -283,7 +286,7 @@ function RegionView({ repo, region }: { repo: string; region: Region }) {
 	return (
 		<section
 			className={`region${named ? " region--named" : " region--grid"}`}
-			// A grid is about square: as many columns as fit twice its rows (each cell 18px with its gap).
+			// Keep the grid about square, with about twice as many columns as rows. Each cell is 18px with its gap.
 			style={named ? undefined : { width: `${Math.ceil(Math.sqrt(shown.length * 2)) * 18}px` }}
 		>
 			<h3 className="region__name">
@@ -402,7 +405,7 @@ export function Overview({ repo, branch, shown: asked, snapshot, api, canWrite =
 	const other = shown === branch ? undefined : shown;
 	const landing = usePoll(api.landing ? `landing:${repo}:${shown}` : null, () => api.landing!(repo, shown), 5_000);
 	const tree = usePoll(`tree:${repo}:${shown}`, () => api.tree(repo, other), 60_000);
-	// The claims on this branch only: a change lands on one.
+	// Only the claims on this branch, since each change lands on one branch.
 	const onBranch = { ...snapshot, claims: snapshot.claims.filter((c) => (c.into ?? branch) === shown) };
 	const many = (snapshot.branches ?? []).length > 0 || canWrite;
 	return (

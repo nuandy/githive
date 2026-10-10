@@ -1,19 +1,15 @@
-// Toolchains beyond Node, installed in a container when the repo uses them:
-// Python (uv), Go and Rust. Which ones a repo uses is read from its tracked
-// files, at any depth, so a monorepo with a Go service in a folder gets Go.
-// Installs and caches live outside the checkout (/opt, /root), so a clean
-// checkout between checks keeps them.
+// Toolchains beyond Node, installed when a repo's tracked files show it uses them, in any folder.
+// Installs and caches live outside the checkout, so cleaning the checkout between checks keeps them.
 
 export type Toolchain = "python" | "go" | "rust";
 
-/** The files that say a repo uses a toolchain (matched by name, in any folder). */
 const MARKERS: Record<Toolchain, RegExp> = {
 	python: /(^|\/)(pyproject\.toml|requirements[^/]*\.txt|setup\.py|setup\.cfg|uv\.lock|Pipfile)$/,
 	go: /(^|\/)go\.mod$/,
 	rust: /(^|\/)Cargo\.toml$/,
 };
 
-/** `git ls-files` pathspecs for every marker, so listing them is cheap in a large repo. */
+/** Pathspecs for the markers, so `git ls-files` stays cheap in a large repo. */
 export const MARKER_PATHSPECS = [
 	"*pyproject.toml",
 	"*requirements*.txt",
@@ -25,12 +21,11 @@ export const MARKER_PATHSPECS = [
 	"*Cargo.toml",
 ];
 
-/** The toolchains a repo uses, from its tracked file paths. */
 export function detectToolchains(files: string[]): Toolchain[] {
 	return (Object.keys(MARKERS) as Toolchain[]).filter((t) => files.some((f) => MARKERS[t].test(f.trim())));
 }
 
-/** Where installed tools are found: every check runs in a login shell, which reads this. */
+/** Puts installed tools on the PATH. Every check runs in a login shell, which reads this. */
 export const PROFILE = `export PATH=/opt/venv/bin:/usr/local/go/bin:/root/go/bin:/root/.cargo/bin:$PATH
 [ -d /opt/venv ] && export VIRTUAL_ENV=/opt/venv
 export UV_PROJECT_ENVIRONMENT=/opt/venv
@@ -40,11 +35,8 @@ export CARGO_TARGET_DIR=/opt/cargo-target
 const APT = "DEBIAN_FRONTEND=noninteractive apt-get install -y -qq";
 
 /**
- * Install a toolchain (a no-op when it's there). Python: the system's
- * python3 and uv, with a virtualenv at /opt/venv that python, pip and the
- * project's tools run from. Go: the latest release (a go.mod asking for a
- * newer one gets it through GOTOOLCHAIN). Rust: rustup's minimal profile
- * with clippy and rustfmt (a rust-toolchain.toml is honoured by rustup).
+ * Idempotent install scripts. Go installs the latest release, and a go.mod that wants a newer
+ * one gets it through GOTOOLCHAIN. rustup honours a rust-toolchain.toml.
  */
 export const INSTALL: Record<Toolchain, string> = {
 	python: [
@@ -62,11 +54,7 @@ export const INSTALL: Record<Toolchain, string> = {
 	].join(" && "),
 };
 
-/**
- * Install the project's dependencies for a toolchain, from the checkout's top
- * folder (the shown command, then the script that runs). Each is skipped when
- * its files aren't there.
- */
+/** Dependency installs run from the checkout's root: a command to show, and the script that runs. */
 export const DEPENDENCIES: Record<Toolchain, { command: string; script: string }> = {
 	python: {
 		command: "uv sync (or uv pip install -r requirements*.txt)",
@@ -81,6 +69,6 @@ export const DEPENDENCIES: Record<Toolchain, { command: string; script: string }
 	rust: { command: "cargo fetch", script: "[ ! -f Cargo.toml ] || cargo fetch -q" },
 };
 
-/** The files a toolchain's dependencies are installed from: unchanged, an install is skipped. */
+/** When none of these files changed, the dependency install is skipped. */
 export const DEPENDENCY_FILES =
 	"pyproject.toml uv.lock requirements*.txt setup.py setup.cfg go.mod go.sum Cargo.toml Cargo.lock rust-toolchain rust-toolchain.toml";

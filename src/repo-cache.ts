@@ -10,42 +10,13 @@ import {
 	settleOutcomes,
 } from "./toolkit/landing";
 
-// One per repo ("repo:<repo>"): what GitHive keeps of the repo between calls,
-// all of it a copy or a hint. Git stays the truth, and throwing any of it away
-// costs only speed: nothing here decides what lands.
-//
-// Live updates. Pages hold a WebSocket open; the toolkit pings the feed after
-// each write, and every page refreshes at once instead of waiting
-// for its next poll. Sockets hibernate between pings, so an idle feed costs
-// nothing. A ping carries no data, only that something changed: pages read
-// the state through the usual routes, with the reader's own access.
-//
-// Ready-made views. Reading a repo from Git takes many round
-// trips (its snapshot ~9 s, its audit ~20 s), so the last of each view is kept
-// here, with the count of writes it was built after. A write makes it stale;
-// a stale view is still served at once while a fresh one is built in the
-// background (one at a time), and pages are told when it's ready. Views also
-// age out, for what reaches Git without a ping. Git stays the truth: a view
-// is only a copy of what was read from it.
-//
-// Landing. Each branch's lease (which merge is landing a batch into it), the
-// batch being checked, the next batch read ahead, and what changes came to
-// lately, for the merges waiting on a batch (see toolkit/landing.ts). A hint
-// like the views: the branch and the audit are the truth, and losing it costs
-// a check.
-//
-// Records. Each record's state by tip (a commit never changes, so it's never
-// stale) and where its ref points, so a read needn't list the project repo. A
-// write that lands updates the tip before it returns; a write built on a stale
-// tip is refused by Git and retried.
-//
-// Forks. The queue that makes a project's seed forks one at a time, then
-// agents' forks 16 at a time. Lost, agents make their own forks.
+// One per repo ("repo:<repo>"). It holds copies and hints that make reads fast: live-update
+// sockets for pages, prebuilt views, landing progress, record tips and the fork queue.
+// Git stays the source of truth, so losing any of this costs only speed.
 
 interface View {
-	/** The view as JSON, as served. */
 	json: string;
-	/** The count of writes when it was built. */
+	/** The write count when it was built; a later write makes it stale. */
 	writes: number;
 	at: number;
 }
@@ -53,7 +24,7 @@ interface View {
 /** How long a build may run before another caller may start one. */
 const BUILD_LEASE_MS = 2 * 60_000;
 
-/** A record's tip as kept: where its ref points (null: nowhere) and when that was known, its generation, and when a listing began. */
+/** Where a record's ref points (null: nowhere). `gen` changes on every write, so a slow listing can't overwrite it. */
 interface KeptTip {
 	tip?: string | null;
 	at?: number;
@@ -61,25 +32,20 @@ interface KeptTip {
 	listing?: number;
 }
 
-/** How long one caller's listing of a ref stands before another is sent. */
+/** How long one caller's listing of a ref stands before another caller is sent. */
 const TIP_LISTING_MS = 3_000;
 
-/** A fork the queue is to make, and how often it has tried. */
-/** The most landings one reply tells an agent of: past it, the newest. */
+/** The most landings one reply tells an agent about; the newest are kept. */
 const NEWS_MOST = 20;
 
-/**
- * The latest commit seen on a change's branch (null: nothing pushed), and when:
- * read from its fork (when the read began), or told by a push event (the
- * event's time, and the fork it was pushed to; see push-events.ts).
- */
+/** The latest commit seen on a change's branch (null: nothing pushed), from a read or a push event. */
 export interface KnownHead {
 	head: string | null;
 	at: number;
 	fork?: string;
 }
 
-/** A push to a change's branch, from a push event: which fork took it, the head it left (null: the branch deleted), and when. */
+/** A push to a change's branch from a push event. A null head means the branch was deleted. */
 export interface ChangePush {
 	change: string;
 	fork: string;
@@ -93,15 +59,13 @@ interface ForkJob {
 }
 
 /**
- * Agents' forks the queue makes at once (seeds: one at a time), each next one
- * started as one finishes: about two per seed, each agent's from its own. Four
- * at a time, each four waiting on its slowest, made 200 agents' forks at about
- * 4 every 30 to 60 s: half an hour before the last could push.
+ * Agents' forks made side by side; seeds are made one at a time. A new fork starts as soon as
+ * one finishes, since waiting for the slowest of a group made large swarms wait too long to push.
  */
 const AGENT_FORKS_AT_ONCE = 16;
-/** How long one alarm keeps starting forks; those started finish, then the next alarm goes on. */
+/** How long one alarm keeps starting forks before the next alarm continues. */
 const FORK_ROUND_MS = 60_000;
-/** Tries per fork before the queue gives up on it (an agent's own credentials still make it). */
+/** Tries per fork before the queue gives up; the agent can still make its own fork. */
 const FORK_TRIES = 3;
 
 export class RepoCache extends DurableObject<Env> {
@@ -112,17 +76,13 @@ export class RepoCache extends DurableObject<Env> {
 		return new Response(null, { status: 101, webSocket: client });
 	}
 
-	/** Tell every page watching that something changed; a write (the default) also makes the views stale. */
+	/** Tell watching pages that something changed. A write also makes the views stale. */
 	async ping(kind: string, write = true) {
 		if (write) await this.ctx.storage.put("writes", (await this.writes()) + 1);
 		this.broadcast(kind);
 	}
 
-	/**
-	 * The latest commit GitHive has seen on each of these changes' branches
-	 * (null: nothing pushed), and when: one key a change, read a few at a time
-	 * (storage reads 128 keys at once). See openHeads in mcp.ts.
-	 */
+	/** The latest commit seen on each change's branch. Storage reads at most 128 keys at once. */
 	async knownHeads(changes: string[]) {
 		const known: Record<string, KnownHead> = {};
 		for (let i = 0; i < changes.length; i += 128) {
@@ -132,7 +92,7 @@ export class RepoCache extends DurableObject<Env> {
 		return known;
 	}
 
-	/** Commits' files changed from their first parent, as the audit worked them out (see branch-history.ts): one key a commit. */
+	/** The files each commit changed from its first parent, as the audit computed them (see branch-history.ts). */
 	async keptFiles(commits: string[]) {
 		const kept: Record<string, string[]> = {};
 		for (let i = 0; i < commits.length; i += 128) {
@@ -149,21 +109,20 @@ export class RepoCache extends DurableObject<Env> {
 	}
 
 	/**
-	 * Note the latest commits read on changes' branches (null: nothing pushed),
-	 * as of when the reads began: a push event newer than that is kept, since
-	 * the read may have missed its push.
+	 * Note the heads read from changes' branches, timed from when the reads began.
+	 * A newer push event wins, since the read may have missed its push.
 	 */
 	async noteHeads(seen: Record<string, string | null>, readAt = Date.now()) {
 		await this.keepNewest(Object.entries(seen).map(([change, head]) => [change, { head, at: readAt }]));
 	}
 
-	/** Note pushes to changes' branches, from push events: each kept unless what's kept is newer (events come late, twice, or out of order). */
+	/** Note pushes from push events. Events can arrive late, twice or out of order, so the newest wins. */
 	async notePushes(pushes: ChangePush[]) {
 		await this.keepNewest(pushes.map(({ change, ...known }) => [change, known]));
 	}
 
 	private async keepNewest(heads: [string, KnownHead][]) {
-		// The newest of each change's here, then against what's kept: storage reads and writes 128 keys at a time.
+		// Storage reads and writes at most 128 keys at a time.
 		const newest = new Map<string, KnownHead>();
 		for (const [change, known] of heads)
 			if ((newest.get(change)?.at ?? -Infinity) <= known.at) newest.set(change, known);
@@ -178,7 +137,7 @@ export class RepoCache extends DurableObject<Env> {
 		}
 	}
 
-	/** The kept view `name`: its JSON, whether it's still fresh, whether a build is running, and the write count now. */
+	/** The kept view `name`, whether it's fresh, and whether a build is running. */
 	async view(name: string, maxAgeMs: number) {
 		const [writes, kept, building] = await Promise.all([
 			this.writes(),
@@ -193,7 +152,7 @@ export class RepoCache extends DurableObject<Env> {
 		};
 	}
 
-	/** Take the build of `name`, unless another is running: true if this caller should build it. */
+	/** Returns true if this caller should build `name`, so only one build runs at a time. */
 	async startBuild(name: string) {
 		const building = await this.ctx.storage.get<number>(`building:${name}`);
 		if (building && Date.now() - building < BUILD_LEASE_MS) return false;
@@ -201,37 +160,31 @@ export class RepoCache extends DurableObject<Env> {
 		return true;
 	}
 
-	/** Keep a built view (built after `writes` writes) and tell pages it's ready. */
 	async keep(name: string, json: string, writes: number) {
 		await this.ctx.storage.put<View>(`view:${name}`, { json, writes, at: Date.now() });
 		await this.ctx.storage.delete(`building:${name}`);
 		this.broadcast(`view:${name}`);
 	}
 
-	/** A build that failed: let the next caller try. */
 	async buildFailed(name: string) {
 		await this.ctx.storage.delete(`building:${name}`);
 	}
 
-	/** A record's state at `tip`, if a reader kept it (see record-log.ts StateCache). */
+	/** A record's state at `tip`, if a reader kept it (see StateCache in record-log.ts). */
 	async recordAt(ref: string, tip: string) {
 		const kept = await this.ctx.storage.get<{ tip: string; json: string }>(`record:${ref}`);
 		return kept?.tip === tip ? kept.json : undefined;
 	}
 
-	/** Keep a record's state at `tip`, its latest: a newer tip replaces it. */
+	/** Only the latest tip's state is kept. */
 	async keepRecord(ref: string, tip: string, json: string) {
 		if (json.length > 1_000_000) return;
 		await this.ctx.storage.put(`record:${ref}`, { tip, json });
 	}
 
 	/**
-	 * Where a record's ref points, as kept (see TipCache in record-log.ts),
-	 * with its state when kept for that tip, and the generation a listing is
-	 * kept under. One caller at a time is sent to list the ref: when nothing
-	 * is kept (the others are told to wait for it), or when what's kept is
-	 * older than `maxAgeMs` (the others take it meanwhile: a write would have
-	 * moved it, so it only ages in case one couldn't).
+	 * Where a record's ref points (see TipCache in record-log.ts). Only one caller at a time is sent
+	 * to list the ref. When nothing is kept, the others wait; when the tip is old, they use it anyway.
 	 */
 	async tipOf(
 		ref: string,
@@ -255,37 +208,29 @@ export class RepoCache extends DurableObject<Env> {
 		return { tip: kept.tip, gen: kept.gen, ...(state?.tip === kept.tip ? { json: state.json } : {}) };
 	}
 
-	/** Keep a listing of a record's ref, unless it moved since the listing began (its generation is past `gen`). */
+	/** Keep a listing of a record's ref, unless a write moved it since the listing began. */
 	async keepTip(ref: string, tip: string | null, gen: number) {
 		const kept = await this.ctx.storage.get<KeptTip>(`tip:${ref}`);
 		if ((kept?.gen ?? 0) === gen) await this.ctx.storage.put(`tip:${ref}`, { tip, at: Date.now(), gen });
 	}
 
-	/**
-	 * A write moved a record's ref from `parent` to `tip`. Kept as the tip if
-	 * the kept one is its parent; otherwise writes are arriving out of order
-	 * (or one was lost), and the tip is forgotten until it's listed again.
-	 * Either way a listing under way is dropped.
-	 */
+	/** A write moved the ref from `parent` to `tip`. If the kept tip isn't `parent`, writes arrived out of order. */
 	async landedTip(ref: string, parent: string | null, tip: string) {
 		const kept = (await this.ctx.storage.get<KeptTip>(`tip:${ref}`)) ?? { gen: 0 };
 		const gen = kept.gen + 1;
 		await this.ctx.storage.put(`tip:${ref}`, kept.tip === parent ? { tip, at: Date.now(), gen } : { gen });
 	}
 
-	/** A write built on `parent` found the ref had moved on: if that's the tip kept, it's out of date. */
+	/** A write built on `parent` found the ref had moved, so a kept `parent` tip is out of date. */
 	async staleTip(ref: string, parent: string | null) {
 		const kept = await this.ctx.storage.get<KeptTip>(`tip:${ref}`);
 		if (kept && kept.tip === parent) await this.ctx.storage.put(`tip:${ref}`, { gen: kept.gen + 1 });
 	}
 
 	/**
-	 * Forks to make for this repo in the background: its seeds ("seed:<k>")
-	 * and agents' own ("agent:<name>"), queued once each. Its alarm makes them,
-	 * seeds one at a time (a burst of forks from one repo stalls Artifacts' fork
-	 * jobs), then agents' AGENT_FORKS_AT_ONCE at a time, from the seeds. It only
-	 * paces fork creation: an agent that needs its fork sooner makes it itself,
-	 * and waits for one the queue is making.
+	 * Queue forks to make in the background: seeds ("seed:<k>") and agents' forks ("agent:<name>").
+	 * Seeds go one at a time because a burst of forks from one repo stalls Artifacts' fork jobs.
+	 * The queue only paces creation; an agent that needs its fork sooner makes it itself.
 	 */
 	async queueForks(repo: string, items: string[]) {
 		await this.inQueueTurn(async () => {
@@ -299,7 +244,7 @@ export class RepoCache extends DurableObject<Env> {
 		});
 	}
 
-	/** The fork queue's changes, one at a time: forks finish side by side, and agents queue theirs meanwhile. */
+	/** Serializes changes to the fork queue, since forks finish side by side while agents add more. */
 	private queueTurn: Promise<unknown> = Promise.resolve();
 	private inQueueTurn<T>(change: () => Promise<T>): Promise<T> {
 		const run = this.queueTurn.then(change);
@@ -307,12 +252,11 @@ export class RepoCache extends DurableObject<Env> {
 		return run;
 	}
 
-	/** The seeds made so far, by number. */
 	async readySeeds() {
 		return (await this.ctx.storage.get<number[]>("forks:seeds")) ?? [];
 	}
 
-	/** How far the forks queue has got: seeds ready, and seeds and agents' forks still to make (for the landing view, and a test waiting on them). */
+	/** Progress of the fork queue, for the landing view and tests. */
 	async forkQueue() {
 		const [queue, seeds] = await Promise.all([this.ctx.storage.get<ForkJob[]>("forks:queue"), this.readySeeds()]);
 		const queued = queue ?? [];
@@ -321,7 +265,7 @@ export class RepoCache extends DurableObject<Env> {
 	}
 
 	async alarm() {
-		// What a round of forks asks of Artifacts and Git, logged after it: "fork queue for <repo> artifacts 40: fork 8 (...), get 24 (...)".
+		// Log the Artifacts and Git requests each round makes.
 		const counting = countingRequests(() => this.makeForks());
 		try {
 			await counting.done;
@@ -332,19 +276,18 @@ export class RepoCache extends DurableObject<Env> {
 		}
 	}
 
-	/** A round of the forks queue: its seeds one at a time, or agents' forks side by side (see alarm). */
 	private async makeForks() {
 		const repo = await this.ctx.storage.get<string>("forks:repo");
 		const queue = (await this.ctx.storage.get<ForkJob[]>("forks:queue")) ?? [];
 		if (!repo || !queue.length) return;
-		// Seeds first, one an alarm; then agents' forks, side by side, until the queue is empty or the round is up.
+		// Seeds first, one per alarm. Then agents' forks side by side until the queue is empty or the round ends.
 		const seeding = queue.some((job) => job.item.startsWith("seed:"));
 		const until = Date.now() + FORK_ROUND_MS;
 		const making = new Set<string>();
 		const next = () =>
 			this.inQueueTurn(async () => {
 				const now = (await this.ctx.storage.get<ForkJob[]>("forks:queue")) ?? [];
-				// Seeds queued while agents' forks are made (by an agent that found none ready) wait for the next alarm.
+				// A seed queued during an agents' round waits for the next alarm.
 				const job = now.find((j) => !making.has(j.item) && j.item.startsWith("seed:") === seeding);
 				if (job) making.add(job.item);
 				return job;
@@ -382,10 +325,7 @@ export class RepoCache extends DurableObject<Env> {
 			await this.ctx.storage.setAlarm(Date.now() + 1_000);
 	}
 
-	/**
-	 * The lease's holder handed it on (the lease itself is a record in Git: see
-	 * toolkit/landing-lease.ts): what it showed as checking isn't any more.
-	 */
+	/** The lease holder handed the lease on (see toolkit/landing-lease.ts), so nothing is being checked. */
 	async dropLanding(branch: string, _holder: string) {
 		await this.keepLanding(branch, { ...(await this.landing(branch)), checking: null });
 		this.broadcast("landing");
@@ -402,16 +342,14 @@ export class RepoCache extends DurableObject<Env> {
 		this.broadcast("landing");
 	}
 
-	/** What's being checked into `branch` now, and what changes came to lately. */
 	async landingView(branch: string) {
 		const { checking, recent } = await this.landing(branch);
 		return { checking, recent };
 	}
 
 	/**
-	 * What landed on `branch` since `agent` was last told, others' changes
-	 * only, newest last (at most NEWS_MOST); and from now on, nothing before
-	 * this. An agent's first call tells it nothing old: news starts there.
+	 * Other agents' changes that landed on `branch` since `agent` was last told, newest last.
+	 * An agent's first call returns nothing, so news starts from there.
 	 */
 	async landingNews(branch: string, agent: string) {
 		const { recent } = await this.landing(branch);
@@ -431,7 +369,7 @@ export class RepoCache extends DurableObject<Env> {
 		await this.ctx.storage.put(`landing:${branch}`, state);
 	}
 
-	/** Forget the kept views: the repo was deleted. */
+	/** Forget everything kept for the repo once it's deleted. */
 	async clearViews() {
 		const kept = await this.ctx.storage.list({ prefix: "view:" });
 		const building = await this.ctx.storage.list({ prefix: "building:" });
@@ -439,9 +377,8 @@ export class RepoCache extends DurableObject<Env> {
 		const tips = await this.ctx.storage.list({ prefix: "tip:" });
 		const forks = await this.ctx.storage.list({ prefix: "forks:" });
 		const landing = await this.ctx.storage.list({ prefix: "landing:" });
-		// The heads last seen on changes' branches (see knownHeads): a repo made again under the name reuses change names.
+		// A repo created again under the same name reuses change names, so drop the old heads.
 		const heads = await this.ctx.storage.list({ prefix: "head:" });
-		// And the files commits changed, as the audit worked them out: a commit's are its own for good, but the repo's gone.
 		const files = await this.ctx.storage.list({ prefix: "files:" });
 		const news = await this.ctx.storage.list({ prefix: "news:" });
 		const keys = [
@@ -455,7 +392,6 @@ export class RepoCache extends DurableObject<Env> {
 			...files.keys(),
 			...news.keys(),
 		];
-		// Storage deletes 128 keys at a time.
 		for (let i = 0; i < keys.length; i += 128) await this.ctx.storage.delete(keys.slice(i, i + 128));
 	}
 
@@ -469,7 +405,7 @@ export class RepoCache extends DurableObject<Env> {
 			try {
 				socket.send(message);
 			} catch {
-				// A page that went away; the runtime closes it.
+				// The page went away; the runtime closes the socket.
 			}
 		}
 	}

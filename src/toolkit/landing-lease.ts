@@ -2,38 +2,30 @@ import type { CasLog } from "../record-log";
 import { type Checking, dropLease, type Landing, type LandingState, renewLease, takeTurn } from "./landing";
 import { appendRecord } from "./records";
 
-// Who lands changes into a branch right now, as a record in Git like the
-// claims, votes and review holds: the branch's lease, and the batch its
-// holder is checking. Whichever merge finds the lease free or run out takes
-// it by compare-and-swap, so of two at once only one does; its heartbeat
-// keeps it, and it hands it on when it's done. Nothing outside Git decides
-// who lands what: a merge's own turn, the records, and the branch's
-// compare-and-swap do.
+// Who lands changes into a branch right now. Like the claims and votes, this is a record in Git: the branch's
+// lease and the batch its holder is checking. A merge that finds the lease free or expired takes it by
+// compare-and-swap, renews it while it works and hands it on when done, so nothing outside Git decides who lands.
 //
-// What changes came to lately is kept in the repo's RepoCache, as a help (a
-// landing is in Git as its merge commit, a failure as its rejection).
-// Without the RepoCache a merge still lands: it finds out whether its change
-// landed from the branch's history.
+// Recent outcomes are cached in the repo's RepoCache. Without the cache a merge still lands, and it learns
+// whether its change landed from the branch's history.
 
-/** A branch's lease and the batch being checked, as its record keeps them. */
 export interface LeaseRecord {
 	lease?: { holder: string; until: number };
 	checking: Checking | null;
 }
 
 const AUTHOR = "githive";
-/** How many times a merge tries to hand the lease on before leaving it to run out. */
 const DROP_TRIES = 3;
 const empty = (): LeaseRecord => ({ checking: null });
 
-/** Where a branch's lease is kept: this ref (branch names may hold `/`, which a ref under it can't also be). */
+/** One ref per branch. The name is encoded because a branch name may contain `/`. */
 export const landingRef = (repo: string, branch: string) =>
 	`refs/notes/githive-landing/${repo}/${encodeURIComponent(branch)}`;
 
-/** Which of a repo's records repos holds its branches' leases: always the first (see landingLog in env.ts). */
+/** Leases always live in a repo's first records repo (see landingLog in env.ts). */
 export const LANDING_RECORDS_REPO = 0;
 
-/** As LandingState, for the pure lease steps in landing.ts (the outcomes they read aren't here: see gitLanding's turn). */
+// Converts between the record and LandingState for the pure lease steps in landing.ts.
 const asState = (record: LeaseRecord): LandingState => ({
 	...(record.lease ? { lease: record.lease } : {}),
 	checking: record.checking,
@@ -45,21 +37,19 @@ const asRecord = (state: LandingState): LeaseRecord => ({
 });
 
 /**
- * A branch's landing: its lease and the batch being checked in `log` (a
- * record in Git), the rest in `kept` (the repo's RepoCache) as a help that
- * may fail. The batch being checked is kept there too, for the views that
- * show it.
+ * A branch's landing. The lease and the batch being checked live in `log`. Recent outcomes, and a copy of the
+ * batch for views, live in `kept`, the repo's RepoCache, which is allowed to fail.
  */
 export function gitLanding(log: CasLog<LeaseRecord>, kept: Omit<Landing, "turn" | "renew">): Landing {
 	return {
 		turn: async (holder, change, head, since, ttlMs) => {
-			// What it came to, if the RepoCache recalls (else, see landedAlready in merge.ts).
+			// The cache may already know how this change came out (otherwise see landedAlready in merge.ts).
 			const view = await kept.view().catch(() => null);
 			const settled = view?.recent.findLast(
 				(s) => s.change === change && s.head === head && (s.how === "landed" || Date.parse(s.at) >= since),
 			);
 			if (settled) return { settled };
-			// The record busy or unreachable: not this merge's turn yet, it looks again in a moment.
+			// If the record is busy or unreachable, the merge doesn't get its turn yet and tries again shortly.
 			const taken = await appendRecord<LeaseRecord, "held">(log, AUTHOR, empty, (record) => {
 				const turn = takeTurn(asState(record), holder, change, head, since, ttlMs);
 				if (!("lease" in turn.turn) || !turn.turn.lease) return { refused: "held" };
@@ -74,7 +64,8 @@ export function gitLanding(log: CasLog<LeaseRecord>, kept: Omit<Landing, "turn" 
 			return { lease: taken.ok };
 		},
 		renew: async (holder, ttlMs) => {
-			// Written only once less than half of it is left: each write is a push, and the holder renews at every step.
+			// Each write is a push and the holder renews at every step, so write only once less than half the
+			// lease is left.
 			const now = Date.now();
 			const lease = (await log.read())?.commit.state.lease;
 			if (lease?.holder === holder && lease.until - now > ttlMs / 2) return true;
@@ -85,7 +76,7 @@ export function gitLanding(log: CasLog<LeaseRecord>, kept: Omit<Landing, "turn" 
 			return renewed.ok;
 		},
 		drop: async (holder) => {
-			// Tried a few times: a lease left held keeps every waiting merge idle until it runs out.
+			// Retry, because a lease left held keeps every waiting merge idle until it expires.
 			for (let attempt = 1; ; attempt++) {
 				try {
 					await appendRecord<LeaseRecord, "none">(log, AUTHOR, empty, (record) =>
@@ -101,7 +92,7 @@ export function gitLanding(log: CasLog<LeaseRecord>, kept: Omit<Landing, "turn" 
 			}
 			await kept.drop(holder).catch(() => undefined);
 		},
-		// Shown, never relied on: a batch whose showing failed is checked and lands all the same.
+		// For display only. A batch is checked and lands even if recording it fails.
 		checking: async (batch) => {
 			await appendRecord<LeaseRecord, "none">(log, AUTHOR, empty, (record) => ({
 				state: { ...record, checking: batch },
@@ -111,8 +102,7 @@ export function gitLanding(log: CasLog<LeaseRecord>, kept: Omit<Landing, "turn" 
 		},
 		settle: (outcomes) =>
 			kept.settle(outcomes).catch((err) => console.error(`keeping ${outcomes.length} outcome(s) failed`, String(err))),
-		// What's being checked as the lease record says, while its holder holds it (a holder that died checks nothing);
-		// what changes came to as the RepoCache recalls.
+		// Trust the record's batch only while its lease is live, since a holder that died checks nothing.
 		view: async () => {
 			const [record, recalled] = await Promise.all([log.read().catch(() => undefined), kept.view().catch(() => null)]);
 			const lease = record?.commit.state.lease;
@@ -127,13 +117,13 @@ export function gitLanding(log: CasLog<LeaseRecord>, kept: Omit<Landing, "turn" 
 	};
 }
 
-/** Whether a merge holds the branch's lease now, as its record says. */
+/** Whether a merge holds the branch's lease now. */
 export async function leaseHeld(log: CasLog<LeaseRecord>, now = Date.now()) {
 	const lease = (await log.read())?.commit.state.lease;
 	return !!lease && lease.until > now;
 }
 
-/** A log found when it's first used (which repo holds it depends on a record read first). */
+/** A log resolved on first use, since which repo holds it depends on reading another record first. */
 export function lazyLog<S>(find: () => Promise<CasLog<S>>): CasLog<S> & { readonly ref?: string } {
 	let found: Promise<CasLog<S>> | undefined;
 	let log: CasLog<S> | undefined;

@@ -19,21 +19,12 @@ import { makeStamper } from "./stamp";
 import { headsForClaims } from "../push-events";
 import { gitLanding, LANDING_RECORDS_REPO, landingRef, lazyLog, type LeaseRecord } from "./landing-lease";
 
-// GitHive wired to Cloudflare: Artifacts for Git, the Gate's
-// container for checks, the repo index for the dashboard, GitHive's hosted
-// agents. Shared by the Worker (acting for an MCP caller) and by the hosted
-// agents themselves (acting as themselves).
+// GitHive wired to Cloudflare: Artifacts for Git, the Gate's container for checks, the repo index for the
+// dashboard and GitHive's hosted agents. Shared by the Worker, acting for an MCP caller, and by the hosted agents.
 
-/**
- * Artifacts tokens, per repo and scope, kept in the project's TokenCache (for
- * every isolate) and briefly in the isolate: minting one is several Artifacts
- * calls, which dominated each tool call. They last an hour and are reused for
- * half of it. An isolate asks the TokenCache again after ISOLATE_MS, so
- * deleting a project (which clears its TokenCache) reaches every isolate soon.
- * Only minted tokens are shared: a mint still in flight is its own request's
- * I/O, which in Workers no other request may wait on, so calls that miss at
- * once each mint their own. If the TokenCache fails, the token is minted.
- */
+// Artifacts tokens per repo and scope, cached in the project's TokenCache and briefly in the isolate, because
+// minting one takes several Artifacts calls. Workers forbids waiting on another request's I/O, so only finished
+// mints are shared. Isolates re-check the TokenCache after ISOLATE_MS so deleting a project reaches them soon.
 const remotes = new Map<string, { remote: Remote; until: number }>();
 const REUSE_MS = 30 * 60_000;
 const ISOLATE_MS = 2 * 60_000;
@@ -53,27 +44,19 @@ async function cached(env: Env, project: string, key: string, mint: () => Promis
 	return remote;
 }
 
-/** Each record's log, kept for the isolate: a log remembers the tip it last saw, so reading an unmoved ref needn't fetch it. */
+// Each record's log, cached for the isolate. A log remembers its last tip, so reading an unmoved ref needn't fetch.
 const logs = new Map<string, GitCasLog<unknown>>();
 
-/** How long a kept copy of the claims stays fresh with no write in between. */
 const KEPT_CLAIMS_MS = 30_000;
-/** How long a branch's head stays fresh for the merges watching it. */
 const KEPT_BRANCH_HEAD_MS = 2_000;
-/** How long the open changes' heads stay fresh for next (pushes to forks don't ping, so this is all that ages them). */
-/** How long a record's tip stays kept with no write clearing it (in case a write couldn't). */
+// Cached tips expire even without a write, in case a write failed to clear them.
 const KEPT_TIP_MS = 10_000;
-/** The largest view a RepoCache keeps. */
 const MAX_KEPT = 1_000_000;
 
 /**
- * A view of a repo kept in its RepoCache, for reads that tolerate a moment's
- * staleness: fresh, served as is; stale, served as is while one caller
- * rebuilds it (that caller gets the new one); none yet, one caller builds it
- * and the others wait for it a few seconds, so many callers at once read the
- * repo once, not once each. Writes make it stale (their pings count them).
- * The RepoCache is only a help: unreachable or overloaded, each caller reads
- * the repo itself, slower and never wrong.
+ * A view of a repo cached in its RepoCache, for reads that tolerate brief staleness. One caller rebuilds a stale or
+ * missing view while the others use the old one or wait briefly, so a crowd reads the repo once. If the cache
+ * fails, each caller reads the repo itself, slower but never wrong.
  */
 export async function keptRead<T>(
 	env: Env,
@@ -91,14 +74,14 @@ export async function keptRead<T>(
 			await cache.buildFailed(name).catch(() => undefined);
 			throw err;
 		}
-		// Kept for the next callers if it can be: a cache that can't keep it doesn't fail this read.
+		// Cache it for the next callers if possible. Failing to cache doesn't fail this read.
 		const json = JSON.stringify(value);
 		await (json.length <= MAX_KEPT ? cache.keep(name, json, writes) : cache.buildFailed(name)).catch((err) =>
 			console.error(`keeping ${name} of ${repo} failed`, String(err)),
 		);
 		return value;
 	};
-	// Null: the cache didn't answer.
+	// null means the cache didn't answer.
 	const starting = () => cache.startBuild(name).catch(() => null);
 	for (const until = Date.now() + 10_000; ;) {
 		const kept = await rpc(cache.view(name, maxAgeMs)).catch(() => null);
@@ -114,23 +97,22 @@ export async function keptRead<T>(
 			if (build === null) return read();
 			if (build) return rebuild(kept.writes);
 		}
-		// Another caller is building the first one: wait for it, a few seconds at most.
+		// Another caller is building the first view, so wait for it a few seconds at most.
 		if (Date.now() > until) return read();
 		await new Promise((resolve) => setTimeout(resolve, 250));
 	}
 }
 
-/** A repo's record log at `ref`, one per ref in the isolate. */
 function recordsLog<S>(env: Env, repo: string, ref: string) {
 	let log = logs.get(ref);
 	if (!log) {
-		// What other Worker instances already read of the project repo's records, by tip, in its RepoCache.
+		// Record states other Worker instances already read, by tip, shared through the RepoCache.
 		const cache = () => env.REPO_CACHE.getByName(`repo:${repo}`);
 		const states = {
 			get: (r: string, tip: string) => rpc(cache().recordAt(r, tip)),
 			put: (r: string, tip: string, json: string) => cache().keepRecord(r, tip, json),
 		};
-		// And where its ref points, so that a read needn't list it on the busy project repo.
+		// Cached tips too, so a read needn't list refs on the busy project repo.
 		const tips = {
 			get: (r: string, stateKey: string) => rpc(cache().tipOf(r, stateKey, KEPT_TIP_MS)),
 			keep: (r: string, tip: string | null, gen: number) => cache().keepTip(r, tip, gen),
@@ -150,12 +132,8 @@ function recordsLog<S>(env: Env, repo: string, ref: string) {
 	return log as GitCasLog<S>;
 }
 
-/**
- * A record kept in records repo `k` of `repo`, not the project repo (review
- * holds, say), kept for the isolate like recordsLog's, its tips in the repo's
- * RepoCache under the records repo's name (the same ref may be in the
- * project repo too, from before).
- */
+// A record in records repo `k` rather than the project repo, cached like recordsLog's. Its tips are cached under
+// the records repo's name, since the same ref may also exist in the project repo from before.
 function recordsLogIn<S>(env: Env, repo: string, k: number, ref: string) {
 	const key = `${recordsRepoName(repo, k)}:${ref}`;
 	let log = logs.get(key);
@@ -187,11 +165,7 @@ function recordsLogIn<S>(env: Env, repo: string, k: number, ref: string) {
 	return log as GitCasLog<S>;
 }
 
-/**
- * The context for one actor: `by` is who it is (as Access or GitHive's
- * sign-in verified them, or a hosted agent's own name), and stamps carry it,
- * with the agent name its key or token is for. Hosted agents (`hosted`) act under githive- names.
- */
+/** The tool context for one actor. `by` is its verified identity or a hosted agent's name, and stamps carry it. */
 export function toolContextFor(
 	env: Env,
 	by: string | undefined,
@@ -208,7 +182,7 @@ export function toolContextFor(
 		register: async (repo) => env.REPO_INDEX.getByName("all").addRepo(repo),
 		summarize: (repo, patch) => env.REPO_INDEX.getByName("all").summarize(`repo:${repo}`, patch),
 		ping: async (repo) => void (await env.REPO_CACHE?.getByName(`repo:${repo}`).ping("records")),
-		// The repo's own Gate keeps its snapshot fresh (see Gate.warmUp): a batch's checks run in Gates of the batch's own.
+		// The repo's own Gate keeps its snapshot fresh (see Gate.warmUp); a batch's checks run in the batch's own Gates.
 		warmChecks: async (repo, { expect, ...input }) => {
 			const remote = await cached(env, repo, `${repo}|read`, () => remoteFor(env.ARTIFACTS, repo, "read", 3600));
 			await env.GATE.getByName(`repo:${repo}`).warmUp({
@@ -218,9 +192,9 @@ export function toolContextFor(
 				why: expect,
 			});
 		},
-		// The claims for advice, kept in the repo's RepoCache so a busy repo isn't read whole on every call.
+		// Claims for advice, cached so a busy repo isn't read whole on every call.
 		keptClaims: (repo, read) => keptRead(env, repo, "claims-advice", KEPT_CLAIMS_MS, read),
-		// Heads read from forks, and those push events told of from the claims' agents' own forks (see push-events.ts).
+		// Heads read from forks, plus those push events reported from the claim holders' forks (see push-events.ts).
 		knownHeads: async (repo, claims) =>
 			headsForClaims(
 				await rpc(env.REPO_CACHE.getByName(`repo:${repo}`).knownHeads(claims.map((c) => c.change))),
@@ -229,23 +203,24 @@ export function toolContextFor(
 			),
 		noteHeads: (repo, seen, readAt) => env.REPO_CACHE.getByName(`repo:${repo}`).noteHeads(seen, readAt),
 		news: (repo, branch, agent) => rpc(env.REPO_CACHE.getByName(`repo:${repo}`).landingNews(branch, agent)),
-		// GitHive's GitHub App, when its ID and key are set: a repo connects to GitHub through it (see github.ts).
+		// GitHive's GitHub App, when its ID and key are set. Repos connect to GitHub through it (see github.ts).
 		...(env.GITHUB_APP_ID && env.GITHUB_APP_PRIVATE_KEY
 			? {
 					github: (repo: string) =>
 						linkTo({ appId: env.GITHUB_APP_ID!, privateKey: env.GITHUB_APP_PRIVATE_KEY! }, repo),
 				}
 			: {}),
-		// A branch's head, kept a moment for every merge watching it (see MergeInput.branchHead).
+		// A branch's head, briefly cached for every merge watching it (see MergeInput.branchHead).
 		branchHead: (repo, branch) =>
 			keptRead(env, repo, `head:${branch}`, KEPT_BRANCH_HEAD_MS, () => headOf(env.ARTIFACTS, repo, branch)),
-		// Forks made in the background, paced, before agents need them: the seeds when GitHive starts, an agent's when it registers.
+		// Make forks in the background before agents need them: the seeds when GitHive starts, an agent's when it
+		// registers.
 		prepareForks: async (repo, items) =>
 			void (await env.REPO_CACHE?.getByName(`repo:${repo}`).queueForks(
 				repo,
 				items === "seeds" ? seedItems() : items.map((agent) => `agent:${agent}`),
 			)),
-		// Review holds are a record in Git: in one of the repo's records repos once it has them (see review-holds.ts), else
+		// Review holds live in one of the repo's records repos once it has them (see review-holds.ts), otherwise
 		// beside the claims and votes.
 		reviews: reviewHolds(async (repo) => {
 			const spread = (await recordsLog<Registry>(env, repo, claimsRef(repo)).read())?.commit.state.recordsRepos ?? 0;
@@ -281,8 +256,8 @@ export function toolContextFor(
 			(await headOf(env.ARTIFACTS, repo, branch)) ?? fail(409, `${repo} has no ${branch} branch`),
 		defaultBranch: async (repo) =>
 			(await defaultBranch(await remoteFor(env.ARTIFACTS, repo, "read", 3600))) ?? fail(409, `${repo} has no commits`),
-		// A batch's checks, in Gates named for the batch and a place in its search (a half stays in its parent's, the
-		// other takes the next), on main with the batch's changes merged in, in order; or the last change's Gate when unnamed.
+		// A batch's checks run on main with its changes merged in order, in Gates named for the batch and its place
+		// in the bisection. Without a name they run in the last change's Gate.
 		runChecks: (repo) => {
 			const read = () => cached(env, repo, `${repo}|read`, () => remoteFor(env.ARTIFACTS, repo, "read", 3600));
 			const fork = (agent: string) =>
@@ -298,7 +273,6 @@ export function toolContextFor(
 					changes.slice(0, -1).map(async (c) => ({ head: c.head, ...(await sourceOf(c)) })),
 				);
 				const forkOf = await sourceOf(last);
-				// The batch's own Gates (see checkBatch's Place), or the last change's.
 				const name = gate ? `repo:${repo}:check:${gate}` : `repo:${repo}:change:${last.change}`;
 				const result = await rpcRetried(() =>
 					env.GATE.getByName(name).checkCommit({
@@ -330,11 +304,11 @@ export function toolContextFor(
 				};
 			};
 		},
-		// A branch's commits for the audit, read through Artifacts' own API, each merge's files worked out once and kept in the
-		// repo's RepoCache (see branch-history.ts): no clone, and no container.
+		// A branch's commits for the audit, read through the Artifacts API with each merge's files cached in the
+		// RepoCache (see branch-history.ts).
 		readBranch: (repo, baseline, branch) => {
 			const cache = () => env.REPO_CACHE.getByName(`repo:${repo}`);
-			// Kept files are a help: without the cache, each merge's files are worked out again.
+			// The cache is optional. Without it, each merge's files are worked out again.
 			return withHistory(env.ARTIFACTS, repo, (source) =>
 				readBranchHistory(source, baseline, branch, {
 					get: (commits) => rpc(cache().keptFiles(commits)).catch(() => ({})),
@@ -345,9 +319,9 @@ export function toolContextFor(
 				}),
 			);
 		},
-		// Any repo's history (a project's, an agent's fork) through Artifacts' own API: a batch's changes are read that way.
+		// Any repo's history through the Artifacts API, used to read a batch's changes.
 		history: (name, read) => withHistory(env.ARTIFACTS, name, read),
-		// A branch's head in an agent's fork, through Artifacts' API: one log, no token or Git listing.
+		// A branch's head in an agent's fork, from one Artifacts log call with no token or Git listing.
 		forkHead: async (repo, agent, ref) => {
 			const name = await forkName(repo, agent);
 			try {
@@ -358,22 +332,21 @@ export function toolContextFor(
 				throw err;
 			}
 		},
-		// A batch's first check container, started while the batch is read (see MergeInput.prepareChecks).
+		// Start a batch's first check container while the batch is read (see MergeInput.prepareChecks).
 		prepareChecks: (repo) => async (gate) => {
 			const read = await cached(env, repo, `${repo}|read`, () => remoteFor(env.ARTIFACTS, repo, "read", 3600));
 			await rpcRetried(() =>
 				env.GATE.getByName(`repo:${repo}:check:${gate}`).boot({ repo, base: { remote: read.url, token: read.token } }),
 			);
 		},
-		// The repo's own Gate started while a batch is read, so its landing finds it running (see MergeInput.prepareLanding).
+		// Start the repo's own Gate while a batch is read, so landing finds it running (see MergeInput.prepareLanding).
 		prepareLanding: async (repo) => {
 			const read = await cached(env, repo, `${repo}|read`, () => remoteFor(env.ARTIFACTS, repo, "read", 3600));
 			await rpcRetried(() =>
 				env.GATE.getByName(`repo:${repo}`).boot({ repo, base: { remote: read.url, token: read.token } }),
 			);
 		},
-		// A batch's git work (reading its changes, landing them) in the repo's own Gate's container, which never runs a
-		// change's code: the Worker only reads the records (see BatchGit).
+		// A batch's Git work runs in the repo's own Gate container, which never runs a change's code (see BatchGit).
 		batchGit: (repo) => {
 			const gate = () => env.GATE.getByName(`repo:${repo}`);
 			const project = (scope: "read" | "write") =>
@@ -403,7 +376,8 @@ export function toolContextFor(
 					const sources = await Promise.all(
 						merges.map(async (m) => ({ ...(await sourceOf(m)), head: m.head, claimed: m.claimed })),
 					);
-					// Tried again after a brief outage too: the push names the main it lands on, so a batch that did land finds main moved.
+					// Retry after a brief outage too. The push names the main it lands on, so a batch that already landed
+					// finds main moved.
 					const landed = await rpcRetried<{ commits: string[] } | { moved: true } | { error: string }>(() =>
 						gate().landBatch({
 							repo,
@@ -448,8 +422,8 @@ export function toolContextFor(
 				},
 			};
 		},
-		// Who's landing a batch into each branch: a record in Git, in the repo's first records repo (see landingLog).
-		// What changes came to, in the repo's RepoCache, as a help.
+		// The landing lease is a record in the repo's first records repo (see landingLog). Outcomes are cached in the
+		// RepoCache.
 		landing: (repo, branch) => {
 			const cache = () => env.REPO_CACHE.getByName(`repo:${repo}`);
 			return gitLanding(landingLog(env, repo, branch), {
@@ -462,14 +436,12 @@ export function toolContextFor(
 	};
 }
 
-/** The repos the landing leases are in, made once per isolate (see landingLog). */
+// Records repos made for landing leases, once per isolate.
 const landingRepos = new Map<string, Promise<void>>();
 
 /**
- * A branch's landing lease record (see landing-lease.ts), always in the repo's
- * first records repo: never the busy project repo, whose pushes it would wait
- * behind, and never moved when claims shard (records repo 0 is one of those
- * they spread over), so no two merges ever read two leases. Made at first use.
+ * A branch's landing lease record, always in the repo's first records repo. It stays out of the busy project repo,
+ * whose pushes it would queue behind, and never moves when claims shard, so no two merges read different leases.
  */
 export function landingLog(env: Env, repo: string, branch: string) {
 	return lazyLog(async () => {
@@ -488,13 +460,12 @@ export function landingLog(env: Env, repo: string, branch: string) {
 }
 
 const claimsRef = (repo: string) => `refs/notes/githive-claims/${repo}`;
-/** A change's hosted agents' Durable Object names: one builder, one reviewer per role and commit. */
+/** The base name for a change's hosted agents: one builder, and one reviewer per role and commit. */
 export const changeRepoName = (repo: string, change: string) => `fork--${repo}--${change}`;
 
 /**
- * An agent's fork of a project repo: one per agent, holding a branch per
- * change. Its name follows the agent's (lowercase, safe characters), with a
- * short hash of the real name when those differ, so two names never share one.
+ * An agent's fork of a project repo, holding a branch per change. A short hash is added when the agent's name had to
+ * be sanitized, so two names never share a fork.
  */
 export async function forkName(repo: string, agent: string) {
 	const slug =
@@ -509,28 +480,23 @@ export async function forkName(repo: string, agent: string) {
 }
 
 /**
- * How many seed forks a project's agents' forks are made from. A fork copies
- * its source repo, and a crowd of agents arriving at once would otherwise all
- * copy the project's repo at once (200 forks of Express left it answering
- * nothing else). The seeds are made one at a time in the background when
- * GitHive starts on the project (see RepoCache's fork queue): 16 asked for at
- * once left some of Artifacts' fork jobs stalled for good.
+ * How many seed forks agents' forks are copied from. A crowd forking the project repo at once overloads it, so the
+ * seeds are made one at a time in the background when GitHive starts on the project (see RepoCache's fork queue).
  */
 export const FORK_SEEDS = 8;
-/** A project's seed fork `k`. */
 export const seedName = (repo: string, k: number) => `fork--${repo}--seed--${k}`;
 
-/** Which seed an agent's fork is made from, when it's ready: a stable hash of its name. */
+// The seed an agent's fork prefers, by a stable hash of its name.
 function seedOf(agent: string) {
 	let h = 0x811c9dc5;
 	for (let i = 0; i < agent.length; i++) h = Math.imul(h ^ agent.charCodeAt(i), 0x01000193);
 	return (h >>> 0) % FORK_SEEDS;
 }
 
-/** The forks a repo's fork queue makes: its seeds, all of them. */
+/** Fork-queue items for all of a repo's seeds. */
 export const seedItems = () => Array.from({ length: FORK_SEEDS }, (_, k) => `seed:${k}`);
 
-/** Make seed `k` of `repo` (or wait for it, if it's being made), from the project's repo. */
+/** Makes seed `k` of `repo` from the project repo, or waits for it if it's being made. */
 export async function makeSeed(env: Env, repo: string, k: number) {
 	const name = seedName(repo, k);
 	await remoteFor(env.ARTIFACTS, name, "read", 60).catch(() =>
@@ -539,10 +505,8 @@ export async function makeSeed(env: Env, repo: string, k: number) {
 }
 
 /**
- * Make an agent's fork of `repo`, or wait for it if it's being made (by the
- * fork queue, say): from its own seed if that's ready, else another that is,
- * else the project itself (seeds not made yet: asked for now). A source whose
- * fork fails is passed over for the next.
+ * Makes an agent's fork of `repo`, or waits if it's already being made. Tries the agent's own seed, then any ready
+ * seed, then the project itself, moving on when a source's fork fails.
  */
 export async function makeAgentFork(env: Env, repo: string, agent: string) {
 	const name = await forkName(repo, agent);
@@ -566,7 +530,7 @@ export async function makeAgentFork(env: Env, repo: string, agent: string) {
 			await forkAndWait(env.ARTIFACTS, source, name, `${agent}'s fork of ${repo}`, { shared: true });
 			return;
 		} catch (err) {
-			// Asked for, but not ready in time: another source would only wait on the same fork. Said so, to ask again.
+			// Requested but not ready in time. Another source would only wait on the same fork, so ask the caller to retry.
 			if (isForkNotReady(err))
 				throw new Error(`[503] ${agent}'s fork of ${repo} is still being made: call again in a minute`);
 			failure = err;
@@ -575,7 +539,7 @@ export async function makeAgentFork(env: Env, repo: string, agent: string) {
 	throw failure;
 }
 
-/** Credentials for an agent's own fork of the project repo; writing to it first creates the fork (once, for all its changes). */
+/** Credentials for an agent's own fork. The first write creates the fork, which all its changes share. */
 export async function changeRemote(env: Env, repo: string, agent: string, scope: "read" | "write", ttlSeconds: number) {
 	const name = await forkName(repo, agent);
 	try {
@@ -604,7 +568,6 @@ async function changeBrief(env: Env, repo: string, change: string) {
 		read,
 		own,
 		branch: projectBranch(registry),
-		/** Where the change's branch lives: its own fork. */
 		source: (scope: "read" | "write") => changeRemote(env, repo, own?.agent ?? "githive-builder", scope, 3 * 3600),
 		policy: registry?.policy ?? DEFAULT_POLICY,
 		job: {
@@ -623,11 +586,8 @@ async function changeBrief(env: Env, repo: string, change: string) {
 }
 
 /**
- * Start GitHive's hosted reviewers on a change: its branch
- * head, reviewed against where it left main, with its claim as the brief. Each
- * reviewer votes with vote when it's done; with `mergeWhenApproved`, it
- * then tries to merge the change, which the toolkit refuses until the approvals
- * are in, so the last vote's attempt is the one that lands.
+ * Starts GitHive's hosted reviewers on a change's head, reviewed against where it left main. With
+ * `mergeWhenApproved` each reviewer tries to merge after voting, and the toolkit refuses until the approvals are in.
  */
 export async function startHostedReviewers(
 	env: Env,
@@ -659,7 +619,7 @@ export async function startHostedReviewers(
 	return { head, reviewers: roles };
 }
 
-/** Start GitHive's hosted builder on a claimed change: it works on the branch changes/<change> in the change's own fork. */
+/** Starts GitHive's hosted builder on a claimed change, working on changes/<change> in the change's fork. */
 export async function startHostedBuilder(env: Env, input: { repo: string; change: string }) {
 	const { repo, change } = input;
 	const { read, own, job, source } = await changeBrief(env, repo, change);
@@ -669,14 +629,14 @@ export async function startHostedBuilder(env: Env, input: { repo: string; change
 	return { change, builder: changeRepoName(repo, change) };
 }
 
-/** Fresh credentials to resume GitHive's hosted builder on a change: its branch's home to push to, the project's main to merge from. */
+/** Fresh credentials to resume the hosted builder: its fork to push to, and the project's main to merge from. */
 export async function builderCredentials(env: Env, repo: string, change: string) {
 	const { read, source } = await changeBrief(env, repo, change);
 	const write = await source("write");
 	return { token: write.token, base: { remote: read.url, token: read.token } };
 }
 
-/** What GitHive's hosted agents on a change are doing: its builder, if it has one, and each role's reviewer of `head`. */
+/** What GitHive's hosted agents on a change are doing: its builder, if any, and each role's reviewer of `head`. */
 export async function hostedAgentStatus(
 	env: Env,
 	repo: string,

@@ -226,7 +226,7 @@ describe("GitHive's hosted agents", () => {
 			error: refusal,
 		});
 		expect(await call(listed(false), "request_review", { change: "a-1" })).toEqual({ error: refusal });
-		// On the list, they get past the gate (here: request_review finds no claim).
+		// On the list, they get past the gate; here request_review then finds no claim.
 		expect(await call(listed(true), "request_review", { change: "a-1" })).toEqual({
 			error: "a-1 holds no claim: claim the change's paths first",
 		});

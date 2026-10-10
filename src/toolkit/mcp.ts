@@ -66,59 +66,57 @@ import { BRANCH_PATTERN, type BranchRule, settingsForBranch } from "./branch-rul
 import { DEFAULT_SKIP_CHECKS, SKIP_PATTERN } from "./check-scope";
 import type { Abandoned } from "./claims";
 
-// GitHive's MCP tools (see docs/design.md). Stateless: each
-// tool reads or writes the repo's records in Git and reports what Git said.
-// Nothing here decides for anyone; an agent can do the same with plain git,
-// and the audit reads the same records either way.
+// GitHive's MCP tools (see docs/design.md). Each tool is stateless: it reads or writes the repo's records
+// in Git and reports what Git said. Nothing here decides for anyone. An agent could do the same with plain
+// git, and the audit reads the same records either way.
 
 export interface ToolContext {
 	/** Credentials for a project repo. */
 	remote: (repo: string, scope: "read" | "write") => Promise<Remote>;
-	/** A record's log (claims, votes), kept across calls so an unmoved ref isn't fetched again; without it, each call makes its own. */
+	/** Shared record logs (claims, votes), so an unchanged ref isn't fetched again on every call. */
 	records?: <S>(repo: string, ref: string) => GitCasLog<S>;
-	/** Credentials for one of a repo's records repos, which hold its claim shards when they're spread out. */
+	/** Credentials for records repo `k`, which holds claim shards once they're spread out. */
 	recordsRemote?: (repo: string, k: number, scope: "read" | "write") => Promise<Remote>;
-	/** Creates a repo's records repos (harmless if they exist). */
+	/** Harmless if the records repos already exist. */
 	createRecordsRepos?: (repo: string, count: number) => Promise<void>;
-	/** Credentials for an agent's own fork of a project repo, where its changes' branches live; asking to write creates the fork. */
+	/** Credentials for an agent's own fork, where its change branches live. Asking to write creates the fork. */
 	changeRemote?: (repo: string, agent: string, scope: "read" | "write") => Promise<Remote>;
-	/** Read access to a change's own fork, where changes made before forks were per agent keep their branch. */
+	/** Read access to a per-change fork, from before forks were per agent. */
 	legacyChangeRemote?: (repo: string, change: string) => Promise<Remote>;
-	/** A branch's head in a project repo. */
 	head: (repo: string, branch: string) => Promise<string>;
-	/** A project repo's default branch, where its HEAD points (main, master, ...); without it, main. */
+	/** The branch the repo's HEAD points to. Without it, main is assumed. */
 	defaultBranch?: (repo: string) => Promise<string>;
-	/** Runs a repo's checks on its branch plus a batch of changes (live, the Gate's container). */
+	/** Runs the repo's checks on its branch plus a batch of changes, in the Gate's container. */
 	runChecks?: (repo: string) => CheckRunner;
-	/** A branch's commits since `baseline`, for the audit (live, read with git in the repo's own Gate's container); absent, read in memory. */
+	/** A branch's commits since `baseline`, read with git in the repo's Gate. Without it, read in memory. */
 	readBranch?: (repo: string, baseline: string, branch: string) => Promise<BranchCommit[]>;
-	/** Where a batch's git work runs (live, the repo's own Gate's container): without it, nothing can land. */
+	/** Where a batch's git work runs (the repo's Gate). Without it, nothing can land. */
 	batchGit?: (repo: string) => BatchGit;
-	/** Reads a repo's history through Artifacts' API, by name (live): a batch's changes are read that way, the Gate reading only what it can't place. */
+	/** Reads a repo's history through Artifacts' API. The Gate reads only the batch changes this can't place. */
 	history?: ReadHistory;
-	/** A branch's head in an agent's fork, through Artifacts' API (live): null if nothing's there; a [409] if the agent has no fork. */
+	/** A branch's head in an agent's fork, through Artifacts' API: null if no branch, a [409] if no fork. */
 	forkHead?: (repo: string, agent: string, ref: string) => Promise<string | null>;
-	/** Starts a batch's first check container while the batch is read (live, a Gate's). */
+	/** Starts a batch's first check container while the batch is being read. */
 	prepareChecks?: (repo: string) => (gate: string) => Promise<void>;
-	/** Starts the repo's Gate's container while a batch is read, for its landing (live). */
+	/** Starts the repo's Gate while a batch is being read, so it's ready to land it. */
 	prepareLanding?: (repo: string) => Promise<void>;
-	/** Who's landing a batch into a repo's branch, and what changes came to (live, the repo's RepoCache); absent, each merge only knows its own. */
+	/** The batch landing on a branch and its recent outcomes. Without it, a merge knows only its own. */
 	landing?: (repo: string, branch: string) => Landing;
-	/** Stamps what this caller writes with their verified identity (GitHive's key), and the agent name their key is for; without it, nothing is stamped. */
+	/** Stamps what this caller writes with their verified identity and agent name. Without it, nothing is stamped. */
 	stamper?: (agent?: string) => Promise<Stamper | undefined>;
-	/** The caller's agent key (register), from the X-GitHive-Agent-Key header. */
+	/** The caller's agent key from register, sent in the X-GitHive-Agent-Key header. */
 	agentKey?: string;
-	/** The caller's agent name, verified by GitHive's sign-in (an agent token or an OAuth grant): <handle>/<agent>. It needs no key. */
+	/** The signed-in caller's name, <handle>/<agent>, verified by an agent token or OAuth grant. It needs no key. */
 	agent?: string;
-	/** Whether the caller may start GitHive's hosted agents (build, request_review), which spend its model account; unset, they may. */
+	/** Whether the caller may start hosted agents (build, request_review), which spend its model account. */
 	mayUseHosted?: () => Promise<boolean>;
-	/** The teams the caller is on in a repo's org (@<org>/<team>), as GitHive checks them: recorded in their votes. */
+	/** The caller's teams in the repo's org (@<org>/<team>), recorded in their votes. */
 	teamsOf?: (repo: string) => Promise<string[]>;
-	/** GitHive's own hosted agents, who act under the reserved githive- names. */
+	/** Set for GitHive's hosted agents, which act under the reserved githive- names. */
 	hosted?: boolean;
-	/** Notes a repo, so the dashboard can list it. */
+	/** Records the repo so the dashboard can list it. */
 	register?: (repo: string) => Promise<void>;
-	/** Starts GitHive's hosted reviewers on a change's current commit; each votes with vote (and, asked to, then tries to merge it). */
+	/** Starts hosted reviewers on a change's current commit. Each votes, and merges the change if asked to. */
 	requestReview?: (input: {
 		repo: string;
 		change: string;
@@ -126,53 +124,50 @@ export interface ToolContext {
 		summary?: string;
 		mergeWhenApproved?: boolean;
 	}) => Promise<{ head: string; reviewers: string[] }>;
-	/** What GitHive's hosted agents on a change are doing: its builder, and the reviewers of its head. */
+	/** What the hosted builder and reviewers of a change are doing. */
 	agentStatus?: (repo: string, change: string, head: string | null, roles: string[]) => Promise<HostedStatus>;
 	/** Times a request's steps, for its Server-Timing header. */
 	timing?: Timing;
 	/** Tells the dashboard's open pages that the repo's records changed. */
 	ping?: (repo: string) => Promise<void>;
-	/** Warms the repo's check container in the background, when a merge is likely soon: why, and for what (see Gate.warmUp). */
+	/** Warms the repo's check container in the background when a merge is likely soon (see Gate.warmUp). */
 	warmChecks?: (
 		repo: string,
 		input: { branch: string; checks: string[]; expect: "claimed" | "checked" | "approved" | "set up"; key?: string },
 	) => Promise<void>;
 	/**
-	 * A kept copy of the repo's claims in force and the changes merged,
-	 * rebuilt after writes (stale while one caller rebuilds it): for advice
-	 * that a moment's staleness doesn't harm (the claims, reviews and backlog tools), so a
-	 * busy repo isn't read whole on every call. Never for a claim or a merge,
-	 * which read their own records in Git. Unset: read every time.
+	 * A cached copy of the claims in force and merged changes, for advice (claims, reviews, backlog) that tolerates
+	 * slight staleness. Claims and merges never use it: they read their own records in Git.
 	 */
 	keptClaims?: (repo: string, read: () => Promise<ClaimsAdvice>) => Promise<ClaimsAdvice>;
 	/**
-	 * The latest commit seen on each of these claims' branches (null: nothing pushed), and when, kept in the repo's
-	 * RepoCache (see openHeads): read from forks, or `pushed`, told by a push event from the claim's agent's fork.
+	 * The latest head seen on each claim's branch (null if nothing is pushed) and when, kept in the repo's
+	 * RepoCache. `pushed` marks a head reported by a push event (see openHeads).
 	 */
 	knownHeads?: (
 		repo: string,
 		claims: { change: string; agent: string }[],
 	) => Promise<Record<string, { head: string | null; at: number; pushed?: boolean }>>;
-	/** Note the latest commits seen on changes' branches, wherever a tool read them (null: nothing pushed), as of `readAt` (default: now). */
+	/** Records the heads a tool read (null if nothing is pushed), as of `readAt` (default now). */
 	noteHeads?: (repo: string, seen: Record<string, string | null>, readAt?: number) => Promise<void>;
-	/** The GitHub repo `repo` (owner/name) through GitHive's App: null if the App isn't installed there. Unset, GitHub isn't configured. */
+	/** A GitHub repo (owner/name) through GitHive's App, or null if the App isn't installed. Unset without GitHub. */
 	github?: (repo: string) => Promise<GitHubLink | null>;
-	/** What landed on a branch since this agent was last told (see RepoCache.landingNews): every reply carries it. */
+	/** What landed on a branch since this agent was last told (see RepoCache.landingNews). */
 	news?: (repo: string, branch: string, agent: string) => Promise<Landed[]>;
-	/** A branch's head, kept a moment for every merge watching it (see MergeInput.branchHead). */
+	/** A branch's head, briefly cached and shared by the merges watching it (see MergeInput.branchHead). */
 	branchHead?: (repo: string, branch: string) => Promise<string | null>;
-	/** Ask for forks to be made in the background: the repo's seeds, or these agents' own (see RepoCache's fork queue). */
+	/** Queues forks to be made in the background: the repo's seeds, or the named agents' own. */
 	prepareForks?: (repo: string, items: "seeds" | string[]) => Promise<void>;
-	/** Review holds: who's reviewing what, marked by review_access, so reviews shows others which are taken (see review-holds.ts). */
+	/** Review holds set by review_access, so the reviews tool shows which reviews are taken (see review-holds.ts). */
 	reviews?: {
 		held(repo: string): Promise<Record<string, string[]>>;
 		hold(repo: string, head: string, agent: string, needed: number): Promise<boolean>;
 		release(repo: string, head: string, agent: string): Promise<void>;
-		/** When each waiting review a role that can block awaits (by holdKey) was first seen, and whether people were told. */
+		/** When each waiting blocking-role review (by holdKey) was first seen, and whether people were told. */
 		waits?(repo: string, keys: string[]): Promise<Record<string, { since: number; told?: boolean }>>;
 		told?(repo: string, key: string): Promise<void>;
 	};
-	/** Updates the repo's summary for the dashboard's list of repos (a hint; Git is what counts). */
+	/** Updates the repo's summary in the dashboard's repo list. It's a hint; Git is the source of truth. */
 	summarize?: (
 		repo: string,
 		patch: {
@@ -195,33 +190,29 @@ export interface HostedStatus {
 	reviewers: { role: string; status: string; verdict?: string }[];
 }
 
-/**
- * None by default, as on GitHub: a claimed, pushed change merges as it is. A
- * repo asks for reviews with settings (required, vetoes, escalate:
- * SENSITIVE_PATHS with security's veto, say), and for checks with verify.
- */
+/** No reviews by default, as on GitHub: a claimed, pushed change merges as is. A repo opts in through settings. */
 export const DEFAULT_POLICY: ReviewPolicy = { required: 0, vetoes: [] };
 const HOSTED_PREFIX = "githive-";
 const DEFAULT_SHARD_DEPTH = 2;
-/** Records repos per sharded repo, where they're available: Artifacts takes one push at a time per repo. */
+/** Records repos per sharded repo. Artifacts takes one push at a time per repo, so shards are spread out. */
 const DEFAULT_RECORDS_REPOS = 16;
-/** The floor: no claim is stale sooner than this after its agent last claimed (see staleness.ts for the rest of the rule). */
+/** No claim goes stale sooner than this after its agent last claimed (see staleness.ts). */
 const STALE_AFTER_MS = BUILDING_IDLE_MS;
 /** How long a change's head, once seen, is taken as current (see openHeads). */
 const HEAD_SEEN_MS = 5 * 60_000;
-/** How long a head a push event told of is taken as current: the next push's event replaces it, and reads only catch a lost one. */
+/** How long a head reported by a push event stays current. Reads only catch a lost event. */
 const HEAD_PUSHED_MS = 30 * 60_000;
-/** How many of the open changes' heads unseen or older than HEAD_SEEN_MS a call reads (see openHeads). */
+/** How many stale or unseen heads one call reads (see openHeads). */
 const HEADS_READ_A_CALL = 6;
-/** How many forks' heads a call reads at once (a Worker request holds only six connections open; past that, the runtime cancels some). */
+/** Concurrent fork head reads. A Worker request holds at most six connections; the runtime cancels any past that. */
 const HEAD_READS_AT_ONCE = 6;
-/** The most reviews or backlog pieces a call lists (the rest counted): each agent's first few differ (see reviewsFor). */
+/** The most reviews or backlog items a call lists; the rest are only counted. */
 const LISTED_AT_MOST = 40;
-/** The most agents register, or pieces of work add_work adds, in one call. */
+/** The most agents register, or work items add_work takes, in one call. */
 const MOST_AT_ONCE = 500;
 const claimsRef = (repo: string) => `refs/notes/githive-claims/${repo}`;
 const votesRef = (repo: string) => `refs/notes/githive-votes/${repo}`;
-/** The checks a repo runs in containers: on GitHub Actions, none (its Gate only lands). */
+/** The checks a repo runs in containers: none when they run on GitHub Actions. */
 const containerChecks = (verify: string[] | undefined) => (onActions(verify) ? [] : (verify ?? []));
 
 const workRef = (repo: string) => `refs/notes/githive-work/${repo}`;
@@ -532,7 +523,7 @@ async function keyAgent(registry: Registry | undefined, key: string) {
 	return agent;
 }
 
-/** Refuses acting as `name`: another name than the caller's key is for, a registered name without its key, or a hosted agent's name. */
+/** Throws unless the caller may act as `name`. Callers with a key or sign-in act only as themselves. */
 function mayActAs(
 	name: string,
 	acting: string | undefined,
@@ -545,9 +536,9 @@ function mayActAs(
 	}
 	if (hosted) return;
 	if (name.startsWith(HOSTED_PREFIX)) throw new Error("[403] githive- names are GitHive's hosted agents'");
-	// "person:…", "service:…" name verified identities, which an agent can't take on.
+	// Names like person:… and service:… are verified identities, which an agent can't take on.
 	if (name.includes(":")) throw new Error("[403] an agent's name can't contain \":\"");
-	// <handle>/<agent> names are signed-in agents', verified by their token.
+	// <handle>/<agent> names belong to signed-in agents, verified by their token.
 	if (name.includes("/"))
 		throw new Error(`[403] ${name} is a signed-in agent's name: sign in to GitHive as it to act as it`);
 	if (registry?.agents?.[name]) throw new Error(`[403] ${name} is registered: call with its agent key`);
@@ -555,7 +546,7 @@ function mayActAs(
 
 export type Args = Record<string, unknown>;
 
-/** The claims in force and the changes merged: what advice (the claims, reviews and backlog tools) reads of the claims. */
+/** What the advice tools (claims, reviews, backlog) read: the claims in force and the changes merged. */
 export interface ClaimsAdvice {
 	claims: ClaimRecord[];
 	merged: string[];
@@ -566,8 +557,7 @@ function recordLog<S>(ctx: ToolContext, repo: string, ref: string): GitCasLog<S>
 	return ctx.records ? ctx.records<S>(repo, ref) : new GitCasLog<S>(() => ctx.remote(repo, "write"), repo, ref);
 }
 
-/** A repo's claims, where its registry says they are: in the registry itself, or split into per-path shards. */
-/** The claims in force and the changes merged, read now from the records (see keptClaims). */
+/** Reads the claims advice fresh from the records (see keptClaims). */
 async function advice(ctx: ToolContext, repo: string): Promise<ClaimsAdvice> {
 	const log = recordLog<Registry>(ctx, repo, claimsRef(repo));
 	const head = await log.read();
@@ -579,10 +569,10 @@ async function advice(ctx: ToolContext, repo: string): Promise<ClaimsAdvice> {
 	};
 }
 
-/** The arguments settings takes for the review policy. */
+/** The settings arguments that make up the review policy. */
 const POLICY_FIELDS = ["required", "vetoes", "escalate", "grants"] as const;
 
-/** A branch's review policy and checks: the repo's, with what a branch rule for it changes (see branch-rules.ts). */
+/** A branch's review policy and checks: the repo's, overridden by any matching branch rule (see branch-rules.ts). */
 export function branchSettings(registry: Registry | null | undefined, branch: string | undefined) {
 	const project = projectBranch(registry);
 	return settingsForBranch(
@@ -596,11 +586,7 @@ export function branchSettings(registry: Registry | null | undefined, branch: st
 	);
 }
 
-/**
- * Branch rules from settings' arguments: each a pattern, the policy fields it
- * changes (as settings takes them) and its checks (verify; left out, the repo's).
- * An empty list clears them.
- */
+/** Parses branch_rules from settings: a pattern each, with the policy fields and checks it overrides. */
 function branchRulesFrom(value: unknown, base: ReviewPolicy): BranchRule<ReviewPolicy>[] {
 	if (!Array.isArray(value))
 		throw new Error("[400] branch_rules is a list of rules: each a pattern, and what it changes");
@@ -613,7 +599,7 @@ function branchRulesFrom(value: unknown, base: ReviewPolicy): BranchRule<ReviewP
 			throw new Error(
 				`[400] branch_rules[${i}].pattern is a branch name, with * for any run of characters (feature/*)`,
 			);
-		// Only the fields it sets: the rest stay the repo's, as the repo's change.
+		// Keep only the fields the rule sets, so the rest follow the repo's settings as they change.
 		const full = policyFrom(rule, base);
 		const policy = Object.fromEntries(
 			POLICY_FIELDS.filter((f) => rule[f] !== undefined).map((f) => [f, full[f]]),
@@ -627,14 +613,14 @@ function branchRulesFrom(value: unknown, base: ReviewPolicy): BranchRule<ReviewP
 	});
 }
 
-/** What the checks skip, from settings' skip_checks: patterns like *.md or docs/ ([] for nothing: the checks always run). */
+/** Parses skip_checks: patterns like *.md or docs/ for files the checks skip. */
 function skipPatternsFrom(value: unknown): string[] {
 	if (!Array.isArray(value) || value.some((p) => typeof p !== "string" || !SKIP_PATTERN.test(p.trim())))
 		throw new Error("[400] skip_checks is a list of patterns, like *.md or docs/ ([] for nothing)");
 	return [...new Set((value as string[]).map((p) => p.trim()))];
 }
 
-/** A review policy from settings' arguments, each one left out kept from `base`. */
+/** A review policy from settings' arguments, falling back to `base` for any left out. */
 function policyFrom(args: Args, base: ReviewPolicy): ReviewPolicy {
 	const required = typeof args.required === "number" ? args.required : base.required;
 	if (!Number.isInteger(required) || required < 0)
@@ -643,14 +629,13 @@ function policyFrom(args: Args, base: ReviewPolicy): ReviewPolicy {
 	return {
 		required,
 		vetoes: Array.isArray(args.vetoes) ? (args.vetoes as string[]) : base.vetoes,
-		// The base's escalation unless the caller sets its own (an empty list for none).
 		escalate: Array.isArray(args.escalate) ? (args.escalate as ReviewPolicy["escalate"]) : base.escalate,
-		// No grants: every role keeps the default holders.
+		// Without grants, every role keeps its default holders.
 		...(grants && Object.keys(grants).length ? { grants } : {}),
 	};
 }
 
-/** The GitHub repo settings connects to ("owner/name"; "" for none): refused unless GitHive's App is installed there. */
+/** Parses settings' github ("owner/name", or "" for none). Refused unless GitHive's App is installed there. */
 async function githubFrom(ctx: ToolContext, value: unknown): Promise<{ repo: string } | null> {
 	if (value === "" || value === null) return null;
 	if (typeof value !== "string" || !/^[\w.-]+\/[\w.-]+$/.test(value.trim()))
@@ -662,13 +647,12 @@ async function githubFrom(ctx: ToolContext, value: unknown): Promise<{ repo: str
 	return { repo };
 }
 
-/** The checks run before each merge, as settings takes them. */
 function checksFrom(value: unknown): string[] {
 	if (!Array.isArray(value)) throw new Error("[400] verify is a list of commands, [] for none");
 	return value.filter((c): c is string => typeof c === "string" && !!c.trim());
 }
 
-/** Role grants as settings takes them: each role to a list of agent names, "person:*", verified identities, teams (@<org>/<team>) or "githive". */
+/** Validates role grants: each role maps to a list of who may vote as it. */
 function validGrants(value: unknown): Record<string, string[]> {
 	if (!value || typeof value !== "object" || Array.isArray(value))
 		throw new Error("[400] grants maps each role to who may vote as it");
@@ -684,10 +668,8 @@ function validGrants(value: unknown): Record<string, string[]> {
 }
 
 /**
- * Tell people (their inbox) about each review a role that can block has
- * awaited, unheld, for ROLE_WAIT_MS: once per commit and role. Never
- * GitHive's own reviewers: if no person holds the role, the flag says so,
- * so its holders can be nudged or more granted.
+ * Flags each blocking-role review that has waited unheld for ROLE_WAIT_MS, once per commit and role,
+ * so a person can take it or nudge its holders.
  */
 async function tellPeopleOfWaitingRoles(
 	ctx: ToolContext,
@@ -742,11 +724,7 @@ function shardingOf(registry: Registry | null | undefined) {
 	};
 }
 
-/**
- * Shard the repo's claims if the load calls for it (see shardingReason):
- * makes the records repos, then records the switch in the registry. Returns
- * the registry as it is now, or null if it stays as it was.
- */
+/** Shards the claims if the load calls for it (see shardingReason). Returns the new registry, or null. */
 async function shardIfBusy(
 	ctx: ToolContext,
 	repo: string,
@@ -780,10 +758,8 @@ export function votesFor(
 }
 
 /**
- * Shard the repo's votes if the load calls for it (see votesShardingReason),
- * where its claims may shard (on demand, or sharded from the start): makes the
- * records repos, then records the switch in the votes record. Returns the
- * votes record's head as it is now, for the vote that follows (undefined: not read).
+ * Shards the repo's votes if the load calls for it (see votesShardingReason), where its claims may shard.
+ * Returns the votes record's head for the vote that follows, or undefined if it wasn't read.
  */
 async function shardVotesIfBusy(
 	ctx: ToolContext,
@@ -822,18 +798,14 @@ export function storeFor(
 }
 
 /**
- * When forks became per agent: a change claimed since has no fork of its own,
- * so none is looked for. Looked for on every change not pushed yet, the missing
- * fork was 40% of the Artifacts calls backlog and reviews made (a failed get
- * each, run 217). A day's margin for deploys.
+ * When forks became per agent. A change claimed since then has no fork of its own, so none is looked
+ * for, which saves a failed lookup per unpushed change. The date leaves a day's margin for deploys.
  */
 const FORKS_PER_AGENT_SINCE = "2026-10-08T00:00:00Z";
 
 /**
- * Where a repo's change branches live: each in its agent's own fork (one per
- * agent, a branch changes/<change> per change). Reading a change made before
- * forks were per agent (claimed `since` then, or unknown), its branch may be
- * in that change's own fork instead.
+ * Where a repo's change branches live: changes/<change> in the agent's own fork. A change claimed before
+ * forks were per agent, or at an unknown time, may still be in a fork of its own.
  */
 function changeSourceFor(ctx: ToolContext, repo: string) {
 	return async (agent: string, scope: "read" | "write", change?: string, since?: string): Promise<Remote> => {
@@ -849,11 +821,8 @@ function changeSourceFor(ctx: ToolContext, repo: string) {
 }
 
 /**
- * A change's pushed head, or null if nothing's pushed: claimed since forks
- * were per agent, one log through Artifacts' API on its agent's fork (where a
- * listing over Git took a token, its repo's info and a ref listing: at 1,000
- * agents, backlog and reviews made 42,000 Git requests and 34,000 Artifacts
- * calls to forks reading heads, run 1000-1); older, wherever its branch is.
+ * A change's pushed head, or null if nothing is pushed. A change claimed since forks were per agent is read
+ * with one Artifacts API call on its agent's fork, far cheaper than listing refs over Git.
  */
 async function changeHead(
 	ctx: ToolContext,
@@ -867,7 +836,7 @@ async function changeHead(
 	return branchHead(await changeSourceFor(ctx, repo)(agent, "read", change, since), ref);
 }
 
-/** Where a change stands: its branch head, the votes on that head, the approvals against the policy, and GitHive's hosted agents on it. */
+/** Where a change stands: its head, the votes on it, its approval under the policy, and its hosted agents. */
 async function changeStatus(
 	ctx: ToolContext,
 	repo: string,
@@ -881,9 +850,9 @@ async function changeStatus(
 	const head = await Promise.resolve()
 		.then(() => changeHead(ctx, repo, agent ?? fail(409, `${change} has no agent`), change, author?.since))
 		.catch(() => null);
-	// Read now: noted, for reviews, backlog and merge (see openHeads).
+	// Note the fresh head for reviews, backlog and merge (see openHeads).
 	if (head) await ctx.noteHeads?.(repo, { [change]: head }).catch(() => undefined);
-	// The policy for the paths it claims: stricter for dependency, CI and deploy files, say.
+	// The claimed paths can escalate the policy (stricter for CI or deploy files, for example).
 	const paths = author?.paths ?? [];
 	// The branch it lands on decides the policy too (see branch-rules.ts).
 	const policy = branchSettings(registry, author?.into).policy;
@@ -899,9 +868,8 @@ async function changeStatus(
 }
 
 /**
- * What's known of a change for whose turn it is: its head, the votes on it
- * that count (`counted`, stamps already checked), a question waiting
- * (`record`: the votes record, for its flags), and the batch being checked to land into its branch.
+ * The signs of whose turn a change is on: its head, the counted votes on it (stamps already checked),
+ * any open question for a person, and whether it's in the batch being landed.
  */
 export function changeSigns(input: {
 	claim: ClaimRecord;
@@ -934,10 +902,8 @@ export function changeSigns(input: {
 }
 
 /**
- * Whether a claim is abandoned on its agent's own turn, as the toolkit decides
- * it when a claim is in the way or asked to be released as stale: its head as
- * its fork has it now, the votes on it, and the batch being checked into its branch, read fresh (a release
- * can't be undone).
+ * Decides whether a claim that's in the way, or asked to be released as stale, is abandoned.
+ * Everything is read fresh, because a release can't be undone.
  */
 function abandonedRule(
 	ctx: ToolContext,
@@ -946,8 +912,8 @@ function abandonedRule(
 	votes: VoteStore,
 ): Abandoned {
 	return async (claim) => {
-		// A head that couldn't be read says nothing: not "nothing pushed", which would let live work be released (a release
-		// can't be undone). Only a fork that doesn't exist yet (or no forks here at all) means nothing's pushed.
+		// A failed read isn't "nothing pushed", which could release live work. Only a missing fork (409),
+		// or no forks at all (501), means nothing is pushed.
 		const head = await changeHead(ctx, repo, claim.agent, claim.change, claim.since).catch((err): null | undefined =>
 			[409, 501].includes(statusOf(err).status) ? null : undefined,
 		);
@@ -978,10 +944,8 @@ function abandonedRule(
 }
 
 /**
- * A change that merges branch `source` into `into` whole: the files `source`
- * changed since it left `into`, as a claim (folders, when there are many: see
- * claimCovering), and its tip, which the change pushes to its agent's fork as
- * its branch, so review, check and merge treat it as any change.
+ * A change that merges branch `source` into `into` whole. Its claim is the files `source` changed since
+ * it left `into`, and its tip becomes the change's branch, so it's reviewed, checked and merged as usual.
  */
 async function branchMerge(ctx: ToolContext, repo: string, source: string, into: string) {
 	if (source === into) throw new Error(`[400] a change can't merge ${into} into itself`);
@@ -995,7 +959,7 @@ async function branchMerge(ctx: ToolContext, repo: string, source: string, into:
 	return {
 		tip,
 		paths,
-		/** Push the tip to the fork as changes/<change>: from this shallow workspace, or with the source's whole history if the fork lacks what it leaves out. */
+		// Push from the shallow workspace, or with the source's full history if the fork lacks what it leaves out.
 		push: async (fork: Remote, change: string) => {
 			const to = `refs/heads/changes/${change}`;
 			await ws
@@ -1007,8 +971,7 @@ async function branchMerge(ctx: ToolContext, repo: string, source: string, into:
 	};
 }
 
-/** A list of change ids from an argument (none when it's absent). */
-/** A piece of work as add_work takes it (alone, or as one of its items). */
+/** Parses a work item for add_work, given alone or as one of its items. */
 function workItemFrom(args: Record<string, unknown>) {
 	const title = requiredString(args, "title");
 	const id = typeof args.id === "string" && args.id.trim() ? args.id.trim() : workId(title);
@@ -1032,10 +995,7 @@ function changeList(value: unknown, field: string): string[] {
 	return [...new Set(value as string[])];
 }
 
-/**
- * A loop `change` would close by waiting on `after`: the changes from it back
- * to itself, or none. Follows what each change waits on (as far as 50 changes).
- */
+/** The loop `change` would close by waiting on `after` (searching up to 50 changes), or undefined. */
 async function dependencyLoop(
 	change: string,
 	after: string[],
@@ -1054,15 +1014,13 @@ async function dependencyLoop(
 	return undefined;
 }
 
-/** A branch name changes may land on: letters, digits, dots, dashes, underscores and slashes, as Git allows them. */
+/** Branch names changes may land on: a safe subset of what Git allows. */
 const BRANCH_NAME = /^(?![-/.])(?!.*\.\.)(?!.*\/\/)(?!.*\.lock$)(?!.*[/.]$)[A-Za-z0-9._/-]+$/;
 
 /**
- * Make sure a branch other than the project's can take changes: recorded
- * already; or there, so adopted as it is now; or made from `from` (a missing
- * branch is never made without one, so a misspelt name is refused, not made).
- * Made first, then recorded: a record that fails is made good by adopting the
- * branch on the next claim. Says what it did, if anything.
+ * Makes sure a branch other than the project's can take changes: already recorded, adopted as it is, or made
+ * from `from`. A missing branch is never made without `from`, so a misspelt name is refused. The branch is
+ * made before it's recorded, so a failed record is repaired on the next claim. Returns what it did, if anything.
  */
 async function targetBranch(
 	ctx: ToolContext,
@@ -1097,20 +1055,20 @@ async function targetBranch(
 	return `made ${into} from ${from} at ${base.slice(0, 8)}`;
 }
 
-/** Replay a repo's records from Git: how many commits on the project's branch since GitHive started on it, and what broke which convention. */
+/** Replays a repo's records from Git: the merges since GitHive started on it, and every broken convention. */
 async function runAudit(ctx: ToolContext, repo: string) {
 	const t = ctx.timing ?? new Timing();
 	const remote = await t.time("token", () => ctx.remote(repo, "read"));
-	// The votes don't depend on the registry: read them meanwhile.
+	// The votes don't depend on the registry, so read them in parallel.
 	const votesRead = t.time("votes", () => readRecordHistory<Votes>(remote, votesRef(repo)));
 	votesRead.catch(() => undefined);
 	const registry = await t.time("registry", () => readRecordHistory<Registry>(remote, claimsRef(repo)));
 	const baseline = registry[0]?.state.baseline;
 	if (!baseline) throw new Error(`[409] GitHive hasn't started on ${repo}`);
 	const start = registry[0].state;
-	// Sharded since the start, or since the load called for it: the latest state says.
+	// Whether claims are sharded, from the start or later, is in the latest state.
 	const latest = registry.at(-1)!.state;
-	// A branch's merges: read with git in the repo's Gate where there's one (in memory, 200 merges took most of a Worker's).
+	// Read with git in the repo's Gate when there is one: reading many merges in memory exhausts a Worker.
 	const branchMerges = (from: string, branch: string) =>
 		ctx.readBranch
 			? ctx.readBranch(repo, from, branch).then((commits) => commits.map(mergeRecordOf))
@@ -1131,7 +1089,7 @@ async function runAudit(ctx: ToolContext, repo: string) {
 			: undefined,
 		votesRead,
 	]);
-	// The votes' buckets, once they're sharded: where the latest state says.
+	// Once votes are sharded, their buckets are where the latest state says.
 	const votesNow = votesHistory.at(-1)?.state;
 	const voteBuckets = votesNow?.buckets
 		? await t.time("buckets", async () =>
@@ -1145,7 +1103,7 @@ async function runAudit(ctx: ToolContext, repo: string) {
 				),
 			)
 		: undefined;
-	// The other branches changes land on, each read after the commit it started at, its files named as their claims are.
+	// Merges on other branches, each read from where it started, with files named as their claims name them.
 	const project = projectBranch(start);
 	const onBranches = (
 		await t.time("branches", () =>
@@ -1175,11 +1133,9 @@ async function runAudit(ctx: ToolContext, repo: string) {
 	return { merges: all.length, violations };
 }
 
-/** The audit of a repo, for the dashboard: it replays every record, so it's read apart from the snapshot. */
 /**
- * One change's history, for its page on the dashboard: its claim (or how it
- * ended), the commits on its branch (the last 50, newest first), every vote on
- * any of them, and the merge if it merged.
+ * One change's history for its dashboard page: its claim (or how it ended), its last 50 commits
+ * newest first, every vote on them, and its merge if it merged.
  */
 export async function changeHistory(ctx: ToolContext, repo: string, change: string) {
 	const t = ctx.timing ?? new Timing();
@@ -1188,7 +1144,7 @@ export async function changeHistory(ctx: ToolContext, repo: string, change: stri
 	if (!registry?.baseline) throw new Error(`[404] GitHive hasn't started on ${repo}`);
 	const { claim: record, released } = await t.time("change", () => storeFor(ctx, repo, registry).readChange(change));
 	if (!record && !released.length) throw new Error(`[404] no change ${change} on ${repo}`);
-	// The branch the change lands on: its own commits are those since it left that one.
+	// The change's own commits are those since it left the branch it lands on.
 	const branch = record ? claimInto(record, projectBranch(registry)) : projectBranch(registry);
 	const claim = record ? presentClaim(record, projectBranch(registry)) : undefined;
 	const mergedAs = released.find((r) => r.mergedAs)?.mergedAs;
@@ -1197,10 +1153,10 @@ export async function changeHistory(ctx: ToolContext, repo: string, change: stri
 			t.time("fork", () => changeSourceFor(ctx, repo)(claim?.agent ?? released.at(-1)!.agent, "read", change)),
 		)
 		.then(async (source) => {
-			// Shallow: a change is a few commits on a recent project head; finding where it left deepens history if that's further back.
+			// Shallow: a change is a few commits on a recent head, and finding the merge base deepens it if needed.
 			const ws = await t.time("clone", () => Workspace.clone(source, `changes/${change}`, { depth: 8 }));
 			const head = await ws.head();
-			// The change's own commits: back to where it left the project's branch (as it was before the merge, if it merged).
+			// For a merged change, its base is found from the merge's first parent, not the branch's current head.
 			const projectHead = await t.time("project", async () =>
 				ws.fetch("project", await ctx.remote(repo, "read"), branch),
 			);
@@ -1226,9 +1182,8 @@ export async function changeHistory(ctx: ToolContext, repo: string, change: stri
 }
 
 /**
- * A person's vote on a change, from the dashboard: on the change's current
- * commit, stamped with their verified identity (ctx's stamper), counted like
- * any vote (never the author's), and answering any question about it.
+ * A person's vote from the dashboard on a change's current commit, stamped with their verified identity
+ * and counted like any other vote (never the author's). It also answers any open question about the change.
  */
 export async function voteAsPerson(
 	ctx: ToolContext,
@@ -1266,8 +1221,8 @@ export async function voteAsPerson(
 }
 
 /**
- * A branch made (or adopted) by a person from the dashboard: what a claim
- * with into and from does, without the claim. Recorded with the person's name.
+ * Makes or adopts a branch from the dashboard, as a claim with `into` and `from` would,
+ * recorded under the person's name.
  */
 export async function makeBranch(
 	ctx: ToolContext,
@@ -1294,9 +1249,8 @@ export async function makeBranch(
 }
 
 /**
- * A person merging a change from the dashboard: the same merge an agent asks
- * for (landing with the branch's other ready changes, checked), as the change's agent,
- * stamped with the person who asked.
+ * Merges a change from the dashboard: the same batched, checked merge an agent asks for,
+ * made as the change's agent and stamped with the person who asked.
  */
 export async function mergeAsPerson(ctx: ToolContext, repo: string, change: string, person: string) {
 	if (!person.startsWith("person:")) throw new Error("[403] only a person merges from the dashboard; agents use merge");
@@ -1311,6 +1265,7 @@ export async function mergeAsPerson(ctx: ToolContext, repo: string, change: stri
 /** The roles GitHive's own reviewers take on a change: one general review, and every role that can veto. */
 export const hostedRoles = (vetoes: string[]) => [...new Set(["review", ...vetoes])];
 
+/** The audit for the dashboard. It replays every record, so it runs apart from the snapshot. */
 export async function repoAudit(ctx: ToolContext, repo: string) {
 	const { merges, violations } = await runAudit(ctx, repo);
 	const open = violations.filter((v) => !v.resolvedBy).length;
@@ -1318,7 +1273,7 @@ export async function repoAudit(ctx: ToolContext, repo: string) {
 	return { merges, open, violations };
 }
 
-/** What the dashboard shows for a repo, read from the records' tips (the audit is apart, in repoAudit). */
+/** The dashboard's view of a repo, read from the records' tips. The audit is separate (see repoAudit). */
 export async function repoSnapshot(ctx: ToolContext, repo: string) {
 	const t = ctx.timing ?? new Timing();
 	const [registry, votes] = await t.time("records", () =>
@@ -1332,7 +1287,8 @@ export async function repoSnapshot(ctx: ToolContext, repo: string) {
 			held.claims.map(async (record) => {
 				const c = presentClaim(record, projectBranch(state));
 				const { head, approval, hosted } = await changeStatus(ctx, repo, state, async () => votes.votes, c.change, c);
-				// A question for a person, until a person votes on the change's commit (or, for a waiting role's review, until the role signs it off).
+				// A question stays open until a person votes on the change's commit. For a waiting role's review,
+				// it closes once that role signs off.
 				const asked = openFlag(votes, c.change, head);
 				const flag = asked?.role && !approval.awaiting?.includes(asked.role) ? null : asked;
 				const attention = flag
@@ -1344,7 +1300,7 @@ export async function repoSnapshot(ctx: ToolContext, repo: string) {
 								at: c.active,
 							}
 						: null;
-				// What it waits on (after) that hasn't merged into the branch it lands on yet.
+				// Dependencies not yet merged into the branch this change lands on.
 				const into = c.into ?? projectBranch(state);
 				const waitsOn = (c.after ?? []).filter(
 					(dep) =>
@@ -1366,25 +1322,21 @@ export async function repoSnapshot(ctx: ToolContext, repo: string) {
 		.summarize?.(repo, {
 			open: claims.length,
 			needsYou: waiting.length,
-			waiting: waiting
-				.slice(0, 20)
-				.map((c) => ({
-					change: c.change,
-					title: c.intent.split("\n")[0].slice(0, 120),
-					reason: c.attention!.reason.slice(0, 500),
-				})),
+			waiting: waiting.slice(0, 20).map((c) => ({
+				change: c.change,
+				title: c.intent.split("\n")[0].slice(0, 120),
+				reason: c.attention!.reason.slice(0, 500),
+			})),
 			countedAt: new Date().toISOString(),
 		})
 		.catch(() => undefined);
 	return {
 		repo,
-		/** The project's branch changes merge into. */
+		/** The project's branch, which changes merge into by default. */
 		branch: projectBranch(state),
-		/** What the checks skip (see check-scope.ts). */
 		skipChecks: state.skipChecks ?? DEFAULT_SKIP_CHECKS,
-		/** Other branches' settings by pattern (see branch-rules.ts). */
 		...(state.branchRules?.length ? { branchRules: state.branchRules } : {}),
-		/** The other branches changes land on: where each started. */
+		/** Other branches that changes land on, and where each started. */
 		branches: Object.entries(state.branches ?? {}).map(([name, b]) => ({
 			name,
 			base: b.base,
@@ -1395,14 +1347,12 @@ export async function repoSnapshot(ctx: ToolContext, repo: string) {
 		verify: state.verify ?? [],
 		/** Whether records and merges are stamped with verified identity. */
 		verified: !!state.stampKey,
-		/** Claims are split into per-path shards this deep (absent: one registry), and since when and why, or whether they will be. */
+		/** Per-path shard depth for claims (absent: one registry); `sharding` says since when and why. */
 		...(state.shardDepth ? { shardDepth: state.shardDepth } : {}),
 		sharding: shardingOf(state).sharding,
-		/** How votes are kept: in one record until the load calls for buckets ("on demand"), always ("never"), or in buckets since `since`. */
+		/** "never" (one record), "on demand" (buckets once the load calls for them), or bucketed since `since`. */
 		votesSharding: votes.sharded ?? (state.autoShard || state.shardDepth ? "on demand" : "never"),
-		/** The claims in force, each with where its change stands. */
 		claims,
-		/** The latest votes, newest first. */
 		votes: votes.votes.slice(-20).reverse(),
 	};
 }
@@ -1422,7 +1372,7 @@ const WRITES = new Set([
 ]);
 const noted = new Map<string, number>();
 
-/** Run one tool, and note what it wrote in the repo's summary. */
+/** Runs one tool and notes any write in the repo's summary. */
 export async function callTool(name: string, args: Args, ctx: ToolContext): Promise<unknown> {
 	const result = await withNews(name, args, ctx, await runTool(name, args, ctx));
 	if (WRITES.has(name) && (result as { ok?: boolean } | null)?.ok !== false)
@@ -1437,7 +1387,7 @@ export async function callTool(name: string, args: Args, ctx: ToolContext): Prom
 				.summarize(repo, { lastActivity: new Date().toISOString(), ...(merged ? { mergedBy: 1 } : {}) })
 				.catch((err) => console.error(`summarizing ${repo} failed`, String(err)));
 		}
-		// A question for a person belongs in their inbox now, not when someone next opens the repo: the snapshot updates the summary's waiting list.
+		// Refresh the summary's waiting list now, so the question reaches people's inboxes at once.
 		if (name === "ask_human")
 			await repoSnapshot(ctx, repo).catch((err) => console.error(`updating ${repo}'s inbox failed`, String(err)));
 	}
@@ -1445,10 +1395,8 @@ export async function callTool(name: string, args: Args, ctx: ToolContext): Prom
 }
 
 /**
- * A reply with what landed on the project's branch since this agent was last
- * told: "main changed invoice.ts: note-7 by agent-3, add refunds", so it hears
- * of main moving without asking. Only on a reply that's an object (a list
- * stays a list), for an agent that's named, and never failing the call.
+ * Adds what landed on the project's branch since this agent was last told, so it hears of main moving
+ * without asking. Only for object replies to a named agent, and it never fails the call.
  */
 async function withNews(name: string, args: Args, ctx: ToolContext, result: unknown) {
 	const agent = ctx.agent ?? (typeof args.agent === "string" ? args.agent : undefined);
@@ -1471,7 +1419,7 @@ async function withNews(name: string, args: Args, ctx: ToolContext, result: unkn
 		: result;
 }
 
-/** How many claims are in force on a repo, read from its records alone: the repo list's count. Null before GitHive starts on it. */
+/** The number of claims in force, for the repo list; null before GitHive starts on the repo. */
 export async function openCount(ctx: ToolContext, repo: string) {
 	const state = (await recordLog<Registry>(ctx, repo, claimsRef(repo)).read())?.commit.state;
 	if (!state?.baseline) return null;
@@ -1480,19 +1428,19 @@ export async function openCount(ctx: ToolContext, repo: string) {
 
 async function runTool(name: string, args: Args, ctx: ToolContext): Promise<unknown> {
 	const repo = requiredString(args, "repo");
-	// The claims tool is advice: from the kept copy when the context keeps one, without reading the registry
-	// first (on a busy repo, every call reading the project repo is what overloads it).
+	// The claims tool is advice, so it's served from the cached copy without reading the registry:
+	// every call reading the project repo is what overloads a busy one.
 	if (name === "claims" && ctx.keptClaims) return (await ctx.keptClaims(repo, () => advice(ctx, repo))).claims;
 	const write = () => ctx.remote(repo, "write");
 	const claims = recordLog<Registry>(ctx, repo, claimsRef(repo));
 	const votes = votesFor(ctx, repo);
-	// Read once per call; only settings starting GitHive, which writes it first, reads it again.
+	// Read once per call. Only settings, when it starts GitHive, reads it again after writing it.
 	const rootHead = await claims.read();
 	const registered = rootHead?.commit.state;
 	const key = ctx.agentKey ?? (typeof args.agent_key === "string" ? args.agent_key : undefined);
 	// A signed-in agent is who its token says; otherwise an agent key names the agent.
 	const acting = ctx.agent ?? (key ? await keyAgent(registered, key) : undefined);
-	/** The agent named in `field`; a signed-in agent may leave it out. */
+	// A signed-in agent may leave its name out.
 	const agentArg = (field: string) =>
 		ctx.agent && !(typeof args[field] === "string" && args[field].trim()) ? ctx.agent : requiredString(args, field);
 	const actAs = (field: string) => {
@@ -1502,14 +1450,11 @@ async function runTool(name: string, args: Args, ctx: ToolContext): Promise<unkn
 	};
 	const stamper = await ctx.stamper?.(acting);
 	const store = storeFor(ctx, repo, registered, { log: claims, head: rootHead });
-	/** The project's branch: changes land on it unless their claim says `into` another (see branch-scope.ts). */
+	// Changes land on the project's branch unless their claim names another with `into`.
 	const branch = projectBranch(registered);
-	/** A claim as agents see it: its own paths, and the branch it lands on when not the project's. */
 	const present = <C extends ClaimRecord>(c: C) => presentClaim(c, branch);
 	let viewing: ReturnType<ClaimStore["read"]> | undefined;
-	/** The claims in force, read at most once per call. */
 	const view = () => (viewing ??= store.read().then((v) => ({ ...v, claims: v.claims.map(present) })));
-	/** The claims for advice: the kept copy when the context keeps one (see keptClaims), else read now. */
 	const adviceView = async (): Promise<ClaimsAdvice> => {
 		const read = async () => {
 			const v = await view();
@@ -1518,7 +1463,6 @@ async function runTool(name: string, args: Args, ctx: ToolContext): Promise<unkn
 		return ctx.keptClaims ? ctx.keptClaims(repo, read) : read();
 	};
 	const changes = new Map<string, ReturnType<ClaimStore["readChange"]>>();
-	/** One change's claim and releases, read at most once per call, and only from what holds them. */
 	const changeOf = (change: string) => {
 		if (!changes.has(change))
 			changes.set(
@@ -1528,7 +1472,7 @@ async function runTool(name: string, args: Args, ctx: ToolContext): Promise<unkn
 		return changes.get(change)!;
 	};
 	const claimOf = async (change: string) => (await changeOf(change)).claim;
-	/** What of `after` hasn't merged into `into` yet, each in words (none: nothing to wait for). */
+	// Each dependency in `after` not yet merged into `into`, described for the agent.
 	const waitingOn = async (after: string[], into: string) =>
 		(
 			await Promise.all(
@@ -1541,23 +1485,15 @@ async function runTool(name: string, args: Args, ctx: ToolContext): Promise<unkn
 			)
 		).filter((w): w is string => !!w);
 	const changeSource = changeSourceFor(ctx, repo);
-	/** A claim's pushed head, from its agent's fork (null: nothing pushed). */
-	// Null when nothing's pushed (no fork, or no branch on it); undefined when the read failed, which says nothing. A
-	// change claimed since forks were per agent is read once, from its agent's fork: no second read, no other fork.
+	// Null when nothing is pushed (no fork, or no branch on it); undefined when the read failed,
+	// which says nothing either way.
 	const pushedHead = (claim: ClaimRecord) =>
 		changeHead(ctx, repo, claim.agent, claim.change, claim.since).catch((err): null | undefined =>
 			statusOf(err).status === 409 ? null : undefined,
 		);
-	/**
-	 * Open changes' pushed heads: `fresh` ones read now (the caller's own), the
-	 * rest as GitHive last saw them (see knownHeads). A head a push event told
-	 * of is taken as current for HEAD_PUSHED_MS, one read for HEAD_SEEN_MS: an
-	 * agent calls check after each push, which notes it. Of those unseen or
-	 * older, a few are read each call, the least lately seen first. Read every
-	 * call, all of them, they were most of GitHive's Git requests (8 fork reads
-	 * a call of next at 200 agents), and they grow with the crowd. Without a
-	 * place to keep them, all are read.
-	 */
+	// Open changes' pushed heads: the caller's own (`fresh`) read now, the rest as last seen (see knownHeads).
+	// Reading every fork on every call dominated GitHive's Git traffic, so a call reads only a few stale
+	// heads, least recently seen first. Without knownHeads, all are read.
 	const openHeads = async (claims: ClaimRecord[], fresh: (claim: ClaimRecord) => boolean = () => false) => {
 		const known = ctx.knownHeads
 			? await ctx
@@ -1576,19 +1512,12 @@ async function runTool(name: string, args: Args, ctx: ToolContext): Promise<unkn
 			await atMost(HEAD_READS_AT_ONCE, reading, async (c) => [c.change, await pushedHead(c)] as const),
 		);
 		const seen = Object.fromEntries([...read].filter((r): r is [string, string | null] => r[1] !== undefined));
-		// As of when the reads began: a push event since then is newer than what they saw.
+		// Timestamped when the reads began, so a push event since then wins.
 		if (Object.keys(seen).length) await ctx.noteHeads?.(repo, seen, now).catch(() => undefined);
 		return (claim: ClaimRecord) => read.get(claim.change) ?? known?.[claim.change]?.head ?? null;
 	};
-	/**
-	 * The repo's open work as `agent` may see it (for reviews and backlog):
-	 * the claims in force with their pushed heads, the votes that count, what
-	 * merged, the backlog, and the changes abandoned. A change that landed at
-	 * the head it has now counts as merged, though its claim isn't released
-	 * yet (that waits for the lease to be handed on) or the claims kept for
-	 * advice still show it: offered to merge again, 80 agents of a 200-agent
-	 * run did, all at once.
-	 */
+	// The repo's open work as `agent` sees it, for reviews and backlog. A change that landed at its current
+	// head counts as merged even before its claim is released, so nobody is offered it to merge again.
 	const openWork = async (agent: string) => {
 		const [inForce, cast, backlog, landing] = await Promise.all([
 			adviceView(),
@@ -1612,7 +1541,7 @@ async function runTool(name: string, args: Args, ctx: ToolContext): Promise<unkn
 			...(stamper?.by ? { by: stamper.by } : {}),
 			...(teams.length ? { teams } : {}),
 			policy: registered?.policy ?? DEFAULT_POLICY,
-			// Each change's by the branch it lands on.
+			// Each change's policy comes from the branch it lands on.
 			policyOf: (claim: ClaimRecord) => branchSettings(registered, claim.into).policy,
 			open,
 			votes: counted,
@@ -1638,7 +1567,7 @@ async function runTool(name: string, args: Args, ctx: ToolContext): Promise<unkn
 			),
 		};
 	};
-	/** Warm the repo's Gate for a merge to come (its checks, or with none, its landing): why, and for which change or commit. */
+	// Warm the repo's Gate ahead of a likely merge: for its checks, or without any, for its landing.
 	const warmChecks = async (expect: "claimed" | "checked" | "approved", key: string) => {
 		if (registered?.baseline)
 			await ctx
@@ -1653,12 +1582,12 @@ async function runTool(name: string, args: Args, ctx: ToolContext): Promise<unkn
 	switch (name) {
 		case "settings": {
 			if (!registered?.baseline) {
-				// A repo's first settings start GitHive on it: the policy and checks, and how its claims are kept.
+				// The first settings start GitHive on the repo: policy, checks, and how claims are kept.
 				const policy = policyFrom(args, DEFAULT_POLICY);
 				const verify = args.verify === undefined ? [] : checksFrom(args.verify);
-				// Claims stay in one record until the load calls for shards, unless asked to shard now (or never: 0).
+				// Claims stay in one record until the load calls for shards, unless shard_depth says otherwise.
 				const asked = typeof args.shard_depth === "number" ? Math.max(0, Math.floor(args.shard_depth)) : undefined;
-				// Sharded claims are spread over records repos, where they can be made.
+				// Sharded claims are spread over records repos when this deployment can make them.
 				const wanted =
 					typeof args.records_repos === "number" ? Math.max(0, Math.floor(args.records_repos)) : DEFAULT_RECORDS_REPOS;
 				const spread = ctx.recordsRemote && ctx.createRecordsRepos ? wanted : 0;
@@ -1680,12 +1609,11 @@ async function runTool(name: string, args: Args, ctx: ToolContext): Promise<unkn
 					...sharding,
 				});
 				await ctx.register?.(repo);
-				// Agents' forks are made from seeds, made one at a time from now, before agents arrive.
+				// Start making seed forks now, one at a time, so agents' forks can be copied from them later.
 				await ctx.prepareForks?.(repo, "seeds").catch(() => undefined);
 				const registry = (await claims.read())?.commit.state;
-				// With checks, the repo's Gate warms up while agents start, and saves the snapshot containers start from: the
-				// first merge is minutes away, and a fresh install takes them. Without, nothing runs until an agent claims work
-				// (claim warms it then, see warmChecks): a repo nobody works in costs nothing.
+				// With checks, warm the Gate now so its install is done and snapshotted before the first merge.
+				// Without checks, the first claim warms it instead, so a repo nobody works in costs nothing.
 				if (containerChecks(registry?.verify).length)
 					await ctx
 						.warmChecks?.(repo, {
@@ -1704,7 +1632,7 @@ async function runTool(name: string, args: Args, ctx: ToolContext): Promise<unkn
 					...(warnings.length ? { warnings } : {}),
 					instructions: INSTRUCTIONS,
 				};
-				// What starting doesn't set (branch rules, skipped files, GitHub), set as on a repo GitHive has started on.
+				// Starting doesn't set branch rules, skipped files or GitHub: apply those with a second settings call.
 				const rest = (["branch_rules", "skip_checks", "github"] as const).filter((f) => args[f] !== undefined);
 				if (!rest.length) return started;
 				const more = (await runTool(
@@ -1748,7 +1676,7 @@ async function runTool(name: string, args: Args, ctx: ToolContext): Promise<unkn
 				...(stamper?.by ? { by: stamper.by } : {}),
 			});
 			const registry = (await claims.read())?.commit.state;
-			// New checks may install something new: warm the Gate for them (on Actions, it only lands).
+			// New checks may need new installs, so warm the Gate for them.
 			if (verify)
 				await ctx
 					.warmChecks?.(repo, { branch: projectBranch(registry), checks: containerChecks(verify), expect: "set up" })
@@ -1769,7 +1697,7 @@ async function runTool(name: string, args: Args, ctx: ToolContext): Promise<unkn
 			const agent = actAs("agent");
 			const state = await openWork(agent);
 			const held = ctx.reviews ? await ctx.reviews.held(repo).catch(() => ({})) : {};
-			// Reviews a role that can block has waited too long for: people hear of it (whoever looks notices; no timer).
+			// Tell people about blocking-role reviews that waited too long. It runs when someone looks; no timer.
 			if (ctx.reviews)
 				await tellPeopleOfWaitingRoles(
 					ctx,
@@ -1813,7 +1741,7 @@ async function runTool(name: string, args: Args, ctx: ToolContext): Promise<unkn
 			return added.ok ? { ok: true, id: item.id } : { ok: false, reason: added.refused };
 		}
 		case "review_access": {
-			// Anyone may review: a read-only view of the change's branch in its author's fork (or its own fork, from before forks were per agent).
+			// Anyone may review, with read-only access to the change's branch in its author's fork.
 			const change = requiredString(args, "change");
 			const { claim: held, released } = await changeOf(change);
 			const author = held?.agent ?? released.at(-1)?.agent;
@@ -1827,8 +1755,8 @@ async function runTool(name: string, args: Args, ctx: ToolContext): Promise<unkn
 			// Agent names only: a person's identity stays in the records, out of logs.
 			console.log(`review access to ${repo} ${change} (${author}) for ${acting ?? "an unregistered caller"}`);
 			const into = (await claimOf(change))?.into ?? branch;
-			// The reviewer's own mark that it's on this commit in this role, for others looking at reviews: it binds nobody,
-			// and goes once it votes, or in 15 minutes.
+			// Mark this commit and role as under review, so others see it taken. The mark binds nobody
+			// and goes when the reviewer votes, or after 15 minutes.
 			const role = typeof args.role === "string" && args.role.trim() ? args.role.trim() : "review";
 			const reviewer = acting ?? (typeof args.agent === "string" ? args.agent : undefined);
 			if (reviewer)
@@ -1858,10 +1786,9 @@ async function runTool(name: string, args: Args, ctx: ToolContext): Promise<unkn
 			const own = await claimOf(change);
 			if (!own) throw new Error(`[409] ${change} holds no claim: claim its paths first`);
 			mayActAs(own.agent, acting, registered, ctx.hosted);
-			// The agent's own fork, made on its first change and reused for the rest. Its default branch may be
-			// behind the project's, so a new change starts from the project, read with `project`.
+			// One fork serves all the agent's changes. Its default branch may lag the project's, so a new change
+			// starts from the project's branch, which `project` gives read access to.
 			const [remote, project] = await Promise.all([changeSource(own.agent, "write"), ctx.remote(repo, "read")]);
-			// The branch the change lands on: the project's, or the one its claim names.
 			const into = own.into ?? branch;
 			return {
 				url: remote.url,
@@ -1877,7 +1804,7 @@ async function runTool(name: string, args: Args, ctx: ToolContext): Promise<unkn
 		case "claim": {
 			const change = requiredString(args, "change");
 			const agent = actAs("agent");
-			// A whole branch merged into the one the change lands on: its tip is the change, its diff the claim (see branchMerge).
+			// With `source`, the change merges a whole branch, claiming what it changed (see branchMerge).
 			const source = typeof args.source === "string" && args.source.trim() ? args.source.trim() : undefined;
 			const given = source ? [] : normalizeClaim(requiredPaths(args, "paths"));
 			const reserved = given.find(isReservedPath);
@@ -1905,7 +1832,7 @@ async function runTool(name: string, args: Args, ctx: ToolContext): Promise<unkn
 			const paths = merging ? merging.paths : given;
 			const after = changeList(args.after, "after");
 			if (after.includes(change)) throw new Error(`[400] ${change} can't wait on itself`);
-			// A loop would leave every change in it waiting forever: refused.
+			// Refuse a dependency loop, which would leave every change in it waiting forever.
 			const loop = after.length
 				? await dependencyLoop(change, after, async (dep) => (await claimOf(dep))?.after ?? [])
 				: undefined;
@@ -1921,10 +1848,10 @@ async function runTool(name: string, args: Args, ctx: ToolContext): Promise<unkn
 				staleAfterMs: STALE_AFTER_MS,
 				abandoned: abandonedRule(ctx, repo, registered, votes),
 			};
-			// Busy enough that one record would hold agents up: shard first, then claim in the shards.
+			// If one record would hold agents up, shard first, then claim in the shards.
 			const sharded = await shardIfBusy(ctx, repo, claims, registered, input.agent);
 			const outcome = await (sharded ? storeFor(ctx, repo, sharded) : store).claim(input, stamper);
-			// Conflicts name paths as agents gave them; a claim into another branch says so.
+			// Report conflicting paths as agents wrote them, without the branch scoping.
 			const conflicts = outcome.ok
 				? undefined
 				: outcome.conflicts.map((c) => ({
@@ -1932,11 +1859,10 @@ async function runTool(name: string, args: Args, ctx: ToolContext): Promise<unkn
 						path: presentClaim({ paths: [c.path] }, branch).paths[0],
 						held: presentClaim({ paths: [c.held] }, branch).paths[0],
 					}));
-			// Claimed: the source's tip becomes the change's branch in the agent's fork, for review, check and merge like any change.
+			// Once claimed, the source's tip becomes the change's branch in the agent's fork.
 			if (outcome.ok && merging) await merging.push(await changeSource(agent, "write"), change);
-			// Without checks in containers, the repo's Gate lands it in a few minutes: warmed from now. Warmed only at its check,
-			// the first batch of 200 agents' run read 3 changes in 61 s, behind the Gate starting cold. (With checks, a claim is
-			// too early to install for: they warm at the check.)
+			// Without container checks, the Gate lands the change within minutes, so warm it from the claim. A cold
+			// Gate holds up the first batch. With checks, a claim is too early to install for; they warm at the check.
 			if (outcome.ok && !containerChecks(registered?.verify).length) await warmChecks("claimed", change);
 			const merged = merging
 				? {
@@ -1946,7 +1872,7 @@ async function runTool(name: string, args: Args, ctx: ToolContext): Promise<unkn
 						note: `${change} merges ${source} at ${merging.tip.slice(0, 8)} into ${into}: its branch changes/${change} is that commit, in your fork. Get it reviewed, check and merge it like any change. If ${source} moves on, claim again to bring the change up to its new tip (a new head, so a new review).`,
 					}
 				: {};
-			// Refused, and part of it couldn't be backed out: the agent's to free, by releasing the change.
+			// A refused claim that couldn't be fully backed out still holds paths: releasing the change frees them.
 			const stuck =
 				!outcome.ok && outcome.stillHeld?.length
 					? {
@@ -1965,7 +1891,7 @@ async function runTool(name: string, args: Args, ctx: ToolContext): Promise<unkn
 		case "release": {
 			const change = requiredString(args, "change");
 			const agent = actAs("agent");
-			// Only its own agent gives a claim up; another's is released only as stale, once its agent has abandoned it.
+			// Only a claim's agent may release it; anyone else may release it only as stale, once abandoned.
 			const held = args.stale === true ? null : await claimOf(change);
 			if (held && held.agent !== agent)
 				throw new Error(
@@ -1990,7 +1916,7 @@ async function runTool(name: string, args: Args, ctx: ToolContext): Promise<unkn
 			const verdict = requiredString(args, "verdict");
 			if (verdict !== "approve" && verdict !== "reject") throw new Error("[400] verdict is approve or reject");
 			const reviewer = actAs("reviewer");
-			// Busy enough that one record would hold reviewers up: shard the votes first.
+			// If one record would hold reviewers up, shard the votes first.
 			const commit = requiredString(args, "commit");
 			const teams = (await ctx.teamsOf?.(repo)) ?? [];
 			const cast = await votesFor(ctx, repo, await shardVotesIfBusy(ctx, repo, registered, reviewer)).vote(
@@ -2004,7 +1930,7 @@ async function runTool(name: string, args: Args, ctx: ToolContext): Promise<unkn
 				},
 				stamper,
 			);
-			// Its review is done: the hold review_access marked goes.
+			// The review is done, so drop the hold review_access placed.
 			await ctx.reviews?.release(repo, holdKey(commit, requiredString(args, "role")), reviewer).catch(() => undefined);
 			if (verdict === "approve") await warmChecks("approved", commit);
 			return cast;
@@ -2012,18 +1938,18 @@ async function runTool(name: string, args: Args, ctx: ToolContext): Promise<unkn
 		case "merge": {
 			// mergeChange reads the claims again itself, when it checks them.
 			const registry = registered;
-			// Anyone may merge a change whose conventions hold; it merges as its claim's agent, and the stamp says who asked.
+			// Anyone may merge a change whose conventions hold. It merges as its agent; the stamp says who asked.
 			const change = requiredString(args, "change");
 			const own = await claimOf(change);
 			const holder = own?.agent;
 			if (holder && holder !== agentArg("agent"))
 				throw new Error(`[409] ${change} is ${holder}'s change: merge it as ${holder}`);
-			// Onto the branch its claim names, with every other change ready to land there.
+			// It lands on the branch its claim names, together with every other change ready there.
 			const into = own?.into ?? branch;
-			// Not before what it depends on has merged into that same branch.
+			// Not before its dependencies have merged into that same branch.
 			const waits = await waitingOn(own?.after ?? [], into);
 			if (waits.length) return { ok: false, reasons: waits };
-			// Checks on GitHub Actions, and main pushed back to GitHub after every landing, for a repo connected to one.
+			// A repo connected to GitHub may run its checks on Actions, and gets main pushed back after each landing.
 			const checksHere = branchSettings(registry, into).verify;
 			const link =
 				registry?.github && ctx.github
@@ -2039,8 +1965,8 @@ async function runTool(name: string, args: Args, ctx: ToolContext): Promise<unkn
 					],
 				};
 			const project = await write();
-			// The repo's Gate (a container, real git) lands every batch, checks or not, and does its GitHub pushes. A batch's
-			// changes are read through Artifacts' API, here, the Gate reading only those it can't place (see artifactsInspect).
+			// The repo's Gate (a container running real git) lands every batch and does its GitHub pushes. Changes are
+			// read through Artifacts' API here; the Gate reads only those it can't place (see artifactsInspect).
 			const gate = ctx.batchGit
 				? ctx.batchGit(repo)
 				: fail(503, "GitHive can't land changes here: no Gate is set up to land them");
@@ -2051,7 +1977,6 @@ async function runTool(name: string, args: Args, ctx: ToolContext): Promise<unkn
 				...(into !== branch ? { scope: (file: string) => scopeFile(file, into, branch) } : {}),
 				store,
 				votes,
-				// The branch's settings: the repo's, with what a branch rule changes.
 				policy: branchSettings(registry, into).policy,
 				verify: branchSettings(registry, into).verify,
 				...(registry?.skipChecks ? { skipChecks: registry.skipChecks } : {}),
@@ -2062,10 +1987,10 @@ async function runTool(name: string, args: Args, ctx: ToolContext): Promise<unkn
 				...(ctx.history ? { history: ctx.history } : {}),
 				...(ctx.prepareLanding ? { prepareLanding: () => ctx.prepareLanding!(repo) } : {}),
 				...(ctx.prepareChecks && !onActions(checksHere) ? { prepareChecks: ctx.prepareChecks(repo) } : {}),
-				// The project's branch, landed, pushed back to GitHub (a fast-forward; refused if someone pushed there directly).
+				// Push the landed branch back to GitHub as a fast-forward, refused if someone pushed there directly.
 				...(link && into === branch ? { afterLanding: (commit: string) => mirrorTo(gate, link, into, commit) } : {}),
-				// The other changes into the branch, as kept a moment (the batch checks each again): claims in force whose
-				// dependencies have merged, with their heads.
+				// Other changes ready for this branch, from the cached advice: claims in force whose dependencies
+				// have merged. The batch checks each again before landing.
 				others: async (): Promise<Candidate[]> => {
 					const inForce = await adviceView();
 					const merged = new Set(inForce.merged);
@@ -2159,8 +2084,8 @@ async function runTool(name: string, args: Args, ctx: ToolContext): Promise<unkn
 				held ?? undefined,
 				held?.agent ?? released?.agent,
 			);
-			// Landed at the head it has now, though its claim isn't released yet (that waits for the lease to be handed on):
-			// said, so its agent doesn't merge it again (80 agents of a 200-agent run did, all at once).
+			// A change can land before its claim is released (that waits for the lease to be handed on).
+			// Report it, so its agent doesn't try to merge it again.
 			const landed =
 				held && status.head
 					? (
@@ -2194,7 +2119,7 @@ async function runTool(name: string, args: Args, ctx: ToolContext): Promise<unkn
 				...(ctx.branchHead ? { branchHead: () => ctx.branchHead!(repo, into) } : {}),
 				...(ctx.history ? { history: ctx.history } : {}),
 			});
-			// In conflict with the branch: who changed each file last, as the landing recalls.
+			// On a conflict, name who last changed each file, as the landing remembers it.
 			const conflicting = checked.main.clean ? [] : (checked.main.conflicts ?? []);
 			const causes =
 				conflicting.length && ctx.landing
@@ -2208,9 +2133,9 @@ async function runTool(name: string, args: Args, ctx: ToolContext): Promise<unkn
 							conflicting,
 						)
 					: [];
-			// The head just read, for reviews, backlog and merge to take as current (see openHeads): agents check after each push.
+			// Agents check after each push, so note this head for reviews, backlog and merge (see openHeads).
 			await ctx.noteHeads?.(repo, { [change]: checked.head }).catch(() => undefined);
-			// Pushed and checked: a merge is likely within minutes, so its check container warms up meanwhile.
+			// A merge is likely within minutes of a check, so warm the check container now.
 			await warmChecks("checked", change);
 			return causes.length ? { ...checked, causes } : checked;
 		}
@@ -2260,7 +2185,7 @@ async function runTool(name: string, args: Args, ctx: ToolContext): Promise<unkn
 				stamper,
 			);
 			if (!outcome.ok) throw new Error(`[409] ${outcome.refused}`);
-			// Its fork, made in the background now rather than in a crowd on its first push.
+			// Queue its fork now, rather than making it on its first push alongside everyone else's.
 			await ctx.prepareForks?.(repo, [agent]).catch(() => undefined);
 			return { agent, key: newKey, note: note.replace("each key", "this key") };
 		}

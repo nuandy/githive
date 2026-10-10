@@ -166,9 +166,8 @@ describe("sharded claims", { timeout: 60_000 }, () => {
 });
 
 describe("sharded claims across records repos", { timeout: 60_000 }, () => {
-	// Artifacts takes one push at a time per repo, so past about a hundred agents
-	// the shards are spread over several small records repos, by a hash of each
-	// shard: pushes to different records repos run side by side.
+	// Artifacts takes one push at a time per repo, so with many agents the shards are spread over several small
+	// records repos by a hash of each shard. Pushes to different records repos run side by side.
 	const records = (k: number) => server.repo(`rec-${k}`);
 	const spread = () =>
 		claimStore({

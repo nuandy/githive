@@ -22,7 +22,7 @@ const git = (...args: string[]) =>
 beforeEach(async () => {
 	server = await startGitServer();
 	work = mkdtempSync(join(tmpdir(), "shallow-"));
-	// Build the history by path: git over HTTP would wait on this process's own server.
+	// Build the history by path, because git over HTTP would wait on this process's own server.
 	const repos = join(server.git("rev-parse", "--absolute-git-dir").trim(), "..");
 	execFileSync("git", ["clone", "--quiet", join(repos, "project.git"), work]);
 	for (let i = 0; i < 40; i++) {

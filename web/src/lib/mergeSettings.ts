@@ -35,7 +35,10 @@ export function splitList(text: string): string[] {
 	];
 }
 
-/** The form's fields from the settings; what the checks skip, the server's defaults when it didn't say (so a save never turns skipping off unasked). */
+/**
+ * The form's fields from the settings. When the server doesn't say what the checks skip, its defaults fill in,
+ * so a save never turns skipping off unasked.
+ */
 export function draftFrom(policy: Policy, verify: string[], skipChecks: string[] = DEFAULT_SKIP_CHECKS): MergeDraft {
 	return {
 		skipChecks: skipChecks.join("\n"),

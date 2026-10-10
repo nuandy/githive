@@ -19,56 +19,46 @@ import { staysInRepo } from "./paths";
 
 export { WORKDIR, clip };
 
-// Base for GitHive's hosted agents, which work in their own Linux container
-// on a clone of one change: builders and reviewers. It owns the container
-// lifecycle, the alarm-driven agent loop, and the tools every such agent
-// needs. What only builders do (guarding pushes) is in builder.ts, behind the
-// hooks below.
-//
-// The loop runs from alarms in RUN_BUDGET_MS slices and keeps the conversation
-// on OpenAI's side (previous_response_id), so long runs survive across alarm
-// invocations. Git credentials never enter the container's files or
-// environment: the token is passed only on the git commands run here.
+// Base class for hosted agents (builders and reviewers), each working in its own container
+// on a clone of one change. The loop runs from alarms in RUN_BUDGET_MS slices and keeps the
+// conversation on OpenAI's side, so long runs survive across alarms.
 
 export const RUN_BUDGET_MS = 8 * 60_000; // per alarm, well under the alarm wall-clock limit
 const MAX_TURNS = 80;
 const MAX_NUDGES = 3;
 const MAX_LINES = 400;
 const LOG_LIMIT = 200;
-/** Storage keys: the turn running now (its token, and when it started), and messages waiting for the next turn. */
+/** Storage keys for the running turn and for messages waiting for the next turn. */
 export const TURN_IN_FLIGHT = "sandbox-turn-in-flight";
 export const TURN_STARTED = "sandbox-turn-started-at";
 export const INBOX = "inbox";
 
-/** Facts every agent prompt should state about the environment. */
 export const ENVIRONMENT = `The repository is checked out at ${WORKDIR} in a Linux container with Node.js 24, npm and git, plus whichever of these the repository uses: Python 3 with uv (a virtualenv at /opt/venv is active: python, pip and uv pip install into it; uv sync installs the project), Go (go mod download), and Rust with cargo, clippy and rustfmt (cargo fetch). Dependencies may already be installed from the project's main branch; install them again if the change touches what they come from (package.json, a lockfile, pyproject.toml, go.mod, Cargo.toml...). Commands time out after ${COMMAND_TIMEOUT_S} seconds.`;
 
 export interface SandboxJob {
-	/** The agent's own name, for prompt caching: <project>--<change>, say. */
+	/** The agent's own name, such as <project>--<change>. It keys the prompt cache. */
 	repo: string;
 	remote: string;
 	token: string;
 }
 
-/** A job about one change: what builders and reviewers share. */
+/** A job about one change, shared by builders and reviewers. */
 export interface ChangeJob extends SandboxJob {
-	/** The project repo the change merges into, its branch (main, master, ...) and its checks. */
+	/** The project repo the change merges into. */
 	project: string;
 	branch: string;
 	verify: string[];
 	change: string;
-	/** The change's own branch in its author's fork: changes/<change>. */
+	/** The change's branch in its author's fork. */
 	ref: string;
-	/** Its claim's agent, as the records name it. */
 	agent: string;
 	intent: string;
-	/** Its claim: the only paths it may change. */
+	/** The only paths the change may touch. */
 	claim: string[];
-	/** The other claims in force. */
 	others: { change: string; claim: string[] }[];
 }
 
-/** The change's place in the repo, stated the same way to every agent. */
+/** The change's context, worded the same way for every agent. */
 export function changeContext(job: ChangeJob) {
 	return `Change: ${job.change}. What it should do: ${job.intent}
 Its claim (the only paths this change may touch): ${job.claim.join(", ")}
@@ -82,13 +72,12 @@ export interface AgentState {
 	startedAt: string;
 	finishedAt?: string;
 	turns: number;
-	/** `turns` when the current run started; each run (a revision) gets its own budget. */
+	/** `turns` when the current run started, since each revision gets its own turn budget. */
 	turnsAtRunStart?: number;
 	toolCalls: number;
 	nudges: number;
 	usage: Usage;
 	error?: string;
-	/** Most recent events, newest last. */
 	log: { at: string; event: string }[];
 	previousResponseId?: string;
 	pending?: ResponseInputItem[];
@@ -109,7 +98,7 @@ const RunArgs = z.strictObject({
 
 const MAX_CACHE_KEY = 64;
 
-/** OpenAI's prompt_cache_key for an agent: `<kind>-<repo>`, cut to 64 characters with a hash of the whole when longer. */
+/** OpenAI's prompt_cache_key for an agent, shortened with a hash suffix past 64 characters. */
 export function promptCacheKey(kind: string, repo: string) {
 	const key = `${kind}-${repo}`;
 	if (key.length <= MAX_CACHE_KEY) return key;
@@ -136,27 +125,22 @@ export abstract class SandboxAgent<J extends SandboxJob, S extends AgentState> e
 		return next;
 	}
 
-	/** Short name for logs and prompt-cache keys, e.g. "builder". */
 	protected abstract readonly kind: string;
 	protected abstract instructions(job: J): string;
 	protected abstract tools(job: J, state: S): AgentTool[];
-	/** First user message of the conversation. */
 	protected abstract kickoff(job: J): string;
 	/** Sent when the model answers in text instead of finishing. */
 	protected abstract nudge(job: J): string;
-	/** Fields a subclass adds to a fresh state. */
 	protected abstract freshFields(): Omit<S, keyof AgentState>;
-	/** Runs after each clone, in WORKDIR. */
 	protected abstract afterClone(job: J, state: S): Promise<void>;
 	/** Why a run_command must not run, if it must not. */
 	protected commandRefusal(_command: string, _state: S): string | undefined {
 		return undefined;
 	}
-	/** Storage keys a fresh start clears. */
 	protected staleKeys(): string[] {
 		return ["cancel", INBOX, TURN_IN_FLIGHT, TURN_STARTED];
 	}
-	/** Runs once when the agent fails; for example, to give its claim back. */
+	/** Runs once when the agent fails, for example to give its claim back. */
 	protected async onFailed(_job: J, _state: S): Promise<void> {}
 
 	protected async load() {
@@ -195,9 +179,8 @@ export abstract class SandboxAgent<J extends SandboxJob, S extends AgentState> e
 	}
 
 	/**
-	 * Ask a queued or working agent to stop. Cooperative: the agent loop holds its
-	 * state in memory, so it checks this flag before each turn rather than having
-	 * its state overwritten underneath it.
+	 * Ask a queued or working agent to stop. The loop holds its state in memory, so it
+	 * checks this flag before each turn rather than having its state overwritten.
 	 */
 	async cancel(reason: string) {
 		const { state } = await this.load();
@@ -206,10 +189,7 @@ export abstract class SandboxAgent<J extends SandboxJob, S extends AgentState> e
 		return true;
 	}
 
-	/**
-	 * Leave a message for a running agent; it reads it at its next turn. Returns
-	 * false when the agent isn't running, so the caller can handle that case.
-	 */
+	/** Leave a message for the agent's next turn. Returns false when the agent isn't running. */
 	async notify(message: string) {
 		return this.lifecycle(async () => {
 			const { state } = await this.load();
@@ -242,7 +222,7 @@ export abstract class SandboxAgent<J extends SandboxJob, S extends AgentState> e
 		return true;
 	}
 
-	/** Public view: everything except the conversation plumbing. */
+	/** The state without the conversation plumbing. */
 	protected view(state: S) {
 		const { previousResponseId: _id, pending: _pending, ...rest } = state;
 		return rest;
@@ -258,7 +238,7 @@ export abstract class SandboxAgent<J extends SandboxJob, S extends AgentState> e
 		if (!job || !state) return;
 		if (state.status !== "queued" && state.status !== "working") return;
 		if (state.status === "working" && (await this.ctx.storage.get(TURN_IN_FLIGHT))) {
-			// A turn may still be running in an earlier alarm; wait for it unless it is long overdue.
+			// A turn may still be running in an earlier alarm. Wait for it unless it is long overdue.
 			const started = await this.ctx.storage.get<number>(TURN_STARTED);
 			if (started && Date.now() - started < RUN_BUDGET_MS + 30_000) {
 				await this.ctx.storage.setAlarm(Date.now() + 60_000);
@@ -306,7 +286,7 @@ export abstract class SandboxAgent<J extends SandboxJob, S extends AgentState> e
 		if ((state.status as string) === "failed") await this.onFailed(job, state).catch(() => {});
 	}
 
-	/** Once a turn is saved: apply what arrived during it. */
+	/** Runs after a turn is saved, to apply anything that arrived during it. */
 	protected async afterTurn(_job: J, state: S, turnToken: string) {
 		await this.lifecycle(async () => {
 			await this.save(state);
@@ -325,28 +305,27 @@ export abstract class SandboxAgent<J extends SandboxJob, S extends AgentState> e
 		if (!container) throw new Error(`no container is configured for ${this.kind}`);
 		const restart = state.status === "working";
 		this.note(state, restart ? "container restarted; re-cloning" : "starting container");
-		// The project's snapshot, when it has one: its checkout with main's dependencies installed, in seconds.
 		const project = (job as Partial<ChangeJob>).project;
 		const snapshot = project
 			? await rpc(this.env.GATE.getByName(`repo:${project}`).snapshot()).catch(() => null)
 			: null;
 		const booted = await bootContainer(container, "standard-1", snapshot);
 		if (booted === "restored") {
-			// Its checkout, pointed at this job's remote; afterClone fetches what the job needs from it.
+			// Point the snapshot's checkout at this job's remote. afterClone fetches what the job needs.
 			const reset = await run(container, ["bash", "-c", "git checkout -q -f --detach && git clean -fdq"]);
 			const pointed = await run(container, ["git", "remote", "set-url", "origin", job.remote]);
 			if (reset.exitCode !== 0 || pointed.exitCode !== 0)
 				throw new Error(`setting up the snapshot's checkout failed: ${clip(reset.output + pointed.output, 2_000)}`);
 			this.note(state, "started from the project's snapshot");
 		} else {
-			// A container that outlived its object (a deploy, say) still has the last checkout.
+			// A container that outlived its object, for example across a deploy, still has the last checkout.
 			await run(container, ["rm", "-rf", WORKDIR], "/");
 			const clone = await this.git(job, ["clone", "--quiet", job.remote, WORKDIR], "/");
 			if (clone.exitCode !== 0) throw new Error(`clone failed: ${clip(clone.output, 2_000)}`);
 			this.note(state, "repository cloned");
 		}
 		await this.afterClone(job, state);
-		// Toolchains the checkout uses beyond Node; a failed install is noted, and the agent sees the missing tool for itself.
+		// A failed install is only noted. The agent will find the missing tool for itself.
 		for (const installed of await installToolchains(container))
 			this.note(
 				state,
@@ -368,12 +347,10 @@ export abstract class SandboxAgent<J extends SandboxJob, S extends AgentState> e
 		return run(this.ctx.container!, cmd, cwd, stdin);
 	}
 
-	/** Run git with a token (the job's, by default) on this one command only. */
 	protected async git(job: J, args: string[], cwd = WORKDIR, token = job.token) {
 		return gitWithToken(this.ctx.container!, token, args, cwd);
 	}
 
-	/** Tools every container agent gets: explore, edit and run commands. */
 	protected baseTools(state: S): AgentTool[] {
 		return [
 			tool({

@@ -40,7 +40,7 @@ function identify(claims: AccessJwtClaims): AccessIdentity | null {
 	const serviceName = usableString(claims.common_name);
 	if (serviceName) return { kind: "service", value: serviceName };
 
-	// A person's browser session is also an "app" token, with their email: a person, then.
+	// A person's browser session is also an "app" token, but it carries their email.
 	const email = usableString(claims.email);
 	if (email) return { kind: "person", value: email };
 

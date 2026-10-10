@@ -22,7 +22,7 @@ import "./AgentsPage.css";
 
 type User = Extract<Me, { kind: "user" }>;
 
-/** What the page does: each call resolves once the server agrees, or throws its error. */
+/** What the page does. Each call resolves once the server agrees, or throws its error. */
 export interface AgentActions {
 	createAgent(name: string): Promise<unknown>;
 	revokeAgent(id: string): Promise<unknown>;
@@ -85,7 +85,7 @@ function rememberClient(client: McpClient) {
 	try {
 		localStorage.setItem(CLIENT_KEY, client);
 	} catch {
-		// Only a convenience: without storage the choice lasts as long as the page.
+		// Only a convenience. Without storage, the choice lasts as long as the page.
 	}
 }
 

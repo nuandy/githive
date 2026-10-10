@@ -1,9 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 import { FakeStorage } from "./fakes/env";
 
-// The Gate, without real containers: the repo's own Gate warms on main to
-// keep the repo's snapshot, a change's Gate runs its checks, and each stops
-// its container once nothing needs it.
+// The Gate, without real containers. The repo's own Gate warms on main to keep
+// the repo's snapshot, a change's Gate runs its checks, and each stops its
+// container once nothing needs it.
 
 const { Gate } = await import("../src/gate");
 
@@ -161,7 +161,7 @@ describe("a repo's snapshot", () => {
 			expect.objectContaining({ containerSnapshot: { id: "s1" } }),
 			expect.objectContaining({ containerSnapshot: { id: "s1" } }),
 		]);
-		// Lost twice: the image.
+		// Lost twice, so it falls back to the image.
 		const gone = fakeContainer();
 		gone.exec = async (cmd: string[]) => {
 			if (cmd.join(" ").includes("command -v git"))
@@ -178,7 +178,8 @@ describe("a repo's snapshot", () => {
 		const restored = fakeContainer();
 		expect(await bootContainer(restored as never, "small", snapshot)).toBe("restored");
 		expect(restored.starts).toEqual([expect.objectContaining({ containerSnapshot: { id: "s1" } })]);
-		// Started without its checkout (expired, say): destroyed, and started from the image with git installed.
+		// A container started without its checkout, for example because it expired, is destroyed and started again
+		// from the image with git installed.
 		const unusable = fakeContainer((cmd) => cmd.join(" ").includes("command -v git"));
 		expect(await bootContainer(unusable as never, "small", snapshot)).toBe("fresh");
 		expect(unusable.destroy).toHaveBeenCalledOnce();

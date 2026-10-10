@@ -1,51 +1,41 @@
 #!/usr/bin/env node
-// Run scripted outside agents on a repo, all at once, the way
-// users would: they send agents, not a team of builders and reviewers. Every
-// agent is the same, and chooses its own work from what it sees: its own
-// changes first (status: revise one sent back, merge one approved, finish one
-// with nothing pushed), then a review it may give (reviews), then a piece of
-// the backlog (backlog), each list's first, else it waits a moment.
-// Building a piece of the backlog, it claims, clones the project, takes its
-// time over the piece's scripted edit, pushes to its fork and checks; it
-// recovers as an agent would (extends its claim when a file falls outside
-// it, merges the project's branch in on a conflict). Reviewing, it gets the
-// change through GitHive (review_access), takes its time, runs the
-// tests and votes by their exit code, in the role reviews names. Sent
-// back, it applies the piece's fix, or asks a person. Approved, it merges. Nothing waits on anything but the protocol. Prints each step as it
-// happens, then a timeline per piece of work, what each agent did, and the
-// audit.
+// Runs scripted outside agents on a repo at once, the way users send agents.
+// Every agent is alike and picks its own work: first its own changes (revise,
+// merge or finish), then a review it may give, then a backlog piece. A builder
+// claims, clones, edits, pushes to its fork and checks, and recovers as a real
+// agent would. A reviewer runs the tests and votes by their exit code. Prints
+// each step, then a timeline per piece, each agent's work and the audit.
 //
 //   node scripts/swarm.mjs <plan.json> [--base URL] [--speed N] [--setup-only]
 //
-// The plan (paths in it are relative to the plan's own directory):
+// The plan (paths are relative to the plan's directory):
 //   {
 //     "repo": "express",
-//     "work": "swarm-work",                  where clones go (emptied first)
-//     "test": "npm test",                    what reviewers run on each commit (optional)
+//     "work": "swarm-work",                   where clones go (emptied first)
+//     "test": "npm test",                     what reviewers run (optional)
 //     "nodeModules": "upstream/node_modules", linked into each reviewer's checkout (optional)
-//     "seed": 7,                             for the random timings, so a run can be repeated
+//     "seed": 7,                              seeds the random timings
 //     "timing": { "arrive": [0, 120], "edit": [30, 180], "fix": [30, 120], "review": [20, 90] },
-//                                           seconds, each a [min, max] range (--speed N divides them)
-//     "agents": [{ "agent": "agent-1", "keyFile": "keys/agent-1.key" }],   all alike
+//                                             [min, max] seconds; --speed N divides them
+//     "agents": [{ "agent": "agent-1", "keyFile": "keys/agent-1.key" }],
 //     "planner": { "agent": "planner", "keyFile": "keys/planner.key" },    adds the backlog
 //     "backlog": [{ "id": "const-lib", "title": "...", "intent": "...", "paths": ["lib/"],
 //                   "edit": "node $PLAN/edits/const-requires.mjs . lib", "message": "commit message",
-//                   "fix": "node $PLAN/edits/fix.mjs .",   what its builder does about a rejection (optional)
-//                   "onReject": "fix" | "ask" | "stop",     default: fix if it has one, else stop
-//                   "rejectFirst": "what to change" }],     the first review of it asks for changes (optional)
+//                   "fix": "node $PLAN/edits/fix.mjs .",    run on a rejection (optional)
+//                   "onReject": "fix" | "ask" | "stop",     default: fix if there is one, else stop
+//                   "rejectFirst": "what to change" }],     first review asks for changes (optional)
 //     "setup": { "import": "https://github.com/expressjs/express", "branch": "master",
-//                "template": "express-template",   imported once; each run's repo is a copy of it (seconds, not a minute)
+//                "template": "express-template",   imported once; each run copies it
 //                "verify": ["npm install", "npm test"], "required": 1,
 //                "grants": { "security": ["agent-3"] },
-//                "shardDepth": 2 }                  optional: shard the claims from the start; make the repo first
+//                "shardDepth": 2 }                  shard the claims from the start (optional)
 //   }
 //
-// Agents whose keyFile doesn't exist yet are registered first (register),
-// the key written to that file: each needs its own identity, or their votes
-// count as one and an author's reviewers as the author. A piece's edit and fix
-// run in its builder's clone, with $PLAN set to the plan's directory. --base
-// defaults to the bench Worker. Access credentials come from .dev.vars.
-// Tokens and keys are never printed.
+// Agents without a key file are registered first and the key is written there.
+// Each needs its own identity so votes count separately. Edits and fixes run in
+// the builder's clone with $PLAN set to the plan's directory. --base defaults
+// to the bench Worker; Access credentials come from .dev.vars. Tokens and keys
+// are never printed.
 
 import { execFile } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
@@ -74,7 +64,7 @@ const access = {
 	"CF-Access-Client-Id": vars.CF_ACCESS_CLIENT_ID,
 	"CF-Access-Client-Secret": vars.CF_ACCESS_CLIENT_SECRET,
 };
-// A merge can wait for its batch for minutes: no client-side timeouts.
+// A merge can wait minutes for its batch, so there are no client-side timeouts.
 const patient = new Agent({ headersTimeout: 0, bodyTimeout: 0 });
 /** The whole run gives up after this long. */
 const RUN_LIMIT_MS = 60 * 60_000;
@@ -84,7 +74,7 @@ const clock = () => `${((Date.now() - started) / 1000).toFixed(0).padStart(4)}s`
 const say = (who, text) => console.log(`${clock()}  ${who.padEnd(12)} ${text}`);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-// Seeded timings (mulberry32): the same plan and seed wait about the same way.
+// Seeded timings (mulberry32), so the same plan and seed can be repeated.
 let seed = plan.seed ?? 1;
 const random = () => {
 	seed = (seed + 0x6d2b79f5) | 0;
@@ -99,7 +89,7 @@ const draw = (step) => {
 	return ((min + random() * (max - min)) * 1000) / speed;
 };
 
-/** How often a call whose connection dropped is tried, in all. */
+/** Attempts for a call whose connection dropped. */
 const CALL_TRIES = 4;
 
 async function tool(name, toolArgs, keyFile) {
@@ -116,8 +106,8 @@ async function tool(name, toolArgs, keyFile) {
 				params: { name, arguments: { repo: plan.repo, ...toolArgs } },
 			}),
 		});
-	// A dropped connection (a reset, say) is tried again: one killed a 200-agent run while it filed its backlog. Only the
-	// network's failures (fetch throws a TypeError), never GitHive's answers; the calls a run makes are safe to repeat.
+	// Retry only network failures (fetch throws a TypeError), never GitHive's answers.
+	// Every call this script makes is safe to repeat.
 	let response;
 	for (let attempt = 1; ; attempt++) {
 		try {
@@ -139,10 +129,8 @@ async function tool(name, toolArgs, keyFile) {
 const sh = (cwd, command) =>
 	run("bash", ["-lc", command], { cwd, maxBuffer: 64 * 1024 * 1024, env: { ...process.env, PLAN: here } });
 /**
- * Git's network work (and the helper's clones), at most NETWORK_AT_ONCE at
- * once on this machine, each tried again on a local network failure: 200
- * agents' Git at once ran out this machine's DNS ("Could not resolve host",
- * 12 builds of a run), which says nothing about GitHive.
+ * Limits concurrent network Git on this machine and retries local network
+ * failures. Too many at once exhausts local DNS, which says nothing about GitHive.
  */
 const NETWORK_AT_ONCE = 32;
 const NETWORK_TRIES = 3;
@@ -182,13 +170,13 @@ mkdirSync(work, { recursive: true });
 let branch = plan.setup?.branch ?? "main";
 
 const pieces = new Map(plan.backlog.map((p) => [p.id, p]));
-/** Each piece's timeline: when each step happened, who did what, what it ran into. */
+/** Each piece's timeline: when each step happened, who did it and what went wrong. */
 const timeline = new Map(plan.backlog.map((p) => [p.id, { heads: [], reviews: [], events: [] }]));
 const mark = (id, step) => (timeline.get(id)[step] ??= Date.now() - started);
 const note = (id, event) => timeline.get(id).events.push(event);
-/** What each agent did. */
+/** What each agent did, by kind of step. */
 const did = new Map(plan.agents.map((a) => [a.agent, { build: 0, review: 0, revise: 0, merge: 0, wait: 0 }]));
-/** Pieces whose first review has asked for changes already (rejectFirst happens once). */
+/** Pieces whose rejectFirst review has already happened. */
 const askedOnce = new Set();
 /** Pieces settled for this run: merged, waiting on a person, or stopped. */
 const settled = new Map();
@@ -198,10 +186,8 @@ const settlePiece = (id, outcome) => {
 };
 const allSettled = () => plan.backlog.every((p) => settled.has(p.id));
 /**
- * Pieces that landed in another merge's batch: a merge lands every approved
- * change into the branch, so a piece's own agent may never be told to merge
- * it. Read from what the repo's landing says changes came to, every few
- * seconds at most.
+ * Settles pieces that landed in another merge's batch. A merge lands every
+ * approved change, so a piece's own agent may never be told to merge it.
  */
 let landingsReadAt = 0;
 async function settleLanded() {
@@ -240,7 +226,7 @@ function agentFor(spec) {
 		timeline.get(id).heads.push(head);
 		say(name, `pushed ${id} ${head.slice(0, 7)}: ${stat.trim().split("\n").at(-1).trim()}`);
 	};
-	/** The project's branch merged in (deep enough to find where they meet), and pushed. */
+	/** Merges the project's branch in and pushes. The fetch is deep enough to find the merge base. */
 	const mergeProject = async (id) => {
 		const dir = dirOf(id);
 		await git(dir, "fetch", "-q", "--depth", "50", "origin", branch);
@@ -277,7 +263,7 @@ function agentFor(spec) {
 		note(id, `extended claim ${when} (${files.length})`);
 		say(name, `extends ${id}'s claim to ${files.join(", ")}`);
 	};
-	/** Check after a push: extend the claim to files outside it, merge the project in on a conflict. */
+	/** After a push, extends the claim to files outside it and merges the project in on a conflict. */
 	const settle = async (id) => {
 		for (let round = 0; round < 3; round++) {
 			const checked = await call("check", { change: id });
@@ -303,7 +289,7 @@ function agentFor(spec) {
 			error: String(err.message ?? err),
 		}));
 		if (!result.ok) {
-			// Picked the same piece as another agent, which claimed it first: look again.
+			// Another agent claimed this piece first.
 			say(name, `couldn't claim ${piece.id}: ${(result.error ?? JSON.stringify(result.conflicts)).slice(0, 100)}`);
 			return;
 		}
@@ -312,7 +298,7 @@ function agentFor(spec) {
 		mark(piece.id, "claimed");
 		say(name, `builds ${piece.id} (${paths.length} path(s))`);
 		const dir = dirOf(piece.id);
-		// Starting over after a build that failed partway (nothing pushed yet: finish it): a fresh clone.
+		// A build that failed before pushing starts over from a fresh clone.
 		rmSync(dir, { recursive: true, force: true });
 		await helper("clone", dir, "--repo", plan.repo, "--change", piece.id, ...(key ? ["--key-file", at(key)] : []));
 		await git(dir, "checkout", "-q", "-b", `changes/${piece.id}`);
@@ -339,7 +325,7 @@ function agentFor(spec) {
 				...(key ? ["--key-file", at(key)] : []),
 			);
 			const got = JSON.parse(stdout.trim().split("\n").at(-1));
-			if (got.head !== next.head) return; // pushed again meanwhile: ask again
+			if (got.head !== next.head) return; // pushed again since; ask again
 			const { stdout: stat } = await git(dir, "diff", "--stat", `${got.base}...HEAD`);
 			await sleep(draw("review"));
 			let verdict = "approve";
@@ -347,7 +333,7 @@ function agentFor(spec) {
 			if (plan.test) {
 				if (plan.nodeModules && !existsSync(join(dir, "node_modules")))
 					symlinkSync(at(plan.nodeModules), join(dir, "node_modules"));
-				// The test command's exit code decides; its summary lines are the evidence.
+				// The exit code decides the verdict. The summary lines are the evidence.
 				const { stdout: out } = await sh(
 					dir,
 					`${plan.test} > .swarm-test.log 2>&1; echo "exit=$?"; tail -60 .swarm-test.log`,
@@ -357,7 +343,7 @@ function agentFor(spec) {
 				if (failing) verdict = "reject";
 				evidence += ` ${plan.test}: ${summary || (failing ? "failed" : "passed")}${failing ? ` (exit ${out.match(/^exit=(\d+)$/m)?.[1]})` : ""}.`;
 			}
-			// A scripted request for changes: the first review of the piece asks for it.
+			// rejectFirst makes the piece's first review ask for changes.
 			const ask = pieces.get(next.change)?.rejectFirst;
 			if (ask && verdict === "approve" && !askedOnce.has(next.change)) {
 				askedOnce.add(next.change);
@@ -425,9 +411,8 @@ function agentFor(spec) {
 	};
 
 	/**
-	 * Its own changes, as status has them, the first that needs it: revise one
-	 * sent back, merge one approved, finish one with nothing pushed. One that
-	 * landed (its claim released, or landed though not released yet) is done.
+	 * Returns the first of its own changes that needs action: revise, merge, or
+	 * finish one with nothing pushed. Changes that landed are dropped.
 	 */
 	const ownStep = async () => {
 		for (const id of claimed.keys()) {
@@ -465,8 +450,7 @@ function agentFor(spec) {
 		say(name, "arrives");
 		const until = started + RUN_LIMIT_MS;
 		while (Date.now() < until) {
-			// What it does next is its own choice, from what it sees (nobody assigns work): its own changes first, then a
-			// review it may give, then a piece of the backlog, else wait a moment.
+			// Nobody assigns work. Own changes come first, then a review, then the backlog, else wait.
 			let next;
 			try {
 				next = await ownStep();
@@ -475,7 +459,7 @@ function agentFor(spec) {
 					if (reviews.length) next = { kind: "review", ...reviews[0] };
 				}
 				if (!next) {
-					// Only this plan's pieces: one the repo had before (a run before this one's) isn't this agent's to build.
+					// Skip backlog items left over from earlier runs.
 					const { open } = await call("backlog", { agent: name });
 					const ours = open.filter((item) => pieces.has(item.id));
 					if (ours.length) next = { kind: "build", work: ours[0] };
@@ -484,7 +468,7 @@ function agentFor(spec) {
 					did.get(name).wait++;
 					await settleLanded();
 					if (allSettled()) break;
-					// Looked again soon: a merge or a review can free work any moment.
+					// A merge or review can free work at any time.
 					await sleep(5_000);
 					continue;
 				}
@@ -496,7 +480,7 @@ function agentFor(spec) {
 				else if (next.kind === "merge") await merge(next);
 			} catch (err) {
 				const id = next?.change ?? next?.work?.id;
-				// A command's own message is mostly its command line: what it printed last says why it failed.
+				// A failed command's message is mostly its command line. Its last output says why it failed.
 				const why = err.stderr
 					? String(err.stderr).trim().split("\n").slice(-2).join(" | ")
 					: String(err.message ?? err);
@@ -552,15 +536,10 @@ if (plan.setup) {
 		`${plan.repo} on ${branch}: checks ${JSON.stringify(startedMode.verify)}, grants ${JSON.stringify(startedMode.policy?.grants ?? {})}, claims ${JSON.stringify(startedMode.sharding)}`,
 	);
 }
-/**
- * Run `fn` over `items`, `n` at a time, trying one again when GitHive says to:
- * each registration and backlog item is a write to one record, and hundreds
- * at once would only contend.
- */
-/** `items` in lists of `n`. */
 const chunks = (items, n) =>
 	Array.from({ length: Math.ceil(items.length / n) }, (_, i) => items.slice(i * n, (i + 1) * n));
 
+/** Runs `fn` over `items`, `n` at a time, retrying when GitHive says to try again. */
 async function inBatches(items, n, fn) {
 	const queue = [...items];
 	const again = async (item) => {
@@ -579,8 +558,7 @@ async function inBatches(items, n, fn) {
 		}),
 	);
 }
-// Registered a list at a time, then the backlog filed a list at a time: one write each, where one per agent and per
-// piece, in turn, took 10 minutes for 200.
+// Register agents and file the backlog a list at a time. One write per list is much faster than one per item.
 const LIST_AT_ONCE = 250;
 const unregistered = [...plan.agents, ...(plan.planner ? [plan.planner] : [])].filter(
 	(who) => who.keyFile && !existsSync(at(who.keyFile)),
@@ -607,8 +585,7 @@ await inBatches(chunks(plan.backlog, LIST_AT_ONCE), 1, async (list) => {
 	if (!added.ok && !added.already?.length)
 		throw new Error(`adding ${list[0].id} to ${list.at(-1).id} failed: ${JSON.stringify(added)}`);
 });
-// Setup ends once the repo has a snapshot for its containers to start from (checks or not: its Gate lands the batches),
-// as on a repo that's been running: the work clock starts then.
+// Wait for the repo's container snapshot, as on a repo that has been running. The work clock starts after setup.
 if (plan.setup) {
 	const until = Date.now() + 6 * 60_000;
 	for (;;) {
@@ -629,8 +606,7 @@ if (plan.setup) {
 		await sleep(5_000);
 	}
 }
-// And once its agents' forks are made, as on a repo that's been running: GitHive makes them as agents register, a few at
-// a time, and agents released before then wait on their forks (92 builds failed so in a run of 200).
+// Also wait for the agents' forks. GitHive makes them a few at a time after registration, and builds fail without them.
 {
 	const until = Date.now() + 30 * 60_000;
 	let said = 0;
@@ -665,12 +641,12 @@ if (plan.setup) {
 }
 const workStarted = Date.now();
 const setupSeconds = ((workStarted - started) / 1000).toFixed(0);
-// Set up for other agents to work on (real ones, see claude-agents.mjs): the repo, its agents and backlog, nothing run.
+// Prepare the repo, agents and backlog for real agents (see claude-agents.mjs) without running any.
 if (args.includes("--setup-only")) {
 	say("swarm", `set up in ${setupSeconds}s; --setup-only, so no scripted agents run`);
 	process.exit(0);
 }
-/** When the last piece settled (merged, waiting on a person, or stopped): the end of the work. */
+/** When the last piece settled. This marks the end of the work. */
 let lastSettled = workStarted;
 say(
 	"swarm",

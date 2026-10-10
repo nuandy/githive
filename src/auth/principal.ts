@@ -15,7 +15,7 @@ export type Principal =
 
 export const SESSION_COOKIE = "__Host-githive_session";
 
-/** The identity GitHive's records carry: the same person:<hash> for a person whether Access or GitHive's sign-in verified them. */
+/** The identity in GitHive's records. A person gets the same person:<hash> whichever door verified them. */
 export function byOf(principal: Principal): string {
 	return principal.kind === "access"
 		? identityLabel(principal.identity)
@@ -26,7 +26,7 @@ export function byOf(principal: Principal): string {
 export const agentNameOf = (principal: Principal) =>
 	principal.kind === "agent" ? `${principal.user.handle}/${principal.agent.name}` : undefined;
 
-/** A person, rather than an agent or a service token: who may vote from the dashboard. */
+/** A person, rather than an agent or a service token. Only people may vote from the dashboard. */
 export const isPerson = (principal: Principal) =>
 	principal.kind === "user" || (principal.kind === "access" && principal.identity.kind === "person");
 
@@ -44,8 +44,8 @@ export const identityStore = (env: Env) => (env.DB ? new IdentityStore(env.DB) :
 
 /** The caller, or null: an Access assertion first, then an agent token, then a session cookie. */
 export async function resolvePrincipal(request: Request, env: Env): Promise<Principal | null> {
-	// Access is the admin door, on the Access hostnames only: on the public address (githive.app) an Access
-	// assertion is never accepted, so nothing there can act as an admin, however it was obtained.
+	// Access is the admin door and only counts on the Access hostnames. The public address (githive.app) never
+	// accepts an Access assertion, so nothing there can act as an admin.
 	const publicOrigin = (env as unknown as { PUBLIC_ORIGIN?: string }).PUBLIC_ORIGIN;
 	if (!publicOrigin || new URL(request.url).origin !== publicOrigin) {
 		// Without its header this returns at once.

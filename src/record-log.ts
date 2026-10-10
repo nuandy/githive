@@ -14,79 +14,54 @@ import {
 } from "./record-format";
 import { retryTransient } from "./retry";
 
-// A record log in Git: one ref in a repo, appended to by compare-and-swap.
-// Reading fetches only the tip; appending pushes one commit on top of the tip
-// it was built on, and Git rejects the push if the ref moved meanwhile, so of
-// two writers on one tip only one lands and the other reads again. Claims,
-// votes and the backlog are kept this way (see toolkit/records.ts).
-//
-// Each commit's tree holds state.json (the record after this commit) and
-// decisions.json (this commit's entries), plus each entry as a Git note on the
-// commit it is about. Who wrote it, why, and the record format (see
-// record-format.ts) are trailers on its message. Reading upgrades an older
-// format's state; records newer than this GitHive knows are read as they are
-// and never written over.
+// A record log in Git: one ref, appended to by compare-and-swap. An append pushes one commit on the
+// tip it was built on, and Git rejects it if the ref moved, so of two writers only one lands.
+// Each commit holds state.json, decisions.json and a note file per commit an entry is about.
 
-/** One entry: what happened, about which commit (if any), and when. */
 export interface LogEntry {
 	commit: string;
 	text: string;
 	at: string;
 }
 
-/** One commit of a log: who wrote it, its entries, and the state after it. */
 export interface LogCommit<S> {
-	/** Who wrote it. */
 	author: string;
 	kind: string;
 	entries: LogEntry[];
 	state: S;
-	/** Unique per append, so a writer can tell whether a push whose answer was lost landed. */
+	/** Unique per append, so a writer can tell whether a push with a lost answer landed. */
 	batch: string;
-	/** The record format it was written in (as read; a write is always in the current one). */
 	format?: number;
 }
 
-/**
- * Record states shared by a log's readers across Worker instances, by ref and
- * tip. A commit never changes, so what's kept for a tip is never stale; only
- * the latest tip per ref need be kept.
- */
+/** Record states shared across Worker instances, by tip. A commit never changes, so they are never stale. */
 export interface StateCache {
 	get(ref: string, tip: string): Promise<string | undefined>;
 	put(ref: string, tip: string, json: string): Promise<void>;
 }
 
 /**
- * Where a log's ref points, kept for its readers across Worker instances so
- * that they needn't list the ref on every read. A write that lands keeps its
- * tip (if the tip kept is the one it built on), so no read sees a tip older
- * than a finished write; a write that finds the tip kept out of date drops
- * it; and a listing is kept only under the generation it began in, so one
- * that raced a write is dropped. One reader at a time lists the ref: the
- * others wait for it, or take the tip kept while it's refreshed.
+ * Where a log's ref points, shared across Worker instances so readers needn't list the ref every time.
+ * A landed write updates it before returning, so no read sees a tip older than a finished write.
  */
 export interface TipCache {
-	/** The tip kept for `ref` (null: no ref), with its state when kept under `stateKey`; or none (`wait`: another reader is listing it), and the generation to keep a listing under. */
+	/** The kept tip (null: no ref) and its state if kept. `wait` means another reader is listing the ref. */
 	get(ref: string, stateKey: string): Promise<{ tip?: string | null; json?: string; gen: number; wait?: boolean }>;
 	keep(ref: string, tip: string | null, gen: number): Promise<void>;
 	landed(ref: string, parent: string | null, tip: string): Promise<void>;
 	stale(ref: string, parent: string | null): Promise<void>;
 }
 
-/** The log as compare-and-swap storage. */
 export interface CasLog<S> {
 	/** The tip and its commit, or null when nothing has been written. */
 	read(): Promise<{ tip: string; commit: LogCommit<S> } | null>;
-	/** As read, but from the ref as Git has it now, never a kept tip (see TipCache). */
+	/** Like read, but always lists the ref in Git instead of using a kept tip. */
 	readFresh?(): Promise<{ tip: string; commit: LogCommit<S> } | null>;
-	/** Append on top of `parent` (null for an empty log): the new tip, or null when the tip had moved. */
+	/** Append on top of `parent` (null for an empty log). Returns the new tip, or null if the tip had moved. */
 	append(parent: string | null, commit: LogCommit<S>): Promise<string | null>;
-	/** Why the last append didn't land: another writer moved the tip, or the server stayed busy. */
 	lastRefusal?: "moved" | "busy" | null;
 }
 
-/** A note line: when, then the entry. Multi-line text is indented under it. */
 function noteLine(entry: LogEntry) {
 	const [first, ...rest] = entry.text.trim().split("\n");
 	return [`${entry.at.slice(0, 19).replace("T", " ")}Z  ${first}`, ...rest.map((l) => `    ${l}`)].join("\n");
@@ -114,7 +89,6 @@ function pktLine(line: string) {
 	return [encoder.encode((payload.length + 4).toString(16).padStart(4, "0")), payload];
 }
 
-/** The pkt-lines of a response body, as text. */
 function pktLines(body: Uint8Array) {
 	const lines: string[] = [];
 	for (let at = 0; at + 4 <= body.length;) {
@@ -129,15 +103,13 @@ function pktLines(body: Uint8Array) {
 	return lines;
 }
 
-/**
- * Move `ref` from `from` (null: create it) to `to`, sending `oids` in one
- * receive-pack request: no discovery round trip first. The server applies the
- * update only if the ref is still at `from`, so this is a compare-and-swap.
- * Returns whether it landed.
- */
-/** Pushes Artifacts refused as busy (several at once on one repo) before reporting one as not landed. */
+/** Attempts while Artifacts refuses a push as busy, before reporting it as not landed. */
 const BUSY_ATTEMPTS = 6;
 
+/**
+ * Move `ref` from `from` (null: create it) to `to` in one receive-pack request, skipping ref discovery.
+ * The server applies it only if the ref is still at `from`, so this is a compare-and-swap.
+ */
 async function pushDirect(remote: Remote, ref: string, from: string | null, to: string, fs: MemoryFS, oids: string[]) {
 	const { packfile } = await git.packObjects({ fs, dir: DIR, oids });
 	const parts = [
@@ -152,10 +124,8 @@ async function pushDirect(remote: Remote, ref: string, from: string | null, to: 
 		at += part.length;
 	}
 	let report: string[] = [];
-	/** A push was answered with a server error: it may have applied all the same. */
+	// After a server error the push may have applied anyway, and another writer may since have moved the ref past it.
 	let unsure = false;
-	// Refused, or still busy, after an answer that was lost: if the push applied, another writer may have moved the ref on
-	// since, and the ref is no longer at `to`; then it's among the commits just behind the ref.
 	const refused = async <T>(outcome: T) =>
 		unsure && (await landedBehind(remote, ref, to).catch(() => false)) ? true : outcome;
 	for (let attempt = 1; ; attempt++) {
@@ -170,7 +140,7 @@ async function pushDirect(remote: Remote, ref: string, from: string | null, to: 
 		});
 		noteGitRequest(`${remote.url}/git-receive-pack`, response.status);
 		if (response.status >= 500 && attempt < BUSY_ATTEMPTS) {
-			// The server failed, perhaps after applying the push: if the ref is now at `to`, it landed.
+			// The server failed, perhaps after applying the push.
 			await response.body?.cancel();
 			unsure = true;
 			if ((await serverTip(remote, ref).catch(() => null)) === to) return true;
@@ -180,9 +150,8 @@ async function pushDirect(remote: Remote, ref: string, from: string | null, to: 
 		if (!response.ok)
 			throw new Error(`[${response.status}] push to ${ref} failed: ${(await response.text()).slice(0, 200)}`);
 		report = pktLines(new Uint8Array(await response.arrayBuffer()));
-		// Busy: the repo is taking another push. Nothing was applied, so it is safe to send again.
+		// A busy refusal applied nothing, so it's safe to send again.
 		if (!report.some((line) => line.startsWith("ERR") && /busy/i.test(line))) break;
-		// Still busy: report it as not landed, and the caller reads the log and tries again.
 		if (attempt === BUSY_ATTEMPTS) return refused("busy" as const);
 		await new Promise((resolve) => setTimeout(resolve, Math.min(50 * 2 ** attempt, 1_500) * (0.5 + Math.random())));
 	}
@@ -192,10 +161,10 @@ async function pushDirect(remote: Remote, ref: string, from: string | null, to: 
 	throw new Error(`push to ${ref}: unexpected report: ${report.join("; ")}`);
 }
 
-/** How many commits behind a ref's tip a push whose answer was lost is looked for. */
+/** How far behind the tip to look for a push whose answer was lost. */
 const LANDED_DEPTH = 32;
 
-/** Whether `oid` is the ref's tip or one of the commits just behind it (a record log is a line of commits). */
+/** Whether `oid` is the ref's tip or one of the commits just behind it. */
 async function landedBehind(remote: Remote, ref: string, oid: string) {
 	const tip = await serverTip(remote, ref);
 	if (!tip) return false;
@@ -208,7 +177,6 @@ async function landedBehind(remote: Remote, ref: string, oid: string) {
 	return false;
 }
 
-/** Where the ref points on the server, or null if it doesn't exist (one request). */
 async function serverTip(remote: Remote, ref: string) {
 	// Ask the server whether the log exists, rather than reading a fetch error as "empty".
 	const refs = await git
@@ -217,7 +185,6 @@ async function serverTip(remote: Remote, ref: string) {
 	return refs.find((r) => r.ref === ref)?.oid ?? null;
 }
 
-/** An empty in-memory repo for a log with nothing in it. */
 async function emptyLog() {
 	const fs = new MemoryFS();
 	await git.init({ fs, dir: DIR });
@@ -225,9 +192,8 @@ async function emptyLog() {
 }
 
 /**
- * The commit `tip` of `ref`, fetched alone in one request (no ref discovery,
- * and no need for the repo to have a HEAD). If the ref has moved on from it
- * meanwhile, the server won't serve it: fetch the new tip instead.
+ * Fetch commit `tip` in one request, without ref discovery. If the ref has moved on,
+ * the server refuses it, so fetch the new tip instead.
  */
 async function fetchAt(remote: Remote, ref: string, tip: string): Promise<{ fs: MemoryFS; tip: string | null }> {
 	try {
@@ -239,34 +205,26 @@ async function fetchAt(remote: Remote, ref: string, tip: string): Promise<{ fs: 
 	}
 }
 
-/** The ref's tip in an in-memory repo, or an empty repo if the ref doesn't exist. */
 async function openTip(remote: Remote, ref: string) {
 	const tip = await serverTip(remote, ref);
 	return tip ? fetchAt(remote, ref, tip) : emptyLog();
 }
 
 export class GitCasLog<S> implements CasLog<S> {
-	/** The ref this log is kept at: named in errors, so a failure says which record it was. */
 	readonly ref: string;
 
-	/**
-	 * The in-memory repo this log last wrote or read, at that tip. A writer
-	 * appends on top of its own last commit, so it needn't read the log first:
-	 * the push alone says whether the tip moved.
-	 */
+	/** The repo at the tip this log last read or wrote, so a writer can append without reading first. */
 	private held: { fs: MemoryFS; tip: string } | null = null;
 
 	lastRefusal: "moved" | "busy" | null = null;
 
-	/** The format this log writes and upgrades to, and how; tests rehearse other formats. */
+	/** Tests set other formats. */
 	private readonly format: number;
 	private readonly upgrades: Readonly<Record<number, Upgrade>>;
-	/** Commits this log's other readers (other Worker instances) already read, by tip (see StateCache). */
 	private readonly states?: StateCache;
-	/** Where its ref points, as other readers last listed it (see TipCache). */
 	private readonly tips?: TipCache;
 
-	/** The log at `ref` in the repo `remote` reaches (`_repo` names it, for callers' readability). */
+	/** `_repo` is unused; it names the repo for callers' readability. */
 	constructor(
 		private readonly remote: () => Promise<Remote>,
 		_repo: string,
@@ -288,13 +246,13 @@ export class GitCasLog<S> implements CasLog<S> {
 	async read(): Promise<{ tip: string; commit: LogCommit<S> } | null> {
 		if (!this.tips) return this.readFresh();
 		let kept = await this.tips.get(this.ref, this.stateKey).catch(() => null);
-		// Another reader is listing it: wait a moment for what it finds, rather than all list at once.
+		// Another reader is listing the ref. Wait for its result rather than all listing at once.
 		for (let waited = 0; kept?.wait && waited < TIP_WAIT_MS; waited += 150) {
 			await new Promise((resolve) => setTimeout(resolve, 150));
 			kept = await this.tips.get(this.ref, this.stateKey).catch(() => null);
 		}
 		if (kept?.tip !== undefined) {
-			// Kept with its state: no Git request at all.
+			// The state is kept too, so no Git request is needed.
 			if (kept.tip && kept.json && this.held?.tip !== kept.tip)
 				return { tip: kept.tip, commit: JSON.parse(kept.json) as LogCommit<S> };
 			return this.readAt(kept.tip);
@@ -307,25 +265,23 @@ export class GitCasLog<S> implements CasLog<S> {
 
 	async readFresh(): Promise<{ tip: string; commit: LogCommit<S> } | null> {
 		const remote = await this.remote();
-		// Reads change nothing, so a brief server failure is simply retried.
 		return this.readAt(await retryTransient(() => serverTip(remote, this.ref)));
 	}
 
-	/** States are kept with the format they were read in, so a GitHive reading another format never takes one. */
+	/** States are keyed by format, so a GitHive on another format never uses them. */
 	private get stateKey() {
 		return `${this.ref}@${this.format}`;
 	}
 
-	/** Read the log, already knowing where its ref points (from a listing): no need to ask the server again. */
+	/** Read the log at a known tip, without listing the ref again. */
 	async readAt(current: string | null): Promise<{ tip: string; commit: LogCommit<S> } | null> {
 		const remote = await this.remote();
 		if (!current) return null;
-		// Another reader already read this tip: a commit never changes, so its state is the same (no fetch).
+		// Another reader may already have read this tip.
 		if (this.held?.tip !== current && this.states) {
 			const json = await this.states.get(this.stateKey, current).catch(() => undefined);
 			if (json) return { tip: current, commit: JSON.parse(json) as LogCommit<S> };
 		}
-		// Fetch only if the tip moved since this log last saw it.
 		const { fs, tip } =
 			this.held?.tip === current ? this.held : await retryTransient(() => fetchAt(remote, this.ref, current));
 		if (!tip) return null;
@@ -343,49 +299,45 @@ export class GitCasLog<S> implements CasLog<S> {
 				author: trailer(TRAILERS.author),
 				kind: trailer(TRAILERS.kind),
 				entries: (await json(DECISIONS_FILE)) as LogEntry[],
-				// A newer format is read as it is: this GitHive can't know how to upgrade it.
+				// This GitHive can't upgrade a newer format, so it's read as is.
 				state: (format > this.format ? raw : upgradeState<S>(raw, format, this.ref, this.format, this.upgrades)) as S,
 				batch: trailer(TRAILERS.batch),
 				format,
 			},
 		};
-		// For the other readers: kept by tip, so it's never stale.
 		if (this.states) void this.states.put(this.stateKey, tip, JSON.stringify(read.commit)).catch(() => undefined);
 		return read;
 	}
 
-	/** Where the ref points now, without reading what's there. */
 	async tip(): Promise<string | null> {
 		return serverTip(await this.remote(), this.ref);
 	}
 
 	async append(parent: string | null, commit: LogCommit<S>): Promise<string | null> {
 		const remote = await this.remote();
-		// Not the tip this log holds: fetch the one it was built on (a read just found it), with no listing first, so
-		// a writer that lost a race is as quick to try again as the one that won (else that one can win every time).
-		// If the ref has moved on, the server says so and the new tip comes back instead.
+		// Fetch the parent directly, without listing first. A writer that lost a race is then as quick to retry
+		// as the winner; otherwise the same writer could win every time.
 		const { fs, tip } =
 			parent !== null && this.held?.tip === parent
 				? this.held
 				: parent !== null
 					? await retryTransient(() => fetchAt(remote, this.ref, parent))
 					: await openTip(remote, this.ref);
-		// Built on a stale tip: no need to ask the server. If that's the tip kept for readers (a write's
-		// keeping of its own was lost), it's out of date: drop it, or every writer would build on it until it aged out.
+		// Built on a stale tip. Drop it from the shared cache, or every writer would build on it until it aged out.
 		if (tip !== parent) {
 			this.lastRefusal = "moved";
 			await this.tips?.stale(this.ref, parent).catch(() => undefined);
 			return null;
 		}
-		// Never write over records a newer GitHive wrote: this one can't keep what it doesn't know.
+		// Never overwrite records a newer GitHive wrote; this one would drop what it doesn't know.
 		if (tip) {
 			const found = formatOf((await git.readCommit({ fs, dir: DIR, oid: tip })).commit.message);
 			if (found > this.format) throw newerFormat(found, this.format);
 		}
 
-		// Carry the notes forward, adding this commit's entries to them.
+		// Carry the notes forward, adding this commit's entries.
 		const files = new Map<string, string>();
-		/** Objects this commit adds: the only ones the push has to send. */
+		// Only the objects this commit adds need to be pushed.
 		const added: string[] = [];
 		const write = async (text: string) => {
 			const oid = await git.writeBlob({ fs, dir: DIR, blob: encoder.encode(text) });
@@ -431,8 +383,7 @@ export class GitCasLog<S> implements CasLog<S> {
 			this.held = null;
 			throw err;
 		}
-		// Kept for the other readers before returning, so that anything this write's caller does next reads it (see TipCache):
-		// landed, its tip and state; refused as moved, the tip it built on is out of date.
+		// Update the shared caches before returning, so the caller's next read sees this write.
 		if (landed === true && this.tips) {
 			await this.tips.landed(this.ref, tip, oid).catch(() => undefined);
 			if (this.states)
@@ -440,14 +391,12 @@ export class GitCasLog<S> implements CasLog<S> {
 					.put(this.stateKey, oid, JSON.stringify({ ...commit, format: this.format }))
 					.catch(() => undefined);
 		} else if (landed === false) await this.tips?.stale(this.ref, tip).catch(() => undefined);
-		// Not landed: the ref moved since `tip` and compare-and-swap lost, or the server stayed busy.
 		this.held = landed === true ? { fs, tip: oid } : null;
 		this.lastRefusal = landed === true ? null : landed === "busy" ? "busy" : "moved";
 		return landed === true ? oid : null;
 	}
 }
 
-/** The commit message: a summary of the entries, then the trailers. */
 function message<S>(commit: LogCommit<S>, format: number) {
 	const first = (text: string) => text.trim().split("\n")[0];
 	const title = commit.entries.length ? first(commit.entries[0].text) : commit.kind;
@@ -461,7 +410,7 @@ function message<S>(commit: LogCommit<S>, format: number) {
 	return `${title}\n\n${summary ? `${summary}\n\n` : ""}${trailers}\n`;
 }
 
-/** Entry lines grouped by the commit they are about; entries not about a commit live only in decisions.json. */
+/** Entries not about a commit live only in decisions.json. */
 function notesByCommit(entries: LogEntry[]) {
 	const byCommit = new Map<string, string[]>();
 	for (const e of entries)

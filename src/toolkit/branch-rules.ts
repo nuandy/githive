@@ -1,23 +1,17 @@
-// Settings by branch: a repo's review policy and checks are its project
-// branch's, and any other branch's unless a branch rule says otherwise. A
-// rule names branches by pattern (feature/*, release/*, or a name) and sets
-// only what it changes: a policy field it leaves out, or checks it leaves
-// unset, stay the repo's, so changing the repo's settings changes them too.
-// The first rule that matches a branch is its rule.
-//
-// Pure, with no imports: the toolkit applies it, and the dashboard shows it.
+// Settings by branch. A repo's review policy and checks apply to every branch unless a branch rule overrides
+// them. A rule sets only the fields it changes, so the rest keep following the repo's settings. The first
+// matching rule wins. The module has no imports so the dashboard can use it too.
 
-/** Settings for the branches a pattern names: the policy fields it changes, and its checks (unset: the repo's; []: none). */
+/** Overrides for the branches a pattern names. Unset `verify` keeps the repo's checks; [] means none. */
 export interface BranchRule<Policy = Record<string, unknown>> {
 	pattern: string;
 	policy?: Partial<Policy>;
 	verify?: string[];
 }
 
-/** A pattern's characters: a branch name's, and * for any run of them (slashes too). */
+/** A branch name's characters, plus * for any run of them, slashes included. */
 export const BRANCH_PATTERN = /^[A-Za-z0-9._/*-]+$/;
 
-/** Whether `pattern` names `branch`: * stands for any run of characters, anything else for itself. */
 export function matchesBranch(pattern: string, branch: string): boolean {
 	const source = pattern
 		.split("*")
@@ -26,7 +20,7 @@ export function matchesBranch(pattern: string, branch: string): boolean {
 	return new RegExp(`^${source}$`).test(branch);
 }
 
-/** The rule for `branch`: the first that names it, if any (the project's branch has none: it takes the repo's settings). */
+/** The first rule that names `branch`. The project's branch never has one; it always takes the repo's settings. */
 export function ruleFor<Policy>(
 	rules: BranchRule<Policy>[] | undefined,
 	branch: string,
@@ -36,7 +30,6 @@ export function ruleFor<Policy>(
 	return rules?.find((rule) => matchesBranch(rule.pattern, branch));
 }
 
-/** A branch's settings: the repo's, with what its rule changes. */
 export function settingsForBranch<Policy extends object>(
 	repo: { policy: Policy; verify: string[]; rules?: BranchRule<Policy>[]; project: string },
 	branch: string,

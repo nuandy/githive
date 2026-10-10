@@ -4,23 +4,14 @@ import { inLane } from "../claim-paths";
 import { changeAgainst, type ReadHistory } from "./batch-reads";
 import type { ClaimRecord } from "./claims";
 
-// An agent's early check on its own change, before merging: does it still
-// merge into the project's branch, and is everything it changed inside its claim. It reports;
-// it decides nothing.
+// An agent's early check on its own change: does it still merge into the project's branch, and does it stay
+// inside its claim. It reports and decides nothing. It doesn't test-merge other agents' changes, because claims
+// are exclusive and merge refuses files outside them, so two changes that can both merge can't conflict.
 //
-// It doesn't test-merge other agents' changes. Claims are exclusive and merge refuses files
-// outside them, so two changes that can both merge touch disjoint files and
-// can't conflict; an overlap means someone is outside their claim, which their
-// own check shows them. Checking every other change would cost a fetch each.
-//
-// Many agents check at once, so a check doesn't clone the project: it reads
-// the change through Artifacts' API where it can (see changeAgainst), test-
-// merging it in memory only when it and the branch changed the same file; else
-// it lists the branch's head and reads the branch from a copy kept while it
-// hasn't moved.
+// Many agents check at once, so a check avoids cloning. It reads the change through the Artifacts API and falls
+// back to a Git workspace only when the change and the branch touched the same file.
 
 export interface CheckInput {
-	/** The project repo. */
 	project: Remote;
 	/** The project's branch the change would merge into. */
 	branch: string;
@@ -28,23 +19,22 @@ export interface CheckInput {
 	source: Remote;
 	claims: ClaimRecord[];
 	change: string;
-	/** The branch's head as kept a moment for every call reading it (see ToolContext.branchHead), if there is one: then no listing. */
+	/** A briefly cached branch head shared by concurrent calls (see ToolContext.branchHead). */
 	branchHead?: () => Promise<string | null>;
-	/** Reads repos' history through Artifacts' API: the change is read that way, without a fetch, where it can be. */
+	/** Reads history through the Artifacts API, so most changes are checked without a fetch. */
 	history?: ReadHistory;
 }
 
 export async function checkChange(input: CheckInput) {
 	const { change, claims } = input;
-	// The branch's head as kept a moment (an early check needn't be on main as of this second), else one ref listing on
-	// the project, which made check the busiest reader of a busy project repo; its objects are kept between checks (see
-	// Workspace.at).
+	// A slightly stale head is fine for an early check. Listing refs every time made check the busiest reader
+	// of the project repo.
 	const listed =
 		(input.branchHead ? await input.branchHead().catch(() => undefined) : undefined) ??
 		(await branchHead(input.project, input.branch));
 	if (!listed) throw new Error(`[409] ${input.branch} doesn't exist yet`);
 	const own = claims.find((c) => c.change === change);
-	// Through Artifacts' API: no file changed on both sides, it merges cleanly, with nothing fetched.
+	// If no file changed on both sides, the change merges cleanly and nothing needs fetching.
 	const read = input.history
 		? await changeAgainst(input.history, repoOfUrl(input.project.url), input.branch, listed, {
 				ref: `changes/${change}`,
@@ -60,7 +50,6 @@ export async function checkChange(input: CheckInput) {
 			main: { head: listed, clean: true },
 			outsideClaim: read.files.filter((f) => !own || !inLane(f, own.paths)),
 		};
-	// Its Git work in turn with the isolate's other calls (see inWorkspaceTurn).
 	return inWorkspaceTurn(async () => {
 		const ws = await Workspace.at(input.project, input.branch, listed);
 		const main = await ws.head();
@@ -71,7 +60,7 @@ export async function checkChange(input: CheckInput) {
 		return {
 			change,
 			head,
-			/** The project's branch it was checked against (the result's `main` is that branch, whatever its name). */
+			// `main` in the result means this branch, whatever its name.
 			branch: ws.branch,
 			main: withMain.clean ? { head: main, clean: true } : { head: main, clean: false, conflicts: withMain.files },
 			outsideClaim: files.filter((f) => !own || !inLane(f, own.paths)),

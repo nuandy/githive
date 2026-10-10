@@ -2,8 +2,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { FakeStorage } from "./fakes/env";
 
 // Agents' forks are made from a project's seed forks, which are made one at a
-// time in the background when GitHive starts on it: a crowd of agents arriving
-// at once then forks from several seeds, not all from the project's repo.
+// time in the background when GitHive starts on the project. A crowd of agents
+// arriving at once then forks from several seeds, not all from the project's
+// repo.
 
 const artifacts = vi.hoisted(() => ({
 	made: new Set<string>(),
@@ -82,7 +83,7 @@ describe("an agent's fork", () => {
 		await expect(changeRemote(env, "p", "agent-slow", "write", 60)).rejects.toThrow(
 			/^\[503\] agent-slow's fork of p is still being made: call again in a minute/,
 		);
-		// One source tried: the others would have waited on the same fork.
+		// Only one source is tried, because the others would have waited on the same fork.
 		expect(artifacts.forks).toHaveLength(1);
 	});
 

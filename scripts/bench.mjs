@@ -1,9 +1,8 @@
 #!/usr/bin/env node
-// Load benchmark: fake agents drive the MCP front door at rising concurrency,
-// the way real agents would, without calling a model. Each agent claims its own
-// directory, pushes a commit to its change branch, checks it, reads its status
-// and the claims, and releases. Alongside them, a few agents race for one shared
-// path, and exactly one must win (Git's compare-and-swap decides).
+// Load benchmark: fake agents drive the MCP endpoint at rising concurrency
+// without calling a model. Each agent claims its own directory, pushes a commit,
+// checks it, reads its status and the claims, and releases. A few racers claim
+// one shared path at the same time, and exactly one must win.
 //
 //   node scripts/bench.mjs [--label baseline] [--levels 1,5,10,25] [--racers 5]
 //                          [--base https://blueprint-bench.nuandy.workers.dev] [--repo bench-<label>]
@@ -73,10 +72,10 @@ async function api(method, path, body) {
 	return JSON.parse(text);
 }
 
-/** Every timed MCP call, for the tables: {level, tool, ms, ok}. */
+/** Every timed MCP call: {level, tool, ms, ok}. */
 const calls = [];
 
-/** Call an MCP tool, timing it (under `as`; null leaves it untimed). Tool errors throw with the tool's message. */
+/** Calls an MCP tool, timed under `as` unless it is null. Tool errors throw with the tool's message. */
 async function tool(level, name, args, as = name) {
 	const start = performance.now();
 	let ok = false;
@@ -97,7 +96,7 @@ async function tool(level, name, args, as = name) {
 	}
 }
 
-/** Time several calls as one step, under one name. */
+/** Times several calls as one named step. */
 async function step(level, as, fn) {
 	const start = performance.now();
 	let ok = false;
@@ -110,14 +109,14 @@ async function step(level, as, fn) {
 	}
 }
 
-/** One fake agent: claim and get its change's fork, push, check, read its status and the claims, release. */
+/** One fake agent's full cycle, from claim to release. */
 async function agent(level, runId, i, scratch) {
 	const ids = { repo: REPO };
 	const change_id = `${runId}-a${i}`;
 	const agentName = `bench-${runId}-a${i}`;
 	await tool(level, "claims", ids);
 	const fork = await step(level, "claim", async () => {
-		// Each agent in its own directory, as agents splitting work would be: two segments deep, so its own claims shard.
+		// A directory two segments deep, so each agent's claims shard.
 		const claimed = await tool(
 			level,
 			"claim",
@@ -129,7 +128,7 @@ async function agent(level, runId, i, scratch) {
 	});
 	const token = fork.token.replace(/\?.*$/, "");
 	const dir = join(scratch, `a${i}`);
-	// In-process git (isomorphic-git): a thousand agents' git processes would exceed this machine's process limit.
+	// In-process git (isomorphic-git), since a git process per agent can exceed the machine's process limit.
 	const onAuth = () => ({ username: "x", password: token });
 	await igit.clone({ fs, http: ihttp, dir, url: fork.url, depth: 1, singleBranch: true, onAuth });
 	const file = `bench-${runId}/a${i}/note.txt`;
@@ -159,7 +158,7 @@ async function agent(level, runId, i, scratch) {
 	return checked;
 }
 
-/** Several agents claim the same path at once: Git's compare-and-swap lets exactly one win. */
+/** Several agents claim the same path at once, and exactly one may win. */
 async function race(level, runId) {
 	const results = await Promise.allSettled(
 		Array.from({ length: RACERS }, (_, i) =>
@@ -181,7 +180,7 @@ async function race(level, runId) {
 	const unexpected = results
 		.filter((r) => r.status === "rejected" || (!r.value.ok && !r.value.conflicts?.length))
 		.map((r) => (r.status === "rejected" ? r.reason.message : JSON.stringify(r.value)));
-	// A failed release is recorded with the rest, not allowed to end the run.
+	// Record a failed release rather than ending the run.
 	for (const i of won)
 		await tool(
 			level,
@@ -215,7 +214,7 @@ async function main() {
 			if (!/exist/i.test(err.message)) throw err;
 		});
 	}
-	// The repo's first settings start GitHive on it; on a repo it had started on already, its claims stay as they're kept.
+	// The first settings call starts GitHive on the repo. On a started repo, existing claims are kept.
 	const started = await tool(0, "settings", {
 		repo: REPO,
 		...(SHARD_DEPTH === undefined ? {} : { shard_depth: SHARD_DEPTH }),
@@ -250,7 +249,7 @@ async function main() {
 		const [agents, raced] = await Promise.all([
 			Promise.allSettled(
 				Array.from({ length: n }, async (_, i) => {
-					// Arrivals spread over the ramp, like agents starting work, rather than all at one instant.
+					// Spread arrivals over the ramp instead of starting all at once.
 					if (RAMP_MS) await new Promise((resolve) => setTimeout(resolve, (RAMP_MS * i) / n));
 					return agent(n, runId, i, scratch);
 				}),

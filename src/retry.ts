@@ -1,13 +1,10 @@
 export interface RetryTransientOptions {
-	/** Maximum number of total attempts, including the first call. */
+	/** Total attempts, including the first. */
 	maxAttempts?: number;
-	/** Delay before the second attempt, in milliseconds. */
 	baseDelayMs?: number;
-	/** Upper bound for any backoff delay, in milliseconds. */
 	maxDelayMs?: number;
-	/** Injectable delay function, useful for tests and custom runtimes. */
 	sleep?: (ms: number) => Promise<void>;
-	/** Which failures to retry (default: isTransientFailure). */
+	/** Defaults to isTransientFailure. */
 	retryable?: (error: unknown) => boolean;
 }
 
@@ -108,12 +105,11 @@ function hasRecognizableNetworkFailure(error: unknown): boolean {
 }
 
 /**
- * Returns true only for failures that are likely to clear on a subsequent
- * attempt. Explicit non-transient HTTP statuses take precedence over generic
- * network-looking messages on the same wrapped error.
+ * Whether a failure is likely to clear on another attempt. An explicit non-transient HTTP
+ * status wins over a network-looking message on the same error.
  */
 export function isTransientFailure(error: unknown): boolean {
-	// Tried again already, as long as is worth it (a Git request a busy server failed, see git-http.ts): not again here.
+	// Errors already retried at a lower level, such as in git-http.ts, aren't retried again.
 	if ((error as { retried?: boolean } | null)?.retried) return false;
 	const statuses = statusesOf(error);
 	if (statuses.length > 0) {
@@ -127,7 +123,7 @@ export function sleep(ms: number): Promise<void> {
 	return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-/** How long retryTransient waits after failed attempt `attempt` (counting from 1), by default. */
+/** retryTransient's default backoff after attempt `attempt`, counting from 1. */
 export const transientDelay = (attempt: number, baseDelayMs = 100, maxDelayMs = 2000) =>
 	Math.min(maxDelayMs, baseDelayMs * 2 ** (attempt - 1));
 

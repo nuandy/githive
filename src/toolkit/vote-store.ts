@@ -6,44 +6,37 @@ import { recordsRepoOf } from "./shards";
 import type { Stamper } from "./stamp";
 import { type FlagRecord, flagChange, type VoteRecord, type Votes, vote } from "./votes";
 
-// Where a repo's votes are kept: in its votes record until the load calls for
-// more (see votesShardingReason), then also in buckets by commit below it,
-// each its own ref, so reviewers voting on different commits never contend.
-// Votes never conflict, so nothing needs checking across the switch: the
-// record keeps the votes cast before (and any cast there after, by a caller
-// that read it before), and every reader reads it with the buckets it needs.
+// Where a repo's votes live: in its votes record until load calls for more (see votesShardingReason), then also
+// in per-commit buckets, each its own ref, so reviewers voting on different commits don't contend. Votes never
+// conflict, so the switch needs no coordination; readers read the record along with the buckets they need.
 // Flags (questions for a person) are rare and always stay in the record.
 
 /** How many buckets the votes are split into when they shard. */
 export const VOTE_BUCKETS = 16;
 
-/** The bucket of a commit's votes: from its leading hex digits. */
 export const bucketOf = (commit: string, buckets: number) =>
 	String((Number.parseInt(commit.slice(0, 6), 16) || 0) % buckets);
 
-/** Where a repo's vote buckets live: one ref each, side by side. */
 export const votesPrefix = (repo: string) => `refs/notes/githive-vote-buckets/${repo}/`;
 const bucketRef = (repo: string, bucket: string) => `${votesPrefix(repo)}${bucket}`;
 
 export interface VotesView {
 	votes: VoteRecord[];
 	flags: FlagRecord[];
-	/** Each record read, at the tip read: "" for the votes record, else the bucket. What a merge cites. */
+	/** The tip read for each record, keyed "" for the votes record or else by bucket. A merge cites these. */
 	tips: Map<string, string>;
-	/** How many buckets the votes were split into when read (0: not sharded). */
+	/** The bucket count when read, or 0 if not sharded. */
 	buckets: number;
-	/** When and why they were sharded, once they are. */
 	sharded?: { since?: string; because?: string };
 }
 
 export interface VoteStore {
-	/** Every vote and flag. */
 	read(): Promise<VotesView>;
-	/** The flags, and the votes on these commits (and others in the records read). */
+	/** The flags and the votes on these commits, plus any others in the records read. */
 	readFor(commits: string[]): Promise<VotesView>;
 	vote(input: Omit<VoteRecord, "at" | "by" | "stamp">, stamper?: Stamper): Promise<unknown>;
 	flag(input: Omit<FlagRecord, "at" | "by" | "stamp">, stamper?: Stamper): Promise<unknown>;
-	/** What a merge of `commit` cites as the votes it counted (its GitHive-Votes trailer), from the view it counted them in. */
+	/** The GitHive-Votes trailer for a merge of `commit`, from the view its votes were counted in. */
 	cite(view: VotesView, commit: string): string;
 }
 
@@ -53,7 +46,7 @@ export interface VoteStoreInput {
 	root: CasLog<Votes>;
 	rootHead?: Awaited<ReturnType<CasLog<Votes>["read"]>>;
 	remote: () => Promise<Remote>;
-	/** A records repo's credentials, when the buckets are spread over records repos. */
+	/** Credentials for a records repo, when the buckets are spread over records repos. */
 	recordsRemote?: (k: number) => Promise<Remote>;
 }
 
@@ -76,7 +69,7 @@ class BucketedVotes implements VoteStore {
 		this.learn(input.rootHead?.commit.state);
 	}
 
-	/** Learn from the votes record whether it's sharded: it only ever turns on. */
+	// Sharding only ever turns on, so the first sharded state seen is final.
 	private learn(state: Votes | null | undefined) {
 		if (!state?.buckets || this.buckets) return;
 		this.buckets = state.buckets;
@@ -88,7 +81,7 @@ class BucketedVotes implements VoteStore {
 		return this.input.recordsRemote ? this.recordsRepos : 0;
 	}
 
-	/** Which repo holds a bucket: -1 for the project repo, else a records repo. */
+	// -1 is the project repo, otherwise a records repo index.
 	private repoOf(bucket: string) {
 		return this.spread ? recordsRepoOf(`votes:${bucket}`, this.spread) : -1;
 	}
@@ -111,7 +104,7 @@ class BucketedVotes implements VoteStore {
 		return log;
 	}
 
-	/** The votes record: the head the caller just read, once; after that, the ref again. */
+	// Uses the head the caller just read once, then reads the ref again.
 	private async readRoot(): Promise<Entry[]> {
 		const head = this.known !== undefined ? this.known : await this.input.root.read();
 		this.known = undefined;
@@ -119,7 +112,6 @@ class BucketedVotes implements VoteStore {
 		return head ? [{ bucket: ROOT, tip: head.tip, state: head.commit.state }] : [];
 	}
 
-	/** Every bucket: per repo holding buckets, one listing and one fetch. */
 	private async readAll(): Promise<Entry[]> {
 		const prefix = votesPrefix(this.input.repo);
 		const repos = this.spread ? Array.from({ length: this.spread }, (_, k) => k) : [-1];
@@ -127,7 +119,6 @@ class BucketedVotes implements VoteStore {
 		return read.flat().map((e) => ({ bucket: e.ref.slice(prefix.length), tip: e.tip, state: e.state }));
 	}
 
-	/** These buckets: per repo, one listing and one fetch. */
 	private async readBuckets(buckets: string[]): Promise<Entry[]> {
 		const byRepo = new Map<number, string[]>();
 		for (const bucket of new Set(buckets))
@@ -146,7 +137,7 @@ class BucketedVotes implements VoteStore {
 
 	private viewOf(entries: Entry[]): VotesView {
 		return {
-			// Oldest first across the records read, as they would be in one.
+			// Oldest first across all records read, as if they were one.
 			votes: entries.flatMap((e) => e.state.votes).sort((a, b) => a.at.localeCompare(b.at)),
 			flags: entries.flatMap((e) => e.state.flags ?? []),
 			tips: new Map(entries.map((e) => [e.bucket, e.tip])),
@@ -177,7 +168,7 @@ class BucketedVotes implements VoteStore {
 		return flagChange(this.input.root, input, stamper);
 	}
 
-	/** Unsharded, the record's tip; sharded, `=tip` for the record and `bucket=tip` for the commit's bucket, if it has one. */
+	// Unsharded: the record's tip. Sharded: `=tip` for the record, plus `bucket=tip` for the commit's bucket if any.
 	cite(view: VotesView, commit: string) {
 		if (!view.buckets) return view.tips.get(ROOT) ?? "";
 		const bucket = bucketOf(commit, view.buckets);

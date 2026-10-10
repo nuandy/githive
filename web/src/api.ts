@@ -4,16 +4,16 @@ import type { Summaries } from "./lib/repos";
 
 // The dashboard's calls to the Worker.
 
-/** How changes merge, as the settings tool takes it: each field left out stays as it is. */
+/** How changes merge, as the settings tool takes it. Fields left out stay as they are. */
 export interface SettingsInput {
 	required?: number;
 	vetoes?: string[];
 	escalate?: { paths: string[]; required?: number; vetoes?: string[] }[];
 	grants?: Record<string, string[]>;
 	verify?: string[];
-	/** What the checks skip: patterns like *.md or docs/ ([] for nothing). */
+	/** Paths the checks skip, as patterns like *.md or docs/. An empty list skips nothing. */
 	skip_checks?: string[];
-	/** Other branches' settings by pattern: each changes only what it sets ([] clears them). */
+	/** Settings for other branches, by pattern. Each rule changes only what it sets; an empty list clears them. */
 	branch_rules?: {
 		pattern: string;
 		required?: number;
@@ -23,7 +23,7 @@ export interface SettingsInput {
 	}[];
 }
 
-/** A branch rule as the server keeps it: a pattern, the policy fields it changes, and its checks (absent: the repo's). */
+/** A branch rule as the server stores it. Without checks of its own, the repo's apply. */
 export interface BranchRule {
 	pattern: string;
 	policy?: Partial<RepoSnapshot["policy"]>;
@@ -42,7 +42,10 @@ export interface SavedMergeSettings {
 /** A repo, as the dashboard shows it (GET /repos/:owner/:name). */
 export interface RepoSnapshot {
 	repo: string;
-	/** `grants`: who may vote as each role that can block a merge (newer servers; unlisted: people and GitHive's reviewers). */
+	/**
+	 * `grants` names who may vote as each role that can block a merge. A role it leaves out goes to people and
+	 * GitHive's reviewers. Older servers omit it.
+	 */
 	policy: {
 		required: number;
 		vetoes: string[];
@@ -50,21 +53,27 @@ export interface RepoSnapshot {
 		grants?: Record<string, string[]>;
 	};
 	verify: string[];
-	/** The project's branch changes merge into (older servers: absent, main). */
+	/** The project's branch, which changes merge into. Older servers omit it, meaning main. */
 	branch?: string;
 	/** Whether records and merges are stamped with verified identity. */
 	verified: boolean;
 	/** Other branches' settings by pattern (newer servers). */
 	branchRules?: BranchRule[];
-	/** What the checks skip: a change touching only these merges without them (newer servers). */
+	/** Paths the checks skip. A change touching only these merges without checks (newer servers). */
 	skipChecks?: string[];
-	/** The other branches changes land on (newer servers): where each started. */
+	/** Other branches that changes land on, and where each started (newer servers). */
 	branches?: { name: string; base: string; from?: string; at: string }[];
-	/** How claims are kept (newer servers): in one record until the load calls for shards ("on demand"), always ("never"), or sharded since `since`. */
+	/**
+	 * How claims are stored (newer servers): in one record until the load calls for shards ("on demand"),
+	 * always in one record ("never"), or sharded since `since`.
+	 */
 	sharding?: "on demand" | "never" | { since?: string; because?: string };
 	/** How many path segments deep claims are sharded, once they are. */
 	shardDepth?: number;
-	/** How votes are kept (newer servers): in one record until the load calls for buckets ("on demand"), always ("never"), or in buckets since `since`. */
+	/**
+	 * How votes are stored (newer servers): in one record until the load calls for buckets ("on demand"),
+	 * always in one record ("never"), or in buckets since `since`.
+	 */
 	votesSharding?: "on demand" | "never" | { since?: string; because?: string };
 	claims: {
 		change: string;
@@ -88,9 +97,9 @@ export interface RepoSnapshot {
 			approvals: number;
 			required: number;
 			vetoedBy: string[];
-			/** Veto roles that haven't approved yet (newer servers); a change merges only once each has. */ awaiting?: string[];
+			/** Veto roles still to approve; the change merges once each has (newer servers). */ awaiting?: string[];
 		};
-		/** A question for a person about the change (an agent asked, or GitHive's builder failed), until a person votes. */
+		/** A question for a person, from an agent or a failed GitHive builder. It stays until a person votes. */
 		attention?: { reason: string; agent: string; at: string };
 		/** GitHive's hosted agents on the change. */
 		hosted?: {
@@ -107,7 +116,7 @@ export interface RepoSnapshot {
 		at: string;
 		by?: string;
 	}[];
-	/** Loaded apart (GET /repos/:repo/audit): it replays every record, so it comes slower and less often. */
+	/** Loaded separately (GET /repos/:repo/audit) and less often, because it replays every record. */
 	audit?: RepoAudit;
 }
 
@@ -120,7 +129,7 @@ export interface RepoLanding {
 	branch: string;
 	/** The batch being checked now, on `base`. */
 	checking: { base: string; since: string; changes: { change: string; head: string; agent: string }[] } | null;
-	/** The changes settled last, newest last: landed (as `commit`), or put out because their checks failed. */
+	/** Recently settled changes, newest last: landed as `commit`, or removed because their checks failed. */
 	recent: {
 		change: string;
 		head: string;
@@ -303,7 +312,7 @@ async function call<T>(method: string, path: string, body?: unknown): Promise<T>
 	try {
 		data = text ? JSON.parse(text) : null;
 	} catch {
-		// Not JSON: an older server without this route answers with the dashboard page.
+		// An older server without this route answers with the dashboard page, which isn't JSON.
 		throw new Error(res.ok ? `Unexpected response from ${path}` : `${res.status} ${res.statusText}`);
 	}
 	if (!res.ok) {
@@ -321,21 +330,21 @@ async function call<T>(method: string, path: string, body?: unknown): Promise<T>
 }
 
 export const api = {
-	/** Every repo with its counts, for the Repositories list and the Inbox (one read, kept by the server). */
+	/** Every repo with its counts, for the Repositories list and the Inbox. The server keeps them, so it's one read. */
 	summaries: () => call<Summaries>("GET", "/summaries"),
 	snapshot: (repo: string) => call<RepoSnapshot>("GET", `/repos/${repoPath(repo)}`),
 	audit: (repo: string) => call<RepoAudit>("GET", `/repos/${repoPath(repo)}/audit`),
 	/** What's landing on a branch of the repo. */
 	landing: (repo: string, branch: string) =>
 		call<RepoLanding>("GET", `/repos/${repoPath(repo)}/landing?branch=${encodeURIComponent(branch)}`),
-	/** A person merges a change: it lands with the branch's other ready changes, as its agent, stamped with the person's name. */
+	/** A person merges a change. It lands as its agent, with the branch's other ready changes, under their name. */
 	merge: (repo: string, change: string) =>
 		call<{ ok: boolean; commit?: string; reasons?: string[]; conflicts?: string[] }>(
 			"POST",
 			`/repos/${repoPath(repo)}/changes/${encodeURIComponent(change)}/merge`,
 			{},
 		),
-	/** A person makes a branch changes can land on, from another. */
+	/** A person makes a new branch from another, for changes to land on. */
 	makeBranch: (repo: string, name: string, from: string) =>
 		call<{ name: string; made?: string }>("POST", `/repos/${repoPath(repo)}/branches`, { name, from }),
 	/** A repo's files at a branch or commit (its default branch if none). */
@@ -365,10 +374,9 @@ export const manage = {
 	setVisibility: (repo: string, visibility: "private" | "public") =>
 		call<RepoRecord>("PATCH", `/repos/${repoPath(repo)}`, { visibility }),
 	deleteRepo: (repo: string) => call<unknown>("DELETE", `/repos/${repoPath(repo)}`),
-	/** Start GitHive on a repo with the default policy (its admins). */
-	// A repo's first settings start GitHive on it: none given, the defaults.
+	/** Start GitHive on a repo with the default policy (admins only). Saving empty first settings starts it. */
 	startRepo: (repo: string) => call<unknown>("POST", `/repos/${repoPath(repo)}/settings`, {}),
-	/** Change a started repo's review policy or checks (its admins); what's left out stays. */
+	/** Change a started repo's review policy or checks (admins only). Fields left out stay as they are. */
 	changeSettings: (repo: string, settings: SettingsInput) =>
 		call<SavedMergeSettings>("POST", `/repos/${repoPath(repo)}/settings`, settings),
 	collaborators: (repo: string) =>
@@ -410,7 +418,7 @@ export const manage = {
 
 export type ManageApi = typeof manage;
 
-/** Who is looking, or null when nobody is signed in (a 401 here is the normal signed-out answer, not an error). */
+/** Who is looking, or null when nobody is signed in. A 401 here is the normal signed-out answer. */
 export async function fetchMe(): Promise<Me | null> {
 	const res = await fetch("/me");
 	if (res.status === 401) return null;
@@ -435,7 +443,7 @@ export const account = {
 
 export type AccountApi = typeof account;
 
-/** What adding a member by email did: added at once, or invited (waiting for an admin's approval, if they can't sign in yet). */
+/** Adding a member by email adds them, or invites them if they can't sign in yet (pending an admin's approval). */
 export interface AddedMember {
 	added?: string;
 	invited?: string;
@@ -450,7 +458,7 @@ export interface ApprovedEmail {
 	createdAt: string;
 }
 
-/** Someone orgs asked to have who can't sign in until an admin approves them. */
+/** Someone orgs want to add, who can't sign in until an admin approves them. */
 export interface InviteRequest {
 	email: string;
 	orgs: { org: string; role: string; invitedBy: string }[];

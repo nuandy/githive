@@ -11,7 +11,7 @@ import { TopBar } from "./TopBar";
 import { RepoPage } from "./RepoPage";
 import { RepoList } from "./RepoList";
 
-// People see changes, claims, checks, reviews and repos: never the internal
+// People see changes, claims, checks, reviews and repos. They never see the internal
 // slices, lanes, tasks, leases, gates, quorums or the Merge-ahead matrix.
 
 const FORBIDDEN = /\b(slices?|lanes?|tasks?|leases?|gates?|quorums?|merge-ahead|matrix|integrat\w*|human)\b/i;

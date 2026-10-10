@@ -53,7 +53,6 @@ export function RepoAdmin({
 		);
 	useEffect(() => {
 		if (admin && !loose) void load();
-		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [admin, loose, repo]);
 
 	const run = async (key: string, work: () => Promise<unknown>) => {

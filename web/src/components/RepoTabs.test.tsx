@@ -4,9 +4,8 @@ import { historyFixture, repoSnapshot as snapshot, stubApi } from "../test/fixtu
 import { AuditTab, ChangeList, ChangePage, SettingsTab } from "./RepoTabs";
 import { RepoPage } from "./RepoPage";
 
-// A repo, shown like any other: its claims as
-// open changes, the audit with what's still open and what a revert resolved,
-// and the conventions agents follow.
+// A repo, shown like any other: its claims as open changes, the audit with what's
+// still open and what a revert resolved, and the conventions agents follow.
 
 describe("a repo", () => {
 	it("shows claims in force as open changes, with head and approvals", () => {

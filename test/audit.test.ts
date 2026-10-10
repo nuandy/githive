@@ -3,9 +3,9 @@ import { audit, type MergeRecord } from "../src/toolkit/audit";
 import type { Registry } from "../src/toolkit/claims";
 import type { Votes } from "../src/toolkit/votes";
 
-// The audit: nothing stopped an agent from breaking a
-// convention, so a pure replay of the records reports every violation, with
-// the commit and the agent responsible.
+// Nothing stops an agent from breaking a convention, so the audit replays the
+// records and reports every violation, with the commit and the agent
+// responsible.
 
 const at = (claims: Registry["claims"], released: Registry["released"] = []): Registry => ({ claims, released });
 const claimA = {
@@ -72,7 +72,7 @@ describe("the audit", () => {
 			},
 		]);
 		expect(await dependencyRule([docs, merge({})])).toEqual([]);
-		// Merged first, but on another branch: it doesn't count.
+		// Merged first, but on another branch, so it doesn't count.
 		expect(await dependencyRule([{ ...docs, branch: "feature/docs" }, merge({})])).toHaveLength(1);
 	});
 
@@ -176,7 +176,7 @@ describe("the audit", () => {
 				detail: "stats-1a2b's claim was released at r3 without naming m1 as its merge",
 			},
 		]);
-		// Released after this merge, naming it: fine.
+		// Released after this merge and naming it, which is allowed.
 		const afterMerge = [...registry, { tip: "r3", state: at([claimB], [{ ...releasedA, mergedAs: "m1" }]) }];
 		expect(await audit(records([merge({ claimsTip: "r2" })], afterMerge))).toEqual([]);
 	});
@@ -214,7 +214,7 @@ describe("the audit", () => {
 	});
 
 	it("holds each merge to the settings in force at the registry state it cites", async () => {
-		// At r3 the policy was raised to 3 approvals and checks were added: a merge citing r2 came before.
+		// At r3 the policy was raised to 3 approvals and checks were added. A merge citing r2 came before that.
 		const raised = [
 			...registry,
 			{ tip: "r3", state: { ...at([claimA, claimB]), policy: { ...policy, required: 3 }, verify: ["npm test"] } },
@@ -228,7 +228,7 @@ describe("the audit", () => {
 });
 
 describe("the audit, with sharded claims", () => {
-	// Claims split by path: a merge cites each shard it checked as shard=tip.
+	// With claims split by path, a merge cites each shard it checked as shard=tip.
 	const wideOther = {
 		change: "src-9z9z",
 		agent: "agent-z",

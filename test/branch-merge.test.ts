@@ -8,10 +8,10 @@ import { pushChange } from "./helpers/agents";
 import { startGitServer, type GitServer } from "./helpers/git-server";
 import { memoryBatchGit } from "./helpers/memory-batch-git";
 
-// A finished branch merges into another as one change: claimed with source,
-// its claim is what the branch changed and its tip is the change, reviewed,
-// checked and merged like any other. The branch it lands on never holds half
-// of it.
+// A finished branch merges into another as one change. It is claimed with
+// `source`: the claim covers what the branch changed, and the branch tip is the
+// change, reviewed, checked and merged like any other. The target branch never
+// holds half of it.
 
 describe("a claim covering a branch's changes", () => {
 	it("is the files when they fit, and their folders, deepest first, when they don't", () => {
@@ -87,7 +87,7 @@ describe.each([
 				head: tip("feature/f"),
 				claimed: ["api/field.js", "web/field.js"],
 			});
-			// Its tip is the change: in the lander's fork, as changes/land-f.
+			// Its tip is the change, in the lander's fork as changes/land-f.
 			expect(tip("changes/land-f")).toBe(tip("feature/f"));
 			// main had neither piece until now.
 			expect(server.git("ls-tree", "-r", "--name-only", "main")).not.toContain("api/field.js");

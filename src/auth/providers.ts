@@ -1,8 +1,7 @@
 import type { ProviderProfile } from "./store";
 
-// Sign-in with GitHub and Google: the authorization-code flow with PKCE.
-// Each provider gives back who signed in, with an email it has verified;
-// without one, sign-in is refused.
+// Sign-in with GitHub and Google through the authorization-code flow with PKCE. Sign-in is refused unless the
+// provider returns a verified email.
 
 export type ProviderName = "github" | "google";
 

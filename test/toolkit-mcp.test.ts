@@ -18,7 +18,7 @@ let summarized: { repo: string; patch: Record<string, unknown> }[] = [];
 let pinged: string[] = [];
 let reviewRequests: { repo: string; change: string; roles: string[]; summary?: string }[] = [];
 let builds: { repo: string; change: string }[] = [];
-/** Agents' forks there, but unreadable (Artifacts busy); otherwise there are none here. */
+/** When set, agents' forks exist but can't be read because Artifacts is busy. Otherwise there are none. */
 let forksDown = false;
 const ctx = () => ({
 	toolkit: {
@@ -281,7 +281,7 @@ describe("GitHive's MCP tools", () => {
 	});
 
 	it("keeps the repo's summary for the dashboard: activity on writes, counts when they're read", async () => {
-		// Its own repo: activity is noted at most every 10 seconds per repo, and other tests write "project".
+		// Use a separate repo, since activity is noted at most every 10 seconds per repo and other tests write "project".
 		summarized = [];
 		await call("settings", { repo: "summed" });
 		await call("claim", { repo: "summed", change: "a-1", agent: "agent-a", paths: ["src/a/"], intent: "a" });

@@ -1,8 +1,8 @@
 #!/usr/bin/env node
-// GitHive with forks (the default), live: each agent registers its
-// own identity, works in its change's own fork, and merges through the toolkit.
-// A rogue sharing the same Access identity is refused at every step: it can't
-// act as another agent, can't get another change's fork, and can't push main.
+// Demonstrates GitHive with forks, live. Each agent registers its own identity,
+// works in its change's fork and merges through the toolkit. A rogue agent with
+// the same Access identity is refused at every step. It can't act as another
+// agent, get another change's fork or push main.
 //
 //   node scripts/forks-demo.mjs [--base https://blueprint-bench.nuandy.workers.dev] [--repo forks-demo]
 //
@@ -48,7 +48,7 @@ async function api(method, path, body) {
 	return JSON.parse(text);
 }
 
-/** A tool call, as the agent holding `key` (if any). Errors come back as { error }. */
+/** Calls a tool as the agent holding `key`, if any. Errors come back as { error }. */
 async function tool(name, args, key) {
 	const response = await fetch(`${BASE}/mcp`, {
 		method: "POST",

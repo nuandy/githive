@@ -2,8 +2,8 @@ import type { RepoSnapshot } from "../api";
 import type { ChangeStatus } from "./changeStatus";
 import { identityName } from "./agent";
 
-// Repos keep no change records: a change is a claim in force,
-// with its pushed head, the approvals on that head, and any hosted agents on it.
+// Repos keep no change records. A change is a claim in force, with its pushed head,
+// the approvals on that head, and any hosted agents on it.
 
 export type Claim = RepoSnapshot["claims"][number];
 export type Vote = RepoSnapshot["votes"][number];
@@ -126,7 +126,10 @@ export function shardingSummary(
 	};
 }
 
-/** How a repo keeps its votes, as a sentence: in one record, or in buckets by commit once the load called for it. Null for older servers. */
+/**
+ * How a repo stores its votes, as a sentence: in one record, or in buckets by commit once the load called
+ * for it. Null for older servers.
+ */
 export function votesShardingSummary(
 	snapshot: Pick<RepoSnapshot, "votesSharding">,
 ): { sharded: boolean; detail: string } | null {
@@ -150,7 +153,10 @@ export function votesShardingSummary(
 	};
 }
 
-/** The header's badge: what's sharded (claims, votes, both), or one claims record; the detail says both. Null for older servers. */
+/**
+ * The header's badge: what's sharded (claims, votes or both), or one claims record. The detail covers both.
+ * Null for older servers.
+ */
 export function recordsBadge(
 	snapshot: Pick<RepoSnapshot, "sharding" | "shardDepth" | "votesSharding">,
 ): { label: string; sharded: boolean; detail: string } | null {
@@ -172,7 +178,7 @@ export function recordsBadge(
 	};
 }
 
-/** Who may vote as each role that can block a merge, in words: the policy's grants, else people and GitHive's reviewers. */
+/** Who may vote as each blocking role, in words: the policy's grants, else people and GitHive's reviewers. */
 export function blockingRoles(policy: RepoSnapshot["policy"]): { role: string; holders: string }[] {
 	const roles = [...new Set([...policy.vetoes, ...(policy.escalate ?? []).flatMap((e) => e.vetoes ?? [])])];
 	const name = (grant: string) =>

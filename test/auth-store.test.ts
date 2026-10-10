@@ -3,7 +3,8 @@ import { IdentityStore, type ProviderProfile, sha256Hex } from "../src/auth/stor
 import { fakeD1 } from "./fakes/d1";
 
 // GitHive's own identity, against a real SQLite database with the migrations
-// applied: who may sign in, how accounts link, sessions, agents and tokens.
+// applied. Covers who may sign in, how accounts link, sessions, agents and
+// tokens.
 
 let clock = Date.parse("2026-10-08T12:00:00.000Z");
 const now = () => new Date(clock);
@@ -37,7 +38,7 @@ describe("signing in", () => {
 			user: { id: string };
 		};
 		expect(google.user.id).toBe(first.user.id);
-		// Linked now: a changed email at Google still finds the same person.
+		// Once the accounts are linked, a changed email at Google still finds the same person.
 		expect(
 			(
 				(await ids.signIn({ provider: "google", providerId: "g-9", email: "other@example.com" })) as {

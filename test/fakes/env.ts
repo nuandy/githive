@@ -1,4 +1,4 @@
-/** The most keys one get, put or delete takes, in Durable Object storage: past it, the call throws. */
+/** The most keys a single get, put or delete takes in Durable Object storage. More than that throws. */
 const KEYS_AT_ONCE = 128;
 const atMost128 = (n: number) => {
 	if (n > KEYS_AT_ONCE)

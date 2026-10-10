@@ -3,7 +3,7 @@ import type { MyOrg, OrgDetail, OrgRole } from "../api";
 // Orgs as the dashboard shows them. A person's own namespace is stored as a
 // "personal" org, but it is never called an org: it's "your repositories".
 
-/** An org's name, or a team's: lowercase letters, digits or single dashes, not starting or ending with one, up to 39. */
+/** An org's or team's name: lowercase letters, digits or single dashes, not at either end, up to 39. */
 export const SLUG_HINT = "Lowercase letters, digits and single dashes, up to 39, not starting or ending with a dash.";
 export function slugProblem(slug: string): string | null {
 	if (!slug) return "Give it a name.";
@@ -24,7 +24,10 @@ export function repoNameProblem(name: string): string | null {
 	return null;
 }
 
-/** Where a person may make a repo: their own namespace, and orgs where they're an owner or admin, or a member and the org lets members. */
+/**
+ * Where a person may make a repo: their own namespace, and orgs where they're an owner or admin, or a member
+ * of an org that lets members.
+ */
 export function creatableOwners(orgs: MyOrg[]): MyOrg[] {
 	return orgs.filter(
 		(o) => o.personal || o.role === "owner" || o.role === "admin" || (o.role === "member" && o.membersCanCreateRepos),

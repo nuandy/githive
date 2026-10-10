@@ -185,7 +185,7 @@ describe("record states shared by readers, by tip", () => {
 		await new GitCasLog<State>(remote, "t1", "refs/notes/githive/t1", { states }).read();
 		await new Promise((resolve) => setTimeout(resolve, 10));
 		expect(kept.get("refs/notes/githive/t1@1")?.tip).toBe(tip);
-		// Another reader takes it from there: shown here by what it was kept as.
+		// Another reader starts from the kept tip, shown here by what it was kept as.
 		kept.set("refs/notes/githive/t1@1", {
 			tip: tip!,
 			json: JSON.stringify(commit({ state: { claims: { kept: "yes" } } })),
@@ -193,7 +193,7 @@ describe("record states shared by readers, by tip", () => {
 		expect(
 			(await new GitCasLog<State>(remote, "t1", "refs/notes/githive/t1", { states }).read())?.commit.state,
 		).toEqual({ claims: { kept: "yes" } });
-		// The tip moved: what was kept is for another tip, so the reader fetches.
+		// The tip moved, so the kept entry is stale and the reader fetches.
 		await first.append(tip!, commit({ state: { claims: { "src/y/": "agent-b" } } }));
 		expect(
 			(await new GitCasLog<State>(remote, "t1", "refs/notes/githive/t1", { states }).read())?.commit.state,
@@ -295,7 +295,7 @@ describe("record tips kept for readers", () => {
 		{ timeout: 60_000 },
 		async () => {
 			const { appendRecord } = await import("../src/toolkit/records");
-			// Half the writes' tips are never kept (the call to keep it failed): the tip kept is then out of date.
+			// Half the writes fail to keep their tip, so the kept tip falls out of date.
 			const reader = await kept((tips) => ({
 				...tips,
 				landed: async (r, parent, tip) =>
@@ -332,7 +332,7 @@ describe("record tips kept for readers", () => {
 describe("a rehearsed change of record format", () => {
 	type V1 = { claims: Record<string, string> };
 	type V2 = { claims: Record<string, { holder: string }> };
-	// Format 2 keeps each holder in an object: the upgrade keeps every claim, holder and all.
+	// Format 2 stores each holder as an object. The upgrade keeps every claim and its holder.
 	const upgrades = {
 		1: (state: unknown) => ({
 			claims: Object.fromEntries(Object.entries((state as V1).claims).map(([path, holder]) => [path, { holder }])),

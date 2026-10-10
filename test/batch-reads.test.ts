@@ -46,7 +46,8 @@ function repos(logs: Record<string, Record<string, CommitMeta[]>>): { history: R
 }
 
 const fork = { url: "https://git.test/ns/fork--proj--agent--a.git", token: "t" };
-// The chains kept for the isolate, by repo name: each test's "proj" is its own.
+// Chains are cached per isolate by repo name, so each test starts with a fresh
+// "proj".
 beforeEach(() => forgetChains());
 const change = (name: string) => ({ change: name, ref: `changes/${name}`, source: fork, agent: "a" });
 
@@ -231,10 +232,10 @@ describe("the branch's history, kept for the isolate", () => {
 		const project = () => logs.filter((l) => l.ref === "main").map((l) => l.limit);
 		await changeAgainst(history, "proj", "main", "m3", { ref: "changes/one", source: fork });
 		await changeAgainst(history, "proj", "main", "m3", { ref: "changes/one", source: fork });
-		// A caller with a head a moment old: on the chain kept, nothing read.
+		// A caller whose head is slightly behind finds it on the cached chain, so nothing is read.
 		await changeAgainst(history, "proj", "main", "m2", { ref: "changes/one", source: fork });
 		expect(project()).toEqual([1000]);
-		// main moves on: only the page on top is read.
+		// When main moves on, only the page on top is read.
 		main = [commit("m4", ["m3"]), ...main];
 		expect(await changeAgainst(history, "proj", "main", "m4", { ref: "changes/one", source: fork })).toMatchObject({
 			head: "c1",

@@ -1,7 +1,4 @@
-/**
- * Where a request's time goes, for a Server-Timing header: each step's
- * duration, by name. Steps run in parallel are timed separately.
- */
+/** Step durations for a Server-Timing header. Steps that run in parallel are timed separately. */
 export class Timing {
 	private readonly steps: [string, number][] = [];
 

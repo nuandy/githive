@@ -33,7 +33,7 @@ const byActivity = <T extends { opened?: number; approvals?: number; rejections?
 	return weight(b) - weight(a) || a.name.localeCompare(b.name);
 };
 
-/** Repos keep no change records: agents come from the claims in force and the votes. */
+/** Who works on a repo and who reviews it, from the claims in force and the votes. */
 export function authorStats(snapshot: Pick<RepoSnapshot, "claims">): AuthorStats[] {
 	const authors = new Map<string, AuthorStats>();
 	for (const claim of snapshot.claims) {

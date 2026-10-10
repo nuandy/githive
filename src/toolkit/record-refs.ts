@@ -4,26 +4,20 @@ import { isEmptyRepo, type Remote } from "../git";
 import { fetchCommits } from "../git-fetch";
 import { retryTransient } from "../retry";
 
-// Reading many record refs (claims shards, vote buckets) at once: one listing
-// per repo, then one fetch for every tip whose state isn't known yet.
+// Reads many record refs (claims shards, vote buckets) at once, with one listing per repo and one fetch for
+// every tip not read yet.
 
-/**
- * Record states by commit, for the isolate. A commit never changes, so a state
- * once read stays right; only states already read are kept (no request waits
- * on another's I/O).
- */
+// Record states by commit. A commit never changes, so a state once read stays valid. Only finished reads are
+// cached, so no request waits on another's I/O.
 const states = new Map<string, unknown>();
 const decoder = new TextDecoder();
 
-/**
- * Every record ref under `prefix`, at its tip: one listing, then one fetch for
- * all the refs whose tips aren't known yet. Brief server failures are retried.
- */
+/** Every record ref under `prefix` with the state at its tip. Brief server failures are retried. */
 export async function readAllShards<S>(remote: Remote, prefix: string) {
 	return readListed<S>(remote, async () => (await listRefs(remote, prefix)).filter((r) => r.ref.startsWith(prefix)));
 }
 
-/** These refs (where they exist) at their tips: one listing (of the prefix they share), then one fetch for the commits not known yet. */
+/** The given refs that exist, with the state at each tip. */
 export async function readRefs<S>(remote: Remote, refs: string[]) {
 	const wanted = new Set(refs);
 	return readListed<S>(remote, async () =>
@@ -31,7 +25,6 @@ export async function readRefs<S>(remote: Remote, refs: string[]) {
 	);
 }
 
-/** The longest prefix every ref starts with. */
 function sharedPrefix(refs: string[]) {
 	let prefix = refs[0] ?? "";
 	for (const ref of refs) while (!ref.startsWith(prefix)) prefix = prefix.slice(0, -1);
@@ -45,7 +38,6 @@ const listRefs = (remote: Remote, prefix: string) =>
 			.catch((err) => (isEmptyRepo(err) ? [] : Promise.reject(err))),
 	);
 
-/** Refs as `list` finds them, with their states: commits not known yet are fetched in one request. */
 async function readListed<S>(
 	remote: Remote,
 	list: () => Promise<{ ref: string; oid: string }[]>,
@@ -63,7 +55,7 @@ async function readListed<S>(
 					);
 			}
 		} catch (err) {
-			// A ref moved between the listing and the fetch: its old tip is no longer served. List again.
+			// A ref moved between the listing and the fetch, so its old tip is no longer served. List again.
 			if (attempt < 3 && /not our ref|fetch refused/i.test(String(err))) continue;
 			throw err;
 		}

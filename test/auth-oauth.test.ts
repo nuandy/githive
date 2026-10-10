@@ -3,11 +3,10 @@ import { IdentityStore } from "../src/auth/store";
 import { fakeD1 } from "./fakes/d1";
 import { fakeKV } from "./fakes/kv";
 
-// An MCP client connecting over OAuth 2.1, end to end through the Worker and
-// the real OAuth provider (KV and D1 in memory): it finds the authorization
-// server from /mcp's 401, registers, sends a person to /authorize, gets a
-// token for the agent they chose, and calls MCP as that agent, until the
-// agent is revoked.
+// An MCP client connecting over OAuth 2.1, end to end through the Worker and the
+// real OAuth provider (KV and D1 in memory). It finds the authorization server
+// from /mcp's 401, registers, sends a person to /authorize, gets a token for the
+// agent they chose, and calls MCP as that agent until the agent is revoked.
 
 vi.mock("../src/access", () => ({ verifyAccessRequest: vi.fn(async () => null) }));
 
@@ -48,7 +47,6 @@ const call = (path: string, init: RequestInit = {}) =>
 		env as never,
 		{ waitUntil: () => {}, passThroughOnException: () => {} } as never,
 	);
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 const json = async (r: Response | Promise<Response>): Promise<any> => (await r).json();
 const cookiesOf = (r: Response) =>
 	r.headers

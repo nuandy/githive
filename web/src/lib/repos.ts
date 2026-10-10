@@ -65,7 +65,7 @@ export function repoCounts(row: RepoRow): string {
 	return parts.join(", ");
 }
 
-/** What a repo needs, as its lamp: a person (a question waits, or the audit found something), work under way, or nothing. */
+/** What a repo needs, as its lamp: a person (a question or an audit finding), work under way, or nothing. */
 export type RepoState = "needs-you" | "at-work" | "quiet";
 
 export function repoState(row: RepoRow): RepoState {

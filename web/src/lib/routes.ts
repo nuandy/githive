@@ -98,7 +98,7 @@ export const href = {
 		`#/repos/${repoPath(repo)}${tab === "changes" ? "" : `/${tab}`}${branch ? `?branch=${enc(branch)}` : ""}`,
 	change: (repo: string, change: string, tab: ChangeTab = "conversation") =>
 		`#/repos/${repoPath(repo)}/changes/${enc(change)}${tab === "conversation" ? "" : `/${tab}`}`,
-	/** A file or folder in the Code tab; each path segment is encoded, so the path reads naturally in the address bar. */
+	/** A file or folder in the Code tab. Each segment is encoded separately, so the path reads naturally. */
 	code: (repo: string, path = "", ref?: string) =>
 		`#/repos/${repoPath(repo)}/code${path ? `/${path.split("/").filter(Boolean).map(enc).join("/")}` : ""}${ref ? `?ref=${enc(ref)}` : ""}`,
 	newRepo: (owner?: string) => `#/new${owner ? `?owner=${enc(owner)}` : ""}`,

@@ -85,7 +85,7 @@ describe("the Agents page", () => {
 		expect(text).toContain("Sign in from Claude Code");
 		expect(text).toContain("Codex");
 		expect(text).toContain("Or use a token");
-		// No command with a placeholder to fill in: a new token comes with its own, filled in.
+		// A new token's commands come with the token filled in, so no placeholder is left.
 		expect(text).not.toContain("Bearer token");
 	});
 

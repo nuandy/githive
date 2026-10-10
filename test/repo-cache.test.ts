@@ -132,7 +132,7 @@ describe("kept record tips", () => {
 		expect(await live.tipOf("refs/r", "refs/r@1", 10_000)).toEqual({ tip: a, gen: 0 });
 		await live.keepRecord("refs/r@1", a, "{}");
 		expect(await live.tipOf("refs/r", "refs/r@1", 10_000)).toEqual({ tip: a, gen: 0, json: "{}" });
-		// No ref is kept too: an empty log.
+		// A missing ref is cached too, as an empty log.
 		await live.tipOf("refs/empty", "refs/empty@1", 10_000);
 		await live.keepTip("refs/empty", null, 0);
 		expect(await live.tipOf("refs/empty", "refs/empty@1", 10_000)).toEqual({ tip: null, gen: 0 });

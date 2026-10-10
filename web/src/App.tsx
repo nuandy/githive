@@ -20,7 +20,7 @@ import { href, parseRoute, type Route } from "./lib/routes";
 import { type Provider, signinErrorMessage, signinErrorOf, withoutSigninError } from "./lib/session";
 import "./App.css";
 
-/** Where a route points, ignoring tabs: moving to a different place scrolls to the top; switching tabs doesn't. */
+/** Where a route points, ignoring tabs. Moving to a new place scrolls to the top; switching tabs doesn't. */
 export function routePlace(route: Route): string {
 	if (route.page === "repo") return `repo:${route.repo}`;
 	if (route.page === "change") return `change:${route.repo}:${route.change}`;
@@ -111,13 +111,13 @@ export function Dashboard({ me, onSignOut }: { me: Me; onSignOut: () => void }) 
 	const onRepos = route.page === "repos";
 	const repoName = route.page === "repo" || route.page === "change" ? route.repo : null;
 
-	// Every repo's counts in one read: the Repositories list, and the Inbox count on every page.
+	// Every repo's counts in one read, for the Repositories list and the Inbox count on every page.
 	const summaries = usePoll("summaries", api.summaries, onRepos || route.page === "inbox" ? 15_000 : 30_000);
 	// For GitHive's operators (Access): orgs' requests waiting for approval, counted on the Admin link.
 	const adminRequests = usePoll(me.kind === "access" ? "admin:requests:count" : null, admin.requests, 60_000);
 	const inbox = buildInbox(summaries.data);
 
-	// The repo's live feed: while it's connected, a ping triggers each refresh and polling slows to a safety net.
+	// While the repo's live feed is connected, each ping triggers a refresh and polling slows to a safety net.
 	const feedKey = repoName;
 	const refreshers = useRef<(() => void)[]>([]);
 	const liveStatus = useLiveFeed(feedKey, () => refreshers.current.forEach((refresh) => refresh()));
@@ -126,7 +126,7 @@ export function Dashboard({ me, onSignOut }: { me: Me; onSignOut: () => void }) 
 	const snapshot = usePoll(repoName !== null ? `repo:${repoName}` : null, () => api.snapshot(repoName!), every(5_000));
 	// The audit replays every record in Git, so it loads on its own and less often.
 	const audit = usePoll(repoName !== null ? `audit:${repoName}` : null, () => api.audit(repoName!), 60_000);
-	// What the reader may do here: the vote form and the settings they can change.
+	// What the reader may do here decides the vote form and which settings they can change.
 	const access = usePoll(repoName !== null ? `access:${repoName}` : null, () => api.access(repoName!), 60_000);
 	const changeId = route.page === "change" ? route.change : null;
 	const change = usePoll(
@@ -257,7 +257,7 @@ export function Dashboard({ me, onSignOut }: { me: Me; onSignOut: () => void }) 
 			/>
 		);
 	} else if (repoName !== null && view) {
-		// GitHive not started on it yet: the repo still shows, with its code and settings, and a way to start.
+		// GitHive hasn't started on this repo yet. It still shows its code, its settings and a way to start.
 		const notStarted = !snapshot.data && !!snapshot.error && !/^no repo /.test(snapshot.error);
 		if (snapshot.data || notStarted) {
 			page = (

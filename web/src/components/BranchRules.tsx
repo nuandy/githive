@@ -14,7 +14,7 @@ export interface BranchRulesProps {
 	onSaved?(): void;
 }
 
-/** Other branches' settings, for the repo's admins: each rule names branches by pattern and changes only what it sets. */
+/** Other branches' settings, for admins. Each rule matches branches by pattern and changes only what it sets. */
 export function BranchRules({ branch, rules, save, onSaved }: BranchRulesProps) {
 	const freshKey = JSON.stringify(ruleDraftsFrom(rules));
 	const [drafts, setDrafts] = useState<RuleDraft[]>(() => JSON.parse(freshKey) as RuleDraft[]);
@@ -24,7 +24,7 @@ export function BranchRules({ branch, rules, save, onSaved }: BranchRulesProps) 
 	const [saved, setSaved] = useState(false);
 	const dirty = JSON.stringify(drafts) !== baseKey;
 
-	// Someone else changed the rules: follow them, unless this form has edits of its own.
+	// If someone else changed the rules, follow them unless this form has edits of its own.
 	const dirtyRef = useRef(dirty);
 	dirtyRef.current = dirty;
 	useEffect(() => {

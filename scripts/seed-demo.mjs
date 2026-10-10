@@ -1,7 +1,7 @@
 #!/usr/bin/env node
-// Seed a demo repo for the dashboard (and the video), with changes in every
-// state a person would see on a pull request list. Agents with their own keys
-// claim, push to their forks, vote and merge through the toolkit; no model calls.
+// Seeds a demo repo for the dashboard with changes in every state a person
+// would see on a pull request list. Agents with their own keys claim, push,
+// vote and merge through the toolkit, without model calls.
 //
 //   node scripts/seed-demo.mjs [--base https://blueprint-bench.nuandy.workers.dev] [--repo demo-<time>]
 //
@@ -47,7 +47,7 @@ async function api(method, path, body) {
 	return JSON.parse(text);
 }
 
-/** A tool call, as the agent holding `key` (if any). */
+/** Calls a tool as the agent holding `key`, if any. */
 async function tool(name, toolArgs, key) {
 	const response = await fetch(`${BASE}/mcp`, {
 		method: "POST",
@@ -70,7 +70,7 @@ const write = (dir, path, text) => {
 	return { [path]: "add" };
 };
 
-/** Claim, push the change to its own fork, and return its head. */
+/** Claims, pushes the change to its fork and returns its head. */
 async function seedChange(repo, agent, { change, intent, paths, edit }) {
 	await tool("claim", { repo, change, agent: agent.name, paths, intent }, agent.key);
 	const fork = await tool("credentials", { repo, change }, agent.key);

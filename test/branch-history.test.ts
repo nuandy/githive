@@ -7,9 +7,9 @@ import { agentClone } from "./helpers/agents";
 import { startGitServer, type GitServer } from "./helpers/git-server";
 
 // The audit reads a branch's history through Artifacts' API: log for the
-// first-parent chain, and readTree to work out what each commit changed from
-// its first parent. What it finds must be exactly what git says: here, git on a
-// test server answers as Artifacts would, and git diff-tree is the reference.
+// first-parent chain, and readTree to work out what each commit changed from its
+// first parent. The result must match git exactly. Here git on a test server
+// answers as Artifacts would, and git diff-tree is the reference.
 
 /** Artifacts' log, readCommit and readTree, answered by git on the server. */
 export function gitHistory(server: GitServer): HistorySource {
@@ -122,7 +122,8 @@ describe("a branch's history through Artifacts' API", { timeout: 60_000 }, () =>
 		}
 		await clone.run("push", "-q", "origin", "HEAD:main");
 		const baseline = server.git("rev-parse", "main~3").trim();
-		// Two commits a page, though more were asked for: read on until the baseline, not taken for the end.
+		// Pages hold two commits even though more were asked for. A short page isn't the end; reading goes on to the
+		// baseline.
 		const source = gitHistory(server);
 		const pages: number[] = [];
 		const paged: HistorySource = {

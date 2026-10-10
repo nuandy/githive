@@ -87,7 +87,10 @@ function RepoLine({ row }: { row: RepoRow }) {
 	);
 }
 
-/** The home page: every repo the reader can see, those that need a person first, then those at work, then the quiet ones. */
+/**
+ * The home page: every repo the reader can see. Those that need a person come first, then those at work,
+ * then the quiet ones.
+ */
 export function RepoList({ rows, loaded, canCreate = false }: RepoListProps) {
 	const [query, setQuery] = useState("");
 	const shown = filterRepos(rows, query);

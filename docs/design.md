@@ -1229,6 +1229,74 @@ in a test. Runs on Express, 9 Oct:
 
 With 200 scripted agents (run 208 in `bench-results/swarm/200/`), landing as a set merged 200 of 200 changes on Express in 2,140 s of work, through 13 merge errors the agents retried: Worker 502 and 500 pages, and Artifacts refusing a batch's push as busy. The 200-agent runs under the line before it never finished.
 
+### Measurements behind the code
+
+The numbers that explain why parts of the code look the way they do. The code
+comments give the reason; the evidence is here.
+
+**Artifacts under load**
+
+- A busy repo's 500s outlasted retries spread over about 0.5 s and reached
+  agents, so Git requests are retried for about 6 s. Artifacts' own
+  `INTERNAL_ERROR` (code 10400) outlasted the default 4 tries in 0.7 s in 4
+  merges of a 200-agent run, so its calls get 5 tries over about 4.5 s.
+- A busy repo can accept a Git request and never answer it. After run 1000-1
+  left the project repo failing, adding the next run's backlog waited 703 s on
+  one such request (run 1000-2), so every Git request now times out after 45 s.
+- A busy repo sometimes answers a fetch with a 200 and an empty body, which git
+  rejects ("expected 'packfile'"): 3 of 8 shallow fetches in a row on the busy
+  project repo (run 1000-3), none of 12 once it was quiet. Empty answers are
+  retried, and the agents' clone helper retries too.
+- A push answered with a server error had applied (run 1000-1). Its changes sat
+  on main with their claims held and their landing unrecorded, and every later
+  batch took one up, merged it to nothing and failed (run 1000-4). A batch now
+  looks for its changes among main's merges first.
+- In run 1000-1, test-merging each change in memory (check and merge fetching
+  main) made the project repo fail about 4,000 of 5,300 requests. Reading
+  changes through Artifacts' API instead removed those fetches.
+- Reading open changes' heads over Git, backlog and reviews made 64,045 Git
+  requests and 34,000 Artifacts calls to forks at 1,000 agents (run 1000-1).
+  Looking each up first in a per-change fork that no longer exists was 40% of
+  their Artifacts calls (run 217). One API call per fork replaced both.
+- Forking a project takes 20–30 s. 200 forks of Express at once left the
+  project repo answering nothing else, so forks are made from seed forks.
+  Forking four at a time, each group waiting on its slowest, gave 200 agents
+  about 4 forks every 30–60 s, and the last agent waited half an hour to push.
+- Deleting a fork takes about 1 s; the bench wipe deletes 8 at a time.
+- Minting an Artifacts token takes about 0.6 s.
+
+**Workers**
+
+- With only onAuth, isomorphic-git leaves each 401's body unread. In a
+  200-agent run those held the Worker request's 6 connections, and the runtime
+  cancelled responses to break the stall 2,585 times. Credentials now go with
+  the first request.
+- Without isomorphic-git's read cache, reading 200 merges took 22 s, and
+  concurrent reads each held their own copy of the packfile.
+- In a 200-agent run, 12 checks and merges were cancelled as hung, and
+  Cloudflare's "internal error; reference = …" killed one merge landing a batch.
+
+**Containers and the Gate**
+
+- At 8 fetches at a time, reading a 64-change batch took 84–95 s; the Gate now
+  fetches 16 at once.
+- Busy push refusals lost two batches in a row at 200 agents before the Gate
+  retried them.
+- The `small` instance (1 vCPU, 3 GiB) has a quarter less memory than
+  standard-1 and twice its CPU. The managed image has Node 24 but no git.
+- Express, the benchmark repo, has no lockfile.
+
+**GitHive's own costs**
+
+- Building a repo's snapshot view from Git takes about 9 s, and its audit view
+  about 20 s.
+- Copying a repo's default branch takes seconds, against a minute or more for
+  an import.
+- Registering agents one write at a time cost about 2 s each, so `register`
+  takes a list.
+- An ordinary reviewer's review hold that lingered after its vote once sent the
+  only security holder off to build instead, so holds are kept by role.
+
 ## Endpoint and dashboard
 
 The tools are at `POST /mcp` on the same Worker as the dashboard and its

@@ -6,51 +6,49 @@ import { approval, type Author, type ReviewPolicy, type VoteRecord, type Votes, 
 import { settingsForBranch } from "./branch-rules";
 import { skipsChecks } from "./check-scope";
 
-// The audit (see docs/design.md). Nothing stops an
-// agent from breaking a convention, so this replays the records and reports
-// every violation, with the commit and the agent responsible. A pure function:
-// anyone can run it over the same records and get the same answer.
+// The audit (see docs/design.md). Nothing stops an agent from breaking a convention, so this replays the records
+// and reports every violation with the commit and agent responsible. It's a pure function, so anyone can rerun it
+// over the same records and get the same answer.
 
 /** A merge into main, as its commit records it. */
 export interface MergeRecord {
 	commit: string;
 	author: string;
-	/** From the merge's GitHive-Change trailer. */
+	/** GitHive-Change trailer. */
 	change?: string;
-	/** From its GitHive-Claims trailer: the registry tip the merging agent checked. */
+	/** GitHive-Claims trailer: the claims state the merging agent checked. */
 	claimsTip?: string;
-	/** The change's commit that was reviewed and merged (the merge's second parent). */
+	/** The reviewed commit, the merge's second parent. */
 	head?: string;
-	/** From its GitHive-Votes trailer: the votes tip the merging agent counted. */
+	/** GitHive-Votes trailer: the votes state the merging agent counted. */
 	votesTip?: string;
-	/** Main before the merge (its first parent). */
+	/** Main before the merge, its first parent. */
 	base?: string;
-	/** From its GitHive-Tested trailer: the main the checks passed on. */
+	/** GitHive-Tested trailer: the main the checks passed on. */
 	testedOn?: string;
-	/** From its GitHive-Tested-After trailer (merges from before batches): the changes (their heads) merged in before it in the check, ahead of it in line. */
+	/** GitHive-Tested-After trailer, on merges from before batches: heads merged ahead of it in the check. */
 	testedAfter?: string[];
-	/** From its GitHive-Tested-With trailer: every change (its head) checked together with it, in landing order, itself among them. */
+	/** GitHive-Tested-With trailer: every head checked together with it, in landing order, itself included. */
 	testedWith?: string[];
-	/** From its GitHive-By and GitHive-Stamp trailers: who asked the toolkit to merge, as Access verified them, and GitHive's stamp. */
+	/** GitHive-By and GitHive-Stamp trailers: the verified identity that asked for the merge, and the stamp. */
 	by?: string;
 	stamp?: string;
-	/** From its GitHive-Reverts trailer: the commit this one reverts. */
+	/** GitHive-Reverts trailer. */
 	reverts?: string;
-	/** Files the merge changed. */
 	files: string[];
 	/** The branch it landed on, when not the project's. */
 	branch?: string;
-	/** The same files as the claims records name them, for a merge into another branch (see branch-scope.ts); absent, `files`. */
+	/** `files` as the claims records name them, for a merge into another branch (see branch-scope.ts). */
 	claimFiles?: string[];
 }
 
 export interface Violation {
 	commit: string;
-	/** The agent the record names: only verified when `by` is set. */
+	/** The agent the record names, verified only when `by` is set. */
 	author: string;
 	rule: string;
 	detail: string;
-	/** Who did it, as Access verified them, when GitHive stamped it. */
+	/** The verified identity, when GitHive stamped the commit. */
 	by?: string;
 	/** The stamped revert that undid the commit, if one did. */
 	resolvedBy?: string;
@@ -89,15 +87,15 @@ export const STALE_AFTER_MS = 30 * 60_000;
 export interface AuditRecords {
 	/** The claims registry's history, oldest first. */
 	registry: { tip: string; state: Registry }[];
-	/** Each claims shard's history, oldest first, when claims are sharded (see shards.ts). */
+	/** Each claims shard's history, oldest first, when claims are sharded. */
 	shards?: Map<string, { tip: string; state: Registry }[]>;
 	/** The votes' history, oldest first. */
 	votes?: { tip: string; state: Votes }[];
-	/** Each vote bucket's history, oldest first, once the votes are sharded (see vote-store.ts). */
+	/** Each vote bucket's history, oldest first, once votes are sharded. */
 	voteBuckets?: Map<string, { tip: string; state: Votes }[]>;
-	/** The review policy, for merges that cite no registry state with one (see settingsFor). */
+	/** The review policy for merges whose cited registry state has none (see settingsFor). */
 	policy?: ReviewPolicy;
-	/** The project's checks, likewise; when set, every merge must record checks passing on the main it merged onto. */
+	/** The checks, likewise. When set, every merge must record checks passing on the main it merged onto. */
 	verify?: string[];
 	merges: MergeRecord[];
 	staleAfterMs?: number;
@@ -116,13 +114,11 @@ export async function audit(records: AuditRecords): Promise<Violation[]> {
 
 	const registryAt = new Map(records.registry.map((r) => [r.tip, r.state]));
 	const byCommit = new Map(records.merges.map((m) => [m.commit, m]));
-	/** Each merge by the one before it on its branch: what landed next. */
+	// Each merge keyed by its base, to find what landed next.
 	const byBase = new Map(records.merges.filter((m) => m.base).map((m) => [m.base!, m]));
-	/** Stamped reverts: what each undid, settled once every commit has been checked. */
 	const reverts: MergeRecord[] = [];
 	for (const merge of records.merges) {
-		// A revert through the toolkit restores what a reported commit changed; it isn't a change of its own.
-		// Without a stamp key nothing is verified, as for every other record.
+		// A stamped revert restores what a reported commit changed, so it isn't checked as a change of its own.
 		if (merge.reverts && (!key || (await verifyStamp(key, revertStampPayload(merge), merge.stamp)))) {
 			reverts.push(merge);
 			continue;
@@ -141,8 +137,7 @@ export async function audit(records: AuditRecords): Promise<Violation[]> {
 			continue;
 		}
 		if (key && merge.by && (await verifyStamp(key, mergeStampPayload(merge), merge.stamp))) stampedBy = merge.by;
-		// Unstamped: its maker is unverified. What it changed is still a fact in
-		// Git, so the checks below still run against the records it cites.
+		// An unstamped merge's maker is unverified, but what it changed is still in Git, so the checks still run.
 		if (key && !stampedBy)
 			violations.push({
 				commit: merge.commit,
@@ -169,7 +164,7 @@ export async function audit(records: AuditRecords): Promise<Violation[]> {
 					`${file} was not in ${merge.change}'s claim at ${merge.claimsTip}${merge.branch ? ` (on ${merge.branch})` : ""}`,
 				);
 		});
-		// What its claim waited on merged into the same branch first (each branch's merges are read oldest first).
+		// Its claim's dependencies must have merged into the same branch first. Merges are read oldest first.
 		for (const dep of own?.after ?? []) {
 			const at = records.merges.indexOf(merge);
 			const before = records.merges.some(
@@ -184,7 +179,7 @@ export async function audit(records: AuditRecords): Promise<Violation[]> {
 		for (const { history, tip } of cited.records) checkReleasedAfter(history, tip, merge, report);
 		const settings = settingsFor(records, registryAt, merge);
 		checkApproved(records, settings.policy, votesAt, merge, report, own);
-		// Checks it needed: none for a change that only touched what they skip, as the settings then said.
+		// A change that only touched files the settings said to skip needs no checks.
 		if (settings.verify?.length && !skipsChecks(merge.files, settings.skipChecks)) {
 			if (!merge.testedOn) report("untested", "the merge records no checks run (GitHive-Tested)");
 			else if (merge.testedWith?.length ? !landedAsBatch(merge, byCommit, byBase) : !testedAsLanded(merge, byCommit)) {
@@ -221,12 +216,8 @@ export async function audit(records: AuditRecords): Promise<Violation[]> {
 type Verify = (kind: string, record: object & { stamp?: string }) => Promise<boolean>;
 type History = { tip: string; state: Registry }[];
 
-/**
- * The claims a merge says it checked (its GitHive-Claims trailer): a tip of
- * the claims registry, or, sharded, `shard=tip` for each shard it read, the
- * registry among them as "" (above every shard). Each file must be covered by
- * a cited shard (its own or one above it).
- */
+// The claims a merge cites in GitHive-Claims: a registry tip, or when sharded `shard=tip` for each shard read,
+// with the registry as "". Each file must be covered by a cited shard, its own or an ancestor.
 function citedClaims(
 	records: AuditRecords,
 	registryAt: Map<string, Registry>,
@@ -322,11 +313,8 @@ async function verifiedVotes(records: AuditRecords, verified: Verify) {
 	return { votesAt, forged };
 }
 
-/**
- * The claim a merge cites must still have been held when it merged: the first
- * registry state after the cited tip without the claim must be a release that
- * names this merge. Otherwise the agent merged after giving its claim up.
- */
+// The cited claim must still have been held at merge time: the first later state without it must hold a release
+// naming this merge. Otherwise the agent merged after giving its claim up.
 function checkReleasedAfter(
 	history: History,
 	tip: string,
@@ -348,11 +336,8 @@ function checkReleasedAfter(
 	}
 }
 
-/**
- * The votes a merge says it counted (its GitHive-Votes trailer): a tip of
- * the votes record, or, sharded, `=tip` for the record and `bucket=tip` for
- * the bucket of the merged commit, counted together.
- */
+// The votes a merge cites in GitHive-Votes: a votes record tip, or when sharded `=tip` for the record plus
+// `bucket=tip` for the merged commit's bucket.
 function citedVotes(
 	records: AuditRecords,
 	votesAt: Map<string, Votes>,
@@ -380,11 +365,8 @@ function citedVotes(
 	return { votes };
 }
 
-/**
- * The settings a merge is held to: the review policy and checks in the
- * registry state it cites (the registry itself, "", among shards), since
- * settings can change; the records' own when it cites none.
- */
+// A merge is held to the settings in the registry state it cites, since settings change over time, or to the
+// records' own when it cites none.
 function settingsFor(
 	records: AuditRecords,
 	registryAt: Map<string, Registry>,
@@ -403,7 +385,7 @@ function settingsFor(
 		verify: state?.verify ?? records.verify,
 		...(state?.skipChecks ? { skipChecks: state.skipChecks } : {}),
 	};
-	// A merge into another branch had that branch's settings: the repo's, with what its rule changed then.
+	// A merge into another branch had that branch's settings at the time.
 	if (!merge.branch || !state?.branchRules?.length || !repo.policy) return repo;
 	const settings = settingsForBranch(
 		{ policy: repo.policy, verify: repo.verify ?? [], rules: state.branchRules, project: state.branch ?? "main" },
@@ -416,7 +398,8 @@ function settingsFor(
 	};
 }
 
-/** The merged commit must have had the policy's approvals from reviewers other than its author, every veto role's among them, and no veto, in the votes the merge cites. */
+// The merged commit needs the policy's approvals from reviewers other than its author, every veto role's included,
+// and no veto, in the votes the merge cites.
 function checkApproved(
 	records: AuditRecords,
 	policy: ReviewPolicy | undefined,
@@ -426,14 +409,13 @@ function checkApproved(
 	author?: Author,
 ) {
 	if (!policy) return;
-	// A policy that needs no approvals and no role's sign-off needs no votes to cite (there may be no votes yet at all).
+	// A policy needing no approvals or sign-offs needs no votes cited, and there may be no votes at all yet.
 	const needs = effectivePolicy(policy, merge.files);
 	if (merge.head && !merge.votesTip && needs.required === 0 && !needs.vetoes.length) return;
 	if (!merge.head || !merge.votesTip)
 		return report("undeclared", "the merge names no reviewed commit or votes it counted (GitHive-Votes)");
 	const votes = citedVotes(records, votesAt, merge, report);
 	if (!votes) return;
-	// Distinct verified reviewers, never the change's own author.
 	const outcome = approval(votes, merge.head, policy, author, merge.files);
 	const { required } = effectivePolicy(policy, merge.files);
 	if (outcome.vetoedBy.length)
@@ -444,12 +426,8 @@ function checkApproved(
 		report("unapproved", `${merge.head} had no approval from ${outcome.awaiting.join(", ")} at ${merge.votesTip}`);
 }
 
-/**
- * Whether a merge went onto the code its checks ran on: right onto the main
- * they ran on, or, checked in a line after other merges (before batches),
- * onto that main with exactly those merges (and nothing else) landed on it
- * since, in order.
- */
+// Whether a merge went onto the code its checks ran on: the tested main itself or, for merges from before batches,
+// that main plus exactly the merges it was checked after, in order.
 function testedAsLanded(merge: MergeRecord, byCommit: Map<string, MergeRecord>) {
 	const after = merge.testedAfter ?? [];
 	const landed: string[] = [];
@@ -462,12 +440,8 @@ function testedAsLanded(merge: MergeRecord, byCommit: Map<string, MergeRecord>) 
 	return landed.length === after.length && landed.every((head, i) => head === after[i]);
 }
 
-/**
- * Whether a merge checked together with other changes landed as checked:
- * right on the main the checks ran on, the batch's merges one after another,
- * exactly the changes it names, in its order, and nothing in between. (They
- * land in one push, so main never stops partway through a batch.)
- */
+// Whether a batch landed as checked: on the tested main, exactly its merges in order with nothing in between.
+// A batch lands in one push, so main never stops partway through one.
 function landedAsBatch(merge: MergeRecord, byCommit: Map<string, MergeRecord>, byBase: Map<string, MergeRecord>) {
 	const heads = merge.testedWith!;
 	const sameBatch = (m: MergeRecord | undefined): m is MergeRecord =>
@@ -479,7 +453,6 @@ function landedAsBatch(merge: MergeRecord, byCommit: Map<string, MergeRecord>, b
 		if (steps >= heads.length || !sameBatch(before)) return false;
 		first = before;
 	}
-	// From there, exactly the batch.
 	let at: MergeRecord | undefined = first;
 	for (const head of heads) {
 		if (!sameBatch(at) || at.head !== head) return false;

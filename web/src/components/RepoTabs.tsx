@@ -30,8 +30,8 @@ import "./RepoSettings.css";
 import "./Timeline.css";
 import "./RepoTabs.css";
 
-// No central server enforces a repo's rules, so these pages show who holds what, how reviews stand, and what the audit read from
-// Git found, including violations a revert has since resolved.
+// No central server enforces a repo's rules, so these pages show who holds what, how reviews stand, and
+// what the audit found in Git, including violations a revert has since resolved.
 
 function Approvals({ claim }: { claim: Claim }) {
 	const { approval } = claim;
@@ -45,8 +45,10 @@ function Approvals({ claim }: { claim: Claim }) {
 	);
 }
 
-/** The Changes tab: claims in force, each a change in progress. */
-/** Where a change lands and what holds it back, when that isn't the plain case: into another branch, a whole branch merged, waiting on others. */
+/**
+ * Where a change lands and what holds it back, when that isn't the plain case: into another branch, merging a
+ * whole branch, or waiting on other changes.
+ */
 export function ChangeLabels({ claim }: { claim: Pick<Claim, "into" | "source" | "waitsOn"> }) {
 	return (
 		<>
@@ -65,7 +67,7 @@ export function ChangeLabels({ claim }: { claim: Pick<Claim, "into" | "source" |
 	);
 }
 
-/** The open changes, newest first: on one branch (`shown`, when given: the one the overview shows), or all. */
+/** The open changes, newest first: all of them, or those on `shown` (the branch the overview shows). */
 export function ChangeList({ snapshot, repo, shown }: { snapshot: RepoSnapshot; repo: string; shown?: string }) {
 	const project = snapshot.branch ?? "main";
 	const claims = [...snapshot.claims]
@@ -355,14 +357,17 @@ export interface ChangePageProps {
 	api?: VoteApi;
 	/** Whether the reader may vote (review or more in the repo); without it, no vote form. */
 	canVote?: boolean;
-	/** A person merging the change (write or more in the repo): landing in a batch with the branch's other ready changes, as its agent, stamped with their name. */
+	/**
+	 * A person merging the change (write or more in the repo). It lands as its agent in a batch with the branch's
+	 * other ready changes, stamped with their name.
+	 */
 	merge?: (
 		repo: string,
 		change: string,
 	) => Promise<{ ok: boolean; commit?: string; reasons?: string[]; conflicts?: string[] }>;
 }
 
-/** Merge, for a person, once a change is approved and waits on nothing: the same merge an agent asks for, checks and all. */
+/** Merge for a person, once a change is approved and waits on nothing. It's the same merge an agent asks for. */
 function MergeButton({
 	repo,
 	change,

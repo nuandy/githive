@@ -29,7 +29,10 @@ export const LAMP_WORDS: Record<Lamp, string> = {
 export const lampColor = (lamp: Lamp): "red" | "amber" | "green" =>
 	lamp === "attention" ? "red" : lamp === "approved" ? "green" : "amber";
 
-/** What else a lamp reads: what's being checked to land, the votes (for when a change's turn came back to its agent), and the time. */
+/**
+ * What else a lamp reads: what's being checked to land, the votes (for when a change went back to its agent),
+ * and the time.
+ */
 export interface LampContext {
 	landing?: Pick<RepoLanding, "checking">;
 	votes?: RepoSnapshot["votes"];

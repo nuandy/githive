@@ -4,14 +4,11 @@ import type { HistorySource } from "./toolkit/branch-history";
 import { isTransientFailure, retryTransient, sleep, transientDelay } from "./retry";
 import { rpc } from "./rpc";
 
-/**
- * One reviewer instance per (slice, role, commit). A new commit never collides
- * with a reviewer that is still finishing on an older one.
- */
+/** One reviewer per slice, role and commit, so a new commit never collides with a reviewer still finishing. */
 export const reviewerName = (sliceRepo: string, role: string, head: string) =>
 	`${sliceRepo}--review-${role}--${head.slice(0, 12)}`;
 
-/** An Artifacts call, `method` on `repo` ("-": the namespace), counted for the call it's made in (see countingRequests), failed or not. */
+/** Make an Artifacts call and count it (see countingRequests). The repo "-" means the namespace. */
 async function call<T>(method: string, repo: string, operation: () => PromiseLike<T>): Promise<T> {
 	try {
 		const value = await operation();
@@ -23,11 +20,7 @@ async function call<T>(method: string, repo: string, operation: () => PromiseLik
 	}
 }
 
-/**
- * Run work against a disposable repo capability, releasing it even on failure.
- * Getting the repo is retried when it fails transiently, unless `retry` is false
- * because the caller retries itself.
- */
+/** Run work against a disposable repo handle, releasing it even on failure. */
 async function withRepo<T>(
 	artifacts: Artifacts,
 	name: string,
@@ -41,8 +34,7 @@ async function withRepo<T>(
 	} catch (err) {
 		throw naming(err, name);
 	} finally {
-		// The binding provides disposable handles; optional invocation also keeps
-		// lightweight test doubles compatible with the same operation contract.
+		// The binding's handles must be disposed; test doubles may not have a dispose method.
 		const disposeSymbol = (Symbol as unknown as { dispose?: symbol }).dispose;
 		if (disposeSymbol) {
 			const dispose = (repo as unknown as Record<symbol, unknown>)[disposeSymbol];
@@ -51,7 +43,7 @@ async function withRepo<T>(
 	}
 }
 
-/** An Artifacts failure, saying which repo it was about (its code and status kept, for retries). */
+/** Add the repo name to an Artifacts error, keeping its code and status for retries. */
 function naming(err: unknown, name: string) {
 	if (err instanceof Error && !err.message.includes(`(${name})`)) err.message = `${err.message} (${name})`;
 	return err;
@@ -73,7 +65,7 @@ export async function remoteFor(
 	});
 }
 
-/** Read a repo's history through Artifacts' own API (log, readCommit, readTree), each call tried again through its transient failures. */
+/** Read a repo's history through the Artifacts API rather than Git, retrying transient failures. */
 export async function withHistory<T>(
 	artifacts: Artifacts,
 	name: string,
@@ -114,15 +106,10 @@ export async function listRepoNames(artifacts: Artifacts) {
 
 const codeOf = (err: unknown) => (err && typeof err === "object" && "code" in err ? String(err.code) : "");
 
-/** Artifacts fails some forks of one repo when many run at once (INTERNAL_ERROR, 10400); they succeed when tried again. */
+/** Artifacts throttles a busy repo with INTERNAL_ERROR, such as many forks at once; retrying succeeds. */
 const isInternalError = (err: unknown) => codeOf(err) === "INTERNAL_ERROR";
 
-/**
- * Artifacts' calls, tried again through transient failures and the internal
- * errors it returns under load: 5 tries over about 4.5 s. A busy repo's
- * "internal error" outlasted the default's 4 in 0.7 s, and reached agents (4
- * merges of a 200-agent run).
- */
+/** Retries Artifacts calls for a few seconds, longer than the default, since a busy repo stays busy a while. */
 const retryArtifacts = <T>(operation: () => Promise<T>) =>
 	retryTransient(operation, {
 		maxAttempts: 5,
@@ -134,35 +121,27 @@ const retryArtifacts = <T>(operation: () => Promise<T>) =>
 const alreadyExists = (err: unknown) =>
 	/EXISTS/.test(codeOf(err)) || /already exists/i.test(err instanceof Error ? err.message : "");
 
-/** Under load a fork that was just made can briefly read as missing; while waiting for it, that means not ready yet. */
+/** Under load a new fork can briefly read as missing, which means it isn't ready yet. */
 const notFoundYet = (err: unknown) =>
 	/NOT_FOUND/.test(codeOf(err)) || /not found/i.test(err instanceof Error ? err.message : "");
 
 const FORK_ATTEMPTS = 5;
 
 /**
- * How long a new fork may read as missing before it is asked for again (and
- * again, each time it stays missing that long), and how long to wait for it
- * in all. Under a burst of forks, some accepted forks never appear.
+ * How long a new fork may read as missing before it's requested again, and the total wait.
+ * Under a burst of forks, Artifacts accepts some forks that never appear.
  */
 const FORK_LOST_MS = 8_000;
 const FORK_READY_MS = 90_000;
-/**
- * How long a fork may stay "in progress" before it's taken to be stuck. A fork
- * of a seed takes about 13 s, of a project 20-30 s; under a burst, Artifacts
- * has left one in progress for good (45 minutes, until it was deleted).
- */
+/** How long a fork may stay "in progress" before it's treated as stuck, which Artifacts can do under a burst. */
 const FORK_STUCK_MS = 45_000;
 
-/** A fork that didn't become ready in time: asking again later may find it made. */
+/** The fork wasn't ready in time; asking again later may find it made. */
 export const isForkNotReady = (err: unknown) => codeOf(err) === "FORK_NOT_READY";
 
 /**
- * Fork `source` and wait until the fork is ready, since get() throws while a
- * repo is still forking. Under load Artifacts fails some forks outright, and
- * now and then accepts one that never appears; both are asked for again.
- * Each loop below does its own retrying, with no retry loop inside it, so a
- * fork is requested at most FORK_ATTEMPTS times per ask.
+ * Fork `source` and wait until the fork is ready, since get() throws while a repo is still forking.
+ * Under load Artifacts fails some forks or loses them, so they're requested again.
  */
 export async function forkAndWait(
 	artifacts: Artifacts,
@@ -172,10 +151,10 @@ export async function forkAndWait(
 	{
 		shared = false,
 	}: {
-		/** Others may be making the same fork at once (a seed): one that exists already is theirs, waited for. */ shared?: boolean;
+		/** Others may make the same fork at once, as with seeds, so an existing one is waited for. */ shared?: boolean;
 	} = {},
 ) {
-	/** Request the fork; null when it turns out to exist already (a failed or lost request made it after all). */
+	/** Request the fork. Returns null when it already exists because an earlier request succeeded after all. */
 	const requestFork = (again: boolean) =>
 		withRepo(artifacts, source, async (repo) => {
 			for (let attempt = 1; ; attempt++) {
@@ -185,8 +164,7 @@ export async function forkAndWait(
 					if ((again || attempt > 1) && alreadyExists(err)) return null;
 					const internal = isInternalError(err);
 					if ((!internal && !isTransientFailure(err)) || attempt === FORK_ATTEMPTS) throw err;
-					// An internal error backs off with jitter, so a burst of forks spreads
-					// out; a transient failure waits as retryTransient would.
+					// Jitter spreads out a burst of forks that hit internal errors together.
 					if (internal) await scheduler.wait(Math.min(250 * 2 ** attempt, 4_000) * (0.5 + Math.random()));
 					else await sleep(transientDelay(attempt));
 				}
@@ -195,7 +173,7 @@ export async function forkAndWait(
 
 	let forked = await requestFork(shared);
 	const started = Date.now();
-	// Since when the fork has read as still forking, and whether it was deleted for staying so (once).
+	// A fork stuck "in progress" is deleted once.
 	let forkingSince: number | undefined;
 	let unstuck = false;
 	// Jittered, so forks lost together aren't all asked for again together.
@@ -203,7 +181,7 @@ export async function forkAndWait(
 	let askAgainAt = started + lostAfter();
 	for (let delay = 100; ; delay = Math.min(delay * 2, 2_000)) {
 		try {
-			// One try: this loop already waits out transient failures.
+			// No retry inside: this loop already waits out transient failures.
 			await withRepo(artifacts, name, async () => undefined, { retry: false });
 			if (forked) return forked;
 			const remote = await remoteFor(artifacts, name, "write", 3 * 3600);
@@ -212,7 +190,7 @@ export async function forkAndWait(
 			if (!isTransientFailure(err) && !isForkPending(err) && !notFoundYet(err)) throw err;
 			if (isForkPending(err)) forkingSince ??= Date.now();
 			if (isForkPending(err) && !unstuck && Date.now() - (forkingSince ?? Date.now()) > FORK_STUCK_MS) {
-				// Stuck forking. Deleting it has been seen to let it finish at once; else it's gone, and asked for again now.
+				// Deleting a stuck fork often lets it finish at once. Otherwise it's gone and is requested again.
 				unstuck = true;
 				console.log(
 					`fork ${name} still forking after ${Math.round((Date.now() - forkingSince!) / 1000)}s: deleting it, so it finishes or is made again`,
@@ -258,11 +236,8 @@ export async function ensureRepo(artifacts: Artifacts, name: string, description
 const escapeRegex = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 /**
- * What a repo leaves behind besides itself: its agents' forks
- * (fork--<id>--agent--<agent>, and fork--<id>--<change> from before forks
- * were per agent) and its claim shards (records--<id>--<n>). A name that
- * belongs to a longer repo id (acme--web, when deleting acme) is never one of
- * them, whatever it looks like.
+ * The forks (fork--<id>--...) and claim shards (records--<id>--<n>) a repo leaves behind.
+ * Names belonging to a longer repo id, like acme--web when deleting acme, are excluded.
  */
 export function leftoversOf(id: string, names: string[]) {
 	const longer = names.filter((n) => !n.startsWith("fork--") && !n.startsWith("records--") && n.startsWith(`${id}--`));

@@ -4,9 +4,8 @@ import { PROVIDERS, type ProviderConfig, type ProviderName, isProvider, pkceChal
 import { OrgStore } from "./orgs";
 import { type IdentityStore, SESSION_DAYS, randomSecret } from "./store";
 
-// GitHive's sign-in and a signed-in person's own things: sign in with GitHub
-// or Google and out again, who you are, your agents and their tokens, and the
-// MCP clients connected as them. Admins behind Access manage invitations.
+// Sign-in with GitHub or Google, and a signed-in person's own agents, tokens and connected MCP clients.
+// Admins behind Access manage invitations here too.
 
 export type AuthEnv = { Bindings: Env; Variables: { principal?: Principal } };
 
@@ -15,7 +14,7 @@ const SIGNIN_COOKIE = "__Host-githive_signin";
 const cookieHeader = (name: string, value: string, maxAgeSeconds: number) =>
 	`${name}=${encodeURIComponent(value)}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${maxAgeSeconds}`;
 
-/** Only a path on this site: never another origin ("//evil", "https://…"). */
+/** Accepts only a path on this site, never another origin ("//evil", "https://…"). */
 export const safeReturn = (value: string | undefined | null) =>
 	value && value.startsWith("/") && !value.startsWith("//") && !value.startsWith("/\\") ? value : "/";
 
@@ -43,7 +42,7 @@ export function authRoutes(app: Hono<AuthEnv>) {
 		c.json({ providers: (["github", "google"] as const).filter((p) => providerConfig(c.env, p)) }),
 	);
 
-	// Start signing in: to the provider, with a fresh state and PKCE verifier kept in a short-lived cookie.
+	// Sends the person to the provider. The state and PKCE verifier wait in a short-lived cookie.
 	app.get("/auth/:provider", async (c) => {
 		const name = c.req.param("provider");
 		if (!isProvider(name)) return c.json({ error: `no sign-in with ${name}` }, 404);
@@ -65,7 +64,7 @@ export function authRoutes(app: Hono<AuthEnv>) {
 		);
 	});
 
-	// Back from the provider: check the state, learn who signed in, and start a session.
+	// The provider's callback checks the state, learns who signed in, and starts a session.
 	app.get("/auth/:provider/callback", async (c) => {
 		const name = c.req.param("provider");
 		const back = (error: string) => {
@@ -94,14 +93,13 @@ export function authRoutes(app: Hono<AuthEnv>) {
 				verifier: pending.verifier,
 			});
 		} catch (err) {
-			// What the provider said (its error, never the code or a secret), for whoever reads the logs.
+			// Log the provider's error for debugging, never the code or a secret.
 			console.error(`sign-in with ${name} failed`, err instanceof Error ? err.message : String(err));
 			return back(/\[403\]/.test(String(err)) ? "unverified-email" : "provider-failed");
 		}
 		const ids = store(c.env);
 		const signed = await ids.signIn(profile);
 		if ("refused" in signed) return back("not-invited");
-		// Their own org, and every org that invited them.
 		const orgs = new OrgStore(c.env.DB);
 		await orgs.personalOrg(signed.user);
 		await orgs.acceptInvites(signed.user);
@@ -121,7 +119,7 @@ export function authRoutes(app: Hono<AuthEnv>) {
 	app.get("/me", async (c) => {
 		const principal = c.get("principal");
 		if (!principal) return c.json({ error: "sign in to GitHive first" }, 401);
-		// Someone who signed in before orgs existed gets their own namespace now.
+		// People who signed in before orgs existed get their personal org here.
 		if (principal.kind === "user" && c.env.DB) await new OrgStore(c.env.DB).personalOrg(principal.user);
 		const hosted =
 			principal.kind === "access" ? true : c.env.DB ? await store(c.env).mayUseHosted(principal.user.id) : false;
@@ -140,7 +138,7 @@ export function authRoutes(app: Hono<AuthEnv>) {
 		const user = signedInUser(c.get("principal"));
 		const agentId = c.req.param("id");
 		await store(c.env).revokeAgent(user.id, agentId);
-		// Its MCP connections go too: each grant's props name the agent it acts as.
+		// Revoke the agent's MCP grants too. Each grant's metadata names the agent it acts as.
 		const helpers = (c.env as unknown as { OAUTH_PROVIDER?: OAuthHelpersLike }).OAUTH_PROVIDER;
 		if (helpers)
 			for (const grant of await listGrants(helpers, user.id))
@@ -148,7 +146,7 @@ export function authRoutes(app: Hono<AuthEnv>) {
 		return c.json({ revoked: agentId });
 	});
 
-	// A new token for one of your agents: shown once, in this response.
+	// A new token is shown once, in this response.
 	app.post("/me/agents/:id/tokens", async (c) => {
 		const user = signedInUser(c.get("principal"));
 		const body = await c.req
@@ -193,7 +191,7 @@ export function authRoutes(app: Hono<AuthEnv>) {
 		return c.json({ revoked: c.req.param("id") });
 	});
 
-	// Invitations: who may sign in, until repos have permissions. Only an admin, through Access.
+	// Sign-in invitations. Only an admin, through Access, manages them.
 	const admin = (principal: Principal | undefined) => {
 		if (principal?.kind !== "access")
 			throw new Error("[403] invitations are managed by an admin, through Cloudflare Access");
@@ -216,7 +214,7 @@ export function authRoutes(app: Hono<AuthEnv>) {
 		return c.json({ uninvited: c.req.param("email") });
 	});
 
-	// People orgs asked for who can't sign in until approved: approve (POST /admin/invites) or turn down.
+	// Org invitations whose email an admin hasn't approved yet. Approve with POST /admin/invites, or decline here.
 	app.get("/admin/invite-requests", async (c) => {
 		admin(c.get("principal"));
 		return c.json(await store(c.env).inviteRequests());
@@ -227,7 +225,7 @@ export function authRoutes(app: Hono<AuthEnv>) {
 		return c.json({ declined: c.req.param("email") });
 	});
 
-	// Who may use GitHive's hosted agents (build, request_review), which spend its model account.
+	// Who may use the hosted agents (build, request_review). They spend GitHive's model account.
 	app.get("/admin/hosted-agents", async (c) => {
 		admin(c.get("principal"));
 		return c.json(await store(c.env).hostedUsers());

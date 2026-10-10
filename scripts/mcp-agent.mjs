@@ -1,15 +1,15 @@
 #!/usr/bin/env node
-// Work on a GitHive repo as an outside agent, from a shell: call the MCP
-// tools, and clone a change's fork with plain git. Tokens and agent keys are
-// never printed: tool results have them redacted, a fork's write token goes
-// only into that clone's own git config, and an agent key into a file.
+// Works on a GitHive repo as an outside agent from a shell: calls MCP tools
+// and clones a change's fork with plain git. Tokens and agent keys are never
+// printed. Tool results are redacted, a fork's write token goes only into that
+// clone's git config, and an agent key goes into a file.
 //
 //   node scripts/mcp-agent.mjs call <tool> '<json args>' [--key-file F]
 //   node scripts/mcp-agent.mjs register <repo> <agent> <key-file>      register an agent, key to <key-file>
-//   node scripts/mcp-agent.mjs clone <dir> --repo R --change C --key-file F   clone the project, push to your fork (remote "fork"; --full x for all history)
-//   node scripts/mcp-agent.mjs auth <dir> (same flags as clone)          fresh write access for an existing clone
-//   node scripts/mcp-agent.mjs review-clone <dir> --repo R --change C [--role R] [--key-file F]   a change to review (marks you reviewing it)
-//        (the project, with the change's branch from its author's fork as "change", checked out at its pushed head)
+//   node scripts/mcp-agent.mjs clone <dir> --repo R --change C --key-file F   clone the project; push to remote "fork" (--full x for all history)
+//   node scripts/mcp-agent.mjs auth <dir> (same flags as clone)          refresh write access for an existing clone
+//   node scripts/mcp-agent.mjs review-clone <dir> --repo R --change C [--role R] [--key-file F]   check out a change to review
+//        (the project, plus the author's fork as remote "change", at the change's pushed head; marks you as reviewing)
 //
 // --base defaults to the bench Worker. Access credentials come from .dev.vars
 // (CF_ACCESS_CLIENT_ID, CF_ACCESS_CLIENT_SECRET).
@@ -18,7 +18,7 @@ import { execFileSync } from "node:child_process";
 import { chmodSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
-// A failure never prints a token: errors carry git's command line, which may hold one.
+// Errors can carry git's command line, which may hold a token.
 const redacted = (text) =>
 	String(text)
 		.replace(/(Bearer |Basic )[^\s"'\]]+/g, "$1<redacted>")
@@ -81,10 +81,9 @@ async function forkAccess() {
 const header = (token) => `http.extraHeader=Authorization: Bearer ${token.split("?")[0]}`;
 
 /**
- * Clone with a token (git's own stderr shown, never its command line, which
- * holds the token), tried again a few times: Artifacts answers some shallow
- * fetches with an empty 200 ("fatal: expected 'packfile'"), 3 of 8 in a row
- * on a busy project repo (run 1000-3).
+ * Clones with a token, showing git's stderr but never its command line, which
+ * holds the token. Retries because Artifacts sometimes answers a shallow fetch
+ * with an empty 200 ("fatal: expected 'packfile'") on a busy repo.
  */
 function cloneWith(token, args, dir) {
 	const CLONE_TRIES = 5;
@@ -123,8 +122,8 @@ switch (command) {
 		const { url, token, project } = await forkAccess();
 		const depth = flags.full === undefined ? ["--depth", "1"] : [];
 		if (project) {
-			// the agent's fork is shared by its changes and may be behind, so start from the
-			// project (origin, read-only) and push to the fork (remote "fork"). Each URL gets its own token.
+			// The agent's fork is shared by its changes and may be behind. Start from the
+			// read-only project (origin) and push to the fork (remote "fork"). Each URL gets its own token.
 			if (command === "clone") cloneWith(project.token, [...depth, "--branch", project.branch, project.url], dir);
 			execFileSync("git", [
 				"-C",
@@ -136,10 +135,10 @@ switch (command) {
 			try {
 				execFileSync("git", ["-C", dir, "remote", "remove", "fork"], { stdio: "ignore" });
 			} catch {
-				// No fork remote yet (a fresh clone).
+				// A fresh clone has no fork remote yet.
 			}
 		} else if (command === "clone") {
-			// Shallow by default: an agent needs the tip to work on, not the project's whole history (--full for all of it).
+			// Shallow by default, since an agent needs only the tip. --full fetches all history.
 			cloneWith(token, [...depth, "--no-single-branch", url], dir);
 		}
 		if (project) {
@@ -152,7 +151,7 @@ switch (command) {
 				`Authorization: Bearer ${token.split("?")[0]}`,
 			]);
 		} else {
-			// The token lives only in this clone's own config, so plain git push works until it expires (then: auth).
+			// The token lives only in this clone's config, so plain git push works until it expires. Then run auth.
 			execFileSync("git", ["-C", dir, "config", "http.extraHeader", `Authorization: Bearer ${token.split("?")[0]}`]);
 		}
 		console.log(
@@ -167,7 +166,7 @@ switch (command) {
 			{ repo: flags.repo, change: flags.change, ...(flags.role ? { role: flags.role } : {}) },
 			flags["key-file"],
 		);
-		// Deep enough to diff against the project's branch; read-only tokens, each in this clone's own config.
+		// Deep enough to diff against the project's branch. Read-only tokens go in this clone's config.
 		cloneWith(access.project.token, ["--depth", "50", "--branch", access.project.branch, access.project.url], dir);
 		execFileSync("git", [
 			"-C",
@@ -184,8 +183,8 @@ switch (command) {
 			`http.${access.url}.extraHeader`,
 			`Authorization: Bearer ${access.token.split("?")[0]}`,
 		]);
-		// Shallow, unless Artifacts refuses it: some shallow fetches of a fork's branch fail there ("expected no other
-		// sections to be sent after no 'ready'", or "expected shallow list" over protocol v0), where a whole one works.
+		// Try a shallow fetch first. Artifacts rejects some shallow fetches of a fork's branch
+		// ("expected shallow list" and similar), so fall back to a full fetch.
 		try {
 			execFileSync(
 				"git",

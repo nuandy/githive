@@ -1,12 +1,8 @@
 import { normalizeEmail } from "./store";
 
-// Orgs, their people and their repos, and what a person may do in a repo.
-//
-// Every person has a personal org named for their handle. Other orgs have
-// members (owner, admin, member) and teams. A repo belongs to one org, is
-// private or public, and may have collaborators. A repo's id is its Artifacts
-// name and the key its records are kept under; people and agents name it
-// <org>/<name>, and only routes and tools translate.
+// Orgs, their members and repos, and what a person may do in a repo. Every person has a personal org named for
+// their handle. A repo's id is its Artifacts name and the key for its records. People and agents call it
+// <org>/<name>, and only routes and tools translate between the two.
 
 export type Level = "read" | "review" | "write" | "admin";
 export type Role = "owner" | "admin" | "member";
@@ -21,7 +17,7 @@ const highest = (levels: (Level | null | undefined)[]) =>
 export const isLevel = (v: unknown): v is Level => typeof v === "string" && v in RANK;
 export const isRole = (v: unknown): v is Role => v === "owner" || v === "admin" || v === "member";
 
-/** An org's slug: lowercase letters, digits and single dashes. Never "--", which joins an org and a repo in a repo's id. */
+/** Lowercase letters, digits and single dashes. Never "--", which separates org and name in a repo's id. */
 const SLUG = /^[a-z0-9](?:[a-z0-9]|-(?!-)){0,37}[a-z0-9]$|^[a-z0-9]$/;
 /** Names GitHive uses for itself, or that would read as its routes. */
 const RESERVED = new Set([
@@ -67,7 +63,6 @@ export interface Repo {
 	id: string;
 	org: string;
 	name: string;
-	/** What people call it: <org>/<name>. */
 	fullName: string;
 	visibility: Visibility;
 	createdAt: string;
@@ -109,7 +104,7 @@ export class OrgStore {
 
 	// Orgs
 
-	/** A person's own org, named for their handle: made the first time it's needed. */
+	/** A person's own org, named for their handle. It is created the first time it's needed. */
 	async personalOrg(user: { id: string; handle: string }) {
 		const found = await this.db.prepare("SELECT * FROM orgs WHERE personal_of = ?").bind(user.id).first<Row>();
 		if (found) return toOrg(found);
@@ -126,7 +121,7 @@ export class OrgStore {
 		return toOrg((await this.db.prepare("SELECT * FROM orgs WHERE id = ?").bind(id).first<Row>())!);
 	}
 
-	/** Whether a slug is free for an org or a person's handle: they share one namespace. */
+	/** Whether a slug is free. Orgs and personal handles share one namespace. */
 	async slugFree(slug: string) {
 		const taken = await this.db
 			.prepare("SELECT 1 FROM orgs WHERE slug = ? UNION SELECT 1 FROM users WHERE handle = ?")
@@ -235,9 +230,8 @@ export class OrgStore {
 	}
 
 	/**
-	 * Add someone to an org by email: at once if they have signed in, else as an
-	 * invitation they take up when they first sign in, once an admin has
-	 * approved their email.
+	 * Adds someone to an org by email. A person who has signed in joins at once. Anyone else gets an invitation
+	 * that takes effect at first sign-in, after an admin approves their email.
 	 */
 	async addMember(org: Org, email: string, role: Role, invitedBy: string) {
 		if (org.personal) fail(400, "a personal org has no members: add collaborators to its repos instead");
@@ -261,7 +255,7 @@ export class OrgStore {
 			)
 			.bind(org.id, address, role, invitedBy, at)
 			.run();
-		// Someone GitHive's admin hasn't approved can't sign in yet: the invitation waits for that.
+		// Someone the GitHive admin hasn't approved can't sign in yet, so the invitation waits.
 		const approved = !!(await this.db.prepare("SELECT 1 FROM invites WHERE email = ?").bind(address).first());
 		return { invited: address, role, ...(approved ? {} : { awaitingApproval: true }) };
 	}
@@ -380,7 +374,7 @@ export class OrgStore {
 		]);
 	}
 
-	/** Add an org member to a team; only members can be on an org's teams. */
+	/** Adds a person to a team. Only members of the org can join its teams. */
 	async addTeamMember(orgId: string, slug: string, handle: string) {
 		const id = await this.teamId(orgId, slug);
 		const user = (await this.userByHandle(handle)) ?? fail(404, `no one is called ${handle}`);
@@ -397,7 +391,7 @@ export class OrgStore {
 		await this.db.prepare("DELETE FROM team_members WHERE team_id = ? AND user_id = ?").bind(id, user.id).run();
 	}
 
-	/** The teams a person is on in an org, as grants name them: @<org>/<team>. */
+	/** The teams a person is on in an org, named as grants name them (@<org>/<team>). */
 	async teamsOf(userId: string, orgId: string) {
 		const { results } = await this.db
 			.prepare(
@@ -408,7 +402,7 @@ export class OrgStore {
 		return results.map((r) => `@${r.org_slug}/${r.slug}`);
 	}
 
-	/** The teams a person is on in the org a repo belongs to: what their vote on it carries. */
+	/** The teams a person is on in a repo's org. Their votes on the repo carry these teams. */
 	async teamsForRepo(userId: string, repoId: string) {
 		const { results } = await this.db
 			.prepare(
@@ -431,7 +425,7 @@ export class OrgStore {
 		return row ? toRepo(row) : null;
 	}
 
-	/** Record a repo in an org: a new one (id <org>--<name>) or one that already exists in Artifacts under `id`. */
+	/** Records a repo in an org: a new one with id <org>--<name>, or one already in Artifacts under `id`. */
 	async addRepo(
 		org: Org,
 		name: string,
@@ -482,7 +476,7 @@ export class OrgStore {
 		return results.map(toRepo);
 	}
 
-	/** Every repo recorded in an org, for Access admins. */
+	/** Every recorded repo, for Access admins. */
 	async allRepos() {
 		const { results } = await this.db.prepare(`${REPO_SELECT} ORDER BY o.slug, r.name`).all<Row>();
 		return results.map(toRepo);
@@ -522,11 +516,8 @@ export class OrgStore {
 	// Permission
 
 	/**
-	 * What a person may do in a repo: the most of
-	 * - read, if it's public;
-	 * - admin for the org's owners and admins, the org's default for members;
-	 * - what they were given as a collaborator.
-	 * Null when they can't see it at all.
+	 * What a person may do in a repo, or null if they can't see it. It is the highest of: read for a public repo,
+	 * admin for org owners and admins, the org default for members, and any collaborator grant.
 	 */
 	async permission(userId: string, repoId: string): Promise<Level | null> {
 		const row = await this.db

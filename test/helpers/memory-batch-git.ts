@@ -8,7 +8,10 @@ import type { BatchGit, Inspected } from "../../src/toolkit/merge";
 // the pushes to GitHub), done with isomorphic-git on a copy of the repo in
 // memory. GitHive itself always does it in the Gate.
 
-/** Each change fetched in turn, its files since it left `base`; landed as merge commits, stamped by the merge's stamper, in one push. */
+/**
+ * A BatchGit that fetches each change in turn with its files since it left `base`, then lands them as
+ * merge commits, stamped by the merge's stamper, in one push.
+ */
 export function memoryBatchGit(remote: Remote): BatchGit {
 	return {
 		inspect: async ({ base, branch, changes }) => {

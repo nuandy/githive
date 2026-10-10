@@ -15,7 +15,10 @@ export interface MergeSettingsProps {
 
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
 
-/** How changes merge, for the repo's admins to change: the review policy, who may block, stricter rules for paths, and the checks. */
+/**
+ * How changes merge, for the repo's admins to change: the review policy, who may block, stricter rules for
+ * paths, and the checks.
+ */
 export function MergeSettings({ snapshot, save, onSaved }: MergeSettingsProps) {
 	const fresh = draftFrom(snapshot.policy, snapshot.verify, snapshot.skipChecks);
 	const freshKey = JSON.stringify(fresh);
@@ -27,7 +30,7 @@ export function MergeSettings({ snapshot, save, onSaved }: MergeSettingsProps) {
 	const dirty = JSON.stringify(draft) !== baseKey;
 	const branch = snapshot.branch ?? "main";
 
-	// Someone else changed the settings: follow them, unless this form has edits of its own.
+	// If someone else changed the settings, follow them unless this form has edits of its own.
 	const dirtyRef = useRef(dirty);
 	dirtyRef.current = dirty;
 	useEffect(() => {

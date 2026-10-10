@@ -1,11 +1,8 @@
 import type { Remote } from "./git";
 
-// GitHive's GitHub App: how GitHive reaches a GitHub repo connected to a
-// GitHive repo, to push main back after every landing and to run checks on
-// GitHub Actions. People install the App on the repos they connect; GitHive
-// signs a short JWT with the App's key, exchanges it for an installation token
-// scoped to that repo (an hour), and uses it for git and the REST API. The
-// App's ID and its private key (PKCS#8 PEM) are Worker secrets.
+// GitHive's GitHub App, used to push main to a connected GitHub repo after each landing and to run checks on
+// GitHub Actions. GitHive signs a short JWT with the App's key and exchanges it for an installation token scoped to
+// the repo. The App's ID and its PKCS#8 private key are Worker secrets.
 
 const API = "https://api.github.com";
 const HEADERS = {
@@ -14,7 +11,6 @@ const HEADERS = {
 	"User-Agent": "githive",
 };
 
-/** A workflow run on a commit, as the Actions API lists it. */
 export interface WorkflowRun {
 	id: number;
 	name: string;
@@ -23,23 +19,19 @@ export interface WorkflowRun {
 	url: string;
 }
 
-/** A GitHub repo GitHive may write to: its git remote and the bits of the REST API GitHive uses. */
+/** A GitHub repo GitHive may write to, with its git remote and the REST calls GitHive uses. */
 export interface GitHubLink {
-	/** owner/name. */
 	repo: string;
 	remote: Remote;
-	/** The workflow runs on a commit (any event). */
 	runsFor(sha: string): Promise<WorkflowRun[]>;
 	deleteBranch(name: string): Promise<void>;
 }
 
-/** The App's credentials, as Worker secrets give them. */
 export interface GitHubApp {
 	appId: string;
 	privateKey: string;
 }
 
-/** A GitHub API call that failed, with its status. */
 export class GitHubError extends Error {
 	constructor(
 		readonly status: number,
@@ -49,7 +41,7 @@ export class GitHubError extends Error {
 	}
 }
 
-/** GitHub's REST API, as `token` (a JWT or an installation token). */
+/** Calls GitHub's REST API with a JWT or an installation token. */
 async function api<T>(
 	token: string,
 	method: string,
@@ -74,7 +66,7 @@ const base64url = (bytes: Uint8Array) =>
 		.replace(/=+$/, "");
 const encoder = new TextEncoder();
 
-/** The App's JWT: RS256 over its ID, good for 9 minutes (GitHub takes at most 10), backdated a minute for clock drift. */
+/** The App's JWT, valid for 9 minutes because GitHub allows at most 10, and backdated a minute for clock drift. */
 export async function appJwt(app: GitHubApp, now = Date.now()) {
 	const der = Uint8Array.from(atob(app.privateKey.replace(/-----[^-]+-----/g, "").replace(/\s+/g, "")), (c) =>
 		c.charCodeAt(0),
@@ -88,13 +80,10 @@ export async function appJwt(app: GitHubApp, now = Date.now()) {
 	return `${unsigned}.${base64url(signature)}`;
 }
 
-/** Installation tokens kept for the isolate until five minutes before they expire, by repo. */
+/** Installation tokens by repo, reused until five minutes before they expire. */
 const tokens = new Map<string, { token: string; until: number }>();
 
-/**
- * A link to `repo` (owner/name) through the App: null if the App isn't
- * installed on it. Its token is the installation's, scoped to that one repo.
- */
+/** A link to `repo` (owner/name) through the App, or null if the App isn't installed on it. */
 export async function linkTo(app: GitHubApp, repo: string, fetcher: typeof fetch = fetch): Promise<GitHubLink | null> {
 	const token = async () => {
 		const kept = tokens.get(repo);

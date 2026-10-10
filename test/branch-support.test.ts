@@ -42,7 +42,7 @@ describe("a project whose branch is master", () => {
 	it("runs GitHive end to end: started, checked, merged and audited on master", async () => {
 		// A change's fork starts as a copy of the project: master, and nothing else.
 		const forkUrl = server.repo("fork");
-		// Pushed by path: git over HTTP would wait on this process's own server.
+		// Pushed by path, because git over HTTP would wait on this process's own server.
 		const repos = join(server.git("rev-parse", "--absolute-git-dir").trim(), "..");
 		server.git("push", "--quiet", join(repos, "fork.git"), "master");
 		server.gitIn("fork", "symbolic-ref", "HEAD", "refs/heads/master");

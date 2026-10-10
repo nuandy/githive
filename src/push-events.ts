@@ -1,23 +1,16 @@
-// Pushes, as Artifacts reports them. An agent pushes a change to its own fork,
-// where GitHive doesn't see it; reviews, backlog and merge then had to read
-// forks to learn changes' heads (see openHeads in toolkit/mcp.ts). Artifacts
-// publishes a `repo.pushed` event to a Queue for every push, and one
-// account-wide subscription carries all of them (every namespace's: a
-// Worker keeps its own). The Worker's queue consumer notes each push to a
-// change's branch in its project's RepoCache, so a change's head is known
-// about two seconds after its push, without reading its fork.
+// Pushes, as Artifacts reports them. An agent pushes a change to its own fork, so without these events GitHive would
+// have to read forks to learn changes' heads. Artifacts publishes a `repo.pushed` event to a Queue for every push,
+// and one account-wide subscription carries every namespace's events, so each Worker filters for its own.
 //
 //   wrangler queues subscription create <queue> --source artifacts --events repo.pushed
 //
-// A head is advice (what to review, what to batch): a merge still reads its
-// own change. Pushes to an agent's fork can only come from that agent, but an
-// agent can push any branch to its fork, so a head an event noted counts for a
-// change only if it came to the fork of the agent holding its claim.
+// A noted head is only advice for what to review and batch; a merge still reads its own change. An agent can push
+// any branch to its fork, so a head counts for a change only if it came to the fork of the agent holding the claim.
 
 import type { ChangePush, KnownHead } from "./repo-cache";
 import { rpc } from "./rpc";
 
-/** A `cf.artifacts.repo.pushed` event's body: the fields GitHive reads. */
+/** The fields GitHive reads from a `cf.artifacts.repo.pushed` event's body. */
 export interface PushedEvent {
 	type?: string;
 	source?: { namespace?: string; repoName?: string };
@@ -29,11 +22,8 @@ const CHANGE_REF = "refs/heads/changes/";
 const DELETED = /^0{40}$/;
 
 /**
- * The change a push event is about, if any: a push to `changes/<change>` on
- * an agent's fork (`fork--<project>--agent--<slug>`, see forkName) in
- * `namespace`. A project's name can hold `--`, so each place `--agent--`
- * appears names a project it may be (almost always one). Pushes to projects,
- * seed forks, records repos and other branches are no change's.
+ * The change a push event is about: a push to `changes/<change>` on an agent's fork `fork--<project>--agent--<slug>`.
+ * A project's name can contain `--`, so every place `--agent--` appears yields a candidate project.
  */
 export function changePushOf(body: PushedEvent, namespace: string): { projects: string[]; push: ChangePush } | null {
 	if (body.type !== "cf.artifacts.repo.pushed" || body.source?.namespace !== namespace) return null;
@@ -59,13 +49,12 @@ export function changePushOf(body: PushedEvent, namespace: string): { projects: 
 	};
 }
 
-/** The Worker's queue consumer: each batch's pushes noted in their projects' RepoCaches, one call a project. */
+/** The Worker's queue consumer. It notes each batch's pushes in their projects' RepoCaches, one call per project. */
 export async function notePushEvents(batch: MessageBatch<unknown>, env: Env) {
 	const namespace = (env as unknown as { ARTIFACTS_NAMESPACE?: string }).ARTIFACTS_NAMESPACE;
 	const byProject = new Map<string, { pushes: ChangePush[]; messages: Message<unknown>[] }>();
 	for (const message of batch.messages) {
 		const found = namespace ? changePushOf(message.body as PushedEvent, namespace) : null;
-		// Not a change's push (or not this Worker's namespace): nothing to note.
 		if (!found) {
 			message.ack();
 			continue;
@@ -88,7 +77,7 @@ export async function notePushEvents(batch: MessageBatch<unknown>, env: Env) {
 			}
 		}),
 	);
-	// Noting is idempotent (the newest push wins), so a message whose noting failed anywhere is delivered again whole.
+	// Noting is idempotent because the newest push wins, so a message that failed for any project is retried whole.
 	for (const m of new Set([...byProject.values()].flatMap((e) => e.messages))) {
 		if (failed.has(m)) m.retry();
 		else m.ack();
@@ -96,10 +85,8 @@ export async function notePushEvents(batch: MessageBatch<unknown>, env: Env) {
 }
 
 /**
- * Of a RepoCache's kept heads, those that count for these claims: a head read
- * from a fork, or one a push event noted on the fork of the agent holding the
- * claim (`forkOf`: see forkName). Any other event's head is left out, so its
- * change counts as unseen and is read.
+ * The kept heads that count for these claims: heads read from a fork, and heads a push event noted on the fork of the
+ * agent holding the claim. Other changes count as unseen and are read.
  */
 export async function headsForClaims(
 	kept: Record<string, KnownHead>,

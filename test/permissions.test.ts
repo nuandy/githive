@@ -148,7 +148,7 @@ describe("every MCP tool, for each person's agent", () => {
 		it(`lets ${person}'s agent (with ${person}'s ${level ?? "nothing"}) use exactly the tools that need no more`, async () => {
 			const { env, people } = await world();
 			for (const [name, needs] of Object.entries(TOOL_LEVEL)) {
-				// credentials with a change writes to a fork.
+				// credentials with a change needs write access, since it writes to a fork.
 				const required = name === "credentials" ? "write" : needs;
 				const error = await tool(env, name, people[person].token);
 				expect(refused(error), `${person} ${name} (needs ${required}): ${error}`).toBe(!atLeast(level, required));

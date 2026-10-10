@@ -213,7 +213,7 @@ describe("Artifacts transient failures", () => {
 			} as never;
 			await expect(forkAndWait(artifacts, "source", "fork", "test fork")).resolves.toMatchObject({ name: "fork" });
 			expect((artifacts as { delete: ReturnType<typeof vi.fn> }).delete).toHaveBeenCalledTimes(1);
-			// Not before it had forked for 45 s: a fork can take 20-30 s.
+			// It gives the fork 45 s before deleting it, since forks can be slow to appear.
 			expect(now).toBeGreaterThan(45_000);
 			done();
 		});

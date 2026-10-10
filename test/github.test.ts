@@ -111,10 +111,10 @@ describe("a repo connected to GitHub", { timeout: 60_000 }, () => {
 		rmSync(work, { recursive: true, force: true });
 	});
 
-	/** GitHub, played by a second repo on the test server (a copy of the project), with workflow runs as `runs` says. */
+	/** GitHub, played by a copy of the project on the test server, with workflow runs as `runs` says. */
 	async function github(runs: (sha: string, asked: number) => WorkflowRun[]) {
 		const url = server.repo("github");
-		// GitHub has the project's main as it was imported (fetched without blocking: the server answering is in this process).
+		// GitHub has the project's main as it was imported. The fetch must not block, since the server runs in this process.
 		await run("git", [
 			"-C",
 			server.gitIn("github", "rev-parse", "--absolute-git-dir").trim(),

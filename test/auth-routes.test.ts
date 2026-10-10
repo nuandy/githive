@@ -2,9 +2,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { IdentityStore } from "../src/auth/store";
 import { fakeD1 } from "./fakes/d1";
 
-// GitHive's sign-in through the Worker, with GitHub's API faked: the redirect
-// and its state, invitations, the session cookie, a person's agents and
-// tokens, cross-site writes refused, and an agent token reaching MCP.
+// GitHive's sign-in through the Worker, with GitHub's API faked. Covers the
+// redirect and its state, invitations, the session cookie, a person's agents and
+// tokens, refusing cross-site writes, and an agent token reaching MCP.
 
 vi.mock("../src/access", () => ({
 	// An Access assertion only when a test sends one.
@@ -40,7 +40,6 @@ const call = (path: string, init: RequestInit & { cookie?: string } = {}) => {
 	);
 };
 /** A response's JSON, as the test reads it. */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 const json = async (response: Response | Promise<Response>): Promise<any> => (await response).json();
 const setCookies = (response: Response) => response.headers.getSetCookie();
 const cookieValue = (response: Response, name: string) =>

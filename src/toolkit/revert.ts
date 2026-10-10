@@ -7,11 +7,8 @@ import type { Registry } from "./claims";
 import type { Stamper } from "./stamp";
 import type { VoteStore } from "./vote-store";
 
-// The remedy that goes with detection: any agent may
-// revert a commit the audit reports. The revert restores the files that commit
-// changed to how they were before it, as a commit on main that names what it
-// reverts and, through the toolkit, who asked (stamped). The audit then marks
-// the reverted commit's violations resolved.
+// Any agent may revert a commit the audit reports. The revert restores the files that commit changed, as a
+// stamped commit on main that names what it reverts, and the audit then marks those violations resolved.
 
 const DIR = "/repo";
 const ATTEMPTS = 3;
@@ -21,11 +18,9 @@ export interface RevertInput {
 	claims: CasLog<Registry>;
 	votes: VoteStore;
 	stamper?: Stamper;
-	/** The project's branch. */
 	branch: string;
-	/** The commit on the branch to revert. */
 	target: string;
-	/** The audit's report: the target must have an open violation in it. */
+	/** The audit's report. The target must have an open violation in it. */
 	violations: Violation[];
 	agent: string;
 }
@@ -42,7 +37,7 @@ export async function revertViolation(input: RevertInput): Promise<RevertOutcome
 		const before = commit.parent[0];
 		if (!before) return { ok: false, reasons: [`${input.target} has no parent to revert to`] };
 		const files = await ws.changedPaths(before, input.target);
-		// Only a clean revert: a file changed again since would be clobbered.
+		// Refuse unless the revert is clean, since a file changed after the target would be clobbered.
 		const since = new Set(await ws.changedPaths(input.target, head));
 		const touched = files.filter((f) => since.has(f));
 		if (touched.length) return { ok: false, reasons: touched.map((f) => `${f} has changed since; revert it by hand`) };
@@ -82,7 +77,7 @@ export async function revertViolation(input: RevertInput): Promise<RevertOutcome
 		try {
 			await ws.push();
 		} catch (err) {
-			// Main moved under us: look again on top of it.
+			// Main moved, so try again on top of it.
 			if (attempt < ATTEMPTS && (err instanceof git.Errors.PushRejectedError || err instanceof git.Errors.GitPushError))
 				continue;
 			throw err;

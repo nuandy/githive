@@ -1,6 +1,6 @@
 /**
- * Best-effort run_command nudge for common Git history rewrites. This parser is
- * not a security boundary; authenticated pushes are enforced in SandboxAgent.git.
+ * A best-effort warning against common Git history rewrites in run_command. It is not a
+ * security boundary: authenticated pushes are enforced in Builder.git.
  */
 export function builderGitCommandBlockReason(command: string, hasPushedHistory: boolean): string | undefined {
 	// Shell removes backslash-newline pairs before parsing the command list.
@@ -81,12 +81,10 @@ function inspectShell(command: string, hasPushedHistory: boolean, depth: number)
 			continue;
 		}
 
-		// A dynamically selected command cannot be classified without executing
-		// shell expansion (for example, `$GIT push --force`).
+		// A command chosen by expansion, such as `$GIT push --force`, can't be classified.
 		if (executable.includes("$") || executable.startsWith("`")) return UNSAFE_SHELL_REASON;
 
-		// These builtins execute a separate script whose contents are not present
-		// in the command line for us to inspect.
+		// These run a script whose contents aren't on the command line.
 		if (executable === "source" || executable === ".") return UNSAFE_SHELL_REASON;
 	}
 	return undefined;

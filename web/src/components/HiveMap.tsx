@@ -48,7 +48,7 @@ export function hexLabel(hex: Hex, now: number = Date.now()): string {
 	const holder = hex.holders[0];
 	if (!holder) return `${what}: not claimed`;
 	const others = hex.holders.length > 1 ? `, and ${plural(hex.holders.length - 1, "more change")}` : "";
-	// Said once: unless its holder's own state already says it, another change in it is landing.
+	// Mention that a change in the cell is landing only if the holder's own state doesn't already say so.
 	const said =
 		(hex.landing === "checking" && holder.lamp === "checking") ||
 		(hex.landing === "queued" && holder.lamp === "approved");

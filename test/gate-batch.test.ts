@@ -9,10 +9,10 @@ import { FakeStorage } from "./fakes/env";
 import { type HistorySource, type KeptFiles, readBranchHistory } from "../src/toolkit/branch-history";
 import { mergeRecordOf, readMainMerges } from "../src/toolkit/git-records";
 
-// The repo's own Gate reads a batch's changes and lands them, with real git
-// in its container. Here the "container" runs its commands with this
-// machine's git, in a folder standing in for its checkout, against a test Git
-// server: what the Gate reads and pushes is what git really does.
+// The repo's own Gate reads a batch's changes and lands them with real git in
+// its container. Here the container runs its commands with this machine's git,
+// in a folder standing in for its checkout, against a test Git server, so what
+// the Gate reads and pushes is what git really does.
 
 const { Gate } = await import("../src/gate");
 
@@ -33,7 +33,7 @@ function localContainer(dir: string) {
 				output: () =>
 					new Promise<{ exitCode: number; stdout: Uint8Array }>((resolve) => {
 						if (installing) return resolve({ exitCode: 0, stdout: new Uint8Array() });
-						// Nothing from this machine's git config (its identity, say): a container has none.
+						// Ignore this machine's git config, such as its identity, since a container has none.
 						const child = spawn(args[0], args.slice(1), {
 							cwd: local(options.cwd),
 							env: {
@@ -153,7 +153,7 @@ describe("reading and landing a batch in the repo's own Gate", { timeout: 60_000
 				.trim()
 				.split("\n"),
 		).toEqual(["GitHive <bot@githive.invalid>", "b-1", `${a} ${b}`]);
-		// Checked on the main before: main has moved since, so nothing lands.
+		// Checked against the previous main. Main has moved since, so nothing lands.
 		const c = await pushChange(server.url, work, "agent-c-1", "c-1", { "src/c.txt": "c\n" });
 		expect(
 			await gate.landBatch({
@@ -201,8 +201,8 @@ describe("reading and landing a batch in the repo's own Gate", { timeout: 60_000
 		expect(await changeGate.checkCommit({ ...batch, checks: ["test -f src/missing.txt"] })).toMatchObject({
 			passed: false,
 		});
-		// Checked again in the same container (a batch's search reuses it): its commits are here, so nothing is fetched,
-		// not even from a branch that's gone since.
+		// Checked again in the same container, which a batch's search reuses. Its commits are already here, so
+		// nothing is fetched, even from a branch that has since been deleted.
 		const again = await changeGate.checkCommit({
 			...batch,
 			ahead: [{ head: a, ...source("gone-1") }],
@@ -277,7 +277,7 @@ describe("reading and landing a batch in the repo's own Gate", { timeout: 60_000
 		]);
 		expect(read[1].testedWith).toEqual([a, b]);
 		expect(read).toEqual(await readMainMerges({ url: server.url, token: "unused" }, main, "main"));
-		// The files each merge changed are kept by commit: read again, no tree is read.
+		// The files each merge changed are cached by commit, so reading them again reads no tree.
 		const before = treesRead;
 		expect((await readBranchHistory(history, main, "main", keep)).map(mergeRecordOf)).toEqual(read);
 		expect(treesRead).toBe(before);

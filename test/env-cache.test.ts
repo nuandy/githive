@@ -1,9 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 
-// Minting an Artifacts token is several Artifacts calls, and every tool call
-// needs one or more; so tokens are kept per repo and scope while fresh, across
-// callers and calls in the isolate. So is each record's log, so a read whose
-// ref hasn't moved needn't fetch it again.
+// Minting an Artifacts token takes several Artifacts calls, and every tool call
+// needs at least one. So tokens are cached per repo and scope while fresh,
+// across callers and calls in the isolate. Each record's log is cached too, so a
+// read whose ref hasn't moved doesn't fetch it again.
 
 const artifacts = vi.hoisted(() => ({ mints: [] as string[] }));
 vi.mock("../src/artifacts", async (importOriginal) => ({

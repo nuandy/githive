@@ -3,10 +3,8 @@ import type { Remote } from "./git";
 import { gitFetch, noteGitRequest } from "./git-http";
 import { MemoryFS } from "./memory-fs";
 
-// Fetching several commits in one request. isomorphic-git fetches one ref at a
-// time (and, fetching everything, only branches), so reading many record refs
-// (claims shards) cost a request each. This speaks Git's upload-pack directly:
-// one request wanting every commit, each without its history.
+// isomorphic-git fetches one ref per request, so reading many record refs was slow.
+// This speaks upload-pack directly to fetch several commits in one request.
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
@@ -28,9 +26,8 @@ const concat = (parts: Uint8Array[]) => {
 };
 
 /**
- * Fetch `oids` (commits the server has at ref tips) with their trees and
- * blobs, without history, in one upload-pack request. Returns an in-memory
- * repo holding them. A server error carries its status, for retries.
+ * Fetch commits at ref tips, with their trees, into an in-memory repo in one request.
+ * A server error carries its status so callers can retry.
  */
 export async function fetchCommits(remote: Remote, oids: string[], dir = FETCHED, { history = false, depth = 1 } = {}) {
 	const fs = new MemoryFS();
@@ -42,7 +39,6 @@ export async function fetchCommits(remote: Remote, oids: string[], dir = FETCHED
 				`want ${oid}${i === 0 ? ` side-band-64k ofs-delta${history ? "" : " shallow"} no-progress agent=githive` : ""}\n`,
 			),
 		),
-		// Just the commits (or `depth` commits of each), or (history) everything behind them too.
 		...(history ? [] : pktLine(`deepen ${depth}\n`)),
 		encoder.encode("0000"),
 		...pktLine("done\n"),
@@ -62,11 +58,11 @@ export async function fetchCommits(remote: Remote, oids: string[], dir = FETCHED
 			status: response.status,
 		});
 	const bytes = new Uint8Array(await response.arrayBuffer());
-	// Empty though it says 200 (see git-http.ts): a server failure, for the caller to try again.
+	// An empty 200 is a server failure (see git-http.ts), so callers retry it.
 	if (!bytes.length)
 		throw Object.assign(new Error(`fetch failed: an empty answer from ${remote.url}`), { status: 502 });
 
-	// Shallow lines and NAK, then the pack in side-band packets (1: data, 2: progress, 3: error).
+	// Shallow lines and NAK come first, then the pack in side-band packets (1 data, 2 progress, 3 error).
 	const pack: Uint8Array[] = [];
 	let inPack = false;
 	for (let at = 0; at + 4 <= bytes.length;) {

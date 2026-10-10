@@ -34,7 +34,8 @@ describe("what the checks skip", () => {
 let server: GitServer;
 let work: string;
 const keys: Record<string, string> = {};
-// No check runner here: a merge that needs its checks is refused, one that skips them merges.
+// There is no check runner here, so a merge that needs its checks is refused and
+// one that skips them merges.
 const ctx = (agentKey?: string): ToolContext => ({
 	remote: async () => ({ url: server.url, token: "unused" }),
 	batchGit: () => memoryBatchGit({ url: server.url, token: "unused" }),

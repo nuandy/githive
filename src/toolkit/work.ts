@@ -4,22 +4,18 @@ import type { ClaimRecord } from "./claims";
 import { appendRecord } from "./records";
 import { type Author, approval, effectivePolicy, holdsRole, type ReviewPolicy, type VoteRecord } from "./votes";
 
-// What there is to do, for agents to choose from: reviews waiting that an
-// agent may give, and pieces of the backlog nobody has claimed. GitHive tells
-// no agent what to do: each looks (reviews, backlog, claims, status) and picks,
-// and its own judgement and instructions order its work. Each sees the choices
-// in an order of its own, so a crowd looking at once spreads over them rather
-// than all taking the first. Nothing is reserved: two agents picking the same
-// thing both try, and the claim (or the vote count) settles it.
+// What there is to do: reviews an agent may give and backlog items nobody has claimed. GitHive assigns nothing;
+// each agent looks and picks. Each sees equally good choices in its own order, so a crowd spreads out instead of
+// all taking the first. Nothing is reserved: if two agents pick the same thing, the claim or vote count settles it.
 
-/** A piece of work in the repo's backlog: taken once a change by its id is claimed, done once that change merges. */
+/** A backlog item: taken once a change with its id is claimed, done once that change merges. */
 export interface WorkItem {
 	id: string;
 	title: string;
 	intent: string;
-	/** What it's likely to touch: the claim to start from. */
+	/** What it's likely to touch, as a starting claim. */
 	paths?: string[];
-	/** Pieces it depends on: it's handed out only once each has merged (and its claim says so, see ClaimRecord.after). */
+	/** Items it depends on. It's handed out only once each has merged (see ClaimRecord.after). */
 	after?: string[];
 	by: string;
 	at: string;
@@ -29,7 +25,6 @@ export interface Work {
 	items: WorkItem[];
 }
 
-/** A work item's id from its title: lowercase words joined by dashes. */
 export const workId = (title: string) =>
 	title
 		.toLowerCase()
@@ -37,7 +32,7 @@ export const workId = (title: string) =>
 		.replace(/^-+|-+$/g, "")
 		.slice(0, 48) || "work";
 
-/** Add a piece of work to the backlog (refused if its id is taken). */
+/** Adds an item to the backlog, refused if its id is taken. */
 export function addWork(log: CasLog<Work>, input: Omit<WorkItem, "at">) {
 	return appendRecord<Work, string>(
 		log,
@@ -53,10 +48,7 @@ export function addWork(log: CasLog<Work>, input: Omit<WorkItem, "at">) {
 	);
 }
 
-/**
- * Add several pieces of work at once: one write for a backlog filed together.
- * Those whose ids are in the backlog already are left as they are, and named.
- */
+/** Adds several items in one write. Items whose ids are taken are left alone and returned in `already`. */
 export async function addWorks(log: CasLog<Work>, by: string, items: Omit<WorkItem, "at" | "by">[]) {
 	let already: string[] = [];
 	const added = await appendRecord<Work, string>(
@@ -77,53 +69,46 @@ export async function addWorks(log: CasLog<Work>, by: string, items: Omit<WorkIt
 	return { ok: added.ok, added: added.ok ? items.map((i) => i.id).filter((id) => !already.includes(id)) : [], already };
 }
 
-/** What's known of the repo's open work, for the choices an agent has (see reviewsFor, backlogFor). */
 export interface WorkInput {
 	agent: string;
-	/** The caller's verified identity, as its votes would carry it (to tell whether it holds a role). */
+	/** The caller's verified identity, to tell whether it holds a role. */
 	by?: string;
-	/** The teams the caller is on in the repo's org (@<org>/<team>), for roles granted to a team. */
+	/** The caller's teams in the repo's org, for roles granted to a team. */
 	teams?: string[];
 	policy: ReviewPolicy;
-	/** A change's policy, by the branch it lands on (see branch-rules.ts); absent, `policy` for all. */
+	/** A change's policy by the branch it lands on (see branch-rules.ts). Defaults to `policy`. */
 	policyOf?: (claim: ClaimRecord) => ReviewPolicy;
-	/** The claims in force, each with its change's pushed head (null: nothing pushed). */
+	/** The claims in force, each with its change's pushed head, or null if nothing is pushed. */
 	open: { claim: ClaimRecord; head: string | null }[];
-	/** The votes that count. */
 	votes: VoteRecord[];
-	/** Changes that merged. */
 	merged: Set<string>;
-	/** Reviews agents are on now, by commit and role (review holds, see holdKey): one held as often as it's needed isn't offered. */
+	/** Review holds by holdKey. A review held by as many agents as it needs isn't offered. */
 	held?: Record<string, string[]>;
 	work: WorkItem[];
-	/** Changes whose agents abandoned them (see staleness.ts): their claims stand in nobody's way, and their work is free to take. */
+	/** Changes their agents abandoned (see staleness.ts). Their claims block nothing and their work is free. */
 	abandoned?: Set<string>;
 }
 
-/** A review the caller may give: a change pushed, waiting for approvals in a role it holds (or ordinary ones). */
 export interface ReviewOption {
 	change: string;
 	author: string;
 	head: string;
-	/** The role to vote as: one that can block, if the change awaits one the caller holds; else "review". */
+	/** A blocking role the change awaits and the caller holds, otherwise "review". */
 	role: string;
-	/** Whether the role can block the merge (a veto role): those reviews hold a change up most. */
+	/** Whether the role can veto the merge. These reviews hold a change up the most. */
 	blocking: boolean;
 	intent: string;
 	paths: string[];
-	/** Approvals it has, and how many more reviews it needs in this role. */
+	/** Approvals so far, and how many more reviews it needs in this role. */
 	approvals: number;
 	needed: number;
-	/** Agents reviewing it in this role now (review holds), the caller among them if it started. */
+	/** Agents reviewing it in this role now, including the caller once it starts. */
 	reviewing: string[];
 }
 
 /**
- * The reviews the caller may give: changes pushed, not its own, not voted on
- * by it, not sent back for changes, and still needing approvals it can give
- * (a role that can block it holds, else ordinary approvals) that others
- * reviewing don't already cover. Those it's reviewing first, then the roles
- * that can block, the fewest approvals and the oldest, equals in its own order.
+ * The reviews the caller may give: others' pushed changes it hasn't voted on, that weren't sent back and still
+ * need an approval it can give. Its own holds come first, then blocking roles, fewest approvals and oldest.
  */
 export function reviewsFor(input: WorkInput): ReviewOption[] {
 	const { agent, votes } = input;
@@ -139,14 +124,13 @@ export function reviewsFor(input: WorkInput): ReviewOption[] {
 			const policy = policyOf(claim);
 			const outcome = approval({ votes }, head, policy, authorOf(claim), claim.paths);
 			if (outcome.approved) return [];
-			// A role that can block, if it holds one the change still needs; else an ordinary review, if more are needed.
+			// Prefer a blocking role the change still needs; otherwise an ordinary review, if more are needed.
 			const role = outcome.awaiting.find((r) =>
 				holdsRole(policy, r, { reviewer: agent, by: input.by, teams: input.teams }, authorOf(claim)),
 			);
 			const { required } = effectivePolicy(policy, claim.paths);
 			if (!role && outcome.approvals >= required) return [];
-			// As many reviews as it still needs: one for a role that can block; else the approvals missing, less those the
-			// roles still awaited will bring (their approvals count too). Others already on it count.
+			// One review for a blocking role. Otherwise the missing approvals, minus those the awaited roles will bring.
 			const needed = role ? 1 : required - outcome.approvals - outcome.awaiting.length;
 			if (needed <= 0) return [];
 			const reviewing = input.held?.[holdKey(head, role ?? "review")] ?? [];
@@ -184,24 +168,19 @@ export function reviewsFor(input: WorkInput): ReviewOption[] {
 	).map(({ since: _, ...o }) => o);
 }
 
-/** The backlog as the caller may take it: pieces free to build now, and why the rest wait. */
 export interface BacklogView {
-	/** Free to build: nobody holds a claim on it (or its agent abandoned it), nor on its paths, and what it depends on merged. */
+	/** Unclaimed or abandoned, clear of other claims, and with its dependencies merged. */
 	open: (WorkItem & { abandonedBy?: string })[];
-	/** Not yet: claimed, overlapping a claim in force, or waiting on what it depends on. */
+	/** Claimed, overlapping a claim in force, or waiting on a dependency. */
 	waiting: { id: string; reason: string }[];
 }
 
-/**
- * The backlog's pieces free to build now, in the caller's own order (equally
- * good, so a crowd looking at once spreads over them), and why the others
- * aren't. Merged pieces are left out.
- */
+/** Backlog items free to build, in the caller's own order so a crowd spreads over them, and why the rest wait. */
 export function backlogFor(input: WorkInput): BacklogView {
-	// An abandoned claim holds nothing back: claiming its paths (or its change) releases it as stale.
+	// An abandoned claim holds nothing back, since claiming its paths releases it as stale.
 	const live = input.open.filter((o) => !input.abandoned?.has(o.claim.change));
 	const holder = new Map(live.map((o) => [o.claim.change, o.claim.agent]));
-	// Backlog work lands on the project's branch: a claim into another branch stands in its way nowhere.
+	// Backlog work lands on the project's branch, so claims into other branches don't block it.
 	const overlapping = (w: WorkItem) =>
 		live.find((o) => !o.claim.into && w.paths?.some((p) => o.claim.paths.some((held) => entriesOverlap(p, held))));
 	const unmerged = (w: WorkItem) => (w.after ?? []).filter((dep) => !input.merged.has(dep));
@@ -223,7 +202,7 @@ export function backlogFor(input: WorkInput): BacklogView {
 	return { open: inOwnOrder(input.agent, open, () => true), waiting };
 }
 
-/** `list` (sorted best first) with each run of equally good items (`same`) started at a place of the agent's own. */
+// Rotates each run of equally good items in the sorted `list` to start at a place of the agent's own.
 function inOwnOrder<T>(agent: string, list: T[], same: (a: T, b: T) => boolean): T[] {
 	const out: T[] = [];
 	for (let i = 0; i < list.length;) {
@@ -238,19 +217,15 @@ function inOwnOrder<T>(agent: string, list: T[], same: (a: T, b: T) => boolean):
 }
 
 /**
- * A review hold's key: a commit and the role reviewed. An ordinary reviewer's
- * hold mustn't keep the holder of a role that can block away (in a run, one
- * lingering after its vote sent the only security holder to build instead).
+ * A review hold's key: the commit and the role. Keying by role keeps an ordinary reviewer's hold from turning away
+ * the holder of a blocking role.
  */
 export const holdKey = (head: string, role: string) => `${head}#${role}`;
 
-/** How long a review a role that can block awaits may wait, unheld, before people are told. */
+/** How long a review awaited by a blocking role may sit unheld before people are told. */
 export const ROLE_WAIT_MS = 10 * 60_000;
 
-/**
- * The reviews roles that can block are waiting for, that no one holds: on
- * changes pushed, not sent back, and still awaiting that role's approval.
- */
+/** Unheld reviews that blocking roles still owe, on pushed changes that weren't sent back. */
 export function waitingRoleReviews(input: Pick<WorkInput, "policy" | "policyOf" | "open" | "votes" | "held">) {
 	return input.open.flatMap(({ claim, head }) => {
 		if (!head) return [];
@@ -269,7 +244,7 @@ export function waitingRoleReviews(input: Pick<WorkInput, "policy" | "policyOf" 
 	});
 }
 
-/** A small, stable hash, to spread agents over equally good choices. */
+// A small, stable hash that spreads agents over equally good choices.
 function spread(agent: string, n: number) {
 	let h = 0x811c9dc5;
 	for (let i = 0; i < agent.length; i++) h = Math.imul(h ^ agent.charCodeAt(i), 0x01000193);

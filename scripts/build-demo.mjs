@@ -1,8 +1,7 @@
 #!/usr/bin/env node
-// GitHive with GitHive's own agents, live: build has the
-// hosted builder make a change on its claim; when it finishes, the hosted
-// reviewers vote and merge it once approved. Nothing coordinates them. Then
-// the audit, from Git alone.
+// Runs GitHive's hosted agents live. The hosted builder makes a change on its
+// claim, then the hosted reviewers vote and merge it once approved. Nothing
+// coordinates them. Ends with the audit, read from Git alone.
 //
 //   node scripts/build-demo.mjs [--base https://blueprint-bench.nuandy.workers.dev] [--repo build-demo]
 //
@@ -99,7 +98,7 @@ for (let waited = 0; waited < 1800; waited += 20) {
 		process.exit(1);
 	}
 	if (builder.status === "done") {
-		// The reviewers are named by the commit they review: the head of the change's branch.
+		// Reviewers are named by the commit they review, the head of the change's branch.
 		const { url, token } = await tool("credentials", {});
 		const { stdout } = await promisify(execFile)("git", [
 			"-c",

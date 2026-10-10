@@ -72,11 +72,11 @@ describe("forks (the default)", () => {
 			token: "fork-read",
 			branch: "changes/a-1",
 			head,
-			// The role it's reviewed in (review, unless named): the reviewer's mark says so.
+			// The reviewer's mark records the role, which defaults to review.
 			role: "review",
 			project: { url: project.url, token: "read", branch: "main" },
 		});
-		// Read access only, to the author's fork.
+		// Read-only access to the author's fork.
 		expect(forkRequests).toEqual([{ agent: "agent-a", scope: "read" }]);
 	});
 
@@ -207,7 +207,7 @@ describe("status", () => {
 
 	it("still finds a change made before forks were per agent, in that change's own fork", async () => {
 		await call("settings", {});
-		// Claimed before forks were per agent: only such a change can have a fork of its own.
+		// Only a change claimed before forks were per agent can have its own fork.
 		vi.useFakeTimers({ toFake: ["Date"] });
 		vi.setSystemTime(new Date("2026-10-05T00:00:00Z"));
 		try {
@@ -298,11 +298,9 @@ describe("status", () => {
 });
 
 describe("check (run by the agent itself)", () => {
-	// Claims are exclusive and merge refuses files outside them, so two
-	// mergeable changes can't conflict with each other: an overlap means someone
-	// is outside their claim, which their own check already shows. So the check
-	// is the change against main, and its files against its claim; it never
-	// fetches other changes.
+	// Claims are exclusive and merge refuses files outside them, so two mergeable changes can't conflict. An
+	// overlap means someone is outside their claim, which their own check already shows. So the check compares the
+	// change against main and its files against its claim, and never fetches other changes.
 	it("warns early about conflicts with main and files outside the claim, without fetching other changes", async () => {
 		await call("settings", { shard_depth: 0 });
 		await call("claim", { change: "a-1", agent: "agent-a", paths: ["src/a/"], intent: "a" });
@@ -328,7 +326,7 @@ describe("check (run by the agent itself)", () => {
 			main: { head: await mainline.run("rev-parse", "HEAD"), clean: false, conflicts: ["README.md"] },
 			outsideClaim: ["README.md"],
 		});
-		// The claims registry and main from the project, the change from its fork: nothing of b-1's.
+		// The claims registry and main come from the project and the change from its fork, with nothing of b-1's.
 		expect(project.requests.slice(before).filter((r) => r === "POST git-upload-pack")).toHaveLength(2);
 		expect(fork.requests.slice(beforeFork).filter((r) => r === "POST git-upload-pack")).toHaveLength(1);
 	}, 60_000);

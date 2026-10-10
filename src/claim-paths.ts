@@ -4,7 +4,6 @@ import { isPlainPath } from "./paths";
 // Claimed paths: what a claim covers, and when two claims overlap. A path with
 // a trailing slash is a directory and covers everything under it.
 
-/** The most paths one claim may list. */
 export const MAX_CLAIM_PATHS = 50;
 
 /** Whether `path` (a file) is covered by the claimed entry `entry`. */
@@ -53,10 +52,9 @@ export function changeId(title: string) {
 }
 
 /**
- * A claim covering `files` in at most `max` entries: the files themselves, or,
- * when there are too many, their folders, the deepest lifted first, level by
- * level (so a merge of a whole branch claims src/billing/ rather than its 80
- * files). Null when even the top-level entries are too many.
+ * A claim covering `files` in at most `max` entries. When there are too many files, the deepest are replaced by
+ * their folders one level at a time, so a large merge claims src/billing/ instead of each file in it. Null when
+ * even the top-level entries are too many.
  */
 export function claimCovering(files: string[], max = MAX_CLAIM_PATHS): string[] | null {
 	const depth = (entry: string) => entry.replace(/\/$/, "").split("/").length;
@@ -66,7 +64,7 @@ export function claimCovering(files: string[], max = MAX_CLAIM_PATHS): string[] 
 		const deepest = Math.max(...entries.map(depth));
 		if (deepest <= 1) return null;
 		const lifted = [...new Set(entries.map((e) => (depth(e) === deepest ? parent(e) : e)))];
-		// What a lifted folder covers needn't be listed apart.
+		// Drop entries that a lifted folder already covers.
 		entries = lifted.filter(
 			(e) => !lifted.some((folder) => folder !== e && folder.endsWith("/") && inLaneEntry(e, folder)),
 		);

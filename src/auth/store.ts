@@ -1,11 +1,9 @@
-// GitHive's identity store in D1: people and the accounts they sign in with,
-// their sessions, the agents they own and those agents' tokens, and the
-// invitations sign-in needs until repos have permissions. Secrets (session
-// ids, agent tokens) are stored only as SHA-256 hashes.
+// GitHive's identity store in D1: people, their sign-in accounts and sessions, their agents and agent tokens,
+// and sign-in invitations. Session ids and agent tokens are stored only as SHA-256 hashes.
 
 export interface User {
 	id: string;
-	/** Unique and public: a GitHub login, or u-<hex> for a Google account. Names the person's agents: <handle>/<agent>. */
+	/** Unique and public: a GitHub login, or u-<hex> for a Google account. Agents are named <handle>/<agent>. */
 	handle: string;
 	email: string;
 	name: string | null;
@@ -24,7 +22,7 @@ export interface Agent {
 export interface AgentToken {
 	id: string;
 	agentId: string;
-	/** The first characters after ghv_, to tell tokens apart. */
+	/** The first characters after ghv_, shown so people can tell tokens apart. */
 	prefix: string;
 	createdAt: string;
 	expiresAt: string | null;
@@ -46,7 +44,7 @@ export interface ProviderProfile {
 export const SESSION_DAYS = 30;
 export const TOKEN_DAYS = 90;
 const MAX_TOKEN_DAYS = 365;
-/** A token's last use is written at most this often. */
+/** How often a token's last-use time is written, at most. */
 const TOUCH_MS = 5 * 60_000;
 const AGENT_NAME = /^[a-z0-9][a-z0-9-]{0,31}$/;
 const HANDLE = /^[a-z0-9][a-z0-9-]{0,38}$/;
@@ -135,10 +133,7 @@ export class IdentityStore {
 		}));
 	}
 
-	/**
-	 * People orgs asked to have who can't sign in yet: an org's invitation waits
-	 * for an admin to approve the email. Each with the orgs that asked.
-	 */
+	/** Emails that orgs have invited but an admin hasn't yet approved for sign-in, each with the inviting orgs. */
 	async inviteRequests() {
 		const { results } = await this.db
 			.prepare(
@@ -158,7 +153,7 @@ export class IdentityStore {
 		return [...byEmail.values()];
 	}
 
-	/** Turn down a request: every org invitation for that email goes. */
+	/** Declines a request by deleting every org invitation for that email. */
 	async declineRequest(email: string) {
 		await this.db.prepare("DELETE FROM org_invites WHERE email = ?").bind(normalizeEmail(email)).run();
 	}
@@ -213,9 +208,8 @@ export class IdentityStore {
 	// Sign-in
 
 	/**
-	 * The user a provider's sign-in is for: the one already linked to this
-	 * account, else the one with this verified email (the account is linked to
-	 * it), else a new user, if their email is invited.
+	 * Finds the user for a provider sign-in: the one linked to this account, else the one with this verified email
+	 * (which links the account), else a new user if the email is invited.
 	 */
 	async signIn(profile: ProviderProfile): Promise<{ user: User } | { refused: "not-invited" }> {
 		const email = normalizeEmail(profile.email);
@@ -260,10 +254,10 @@ export class IdentityStore {
 			.run();
 	}
 
-	/** The provider's login when it makes a free handle (GitHub's), else u-<hex>: never derived from an email. */
+	/** Uses the provider's login as the handle when it is free, else u-<hex>. A handle never comes from an email. */
 	private async freeHandle(profile: ProviderProfile) {
 		const login = profile.login?.trim().toLowerCase();
-		// Handles and org names share one namespace: a person's handle names their personal org.
+		// Handles and org slugs share one namespace because a person's handle names their personal org.
 		const taken = async (handle: string) =>
 			!!(await this.db
 				.prepare("SELECT 1 FROM users WHERE handle = ? UNION SELECT 1 FROM orgs WHERE slug = ?")
@@ -283,7 +277,7 @@ export class IdentityStore {
 
 	// Sessions
 
-	/** A new session for the user: returns the secret for the cookie, which is stored only as a hash. */
+	/** Starts a session and returns the cookie secret. Only its hash is stored. */
 	async createSession(userId: string) {
 		const secret = randomSecret();
 		await this.db
@@ -310,7 +304,7 @@ export class IdentityStore {
 
 	// Agents
 
-	/** A new agent for the user, or a revoked one of theirs by that name made active again (its old tokens stay revoked). */
+	/** Creates an agent, or reactivates the user's revoked agent of that name. Its old tokens stay revoked. */
 	async createAgent(ownerId: string, name: string): Promise<Agent> {
 		const agentName = name.trim().toLowerCase();
 		if (!AGENT_NAME.test(agentName))
@@ -358,7 +352,7 @@ export class IdentityStore {
 		return row ? toAgent(row) : fail(404, "no such agent");
 	}
 
-	/** An active agent and its owner, or null: what an OAuth grant's props are checked against on every call. */
+	/** An active agent and its owner, or null. OAuth grant props are checked against this on every call. */
 	async activeAgent(agentId: string) {
 		const row = await this.db
 			.prepare(
@@ -379,7 +373,6 @@ export class IdentityStore {
 		};
 	}
 
-	/** Revoke an agent and every token it has. */
 	async revokeAgent(ownerId: string, agentId: string) {
 		await this.ownAgent(ownerId, agentId);
 		const at = this.iso();
@@ -393,7 +386,7 @@ export class IdentityStore {
 
 	// Agent tokens
 
-	/** A new token for one of the user's active agents: the secret is returned once and stored only as a hash. */
+	/** Creates a token for one of the user's active agents. The secret is returned once; only its hash is stored. */
 	async createToken(ownerId: string, agentId: string, expiresInDays: number | null = TOKEN_DAYS) {
 		const agent = await this.ownAgent(ownerId, agentId);
 		if (agent.revokedAt) fail(409, `${agent.name} is revoked`);
@@ -433,7 +426,7 @@ export class IdentityStore {
 			.run();
 	}
 
-	/** The agent and owner a token is for, if it's live: not revoked, not expired, and its agent not revoked. */
+	/** The agent and owner for a live token: not revoked or expired, and its agent not revoked. */
 	async tokenPrincipal(secret: string) {
 		if (!secret.startsWith("ghv_")) return null;
 		const row = await this.db

@@ -1,20 +1,17 @@
 #!/usr/bin/env node
-// What batch size spends the fewest check runs, as GitHive lands a batch
-// (src/toolkit/merge.ts, checkBatch): a batch is checked once on main;
-// failing, it's split in halves checked side by side, and so on; a part that
-// passes stops; a single change that fails is checked once more, then put
-// out. Only the first passing part found lands (the shallowest finishes
-// first), since each was checked on main alone: the other passing parts go
-// back to the front of the pool and are checked again in a later batch.
+// Finds the batch size that spends the fewest check runs, landing batches the
+// way GitHive does (src/toolkit/merge.ts, checkBatch). A failing batch is split
+// in halves, checked side by side, until parts pass. A failing single change is
+// checked once more, then put out. Only the shallowest passing part lands; the
+// others return to the front of the pool, since each was checked on main alone.
 //
 //   node scripts/batch-size-sim.mjs [--fail 0.01,0.02,0.05,0.1,0.2]
 //                                   [--sizes 4,6,8,12,16,20,24,32,48,64]
 //                                   [--batches 40000] [--seed 1]
 //
-// For each share of changes that fail, it prints the check runs spent per
-// change landed or put out, at each batch size, and how many changes a batch
-// lands for the time its search takes. Bad changes fail every time, there's
-// always a full batch waiting, and every run takes the same time.
+// For each failure share and batch size, prints check runs per settled change
+// and changes settled per unit of search time. Bad changes always fail, a full
+// batch is always waiting, and every run takes the same time.
 
 const args = process.argv.slice(2);
 const flag = (name) => (args.includes(`--${name}`) ? args[args.indexOf(`--${name}`) + 1] : undefined);
@@ -34,7 +31,7 @@ const seeded = (seed) => () => {
 /** GitHive's batch size for a failure share (merge.ts, batchSize, without the prior). */
 const githiveSize = (p) => Math.max(4, Math.min(64, Math.round(1 / p)));
 
-/** Check `batch` (true: a bad change) as checkBatch does: the parts found passing, with their depth, and the changes put out. */
+/** Searches `batch` (true marks a bad change) as checkBatch does, collecting passing parts and put-out changes. */
 function search(batch, depth, found, out, runs) {
 	runs.n++;
 	if (!batch.some(Boolean)) return void found.push({ depth, part: batch });
@@ -44,7 +41,7 @@ function search(batch, depth, found, out, runs) {
 	search(batch.slice(half), depth + 1, found, out, runs);
 }
 
-/** Batches of `n` from a stream where a share `p` fail: runs per change settled, and changes settled per run's time. */
+/** Simulates batches of `n` from a stream where a share `p` of changes fail. */
 function steady(n, p) {
 	const random = seeded(SEED);
 	let pool = [];
@@ -59,7 +56,7 @@ function steady(n, p) {
 		const out = [];
 		search(batch, 0, found, out, runs);
 		settled += out.length;
-		// The search takes as long as its deepest part, and a failing single change's second run.
+		// The search takes as long as its deepest part, plus a failing change's second run.
 		const deepest = Math.max(0, ...found.map((f) => f.depth));
 		time += 1 + (out.length ? Math.max(deepest, Math.ceil(Math.log2(n))) + 1 : 0);
 		if (found.length) {

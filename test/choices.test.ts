@@ -153,7 +153,7 @@ describe("the reviews an agent may give", () => {
 			{ change: "deps", role: "security" },
 			{ change: "plain", role: "review" },
 		]);
-		// Anyone else: ordinary reviews only; with deps' ordinary approvals in, only the security holder is offered it.
+		// Anyone else gets ordinary reviews only. Once deps has its ordinary approvals, only the security holder is offered it.
 		const deps = [vote("h1", "agent-w"), vote("h2", "agent-w"), vote("h2", "agent-v")];
 		expect(reviewsFor(base({ policy, open, votes: deps }))).toEqual([]);
 		expect(reviewsFor(base({ agent: "sec-agent", policy, open, votes: deps }))).toMatchObject([
@@ -279,7 +279,7 @@ describe("review holds through the toolkit", { timeout: 120_000 }, () => {
 			const listed = async (agent: string) =>
 				((await call("reviews", { agent }, keys[agent])) as { reviews: { change: string; head: string }[] }).reviews;
 			expect((await listed("rev-1")).map((r) => r.change).sort()).toEqual(["c-1", "c-2"]);
-			// A mark that can't be written (the record stayed busy) doesn't keep anyone from reviewing: it's only a mark.
+			// A mark that can't be written because the record stayed busy doesn't stop anyone from reviewing.
 			const busy = {
 				...reviews,
 				hold: async () => {
@@ -296,7 +296,7 @@ describe("review holds through the toolkit", { timeout: 120_000 }, () => {
 			expect(await listed("rev-3")).toEqual([]);
 			// rev-1 still sees its own, first.
 			expect((await listed("rev-1"))[0].change).toBe("c-1");
-			// rev-1 votes: its hold runs out a minute later (until the vote shows everywhere), not 15 minutes later.
+			// After rev-1 votes, its hold lasts one more minute, until the vote is visible everywhere, not 15 minutes.
 			await call(
 				"vote",
 				{ commit: one.head, reviewer: "rev-1", role: "review", verdict: "approve", evidence: "ok" },
@@ -356,9 +356,9 @@ describe("warming the checks when a merge is near", { timeout: 60_000 }, () => {
 					evidence: "no",
 				});
 			}
-			// The start, the check and the approval warm, each saying what merge to expect; the rejection doesn't. Without checks
-			// the repo's Gate still lands the batch: it warms from the claim on (the Gate passes over these once it has the
-			// snapshot), never at the start, so a repo nobody works in starts no container.
+			// The start, the check and the approval each warm the Gate with the merge to expect; the rejection
+			// doesn't. Without checks the Gate still lands the batch, so it warms from the claim on. It never warms
+			// at the start, so a repo nobody works in starts no container.
 			expect(warmed).toEqual([
 				{ branch: "main", checks: ["npm test"], expect: "set up" },
 				{ branch: "main", checks: ["npm test"], expect: "checked", key: "c-checked" },
@@ -471,7 +471,7 @@ describe("open changes' heads, as GitHive last saw them", { timeout: 120_000 }, 
 				await call("claim", { change: `c-${agent}`, agent, paths: [`src/${agent}/`], intent: "x" }, keys[agent]);
 				await pushChange(server.url, work, agent, `c-${agent}`, { [`src/${agent}/x.js`]: `${agent}\n` });
 			}
-			// None seen yet: each look reads 6 of them, then the rest, then none.
+			// Nothing seen yet. Each look reads 6 of them, then the rest, then none.
 			const readsOf = async () => {
 				const before = forkReads;
 				await call("reviews", { agent: "z" }, keys.z);
@@ -493,7 +493,7 @@ describe("open changes' heads, as GitHive last saw them", { timeout: 120_000 }, 
 			await call("check", { change: "c-a0" }, keys.a0);
 			expect(known.get("c-a0")?.head).toBe(newer);
 			expect(await readsOf()).toBe(0);
-			// Seen long ago, and its read fails: what was seen stays, not "nothing pushed".
+			// Seen long ago and now unreadable, the change keeps what was seen rather than "nothing pushed".
 			const seen = known.get("c-a1")!;
 			known.set("c-a1", { ...seen, at: 0 });
 			failing = "a1";
@@ -645,7 +645,7 @@ describe("agents choosing through the toolkit", { timeout: 120_000 }, () => {
 			await call("add_work", { title: "Add the farewell", intent: "again", agent: "agent-a" }, keys["agent-a"]),
 		).toEqual({ ok: false, reason: "add-the-farewell is in the backlog already" });
 
-		// Each builds a piece it picks from the backlog; if both picked the same, the claim decides and the other picks again.
+		// Each builds a piece from the backlog. If both pick the same one, the claim decides and the other picks again.
 		const built: Record<string, string> = {};
 		for (const agent of ["agent-a", "agent-b"]) {
 			for (;;) {

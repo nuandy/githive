@@ -15,9 +15,8 @@ export function voteRoles(policy: RepoSnapshot["policy"]): string[] {
 }
 
 /**
- * A person's vote on a change, from its page: on its current
- * commit, stamped with their verified identity, counted like any reviewer's,
- * and answering an agent's question about it. The server's words show on refusal.
+ * A person's vote on a change's current commit, from its page. It is stamped with their verified identity,
+ * counts like any reviewer's, and answers an agent's question about the change. A refusal shows the server's words.
  */
 export function VoteForm({
 	repo,

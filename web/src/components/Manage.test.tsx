@@ -112,7 +112,7 @@ describe("a new repository", () => {
 			visibility: "private",
 			copy_from: "acme/old",
 		});
-		// Fresh: a README by default, and whatever else was chosen; nothing at all only if nothing was.
+		// A fresh repo gets a README by default, plus whatever else was chosen. It is empty only if nothing was.
 		expect(newRepoInput({ ...base, source: "empty" })).toEqual({
 			owner: "acme",
 			name: "web",
@@ -342,7 +342,7 @@ describe("a repo's access settings", () => {
 		// Someone who may only write is told who can start it, with no button.
 		expect(render("write", { kind: "repo", tab: "changes" })).not.toContain("Start GitHive");
 		expect(render("write", { kind: "repo", tab: "changes" })).toContain("once one of its admins starts it");
-		// Settings shows who may do what, and the code shows, without a start.
+		// Settings shows who may do what and the code shows, but there is no way to start.
 		expect(render("admin", { kind: "repo", tab: "settings" })).toContain("Delete");
 		expect(render("admin", { kind: "repo", tab: "settings" })).not.toContain("Nothing here yet");
 		expect(render("admin", { kind: "repo", tab: "code" })).not.toContain("Nothing here yet");

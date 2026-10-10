@@ -4,11 +4,10 @@ import type { BuildJob, BuilderState } from "../src/builder";
 import type { ReviewJob, ReviewerState } from "../src/reviewer";
 import { FakeStorage } from "./fakes/env";
 
-// GitHive's hosted agents the builder works on a
-// branch of the project repo within its claim and asks for review when done;
-// a reviewer votes, and, asked to, then tries the merge (which the toolkit
-// refuses until the approvals are in). The
-// container is stubbed: its git and shell calls are recorded and answered.
+// GitHive's hosted agents. The builder works on a branch of the project repo
+// within its claim and asks for review when done. A reviewer votes and, when
+// asked, tries the merge, which the toolkit refuses until the approvals are in.
+// The container is stubbed: its git and shell calls are recorded and answered.
 
 const hosted = vi.hoisted(() => ({
 	startHostedReviewers: vi.fn(async () => ({ head: "h1", reviewers: ["tests"] })),
@@ -60,7 +59,7 @@ const job: BuildJob = {
 	base: { remote: "https://git.test/project.git", token: "read" },
 };
 
-/** A builder whose container answers: `outputs` maps a command (joined) to its output; everything else succeeds quietly. */
+/** A builder whose container maps each command (joined) to its output in `outputs`; anything else succeeds quietly. */
 function builder(outputs: Record<string, string> = {}) {
 	const agent = new Builder({ storage: new FakeStorage() } as never, env as never);
 	const ran: string[][] = [];
