@@ -13,19 +13,16 @@ import { makeStamper, type Stamper } from "./stamp";
 // Lands a batch in the Worker, without a container and without a checkout. Claims keep a batch's changes apart, so
 // each merge is main's tree with the change's files put in place: only the trees along those paths are read
 // (through the Artifacts API) and written. The objects a change adds come from its fork as the server packs them,
-// pushed into the project under a ref of their own, and the merges then land in one push with a lease on the base.
+// and land with the merges in one push, with a lease on the base.
 // It makes the same commits the Gate's `git merge --no-ff` would. When it can't be sure of that (a change and main
 // both touched a file, or a change it can't place on the branch), the batch lands in the Gate instead.
 
 const DIR = "/landing";
 
-/** Where a change's objects wait in the project repo until its merge lands. */
-export const INCOMING = "refs/notes/githive-incoming/";
+/** A batch whose changes add more than this lands in the Gate, which streams it, rather than the Worker's memory. */
+const PACKS_MOST = 32 * 1024 * 1024;
 
-/** A change adding more than this lands in the Gate, which streams it, rather than in the Worker's memory. */
-const PACK_MOST = 16 * 1024 * 1024;
-
-const TRANSFERS_AT_ONCE = 4;
+const FETCHES_AT_ONCE = 4;
 const PUSH_ATTEMPTS = 6;
 
 export interface TreeLandingInput {
@@ -50,16 +47,15 @@ export function treeLanding(input: TreeLandingInput): BatchGit["land"] {
 			console.log(`landing ${batch.merges.length} in the Gate: ${plan.gate}`);
 			return input.fallback(batch);
 		}
-		const write = await input.remote("write");
-		const staged = await stageChanges(write, batch.merges, plan.placed);
-		if ("gate" in staged) {
-			console.log(`landing ${batch.merges.length} in the Gate: ${staged.gate}`);
+		const fs = new MemoryFS();
+		await git.init({ fs, dir: DIR });
+		const fetched = await fetchChanges(fs, batch.merges, plan.placed);
+		if ("gate" in fetched) {
+			console.log(`landing ${batch.merges.length} in the Gate: ${fetched.gate}`);
 			return input.fallback(batch);
 		}
-		const stamper =
-			batch.stamper ?? (input.stampKey && batch.by ? await makeStamper(input.stampKey, batch.by) : undefined);
-		const built = await buildMerges(input, batch, plan, stamper);
-		return pushMerges(write, batch, built, staged.refs);
+		const built = await buildMerges(fs, input, batch, plan, await stamperFor(input, batch));
+		return pushMerges(await input.remote("write"), batch, built, fetched.oids);
 	};
 }
 
@@ -87,45 +83,48 @@ async function planLanding(input: TreeLandingInput, batch: LandInput): Promise<P
 
 const touches = (a: string, b: string) => a === b || a.startsWith(`${b}/`) || b.startsWith(`${a}/`);
 
+/** Who the merges are stamped for: the caller's stamper, or GitHive's key for `by`, as the Gate stamps. */
+async function stamperFor(input: TreeLandingInput, batch: LandInput): Promise<Stamper | undefined> {
+	if (batch.stamper) return batch.stamper;
+	if (!input.stampKey || !batch.by) return undefined;
+	return makeStamper(input.stampKey, batch.by);
+}
+
 /**
- * Copies the objects each change adds from its fork into the project repo, under a ref of its own, so its merge
- * can name it. A change on a branch of the project repo already has them there.
+ * Fetches the objects each change adds beyond its merge base from its fork into `fs`, to push with the merges.
+ * A change on a branch of the project repo already has them there.
  */
-async function stageChanges(
-	write: Remote,
+async function fetchChanges(
+	fs: MemoryFS,
 	merges: Merge[],
 	placed: Placed[],
-): Promise<{ gate: string } | { refs: RefUpdate[] }> {
-	const staged = await atMost(TRANSFERS_AT_ONCE, merges, async (merge, index): Promise<RefUpdate | string | null> => {
+): Promise<{ gate: string } | { oids: string[] }> {
+	const packs = await atMost(FETCHES_AT_ONCE, merges, async (merge, index) => {
 		if (!merge.source) return null;
-		const base = placed[index]!.base.hash;
-		const pack = await fetchPackSince(merge.source, merge.head, [base]);
-		if (pack.length > PACK_MOST) return `${merge.change} adds ${Math.round(pack.length / 1e6)} MB`;
-		const ref = `${INCOMING}${merge.head}`;
-		const report = await pushWithRetries(write, [{ ref, from: null, to: merge.head }], pack);
-		if ("busy" in report) return `the project repo stayed busy taking ${merge.change}'s objects`;
-		const result = report.refs.get(ref);
-		// Already there from an earlier attempt: its objects are too.
-		if (report.unpack !== "ok" || (result !== true && !/exist/i.test(String(result))))
-			return `${merge.change}'s objects weren't taken: ${report.unpack}, ${String(result)}`;
-		return { ref, from: merge.head, to: null };
+		return fetchPackSince(merge.source, merge.head, [placed[index]!.base.hash]);
 	});
-	const failed = staged.find((each): each is string => typeof each === "string");
-	if (failed) return { gate: failed };
-	return { refs: staged.filter((each): each is RefUpdate => !!each && typeof each !== "string") };
+	const size = packs.reduce((total, pack) => total + (pack?.length ?? 0), 0);
+	if (size > PACKS_MOST) return { gate: `the changes add ${Math.round(size / 1e6)} MB` };
+	const oids: string[] = [];
+	for (const [index, pack] of packs.entries()) {
+		if (!pack) continue;
+		const filepath = `.git/objects/pack/pack-change-${index}.pack`;
+		await fs.promises.writeFile(`${DIR}/${filepath}`, pack);
+		oids.push(...(await git.indexPack({ fs, dir: DIR, filepath })).oids);
+	}
+	return { oids };
 }
 
 type Built = { fs: MemoryFS; objects: string[]; commits: string[]; tip: string };
 
 /** Writes each merge's trees and commit in memory, each on top of the one before. */
 async function buildMerges(
+	fs: MemoryFS,
 	input: TreeLandingInput,
 	batch: LandInput,
 	plan: { baseTree: string; placed: Placed[] },
 	stamper: Stamper | undefined,
 ): Promise<Built> {
-	const fs = new MemoryFS();
-	await git.init({ fs, dir: DIR });
 	const written = new Map<string, TreeEntry[]>();
 	const objects: string[] = [];
 	const writeTree = async (entries: TreeEntry[]) => {
@@ -212,21 +211,22 @@ function cleanMessage(message: string) {
 }
 
 /**
- * Pushes the merges and moves the branch from the base to the last one, removing the changes' staging refs in the
- * same request. "moved" if the branch is no longer at the base.
+ * Pushes the changes' objects and the merges, and moves the branch from the base to the last merge, in one
+ * request. "moved" if the branch is no longer at the base.
  */
 async function pushMerges(
 	write: Remote,
 	batch: LandInput,
 	built: Built,
-	staged: RefUpdate[],
+	changeObjects: string[],
 ): Promise<{ commits: string[] } | "moved"> {
-	const { packfile } = await git.packObjects({ fs: built.fs, dir: DIR, oids: built.objects });
+	const oids = [...new Set([...changeObjects, ...built.objects])];
+	const { packfile } = await git.packObjects({ fs: built.fs, dir: DIR, oids });
 	const branchRef = `refs/heads/${batch.branch}`;
 	const update = { ref: branchRef, from: batch.base, to: built.tip };
 	let report;
 	try {
-		report = await pushWithRetries(write, [update, ...staged], packfile);
+		report = await pushWithRetries(write, [update], packfile);
 	} catch (err) {
 		// A server error may come after the push applied: the branch then tells.
 		const now = await branchHead(write, batch.branch).catch(() => null);

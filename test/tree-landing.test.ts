@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { forgetChains, type ReadHistory } from "../src/toolkit/batch-reads";
-import { INCOMING, treeLanding } from "../src/toolkit/tree-landing";
+import { treeLanding } from "../src/toolkit/tree-landing";
 import { agentClone } from "./helpers/agents";
 import { gitHistory } from "./helpers/git-history";
 import { startGitServer, type GitServer } from "./helpers/git-server";
@@ -108,7 +108,7 @@ afterEach(async () => {
 });
 
 describe("landing a batch with trees, in the Worker", { timeout: 60_000 }, () => {
-	it("makes the tree git's merge makes, merge commits included, and leaves no staging refs", async () => {
+	it("makes the tree git's merge makes, merge commits included, in one push", async () => {
 		const nested = await forkChange("nested", async (clone) => {
 			clone.write("lib/new/x.js", "new\n");
 			clone.write("README.md", "# Project\n\nMore.\n");
@@ -125,7 +125,9 @@ describe("landing a batch with trees, in the Worker", { timeout: 60_000 }, () =>
 		});
 		const land = treeLanding({ history, project: "project", remote: async () => project(), fallback });
 
+		const pushesBefore = server.pushes();
 		const landed = await land({ base, branch: "main", merges: [merge(nested), merge(reshape)] });
+		expect(server.pushes() - pushesBefore).toBe(1);
 
 		expect(fallback).not.toHaveBeenCalled();
 		if (landed === "moved") throw new Error("moved");
@@ -138,7 +140,8 @@ describe("landing a batch with trees, in the Worker", { timeout: 60_000 }, () =>
 		expect(server.git("rev-list", "--parents", "-n1", second).trim()).toBe(`${second} ${first} ${reshape.head}`);
 		expect(server.git("log", "-1", "--format=%an <%ae>", second).trim()).toBe("GitHive <bot@githive.invalid>");
 		expect(server.git("log", "-1", "--format=%B", second)).toContain("GitHive-Change: reshape");
-		expect(server.git("for-each-ref", INCOMING).trim()).toBe("");
+		// One push: the changes' objects and the merges together.
+		expect(server.git("for-each-ref", "refs/notes").trim()).toBe("");
 		// The project repo holds every object it now refers to.
 		expect(() => server.git("fsck", "--connectivity-only", "--no-dangling")).not.toThrow();
 	});
