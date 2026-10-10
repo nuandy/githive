@@ -30,3 +30,13 @@ describe("the sign-in screen", () => {
 		expect(html).not.toContain("/auth/");
 	});
 });
+
+describe("the sign-in screen with an invite code", () => {
+	it("asks for the code only where one lets people in, and fills in the one the link carried", () => {
+		expect(visibleText(renderToStaticMarkup(<SignIn providers={["github"]} />))).not.toContain("Invite code");
+		const html = renderToStaticMarkup(<SignIn providers={["github"]} takesInviteCode invite="hive-2026" />);
+		expect(visibleText(html)).toContain("Invite code, if you have one");
+		expect(html).toContain('value="hive-2026"');
+		expect(html).toContain(`href="/auth/github?return=${encodeURIComponent("/")}&amp;invite=hive-2026"`);
+	});
+});

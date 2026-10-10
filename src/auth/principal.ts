@@ -1,6 +1,7 @@
 import { verifyAccessRequest } from "../access";
 import type { AccessIdentity } from "../access-contract";
 import { identityLabel } from "../toolkit/stamp";
+import { inviteCodeOf } from "./invite-code";
 import { type Agent, IdentityStore, type User } from "./store";
 
 // Who is calling. One of three doors:
@@ -40,7 +41,8 @@ export function cookie(request: Request, name: string) {
 
 const bearer = (request: Request) => request.headers.get("Authorization")?.match(/^Bearer\s+(\S+)$/i)?.[1];
 
-export const identityStore = (env: Env) => (env.DB ? new IdentityStore(env.DB) : null);
+/** The identity store, knowing the site's invite code, so access through a closed code stops at once. */
+export const identityStore = (env: Env) => (env.DB ? new IdentityStore(env.DB, undefined, inviteCodeOf(env)) : null);
 
 /** The caller, or null: an Access assertion first, then an agent token, then a session cookie. */
 export async function resolvePrincipal(request: Request, env: Env): Promise<Principal | null> {

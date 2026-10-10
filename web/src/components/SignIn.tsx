@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { PROVIDER_NAMES, type Provider, signInHref } from "../lib/session";
 import { HiveMark } from "./HiveMark";
 import "./SignIn.css";
@@ -33,7 +34,15 @@ function ProviderMark({ provider }: { provider: Provider }) {
 }
 
 /** One button per provider, once they're known. */
-function ProviderButtons({ providers, hash }: { providers: Provider[] | undefined; hash: string }) {
+function ProviderButtons({
+	providers,
+	hash,
+	invite,
+}: {
+	providers: Provider[] | undefined;
+	hash: string;
+	invite: string;
+}) {
 	if (providers === undefined)
 		return (
 			<p className="muted" role="status">
@@ -44,7 +53,11 @@ function ProviderButtons({ providers, hash }: { providers: Provider[] | undefine
 	return (
 		<div className="signin__buttons">
 			{providers.map((provider) => (
-				<a key={provider} className={`signin__button signin__button--${provider}`} href={signInHref(provider, hash)}>
+				<a
+					key={provider}
+					className={`signin__button signin__button--${provider}`}
+					href={signInHref(provider, hash, invite)}
+				>
 					<ProviderMark provider={provider} />
 					Continue with {PROVIDER_NAMES[provider]}
 				</a>
@@ -62,11 +75,18 @@ export function SignIn({
 	providers,
 	error,
 	hash = "",
+	takesInviteCode = false,
+	invite: linkedInvite = "",
 }: {
 	providers: Provider[] | undefined;
 	error?: string | null;
 	hash?: string;
+	/** An invite code lets people in here, so the screen asks for one. */
+	takesInviteCode?: boolean;
+	/** The invite code the link carried, filled in. */
+	invite?: string;
 }) {
+	const [invite, setInvite] = useState(linkedInvite);
 	return (
 		<main className="signin" id="main">
 			<div className="signin__card">
@@ -82,7 +102,18 @@ export function SignIn({
 						{error}
 					</p>
 				) : null}
-				<ProviderButtons providers={providers} hash={hash} />
+				{takesInviteCode ? (
+					<label className="signin__invite">
+						<span>Invite code, if you have one</span>
+						<input
+							value={invite}
+							onChange={(event) => setInvite(event.target.value)}
+							autoComplete="off"
+							spellCheck={false}
+						/>
+					</label>
+				) : null}
+				<ProviderButtons providers={providers} hash={hash} invite={invite} />
 				<p className="signin__note">
 					GitHive is invitation-only for now. You'll be signed in with the email your account has verified.
 				</p>

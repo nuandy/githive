@@ -7,6 +7,7 @@ import {
 	expiryValue,
 	connectSteps,
 	tokenSteps,
+	inviteOf,
 	signInHref,
 	signinErrorMessage,
 	signinErrorOf,
@@ -37,6 +38,9 @@ describe("signing in", () => {
 	it("sends a sign-in back to the page the person was on, as a path on this site", () => {
 		expect(signInHref("github", "#/repos/docs")).toBe(`/auth/github?return=${encodeURIComponent("/#/repos/docs")}`);
 		expect(signInHref("google", "")).toBe(`/auth/google?return=${encodeURIComponent("/")}`);
+		expect(signInHref("github", "", " hive 2026 ")).toBe(`/auth/github?return=%2F&invite=hive%202026`);
+		expect(inviteOf("?invite=hive-2026")).toBe("hive-2026");
+		expect(signinErrorMessage("wrong-invite-code")).toContain("invite code");
 	});
 });
 

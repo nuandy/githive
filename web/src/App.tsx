@@ -1,4 +1,4 @@
-import { type ReactNode, useEffect, useRef, useState } from "react";
+import { type ComponentProps, type ReactNode, useEffect, useRef, useState } from "react";
 import { messageOf } from "./lib/errors";
 import {
 	SIGNED_OUT_EVENT,
@@ -29,7 +29,7 @@ import { claimTitle } from "./lib/claimStatus";
 import { buildInbox } from "./lib/inbox";
 import { buildRepoRows } from "./lib/repos";
 import { href, parseRoute, type Route } from "./lib/routes";
-import { type Provider, signinErrorMessage, signinErrorOf, withoutSigninError } from "./lib/session";
+import { type Provider, inviteOf, signinErrorMessage, signinErrorOf, withoutSigninError } from "./lib/session";
 import "./App.css";
 
 /** Where a route points, ignoring tabs. Moving to a new place scrolls to the top; switching tabs doesn't. */
@@ -94,6 +94,7 @@ export function App() {
 	const [me, setMe] = useState<Me | null | undefined>(undefined);
 	const [bootError, setBootError] = useState<string | null>(null);
 	const [providers, setProviders] = useState<Provider[] | undefined>(undefined);
+	const [takesInviteCode, setTakesInviteCode] = useState(false);
 	// Read once, then dropped from the address bar so a reload doesn't show it again.
 	const [signinError] = useState(() => signinErrorMessage(signinErrorOf(window.location.search)));
 	useEffect(() => {
@@ -111,7 +112,10 @@ export function App() {
 		if (me !== null || providers !== undefined) return;
 		document.title = "Sign in · GitHive";
 		account.providers().then(
-			(answer) => setProviders(answer.providers),
+			(answer) => {
+				setProviders(answer.providers);
+				setTakesInviteCode(!!answer.inviteCode);
+			},
 			() => setProviders([]),
 		);
 	}, [me, providers]);
@@ -129,15 +133,19 @@ export function App() {
 			</EmptyPage>
 		);
 	}
-	if (me === null) return <SignedOut providers={providers} error={signinError} />;
+	if (me === null) {
+		const signIn = { providers, error: signinError, takesInviteCode, invite: inviteOf(window.location.search) };
+		return <SignedOut signIn={signIn} />;
+	}
 	return <Dashboard me={me} onSignOut={signOut} />;
 }
 
 /** Someone signed out: a public repo's pages when the address names one, and the sign-in screen otherwise. */
-function SignedOut({ providers, error }: { providers: Provider[] | undefined; error: string | null }) {
+function SignedOut({ signIn: options }: { signIn: Omit<ComponentProps<typeof SignIn>, "hash"> }) {
 	const route = useHashRoute();
 	const [signingIn, setSigningIn] = useState(false);
-	const signIn = <SignIn providers={providers} error={error} hash={window.location.hash} />;
+	const signIn = <SignIn {...options} hash={window.location.hash} />;
+	const error = options.error;
 	const reading = route.page === "repo" || route.page === "change";
 	// After a failed sign-in, or once they ask to sign in, the sign-in screen.
 	const toSignIn = signingIn || !!error;

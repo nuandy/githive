@@ -1,9 +1,8 @@
 import { Hono } from "hono";
-import { resolvePrincipal } from "./auth/principal";
+import { identityStore, resolvePrincipal } from "./auth/principal";
 import { authRoutes } from "./auth/routes";
 import { authorize } from "./auth/authorize";
 import { orgRoutes } from "./auth/org-routes";
-import { IdentityStore } from "./auth/store";
 import { OAuthProvider } from "@cloudflare/workers-oauth-provider";
 import { statusOf } from "./errors";
 import { notePushEvents } from "./push-events";
@@ -135,7 +134,7 @@ function oauthFor(origin: string) {
 			apiHandler: {
 				async fetch(request, env, ctx) {
 					const props = (ctx as unknown as { props?: { userId?: string; agentId?: string } }).props;
-					const found = props?.agentId ? await new IdentityStore(env.DB).activeAgent(props.agentId) : null;
+					const found = props?.agentId ? await identityStore(env)?.activeAgent(props.agentId) : null;
 					if (!found || found.user.id !== props?.userId)
 						return Response.json({ error: "this connection's agent was revoked: connect again" }, { status: 401 });
 					return mcpResponse(request, env, { kind: "agent", ...found });

@@ -135,6 +135,8 @@ Revoking a token, an agent or a connection stops it at its next call.
 
 **Who gets in.** Only people an admin approves can sign in. An org's owners and admins can invite anyone by email, but someone not yet approved waits: their email shows on the admin page (the dashboard's Admin page, through Access) as a request, and once it's approved they join the org when they first sign in. GitHive's hosted agents (`build`, `request_review`) run on GitHive's model account, so only the people an admin lists may start them.
 
+**An invite code** lets in people you can't name ahead of time. Set one with `wrangler secret put INVITE_CODE`; the sign-in screen then asks for it, and a link can carry it (`https://githive.app/?invite=<code>`). Whoever signs in with it is invited, marked with a digest of the code (never the code itself). That access lasts only while the code stands: `wrangler secret delete INVITE_CODE`, or changing it, signs everyone it let in out, stops their agents' tokens and connections, and turns their next sign-in into a request. Approving that request (below) keeps them in for good.
+
 **Approving someone** (as an admin, through Access; or on the dashboard's Admin page):
 
 ```sh
