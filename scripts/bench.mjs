@@ -171,7 +171,8 @@ const summary = (values) => ({
 	max: values.length ? Math.max(...values) : null,
 });
 
-async function main() {
+/** Imports the bench repo if it isn't there, and starts GitHive on it with the sharding asked for. */
+async function prepareRepo() {
 	const repos = await api("GET", "/repos");
 	const names = (Array.isArray(repos) ? repos : (repos.repos ?? [])).map((r) => (typeof r === "string" ? r : r.name));
 	if (!names.includes(REPO)) {
@@ -196,66 +197,56 @@ async function main() {
 		const repos = started.recordsRepos || "no";
 		console.log(`${REPO} at ${BASE} (claims sharded ${started.shardDepth} deep, over ${repos} records repos)`);
 	}
+}
 
-	const levels = [];
-	const result = {
-		label: LABEL,
-		rampSeconds: RAMP_MS / 1000,
-		base: BASE,
-		repo: REPO,
-		racers: RACERS,
-		at: new Date().toISOString(),
-		levels,
+/** Runs `n` agents at once, plus a race for one path, and measures each tool's calls. */
+async function runLevel(n) {
+	const runId = `${LABEL}-n${n}-${Date.now().toString(36)}`;
+	const scratch = await mkdtemp(join(tmpdir(), "githive-bench-"));
+	const startedAt = performance.now();
+	const [agents, raced] = await Promise.all([
+		Promise.allSettled(
+			Array.from({ length: n }, async (_, i) => {
+				// Spread arrivals over the ramp instead of starting all at once.
+				if (RAMP_MS) await new Promise((resolve) => setTimeout(resolve, (RAMP_MS * i) / n));
+				return agent(n, runId, i, scratch);
+			}),
+		),
+		race(n, runId),
+	]);
+	const wallMs = performance.now() - startedAt;
+	await rm(scratch, { recursive: true, force: true });
+
+	const failures = agents.filter((a) => a.status === "rejected").map((a) => a.reason.message.slice(0, 200));
+	const leftover = (await tool(n, "claims", { repo: REPO }, null)).filter((c) => c.change.startsWith(runId));
+	const levelCalls = calls.filter((c) => c.level === n);
+	const tools = Object.fromEntries(
+		[...new Set(levelCalls.map((c) => c.tool))].map((name) => [
+			name,
+			summary(levelCalls.filter((c) => c.tool === name).map((c) => c.ms)),
+		]),
+	);
+	const level = {
+		agents: n,
+		wallMs,
+		calls: levelCalls.length,
+		callsPerSecond: levelCalls.length / (wallMs / 1000),
+		// Refused racers are answers ({ ok: false }), not errors.
+		errors: levelCalls.filter((c) => !c.ok).length,
+		failures,
+		race: raced,
+		leftoverClaims: leftover.length,
+		tools,
 	};
-	await mkdir(join(ROOT, "bench-results"), { recursive: true });
-	const file = join(ROOT, "bench-results", `${LABEL}-${result.at.replace(/[:.]/g, "-")}.json`);
-	const save = () => writeFile(file, JSON.stringify(result, null, "\t") + "\n");
-	for (const n of LEVELS) {
-		const runId = `${LABEL}-n${n}-${Date.now().toString(36)}`;
-		const scratch = await mkdtemp(join(tmpdir(), "githive-bench-"));
-		const startedAt = performance.now();
-		const [agents, raced] = await Promise.all([
-			Promise.allSettled(
-				Array.from({ length: n }, async (_, i) => {
-					// Spread arrivals over the ramp instead of starting all at once.
-					if (RAMP_MS) await new Promise((resolve) => setTimeout(resolve, (RAMP_MS * i) / n));
-					return agent(n, runId, i, scratch);
-				}),
-			),
-			race(n, runId),
-		]);
-		const wallMs = performance.now() - startedAt;
-		await rm(scratch, { recursive: true, force: true });
+	console.log(
+		`n=${n}: ${(wallMs / 1000).toFixed(1)}s, ${level.calls} calls, race winners ${raced.winners}, ` +
+			`failures ${failures.length}, leftover claims ${leftover.length}`,
+	);
+	return level;
+}
 
-		const failures = agents.filter((a) => a.status === "rejected").map((a) => a.reason.message.slice(0, 200));
-		const leftover = (await tool(n, "claims", { repo: REPO }, null)).filter((c) => c.change.startsWith(runId));
-		const levelCalls = calls.filter((c) => c.level === n);
-		const tools = Object.fromEntries(
-			[...new Set(levelCalls.map((c) => c.tool))].map((name) => [
-				name,
-				summary(levelCalls.filter((c) => c.tool === name).map((c) => c.ms)),
-			]),
-		);
-		const level = {
-			agents: n,
-			wallMs,
-			calls: levelCalls.length,
-			callsPerSecond: levelCalls.length / (wallMs / 1000),
-			// Refused racers are answers ({ ok: false }), not errors.
-			errors: levelCalls.filter((c) => !c.ok).length,
-			failures,
-			race: raced,
-			leftoverClaims: leftover.length,
-			tools,
-		};
-		levels.push(level);
-		await save();
-		console.log(
-			`n=${n}: ${(wallMs / 1000).toFixed(1)}s, ${level.calls} calls, race winners ${raced.winners}, ` +
-				`failures ${failures.length}, leftover claims ${leftover.length}`,
-		);
-	}
-
+/** The levels as a Markdown table: wall time, calls per second, and each tool's p50 and p95. */
+function printTable(levels) {
 	const ms = (v) => {
 		if (v === null) return "-";
 		if (v >= 10_000) return `${(v / 1000).toFixed(0)}s`;
@@ -275,6 +266,27 @@ async function main() {
 				`| ${t("status")} | ${t("release")} | ${l.race.winners}/${RACERS} | ${l.failures.length} |`,
 		);
 	}
+}
+
+async function main() {
+	await prepareRepo();
+	const levels = [];
+	const result = {
+		label: LABEL,
+		rampSeconds: RAMP_MS / 1000,
+		base: BASE,
+		repo: REPO,
+		racers: RACERS,
+		at: new Date().toISOString(),
+		levels,
+	};
+	await mkdir(join(ROOT, "bench-results"), { recursive: true });
+	const file = join(ROOT, "bench-results", `${LABEL}-${result.at.replace(/[:.]/g, "-")}.json`);
+	for (const n of LEVELS) {
+		levels.push(await runLevel(n));
+		await writeFile(file, JSON.stringify(result, null, "\t") + "\n");
+	}
+	printTable(levels);
 	console.log(`\nfull results: ${file}`);
 }
 
