@@ -193,6 +193,23 @@ describe("what each person can see", () => {
 		expect(await tool(env, "claims", people.eve.token)).toBe("no repo acme/web");
 	});
 
+	it("lets someone signed out read a public repo, and asks them to sign in for anything else", async () => {
+		const { env } = await world();
+		const signIn = "sign in to GitHive first";
+		const signedOut = async (method: string, path: string) => (await route(env, method, path, "")).error;
+		for (const [method, path, needs] of ROUTES) {
+			const onDocs = path.replace("/acme/web", "/acme/docs");
+			const error = await signedOut(method, onDocs);
+			if (needs === "read") expect(error, `${method} ${onDocs}`).not.toBe(signIn);
+			else expect(error, `${method} ${onDocs}`).toBe(signIn);
+		}
+		// A private repo and one that doesn't exist answer alike, so a name gives nothing away.
+		expect(await signedOut("GET", "/repos/acme/web")).toBe(signIn);
+		expect(await signedOut("GET", "/repos/acme/nothing")).toBe(signIn);
+		expect(await signedOut("GET", "/repos")).toBe(signIn);
+		expect(await signedOut("GET", "/summaries")).toBe(signIn);
+	});
+
 	it("shows an org's people and teams only to its members", async () => {
 		const { env, people } = await world();
 		const org = async (who: Handle) =>

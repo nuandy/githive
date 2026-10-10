@@ -1,7 +1,8 @@
-import { type ReactNode, useEffect, useRef, useState } from "react";
+import { type ComponentProps, type ReactNode, useEffect, useRef, useState } from "react";
 import { messageOf } from "./lib/errors";
 import {
 	SIGNED_OUT_EVENT,
+	SIGNED_OUT_MESSAGE,
 	account,
 	admin,
 	api,
@@ -28,7 +29,7 @@ import { claimTitle } from "./lib/claimStatus";
 import { buildInbox } from "./lib/inbox";
 import { buildRepoRows } from "./lib/repos";
 import { href, parseRoute, type Route } from "./lib/routes";
-import { type Provider, signinErrorMessage, signinErrorOf, withoutSigninError } from "./lib/session";
+import { type Provider, inviteOf, signinErrorMessage, signinErrorOf, withoutSigninError } from "./lib/session";
 import "./App.css";
 
 /** Where a route points, ignoring tabs. Moving to a new place scrolls to the top; switching tabs doesn't. */
@@ -93,6 +94,7 @@ export function App() {
 	const [me, setMe] = useState<Me | null | undefined>(undefined);
 	const [bootError, setBootError] = useState<string | null>(null);
 	const [providers, setProviders] = useState<Provider[] | undefined>(undefined);
+	const [takesInviteCode, setTakesInviteCode] = useState(false);
 	// Read once, then dropped from the address bar so a reload doesn't show it again.
 	const [signinError] = useState(() => signinErrorMessage(signinErrorOf(window.location.search)));
 	useEffect(() => {
@@ -110,7 +112,10 @@ export function App() {
 		if (me !== null || providers !== undefined) return;
 		document.title = "Sign in · GitHive";
 		account.providers().then(
-			(answer) => setProviders(answer.providers),
+			(answer) => {
+				setProviders(answer.providers);
+				setTakesInviteCode(!!answer.inviteCode);
+			},
 			() => setProviders([]),
 		);
 	}, [me, providers]);
@@ -128,8 +133,58 @@ export function App() {
 			</EmptyPage>
 		);
 	}
-	if (me === null) return <SignIn providers={providers} error={signinError} hash={window.location.hash} />;
+	if (me === null) {
+		const signIn = { providers, error: signinError, takesInviteCode, invite: inviteOf(window.location.search) };
+		return <SignedOut signIn={signIn} />;
+	}
 	return <Dashboard me={me} onSignOut={signOut} />;
+}
+
+/** Someone signed out: a public repo's pages when the address names one, and the sign-in screen otherwise. */
+function SignedOut({ signIn: options }: { signIn: Omit<ComponentProps<typeof SignIn>, "hash"> }) {
+	const route = useHashRoute();
+	const [signingIn, setSigningIn] = useState(false);
+	const signIn = <SignIn {...options} hash={window.location.hash} />;
+	const error = options.error;
+	const reading = route.page === "repo" || route.page === "change";
+	// After a failed sign-in, or once they ask to sign in, the sign-in screen.
+	const toSignIn = signingIn || !!error;
+	if (!reading || toSignIn) return signIn;
+	return <Visitor route={route} onSignIn={() => setSigningIn(true)} signIn={signIn} />;
+}
+
+/** A public repo, read by someone signed out. A repo they can't read asks them to sign in. */
+function Visitor({
+	route,
+	onSignIn,
+	signIn,
+}: {
+	route: Extract<Route, { page: "repo" | "change" }>;
+	onSignIn: () => void;
+	signIn: ReactNode;
+}) {
+	const changeId = route.page === "change" ? route.change : null;
+	const data = useRepoData(route.repo, changeId);
+	const changeLabel = changeId ? changeTitle(changeId, data.snapshot.data, data.change.data) : "";
+	const { crumbs, title } = headingOf(route, 0, changeLabel);
+	useEffect(() => {
+		document.title = title;
+	}, [title]);
+	const view = repoViewOf(route);
+	if (data.snapshot.error === SIGNED_OUT_MESSAGE) return signIn;
+	// The Repositories list is for people signed in, so the trail starts at the repo.
+	const trail = crumbs.filter((crumb) => crumb.href !== href.repos());
+	return (
+		<div className="shell">
+			<a className="skip-link" href="#main">
+				Skip to content
+			</a>
+			<TopBar crumbs={trail} onSignIn={onSignIn} />
+			<PageBoundary key={routePlace(route)}>
+				{view ? <RepoRoute repo={route.repo} view={view} data={data} visitor /> : <PageNotFound />}
+			</PageBoundary>
+		</div>
+	);
 }
 
 /** Everything a signed-in person (or an Access caller) sees. */
@@ -251,9 +306,11 @@ function RepoRoute(props: {
 	repo: string;
 	view: RepoView;
 	data: ReturnType<typeof useRepoData>;
-	refreshSummaries: () => void;
+	refreshSummaries?: () => void;
+	/** Read by someone signed out: nothing to manage. */
+	visitor?: boolean;
 }) {
-	const { repo, view, refreshSummaries } = props;
+	const { repo, view, refreshSummaries = () => undefined, visitor = false } = props;
 	const { liveStatus, snapshot, audit, access, change } = props.data;
 	// GitHive hasn't started on this repo yet. It still shows its code, its settings and a way to start.
 	const notStarted = !snapshot.data && !!snapshot.error && !/^no repo /.test(snapshot.error);
@@ -272,7 +329,7 @@ function RepoRoute(props: {
 				liveStatus={liveStatus}
 				api={api}
 				{...(access.data ? { access: access.data } : {})}
-				manage={manage}
+				{...(visitor ? {} : { manage })}
 				onAccessChanged={() => {
 					access.refresh();
 					refreshSummaries();

@@ -1,6 +1,6 @@
 # GitHive
 
-A Git platform for many agents working on one repository at once, with no central server deciding for them. Built on Cloudflare Workers and [Artifacts](https://developers.cloudflare.com/artifacts/). [githive.app](https://githive.app)
+A hive for coding agents: no queen assigns the work, each agent claims its own work, and every step is recorded in Git. Built on Cloudflare Workers and [Artifacts](https://developers.cloudflare.com/artifacts/). [githive.app](https://githive.app)
 
 **A repo that works like a database.** `main` is the shared record, and each agent's change is a transaction. It declares what it will write (a claim on paths, refused if another change holds them), starts from a snapshot of `main` (a branch in the agent's own fork), writes privately, and commits only if it still fits: reviewed, checked, and merging cleanly onto the latest `main`. Ready changes commit together, the way a database commits a group of transactions in one write. The records of who claimed, reviewed and merged what are the log, and the audit replays that log to check every commit.
 
@@ -117,7 +117,7 @@ Every request resolves to one caller (`src/auth/principal.ts`): an Access identi
 | write | `register`, `claim`, `release`, `credentials` for a change's fork, `merge`, `revert`, `add_work`, `ask_human`, `request_review`, `build` (and merging or making a branch on the dashboard) |
 | admin | `settings`, a repo's visibility and collaborators, deleting it |
 
-An org's owners and admins have admin on its repos; members have the org's default (write, unless changed); a public repo is readable by anyone signed in; a collaborator has what they were given; an agent has its owner's permission. A repo you can't see answers "no repo", so its name gives nothing away. A role can be granted to a team (`security = @acme/security`): a vote carries the teams its voter was on when they voted, stamped, so whoever joins the team counts without changing the grant.
+An org's owners and admins have admin on its repos; members have the org's default (write, unless changed); a public repo is readable by anyone, signed in or not (its dashboard pages too, so a link to it just works); a collaborator has what they were given; an agent has its owner's permission. A repo you can't see answers "no repo", so its name gives nothing away. A role can be granted to a team (`security = @acme/security`): a vote carries the teams its voter was on when they voted, stamped, so whoever joins the team counts without changing the grant.
 
 **Connecting an agent.** With OAuth, nothing to copy:
 
@@ -134,6 +134,8 @@ claude mcp add --scope user --transport http githive https://githive.app/mcp --h
 Revoking a token, an agent or a connection stops it at its next call.
 
 **Who gets in.** Only people an admin approves can sign in. An org's owners and admins can invite anyone by email, but someone not yet approved waits: their email shows on the admin page (the dashboard's Admin page, through Access) as a request, and once it's approved they join the org when they first sign in. GitHive's hosted agents (`build`, `request_review`) run on GitHive's model account, so only the people an admin lists may start them.
+
+**An invite code** lets in people you can't name ahead of time. Set one with `wrangler secret put INVITE_CODE`; the sign-in screen then asks for it, and a link can carry it (`https://githive.app/?invite=<code>`). Whoever signs in with it is invited, marked with a digest of the code (never the code itself). That access lasts only while the code stands: `wrangler secret delete INVITE_CODE`, or changing it, signs everyone it let in out, stops their agents' tokens and connections, and turns their next sign-in into a request. Approving that request (below) keeps them in for good.
 
 **Approving someone** (as an admin, through Access; or on the dashboard's Admin page):
 

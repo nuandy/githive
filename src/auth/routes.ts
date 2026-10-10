@@ -1,12 +1,14 @@
 import { Hono } from "hono";
 import { type Principal, SESSION_COOKIE, cookie, describe, identityStore } from "./principal";
 import { PROVIDERS, type ProviderConfig, type ProviderName, isProvider, pkceChallenge } from "./providers";
+import { codeInviteLabel, inviteCodeMatches, inviteCodeOf } from "./invite-code";
 import { OrgStore } from "./orgs";
 import { type IdentityStore, type ProviderProfile, SESSION_DAYS, randomSecret } from "./store";
 import { fail } from "../errors";
 
 // Sign-in with GitHub or Google, and a signed-in person's own agents, tokens and connected MCP clients.
-// Admins behind Access manage invitations here too.
+// Admins behind Access manage invitations here too. Where an invite code is set, signing in with it invites the
+// person (see invite-code.ts).
 
 export type AuthEnv = { Bindings: Env; Variables: { principal?: Principal } };
 
@@ -44,7 +46,7 @@ export function authRoutes(app: Hono<AuthEnv>) {
 	adminRoutes(app);
 }
 
-type PendingSignIn = { provider: string; state: string; verifier: string; return: string };
+type PendingSignIn = { provider: string; state: string; verifier: string; return: string; invite?: string };
 
 /** The sign-in this browser started, from its cookie, or null if there's none or it can't be read. */
 function pendingSignIn(request: Request): PendingSignIn | null {
@@ -57,11 +59,16 @@ function pendingSignIn(request: Request): PendingSignIn | null {
 
 /**
  * Signs in the person the provider vouched for, with their personal org and any org invitations, and returns a
- * new session id, or null when they aren't invited.
+ * new session id, or null when they aren't invited. With the right invite code, they're invited by it.
  */
-async function startSession(env: Env, profile: ProviderProfile) {
+async function startSession(env: Env, profile: ProviderProfile, withInviteCode: boolean) {
 	const ids = store(env);
-	const signed = await ids.signIn(profile);
+	let signed = await ids.signIn(profile);
+	const code = inviteCodeOf(env);
+	if ("refused" in signed && withInviteCode && code) {
+		await ids.invite(profile.email, await codeInviteLabel(code));
+		signed = await ids.signIn(profile);
+	}
 	if ("refused" in signed) return null;
 	const orgs = new OrgStore(env.DB);
 	await orgs.personalOrg(signed.user);
@@ -72,7 +79,10 @@ async function startSession(env: Env, profile: ProviderProfile) {
 /** Signing in with GitHub or Google, and out. */
 function signInRoutes(app: Hono<AuthEnv>) {
 	app.get("/auth/providers", (c) =>
-		c.json({ providers: (["github", "google"] as const).filter((p) => providerConfig(c.env, p)) }),
+		c.json({
+			providers: (["github", "google"] as const).filter((p) => providerConfig(c.env, p)),
+			inviteCode: !!inviteCodeOf(c.env),
+		}),
 	);
 
 	// Sends the person to the provider. The state and PKCE verifier wait in a short-lived cookie.
@@ -84,7 +94,10 @@ function signInRoutes(app: Hono<AuthEnv>) {
 		const state = randomSecret(24);
 		const verifier = randomSecret(48);
 		const origin = new URL(c.req.url).origin;
-		const pending = JSON.stringify({ provider: name, state, verifier, return: safeReturn(c.req.query("return")) });
+		const started: PendingSignIn = { provider: name, state, verifier, return: safeReturn(c.req.query("return")) };
+		const invite = c.req.query("invite")?.trim().slice(0, 200);
+		if (invite) started.invite = invite;
+		const pending = JSON.stringify(started);
 		c.header("Set-Cookie", cookieHeader(SIGNIN_COOKIE, pending, 600));
 		return c.redirect(
 			PROVIDERS[name].authorizeUrl({
@@ -125,8 +138,13 @@ function signInRoutes(app: Hono<AuthEnv>) {
 			console.error(`sign-in with ${name} failed`, err instanceof Error ? err.message : String(err));
 			return back(/\[403\]/.test(String(err)) ? "unverified-email" : "provider-failed");
 		}
-		const session = await startSession(c.env, profile);
-		if (!session) return back("not-invited");
+		const withInviteCode = await inviteCodeMatches(inviteCodeOf(c.env), pending.invite);
+		const session = await startSession(c.env, profile, withInviteCode);
+		// Someone already invited gets in whatever code they typed; only the turned away hear it was wrong.
+		if (!session) {
+			const wrongCode = !!pending.invite && !withInviteCode;
+			return back(wrongCode ? "wrong-invite-code" : "not-invited");
+		}
 		c.header("Set-Cookie", cookieHeader(SIGNIN_COOKIE, "", 0));
 		c.header("Set-Cookie", cookieHeader(SESSION_COOKIE, session, SESSION_DAYS * 86_400), { append: true });
 		return c.redirect(safeReturn(pending.return), 302);

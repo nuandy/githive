@@ -86,6 +86,11 @@
 	}
 }
 
+.topbar__signin {
+	flex-shrink: 0;
+	margin-left: auto;
+}
+
 .topbar__inbox {
 	display: inline-flex;
 	align-items: center;

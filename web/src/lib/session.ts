@@ -13,6 +13,7 @@ const SIGNIN_ERRORS: Record<string, string> = {
 	cancelled: "Sign-in was cancelled.",
 	"unverified-email": "Your account's email isn't verified with the provider.",
 	"provider-failed": "GitHub or Google didn't answer. Try again.",
+	"wrong-invite-code": "That invite code isn't right, or it no longer works. Check it and try again.",
 };
 
 export function signinErrorMessage(code: string | null | undefined): string | null {
@@ -32,11 +33,20 @@ export function withoutSigninError(url: string): string {
 	return `${parsed.pathname}${parsed.search}${parsed.hash}`;
 }
 
-/** Where a sign-in button goes: the provider, then back to the page the person was on (a path on this site). */
-export function signInHref(provider: Provider, hash: string): string {
+/**
+ * Where a sign-in button goes: the provider, then back to the page the person was on (a path on this site), with
+ * the invite code they typed, if any.
+ */
+export function signInHref(provider: Provider, hash: string, invite = ""): string {
 	const fragment = hash && !hash.startsWith("#") ? `#${hash}` : hash;
 	const back = `/${fragment}`;
-	return `/auth/${provider}?return=${encodeURIComponent(back)}`;
+	const code = invite.trim() ? `&invite=${encodeURIComponent(invite.trim())}` : "";
+	return `/auth/${provider}?return=${encodeURIComponent(back)}${code}`;
+}
+
+/** The invite code a link carries (`?invite=`), so the sign-in screen can fill it in. */
+export function inviteOf(search: string): string {
+	return new URLSearchParams(search).get("invite") ?? "";
 }
 
 /** How long a new agent token lasts: the choices, 90 days first chosen. */
