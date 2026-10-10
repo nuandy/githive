@@ -63,7 +63,7 @@ what Git said.
 
 - `settings`: set up a repo's review policy, role grants or checks, rules for
   other branches (`branch_rules`), and what the checks skip (`skip_checks`).
-  A repo's first settings start GitHive on it (with none given, the defaults),
+  A repo's first settings start GitHive on it (with none given, no reviews and no checks),
   and set how its claims are kept (`shard_depth`, `records_repos`); a repo made
   on GitHive starts as it's made.
   The registry keeps every version, and each merge cites the registry state
@@ -127,11 +127,15 @@ In the project repo:
   `refs/notes/githive-reviews/<repo>`): which agent is reviewing which commit
   in which role, marked by the reviewer
   (`credentials` for that change), so others looking at `reviews` don't pile onto one review, and `credentials` refuses a review to more reviewers than it needs. A vote counts with or without one, and the audit never reads them. Once the repo
-  has records repos it's kept in one of them instead (the same one always,
-  picked by a hash): every review handed out writes it, and in the project
-  repo those writes kept the repo busy for the batches landing on its branch.
+  has records repos, each bucket is kept in one of them instead, picked by a
+  hash of the bucket, and the waits record in one more: every review handed
+  out writes a bucket, and in the project repo those writes kept the repo busy
+  for the batches landing on its branch.
   The holds in the project repo from before are left behind; they're hints,
   and lapse within 15 minutes anyway.
+- **Landing lease** `refs/notes/githive-landing/<repo>/<branch>`: which merge
+  is landing a batch on the branch, and what it's checking. It's never in the
+  project repo: it lives in the repo's first records repo (see Landing).
 - **Main** and the other branches changes land on: written only by the
   toolkit (merges, reverts, and making a branch a claim names with `from`).
 
@@ -154,9 +158,12 @@ and are format 1. A reader upgrades an older format's state one step at a
 time as it reads it (`UPGRADES`), and a writer always writes the current
 format. A GitHive that meets records newer than it knows reads them as they
 are and refuses to write over them, so a rollback can't corrupt them. The
-shape of each kind of record (claims, votes, the backlog, review holds) is
-pinned in `test/fixtures/record-shapes.json`: changing one fails the tests
-until the format is bumped and an upgrade written. The pinned shapes don't yet
+shape of each kind of record (claims, votes, the backlog, review holds, the
+landing lease) is pinned in `test/fixtures/record-shapes.json`: changing one fails the tests
+until the format is bumped and an upgrade written. Every read is also checked
+against a schema of the fields the code relies on (`src/record-schemas.ts`):
+a record someone wrote by hand with plain git fails as an error naming its
+ref, not somewhere deeper. The pinned shapes don't yet
 cover fields only some repos write: sharding (`autoShard`, shard indexes, vote
 buckets), branches and branch rules, `skipChecks`, `after` and `source`, and
 releases' `mergedAs`, `into` and `stale`.
@@ -206,7 +213,11 @@ of that person's agents. Names with a `/` belong to signed-in agents: nobody
 registers one, and nobody acts as one without its token. Revoking an agent
 stops its tokens and its OAuth connections at their next call. People,
 sessions, agents and tokens live in D1 (`src/auth/`). Sign-in is by an
-admin's approval; an org's invitation waits for it.
+admin's approval; an org's invitation waits for it. Where the `INVITE_CODE`
+secret is set, signing in with it is a second way in, for as long as the code
+stands: deleting or changing it shuts out everyone it let in, their sessions,
+tokens and connections included, until an admin invites them
+(`src/auth/invite-code.ts`).
 
 
 ## Who may do what
@@ -223,7 +234,9 @@ the org's owners and admins; the org's default for members; a collaborator's
 level. An agent has its owner's. Every route and tool needs a level: read for
 looking, review for `reviews`, `credentials` for a change and `vote`, write for claiming,
 pushing and merging, admin for `settings` and deleting. A repo the
-caller can't see answers as if it didn't exist. Anyone who comes through
+caller can't see answers as if it didn't exist. Someone signed out may read a
+public repo, its dashboard pages included; for any other repo, existing or
+not, they're asked to sign in. Anyone who comes through
 Cloudflare Access (a person or a service token) may do anything, and name a
 repo not yet in an org as `_/<id>`.
 
@@ -349,7 +362,8 @@ source moves on, claiming again brings the change up to its new tip (a new
 head, so a new review). A conflict with the target is fixed the same way in
 the other direction: merge the target into the source, then claim again.
 
-On the dashboard, a repo's home shows one branch at a time, picked from the
+On the dashboard, a repo opens on its Hive tab (see Endpoint and dashboard).
+Its Changes tab shows one branch at a time, picked from the
 project's and those changes land on (`?branch=` in the address): its claims,
 what's landing, its territory and its open changes. A change shows where it lands
 (into), the branch it merges (merges) and what it waits on. People who can
@@ -442,7 +456,7 @@ it off.
 3. it merges into main without conflicts. A conflict comes back as the files,
    and what to do: merge main into the branch, resolve inside the claim, push,
    and get the new commit approved;
-4. the project's checks pass on main with the change merged in, with the
+4. if the branch has checks (none by default), they pass on main with the change merged in, with the
    other changes landing in the same batch, run in a container (see Landing).
 
 Then it makes a merge commit, never a fast-forward. Its subject is the
@@ -583,8 +597,8 @@ checks, on Express with 5 agents, batches took 44 to 94 s from merge to
 landed against the Gate's 30 to 35 s (agents-6 against agents-5), the copy of
 the repo made again in each new isolate and the changes fetched one at a
 time, where the Gate has the repo on disk and fetches 16 at once. So a repo
-without checks warms its Gate too, from the start and each claim on, for a
-snapshot a cold Gate restores in seconds.
+without checks warms its Gate too, from its first claim until the snapshot is
+saved, for a snapshot a cold Gate restores in seconds.
 
 **Connected to GitHub.** A repo can be connected to a GitHub repo through
 GitHive's GitHub App (`settings` with `github: "owner/name"`; refused unless the
@@ -808,7 +822,7 @@ installed before the checks and skipped while the files they come from are
 unchanged. Toolchains, the virtualenv and Cargo's target folder live outside
 the checkout, so a clean checkout between checks keeps them. A failed install
 fails the check with its output. The repo's own Gate warms on main when
-GitHive starts with checks and at `settings`, after a `status` that test-merged a new head or an approving vote while the repo has no
+GitHive starts with checks and at a `settings` that changes the checks, after a `status` that test-merged a new head or an approving vote while the repo has no
 usable snapshot, and when a batch's check container had to set up from
 scratch or install what the snapshot didn't have; it saves a new snapshot only when one
 is due. A container warmed in the last minute isn't warmed again.
@@ -1109,7 +1123,7 @@ How it got there:
 - **Tuned**: tokens kept for half an hour in a per-project TokenCache (and
   two minutes in each isolate), record logs kept per isolate, one registry read per call, and
   retries with random backoff.
-- **Trimmed check**: `check` doesn't test-merge every other change (see
+- **Trimmed check**: `check` (now part of `status`) didn't test-merge every other change (see
   Merging), so it costs the same at any scale.
 - **Sharded claims**: one ref per part of the tree, so claims elsewhere never
   contend (one record: 22 of 50 agents gave up on contention).
@@ -1341,8 +1355,14 @@ comments give the reason; the evidence is here.
 The tools are at `POST /mcp` on the same Worker as the dashboard and its
 routes, with the same sign-in: Cloudflare Access (on the Access hostnames
 only), an agent token (`ghv_…`, also given out over OAuth), or a person's
-session. The dashboard lists repos and shows each one's changes (one branch at
-a time), its claims as a map, its code at any branch or commit, its agents,
+session. Reads of a public repo, its pages and routes, need no sign-in. The
+dashboard lists repos and opens each one on its Hive: the agents at work, what
+each is doing, what's landing, and a live feed of claims, pushes, votes and
+landings. That feed is a rolling log of a repo's last 100 events in its
+RepoCache (`src/hive-events.ts`), sent to open pages as they happen; losing it
+loses nothing, since the records in Git hold the truth. A repo's other tabs
+show its changes (one branch at a time), what landed on a branch and why
+(History), its claims as a map, its code at any branch or commit, its agents,
 the audit, and what's landing (the batch being checked, and what landed or
 failed lately), with people's inbox. People vote and merge from it, make
 branches, and change the settings: review policy, checks, branch rules,

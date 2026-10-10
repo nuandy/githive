@@ -33,7 +33,7 @@ export const INSTRUCTIONS = [
 	"2. Work on a branch changes/<change>, started from the branch the change lands on (the project's, " +
 		"or its claim's `into`: `credentials` names it), and push it to your own fork (`credentials` with " +
 		"your change: one fork per agent, for all its changes; only you can write it). The project's branch " +
-		"(`start` names it: main, master, ...) is written only through the toolkit.",
+		"(`credentials` names it: main, master, ...) is written only through the toolkit.",
 	"3. Reviewers get the change's code with `credentials` and its change (read-only for a change that " +
 		"isn't yours: its branch in the author's fork, and the project to diff against; it marks the review " +
 		"as yours, so others aren't offered it), then `vote` on the exact commit they reviewed. A change " +
