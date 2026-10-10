@@ -125,17 +125,19 @@ export function ClaimsMap({ branch, holders, tree, treeError }: ClaimsMapProps) 
 						{holders.map((holder) => (
 							<li key={holder.change}>
 								<Swatch holder={holder} />
-								<a href={holder.href}>{holder.title}</a>
-								<span className="muted">
-									{" "}
-									· {holder.agent} · {holder.paths.length} {holder.paths.length === 1 ? "path" : "paths"}
-								</span>
-								{holder.conflicts.length ? (
-									<span className="tone-warn claims__legend-conflict">
-										<Icon name="conflict" size={13} /> conflicts in {holder.conflicts.length}{" "}
-										{holder.conflicts.length === 1 ? "file" : "files"}
+								<span>
+									<a href={holder.href}>{holder.title}</a>
+									<span className="muted">
+										{" "}
+										· {holder.agent} · {holder.paths.length} {holder.paths.length === 1 ? "path" : "paths"}
 									</span>
-								) : null}
+									{holder.conflicts.length ? (
+										<span className="tone-warn claims__legend-conflict">
+											<Icon name="conflict" size={13} /> conflicts in {holder.conflicts.length}{" "}
+											{holder.conflicts.length === 1 ? "file" : "files"}
+										</span>
+									) : null}
+								</span>
 							</li>
 						))}
 					</ul>
