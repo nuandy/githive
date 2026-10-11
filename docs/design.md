@@ -94,6 +94,9 @@ what Git said.
 - `ask_human`: put a change in people's inbox, with the reason.
 - `request_review`: ask GitHive's hosted reviewers for votes.
 - `build`: have GitHive's hosted builder make a change, start to merge.
+- `github_pr`: for a repo connected to GitHub in pr mode, open the standing
+  pull request into GitHub's branch, or say where it is (see Connected to
+  GitHub).
 
 Neither the toolkit nor the audit decides anything that binds an agent. An
 agent can skip the toolkit and use plain git, and the audit sees the same
@@ -138,6 +141,11 @@ In the project repo:
   project repo: it lives in the repo's first records repo (see Landing).
 - **Main** and the other branches changes land on: written only by the
   toolkit (merges, reverts, and making a branch a claim names with `from`).
+- **GitHub's imports** `refs/notes/githive-github/<repo>`, for a repo connected
+  to GitHub: each commit of GitHub's that GitHive brought in as the branch
+  `github/<branch>` (also written only by the toolkit) to merge as
+  githive-github's change, with the GitHive commit whose work it had. The audit
+  accepts that change without votes only against it (see Connected to GitHub).
 
 Once claims or votes shard (see Sharding on demand), there are also claim
 shards `refs/notes/githive-claim-shards/<repo>/<shard>`, each change's index
@@ -159,7 +167,7 @@ time as it reads it (`UPGRADES`), and a writer always writes the current
 format. A GitHive that meets records newer than it knows reads them as they
 are and refuses to write over them, so a rollback can't corrupt them. The
 shape of each kind of record (claims, votes, the backlog, review holds, the
-landing lease) is pinned in `test/fixtures/record-shapes.json`: changing one fails the tests
+landing lease, GitHub's imports, a repo's GitHub link) is pinned in `test/fixtures/record-shapes.json`: changing one fails the tests
 until the format is bumped and an upgrade written. Every read is also checked
 against a schema of the fields the code relies on (`src/record-schemas.ts`):
 a record someone wrote by hand with plain git fails as an error naming its
@@ -199,7 +207,8 @@ caller that agent: its records carry `by` as `<identity>/<agent>`, and it
 can't act under any other name. A registered name is never used without its
 key, and a second `register` for it is refused unless the call carries the
 current key (which rotates it). Names starting `githive-` are reserved for
-GitHive's hosted agents, and names with a `/` for signed-in agents. An agent's
+GitHive's hosted agents (the builder, the reviewers, and `githive-github`,
+which brings GitHub's changes back), and names with a `/` for signed-in agents. An agent's
 records always carry its caller's identity before its name, so no agent can
 pass as a verified identity.
 
@@ -641,17 +650,57 @@ restores in seconds. With trees it doesn't, so a batch that falls back to the
 Gate starts it cold.
 
 **Connected to GitHub.** A repo can be connected to a GitHub repo through
-GitHive's GitHub App (`settings` with `github: "owner/name"`; refused unless the
-App is installed there). The App's ID and private key (PKCS#8) are Worker
-secrets; GitHive signs a short JWT with the key and exchanges it for an
-installation token scoped to that one repo, kept for the isolate until near its
-hour (`github.ts`). Then:
+GitHive's GitHub App (`settings` with `github: "owner/name"`, or the
+dashboard's Settings tab; refused unless the App is installed there). The App's
+ID and private key (PKCS#8) are Worker secrets; GitHive signs a short JWT with
+the key and exchanges it for an installation token scoped to that one repo,
+kept for the isolate until near its hour (`github.ts`). The link is kept in the
+claims registry with its mode and trust (`github_sync`, `github_trust`), so
+the audit holds each merge to the settings in force when it merged. Then
+(docs/github-prs.md has the details):
 
-- **main goes back to GitHub after every landing**, once the batch's claims are
-  released, so off the critical path, from the repo's Gate (real git, the
-  repo on disk). It's a fast-forward only: if someone pushed to GitHub's copy
-  directly, the push is refused and logged, never forced. GitHub stays the
-  copy people browse, and a backup.
+- **GitHive's work goes to GitHub after every landing**, once the batch's
+  claims are released, so off the critical path, from the repo's Gate (real
+  git): a fast-forward only, refused and logged, never forced, if someone
+  pushed there. How depends on the mode:
+  - `pr`, the default for a new connection: main goes to `githive/main`, and
+    one standing pull request from it into GitHub's default branch updates
+    itself, with no API call per landing. `github_pr` (admin or write level)
+    and the dashboard's "Open a pull request on GitHub" open it, or say where
+    it is: "GitHive: <n> changes", its body listing what landed since GitHub's
+    branch last took GitHive's work, each change's intent, agent and reviewers
+    with their evidence; `refresh` rewrites it. Merging and closing it happen
+    on GitHub.
+  - `mirror`, which repos connected before modes keep: main goes to GitHub's
+    main, the copy people browse, and a backup.
+- **GitHub's changes come back as a change.** After pushing, one read of
+  GitHub's default branch (with its ETag) says where it is; a mirror whose
+  push was taken skips it. If GitHub's head may not be on main, the repo's
+  `GitHubSync` Durable Object starts a job and the landing goes on: no timers,
+  and the job runs one step per alarm, like the hosted builder, each step
+  finding its work done when run again. The repo's Gate fetches GitHub's
+  commit and, unless main has it, writes it to the project as
+  `github/<branch>`; the import record notes it. A squash or rebase merge of
+  the pull request gave GitHive's commits new ids, so git's merge base would be
+  GitHub's branch from before the pull request: the Gate joins GitHub's commit
+  to the newest commit of GitHive's main whose tree GitHub's branch has (a
+  commit with GitHub's tree and both as parents), so merging it brings in only
+  what GitHub added. Then `githive-github` claims a `source` merge of
+  `github/<branch>` into main (see Branches): the claim holds the paths GitHub
+  changed while it lands, none for a pull request's own merge. It lands like
+  any change, in a batch, through the repo's checks. Its merge commit says
+  "Bring in GitHub's changes (owner/name main at <sha>)". Once it's on main,
+  GitHub's commit is too, so the next pull request shows only what's new, and a
+  mirror's push is a fast-forward again.
+- **GitHub's changes are trusted** while `github_trust` is on (the default):
+  they need no approvals, whatever the policy, and their checks still run.
+  `status` says so, `reviews` offers them to no one, and the dashboard labels
+  them "from GitHub". Other merges' batches leave them to their own merge,
+  githive-github's or a person's, which test-merges them first. A conflict or a
+  failed check sends one back like any change, to people's inbox as "GitHub's
+  changes need a person", with the reason; fixing it on GitHub (merging
+  `githive/main` there) brings the fix back and lets the stuck change go. With
+  trust off, GitHub's changes need review like any change.
 - **Checks can run on GitHub Actions** instead of in containers (`verify:
   ["github-actions"]`, `actions-checks.ts`). For a batch, the repo's Gate
   merges its changes onto main, the way they'll land, and pushes that commit to
@@ -913,6 +962,13 @@ and author, and `by` when the commit was stamped:
   was idle 30 minutes.
 - `unjustified-revert`: a revert of a commit the audit doesn't report.
 
+A merge with no votes where the policy needs some is accepted only as GitHub's
+trusted change: claimed by `githive-github` (stamped as
+`service:githive-github`) with `source: github/<branch>`, its head a commit in
+the import record (stamped), and the repo's GitHub trust on, for the GitHub repo
+the import came from, in the registry state the merge cites. Anything else that
+skips a vote is reported as before.
+
 Each merge names its change and the claims tips its agent checked, so the
 audit checks the merge against the claims exactly as they stood there. It
 recounts the approvals the same way, from the votes tips the merge cites.
@@ -1056,6 +1112,11 @@ merges.
 Live (`scripts/build-demo.mjs`): the builder pushed in a minute, both
 reviewers approved, and the change was on main, stamped, about two minutes
 after `build`. The audit was clean.
+
+**githive-github.** For a repo connected to GitHub, this service agent brings
+GitHub's changes back (see Connected to GitHub): it claims and merges through
+the same toolkit, as a hosted agent stamped `service:githive-github`, from the
+repo's `GitHubSync` object. It runs no model and needs no invitation.
 
 ## Sharding on demand
 
@@ -1454,8 +1515,9 @@ show its changes (one branch at a time), what landed on a branch and why
 (History), its claims as a map, its code at any branch or commit, its agents,
 the audit, and what's landing (the batch being checked, and what landed or
 failed lately), with people's inbox. People vote and merge from it, make
-branches, and change the settings: review policy, checks, branch rules,
-visibility, collaborators. It also has pages for orgs, new repositories, a
+branches, and change the settings: review policy, checks, branch rules, the
+GitHub link, visibility, collaborators. A repo connected to GitHub shows its
+GitHub repo by its name, with the standing pull request or a button to open it. It also has pages for orgs, new repositories, a
 person's own agents and, for admins, who may sign in. Its
 views of a repo are read from Git and kept in the repo's RepoCache: a stale
 view is served at once while a fresh one is built, and the toolkit pings open
