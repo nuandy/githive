@@ -3,7 +3,9 @@ import { type Principal, agentNameOf, byOf } from "../auth/principal";
 import { type RepoRef, resolveRepo } from "../auth/access-control";
 import { type Level, OrgStore } from "../auth/orgs";
 import { IdentityStore } from "../auth/store";
+import { changeCache } from "../change-cache";
 import { fail } from "../errors";
+import { rpc } from "../rpc";
 import type { ToolContext } from "../toolkit/mcp";
 import { toolContextFor } from "../toolkit/env";
 
@@ -60,9 +62,19 @@ export async function forgetRepo(env: Env, repo: string) {
 		.then(() =>
 			Promise.all([
 				env.TOKENS?.getByName(repo).clear(),
-				env.REPO_CACHE?.getByName(`repo:${repo}`).clearViews(),
+				forgetCaches(env, repo),
 				env.GATE?.getByName(`repo:${repo}`).forgetSnapshot(),
 			]),
 		)
 		.catch((err) => console.error(`forgetting ${repo}'s tokens, views and snapshot failed`, String(err)));
+}
+
+// The repo's RepoCache, and the RecordCaches and ChangeCache beside it.
+async function forgetCaches(env: Env, repo: string) {
+	if (!env.REPO_CACHE) return;
+	const recordCaches = await rpc(env.REPO_CACHE.getByName(`repo:${repo}`).clearViews());
+	await Promise.all([
+		...recordCaches.map((name) => env.RECORD_CACHE.getByName(name).forget()),
+		changeCache(env, repo).forget(),
+	]);
 }

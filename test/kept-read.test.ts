@@ -61,6 +61,23 @@ describe("a kept read", () => {
 		expect(read).toHaveBeenCalledTimes(1);
 	});
 
+	it("isn't sent a view again that this isolate already has", async () => {
+		const { live, env } = world();
+		const sent: (string | undefined)[] = [];
+		const view = live.view.bind(live);
+		live.view = async (...args) => {
+			const answer = await view(...args);
+			sent.push(answer.json);
+			return answer;
+		};
+		const read = vi.fn(async () => ({ claims: ["a"] }));
+		await keptRead(env, "seen", "claims-advice", 30_000, read);
+		expect(await keptRead(env, "seen", "claims-advice", 30_000, read)).toEqual({ claims: ["a"] });
+		expect(await keptRead(env, "seen", "claims-advice", 30_000, read)).toEqual({ claims: ["a"] });
+		expect(read).toHaveBeenCalledTimes(1);
+		expect(sent).toEqual([undefined, undefined, undefined]);
+	});
+
 	it("after a write, rebuilds for one caller and serves the others the stale copy meanwhile", async () => {
 		const { env, live } = world();
 		let version = 1;

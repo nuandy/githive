@@ -1,5 +1,6 @@
 import { linkTo } from "../github";
 import type { SharedPlacements } from "./batch-reads";
+import { changeCache } from "../change-cache";
 import { readBranchHistory } from "./branch-history";
 import { DEFAULT_POLICY, hostedRoles } from "./mcp";
 import { effectivePolicy } from "./votes";
@@ -54,6 +55,16 @@ const KEPT_BRANCH_HEAD_MS = 2_000;
 const KEPT_TIP_MS = 10_000;
 const MAX_KEPT = 1_000_000;
 
+// The views this isolate last read, by repo and name, so the RepoCache sends a view only when it has changed.
+const viewsSeen = new Map<string, { version: number; json: string }>();
+const VIEWS_SEEN_MOST = 64;
+
+function seeView(key: string, seen: { version: number; json: string }) {
+	viewsSeen.delete(key);
+	viewsSeen.set(key, seen);
+	while (viewsSeen.size > VIEWS_SEEN_MOST) viewsSeen.delete(viewsSeen.keys().next().value!);
+}
+
 /**
  * A view of a repo cached in its RepoCache, for reads that tolerate brief staleness. One caller rebuilds a stale or
  * missing view while the others use the old one or wait briefly, so a crowd reads the repo once. If the cache
@@ -67,6 +78,7 @@ export async function keptRead<T>(
 	read: () => Promise<T>,
 ): Promise<T> {
 	const cache = env.REPO_CACHE.getByName(`repo:${repo}`);
+	const seenKey = `${repo}|${name}`;
 	const rebuild = async (writes: number) => {
 		let value: T;
 		try {
@@ -77,16 +89,22 @@ export async function keptRead<T>(
 		}
 		// Cache it for the next callers if possible. Failing to cache doesn't fail this read.
 		const json = JSON.stringify(value);
-		await (json.length <= MAX_KEPT ? cache.keep(name, json, writes) : cache.buildFailed(name)).catch((err) =>
-			console.error(`keeping ${name} of ${repo} failed`, String(err)),
-		);
+		if (json.length > MAX_KEPT) await cache.buildFailed(name).catch(() => undefined);
+		else
+			await rpc(cache.keep(name, json, writes))
+				.then((version) => seeView(seenKey, { version, json }))
+				.catch((err) => console.error(`keeping ${name} of ${repo} failed`, String(err)));
 		return value;
 	};
 	// null means the cache didn't answer.
 	const starting = () => cache.startBuild(name).catch(() => null);
 	for (const until = Date.now() + 10_000; ;) {
-		const kept = await rpc(cache.view(name, maxAgeMs)).catch(() => null);
-		if (!kept) return read();
+		const seen = viewsSeen.get(seenKey);
+		const answer = await rpc(cache.view(name, maxAgeMs, seen?.version)).catch(() => null);
+		if (!answer) return read();
+		const kept = { ...answer, json: answer.json ?? (seen && seen.version === answer.version ? seen.json : undefined) };
+		if (answer.json !== undefined && answer.version !== undefined)
+			seeView(seenKey, { version: answer.version, json: answer.json });
 		if (kept.json !== undefined) {
 			if (kept.fresh || kept.building) return JSON.parse(kept.json) as T;
 			const build = await starting();
@@ -121,8 +139,13 @@ function recordsLogIn<S>(env: Env, repo: string, index: number, ref: string) {
 function cachedLog<S>(env: Env, repo: string, at: { key: string; ref: string; holder: string; tipsKey?: string }) {
 	let log = logs.get(at.key);
 	if (!log) {
-		const cache = () => env.REPO_CACHE.getByName(`repo:${repo}`);
-		// Record states other Worker instances already read, by tip, shared through the RepoCache.
+		// Each log's tips and states have an object of their own, which the repo's RepoCache notes so it can forget them.
+		const name = `record:${repo}:${at.key}`;
+		const cache = () => env.RECORD_CACHE.getByName(name);
+		void env.REPO_CACHE?.getByName(`repo:${repo}`)
+			.noteRecordCache(name)
+			.catch(() => undefined);
+		// Record states other Worker instances already read, by tip.
 		const states = {
 			get: (recordRef: string, tip: string) => rpc(cache().recordAt(recordRef, tip)),
 			put: (recordRef: string, tip: string, json: string) => cache().keepRecord(recordRef, tip, json),
@@ -130,7 +153,8 @@ function cachedLog<S>(env: Env, repo: string, at: { key: string; ref: string; ho
 		// Cached tips too, so a read needn't list refs on the busy project repo.
 		const tipsKey = (recordRef: string) => at.tipsKey ?? recordRef;
 		const tips = {
-			get: (recordRef: string, stateKey: string) => rpc(cache().tipOf(tipsKey(recordRef), stateKey, KEPT_TIP_MS)),
+			get: (recordRef: string, stateKey: string, has?: string) =>
+				rpc(cache().tipOf(tipsKey(recordRef), stateKey, KEPT_TIP_MS, has)),
 			keep: (recordRef: string, tip: string | null, gen: number) => cache().keepTip(tipsKey(recordRef), tip, gen),
 			landed: (recordRef: string, parent: string | null, tip: string) =>
 				cache().landedTip(tipsKey(recordRef), parent, tip),
@@ -501,26 +525,26 @@ function batchGitFor(env: Env, repo: string): BatchGit {
 	return { ...inGate, land };
 }
 
-/** How a landing with trees reads the repo, and the change packs and places merges kept for it in the RepoCache. */
+/** How a landing with trees reads the repo, and the change packs and places merges kept for it in the ChangeCache. */
 function treeReads(env: Env, repo: string): TreeReads & { packs: ChangePacks } {
-	const cache = () => env.REPO_CACHE.getByName(`repo:${repo}`);
+	const changes = () => changeCache(env, repo);
 	return {
 		history: (name, read) => withHistory(env.ARTIFACTS, name, read),
 		project: repo,
 		remote: (scope) => projectRemote(env, repo, scope),
 		packs: {
-			keep: (head, pack) => cache().keepChangePack(head, pack),
-			read: (heads) => rpc(cache().changePacks(heads)),
+			keep: (head, pack) => changes().keepChangePack(head, pack),
+			read: (heads) => rpc(changes().changePacks(heads)),
 		},
 		placements: sharedPlacements(env, repo),
 	};
 }
 
 function sharedPlacements(env: Env, repo: string): SharedPlacements {
-	const cache = () => env.REPO_CACHE.getByName(`repo:${repo}`);
+	const changes = () => changeCache(env, repo);
 	return {
-		keep: (branch, placed) => cache().keepPlacements(branch, placed),
-		read: (branch, heads) => rpc(cache().placements(branch, heads)),
+		keep: (branch, placed) => changes().keepPlacements(branch, placed),
+		read: (branch, heads) => rpc(changes().placements(branch, heads)),
 	};
 }
 

@@ -20,6 +20,8 @@ export { Reviewer } from "./reviewer";
 export { Gate } from "./gate";
 export { RepoIndex } from "./repo-index";
 export { RepoCache } from "./repo-cache";
+export { RecordCache } from "./record-cache";
+export { ChangeCache } from "./change-cache";
 export { TokenCache } from "./token-cache";
 
 const app = new Hono<AppEnv>();

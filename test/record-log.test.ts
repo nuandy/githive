@@ -234,15 +234,15 @@ describe("a push whose answer was lost", () => {
 describe("record tips kept for readers", () => {
 	const listings = () => server.requests.filter((r) => r.startsWith("GET refs")).length;
 	const kept = async (wrap: (tips: TipCache) => TipCache = (tips) => tips) => {
-		const { RepoCache } = await import("../src/repo-cache");
+		const { RecordCache } = await import("../src/record-cache");
 		const { FakeStorage } = await import("./fakes/env");
-		const live = new RepoCache({ storage: new FakeStorage(), getWebSockets: () => [] } as never, {} as never);
+		const live = new RecordCache({ storage: new FakeStorage() } as never, {} as never);
 		const states = {
 			get: (r: string, tip: string) => live.recordAt(r, tip),
 			put: (r: string, tip: string, json: string) => live.keepRecord(r, tip, json),
 		};
 		const tips = {
-			get: (r: string, key: string) => live.tipOf(r, key, 10_000),
+			get: (r: string, key: string, has?: string) => live.tipOf(r, key, 10_000, has),
 			keep: (r: string, tip: string | null, gen: number) => live.keepTip(r, tip, gen),
 			landed: (r: string, parent: string | null, tip: string) => live.landedTip(r, parent, tip),
 			stale: (r: string, parent: string | null) => live.staleTip(r, parent),
@@ -288,6 +288,28 @@ describe("record tips kept for readers", () => {
 			commit: { ...commit({ state: { claims: { "src/y/": "agent-b" } } }), format: 1 },
 		});
 		expect(server.requests.length).toBe(before);
+	});
+
+	it("isn't sent a state again that it already read", async () => {
+		const sentStates: string[] = [];
+		const reader = await kept((tips) => ({
+			...tips,
+			get: async (ref, stateKey, has) => {
+				const kept = await tips.get(ref, stateKey, has);
+				if (kept.json) sentStates.push(kept.tip ?? "");
+				return kept;
+			},
+		}));
+		await reader().append(null, commit({ state: { claims: { "src/x/": "agent-a" } } }));
+		await settle();
+		// The first read lists the ref and fetches the state; later reads find the same tip and use their own copy.
+		const log = reader();
+		await log.read();
+		await settle();
+		await log.read();
+		await log.read();
+		expect(sentStates).toEqual([]);
+		expect((await log.read())?.commit.state).toEqual({ claims: { "src/x/": "agent-a" } });
 	});
 
 	it(

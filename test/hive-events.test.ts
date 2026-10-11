@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { EVENTS_KEPT, type HiveEvent, pushEvents, settledEvents, toolEvent, withEvents } from "../src/hive-events";
+import { EVENTS_KEPT, type HiveEvent, pushEvents, settledEvents, toolEvent } from "../src/hive-events";
 import { FakeStorage } from "./fakes/env";
 
 const { RepoCache } = await import("../src/repo-cache");
@@ -51,15 +51,25 @@ describe("the hive's events", () => {
 		]);
 	});
 
-	it("keeps the newest, in order, and an event delivered twice once", () => {
+	it("keeps the newest, in order, and an event delivered twice once", async () => {
 		const at = (second: number) => new Date(NOW.getTime() + second * 1000).toISOString();
 		const pushed = (second: number): HiveEvent => ({ kind: "pushed", change: `c${second}`, at: at(second) });
-		const log = withEvents([], [pushed(2), pushed(1)]);
-		expect(withEvents(log, [pushed(1)]).map((event) => event.change)).toEqual(["c1", "c2"]);
-		const many = Array.from({ length: EVENTS_KEPT + 5 }, (_, second) => pushed(second));
-		const kept = withEvents([], many);
+		const cache = new RepoCache({ storage: new FakeStorage(), getWebSockets: () => [] } as never, {} as never);
+		await cache.ping("records", false, [pushed(2), pushed(1)]);
+		await cache.ping("records", false, [pushed(1)]);
+		expect((await cache.events()).map((event) => event.change)).toEqual(["c1", "c2"]);
+		for (let second = 3; second < EVENTS_KEPT + 8; second++) await cache.ping("records", false, [pushed(second)]);
+		const kept = await cache.events();
 		expect(kept).toHaveLength(EVENTS_KEPT);
-		expect(kept.at(-1)?.change).toBe(`c${EVENTS_KEPT + 4}`);
+		expect(kept.at(-1)?.change).toBe(`c${EVENTS_KEPT + 7}`);
+	});
+
+	it("moves a log kept as one list under keys of its own", async () => {
+		const storage = new FakeStorage();
+		await storage.put("events", [{ kind: "pushed", change: "old", at: NOW.toISOString() }]);
+		const cache = new RepoCache({ storage, getWebSockets: () => [] } as never, {} as never);
+		expect((await cache.events()).map((event) => event.change)).toEqual(["old"]);
+		expect(await storage.get("events")).toBeUndefined();
 	});
 
 	it("are kept in the repo's cache from pings, pushes and landings, and each tells open pages", async () => {

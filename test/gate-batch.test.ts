@@ -175,10 +175,10 @@ describe("reading and landing a batch in the repo's own Gate", { timeout: 60_000
 	it("lands changes from the packs their merges kept, fetching neither them nor main again", async () => {
 		const main = server.git("rev-parse", "main").trim();
 		const kept: Record<string, Uint8Array> = {};
-		const repoCache = { changePacks: async (heads: string[]) => Object.fromEntries(heads.map((h) => [h, kept[h]!])) };
+		const changeCache = { changePacks: async (heads: string[]) => Object.fromEntries(heads.map((h) => [h, kept[h]!])) };
 		const keeping = new Gate(
 			{ storage: new FakeStorage(), container: localContainer(checkout), id: { equals: () => true } } as never,
-			{ GATE: { idFromName: () => ({}) }, REPO_CACHE: { getByName: () => repoCache } } as never,
+			{ GATE: { idFromName: () => ({}) }, CHANGE_CACHE: { getByName: () => changeCache } } as never,
 		);
 		await keeping.boot({ repo: "t1", base: base() });
 		// Pushed after the Gate cloned the project, so it has neither change.

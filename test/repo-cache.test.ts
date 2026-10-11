@@ -21,9 +21,22 @@ describe("kept views", () => {
 		const { live, sent } = feed();
 		expect(await live.view("snapshot", 60_000)).toEqual({ json: undefined, fresh: false, building: false, writes: 0 });
 		expect(await live.startBuild("snapshot")).toBe(true);
-		await live.keep("snapshot", '{"open":1}', 0);
-		expect(await live.view("snapshot", 60_000)).toMatchObject({ json: '{"open":1}', fresh: true, building: false });
+		const version = await live.keep("snapshot", '{"open":1}', 0);
+		expect(await live.view("snapshot", 60_000)).toMatchObject({ json: '{"open":1}', version, fresh: true });
 		expect(sent).toEqual(["view:snapshot"]);
+	});
+
+	it("leaves out a view the caller already has", async () => {
+		const { live } = feed();
+		const version = await live.keep("snapshot", '{"open":1}', 0);
+		expect(await live.view("snapshot", 60_000, version)).toEqual({
+			json: undefined,
+			version,
+			fresh: true,
+			building: false,
+			writes: 0,
+		});
+		expect(await live.view("snapshot", 60_000, version - 1)).toMatchObject({ json: '{"open":1}' });
 	});
 
 	it("goes stale on a write but not on a view's own ping", async () => {
@@ -108,6 +121,14 @@ describe("forgetting a deleted repo's views", () => {
 		expect((await live.landingView("master")).recent).toEqual([]);
 	});
 
+	it("names the repo's record caches for the caller to forget", async () => {
+		const { live } = feed();
+		await live.noteRecordCache("record:p:refs/notes/githive-claims/p");
+		await live.noteRecordCache("record:p:refs/notes/githive-claims/p");
+		expect(await live.clearViews()).toEqual(["record:p:refs/notes/githive-claims/p"]);
+		expect(await live.clearViews()).toEqual([]);
+	});
+
 	it("drops kept views and builds, and keeps counting writes", async () => {
 		const { live } = feed();
 		await live.keep("snapshot", "{}", 0);
@@ -119,58 +140,19 @@ describe("forgetting a deleted repo's views", () => {
 	});
 });
 
-describe("kept record tips", () => {
-	const a = "a".repeat(40);
-	const b = "b".repeat(40);
-	const c = "c".repeat(40);
-
-	it("sends one caller to list a ref nothing is kept for, and the others to wait for it", async () => {
-		const { live } = feed();
-		expect(await live.tipOf("refs/r", "refs/r@1", 10_000)).toEqual({ gen: 0 });
-		expect(await live.tipOf("refs/r", "refs/r@1", 10_000)).toEqual({ gen: 0, wait: true });
-		await live.keepTip("refs/r", a, 0);
-		expect(await live.tipOf("refs/r", "refs/r@1", 10_000)).toEqual({ tip: a, gen: 0 });
-		await live.keepRecord("refs/r@1", a, "{}");
-		expect(await live.tipOf("refs/r", "refs/r@1", 10_000)).toEqual({ tip: a, gen: 0, json: "{}" });
-		// A missing ref is cached too, as an empty log.
-		await live.tipOf("refs/empty", "refs/empty@1", 10_000);
-		await live.keepTip("refs/empty", null, 0);
-		expect(await live.tipOf("refs/empty", "refs/empty@1", 10_000)).toEqual({ tip: null, gen: 0 });
-	});
-
-	it("keeps a write's tip when it built on the one kept, and forgets it when writes arrive out of order", async () => {
-		const { live } = feed();
-		await live.keepTip("refs/r", a, 0);
-		await live.landedTip("refs/r", a, b);
-		expect(await live.tipOf("refs/r", "refs/r@1", 10_000)).toMatchObject({ tip: b });
-		// c built on something other than b: b's write arrived late, or one was lost.
-		await live.landedTip("refs/r", a, c);
-		expect(await live.tipOf("refs/r", "refs/r@1", 10_000)).toEqual({ gen: 2 });
-	});
-
-	it("drops a listing that began before a write, and a tip a write found out of date", async () => {
-		const { live } = feed();
-		await live.tipOf("refs/s", "refs/s@1", 10_000);
-		await live.keepTip("refs/s", null, 0);
-		// A listing begins; a write lands meanwhile (on the empty ref kept, so its tip is kept).
-		await live.tipOf("refs/s", "refs/s@1", -1);
-		await live.landedTip("refs/s", null, a);
-		// Listed before the write: it may show no ref at all, so it isn't kept.
-		await live.keepTip("refs/s", null, 0);
-		expect(await live.tipOf("refs/s", "refs/s@1", 10_000)).toMatchObject({ tip: a });
-		await live.staleTip("refs/s", b);
-		expect(await live.tipOf("refs/s", "refs/s@1", 10_000)).toMatchObject({ tip: a });
-		await live.staleTip("refs/s", a);
-		expect(await live.tipOf("refs/s", "refs/s@1", 10_000)).toEqual({ gen: 2 });
-		// Nothing kept: a write can't tell it's the latest, so its tip waits for a listing.
-		await live.landedTip("refs/t", null, a);
-		expect(await live.tipOf("refs/t", "refs/t@1", 10_000)).toEqual({ gen: 1 });
-	});
-
-	it("serves an aged tip to all but one caller, who refreshes it", async () => {
-		const { live } = feed();
-		await live.keepTip("refs/r", a, 0);
-		expect(await live.tipOf("refs/r", "refs/r@1", -1)).toEqual({ gen: 0 });
-		expect(await live.tipOf("refs/r", "refs/r@1", -1)).toEqual({ tip: a, gen: 0 });
+describe("the fork queue", () => {
+	it("moves a queue kept as one list under keys of its own, in order", async () => {
+		const storage = new FakeStorage();
+		await storage.put("forks:queue", [
+			{ item: "agent:a", tries: 0 },
+			{ item: "agent:b", tries: 1 },
+		]);
+		const live = new RepoCache({ storage, getWebSockets: () => [] } as never, {} as never);
+		expect(await live.forkQueue()).toEqual({ seedsReady: 0, seedsQueued: 0, agentsQueued: 2 });
+		await live.queueForks("p", ["agent:b", "agent:c", "seed:0"]);
+		expect(await live.forkQueue()).toEqual({ seedsReady: 0, seedsQueued: 1, agentsQueued: 3 });
+		expect(await storage.get("forks:queue")).toBeUndefined();
+		const items = [...(await storage.list<{ item: string }>({ prefix: "forks:job:" })).values()].map((job) => job.item);
+		expect(items).toEqual(["agent:a", "agent:b", "agent:c", "seed:0"]);
 	});
 });

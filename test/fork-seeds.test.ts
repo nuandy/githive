@@ -57,12 +57,16 @@ beforeEach(() => {
 	artifacts.most = 0;
 });
 
+/** The items in the fork queue, in order. */
+const queued = async (storage: FakeStorage) =>
+	[...(await storage.list<{ item: string }>({ prefix: "forks:job:" })).values()].map((job) => job.item);
+
 describe("an agent's fork", () => {
 	it("comes from the project while no seed is made yet, and asks for the seeds", async () => {
 		const { env, storage } = envWith([]);
 		await changeRemote(env, "p", "agent-a", "write", 60);
 		expect(artifacts.forks).toEqual(["p -> fork--p--agent--agent-a"]);
-		expect(((await storage.get<{ item: string }[]>("forks:queue")) ?? []).map((j) => j.item)).toEqual(seedItems());
+		expect(await queued(storage)).toEqual(seedItems());
 	});
 
 	it("comes from its own seed when that's made, else the nearest made one, and passes over one that fails", async () => {
@@ -104,10 +108,10 @@ describe("the fork queue", () => {
 		expect(artifacts.most).toBe(1);
 		await live.alarm();
 		expect(artifacts.forks.filter((f) => f.includes("--agent--"))).toHaveLength(5);
-		expect(await storage.get("forks:queue")).toEqual([]);
+		expect(await queued(storage)).toEqual([]);
 		// Queuing what's made already does nothing.
 		await live.queueForks("p", seedItems());
-		expect(await storage.get("forks:queue")).toEqual([]);
+		expect(await queued(storage)).toEqual([]);
 	});
 
 	it("makes 16 agents' forks at a time, starting the next as each finishes, all in one alarm", async () => {
@@ -123,7 +127,7 @@ describe("the fork queue", () => {
 		await working;
 		expect(artifacts.most).toBe(16);
 		expect(artifacts.forks).toHaveLength(52);
-		expect(await storage.get("forks:queue")).toEqual([]);
+		expect(await queued(storage)).toEqual([]);
 	});
 
 	it("tries a fork that fails again, then gives up on it (the agent still makes its own)", async () => {
@@ -132,7 +136,7 @@ describe("the fork queue", () => {
 		await live.queueForks("p", ["seed:0"]);
 		for (let i = 0; i < 3; i++) await live.alarm();
 		expect(artifacts.forks).toHaveLength(3);
-		expect(await storage.get("forks:queue")).toEqual([]);
+		expect(await queued(storage)).toEqual([]);
 		expect(await live.readySeeds()).toEqual([]);
 	});
 });

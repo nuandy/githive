@@ -602,7 +602,7 @@ base. Those objects come from each change's fork as Artifacts packs them,
 joined byte for byte into the push. Artifacts takes 5 to 10 s to answer any
 fetch, however small, so each merge fetches its own change while it waits
 for its turn, and keeps the pack (up to 1 MB, for 2 hours) in the repo's
-RepoCache for the batch that lands it. Trees are kept for the isolate by hash:
+ChangeCache for the batch that lands it. Trees are kept for the isolate by hash:
 Git names a tree by its content, so one read serves the project and every
 fork. Gathering, those early fetches and the trees each landing writes fill
 it, and the next landing starts from the last one's tree. A batch reads the
@@ -705,7 +705,7 @@ change's head and the files it changed since it left main, in 1.6 to 3.1 s.
 (Read through the Gate, it took 25 to 65 s, and the next batch was read while
 one was checked; reading through the API made that unnecessary, and it went.)
 A merge waiting for its turn places its own change (its merge base and the
-files it changed) and keeps that in the repo's RepoCache, where every Worker
+files it changed) and keeps that in the repo's ChangeCache, where every Worker
 instance reads it: gathering then reads only the head of a change already
 placed as it was last seen, to see that it hasn't moved.
 
@@ -1215,9 +1215,10 @@ been taking requests off the busiest repos:
 
 - **Kept claim views**: the claims list is built once per 30 s per project
   (in its RepoCache Durable Object) and served to every caller meanwhile;
-  `reviews` and `backlog` read from the same view.
+  `reviews` and `backlog` read from the same view. A Worker isolate keeps the
+  last version it read, and the RepoCache sends a view only when it changed.
 - **Shared record states**: a record log's state at a tip is kept in the
-  project's RepoCache, so a Worker isolate that hasn't read a log yet doesn't
+  log's own RecordCache, so a Worker isolate that hasn't read a log yet doesn't
   fetch it from Git again (the tip is still listed, so a state is never
   stale).
 - **One registry read per claim**: `claim` reuses the caller's read to see
@@ -1256,8 +1257,9 @@ timing out against Artifacts. No fork failed in either run, and exactly one
 racer won each time.
 
 - **Kept record tips**: every call still listed the claims registry's ref on
-  the project repo. A record's tip is now kept in the project's RepoCache with
-  its state, so a read asks the RepoCache, not Git. Every write that lands
+  the project repo. A record's tip is now kept with its state in a RecordCache
+  Durable Object of the log's own, so a read asks it, not Git, and it leaves
+  the state out for a reader that already has it. Every write that lands
   keeps its new tip and state in place of its parent before it returns (or
   forgets the tip, if writes arrive out of order), so no read sees a tip
   older than a finished write; a write that finds the kept tip out of date
@@ -1383,6 +1385,12 @@ comments give the reason; the evidence is here.
   brought it to about one copy (that batch peaked at 26 MB; the push itself
   adds 0.2 MB). The limit of 16 MB per batch leaves room for other landings
   in the same isolate.
+- At 1,000 agents, one RepoCache per repo held every view, every record's
+  tip and state, the event log and the fork queue, and ran out of its 128 MB
+  twice; agents' calls failed with 500s and 16 of 1,000 changes landed
+  (run 1000-6). Each record log now has a RecordCache of its own, packs and
+  places a ChangeCache, and a reply leaves out a view or a state the caller
+  already has. Each cache logs how much it sends a minute.
 - Without isomorphic-git's read cache, reading 200 merges took 22 s, and
   concurrent reads each held their own copy of the packfile.
 - In a 200-agent run, 12 checks and merges were cancelled as hung, and
@@ -1436,7 +1444,7 @@ session. Reads of a public repo, its pages and routes, need no sign-in. The
 dashboard lists repos and opens each one on its Hive: the agents at work, what
 each is doing, what's landing, and a live feed of claims, pushes, votes and
 landings. That feed is a rolling log of a repo's last 100 events in its
-RepoCache (`src/hive-events.ts`), sent to open pages as they happen; losing it
+RepoCache, each under a key of its own (`src/hive-events.ts`), sent to open pages as they happen; losing it
 loses nothing, since the records in Git hold the truth. A repo's other tabs
 show its changes (one branch at a time), what landed on a branch and why
 (History), its claims as a map, its code at any branch or commit, its agents,

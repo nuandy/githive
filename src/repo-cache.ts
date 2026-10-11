@@ -1,7 +1,7 @@
 import { DurableObject } from "cloudflare:workers";
+import { Traffic, objectLabel } from "./cache-traffic";
 import { countingRequests, describeCounts } from "./git-http";
-import type { Placed } from "./toolkit/batch-reads";
-import { type HiveEvent, pushEvents, settledEvents, withEvents } from "./hive-events";
+import { EVENTS_KEPT, type HiveEvent, eventKey, pushEvents, settledEvents } from "./hive-events";
 import { makeAgentFork, makeSeed } from "./toolkit/env";
 import { type Stretch, extendStretch, stretchSummary } from "./toolkit/stretch";
 import {
@@ -13,9 +13,10 @@ import {
 	settleOutcomes,
 } from "./toolkit/landing";
 
-// One per repo ("repo:<repo>"). It holds copies and hints that make reads fast: live-update
-// sockets for pages, prebuilt views, landing progress, record tips and the fork queue.
-// Git stays the source of truth, so losing any of this costs only speed.
+// One per repo ("repo:<repo>"). It holds copies and hints that make reads fast: live-update sockets for pages,
+// prebuilt views, the hive's events, changes' heads, landing progress and the fork queue. Record tips and states
+// (RecordCache) and what merges keep for their landing (ChangeCache) have objects of their own, so they don't share
+// this one's memory. Git stays the source of truth, so losing any of this costs only speed.
 
 interface View {
 	json: string;
@@ -26,17 +27,6 @@ interface View {
 
 /** How long a build may run before another caller may start one. */
 const BUILD_LEASE_MS = 2 * 60_000;
-
-/** Where a record's ref points (null: nowhere). `gen` changes on every write, so a slow listing can't overwrite it. */
-interface KeptTip {
-	tip?: string | null;
-	at?: number;
-	gen: number;
-	listing?: number;
-}
-
-/** How long one caller's listing of a ref stands before another caller is sent. */
-const TIP_LISTING_MS = 3_000;
 
 /** The most landings one reply tells an agent about; the newest are kept. */
 const NEWS_MOST = 20;
@@ -61,6 +51,14 @@ interface ForkJob {
 	tries: number;
 }
 
+/** A queued job, with the key that holds it. Keys sort in the order jobs were queued. */
+type QueuedFork = ForkJob & { key: string };
+
+const FORK_JOB = "forks:job:";
+const EVENT = "event:";
+/** The event log is trimmed to EVENTS_KEPT after this many writes. */
+const EVENT_WRITES_PER_TRIM = 20;
+
 /**
  * Agents' forks made side by side; seeds are made one at a time. A new fork starts as soon as
  * one finishes, since waiting for the slowest of a group made large swarms wait too long to push.
@@ -78,23 +76,22 @@ const STORAGE_BATCH = 128;
 const KEPT_PREFIXES = [
 	"view:",
 	"building:",
-	"record:",
-	"tip:",
 	"forks:",
 	"landing:",
 	"head:",
 	"files:",
 	"news:",
 	"merge:",
+	// Record tips and states, and packs, before they had objects of their own.
+	"record:",
+	"tip:",
 	"pack:",
 	"placed:",
 	"kept-at:",
 ];
 
-/** How long a change's prefetched pack, or its place on a branch, is kept for its landing. */
-const KEPT_A_WHILE_MS = 2 * 60 * 60_000;
-/** Where the time each of those was kept is stored, before its own key. */
-const KEPT_AT = "kept-at:";
+/** Where the names of the repo's RecordCaches are noted, so a deleted repo's can be forgotten too. */
+const RECORD_CACHE = "record-cache:";
 
 /** A change's merge check as status worked it out, for the change head and branch head in `key`. */
 export interface KeptMergeCheck {
@@ -103,6 +100,9 @@ export interface KeptMergeCheck {
 }
 
 export class RepoCache extends DurableObject<Env> {
+	private readonly traffic = new Traffic(() => objectLabel(this.ctx));
+	private eventWrites = 0;
+
 	async fetch(request: Request) {
 		if (request.headers.get("Upgrade") !== "websocket") return new Response("expected a WebSocket", { status: 426 });
 		const { 0: client, 1: server } = new WebSocketPair();
@@ -119,11 +119,33 @@ export class RepoCache extends DurableObject<Env> {
 
 	/** The hive's recent events, oldest first (see hive-events.ts). */
 	async events() {
-		return (await this.ctx.storage.get<HiveEvent[]>("events")) ?? [];
+		await this.eventsByKey();
+		const newest = await this.ctx.storage.list<HiveEvent>({ prefix: EVENT, reverse: true, limit: EVENTS_KEPT });
+		return [...newest.values()].reverse();
 	}
 
+	// Each event under its own key, by its time then what it was, so an event delivered twice is kept once and
+	// adding one never rewrites the others.
 	private async keepEvents(events: HiveEvent[]) {
-		if (events.length) await this.ctx.storage.put("events", withEvents(await this.events(), events));
+		if (!events.length) return;
+		await this.eventsByKey();
+		await this.ctx.storage.put(Object.fromEntries(events.map((event) => [`${EVENT}${eventKey(event)}`, event])));
+		this.eventWrites += 1;
+		if (this.eventWrites % EVENT_WRITES_PER_TRIM === 0) await this.trimEvents();
+	}
+
+	private async trimEvents() {
+		const keys = [...(await this.ctx.storage.list({ prefix: EVENT })).keys()];
+		const old = keys.slice(0, Math.max(0, keys.length - EVENTS_KEPT));
+		for (let i = 0; i < old.length; i += STORAGE_BATCH) await this.ctx.storage.delete(old.slice(i, i + STORAGE_BATCH));
+	}
+
+	// The log was once one list under "events"; its events move under keys of their own.
+	private async eventsByKey() {
+		const listed = await this.ctx.storage.get<HiveEvent[]>("events");
+		if (!listed) return;
+		await this.ctx.storage.put(Object.fromEntries(listed.map((event) => [`${EVENT}${eventKey(event)}`, event])));
+		await this.ctx.storage.delete("events");
 	}
 
 	/** The latest commit seen on each change's branch. */
@@ -171,62 +193,6 @@ export class RepoCache extends DurableObject<Env> {
 		await this.ctx.storage.put(`merge:${change}`, kept);
 	}
 
-	/** Keeps the objects a change at `head` adds, as its fork packed them, until its batch lands (see tree-landing.ts). */
-	async keepChangePack(head: string, pack: Uint8Array) {
-		await this.keepAWhile([[`pack:${head}`, pack]]);
-	}
-
-	/** The packs kept for these heads, by head. */
-	async changePacks(heads: string[]) {
-		return this.keptFor<Uint8Array>("pack:", heads);
-	}
-
-	/** Keeps changes' places on `branch` for gathering batches (see batch-reads.ts). */
-	async keepPlacements(branch: string, placed: Placed[]) {
-		await this.keepAWhile(placed.map((each) => [`placed:${branch}|${each.head.hash}`, each]));
-	}
-
-	/** The places kept for these heads on `branch`, by head. */
-	async placements(branch: string, heads: string[]) {
-		return this.keptFor<Placed>(`placed:${branch}|`, heads);
-	}
-
-	// Values kept for KEPT_A_WHILE_MS, each with its time under a key of its own, so that finding the old ones
-	// never reads the values, packs among them.
-	private async keepAWhile(entries: [string, unknown][]) {
-		await this.forgetOld();
-		const at = Date.now();
-		const stored = entries.flatMap(([key, value]) => [
-			[key, value],
-			[`${KEPT_AT}${key}`, at],
-		]);
-		for (let i = 0; i < stored.length; i += STORAGE_BATCH)
-			await this.ctx.storage.put(Object.fromEntries(stored.slice(i, i + STORAGE_BATCH)));
-	}
-
-	private async keptFor<T>(prefix: string, heads: string[]) {
-		const found: Record<string, T> = {};
-		for (let i = 0; i < heads.length; i += STORAGE_BATCH) {
-			const keys = heads.slice(i, i + STORAGE_BATCH).map((head) => `${prefix}${head}`);
-			const kept = await this.ctx.storage.get<T>(keys);
-			for (const [key, value] of kept) found[key.slice(prefix.length)] = value;
-		}
-		return found;
-	}
-
-	private lastForgot = 0;
-
-	// At most once a minute: a merge keeps something every time it waits.
-	private async forgetOld() {
-		if (Date.now() - this.lastForgot < 60_000) return;
-		this.lastForgot = Date.now();
-		const times = await this.ctx.storage.list<number>({ prefix: KEPT_AT });
-		const old = [...times]
-			.filter(([, at]) => at < Date.now() - KEPT_A_WHILE_MS)
-			.flatMap(([key]) => [key, key.slice(KEPT_AT.length)]);
-		for (let i = 0; i < old.length; i += STORAGE_BATCH) await this.ctx.storage.delete(old.slice(i, i + STORAGE_BATCH));
-	}
-
 	/** Note pushes from push events. Events can arrive late, twice or out of order, so the newest wins. */
 	async notePushes(pushes: ChangePush[]) {
 		await this.keepNewest(pushes.map(({ change, ...known }) => [change, known]));
@@ -250,15 +216,21 @@ export class RepoCache extends DurableObject<Env> {
 		}
 	}
 
-	/** The kept view `name`, whether it's fresh, and whether a build is running. */
-	async view(name: string, maxAgeMs: number) {
+	/**
+	 * The kept view `name`, whether it's fresh, and whether a build is running. Its JSON is left out when the caller
+	 * already `has` this version of it, since a view can be large and many callers ask at once.
+	 */
+	async view(name: string, maxAgeMs: number, has?: number) {
 		const [writes, kept, building] = await Promise.all([
 			this.writes(),
 			this.ctx.storage.get<View>(`view:${name}`),
 			this.ctx.storage.get<number>(`building:${name}`),
 		]);
+		const sent = kept && kept.at !== has ? kept.json : undefined;
+		this.traffic.sent(`view:${name}`, sent?.length ?? 0);
 		return {
-			json: kept?.json,
+			json: sent,
+			...(kept ? { version: kept.at } : {}),
 			fresh: !!kept && kept.writes === writes && Date.now() - kept.at < maxAgeMs,
 			building: !!building && Date.now() - building < BUILD_LEASE_MS,
 			writes,
@@ -273,72 +245,18 @@ export class RepoCache extends DurableObject<Env> {
 		return true;
 	}
 
+	/** Keeps a view, and returns its version. */
 	async keep(name: string, json: string, writes: number) {
-		await this.ctx.storage.put<View>(`view:${name}`, { json, writes, at: Date.now() });
+		this.traffic.kept(`view:${name}`, json.length);
+		const at = Date.now();
+		await this.ctx.storage.put<View>(`view:${name}`, { json, writes, at });
 		await this.ctx.storage.delete(`building:${name}`);
 		this.broadcast(`view:${name}`);
+		return at;
 	}
 
 	async buildFailed(name: string) {
 		await this.ctx.storage.delete(`building:${name}`);
-	}
-
-	/** A record's state at `tip`, if a reader kept it (see StateCache in record-log.ts). */
-	async recordAt(ref: string, tip: string) {
-		const kept = await this.ctx.storage.get<{ tip: string; json: string }>(`record:${ref}`);
-		return kept?.tip === tip ? kept.json : undefined;
-	}
-
-	/** Only the latest tip's state is kept. */
-	async keepRecord(ref: string, tip: string, json: string) {
-		if (json.length > 1_000_000) return;
-		await this.ctx.storage.put(`record:${ref}`, { tip, json });
-	}
-
-	/**
-	 * Where a record's ref points (see TipCache in record-log.ts). Only one caller at a time is sent
-	 * to list the ref. When nothing is kept, the others wait; when the tip is old, they use it anyway.
-	 */
-	async tipOf(
-		ref: string,
-		stateKey: string,
-		maxAgeMs: number,
-	): Promise<{ tip?: string | null; json?: string; gen: number; wait?: boolean }> {
-		const key = `tip:${ref}`;
-		const kept = (await this.ctx.storage.get<KeptTip>(key)) ?? { gen: 0 };
-		const now = Date.now();
-		const listing = kept.listing !== undefined && now - kept.listing < TIP_LISTING_MS;
-		if (kept.tip === undefined || now - (kept.at ?? 0) > maxAgeMs) {
-			if (!listing) {
-				await this.ctx.storage.put(key, { ...kept, listing: now });
-				return { gen: kept.gen };
-			}
-			if (kept.tip === undefined) return { gen: kept.gen, wait: true };
-		}
-		const state = kept.tip
-			? await this.ctx.storage.get<{ tip: string; json: string }>(`record:${stateKey}`)
-			: undefined;
-		if (state?.tip !== kept.tip) return { tip: kept.tip, gen: kept.gen };
-		return { tip: kept.tip, gen: kept.gen, json: state.json };
-	}
-
-	/** Keep a listing of a record's ref, unless a write moved it since the listing began. */
-	async keepTip(ref: string, tip: string | null, gen: number) {
-		const kept = await this.ctx.storage.get<KeptTip>(`tip:${ref}`);
-		if ((kept?.gen ?? 0) === gen) await this.ctx.storage.put(`tip:${ref}`, { tip, at: Date.now(), gen });
-	}
-
-	/** A write moved the ref from `parent` to `tip`. If the kept tip isn't `parent`, writes arrived out of order. */
-	async landedTip(ref: string, parent: string | null, tip: string) {
-		const kept = (await this.ctx.storage.get<KeptTip>(`tip:${ref}`)) ?? { gen: 0 };
-		const gen = kept.gen + 1;
-		await this.ctx.storage.put(`tip:${ref}`, kept.tip === parent ? { tip, at: Date.now(), gen } : { gen });
-	}
-
-	/** A write built on `parent` found the ref had moved, so a kept `parent` tip is out of date. */
-	async staleTip(ref: string, parent: string | null) {
-		const kept = await this.ctx.storage.get<KeptTip>(`tip:${ref}`);
-		if (kept && kept.tip === parent) await this.ctx.storage.put(`tip:${ref}`, { gen: kept.gen + 1 });
 	}
 
 	/**
@@ -348,11 +266,11 @@ export class RepoCache extends DurableObject<Env> {
 	 */
 	async queueForks(repo: string, items: string[]) {
 		await this.inQueueTurn(async () => {
-			const queue = (await this.ctx.storage.get<ForkJob[]>("forks:queue")) ?? [];
+			const queued = new Set((await this.queuedForks()).map((job) => job.item));
 			const ready = new Set((await this.readySeeds()).map((seed) => `seed:${seed}`));
-			const fresh = items.filter((item) => !ready.has(item) && !queue.some((job) => job.item === item));
+			const fresh = [...new Set(items)].filter((item) => !ready.has(item) && !queued.has(item));
 			if (!fresh.length) return;
-			await this.ctx.storage.put("forks:queue", [...queue, ...fresh.map((item) => ({ item, tries: 0 }))]);
+			await this.addForkJobs(fresh.map((item) => ({ item, tries: 0 })));
 			await this.ctx.storage.put("forks:repo", repo);
 			if (!(await this.ctx.storage.getAlarm())) await this.ctx.storage.setAlarm(Date.now() + 100);
 		});
@@ -372,8 +290,7 @@ export class RepoCache extends DurableObject<Env> {
 
 	/** Progress of the fork queue, for the landing view and tests. */
 	async forkQueue() {
-		const [queue, seeds] = await Promise.all([this.ctx.storage.get<ForkJob[]>("forks:queue"), this.readySeeds()]);
-		const queued = queue ?? [];
+		const [queued, seeds] = await Promise.all([this.queuedForks(), this.readySeeds()]);
 		const seedsQueued = queued.filter((job) => job.item.startsWith("seed:")).length;
 		return { seedsReady: seeds.length, seedsQueued, agentsQueued: queued.length - seedsQueued };
 	}
@@ -410,8 +327,27 @@ export class RepoCache extends DurableObject<Env> {
 		if ((await this.queuedForks()).length) await this.ctx.storage.setAlarm(Date.now() + 1_000);
 	}
 
-	private async queuedForks() {
-		return (await this.ctx.storage.get<ForkJob[]>("forks:queue")) ?? [];
+	// Each job under its own key, numbered as queued, so finishing one never rewrites the rest.
+	private async queuedForks(): Promise<QueuedFork[]> {
+		await this.forkJobsByKey();
+		const listed = await this.ctx.storage.list<ForkJob>({ prefix: FORK_JOB });
+		return [...listed].map(([key, job]) => ({ ...job, key }));
+	}
+
+	private async addForkJobs(jobs: ForkJob[]) {
+		const next = (await this.ctx.storage.get<number>("forks:next")) ?? 0;
+		const entries = jobs.map((job, index) => [`${FORK_JOB}${String(next + index).padStart(12, "0")}`, job]);
+		for (let i = 0; i < entries.length; i += STORAGE_BATCH)
+			await this.ctx.storage.put(Object.fromEntries(entries.slice(i, i + STORAGE_BATCH)));
+		await this.ctx.storage.put("forks:next", next + jobs.length);
+	}
+
+	// The queue was once one list under "forks:queue"; its jobs move under keys of their own.
+	private async forkJobsByKey() {
+		const listed = await this.ctx.storage.get<ForkJob[]>("forks:queue");
+		if (!listed) return;
+		await this.ctx.storage.delete("forks:queue");
+		await this.addForkJobs(listed);
 	}
 
 	/** The next queued job no worker is making, of this round's kind. */
@@ -426,18 +362,19 @@ export class RepoCache extends DurableObject<Env> {
 	}
 
 	/** Take a finished job off the queue: a made seed is ready, and a failed job is tried again or given up on. */
-	private finishForkJob(repo: string, job: ForkJob, failure: unknown) {
+	private finishForkJob(repo: string, job: QueuedFork, failure: unknown) {
 		return this.inQueueTurn(async () => {
-			const rest = (await this.queuedForks()).filter((queued) => queued.item !== job.item);
+			await this.ctx.storage.delete(job.key);
 			if (failure === null && isSeed(job.item)) {
 				const ready = await this.readySeeds();
 				const seeds = [...new Set([...ready, seedNumber(job.item)])].sort((a, b) => a - b);
 				await this.ctx.storage.put("forks:seeds", seeds);
 			}
-			if (failure !== null && job.tries + 1 < FORK_TRIES) rest.push({ ...job, tries: job.tries + 1 });
+			// A failed job goes to the back of the queue.
+			if (failure !== null && job.tries + 1 < FORK_TRIES)
+				await this.addForkJobs([{ item: job.item, tries: job.tries + 1 }]);
 			else if (failure !== null)
 				console.error(`fork queue for ${repo} gave up on ${job.item}: ${String(failure).slice(0, 200)}`);
-			await this.ctx.storage.put("forks:queue", rest);
 		});
 	}
 
@@ -504,13 +441,23 @@ export class RepoCache extends DurableObject<Env> {
 		await this.ctx.storage.put(`landing:${branch}`, state);
 	}
 
-	/** Forget everything kept for the repo once it's deleted. */
+	/** Notes a RecordCache of the repo's, so clearViews can name it. */
+	async noteRecordCache(name: string) {
+		await this.ctx.storage.put(`${RECORD_CACHE}${name}`, true);
+	}
+
+	/**
+	 * Forget everything kept for the repo once it's deleted. Returns the names of its RecordCaches, for the caller
+	 * to forget too.
+	 */
 	async clearViews() {
+		const recordCaches = [...(await this.ctx.storage.list({ prefix: RECORD_CACHE })).keys()];
 		// A repo created again under the same name reuses change names, so the old heads go too.
-		const keys: string[] = [];
+		const keys: string[] = [...recordCaches];
 		for (const prefix of KEPT_PREFIXES) keys.push(...(await this.ctx.storage.list({ prefix })).keys());
 		for (let i = 0; i < keys.length; i += STORAGE_BATCH)
 			await this.ctx.storage.delete(keys.slice(i, i + STORAGE_BATCH));
+		return recordCaches.map((key) => key.slice(RECORD_CACHE.length));
 	}
 
 	private async writes() {

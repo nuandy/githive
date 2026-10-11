@@ -42,6 +42,8 @@
 			{ "name": "GATE", "class_name": "Gate" },
 			{ "name": "REPO_INDEX", "class_name": "RepoIndex" },
 			{ "name": "REPO_CACHE", "class_name": "RepoCache" },
+			{ "name": "RECORD_CACHE", "class_name": "RecordCache" },
+			{ "name": "CHANGE_CACHE", "class_name": "ChangeCache" },
 			{ "name": "TOKENS", "class_name": "TokenCache" },
 		],
 	},
@@ -89,5 +91,7 @@
 		{ "tag": "v12", "deleted_classes": ["TaskIndex"], "new_sqlite_classes": ["RepoIndex"] },
 		// The repo's live feed became its cache, too (views, record tips, the fork queue, landing): the same objects and storage, renamed.
 		{ "tag": "v13", "renamed_classes": [{ "from": "LiveFeed", "to": "RepoCache" }] },
+		// Record tips and states, and what merges keep for their landing, moved out of RepoCache into objects of their own.
+		{ "tag": "v14", "new_sqlite_classes": ["RecordCache", "ChangeCache"] },
 	],
 }

@@ -46,8 +46,15 @@ export interface StateCache {
  * A landed write updates it before returning, so no read sees a tip older than a finished write.
  */
 export interface TipCache {
-	/** The kept tip (null: no ref) and its state if kept. `wait` means another reader is listing the ref. */
-	get(ref: string, stateKey: string): Promise<{ tip?: string | null; json?: string; gen: number; wait?: boolean }>;
+	/**
+	 * The kept tip (null: no ref) and its state if kept, unless the caller already `has` that tip's state. `wait`
+	 * means another reader is listing the ref.
+	 */
+	get(
+		ref: string,
+		stateKey: string,
+		has?: string,
+	): Promise<{ tip?: string | null; json?: string; gen: number; wait?: boolean }>;
 	keep(ref: string, tip: string | null, gen: number): Promise<void>;
 	landed(ref: string, parent: string | null, tip: string): Promise<void>;
 	stale(ref: string, parent: string | null): Promise<void>;
@@ -226,6 +233,9 @@ export class GitCasLog<S> implements CasLog<S> {
 	/** The repo at the tip this log last read or wrote, so a writer can append without reading first. */
 	private held: { fs: MemoryFS; tip: string } | null = null;
 
+	/** The state this log last read or wrote, so the tip cache needn't send it again. */
+	private last: { tip: string; json: string } | null = null;
+
 	lastRefusal: "moved" | "busy" | null = null;
 
 	/** Tests set other formats. */
@@ -255,16 +265,16 @@ export class GitCasLog<S> implements CasLog<S> {
 
 	async read(): Promise<{ tip: string; commit: LogCommit<S> } | null> {
 		if (!this.tips) return this.readFresh();
-		let kept = await this.tips.get(this.ref, this.stateKey).catch(() => null);
+		const ask = () => this.tips!.get(this.ref, this.stateKey, this.last?.tip).catch(() => null);
+		let kept = await ask();
 		// Another reader is listing the ref. Wait for its result rather than all listing at once.
 		for (let waited = 0; kept?.wait && waited < TIP_WAIT_MS; waited += 150) {
 			await new Promise((resolve) => setTimeout(resolve, 150));
-			kept = await this.tips.get(this.ref, this.stateKey).catch(() => null);
+			kept = await ask();
 		}
 		if (kept?.tip !== undefined) {
 			// The state is kept too, so no Git request is needed.
-			if (kept.tip && kept.json && this.held?.tip !== kept.tip)
-				return { tip: kept.tip, commit: JSON.parse(kept.json) as LogCommit<S> };
+			if (kept.tip && kept.json) return this.remembered(kept.tip, kept.json);
 			return this.readAt(kept.tip);
 		}
 		const remote = await this.remote();
@@ -287,18 +297,27 @@ export class GitCasLog<S> implements CasLog<S> {
 	async readAt(current: string | null): Promise<{ tip: string; commit: LogCommit<S> } | null> {
 		const remote = await this.remote();
 		if (!current) return null;
+		if (this.last?.tip === current) return this.remembered(current, this.last.json);
 		// Another reader may already have read this tip.
 		if (this.held?.tip !== current && this.states) {
 			const json = await this.states.get(this.stateKey, current).catch(() => undefined);
-			if (json) return { tip: current, commit: JSON.parse(json) as LogCommit<S> };
+			if (json) return this.remembered(current, json);
 		}
 		const { fs, tip } =
 			this.held?.tip === current ? this.held : await retryTransient(() => fetchAt(remote, this.ref, current));
 		if (!tip) return null;
 		this.held = { fs, tip };
 		const read = { tip, commit: await this.readCommit(fs, tip) };
-		if (this.states) void this.states.put(this.stateKey, tip, JSON.stringify(read.commit)).catch(() => undefined);
+		const json = JSON.stringify(read.commit);
+		this.last = { tip, json };
+		if (this.states) void this.states.put(this.stateKey, tip, json).catch(() => undefined);
 		return read;
+	}
+
+	/** A state as JSON, parsed afresh for each caller, and kept as the last one this log saw. */
+	private remembered(tip: string, json: string) {
+		this.last = { tip, json };
+		return { tip, commit: JSON.parse(json) as LogCommit<S> };
 	}
 
 	/** A state upgraded to this GitHive's format, checked against what its kind of record must hold. */
@@ -387,10 +406,9 @@ export class GitCasLog<S> implements CasLog<S> {
 	private async noteOutcome(landed: boolean | "busy", tip: string | null, oid: string, commit: LogCommit<S>) {
 		if (landed === true && this.tips) {
 			await this.tips.landed(this.ref, tip, oid).catch(() => undefined);
-			if (this.states)
-				await this.states
-					.put(this.stateKey, oid, JSON.stringify({ ...commit, format: this.format }))
-					.catch(() => undefined);
+			const json = JSON.stringify({ ...commit, format: this.format });
+			this.last = { tip: oid, json };
+			if (this.states) await this.states.put(this.stateKey, oid, json).catch(() => undefined);
 		} else if (landed === false) await this.tips?.stale(this.ref, tip).catch(() => undefined);
 		if (landed === true) this.lastRefusal = null;
 		else if (landed === "busy") this.lastRefusal = "busy";

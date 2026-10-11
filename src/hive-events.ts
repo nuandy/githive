@@ -34,14 +34,8 @@ export interface HiveEvent {
 /** How many events the log keeps; the newest are kept. */
 export const EVENTS_KEPT = 100;
 
-const keyOf = (event: HiveEvent) => [event.kind, event.agent, event.change, event.commit, event.at].join(" ");
-
-/** The log with `added` in it, oldest first. An event already in it (a push event delivered twice) is left out. */
-export function withEvents(log: HiveEvent[], added: HiveEvent[]) {
-	const known = new Set(log.map(keyOf));
-	const fresh = added.filter((event) => !known.has(keyOf(event)));
-	return [...log, ...fresh].sort((a, b) => a.at.localeCompare(b.at)).slice(-EVENTS_KEPT);
-}
+/** An event's key in the log: its time first, so keys sort oldest first, and the same for an event sent twice. */
+export const eventKey = (event: HiveEvent) => [event.at, event.kind, event.agent, event.change, event.commit].join(" ");
 
 const textOf = (args: Record<string, unknown>, key: string) =>
 	typeof args[key] === "string" ? (args[key] as string) : undefined;
