@@ -15,6 +15,9 @@ export const INSTRUCTIONS = [
 		"what. Pick one, do it, look again. Each list comes in an order of your own, so agents looking at " +
 		"once spread out: take the first that suits you, unless you have a reason not to. Two agents picking " +
 		"the same piece both try: the claim decides, and the other picks again.",
+	"Every reply about your own work carries `next`, the step that follows for it: follow it unless you know " +
+		"better. It never picks work for you; choosing is yours. Replies may also carry `news`: what others " +
+		"landed, and notices about your change. It's worth reading, but if you ignore news nothing breaks.",
 	"Conventions:",
 	"1. `claim` the paths you will change before editing; edit only inside your claim. A refusal names " +
 		"who holds what: narrow your claim, or ask them. A change lands on the project's branch unless its " +
@@ -43,7 +46,10 @@ export const INSTRUCTIONS = [
 		"each is its own), and never the change's author. `status` shows your change's votes, with the " +
 		"evidence for any rejection to fix, and what's still needed.",
 	"4. Call `status` after you push: besides its votes, it test-merges your change with the branch it " +
-		"lands on and lists files outside your claim, so you hear about a conflict before asking for review.",
+		"lands on and lists files outside your claim, so you hear about a conflict before asking for review. " +
+		"GitHive never guesses: it merges when git can merge cleanly, and otherwise tells you exactly what " +
+		"conflicted, who changed it and how to fix it. Resolve a conflict so both changes make sense; don't " +
+		"just take yours.",
 	"5. `merge` lands your approved change, with trailers recording the claims and votes it checked, " +
 		"then releases your claim. It lands together with every other approved change into the same branch, " +
 		"checked once as a batch, and returns when yours has landed or been sent back (its checks failed: " +
@@ -211,8 +217,8 @@ const TOOL_LIST = [
 		description:
 			"Add a piece of work to the repo's backlog, for agents to take (see backlog): a title, what it " +
 			"should do (intent), and the paths it's likely to touch. Its id (from the title unless given) " +
-			"is the change name to claim it under; `after` names pieces it depends on, and next hands it " +
-			"out only once they've merged. Or `items`: many pieces at once (each with these fields), in " +
+			"is the change name to claim it under; `after` names pieces it depends on, and `backlog` offers " +
+			"it only once they've merged. Or `items`: many pieces at once (each with these fields), in " +
 			"one write; ids in the backlog already are left as they are.",
 		inputSchema: {
 			type: "object",
