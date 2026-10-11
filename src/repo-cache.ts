@@ -2,6 +2,7 @@ import { DurableObject } from "cloudflare:workers";
 import { countingRequests, describeCounts } from "./git-http";
 import { type HiveEvent, pushEvents, settledEvents, withEvents } from "./hive-events";
 import { makeAgentFork, makeSeed } from "./toolkit/env";
+import { type Stretch, extendStretch, stretchSummary } from "./toolkit/stretch";
 import {
 	asNews,
 	type Checking,
@@ -410,16 +411,23 @@ export class RepoCache extends DurableObject<Env> {
 		this.broadcast("landing");
 	}
 
+	/** Keeps a batch's outcomes, and returns the repo's last stretch of work with them in it (see stretch.ts). */
 	async landingSettled(branch: string, outcomes: Settled[]) {
-		if (!outcomes.length) return;
+		if (!outcomes.length) return undefined;
 		await this.keepLanding(branch, settleOutcomes(await this.landing(branch), outcomes));
 		await this.keepEvents(settledEvents(outcomes));
+		const stretch = extendStretch(await this.ctx.storage.get<Stretch>("stretch"), outcomes);
+		if (stretch) await this.ctx.storage.put("stretch", stretch);
 		this.broadcast("landing");
+		return stretch && stretchSummary(stretch);
 	}
 
 	async landingView(branch: string) {
-		const { checking, recent } = await this.landing(branch);
-		return { checking, recent };
+		const [{ checking, recent }, stretch] = await Promise.all([
+			this.landing(branch),
+			this.ctx.storage.get<Stretch>("stretch"),
+		]);
+		return { checking, recent, ...(stretch ? { stretch: stretchSummary(stretch) } : {}) };
 	}
 
 	/**

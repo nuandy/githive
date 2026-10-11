@@ -3,6 +3,7 @@ import "./RepoPage.css";
 import type { VoteApi } from "./VoteForm";
 import type {
 	BranchHistory,
+	LandingStretch,
 	ChangeHistory,
 	HiveEvent,
 	RepoAccess,
@@ -18,6 +19,7 @@ import { holdersFromSnapshot } from "../lib/claimsMap";
 import { recordsBadge } from "../lib/claimStatus";
 import type { LiveStatus } from "../lib/liveFeed";
 import { href, type ChangeTab, type RepoTab } from "../lib/routes";
+import { justFinished, stretchWords } from "../lib/stretch";
 import { messageOf } from "../lib/errors";
 import { AgentsTab } from "./Agents";
 import { ClaimsTab } from "./ClaimsMap";
@@ -66,6 +68,8 @@ export interface RepoPageProps {
 	/** On a change page: the change's history (undefined while loading, null if unreadable). */
 	changeHistory?: ChangeHistory | null;
 	liveStatus?: LiveStatus;
+	/** The repo's last stretch of work, from the repo list's summary: "all landed" by its name once it ends. */
+	lastStretch?: LandingStretch;
 	api: RepoPageApi;
 	/** What the reader may do here (GET .../access): gates the vote form and the settings they can change. */
 	access?: RepoAccess;
@@ -252,6 +256,15 @@ function RepoTabContent({
 	);
 }
 
+/** By the repo's name once a stretch of work has landed and nothing's open: that it's done, and how much. */
+function AllLandedBadge({ stretch }: { stretch: LandingStretch }) {
+	return (
+		<span className="repo-header__done tone-good" title={stretchWords(stretch)}>
+			✓ All landed
+		</span>
+	);
+}
+
 /** A repo: claims in force as its changes, its claims map, code, agents, audit and settings, or one change. */
 export function RepoPage({
 	repo,
@@ -259,6 +272,7 @@ export function RepoPage({
 	snapshot,
 	changeHistory,
 	liveStatus = "off",
+	lastStretch,
 	api,
 	access,
 	manage,
@@ -300,7 +314,14 @@ export function RepoPage({
 		<>
 			<RepoHeader
 				name={repo}
-				badges={snapshot ? <ShardingBadge summary={recordsBadge(snapshot)} /> : undefined}
+				badges={
+					snapshot ? (
+						<>
+							<ShardingBadge summary={recordsBadge(snapshot)} />
+							{!snapshot.claims.length && justFinished(lastStretch) ? <AllLandedBadge stretch={lastStretch} /> : null}
+						</>
+					) : undefined
+				}
 				tabs={tabs}
 				current={current}
 				homeHref={href.repo(repo)}

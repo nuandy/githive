@@ -125,8 +125,20 @@ export interface RepoSnapshot {
  * checked together now, and what changes came to lately. Approved changes
  * land as a set, checked once together, in one push.
  */
+/** A repo's last stretch of work: what landed since it last went quiet (see the server's toolkit/stretch.ts). */
+export interface LandingStretch {
+	landed: number;
+	/** Changes put out because their checks failed. */
+	failed: number;
+	agents: number;
+	from: string;
+	to: string;
+}
+
 export interface RepoLanding {
 	branch: string;
+	/** The repo's last stretch of work, across its branches. Older servers leave it out. */
+	stretch?: LandingStretch;
 	/** The batch being checked now, on `base`. */
 	checking: { base: string; since: string; changes: { change: string; head: string; agent: string }[] } | null;
 	/** Recently settled changes, newest last: landed as `commit`, or removed because their checks failed. */

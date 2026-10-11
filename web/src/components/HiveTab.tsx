@@ -1,10 +1,11 @@
-import type { HiveEvent, RepoLanding, RepoSnapshot, RepoTree } from "../api";
+import type { HiveEvent, LandingStretch, RepoAudit, RepoLanding, RepoSnapshot, RepoTree } from "../api";
 import { useEffect } from "react";
 import { usePoll } from "../hooks/usePoll";
 import { type HiveActivity, type HiveState, hiveActivity, hiveCounts } from "../lib/hive";
 import { counted } from "../lib/plural";
 import { timeAgo } from "../lib/relativeTime";
 import { href } from "../lib/routes";
+import { justFinished, stretchWords } from "../lib/stretch";
 import { HiveFeed } from "./HiveFeed";
 import { HiveMap } from "./HiveMap";
 import { LandingTrack } from "./LandingTrack";
@@ -77,7 +78,14 @@ export function Hive(props: HiveProps) {
 	const rows = hiveActivity(snapshot, landing, now);
 	return (
 		<div className="hive-tab">
-			<Headline rows={rows} />
+			<Headline
+				repo={repo}
+				rows={rows}
+				open={snapshot.claims.length}
+				{...(landing?.stretch ? { stretch: landing.stretch } : {})}
+				{...(snapshot.audit ? { audit: snapshot.audit } : {})}
+				now={now}
+			/>
 			<div className="hive-tab__grid">
 				<HiveMap
 					repo={repo}
@@ -114,16 +122,21 @@ export function Hive(props: HiveProps) {
 	);
 }
 
-function Headline({ rows }: { rows: HiveActivity[] }) {
+interface HeadlineProps {
+	repo: string;
+	rows: HiveActivity[];
+	/** Claims in force. */
+	open: number;
+	stretch?: LandingStretch;
+	audit?: RepoAudit;
+	now: number;
+}
+
+/** Who's at work and doing what; once a stretch of work has landed and nothing's open, that it's all done. */
+function Headline({ repo, rows, open, stretch, audit, now }: HeadlineProps) {
+	if (!open && justFinished(stretch, now)) return <AllLanded repo={repo} stretch={stretch} audit={audit} now={now} />;
 	const counts = hiveCounts(rows);
-	if (!counts.agents) {
-		return (
-			<header className="hive-tab__head">
-				<h2>No agents in the hive yet</h2>
-				<p className="muted">Connect one from the Agents page: it claims work here, and shows up as it does.</p>
-			</header>
-		);
-	}
+	if (!counts.agents) return <EmptyHive stretch={stretch} now={now} />;
 	const parts = [
 		counted(counts.building, "building", "building"),
 		counted(counts.inReview, "in review", "in review"),
@@ -137,6 +150,55 @@ function Headline({ rows }: { rows: HiveActivity[] }) {
 			<p className="muted">
 				No queen: nothing assigns the work. Each agent claims its own, and every claim, vote and landing is a record in
 				Git.
+			</p>
+		</header>
+	);
+}
+
+/** The recap once a stretch of work has landed: how much, how fast, by how many, and what the audit says. */
+function AllLanded({
+	repo,
+	stretch,
+	audit,
+	now,
+}: {
+	repo: string;
+	stretch: LandingStretch;
+	audit?: RepoAudit;
+	now: number;
+}) {
+	return (
+		<header className="hive-tab__head hive-tab__head--done">
+			<h2>
+				<span className="tone-good">✓ All landed.</span> The hive is quiet.
+			</h2>
+			<p className="muted">
+				{stretchWords(stretch)}, finished {timeAgo(stretch.to, now)}. <AuditWords repo={repo} audit={audit} />{" "}
+				<a href={href.repo(repo, "history")}>See what landed</a>
+			</p>
+		</header>
+	);
+}
+
+/** What the audit found, in a sentence: nothing, or how many merges to look at. */
+function AuditWords({ repo, audit }: { repo: string; audit?: RepoAudit }) {
+	if (!audit) return null;
+	if (!audit.open) return <>The audit is clean.</>;
+	return (
+		<a href={href.repo(repo, "audit")} className="tone-bad">
+			{counted(audit.open, "merge")} for the audit to look at.
+		</a>
+	);
+}
+
+/** No agent at work: how to bring one in, or when the last work finished. */
+function EmptyHive({ stretch, now }: { stretch?: LandingStretch; now: number }) {
+	return (
+		<header className="hive-tab__head">
+			<h2>No agents in the hive {stretch ? "now" : "yet"}</h2>
+			<p className="muted">
+				{stretch ? `Its last stretch of work finished ${timeAgo(stretch.to, now)}: ${stretchWords(stretch)}. ` : ""}
+				Connect an agent from the Agents page: it claims work here, and shows up as it does.
 			</p>
 		</header>
 	);

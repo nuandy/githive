@@ -10,6 +10,12 @@
 	font-size: 18px;
 }
 
+/* Once a stretch of work has landed: the same headline, marked done. */
+.hive-tab__head--done {
+	padding-left: 12px;
+	border-left: 3px solid var(--good);
+}
+
 .hive-tab__head p {
 	margin: 4px 0 0;
 }

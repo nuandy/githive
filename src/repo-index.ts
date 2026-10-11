@@ -1,4 +1,5 @@
 import { DurableObject } from "cloudflare:workers";
+import type { StretchSummary } from "./toolkit/stretch";
 
 // One instance lists every repo with its counts, so the dashboard's repo list is one read.
 // The counts are hints; the records in Git are the source of truth.
@@ -13,6 +14,8 @@ export interface RepoSummary {
 	abandoned?: number;
 	violations?: number;
 	lastActivity?: string;
+	/** The repo's last stretch of work, for "all landed" on the list (see toolkit/stretch.ts). */
+	lastStretch?: StretchSummary;
 	/** When the counts were last read from the records. */
 	countedAt?: string;
 }
