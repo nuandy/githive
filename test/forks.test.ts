@@ -336,7 +336,7 @@ describe("check (run by the agent itself)", () => {
 				hunks: [
 					{
 						file: "README.md",
-						content: expect.stringMatching(/^<<<<<<< main\n[\s\S]*>>>>>>> changes\/a-1\n$/),
+						content: expect.stringMatching(/^<<<<<<< ours \(changes\/a-1\)\n[\s\S]*>>>>>>> origin\/main\n$/),
 						truncated: false,
 					},
 				],

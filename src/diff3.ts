@@ -16,7 +16,10 @@ export interface Merged {
 /** The lines of `text`, each keeping its line ending. */
 export const linesOf = (text: string) => text.match(/[^\n]*\n|[^\n]+$/g) ?? [];
 
-/** `base` changed one way in `ours` and another in `theirs`, merged, with markers labelled as `labels` say. */
+/**
+ * `base` changed one way in `ours` and another in `theirs`, merged, with markers labelled as `labels` say: `ours`
+ * first, as git writes them for the branch it's on.
+ */
 export function merge3(base: string, ours: string, theirs: string, labels: { ours: string; theirs: string }): Merged {
 	const [o, a, b] = [linesOf(base), linesOf(ours), linesOf(theirs)];
 	const inA = matched(o, a);

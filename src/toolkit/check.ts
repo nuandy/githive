@@ -58,7 +58,9 @@ export async function checkChange(input: CheckInput) {
 		if (!head) fail(409, `changes/${change} has nothing pushed to check`);
 		const base = await workspace.mergeBase(main, head);
 		const files = (await workspace.changedPaths(base, head)).sort();
-		const withMain = await workspace.tryMerge(main, head, { ours: input.branch, theirs: `changes/${change}` });
+		// The change's side first, as `git merge origin/<branch>` shows it in the agent's clone.
+		const labels = { ours: `ours (changes/${change})`, theirs: `origin/${input.branch}` };
+		const withMain = await workspace.tryMerge(head, main, labels);
 		return {
 			change,
 			head,

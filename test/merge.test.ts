@@ -76,7 +76,14 @@ describe("merge", { timeout: 60_000 }, () => {
 			ok: false,
 			conflicts: ["shared.txt"],
 			touchedBy: [{ file: "shared.txt", commit: main, change: "a-1", agent: "agent-a-1", intent: "a-1" }],
-			hunks: [{ file: "shared.txt", content: "<<<<<<< main\na\n=======\nb\n>>>>>>> changes/b-1\n", truncated: false }],
+			// b-1's side first, as `git merge origin/main` shows it in its agent's clone.
+			hunks: [
+				{
+					file: "shared.txt",
+					content: "<<<<<<< ours (changes/b-1)\nb\n=======\na\n>>>>>>> origin/main\n",
+					truncated: false,
+				},
+			],
 			fix: [
 				"git fetch origin main && git merge origin/main",
 				"# resolve shared.txt so both changes make sense, then:",

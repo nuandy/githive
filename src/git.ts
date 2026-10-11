@@ -307,7 +307,8 @@ export class Workspace {
 
 	/**
 	 * Test-merge two refs without touching any branch. A conflict gives each conflicted file (the first HUNK_FILES)
-	 * with its conflict markers, labelled as `labels` say, so an agent sees what it's reconciling before it fetches.
+	 * with its conflict markers, `ours` first and labelled as `labels` say, so an agent sees what it's reconciling
+	 * before it fetches. Toolkit callers pass the agent's change as `ours`, as `git merge` in its clone shows it.
 	 */
 	async tryMerge(ours: string, theirs: string, labels = { ours: "ours", theirs: "theirs" }): Promise<MergeOutcome> {
 		// Fetches the merge base if history is too shallow.

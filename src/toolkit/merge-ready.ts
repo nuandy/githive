@@ -75,7 +75,8 @@ export async function readyNow(
 
 // Reads the change through Artifacts' API where possible (see changeAgainst). If no file changed on both sides, the
 // change merges cleanly and nothing is fetched. Otherwise git takes its turn in the isolate's workspace (see
-// inWorkspaceTurn), which needs one listing and no clone.
+// inWorkspaceTurn), which needs one listing and no clone. The conflict markers show the change's side first, as
+// `git merge origin/<branch>` does in the agent's clone.
 async function readChange(input: MergeInput, baseHead: string, ref: string): Promise<ChangeRead> {
 	const read = await readThroughHistory(input, baseHead, ref);
 	if (read && !("error" in read) && !read.both.length)
@@ -85,7 +86,8 @@ async function readChange(input: MergeInput, baseHead: string, ref: string): Pro
 		const head = await workspace.fetch("change", input.source ?? input.remote, ref);
 		const base = await workspace.mergeBase(baseHead, head);
 		const files = await workspace.changedPaths(base, head);
-		const tried = await workspace.tryMerge(baseHead, head, { ours: input.branch, theirs: ref });
+		const labels = { ours: `ours (${ref})`, theirs: `origin/${input.branch}` };
+		const tried = await workspace.tryMerge(head, baseHead, labels);
 		if (tried.clean) return { head, files, tried, branch: workspace.branch };
 		// Who changed the conflicted files since the change left the branch, from the history the workspace holds.
 		const touchedBy = await touchedInWorkspace(workspace, baseHead, base, tried.files).catch((err) => {

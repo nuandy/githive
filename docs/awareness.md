@@ -84,7 +84,9 @@ Causes are missing for direct pushes, past 12 files, and when the conflict appea
   main's first-parent chain along those paths, with the commit's `GitHive-Change`, `GitHive-Agent` and
   `GitHive-Intent` trailers, or its author for a plain-git push. At most 50 commits are scanned and 5 named per
   file.
-- **`hunks`:** each conflicted file with its conflict markers, at most 4 KB, marked `truncated` when cut.
+- **`hunks`:** each conflicted file with its conflict markers, at most 4 KB, marked `truncated` when cut. The agent's
+  side comes first, as `git merge origin/<branch>` shows it in its clone: `<<<<<<< ours (changes/<change>)` …
+  `>>>>>>> origin/<branch>`.
 - **`fix`:** the commands that resolve it in the clone `credentials` gives (remotes `origin` and `fork`), then
   "call status; once the new commit is approved, merge again".
 - **Attempts:** each conflict refusal is noted as an attempt for the change. Attempts are kept in RepoCache, at

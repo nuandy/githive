@@ -388,7 +388,9 @@ describe("landing ready changes together", { timeout: 120_000 }, () => {
 				{ file: "src/shared.txt", commit: pushed, author: "pusher", intent: "touch up shared" },
 				{ file: "src/shared.txt", commit: aCommit, change: "a-1", agent: "agent-a-1", intent: "a-1" },
 			],
-			hunks: [{ file: "src/shared.txt", content: expect.stringContaining("<<<<<<< main\n"), truncated: false }],
+			hunks: [
+				{ file: "src/shared.txt", content: expect.stringContaining("<<<<<<< ours (changes/b-1)\n"), truncated: false },
+			],
 			fix: expect.arrayContaining(["git add src/shared.txt && git commit --no-edit", "git push fork changes/b-1"]),
 		});
 		expect((refused as { reasons: string[] }).reasons[0]).toMatch(

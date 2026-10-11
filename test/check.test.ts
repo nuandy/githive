@@ -157,7 +157,8 @@ describe("an early check", { timeout: 60_000 }, () => {
 			branchHead: async () => main,
 			history: gitHistory(server.git),
 		});
-		// The commit pushed to main with plain git is named by its author and subject, and the file shows its markers.
+		// The commit pushed to main with plain git is named by its author and subject, and the file shows its markers,
+		// the change's side first, as `git merge origin/main` shows it in the agent's clone.
 		expect(read.main).toEqual({
 			head: main,
 			clean: false,
@@ -166,7 +167,7 @@ describe("an early check", { timeout: 60_000 }, () => {
 			hunks: [
 				{
 					file: "src/same.txt",
-					content: "<<<<<<< main\nmain\n=======\na\n>>>>>>> changes/a-1\n",
+					content: "<<<<<<< ours (changes/a-1)\na\n=======\nmain\n>>>>>>> origin/main\n",
 					truncated: false,
 				},
 			],
