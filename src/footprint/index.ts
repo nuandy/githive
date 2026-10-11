@@ -1,6 +1,6 @@
-// Footprints: what a TypeScript or JavaScript file declares, imports and uses, and which exported names a change
-// alters (docs/awareness.md, section 7). Pure: it reads no git and no files, and parses in the Worker with
-// web-tree-sitter.
+// Footprints: what a TypeScript or JavaScript file declares, imports and uses, which exported names a change
+// alters, and the notices that tell it (docs/awareness.md, section 7). Pure: it reads no git and no files, and
+// parses in the Worker with web-tree-sitter.
 
 export {
 	fileFacts,
@@ -25,3 +25,17 @@ export {
 	type Use,
 } from "./compare";
 export { importTargets, isRelative, relativeTarget, resolveImport, resolvesTo } from "./resolve";
+export {
+	headsUpNext,
+	headsUpSays,
+	headsUpUsedNext,
+	headsUpUsedSays,
+	interfaceNext,
+	interfaceSays,
+	useFact,
+	useSays,
+	whatChanged,
+	type Landing,
+	type OpenChange,
+	type UseFact,
+} from "./wording";
