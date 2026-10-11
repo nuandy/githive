@@ -20,7 +20,7 @@ export const INSTRUCTIONS = [
 		"landed, and notices about your change. It's worth reading, but if you ignore news nothing breaks.",
 	"Conventions:",
 	"1. `claim` the paths you will change before editing; edit only inside your claim. A refusal names " +
-		"who holds what: narrow your claim, or ask them. A change lands on the project's branch unless its " +
+		"who holds what and why: narrow your claim, or pick other work. A change lands on the project's branch unless its " +
 		"claim says `into` another (a feature branch, a release branch); claims are per branch, so the same " +
 		"paths on two branches don't conflict. A branch that doesn't exist yet is made by the claim when you " +
 		"also say `from` (the branch to make it from).",

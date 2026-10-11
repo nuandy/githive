@@ -65,7 +65,8 @@ Today each object reply carries `news`: what others landed since the agent was l
   | `interface` | A landed change altered a name the agent's change uses. |
   | `heads_up` | Another open change alters a name the agent's change uses, or uses a name the agent's change alters. |
 
-- **Notices** are kept per agent and branch in RepoCache. They come back in the same `landingNews` call (no
+- **Notices** are kept per agent in RepoCache, across branches (each notice says which branch it's about), so a
+  notice about a change into a feature branch reaches its agent too. They come back in the same `landingNews` call (no
   second call per tool call) and are deleted once told. Each agent keeps at most 50, for at most 24 hours. Unlike
   landed news, notices reach an agent on its first call.
 - **Fixes to today's news:**
@@ -145,7 +146,7 @@ dashboard's claims show "free after 14:30".
   2. Build its footprint: the names it alters (signature changed, removed, export toggled, compared with the
      change's base) and the names it uses from other files.
   3. Compare it with the other open changes on the same branch. When one alters a name the other uses, both hear
-     a `heads_up`.
+     a `heads_up`, once per alteration: a later push that keeps the same signature tells nothing new.
   4. Keep the footprint for the next push and for landings.
 - **When main moves** (an event for the project's branch: a landing, or plain git):
   1. Diff each new commit's TS/JS files against their parents' versions.

@@ -356,7 +356,7 @@ async function startChange() {
 			const intent = firstLine(conflict.intent, 80);
 			say(`  ${conflict.path} overlaps ${conflict.held}: ${conflict.agent}'s ${conflict.change} (${intent})`);
 		}
-		follow(claimed, `narrow your paths and start again, ask the holder, or pick other work: githive backlog ${repo}`);
+		follow(claimed, `narrow your paths and start again, or pick other work: githive backlog ${repo}`);
 		process.exitCode = 1;
 		return;
 	}
