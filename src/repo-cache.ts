@@ -398,12 +398,23 @@ export class RepoCache extends DurableObject<Env> {
 		return stretch && stretchSummary(stretch);
 	}
 
+	/**
+	 * What's landing on a branch, and the repo's last stretch of work. `firstStretch` is set when the stretch was
+	 * just worked out, so the caller can note it in the repo list's summary.
+	 */
 	async landingView(branch: string) {
-		const [{ checking, recent }, stretch] = await Promise.all([
-			this.landing(branch),
-			this.ctx.storage.get<Stretch>("stretch"),
-		]);
-		return { checking, recent, ...(stretch ? { stretch: stretchSummary(stretch) } : {}) };
+		const { checking, recent } = await this.landing(branch);
+		const kept = await this.ctx.storage.get<Stretch>("stretch");
+		const stretch = kept ?? (await this.stretchFrom(recent));
+		const view = { checking, recent, ...(stretch ? { stretch: stretchSummary(stretch) } : {}) };
+		return { ...view, ...(stretch && !kept ? { firstStretch: true } : {}) };
+	}
+
+	/** The stretch in outcomes that settled before stretches were kept, kept from now on. */
+	private async stretchFrom(recent: Settled[]) {
+		const stretch = extendStretch(undefined, recent);
+		if (stretch) await this.ctx.storage.put("stretch", stretch);
+		return stretch;
 	}
 
 	/**

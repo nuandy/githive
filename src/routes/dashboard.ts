@@ -23,7 +23,7 @@ import { GitCasLog } from "../record-log";
 import { projectBranch } from "../project-branch";
 import { rpc } from "../rpc";
 import { keptView } from "./kept-view";
-import { type AppEnv, jsonArgs, routeRepo, toolContext } from "./shared";
+import { type AppEnv, jsonArgs, repoIndex, routeRepo, toolContext } from "./shared";
 
 // One repo for the dashboard (/repos/:owner/:name/...): its claims, changes, landing and history, what people do there
 // (vote, merge, make branches), its settings and collaborators, and its code.
@@ -136,12 +136,19 @@ function changeViewRoutes(app: Hono<AppEnv>) {
 		const branch = c.req.query("branch")?.trim() || (await registryBranch(c.env, repo.id));
 		const cache = c.env.REPO_CACHE.getByName(`repo:${repo.id}`);
 		const [landing, leaseHeld, forks, snapshot] = await Promise.all([
-			rpc(cache.landingView(branch)).catch(() => ({ checking: null, recent: [] })),
+			rpc(cache.landingView(branch)).catch(() => ({ checking: null, recent: [], firstStretch: false })),
 			landingLeaseHeld(landingLog(c.env, repo.id, branch)).catch(() => false),
 			rpc(cache.forkQueue()).catch(() => null),
 			rpc(c.env.GATE.getByName(`repo:${repo.id}`).snapshotInfo()),
 		]);
-		return c.json({ branch, leaseHeld, ...landing, forks, snapshot });
+		const { firstStretch, ...view } = landing;
+		// A stretch worked out from outcomes kept before stretches were goes into the repo list too.
+		const noted = firstStretch && "stretch" in view ? view.stretch : undefined;
+		if (noted)
+			await repoIndex(c.env)
+				.summarize(`repo:${repo.id}`, { lastStretch: noted })
+				.catch((err: unknown) => console.error(`noting ${repo.id}'s stretch failed`, String(err)));
+		return c.json({ branch, leaseHeld, ...view, forks, snapshot });
 	});
 	app.get("/repos/:owner/:name/audit", async (c) => {
 		const repo = await routeRepo(c, "read");
