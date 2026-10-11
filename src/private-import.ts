@@ -8,6 +8,12 @@ import { fail } from "./errors";
 /** Where the bare clone goes in the import's container. */
 const CLONE_DIR = "/import";
 
+/**
+ * How long the clone and the push may each take. Longer than other Git commands get, since a whole repo's history
+ * moves at once; this import's container does nothing else.
+ */
+export const IMPORT_TIMEOUT_S = 20 * 60;
+
 /** GitHub takes a token as the password of any user; this is the name its docs use. */
 const TOKEN_USER = "x-access-token";
 
@@ -29,8 +35,13 @@ export function checkImportUrl(url: string) {
 	if (parsed.username || parsed.password) fail(400, "put the token in its own field, not in the URL");
 }
 
+/** A step that ran out of time: the repository is probably too large to import this way. */
+const tooLong = (step: string) =>
+	`${step} took longer than ${IMPORT_TIMEOUT_S / 60} minutes: the repository is probably too large to import this way`;
+
 /** What a failed clone means for the person importing, without Git's own output, which names the URL. */
 function cloneFailure(output: string) {
+	if (/\(killed after \d+s\)/.test(output)) return tooLong("cloning it");
 	if (/authentication failed|could not read username|403|401/i.test(output))
 		return "GitHub refused the token: check it can read this repository's contents, and hasn't expired";
 	if (/remote branch .* not found/i.test(output)) return "that branch isn't in the repository";
@@ -47,7 +58,7 @@ export async function importWithToken(container: Container, input: PrivateImport
 	const { source, target } = input;
 	const branchArgs = source.branch ? ["--branch", source.branch] : [];
 	const cloneArgs = ["clone", "--bare", "--single-branch", ...branchArgs, source.url, CLONE_DIR];
-	const cloned = await gitWithToken(container, source.token, cloneArgs, "/", TOKEN_USER);
+	const cloned = await gitWithToken(container, source.token, cloneArgs, "/", TOKEN_USER, IMPORT_TIMEOUT_S);
 	if (cloned.exitCode !== 0) fail(400, cloneFailure(cloned.output));
 
 	const head = await run(container, ["git", "symbolic-ref", "--short", "HEAD"], CLONE_DIR);
@@ -55,7 +66,8 @@ export async function importWithToken(container: Container, input: PrivateImport
 	if (!branch) fail(400, "the repository has no branch to import");
 
 	const pushArgs = ["push", target.url, `refs/heads/${branch}:refs/heads/${branch}`];
-	const pushed = await gitWithToken(container, target.token, pushArgs, CLONE_DIR);
+	const pushed = await gitWithToken(container, target.token, pushArgs, CLONE_DIR, undefined, IMPORT_TIMEOUT_S);
+	if (/\(killed after \d+s\)/.test(pushed.output)) fail(400, tooLong("saving it to GitHive"));
 	if (pushed.exitCode !== 0) fail(502, "the cloned repository couldn't be saved to GitHive; try again");
 	return { branch };
 }

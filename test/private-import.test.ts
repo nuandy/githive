@@ -11,18 +11,20 @@ const TARGET = { url: "https://artifacts.test/acme--app.git", token: "art_v1_tar
 /** A container that answers each command from the first matching rule, recording what ran. */
 function fakeContainer(rules: [RegExp, { exitCode?: number; output?: string }][] = []) {
 	const ran: string[] = [];
+	const limits: string[] = [];
 	const container = {
 		running: true,
 		exec: async (cmd: string[]) => {
 			const line = cmd.slice(4).join(" "); // past `timeout -s KILL <s>`
 			ran.push(line);
+			limits.push(cmd[3] ?? "");
 			const rule = rules.find(([pattern]) => pattern.test(line))?.[1] ?? {};
 			return {
 				output: async () => ({ exitCode: rule.exitCode ?? 0, stdout: new TextEncoder().encode(rule.output ?? "") }),
 			};
 		},
 	};
-	return { container: container as unknown as Container, ran };
+	return { container: container as unknown as Container, ran, limits };
 }
 
 const failure = (work: Promise<unknown>) =>
@@ -33,7 +35,7 @@ const failure = (work: Promise<unknown>) =>
 
 describe("importing a private repo", () => {
 	it("clones the branch with the token as a header, and pushes it to the new repo with the repo's own token", async () => {
-		const { container, ran } = fakeContainer();
+		const { container, ran, limits } = fakeContainer();
 		const source = { url: SOURCE, branch: "main", token: TOKEN };
 		expect(await importWithToken(container, { source, target: TARGET })).toEqual({ branch: "main" });
 		const [clone, push] = [ran.find((line) => line.includes(" clone ")), ran.find((line) => line.includes(" push "))];
@@ -44,6 +46,8 @@ describe("importing a private repo", () => {
 		expect(push).toBe(
 			`git -c http.extraHeader=Authorization: Bearer art_v1_target push ${TARGET.url} refs/heads/main:refs/heads/main`,
 		);
+		// The import's clone and push get 20 minutes; Git commands elsewhere keep their 5.
+		expect(limits.filter((limit) => limit === "1200")).toHaveLength(2);
 		// The token is in no URL and in no other command.
 		expect(ran.filter((line) => line.includes(TOKEN))).toEqual([]);
 	});
@@ -67,6 +71,18 @@ describe("importing a private repo", () => {
 		expect(
 			await failure(importWithToken(missing.container, { source: { url: SOURCE, token: TOKEN }, target: TARGET })),
 		).toMatch(/no such repository, or the token can't see it/);
+	});
+
+	it("says a clone that ran out of time was probably too large", async () => {
+		const slow = fakeContainer([
+			[/ clone /, { exitCode: 137, output: "Receiving objects: 40%\n(killed after 1200s)" }],
+		]);
+		const message = await failure(
+			importWithToken(slow.container, { source: { url: SOURCE, token: TOKEN }, target: TARGET }),
+		);
+		expect(message).toBe(
+			"[400] cloning it took longer than 20 minutes: the repository is probably too large to import this way",
+		);
 	});
 
 	it("takes only an HTTPS URL, with no credentials in it", () => {
