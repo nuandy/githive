@@ -10,7 +10,7 @@ import type { TreeEntry } from "./branch-history";
 import { mergeMessage } from "./merge-commit";
 import { atMost, type BatchChange, type BatchGit } from "./merge";
 import { makeStamper, type Stamper } from "./stamp";
-import { cachingHistory, changedAlong } from "./tree-reads";
+import { cachingHistory, changedAlong, entryAt, keepTree } from "./tree-reads";
 
 // Lands a batch in the Worker, without a container and without a checkout. Claims keep a batch's changes apart, so
 // each merge is main's tree with the change's files put in place: only the trees along those paths are read
@@ -29,6 +29,7 @@ const PACKS_MOST = 16 * 1024 * 1024;
 
 const FETCHES_AT_ONCE = 4;
 const CHECKS_AT_ONCE = 6;
+const READS_AT_ONCE = 8;
 const PUSH_ATTEMPTS = 6;
 
 /** The packs merges fetched for their changes while they waited, by change head. */
@@ -65,7 +66,8 @@ export async function prefetchChange(input: TreeReads, branch: string, change: B
 	if (!input.packs || !change.source) return;
 	const tip = await branchHead(await input.remote("read"), branch);
 	if (!tip) return;
-	const placing = await placeBatch(input.history, input.project, branch, tip, [change]);
+	// Through the cache, so the landing finds the change's trees already read.
+	const placing = await placeBatch(cachingHistory(input.history), input.project, branch, tip, [change]);
 	const placed = placing?.placed[0];
 	if (!placed || placed.head.hash !== change.head) return;
 	const pack = await fetchPackSince(change.source, [change.head], [placed.base.hash], { bytes: KEPT_PACK_MOST });
@@ -229,17 +231,29 @@ async function buildMerges(
 		const oid = await git.writeTree({ fs, dir: DIR, tree: tree as Parameters<typeof git.writeTree>[0]["tree"] });
 		if (!written.has(oid)) objects.push(oid);
 		written.set(oid, entries);
+		// The next landing starts from this one's last tree.
+		keepTree(oid, entries);
 		return oid;
 	};
 	const reader = (repo: string) => async (hash: string) =>
 		written.get(hash) ?? (await input.history(repo, (source) => source.readTree(hash))) ?? [];
 	const readMain = reader(input.project);
+	const readerFor = (merge: Merge) => reader(merge.source ? repoOfUrl(merge.source.url) : input.project);
+	// Each merge is built on the one before, so its reads would wait in turn. Read them all first, side by side.
+	await atMost(READS_AT_ONCE, plan.placed, (placed, index) => {
+		const readChange = readerFor(batch.merges[index]!);
+		const reads = placed.files.flatMap((file) => [
+			entryAt(readMain, plan.baseTree, file),
+			entryAt(readChange, placed.head.treeHash, file),
+		]);
+		return Promise.all(reads);
+	});
 	const commits: string[] = [];
 	let tip = batch.base;
 	let tipTree = plan.baseTree;
 	for (const [index, merge] of batch.merges.entries()) {
 		const placed = plan.placed[index]!;
-		const readChange = reader(merge.source ? repoOfUrl(merge.source.url) : input.project);
+		const readChange = readerFor(merge);
 		const entries = await graft(
 			{ main: readMain, change: readChange, write: writeTree },
 			await readMain(tipTree),

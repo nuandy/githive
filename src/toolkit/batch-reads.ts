@@ -1,7 +1,7 @@
 import { repoOfUrl } from "../git-http";
 import { type CommitMeta, filesBetween, type HistorySource } from "./branch-history";
 import { atMost, type BatchGit, type Inspected } from "./merge";
-import { cachingHistory } from "./tree-reads";
+import { cachingHistory, forgetTrees } from "./tree-reads";
 
 // Reads a batch's changes through the Artifacts API in the Worker instead of fetching them in the repo's Gate:
 // each change's head, and the files it changed since leaving the branch, from comparing two trees. This is much
@@ -59,10 +59,11 @@ const NEWER_PAGE = 64;
 const chains = new Map<string, Promise<CommitMeta[] | null>>();
 const CHAINS_KEPT = 16;
 
-/** Clears the cached chains and placements, for tests whose repos share names. */
+/** Clears the cached chains, placements and trees, for tests whose repos share names. */
 export const forgetChains = () => {
 	chains.clear();
 	placements.clear();
+	forgetTrees();
 };
 
 // Each change head's place on a branch, as last worked out, for the isolate. A head's merge base with the branch, and
