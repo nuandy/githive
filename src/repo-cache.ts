@@ -44,6 +44,8 @@ export interface Notice {
 	next?: string;
 	/** The recipient's change it is about. */
 	change?: string;
+	/** The branch that change goes into. notify sets it, so an agent hears of its changes into every branch. */
+	branch?: string;
 	from?: { agent: string; change?: string };
 	detail?: Record<string, unknown>;
 }
@@ -52,7 +54,7 @@ export interface Notice {
 export type NewsItem = (Landed & { kind: "landed" }) | Notice;
 
 const NOTICE = "notice:";
-/** The most notices kept for one agent on one branch; the oldest are dropped. */
+/** The most notices kept for one agent, across branches; the oldest are dropped. */
 const NOTICES_KEPT = 50;
 /** How long a notice is kept untold. */
 const NOTICE_MS = 24 * 60 * 60_000;
@@ -427,6 +429,9 @@ export class RepoCache extends DurableObject<Env> {
 		if (!outcomes.length) return undefined;
 		await this.keepLanding(branch, settleOutcomes(await this.landing(branch), outcomes));
 		await this.keepEvents(settledEvents(outcomes));
+		// Attempts are kept by change name, and a name can be claimed again: a landed change's go, so a later claim's
+		// story doesn't start with them.
+		await this.deleteKeys(outcomes.filter((each) => each.how === "landed").map((each) => `${ATTEMPTS}${each.change}`));
 		const stretch = extendStretch(await this.ctx.storage.get<Stretch>("stretch"), outcomes);
 		if (stretch) await this.ctx.storage.put("stretch", stretch);
 		this.broadcast("landing");
@@ -453,8 +458,9 @@ export class RepoCache extends DurableObject<Env> {
 	}
 
 	/**
-	 * What `agent` hasn't been told on `branch`: other agents' changes that landed since it was last told, newest
-	 * last, then its notices, oldest first. Landings start from an agent's first call; notices reach it on that call.
+	 * What `agent` hasn't been told: other agents' changes that landed on `branch` since it was last told, newest
+	 * last, then its notices on every branch, oldest first. Landings start from an agent's first call; notices reach it
+	 * on that call.
 	 */
 	async landingNews(branch: string, agent: string): Promise<NewsItem[]> {
 		const { recent } = await this.landing(branch);
@@ -471,32 +477,34 @@ export class RepoCache extends DurableObject<Env> {
 		const landed = told
 			? asNews(recent.filter((settled) => settled.at > told && settled.agent !== agent)).slice(-NEWS_MOST)
 			: [];
-		const notices = await this.takeNotices(branch, agent);
+		const notices = await this.takeNotices(agent);
 		return [...landed.map((news) => ({ kind: "landed" as const, ...news })), ...notices];
 	}
 
 	/**
-	 * Leave notices for agents on `branch`, told with their next reply (see landingNews). Each agent keeps its newest
-	 * NOTICES_KEPT, for a day at most.
+	 * Leave notices for agents about their changes into `branch`, told with their next reply on any branch (see
+	 * landingNews), and the hive events that go with them. Each agent keeps its newest NOTICES_KEPT, for a day at most.
 	 */
-	async notify(branch: string, notices: { agent: string; notice: Notice }[]) {
-		// Keyed by time, so an agent's notices list oldest first.
+	async notify(branch: string, notices: { agent: string; notice: Notice }[], events: HiveEvent[] = []) {
+		// Keyed by agent then time, so an agent's notices on every branch list together, oldest first.
 		const entries = notices.map(
-			({ agent, notice }) => [`${noticesOf(branch, agent)}${notice.at}:${crypto.randomUUID()}`, notice] as const,
+			({ agent, notice }) => [`${noticesOf(agent)}${notice.at}:${crypto.randomUUID()}`, { ...notice, branch }] as const,
 		);
 		for (let i = 0; i < entries.length; i += STORAGE_BATCH)
 			await this.ctx.storage.put(Object.fromEntries(entries.slice(i, i + STORAGE_BATCH)));
 		for (const agent of new Set(notices.map((each) => each.agent))) {
-			const kept = [...(await this.ctx.storage.list<Notice>({ prefix: noticesOf(branch, agent) }))];
+			const kept = [...(await this.ctx.storage.list<Notice>({ prefix: noticesOf(agent) }))];
 			const dropped = kept.filter(([, notice], index) => index < kept.length - NOTICES_KEPT || expired(notice));
 			await this.deleteKeys(dropped.map(([key]) => key));
 		}
+		await this.keepEvents(events);
+		if (events.length) this.broadcast("awareness");
 	}
 
 	// An agent's notices that are still current, oldest first. All of them are deleted: told once, a reply lost on
 	// the way loses them, which is fine for advice.
-	private async takeNotices(branch: string, agent: string) {
-		const kept = [...(await this.ctx.storage.list<Notice>({ prefix: noticesOf(branch, agent) }))];
+	private async takeNotices(agent: string) {
+		const kept = [...(await this.ctx.storage.list<Notice>({ prefix: noticesOf(agent) }))];
 		if (!kept.length) return [];
 		await this.deleteKeys(kept.map(([key]) => key));
 		return kept
@@ -582,8 +590,8 @@ export class RepoCache extends DurableObject<Env> {
 	}
 }
 
-/** Where an agent's notices on a branch are kept. Neither branch nor agent names hold a ":". */
-const noticesOf = (branch: string, agent: string) => `${NOTICE}${branch}:${agent}:`;
+/** Where an agent's notices are kept, whatever branch they're about. Agent names don't hold a ":". */
+const noticesOf = (agent: string) => `${NOTICE}${agent}:`;
 
 const expired = (notice: Notice, now = Date.now()) => now - Date.parse(notice.at) > NOTICE_MS;
 

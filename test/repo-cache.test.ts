@@ -140,8 +140,9 @@ describe("news of what landed", () => {
 });
 
 describe("notices", () => {
+	const minutesAgo = (minutes: number) => new Date(Date.now() - minutes * 60_000).toISOString();
 	const notice = (says: string, at = new Date().toISOString()): Notice => ({
-		kind: "note",
+		kind: "interface",
 		at,
 		says,
 		next: "read it",
@@ -149,53 +150,72 @@ describe("notices", () => {
 		from: { agent: "agent-b", change: "c-2" },
 	});
 
-	it("delivers a notice on the agent's first call", async () => {
+	it("delivers a notice on the agent's first call, with the branch it's about", async () => {
 		const { live } = feed();
 		await live.notify("main", [{ agent: "agent-a", notice: notice("hello") }]);
-		expect(await live.landingNews("main", "agent-a")).toEqual([notice("hello", expect.any(String))]);
+		expect(await live.landingNews("main", "agent-a")).toEqual([
+			{ ...notice("hello", expect.any(String)), branch: "main" },
+		]);
 	});
 
-	it("tells a notice once, after what landed, and only to its agent on its branch", async () => {
+	it("tells a notice once, after what landed, only to its agent, whichever branch it's about", async () => {
 		const { live } = feed();
 		await live.landingNews("main", "agent-a");
 		await live.landingSettled("main", [settled("theirs", "agent-b", "landed", soon(1))]);
 		await live.notify("main", [
-			{ agent: "agent-a", notice: notice("second", "2026-10-11T10:01:00.000Z") },
-			{ agent: "agent-a", notice: notice("first", "2026-10-11T10:00:00.000Z") },
+			{ agent: "agent-a", notice: notice("second", minutesAgo(2)) },
+			{ agent: "agent-a", notice: notice("first", minutesAgo(3)) },
 			{ agent: "agent-ab", notice: notice("not a's") },
 		]);
-		await live.notify("dev", [{ agent: "agent-a", notice: notice("on dev") }]);
+		// A change into a feature branch: its agent hears of it in a reply about the project's branch.
+		await live.notify("feature", [{ agent: "agent-a", notice: notice("on feature", minutesAgo(1)) }]);
 		expect(await live.landingNews("main", "agent-a")).toMatchObject([
 			{ kind: "landed", change: "theirs" },
-			{ kind: "note", says: "first" },
-			{ kind: "note", says: "second" },
+			{ kind: "interface", says: "first", branch: "main" },
+			{ kind: "interface", says: "second", branch: "main" },
+			{ kind: "interface", says: "on feature", branch: "feature" },
 		]);
 		expect(await live.landingNews("main", "agent-a")).toEqual([]);
+		expect(await live.landingNews("feature", "agent-a")).toEqual([]);
 		expect(await live.landingNews("main", "agent-ab")).toMatchObject([{ says: "not a's" }]);
-		expect(await live.landingNews("dev", "agent-a")).toMatchObject([{ says: "on dev" }]);
 	});
 
-	it("keeps at most 50 notices per agent, and none older than a day", async () => {
+	it("keeps at most 50 notices per agent across branches, and none older than a day", async () => {
 		const storage = new FakeStorage();
 		const live = new RepoCache({ storage, getWebSockets: () => [] } as never, {} as never);
-		const minutesAgo = (minutes: number) => new Date(Date.now() - minutes * 60_000).toISOString();
 		await live.notify("main", [{ agent: "agent-a", notice: notice("stale", minutesAgo(25 * 60)) }]);
 		// Dropped as a later notify trims.
 		await live.notify("main", [{ agent: "agent-a", notice: notice("fresh", minutesAgo(60)) }]);
 		expect([...(await storage.list<Notice>({ prefix: "notice:" })).values()].map((kept) => kept.says)).toEqual([
 			"fresh",
 		]);
-		const many = Array.from({ length: 60 }, (_, i) => ({
-			agent: "agent-a",
-			notice: notice(`n${i}`, minutesAgo(59 - i)),
-		}));
-		await live.notify("main", many);
+		const many = (from: number) =>
+			Array.from({ length: 30 }, (_, i) => ({
+				agent: "agent-a",
+				notice: notice(`n${from + i}`, minutesAgo(59 - from - i)),
+			}));
+		await live.notify("main", many(0));
+		await live.notify("feature", many(30));
 		expect((await storage.list({ prefix: "notice:" })).size).toBe(50);
 		// One older than a day that no notify has trimmed yet is dropped when the agent is told.
-		storage.data.set("notice:main:agent-a:2026-01-01T00:00:00.000Z:x", notice("expired", "2026-01-01T00:00:00.000Z"));
+		storage.data.set("notice:agent-a:2026-01-01T00:00:00.000Z:x", notice("expired", "2026-01-01T00:00:00.000Z"));
 		const told = await live.landingNews("main", "agent-a");
 		expect(told.map((item) => (item as Notice).says)).toEqual(Array.from({ length: 50 }, (_, i) => `n${i + 10}`));
 		expect((await storage.list({ prefix: "notice:" })).size).toBe(0);
+	});
+
+	it("keeps the hive events that come with them, and tells watching pages", async () => {
+		const { live, sent } = feed();
+		const at = new Date().toISOString();
+		await live.notify(
+			"main",
+			[{ agent: "agent-a", notice: notice("hello") }],
+			[{ kind: "heads_up", agent: "agent-b", change: "c-2", other: "agent-a", detail: "loadSettings", at }],
+		);
+		expect(await live.events()).toEqual([
+			{ kind: "heads_up", agent: "agent-b", change: "c-2", other: "agent-a", detail: "loadSettings", at },
+		]);
+		expect(sent).toEqual(["awareness"]);
 	});
 });
 
@@ -262,15 +282,26 @@ describe("attempts", () => {
 		await live.clearViews();
 		expect(await live.attemptsOf(["c-1"])).toEqual({});
 	});
+
+	it("are cleared when a change lands, so a later claim of its name starts with none", async () => {
+		const { live } = feed();
+		await live.noteAttempt("c-1", "conflict on a.ts");
+		await live.noteAttempt("c-2", "checks failed: npm test exited 1");
+		await live.landingSettled("main", [
+			settled("c-1", "agent-a", "landed", soon(1)),
+			settled("c-2", "agent-b", "failed", soon(1)),
+		]);
+		expect(await live.attemptsOf(["c-1", "c-2"])).toEqual({ "c-2": ["checks failed: npm test exited 1"] });
+	});
 });
 
 describe("the hooks tools reach it through", () => {
 	it("leave notices for the agent's next news, and a RepoCache that doesn't answer never fails the call", async () => {
 		const { live } = feed();
 		const ctx = toolContextFor({ REPO_CACHE: { getByName: () => live } } as never, undefined);
-		const notice = { kind: "note", at: new Date().toISOString(), says: "hello" };
+		const notice = { kind: "interface", at: new Date().toISOString(), says: "hello" };
 		await ctx.notify!("p", "main", [{ agent: "agent-a", notice }]);
-		expect(await ctx.news!("p", "main", "agent-a")).toEqual([notice]);
+		expect(await ctx.news!("p", "main", "agent-a")).toEqual([{ ...notice, branch: "main" }]);
 		const down = () => Promise.reject(new Error("Durable Object is overloaded. Requests queued for too long."));
 		const unreachable = toolContextFor({ REPO_CACHE: { getByName: () => ({ notify: down }) } } as never, undefined);
 		await expect(unreachable.notify!("p", "main", [{ agent: "agent-a", notice }])).resolves.toBeUndefined();
