@@ -509,7 +509,10 @@ export class RepoCache extends DurableObject<Env> {
 	async noteAttempt(change: string, line: string) {
 		const key = `${ATTEMPTS}${change}`;
 		const kept = (await this.ctx.storage.get<string[]>(key)) ?? [];
-		await this.ctx.storage.put(key, [...kept, line.slice(0, ATTEMPT_CHARS)].slice(-ATTEMPTS_KEPT));
+		const cut = line.slice(0, ATTEMPT_CHARS);
+		// An agent merging the same conflicting commit again, or failing the same way, is one attempt in the story.
+		if (kept.at(-1) === cut) return;
+		await this.ctx.storage.put(key, [...kept, cut].slice(-ATTEMPTS_KEPT));
 	}
 
 	/** The attempts noted for each change, oldest first. A change with none is left out. */

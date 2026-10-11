@@ -7,12 +7,16 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { HUNK_BYTES, HUNK_FILES, Workspace } from "../src/git";
 import { statusOf } from "../src/errors";
 import { callTool, type ToolContext } from "../src/toolkit/mcp";
+import { BATCH_MERGE } from "../src/toolkit/merge-checks";
+import type { CheckRunner } from "../src/toolkit/merge";
 import { agentClone, pushChange } from "./helpers/agents";
 import { startGitServer, type GitServer } from "./helpers/git-server";
 import { memoryBatchGit } from "./helpers/memory-batch-git";
+import { toolCalls } from "./helpers/tool-calls";
 
 // Conflicts that explain themselves: who changed each conflicted file since the change left the branch, the files
-// with their conflict markers, and commands that resolve it in the agent's own clone.
+// with their conflict markers, and commands that resolve it in the agent's own clone. Each conflict and failed check
+// is noted as an attempt for the merge commit's story.
 
 let server: GitServer;
 let work: string;
@@ -138,5 +142,67 @@ describe("fixing a conflict", { timeout: 60_000 }, () => {
 		expect(after.merge).toMatchObject({ clean: true });
 		expect(after.merge).not.toHaveProperty("conflicts");
 		expect(fork.git("show", "changes/a-1:shared.txt")).toBe("main's line\na's line\n");
+	});
+});
+
+describe("attempts at landing", { timeout: 60_000 }, () => {
+	const noted: [string, string, string][] = [];
+	const pings: unknown[] = [];
+	const results: Record<string, { command: string; exitCode: number; output: string }> = {};
+	const runChecks: CheckRunner = async ({ changes }) => {
+		const failed = changes.map((change) => results[change.change]).find(Boolean);
+		return { passed: !failed, results: [failed ?? { command: "npm test", exitCode: 0, output: "ok" }] };
+	};
+	const { call, register, approve } = toolCalls(() => server, {
+		runChecks: () => runChecks,
+		noteAttempt: async (repo, change, line) => void noted.push([repo, change, line]),
+		ping: async (_repo, event) => void pings.push(event),
+	});
+	beforeEach(async () => {
+		noted.length = 0;
+		pings.length = 0;
+		for (const change of Object.keys(results)) delete results[change];
+		await call("settings", { required: 1, vetoes: [], verify: ["npm test"] });
+		await register("a", "b", "reviewer");
+	});
+	async function approved(agent: string, change: string, files: Record<string, string>, from?: string) {
+		await call("claim", { change, agent, paths: Object.keys(files), intent: `${change}'s intent` }, agent);
+		const head = await pushChange(server.url, work, agent, change, files, from);
+		await approve(head);
+		return head;
+	}
+
+	it("notes an attempt for a conflict and for failed checks", async () => {
+		const base = server.git("rev-parse", "main").trim();
+		await approved("a", "a-1", { "shared.txt": "a\n" });
+		expect(await call("merge", { change: "a-1", agent: "a" }, "a")).toMatchObject({ ok: true });
+		const landed = server.git("rev-parse", "main").trim();
+		// b-1 left main before a-1 landed, and changed the same file.
+		await approved("b", "b-1", { "shared.txt": "b\n" }, base);
+		expect(await call("merge", { change: "b-1", agent: "b" }, "b")).toMatchObject({ ok: false });
+		const conflict = `conflict on shared.txt with a-1 by a ("a-1's intent", ${landed.slice(0, 7)})`;
+		expect(noted).toEqual([["p", "b-1", conflict]]);
+		// The hive sees the conflict, naming its file.
+		expect(pings).toContainEqual(
+			expect.objectContaining({ kind: "conflicted", agent: "b", change: "b-1", detail: "shared.txt" }),
+		);
+		// b gives it up, so later batches don't take it in.
+		await call("release", { change: "b-1", agent: "b" }, "b");
+
+		// Failed checks are an attempt too, and so is a batch the Gate couldn't merge, in the words it gave.
+		results["c-1"] = { command: "npm test", exitCode: 1, output: "1 failing" };
+		await approved("a", "c-1", { "c.txt": "c\n" });
+		expect(await call("merge", { change: "c-1", agent: "a" }, "a")).toMatchObject({
+			ok: false,
+			reasons: ["checks failed: npm test exited 1"],
+		});
+		const gateSaid = 'conflict on d.txt with c-7 by alice ("add refunds", 6584265)';
+		results["d-1"] = { command: BATCH_MERGE, exitCode: 1, output: gateSaid };
+		await approved("a", "d-1", { "d.txt": "d\n" });
+		expect(await call("merge", { change: "d-1", agent: "a" }, "a")).toMatchObject({ ok: false, reasons: [gateSaid] });
+		expect(noted.slice(1)).toEqual([
+			["p", "c-1", "checks failed: npm test exited 1"],
+			["p", "d-1", gateSaid],
+		]);
 	});
 });

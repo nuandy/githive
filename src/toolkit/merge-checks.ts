@@ -5,6 +5,11 @@ import { fail } from "../errors";
 
 /** The reviewer failed checks are recorded as. Its rejection of the failing head sends the change back to its agent. */
 export const CHECKS_REVIEWER = "githive-checks";
+/**
+ * The check a batch that doesn't merge onto main fails, as the Gate's runner reports it (see env.ts). Its output is
+ * the conflict in one line: its files and who changed them.
+ */
+export const BATCH_MERGE = "(merging the batch onto main)";
 // How much of a failed check's output is kept in its outcome, and in its rejection.
 const OUTCOME_OUTPUT_CHARS = 1_000;
 const EVIDENCE_CHARS = 2_000;
@@ -103,10 +108,17 @@ async function checkBatch(
 	return [...firstFailures, ...secondFailures];
 }
 
-// Puts out a change whose checks failed alone on main. The checks' rejection of its head sends it back to its agent.
+// Puts out a change whose checks failed alone on main. The checks' rejection of its head sends it back to its agent,
+// and the failure is noted as an attempt, for its merge commit's story.
 async function putOut(input: MergeInput, ready: Ready, results: CheckResult[]): Promise<Settled> {
 	const failed = results.find((result) => result.exitCode !== 0);
-	const reasons = [failed ? `checks failed: ${failed.command} exited ${failed.exitCode}` : "checks failed"];
+	const conflict = failed?.command === BATCH_MERGE ? failed.output.split("\n")[0] : undefined;
+	const reasons = [
+		conflict || (failed ? `checks failed: ${failed.command} exited ${failed.exitCode}` : "checks failed"),
+	];
+	await input
+		.noteAttempt?.(ready.change, reasons[0]!)
+		.catch((err) => console.error(`noting ${ready.change}'s failed checks failed`, String(err)));
 	const outputTail = failed?.output ? `:\n${failed.output.slice(-EVIDENCE_CHARS)}` : "";
 	const evidence = `${reasons[0]} on ${ready.head.slice(0, 8)}, checked alone on the branch, twice${outputTail}`;
 	const rejection = { commit: ready.head, reviewer: CHECKS_REVIEWER, role: "checks", verdict: "reject" } as const;

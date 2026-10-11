@@ -5,7 +5,7 @@ import { busyArtifacts, changeAgainst, landedOn, type TouchedBy, touchedInWorksp
 import { skipsChecks } from "./check-scope";
 import type { ClaimRecord } from "./claims";
 import type { ClaimsView } from "./claim-store";
-import { conflictWords, type Landing, lastLandedOn, type Settled } from "./landing";
+import { conflictLine, conflictWords, type Landing, lastLandedOn, type Settled } from "./landing";
 import { CHECKS_REVIEWER } from "./merge-checks";
 import type { BatchSource, MergeInput, MergeOutcome, Ready, Refused } from "./merge-types";
 import type { VotesView } from "./vote-store";
@@ -116,6 +116,10 @@ async function conflictRefusal(
 	const recent = (await landing.view().catch(() => null))?.recent ?? [];
 	const causes = lastLandedOn(recent, conflicts);
 	const where = conflictWords(conflicts, causes, touchedBy).join(", ");
+	// The merge commit's story tells of it once the change lands.
+	await input
+		.noteAttempt?.(input.change, conflictLine(conflicts, touchedBy, causes))
+		.catch((err) => console.error(`noting ${input.change}'s conflict failed`, String(err)));
 	return {
 		ok: false,
 		conflicts,

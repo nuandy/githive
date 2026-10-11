@@ -1,6 +1,7 @@
 import { fail, optionalString, requiredString } from "../../errors";
 import { branchHead } from "../../git";
 import type { GitHubLink } from "../../github";
+import type { HiveEvent } from "../../hive-events";
 import { actionsChecks, mirrorTo, onActions } from "../actions-checks";
 import { artifactsInspect } from "../batch-reads";
 import { scopeFile } from "../branch-scope";
@@ -50,7 +51,7 @@ export const mergeTools: ToolHandlers = {
 			: fail(503, "GitHive can't land changes here: no Gate is set up to land them");
 		const inspect = ctx.history && artifactsInspect(ctx.history, repo, gate.inspect, ctx.placements?.(repo));
 		const batchGit = inspect ? { ...gate, inspect } : gate;
-		return mergeChange({
+		const outcome = await mergeChange({
 			remote: project,
 			branch: into,
 			store,
@@ -67,6 +68,10 @@ export const mergeTools: ToolHandlers = {
 			change,
 			agent: agentArg("agent"),
 		});
+		// The hive sees a merge refused for a conflict, naming its files.
+		if (!outcome.ok && outcome.conflicts?.length)
+			await ctx.ping?.(repo, conflictedEvent(agentArg("agent"), change, outcome.conflicts)).catch(() => undefined);
+		return outcome;
 	},
 	async credentials(call) {
 		const { args, ctx, repo, acting, changeOf } = call;
@@ -116,8 +121,9 @@ function optionalMergeInput(
 	if (ctx.branchHead) optional.branchHead = () => ctx.branchHead!(repo, into);
 	if (ctx.landing) optional.landing = ctx.landing(repo, into);
 	if (ctx.history) optional.history = ctx.history;
-	// Each change's earlier attempts to land, for its merge commit's story.
+	// Each change's earlier attempts to land, for its merge commit's story, and noting new ones.
 	if (ctx.attemptsOf) optional.attemptsOf = (changes) => ctx.attemptsOf!(repo, changes);
+	if (ctx.noteAttempt) optional.noteAttempt = (change, line) => ctx.noteAttempt!(repo, change, line);
 	if (ctx.prepareLanding) optional.prepareLanding = () => ctx.prepareLanding!(repo);
 	if (ctx.prefetchChange) optional.prefetch = (change) => ctx.prefetchChange!(repo, into, change);
 	if (ctx.prepareChecks && !at.checksOnActions) optional.prepareChecks = ctx.prepareChecks(repo);
@@ -125,6 +131,15 @@ function optionalMergeInput(
 	if (link && into === branch) optional.afterLanding = (commit: string) => mirrorTo(gate, link, into, commit);
 	return optional;
 }
+
+// A `conflicted` hive event, with the first few files in its detail.
+function conflictedEvent(agent: string, change: string, files: string[]): HiveEvent {
+	const more = files.length > CONFLICTED_SHOWN ? ` and ${files.length - CONFLICTED_SHOWN} more` : "";
+	const detail = `${files.slice(0, CONFLICTED_SHOWN).join(", ")}${more}`;
+	return { kind: "conflicted", agent, change, detail, at: new Date().toISOString() };
+}
+
+const CONFLICTED_SHOWN = 3;
 
 // Other changes ready for this branch, from the cached advice: claims in force whose dependencies have merged. The
 // batch checks each again before landing.

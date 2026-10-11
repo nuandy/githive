@@ -130,6 +130,8 @@ export interface MergeInput {
 	maxBatch?: number;
 	/** Runs after a batch lands and its claims are released, such as pushing main to GitHub. Failures are logged. */
 	afterLanding?: (commit: string) => Promise<void>;
+	/** Notes a line on a change's attempt to land (a conflict, failed checks) for its merge commit. Never fails. */
+	noteAttempt?: (change: string, line: string) => Promise<void>;
 	/** Timings that default to POLL_MS, ANSWER_WITHIN_MS, HEARTBEAT_MS and LEASE_TTL_MS. Tests shorten them. */
 	pollMs?: number;
 	answerWithinMs?: number;
