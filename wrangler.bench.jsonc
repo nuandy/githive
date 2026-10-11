@@ -41,6 +41,7 @@
 			{ "name": "RECORD_CACHE", "class_name": "RecordCache" },
 			{ "name": "CHANGE_CACHE", "class_name": "ChangeCache" },
 			{ "name": "TOKENS", "class_name": "TokenCache" },
+			{ "name": "FOOTPRINT_CACHE", "class_name": "FootprintCache" },
 		],
 	},
 	// GitHive's own identity: people, sessions, agents and their tokens (migrations/).
@@ -87,5 +88,7 @@
 		{ "tag": "v13", "renamed_classes": [{ "from": "LiveFeed", "to": "RepoCache" }] },
 		// Record tips and states, and what merges keep for their landing, moved out of RepoCache into objects of their own.
 		{ "tag": "v14", "new_sqlite_classes": ["RecordCache", "ChangeCache"] },
+		// Awareness: parsed files, open changes' footprints and told notices, per repo (docs/awareness.md).
+		{ "tag": "v15", "new_sqlite_classes": ["FootprintCache"] },
 	],
 }
