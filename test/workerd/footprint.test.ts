@@ -1,6 +1,6 @@
 import { env, exports } from "cloudflare:workers";
 import { describe, expect, it } from "vitest";
-import { alteredNames, fileFacts } from "../../src/footprint";
+import { alteredNames, fileFacts, MAX_PARSE_CHARS, parserMemoryBytes } from "../../src/footprint";
 import { SETTINGS, SETTINGS_TS, SIGNATURE_CHANGE } from "../helpers/footprints";
 
 // The footprint parser in workerd, which (unlike Node) refuses to compile wasm from bytes at run time: a
@@ -31,6 +31,20 @@ describe("footprints in workerd", () => {
 		expect(js?.imports).toEqual([
 			{ from: "./b.js", resolved: "src/b.js", names: [{ imported: "a", local: "a", uses: [2] }] },
 		]);
+	});
+
+	it("parses a file at the size cap within the parser's first 32 MiB, which a 1 MB file grows to about 55", async () => {
+		const declarations: string[] = [];
+		let size = 0;
+		for (let i = 0; size < MAX_PARSE_CHARS - 200; i++) {
+			const line = `export function f${i}(a: string, b: number): Promise<Record<string, number>> {\n  return Promise.resolve({ [a]: b + ${i} });\n}\n`;
+			declarations.push(line);
+			size += line.length;
+		}
+		const facts = await fileFacts("src/generated.ts", declarations.join(""));
+		expect(facts?.declarations).toHaveLength(declarations.length);
+		// It shares the isolate with agents' calls, which have 128 MB in all, and never shrinks once grown.
+		expect(parserMemoryBytes()).toBeLessThanOrEqual(32 * 1024 * 1024);
 	});
 
 	// The same Worker twice: through the test runner, and bundled by wrangler exactly as for a deploy (where

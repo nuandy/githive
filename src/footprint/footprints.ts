@@ -210,8 +210,9 @@ async function factsOf(source: HistorySource, wanted: { path: string; blob: stri
 	const fresh: Record<string, FileFacts> = {};
 	for (const [index, [key, { path }]] of missing.entries()) {
 		const bytes = blobs[index];
-		// A file over the parse cap is skipped whatever its encoding, without decoding it.
-		if (!bytes || bytes.byteLength > 4 * MAX_PARSE_CHARS) continue;
+		// A file over the parse cap in bytes is skipped without decoding it (in characters it may be a little under,
+		// which costs only a hint).
+		if (!bytes || bytes.byteLength > MAX_PARSE_CHARS) continue;
 		const text = new TextDecoder().decode(bytes);
 		if (text.length > facts.budget.chars) {
 			console.log(`footprint: this batch's characters ran out; ${path} skipped`);

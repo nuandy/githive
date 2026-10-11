@@ -14,6 +14,7 @@
 
 import type { FootprintCache, LandedCommit } from "./footprint-cache";
 import type { CommitMeta, HistorySource } from "./toolkit/branch-history";
+import { newParseBatch, parserMemoryBytes } from "./footprint/engine";
 import { INTENT_SAID } from "./footprint/wording";
 import { changeFootprint, commitAlters, type FactsSource, landingOf } from "./footprint/footprints";
 import type { ChangePush, KnownHead } from "./repo-cache";
@@ -164,22 +165,32 @@ export interface AwarenessParts {
 	/** An agent's fork of the project. */
 	forkOf(repo: string, agent: string): Promise<string>;
 	footprints(repo: string): FootprintStore;
+	/** A batch's budgets, smaller than BUDGET's, for tests. */
+	budget?: Partial<typeof BUDGET>;
 }
 
-/** What one batch may parse, by count: a Worker's clock stands still during CPU work, so time can't be the budget. */
-const PARSES_PER_BATCH = 400;
-const CHARS_PER_BATCH = 16_000_000;
-/** The most Artifacts reads one batch makes for awareness, well inside an invocation's 10,000 subrequests. */
-const READS_PER_BATCH = 4_000;
+/**
+ * What one batch may spend on awareness, by count: a Worker's clock stands still during CPU work, so time can't be the
+ * budget. Parsing ran at about 0.55 s a million characters on a laptop (the spike), so 4 million is about 2 s there and
+ * a few times that on production CPUs: well under the Worker's CPU limit (limits.cpu_ms in wrangler.jsonc), with room
+ * for the reads, the tree walks and the rest of the batch. Artifacts reads stay well inside an invocation's 10,000
+ * subrequests.
+ */
+const BUDGET = { parses: 200, chars: 4_000_000, reads: 2_000 };
+/** Kept facts are asked for this many files at a time, so one answer stays a few MB. */
+const FACTS_AT_ONCE = 20;
 /** The most first-parent commits one push to a project's branch is analysed for. */
 export const LANDED_COMMITS = 50;
 
 // The batch's pushes for awareness: branch pushes first, so a change that landed is dropped before others are compared
 // with it, then each change's newest push. Each is caught and logged on its own.
 async function awareness(messages: Message<unknown>[], namespace: string, parts: AwarenessParts) {
-	const budget = { parses: PARSES_PER_BATCH, chars: CHARS_PER_BATCH };
+	const most = { ...BUDGET, ...parts.budget };
+	const budget = { parses: most.parses, chars: most.chars };
 	const claimsRead = new Map<string, ReturnType<AwarenessParts["claims"]>>();
-	const reads = { left: READS_PER_BATCH };
+	const reads = { left: most.reads, most: most.reads };
+	// A grammar that failed to load in an earlier batch is tried once more in this one.
+	newParseBatch();
 	const once: AwarenessParts = {
 		...parts,
 		history: (repo, read) => parts.history(repo, (source) => read(counted(source, reads))),
@@ -206,13 +217,24 @@ async function awareness(messages: Message<unknown>[], namespace: string, parts:
 		await footprintChange(once, found, budget).catch((err) =>
 			console.error(`awareness: footprinting ${found.push.change} from ${found.push.fork} failed: ${String(err)}`),
 		);
+	noteParserMemory();
+}
+
+// The parser's memory is the isolate's for good once grown (agents' calls share the isolate's 128 MB), so each new
+// high is logged: what docs/awareness.md's open question asks to measure.
+let parserMemoryHigh = 0;
+function noteParserMemory() {
+	const bytes = parserMemoryBytes();
+	if (bytes === null || bytes <= parserMemoryHigh) return;
+	parserMemoryHigh = bytes;
+	console.log(`awareness: the parser's memory is ${(bytes / 2 ** 20).toFixed(0)} MiB in this isolate`);
 }
 
 // A history source that gives up once the batch's reads run out: the event at hand fails, is logged, and the rest
 // of the batch fails fast the same way.
-function counted(source: HistorySource, reads: { left: number }): HistorySource {
+function counted(source: HistorySource, reads: { left: number; most: number }): HistorySource {
 	const spend = () => {
-		if (reads.left-- <= 0) throw new Error(`this batch's ${READS_PER_BATCH} Artifacts reads for awareness ran out`);
+		if (reads.left-- <= 0) throw new Error(`this batch's ${reads.most} Artifacts reads for awareness ran out`);
 	};
 	const readBlob = source.readBlob?.bind(source);
 	return {
@@ -224,7 +246,12 @@ function counted(source: HistorySource, reads: { left: number }): HistorySource 
 }
 
 const factsSource = (store: FootprintStore, budget: FactsSource["budget"]): FactsSource => ({
-	kept: (keys) => rpc(store.factsOf(keys)),
+	kept: async (keys) => {
+		const found: Awaited<ReturnType<FactsSource["kept"]>> = {};
+		for (let from = 0; from < keys.length; from += FACTS_AT_ONCE)
+			Object.assign(found, await rpc(store.factsOf(keys.slice(from, from + FACTS_AT_ONCE))));
+		return found;
+	},
 	keep: (facts) => store.keepFacts(facts),
 	budget,
 });
@@ -323,6 +350,8 @@ async function branchMoved(parts: AwarenessParts, push: BranchPush, budget: Fact
 		}
 	});
 	const claimed = landed.some((commit) => commit.alters.length) ? await parts.claims(push.repo) : null;
+	// With nothing altered, nobody is told and the claims aren't looked at, so none are read: landed then gets an empty
+	// map, which it never consults (it would drop every footprint if it did).
 	await store.landed(push.repo, push.branch, landed, claimed ? openClaims(claimed.claims) : {}, after);
 }
 

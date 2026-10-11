@@ -30,7 +30,9 @@ in Git. Nothing decides, orders work or blocks a landing.
 - **`next` is only about the caller's own change.** It is computed from data in the same reply. It never picks
   work from the crowd: that is what the removed `next` tool did (design.md, "Agents without roles").
 - **Bounded work.** Every list has a cap, every cache entry an age or a size limit, and every parse a budget. At
-  1,000 agents the analysis falls behind before it falls over, and falling behind only delays hints.
+  1,000 agents the analysis falls behind before it falls over. Falling behind costs hints, never a landing: what's
+  over a cap is logged and dropped, not carried to the next batch (interface notices past a push's 200, a change left
+  unfootprinted when a batch's budget ran out, which is footprinted at its agent's next push).
 
 ## The pieces
 
@@ -177,9 +179,17 @@ dashboard's claims show "free after 14:30".
 
   A notice words at most 5 facts, then "and N more", and its `says` runs to 1,500 characters at most. An intent is
   quoted by its first line, cut to 140 characters, as a landing's is; `detail.names` lists at most 20 names.
-- **Where parsing runs.** web-tree-sitter in the Worker, with precompiled grammars as WebAssembly modules, if a
-  spike shows it runs in workerd within the bundle limit. Otherwise a small parser container fed file contents.
-  The analysis is asynchronous either way.
+- **Where parsing runs.** web-tree-sitter in the main Worker's push-event queue consumer, with precompiled grammars
+  as WebAssembly modules (the spike showed it runs in workerd within the bundle limit). The limits are strict:
+  - the Worker's CPU limit is set to 60 s (`limits.cpu_ms`, twice the default), and a batch's budget is far below it:
+    200 parses, 4 million characters and 2,000 Artifacts reads, counted, not timed;
+  - a file over 256 KB is skipped, without being decoded;
+  - a grammar that fails to load is tried once a batch, not once a file.
+
+  The trade-off: the parser's 32 MiB of wasm memory is fixed, never shrinks, and sits in the same isolates that serve
+  agents' calls, which have 128 MB in all. A file at the 256 KB cap parses within those 32 MiB (a workerd test pins
+  it); a 1 MB file grew it to about 55 MiB for good, which is why the cap came down from a million characters. The
+  consumer logs each new high of the parser's memory in an isolate.
 - **Where it's kept.** A new `FootprintCache` Durable Object per repo (`footprints:<repo>`), like `ChangeCache`,
   so parsing state never shares RepoCache's memory. It writes notices into RepoCache, the one place agents' news
   is read from.
@@ -190,6 +200,14 @@ dashboard's claims show "free after 14:30".
 - The change page shows a conflict panel (`touchedBy` and the hunks), and the names
   the change alters or uses that others touch.
 - Claims show when they free up.
+
+## Open question
+
+After this merges, open an issue to measure isolate memory on the bench under a 1,000-agent run (the consumer's
+"the parser's memory is N MiB" lines, and any "Worker exceeded memory limit"), and decide from it whether to move
+the queue consumer and the parser into a Worker of their own, called by service binding. Cloudflare recommends
+splitting a Worker with service bindings, at no extra cost; the parser's memory would then never share an isolate
+with agents' calls.
 
 ## Order of work
 

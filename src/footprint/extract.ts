@@ -1,5 +1,5 @@
 import type { Node, Query } from "web-tree-sitter";
-import { engine, type Lang } from "./engine";
+import { engine, type Lang, NotLoaded } from "./engine";
 import { relativeTarget } from "./resolve";
 
 // What one TypeScript or JavaScript file declares and imports, and where it uses what it imports. Ported from
@@ -40,8 +40,11 @@ export type Import = {
 };
 export type FileFacts = { declarations: Declaration[]; imports: Import[] };
 
-/** Files over this many characters (about 1 MB) are skipped: parsing them costs too much for a hint. */
-export const MAX_PARSE_CHARS = 1_000_000;
+/**
+ * Files over this many characters (about 256 KB) are skipped: generous for source, while what's bigger is mostly
+ * generated, and costs too much CPU and parser memory for a hint.
+ */
+export const MAX_PARSE_CHARS = 256_000;
 /** Lines kept per imported name: enough to point at the uses, bounded however often a file uses one. */
 export const MAX_USE_LINES = 20;
 
@@ -80,7 +83,8 @@ export async function fileFacts(path: string, source: string): Promise<FileFacts
 		if (!tree || tree.rootNode.hasError) return null;
 		return { declarations: declarationsOf(tree.rootNode, source, query), imports: importsOf(path, tree.rootNode) };
 	} catch (err) {
-		console.error(`footprint: ${path} left unparsed: ${String(err)}`);
+		// A grammar that failed to load was logged once for the batch; its files are skipped quietly.
+		if (!(err instanceof NotLoaded)) console.error(`footprint: ${path} left unparsed: ${String(err)}`);
 		return null;
 	} finally {
 		// Trees live in the wasm heap, not the JS one: free each.

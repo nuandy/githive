@@ -2,6 +2,7 @@
 // alters, and the notices that tell it (docs/awareness.md, section 7). Pure: it reads no git and no files, and
 // parses in the Worker with web-tree-sitter.
 
+export { newParseBatch, parserMemoryBytes } from "./engine";
 export {
 	fileFacts,
 	languageOf,

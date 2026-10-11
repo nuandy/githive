@@ -12,6 +12,12 @@
 	"compatibility_date": "2026-10-01",
 	"compatibility_flags": ["nodejs_compat"],
 	"observability": { "enabled": true },
+	// The most CPU one invocation may use: twice the 30 s default, sized for the push consumer's awareness work, which
+	// parses in this Worker (src/push-events.ts). A batch's budget (4 million characters, 200 parses) is a few seconds
+	// of parsing even on CPUs slower than the laptop it was measured on, so a full batch stays well under this, with
+	// room for its reads and tree walks. An invocation over it is killed whole: the heads were acked first, so only
+	// that batch's hints are lost. Agents' calls and the dashboard use far less, and ran under the default.
+	"limits": { "cpu_ms": 60000 },
 	"preview_urls": false,
 	"vars": {
 		// Where people sign in and MCP clients connect over OAuth (no Access in front). The Access hostnames serve as before.

@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { Footprint } from "../src/footprint-cache";
+import { MAX_PARSE_CHARS } from "../src/footprint";
 import { commitAlters, type FactsSource, keptFacts, SIGNATURE_KEPT } from "../src/footprint/footprints";
 import type { HistorySource, TreeEntry } from "../src/toolkit/branch-history";
 import { FakeStorage } from "./fakes/env";
@@ -281,6 +282,46 @@ describe("facts", () => {
 		expect(reads).toHaveLength(2);
 		await commitAlters(source, { hash: "c2", treeHash: "t2" }, "t1", factsFrom(cache));
 		expect(reads).toHaveLength(2);
+	});
+
+	it("are parsed only while the batch's parses and characters last, the rest skipped and logged", async () => {
+		const { cache } = caches();
+		const files = (returns: string) =>
+			Object.fromEntries(
+				Array.from({ length: 3 }, (_, i) => [
+					`src/f${i}.ts`,
+					`export function f${i}(): ${returns} {\n  return 1;\n}\n`,
+				]),
+			);
+		const { source, reads } = repo({ t1: files("number"), t2: files("unknown") });
+		const logs = vi.spyOn(console, "log").mockImplementation(() => undefined);
+		const budget = { parses: 2, chars: 1_000_000 };
+		const facts: FactsSource = { ...factsFrom(cache), budget };
+		// Two parses for six blobs: one file's two sides, so one file is told.
+		expect(await commitAlters(source, { hash: "c2", treeHash: "t2" }, "t1", facts)).toHaveLength(1);
+		expect(reads).toHaveLength(2);
+		expect(budget.parses).toBe(0);
+		expect(logs).toHaveBeenCalledWith("footprint: this batch's parses ran out; 4 files skipped");
+		// Characters run out the same way: what's left is skipped, not cut.
+		const { source: other } = repo({ t3: files("string"), t4: files("boolean") });
+		const few = { ...factsFrom(caches().cache), budget: { parses: 100, chars: 60 } };
+		expect(await commitAlters(other, { hash: "c4", treeHash: "t4" }, "t3", few)).toHaveLength(0);
+		expect(logs).toHaveBeenCalledWith(
+			expect.stringMatching(/^footprint: this batch's characters ran out; src\/f\d\.ts skipped$/),
+		);
+		logs.mockRestore();
+	});
+
+	it("aren't parsed, nor decoded, for a file over the size cap", async () => {
+		const { cache } = caches();
+		const big = `export function big(): number {\n  return 1;\n}\n${" ".repeat(MAX_PARSE_CHARS)}`;
+		const { source, reads } = repo({ t1: { "src/big.ts": big }, t2: { "src/big.ts": `${big} ` } });
+		const budget = { parses: 100, chars: 10_000_000 };
+		expect(await commitAlters(source, { hash: "c2", treeHash: "t2" }, "t1", { ...factsFrom(cache), budget })).toEqual(
+			[],
+		);
+		expect(reads).toHaveLength(2);
+		expect(budget.chars).toBe(10_000_000);
 	});
 
 	it("are read for at most 50 changed TS/JS files a push", async () => {

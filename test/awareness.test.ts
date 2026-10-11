@@ -388,6 +388,26 @@ describe("heads-ups between open changes", () => {
 		expect([await told("bob"), await told("alice")]).toEqual([[], []]);
 	});
 
+	it("fails a batch's pushes fast once its reads run out, and footprints the change at its next push", async () => {
+		const { claims, deliver, forkPush, footprints, parts } = hive();
+		claims.push({ change: "c-9", agent: "bob" });
+		const errors = vi.spyOn(console, "error").mockImplementation(() => undefined);
+		parts.budget = { reads: 0 };
+		const first = await pushToFork("bob", "c-9", { "src/jobs/sync.ts": USES_LOAD });
+		const messages = await deliver(forkPush("bob", "c-9", first));
+		expect(messages[0]!.ack).toHaveBeenCalledOnce();
+		expect(await footprints.keptHead("c-9")).toBeNull();
+		expect(errors).toHaveBeenCalledWith(
+			expect.stringMatching(/^awareness: footprinting c-9 .* this batch's 0 Artifacts reads for awareness ran out/),
+		);
+		// Nothing retries it: it's footprinted when its agent pushes again.
+		delete parts.budget;
+		const second = await pushToFork("bob", "c-9", { "src/jobs/sync.ts": `${USES_LOAD}\n` });
+		await deliver(forkPush("bob", "c-9", second));
+		expect(await footprints.keptHead("c-9")).toMatchObject({ head: second });
+		errors.mockRestore();
+	});
+
 	it("ignores a push to a change's branch on a fork other than its claim holder's, and a change nobody claims", async () => {
 		const { claims, deliver, forkPush, footprints } = hive();
 		claims.push({ change: "c-9", agent: "bob" });
