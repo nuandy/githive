@@ -137,8 +137,10 @@ export function ImportSource(props: {
 	setUrl: (url: string) => void;
 	branch: string;
 	setBranch: (branch: string) => void;
+	token: string;
+	setToken: (token: string) => void;
 }) {
-	const { url, setUrl, branch, setBranch } = props;
+	const { url, setUrl, branch, setBranch, token, setToken } = props;
 	return (
 		<div className="manage__source">
 			<div className="manage__field">
@@ -164,6 +166,27 @@ export function ImportSource(props: {
 					autoComplete="off"
 					spellCheck={false}
 				/>
+			</div>
+			<div className="manage__field manage__source-token">
+				<label htmlFor="new-repo-token">Access token, for a private repo (optional)</label>
+				<input
+					id="new-repo-token"
+					type="password"
+					value={token}
+					onChange={(e) => setToken(e.target.value)}
+					placeholder="github_pat_…"
+					autoComplete="off"
+					spellCheck={false}
+					aria-describedby="new-repo-token-hint"
+				/>
+				<p className="manage__hint" id="new-repo-token-hint">
+					On GitHub, make a{" "}
+					<a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noreferrer">
+						fine-grained token
+					</a>{" "}
+					with read-only access to this repository's contents. GitHive uses it once to clone the repository, and keeps
+					it nowhere.
+				</p>
 			</div>
 		</div>
 	);

@@ -110,6 +110,11 @@ describe("a new repository", () => {
 			import_url: "https://g.test/x",
 		});
 		expect(newRepoInput({ ...base, source: "import", branch: "dev" })).toMatchObject({ branch: "dev" });
+		// A private repo's token goes with an import, trimmed, and never with a copy.
+		expect(newRepoInput({ ...base, source: "import", token: " github_pat_x " })).toMatchObject({
+			import_token: "github_pat_x",
+		});
+		expect(newRepoInput({ ...base, source: "copy", token: "github_pat_x" })).not.toHaveProperty("import_token");
 		expect(newRepoInput({ ...base, source: "copy" })).toEqual({
 			owner: "acme",
 			name: "web",

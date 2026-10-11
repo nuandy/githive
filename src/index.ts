@@ -98,7 +98,7 @@ app.get("/api", (c) =>
 			"POST /orgs/:org/teams {slug}, DELETE /orgs/:org/teams/:team, PUT|DELETE " +
 				"/orgs/:org/teams/:team/members/:handle",
 			"GET  /repos       (the repos you can see)",
-			"POST /repos {owner, name, import_url? | copy_from?, visibility?}  (a new repo)",
+			"POST /repos {owner, name, import_url? (import_token? for a private repo) | copy_from?, visibility?}  (a new repo)",
 			"GET  /summaries   (every repo you can see, with its counts)",
 			"GET  /repos/:owner/:name  (claims and votes, from Git); /access (your permission)",
 			"GET  /repos/:owner/:name/changes/:change  (one change's history)",

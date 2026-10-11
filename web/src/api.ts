@@ -349,6 +349,8 @@ export interface NewRepoInput {
 	owner: string;
 	name: string;
 	import_url?: string;
+	/** For a private repo: a token that reads it, used once to clone it and kept nowhere. */
+	import_token?: string;
 	branch?: string;
 	copy_from?: string;
 	visibility: "private" | "public";
