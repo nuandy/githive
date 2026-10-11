@@ -22,12 +22,14 @@ export const githubDraft = (github: RepoGitHub | undefined): GitHubDraft => ({
 
 /**
  * The settings call for a draft: only what changed, and "" for the repo to disconnect it. Saving a link made before
- * modes sets its mode and trust, which brings GitHub's changes back from then on.
+ * modes sets its mode and trust, which brings GitHub's changes back from then on, so it's sent only once someone
+ * `touched` the form: an untouched form has nothing to save.
  */
-export function githubInput(draft: GitHubDraft, github: RepoGitHub | undefined): SettingsInput {
+export function githubInput(draft: GitHubDraft, github: RepoGitHub | undefined, touched = true): SettingsInput {
 	const repo = draft.repo.trim();
 	if (!repo) return github ? { github: "" } : {};
-	if (github && !github.inbound && repo === github.repo) return { github_sync: draft.sync, github_trust: draft.trust };
+	if (github && !github.inbound && repo === github.repo)
+		return touched ? { github_sync: draft.sync, github_trust: draft.trust } : {};
 	const input: SettingsInput = {};
 	if (repo !== github?.repo) input.github = repo;
 	if (draft.sync !== (github?.sync ?? "pr")) input.github_sync = draft.sync;
@@ -56,11 +58,16 @@ export function GitHubSettings({
 	const [busy, setBusy] = useState(false);
 	const [error, setError] = useState<string | null>(null);
 	const [saved, setSaved] = useState(false);
-	useEffect(() => setDraft(JSON.parse(fresh) as GitHubDraft), [fresh]);
-	const input = githubInput(draft, github);
+	const [touched, setTouched] = useState(false);
+	useEffect(() => {
+		setDraft(JSON.parse(fresh) as GitHubDraft);
+		setTouched(false);
+	}, [fresh]);
+	const input = githubInput(draft, github, touched);
 	const dirty = Object.keys(input).length > 0;
 	const edit = (patch: Partial<GitHubDraft>) => {
 		setSaved(false);
+		setTouched(true);
 		setDraft((current) => ({ ...current, ...patch }));
 	};
 	const submit = async (event: FormEvent) => {
@@ -91,8 +98,8 @@ export function GitHubSettings({
 					</p>
 					{github && !github.inbound ? (
 						<p className="callout">
-							Connected before GitHive had modes: it mirrors {branch} to GitHub and brings nothing back. Saving a mode
-							here brings GitHub's changes back from then on.
+							Connected before GitHive had modes: it mirrors {branch} to GitHub and brings nothing back. Choosing a mode
+							here and saving brings GitHub's changes back from then on.
 						</p>
 					) : null}
 					<div className="repo-settings__field">

@@ -144,6 +144,8 @@ describe("the GitHub settings", () => {
 		const legacy = github({ sync: "mirror", trust: false, inbound: false });
 		expect(githubDraft(legacy)).toEqual({ repo: "acme/shop", sync: "mirror", trust: true });
 		expect(githubInput(githubDraft(legacy), legacy)).toEqual({ github_sync: "mirror", github_trust: true });
+		// Until someone touches the form, there's nothing to save: saving would change what the link does.
+		expect(githubInput(githubDraft(legacy), legacy, false)).toEqual({});
 		expect(githubTerms(legacy, "main")).toBe(
 			"GitHive pushes main to acme/shop after every landing, as it did before modes: GitHub's changes aren't " +
 				"brought back.",

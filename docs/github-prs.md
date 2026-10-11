@@ -14,7 +14,7 @@ collect on GitHive and reach GitHub through a pull request, merged the normal Gi
 - **A link made before modes keeps today's behaviour exactly.** It has no `sync` recorded: it mirrors `main` after
   each landing, brings nothing of GitHub's back, and trusts nothing. Inbound, and trust, apply only to a link whose
   `github_sync` is set, to `"pr"` or `"mirror"`, through `settings` or the dashboard's Settings tab (which offers it
-  for such a link). Setting `github_trust` alone sets no mode.
+  for such a link, and saves it only once someone chose there). Setting `github_trust` alone sets no mode.
 - `pr` is the default for new connections (`NEW_CONNECTION_SYNC` in `src/toolkit/github-settings.ts`: Andy may
   prefer `mirror`; it's one constant). A new connection records `sync` and `trust` explicitly, so it brings GitHub's
   changes back, and changing the constant later moves no repo.
@@ -141,10 +141,14 @@ is a fast-forward again.
   Anything else that skips a vote is refused by the merge, and reported by the audit, as today. A hosted agent acting
   as `githive-github` (they can) gets no trust: its records are stamped as itself.
 - **Trust is a setting:** `github_trust` defaults to true. Turned off, GitHub's changes need review like any change:
-  the job's merge waits for review, reviewers see the change in `reviews`, and once approved it lands with the next
-  notice's merge.
+  the job's merge waits for review, reviewers see the change in `reviews`, and once approved it lands with the merge
+  of the next notice (a landing, `github_pr`), since other merges' batches leave it out; in a quiet repo, a person
+  merges it from its page (the dashboard's Merge button) rather than waiting for one.
 - **Advice follows the rule.** While trusted, `status` says the change needs no review, `reviews` offers it to no
   one, and the abandoned rule treats it as approved (so its claim waits on a person only once it's asked one).
+- **Known limits.** A person's veto counts for nothing while a GitHub change is trusted: it needs no votes, and a clean
+  one lands at once, so the window is small; give it up (step 6) to stop one. The import record and a released older
+  GitHub change's question to people stay as written; nothing reads that question once its claim is gone.
 - **Who runs it.** Steps 2 to 4 must not hold up the landing that noticed GitHub moved. They run as a small,
   resumable job owned by the repo, in its `GitHubSync` Durable Object (a new class, migration `v15`), with an alarm
   per step like the hosted builder's. Every step is idempotent, so a retried step finds its work done. A step that
