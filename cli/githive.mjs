@@ -418,12 +418,16 @@ async function landChange() {
 		process.exitCode = 3;
 		return;
 	}
-	say("merge refused:", ...(merged.reasons ?? []).map((reason) => `  ${reason}`));
+	say("not landed yet:", ...(merged.reasons ?? []).map((reason) => `  ${reason}`));
 	for (const check of merged.checks ?? []) if (check.exitCode !== 0) printFailedCheck(check);
 	process.exitCode = 1;
 	if (merged.conflicts?.length) return next("githive sync, resolve inside your claim, commit, githive land");
 	if (merged.checks?.length) return next("fix what failed, commit, githive land (a new commit needs new approvals)");
-	next(`githive status (what it still needs)`);
+	// Most often it's waiting for reviews: say where it stands and what to do meanwhile, as status does.
+	const status = await tool("status", { repo, change }).catch(() => null);
+	if (!status) return next("githive status (what it still needs)");
+	if (status.head) say(approvalLine(status.approval ?? {}));
+	nextForStatus(status, repo);
 }
 
 async function syncWithProject() {

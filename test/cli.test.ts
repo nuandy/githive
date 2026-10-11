@@ -209,6 +209,35 @@ describe("githive CLI", () => {
 		expect(again.stdout).toContain("landed rate-limit as 01234567");
 	});
 
+	it("says a change waiting for reviews is waiting, and what to do meanwhile, not just that the merge was refused", async () => {
+		const { project, fork } = repos();
+		answers.claim = { ok: true };
+		answers.credentials = {
+			url: fork,
+			token: "fork-secret?exp=1",
+			branch: "changes/rate-limit",
+			project: { url: project, token: "project-secret", branch: "main" },
+		};
+		await cli(["start", "acme/app", "rate-limit", "Rate-limit logins", "src/auth/"]);
+		const clone = join(tmp, "rate-limit");
+		writeFileSync(join(clone, "limit.ts"), "export const limit = 5;\n");
+		gitIn(clone, "add", ".");
+		gitIn(clone, "commit", "--quiet", "-m", "Rate-limit logins");
+		const head = gitIn(clone, "rev-parse", "HEAD");
+		answers.status = {
+			change: "rate-limit",
+			claim: { change: "rate-limit", agent: "builder", paths: ["src/auth/"], intent: "Rate-limit logins" },
+			head,
+			approval: { approved: false, approvals: 0, required: 1 },
+			merge: { into: "main", branchHead: "x", clean: true, outsideClaim: [] },
+		};
+		answers.merge = { ok: false, reasons: [`${head} has 0 of 1 approvals from reviewers other than its author`] };
+		const landed = await cli(["land"], clone);
+		expect(landed.stdout).toContain("not landed yet:");
+		expect(landed.stdout).toContain("approvals: 0 of 1");
+		expect(landed.stdout).toContain("next: waiting on 1 approval; meanwhile review others': githive reviews acme/app");
+	});
+
 	it("sync merges the project's branch into the change branch, never rebasing", async () => {
 		const { project, fork, seed } = repos();
 		answers.claim = { ok: true };
