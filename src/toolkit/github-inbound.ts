@@ -27,8 +27,14 @@ import { advice, claimsRef, recordLog } from "./tools/repo";
 const RUNNING: InboundJob["step"][] = ["import", "claim", "merge"];
 export const isRunning = (job: InboundJob | null | undefined) => !!job && RUNNING.includes(job.step);
 
-/** A running job not heard from in this long has lost its alarm, and starts again when GitHub's branch is noticed. */
-const LOST_AFTER_MS = 30 * 60_000;
+/**
+ * A running job not heard from in this long has lost its alarm, and starts again when GitHub's branch is noticed. A
+ * merge step answers within 10 minutes, but a batch it's landing can run its checks for longer.
+ */
+const LOST_AFTER_MS = 60 * 60_000;
+
+/** A job that failed is started again by a notice of the same commit only after this long (or when asked). */
+const FAILED_RETRY_MS = 60 * 60_000;
 
 /** A step that threw is tried this many times, waiting longer each time, before the job counts as failed. */
 const STEP_TRIES = 5;
@@ -44,9 +50,10 @@ export function newJob(repo: string, seen: GitHubSeen, now = Date.now()): Inboun
 }
 
 /**
- * What noticing GitHub's branch at `seen` starts: a new job, or nothing when one is running, the commit is known to
- * be on main, or it was brought back or sent to a person already (unless `again`). A job that waited, or failed,
- * starts again.
+ * What noticing GitHub's branch at `seen` starts: a new job, the job that waited going on from where it waited, or
+ * nothing when one is running, the commit is known to be on main, or it was brought back or sent to a person already
+ * (unless `again`). A job that failed starts again after a while, so a commit that can't come in (a GitHub branch
+ * sharing no history with main, say) doesn't start a container at every landing.
  */
 export function noticed(
 	current: InboundJob | null | undefined,
@@ -58,8 +65,15 @@ export function noticed(
 ): InboundJob | null {
 	if (current && isRunning(current) && now - Date.parse(current.updatedAt) < LOST_AFTER_MS) return null;
 	if (!again && seen.commit === known) return null;
+	const same = current?.commit === seen.commit;
+	if (current && same && current.step === "waiting") {
+		const { reason: _, ...waited } = current;
+		return { ...waited, step: current.resume ?? "import", attempts: 0, updatedAt: new Date(now).toISOString() };
+	}
 	const ended = current?.step === "done" || current?.step === "needs a person";
-	if (!again && ended && current?.commit === seen.commit) return null;
+	if (!again && same && ended) return null;
+	const failedLately = current?.step === "failed" && now - Date.parse(current.updatedAt) < FAILED_RETRY_MS;
+	if (!again && same && failedLately) return null;
 	return newJob(repo, seen, now);
 }
 
@@ -154,7 +168,7 @@ async function claimStep(ctx: ToolContext, job: InboundJob, at: At): Promise<Ste
 			(conflict) => `${conflict.path} (${conflict.change}, ${conflict.agent})`,
 		);
 		const reason = `waits for paths others hold: ${[...new Set(held)].join(", ")}`;
-		return { job: at({ step: "waiting", change, reason, attempts: 0 }) };
+		return { job: at({ step: "waiting", resume: "claim", change, reason, attempts: 0 }) };
 	}
 	return { job: at({ step: "merge", change, attempts: 0 }), next: 0 };
 }
@@ -173,7 +187,7 @@ async function mergeStep(ctx: ToolContext, job: InboundJob, at: At): Promise<Ste
 	if (/holds no claim/.test(reason)) return { job: at({ step: "failed", reason }) };
 	// Untrusted, it waits for review like any change, and lands with a batch once approved.
 	if (/approvals from reviewers|still needs approval|is vetoed/.test(reason))
-		return { job: at({ step: "waiting", reason: `waits for review: ${reason}`, attempts: 0 }) };
+		return { job: at({ step: "waiting", resume: "merge", reason: `waits for review: ${reason}`, attempts: 0 }) };
 	// Sent back like any change: people see it in their inbox, with the reason.
 	const asked =
 		`GitHub's changes need a person: ${reason}. Fix it on GitHub (merge ${PR_BRANCH} into ${job.branch} there, ` +

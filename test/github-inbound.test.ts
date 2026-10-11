@@ -203,7 +203,10 @@ describe("GitHub's changes coming back", { timeout: 120_000 }, () => {
 		const job = await land("c-2", { "src/b.js": "b\n" });
 		expect(job).toMatchObject({ step: "failed", reason: expect.stringContaining("fetching GitHub's main failed") });
 		github.link.remote.url = away;
-		expect(await land("c-3", { "src/c.js": "c\n" })).toMatchObject({ step: "done" });
+		// Not at every landing: a commit that can't come in would start a container each time. Asked, it goes on.
+		expect(await land("c-3", { "src/c.js": "c\n" })).toMatchObject({ step: "failed" });
+		await sync.notice({ repo: "p", github: "acme/shop", branch: "main", commit: github.head() }, true);
+		expect(await settle()).toMatchObject({ step: "done" });
 		expect(server.git("show", "main:docs/notes.md")).toBe("from GitHub\n");
 	});
 });
@@ -223,14 +226,20 @@ describe("noticing GitHub's branch", () => {
 		// One runs: it fetches GitHub's newest anyway.
 		expect(noticed(job("merge", "c0"), null, seen, "p", false, now)).toBeNull();
 		// Unless it lost its alarm long ago.
-		expect(noticed(job("merge", "c0", 31), null, seen, "p", false, now)).toMatchObject({ commit: "c1" });
+		expect(noticed(job("merge", "c0", 61), null, seen, "p", false, now)).toMatchObject({ commit: "c1" });
 		// Brought back, or sent to a person: not again for the same commit, unless asked.
 		expect(noticed(job("done"), null, seen, "p", false, now)).toBeNull();
 		expect(noticed(job("needs a person"), null, seen, "p", false, now)).toBeNull();
 		expect(noticed(job("needs a person"), null, seen, "p", true, now)).toMatchObject({ step: "import" });
-		// A newer commit, or a job that waited or failed, starts again.
+		// A newer commit starts again.
 		expect(noticed(job("needs a person", "c0"), null, seen, "p", false, now)).toMatchObject({ commit: "c1" });
-		expect(noticed(job("waiting"), null, seen, "p", false, now)).toMatchObject({ step: "import" });
-		expect(noticed(job("failed"), null, seen, "p", false, now)).toMatchObject({ step: "import" });
+		// A job that waited goes on from where it waited, its import done.
+		const waited = { ...job("waiting"), resume: "claim" as const, reason: "paths held", head: "h1" };
+		expect(noticed(waited, null, seen, "p", false, now)).toMatchObject({ step: "claim", head: "h1" });
+		expect(noticed(waited, null, seen, "p", false, now)).not.toHaveProperty("reason");
+		// A job that failed starts again only after a while, or when asked.
+		expect(noticed(job("failed", "c1", 5), null, seen, "p", false, now)).toBeNull();
+		expect(noticed(job("failed", "c1", 5), null, seen, "p", true, now)).toMatchObject({ step: "import" });
+		expect(noticed(job("failed", "c1", 61), null, seen, "p", false, now)).toMatchObject({ step: "import" });
 	});
 });

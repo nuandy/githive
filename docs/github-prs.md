@@ -54,7 +54,8 @@ people pushed there directly. They come back through GitHive's own path, so the 
    against GitHub's rate limit. In mirror mode a push GitHub took means its main is GitHive's, so the read is made
    only when the push was refused. The `github_pr` tool and the dashboard notice it as well. GitHive never polls:
    no timers. A commit already brought back, found on main, or sent to a person isn't started again (unless
-   `github_pr` asks with `refresh`); a job that waited or failed is.
+   `github_pr` asks with `refresh`). A job that waited goes on from the step it waited at; one that failed starts
+   again an hour on, or when asked, so a commit that can't come in doesn't start a container at every landing.
 2. **Imported.** The repo's `GitHubSync` starts a job (`github-sync.ts`, `github-inbound.ts`). Main's last 1,000
    first-parent commits are read through Artifacts' API first: a commit on them, or merged into them, needs no
    container. Otherwise:
@@ -77,7 +78,7 @@ people pushed there directly. They come back through GitHive's own path, so the 
    while it lands. A merge that changes no file (a PR's merge commit, a squash joined to what it took) claims no
    paths: a source merge whose commits change nothing now claims nothing, and still merges. An older GitHub change
    of the same branch still open (it needed a person) is released first: the newer commit has it. A claim refused
-   because others hold the paths waits, and is tried again the next time GitHub's branch is noticed.
+   because others hold the paths waits, and claims again the next time GitHub's branch is noticed.
 4. **Landed without review, with checks.** The change is trusted: it needs no approvals, whatever the policy. It
    lands in a batch, through the repo's checks when it has any. Other merges' batches leave it to its own merge
    (githive-github's, or a person's from the dashboard), which test-merges it first: a conflict sends it back with
@@ -107,8 +108,8 @@ is a fast-forward again.
 - **Who runs it.** Steps 2 to 4 must not hold up the landing that noticed GitHub moved. They run as a small,
   resumable job owned by the repo, in its `GitHubSync` Durable Object (a new class, migration `v15`), with an alarm
   per step like the hosted builder's. Every step is idempotent, so a retried step finds its work done. A step that
-  throws is tried again, waiting 30 s, 1, 2 and 4 minutes, then the job counts as failed until GitHub's branch is
-  noticed again. The landing only notes that GitHub is ahead and starts the job. The job's own merges push to GitHub
+  throws is tried again, waiting 30 s, 1, 2 and 4 minutes, then the job counts as failed (see step 1 for when it
+  starts again). A job not heard from in an hour has lost its alarm, and a notice starts it again. The landing only notes that GitHub is ahead and starts the job. The job's own merges push to GitHub
   as any landing does, but don't notice GitHub's branch, which would call the object back while its step runs.
 
 ## The dashboard

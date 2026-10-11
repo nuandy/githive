@@ -84,6 +84,8 @@ export interface InboundJob {
 	merged?: string;
 	/** Why it waits, needs a person, or failed; or that GitHive's main had it already. */
 	reason?: string;
+	/** For a job that waits: the step it goes on from when GitHub's branch is noticed again. */
+	resume?: "claim" | "merge";
 	attempts: number;
 	noticedAt: string;
 	updatedAt: string;

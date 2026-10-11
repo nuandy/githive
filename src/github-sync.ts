@@ -49,6 +49,9 @@ export class GitHubSync extends DurableObject<Env> {
 		const job = await this.ctx.storage.get<InboundJob>("job");
 		if (!isRunning(job)) return;
 		const outcome = await inboundStep(this.toolContext(), job!);
+		// A job noticed again meanwhile (this one's alarm thought lost) has replaced it: that one goes on.
+		const current = await this.ctx.storage.get<InboundJob>("job");
+		if (JSON.stringify(current) !== JSON.stringify(job)) return;
 		await this.ctx.storage.put("job", outcome.job);
 		// GitHub's commit is on main now, found there or merged: noticed again, it needs nothing.
 		if (outcome.job.step === "done" && (outcome.job.merged || outcome.job.reason === ON_MAIN))
