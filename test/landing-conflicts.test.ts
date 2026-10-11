@@ -155,6 +155,11 @@ describe("a conflict on hundreds of files", () => {
 		expect(voted[0]!.evidence.length).toBeLessThanOrEqual(2_000);
 		expect(voted[0]!.evidence).toBe(`${reason} on ${"c".repeat(8)}, found while landing it on main`);
 		expect(noted).toEqual([reason]);
+		// Failed checks keep the end of their output in what's left of the 2,000, however long the command.
+		const checks = { results: [{ command: `npm test ${"z".repeat(3_000)}`, exitCode: 1, output: "y".repeat(10_000) }] };
+		await putOut(input, "b".repeat(40), ready, checks, "checked alone on the branch, twice");
+		expect(voted[1]!.evidence.length).toBeLessThanOrEqual(2_000);
+		expect(voted[1]!.evidence).not.toContain("y".repeat(10_000));
 		// The outcome keeps the first 50 files, not 600.
 		expect(settled.conflicts).toHaveLength(50);
 		expect(JSON.stringify(settled).length).toBeLessThan(8_000);

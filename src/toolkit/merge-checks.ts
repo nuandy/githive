@@ -154,7 +154,9 @@ export async function putOut(
 	const said = `${reasons[0]} on ${ready.head.slice(0, 8)}, ${how}`;
 	// A conflict's failed step is the conflict in one line again, which the reason already says.
 	const output = failed?.command === BATCH_MERGE ? "" : (failed?.output ?? "");
-	const outputTail = output ? `:\n${output.slice(-Math.max(0, EVIDENCE_CHARS - said.length - 2))}` : "";
+	// What room the reason leaves of EVIDENCE_CHARS, for the end of the output (slice(-0) would keep all of it).
+	const room = EVIDENCE_CHARS - said.length - 2;
+	const outputTail = output && room > 0 ? `:\n${output.slice(-room)}` : "";
 	const evidence = `${said}${outputTail}`;
 	const rejection = { commit: ready.head, reviewer: CHECKS_REVIEWER, role: "checks", verdict: "reject" } as const;
 	await input.votes
