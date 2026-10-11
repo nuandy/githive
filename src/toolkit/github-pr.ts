@@ -87,7 +87,10 @@ export function pullStory(untakenWork: Untaken, branch: string): PullStory {
 			changes: null,
 		};
 	const at = `\`${since.slice(0, 8)}\``;
-	const lines = [`What landed on GitHive since \`${branch}\` last took GitHive's work (${at}), newest first. ${merging}`, ""];
+	const lines = [
+		`What landed on GitHive since \`${branch}\` last took GitHive's work (${at}), newest first. ${merging}`,
+		"",
+	];
 	// Everything an agent wrote (intents, names, roles, evidence) goes in as inert text: see inert.
 	for (const change of listed.slice(0, LISTED_MOST)) {
 		const intent = inert(change.intent ?? change.title, INTENT_MOST);

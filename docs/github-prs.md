@@ -94,7 +94,8 @@ people pushed there directly. They come back through GitHive's own path, so the 
      schema.
 3. **Merged as a change.** GitHive's service agent `githive-github` claims a `source` merge of `github/<branch>`
    into `main` (design.md, "Branches"), as change `github-<sha12>`, so the claim holds the paths GitHub changed
-   while it lands. A merge that changes no file (a PR's merge commit, a squash joined to what it took) claims no
+   while it lands. Branches under `github/` are reserved: the import forces them, so no claim may name one as `into`
+   or `from` (nor the dashboard make one), and only `githive-github` may name one as `source`. A merge that changes no file (a PR's merge commit, a squash joined to what it took) claims no
    paths: a source merge whose commits change nothing now claims nothing, and still merges. An older GitHub change
    of the same branch still open (it needed a person) is released first: the newer commit has it. A claim refused
    because others hold the paths waits, and claims again the next time GitHub's branch is noticed.
@@ -175,6 +176,7 @@ real-git test server) plays GitHub, as GitHive's tests fake Artifacts.
 - The Gate's import joins a squash or rebase to what it took, so it merges cleanly where git's own merge base
   conflicts (`github-import.test.ts`). It runs in the repo's GitHub Gate: the repo's own Gate refuses it.
 - The audit reports every way a vote could be skipped short of the trust rule (`github-audit.test.ts`).
+- Branches under `github/` are reserved: a claim into or from one, or an agent's `source` merge of one, is refused.
 - The import record's shape is pinned.
 - A failing GitHub API, a refused push or a failing import never fails a landing, and an API that takes the read
   and never answers is given up after 5 seconds, the merging agent answered (`github-pr.test.ts`, `github.test.ts`).

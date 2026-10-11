@@ -33,6 +33,12 @@ export const PR_BRANCH = "githive/main";
 /** The project repo's branch GitHub's `branch` is written to, the source of the change that brings it back. */
 export const importedBranch = (branch: string) => `github/${branch}`;
 
+/**
+ * Whether a branch is one of GitHive's copies of GitHub's (github/<branch>). They're reserved: the toolkit writes them
+ * (force, at each import), so a change landing on one would be pushed away, and only githive-github merges one.
+ */
+export const isImportedBranch = (name: string) => name.startsWith("github/");
+
 /** The mode a connected repo's GitHub link is in, or null when none is connected. */
 export function githubSync(registry: Pick<Registry, "github"> | null | undefined): GitHubSync | null {
 	if (!registry?.github) return null;

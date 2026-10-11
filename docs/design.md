@@ -346,6 +346,12 @@ after its baseline. The toolkit writes the branch's ref, never an agent's
 token: agents still push only to their forks. Made first, then recorded, so a
 record that fails is made good by adopting the branch on the next claim.
 
+Branches under `github/` are GitHive's copies of a connected GitHub repo's
+(Connected to GitHub): the toolkit writes them, forced, at each import, so a
+change landed on one would be pushed away. No claim may name one as `into` or
+`from`, the dashboard makes none, and only `githive-github` may name one as
+`source`.
+
 Work that depends on other unmerged work goes on a feature branch, and the
 project's branch only receives finished features: a feature's pieces merge
 into its branch, and the finished branch merges into the project's in one

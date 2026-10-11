@@ -235,7 +235,10 @@ describe("GitHub's changes coming back", { timeout: 120_000 }, () => {
 		storage.alarm = null;
 		await sync.alarm();
 		expect(Date.now() - started).toBeLessThan(10_000);
-		expect((await sync.state()).job).toMatchObject({ step: "merge", reason: expect.stringContaining("waits for its turn") });
+		expect((await sync.state()).job).toMatchObject({
+			step: "merge",
+			reason: expect.stringContaining("waits for its turn"),
+		});
 		expect(storage.alarm).not.toBeNull();
 		// An approved change of agent a's is ready too, but the job's batch is its own change alone.
 		const other = await ready("c-3", { "src/c.js": "c\n" });
@@ -279,6 +282,38 @@ describe("GitHub's changes coming back", { timeout: 120_000 }, () => {
 		await sync.notice({ repo: "p", github: "acme/shop", branch: "main", commit: github.head() }, true);
 		expect(await settle()).toMatchObject({ step: "done" });
 		expect(server.git("show", "main:docs/notes.md")).toBe("from GitHub\n");
+	});
+});
+
+describe("GitHive's copies of GitHub's branches", { timeout: 120_000 }, () => {
+	const tryCall = (name: string, args: Record<string, unknown>, as?: string) =>
+		call(name, args, as).then(
+			() => "done",
+			(err: Error) => err.message,
+		);
+
+	it("are reserved: no change lands on or starts from github/<branch>, and only githive-github merges one", async () => {
+		await land("c-1", { "src/a.js": "a\n" });
+		github.push({ "docs/notes.md": "from GitHub\n" });
+		await call("settings", { github_trust: false });
+		// The job brings GitHub's commit in as github/main, and waits for review.
+		expect(await land("c-2", { "src/b.js": "b\n" })).toMatchObject({ step: "waiting" });
+		const claim = { agent: "a", paths: ["src/x.js"], intent: "Work on GitHub's copy" };
+		expect(await tryCall("claim", { ...claim, change: "x-1", into: "github/main", from: "main" }, "a")).toMatch(
+			"github/main: branches under github/ are GitHive's copies of GitHub's",
+		);
+		expect(await tryCall("claim", { ...claim, change: "x-2", into: "feature/x", from: "github/main" }, "a")).toMatch(
+			"github/main: branches under github/ are GitHive's copies of GitHub's",
+		);
+		expect(await tryCall("claim", { ...claim, change: "x-3", source: "github/main" }, "a")).toMatch(
+			"github/main: only githive-github merges GitHive's copies of GitHub's branches",
+		);
+		const { makeBranch } = await import("../src/toolkit/mcp");
+		await expect(
+			makeBranch(ctx(), "p", { name: "github/other", from: "main" }, "person:ana@example.com"),
+		).rejects.toThrow("branches under github/ are GitHive's copies of GitHub's");
+		expect(server.git("branch", "--list", "github/*").trim().split(/\s+/)).toEqual(["github/main"]);
+		expect((await claimsNow()).map((held) => held.change)).toEqual([expect.stringMatching(/^github-/)]);
 	});
 });
 

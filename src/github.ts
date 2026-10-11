@@ -231,9 +231,17 @@ export async function linkTo(app: GitHubApp, repo: string, fetcher: typeof fetch
 		},
 		defaultHead: async (signal) => {
 			const kept = defaults.get(repo);
-			const read = async () =>
-				(await api<{ default_branch: string }>(await token(signal), "GET", `/repos/${repo}`, undefined, fetcher, signal))
-					.default_branch;
+			const read = async () => {
+				const found = await api<{ default_branch: string }>(
+					await token(signal),
+					"GET",
+					`/repos/${repo}`,
+					undefined,
+					fetcher,
+					signal,
+				);
+				return found.default_branch;
+			};
 			const branch = kept && kept.until > Date.now() ? kept.branch : await read();
 			defaults.set(repo, { branch, until: Date.now() + DEFAULT_KEPT_MS });
 			return { branch, head: await branchHeadOf(await token(signal), repo, branch, fetcher, signal) };

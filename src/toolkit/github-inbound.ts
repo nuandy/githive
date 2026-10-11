@@ -102,7 +102,11 @@ export interface StepOutcome {
 /** Runs the job's current step as githive-github (`ctx` is a hosted tool context stamped as it). */
 export async function inboundStep(ctx: ToolContext, job: InboundJob): Promise<StepOutcome> {
 	// When the step ended, not when it began: a merge step can wait minutes.
-	const at = (changes: Partial<InboundJob>): InboundJob => ({ ...job, ...changes, updatedAt: new Date().toISOString() });
+	const at = (changes: Partial<InboundJob>): InboundJob => ({
+		...job,
+		...changes,
+		updatedAt: new Date().toISOString(),
+	});
 	try {
 		if (job.step === "import") return await importStep(ctx, job, at);
 		if (job.step === "claim") return await claimStep(ctx, job, at);
@@ -214,8 +218,10 @@ async function mergeStep(ctx: ToolContext, job: InboundJob, at: At): Promise<Ste
 // The standing pull request after GitHub's commit landed: merged and closed, or still open with more to take. Only a
 // repo in pr mode has one, and a GitHub that doesn't answer soon is left for the next time.
 async function openPull(ctx: ToolContext, job: InboundJob): Promise<KnownPull | null | undefined> {
-	const registry = (await recordLog<Registry>(ctx, job.repo, claimsRef(job.repo)).read().catch(() => null))?.commit
-		.state;
+	const registered = await recordLog<Registry>(ctx, job.repo, claimsRef(job.repo))
+		.read()
+		.catch(() => null);
+	const registry = registered?.commit.state;
 	if (githubSync(registry) !== "pr") return undefined;
 	const link = await ctx.github?.(job.github).catch(() => null);
 	if (!link) return undefined;

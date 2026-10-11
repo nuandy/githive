@@ -4,6 +4,7 @@ import { branchHead, type Remote, Workspace } from "../../git";
 import { projectBranch } from "../../project-branch";
 import { GitCasLog } from "../../record-log";
 import { recordBranch, type Registry } from "../claims";
+import { isImportedBranch } from "../github-settings";
 import type { Stamper } from "../stamp";
 import { workId } from "../work";
 import type { ToolContext } from "./context";
@@ -104,6 +105,13 @@ export async function targetBranch(
 ): Promise<string | undefined> {
 	const { into, from, registered, claims, agent, stamper } = input;
 	if (!BRANCH_NAME.test(into)) fail(400, `${into} isn't a branch name changes can land on`);
+	// GitHive's copies of GitHub's branches are written at each import, forced: nothing lands on or starts from one.
+	for (const named of [into, from])
+		if (named && isImportedBranch(named))
+			fail(
+				403,
+				`${named}: branches under github/ are GitHive's copies of GitHub's; no change lands on or starts from one`,
+			);
 	if (registered?.branches?.[into]) return undefined;
 	const found = await branchHead(await ctx.remote(repo, "read"), into);
 	if (found) {

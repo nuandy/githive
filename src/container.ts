@@ -173,18 +173,19 @@ export async function gitWithToken(
 	const command = ["git", "-c", `http.extraHeader=Authorization: ${authorization}`, ...args];
 	if (!isNetworkGitCommand(args)) return run(container, command, cwd, undefined, timeoutS);
 
+	const attempt = async () => {
+		const result = await run(container, command, cwd, undefined, timeoutS);
+		if (result.exitCode !== 0 && isTransientGitOutput(result.output)) {
+			throw Object.assign(new Error("Transient Git transport failure"), {
+				status: 503,
+				statusCode: 503,
+				commandResult: result,
+			});
+		}
+		return result;
+	};
 	try {
-		return await retryTransient(async () => {
-			const result = await run(container, command, cwd, undefined, timeoutS);
-			if (result.exitCode !== 0 && isTransientGitOutput(result.output)) {
-				throw Object.assign(new Error("Transient Git transport failure"), {
-					status: 503,
-					statusCode: 503,
-					commandResult: result,
-				});
-			}
-			return result;
-		}, attempts ? { maxAttempts: attempts } : {});
+		return await retryTransient(attempt, attempts ? { maxAttempts: attempts } : {});
 	} catch (err) {
 		const result = (err as { commandResult?: Awaited<ReturnType<typeof run>> } | null)?.commandResult;
 		if (result) return result;
