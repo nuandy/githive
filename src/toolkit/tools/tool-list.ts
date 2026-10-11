@@ -357,6 +357,23 @@ const TOOL_LIST = [
 		},
 	},
 	{
+		name: "github_pr",
+		description:
+			"For a repo connected to GitHub in pr mode (settings github_sync 'pr'): open the standing pull " +
+			"request from githive/main into GitHub's default branch, or say where it is if it's open. Its " +
+			"title is 'GitHive: <n> changes' and its body lists what landed since GitHub's branch last took " +
+			"GitHive's work: each change's intent, agent and reviewers with their evidence. GitHive pushes " +
+			"githive/main after every landing, so it updates itself; refresh rewrites its title and body. " +
+			"Merging and closing it happen on GitHub, and GitHive brings the merge back as githive-github's " +
+			"change. Asking also looks at GitHub's branch and brings back what it holds that main lacks; " +
+			"refresh tries again what needed a person.",
+		inputSchema: {
+			type: "object",
+			properties: { repo: str, refresh: { type: "boolean" } },
+			required: ["repo"],
+		},
+	},
+	{
 		name: "register",
 		description:
 			"Register your agent name and get its secret key (shown once), so what you write is attributed " +
@@ -403,5 +420,6 @@ export const TOOLS = annotate(
 		status: reads("Change status"),
 		register: destroys("Register an agent key"),
 		ask_human: writes("Ask a person"),
+		github_pr: writes("Open the pull request on GitHub", { idempotent: true }),
 	},
 );

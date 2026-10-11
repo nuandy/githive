@@ -2,7 +2,7 @@ import { projectBranch } from "../project-branch";
 import { GitCasLog } from "../record-log";
 import { readBranchHistory } from "./branch-history";
 import type { Registry } from "./claims";
-import { type BranchCommit, trailer } from "./git-records";
+import { type BranchCommit, readBranchCommits, trailer } from "./git-records";
 import { type ToolContext, votesFor } from "./mcp";
 import { fail } from "../errors";
 
@@ -52,7 +52,8 @@ async function branchCommits(ctx: ToolContext, repo: string, registry: Registry,
 	if (!from) fail(404, `GitHive lands nothing on ${branch}`);
 	if (ctx.readBranch) return ctx.readBranch(repo, from, branch);
 	if (ctx.history) return ctx.history(repo, (source) => readBranchHistory(source, from, branch));
-	fail(501, "reading a branch's history isn't available here");
+	// Without Artifacts' API, as in tests, with a clone in memory.
+	return readBranchCommits(await ctx.remote(repo, "read"), from, branch);
 }
 
 // A merge GitHive made as a landed change, without reviews or time yet. Null for any other commit.

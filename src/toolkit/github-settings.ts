@@ -49,3 +49,59 @@ export const trustedClaim = (
 	registry: Pick<Registry, "github"> | null | undefined,
 	claim: Pick<ClaimRecord, "agent" | "source">,
 ) => isGitHubChange(claim) && trustsGitHub(registry);
+
+/** GitHub's default branch as GitHive last read it. */
+export interface GitHubSeen {
+	github: string;
+	branch: string;
+	commit: string;
+}
+
+/** The standing pull request as GitHive last saw it: a hint for the dashboard; GitHub has the truth. */
+export interface KnownPull {
+	number: number;
+	url: string;
+	at: string;
+}
+
+/**
+ * The job bringing one commit of GitHub's back (see github-inbound.ts): imported as github/<branch>, claimed by
+ * githive-github, then merged. Each step is idempotent, so a step tried again finds its work done.
+ */
+export interface InboundJob {
+	repo: string;
+	github: string;
+	branch: string;
+	/** GitHub's commit being brought back, as the import found it. */
+	commit: string;
+	step: "import" | "claim" | "merge" | "done" | "waiting" | "needs a person" | "failed";
+	/** github/<branch>'s commit: GitHub's, or one GitHive made joining it to what GitHub had already taken. */
+	head?: string;
+	/** The GitHive commit whose work GitHub's branch already had when it was imported. */
+	base?: string;
+	change?: string;
+	/** The merge commit, once it landed. */
+	merged?: string;
+	/** Why it waits, needs a person, or failed; or that GitHive's main had it already. */
+	reason?: string;
+	attempts: number;
+	noticedAt: string;
+	updatedAt: string;
+}
+
+/** What a repo's GitHubSync object keeps: the job bringing GitHub's changes back, and the pull request. */
+export interface GitHubSyncState {
+	pull: KnownPull | null;
+	job: InboundJob | null;
+}
+
+/** The repo's GitHubSync object (see github-sync.ts), as the toolkit reaches it. */
+export interface GitHubSyncHandle {
+	/**
+	 * GitHub's branch is at `seen.commit`: bring it back if GitHive's main lacks it. Returns at once; the job runs in
+	 * steps of its own. A commit already brought back, or found on main, is left alone unless `again`.
+	 */
+	notice(seen: GitHubSeen, again?: boolean): Promise<GitHubSyncState>;
+	notePull(pull: KnownPull | null): Promise<void>;
+	state(): Promise<GitHubSyncState>;
+}

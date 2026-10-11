@@ -71,8 +71,11 @@ export interface BatchGit {
 		to: Remote;
 		ref: string;
 	}): Promise<{ tip: string } | { failed: string }>;
-	/** Fast-forwards `branch` on `to` (GitHub's copy) to `head`, and throws if that's refused. */
-	pushBranch(input: { branch: string; head: string; to: Remote }): Promise<void>;
+	/**
+	 * Fast-forwards `as` (by default `branch`) on `to`, GitHub's copy, to `head` from the project's `branch`, and throws
+	 * if that's refused.
+	 */
+	pushBranch(input: { branch: string; head: string; to: Remote; as?: string }): Promise<void>;
 }
 
 /** Another change that may land with this one: its claim, its head as last seen, and where its branch lives. */

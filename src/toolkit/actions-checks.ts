@@ -82,9 +82,15 @@ async function finishedRuns(
 }
 
 /**
- * Fast-forwards `branch` on the connected GitHub repo to `head`. A commit someone pushed there directly is
- * never overwritten; the refused push is reported instead.
+ * Fast-forwards `branch` on the connected GitHub repo to `head`, or `as` (githive/main, say) to the project's `branch`
+ * at `head`. A commit someone pushed there directly is never overwritten; the refused push is reported instead.
  */
-export function mirrorTo(gate: Pick<BatchGit, "pushBranch">, link: GitHubLink, branch: string, head: string) {
-	return gate.pushBranch({ branch, head, to: link.remote });
+export function mirrorTo(
+	gate: Pick<BatchGit, "pushBranch">,
+	link: GitHubLink,
+	branch: string,
+	head: string,
+	as?: string,
+) {
+	return gate.pushBranch({ branch, head, to: link.remote, ...(as ? { as } : {}) });
 }

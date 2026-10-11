@@ -23,7 +23,7 @@ export type ChecksBranch = {
 	to: { remote: string; token: string; user?: string };
 	ref: string;
 };
-export type LandedPush = { head: string; to: { remote: string; token: string; user?: string } };
+export type LandedPush = { head: string; to: { remote: string; token: string; user?: string }; as?: string };
 
 /** Readies the container's checkout for a batch on `baseHead`, with the project's branch fetched. */
 export async function fetchBatchBase(container: Container, input: BatchBase) {
@@ -255,8 +255,8 @@ export async function pushForChecks(
 }
 
 /**
- * Pushes `branch` at `head` to a connected GitHub repo. The push is a fast-forward only, so commits someone pushed
- * there directly are never overwritten.
+ * Pushes `branch` at `head` to a connected GitHub repo, as `as` when given (githive/main, for the pull request). The
+ * push is a fast-forward only, so commits someone pushed there directly are never overwritten.
  */
 export async function pushLanded(
 	container: Container,
@@ -265,7 +265,7 @@ export async function pushLanded(
 	const pushed = await gitWithToken(
 		container,
 		input.to.token,
-		["push", "-q", input.to.remote, `${input.head}:refs/heads/${input.branch}`],
+		["push", "-q", input.to.remote, `${input.head}:refs/heads/${input.as ?? input.branch}`],
 		WORKDIR,
 		input.to.user,
 	);

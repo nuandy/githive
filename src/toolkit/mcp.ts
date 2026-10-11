@@ -7,6 +7,7 @@ import { repoSnapshot } from "./tools/dashboard";
 import { advice, claimsRef, recordLog, storeFor } from "./tools/repo";
 import { auditTools } from "./tools/audit-tools";
 import { claimTools } from "./tools/claim-tools";
+import { githubTools } from "./tools/github-tools";
 import { mergeTools } from "./tools/merge-tools";
 import { reviewTools } from "./tools/review-tools";
 import { setupTools } from "./tools/setup";
@@ -97,6 +98,7 @@ const handlers: ToolHandlers = {
 	...reviewTools,
 	...mergeTools,
 	...auditTools,
+	...githubTools,
 };
 
 async function runTool(name: string, args: Args, ctx: ToolContext): Promise<unknown> {

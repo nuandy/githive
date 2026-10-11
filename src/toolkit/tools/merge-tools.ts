@@ -1,10 +1,12 @@
 import { fail, optionalString, requiredString } from "../../errors";
 import { branchHead } from "../../git";
 import type { GitHubLink } from "../../github";
-import { actionsChecks, mirrorTo, onActions } from "../actions-checks";
+import { actionsChecks, onActions } from "../actions-checks";
 import { artifactsInspect } from "../batch-reads";
 import { scopeFile } from "../branch-scope";
 import type { ClaimRecord, Registry } from "../claims";
+import { pushToGitHub } from "../github-outbound";
+import { type GitHubSeen, githubSync } from "../github-settings";
 import { type BatchGit, type Candidate, mergeChange, type MergeInput } from "../merge";
 import { countedVotes } from "../votes";
 import { holdKey, reviewersNeeded } from "../work";
@@ -119,8 +121,21 @@ function optionalMergeInput(
 	if (ctx.prepareLanding) optional.prepareLanding = () => ctx.prepareLanding!(repo);
 	if (ctx.prefetchChange) optional.prefetch = (change) => ctx.prefetchChange!(repo, into, change);
 	if (ctx.prepareChecks && !at.checksOnActions) optional.prepareChecks = ctx.prepareChecks(repo);
-	// Push the landed branch back to GitHub as a fast-forward, refused if someone pushed there directly.
-	if (link && into === branch) optional.afterLanding = (commit: string) => mirrorTo(gate, link, into, commit);
+	// Push the landed branch to GitHub as a fast-forward (its main, or githive/main for the pull request), refused if
+	// someone pushed there directly, then notice whether GitHub's branch holds what main lacks.
+	const sync = githubSync(registered);
+	if (link && sync && into === branch) {
+		const github = ctx.githubSync?.(repo);
+		optional.afterLanding = (commit: string) =>
+			pushToGitHub({
+				gate,
+				link,
+				sync,
+				branch: into,
+				commit,
+				...(github ? { notice: (seen: GitHubSeen) => github.notice(seen) } : {}),
+			});
+	}
 	return optional;
 }
 

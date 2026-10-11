@@ -510,7 +510,7 @@ function batchGitFor(env: Env, repo: string): BatchGit {
 				}),
 			);
 		},
-		pushBranch: async ({ branch, head, to }) => {
+		pushBranch: async ({ branch, head, to, as }) => {
 			const read = await project("read");
 			const pushed = await rpcRetried<{ pushed: true } | { refused: string }>(() =>
 				gate().pushBranch({
@@ -519,9 +519,10 @@ function batchGitFor(env: Env, repo: string): BatchGit {
 					base: { remote: read.url, token: read.token },
 					head,
 					to: pushTarget(to),
+					...(as ? { as } : {}),
 				}),
 			);
-			if ("refused" in pushed) throw new Error(`pushing ${branch} to ${to.url} was refused: ${pushed.refused}`);
+			if ("refused" in pushed) throw new Error(`pushing ${as ?? branch} to ${to.url} was refused: ${pushed.refused}`);
 		},
 	};
 	if (!treeLandingOn(env)) return inGate;

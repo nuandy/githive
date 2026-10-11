@@ -2,7 +2,7 @@ import git from "isomorphic-git";
 import { BOT, branchHead, type Remote, Workspace } from "../../src/git";
 import { mergeMessage } from "../../src/toolkit/merge-commit";
 import type { BatchGit, Inspected } from "../../src/toolkit/merge";
-import { repoOfUrl } from "../../src/git-http";
+import { http, repoOfUrl } from "../../src/git-http";
 import type { ReadHistory } from "../../src/toolkit/batch-reads";
 import { treeLanding } from "../../src/toolkit/tree-landing";
 import { gitHistory } from "./git-history";
@@ -89,9 +89,13 @@ function inMemory(remote: Remote): BatchGit {
 			await ws.pushAs(ws.branch, `refs/heads/${ref}`, to);
 			return { tip };
 		},
-		pushBranch: async ({ branch, head, to }) => {
+		pushBranch: async ({ branch, head, to, as }) => {
 			const ws = await Workspace.at(remote, branch, head);
-			await ws.push(branch, to);
+			// A fast-forward only, as the Gate's push.
+			if (!as) return void (await ws.push(branch, to));
+			await git.writeRef({ fs: ws.fs, dir: "/repo", ref: "refs/heads/pushing", value: head, force: true });
+			const pushed = await git.push({ fs: ws.fs, http, dir: "/repo", url: to.url, ref: "pushing", remoteRef: as });
+			if (!pushed.ok) throw new Error(`pushing ${as} was refused`);
 		},
 	};
 }

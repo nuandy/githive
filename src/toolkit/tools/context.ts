@@ -1,6 +1,7 @@
 import { requiredString, statusOf } from "../../errors";
 import type { Remote } from "../../git";
 import type { GitHubLink } from "../../github";
+import type { GitHubSyncHandle } from "../github-settings";
 import type { HiveEvent } from "../../hive-events";
 import { projectBranch } from "../../project-branch";
 import { GitCasLog } from "../../record-log";
@@ -124,6 +125,8 @@ export interface ToolContext {
 	};
 	/** A GitHub repo (owner/name) through GitHive's App, or null if the App isn't installed. Unset without GitHub. */
 	github?: (repo: string) => Promise<GitHubLink | null>;
+	/** The repo's GitHubSync: the job bringing GitHub's changes back, and the pull request as last seen. */
+	githubSync?: (repo: string) => GitHubSyncHandle;
 	/** What landed on a branch since this agent was last told (see RepoCache.landingNews). */
 	news?: (repo: string, branch: string, agent: string) => Promise<Landed[]>;
 	/** A branch's head, briefly cached and shared by the merges watching it (see MergeInput.branchHead). */
