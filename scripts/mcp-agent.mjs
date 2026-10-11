@@ -175,48 +175,39 @@ switch (command) {
 			{ repo: flags.repo, change: flags.change, ...(flags.role ? { role: flags.role } : {}) },
 			flags["key-file"],
 		);
-		// Deep enough to diff against the project's branch. Read-only tokens go in this clone's config.
-		cloneWith(access.project.token, ["--depth", "50", "--branch", access.project.branch, access.project.url], dir);
-		execFileSync("git", [
+		// Clone the change from the author's fork, then fetch the project's branch beside it to diff against. A fetch
+		// from a fork into a shallow clone of the project is refused by Artifacts ("expected no other sections to be
+		// sent after no 'ready'"); this way round works. A shallow clone of a fork's branch is sometimes refused
+		// too, so a whole clone follows.
+		const header = (url, token) => [
 			"-C",
 			dir,
 			"config",
-			`http.${access.project.url}.extraHeader`,
-			`Authorization: Bearer ${access.project.token.split("?")[0]}`,
-		]);
-		commitAs(dir);
-		execFileSync("git", ["-C", dir, "remote", "add", "change", access.url]);
-		execFileSync("git", [
-			"-C",
-			dir,
-			"config",
-			`http.${access.url}.extraHeader`,
-			`Authorization: Bearer ${access.token.split("?")[0]}`,
-		]);
-		// Try a shallow fetch first. Artifacts rejects some shallow fetches of a fork's branch
-		// ("expected shallow list" and similar), so fall back to a full fetch.
+			`http.${url}.extraHeader`,
+			`Authorization: Bearer ${token.split("?")[0]}`,
+		];
+		const branch = ["--branch", access.branch, access.url];
 		try {
-			execFileSync(
-				"git",
-				[
-					"-C",
-					dir,
-					"fetch",
-					"--quiet",
-					"--depth",
-					"50",
-					"change",
-					`${access.branch}:refs/remotes/change/${access.branch}`,
-				],
-				{ stdio: "pipe" },
-			);
+			cloneWith(access.token, ["--depth", "50", ...branch], dir);
 		} catch {
-			execFileSync(
-				"git",
-				["-C", dir, "fetch", "--quiet", "change", `${access.branch}:refs/remotes/change/${access.branch}`],
-				{ stdio: "inherit" },
-			);
+			cloneWith(access.token, branch, dir);
 		}
+		execFileSync("git", ["-C", dir, "remote", "rename", "origin", "change"]);
+		execFileSync("git", header(access.url, access.token));
+		commitAs(dir);
+		execFileSync("git", ["-C", dir, "remote", "add", "origin", access.project.url]);
+		execFileSync("git", header(access.project.url, access.project.token));
+		const into = access.project.branch;
+		execFileSync("git", [
+			"-C",
+			dir,
+			"fetch",
+			"--quiet",
+			"--depth",
+			"50",
+			"origin",
+			`${into}:refs/remotes/origin/${into}`,
+		]);
 		execFileSync("git", ["-C", dir, "checkout", "--quiet", access.head]);
 		console.log(
 			JSON.stringify({
