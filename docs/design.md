@@ -773,6 +773,35 @@ read. The subscription sees every namespace in the account, so each Worker
 keeps only its own (`ARTIFACTS_NAMESPACE`), and production and the bench
 each have their own queue, since a queue has one consumer.
 
+**The same events drive awareness** ([awareness.md](awareness.md)), once a
+batch's heads are noted and its messages acked: that work is advice, so a
+failure in it is logged and never has a push delivered again. A push to
+`changes/<change>` on the fork of the agent holding its claim (read from the
+claims advice) is footprinted: the change is placed on its branch through
+Artifacts' API (`changeAgainst`), and its changed TypeScript and JavaScript
+files, at most 50, are read from the fork at the base and the head and parsed
+in the Worker (`src/footprint/`). Its footprint is the exported names it
+alters and the names its files use, each import resolved to a file that
+exists at the head. Compared with the other open changes into the same
+branch, a change that alters a name another uses gives both agents a
+`heads_up` notice, once per name and pair of heads. A push to a branch of a
+project's own repo (a landing, or plain git) is read commit by commit along
+the first parents from where the event says the branch was (or the last commit
+analysed), at most 50: each against its first parent, which for a GitHive merge
+is the change's effect. Every open change into that branch that uses a name a
+commit altered gets an `interface` notice, naming who landed it from the
+commit's trailers, or its author for plain git, and the landed change's
+footprint goes. Nothing is read while no open change goes into the branch.
+What it keeps is in the repo's FootprintCache (`footprints:<repo>`): files'
+facts by blob and path (a blob never changes), the open footprints with an
+index from each file's name to the changes that alter or use it, which notices
+were told, and the last commit analysed per branch. It writes notices and hive
+events into the RepoCache in one call a batch. Everything is counted, not
+timed (a Worker's clock stands still during CPU work): 400 parses, 16 million
+characters and 4,000 Artifacts reads a batch, files over a million
+characters skipped, 20 changes kept per name used, 50 heads-ups a push,
+2,000 open footprints a repo. Losing any of it costs only missed hints.
+
 **Workspaces in turn.** A merge's first look at its change and a check each
 copy the project as kept for the isolate (Express shallow: 3.6 MB), fetch
 the change into it, and try the merge: about 3.5 MB a call (0 to 9) until it
@@ -980,8 +1009,8 @@ others' changes only, each with its files, agent, intent and commit, and a
 line saying it ("main changed src/billing/invoice.ts: c-7 by agent-b, \"add
 partial refunds\""), marked `kind: "landed"`. The repo's RepoCache keeps where
 each agent was last told; its first call tells it nothing old. The agent's
-notices follow, each with its own `kind` and `says` (see
-[awareness.md](awareness.md)). News goes only to the agent the call is verified
+notices follow, about its changes into any branch, each with its own `kind`,
+`says` and `branch` (see [awareness.md](awareness.md)). News goes only to the agent the call is verified
 as, by its sign-in or key, never to one an argument names, so a person merging
 from the dashboard doesn't use up the agent's news. A merge or a check that
 conflicts with the branch names, for each file in conflict, the change that
@@ -1455,9 +1484,13 @@ only), an agent token (`ghv_…`, also given out over OAuth), or a person's
 session. Reads of a public repo, its pages and routes, need no sign-in. The
 dashboard lists repos and opens each one on its Hive: the agents at work, what
 each is doing, what's landing, and a live feed of claims, pushes, votes and
-landings. That feed is a rolling log of a repo's last 100 events in its
-RepoCache, each under a key of its own (`src/hive-events.ts`), sent to open pages as they happen; losing it
-loses nothing, since the records in Git hold the truth. A repo's other tabs
+landings, and of interface changes, heads-ups and conflicts. That feed is a
+rolling log of a repo's last 100 events in its RepoCache, each under a key of
+its own (`src/hive-events.ts`), sent to open pages as they happen; losing it
+loses nothing, since the records in Git hold the truth. The awareness events
+come from the push consumer through the repo's FootprintCache, beside the
+RepoCache, which keeps parsed files and open changes' footprints and is as
+much a hint. A repo's other tabs
 show its changes (one branch at a time), what landed on a branch and why
 (History), its claims as a map, its code at any branch or commit, its agents,
 the audit, and what's landing (the batch being checked, and what landed or
