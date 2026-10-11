@@ -189,6 +189,31 @@ describe("bringing GitHub's branch into the project", { timeout: 60_000 }, () =>
 		expect(await mergeOntoMain(pushed)).toEqual({ clean: true, files: ["docs/notes.md"] });
 	});
 
+	it("brings a revert on GitHub of what a squash took back as a revert, not as an older squash taken", async () => {
+		await landOnMain({ "src/app.js": "two\n" });
+		pushPullBranch();
+		const first = github.mergePull("squash");
+		// GitHive brings the first squash back, as githive-github's merge does.
+		const { head: joined } = (await importGitHub()) as { head: string };
+		await clone.run("pull", "-q", "origin", "main");
+		await clone.run("fetch", "-q", "origin", "github/main");
+		await clone.run("merge", "-q", "--no-ff", "-m", "Bring in GitHub's changes", joined);
+		await clone.run("push", "-q", "origin", "main");
+		await landOnMain({ "src/app.js": "three\n" });
+		const pulled = pushPullBranch();
+		const second = github.mergePull("squash");
+		// Someone on GitHub reverts the second squash: GitHub's files are as the first squash left them.
+		const reverted = github
+			.git("commit-tree", "-p", second, "-m", "Revert the second squash", `${first}^{tree}`)
+			.trim();
+		github.git("update-ref", "refs/heads/main", reverted);
+		await landOnMain({ "src/notes.js": "unrelated\n" });
+		const imported = (await importGitHub()) as { head: string; base: string };
+		// GitHub took GitHive's newer work, then went back on it: what comes back undoes it.
+		expect(imported).toMatchObject({ commit: reverted, base: pulled });
+		expect(await mergeOntoMain(imported.head)).toEqual({ clean: true, files: ["src/app.js"] });
+	});
+
 	it("brings what was pushed after a squash, joined to what the squash took", async () => {
 		await landOnMain({ "src/app.js": "two\n" });
 		const pulled = pushPullBranch();

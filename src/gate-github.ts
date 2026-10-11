@@ -73,6 +73,8 @@ export async function importFromGitHub(
 	const took = await workTaken(git, main, head, mergeBase);
 	const base = took?.main ?? mergeBase;
 	const joined = took && !(await isAncestor(took.main, head)) && took.tree !== (await treeOf(git, mergeBase));
+	// The join's commits go into a shell script: both must be commit ids, whatever a later caller passes.
+	if (joined && !SHA.test(base)) return { failed: `joining GitHub's ${githubBranch} found no commit to join: ${base}` };
 	const tip = joined ? await joinedCommit(container, { head, base, githubBranch, branch: input.branch }) : head;
 	if (!SHA.test(tip))
 		return { failed: `joining GitHub's ${githubBranch} to ${input.branch} failed: ${clip(tip, 300)}` };
@@ -102,16 +104,21 @@ async function chain(git: Git, ref: string, since: string, most: number) {
 }
 
 // The newest commit of GitHive's main whose tree is also on GitHub's branch: the work GitHub took, by whatever
-// merge. Null when GitHub has no tree of GitHive's since the merge base.
+// merge. Null when GitHub has no tree of GitHive's since the merge base. Newest on main's side, not on GitHub's: a
+// GitHub commit that goes back to an older state of GitHive's (a revert of what a squash took, say) is GitHub's own
+// change, made after it took the newer one, and must come back as one rather than read as the older one taken.
 async function workTaken(git: Git, main: string, head: string, mergeBase: string) {
-	const ours = new Map<string, string>();
-	for (const [commit, tree] of await chain(git, main, mergeBase, MAIN_SEARCHED))
-		if (!ours.has(tree)) ours.set(tree, commit);
+	// Each tree on main's side, with its newest commit and how far back that is (0 the newest).
+	const ours = new Map<string, { commit: string; back: number }>();
+	(await chain(git, main, mergeBase, MAIN_SEARCHED)).forEach(([commit, tree], back) => {
+		if (!ours.has(tree)) ours.set(tree, { commit, back });
+	});
+	let taken: { commit: string; back: number; tree: string } | null = null;
 	for (const [, tree] of await chain(git, head, mergeBase, GITHUB_SEARCHED)) {
-		const commit = ours.get(tree);
-		if (commit) return { main: commit, tree };
+		const ourCommit = ours.get(tree);
+		if (ourCommit && (!taken || ourCommit.back < taken.back)) taken = { ...ourCommit, tree };
 	}
-	return null;
+	return taken && { main: taken.commit, tree: taken.tree };
 }
 
 // A commit with GitHub's tree whose parents are GitHub's commit and GitHive's `base`. Its dates are GitHub's

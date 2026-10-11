@@ -84,7 +84,9 @@ people pushed there directly. They come back through GitHive's own path, so the 
    - a squash or rebase merge gave GitHive's commits new ids, so git's own merge base would be GitHub's branch from
      before the PR, and merging would set the PR's own lines against what landed on GitHive since. So the Gate
      finds the newest commit of GitHive's main (searching its first-parent history back to the merge base) whose
-     tree a commit on GitHub's branch has: the work GitHub took. If that commit isn't already an ancestor of
+     tree a commit on GitHub's branch has: the work GitHub took. Newest on main's side, not GitHub's: a GitHub commit
+     going back to an older state of GitHive's (reverting what a squash took) is GitHub's own change, made after it
+     took the newer, and comes back as a revert. If that commit isn't already an ancestor of
      GitHub's (as it is for a merge commit), the Gate joins them: a commit with GitHub's tree and both as parents,
      with GitHub's commit's dates, so making it again makes the same commit. That join is `github/<branch>`, and
      merging it brings in only what GitHub added;
@@ -193,7 +195,8 @@ real-git test server) plays GitHub, as GitHive's tests fake Artifacts.
   asked again it comes back.
 - With trust off, review is needed.
 - The Gate's import joins a squash or rebase to what it took, so it merges cleanly where git's own merge base
-  conflicts (`github-import.test.ts`). It runs in the repo's GitHub Gate: the repo's own Gate refuses it.
+  conflicts (`github-import.test.ts`). It runs in the repo's GitHub Gate: the repo's own Gate refuses it. A revert on
+  GitHub of what a squash took comes back as a revert.
 - The audit reports every way a vote could be skipped short of the trust rule (`github-audit.test.ts`), and the
   merge path refuses them: a claim as `githive-github` stamped as another identity, a head the import record doesn't
   hold, a repo connected to another GitHub repo since the import, another agent's claim of `github/main`
