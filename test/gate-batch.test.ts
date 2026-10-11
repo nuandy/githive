@@ -181,6 +181,22 @@ describe("reading and landing a batch in the repo's own Gate", { timeout: 60_000
 		expect(server.git("rev-parse", "main").trim()).toBe(second);
 	});
 
+	it("names the change that doesn't merge onto the batch and the files it conflicts on, and lands nothing", async () => {
+		const main = server.git("rev-parse", "main").trim();
+		const a = await pushChange(server.url, work, "agent-a-1", "a-1", { "src/shared.txt": "a\n" });
+		const b = await pushChange(server.url, work, "agent-b-1", "b-1", { "src/shared.txt": "b\n", "src/b.txt": "b\n" });
+		const merges = [
+			{ ...source("a-1"), head: a, claimed: claimed("a-1", a) },
+			{ ...source("b-1"), head: b, claimed: claimed("b-1", b) },
+		];
+		const landed = await gate.landBatch({ repo: "t1", branch: "main", base: base(), baseHead: main, merges });
+		expect(landed).toEqual({
+			error: expect.stringMatching(/^merging b-1 onto the batch failed: src\/shared\.txt\n/),
+			conflict: { change: "b-1", files: ["src/shared.txt"] },
+		});
+		expect(server.git("rev-parse", "main").trim()).toBe(main);
+	});
+
 	it("lands changes from the packs their merges kept, fetching neither them nor main again", async () => {
 		const main = server.git("rev-parse", "main").trim();
 		const kept: Record<string, Uint8Array> = {};

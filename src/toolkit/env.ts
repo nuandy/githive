@@ -1,5 +1,6 @@
 import { linkTo } from "../github";
-import type { SharedPlacements } from "./batch-reads";
+import type { LandingResult } from "../gate-landing";
+import { changeAgainst, type ReadHistory, type SharedPlacements, type TouchedBy, touchedSince } from "./batch-reads";
 import { changeCache } from "../change-cache";
 import { SizedCache } from "../sized-cache";
 import { readBranchHistory } from "./branch-history";
@@ -15,7 +16,9 @@ import { claimStore } from "./claim-store";
 import { holdsRef, holdsRepoOf, type ReviewHolds, reviewHolds, reviewsRef, reviewsRepoOf } from "./review-holds";
 import type { Registry } from "./claims";
 import type { ToolContext, HostedStatus } from "./mcp";
+import { conflictLine } from "./landing";
 import type { BatchGit, BatchSource, CheckRunner } from "./merge";
+import { BATCH_MERGE } from "./merge-checks";
 import { recordsRepoName } from "./shards";
 import { makeStamper } from "./stamp";
 import { type ChangePacks, prefetchChange, treeLanding, type TreeReads } from "./tree-landing";
@@ -244,8 +247,7 @@ function repoCacheParts(env: Env) {
 		notify: (repo, branch, notices) =>
 			quietly(() => env.REPO_CACHE.getByName(`repo:${repo}`).notify(branch, notices), undefined),
 		// Attempts are lines for a merge commit's story, so losing them costs only a line.
-		noteAttempt: (repo, change, line) =>
-			quietly(() => env.REPO_CACHE.getByName(`repo:${repo}`).noteAttempt(change, line), undefined),
+		noteAttempt: (repo, change, line) => noteAttempt(env, repo, change, line),
 		attemptsOf: (repo, changes) =>
 			quietly(() => env.REPO_CACHE.getByName(`repo:${repo}`).attemptsOf(changes), {} as Record<string, string[]>),
 		// A branch's head, briefly cached for every merge watching it (see MergeInput.branchHead).
@@ -400,6 +402,8 @@ async function holdsLog(env: Env, repo: string, bucket: string) {
 }
 
 function checksRunner(env: Env, repo: string): CheckRunner {
+	// A change put out is checked alone twice, so who changed the files it conflicts on is read once.
+	const conflicts = new Map<string, Promise<string>>();
 	return async ({ base, branch, changes, commands, gate }) => {
 		const remote = await projectRemote(env, repo, "read");
 		const sourceOf = async (entry: (typeof changes)[number]) => {
@@ -424,14 +428,16 @@ function checksRunner(env: Env, repo: string): CheckRunner {
 				ahead,
 			}),
 		);
+		// A change checked alone that doesn't merge conflicts with the branch itself, so who changed its files is named.
+		const saying = (files: string[]) => {
+			if (changes.length > 1) return conflictSaid(env, repo, { branch, main: base, files });
+			const key = `${base} ${last.head} ${files.join(" ")}`;
+			const alone = { ...last, source: { url: forkOf.remote } };
+			if (!conflicts.has(key)) conflicts.set(key, conflictSaid(env, repo, { branch, main: base, files }, alone));
+			return conflicts.get(key)!;
+		};
 		const conflict = result.mergeConflict
-			? [
-					{
-						command: "(merging the batch onto main)",
-						exitCode: 1,
-						output: `conflicts in ${result.mergeConflict.join(", ")}`,
-					},
-				]
+			? [{ command: BATCH_MERGE, exitCode: 1, output: await saying(result.mergeConflict) }]
 			: [];
 		const checks = result.results.map((check) => ({
 			command: check.command,
@@ -441,6 +447,44 @@ function checksRunner(env: Env, repo: string): CheckRunner {
 		return { passed: result.passed, results: [...conflict, ...checks] };
 	};
 }
+
+// How long naming who changed a conflicted file may take at landing time, where it's advice that mustn't hold the
+// batch up. Past it, the conflict is told with its files alone.
+const CONFLICT_SAID_MS = 10_000;
+
+/**
+ * A conflict found while landing, in one line (see conflictLine). For a change that conflicted with the branch itself,
+ * each file's commits since the change left the branch are read Worker-side through Artifacts' API; that's caught,
+ * logged and bounded, and without it the line names just the files.
+ */
+async function conflictSaid(
+	env: Env,
+	repo: string,
+	at: { branch: string; main: string; files: string[] },
+	change?: { change: string; ref: string; source: { url: string } },
+): Promise<string> {
+	if (!change) return conflictLine(at.files, []);
+	const history: ReadHistory = (name, read) => withHistory(env.ARTIFACTS, name, read);
+	const naming = (async () => {
+		const placed = await changeAgainst(history, repo, at.branch, at.main, change);
+		if (!placed || "error" in placed) return [];
+		return touchedSince(history, repo, at.branch, at.main, placed.base, at.files);
+	})().catch((err) => {
+		console.error(`reading who changed ${change.change}'s conflicted files failed`, String(err));
+		return [] as TouchedBy[];
+	});
+	let timer: ReturnType<typeof setTimeout> | undefined;
+	const late = new Promise<TouchedBy[]>((resolve) => (timer = setTimeout(() => resolve([]), CONFLICT_SAID_MS)));
+	try {
+		return conflictLine(at.files, await Promise.race([naming, late]));
+	} finally {
+		if (timer !== undefined) clearTimeout(timer);
+	}
+}
+
+/** Notes a line on a change's attempt to land, for its merge commit's story. Never fails (see quietly). */
+const noteAttempt = (env: Env, repo: string, change: string, line: string) =>
+	quietly(() => env.REPO_CACHE.getByName(`repo:${repo}`).noteAttempt(change, line), undefined);
 
 function readBranchCommits(env: Env, repo: string, baseline: string, branch: string) {
 	const cache = () => env.REPO_CACHE.getByName(`repo:${repo}`);
@@ -495,7 +539,7 @@ function batchGitFor(env: Env, repo: string): BatchGit {
 			);
 			// Retry after a brief outage too. The push names the main it lands on, so a batch that already landed
 			// finds main moved.
-			const landed = await rpcRetried<{ commits: string[] } | { moved: true } | { error: string }>(() =>
+			const landed = await rpcRetried<LandingResult>(() =>
 				gate().landBatch({
 					repo,
 					branch,
@@ -506,7 +550,15 @@ function batchGitFor(env: Env, repo: string): BatchGit {
 				}),
 			);
 			if ("moved" in landed) return "moved";
-			if ("error" in landed) fail(500, `landing the batch failed: ${landed.error}`);
+			if ("error" in landed) {
+				const merge = landed.conflict && merges.find((each) => each.change === landed.conflict!.change);
+				if (!merge || !landed.conflict) fail(500, `landing the batch failed: ${landed.error}`);
+				const source = { url: (await sourceOf(merge)).remote };
+				const files = landed.conflict.files;
+				const said = await conflictSaid(env, repo, { branch, main: base, files }, { ...merge, source });
+				await noteAttempt(env, repo, merge.change, said);
+				fail(500, `landing the batch failed: ${merge.change} doesn't merge onto the batch: ${said}`);
+			}
 			return { commits: landed.commits };
 		},
 		checksBranch: async ({ base, branch, changes, to, ref }) => {

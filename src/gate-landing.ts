@@ -16,7 +16,9 @@ export const pushBusy = (output: string) => /receive_pack_busy|repository is bus
 
 export type ReadChange = { change: string; head: string; files: string[] } | { change: string; error: string };
 export type LandingMerge = BatchSource & { head: string; claimed: Omit<MergeClaim, "base"> };
-export type LandingResult = { commits: string[] } | { moved: true } | { error: string };
+/** A change that didn't merge onto the batch, and the files it conflicted on. */
+export type LandingConflict = { change: string; files: string[] };
+export type LandingResult = { commits: string[] } | { moved: true } | { error: string; conflict?: LandingConflict };
 export type ChecksChange = { change: string; remote: string; token: string; ref: string; head: string };
 export type ChecksBranch = {
 	changes: ChecksChange[];
@@ -178,20 +180,26 @@ async function commitMerge(
 	merge: LandingMerge,
 	base: string,
 	stamper: Stamper | undefined,
-): Promise<{ commit: string } | { error: string }> {
+): Promise<{ commit: string } | { error: string; conflict?: LandingConflict }> {
 	const identity = `-c user.name="${BOT.name}" -c user.email="${BOT.email}"`;
-	// Always a merge commit, never a fast-forward, because the audit reads the merge's trailers.
+	// Always a merge commit, never a fast-forward, because the audit reads the merge's trailers. The conflicted files
+	// are listed between two markers, so the Worker can name who changed them.
 	const script =
 		`git merge -q --no-ff --no-commit ${merge.head} >/tmp/merge.out 2>&1 || { echo CONFLICT; ` +
-		"git diff --name-only --diff-filter=U; cat /tmp/merge.out; git merge --abort; exit 1; }\n" +
+		"git -c core.quotePath=false diff --name-only --diff-filter=U; echo CONFLICT-END; cat /tmp/merge.out; git merge --abort; exit 1; }\n" +
 		`git ${identity} commit -q --no-verify -F - >/tmp/commit.out 2>&1 || { cat /tmp/commit.out; exit 2; }\n` +
 		"git rev-parse HEAD";
 	const message = await mergeMessage({ ...merge.claimed, base }, stamper);
 	const ran = await run(container, ["bash", "-c", script], WORKDIR, message);
-	if (ran.exitCode === 1)
+	if (ran.exitCode === 1) {
+		const [, listed = "", said = ""] = ran.output.match(/^CONFLICT\n([\s\S]*?)CONFLICT-END\n([\s\S]*)$/) ?? [];
+		const files = listed.split("\n").filter(Boolean);
+		const output = listed || said ? `${listed}${said}` : ran.output.replace(/^CONFLICT\n/, "");
 		return {
-			error: `merging ${merge.change} onto the batch failed: ${clip(ran.output.replace(/^CONFLICT\n/, ""), 500)}`,
+			error: `merging ${merge.change} onto the batch failed: ${clip(output, 500)}`,
+			...(files.length ? { conflict: { change: merge.change, files } } : {}),
 		};
+	}
 	if (ran.exitCode !== 0) return { error: `committing ${merge.change}'s merge failed: ${clip(ran.output, 500)}` };
 	return { commit: ran.output.trim() };
 }
