@@ -289,7 +289,9 @@ function MergePolicyTerms({ policy, verify }: { policy: Policy; verify: string[]
 			) : null}
 			<dt>Merge checks</dt>
 			<dd>
-				{verify.length ? verify.map((command) => <code key={command}>{command}</code>) : "No checks before merging"}
+				{verify.length
+					? verify.map((command) => <code key={command}>{command}</code>)
+					: "None: changes that merge cleanly but break together aren't caught"}
 			</dd>
 		</>
 	);

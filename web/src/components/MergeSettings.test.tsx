@@ -17,4 +17,15 @@ describe("merge settings", () => {
 		expect(html).toMatch(/Up to 10 minutes per command/);
 		expect(html).toMatch(/No secrets or environment variables/);
 	});
+
+	it("say why checks matter while a repo has none, and stop once it has one", () => {
+		const settings = (verify: string[]) =>
+			({ branch: "main", policy: { required: 1, vetoes: [] }, verify }) as unknown as RepoSnapshot;
+		const without = renderToStaticMarkup(<MergeSettings snapshot={settings([])} save={async () => ({}) as never} />);
+		expect(without).toMatch(/Without checks, nothing catches two changes that merge cleanly but break together/);
+		const withChecks = renderToStaticMarkup(
+			<MergeSettings snapshot={settings(["npm test"])} save={async () => ({}) as never} />,
+		);
+		expect(withChecks).not.toMatch(/Without checks/);
+	});
 });

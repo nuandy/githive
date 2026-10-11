@@ -24,6 +24,7 @@ export function MergeChecks({ draft, update, busy, branch }: MergeChecksProps) {
 					Commands that must pass on a change merged into {branch} before it lands, run by GitHive in its own container.
 					None: a change merges once approved, and no container runs.
 				</p>
+				{draft.verify.some((command) => command.trim()) ? null : <NoChecksHint />}
 				{draft.verify.map((command, index) => (
 					<div key={index} className="repo-settings__add">
 						<label className="sr-only" htmlFor={`check-${index}`}>
@@ -76,6 +77,18 @@ export function MergeChecks({ draft, update, busy, branch }: MergeChecksProps) {
 	);
 }
 
+/** Why a repo with agents working in parallel wants checks, shown while it has none. */
+function NoChecksHint() {
+	return (
+		<p className="callout callout--warn">
+			Without checks, nothing catches two changes that merge cleanly but break together, like one agent renaming a
+			function while another adds a call to its old name. A build or a typecheck catches most of these:{" "}
+			<code>npm run build</code>, <code>npx tsc --noEmit</code>, <code>go build ./...</code> or <code>cargo check</code>
+			.
+		</p>
+	);
+}
+
 /** What the checks run in: the shell, the tools installed, the limits, and what isn't there. */
 function CheckEnvironment({ branch }: { branch: string }) {
 	return (
@@ -88,12 +101,12 @@ function CheckEnvironment({ branch }: { branch: string }) {
 			</p>
 			<ul>
 				<li>
-					Debian, with Node 24, npm and git. Python 3 (with uv), Go and Rust too, when the repo has a pyproject.toml or
-					requirements.txt, a go.mod, or a Cargo.toml.
+					Debian, with Node 24, npm and git. Python 3 (with uv), Go, Rust and Bun too, when the repo has a
+					pyproject.toml or requirements.txt, a go.mod, a Cargo.toml, or a bun.lock.
 				</li>
 				<li>
-					Dependencies installed first: npm ci (npm install without a lockfile) unless a check installs them, and
-					Python's, Go's and Rust's. Skipped while they're unchanged.
+					Dependencies installed first: npm ci (npm install without a lockfile) unless a check installs them, or bun
+					install for a Bun repo, and Python's, Go's and Rust's. Skipped while they're unchanged.
 				</li>
 				<li>
 					Up to 10 minutes per command, in 1 vCPU and 3 GiB of memory (2 vCPU and 6 GiB once checks run out of memory).
