@@ -66,6 +66,9 @@ export interface ClaimInput {
 export type ClaimOutcome = { ok: true } | { ok: false; conflicts: Conflict[]; stillHeld?: string[] };
 export type ReleaseOutcome = { ok: true } | { ok: false; refused: string };
 
+/** A change, and the files it would merge. */
+export type Scope = { change: string; files: string[] };
+
 export interface ChangeView {
 	claim?: ClaimRecord;
 	/** The change's releases, oldest first. */
@@ -78,6 +81,8 @@ export interface ClaimStore {
 	readChange(change: string): Promise<ChangeView>;
 	/** Everything bearing on merging `files` for `change`: its own claim and any covering the files. */
 	readScope(change: string, files: string[]): Promise<ClaimsView>;
+	/** readScope for several changes at once, reading each record once for all of them. */
+	readScopes(scopes: Scope[]): Promise<ClaimsView[]>;
 	claim(input: ClaimInput, stamper?: Stamper): Promise<ClaimOutcome>;
 	release(
 		input: { change: string; agent: string; reason: string; mergedAs?: string },
@@ -258,32 +263,66 @@ class Claims implements ClaimStore {
 		return this.viewOf(await this.readEverything());
 	}
 
+	private indexRepoOf(change: string) {
+		return this.repos.spread ? changeRepoOf(change, this.repos.spread) : -1;
+	}
+
 	private indexRemote(change: string) {
-		return this.repos.spread ? this.input.recordsRemote!(changeRepoOf(change, this.repos.spread)) : this.input.remote();
+		return this.repos.remote(this.indexRepoOf(change));
 	}
 
-	// The shards a change has claimed in below the registry, from its index, or null if it has none.
-	private async indexed(change: string): Promise<string[] | null> {
-		const [entry] = await readRefs<{ shards?: string[] }>(await this.indexRemote(change), [
-			changeRef(this.input.repo, change),
-		]);
-		return entry ? (entry.state.shards ?? []) : null;
+	// The shards each change has claimed in below the registry, from its index, or null if it has none. One read
+	// per repo holding indexes.
+	private async indexed(changes: string[]): Promise<Map<string, string[] | null>> {
+		const unique = [...new Set(changes)];
+		const byRepo = this.repos.group(unique, (change) => this.indexRepoOf(change));
+		const read = await Promise.all(
+			[...byRepo].map(async ([repoIndex, group]) =>
+				readRefs<{ shards?: string[] }>(
+					await this.repos.remote(repoIndex),
+					group.map((change) => changeRef(this.input.repo, change)),
+				),
+			),
+		);
+		const byRef = new Map(read.flat().map((entry) => [entry.ref, entry.state.shards ?? []]));
+		return new Map(unique.map((change) => [change, byRef.get(changeRef(this.input.repo, change)) ?? null]));
 	}
 
-	// The records that may hold a change's claim: the registry, the shards its index names, and `also`. A change
-	// with no index has claimed only in the registry, unless its shards predate indexing; then every shard is read.
-	private async changeEntries(change: string, also: () => string[] = () => []): Promise<Entry[]> {
-		// Fetch every records repo's credentials while the index is read.
+	// The records that may hold each scope's change's claim, and the shards covering its files or above them. A
+	// change with no index has claimed only in the registry, unless its shards predate indexing; then every shard
+	// is read. Each record is read once for all the scopes.
+	private async scopeEntries(scopes: Scope[]): Promise<Entry[][]> {
+		// Fetch every records repo's credentials while the indexes are read.
 		if (this.sharded) for (const remote of this.repos.all()) remote.catch(() => undefined);
-		const [index, root] = await Promise.all([
-			this.sharded ? this.indexed(change) : Promise.resolve(undefined),
+		const changes = scopes.map((scope) => scope.change);
+		const [early, root] = await Promise.all([
+			this.sharded ? this.indexed(changes) : Promise.resolve(undefined),
 			this.readRoot(),
 		]);
-		if (!this.sharded) return root;
-		// Sharded since this store was made, so read the index now.
-		const own = index === undefined ? await this.indexed(change) : index;
-		if (own === null && !this.alwaysIndexed) return [...root, ...(await this.readAll())];
-		return [...root, ...(await this.readShards([...(own ?? []), ...also()]))];
+		if (!this.sharded) return scopes.map(() => root);
+		// Sharded since this store was made, so read the indexes now.
+		const indexes = early ?? (await this.indexed(changes));
+		const unindexed = (scope: Scope) => indexes.get(scope.change) === null && !this.alwaysIndexed;
+		const wanted = scopes.map((scope) => new Set([...(indexes.get(scope.change) ?? []), ...this.covering(scope)]));
+		const all = scopes.some(unindexed) ? await this.readAll() : undefined;
+		const read = all ?? (await this.readShards(wanted.flatMap((shards) => [...shards])));
+		return scopes.map((scope, index) => {
+			if (all && unindexed(scope)) return [...root, ...all];
+			return [...root, ...read.filter((entry) => wanted[index]!.has(entry.shard))];
+		});
+	}
+
+	// The shards covering a scope's files, or above them.
+	private covering(scope: Scope) {
+		return scope.files.flatMap((file) => {
+			const shard = shardOf(file, this.depth);
+			return [...ancestorsOf(shard), shard];
+		});
+	}
+
+	private async changeEntries(change: string): Promise<Entry[]> {
+		const [entries] = await this.scopeEntries([{ change, files: [] }]);
+		return entries ?? [];
 	}
 
 	async readChange(change: string): Promise<ChangeView> {
@@ -295,15 +334,12 @@ class Claims implements ClaimStore {
 	}
 
 	async readScope(change: string, files: string[]): Promise<ClaimsView> {
-		// The change's own records, and every shard covering the files or above them.
-		return this.viewOf(
-			await this.changeEntries(change, () =>
-				files.flatMap((file) => {
-					const shard = shardOf(file, this.depth);
-					return [...ancestorsOf(shard), shard];
-				}),
-			),
-		);
+		const [view] = await this.readScopes([{ change, files }]);
+		return view!;
+	}
+
+	async readScopes(scopes: Scope[]): Promise<ClaimsView[]> {
+		return (await this.scopeEntries(scopes)).map((entries) => this.viewOf(entries));
 	}
 
 	// Unsharded, a claim goes in the registry. Sharded, each path goes in its shard, or all of them in one common

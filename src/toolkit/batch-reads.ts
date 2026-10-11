@@ -1,6 +1,7 @@
 import { repoOfUrl } from "../git-http";
 import { type CommitMeta, filesBetween, type HistorySource } from "./branch-history";
 import { atMost, type BatchGit, type Inspected } from "./merge";
+import type { BatchSource } from "./merge-types";
 import { cachingHistory, forgetTrees } from "./tree-reads";
 
 // Reads a batch's changes through the Artifacts API in the Worker instead of fetching them in the repo's Gate:
@@ -17,11 +18,18 @@ const BRANCH_WINDOW = 1000;
 const CHANGE_WINDOW = 200;
 const READS_AT_ONCE = 6;
 
+/** Changes' places on a branch, kept for the repo where every Worker instance can read them (see RepoCache). */
+export interface SharedPlacements {
+	read(branch: string, heads: string[]): Promise<Record<string, Placed>>;
+	keep(branch: string, placed: Placed[]): Promise<void>;
+}
+
 /** Inspects a batch through Artifacts. `fallback`, the Gate's inspect, reads the changes this can't place. */
 export function artifactsInspect(
 	history: ReadHistory,
 	project: string,
 	fallback: BatchGit["inspect"],
+	shared?: SharedPlacements,
 ): BatchGit["inspect"] {
 	return async ({ base, branch, changes }) => {
 		const chain = await branchChain(history, project, branch, base);
@@ -30,15 +38,17 @@ export function artifactsInspect(
 		// The batch's changes share most of their trees, so each is read once for all of them.
 		const reads = cachingHistory(history);
 		const where = `${project}|${branch}`;
+		const known = await recall(shared, where, branch, changes);
 		const inspected = await atMost(READS_AT_ONCE, changes, async (entry): Promise<Inspected | null> => {
 			try {
 				return await reads(entry.source ? repoOfUrl(entry.source.url) : project, (source) =>
-					readChange(source, where, entry.change, entry.ref, chain, onBranch),
+					readChange(source, where, entry, chain, onBranch),
 				);
 			} catch (err) {
 				return { change: entry.change, error: String(err) };
 			}
 		});
+		await share(shared, branch, where, inspected, known);
 		const unplaced = changes.filter((_, index) => inspected[index] === null);
 		if (!unplaced.length) return inspected as Inspected[];
 		const fetched = await fallback({ base, branch, changes: unplaced });
@@ -123,15 +133,50 @@ async function branchChain(
 	return chain;
 }
 
+// The places other Worker instances worked out for the heads the changes were last seen at, added to this
+// isolate's. Returns the heads that were known before reading.
+async function recall(shared: SharedPlacements | undefined, where: string, branch: string, changes: BatchSource[]) {
+	const seen = changes.flatMap((change) => (change.seen ? [change.seen] : []));
+	const known = new Set(seen.filter((head) => placements.has(placementKey(where, head))));
+	const missing = seen.filter((head) => !known.has(head));
+	if (!shared || !missing.length) return known;
+	const stored = await shared.read(branch, missing).catch((err) => {
+		console.error("reading the kept placements failed", String(err));
+		return {};
+	});
+	for (const placed of Object.values(stored)) {
+		remember(where, placed);
+		known.add(placed.head.hash);
+	}
+	return known;
+}
+
+// Keeps the places worked out here for other Worker instances: a change left out of this batch is gathered again.
+async function share(
+	shared: SharedPlacements | undefined,
+	branch: string,
+	where: string,
+	inspected: (Inspected | null)[],
+	known: Set<string>,
+) {
+	if (!shared) return;
+	const fresh = inspected.flatMap((each) => {
+		const placed = each && "head" in each ? placements.get(placementKey(where, each.head)) : undefined;
+		return placed && !known.has(placed.head.hash) ? [placed] : [];
+	});
+	if (fresh.length)
+		await shared.keep(branch, fresh).catch((err) => console.error("keeping placements failed", String(err)));
+}
+
 async function readChange(
 	source: HistorySource,
 	where: string,
-	change: string,
-	ref: string,
+	entry: BatchSource,
 	chain: CommitMeta[],
 	onBranch: Map<string, number>,
 ): Promise<Inspected | null> {
-	const placed = await placeChange(source, where, ref, chain, onBranch);
+	const { change } = entry;
+	const placed = await placeChange(source, where, entry.ref, chain, onBranch, entry.seen);
 	if (!placed) return null;
 	if ("error" in placed) return { change, error: placed.error };
 	return { change, head: placed.head.hash, files: placed.files };
@@ -139,14 +184,21 @@ async function readChange(
 
 // A change's head, its merge base with the branch and the files it changed since, or null if its history can't
 // be placed. The merge base is the newest branch commit the change reaches, as git's merge-base finds it; agents
-// merge the branch in rather than rebase.
+// merge the branch in rather than rebase. When the head it was last `seen` at is already placed, only the head is
+// read, to see that it hasn't moved.
 async function placeChange(
 	source: HistorySource,
 	where: string,
 	ref: string,
 	chain: CommitMeta[],
 	onBranch: Map<string, number>,
+	seen?: string,
 ): Promise<Placed | { error: string } | null> {
+	const placedAsSeen = seen ? placedBefore(where, seen, onBranch) : undefined;
+	if (placedAsSeen) {
+		const [now] = await source.log(ref, 1, 0);
+		if (now?.hash === seen) return placedAsSeen;
+	}
 	const own = await source.log(ref, CHANGE_WINDOW, 0);
 	const head = own[0];
 	if (!head) return { error: "its branch couldn't be read" };

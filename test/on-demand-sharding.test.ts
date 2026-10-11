@@ -233,6 +233,26 @@ describe("claims before and after sharding", { timeout: 60_000 }, () => {
 			),
 		).toBe(`=${view.tips.get("")} src%2Fb=${view.tips.get("src/b")}`);
 	});
+	it("reads several changes' scopes at once, as each alone would, listing the records once", async () => {
+		await (await store()).claim(want("a-1", ["src/a/"]));
+		await shard();
+		await (await store()).claim(want("b-1", ["src/b/"]));
+		await (await store()).claim(want("c-1", ["lib/c/"]));
+		const scopes = [
+			{ change: "a-1", files: ["src/a/x.ts"] },
+			{ change: "b-1", files: ["src/b/x.ts"] },
+			{ change: "c-1", files: ["lib/c/y.ts", "src/b/z.ts"] },
+		];
+		const listings = () => server.requests.filter((request) => request.startsWith("GET refs")).length;
+		const alone = [];
+		for (const scope of scopes) alone.push(await (await store()).readScope(scope.change, scope.files));
+		const s = await store();
+		const before = listings();
+		const together = await s.readScopes(scopes);
+		expect(together).toEqual(alone);
+		// The registry once, then the indexes and the shards, all in the project repo here.
+		expect(listings() - before).toBeLessThanOrEqual(3);
+	});
 });
 
 describe("sharding on demand through the toolkit", { timeout: 120_000 }, () => {

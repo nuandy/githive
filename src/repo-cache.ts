@@ -1,5 +1,6 @@
 import { DurableObject } from "cloudflare:workers";
 import { countingRequests, describeCounts } from "./git-http";
+import type { Placed } from "./toolkit/batch-reads";
 import { type HiveEvent, pushEvents, settledEvents, withEvents } from "./hive-events";
 import { makeAgentFork, makeSeed } from "./toolkit/env";
 import { type Stretch, extendStretch, stretchSummary } from "./toolkit/stretch";
@@ -86,9 +87,10 @@ const KEPT_PREFIXES = [
 	"news:",
 	"merge:",
 	"pack:",
+	"placed:",
 ];
 
-/** How long a change's prefetched pack is kept for its landing. */
+/** How long a change's prefetched pack, or its place on a branch, is kept for its landing. */
 const PACK_KEPT_MS = 2 * 60 * 60_000;
 
 /** A change's merge check as status worked it out, for the change head and branch head in `key`. */
@@ -168,10 +170,7 @@ export class RepoCache extends DurableObject<Env> {
 
 	/** Keeps the objects a change at `head` adds, as its fork packed them, until its batch lands (see tree-landing.ts). */
 	async keepChangePack(head: string, pack: Uint8Array) {
-		const stale = [...(await this.ctx.storage.list<{ at: number }>({ prefix: "pack:" }))]
-			.filter(([, kept]) => kept.at < Date.now() - PACK_KEPT_MS)
-			.map(([key]) => key);
-		if (stale.length) await this.ctx.storage.delete(stale);
+		await this.forgetOlder("pack:");
 		await this.ctx.storage.put(`pack:${head}`, { at: Date.now(), pack });
 	}
 
@@ -184,6 +183,34 @@ export class RepoCache extends DurableObject<Env> {
 			for (const [key, value] of kept) packs[key.slice("pack:".length)] = value.pack;
 		}
 		return packs;
+	}
+
+	/** Keeps changes' places on `branch` for gathering batches (see batch-reads.ts). */
+	async keepPlacements(branch: string, placed: Placed[]) {
+		await this.forgetOlder("placed:");
+		const at = Date.now();
+		const entries = placed.map((each) => [`placed:${branch}|${each.head.hash}`, { at, placed: each }] as const);
+		for (let i = 0; i < entries.length; i += STORAGE_BATCH)
+			await this.ctx.storage.put(Object.fromEntries(entries.slice(i, i + STORAGE_BATCH)));
+	}
+
+	/** The places kept for these heads on `branch`, by head. */
+	async placements(branch: string, heads: string[]) {
+		const found: Record<string, Placed> = {};
+		for (let i = 0; i < heads.length; i += STORAGE_BATCH) {
+			const keys = heads.slice(i, i + STORAGE_BATCH).map((head) => `placed:${branch}|${head}`);
+			const kept = await this.ctx.storage.get<{ at: number; placed: Placed }>(keys);
+			for (const value of kept.values()) found[value.placed.head.hash] = value.placed;
+		}
+		return found;
+	}
+
+	private async forgetOlder(prefix: string) {
+		const stale = [...(await this.ctx.storage.list<{ at: number }>({ prefix }))]
+			.filter(([, kept]) => kept.at < Date.now() - PACK_KEPT_MS)
+			.map(([key]) => key);
+		for (let i = 0; i < stale.length; i += STORAGE_BATCH)
+			await this.ctx.storage.delete(stale.slice(i, i + STORAGE_BATCH));
 	}
 
 	/** Note pushes from push events. Events can arrive late, twice or out of order, so the newest wins. */

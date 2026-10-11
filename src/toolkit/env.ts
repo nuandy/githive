@@ -1,4 +1,5 @@
 import { linkTo } from "../github";
+import type { SharedPlacements } from "./batch-reads";
 import { readBranchHistory } from "./branch-history";
 import { DEFAULT_POLICY, hostedRoles } from "./mcp";
 import { effectivePolicy } from "./votes";
@@ -15,7 +16,7 @@ import type { ToolContext, HostedStatus } from "./mcp";
 import type { BatchGit, BatchSource, CheckRunner } from "./merge";
 import { recordsRepoName } from "./shards";
 import { makeStamper } from "./stamp";
-import { prefetchChange, treeLanding, type TreeReads } from "./tree-landing";
+import { type ChangePacks, prefetchChange, treeLanding, type TreeReads } from "./tree-landing";
 import { headsForClaims } from "../push-events";
 import { gitLanding, LANDING_RECORDS_REPO, landingRef, lazyLog, type LeaseRecord } from "./landing-lease";
 
@@ -290,10 +291,13 @@ function gateParts(env: Env) {
 			if (treeLandingOn(env)) return;
 			await bootGate(env, repo, `repo:${repo}`);
 		},
-		// With trees, a merge fetches its own change while it waits for its turn (see tree-landing.ts).
+		// A merge places its own change while it waits for its turn, and with trees fetches it too (see
+		// tree-landing.ts).
 		prefetchChange: async (repo, branch, change) => {
-			if (treeLandingOn(env)) await prefetchChange(treeReads(env, repo), branch, change);
+			const { packs, ...reads } = treeReads(env, repo);
+			await prefetchChange({ ...reads, ...(treeLandingOn(env) ? { packs } : {}) }, branch, change);
 		},
+		placements: (repo) => sharedPlacements(env, repo),
 		// A batch's Git work runs in the repo's own Gate container, which never runs a change's code (see BatchGit).
 		batchGit: (repo) => batchGitFor(env, repo),
 		// The landing lease is a record in the repo's first records repo (see landingLog). Outcomes are cached in the
@@ -500,8 +504,8 @@ function batchGitFor(env: Env, repo: string): BatchGit {
 	return { ...inGate, land };
 }
 
-/** How a landing with trees reads the repo, and the change packs merges kept for it in the RepoCache. */
-function treeReads(env: Env, repo: string): TreeReads {
+/** How a landing with trees reads the repo, and the change packs and places merges kept for it in the RepoCache. */
+function treeReads(env: Env, repo: string): TreeReads & { packs: ChangePacks } {
 	const cache = () => env.REPO_CACHE.getByName(`repo:${repo}`);
 	return {
 		history: (name, read) => withHistory(env.ARTIFACTS, name, read),
@@ -511,6 +515,15 @@ function treeReads(env: Env, repo: string): TreeReads {
 			keep: (head, pack) => cache().keepChangePack(head, pack),
 			read: (heads) => rpc(cache().changePacks(heads)),
 		},
+		placements: sharedPlacements(env, repo),
+	};
+}
+
+function sharedPlacements(env: Env, repo: string): SharedPlacements {
+	const cache = () => env.REPO_CACHE.getByName(`repo:${repo}`);
+	return {
+		keep: (branch, placed) => cache().keepPlacements(branch, placed),
+		read: (branch, heads) => rpc(cache().placements(branch, heads)),
 	};
 }
 

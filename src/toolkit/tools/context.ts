@@ -5,7 +5,7 @@ import type { HiveEvent } from "../../hive-events";
 import { projectBranch } from "../../project-branch";
 import { GitCasLog } from "../../record-log";
 import { Timing } from "../../timing";
-import type { ReadHistory } from "../batch-reads";
+import type { ReadHistory, SharedPlacements } from "../batch-reads";
 import { presentClaim } from "../branch-scope";
 import type { ClaimStore } from "../claim-store";
 import type { ClaimRecord, Registry } from "../claims";
@@ -63,8 +63,10 @@ export interface ToolContext {
 	prepareChecks?: (repo: string) => (gate: string) => Promise<void>;
 	/** Starts the repo's Gate while a batch is being read, so it's ready to land it. */
 	prepareLanding?: (repo: string) => Promise<void>;
-	/** Fetches a change for its landing on `branch` while its merge waits for its turn. */
+	/** Places a change on `branch`, and fetches it for its landing, while its merge waits for its turn. */
 	prefetchChange?: (repo: string, branch: string, change: BatchChange) => Promise<void>;
+	/** Changes' places on a branch, kept for every Worker instance gathering a batch. */
+	placements?: (repo: string) => SharedPlacements;
 	/** The batch landing on a branch and its recent outcomes. Without it, a merge knows only its own. */
 	landing?: (repo: string, branch: string) => Landing;
 	/** Stamps what this caller writes with their verified identity and agent name. Without it, nothing is stamped. */

@@ -2,7 +2,14 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { artifactsInspect, changeAgainst, forgetChains, type ReadHistory } from "../src/toolkit/batch-reads";
+import {
+	artifactsInspect,
+	changeAgainst,
+	forgetChains,
+	type Placed,
+	type ReadHistory,
+	type SharedPlacements,
+} from "../src/toolkit/batch-reads";
 import type { CommitMeta, HistorySource, TreeEntry } from "../src/toolkit/branch-history";
 import { agentClone, pushChange } from "./helpers/agents";
 import { gitHistory } from "./helpers/git-history";
@@ -36,7 +43,7 @@ function repos(logs: Record<string, Record<string, CommitMeta[]>>): { history: R
 	const reads: string[] = [];
 	const source = (repo: string): HistorySource => ({
 		log: async (ref, limit, offset) => (
-			reads.push(`${repo} log ${ref}`),
+			reads.push(`${repo} log ${ref}${limit === 1 ? " head" : ""}`),
 			(logs[repo]?.[ref] ?? []).slice(offset, offset + limit)
 		),
 		readCommit: async () => null,
@@ -146,6 +153,82 @@ describe("a batch read through Artifacts' API", () => {
 			"fork--proj--agent--a tree t-m1",
 			"fork--proj--agent--a tree t-c2",
 		]);
+	});
+
+	describe("with places kept by other Worker instances", () => {
+		const kept = () => {
+			const store = new Map<string, Placed>();
+			const shared: SharedPlacements = {
+				read: async (branch, heads) =>
+					Object.fromEntries(
+						heads.flatMap((head) => store.get(`${branch}|${head}`) ?? []).map((p) => [p.head.hash, p]),
+					),
+				keep: async (branch, placed) => {
+					for (const each of placed) store.set(`${branch}|${each.head.hash}`, each);
+				},
+			};
+			return { store, shared };
+		};
+		const forkLog = [commit("c2", ["c1"]), commit("c1", ["m1"]), ...main.slice(2)];
+
+		it("reads only a change's head when another instance placed it as it was seen", async () => {
+			const { store, shared } = kept();
+			const placing = repos({ proj: { main }, "fork--proj--agent--a": { "changes/one": forkLog } });
+			await artifactsInspect(
+				placing.history,
+				"proj",
+				vi.fn(),
+				shared,
+			)({
+				base: "m3",
+				branch: "main",
+				changes: [change("one")],
+			});
+			expect([...store.keys()]).toEqual(["main|c2"]);
+			// Another isolate, which has placed nothing itself.
+			forgetChains();
+			const { history, reads } = repos({ proj: { main }, "fork--proj--agent--a": { "changes/one": forkLog } });
+			const read = await artifactsInspect(
+				history,
+				"proj",
+				vi.fn(),
+				shared,
+			)({
+				base: "m3",
+				branch: "main",
+				changes: [{ ...change("one"), seen: "c2" }],
+			});
+			expect(read).toEqual([{ change: "one", head: "c2", files: ["b.txt", "c.txt"] }]);
+			expect(reads.filter((r) => r.startsWith("fork"))).toEqual(["fork--proj--agent--a log changes/one head"]);
+		});
+
+		it("reads a change again in full when its head moved since it was seen", async () => {
+			const { shared } = kept();
+			const placing = repos({ proj: { main }, "fork--proj--agent--a": { "changes/one": forkLog.slice(1) } });
+			await artifactsInspect(
+				placing.history,
+				"proj",
+				vi.fn(),
+				shared,
+			)({
+				base: "m3",
+				branch: "main",
+				changes: [change("one")],
+			});
+			forgetChains();
+			const { history } = repos({ proj: { main }, "fork--proj--agent--a": { "changes/one": forkLog } });
+			const read = await artifactsInspect(
+				history,
+				"proj",
+				vi.fn(),
+				shared,
+			)({
+				base: "m3",
+				branch: "main",
+				changes: [{ ...change("one"), seen: "c1" }],
+			});
+			expect(read).toEqual([{ change: "one", head: "c2", files: ["b.txt", "c.txt"] }]);
+		});
 	});
 });
 

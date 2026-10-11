@@ -131,18 +131,20 @@ export async function landedAlready(input: MergeInput, landing: Landing, head: s
 // Whether a change may land: its claim covers every file and no one else's does, its head has the approvals, and its
 // checks haven't failed on that head. Another agent's change is also held back if a reviewer asked for changes.
 // Only the records are read here; the batch finds out whether it merges cleanly.
+/** The files as the claims records name them, which differs for a branch other than the project's. */
+export const scopedFiles = (input: MergeInput, files: string[]) => (input.scope ? files.map(input.scope) : files);
+
 export async function validated(
 	input: MergeInput,
 	proposed: Proposed,
-	seen?: VotesView,
+	batch?: { votes: VotesView; claims: ClaimsView },
 ): Promise<{ ok: true; ready: Ready } | Refused> {
 	const { head, files } = proposed;
-	// The files as the claims records name them, which differs for a branch other than the project's.
-	const scoped = input.scope ? files.map(input.scope) : files;
+	const scoped = scopedFiles(input, files);
 	// The claims bearing on these files, and the votes on its head (read once for the whole batch when given).
 	const [claims, votes] = await Promise.all([
-		input.store.readScope(proposed.change, scoped),
-		seen ?? input.votes.readFor([head]),
+		batch?.claims ?? input.store.readScope(proposed.change, scoped),
+		batch?.votes ?? input.votes.readFor([head]),
 	]);
 	const own = claims.claims.find((claim) => claim.change === proposed.change);
 	const reasons = claimReasons(proposed, scoped, claims, own);

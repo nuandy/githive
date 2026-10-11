@@ -36,8 +36,8 @@ export type CheckRunner = (input: {
 	gate?: string;
 }) => Promise<{ passed: boolean; results: CheckResult[] }>;
 
-/** A change in a batch before its head is read. */
-export type BatchSource = Omit<BatchChange, "head">;
+/** A change in a batch before its head is read, and the head it was last seen at, if any. */
+export type BatchSource = Omit<BatchChange, "head"> & { seen?: string };
 
 /** A change's head and the files it changed since it left main, or why it couldn't be read. */
 export type Inspected = { change: string; head: string; files: string[] } | { change: string; error: string };

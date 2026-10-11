@@ -5,7 +5,7 @@ import { concat } from "../git-fetch";
 import { Chunks, fetchPackSince, receivePack } from "../git-pack";
 import { MemoryFS } from "../memory-fs";
 import { jitteredDelay, sleep } from "../retry";
-import { placeBatch, type Placed, type ReadHistory } from "./batch-reads";
+import { placeBatch, type Placed, type ReadHistory, type SharedPlacements } from "./batch-reads";
 import type { TreeEntry } from "./branch-history";
 import { mergeMessage } from "./merge-commit";
 import { atMost, type BatchChange, type BatchGit } from "./merge";
@@ -45,6 +45,7 @@ export interface TreeReads {
 	project: string;
 	remote: (scope: "read" | "write") => Promise<Remote>;
 	packs?: ChangePacks;
+	placements?: SharedPlacements;
 }
 
 export interface TreeLandingInput extends TreeReads {
@@ -58,18 +59,20 @@ export interface TreeLandingInput extends TreeReads {
 const KEPT_PACK_MOST = 1024 * 1024;
 
 /**
- * Fetches a merge's own change from its fork while the merge waits for its turn, and keeps it for the batch that
- * lands it, so that landing, which holds every other merge up, needn't wait on the fork. Artifacts takes seconds to
- * work out any pack, however small.
+ * Places a merge's own change on the branch while the merge waits for its turn, and fetches it from its fork, and
+ * keeps both for the batch that lands it. Gathering and landing that batch hold every other merge up, so they
+ * shouldn't wait on the change's fork: Artifacts takes seconds to work out any pack, however small.
  */
 export async function prefetchChange(input: TreeReads, branch: string, change: BatchChange) {
-	if (!input.packs || !change.source) return;
+	if (!change.source) return;
 	const tip = await branchHead(await input.remote("read"), branch);
 	if (!tip) return;
 	// Through the cache, so the landing finds the change's trees already read.
 	const placing = await placeBatch(cachingHistory(input.history), input.project, branch, tip, [change]);
 	const placed = placing?.placed[0];
 	if (!placed || placed.head.hash !== change.head) return;
+	await input.placements?.keep(branch, [placed]);
+	if (!input.packs) return;
 	const pack = await fetchPackSince(change.source, [change.head], [placed.base.hash], { bytes: KEPT_PACK_MOST });
 	if (pack !== "too big") await input.packs.keep(change.head, concat(pack.parts));
 }

@@ -3,7 +3,7 @@ import type { Landing, Settled } from "./landing";
 import { checkAndPutOut, gateName, newPlace, type Place } from "./merge-checks";
 import { land, type Landed, leaveOutLanded } from "./merge-land";
 import { type Holding, STEP_MS } from "./merge-lease";
-import { conflict, validated } from "./merge-ready";
+import { conflict, scopedFiles, validated } from "./merge-ready";
 import type { BatchSource, Candidate, Inspected, MergeInput, Ready, Refused } from "./merge-types";
 import { approval, countedVotes } from "./votes";
 
@@ -14,8 +14,6 @@ export const MAX_BATCH = 64;
 // The prior for a branch's failure rate, 1 in 20, so a new branch starts with batches of 20.
 const PRIOR_FAILED = 1;
 const PRIOR_OUTCOMES = 20;
-// How many of a batch's changes are checked against their claims at once. Their votes are read once for all of them.
-const VALIDATIONS_AT_ONCE = 8;
 // A Worker request holds only so many connections open.
 const SOURCES_AT_ONCE = 6;
 
@@ -197,21 +195,29 @@ async function sizeLimit(input: MergeInput, landing: Landing) {
 	return Math.min(sized, input.maxBatch ?? MAX_BATCH);
 }
 
-// Checks each change against its claim and votes, a few at a time because a Worker request holds only so many
-// connections open. The votes on all their heads are read once.
+// Checks each change against its claim and votes. The votes on all their heads, and the claims bearing on all
+// their files, are read once for the batch.
 async function validateAll(input: MergeInput, sources: SeenSource[], read: Inspected[]) {
-	const heads = read.flatMap((inspected) => ("error" in inspected ? [] : [inspected.head]));
-	const seen = await input.votes.readFor(heads);
-	return atMost(VALIDATIONS_AT_ONCE, read, async (inspected, index) => {
-		if ("error" in inspected) {
-			console.error(`${inspected.change} can't land with the others now: ${inspected.error}`);
-			return null;
-		}
-		const source = sources[index];
-		if (!source) return null;
-		const proposed = { ...source, head: inspected.head, files: inspected.files, mine: index === 0 };
-		return validated(input, proposed, seen);
-	});
+	const readable = read.flatMap((inspected) => ("error" in inspected ? [] : [inspected]));
+	const [votes, claims] = await Promise.all([
+		input.votes.readFor(readable.map((inspected) => inspected.head)),
+		input.store.readScopes(
+			readable.map((inspected) => ({ change: inspected.change, files: scopedFiles(input, inspected.files) })),
+		),
+	]);
+	const claimsOf = new Map(readable.map((inspected, index) => [inspected, claims[index]!]));
+	return Promise.all(
+		read.map(async (inspected, index) => {
+			if ("error" in inspected) {
+				console.error(`${inspected.change} can't land with the others now: ${inspected.error}`);
+				return null;
+			}
+			const source = sources[index];
+			if (!source) return null;
+			const proposed = { ...source, head: inspected.head, files: inspected.files, mine: index === 0 };
+			return validated(input, proposed, { votes, claims: claimsOf.get(inspected)! });
+		}),
+	);
 }
 
 // Up to `count` other changes that may be ready to land with this one, oldest claims first: those approved as last
@@ -280,6 +286,5 @@ async function readBatch(
 	holding: Holding,
 ): Promise<Inspected[]> {
 	await holding.step(STEP_MS.gate);
-	const changes = sources.map(({ seen: _, ...source }) => source);
-	return input.batchGit.inspect({ base: baseHead, branch: input.branch, changes });
+	return input.batchGit.inspect({ base: baseHead, branch: input.branch, changes: sources });
 }

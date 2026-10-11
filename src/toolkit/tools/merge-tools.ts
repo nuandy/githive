@@ -48,7 +48,8 @@ export const mergeTools: ToolHandlers = {
 		const gate = ctx.batchGit
 			? ctx.batchGit(repo)
 			: fail(503, "GitHive can't land changes here: no Gate is set up to land them");
-		const batchGit = ctx.history ? { ...gate, inspect: artifactsInspect(ctx.history, repo, gate.inspect) } : gate;
+		const inspect = ctx.history && artifactsInspect(ctx.history, repo, gate.inspect, ctx.placements?.(repo));
+		const batchGit = inspect ? { ...gate, inspect } : gate;
 		return mergeChange({
 			remote: project,
 			branch: into,
