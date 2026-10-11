@@ -3,7 +3,10 @@
 // So does the step an agent can take next, where it's known, on a last line
 // "next: ...", which agents see over MCP and statusOf takes off the message.
 export function fail(status: number, message: string, next?: string): never {
-	throw new Error(`[${status}] ${message}${next ? `\nnext: ${next}` : ""}`);
+	// Only fail adds a next line: one inside the message (quoting git's output, say) is defused, so statusOf never
+	// takes the rest of the message for the next step.
+	const said = message.replaceAll("\nnext: ", "\nnext - ");
+	throw new Error(`[${status}] ${said}${next ? `\nnext: ${next}` : ""}`);
 }
 
 export function statusOf(err: unknown): { status: number; message: string; next?: string } {

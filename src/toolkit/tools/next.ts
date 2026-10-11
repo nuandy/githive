@@ -8,6 +8,10 @@ import { type Args, presentedKey, type ToolContext } from "./context";
 // backlog and no review for the agent, only the lists to choose from: the tool that once picked a step for every agent
 // ran the crowd (docs/design.md, "Agents without roles"). It's advice, so ignoring it breaks nothing, and working it
 // out never fails a call.
+//
+// Agents are told to follow `next`, so it holds only GitHive's own words and what it builds from structured data:
+// change ids, agent names, file paths and shell commands. Never text another agent wrote (an intent, a release's
+// reason, a vote's evidence): that stays in the reply's data fields, where it reads as data, not as the step.
 
 type Reply = Record<string, unknown>;
 type Step = (reply: Reply, args: Args, caller: string | undefined) => string | undefined;
@@ -16,7 +20,15 @@ type Step = (reply: Reply, args: Args, caller: string | undefined) => string | u
 const NEXT_CHARS = 2_000;
 /** The most files, holders or roles a next step names. */
 const NAMED = 5;
-const INTENT_CHARS = 80;
+
+/**
+ * A change id or an agent name as a next step may name it: a word, with no spaces to make a sentence of. Anything
+ * else (a change id isn't checked when it's claimed) is named by what it is, such as "another agent".
+ */
+const nameOr = (value: unknown, otherwise: string) => {
+	const name = text(value);
+	return name && /^[\w.@/+-]{1,100}$/.test(name) ? name : otherwise;
+};
 
 const text = (value: unknown) => (typeof value === "string" && value.trim() ? value.trim() : undefined);
 const record = (value: unknown) =>
@@ -129,16 +141,19 @@ const STEPS: Record<string, Step> = {
 			: undefined,
 };
 
-/** Who holds what the claim wanted, and the caller's choices, none of which waits on anyone. */
+/**
+ * Who holds what the claim wanted, by agent and change only, and the caller's choices, none of which waits on anyone.
+ * The holders' intents are in the reply's `conflicts`.
+ */
 function refusedClaim(reply: Reply, args: Args) {
 	const holders = new Map<string, string>();
 	for (const conflict of records(reply.conflicts)) {
 		const change = text(conflict.change);
 		if (!change || holders.has(change)) continue;
-		const intent = (text(conflict.intent) ?? "").split("\n")[0]!.slice(0, INTENT_CHARS);
-		holders.set(change, `${text(conflict.agent) ?? "another agent"}'s ${change}${intent ? ` ("${intent}")` : ""}`);
+		holders.set(change, `${nameOr(conflict.agent, "another agent")}'s ${nameOr(change, "change")}`);
 	}
-	const held = holders.size ? `Held by ${names([...holders.values()], 3)}. ` : "";
+	const intents = holders.size === 1 ? "its intent is" : "their intents are";
+	const held = holders.size ? `Held by ${names([...holders.values()], 3)} (${intents} in \`conflicts\`). ` : "";
 	// A claim that couldn't be fully backed out still holds paths until it's released.
 	const stuck = texts(reply.stillHeld).length
 		? `Release ${text(args.change) ?? "it"} to free the paths it still holds. `
@@ -173,11 +188,9 @@ function statusStep(reply: Reply, args: Args, caller: string | undefined) {
 	if (landed) return `Landed as ${short(landed.commit)}: don't merge it again. ${CHOOSE_NEXT}`;
 	if (released) {
 		if (text(released.mergedAs)) return `Merged as ${short(released.mergedAs)}. ${CHOOSE_NEXT}`;
-		const why = text(released.reason);
-		return (
-			`Its claim was released${why ? ` (${why.slice(0, INTENT_CHARS)})` : ""}: claim it again to go on, or ` +
-			"choose other work from `backlog`."
-		);
+		// A release's reason is free text, so only GitHive's own are said.
+		const why = text(released.reason) === "stale" ? " as abandoned" : "";
+		return `Its claim was released${why}: claim it again to go on, or choose other work from \`backlog\`.`;
 	}
 	if (!claim) return `Nobody holds ${change}: \`claim\` its paths to start it.`;
 	const head = text(reply.head);

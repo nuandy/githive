@@ -167,7 +167,7 @@ describe("githive CLI", () => {
 			intent: "Fix the login loop",
 		};
 		const next =
-			'Held by ann/bot\'s fix-login ("Fix the login loop"). Pick other work from `backlog`, or claim again later.';
+			"Held by ann/bot's fix-login (its intent is in `conflicts`). Pick other work from `backlog`, or claim again later.";
 		answers.claim = { ok: false, conflicts: [holder], next };
 		const refused = await cli(["start", "acme/app", "rate-limit", "Rate-limit logins", "src/auth/login.ts"]);
 		expect(refused.stdout).toContain("next: narrow your paths and start again");

@@ -26,12 +26,15 @@ export {
 } from "./compare";
 export { importTargets, isRelative, relativeTarget, resolveImport, resolvesTo } from "./resolve";
 export {
+	FACTS_SAID,
 	headsUpNext,
 	headsUpSays,
 	headsUpUsedNext,
 	headsUpUsedSays,
+	INTENT_SAID,
 	interfaceNext,
 	interfaceSays,
+	SAYS_CHARS,
 	useFact,
 	useSays,
 	whatChanged,

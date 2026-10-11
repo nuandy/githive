@@ -12,3 +12,9 @@ export const gitGuidance = (branch: string) =>
 		`- Avoid commands that throw away uncommitted work (\`git reset --hard\`, \`git checkout -- .\`, \`git ` +
 			`clean -fdx\`) unless that is intended.`,
 	].join("\n");
+
+/**
+ * A word as a shell reads it: as it is when that's safe, else in single quotes. Every command GitHive gives an agent
+ * builds its branch names and paths with it.
+ */
+export const shellWord = (word: string) => (/^[\w@%+=:,./-]+$/.test(word) ? word : `'${word.replaceAll("'", `'\\''`)}'`);

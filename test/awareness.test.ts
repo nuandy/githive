@@ -341,7 +341,15 @@ describe("heads-ups between open changes", () => {
 		]);
 		const headsUps = (await repoCache.events()).filter((event) => event.kind === "heads_up");
 		expect(headsUps).toEqual([
-			{ kind: "heads_up", agent: "alice", change: "c-7", other: "bob", detail: "loadSettings", at: expect.any(String) },
+			{
+				kind: "heads_up",
+				agent: "alice",
+				change: "c-7",
+				other: "bob",
+				otherChange: "c-9",
+				detail: "loadSettings",
+				at: expect.any(String),
+			},
 		]);
 		// The same pushes again, in either order: nothing more.
 		await deliver(bob, alice);

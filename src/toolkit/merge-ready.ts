@@ -11,6 +11,7 @@ import type { BatchSource, MergeInput, MergeOutcome, Ready, Refused, Why } from 
 import type { VotesView } from "./vote-store";
 import { approval, countedVotes, effectivePolicy } from "./votes";
 import { fail } from "../errors";
+import { shellWord } from "../git-guidance";
 
 // A change about to be checked against its claim and votes, at the head and with the files just read.
 type Proposed = BatchSource & { head: string; files: string[]; mine: boolean };
@@ -185,8 +186,6 @@ export function conflictFix(branch: string, change: string, files: string[]): st
 	];
 }
 
-// A word as a shell reads it: as it is when that's safe, else in single quotes.
-const shellWord = (word: string) => (/^[\w@%+=:,./-]+$/.test(word) ? word : `'${word.replaceAll("'", `'\\''`)}'`);
 
 // The outcome if the change already landed at `head`, since its claim is gone by then. The landing's recent outcomes
 // answer first; failing that, the branch's history, as a merge commit whose second parent is `head`.

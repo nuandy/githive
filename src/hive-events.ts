@@ -40,6 +40,8 @@ export interface HiveEvent {
 	 * the claim on the change says.
 	 */
 	other?: string;
+	/** The other side's change, for a heads-up: one agent's two changes are two heads-ups, kept apart. */
+	otherChange?: string;
 	/**
 	 * A few words on it: the intent claimed, the role voted as, why a landing failed, the names an interface change
 	 * or a heads-up is about, the files a merge conflicted on.
@@ -57,7 +59,15 @@ export const EVENTS_KEPT = 100;
  * occurrence, such as one per change an interface change matters to.
  */
 export const eventKey = (event: HiveEvent) =>
-	[event.at, event.kind, event.agent, event.change, event.commit, ...(event.other ? [event.other] : [])].join(" ");
+	[
+		event.at,
+		event.kind,
+		event.agent,
+		event.change,
+		event.commit,
+		...(event.other ? [event.other] : []),
+		...(event.otherChange ? [event.otherChange] : []),
+	].join(" ");
 
 const textOf = (args: Record<string, unknown>, key: string) =>
 	typeof args[key] === "string" ? (args[key] as string) : undefined;

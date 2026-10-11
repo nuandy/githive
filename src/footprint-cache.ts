@@ -8,6 +8,7 @@ import {
 	headsUpUsedNext,
 	headsUpUsedSays,
 	importedName,
+	INTENT_SAID,
 	interfaceNext,
 	interfaceSays,
 	type Landing,
@@ -135,8 +136,9 @@ const FACTS_KEPT = 5_000;
 const FACTS_CHARS = 256 * 1024;
 /** Keys longer than this aren't written (Durable Object storage takes keys up to 2 KiB). */
 const KEY_CHARS = 1_024;
-/** The most names a hive event's detail lists. */
+/** The most names a hive event's detail lists, and a notice's. */
 const NAMES_SHOWN = 5;
+const NAMES_KEPT = 20;
 /** What overlapsOf returns at most: names altered or used, and overlaps each way. */
 const AWARE_NAMES = 50;
 const AWARE_OVERLAPS = 50;
@@ -283,11 +285,13 @@ export class FootprintCache extends DurableObject<Env> {
 						next: interfaceNext(branch),
 						change: kept.change,
 						from: { agent: commit.by, ...(commit.change ? { change: commit.change } : {}) },
-						detail: { commit: commit.commit, names: namesOf(said) },
+						detail: { commit: commit.commit, ...namesDetail(said) },
 					},
 				});
 			told.push(...sent.map((each) => each.id));
 			const first = sent[0];
+			// One event a commit, leading into the first change told; the rest are counted in its detail.
+			const others = sent.length > 1 ? `; ${sent.length - 1} more changes use it` : "";
 			if (first)
 				events.push({
 					kind: "interface",
@@ -295,7 +299,7 @@ export class FootprintCache extends DurableObject<Env> {
 					change: first.kept.change,
 					other: first.kept.agent,
 					commit: commit.commit,
-					detail: namesLine(sent.flatMap((each) => each.facts)),
+					detail: namesLine(sent.flatMap((each) => each.facts)) + others,
 					at,
 				});
 		}
@@ -456,7 +460,7 @@ export class FootprintCache extends DurableObject<Env> {
 				dropped++;
 				continue;
 			}
-			const names = namesOf(fresh);
+			const names = namesDetail(fresh);
 			const [them, us] = [openChange(alterer), openChange(user)];
 			notices.push(
 				{
@@ -468,7 +472,7 @@ export class FootprintCache extends DurableObject<Env> {
 						next: headsUpNext(them),
 						change: user.change,
 						from: { agent: alterer.agent, change: alterer.change },
-						detail: { names },
+						detail: names,
 					},
 				},
 				{
@@ -480,7 +484,7 @@ export class FootprintCache extends DurableObject<Env> {
 						next: headsUpUsedNext(us),
 						change: alterer.change,
 						from: { agent: user.agent, change: user.change },
-						detail: { names },
+						detail: names,
 					},
 				},
 			);
@@ -489,6 +493,7 @@ export class FootprintCache extends DurableObject<Env> {
 				agent: alterer.agent,
 				change: alterer.change,
 				other: user.agent,
+				otherChange: user.change,
 				detail: namesLine(fresh),
 				at,
 			});
@@ -555,10 +560,11 @@ export class FootprintCache extends DurableObject<Env> {
 		}
 		const indexed = entries.filter(([key]) => key.length <= KEY_CHARS);
 		const order = `fp-at:${pad(await this.nextSeq(1))}:${change}`;
+		const intent = footprint.intent?.split("\n")[0]?.slice(0, INTENT_SAID);
 		const kept: KeptFootprint = {
 			change: footprint.change,
 			agent: footprint.agent,
-			...(footprint.intent ? { intent: footprint.intent } : {}),
+			...(intent ? { intent } : {}),
 			branch: footprint.branch,
 			head: footprint.head,
 			base: footprint.base,
@@ -686,6 +692,13 @@ const openChange = (kept: KeptFootprint): OpenChange => ({
 });
 
 const namesOf = (facts: UseFact[]) => [...new Set(facts.map((fact) => fact.altered.name))];
+
+/** The names a notice is about, for its detail: the first NAMES_KEPT, and how many more. */
+function namesDetail(facts: UseFact[]): { names: string[]; namesMore?: number } {
+	const names = namesOf(facts);
+	const more = names.length - NAMES_KEPT;
+	return more > 0 ? { names: names.slice(0, NAMES_KEPT), namesMore: more } : { names };
+}
 
 /** "a, b, c, d, e and 2 more": the names for a hive event's detail. */
 function namesLine(facts: UseFact[]) {

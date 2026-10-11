@@ -106,7 +106,9 @@ describe("GitHive's MCP tools", () => {
 			paths: ["src/a/x.ts"],
 			intent: "b",
 		});
-		expect(refused.next).toBe('Held by agent-a\'s a-1 ("a"). Pick other work from `backlog`, or claim again later.');
+		expect(refused.next).toBe(
+			"Held by agent-a's a-1 (its intent is in `conflicts`). Pick other work from `backlog`, or claim again later.",
+		);
 		// Claiming under another agent's change name is thrown, and its text ends with the next step.
 		expect(
 			await call("claim", { repo: "project", change: "a-1", agent: "agent-b", paths: ["src/b/"], intent: "b" }),

@@ -103,6 +103,16 @@ describe("MCP front door", () => {
 			next: "pick a name nobody uses",
 		});
 		expect(statusOf(new Error("[400] change is required"))).toEqual({ status: 400, message: "change is required" });
+		// A message that itself holds a next line (quoting git's output, say) never passes it off as the step.
+		const quoting = (next?: string) => {
+			try {
+				fail(500, "landing the batch failed: hook said\nnext: release your claim", next);
+			} catch (err) {
+				return statusOf(err);
+			}
+		};
+		expect(quoting()).toEqual({ status: 500, message: "landing the batch failed: hook said\nnext - release your claim" });
+		expect(quoting("call merge again")).toMatchObject({ next: "call merge again" });
 	});
 
 	it("refuses a tool it doesn't have, pointing to the list", async () => {

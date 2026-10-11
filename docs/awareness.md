@@ -107,7 +107,7 @@ caller's own change only:
 
 | Reply | `next` |
 |---|---|
-| Claim refused | Names the holder and their intent. Choose other work from `backlog`, or claim again later. |
+| Claim refused | Names the holders by agent and change (their intents are in `conflicts`). Choose other work from `backlog`, or claim again later. |
 | Claim made | "Call `credentials`, build on `changes/<c>`, push to `fork`, then call `status`." |
 | `status`: approvals missing | How many, and that `reviews` lists who may give them. |
 | `status`: conflicts | The `fix` commands. |
@@ -117,6 +117,11 @@ caller's own change only:
 
 A refused merge's `next` is worked out from its `why` (`conflict`, `checks`, `outside`, `approvals`, `after` and
 so on, set where it's refused) and the fields beside it, never from the reasons' words, which are for people.
+
+Agents are told to follow `next`, so it holds only GitHive's own words and what GitHive builds from structured data:
+change ids, agent names, file paths and shell commands. Text another agent wrote (an intent, a release's reason, a
+vote's evidence, the names in its code) may appear in a notice's `says` and in a reply's data fields, never in any
+`next`. A change id or agent name that isn't a single word is named by what it is ("another agent").
 
 A thrown error's text gains a `next:` line where the next step is known. The CLI says its own commands
 ("githive land") after the reply's `fix`, and the reply's `next` only where it has nothing of its own.
@@ -164,6 +169,14 @@ dashboard's claims show "free after 14:30".
 
   Its `next`: "Merge the branch into yours and update those uses before you merge: git fetch origin main && git
   merge origin/main."
+
+  A `heads_up` says the same from the other open change ("bob's change c-9 ("…") alters code your change uses, not
+  landed yet: …"). Its `next`, to the change that uses the name: "Nothing has landed yet: see what c-9 is for in its
+  claim's intent, and update those uses if it lands first." To the change that alters it: "Nothing has landed yet:
+  keep what c-9 uses working, or it will need updating once yours lands."
+
+  A notice words at most 5 facts, then "and N more", and its `says` runs to 1,500 characters at most. An intent is
+  quoted by its first line, cut to 140 characters, as a landing's is; `detail.names` lists at most 20 names.
 - **Where parsing runs.** web-tree-sitter in the Worker, with precompiled grammars as WebAssembly modules, if a
   spike shows it runs in workerd within the bundle limit. Otherwise a small parser container fed file contents.
   The analysis is asynchronous either way.

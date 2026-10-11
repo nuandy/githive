@@ -14,6 +14,7 @@
 
 import type { FootprintCache, LandedCommit } from "./footprint-cache";
 import type { CommitMeta, HistorySource } from "./toolkit/branch-history";
+import { INTENT_SAID } from "./footprint/wording";
 import { changeFootprint, commitAlters, type FactsSource, landingOf } from "./footprint/footprints";
 import type { ChangePush, KnownHead } from "./repo-cache";
 import { rpc } from "./rpc";
@@ -266,7 +267,8 @@ async function footprintChange(
 			{
 				change: push.change,
 				agent: claim.agent,
-				...(claim.intent ? { intent: claim.intent } : {}),
+				// Only its start is ever quoted, so only that is kept (see INTENT_SAID).
+				...(claim.intent ? { intent: claim.intent.split("\n")[0]!.slice(0, INTENT_SAID) } : {}),
 				branch,
 				head: placed.head,
 				base: placed.base,

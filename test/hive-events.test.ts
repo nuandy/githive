@@ -81,6 +81,16 @@ describe("the hive's events", () => {
 			["carol", "saveSettings"],
 			["dan", "loadSettings"],
 		]);
+		// One agent's two changes in the same moment are two heads-ups.
+		const twice = [
+			{ ...headsUp("erin", "loadSettings"), otherChange: "e-1" },
+			{ ...headsUp("erin", "loadSettings"), otherChange: "e-2" },
+		];
+		await cache.ping("records", false, twice);
+		expect((await cache.events()).filter((event) => event.other === "erin").map((event) => event.otherChange)).toEqual([
+			"e-1",
+			"e-2",
+		]);
 	});
 
 	it("moves a log kept as one list under keys of its own", async () => {
