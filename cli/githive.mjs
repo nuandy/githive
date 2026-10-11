@@ -62,6 +62,8 @@ const firstLine = (text, max = 100) =>
 		.slice(0, max);
 const say = (...lines) => console.log(lines.join("\n"));
 const next = (text) => console.log(`next: ${text}`);
+/** GitHive's next step for the caller's change when its reply gives one, else the CLI's own. */
+const follow = (reply, own) => next(typeof reply?.next === "string" && reply.next.trim() ? reply.next : own);
 const SECRET_FIELDS = new Set(["token", "key", "agent_key"]);
 const redact = (value) =>
 	JSON.parse(JSON.stringify(value, (field, inner) => (SECRET_FIELDS.has(field) ? "<redacted>" : inner)));
@@ -220,8 +222,9 @@ function approvalLine(approval) {
 	return `approvals: ${approval.approvals ?? 0} of ${approval.required ?? "?"}${awaiting}${vetoed}${approved}`;
 }
 
-/** What to do next about a change, from its status. */
+/** What to do next about a change, from its status: GitHive's next step when the reply has one, else the CLI's own. */
 function nextForStatus(status, repo) {
+	if (typeof status.next === "string" && status.next.trim()) return next(status.next);
 	const approval = status.approval ?? {};
 	if (status.landed || status.released?.mergedAs)
 		return next(`it's in. Pick more work: githive reviews ${repo}, githive backlog ${repo}`);
@@ -229,6 +232,10 @@ function nextForStatus(status, repo) {
 		return next(`claim it again to go on: githive start ${repo} ${status.change} "<intent>" <paths>`);
 	if (!status.claim) return next(`githive backlog ${repo}`);
 	if (!status.head) return next("commit inside your claim, then githive land");
+	// The test merge first: a conflict or a file outside the claim needs a new commit, whatever the votes say.
+	const merge = status.merge ?? {};
+	if (merge.clean === false) return next(RESOLVE_CONFLICT);
+	if (merge.outsideClaim?.length) return next(claimThemToo(repo, status.change));
 	const rejected = (status.votes ?? []).some((vote) => vote.verdict === "reject");
 	if (rejected || approval.vetoedBy?.length)
 		return next("fix what the evidence says, commit, githive land (a new commit needs new approvals)");
@@ -243,12 +250,20 @@ function nextForStatus(status, repo) {
 	);
 }
 
+const RESOLVE_CONFLICT = "githive sync, resolve inside your claim so both changes make sense, commit, githive land";
+const claimThemToo = (repo, change) =>
+	`claim them too (githive start ${repo} ${change} "<intent>" <your paths> <these>), or take them out of the change`;
+
 function printStatus(status, repo) {
 	const lines = claimLines(status);
 	lines.push(`head: ${status.head ? short(status.head) : "nothing pushed"}`);
 	for (const vote of status.votes ?? [])
 		lines.push(`  ${vote.verdict} by ${vote.reviewer} as ${vote.role}: ${firstLine(vote.evidence, 300)}`);
 	if (status.head) lines.push(approvalLine(status.approval ?? {}));
+	const merge = status.merge ?? {};
+	if (merge.clean === false)
+		lines.push(`conflicts with ${merge.into ?? "the project's branch"} in ${(merge.conflicts ?? []).join(", ")}`);
+	if (merge.outsideClaim?.length) lines.push(`outside your claim: ${merge.outsideClaim.join(" ")}`);
 	for (const waitsOn of status.waitsOn ?? []) lines.push(`  ${waitsOn}`);
 	if (status.landed)
 		lines.push(`landed as ${short(status.landed.commit)} at ${status.landed.at}: don't merge it again`);
@@ -298,7 +313,7 @@ async function startChange() {
 			const intent = firstLine(conflict.intent, 80);
 			say(`  ${conflict.path} overlaps ${conflict.held}: ${conflict.agent}'s ${conflict.change} (${intent})`);
 		}
-		next(`narrow your paths and start again, ask the holder, or pick other work: githive backlog ${repo}`);
+		follow(claimed, `narrow your paths and start again, ask the holder, or pick other work: githive backlog ${repo}`);
 		process.exitCode = 1;
 		return;
 	}
@@ -375,16 +390,13 @@ async function checkChange(repo, change) {
 	const onto = checked.into ?? "the project's branch";
 	if (checked.clean === false) {
 		say(`${short(checked.head)} conflicts with ${onto} in ${(checked.conflicts ?? []).join(", ")}`);
-		next("githive sync, resolve inside your claim, commit, githive land");
+		follow(status, RESOLVE_CONFLICT);
 		process.exitCode = 1;
 		return false;
 	}
 	if (checked.outsideClaim?.length) {
 		say(`${short(checked.head)} changes files outside your claim: ${checked.outsideClaim.join(" ")}`);
-		next(
-			`claim them too (githive start ${repo} ${change} "<intent>" <your paths> <these>), or take ` +
-				"them out of the change",
-		);
+		follow(status, claimThemToo(repo, change));
 		process.exitCode = 1;
 		return false;
 	}
@@ -410,22 +422,23 @@ async function landChange() {
 	if (merged.ok) {
 		const checks = merged.checks ? ` (checks ${merged.checks})` : "";
 		say(`landed ${change} as ${short(merged.commit)}${checks}`);
-		return next(`pick more work: githive reviews ${repo}, githive backlog ${repo}`);
+		return follow(merged, `pick more work: githive reviews ${repo}, githive backlog ${repo}`);
 	}
 	if (merged.pending) {
 		say(`pending: ${(merged.reasons ?? []).join(" ")}`);
-		next("githive land (it goes on waiting; nothing is lost)");
+		follow(merged, "githive land (it goes on waiting; nothing is lost)");
 		process.exitCode = 3;
 		return;
 	}
 	say("not landed yet:", ...(merged.reasons ?? []).map((reason) => `  ${reason}`));
 	for (const check of merged.checks ?? []) if (check.exitCode !== 0) printFailedCheck(check);
 	process.exitCode = 1;
-	if (merged.conflicts?.length) return next("githive sync, resolve inside your claim, commit, githive land");
-	if (merged.checks?.length) return next("fix what failed, commit, githive land (a new commit needs new approvals)");
+	if (merged.conflicts?.length) return follow(merged, RESOLVE_CONFLICT);
+	if (merged.checks?.length)
+		return follow(merged, "fix what failed, commit, githive land (a new commit needs new approvals)");
 	// Most often it's waiting for reviews: say where it stands and what to do meanwhile, as status does.
 	const status = await tool("status", { repo, change }).catch(() => null);
-	if (!status) return next("githive status (what it still needs)");
+	if (!status) return follow(merged, "githive status (what it still needs)");
 	if (status.head) say(approvalLine(status.approval ?? {}));
 	nextForStatus(status, repo);
 }
@@ -574,9 +587,9 @@ async function castVote() {
 	if (!repo?.includes("/") || !commit || !["approve", "reject"].includes(verdict) || !evidence)
 		throw new Usage('vote <repo> <commit> approve|reject "<evidence>" [--role R]');
 	const role = flags.role ?? "review";
-	await tool("vote", { repo, commit, verdict, evidence, role, ...as("reviewer") });
+	const voted = await tool("vote", { repo, commit, verdict, evidence, role, ...as("reviewer") });
 	say(`voted ${verdict} on ${short(commit)} as ${role}`);
-	next(`githive reviews ${repo}`);
+	follow(voted, `githive reviews ${repo}`);
 }
 
 async function callTool() {

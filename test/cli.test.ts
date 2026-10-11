@@ -158,6 +158,58 @@ describe("githive CLI", () => {
 		expect(calls.map((c) => c.name)).toEqual(["claim"]);
 	});
 
+	it("prints GitHive's next step when the reply has one, and its own otherwise", async () => {
+		const holder = {
+			path: "src/auth/login.ts",
+			held: "src/auth/",
+			change: "fix-login",
+			agent: "ann/bot",
+			intent: "Fix the login loop",
+		};
+		const next =
+			'Held by ann/bot\'s fix-login ("Fix the login loop"). Pick other work from `backlog`, or claim again later.';
+		answers.claim = { ok: false, conflicts: [holder], next };
+		const refused = await cli(["start", "acme/app", "rate-limit", "Rate-limit logins", "src/auth/login.ts"]);
+		expect(refused.stdout).toContain(`next: ${next}`);
+		expect(refused.stdout).not.toContain("narrow your paths");
+		const approved = { approved: true, approvals: 1, required: 1, awaiting: [], vetoedBy: [] };
+		const clean = { into: "main", branchHead: "x", clean: true, outsideClaim: [] };
+		const status = {
+			change: "rate-limit",
+			claim: { agent: "me", paths: ["src/"], intent: "x" },
+			head: "abc",
+			votes: [],
+		};
+		answers.status = { ...status, approval: approved, merge: clean, next: "Call `merge`." };
+		expect((await cli(["status", "acme/app", "rate-limit"])).stdout).toMatch(/next: Call `merge`\.\n$/);
+		answers.status = { ...status, approval: approved, merge: clean };
+		expect((await cli(["status", "acme/app", "rate-limit"])).stdout).toMatch(/next: githive land\n$/);
+		answers.vote = { ok: true, tip: "t", next: "Done. Choose more from `reviews`." };
+		const voted = await cli(["vote", "acme/app", "abc", "approve", "ran the tests"]);
+		expect(voted.stdout).toContain("next: Done. Choose more from `reviews`.");
+	});
+
+	it("tells from status a change that conflicts or strays outside its claim, though it's approved", async () => {
+		const status = {
+			change: "rate-limit",
+			claim: { agent: "me", paths: ["src/auth/"], intent: "x" },
+			head: "abc",
+			votes: [],
+			approval: { approved: true, approvals: 1, required: 1, awaiting: [], vetoedBy: [] },
+		};
+		answers.status = {
+			...status,
+			merge: { into: "main", clean: false, conflicts: ["src/auth/a.ts"], outsideClaim: [] },
+		};
+		const conflicted = await cli(["status", "acme/app", "rate-limit"]);
+		expect(conflicted.stdout).toContain("conflicts with main in src/auth/a.ts");
+		expect(conflicted.stdout).toContain("next: githive sync, resolve inside your claim so both changes make sense");
+		answers.status = { ...status, merge: { into: "main", clean: true, outsideClaim: ["docs/x.md"] } };
+		const strayed = await cli(["status", "acme/app", "rate-limit"]);
+		expect(strayed.stdout).toContain("outside your claim: docs/x.md");
+		expect(strayed.stdout).toContain("next: claim them too (githive start acme/app rate-limit");
+	});
+
 	it("starts a change, then land pushes it to the fork, checks, and says to land again while pending", async () => {
 		const { project, fork, forkPath } = repos();
 		answers.claim = { ok: true };
