@@ -42,12 +42,20 @@ export interface RepoGitHub {
 	pull: { number: number; url: string } | null;
 	/** Bringing GitHub's changes back, as GitHive last did it. */
 	fromGitHub?: {
-		step: "import" | "claim" | "merge" | "done" | "waiting" | "needs a person" | "failed";
+		step: "import" | "claim" | "merge" | "done" | "waiting" | "needs a person" | "given up" | "failed";
 		commit: string;
 		at: string;
 		change?: string;
 		reason?: string;
 	};
+}
+
+/** What giving up GitHub's change answers: released, or why not. */
+export interface GiveUpAnswer {
+	ok: boolean;
+	released?: string;
+	note?: string;
+	refused?: string;
 }
 
 /** What github_pr answers: the pull request, and whether it was just opened or rewritten. */
@@ -483,6 +491,12 @@ export const api = {
 	/** Opens the standing pull request on GitHub, or finds it; with refresh, rewrites its title and body. */
 	githubPull: (repo: string, refresh = false) =>
 		call<PullAnswer>("POST", `/repos/${repoPath(repo)}/github/pr`, { refresh }),
+	/** A person gives up GitHub's change: its claim released, its paths free, until GitHub's branch moves or asked. */
+	giveUpGitHub: (repo: string, change: string) =>
+		call<GiveUpAnswer>("POST", `/repos/${repoPath(repo)}/changes/${encodeURIComponent(change)}/give-up`, {}),
+	/** Looks at GitHub's branch now and brings its changes back, even a commit given up or sent to a person before. */
+	githubAgain: (repo: string) =>
+		call<{ fromGitHub?: RepoGitHub["fromGitHub"] }>("POST", `/repos/${repoPath(repo)}/github/again`, {}),
 };
 
 /** Repositories, orgs and their people: making, settings, members, teams and collaborators. */

@@ -2,6 +2,8 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import type { RepoGitHub, RepoSnapshot } from "../api";
 import { claimApprovalLabel, claimStatus } from "../lib/claimStatus";
+import { repoSnapshot } from "../test/fixtures";
+import { ChangePage } from "./ChangePage";
 import { GitHubLink } from "./GitHubLink";
 import { githubDraft, githubInput } from "./GitHubSettings";
 import { ChangeLabels, githubTerms } from "./RepoTabs";
@@ -61,6 +63,22 @@ describe("the GitHub link by a repo's name", () => {
 		expect(text(stuck)).toContain("GitHub's changes need a person: it conflicts");
 		expect(stuck).toContain("github-c");
 	});
+
+	it("offers people who can write to bring GitHub's changes in again once they were given up", () => {
+		const givenUp = github({
+			fromGitHub: { step: "given up", commit: "c", at: "", change: "github-c", reason: "given up by ana" },
+		});
+		const again = async () => ({});
+		const writer = text(renderToStaticMarkup(<GitHubLink repo="acme/web" github={givenUp} again={again} />));
+		expect(writer).toContain("GitHub's changes were given up: given up by ana");
+		expect(writer).toContain("Bring them in again");
+		expect(text(renderToStaticMarkup(<GitHubLink repo="acme/web" github={givenUp} />))).not.toContain("Bring them");
+		// Nothing to ask again while it's done.
+		const done = github({ fromGitHub: { step: "done", commit: "c", at: "" } });
+		expect(text(renderToStaticMarkup(<GitHubLink repo="acme/web" github={done} again={again} />))).not.toContain(
+			"Bring them",
+		);
+	});
 });
 
 describe("GitHub's change", () => {
@@ -77,6 +95,26 @@ describe("GitHub's change", () => {
 		trusted: "GitHub's changes: trusted",
 		approval: { approved: true, approvals: 0, required: 0, vetoedBy: [] },
 	};
+
+	it("can be given up from its page by people who can write, and no other change can", () => {
+		const giveUp = async () => ({ ok: true, released: "github-abc" });
+		const page = (claim: Claim, withGiveUp = true) =>
+			text(
+				renderToStaticMarkup(
+					<ChangePage
+						snapshot={{ ...repoSnapshot, claims: [claim] }}
+						changeId={claim.change}
+						claim={claim}
+						repo="acme/web"
+						tab="conversation"
+						{...(withGiveUp ? { giveUp } : {})}
+					/>,
+				),
+			);
+		expect(page(change)).toContain("Give up GitHub's changes");
+		expect(page(change, false)).not.toContain("Give up");
+		expect(page({ ...change, change: "c-1", agent: "agent-a", source: undefined })).not.toContain("Give up");
+	});
 
 	it("says it's from GitHub and needs no review while the repo trusts GitHub", () => {
 		expect(text(renderToStaticMarkup(<ChangeLabels claim={change} />))).toBe("from GitHub, trusted");

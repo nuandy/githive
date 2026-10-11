@@ -205,7 +205,9 @@ const TOOL_LIST = [
 			"Release a claim: yours, or with stale: true another agent's it has abandoned: its change " +
 			"waits on that agent, unanswered for 30 minutes with nothing pushed, or 2 hours after changes " +
 			"were asked for, failed checks, or approval without a merge. Never one waiting for review, " +
-			"being checked to land, or on a person.",
+			"being checked to land, or on a person. A repo admin may also give up GitHub's change " +
+			"(githive-github's github-<sha>, which holds its paths until GitHub's branch moves): name it as " +
+			"your own agent.",
 		inputSchema: {
 			type: "object",
 			properties: { repo: str, change: str, agent: str, reason: str, stale: { type: "boolean" } },

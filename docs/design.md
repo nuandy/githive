@@ -80,7 +80,8 @@ what Git said.
   project's branch or `into` another, `after` the changes it depends on, or
   merging a whole branch (`source`).
 - `release`: release a claim: your own, or another's its agent abandoned
-  (`stale: true`).
+  (`stale: true`); a repo admin may also give up GitHub's change (see
+  Connected to GitHub).
 - `credentials`: with a change, write access to its agent's fork; without,
   read access to the project.
 - `vote`: a verdict, approve or reject, with evidence, on one commit.
@@ -722,8 +723,13 @@ the audit holds each merge to the settings in force when it merged. Then
   githive-github's or a person's, which test-merges them first. A conflict or a
   failed check sends one back like any change, to people's inbox as "GitHub's
   changes need a person", with the reason; fixing it on GitHub (merging
-  `githive/main` there) brings the fix back and lets the stuck change go. With
-  trust off, GitHub's changes need review like any change.
+  `githive/main` there) brings the fix back and lets the stuck change go. A
+  person who can write may also give it up from its page, and a repo admin
+  through `release`: the one claim someone other than its agent may release
+  before it's abandoned, recorded like a stale release with their stamp. Its
+  paths are free at once, and GitHub's changes come back when GitHub's branch
+  moves or someone asks again. With trust off, GitHub's changes need review
+  like any change.
 - **Checks can run on GitHub Actions** instead of in containers (`verify:
   ["github-actions"]`, `actions-checks.ts`). For a batch, the repo's Gate
   merges its changes onto main, the way they'll land, and pushes that commit to
@@ -982,7 +988,9 @@ and author, and `by` when the commit was stamped:
 - `unverified-record`: a claim or vote without a valid stamp, or a claim that
   disappeared without a stamped release.
 - `released-others-claim`: someone released another agent's claim before it
-  was idle 30 minutes.
+  was idle 30 minutes. `githive-github`'s claim is the exception: a person
+  who can write, or a repo admin, may give it up at any time, and the audit
+  accepts that release when it's stamped (who could write then isn't in Git).
 - `unjustified-revert`: a revert of a commit the audit doesn't report.
 
 A merge with no votes where the policy needs some is accepted only as GitHub's

@@ -36,6 +36,15 @@ export class GitHubSync extends DurableObject<Env> {
 		else await this.ctx.storage.delete("pull");
 	}
 
+	/** Someone gave up GitHub's change `change`: its job ends, waiting for GitHub's branch to move or to be asked. */
+	async gaveUp(change: string, reason: string) {
+		const job = await this.ctx.storage.get<InboundJob>("job");
+		if (!job || job.change !== change || job.step === "done") return;
+		// A step running now finds its job replaced, and drops its outcome (see alarm).
+		const { resume: _, ...ended } = job;
+		await this.ctx.storage.put("job", { ...ended, step: "given up", reason, updatedAt: new Date().toISOString() });
+	}
+
 	async state(): Promise<GitHubSyncState> {
 		const [job, pull] = await Promise.all([
 			this.ctx.storage.get<InboundJob>("job"),

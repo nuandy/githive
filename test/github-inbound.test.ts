@@ -10,6 +10,7 @@ import { GITHUB_AGENT, GITHUB_IDENTITY, type GitHubSyncHandle } from "../src/too
 import { memoryLanding } from "../src/toolkit/landing";
 import { callTool, type ToolContext } from "../src/toolkit/mcp";
 import { generateStampKey, makeStamper } from "../src/toolkit/stamp";
+import type { Votes } from "../src/toolkit/votes";
 import { FakeStorage } from "./fakes/env";
 import { pushChange } from "./helpers/agents";
 import { fakeGitHub, type FakeGitHub } from "./helpers/fake-github";
@@ -35,6 +36,7 @@ let privateKey: string;
 const handle = (): GitHubSyncHandle => ({
 	notice: (seen, again) => sync.notice({ ...seen, repo: "p" }, again),
 	notePull: (pull) => sync.notePull(pull),
+	gaveUp: (change, reason) => sync.gaveUp(change, reason),
 	state: () => sync.state(),
 });
 const extra: Partial<ToolContext> = {
@@ -42,7 +44,7 @@ const extra: Partial<ToolContext> = {
 	githubSync: () => handle(),
 	stamper: async (agent) => makeStamper(privateKey, agent ? `service:test/${agent}` : "service:test"),
 };
-const { ctx, call, register, approve } = toolCalls(() => server, extra);
+const { ctx, call, keys, register, approve } = toolCalls(() => server, extra);
 
 /** githive-github's job, as the repo's GitHubSync runs it: a hosted context stamped as it. */
 class TestSync extends GitHubSync {
@@ -77,14 +79,21 @@ const lastMerge = () => {
 const imports = async () =>
 	(await new GitCasLog<GitHubImports>(async () => ({ url: server.url, token: "unused" }), "p", importsRef("p")).read())
 		?.commit.state.imports ?? [];
-const claimsNow = async () =>
+const registryNow = async () =>
+	(await new GitCasLog<Registry>(
+		async () => ({ url: server.url, token: "unused" }),
+		"p",
+		"refs/notes/githive-claims/p",
+	).read())!.commit.state;
+const claimsNow = async () => (await registryNow()).claims;
+const votesNow = async () =>
 	(
-		await new GitCasLog<Registry>(
+		await new GitCasLog<Votes>(
 			async () => ({ url: server.url, token: "unused" }),
 			"p",
-			"refs/notes/githive-claims/p",
+			"refs/notes/githive-votes/p",
 		).read()
-	)?.commit.state.claims ?? [];
+	)?.commit.state ?? { votes: [] };
 
 beforeEach(async () => {
 	server = await startGitServer();
@@ -197,6 +206,66 @@ describe("GitHub's changes coming back", { timeout: 120_000 }, () => {
 		const after = await land("c-3", { "src/c.js": "c\n" });
 		expect(after).toMatchObject({ step: "done", commit: fixed });
 		expect((await claimsNow()).filter((claim) => claim.agent === GITHUB_AGENT)).toEqual([]);
+		expect(await call("audit", {})).toMatchObject({ open: 0 });
+	});
+
+	it("lets a person give up a stuck GitHub change, freeing its paths, until GitHub moves or they ask again", async () => {
+		await land("c-1", { "src/a.js": "a\n" });
+		const theirs = github.push({ "src/a.js": "from GitHub\n" });
+		expect(await land("c-2", { "src/a.js": "from GitHive\n" })).toMatchObject({ step: "needs a person" });
+		const change = `github-${theirs.slice(0, 12)}`;
+		// Its claim holds src/a.js: an agent's claim on it is refused, and only its agent may release it.
+		const claimA = { change: "c-3", agent: "a", paths: ["src/a.js"], intent: "Work on a" };
+		expect(await call("claim", claimA, "a")).toMatchObject({ ok: false });
+		await expect(call("release", { change, agent: "a" }, "a")).rejects.toThrow("a person who can write");
+		// A person who can write gives it up from the dashboard.
+		const { giveUpAsPerson, repoSnapshot } = await import("../src/toolkit/mcp");
+		const person = "person:ana@example.com";
+		const asPerson = { ...ctx(), stamper: async () => makeStamper(privateKey, person) };
+		expect(await giveUpAsPerson(asPerson, "p", change, person)).toMatchObject({ ok: true, released: change });
+		expect(await claimsNow()).toEqual([]);
+		const released = (await registryNow()).released.at(-1);
+		expect(released).toMatchObject({
+			change,
+			agent: GITHUB_AGENT,
+			by: person,
+			verifiedBy: person,
+			stale: true,
+			reason: `GitHub's changes given up by ${person}`,
+		});
+		expect((await sync.state()).job).toMatchObject({ step: "given up", change });
+		expect((await repoSnapshot(ctx(), "p")).github?.fromGitHub).toMatchObject({ step: "given up" });
+		// Its paths are free, and the audit accepts the release.
+		expect(await call("claim", claimA, "a")).toMatchObject({ ok: true });
+		await call("release", { change: "c-3", agent: "a" }, "a");
+		expect(await call("audit", {})).toMatchObject({ open: 0 });
+		// The next landing notices the same commit of GitHub's and starts nothing.
+		await land("c-4", { "src/d.js": "d\n" });
+		expect((await sync.state()).job).toMatchObject({ step: "given up" });
+		expect(await claimsNow()).toEqual([]);
+		// Asked again from the dashboard, it comes back, and conflicts as before.
+		const { bringGitHubBackAgain } = await import("../src/toolkit/mcp");
+		expect(await bringGitHubBackAgain(ctx(), "p")).toMatchObject({ fromGitHub: { step: "import", commit: theirs } });
+		expect(await settle()).toMatchObject({ step: "needs a person", change });
+		// People's question from before is still open: it isn't asked twice.
+		const flags = (await votesNow()).flags ?? [];
+		expect(flags.filter((flag) => flag.change === change)).toHaveLength(1);
+		// Only GitHub's changes are given up this way.
+		await call("claim", { ...claimA, change: "c-5", paths: ["src/e.js"] }, "a");
+		await expect(giveUpAsPerson(asPerson, "p", "c-5", person)).rejects.toThrow("not GitHub's");
+	});
+
+	it("lets a repo admin give up GitHub's change through release, and no one else", async () => {
+		await land("c-1", { "src/a.js": "a\n" });
+		const theirs = github.push({ "src/a.js": "from GitHub\n" });
+		expect(await land("c-2", { "src/a.js": "from GitHive\n" })).toMatchObject({ step: "needs a person" });
+		const change = `github-${theirs.slice(0, 12)}`;
+		const as = (level: "write" | "admin") => ({ ...ctx(keys.a), level });
+		const release = { repo: "p", change, agent: "a" };
+		await expect(callTool("release", release, as("write"))).rejects.toThrow("also a repo admin");
+		expect(await callTool("release", release, as("admin"))).toMatchObject({ ok: true, released: change });
+		expect((await registryNow()).released.at(-1)).toMatchObject({ change, agent: GITHUB_AGENT, by: "a", stale: true });
+		expect((await sync.state()).job).toMatchObject({ step: "given up" });
 		expect(await call("audit", {})).toMatchObject({ open: 0 });
 	});
 

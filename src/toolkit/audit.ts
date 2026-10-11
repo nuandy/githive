@@ -6,6 +6,7 @@ import { approval, type Author, type ReviewPolicy, type VoteRecord, type Votes, 
 import { settingsForBranch } from "./branch-rules";
 import { skipsChecks } from "./check-scope";
 import { type GitHubImport, trustedGitHubChange } from "./github-imports";
+import { GITHUB_AGENT } from "./github-settings";
 
 // The audit (see docs/design.md). Nothing stops an agent from breaking a convention, so this replays the records
 // and reports every violation with the commit and agent responsible. It's a pure function, so anyone can rerun it
@@ -132,7 +133,7 @@ export async function audit(records: AuditRecords): Promise<Violation[]> {
 		violations.push(...(await auditMerge(merge, key, indexed)));
 	}
 	for (const history of claimHistories(records))
-		violations.push(...othersClaimsReleased(history, records.staleAfterMs));
+		violations.push(...(await othersClaimsReleased(history, records.staleAfterMs, verified)));
 	resolveReverts(violations, reverts);
 	return violations;
 }
@@ -535,14 +536,20 @@ function landedAsBatch(merge: MergeRecord, byCommit: Map<string, MergeRecord>, b
 	return true;
 }
 
-/** Releases of another agent's claim that wasn't stale yet. */
-function othersClaimsReleased(history: History, staleAfterMs?: number): Violation[] {
+/**
+ * Releases of another agent's claim that wasn't stale yet. githive-github's claim (GitHub's change) is the exception:
+ * a person who can write, or a repo admin, may give it up at any time, through the toolkit, which stamps the release
+ * with who did it (see giveUpGitHubChange). The audit can't see who could write then, so it holds such a release to
+ * being stamped.
+ */
+async function othersClaimsReleased(history: History, staleAfterMs: number | undefined, verified: Verify) {
 	const staleAfter = staleAfterMs ?? STALE_AFTER_MS;
 	const violations: Violation[] = [];
 	let checked = 0;
 	for (const entry of history) {
 		for (const release of entry.state.released.slice(checked)) {
 			if (release.by === release.agent) continue;
+			if (release.agent === GITHUB_AGENT && release.stale && (await verified("release", release))) continue;
 			const idle = Date.parse(release.at) - Date.parse(release.lastActive);
 			if (idle <= staleAfter)
 				violations.push({

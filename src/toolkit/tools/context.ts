@@ -1,3 +1,4 @@
+import type { Level } from "../../auth/orgs";
 import { requiredString, statusOf } from "../../errors";
 import type { Remote } from "../../git";
 import type { GitHubLink } from "../../github";
@@ -82,6 +83,11 @@ export interface ToolContext {
 	teamsOf?: (repo: string) => Promise<string[]>;
 	/** Set for GitHive's hosted agents, which act under the reserved githive- names. */
 	hosted?: boolean;
+	/**
+	 * What the caller may do in the call's repo, as the MCP front door checked it for this call. Unset where no one
+	 * checked it per repo (hosted agents, the dashboard's own calls, tests); only an admin's exceptions read it.
+	 */
+	level?: Level;
 	/** Records the repo so the dashboard can list it. */
 	register?: (repo: string) => Promise<void>;
 	/** Starts hosted reviewers on a change's current commit. Each votes, and merges the change if asked to. */

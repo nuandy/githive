@@ -16,7 +16,8 @@ import {
 import { NOTICE_WITHIN_MS } from "./github-outbound";
 import type { MergeOutcome } from "./merge-types";
 import { callTool, type ToolContext } from "./mcp";
-import { advice, claimsRef, recordLog } from "./tools/repo";
+import { advice, claimsRef, recordLog, votesFor } from "./tools/repo";
+import { openFlag } from "./votes";
 
 // Bringing a commit of GitHub's back (see docs/github-prs.md, "Inbound"): the repo's Gate imports it as github/<branch>
 // and the import record notes it; githive-github claims a source merge of github/<branch> into main, so the claim
@@ -65,8 +66,8 @@ export function newJob(repo: string, seen: GitHubSeen, now = Date.now()): Inboun
 
 /**
  * What noticing GitHub's branch at `seen` starts: a new job, the job that waited going on from where it waited, or
- * nothing when one is running, the commit is known to be on main, or it was brought back or sent to a person already
- * (unless `again`). A job that failed starts again after a while, so a commit that can't come in (a GitHub branch
+ * nothing when one is running, the commit is known to be on main, or it was brought back, sent to a person or given
+ * up already (unless `again`). A job that failed starts again after a while, so a commit that can't come in (a GitHub branch
  * sharing no history with main, say) doesn't start a container at every landing.
  */
 export function noticed(
@@ -84,7 +85,7 @@ export function noticed(
 		const { reason: _, ...waited } = current;
 		return { ...waited, step: current.resume ?? "import", attempts: 0, updatedAt: new Date(now).toISOString() };
 	}
-	const ended = current?.step === "done" || current?.step === "needs a person";
+	const ended = current?.step === "done" || current?.step === "needs a person" || current?.step === "given up";
 	if (!again && same && ended) return null;
 	const failedLately = current?.step === "failed" && now - Date.parse(current.updatedAt) < FAILED_RETRY_MS;
 	if (!again && same && failedLately) return null;
@@ -203,7 +204,9 @@ async function mergeStep(ctx: ToolContext, job: InboundJob, at: At): Promise<Ste
 	if (outcome.pending) return { job: at({ reason: `waits for its turn to land: ${reason}`, attempts: 0 }), next: 0 };
 	// Others' merges landed first: a busy repo, so it merges again shortly, however often that happens.
 	if (/kept moving/.test(reason)) return { job: at({ reason, attempts: 0 }), next: MOVED_RETRY_MS };
-	if (/holds no claim/.test(reason)) return { job: at({ step: "failed", reason }) };
+	// Its claim is gone and it didn't land: someone gave it up (see giveUpGitHubChange).
+	if (/holds no claim/.test(reason))
+		return { job: at({ step: "given up", reason: `its claim was released: ${reason}` }) };
 	// Untrusted, it waits for review like any change, and lands with a batch once approved.
 	if (/approvals from reviewers|still needs approval|is vetoed/.test(reason))
 		return { job: at({ step: "waiting", resume: "merge", reason: `waits for review: ${reason}`, attempts: 0 }) };
@@ -211,8 +214,20 @@ async function mergeStep(ctx: ToolContext, job: InboundJob, at: At): Promise<Ste
 	const asked =
 		`GitHub's changes need a person: ${reason}. Fix it on GitHub (merge ${PR_BRANCH} into ${job.branch} there, ` +
 		"resolving it) and GitHive brings the fix back, which also lets this one go.";
-	await callTool("ask_human", { repo: job.repo, change, agent: GITHUB_AGENT, reason: asked }, ctx);
+	// Asked once: while the question is open (a person hasn't voted on its head since), asking again would only add
+	// another to people's inbox, as github_pr's refresh restarting the job did.
+	if (!(await askedAlready(ctx, job.repo, change, job.head)))
+		await callTool("ask_human", { repo: job.repo, change, agent: GITHUB_AGENT, reason: asked }, ctx);
 	return { job: at({ step: "needs a person", reason, attempts: 0 }) };
+}
+
+// Whether people were asked about `change` at `head` and haven't answered yet.
+async function askedAlready(ctx: ToolContext, repo: string, change: string, head: string | undefined) {
+	if (!head) return false;
+	const seen = await votesFor(ctx, repo)
+		.readFor([head])
+		.catch(() => null);
+	return !!openFlag(seen, change, head);
 }
 
 // The standing pull request after GitHub's commit landed: merged and closed, or still open with more to take. Only a

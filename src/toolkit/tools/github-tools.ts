@@ -3,6 +3,7 @@ import { GitHubError, type GitHubLink, type PullRequest } from "../../github";
 import { mirrorTo } from "../actions-checks";
 import { pullStoryAt } from "../github-pr";
 import type { ClaimStore } from "../claim-store";
+import type { Stamper } from "../stamp";
 import type { ClaimRecord, Registry } from "../claims";
 import { type GitHubImport, type GitHubImports, importsRef, trustedGitHubChange } from "../github-imports";
 import {
@@ -14,7 +15,7 @@ import {
 	trustsGitHub,
 } from "../github-settings";
 import type { ToolCall, ToolContext, ToolHandlers } from "./context";
-import { recordLog } from "./repo";
+import { claimsRef, recordLog } from "./repo";
 
 // The standing pull request on GitHub (see docs/github-prs.md): github_pr opens it, or says where it is, and with
 // refresh rewrites its title and body. Asking is also a moment to look at GitHub's branch: if it holds commits
@@ -104,8 +105,57 @@ async function takenAt({ ctx, repo }: ToolCall, seen: { branch: string; head: st
 	return imports.findLast((entry) => entry.branch === seen.branch && entry.commit === seen.head)?.base ?? seen.head;
 }
 
+/**
+ * Gives up GitHub's change on `who`'s word (see docs/github-prs.md, "Giving up GitHub's changes"): its claim released,
+ * recorded like a stale release with their stamp, so its paths are free, and its job ended until GitHub's branch moves
+ * or someone asks again. It's the one exception to "only a claim's agent releases it", since githive-github's claim
+ * otherwise holds its paths until GitHub's branch moves. Who may is the caller's to check: a person who can write,
+ * from the dashboard, or a repo admin, through release.
+ */
+export async function giveUpGitHubChange(
+	ctx: ToolContext,
+	repo: string,
+	input: { store: ClaimStore; claim: ClaimRecord; who: string; stamper?: Stamper },
+) {
+	const { store, claim, who, stamper } = input;
+	if (!isGitHubChange(claim))
+		fail(409, `${claim.change} is ${claim.agent}'s change, not GitHub's: only its agent releases it`);
+	const reason = `GitHub's changes given up by ${who}`;
+	const outcome = await store.giveUp({ change: claim.change, agent: who, reason }, stamper);
+	if (!outcome.ok) return outcome;
+	await ctx
+		.githubSync?.(repo)
+		.gaveUp(claim.change, reason)
+		.catch((err) => console.error(`telling ${repo}'s GitHubSync ${claim.change} was given up failed`, String(err)));
+	return {
+		ok: true as const,
+		released: claim.change,
+		note:
+			"Its paths are free. GitHive brings GitHub's changes back again when GitHub's branch moves, or when asked " +
+			"(github_pr with refresh, or the dashboard).",
+	};
+}
+
+/**
+ * Looks at GitHub's branch now and brings its changes back, even a commit given up, sent to a person or failed before:
+ * a person asking again from the dashboard. Returns where bringing them back stands.
+ */
+export async function bringGitHubBackAgain(ctx: ToolContext, repo: string) {
+	const registered = (await recordLog<Registry>(ctx, repo, claimsRef(repo)).read())?.commit.state;
+	const link = await connectedLink({ ctx, repo, registered });
+	if (!bringsGitHubBack(registered))
+		fail(409, `${repo}'s link to ${link.repo} only mirrors: set github_sync to bring GitHub's changes back`);
+	const sync = ctx.githubSync?.(repo) ?? fail(503, "GitHive can't bring GitHub's changes back here");
+	const seen = await link.defaultHead();
+	return inboundOf(await sync.notice({ github: link.repo, branch: seen.branch, commit: seen.head }, true));
+}
+
 // The connected GitHub repo, through GitHive's App.
-async function connectedLink({ ctx, repo, registered }: ToolCall): Promise<GitHubLink> {
+async function connectedLink({
+	ctx,
+	repo,
+	registered,
+}: Pick<ToolCall, "ctx" | "repo" | "registered">): Promise<GitHubLink> {
 	const github = registered?.github;
 	if (!github) fail(409, `${repo} isn't connected to GitHub: connect it with settings github ("owner/name")`);
 	if (!ctx.github) fail(501, "GitHub isn't set up on this GitHive (its App's ID and key)");

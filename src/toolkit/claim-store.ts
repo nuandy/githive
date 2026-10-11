@@ -14,6 +14,7 @@ import {
 	conflictsWith,
 	release,
 	releaseStale,
+	giveUp,
 	withdraw,
 	type ClaimRecord,
 	type Conflict,
@@ -94,6 +95,8 @@ export interface ClaimStore {
 		input: { change: string; agent: string; staleAfterMs: number; abandoned?: Abandoned; now?: number },
 		stamper?: Stamper,
 	): Promise<ReleaseOutcome>;
+	/** Releases another agent's claim on `agent`'s word, idle or not (see claims.ts giveUp). */
+	giveUp(input: { change: string; agent: string; reason: string }, stamper?: Stamper): Promise<ReleaseOutcome>;
 	/** The GitHive-Claims trailer for a merge of `files`, from the view its claims were checked in. */
 	cite(view: ClaimsView, files: string[], own?: ClaimRecord): string;
 }
@@ -546,6 +549,12 @@ class Claims implements ClaimStore {
 		if (turn && !turn.abandoned) return { ok: false, refused: `${input.change} isn't abandoned: it ${turn.why}` };
 		const { abandoned: _abandoned, ...rest } = input;
 		return this.eachShard(held.shards, (shard) => releaseStale(this.logOf(shard), rest, stamper));
+	}
+
+	async giveUp(input: { change: string; agent: string; reason: string }, stamper?: Stamper): Promise<ReleaseOutcome> {
+		const held = await this.holding(input.change);
+		if (!held) return { ok: false, refused: `${input.change} holds no claim` };
+		return this.eachShard(held.shards, (shard) => giveUp(this.logOf(shard), input, stamper));
 	}
 
 	// Releases in each record, a few repos at a time. A record that no longer holds the claim is fine, and the first

@@ -188,6 +188,7 @@ function githubSyncParts(env: Env): Pick<ToolContext, "githubSync"> {
 			return {
 				notice: (seen, again) => rpc(sync().notice({ ...seen, repo }, again)),
 				notePull: (pull) => sync().notePull(pull),
+				gaveUp: (change, reason) => sync().gaveUp(change, reason),
 				state: () => rpc(sync().state()),
 			};
 		},

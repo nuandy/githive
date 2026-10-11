@@ -478,6 +478,32 @@ export function releaseStale(
 	});
 }
 
+/**
+ * Releases another agent's claim on someone's word, idle or not, recorded like a stale release with their stamp. Only
+ * for claims GitHive's own job holds, which no one else can release otherwise (see giveUpGitHubChange); the caller
+ * decides who may.
+ */
+export function giveUp(
+	log: CasLog<Registry>,
+	input: { change: string; agent: string; reason: string },
+	stamper?: Stamper,
+) {
+	return appendRecord<Registry, string>(log, input.agent, empty, async (state) => {
+		const held = state.claims.find((c) => c.change === input.change);
+		if (!held) return { refused: `${input.change} holds no claim` };
+		const at = new Date().toISOString();
+		const record: ReleaseRecord = { ...staleRelease(held, input.agent, at), reason: input.reason };
+		return {
+			state: {
+				...state,
+				claims: state.claims.filter((c) => c.change !== input.change),
+				released: [...state.released, await stamped("release", record, stamper, "verifiedBy")],
+			},
+			text: `${input.agent} gives up ${input.change} (${held.agent}'s): ${input.reason}`,
+		};
+	});
+}
+
 /** Records a branch changes may land on, at its starting commit. A branch already recorded keeps its record. */
 export function recordBranch(
 	log: CasLog<Registry>,

@@ -5,6 +5,7 @@ import type {
 	BranchHistory,
 	LandingStretch,
 	ChangeHistory,
+	GiveUpAnswer,
 	HiveEvent,
 	RepoAccess,
 	PullAnswer,
@@ -63,6 +64,10 @@ export type RepoPageApi = CodeApi &
 		) => Promise<{ ok: boolean; commit?: string; reasons?: string[]; conflicts?: string[] }>;
 		/** People who can write: open the standing pull request on GitHub, or find it. */
 		githubPull?: (repo: string) => Promise<PullAnswer>;
+		/** People who can write: give up GitHub's change, freeing its paths. */
+		giveUpGitHub?: (repo: string, change: string) => Promise<GiveUpAnswer>;
+		/** People who can write: bring GitHub's changes back again, after they were given up or sent back. */
+		githubAgain?: (repo: string) => Promise<unknown>;
 	};
 
 export interface RepoPageProps {
@@ -222,6 +227,7 @@ function RepoTabContent({
 				api={api}
 				canVote={voting}
 				merge={canWrite(access?.level) ? api.merge : undefined}
+				giveUp={canWrite(access?.level) ? api.giveUpGitHub : undefined}
 			/>
 		);
 	}
@@ -334,6 +340,7 @@ export function RepoPage({
 							repo={repo}
 							github={snapshot.github}
 							openPull={canWrite(access?.level) ? api.githubPull : undefined}
+							again={canWrite(access?.level) ? api.githubAgain : undefined}
 							onChanged={onSettingsChanged}
 						/>
 					) : undefined

@@ -26,6 +26,7 @@ let pull: KnownPull | null;
 const handle: GitHubSyncHandle = {
 	notice: async (seen) => (noticed.push(seen), { pull, job: null }),
 	notePull: async (known) => void (pull = known),
+	gaveUp: async () => undefined,
 	state: async () => ({ pull, job: null }),
 };
 const { ctx, call, register, approve } = toolCalls(() => server, {

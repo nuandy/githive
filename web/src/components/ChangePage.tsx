@@ -1,7 +1,7 @@
 import { type ReactNode, useState } from "react";
 import { messageOf } from "../lib/errors";
 import { VoteForm, type VoteApi } from "./VoteForm";
-import type { ChangeHistory, RepoSnapshot } from "../api";
+import type { ChangeHistory, GiveUpAnswer, RepoSnapshot } from "../api";
 import { identityName } from "../lib/agent";
 import type { ChangeStatus } from "../lib/changeStatus";
 import { claimApprovalLabel, claimStatus, votesForClaim, type Claim } from "../lib/claimStatus";
@@ -40,6 +40,62 @@ export interface ChangePageProps {
 		repo: string,
 		change: string,
 	) => Promise<{ ok: boolean; commit?: string; reasons?: string[]; conflicts?: string[] }>;
+	/**
+	 * A person giving up GitHub's change (write or more in the repo): its claim released, so its paths are free, until
+	 * GitHub's branch moves or someone asks again. Only GitHub's changes offer it.
+	 */
+	giveUp?: (repo: string, change: string) => Promise<GiveUpAnswer>;
+}
+
+/** Whether a claim is GitHub's change, brought back by githive-github. */
+export const isGitHubClaim = (claim: Pick<Claim, "agent" | "source">) =>
+	claim.agent === "githive-github" && !!claim.source?.startsWith("github/");
+
+/** Give up GitHub's change, for a person who can write: the one claim someone other than its agent may release. */
+function GiveUpButton({
+	repo,
+	change,
+	giveUp,
+}: {
+	repo: string;
+	change: string;
+	giveUp: NonNullable<ChangePageProps["giveUp"]>;
+}) {
+	const [busy, setBusy] = useState(false);
+	const [outcome, setOutcome] = useState<{ ok: boolean; text: string } | null>(null);
+	const giveUpChange = async () => {
+		setBusy(true);
+		setOutcome(null);
+		try {
+			const answer = await giveUp(repo, change);
+			setOutcome(
+				answer.ok
+					? { ok: true, text: answer.note ?? "Given up: its paths are free." }
+					: { ok: false, text: answer.refused ?? "It couldn't be given up." },
+			);
+		} catch (err) {
+			setOutcome({ ok: false, text: messageOf(err) });
+		} finally {
+			setBusy(false);
+		}
+	};
+	return (
+		<div className="change-merge">
+			<button
+				type="button"
+				onClick={giveUpChange}
+				disabled={busy}
+				title="Releases its claim, so its paths are free; GitHive brings GitHub's changes back when GitHub's branch moves"
+			>
+				{busy ? "Giving up…" : "Give up GitHub's changes"}
+			</button>
+			{outcome ? (
+				<p className={outcome.ok ? "tone-good" : "error"} role="status">
+					{outcome.text}
+				</p>
+			) : null}
+		</div>
+	);
 }
 
 type ChangeEnding = NonNullable<ReturnType<typeof changeEnding>>;
@@ -297,6 +353,7 @@ export function ChangePage({
 	api,
 	canVote = true,
 	merge,
+	giveUp,
 }: ChangePageProps) {
 	const branch = claim?.into || history?.branch || snapshot.branch || "main";
 	const record = claim ?? history?.claim ?? undefined;
@@ -346,6 +403,9 @@ export function ChangePage({
 					</span>
 					{claim?.waitsOn?.length ? <span className="pill pill--warn">waits on {claim.waitsOn.join(", ")}</span> : null}
 					{mergeable ? <MergeButton repo={repo} change={changeId} merge={merge} /> : null}
+					{claim && giveUp && isGitHubClaim(claim) ? (
+						<GiveUpButton repo={repo} change={changeId} giveUp={giveUp} />
+					) : null}
 				</div>
 			</div>
 			<Tabs

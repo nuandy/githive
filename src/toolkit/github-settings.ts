@@ -89,7 +89,7 @@ export interface InboundJob {
 	branch: string;
 	/** GitHub's commit being brought back, as the import found it. */
 	commit: string;
-	step: "import" | "claim" | "merge" | "done" | "waiting" | "needs a person" | "failed";
+	step: "import" | "claim" | "merge" | "done" | "waiting" | "needs a person" | "given up" | "failed";
 	/** github/<branch>'s commit: GitHub's, or one GitHive made joining it to what GitHub had already taken. */
 	head?: string;
 	/** The GitHive commit whose work GitHub's branch already had when it was imported. */
@@ -97,7 +97,7 @@ export interface InboundJob {
 	change?: string;
 	/** The merge commit, once it landed. */
 	merged?: string;
-	/** Why it waits, needs a person, or failed; or that GitHive's main had it already. */
+	/** Why it waits, needs a person, was given up or failed; or that GitHive's main had it already. */
 	reason?: string;
 	/** For a job that waits: the step it goes on from when GitHub's branch is noticed again. */
 	resume?: "claim" | "merge";
@@ -120,5 +120,10 @@ export interface GitHubSyncHandle {
 	 */
 	notice(seen: GitHubSeen, again?: boolean): Promise<GitHubSyncState>;
 	notePull(pull: KnownPull | null): Promise<void>;
+	/**
+	 * Someone gave up `change`, GitHub's change, releasing its claim (see giveUpGitHubChange): its job ends there, and
+	 * starts again when GitHub's branch moves, or when asked.
+	 */
+	gaveUp(change: string, reason: string): Promise<void>;
 	state(): Promise<GitHubSyncState>;
 }

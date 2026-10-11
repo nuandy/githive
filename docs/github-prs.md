@@ -102,13 +102,24 @@ people pushed there directly. They come back through GitHive's own path, so the 
 4. **Landed without review, with checks.** The change is trusted: it needs no approvals, whatever the policy. It
    lands in a batch, through the repo's checks when it has any, with trees or, when it needs a real merge (GitHub's
    commits often aren't on top of main), in the repo's Gate like any change that needs one. So a connected repo
-   without checks does start the repo's Gate now and then, and the GitHub Gate for each import. Other merges' batches leave it to its own merge
-   (githive-github's, or a person's from the dashboard), which test-merges it first: a conflict sends it back with
-   no vote to show it, and in another merge's batch it would break every landing. If the checks fail or it
-   conflicts, it is sent back like any change: githive-github asks people (`ask_human`), so the dashboard shows it
-   as "GitHub's changes need a person" with the reason, and its claim waits on a person. Fixing it on GitHub
-   (merging `githive/main` there) brings the fix back, which lets the stuck change go.
-5. **Recorded.** The merge commit says "Bring in GitHub's changes (owner/name main at <sha>)", with the usual
+   without checks does start the repo's Gate now and then, and the GitHub Gate for each import. Other merges'
+   batches leave it to its own merge (githive-github's, or a person's from the dashboard), which test-merges it
+   first: a conflict sends it back with no vote to show it, and in another merge's batch it would break every
+   landing. If the checks fail or it conflicts, it is sent back like any change: githive-github asks people
+   (`ask_human`, once: asked again while the question is open, it doesn't ask twice), so the dashboard shows it as
+   "GitHub's changes need a person" with the reason, and its claim waits on a person. Fixing it on GitHub (merging
+   `githive/main` there) brings the fix back, which lets the stuck change go; or a person gives it up (below).
+6. **Given up, when it can't wait.** A GitHub change sent to a person holds its paths, and only its agent may release
+   a claim, which no one can act as. So a person who can write may give it up from the dashboard ("Give up GitHub's
+   changes", on the change's page; `POST /repos/:owner/:name/changes/:change/give-up`), and a repo admin through
+   `release` (naming the change, as their own agent; the MCP front door tells the toolkit the caller's level). It's
+   the one exception to "only the holder releases", recorded like a stale release (`stale: true`, the reason "GitHub's
+   changes given up by <who>") and stamped with who did it; the audit accepts a stamped release of
+   `githive-github`'s claim at any time (`giveUpGitHubChange`). Its paths are free at once. The job ends ("given up")
+   and waits: GitHub's branch moving starts it again, as does a person asking (the dashboard's "Bring them in again",
+   `POST /repos/:owner/:name/github/again`, or `github_pr` with `refresh`). Only GitHub's changes are given up this
+   way.
+7. **Recorded.** The merge commit says "Bring in GitHub's changes (owner/name main at <sha>)", with the usual
    trailers.
 
 Once GitHub's commit is on `main`, the next PR shows only what's new, even after a squash merge, and a mirror's push
@@ -149,8 +160,10 @@ is a fast-forward again.
 ## The dashboard
 
 - By the repo's name: the GitHub repo, and in pr mode the pull request's link, or for people who can write the "Open
-  a pull request on GitHub" button. When bringing GitHub's changes back needs a person, waits or failed, it says so
-  there, linking to the change.
+  a pull request on GitHub" button. When bringing GitHub's changes back needs a person, waits, was given up or
+  failed, it says so there, linking to the change; once it stopped (a person, given up, failed), people who can write
+  get "Bring them in again".
+- GitHub's change's page offers people who can write "Give up GitHub's changes" (step 6).
 - The Settings tab: the GitHub repo, how GitHive's work reaches it (`github_sync`), and whether its changes are
   trusted (`github_trust`), for admins; the same in words for everyone else.
 - The Changes tab labels GitHub's change "from GitHub, trusted"; its page and sidebar say it needs no review instead
@@ -174,7 +187,10 @@ real-git test server) plays GitHub, as GitHive's tests fake Artifacts.
 - Each kind of GitHub merge comes back as one trusted change that lands without votes and passes the audit: a merge
   commit, a squash and a rebase; the next PR lists only what's new (`github-inbound.test.ts`).
 - A direct push on GitHub comes back the same way.
-- A conflicting GitHub change is sent back to a person, not landed, and a fix on GitHub lets it go.
+- A conflicting GitHub change is sent back to a person, not landed, and a fix on GitHub lets it go. A person who can
+  write gives it up from the dashboard, or a repo admin through `release` (an agent who can only write can't), and
+  its paths are free at once, the audit accepting the release; noticed again, the same commit starts nothing, and
+  asked again it comes back.
 - With trust off, review is needed.
 - The Gate's import joins a squash or rebase to what it took, so it merges cleanly where git's own merge base
   conflicts (`github-import.test.ts`). It runs in the repo's GitHub Gate: the repo's own Gate refuses it.

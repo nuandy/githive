@@ -12,6 +12,7 @@ import { holdKey, ROLE_WAIT_MS, waitingRoleReviews } from "../work";
 import { runAudit } from "./audit-tools";
 import { changeHead, changeSourceFor, changeStatus } from "./change-state";
 import { targetBranch } from "./claim-input";
+import { giveUpGitHubChange } from "./github-tools";
 import type { HostedStatus, ToolContext } from "./context";
 import { claimsRef, DEFAULT_POLICY, recordLog, shardingOf, shardVotesIfBusy, storeFor, votesFor } from "./repo";
 import { fail } from "../../errors";
@@ -198,6 +199,23 @@ export async function makeBranch(
 	});
 	await ctx.ping?.(repo).catch(() => undefined);
 	return { name: input.name, made };
+}
+
+/**
+ * A person gives up GitHub's change from the dashboard: its claim released, so its paths are free, and its job ended
+ * until GitHub's branch moves or someone asks again (see giveUpGitHubChange). The route checks they can write.
+ */
+export async function giveUpAsPerson(ctx: ToolContext, repo: string, change: string, person: string) {
+	if (!person.startsWith("person:"))
+		fail(403, "only a person gives up GitHub's changes from the dashboard; a repo admin's agents use release");
+	const registry = (await recordLog<Registry>(ctx, repo, claimsRef(repo)).read())?.commit.state;
+	const store = storeFor(ctx, repo, registry);
+	const { claim } = await store.readChange(change);
+	if (!claim) fail(409, `${change} holds no claim: there's nothing to give up`);
+	const stamper = await ctx.stamper?.();
+	const outcome = await giveUpGitHubChange(ctx, repo, { store, claim, who: person, ...(stamper ? { stamper } : {}) });
+	await ctx.ping?.(repo).catch(() => undefined);
+	return outcome;
 }
 
 /** The audit for the dashboard. It replays every record, so it runs apart from the snapshot. */

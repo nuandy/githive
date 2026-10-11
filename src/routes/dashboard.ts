@@ -4,9 +4,11 @@ import { type Level, OrgStore } from "../auth/orgs";
 import { remoteFor, reviewerName } from "../artifacts";
 import { fail } from "../errors";
 import {
+	bringGitHubBackAgain,
 	callTool,
 	repoAudit,
 	changeHistory,
+	giveUpAsPerson,
 	makeBranch,
 	mergeAsPerson,
 	repoSnapshot,
@@ -98,6 +100,22 @@ function personActionRoutes(app: Hono<AppEnv>) {
 		if (!isPerson(actor)) fail(403, "a merge from the dashboard is a person's: agents merge through MCP");
 		const repo = await routeRepo(c, "write");
 		return c.json(await mergeAsPerson(toolContext(c.env, actor), repo.id, c.req.param("change"), byOf(actor)));
+	});
+	// A person gives up GitHub's change, freeing its paths (see giveUpGitHubChange): stamped with their name.
+	app.post("/repos/:owner/:name/changes/:change/give-up", async (c) => {
+		const actor = c.get("principal") ?? fail(401, "no identity");
+		if (!isPerson(actor))
+			fail(403, "giving up GitHub's changes from the dashboard is a person's: admins' agents release");
+		const repo = await routeRepo(c, "write");
+		return c.json(await giveUpAsPerson(toolContext(c.env, actor), repo.id, c.req.param("change"), byOf(actor)));
+	});
+	// Looks at GitHub's branch now and brings its changes back, even a commit given up or sent to a person before.
+	app.post("/repos/:owner/:name/github/again", async (c) => {
+		const repo = await routeRepo(c, "write");
+		const ctx = toolContext(c.env, c.get("principal"));
+		const state = await bringGitHubBackAgain(ctx, repo.id);
+		await ctx.ping?.(repo.id).catch(() => undefined);
+		return c.json(state);
 	});
 	// Opens the standing pull request on GitHub, or says where it is; with refresh, rewrites it (see github_pr).
 	app.post("/repos/:owner/:name/github/pr", async (c) => {
