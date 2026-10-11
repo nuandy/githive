@@ -212,6 +212,32 @@ describe("a repo connected to GitHub", { timeout: 60_000 }, () => {
 	const project = () => ({ url: server.url, token: "unused" });
 	const timing = { pollMs: 5, firstRunWithinMs: 200, runsWithinMs: 2_000 };
 
+	it("gives up a read of GitHub that doesn't answer in time, passing the signal to fetch", async () => {
+		const { pem } = await appKey();
+		const signals: (AbortSignal | undefined)[] = [];
+		const fetcher = (async (url: string, init?: RequestInit) => {
+			const { pathname } = new URL(url);
+			if (pathname === "/repos/acme/hangs/installation") return Response.json({ id: 9 });
+			if (pathname === "/app/installations/9/access_tokens")
+				return Response.json({ token: "t", expires_at: new Date(Date.now() + 3600_000).toISOString() });
+			signals.push(init?.signal ?? undefined);
+			// GitHub takes the request and never answers, until it's given up.
+			return new Promise<Response>((_, reject) =>
+				init?.signal?.addEventListener("abort", () => reject(new Error("aborted"))),
+			);
+		}) as typeof fetch;
+		const { withinMs } = await import("../src/github");
+		const link = (await linkTo({ appId: "1", privateKey: pem }, "acme/hangs", fetcher))!;
+		await expect(withinMs(50, "acme/hangs's default branch", (signal) => link.defaultHead(signal))).rejects.toThrow(
+			"acme/hangs's default branch didn't answer within 0.05 s",
+		);
+		await expect(withinMs(50, "its pull request", (signal) => link.openPull("githive/main", signal))).rejects.toThrow(
+			"didn't answer",
+		);
+		expect(signals).toHaveLength(2);
+		expect(signals.every((signal) => signal?.aborted)).toBe(true);
+	});
+
 	it("checks a batch on Actions, pushing its merged result to githive/checks/<id>: every run must pass", async () => {
 		const main = server.git("rev-parse", "main").trim();
 		const a = await pushChange(server.url, work, "agent-a", "a-1", { "src/a.txt": "a\n" });

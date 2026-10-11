@@ -1,4 +1,4 @@
-import type { GitHubLink } from "../github";
+import { type GitHubLink, withinMs } from "../github";
 import { mirrorTo } from "./actions-checks";
 import { type GitHubSeen, type GitHubSync, PR_BRANCH } from "./github-settings";
 import type { BatchGit } from "./merge-types";
@@ -9,6 +9,12 @@ import type { BatchGit } from "./merge-types";
 // branch says whether GitHub has commits GitHive's main lacks, and if so the repo's GitHubSync brings them back in
 // steps of its own. None of it holds up the landing: it runs once the lease is handed on, and every failure is
 // caught and logged.
+
+/**
+ * How long the read of GitHub's branch may take. It runs in the merging agent's request, after the landing, so a
+ * GitHub that never answers would leave the agent with no answer.
+ */
+export const NOTICE_WITHIN_MS = 5_000;
 
 export interface AfterLanding {
 	gate: Pick<BatchGit, "pushBranch">;
@@ -42,7 +48,8 @@ export async function pushToGitHub(input: AfterLanding): Promise<void> {
 // One read of GitHub's default branch, told to the repo's GitHubSync unless it's the commit just pushed.
 async function noticeGitHub({ link, commit, notice }: AfterLanding) {
 	if (!notice) return;
-	const { branch, head } = await link.defaultHead();
+	const read = `${link.repo}'s default branch`;
+	const { branch, head } = await withinMs(NOTICE_WITHIN_MS, read, (signal) => link.defaultHead(signal));
 	if (head === commit) return;
 	await notice({ github: link.repo, branch, commit: head });
 }

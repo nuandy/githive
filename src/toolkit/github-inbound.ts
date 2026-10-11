@@ -1,16 +1,19 @@
 import { statusOf } from "../errors";
+import { withinMs } from "../github";
 import { projectBranch } from "../project-branch";
 import type { Registry } from "./claims";
 import { type GitHubImports, importsRef, recordImport } from "./github-imports";
 import {
 	bringsGitHubBack,
 	GITHUB_AGENT,
+	githubSync,
 	type GitHubSeen,
 	importedBranch,
 	type InboundJob,
 	type KnownPull,
 	PR_BRANCH,
 } from "./github-settings";
+import { NOTICE_WITHIN_MS } from "./github-outbound";
 import type { MergeOutcome } from "./merge-types";
 import { callTool, type ToolContext } from "./mcp";
 import { advice, claimsRef, recordLog } from "./tools/repo";
@@ -199,10 +202,18 @@ async function mergeStep(ctx: ToolContext, job: InboundJob, at: At): Promise<Ste
 	return { job: at({ step: "needs a person", reason, attempts: 0 }) };
 }
 
-// The standing pull request after GitHub's commit landed: merged and closed, or still open with more to take.
+// The standing pull request after GitHub's commit landed: merged and closed, or still open with more to take. Only a
+// repo in pr mode has one, and a GitHub that doesn't answer soon is left for the next time.
 async function openPull(ctx: ToolContext, job: InboundJob): Promise<KnownPull | null | undefined> {
+	const registry = (await recordLog<Registry>(ctx, job.repo, claimsRef(job.repo)).read().catch(() => null))?.commit
+		.state;
+	if (githubSync(registry) !== "pr") return undefined;
 	const link = await ctx.github?.(job.github).catch(() => null);
-	const pull = await link?.openPull(PR_BRANCH).catch(() => undefined);
+	if (!link) return undefined;
+	const read = `${job.github}'s pull request from ${PR_BRANCH}`;
+	const pull = await withinMs(NOTICE_WITHIN_MS, read, (signal) => link.openPull(PR_BRANCH, signal)).catch(
+		() => undefined,
+	);
 	if (pull === undefined) return undefined;
 	return pull && { number: pull.number, url: pull.url, at: new Date().toISOString() };
 }

@@ -47,7 +47,8 @@ In `pr` mode:
   - `github_pr { refresh: true }` rewrites the title and body.
   - Merging and closing it happen on GitHub.
 - The repo's `GitHubSync` keeps the pull request as last seen, for the dashboard's link: a hint. It's updated when
-  `github_pr` finds or opens one, and after an import lands (one read: merged and closed, or still open).
+  `github_pr` finds or opens one, and after an import lands in pr mode (one read, given 5 seconds: merged and
+  closed, or still open).
 
 ## Inbound: GitHub's changes come back as a trusted change
 
@@ -55,11 +56,12 @@ GitHub's branch can hold commits GitHive's `main` lacks: the PR's merge, squash 
 people pushed there directly. They come back through GitHive's own path, so the record and the audit stay whole.
 
 1. **Noticed after a landing** (for a link with its mode set). After pushing `githive/main` (or `main` in mirror
-   mode), GitHive reads GitHub's
-   default branch head: one API call, made with the last answer's ETag, so an unchanged branch costs nothing
-   against GitHub's rate limit. In mirror mode a push GitHub took means its main is GitHive's, so the read is made
-   only when the push was refused. The `github_pr` tool and the dashboard notice it as well. GitHive never polls:
-   no timers. A commit already brought back, found on main, or sent to a person isn't started again (unless
+   mode), GitHive reads GitHub's default branch head: one API call, made with the last answer's ETag, so an
+   unchanged branch costs nothing against GitHub's rate limit. The merging agent's request waits for it, so it's
+   given 5 seconds (`NOTICE_WITHIN_MS`) and then given up, caught and logged like any failure there: the next
+   landing looks again. In mirror mode a push GitHub took means its main is GitHive's, so the read is made only
+   when the push was refused. The `github_pr` tool, and so the dashboard's pull request button, notice it as well;
+   showing the repo page doesn't. GitHive never polls: no timers. A commit already brought back, found on main, or sent to a person isn't started again (unless
    `github_pr` asks with `refresh`). A job that waited goes on from the step it waited at; one that failed starts
    again an hour on, or when asked, so a commit that can't come in doesn't start a container at every landing.
 2. **Imported.** The repo's `GitHubSync` starts a job (`github-sync.ts`, `github-inbound.ts`). Main's last 1,000
@@ -155,6 +157,7 @@ real-git test server) plays GitHub, as GitHive's tests fake Artifacts.
   conflicts (`github-import.test.ts`). It runs in the repo's GitHub Gate: the repo's own Gate refuses it.
 - The audit reports every way a vote could be skipped short of the trust rule (`github-audit.test.ts`).
 - The import record's shape is pinned.
-- A failing GitHub API, a refused push or a failing import never fails a landing.
+- A failing GitHub API, a refused push or a failing import never fails a landing, and an API that takes the read
+  and never answers is given up after 5 seconds, the merging agent answered (`github-pr.test.ts`, `github.test.ts`).
 - A link with no `github_sync` never starts the GitHub job (no API call, nothing brought back, `github_pr` included);
   setting `github_sync` to `mirror` turns inbound on, trusted (`github-inbound.test.ts`, `github-settings.test.ts`).

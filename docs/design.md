@@ -680,7 +680,8 @@ the audit holds each merge to the settings in force when it merged. Then
     until `github_sync` is set for it, to `pr` or `mirror`.
 - **GitHub's changes come back as a change**, for a link with its mode set
   (`github_sync`, recorded for every new connection). After pushing, one read of
-  GitHub's default branch (with its ETag) says where it is; a mirror whose
+  GitHub's default branch (with its ETag, and given 5 seconds, since the
+  merging agent's request waits for it) says where it is; a mirror whose
   push was taken skips it. If GitHub's head may not be on main, the repo's
   `GitHubSync` Durable Object starts a job and the landing goes on: no timers,
   and the job runs one step per alarm, like the hosted builder, each step

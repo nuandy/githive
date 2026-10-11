@@ -238,6 +238,8 @@ describe("a link made before modes", { timeout: 120_000 }, () => {
 		await call("settings", { github_sync: "mirror" });
 		expect(await land("c-2", { "src/b.js": "b\n" })).toMatchObject({ step: "done", commit: pushed });
 		expect(server.git("show", "main:docs/notes.md")).toBe("from GitHub\n");
+		// A mirror has no pull request to look for once it landed.
+		expect(github.calls.filter((call) => call.startsWith("GET pulls"))).toEqual([]);
 		// Trusted: it landed without the review the repo asks for, and the audit agrees.
 		expect(await call("audit", {})).toMatchObject({ open: 0 });
 	});

@@ -133,6 +133,17 @@ describe("a repo connected to GitHub in pr mode", { timeout: 60_000 }, () => {
 		github.failCalls(10);
 		expect(await land("c-3", { "src/c.js": "c\n" })).toMatchObject({ ok: true });
 	});
+
+	it("answers the merging agent soon when GitHub's API takes the read and never answers", async () => {
+		github.stallCalls(1);
+		const started = Date.now();
+		expect(await land("c-1", { "src/a.js": "a\n" })).toMatchObject({ ok: true });
+		// The read is given up after 5 seconds, and nothing is noticed: the next landing looks again.
+		expect(Date.now() - started).toBeLessThan(20_000);
+		expect(github.calls).toEqual(["GET default"]);
+		expect(noticed).toEqual([]);
+		expect(github.head("githive/main")).toBe(server.git("rev-parse", "main").trim());
+	});
 });
 
 describe("a repo connected to GitHub in mirror mode", { timeout: 60_000 }, () => {

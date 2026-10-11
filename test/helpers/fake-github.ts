@@ -20,6 +20,8 @@ export interface FakeGitHub {
 	calls: string[];
 	/** Makes the next `count` REST calls fail, as GitHub down would. */
 	failCalls: (count: number) => void;
+	/** Makes the next `count` REST calls never answer, as a GitHub that takes the connection and hangs, until given up. */
+	stallCalls: (count: number) => void;
 	/**
 	 * Merges the open pull request (or githive/main) into the default branch as GitHub would, and closes it. A
 	 * conflict is resolved taking `taking`'s side, as a person would on GitHub. Returns the new head.
@@ -48,8 +50,15 @@ export async function fakeGitHub(
 	const pulls: (PullRequest & { open: boolean })[] = [];
 	const calls: string[] = [];
 	let failing = 0;
-	const called = (what: string) => {
+	let stalling = 0;
+	const called = async (what: string, signal?: AbortSignal) => {
 		calls.push(what);
+		if (stalling > 0) {
+			stalling--;
+			await new Promise((_, reject) =>
+				signal?.addEventListener("abort", () => reject(new Error(`GitHub ${what}: given up`))),
+			);
+		}
 		if (failing > 0) {
 			failing--;
 			throw new GitHubError(503, `GitHub ${what}: 503 unavailable`);
@@ -67,22 +76,25 @@ export async function fakeGitHub(
 	const link: GitHubLink = {
 		repo,
 		remote: { url, token: "unused", user: "x-access-token" },
-		runsFor: async (sha) => (called(`GET runs ${sha}`), options.runs?.(sha) ?? []),
+		runsFor: async (sha) => {
+			await called(`GET runs ${sha}`);
+			return options.runs?.(sha) ?? [];
+		},
 		deleteBranch: async (name) => {
-			called(`DELETE ${name}`);
+			await called(`DELETE ${name}`);
 			git("update-ref", "-d", `refs/heads/${name}`);
 		},
-		defaultHead: async () => {
-			called("GET default");
+		defaultHead: async (signal) => {
+			await called("GET default", signal);
 			return { branch: "main", head: head() };
 		},
-		openPull: async (from) => {
-			called(`GET pulls ${from}`);
+		openPull: async (from, signal) => {
+			await called(`GET pulls ${from}`, signal);
 			const open = pulls.find((pull) => pull.open && pull.head === from);
 			return open ? withoutOpen(open) : null;
 		},
 		createPull: async ({ head: from, base, title, body }) => {
-			called(`POST pulls ${from}`);
+			await called(`POST pulls ${from}`);
 			if (pulls.some((pull) => pull.open && pull.head === from))
 				throw new GitHubError(422, "A pull request already exists");
 			if (!git("rev-list", `refs/heads/${base}..refs/heads/${from}`).trim())
@@ -93,7 +105,7 @@ export async function fakeGitHub(
 			return pull;
 		},
 		updatePull: async (number, { title, body }) => {
-			called(`PATCH pulls ${number}`);
+			await called(`PATCH pulls ${number}`);
 			const pull = pulls.find((entry) => entry.number === number);
 			if (!pull) throw new GitHubError(404, "Not Found");
 			Object.assign(pull, { title, body });
@@ -151,6 +163,7 @@ export async function fakeGitHub(
 		pulls,
 		calls,
 		failCalls: (count) => void (failing = count),
+		stallCalls: (count) => void (stalling = count),
 		mergePull,
 		push,
 		close: () => rmSync(work, { recursive: true, force: true }),
