@@ -784,7 +784,8 @@ in the Worker (`src/footprint/`). Its footprint is the exported names it
 alters and the names its files use, each import resolved to a file that
 exists at the head. Compared with the other open changes into the same
 branch, a change that alters a name another uses gives both agents a
-`heads_up` notice, once per name and pair of heads. A push to a branch of a
+`heads_up` notice, once per alteration (a later push that keeps the same
+signature tells nothing new). A push to a branch of a
 project's own repo (a landing, or plain git) is read commit by commit along
 the first parents from where the event says the branch was (or the last commit
 analysed), at most 50: each against its first parent, which for a GitHive merge

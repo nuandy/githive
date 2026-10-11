@@ -177,8 +177,8 @@ export class FootprintCache extends DurableObject<Env> {
 
 	/**
 	 * Keeps a change's footprint, replacing an older push's, and tells the heads-ups it raises with the other open
-	 * changes into the same branch: when one alters a name the other uses, both agents hear it, once per name and pair
-	 * of heads. `claimed` maps each change claimed now to its agent; another change found unclaimed is dropped.
+	 * changes into the same branch: when one alters a name the other uses, both agents hear it, once per
+	 * alteration: a later push that keeps the same signature tells nothing new. `claimed` maps each change claimed now to its agent; another change found unclaimed is dropped.
 	 * Returns how many notices it sent.
 	 */
 	async keep(repo: string, footprint: Footprint, claimed: Record<string, string>) {
