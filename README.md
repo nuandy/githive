@@ -150,7 +150,7 @@ Records in Git outlive the code that wrote them. To change a record's shape, bum
 ## Known gaps
 
 - **Changes that merge cleanly but break together.** `status` and every merge find text conflicts, two changes editing the same lines. They can't see a break across files: one agent renames a function while another, elsewhere, adds a call to its old name. Only the checks catch that. Each batch runs them on main with all its changes merged in, and splitting a failed batch finds the change at fault. But checks are off by default, so a repo without them lands both changes and its main breaks, and even with them, only what the tests cover is caught. Turn on at least a build or a typecheck for any repo where agents work in parallel; a repo's Settings say so while it has none.
-- **Scale.** 1,000 agents at once claim, push, check and release with no failures (see Benchmarks); past that is untested. Merging is proven at 200: 200 scripted agents landed 200 of 200 changes as a set (before that, a line of merges stalled with about 190 approved changes calling `merge` at once). Merging is proven at 1,000 without reviews or checks: 1,000 of 1,000 landed in 15 minutes of work (`bench-results/swarm/1000/run-1000-10`); with reviews and checks it's untested past 200.
+- **Scale beyond what's tested.** Nothing has run with more than 1,000 agents at once.
 - **Plain git goes around GitHive.** Anyone with the account's Artifacts credentials can write the project with plain git. The audit reports it; it can't prevent it.
 - **Containers run Linux.** Checks that need macOS (iOS apps), Windows or a GPU can't run in them.
 
