@@ -93,7 +93,8 @@ Causes are missing for direct pushes, past 12 files, and when the conflict appea
   most 10 per change, for the merge commit's story.
 
 `causes` stays as it is, so nothing that reads it breaks. A conflict found while landing (in the Gate, or when a
-tree landing hands over) carries the same fields when the change is sent back.
+tree landing hands over) puts the change out, as failed checks do, and the rest of the batch lands. Its refusal
+carries `conflicts`, `touchedBy` and `fix`.
 
 ### 3. `next` in every reply
 

@@ -24,9 +24,16 @@ export interface BatchChange {
 	agent: string;
 }
 
+/** The files a change doesn't merge on, and who changed them on the branch since it left, where that was read. */
+export interface Conflict {
+	files: string[];
+	touchedBy?: TouchedBy[];
+}
+
 /**
  * Runs the project's checks on `base` with `changes` merged in order, which is what main becomes once they land.
- * They run in the Gate container named `gate`, or else the last change's.
+ * They run in the Gate container named `gate`, or else the last change's. A batch that doesn't merge says on what, in
+ * `conflict`, besides its failed step in `results`.
  */
 export type CheckRunner = (input: {
 	base: string;
@@ -34,7 +41,7 @@ export type CheckRunner = (input: {
 	changes: BatchChange[];
 	commands: string[];
 	gate?: string;
-}) => Promise<{ passed: boolean; results: CheckResult[] }>;
+}) => Promise<{ passed: boolean; results: CheckResult[]; conflict?: Conflict }>;
 
 /** A change in a batch before its head is read, and the head it was last seen at, if any. */
 export type BatchSource = Omit<BatchChange, "head"> & { seen?: string };
@@ -51,7 +58,8 @@ export interface BatchGit {
 	inspect(input: { base: string; branch: string; changes: BatchSource[] }): Promise<Inspected[]>;
 	/**
 	 * Lands `merges` on `base` in order and in one push, each as its own merge commit with its claim's trailers and
-	 * GitHive's stamp. Returns their commits, or "moved" if the branch is no longer at `base`.
+	 * GitHive's stamp. Returns their commits, "moved" if the branch is no longer at `base`, or why nothing landed:
+	 * with the change that didn't merge onto the batch and its files, when that's what failed.
 	 */
 	land(input: {
 		base: string;
@@ -59,10 +67,10 @@ export interface BatchGit {
 		merges: (BatchChange & { claimed: Omit<MergeClaim, "base"> })[];
 		by?: string;
 		stamper?: Stamper;
-	}): Promise<{ commits: string[] } | "moved">;
+	}): Promise<{ commits: string[] } | "moved" | Unlanded>;
 	/**
 	 * Merges `changes` onto `base` as they would land and pushes the result to `ref` on `to`, a connected GitHub repo,
-	 * for its Actions to check. Returns the tip, or why it failed.
+	 * for its Actions to check. Returns the tip, or why it failed: with the change that didn't merge, and its files.
 	 */
 	checksBranch(input: {
 		base: string;
@@ -70,9 +78,15 @@ export interface BatchGit {
 		changes: BatchChange[];
 		to: Remote;
 		ref: string;
-	}): Promise<{ tip: string } | { failed: string }>;
+	}): Promise<{ tip: string } | Unlanded>;
 	/** Fast-forwards `branch` on `to` (GitHub's copy) to `head`, and throws if that's refused. */
 	pushBranch(input: { branch: string; head: string; to: Remote }): Promise<void>;
+}
+
+/** Why a batch didn't land or merge, and the change that didn't merge onto it with its files, when that's why. */
+export interface Unlanded {
+	failed: string;
+	conflict?: { change: string; files: string[] };
 }
 
 /** Another change that may land with this one: its claim, its head as last seen, and where its branch lives. */

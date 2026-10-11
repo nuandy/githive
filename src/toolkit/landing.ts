@@ -23,6 +23,9 @@ export interface Settled {
 	skipped?: boolean;
 	reasons?: string[];
 	checks?: CheckResult[];
+	/** If it failed because it doesn't merge onto the branch: its files, and who changed them (see putOut). */
+	conflicts?: string[];
+	touchedBy?: TouchedBy[];
 }
 
 /** The changes being checked together now, on `base`. */

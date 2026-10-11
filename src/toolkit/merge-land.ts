@@ -1,12 +1,16 @@
+import { fail } from "../errors";
 import { repoOfUrl } from "../git-http";
 import { landedOn } from "./batch-reads";
 import { LANDED_FILES_KEPT, LANDED_INTENT_CHARS, type Landing, type Settled } from "./landing";
-import { batchChange } from "./merge-checks";
+import { batchChange, putOut } from "./merge-checks";
 import { ATTEMPT_LINE_MOST, ATTEMPTS_MOST, type MergeReview } from "./merge-commit";
 import { type Holding, STEP_MS } from "./merge-lease";
-import type { MergeInput, Ready } from "./merge-types";
+import { readChange } from "./merge-ready";
+import type { Conflict, MergeInput, Ready, Unlanded } from "./merge-types";
 
 const RELEASES_AT_ONCE = 4;
+/** How long test-merging a batch's changes one at a time may take, to find the one that didn't merge. */
+const FINDING_MS = 2 * 60_000;
 
 // A landed batch: each change's outcome, and the release of their claims for after the lease is handed on.
 export interface Landed {
@@ -16,6 +20,9 @@ export interface Landed {
 
 // Lands `batch` on main in one push, one merge commit per change. Waiting merges hear at once, but claims are
 // released later (see Landed) and candidates skips them until then. Null if main moved.
+//
+// A change that doesn't merge onto the batch is put out, as a change failing its checks is (see putOut), and the rest
+// land without it. A batch that was checked was checked with it, so then the rest wait for a batch checked without it.
 export async function land(
 	input: MergeInput,
 	landing: Landing,
@@ -25,27 +32,89 @@ export async function land(
 	holding: Holding,
 ): Promise<Landed | null> {
 	const startedAt = Date.now();
-	const landed = await input.batchGit.land({
-		base: baseHead,
-		branch: input.branch,
-		merges: await mergesOf(input, baseHead, batch, tested),
-		// The Gate stamps with GitHive's key as `by`. An in-process implementation (tests) uses the stamper itself.
-		...(input.stamper ? { by: input.stamper.by, stamper: input.stamper } : {}),
-	});
-	if (landed === "moved") return null;
+	const putOuts: Settled[] = [];
+	let part = batch;
+	let landed: { commits: string[] } | "moved";
+	for (;;) {
+		const tried = await input.batchGit.land({
+			base: baseHead,
+			branch: input.branch,
+			merges: await mergesOf(input, baseHead, part, tested),
+			// The Gate stamps with GitHive's key as `by`. An in-process implementation (tests) uses the stamper itself.
+			...(input.stamper ? { by: input.stamper.by, stamper: input.stamper } : {}),
+		});
+		if (tried === "moved" || !("failed" in tried)) {
+			landed = tried;
+			break;
+		}
+		const found = await conflictIn(input, baseHead, part, tried, holding);
+		if (!found) {
+			await settleAny(landing, putOuts);
+			fail(500, `landing the batch failed: ${tried.failed}`);
+		}
+		await holding.step(STEP_MS.records);
+		const failure = { results: [], conflict: found.conflict };
+		putOuts.push(await putOut(input, baseHead, found.ready, failure, `found while landing it on ${input.branch}`));
+		part = part.filter((ready) => ready !== found.ready);
+		if (tested || !part.length) {
+			await settleAny(landing, putOuts);
+			return { settled: putOuts, release: async () => undefined };
+		}
+	}
+	if (landed === "moved") {
+		await settleAny(landing, putOuts);
+		return null;
+	}
 	const { commits } = landed;
 	const pushedAt = Date.now();
 	await holding.step(STEP_MS.records);
-	const settled = landedOutcomes(input, batch, commits);
+	const settled = [...putOuts, ...landedOutcomes(input, part, commits)];
 	// Record the outcomes now, so a merge retried before its claim is released finds its change landed.
 	await landing.settle(settled);
-	const plural = batch.length === 1 ? "" : "s";
+	const plural = part.length === 1 ? "" : "s";
 	const how = tested ? "checked together" : "no checks";
+	const without = putOuts.length ? `, ${putOuts.length} put out for conflicts` : "";
 	console.log(
-		`landed ${batch.length} change${plural} on ${input.branch} (${how}): merged and pushed ${pushedAt - startedAt} ` +
-			`ms, told ${Date.now() - pushedAt} ms`,
+		`landed ${part.length} change${plural} on ${input.branch} (${how}${without}): merged and pushed ` +
+			`${pushedAt - startedAt} ms, told ${Date.now() - pushedAt} ms`,
 	);
-	return { settled, release: () => releaseLanded(input, batch, commits) };
+	return { settled, release: () => releaseLanded(input, part, commits) };
+}
+
+// Records the changes put out, if any, so merges waiting on them hear at once.
+const settleAny = async (landing: Landing, putOuts: Settled[]) => {
+	if (putOuts.length) await landing.settle(putOuts);
+};
+
+/**
+ * The change in `part` that didn't merge onto the batch, and its files: as the landing said, or else as test-merging
+ * each change alone onto the branch finds, for at most FINDING_MS. Null if neither finds one.
+ */
+async function conflictIn(
+	input: MergeInput,
+	baseHead: string,
+	part: Ready[],
+	unlanded: Unlanded,
+	holding: Holding,
+): Promise<{ ready: Ready; conflict: Conflict } | null> {
+	const said = unlanded.conflict;
+	const ready = said?.files.length ? part.find((each) => each.change === said.change) : undefined;
+	if (ready && said) return { ready, conflict: { files: said.files } };
+	await holding.step(STEP_MS.gate);
+	const until = Date.now() + FINDING_MS;
+	for (const each of part) {
+		if (Date.now() > until) break;
+		const read = await readChange(input, baseHead, each).catch((err) => {
+			console.error(`test-merging ${each.change} to find the change that didn't land failed`, String(err));
+			return null;
+		});
+		// Only the head that was landed counts: a newer one is the next batch's to try.
+		if (!read || read.head !== each.head || read.tried.clean) continue;
+		const touchedBy = read.touchedBy ? { touchedBy: read.touchedBy } : {};
+		return { ready: each, conflict: { files: read.tried.files ?? [], ...touchedBy } };
+	}
+	console.error(`no change of the ${part.length} that didn't land conflicts alone with ${input.branch}`);
+	return null;
 }
 
 // Each change's merge with the trailers its commit carries (its claim, its votes and what it was checked on), and

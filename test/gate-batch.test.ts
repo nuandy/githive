@@ -393,7 +393,10 @@ describe("reading and landing a batch in the repo's own Gate", { timeout: 60_000
 			to: { remote: server.repo("github"), token: "t" },
 			ref: "githive/checks/y-0",
 		});
-		expect(made).toEqual({ failed: expect.stringMatching(/^b-1 doesn't merge onto the batch: .*src\/same\.txt/s) });
+		expect(made).toEqual({
+			failed: expect.stringMatching(/^b-1 doesn't merge onto the batch: .*src\/same\.txt/s),
+			conflict: { change: "b-1", files: ["src/same.txt"] },
+		});
 		expect(server.gitIn("github", "for-each-ref", "--format=%(refname)").trim()).toBe("");
 	});
 

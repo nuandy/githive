@@ -95,7 +95,10 @@ export async function landBatch(
 		else firstPassing.found(batch);
 		const checkedAt = Date.now();
 		const done = await firstPassing.outcome();
-		const landedCount = done.landed === null ? "lost the race" : `${done.landed.settled.length}`;
+		const landedCount =
+			done.landed === null
+				? "lost the race"
+				: `${done.landed.settled.filter((settled) => settled.how === "landed").length}`;
 		const { size, foundAt, readAt } = gathered;
 		console.log(
 			`batch of ${batch.length} (at most ${size}) into ${input.branch}: gathering ${gatheredAt - startedAt} ` +

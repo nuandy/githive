@@ -8,8 +8,9 @@ import { gitHistory } from "./helpers/git-history";
 import { startGitServer, type GitServer } from "./helpers/git-server";
 
 // A conflict found while landing, in the Gate's checks or its landing (a tree landing hands such a batch over), comes
-// back naming the files and who changed each since the change left the branch. That's read Worker-side from the
-// branch's history through Artifacts' API (played here by git), and the change's attempt is noted.
+// back naming the change and its files. The checks name who changed each since the change left the branch, read
+// Worker-side from the branch's history through Artifacts' API (played here by git). The landing hands the conflict
+// to the merge, which puts the change out (see land in merge-land.ts) and names who changed them the same way.
 
 let server: GitServer;
 let work: string;
@@ -77,6 +78,7 @@ describe("a conflict found while landing", { timeout: 60_000 }, () => {
 		const runChecks = toolContextFor(env, "service:t").runChecks!("lc1");
 		const change = { change: "b-1", head, ref: "changes/b-1", agent: "agent-b" };
 		const checked = await runChecks({ base: main, branch: "main", changes: [change], commands: ["npm test"] });
+		const touchedBy = [{ file: "shared.txt", commit: main, change: "a-1", agent: "agent-a", intent: "add shared" }];
 		expect(checked).toEqual({
 			passed: false,
 			results: [
@@ -86,14 +88,16 @@ describe("a conflict found while landing", { timeout: 60_000 }, () => {
 					output: `conflict on shared.txt with a-1 by agent-a ("add shared", ${main.slice(0, 7)})`,
 				},
 			],
+			conflict: { files: ["shared.txt"], touchedBy },
 		});
 		// In a batch of several, the conflict may be with another change in it, so only the files are named.
 		const other = { change: "c-1", head, ref: "changes/c-1", agent: "agent-c" };
 		const batch = await runChecks({ base: main, branch: "main", changes: [other, change], commands: ["npm test"] });
 		expect(batch.results[0]).toEqual({ command: BATCH_MERGE, exitCode: 1, output: "conflict on shared.txt" });
+		expect(batch.conflict).toEqual({ files: ["shared.txt"] });
 	});
 
-	it("names them when a tree landing hands the batch to the Gate and it doesn't merge, and notes the attempt", async () => {
+	it("hands the change and its files back when a tree landing hands the batch to the Gate and it doesn't merge", async () => {
 		const { main, head } = await conflicting();
 		const noted: string[][] = [];
 		const env = envWith(
@@ -114,10 +118,11 @@ describe("a conflict found while landing", { timeout: 60_000 }, () => {
 			source: { url: server.repo("fork"), token: "read" },
 			claimed: { head, change: "b-1", author: "agent-b", claimsTip: "c1", votesTip: "v1" },
 		};
-		const said = `conflict on shared.txt with a-1 by agent-a ("add shared", ${main.slice(0, 7)})`;
-		await expect(land({ base: main, branch: "main", merges: [merge] })).rejects.toThrow(
-			`landing the batch failed: b-1 doesn't merge onto the batch: ${said}`,
-		);
-		expect(noted).toEqual([["b-1", said]]);
+		expect(await land({ base: main, branch: "main", merges: [merge] })).toEqual({
+			failed: "merging b-1 onto the batch failed: shared.txt\nCONFLICT (add/add)",
+			conflict: { change: "b-1", files: ["shared.txt"] },
+		});
+		// The merge notes the attempt when it puts the change out.
+		expect(noted).toEqual([]);
 	});
 });

@@ -17,7 +17,7 @@ type Proposed = BatchSource & { head: string; files: string[]; mine: boolean };
 
 // A change as read against the branch: its head, its files, and whether it merges cleanly into `branch`. A conflict
 // comes with its files' markers and the branch's commits that changed them since the change left it.
-interface ChangeRead {
+export interface ChangeRead {
 	head: string;
 	files: string[];
 	tried: { clean: boolean; files?: string[]; hunks?: Hunk[] };
@@ -40,12 +40,17 @@ export function outcomeOf(settled: Settled, branch?: string): MergeOutcome {
 		const skipped = settled.skipped ? { checks: "skipped: it only touches files the checks skip" } : {};
 		return { ok: true, commit: settled.commit!, ...skipped };
 	}
-	const conflicted = !!settled.checks?.some((check) => check.command === BATCH_MERGE);
+	const conflicts = settled.conflicts ?? [];
+	const conflicted = conflicts.length > 0 || !!settled.checks?.some((check) => check.command === BATCH_MERGE);
+	const into = branch ? { into: branch } : {};
 	return {
 		ok: false,
 		reasons: settled.reasons ?? ["it didn't land"],
 		why: [conflicted ? "conflict" : "checks"],
-		...(conflicted && branch ? { into: branch } : {}),
+		...(conflicted ? into : {}),
+		...(conflicts.length ? { conflicts } : {}),
+		...(settled.touchedBy?.length ? { touchedBy: settled.touchedBy } : {}),
+		...(conflicts.length && branch ? { fix: conflictFix(branch, settled.change, conflicts) } : {}),
 		...(settled.checks ? { checks: settled.checks } : {}),
 	};
 }
@@ -57,14 +62,15 @@ export async function readyNow(
 ): Promise<{ ok: true; ready: Ready } | { ok: false; refused: Refused; head: string }> {
 	const baseHead = (await headOf(input)) ?? conflict(`there's no branch ${input.branch}`);
 	const ref = `changes/${input.change}`;
+	const source = input.source ? { source: input.source } : {};
 	// The records are read once the workspace is released.
-	const read = await readChange(input, baseHead, ref);
+	const read = await readChange(input, baseHead, { change: input.change, ref, ...source });
 	const { head, files, tried, branch } = read;
 	const ready = await validated(input, {
 		change: input.change,
 		agent: input.agent,
 		ref,
-		...(input.source ? { source: input.source } : {}),
+		...source,
 		head,
 		files,
 		mine: true,
@@ -87,37 +93,47 @@ function alsoRefused(conflicted: Refused, other: Refused): Refused {
 	};
 }
 
-// Reads the change through Artifacts' API where possible (see changeAgainst). If no file changed on both sides, the
-// change merges cleanly and nothing is fetched. Otherwise git takes its turn in the isolate's workspace (see
-// inWorkspaceTurn), which needs one listing and no clone. The conflict markers show the change's side first, as
-// `git merge origin/<branch>` does in the agent's clone.
-async function readChange(input: MergeInput, baseHead: string, ref: string): Promise<ChangeRead> {
-	const read = await readThroughHistory(input, baseHead, ref);
+/**
+ * Test-merges a change onto the branch at `baseHead`, reading it through Artifacts' API where possible (see
+ * changeAgainst). If no file changed on both sides, it merges cleanly and nothing is fetched. Otherwise git takes its
+ * turn in the isolate's workspace (see inWorkspaceTurn), which needs one listing and no clone. The conflict markers
+ * show the change's side first, as `git merge origin/<branch>` does in the agent's clone.
+ */
+export async function readChange(
+	input: MergeInput,
+	baseHead: string,
+	change: { change: string; ref: string; source?: MergeInput["source"] },
+): Promise<ChangeRead> {
+	const read = await readThroughHistory(input, baseHead, change);
 	if (read && !("error" in read) && !read.both.length)
 		return { head: read.head, files: read.files, tried: { clean: true }, branch: input.branch };
 	return inWorkspaceTurn(async () => {
 		const workspace = await Workspace.at(input.remote, input.branch, baseHead);
-		const head = await workspace.fetch("change", input.source ?? input.remote, ref);
+		const head = await workspace.fetch("change", change.source ?? input.remote, change.ref);
 		const base = await workspace.mergeBase(baseHead, head);
 		const files = await workspace.changedPaths(base, head);
-		const labels = { ours: `ours (${ref})`, theirs: `origin/${input.branch}` };
+		const labels = { ours: `ours (${change.ref})`, theirs: `origin/${input.branch}` };
 		const tried = await workspace.tryMerge(head, baseHead, labels);
 		if (tried.clean) return { head, files, tried, branch: workspace.branch };
 		// Who changed the conflicted files since the change left the branch, from the history the workspace holds.
 		const touchedBy = await touchedInWorkspace(workspace, baseHead, base, tried.files).catch((err) => {
-			console.error(`reading who changed ${input.change}'s conflicted files failed`, String(err));
+			console.error(`reading who changed ${change.change}'s conflicted files failed`, String(err));
 			return [];
 		});
 		return { head, files, tried, touchedBy, branch: workspace.branch };
 	});
 }
 
-async function readThroughHistory(input: MergeInput, baseHead: string, ref: string) {
+async function readThroughHistory(
+	input: MergeInput,
+	baseHead: string,
+	change: { change: string; ref: string; source?: MergeInput["source"] },
+) {
 	if (!input.history) return null;
-	const target = { ref, ...(input.source ? { source: input.source } : {}) };
+	const target = { ref: change.ref, ...(change.source ? { source: change.source } : {}) };
 	const repo = repoOfUrl(input.remote.url);
 	return changeAgainst(input.history, repo, input.branch, baseHead, target).catch((err) =>
-		busyArtifacts(input.change, err),
+		busyArtifacts(change.change, err),
 	);
 }
 

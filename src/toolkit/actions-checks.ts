@@ -1,5 +1,8 @@
 import type { GitHubLink, WorkflowRun } from "../github";
+import { conflictLine } from "./landing";
 import type { BatchGit, CheckResult, CheckRunner } from "./merge";
+import type { Unlanded } from "./merge-types";
+import { BATCH_MERGE } from "./merge-checks";
 import { sleep } from "../retry";
 
 // Checks on GitHub Actions, for a repo connected to GitHub with verify ["github-actions"]. The Gate merges a
@@ -26,7 +29,13 @@ export function actionsChecks(
 		// Merge each change onto main as its own merge commit, as the batch will land.
 		const made = await gate
 			.checksBranch({ base, branch, changes, to: link.remote, ref: name })
-			.catch((err) => ({ failed: String(err) }));
+			.catch((err): Unlanded => ({ failed: String(err) }));
+		// A change that doesn't merge onto the batch fails it as the Gate's checks do, so it's put out for its conflict.
+		if ("failed" in made && made.conflict) {
+			const { files } = made.conflict;
+			const merging = { command: BATCH_MERGE, exitCode: 1, output: conflictLine(files, []) };
+			return { passed: false, results: [merging], conflict: { files } };
+		}
 		if ("failed" in made)
 			return { passed: false, results: [{ command: "(merging the batch)", exitCode: 1, output: made.failed }] };
 		try {

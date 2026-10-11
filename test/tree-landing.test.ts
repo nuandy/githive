@@ -135,7 +135,7 @@ describe("landing a batch with trees, in the Worker", { timeout: 60_000 }, () =>
 		expect(server.pushes() - pushesBefore).toBe(1);
 
 		expect(fallback).not.toHaveBeenCalled();
-		if (landed === "moved") throw new Error("moved");
+		if (landed === "moved" || "failed" in landed) throw new Error(`not landed: ${JSON.stringify(landed)}`);
 		expect(landed.commits).toHaveLength(2);
 		const tip = server.git("rev-parse", "main").trim();
 		expect(tip).toBe(landed.commits[1]);
@@ -177,7 +177,7 @@ describe("landing a batch with trees, in the Worker", { timeout: 60_000 }, () =>
 		expect(server.requestsTo.filter((request) => /fork-early.*git-upload-pack/.test(request)).length).toBe(
 			fetchesBefore,
 		);
-		if (landed === "moved") throw new Error("moved");
+		if (landed === "moved" || "failed" in landed) throw new Error(`not landed: ${JSON.stringify(landed)}`);
 		expect(server.git("rev-parse", `${landed.commits[0]}^{tree}`).trim()).toBe(await gitMergeTree(base, [early]));
 	});
 
@@ -217,7 +217,7 @@ describe("landing a batch with trees, in the Worker", { timeout: 60_000 }, () =>
 		const landed = await land({ base, branch: "main", merges: [merge(change)] });
 
 		expect(fallback).not.toHaveBeenCalled();
-		if (landed === "moved") throw new Error("moved");
+		if (landed === "moved" || "failed" in landed) throw new Error(`not landed: ${JSON.stringify(landed)}`);
 		expect(server.git("rev-parse", "main").trim()).toBe(landed.commits[0]);
 	});
 
@@ -244,7 +244,7 @@ describe("landing a batch with trees, in the Worker", { timeout: 60_000 }, () =>
 		});
 
 		expect(fallback).not.toHaveBeenCalled();
-		if (landed === "moved") throw new Error("moved");
+		if (landed === "moved" || "failed" in landed) throw new Error(`not landed: ${JSON.stringify(landed)}`);
 		expect(server.git("rev-parse", `${landed.commits[0]}^{tree}`).trim()).toBe(await gitMergeTree(base, [beside]));
 	});
 
