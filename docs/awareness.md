@@ -178,7 +178,7 @@ dashboard's claims show "free after 14:30".
 
 ## Order of work
 
-1. The news channel, landing hooks and blob reads; then, in parallel: conflicts that explain themselves, `next`,
+1. The news channel, blob reads and the cache plumbing; then, in parallel: conflicts that explain themselves, `next`,
    notes and the merge story, and how long a claim lasts.
 2. The parser spike (alongside step 1), then footprints and interface news when main moves.
 3. Heads-ups between open changes, when they're pushed.
