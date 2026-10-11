@@ -40,10 +40,14 @@ In `pr` mode:
     on GitHub", `POST /repos/:owner/:name/github/pr`) open it, or say where it is if it's already open. Opening
     pushes `githive/main` first, for a repo connected since its last landing;
   - its title is "GitHive: <n> changes", and its body lists what landed on GitHive since GitHub's branch last took
-    GitHive's work, newest first (at most 100, then a count): each change's intent, agent, and reviewers with their
-    evidence, read from the branch's merge commits and votes as the History tab reads them (`github-pr.ts`).
-    "Since" starts at GitHub's head, or for a head GitHive brought in, the GitHive commit its import found GitHub had
-    taken; githive-github's own merges are left out;
+    GitHive's work, newest first (at most 50, then "…and <n> more since <sha>"): each change's intent, agent, and
+    reviewers with their evidence, read from the branch's merge commits and votes as the History tab reads them
+    (`github-pr.ts`, `landedSince` in `history.ts`). "Since" starts at GitHub's head, or for a head GitHive brought
+    in, the GitHive commit its import found GitHub had taken; githive-github's own merges are left out. When GitHub's
+    head is no commit of GitHive's main and no import has it yet (someone pushed to GitHub, or GitHub merged and the
+    job hasn't brought it back), GitHive can't tell which changes GitHub lacks: the title and body say "since
+    GitHub's branch last took GitHive's work" and list none, rather than every change since GitHive started.
+    Refreshing once the job has brought GitHub's commit back lists them;
   - everything in it an agent wrote (intents, change ids, agent and reviewer names, roles, evidence) is inert: one
     line, capped (200 characters for an intent or evidence), in a code span (`inert`). GitHub acts on a pull
     request's body, closing an issue a keyword names ("Fixes #12") when it merges and notifying "@user" or
@@ -152,7 +156,8 @@ A fake GitHub (`test/helpers/fake-github.ts`: REST answered in the test, git ove
 real-git test server) plays GitHub, as GitHive's tests fake Artifacts.
 - In `pr` mode a landing pushes `githive/main`, not `main`, and reads GitHub's branch once (`github-pr.test.ts`).
 - `github_pr` opens one PR and finds it after that, with refresh. Its body gives GitHub nothing to act on in what
-  agents wrote: "Closes #12", "@org/team" and markup stay in code spans.
+  agents wrote: "Closes #12", "@org/team" and markup stay in code spans. It lists at most 50 changes, and none when
+  GitHub's head isn't a commit GitHive has.
 - Each kind of GitHub merge comes back as one trusted change that lands without votes and passes the audit: a merge
   commit, a squash and a rebase; the next PR lists only what's new (`github-inbound.test.ts`).
 - A direct push on GitHub comes back the same way.

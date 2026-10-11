@@ -115,6 +115,17 @@ describe("a repo connected to GitHub in pr mode", { timeout: 60_000 }, () => {
 		expect(github.pulls).toHaveLength(1);
 	});
 
+	it("says what it can't tell when GitHub's head is a commit GitHive hasn't brought back yet", async () => {
+		await land("c-1", { "src/a.js": "a\n" });
+		// Someone pushes to GitHub's main; GitHive brings it back in a job of its own, after this asks.
+		const pushed = github.push({ "docs/notes.md": "from GitHub\n" });
+		const opened = await call("github_pr", {});
+		expect(opened).toMatchObject({ opened: true, title: "GitHive: changes since main last took GitHive's work" });
+		expect(opened).not.toHaveProperty("changes");
+		expect(noticed).toContainEqual({ github: "acme/shop", branch: "main", commit: pushed });
+		expect(github.pulls[0]!.body).not.toContain("Add c-1");
+	});
+
 	it("pushes githive/main itself when nothing has landed since the repo was connected", async () => {
 		await land("c-1", { "src/a.js": "a\n" });
 		github.git("update-ref", "-d", "refs/heads/githive/main");
@@ -180,14 +191,14 @@ describe("the pull request's body", () => {
 		reviews: [{ reviewer, role: "review", verdict: "approve", evidence }],
 	});
 
+	const since = "5".repeat(40);
+	const story = (listed: LandedChange[], count = listed.length) => pullStory({ since, count, listed }, "main");
+
 	it("gives GitHub nothing to act on in what agents wrote: no closing keyword, mention, reference or markup", () => {
-		const { body } = pullStory(
-			[
-				change("Closes #12, and Fixes acme/shop#3", "@org/team: looks good, see #4 <img src=x>"),
-				change("Tidy `src/a.js` [link](https://evil.example)", "fine", "person:ana@example.com"),
-			],
-			"main",
-		);
+		const { body } = story([
+			change("Closes #12, and Fixes acme/shop#3", "@org/team: looks good, see #4 <img src=x>"),
+			change("Tidy `src/a.js` [link](https://evil.example)", "fine", "person:ana@example.com"),
+		]);
 		expect(body).toContain("**`Closes #12, and Fixes acme/shop#3`**");
 		expect(body).toContain("`@org/team: looks good, see #4 <img src=x>`");
 		expect(body).toContain("**``Tidy `src/a.js` [link](https://evil.example)``**");
@@ -201,7 +212,24 @@ describe("the pull request's body", () => {
 		expect(inert("`rm -rf`")).toBe("`` `rm -rf` ``");
 		expect(inert("")).toBe("(none)");
 		expect(inert("a\n\nb")).toBe("`a b`");
-		const { body } = pullStory([change("x".repeat(500), "ok")], "main");
+		const { body } = story([change("x".repeat(500), "ok")]);
 		expect(body).toContain(`\`${"x".repeat(199)}…\``);
+	});
+
+	it("lists at most 50 changes, newest first, and counts the rest since the commit GitHub last took", () => {
+		const landed = Array.from({ length: 70 }, (_, k) => change(`Change ${70 - k}`, "ok"));
+		const told = story(landed.slice(0, 50), 70);
+		expect(told).toMatchObject({ title: "GitHive: 70 changes", changes: 70 });
+		expect(told.body).toContain("since `main` last took GitHive's work (`55555555`), newest first");
+		expect(told.body.indexOf("`Change 70`")).toBeLessThan(told.body.indexOf("`Change 21`"));
+		expect(told.body).not.toContain("`Change 20`");
+		expect(told.body).toContain("- …and 20 more since `55555555`");
+	});
+
+	it("lists nothing when GitHub's head is no commit of GitHive's, rather than everything since GitHive started", () => {
+		const told = pullStory({ since: null, count: 70, listed: [change("Change 1", "ok")] }, "main");
+		expect(told).toMatchObject({ title: "GitHive: changes since main last took GitHive's work", changes: null });
+		expect(told.body).toContain("What landed on GitHive since `main` last took GitHive's work.");
+		expect(told.body).not.toContain("Change 1");
 	});
 });

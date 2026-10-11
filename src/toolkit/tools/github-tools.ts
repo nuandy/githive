@@ -1,7 +1,7 @@
 import { fail } from "../../errors";
 import { GitHubError, type GitHubLink, type PullRequest } from "../../github";
 import { mirrorTo } from "../actions-checks";
-import { pullStory, untaken } from "../github-pr";
+import { pullStoryAt } from "../github-pr";
 import type { ClaimRecord, Registry } from "../claims";
 import { type GitHubImport, type GitHubImports, importedAt, importsRef, verifiedImports } from "../github-imports";
 import {
@@ -12,7 +12,6 @@ import {
 	PR_BRANCH,
 	trustsGitHub,
 } from "../github-settings";
-import { branchHistory } from "../history";
 import type { ToolCall, ToolContext, ToolHandlers } from "./context";
 import { recordLog } from "./repo";
 
@@ -51,15 +50,15 @@ export const githubTools: ToolHandlers = {
 				note: `a pull request from ${PR_BRANCH} is open already; it updates itself as changes land`,
 			};
 		}
-		const [landed, taken] = await Promise.all([branchHistory(ctx, repo), takenAt(call, seen)]);
-		const story = pullStory(untaken(landed.changes, taken), seen.branch);
+		const story = await pullStoryAt(ctx, repo, await takenAt(call, seen), seen.branch);
+		const changes = story.changes ?? undefined;
 		if (open) {
 			const updated = await link.updatePull(open.number, { title: story.title, body: story.body });
 			await notePull(call, updated);
-			return reply(updated, "refreshed", story.changes);
+			return reply(updated, "refreshed", changes);
 		}
 		await sync?.notePull(null).catch(() => undefined);
-		if (!story.changes)
+		if (story.changes === 0)
 			fail(409, `nothing has landed on GitHive since ${link.repo}'s ${seen.branch} took its work: no pull request`);
 		await pushPullBranch(call, link);
 		const pull = await link
@@ -70,7 +69,7 @@ export const githubTools: ToolHandlers = {
 					: Promise.reject(err),
 			);
 		await notePull(call, pull);
-		return reply(pull, "opened", story.changes);
+		return reply(pull, "opened", changes);
 	},
 };
 

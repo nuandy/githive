@@ -76,20 +76,53 @@ function landedOf(commit: BranchCommit): LandedChange | null {
 
 /** The changes landed on a repo's branch (its project branch by default), newest first, with their reviews. */
 export async function branchHistory(ctx: ToolContext, repo: string, branch?: string): Promise<BranchHistory> {
+	const { shown, commits } = await readHistory(ctx, repo, branch);
+	const landed = commits.flatMap((commit) => landedOf(commit) ?? []).reverse();
+	const listed = await withReviews(ctx, repo, shown, landed.slice(0, HISTORY_MOST));
+	return { branch: shown, total: landed.length, changes: listed };
+}
+
+/**
+ * The changes landed on the project's branch after `since`, newest first: all of them, with the reviews of those
+ * `listed` picks. `since` is null in the reply when it's no commit of the branch's since GitHive started (nor where it
+ * started), and then every change is there.
+ */
+export async function landedSince(
+	ctx: ToolContext,
+	repo: string,
+	since: string,
+	listed: (landed: LandedChange[]) => LandedChange[],
+): Promise<{ since: string | null; landed: LandedChange[]; listed: LandedChange[] }> {
+	const { start, commits } = await readHistory(ctx, repo);
+	const at = commits.findIndex((commit) => commit.commit === since);
+	const after = at >= 0 ? commits.slice(at + 1) : commits;
+	const landed = after.flatMap((commit) => landedOf(commit) ?? []).reverse();
+	const found = at >= 0 || since === start;
+	return { since: found ? since : null, landed, listed: await withReviews(ctx, repo, undefined, listed(landed)) };
+}
+
+// The branch's commits since GitHive started on it (its project branch by default), oldest first, and where it started.
+async function readHistory(ctx: ToolContext, repo: string, branch?: string) {
 	const claims = new GitCasLog<Registry>(() => ctx.remote(repo, "read"), repo, `refs/notes/githive-claims/${repo}`);
 	const registry = (await claims.read())?.commit.state;
 	if (!registry?.baseline) fail(404, `GitHive hasn't started on ${repo}`);
 	const shown = branch || projectBranch(registry);
-	const commits = await branchCommits(ctx, repo, registry, shown);
-	const landed = commits.flatMap((commit) => landedOf(commit) ?? []).reverse();
-	const listed = landed.slice(0, HISTORY_MOST);
+	const start = shown === projectBranch(registry) ? registry.baseline : registry.branches?.[shown]?.base;
+	return { shown, start, commits: await branchCommits(ctx, repo, registry, shown) };
+}
+
+// The reviews of each landed change's head, and when it landed while the repo's landing recalls it.
+async function withReviews(ctx: ToolContext, repo: string, branch: string | undefined, listed: LandedChange[]) {
+	if (!listed.length) return listed;
 	const heads = listed.map((entry) => entry.head);
 	const [votes, landing] = await Promise.all([
 		votesFor(ctx, repo).readFor(heads),
-		ctx
-			.landing?.(repo, shown)
-			.view()
-			.catch(() => null) ?? null,
+		branch
+			? (ctx
+					.landing?.(repo, branch)
+					.view()
+					.catch(() => null) ?? null)
+			: null,
 	]);
 	const outcomes = (landing?.recent ?? []).filter((outcome) => outcome.commit);
 	const landedAt = new Map(outcomes.map((outcome) => [outcome.commit!, outcome.at]));
@@ -99,5 +132,5 @@ export async function branchHistory(ctx: ToolContext, repo: string, branch?: str
 		const at = landedAt.get(entry.commit);
 		if (at) entry.at = at;
 	}
-	return { branch: shown, total: landed.length, changes: listed };
+	return listed;
 }
