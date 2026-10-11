@@ -589,7 +589,8 @@ describe("news of main moving", { timeout: 120_000 }, () => {
 				callTool(name, { repo: "p", ...args }, ctx(key));
 			await call("settings", { required: 1, vetoes: [] });
 			const { key } = (await call("register", { agent: "agent-a" })) as { key: string };
-			expect(await call("backlog", { agent: "agent-a" }, key)).toMatchObject({
+			const backlog = await call("backlog", { agent: "agent-a" }, key);
+			expect(backlog).toMatchObject({
 				open: [],
 				news: [
 					{
@@ -600,7 +601,23 @@ describe("news of main moving", { timeout: 120_000 }, () => {
 					note,
 				],
 			});
-			expect(Array.isArray(await call("claims", {}, key))).toBe(true);
+			// A list to choose from has no next step: choosing is the agent's.
+			expect(backlog).not.toHaveProperty("next");
+			const claims = await call("claims", {}, key);
+			expect(Array.isArray(claims)).toBe(true);
+			expect(claims).not.toHaveProperty("next");
+			// A reply about the agent's own change has its next step, after the news, whose notices keep their own.
+			const claimed = (await call(
+				"claim",
+				{ change: "c-1", agent: "agent-a", paths: ["src/c/"], intent: "c" },
+				key,
+			)) as Record<string, unknown>;
+			expect(claimed).toMatchObject({
+				ok: true,
+				news: [{ kind: "landed" }, note],
+				next: expect.stringMatching(/^Call `credentials`/),
+			});
+			expect(Object.keys(claimed).at(-1)).toBe("next");
 			expect(asked).toContain("main agent-a");
 		} finally {
 			await server.close();

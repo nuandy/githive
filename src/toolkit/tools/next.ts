@@ -1,0 +1,299 @@
+import { optionalString } from "../../errors";
+import { CHECKS_REVIEWER } from "../merge-checks";
+import { type Args, presentedKey, type ToolContext } from "./context";
+
+// `next` in replies (see docs/awareness.md, "next in every reply"): the step that follows for the caller's own change,
+// worked out from the reply alone, with nothing read. It never picks work from the crowd. It names no piece of the
+// backlog and no review for the agent, only the lists to choose from: the tool that once picked a step for every agent
+// ran the crowd (docs/design.md, "Agents without roles"). It's advice, so ignoring it breaks nothing, and working it
+// out never fails a call.
+
+type Reply = Record<string, unknown>;
+type Step = (reply: Reply, args: Args, caller: string | undefined) => string | undefined;
+
+/** The most a next step says, so a long list of files or commands can't swell a reply. The reply has the rest. */
+const NEXT_CHARS = 2_000;
+/** The most files, holders or roles a next step names. */
+const NAMED = 5;
+const INTENT_CHARS = 80;
+
+const text = (value: unknown) => (typeof value === "string" && value.trim() ? value.trim() : undefined);
+const record = (value: unknown) =>
+	value && typeof value === "object" && !Array.isArray(value) ? (value as Reply) : undefined;
+const records = (value: unknown) => (Array.isArray(value) ? value.map(record).filter((item) => !!item) : []);
+const texts = (value: unknown) =>
+	Array.isArray(value) ? value.filter((item): item is string => typeof item === "string" && !!item) : [];
+const short = (sha: unknown) => String(sha ?? "").slice(0, 8);
+const plural = (count: number, word: string) => `${count} ${word}${count === 1 ? "" : "s"}`;
+const isAre = (files: string[]) => (files.length === 1 ? "is" : "are");
+
+/** "a", "a and b", "a, b and c": at most `most`, then how many more. */
+function names(items: string[], most = NAMED) {
+	const shown = items.slice(0, most);
+	if (items.length > most) shown.push(`${items.length - most} more`);
+	return shown.length < 2 ? (shown[0] ?? "") : `${shown.slice(0, -1).join(", ")} and ${shown.at(-1)}`;
+}
+
+/**
+ * The step that follows `name`'s reply for the caller's own change, or undefined where none is clear. Only object
+ * replies have one: a list stays a list. `caller` is who seems to be asking (see askingAgent), so that a look at
+ * another agent's change isn't answered as if it were the caller's.
+ */
+export function nextFor(name: string, args: Args, result: unknown, caller?: string): string | undefined {
+	const reply = record(result);
+	if (!reply || !Object.hasOwn(STEPS, name)) return undefined;
+	const step = STEPS[name]!(reply, args, caller);
+	if (!step) return undefined;
+	return step.length > NEXT_CHARS ? `${step.slice(0, NEXT_CHARS)}... (cut: the reply has the rest)` : step;
+}
+
+/**
+ * Adds `next` to an object reply that has none. A failure leaves the reply as it was and is logged, so working out the
+ * next step never fails or slows a call.
+ */
+export function withNext(name: string, args: Args, ctx: ToolContext, result: unknown): unknown {
+	const reply = record(result);
+	if (!reply || "next" in reply) return result;
+	try {
+		const next = nextFor(name, args, reply, askingAgent(args, ctx));
+		return next ? { ...reply, next } : result;
+	} catch (err) {
+		console.error(`working out ${name}'s next step failed`, String(err));
+		return result;
+	}
+}
+
+/**
+ * Who seems to be asking: the signed-in agent, the agent its key names, or the agent the arguments name. Unchecked,
+ * which is enough for advice: it only decides whose next step a reply gets.
+ */
+export function askingAgent(args: Args, ctx: ToolContext): string | undefined {
+	const key = presentedKey(args, ctx);
+	const dot = key ? key.lastIndexOf(".") : -1;
+	return ctx.agent ?? (key && dot > 0 ? key.slice(0, dot) : undefined) ?? optionalString(args, "agent");
+}
+
+const CHOOSE_NEXT = "Choose your next work from `backlog` or `reviews`.";
+const CHANGES_ASKED =
+	"Changes were asked for: address the rejection's evidence, push a new commit to `fork`, then call `status`.";
+
+// Tools left out have no next step of the caller's own to give: settings and register set things up, audit and revert
+// are about the repo, add_work adds for anyone to take, and claims, reviews and backlog are lists to choose from, which
+// next must never choose from.
+const STEPS: Record<string, Step> = {
+	claim: (reply, args) => (reply.ok === false ? refusedClaim(reply, args) : madeClaim(reply, args)),
+	build: (reply, args) => {
+		if (reply.ok === false) return refusedClaim(reply, args);
+		const change = text(reply.change);
+		return change && `GitHive's builder makes ${change} from start to merge: call \`status\` on it to follow it.`;
+	},
+	release: (reply, args) => {
+		const stale = args.stale === true;
+		if (reply.ok === true)
+			return stale ? "Released as abandoned: claim the paths you need." : "Released. Choose other work from `backlog`.";
+		return stale ? "It isn't abandoned, so it stays: choose other work from `backlog`." : undefined;
+	},
+	credentials: (reply, args) => {
+		const change = text(args.change);
+		if (!change) return undefined;
+		const head = text(reply.head);
+		// Another agent's change, to review: the review is the caller's own work.
+		if (text(reply.author) && head)
+			return (
+				`Run the \`git\` setup commands, read the diff, then \`vote\` on ${head} as ${text(reply.role) ?? "review"}, ` +
+				"with what you checked as evidence."
+			);
+		return `Clone (the \`git\` setup commands), build on \`changes/${change}\`, push to \`fork\`, then call \`status\`.`;
+	},
+	status: statusStep,
+	merge: (reply, args, caller) => {
+		// A merge lands as the change's agent: anyone else asking gets the outcome, not that agent's next step.
+		const agent = text(args.agent);
+		if (caller && agent && caller !== agent) return undefined;
+		if (reply.ok === true) return `Landed as ${short(reply.commit)}; your claim is released. ${CHOOSE_NEXT}`;
+		if (reply.pending === true) return "Call `merge` again; it lands with the next batch.";
+		return refusedMerge(reply, args);
+	},
+	vote: (reply) => (reply.ok === true ? "Done. Choose more from `reviews`." : undefined),
+	request_review: (reply) => {
+		if (!text(reply.head)) return undefined;
+		const reviewers = texts(reply.reviewers);
+		const who = reviewers.length ? ` (${names(reviewers)})` : "";
+		return `GitHive's reviewers${who} review ${short(reply.head)} and vote: call \`status\` to see their votes.`;
+	},
+	ask_human: (reply) =>
+		reply.ok === true
+			? "A person decides with their own vote, which `status` shows. Meanwhile choose other work from " +
+				"`reviews` or `backlog`."
+			: undefined,
+};
+
+/** Who holds what the claim wanted, and the caller's choices, none of which waits on anyone. */
+function refusedClaim(reply: Reply, args: Args) {
+	const holders = new Map<string, string>();
+	for (const conflict of records(reply.conflicts)) {
+		const change = text(conflict.change);
+		if (!change || holders.has(change)) continue;
+		const intent = (text(conflict.intent) ?? "").split("\n")[0]!.slice(0, INTENT_CHARS);
+		holders.set(change, `${text(conflict.agent) ?? "another agent"}'s ${change}${intent ? ` ("${intent}")` : ""}`);
+	}
+	const held = holders.size ? `Held by ${names([...holders.values()], 3)}. ` : "";
+	// A claim that couldn't be fully backed out still holds paths until it's released.
+	const stuck = texts(reply.stillHeld).length
+		? `Release ${text(args.change) ?? "it"} to free the paths it still holds. `
+		: "";
+	return `${held}${stuck}Pick other work from \`backlog\`, or claim again later.`;
+}
+
+function madeClaim(reply: Reply, args: Args) {
+	const change = text(args.change) ?? "<change>";
+	// A branch merge's change branch is already in the agent's fork, at the source's tip.
+	const source = text(reply.source);
+	if (source)
+		return (
+			`Call \`status\`: \`changes/${change}\` in your fork is already ${source}'s tip. Once approved, call ` +
+			"`merge`."
+		);
+	return (
+		`Call \`credentials\` with change ${change}, build on \`changes/${change}\` in your clone, push to \`fork\`, ` +
+		"then call `status`."
+	);
+}
+
+/** Where the caller's change stands, and what it takes to land: fix it, wait, or merge. */
+function statusStep(reply: Reply, args: Args, caller: string | undefined) {
+	const claim = record(reply.claim);
+	const released = record(reply.released);
+	const holder = text(claim?.agent) ?? text(released?.agent);
+	// Someone else's change: its next step is its agent's, not the caller's.
+	if (caller && holder && caller !== holder) return undefined;
+	const change = text(reply.change) ?? text(args.change) ?? "<change>";
+	const landed = record(reply.landed);
+	if (landed) return `Landed as ${short(landed.commit)}: don't merge it again. ${CHOOSE_NEXT}`;
+	if (released) {
+		if (text(released.mergedAs)) return `Merged as ${short(released.mergedAs)}. ${CHOOSE_NEXT}`;
+		const why = text(released.reason);
+		return (
+			`Its claim was released${why ? ` (${why.slice(0, INTENT_CHARS)})` : ""}: claim it again to go on, or ` +
+			"choose other work from `backlog`."
+		);
+	}
+	if (!claim) return `Nobody holds ${change}: \`claim\` its paths to start it.`;
+	const head = text(reply.head);
+	if (!head)
+		return (
+			`Nothing pushed yet: build on \`changes/${change}\` (\`credentials\` gives you access), push it to ` +
+			"`fork`, then call `status`."
+		);
+	// Each of these needs a new commit, and every new commit needs approving again, so they're all said at once.
+	const fixes: string[] = [];
+	const merge = record(reply.merge);
+	const conflicts = texts(merge?.conflicts);
+	if (merge?.clean === false && conflicts.length)
+		fixes.push(conflictStep(merge.fix, conflicts, text(merge.into), change));
+	const outside = texts(merge?.outsideClaim);
+	if (outside.length) fixes.push(outsideStep(change, outside));
+	const rejections = records(reply.votes).filter(
+		(vote) => vote.verdict === "reject" && vote.reviewer !== holder && (!vote.commit || vote.commit === head),
+	);
+	const checks = rejections.find((vote) => vote.reviewer === CHECKS_REVIEWER);
+	if (checks) fixes.push(failedCheck(text(checks.evidence) ?? ""));
+	const approval = record(reply.approval) ?? {};
+	const vetoed = Array.isArray(approval.vetoedBy) && approval.vetoedBy.length > 0;
+	if (vetoed || rejections.some((vote) => vote.reviewer !== CHECKS_REVIEWER)) fixes.push(CHANGES_ASKED);
+	if (fixes.length) return fixes.join("\n");
+	if (texts(reply.waitsOn).length)
+		return "It waits on what it depends on (see waitsOn): call `status` again once that has merged.";
+	if (approval.approved === true) return "Call `merge`.";
+	return approvalsMissing(approval);
+}
+
+function approvalsMissing(approval: Reply) {
+	const required = typeof approval.required === "number" ? approval.required : 0;
+	const approvals = typeof approval.approvals === "number" ? approval.approvals : 0;
+	const needed = Math.max(0, required - approvals);
+	const roles = texts(approval.awaiting);
+	const asRoles = `${names(roles)}, which can veto it`;
+	let what = needed ? plural(needed, "more approval") : "";
+	if (roles.length) what = what ? `${what} (including ${asRoles})` : `approval as ${asRoles}`;
+	return what ? `Waiting for ${what}; agents who may give them see it in \`reviews\`.` : undefined;
+}
+
+/** The commands that resolve a conflict in the agent's clone, when the reply has them; else how to. */
+function conflictStep(fix: unknown, files: string[], into: string | undefined, change: string) {
+	const onto = into ?? "the branch it lands on";
+	const where = `It conflicts with ${onto} in ${names(files)}`;
+	const commands = texts(fix);
+	if (commands.length) return [`${where}. In your clone:`, ...commands].join("\n");
+	const merging = into ? ` (git fetch origin ${into} && git merge origin/${into})` : "";
+	return (
+		`${where}: merge ${onto} into your branch${merging}, resolve inside your claim so both changes make sense, ` +
+		`push \`changes/${change}\` to \`fork\`, then call \`status\`.`
+	);
+}
+
+function outsideStep(change: string, files: string[]) {
+	return (
+		`${names(files)} ${isAre(files)} outside your claim: claim them too (\`claim\` ${change} again with the ` +
+		"extra paths), or move them out of this change."
+	);
+}
+
+/** How to reproduce a failed check, from its command, or from a reason or evidence naming it. */
+function failedCheck(said: string, command?: string, exitCode?: unknown) {
+	const named = /checks failed: (.+?) exited (\d+)/.exec(said);
+	const run = command ?? named?.[1];
+	if (!run) return "Its checks failed (see their output): fix it, push a new commit to `fork`, then call `status`.";
+	return (
+		`Its checks failed: \`${run}\` exited ${exitCode ?? named?.[2]}. Reproduce it in your clone, up to date with ` +
+		"the branch it lands on; fix it, push a new commit to `fork`, then call `status`."
+	);
+}
+
+// A refused merge's other reasons (merge-ready.ts, merge-batch.ts, and the waits on dependencies), each with what the
+// agent can do about it.
+const REASON_STEPS: [RegExp, (change: string) => string][] = [
+	[/ is vetoed by | asked for changes on /, () => CHANGES_ASKED],
+	[
+		/ approvals from reviewers other than its author$| still needs approval from /,
+		() => "Waiting for approvals: `status` shows how many and as what; agents who may give them see it in `reviews`.",
+	],
+	[/^waits on /, () => "It waits on what it depends on (see reasons): call `merge` again once that has merged."],
+	[/ holds no claim$/, (change) => `Claim ${change} again (\`claim\`), then call \`merge\`.`],
+	[/ kept moving /, () => "Call `merge` again."],
+	[
+		/ couldn't be read/,
+		(change) => `Call \`merge\` again; if it still can't be read, push \`changes/${change}\` to \`fork\` again.`,
+	],
+];
+
+/** What a refused merge needs: the fix for a conflict, the check to reproduce, or what it waits on. */
+function refusedMerge(reply: Reply, args: Args) {
+	const change = text(args.change) ?? "<change>";
+	const reasons = texts(reply.reasons);
+	const steps = new Set<string>();
+	const into = reasons.map((reason) => /conflicts with (\S+) in /.exec(reason)?.[1]).find(Boolean);
+	const conflicts = texts(reply.conflicts);
+	if (conflicts.length) steps.add(conflictStep(reply.fix, conflicts, into, change));
+	const failed = records(reply.checks).find((check) => check.exitCode !== 0);
+	const command = text(failed?.command);
+	// The Gate reports a batch that wouldn't merge as a failed step that names the files.
+	const merging = command?.startsWith("(merging") && /conflicts in (.+)/.exec(text(failed?.output) ?? "");
+	if (merging) steps.add(conflictStep(reply.fix, merging[1]!.split(", "), into, change));
+	else if (failed) steps.add(failedCheck("", command, failed.exitCode));
+	else {
+		const checks = reasons.find((reason) => reason.startsWith("checks failed: "));
+		if (checks) steps.add(failedCheck(checks));
+	}
+	const outside = reasons.flatMap((reason) => /^(.+) is outside \S+'s claim$/.exec(reason)?.[1] ?? []);
+	if (outside.length) steps.add(outsideStep(change, outside));
+	const theirs = reasons.flatMap((reason) => /^(.+) is inside \S+'s claim \(/.exec(reason)?.[1] ?? []);
+	if (theirs.length)
+		steps.add(
+			`${names(theirs)} ${isAre(theirs)} inside others' claims: move them out of this change, or wait until ` +
+				"those claims are released (`claims` shows whose).",
+		);
+	for (const reason of reasons)
+		for (const [pattern, step] of REASON_STEPS) if (pattern.test(reason)) steps.add(step(change));
+	return steps.size ? [...steps].join("\n") : undefined;
+}

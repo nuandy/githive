@@ -305,6 +305,7 @@ describe("GitHive's MCP tools", () => {
 		expect(await call("request_review", { repo: "project", change: "a-1", summary: "adds a" })).toEqual({
 			head: "h1",
 			reviewers: ["review", "security"],
+			next: "GitHive's reviewers (review and security) review h1 and vote: call `status` to see their votes.",
 		});
 		expect(reviewRequests).toEqual([
 			{ repo: "project", change: "a-1", roles: ["review", "security"], summary: "adds a" },

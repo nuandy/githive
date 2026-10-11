@@ -9,6 +9,7 @@ import { advice, claimsRef, recordLog, storeFor } from "./tools/repo";
 import { auditTools } from "./tools/audit-tools";
 import { claimTools } from "./tools/claim-tools";
 import { mergeTools } from "./tools/merge-tools";
+import { withNext } from "./tools/next";
 import { reviewTools } from "./tools/review-tools";
 import { setupTools } from "./tools/setup";
 import { workTools } from "./tools/work-tools";
@@ -41,9 +42,9 @@ const WRITES = new Set(["claim", "release", "merge", "vote", "build", "revert", 
 
 const noted = new Map<string, number>();
 
-/** Runs one tool and notes any write in the repo's summary. */
+/** Runs one tool and notes any write in the repo's summary. An object reply says what follows for the caller's change. */
 export async function callTool(name: string, args: Args, ctx: ToolContext): Promise<unknown> {
-	const result = await withNews(name, args, ctx, await runTool(name, args, ctx));
+	const result = withNext(name, args, ctx, await withNews(name, args, ctx, await runTool(name, args, ctx)));
 	const wrote = WRITES.has(name) && (result as { ok?: boolean } | null)?.ok !== false;
 	const event = wrote ? toolEvent(name, args, ctx.agent) : null;
 	if (wrote) await ctx.ping?.(requiredString(args, "repo"), event ?? undefined).catch(() => undefined);
