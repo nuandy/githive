@@ -52,7 +52,9 @@ In `pr` mode:
     line, capped (200 characters for an intent or evidence), in a code span (`inert`). GitHub acts on a pull
     request's body, closing an issue a keyword names ("Fixes #12") when it merges and notifying "@user" or
     "@org/team", but not on anything in code, so an agent can't close issues or ping people through it.
-  - `github_pr { refresh: true }` rewrites the title and body.
+  - `github_pr { refresh: true }` rewrites the title and body, and points the pull request at GitHub's default
+    branch if that changed since it was opened (asked without refresh, it says so). A pull request closed on GitHub
+    without merging is no longer open, so the next `github_pr` opens another.
   - Merging and closing it happen on GitHub.
 - The repo's `GitHubSync` keeps the pull request as last seen, for the dashboard's link: a hint. It's updated when
   `github_pr` finds or opens one, and after an import lands in pr mode (one read, given 5 seconds: merged and
@@ -203,6 +205,16 @@ real-git test server) plays GitHub, as GitHive's tests fake Artifacts.
   (`github-inbound.test.ts`).
 - Branches under `github/` are reserved: a claim into or from one, or an agent's `source` merge of one, is refused.
 - The import record's shape is pinned.
+- What can go wrong bringing GitHub's changes back (`github-inbound.test.ts`): checks that fail on GitHub's change,
+  in containers or on Actions, send it to a person and land nothing, and a fix pushed on GitHub lands; a step that
+  dies after its claim, or after its merge landed, before the job noted it, finds its work done when run again (a
+  merge's claim release names the commit it landed as); a step's outcome is dropped when a newer notice replaced its
+  job; GitHub's branch moving on while a change waits on a person lets the older one go; a GitHub branch sharing no
+  history with main fails, saying so; a force-pushed GitHub branch brings in what it added and drops nothing of
+  GitHive's. The job's merge waits for its turn within its bound, lands its own change alone, and goes on however
+  often main moves under it.
+- `github_pr` opens another pull request after one was closed unmerged, points one at a changed default branch, and
+  works in pr mode with no `GitHubSync` binding (`github-pr.test.ts`).
 - A failing GitHub API, a refused push or a failing import never fails a landing, and an API that takes the read
   and never answers is given up after 5 seconds, the merging agent answered (`github-pr.test.ts`, `github.test.ts`).
 - A link with no `github_sync` never starts the GitHub job (no API call, nothing brought back, `github_pr` included);

@@ -29,6 +29,10 @@ export interface FakeGitHub {
 	mergePull: (how: "merge" | "squash" | "rebase", taking?: "ours" | "theirs") => string;
 	/** Someone commits `files` straight to GitHub's default branch. Returns the new head. */
 	push: (files: Record<string, string>, message?: string) => string;
+	/** Someone force-pushes GitHub's default branch to `onto` with `files` committed on it. Returns the new head. */
+	forcePush: (onto: string, files: Record<string, string>) => string;
+	/** GitHub's default branch becomes `branch`, made from the current one's head if it's new. */
+	setDefault: (branch: string) => void;
 	close: () => void;
 }
 
@@ -51,6 +55,7 @@ export async function fakeGitHub(
 	const calls: string[] = [];
 	let failing = 0;
 	let stalling = 0;
+	let defaultBranch = "main";
 	const called = async (what: string, signal?: AbortSignal) => {
 		calls.push(what);
 		if (stalling > 0) {
@@ -64,7 +69,7 @@ export async function fakeGitHub(
 			throw new GitHubError(503, `GitHub ${what}: 503 unavailable`);
 		}
 	};
-	const head = (branch = "main") => git("rev-parse", `refs/heads/${branch}`).trim();
+	const head = (branch = defaultBranch) => git("rev-parse", `refs/heads/${branch}`).trim();
 	// A working clone of GitHub, fresh for each thing people do there.
 	const inClone = (work_: (dir: string, run: (...args: string[]) => string) => void) => {
 		const dir = join(work, `clone-${Math.random().toString(36).slice(2, 8)}`);
@@ -86,7 +91,7 @@ export async function fakeGitHub(
 		},
 		defaultHead: async (signal) => {
 			await called("GET default", signal);
-			return { branch: "main", head: head() };
+			return { branch: defaultBranch, head: head() };
 		},
 		openPull: async (from, signal) => {
 			await called(`GET pulls ${from}`, signal);
@@ -104,11 +109,11 @@ export async function fakeGitHub(
 			pulls.push({ ...pull, open: true });
 			return pull;
 		},
-		updatePull: async (number, { title, body }) => {
+		updatePull: async (number, { title, body, base }) => {
 			await called(`PATCH pulls ${number}`);
 			const pull = pulls.find((entry) => entry.number === number);
 			if (!pull) throw new GitHubError(404, "Not Found");
-			Object.assign(pull, { title, body });
+			Object.assign(pull, { title, body, ...(base ? { base } : {}) });
 			return withoutOpen(pull);
 		},
 	};
@@ -144,15 +149,37 @@ export async function fakeGitHub(
 		if ("open" in pull) pull.open = false;
 		return head(pull.base);
 	};
+	const commitFiles = (
+		dir: string,
+		run: (...args: string[]) => string,
+		files: Record<string, string>,
+		message: string,
+	) => {
+		for (const [path, text] of Object.entries(files)) {
+			mkdirSync(join(dir, path, ".."), { recursive: true });
+			writeFileSync(join(dir, path), text);
+		}
+		run("add", "-A");
+		run("commit", "-q", "-m", message);
+	};
+	const forcePush = (onto: string, files: Record<string, string>) => {
+		inClone((dir, run) => {
+			run("checkout", "-q", "-B", defaultBranch, onto);
+			commitFiles(dir, run, files, "Rewritten on GitHub");
+			run("push", "-q", "--force", "origin", defaultBranch);
+		});
+		return head();
+	};
+	const setDefault = (branch: string) => {
+		if (!git("branch", "--list", branch).trim()) git("branch", branch, head());
+		git("symbolic-ref", "HEAD", `refs/heads/${branch}`);
+		defaultBranch = branch;
+	};
 	const push = (files: Record<string, string>, message = "A commit on GitHub") => {
 		inClone((dir, run) => {
-			for (const [path, text] of Object.entries(files)) {
-				mkdirSync(join(dir, path, ".."), { recursive: true });
-				writeFileSync(join(dir, path), text);
-			}
-			run("add", "-A");
-			run("commit", "-q", "-m", message);
-			run("push", "-q", "origin", "main");
+			run("checkout", "-q", defaultBranch);
+			commitFiles(dir, run, files, message);
+			run("push", "-q", "origin", defaultBranch);
 		});
 		return head();
 	};
@@ -166,6 +193,8 @@ export async function fakeGitHub(
 		stallCalls: (count) => void (stalling = count),
 		mergePull,
 		push,
+		forcePush,
+		setDefault,
 		close: () => rmSync(work, { recursive: true, force: true }),
 	};
 }

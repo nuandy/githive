@@ -8,7 +8,7 @@ import type { Registry } from "../src/toolkit/claims";
 import { type GitHubImports, importsRef } from "../src/toolkit/github-imports";
 import { GITHUB_AGENT, GITHUB_IDENTITY, type GitHubSyncHandle } from "../src/toolkit/github-settings";
 import { memoryLanding } from "../src/toolkit/landing";
-import { callTool, type ToolContext } from "../src/toolkit/mcp";
+import { callTool, repoSnapshot, type ToolContext } from "../src/toolkit/mcp";
 import { generateStampKey, makeStamper } from "../src/toolkit/stamp";
 import type { Votes } from "../src/toolkit/votes";
 import { FakeStorage } from "./fakes/env";
@@ -114,6 +114,7 @@ afterEach(async () => {
 	delete extra.landing;
 	delete extra.mergeLimits;
 	delete extra.batchGit;
+	delete extra.runChecks;
 });
 
 /** Runs the job's steps until it's at `step` (or ended), without running that step. */
@@ -351,6 +352,153 @@ describe("GitHub's changes coming back", { timeout: 120_000 }, () => {
 		await sync.notice({ repo: "p", github: "acme/shop", branch: "main", commit: github.head() }, true);
 		expect(await settle()).toMatchObject({ step: "done" });
 		expect(server.git("show", "main:docs/notes.md")).toBe("from GitHub\n");
+	});
+});
+
+describe("what can go wrong bringing GitHub's changes back", { timeout: 120_000 }, () => {
+	it("sends a GitHub change whose checks fail to a person, landing nothing", async () => {
+		extra.runChecks =
+			() =>
+			async ({ changes }) => {
+				const github = changes.some((entry) => entry.change.startsWith("github-"));
+				const output = github ? "1 failing: GitHub's change breaks the build" : "ok";
+				return { passed: !github, results: [{ command: "npm test", exitCode: github ? 1 : 0, output }] };
+			};
+		await call("settings", { verify: ["npm test"] });
+		await land("c-1", { "src/a.js": "a\n" });
+		const pushed = github.push({ "src/g.js": "from GitHub\n" });
+		const job = await land("c-2", { "src/b.js": "b\n" });
+		expect(job).toMatchObject({ step: "needs a person", commit: pushed, reason: expect.stringContaining("npm test") });
+		expect(server.git("ls-tree", "--name-only", "-r", "main")).not.toContain("src/g.js");
+		const change = `github-${pushed.slice(0, 12)}`;
+		const shown = (await repoSnapshot(ctx(), "p")).claims.find((claim) => claim.change === change);
+		expect(shown?.attention?.reason).toMatch(/^GitHub's changes need a person: .*npm test/);
+		expect((await claimsNow()).map((claim) => claim.change)).toEqual([change]);
+	});
+
+	it("runs a GitHub change's checks on Actions when the repo does, and sends it to a person when they fail", async () => {
+		github.close();
+		let failing = false;
+		const run = { id: 1, name: "test", status: "completed", url: "https://github.com/acme/shop/actions/runs/1" };
+		github = await fakeGitHub(server, { runs: () => [{ ...run, conclusion: failing ? "failure" : "success" }] });
+		await call("settings", { verify: ["github-actions"] });
+		await land("c-1", { "src/a.js": "a\n" });
+		const pushed = github.push({ "src/g.js": "from GitHub\n" });
+		await ready("c-2", { "src/b.js": "b\n" });
+		expect(await call("merge", { change: "c-2", agent: "a" }, "a")).toMatchObject({ ok: true });
+		// The workflow fails on the batch holding GitHub's change.
+		failing = true;
+		expect(await settle()).toMatchObject({ step: "needs a person", reason: expect.stringContaining("GitHub Actions") });
+		expect(server.git("ls-tree", "--name-only", "-r", "main")).not.toContain("src/g.js");
+		expect(github.calls.some((call) => call.startsWith("GET runs"))).toBe(true);
+		// A fix pushed on GitHub is a new commit, checked afresh: passing, it lands, and the stuck change goes.
+		failing = false;
+		const fixed = github.push({ "src/g.js": "fixed on GitHub\n" });
+		expect(await land("c-3", { "src/c.js": "c\n" })).toMatchObject({ step: "done", commit: fixed });
+		expect(server.git("show", "main:src/g.js")).toBe("fixed on GitHub\n");
+		expect(await claimsNow()).toEqual([]);
+		expect(pushed).not.toBe(fixed);
+	});
+
+	it("finds its work done when a step dies after its claim, before the job noted it", async () => {
+		await land("c-1", { "src/a.js": "a\n" });
+		const pushed = github.push({ "docs/notes.md": "from GitHub\n" });
+		await ready("c-2", { "src/b.js": "b\n" });
+		expect(await call("merge", { change: "c-2", agent: "a" }, "a")).toMatchObject({ ok: true });
+		const before = await stepUntil("claim");
+		storage.alarm = null;
+		await sync.alarm();
+		expect((await sync.state()).job).toMatchObject({ step: "merge" });
+		// The object lost what the step wrote: it claims again, which extends its claim, and goes on.
+		await storage.put("job", before);
+		await storage.setAlarm(Date.now());
+		expect(await settle()).toMatchObject({ step: "done", commit: pushed });
+		const brought = server.git("log", "--format=%s", "main").split("\n");
+		expect(brought.filter((subject) => subject.startsWith("Bring in GitHub's changes"))).toHaveLength(1);
+		expect(await call("audit", {})).toMatchObject({ open: 0 });
+	});
+
+	it("finds its work done when a step dies after its merge landed, before the job noted it", async () => {
+		await land("c-1", { "src/a.js": "a\n" });
+		const pushed = github.push({ "docs/notes.md": "from GitHub\n" });
+		await ready("c-2", { "src/b.js": "b\n" });
+		expect(await call("merge", { change: "c-2", agent: "a" }, "a")).toMatchObject({ ok: true });
+		const before = await stepUntil("merge");
+		storage.alarm = null;
+		await sync.alarm();
+		const landed = (await sync.state()).job;
+		expect(landed).toMatchObject({ step: "done", merged: expect.any(String) });
+		// Merged again, it answers with the commit it landed as, from its claim's release: nothing lands twice.
+		await storage.put("job", before);
+		await storage.setAlarm(Date.now());
+		expect(await settle()).toMatchObject({ step: "done", commit: pushed, merged: landed!.merged });
+		const brought = server.git("log", "--format=%s", "main").split("\n");
+		expect(brought.filter((subject) => subject.startsWith("Bring in GitHub's changes"))).toHaveLength(1);
+	});
+
+	it("drops a step's outcome when a newer notice replaced its job meanwhile", async () => {
+		await land("c-1", { "src/a.js": "a\n" });
+		github.push({ "docs/notes.md": "from GitHub\n" });
+		await ready("c-2", { "src/b.js": "b\n" });
+		expect(await call("merge", { change: "c-2", agent: "a" }, "a")).toMatchObject({ ok: true });
+		const running = (await sync.state()).job!;
+		expect(running).toMatchObject({ step: "import" });
+		// While the import runs, the job is replaced (its alarm thought lost, say).
+		const replaced = { ...running, commit: "f".repeat(40), noticedAt: new Date().toISOString() };
+		const reach = extra.github!;
+		extra.github = async (repo) => {
+			await storage.put("job", replaced);
+			return reach(repo);
+		};
+		try {
+			storage.alarm = null;
+			await sync.alarm();
+		} finally {
+			extra.github = reach;
+		}
+		expect((await sync.state()).job).toEqual(replaced);
+	});
+
+	it("lets the older GitHub change go when GitHub's branch moves on while it waits on a person", async () => {
+		await land("c-1", { "src/a.js": "a\n" });
+		const first = github.push({ "src/a.js": "from GitHub\n" });
+		expect(await land("c-2", { "src/a.js": "from GitHive\n" })).toMatchObject({ step: "needs a person" });
+		// GitHub moves on, still conflicting: the newer commit has the older one in it.
+		const second = github.push({ "docs/notes.md": "more from GitHub\n" });
+		expect(await land("c-3", { "src/c.js": "c\n" })).toMatchObject({ step: "needs a person", commit: second });
+		expect((await claimsNow()).map((claim) => claim.change)).toEqual([`github-${second.slice(0, 12)}`]);
+		const releases = (await registryNow()).released.filter(
+			(release) => release.change === `github-${first.slice(0, 12)}`,
+		);
+		expect(releases.at(-1)).toMatchObject({ agent: GITHUB_AGENT, by: GITHUB_AGENT, reason: "GitHub's main moved on" });
+		expect(await call("audit", {})).toMatchObject({ open: 0 });
+	});
+
+	it("can't bring in a GitHub branch sharing no history with main, and says so", async () => {
+		await land("c-1", { "src/a.js": "a\n" });
+		// Someone replaces GitHub's main with an unrelated history.
+		const tree = github.git("mktree").trim();
+		const unrelated = github.git("commit-tree", "-m", "a new start", tree).trim();
+		github.git("update-ref", "refs/heads/main", unrelated);
+		const job = await land("c-2", { "src/b.js": "b\n" });
+		expect(job).toMatchObject({ step: "failed", reason: expect.stringContaining("shares no history with main") });
+		expect(await imports()).toEqual([]);
+		expect(server.git("ls-tree", "--name-only", "-r", "main").trim().split("\n")).toEqual(["src/a.js", "src/b.js"]);
+	});
+
+	it("brings in what a force-pushed GitHub branch added, and drops nothing of GitHive's it left out", async () => {
+		const start = github.head();
+		await land("c-1", { "src/a.js": "a\n" });
+		expect(await call("github_pr", {})).toMatchObject({ opened: true });
+		github.mergePull("merge");
+		expect(await land("c-2", { "src/b.js": "b\n" })).toMatchObject({ step: "done" });
+		// GitHub's main is force-pushed back to before the pull request, with a commit of its own.
+		const forced = github.forcePush(start, { "docs/notes.md": "rewritten on GitHub\n" });
+		expect(await land("c-3", { "src/c.js": "c\n" })).toMatchObject({ step: "done", commit: forced });
+		expect(server.git("show", "main:docs/notes.md")).toBe("rewritten on GitHub\n");
+		expect(server.git("show", "main:src/a.js")).toBe("a\n");
+		expect(server.git("show", "main:src/b.js")).toBe("b\n");
+		expect(await call("audit", {})).toMatchObject({ open: 0 });
 	});
 });
 

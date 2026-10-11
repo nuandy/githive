@@ -43,7 +43,8 @@ export interface GitHubLink {
 	/** The open pull request from `head`, a branch of the repo, or null. `signal` gives up the read. */
 	openPull(head: string, signal?: AbortSignal): Promise<PullRequest | null>;
 	createPull(input: { head: string; base: string; title: string; body: string }): Promise<PullRequest>;
-	updatePull(number: number, input: { title: string; body: string }): Promise<PullRequest>;
+	/** Rewrites a pull request's title and body, and with `base` the branch it goes into. */
+	updatePull(number: number, input: { title: string; body: string; base?: string }): Promise<PullRequest>;
 }
 
 export interface GitHubApp {

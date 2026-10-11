@@ -45,17 +45,23 @@ export const githubTools: ToolHandlers = {
 			...(changes !== undefined ? { changes } : {}),
 			...inbound,
 		});
+		// GitHub's default branch may have changed since it was opened: refresh points it there.
+		const elsewhere = open && open.base !== seen.branch;
 		if (open && !refresh) {
 			await notePull(call, open);
+			const moved = elsewhere
+				? `; it goes into ${open.base}, but ${link.repo}'s default branch is ${seen.branch} now: refresh points it there`
+				: "";
 			return {
 				...reply(open, "open"),
-				note: `a pull request from ${PR_BRANCH} is open already; it updates itself as changes land`,
+				note: `a pull request from ${PR_BRANCH} is open already; it updates itself as changes land${moved}`,
 			};
 		}
 		const story = await pullStoryAt(ctx, repo, await takenAt(call, seen), seen.branch);
 		const changes = story.changes ?? undefined;
 		if (open) {
-			const updated = await link.updatePull(open.number, { title: story.title, body: story.body });
+			const rewritten = { title: story.title, body: story.body, ...(elsewhere ? { base: seen.branch } : {}) };
+			const updated = await link.updatePull(open.number, rewritten);
 			await notePull(call, updated);
 			return reply(updated, "refreshed", changes);
 		}

@@ -16,7 +16,7 @@ import {
 import { NOTICE_WITHIN_MS } from "./github-outbound";
 import type { MergeOutcome } from "./merge-types";
 import { callTool, type ToolContext } from "./mcp";
-import { advice, claimsRef, recordLog, votesFor } from "./tools/repo";
+import { advice, claimsRef, recordLog, storeFor, votesFor } from "./tools/repo";
 import { openFlag } from "./votes";
 
 // Bringing a commit of GitHub's back (see docs/github-prs.md, "Inbound"): the repo's Gate imports it as github/<branch>
@@ -204,9 +204,13 @@ async function mergeStep(ctx: ToolContext, job: InboundJob, at: At): Promise<Ste
 	if (outcome.pending) return { job: at({ reason: `waits for its turn to land: ${reason}`, attempts: 0 }), next: 0 };
 	// Others' merges landed first: a busy repo, so it merges again shortly, however often that happens.
 	if (/kept moving/.test(reason)) return { job: at({ reason, attempts: 0 }), next: MOVED_RETRY_MS };
-	// Its claim is gone and it didn't land: someone gave it up (see giveUpGitHubChange).
-	if (/holds no claim/.test(reason))
+	// Its claim is gone: it landed (a step that merged, then died before the job noted it, asks again), or someone
+	// gave it up (see giveUpGitHubChange). Its releases say which.
+	if (/holds no claim/.test(reason)) {
+		const merged = await mergedAs(ctx, job.repo, change);
+		if (merged) return { job: at({ step: "done", merged, attempts: 0 }), pull: await openPull(ctx, job) };
 		return { job: at({ step: "given up", reason: `its claim was released: ${reason}` }) };
+	}
 	// Untrusted, it waits for review like any change, and lands with a batch once approved.
 	if (/approvals from reviewers|still needs approval|is vetoed/.test(reason))
 		return { job: at({ step: "waiting", resume: "merge", reason: `waits for review: ${reason}`, attempts: 0 }) };
@@ -219,6 +223,13 @@ async function mergeStep(ctx: ToolContext, job: InboundJob, at: At): Promise<Ste
 	if (!(await askedAlready(ctx, job.repo, change, job.head)))
 		await callTool("ask_human", { repo: job.repo, change, agent: GITHUB_AGENT, reason: asked }, ctx);
 	return { job: at({ step: "needs a person", reason, attempts: 0 }) };
+}
+
+// The merge commit `change` landed as, from its claim's last release, if it merged.
+async function mergedAs(ctx: ToolContext, repo: string, change: string) {
+	const registry = (await recordLog<Registry>(ctx, repo, claimsRef(repo)).read())?.commit.state;
+	const { released } = await storeFor(ctx, repo, registry).readChange(change);
+	return released.at(-1)?.mergedAs;
 }
 
 // Whether people were asked about `change` at `head` and haven't answered yet.

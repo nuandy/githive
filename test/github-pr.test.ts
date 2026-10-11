@@ -29,7 +29,7 @@ const handle: GitHubSyncHandle = {
 	gaveUp: async () => undefined,
 	state: async () => ({ pull, job: null }),
 };
-const { ctx, call, register, approve } = toolCalls(() => server, {
+const { ctx, call, keys, register, approve } = toolCalls(() => server, {
 	github: async (repo) => (repo === "acme/shop" ? github.link : null),
 	githubSync: () => handle,
 });
@@ -127,6 +127,29 @@ describe("a repo connected to GitHub in pr mode", { timeout: 60_000 }, () => {
 		expect(github.pulls[0]!.body).not.toContain("Add c-1");
 	});
 
+	it("opens a new pull request once the last was closed on GitHub without merging", async () => {
+		await land("c-1", { "src/a.js": "a\n" });
+		expect(await call("github_pr", {})).toMatchObject({ number: 1, opened: true });
+		// Someone closes it on GitHub, unmerged.
+		github.pulls[0]!.open = false;
+		await land("c-2", { "src/b.js": "b\n" });
+		expect(await call("github_pr", {})).toMatchObject({ number: 2, opened: true, title: "GitHive: 2 changes" });
+		expect(github.pulls.map((pr) => pr.open)).toEqual([false, true]);
+	});
+
+	it("points the pull request at GitHub's default branch when that changes", async () => {
+		await land("c-1", { "src/a.js": "a\n" });
+		expect(await call("github_pr", {})).toMatchObject({ number: 1, opened: true });
+		github.setDefault("trunk");
+		const asked = await call("github_pr", {});
+		expect(asked).toMatchObject({ number: 1, open: true });
+		expect(asked.note).toContain("it goes into main, but acme/shop's default branch is trunk now");
+		// GitHub's new default branch is noticed too, to bring back what it holds.
+		expect(noticed.at(-1)).toMatchObject({ branch: "trunk" });
+		expect(await call("github_pr", { refresh: true })).toMatchObject({ number: 1, refreshed: true });
+		expect(github.pulls[0]).toMatchObject({ base: "trunk", open: true });
+	});
+
 	it("pushes githive/main itself when nothing has landed since the repo was connected", async () => {
 		await land("c-1", { "src/a.js": "a\n" });
 		github.git("update-ref", "-d", "refs/heads/githive/main");
@@ -157,6 +180,23 @@ describe("a repo connected to GitHub in pr mode", { timeout: 60_000 }, () => {
 		expect(github.calls).toEqual(["GET default"]);
 		expect(noticed).toEqual([]);
 		expect(github.head("githive/main")).toBe(server.git("rev-parse", "main").trim());
+	});
+});
+
+describe("a GitHive without the GitHubSync object", { timeout: 60_000 }, () => {
+	const unsynced = toolCalls(() => server, { github: async (repo) => (repo === "acme/shop" ? github.link : null) });
+
+	it("still pushes githive/main and opens the pull request in pr mode, and reads nothing it can't tell anyone", async () => {
+		Object.assign(unsynced.keys, keys);
+		await unsynced.call("settings", { github: "acme/shop" });
+		await unsynced.call("claim", { change: "c-1", agent: "a", paths: ["src/a.js"], intent: "Add c-1" }, "a");
+		await approve(await pushChange(server.url, work, "a", "c-1", { "src/a.js": "a\n" }));
+		expect(await unsynced.call("merge", { change: "c-1", agent: "a" }, "a")).toMatchObject({ ok: true });
+		expect(github.head("githive/main")).toBe(server.git("rev-parse", "main").trim());
+		expect(github.calls).toEqual([]);
+		const opened = await unsynced.call("github_pr", {});
+		expect(opened).toMatchObject({ opened: true, title: "GitHive: 1 change" });
+		expect(opened).not.toHaveProperty("fromGitHub");
 	});
 });
 
