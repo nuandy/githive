@@ -1,14 +1,16 @@
 // Errors thrown across Durable Object RPC keep their message but not their
 // class, so the HTTP status rides in the message: "[409] slice is not building".
-export function fail(status: number, message: string): never {
-	throw new Error(`[${status}] ${message}`);
+// So does the step an agent can take next, where it's known, on a last line
+// "next: ...", which agents see over MCP and statusOf takes off the message.
+export function fail(status: number, message: string, next?: string): never {
+	throw new Error(`[${status}] ${message}${next ? `\nnext: ${next}` : ""}`);
 }
 
-export function statusOf(err: unknown): { status: number; message: string } {
+export function statusOf(err: unknown): { status: number; message: string; next?: string } {
 	const text = err instanceof Error ? err.message : String(err);
-	const [, status, message] = /^\[(\d{3})\] (.*)$/s.exec(text) ?? [];
+	const [, status, message, next] = /^\[(\d{3})\] (.*?)(?:\nnext: (.*))?$/s.exec(text) ?? [];
 	if (status === undefined || message === undefined) return { status: 500, message: text };
-	return { status: Number(status), message };
+	return { status: Number(status), message, ...(next ? { next } : {}) };
 }
 
 /** A required string argument, trimmed. Throws `[400] <key> is required` when it is missing or blank. */

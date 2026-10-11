@@ -198,7 +198,7 @@ async function reviewAccess(
 		taking,
 	]);
 	const head = await branchHead(fork, `changes/${change}`).catch(() => null);
-	if (!head) fail(409, `${change} has nothing pushed to review yet`);
+	if (!head) fail(409, `${change} has nothing pushed to review yet`, "choose another review from `reviews`");
 	if (head !== knownHead) await take(head);
 	// Agent names only: a person's identity stays in the records, out of logs.
 	console.log(`review access to ${repo} ${change} (${author}) for ${reviewer ?? "an unregistered caller"}`);

@@ -13,7 +13,8 @@ export const sha256 = async (text: string) => {
 export async function keyAgent(registry: Registry | undefined, key: string) {
 	const agent = key.slice(0, Math.max(0, key.lastIndexOf(".")));
 	const record = agent ? registry?.agents?.[agent] : undefined;
-	if (!record || record.keyHash !== (await sha256(key))) fail(403, "unknown agent key");
+	if (!record || record.keyHash !== (await sha256(key)))
+		fail(403, "unknown agent key", "send the key `register` gave your agent, as X-GitHive-Agent-Key or agent_key");
 	return agent;
 }
 
@@ -25,7 +26,7 @@ export function mayActAs(
 	hosted: boolean | undefined,
 ) {
 	if (acting) {
-		if (name !== acting) fail(403, `you act as ${acting}; you can't act as ${name}`);
+		if (name !== acting) fail(403, `you act as ${acting}; you can't act as ${name}`, `name yourself: ${acting}`);
 		return;
 	}
 	if (hosted) return;

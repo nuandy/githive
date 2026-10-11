@@ -253,7 +253,8 @@ export function conflictsWith(state: Registry | null | undefined, paths: string[
 }
 
 export const changeTaken = (change: string, agent: string) =>
-	`[409] ${change} is ${agent}'s change: claim under a change name of your own`;
+	`[409] ${change} is ${agent}'s change: claim under a change name of your own\n` +
+	"next: pick a name nobody uses (`claims` shows those in use), or choose other work from `backlog`";
 
 // Adds the writer's identity and GitHive's stamp, when the record is written through the toolkit.
 async function stamped<T extends object>(
