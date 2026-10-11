@@ -31,7 +31,7 @@ export function actionsChecks(
 			.checksBranch({ base, branch, changes, to: link.remote, ref: name })
 			.catch((err): Unlanded => ({ failed: String(err) }));
 		// A change that doesn't merge onto the batch fails it as the Gate's checks do, so it's put out for its conflict.
-		if ("failed" in made && made.conflict) {
+		if ("failed" in made && made.conflict?.files.length) {
 			const { files } = made.conflict;
 			const merging = { command: BATCH_MERGE, exitCode: 1, output: conflictLine(files, []) };
 			return { passed: false, results: [merging], conflict: { files } };

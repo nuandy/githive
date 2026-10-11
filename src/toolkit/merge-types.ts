@@ -83,7 +83,10 @@ export interface BatchGit {
 	pushBranch(input: { branch: string; head: string; to: Remote }): Promise<void>;
 }
 
-/** Why a batch didn't land or merge, and the change that didn't merge onto it with its files, when that's why. */
+/**
+ * Why a batch didn't land or merge, and the change that didn't merge onto it with its files, when that's why: git
+ * names the change whose merge failed, and lists its files where it can (none when it didn't say).
+ */
 export interface Unlanded {
 	failed: string;
 	conflict?: { change: string; files: string[] };

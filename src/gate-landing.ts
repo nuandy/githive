@@ -16,7 +16,7 @@ export const pushBusy = (output: string) => /receive_pack_busy|repository is bus
 
 export type ReadChange = { change: string; head: string; files: string[] } | { change: string; error: string };
 export type LandingMerge = BatchSource & { head: string; claimed: Omit<MergeClaim, "base"> };
-/** A change that didn't merge onto the batch, and the files it conflicted on. */
+/** A change that didn't merge onto the batch, and the files it conflicted on, where git listed them. */
 export type LandingConflict = { change: string; files: string[] };
 export type LandingResult = { commits: string[] } | { moved: true } | { error: string; conflict?: LandingConflict };
 /** The batch merged for checks on Actions, or why it couldn't be: with the change that didn't merge and its files. */
@@ -192,11 +192,13 @@ async function commitMerge(
 		"git rev-parse HEAD";
 	const message = await mergeMessage({ ...merge.claimed, base }, stamper);
 	const ran = await run(container, ["bash", "-c", script], WORKDIR, message);
+	// Exit 1 is git merge failing, which names the change even when it listed no files (see conflictIn in
+	// merge-land.ts): a failed commit or push isn't a conflict, and says nothing of one.
 	if (ran.exitCode === 1) {
 		const { files, output } = conflictListed(ran.output);
 		return {
 			error: `merging ${merge.change} onto the batch failed: ${clip(output, 500)}`,
-			...(files.length ? { conflict: { change: merge.change, files } } : {}),
+			conflict: { change: merge.change, files },
 		};
 	}
 	if (ran.exitCode !== 0) return { error: `committing ${merge.change}'s merge failed: ${clip(ran.output, 500)}` };

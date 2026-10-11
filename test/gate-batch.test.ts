@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { pushChange } from "./helpers/agents";
+import { agentClone, pushChange } from "./helpers/agents";
 import { startGitServer, type GitServer } from "./helpers/git-server";
 import { FakeStorage } from "./fakes/env";
 import { type HistorySource, type KeptFiles, readBranchHistory } from "../src/toolkit/branch-history";
@@ -193,6 +193,26 @@ describe("reading and landing a batch in the repo's own Gate", { timeout: 60_000
 		expect(landed).toEqual({
 			error: expect.stringMatching(/^merging b-1 onto the batch failed: src\/shared\.txt\n/),
 			conflict: { change: "b-1", files: ["src/shared.txt"] },
+		});
+		expect(server.git("rev-parse", "main").trim()).toBe(main);
+	});
+
+	it("names the change whose merge fails without listing files, which a fetch or a push never is", async () => {
+		const main = server.git("rev-parse", "main").trim();
+		// A branch with no history in common with main: git refuses to merge it, and lists no conflicted file.
+		const clone = await agentClone(server.url, work, "orphan");
+		await clone.run("checkout", "--quiet", "--orphan", "changes/o-1");
+		await clone.run("rm", "-rqf", "--ignore-unmatch", ".");
+		clone.write("src/o.txt", "o\n");
+		await clone.run("add", "-A");
+		await clone.run("commit", "--quiet", "-m", "start over");
+		await clone.run("push", "--quiet", "origin", "changes/o-1");
+		const head = await clone.run("rev-parse", "HEAD");
+		const merges = [{ ...source("o-1"), head, claimed: claimed("o-1", head) }];
+		const landed = await gate.landBatch({ repo: "t1", branch: "main", base: base(), baseHead: main, merges });
+		expect(landed).toEqual({
+			error: expect.stringMatching(/^merging o-1 onto the batch failed: .*unrelated histories/s),
+			conflict: { change: "o-1", files: [] },
 		});
 		expect(server.git("rev-parse", "main").trim()).toBe(main);
 	});

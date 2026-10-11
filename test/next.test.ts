@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { TOOLS } from "../src/toolkit/mcp";
+import { rejectedFor } from "../src/toolkit/merge-checks";
 import { nextFor } from "../src/toolkit/tools/next";
 import { agentClone, pushChange } from "./helpers/agents";
 import { startGitServer, type GitServer } from "./helpers/git-server";
@@ -351,6 +352,23 @@ describe("next", () => {
 		expect(next.length).toBeLessThan(2_100);
 		expect(next).toContain("src/very/long/path/to/a/file-4.ts and 295 more");
 		expect(next).toMatch(/\(cut: the reply has the rest\)$/);
+	});
+
+	it("reads a rejection written before conflicts had words of their own as a conflict, not failed checks", () => {
+		const evidence =
+			"checks failed: (merging the batch onto main) exited 1 on 4b825dc6, checked alone on the branch, twice:\n" +
+			"conflict on src/a.ts";
+		expect(rejectedFor(evidence)).toEqual({ why: "conflict" });
+		const status = {
+			change: "c-1",
+			claim: { agent: "a" },
+			head: HEAD,
+			votes: [{ commit: HEAD, reviewer: "githive-checks", verdict: "reject", evidence }],
+			approval: { approved: false, approvals: 0, required: 1, awaiting: [], vetoedBy: [] },
+			merge: { into: "main", clean: false, conflicts: ["src/a.ts"], outsideClaim: [] },
+		};
+		expect(nextFor("status", { change: "c-1" }, status)).toMatch(/^It conflicts with main in src\/a\.ts/);
+		expect(nextFor("status", { change: "c-1" }, status)).not.toMatch(/checks failed/);
 	});
 });
 

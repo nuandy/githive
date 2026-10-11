@@ -1,6 +1,6 @@
 import { repoOfUrl } from "../git-http";
 import { changeAgainst, type ReadHistory, type TouchedBy, touchedSince } from "./batch-reads";
-import { CONFLICT_ON, conflictLine, type Landing, type Settled } from "./landing";
+import { CONFLICT_FILES_NAMED, CONFLICT_ON, conflictLine, type Landing, type Settled } from "./landing";
 import { type Holding, STEP_MS } from "./merge-lease";
 import type { BatchChange, CheckResult, Conflict, MergeInput, Ready } from "./merge-types";
 import { fail } from "../errors";
@@ -12,9 +12,11 @@ export const CHECKS_REVIEWER = "githive-checks";
  * the conflict in one line: its files and who changed them.
  */
 export const BATCH_MERGE = "(merging the batch onto main)";
-// How much of a failed check's output is kept in its outcome, and in its rejection.
+// How much of a failed check's output is kept in its outcome, and of the whole rejection (its reason, then the end of
+// the output). A reason is cut first, so a conflict on many files can't crowd the output out.
 const OUTCOME_OUTPUT_CHARS = 1_000;
 const EVIDENCE_CHARS = 2_000;
+const REASON_CHARS = 1_000;
 /** The most conflicted files an outcome keeps, since the branch's recent outcomes are kept together. */
 const CONFLICTS_KEPT = 50;
 /** How a change failing its checks was found, as its rejection tells it. */
@@ -141,16 +143,19 @@ export async function putOut(
 	const conflict = failure.conflict && (await withTouchedBy(input, baseHead, ready, failure.conflict));
 	// A runner without `conflict` still tells one as its failed step, whose output is the conflict in one line.
 	const told = failed?.command === BATCH_MERGE ? failed.output.split("\n")[0] : undefined;
-	const reasons = [
+	const reason =
 		(conflict && conflictLine(conflict.files, conflict.touchedBy ?? [])) ||
-			told ||
-			(failed ? `checks failed: ${failed.command} exited ${failed.exitCode}` : "checks failed"),
-	];
+		told ||
+		(failed ? `checks failed: ${failed.command} exited ${failed.exitCode}` : "checks failed");
+	const reasons = [cut(reason, REASON_CHARS)];
 	await input
 		.noteAttempt?.(ready.change, reasons[0]!)
 		.catch((err) => console.error(`noting ${ready.change}'s failed checks failed`, String(err)));
-	const outputTail = failed?.output ? `:\n${failed.output.slice(-EVIDENCE_CHARS)}` : "";
-	const evidence = `${reasons[0]} on ${ready.head.slice(0, 8)}, ${how}${outputTail}`;
+	const said = `${reasons[0]} on ${ready.head.slice(0, 8)}, ${how}`;
+	// A conflict's failed step is the conflict in one line again, which the reason already says.
+	const output = failed?.command === BATCH_MERGE ? "" : (failed?.output ?? "");
+	const outputTail = output ? `:\n${output.slice(-Math.max(0, EVIDENCE_CHARS - said.length - 2))}` : "";
+	const evidence = `${said}${outputTail}`;
 	const rejection = { commit: ready.head, reviewer: CHECKS_REVIEWER, role: "checks", verdict: "reject" } as const;
 	await input.votes
 		.vote({ ...rejection, evidence }, input.stamper)
@@ -171,6 +176,9 @@ export async function putOut(
 	};
 }
 
+/** `text` cut to `most` characters, marked where it was cut. */
+const cut = (text: string, most: number) => (text.length > most ? `${text.slice(0, most - 1)}…` : text);
+
 // A conflict with who changed its files, read through Artifacts' API when the checks didn't say.
 async function withTouchedBy(input: MergeInput, baseHead: string, ready: Ready, conflict: Conflict): Promise<Conflict> {
 	if (conflict.touchedBy || !input.history) return conflict;
@@ -180,10 +188,13 @@ async function withTouchedBy(input: MergeInput, baseHead: string, ready: Ready, 
 	return { ...conflict, touchedBy: await touchedWhileLanding(input.history, project, at, change) };
 }
 
-// A conflict as an outcome keeps it: some of its files, and the newest change to each of them.
+// A conflict as an outcome keeps it: some of its files, and the newest change to each of the few its words name (the
+// branch's recent outcomes are kept together in one value).
 function kept(conflict: Conflict): Pick<Settled, "conflicts" | "touchedBy"> {
+	const named = new Set(conflict.files.slice(0, CONFLICT_FILES_NAMED));
 	const touchedBy = (conflict.touchedBy ?? []).filter(
-		(touched, index, all) => all.findIndex((other) => other.file === touched.file) === index,
+		(touched, index, all) =>
+			named.has(touched.file) && all.findIndex((other) => other.file === touched.file) === index,
 	);
 	return { conflicts: conflict.files.slice(0, CONFLICTS_KEPT), ...(touchedBy.length ? { touchedBy } : {}) };
 }
@@ -229,6 +240,8 @@ export function rejectedFor(evidence: string): { why: "conflict" } | { why: "che
 	if (first.startsWith(CONFLICT_ON)) return { why: "conflict" };
 	const named = /^checks failed: (.+?) exited (-?\d+) on [0-9a-f]+, /.exec(first);
 	if (!named) return { why: "checks" };
+	// A rejection written before conflicts had words of their own failed the batch's merge as a check.
+	if (named[1] === BATCH_MERGE) return { why: "conflict" };
 	const output = rest.join("\n").slice(-OUTCOME_OUTPUT_CHARS);
 	return { why: "checks", check: { command: named[1]!, exitCode: Number(named[2]), output } };
 }

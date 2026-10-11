@@ -126,3 +126,32 @@ describe("a conflict found while landing", { timeout: 60_000 }, () => {
 		expect(noted).toEqual([]);
 	});
 });
+
+describe("a conflict on hundreds of files", () => {
+	it("names a few of them and how many more, so its rejection and its outcome stay small", async () => {
+		const { putOut } = await import("../src/toolkit/merge-checks");
+		const files = Array.from({ length: 600 }, (_, i) => `src/generated/part-${i}.ts`);
+		const touchedBy = files.map((file) => ({ file, commit: "f".repeat(40), author: "fmt-bot", intent: "x".repeat(140) }));
+		const voted: { evidence: string }[] = [];
+		const noted: string[] = [];
+		const input = {
+			branch: "main",
+			remote: { url: "https://artifacts.invalid/p.git", token: "t" },
+			votes: { vote: async (vote: { evidence: string }) => void voted.push(vote) },
+			noteAttempt: async (_change: string, line: string) => void noted.push(line),
+		} as unknown as import("../src/toolkit/merge-types").MergeInput;
+		const ready = { change: "c-1", head: "c".repeat(40), agent: "agent-c", ref: "changes/c-1" } as never;
+		const failure = { results: [], conflict: { files, touchedBy } };
+		const settled = await putOut(input, "b".repeat(40), ready, failure, "found while landing it on main");
+		const [reason] = settled.reasons!;
+		expect(reason).toMatch(/^conflict on src\/generated\/part-0\.ts with f{7} by fmt-bot \("x{140}"\); /);
+		expect(reason).toMatch(/; and 59\d more files$/);
+		expect(reason!.length).toBeLessThanOrEqual(1_200);
+		expect(voted[0]!.evidence.length).toBeLessThanOrEqual(2_000);
+		expect(voted[0]!.evidence).toBe(`${reason} on ${"c".repeat(8)}, found while landing it on main`);
+		expect(noted).toEqual([reason]);
+		// The outcome keeps the first 50 files, not 600.
+		expect(settled.conflicts).toHaveLength(50);
+		expect(JSON.stringify(settled).length).toBeLessThan(8_000);
+	});
+});
