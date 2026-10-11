@@ -4,7 +4,14 @@ import { mirrorTo } from "../actions-checks";
 import { pullStory, untaken } from "../github-pr";
 import type { ClaimRecord, Registry } from "../claims";
 import { type GitHubImport, type GitHubImports, importedAt, importsRef, verifiedImports } from "../github-imports";
-import { githubSync, type GitHubSyncState, isGitHubChange, PR_BRANCH, trustsGitHub } from "../github-settings";
+import {
+	bringsGitHubBack,
+	githubSync,
+	type GitHubSyncState,
+	isGitHubChange,
+	PR_BRANCH,
+	trustsGitHub,
+} from "../github-settings";
 import { branchHistory } from "../history";
 import type { ToolCall, ToolContext, ToolHandlers } from "./context";
 import { recordLog } from "./repo";
@@ -19,7 +26,8 @@ export const githubTools: ToolHandlers = {
 		const refresh = args.refresh === true;
 		const link = await connectedLink(call);
 		const seen = await link.defaultHead();
-		const sync = ctx.githubSync?.(repo);
+		// A link made before modes brings nothing back.
+		const sync = bringsGitHubBack(registered) ? ctx.githubSync?.(repo) : undefined;
 		// No timers: someone asking is when GitHive looks, and refresh tries again what needed a person.
 		const state = await sync
 			?.notice({ github: link.repo, branch: seen.branch, commit: seen.head }, refresh)

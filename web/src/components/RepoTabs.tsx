@@ -312,6 +312,7 @@ export function githubTerms(github: NonNullable<RepoSnapshot["github"]>, branch:
 		github.sync === "pr"
 			? `GitHive's work reaches ${github.repo} through one pull request from githive/main, merged on GitHub`
 			: `GitHive pushes ${branch} to ${github.repo} after every landing`;
+	if (!github.inbound) return `${how}, as it did before modes: GitHub's changes aren't brought back.`;
 	const back = github.trust
 		? "GitHub's changes come back as githive-github's change, landing through the checks without review"
 		: "GitHub's changes come back as githive-github's change, reviewed like any change";

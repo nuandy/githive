@@ -671,9 +671,12 @@ the audit holds each merge to the settings in force when it merged. Then
     branch last took GitHive's work, each change's intent, agent and reviewers
     with their evidence; `refresh` rewrites it. Merging and closing it happen
     on GitHub.
-  - `mirror`, which repos connected before modes keep: main goes to GitHub's
-    main, the copy people browse, and a backup.
-- **GitHub's changes come back as a change.** After pushing, one read of
+  - `mirror`: main goes to GitHub's main, the copy people browse, and a
+    backup. A link made before modes has no mode recorded: it mirrors
+    exactly as it did, and brings nothing back nor trusts anything (below),
+    until `github_sync` is set for it, to `pr` or `mirror`.
+- **GitHub's changes come back as a change**, for a link with its mode set
+  (`github_sync`, recorded for every new connection). After pushing, one read of
   GitHub's default branch (with its ETag) says where it is; a mirror whose
   push was taken skips it. If GitHub's head may not be on main, the repo's
   `GitHubSync` Durable Object starts a job and the landing goes on: no timers,
@@ -692,7 +695,8 @@ the audit holds each merge to the settings in force when it merged. Then
   "Bring in GitHub's changes (owner/name main at <sha>)". Once it's on main,
   GitHub's commit is too, so the next pull request shows only what's new, and a
   mirror's push is a fast-forward again.
-- **GitHub's changes are trusted** while `github_trust` is on (the default):
+- **GitHub's changes are trusted** while `github_trust` is on (the default,
+  for a link with its mode set):
   they need no approvals, whatever the policy, and their checks still run.
   `status` says so, `reviews` offers them to no one, and the dashboard labels
   them "from GitHub". Other merges' batches leave them to their own merge,

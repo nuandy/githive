@@ -12,6 +12,7 @@ import { generateStampKey, makeStamper } from "../src/toolkit/stamp";
 import { FakeStorage } from "./fakes/env";
 import { pushChange } from "./helpers/agents";
 import { fakeGitHub, type FakeGitHub } from "./helpers/fake-github";
+import { linkBeforeModes } from "./helpers/github-link";
 import { startGitServer, type GitServer } from "./helpers/git-server";
 import { toolCalls } from "./helpers/tool-calls";
 
@@ -208,6 +209,37 @@ describe("GitHub's changes coming back", { timeout: 120_000 }, () => {
 		await sync.notice({ repo: "p", github: "acme/shop", branch: "main", commit: github.head() }, true);
 		expect(await settle()).toMatchObject({ step: "done" });
 		expect(server.git("show", "main:docs/notes.md")).toBe("from GitHub\n");
+	});
+});
+
+describe("a link made before modes", { timeout: 120_000 }, () => {
+	beforeEach(async () => {
+		await linkBeforeModes(server, "p", "acme/shop");
+	});
+
+	it("never starts the GitHub job: it mirrors, as it always did", async () => {
+		await land("c-1", { "src/a.js": "a\n" });
+		expect(github.head()).toBe(main());
+		// Someone pushes to GitHub: the next push is refused, and nothing comes back.
+		github.push({ "docs/notes.md": "from GitHub\n" });
+		expect(await land("c-2", { "src/b.js": "b\n" })).toBeNull();
+		expect(await sync.state()).toEqual({ job: null, pull: null });
+		expect(github.calls).toEqual([]);
+		expect(server.git("ls-tree", "-r", "--name-only", "main")).not.toContain("docs/notes.md");
+		expect(await imports()).toEqual([]);
+		// Asking about a pull request starts nothing either.
+		await call("github_pr", {}).catch(() => undefined);
+		expect((await sync.state()).job).toBeNull();
+	});
+
+	it("brings GitHub's changes back once github_sync is set, to mirror too", async () => {
+		await land("c-1", { "src/a.js": "a\n" });
+		const pushed = github.push({ "docs/notes.md": "from GitHub\n" });
+		await call("settings", { github_sync: "mirror" });
+		expect(await land("c-2", { "src/b.js": "b\n" })).toMatchObject({ step: "done", commit: pushed });
+		expect(server.git("show", "main:docs/notes.md")).toBe("from GitHub\n");
+		// Trusted: it landed without the review the repo asks for, and the audit agrees.
+		expect(await call("audit", {})).toMatchObject({ open: 0 });
 	});
 });
 

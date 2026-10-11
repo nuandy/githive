@@ -8,15 +8,18 @@ import type { ClaimRecord, Registry } from "./claims";
 export type GitHubSync = "mirror" | "pr";
 export const GITHUB_SYNCS: readonly GitHubSync[] = ["mirror", "pr"];
 
-/** A new connection's mode. Repos connected before modes existed have none recorded and mirror. */
+/**
+ * A new connection's mode. A link made before modes existed has none recorded: it mirrors exactly as it did, and
+ * brings nothing of GitHub's back, until a mode is set for it.
+ */
 export const NEW_CONNECTION_SYNC: GitHubSync = "pr";
 
 /** The connected GitHub repo, how GitHive pushes to it, and whether its changes come back without review. */
 export interface GitHubSettings {
 	repo: string;
-	/** Absent on connections made before modes, which mirror. */
+	/** Absent on connections made before modes, which mirror and bring nothing back. */
 	sync?: GitHubSync;
-	/** Absent means trusted. */
+	/** Absent means trusted, once a mode is recorded. */
 	trust?: boolean;
 }
 
@@ -36,9 +39,15 @@ export function githubSync(registry: Pick<Registry, "github"> | null | undefined
 	return registry.github.sync ?? "mirror";
 }
 
-/** Whether a repo takes GitHub's changes without review: connected, and trust not turned off. */
+/**
+ * Whether GitHub's changes come back to the repo: only for a link with its mode recorded. A link made before modes
+ * keeps what it did then, a mirror and nothing more.
+ */
+export const bringsGitHubBack = (registry: Pick<Registry, "github"> | null | undefined) => !!registry?.github?.sync;
+
+/** Whether a repo takes GitHub's changes without review: they come back, and trust isn't turned off. */
 export const trustsGitHub = (registry: Pick<Registry, "github"> | null | undefined) =>
-	!!registry?.github && registry.github.trust !== false;
+	bringsGitHubBack(registry) && registry!.github!.trust !== false;
 
 /** Whether a claim is githive-github's, bringing a branch of GitHub's back. */
 export const isGitHubChange = (claim: Pick<ClaimRecord, "agent" | "source">) =>

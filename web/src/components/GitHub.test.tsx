@@ -21,6 +21,7 @@ const github = (over: Partial<RepoGitHub> = {}): RepoGitHub => ({
 	repo: "acme/shop",
 	sync: "pr",
 	trust: true,
+	inbound: true,
 	pull: null,
 	...over,
 });
@@ -99,6 +100,16 @@ describe("the GitHub settings", () => {
 			github_sync: "mirror",
 		});
 		expect(githubInput({ repo: " ", sync: "pr", trust: true }, github())).toEqual({ github: "" });
+	});
+
+	it("sets a mode for a link made before modes, which brings GitHub's changes back from then on", () => {
+		const legacy = github({ sync: "mirror", trust: false, inbound: false });
+		expect(githubDraft(legacy)).toEqual({ repo: "acme/shop", sync: "mirror", trust: true });
+		expect(githubInput(githubDraft(legacy), legacy)).toEqual({ github_sync: "mirror", github_trust: true });
+		expect(githubTerms(legacy, "main")).toBe(
+			"GitHive pushes main to acme/shop after every landing, as it did before modes: GitHub's changes aren't " +
+				"brought back.",
+		);
 	});
 
 	it("reads the link in words for those who can't change it", () => {

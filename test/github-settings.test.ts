@@ -5,6 +5,7 @@ import { GitCasLog } from "../src/record-log";
 import type { Registry } from "../src/toolkit/claims";
 import { callTool } from "../src/toolkit/mcp";
 import { startGitServer, type GitServer } from "./helpers/git-server";
+import { linkBeforeModes } from "./helpers/github-link";
 import { memoryBatchGit } from "./helpers/memory-batch-git";
 
 // How a connected repo works with GitHub: github_sync says whether main goes to
@@ -50,6 +51,7 @@ describe("connecting a repo to GitHub", { timeout: 60_000 }, () => {
 			github: "acme/shop",
 			githubSync: "pr",
 			githubTrust: true,
+			githubInbound: true,
 		});
 		expect((await registry())?.github).toEqual({ repo: "acme/shop", sync: "pr", trust: true });
 	});
@@ -66,30 +68,25 @@ describe("connecting a repo to GitHub", { timeout: 60_000 }, () => {
 		expect(await settings({ github: "acme/shop" })).toMatchObject({ github: "acme/shop", githubSync: "pr" });
 	});
 
-	it("keeps a link made before modes as a mirror, trusted", async () => {
+	it("keeps a link made before modes a mirror that brings nothing back, until a mode is set", async () => {
 		await settings({});
-		// A link as GitHive wrote it before modes existed: the repo alone.
-		const log = new GitCasLog<Registry>(
-			async () => ({ url: server.url, token: "unused" }),
-			"p",
-			"refs/notes/githive-claims/p",
-		);
-		const head = await log.read();
-		const state = { ...head!.commit.state, github: { repo: "acme/old" } };
-		await log.append(head!.tip, {
-			author: "githive",
-			kind: "decisions",
-			entries: [{ commit: "none", text: "an older link", at: new Date().toISOString() }],
-			state,
-			batch: "b",
-		});
+		await linkBeforeModes(server, "p", "acme/old");
 		expect(await settings({ required: 1 })).toMatchObject({
 			github: "acme/old",
 			githubSync: "mirror",
-			githubTrust: true,
+			githubTrust: false,
+			githubInbound: false,
 		});
-		expect(await settings({ github_trust: false })).toMatchObject({ githubSync: "mirror", githubTrust: false });
-		expect((await registry())?.github).toEqual({ repo: "acme/old", trust: false });
+		// Trust alone sets no mode: it still only mirrors.
+		expect(await settings({ github_trust: true })).toMatchObject({ githubTrust: false, githubInbound: false });
+		expect((await registry())?.github).toEqual({ repo: "acme/old", trust: true });
+		// Setting the mode, even to mirror, brings GitHub's changes back, trusted.
+		expect(await settings({ github_sync: "mirror" })).toMatchObject({
+			githubSync: "mirror",
+			githubTrust: true,
+			githubInbound: true,
+		});
+		expect((await registry())?.github).toEqual({ repo: "acme/old", sync: "mirror", trust: true });
 	});
 
 	it("refuses a mode or trust without a GitHub repo, and anything but the two modes", async () => {

@@ -10,17 +10,24 @@ export interface GitHubDraft {
 	trust: boolean;
 }
 
-/** The form's draft for a repo's link: a new connection goes through a pull request and trusts GitHub. */
+/**
+ * The form's draft for a repo's link: a new connection goes through a pull request and trusts GitHub. A link made
+ * before modes shows the mirror it is, and trust as a mode would start it.
+ */
 export const githubDraft = (github: RepoGitHub | undefined): GitHubDraft => ({
 	repo: github?.repo ?? "",
 	sync: github?.sync ?? "pr",
-	trust: github?.trust ?? true,
+	trust: github && !github.inbound ? true : (github?.trust ?? true),
 });
 
-/** The settings call for a draft: only what changed, and "" for the repo to disconnect it. */
+/**
+ * The settings call for a draft: only what changed, and "" for the repo to disconnect it. Saving a link made before
+ * modes sets its mode and trust, which brings GitHub's changes back from then on.
+ */
 export function githubInput(draft: GitHubDraft, github: RepoGitHub | undefined): SettingsInput {
 	const repo = draft.repo.trim();
 	if (!repo) return github ? { github: "" } : {};
+	if (github && !github.inbound && repo === github.repo) return { github_sync: draft.sync, github_trust: draft.trust };
 	const input: SettingsInput = {};
 	if (repo !== github?.repo) input.github = repo;
 	if (draft.sync !== (github?.sync ?? "pr")) input.github_sync = draft.sync;
@@ -82,6 +89,12 @@ export function GitHubSettings({
 						A GitHub repo GitHive's GitHub app is installed on. Whatever GitHub's branch gains (the pull request's
 						merge, or commits pushed there) comes back as a change by githive-github, landing through the checks.
 					</p>
+					{github && !github.inbound ? (
+						<p className="callout">
+							Connected before GitHive had modes: it mirrors {branch} to GitHub and brings nothing back. Saving a mode
+							here brings GitHub's changes back from then on.
+						</p>
+					) : null}
 					<div className="repo-settings__field">
 						<label htmlFor="github-repo">GitHub repo</label>
 						<input

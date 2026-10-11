@@ -36,6 +36,8 @@ export interface RepoGitHub {
 	repo: string;
 	sync: GitHubSync;
 	trust: boolean;
+	/** Whether GitHub's changes come back: not for a link made before modes, which only mirrors until one is set. */
+	inbound: boolean;
 	/** The standing pull request as GitHive last saw it: open then, it may have been merged since. */
 	pull: { number: number; url: string } | null;
 	/** Bringing GitHub's changes back, as GitHive last did it. */

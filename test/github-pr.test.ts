@@ -95,6 +95,7 @@ describe("a repo connected to GitHub in pr mode", { timeout: 60_000 }, () => {
 			repo: "acme/shop",
 			sync: "pr",
 			trust: true,
+			inbound: true,
 			pull: { number: 1, url: "https://github.com/acme/shop/pull/1" },
 		});
 		// Asked again, it's found, not opened twice.

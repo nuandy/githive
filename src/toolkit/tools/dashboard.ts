@@ -5,7 +5,7 @@ import { Timing } from "../../timing";
 import { claimInto, presentClaim } from "../branch-scope";
 import { DEFAULT_SKIP_CHECKS } from "../check-scope";
 import type { ClaimRecord, Registry, ReleaseRecord } from "../claims";
-import { githubSync, trustsGitHub } from "../github-settings";
+import { bringsGitHubBack, githubSync, trustsGitHub } from "../github-settings";
 import type { VoteStore, VotesView } from "../vote-store";
 import { DEFAULT_GRANT, type FlagRecord, openFlag, type ReviewPolicy, type VoteRecord } from "../votes";
 import { holdKey, ROLE_WAIT_MS, waitingRoleReviews } from "../work";
@@ -275,6 +275,7 @@ async function githubView(ctx: ToolContext, repo: string, state: Registry) {
 		repo: state.github!.repo,
 		sync: githubSync(state),
 		trust: trustsGitHub(state),
+		inbound: bringsGitHubBack(state),
 		pull: seen?.pull ? { number: seen.pull.number, url: seen.pull.url } : null,
 		...(job
 			? {

@@ -3,6 +3,7 @@ import { projectBranch } from "../project-branch";
 import type { Registry } from "./claims";
 import { type GitHubImports, importsRef, recordImport } from "./github-imports";
 import {
+	bringsGitHubBack,
 	GITHUB_AGENT,
 	type GitHubSeen,
 	importedBranch,
@@ -114,6 +115,8 @@ async function importStep(ctx: ToolContext, job: InboundJob, at: At): Promise<St
 	const registry = (await recordLog<Registry>(ctx, job.repo, claimsRef(job.repo)).read())?.commit.state;
 	if (registry?.github?.repo !== job.github)
 		return { job: at({ step: "done", reason: `${job.repo} isn't connected to ${job.github} any more` }) };
+	if (!bringsGitHubBack(registry))
+		return { job: at({ step: "done", reason: `${job.repo}'s link has no mode set: it only mirrors` }) };
 	const branch = projectBranch(registry);
 	const link = (await ctx.github?.(job.github)) ?? null;
 	if (!link) throw new Error(`GitHive's GitHub app can't reach ${job.github}`);

@@ -15,7 +15,7 @@ import {
 	MOST_AT_ONCE,
 	shardingOf,
 } from "./repo";
-import { githubSync, trustsGitHub } from "../github-settings";
+import { bringsGitHubBack, githubSync, trustsGitHub } from "../github-settings";
 import {
 	branchRulesFrom,
 	checksFrom,
@@ -201,5 +201,11 @@ async function changeRepoSettings({ args, ctx, repo, claims, stamper }: ToolCall
 
 // The GitHub link as settings reply with it: the repo, how main goes there, and whether its changes need review.
 function githubReply(registry: Registry) {
-	return { github: registry.github!.repo, githubSync: githubSync(registry), githubTrust: trustsGitHub(registry) };
+	return {
+		github: registry.github!.repo,
+		githubSync: githubSync(registry),
+		githubTrust: trustsGitHub(registry),
+		// A link made before modes mirrors only, until a mode is set for it.
+		githubInbound: bringsGitHubBack(registry),
+	};
 }

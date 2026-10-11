@@ -11,11 +11,16 @@ collect on GitHive and reach GitHub through a pull request, merged the normal Gi
 ## Settings
 
 `settings { github: "owner/name", github_sync: "mirror" | "pr", github_trust: true | false }`.
-- `mirror` is today's behaviour, and stays the mode of repos already connected: a link recorded before modes
-  existed has no `sync` and reads as `mirror`.
+- **A link made before modes keeps today's behaviour exactly.** It has no `sync` recorded: it mirrors `main` after
+  each landing, brings nothing of GitHub's back, and trusts nothing. Inbound, and trust, apply only to a link whose
+  `github_sync` is set, to `"pr"` or `"mirror"`, through `settings` or the dashboard's Settings tab (which offers it
+  for such a link). Setting `github_trust` alone sets no mode.
 - `pr` is the default for new connections (`NEW_CONNECTION_SYNC` in `src/toolkit/github-settings.ts`: Andy may
-  prefer `mirror`; it's one constant). A new connection records `sync` and `trust` explicitly, so changing the
-  constant later moves no repo.
+  prefer `mirror`; it's one constant). A new connection records `sync` and `trust` explicitly, so it brings GitHub's
+  changes back, and changing the constant later moves no repo.
+- `bringsGitHubBack(registry)` (a mode is recorded) gates the notice after a landing, `github_pr`'s notice and the
+  job's import step; `trustsGitHub` needs it too, so the merge path and the audit give a link without a mode no trust.
+  Settings replies say `githubInbound`, and the dashboard's snapshot `inbound`.
 - The choice is stored with the repo's GitHub link in the claims registry (`github: { repo, sync, trust }`), and
   changes through `settings` and the dashboard's Settings tab. Naming the same repo again keeps its mode; another
   repo is a new connection. `github_sync` or `github_trust` without a connected repo is refused.
@@ -49,7 +54,8 @@ In `pr` mode:
 GitHub's branch can hold commits GitHive's `main` lacks: the PR's merge, squash or rebase commits, or commits
 people pushed there directly. They come back through GitHive's own path, so the record and the audit stay whole.
 
-1. **Noticed after a landing.** After pushing `githive/main` (or `main` in mirror mode), GitHive reads GitHub's
+1. **Noticed after a landing** (for a link with its mode set). After pushing `githive/main` (or `main` in mirror
+   mode), GitHive reads GitHub's
    default branch head: one API call, made with the last answer's ETag, so an unchanged branch costs nothing
    against GitHub's rate limit. In mirror mode a push GitHub took means its main is GitHive's, so the read is made
    only when the push was refused. The `github_pr` tool and the dashboard notice it as well. GitHive never polls:
@@ -124,8 +130,9 @@ is a fast-forward again.
 
 ## What doesn't change
 
-- `mirror` mode, GitHub Actions checks and importing a repo work as before. A mirror now also brings back what was
-  pushed to GitHub directly, which before only refused the next push.
+- A link made before modes works exactly as before: it mirrors, and a push someone made to GitHub only refuses the
+  next one. GitHub Actions checks and importing a repo work as before. A link set to `mirror` also brings back what
+  was pushed to GitHub directly.
 - GitHub is never force-pushed.
 
 ## Tests
@@ -144,3 +151,5 @@ real-git test server) plays GitHub, as GitHive's tests fake Artifacts.
 - The audit reports every way a vote could be skipped short of the trust rule (`github-audit.test.ts`).
 - The import record's shape is pinned.
 - A failing GitHub API, a refused push or a failing import never fails a landing.
+- A link with no `github_sync` never starts the GitHub job (no API call, nothing brought back, `github_pr` included);
+  setting `github_sync` to `mirror` turns inbound on, trusted (`github-inbound.test.ts`, `github-settings.test.ts`).
