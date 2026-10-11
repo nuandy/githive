@@ -353,9 +353,23 @@ function hostedParts(env: Env) {
 	} satisfies Partial<ToolContext>;
 }
 
-async function reviewsLog(env: Env, repo: string) {
+// How many records repos a repo's records are spread over, as its claims registry says. A repo spreads its records
+// once and never gathers them again, so a spread seen is kept for the isolate a while: a call reading all 16 review
+// hold buckets read the registry for each.
+const spreads = new SizedCache<{ spread: number; until: number }>("records spreads", 256);
+const SPREAD_KEPT_MS = 10 * 60_000;
+
+async function recordsSpread(env: Env, repo: string) {
+	const kept = spreads.get(repo);
+	if (kept && kept.until > Date.now()) return kept.spread;
 	const registry = (await recordsLog<Registry>(env, repo, claimsRef(repo)).read())?.commit.state;
 	const spread = registry?.recordsRepos ?? 0;
+	if (spread) spreads.set(repo, { spread, until: Date.now() + SPREAD_KEPT_MS });
+	return spread;
+}
+
+async function reviewsLog(env: Env, repo: string) {
+	const spread = await recordsSpread(env, repo);
 	return spread
 		? recordsLogIn<ReviewHolds>(env, repo, reviewsRepoOf(spread), reviewsRef(repo))
 		: recordsLog<ReviewHolds>(env, repo, reviewsRef(repo));
@@ -363,8 +377,7 @@ async function reviewsLog(env: Env, repo: string) {
 
 /** One bucket of a repo's review holds: in one of its records repos once it has them, else beside the claims. */
 async function holdsLog(env: Env, repo: string, bucket: string) {
-	const registry = (await recordsLog<Registry>(env, repo, claimsRef(repo)).read())?.commit.state;
-	const spread = registry?.recordsRepos ?? 0;
+	const spread = await recordsSpread(env, repo);
 	return spread
 		? recordsLogIn<ReviewHolds>(env, repo, holdsRepoOf(bucket, spread), holdsRef(repo, bucket))
 		: recordsLog<ReviewHolds>(env, repo, holdsRef(repo, bucket));
