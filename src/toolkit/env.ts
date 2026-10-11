@@ -243,6 +243,11 @@ function repoCacheParts(env: Env) {
 		news: (repo, branch, agent) => rpc(env.REPO_CACHE.getByName(`repo:${repo}`).landingNews(branch, agent)),
 		notify: (repo, branch, notices) =>
 			quietly(() => env.REPO_CACHE.getByName(`repo:${repo}`).notify(branch, notices), undefined),
+		// Attempts are lines for a merge commit's story, so losing them costs only a line.
+		noteAttempt: (repo, change, line) =>
+			quietly(() => env.REPO_CACHE.getByName(`repo:${repo}`).noteAttempt(change, line), undefined),
+		attemptsOf: (repo, changes) =>
+			quietly(() => env.REPO_CACHE.getByName(`repo:${repo}`).attemptsOf(changes), {} as Record<string, string[]>),
 		// A branch's head, briefly cached for every merge watching it (see MergeInput.branchHead).
 		branchHead: (repo, branch) =>
 			keptRead(

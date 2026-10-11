@@ -57,6 +57,11 @@ const NOTICES_KEPT = 50;
 /** How long a notice is kept untold. */
 const NOTICE_MS = 24 * 60 * 60_000;
 
+const ATTEMPTS = "attempts:";
+/** The most attempts kept for one change, the newest, and the most characters kept of each. */
+const ATTEMPTS_KEPT = 10;
+const ATTEMPT_CHARS = 200;
+
 /** The latest commit seen on a change's branch (null: nothing pushed), from a read or a push event. */
 export interface KnownHead {
 	head: string | null;
@@ -108,6 +113,7 @@ const KEPT_PREFIXES = [
 	"files:",
 	"news:",
 	"notice:",
+	"attempts:",
 	"merge:",
 	// Record tips and states, and packs, before they had objects of their own.
 	"record:",
@@ -497,6 +503,25 @@ export class RepoCache extends DurableObject<Env> {
 			.map(([, notice]) => notice)
 			.filter((notice) => !expired(notice))
 			.slice(-NOTICES_KEPT);
+	}
+
+	/** Notes an attempt of `change`'s to land, such as a conflict or a failed check, for its merge commit's story. */
+	async noteAttempt(change: string, line: string) {
+		const key = `${ATTEMPTS}${change}`;
+		const kept = (await this.ctx.storage.get<string[]>(key)) ?? [];
+		await this.ctx.storage.put(key, [...kept, line.slice(0, ATTEMPT_CHARS)].slice(-ATTEMPTS_KEPT));
+	}
+
+	/** The attempts noted for each change, oldest first. A change with none is left out. */
+	async attemptsOf(changes: string[]) {
+		const unique = [...new Set(changes)];
+		const noted: Record<string, string[]> = {};
+		for (let i = 0; i < unique.length; i += STORAGE_BATCH) {
+			const keys = unique.slice(i, i + STORAGE_BATCH).map((change) => `${ATTEMPTS}${change}`);
+			const got = await this.ctx.storage.get<string[]>(keys);
+			for (const [key, lines] of got) noted[key.slice(ATTEMPTS.length)] = lines;
+		}
+		return noted;
 	}
 
 	private async deleteKeys(keys: string[]) {

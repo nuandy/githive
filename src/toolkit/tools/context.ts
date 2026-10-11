@@ -129,6 +129,13 @@ export interface ToolContext {
 	news?: (repo: string, branch: string, agent: string) => Promise<NewsItem[]>;
 	/** Leaves notices for agents on a branch, told with their next reply (see RepoCache.notify). Never fails. */
 	notify?: (repo: string, branch: string, notices: { agent: string; notice: Notice }[]) => Promise<void>;
+	/**
+	 * Notes a line on a change's attempt to land, such as a conflict, for its merge commit's story (see
+	 * RepoCache.noteAttempt). Never fails: losing it costs only a line in a merge commit.
+	 */
+	noteAttempt?: (repo: string, change: string, line: string) => Promise<void>;
+	/** The attempts noted for each change, oldest first; a change with none is left out. Never fails. */
+	attemptsOf?: (repo: string, changes: string[]) => Promise<Record<string, string[]>>;
 	/** A branch's head, briefly cached and shared by the merges watching it (see MergeInput.branchHead). */
 	branchHead?: (repo: string, branch: string) => Promise<string | null>;
 	/** Queues forks to be made in the background: the repo's seeds, or the named agents' own. */

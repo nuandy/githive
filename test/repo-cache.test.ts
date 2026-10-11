@@ -248,6 +248,22 @@ describe("the fork queue", () => {
 	});
 });
 
+describe("attempts", () => {
+	it("keeps each change's 10 newest attempts, 200 characters of each, and leaves out changes with none", async () => {
+		const { live } = feed();
+		for (let i = 0; i < 12; i++) await live.noteAttempt("c-1", `conflict ${i}`);
+		await live.noteAttempt("c-2", "x".repeat(300));
+		expect(await live.attemptsOf(["c-1", "c-2", "c-3", "c-1"])).toEqual({
+			"c-1": Array.from({ length: 10 }, (_, i) => `conflict ${i + 2}`),
+			"c-2": ["x".repeat(200)],
+		});
+		const many = Array.from({ length: 300 }, (_, i) => `c-${i}`);
+		expect(Object.keys(await live.attemptsOf(many))).toEqual(["c-1", "c-2"]);
+		await live.clearViews();
+		expect(await live.attemptsOf(["c-1"])).toEqual({});
+	});
+});
+
 describe("the hooks tools reach it through", () => {
 	it("leave notices for the agent's next news, and a RepoCache that doesn't answer never fails the call", async () => {
 		const { live } = feed();
@@ -260,5 +276,19 @@ describe("the hooks tools reach it through", () => {
 		await expect(unreachable.notify!("p", "main", [{ agent: "agent-a", notice }])).resolves.toBeUndefined();
 		const missing = toolContextFor({} as never, undefined);
 		await expect(missing.notify!("p", "main", [{ agent: "agent-a", notice }])).resolves.toBeUndefined();
+	});
+
+	it("note attempts and read them back, and a RepoCache that doesn't answer never fails the call", async () => {
+		const { live } = feed();
+		const ctx = toolContextFor({ REPO_CACHE: { getByName: () => live } } as never, undefined);
+		await ctx.noteAttempt!("p", "c-1", "conflicted on a.ts");
+		expect(await ctx.attemptsOf!("p", ["c-1", "c-2"])).toEqual({ "c-1": ["conflicted on a.ts"] });
+		const down = () => Promise.reject(new Error("Durable Object is overloaded. Requests queued for too long."));
+		const unreachable = toolContextFor(
+			{ REPO_CACHE: { getByName: () => ({ noteAttempt: down, attemptsOf: down }) } } as never,
+			undefined,
+		);
+		await expect(unreachable.noteAttempt!("p", "c-1", "conflicted")).resolves.toBeUndefined();
+		await expect(unreachable.attemptsOf!("p", ["c-1"])).resolves.toEqual({});
 	});
 });
