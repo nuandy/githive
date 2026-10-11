@@ -88,10 +88,13 @@ const KEPT_PREFIXES = [
 	"merge:",
 	"pack:",
 	"placed:",
+	"kept-at:",
 ];
 
 /** How long a change's prefetched pack, or its place on a branch, is kept for its landing. */
-const PACK_KEPT_MS = 2 * 60 * 60_000;
+const KEPT_A_WHILE_MS = 2 * 60 * 60_000;
+/** Where the time each of those was kept is stored, before its own key. */
+const KEPT_AT = "kept-at:";
 
 /** A change's merge check as status worked it out, for the change head and branch head in `key`. */
 export interface KeptMergeCheck {
@@ -170,47 +173,58 @@ export class RepoCache extends DurableObject<Env> {
 
 	/** Keeps the objects a change at `head` adds, as its fork packed them, until its batch lands (see tree-landing.ts). */
 	async keepChangePack(head: string, pack: Uint8Array) {
-		await this.forgetOlder("pack:");
-		await this.ctx.storage.put(`pack:${head}`, { at: Date.now(), pack });
+		await this.keepAWhile([[`pack:${head}`, pack]]);
 	}
 
 	/** The packs kept for these heads, by head. */
 	async changePacks(heads: string[]) {
-		const packs: Record<string, Uint8Array> = {};
-		for (let i = 0; i < heads.length; i += STORAGE_BATCH) {
-			const keys = heads.slice(i, i + STORAGE_BATCH).map((head) => `pack:${head}`);
-			const kept = await this.ctx.storage.get<{ at: number; pack: Uint8Array }>(keys);
-			for (const [key, value] of kept) packs[key.slice("pack:".length)] = value.pack;
-		}
-		return packs;
+		return this.keptFor<Uint8Array>("pack:", heads);
 	}
 
 	/** Keeps changes' places on `branch` for gathering batches (see batch-reads.ts). */
 	async keepPlacements(branch: string, placed: Placed[]) {
-		await this.forgetOlder("placed:");
-		const at = Date.now();
-		const entries = placed.map((each) => [`placed:${branch}|${each.head.hash}`, { at, placed: each }] as const);
-		for (let i = 0; i < entries.length; i += STORAGE_BATCH)
-			await this.ctx.storage.put(Object.fromEntries(entries.slice(i, i + STORAGE_BATCH)));
+		await this.keepAWhile(placed.map((each) => [`placed:${branch}|${each.head.hash}`, each]));
 	}
 
 	/** The places kept for these heads on `branch`, by head. */
 	async placements(branch: string, heads: string[]) {
-		const found: Record<string, Placed> = {};
+		return this.keptFor<Placed>(`placed:${branch}|`, heads);
+	}
+
+	// Values kept for KEPT_A_WHILE_MS, each with its time under a key of its own, so that finding the old ones
+	// never reads the values, packs among them.
+	private async keepAWhile(entries: [string, unknown][]) {
+		await this.forgetOld();
+		const at = Date.now();
+		const stored = entries.flatMap(([key, value]) => [
+			[key, value],
+			[`${KEPT_AT}${key}`, at],
+		]);
+		for (let i = 0; i < stored.length; i += STORAGE_BATCH)
+			await this.ctx.storage.put(Object.fromEntries(stored.slice(i, i + STORAGE_BATCH)));
+	}
+
+	private async keptFor<T>(prefix: string, heads: string[]) {
+		const found: Record<string, T> = {};
 		for (let i = 0; i < heads.length; i += STORAGE_BATCH) {
-			const keys = heads.slice(i, i + STORAGE_BATCH).map((head) => `placed:${branch}|${head}`);
-			const kept = await this.ctx.storage.get<{ at: number; placed: Placed }>(keys);
-			for (const value of kept.values()) found[value.placed.head.hash] = value.placed;
+			const keys = heads.slice(i, i + STORAGE_BATCH).map((head) => `${prefix}${head}`);
+			const kept = await this.ctx.storage.get<T>(keys);
+			for (const [key, value] of kept) found[key.slice(prefix.length)] = value;
 		}
 		return found;
 	}
 
-	private async forgetOlder(prefix: string) {
-		const stale = [...(await this.ctx.storage.list<{ at: number }>({ prefix }))]
-			.filter(([, kept]) => kept.at < Date.now() - PACK_KEPT_MS)
-			.map(([key]) => key);
-		for (let i = 0; i < stale.length; i += STORAGE_BATCH)
-			await this.ctx.storage.delete(stale.slice(i, i + STORAGE_BATCH));
+	private lastForgot = 0;
+
+	// At most once a minute: a merge keeps something every time it waits.
+	private async forgetOld() {
+		if (Date.now() - this.lastForgot < 60_000) return;
+		this.lastForgot = Date.now();
+		const times = await this.ctx.storage.list<number>({ prefix: KEPT_AT });
+		const old = [...times]
+			.filter(([, at]) => at < Date.now() - KEPT_A_WHILE_MS)
+			.flatMap(([key]) => [key, key.slice(KEPT_AT.length)]);
+		for (let i = 0; i < old.length; i += STORAGE_BATCH) await this.ctx.storage.delete(old.slice(i, i + STORAGE_BATCH));
 	}
 
 	/** Note pushes from push events. Events can arrive late, twice or out of order, so the newest wins. */

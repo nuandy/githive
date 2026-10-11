@@ -1,6 +1,7 @@
 import { DurableObject } from "cloudflare:workers";
 import { type InstanceSize, type SetupSnapshot, WORKDIR, bootContainer, clip, outOfMemory, run } from "./container";
 import { statusOf } from "./errors";
+import { rpc } from "./rpc";
 import { mergeForCheck } from "./gate-check";
 import { type ContainerStart, cloneProject, logGitRequests, logStopped } from "./gate-container";
 import { checkoutDetached, fetchBase } from "./gate-git";
@@ -113,7 +114,9 @@ export class Gate extends DurableObject<Env> {
 	 */
 	landBatch(input: BatchBase & { merges: LandingMerge[]; by?: string }): Promise<LandingResult> {
 		return this.landing("landBatch", input, async (container) => {
-			const landed = await landMerges(container, input, this.env.STAMP_KEY);
+			const kept = async (heads: string[]) =>
+				rpc(this.env.REPO_CACHE.getByName(`repo:${input.repo}`).changePacks(heads));
+			const landed = await landMerges(container, input, this.env.STAMP_KEY, kept);
 			if ("commits" in landed) await this.ctx.storage.delete("holdUntil");
 			return landed;
 		});

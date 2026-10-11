@@ -1,6 +1,7 @@
 // The git steps every Gate runs in its container: fetching the project's branch and a batch's changes, and checking
 // out a commit. Each takes the container and keeps no state of its own.
 import { WORKDIR, clip, gitWithToken, run } from "./container";
+import { Chunks, joinPacks, streamOf } from "./git-pack";
 
 /** How many of a batch's forks are fetched at once. Each fetch reads a different fork, so no one repo gets busier. */
 const FETCHES_AT_ONCE = 16;
@@ -40,6 +41,18 @@ export async function missingCommits(container: Container, commits: string[]): P
 		commits.map((commit, index) => `git cat-file -e ${commit}^{commit} 2>/dev/null || echo ${index}`).join("\n"),
 	]);
 	return missing.output.split("\n").filter(Boolean).map(Number);
+}
+
+/**
+ * Adds the objects in `packs` to the container's repo, as one pack. Their deltas may be against objects the repo
+ * already has, which `--fix-thin` copies in. Returns whether git took them.
+ */
+export async function addPacks(container: Container, packs: Uint8Array[]) {
+	if (!packs.length) return true;
+	const joined = joinPacks(packs.map((pack) => new Chunks([pack])));
+	const added = await run(container, ["git", "index-pack", "--stdin", "--fix-thin"], WORKDIR, streamOf(joined));
+	if (added.exitCode !== 0) console.error("adding the kept packs failed", clip(added.output, 300));
+	return added.exitCode === 0;
 }
 
 /** Fetches the branches of the changes whose heads the container doesn't have. Returns the failures and why. */

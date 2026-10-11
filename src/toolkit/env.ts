@@ -291,12 +291,9 @@ function gateParts(env: Env) {
 			if (treeLandingOn(env)) return;
 			await bootGate(env, repo, `repo:${repo}`);
 		},
-		// A merge places its own change while it waits for its turn, and with trees fetches it too (see
-		// tree-landing.ts).
-		prefetchChange: async (repo, branch, change) => {
-			const { packs, ...reads } = treeReads(env, repo);
-			await prefetchChange({ ...reads, ...(treeLandingOn(env) ? { packs } : {}) }, branch, change);
-		},
+		// A merge places and fetches its own change while it waits for its turn, for the batch that lands it, with
+		// trees or in the Gate (see tree-landing.ts).
+		prefetchChange: (repo, branch, change) => prefetchChange(treeReads(env, repo), branch, change),
 		placements: (repo) => sharedPlacements(env, repo),
 		// A batch's Git work runs in the repo's own Gate container, which never runs a change's code (see BatchGit).
 		batchGit: (repo) => batchGitFor(env, repo),

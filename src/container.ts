@@ -136,13 +136,13 @@ export async function run(
 	container: Container,
 	cmd: string[],
 	cwd = WORKDIR,
-	stdin?: string,
+	stdin?: string | ReadableStream<Uint8Array>,
 	timeoutS = COMMAND_TIMEOUT_S,
 ) {
 	const process = await container.exec(["timeout", "-s", "KILL", String(timeoutS), ...cmd], {
 		cwd,
 		stderr: "combined",
-		stdin: stdin === undefined ? undefined : new Response(stdin).body!,
+		stdin: typeof stdin === "string" ? new Response(stdin).body! : stdin,
 		env: { HOME: "/root", CI: "true", npm_config_update_notifier: "false", ...GIT_TRACE_ENV },
 	});
 	const result = await process.output();

@@ -171,6 +171,11 @@ function receivePackBody(updates: RefUpdate[], packs: Chunks[]): Uint8Array[] {
 		encoder.encode("0000"),
 	]);
 	if (updates.every((update) => update.to === null)) return [commands];
+	return [commands, ...joinPacks(packs)];
+}
+
+/** `packs` as one pack: a new header and checksum around their entries, which are views of them. */
+export function joinPacks(packs: Chunks[]): Uint8Array[] {
 	const parts = packs.map(packEntries);
 	const header = new Uint8Array(PACK_HEADER);
 	header.set(encoder.encode("PACK"));
@@ -183,11 +188,11 @@ function receivePackBody(updates: RefUpdate[], packs: Chunks[]): Uint8Array[] {
 	const entries = parts.flatMap((part) => part.entries);
 	const checksum = createHash("sha1").update(header);
 	for (const entry of entries) checksum.update(entry);
-	return [commands, header, ...entries, new Uint8Array(checksum.digest())];
+	return [header, ...entries, new Uint8Array(checksum.digest())];
 }
 
 /** A request body streamed from `parts`, with its length when the runtime can send one (Workers' FixedLengthStream). */
-function streamOf(parts: Uint8Array[]): ReadableStream<Uint8Array> {
+export function streamOf(parts: Uint8Array[]): ReadableStream<Uint8Array> {
 	const length = parts.reduce((total, part) => total + part.length, 0);
 	const FixedLength = (globalThis as { FixedLengthStream?: new (length: number) => TransformStream }).FixedLengthStream;
 	if (FixedLength) {

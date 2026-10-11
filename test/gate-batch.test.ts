@@ -8,6 +8,8 @@ import { startGitServer, type GitServer } from "./helpers/git-server";
 import { FakeStorage } from "./fakes/env";
 import { type HistorySource, type KeptFiles, readBranchHistory } from "../src/toolkit/branch-history";
 import { mergeRecordOf, readMainMerges } from "../src/toolkit/git-records";
+import { concat } from "../src/git-fetch";
+import { fetchPackSince } from "../src/git-pack";
 
 // The repo's own Gate reads a batch's changes and lands them with real git in
 // its container. Here the container runs its commands with this machine's git,
@@ -27,7 +29,7 @@ function localContainer(dir: string) {
 		exec: async (cmd: string[], options: { cwd: string; stdin?: ReadableStream }) => {
 			// `timeout -s KILL <seconds>` first: not on every machine, and not needed here.
 			const args = (cmd[0] === "timeout" ? cmd.slice(4) : cmd).map(local);
-			const stdin = options.stdin ? await new Response(options.stdin).text() : undefined;
+			const stdin = options.stdin ? Buffer.from(await new Response(options.stdin).arrayBuffer()) : undefined;
 			const installing = args.join(" ").includes("apt-get");
 			return {
 				output: () =>
@@ -168,6 +170,37 @@ describe("reading and landing a batch in the repo's own Gate", { timeout: 60_000
 			}),
 		).toEqual({ moved: true });
 		expect(server.git("rev-parse", "main").trim()).toBe(second);
+	});
+
+	it("lands changes from the packs their merges kept, fetching neither them nor main again", async () => {
+		const main = server.git("rev-parse", "main").trim();
+		const kept: Record<string, Uint8Array> = {};
+		const repoCache = { changePacks: async (heads: string[]) => Object.fromEntries(heads.map((h) => [h, kept[h]!])) };
+		const keeping = new Gate(
+			{ storage: new FakeStorage(), container: localContainer(checkout), id: { equals: () => true } } as never,
+			{ GATE: { idFromName: () => ({}) }, REPO_CACHE: { getByName: () => repoCache } } as never,
+		);
+		await keeping.boot({ repo: "t1", base: base() });
+		// Pushed after the Gate cloned the project, so it has neither change.
+		const a = await pushChange(server.url, work, "agent-a-1", "a-1", { "src/a.txt": "a\n" });
+		const b = await pushChange(server.url, work, "agent-b-1", "b-1", { "lib/b.txt": "b\n" });
+		for (const head of [a, b]) {
+			const pack = await fetchPackSince({ url: server.url, token: "unused" }, [head], [main], { bytes: 1e6 });
+			if (pack === "too big") throw new Error("too big");
+			kept[head] = concat(pack.parts);
+		}
+		const fetches = () => server.requests.filter((request) => request.includes("upload-pack")).length;
+		const before = fetches();
+		const merges = [
+			{ ...source("a-1"), head: a, claimed: claimed("a-1", a) },
+			{ ...source("b-1"), head: b, claimed: claimed("b-1", b) },
+		];
+		const landed = await keeping.landBatch({ repo: "t1", branch: "main", base: base(), baseHead: main, merges });
+		expect(landed).toEqual({ commits: [expect.any(String), expect.any(String)] });
+		expect(fetches() - before).toBe(0);
+		const [first, second] = (landed as { commits: [string, string] }).commits;
+		expect(server.git("rev-list", "--parents", "-1", second).trim()).toBe(`${second} ${first} ${b}`);
+		expect(server.git("ls-tree", "-r", "--name-only", second)).toContain("lib/b.txt");
 	});
 
 	it("checks a batch with all its changes fetched at once, in a change's Gate", async () => {

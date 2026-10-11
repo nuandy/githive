@@ -1,7 +1,7 @@
 // How the repo's own Gate reads, lands and pushes a batch's changes, once its container has the project's branch
 // fetched. A change's Gate never runs these, because it ran that change's code.
 import { WORKDIR, clip, gitWithToken, run } from "./container";
-import { checkoutDetached, fetchChanges, fetchMissing, requireBase } from "./gate-git";
+import { addPacks, checkoutDetached, fetchChanges, fetchMissing, missingCommits, requireBase } from "./gate-git";
 import type { BatchBase, BatchSource } from "./gate-types";
 import { BOT } from "./git";
 import { type MergeClaim, mergeMessage } from "./toolkit/merge-commit";
@@ -34,9 +34,11 @@ export async function fetchBatchBase(container: Container, input: BatchBase) {
 		`git config core.hooksPath /dev/null && git config user.name "${BOT.name}" && git config ` +
 			`user.email "${BOT.email}"`,
 	]);
+	// The container usually has the base already: the last batch it landed, or its fetch for the batch's checks.
+	const has = () => run(container, ["git", "cat-file", "-e", `${input.baseHead}^{commit}`]);
+	if ((await has()).exitCode === 0) return;
 	await requireBase(container, input.base, input.branch);
-	const found = await run(container, ["git", "cat-file", "-e", `${input.baseHead}^{commit}`]);
-	if (found.exitCode !== 0) throw new Error(`${input.branch} at ${input.baseHead} isn't in the project`);
+	if ((await has()).exitCode !== 0) throw new Error(`${input.branch} at ${input.baseHead} isn't in the project`);
 }
 
 /** Fetches each change's branch and reads its current head and the files it changed since it left `baseHead`. */
@@ -91,23 +93,70 @@ export async function landMerges(
 	container: Container,
 	input: BatchBase & { merges: LandingMerge[]; by?: string },
 	stampKey: string | undefined,
+	keptPacks?: KeptPacks,
 ): Promise<LandingResult> {
-	// inspectBatch usually fetched these already, so only missing commits are fetched.
+	const steps = stepTimer();
+	const kept = await addKeptPacks(container, input.merges, keptPacks);
+	// Only the commits still missing are fetched.
 	const failed = await fetchMissing(container, input.merges);
+	steps.mark(`fetched (${kept} from kept packs)`);
 	for (const [index, why] of failed) return { error: `fetch of ${input.merges[index]?.change} failed: ${why}` };
 	const absent = await absentChanges(container, input.merges);
 	if (absent) return { error: `not on their branches: ${absent.split("\n").join(", ")}` };
 	await checkoutDetached(container, input.baseHead);
+	steps.mark("checked out");
 	const stamper = stampKey && input.by ? await makeStamper(stampKey, input.by) : undefined;
+	const commits: string[] = [];
+	let base = input.baseHead;
 	for (const merge of input.merges) {
-		const error = await commitMerge(container, merge, stamper);
-		if (error) return { error };
+		const committed = await commitMerge(container, merge, base, stamper);
+		if ("error" in committed) return committed;
+		base = committed.commit;
+		commits.push(base);
 	}
-	const commits = await firstParentCommits(container, input.baseHead);
+	steps.mark("merged");
 	const pushed = await pushWithLease(container, input);
+	steps.mark("pushed");
+	console.log(`gate landing of ${input.merges.length}: ${steps.done()}`);
 	if (pushed.exitCode === 0) return { commits };
 	if (/rejected|non-fast-forward|fetch first|stale info/i.test(pushed.output)) return { moved: true };
 	return { error: `the push failed: ${clip(pushed.output, 500)}` };
+}
+
+/** The packs merges fetched for their changes while they waited, by change head (see tree-landing.ts). */
+export type KeptPacks = (heads: string[]) => Promise<Record<string, Uint8Array>>;
+
+// Adds the packs kept for the changes the container doesn't have, sparing it a fetch from each fork. Returns how
+// many changes they covered.
+async function addKeptPacks(container: Container, merges: LandingMerge[], keptPacks: KeptPacks | undefined) {
+	if (!keptPacks) return 0;
+	const missing = (
+		await missingCommits(
+			container,
+			merges.map((merge) => merge.head),
+		)
+	).map((k) => merges[k]!.head);
+	if (!missing.length) return 0;
+	const packs = await keptPacks(missing).catch((err) => {
+		console.error("reading the kept packs failed", String(err));
+		return {};
+	});
+	const found = Object.values(packs);
+	return (await addPacks(container, found)) ? found.length : 0;
+}
+
+/** Each step's time since the one before, for the batch's log line. */
+function stepTimer() {
+	const started = Date.now();
+	let last = started;
+	const steps: string[] = [];
+	return {
+		mark: (step: string) => {
+			steps.push(`${step} ${Date.now() - last} ms`);
+			last = Date.now();
+		},
+		done: () => `${steps.join(", ")} (${Date.now() - started} ms)`,
+	};
 }
 
 /** The changes whose heads the container doesn't have, one per line. */
@@ -120,35 +169,31 @@ async function absentChanges(container: Container, merges: LandingMerge[]) {
 	return absent.output.trim();
 }
 
-/** Merges one change onto the checkout and commits it with its claim's trailers. Returns why it failed, if it did. */
-async function commitMerge(container: Container, merge: LandingMerge, stamper: Stamper | undefined) {
-	const identity = ["-c", `user.name=${BOT.name}`, "-c", `user.email=${BOT.email}`];
-	// Print the merge's base (the commit before it), then merge without committing.
-	const merged = await run(container, [
-		"bash",
-		"-c",
-		`base=$(git rev-parse HEAD) && git merge -q --no-ff --no-commit ${merge.head} >/tmp/merge.out 2>&1 ` +
-			`&& echo "$base" || { echo CONFLICT; git diff --name-only --diff-filter=U; cat /tmp/merge.out; git ` +
-			"merge --abort; exit 1; }",
-	]);
-	const base = merged.output.trim();
-	if (merged.exitCode !== 0)
-		return `merging ${merge.change} onto the batch failed: ${clip(merged.output.replace(/^CONFLICT\n/, ""), 500)}`;
+/**
+ * Merges one change onto the checkout at `base` and commits it with its claim's trailers, in one command. Returns
+ * the commit, or why it failed.
+ */
+async function commitMerge(
+	container: Container,
+	merge: LandingMerge,
+	base: string,
+	stamper: Stamper | undefined,
+): Promise<{ commit: string } | { error: string }> {
+	const identity = `-c user.name="${BOT.name}" -c user.email="${BOT.email}"`;
 	// Always a merge commit, never a fast-forward, because the audit reads the merge's trailers.
-	const committed = await run(
-		container,
-		["git", ...identity, "commit", "-q", "--no-verify", "-F", "-"],
-		WORKDIR,
-		await mergeMessage({ ...merge.claimed, base }, stamper),
-	);
-	if (committed.exitCode !== 0) return `committing ${merge.change}'s merge failed: ${clip(committed.output, 500)}`;
-	return undefined;
-}
-
-/** The commits on the checkout since `baseHead`, oldest first, without the merged branches' own commits. */
-async function firstParentCommits(container: Container, baseHead: string) {
-	const listed = await run(container, ["git", "rev-list", "--reverse", "--first-parent", `${baseHead}..HEAD`]);
-	return listed.output.split("\n").filter(Boolean);
+	const script =
+		`git merge -q --no-ff --no-commit ${merge.head} >/tmp/merge.out 2>&1 || { echo CONFLICT; ` +
+		"git diff --name-only --diff-filter=U; cat /tmp/merge.out; git merge --abort; exit 1; }\n" +
+		`git ${identity} commit -q --no-verify -F - >/tmp/commit.out 2>&1 || { cat /tmp/commit.out; exit 2; }\n` +
+		"git rev-parse HEAD";
+	const message = await mergeMessage({ ...merge.claimed, base }, stamper);
+	const ran = await run(container, ["bash", "-c", script], WORKDIR, message);
+	if (ran.exitCode === 1)
+		return {
+			error: `merging ${merge.change} onto the batch failed: ${clip(ran.output.replace(/^CONFLICT\n/, ""), 500)}`,
+		};
+	if (ran.exitCode !== 0) return { error: `committing ${merge.change}'s merge failed: ${clip(ran.output, 500)}` };
+	return { commit: ran.output.trim() };
 }
 
 /**
