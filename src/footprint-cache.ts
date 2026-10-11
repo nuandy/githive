@@ -122,10 +122,20 @@ interface AltersEntry {
 	when: number;
 }
 
-/** The most open footprints kept for a repo; the oldest are dropped. A soft cap: claims end long before. */
+/**
+ * The most open footprints kept for a repo; the oldest are dropped. A soft cap: claims end long before. Every open
+ * change using a name is indexed, so this bounds a name's users too.
+ */
 const OPEN_KEPT = 2_000;
-/** The most changes kept as using one name of a file; the oldest pushes are dropped. */
-const USERS_PER_NAME = 20;
+/**
+ * The most index entries read for one name of a file, and for one lookup of everything a push alters, so a name a
+ * thousand changes use can't fill the object's memory. Past either, the rest aren't told this time, and it's logged:
+ * the notices a push sends are capped well below (HEADS_UPS_PER_PUSH, INTERFACE_NOTICES_PER_PUSH).
+ */
+const USERS_READ = 500;
+const USES_READ = 5_000;
+/** Kept footprints are read this many at a time while telling, each holding its index keys. */
+const KEPT_AT_ONCE = 100;
 /** The most heads-up notices one push sends, and the most interface notices one branch push sends. */
 const HEADS_UPS_PER_PUSH = 50;
 const INTERFACE_NOTICES_PER_PUSH = 200;
@@ -257,24 +267,34 @@ export class FootprintCache extends DurableObject<Env> {
 			if (commit.change) await this.dropChange(commit.change);
 			const facts = await this.usersOf(branch, commit.alters, commit.change);
 			if (!facts.size) continue;
-			const footprints = await this.keptMany([...facts.keys()]);
 			// A change whose base is this commit or a later one in the push already has it.
 			const later = new Set(commits.slice(index).map((each) => each.commit));
-			const recipients: { kept: KeptFootprint; facts: UseFact[]; id: string }[] = [];
-			for (const [change, each] of facts) {
-				const kept = footprints.get(change);
-				if (!kept || later.has(kept.base)) continue;
-				if (claimed[change] !== kept.agent) {
-					await this.dropChange(change);
-					continue;
+			const users = [...facts];
+			const sent: { kept: KeptFootprint; facts: UseFact[]; id: string }[] = [];
+			// Read a few kept footprints at a time, and only while there's room for their notices.
+			for (let from = 0; from < users.length; from += KEPT_AT_ONCE) {
+				const room = INTERFACE_NOTICES_PER_PUSH - notices.length - sent.length;
+				if (room <= 0) {
+					dropped += users.length - from;
+					break;
 				}
-				recipients.push({ kept, facts: each, id: footprintHash(`interface\0${commit.commit}\0${change}`) });
+				const part = users.slice(from, from + KEPT_AT_ONCE);
+				const footprints = await this.keptMany(part.map(([change]) => change));
+				const recipients: { kept: KeptFootprint; facts: UseFact[]; id: string }[] = [];
+				for (const [change, each] of part) {
+					const kept = footprints.get(change);
+					if (!kept || later.has(kept.base)) continue;
+					if (claimed[change] !== kept.agent) {
+						await this.dropChange(change);
+						continue;
+					}
+					recipients.push({ kept, facts: each, id: footprintHash(`interface\0${commit.commit}\0${change}`) });
+				}
+				const already = await this.toldOf(recipients.map((each) => each.id));
+				const fresh = recipients.filter((each) => !already.has(each.id));
+				dropped += Math.max(0, fresh.length - room);
+				sent.push(...fresh.slice(0, room));
 			}
-			const already = await this.toldOf(recipients.map((each) => each.id));
-			const fresh = recipients.filter((each) => !already.has(each.id));
-			const room = Math.max(0, INTERFACE_NOTICES_PER_PUSH - notices.length);
-			dropped += Math.max(0, fresh.length - room);
-			const sent = fresh.slice(0, room);
 			for (const { kept, facts: said } of sent)
 				notices.push({
 					agent: kept.agent,
@@ -303,7 +323,7 @@ export class FootprintCache extends DurableObject<Env> {
 					at,
 				});
 		}
-		if (dropped) console.log(`footprints: ${dropped} interface notices on ${branch} over the cap were dropped`);
+		if (dropped) console.log(`footprints: up to ${dropped} interface notices on ${branch} over the cap were dropped`);
 		await this.analysed(branch, after);
 		return this.tell(repo, branch, notices, events, told);
 	}
@@ -409,11 +429,10 @@ export class FootprintCache extends DurableObject<Env> {
 		for (const [other, facts] of await this.usersOf(footprint.branch, footprint.alters, footprint.change))
 			for (const fact of facts) add(footprint.change, other, fact);
 		const branch = enc(footprint.branch);
+		const reads = this.capped(USES_READ);
 		for (const use of footprint.uses) {
 			const name = use.name === "*" ? "" : `${enc(use.name)}:`;
-			const altering = await this.ctx.storage.list<AltersEntry>({
-				prefix: `alters:${branch}:${enc(use.file)}:${name}`,
-			});
+			const altering = await reads.list<AltersEntry>(`alters:${branch}:${enc(use.file)}:${name}`);
 			for (const [key, entry] of altering) {
 				const other = changeIn(key);
 				if (other === footprint.change) continue;
@@ -422,97 +441,110 @@ export class FootprintCache extends DurableObject<Env> {
 			}
 		}
 		if (!pairs.size) return 0;
-		const others = await this.keptMany(
-			[...pairs.values()].map((pair) => (pair.alterer === footprint.change ? pair.user : pair.alterer)),
-		);
 		const self = { ...footprint, order: "", keys: [] } satisfies KeptFootprint;
-		const open = new Map<string, KeptFootprint>([[footprint.change, self]]);
-		for (const [change, kept] of others) {
-			if (claimed[change] === kept.agent) open.set(change, kept);
-			else await this.dropChange(change);
-		}
-		type Told = { alterer: KeptFootprint; user: KeptFootprint; facts: UseFact[]; ids: string[] };
-		const candidates: Told[] = [];
-		for (const { alterer, user, facts } of pairs.values()) {
-			const [a, u] = [open.get(alterer), open.get(user)];
-			// An agent knows its own changes.
-			if (!a || !u || a.agent === u.agent) continue;
-			// Told once per alteration, not per push: a new push that keeps the same signature tells nothing new, and a
-			// different signature is told again.
-			const ids = facts.map((fact) =>
-				footprintHash(
-					`heads_up\0${a.change}\0${u.change}\0${fact.file}\0${fact.altered.name}\0${fact.imported}\0` +
-						`${fact.altered.change}\0${fact.altered.after ?? ""}`,
-				),
-			);
-			candidates.push({ alterer: a, user: u, facts, ids });
-		}
-		const already = await this.toldOf(candidates.flatMap((each) => each.ids));
 		const notices: { agent: string; notice: Notice }[] = [];
 		const events: HiveEvent[] = [];
 		const told: string[] = [];
 		const at = new Date().toISOString();
 		let dropped = 0;
-		for (const { alterer, user, facts, ids } of candidates) {
-			const fresh = facts.filter((_, index) => !already.has(ids[index]!));
-			if (!fresh.length) continue;
+		const all = [...pairs.values()];
+		// Read a few kept footprints at a time, and only while there's room for their notices.
+		for (let from = 0; from < all.length; from += KEPT_AT_ONCE) {
 			if (notices.length + 2 > HEADS_UPS_PER_PUSH) {
-				dropped++;
-				continue;
+				dropped += all.length - from;
+				break;
 			}
-			const names = namesDetail(fresh);
-			const [them, us] = [openChange(alterer), openChange(user)];
-			notices.push(
-				{
-					agent: user.agent,
-					notice: {
-						kind: "heads_up",
-						at,
-						says: headsUpSays(them, fresh),
-						next: headsUpNext(them),
-						change: user.change,
-						from: { agent: alterer.agent, change: alterer.change },
-						detail: names,
-					},
-				},
-				{
-					agent: alterer.agent,
-					notice: {
-						kind: "heads_up",
-						at,
-						says: headsUpUsedSays(us, fresh),
-						next: headsUpUsedNext(us),
-						change: alterer.change,
-						from: { agent: user.agent, change: user.change },
-						detail: names,
-					},
-				},
+			const part = all.slice(from, from + KEPT_AT_ONCE);
+			const others = await this.keptMany(
+				part.map((pair) => (pair.alterer === footprint.change ? pair.user : pair.alterer)),
 			);
-			events.push({
-				kind: "heads_up",
-				agent: alterer.agent,
-				change: alterer.change,
-				other: user.agent,
-				otherChange: user.change,
-				detail: namesLine(fresh),
-				at,
-			});
-			told.push(...ids.filter((id) => !already.has(id)));
+			const open = new Map<string, KeptFootprint>([[footprint.change, self]]);
+			for (const [change, kept] of others) {
+				if (claimed[change] === kept.agent) open.set(change, kept);
+				else await this.dropChange(change);
+			}
+			type Told = { alterer: KeptFootprint; user: KeptFootprint; facts: UseFact[]; ids: string[] };
+			const candidates: Told[] = [];
+			for (const { alterer, user, facts } of part) {
+				const [a, u] = [open.get(alterer), open.get(user)];
+				// An agent knows its own changes.
+				if (!a || !u || a.agent === u.agent) continue;
+				// Told once per alteration, not per push: a new push that keeps the same signature tells nothing new, and
+				// a different signature is told again.
+				const ids = facts.map((fact) =>
+					footprintHash(
+						`heads_up\0${a.change}\0${u.change}\0${fact.file}\0${fact.altered.name}\0${fact.imported}\0` +
+							`${fact.altered.change}\0${fact.altered.after ?? ""}`,
+					),
+				);
+				candidates.push({ alterer: a, user: u, facts, ids });
+			}
+			const already = await this.toldOf(candidates.flatMap((each) => each.ids));
+			for (const { alterer, user, facts, ids } of candidates) {
+				const fresh = facts.filter((_, index) => !already.has(ids[index]!));
+				if (!fresh.length) continue;
+				if (notices.length + 2 > HEADS_UPS_PER_PUSH) {
+					dropped++;
+					continue;
+				}
+				const names = namesDetail(fresh);
+				const [them, us] = [openChange(alterer), openChange(user)];
+				notices.push(
+					{
+						agent: user.agent,
+						notice: {
+							kind: "heads_up",
+							at,
+							says: headsUpSays(them, fresh),
+							next: headsUpNext(them),
+							change: user.change,
+							from: { agent: alterer.agent, change: alterer.change },
+							detail: names,
+						},
+					},
+					{
+						agent: alterer.agent,
+						notice: {
+							kind: "heads_up",
+							at,
+							says: headsUpUsedSays(us, fresh),
+							next: headsUpUsedNext(us),
+							change: alterer.change,
+							from: { agent: user.agent, change: user.change },
+							detail: names,
+						},
+					},
+				);
+				events.push({
+					kind: "heads_up",
+					agent: alterer.agent,
+					change: alterer.change,
+					other: user.agent,
+					otherChange: user.change,
+					detail: namesLine(fresh),
+					at,
+				});
+				told.push(...ids.filter((id) => !already.has(id)));
+			}
 		}
 		if (dropped) console.log(`footprints: ${dropped} heads-ups for ${footprint.change} over the cap were dropped`);
 		return this.tell(repo, footprint.branch, notices, events, told);
 	}
 
 	// The open changes into `branch` that use what `alters` alter, but `except`, with what each uses: by the name it's
-	// imported as, or through the whole file.
+	// imported as, or through the whole file. At most USERS_READ entries a name and USES_READ in all are read.
 	private async usersOf(branch: string, alters: Alter[], except?: string) {
 		const users = new Map<string, UseFact[]>();
+		const reads = this.capped(USES_READ);
+		// A file's users through "*" are the same for each of its names, so they're listed once.
+		const wholes = new Map<string, Map<string, UsesEntry>>();
 		for (const [file, name, altered] of byImportedName(alters))
 			for (const as of [name, "*"]) {
-				const using = await this.ctx.storage.list<UsesEntry>({
-					prefix: `uses:${enc(branch)}:${enc(file)}:${enc(as)}:`,
-				});
-				for (const [key, entry] of using) {
+				const prefix = `uses:${enc(branch)}:${enc(file)}:${enc(as)}:`;
+				const using = as === "*" ? wholes.get(file) : undefined;
+				const listed = using ?? (await reads.list<UsesEntry>(prefix));
+				if (as === "*") wholes.set(file, listed);
+				for (const [key, entry] of listed) {
 					const change = changeIn(key);
 					if (change === except) continue;
 					const facts = users.get(change) ?? [];
@@ -521,6 +553,27 @@ export class FootprintCache extends DurableObject<Env> {
 				}
 			}
 		return users;
+	}
+
+	/**
+	 * Lists index entries under prefixes, at most USERS_READ under each and `most` in all, logging where it stops: a
+	 * name used by more changes than that tells only the first this time.
+	 */
+	private capped(most: number) {
+		let left = most;
+		return {
+			list: async <T>(prefix: string) => {
+				const limit = Math.min(USERS_READ, left);
+				if (limit <= 0) {
+					console.log(`footprints: past ${most} index entries read at once; ${prefix} not read`);
+					return new Map<string, T>();
+				}
+				const listed = await this.ctx.storage.list<T>({ prefix, limit });
+				left -= listed.size;
+				if (listed.size === limit) console.log(`footprints: read the first ${limit} entries of ${prefix}`);
+				return listed;
+			},
+		};
 	}
 
 	// Sends notices and hive events into the repo's RepoCache in one call, and only then marks them told.
@@ -553,11 +606,11 @@ export class FootprintCache extends DurableObject<Env> {
 		const entries: [string, unknown][] = [[`on:${branch}:${change}`, 1]];
 		for (const [file, name, altered] of byImportedName(footprint.alters))
 			entries.push([`alters:${branch}:${enc(file)}:${enc(name)}:${change}`, { altered, when } satisfies AltersEntry]);
-		for (const use of footprint.uses) {
-			const prefix = `uses:${branch}:${enc(use.file)}:${enc(use.name)}:`;
-			await this.makeRoom(prefix, footprint.change);
-			entries.push([`${prefix}${change}`, { at: use.at, when } satisfies UsesEntry]);
-		}
+		for (const use of footprint.uses)
+			entries.push([
+				`uses:${branch}:${enc(use.file)}:${enc(use.name)}:${change}`,
+				{ at: use.at, when } satisfies UsesEntry,
+			]);
 		const indexed = entries.filter(([key]) => key.length <= KEY_CHARS);
 		const order = `fp-at:${pad(await this.nextSeq(1))}:${change}`;
 		const intent = footprint.intent?.split("\n")[0]?.slice(0, INTENT_SAID);
@@ -573,15 +626,6 @@ export class FootprintCache extends DurableObject<Env> {
 			keys: indexed.map(([key]) => key),
 		};
 		await this.putMany([...indexed, [order, 1], [`fp:${change}`, kept]]);
-	}
-
-	// Room for one more change using a name: past USERS_PER_NAME, the oldest pushes' uses are dropped from the index.
-	private async makeRoom(prefix: string, change: string) {
-		const using = [...(await this.ctx.storage.list<UsesEntry>({ prefix }))].filter(([key]) => changeIn(key) !== change);
-		if (using.length < USERS_PER_NAME) return;
-		const oldest = using.sort((a, b) => a[1].when - b[1].when).slice(0, using.length - USERS_PER_NAME + 1);
-		await this.deleteMany(oldest.map(([key]) => key));
-		console.log(`footprints: ${oldest.length} uses of ${prefix} dropped, past ${USERS_PER_NAME} changes`);
 	}
 
 	private async unindex(kept: KeptFootprint) {

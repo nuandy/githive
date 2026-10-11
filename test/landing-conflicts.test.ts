@@ -131,7 +131,12 @@ describe("a conflict on hundreds of files", () => {
 	it("names a few of them and how many more, so its rejection and its outcome stay small", async () => {
 		const { putOut } = await import("../src/toolkit/merge-checks");
 		const files = Array.from({ length: 600 }, (_, i) => `src/generated/part-${i}.ts`);
-		const touchedBy = files.map((file) => ({ file, commit: "f".repeat(40), author: "fmt-bot", intent: "x".repeat(140) }));
+		const touchedBy = files.map((file) => ({
+			file,
+			commit: "f".repeat(40),
+			author: "fmt-bot",
+			intent: "x".repeat(140),
+		}));
 		const voted: { evidence: string }[] = [];
 		const noted: string[] = [];
 		const input = {

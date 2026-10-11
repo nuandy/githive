@@ -193,8 +193,7 @@ async function withTouchedBy(input: MergeInput, baseHead: string, ready: Ready, 
 function kept(conflict: Conflict): Pick<Settled, "conflicts" | "touchedBy"> {
 	const named = new Set(conflict.files.slice(0, CONFLICT_FILES_NAMED));
 	const touchedBy = (conflict.touchedBy ?? []).filter(
-		(touched, index, all) =>
-			named.has(touched.file) && all.findIndex((other) => other.file === touched.file) === index,
+		(touched, index, all) => named.has(touched.file) && all.findIndex((other) => other.file === touched.file) === index,
 	);
 	return { conflicts: conflict.files.slice(0, CONFLICTS_KEPT), ...(touchedBy.length ? { touchedBy } : {}) };
 }

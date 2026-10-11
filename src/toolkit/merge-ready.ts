@@ -186,7 +186,6 @@ export function conflictFix(branch: string, change: string, files: string[]): st
 	];
 }
 
-
 // The outcome if the change already landed at `head`, since its claim is gone by then. The landing's recent outcomes
 // answer first; failing that, the branch's history, as a merge commit whose second parent is `head`.
 export async function landedAlready(input: MergeInput, landing: Landing, head: string): Promise<MergeOutcome | null> {

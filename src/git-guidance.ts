@@ -17,4 +17,5 @@ export const gitGuidance = (branch: string) =>
  * A word as a shell reads it: as it is when that's safe, else in single quotes. Every command GitHive gives an agent
  * builds its branch names and paths with it.
  */
-export const shellWord = (word: string) => (/^[\w@%+=:,./-]+$/.test(word) ? word : `'${word.replaceAll("'", `'\\''`)}'`);
+export const shellWord = (word: string) =>
+	/^[\w@%+=:,./-]+$/.test(word) ? word : `'${word.replaceAll("'", `'\\''`)}'`;

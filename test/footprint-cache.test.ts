@@ -119,17 +119,38 @@ describe("heads-ups", () => {
 		expect(await cache.keptHead("c-9")).toBeNull();
 	});
 
-	it("keep at most 20 changes using one name, dropping the oldest pushes", async () => {
-		const { cache, storage } = caches();
-		const users = Array.from({ length: 21 }, (_, i) => using(`u-${i}`, `agent-${i}`, ["loadSettings"], { at: i }));
+	it("keep every change using a name: a landing tells each, and each page shows what alters it", async () => {
+		const { cache, notify } = caches();
+		const users = Array.from({ length: 60 }, (_, i) => using(`u-${i}`, `agent-${i}`, ["loadSettings"], { at: i }));
 		const alice = altering("c-7", "alice", ["loadSettings"], { at: 100 });
 		const claimed = claimedBy(...users, alice);
 		const logs = vi.spyOn(console, "log").mockImplementation(() => undefined);
 		for (const user of users) await cache.keep("p", user, claimed);
-		expect((await storage.list({ prefix: "uses:main:src%2Fconfig.ts:loadSettings:" })).size).toBe(20);
-		expect(await storage.get("uses:main:src%2Fconfig.ts:loadSettings:u-0")).toBeUndefined();
-		expect(await cache.keep("p", alice, claimed)).toBe(40);
-		expect(logs).toHaveBeenCalledWith(expect.stringMatching(/1 uses of .* dropped, past 20 changes/));
+		// The oldest push's use is kept, so its page shows the open change that alters what it uses.
+		await cache.keep("p", alice, claimed);
+		expect((await cache.overlapsOf("u-0"))?.alteredBy).toMatchObject([
+			{ file: "src/config.ts", altered: { name: "loadSettings" }, other: { by: "alice", change: "c-7" } },
+		]);
+		// A landing of the same alteration tells all 60.
+		const landing = { by: "dan", commit: "m1", change: "d-1", alters: alice.alters };
+		expect(await cache.landed("p", "main", [landing], claimed, "m1")).toBe(60);
+		expect(new Set(notify.mock.calls.at(-1)![1].map(({ agent }) => agent)).size).toBe(60);
+		logs.mockRestore();
+	});
+
+	it("read at most 500 users of one name at once, and send at most 200 interface notices a push, saying so", async () => {
+		const { cache, notify } = caches();
+		const users = Array.from({ length: 501 }, (_, i) => using(`u-${String(i).padStart(3, "0")}`, `agent-${i}`));
+		const claimed = claimedBy(...users);
+		const logs = vi.spyOn(console, "log").mockImplementation(() => undefined);
+		for (const user of users) await cache.keep("p", user, claimed);
+		const landing = { by: "dan", commit: "m1", change: "d-1", alters: altering("d-1", "dan").alters };
+		expect(await cache.landed("p", "main", [landing], claimed, "m1")).toBe(200);
+		expect(notify.mock.calls.at(-1)![1]).toHaveLength(200);
+		expect(logs).toHaveBeenCalledWith(
+			"footprints: read the first 500 entries of uses:main:src%2Fconfig.ts:loadSettings:",
+		);
+		expect(logs).toHaveBeenCalledWith("footprints: up to 300 interface notices on main over the cap were dropped");
 		logs.mockRestore();
 	});
 
@@ -186,6 +207,17 @@ describe("open footprints", () => {
 		expect((await storage.list({ prefix: "uses:" })).size).toBe(0);
 		expect(logs).toHaveBeenCalledWith("footprints: dropped the 1 oldest open footprints, past 2000");
 		logs.mockRestore();
+	});
+
+	it("show a page at most 50 names each way, looking up at most 100 index entries, and count the rest", async () => {
+		const { cache } = caches();
+		const names = Array.from({ length: 150 }, (_, i) => `name${i}`);
+		const wide = using("c-1", "bob", names);
+		await cache.keep("p", wide, claimedBy(wide));
+		const awareness = (await cache.overlapsOf("c-1"))!;
+		expect(awareness.uses).toHaveLength(50);
+		// 50 found past the cap, and 50 index entries never looked up.
+		expect(awareness.omitted).toEqual({ uses: 100 });
 	});
 
 	it("say whether any goes into a branch, and the last commit analysed there", async () => {

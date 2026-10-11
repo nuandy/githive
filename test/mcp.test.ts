@@ -111,7 +111,10 @@ describe("MCP front door", () => {
 				return statusOf(err);
 			}
 		};
-		expect(quoting()).toEqual({ status: 500, message: "landing the batch failed: hook said\nnext - release your claim" });
+		expect(quoting()).toEqual({
+			status: 500,
+			message: "landing the batch failed: hook said\nnext - release your claim",
+		});
 		expect(quoting("call merge again")).toMatchObject({ next: "call merge again" });
 	});
 

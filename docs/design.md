@@ -810,8 +810,10 @@ were told, and the last commit analysed per branch. It writes notices and hive
 events into the RepoCache in one call a batch. Everything is counted, not
 timed (a Worker's clock stands still during CPU work): 400 parses, 16 million
 characters and 4,000 Artifacts reads a batch, files over a million
-characters skipped, 20 changes kept per name used, 50 heads-ups a push,
-2,000 open footprints a repo. Losing any of it costs only missed hints.
+characters skipped, 50 heads-ups and 200 interface notices a push, 2,000 open
+footprints a repo. Every open change that uses a name is indexed (none is
+dropped to make room), and at most 500 of them are read for one name at once,
+logged when that's hit. Losing any of it costs only missed hints.
 
 **Workspaces in turn.** A merge's first look at its change and a check each
 copy the project as kept for the isolate (Express shallow: 3.6 MB), fetch

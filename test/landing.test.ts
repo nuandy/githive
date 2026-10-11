@@ -548,7 +548,10 @@ describe("landing ready changes together", { timeout: 120_000 }, () => {
 		const pushed = server.git("rev-parse", "main").trim();
 		const tries: string[][] = [];
 		const git = memoryBatchGit(remote());
-		const noted: BatchGit = { ...git, land: async (input) => (tries.push(input.merges.map((m) => m.change)), git.land(input)) };
+		const noted: BatchGit = {
+			...git,
+			land: async (input) => (tries.push(input.merges.map((m) => m.change)), git.land(input)),
+		};
 		const landing = memoryLanding();
 		const more = { verify: [], runChecks: undefined, batchGit: noted, history: gitHistory(server.git) };
 		expect(await merge("b-1", runner(), landing, more)).toMatchObject({ ok: true });
@@ -558,7 +561,8 @@ describe("landing ready changes together", { timeout: 120_000 }, () => {
 		expect(tries.at(-1)).toEqual(["b-1"]);
 		const rejected = await checksRejections();
 		expect(rejected.map((vote) => vote.commit).sort()).toEqual([aHead, cHead].sort());
-		for (const vote of rejected) expect(vote.evidence).toMatch(/^conflict on src\/[ac]\.txt with [0-9a-f]{7} by pusher/);
+		for (const vote of rejected)
+			expect(vote.evidence).toMatch(/^conflict on src\/[ac]\.txt with [0-9a-f]{7} by pusher/);
 		expect((await landing.view()).recent.map((settled) => [settled.change, settled.how]).sort()).toEqual([
 			["a-1", "failed"],
 			["b-1", "landed"],
