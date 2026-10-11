@@ -524,8 +524,8 @@ function sharedPlacements(env: Env, repo: string): SharedPlacements {
 	};
 }
 
-/** Whether batches land with trees in the Worker rather than in the repo's Gate container. */
-const treeLandingOn = (env: Env) => env.TREE_LANDING === "on";
+/** Whether batches land with trees in the Worker, as they do unless TREE_LANDING is "off" (see tree-landing.ts). */
+const treeLandingOn = (env: Env) => env.TREE_LANDING !== "off";
 
 // Records repos made for landing leases, once per isolate.
 const landingRepos = new Map<string, Promise<void>>();

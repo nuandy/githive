@@ -43,8 +43,8 @@ export const mergeTools: ToolHandlers = {
 			return { ok: false, reasons: [`checks run on GitHub Actions, but ${why}`] };
 		}
 		const project = await write();
-		// The repo's Gate (a container running real git) lands every batch and does its GitHub pushes. Changes are
-		// read through Artifacts' API here; the Gate reads only those it can't place (see artifactsInspect).
+		// Batches land with trees in the Worker, or in the repo's Gate (a container running real git), which also does
+		// the GitHub pushes. Changes are read through Artifacts' API here; the Gate reads only those it can't place.
 		const gate = ctx.batchGit
 			? ctx.batchGit(repo)
 			: fail(503, "GitHive can't land changes here: no Gate is set up to land them");

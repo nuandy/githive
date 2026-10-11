@@ -7,6 +7,6 @@ interface Env {
 	/** GitHive's GitHub App ID and PKCS#8 PEM private key (see github.ts). Without them, no repo connects to GitHub. */
 	GITHUB_APP_ID?: string;
 	GITHUB_APP_PRIVATE_KEY?: string;
-	/** "on" lands batches with trees in the Worker, falling back to the Gate (see tree-landing.ts). */
+	/** "off" lands every batch in the repo's Gate; otherwise batches land with trees in the Worker (tree-landing.ts). */
 	TREE_LANDING?: string;
 }

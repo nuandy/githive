@@ -51,7 +51,7 @@ export const claimTools: ToolHandlers = {
 		const outcome = await (sharded ? storeFor(ctx, repo, sharded) : store).claim(input, stamper);
 		// Once claimed, the source's tip becomes the change's branch in the agent's fork.
 		if (outcome.ok && merging) await merging.push(await changeSource(agent, "write"), change);
-		// Without container checks, the Gate lands the change within minutes, so warm it from the claim. A cold
+		// Without container checks, a Gate that lands batches does so within minutes, so warm it from the claim. A cold
 		// Gate holds up the first batch. With checks, a claim is too early to install for; they warm at the check.
 		if (outcome.ok && !containerChecks(registered?.verify).length) await warmChecks("claimed", change);
 		return claimReply(outcome, { change, into, branch, made, source, merging, paths });

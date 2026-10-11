@@ -582,23 +582,61 @@ evidence. Its agent sees it in `status` like any rejection,
 and keeps it out of later batches until it has a new commit: `merge` refuses
 that commit at once, with the failure, rather than check it a third time.
 
-**Every batch lands in the repo's Gate, checks or not.** The audit reads the
-branch's history through Artifacts' own API, not a clone: `log` lists the
+**The audit reads the branch through Artifacts' API, not a clone.** `log` lists the
 first-parent chain (a page at a time, until the baseline), and each merge's
 files changed from its first parent come from comparing their trees with
 `readTree`, reading only the folders that differ. A commit's files are its
 own for good, so they're kept in the repo's RepoCache by commit, and an audit
 after reads trees only for merges new since. (Read in a Worker with a clone,
-200 merges had taken 12 s and most of its memory.) Landing was tried in the
-Worker too, in memory, and measured against the Gate: without checks, at 200
-agents, a batch of about 60 ran the Worker out of its 128 MB, which is fixed,
-and every merge waiting in that isolate failed with it (run 217); with
-checks, on Express with 5 agents, batches took 44 to 94 s from merge to
-landed against the Gate's 30 to 35 s (agents-6 against agents-5), the copy of
-the repo made again in each new isolate and the changes fetched one at a
-time, where the Gate has the repo on disk and fetches 16 at once. So a repo
-without checks warms its Gate too, from its first claim until the snapshot is
-saved, for a snapshot a cold Gate restores in seconds.
+200 merges had taken 12 s and most of its memory.)
+
+**Batches land in the Worker, with trees** (`tree-landing.ts`). Claims keep a
+batch's changes off each other's paths, so each merge is main's tree with its
+change's files put in place: it needs no checkout and no real merge. The
+landing reads only the trees along each change's paths, through Artifacts'
+`readTree`; writes the new trees and the merge commits in memory, the same
+commits the Gate's `git merge --no-ff` makes (author, message and stamp
+included); and pushes them, with the objects the changes add, in one
+`git-receive-pack` request that moves the branch only if it's still at the
+base. Those objects come from each change's fork as Artifacts packs them,
+joined byte for byte into the push. Artifacts takes 5 to 10 s to answer any
+fetch, however small, so each merge fetches its own change while it waits
+for its turn, and keeps the pack (up to 1 MB, for 2 hours) in the repo's
+RepoCache for the batch that lands it. Trees are kept for the isolate by hash:
+Git names a tree by its content, so one read serves the project and every
+fork. Gathering, those early fetches and the trees each landing writes fill
+it, and the next landing starts from the last one's tree. A batch reads the
+trees it still lacks all at once, before it builds.
+
+A batch lands in the repo's Gate instead, with real git, when it needs more
+than this: when a change and main, or two changes in the batch, changed the
+same file (a real merge); when a change can't be placed on the branch exactly
+(it merged in something other than main); when its changes add over 16 MB (a
+landing holds about one copy of what they add, and other landings may share
+the isolate's 128 MB; the repo's own size doesn't count); or when anything in
+the Worker fails. So a repo without checks runs no container at all while its
+batches merge cleanly. A repo with checks runs them where its code can run: in
+containers, or on GitHub Actions (below), which needs none. `TREE_LANDING:
+"off"` lands every batch in the Gate.
+
+Landing in the Worker was tried before, in memory, and measured against the
+Gate: without checks, at 200 agents, a batch of about 60 ran the Worker out of
+its 128 MB, which is fixed, and every merge waiting in that isolate failed
+with it (run 217); with checks, on Express with 5 agents, batches took 44 to
+94 s from merge to landed against the Gate's 30 to 35 s (agents-6 against
+agents-5), the copy of the repo made again in each new isolate and the
+changes fetched one at a time, where the Gate has the repo on disk and
+fetches 16 at once. Trees changed both: a landing holds only what its changes
+add, never a copy of the repo, and its fetches are done before it starts. At
+200 agents without checks, on Express, the agents' work took 256 s landing
+with trees, 300 s in the Gate from kept packs, and 360 s in the Gate fetching
+every change as it landed (tree-on5, tree-off3, tree-off2). With trees, a
+64-change batch was gathered in 17 s and landed in 13 s.
+
+With `TREE_LANDING: "off"`, a repo without checks warms its Gate too, from
+its first claim until the snapshot is saved, for a snapshot a cold Gate
+restores in seconds. With trees it doesn't, so a batch that falls back to the
+Gate starts it cold.
 
 **Connected to GitHub.** A repo can be connected to a GitHub repo through
 GitHive's GitHub App (`settings` with `github: "owner/name"`; refused unless the
@@ -617,9 +655,9 @@ hour (`github.ts`). Then:
   merges its changes onto main, the way they'll land, and pushes that commit to
   `githive/checks/<id>` on GitHub, waits for every workflow run on it (one must
   start within 3 minutes; all must finish within 30), and passes the batch
-  when they all succeed; the branch is deleted after. The batch then lands in
-  the repo's Gate, as every batch does: no check container runs, and nothing
-  holds a copy of the repo in a Worker's memory. A repo without GitHub keeps
+  when they all succeed; the branch is deleted after. The batch then lands as
+  any other does, with trees or in the repo's Gate: no check container runs.
+  A repo without GitHub keeps
   checks in containers. Its workflow just runs on those branches:
 
   ```yaml
@@ -645,10 +683,12 @@ main in, never rebase). A change that merged in anything else, or left main
 more than 1,000 commits ago, is read in the Gate with git instead, so the
 answer is always merge-base's. Reading 1 to 4 changes this way took 1.6 to
 3.1 s (agents-6); in the Gate, 10 to 23 s (agents-7, its container restarting
-between batches). The batch then lands in the repo's own Gate's container,
-with real git on a disk: fetching each change, making the merge commits
-(stamped there: the Gate is the same Worker, with GitHive's key) and pushing
-them.
+between batches). A batch that lands in the Gate does so in the repo's own
+Gate's container, with real git on a disk: it adds the packs its merges kept
+in one `index-pack`, fetches what's still missing, makes the merge commits
+(stamped there: the Gate is the same Worker, with GitHive's key), one command
+each, and pushes them. It fetches the branch only when it lacks the base,
+which is usually the last batch it landed.
 It's the repo's own Gate, never a change's: a change's Gate runs that change's
 code (its installs and tests), which could tamper with git there, so it's
 trusted neither with what a change touched nor with the token that writes the
@@ -664,6 +704,10 @@ and the batch's check container, which fetches only what it doesn't have yet
 change's head and the files it changed since it left main, in 1.6 to 3.1 s.
 (Read through the Gate, it took 25 to 65 s, and the next batch was read while
 one was checked; reading through the API made that unnecessary, and it went.)
+A merge waiting for its turn places its own change (its merge base and the
+files it changed) and keeps that in the repo's RepoCache, where every Worker
+instance reads it: gathering then reads only the head of a change already
+placed as it was last seen, to see that it hasn't moved.
 
 **Without checks, a batch takes all that's ready**, up to 64: its size is
 about one check failure per batch (see `batchSize`), and nothing fails a batch
@@ -671,13 +715,16 @@ that isn't checked. At 200 agents with no checks, batches sized for checks (8,
 24, 52) left 130 ready changes waiting. The repo's Gate, which lands it, is
 warmed when GitHive starts on a repo with checks, or without checks at its first
 claim (so a repo nobody works in starts no container), and saves the repo's
-snapshot (with nothing installed, when there are no checks): cold, it then restores in
+snapshot (with nothing installed, when there are no checks; with trees, a
+repo without checks isn't warmed at all): cold, it then restores in
 seconds. Without one, the first batch of a 200-agent run read 3 or 4 changes
 in 42 to 61 s, behind the container starting from its image and Express
 cloning, however early it was warmed: the Gate stops after a minute idle, and
 an agent went from claim to merge in 30 to 40 s. Until the snapshot is saved,
 a claim (without checks), a check or an approval warms the Gate too. A batch reads the votes on all its
-changes' heads once, then checks each change against its claim 8 at a time.
+changes' heads, and the claims bearing on all their files, once (`readScopes`:
+the registry once, the indexes and shards once per records repo), then checks
+each change against them.
 
 **A batch's merges hear it landed as soon as it's pushed**, and its claims are
 released once the lease is handed on: a write per change, a few at a time, it
@@ -755,7 +802,7 @@ ran out, and its own batch always takes its own change. Oldest claims go
 first, so every batch brings a waiting change closer. The merge holding the
 lease keeps it by a heartbeat: every 30 s it keeps the lease 2 minutes ahead,
 but only while the step it's on is within that step's bound: five minutes to
-read or land a batch in the Gate, two to read or write records, and for a
+read or land a batch, two to read or write records, and for a
 check run, ten minutes per command (the Gate stops a command there) with
 twenty more for an install and setting up. A merge that died (Cloudflare
 dropped its request, say) lets the lease run out within 2 minutes, and one
@@ -791,9 +838,10 @@ kept per container, and each batch's containers are new, so each batch starts
 small. A batch's checks run in Gates of its own
 (`repo:<repo>:check:<batch>-<n>`), each stopping its container a minute after
 its last run; a 30-minute inactivity timeout is only the backstop. The repo's
-own Gate never runs a change's checks: it reads and lands each batch, staying
-up five minutes after reading one so the landing finds its changes fetched,
-and warms on main to keep the repo's snapshot.
+own Gate never runs a change's checks: it reads the changes Artifacts' API
+can't place, staying up five minutes after so their landing finds them
+fetched; lands the batches that need real git; and warms on main to keep the
+repo's snapshot.
 
 **Snapshots.** After a warm-up on main, the repo's own Gate saves its
 container as the repo's snapshot (git, toolchains, the project checked out,
@@ -1302,6 +1350,10 @@ comments give the reason; the evidence is here.
   about 4 forks every 30–60 s, and the last agent waited half an hour to push.
 - Deleting a fork takes about 1 s; the bench wipe deletes 8 at a time.
 - Minting an Artifacts token takes about 0.6 s.
+- Artifacts takes 5 to 10 s to answer any upload-pack request, whatever the
+  protocol (v0 or v2), the `have` lines or the client. Without side-band, its
+  answer ends with a flush packet after the pack, so the pack's end is found by
+  its checksum: joined into a push with the flush, a pack made the push fail.
 
 **Workers**
 
@@ -1309,6 +1361,20 @@ comments give the reason; the evidence is here.
   200-agent run those held the Worker request's 6 connections, and the runtime
   cancelled responses to break the stall 2,585 times. Credentials now go with
   the first request.
+- Planning a tree landing (each change's place, and what main changed along
+  its paths) first took 591 s for a 64-change batch, comparing every file
+  between trees for each change, and the landing outran its lease. Reading
+  only along each change's paths, each tree once, took about 5 s, and 0 once
+  it reused gathering's places.
+- Building a 64-change batch's merges took about 75 s: each merge read its
+  change's trees in turn, again after gathering had read them, and every read
+  opened its repo first (an Artifacts `get`, even for a tree already read).
+  With trees kept for the isolate, read all at once before building, and a
+  kept tree read without opening its repo, it took 9 s.
+- Gathering a 64-change batch took 36 to 46 s: reading each change's history
+  and trees on its fork (about 15 s), and its claims change by change, 8 at a
+  time (13 to 30 s). With the places waiting merges kept, and the claims read
+  together, it took 17 s (once 40 s, with Artifacts slow).
 - A batch landed with trees in the Worker first held 5 to 9 times what its
   changes add: each fork's pack copied out of side-band packets, unpacked and
   packed again, then copied into the push and again to checksum it (a batch
@@ -1331,6 +1397,9 @@ comments give the reason; the evidence is here.
 
 - At 8 fetches at a time, reading a 64-change batch took 84–95 s; the Gate now
   fetches 16 at once.
+- Landing a 64-change batch in the Gate took about 60 s while it fetched every
+  change from its fork, and the branch again. From the packs its merges kept,
+  with the base already there, it took 4 s.
 - Busy push refusals lost two batches in a row at 200 agents before the Gate
   retried them.
 - With the Gate's container restarting between batches, landing a batch took

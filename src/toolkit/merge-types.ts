@@ -43,8 +43,8 @@ export type BatchSource = Omit<BatchChange, "head"> & { seen?: string };
 export type Inspected = { change: string; head: string; files: string[] } | { change: string; error: string };
 
 /**
- * A batch's git work, done with real git in the repo's own Gate. That container never runs a change's code, so what it
- * reads and pushes can be trusted (see gate.ts). Landed in a Worker's memory instead, big batches ran out of it.
+ * A batch's git work: landed with trees in the Worker (see tree-landing.ts), or with real git in the repo's own Gate.
+ * That container never runs a change's code, so what it reads and pushes can be trusted (see gate.ts).
  */
 export interface BatchGit {
 	/** Each change's head now and the files it changed since it left `base`. */
