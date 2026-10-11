@@ -70,6 +70,15 @@ export function abandonableAt(signs: ChangeSigns): number | undefined {
 	return Math.max(Date.parse(signs.active) + BUILDING_IDLE_MS, Date.parse(waiting.since) + waiting.idleAfterMs);
 }
 
+/** How long a claim lasts if its agent goes quiet: whose turn its change is on, and on its agent's turn when it frees up. */
+export function leaseFor(signs: ChangeSigns): { waitingOn: Turn; freeAfter?: string } {
+	const freeAt = abandonableAt(signs);
+	return {
+		waitingOn: waitingOn(signs).turn,
+		...(freeAt !== undefined ? { freeAfter: new Date(freeAt).toISOString() } : {}),
+	};
+}
+
 /** Whether the agent's turn has gone unanswered longer than allowed (see abandonableAt). */
 export function abandoned(signs: ChangeSigns, now: number): { abandoned: boolean; waiting: Waiting; idleMs: number } {
 	const waiting = waitingOn(signs);

@@ -4,7 +4,7 @@ import { checkChange } from "../check";
 import type { ClaimRecord } from "../claims";
 import { type LandingView, lastLandedOn, type Settled } from "../landing";
 import { conflictFix } from "../merge-ready";
-import { abandonableAt, waitingOn as waitingFor } from "../staleness";
+import { leaseFor } from "../staleness";
 import type { VotesView } from "../vote-store";
 import { countedVotes } from "../votes";
 import { addWork, addWorks, backlogFor, reviewsFor, type Work } from "../work";
@@ -142,13 +142,7 @@ async function leaseOf(
 	const onHead = head ? record.votes.filter((vote) => vote.commit === head) : [];
 	const counted = await countedVotes(onHead, registered?.stampKey);
 	const policy = branchSettings(registered, claim.into).policy;
-	const signs = changeSigns({ claim, head, counted, record, landing, policy });
-	const freeAt = abandonableAt(signs);
-	return {
-		waitingOn: waitingFor(signs).turn,
-		...(freeAt !== undefined ? { freeAfter: new Date(freeAt).toISOString() } : {}),
-		renew: RENEW,
-	};
+	return { ...leaseFor(changeSigns({ claim, head, counted, record, landing, policy })), renew: RENEW };
 }
 
 /**

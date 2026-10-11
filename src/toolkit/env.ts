@@ -1,3 +1,4 @@
+import type { ChangeAwareness } from "../footprint-cache";
 import { linkTo } from "../github";
 import type { LandingResult } from "../gate-landing";
 import type { ReadHistory, SharedPlacements } from "./batch-reads";
@@ -251,6 +252,9 @@ function repoCacheParts(env: Env) {
 		noteAttempt: (repo, change, line) => noteAttempt(env, repo, change, line),
 		attemptsOf: (repo, changes) =>
 			quietly(() => env.REPO_CACHE.getByName(`repo:${repo}`).attemptsOf(changes), {} as Record<string, string[]>),
+		// What a change's footprint meets, from the repo's FootprintCache. Async, so a missing binding rejects too.
+		awarenessOf: async (repo, change) =>
+			(await rpc(env.FOOTPRINT_CACHE.getByName(`footprints:${repo}`).overlapsOf(change))) as ChangeAwareness | null,
 		// A branch's head, briefly cached for every merge watching it (see MergeInput.branchHead).
 		branchHead: (repo, branch) =>
 			keptRead(

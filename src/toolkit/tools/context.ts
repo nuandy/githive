@@ -1,4 +1,5 @@
 import { requiredString, statusOf } from "../../errors";
+import type { ChangeAwareness } from "../../footprint-cache";
 import type { Remote } from "../../git";
 import type { GitHubLink } from "../../github";
 import type { HiveEvent } from "../../hive-events";
@@ -136,6 +137,11 @@ export interface ToolContext {
 	noteAttempt?: (repo: string, change: string, line: string) => Promise<void>;
 	/** The attempts noted for each change, oldest first; a change with none is left out. Never fails. */
 	attemptsOf?: (repo: string, changes: string[]) => Promise<Record<string, string[]>>;
+	/**
+	 * A change's footprint and where it meets other open changes now, from the repo's FootprintCache (see
+	 * FootprintCache.overlapsOf); null when none is kept. A hint for the dashboard: callers catch its failures.
+	 */
+	awarenessOf?: (repo: string, change: string) => Promise<ChangeAwareness | null>;
 	/** A branch's head, briefly cached and shared by the merges watching it (see MergeInput.branchHead). */
 	branchHead?: (repo: string, branch: string) => Promise<string | null>;
 	/** Queues forks to be made in the background: the repo's seeds, or the named agents' own. */

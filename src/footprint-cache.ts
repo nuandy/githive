@@ -62,6 +62,40 @@ export interface Footprint {
 /** A commit that landed on a branch: who landed it, and the names it altered. */
 export type LandedCommit = Landing & { alters: Alter[] };
 
+/** Where a change's footprint meets another open change's: one altered name, as one side uses it. */
+export interface Overlap {
+	/** The file that declares the altered name. */
+	file: string;
+	altered: AlteredName;
+	/** The name as it is imported where it's used: the altered name, its class, "default", or "*" for the whole file. */
+	imported: string;
+	/** Where it's used: in the other change (usedBy), or in this one (alteredBy). */
+	at: UseOf["at"];
+	/** The other open change. */
+	other: OpenChange;
+}
+
+/** A change's footprint for the dashboard, and where it meets the other open changes into its branch. */
+export interface ChangeAwareness {
+	change: string;
+	agent: string;
+	branch: string;
+	head: string;
+	base: string;
+	/** When the push it was read from happened. */
+	at: number;
+	/** The names it alters. */
+	alters: Alter[];
+	/** The names of other files it uses, and where. */
+	uses: UseOf[];
+	/** What it alters that other agents' open changes use. */
+	usedBy: Overlap[];
+	/** What it uses that other agents' open changes alter. */
+	alteredBy: Overlap[];
+	/** How many of each were left out past the caps. */
+	omitted?: Partial<Record<"alters" | "uses" | "usedBy" | "alteredBy", number>>;
+}
+
 /** A footprint as kept: what telling about it needs, and the keys that take it out again. */
 interface KeptFootprint {
 	change: string;
@@ -103,6 +137,12 @@ const FACTS_CHARS = 256 * 1024;
 const KEY_CHARS = 1_024;
 /** The most names a hive event's detail lists. */
 const NAMES_SHOWN = 5;
+/** What overlapsOf returns at most: names altered or used, and overlaps each way. */
+const AWARE_NAMES = 50;
+const AWARE_OVERLAPS = 50;
+/** The most index entries overlapsOf looks up from, and reads in each lookup. */
+const AWARE_LOOKUPS = 100;
+const AWARE_LISTED = 100;
 /** Storage reads and writes at most this many keys at once. */
 const STORAGE_BATCH = 128;
 
@@ -110,6 +150,11 @@ const enc = encodeURIComponent;
 const pad = (seq: number) => String(seq).padStart(12, "0");
 /** The change a uses: or alters: key ends with. */
 const changeIn = (key: string) => decodeURIComponent(key.slice(key.lastIndexOf(":") + 1));
+/** The file and name of a uses: or alters: key (<kind>:<branch>:<file>:<name>:<change>, each part encoded). */
+function indexParts(key: string) {
+	const [, , file = "", name = ""] = key.split(":").map(decodeURIComponent);
+	return { file, name };
+}
 
 /** A repo's FootprintCache. */
 export const footprintCache = (env: Env, repo: string) => env.FOOTPRINT_CACHE.getByName(`footprints:${repo}`);
@@ -257,6 +302,89 @@ export class FootprintCache extends DurableObject<Env> {
 		if (dropped) console.log(`footprints: ${dropped} interface notices on ${branch} over the cap were dropped`);
 		await this.analysed(branch, after);
 		return this.tell(repo, branch, notices, events, told);
+	}
+
+	/**
+	 * A change's footprint and where it meets the other open changes into its branch now, for its dashboard page: what
+	 * it alters that they use, and what it uses that they alter. Between one agent's own changes nothing is said, as in
+	 * heads-ups. It reads only through the indexes, and returns at most AWARE_NAMES names and AWARE_OVERLAPS overlaps
+	 * each way, saying how many it left out. Null when no footprint is kept for the change.
+	 */
+	async overlapsOf(change: string): Promise<ChangeAwareness | null> {
+		const kept = await this.kept(change);
+		if (!kept) return null;
+		const omitted: NonNullable<ChangeAwareness["omitted"]> = {};
+		// Past a cap, what's left out is counted: entries found, and index entries never looked up.
+		const capped = <T>(list: T[], kind: keyof typeof omitted, cap: number, unread = 0) => {
+			const over = Math.max(0, list.length - cap) + unread;
+			if (over) omitted[kind] = over;
+			return list.slice(0, cap);
+		};
+		const altersKeys = kept.keys.filter((key) => key.startsWith("alters:"));
+		const usesKeys = kept.keys.filter((key) => key.startsWith("uses:"));
+		const looked = [...altersKeys.slice(0, AWARE_LOOKUPS), ...usesKeys.slice(0, AWARE_LOOKUPS)];
+		const entries = await this.getMany<AltersEntry & UsesEntry>(looked);
+		const branch = enc(kept.branch);
+		const usedBy: [string, Omit<Overlap, "other">][] = [];
+		const alteredBy: [string, Omit<Overlap, "other">][] = [];
+		const alters: Alter[] = [];
+		const uses: UseOf[] = [];
+		for (const key of altersKeys.slice(0, AWARE_LOOKUPS)) {
+			const entry = entries.get(key);
+			if (!entry) continue;
+			const { file, name } = indexParts(key);
+			alters.push(...entry.altered.map((altered) => ({ file, altered })));
+			// Used by its imported name, or through the whole file.
+			for (const as of [name, "*"]) {
+				const using = await this.ctx.storage.list<UsesEntry>({
+					prefix: `uses:${branch}:${enc(file)}:${enc(as)}:`,
+					limit: AWARE_LISTED,
+				});
+				for (const [useKey, use] of using) {
+					const other = changeIn(useKey);
+					if (other === change) continue;
+					for (const altered of entry.altered) usedBy.push([other, { file, altered, imported: as, at: use.at }]);
+				}
+			}
+		}
+		for (const key of usesKeys.slice(0, AWARE_LOOKUPS)) {
+			const entry = entries.get(key);
+			if (!entry) continue;
+			const { file, name } = indexParts(key);
+			uses.push({ file, name, at: entry.at });
+			// A use of the whole file meets every name another change alters in it.
+			const altering = await this.ctx.storage.list<AltersEntry>({
+				prefix: `alters:${branch}:${enc(file)}:${name === "*" ? "" : `${enc(name)}:`}`,
+				limit: AWARE_LISTED,
+			});
+			for (const [alterKey, other] of altering) {
+				const by = changeIn(alterKey);
+				if (by === change) continue;
+				for (const altered of other.altered) alteredBy.push([by, { file, altered, imported: name, at: entry.at }]);
+			}
+		}
+		const others = await this.keptMany([...usedBy, ...alteredBy].map(([other]) => other));
+		// Another change's index entries may outlive its footprint for a moment; only those still kept count.
+		const named = (found: [string, Omit<Overlap, "other">][]) =>
+			found.flatMap(([other, overlap]) => {
+				const theirs = others.get(other);
+				return theirs && theirs.agent !== kept.agent ? [{ ...overlap, other: openChange(theirs) }] : [];
+			});
+		const awareness: ChangeAwareness = {
+			change: kept.change,
+			agent: kept.agent,
+			branch: kept.branch,
+			head: kept.head,
+			base: kept.base,
+			at: kept.at,
+			alters: capped(alters, "alters", AWARE_NAMES, Math.max(0, altersKeys.length - AWARE_LOOKUPS)),
+			uses: capped(uses, "uses", AWARE_NAMES, Math.max(0, usesKeys.length - AWARE_LOOKUPS)),
+			usedBy: capped(named(usedBy), "usedBy", AWARE_OVERLAPS),
+			alteredBy: capped(named(alteredBy), "alteredBy", AWARE_OVERLAPS),
+		};
+		if (Object.keys(omitted).length) awareness.omitted = omitted;
+		this.traffic.sent("overlaps", JSON.stringify(awareness).length);
+		return awareness;
 	}
 
 	/** Forget everything kept, for a deleted repo. */

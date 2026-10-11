@@ -5,14 +5,25 @@ import { Timing } from "../../timing";
 import { claimInto, presentClaim } from "../branch-scope";
 import { DEFAULT_SKIP_CHECKS } from "../check-scope";
 import type { ClaimRecord, Registry, ReleaseRecord } from "../claims";
+import type { LandingView } from "../landing";
+import { leaseFor } from "../staleness";
 import type { VoteStore, VotesView } from "../vote-store";
-import { DEFAULT_GRANT, type FlagRecord, openFlag, type ReviewPolicy, type VoteRecord } from "../votes";
+import { countedVotes, DEFAULT_GRANT, type FlagRecord, openFlag, type ReviewPolicy, type VoteRecord } from "../votes";
 import { holdKey, ROLE_WAIT_MS, waitingRoleReviews } from "../work";
 import { runAudit } from "./audit-tools";
-import { changeHead, changeSourceFor, changeStatus } from "./change-state";
+import { changeHead, changeSigns, changeSourceFor, changeStatus } from "./change-state";
 import { targetBranch } from "./claim-input";
 import type { HostedStatus, ToolContext } from "./context";
-import { claimsRef, DEFAULT_POLICY, recordLog, shardingOf, shardVotesIfBusy, storeFor, votesFor } from "./repo";
+import {
+	branchSettings,
+	claimsRef,
+	DEFAULT_POLICY,
+	recordLog,
+	shardingOf,
+	shardVotesIfBusy,
+	storeFor,
+	votesFor,
+} from "./repo";
 import { fail } from "../../errors";
 
 // What the dashboard reads and does through the toolkit: a repo's snapshot and audit, a change's
@@ -87,6 +98,7 @@ export async function changeHistory(ctx: ToolContext, repo: string, change: stri
 	const branch = record ? claimInto(record, projectBranch(registry)) : projectBranch(registry);
 	const claim = record ? presentClaim(record, projectBranch(registry)) : undefined;
 	const mergedAs = released.find((release) => release.mergedAs)?.mergedAs;
+	const hints = cachedHints(ctx, repo, change, !!claim);
 	const commits = await Promise.resolve()
 		.then(() =>
 			timing.time("fork", () => changeSourceFor(ctx, repo)(claim?.agent ?? released.at(-1)!.agent, "read", change)),
@@ -96,7 +108,39 @@ export async function changeHistory(ctx: ToolContext, repo: string, change: stri
 		.catch(() => [] as OwnCommit[]);
 	const ids = new Set(commits.map((commit) => commit.commit));
 	const votes = (await votesFor(ctx, repo).readFor([...ids])).votes.filter((vote) => ids.has(vote.commit));
-	return { change, branch, claim: claim ?? null, released, commits, votes };
+	return { change, branch, claim: claim ?? null, released, commits, votes, ...(await hints) };
+}
+
+/** A merge check as status kept it (see mergeCheck in work-tools.ts), with the change head it was worked out on. */
+type KeptCheck = { head: string; into: string; branchHead: string; clean: boolean } & Record<string, unknown>;
+
+/**
+ * What the caches add to a change's page: while its claim is in force, its last merge check as status kept it (a
+ * conflict's files, who changed each, the hunks and the fix) and what its footprint meets in other open changes; and
+ * its earlier attempts to land. Each is a hint, read beside the history: one that can't be read is left out, and
+ * logged. The caches bound them all (hunks, attempts and overlaps are capped where they're kept or read).
+ */
+async function cachedHints(ctx: ToolContext, repo: string, change: string, open: boolean) {
+	const hint = <T>(what: string, read: () => Promise<T> | undefined) =>
+		Promise.resolve()
+			.then(read)
+			.catch((err: unknown) => {
+				console.error(`reading ${change}'s ${what} on ${repo} for the dashboard failed`, String(err));
+				return undefined;
+			});
+	const [kept, attempts, awareness] = await Promise.all([
+		open ? hint("merge check", () => ctx.mergeChecks?.kept(repo, change)) : undefined,
+		hint("attempts", () => ctx.attemptsOf?.(repo, [change])),
+		open ? hint("footprint", () => ctx.awarenessOf?.(repo, change)) : undefined,
+	]);
+	// The check is kept under "<change head> <branch head>".
+	const merge = kept ? ({ head: kept.key.split(" ")[0], ...(kept.result as object) } as KeptCheck) : undefined;
+	const tried = attempts?.[change];
+	return {
+		...(merge ? { merge } : {}),
+		...(tried?.length ? { attempts: tried } : {}),
+		...(awareness ? { awareness } : {}),
+	};
 }
 
 type OwnCommit = { commit: string; message: string; author: string; at: string };
@@ -216,8 +260,27 @@ export async function repoSnapshot(ctx: ToolContext, repo: string) {
 	const state = registry?.commit.state;
 	if (!state?.baseline) fail(404, `GitHive hasn't started on ${repo}`);
 	const held = await timing.time("claims", () => storeFor(ctx, repo, state).read());
+	const landings = await timing.time("landing", () =>
+		landingViews(
+			ctx,
+			repo,
+			held.claims.map((record) => claimInto(record, projectBranch(state))),
+		),
+	);
 	const claims = await timing.time("status", () =>
-		Promise.all(held.claims.map((record) => claimSnapshot(ctx, repo, state, votes, held.released, record))),
+		Promise.all(
+			held.claims.map((record) =>
+				claimSnapshot(
+					ctx,
+					repo,
+					state,
+					votes,
+					held.released,
+					record,
+					landings.get(claimInto(record, projectBranch(state))),
+				),
+			),
+		),
 	);
 	const waiting = claims.filter((claim) => claim.attention);
 	await ctx
@@ -268,9 +331,25 @@ interface ClaimSnapshot extends ClaimRecord {
 	hosted?: HostedStatus;
 	attention?: Attention;
 	waitsOn?: string[];
+	lease?: ReturnType<typeof leaseFor>;
 }
 
-// A claim as the dashboard shows it: where its change stands, what needs a person, and what it waits on.
+/** The batch being checked on each of these branches, read once a branch; null where it can't be read. */
+async function landingViews(ctx: ToolContext, repo: string, branches: string[]) {
+	const views = new Map<string, LandingView | null>();
+	await Promise.all(
+		[...new Set(branches)].map(async (branch) => {
+			const view = await Promise.resolve()
+				.then(() => ctx.landing?.(repo, branch).view())
+				.catch(() => null);
+			views.set(branch, view ?? null);
+		}),
+	);
+	return views;
+}
+
+// A claim as the dashboard shows it: where its change stands, what needs a person, what it waits on, and how long it
+// lasts if its agent goes quiet.
 async function claimSnapshot(
 	ctx: ToolContext,
 	repo: string,
@@ -278,9 +357,11 @@ async function claimSnapshot(
 	votes: VotesView,
 	released: ReleaseRecord[],
 	record: ClaimRecord,
+	landing: LandingView | null | undefined,
 ): Promise<ClaimSnapshot> {
 	const claim = presentClaim(record, projectBranch(state));
-	const { head, approval, hosted } = await changeStatus(ctx, repo, state, async () => votes.votes, claim.change, claim);
+	const status = await changeStatus(ctx, repo, state, async () => votes.votes, claim.change, claim);
+	const { head, approval, hosted } = status;
 	// A question stays open until a person votes on the change's commit. For a waiting role's review,
 	// it closes once that role signs off.
 	const asked = openFlag(votes, claim.change, head);
@@ -297,6 +378,18 @@ async function claimSnapshot(
 	if (hosted) snapshot.hosted = hosted;
 	if (attention) snapshot.attention = attention;
 	if (waitsOn.length) snapshot.waitsOn = waitsOn;
+	// How long it lasts if its agent goes quiet, worked out as status does. Advice: left out if it can't be.
+	const lease = await Promise.resolve()
+		.then(async () => {
+			const counted = await countedVotes(status.votes, state.stampKey);
+			const policy = branchSettings(state, claim.into).policy;
+			return leaseFor(changeSigns({ claim, head, counted, record: votes, landing, policy }));
+		})
+		.catch((err: unknown) => {
+			console.error(`working out ${claim.change}'s lease for the dashboard failed`, String(err));
+			return undefined;
+		});
+	if (lease) snapshot.lease = lease;
 	return snapshot;
 }
 
