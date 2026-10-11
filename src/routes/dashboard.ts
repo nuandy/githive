@@ -99,6 +99,15 @@ function personActionRoutes(app: Hono<AppEnv>) {
 		const repo = await routeRepo(c, "write");
 		return c.json(await mergeAsPerson(toolContext(c.env, actor), repo.id, c.req.param("change"), byOf(actor)));
 	});
+	// Opens the standing pull request on GitHub, or says where it is; with refresh, rewrites it (see github_pr).
+	app.post("/repos/:owner/:name/github/pr", async (c) => {
+		const repo = await routeRepo(c, "write");
+		const { refresh } = await jsonArgs(c);
+		const ctx = toolContext(c.env, c.get("principal"));
+		const opened = await callTool("github_pr", { repo: repo.id, refresh: refresh === true }, ctx);
+		await ctx.ping?.(repo.id).catch(() => undefined);
+		return c.json(opened);
+	});
 	// A person makes a branch changes can land on, from another.
 	app.post("/repos/:owner/:name/branches", async (c) => {
 		const actor = c.get("principal") ?? fail(401, "no identity");

@@ -185,8 +185,14 @@ function ClaimMergeBox({ claim }: { claim: Claim }) {
 				</span>
 				<div className="merge-box__text">
 					<strong>
-						{approval.approvals} of {approval.required} approvals
-						{waitingNote}
+						{claim.trusted ? (
+							approvalLabel
+						) : (
+							<>
+								{approval.approvals} of {approval.required} approvals
+								{waitingNote}
+							</>
+						)}
 					</strong>
 					<div className="muted">
 						{claim.attention

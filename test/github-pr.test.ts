@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { statusOf } from "../src/errors";
+import { repoSnapshot } from "../src/toolkit/mcp";
 import type { GitHubSeen, GitHubSyncHandle, KnownPull } from "../src/toolkit/github-settings";
 import { pushChange } from "./helpers/agents";
 import { fakeGitHub, type FakeGitHub } from "./helpers/fake-github";
@@ -25,7 +26,7 @@ const handle: GitHubSyncHandle = {
 	notePull: async (known) => void (pull = known),
 	state: async () => ({ pull, job: null }),
 };
-const { call, register, approve } = toolCalls(() => server, {
+const { ctx, call, register, approve } = toolCalls(() => server, {
 	github: async (repo) => (repo === "acme/shop" ? github.link : null),
 	githubSync: () => handle,
 });
@@ -89,6 +90,13 @@ describe("a repo connected to GitHub in pr mode", { timeout: 60_000 }, () => {
 		expect(github.pulls[0]!.body).toContain("**Add c-1** (`c-1`, by a)");
 		expect(github.pulls[0]!.body).toContain("reviewed by reviewer (review): ok");
 		expect(pull).toMatchObject({ number: 1, url: "https://github.com/acme/shop/pull/1" });
+		// The dashboard shows it by the repo's name.
+		expect((await repoSnapshot(ctx(), "p")).github).toEqual({
+			repo: "acme/shop",
+			sync: "pr",
+			trust: true,
+			pull: { number: 1, url: "https://github.com/acme/shop/pull/1" },
+		});
 		// Asked again, it's found, not opened twice.
 		expect(await call("github_pr", {})).toMatchObject({ number: 1, open: true });
 		expect(github.pulls).toHaveLength(1);

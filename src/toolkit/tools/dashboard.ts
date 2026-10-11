@@ -5,6 +5,7 @@ import { Timing } from "../../timing";
 import { claimInto, presentClaim } from "../branch-scope";
 import { DEFAULT_SKIP_CHECKS } from "../check-scope";
 import type { ClaimRecord, Registry, ReleaseRecord } from "../claims";
+import { githubSync, trustsGitHub } from "../github-settings";
 import type { VoteStore, VotesView } from "../vote-store";
 import { DEFAULT_GRANT, type FlagRecord, openFlag, type ReviewPolicy, type VoteRecord } from "../votes";
 import { holdKey, ROLE_WAIT_MS, waitingRoleReviews } from "../work";
@@ -256,6 +257,36 @@ export async function repoSnapshot(ctx: ToolContext, repo: string) {
 		votesSharding: votes.sharded ?? (state.autoShard || state.shardDepth ? "on demand" : "never"),
 		claims,
 		votes: votes.votes.slice(-20).reverse(),
+		...(state.github ? { github: await githubView(ctx, repo, state) } : {}),
+	};
+}
+
+/**
+ * The connected GitHub repo for the dashboard: how GitHive's work reaches it, whether its changes need review, and
+ * as GitHubSync last saw them (hints), the standing pull request and bringing GitHub's changes back.
+ */
+async function githubView(ctx: ToolContext, repo: string, state: Registry) {
+	const seen = await ctx
+		.githubSync?.(repo)
+		.state()
+		.catch(() => null);
+	const job = seen?.job;
+	return {
+		repo: state.github!.repo,
+		sync: githubSync(state),
+		trust: trustsGitHub(state),
+		pull: seen?.pull ? { number: seen.pull.number, url: seen.pull.url } : null,
+		...(job
+			? {
+					fromGitHub: {
+						step: job.step,
+						commit: job.commit,
+						at: job.updatedAt,
+						...(job.change ? { change: job.change } : {}),
+						...(job.reason ? { reason: job.reason } : {}),
+					},
+				}
+			: {}),
 	};
 }
 
@@ -265,6 +296,8 @@ type ChangeStatus = Awaited<ReturnType<typeof changeStatus>>;
 interface ClaimSnapshot extends ClaimRecord {
 	head: string | null;
 	approval: ChangeStatus["approval"];
+	/** Why GitHub's change needs no review, while the repo trusts GitHub's changes. */
+	trusted?: string;
 	hosted?: HostedStatus;
 	attention?: Attention;
 	waitsOn?: string[];
@@ -280,7 +313,14 @@ async function claimSnapshot(
 	record: ClaimRecord,
 ): Promise<ClaimSnapshot> {
 	const claim = presentClaim(record, projectBranch(state));
-	const { head, approval, hosted } = await changeStatus(ctx, repo, state, async () => votes.votes, claim.change, claim);
+	const { head, approval, hosted, trusted } = await changeStatus(
+		ctx,
+		repo,
+		state,
+		async () => votes.votes,
+		claim.change,
+		claim,
+	);
 	// A question stays open until a person votes on the change's commit. For a waiting role's review,
 	// it closes once that role signs off.
 	const asked = openFlag(votes, claim.change, head);
@@ -294,6 +334,7 @@ async function claimSnapshot(
 		);
 	const waitsOn = (claim.after ?? []).filter((dependency) => !mergedInto(dependency));
 	const snapshot: ClaimSnapshot = { ...claim, head, approval };
+	if (trusted) snapshot.trusted = trusted;
 	if (hosted) snapshot.hosted = hosted;
 	if (attention) snapshot.attention = attention;
 	if (waitsOn.length) snapshot.waitsOn = waitsOn;

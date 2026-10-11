@@ -102,3 +102,10 @@
 		animation: none;
 	}
 }
+
+.repo-header__aside {
+	display: flex;
+	align-items: center;
+	flex-wrap: wrap;
+	gap: 8px 16px;
+}

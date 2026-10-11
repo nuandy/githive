@@ -7,12 +7,15 @@ import type {
 	ChangeHistory,
 	HiveEvent,
 	RepoAccess,
+	PullAnswer,
 	RepoLanding,
 	RepoSnapshot,
 	SettingsInput,
 } from "../api";
 import { canVote, canWrite } from "../lib/permissions";
 import { BranchRules } from "./BranchRules";
+import { GitHubLink } from "./GitHubLink";
+import { GitHubSettings } from "./GitHubSettings";
 import { MergeSettings } from "./MergeSettings";
 import { RepoAdmin, type RepoManageApi } from "./RepoAdmin";
 import { holdersFromSnapshot } from "../lib/claimsMap";
@@ -58,6 +61,8 @@ export type RepoPageApi = CodeApi &
 			repo: string,
 			change: string,
 		) => Promise<{ ok: boolean; commit?: string; reasons?: string[]; conflicts?: string[] }>;
+		/** People who can write: open the standing pull request on GitHub, or find it. */
+		githubPull?: (repo: string) => Promise<PullAnswer>;
 	};
 
 export interface RepoPageProps {
@@ -160,6 +165,7 @@ function SettingsEditor({
 		<>
 			<MergeSettings snapshot={snapshot} save={save} onSaved={onSaved} />
 			<BranchRules branch={branch} rules={snapshot.branchRules} save={save} onSaved={onSaved} />
+			<GitHubSettings branch={branch} github={snapshot.github} save={save} onSaved={onSaved} />
 		</>
 	);
 }
@@ -320,6 +326,16 @@ export function RepoPage({
 							<ShardingBadge summary={recordsBadge(snapshot)} />
 							{!snapshot.claims.length && justFinished(lastStretch) ? <AllLandedBadge stretch={lastStretch} /> : null}
 						</>
+					) : undefined
+				}
+				aside={
+					snapshot?.github ? (
+						<GitHubLink
+							repo={repo}
+							github={snapshot.github}
+							openPull={canWrite(access?.level) ? api.githubPull : undefined}
+							onChanged={onSettingsChanged}
+						/>
 					) : undefined
 				}
 				tabs={tabs}

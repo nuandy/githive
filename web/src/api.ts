@@ -21,6 +21,43 @@ export interface SettingsInput {
 		grants?: Record<string, string[]>;
 		verify?: string[];
 	}[];
+	/** The connected GitHub repo, "owner/name", or "" for none. */
+	github?: string;
+	/** How GitHive's work reaches GitHub: through a pull request, or pushed to its main. */
+	github_sync?: GitHubSync;
+	/** Whether GitHub's changes come back without review. */
+	github_trust?: boolean;
+}
+
+export type GitHubSync = "mirror" | "pr";
+
+/** A repo's link to GitHub, as the snapshot shows it (newer servers, connected repos only). */
+export interface RepoGitHub {
+	repo: string;
+	sync: GitHubSync;
+	trust: boolean;
+	/** The standing pull request as GitHive last saw it: open then, it may have been merged since. */
+	pull: { number: number; url: string } | null;
+	/** Bringing GitHub's changes back, as GitHive last did it. */
+	fromGitHub?: {
+		step: "import" | "claim" | "merge" | "done" | "waiting" | "needs a person" | "failed";
+		commit: string;
+		at: string;
+		change?: string;
+		reason?: string;
+	};
+}
+
+/** What github_pr answers: the pull request, and whether it was just opened or rewritten. */
+export interface PullAnswer {
+	pr: string;
+	number: number;
+	title: string;
+	opened?: true;
+	open?: true;
+	refreshed?: true;
+	changes?: number;
+	note?: string;
 }
 
 /** A branch rule as the server stores it. Without checks of its own, the repo's apply. */
@@ -99,6 +136,8 @@ export interface RepoSnapshot {
 			vetoedBy: string[];
 			/** Veto roles still to approve; the change merges once each has (newer servers). */ awaiting?: string[];
 		};
+		/** For GitHub's change while the repo trusts GitHub's changes: why it needs no review. */
+		trusted?: string;
 		/** A question for a person, from an agent or a failed GitHive builder. It stays until a person votes. */
 		attention?: { reason: string; agent: string; at: string };
 		/** GitHive's hosted agents on the change. */
@@ -118,6 +157,8 @@ export interface RepoSnapshot {
 	}[];
 	/** Loaded separately (GET /repos/:repo/audit) and less often, because it replays every record. */
 	audit?: RepoAudit;
+	/** The connected GitHub repo (newer servers). */
+	github?: RepoGitHub;
 }
 
 /**
@@ -437,6 +478,9 @@ export const api = {
 		call<ChangeHistory>("GET", `/repos/${repoPath(repo)}/changes/${encodeURIComponent(change)}`),
 	/** What the caller may do in a repo, and whether it's private or public. */
 	access: (repo: string) => call<RepoAccess>("GET", `/repos/${repoPath(repo)}/access`),
+	/** Opens the standing pull request on GitHub, or finds it; with refresh, rewrites its title and body. */
+	githubPull: (repo: string, refresh = false) =>
+		call<PullAnswer>("POST", `/repos/${repoPath(repo)}/github/pr`, { refresh }),
 };
 
 /** Repositories, orgs and their people: making, settings, members, teams and collaborators. */

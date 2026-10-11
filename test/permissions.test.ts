@@ -68,6 +68,7 @@ const ROUTES: [method: string, path: string, needs: Level][] = [
 	["GET", "/repos/acme/web/reviewers/c-1/abc/tests", "read"],
 	["GET", "/repos/acme/web/live", "read"],
 	["POST", "/repos/acme/web/changes/c-1/votes", "review"],
+	["POST", "/repos/acme/web/github/pr", "write"],
 	["PATCH", "/repos/acme/web", "admin"],
 	["POST", "/repos/acme/web/settings", "admin"],
 	["GET", "/repos/acme/web/collaborators", "admin"],
