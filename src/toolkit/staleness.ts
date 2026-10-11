@@ -60,16 +60,20 @@ export function waitingOn(signs: ChangeSigns): Waiting {
 }
 
 /**
- * Whether the agent's turn has gone unanswered longer than allowed. Never sooner than BUILDING_IDLE_MS after its
+ * When the change counts as abandoned if nothing more happens (its time in ms; it is abandoned after it), or
+ * undefined while it waits on others, which never ends a claim. Never sooner than BUILDING_IDLE_MS after its agent's
  * last claim, the floor the audit checks every stale release against.
  */
+export function abandonableAt(signs: ChangeSigns): number | undefined {
+	const waiting = waitingOn(signs);
+	if (waiting.turn !== "agent" || !waiting.since || waiting.idleAfterMs === undefined) return undefined;
+	return Math.max(Date.parse(signs.active) + BUILDING_IDLE_MS, Date.parse(waiting.since) + waiting.idleAfterMs);
+}
+
+/** Whether the agent's turn has gone unanswered longer than allowed (see abandonableAt). */
 export function abandoned(signs: ChangeSigns, now: number): { abandoned: boolean; waiting: Waiting; idleMs: number } {
 	const waiting = waitingOn(signs);
 	const idleMs = waiting.since ? now - Date.parse(waiting.since) : 0;
-	const floor = now - Date.parse(signs.active) > BUILDING_IDLE_MS;
-	return {
-		abandoned: waiting.turn === "agent" && floor && idleMs > (waiting.idleAfterMs ?? Number.POSITIVE_INFINITY),
-		waiting,
-		idleMs,
-	};
+	const at = abandonableAt(signs);
+	return { abandoned: at !== undefined && now > at, waiting, idleMs };
 }
