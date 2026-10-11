@@ -120,6 +120,9 @@ export const conflictWords = (files: string[], causes: ReturnType<typeof lastLan
 		return `${file} (changed by ${by.change}${by.agent ? `, ${by.agent}` : ""}${intent}${commit})`;
 	});
 
+/** How a conflict's line starts (see conflictLine), so a rejection that tells of one can be told from failed checks. */
+export const CONFLICT_ON = "conflict on ";
+
 /**
  * A conflict as one line, for the change's attempts and its merge commit's story, naming each file's newest change:
  * `conflict on src/billing/invoice.ts with c-7 by alice ("add partial refunds", 6584265)`. A commit pushed with
@@ -135,7 +138,7 @@ export function conflictLine(files: string[], touchedBy: TouchedBy[], causes: Re
 		const why = [by.intent ? `"${by.intent}"` : "", commit ?? ""].filter(Boolean).join(", ");
 		return `${file} with ${by.change}${by.agent ? ` by ${by.agent}` : ""}${why ? ` (${why})` : ""}`;
 	});
-	return `conflict on ${named.join("; ")}`;
+	return `${CONFLICT_ON}${named.join("; ")}`;
 }
 
 /** A branch's landing as plain data, shared by RepoCache and memoryLanding. */

@@ -52,6 +52,7 @@ describe("a change that waits on another", () => {
 		expect(await call("merge", { change: "consumer", agent: "b" }, "b")).toEqual({
 			ok: false,
 			reasons: ["waits on api, which hasn't merged yet"],
+			why: ["after"],
 			next: "It waits on what it depends on (see reasons): call `merge` again once that has merged.",
 		});
 		expect(await call("status", { change: "consumer" }, "b")).toMatchObject({
@@ -70,6 +71,7 @@ describe("a change that waits on another", () => {
 		expect(await call("merge", { change: "consumer", agent: "b" }, "b")).toEqual({
 			ok: false,
 			reasons: ["waits on api, which merged into feature/f, not main"],
+			why: ["after"],
 			next: "It waits on what it depends on (see reasons): call `merge` again once that has merged.",
 		});
 	});

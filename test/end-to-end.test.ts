@@ -169,6 +169,8 @@ describe("GitHive, end to end", { timeout: 60_000 }, () => {
 				"src/elsewhere.txt is outside a-1's claim",
 				`${aHead} has 1 of 2 approvals from reviewers other than its author`,
 			],
+			why: ["outside", "approvals"],
+			outsideClaim: ["src/elsewhere.txt"],
 		});
 		expect(server.git("rev-list", "--count", "main").trim()).toBe("1");
 	});

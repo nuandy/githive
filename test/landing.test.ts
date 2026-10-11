@@ -259,6 +259,9 @@ describe("landing ready changes together", { timeout: 120_000 }, () => {
 		expect(again).toMatchObject({
 			ok: false,
 			reasons: [expect.stringMatching(/^checks failed: npm test exited 1 on .* push a fix \(a new commit\)/)],
+			// What failed, read back from the rejection, so what follows needn't be read from the reason.
+			why: ["checks"],
+			checks: [{ command: "npm test", exitCode: 1, output: "1 failing" }],
 		});
 		expect(runs.length).toBe(before);
 	});

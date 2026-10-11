@@ -6,8 +6,8 @@ import { skipsChecks } from "./check-scope";
 import type { ClaimRecord } from "./claims";
 import type { ClaimsView } from "./claim-store";
 import { conflictLine, conflictWords, type Landing, lastLandedOn, type Settled } from "./landing";
-import { CHECKS_REVIEWER } from "./merge-checks";
-import type { BatchSource, MergeInput, MergeOutcome, Ready, Refused } from "./merge-types";
+import { BATCH_MERGE, CHECKS_REVIEWER, rejectedFor } from "./merge-checks";
+import type { BatchSource, MergeInput, MergeOutcome, Ready, Refused, Why } from "./merge-types";
 import type { VotesView } from "./vote-store";
 import { approval, countedVotes, effectivePolicy } from "./votes";
 import { fail } from "../errors";
@@ -34,14 +34,18 @@ function headOf(input: MergeInput) {
 	return input.branchHead ? input.branchHead() : branchHead(input.remote, input.branch);
 }
 
-export function outcomeOf(settled: Settled): MergeOutcome {
+/** A settled change as its merge's outcome. A failure is put out by putOut, for its checks or for a conflict. */
+export function outcomeOf(settled: Settled, branch?: string): MergeOutcome {
 	if (settled.how === "landed") {
 		const skipped = settled.skipped ? { checks: "skipped: it only touches files the checks skip" } : {};
 		return { ok: true, commit: settled.commit!, ...skipped };
 	}
+	const conflicted = !!settled.checks?.some((check) => check.command === BATCH_MERGE);
 	return {
 		ok: false,
 		reasons: settled.reasons ?? ["it didn't land"],
+		why: [conflicted ? "conflict" : "checks"],
+		...(conflicted && branch ? { into: branch } : {}),
 		...(settled.checks ? { checks: settled.checks } : {}),
 	};
 }
@@ -65,12 +69,22 @@ export async function readyNow(
 		files,
 		mine: true,
 	});
-	if (!ready.ok) return { ok: false, refused: ready, head };
-	if (!tried.clean) {
-		const conflicts = { files: tried.files ?? [], hunks: tried.hunks, touchedBy: read.touchedBy ?? [] };
-		return { ok: false, head, refused: await conflictRefusal(input, landing, conflicts, branch) };
-	}
-	return ready;
+	if (tried.clean) return ready.ok ? ready : { ok: false, refused: ready, head };
+	// A conflict is said with whatever else keeps it from landing, since resolving it needs a new commit anyway.
+	const conflicts = { files: tried.files ?? [], hunks: tried.hunks, touchedBy: read.touchedBy ?? [] };
+	const refused = await conflictRefusal(input, landing, conflicts, branch);
+	return { ok: false, head, refused: ready.ok ? refused : alsoRefused(refused, ready) };
+}
+
+// A conflict's refusal with another refusal's reasons, and what they're about, after its own.
+function alsoRefused(conflicted: Refused, other: Refused): Refused {
+	const { reasons, why, ...fields } = other;
+	return {
+		...fields,
+		...conflicted,
+		reasons: [...conflicted.reasons, ...reasons],
+		why: [...new Set([...conflicted.why, ...why])],
+	};
 }
 
 // Reads the change through Artifacts' API where possible (see changeAgainst). If no file changed on both sides, the
@@ -124,6 +138,8 @@ async function conflictRefusal(
 		.catch((err) => console.error(`noting ${input.change}'s conflict failed`, String(err)));
 	return {
 		ok: false,
+		why: ["conflict"],
+		into: branch,
 		conflicts,
 		...(causes.length ? { causes } : {}),
 		...(touchedBy.length ? { touchedBy } : {}),
@@ -192,9 +208,10 @@ export async function validated(
 		batch?.votes ?? input.votes.readFor([head]),
 	]);
 	const own = claims.claims.find((claim) => claim.change === proposed.change);
-	const reasons = claimReasons(proposed, scoped, claims, own);
-	reasons.push(...(await voteReasons(input, proposed, own, votes)));
-	if (reasons.length || !own) return { ok: false, reasons };
+	const refusal: Refused = { ok: false, reasons: [], why: [] };
+	claimReasons(refusal, proposed, scoped, claims, own);
+	await voteReasons(refusal, input, proposed, own, votes);
+	if (refusal.reasons.length || !own) return refusal;
 	// No checks for a change that only touches what they skip, such as documentation (see check-scope.ts).
 	const skipped = !!input.verify?.length && skipsChecks(files, input.skipChecks);
 	return {
@@ -215,46 +232,69 @@ export async function validated(
 	};
 }
 
-function claimReasons(proposed: Proposed, scoped: string[], claims: ClaimsView, own?: ClaimRecord): string[] {
+/** Adds a reason to a refusal being made, with what it's about (see Why). */
+function refuse(refusal: Refused, why: Why, reason: string) {
+	refusal.reasons.push(reason);
+	if (!refusal.why.includes(why)) refusal.why.push(why);
+}
+
+function claimReasons(
+	refusal: Refused,
+	proposed: Proposed,
+	scoped: string[],
+	claims: ClaimsView,
+	own?: ClaimRecord,
+): void {
 	const { change } = proposed;
-	const reasons: string[] = [];
-	if (!own) reasons.push(`${change} holds no claim`);
+	if (!own) refuse(refusal, "unclaimed", `${change} holds no claim`);
 	proposed.files.forEach((file, index) => {
 		// The file as the claims records name it (scoped to its branch); the same list, in the same order.
 		const scopedFile = scoped[index] ?? file;
 		const holder = claims.claims.find((claim) => claim.change !== change && inLane(scopedFile, claim.paths));
-		if (holder) reasons.push(`${file} is inside ${holder.change}'s claim (${holder.agent})`);
-		else if (own && !inLane(scopedFile, own.paths)) reasons.push(`${file} is outside ${change}'s claim`);
+		if (holder) {
+			refuse(refusal, "inside", `${file} is inside ${holder.change}'s claim (${holder.agent})`);
+			(refusal.insideOthers ??= []).push(file);
+		} else if (own && !inLane(scopedFile, own.paths)) {
+			refuse(refusal, "outside", `${file} is outside ${change}'s claim`);
+			(refusal.outsideClaim ??= []).push(file);
+		}
 	});
-	return reasons;
 }
 
 async function voteReasons(
+	refusal: Refused,
 	input: MergeInput,
 	proposed: Proposed,
 	own: ClaimRecord | undefined,
 	votes: VotesView,
-): Promise<string[]> {
+): Promise<void> {
 	const { head, files } = proposed;
 	const onHead = votes.votes.filter((vote) => vote.commit === head);
 	const counted = await countedVotes(onHead, input.stampKey);
-	const reasons: string[] = [];
 	// Approvals count distinct reviewers other than the author, under the policy for the files touched. That policy may
 	// be stricter for dependency, CI and deploy files.
 	const outcome = approval({ votes: counted }, head, input.policy, own, files);
 	const { required } = effectivePolicy(input.policy, files);
-	if (outcome.vetoedBy.length) reasons.push(`${head} is vetoed by ${outcome.vetoedBy.join(", ")}`);
+	if (outcome.vetoedBy.length) refuse(refusal, "changes-asked", `${head} is vetoed by ${outcome.vetoedBy.join(", ")}`);
 	else if (outcome.approvals < required)
-		reasons.push(`${head} has ${outcome.approvals} of ${required} approvals from reviewers other than its author`);
+		refuse(
+			refusal,
+			"approvals",
+			`${head} has ${outcome.approvals} of ${required} approvals from reviewers other than its author`,
+		);
 	else if (outcome.awaiting.length)
-		reasons.push(`${head} still needs approval from ${outcome.awaiting.join(", ")}, which can veto it`);
-	// Its checks failed twice on this exact commit, so merging it again would fail. A new commit is checked afresh.
+		refuse(refusal, "approvals", `${head} still needs approval from ${outcome.awaiting.join(", ")}, which can veto it`);
+	// Its checks failed on this exact commit, or it didn't merge, so merging it again would fail. A new commit is
+	// checked afresh.
 	const failed = counted.find((vote) => vote.reviewer === CHECKS_REVIEWER && vote.verdict === "reject");
-	if (failed) reasons.push(`${failed.evidence.split("\n")[0]}: push a fix (a new commit) and get it approved`);
-	else if (!proposed.mine) {
+	if (failed) {
+		const said = rejectedFor(failed.evidence);
+		refuse(refusal, said.why, `${failed.evidence.split("\n")[0]}: push a fix (a new commit) and get it approved`);
+		if (said.why === "conflict") refusal.into = input.branch;
+		else if (said.check) refusal.checks = [said.check];
+	} else if (!proposed.mine) {
 		const author = own?.agent ?? proposed.agent;
 		const sentBack = counted.find((vote) => vote.verdict === "reject" && vote.reviewer !== author);
-		if (sentBack) reasons.push(`${sentBack.reviewer} asked for changes on ${head}`);
+		if (sentBack) refuse(refusal, "changes-asked", `${sentBack.reviewer} asked for changes on ${head}`);
 	}
-	return reasons;
 }

@@ -112,6 +112,7 @@ export async function landBatch(
 				reasons: [
 					`the project's branch kept moving while ${input.change} merged (other merges landed ` + "first): merge again",
 				],
+				why: ["moved"],
 			};
 		}
 		return { ok: true, settled: [...failures, ...done.landed.settled], release: done.landed.release };
@@ -178,8 +179,9 @@ async function gatherBatch(
 	const readAt = Date.now();
 	await holding.step(STEP_MS.records);
 	const own = read[0];
-	if (!own) return { ok: false, reasons: [`${input.change} couldn't be read`] };
-	if ("error" in own) return { ok: false, reasons: [`${input.change} couldn't be read: ${own.error}`] };
+	if (!own) return { ok: false, reasons: [`${input.change} couldn't be read`], why: ["unread"] };
+	if ("error" in own)
+		return { ok: false, reasons: [`${input.change} couldn't be read: ${own.error}`], why: ["unread"] };
 	const checked = await validateAll(input, sources, read);
 	if (checked[0] && !checked[0].ok) return checked[0];
 	const ready = checked.flatMap((result) => (result?.ok ? [result.ready] : []));

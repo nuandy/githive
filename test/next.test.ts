@@ -174,6 +174,8 @@ const CARRIES_NEXT: [string, Record<string, unknown>, Record<string, unknown>, s
 		{ change: "c-1", agent: "a" },
 		{
 			ok: false,
+			why: ["conflict"],
+			into: "main",
 			conflicts: ["src/a.ts"],
 			reasons: ["changes/c-1 conflicts with main in src/a.ts (last changed by o-7, bob): merge main into your branch"],
 		},
@@ -184,6 +186,7 @@ const CARRIES_NEXT: [string, Record<string, unknown>, Record<string, unknown>, s
 		{ change: "c-1", agent: "a" },
 		{
 			ok: false,
+			why: ["checks"],
 			reasons: ["checks failed: npm test exited 1"],
 			checks: [{ command: "npm test", exitCode: 1, output: "FAIL" }],
 		},
@@ -192,13 +195,19 @@ const CARRIES_NEXT: [string, Record<string, unknown>, Record<string, unknown>, s
 	[
 		"merge",
 		{ change: "c-1", agent: "a" },
-		{ ok: false, reasons: [`${HEAD} has 0 of 1 approvals from reviewers other than its author`] },
+		{ ok: false, why: ["approvals"], reasons: [`${HEAD} has 0 of 1 approvals from reviewers other than its author`] },
 		/^Waiting for approvals: `status` shows how many/,
 	],
 	[
 		"merge",
 		{ change: "c-1", agent: "a" },
-		{ ok: false, reasons: ["src/b.ts is outside c-1's claim", "src/o.ts is inside o-2's claim (other)"] },
+		{
+			ok: false,
+			why: ["outside", "inside"],
+			outsideClaim: ["src/b.ts"],
+			insideOthers: ["src/o.ts"],
+			reasons: ["src/b.ts is outside c-1's claim", "src/o.ts is inside o-2's claim (other)"],
+		},
 		"src/b.ts is outside your claim: claim them too (`claim` c-1 again with the extra paths), or move them out of " +
 			"this change.\nsrc/o.ts is inside others' claims: move them out of this change, or wait until those claims " +
 			"are released (`claims` shows whose).",
@@ -245,6 +254,94 @@ describe("next", () => {
 		expect(nextFor("status", { change: "c-1" }, status)).toBe("Call `merge`.");
 		expect(nextFor("status", { change: "c-1" }, status, "b")).toBeUndefined();
 		expect(nextFor("merge", { change: "c-1", agent: "a" }, { ok: true, commit: LANDED }, "b")).toBeUndefined();
+	});
+
+	it("follows a refused merge's why and fields, so rewording its reasons changes nothing", () => {
+		const fix = [
+			"git fetch origin main && git merge origin/main",
+			"call status; once the new commit is approved, merge again",
+		];
+		const checks =
+			"Its checks failed: `npm test` exited 1. Reproduce it in your clone, up to date with the branch it lands on; fix it, push a new commit to `fork`, then call `status`.";
+		// [the refusal as each place that refuses makes it, its next]
+		const refusals: [Record<string, unknown>, string][] = [
+			// merge-ready.ts: its own test merge conflicts.
+			[
+				{
+					why: ["conflict"],
+					into: "main",
+					conflicts: ["src/a.ts"],
+					fix,
+					reasons: ["changes/c-1 conflicts with main in src/a.ts"],
+				},
+				`It conflicts with main in src/a.ts. In your clone:\n${fix.join("\n")}`,
+			],
+			// merge-land.ts: put out for a conflict found while landing.
+			[
+				{
+					why: ["conflict"],
+					into: "main",
+					conflicts: ["src/a.ts"],
+					touchedBy: [{ file: "src/a.ts", commit: LANDED, change: "o-7", agent: "bob" }],
+					fix,
+					reasons: ["conflict on src/a.ts with o-7 by bob (2f56723)"],
+				},
+				`It conflicts with main in src/a.ts. In your clone:\n${fix.join("\n")}`,
+			],
+			// merge-ready.ts: the checks' rejection of a head that didn't merge, which names no files.
+			[
+				{ why: ["conflict"], into: "main", reasons: [`conflict on src/a.ts on ${HEAD.slice(0, 8)}: push a fix`] },
+				"It conflicts with main: merge main into your branch (git fetch origin main && git merge origin/main), " +
+					"resolve inside your claim so both changes make sense, push `changes/c-1` to `fork`, then call `status`.",
+			],
+			// merge-checks.ts: put out for failed checks; merge-ready.ts: their rejection of this head, read back.
+			[
+				{
+					why: ["checks"],
+					checks: [{ command: "npm test", exitCode: 1, output: "FAIL" }],
+					reasons: ["checks failed: npm test exited 1"],
+				},
+				checks,
+			],
+			[
+				{ why: ["unclaimed", "approvals"], reasons: ["c-1 holds no claim", `${HEAD} has 0 of 1 approvals`] },
+				"Claim c-1 again (`claim`), then call `merge`.\nWaiting for approvals: `status` shows how many and as what; " +
+					"agents who may give them see it in `reviews`.",
+			],
+			[
+				{ why: ["changes-asked"], reasons: [`${HEAD} is vetoed by sec (security)`] },
+				"Changes were asked for: address the rejection's evidence, push a new commit to `fork`, then call `status`.",
+			],
+			// merge-tools.ts: it waits on a change it depends on.
+			[
+				{ why: ["after"], reasons: ["waits on api, which hasn't merged yet"] },
+				"It waits on what it depends on (see reasons): call `merge` again once that has merged.",
+			],
+			// merge-batch.ts: the branch kept moving, or the change couldn't be read.
+			[{ why: ["moved"], reasons: ["the project's branch kept moving while c-1 merged"] }, "Call `merge` again."],
+			[
+				{ why: ["unread"], reasons: ["c-1 couldn't be read: no such ref"] },
+				"Call `merge` again; if it still can't be read, push `changes/c-1` to `fork` again.",
+			],
+		];
+		const args = { change: "c-1", agent: "a" };
+		for (const [refusal, step] of refusals) {
+			const reply = { ok: false, ...refusal };
+			expect(nextFor("merge", args, reply)).toBe(step);
+			expect(nextFor("merge", args, { ...reply, reasons: ["in other words, entirely"] })).toBe(step);
+			expect(nextFor("merge", args, { ...reply, reasons: [] })).toBe(step);
+		}
+		// The repo's setup is for the people who run it.
+		const setup = {
+			ok: false,
+			why: ["setup"],
+			reasons: ["checks run on GitHub Actions, but no GitHub repo is connected"],
+		};
+		expect(nextFor("merge", args, setup)).toBeUndefined();
+		// A refusal without why is read from its fields.
+		expect(nextFor("merge", args, { ok: false, conflicts: ["src/a.ts"], into: "main", reasons: [] })).toMatch(
+			/^It conflicts with main in src\/a\.ts: merge main into your branch/,
+		);
 	});
 
 	it("is bounded, however many files or holders a reply names", () => {

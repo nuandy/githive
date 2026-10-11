@@ -76,6 +76,8 @@ describe("merge", { timeout: 60_000 }, () => {
 			ok: false,
 			conflicts: ["shared.txt"],
 			touchedBy: [{ file: "shared.txt", commit: main, change: "a-1", agent: "agent-a-1", intent: "a-1" }],
+			why: ["conflict"],
+			into: "main",
 			// b-1's side first, as `git merge origin/main` shows it in its agent's clone.
 			hunks: [
 				{
@@ -113,6 +115,7 @@ describe("merge", { timeout: 60_000 }, () => {
 		expect(await merge("a-1")).toEqual({
 			ok: false,
 			reasons: [`${head} has 0 of 1 approvals from reviewers other than its author`],
+			why: ["approvals"],
 		});
 	});
 
@@ -126,6 +129,7 @@ describe("merge", { timeout: 60_000 }, () => {
 		expect(await merge("a-1", failing)).toEqual({
 			ok: false,
 			reasons: ["checks failed: npm test exited 1"],
+			why: ["checks"],
 			checks: [{ command: "npm test", exitCode: 1, output: "1 failing" }],
 		});
 		expect(failing).toHaveBeenCalledWith({

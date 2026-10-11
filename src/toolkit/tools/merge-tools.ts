@@ -32,7 +32,7 @@ export const mergeTools: ToolHandlers = {
 		const into = own?.into ?? branch;
 		// Not before its dependencies have merged into that same branch.
 		const waits = await waitingOn(own?.after ?? [], into);
-		if (waits.length) return { ok: false, reasons: waits };
+		if (waits.length) return { ok: false, reasons: waits, why: ["after"] };
 		// A repo connected to GitHub may run its checks on Actions, and gets main pushed back after each landing.
 		const settings = branchSettings(registry, into);
 		const checksOnActions = onActions(settings.verify);
@@ -41,7 +41,7 @@ export const mergeTools: ToolHandlers = {
 			const why = registry?.github
 				? `GitHive can't reach ${registry.github.repo}: is the GitHive app installed there?`
 				: "no GitHub repo is connected (settings github)";
-			return { ok: false, reasons: [`checks run on GitHub Actions, but ${why}`] };
+			return { ok: false, reasons: [`checks run on GitHub Actions, but ${why}`], why: ["setup"] };
 		}
 		const project = await write();
 		// Batches land with trees in the Worker, or in the repo's Gate (a container running real git), which also does

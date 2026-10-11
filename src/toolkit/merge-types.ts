@@ -139,11 +139,45 @@ export interface MergeInput {
 	leaseTtlMs?: number;
 }
 
+/**
+ * What a refused merge's reasons are about, so what follows can be worked out without reading their words:
+ * - conflict: it doesn't merge onto the branch (`into`); conflicts, touchedBy, hunks and fix say more where known.
+ * - checks: its checks failed, in this batch or on this head before; `checks` has the failed step where known.
+ * - unclaimed: its change holds no claim.
+ * - outside: it changes files outside its claim (`outsideClaim`).
+ * - inside: it changes files inside others' claims (`insideOthers`).
+ * - changes-asked: it's vetoed, or a reviewer asked for changes.
+ * - approvals: approvals are still missing.
+ * - after: what it depends on hasn't merged yet.
+ * - moved: the branch kept moving while it merged.
+ * - unread: its branch couldn't be read.
+ * - pending: not refused; it's ready and waiting to land.
+ * - setup: the repo's setup keeps it from landing, such as checks on Actions with no GitHub repo reached.
+ */
+export type Why =
+	| "conflict"
+	| "checks"
+	| "unclaimed"
+	| "outside"
+	| "inside"
+	| "changes-asked"
+	| "approvals"
+	| "after"
+	| "moved"
+	| "unread"
+	| "pending"
+	| "setup";
+
 export type MergeOutcome =
 	| { ok: true; commit: string; /** Why no checks ran, when they're configured. */ checks?: string }
 	| {
 			ok: false;
+			/** For people. What follows is worked out from `why` and the fields beside it, never from these words. */
 			reasons: string[];
+			/** Each kind of reason the refusal has, once, in the order of its reasons. */
+			why: Why[];
+			/** The branch it conflicts with. */
+			into?: string;
 			conflicts?: string[];
 			/** The changes that last landed on each conflicted file. */
 			causes?: ReturnType<typeof lastLandedOn>;
@@ -154,6 +188,9 @@ export type MergeOutcome =
 			/** The commands that resolve the conflict in the clone credentials gives, then what to call. */
 			fix?: string[];
 			checks?: CheckResult[];
+			/** The files it changes outside its own claim, and inside others' claims. */
+			outsideClaim?: string[];
+			insideOthers?: string[];
 			/** Not refused but still waiting; merging again keeps waiting. */ pending?: true;
 	  };
 

@@ -110,6 +110,9 @@ caller's own change only:
 | `merge` landed | "Landed as <sha>; your claim is released." |
 | `merge` refused | The fix, the command to reproduce a failed check, or what it waits on. |
 
+A refused merge's `next` is worked out from its `why` (`conflict`, `checks`, `outside`, `approvals`, `after` and
+so on, set where it's refused) and the fields beside it, never from the reasons' words, which are for people.
+
 A thrown error's text gains a `next:` line where the next step is known. The CLI prints the reply's `next` when it
 has one.
 

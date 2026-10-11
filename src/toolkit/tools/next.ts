@@ -1,5 +1,6 @@
 import { optionalString } from "../../errors";
-import { CHECKS_REVIEWER } from "../merge-checks";
+import { BATCH_MERGE, CHECKS_REVIEWER, rejectedFor } from "../merge-checks";
+import type { Why } from "../merge-types";
 import { type Args, presentedKey, type ToolContext } from "./context";
 
 // `next` in replies (see docs/awareness.md, "next in every reply"): the step that follows for the caller's own change,
@@ -196,8 +197,10 @@ function statusStep(reply: Reply, args: Args, caller: string | undefined) {
 	const rejections = records(reply.votes).filter(
 		(vote) => vote.verdict === "reject" && vote.reviewer !== holder && (!vote.commit || vote.commit === head),
 	);
+	// A head the checks rejected because it didn't merge conflicts still, which status's own test merge says above.
 	const checks = rejections.find((vote) => vote.reviewer === CHECKS_REVIEWER);
-	if (checks) fixes.push(failedCheck(text(checks.evidence) ?? ""));
+	const rejected = checks && rejectedFor(text(checks.evidence) ?? "");
+	if (rejected?.why === "checks") fixes.push(failedCheck(rejected.check?.command, rejected.check?.exitCode));
 	const approval = record(reply.approval) ?? {};
 	const vetoed = Array.isArray(approval.vetoedBy) && approval.vetoedBy.length > 0;
 	if (vetoed || rejections.some((vote) => vote.reviewer !== CHECKS_REVIEWER)) fixes.push(CHANGES_ASKED);
@@ -222,7 +225,7 @@ function approvalsMissing(approval: Reply) {
 /** The commands that resolve a conflict in the agent's clone, when the reply has them; else how to. */
 function conflictStep(fix: unknown, files: string[], into: string | undefined, change: string) {
 	const onto = into ?? "the branch it lands on";
-	const where = `It conflicts with ${onto} in ${names(files)}`;
+	const where = `It conflicts with ${onto}${files.length ? ` in ${names(files)}` : ""}`;
 	const commands = texts(fix);
 	if (commands.length) return [`${where}. In your clone:`, ...commands].join("\n");
 	const merging = into ? ` (git fetch origin ${into} && git merge origin/${into})` : "";
@@ -239,61 +242,63 @@ function outsideStep(change: string, files: string[]) {
 	);
 }
 
-/** How to reproduce a failed check, from its command, or from a reason or evidence naming it. */
-function failedCheck(said: string, command?: string, exitCode?: unknown) {
-	const named = /checks failed: (.+?) exited (\d+)/.exec(said);
-	const run = command ?? named?.[1];
-	if (!run) return "Its checks failed (see their output): fix it, push a new commit to `fork`, then call `status`.";
+/** How to reproduce a failed check, from its command where that's known. */
+function failedCheck(command?: string, exitCode?: unknown) {
+	if (!command) return "Its checks failed (see their output): fix it, push a new commit to `fork`, then call `status`.";
+	const exited = typeof exitCode === "number" ? ` exited ${exitCode}` : " failed";
 	return (
-		`Its checks failed: \`${run}\` exited ${exitCode ?? named?.[2]}. Reproduce it in your clone, up to date with ` +
-		"the branch it lands on; fix it, push a new commit to `fork`, then call `status`."
+		`Its checks failed: \`${command}\`${exited}. Reproduce it in your clone, up to date with the branch it lands ` +
+		"on; fix it, push a new commit to `fork`, then call `status`."
 	);
 }
 
-// A refused merge's other reasons (merge-ready.ts, merge-batch.ts, and the waits on dependencies), each with what the
-// agent can do about it.
-const REASON_STEPS: [RegExp, (change: string) => string][] = [
-	[/ is vetoed by | asked for changes on /, () => CHANGES_ASKED],
-	[
-		/ approvals from reviewers other than its author$| still needs approval from /,
-		() => "Waiting for approvals: `status` shows how many and as what; agents who may give them see it in `reviews`.",
-	],
-	[/^waits on /, () => "It waits on what it depends on (see reasons): call `merge` again once that has merged."],
-	[/ holds no claim$/, (change) => `Claim ${change} again (\`claim\`), then call \`merge\`.`],
-	[/ kept moving /, () => "Call `merge` again."],
-	[
-		/ couldn't be read/,
-		(change) => `Call \`merge\` again; if it still can't be read, push \`changes/${change}\` to \`fork\` again.`,
-	],
-];
+// What follows each kind of reason a refused merge has (see Why), from the refusal's fields, never from its words.
+// A pending merge isn't refused, and the repo's setup is for the people who run it.
+const REFUSED_STEPS: Record<Why, (reply: Reply, change: string) => string | undefined> = {
+	conflict: (reply, change) => conflictStep(reply.fix, texts(reply.conflicts), text(reply.into), change),
+	checks: (reply) => {
+		const failed = failedChecks(reply).find((check) => check.command !== BATCH_MERGE);
+		return failedCheck(text(failed?.command), failed?.exitCode);
+	},
+	outside: (reply, change) => outsideStep(change, texts(reply.outsideClaim)),
+	inside: (reply) => {
+		const files = texts(reply.insideOthers);
+		return (
+			`${names(files)} ${isAre(files)} inside others' claims: move them out of this change, or wait until those ` +
+			"claims are released (`claims` shows whose)."
+		);
+	},
+	unclaimed: (_, change) => `Claim ${change} again (\`claim\`), then call \`merge\`.`,
+	"changes-asked": () => CHANGES_ASKED,
+	approvals: () =>
+		"Waiting for approvals: `status` shows how many and as what; agents who may give them see it in `reviews`.",
+	after: () => "It waits on what it depends on (see reasons): call `merge` again once that has merged.",
+	moved: () => "Call `merge` again.",
+	unread: (_, change) =>
+		`Call \`merge\` again; if it still can't be read, push \`changes/${change}\` to \`fork\` again.`,
+	pending: () => undefined,
+	setup: () => undefined,
+};
 
-/** What a refused merge needs: the fix for a conflict, the check to reproduce, or what it waits on. */
+const failedChecks = (reply: Reply) => records(reply.checks).filter((check) => check.exitCode !== 0);
+
+/**
+ * What a refused merge needs, for each kind of reason it has: the fix for a conflict, the check to reproduce, the
+ * claim to widen, or what it waits on. A refusal without `why` is read from its fields alone.
+ */
 function refusedMerge(reply: Reply, args: Args) {
 	const change = text(args.change) ?? "<change>";
-	const reasons = texts(reply.reasons);
-	const steps = new Set<string>();
-	const into = reasons.map((reason) => /conflicts with (\S+) in /.exec(reason)?.[1]).find(Boolean);
-	const conflicts = texts(reply.conflicts);
-	if (conflicts.length) steps.add(conflictStep(reply.fix, conflicts, into, change));
-	const failed = records(reply.checks).find((check) => check.exitCode !== 0);
-	const command = text(failed?.command);
-	// The Gate reports a batch that wouldn't merge as a failed step that names the files.
-	const merging = command?.startsWith("(merging") && /conflicts in (.+)/.exec(text(failed?.output) ?? "");
-	if (merging) steps.add(conflictStep(reply.fix, merging[1]!.split(", "), into, change));
-	else if (failed) steps.add(failedCheck("", command, failed.exitCode));
-	else {
-		const checks = reasons.find((reason) => reason.startsWith("checks failed: "));
-		if (checks) steps.add(failedCheck(checks));
+	const kinds = new Set(texts(reply.why).filter((kind): kind is Why => Object.hasOwn(REFUSED_STEPS, kind)));
+	if (!kinds.size) {
+		if (texts(reply.conflicts).length) kinds.add("conflict");
+		for (const check of failedChecks(reply)) kinds.add(check.command === BATCH_MERGE ? "conflict" : "checks");
+		if (texts(reply.outsideClaim).length) kinds.add("outside");
+		if (texts(reply.insideOthers).length) kinds.add("inside");
 	}
-	const outside = reasons.flatMap((reason) => /^(.+) is outside \S+'s claim$/.exec(reason)?.[1] ?? []);
-	if (outside.length) steps.add(outsideStep(change, outside));
-	const theirs = reasons.flatMap((reason) => /^(.+) is inside \S+'s claim \(/.exec(reason)?.[1] ?? []);
-	if (theirs.length)
-		steps.add(
-			`${names(theirs)} ${isAre(theirs)} inside others' claims: move them out of this change, or wait until ` +
-				"those claims are released (`claims` shows whose).",
-		);
-	for (const reason of reasons)
-		for (const [pattern, step] of REASON_STEPS) if (pattern.test(reason)) steps.add(step(change));
+	const steps = new Set<string>();
+	for (const kind of kinds) {
+		const step = REFUSED_STEPS[kind](reply, change);
+		if (step) steps.add(step);
+	}
 	return steps.size ? [...steps].join("\n") : undefined;
 }

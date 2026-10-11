@@ -61,7 +61,7 @@ export async function mergeChange(input: MergeInput): Promise<MergeOutcome> {
 	const answerBy = started + (input.answerWithinMs ?? ANSWER_WITHIN_MS);
 	for (;;) {
 		const turn = await landing.turn(holder, input.change, head, started, LEASE_MS);
-		if ("settled" in turn) return outcomeOf(turn.settled);
+		if ("settled" in turn) return outcomeOf(turn.settled, input.branch);
 		if (turn.lease) {
 			const outcome = await landWhileHeld(input, landing, holder, answerBy, head);
 			// It may have stopped being ready because another batch landed it and released its claim.
@@ -79,6 +79,7 @@ function stillWaiting(change: string, head: string, waitedMs: number): MergeOutc
 	return {
 		ok: false,
 		pending: true,
+		why: ["pending"],
 		reasons: [
 			`${change} is ready and waiting to land (${head.slice(0, 8)}): others' batches came first in ` +
 				`the ${Math.round(waitedMs / 60_000)} minutes this merge waited. Call merge again to go on ` +
@@ -107,7 +108,7 @@ async function landWhileHeld(
 			if (!done.ok) return done;
 			releases.push(done.release);
 			const mine = done.settled.find((settled) => settled.change === input.change);
-			if (mine) return outcomeOf(mine);
+			if (mine) return outcomeOf(mine, input.branch);
 		}
 		return null;
 	} finally {

@@ -1,4 +1,4 @@
-import type { Landing, Settled } from "./landing";
+import { CONFLICT_ON, type Landing, type Settled } from "./landing";
 import { type Holding, STEP_MS } from "./merge-lease";
 import type { BatchChange, CheckResult, MergeInput, Ready } from "./merge-types";
 import { fail } from "../errors";
@@ -138,4 +138,18 @@ async function putOut(input: MergeInput, ready: Ready, results: CheckResult[]): 
 		reasons,
 		checks,
 	};
+}
+
+/**
+ * What a rejection by the checks says, read back from its evidence as putOut writes it: that the head doesn't merge
+ * onto the branch, or that its checks failed, with the failed command, its exit code and the end of its output when
+ * it names them.
+ */
+export function rejectedFor(evidence: string): { why: "conflict" } | { why: "checks"; check?: CheckResult } {
+	const [first = "", ...rest] = evidence.split("\n");
+	if (first.startsWith(CONFLICT_ON)) return { why: "conflict" };
+	const named = /^checks failed: (.+?) exited (-?\d+) on [0-9a-f]+, /.exec(first);
+	if (!named) return { why: "checks" };
+	const output = rest.join("\n").slice(-OUTCOME_OUTPUT_CHARS);
+	return { why: "checks", check: { command: named[1]!, exitCode: Number(named[2]), output } };
 }
