@@ -3,7 +3,7 @@ import { toolEvent } from "../hive-events";
 import { projectBranch } from "../project-branch";
 import type { NewsItem } from "../repo-cache";
 import type { Registry } from "./claims";
-import { type Args, openCall, type ToolContext, type ToolHandlers } from "./tools/context";
+import { type Args, openCall, presentedKey, type ToolContext, type ToolHandlers, verifiedAgent } from "./tools/context";
 import { repoSnapshot } from "./tools/dashboard";
 import { advice, claimsRef, recordLog, storeFor } from "./tools/repo";
 import { auditTools } from "./tools/audit-tools";
@@ -65,18 +65,21 @@ export async function callTool(name: string, args: Args, ctx: ToolContext): Prom
 }
 
 /**
- * Adds what landed on the project's branch since this agent was last told, so it hears of main moving
- * without asking. Only for object replies to a named agent, and it never fails the call.
+ * Adds what landed on the project's branch since this agent was last told, and its notices, so it hears of main
+ * moving without asking. Only for object replies to the agent the call is verified as, never one an argument names:
+ * a person merging from the dashboard, or a caller naming another agent, would use up that agent's news. It never
+ * fails the call.
  */
 async function withNews(name: string, args: Args, ctx: ToolContext, result: unknown) {
-	const agent = ctx.agent ?? (typeof args.agent === "string" ? args.agent : undefined);
-	if (!ctx.news || !agent || name === "register" || !result || typeof result !== "object" || Array.isArray(result))
-		return result;
+	if (!ctx.news || name === "register" || !result || typeof result !== "object" || Array.isArray(result)) return result;
+	if (!ctx.agent && !presentedKey(args, ctx)) return result;
 	const repo = requiredString(args, "repo");
 	const registry = await recordLog<Registry>(ctx, repo, claimsRef(repo))
 		.read()
 		.catch(() => null);
 	if (!registry?.commit.state.baseline) return result;
+	const agent = await verifiedAgent(args, ctx, registry.commit.state).catch(() => undefined);
+	if (!agent) return result;
 	const branch = projectBranch(registry.commit.state);
 	const news = await ctx.news(repo, branch, agent).catch((): NewsItem[] => []);
 	if (!news.length) return result;

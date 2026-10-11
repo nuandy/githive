@@ -236,11 +236,20 @@ export async function openCall(args: Args, ctx: ToolContext, run: RunTool) {
 	};
 }
 
+/** The agent key the caller presented: in the X-GitHive-Agent-Key header, or as the agent_key argument. */
+export const presentedKey = (args: Args, ctx: ToolContext) =>
+	ctx.agentKey ?? (typeof args.agent_key === "string" ? args.agent_key : undefined);
+
+/** The agent a call is verified as, if any: a signed-in agent, or the agent whose key the caller presented. */
+export async function verifiedAgent(args: Args, ctx: ToolContext, registered: Registry | undefined) {
+	const key = presentedKey(args, ctx);
+	// A signed-in agent is who its token says; otherwise an agent key names the agent.
+	return ctx.agent ?? (key ? await keyAgent(registered, key) : undefined);
+}
+
 /** Who the call is from: a signed-in agent, or the agent its key names; and the agent each argument names. */
 async function callerOf(args: Args, ctx: ToolContext, registered: Registry | undefined) {
-	const key = ctx.agentKey ?? (typeof args.agent_key === "string" ? args.agent_key : undefined);
-	// A signed-in agent is who its token says; otherwise an agent key names the agent.
-	const acting = ctx.agent ?? (key ? await keyAgent(registered, key) : undefined);
+	const acting = await verifiedAgent(args, ctx, registered);
 	// A signed-in agent may leave its name out.
 	const agentArg = (field: string) => {
 		const given = typeof args[field] === "string" && args[field].trim();

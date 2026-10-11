@@ -6,7 +6,7 @@ import { GitCasLog } from "../src/record-log";
 import { statusOf } from "../src/errors";
 import { claimStore } from "../src/toolkit/claim-store";
 import { type ClaimRecord, type Registry, shardClaims } from "../src/toolkit/claims";
-import { callTool, type ToolContext, repoSnapshot } from "../src/toolkit/mcp";
+import { callTool, mergeAsPerson, type ToolContext, repoSnapshot } from "../src/toolkit/mcp";
 import type { VoteRecord } from "../src/toolkit/votes";
 import { backlogFor, reviewsFor, type WorkInput, type WorkItem, workId } from "../src/toolkit/work";
 import { memoryLanding } from "../src/toolkit/landing";
@@ -14,6 +14,10 @@ import { holdsRef, type ReviewHolds, reviewHolds, reviewsRef } from "../src/tool
 import { pushChange } from "./helpers/agents";
 import { startGitServer, type GitServer } from "./helpers/git-server";
 import { memoryBatchGit } from "./helpers/memory-batch-git";
+import { toolCalls } from "./helpers/tool-calls";
+import { FakeStorage } from "./fakes/env";
+
+const { RepoCache } = await import("../src/repo-cache");
 
 // Agents without set roles look and choose: reviews lists the reviews an
 // agent may give (never its own; a role that can block only if it holds it),
@@ -601,6 +605,60 @@ describe("news of main moving", { timeout: 120_000 }, () => {
 		} finally {
 			await server.close();
 		}
+	});
+});
+
+describe("news goes only to the verified caller", { timeout: 120_000 }, () => {
+	let server: GitServer;
+	let work: string;
+	beforeEach(async () => {
+		server = await startGitServer();
+		work = mkdtempSync(join(tmpdir(), "githive-news-"));
+	});
+	afterEach(async () => {
+		await server.close();
+		rmSync(work, { recursive: true, force: true });
+	});
+
+	// Agent a's change c-a, pushed and waiting for approval, with news for a: b's landing and a note.
+	const newsForA = async () => {
+		const live = new RepoCache({ storage: new FakeStorage(), getWebSockets: () => [] } as never, {} as never);
+		const tools = toolCalls(() => server, { news: async (_repo, branch, agent) => live.landingNews(branch, agent) });
+		await tools.call("settings", { required: 1, vetoes: [] });
+		await tools.register("a", "b");
+		// a's first call starts its news; b's starts b's.
+		await tools.call("claim", { change: "c-a", agent: "a", paths: ["src/a/"], intent: "a" }, "a");
+		await tools.call("claim", { change: "c-b", agent: "b", paths: ["src/b/"], intent: "b" }, "b");
+		await pushChange(server.url, work, "a", "c-a", { "src/a/x.js": "a\n" });
+		const at = new Date(Date.now() + 1000).toISOString();
+		await live.landingSettled("main", [
+			{ change: "c-z", head: "h", agent: "z", how: "landed", at, commit: "m1", files: ["src/z.js"] },
+		]);
+		await live.notify("main", [{ agent: "a", notice: { kind: "note", at, says: "b left a note on c-a" } }]);
+		const aHears = async () => {
+			const { news } = (await tools.call("backlog", { agent: "a" }, "a")) as { news?: { kind: string }[] };
+			return (news ?? []).map((item) => item.kind);
+		};
+		return { ...tools, aHears };
+	};
+
+	it("a person's dashboard merge doesn't use up the agent's news", async () => {
+		const { ctx, aHears } = await newsForA();
+		const merged = (await mergeAsPerson(ctx(), "p", "c-a", "person:ada@example.com")) as Record<string, unknown>;
+		expect(merged).toMatchObject({ ok: false });
+		expect(merged.news).toBeUndefined();
+		expect(await aHears()).toEqual(["landed", "note"]);
+	});
+
+	it("a caller naming another agent doesn't get or use up its news", async () => {
+		const { call, aHears } = await newsForA();
+		// b may ask to merge a's change, naming a, but hears only its own news: z's landing.
+		const merged = await call("merge", { change: "c-a", agent: "a" }, "b");
+		expect(merged).toMatchObject({ ok: false, news: [{ kind: "landed", change: "c-z" }] });
+		expect(await aHears()).toEqual(["landed", "note"]);
+		// Nor does a caller with no key or sign-in, naming a.
+		expect((await call("merge", { change: "c-a", agent: "a" })).news).toBeUndefined();
+		expect(await aHears()).toEqual([]);
 	});
 });
 

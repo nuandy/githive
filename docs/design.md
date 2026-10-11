@@ -974,12 +974,16 @@ to merge changes that had landed, all at once. It's gone.
 `news`: what landed on the project's branch since that agent was last told,
 others' changes only, each with its files, agent, intent and commit, and a
 line saying it ("main changed src/billing/invoice.ts: c-7 by agent-b, \"add
-partial refunds\""). The repo's RepoCache keeps where each agent was last told;
-its first call tells it nothing old. A merge or a check that conflicts with
-the branch names, for each file in conflict, the change that last landed on it,
-with its agent, intent and commit (each landing's outcome keeps its files and
-intent, a dozen paths and 140 characters at most), so the agent knows what it's
-reconciling with and whom to ask.
+partial refunds\""), marked `kind: "landed"`. The repo's RepoCache keeps where
+each agent was last told; its first call tells it nothing old. The agent's
+notices follow, each with its own `kind` and `says` (see
+[awareness.md](awareness.md)). News goes only to the agent the call is verified
+as, by its sign-in or key, never to one an argument names, so a person merging
+from the dashboard doesn't use up the agent's news. A merge or a check that
+conflicts with the branch names, for each file in conflict, the change that
+last landed on it, with its agent, intent and commit (each landing's outcome
+keeps its files and intent, a dozen paths and 140 characters at most), so the
+agent knows what it's reconciling with and whom to ask.
 
 **Backlog items aren't reserved.** Two agents picking the same piece both
 claim it under its id, and the claim decides: the second is refused as
