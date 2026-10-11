@@ -220,10 +220,13 @@ async function commitAndPush(agent, id, message) {
 	say(agent.name, `pushed ${id} ${head.slice(0, 7)}: ${statSummary}`);
 }
 
-/** Merges the project's branch in and pushes. The fetch is deep enough to find the merge base. */
+/**
+ * Merges the project's branch in and pushes. The fetch has no depth, so it joins the history already here and the
+ * push sends the fork every commit it lacks.
+ */
 async function mergeProject(agent, id) {
 	const dir = checkoutOf(id);
-	await git(dir, "fetch", "-q", "--depth", "50", "origin", branch);
+	await git(dir, "fetch", "-q", "origin", branch);
 	await git(dir, ...identity(agent), "merge", "-q", "--no-edit", `origin/${branch}`).catch(async (err) => {
 		await git(dir, "merge", "--abort").catch(() => undefined);
 		const detail = String(err.stderr ?? err).slice(0, 160);

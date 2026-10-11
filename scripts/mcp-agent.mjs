@@ -137,7 +137,10 @@ switch (command) {
 				`Authorization: Bearer ${project.token.split("?")[0]}`,
 			]);
 			if (command === "clone") {
-				execFileSync("git", ["-C", dir, "fetch", "--quiet", ...depth, "origin", project.branch]);
+				// Without a depth, so the fetch reaches back to the fork's own copy of the branch: a push then sends
+				// the fork every commit it lacks. Cut off at a depth, it left the fork's history with holes, which
+				// Artifacts can't serve to a fetch that negotiates.
+				execFileSync("git", ["-C", dir, "fetch", "--quiet", "origin", project.branch]);
 				execFileSync("git", ["-C", dir, "checkout", "--quiet", "-B", project.branch, `origin/${project.branch}`]);
 			}
 			try {
