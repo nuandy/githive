@@ -429,6 +429,58 @@ describe("heads-ups between open changes", () => {
 	});
 });
 
+describe("a full batch", { timeout: 60_000 }, () => {
+	it("reads no more for 100 events, with redeliveries, duplicates and strangers' pushes, than for each push once", async () => {
+		const changes = ["c-0", "c-1", "c-2", "c-3", "c-4"];
+		const heads: Record<string, string> = {};
+		for (const [i, change] of changes.entries())
+			heads[change] = await pushToFork(`agent-${i}`, change, { [`src/jobs/job${i}.ts`]: USES_LOAD });
+		const stranger = await pushToFork("mallory", "c-0", { "src/jobs/x.ts": USES_LOAD });
+		const moved = await land("c-7", "alice", { "src/config.ts": SIGNATURE_CHANGE }, INTENT_C7);
+		/** Delivers the batches to a fresh hive, counting Artifacts reads. */
+		const readsFor = async (...batches: ((h: ReturnType<typeof hive>) => PushedEvent[])[]) => {
+			forgetChains();
+			const h = hive();
+			h.claims.push(...changes.map((change, i) => ({ change, agent: `agent-${i}` })));
+			const reads = { count: 0 };
+			const history = h.parts.history;
+			h.parts.history = (repo, read) =>
+				history(repo, (source) => {
+					const spend = <T>(made: Promise<T>) => (reads.count++, made);
+					return read({
+						log: (ref, limit, offset) => spend(source.log(ref, limit, offset)),
+						readCommit: (hash) => spend(source.readCommit(hash)),
+						readTree: (hash) => spend(source.readTree(hash)),
+						...(source.readBlob ? { readBlob: (hash: string) => spend(source.readBlob!(hash)) } : {}),
+					});
+				});
+			for (const batch of batches) {
+				const messages = await h.deliver(...batch(h));
+				for (const message of messages) expect(message.ack).toHaveBeenCalledOnce();
+			}
+			return { reads: reads.count, told: (await Promise.all(changes.map((_, i) => h.told(`agent-${i}`)))).flat() };
+		};
+		const pushes = (h: ReturnType<typeof hive>) =>
+			changes.map((change, i) => h.forkPush(`agent-${i}`, change, heads[change]!));
+		const once = await readsFor(pushes, (h) => [h.branchPush("main", moved)]);
+		// 85 events, then 15: each push delivered ten times, pushes by strangers, and one landing told fifteen times.
+		const crowded = await readsFor(
+			(h) => {
+				const events: PushedEvent[] = [];
+				for (let round = 0; round < 10; round++) events.push(...pushes(h));
+				// Pushes to a change's branch on a fork that isn't its holder's, and to changes nobody claims.
+				for (let i = 0; i < 30; i++) events.push(h.forkPush("mallory", "c-0", stranger));
+				for (let i = 0; i < 5; i++) events.push(h.forkPush("mallory", `m-${i}`, stranger));
+				return events;
+			},
+			(h) => Array.from({ length: 15 }, () => h.branchPush("main", moved)),
+		);
+		expect(crowded.reads).toBe(once.reads);
+		expect(crowded.told.map((notice) => notice.change).sort()).toEqual(once.told.map((notice) => notice.change).sort());
+		expect(once.told).toHaveLength(5);
+	});
+});
+
 describe("the queue consumer with awareness", () => {
 	it("noting heads still works when the awareness work throws", async () => {
 		const notePushes = vi.fn(async () => undefined);

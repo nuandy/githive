@@ -237,7 +237,7 @@ describe("githive CLI", () => {
 		);
 		expect(refused.stdout).not.toContain("githive sync");
 		// Without a fix to print (an older server, say), the CLI's own recipe.
-		answers.merge = { ...answers.merge, fix: undefined };
+		answers.merge = { ...(answers.merge as Record<string, unknown>), fix: undefined };
 		const unfixed = await cli(["land", "acme/app", "rate-limit"]);
 		expect(unfixed.stdout).toMatch(
 			/next: githive sync, resolve inside your claim so both changes make sense, commit, githive land;/,

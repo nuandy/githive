@@ -319,6 +319,8 @@ async function branchMoved(parts: AwarenessParts, push: BranchPush, budget: Fact
 	const { open, last } = await rpc(store.branchState(push.branch));
 	// A new branch starts where another was: nothing landed on it yet.
 	if (!open || push.before === null) return void (await store.analysed(push.branch, push.after));
+	// Analysed already: an event delivered again, or a second event for the same push.
+	if (last === push.after) return;
 	const after = push.after;
 	const chain = await parts.history(push.repo, (source) => source.log(after, LANDED_COMMITS + 1, 0));
 	const stops = new Set([push.before, last].filter((each): each is string => !!each));

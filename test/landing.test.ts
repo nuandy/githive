@@ -574,6 +574,38 @@ describe("landing ready changes together", { timeout: 120_000 }, () => {
 		expect((await store().read()).claims.map((claim) => claim.change).sort()).toEqual(["a-1", "c-1"]);
 	});
 
+	it("lands nothing more once its lease is lost after a put-out: the merge takes its turn again", async () => {
+		await readyChange("a-1", { "src/a.txt": "a\n" });
+		await readyChange("c-1", { "src/shared.txt": "from c\n" });
+		await pushSharedToMain();
+		const steps: string[] = [];
+		let lose = false;
+		const git = memoryBatchGit(remote());
+		const noted: BatchGit = {
+			...git,
+			land: async (input) => {
+				steps.push(`land ${input.merges.map((m) => m.change).join(",")}`);
+				const landed = await git.land(input);
+				if (typeof landed === "object" && "failed" in landed) lose = true;
+				return landed;
+			},
+		};
+		const landing = memoryLanding();
+		// The lease is renewed once more after c-1 is put out, and that renewal is refused, as when another merge took it.
+		const watched: Landing = {
+			...landing,
+			turn: async (...args) => (steps.push("turn"), landing.turn(...args)),
+			renew: async (holder, ttl) => (lose ? ((lose = false), false) : landing.renew(holder, ttl)),
+		};
+		const more = { verify: [], runChecks: undefined, batchGit: noted };
+		expect(await merge("a-1", runner(), watched, more)).toMatchObject({ ok: true });
+		expect(landed()).toEqual(["a-1"]);
+		// Not landed again in the same turn: the merge asked for its turn first.
+		const [first, second] = steps.flatMap((step, i) => (step.startsWith("land") ? [i] : []));
+		expect(steps.slice(first! + 1, second)).toContain("turn");
+		expect(steps[second!]).toBe("land a-1");
+	});
+
 	it("puts out a change that conflicts while landing a checked batch, and checks the rest again without it", async () => {
 		for (const x of ["a", "b", "c"]) await readyChange(`${x}-1`, { [`src/${x}.txt`]: `${x}\n` });
 		const git = memoryBatchGit(remote());

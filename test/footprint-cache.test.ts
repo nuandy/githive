@@ -324,6 +324,21 @@ describe("facts", () => {
 		expect(budget.chars).toBe(10_000_000);
 	});
 
+	it("are kept for at most 5,000 files, the oldest dropped, and never past 256 KiB a file", async () => {
+		const { cache, storage } = caches();
+		const small = { declarations: [], imports: [] };
+		const logs = vi.spyOn(console, "log").mockImplementation(() => undefined);
+		await cache.keepFacts(Object.fromEntries(Array.from({ length: 5_001 }, (_, i) => [`b${i}:src/f.ts`, small])));
+		expect(await cache.factsOf(["b0:src/f.ts", "b5000:src/f.ts"])).toEqual({ "b5000:src/f.ts": small });
+		expect(await storage.get("count:facts")).toBe(5_000);
+		expect(logs).toHaveBeenCalledWith("footprints: dropped the 1 oldest facts, past 5000");
+		const signature = "x".repeat(300_000);
+		const big = { declarations: [{ name: "X", kind: "type" as const, exported: true, signature }], imports: [] };
+		await cache.keepFacts({ "huge:src/big.ts": big });
+		expect(await cache.factsOf(["huge:src/big.ts"])).toEqual({});
+		logs.mockRestore();
+	});
+
 	it("are read for at most 50 changed TS/JS files a push", async () => {
 		const { cache } = caches();
 		const files = (returns: string) =>
