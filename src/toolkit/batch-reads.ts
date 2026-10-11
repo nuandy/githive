@@ -1,3 +1,4 @@
+import { fail } from "../errors";
 import { repoOfUrl } from "../git-http";
 import { type CommitMeta, filesBetween, type HistorySource } from "./branch-history";
 import { atMost, type BatchGit, type Inspected } from "./merge";
@@ -260,6 +261,14 @@ export async function changeAgainst(
 		files: placed.files,
 		both: placed.files.filter((file) => theirs.some((theirFile) => touches(file, theirFile))),
 	};
+}
+
+/**
+ * Refuses a read that failed because Artifacts didn't answer. Reading the change with git instead would fetch the
+ * project from the busiest repo, the more so the busier Artifacts is, so the caller is asked to come back.
+ */
+export function busyArtifacts(change: string, err: unknown): never {
+	fail(503, `${change} couldn't be read just now, as Artifacts is busy (${String(err)}): call again shortly`);
 }
 
 /** A change placed on the branch: its head, its merge base with the branch, and the files it changed since. */

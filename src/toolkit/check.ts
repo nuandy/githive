@@ -1,7 +1,7 @@
 import { branchHead, inWorkspaceTurn, type Remote, Workspace } from "../git";
 import { repoOfUrl } from "../git-http";
 import { inLane } from "../claim-paths";
-import { changeAgainst, type ReadHistory } from "./batch-reads";
+import { busyArtifacts, changeAgainst, type ReadHistory } from "./batch-reads";
 import type { ClaimRecord } from "./claims";
 import { fail } from "../errors";
 
@@ -40,7 +40,7 @@ export async function checkChange(input: CheckInput) {
 		? await changeAgainst(input.history, repoOfUrl(input.project.url), input.branch, listed, {
 				ref: `changes/${change}`,
 				source: input.source,
-			}).catch(() => null)
+			}).catch((err) => busyArtifacts(change, err))
 		: null;
 	if (compared && "error" in compared) fail(409, `changes/${change} has nothing pushed to check`);
 	if (compared && !compared.both.length)

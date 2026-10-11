@@ -112,6 +112,28 @@ describe("an early check", { timeout: 60_000 }, () => {
 		);
 	});
 
+	it("asks to come back, fetching nothing, when Artifacts doesn't answer", async () => {
+		const remote = { url: server.url, token: "unused" };
+		await pushChange(server.url, work, "agent-a", "a-1", { "src/a.txt": "a\n" });
+		const main = server.git("rev-parse", "main").trim();
+		const before = server.requests.length;
+		const down = (async () => {
+			throw new Error("INTERNAL_ERROR");
+		}) as never;
+		await expect(
+			checkChange({
+				project: remote,
+				branch: "main",
+				source: remote,
+				claims: [],
+				change: "a-1",
+				branchHead: async () => main,
+				history: down,
+			}),
+		).rejects.toThrow(/\[503\] a-1 couldn't be read just now, as Artifacts is busy/);
+		expect(server.requests.length).toBe(before);
+	});
+
 	it("test-merges when the change and main changed the same file, and reports a real conflict", async () => {
 		const remote = { url: server.url, token: "unused" };
 		await pushChange(server.url, work, "agent-a", "a-1", { "src/same.txt": "a\n" });

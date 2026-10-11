@@ -1,7 +1,7 @@
 import { branchHead, inWorkspaceTurn, Workspace } from "../git";
 import { inLane } from "../claim-paths";
 import { repoOfUrl } from "../git-http";
-import { changeAgainst, landedOn } from "./batch-reads";
+import { busyArtifacts, changeAgainst, landedOn } from "./batch-reads";
 import { skipsChecks } from "./check-scope";
 import type { ClaimRecord } from "./claims";
 import type { ClaimsView } from "./claim-store";
@@ -87,7 +87,9 @@ async function readThroughHistory(input: MergeInput, baseHead: string, ref: stri
 	if (!input.history) return null;
 	const target = { ref, ...(input.source ? { source: input.source } : {}) };
 	const repo = repoOfUrl(input.remote.url);
-	return changeAgainst(input.history, repo, input.branch, baseHead, target).catch(() => null);
+	return changeAgainst(input.history, repo, input.branch, baseHead, target).catch((err) =>
+		busyArtifacts(input.change, err),
+	);
 }
 
 async function conflictRefusal(
