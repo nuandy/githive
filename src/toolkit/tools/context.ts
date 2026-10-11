@@ -127,6 +127,11 @@ export interface ToolContext {
 	github?: (repo: string) => Promise<GitHubLink | null>;
 	/** The repo's GitHubSync: the job bringing GitHub's changes back, and the pull request as last seen. */
 	githubSync?: (repo: string) => GitHubSyncHandle;
+	/**
+	 * Bounds for a merge run where time is short (the GitHub job's, in an alarm): how long it waits for its turn before
+	 * answering pending, how often it looks, and how many changes its batch may take.
+	 */
+	mergeLimits?: { answerWithinMs?: number; pollMs?: number; maxBatch?: number };
 	/** What landed on a branch since this agent was last told (see RepoCache.landingNews). */
 	news?: (repo: string, branch: string, agent: string) => Promise<Landed[]>;
 	/** A branch's head, briefly cached and shared by the merges watching it (see MergeInput.branchHead). */

@@ -7,12 +7,14 @@ import { GitCasLog } from "../src/record-log";
 import type { Registry } from "../src/toolkit/claims";
 import { type GitHubImports, importsRef } from "../src/toolkit/github-imports";
 import { GITHUB_AGENT, GITHUB_IDENTITY, type GitHubSyncHandle } from "../src/toolkit/github-settings";
+import { memoryLanding } from "../src/toolkit/landing";
 import type { ToolContext } from "../src/toolkit/mcp";
 import { generateStampKey, makeStamper } from "../src/toolkit/stamp";
 import { FakeStorage } from "./fakes/env";
 import { pushChange } from "./helpers/agents";
 import { fakeGitHub, type FakeGitHub } from "./helpers/fake-github";
 import { linkBeforeModes } from "./helpers/github-link";
+import { memoryBatchGit } from "./helpers/memory-batch-git";
 import { startGitServer, type GitServer } from "./helpers/git-server";
 import { toolCalls } from "./helpers/tool-calls";
 
@@ -100,7 +102,29 @@ afterEach(async () => {
 	github.close();
 	await server.close();
 	rmSync(work, { recursive: true, force: true });
+	delete extra.landing;
+	delete extra.mergeLimits;
+	delete extra.batchGit;
 });
+
+/** Runs the job's steps until it's at `step` (or ended), without running that step. */
+async function stepUntil(step: string) {
+	for (let alarms = 0; alarms < 20; alarms++) {
+		const job = (await sync.state()).job;
+		if (!job || job.step === step || storage.alarm === null) return job;
+		storage.alarm = null;
+		await sync.alarm();
+	}
+	return (await sync.state()).job;
+}
+
+/** A change claimed, pushed and approved by agent a, ready to land; returns its head. */
+async function ready(change: string, files: Record<string, string>) {
+	await call("claim", { change, agent: "a", paths: Object.keys(files), intent: `Add ${change}` }, "a");
+	const head = await pushChange(server.url, work, "a", change, files);
+	await approve(head);
+	return head;
+}
 
 describe("GitHub's changes coming back", { timeout: 120_000 }, () => {
 	it("finds nothing to bring back while GitHub's branch is behind main", async () => {
@@ -193,6 +217,52 @@ describe("GitHub's changes coming back", { timeout: 120_000 }, () => {
 		await land("c-3", { "src/c.js": "c\n" });
 		expect(server.git("show", "main:docs/notes.md")).toBe("from GitHub\n");
 		expect(await call("audit", {})).toMatchObject({ open: 0 });
+	});
+
+	it("waits for its turn in steps no longer than its bound, and lands its own change alone", async () => {
+		// One landing record for every merge, as the repo's is, so a lease held elsewhere makes the job's merge wait.
+		const shared = memoryLanding();
+		extra.landing = () => shared;
+		extra.mergeLimits = { answerWithinMs: 200, pollMs: 50 };
+		await land("c-1", { "src/a.js": "a\n" });
+		const pushed = github.push({ "docs/notes.md": "from GitHub\n" });
+		await ready("c-2", { "src/b.js": "b\n" });
+		expect(await call("merge", { change: "c-2", agent: "a" }, "a")).toMatchObject({ ok: true });
+		expect(await stepUntil("merge")).toMatchObject({ step: "merge", commit: pushed });
+		// Another merge holds the lease: the job's merge answers pending within its bound, and its next alarm is set.
+		expect(await shared.turn("someone", "x-1", "h".repeat(40), Date.now(), 60_000)).toEqual({ lease: true });
+		const started = Date.now();
+		storage.alarm = null;
+		await sync.alarm();
+		expect(Date.now() - started).toBeLessThan(10_000);
+		expect((await sync.state()).job).toMatchObject({ step: "merge", reason: expect.stringContaining("waits for its turn") });
+		expect(storage.alarm).not.toBeNull();
+		// An approved change of agent a's is ready too, but the job's batch is its own change alone.
+		const other = await ready("c-3", { "src/c.js": "c\n" });
+		await shared.drop("someone");
+		expect(await settle()).toMatchObject({ step: "done", commit: pushed });
+		expect(server.git("show", "main:docs/notes.md")).toBe("from GitHub\n");
+		expect(server.git("ls-tree", "--name-only", "-r", "main")).not.toContain("src/c.js");
+		expect(await call("merge", { change: "c-3", agent: "a" }, "a")).toMatchObject({ ok: true });
+		expect(lastMerge().parents[1]).toBe(other);
+	});
+
+	it("merges again shortly, however often others' merges land first, and never sends that to a person", async () => {
+		await land("c-1", { "src/a.js": "a\n" });
+		const pushed = github.push({ "docs/notes.md": "from GitHub\n" });
+		await ready("c-2", { "src/b.js": "b\n" });
+		expect(await call("merge", { change: "c-2", agent: "a" }, "a")).toMatchObject({ ok: true });
+		expect(await stepUntil("merge")).toMatchObject({ step: "merge" });
+		// Main moves under every batch the job's merge builds, for more rounds than a step is tried.
+		extra.batchGit = () => ({ ...memoryBatchGit({ url: server.url, token: "unused" }), land: async () => "moved" });
+		for (let round = 0; round < 6; round++) {
+			storage.alarm = null;
+			await sync.alarm();
+			expect((await sync.state()).job).toMatchObject({ step: "merge", reason: expect.stringContaining("kept moving") });
+			expect(storage.alarm! - Date.now()).toBeGreaterThan(20_000);
+		}
+		delete extra.batchGit;
+		expect(await settle()).toMatchObject({ step: "done", commit: pushed });
 	});
 
 	it("never fails a landing when GitHub or the import does", async () => {

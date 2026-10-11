@@ -130,8 +130,17 @@ is a fast-forward again.
   resumable job owned by the repo, in its `GitHubSync` Durable Object (a new class, migration `v15`), with an alarm
   per step like the hosted builder's. Every step is idempotent, so a retried step finds its work done. A step that
   throws is tried again, waiting 30 s, 1, 2 and 4 minutes, then the job counts as failed (see step 1 for when it
-  starts again). A job not heard from in an hour has lost its alarm, and a notice starts it again. The landing only notes that GitHub is ahead and starts the job. The job's own merges push to GitHub
-  as any landing does, but don't notice GitHub's branch, which would call the object back while its step runs.
+  starts again). A job not heard from in an hour has lost its alarm, and a notice starts it again. The landing only
+  notes that GitHub is ahead and starts the job. The job's own merges push to GitHub as any landing does, but don't
+  notice GitHub's branch, which would call the object back while its step runs.
+- **A merge step stays within an alarm.** The runtime stops an alarm after 15 minutes, and a merge can wait 10 for
+  its turn and then land batches whose checks run for minutes. So the job's merge (`JOB_MERGE`) waits for its turn
+  at most 4 minutes, then answers pending; the job records that ("waits for its turn to land") and merges again at
+  its next alarm, never holding on. When its turn comes, its batch is its own change alone, so a slow check, or the
+  runtime stopping the alarm, costs no other change anything: the lease lapses within 2 minutes and the next merge
+  goes on. A merge refused because main kept moving under its batch is tried again 30 seconds on, however often:
+  that's a busy repo, not something for a person. A check run itself longer than an alarm allows is cut off with
+  it, and the change's own batch is tried again at the next alarm.
 
 ## The dashboard
 

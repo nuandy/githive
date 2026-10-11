@@ -33,9 +33,19 @@ export const isRunning = (job: InboundJob | null | undefined) => !!job && RUNNIN
 
 /**
  * A running job not heard from in this long has lost its alarm, and starts again when GitHub's branch is noticed. A
- * merge step answers within 10 minutes, but a batch it's landing can run its checks for longer.
+ * merge step answers within JOB_MERGE's bound plus its own batch's checks.
  */
 const LOST_AFTER_MS = 60 * 60_000;
+
+/**
+ * The job's merge, run in an alarm, which the runtime stops after 15 minutes. It waits for its turn at most 4 minutes,
+ * then answers pending, and the job records that and merges again at its next alarm rather than holding on. When its
+ * turn comes, its batch is its own change alone, so a slow check or a stopped alarm costs no one else's change.
+ */
+export const JOB_MERGE: NonNullable<ToolContext["mergeLimits"]> = { answerWithinMs: 4 * 60_000, maxBatch: 1 };
+
+/** A merge refused because main kept moving under its batch is tried again this long after: a busy repo, not a fault. */
+const MOVED_RETRY_MS = 30_000;
 
 /** A job that failed is started again by a notice of the same commit only after this long (or when asked). */
 const FAILED_RETRY_MS = 60 * 60_000;
@@ -90,12 +100,9 @@ export interface StepOutcome {
 }
 
 /** Runs the job's current step as githive-github (`ctx` is a hosted tool context stamped as it). */
-export async function inboundStep(ctx: ToolContext, job: InboundJob, now = Date.now()): Promise<StepOutcome> {
-	const at = (changes: Partial<InboundJob>): InboundJob => ({
-		...job,
-		...changes,
-		updatedAt: new Date(now).toISOString(),
-	});
+export async function inboundStep(ctx: ToolContext, job: InboundJob): Promise<StepOutcome> {
+	// When the step ended, not when it began: a merge step can wait minutes.
+	const at = (changes: Partial<InboundJob>): InboundJob => ({ ...job, ...changes, updatedAt: new Date().toISOString() });
 	try {
 		if (job.step === "import") return await importStep(ctx, job, at);
 		if (job.step === "claim") return await claimStep(ctx, job, at);
@@ -179,17 +186,19 @@ async function claimStep(ctx: ToolContext, job: InboundJob, at: At): Promise<Ste
 	return { job: at({ step: "merge", change, attempts: 0 }), next: 0 };
 }
 
-// It merges like any change: in a batch, through the checks, sent back if it conflicts or they fail.
+// It merges like any change: in a batch, through the checks, sent back if it conflicts or they fail. Within JOB_MERGE's
+// bound: a merge still waiting for its turn answers pending, and the next alarm merges again.
 async function mergeStep(ctx: ToolContext, job: InboundJob, at: At): Promise<StepOutcome> {
 	const change = job.change!;
-	const outcome = (await callTool("merge", { repo: job.repo, change, agent: GITHUB_AGENT }, ctx)) as MergeOutcome;
+	const bounded = { ...ctx, mergeLimits: { ...JOB_MERGE, ...ctx.mergeLimits } };
+	const outcome = (await callTool("merge", { repo: job.repo, change, agent: GITHUB_AGENT }, bounded)) as MergeOutcome;
 	if (outcome.ok)
 		return { job: at({ step: "done", merged: outcome.commit, attempts: 0 }), pull: await openPull(ctx, job) };
-	// Still waiting for its batch: merging again goes on waiting.
-	if (outcome.pending) return { job: at({}), next: 0 };
 	const reason = outcome.reasons.join("; ");
-	if (/kept moving/.test(reason) && job.attempts + 1 < STEP_TRIES)
-		return { job: at({ attempts: job.attempts + 1, reason }), next: 0 };
+	// Still waiting for its turn: merging again goes on waiting.
+	if (outcome.pending) return { job: at({ reason: `waits for its turn to land: ${reason}`, attempts: 0 }), next: 0 };
+	// Others' merges landed first: a busy repo, so it merges again shortly, however often that happens.
+	if (/kept moving/.test(reason)) return { job: at({ reason, attempts: 0 }), next: MOVED_RETRY_MS };
 	if (/holds no claim/.test(reason)) return { job: at({ step: "failed", reason }) };
 	// Untrusted, it waits for review like any change, and lands with a batch once approved.
 	if (/approvals from reviewers|still needs approval|is vetoed/.test(reason))

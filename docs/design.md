@@ -691,7 +691,10 @@ the audit holds each merge to the settings in force when it merged. Then
   GitHub's commit, given 2 minutes and tried twice, and, unless main has it,
   writes it to the project as `github/<branch>`; the import record notes it.
   The repo's own Gate lands batches one at a time, so a slow GitHub fetched
-  there would hold up every landing that needs it. A squash or rebase merge of
+  there would hold up every landing that needs it. The job's merge stays
+  within an alarm's 15 minutes: it waits for its turn at most 4 minutes and
+  then answers pending, which the job records before merging again at its
+  next alarm, and its batch is its own change alone. A squash or rebase merge of
   the pull request gave GitHive's commits new ids, so git's merge base would be
   GitHub's branch from before the pull request: the Gate joins GitHub's commit
   to the newest commit of GitHive's main whose tree GitHub's branch has (a

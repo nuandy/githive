@@ -116,6 +116,11 @@ function optionalMergeInput(
 	const optional: Partial<MergeInput> = {};
 	if (into !== branch) optional.scope = (file: string) => scopeFile(file, into, branch);
 	if (registered?.skipChecks) optional.skipChecks = registered.skipChecks;
+	// A merge whose caller's time is bounded answers sooner, and lands a smaller batch (see ToolContext.mergeLimits).
+	const { answerWithinMs, pollMs, maxBatch } = ctx.mergeLimits ?? {};
+	if (answerWithinMs !== undefined) optional.answerWithinMs = answerWithinMs;
+	if (pollMs !== undefined) optional.pollMs = pollMs;
+	if (maxBatch !== undefined) optional.maxBatch = maxBatch;
 	const trusted = trustedImports(ctx, repo, registered);
 	if (trusted) optional.trusted = trusted;
 	if (ctx.branchHead) optional.branchHead = () => ctx.branchHead!(repo, into);
