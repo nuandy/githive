@@ -1,6 +1,7 @@
 import { fail, requiredString } from "../errors";
 import { toolEvent } from "../hive-events";
 import { projectBranch } from "../project-branch";
+import type { NewsItem } from "../repo-cache";
 import type { Registry } from "./claims";
 import { type Args, openCall, type ToolContext, type ToolHandlers } from "./tools/context";
 import { repoSnapshot } from "./tools/dashboard";
@@ -77,18 +78,22 @@ async function withNews(name: string, args: Args, ctx: ToolContext, result: unkn
 		.catch(() => null);
 	if (!registry?.commit.state.baseline) return result;
 	const branch = projectBranch(registry.commit.state);
-	const news = await ctx.news(repo, branch, agent).catch(() => []);
+	const news = await ctx.news(repo, branch, agent).catch((): NewsItem[] => []);
 	if (!news.length) return result;
-	const says = (landed: (typeof news)[number]) => {
+	const says = (landed: LandedNews) => {
 		const more = landed.filesMore ? ` and ${landed.filesMore} more` : "";
 		const intent = landed.intent ? `, "${landed.intent}"` : "";
 		return `${branch} changed ${landed.files.join(", ")}${more}: ${landed.change} by ${landed.agent}${intent}`;
 	};
+	// Landings are told in a line made here; notices come with their own `says` and `next`.
 	return {
 		...(result as Record<string, unknown>),
-		news: news.map((landed) => ({ ...landed, says: says(landed) })),
+		news: news.map((item) => (isLanded(item) ? { ...item, says: says(item) } : item)),
 	};
 }
+
+type LandedNews = Extract<NewsItem, { kind: "landed" }>;
+const isLanded = (item: NewsItem): item is LandedNews => item.kind === "landed";
 
 const handlers: ToolHandlers = {
 	...setupTools,

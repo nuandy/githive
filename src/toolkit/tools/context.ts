@@ -4,13 +4,14 @@ import type { GitHubLink } from "../../github";
 import type { HiveEvent } from "../../hive-events";
 import { projectBranch } from "../../project-branch";
 import { GitCasLog } from "../../record-log";
+import type { NewsItem, Notice } from "../../repo-cache";
 import { Timing } from "../../timing";
 import type { ReadHistory, SharedPlacements } from "../batch-reads";
 import { presentClaim } from "../branch-scope";
 import type { ClaimStore } from "../claim-store";
 import type { ClaimRecord, Registry } from "../claims";
 import type { BranchCommit } from "../git-records";
-import type { Landed, Landing } from "../landing";
+import type { Landing } from "../landing";
 import { atMost, type BatchChange, type BatchGit, type CheckRunner } from "../merge";
 import { abandoned } from "../staleness";
 import type { Stamper } from "../stamp";
@@ -124,8 +125,10 @@ export interface ToolContext {
 	};
 	/** A GitHub repo (owner/name) through GitHive's App, or null if the App isn't installed. Unset without GitHub. */
 	github?: (repo: string) => Promise<GitHubLink | null>;
-	/** What landed on a branch since this agent was last told (see RepoCache.landingNews). */
-	news?: (repo: string, branch: string, agent: string) => Promise<Landed[]>;
+	/** What landed on a branch since this agent was last told, then its notices (see RepoCache.landingNews). */
+	news?: (repo: string, branch: string, agent: string) => Promise<NewsItem[]>;
+	/** Leaves notices for agents on a branch, told with their next reply (see RepoCache.notify). Never fails. */
+	notify?: (repo: string, branch: string, notices: { agent: string; notice: Notice }[]) => Promise<void>;
 	/** A branch's head, briefly cached and shared by the merges watching it (see MergeInput.branchHead). */
 	branchHead?: (repo: string, branch: string) => Promise<string | null>;
 	/** Queues forks to be made in the background: the repo's seeds, or the named agents' own. */

@@ -548,10 +548,17 @@ describe("open changes' heads, as GitHive last saw them", { timeout: 120_000 }, 
 });
 
 describe("news of main moving", { timeout: 120_000 }, () => {
-	it("comes with every reply that's an object, saying what changed, by whom and why; a list stays a list", async () => {
+	it("comes with every reply that's an object, saying what changed, by whom and why, then notices; a list stays a list", async () => {
 		const server = await startGitServer();
 		try {
 			const asked: string[] = [];
+			// A notice keeps its own words.
+			const note = {
+				kind: "note",
+				at: "2026-10-10T10:01:00.000Z",
+				says: "agent-c left a note on c-1",
+				next: "reply with a note",
+			};
 			const ctx = (agentKey?: string): ToolContext => ({
 				remote: async () => ({ url: server.url, token: "unused" }),
 				batchGit: () => memoryBatchGit({ url: server.url, token: "unused" }),
@@ -561,6 +568,7 @@ describe("news of main moving", { timeout: 120_000 }, () => {
 					asked.push(`${branch} ${agent}`),
 					[
 						{
+							kind: "landed",
 							change: "c-7",
 							agent: "agent-b",
 							at: "2026-10-10T10:00:00.000Z",
@@ -568,6 +576,7 @@ describe("news of main moving", { timeout: 120_000 }, () => {
 							files: ["src/billing/invoice.ts"],
 							intent: "add partial refunds",
 						},
+						note,
 					]
 				),
 				...(agentKey ? { agentKey } : {}),
@@ -578,7 +587,14 @@ describe("news of main moving", { timeout: 120_000 }, () => {
 			const { key } = (await call("register", { agent: "agent-a" })) as { key: string };
 			expect(await call("backlog", { agent: "agent-a" }, key)).toMatchObject({
 				open: [],
-				news: [{ change: "c-7", says: 'main changed src/billing/invoice.ts: c-7 by agent-b, "add partial refunds"' }],
+				news: [
+					{
+						kind: "landed",
+						change: "c-7",
+						says: 'main changed src/billing/invoice.ts: c-7 by agent-b, "add partial refunds"',
+					},
+					note,
+				],
 			});
 			expect(Array.isArray(await call("claims", {}, key))).toBe(true);
 			expect(asked).toContain("main agent-a");

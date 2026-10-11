@@ -8,15 +8,16 @@ import {
 	asNews,
 	type Checking,
 	emptyLanding,
+	type Landed,
 	type LandingState,
 	type Settled,
 	settleOutcomes,
 } from "./toolkit/landing";
 
 // One per repo ("repo:<repo>"). It holds copies and hints that make reads fast: live-update sockets for pages,
-// prebuilt views, the hive's events, changes' heads, landing progress and the fork queue. Record tips and states
-// (RecordCache) and what merges keep for their landing (ChangeCache) have objects of their own, so they don't share
-// this one's memory. Git stays the source of truth, so losing any of this costs only speed.
+// prebuilt views, the hive's events, changes' heads, landing progress, agents' news and the fork queue. Record tips
+// and states (RecordCache) and what merges keep for their landing (ChangeCache) have objects of their own, so they
+// don't share this one's memory. Git stays the source of truth, so losing any of this costs only speed.
 
 interface View {
 	json: string;
@@ -30,6 +31,31 @@ const BUILD_LEASE_MS = 2 * 60_000;
 
 /** The most landings one reply tells an agent about; the newest are kept. */
 const NEWS_MOST = 20;
+
+/** A message for one agent about its change, kept until told (see docs/awareness.md, "The news channel"). */
+export interface Notice {
+	/** "interface", "heads_up", "note", ...: an open set, but never "landed", which marks landed news. */
+	kind: string;
+	/** The ISO time it was noted. */
+	at: string;
+	/** One line an agent can read. */
+	says: string;
+	/** What the agent might do about it. */
+	next?: string;
+	/** The recipient's change it is about. */
+	change?: string;
+	from?: { agent: string; change?: string };
+	detail?: Record<string, unknown>;
+}
+
+/** What a reply tells an agent: what others landed, then its notices. */
+export type NewsItem = (Landed & { kind: "landed" }) | Notice;
+
+const NOTICE = "notice:";
+/** The most notices kept for one agent on one branch; the oldest are dropped. */
+const NOTICES_KEPT = 50;
+/** How long a notice is kept untold. */
+const NOTICE_MS = 24 * 60 * 60_000;
 
 /** The latest commit seen on a change's branch (null: nothing pushed), from a read or a push event. */
 export interface KnownHead {
@@ -81,6 +107,7 @@ const KEPT_PREFIXES = [
 	"head:",
 	"files:",
 	"news:",
+	"notice:",
 	"merge:",
 	// Record tips and states, and packs, before they had objects of their own.
 	"record:",
@@ -420,17 +447,61 @@ export class RepoCache extends DurableObject<Env> {
 	}
 
 	/**
-	 * Other agents' changes that landed on `branch` since `agent` was last told, newest last.
-	 * An agent's first call returns nothing, so news starts from there.
+	 * What `agent` hasn't been told on `branch`: other agents' changes that landed since it was last told, newest
+	 * last, then its notices, oldest first. Landings start from an agent's first call; notices reach it on that call.
 	 */
-	async landingNews(branch: string, agent: string) {
+	async landingNews(branch: string, agent: string): Promise<NewsItem[]> {
 		const { recent } = await this.landing(branch);
 		const key = `news:${branch}:${agent}`;
 		const told = await this.ctx.storage.get<string>(key);
-		const latest = recent.at(-1)?.at;
-		if (latest && latest !== told) await this.ctx.storage.put(key, latest);
-		if (!told) return [];
-		return asNews(recent.filter((settled) => settled.at > told && settled.agent !== agent)).slice(-NEWS_MOST);
+		// The newest outcome, not the last kept: a failure noted later can carry an earlier time.
+		const newest = recent
+			.map((settled) => settled.at)
+			.sort()
+			.at(-1);
+		// A first call starts the cursor even when nothing has landed, so the first landings on a new repo are told.
+		if (!told) await this.ctx.storage.put(key, newest ?? new Date().toISOString());
+		else if (newest && newest > told) await this.ctx.storage.put(key, newest);
+		const landed = told
+			? asNews(recent.filter((settled) => settled.at > told && settled.agent !== agent)).slice(-NEWS_MOST)
+			: [];
+		const notices = await this.takeNotices(branch, agent);
+		return [...landed.map((news) => ({ kind: "landed" as const, ...news })), ...notices];
+	}
+
+	/**
+	 * Leave notices for agents on `branch`, told with their next reply (see landingNews). Each agent keeps its newest
+	 * NOTICES_KEPT, for a day at most.
+	 */
+	async notify(branch: string, notices: { agent: string; notice: Notice }[]) {
+		// Keyed by time, so an agent's notices list oldest first.
+		const entries = notices.map(
+			({ agent, notice }) => [`${noticesOf(branch, agent)}${notice.at}:${crypto.randomUUID()}`, notice] as const,
+		);
+		for (let i = 0; i < entries.length; i += STORAGE_BATCH)
+			await this.ctx.storage.put(Object.fromEntries(entries.slice(i, i + STORAGE_BATCH)));
+		for (const agent of new Set(notices.map((each) => each.agent))) {
+			const kept = [...(await this.ctx.storage.list<Notice>({ prefix: noticesOf(branch, agent) }))];
+			const dropped = kept.filter(([, notice], index) => index < kept.length - NOTICES_KEPT || expired(notice));
+			await this.deleteKeys(dropped.map(([key]) => key));
+		}
+	}
+
+	// An agent's notices that are still current, oldest first. All of them are deleted: told once, a reply lost on
+	// the way loses them, which is fine for advice.
+	private async takeNotices(branch: string, agent: string) {
+		const kept = [...(await this.ctx.storage.list<Notice>({ prefix: noticesOf(branch, agent) }))];
+		if (!kept.length) return [];
+		await this.deleteKeys(kept.map(([key]) => key));
+		return kept
+			.map(([, notice]) => notice)
+			.filter((notice) => !expired(notice))
+			.slice(-NOTICES_KEPT);
+	}
+
+	private async deleteKeys(keys: string[]) {
+		for (let i = 0; i < keys.length; i += STORAGE_BATCH)
+			await this.ctx.storage.delete(keys.slice(i, i + STORAGE_BATCH));
 	}
 
 	private async landing(branch: string) {
@@ -482,6 +553,11 @@ export class RepoCache extends DurableObject<Env> {
 		socket.close(code === 1005 ? 1000 : code, "closed");
 	}
 }
+
+/** Where an agent's notices on a branch are kept. Neither branch nor agent names hold a ":". */
+const noticesOf = (branch: string, agent: string) => `${NOTICE}${branch}:${agent}:`;
+
+const expired = (notice: Notice, now = Date.now()) => now - Date.parse(notice.at) > NOTICE_MS;
 
 const isSeed = (item: string) => item.startsWith("seed:");
 const seedNumber = (item: string) => Number(item.slice("seed:".length));

@@ -210,7 +210,16 @@ export function toolContextFor(
 	};
 }
 
-/** The repo's index entry and its RepoCache: summaries, cached reads, known heads and the fork queue. */
+/** An RPC whose loss costs only a hint: `otherwise` if it fails, never an error. */
+async function quietly<T>(call: () => PromiseLike<T>, otherwise: T): Promise<T> {
+	try {
+		return await rpc(call());
+	} catch {
+		return otherwise;
+	}
+}
+
+/** The repo's index entry and its RepoCache: summaries, cached reads, known heads, news and the fork queue. */
 function repoCacheParts(env: Env) {
 	return {
 		register: async (repo) => env.REPO_INDEX.getByName("all").addRepo(repo),
@@ -232,6 +241,8 @@ function repoCacheParts(env: Env) {
 			keep: (repo, change, kept) => env.REPO_CACHE.getByName(`repo:${repo}`).keepMergeCheck(change, kept),
 		},
 		news: (repo, branch, agent) => rpc(env.REPO_CACHE.getByName(`repo:${repo}`).landingNews(branch, agent)),
+		notify: (repo, branch, notices) =>
+			quietly(() => env.REPO_CACHE.getByName(`repo:${repo}`).notify(branch, notices), undefined),
 		// A branch's head, briefly cached for every merge watching it (see MergeInput.branchHead).
 		branchHead: (repo, branch) =>
 			keptRead(

@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import { FakeStorage } from "./fakes/env";
 
 const { RepoCache } = await import("../src/repo-cache");
+const { toolContextFor } = await import("../src/toolkit/env");
+type Notice = import("../src/repo-cache").Notice;
 
 // The dashboard's ready-made views, kept in a repo's cache: a write makes
 // them stale, a stale view is still served while one build runs, and a view
@@ -74,6 +76,17 @@ describe("kept views", () => {
 	});
 });
 
+/** A time `seconds` from now, so it's after any cursor a test's first call started. */
+const soon = (seconds: number) => new Date(Date.now() + seconds * 1000).toISOString();
+const settled = (change: string, agent: string, how: "landed" | "failed", at: string) => ({
+	change,
+	head: `h-${change}`,
+	agent,
+	how,
+	at,
+	...(how === "landed" ? { commit: `c-${change}`, files: [`src/${change}.ts`] } : { reasons: ["checks failed"] }),
+});
+
 describe("news of what landed", () => {
 	it("tells an agent what others landed since it last heard, nothing old on its first call, never its own", async () => {
 		const { live } = feed();
@@ -95,6 +108,7 @@ describe("news of what landed", () => {
 		]);
 		expect(await live.landingNews("main", "agent-a")).toEqual([
 			{
+				kind: "landed",
 				change: "theirs",
 				agent: "agent-b",
 				at: "2026-10-10T10:01:00.000Z",
@@ -105,6 +119,83 @@ describe("news of what landed", () => {
 		]);
 		// Told once.
 		expect(await live.landingNews("main", "agent-a")).toEqual([]);
+	});
+
+	it("tells the first landings on a new repo", async () => {
+		const { live } = feed();
+		expect(await live.landingNews("main", "agent-a")).toEqual([]);
+		await live.landingSettled("main", [settled("first", "agent-b", "landed", soon(1))]);
+		expect(await live.landingNews("main", "agent-a")).toMatchObject([{ kind: "landed", change: "first" }]);
+	});
+
+	it("the cursor follows the newest outcome, not the last one kept", async () => {
+		const { live } = feed();
+		await live.landingNews("main", "agent-a");
+		await live.landingSettled("main", [settled("landed", "agent-b", "landed", soon(2))]);
+		// A failure noted later, with an earlier time.
+		await live.landingSettled("main", [settled("failed", "agent-c", "failed", soon(1))]);
+		expect(await live.landingNews("main", "agent-a")).toMatchObject([{ change: "landed" }]);
+		expect(await live.landingNews("main", "agent-a")).toEqual([]);
+	});
+});
+
+describe("notices", () => {
+	const notice = (says: string, at = new Date().toISOString()): Notice => ({
+		kind: "note",
+		at,
+		says,
+		next: "read it",
+		change: "c-1",
+		from: { agent: "agent-b", change: "c-2" },
+	});
+
+	it("delivers a notice on the agent's first call", async () => {
+		const { live } = feed();
+		await live.notify("main", [{ agent: "agent-a", notice: notice("hello") }]);
+		expect(await live.landingNews("main", "agent-a")).toEqual([notice("hello", expect.any(String))]);
+	});
+
+	it("tells a notice once, after what landed, and only to its agent on its branch", async () => {
+		const { live } = feed();
+		await live.landingNews("main", "agent-a");
+		await live.landingSettled("main", [settled("theirs", "agent-b", "landed", soon(1))]);
+		await live.notify("main", [
+			{ agent: "agent-a", notice: notice("second", "2026-10-11T10:01:00.000Z") },
+			{ agent: "agent-a", notice: notice("first", "2026-10-11T10:00:00.000Z") },
+			{ agent: "agent-ab", notice: notice("not a's") },
+		]);
+		await live.notify("dev", [{ agent: "agent-a", notice: notice("on dev") }]);
+		expect(await live.landingNews("main", "agent-a")).toMatchObject([
+			{ kind: "landed", change: "theirs" },
+			{ kind: "note", says: "first" },
+			{ kind: "note", says: "second" },
+		]);
+		expect(await live.landingNews("main", "agent-a")).toEqual([]);
+		expect(await live.landingNews("main", "agent-ab")).toMatchObject([{ says: "not a's" }]);
+		expect(await live.landingNews("dev", "agent-a")).toMatchObject([{ says: "on dev" }]);
+	});
+
+	it("keeps at most 50 notices per agent, and none older than a day", async () => {
+		const storage = new FakeStorage();
+		const live = new RepoCache({ storage, getWebSockets: () => [] } as never, {} as never);
+		const minutesAgo = (minutes: number) => new Date(Date.now() - minutes * 60_000).toISOString();
+		await live.notify("main", [{ agent: "agent-a", notice: notice("stale", minutesAgo(25 * 60)) }]);
+		// Dropped as a later notify trims.
+		await live.notify("main", [{ agent: "agent-a", notice: notice("fresh", minutesAgo(60)) }]);
+		expect([...(await storage.list<Notice>({ prefix: "notice:" })).values()].map((kept) => kept.says)).toEqual([
+			"fresh",
+		]);
+		const many = Array.from({ length: 60 }, (_, i) => ({
+			agent: "agent-a",
+			notice: notice(`n${i}`, minutesAgo(59 - i)),
+		}));
+		await live.notify("main", many);
+		expect((await storage.list({ prefix: "notice:" })).size).toBe(50);
+		// One older than a day that no notify has trimmed yet is dropped when the agent is told.
+		storage.data.set("notice:main:agent-a:2026-01-01T00:00:00.000Z:x", notice("expired", "2026-01-01T00:00:00.000Z"));
+		const told = await live.landingNews("main", "agent-a");
+		expect(told.map((item) => (item as Notice).says)).toEqual(Array.from({ length: 50 }, (_, i) => `n${i + 10}`));
+		expect((await storage.list({ prefix: "notice:" })).size).toBe(0);
 	});
 });
 
@@ -154,5 +245,20 @@ describe("the fork queue", () => {
 		expect(await storage.get("forks:queue")).toBeUndefined();
 		const items = [...(await storage.list<{ item: string }>({ prefix: "forks:job:" })).values()].map((job) => job.item);
 		expect(items).toEqual(["agent:a", "agent:b", "agent:c", "seed:0"]);
+	});
+});
+
+describe("the hooks tools reach it through", () => {
+	it("leave notices for the agent's next news, and a RepoCache that doesn't answer never fails the call", async () => {
+		const { live } = feed();
+		const ctx = toolContextFor({ REPO_CACHE: { getByName: () => live } } as never, undefined);
+		const notice = { kind: "note", at: new Date().toISOString(), says: "hello" };
+		await ctx.notify!("p", "main", [{ agent: "agent-a", notice }]);
+		expect(await ctx.news!("p", "main", "agent-a")).toEqual([notice]);
+		const down = () => Promise.reject(new Error("Durable Object is overloaded. Requests queued for too long."));
+		const unreachable = toolContextFor({ REPO_CACHE: { getByName: () => ({ notify: down }) } } as never, undefined);
+		await expect(unreachable.notify!("p", "main", [{ agent: "agent-a", notice }])).resolves.toBeUndefined();
+		const missing = toolContextFor({} as never, undefined);
+		await expect(missing.notify!("p", "main", [{ agent: "agent-a", notice }])).resolves.toBeUndefined();
 	});
 });
