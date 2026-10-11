@@ -451,6 +451,7 @@ describe("landing ready changes together", { timeout: 120_000 }, () => {
 			ok: false,
 			why: ["conflict"],
 			into: "main",
+			head: cHead,
 			conflicts: ["src/shared.txt"],
 			touchedBy: [{ file: "src/shared.txt", commit: pushed, author: "pusher", intent: "add shared on main" }],
 			fix: [

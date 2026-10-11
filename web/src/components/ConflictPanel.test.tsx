@@ -93,7 +93,10 @@ describe("the conflict panel", () => {
 		expect(html).toContain(
 			"<code>git fetch origin main &amp;&amp; git merge origin/main\n# resolve src/billing/invoice.ts README.md so both",
 		);
-		expect(html).toContain("call status; once the new commit is approved, merge again</code>");
+		// The copy block holds only the shell commands; what to call after is said beneath it.
+		expect(html).toContain("git push fork changes/c-1</code>");
+		expect(html).not.toMatch(/<code>[^<]*call status/);
+		expect(text).toContain("Then: call status; once the new commit is approved, merge again.");
 		expect(html).toMatch(
 			/<button type="button" class="copy-block__button" aria-label="Copy commands: git fetch origin main/,
 		);

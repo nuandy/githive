@@ -161,12 +161,27 @@ export class RepoCache extends DurableObject<Env> {
 
 	// Each event under its own key, by its time then what it was, so an event delivered twice is kept once and
 	// adding one never rewrites the others.
-	private async keepEvents(events: HiveEvent[]) {
+	private async keepEvents(given: HiveEvent[]) {
+		const events = await this.newConflicts(given);
 		if (!events.length) return;
 		await this.eventsByKey();
 		await this.ctx.storage.put(Object.fromEntries(events.map((event) => [`${EVENT}${eventKey(event)}`, event])));
 		this.eventWrites += 1;
 		if (this.eventWrites % EVENT_WRITES_PER_TRIM === 0) await this.trimEvents();
+	}
+
+	// Events but the `conflicted` ones the log already has for the same change and head: an agent merging the same
+	// conflicting commit again and again is one event, not a feed full of them.
+	private async newConflicts(events: HiveEvent[]) {
+		const conflicts = events.filter((event) => event.kind === "conflicted" && event.commit);
+		if (!conflicts.length) return events;
+		const key = (event: HiveEvent) => `${event.change}\0${event.commit}`;
+		const kept = new Set(
+			[...(await this.ctx.storage.list<HiveEvent>({ prefix: EVENT, reverse: true, limit: EVENTS_KEPT })).values()]
+				.filter((event) => event.kind === "conflicted" && event.commit)
+				.map(key),
+		);
+		return events.filter((event) => !conflicts.includes(event) || !kept.has(key(event)));
 	}
 
 	private async trimEvents() {
@@ -521,6 +536,11 @@ export class RepoCache extends DurableObject<Env> {
 		// An agent merging the same conflicting commit again, or failing the same way, is one attempt in the story.
 		if (kept.at(-1) === cut) return;
 		await this.ctx.storage.put(key, [...kept, cut].slice(-ATTEMPTS_KEPT));
+	}
+
+	/** Forgets these changes' attempts: their claims were released without merging, and a name can be claimed again. */
+	async forgetAttempts(changes: string[]) {
+		await this.deleteKeys(changes.map((change) => `${ATTEMPTS}${change}`));
 	}
 
 	/** The attempts noted for each change, oldest first. A change with none is left out. */

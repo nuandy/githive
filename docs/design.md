@@ -800,9 +800,10 @@ project's own repo (a landing, or plain git) is read commit by commit along
 the first parents from where the event says the branch was (or the last commit
 analysed), at most 50: each against its first parent, which for a GitHive merge
 is the change's effect. Every open change into that branch that uses a name a
-commit altered gets an `interface` notice, naming who landed it from the
-commit's trailers, or its author for plain git, and the landed change's
-footprint goes. Nothing is read while no open change goes into the branch.
+commit altered gets an `interface` notice, naming who landed it from a merge
+commit's trailers (a plain commit's are ignored), or its author for plain
+git, and the landed change's footprint goes. Nothing is read while no open
+change goes into the branch.
 What it keeps is in the repo's FootprintCache (`footprints:<repo>`): files'
 facts by blob and path (a blob never changes), the open footprints with an
 index from each file's name to the changes that alter or use it, which notices

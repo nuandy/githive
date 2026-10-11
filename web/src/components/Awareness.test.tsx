@@ -99,6 +99,9 @@ describe("where a change meets other open changes", () => {
 		);
 		expect(text).toContain("read at b1c2d3e (before its latest push).");
 		expect(text).not.toContain("What it alters that others use");
+		// The names past the server's caps count too.
+		const capped = render({ ...awareness, usedBy: [], alteredBy: [], omitted: { alters: 60, uses: 4 } });
+		expect(inlineText(capped)).toContain("it alters 61 names and uses 5 names of other files.");
 	});
 
 	it("says how many it left out past the server's caps", () => {

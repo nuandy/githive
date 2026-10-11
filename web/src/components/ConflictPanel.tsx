@@ -97,6 +97,10 @@ export function ConflictPanel({ merge, head, repo }: { merge: MergeCheck; head?:
 	// The check is kept until the agent asks again, so it may be of an older push.
 	const moved = !!head && !!merge.head && merge.head !== head;
 	const shown = files.slice(0, FILES_SHOWN);
+	// The fix ends with what to call once the commands are done: that's for the agent, not for a shell, so only the
+	// commands are copied.
+	const commands = (merge.fix ?? []).filter((line) => !line.startsWith("call "));
+	const then = (merge.fix ?? []).filter((line) => line.startsWith("call "));
 	return (
 		<section className="conflict-panel" aria-labelledby="conflict-panel-title">
 			<div className="conflict-panel__head">
@@ -133,14 +137,15 @@ export function ConflictPanel({ merge, head, repo }: { merge: MergeCheck; head?:
 			{files.length > shown.length ? (
 				<p className="muted conflict-panel__more">And {counted(files.length - shown.length, "more file")}.</p>
 			) : null}
-			{merge.fix?.length ? (
+			{commands.length ? (
 				<div className="conflict-panel__fix">
 					<h3>The agent's next commands</h3>
 					<p className="muted">
 						For its own clone, where <code>origin</code> is the project and <code>fork</code> its copy. The agent
 						resolves the conflict there; its new commit is reviewed and merged as usual.
 					</p>
-					<CopyBlock text={merge.fix.join("\n")} label="Copy commands" />
+					<CopyBlock text={commands.join("\n")} label="Copy commands" />
+					{then.length ? <p className="muted conflict-panel__then">Then: {then.join(" ")}.</p> : null}
 				</div>
 			) : null}
 		</section>

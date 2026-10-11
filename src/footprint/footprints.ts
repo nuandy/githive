@@ -98,9 +98,13 @@ export async function commitAlters(
 	return altersOf(await readFiles(source, treeReader(source), parentTree, commit.treeHash, files, facts));
 }
 
-/** Who landed a commit: a GitHive merge's change, agent and intent from its trailers, or a plain commit's author. */
-export function landingOf(commit: Pick<CommitMeta, "hash" | "message" | "author">): Landing {
-	const said = (name: string) => trailer(commit.message, name);
+/**
+ * Who landed a commit: a GitHive merge's change, agent and intent from its trailers, or a plain commit's author. Only
+ * a merge commit's trailers are taken (GitHive always lands a change as one): a plain commit that writes them could
+ * otherwise drop another change's footprint and land in the feed under any agent's name.
+ */
+export function landingOf(commit: Pick<CommitMeta, "hash" | "message" | "author" | "parents">): Landing {
+	const said = (name: string) => (commit.parents.length > 1 ? trailer(commit.message, name) : undefined);
 	const cut = (text: string) => text.slice(0, LANDED_INTENT_CHARS);
 	const change = said("GitHive-Change");
 	if (change) {

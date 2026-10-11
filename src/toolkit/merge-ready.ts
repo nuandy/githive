@@ -48,7 +48,7 @@ export function outcomeOf(settled: Settled, branch?: string): MergeOutcome {
 		ok: false,
 		reasons: settled.reasons ?? ["it didn't land"],
 		why: [conflicted ? "conflict" : "checks"],
-		...(conflicted ? into : {}),
+		...(conflicted ? { ...into, head: settled.head } : {}),
 		...(conflicts.length ? { conflicts } : {}),
 		...(settled.touchedBy?.length ? { touchedBy: settled.touchedBy } : {}),
 		...(conflicts.length && branch ? { fix: conflictFix(branch, settled.change, conflicts) } : {}),
@@ -79,7 +79,7 @@ export async function readyNow(
 	if (tried.clean) return ready.ok ? ready : { ok: false, refused: ready, head };
 	// A conflict is said with whatever else keeps it from landing, since resolving it needs a new commit anyway.
 	const conflicts = { files: tried.files ?? [], hunks: tried.hunks, touchedBy: read.touchedBy ?? [] };
-	const refused = await conflictRefusal(input, landing, conflicts, branch);
+	const refused = { ...(await conflictRefusal(input, landing, conflicts, branch)), head };
 	return { ok: false, head, refused: ready.ok ? refused : alsoRefused(refused, ready) };
 }
 

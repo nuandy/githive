@@ -148,6 +148,7 @@ describe("fixing a conflict", { timeout: 60_000 }, () => {
 
 describe("attempts at landing", { timeout: 60_000 }, () => {
 	const noted: [string, string, string][] = [];
+	const forgotten: string[] = [];
 	const pings: unknown[] = [];
 	const results: Record<string, { command: string; exitCode: number; output: string }> = {};
 	const runChecks: CheckRunner = async ({ changes }) => {
@@ -157,10 +158,12 @@ describe("attempts at landing", { timeout: 60_000 }, () => {
 	const { call, register, approve } = toolCalls(() => server, {
 		runChecks: () => runChecks,
 		noteAttempt: async (repo, change, line) => void noted.push([repo, change, line]),
+		forgetAttempts: async (_repo, change) => void forgotten.push(change),
 		ping: async (_repo, event) => void pings.push(event),
 	});
 	beforeEach(async () => {
 		noted.length = 0;
+		forgotten.length = 0;
 		pings.length = 0;
 		for (const change of Object.keys(results)) delete results[change];
 		await call("settings", { required: 1, vetoes: [], verify: ["npm test"] });
@@ -179,16 +182,18 @@ describe("attempts at landing", { timeout: 60_000 }, () => {
 		expect(await call("merge", { change: "a-1", agent: "a" }, "a")).toMatchObject({ ok: true });
 		const landed = server.git("rev-parse", "main").trim();
 		// b-1 left main before a-1 landed, and changed the same file.
-		await approved("b", "b-1", { "shared.txt": "b\n" }, base);
-		expect(await call("merge", { change: "b-1", agent: "b" }, "b")).toMatchObject({ ok: false });
+		const bHead = await approved("b", "b-1", { "shared.txt": "b\n" }, base);
+		const refused = await call("merge", { change: "b-1", agent: "b" }, "b");
+		expect(refused).toMatchObject({ ok: false, head: bHead });
 		const conflict = `conflict on shared.txt with a-1 by a ("a-1's intent", ${landed.slice(0, 7)})`;
 		expect(noted).toEqual([["p", "b-1", conflict]]);
-		// The hive sees the conflict, naming its file.
+		// The hive sees the conflict, naming its file and the head that conflicts.
 		expect(pings).toContainEqual(
-			expect.objectContaining({ kind: "conflicted", agent: "b", change: "b-1", detail: "shared.txt" }),
+			expect.objectContaining({ kind: "conflicted", agent: "b", change: "b-1", commit: bHead, detail: "shared.txt" }),
 		);
-		// b gives it up, so later batches don't take it in.
+		// b gives it up, so later batches don't take it in, and a later b-1 won't start its story with these attempts.
 		await call("release", { change: "b-1", agent: "b" }, "b");
+		expect(forgotten).toEqual(["b-1"]);
 
 		// Failed checks are an attempt too, and so is a batch the Gate couldn't merge, in the words it gave.
 		results["c-1"] = { command: "npm test", exitCode: 1, output: "1 failing" };

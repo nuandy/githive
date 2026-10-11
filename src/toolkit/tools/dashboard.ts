@@ -8,10 +8,10 @@ import type { ClaimRecord, Registry, ReleaseRecord } from "../claims";
 import type { LandingView } from "../landing";
 import { leaseFor } from "../staleness";
 import type { VoteStore, VotesView } from "../vote-store";
-import { countedVotes, DEFAULT_GRANT, type FlagRecord, openFlag, type ReviewPolicy, type VoteRecord } from "../votes";
+import { DEFAULT_GRANT, type FlagRecord, openFlag, type ReviewPolicy, type VoteRecord } from "../votes";
 import { holdKey, ROLE_WAIT_MS, waitingRoleReviews } from "../work";
 import { runAudit } from "./audit-tools";
-import { changeHead, changeSigns, changeSourceFor, changeStatus } from "./change-state";
+import { changeHead, changeSigns, changeSourceFor, changeState, type changeStatus } from "./change-state";
 import { targetBranch } from "./claim-input";
 import type { HostedStatus, ToolContext } from "./context";
 import {
@@ -360,7 +360,7 @@ async function claimSnapshot(
 	landing: LandingView | null | undefined,
 ): Promise<ClaimSnapshot> {
 	const claim = presentClaim(record, projectBranch(state));
-	const status = await changeStatus(ctx, repo, state, async () => votes.votes, claim.change, claim);
+	const { status, counted } = await changeState(ctx, repo, state, async () => votes.votes, claim.change, claim);
 	const { head, approval, hosted } = status;
 	// A question stays open until a person votes on the change's commit. For a waiting role's review,
 	// it closes once that role signs off.
@@ -379,9 +379,9 @@ async function claimSnapshot(
 	if (attention) snapshot.attention = attention;
 	if (waitsOn.length) snapshot.waitsOn = waitsOn;
 	// How long it lasts if its agent goes quiet, worked out as status does. Advice: left out if it can't be.
+	// From the votes changeState already counted, so no stamp is checked twice.
 	const lease = await Promise.resolve()
 		.then(async () => {
-			const counted = await countedVotes(status.votes, state.stampKey);
 			const policy = branchSettings(state, claim.into).policy;
 			return leaseFor(changeSigns({ claim, head, counted, record: votes, landing, policy }));
 		})

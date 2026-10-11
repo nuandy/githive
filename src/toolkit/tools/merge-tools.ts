@@ -68,9 +68,11 @@ export const mergeTools: ToolHandlers = {
 			change,
 			agent: agentArg("agent"),
 		});
-		// The hive sees a merge refused for a conflict, naming its files.
+		// The hive sees a merge refused for a conflict, naming its files: once for each head (see RepoCache.ping).
 		if (!outcome.ok && outcome.conflicts?.length)
-			await ctx.ping?.(repo, conflictedEvent(agentArg("agent"), change, outcome.conflicts)).catch(() => undefined);
+			await ctx
+				.ping?.(repo, conflictedEvent(agentArg("agent"), change, outcome.conflicts, outcome.head))
+				.catch(() => undefined);
 		return outcome;
 	},
 	async credentials(call) {
@@ -133,10 +135,10 @@ function optionalMergeInput(
 }
 
 // A `conflicted` hive event, with the first few files in its detail.
-function conflictedEvent(agent: string, change: string, files: string[]): HiveEvent {
+function conflictedEvent(agent: string, change: string, files: string[], head?: string): HiveEvent {
 	const more = files.length > CONFLICTED_SHOWN ? ` and ${files.length - CONFLICTED_SHOWN} more` : "";
 	const detail = `${files.slice(0, CONFLICTED_SHOWN).join(", ")}${more}`;
-	return { kind: "conflicted", agent, change, detail, at: new Date().toISOString() };
+	return { kind: "conflicted", agent, change, ...(head ? { commit: head } : {}), detail, at: new Date().toISOString() };
 }
 
 const CONFLICTED_SHOWN = 3;

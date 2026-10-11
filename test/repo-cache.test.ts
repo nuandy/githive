@@ -293,6 +293,21 @@ describe("attempts", () => {
 		]);
 		expect(await live.attemptsOf(["c-1", "c-2"])).toEqual({ "c-2": ["checks failed: npm test exited 1"] });
 	});
+
+	it("are forgotten when a claim is released without merging, through the hook the claim store calls", async () => {
+		const { live } = feed();
+		const ctx = toolContextFor({ REPO_CACHE: { getByName: () => live } } as never, undefined);
+		await live.noteAttempt("c-1", "conflict on a.ts");
+		await live.noteAttempt("c-2", "conflict on b.ts");
+		await ctx.forgetAttempts!("p", "c-1");
+		expect(await live.attemptsOf(["c-1", "c-2"])).toEqual({ "c-2": ["conflict on b.ts"] });
+		const down = () => Promise.reject(new Error("Durable Object is overloaded. Requests queued for too long."));
+		const unreachable = toolContextFor(
+			{ REPO_CACHE: { getByName: () => ({ forgetAttempts: down }) } } as never,
+			undefined,
+		);
+		await expect(unreachable.forgetAttempts!("p", "c-2")).resolves.toBeUndefined();
+	});
 });
 
 describe("the hooks tools reach it through", () => {

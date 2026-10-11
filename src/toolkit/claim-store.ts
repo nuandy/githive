@@ -108,6 +108,11 @@ export interface StoreInput {
 	recordsRemote?: (k: number) => Promise<Remote>;
 	/** A shard's log in the project repo, if the caller caches logs across calls. */
 	log?: (ref: string) => CasLog<Registry> & Pick<GitCasLog<Registry>, "readAt">;
+	/**
+	 * Forgets a change's earlier attempts to land once its claim is released without merging, so a later claim of the
+	 * same name doesn't inherit them in its story (a merged change's go when it lands). Advice: caught.
+	 */
+	forgetAttempts?: (change: string) => Promise<void>;
 }
 
 const RELEASE_REPOS_AT_ONCE = 4;
@@ -490,6 +495,7 @@ class Claims implements ClaimStore {
 						{ change: conflict.change, agent: input.agent, staleAfterMs: input.staleAfterMs!, now: input.now },
 						stamper,
 					);
+					if (freed.ok) await this.forgetAttempts(conflict.change);
 					if (freed.ok || /holds no claim/.test(freed.refused)) continue;
 				}
 				live.push(conflict);
@@ -517,7 +523,9 @@ class Claims implements ClaimStore {
 	): Promise<ReleaseOutcome> {
 		const held = await this.holding(input.change);
 		if (!held) return { ok: false, refused: `${input.change} holds no claim` };
-		return this.eachShard(held.shards, (shard) => release(this.logOf(shard), input, stamper));
+		const released = await this.eachShard(held.shards, (shard) => release(this.logOf(shard), input, stamper));
+		if (released.ok && !input.mergedAs && input.reason !== "merged") await this.forgetAttempts(input.change);
+		return released;
 	}
 
 	async releaseStale(
@@ -536,7 +544,15 @@ class Claims implements ClaimStore {
 		const turn = input.abandoned ? await input.abandoned(held.own) : undefined;
 		if (turn && !turn.abandoned) return { ok: false, refused: `${input.change} isn't abandoned: it ${turn.why}` };
 		const { abandoned: _abandoned, ...rest } = input;
-		return this.eachShard(held.shards, (shard) => releaseStale(this.logOf(shard), rest, stamper));
+		const released = await this.eachShard(held.shards, (shard) => releaseStale(this.logOf(shard), rest, stamper));
+		if (released.ok) await this.forgetAttempts(input.change);
+		return released;
+	}
+
+	private async forgetAttempts(change: string) {
+		await this.input
+			.forgetAttempts?.(change)
+			.catch((err) => console.error(`forgetting ${change}'s attempts failed`, String(err)));
 	}
 
 	// Releases in each record, a few repos at a time. A record that no longer holds the claim is fine, and the first

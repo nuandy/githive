@@ -137,6 +137,8 @@ export interface ToolContext {
 	noteAttempt?: (repo: string, change: string, line: string) => Promise<void>;
 	/** The attempts noted for each change, oldest first; a change with none is left out. Never fails. */
 	attemptsOf?: (repo: string, changes: string[]) => Promise<Record<string, string[]>>;
+	/** Forgets a change's attempts, once its claim is released without merging. Never fails. */
+	forgetAttempts?: (repo: string, change: string) => Promise<void>;
 	/**
 	 * A change's footprint and where it meets other open changes now, from the repo's FootprintCache (see
 	 * FootprintCache.overlapsOf); null when none is kept. A hint for the dashboard: callers catch its failures.

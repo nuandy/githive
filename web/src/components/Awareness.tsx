@@ -98,6 +98,9 @@ export function Awareness({
 	const usedBy = openOverlaps(awareness.usedBy, claims);
 	const alteredBy = openOverlaps(awareness.alteredBy, claims);
 	const left = (awareness.omitted?.usedBy ?? 0) + (awareness.omitted?.alteredBy ?? 0);
+	// The names lists are capped: what was left out counts too.
+	const alters = awareness.alters.length + (awareness.omitted?.alters ?? 0);
+	const uses = awareness.uses.length + (awareness.omitted?.uses ?? 0);
 	// Footprints are read from pushes as the push consumer gets to them, so one may lag the change's head.
 	const moved = !!head && head !== awareness.head;
 	return (
@@ -134,7 +137,7 @@ export function Awareness({
 			{!usedBy.length && !alteredBy.length ? (
 				<p className="awareness__none">
 					Nothing it alters is used by another open change, and nothing it uses is being altered: it alters{" "}
-					{counted(awareness.alters.length, "name")} and uses {counted(awareness.uses.length, "name")} of other files.
+					{counted(alters, "name")} and uses {counted(uses, "name")} of other files.
 				</p>
 			) : null}
 			{left ? <p className="muted awareness__more">And {left} more not shown.</p> : null}

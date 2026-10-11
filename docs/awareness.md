@@ -91,9 +91,10 @@ Causes are missing for direct pushes, past 12 files, and when the conflict appea
   side comes first, as `git merge origin/<branch>` shows it in its clone: `<<<<<<< ours (changes/<change>)` …
   `>>>>>>> origin/<branch>`.
 - **`fix`:** the commands that resolve it in the clone `credentials` gives (remotes `origin` and `fork`), then
-  "call status; once the new commit is approved, merge again".
+  "call status; once the new commit is approved, merge again". The dashboard's copy button copies only the commands.
 - **Attempts:** each conflict refusal is noted as an attempt for the change. Attempts are kept in RepoCache, at
-  most 10 per change, for the merge commit's story.
+  most 10 per change, for the merge commit's story, and forgotten once the change lands or its claim is released
+  without merging, so a later claim of the same name starts with none.
 
 `causes` stays as it is, so nothing that reads it breaks. A conflict found while landing (in the Gate, or when a
 tree landing hands over) puts the change out, as failed checks do, and the rest of the batch lands. Its refusal
@@ -140,7 +141,8 @@ the reviews when a change has no intent.
 
 A claim counts as abandoned after 30 minutes with nothing pushed, or 2 hours after changes were asked for. Nothing
 tells the agent. `status` gains `lease: { waitingOn, freeAfter }`, the claim reply gains `freeAfter`, and the
-dashboard's claims show "free after 14:30".
+dashboard's claims show "free after 14:30". The claim's `freeAfter` is the soonest it can free up (30 minutes after
+the claim); once something is pushed it lasts longer, and status's `lease` says exactly.
 
 ### 6. Footprints and interface news
 
@@ -196,7 +198,8 @@ dashboard's claims show "free after 14:30".
 
 ### 7. The dashboard
 
-- The Hive feed shows interface changes, heads-ups and conflicts.
+- The Hive feed shows interface changes, heads-ups and conflicts: one conflict event per change and head, however
+  often its agent merges it again.
 - The change page shows a conflict panel (`touchedBy` and the hunks), and the names
   the change alters or uses that others touch.
 - Claims show when they free up.

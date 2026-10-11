@@ -78,6 +78,7 @@ describe("merge", { timeout: 60_000 }, () => {
 			touchedBy: [{ file: "shared.txt", commit: main, change: "a-1", agent: "agent-a-1", intent: "a-1" }],
 			why: ["conflict"],
 			into: "main",
+			head: bHead,
 			// b-1's side first, as `git merge origin/main` shows it in its agent's clone.
 			hunks: [
 				{

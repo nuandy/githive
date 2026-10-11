@@ -193,8 +193,9 @@ export type MergeOutcome =
 			reasons: string[];
 			/** Each kind of reason the refusal has, once, in the order of its reasons. */
 			why: Why[];
-			/** The branch it conflicts with. */
+			/** The branch it conflicts with, and the head that conflicts. */
 			into?: string;
+			head?: string;
 			conflicts?: string[];
 			/** The changes that last landed on each conflicted file. */
 			causes?: ReturnType<typeof lastLandedOn>;

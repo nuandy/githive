@@ -93,6 +93,21 @@ describe("the hive's events", () => {
 		]);
 	});
 
+	it("keeps one conflicted event for each change and head, however often its agent merges it again", async () => {
+		const cache = new RepoCache({ storage: new FakeStorage(), getWebSockets: () => [] } as never, {} as never);
+		const conflicted = (second: number, commit: string): HiveEvent => ({
+			kind: "conflicted",
+			agent: "bob",
+			change: "c-3",
+			commit,
+			detail: "a.ts",
+			at: new Date(NOW.getTime() + second * 1000).toISOString(),
+		});
+		for (let second = 0; second < 5; second++) await cache.ping("records", false, [conflicted(second, HEAD)]);
+		await cache.ping("records", false, [conflicted(9, "b".repeat(40))]);
+		expect((await cache.events()).map((event) => event.commit)).toEqual([HEAD, "b".repeat(40)]);
+	});
+
 	it("moves a log kept as one list under keys of its own", async () => {
 		const storage = new FakeStorage();
 		await storage.put("events", [{ kind: "pushed", change: "old", at: NOW.toISOString() }]);

@@ -194,6 +194,18 @@ describe("interface news when the branch moves", () => {
 		]);
 	});
 
+	it("takes GitHive's trailers only from a merge commit: a plain push that writes them is its author's", async () => {
+		const { claims, deliver, forkPush, branchPush, told, footprints } = hive();
+		claims.push({ change: "c-9", agent: "bob" });
+		await deliver(forkPush("bob", "c-9", await pushToFork("bob", "c-9", { "src/jobs/sync.ts": USES_LOAD })));
+		const message = "loadSettings returns a Result\n\nGitHive-Change: c-9\nGitHive-Agent: alice";
+		const moved = await plainPush("Jane Doe", message, { "src/config.ts": SIGNATURE_CHANGE });
+		await deliver(branchPush("main", moved));
+		// c-9's footprint stays, and the notice names who pushed, not the agent the trailers name.
+		expect(await footprints.keptHead("c-9")).not.toBeNull();
+		expect(await told("bob")).toMatchObject([{ kind: "interface", from: { agent: "Jane Doe" } }]);
+	});
+
 	it("says nothing for a body-only change", async () => {
 		const { claims, deliver, forkPush, branchPush, told, repoCache } = hive();
 		claims.push({ change: "c-9", agent: "bob" });
