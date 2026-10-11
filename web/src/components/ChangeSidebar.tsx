@@ -1,6 +1,7 @@
 import type { ChangeHistory, RepoSnapshot } from "../api";
 import { identityName } from "../lib/agent";
 import type { Claim } from "../lib/claimStatus";
+import { leaseWords } from "../lib/lease";
 import { counted } from "../lib/plural";
 import { timeAgo } from "../lib/relativeTime";
 import { Icon } from "./Icon";
@@ -27,14 +28,18 @@ export function ChangeSidebar({
 	record,
 	agent,
 	votes,
+	now,
 }: {
 	snapshot: RepoSnapshot;
 	claim: Claim | undefined;
 	record: ChangeRecord | undefined;
 	agent: string;
 	votes: Vote[];
+	/** The time a lease is told against (tests fix it). */
+	now?: number;
 }) {
 	const builder = claim?.hosted?.builder;
+	const lease = leaseWords(claim?.lease, now);
 	return (
 		<aside className="change-sidebar" aria-label="Change details">
 			<section className="sidebar-section">
@@ -90,6 +95,12 @@ export function ChangeSidebar({
 				) : (
 					<p className="muted">Released.</p>
 				)}
+				{lease ? (
+					<p className={`sidebar-small sidebar-lease ${lease.free ? "tone-warn" : "muted"}`}>
+						<Icon name="clock" size={13} />
+						{lease.long}
+					</p>
+				) : null}
 			</section>
 			{claim?.approval.vetoedBy.length ? (
 				<section className="sidebar-section">

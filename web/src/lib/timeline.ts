@@ -5,7 +5,7 @@ import type { Tone } from "./changeStatus";
 // change's history in Git).
 
 export type TimelineKind =
-	"opened" | "pushed" | "review" | "changes-requested" | "needs-you" | "merged" | "abandoned" | "note";
+	"opened" | "pushed" | "review" | "changes-requested" | "needs-you" | "merged" | "abandoned" | "note" | "attempt";
 
 /** A vote, shown as a review card. */
 export interface TimelineReview {

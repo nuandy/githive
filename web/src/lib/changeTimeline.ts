@@ -117,8 +117,26 @@ export function buildTimeline(history: ChangeHistory, repo: string): TimelineIte
 		});
 	}
 	const order = (item: TimelineItem) => timeOf(item.at) ?? (item.kind === "opened" ? -Infinity : Infinity);
-	return items
+	const sorted = items
 		.map((item, index) => ({ item, index }))
 		.sort((a, b) => order(a.item) - order(b.item) || a.index - b.index)
 		.map(({ item }) => item);
+	// Attempts carry no time: they go after everything else that happened, and before how it ended.
+	const ended = sorted.findIndex((item) => item.kind === "merged" || item.kind === "abandoned");
+	sorted.splice(ended < 0 ? sorted.length : ended, 0, ...attemptItems(history.attempts ?? []));
+	return sorted;
+}
+
+/** How an attempt's line starts, as the server words it (see conflictLine and putOut). */
+const CONFLICT_ON = "conflict on ";
+const CHECKS_FAILED = "checks failed";
+
+/** Each earlier attempt to land, oldest first: what refused it, in the line noted for the merge commit's story. */
+export function attemptItems(attempts: string[]): TimelineItem[] {
+	return attempts.map((line, index) => {
+		let what = "was refused";
+		if (line.startsWith(CONFLICT_ON)) what = "conflicted with its branch";
+		else if (line.startsWith(CHECKS_FAILED)) what = "failed its checks";
+		return { key: `attempt:${index}`, kind: "attempt", tone: "warn", text: `an attempt to land ${what}`, body: line };
+	});
 }

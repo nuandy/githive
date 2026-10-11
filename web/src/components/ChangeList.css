@@ -98,6 +98,15 @@
 	margin: 0 3px -1px 0;
 }
 
+/* When the claim frees up if its agent goes quiet. */
+.change-row__lease {
+	white-space: nowrap;
+}
+
+.change-row__lease .icon {
+	margin: 0 3px -1px 0;
+}
+
 .change-row__warn {
 	display: flex;
 	align-items: center;

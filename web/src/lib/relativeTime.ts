@@ -58,3 +58,15 @@ export function dayLabel(isoTime: string | undefined, now: number | Date = Date.
 	if (daysAgo === 1) return "Yesterday";
 	return day.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
 }
+
+const twoDigits = (value: number) => String(value).padStart(2, "0");
+
+/** "14:30" on the reader's clock, or "Oct 12, 14:30" on another day than today. */
+export function clockTime(isoTime: string | undefined, now: number | Date = Date.now()): string {
+	const timestamp = isoTime ? Date.parse(isoTime) : NaN;
+	if (!Number.isFinite(timestamp)) return "";
+	const at = new Date(timestamp);
+	const time = `${twoDigits(at.getHours())}:${twoDigits(at.getMinutes())}`;
+	if (at.toDateString() === new Date(millisOf(now)).toDateString()) return time;
+	return `${at.toLocaleDateString(undefined, { month: "short", day: "numeric" })}, ${time}`;
+}
