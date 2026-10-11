@@ -48,6 +48,17 @@ describe("a merge commit's message", () => {
 
 	it("says only who merged what when the change has no intent", async () => {
 		expect((await mergeMessage(claimed)).split("\n")[0]).toBe("Merge rate-limit by ada/builder");
+		expect(await mergeMessage(claimed)).toMatch(/^Merge rate-limit by ada\/builder\n\nGitHive-Change: rate-limit\n/);
+	});
+
+	it("storyOf keeps reviews without an intent", async () => {
+		const message = await mergeMessage({
+			...claimed,
+			reviews: [{ reviewer: "bob/reviewer", role: "review", evidence: "ran npm test" }],
+		});
+		expect(message).toMatch(
+			/^Merge rate-limit by ada\/builder\n\nReviewed by:\n- bob\/reviewer \(review\): ran npm test\n\nGitHive-Change: /,
+		);
 	});
 
 	it("can't be given trailers by an intent or evidence that looks like them", async () => {

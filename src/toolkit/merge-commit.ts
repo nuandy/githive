@@ -60,18 +60,19 @@ function wrapped(text: string, width = BODY_WIDTH) {
 function storyOf(claimed: MergeClaim) {
 	const merged = `Merge ${claimed.change} by ${claimed.author}`;
 	const intent = claimed.intent ? oneLine(claimed.intent, Number.POSITIVE_INFINITY) : "";
-	if (!intent) return [merged, ""];
-	const lines = [oneLine(intent, SUBJECT_MOST), "", `${merged}.`];
+	// Without an intent, the subject says only who merged what.
+	const lines = intent ? [oneLine(intent, SUBJECT_MOST), "", `${merged}.`] : [merged];
 	if (intent.length > SUBJECT_MOST) lines.push("", ...wrapped(intent));
-	const reviews = claimed.reviews ?? [];
-	if (reviews.length) {
-		lines.push("", "Reviewed by:");
-		for (const review of reviews) {
-			const evidence = oneLine(review.evidence, EVIDENCE_MOST);
-			lines.push(`- ${review.reviewer} (${review.role}): ${evidence}`);
-		}
-	}
+	const reviews = (claimed.reviews ?? []).map(
+		(review) => `- ${review.reviewer} (${review.role}): ${oneLine(review.evidence, EVIDENCE_MOST)}`,
+	);
+	section(lines, "Reviewed by:", reviews);
 	return [...lines, ""];
+}
+
+// A heading and its lines, after a blank line, when there are any.
+function section(lines: string[], heading: string, items: string[]) {
+	if (items.length) lines.push("", heading, ...items);
 }
 
 export async function mergeMessage(claimed: MergeClaim, stamper?: Stamper) {
