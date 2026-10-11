@@ -23,6 +23,7 @@ export { RepoCache } from "./repo-cache";
 export { RecordCache } from "./record-cache";
 export { ChangeCache } from "./change-cache";
 export { TokenCache } from "./token-cache";
+export { GitHubSync } from "./github-sync";
 
 const app = new Hono<AppEnv>();
 

@@ -21,7 +21,7 @@ import type { Work } from "../work";
 import { changeHead, changeSigns, changeSourceFor } from "./change-state";
 import { keyAgent, mayActAs } from "./identity";
 import {
-	branchSettings,
+	claimPolicy,
 	claimsRef,
 	containerChecks,
 	DEFAULT_POLICY,
@@ -396,7 +396,7 @@ async function readOpenWork(sources: WorkSources, agent: string) {
 				counted,
 				record: votesCast,
 				landing: claim.into ? null : landing,
-				policy: branchSettings(registered, claim.into).policy,
+				policy: claimPolicy(registered, claim),
 			}),
 			Date.now(),
 		).abandoned;
@@ -406,7 +406,7 @@ async function readOpenWork(sources: WorkSources, agent: string) {
 		...(teams.length ? { teams } : {}),
 		policy: registered?.policy ?? DEFAULT_POLICY,
 		// Each change's policy comes from the branch it lands on.
-		policyOf: (claim: ClaimRecord) => branchSettings(registered, claim.into).policy,
+		policyOf: (claim: ClaimRecord) => claimPolicy(registered, claim),
 		open,
 		votes: counted,
 		merged: new Set([...inForce.merged, ...inForce.claims.filter(landedHere).map((claim) => claim.change)]),

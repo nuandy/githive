@@ -5,6 +5,7 @@ import { audit } from "../audit";
 import { scopeFile } from "../branch-scope";
 import type { BranchRecord, Registry } from "../claims";
 import { mergeRecordOf, readMainMerges, readRecordHistory, readRefHistories, readShardHistories } from "../git-records";
+import { type GitHubImports, importsRef } from "../github-imports";
 import { revertViolation } from "../revert";
 import { votesPrefix } from "../vote-store";
 import type { Votes } from "../votes";
@@ -58,6 +59,10 @@ export async function runAudit(ctx: ToolContext, repo: string) {
 	const branches = Object.entries(latest.branches ?? {});
 	const onBranches = (await timing.time("branches", () => Promise.all(branches.map(mergesOn)))).flat();
 	const all = [...merges, ...onBranches];
+	// What a trusted GitHub change may merge: the commits of GitHub's brought in (see github-imports.ts).
+	const imports = (await timing.time("imports", () => readRecordHistory<GitHubImports>(remote, importsRef(repo)))).at(
+		-1,
+	)?.state.imports;
 	const violations = await timing.time("audit", () =>
 		audit({
 			registry,
@@ -67,6 +72,7 @@ export async function runAudit(ctx: ToolContext, repo: string) {
 			policy: start.policy ?? DEFAULT_POLICY,
 			verify: start.verify,
 			merges: all,
+			...(imports?.length ? { imports } : {}),
 		}),
 	);
 	return { merges: all.length, violations };

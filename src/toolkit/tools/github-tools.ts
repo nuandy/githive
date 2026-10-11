@@ -2,9 +2,12 @@ import { fail } from "../../errors";
 import { GitHubError, type GitHubLink, type PullRequest } from "../../github";
 import { mirrorTo } from "../actions-checks";
 import { pullStory, untaken } from "../github-pr";
-import { githubSync, type GitHubSyncState, PR_BRANCH } from "../github-settings";
+import type { ClaimRecord, Registry } from "../claims";
+import { type GitHubImport, type GitHubImports, importedAt, importsRef, verifiedImports } from "../github-imports";
+import { githubSync, type GitHubSyncState, isGitHubChange, PR_BRANCH, trustsGitHub } from "../github-settings";
 import { branchHistory } from "../history";
-import type { ToolCall, ToolHandlers } from "./context";
+import type { ToolCall, ToolContext, ToolHandlers } from "./context";
+import { recordLog } from "./repo";
 
 // The standing pull request on GitHub (see docs/github-prs.md): github_pr opens it, or says where it is, and with
 // refresh rewrites its title and body. Asking is also a moment to look at GitHub's branch: if it holds commits
@@ -40,9 +43,8 @@ export const githubTools: ToolHandlers = {
 				note: `a pull request from ${PR_BRANCH} is open already; it updates itself as changes land`,
 			};
 		}
-		const landed = (await branchHistory(ctx, repo)).changes;
-		// The newest commit GitHub's branch holds of GitHive's main; it's on main once its import has landed.
-		const story = pullStory(untaken(landed, seen.head), seen.branch);
+		const [landed, taken] = await Promise.all([branchHistory(ctx, repo), takenAt(call, seen)]);
+		const story = pullStory(untaken(landed.changes, taken), seen.branch);
 		if (open) {
 			const updated = await link.updatePull(open.number, { title: story.title, body: story.body });
 			await notePull(call, updated);
@@ -63,6 +65,32 @@ export const githubTools: ToolHandlers = {
 		return reply(pull, "opened", story.changes);
 	},
 };
+
+/**
+ * Whether a change lands without votes at a head: githive-github's claim of a GitHub branch, while the repo trusts
+ * GitHub's changes, at a head the import record holds, stamped. The record is read once, when first needed.
+ */
+export function trustedImports(ctx: ToolContext, repo: string, registry: Registry | undefined) {
+	if (!registry || !trustsGitHub(registry)) return undefined;
+	let imports: Promise<GitHubImport[]> | undefined;
+	const read = async () => {
+		const head = await recordLog<GitHubImports>(ctx, repo, importsRef(repo)).read();
+		return verifiedImports(head?.commit.state.imports ?? [], registry.stampKey);
+	};
+	return async (claim: ClaimRecord, head: string) => {
+		if (!isGitHubChange(claim)) return false;
+		imports ??= read().catch((err) => (console.error(`reading ${repo}'s GitHub imports failed`, String(err)), []));
+		const branch = claim.source!.slice("github/".length);
+		return !!importedAt(await imports, branch, head);
+	};
+}
+
+// The newest commit of GitHive's main whose work GitHub's branch has: its head, or for a head GitHive brought in, the
+// commit its import found GitHub had taken (a squash's or rebase's head is no commit of main's).
+async function takenAt({ ctx, repo }: ToolCall, seen: { branch: string; head: string }) {
+	const imports = (await recordLog<GitHubImports>(ctx, repo, importsRef(repo)).read())?.commit.state.imports ?? [];
+	return imports.findLast((entry) => entry.branch === seen.branch && entry.commit === seen.head)?.base ?? seen.head;
+}
 
 // The connected GitHub repo, through GitHive's App.
 async function connectedLink({ ctx, repo, registered }: ToolCall): Promise<GitHubLink> {

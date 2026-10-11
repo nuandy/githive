@@ -20,8 +20,11 @@ export interface FakeGitHub {
 	calls: string[];
 	/** Makes the next `count` REST calls fail, as GitHub down would. */
 	failCalls: (count: number) => void;
-	/** Merges the open pull request into the default branch as GitHub would, and closes it. Returns the new head. */
-	mergePull: (how: "merge" | "squash" | "rebase") => string;
+	/**
+	 * Merges the open pull request (or githive/main) into the default branch as GitHub would, and closes it. A
+	 * conflict is resolved taking `taking`'s side, as a person would on GitHub. Returns the new head.
+	 */
+	mergePull: (how: "merge" | "squash" | "rebase", taking?: "ours" | "theirs") => string;
 	/** Someone commits `files` straight to GitHub's default branch. Returns the new head. */
 	push: (files: Record<string, string>, message?: string) => string;
 	close: () => void;
@@ -97,7 +100,8 @@ export async function fakeGitHub(
 			return withoutOpen(pull);
 		},
 	};
-	const mergePull = (how: "merge" | "squash" | "rebase") => {
+	const mergePull = (how: "merge" | "squash" | "rebase", taking?: "ours" | "theirs") => {
+		const resolving = taking ? ["-X", taking] : [];
 		const pull = pulls.find((entry) => entry.open) ?? { number: 0, head: "githive/main", base: "main", title: "" };
 		inClone((_dir, run) => {
 			run("fetch", "-q", "origin", `${pull.head}:refs/remotes/origin/${pull.head}`);
@@ -106,13 +110,14 @@ export async function fakeGitHub(
 				run(
 					"merge",
 					"-q",
+					...resolving,
 					"--no-ff",
 					"-m",
 					`Merge pull request #${pull.number} from ${pull.head}`,
 					`origin/${pull.head}`,
 				);
 			if (how === "squash") {
-				run("merge", "-q", "--squash", `origin/${pull.head}`);
+				run("merge", "-q", ...resolving, "--squash", `origin/${pull.head}`);
 				run("commit", "-q", "-m", `${pull.title} (#${pull.number})`);
 			}
 			if (how === "rebase") {

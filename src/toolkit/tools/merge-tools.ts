@@ -12,8 +12,9 @@ import { countedVotes } from "../votes";
 import { holdKey, reviewersNeeded } from "../work";
 import type { ToolCall, ToolContext, ToolHandlers } from "./context";
 import { ownChangeCommands, reviewCommands } from "./git-commands";
+import { trustedImports } from "./github-tools";
 import { mayActAs } from "./identity";
-import { branchSettings } from "./repo";
+import { branchSettings, claimPolicy } from "./repo";
 
 // Tools for landing a change: merge, and credentials for a change's branch: your own to push to, or someone
 // else's to review.
@@ -115,6 +116,8 @@ function optionalMergeInput(
 	const optional: Partial<MergeInput> = {};
 	if (into !== branch) optional.scope = (file: string) => scopeFile(file, into, branch);
 	if (registered?.skipChecks) optional.skipChecks = registered.skipChecks;
+	const trusted = trustedImports(ctx, repo, registered);
+	if (trusted) optional.trusted = trusted;
 	if (ctx.branchHead) optional.branchHead = () => ctx.branchHead!(repo, into);
 	if (ctx.landing) optional.landing = ctx.landing(repo, into);
 	if (ctx.history) optional.history = ctx.history;
@@ -238,7 +241,7 @@ async function reviewAccess(
 async function takeReview(call: ToolCall, claim: ClaimRecord, head: string, role: string, reviewer: string) {
 	const { ctx, repo, registered, votes } = call;
 	if (!ctx.reviews) return;
-	const policy = branchSettings(registered, claim.into).policy;
+	const policy = claimPolicy(registered, claim);
 	const cast = (await votes.readFor([head])).votes.filter((vote) => vote.commit === head);
 	const counted = await countedVotes(cast, registered?.stampKey);
 	const needed = reviewersNeeded(policy, claim, head, counted, role);

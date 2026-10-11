@@ -117,6 +117,11 @@ export interface MergeInput {
 	stamper?: Stamper;
 	/** The registry's stamp key. When set, only stamped votes count. */
 	stampKey?: string;
+	/**
+	 * Whether a change lands without votes at `head`: GitHub's changes, brought in by githive-github, while the repo
+	 * trusts them (see github-settings.ts). Its checks still run.
+	 */
+	trusted?: (claim: ClaimRecord, head: string) => Promise<boolean>;
 	change: string;
 	agent: string;
 	/** Maps a file to its name in the claims records, for a branch other than the project's (see branch-scope.ts). */

@@ -179,6 +179,21 @@ function githubApp(env: Env): Pick<ToolContext, "github"> {
 	return { github: (repo: string) => linkTo({ appId, privateKey }, repo) };
 }
 
+// A connected repo's GitHubSync (see github-sync.ts): the job bringing GitHub's changes back, and the pull request.
+function githubSyncParts(env: Env): Pick<ToolContext, "githubSync"> {
+	if (!env.GITHUB_SYNC) return {};
+	return {
+		githubSync: (repo: string) => {
+			const sync = () => env.GITHUB_SYNC.getByName(`repo:${repo}`);
+			return {
+				notice: (seen, again) => rpc(sync().notice({ ...seen, repo }, again)),
+				notePull: (pull) => sync().notePull(pull),
+				state: () => rpc(sync().state()),
+			};
+		},
+	};
+}
+
 // Starts the Gate called `name`, on the repo's branch, before it's needed.
 async function bootGate(env: Env, repo: string, name: string) {
 	const read = await projectRemote(env, repo, "read");
@@ -204,6 +219,7 @@ export function toolContextFor(
 		...gateParts(env),
 		...hostedParts(env),
 		...githubApp(env),
+		...githubSyncParts(env),
 		stamper: async (agent) => {
 			if (!env.STAMP_KEY || !by) return undefined;
 			return makeStamper(env.STAMP_KEY, agent ? `${by}/${agent}` : by);

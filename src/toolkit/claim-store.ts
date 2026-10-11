@@ -345,7 +345,8 @@ class Claims implements ClaimStore {
 	// Unsharded, a claim goes in the registry. Sharded, each path goes in its shard, or all of them in one common
 	// shard if they are spread too wide.
 	private place(paths: string[]): Map<string, string[]> {
-		if (!this.sharded) return new Map([[ROOT, paths]]);
+		// A claim of no paths (a merge that changes no file) holds nothing, and goes in the registry.
+		if (!this.sharded || !paths.length) return new Map([[ROOT, paths]]);
 		const groups = new Map<string, string[]>();
 		for (const path of paths) {
 			const shard = shardOf(path, this.depth);

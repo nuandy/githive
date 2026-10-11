@@ -172,6 +172,25 @@ export async function validated(
 	};
 }
 
+// Approvals count distinct reviewers other than the author, under the policy for the files touched. That policy may
+// be stricter for dependency, CI and deploy files.
+function approvalReasons(
+	input: MergeInput,
+	head: string,
+	own: ClaimRecord | undefined,
+	counted: VotesView["votes"],
+	files: string[],
+): string[] {
+	const outcome = approval({ votes: counted }, head, input.policy, own, files);
+	const { required } = effectivePolicy(input.policy, files);
+	if (outcome.vetoedBy.length) return [`${head} is vetoed by ${outcome.vetoedBy.join(", ")}`];
+	if (outcome.approvals < required)
+		return [`${head} has ${outcome.approvals} of ${required} approvals from reviewers other than its author`];
+	if (outcome.awaiting.length)
+		return [`${head} still needs approval from ${outcome.awaiting.join(", ")}, which can veto it`];
+	return [];
+}
+
 function claimReasons(proposed: Proposed, scoped: string[], claims: ClaimsView, own?: ClaimRecord): string[] {
 	const { change } = proposed;
 	const reasons: string[] = [];
@@ -196,19 +215,13 @@ async function voteReasons(
 	const onHead = votes.votes.filter((vote) => vote.commit === head);
 	const counted = await countedVotes(onHead, input.stampKey);
 	const reasons: string[] = [];
-	// Approvals count distinct reviewers other than the author, under the policy for the files touched. That policy may
-	// be stricter for dependency, CI and deploy files.
-	const outcome = approval({ votes: counted }, head, input.policy, own, files);
-	const { required } = effectivePolicy(input.policy, files);
-	if (outcome.vetoedBy.length) reasons.push(`${head} is vetoed by ${outcome.vetoedBy.join(", ")}`);
-	else if (outcome.approvals < required)
-		reasons.push(`${head} has ${outcome.approvals} of ${required} approvals from reviewers other than its author`);
-	else if (outcome.awaiting.length)
-		reasons.push(`${head} still needs approval from ${outcome.awaiting.join(", ")}, which can veto it`);
+	// GitHub's changes, while the repo trusts them, need no votes; only their checks can send them back.
+	const trusted = !!own && !!(await input.trusted?.(own, head));
+	if (!trusted) reasons.push(...approvalReasons(input, head, own, counted, files));
 	// Its checks failed twice on this exact commit, so merging it again would fail. A new commit is checked afresh.
 	const failed = counted.find((vote) => vote.reviewer === CHECKS_REVIEWER && vote.verdict === "reject");
 	if (failed) reasons.push(`${failed.evidence.split("\n")[0]}: push a fix (a new commit) and get it approved`);
-	else if (!proposed.mine) {
+	else if (!proposed.mine && !trusted) {
 		const author = own?.agent ?? proposed.agent;
 		const sentBack = counted.find((vote) => vote.verdict === "reject" && vote.reviewer !== author);
 		if (sentBack) reasons.push(`${sentBack.reviewer} asked for changes on ${head}`);

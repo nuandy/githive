@@ -12,15 +12,17 @@ import type { ToolContext } from "./context";
 
 /**
  * A change that merges branch `source` into `into` whole. Its claim is the files `source` changed since
- * it left `into`, and its tip becomes the change's branch, so it's reviewed, checked and merged as usual.
+ * it left `into`, and its tip becomes the change's branch, so it's reviewed, checked and merged as usual. A source
+ * whose commits change no file (GitHub's merge of a pull request, say) claims no paths, and still merges.
  */
 export async function branchMerge(ctx: ToolContext, repo: string, source: string, into: string) {
 	if (source === into) fail(400, `a change can't merge ${into} into itself`);
 	const project = await ctx.remote(repo, "read");
 	const workspace = await Workspace.clone(project, into).catch(() => fail(409, `there's no branch ${into}`));
 	const tip = await workspace.fetch("source", project, source).catch(() => fail(409, `there's no branch ${source}`));
-	const files = await workspace.changedPaths(await workspace.mergeBase(await workspace.head(), tip), tip);
-	if (!files.length) fail(409, `${source} has nothing ${into} doesn't have`);
+	const base = await workspace.mergeBase(await workspace.head(), tip);
+	if (base === tip) fail(409, `${source} has nothing ${into} doesn't have`);
+	const files = await workspace.changedPaths(base, tip);
 	const paths =
 		claimCovering(files) ?? fail(409, `${source} changes too much of ${into} to claim at once: merge it in parts`);
 	return {
