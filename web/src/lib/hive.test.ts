@@ -97,11 +97,25 @@ describe("the hive's live feed", () => {
 		);
 		// The change it's about is linked, and the names it's about noted; a conflict's files are in its words.
 		const line = feedLine({ ...landed, detail: "loadSettings", at: ago(1) }, snapshot(claims));
-		expect(line).toMatchObject({ kind: "interface", change: "c-12", note: "loadSettings" });
+		expect(line).toMatchObject({ kind: "interface", toChange: "in", change: "c-12", note: "loadSettings" });
+		// A heads-up's change is its own agent's; a conflict's is the change whose merge it was.
+		const headsUp = feedLine(
+			{ kind: "heads_up", agent: "bob", change: "c-3", other: "carol", at: ago(1) },
+			snapshot(claims),
+		);
+		expect(headsUp).toMatchObject({ toChange: "in bob's", change: "c-3" });
+		const conflicted = feedLine({ kind: "conflicted", agent: "dan", change: "c-9", at: ago(1) }, snapshot(claims));
+		expect(conflicted).toMatchObject({ toChange: "in", change: "c-9" });
+		// What agents did needs no words between: "ann landed c-12".
+		expect(
+			feedLine({ kind: "landed", agent: "ann", change: "c-12", at: ago(1) }, snapshot(claims)).toChange,
+		).toBeUndefined();
 		const conflict = { kind: "conflicted" as const, agent: "dan", change: "c-9", detail: "invoice.ts", at: ago(1) };
 		expect(feedLine(conflict, snapshot(claims)).note).toBeUndefined();
 		// Without a claim to say who, the other agent is unnamed.
-		expect(said({ kind: "interface", agent: "alice", change: "gone" })).toBe("alice landed an interface change another agent uses");
+		expect(said({ kind: "interface", agent: "alice", change: "gone" })).toBe(
+			"alice landed an interface change another agent uses",
+		);
 		expect(said({ kind: "heads_up", agent: "bob", change: "c-3" })).toBe(
 			"bob and another agent are changing things each other uses",
 		);

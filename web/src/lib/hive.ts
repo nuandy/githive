@@ -75,6 +75,8 @@ export interface FeedLine {
 	agent: string;
 	/** What they did, before the change it was done to. */
 	action: string;
+	/** Words between the action and the change, where the action ends in a clause of its own ("… bob uses in c-12"). */
+	toChange?: string;
 	change?: string;
 	/** The short commit, when no change is known for it. */
 	commit?: string;
@@ -100,6 +102,14 @@ const ACTIONS: Record<HiveEvent["kind"], string | ((event: HiveEvent, other: str
 	conflicted: (event) => `'s merge conflicted${event.detail ? ` on ${event.detail}` : ""}`,
 };
 
+// How an awareness event leads into its change: an interface change's is the change that uses it, a heads-up's is its
+// own agent's, and a conflict's is the change whose merge it was.
+const TO_CHANGE: Partial<Record<HiveEvent["kind"], (agent: string) => string>> = {
+	interface: () => "in",
+	heads_up: (agent) => `in ${agent}'s`,
+	conflicted: () => "in",
+};
+
 /**
  * An event as a line of the feed. A push names only its change, so its agent is the one claiming the change; a
  * vote names only its commit, so its change is the claim whose head that is.
@@ -112,8 +122,11 @@ export function feedLine(event: HiveEvent, snapshot: RepoSnapshot): FeedLine {
 	// The other agent an awareness event names; a heads-up's change is its own agent's.
 	const other = event.other ?? (event.kind === "heads_up" ? undefined : claimOf(change)?.agent) ?? "another agent";
 	const line: FeedLine = { kind: event.kind, agent, action: actionOf(event, other), at: event.at };
-	if (change) line.change = change;
-	else if (event.commit) line.commit = event.commit.slice(0, 8);
+	if (change) {
+		const toChange = TO_CHANGE[event.kind];
+		if (toChange) line.toChange = toChange(agent);
+		line.change = change;
+	} else if (event.commit) line.commit = event.commit.slice(0, 8);
 	const note = noteOf(event);
 	if (note) line.note = note;
 	return line;
