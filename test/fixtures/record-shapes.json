@@ -23,6 +23,11 @@
 					"stamp": "string"
 				}
 			],
+			"github": {
+				"repo": "string",
+				"sync": "string",
+				"trust": "boolean"
+			},
 			"policy": {
 				"escalate": [
 					{

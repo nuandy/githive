@@ -1,10 +1,14 @@
 import { BRANCH_PATTERN, type BranchRule } from "../branch-rules";
 import { SKIP_PATTERN } from "../check-scope";
+import { GITHUB_SYNCS, type GitHubSettings, type GitHubSync, NEW_CONNECTION_SYNC } from "../github-settings";
 import type { ReviewPolicy } from "../votes";
 import type { Args, ToolContext } from "./context";
 import { fail } from "../../errors";
 
 // Parsing the settings tool's input into the registry's policy, checks and branch rules.
+
+/** The settings arguments for the GitHub link. */
+export const GITHUB_FIELDS = ["github", "github_sync", "github_trust"] as const;
 
 /** The settings arguments that make up the review policy. */
 export const POLICY_FIELDS = ["required", "vetoes", "escalate", "grants"] as const;
@@ -56,15 +60,45 @@ export function policyFrom(args: Args, base: ReviewPolicy): ReviewPolicy {
 	};
 }
 
-/** Parses settings' github ("owner/name", or "" for none). Refused unless GitHive's App is installed there. */
-export async function githubFrom(ctx: ToolContext, value: unknown): Promise<{ repo: string } | null> {
-	if (value === "" || value === null) return null;
+/**
+ * Parses settings' github ("owner/name", or "" for none), github_sync ("mirror" or "pr") and github_trust, against
+ * the repo's current link. A repo newly connected takes NEW_CONNECTION_SYNC and trusts GitHub's changes. Refused
+ * unless GitHive's App is installed there. Undefined when none of them is given.
+ */
+export async function githubFrom(
+	ctx: ToolContext,
+	args: Args,
+	current: GitHubSettings | undefined,
+): Promise<GitHubSettings | null | undefined> {
+	const { github: value, github_sync: sync, github_trust: trust } = args;
+	if (value === undefined && sync === undefined && trust === undefined) return undefined;
+	if (sync !== undefined && !GITHUB_SYNCS.includes(sync as GitHubSync))
+		fail(400, 'github_sync is "mirror" (main goes to GitHub\'s main) or "pr" (through a pull request)');
+	if (trust !== undefined && typeof trust !== "boolean") fail(400, "github_trust is true or false");
+	if (value === "" || value === null) {
+		if (sync !== undefined || trust !== undefined) fail(400, "github_sync and github_trust need a GitHub repo");
+		return null;
+	}
+	const link = value === undefined ? current : await connected(ctx, value, current);
+	if (!link) fail(409, 'connect a GitHub repo first: set github ("owner/name")');
+	// What isn't given stays as the link has it.
+	const next: GitHubSettings = { repo: link.repo };
+	const mode = (sync as GitHubSync | undefined) ?? link.sync;
+	if (mode) next.sync = mode;
+	const trusted = (trust as boolean | undefined) ?? link.trust;
+	if (trusted !== undefined) next.trust = trusted;
+	return next;
+}
+
+// The link `value` names: the current one if it's the same repo, else a new connection, which must have the App.
+async function connected(ctx: ToolContext, value: unknown, current: GitHubSettings | undefined) {
 	if (typeof value !== "string" || !/^[\w.-]+\/[\w.-]+$/.test(value.trim()))
 		fail(400, 'github is "owner/name", or "" for none');
-	if (!ctx.github) fail(501, "GitHub isn't set up on this GitHive (its App's ID and key)");
 	const repo = value.trim();
+	if (current?.repo === repo) return current;
+	if (!ctx.github) fail(501, "GitHub isn't set up on this GitHive (its App's ID and key)");
 	if (!(await ctx.github(repo))) fail(409, `GitHive's GitHub app isn't installed on ${repo}: install it there first`);
-	return { repo };
+	return { repo, sync: NEW_CONNECTION_SYNC, trust: true };
 }
 
 export function checksFrom(value: unknown): string[] {

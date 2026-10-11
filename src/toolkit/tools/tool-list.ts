@@ -96,9 +96,13 @@ const TOOL_LIST = [
 			"touching only these merges without them (*.md, docs/, licenses and images by default; a file " +
 			"under test/, fixtures/ or examples/ always runs them); [] makes them always run. github " +
 			"connects a GitHub repo ('owner/name', '' for none) through GitHive's GitHub app, installed " +
-			"there: main is pushed back to it after every landing, and verify ['github-actions'] runs the " +
-			"checks on its Actions instead of in containers (a workflow that runs on pushes to " +
-			"githive/checks/**). Only when GitHive starts on a repo: how claims are kept. They start in " +
+			"there. github_sync says how GitHive's work reaches it: 'pr' (new connections) pushes main to " +
+			"githive/main after every landing, for one standing pull request into GitHub's default branch " +
+			"(github_pr opens it); 'mirror' pushes main to GitHub's main. Either way what GitHub's branch " +
+			"gains (the pull request's merge, or commits pushed there) comes back as a change by " +
+			"githive-github, landing through the checks without review unless github_trust is false. verify " +
+			"['github-actions'] runs the checks on its Actions instead of in containers (a workflow that runs " +
+			"on pushes to githive/checks/**). Only when GitHive starts on a repo: how claims are kept. They start in " +
 			"one record and shard per path, 2 segments deep over 16 records repos, once the load calls for " +
 			"it (8 agents holding claims, or over 15 claim writes a minute); shard_depth shards now, this " +
 			"deep (0: never), and records_repos is how many repos the shards are spread over, since a repo " +
@@ -108,6 +112,8 @@ const TOOL_LIST = [
 			properties: {
 				repo: str,
 				github: str,
+				github_sync: { type: "string", enum: ["mirror", "pr"] },
+				github_trust: { type: "boolean" },
 				shard_depth: { type: "number" },
 				records_repos: { type: "number" },
 				required: { type: "number" },

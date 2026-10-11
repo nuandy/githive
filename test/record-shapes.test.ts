@@ -2,6 +2,7 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { RECORD_FORMAT } from "../src/record-format";
+import type { GitHubLink } from "../src/github";
 import { GitCasLog } from "../src/record-log";
 import { callTool, type ToolContext } from "../src/toolkit/mcp";
 import { generateStampKey, makeStamper } from "../src/toolkit/stamp";
@@ -59,6 +60,7 @@ beforeAll(async () => {
 		stamper: (acting?: string) => makeStamper(privateKey, `person:000000000000${acting ? `/${acting}` : ""}`),
 		agent,
 		teamsOf: async () => ["@acme/security"],
+		github: async (repo: string) => ({ repo }) as GitHubLink,
 	});
 	const call = (agent: string, name: string, args: Record<string, unknown>) =>
 		callTool(name, { repo: "p", ...args }, ctx(agent));
@@ -71,6 +73,8 @@ beforeAll(async () => {
 		verify: ["npm test"],
 		shard_depth: 0,
 	});
+	// A GitHub link, with its mode and trust.
+	await call("ada/lead", "settings", { github: "acme/shop", github_sync: "pr", github_trust: true });
 	await callTool(
 		"register",
 		{ repo: "p", agent: "keyed-agent" },
