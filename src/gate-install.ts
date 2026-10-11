@@ -3,17 +3,22 @@ import { WORKDIR, clip, installToolchains, run } from "./container";
 import type { CheckResult } from "./gate-types";
 import { DEPENDENCIES, DEPENDENCY_FILES, type Toolchain } from "./toolchains";
 
-const INSTALLS = /^(npm|pnpm|yarn)\s+(ci|install)(\s|$)/;
+const INSTALLS = /^(npm|pnpm|yarn|bun)\s+(ci|install)(\s|$)/;
 
 /** Whether a check installs a Node project's dependencies. */
 export const isInstall = (command: string) => INSTALLS.test(command.trim());
 
 /**
  * Puts an install first in a Node project's checks when none of them installs dependencies, since otherwise every
- * check fails on missing tools.
+ * check fails on missing tools. A Bun project's dependencies are installed with its toolchain instead (see
+ * toolchains.ts), from its own lockfile.
  */
-export function withInstall(checks: string[], project: { packageJson: boolean; npmLockfile: boolean }) {
-	if (!project.packageJson || checks.some((c) => INSTALLS.test(c.trim()))) return checks;
+export function withInstall(
+	checks: string[],
+	project: { packageJson: boolean; npmLockfile: boolean; bunLockfile?: boolean },
+) {
+	if (!project.packageJson || project.bunLockfile) return checks;
+	if (checks.some((c) => INSTALLS.test(c.trim()))) return checks;
 	return [project.npmLockfile ? "npm ci" : "npm install", ...checks];
 }
 
@@ -23,11 +28,12 @@ export async function checksFor(container: Container, checks: string[]) {
 		"bash",
 		"-c",
 		"[ -f package.json ] && echo package.json; [ -f package-lock.json ] || [ -f npm-shrinkwrap.json ] " +
-			"&& echo lockfile; true",
+			"&& echo lockfile; [ -f bun.lock ] || [ -f bun.lockb ] && echo bun; true",
 	]);
 	return withInstall(checks, {
 		packageJson: found.output.includes("package.json"),
 		npmLockfile: found.output.includes("lockfile"),
+		bunLockfile: found.output.includes("bun"),
 	});
 }
 
@@ -43,7 +49,7 @@ export async function lockHash(container: Container) {
 	const hashed = await run(container, [
 		"bash",
 		"-lc",
-		`{ ${deps}; cat package-lock.json npm-shrinkwrap.json yarn.lock pnpm-lock.yaml 2>/dev/null; } | ` +
+		`{ ${deps}; cat package-lock.json npm-shrinkwrap.json yarn.lock pnpm-lock.yaml bun.lock bun.lockb 2>/dev/null; } | ` +
 			"sha256sum | cut -d' ' -f1",
 	]);
 	return hashed.output.trim();

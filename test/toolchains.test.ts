@@ -21,6 +21,18 @@ describe("which toolchains a repo uses", () => {
 		]);
 	});
 
+	it("finds Bun from its lockfile or bunfig.toml", () => {
+		expect(detectToolchains(["package.json", "bun.lock"])).toEqual(["bun"]);
+		expect(detectToolchains(["apps/web/bun.lockb"])).toEqual(["bun"]);
+		expect(detectToolchains(["bunfig.toml"])).toEqual(["bun"]);
+		expect(detectToolchains(["docs/bun.lock.md"])).toEqual([]);
+	});
+
+	it("installs a Bun project's dependencies exactly as its lockfile pins them", () => {
+		expect(DEPENDENCIES.bun.script).toContain("bun install --frozen-lockfile");
+		expect(INSTALL.bun).toContain("BUN_INSTALL=/usr/local");
+	});
+
 	it("isn't fooled by names that only contain a marker", () => {
 		expect(detectToolchains(["docs/go.mod.md", "notes/Cargo.toml.bak", "my-pyproject.toml.txt"])).toEqual([]);
 	});

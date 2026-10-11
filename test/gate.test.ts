@@ -67,6 +67,12 @@ describe("installing a Node project's dependencies before its checks", () => {
 		).toEqual(["pnpm install --frozen-lockfile", "pnpm test"]);
 		expect(withInstall(["cargo test"], { packageJson: false, npmLockfile: false })).toEqual(["cargo test"]);
 	});
+
+	it("adds no npm install to a Bun project, whose dependencies come from its own lockfile", async () => {
+		const { withInstall } = await import("../src/gate");
+		const bun = { packageJson: true, npmLockfile: false, bunLockfile: true };
+		expect(withInstall(["bun test"], bun)).toEqual(["bun test"]);
+	});
 });
 
 describe("a check container's size", () => {

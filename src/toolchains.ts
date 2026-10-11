@@ -1,12 +1,13 @@
 // Toolchains beyond Node, installed when a repo's tracked files show it uses them, in any folder.
 // Installs and caches live outside the checkout, so cleaning the checkout between checks keeps them.
 
-export type Toolchain = "python" | "go" | "rust";
+export type Toolchain = "python" | "go" | "rust" | "bun";
 
 const MARKERS: Record<Toolchain, RegExp> = {
 	python: /(^|\/)(pyproject\.toml|requirements[^/]*\.txt|setup\.py|setup\.cfg|uv\.lock|Pipfile)$/,
 	go: /(^|\/)go\.mod$/,
 	rust: /(^|\/)Cargo\.toml$/,
+	bun: /(^|\/)(bun\.lockb?|bunfig\.toml)$/,
 };
 
 /** Pathspecs for the markers, so `git ls-files` stays cheap in a large repo. */
@@ -19,6 +20,9 @@ export const MARKER_PATHSPECS = [
 	"*Pipfile",
 	"*go.mod",
 	"*Cargo.toml",
+	"*bun.lock",
+	"*bun.lockb",
+	"*bunfig.toml",
 ];
 
 export function detectToolchains(files: string[]): Toolchain[] {
@@ -37,7 +41,8 @@ const APT = "DEBIAN_FRONTEND=noninteractive apt-get install -y -qq";
 
 /**
  * Idempotent install scripts. Go installs the latest release, and a go.mod that wants a newer
- * one gets it through GOTOOLCHAIN. rustup honours a rust-toolchain.toml.
+ * one gets it through GOTOOLCHAIN. rustup honours a rust-toolchain.toml. Bun installs its latest
+ * release into /usr/local/bin, which is on the PATH already.
  */
 export const INSTALL: Record<Toolchain, string> = {
 	python: [
@@ -59,6 +64,10 @@ export const INSTALL: Record<Toolchain, string> = {
 		"[ -x /root/.cargo/bin/cargo ] || curl --proto '=https' -sSf https://sh.rustup.rs | sh -s -- -y -q " +
 			"--profile minimal -c clippy -c rustfmt --no-modify-path >/dev/null",
 	].join(" && "),
+	bun: [
+		`{ command -v curl >/dev/null && command -v unzip >/dev/null || ${APT} curl unzip >/dev/null; }`,
+		"{ command -v bun >/dev/null || curl -fsSL https://bun.sh/install | BUN_INSTALL=/usr/local bash >/dev/null; }",
+	].join(" && "),
 };
 
 /** Dependency installs run from the checkout's root: a command to show, and the script that runs. */
@@ -75,9 +84,18 @@ export const DEPENDENCIES: Record<Toolchain, { command: string; script: string }
 	},
 	go: { command: "go mod download", script: "[ ! -f go.mod ] || go mod download" },
 	rust: { command: "cargo fetch", script: "[ ! -f Cargo.toml ] || cargo fetch -q" },
+	// With a lockfile, install exactly what it pins; a repo that only has bunfig.toml resolves afresh.
+	bun: {
+		command: "bun install",
+		script: [
+			"if [ -f bun.lock ] || [ -f bun.lockb ]; then bun install --frozen-lockfile",
+			"elif [ -f package.json ]; then bun install",
+			"fi",
+		].join("; "),
+	},
 };
 
 /** When none of these files changed, the dependency install is skipped. */
 export const DEPENDENCY_FILES =
 	"pyproject.toml uv.lock requirements*.txt setup.py setup.cfg go.mod go.sum Cargo.toml Cargo.lock " +
-	"rust-toolchain rust-toolchain.toml";
+	"rust-toolchain rust-toolchain.toml bun.lock bun.lockb bunfig.toml package.json";

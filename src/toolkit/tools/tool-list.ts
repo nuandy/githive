@@ -85,7 +85,7 @@ const TOOL_LIST = [
 			"'@<org>/<team>', 'githive' for GitHive's reviewers; unlisted roles: people and GitHive's " +
 			"reviewers). verify: the checks run before each merge ([] for none). Each check is a shell " +
 			"command, run with bash at the repo's top on the merged code (exit 0 passes, the first failure " +
-			"stops the run) in a Linux container with Node 24, npm and git, plus Python, Go or Rust when " +
+			"stops the run) in a Linux container with Node 24, npm and git, plus Python, Go, Rust or Bun when " +
 			"the repo uses them; dependencies are installed first; up to 10 minutes per command; no " +
 			"secrets or environment variables, so a test needing a database or an API key fails. Each " +
 			"merge is held to the settings in force when it merged: the audit replays them from the " +

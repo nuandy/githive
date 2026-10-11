@@ -863,11 +863,13 @@ forgets its snapshot, so nothing starts from it again. GitHive doesn't start
 from one older than 25 days. An install is skipped while `package.json`'s
 dependency sections and the lockfile are unchanged since the last one. If no
 check installs a Node project's dependencies, the Gate runs `npm ci` first
-(from an npm lockfile) or `npm install` (without one).
-Python, Go and Rust are installed when the repo's tracked files use them
+(from an npm lockfile) or `npm install` (without one); a Bun project gets
+`bun install` from its toolchain instead.
+Python, Go, Rust and Bun are installed when the repo's tracked files use them
 (`toolchains.ts`: `pyproject.toml` or `requirements*.txt`, `go.mod`,
-`Cargo.toml`, in any folder), read from the merged code, since a change may
-add one. Their dependencies (`uv sync`, `go mod download`, `cargo fetch`) are
+`Cargo.toml`, `bun.lock` or `bunfig.toml`, in any folder), read from the merged
+code, since a change may add one. Their dependencies (`uv sync`,
+`go mod download`, `cargo fetch`, `bun install --frozen-lockfile`) are
 installed before the checks and skipped while the files they come from are
 unchanged. Toolchains, the virtualenv and Cargo's target folder live outside
 the checkout, so a clean checkout between checks keeps them. A failed install
