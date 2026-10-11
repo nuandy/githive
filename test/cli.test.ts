@@ -231,8 +231,35 @@ describe("githive CLI", () => {
 		);
 		expect(refused.stdout).not.toContain("call status");
 		expect(refused.stdout).not.toContain("In your clone: ...");
+		// The step goes on from the fix's commands, rather than start over with a second recipe (githive sync).
 		expect(refused.stdout).toMatch(
-			/next: githive sync, resolve inside your claim so both changes make sense, commit, githive land; wait for approvals \(githive status says how many\); meanwhile githive reviews acme\/app\n$/,
+			/next: run the commands above, resolving inside your claim so both changes make sense, then: githive land \(the new commit needs approval again\); wait for approvals \(githive status says how many\); meanwhile githive reviews acme\/app\n$/,
+		);
+		expect(refused.stdout).not.toContain("githive sync");
+		// Without a fix to print (an older server, say), the CLI's own recipe.
+		answers.merge = { ...answers.merge, fix: undefined };
+		const unfixed = await cli(["land", "acme/app", "rate-limit"]);
+		expect(unfixed.stdout).toMatch(
+			/next: githive sync, resolve inside your claim so both changes make sense, commit, githive land;/,
+		);
+	});
+
+	it("deepens a shallow clone first in the fix it prints, as githive sync would", async () => {
+		const { project } = repos();
+		const shallow = join(tmp, "shallow");
+		execFileSync("git", ["clone", "--quiet", "--depth", "1", project, shallow]);
+		const fix = ["git fetch origin main && git merge origin/main", "call status; once approved, merge again"];
+		answers.status = {
+			change: "rate-limit",
+			claim: { agent: "me", paths: ["src/auth/"], intent: "x" },
+			head: "abc",
+			votes: [],
+			approval: { approved: true, approvals: 1, required: 1, awaiting: [], vetoedBy: [] },
+			merge: { into: "main", clean: false, conflicts: ["src/auth/a.ts"], outsideClaim: [], fix },
+		};
+		const out = await cli(["status", "acme/app", "rate-limit"], shallow);
+		expect(out.stdout).toContain(
+			"with plain git, in your clone:\n  git fetch --unshallow origin\n  git fetch origin main && git merge origin/main\n",
 		);
 	});
 
@@ -258,7 +285,7 @@ describe("githive CLI", () => {
 		expect(conflicted.stdout).toContain(
 			"with plain git, in your clone:\n  git fetch origin main && git merge origin/main\n",
 		);
-		expect(conflicted.stdout).toContain("next: githive sync, resolve inside your claim so both changes make sense");
+		expect(conflicted.stdout).toContain("next: run the commands above, resolving inside your claim");
 		answers.status = { ...status, merge: { into: "main", clean: true, outsideClaim: ["docs/x.md"] } };
 		const strayed = await cli(["status", "acme/app", "rate-limit"]);
 		expect(strayed.stdout).toContain("outside your claim: docs/x.md");

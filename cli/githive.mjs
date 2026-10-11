@@ -64,21 +64,29 @@ const say = (...lines) => console.log(lines.join("\n"));
 const next = (text) => console.log(`next: ${text}`);
 /**
  * The next step in the CLI's own commands, after the commands in `fix` (the reply's, by default) that resolve it with
- * plain git. GitHive's next, in its tool words, only where the CLI has nothing of its own, else `otherwise`.
+ * plain git. `own` may be a function of whether a fix was printed, so that its step continues that recipe rather than
+ * give a second one. GitHive's next, in its tool words, only where the CLI has nothing of its own, else `otherwise`.
  */
 function follow(reply, own, { fix = reply?.fix, otherwise } = {}) {
-	printFix(fix);
+	const fixed = printFix(fix);
 	const theirs = typeof reply?.next === "string" && reply.next.trim() ? reply.next : undefined;
-	const step = own || theirs || otherwise;
+	const step = (typeof own === "function" ? own(fixed) : own) || theirs || otherwise;
 	if (step) next(step);
 }
 
-/** A reply's fix as plain git to run in the clone, leaving out its tool words, which the next step says the CLI's way. */
+/**
+ * A reply's fix as plain git to run in the clone, leaving out its tool words, which the next step says the CLI's way.
+ * A shallow clone (start's default) is deepened first, as githive sync does, so the merge finds its base. Returns
+ * whether it printed any commands.
+ */
 function printFix(fix) {
 	const commands = Array.isArray(fix)
 		? fix.filter((line) => typeof line === "string" && !line.startsWith("call "))
 		: [];
-	if (commands.length) say("with plain git, in your clone:", ...commands.map((line) => `  ${line}`));
+	if (!commands.length) return false;
+	const deepen = gitOk(["rev-parse", "--is-shallow-repository"]) === "true" ? ["git fetch --unshallow origin"] : [];
+	say("with plain git, in your clone:", ...[...deepen, ...commands].map((line) => `  ${line}`));
+	return true;
 }
 const SECRET_FIELDS = new Set(["token", "key", "agent_key"]);
 const redact = (value) =>
@@ -252,7 +260,7 @@ function statusStep(status, repo) {
 	if (!status.head) return "commit inside your claim, then githive land";
 	// The test merge first: a conflict or a file outside the claim needs a new commit, whatever the votes say.
 	const merge = status.merge ?? {};
-	if (merge.clean === false) return RESOLVE_CONFLICT;
+	if (merge.clean === false) return resolveConflict;
 	if (merge.outsideClaim?.length) return claimThemToo(repo, status.change);
 	const rejected = (status.votes ?? []).some((vote) => vote.verdict === "reject");
 	if (rejected || approval.vetoedBy?.length) return FIX_EVIDENCE;
@@ -265,6 +273,11 @@ function statusStep(status, repo) {
 }
 
 const RESOLVE_CONFLICT = "githive sync, resolve inside your claim so both changes make sense, commit, githive land";
+/** After the reply's fix, the step goes on from its commands rather than start over with githive sync. */
+const AFTER_FIX =
+	"run the commands above, resolving inside your claim so both changes make sense, then: githive land (the new " +
+	"commit needs approval again)";
+const resolveConflict = (fixed) => (fixed ? AFTER_FIX : RESOLVE_CONFLICT);
 const FIX_EVIDENCE = "fix what the evidence says, commit, githive land (a new commit needs new approvals)";
 const WAIT_FOR_DEPENDENCIES = (repo) => `wait for what it depends on to merge; meanwhile githive reviews ${repo}`;
 const claimThemToo = (repo, change) =>
@@ -272,7 +285,7 @@ const claimThemToo = (repo, change) =>
 
 // What a refused merge needs, in the CLI's commands, for each kind of reason it has (the reply's why).
 const REFUSED = {
-	conflict: () => RESOLVE_CONFLICT,
+	conflict: (_repo, _change, fixed) => resolveConflict(fixed),
 	checks: () => "fix what failed, commit, githive land (a new commit needs new approvals)",
 	"changes-asked": () => FIX_EVIDENCE,
 	outside: (repo, change) => claimThemToo(repo, change),
@@ -286,15 +299,18 @@ const REFUSED = {
 	unread: () => "githive land (it pushes your branch to your fork if it's missing there)",
 };
 
-/** The CLI's steps for a refused merge, from its why, or from its fields when it has none; undefined if it has none. */
+/**
+ * The CLI's steps for a refused merge, from its why, or from its fields when it has none, as a function of whether the
+ * reply's fix was printed (see follow); undefined if it has none.
+ */
 function refusedStep(merged, repo, change) {
 	const kinds = new Set((merged.why ?? []).filter((kind) => Object.hasOwn(REFUSED, kind)));
 	if (!merged.why?.length) {
 		if (merged.conflicts?.length) kinds.add("conflict");
 		if ((merged.checks ?? []).some((check) => check.exitCode !== 0)) kinds.add("checks");
 	}
-	const steps = [...kinds].map((kind) => REFUSED[kind](repo, change));
-	return steps.length ? steps.join("; ") : undefined;
+	if (!kinds.size) return undefined;
+	return (fixed) => [...kinds].map((kind) => REFUSED[kind](repo, change, fixed)).join("; ");
 }
 
 function printStatus(status, repo) {
@@ -433,7 +449,7 @@ async function checkChange(repo, change) {
 	const onto = checked.into ?? "the project's branch";
 	if (checked.clean === false) {
 		say(`${short(checked.head)} conflicts with ${onto} in ${(checked.conflicts ?? []).join(", ")}`);
-		follow(status, RESOLVE_CONFLICT, { fix: checked.fix });
+		follow(status, resolveConflict, { fix: checked.fix });
 		process.exitCode = 1;
 		return false;
 	}

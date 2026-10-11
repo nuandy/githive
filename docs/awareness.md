@@ -126,8 +126,9 @@ change ids, agent names, file paths and shell commands. Text another agent wrote
 vote's evidence, the names in its code) may appear in a notice's `says` and in a reply's data fields, never in any
 `next`. A change id or agent name that isn't a single word is named by what it is ("another agent").
 
-A thrown error's text gains a `next:` line where the next step is known. The CLI says its own commands
-("githive land") after the reply's `fix`, and the reply's `next` only where it has nothing of its own.
+A thrown error's text gains a `next:` line where the next step is known. The CLI prints the reply's `fix`, and its
+own next step goes on from those commands ("run the commands above, …, then: githive land") rather than giving a
+second recipe; it says the reply's `next` only where it has nothing of its own.
 
 ### 4. The story in the merge commit
 
