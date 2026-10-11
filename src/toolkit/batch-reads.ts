@@ -3,7 +3,7 @@ import { repoOfUrl } from "../git-http";
 import { type CommitMeta, filesBetween, type HistorySource } from "./branch-history";
 import { atMost, type BatchGit, type Inspected } from "./merge";
 import type { BatchSource } from "./merge-types";
-import { cachingHistory, forgetTrees } from "./tree-reads";
+import { cachingHistory, changedAlong, forgetTrees, treesOf } from "./tree-reads";
 import { SizedCache } from "../sized-cache";
 
 // Reads a batch's changes through the Artifacts API in the Worker instead of fetching them in the repo's Gate:
@@ -249,18 +249,16 @@ export async function changeAgainst(
 		placeChange(source, `${project}|${branch}`, change.ref, chain, onBranch),
 	);
 	if (!placed || "error" in placed) return placed;
-	// What the branch changed since the change left it, or nothing if it hasn't moved.
+	// The change's files the branch changed too since the change left it, read only along the change's own paths:
+	// whatever else the branch changed doesn't matter, and on a busy branch it's most of the tree.
 	const branchTip = chain[0];
 	const branchMoved = placed.base.hash !== main;
-	let theirs: string[] = [];
-	if (branchTip && branchMoved)
-		theirs = await history(project, (source) => filesBetween(source, placed.base.treeHash, branchTip.treeHash));
-	const touches = (a: string, b: string) => a === b || a.startsWith(`${b}/`) || b.startsWith(`${a}/`);
-	return {
-		head: placed.head.hash,
-		files: placed.files,
-		both: placed.files.filter((file) => theirs.some((theirFile) => touches(file, theirFile))),
-	};
+	let both: string[] = [];
+	if (branchTip && branchMoved) {
+		const readTree = treesOf(cachingHistory(history), project);
+		both = await changedAlong(readTree, placed.base.treeHash, branchTip.treeHash, placed.files);
+	}
+	return { head: placed.head.hash, files: placed.files, both };
 }
 
 /**

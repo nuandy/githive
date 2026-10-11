@@ -299,6 +299,40 @@ describe("a change against main through Artifacts' API", () => {
 	});
 });
 
+describe("a change against a busy main", () => {
+	it("reads the project's trees only along the change's own paths", async () => {
+		// main added 50 folders since the change left it, none on the change's paths.
+		const folders = Array.from({ length: 50 }, (_, k) => ({
+			name: `f${k}`,
+			mode: "040000",
+			hash: `t-f${k}`,
+			type: "tree" as const,
+		}));
+		const busyTrees: Record<string, TreeEntry[]> = {
+			...trees,
+			"t-m9": [blob("a.txt", "a1"), blob("b.txt", "b1"), ...folders],
+			...Object.fromEntries(folders.map((folder) => [folder.hash, [blob("x.js", folder.name)]])),
+		};
+		const reads: string[] = [];
+		const history: ReadHistory = (repo, read) =>
+			read({
+				log: async (ref, limit, offset) =>
+					(repo === "proj"
+						? [commit("m9", ["m1"]), commit("m1", ["m0"])]
+						: [commit("c1", ["m1"]), commit("m1", ["m0"])]
+					).slice(offset, offset + limit),
+				readCommit: async () => null,
+				readTree: async (hash) => (reads.push(`${repo} ${hash}`), busyTrees[hash] ?? null),
+			});
+		expect(await changeAgainst(history, "proj", "main", "m9", { ref: "changes/one", source: fork })).toEqual({
+			head: "c1",
+			files: ["c.txt"],
+			both: [],
+		});
+		expect(reads.filter((read) => read.startsWith("proj ")).sort()).toEqual(["proj t-m1", "proj t-m9"]);
+	});
+});
+
 describe("the branch's history, kept for the isolate", () => {
 	it("is read once per head of main, then only the commits on top as main moves", async () => {
 		const logs: { ref: string; limit: number }[] = [];
