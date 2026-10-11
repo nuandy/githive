@@ -20,6 +20,7 @@ import {
 	readChanges,
 } from "./gate-landing";
 import { saveSnapshotIfDue, snapshotUsable } from "./gate-snapshot";
+import { type PrivateImport, importWithToken } from "./private-import";
 import type { BatchBase, BatchSource, ChangeCheck, CheckPlan, CheckResult, GateResult, WarmUp } from "./gate-types";
 
 export { withInstall } from "./gate-install";
@@ -469,5 +470,20 @@ export class Gate extends DurableObject<Env> {
 	/** Whether dependencies are installed and match the last install. */
 	private async installUnchanged(container: Container) {
 		return installMatches(container, await this.ctx.storage.get<string>("lockHash"));
+	}
+
+	/**
+	 * Fills a new repo from a private one (see private-import.ts). Only a Gate made for one import runs it, so the
+	 * person's token never shares a container with a change's code, and the container is destroyed once it's done.
+	 */
+	async importPrivate(input: PrivateImport) {
+		const container = this.ctx.container;
+		if (!container) throw new Error("this Gate has no container");
+		try {
+			await bootContainer(container, SMALL, null);
+			return await importWithToken(container, input);
+		} finally {
+			await container.destroy("the import is done").catch(() => undefined);
+		}
 	}
 }

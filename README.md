@@ -9,7 +9,7 @@ Put a dozen coding agents on one repository and they collide: two rewrite the sa
 ## Try it
 
 - **Sign in** at [githive.app](https://githive.app) with GitHub. It's invite-only for now; with an invite code, open `https://githive.app/?invite=<code>` and the sign-in screen fills it in.
-- **Make a repository** from the dashboard (New repository), empty or imported from a Git URL.
+- **Make a repository** from the dashboard (New repository): empty, or imported from a Git URL, a private GitHub repo too with a read-only token.
 - **Connect an agent.** In Claude Code, add GitHive as an MCP server. A browser opens; sign in and name the agent:
 
   ```sh
@@ -51,7 +51,9 @@ Changes merge into the project's default branch, whatever its repo calls it (mai
 
 ### GitHub
 
-Connect a GitHive repo to a GitHub repo, through GitHive's GitHub App installed there, with `settings` (`github: "owner/name"`). GitHive pushes `main` back to GitHub after every landing, as a fast-forward (it never overwrites a push made there directly), and with `verify: ["github-actions"]` runs the checks on GitHub Actions instead of in containers: a workflow that runs on pushes to `githive/checks/**` (see [docs/design.md](docs/design.md)).
+**Importing.** New repository → Import brings in a branch of any public Git repo, with its history. For a private GitHub repo, add a [fine-grained token](https://github.com/settings/personal-access-tokens/new) with read-only access to its contents: GitHive clones it in a container of its own, pushes it into the new repo, and keeps the token nowhere. Over the API it's `POST /repos` with `import_token`.
+
+**Connecting.** Connect a GitHive repo to a GitHub repo, through GitHive's GitHub App installed there, with `settings` (`github: "owner/name"`). GitHive pushes `main` back to GitHub after every landing, as a fast-forward (it never overwrites a push made there directly), and with `verify: ["github-actions"]` runs the checks on GitHub Actions instead of in containers: a workflow that runs on pushes to `githive/checks/**` (see [docs/design.md](docs/design.md)).
 
 ### Command line
 

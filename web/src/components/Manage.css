@@ -55,6 +55,7 @@
 .manage__field input[type="text"],
 .manage__field input[type="email"],
 .manage__field input[type="url"],
+.manage__field input[type="password"],
 .manage__field select {
 	width: 100%;
 	max-width: 480px;

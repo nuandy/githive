@@ -8,6 +8,7 @@ import { retryTransient } from "../retry";
 import { type ToolContext, callTool, openCount } from "../toolkit/mcp";
 import { type InitOptions, initialFiles, parseInit, writeFirstCommit } from "../repo-init";
 import type { RepoSummary } from "../repo-index";
+import { checkImportUrl } from "../private-import";
 import { rpc } from "../rpc";
 import {
 	type AppEnv,
@@ -39,23 +40,32 @@ async function visibleRepos(env: Env, principal: Principal | undefined) {
 	return [...inOrgs, ...loose];
 }
 
-/** Where a new repo's content comes from: a repo to copy, a Git URL to import, or the files of a first commit. */
+/**
+ * Where a new repo's content comes from: a repo to copy, a Git URL to import (with a token that reads it, for a
+ * private repo), or the files of a first commit.
+ */
 interface RepoSource {
 	from: unknown;
 	url: unknown;
 	branch: unknown;
+	token: unknown;
 	init: InitOptions;
 }
 
 /** Fills a new, empty repo `id` in `org` from its source. */
 async function fillNewRepo(env: Env, principal: Principal, org: Org, repoName: string, id: string, source: RepoSource) {
-	const { from, url, branch } = source;
+	const { from, url, branch, token } = source;
 	if (typeof from === "string" && from) {
 		const copied = await resolveRepo(env, principal, from, "read");
 		await forkAndWait(env.ARTIFACTS, copied.id, id, `A copy of ${copied.fullName}`);
 		return;
 	}
 	if (typeof url === "string" && url) {
+		// A token means a private repo, which Artifacts can't import itself.
+		const readToken = typeof token === "string" ? token.trim() : "";
+		const branchName = typeof branch === "string" && branch.trim() ? branch.trim() : undefined;
+		if (readToken)
+			return importPrivately(env, id, `${org.slug}/${repoName}`, { url, token: readToken, branch: branchName });
 		await retryTransient(() =>
 			env.ARTIFACTS.import({
 				source: { url, branch: typeof branch === "string" ? branch : undefined },
@@ -78,6 +88,34 @@ async function fillNewRepo(env: Env, principal: Principal, org: Org, repoName: s
 			name: handle,
 			email: `${handle}@users.githive.app`,
 		});
+	}
+}
+
+/**
+ * Imports a private repo: GitHive clones it with the person's token, in a container made for this import alone, and
+ * pushes it into the new repo (see private-import.ts). The token is used once and kept nowhere. If the import fails,
+ * the empty repo goes, so trying again starts clean.
+ */
+async function importPrivately(
+	env: Env,
+	id: string,
+	description: string,
+	source: { url: string; token: string; branch: string | undefined },
+) {
+	checkImportUrl(source.url);
+	await ensureRepo(env.ARTIFACTS, id, description);
+	try {
+		const target = await remoteFor(env.ARTIFACTS, id, "write", 3600);
+		const { url, token, branch } = source;
+		await rpc(
+			env.GATE.getByName(`import:${id}`).importPrivate({
+				source: { url, token, ...(branch ? { branch } : {}) },
+				target,
+			}),
+		);
+	} catch (err) {
+		await env.ARTIFACTS.delete(id).catch(() => undefined);
+		throw err;
 	}
 }
 
@@ -127,7 +165,16 @@ export function repoRoutes(app: Hono<AppEnv>) {
 	 */
 	app.post("/repos", async (c) => {
 		const principal = c.get("principal") ?? fail(401, "sign in to GitHive first");
-		const { owner, name, import_url: url, branch, copy_from: from, visibility, init } = await jsonArgs(c);
+		const {
+			owner,
+			name,
+			import_url: url,
+			import_token: token,
+			branch,
+			copy_from: from,
+			visibility,
+			init,
+		} = await jsonArgs(c);
 		const start = parseInit(init);
 		if (typeof owner !== "string" || typeof name !== "string") fail(400, "owner and name are required");
 		const repoName = String(name);
@@ -141,7 +188,7 @@ export function repoRoutes(app: Hono<AppEnv>) {
 		if (userId && !(await orgs.mayCreateRepo(org, userId))) fail(403, `you can't make repos in ${org.slug}`);
 		if (await orgs.repo(org.slug, repoName)) fail(409, `${org.slug}/${repoName} exists`);
 		const id = `${org.slug}--${repoName.toLowerCase()}`;
-		await fillNewRepo(c.env, principal, org, repoName, id, { from, url, branch, init: start });
+		await fillNewRepo(c.env, principal, org, repoName, id, { from, url, branch, token, init: start });
 		const repo = await orgs.addRepo(org, repoName, userId, {
 			visibility: visibility === "public" ? "public" : "private",
 			id,

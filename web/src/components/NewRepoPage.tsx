@@ -39,13 +39,23 @@ export function newRepoInput(form: {
 	source: Source;
 	url: string;
 	branch: string;
+	/** A token that reads a private repo, for an import. */
+	token?: string;
 	copyFrom: string;
 	visibility: "private" | "public";
 	first?: FirstCommit;
 }): NewRepoInput {
 	const base = { owner: form.owner, name: form.name.trim(), visibility: form.visibility };
-	if (form.source === "import")
-		return { ...base, import_url: form.url.trim(), ...(form.branch.trim() ? { branch: form.branch.trim() } : {}) };
+	if (form.source === "import") {
+		const branch = form.branch.trim();
+		const token = form.token?.trim() ?? "";
+		return {
+			...base,
+			import_url: form.url.trim(),
+			...(branch ? { branch } : {}),
+			...(token ? { import_token: token } : {}),
+		};
+	}
 	if (form.source === "copy") return { ...base, copy_from: form.copyFrom };
 	const first = form.first ?? DEFAULT_FIRST_COMMIT;
 	if (emptyFirstCommit(first)) return base;
@@ -70,6 +80,7 @@ export function NewRepoView({ orgs, repos, owner: wanted, create, onCreated }: N
 	const [source, setSource] = useState<Source>("import");
 	const [url, setUrl] = useState("");
 	const [branch, setBranch] = useState("");
+	const [token, setToken] = useState("");
 	const [copyFrom, setCopyFrom] = useState("");
 	const [visibility, setVisibility] = useState<"private" | "public">("private");
 	const [first, setFirst] = useState<FirstCommit>(DEFAULT_FIRST_COMMIT);
@@ -90,7 +101,8 @@ export function NewRepoView({ orgs, repos, owner: wanted, create, onCreated }: N
 		setBusy(true);
 		setError(null);
 		try {
-			onCreated(await create(newRepoInput({ owner: chosen, name, source, url, branch, copyFrom, visibility, first })));
+			const input = newRepoInput({ owner: chosen, name, source, url, branch, token, copyFrom, visibility, first });
+			onCreated(await create(input));
 		} catch (err) {
 			setError(messageOf(err));
 			setBusy(false);
@@ -141,7 +153,14 @@ export function NewRepoView({ orgs, repos, owner: wanted, create, onCreated }: N
 						options={SOURCES}
 					/>
 					{source === "import" ? (
-						<ImportSource url={url} setUrl={setUrl} branch={branch} setBranch={setBranch} />
+						<ImportSource
+							url={url}
+							setUrl={setUrl}
+							branch={branch}
+							setBranch={setBranch}
+							token={token}
+							setToken={setToken}
+						/>
 					) : null}
 					{source === "copy" ? <CopySource repos={repos} copyFrom={copyFrom} setCopyFrom={setCopyFrom} /> : null}
 					{source === "empty" ? <FirstCommitFields first={first} setFirst={setFirst} /> : null}

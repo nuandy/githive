@@ -157,16 +157,23 @@ export async function run(
  * Run git with a token passed on the command line only, never in files or the environment.
  * A network command that keeps failing still returns its last result for the builder to see.
  */
-export async function gitWithToken(container: Container, token: string, args: string[], cwd = WORKDIR, user?: string) {
+export async function gitWithToken(
+	container: Container,
+	token: string,
+	args: string[],
+	cwd = WORKDIR,
+	user?: string,
+	timeoutS = COMMAND_TIMEOUT_S,
+) {
 	const secret = token.split("?expires=")[0];
 	// GitHub wants Basic auth with x-access-token and the installation token.
 	const authorization = user ? `Basic ${btoa(`${user}:${secret}`)}` : `Bearer ${secret}`;
 	const command = ["git", "-c", `http.extraHeader=Authorization: ${authorization}`, ...args];
-	if (!isNetworkGitCommand(args)) return run(container, command, cwd);
+	if (!isNetworkGitCommand(args)) return run(container, command, cwd, undefined, timeoutS);
 
 	try {
 		return await retryTransient(async () => {
-			const result = await run(container, command, cwd);
+			const result = await run(container, command, cwd, undefined, timeoutS);
 			if (result.exitCode !== 0 && isTransientGitOutput(result.output)) {
 				throw Object.assign(new Error("Transient Git transport failure"), {
 					status: 503,
