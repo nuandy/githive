@@ -3,6 +3,7 @@ import { type CommitMeta, filesBetween, type HistorySource } from "./branch-hist
 import { atMost, type BatchGit, type Inspected } from "./merge";
 import type { BatchSource } from "./merge-types";
 import { cachingHistory, forgetTrees } from "./tree-reads";
+import { SizedCache } from "../sized-cache";
 
 // Reads a batch's changes through the Artifacts API in the Worker instead of fetching them in the repo's Gate:
 // each change's head, and the files it changed since leaving the branch, from comparing two trees. This is much
@@ -79,8 +80,7 @@ export const forgetChains = () => {
 // Each change head's place on a branch, as last worked out, for the isolate. A head's merge base with the branch, and
 // the files it changed since, stay the same as the branch moves on, so gathering a batch, landing it and fetching a
 // change ahead share one reading of each change.
-const placements = new Map<string, Placed>();
-const PLACEMENTS_KEPT = 2_000;
+const placements = new SizedCache<Placed>("placements", 2_000);
 
 const placementKey = (where: string, head: string) => `${where}|${head}`;
 
@@ -92,7 +92,6 @@ function placedBefore(where: string, head: string, onBranch: Map<string, number>
 
 function remember(where: string, placed: Placed) {
 	placements.set(placementKey(where, placed.head.hash), placed);
-	while (placements.size > PLACEMENTS_KEPT) placements.delete(placements.keys().next().value!);
 }
 
 // The branch's first-parent chain from `head`, newest first, or null if `head` is outside the window. When the

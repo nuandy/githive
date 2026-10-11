@@ -1,5 +1,6 @@
 import { type ArtifactsCalls, countingRequests, describeCounts, type GitRequests } from "./git-http";
 import { statusOf } from "./errors";
+import { describeCaches } from "./sized-cache";
 import { INSTRUCTIONS, TOOLS, callTool, type ToolContext } from "./toolkit/mcp";
 
 // The MCP front door, where any agent works on a repo through GitHive's tools with its own fork and plain git.
@@ -99,13 +100,14 @@ async function callToolRpc(request: RpcRequest, ctx: McpContext) {
 		counting = countingRequests(() => callTool(name, args, ctx.toolkit));
 		let result = await counting.done;
 		logCounts(name, repoId, counting);
-		if (Date.now() - from >= SLOW_TOOL_MS) console.log(`mcp ${name} took ${Date.now() - from} ms`);
+		if (Date.now() - from >= SLOW_TOOL_MS)
+			console.log(`mcp ${name} took ${Date.now() - from} ms; isolate caches: ${describeCaches()}`);
 		if (named && result && typeof result === "object" && (result as Args).repo === named.id)
 			result = { ...(result as Args), repo: named.fullName };
 		return reply(request.id, { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] });
 	} catch (err) {
 		if (counting) logCounts(name, repoId, counting);
-		console.log(`mcp ${name} failed after ${Date.now() - from} ms`);
+		console.log(`mcp ${name} failed after ${Date.now() - from} ms; isolate caches: ${describeCaches()}`);
 		// Tool failures go back to the agent as results it can act on, not protocol errors.
 		const failed = statusOf(err);
 		// Log GitHive's own failures with their stack. The agent's answer says only what failed.

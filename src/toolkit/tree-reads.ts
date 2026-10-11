@@ -1,5 +1,6 @@
 import type { ReadHistory } from "./batch-reads";
 import type { TreeEntry } from "./branch-history";
+import { SizedCache } from "../sized-cache";
 
 // Tree reads for a landing. A batch's changes mostly share their merge base and the folders near the top, so reading
 // each tree only once, and only along the paths that matter, keeps a landing to a few reads per change.
@@ -7,36 +8,19 @@ import type { TreeEntry } from "./branch-history";
 // Trees as read or written, for the isolate. Gathering a batch, landing it and fetching a change ahead read the same
 // trees, and a landing's last tree is where the next one starts. Only finished reads are kept: a read still under
 // way belongs to the request that started it.
-const keptTrees = new Map<string, TreeEntry[]>();
 // About 10 MB of entries.
-const ENTRIES_KEPT = 50_000;
-let entriesKept = 0;
+const keptTrees = new SizedCache<TreeEntry[]>("trees", 50_000);
 
 /** Keeps a tree read or written, by its hash, for any later reads in the isolate. */
 export function keepTree(hash: string, entries: TreeEntry[]) {
-	if (keptTrees.has(hash)) return;
-	keptTrees.set(hash, entries);
-	entriesKept += entries.length;
-	for (const [oldest, kept] of keptTrees) {
-		if (entriesKept <= ENTRIES_KEPT) break;
-		keptTrees.delete(oldest);
-		entriesKept -= kept.length;
-	}
+	if (!keptTrees.has(hash)) keptTrees.set(hash, entries, entries.length);
 }
 
-function keptTree(hash: string) {
-	const kept = keptTrees.get(hash);
-	if (!kept) return undefined;
-	// Most recently used last, so the oldest go first.
-	keptTrees.delete(hash);
-	keptTrees.set(hash, kept);
-	return kept;
-}
+const keptTree = (hash: string) => keptTrees.get(hash);
 
 /** Forgets the kept trees, for tests whose made-up hashes differ in content from one test to the next. */
 export function forgetTrees() {
 	keptTrees.clear();
-	entriesKept = 0;
 }
 
 /**

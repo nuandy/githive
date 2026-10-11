@@ -1,6 +1,7 @@
 import { linkTo } from "../github";
 import type { SharedPlacements } from "./batch-reads";
 import { changeCache } from "../change-cache";
+import { SizedCache } from "../sized-cache";
 import { readBranchHistory } from "./branch-history";
 import { DEFAULT_POLICY, hostedRoles } from "./mcp";
 import { effectivePolicy } from "./votes";
@@ -47,7 +48,7 @@ async function cached(env: Env, project: string, key: string, mint: () => Promis
 }
 
 // Each record's log, cached for the isolate. A log remembers its last tip, so reading an unmoved ref needn't fetch.
-const logs = new Map<string, GitCasLog<unknown>>();
+const logs = new SizedCache<GitCasLog<unknown>>("record logs", 256);
 
 const KEPT_CLAIMS_MS = 30_000;
 const KEPT_BRANCH_HEAD_MS = 2_000;
@@ -56,14 +57,9 @@ const KEPT_TIP_MS = 10_000;
 const MAX_KEPT = 1_000_000;
 
 // The views this isolate last read, by repo and name, so the RepoCache sends a view only when it has changed.
-const viewsSeen = new Map<string, { version: number; json: string }>();
-const VIEWS_SEEN_MOST = 64;
+const viewsSeen = new SizedCache<{ version: number; json: string }>("views", 8 * 1024 * 1024, "bytes");
 
-function seeView(key: string, seen: { version: number; json: string }) {
-	viewsSeen.delete(key);
-	viewsSeen.set(key, seen);
-	while (viewsSeen.size > VIEWS_SEEN_MOST) viewsSeen.delete(viewsSeen.keys().next().value!);
-}
+const seeView = (key: string, seen: { version: number; json: string }) => viewsSeen.set(key, seen, seen.json.length);
 
 /**
  * A view of a repo cached in its RepoCache, for reads that tolerate brief staleness. One caller rebuilds a stale or
