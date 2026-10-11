@@ -155,7 +155,9 @@ function runAgent(spec) {
 		],
 		{ cwd: dir, env: withoutApiKey(), stdio: ["ignore", "pipe", "pipe"] },
 	);
-	const summary = { agent: spec.agent, tools: {}, result: null };
+	const summary = { agent: spec.agent, tools: {}, time: {}, result: null };
+	// When each tool call began, by its id, so its answer can be timed.
+	const calls = new Map();
 	let buffer = "";
 	child.stdout.on("data", (chunk) => {
 		events.write(chunk);
@@ -170,14 +172,14 @@ function runAgent(spec) {
 				continue;
 			}
 			for (const part of event.message?.content ?? []) {
+				if (part.type === "tool_result") timeAnswer(spec.agent, summary, calls, part.tool_use_id);
 				if (part.type !== "tool_use") continue;
 				const name = part.name.replace(/^mcp__githive__/, "githive.");
 				summary.tools[name] = (summary.tools[name] ?? 0) + 1;
+				const details = [name, part.input?.change, part.input?.verdict].filter(Boolean).join(" ");
+				calls.set(part.id, { name, details, at: Date.now() });
 				// Log GitHive calls, which show what the agent is doing.
-				if (name.startsWith("githive.")) {
-					const details = [name, part.input?.change, part.input?.verdict].filter(Boolean);
-					say(spec.agent, details.join(" "));
-				}
+				if (name.startsWith("githive.")) say(spec.agent, details);
 			}
 			if (event.type === "result") summary.result = event;
 		}
@@ -200,6 +202,21 @@ function runAgent(spec) {
 			done(summary);
 		}),
 	);
+}
+
+/** A GitHive call this long is logged when it answers. */
+const SLOW_CALL_MS = 5_000;
+
+// Adds the time a tool call took, from its start to its answer, to the agent's summary.
+function timeAnswer(agent, summary, calls, id) {
+	const call = calls.get(id);
+	if (!call) return;
+	calls.delete(id);
+	const ms = Date.now() - call.at;
+	const kept = summary.time[call.name] ?? { calls: 0, ms: 0, most: 0 };
+	summary.time[call.name] = { calls: kept.calls + 1, ms: kept.ms + ms, most: Math.max(kept.most, ms) };
+	if (call.name.startsWith("githive.") && ms >= SLOW_CALL_MS)
+		say(agent, `${call.details} answered in ${(ms / 1000).toFixed(1)}s`);
 }
 
 for (const spec of plan.agents)
@@ -227,6 +244,8 @@ for (const s of summaries) {
 	);
 	if (s.result?.result) console.log(`           ${String(s.result.result).replace(/\s+/g, " ").slice(0, 400)}`);
 }
+printTimes(summaries);
+
 // Read as the first agent: a signed-in agent reads its own repo, and a registered one through Access.
 const readHeaders = { ...agentHeaders(keyOf(plan.agents[0])), "Cache-Control": "no-cache" };
 delete readHeaders["X-GitHive-Agent-Key"];
@@ -249,3 +268,38 @@ const audit = await get(`/repos/${repoPath}/audit`);
 const violations = audit.violations?.length ? `: ${JSON.stringify(audit.violations).slice(0, 400)}` : "";
 console.log(`audit: ${audit.merges} merges, ${audit.open} open violations${violations}`);
 console.log(`total ${((Date.now() - started) / 1000).toFixed(0)}s`);
+
+// Where each agent's session went, and how long each GitHive tool took. Calls an agent made side by side overlap, so
+// the parts can add up to more than the session.
+function printTimes(all) {
+	const seconds = (ms) => `${Math.round(ms / 1000)}s`;
+	const share = (ms, of) => (of ? ` (${Math.round((ms / of) * 100)}%)` : "");
+	const spent = (time, pick) =>
+		Object.entries(time)
+			.filter(([name]) => pick(name))
+			.reduce((total, [, t]) => total + t.ms, 0);
+	console.log("\nWhere each agent's time went:");
+	for (const s of all) {
+		const session = s.result?.duration_ms ?? 0;
+		const model = s.result?.duration_api_ms ?? 0;
+		const githive = spent(s.time, (name) => name.startsWith("githive."));
+		const bash = spent(s.time, (name) => name === "Bash");
+		console.log(
+			`${s.agent.padEnd(10)} session ${seconds(session)}: model ${seconds(model)}${share(model, session)}, ` +
+				`githive ${seconds(githive)}${share(githive, session)}, bash ${seconds(bash)}${share(bash, session)}`,
+		);
+	}
+	const byTool = {};
+	for (const s of all)
+		for (const [name, t] of Object.entries(s.time)) {
+			if (!name.startsWith("githive.")) continue;
+			const kept = byTool[name] ?? { calls: 0, ms: 0, most: 0 };
+			byTool[name] = { calls: kept.calls + t.calls, ms: kept.ms + t.ms, most: Math.max(kept.most, t.most) };
+		}
+	console.log("\nGitHive calls, all agents (calls, average, longest):");
+	for (const [name, t] of Object.entries(byTool).sort((a, b) => b[1].ms - a[1].ms))
+		console.log(
+			`  ${name.slice(8).padEnd(12)} ${String(t.calls).padStart(4)}  ${(t.ms / t.calls / 1000).toFixed(1)}s  ` +
+				`${(t.most / 1000).toFixed(1)}s`,
+		);
+}
