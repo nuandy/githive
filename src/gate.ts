@@ -19,6 +19,7 @@ import {
 	pushLanded,
 	readChanges,
 } from "./gate-landing";
+import { type GitHubImport, type GitHubImportResult, importFromGitHub } from "./gate-github";
 import { saveSnapshotIfDue, snapshotUsable } from "./gate-snapshot";
 import { type PrivateImport, importWithToken } from "./private-import";
 import type { BatchBase, BatchSource, ChangeCheck, CheckPlan, CheckResult, GateResult, WarmUp } from "./gate-types";
@@ -137,6 +138,15 @@ export class Gate extends DurableObject<Env> {
 	 */
 	pushBranch(input: Omit<BatchBase, "baseHead"> & LandedPush): Promise<{ pushed: true } | { refused: string }> {
 		return this.landing("pushBranch", { ...input, baseHead: input.head }, (container) => pushLanded(container, input));
+	}
+
+	/**
+	 * Fetches GitHub's branch and, unless the project's branch at `baseHead` has it, writes it to the project as `as`
+	 * (github/<branch>), joined to the work of GitHive's it already took (see gate-github.ts). Only the repo's own Gate
+	 * writes it: the toolkit writes the project's branches, never an agent.
+	 */
+	importGitHub(input: BatchBase & GitHubImport): Promise<GitHubImportResult> {
+		return this.landing("importGitHub", input, (container) => importFromGitHub(container, input));
 	}
 
 	/**

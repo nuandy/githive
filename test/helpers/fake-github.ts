@@ -118,7 +118,7 @@ export async function fakeGitHub(
 			if (how === "rebase") {
 				// GitHub replays the pull request's commits on its branch, merges dropped, each with a new id.
 				run("checkout", "-q", "-B", "rebasing", `origin/${pull.head}`);
-				run("rebase", "-q", pull.base);
+				run("rebase", "-q", "--force-rebase", pull.base);
 				run("checkout", "-q", pull.base);
 				run("merge", "-q", "--ff-only", "rebasing");
 			}

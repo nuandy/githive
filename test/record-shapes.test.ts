@@ -4,6 +4,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { RECORD_FORMAT } from "../src/record-format";
 import type { GitHubLink } from "../src/github";
 import { GitCasLog } from "../src/record-log";
+import { type GitHubImports, importsRef, recordImport } from "../src/toolkit/github-imports";
 import { callTool, type ToolContext } from "../src/toolkit/mcp";
 import { generateStampKey, makeStamper } from "../src/toolkit/stamp";
 import { holdReview, type ReviewHolds, reviewsRef, roleWaits, roleWaitTold } from "../src/toolkit/review-holds";
@@ -110,6 +111,12 @@ beforeAll(async () => {
 		since: new Date().toISOString(),
 		changes: [{ change: "stats-1", head: "1".repeat(40), agent: "ada/builder" }],
 	});
+	// GitHub's commit brought in, as githive-github's job records it.
+	await recordImport(
+		new GitCasLog<GitHubImports>(async () => ({ url: server.url, token: "unused" }), "p", importsRef("p")),
+		{ github: "acme/shop", branch: "main", commit: "3".repeat(40), head: "4".repeat(40), base: "2".repeat(40) },
+		await makeStamper(privateKey, "service:githive-github"),
+	);
 	const read = async (ref: string) =>
 		(await new GitCasLog<unknown>(async () => ({ url: server.url, token: "unused" }), "p", ref).read())?.commit.state;
 	shapes = {
@@ -118,6 +125,7 @@ beforeAll(async () => {
 		work: shapeOf(await read("refs/notes/githive-work/p")),
 		reviews: shapeOf(await read(reviewsRef("p"))),
 		landing: shapeOf(await read(landingRef("p", "main"))),
+		github: shapeOf(await read(importsRef("p"))),
 	};
 }, 60_000);
 

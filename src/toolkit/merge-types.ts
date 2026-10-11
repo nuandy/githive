@@ -1,3 +1,4 @@
+import type { GitHubImportResult } from "../gate-github";
 import type { Remote } from "../git";
 import type { ReadHistory } from "./batch-reads";
 import type { ClaimRecord } from "./claims";
@@ -76,6 +77,17 @@ export interface BatchGit {
 	 * if that's refused.
 	 */
 	pushBranch(input: { branch: string; head: string; to: Remote; as?: string }): Promise<void>;
+	/**
+	 * Fetches `githubBranch` from `from` (GitHub) and, unless the project's `branch` at `base` has it, writes it to the
+	 * project's `as`, joined to the work of GitHive's it already took (see gate-github.ts).
+	 */
+	importBranch?(input: {
+		base: string;
+		branch: string;
+		from: Remote;
+		githubBranch: string;
+		as: string;
+	}): Promise<GitHubImportResult>;
 }
 
 /** Another change that may land with this one: its claim, its head as last seen, and where its branch lives. */

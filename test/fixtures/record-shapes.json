@@ -122,6 +122,20 @@
 				"holder": "string",
 				"until": "number"
 			}
+		},
+		"github": {
+			"imports": [
+				{
+					"at": "string",
+					"base": "string",
+					"branch": "string",
+					"by": "string",
+					"commit": "string",
+					"github": "string",
+					"head": "string",
+					"stamp": "string"
+				}
+			]
 		}
 	}
 }
