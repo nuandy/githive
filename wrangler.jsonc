@@ -95,6 +95,7 @@
 		// Record tips and states, and what merges keep for their landing, moved out of RepoCache into objects of their own.
 		{ "tag": "v14", "new_sqlite_classes": ["RecordCache", "ChangeCache"] },
 		// A connected repo's GitHub side: the job bringing GitHub's changes back, and the pull request as last seen.
-		{ "tag": "v15", "new_sqlite_classes": ["GitHubSync"] },
+		// v16, after the awareness branch adds v15 (FootprintCache): whichever of the two merges second keeps the higher tag.
+		{ "tag": "v16", "new_sqlite_classes": ["GitHubSync"] },
 	],
 }
