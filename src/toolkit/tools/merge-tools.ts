@@ -116,6 +116,8 @@ function optionalMergeInput(
 	if (ctx.branchHead) optional.branchHead = () => ctx.branchHead!(repo, into);
 	if (ctx.landing) optional.landing = ctx.landing(repo, into);
 	if (ctx.history) optional.history = ctx.history;
+	// Each change's earlier attempts to land, for its merge commit's story.
+	if (ctx.attemptsOf) optional.attemptsOf = (changes) => ctx.attemptsOf!(repo, changes);
 	if (ctx.prepareLanding) optional.prepareLanding = () => ctx.prepareLanding!(repo);
 	if (ctx.prefetchChange) optional.prefetch = (change) => ctx.prefetchChange!(repo, into, change);
 	if (ctx.prepareChecks && !at.checksOnActions) optional.prepareChecks = ctx.prepareChecks(repo);

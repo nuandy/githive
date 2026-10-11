@@ -127,7 +127,11 @@ describe("landing a batch with trees, in the Worker", { timeout: 60_000 }, () =>
 		const land = treeLanding({ history, project: "project", remote: async () => project(), fallback });
 
 		const pushesBefore = server.pushes();
-		const landed = await land({ base, branch: "main", merges: [merge(nested), merge(reshape)] });
+		const tried = {
+			...merge(reshape).claimed,
+			attempts: ['conflict on cfg with c-7 by alice ("add config", 6584265)'],
+		};
+		const landed = await land({ base, branch: "main", merges: [merge(nested), { ...merge(reshape), claimed: tried }] });
 		expect(server.pushes() - pushesBefore).toBe(1);
 
 		expect(fallback).not.toHaveBeenCalled();
@@ -140,7 +144,10 @@ describe("landing a batch with trees, in the Worker", { timeout: 60_000 }, () =>
 		expect(server.git("rev-list", "--parents", "-n1", first).trim()).toBe(`${first} ${base} ${nested.head}`);
 		expect(server.git("rev-list", "--parents", "-n1", second).trim()).toBe(`${second} ${first} ${reshape.head}`);
 		expect(server.git("log", "-1", "--format=%an <%ae>", second).trim()).toBe("GitHive <bot@githive.invalid>");
-		expect(server.git("log", "-1", "--format=%B", second)).toContain("GitHive-Change: reshape");
+		expect(server.git("log", "-1", "--format=%B", second)).toContain(
+			'Merge reshape by agent-reshape.\n\nEarlier attempts:\n- conflict on cfg with c-7 by alice ("add config", ' +
+				"6584265)\n\nGitHive-Change: reshape\n",
+		);
 		// One push: the changes' objects and the merges together.
 		expect(server.git("for-each-ref", "refs/notes").trim()).toBe("");
 		// The project repo holds every object it now refers to.

@@ -118,6 +118,8 @@ export interface MergeInput {
 	batchGit: BatchGit;
 	/** Reads history through Artifacts' API, so a change can often be checked without a fetch (see changeAgainst). */
 	history?: ReadHistory;
+	/** Each change's earlier attempts to land, for its merge commit's story (see ToolContext.attemptsOf). */
+	attemptsOf?: (changes: string[]) => Promise<Record<string, string[]>>;
 	/** Starts the container for a batch's first check while the batch is read, so the check finds it running. */
 	prepareChecks?: (gate: string) => Promise<void>;
 	/** Starts the repo's Gate while the batch is read, so landing doesn't wait for its container to start. */

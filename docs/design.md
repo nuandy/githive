@@ -463,9 +463,13 @@ it off.
 
 Then it makes a merge commit, never a fast-forward. Its subject is the
 change's intent, as its claim gave it, and its body names the change and its
-agent, the intent in full when the subject had to shorten it, and each
-approval with its reviewer's evidence, so `git log`, `git blame` and a GitHub
-mirror say why every change was made and who checked it. The audit reads only
+agent, the intent in full when the subject had to shorten it, each
+approval with its reviewer's evidence, and the change's earlier attempts to
+land (its conflicts and failed checks, as the repo's RepoCache kept them: the
+newest five, a line each), so `git log`, `git blame` and a GitHub
+mirror say why every change was made, who checked it and what it ran into.
+The attempts are asked for once per batch and are only the story: if asking
+fails or is slow, the batch lands without them. The audit reads only
 the trailers, the message's last paragraph, so nothing an agent wrote above
 them can pose as one:
 

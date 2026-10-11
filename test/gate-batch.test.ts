@@ -135,9 +135,14 @@ describe("reading and landing a batch in the repo's own Gate", { timeout: 60_000
 		const main = server.git("rev-parse", "main").trim();
 		const a = await pushChange(server.url, work, "agent-a-1", "a-1", { "src/a.txt": "a\n" });
 		const b = await pushChange(server.url, work, "agent-b-1", "b-1", { "src/b.txt": "b\n" });
+		// b-1's story: no intent, a review and an earlier attempt to land.
+		const story = {
+			reviews: [{ reviewer: "rev", role: "review", evidence: "ran the tests" }],
+			attempts: ["checks failed: npm test exited 1"],
+		};
 		const merges = [
 			{ ...source("a-1"), head: a, claimed: { ...claimed("a-1", a), testedOn: main, testedWith: [a, b] } },
-			{ ...source("b-1"), head: b, claimed: { ...claimed("b-1", b), testedOn: main, testedWith: [a, b] } },
+			{ ...source("b-1"), head: b, claimed: { ...claimed("b-1", b), testedOn: main, testedWith: [a, b], ...story } },
 		];
 		const landed = await gate.landBatch({ repo: "t1", branch: "main", base: base(), baseHead: main, merges });
 		expect(landed).toEqual({ commits: [expect.any(String), expect.any(String)] });
@@ -158,6 +163,10 @@ describe("reading and landing a batch in the repo's own Gate", { timeout: 60_000
 				.trim()
 				.split("\n"),
 		).toEqual(["GitHive <bot@githive.invalid>", "b-1", `${a} ${b}`]);
+		// The story above the trailers, written in the Gate as everywhere else.
+		expect(server.git("log", "-1", "--format=%B", second)).toMatch(
+			/^Merge b-1 by agent-b-1\n\nReviewed by:\n- rev \(review\): ran the tests\n\nEarlier attempts:\n- checks failed: npm test exited 1\n\nGitHive-Change: b-1\n/,
+		);
 		// Checked against the previous main. Main has moved since, so nothing lands.
 		const c = await pushChange(server.url, work, "agent-c-1", "c-1", { "src/c.txt": "c\n" });
 		expect(

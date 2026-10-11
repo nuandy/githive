@@ -2,7 +2,7 @@ import { repoOfUrl } from "../git-http";
 import { landedOn } from "./batch-reads";
 import { LANDED_FILES_KEPT, LANDED_INTENT_CHARS, type Landing, type Settled } from "./landing";
 import { batchChange } from "./merge-checks";
-import type { MergeReview } from "./merge-commit";
+import { ATTEMPT_LINE_MOST, ATTEMPTS_MOST, type MergeReview } from "./merge-commit";
 import { type Holding, STEP_MS } from "./merge-lease";
 import type { MergeInput, Ready } from "./merge-types";
 
@@ -28,7 +28,7 @@ export async function land(
 	const landed = await input.batchGit.land({
 		base: baseHead,
 		branch: input.branch,
-		merges: mergesOf(input, baseHead, batch, tested),
+		merges: await mergesOf(input, baseHead, batch, tested),
 		// The Gate stamps with GitHive's key as `by`. An in-process implementation (tests) uses the stamper itself.
 		...(input.stamper ? { by: input.stamper.by, stamper: input.stamper } : {}),
 	});
@@ -48,26 +48,57 @@ export async function land(
 	return { settled, release: () => releaseLanded(input, batch, commits) };
 }
 
-// Each change's merge with the trailers its commit carries: its claim, its votes and what it was checked on.
-function mergesOf(input: MergeInput, baseHead: string, batch: Ready[], tested: boolean) {
+// Each change's merge with the trailers its commit carries (its claim, its votes and what it was checked on), and
+// the story above them.
+async function mergesOf(input: MergeInput, baseHead: string, batch: Ready[], tested: boolean) {
 	// Every change in the batch, in landing order. A change checked alone needs only testedOn.
 	const heads = batch.map((ready) => ready.head);
 	const testedOn = tested ? { testedOn: baseHead } : {};
 	const testedWith = tested && heads.length > 1 ? { testedWith: heads } : {};
-	return batch.map((ready) => ({
-		...batchChange(ready),
-		claimed: {
-			head: ready.head,
-			change: ready.change,
-			author: ready.agent,
-			claimsTip: input.store.cite(ready.claims, ready.scoped, ready.own),
-			votesTip: input.votes.cite(ready.votes, ready.head),
-			...testedOn,
-			...testedWith,
-			intent: ready.own.intent,
-			reviews: approvalsOn(ready),
-		},
-	}));
+	const attempts = await attemptsOf(input, batch);
+	return batch.map((ready) => {
+		const tried = (attempts[ready.change] ?? []).slice(-ATTEMPTS_MOST).map((line) => line.slice(0, ATTEMPT_LINE_MOST));
+		return {
+			...batchChange(ready),
+			claimed: {
+				head: ready.head,
+				change: ready.change,
+				author: ready.agent,
+				claimsTip: input.store.cite(ready.claims, ready.scoped, ready.own),
+				votesTip: input.votes.cite(ready.votes, ready.head),
+				...testedOn,
+				...testedWith,
+				intent: ready.own.intent,
+				reviews: approvalsOn(ready),
+				...(tried.length ? { attempts: tried } : {}),
+			},
+		};
+	});
+}
+
+const ATTEMPTS_WAIT_MS = 2_000;
+
+/**
+ * Each change's earlier attempts to land, asked once for the batch. They're only the story, so a call that fails, or
+ * takes longer than ATTEMPTS_WAIT_MS, leaves those lines out and never holds the landing up.
+ */
+async function attemptsOf(input: MergeInput, batch: Ready[]): Promise<Record<string, string[]>> {
+	if (!input.attemptsOf) return {};
+	let timer: ReturnType<typeof setTimeout> | null = null;
+	const slow = new Promise<Record<string, string[]>>((resolve) => {
+		timer = setTimeout(() => {
+			console.error(`reading earlier attempts took over ${ATTEMPTS_WAIT_MS} ms: landing without them`);
+			resolve({});
+		}, ATTEMPTS_WAIT_MS);
+	});
+	try {
+		return await Promise.race([input.attemptsOf(batch.map((ready) => ready.change)), slow]);
+	} catch (err) {
+		console.error("reading earlier attempts failed: landing without them", String(err));
+		return {};
+	} finally {
+		clearTimeout(timer);
+	}
 }
 
 function approvalsOn(ready: Ready): MergeReview[] {
