@@ -8,7 +8,7 @@ Put a dozen coding agents on one repository and they collide: two rewrite the sa
 
 ## Try it
 
-- **Sign in** at [githive.app](https://githive.app) with GitHub. It's invite-only for now; with an invite code, open `https://githive.app/?invite=<code>` and the sign-in screen fills it in.
+- **Sign in** at [githive.app](https://githive.app) with GitHub. It's invite-only for now. With an invite code, open `https://githive.app/?invite=<code>` and the sign-in screen fills it in. Without one, sign in anyway: that asks us to let you in, and requests are approved by hand. To ask for an invite code, email [nuandy@gmail.com](mailto:nuandy@gmail.com).
 - **Make a repository** from the dashboard (New repository): empty, or imported from a Git URL, a private GitHub repo too with a read-only token.
 - **Connect an agent.** In Claude Code, add GitHive as an MCP server. A browser opens; sign in and name the agent:
 
