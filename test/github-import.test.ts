@@ -3,14 +3,23 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { agentClone } from "./helpers/agents";
 import { FakeStorage } from "./fakes/env";
 import { fakeGitHub, type FakeGitHub } from "./helpers/fake-github";
 import { startGitServer, type GitServer } from "./helpers/git-server";
 import { localContainer } from "./helpers/local-container";
 
+vi.mock("../src/artifacts", async (importOriginal) => ({
+	...(await importOriginal<typeof import("../src/artifacts")>()),
+	remoteFor: vi.fn(async (_artifacts: unknown, name: string, scope: string) => ({
+		url: `https://git.test/${name}.git`,
+		token: `${scope}-token`,
+	})),
+}));
+
 const { Gate } = await import("../src/gate");
+const { githubGate } = await import("../src/gate-github");
 const exec = promisify(execFile);
 
 // The repo's own Gate brings GitHub's branch into the project as github/main,
@@ -88,15 +97,20 @@ beforeEach(async () => {
 	// GitHive's main with a file of its own, mirrored to GitHub before pr mode began.
 	await landOnMain({ "src/app.js": "one\n" }, "the start");
 	github = await fakeGitHub(server);
-	gate = new Gate(
+	gate = gateNamed(githubGate("p"));
+});
+
+/** The Gate called `name`: Gates are told apart by the name their object was got by. */
+function gateNamed(name: string) {
+	return new Gate(
 		{
 			storage: new FakeStorage(),
-			container: localContainer(join(work, "checkout")),
-			id: { equals: () => true },
+			container: localContainer(join(work, `checkout-${name.replaceAll(":", "-")}`)),
+			id: { equals: (other: string) => other === name },
 		} as never,
-		{ GATE: { idFromName: () => ({}) } } as never,
+		{ GATE: { idFromName: (named: string) => named, getByName: () => ({ snapshot: async () => null }) } } as never,
 	);
-});
+}
 afterEach(async () => {
 	github.close();
 	await server.close();
@@ -104,6 +118,30 @@ afterEach(async () => {
 });
 
 describe("bringing GitHub's branch into the project", { timeout: 60_000 }, () => {
+	it("runs in the repo's GitHub Gate, never in the one that lands its batches, so GitHub holds up no landing", async () => {
+		await landOnMain({ "src/app.js": "two\n" });
+		github.push({ "docs/notes.md": "from GitHub\n" });
+		gate = gateNamed("repo:p");
+		await expect(importGitHub()).rejects.toThrow("only the repo's GitHub Gate imports from GitHub");
+		expect(server.git("branch", "--list", "github/main").trim()).toBe("");
+		// The toolkit asks the GitHub Gate.
+		const asked: string[] = [];
+		const env = {
+			GATE: {
+				getByName: (name: string) => {
+					asked.push(name);
+					return { importGitHub: async () => ({ known: "k".repeat(40) }) };
+				},
+			},
+			TREE_LANDING: "off",
+		} as unknown as Env;
+		const { toolContextFor } = await import("../src/toolkit/env");
+		const from = { url: github.link.remote.url, token: "t", user: "x-access-token" };
+		const batchGit = toolContextFor(env, "service:githive-github").batchGit!("p");
+		await batchGit.importBranch!({ base: main(), branch: "main", from, githubBranch: "main", as: "github/main" });
+		expect(asked).toEqual(["repo:p:github"]);
+	});
+
 	it("leaves it alone when main already has it", async () => {
 		await landOnMain({ "src/app.js": "two\n" });
 		expect(await importGitHub()).toEqual({ known: github.head() });

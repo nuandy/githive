@@ -626,9 +626,12 @@ same file (a real merge); when a change can't be placed on the branch exactly
 landing holds about one copy of what they add, and other landings may share
 the isolate's 128 MB; the repo's own size doesn't count); or when anything in
 the Worker fails. So a repo without checks runs no container at all while its
-batches merge cleanly. A repo with checks runs them where its code can run: in
-containers, or on GitHub Actions (below), which needs none. `TREE_LANDING:
-"off"` lands every batch in the Gate.
+batches merge cleanly, except that a repo connected to GitHub brings GitHub's
+changes in through a Gate of its own (Connected to GitHub, below), and a
+GitHub change that needs a real merge lands in the repo's Gate like any other.
+A repo with checks runs them where its code can run: in containers, or on
+GitHub Actions (below), which needs none. `TREE_LANDING: "off"` lands every
+batch in the Gate.
 
 Landing in the Worker was tried before, in memory, and measured against the
 Gate: without checks, at 200 agents, a batch of about 60 ran the Worker out of
@@ -681,9 +684,12 @@ the audit holds each merge to the settings in force when it merged. Then
   push was taken skips it. If GitHub's head may not be on main, the repo's
   `GitHubSync` Durable Object starts a job and the landing goes on: no timers,
   and the job runs one step per alarm, like the hosted builder, each step
-  finding its work done when run again. The repo's Gate fetches GitHub's
-  commit and, unless main has it, writes it to the project as
-  `github/<branch>`; the import record notes it. A squash or rebase merge of
+  finding its work done when run again. The repo's GitHub Gate (a Gate of its
+  own, `repo:<repo>:github`, which also never runs a change's code) fetches
+  GitHub's commit, given 2 minutes and tried twice, and, unless main has it,
+  writes it to the project as `github/<branch>`; the import record notes it.
+  The repo's own Gate lands batches one at a time, so a slow GitHub fetched
+  there would hold up every landing that needs it. A squash or rebase merge of
   the pull request gave GitHive's commits new ids, so git's merge base would be
   GitHub's branch from before the pull request: the Gate joins GitHub's commit
   to the newest commit of GitHive's main whose tree GitHub's branch has (a
@@ -691,7 +697,9 @@ the audit holds each merge to the settings in force when it merged. Then
   what GitHub added. Then `githive-github` claims a `source` merge of
   `github/<branch>` into main (see Branches): the claim holds the paths GitHub
   changed while it lands, none for a pull request's own merge. It lands like
-  any change, in a batch, through the repo's checks. Its merge commit says
+  any change, in a batch, through the repo's checks: with trees, or in the
+  repo's Gate when it needs a real merge (GitHub's commits often aren't on top
+  of main), as any change that needs one does. Its merge commit says
   "Bring in GitHub's changes (owner/name main at <sha>)". Once it's on main,
   GitHub's commit is too, so the next pull request shows only what's new, and a
   mirror's push is a fast-forward again.

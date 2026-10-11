@@ -155,7 +155,8 @@ export async function run(
 
 /**
  * Run git with a token passed on the command line only, never in files or the environment.
- * A network command that keeps failing still returns its last result for the builder to see.
+ * A network command that keeps failing (`attempts` times, 4 by default) still returns its last result for the builder
+ * to see.
  */
 export async function gitWithToken(
 	container: Container,
@@ -164,6 +165,7 @@ export async function gitWithToken(
 	cwd = WORKDIR,
 	user?: string,
 	timeoutS = COMMAND_TIMEOUT_S,
+	attempts?: number,
 ) {
 	const secret = token.split("?expires=")[0];
 	// GitHub wants Basic auth with x-access-token and the installation token.
@@ -182,7 +184,7 @@ export async function gitWithToken(
 				});
 			}
 			return result;
-		});
+		}, attempts ? { maxAttempts: attempts } : {});
 	} catch (err) {
 		const result = (err as { commandResult?: Awaited<ReturnType<typeof run>> } | null)?.commandResult;
 		if (result) return result;

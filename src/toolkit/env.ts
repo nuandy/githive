@@ -1,4 +1,4 @@
-import type { GitHubImportResult } from "../gate-github";
+import { type GitHubImportResult, githubGate } from "../gate-github";
 import { linkTo } from "../github";
 import type { SharedPlacements } from "./batch-reads";
 import { changeCache } from "../change-cache";
@@ -541,10 +541,11 @@ function batchGitFor(env: Env, repo: string): BatchGit {
 			);
 			if ("refused" in pushed) throw new Error(`pushing ${as ?? branch} to ${to.url} was refused: ${pushed.refused}`);
 		},
+		// In the repo's GitHub Gate, not its own: a slow GitHub holds up no batch (see Gate.importGitHub).
 		importBranch: async ({ base, branch, from, githubBranch, as }) => {
 			const write = await project("write");
 			return rpcRetried<GitHubImportResult>(() =>
-				gate().importGitHub({
+				env.GATE.getByName(githubGate(repo)).importGitHub({
 					repo,
 					branch,
 					base: { remote: write.url, token: write.token },

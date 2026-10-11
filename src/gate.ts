@@ -19,7 +19,7 @@ import {
 	pushLanded,
 	readChanges,
 } from "./gate-landing";
-import { type GitHubImport, type GitHubImportResult, importFromGitHub } from "./gate-github";
+import { type GitHubImport, type GitHubImportResult, githubGate, importFromGitHub } from "./gate-github";
 import { saveSnapshotIfDue, snapshotUsable } from "./gate-snapshot";
 import { type PrivateImport, importWithToken } from "./private-import";
 import type { BatchBase, BatchSource, ChangeCheck, CheckPlan, CheckResult, GateResult, WarmUp } from "./gate-types";
@@ -142,11 +142,16 @@ export class Gate extends DurableObject<Env> {
 
 	/**
 	 * Fetches GitHub's branch and, unless the project's branch at `baseHead` has it, writes it to the project as `as`
-	 * (github/<branch>), joined to the work of GitHive's it already took (see gate-github.ts). Only the repo's own Gate
-	 * writes it: the toolkit writes the project's branches, never an agent.
+	 * (github/<branch>), joined to the work of GitHive's it already took (see gate-github.ts). This runs in the repo's
+	 * GitHub Gate (githubGate), never in its own: the repo's own Gate lands batches one at a time, and a slow GitHub
+	 * would hold every one of them up. Like the repo's own, the GitHub Gate never runs a change's code, so it may write
+	 * github/<branch>: the toolkit writes the project's branches, never an agent.
 	 */
 	importGitHub(input: BatchBase & GitHubImport): Promise<GitHubImportResult> {
-		return this.landing("importGitHub", input, (container) => importFromGitHub(container, input));
+		const why = "only the repo's GitHub Gate imports from GitHub: its own lands batches, a change's runs its code";
+		return this.checkedOut("importGitHub", input, this.isGate(githubGate(input.repo)), why, (container) =>
+			importFromGitHub(container, input),
+		);
 	}
 
 	/**
@@ -154,11 +159,22 @@ export class Gate extends DurableObject<Env> {
 	 * Batches are read and landed only there.
 	 */
 	private landing<T>(what: string, input: BatchBase, work: (container: Container) => Promise<T>): Promise<T> {
+		const why = "only the repo's own Gate reads and lands batches: a change's Gate runs that change's code";
+		return this.checkedOut(what, input, this.ownsSnapshot(input.repo), why, work);
+	}
+
+	/** Runs `work` in turn, if this Gate is `allowed` to, once the container has the project's branch and `baseHead`. */
+	private checkedOut<T>(
+		what: string,
+		input: BatchBase,
+		allowed: boolean,
+		refusal: string,
+		work: (container: Container) => Promise<T>,
+	): Promise<T> {
 		return this.inTurn(what, input.repo, async () => {
 			const container = this.ctx.container;
 			if (!container) throw new Error("no container is configured for Gate");
-			if (!this.ownsSnapshot(input.repo))
-				throw new Error("only the repo's own Gate reads and lands batches: a change's Gate runs that change's code");
+			if (!allowed) throw new Error(refusal);
 			await this.prepare(container, input.base, input.repo);
 			await fetchBatchBase(container, input);
 			return work(container);
@@ -357,8 +373,13 @@ export class Gate extends DurableObject<Env> {
 
 	/** Whether this is the repo's own Gate, which keeps the repo's snapshot. */
 	private ownsSnapshot(repo: string) {
-		const own = this.env.GATE?.idFromName?.(`repo:${repo}`);
-		return !!own && !!this.ctx.id?.equals?.(own);
+		return this.isGate(`repo:${repo}`);
+	}
+
+	/** Whether this is the Gate called `name`. */
+	private isGate(name: string) {
+		const id = this.env.GATE?.idFromName?.(name);
+		return !!id && !!this.ctx.id?.equals?.(id);
 	}
 
 	private async snapshotFor(repo: string): Promise<SetupSnapshot | null> {

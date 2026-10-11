@@ -16,6 +16,16 @@ import { BOT } from "./git";
 const MAIN_SEARCHED = 1_000;
 const GITHUB_SEARCHED = 500;
 
+/**
+ * A fetch from GitHub is given this long, and tried this many times when its transport fails. Its own Gate holds up no
+ * landing while it runs, but the job's alarm waits on it.
+ */
+const GITHUB_FETCH_S = 120;
+const GITHUB_FETCH_TRIES = 2;
+
+/** The Gate that brings a repo's GitHub branch in (see Gate.importGitHub): its own, so batches never wait on GitHub. */
+export const githubGate = (repo: string) => `repo:${repo}:github`;
+
 export interface GitHubImport {
 	/** GitHub's repo, its credentials as the App gives them. */
 	from: { remote: string; token: string; user?: string };
@@ -46,6 +56,8 @@ export async function importFromGitHub(
 		["fetch", "-q", "--no-tags", from.remote, `+refs/heads/${githubBranch}:refs/remotes/github/${githubBranch}`],
 		WORKDIR,
 		from.user,
+		GITHUB_FETCH_S,
+		GITHUB_FETCH_TRIES,
 	);
 	if (fetched.exitCode !== 0)
 		return { failed: `fetching GitHub's ${githubBranch} failed: ${clip(fetched.output, 500)}` };

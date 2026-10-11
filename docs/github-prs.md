@@ -65,9 +65,12 @@ people pushed there directly. They come back through GitHive's own path, so the 
 2. **Imported.** The repo's `GitHubSync` starts a job (`github-sync.ts`, `github-inbound.ts`). Main's last 1,000
    first-parent commits are read through Artifacts' API first: a commit on them, or merged into them, needs no
    container. Otherwise:
-   - the repo's Gate fetches GitHub's branch and, unless main has its head, writes it to the project repo as the
-     branch `github/<branch>`, written by the toolkit (force, since it's GitHive's own copy), never by an agent
-     (`gate-github.ts`);
+   - the repo's GitHub Gate fetches GitHub's branch and, unless main has its head, writes it to the project repo as
+     the branch `github/<branch>`, written by the toolkit (force, since it's GitHive's own copy), never by an agent
+     (`gate-github.ts`). It's a Gate of its own (`repo:<repo>:github`, `githubGate`), not the repo's, which lands
+     batches one at a time: a slow GitHub fetched there would hold up every landing that needs the Gate. Like the
+     repo's own, it never runs a change's code, so it may write `github/<branch>`. The fetch is given 2 minutes and
+     tried twice;
    - a squash or rebase merge gave GitHive's commits new ids, so git's own merge base would be GitHub's branch from
      before the PR, and merging would set the PR's own lines against what landed on GitHive since. So the Gate
      finds the newest commit of GitHive's main (searching its first-parent history back to the merge base) whose
@@ -86,7 +89,9 @@ people pushed there directly. They come back through GitHive's own path, so the 
    of the same branch still open (it needed a person) is released first: the newer commit has it. A claim refused
    because others hold the paths waits, and claims again the next time GitHub's branch is noticed.
 4. **Landed without review, with checks.** The change is trusted: it needs no approvals, whatever the policy. It
-   lands in a batch, through the repo's checks when it has any. Other merges' batches leave it to its own merge
+   lands in a batch, through the repo's checks when it has any, with trees or, when it needs a real merge (GitHub's
+   commits often aren't on top of main), in the repo's Gate like any change that needs one. So a connected repo
+   without checks does start the repo's Gate now and then, and the GitHub Gate for each import. Other merges' batches leave it to its own merge
    (githive-github's, or a person's from the dashboard), which test-merges it first: a conflict sends it back with
    no vote to show it, and in another merge's batch it would break every landing. If the checks fail or it
    conflicts, it is sent back like any change: githive-github asks people (`ask_human`), so the dashboard shows it
@@ -147,7 +152,7 @@ real-git test server) plays GitHub, as GitHive's tests fake Artifacts.
 - A conflicting GitHub change is sent back to a person, not landed, and a fix on GitHub lets it go.
 - With trust off, review is needed.
 - The Gate's import joins a squash or rebase to what it took, so it merges cleanly where git's own merge base
-  conflicts (`github-import.test.ts`).
+  conflicts (`github-import.test.ts`). It runs in the repo's GitHub Gate: the repo's own Gate refuses it.
 - The audit reports every way a vote could be skipped short of the trust rule (`github-audit.test.ts`).
 - The import record's shape is pinned.
 - A failing GitHub API, a refused push or a failing import never fails a landing.
