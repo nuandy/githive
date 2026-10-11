@@ -49,7 +49,7 @@ const claimedBy = (...footprints: Footprint[]) =>
 	Object.fromEntries(footprints.map((each) => [each.change, each.agent]));
 
 describe("heads-ups", () => {
-	it("are told once per name and pair of heads, and again for a new head", async () => {
+	it("are told once per alteration, and again only when the alteration changes", async () => {
 		const { cache } = caches();
 		const bob = using("c-9", "bob");
 		const alice = altering("c-7", "alice");
@@ -58,10 +58,23 @@ describe("heads-ups", () => {
 		expect(await cache.keep("p", alice, claimed)).toBe(2);
 		// The same footprint again, as a redelivered push would bring it: nothing new.
 		expect(await cache.keep("p", { ...alice, at: 2 }, claimed)).toBe(0);
-		expect(await cache.keep("p", { ...alice, head: "h-c-7-2", at: 3 }, claimed)).toBe(2);
+		// A new head with the same alteration (a body change, say): nothing new either.
+		expect(await cache.keep("p", { ...alice, head: "h-c-7-2", at: 3 }, claimed)).toBe(0);
+		// A different signature is a different alteration, told again.
+		const reshaped = footprint("c-7", "alice", {
+			head: "h-c-7-3",
+			at: 4,
+			alters: [
+				{
+					file: "src/config.ts",
+					altered: { name: "loadSettings", change: "interface" as const, before: BEFORE, after: `${AFTER} | null` },
+				},
+			],
+		});
+		expect(await cache.keep("p", reshaped, claimed)).toBe(2);
 		// An older push's footprint doesn't replace a newer one's.
 		expect(await cache.keep("p", { ...alice, head: "h-old", at: 0 }, claimed)).toBe(0);
-		expect(await cache.keptHead("c-7")).toEqual({ head: "h-c-7-2", at: 3 });
+		expect(await cache.keptHead("c-7")).toEqual({ head: "h-c-7-3", at: 4 });
 	});
 
 	it("match a use of a whole file, and a class's member through its class", async () => {

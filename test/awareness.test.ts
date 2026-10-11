@@ -348,7 +348,7 @@ describe("heads-ups between open changes", () => {
 		expect([await told("bob"), await told("alice")]).toEqual([[], []]);
 	});
 
-	it("a newer head replaces the footprint, and a heads-up is told again only for new heads", async () => {
+	it("a newer head replaces the footprint, and a heads-up is told again only when the alteration changes", async () => {
 		const { claims, deliver, forkPush, told, footprints } = hive();
 		claims.push(
 			{ change: "c-7", agent: "alice", intent: INTENT_C7 },
@@ -358,15 +358,25 @@ describe("heads-ups between open changes", () => {
 		await deliver(first, forkPush("bob", "c-9", await pushToFork("bob", "c-9", { "src/jobs/sync.ts": USES_LOAD })));
 		await told("bob");
 		await told("alice");
-		const changed = SIGNATURE_CHANGE.replace("path.length", "path.length + 1");
-		const newer = await pushToFork("alice", "c-7", { "src/config.ts": changed });
+		// A newer push with only a body change keeps the same alteration: nothing new to tell.
+		const bodyOnly = SIGNATURE_CHANGE.replace("path.length", "path.length + 1");
+		const newer = await pushToFork("alice", "c-7", { "src/config.ts": bodyOnly });
 		await deliver(forkPush("alice", "c-7", newer));
 		expect(await footprints.keptHead("c-7")).toMatchObject({ head: newer });
-		expect((await told("bob")).map((notice) => notice.says)).toEqual([SAYS_FOR_BOB]);
-		expect((await told("alice")).map((notice) => notice.says)).toEqual([SAYS_FOR_ALICE]);
+		expect([await told("bob"), await told("alice")]).toEqual([[], []]);
+		// A different signature is a different alteration, told again.
+		const reshaped = bodyOnly.replace("Result<Settings>", "Promise<Settings>");
+		const newest = await pushToFork("alice", "c-7", { "src/config.ts": reshaped });
+		await deliver(forkPush("alice", "c-7", newest));
+		expect((await told("bob")).map((notice) => notice.says)).toEqual([
+			SAYS_FOR_BOB.replace("Result<Settings>", "Promise<Settings>"),
+		]);
+		expect((await told("alice")).map((notice) => notice.says)).toEqual([
+			SAYS_FOR_ALICE.replace("Result<Settings>", "Promise<Settings>"),
+		]);
 		// The older push's event, late: it replaces nothing and tells nothing.
 		await deliver(first);
-		expect(await footprints.keptHead("c-7")).toMatchObject({ head: newer });
+		expect(await footprints.keptHead("c-7")).toMatchObject({ head: newest });
 		expect([await told("bob"), await told("alice")]).toEqual([[], []]);
 	});
 

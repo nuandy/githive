@@ -305,8 +305,13 @@ export class FootprintCache extends DurableObject<Env> {
 			const [a, u] = [open.get(alterer), open.get(user)];
 			// An agent knows its own changes.
 			if (!a || !u || a.agent === u.agent) continue;
+			// Told once per alteration, not per push: a new push that keeps the same signature tells nothing new, and a
+			// different signature is told again.
 			const ids = facts.map((fact) =>
-				footprintHash(`heads_up\0${a.head}\0${u.head}\0${fact.file}\0${fact.altered.name}\0${fact.imported}`),
+				footprintHash(
+					`heads_up\0${a.change}\0${u.change}\0${fact.file}\0${fact.altered.name}\0${fact.imported}\0` +
+						`${fact.altered.change}\0${fact.altered.after ?? ""}`,
+				),
 			);
 			candidates.push({ alterer: a, user: u, facts, ids });
 		}
