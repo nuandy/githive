@@ -92,7 +92,7 @@ export function headsUpSays(other: OpenChange, facts: UseFact[]): string {
 
 /** The `next` of a heads_up to the user. */
 export function headsUpNext(other: OpenChange): string {
-	return `Nothing has landed yet: agree on it with a note on ${other.change}, or update those uses once it lands.`;
+	return `Nothing has landed yet: see what ${other.change} is for in its claim's intent, and update those uses if it lands first.`;
 }
 
 /** A `heads_up` to the alterer: another open change uses names the told agent's change alters. */
@@ -103,7 +103,7 @@ export function headsUpUsedSays(other: OpenChange, facts: UseFact[]): string {
 
 /** The `next` of a heads_up to the alterer. */
 export function headsUpUsedNext(other: OpenChange): string {
-	return `Nothing has landed yet: agree on it with a note on ${other.change}, or keep what they use working.`;
+	return `Nothing has landed yet: keep what ${other.change} uses working, or it will need updating once yours lands.`;
 }
 
 /** A UseFact from an altered name and the uses (usesOf) one file of the change makes of it. */

@@ -124,7 +124,7 @@ describe("footprints: heads-ups between open changes", () => {
 				"`export function loadSettings(path: string): Result<Settings>`",
 		);
 		expect(headsUpNext(BOB)).toBe(
-			"Nothing has landed yet: agree on it with a note on c-9, or update those uses once it lands.",
+			"Nothing has landed yet: see what c-9 is for in its claim's intent, and update those uses if it lands first.",
 		);
 	});
 
@@ -135,7 +135,7 @@ describe("footprints: heads-ups between open changes", () => {
 				"`export function loadSettings(path: string): Settings` to `export function loadSettings(path: string): Result<Settings>`",
 		);
 		expect(headsUpUsedNext(BOB)).toBe(
-			"Nothing has landed yet: agree on it with a note on c-9, or keep what they use working.",
+			"Nothing has landed yet: keep what c-9 uses working, or it will need updating once yours lands.",
 		);
 	});
 
