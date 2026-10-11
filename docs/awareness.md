@@ -114,8 +114,8 @@ caller's own change only:
 A refused merge's `next` is worked out from its `why` (`conflict`, `checks`, `outside`, `approvals`, `after` and
 so on, set where it's refused) and the fields beside it, never from the reasons' words, which are for people.
 
-A thrown error's text gains a `next:` line where the next step is known. The CLI prints the reply's `next` when it
-has one.
+A thrown error's text gains a `next:` line where the next step is known. The CLI says its own commands
+("githive land") after the reply's `fix`, and the reply's `next` only where it has nothing of its own.
 
 ### 4. The story in the merge commit
 

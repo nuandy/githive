@@ -158,7 +158,7 @@ describe("githive CLI", () => {
 		expect(calls.map((c) => c.name)).toEqual(["claim"]);
 	});
 
-	it("prints GitHive's next step when the reply has one, and its own otherwise", async () => {
+	it("prints its own commands as the next step, and GitHive's only where it has none of its own", async () => {
 		const holder = {
 			path: "src/auth/login.ts",
 			held: "src/auth/",
@@ -170,8 +170,8 @@ describe("githive CLI", () => {
 			'Held by ann/bot\'s fix-login ("Fix the login loop"). Pick other work from `backlog`, or claim again later.';
 		answers.claim = { ok: false, conflicts: [holder], next };
 		const refused = await cli(["start", "acme/app", "rate-limit", "Rate-limit logins", "src/auth/login.ts"]);
-		expect(refused.stdout).toContain(`next: ${next}`);
-		expect(refused.stdout).not.toContain("narrow your paths");
+		expect(refused.stdout).toContain("next: narrow your paths and start again");
+		expect(refused.stdout).not.toContain("Pick other work from `backlog`");
 		const approved = { approved: true, approvals: 1, required: 1, awaiting: [], vetoedBy: [] };
 		const clean = { into: "main", branchHead: "x", clean: true, outsideClaim: [] };
 		const status = {
@@ -181,12 +181,59 @@ describe("githive CLI", () => {
 			votes: [],
 		};
 		answers.status = { ...status, approval: approved, merge: clean, next: "Call `merge`." };
-		expect((await cli(["status", "acme/app", "rate-limit"])).stdout).toMatch(/next: Call `merge`\.\n$/);
-		answers.status = { ...status, approval: approved, merge: clean };
 		expect((await cli(["status", "acme/app", "rate-limit"])).stdout).toMatch(/next: githive land\n$/);
 		answers.vote = { ok: true, tip: "t", next: "Done. Choose more from `reviews`." };
 		const voted = await cli(["vote", "acme/app", "abc", "approve", "ran the tests"]);
-		expect(voted.stdout).toContain("next: Done. Choose more from `reviews`.");
+		expect(voted.stdout).toMatch(/next: githive reviews acme\/app\n$/);
+		// A refusal the CLI has no words for gets GitHive's next step, and failing that, a look at status.
+		answers.merge = { ok: false, why: ["something-new"], reasons: ["a reason"], next: "Ask the repo's people." };
+		const unknown = await cli(["land", "acme/app", "rate-limit"]);
+		expect(unknown.stdout).toMatch(/next: Ask the repo's people\.\n$/);
+		answers.merge = {
+			ok: false,
+			why: ["setup"],
+			reasons: ["checks run on GitHub Actions, but no GitHub repo is connected"],
+		};
+		const setup = await cli(["land", "acme/app", "rate-limit"]);
+		expect(setup.stdout).toMatch(/next: githive status \(what it still needs\)\n$/);
+	});
+
+	it("says what a refused merge needs in its own commands, after the plain git that resolves a conflict", async () => {
+		const status = {
+			change: "rate-limit",
+			claim: { agent: "me", paths: ["src/auth/"], intent: "x" },
+			head: "abc",
+			votes: [],
+			approval: { approved: true, approvals: 1, required: 1, awaiting: [], vetoedBy: [] },
+			merge: { into: "main", branchHead: "x", clean: true, outsideClaim: [] },
+		};
+		answers.status = status;
+		const fix = [
+			"git fetch origin main && git merge origin/main",
+			"# resolve src/auth/a.ts so both changes make sense, then:",
+			"git add src/auth/a.ts && git commit --no-edit",
+			"git push fork changes/rate-limit",
+			"call status; once the new commit is approved, merge again",
+		];
+		answers.merge = {
+			ok: false,
+			why: ["conflict", "approvals"],
+			into: "main",
+			conflicts: ["src/auth/a.ts"],
+			fix,
+			reasons: ["conflict on src/auth/a.ts with o-7 by bob", "abc has 0 of 2 approvals"],
+			next: "It conflicts with main in src/auth/a.ts. In your clone: ...",
+		};
+		const refused = await cli(["land", "acme/app", "rate-limit"]);
+		expect(refused.code).toBe(1);
+		expect(refused.stdout).toContain(
+			["with plain git, in your clone:", ...fix.slice(0, 4).map((line) => `  ${line}`)].join("\n"),
+		);
+		expect(refused.stdout).not.toContain("call status");
+		expect(refused.stdout).not.toContain("In your clone: ...");
+		expect(refused.stdout).toMatch(
+			/next: githive sync, resolve inside your claim so both changes make sense, commit, githive land; wait for approvals \(githive status says how many\); meanwhile githive reviews acme\/app\n$/,
+		);
 	});
 
 	it("tells from status a change that conflicts or strays outside its claim, though it's approved", async () => {
@@ -197,12 +244,20 @@ describe("githive CLI", () => {
 			votes: [],
 			approval: { approved: true, approvals: 1, required: 1, awaiting: [], vetoedBy: [] },
 		};
+		const fix = [
+			"git fetch origin main && git merge origin/main",
+			"call status; once the new commit is approved, merge again",
+		];
 		answers.status = {
 			...status,
-			merge: { into: "main", clean: false, conflicts: ["src/auth/a.ts"], outsideClaim: [] },
+			merge: { into: "main", clean: false, conflicts: ["src/auth/a.ts"], outsideClaim: [], fix },
+			next: "It conflicts with main in src/auth/a.ts. In your clone: ...",
 		};
 		const conflicted = await cli(["status", "acme/app", "rate-limit"]);
 		expect(conflicted.stdout).toContain("conflicts with main in src/auth/a.ts");
+		expect(conflicted.stdout).toContain(
+			"with plain git, in your clone:\n  git fetch origin main && git merge origin/main\n",
+		);
 		expect(conflicted.stdout).toContain("next: githive sync, resolve inside your claim so both changes make sense");
 		answers.status = { ...status, merge: { into: "main", clean: true, outsideClaim: ["docs/x.md"] } };
 		const strayed = await cli(["status", "acme/app", "rate-limit"]);
