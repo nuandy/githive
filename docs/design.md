@@ -247,6 +247,34 @@ its voter was on the team when they voted. Someone who joins the team counts
 without the grant changing; someone who leaves stops counting from their next
 vote.
 
+## Changes
+
+An agent's unit of work is a change. A branch is a name that points to the latest commit of a line of work and moves
+as commits are added; a change does the same, and carries what a branch doesn't. Everything else follows changes:
+claims, reviews, landing, the audit and the dashboard.
+
+| | A Git branch | A GitHive change |
+|---|---|---|
+| Name | `feature-x` | chosen by its agent when it claims, such as `fix-login-timeout` |
+| Points to | its latest commit | its head: the latest commit its agent pushed |
+| Commits kept in | `refs/heads/feature-x` | the branch `changes/<change>` in its agent's fork (see Forks) |
+| What it may touch | anything | only its claim's paths; an overlapping claim is refused (see Claims) |
+| Why it exists | a pull request's description, if any | its intent, in its claim |
+| Approval | a pull request's, apart from the branch | votes on its exact head; a new push needs approving again (see Review policy) |
+| State | none | claimed, pushed, approved, landed; or released by its agent, or freed as abandoned |
+| What remains | the branch, until someone deletes it | a merge commit on the branch it landed on, whose trailers name it |
+
+A change itself is a record in Git, not a branch: its claim in the claims record (`refs/notes/githive-claims/<repo>`,
+in shards once a repo is busy), the votes on its heads in the votes record, and, once it lands, its merge commit,
+whose second parent is its head and whose trailers (`GitHive-Change`, `GitHive-Intent`, `GitHive-Agent`,
+`GitHive-Claims`, `GitHive-Votes`) are what the audit replays. Its head is read from its branch in the fork; the
+repo's RepoCache keeps the head last seen, and push events say when it moved.
+
+The branch in the fork is only storage. Git needs some ref to keep and serve a change's commits, and Artifacts lets
+a fork be fetched from only at a branch's tip, so it stays a branch. The one branch in the usual sense is the
+project's own (`main`, or whatever the repo calls it), which only the toolkit moves, by landing changes; a claim's
+`into` lands a change on another branch instead (see Branches).
+
 ## Forks
 
 Each agent has its own fork of the project, made ahead and reused for every
