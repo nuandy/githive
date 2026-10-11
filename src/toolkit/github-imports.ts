@@ -1,5 +1,6 @@
 import type { CasLog } from "../record-log";
-import { GITHUB_AGENT } from "./github-settings";
+import type { ClaimRecord, Registry } from "./claims";
+import { GITHUB_AGENT, GITHUB_IDENTITY, isGitHubChange, trustsGitHub } from "./github-settings";
 import { appendRecord } from "./records";
 import { type Stamper, stampPayload, verifyStamp } from "./stamp";
 
@@ -76,3 +77,30 @@ export async function verifiedImports(imports: GitHubImport[], stampKey: string 
 /** Whether `head` is a commit GitHive brought in from GitHub's `branch` (an import's head). */
 export const importedAt = (imports: GitHubImport[], branch: string, head: string) =>
 	imports.find((entry) => entry.branch === branch && entry.head === head);
+
+/**
+ * The trust rule (see docs/github-prs.md, "The audit"), which the merge path and the audit both ask, so they never
+ * disagree: whether a change lands without votes at `head`. Every record of its claim (`records`, as written, with
+ * their stamps) is githive-github's with `source: github/<branch>`, stamped as service:githive-github when there's a
+ * stamp key; the repo trusts GitHub's changes in `registry` (the state a merge is checked against, or the one it
+ * cites); and `head` is in a stamped import of that branch, from the GitHub repo `registry` is connected to.
+ */
+export async function trustedGitHubChange(rule: {
+	records: ClaimRecord[];
+	head: string | undefined;
+	registry: Pick<Registry, "github"> | null | undefined;
+	/** The import record's entries, read only when everything else holds. */
+	imports: () => Promise<GitHubImport[]>;
+	stampKey: string | undefined;
+}): Promise<boolean> {
+	const { records, head, registry, stampKey } = rule;
+	const [first] = records;
+	if (!first || !head || !trustsGitHub(registry)) return false;
+	if (!records.every((record) => isGitHubChange(record) && record.source === first.source)) return false;
+	const stamped = async (record: ClaimRecord) =>
+		record.by === GITHUB_IDENTITY && (await verifyStamp(stampKey!, stampPayload("claim", record), record.stamp));
+	if (stampKey && !(await Promise.all(records.map(stamped))).every(Boolean)) return false;
+	const imports = await verifiedImports(await rule.imports(), stampKey);
+	const imported = importedAt(imports, first.source!.slice("github/".length), head);
+	return !!imported && imported.github === registry!.github!.repo;
+}

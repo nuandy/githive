@@ -8,7 +8,7 @@ import type { Registry } from "../src/toolkit/claims";
 import { type GitHubImports, importsRef } from "../src/toolkit/github-imports";
 import { GITHUB_AGENT, GITHUB_IDENTITY, type GitHubSyncHandle } from "../src/toolkit/github-settings";
 import { memoryLanding } from "../src/toolkit/landing";
-import type { ToolContext } from "../src/toolkit/mcp";
+import { callTool, type ToolContext } from "../src/toolkit/mcp";
 import { generateStampKey, makeStamper } from "../src/toolkit/stamp";
 import { FakeStorage } from "./fakes/env";
 import { pushChange } from "./helpers/agents";
@@ -282,6 +282,80 @@ describe("GitHub's changes coming back", { timeout: 120_000 }, () => {
 		await sync.notice({ repo: "p", github: "acme/shop", branch: "main", commit: github.head() }, true);
 		expect(await settle()).toMatchObject({ step: "done" });
 		expect(server.git("show", "main:docs/notes.md")).toBe("from GitHub\n");
+	});
+});
+
+describe("the merge path's trust rule, the audit's own", { timeout: 120_000 }, () => {
+	/** A hosted context acting under githive- names, stamped as `identity`. */
+	const hosted = (identity: string): ToolContext => {
+		const { githubSync: _, ...rest } = ctx();
+		return { ...rest, hosted: true, stamper: async () => makeStamper(privateKey, identity) };
+	};
+	const mergeAs = (change: string, agent: string, as: ToolContext) =>
+		callTool("merge", { repo: "p", change, agent }, as) as Promise<Record<string, unknown>>;
+	const needsVotes = { ok: false, reasons: [expect.stringContaining("approvals from reviewers")] };
+
+	/** GitHub's commit pushed there and imported by the job, which stops before it claims. */
+	async function imported() {
+		await land("c-1", { "src/a.js": "a\n" });
+		const pushed = github.push({ "docs/notes.md": "from GitHub\n" });
+		await ready("c-2", { "src/b.js": "b\n" });
+		expect(await call("merge", { change: "c-2", agent: "a" }, "a")).toMatchObject({ ok: true });
+		expect(await stepUntil("claim")).toMatchObject({ step: "claim" });
+		return { pushed, change: `github-${pushed.slice(0, 12)}` };
+	}
+
+	it("needs votes for a claim of GitHub's branch as githive-github that isn't stamped as service:githive-github", async () => {
+		const { change } = await imported();
+		const builder = hosted("service:githive-builder");
+		const claim = { repo: "p", change, agent: GITHUB_AGENT, source: "github/main", intent: "Bring it in" };
+		expect(await callTool("claim", claim, builder)).toMatchObject({ ok: true });
+		expect(await mergeAs(change, GITHUB_AGENT, builder)).toMatchObject(needsVotes);
+		expect(server.git("ls-tree", "--name-only", "-r", "main")).not.toContain("docs/notes.md");
+	});
+
+	it("needs votes for a head the import record doesn't hold", async () => {
+		await imported();
+		// github/main moves to a commit no import wrote, before githive-github claims it.
+		const tip = server.git("rev-parse", "github/main").trim();
+		const other = server.git("commit-tree", "-p", tip, "-m", "not imported", `${tip}^{tree}`).trim();
+		server.git("update-ref", "refs/heads/github/main", other);
+		expect(await settle()).toMatchObject({ step: "waiting", reason: expect.stringContaining("waits for review") });
+		expect(server.git("ls-tree", "--name-only", "-r", "main")).not.toContain("docs/notes.md");
+	});
+
+	it("needs votes once the repo is connected to another GitHub repo than the import came from", async () => {
+		const { change } = await imported();
+		expect(await stepUntil("merge")).toMatchObject({ step: "merge", change });
+		const reach = extra.github!;
+		extra.github = async (repo) => (repo === "acme/other" ? github.link : reach(repo));
+		try {
+			await call("settings", { github: "acme/other" });
+			expect(await mergeAs(change, GITHUB_AGENT, hosted(GITHUB_IDENTITY))).toMatchObject(needsVotes);
+		} finally {
+			extra.github = reach;
+		}
+	});
+
+	it("needs votes for another agent's claim of GitHub's branch, however it got into the records", async () => {
+		await imported();
+		const log = new GitCasLog<Registry>(
+			async () => ({ url: server.url, token: "unused" }),
+			"p",
+			"refs/notes/githive-claims/p",
+		);
+		const head = (await log.read())!;
+		const at = new Date().toISOString();
+		const forged = { change: "x-1", agent: "a", paths: ["docs/"], intent: "GitHub's", since: at, active: at };
+		await log.append(head.tip, {
+			author: "a",
+			kind: "decisions",
+			entries: [{ commit: "none", text: "a claim written by hand", at }],
+			state: { ...head.commit.state, claims: [...head.commit.state.claims, { ...forged, source: "github/main" }] },
+			batch: crypto.randomUUID(),
+		});
+		await pushChange(server.url, work, "a", "x-1", { "docs/notes.md": "from GitHub\n" });
+		expect(await call("merge", { change: "x-1", agent: "a" }, "a")).toMatchObject(needsVotes);
 	});
 });
 

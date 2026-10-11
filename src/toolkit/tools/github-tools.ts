@@ -2,8 +2,9 @@ import { fail } from "../../errors";
 import { GitHubError, type GitHubLink, type PullRequest } from "../../github";
 import { mirrorTo } from "../actions-checks";
 import { pullStoryAt } from "../github-pr";
+import type { ClaimStore } from "../claim-store";
 import type { ClaimRecord, Registry } from "../claims";
-import { type GitHubImport, type GitHubImports, importedAt, importsRef, verifiedImports } from "../github-imports";
+import { type GitHubImport, type GitHubImports, importsRef, trustedGitHubChange } from "../github-imports";
 import {
 	bringsGitHubBack,
 	githubSync,
@@ -74,21 +75,25 @@ export const githubTools: ToolHandlers = {
 };
 
 /**
- * Whether a change lands without votes at a head: githive-github's claim of a GitHub branch, while the repo trusts
- * GitHub's changes, at a head the import record holds, stamped. The record is read once, when first needed.
+ * Whether a change lands without votes at a head: the trust rule (trustedGitHubChange), the audit's own, against its
+ * claim's records as written and the registry the merge is checked against. Only githive-github's claims of a GitHub
+ * branch are looked at further, and the import record is read once, when first needed.
  */
-export function trustedImports(ctx: ToolContext, repo: string, registry: Registry | undefined) {
+export function trustedImports(ctx: ToolContext, repo: string, registry: Registry | undefined, store: ClaimStore) {
 	if (!registry || !trustsGitHub(registry)) return undefined;
 	let imports: Promise<GitHubImport[]> | undefined;
-	const read = async () => {
-		const head = await recordLog<GitHubImports>(ctx, repo, importsRef(repo)).read();
-		return verifiedImports(head?.commit.state.imports ?? [], registry.stampKey);
-	};
+	const read = async () =>
+		(await recordLog<GitHubImports>(ctx, repo, importsRef(repo)).read())?.commit.state.imports ?? [];
 	return async (claim: ClaimRecord, head: string) => {
 		if (!isGitHubChange(claim)) return false;
 		imports ??= read().catch((err) => (console.error(`reading ${repo}'s GitHub imports failed`, String(err)), []));
-		const branch = claim.source!.slice("github/".length);
-		return !!importedAt(await imports, branch, head);
+		return trustedGitHubChange({
+			records: await store.claimRecords(claim.change),
+			head,
+			registry,
+			imports: () => imports!,
+			stampKey: registry.stampKey,
+		});
 	};
 }
 

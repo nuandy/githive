@@ -32,6 +32,8 @@ async function story(change: {
 	github?: GitHubSettings | null;
 	imported?: Partial<GitHubImport>;
 	importBy?: Stamper | null;
+	/** Another record of the same claim (a claim spread over shards), stamped by this. */
+	alsoBy?: Stamper;
 }) {
 	const claim = await stamped<ClaimRecord>("claim", change.claimBy ?? as.github, {
 		change: "github-abc",
@@ -51,9 +53,11 @@ async function story(change: {
 		stampKey: key.publicKey,
 		...(github ? { github } : {}),
 	};
+	const { by: _by, stamp: _stamp, ...unstampedClaim } = claim;
+	const also = change.alsoBy ? [await stamped("claim", change.alsoBy, { ...unstampedClaim, paths: ["src/"] })] : [];
 	const registry = [
 		{ tip: "r0", state: start },
-		{ tip: "r1", state: { ...start, claims: [claim] } },
+		{ tip: "r1", state: { ...start, claims: [claim, ...also] } },
 	];
 	const entry = {
 		github: "acme/shop",
@@ -93,6 +97,8 @@ beforeAll(async () => {
 describe("auditing GitHub's changes", () => {
 	it("accepts a trusted GitHub change that landed without votes", async () => {
 		expect(await story({})).toEqual([]);
+		// Its claim spread over two records, both githive-github's.
+		expect(await story({ alsoBy: as.github })).toEqual([]);
 	});
 
 	it.each([
@@ -102,6 +108,7 @@ describe("auditing GitHub's changes", () => {
 		["the repo didn't trust GitHub's changes then", () => ({ github: { ...link, trust: false } })],
 		["the repo wasn't connected to GitHub", () => ({ github: null })],
 		["another identity claimed it as githive-github", () => ({ claimBy: as.someone })],
+		["another identity wrote one of its claim's records", () => ({ alsoBy: as.someone })],
 		["another agent claimed it", () => ({ agent: "agent-a" })],
 		["its claim merges no GitHub branch", () => ({ source: "feature/x" })],
 	] as [string, () => Parameters<typeof story>[0]][])("reports the votes it lacks when %s", async (_why, change) => {

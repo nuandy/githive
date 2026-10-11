@@ -114,14 +114,17 @@ people pushed there directly. They come back through GitHive's own path, so the 
 Once GitHub's commit is on `main`, the next PR shows only what's new, even after a squash merge, and a mirror's push
 is a fast-forward again.
 
-- **The audit** accepts a merge with no votes when all of these hold:
-  - its claim is by `githive-github` with `source: github/<branch>`, stamped as `service:githive-github` (with a
-    stamp key);
+- **The trust rule,** one function (`trustedGitHubChange` in `github-imports.ts`) that the merge path and the audit
+  both apply, so they never disagree. A merge needs no votes when all of these hold:
+  - its claim is by `githive-github` with `source: github/<branch>`, and every record of it (a claim spread over
+    shards has several), as written, is stamped as `service:githive-github` (with a stamp key). The merge path reads
+    those records for it, since the merged view of a claim carries no stamp;
   - its head is a commit in the import record (a stamped entry, for that branch);
-  - the repo's GitHub trust was on when it merged, in the registry state it cites, connected to the GitHub repo the
-    import came from.
+  - the repo's GitHub trust is on, connected to the GitHub repo the import came from: for the merge path, in the
+    registry it's checked against; for the audit, in the registry state the merge cites.
 
-  Anything else that skips a vote is reported as today.
+  Anything else that skips a vote is refused by the merge, and reported by the audit, as today. A hosted agent acting
+  as `githive-github` (they can) gets no trust: its records are stamped as itself.
 - **Trust is a setting:** `github_trust` defaults to true. Turned off, GitHub's changes need review like any change:
   the job's merge waits for review, reviewers see the change in `reviews`, and once approved it lands with the next
   notice's merge.
@@ -175,7 +178,10 @@ real-git test server) plays GitHub, as GitHive's tests fake Artifacts.
 - With trust off, review is needed.
 - The Gate's import joins a squash or rebase to what it took, so it merges cleanly where git's own merge base
   conflicts (`github-import.test.ts`). It runs in the repo's GitHub Gate: the repo's own Gate refuses it.
-- The audit reports every way a vote could be skipped short of the trust rule (`github-audit.test.ts`).
+- The audit reports every way a vote could be skipped short of the trust rule (`github-audit.test.ts`), and the
+  merge path refuses them: a claim as `githive-github` stamped as another identity, a head the import record doesn't
+  hold, a repo connected to another GitHub repo since the import, another agent's claim of `github/main`
+  (`github-inbound.test.ts`).
 - Branches under `github/` are reserved: a claim into or from one, or an agent's `source` merge of one, is refused.
 - The import record's shape is pinned.
 - A failing GitHub API, a refused push or a failing import never fails a landing, and an API that takes the read

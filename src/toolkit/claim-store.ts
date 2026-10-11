@@ -79,6 +79,8 @@ export interface ClaimStore {
 	read(): Promise<ClaimsView>;
 	/** One change's claim and releases, reading only the records that hold them where possible. */
 	readChange(change: string): Promise<ChangeView>;
+	/** One change's claim records as written in each record that holds them, with their stamps: no merged view. */
+	claimRecords(change: string): Promise<ClaimRecord[]>;
 	/** Everything bearing on merging `files` for `change`: its own claim and any covering the files. */
 	readScope(change: string, files: string[]): Promise<ClaimsView>;
 	/** readScope for several changes at once, reading each record once for all of them. */
@@ -331,6 +333,12 @@ class Claims implements ClaimStore {
 			claim: view.claims.find((c) => c.change === change),
 			released: view.released.filter((r) => r.change === change),
 		};
+	}
+
+	async claimRecords(change: string): Promise<ClaimRecord[]> {
+		return (await this.changeEntries(change)).flatMap((entry) =>
+			entry.state.claims.filter((held) => held.change === change),
+		);
 	}
 
 	async readScope(change: string, files: string[]): Promise<ClaimsView> {

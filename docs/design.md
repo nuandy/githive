@@ -986,11 +986,13 @@ and author, and `by` when the commit was stamped:
 - `unjustified-revert`: a revert of a commit the audit doesn't report.
 
 A merge with no votes where the policy needs some is accepted only as GitHub's
-trusted change: claimed by `githive-github` (stamped as
-`service:githive-github`) with `source: github/<branch>`, its head a commit in
-the import record (stamped), and the repo's GitHub trust on, for the GitHub repo
-the import came from, in the registry state the merge cites. Anything else that
-skips a vote is reported as before.
+trusted change: claimed by `githive-github` (every record of the claim stamped
+as `service:githive-github`) with `source: github/<branch>`, its head a commit
+in the import record (stamped), and the repo's GitHub trust on, for the GitHub
+repo the import came from, in the registry state the merge cites. The merge
+path applies the same rule, the same function (`trustedGitHubChange`), against
+the registry it's checked against. Anything else that skips a vote is reported
+as before.
 
 Each merge names its change and the claims tips its agent checked, so the
 audit checks the merge against the claims exactly as they stood there. It

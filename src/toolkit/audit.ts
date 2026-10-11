@@ -5,8 +5,7 @@ import { stampPayload, verifyStamp } from "./stamp";
 import { approval, type Author, type ReviewPolicy, type VoteRecord, type Votes, effectivePolicy } from "./votes";
 import { settingsForBranch } from "./branch-rules";
 import { skipsChecks } from "./check-scope";
-import { type GitHubImport, importedAt, verifiedImports } from "./github-imports";
-import { GITHUB_IDENTITY, isGitHubChange, trustsGitHub } from "./github-settings";
+import { type GitHubImport, trustedGitHubChange } from "./github-imports";
 
 // The audit (see docs/design.md). Nothing stops an agent from breaking a convention, so this replays the records
 // and reports every violation with the commit and agent responsible. It's a pure function, so anyone can rerun it
@@ -188,7 +187,7 @@ async function auditMerge(merge: MergeRecord, key: string | undefined, indexed: 
 	for (const { history, tip } of cited.records) checkReleasedAfter(history, tip, merge, report);
 	const settings = settingsFor(records, registryAt, merge);
 	// GitHub's change, while the repo trusted GitHub's changes, needed no votes.
-	if (!(await trustedImport(records, registryAt, merge, firstRecord, key)))
+	if (!(await trustedImport(records, registryAt, merge, ownRecords, key)))
 		checkApproved(records, settings.policy, votesAt, merge, report, own);
 	// A change that only touched files the settings said to skip needs no checks.
 	if (settings.verify?.length && !skipsChecks(merge.files, settings.skipChecks)) checkTested(merge, indexed, report);
@@ -454,27 +453,23 @@ function registryTip(cited: string): string | undefined {
 		.find(([shard = ""]) => decodeShard(shard) === "")?.[1];
 }
 
-/**
- * Whether a merge was GitHub's change, landed without votes as trusted: claimed by githive-github (stamped as it, with
- * a stamp key) with `source: github/<branch>`, its head a commit the import record holds (stamped), and the repo's
- * GitHub trust on in the registry state it cites, connected to the GitHub repo the import came from.
- */
+// Whether a merge was GitHub's change, landed without votes as trusted: the trust rule (trustedGitHubChange) against
+// its claim's records and the registry state it cites, the same rule the merge path applied.
 async function trustedImport(
 	records: AuditRecords,
 	registryAt: Map<string, Registry>,
 	merge: MergeRecord,
-	claim: ClaimRecord | undefined,
+	claims: ClaimRecord[],
 	key: string | undefined,
 ) {
-	if (!claim || !isGitHubChange(claim) || !merge.head) return false;
-	if (key && (claim.by !== GITHUB_IDENTITY || !(await verifyStamp(key, stampPayload("claim", claim), claim.stamp))))
-		return false;
 	const tip = registryTip(merge.claimsTip!);
-	const state = tip ? registryAt.get(tip) : undefined;
-	if (!trustsGitHub(state)) return false;
-	const imports = await verifiedImports(records.imports ?? [], key);
-	const imported = importedAt(imports, claim.source!.slice("github/".length), merge.head);
-	return !!imported && imported.github === state!.github!.repo;
+	return trustedGitHubChange({
+		records: claims,
+		head: merge.head,
+		registry: tip ? registryAt.get(tip) : undefined,
+		imports: async () => records.imports ?? [],
+		stampKey: key,
+	});
 }
 
 // The merged commit needs the policy's approvals from reviewers other than its author, every veto role's included,

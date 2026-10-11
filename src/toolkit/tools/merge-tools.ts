@@ -121,7 +121,7 @@ function optionalMergeInput(
 	if (answerWithinMs !== undefined) optional.answerWithinMs = answerWithinMs;
 	if (pollMs !== undefined) optional.pollMs = pollMs;
 	if (maxBatch !== undefined) optional.maxBatch = maxBatch;
-	const trusted = trustedImports(ctx, repo, registered);
+	const trusted = trustedImports(ctx, repo, registered, call.store);
 	if (trusted) optional.trusted = trusted;
 	if (ctx.branchHead) optional.branchHead = () => ctx.branchHead!(repo, into);
 	if (ctx.landing) optional.landing = ctx.landing(repo, into);
