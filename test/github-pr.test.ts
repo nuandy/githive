@@ -3,6 +3,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { statusOf } from "../src/errors";
+import { inert, pullStory } from "../src/toolkit/github-pr";
+import type { LandedChange } from "../src/toolkit/history";
 import { repoSnapshot } from "../src/toolkit/mcp";
 import type { GitHubSeen, GitHubSyncHandle, KnownPull } from "../src/toolkit/github-settings";
 import { pushChange } from "./helpers/agents";
@@ -87,8 +89,8 @@ describe("a repo connected to GitHub in pr mode", { timeout: 60_000 }, () => {
 		expect(github.pulls).toHaveLength(1);
 		expect(github.pulls[0]).toMatchObject({ head: "githive/main", base: "main", open: true });
 		// The body tells each change's story: its intent, its agent, and its reviewer's evidence.
-		expect(github.pulls[0]!.body).toContain("**Add c-1** (`c-1`, by a)");
-		expect(github.pulls[0]!.body).toContain("reviewed by reviewer (review): ok");
+		expect(github.pulls[0]!.body).toContain("**`Add c-1`** (`c-1`, by `a`)");
+		expect(github.pulls[0]!.body).toContain("reviewed by `reviewer` (`review`): `ok`");
 		expect(pull).toMatchObject({ number: 1, url: "https://github.com/acme/shop/pull/1" });
 		// The dashboard shows it by the repo's name.
 		expect((await repoSnapshot(ctx(), "p")).github).toEqual({
@@ -161,5 +163,45 @@ describe("a repo connected to GitHub in mirror mode", { timeout: 60_000 }, () =>
 		expect(await tryCall("github_pr", {})).toMatchObject({
 			error: 'p mirrors main to acme/shop: set github_sync to "pr" for a pull request',
 		});
+	});
+});
+
+describe("the pull request's body", () => {
+	/** The body with its code spans taken out: what GitHub reads for closing keywords, mentions and references. */
+	const outsideCode = (body: string) => body.replace(/(`+)[^`][\s\S]*?\1/g, "");
+	const change = (intent: string, evidence: string, reviewer = "reviewer"): LandedChange => ({
+		commit: "m".repeat(40),
+		change: "c-1",
+		agent: "agent-a",
+		head: "h".repeat(40),
+		title: intent,
+		intent,
+		files: ["src/a.js"],
+		reviews: [{ reviewer, role: "review", verdict: "approve", evidence }],
+	});
+
+	it("gives GitHub nothing to act on in what agents wrote: no closing keyword, mention, reference or markup", () => {
+		const { body } = pullStory(
+			[
+				change("Closes #12, and Fixes acme/shop#3", "@org/team: looks good, see #4 <img src=x>"),
+				change("Tidy `src/a.js` [link](https://evil.example)", "fine", "person:ana@example.com"),
+			],
+			"main",
+		);
+		expect(body).toContain("**`Closes #12, and Fixes acme/shop#3`**");
+		expect(body).toContain("`@org/team: looks good, see #4 <img src=x>`");
+		expect(body).toContain("**``Tidy `src/a.js` [link](https://evil.example)``**");
+		expect(body).toContain("reviewed by `person:ana@example.com`");
+		const plain = outsideCode(body);
+		expect(plain).not.toMatch(/#\d|@\w|<img|\]\(/);
+		expect(plain).not.toMatch(/closes|fixes/i);
+	});
+
+	it("fences text that starts or ends with a backtick, and caps a long intent", () => {
+		expect(inert("`rm -rf`")).toBe("`` `rm -rf` ``");
+		expect(inert("")).toBe("(none)");
+		expect(inert("a\n\nb")).toBe("`a b`");
+		const { body } = pullStory([change("x".repeat(500), "ok")], "main");
+		expect(body).toContain(`\`${"x".repeat(199)}…\``);
 	});
 });

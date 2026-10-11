@@ -672,8 +672,9 @@ the audit holds each merge to the settings in force when it merged. Then
     and the dashboard's "Open a pull request on GitHub" open it, or say where
     it is: "GitHive: <n> changes", its body listing what landed since GitHub's
     branch last took GitHive's work, each change's intent, agent and reviewers
-    with their evidence; `refresh` rewrites it. Merging and closing it happen
-    on GitHub.
+    with their evidence, all of it inert in code spans, so GitHub acts on no
+    closing keyword, mention or reference an agent wrote; `refresh` rewrites
+    it. Merging and closing it happen on GitHub.
   - `mirror`: main goes to GitHub's main, the copy people browse, and a
     backup. A link made before modes has no mode recorded: it mirrors
     exactly as it did, and brings nothing back nor trusts anything (below),

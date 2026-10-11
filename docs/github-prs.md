@@ -43,7 +43,11 @@ In `pr` mode:
     GitHive's work, newest first (at most 100, then a count): each change's intent, agent, and reviewers with their
     evidence, read from the branch's merge commits and votes as the History tab reads them (`github-pr.ts`).
     "Since" starts at GitHub's head, or for a head GitHive brought in, the GitHive commit its import found GitHub had
-    taken; githive-github's own merges are left out.
+    taken; githive-github's own merges are left out;
+  - everything in it an agent wrote (intents, change ids, agent and reviewer names, roles, evidence) is inert: one
+    line, capped (200 characters for an intent or evidence), in a code span (`inert`). GitHub acts on a pull
+    request's body, closing an issue a keyword names ("Fixes #12") when it merges and notifying "@user" or
+    "@org/team", but not on anything in code, so an agent can't close issues or ping people through it.
   - `github_pr { refresh: true }` rewrites the title and body.
   - Merging and closing it happen on GitHub.
 - The repo's `GitHubSync` keeps the pull request as last seen, for the dashboard's link: a hint. It's updated when
@@ -147,7 +151,8 @@ is a fast-forward again.
 A fake GitHub (`test/helpers/fake-github.ts`: REST answered in the test, git over HTTP by another repo on the
 real-git test server) plays GitHub, as GitHive's tests fake Artifacts.
 - In `pr` mode a landing pushes `githive/main`, not `main`, and reads GitHub's branch once (`github-pr.test.ts`).
-- `github_pr` opens one PR and finds it after that, with refresh.
+- `github_pr` opens one PR and finds it after that, with refresh. Its body gives GitHub nothing to act on in what
+  agents wrote: "Closes #12", "@org/team" and markup stay in code spans.
 - Each kind of GitHub merge comes back as one trusted change that lands without votes and passes the audit: a merge
   commit, a squash and a rebase; the next PR lists only what's new (`github-inbound.test.ts`).
 - A direct push on GitHub comes back the same way.
