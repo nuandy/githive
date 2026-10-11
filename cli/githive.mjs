@@ -495,7 +495,8 @@ async function landChange() {
 	const step = refusedStep(merged, repo, change);
 	// Most often it's only waiting for reviews: say where it stands and what to do meanwhile, as status does.
 	const onlyApprovals = merged.why?.length && merged.why.every((kind) => kind === "approvals");
-	if (!step || onlyApprovals) {
+	const unexplained = !step && !merged.why?.length && !(typeof merged.next === "string" && merged.next.trim());
+	if (onlyApprovals || unexplained) {
 		const status = await tool("status", { repo, change }).catch(() => null);
 		if (status) {
 			if (status.head) say(approvalLine(status.approval ?? {}));
