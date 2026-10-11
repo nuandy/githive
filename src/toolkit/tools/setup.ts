@@ -4,7 +4,7 @@ import { onActions } from "../actions-checks";
 import { DEFAULT_SKIP_CHECKS } from "../check-scope";
 import { changeSettings, type Registry, registerAgent, registerAgents, startRepo } from "../claims";
 import { grantWarnings } from "../votes";
-import type { ToolCall, ToolHandlers } from "./context";
+import type { Args, ToolCall, ToolContext, ToolHandlers } from "./context";
 import { sha256 } from "./identity";
 import {
 	containerChecks,
@@ -15,7 +15,15 @@ import {
 	MOST_AT_ONCE,
 	shardingOf,
 } from "./repo";
-import { branchRulesFrom, checksFrom, githubFrom, POLICY_FIELDS, policyFrom, skipPatternsFrom } from "./settings-input";
+import {
+	branchRulesFrom,
+	checksFrom,
+	githubFrom,
+	githubMainFrom,
+	POLICY_FIELDS,
+	policyFrom,
+	skipPatternsFrom,
+} from "./settings-input";
 import { INSTRUCTIONS } from "./tool-list";
 
 // Tools that set up a repo and its agents: settings (which also starts GitHive on a repo) and register.
@@ -151,9 +159,9 @@ async function changeRepoSettings({ args, ctx, repo, claims, stamper }: ToolCall
 			? undefined
 			: branchRulesFrom(args.branch_rules, registered.policy ?? DEFAULT_POLICY);
 	const skipChecks = args.skip_checks === undefined ? undefined : skipPatternsFrom(args.skip_checks);
-	const github = args.github === undefined ? undefined : await githubFrom(ctx, args.github);
+	const github = await githubSetting(ctx, args, registered.github);
 	if (!policy && !verify && !branchRules && !skipChecks && github === undefined) {
-		const fields = [...POLICY_FIELDS, "verify", "branch_rules", "skip_checks", "github"].join(", ");
+		const fields = [...POLICY_FIELDS, "verify", "branch_rules", "skip_checks", "github", "github_main"].join(", ");
 		fail(400, `GitHive has started on ${repo}: name what to change: ${fields}`);
 	}
 	// Checks on Actions need the GitHub repo they run in. A github of null disconnects it.
@@ -183,7 +191,26 @@ async function changeRepoSettings({ args, ctx, repo, claims, stamper }: ToolCall
 		skipChecks: registry?.skipChecks ?? DEFAULT_SKIP_CHECKS,
 	};
 	if (registry?.branchRules?.length) reply.branchRules = registry.branchRules;
-	if (registry?.github) reply.github = registry.github.repo;
+	if (registry?.github) {
+		reply.github = registry.github.repo;
+		reply.githubMain = registry.github.main ?? "pr";
+	}
 	if (warnings.length) reply.warnings = warnings;
 	return reply;
+}
+
+/**
+ * The GitHub connection a settings call asks for: undefined if it doesn't touch it, null to disconnect. Setting the
+ * same repo again keeps how landed work reaches it, unless github_main says otherwise.
+ */
+async function githubSetting(ctx: ToolContext, args: Args, now: Registry["github"]) {
+	const repo = args.github === undefined ? undefined : await githubFrom(ctx, args.github);
+	if (args.github_main === undefined) {
+		if (repo && repo.repo === now?.repo && now.main) return { ...repo, main: now.main };
+		return repo;
+	}
+	const main = githubMainFrom(args.github_main);
+	const connected = repo === undefined ? now : repo;
+	if (!connected) fail(409, 'github_main needs a connected GitHub repo: set github ("owner/name") too');
+	return { ...connected, main };
 }

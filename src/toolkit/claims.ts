@@ -1,4 +1,5 @@
 import type { CasLog } from "../record-log";
+import type { GitHubMain } from "./github-sync";
 import { entriesOverlap } from "../claim-paths";
 import { appendRecord } from "./records";
 import { scopedInto } from "./branch-scope";
@@ -75,7 +76,8 @@ export interface Registry {
 	/** The checks run on the branch plus a change before it merges. ["github-actions"] runs them on GitHub. */
 	verify?: string[];
 	/** The connected GitHub repo (owner/name), which main is pushed back to after every landing. */
-	github?: { repo: string };
+	/** The connected GitHub repo, and how landed work reaches its branch ("pr" when left out; see github-sync.ts). */
+	github?: { repo: string; main?: GitHubMain };
 	stampKey?: string;
 	/** When set, claims are sharded this many path segments deep (see shards.ts), below this registry. */
 	shardDepth?: number;
@@ -158,6 +160,16 @@ function startingSharding(input: {
 	return {};
 }
 
+/** Whether a settings call changes the GitHub connection: which repo, or how landed work reaches it. */
+function githubChanged(next: Registry["github"] | null | undefined, now: Registry["github"]) {
+	if (next === undefined) return false;
+	if (next?.repo !== now?.repo) return true;
+	return (next?.main ?? "pr") !== (now?.main ?? "pr");
+}
+
+const githubWords = (github: NonNullable<Registry["github"]>) =>
+	`${github.repo}, ${(github.main ?? "pr") === "pr" ? "by pull request" : "pushed directly"}`;
+
 /** Changes a started repo's settings. The audit holds each merge to the settings in the state it cites. */
 export async function changeSettings(
 	log: CasLog<Registry>,
@@ -166,7 +178,7 @@ export async function changeSettings(
 		verify?: string[];
 		branchRules?: BranchRule<ReviewPolicy>[];
 		skipChecks?: string[];
-		github?: { repo: string } | null;
+		github?: { repo: string; main?: GitHubMain } | null;
 		by?: string;
 	},
 ) {
@@ -176,7 +188,7 @@ export async function changeSettings(
 		const verify = ifChanged(input.verify, state.verify ?? []);
 		const rules = ifChanged(input.branchRules, state.branchRules ?? []);
 		const skip = ifChanged(input.skipChecks, state.skipChecks);
-		const github = input.github !== undefined && input.github?.repo !== state.github?.repo ? input.github : undefined;
+		const github = githubChanged(input.github, state.github) ? input.github : undefined;
 		if (!policy && !verify && !rules && !skip && github === undefined) return { refused: "unchanged" };
 		const { github: _, ...rest } = state;
 		const next: Registry = { ...(github === null ? rest : state) };
@@ -190,7 +202,7 @@ export async function changeSettings(
 			verify && `the checks (${verify.join("; ") || "none"})`,
 			rules && `the branch rules (${rules.map((r) => r.pattern).join(", ") || "none"})`,
 			skip && `what the checks skip (${skip.join(", ") || "nothing"})`,
-			github !== undefined && (github ? `the GitHub repo (${github.repo})` : "the GitHub repo (none)"),
+			github !== undefined && (github ? `the GitHub repo (${githubWords(github)})` : "the GitHub repo (none)"),
 		]
 			.filter(Boolean)
 			.join(" and ");

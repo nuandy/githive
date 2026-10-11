@@ -115,7 +115,9 @@ Artifacts is in beta, and its own documentation doesn't yet state encryption at 
    npx wrangler secret put GOOGLE_CLIENT_ID      # optional: Google sign-in shows only once these are set; an OAuth web client
    npx wrangler secret put GOOGLE_CLIENT_SECRET  #   with redirect <PUBLIC_ORIGIN>/auth/google/callback
    npx wrangler secret put INVITE_CODE           # optional: a shared invite code (see Signing in)
-   npx wrangler secret put GITHUB_APP_ID         # optional: GitHive's GitHub App, to connect repos to GitHub
+   npx wrangler secret put GITHUB_APP_ID         # optional: GitHive's GitHub App, to connect repos to GitHub (repository
+                                                 # permissions: Contents, Pull requests and Workflows read and write,
+                                                 # Actions read; the key converted to PKCS#8 with openssl pkcs8 -topk8)
    npx wrangler secret put GITHUB_APP_PRIVATE_KEY
    ```
 

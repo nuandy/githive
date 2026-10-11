@@ -1,7 +1,8 @@
 import { fail, optionalString, requiredString } from "../../errors";
 import { branchHead } from "../../git";
 import type { GitHubLink } from "../../github";
-import { actionsChecks, mirrorTo, onActions } from "../actions-checks";
+import { actionsChecks, onActions } from "../actions-checks";
+import { syncToGitHub } from "../github-sync";
 import { artifactsInspect } from "../batch-reads";
 import { scopeFile } from "../branch-scope";
 import type { ClaimRecord, Registry } from "../claims";
@@ -119,8 +120,9 @@ function optionalMergeInput(
 	if (ctx.prepareLanding) optional.prepareLanding = () => ctx.prepareLanding!(repo);
 	if (ctx.prefetchChange) optional.prefetch = (change) => ctx.prefetchChange!(repo, into, change);
 	if (ctx.prepareChecks && !at.checksOnActions) optional.prepareChecks = ctx.prepareChecks(repo);
-	// Push the landed branch back to GitHub as a fast-forward, refused if someone pushed there directly.
-	if (link && into === branch) optional.afterLanding = (commit: string) => mirrorTo(gate, link, into, commit);
+	// Send what landed back to GitHub: through a pull request by default, or straight to the branch (github-sync.ts).
+	const main = registered?.github?.main ?? "pr";
+	if (link && into === branch) optional.afterLanding = (commit: string) => syncToGitHub(gate, link, into, commit, main);
 	return optional;
 }
 

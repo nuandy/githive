@@ -5,15 +5,17 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { appJwt, type GitHubLink, linkTo, type WorkflowRun } from "../src/github";
-import { actionsChecks, mirrorTo } from "../src/toolkit/actions-checks";
+import { actionsChecks } from "../src/toolkit/actions-checks";
+import { mirrorBranch, syncToGitHub } from "../src/toolkit/github-sync";
 import { pushChange } from "./helpers/agents";
 import { startGitServer, type GitServer } from "./helpers/git-server";
 import { memoryBatchGit } from "./helpers/memory-batch-git";
 
 const run = promisify(execFile);
 
-// A GitHive repo connected to a GitHub repo through GitHive's App: main pushed
-// back after every landing, and checks run on its Actions. Here a second repo
+// A GitHive repo connected to a GitHub repo through GitHive's App: what lands
+// goes back after every landing, through a pull request or pushed to main, and
+// checks run on its Actions. Here a second repo
 // on the test Git server stands in for GitHub's git, and the REST API is
 // answered by fakes.
 
@@ -102,6 +104,51 @@ describe("GitHive's GitHub App", () => {
 	});
 });
 
+describe("the pull request GitHive keeps open", () => {
+	/** A GitHub that has `open` pull requests, answers a new one as `create` says, and records what was asked. */
+	async function linkWith(open: { html_url: string }[], create: Response) {
+		const { pem } = await appKey();
+		const asked: string[] = [];
+		const fetcher = (async (url: string, init?: RequestInit) => {
+			const { pathname, search } = new URL(url);
+			asked.push(`${init?.method} ${pathname}${search}`);
+			if (pathname === "/repos/acme/shop/installation") return Response.json({ id: 77 });
+			if (pathname === "/app/installations/77/access_tokens")
+				return Response.json({ token: "t", expires_at: new Date(Date.now() + 3600_000).toISOString() });
+			if (pathname === "/repos/acme/shop/pulls" && init?.method === "GET") return Response.json(open);
+			if (pathname === "/repos/acme/shop/pulls") return create;
+			return new Response("?", { status: 500 });
+		}) as typeof fetch;
+		const link = await linkTo({ appId: "1", privateKey: pem }, "acme/shop", fetcher);
+		return { link: link!, asked };
+	}
+	const input = { head: "githive/main", base: "main", title: "t", body: "b" };
+
+	it("reuses one that's open, opens one when none is, and does nothing when there's nothing to merge", async () => {
+		const open = await linkWith(
+			[{ html_url: "https://github.com/acme/shop/pull/7" }],
+			new Response("?", { status: 500 }),
+		);
+		expect(await open.link.openPullRequest(input)).toEqual({
+			url: "https://github.com/acme/shop/pull/7",
+			opened: false,
+		});
+		expect(open.asked.at(-1)).toBe("GET /repos/acme/shop/pulls?state=open&head=acme%3Agithive%2Fmain&base=main");
+
+		const none = await linkWith(
+			[],
+			Response.json({ html_url: "https://github.com/acme/shop/pull/8" }, { status: 201 }),
+		);
+		expect(await none.link.openPullRequest(input)).toEqual({
+			url: "https://github.com/acme/shop/pull/8",
+			opened: true,
+		});
+
+		const merged = await linkWith([], new Response("No commits between main and githive/main", { status: 422 }));
+		expect(await merged.link.openPullRequest(input)).toBeNull();
+	});
+});
+
 describe("a repo connected to GitHub", { timeout: 60_000 }, () => {
 	let server: GitServer;
 	let work: string;
@@ -127,6 +174,7 @@ describe("a repo connected to GitHub", { timeout: 60_000 }, () => {
 			"main:main",
 		]);
 		const deleted: string[] = [];
+		const pulls: { head: string; base: string; title: string; body: string }[] = [];
 		const asked = new Map<string, number>();
 		const link: GitHubLink = {
 			repo: "acme/shop",
@@ -137,8 +185,12 @@ describe("a repo connected to GitHub", { timeout: 60_000 }, () => {
 			},
 			deleteBranch: async (name) =>
 				void (deleted.push(name), server.gitIn("github", "update-ref", "-d", `refs/heads/${name}`)),
+			openPullRequest: async (input) => (
+				pulls.push(input),
+				{ url: "https://github.com/acme/shop/pull/1", opened: true }
+			),
 		};
-		return { link, deleted };
+		return { link, deleted, pulls };
 	}
 	const project = () => ({ url: server.url, token: "unused" });
 	const timing = { pollMs: 5, firstRunWithinMs: 200, runsWithinMs: 2_000 };
@@ -235,19 +287,39 @@ describe("a repo connected to GitHub", { timeout: 60_000 }, () => {
 		});
 	});
 
-	it("pushes main back as a fast-forward, and never over what someone pushed to GitHub directly", async () => {
-		const { link } = await github(() => []);
+	it("sends what landed to githive/main with a pull request into main, never touching main itself", async () => {
+		const { link, pulls } = await github(() => []);
+		const githubMain = server.gitIn("github", "rev-parse", "main").trim();
+		const a = await pushChange(server.url, work, "agent-a", "a-1", { "src/a.txt": "a\n" });
+		server.git("update-ref", "refs/heads/main", a);
+		await syncToGitHub(memoryBatchGit(project()), link, "main", a);
+		expect(server.gitIn("github", "rev-parse", mirrorBranch("main")).trim()).toBe(a);
+		expect(server.gitIn("github", "rev-parse", "main").trim()).toBe(githubMain);
+		expect(pulls).toHaveLength(1);
+		expect(pulls[0]).toMatchObject({ head: "githive/main", base: "main" });
+		expect(pulls[0]?.body).toContain("Create a merge commit");
+		// More lands: githive/main moves on, and the pull request is asked for again (GitHub's link keeps one open).
+		const b = await pushChange(server.url, work, "agent-b", "b-1", { "src/b.txt": "b\n" }, "main");
+		server.git("update-ref", "refs/heads/main", b);
+		await syncToGitHub(memoryBatchGit(project()), link, "main", b);
+		expect(server.gitIn("github", "rev-parse", mirrorBranch("main")).trim()).toBe(b);
+		expect(server.gitIn("github", "rev-parse", "main").trim()).toBe(githubMain);
+	});
+
+	it("pushes main itself when the repo chose push, and never over what someone pushed to GitHub directly", async () => {
+		const { link, pulls } = await github(() => []);
 		const a = await pushChange(server.url, work, "agent-a", "a-1", { "src/a.txt": "a\n" });
 		// main moves on GitHive (a change lands): GitHub follows.
 		server.git("update-ref", "refs/heads/main", a);
-		await mirrorTo(memoryBatchGit(project()), link, "main", a);
+		await syncToGitHub(memoryBatchGit(project()), link, "main", a, "push");
+		expect(pulls).toEqual([]);
 		expect(server.gitIn("github", "rev-parse", "main").trim()).toBe(a);
 		// Someone pushes to GitHub directly; GitHive's next push is refused, not forced.
 		const direct = server.gitIn("github", "commit-tree", "-m", "direct", "-p", a, `${a}^{tree}`).trim();
 		server.gitIn("github", "update-ref", "refs/heads/main", direct);
 		const b = await pushChange(server.url, work, "agent-b", "b-1", { "src/b.txt": "b\n" }, "main");
 		server.git("update-ref", "refs/heads/main", b);
-		await expect(mirrorTo(memoryBatchGit(project()), link, "main", b)).rejects.toThrow();
+		await expect(syncToGitHub(memoryBatchGit(project()), link, "main", b, "push")).rejects.toThrow();
 		expect(server.gitIn("github", "rev-parse", "main").trim()).toBe(direct);
 	});
 });
@@ -285,10 +357,20 @@ describe("connecting a repo to GitHub with settings", { timeout: 60_000 }, () =>
 			});
 			expect(await call({ github: "acme/shop", verify: ["github-actions"] })).toMatchObject({
 				github: "acme/shop",
+				githubMain: "pr",
 				verify: ["github-actions"],
+			});
+			// Landed work goes by pull request unless the repo chooses push, which setting the repo again keeps.
+			expect(await call({ github_main: "push" })).toMatchObject({ github: "acme/shop", githubMain: "push" });
+			expect(await call({ github: "acme/shop", verify: [] })).toMatchObject({ githubMain: "push" });
+			expect(await call({ github_main: "merge" })).toEqual({
+				error: 'github_main is "pr" (a pull request into the branch) or "push" (fast-forward the branch)',
 			});
 			// Disconnected, the setting goes.
 			expect(await call({ github: "", verify: [] })).not.toHaveProperty("github");
+			expect(await call({ github_main: "pr" })).toEqual({
+				error: 'github_main needs a connected GitHub repo: set github ("owner/name") too',
+			});
 		} finally {
 			await server.close();
 		}
@@ -311,6 +393,8 @@ describe("merging in a repo connected to GitHub", { timeout: 120_000 }, () => {
 				"main:main",
 			]);
 			const checked: string[] = [];
+			const pulls: { head: string; base: string }[] = [];
+			const githubMain = server.gitIn("github", "rev-parse", "main").trim();
 			const link: GitHubLink = {
 				repo: "acme/shop",
 				remote: { url, token: "unused", user: "x-access-token" },
@@ -327,6 +411,10 @@ describe("merging in a repo connected to GitHub", { timeout: 120_000 }, () => {
 					]
 				),
 				deleteBranch: async () => undefined,
+				openPullRequest: async (input) => (
+					pulls.push(input),
+					{ url: "https://github.com/acme/shop/pull/1", opened: true }
+				),
 			};
 			const ctx = (agentKey?: string) => ({
 				remote: async () => ({ url: server.url, token: "unused" }),
@@ -356,8 +444,10 @@ describe("merging in a repo connected to GitHub", { timeout: 120_000 }, () => {
 			const merged = await call("merge", { change: "c-1", agent: "a" }, keys.a);
 			expect(merged).toMatchObject({ ok: true });
 			expect(checked).toHaveLength(1);
-			// GitHub's main is GitHive's, pushed back after the landing.
-			expect(server.gitIn("github", "rev-parse", "main").trim()).toBe(server.git("rev-parse", "main").trim());
+			// What landed went to githive/main, with a pull request into main; GitHub's main waits for it.
+			expect(server.gitIn("github", "rev-parse", "githive/main").trim()).toBe(server.git("rev-parse", "main").trim());
+			expect(server.gitIn("github", "rev-parse", "main").trim()).toBe(githubMain);
+			expect(pulls).toMatchObject([{ head: "githive/main", base: "main" }]);
 		} finally {
 			await server.close();
 			rmSync(work, { recursive: true, force: true });
