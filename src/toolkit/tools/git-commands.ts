@@ -18,18 +18,23 @@ function authHeader(remote: Remote) {
 	return `Authorization: Bearer ${token}`;
 }
 
-/** Commands to start a change in a clone of the project, push it to the agent's own fork, and push again later. */
+/**
+ * Commands to start a change, push it to the agent's own fork, and push again later. The clone comes from the fork,
+ * so a crowd of agents starting at once doesn't all clone the project repo; only what the project's branch gained
+ * since the fork was made is fetched from it, and the change starts from there.
+ */
 export function ownChangeCommands(input: { project: Remote; fork: Remote; into: string; change: string }) {
 	const { project, fork, into, change } = input;
 	const branch = `changes/${change}`;
 	return {
 		setup: [
-			`git -c ${authOption(project)} clone --branch ${into} ${project.url} ${change}`,
+			`git -c ${authOption(fork)} clone --origin fork ${fork.url} ${change}`,
 			`cd ${change}`,
-			authConfig(project),
-			`git remote add fork ${fork.url}`,
 			authConfig(fork),
-			`git checkout -b ${branch}`,
+			`git remote add origin ${project.url}`,
+			authConfig(project),
+			`git fetch origin ${into}`,
+			`git checkout -b ${branch} origin/${into}`,
 		],
 		push: `git push fork ${branch}`,
 	};

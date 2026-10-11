@@ -266,7 +266,9 @@ fork. So it can't push to main or touch the records. `credentials` with a
 change hands out a fork's write token only to the agent holding the change's
 claim; anyone else asking for that change gets a read-only token for the
 author's fork to review it, and the grant is logged by agent name. A fork's default branch may be behind, so a new
-change starts from the project's branch, not the fork's.
+change starts from the project's branch, not the fork's. The commands `credentials` gives clone the fork and fetch
+only what the project's branch gained since on top: a crowd of agents starting at once would otherwise all clone
+the project repo, and at 1,000 agents those clones were the busiest minutes it had.
 
 Forks take seconds each to make (a fork of a seed about 13 s). Letting every agent push its branches to
 the project repo instead was tried and removed: Artifacts takes one push at a

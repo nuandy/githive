@@ -121,9 +121,14 @@ switch (command) {
 		const { url, token, project } = await forkAccess();
 		const depth = flags.full === undefined ? ["--depth", "1"] : [];
 		if (project) {
-			// The agent's fork is shared by its changes and may be behind. Start from the
-			// read-only project (origin) and push to the fork (remote "fork"). Each URL gets its own token.
-			if (command === "clone") cloneWith(project.token, [...depth, "--branch", project.branch, project.url], dir);
+			// Clone the agent's fork, so agents starting at once don't all clone the project repo. The fork is
+			// shared by its changes and may be behind, so the change starts from the read-only project's branch
+			// (origin), fetched on top, and is pushed to the fork (remote "fork"). Each URL gets its own token.
+			if (command === "clone") {
+				cloneWith(token, [...depth, url], dir);
+				execFileSync("git", ["-C", dir, "remote", "rename", "origin", "fork"]);
+				execFileSync("git", ["-C", dir, "remote", "add", "origin", project.url]);
+			}
 			execFileSync("git", [
 				"-C",
 				dir,
@@ -131,10 +136,14 @@ switch (command) {
 				`http.${project.url}.extraHeader`,
 				`Authorization: Bearer ${project.token.split("?")[0]}`,
 			]);
+			if (command === "clone") {
+				execFileSync("git", ["-C", dir, "fetch", "--quiet", ...depth, "origin", project.branch]);
+				execFileSync("git", ["-C", dir, "checkout", "--quiet", "-B", project.branch, `origin/${project.branch}`]);
+			}
 			try {
 				execFileSync("git", ["-C", dir, "remote", "remove", "fork"], { stdio: "ignore" });
 			} catch {
-				// A fresh clone has no fork remote yet.
+				// Only a clone made before this tool cloned the fork has no fork remote.
 			}
 		} else if (command === "clone") {
 			// Shallow by default, since an agent needs only the tip. --full fetches all history.

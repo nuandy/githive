@@ -147,8 +147,8 @@ async function otherCandidates(call: ToolCall, change: string, into: string): Pr
 async function ownChangeAccess(call: ToolCall, change: string, own: ClaimRecord) {
 	const { ctx, repo, registered, acting, branch, changeSource } = call;
 	mayActAs(own.agent, acting, registered, ctx.hosted);
-	// One fork serves all the agent's changes. Its default branch may lag the project's, so a new change
-	// starts from the project's branch, which `project` gives read access to.
+	// One fork serves all the agent's changes. Its default branch may lag the project's, so a new change starts
+	// from the project's branch, fetched into a clone of the fork with the read access `project` gives.
 	const [remote, project] = await Promise.all([changeSource(own.agent, "write"), ctx.remote(repo, "read")]);
 	const into = own.into ?? branch;
 	const elsewhere = into !== branch ? `: this change lands on ${into}, not ${branch}` : "";
@@ -160,8 +160,9 @@ async function ownChangeAccess(call: ToolCall, change: string, own: ClaimRecord)
 		...(into !== branch ? { into } : {}),
 		git: ownChangeCommands({ project, fork: remote, into, change }),
 		note:
-			`Your own fork, for all your changes: push this change's branch changes/${change} to it. Start the ` +
-			`branch from the project's ${into} (project), not the fork's, which may be behind${elsewhere}.`,
+			`Your own fork, for all your changes: push this change's branch changes/${change} to it. Clone the ` +
+			`fork, then start the branch from the project's ${into} (project), fetched on top: the fork's own ` +
+			`copy may be behind${elsewhere}.`,
 	};
 }
 

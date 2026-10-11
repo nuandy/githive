@@ -353,6 +353,13 @@ describe("check (run by the agent itself)", () => {
 	});
 
 	it("hands out git commands that work as given: to push a change, and to review it", async () => {
+		// The project's main moved on after the fork was made, so the fork's own copy is behind.
+		const lander = await agentClone(project.url, work, "lander");
+		lander.write("landed.txt", "landed\n");
+		await lander.run("add", "landed.txt");
+		await lander.run("commit", "-qm", "landed");
+		await lander.run("push", "--quiet", "origin", "main");
+		const main = project.git("rev-parse", "main").trim();
 		// Asynchronously: the test's git servers run in this process, so a blocking call would wait on itself.
 		const run = promisify(execFile);
 		const identity = {
@@ -368,11 +375,15 @@ describe("check (run by the agent itself)", () => {
 		const { key: keyR } = (await call("register", { agent: "reviewer-1" })) as { key: string };
 		await call("claim", { change: "a-1", agent: "agent-a", paths: ["src/a/"], intent: "a" }, keyA);
 		const own = (await call("credentials", { change: "a-1" }, keyA)) as { git: { setup: string[]; push: string } };
+		// The clone comes from the fork; the project serves only what main gained since.
+		expect(own.git.setup[0]).toContain(`clone --origin fork ${fork.url}`);
 		const author = mkdtempSync(join(work, "author-"));
 		await shell(author, own.git.setup);
 		writeFileSync(join(author, "a-1", "added.txt"), "added\n");
 		await shell(join(author, "a-1"), ["git add added.txt", "git commit -qm add", own.git.push]);
 		const head = fork.git("rev-parse", "changes/a-1").trim();
+		// Cloned from the fork, but started from the project's main as it is now.
+		expect(fork.git("rev-parse", `${head}^`).trim()).toBe(main);
 		const review = (await call("credentials", { change: "a-1" }, keyR)) as { git: { setup: string[]; diff: string } };
 		const reviewer = mkdtempSync(join(work, "reviewer-"));
 		await shell(reviewer, review.git.setup);
