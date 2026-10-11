@@ -1,7 +1,7 @@
-import { branchHead, inWorkspaceTurn, Workspace } from "../git";
+import { branchHead, type Hunk, inWorkspaceTurn, Workspace } from "../git";
 import { inLane } from "../claim-paths";
 import { repoOfUrl } from "../git-http";
-import { busyArtifacts, changeAgainst, landedOn } from "./batch-reads";
+import { busyArtifacts, changeAgainst, landedOn, type TouchedBy, touchedInWorkspace } from "./batch-reads";
 import { skipsChecks } from "./check-scope";
 import type { ClaimRecord } from "./claims";
 import type { ClaimsView } from "./claim-store";
@@ -15,11 +15,13 @@ import { fail } from "../errors";
 // A change about to be checked against its claim and votes, at the head and with the files just read.
 type Proposed = BatchSource & { head: string; files: string[]; mine: boolean };
 
-// A change as read against the branch: its head, its files, and whether it merges cleanly into `branch`.
+// A change as read against the branch: its head, its files, and whether it merges cleanly into `branch`. A conflict
+// comes with its files' markers and the branch's commits that changed them since the change left it.
 interface ChangeRead {
 	head: string;
 	files: string[];
-	tried: { clean: boolean; files?: string[] };
+	tried: { clean: boolean; files?: string[]; hunks?: Hunk[] };
+	touchedBy?: TouchedBy[];
 	branch: string;
 }
 
@@ -52,7 +54,8 @@ export async function readyNow(
 	const baseHead = (await headOf(input)) ?? conflict(`there's no branch ${input.branch}`);
 	const ref = `changes/${input.change}`;
 	// The records are read once the workspace is released.
-	const { head, files, tried, branch } = await readChange(input, baseHead, ref);
+	const read = await readChange(input, baseHead, ref);
+	const { head, files, tried, branch } = read;
 	const ready = await validated(input, {
 		change: input.change,
 		agent: input.agent,
@@ -63,8 +66,10 @@ export async function readyNow(
 		mine: true,
 	});
 	if (!ready.ok) return { ok: false, refused: ready, head };
-	if (!tried.clean)
-		return { ok: false, head, refused: await conflictRefusal(input, landing, tried.files ?? [], branch) };
+	if (!tried.clean) {
+		const conflicts = { files: tried.files ?? [], hunks: tried.hunks, touchedBy: read.touchedBy ?? [] };
+		return { ok: false, head, refused: await conflictRefusal(input, landing, conflicts, branch) };
+	}
 	return ready;
 }
 
@@ -78,8 +83,16 @@ async function readChange(input: MergeInput, baseHead: string, ref: string): Pro
 	return inWorkspaceTurn(async () => {
 		const workspace = await Workspace.at(input.remote, input.branch, baseHead);
 		const head = await workspace.fetch("change", input.source ?? input.remote, ref);
-		const files = await workspace.changedPaths(await workspace.mergeBase(baseHead, head), head);
-		return { head, files, tried: await workspace.tryMerge(baseHead, head), branch: workspace.branch };
+		const base = await workspace.mergeBase(baseHead, head);
+		const files = await workspace.changedPaths(base, head);
+		const tried = await workspace.tryMerge(baseHead, head, { ours: input.branch, theirs: ref });
+		if (tried.clean) return { head, files, tried, branch: workspace.branch };
+		// Who changed the conflicted files since the change left the branch, from the history the workspace holds.
+		const touchedBy = await touchedInWorkspace(workspace, baseHead, base, tried.files).catch((err) => {
+			console.error(`reading who changed ${input.change}'s conflicted files failed`, String(err));
+			return [];
+		});
+		return { head, files, tried, touchedBy, branch: workspace.branch };
 	});
 }
 
@@ -95,23 +108,47 @@ async function readThroughHistory(input: MergeInput, baseHead: string, ref: stri
 async function conflictRefusal(
 	input: MergeInput,
 	landing: Landing,
-	conflicts: string[],
+	conflict: { files: string[]; hunks?: Hunk[]; touchedBy: TouchedBy[] },
 	branch: string,
 ): Promise<Refused> {
+	const { files: conflicts, hunks, touchedBy } = conflict;
 	// Name who last changed each file, so the agent knows what it's reconciling with and whom to ask.
 	const recent = (await landing.view().catch(() => null))?.recent ?? [];
 	const causes = lastLandedOn(recent, conflicts);
-	const where = conflictWords(conflicts, causes).join(", ");
+	const where = conflictWords(conflicts, causes, touchedBy).join(", ");
 	return {
 		ok: false,
 		conflicts,
 		...(causes.length ? { causes } : {}),
+		...(touchedBy.length ? { touchedBy } : {}),
+		...(hunks?.length ? { hunks } : {}),
+		fix: conflictFix(branch, input.change, conflicts),
 		reasons: [
 			`changes/${input.change} conflicts with ${branch} in ${where}: merge ${branch} into your ` +
-				"branch, resolve inside your claim, push, and get the new commit approved",
+				"branch, resolve inside your claim, push, and get the new commit approved; see touchedBy, hunks and fix",
 		],
 	};
 }
+
+/**
+ * The commands that resolve a conflict with `branch` in the clone credentials gives, where the project is `origin`
+ * and the agent's fork is `fork`; then what to call. Merging the branch in stops at the conflict, for the agent to
+ * resolve so that both changes make sense.
+ */
+export function conflictFix(branch: string, change: string, files: string[]): string[] {
+	const named = files.map(shellWord).join(" ");
+	const from = shellWord(`origin/${branch}`);
+	return [
+		`git fetch origin ${shellWord(branch)} && git merge ${from}`,
+		`# resolve ${named} so both changes make sense, then:`,
+		`git add ${named} && git commit --no-edit`,
+		`git push fork ${shellWord(`changes/${change}`)}`,
+		"call status; once the new commit is approved, merge again",
+	];
+}
+
+// A word as a shell reads it: as it is when that's safe, else in single quotes.
+const shellWord = (word: string) => (/^[\w@%+=:,./-]+$/.test(word) ? word : `'${word.replaceAll("'", `'\\''`)}'`);
 
 // The outcome if the change already landed at `head`, since its claim is gone by then. The landing's recent outcomes
 // answer first; failing that, the branch's history, as a merge commit whose second parent is `head`.

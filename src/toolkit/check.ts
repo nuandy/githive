@@ -1,7 +1,7 @@
-import { branchHead, inWorkspaceTurn, type Remote, Workspace } from "../git";
+import { branchHead, type Hunk, inWorkspaceTurn, type Remote, Workspace } from "../git";
 import { repoOfUrl } from "../git-http";
 import { inLane } from "../claim-paths";
-import { busyArtifacts, changeAgainst, type ReadHistory } from "./batch-reads";
+import { busyArtifacts, changeAgainst, type ReadHistory, touchedInWorkspace } from "./batch-reads";
 import type { ClaimRecord } from "./claims";
 import { fail } from "../errors";
 
@@ -48,7 +48,7 @@ export async function checkChange(input: CheckInput) {
 			change,
 			head: compared.head,
 			branch: input.branch,
-			main: { head: listed, clean: true },
+			main: { head: listed, clean: true as const },
 			outsideClaim: outsideClaim(compared.files),
 		};
 	return inWorkspaceTurn(async () => {
@@ -56,15 +56,37 @@ export async function checkChange(input: CheckInput) {
 		const main = await workspace.head();
 		const head = await workspace.fetch("change", input.source, `changes/${change}`).catch(() => null);
 		if (!head) fail(409, `changes/${change} has nothing pushed to check`);
-		const files = (await workspace.changedPaths(await workspace.mergeBase(main, head), head)).sort();
-		const withMain = await workspace.tryMerge(main, head);
+		const base = await workspace.mergeBase(main, head);
+		const files = (await workspace.changedPaths(base, head)).sort();
+		const withMain = await workspace.tryMerge(main, head, { ours: input.branch, theirs: `changes/${change}` });
 		return {
 			change,
 			head,
 			// `main` in the result means this branch, whatever its name.
 			branch: workspace.branch,
-			main: withMain.clean ? { head: main, clean: true } : { head: main, clean: false, conflicts: withMain.files },
+			main: withMain.clean ? { head: main, clean: true as const } : await conflictWith(workspace, main, base, withMain),
 			outsideClaim: outsideClaim(files),
 		};
 	});
+}
+
+// A conflict with the branch: its files, their markers, and the branch's commits that changed them since the change
+// left it, read from the history the workspace already holds.
+async function conflictWith(
+	workspace: Workspace,
+	main: string,
+	base: string,
+	tried: { files: string[]; hunks?: Hunk[] },
+) {
+	const touchedBy = await touchedInWorkspace(workspace, main, base, tried.files).catch((err) => {
+		console.error("reading who changed the conflicted files failed", String(err));
+		return [];
+	});
+	return {
+		head: main,
+		clean: false as const,
+		conflicts: tried.files,
+		...(touchedBy.length ? { touchedBy } : {}),
+		...(tried.hunks?.length ? { hunks: tried.hunks } : {}),
+	};
 }

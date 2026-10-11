@@ -1,6 +1,9 @@
 import { fail } from "../errors";
+import type { Workspace } from "../git";
 import { repoOfUrl } from "../git-http";
 import { type CommitMeta, filesBetween, type HistorySource } from "./branch-history";
+import { trailer } from "./git-records";
+import { LANDED_INTENT_CHARS } from "./landing";
 import { atMost, type BatchGit, type Inspected } from "./merge";
 import type { BatchSource } from "./merge-types";
 import { cachingHistory, changedAlong, forgetTrees, treesOf } from "./tree-reads";
@@ -241,7 +244,7 @@ export async function changeAgainst(
 	branch: string,
 	main: string,
 	change: { ref: string; source?: { url: string } },
-): Promise<{ head: string; files: string[]; both: string[] } | { error: string } | null> {
+): Promise<{ head: string; files: string[]; both: string[]; base: string } | { error: string } | null> {
 	const chain = await branchChain(history, project, branch, main);
 	if (!chain) return null;
 	const onBranch = positions(chain);
@@ -258,7 +261,7 @@ export async function changeAgainst(
 		const readTree = treesOf(cachingHistory(history), project);
 		both = await changedAlong(readTree, placed.base.treeHash, branchTip.treeHash, placed.files);
 	}
-	return { head: placed.head.hash, files: placed.files, both };
+	return { head: placed.head.hash, files: placed.files, both, base: placed.base.hash };
 }
 
 /**
@@ -319,4 +322,86 @@ export async function landedOn(
 		for (const merged of commit.parents.slice(1))
 			if (wanted.has(merged) && !landed.has(merged)) landed.set(merged, commit.hash);
 	return landed;
+}
+
+/** A commit on the branch, since a change left it, that changed one of the files the change conflicts on. */
+export interface TouchedBy {
+	file: string;
+	commit: string;
+	/** A GitHive merge's change, agent and intent, from its trailers. */
+	change?: string;
+	agent?: string;
+	/** The claim's intent for a GitHive merge; a plain commit's subject. */
+	intent?: string;
+	/** A commit pushed with plain git: its author. */
+	author?: string;
+}
+
+/** The most branch commits read for touchedBy, the most named per file, and the most files looked at. */
+export const TOUCHED_COMMITS = 50;
+export const TOUCHED_PER_FILE = 5;
+export const TOUCHED_FILES = 12;
+
+type ReadTree = Parameters<typeof changedAlong>[0];
+
+/**
+ * Every commit on `branch`'s first-parent chain from `main` back to `base`, a change's merge base, that changed one
+ * of `files`, newest first per file, with who made it and why. Only the trees along those files are read, for at most
+ * TOUCHED_COMMITS commits, and at most TOUCHED_PER_FILE are named per file.
+ */
+export async function touchedSince(
+	history: ReadHistory,
+	project: string,
+	branch: string,
+	main: string,
+	base: string,
+	files: string[],
+): Promise<TouchedBy[]> {
+	const chain = await branchChain(history, project, branch, main);
+	if (!chain) return [];
+	return touchedAlong(chain, base, treesOf(cachingHistory(history), project), files);
+}
+
+/** touchedSince from a workspace that test-merged the change, so already holds that history: nothing is fetched. */
+export async function touchedInWorkspace(
+	workspace: Pick<Workspace, "firstParents" | "readTree">,
+	main: string,
+	base: string,
+	files: string[],
+): Promise<TouchedBy[]> {
+	// One more than is read, for the last one's first parent.
+	const chain = await workspace.firstParents(main, TOUCHED_COMMITS + 1);
+	return touchedAlong(chain, base, (hash) => workspace.readTree(hash), files);
+}
+
+// Each commit since the base against its first parent, the next on the chain, compared along `files` only.
+async function touchedAlong(chain: CommitMeta[], base: string, readTree: ReadTree, files: string[]) {
+	const looked = files.slice(0, TOUCHED_FILES);
+	const end = chain.findIndex((commit) => commit.hash === base);
+	const since = chain.slice(0, Math.min(end < 0 ? chain.length : end, TOUCHED_COMMITS));
+	const changed = await atMost(READS_AT_ONCE, since, async (commit, index) => {
+		const parent = chain[index + 1];
+		if (!parent || parent.hash !== commit.parents[0]) return [];
+		return changedAlong(readTree, parent.treeHash, commit.treeHash, looked);
+	});
+	return looked.flatMap((file) =>
+		since
+			.filter((_, index) => changed[index]!.includes(file))
+			.slice(0, TOUCHED_PER_FILE)
+			.map((commit) => ({ file, ...whoMade(commit) })),
+	);
+}
+
+// Who made a commit and why: a GitHive merge's trailers, or a plain commit's author and subject.
+function whoMade(commit: CommitMeta): Omit<TouchedBy, "file"> {
+	const said = (name: string) => trailer(commit.message, name);
+	const change = said("GitHive-Change");
+	const cut = (text: string) => text.slice(0, LANDED_INTENT_CHARS);
+	if (change) {
+		const agent = said("GitHive-Agent");
+		const intent = said("GitHive-Intent");
+		return { commit: commit.hash, change, ...(agent ? { agent } : {}), ...(intent ? { intent: cut(intent) } : {}) };
+	}
+	const subject = commit.message.split("\n")[0]?.trim();
+	return { commit: commit.hash, author: commit.author.name, ...(subject ? { intent: cut(subject) } : {}) };
 }

@@ -360,38 +360,39 @@ describe("landing ready changes together", { timeout: 120_000 }, () => {
 
 	it("names who last changed each file a merge conflicts on: their change, agent, intent and commit", async () => {
 		const landing = memoryLanding();
+		const before = server.git("rev-parse", "main").trim();
 		await readyChange("a-1", { "src/shared.txt": "from a\n" });
 		const landedA = await merge("a-1", runner(), landing);
 		expect(landedA).toMatchObject({ ok: true });
+		// Then someone pushed to main with plain git, in the same file.
+		const pusher = await agentClone(server.url, work, "pusher");
+		pusher.write("src/shared.txt", "from a, and the pusher\n");
+		await pusher.run("commit", "-qam", "touch up shared");
+		await pusher.run("push", "-q", "origin", "main");
+		const pushed = server.git("rev-parse", "main").trim();
 		// b-1 started from the main before a-1 landed, and changed the same file.
 		const refused = await (async () => {
 			await claim(claims(), { change: "b-1", agent: "agent-b-1", paths: ["src/shared.txt"], intent: "b-1" });
-			const head = await pushChange(
-				server.url,
-				work,
-				"agent-b-1",
-				"b-1",
-				{ "src/shared.txt": "from b\n" },
-				`${landed().length ? "main~1" : "main"}`,
-			);
+			const head = await pushChange(server.url, work, "agent-b-1", "b-1", { "src/shared.txt": "from b\n" }, before);
 			await vote(votes(), { commit: head, reviewer: "rev", role: "tests", verdict: "approve", evidence: "ok" });
-			return merge("b-1", runner(), landing);
+			return merge("b-1", runner(), landing, { history: gitHistory(server.git) });
 		})();
+		const aCommit = (landedA as { commit: string }).commit;
 		expect(refused).toMatchObject({
 			ok: false,
 			conflicts: ["src/shared.txt"],
-			causes: [
-				{
-					file: "src/shared.txt",
-					change: "a-1",
-					agent: "agent-a-1",
-					intent: "a-1",
-					commit: (landedA as { commit: string }).commit,
-				},
+			// The landing's recent outcomes know only what GitHive landed.
+			causes: [{ file: "src/shared.txt", change: "a-1", agent: "agent-a-1", intent: "a-1", commit: aCommit }],
+			// The branch's history knows the plain push too, newest first.
+			touchedBy: [
+				{ file: "src/shared.txt", commit: pushed, author: "pusher", intent: "touch up shared" },
+				{ file: "src/shared.txt", commit: aCommit, change: "a-1", agent: "agent-a-1", intent: "a-1" },
 			],
+			hunks: [{ file: "src/shared.txt", content: expect.stringContaining("<<<<<<< main\n"), truncated: false }],
+			fix: expect.arrayContaining(["git add src/shared.txt && git commit --no-edit", "git push fork changes/b-1"]),
 		});
 		expect((refused as { reasons: string[] }).reasons[0]).toMatch(
-			/src\/shared\.txt \(changed by a-1, agent-a-1: "a-1", [0-9a-f]{8}\)/,
+			/src\/shared\.txt \(changed by a-1, agent-a-1: "a-1", [0-9a-f]{8}\).*see touchedBy, hunks and fix$/,
 		);
 	});
 

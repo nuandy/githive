@@ -326,7 +326,23 @@ describe("check (run by the agent itself)", () => {
 		const branchHead = (await mainline.run("rev-parse", "HEAD")).trim();
 		expect(await call("status", { change: "a-1" })).toMatchObject({
 			head,
-			merge: { into: "main", branchHead, clean: false, conflicts: ["README.md"], outsideClaim: ["README.md"] },
+			merge: {
+				into: "main",
+				branchHead,
+				clean: false,
+				conflicts: ["README.md"],
+				// Pushed to main with plain git, so no landing names it: its author does.
+				touchedBy: [{ file: "README.md", commit: branchHead, author: "mainline", intent: "readme" }],
+				hunks: [
+					{
+						file: "README.md",
+						content: expect.stringMatching(/^<<<<<<< main\n[\s\S]*>>>>>>> changes\/a-1\n$/),
+						truncated: false,
+					},
+				],
+				fix: expect.arrayContaining(["git fetch origin main && git merge origin/main"]),
+				outsideClaim: ["README.md"],
+			},
 		});
 	}, 60_000);
 

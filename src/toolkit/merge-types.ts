@@ -1,5 +1,5 @@
-import type { Remote } from "../git";
-import type { ReadHistory } from "./batch-reads";
+import type { Hunk, Remote } from "../git";
+import type { ReadHistory, TouchedBy } from "./batch-reads";
 import type { ClaimRecord } from "./claims";
 import type { ClaimStore, ClaimsView } from "./claim-store";
 import type { Landing, lastLandedOn } from "./landing";
@@ -145,6 +145,12 @@ export type MergeOutcome =
 			conflicts?: string[];
 			/** The changes that last landed on each conflicted file. */
 			causes?: ReturnType<typeof lastLandedOn>;
+			/** Every commit on the branch since the change left it that changed a conflicted file (see touchedSince). */
+			touchedBy?: TouchedBy[];
+			/** Each conflicted file with its conflict markers, cut to a few KB (see Workspace.tryMerge). */
+			hunks?: Hunk[];
+			/** The commands that resolve the conflict in the clone credentials gives, then what to call. */
+			fix?: string[];
 			checks?: CheckResult[];
 			/** Not refused but still waiting; merging again keeps waiting. */ pending?: true;
 	  };

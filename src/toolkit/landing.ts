@@ -1,3 +1,4 @@
+import type { TouchedBy } from "./batch-reads";
 import type { CheckResult } from "./merge";
 
 // Who lands changes into a branch right now, and how each change settled. There is no queue: the merge that takes
@@ -102,15 +103,40 @@ export const lastLandedOn = (outcomes: Settled[], files: string[]) =>
 		];
 	});
 
-/** A conflict's causes in words: `a.ts (changed by note-7, agent-3: "add refunds", 2f56723d)`. */
-export const conflictWords = (files: string[], causes: ReturnType<typeof lastLandedOn>) =>
+/**
+ * A conflict's causes in words: `a.ts (changed by note-7, agent-3: "add refunds", 2f56723d)`. A file no recent
+ * landing names is named by the newest commit in `touchedBy`, such as one pushed with plain git:
+ * `a.ts (changed by bob in 2f56723d: "fix typo")`.
+ */
+export const conflictWords = (files: string[], causes: ReturnType<typeof lastLandedOn>, touchedBy: TouchedBy[] = []) =>
 	files.map((file) => {
 		const cause = causes.find((candidate) => candidate.file === file);
-		if (!cause) return file;
-		const intent = cause.intent ? `: "${cause.intent}"` : "";
-		const commit = cause.commit ? `, ${cause.commit.slice(0, 8)}` : "";
-		return `${file} (changed by ${cause.change}, ${cause.agent}${intent}${commit})`;
+		const touched = touchedBy.find((candidate) => candidate.file === file);
+		const by = cause ?? touched;
+		if (!by) return file;
+		const commit = by.commit ? `, ${by.commit.slice(0, 8)}` : "";
+		const intent = by.intent ? `: "${by.intent}"` : "";
+		if (!by.change) return `${file} (changed by ${touched?.author} in ${by.commit?.slice(0, 8)}${intent})`;
+		return `${file} (changed by ${by.change}${by.agent ? `, ${by.agent}` : ""}${intent}${commit})`;
 	});
+
+/**
+ * A conflict as one line, for the change's attempts and its merge commit's story, naming each file's newest change:
+ * `conflict on src/billing/invoice.ts with c-7 by alice ("add partial refunds", 6584265)`. A commit pushed with
+ * plain git is named by its commit and author.
+ */
+export function conflictLine(files: string[], touchedBy: TouchedBy[], causes: ReturnType<typeof lastLandedOn> = []) {
+	const named = files.map((file) => {
+		const touched = touchedBy.find((candidate) => candidate.file === file);
+		const by = touched ?? causes.find((candidate) => candidate.file === file);
+		if (!by) return file;
+		const commit = by.commit?.slice(0, 7);
+		if (!by.change) return `${file} with ${commit} by ${touched?.author}${by.intent ? ` ("${by.intent}")` : ""}`;
+		const why = [by.intent ? `"${by.intent}"` : "", commit ?? ""].filter(Boolean).join(", ");
+		return `${file} with ${by.change}${by.agent ? ` by ${by.agent}` : ""}${why ? ` (${why})` : ""}`;
+	});
+	return `conflict on ${named.join("; ")}`;
+}
 
 /** A branch's landing as plain data, shared by RepoCache and memoryLanding. */
 export interface LandingState {

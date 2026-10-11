@@ -1,4 +1,5 @@
-import git from "isomorphic-git";
+import git, { type ReadCommitResult } from "isomorphic-git";
+import { type Merged, merge3 } from "./diff3";
 import { gitAuth, http } from "./git-http";
 import { MemoryFS } from "./memory-fs";
 import { retryTransient } from "./retry";
@@ -44,7 +45,31 @@ export async function branchHead(remote: Remote, branch: string): Promise<string
 	return refs.find((r) => r.ref === `refs/heads/${branch}`)?.oid ?? null;
 }
 
-export type MergeOutcome = { clean: true } | { clean: false; files: string[] };
+/** A conflicted file with its conflict markers, cut to HUNK_BYTES around the conflicts (`truncated`) if longer. */
+export interface Hunk {
+	file: string;
+	content: string;
+	truncated: boolean;
+}
+
+export type MergeOutcome = { clean: true } | { clean: false; files: string[]; hunks?: Hunk[] };
+
+/** The most of each conflicted file a test merge shows, and how many files it shows. */
+export const HUNK_BYTES = 4096;
+export const HUNK_FILES = 8;
+// Lines shown around each conflict when a file is cut, and the largest file merged for its markers.
+const HUNK_CONTEXT = 3;
+const HUNK_SOURCE_BYTES = 256 * 1024;
+
+/** A commit as the history readers see it (see branch-history.ts's CommitMeta). */
+export interface CommitRead {
+	hash: string;
+	treeHash: string;
+	message: string;
+	author: { name: string };
+	parents: string[];
+}
+
 /** Commits of history a workspace starts with. It fetches more only when Git needs older commits. */
 export const SHALLOW_DEPTH = 64;
 /** Deep enough to mean all of history. */
@@ -280,10 +305,13 @@ export class Workspace {
 		return /^[0-9a-f]{40}$/.test(ref) ? ref : git.resolveRef({ fs: this.fs, dir: DIR, ref });
 	}
 
-	/** Test-merge two refs without touching any branch. */
-	async tryMerge(ours: string, theirs: string): Promise<MergeOutcome> {
+	/**
+	 * Test-merge two refs without touching any branch. A conflict gives each conflicted file (the first HUNK_FILES)
+	 * with its conflict markers, labelled as `labels` say, so an agent sees what it's reconciling before it fetches.
+	 */
+	async tryMerge(ours: string, theirs: string, labels = { ours: "ours", theirs: "theirs" }): Promise<MergeOutcome> {
 		// Fetches the merge base if history is too shallow.
-		await this.mergeBase(ours, theirs);
+		const base = await this.mergeBase(ours, theirs);
 		try {
 			await git.merge({
 				fs: this.fs,
@@ -297,9 +325,73 @@ export class Workspace {
 			});
 			return { clean: true };
 		} catch (err) {
-			if (err instanceof git.Errors.MergeConflictError) return { clean: false, files: err.data.filepaths };
+			if (!(err instanceof git.Errors.MergeConflictError)) throw err;
+			// Sorted, since the merge walks folders side by side and lists files in whatever order they finish.
+			const files = [...err.data.filepaths].sort();
+			// isomorphic-git's merge driver is told only a file's base name, so the sides are read again here.
+			const hunks = await this.hunks(files.slice(0, HUNK_FILES), { base, ours, theirs }, labels).catch((failed) => {
+				console.error("writing a conflict's markers failed", String(failed));
+				return undefined;
+			});
+			return { clean: false, files, ...(hunks ? { hunks } : {}) };
+		}
+	}
+
+	private async hunks(
+		files: string[],
+		at: { base: string; ours: string; theirs: string },
+		labels: { ours: string; theirs: string },
+	): Promise<Hunk[]> {
+		const [base, ours, theirs] = await Promise.all([at.base, at.ours, at.theirs].map((ref) => this.oid(ref)));
+		const hunks: Hunk[] = [];
+		for (const file of files) {
+			const [was, mine, other] = await Promise.all([base, ours, theirs].map((oid) => this.fileAt(oid!, file)));
+			hunks.push({ file, ...hunkOf(was ?? null, mine ?? null, other ?? null, labels) });
+		}
+		return hunks;
+	}
+
+	// A file's bytes at a commit, or null where it doesn't exist.
+	private async fileAt(commit: string, filepath: string): Promise<Uint8Array | null> {
+		try {
+			return (await git.readBlob({ fs: this.fs, dir: DIR, oid: commit, filepath, cache: this.cache })).blob;
+		} catch (err) {
+			if (err instanceof git.Errors.NotFoundError || err instanceof git.Errors.ObjectTypeError) return null;
 			throw err;
 		}
+	}
+
+	/**
+	 * The first-parent chain from `from`, newest first, at most `most` commits, as far as this workspace holds it.
+	 * It never fetches: a shallow workspace's chain ends where its history does.
+	 */
+	async firstParents(from: string, most: number): Promise<CommitRead[]> {
+		const chain: CommitRead[] = [];
+		let oid: string | undefined = await this.oid(from);
+		while (oid && chain.length < most) {
+			const read: ReadCommitResult | null = await git
+				.readCommit({ fs: this.fs, dir: DIR, oid, cache: this.cache })
+				.catch(() => null);
+			if (!read) break;
+			const commit: ReadCommitResult["commit"] = read.commit;
+			chain.push({
+				hash: oid,
+				treeHash: commit.tree,
+				message: commit.message,
+				author: { name: commit.author.name },
+				parents: commit.parent,
+			});
+			oid = commit.parent[0];
+		}
+		return chain;
+	}
+
+	/** A tree's entries as the history readers see them, or null if the workspace doesn't hold it. */
+	async readTree(hash: string) {
+		const read = await git.readTree({ fs: this.fs, dir: DIR, oid: hash, cache: this.cache }).catch(() => null);
+		return (
+			read?.tree.map((entry) => ({ name: entry.path, mode: entry.mode, hash: entry.oid, type: entry.type })) ?? null
+		);
 	}
 
 	/** Merge `theirs` into the local branch. Throws MergeConflictError on conflict. */
@@ -345,4 +437,51 @@ export class Workspace {
 		});
 		return changed;
 	}
+}
+
+const encoder = new TextEncoder();
+const decoder = new TextDecoder();
+
+/** A conflicted file's content with its markers, cut around its conflicts when it's longer than HUNK_BYTES. */
+function hunkOf(
+	base: Uint8Array | null,
+	ours: Uint8Array | null,
+	theirs: Uint8Array | null,
+	labels: { ours: string; theirs: string },
+): { content: string; truncated: boolean } {
+	// Deleted on one side and changed on the other: there are no lines to mark.
+	if (!ours || !theirs)
+		return {
+			content: `deleted on ${ours ? labels.theirs : labels.ours}, changed on the other side\n`,
+			truncated: false,
+		};
+	if ([base, ours, theirs].some((bytes) => bytes && (bytes.length > HUNK_SOURCE_BYTES || bytes.includes(0))))
+		return { content: "binary or too large to show: both sides changed it\n", truncated: false };
+	const text = (bytes: Uint8Array | null) => (bytes ? decoder.decode(bytes) : "");
+	return shown(merge3(text(base), text(ours), text(theirs), labels));
+}
+
+// The merged text whole if it fits, else each conflict with a few lines around it, headed by where it starts.
+function shown({ lines, conflicts }: Merged): { content: string; truncated: boolean } {
+	const whole = lines.join("");
+	if (encoder.encode(whole).length <= HUNK_BYTES) return { content: whole, truncated: false };
+	const windows: [number, number][] = [];
+	for (const [start, end] of conflicts) {
+		const from = Math.max(0, start - HUNK_CONTEXT);
+		const to = Math.min(lines.length, end + HUNK_CONTEXT);
+		const last = windows.at(-1);
+		if (last && from <= last[1]) last[1] = Math.max(last[1], to);
+		else windows.push([from, to]);
+	}
+	const excerpt = windows.map(([from, to]) => `@@ line ${from + 1} @@\n${lines.slice(from, to).join("")}`).join("");
+	return { content: clipped(excerpt || whole, HUNK_BYTES), truncated: true };
+}
+
+// The text cut to at most `most` bytes of UTF-8, at the start of a character.
+function clipped(text: string, most: number) {
+	const bytes = encoder.encode(text);
+	if (bytes.length <= most) return text;
+	let end = most;
+	while (end > 0 && (bytes[end]! & 0xc0) === 0x80) end--;
+	return decoder.decode(bytes.subarray(0, end));
 }

@@ -3,6 +3,7 @@ import { branchHead } from "../../git";
 import { checkChange } from "../check";
 import type { ClaimRecord } from "../claims";
 import { lastLandedOn, type Settled } from "../landing";
+import { conflictFix } from "../merge-ready";
 import { addWork, addWorks, backlogFor, reviewsFor, type Work } from "../work";
 import { changeStatus } from "./change-state";
 import { workItemFrom } from "./claim-input";
@@ -105,9 +106,11 @@ export const workTools: ToolHandlers = {
 };
 
 /**
- * Whether a change merges cleanly into the branch it lands on (and who last changed any file it conflicts on),
- * and its files outside its claim. Worked out once per change head and branch head, so status stays cheap until
- * the agent pushes or the branch moves; worked out afresh, it warms the merge's check container.
+ * Whether a change merges cleanly into the branch it lands on, and its files outside its claim. A conflict comes with
+ * who changed each file (the landing's last change on it, and every commit since the change left the branch), the
+ * files with their conflict markers, and the commands that resolve it. Worked out once per change head and branch
+ * head, so status stays cheap until the agent pushes or the branch moves; worked out afresh, it warms the merge's
+ * check container.
  */
 async function mergeCheck(call: ToolCall, change: string, own: ClaimRecord, head: string) {
 	const { ctx, repo, branch, changeSource, warmChecks } = call;
@@ -127,15 +130,24 @@ async function mergeCheck(call: ToolCall, change: string, own: ClaimRecord, head
 		branchHead: async () => onto,
 		...(ctx.history ? { history: ctx.history } : {}),
 	});
-	const conflicts = checked.main.clean ? [] : (checked.main.conflicts ?? []);
+	const { main } = checked;
+	const conflicts = main.clean ? [] : main.conflicts;
+	const explained = main.clean
+		? {}
+		: {
+				...(main.touchedBy ? { touchedBy: main.touchedBy } : {}),
+				...(main.hunks ? { hunks: main.hunks } : {}),
+				fix: conflictFix(into, change, conflicts),
+			};
 	const result = {
 		into,
 		branchHead: onto,
-		clean: checked.main.clean,
-		...(conflicts.length ? { conflicts, causes: await conflictCauses(call, into, conflicts) } : {}),
+		clean: main.clean,
+		...(conflicts.length ? { conflicts, causes: await conflictCauses(call, into, conflicts), ...explained } : {}),
 		outsideClaim: checked.outsideClaim,
 	};
-	// Kept under the head the check read, which may be newer than status's.
+	// Kept under the head the check read, which may be newer than status's. Hunks and touchedBy are capped, so the
+	// entry stays small.
 	await ctx.mergeChecks?.keep(repo, change, { key: `${checked.head} ${onto}`, result }).catch(() => undefined);
 	await warmChecks("checked", change);
 	return result;
