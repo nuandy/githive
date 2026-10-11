@@ -71,6 +71,11 @@ export function cachingHistory(history: ReadHistory): ReadHistory {
 
 type ReadTree = (hash: string) => Promise<TreeEntry[] | null>;
 
+/** Reads `repo`'s trees, answering those kept for the isolate without opening the repo. */
+export function treesOf(history: ReadHistory, repo: string): ReadTree {
+	return async (hash) => keptTree(hash) ?? (await history(repo, (source) => source.readTree(hash)));
+}
+
 /**
  * The entry at `path` in a tree, or the file standing where a folder on the way to it would be, or null if there's
  * neither. A file in the way is returned so that it differs from a tree where the path is simply absent.

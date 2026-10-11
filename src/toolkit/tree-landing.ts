@@ -10,7 +10,7 @@ import type { TreeEntry } from "./branch-history";
 import { mergeMessage } from "./merge-commit";
 import { atMost, type BatchChange, type BatchGit } from "./merge";
 import { makeStamper, type Stamper } from "./stamp";
-import { cachingHistory, changedAlong, entryAt, keepTree } from "./tree-reads";
+import { cachingHistory, changedAlong, entryAt, keepTree, treesOf } from "./tree-reads";
 
 // Lands a batch in the Worker, without a container and without a checkout. Claims keep a batch's changes apart, so
 // each merge is main's tree with the change's files put in place: only the trees along those paths are read
@@ -152,7 +152,7 @@ async function planLanding(input: TreeReads, batch: LandInput): Promise<Plan> {
 	const { tip, placed } = placing;
 	const moved = placed.findIndex((each, index) => each.head.hash !== batch.merges[index]?.head);
 	if (moved >= 0) return { gate: `${batch.merges[moved]?.change}'s branch moved since it was read` };
-	const readTree = (hash: string) => input.history(input.project, (source) => source.readTree(hash));
+	const readTree = treesOf(input.history, input.project);
 	// The branch's side, read only along each change's own paths: what main changed elsewhere doesn't matter.
 	const changedOnBranch = await atMost(CHECKS_AT_ONCE, placed, (each) =>
 		each.base.hash === tip.hash
@@ -235,8 +235,10 @@ async function buildMerges(
 		keepTree(oid, entries);
 		return oid;
 	};
-	const reader = (repo: string) => async (hash: string) =>
-		written.get(hash) ?? (await input.history(repo, (source) => source.readTree(hash))) ?? [];
+	const reader = (repo: string) => {
+		const read = treesOf(input.history, repo);
+		return async (hash: string) => written.get(hash) ?? (await read(hash)) ?? [];
+	};
 	const readMain = reader(input.project);
 	const readerFor = (merge: Merge) => reader(merge.source ? repoOfUrl(merge.source.url) : input.project);
 	// Each merge is built on the one before, so its reads would wait in turn. Read them all first, side by side.

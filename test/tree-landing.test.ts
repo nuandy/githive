@@ -288,8 +288,10 @@ describe("landing a batch with trees, in the Worker", { timeout: 60_000 }, () =>
 		const base = server.git("rev-parse", "main").trim();
 		const forkLogs: string[] = [];
 		const forkTrees: string[] = [];
-		const counted: ReadHistory = (repo, read) =>
-			history(repo, (source) =>
+		const forkOpens: string[] = [];
+		const counted: ReadHistory = (repo, read) => {
+			if (repo !== "project") forkOpens.push(repo);
+			return history(repo, (source) =>
 				read({
 					log: (...args) => {
 						if (repo !== "project") forkLogs.push(repo);
@@ -302,6 +304,7 @@ describe("landing a batch with trees, in the Worker", { timeout: 60_000 }, () =>
 					},
 				}),
 			);
+		};
 		const gateInspect = vi.fn(async () => []);
 		const inspected = await artifactsInspect(
 			counted,
@@ -315,6 +318,7 @@ describe("landing a batch with trees, in the Worker", { timeout: 60_000 }, () =>
 		expect(inspected.map((each) => ("head" in each ? each.head : each.error))).toEqual(made.map((each) => each.head));
 		const gathered = forkLogs.length;
 		const treesGathered = forkTrees.length;
+		const opened = forkOpens.length;
 		const fallback = vi.fn(async () => ({ commits: [] }));
 
 		await treeLanding({ history: counted, project: "project", remote: async () => project(), fallback })({
@@ -328,6 +332,7 @@ describe("landing a batch with trees, in the Worker", { timeout: 60_000 }, () =>
 		expect(forkLogs.length).toBe(gathered);
 		expect(treesGathered).toBeGreaterThan(0);
 		expect(forkTrees.length).toBe(treesGathered);
+		expect(forkOpens.length).toBe(opened);
 	});
 
 	it("answers moved when main moved past the base, and lands nothing", async () => {
