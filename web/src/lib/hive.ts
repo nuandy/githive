@@ -82,7 +82,8 @@ export interface FeedLine {
 	at: string;
 }
 
-const ACTIONS: Record<HiveEvent["kind"], string> = {
+// What each kind of event says its agent did. Awareness events name another agent, or the files, in it.
+const ACTIONS: Record<HiveEvent["kind"], string | ((event: HiveEvent, other: string) => string)> = {
 	claimed: "claimed",
 	released: "released",
 	pushed: "pushed to",
@@ -94,6 +95,10 @@ const ACTIONS: Record<HiveEvent["kind"], string> = {
 	reverted: "reverted",
 	added: "added work",
 	building: "started a hosted builder",
+	interface: (_event, other) => `landed an interface change ${other} uses`,
+	heads_up: (_event, other) => `and ${other} are changing things each other uses`,
+	noted: (_event, other) => `left a note for ${other}`,
+	conflicted: (event) => `'s merge conflicted${event.detail ? ` on ${event.detail}` : ""}`,
 };
 
 /**
@@ -105,16 +110,28 @@ export function feedLine(event: HiveEvent, snapshot: RepoSnapshot): FeedLine {
 	const onHead = event.commit ? snapshot.claims.find((claim) => claim.head === event.commit) : undefined;
 	const change = event.change ?? onHead?.change;
 	const agent = event.agent ?? claimOf(change)?.agent ?? "an agent";
-	const line: FeedLine = { kind: event.kind, agent, action: actionOf(event), at: event.at };
+	// The other agent an awareness event names; a heads-up's change is its own agent's.
+	const other = event.other ?? (event.kind === "heads_up" ? undefined : claimOf(change)?.agent) ?? "another agent";
+	const line: FeedLine = { kind: event.kind, agent, action: actionOf(event, other), at: event.at };
 	if (change) line.change = change;
 	else if (event.commit) line.commit = event.commit.slice(0, 8);
-	const note = event.kind === "voted" && event.detail ? `as ${event.detail}` : event.detail;
+	const note = noteOf(event);
 	if (note) line.note = note;
 	return line;
 }
 
-function actionOf(event: HiveEvent) {
+/** What goes between a line's agent and its action: a space, or nothing before a possessive ("dan's merge"). */
+export const afterAgent = (line: FeedLine) => (line.action.startsWith("'s ") ? "" : " ");
+
+function actionOf(event: HiveEvent, other: string) {
 	if (event.verdict === "approve") return "approved";
 	if (event.verdict === "reject") return "asked for changes to";
-	return ACTIONS[event.kind];
+	const action = ACTIONS[event.kind];
+	return typeof action === "string" ? action : action(event, other);
+}
+
+function noteOf(event: HiveEvent) {
+	if (event.kind === "voted" && event.detail) return `as ${event.detail}`;
+	// A conflict's files are in its action already.
+	return event.kind === "conflicted" ? undefined : event.detail;
 }

@@ -64,6 +64,25 @@ describe("the hive's events", () => {
 		expect(kept.at(-1)?.change).toBe(`c${EVENTS_KEPT + 7}`);
 	});
 
+	it("keeps awareness events one per occurrence: the other agent tells two apart, the detail doesn't", async () => {
+		const at = NOW.toISOString();
+		const headsUp = (other: string, detail: string): HiveEvent => ({
+			kind: "heads_up",
+			agent: "bob",
+			change: "c-3",
+			other,
+			detail,
+			at,
+		});
+		const cache = new RepoCache({ storage: new FakeStorage(), getWebSockets: () => [] } as never, {} as never);
+		await cache.ping("records", false, [headsUp("carol", "loadSettings"), headsUp("dan", "loadSettings")]);
+		await cache.ping("records", false, [headsUp("carol", "saveSettings")]);
+		expect((await cache.events()).map((event) => [event.other, event.detail])).toEqual([
+			["carol", "saveSettings"],
+			["dan", "loadSettings"],
+		]);
+	});
+
 	it("moves a log kept as one list under keys of its own", async () => {
 		const storage = new FakeStorage();
 		await storage.put("events", [{ kind: "pushed", change: "old", at: NOW.toISOString() }]);

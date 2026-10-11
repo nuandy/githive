@@ -1,5 +1,5 @@
 import type { HiveEvent, RepoSnapshot } from "../api";
-import { feedLine } from "../lib/hive";
+import { afterAgent, feedLine } from "../lib/hive";
 import { timeAgo } from "../lib/relativeTime";
 import { href } from "../lib/routes";
 
@@ -27,8 +27,9 @@ export function HiveFeed(props: {
 				{lines.map((line, index) => (
 					<li key={`${line.at}:${index}`} className={`hive-tab__event hive-tab__event--${line.kind}`}>
 						<span>
-							<strong>{line.agent}</strong> {line.action}{" "}
-							{line.change ? <a href={href.change(repo, line.change)}>{line.change}</a> : null}
+							<strong>{line.agent}</strong>
+							{afterAgent(line)}
+							{line.action} {line.change ? <a href={href.change(repo, line.change)}>{line.change}</a> : null}
 							{line.commit ? <code>{line.commit}</code> : null}
 							{line.note ? <span className="muted"> · {line.note}</span> : null}
 						</span>
