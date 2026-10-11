@@ -169,14 +169,13 @@ export interface HiveEvent {
 		| "building"
 		| "interface"
 		| "heads_up"
-		| "noted"
 		| "conflicted";
 	/** Who did it. A push names only its change. */
 	agent?: string;
 	change?: string;
 	commit?: string;
 	verdict?: "approve" | "reject";
-	/** The other agent: whose change uses an interface that changed, the other side of a heads-up, who a note is for. */
+	/** The other agent: whose change uses an interface that changed, or the other side of a heads-up. */
 	other?: string;
 	/** The intent claimed, the role voted as, why a landing failed, the names or files an awareness event is about. */
 	detail?: string;

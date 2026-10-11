@@ -81,7 +81,7 @@ describe("the hive's live feed", () => {
 		expect(line).toMatchObject({ agent: "bob", action: "asked for changes to", change: "login", note: "as security" });
 	});
 
-	it("says who an interface change, a heads-up, a note or a conflict matters to", () => {
+	it("says who an interface change, a heads-up or a conflict matters to", () => {
 		const claims = [claim("c-12", "bob"), claim("c-3", "bob"), claim("c-9", "dan")];
 		const said = (event: Omit<HiveEvent, "at">) => {
 			const line = feedLine({ ...event, at: ago(1) }, snapshot(claims));
@@ -92,7 +92,6 @@ describe("the hive's live feed", () => {
 		expect(said({ kind: "heads_up", agent: "bob", change: "c-3", other: "carol" })).toBe(
 			"bob and carol are changing things each other uses",
 		);
-		expect(said({ kind: "noted", agent: "carol", change: "c-12", other: "bob" })).toBe("carol left a note for bob");
 		expect(said({ kind: "conflicted", agent: "dan", change: "c-9", detail: "invoice.ts" })).toBe(
 			"dan's merge conflicted on invoice.ts",
 		);
@@ -102,7 +101,7 @@ describe("the hive's live feed", () => {
 		const conflict = { kind: "conflicted" as const, agent: "dan", change: "c-9", detail: "invoice.ts", at: ago(1) };
 		expect(feedLine(conflict, snapshot(claims)).note).toBeUndefined();
 		// Without a claim to say who, the other agent is unnamed.
-		expect(said({ kind: "noted", agent: "carol", change: "gone" })).toBe("carol left a note for another agent");
+		expect(said({ kind: "interface", agent: "alice", change: "gone" })).toBe("alice landed an interface change another agent uses");
 		expect(said({ kind: "heads_up", agent: "bob", change: "c-3" })).toBe(
 			"bob and another agent are changing things each other uses",
 		);

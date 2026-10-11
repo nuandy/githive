@@ -34,7 +34,7 @@ const NEWS_MOST = 20;
 
 /** A message for one agent about its change, kept until told (see docs/awareness.md, "The news channel"). */
 export interface Notice {
-	/** "interface", "heads_up", "note", ...: an open set, but never "landed", which marks landed news. */
+	/** "interface", "heads_up", ...: an open set, but never "landed", which marks landed news. */
 	kind: string;
 	/** The ISO time it was noted. */
 	at: string;

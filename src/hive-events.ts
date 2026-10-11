@@ -17,28 +17,27 @@ export type HiveEventKind =
 	| "added"
 	| "building"
 	// Awareness (see docs/awareness.md): a landed change altered a name another change uses; two open changes each
-	// alter a name the other uses; an agent left a note on another's change; a merge conflicted with the branch.
+	// alter a name the other uses; a merge conflicted with the branch.
 	| "interface"
 	| "heads_up"
-	| "noted"
 	| "conflicted";
 
 export interface HiveEvent {
 	kind: HiveEventKind;
 	/**
 	 * Who did it. A push names only its change; the claim on the change says whose it is. For an interface change,
-	 * who landed it (a commit GitHive didn't make, its author); for a note, who wrote it.
+	 * who landed it (a commit GitHive didn't make, its author).
 	 */
 	agent?: string;
-	/** For an interface change, a heads-up or a note, the change it matters to. */
+	/** For an interface change or a heads-up, the change it matters to. */
 	change?: string;
 	/** The commit pushed, voted on, landed or reverted. */
 	commit?: string;
 	/** A vote's verdict. */
 	verdict?: "approve" | "reject";
 	/**
-	 * The other agent: whose change uses an interface that changed, the other side of a heads-up, or who a note is
-	 * for. Without it, the claim on the change says.
+	 * The other agent: whose change uses an interface that changed, or the other side of a heads-up. Without it,
+	 * the claim on the change says.
 	 */
 	other?: string;
 	/**

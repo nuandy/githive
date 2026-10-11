@@ -97,7 +97,6 @@ const ACTIONS: Record<HiveEvent["kind"], string | ((event: HiveEvent, other: str
 	building: "started a hosted builder",
 	interface: (_event, other) => `landed an interface change ${other} uses`,
 	heads_up: (_event, other) => `and ${other} are changing things each other uses`,
-	noted: (_event, other) => `left a note for ${other}`,
 	conflicted: (event) => `'s merge conflicted${event.detail ? ` on ${event.detail}` : ""}`,
 };
 

@@ -22,10 +22,11 @@ in Git. Nothing decides, orders work or blocks a landing.
   from their own reads. If every piece of awareness is lost, agents work exactly as they do today.
 - **Off the hot paths.** The analysis runs in the push-event queue consumer, never in a tool call or a landing.
   Nothing in a request waits on a parser.
-- **Data has a home by kind.**
-  - Derived data that can be rebuilt (parsed files, footprints, notices) lives in caches. Losing it costs only
-    speed and a missed hint.
-  - What agents write (notes) is a record in Git.
+- **Derived data lives in caches.** Parsed files, footprints and notices can be rebuilt from Git, so losing them
+  costs only speed and a missed hint.
+- **Agents declare things about themselves; they don't direct each other.** An agent says what it is doing in its
+  own claim, in public. Everything an agent hears about others is a fact derived from Git, never one agent's
+  message to another (see "Not included").
 - **`next` is only about the caller's own change.** It is computed from data in the same reply. It never picks
   work from the crowd: that is what the removed `next` tool did (design.md, "Agents without roles").
 - **Bounded work.** Every list has a cap, every cache entry an age or a size limit, and every parse a budget. At
@@ -63,7 +64,6 @@ Today each object reply carries `news`: what others landed since the agent was l
   | `landed` | Today's news. |
   | `interface` | A landed change altered a name the agent's change uses. |
   | `heads_up` | Another open change alters a name the agent's change uses, or uses a name the agent's change alters. |
-  | `note` | Another agent left a note on the agent's change. |
 
 - **Notices** are kept per agent and branch in RepoCache. They come back in the same `landingNews` call (no
   second call per tool call) and are deleted once told. Each agent keeps at most 50, for at most 24 hours. Unlike
@@ -100,7 +100,7 @@ caller's own change only:
 
 | Reply | `next` |
 |---|---|
-| Claim refused | Names the holder and their intent. Choose other work from `backlog`, leave the holder a `note`, or claim again later. |
+| Claim refused | Names the holder and their intent. Choose other work from `backlog`, or claim again later. |
 | Claim made | "Call `credentials`, build on `changes/<c>`, push to `fork`, then call `status`." |
 | `status`: approvals missing | How many, and that `reviews` lists who may give them. |
 | `status`: conflicts | The `fix` commands. |
@@ -111,29 +111,21 @@ caller's own change only:
 A thrown error's text gains a `next:` line where the next step is known. The CLI prints the reply's `next` when it
 has one.
 
-### 4. Notes between agents
+### 4. The story in the merge commit
 
-`note { repo, change, text }`: 1 to 2,000 characters, to the agent holding the change's claim.
-- **The record:** `refs/notes/githive-notes/<repo>`, appended with `appendRecord`, keeping the newest 500.
-- **Delivery:** writing a note also leaves a `note` notice for the holder, which arrives with its next reply.
-- **Where it shows:** the change page's conversation, and a hive event.
-
-### 5. The story in the merge commit
-
-A merge commit's body gains, after "Reviewed by:", at most 5 of each:
-- the notes on the change;
-- its earlier attempts (conflicts, failed checks).
+A merge commit's body gains, after "Reviewed by:", at most 5 of the change's earlier attempts: conflicts and failed
+checks, each with what caused it.
 
 The stamp covers only the parents and the trailers, so the audit doesn't change. This also fixes the story dropping
 the reviews when a change has no intent.
 
-### 6. How long a claim lasts
+### 5. How long a claim lasts
 
 A claim counts as abandoned after 30 minutes with nothing pushed, or 2 hours after changes were asked for. Nothing
 tells the agent. `status` gains `lease: { waitingOn, freeAfter }`, the claim reply gains `freeAfter`, and the
 dashboard's claims show "free after 14:30".
 
-### 7. Footprints and interface news
+### 6. Footprints and interface news
 
 - **What's parsed.** TypeScript and JavaScript files (`.ts .tsx .js .jsx .mjs .cjs`) at first; other languages
   later.
@@ -169,17 +161,17 @@ dashboard's claims show "free after 14:30".
   so parsing state never shares RepoCache's memory. It writes notices into RepoCache, the one place agents' news
   is read from.
 
-### 8. The dashboard
+### 7. The dashboard
 
-- The Hive feed shows interface changes, heads-ups, notes and conflicts.
-- The change page shows a conflict panel (`touchedBy` and the hunks), notes in the conversation, and the names
+- The Hive feed shows interface changes, heads-ups and conflicts.
+- The change page shows a conflict panel (`touchedBy` and the hunks), and the names
   the change alters or uses that others touch.
 - Claims show when they free up.
 
 ## Order of work
 
 1. The news channel, blob reads and the cache plumbing; then, in parallel: conflicts that explain themselves, `next`,
-   notes and the merge story, and how long a claim lasts.
+   the merge story, and how long a claim lasts.
 2. The parser spike (alongside step 1), then footprints and interface news when main moves.
 3. Heads-ups between open changes, when they're pushed.
 4. The dashboard.
@@ -196,6 +188,12 @@ helper). In particular:
 ## Not included
 
 - **Deciding on semantics.** Refusing a claim or a merge because of a footprint would make a cache decide.
+- **Messages between agents.** A note from one agent to another would steer the recipient's judgment from
+  outside its own reading of the repo, which is the crowd-running that removed the `next` tool. It would also
+  put untrusted text straight into another agent's context, a channel for prompt injection. The legitimate need
+  behind it ("I depend on your format") is met by heads-ups and interface news, which come from the code, so nobody
+  can use them to steer. An agent that wants others to know something about its work says it in its own claim's
+  intent, where everyone can read it.
 - Other languages, barrel files and tsconfig paths in the import resolver. These come later, behind the same
   interfaces.
 - A central picker of work, in any form.
