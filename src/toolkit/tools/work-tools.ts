@@ -7,6 +7,7 @@ import { conflictFix } from "../merge-ready";
 import { leaseFor } from "../staleness";
 import type { VotesView } from "../vote-store";
 import { countedVotes } from "../votes";
+import { pieceHints } from "../clef-hints";
 import { addWork, addWorks, backlogFor, reviewsFor, type Work, type WorkInput } from "../work";
 import { changeSigns, changeStatus } from "./change-state";
 import { workItemFrom } from "./claim-input";
@@ -48,7 +49,8 @@ export const workTools: ToolHandlers = {
 			...(waiting.length > LISTED_AT_MOST ? { moreWaiting: waiting.length - LISTED_AT_MOST } : {}),
 		};
 	},
-	async add_work({ args, ctx, repo, actAs }) {
+	async add_work(call) {
+		const { args, ctx, repo, actAs } = call;
 		const by = actAs("agent");
 		if (args.items !== undefined) {
 			if (!Array.isArray(args.items) || !args.items.length || args.items.length > MOST_AT_ONCE)
@@ -57,12 +59,16 @@ export const workTools: ToolHandlers = {
 			const ids = items.map((item) => item.id);
 			const twice = ids.filter((id, index) => ids.indexOf(id) !== index);
 			if (twice.length) fail(400, `each piece needs its own id: ${[...new Set(twice)].join(", ")} more than once`);
+			const similar = await piecesLikeOpenWork(call, items);
 			const added = await addWorks(recordLog<Work>(ctx, repo, workRef(repo)), by, items);
-			return { ok: added.ok, added: added.added, ...(added.already.length ? { already: added.already } : {}) };
+			const reply = { ok: added.ok, added: added.added, ...(added.already.length ? { already: added.already } : {}) };
+			return similar.length ? { ...reply, similar } : reply;
 		}
 		const item = workItemFrom(args);
+		const similar = await piecesLikeOpenWork(call, [item]);
 		const added = await addWork(recordLog<Work>(ctx, repo, workRef(repo)), { ...item, by });
-		return added.ok ? { ok: true, id: item.id } : { ok: false, reason: added.refused };
+		if (!added.ok) return { ok: false, reason: added.refused };
+		return similar.length ? { ok: true, id: item.id, similar } : { ok: true, id: item.id };
 	},
 	async status(call) {
 		const { args, ctx, repo, votes, registered, branch, changeOf, claimOf, waitingOn } = call;
@@ -122,6 +128,18 @@ export const workTools: ToolHandlers = {
 		return reply;
 	},
 };
+
+/** New pieces that may duplicate a piece already in the backlog or an open change, as Clef sees it: advice. */
+async function piecesLikeOpenWork(call: ToolCall, pieces: { id: string; title: string; intent: string }[]) {
+	const { ctx, repo, adviceView } = call;
+	const [backlog, advice] = await Promise.all([recordLog<Work>(ctx, repo, workRef(repo)).read(), adviceView()]);
+	const items = backlog?.commit.state.items ?? [];
+	const existing = [
+		...items.map((item) => ({ id: item.id, intent: `${item.title}: ${item.intent}` })),
+		...advice.claims.map((claim) => ({ id: claim.change, intent: claim.intent })),
+	];
+	return pieceHints(ctx, pieces, existing);
+}
 
 /** The reviews `state`'s agent may give, as `reviews` lists them, given the review holds in force. */
 export async function reviewOptions(ctx: ToolContext, repo: string, state: WorkInput, held: Record<string, string[]>) {

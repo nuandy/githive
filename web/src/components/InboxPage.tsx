@@ -1,4 +1,4 @@
-import type { InboxGroup } from "../lib/inbox";
+import { type InboxGroup, isUrgent } from "../lib/inbox";
 import { Icon } from "./Icon";
 import "./InboxPage.css";
 
@@ -67,6 +67,7 @@ function InboxRepo({ group }: { group: InboxGroup }) {
 								{item.title}
 							</a>
 							<span className="inbox__id">{item.change}</span>
+							{isUrgent(item) ? <span className="pill pill--bad inbox__urgent">Urgent</span> : null}
 							<p className="inbox__reason">{item.reason}</p>
 						</div>
 					</li>

@@ -1,4 +1,5 @@
 import { fail, optionalString, requiredString } from "../../errors";
+import { questionHints, voteHints } from "../clef-hints";
 import { effectivePolicy } from "../votes";
 import { holdKey } from "../work";
 import type { ToolHandlers } from "./context";
@@ -15,6 +16,8 @@ export const reviewTools: ToolHandlers = {
 		const commit = requiredString(args, "commit");
 		const teams = (await ctx.teamsOf?.(repo)) ?? [];
 		const change = optionalString(args, "change");
+		const evidence = requiredString(args, "evidence");
+		const { vague } = await voteHints(ctx, { verdict, evidence });
 		const outcome = await votesFor(ctx, repo, await shardVotesIfBusy(ctx, repo, registered, reviewer)).vote(
 			{
 				commit,
@@ -22,7 +25,7 @@ export const reviewTools: ToolHandlers = {
 				reviewer,
 				role: requiredString(args, "role"),
 				verdict,
-				evidence: requiredString(args, "evidence"),
+				evidence,
 				...(teams.length ? { teams } : {}),
 			},
 			stamper,
@@ -30,7 +33,8 @@ export const reviewTools: ToolHandlers = {
 		// The review is done, so drop the hold credentials placed when the review began.
 		await ctx.reviews?.release(repo, holdKey(commit, requiredString(args, "role")), reviewer).catch(() => undefined);
 		if (verdict === "approve") await warmChecks("approved", commit);
-		return outcome;
+		// The vote counts either way; the reply only says the author may not be able to act on it.
+		return vague ? { ...(outcome as Record<string, unknown>), vagueEvidence: true } : outcome;
 	},
 	async request_review({ args, ctx, repo, registered, claimOf }) {
 		if (ctx.mayUseHosted && !(await ctx.mayUseHosted()))
@@ -53,9 +57,12 @@ export const reviewTools: ToolHandlers = {
 			...(typeof args.summary === "string" ? { summary: args.summary } : {}),
 		});
 	},
-	async ask_human({ args, votes, actAs, stamper, claimOf }) {
+	async ask_human({ args, ctx, votes, actAs, stamper, claimOf }) {
 		const change = requiredString(args, "change");
 		if (!(await claimOf(change))) fail(409, `${change} holds no claim`);
-		return votes.flag({ change, agent: actAs("agent"), reason: requiredString(args, "reason") }, stamper);
+		const agent = actAs("agent");
+		const reason = requiredString(args, "reason");
+		const urgency = await questionHints(ctx, reason);
+		return votes.flag({ change, agent, reason, ...(urgency === undefined ? {} : { urgency }) }, stamper);
 	},
 };

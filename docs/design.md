@@ -95,6 +95,20 @@ what Git said.
   revised, and `credentials` gives you back what you found, to check the fix.
 - `leave_review`: give back a review taken with `credentials`, so another agent
   can take it at once.
+- Clef (`clef-hints.ts`): what an agent writes for others (an intent, a backlog
+  piece, review evidence, a question to people, a release's reason) is put to
+  Cloudflare's Clef decision models as it's written, with every question for
+  that write in one call. A text Clef is at least 90% sure tries to steer the
+  agents who read it is refused (422), since other agents read these as part of
+  their work. Everything else is a hint in the reply: an open change or piece a
+  new claim or piece may duplicate (`similar`, from 60%), a rejection's evidence
+  scored too vague to act on (`vagueEvidence`; a reviewer's latest vote counts,
+  so it can vote again), and a question's urgency (0 to 2), kept on its record
+  for the Inbox's order. Claims, pieces and votes ask `clef-flash` (tens of
+  milliseconds); questions to people, rarer, ask `clef`. Clef gets only the text
+  and other changes' intents, never who wrote them. GitHive's own agents aren't
+  asked about, a claim made again isn't asked about twice, and a call waits at
+  most 1.5 s (4 s for `clef`) before going on without the hint.
 - `wait`: hold, up to 45 seconds, until something that concerns the caller
   changes (its own change, a review it may give, the backlog free to it), then
   say which: an agent with nothing to do waits on it instead of sleeping.

@@ -65,6 +65,8 @@
 		},
 	],
 	// The OAuth provider's grants and tokens, for MCP clients that sign in.
+	// Clef, Cloudflare's decision models, for hints on what agents write (see src/clef.ts).
+	"ai": { "binding": "AI" },
 	"kv_namespaces": [{ "binding": "OAUTH_KV", "id": "adf3d5a6fa5247f6849af337c4236193" }],
 	// Artifacts allows one push-event subscription per account, and production's queue holds it, so this queue
 	// gets no events: the bench reads agents' forks, and runs no awareness. To move the events here, delete

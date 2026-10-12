@@ -15,7 +15,7 @@ export interface RepoSummary {
 	open?: number;
 	/** Changes waiting on a person. */
 	needsYou?: number;
-	waiting?: { change: string; title: string; reason: string }[];
+	waiting?: { change: string; title: string; reason: string; urgency?: number }[];
 	merged?: number;
 	abandoned?: number;
 	violations?: number;

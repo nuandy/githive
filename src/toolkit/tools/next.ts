@@ -128,7 +128,7 @@ const STEPS: Record<string, Step> = {
 		if (reply.pending === true) return "Call `merge` again; it lands with the next batch.";
 		return refusedMerge(reply, args);
 	},
-	vote: (reply) => (reply.ok === true ? "Done. Choose more from `reviews`." : undefined),
+	vote: voteStep,
 	reviews: (reply) => (isEmpty(reply.reviews) ? NONE_NOW : undefined),
 	backlog: (reply) => (isEmpty(reply.open) ? NONE_NOW : undefined),
 	wait: waitStep,
@@ -174,9 +174,22 @@ function madeClaim(reply: Reply, args: Args) {
 			`Call \`status\`: \`changes/${change}\` in your fork is already ${source}'s tip. Once approved, call ` +
 			"`merge`."
 		);
-	return (
+	const build =
 		`Call \`credentials\` with change ${change}, build on \`changes/${change}\` in your clone, push to \`fork\`, ` +
-		"then call `status`."
+		"then call `status`.";
+	const similar = record(reply.similar);
+	if (!similar) return build;
+	const other = nameOr(similar.change, "another open change");
+	const check = `${other} may already do this (see similar): call \`status\` on it first`;
+	return `${check}, and release yours if it does. ${build}`;
+}
+
+function voteStep(reply: Reply) {
+	if (reply.ok !== true) return undefined;
+	if (reply.vagueEvidence !== true) return "Done. Choose more from `reviews`.";
+	return (
+		"Recorded, but its author may not be able to act on your evidence: vote again on the same commit, saying what " +
+		"is wrong, where, and what would fix it. Your latest vote is the one that counts."
 	);
 }
 

@@ -1,4 +1,5 @@
 import type { Level } from "../../auth/orgs";
+import type { Clef } from "../../clef";
 import { requiredString, statusOf } from "../../errors";
 import type { ChangeAwareness } from "../../footprint-cache";
 import type { Remote } from "../../git";
@@ -109,6 +110,8 @@ export interface ToolContext {
 	/** Tells the dashboard's open pages that the repo's records changed, and how, for the hive's feed. */
 	/** Tells the repo's watchers that `tool` wrote (see RepoCache.ping). */
 	ping?: (repo: string, event?: HiveEvent, tool?: string) => Promise<void>;
+	/** Cloudflare's Clef decision models, asked about what agents write for each other (see clef-hints.ts). */
+	clef?: Clef;
 	/** The repo's doorbell, which rings on every write (see RepoCache.ring): `wait` holds on it. */
 	doorbell?: (repo: string) => Doorbell;
 	/** Which of these changes GitHive's hosted builder is still working on: they aren't ready to review yet. */

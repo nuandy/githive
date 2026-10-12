@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildInbox } from "./inbox";
+import { buildInbox, isUrgent } from "./inbox";
 
 describe("the inbox", () => {
 	it("groups waiting changes by repo, most recently active first, and counts them", () => {
@@ -39,6 +39,22 @@ describe("the inbox", () => {
 				reason: "Reviewers disagree",
 				href: "#/repos/acme/my-app/changes/rate-limit",
 			},
+		]);
+	});
+
+	it("puts urgent questions first, and the repos that have one, whatever their activity", () => {
+		const waiting = (urgencies: (number | undefined)[]) =>
+			urgencies.map((urgency, index) => ({ change: `c-${index}`, title: "", reason: "?", urgency }));
+		const { groups } = buildInbox({
+			repos: [
+				{ repo: "busy", since: "", summary: { lastActivity: "2026-10-02T00:00:00Z", waiting: waiting([0.4]) } },
+				{ repo: "quiet", since: "", summary: { lastActivity: "2026-10-01T00:00:00Z", waiting: waiting([0.2, 1.8]) } },
+			],
+		});
+		expect(groups.map((group) => group.repo)).toEqual(["quiet", "busy"]);
+		expect(groups[0]!.items.map((item) => [item.change, isUrgent(item)])).toEqual([
+			["c-1", true],
+			["c-0", false],
 		]);
 	});
 

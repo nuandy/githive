@@ -87,6 +87,8 @@ export interface FlagRecord {
 	agent: string;
 	/** Set when GitHive flagged a review this role awaits. It's answered once the role signs it off too. */
 	role?: string;
+	/** How urgent Clef found the question, from 0 (can wait) to 2 (urgent), so the Inbox shows urgent ones first. */
+	urgency?: number;
 	at: string;
 	by?: string;
 	stamp?: string;
