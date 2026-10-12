@@ -87,7 +87,7 @@ So that the shape can be tested without a browser, `src/ui/board.js` and `src/ui
 
 - the comb is `position: relative` with the box's `width` and `height`;
 - each cell is `position: absolute` with its `left`, `top`, `width` and `height` set as inline styles, and no margin, transform, grid or flex that moves it;
-- each cell is a `<button>` that isn't clipped, with the hexagon drawn by an element inside it that carries the `clip-path` and the colors. The button's `:focus-visible` ring (`outline: 3px solid var(--focus); outline-offset: 2px`) goes on the button, never on the clipped hexagon, which would cut it off.
+- each cell is a `<button>` clipped to its hexagon (the `clip-path` above, on the button itself), so a tap or click lands only on the letter it shows: an unclipped button is a rectangle, and neighbouring rectangles overlap. The cell's colors are drawn by an element inside it, a hexagon inset 3px on every side (`position: absolute; inset: 3px` and the same `clip-path`), so a 3px hexagonal border of the button's own background shows around it. That border is the focus ring: the button's background is transparent, and `var(--focus)` on `:focus-visible`. Don't use `outline` or `box-shadow` for it; the `clip-path` cuts them off.
 
 Their tests (`test/board.test.js`, `test/yesterday.test.js`) check `combLayout` for a few widths: the center cell is in the middle of the box; every outer cell's center is `1.06 × H` from the center cell's, in the direction above; no two cells' centers are closer than `H`, so no hexagons overlap; and every cell lies inside the box.
 
@@ -98,7 +98,7 @@ Their tests (`test/board.test.js`, `test/yesterday.test.js`) check `combLayout` 
 - Ignore a key with Ctrl, Meta or Alt held, and every key while a dialog (the help) is open.
 - A letter key `a` to `z` types it, and Backspace deletes, wherever focus is, including on the board's letter buttons.
 - Enter submits and the space bar shuffles, **except** when focus is on a button: then leave the key to the browser, so the button does what it says (a letter button types its letter, Shuffle shuffles). Don't call `preventDefault` for it.
-- Every button can be reached with Tab and shows a visible focus ring (`--focus`).
+- Every button can be reached with Tab and shows a visible focus ring (`--focus`); the board's cells show it as their hexagonal border (see The honeycomb).
 
 ### Colors and contrast
 
