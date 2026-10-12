@@ -1,5 +1,6 @@
 import { execFile, execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
+import { type AddressInfo, createServer } from "node:net";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { isBrowserCheck, setUpBrowserCheck } from "../src/gate-browser";
@@ -15,6 +16,16 @@ const CHROME = [
 	"/usr/bin/chromium",
 	"/usr/bin/google-chrome",
 ].find((path) => path && existsSync(path));
+
+/** A port nothing listens on, so the app can't land on another test's server. */
+function freePort(): Promise<string> {
+	return new Promise((done) => {
+		const server = createServer().listen(0, "127.0.0.1", () => {
+			const { port } = server.address() as AddressInfo;
+			server.close(() => done(String(port)));
+		});
+	});
+}
 
 /** Runs the check in the fixture site, and returns its exit code and output. */
 function check(...args: string[]): Promise<{ code: number; output: string }> {
@@ -48,7 +59,7 @@ describe.skipIf(!CHROME)("the browser check in Chromium", { timeout: 150_000 }, 
 
 	it("passes a clean page, and checks an app its start command runs", async () => {
 		expect(await check("--page", "/clean.html")).toMatchObject({ code: 0, output: expect.stringMatching(/passed/) });
-		const port = String(40_000 + Math.floor(Math.random() * 10_000));
+		const port = await freePort();
 		const app = await check("--start", `node serve.mjs ${port}`, "--url", `http://127.0.0.1:${port}/`);
 		expect(app).toEqual({
 			code: 0,
