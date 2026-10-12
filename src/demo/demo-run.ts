@@ -2,8 +2,9 @@ import { DurableObject } from "cloudflare:workers";
 import { statusOf } from "../errors";
 import type { HostedAgent } from "../hosted-agents";
 import { callTool } from "../toolkit/mcp";
-import { DEMO_AGENT, demoContext, setUpRun } from "./demo-repo";
+import { DEMO_AGENT, demoContext, gatesOf, setUpRun } from "./demo-repo";
 import {
+	type Gates,
 	type Registry,
 	type RunSlot,
 	type RunState,
@@ -78,23 +79,43 @@ export class DemoRun extends DurableObject<Env> {
 		await this.ctx.storage.setAlarm(startedAt);
 	}
 
-	/** Sets the demo repo up for run `number` (tests answer it instead). */
-	protected setUp(number: number): Promise<Pick<RunState, "repo" | "reset" | "restore">> {
-		return setUpRun(this.env, number);
+	/** Sets the demo repo up for `run`, given the settings to put back after its reset (tests answer it instead). */
+	protected setUp(run: RunState, restore: () => Promise<Gates>): Promise<Pick<RunState, "repo" | "reset" | "restore">> {
+		return setUpRun(this.env, run.number, restore);
+	}
+
+	/**
+	 * The repo's approvals and checks before this run changed them: read once and kept with the run before the reset
+	 * turns them off, so a setup that's cut short and runs again puts back what the repo had, not the reset's.
+	 */
+	private async keptGates(run: RunState): Promise<Gates> {
+		const kept = (await this.ctx.storage.get<RunState>("run"))?.restore;
+		if (kept) return kept;
+		const restore = await this.currentGates(run.repo);
+		await this.ctx.storage.put("run", { ...run, restore } satisfies RunState);
+		return restore;
+	}
+
+	/** The repo's approvals and checks now (tests answer it instead). */
+	protected currentGates(repo: string): Promise<Gates> {
+		return gatesOf(this.env, repo);
 	}
 
 	/** Sets the repo up, then starts the agents, or waits for the reset; a run that can't be set up has failed. */
 	private async setUpThenStart(run: RunState) {
 		try {
 			const { settingUp: _, ...rest } = run;
-			const ready: RunState = { ...rest, ...(await this.setUp(run.number)) };
+			const ready: RunState = { ...rest, ...(await this.setUp(run, () => this.keptGates(run))) };
 			await this.ctx.storage.put("run", ready);
 			if (!ready.reset) await this.startAgents(ready);
 			await this.ctx.storage.setAlarm(Date.now() + this.watchEvery(ready));
 		} catch (err) {
 			const error = statusOf(err).message;
 			console.error(`demo ${run.id}: setting up failed`, error);
-			await this.ctx.storage.put("run", { ...run, status: "failed", error, endedAt: Date.now() } satisfies RunState);
+			const failed: RunState = { ...((await this.ctx.storage.get<RunState>("run")) ?? run), status: "failed", error };
+			// The reset may have turned the repo's approvals and checks off already: put them back.
+			if (failed.restore) await this.callTool("settings", { repo: run.repo, ...failed.restore }).catch(() => undefined);
+			await this.ctx.storage.put("run", { ...failed, endedAt: Date.now() });
 			await this.env.DEMO_RUN.getByName("registry").release(run.id);
 		}
 	}

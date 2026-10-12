@@ -73,7 +73,13 @@ type SetUp = { repo: string; reset?: string; restore?: { required: number; verif
  * A run over stand-ins for its repo's hosted agents, whose accounts the test sets, and for the repo's setup, which
  * gives `setUp` (or throws it, when it's an Error).
  */
-function demo(setUp: SetUp | Error = { repo: "ada--honeycomb" }) {
+type Gates = { required: number; verify: string[] };
+type SetUpWith = (restore: () => Promise<Gates>) => Promise<SetUp>;
+
+function demo(
+	setUp: SetUp | Error | SetUpWith = { repo: "ada--honeycomb" },
+	gates: Gates = { required: 1, verify: [] },
+) {
 	const agents: { name: string; done: boolean }[] = [];
 	const started: unknown[] = [];
 	let stopped = false;
@@ -82,9 +88,13 @@ function demo(setUp: SetUp | Error = { repo: "ada--honeycomb" }) {
 	const reset = { claimed: true, merges: 0, settings: [] as unknown[] };
 	const env = { DEMO_RUN: { getByName: () => ({ release: async (id: string) => void released.push(id) }) } };
 	class TestRun extends DemoRun {
-		protected override async setUp() {
+		protected override async setUp(_run: unknown, restore: () => Promise<Gates>) {
 			if (setUp instanceof Error) throw setUp;
+			if (typeof setUp === "function") return setUp(restore);
 			return setUp;
+		}
+		protected override async currentGates() {
+			return gates;
 		}
 		protected override async callTool(name: string, args: Record<string, unknown>) {
 			if (name === "settings") return void reset.settings.push(args);
@@ -131,6 +141,20 @@ describe("a demo run", () => {
 		await begin(run);
 		expect(started).toEqual([]);
 		expect(await run.status()).toMatchObject({ status: "failed", error: "the reset couldn't claim the repo" });
+		expect(released).toEqual(["run-1"]);
+	});
+
+	it("keeps the repo's approvals and checks before its reset changes them, to put back if setup fails", async () => {
+		const kept = { required: 2, verify: ["npm test"] };
+		const turnedOff = async (restore: () => Promise<Gates>) => {
+			await restore();
+			throw new Error("[500] the reset's push failed");
+		};
+		const { run, storage, reset, released } = demo(turnedOff, kept);
+		await begin(run);
+		expect(((await storage.get("run")) as { restore?: Gates }).restore).toEqual(kept);
+		expect(reset.settings).toEqual([{ repo: "ada--honeycomb", ...kept }]);
+		expect(await run.status()).toMatchObject({ status: "failed" });
 		expect(released).toEqual(["run-1"]);
 	});
 

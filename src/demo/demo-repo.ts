@@ -72,10 +72,10 @@ export async function clearLastRun(env: Env, repo: string, number: number) {
 
 /**
  * Puts the starting files back for run `number`, as a change claiming the whole repo, with no approvals or checks while
- * it lands. Returns its id and the approvals and checks to put back once it has, or nothing when main holds just those
- * files.
+ * it lands. `restore` is what to put back once it has, kept by the run before anything changed. Returns its id and
+ * `restore`, or nothing when main holds just those files.
  */
-export async function startReset(env: Env, repo: string, number: number) {
+export async function startReset(env: Env, repo: string, number: number, restore: Gates) {
 	const ctx = demoContext(env);
 	const project = await remoteFor(env.ARTIFACTS, repo, "read");
 	const reset = await resetCommit(project, number);
@@ -84,7 +84,6 @@ export async function startReset(env: Env, repo: string, number: number) {
 	const intent =
 		`Start demo run ${number} over: remove every file the last run built and put Honeycomb's starting files back, ` +
 		"as the repo began.";
-	const restore = await gatesOf(env, repo);
 	await setGates(env, repo, { required: 0, verify: [] });
 	try {
 		const claim = { repo, agent: DEMO_AGENT, change, paths: reset.paths, intent };
@@ -105,7 +104,7 @@ export async function startReset(env: Env, repo: string, number: number) {
 }
 
 /** What the repo's changes need now to land: approvals, and the checks they pass. */
-async function gatesOf(env: Env, repo: string): Promise<Gates> {
+export async function gatesOf(env: Env, repo: string): Promise<Gates> {
 	const state = (await recordLog<Registry>(demoContext(env), repo, claimsRef(repo)).read())?.commit.state;
 	return { required: state?.policy?.required ?? 0, verify: state?.verify ?? [] };
 }
@@ -136,14 +135,15 @@ export function topLevel(paths: string[]) {
 
 /**
  * The demo repo ready for run `number`: the last run cleared and its reset pushed, then this run's backlog. Returns
- * the repo, and the reset to land before the agents start with the approvals and checks to put back after it.
+ * the repo, and the reset to land before the agents start with the approvals and checks to put back after it, which
+ * `restore` gives once it's needed.
  */
-export async function setUpRun(env: Env, number: number) {
+export async function setUpRun(env: Env, number: number, restore: () => Promise<Gates>) {
 	const repo = await demoRepo(env);
 	let reset: Awaited<ReturnType<typeof startReset>>;
 	if (!repo.made) {
 		await clearLastRun(env, repo.id, number);
-		reset = await startReset(env, repo.id, number);
+		reset = await startReset(env, repo.id, number, await restore());
 	}
 	const items = runBacklog(BACKLOG, number);
 	await callTool("add_work", { repo: repo.id, agent: DEMO_AGENT, items }, demoContext(env)).catch(async (err) => {
