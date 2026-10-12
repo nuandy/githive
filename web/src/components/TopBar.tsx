@@ -105,7 +105,6 @@ export function UserMenu({
 	);
 }
 
-/** The top bar: the GitHive mark, which leads home, where you are, the Inbox, and who you are. */
 /** The Inbox link, with how many changes wait on the reader. */
 function InboxLink({ inboxCount, inboxCurrent }: { inboxCount?: number | undefined; inboxCurrent: boolean }) {
 	return (
@@ -122,6 +121,22 @@ function InboxLink({ inboxCount, inboxCurrent }: { inboxCount?: number | undefin
 	);
 }
 
+/** The link to a person's own agents, where they connect one: in plain sight, not only in their menu. */
+function AgentsLink({ agentsCurrent }: { agentsCurrent: boolean }) {
+	return (
+		<a
+			className="topbar__inbox topbar__agents"
+			href={href.agents()}
+			aria-current={agentsCurrent ? "page" : undefined}
+			aria-label="Your agents"
+		>
+			<Icon name="bot" size={15} />
+			<span className="topbar__inbox-label">Agents</span>
+		</a>
+	);
+}
+
+/** The top bar: the GitHive mark, which leads home, where you are, the Inbox, your agents, and who you are. */
 export function TopBar({
 	crumbs,
 	inboxCount,
@@ -181,6 +196,7 @@ export function TopBar({
 				) : (
 					<InboxLink inboxCount={inboxCount} inboxCurrent={inboxCurrent} />
 				)}
+				{me?.kind === "user" ? <AgentsLink agentsCurrent={agentsCurrent} /> : null}
 				{me?.kind === "user" ? (
 					<UserMenu
 						me={me}

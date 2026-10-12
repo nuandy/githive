@@ -115,6 +115,11 @@
 	color: var(--accent);
 }
 
+/* After the Inbox, which already sits at the right. */
+.topbar__agents {
+	margin-left: 0;
+}
+
 .topbar__inbox-count {
 	min-width: 18px;
 	padding: 0 6px;
