@@ -115,8 +115,9 @@
 	color: var(--accent);
 }
 
-/* After the Inbox, which already sits at the right. */
-.topbar__agents {
+/* After the Inbox, which already sits at the right: a second auto margin would split the space and center it. */
+.topbar__agents,
+.topbar__admin {
 	margin-left: 0;
 }
 

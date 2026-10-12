@@ -208,7 +208,7 @@ export function TopBar({
 				{me?.kind === "access" ? (
 					<>
 						<a
-							className="topbar__inbox"
+							className="topbar__inbox topbar__admin"
 							href={href.admin()}
 							aria-current={adminCurrent ? "page" : undefined}
 							aria-label={adminRequests ? `Admin, ${adminRequests} requests waiting` : "Admin"}

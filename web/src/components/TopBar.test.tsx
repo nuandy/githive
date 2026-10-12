@@ -42,4 +42,11 @@ describe("the top bar, signed in", () => {
 		const access = { kind: "access" as const, label: "admin", by: "access:admin" };
 		expect(renderToStaticMarkup(<TopBar crumbs={[]} me={access} />)).not.toContain("Your agents");
 	});
+
+	it("keeps an admin's Admin link beside the Inbox, at the right", () => {
+		const access = { kind: "access" as const, label: "admin", by: "access:admin" };
+		const markup = renderToStaticMarkup(<TopBar crumbs={[]} me={access} />);
+		// Only the Inbox takes the free space; the links after it don't take a share of it.
+		expect(markup).toMatch(/class="topbar__inbox topbar__admin"/);
+	});
 });
