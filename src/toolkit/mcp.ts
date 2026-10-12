@@ -1,13 +1,15 @@
 import { fail, requiredString } from "../errors";
 import { toolEvent } from "../hive-events";
 import { projectBranch } from "../project-branch";
+import type { NewsItem } from "../repo-cache";
 import type { Registry } from "./claims";
-import { type Args, openCall, type ToolContext, type ToolHandlers } from "./tools/context";
+import { type Args, openCall, presentedKey, type ToolContext, type ToolHandlers, verifiedAgent } from "./tools/context";
 import { repoSnapshot } from "./tools/dashboard";
 import { advice, claimsRef, recordLog, storeFor } from "./tools/repo";
 import { auditTools } from "./tools/audit-tools";
 import { claimTools } from "./tools/claim-tools";
 import { mergeTools } from "./tools/merge-tools";
+import { withNext } from "./tools/next";
 import { reviewTools } from "./tools/review-tools";
 import { setupTools } from "./tools/setup";
 import { workTools } from "./tools/work-tools";
@@ -40,9 +42,9 @@ const WRITES = new Set(["claim", "release", "merge", "vote", "build", "revert", 
 
 const noted = new Map<string, number>();
 
-/** Runs one tool and notes any write in the repo's summary. */
+/** Runs one tool and notes any write in the repo's summary. An object reply says what follows for the caller's change. */
 export async function callTool(name: string, args: Args, ctx: ToolContext): Promise<unknown> {
-	const result = await withNews(name, args, ctx, await runTool(name, args, ctx));
+	const result = withNext(name, args, ctx, await withNews(name, args, ctx, await runTool(name, args, ctx)));
 	const wrote = WRITES.has(name) && (result as { ok?: boolean } | null)?.ok !== false;
 	const event = wrote ? toolEvent(name, args, ctx.agent) : null;
 	if (wrote) await ctx.ping?.(requiredString(args, "repo"), event ?? undefined).catch(() => undefined);
@@ -64,31 +66,38 @@ export async function callTool(name: string, args: Args, ctx: ToolContext): Prom
 }
 
 /**
- * Adds what landed on the project's branch since this agent was last told, so it hears of main moving
- * without asking. Only for object replies to a named agent, and it never fails the call.
+ * Adds what landed on the project's branch since this agent was last told, and its notices, so it hears of main
+ * moving without asking. Only for object replies to the agent the call is verified as, never one an argument names:
+ * a person merging from the dashboard, or a caller naming another agent, would use up that agent's news. It never
+ * fails the call.
  */
 async function withNews(name: string, args: Args, ctx: ToolContext, result: unknown) {
-	const agent = ctx.agent ?? (typeof args.agent === "string" ? args.agent : undefined);
-	if (!ctx.news || !agent || name === "register" || !result || typeof result !== "object" || Array.isArray(result))
-		return result;
+	if (!ctx.news || name === "register" || !result || typeof result !== "object" || Array.isArray(result)) return result;
+	if (!ctx.agent && !presentedKey(args, ctx)) return result;
 	const repo = requiredString(args, "repo");
 	const registry = await recordLog<Registry>(ctx, repo, claimsRef(repo))
 		.read()
 		.catch(() => null);
 	if (!registry?.commit.state.baseline) return result;
+	const agent = await verifiedAgent(args, ctx, registry.commit.state).catch(() => undefined);
+	if (!agent) return result;
 	const branch = projectBranch(registry.commit.state);
-	const news = await ctx.news(repo, branch, agent).catch(() => []);
+	const news = await ctx.news(repo, branch, agent).catch((): NewsItem[] => []);
 	if (!news.length) return result;
-	const says = (landed: (typeof news)[number]) => {
+	const says = (landed: LandedNews) => {
 		const more = landed.filesMore ? ` and ${landed.filesMore} more` : "";
 		const intent = landed.intent ? `, "${landed.intent}"` : "";
 		return `${branch} changed ${landed.files.join(", ")}${more}: ${landed.change} by ${landed.agent}${intent}`;
 	};
+	// Landings are told in a line made here; notices come with their own `says` and `next`.
 	return {
 		...(result as Record<string, unknown>),
-		news: news.map((landed) => ({ ...landed, says: says(landed) })),
+		news: news.map((item) => (isLanded(item) ? { ...item, says: says(item) } : item)),
 	};
 }
+
+type LandedNews = Extract<NewsItem, { kind: "landed" }>;
+const isLanded = (item: NewsItem): item is LandedNews => item.kind === "landed";
 
 const handlers: ToolHandlers = {
 	...setupTools,

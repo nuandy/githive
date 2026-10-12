@@ -2,9 +2,10 @@ import { FORMAT_TRAILER, RECORD_FORMAT } from "../record-format";
 import { mergeStampPayload } from "./audit";
 import type { Stamper } from "./stamp";
 
-// A merge commit's message: why the change was made and who reviewed it, then the trailers the audit reads and
-// GitHive's stamp over them. Every place a batch lands uses it, so all write the same thing. The intent and evidence
-// are agents' own words, so they stay above the trailer block, the only part the audit reads.
+// A merge commit's message: why the change was made, who reviewed it and how it tried to land before, then the
+// trailers the audit reads and GitHive's stamp over them. Every place a batch lands uses it, so all write the same
+// thing. The intent and evidence are agents' own words, and the attempts quote others', so they stay above the trailer
+// block, the only part the audit reads.
 
 /** What a merge records: the change, its agent, the records it checked, and what its checks ran on. */
 export interface MergeClaim {
@@ -24,6 +25,8 @@ export interface MergeClaim {
 	/** Why the change was made, from its claim. */
 	intent?: string;
 	reviews?: MergeReview[];
+	/** Its earlier attempts to land, oldest first: conflicts, failed checks (see RepoCache.noteAttempt). */
+	attempts?: string[];
 }
 
 export interface MergeReview {
@@ -36,6 +39,10 @@ const SUBJECT_MOST = 72;
 const BODY_WIDTH = 72;
 const EVIDENCE_MOST = 200;
 const INTENT_TRAILER_MOST = 200;
+/** The most earlier attempts a story lists: the newest. */
+export const ATTEMPTS_MOST = 5;
+/** The most characters of each attempt's line in a story. */
+export const ATTEMPT_LINE_MOST = 200;
 
 // Agent-written text as one line, cut to `most` characters.
 function oneLine(text: string, most: number) {
@@ -56,22 +63,27 @@ function wrapped(text: string, width = BODY_WIDTH) {
 	return line ? [...lines, line] : lines;
 }
 
-// The subject and body: the change's intent, and each approval's evidence.
+// The subject and body: the change's intent, each approval's evidence, and its earlier attempts to land.
 function storyOf(claimed: MergeClaim) {
 	const merged = `Merge ${claimed.change} by ${claimed.author}`;
 	const intent = claimed.intent ? oneLine(claimed.intent, Number.POSITIVE_INFINITY) : "";
-	if (!intent) return [merged, ""];
-	const lines = [oneLine(intent, SUBJECT_MOST), "", `${merged}.`];
+	// Without an intent, the subject says only who merged what.
+	const lines = intent ? [oneLine(intent, SUBJECT_MOST), "", `${merged}.`] : [merged];
 	if (intent.length > SUBJECT_MOST) lines.push("", ...wrapped(intent));
-	const reviews = claimed.reviews ?? [];
-	if (reviews.length) {
-		lines.push("", "Reviewed by:");
-		for (const review of reviews) {
-			const evidence = oneLine(review.evidence, EVIDENCE_MOST);
-			lines.push(`- ${review.reviewer} (${review.role}): ${evidence}`);
-		}
-	}
+	const reviews = (claimed.reviews ?? []).map(
+		(review) => `- ${review.reviewer} (${review.role}): ${oneLine(review.evidence, EVIDENCE_MOST)}`,
+	);
+	const attempts = (claimed.attempts ?? [])
+		.slice(-ATTEMPTS_MOST)
+		.map((attempt) => oneLine(`- ${attempt}`, ATTEMPT_LINE_MOST));
+	section(lines, "Reviewed by:", reviews);
+	section(lines, "Earlier attempts:", attempts);
 	return [...lines, ""];
+}
+
+// A heading and its lines, after a blank line, when there are any.
+function section(lines: string[], heading: string, items: string[]) {
+	if (items.length) lines.push("", heading, ...items);
 }
 
 export async function mergeMessage(claimed: MergeClaim, stamper?: Stamper) {

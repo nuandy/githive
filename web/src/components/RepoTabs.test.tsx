@@ -87,6 +87,29 @@ describe("a repo", () => {
 		expect(older).not.toMatch(/claims record|Sharded claims|<dt>Claims<\/dt>|<dt>Votes<\/dt>/);
 	});
 
+	it("says when a claim frees up if its agent goes quiet, where it does at a time", () => {
+		const at = (hour: number, minute: number) => new Date(2026, 9, 11, hour, minute).toISOString();
+		const now = Date.parse(at(14, 0));
+		const claim = snapshot.claims[0]!;
+		const claims = [
+			{ ...claim, change: "c-1", since: at(9, 0), lease: { waitingOn: "agent" as const, freeAfter: at(14, 30) } },
+			{ ...claim, change: "c-2", since: at(10, 0), lease: { waitingOn: "agent" as const, freeAfter: at(13, 45) } },
+			{ ...claim, change: "c-3", since: at(11, 0), lease: { waitingOn: "reviewers" as const } },
+		];
+		const html = renderToStaticMarkup(
+			<ChangeList snapshot={{ ...snapshot, claims }} repo="acme/docs-site" now={now} />,
+		);
+		const rows = html.split('<li class="change-row">').slice(1);
+		expect(rows.map((row) => row.match(/change-row__id">([^<]+)/)?.[1])).toEqual(["c-3", "c-2", "c-1"]);
+		expect(rows[2]).toMatch(
+			/class="change-row__lease" title="Free after 14:30 if its agent does nothing more\. Claiming again renews it\."> · <svg[^>]*>.*<\/svg>free after 14:30<\/span>/,
+		);
+		// Past its time, anyone may take it: said in the warning tone.
+		expect(rows[1]).toMatch(/class="change-row__lease tone-warn"[^>]*> · <svg[^>]*>.*<\/svg>free since 13:45<\/span>/);
+		// Waiting on review, it never frees: the list says nothing, the change's page says why.
+		expect(rows[0]).not.toContain("change-row__lease");
+	});
+
 	it("shows one claim like a pull request, with its commits, votes and hosted agents", () => {
 		const html = renderToStaticMarkup(
 			<ChangePage

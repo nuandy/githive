@@ -463,9 +463,13 @@ it off.
 
 Then it makes a merge commit, never a fast-forward. Its subject is the
 change's intent, as its claim gave it, and its body names the change and its
-agent, the intent in full when the subject had to shorten it, and each
-approval with its reviewer's evidence, so `git log`, `git blame` and a GitHub
-mirror say why every change was made and who checked it. The audit reads only
+agent, the intent in full when the subject had to shorten it, each
+approval with its reviewer's evidence, and the change's earlier attempts to
+land (its conflicts and failed checks, as the repo's RepoCache kept them: the
+newest five, a line each), so `git log`, `git blame` and a GitHub
+mirror say why every change was made, who checked it and what it ran into.
+The attempts are asked for once per batch and are only the story: if asking
+fails or is slow, the batch lands without them. The audit reads only
 the trailers, the message's last paragraph, so nothing an agent wrote above
 them can pose as one:
 
@@ -583,6 +587,16 @@ checked once more (a flaky run isn't a verdict), then put out:
 evidence. Its agent sees it in `status` like any rejection,
 and keeps it out of later batches until it has a new commit: `merge` refuses
 that commit at once, with the failure, rather than check it a third time.
+A change that doesn't merge while its batch lands (with no checks, or in a
+batch that only touches files they skip) is put out the same way: its
+rejection names the conflict (a few files, then how many more, within 2,000
+characters) and who changed its files, and the rest of the batch lands
+without it. Only git's word puts a change out: the Gate names the change whose
+merge failed. When it lists no files, that change alone is test-merged onto
+the branch, for at most 30 seconds, to name them; if that merges cleanly, or a
+fetch, a commit or a push failed instead, the landing fails as before. A batch
+that was checked was checked with that change, so its rest waits for the next
+batch, checked without it.
 
 **The audit reads the branch through Artifacts' API, not a clone.** `log` lists the
 first-parent chain (a page at a time, until the baseline), and each merge's
@@ -768,6 +782,41 @@ only if its fork is the fork of the agent holding the claim; any other is
 read. The subscription sees every namespace in the account, so each Worker
 keeps only its own (`ARTIFACTS_NAMESPACE`), and production and the bench
 each have their own queue, since a queue has one consumer.
+
+**The same events drive awareness** ([awareness.md](awareness.md)), once a
+batch's heads are noted and its messages acked: that work is advice, so a
+failure in it is logged and never has a push delivered again. A push to
+`changes/<change>` on the fork of the agent holding its claim (read from the
+claims advice) is footprinted: the change is placed on its branch through
+Artifacts' API (`changeAgainst`), and its changed TypeScript and JavaScript
+files, at most 50, are read from the fork at the base and the head and parsed
+in the Worker (`src/footprint/`). Its footprint is the exported names it
+alters and the names its files use, each import resolved to a file that
+exists at the head. Compared with the other open changes into the same
+branch, a change that alters a name another uses gives both agents a
+`heads_up` notice, once per alteration (a later push that keeps the same
+signature tells nothing new). A push to a branch of a
+project's own repo (a landing, or plain git) is read commit by commit along
+the first parents from where the event says the branch was (or the last commit
+analysed), at most 50: each against its first parent, which for a GitHive merge
+is the change's effect. Every open change into that branch that uses a name a
+commit altered gets an `interface` notice, naming who landed it from a merge
+commit's trailers (a plain commit's are ignored), or its author for plain
+git, and the landed change's footprint goes. Nothing is read while no open
+change goes into the branch.
+What it keeps is in the repo's FootprintCache (`footprints:<repo>`): files'
+facts by blob and path (a blob never changes), the open footprints with an
+index from each file's name to the changes that alter or use it, which notices
+were told, and the last commit analysed per branch. It writes notices and hive
+events into the RepoCache in one call a batch. Everything is counted, not
+timed (a Worker's clock stands still during CPU work): 200 parses, 4 million
+characters and 2,000 Artifacts reads a batch, a few seconds of CPU against the
+Worker's 60 s limit (`limits.cpu_ms`), files over 256 KB skipped without being
+decoded, a grammar that fails to load tried once a batch, 50 heads-ups and 200
+interface notices a push, 2,000 open
+footprints a repo. Every open change that uses a name is indexed (none is
+dropped to make room), and at most 500 of them are read for one name at once,
+logged when that's hit. Losing any of it costs only missed hints.
 
 **Workspaces in turn.** A merge's first look at its change and a check each
 copy the project as kept for the isolate (Express shallow: 3.6 MB), fetch
@@ -974,12 +1023,16 @@ to merge changes that had landed, all at once. It's gone.
 `news`: what landed on the project's branch since that agent was last told,
 others' changes only, each with its files, agent, intent and commit, and a
 line saying it ("main changed src/billing/invoice.ts: c-7 by agent-b, \"add
-partial refunds\""). The repo's RepoCache keeps where each agent was last told;
-its first call tells it nothing old. A merge or a check that conflicts with
-the branch names, for each file in conflict, the change that last landed on it,
-with its agent, intent and commit (each landing's outcome keeps its files and
-intent, a dozen paths and 140 characters at most), so the agent knows what it's
-reconciling with and whom to ask.
+partial refunds\""), marked `kind: "landed"`. The repo's RepoCache keeps where
+each agent was last told; its first call tells it nothing old. The agent's
+notices follow, about its changes into any branch, each with its own `kind`,
+`says` and `branch` (see [awareness.md](awareness.md)). News goes only to the agent the call is verified
+as, by its sign-in or key, never to one an argument names, so a person merging
+from the dashboard doesn't use up the agent's news. A merge or a check that
+conflicts with the branch names, for each file in conflict, the change that
+last landed on it, with its agent, intent and commit (each landing's outcome
+keeps its files and intent, a dozen paths and 140 characters at most), so the
+agent knows what it's reconciling with and whom to ask.
 
 **Backlog items aren't reserved.** Two agents picking the same piece both
 claim it under its id, and the claim decides: the second is refused as
@@ -1447,9 +1500,13 @@ only), an agent token (`ghv_…`, also given out over OAuth), or a person's
 session. Reads of a public repo, its pages and routes, need no sign-in. The
 dashboard lists repos and opens each one on its Hive: the agents at work, what
 each is doing, what's landing, and a live feed of claims, pushes, votes and
-landings. That feed is a rolling log of a repo's last 100 events in its
-RepoCache, each under a key of its own (`src/hive-events.ts`), sent to open pages as they happen; losing it
-loses nothing, since the records in Git hold the truth. A repo's other tabs
+landings, and of interface changes, heads-ups and conflicts. That feed is a
+rolling log of a repo's last 100 events in its RepoCache, each under a key of
+its own (`src/hive-events.ts`), sent to open pages as they happen; losing it
+loses nothing, since the records in Git hold the truth. The awareness events
+come from the push consumer through the repo's FootprintCache, beside the
+RepoCache, which keeps parsed files and open changes' footprints and is as
+much a hint. A repo's other tabs
 show its changes (one branch at a time), what landed on a branch and why
 (History), its claims as a map, its code at any branch or commit, its agents,
 the audit, and what's landing (the batch being checked, and what landed or
@@ -1509,5 +1566,11 @@ one RepoIndex; the records in Git are what count.
   be checked again, and the next batch read again.
 - **Without a stamp key** nothing is stamped or verified, and the audit takes
   names as written.
+- **The parser shares agents' isolates.** Awareness parses in the main
+  Worker's queue consumer, and web-tree-sitter's 32 MiB of wasm memory, which
+  never shrinks, stays in an isolate that also serves agents' calls (128 MB in
+  all). Files over 256 KB are skipped so it doesn't grow, and each new high is
+  logged; whether to move the consumer into a Worker of its own is open (see
+  [awareness.md](awareness.md)).
 
 An earlier elected-coordinator design is kept as the tag `elected-mode-final`.

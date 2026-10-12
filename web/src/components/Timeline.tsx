@@ -23,6 +23,8 @@ export function kindIcon(kind: TimelineKind, tone: Tone): IconName {
 			return "merge";
 		case "abandoned":
 			return "ban";
+		case "attempt":
+			return "alert";
 		default:
 			return "dot";
 	}

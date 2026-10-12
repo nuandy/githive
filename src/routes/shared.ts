@@ -69,12 +69,13 @@ export async function forgetRepo(env: Env, repo: string) {
 		.catch((err) => console.error(`forgetting ${repo}'s tokens, views and snapshot failed`, String(err)));
 }
 
-// The repo's RepoCache, and the RecordCaches and ChangeCache beside it.
+// The repo's RepoCache, and the RecordCaches, ChangeCache and FootprintCache beside it.
 async function forgetCaches(env: Env, repo: string) {
 	if (!env.REPO_CACHE) return;
 	const recordCaches = await rpc(env.REPO_CACHE.getByName(`repo:${repo}`).clearViews());
 	await Promise.all([
 		...recordCaches.map((name) => env.RECORD_CACHE.getByName(name).forget()),
 		changeCache(env, repo).forget(),
+		env.FOOTPRINT_CACHE?.getByName(`footprints:${repo}`).forget(),
 	]);
 }

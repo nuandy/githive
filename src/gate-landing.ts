@@ -16,7 +16,11 @@ export const pushBusy = (output: string) => /receive_pack_busy|repository is bus
 
 export type ReadChange = { change: string; head: string; files: string[] } | { change: string; error: string };
 export type LandingMerge = BatchSource & { head: string; claimed: Omit<MergeClaim, "base"> };
-export type LandingResult = { commits: string[] } | { moved: true } | { error: string };
+/** A change that didn't merge onto the batch, and the files it conflicted on, where git listed them. */
+export type LandingConflict = { change: string; files: string[] };
+export type LandingResult = { commits: string[] } | { moved: true } | { error: string; conflict?: LandingConflict };
+/** The batch merged for checks on Actions, or why it couldn't be: with the change that didn't merge and its files. */
+export type ChecksResult = { tip: string } | { failed: string; conflict?: LandingConflict };
 export type ChecksChange = { change: string; remote: string; token: string; ref: string; head: string };
 export type ChecksBranch = {
 	changes: ChecksChange[];
@@ -178,23 +182,40 @@ async function commitMerge(
 	merge: LandingMerge,
 	base: string,
 	stamper: Stamper | undefined,
-): Promise<{ commit: string } | { error: string }> {
+): Promise<{ commit: string } | { error: string; conflict?: LandingConflict }> {
 	const identity = `-c user.name="${BOT.name}" -c user.email="${BOT.email}"`;
-	// Always a merge commit, never a fast-forward, because the audit reads the merge's trailers.
+	// Always a merge commit, never a fast-forward, because the audit reads the merge's trailers. The conflicted files
+	// are listed between two markers, so the Worker can name who changed them.
 	const script =
-		`git merge -q --no-ff --no-commit ${merge.head} >/tmp/merge.out 2>&1 || { echo CONFLICT; ` +
-		"git diff --name-only --diff-filter=U; cat /tmp/merge.out; git merge --abort; exit 1; }\n" +
+		`git merge -q --no-ff --no-commit ${merge.head} ${MERGE_OR_LIST}\n` +
 		`git ${identity} commit -q --no-verify -F - >/tmp/commit.out 2>&1 || { cat /tmp/commit.out; exit 2; }\n` +
 		"git rev-parse HEAD";
 	const message = await mergeMessage({ ...merge.claimed, base }, stamper);
 	const ran = await run(container, ["bash", "-c", script], WORKDIR, message);
-	if (ran.exitCode === 1)
+	// Exit 1 is git merge failing, which names the change even when it listed no files (see conflictIn in
+	// merge-land.ts): a failed commit or push isn't a conflict, and says nothing of one.
+	if (ran.exitCode === 1) {
+		const { files, output } = conflictListed(ran.output);
 		return {
-			error: `merging ${merge.change} onto the batch failed: ${clip(ran.output.replace(/^CONFLICT\n/, ""), 500)}`,
+			error: `merging ${merge.change} onto the batch failed: ${clip(output, 500)}`,
+			conflict: { change: merge.change, files },
 		};
+	}
 	if (ran.exitCode !== 0) return { error: `committing ${merge.change}'s merge failed: ${clip(ran.output, 500)}` };
 	return { commit: ran.output.trim() };
 }
+
+// The output of a merge that failed, with the conflicted files it listed between CONFLICT and CONFLICT-END taken out.
+function conflictListed(output: string) {
+	const [, listed = "", said = ""] = output.match(/^CONFLICT\n([\s\S]*?)CONFLICT-END\n([\s\S]*)$/) ?? [];
+	const files = listed.split("\n").filter(Boolean);
+	return { files, output: listed || said ? `${listed}${said}` : output.replace(/^CONFLICT\n/, "") };
+}
+
+// A merge that lists the files it conflicted on between two markers, then gives up, so the Worker can name them.
+const MERGE_OR_LIST =
+	">/tmp/merge.out 2>&1 || { echo CONFLICT; git -c core.quotePath=false diff --name-only --diff-filter=U; " +
+	"echo CONFLICT-END; cat /tmp/merge.out; git merge --abort; exit 1; }";
 
 /**
  * Pushes the checkout to the project's branch only if the branch is still exactly at the base. A plain push would
@@ -224,10 +245,7 @@ async function pushWithLease(container: Container, input: BatchBase) {
  * Merges a batch onto `baseHead` as it will land and force-pushes it to `ref` on a connected GitHub repo, whose
  * Actions check it.
  */
-export async function pushForChecks(
-	container: Container,
-	input: BatchBase & ChecksBranch,
-): Promise<{ tip: string } | { failed: string }> {
+export async function pushForChecks(container: Container, input: BatchBase & ChecksBranch): Promise<ChecksResult> {
 	const failed = await fetchMissing(container, input.changes);
 	for (const [index, why] of failed) return { failed: `fetch of ${input.changes[index]?.change} failed: ${why}` };
 	await checkoutDetached(container, input.baseHead);
@@ -235,12 +253,15 @@ export async function pushForChecks(
 		const merged = await run(container, [
 			"bash",
 			"-c",
-			`git merge -q --no-ff -m "Check ${change.change} with the batch" ${change.head} ` +
-				">/tmp/merge.out 2>&1 || { git diff --name-only --diff-filter=U; cat /tmp/merge.out; git merge " +
-				"--abort; exit 1; }",
+			`git merge -q --no-ff -m "Check ${change.change} with the batch" ${change.head} ${MERGE_OR_LIST}`,
 		]);
-		if (merged.exitCode !== 0)
-			return { failed: `${change.change} doesn't merge onto the batch: ${clip(merged.output, 500)}` };
+		if (merged.exitCode !== 0) {
+			const { files, output } = conflictListed(merged.output);
+			return {
+				failed: `${change.change} doesn't merge onto the batch: ${clip(output, 500)}`,
+				...(files.length ? { conflict: { change: change.change, files } } : {}),
+			};
+		}
 	}
 	const tip = (await run(container, ["git", "rev-parse", "HEAD"])).output.trim();
 	const pushed = await gitWithToken(

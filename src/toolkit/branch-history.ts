@@ -28,6 +28,11 @@ export interface HistorySource {
 	log(ref: string, limit: number, offset: number): Promise<CommitMeta[]>;
 	readCommit(hash: string): Promise<CommitMeta | null>;
 	readTree(hash: string): Promise<TreeEntry[] | null>;
+	/**
+	 * A blob's bytes, or null if the repo has no blob by that hash. Optional, so sources that never read files
+	 * needn't have it. The bytes may be shared with other reads, so they're never changed.
+	 */
+	readBlob?(hash: string): Promise<Uint8Array | null>;
 }
 
 /** A cache of each commit's files changed from its first parent. Commits never change, so entries never expire. */

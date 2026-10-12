@@ -1,6 +1,6 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { ago, NOW, repoSnapshot, visibleText } from "../test/fixtures";
+import { ago, inlineText, NOW, repoSnapshot, visibleText } from "../test/fixtures";
 import { Hive } from "./HiveTab";
 
 // The Hive tab: who works on the repo, what each is doing, and that nothing assigns the work.
@@ -38,6 +38,70 @@ describe("the Hive tab", () => {
 		const text = visibleText(html);
 		expect(text).toContain("Right now");
 		expect(text.indexOf("agent-c landed c-1")).toBeLessThan(text.indexOf("agent-c pushed to c-1"));
+	});
+
+	it("marks what agents hear apart in the feed, each linking to the change it's about", () => {
+		const claim = repoSnapshot.claims[0]!;
+		const claims = [
+			{ ...claim, change: "c-12", agent: "bob" },
+			{ ...claim, change: "c-3", agent: "bob" },
+			{ ...claim, change: "c-9", agent: "dan" },
+		];
+		const events = [
+			{
+				kind: "interface" as const,
+				agent: "alice",
+				change: "c-12",
+				other: "bob",
+				commit: "0123456789ab",
+				detail: "loadSettings",
+				at: ago(1),
+			},
+			{
+				kind: "heads_up" as const,
+				agent: "bob",
+				change: "c-3",
+				other: "carol",
+				detail: "loadSettings, Store",
+				at: ago(2),
+			},
+			{ kind: "conflicted" as const, agent: "dan", change: "c-9", detail: "invoice.ts", at: ago(3) },
+			{ kind: "landed" as const, agent: "dan", change: "c-8", commit: "c0ffee", at: ago(4) },
+		];
+		const html = renderToStaticMarkup(
+			<Hive
+				repo="acme/docs-site"
+				branch="main"
+				snapshot={{ ...repoSnapshot, claims }}
+				events={events}
+				showsFeed
+				now={NOW}
+			/>,
+		);
+		// Each feed line's words, up to its time.
+		const feed = html
+			.split('<li class="hive-tab__event')
+			.slice(1)
+			.map((line) => inlineText(line.slice(line.indexOf(">") + 1, line.indexOf("<time"))));
+		expect(feed).toEqual([
+			"alice landed an interface change bob uses in c-12 · loadSettings",
+			"bob and carol are changing things each other uses in bob's c-3 · loadSettings, Store",
+			"dan's merge conflicted on invoice.ts in c-9",
+			"dan landed c-8",
+		]);
+		for (const change of ["c-12", "c-3", "c-9"])
+			expect(html).toContain(`href="#/repos/acme/docs-site/changes/${change}"`);
+		// Each with a quiet marker of its own, named for screen readers; what agents did has none.
+		expect(html).toMatch(
+			/hive-tab__event--interface"><span><svg class="icon hive-tab__marker"[^>]*aria-label="Interface change"/,
+		);
+		expect(html).toMatch(
+			/hive-tab__event--heads_up"><span><svg class="icon hive-tab__marker"[^>]*aria-label="Heads-up"/,
+		);
+		expect(html).toMatch(
+			/hive-tab__event--conflicted"><span><svg class="icon hive-tab__marker"[^>]*aria-label="Conflict"/,
+		);
+		expect(html).toMatch(/hive-tab__event--landed"><span><strong>/);
 	});
 
 	it("says the feed is quiet when nothing has happened lately", () => {

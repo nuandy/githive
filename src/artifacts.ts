@@ -76,6 +76,13 @@ export async function withHistory<T>(
 			log: (ref, limit, offset) => retryArtifacts(() => call("log", name, () => rpc(repo.log({ ref, limit, offset })))),
 			readCommit: (hash) => retryArtifacts(() => call("readCommit", name, () => rpc(repo.readCommit(hash)))),
 			readTree: (hash) => retryArtifacts(() => call("readTree", name, () => rpc(repo.readTree(hash)))),
+			readBlob: (hash) =>
+				retryArtifacts(() =>
+					call("readBlob", name, async () => {
+						const blob = await rpc(repo.readBlob(hash));
+						return blob ? new Uint8Array(await blob.arrayBuffer()) : null;
+					}),
+				),
 		}),
 	);
 }

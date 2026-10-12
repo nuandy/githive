@@ -81,7 +81,7 @@ export async function handleRpc(request: RpcRequest, ctx: McpContext): Promise<o
 async function callToolRpc(request: RpcRequest, ctx: McpContext) {
 	const name = request.params?.name;
 	if (typeof name !== "string" || !TOOLS.some((tool) => tool.name === name))
-		return rpcError(request.id, -32602, `unknown tool ${String(name)}`);
+		return rpcError(request.id, -32602, `unknown tool ${String(name)}\nnext: see tools/list for GitHive's tools`);
 	// Log the tool first, so the runtime's own log lines for the request can be told apart by tool.
 	// Log the tool and repo only, never the caller.
 	const from = Date.now();
@@ -108,11 +108,13 @@ async function callToolRpc(request: RpcRequest, ctx: McpContext) {
 	} catch (err) {
 		if (counting) logCounts(name, repoId, counting);
 		console.log(`mcp ${name} failed after ${Date.now() - from} ms; isolate caches: ${describeCaches()}`);
-		// Tool failures go back to the agent as results it can act on, not protocol errors.
+		// Tool failures go back to the agent as results it can act on, not protocol errors: what failed, then what to
+		// do about it where that's known.
 		const failed = statusOf(err);
 		// Log GitHive's own failures with their stack. The agent's answer says only what failed.
 		if (failed.status >= 500) console.error(`${name} failed: ${err instanceof Error ? err.stack : failed.message}`);
-		return reply(request.id, { content: [{ type: "text", text: failed.message }], isError: true });
+		const text = failed.next ? `${failed.message}\nnext: ${failed.next}` : failed.message;
+		return reply(request.id, { content: [{ type: "text", text }], isError: true });
 	}
 }
 

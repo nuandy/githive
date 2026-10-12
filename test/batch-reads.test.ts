@@ -6,6 +6,7 @@ import {
 	artifactsInspect,
 	changeAgainst,
 	forgetChains,
+	touchedSince,
 	type Placed,
 	type ReadHistory,
 	type SharedPlacements,
@@ -260,6 +261,7 @@ describe("a change against main through Artifacts' API", () => {
 			head: "c1",
 			files: ["c.txt"],
 			both: [],
+			base: "m1",
 		});
 	});
 
@@ -272,6 +274,7 @@ describe("a change against main through Artifacts' API", () => {
 			head: "c2",
 			files: ["b.txt", "c.txt"],
 			both: ["b.txt"],
+			base: "m1",
 		});
 	});
 
@@ -284,6 +287,7 @@ describe("a change against main through Artifacts' API", () => {
 			head: "c5",
 			files: ["lib/x.js"],
 			both: ["lib/x.js"],
+			base: "m1",
 		});
 	});
 
@@ -328,8 +332,84 @@ describe("a change against a busy main", () => {
 			head: "c1",
 			files: ["c.txt"],
 			both: [],
+			base: "m1",
 		});
 		expect(reads.filter((read) => read.startsWith("proj ")).sort()).toEqual(["proj t-m1", "proj t-m9"]);
+	});
+});
+
+describe("who changed a file since a change left the branch", () => {
+	// main's commits, newest first, each with its message and author, and each its own tree of a.txt and b.txt.
+	const step = (hash: string, parent: string, message: string, author = "githive") => ({
+		...commit(hash, [parent]),
+		message,
+		author: { name: author },
+	});
+	const merged = (change: string, agent: string, intent?: string) =>
+		[
+			intent ?? `Merge ${change} by ${agent}`,
+			"",
+			`GitHive-Change: ${change}`,
+			...(intent ? [`GitHive-Intent: ${intent}`] : []),
+			"GitHive-Format: 2",
+			`GitHive-Agent: ${agent}`,
+			"GitHive-Claims: c1",
+		].join("\n");
+	const treeOf = (a: string, b: string) => [blob("a.txt", a), blob("b.txt", b)];
+	const history =
+		(chain: CommitMeta[], tree: Record<string, TreeEntry[]>, reads: string[] = []): ReadHistory =>
+		(_repo, read) =>
+			read({
+				log: async (_ref, limit, offset) => chain.slice(offset, offset + limit),
+				readCommit: async () => null,
+				readTree: async (hash) => (reads.push(hash), tree[hash] ?? null),
+			});
+
+	it("names every commit since the base that touched the file, with its agent and intent", async () => {
+		const chain = [
+			step("h5", "h4", merged("c-9", "bob", "tidy the totals")),
+			step("h4", "h3", "fix a typo\n\nIt said tota.", "carol"),
+			step("h3", "h2", merged("c-8", "alice")),
+			step("h2", "h1", merged("c-7", "alice", "round to cents")),
+			// The change left main here, so what came before isn't named.
+			step("h1", "h0", merged("c-1", "dan", "older")),
+			step("h0", "", "start"),
+		];
+		const tree = {
+			"t-h5": treeOf("a2", "b4"),
+			"t-h4": treeOf("a2", "b3"),
+			"t-h3": treeOf("a2", "b2"),
+			"t-h2": treeOf("a2", "b1"),
+			"t-h1": treeOf("a1", "b1"),
+			"t-h0": treeOf("a0", "b0"),
+		};
+		expect(await touchedSince(history(chain, tree), "proj", "main", "h5", "h1", ["b.txt", "a.txt"])).toEqual([
+			{ file: "b.txt", commit: "h5", change: "c-9", agent: "bob", intent: "tidy the totals" },
+			{ file: "b.txt", commit: "h4", author: "carol", intent: "fix a typo" },
+			// A merge without an intent names its change and agent.
+			{ file: "b.txt", commit: "h3", change: "c-8", agent: "alice" },
+			{ file: "a.txt", commit: "h2", change: "c-7", agent: "alice", intent: "round to cents" },
+		]);
+	});
+
+	it("names at most five commits a file, and reads at most fifty commits", async () => {
+		// 60 commits since the base, each changing b.txt, and a.txt changed only by the oldest.
+		const chain = Array.from({ length: 61 }, (_, k) => step(`h${60 - k}`, `h${59 - k}`, `edit ${60 - k}`, "eve"));
+		const tree = Object.fromEntries(
+			Array.from({ length: 61 }, (_, k) => [`t-h${k}`, treeOf(k > 1 ? "a1" : "a0", `b${k}`)]),
+		);
+		const reads: string[] = [];
+		const named = await touchedSince(history(chain, tree, reads), "proj", "main", "h60", "h0", ["b.txt", "a.txt"]);
+		expect(named.map((touched) => `${touched.file} ${touched.commit}`)).toEqual(
+			["h60", "h59", "h58", "h57", "h56"].map((hash) => `b.txt ${hash}`),
+		);
+		expect(new Set(reads).size).toBeLessThanOrEqual(51);
+	});
+
+	it("finds nothing when the branch's history doesn't reach where it's asked from", async () => {
+		const chain = [step("h1", "h0", "one"), step("h0", "", "start")];
+		const tree = { "t-h1": treeOf("a1", "b1"), "t-h0": treeOf("a0", "b0") };
+		expect(await touchedSince(history(chain, tree), "proj", "main", "elsewhere", "h0", ["a.txt"])).toEqual([]);
 	});
 });
 

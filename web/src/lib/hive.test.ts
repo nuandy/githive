@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import type { RepoLanding, RepoSnapshot } from "../api";
+import type { HiveEvent, RepoLanding, RepoSnapshot } from "../api";
 import { ago, NOW } from "../test/fixtures";
-import { feedLine, hiveActivity, hiveCounts } from "./hive";
+import { afterAgent, feedLine, hiveActivity, hiveCounts } from "./hive";
 
 // The hive: what each agent on a repo is doing, worked out from its claims, votes and landing.
 
@@ -79,6 +79,46 @@ describe("the hive's live feed", () => {
 		const vote = { kind: "voted" as const, agent: "bob", commit: "login-head", verdict: "reject" as const };
 		const line = feedLine({ ...vote, detail: "security", at: ago(1) }, snapshot(claims));
 		expect(line).toMatchObject({ agent: "bob", action: "asked for changes to", change: "login", note: "as security" });
+	});
+
+	it("says who an interface change, a heads-up or a conflict matters to", () => {
+		const claims = [claim("c-12", "bob"), claim("c-3", "bob"), claim("c-9", "dan")];
+		const said = (event: Omit<HiveEvent, "at">) => {
+			const line = feedLine({ ...event, at: ago(1) }, snapshot(claims));
+			return `${line.agent}${afterAgent(line)}${line.action}`;
+		};
+		const landed = { kind: "interface" as const, agent: "alice", change: "c-12", commit: "0123456789abcdef" };
+		expect(said(landed)).toBe("alice landed an interface change bob uses");
+		expect(said({ kind: "heads_up", agent: "bob", change: "c-3", other: "carol" })).toBe(
+			"bob and carol are changing things each other uses",
+		);
+		expect(said({ kind: "conflicted", agent: "dan", change: "c-9", detail: "invoice.ts" })).toBe(
+			"dan's merge conflicted on invoice.ts",
+		);
+		// The change it's about is linked, and the names it's about noted; a conflict's files are in its words.
+		const line = feedLine({ ...landed, detail: "loadSettings", at: ago(1) }, snapshot(claims));
+		expect(line).toMatchObject({ kind: "interface", toChange: "in", change: "c-12", note: "loadSettings" });
+		// A heads-up's change is its own agent's; a conflict's is the change whose merge it was.
+		const headsUp = feedLine(
+			{ kind: "heads_up", agent: "bob", change: "c-3", other: "carol", at: ago(1) },
+			snapshot(claims),
+		);
+		expect(headsUp).toMatchObject({ toChange: "in bob's", change: "c-3" });
+		const conflicted = feedLine({ kind: "conflicted", agent: "dan", change: "c-9", at: ago(1) }, snapshot(claims));
+		expect(conflicted).toMatchObject({ toChange: "in", change: "c-9" });
+		// What agents did needs no words between: "ann landed c-12".
+		expect(
+			feedLine({ kind: "landed", agent: "ann", change: "c-12", at: ago(1) }, snapshot(claims)).toChange,
+		).toBeUndefined();
+		const conflict = { kind: "conflicted" as const, agent: "dan", change: "c-9", detail: "invoice.ts", at: ago(1) };
+		expect(feedLine(conflict, snapshot(claims)).note).toBeUndefined();
+		// Without a claim to say who, the other agent is unnamed.
+		expect(said({ kind: "interface", agent: "alice", change: "gone" })).toBe(
+			"alice landed an interface change another agent uses",
+		);
+		expect(said({ kind: "heads_up", agent: "bob", change: "c-3" })).toBe(
+			"bob and another agent are changing things each other uses",
+		);
 	});
 
 	it("shows a commit no claim is on by its short hash", () => {

@@ -1,0 +1,9 @@
+{
+	"$schema": "../../node_modules/wrangler/config-schema.json",
+	// A tiny Worker for the workerd tests (npm run test:workerd): only the footprint library, with GitHive's
+	// compatibility date and flags, so its .wasm loads the way it does in production.
+	"name": "githive-footprint-test",
+	"main": "./worker.ts",
+	"compatibility_date": "2026-10-01",
+	"compatibility_flags": ["nodejs_compat"],
+}

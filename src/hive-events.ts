@@ -15,18 +15,37 @@ export type HiveEventKind =
 	| "asked"
 	| "reverted"
 	| "added"
-	| "building";
+	| "building"
+	// Awareness (see docs/awareness.md): a landed change altered a name another change uses; two open changes each
+	// alter a name the other uses; a merge conflicted with the branch.
+	| "interface"
+	| "heads_up"
+	| "conflicted";
 
 export interface HiveEvent {
 	kind: HiveEventKind;
-	/** Who did it. A push names only its change; the claim on the change says whose it is. */
+	/**
+	 * Who did it. A push names only its change; the claim on the change says whose it is. For an interface change,
+	 * who landed it (a commit GitHive didn't make, its author).
+	 */
 	agent?: string;
+	/** For an interface change or a heads-up, the change it matters to. */
 	change?: string;
 	/** The commit pushed, voted on, landed or reverted. */
 	commit?: string;
 	/** A vote's verdict. */
 	verdict?: "approve" | "reject";
-	/** A few words on it: the intent claimed, the role voted as, why a landing failed. */
+	/**
+	 * The other agent: whose change uses an interface that changed, or the other side of a heads-up. Without it,
+	 * the claim on the change says.
+	 */
+	other?: string;
+	/** The other side's change, for a heads-up: one agent's two changes are two heads-ups, kept apart. */
+	otherChange?: string;
+	/**
+	 * A few words on it: the intent claimed, the role voted as, why a landing failed, the names an interface change
+	 * or a heads-up is about, the files a merge conflicted on.
+	 */
 	detail?: string;
 	at: string;
 }
@@ -34,8 +53,21 @@ export interface HiveEvent {
 /** How many events the log keeps; the newest are kept. */
 export const EVENTS_KEPT = 100;
 
-/** An event's key in the log: its time first, so keys sort oldest first, and the same for an event sent twice. */
-export const eventKey = (event: HiveEvent) => [event.at, event.kind, event.agent, event.change, event.commit].join(" ");
+/**
+ * An event's key in the log: its time first, so keys sort oldest first, and the same for an event sent twice. It
+ * leaves out `detail`, so two events that differ only there are kept as one: an emitter writes one event per
+ * occurrence, such as one per change an interface change matters to.
+ */
+export const eventKey = (event: HiveEvent) =>
+	[
+		event.at,
+		event.kind,
+		event.agent,
+		event.change,
+		event.commit,
+		...(event.other ? [event.other] : []),
+		...(event.otherChange ? [event.otherChange] : []),
+	].join(" ");
 
 const textOf = (args: Record<string, unknown>, key: string) =>
 	typeof args[key] === "string" ? (args[key] as string) : undefined;
