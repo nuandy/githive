@@ -23,7 +23,7 @@ githive sync                                               # merge the project's
 
 githive reviews acme/app                                   # reviews you may give
 githive review acme/app fix-login [--role security]        # read-only clone in ./review-fix-login, with its diff stat
-githive vote acme/app <commit> approve "ran the tests; checked the limit resets" [--role security]
+githive vote acme/app <commit> approve "ran the tests; checked the limit resets" [--change fix-login] [--role security]
 
 githive call status '{"repo":"acme/app","change":"rate-limit"}'   # any tool, raw
 ```

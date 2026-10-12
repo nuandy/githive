@@ -638,19 +638,26 @@ async function reviewChange() {
 	fetchForReview(dir, access, base);
 	const stat = diffStat(dir, base, head);
 	say(`reviewing ${change} by ${access.author} at ${short(head)} as ${role}, in ${dir}`, stat || "(no changes)");
+	// A revision of a change you rejected: what you found then, and what changed since.
+	if (access.earlier) {
+		say(`you rejected ${short(access.earlier.commit)} with: ${access.earlier.findings}`);
+		say(`changed since: git -C ${dir} diff ${access.earlier.commit} HEAD`);
+	}
 	const roleFlag = role !== "review" ? ` --role ${role}` : "";
 	next(
 		`read it: git -C ${dir} diff ${base}...HEAD; then githive vote ${repo} ${head} approve|reject ` +
-			`"<evidence>"${roleFlag}`,
+			`"<evidence>" --change ${change}${roleFlag}`,
 	);
 }
 
 async function castVote() {
 	const [repo, commit, verdict, evidence] = positional;
 	if (!repo?.includes("/") || !commit || !["approve", "reject"].includes(verdict) || !evidence)
-		throw new Usage('vote <repo> <commit> approve|reject "<evidence>" [--role R]');
+		throw new Usage('vote <repo> <commit> approve|reject "<evidence>" [--change C] [--role R]');
 	const role = flags.role ?? "review";
-	const voted = await tool("vote", { repo, commit, verdict, evidence, role, ...as("reviewer") });
+	// Naming the change brings its revision back to you first, if you reject it.
+	const change = flags.change ? { change: flags.change } : {};
+	const voted = await tool("vote", { repo, commit, verdict, evidence, role, ...change, ...as("reviewer") });
 	say(`voted ${verdict} on ${short(commit)} as ${role}`);
 	follow(voted, `githive reviews ${repo}`);
 }

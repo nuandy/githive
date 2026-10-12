@@ -16,7 +16,7 @@ Every request resolves to one caller (`src/auth/principal.ts`): an Access identi
 | Needs | Routes and tools |
 |---|---|
 | read | the repo's pages, its code, `claims`, `backlog`, `status`, `audit`, `credentials` for the project |
-| review | `reviews`, `credentials` for a change to review, `vote` (and a person's vote on the dashboard) |
+| review | `reviews`, `credentials` for a change to review, `vote`, `leave_review` (and a person's vote on the dashboard) |
 | write | `register`, `claim`, `release`, `credentials` for a change's fork, `merge`, `revert`, `add_work`, `ask_human`, `request_review`, `build`, `github_pr` (and merging or making a branch on the dashboard) |
 | admin | `settings`, a repo's visibility and collaborators, deleting it |
 
@@ -68,7 +68,7 @@ The Access team domain and application audience are public configuration in `wra
 | People, sessions, agents and their tokens, orgs, teams, permissions | D1 | [AES-256-GCM](https://developers.cloudflare.com/d1/reference/data-security/) |
 | MCP clients' OAuth grants | Workers KV | AES-256-GCM |
 | Push events (repo, branch, commit) on their way to the Worker | Cloudflare Queues | Not documented by Queues |
-| Each repo's caches: live updates, kept dashboard views, record tips and states, changes' heads, the fork queue and how each branch's landings turned out (RepoCache, RecordCache); changes' packs, which hold their code, for up to 2 hours (ChangeCache); names and signatures parsed from the code, and agents' notices (FootprintCache); a GitHub-connected repo's sync job and pull request (GitHubSync). Also the repo list's counts, cached Artifacts tokens, builders', reviewers' and check containers' state; hosted agents' state (each agent's change, the review it holds and what it has finished, and who started them, by handle); demo runs (the latest 20, each with its number, its repo, its starter's handle, its times and its reset change, the day's count and how many have run) | Durable Objects | AES-256 (LUKS) |
+| Each repo's caches: live updates, kept dashboard views, record tips and states, changes' heads, the fork queue and how each branch's landings turned out (RepoCache, RecordCache); changes' packs, which hold their code, for up to 2 hours (ChangeCache); names and signatures parsed from the code, and agents' notices (FootprintCache); a GitHub-connected repo's sync job and pull request (GitHubSync). Also the repo list's counts, cached Artifacts tokens, builders', reviewers' and check containers' state; hosted agents' state (each agent's change, the review it holds and what it has finished, the latest changes its reviewers rejected with their findings and the ID of that review's conversation with the model, and who started them, by handle); demo runs (the latest 20, each with its number, its repo, its starter's handle, its times and its reset change, the day's count and how many have run) | Durable Objects | AES-256 (LUKS) |
 | A repo's snapshot: a container's disk with its code checked out and its main branch's dependencies installed, which check containers, builders and reviewers start from | Cloudflare Containers | Not documented by Containers |
 
 Artifacts is in beta, and its own documentation doesn't yet state encryption at rest: the claim for repos rests on what it's built on. Ask Cloudflare for a direct statement, and whether Artifacts is in scope for its SOC 2 and ISO 27001 reports, before relying on it for compliance. Everything travels over TLS.
@@ -79,6 +79,7 @@ Artifacts is in beta, and its own documentation doesn't yet state encryption at 
 - The records in Git name a person as `person:<the first 12 hex digits of a SHA-256 of their email>`, never the email. An email is stored only in D1, to sign people in.
 - Records are signed (Ed25519) with a key only the Worker holds, so the audit can tell what went through GitHive from what was pushed around it.
 - GitHive never puts a person's email or verified identity into its hosted agents' instructions. Those agents do read the repo they work on, and Git history can carry commit authors' names and emails.
+- The model provider keeps hosted agents' conversations (OpenAI stores responses), which is what lets a reviewer that rejected a change continue the same conversation to check the fix. GitHive keeps only each conversation's last response ID.
 - A repo someone can't see answers as if it didn't exist.
 
 **Deleting a repo** deletes its code, history, records (its records repos too) and its agents' forks at once, and clears every cache and GitHub sync state GitHive kept for it. Its snapshot can't be deleted sooner than Containers allows: GitHive forgets it, so nothing starts from it again, and Containers drops it within 30 days.

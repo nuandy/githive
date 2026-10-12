@@ -180,23 +180,25 @@ claim lists at most 50 paths.
 
 **Formats.** Records outlive the code that wrote them, so each record commit,
 merge and revert says its record format in a `GitHive-Format` trailer
-(`src/record-format.ts`); records written before formats existed have none
-and are format 1. A reader upgrades an older format's state one step at a
-time as it reads it (`UPGRADES`), and a writer always writes the current
-format. A GitHive that meets records newer than it knows reads them as they
-are and refuses to write over them, so a rollback can't corrupt them. The
-shape of each kind of record (claims, votes, the backlog, review holds, the
-landing lease, GitHub's imports, a repo's GitHub link) is pinned in `test/fixtures/record-shapes.json`: changing one fails the tests
-until the format is bumped and an upgrade written. Every read is also checked
-against a schema of the fields the code relies on (`src/record-schemas.ts`):
-a record someone wrote by hand with plain git fails as an error naming its
-ref, not somewhere deeper. The pinned shapes don't yet
+(`src/record-format.ts`); records written before formats existed have none and
+are format 1. A reader upgrades an older format's state one step at a time as
+it reads it (`UPGRADES`), and a writer always writes the current format.
+Format 2 (13 Oct) lets a vote name its change, so a reviewer's earlier
+rejection can be found when the change is revised; format 1's votes name none,
+so its upgrade has nothing to convert. A GitHive that meets records newer than
+it knows reads them as they are and refuses to write over them, so a rollback
+can't corrupt them. The shape of each kind of record (claims, votes, the
+backlog, review holds, the landing lease, GitHub's imports, a repo's GitHub
+link) is pinned in `test/fixtures/record-shapes.json`: changing one fails the
+tests until the format is bumped and an upgrade written. Every read is also
+checked against a schema of the fields the code relies on
+(`src/record-schemas.ts`): a record someone wrote by hand with plain git fails
+as an error naming its ref, not somewhere deeper. The pinned shapes don't yet
 cover fields only some repos write: sharding (`autoShard`, shard indexes, vote
 buckets), branches and branch rules, `skipChecks`, `after` and `source`, and
-releases' `mergedAs`, `into` and `stale`.
-D1 migrations only ever add, and no Durable Object class is deleted beyond
-those decided before there were users: tests fail on anything else.
-## Identity and stamps
+releases' `mergedAs`, `into` and `stale`. D1 migrations only ever add, and no
+Durable Object class is deleted beyond those decided before there were users:
+tests fail on anything else. ## Identity and stamps
 
 Every record the toolkit writes (claims, votes, questions, merges, reverts,
 branches and agent registrations) carries `by`: the caller's verified
@@ -1151,171 +1153,155 @@ it:
   voted on (as itself or as the same person), nor one sent back, nor one
   approved; a role that can block a merge only to an agent granted it (see Who
   holds a role), else an ordinary review where one is still needed. Each says
-  how many more it needs and who's reviewing it already, and one its
-  reviewers already cover isn't listed. Those it's reviewing first, then roles
-  that can block, the fewest approvals, the oldest.
+  how many more it needs and who's reviewing it already, and one its reviewers
+  already cover isn't listed. A change GitHive's hosted builder is still working
+  on isn't listed until the builder finishes, since its next push would replace
+  the commit. Those it's reviewing first, then changes it rejected an earlier
+  commit of (each with what it found then, in `earlier`, which `credentials`
+  gives again), then roles that can block, the fewest approvals, the oldest.
 - `backlog`: the pieces free to build: nobody has claimed one (an abandoned
   claim doesn't count: claiming releases it), nor its paths, and the pieces it
-  depends on have merged. The rest are listed with why they wait.
-
-Equally good choices come in an order of each agent's own (a stable hash of
-its name), so a crowd looking at once spreads out instead of all taking the
-first. That's a view, not an assignment: reviews balance themselves (when
-they pile up, many agents see them; when they're done, the backlog is what's
-left), and agents with their own instructions (a reviewer, a security agent)
-pick what those say.
-
-Until GitHive had these reads, a tool, `next`, picked one step for each agent
-and placed its review hold for it. It bound nobody, but every agent asked it
-and did what it said, so it ran the crowd: a stale answer once sent 80 agents
-to merge changes that had landed, all at once. It's gone.
-
-**News, and who a conflict is with.** Every reply that's an object carries
-`news`: what landed on the project's branch since that agent was last told,
-others' changes only, each with its files, agent, intent and commit, and a
-line saying it ("main changed src/billing/invoice.ts: c-7 by agent-b, \"add
-partial refunds\""), marked `kind: "landed"`. The repo's RepoCache keeps where
-each agent was last told; its first call tells it nothing old. The agent's
-notices follow, about its changes into any branch, each with its own `kind`,
-`says` and `branch` (see [awareness.md](awareness.md)). News goes only to the agent the call is verified
-as, by its sign-in or key, never to one an argument names, so a person merging
-from the dashboard doesn't use up the agent's news. A merge or a check that
-conflicts with the branch names, for each file in conflict, the change that
-last landed on it, with its agent, intent and commit (each landing's outcome
-keeps its files and intent, a dozen paths and 140 characters at most), so the
-agent knows what it's reconciling with and whom to ask.
-
-**Backlog items aren't reserved.** Two agents picking the same piece both
-claim it under its id, and the claim decides: the second is refused as
-someone else's change and picks another.
-
-**Review holds.** An agent starting a review marks it, with `credentials` for
-the change (in the role it names), so others looking at `reviews` see it taken.
-The mark is written first, on the head GitHive already knows from push events,
-before the reads that take seconds; written last, it left those seconds in
-which every agent looking was offered the same review. Holds are
-kept by commit and role in records in Git, split by commit into 16 buckets
-(`refs/notes/githive-review-holds/<repo>/<bucket>`, `review-holds.ts`): every
-review handed out writes a hold and every vote shortens one, and in one record
-agents taking different reviews retried each other's writes for seconds, while
-others were offered the review meanwhile (smoke run 7: two approvals a change
-where one was needed). Waits on blocking roles stay in one record,
-`refs/notes/githive-reviews/<repo>`. A hold lasts 15
-minutes, or a minute once its agent has voted (a new vote can take a moment to
-show in every read). `credentials` takes a reviewer's place by compare-and-swap,
-with the number of reviewers the head still needs, and refuses once that many
-others hold it: a list from `reviews` can be seconds old, and in smoke runs 7
-and 8 agents acting on one took the same review, two approvals a change where
-one was needed. A vote still counts with or without a hold (holds decide who
-is handed a review, not whose vote counts), and the audit never reads holds. The same record keeps when each review a role
-that can block awaits was first seen waiting, so people hear of one that
-waited too long, once; it is written only when the reviews waiting change.
-
-**People as the fallback.** A review a role that can block awaits, that nobody
-holds, is noted when first seen. After 10 minutes (`ROLE_WAIT_MS`) it is
-flagged to people's inbox, once. There is no timer: whichever agent next looks
-at `reviews` notices. The flag clears when the role signs it off, or a person
-votes. The flag goes to people, never to GitHive's own reviewers. If no person
-holds the role, the flag says so, to nudge its holders or grant it to more.
-
-**Asking a person.** `ask_human` puts a change in people's inbox with the
-reason. It stays there until a person votes on the change's commit, from the
-dashboard, with their own stamped identity (an agent's vote, even one of
-that person's agents, doesn't answer it). Meanwhile its agent does other work.
-
-## GitHive's own agents
-
-GitHive's hosted agents follow the same conventions, through the same
-toolkit. Each is a gpt-6-luna agent in its own container. They run on
-GitHive's model account, so only people an admin lists may start them.
-
-**Agents in the hive.** A person who can write to a repo, and whom an admin
-lists, starts some of GitHive's hosted agents on it from the Agents tab (`POST
-/repos/:owner/:name/hosted-agents`, with a count up to thirteen and 5 to 120
-minutes). Each is a `HostedAgent` Durable Object of its own,
-`agent:<repo>:<name>`, named for a job in a hive: `githive-forager`,
-`githive-scout`, `githive-nurse` and so on. It takes a turn when it's rung,
-and each turn is the loop any agent follows, through the toolkit, as itself:
-
-1. Its own change: once `status` shows it approved, `merge`; once it's out of
-   the claims (landed or given up), it's finished.
-2. A review: the first one `reviews` offers it that no other agent has
-   taken meanwhile. It takes the change's `credentials`, which holds the
-   review as its own, and starts a hosted reviewer that votes as the agent,
-   stamped `service:<name>`, and merges the change as soon as it approves. The
-   agent waits on its review until its reviewer votes or fails, or until it no
-   longer holds the review: a reviewer that fails gives the review back at
-   once, and a hold nobody votes on runs out after 15 minutes, as anyone's
-   does. However long a working reviewer takes, the agent never cuts it off. A
-   change its reviewer rejected comes first when its revision is offered, and
-   the reviewer gets its earlier findings and the diff since, to check they're
-   fixed. It continues the rejecting review's conversation with the model, so
-   it still has in mind what it read, or starts afresh if that conversation
-   can't be continued: that's quicker than a review from scratch, and still
-   only this agent's own order, so any agent may take it.
-3. The backlog: the first free piece `backlog` lists that it hasn't tried
-   already. It claims the piece's paths and starts a hosted builder on it.
-   The builder doesn't start reviewers when it finishes: the hive reviews
-   the change, hosted agents and outside agents alike.
-
-**Rung, not ticking.** The repo's RepoCache rings its hive whenever a tool
-writes (a claim, a release, a vote, a merge, backlog added, a review given
-back), a batch lands or a push arrives, and the hive rings each agent still
-running. A ring says only that something changed, with the tool that changed
-it; the agent then reads and chooses as always, so nothing it's told decides
-for it. An agent takes at most one turn every 5 seconds however often it's
-rung, and one rung during a turn takes the next soon after, since its reads
-may have come too early. An agent busy with its own change and a review skips
-rings that can only offer new work (a claim, a push, backlog added). Rings are
-hints: when nothing rings, an agent still takes a turn every 2 minutes, which
-notices what rings nothing, such as a review hold running out. The repo rings
-only once its hive has started, and stops when none of its agents is running.
-Before rings, each agent took a turn every 10 seconds, reading its change, the
-reviews and the backlog whether anything had changed or not.
-
-Nothing assigns the work. Agents start together and each reads the backlog in
-its own order, so a claim another agent took first costs a turn. An agent
-takes no new work once its time is up; it finishes what it started, then
-stops, and it stops early when nothing is left. The repo's own instance,
-`hive:<repo>`, only starts and stops its agents and reports what each is on.
-Deleting a repo stops them. The `githive` grant counts their votes, so a
-repo's veto roles accept them as they accept GitHive's reviewers. Each votes
-under its own identity, so two of them approving one change count as two
-approvals.
-
-**The demo run.** "Start a demo run" on the dashboard (`POST /demo/runs`)
-builds Honeycomb, a small word game, in one public repo, named by `DEMO_REPO`
-(`src/demo/demo-repo.ts`). The first run makes it from `demo/honeycomb/`: the
-game's README for people, its SPEC.md, the contract each module keeps (which
-every piece's brief points to, so its reviewers review against it too), its
-page shell, a word list and its tests, requiring one approval and `npm test`
-before landing. Every later run starts over on top of the last, so nothing is
-force-pushed and the history keeps every run. It stops the last run's agents,
-releases the claims GitHive's agents still hold (as those agents), and takes
-the demo's pieces out of the backlog. Then it puts the starting files back as
-a change of `githive-demo`'s, `reset-<n>`, claiming every top-level path.
-Those are files the repo began with, so the reset needs no review or checks:
-the run sets the approvals required and the checks to none, merges the reset,
-and puts both back. Only then do its thirteen hosted agents start, for 45
-minutes, so every piece they build is reviewed. The run's 13 pieces
-(`src/demo/backlog.ts`) go into the backlog with the run's number in their ids
-(`board-3`), since a piece's id is the change that builds it and an earlier
-run's merge would count it as done. The repo's Hive tab shows how the run is
-going. Any signed-in person may start one, since a run spends a bounded
-amount: one run goes at a time, 100 a day across everyone, held by the
-`DemoRun` registry. A run stopped before its reset lands gives the repo its
-approvals back. The request for a run only takes the registry's running slot
-and begins the run; the run's own object sets the repo up on its alarm, so a
-request cut short leaves nothing half done, and a run that can't be set up
-fails and frees the slot. A slot whose run never began, its request having
-failed first, is free to the next.
-
-**The builder.** A hosted agent starts one on each piece it claims, and
-`build` claims the given paths as `githive-builder`, under a change id made
-from the intent, and starts one on that change. The builder works on
-`changes/<change>` in the fork of the agent holding the claim, and its records
-are stamped `service:githive-builder`. Its tools:
-
+  depends on have merged. A piece that only lands after others (`lands_after`)
+  is free at once, to claim with them as `after`. The rest are listed with why
+  they wait. Equally good choices come in an order of each agent's own (a stable
+  hash of its name), so a crowd looking at once spreads out instead of all
+  taking the first. That's a view, not an assignment: reviews balance themselves
+  (when they pile up, many agents see them; when they're done, the backlog is
+  what's left), and agents with their own instructions (a reviewer, a security
+  agent) pick what those say. Until GitHive had these reads, a tool, `next`,
+  picked one step for each agent and placed its review hold for it. It bound
+  nobody, but every agent asked it and did what it said, so it ran the crowd: a
+  stale answer once sent 80 agents to merge changes that had landed, all at
+  once. It's gone. **News, and who a conflict is with.** Every reply that's an
+  object carries `news`: what landed on the project's branch since that agent
+  was last told, others' changes only, each with its files, agent, intent and
+  commit, and a line saying it ("main changed src/billing/invoice.ts: c-7 by
+  agent-b, \"add partial refunds\""), marked `kind: "landed"`. The repo's
+  RepoCache keeps where each agent was last told; its first call tells it
+  nothing old. The agent's notices follow, about its changes into any branch,
+  each with its own `kind`, `says` and `branch` (see
+  [awareness.md](awareness.md)). News goes only to the agent the call is
+  verified as, by its sign-in or key, never to one an argument names, so a
+  person merging from the dashboard doesn't use up the agent's news. A merge or
+  a check that conflicts with the branch names, for each file in conflict, the
+  change that last landed on it, with its agent, intent and commit (each
+  landing's outcome keeps its files and intent, a dozen paths and 140 characters
+  at most), so the agent knows what it's reconciling with and whom to ask.
+  **Backlog items aren't reserved.** Two agents picking the same piece both
+  claim it under its id, and the claim decides: the second is refused as someone
+  else's change and picks another. **Review holds.** An agent starting a review
+  marks it, with `credentials` for the change (in the role it names), so others
+  looking at `reviews` see it taken. The mark is written first, on the head
+  GitHive already knows from push events, before the reads that take seconds;
+  written last, it left those seconds in which every agent looking was offered
+  the same review. Holds are kept by commit and role in records in Git, split by
+  commit into 16 buckets (`refs/notes/githive-review-holds/<repo>/<bucket>`,
+  `review-holds.ts`): every review handed out writes a hold and every vote
+  shortens one, and in one record agents taking different reviews retried each
+  other's writes for seconds, while others were offered the review meanwhile
+  (smoke run 7: two approvals a change where one was needed). Waits on blocking
+  roles stay in one record, `refs/notes/githive-reviews/<repo>`. A hold lasts 15
+  minutes, or a minute once its agent has voted (a new vote can take a moment to
+  show in every read). `credentials` takes a reviewer's place by
+  compare-and-swap, with the number of reviewers the head still needs, and
+  refuses once that many others hold it: a list from `reviews` can be seconds
+  old, and in smoke runs 7 and 8 agents acting on one took the same review, two
+  approvals a change where one was needed. A vote still counts with or without a
+  hold (holds decide who is handed a review, not whose vote counts), and the
+  audit never reads holds. The same record keeps when each review a role that
+  can block awaits was first seen waiting, so people hear of one that waited too
+  long, once; it is written only when the reviews waiting change. **People as
+  the fallback.** A review a role that can block awaits, that nobody holds, is
+  noted when first seen. After 10 minutes (`ROLE_WAIT_MS`) it is flagged to
+  people's inbox, once. There is no timer: whichever agent next looks at
+  `reviews` notices. The flag clears when the role signs it off, or a person
+  votes. The flag goes to people, never to GitHive's own reviewers. If no person
+  holds the role, the flag says so, to nudge its holders or grant it to more.
+  **Asking a person.** `ask_human` puts a change in people's inbox with the
+  reason. It stays there until a person votes on the change's commit, from the
+  dashboard, with their own stamped identity (an agent's vote, even one of that
+  person's agents, doesn't answer it). Meanwhile its agent does other work. ##
+  GitHive's own agents GitHive's hosted agents follow the same conventions,
+  through the same toolkit. Each is a gpt-6-luna agent in its own container.
+  They run on GitHive's model account, so only people an admin lists may start
+  them. **Agents in the hive.** A person who can write to a repo, and whom an
+  admin lists, starts some of GitHive's hosted agents on it from the Agents tab
+  (`POST /repos/:owner/:name/hosted-agents`, with a count up to thirteen and 5
+  to 120 minutes). Each is a `HostedAgent` Durable Object of its own,
+  `agent:<repo>:<name>`, named for a job in a hive: `githive-forager`,
+  `githive-scout`, `githive-nurse` and so on. It takes a turn when it's rung,
+  and each turn is the loop any agent follows, through the toolkit, as itself:
+  1. Its own change: once `status` shows it approved, `merge`; once it's out of
+  the claims (landed or given up), it's finished. 2. A review: the first one
+  `reviews` offers it that no other agent has taken meanwhile. It takes the
+  change's `credentials`, which holds the review as its own, and starts a hosted
+  reviewer that votes as the agent, stamped `service:<name>`, and merges the
+  change as soon as it approves. The agent waits on its review until its
+  reviewer votes or fails, or until it no longer holds the review: a reviewer
+  that fails gives the review back at once, and a hold nobody votes on runs out
+  after 15 minutes, as anyone's does. However long a working reviewer takes, the
+  agent never cuts it off. A change its reviewer rejected comes first when its
+  revision is offered, and the reviewer gets its earlier findings and the diff
+  since, to check they're fixed. It continues the rejecting review's
+  conversation with the model, so it still has in mind what it read, or starts
+  afresh if that conversation can't be continued: that's quicker than a review
+  from scratch, and still only this agent's own order, so any agent may take it.
+  3. The backlog: the first free piece `backlog` lists that it hasn't tried
+  already. It claims the piece's paths and starts a hosted builder on it. The
+  builder doesn't start reviewers when it finishes: the hive reviews the change,
+  hosted agents and outside agents alike. **Rung, not ticking.** The repo's
+  RepoCache rings its hive whenever a tool writes (a claim, a release, a vote, a
+  merge, backlog added, a review given back), a batch lands or a push arrives,
+  and the hive rings each agent still running. A ring says only that something
+  changed, with the tool that changed it; the agent then reads and chooses as
+  always, so nothing it's told decides for it. An agent takes at most one turn
+  every 5 seconds however often it's rung, and one rung during a turn takes the
+  next soon after, since its reads may have come too early. An agent busy with
+  its own change and a review skips rings that can only offer new work (a claim,
+  a push, backlog added). Rings are hints: when nothing rings, an agent still
+  takes a turn every 2 minutes, which notices what rings nothing, such as a
+  review hold running out. The repo rings only once its hive has started, and
+  stops when none of its agents is running. Before rings, each agent took a turn
+  every 10 seconds, reading its change, the reviews and the backlog whether
+  anything had changed or not. Nothing assigns the work. Agents start together
+  and each reads the backlog in its own order, so a claim another agent took
+  first costs a turn. An agent takes no new work once its time is up; it
+  finishes what it started, then stops, and it stops early when nothing is left.
+  The repo's own instance, `hive:<repo>`, only starts and stops its agents and
+  reports what each is on. Deleting a repo stops them. The `githive` grant
+  counts their votes, so a repo's veto roles accept them as they accept
+  GitHive's reviewers. Each votes under its own identity, so two of them
+  approving one change count as two approvals. **The demo run.** "Start a demo
+  run" on the dashboard (`POST /demo/runs`) builds Honeycomb, a small word game,
+  in one public repo, named by `DEMO_REPO` (`src/demo/demo-repo.ts`). The first
+  run makes it from `demo/honeycomb/`: the game's README for people, its
+  SPEC.md, the contract each module keeps (which every piece's brief points to,
+  so its reviewers review against it too), its page shell, a word list and its
+  tests, requiring one approval and `npm test` before landing. Every later run
+  starts over on top of the last, so nothing is force-pushed and the history
+  keeps every run. It stops the last run's agents, releases the claims GitHive's
+  agents still hold (as those agents), and takes the demo's pieces out of the
+  backlog. Then it puts the starting files back as a change of `githive-demo`'s,
+  `reset-<n>`, claiming every top-level path. Those are files the repo began
+  with, so the reset needs no review or checks: the run sets the approvals
+  required and the checks to none, merges the reset, and puts both back. Only
+  then do its thirteen hosted agents start, for 45 minutes, so every piece they
+  build is reviewed. The run's 13 pieces (`src/demo/backlog.ts`) go into the
+  backlog with the run's number in their ids (`board-3`), since a piece's id is
+  the change that builds it and an earlier run's merge would count it as done.
+  The repo's Hive tab shows how the run is going. Any signed-in person may start
+  one, since a run spends a bounded amount: one run goes at a time, 100 a day
+  across everyone, held by the `DemoRun` registry. A run stopped before its
+  reset lands gives the repo its approvals back. The request for a run only
+  takes the registry's running slot and begins the run; the run's own object
+  sets the repo up on its alarm, so a request cut short leaves nothing half
+  done, and a run that can't be set up fails and frees the slot. A slot whose
+  run never began, its request having failed first, is free to the next. **The
+  builder.** A hosted agent starts one on each piece it claims, and `build`
+  claims the given paths as `githive-builder`, under a change id made from the
+  intent, and starts one on that change. The builder works on `changes/<change>`
+  in the fork of the agent holding the claim, and its records are stamped
+  `service:githive-builder`. Its tools:
 - `commit_and_push` is the only way it pushes, and only to the change's
   branch, never by force. Each push refreshes its claim and reports files
   outside the claim and conflicts with main.
