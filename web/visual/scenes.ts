@@ -185,6 +185,10 @@ const APP: Scene[] = [
 	page("admin", "/admin", { who: "operator" }),
 	page("admin-confirm", "/admin", { who: "operator", act: click("Remove") }),
 	page("not-found", "/nope/nothing"),
+	page("theme-menu", "/", { act: async (p) => p.getByRole("button", { name: /^Theme:/ }).click() }),
+	// A choice against the system's: these match repos.dark and repos.light.
+	page("theme-dark-chosen", "/", { storage: { "githive.theme": "dark" }, schemes: ["light"] }),
+	page("theme-light-chosen", "/", { storage: { "githive.theme": "light" }, schemes: ["dark"] }),
 
 	page("storefront-hive", STOREFRONT),
 	page("storefront-hive-row", STOREFRONT, {

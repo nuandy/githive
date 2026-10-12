@@ -3,6 +3,7 @@ import type { Me } from "../api";
 import { href } from "../lib/routes";
 import { HiveMark } from "./HiveMark";
 import { Icon } from "./Icon";
+import { ThemeMenu } from "./ThemeMenu";
 import "./TopBar.css";
 
 export interface Crumb {
@@ -136,7 +137,7 @@ function AgentsLink({ agentsCurrent }: { agentsCurrent: boolean }) {
 	);
 }
 
-/** The top bar: the GitHive mark, which leads home, where you are, the Inbox, your agents, and who you are. */
+/** The top bar: the GitHive mark, which leads home, where you are, the Inbox, your agents, light or dark, and who you are. */
 export function TopBar({
 	crumbs,
 	inboxCount,
@@ -197,6 +198,19 @@ export function TopBar({
 					<InboxLink inboxCount={inboxCount} inboxCurrent={inboxCurrent} />
 				)}
 				{me?.kind === "user" ? <AgentsLink agentsCurrent={agentsCurrent} /> : null}
+				{me?.kind === "access" ? (
+					<a
+						className="topbar__inbox"
+						href={href.admin()}
+						aria-current={adminCurrent ? "page" : undefined}
+						aria-label={adminRequests ? `Admin, ${adminRequests} requests waiting` : "Admin"}
+					>
+						<Icon name="settings" size={15} />
+						<span className="topbar__inbox-label">Admin</span>
+						{adminRequests ? <span className="topbar__inbox-count">{adminRequests}</span> : null}
+					</a>
+				) : null}
+				<ThemeMenu />
 				{me?.kind === "user" ? (
 					<UserMenu
 						me={me}
@@ -206,21 +220,9 @@ export function TopBar({
 					/>
 				) : null}
 				{me?.kind === "access" ? (
-					<>
-						<a
-							className="topbar__inbox"
-							href={href.admin()}
-							aria-current={adminCurrent ? "page" : undefined}
-							aria-label={adminRequests ? `Admin, ${adminRequests} requests waiting` : "Admin"}
-						>
-							<Icon name="settings" size={15} />
-							<span className="topbar__inbox-label">Admin</span>
-							{adminRequests ? <span className="topbar__inbox-count">{adminRequests}</span> : null}
-						</a>
-						<span className="topbar__access" title="Signed in through Cloudflare Access">
-							{me.label}
-						</span>
-					</>
+					<span className="topbar__access" title="Signed in through Cloudflare Access">
+						{me.label}
+					</span>
 				) : null}
 			</div>
 		</header>

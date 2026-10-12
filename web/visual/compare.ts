@@ -1,7 +1,9 @@
 // Compares two captures (capture.ts) shot by shot and writes an HTML report of every difference.
 //
-//   node web/visual/compare.ts <before-label> <after-label> [--only <regex>]
+//   node web/visual/compare.ts <before-label> <after-label> [--only <regex>] [--ignore-top <px>]
 //
+// --ignore-top leaves the top rows out of every shot: a deliberate change to the top bar can be checked by eye while
+// everything below it is held to the baseline.
 // A shot passes when it has the same size and no more than NOISE pixels differ beyond pixelmatch's threshold
 // (anti-aliased pixels are ignored): two captures of the same build differ, now and then, in a pixel or two of
 // anti-aliasing, where the smallest real change (a line moved by a pixel) moves hundreds. The report, web/visual/out/<after>-vs-<before>.html, shows before, after and the difference.
@@ -16,6 +18,8 @@ const NOISE = 4;
 const [before, after] = process.argv.slice(2);
 const onlyAt = process.argv.indexOf("--only");
 const only = onlyAt >= 0 ? new RegExp(process.argv[onlyAt + 1]!) : null;
+const topAt = process.argv.indexOf("--ignore-top");
+const ignoreTop = topAt >= 0 ? Number(process.argv[topAt + 1]) : 0;
 if (!before || !after) {
 	console.error("usage: node web/visual/compare.ts <before-label> <after-label> [--only <regex>]");
 	process.exit(2);
@@ -48,6 +52,12 @@ for (const shot of shots) {
 	if (a.width !== b.width || a.height !== b.height) {
 		results.push({ shot, problem: `size ${a.width}×${a.height} → ${b.width}×${b.height}` });
 		continue;
+	}
+	if (ignoreTop) {
+		// Paint the ignored rows the same in both, so they can't differ.
+		const end = Math.min(ignoreTop, a.height) * a.width * 4;
+		a.data.fill(0, 0, end);
+		b.data.fill(0, 0, end);
 	}
 	const diff = new PNG({ width: a.width, height: a.height });
 	const changed = pixelmatch(a.data, b.data, diff.data, a.width, a.height, { threshold: 0.1 });

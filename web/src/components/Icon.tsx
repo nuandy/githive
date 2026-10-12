@@ -142,6 +142,19 @@ const PATHS = {
 			<path d="m3 3 18 18" />
 		</>
 	),
+	sun: (
+		<>
+			<circle cx="12" cy="12" r="4" />
+			<path d="M12 2v2M12 20v2m-7.07-17.07 1.41 1.41m11.32 11.32 1.41 1.41M2 12h2m16 0h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41" />
+		</>
+	),
+	moon: <path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z" />,
+	monitor: (
+		<>
+			<rect width="20" height="14" x="2" y="3" rx="2" />
+			<path d="M8 21h8m-4-4v4" />
+		</>
+	),
 } satisfies Record<string, ReactNode>;
 
 export type IconName = keyof typeof PATHS;

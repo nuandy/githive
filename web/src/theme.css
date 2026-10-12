@@ -24,6 +24,14 @@
 
 @custom-variant dark (&:where(.dark, .dark *));
 
+/* Narrower windows, by the widths the layout gives way at: to-560: applies up to and including 560px wide. */
+@custom-variant to-480 (@media (max-width: 480px));
+@custom-variant to-560 (@media (max-width: 560px));
+@custom-variant to-640 (@media (max-width: 640px));
+@custom-variant to-720 (@media (max-width: 720px));
+@custom-variant to-900 (@media (max-width: 900px));
+@custom-variant to-1100 (@media (max-width: 1100px));
+
 /* Overpass and Overpass Mono (SIL Open Font License, see /fonts/OFL.txt), served by GitHive itself: latin, every weight in one file. */
 @font-face {
 	font-family: "Overpass";
@@ -265,6 +273,8 @@
 	--radius-3xl: calc(var(--radius) * 3.5);
 
 	--shadow-raised: var(--shadow-raised);
+	/* A focused control's ring, drawn as a shadow so it follows the control's corners. */
+	--shadow-focus: 0 0 0 3px color-mix(in srgb, var(--ring) 35%, transparent);
 }
 
 @theme {
