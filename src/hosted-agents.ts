@@ -11,10 +11,23 @@ import { type BacklogView, type ReviewOption, holdKey } from "./toolkit/work";
 // of someone else's change under its own name, then the first free piece of the backlog in its own order. It builds
 // with GitHive's hosted builder and reviews with a hosted reviewer that votes as itself, so it reviews external
 // agents' work and they review its own. Nothing assigns work. The repo's instance ("hive:<repo>") only starts and
-// stops its agents and says what they're doing.
+// stops its agents, says what they're doing, and passes on rings.
+//
+// An agent takes a turn when it's rung: the repo's RepoCache rings the hive whenever a tool writes, a batch lands or
+// a push arrives, and the agent then reads and chooses as always. A ring says only that something changed, never what
+// to do. Rings are hints, so a slow turn of its own notices what rings nothing, such as a review hold running out.
 
-/** How often an agent takes a turn of its loop. */
-export const AGENT_TICK_MS = 10_000;
+/** The longest an agent goes between turns when nothing rings it. */
+export const AGENT_FALLBACK_MS = 2 * 60_000;
+/** The soonest an agent takes another turn after its last began, however often it's rung. */
+export const AGENT_TURN_GAP_MS = 5_000;
+
+const TURN_BEGAN = "turn-began";
+const RUNG_AT = "rung-at";
+
+// What rings as a tool wrote it, a batch landed or a push arrived (see RepoCache.ringHive) that can't end an agent's
+// wait on its own change or its review: an agent busy with both skips them.
+const NEW_WORK_ONLY = new Set(["claim", "add_work", "build", "pushed", "settings", "ask_human"]);
 
 /** Turns in a row an agent's loop may fail before it stops. */
 const FAILING_MOST = 15;
@@ -65,7 +78,20 @@ export class HostedAgent extends DurableObject<Env> {
 		await this.ctx.storage.put("hive", hive);
 		const begin = (name: string) => this.agentNamed(input.repo, name).work({ repo: input.repo, name, until });
 		await Promise.all(names.map(begin));
+		await this.listenToRepo(input.repo);
 		return this.status();
+	}
+
+	/** Rings each of the repo's agents (see ring). Returns whether any of them is still running. */
+	async ringAgents(reason: string) {
+		const hive = await this.ctx.storage.get<Hive>("hive");
+		if (!hive) return false;
+		const ring = (name: string) =>
+			this.agentNamed(hive.repo, name)
+				.ring(reason)
+				.catch(() => true);
+		const running = await Promise.all(hive.names.map(ring));
+		return running.some(Boolean);
 	}
 
 	/** Stops every agent of the repo's hive; what they started finishes on its own. */
@@ -116,6 +142,23 @@ export class HostedAgent extends DurableObject<Env> {
 		return (await this.ctx.storage.get<HostedAgentState>("agent")) ?? null;
 	}
 
+	/**
+	 * Something changed in the repo (`reason`: the tool that wrote, "landed" or "pushed"): the agent takes a turn soon,
+	 * at most one per AGENT_TURN_GAP_MS. A stopped agent stays stopped. Returns whether the agent is still running.
+	 */
+	async ring(reason: string) {
+		const state = await this.ctx.storage.get<HostedAgentState>("agent");
+		if (!state || state.done) return false;
+		if (state.change && state.reviewing && NEW_WORK_ONLY.has(reason)) return true;
+		const now = Date.now();
+		await this.ctx.storage.put(RUNG_AT, now);
+		const began = (await this.ctx.storage.get<number>(TURN_BEGAN)) ?? 0;
+		const turnAt = Math.max(now, began + AGENT_TURN_GAP_MS);
+		const set = await this.ctx.storage.getAlarm();
+		if (set === null || set > turnAt) await this.ctx.storage.setAlarm(turnAt);
+		return true;
+	}
+
 	/** Stops this agent's loop. */
 	async stop() {
 		const state = await this.ctx.storage.get<HostedAgentState>("agent");
@@ -156,13 +199,20 @@ export class HostedAgent extends DurableObject<Env> {
 	}
 
 	/** The instance for one of a repo's agents (tests stand in for it). */
-	protected agentNamed(repo: string, name: string): Pick<HostedAgent, "work" | "account" | "stop"> {
+	protected agentNamed(repo: string, name: string): Pick<HostedAgent, "work" | "account" | "stop" | "ring"> {
 		return this.env.HOSTED_AGENT.getByName(`agent:${repo}:${name}`);
+	}
+
+	/** Asks the repo's RepoCache to ring this hive when something changes (tests note it instead). */
+	protected async listenToRepo(repo: string) {
+		await this.env.REPO_CACHE?.getByName(`repo:${repo}`).hiveListens(repo);
 	}
 
 	async alarm() {
 		const state = await this.ctx.storage.get<HostedAgentState>("agent");
 		if (!state || state.done) return;
+		const began = Date.now();
+		await this.ctx.storage.put(TURN_BEGAN, began);
 		try {
 			await this.step(state);
 			state.failing = 0;
@@ -175,7 +225,15 @@ export class HostedAgent extends DurableObject<Env> {
 		const stopped = (await this.ctx.storage.get<HostedAgentState>("agent"))?.done;
 		if (stopped) state.done = true;
 		await this.ctx.storage.put("agent", state);
-		if (!state.done) await this.ctx.storage.setAlarm(Date.now() + AGENT_TICK_MS);
+		if (!state.done) await this.ctx.storage.setAlarm(await this.nextTurnAt(began));
+	}
+
+	// A ring during the turn may be about something its reads came too early to see, so it brings the next turn
+	// forward; otherwise the agent waits to be rung.
+	private async nextTurnAt(began: number) {
+		const rung = (await this.ctx.storage.get<number>(RUNG_AT)) ?? 0;
+		if (rung >= began) return Math.max(Date.now(), began + AGENT_TURN_GAP_MS);
+		return Date.now() + AGENT_FALLBACK_MS;
 	}
 
 	/** Its own change first, then a review of another's, then the backlog; it stops when nothing's left for it. */

@@ -1231,9 +1231,8 @@ lists, starts some of GitHive's hosted agents on it from the Agents tab (`POST
 /repos/:owner/:name/hosted-agents`, with a count up to thirteen and 5 to 120
 minutes). Each is a `HostedAgent` Durable Object of its own,
 `agent:<repo>:<name>`, named for a job in a hive: `githive-forager`,
-`githive-scout`, `githive-nurse` and so on. It takes a turn on its own alarm
-every 10 seconds, and each turn is the loop any agent follows, through the
-toolkit, as itself:
+`githive-scout`, `githive-nurse` and so on. It takes a turn when it's rung,
+and each turn is the loop any agent follows, through the toolkit, as itself:
 
 1. Its own change: once `status` shows it approved, `merge`; once it's out of
    the claims (landed or given up), it's finished.
@@ -1249,6 +1248,21 @@ toolkit, as itself:
    already. It claims the piece's paths and starts a hosted builder on it.
    The builder doesn't start reviewers when it finishes: the hive reviews
    the change, hosted agents and outside agents alike.
+
+**Rung, not ticking.** The repo's RepoCache rings its hive whenever a tool
+writes (a claim, a release, a vote, a merge, backlog added, a review given
+back), a batch lands or a push arrives, and the hive rings each agent still
+running. A ring says only that something changed, with the tool that changed
+it; the agent then reads and chooses as always, so nothing it's told decides
+for it. An agent takes at most one turn every 5 seconds however often it's
+rung, and one rung during a turn takes the next soon after, since its reads
+may have come too early. An agent busy with its own change and a review skips
+rings that can only offer new work (a claim, a push, backlog added). Rings are
+hints: when nothing rings, an agent still takes a turn every 2 minutes, which
+notices what rings nothing, such as a review hold running out. The repo rings
+only once its hive has started, and stops when none of its agents is running.
+Before rings, each agent took a turn every 10 seconds, reading its change, the
+reviews and the backlog whether anything had changed or not.
 
 Nothing assigns the work. Agents start together and each reads the backlog in
 its own order, so a claim another agent took first costs a turn. An agent

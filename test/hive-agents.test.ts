@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
-import type { HostedAgentState } from "../src/hosted-agents";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { AGENT_FALLBACK_MS, AGENT_TURN_GAP_MS, type HostedAgentState } from "../src/hosted-agents";
 import { hiveAgentNames } from "../src/toolkit/hive-agents";
 import { FakeStorage } from "./fakes/env";
 
@@ -197,6 +197,68 @@ describe("a repo's hosted agents", () => {
 		await repoHive.stopAll();
 		const accounts = (await Promise.all(agents().map((agent) => agent.account()))) as HostedAgentState[];
 		expect(accounts.every((account) => account.done)).toBe(true);
+	});
+});
+
+type Agent = InstanceType<typeof HostedAgent>;
+const storageOf = (agent: Agent) => (agent as unknown as { ctx: { storage: FakeStorage } }).ctx.storage;
+const alarmOf = (agent: Agent) => storageOf(agent).getAlarm();
+
+describe("ringing a repo's hosted agents", () => {
+	// Time stands still, so a ring and the turn it lands in share a moment.
+	const now = Date.parse("2026-10-13T10:00:00Z");
+	afterEach(() => vi.useRealTimers());
+	const frozen = () => vi.useFakeTimers({ now, toFake: ["Date"] });
+
+	it("wait to be rung between turns, then take a turn soon, at most one per gap", async () => {
+		frozen();
+		const { repoHive, agents } = hive(pieces("a", "b"));
+		await start(repoHive);
+		const [first] = agents();
+		await first!.alarm();
+		expect(await alarmOf(first!)).toBe(now + AGENT_FALLBACK_MS);
+		expect(await first!.ring("release")).toBe(true);
+		expect(await alarmOf(first!)).toBe(now + AGENT_TURN_GAP_MS);
+		vi.setSystemTime(now + 60_000);
+		await first!.ring("landed");
+		expect(await alarmOf(first!)).toBe(now + AGENT_TURN_GAP_MS);
+	});
+
+	it("take the next turn soon when rung during one, since its reads may have come too early", async () => {
+		frozen();
+		const { repoHive, agents } = hive(pieces("a"));
+		await start(repoHive);
+		const [first] = agents();
+		const turn = first!.alarm();
+		await first!.ring("vote");
+		await turn;
+		expect(await alarmOf(first!)).toBe(now + AGENT_TURN_GAP_MS);
+	});
+
+	it("skip rings about new work while busy with their own change and a review", async () => {
+		frozen();
+		const { repoHive, agents } = hive(pieces("a"));
+		await start(repoHive);
+		const [first] = agents();
+		const busy = { change: "a", reviewing: { change: "b", head: "b-1", role: "review", since: now } };
+		const state = (await first!.account()) as HostedAgentState;
+		await storageOf(first!).put("agent", { ...state, ...busy });
+		await storageOf(first!).setAlarm(now + AGENT_FALLBACK_MS);
+		await first!.ring("claim");
+		await first!.ring("pushed");
+		expect(await alarmOf(first!)).toBe(now + AGENT_FALLBACK_MS);
+		// Its reviewer giving the review back ends its wait, as a vote does.
+		await first!.ring("leave_review");
+		expect(await alarmOf(first!)).toBe(now);
+	});
+
+	it("never wake once stopped, and the hive says when none of its agents is running", async () => {
+		const { repoHive, agents } = hive(pieces("a"));
+		await start(repoHive);
+		expect(await repoHive.ringAgents("claim")).toBe(true);
+		await repoHive.stopAll();
+		expect(await repoHive.ringAgents("claim")).toBe(false);
+		for (const agent of agents()) expect(await alarmOf(agent)).toBeNull();
 	});
 });
 

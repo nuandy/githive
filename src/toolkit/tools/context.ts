@@ -107,7 +107,8 @@ export interface ToolContext {
 	/** Times a request's steps, for its Server-Timing header. */
 	timing?: Timing;
 	/** Tells the dashboard's open pages that the repo's records changed, and how, for the hive's feed. */
-	ping?: (repo: string, event?: HiveEvent) => Promise<void>;
+	/** Tells the repo's watchers that `tool` wrote (see RepoCache.ping). */
+	ping?: (repo: string, event?: HiveEvent, tool?: string) => Promise<void>;
 	/** Warms the repo's check container in the background when a merge is likely soon (see Gate.warmUp). */
 	warmChecks?: (
 		repo: string,

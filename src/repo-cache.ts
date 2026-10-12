@@ -1,6 +1,7 @@
 import { DurableObject } from "cloudflare:workers";
 import { Traffic, objectLabel } from "./cache-traffic";
 import { countingRequests, describeCounts } from "./git-http";
+import { rpc } from "./rpc";
 import { EVENTS_KEPT, type HiveEvent, eventKey, pushEvents, settledEvents } from "./hive-events";
 import { makeAgentFork, makeSeed } from "./toolkit/env";
 import { type Stretch, extendStretch, stretchSummary } from "./toolkit/stretch";
@@ -127,6 +128,8 @@ const KEPT_PREFIXES = [
 
 /** Where the names of the repo's RecordCaches are noted, so a deleted repo's can be forgotten too. */
 const RECORD_CACHE = "record-cache:";
+/** The repo's hosted agents to ring (see ringHive), with when they asked, so a stale answer can't drop a new hive. */
+const HIVE = "hive";
 
 /** A change's merge check as status worked it out, for the change head and branch head in `key`. */
 export interface KeptMergeCheck {
@@ -145,11 +148,20 @@ export class RepoCache extends DurableObject<Env> {
 		return new Response(null, { status: 101, webSocket: client });
 	}
 
-	/** Tell watching pages that something changed, and what for the hive's feed. A write makes the views stale. */
-	async ping(kind: string, write = true, events: HiveEvent[] = []) {
+	/**
+	 * Tell watching pages that something changed, and what for the hive's feed. A write makes the views stale, and
+	 * rings the repo's hosted agents with the tool that made it.
+	 */
+	async ping(kind: string, write = true, events: HiveEvent[] = [], tool?: string) {
 		if (write) await this.ctx.storage.put("writes", (await this.writes()) + 1);
 		await this.keepEvents(events);
 		this.broadcast(kind);
+		if (write) this.ringHive(tool ?? kind);
+	}
+
+	/** The repo's hosted agents want to hear when something changes, until none of them is running. */
+	async hiveListens(repo: string) {
+		await this.ctx.storage.put(HIVE, { repo, since: Date.now() });
 	}
 
 	/** The hive's recent events, oldest first (see hive-events.ts). */
@@ -248,7 +260,9 @@ export class RepoCache extends DurableObject<Env> {
 		await this.keepNewest(pushes.map(({ change, ...known }) => [change, known]));
 		const events = pushEvents(pushes);
 		await this.keepEvents(events);
-		if (events.length) this.broadcast("pushed");
+		if (!events.length) return;
+		this.broadcast("pushed");
+		this.ringHive("pushed");
 	}
 
 	private async keepNewest(heads: [string, KnownHead][]) {
@@ -450,6 +464,7 @@ export class RepoCache extends DurableObject<Env> {
 		const stretch = extendStretch(await this.ctx.storage.get<Stretch>("stretch"), outcomes);
 		if (stretch) await this.ctx.storage.put("stretch", stretch);
 		this.broadcast("landing");
+		this.ringHive("landed");
 		return stretch && stretchSummary(stretch);
 	}
 
@@ -601,6 +616,19 @@ export class RepoCache extends DurableObject<Env> {
 
 	private async writes() {
 		return (await this.ctx.storage.get<number>("writes")) ?? 0;
+	}
+
+	// Wakes the repo's hosted agents (see HostedAgent.ring), without holding up the write that rang. Ringing is a hint:
+	// one lost costs only the agents' fallback turn. Once none is running, the repo stops ringing.
+	private ringHive(reason: string) {
+		const ring = async () => {
+			const hive = await this.ctx.storage.get<{ repo: string; since: number }>(HIVE);
+			if (!hive || !this.env.HOSTED_AGENT) return;
+			const running = await rpc(this.env.HOSTED_AGENT.getByName(`hive:${hive.repo}`).ringAgents(reason));
+			const current = await this.ctx.storage.get<{ since: number }>(HIVE);
+			if (!running && current?.since === hive.since) await this.ctx.storage.delete(HIVE);
+		};
+		void ring().catch((err) => console.error(`ringing the hive (${reason}) failed`, String(err)));
 	}
 
 	private broadcast(kind: string) {

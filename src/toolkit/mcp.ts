@@ -48,7 +48,18 @@ export async function mergeAsPerson(ctx: ToolContext, repo: string, change: stri
 }
 
 // Tools that write records, after which the repo's summary notes the activity.
-const WRITES = new Set(["claim", "release", "merge", "vote", "build", "revert", "ask_human", "add_work", "settings"]);
+const WRITES = new Set([
+	"claim",
+	"release",
+	"merge",
+	"vote",
+	"build",
+	"revert",
+	"ask_human",
+	"add_work",
+	"settings",
+	"leave_review",
+]);
 
 const noted = new Map<string, number>();
 
@@ -57,7 +68,7 @@ export async function callTool(name: string, args: Args, ctx: ToolContext): Prom
 	const result = withNext(name, args, ctx, await withNews(name, args, ctx, await runTool(name, args, ctx)));
 	const wrote = WRITES.has(name) && (result as { ok?: boolean } | null)?.ok !== false;
 	const event = wrote ? toolEvent(name, args, ctx.agent) : null;
-	if (wrote) await ctx.ping?.(requiredString(args, "repo"), event ?? undefined).catch(() => undefined);
+	if (wrote) await ctx.ping?.(requiredString(args, "repo"), event ?? undefined, name).catch(() => undefined);
 	if (ctx.summarize && wrote) {
 		const repo = requiredString(args, "repo");
 		const merged = name === "merge";
