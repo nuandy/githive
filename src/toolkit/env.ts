@@ -220,6 +220,7 @@ export function toolContextFor(
 ): ToolContext {
 	return {
 		...caller,
+		...(by ? { identity: by } : {}),
 		...repoCacheParts(env),
 		...artifactsParts(env),
 		...gateParts(env),

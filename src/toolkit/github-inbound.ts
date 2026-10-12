@@ -6,6 +6,7 @@ import { type GitHubImports, importsRef, recordImport } from "./github-imports";
 import {
 	bringsGitHubBack,
 	GITHUB_AGENT,
+	githubChangeId,
 	githubSync,
 	type GitHubSeen,
 	importedBranch,
@@ -161,7 +162,7 @@ async function onMain(ctx: ToolContext, repo: string, branch: string, commit: st
 // githive-github claims a merge of github/<branch> into main: what GitHub changed, held while it lands.
 async function claimStep(ctx: ToolContext, job: InboundJob, at: At): Promise<StepOutcome> {
 	const source = importedBranch(job.branch);
-	const change = `github-${job.commit.slice(0, 12)}`;
+	const change = githubChangeId(job.commit);
 	// A change of GitHub's still open from before (it needed a person) gives way to this newer commit.
 	const { claims } = await advice(ctx, job.repo);
 	for (const older of claims.filter((claim) => claim.agent === GITHUB_AGENT && claim.source === source))

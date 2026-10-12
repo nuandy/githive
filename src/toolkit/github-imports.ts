@@ -1,6 +1,6 @@
 import type { CasLog } from "../record-log";
 import type { ClaimRecord, Registry } from "./claims";
-import { GITHUB_AGENT, GITHUB_IDENTITY, isGitHubChange, trustsGitHub } from "./github-settings";
+import { GITHUB_AGENT, GITHUB_IDENTITY, githubChangeId, isGitHubChange, trustsGitHub } from "./github-settings";
 import { appendRecord } from "./records";
 import { type Stamper, stampPayload, verifyStamp } from "./stamp";
 
@@ -34,7 +34,10 @@ export const importsRef = (repo: string) => `refs/notes/githive-github/${repo}`;
 
 const empty = (): GitHubImports => ({ imports: [] });
 
-/** Records an import, stamped. One already recorded for the same commit and head is left as it is, and returned. */
+/**
+ * Records an import, stamped. When the branch's newest import is this one already (a step tried again), it's left as
+ * it is, and returned.
+ */
 export async function recordImport(
 	log: CasLog<GitHubImports>,
 	entry: Omit<GitHubImport, "at" | "by" | "stamp">,
@@ -42,14 +45,12 @@ export async function recordImport(
 ): Promise<GitHubImport> {
 	let recorded: GitHubImport | undefined;
 	await appendRecord<GitHubImports, "recorded">(log, GITHUB_AGENT, empty, async (state) => {
-		recorded = state.imports.find(
-			(found) =>
-				found.github === entry.github &&
-				found.branch === entry.branch &&
-				found.commit === entry.commit &&
-				found.head === entry.head,
-		);
-		if (recorded) return { refused: "recorded" };
+		// Only the newest counts (see newestImport): a GitHub branch gone back to an older commit is recorded again.
+		const newest = state.imports.findLast((found) => found.branch === entry.branch);
+		if (newest && sameImport(newest, entry)) {
+			recorded = newest;
+			return { refused: "recorded" };
+		}
 		const record: GitHubImport = { ...entry, at: new Date().toISOString() };
 		recorded = stamper ? await stamped(record, stamper) : record;
 		return {
@@ -61,6 +62,12 @@ export async function recordImport(
 		};
 	});
 	return recorded!;
+}
+
+function sameImport(recorded: GitHubImport, entry: Pick<GitHubImport, "github" | "commit" | "head">) {
+	if (recorded.github !== entry.github) return false;
+	if (recorded.commit !== entry.commit) return false;
+	return recorded.head === entry.head;
 }
 
 async function stamped(record: GitHubImport, stamper: Stamper): Promise<GitHubImport> {
@@ -77,17 +84,20 @@ export async function verifiedImports(imports: GitHubImport[], stampKey: string 
 	return imports.filter((_, index) => valid[index]);
 }
 
-/** Whether `head` is a commit GitHive brought in from GitHub's `branch` (an import's head). */
-export const importedAt = (imports: GitHubImport[], branch: string, head: string) =>
-	imports.find((entry) => entry.branch === branch && entry.head === head);
+/**
+ * The import a claim of GitHub's `branch` brings in: the branch's newest recorded by `claimedAt`, the claim's last
+ * claim or extension. An older one was superseded or given up, so a claim made later can't bring it in.
+ */
+export const newestImport = (imports: GitHubImport[], branch: string, claimedAt: string) =>
+	imports.findLast((entry) => entry.branch === branch && entry.at <= claimedAt);
 
 /**
  * The trust rule (see docs/github-prs.md, "The audit"), which the merge path and the audit both ask, so they never
  * disagree: whether a change lands without votes at `head`. Every record of its claim (`records`, as written, with
  * their stamps) is githive-github's with `source: github/<branch>`, stamped as service:githive-github when there's a
  * stamp key; the repo trusts GitHub's changes in `registry` (the state a merge is checked against, or the one it
- * cites); and `head` is in a stamped import of that branch, from the GitHub repo `registry` is connected to, that
- * didn't find a reason to need review.
+ * cites); and `head` is the head of the branch's newest stamped import when it was claimed, the import the change is
+ * named for, from the GitHub repo `registry` is connected to, that found no reason to need review.
  */
 export async function trustedGitHubChange(rule: {
 	records: ClaimRecord[];
@@ -105,6 +115,10 @@ export async function trustedGitHubChange(rule: {
 		record.by === GITHUB_IDENTITY && (await verifyStamp(stampKey!, stampPayload("claim", record), record.stamp));
 	if (stampKey && !(await Promise.all(records.map(stamped))).every(Boolean)) return false;
 	const imports = await verifiedImports(await rule.imports(), stampKey);
-	const imported = importedAt(imports, first.source!.slice("github/".length), head);
-	return !!imported && imported.github === registry!.github!.repo && !imported.untrusted;
+	const claimedAt = records.map((record) => record.active).reduce((latest, at) => (at > latest ? at : latest));
+	const imported = newestImport(imports, first.source!.slice("github/".length), claimedAt);
+	if (!imported || imported.head !== head) return false;
+	if (first.change !== githubChangeId(imported.commit)) return false;
+	if (imported.github !== registry!.github!.repo) return false;
+	return !imported.untrusted;
 }

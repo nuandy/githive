@@ -98,7 +98,8 @@ people pushed there directly. They come back through GitHive's own path, so the 
      would have GitHive's files exactly, and been found), or GitHub changed no path GitHive changed after the base,
      the import comes back untrusted (`untrusted` in its entry says why), and needs review even while the repo trusts
      GitHub's changes;
-   - an import record (`refs/notes/githive-github/<repo>`, appended by compare-and-swap, once per commit and head)
+   - an import record (`refs/notes/githive-github/<repo>`, appended by compare-and-swap, unless the branch's newest
+     import is already the same commit and head)
      notes the GitHub repo, branch and commit, the head written, and the GitHive commit whose work it had, stamped
      like every record (by `service:githive-github`). Its shape is pinned, and its reads are checked against a
      schema.
@@ -140,13 +141,17 @@ is a fast-forward again.
   - its claim is by `githive-github` with `source: github/<branch>`, and every record of it (a claim spread over
     shards has several), as written, is stamped as `service:githive-github` (with a stamp key). The merge path reads
     those records for it, since the merged view of a claim carries no stamp;
-  - its head is a commit in the import record (a stamped entry, for that branch), whose import found no reason for
-    review (`untrusted`);
+  - its head is the head of the branch's newest import (a stamped entry) as of its claim's last claim or extension,
+    an import that found no reason for review (`untrusted`), and the change is the one made for it,
+    `github-<sha12>` of the imported commit. So a claim can't bring in an older import that was superseded or given
+    up, and never landed; and an older merge still passes the audit after newer imports;
   - the repo's GitHub trust is on, connected to the GitHub repo the import came from: for the merge path, in the
     registry it's checked against; for the audit, in the registry state the merge cites.
 
-  Anything else that skips a vote is refused by the merge, and reported by the audit, as today. A hosted agent acting
-  as `githive-github` (they can) gets no trust: its records are stamped as itself.
+  Anything else that skips a vote is refused by the merge, and reported by the audit, as today. Only the repo's
+  `GitHubSync`, verified as `service:githive-github`, may act as `githive-github`: other hosted agents, which act
+  under the other `githive-` names, are refused (`mayActAs`). Were one to get a record written anyway, it would
+  get no trust: its records are stamped as itself.
 - **Trust is a setting:** `github_trust` defaults to true. Turned off, GitHub's changes need review like any change:
   the job's merge waits for review, reviewers see the change in `reviews`, and once approved it lands with the merge
   of the next notice (a landing, `github_pr`), since other merges' batches leave it out; in a quiet repo, a person
@@ -212,9 +217,9 @@ real-git test server) plays GitHub, as GitHive's tests fake Artifacts.
   GitHub of what a squash took comes back as a revert. A squash onto a GitHub branch that had a commit of its own
   comes back untrusted, so a file GitHive deleted since can't come back without review (`github-inbound.test.ts` too).
 - The audit reports every way a vote could be skipped short of the trust rule (`github-audit.test.ts`), and the
-  merge path refuses them: a claim as `githive-github` stamped as another identity, a head the import record doesn't
-  hold, a repo connected to another GitHub repo since the import, another agent's claim of `github/main`
-  (`github-inbound.test.ts`).
+  merge path refuses them: a head the import record doesn't hold, a change not named for its import, an older import
+  claimed again once a newer one came in, a repo connected to another GitHub repo since the import, another agent's
+  claim of `github/main` (`github-inbound.test.ts`). No hosted agent but the GitHub job may act as `githive-github`.
 - Branches under `github/` are reserved: a claim into or from one, or an agent's `source` merge of one, is refused.
 - The import record's shape is pinned.
 - What can go wrong bringing GitHub's changes back (`github-inbound.test.ts`): checks that fail on GitHub's change,

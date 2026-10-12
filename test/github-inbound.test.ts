@@ -49,7 +49,12 @@ const { ctx, call, keys, register, approve } = toolCalls(() => server, extra);
 /** A hosted context stamped as service:githive-github, as the repo's GitHubSync acts. */
 function githubAgent(): ToolContext {
 	const { githubSync: _, ...rest } = ctx();
-	return { ...rest, hosted: true, stamper: async () => makeStamper(privateKey, GITHUB_IDENTITY) };
+	return {
+		...rest,
+		hosted: true,
+		identity: GITHUB_IDENTITY,
+		stamper: async () => makeStamper(privateKey, GITHUB_IDENTITY),
+	};
 }
 
 /** githive-github's job, as the repo's GitHubSync runs it. */
@@ -548,7 +553,7 @@ describe("the merge path's trust rule, the audit's own", { timeout: 120_000 }, (
 	/** A hosted context acting under githive- names, stamped as `identity`. */
 	const hosted = (identity: string): ToolContext => {
 		const { githubSync: _, ...rest } = ctx();
-		return { ...rest, hosted: true, stamper: async () => makeStamper(privateKey, identity) };
+		return { ...rest, hosted: true, identity, stamper: async () => makeStamper(privateKey, identity) };
 	};
 	const mergeAs = (change: string, agent: string, as: ToolContext) =>
 		callTool("merge", { repo: "p", change, agent }, as) as Promise<Record<string, unknown>>;
@@ -564,13 +569,49 @@ describe("the merge path's trust rule, the audit's own", { timeout: 120_000 }, (
 		return { pushed, change: `github-${pushed.slice(0, 12)}` };
 	}
 
-	it("needs votes for a claim of GitHub's branch as githive-github that isn't stamped as service:githive-github", async () => {
+	it("lets no hosted agent but GitHive's GitHub job act as githive-github", async () => {
 		const { change } = await imported();
 		const builder = hosted("service:githive-builder");
 		const claim = { repo: "p", change, agent: GITHUB_AGENT, source: "github/main", intent: "Bring it in" };
-		expect(await callTool("claim", claim, builder)).toMatchObject({ ok: true });
-		expect(await mergeAs(change, GITHUB_AGENT, builder)).toMatchObject(needsVotes);
+		await expect(callTool("claim", claim, builder)).rejects.toThrow("only GitHive's GitHub job acts as githive-github");
+		const release = { repo: "p", change, agent: GITHUB_AGENT, reason: "not needed" };
+		await expect(callTool("release", release, builder)).rejects.toThrow("only GitHive's GitHub job");
 		expect(server.git("ls-tree", "--name-only", "-r", "main")).not.toContain("docs/notes.md");
+	});
+
+	it("needs votes for a change of GitHub's not named for the import it brings in", async () => {
+		await imported();
+		const claim = {
+			repo: "p",
+			change: "github-other",
+			agent: GITHUB_AGENT,
+			source: "github/main",
+			intent: "Bring it in",
+		};
+		expect(await callTool("claim", claim, githubAgent())).toMatchObject({ ok: true });
+		expect(await mergeAs("github-other", GITHUB_AGENT, githubAgent())).toMatchObject(needsVotes);
+		expect(server.git("ls-tree", "--name-only", "-r", "main")).not.toContain("docs/notes.md");
+	});
+
+	it("needs votes for an older import claimed again once a newer one came in", async () => {
+		await land("c-1", { "src/a.js": "a\n" });
+		const first = github.push({ "src/a.js": "from GitHub\n" });
+		expect(await land("c-2", { "src/a.js": "from GitHive\n" })).toMatchObject({ step: "needs a person" });
+		const second = github.push({ "docs/notes.md": "more from GitHub\n" });
+		expect(await land("c-3", { "src/c.js": "c\n" })).toMatchObject({ commit: second });
+		expect((await imports()).map((entry) => entry.commit)).toEqual([first, second]);
+		// The older import, which never landed, is pointed at again and claimed as GitHub's job would.
+		const job = githubAgent();
+		const newer = { repo: "p", change: `github-${second.slice(0, 12)}`, agent: GITHUB_AGENT, reason: "replayed" };
+		await callTool("release", newer, job);
+		server.git("update-ref", "refs/heads/github/main", first);
+		const older = `github-${first.slice(0, 12)}`;
+		const claim = { repo: "p", change: older, agent: GITHUB_AGENT, source: "github/main", intent: "Bring it in" };
+		expect(await callTool("claim", claim, job)).toMatchObject({ ok: true });
+		expect(await mergeAs(older, GITHUB_AGENT, job)).toMatchObject({
+			ok: false,
+			reasons: expect.arrayContaining([expect.stringContaining("approvals from reviewers")]),
+		});
 	});
 
 	it("needs votes for a head the import record doesn't hold", async () => {

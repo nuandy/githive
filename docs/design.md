@@ -1077,8 +1077,9 @@ and author, and `by` when the commit was stamped:
 
 A merge with no votes where the policy needs some is accepted only as GitHub's
 trusted change: claimed by `githive-github` (every record of the claim stamped
-as `service:githive-github`) with `source: github/<branch>`, its head a commit
-in the import record (stamped, and not marked untrusted), and the repo's
+as `service:githive-github`) with `source: github/<branch>`, its head the head
+of the branch's newest import when it was claimed (stamped, and not marked
+untrusted), the change named for that import (`github-<sha12>`), and the repo's
 GitHub trust on, for the GitHub repo the import came from, in the registry
 state the merge cites. The merge
 path applies the same rule, the same function (`trustedGitHubChange`), against

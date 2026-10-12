@@ -1,6 +1,7 @@
 import type { Registry } from "../claims";
 import { HOSTED_PREFIX } from "./repo";
 import { fail } from "../../errors";
+import { GITHUB_AGENT, GITHUB_IDENTITY } from "../github-settings";
 
 // Who a call acts as: an agent key or a sign-in names the agent, and an agent acts only as itself.
 
@@ -18,18 +19,24 @@ export async function keyAgent(registry: Registry | undefined, key: string) {
 	return agent;
 }
 
-/** Throws unless the caller may act as `name`. Callers with a key or sign-in act only as themselves. */
+/**
+ * Throws unless the caller may act as `name`. Callers with a key or sign-in act only as themselves; hosted agents act
+ * under the githive- names, but only GitHive's GitHub job, verified as `identity`, acts as githive-github.
+ */
 export function mayActAs(
 	name: string,
 	acting: string | undefined,
 	registry: Registry | undefined,
-	hosted: boolean | undefined,
+	caller: { hosted?: boolean | undefined; identity?: string | undefined },
 ) {
 	if (acting) {
 		if (name !== acting) fail(403, `you act as ${acting}; you can't act as ${name}`, `name yourself: ${acting}`);
 		return;
 	}
-	if (hosted) return;
+	// What githive-github claims from GitHub's branch lands without review.
+	if (name === GITHUB_AGENT && caller.identity !== GITHUB_IDENTITY)
+		fail(403, `only GitHive's GitHub job acts as ${GITHUB_AGENT}`);
+	if (caller.hosted) return;
 	if (name.startsWith(HOSTED_PREFIX)) fail(403, "githive- names are GitHive's hosted agents'");
 	// Names like person:… and service:… are verified identities, which an agent can't take on.
 	if (name.includes(":")) fail(403, "an agent's name can't contain \":\"");

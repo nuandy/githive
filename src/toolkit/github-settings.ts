@@ -30,6 +30,9 @@ export const GITHUB_IDENTITY = "service:githive-github";
 /** Where main goes on GitHub in pr mode: the standing pull request's head. */
 export const PR_BRANCH = "githive/main";
 
+/** The change githive-github brings GitHub's `commit` in as. */
+export const githubChangeId = (commit: string) => `github-${commit.slice(0, 12)}`;
+
 /** The project repo's branch GitHub's `branch` is written to, the source of the change that brings it back. */
 export const importedBranch = (branch: string) => `github/${branch}`;
 
