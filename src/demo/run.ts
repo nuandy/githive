@@ -15,8 +15,8 @@ export const RUN_MINUTES = 45;
 /** How often the run looks at its agents. */
 export const WATCH_MS = 60_000;
 
-/** How often a run waiting on its reset looks at it. */
-export const RESET_WATCH_MS = 15_000;
+/** How often a run waiting on its reset looks at it, so its agents start soon after it lands. */
+export const RESET_WATCH_MS = 5_000;
 
 /** Past this, a run whose agents haven't all stopped is stopped. */
 export const RUN_GIVES_UP_MS = (RUN_MINUTES + 30) * 60_000;

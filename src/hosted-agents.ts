@@ -64,8 +64,7 @@ export class HostedAgent extends DurableObject<Env> {
 		const names = hiveAgentNames(input.count);
 		const hive: Hive = { repo: input.repo, names, startedAt, until, by: input.by };
 		await this.ctx.storage.put("hive", hive);
-		const begin = (name: string, index: number) =>
-			this.agentNamed(input.repo, name).work({ repo: input.repo, name, until, index });
+		const begin = (name: string) => this.agentNamed(input.repo, name).work({ repo: input.repo, name, until });
 		await Promise.all(names.map(begin));
 		return this.status();
 	}
@@ -90,7 +89,7 @@ export class HostedAgent extends DurableObject<Env> {
 	// An agent.
 
 	/** Starts this agent's loop afresh, or gives one already working the new end. */
-	async work(input: { repo: string; name: string; until: number; index: number }) {
+	async work(input: { repo: string; name: string; until: number }) {
 		const kept = await this.ctx.storage.get<HostedAgentState>("agent");
 		if (kept && !kept.done) {
 			await this.ctx.storage.put("agent", { ...kept, until: Math.max(kept.until, input.until) });
@@ -108,8 +107,9 @@ export class HostedAgent extends DurableObject<Env> {
 			done: false,
 		};
 		await this.ctx.storage.put("agent", fresh);
-		// Agents start a few seconds apart, so they don't all read the backlog at once.
-		await this.ctx.storage.setAlarm(Date.now() + input.index * 3_000);
+		// Agents start together: each reads the backlog in an order of its own, and a claim another took first costs
+		// only a turn.
+		await this.ctx.storage.setAlarm(Date.now());
 	}
 
 	/** What this agent is doing and has done. */

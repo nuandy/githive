@@ -1242,14 +1242,15 @@ toolkit, as itself:
    The builder doesn't start reviewers when it finishes: the hive reviews
    the change, hosted agents and outside agents alike.
 
-Nothing assigns the work. Agents start a few seconds apart and each reads the
-backlog in its own order, so a refused claim costs a turn. An agent takes no
-new work once its time is up; it finishes what it started, then stops, and it
-stops early when nothing is left. The repo's own instance, `hive:<repo>`, only
-starts and stops its agents and reports what each is on. Deleting a repo stops
-them. The `githive` grant counts their votes, so a repo's veto roles accept
-them as they accept GitHive's reviewers. Each votes under its own identity, so
-two of them approving one change count as two approvals.
+Nothing assigns the work. Agents start together and each reads the backlog in
+its own order, so a claim another agent took first costs a turn. An agent
+takes no new work once its time is up; it finishes what it started, then
+stops, and it stops early when nothing is left. The repo's own instance,
+`hive:<repo>`, only starts and stops its agents and reports what each is on.
+Deleting a repo stops them. The `githive` grant counts their votes, so a
+repo's veto roles accept them as they accept GitHive's reviewers. Each votes
+under its own identity, so two of them approving one change count as two
+approvals.
 
 **The demo run.** "Start a demo run" on the dashboard (`POST /demo/runs`)
 builds Honeycomb, a small word game, in one public repo, named by `DEMO_REPO`
