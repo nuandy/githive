@@ -168,6 +168,7 @@ export function storeFor(
 		...(ctx.recordsRemote ? { recordsRemote: (index: number) => ctx.recordsRemote!(repo, index, "write") } : {}),
 		remote: () => ctx.remote(repo, "write"),
 		log: ctx.records ? (ref) => ctx.records!<Registry>(repo, ref) : undefined,
+		...(ctx.forgetAttempts ? { forgetAttempts: (change: string) => ctx.forgetAttempts!(repo, change) } : {}),
 	});
 }
 

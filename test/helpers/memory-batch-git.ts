@@ -61,18 +61,24 @@ function inMemory(remote: Remote): BatchGit {
 			for (const m of merges) {
 				await ws.fetch(`change-${m.change}`, m.source ?? remote, m.ref);
 				const message = await mergeMessage({ ...m.claimed, base: await ws.head() }, stamper);
-				const { oid } = await git.merge({
-					fs: ws.fs,
-					dir: "/repo",
-					ours: ws.branch,
-					theirs: m.head,
-					message,
-					author: BOT,
-					fastForward: false,
-					abortOnConflict: true,
-				});
-				if (!oid) throw new Error(`merging ${m.change} made no commit`);
-				commits.push(oid);
+				const merged = await git
+					.merge({
+						fs: ws.fs,
+						dir: "/repo",
+						ours: ws.branch,
+						theirs: m.head,
+						message,
+						author: BOT,
+						fastForward: false,
+						abortOnConflict: true,
+					})
+					.catch((err) => err as Error);
+				// As the Gate says it: the change that didn't merge onto the batch, and its files.
+				if (merged instanceof git.Errors.MergeConflictError)
+					return { failed: `merging ${m.change} onto the batch failed`, conflict: conflictOf(m.change, merged) };
+				if (merged instanceof Error) throw merged;
+				if (!merged.oid) throw new Error(`merging ${m.change} made no commit`);
+				commits.push(merged.oid);
 			}
 			// Only onto the base, as the Gate's push with a lease: looked at just before.
 			if ((await branchHead(remote, branch)) !== base) return "moved";
@@ -90,7 +96,11 @@ function inMemory(remote: Remote): BatchGit {
 				const head = await ws.fetch(`change-${c.change}`, c.source ?? remote, c.ref).catch((err) => err as Error);
 				if (head instanceof Error) return { failed: `fetch of ${c.change} failed: ${head.message}` };
 				const merged = await ws.merge(c.head, `Check ${c.change} with the batch`).catch((err) => err as Error);
-				if (merged instanceof Error) return { failed: `${c.change} doesn't merge onto the batch: ${merged.message}` };
+				if (merged instanceof Error) {
+					const failed = `${c.change} doesn't merge onto the batch: ${merged.message}`;
+					if (!(merged instanceof git.Errors.MergeConflictError)) return { failed };
+					return { failed, conflict: conflictOf(c.change, merged) };
+				}
 			}
 			const tip = await ws.head();
 			await ws.pushAs(ws.branch, `refs/heads/${ref}`, to);
@@ -121,3 +131,8 @@ function inMemory(remote: Remote): BatchGit {
 		},
 	};
 }
+
+const conflictOf = (change: string, err: InstanceType<typeof git.Errors.MergeConflictError>) => ({
+	change,
+	files: [...err.data.filepaths].sort(),
+});

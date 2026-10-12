@@ -13,6 +13,7 @@ import {
 	votesShardingSummary,
 	type Claim,
 } from "../lib/claimStatus";
+import { leaseWords } from "../lib/lease";
 import { shortSha, briefPaths } from "../lib/model";
 import { counted } from "../lib/plural";
 import { shortAge, timeAgo } from "../lib/relativeTime";
@@ -77,9 +78,11 @@ export function ChangeLabels({
 	);
 }
 
-/** One open change in the list: its status, title, who opened it, what it claims, and its approvals. */
-function ChangeRow({ claim, repo }: { claim: Claim; repo: string }) {
+/** One open change in the list: its status, title, who opened it, what it claims, when it frees up, and its approvals. */
+function ChangeRow({ claim, repo, now }: { claim: Claim; repo: string; now?: number }) {
 	const status = claimStatus(claim);
+	// Only a claim on its agent's turn frees up, at a time; the change's page says why the others don't.
+	const lease = leaseWords(claim.lease, now);
 	return (
 		<li className="change-row">
 			<StatusIcon status={status} />
@@ -101,6 +104,13 @@ function ChangeRow({ claim, repo }: { claim: Claim; repo: string }) {
 							<span title={claim.paths.join("\n")}>{briefPaths(claim.paths)}</span>
 						</span>
 					) : null}
+					{lease?.short ? (
+						<span className={`change-row__lease${lease.free ? " tone-warn" : ""}`} title={lease.long}>
+							{" · "}
+							<Icon name="clock" size={12} />
+							{lease.short}
+						</span>
+					) : null}
 				</p>
 			</div>
 			<div className="change-row__aside">
@@ -119,7 +129,18 @@ function ChangeRow({ claim, repo }: { claim: Claim; repo: string }) {
 }
 
 /** The open changes, newest first: all of them, or those on `shown` (the branch the overview shows). */
-export function ChangeList({ snapshot, repo, shown }: { snapshot: RepoSnapshot; repo: string; shown?: string }) {
+export function ChangeList({
+	snapshot,
+	repo,
+	shown,
+	now,
+}: {
+	snapshot: RepoSnapshot;
+	repo: string;
+	shown?: string;
+	/** The time leases are told against (tests fix it). */
+	now?: number;
+}) {
 	const project = snapshot.branch ?? "main";
 	const claims = [...snapshot.claims]
 		.filter((claim) => !shown || (claim.into ?? project) === shown)
@@ -147,7 +168,7 @@ export function ChangeList({ snapshot, repo, shown }: { snapshot: RepoSnapshot; 
 			) : (
 				<ul className="change-list__rows">
 					{claims.map((claim) => (
-						<ChangeRow key={claim.change} claim={claim} repo={repo} />
+						<ChangeRow key={claim.change} claim={claim} repo={repo} now={now} />
 					))}
 				</ul>
 			)}

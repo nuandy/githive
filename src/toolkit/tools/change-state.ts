@@ -67,7 +67,15 @@ export const TRUSTED_NOTE =
 	"(settings github_trust)";
 
 /** Where a change stands: its head, the votes on it, its approval under the policy, and its hosted agents. */
-export async function changeStatus(
+export async function changeStatus(...args: Parameters<typeof changeState>) {
+	return (await changeState(...args)).status;
+}
+
+/**
+ * Where a change stands, and the votes on its head that count (their stamps checked), for a caller that works out more
+ * from them without checking every stamp again.
+ */
+export async function changeState(
 	ctx: ToolContext,
 	repo: string,
 	registry: Registry | null | undefined,
@@ -88,15 +96,23 @@ export async function changeStatus(
 	const policy = author ? claimPolicy(registry, author) : branchSettings(registry, undefined).policy;
 	const { required, vetoes } = effectivePolicy(policy, paths);
 	const votesCast = head ? (await votesOn(head)).filter((vote) => vote.commit === head) : [];
+	const counted = head ? await countedVotes(votesCast, registry?.stampKey) : [];
 	const outcome = head
-		? approval({ votes: await countedVotes(votesCast, registry?.stampKey) }, head, policy, author, paths)
+		? approval({ votes: counted }, head, policy, author, paths)
 		: { approved: false, approvals: 0, vetoedBy: [], awaiting: vetoes };
 	const hosted = ctx.agentStatus
 		? await ctx.agentStatus(repo, change, head, hostedRoles(vetoes)).catch(() => undefined)
 		: undefined;
 	// GitHub's change says why it needs no review.
 	const trusted = author && trustedClaim(registry, author) ? { trusted: TRUSTED_NOTE } : {};
-	return { head, votes: votesCast, approval: { ...outcome, required }, ...trusted, ...(hosted ? { hosted } : {}) };
+	const status = {
+		head,
+		votes: votesCast,
+		approval: { ...outcome, required },
+		...trusted,
+		...(hosted ? { hosted } : {}),
+	};
+	return { status, counted };
 }
 
 /**

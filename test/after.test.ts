@@ -7,8 +7,8 @@ import { startGitServer, type GitServer } from "./helpers/git-server";
 import { toolCalls } from "./helpers/tool-calls";
 
 // A change can name changes it depends on (after): it merges only once each
-// has merged into the branch it lands on, and next hands out backlog work
-// only once what it depends on has merged.
+// has merged into the branch it lands on, and backlog offers work only once
+// what it depends on has merged.
 
 let server: GitServer;
 let work: string;
@@ -52,6 +52,8 @@ describe("a change that waits on another", () => {
 		expect(await call("merge", { change: "consumer", agent: "b" }, "b")).toEqual({
 			ok: false,
 			reasons: ["waits on api, which hasn't merged yet"],
+			why: ["after"],
+			next: "It waits on what it depends on (see reasons): call `merge` again once that has merged.",
 		});
 		expect(await call("status", { change: "consumer" }, "b")).toMatchObject({
 			waitsOn: ["waits on api, which hasn't merged yet"],
@@ -69,6 +71,8 @@ describe("a change that waits on another", () => {
 		expect(await call("merge", { change: "consumer", agent: "b" }, "b")).toEqual({
 			ok: false,
 			reasons: ["waits on api, which merged into feature/f, not main"],
+			why: ["after"],
+			next: "It waits on what it depends on (see reasons): call `merge` again once that has merged.",
 		});
 	});
 

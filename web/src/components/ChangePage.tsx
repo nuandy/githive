@@ -9,7 +9,9 @@ import { shortSha } from "../lib/model";
 import { timeAgo } from "../lib/relativeTime";
 import { href } from "../lib/routes";
 import { buildTimeline, changeEnding, historyStatus } from "../lib/changeTimeline";
+import { Awareness } from "./Awareness";
 import { ChangeCommits } from "./Commits";
+import { ConflictPanel } from "./ConflictPanel";
 import { Icon, type IconName } from "./Icon";
 import { Tabs } from "./Tabs";
 import { Timeline } from "./Timeline";
@@ -45,6 +47,8 @@ export interface ChangePageProps {
 	 * GitHub's branch moves or someone asks again. Only GitHub's changes offer it.
 	 */
 	giveUp?: (repo: string, change: string) => Promise<GiveUpAnswer>;
+	/** The time leases are told against (tests fix it). */
+	now?: number;
 }
 
 /** Whether a claim is GitHub's change, brought back by githive-github. */
@@ -354,6 +358,7 @@ export function ChangePage({
 	canVote = true,
 	merge,
 	giveUp,
+	now,
 }: ChangePageProps) {
 	const branch = claim?.into || history?.branch || snapshot.branch || "main";
 	const record = claim ?? history?.claim ?? undefined;
@@ -370,6 +375,17 @@ export function ChangePage({
 
 	if (!record && !ending) return <ChangeMissing changeId={changeId} repo={repo} loading={history === undefined} />;
 
+	// What its agent hears about it while its claim is in force: a conflict with its branch, and other changes' code.
+	const heard =
+		claim && history ? (
+			<>
+				{history.merge ? <ConflictPanel merge={history.merge} head={claim.head} repo={repo} /> : null}
+				{history.awareness ? (
+					<Awareness awareness={history.awareness} claims={snapshot.claims} head={claim.head} repo={repo} />
+				) : null}
+			</>
+		) : null;
+
 	const conversation = (
 		<div className="change-layout">
 			<div className="change-layout__main">
@@ -377,10 +393,11 @@ export function ChangePage({
 				<OpeningComment agent={agent} record={record} />
 				{history === undefined ? <p className="muted change-layout__loading">Loading history…</p> : null}
 				{history ? <Timeline items={timeline} /> : <LatestPush head={claim?.head} />}
+				{heard}
 				{claim && api && canVote ? <VoteForm repo={repo} claim={claim} policy={snapshot.policy} api={api} /> : null}
 				<MergeStatus claim={claim} ending={ending} branch={branch} repo={repo} />
 			</div>
-			<ChangeSidebar snapshot={snapshot} claim={claim} record={record} agent={agent} votes={votes} />
+			<ChangeSidebar snapshot={snapshot} claim={claim} record={record} agent={agent} votes={votes} now={now} />
 		</div>
 	);
 	const commits =

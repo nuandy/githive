@@ -1,0 +1,262 @@
+{
+	"repo": "express-agents-free-1011",
+	"work": "swarm-work-agents-free-1011",
+	"seed": 1,
+	"setup": {
+		"import": "https://github.com/expressjs/express",
+		"branch": "master",
+		"template": "express-template",
+		"verify": [],
+		"required": 0,
+		"shardDepth": 2,
+		"owner": "nuandy"
+	},
+	"planner": {
+		"agent": "planner",
+		"keyFile": "keys-agents-free-1011/planner.key"
+	},
+	"agents": [
+		{
+			"agent": "agent-1",
+			"keyFile": "keys-agents-free-1011/agent-1.key"
+		},
+		{
+			"agent": "agent-2",
+			"keyFile": "keys-agents-free-1011/agent-2.key"
+		},
+		{
+			"agent": "agent-3",
+			"keyFile": "keys-agents-free-1011/agent-3.key"
+		},
+		{
+			"agent": "agent-4",
+			"keyFile": "keys-agents-free-1011/agent-4.key"
+		},
+		{
+			"agent": "agent-5",
+			"keyFile": "keys-agents-free-1011/agent-5.key"
+		}
+	],
+	"backlog": [
+		{
+			"id": "accepts-edges",
+			"title": "Test req.accepts() edge cases",
+			"intent": "Add a new test file for req.accepts() cases the existing tests miss: q-values and their ordering, wildcards like */* and text/*, extension names vs full types, an empty Accept header, and several arguments vs an array. Only add tests, as the code behaves today; if one exposes a real bug, say so in the commit message rather than changing lib/.",
+			"paths": [
+				"test/req.accepts.edges.js"
+			]
+		},
+		{
+			"id": "languages-edges",
+			"title": "Test req.acceptsLanguages() edge cases",
+			"intent": "Add a new test file for req.acceptsLanguages(): region subtags (en-US vs en), q=0, wildcards, case, and no Accept-Language header. Only add tests, as the code behaves today; if one exposes a real bug, say so in the commit message rather than changing lib/.",
+			"paths": [
+				"test/req.acceptsLanguages.edges.js"
+			]
+		},
+		{
+			"id": "is-edges",
+			"title": "Test req.is() edge cases",
+			"intent": "Add a new test file for req.is(): bodies with and without Content-Type, parameters like charset, wildcards (text/*, */json), \"+json\" suffix types, and several types at once. Only add tests, as the code behaves today; if one exposes a real bug, say so in the commit message rather than changing lib/.",
+			"paths": [
+				"test/req.is.edges.js"
+			]
+		},
+		{
+			"id": "fresh-edges",
+			"title": "Test req.fresh and req.stale edge cases",
+			"intent": "Add a new test file for req.fresh/req.stale: ETag vs If-None-Match (weak and strong, lists, *), Last-Modified vs If-Modified-Since, both at once, non-GET/HEAD methods, and non-2xx/304 statuses. Only add tests, as the code behaves today; if one exposes a real bug, say so in the commit message rather than changing lib/.",
+			"paths": [
+				"test/req.fresh.edges.js"
+			]
+		},
+		{
+			"id": "hostname-edges",
+			"title": "Test req.hostname with proxies",
+			"intent": "Add a new test file for req.hostname and req.host under different \"trust proxy\" settings: X-Forwarded-Host with several values, IPv6 hosts with ports, and a missing Host header. Only add tests, as the code behaves today; if one exposes a real bug, say so in the commit message rather than changing lib/.",
+			"paths": [
+				"test/req.hostname.edges.js"
+			]
+		},
+		{
+			"id": "query-edges",
+			"title": "Test the query parser settings",
+			"intent": "Add a new test file for req.query under the \"query parser\" setting: \"simple\", \"extended\", false, and a custom function, with nested keys, arrays, and repeated keys. Only add tests, as the code behaves today; if one exposes a real bug, say so in the commit message rather than changing lib/.",
+			"paths": [
+				"test/req.query.edges.js"
+			]
+		},
+		{
+			"id": "append-edges",
+			"title": "Test res.append() edge cases",
+			"intent": "Add a new test file for res.append(): appending to a header set by res.set(), arrays, Set-Cookie with res.cookie() before and after, and header name case. Only add tests, as the code behaves today; if one exposes a real bug, say so in the commit message rather than changing lib/.",
+			"paths": [
+				"test/res.append.edges.js"
+			]
+		},
+		{
+			"id": "cookie-edges",
+			"title": "Test res.cookie() options",
+			"intent": "Add a new test file for res.cookie(): maxAge vs expires, signed cookies with a secret, encode, object values (JSON-prefixed), sameSite, partitioned, priority, and path/domain. Only add tests, as the code behaves today; if one exposes a real bug, say so in the commit message rather than changing lib/.",
+			"paths": [
+				"test/res.cookie.edges.js"
+			]
+		},
+		{
+			"id": "format-edges",
+			"title": "Test res.format() edge cases",
+			"intent": "Add a new test file for res.format(): q-values choosing between handlers, the default handler, no acceptable type (406 and its body), extension keys vs full types, and the Vary header it sets. Only add tests, as the code behaves today; if one exposes a real bug, say so in the commit message rather than changing lib/.",
+			"paths": [
+				"test/res.format.edges.js"
+			]
+		},
+		{
+			"id": "links-edges",
+			"title": "Test res.links() edge cases",
+			"intent": "Add a new test file for res.links(): several rels, calling it twice (appending), and arrays of URLs for one rel if supported. Only add tests, as the code behaves today; if one exposes a real bug, say so in the commit message rather than changing lib/.",
+			"paths": [
+				"test/res.links.edges.js"
+			]
+		},
+		{
+			"id": "location-edges",
+			"title": "Test res.location() edge cases",
+			"intent": "Add a new test file for res.location(): \"back\" with and without Referrer, absolute and relative URLs, encoding of unsafe characters, and already-encoded input. Only add tests, as the code behaves today; if one exposes a real bug, say so in the commit message rather than changing lib/.",
+			"paths": [
+				"test/res.location.edges.js"
+			]
+		},
+		{
+			"id": "redirect-edges",
+			"title": "Test res.redirect() edge cases",
+			"intent": "Add a new test file for res.redirect(): custom statuses, HEAD requests (no body), the body for Accept text/html vs text/plain vs none, and escaping of the URL in the HTML body. Only add tests, as the code behaves today; if one exposes a real bug, say so in the commit message rather than changing lib/.",
+			"paths": [
+				"test/res.redirect.edges.js"
+			]
+		},
+		{
+			"id": "type-edges",
+			"title": "Test res.type() edge cases",
+			"intent": "Add a new test file for res.type()/res.contentType(): extensions with and without a dot, full types, unknown extensions, and charset handling. Only add tests, as the code behaves today; if one exposes a real bug, say so in the commit message rather than changing lib/.",
+			"paths": [
+				"test/res.type.edges.js"
+			]
+		},
+		{
+			"id": "json-edges",
+			"title": "Test res.json() settings",
+			"intent": "Add a new test file for res.json() with the \"json spaces\", \"json replacer\" and \"json escape\" settings, plus undefined, null, numbers and strings as bodies. Only add tests, as the code behaves today; if one exposes a real bug, say so in the commit message rather than changing lib/.",
+			"paths": [
+				"test/res.json.edges.js"
+			]
+		},
+		{
+			"id": "param-edges",
+			"title": "Test app.param() edge cases",
+			"intent": "Add a new test file for app.param(): several params in one route, a param callback called once per request, errors passed to next(), and arrays of names. Only add tests, as the code behaves today; if one exposes a real bug, say so in the commit message rather than changing lib/.",
+			"paths": [
+				"test/app.param.edges.js"
+			]
+		},
+		{
+			"id": "route-edges",
+			"title": "Test app.route() edge cases",
+			"intent": "Add a new test file for app.route(): chaining methods, .all() with specific methods, 404/405-like behavior for unhandled methods, and HEAD falling back to GET. Only add tests, as the code behaves today; if one exposes a real bug, say so in the commit message rather than changing lib/.",
+			"paths": [
+				"test/app.route.edges.js"
+			]
+		},
+		{
+			"id": "router-edges",
+			"title": "Test mounted routers",
+			"intent": "Add a new test file for express.Router() mounted under paths: mergeParams, req.baseUrl and req.originalUrl at each level, nested routers, and case sensitivity / strict routing options. Only add tests, as the code behaves today; if one exposes a real bug, say so in the commit message rather than changing lib/.",
+			"paths": [
+				"test/router.mount.edges.js"
+			]
+		},
+		{
+			"id": "static-edges",
+			"title": "Test express.static() edge cases",
+			"intent": "Add a new test file for express.static() using the existing fixtures: index files, dotfiles options, fallthrough true and false, redirect for directories, and Cache-Control from maxAge. Only add tests, as the code behaves today; if one exposes a real bug, say so in the commit message rather than changing lib/.",
+			"paths": [
+				"test/express.static.edges.js"
+			]
+		},
+		{
+			"id": "example-ratelimit",
+			"title": "A rate-limit example",
+			"intent": "Add an example app in examples/rate-limit/index.js, in the style of the other examples, with a small in-memory fixed-window rate limiter middleware (no new dependencies) that returns 429 with Retry-After, plus an acceptance test in test/acceptance/rate-limit.js like the other acceptance tests.",
+			"paths": [
+				"examples/rate-limit/",
+				"test/acceptance/rate-limit.js"
+			]
+		},
+		{
+			"id": "example-etag",
+			"title": "A conditional-GET example",
+			"intent": "Add an example app in examples/etag-cache/index.js showing ETag and Last-Modified handling with 304 responses (no new dependencies), plus an acceptance test in test/acceptance/etag-cache.js.",
+			"paths": [
+				"examples/etag-cache/",
+				"test/acceptance/etag-cache.js"
+			]
+		},
+		{
+			"id": "example-jsonapi",
+			"title": "A JSON CRUD example",
+			"intent": "Add an example app in examples/json-crud/index.js: an in-memory CRUD JSON API for \"notes\" with validation errors as 400s and 404s for missing ids (no new dependencies), plus an acceptance test in test/acceptance/json-crud.js.",
+			"paths": [
+				"examples/json-crud/",
+				"test/acceptance/json-crud.js"
+			]
+		},
+		{
+			"id": "example-requestid",
+			"title": "A request-id example",
+			"intent": "Add an example app in examples/request-id/index.js with middleware that sets an X-Request-Id (reusing a valid incoming one, else generating one with node:crypto) and exposes it on req, plus an acceptance test in test/acceptance/request-id.js.",
+			"paths": [
+				"examples/request-id/",
+				"test/acceptance/request-id.js"
+			]
+		},
+		{
+			"id": "utils-jsdoc",
+			"title": "Complete the JSDoc in lib/utils.js",
+			"intent": "Give every function in lib/utils.js complete, accurate JSDoc: what it does, each parameter with its type, the return value. Comments only: no change in behavior.",
+			"paths": [
+				"lib/utils.js"
+			]
+		},
+		{
+			"id": "request-jsdoc",
+			"title": "Complete the JSDoc in lib/request.js",
+			"intent": "Give every property and method in lib/request.js complete, accurate JSDoc (types, return values, short examples where they help). Comments only: no change in behavior.",
+			"paths": [
+				"lib/request.js"
+			]
+		},
+		{
+			"id": "response-jsdoc",
+			"title": "Complete the JSDoc in lib/response.js",
+			"intent": "Give every method in lib/response.js complete, accurate JSDoc (types, return values, what it throws). Comments only: no change in behavior.",
+			"paths": [
+				"lib/response.js"
+			]
+		},
+		{
+			"id": "application-jsdoc",
+			"title": "Complete the JSDoc in lib/application.js",
+			"intent": "Give every method in lib/application.js complete, accurate JSDoc (types, return values). Comments only: no change in behavior.",
+			"paths": [
+				"lib/application.js"
+			]
+		},
+		{
+			"id": "express-jsdoc",
+			"title": "Complete the JSDoc in lib/express.js",
+			"intent": "Give lib/express.js complete, accurate JSDoc for createApplication and every export. Comments only: no change in behavior.",
+			"paths": [
+				"lib/express.js"
+			]
+		}
+	]
+}

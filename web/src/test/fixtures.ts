@@ -107,3 +107,12 @@ export const historyFixture: import("../api").ChangeHistory = {
 		},
 	],
 };
+
+/** Inline text of rendered markup as read, tags dropped without spaces and entities decoded: "dan's merge …". */
+export function inlineText(html: string): string {
+	const entities: Record<string, string> = { "&#x27;": "'", "&quot;": '"', "&amp;": "&", "&lt;": "<", "&gt;": ">" };
+	return html
+		.replace(/<[^>]+>/g, "")
+		.replace(/&#x27;|&quot;|&amp;|&lt;|&gt;/g, (entity) => entities[entity]!)
+		.replace(/\s+/g, " ");
+}

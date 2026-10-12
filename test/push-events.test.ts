@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { FakeStorage } from "./fakes/env";
-import { changePushOf, headsForClaims, notePushEvents, type PushedEvent } from "../src/push-events";
+import { branchPushOf, changePushOf, headsForClaims, notePushEvents, type PushedEvent } from "../src/push-events";
 
 const { RepoCache } = await import("../src/repo-cache");
 
@@ -65,6 +65,51 @@ describe("a push event's change", () => {
 			{},
 		];
 		for (const body of none) expect(changePushOf(body, "blueprint")).toBeNull();
+	});
+});
+
+describe("a push event's branch", () => {
+	const moved = (repoName: string, ref: string, after: string, before?: string): PushedEvent => ({
+		...event(repoName, ref, after),
+		payload: { ref, after, ...(before === undefined ? {} : { before }) },
+	});
+	const at = Date.parse("2026-10-10T12:00:00.000Z");
+
+	it("is a push to a branch of a project's own repo, with where the branch was", () => {
+		expect(branchPushOf(moved("nuandy--web", "refs/heads/main", B, A), "blueprint")).toEqual({
+			repo: "nuandy--web",
+			branch: "main",
+			before: A,
+			after: B,
+			at,
+		});
+		expect(branchPushOf(moved("p", "refs/heads/feature/x", B), "blueprint")).toEqual({
+			repo: "p",
+			branch: "feature/x",
+			after: B,
+			at,
+		});
+	});
+
+	it("says when the push made the branch, or deleted it", () => {
+		expect(branchPushOf(moved("p", "refs/heads/main", B, ZERO), "blueprint")).toMatchObject({ before: null, after: B });
+		expect(branchPushOf(moved("p", "refs/heads/main", ZERO, A), "blueprint")).toMatchObject({ before: A, after: null });
+	});
+
+	it("is nothing for a fork, a records repo, a note, another namespace, or a malformed event", () => {
+		const none = [
+			moved("fork--p--agent--a", "refs/heads/changes/c", A),
+			moved("fork--p--seed--3", "refs/heads/main", A),
+			moved("records--p--0", "refs/heads/main", A),
+			moved("p", "refs/notes/githive-claims/p", A),
+			moved("p", "refs/heads/", A),
+			moved("p", "refs/heads/main", "not-a-commit"),
+			moved("p", "refs/heads/main", A, "not-a-commit"),
+			{ ...moved("p", "refs/heads/main", A), source: { namespace: "blueprint-bench", repoName: "p" } },
+			{ ...moved("p", "refs/heads/main", A), metadata: { eventTimestamp: "not a time" } },
+			{},
+		];
+		for (const body of none) expect(branchPushOf(body, "blueprint")).toBeNull();
 	});
 });
 

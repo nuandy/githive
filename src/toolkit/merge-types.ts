@@ -1,6 +1,6 @@
 import type { GitHubImportResult } from "../gate-github";
-import type { Remote } from "../git";
-import type { ReadHistory } from "./batch-reads";
+import type { Hunk, Remote } from "../git";
+import type { ReadHistory, TouchedBy } from "./batch-reads";
 import type { ClaimRecord } from "./claims";
 import type { ClaimStore, ClaimsView } from "./claim-store";
 import type { Landing, lastLandedOn } from "./landing";
@@ -25,9 +25,16 @@ export interface BatchChange {
 	agent: string;
 }
 
+/** The files a change doesn't merge on, and who changed them on the branch since it left, where that was read. */
+export interface Conflict {
+	files: string[];
+	touchedBy?: TouchedBy[];
+}
+
 /**
  * Runs the project's checks on `base` with `changes` merged in order, which is what main becomes once they land.
- * They run in the Gate container named `gate`, or else the last change's.
+ * They run in the Gate container named `gate`, or else the last change's. A batch that doesn't merge says on what, in
+ * `conflict`, besides its failed step in `results`.
  */
 export type CheckRunner = (input: {
 	base: string;
@@ -35,7 +42,7 @@ export type CheckRunner = (input: {
 	changes: BatchChange[];
 	commands: string[];
 	gate?: string;
-}) => Promise<{ passed: boolean; results: CheckResult[] }>;
+}) => Promise<{ passed: boolean; results: CheckResult[]; conflict?: Conflict }>;
 
 /** A change in a batch before its head is read, and the head it was last seen at, if any. */
 export type BatchSource = Omit<BatchChange, "head"> & { seen?: string };
@@ -52,7 +59,8 @@ export interface BatchGit {
 	inspect(input: { base: string; branch: string; changes: BatchSource[] }): Promise<Inspected[]>;
 	/**
 	 * Lands `merges` on `base` in order and in one push, each as its own merge commit with its claim's trailers and
-	 * GitHive's stamp. Returns their commits, or "moved" if the branch is no longer at `base`.
+	 * GitHive's stamp. Returns their commits, "moved" if the branch is no longer at `base`, or why nothing landed:
+	 * with the change that didn't merge onto the batch and its files, when that's what failed.
 	 */
 	land(input: {
 		base: string;
@@ -60,10 +68,10 @@ export interface BatchGit {
 		merges: (BatchChange & { claimed: Omit<MergeClaim, "base"> })[];
 		by?: string;
 		stamper?: Stamper;
-	}): Promise<{ commits: string[] } | "moved">;
+	}): Promise<{ commits: string[] } | "moved" | Unlanded>;
 	/**
 	 * Merges `changes` onto `base` as they would land and pushes the result to `ref` on `to`, a connected GitHub repo,
-	 * for its Actions to check. Returns the tip, or why it failed.
+	 * for its Actions to check. Returns the tip, or why it failed: with the change that didn't merge, and its files.
 	 */
 	checksBranch(input: {
 		base: string;
@@ -71,7 +79,7 @@ export interface BatchGit {
 		changes: BatchChange[];
 		to: Remote;
 		ref: string;
-	}): Promise<{ tip: string } | { failed: string }>;
+	}): Promise<{ tip: string } | Unlanded>;
 	/**
 	 * Fast-forwards `as` (by default `branch`) on `to`, GitHub's copy, to `head` from the project's `branch`, and throws
 	 * if that's refused.
@@ -88,6 +96,15 @@ export interface BatchGit {
 		githubBranch: string;
 		as: string;
 	}): Promise<GitHubImportResult>;
+}
+
+/**
+ * Why a batch didn't land or merge, and the change that didn't merge onto it with its files, when that's why: git
+ * names the change whose merge failed, and lists its files where it can (none when it didn't say).
+ */
+export interface Unlanded {
+	failed: string;
+	conflict?: { change: string; files: string[] };
 }
 
 /** Another change that may land with this one: its claim, its head as last seen, and where its branch lives. */
@@ -138,6 +155,8 @@ export interface MergeInput {
 	batchGit: BatchGit;
 	/** Reads history through Artifacts' API, so a change can often be checked without a fetch (see changeAgainst). */
 	history?: ReadHistory;
+	/** Each change's earlier attempts to land, for its merge commit's story (see ToolContext.attemptsOf). */
+	attemptsOf?: (changes: string[]) => Promise<Record<string, string[]>>;
 	/** Starts the container for a batch's first check while the batch is read, so the check finds it running. */
 	prepareChecks?: (gate: string) => Promise<void>;
 	/** Starts the repo's Gate while the batch is read, so landing doesn't wait for its container to start. */
@@ -148,6 +167,8 @@ export interface MergeInput {
 	maxBatch?: number;
 	/** Runs after a batch lands and its claims are released, such as pushing main to GitHub. Failures are logged. */
 	afterLanding?: (commit: string) => Promise<void>;
+	/** Notes a line on a change's attempt to land (a conflict, failed checks) for its merge commit. Never fails. */
+	noteAttempt?: (change: string, line: string) => Promise<void>;
 	/** Timings that default to POLL_MS, ANSWER_WITHIN_MS, HEARTBEAT_MS and LEASE_TTL_MS. Tests shorten them. */
 	pollMs?: number;
 	answerWithinMs?: number;
@@ -155,15 +176,59 @@ export interface MergeInput {
 	leaseTtlMs?: number;
 }
 
+/**
+ * What a refused merge's reasons are about, so what follows can be worked out without reading their words:
+ * - conflict: it doesn't merge onto the branch (`into`); conflicts, touchedBy, hunks and fix say more where known.
+ * - checks: its checks failed, in this batch or on this head before; `checks` has the failed step where known.
+ * - unclaimed: its change holds no claim.
+ * - outside: it changes files outside its claim (`outsideClaim`).
+ * - inside: it changes files inside others' claims (`insideOthers`).
+ * - changes-asked: it's vetoed, or a reviewer asked for changes.
+ * - approvals: approvals are still missing.
+ * - after: what it depends on hasn't merged yet.
+ * - moved: the branch kept moving while it merged.
+ * - unread: its branch couldn't be read.
+ * - pending: not refused; it's ready and waiting to land.
+ * - setup: the repo's setup keeps it from landing, such as checks on Actions with no GitHub repo reached.
+ */
+export type Why =
+	| "conflict"
+	| "checks"
+	| "unclaimed"
+	| "outside"
+	| "inside"
+	| "changes-asked"
+	| "approvals"
+	| "after"
+	| "moved"
+	| "unread"
+	| "pending"
+	| "setup";
+
 export type MergeOutcome =
 	| { ok: true; commit: string; /** Why no checks ran, when they're configured. */ checks?: string }
 	| {
 			ok: false;
+			/** For people. What follows is worked out from `why` and the fields beside it, never from these words. */
 			reasons: string[];
+			/** Each kind of reason the refusal has, once, in the order of its reasons. */
+			why: Why[];
+			/** The branch it conflicts with, and the head that conflicts. */
+			into?: string;
+			head?: string;
 			conflicts?: string[];
 			/** The changes that last landed on each conflicted file. */
 			causes?: ReturnType<typeof lastLandedOn>;
+			/** Every commit on the branch since the change left it that changed a conflicted file (see touchedSince). */
+			touchedBy?: TouchedBy[];
+			/** Each conflicted file with its conflict markers, cut to a few KB (see Workspace.tryMerge). */
+			hunks?: Hunk[];
+			/** The commands that resolve the conflict in the clone credentials gives, then what to call. */
+			fix?: string[];
 			checks?: CheckResult[];
+			/** The files it changes outside its own claim, and inside others' claims. */
+			outsideClaim?: string[];
+			insideOthers?: string[];
 			/** Not refused but still waiting; merging again keeps waiting. */ pending?: true;
 	  };
 

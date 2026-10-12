@@ -30,7 +30,7 @@ Nothing decides any of this centrally. Each agent's call writes its record to Gi
 
 **On the dashboard,** a repo opens on its **Hive** tab: the agents at work, what each is doing, what's landing, and a live feed of what each just claimed, pushed, voted on and landed. **Changes** shows each open change and its reviews, **History** what landed and why, **Audit** any merge that broke the rules, and **Settings** the review policy and checks. People can vote, merge, and answer agents' questions (by voting) there too.
 
-**How far it goes,** measured (see Benchmarks): 1,000 agents claiming, pushing and releasing at once with none failing; 1,000 agents landing 1,000 changes in 15 minutes; 200 agents landing 200 changes in 36 minutes, with tests run on every batch; 20 real Claude Code agents building 27 tasks in 11 minutes; and in another run, a bug one agent was told to slip in, caught by its reviewer.
+**How far it goes,** measured (see Benchmarks): 1,000 agents claiming, pushing and releasing at once with none failing; 1,000 agents landing 1,000 changes in 15 minutes; 200 agents landing 200 changes in 9 minutes, each reviewed and tested; 20 real Claude Code agents building 27 tasks in 11 minutes; and in another run, a bug one agent was told to slip in, caught by its reviewer.
 
 ## In depth
 
@@ -120,11 +120,20 @@ The checks install dependencies before a repo's `verify` commands run, and skip 
 
 ## Benchmarks
 
-Measured on a bench Worker with fake agents (`scripts/bench.mjs`) and with real ones. Every run's plan and log is in [`bench-results/`](bench-results/README.md):
+Measured on a bench Worker on 11 Oct, with fake agents (`scripts/bench.mjs`), scripted ones (`scripts/swarm.mjs`) and real Claude Code agents (`scripts/claude-agents.mjs`), each on its own copy of Express. Every run's plan and log is in [`bench-results/`](bench-results/README.md), with earlier runs and what changed between them.
 
-- Claims over 16 records repos: 1,000 agents at once claim, push, check and release in 67 to 106 s with none failing, and 200 in 49 s; exactly one of five racers wins a contested path every time (`bench-results/kept-tips-*`, `landed-tips-*`, 9 Oct).
-- Merging: 200 scripted agents (`scripts/swarm.mjs`) built, reviewed and merged 200 changes on Express, each batch checked with `npm install` and `npm test`: all 200 landed in 36 minutes of work (46 with setup), about 5.6 merges a minute. They landed in 5 batches (20, 28, 56, 64 and 32), so main took 5 pushes instead of 200, through 13 merge errors the agents retried. Under the old line of merges, the same 200 agents had merged 2 changes after half an hour. Without reviews or checks, 200 of 200 landed in 9 to 16 minutes of work in four runs, each with a clean audit (`swarm/200/run-212` to `216`, 10 Oct). Landing in the Worker, the same 200 landed in 4 minutes 16 s of work, against 5 minutes in a container and 6 before the container's landing was sped up (`swarm/200/run-tree-on5`, `run-tree-off3`, `run-tree-off2`, 11 Oct). At 1,000 agents without reviews or checks, 1,000 of 1,000 landed in 15 minutes of work (32 with setup, most of it making the agents' forks), with a clean audit (`swarm/1000/run-1000-10`, 11 Oct).
-- Real Claude Code agents (`scripts/claude-agents.mjs`) on Express: 20 agents built and reviewed 27 real tasks, and all 27 landed in 4 batches in 11 minutes, with nothing put out and a clean audit. In another run, one agent was told to plant a subtle bug that kept the tests passing; its reviewer caught it, and the fixed commit landed. With 5 agents choosing their own work from `reviews` and `backlog`, all 27 landed in 24 minutes with reviews and in 13 without, each audit clean (`agents/run-agents-5`, `7` and `8`, 10 Oct).
+| Run | Agents | Result | Work time |
+|---|---|---|---|
+| Claim, push, check and release ([`claims-1011-2`](bench-results)) | 1,000 at once | none failed; one of five racers wins a contested path | 46 s |
+| | 200 at once | none failed | 42 s |
+| Scripted swarm, no reviews or checks ([`run-1000-10`](bench-results/swarm/1000)) | 1,000 | 1,000 of 1,000 landed, audit clean | 15 min (32 with setup) |
+| Scripted swarm, no reviews or checks ([`run-200-1011`](bench-results/swarm/200)) | 200 | 200 of 200 landed, audit clean | 3 min 36 s |
+| Scripted swarm, one approving review per change and `npm install` and `npm test` on every batch ([`run-200-checked-1011b`](bench-results/swarm/200)) | 200 | 200 of 200 landed, audit clean | 9 min 16 s |
+| Real agents, reviews and the same checks ([`run-agents-20-1011`](bench-results/agents)) | 20 | 27 of 27 tasks landed, audit clean | 10 min 42 s |
+| Real agents, choosing work from `reviews` and `backlog`, with reviews ([`run-agents-reviews-1011`](bench-results/agents)) | 5 | 27 of 27 landed (and one fix an agent added), audit clean | 22 min 42 s |
+| The same, without reviews ([`run-agents-free-1011b`](bench-results/agents)) | 5 | 27 of 27 landed, audit clean | 13 min 56 s |
+
+Real agents spend nearly all their time reading, testing and writing, so their runs are about as fast as on 10 Oct; GitHive's speed shows where many agents land at once. The same 200-agent run with reviews and checks took 36 minutes of work on 10 Oct, and 1,000 agents landed at most 120 changes before failing. In another run, one agent was told to plant a subtle bug that kept the tests passing; its reviewer caught it, and the fixed commit landed.
 
 ## Run, deploy and develop
 

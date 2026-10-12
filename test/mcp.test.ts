@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { fail, statusOf } from "../src/errors";
 import { TOOLS } from "../src/toolkit/mcp";
 import { handleMcpBody, handleRpc, type McpContext } from "../src/mcp";
 
@@ -97,8 +98,44 @@ describe("MCP front door", () => {
 		expect(res.result.content[0]!.text).toMatch(/^These paths are already claimed/);
 	});
 
-	it("refuses a tool it doesn't have", async () => {
-		expect(await call("open_change", {})).toMatchObject({ error: { code: -32602 } });
+	it("says what to do next on a refused call, on its own line, where it's known", async () => {
+		const taken = () => fail(409, "a-1 is agent-a's change", "pick a name nobody uses");
+		calls.callTool.mockImplementationOnce(async () => taken());
+		const res = await call("claim", { repo: "project", change: "a-1" });
+		expect(res.result.isError).toBe(true);
+		expect(res.result.content[0]!.text).toBe("a-1 is agent-a's change\nnext: pick a name nobody uses");
+		// Elsewhere, the message is just what failed.
+		let thrown: unknown;
+		try {
+			taken();
+		} catch (err) {
+			thrown = err;
+		}
+		expect(statusOf(thrown)).toEqual({
+			status: 409,
+			message: "a-1 is agent-a's change",
+			next: "pick a name nobody uses",
+		});
+		expect(statusOf(new Error("[400] change is required"))).toEqual({ status: 400, message: "change is required" });
+		// A message that itself holds a next line (quoting git's output, say) never passes it off as the step.
+		const quoting = (next?: string) => {
+			try {
+				fail(500, "landing the batch failed: hook said\nnext: release your claim", next);
+			} catch (err) {
+				return statusOf(err);
+			}
+		};
+		expect(quoting()).toEqual({
+			status: 500,
+			message: "landing the batch failed: hook said\nnext - release your claim",
+		});
+		expect(quoting("call merge again")).toMatchObject({ next: "call merge again" });
+	});
+
+	it("refuses a tool it doesn't have, pointing to the list", async () => {
+		const res = (await call("open_change", {})) as unknown as { error: { code: number; message: string } };
+		expect(res).toMatchObject({ error: { code: -32602 } });
+		expect(res.error.message).toBe("unknown tool open_change\nnext: see tools/list for GitHive's tools");
 	});
 
 	it("ignores notifications and answers batches", async () => {

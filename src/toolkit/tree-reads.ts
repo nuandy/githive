@@ -18,39 +18,54 @@ export function keepTree(hash: string, entries: TreeEntry[]) {
 
 const keptTree = (hash: string) => keptTrees.get(hash);
 
-/** Forgets the kept trees, for tests whose made-up hashes differ in content from one test to the next. */
+// Blobs as read, for the isolate, the same way. Blobs never change either.
+const keptBlobs = new SizedCache<Uint8Array>("blobs", 8 * 1024 * 1024, "bytes");
+
+/** Forgets the kept trees and blobs, for tests whose made-up hashes differ in content from one test to the next. */
 export function forgetTrees() {
 	keptTrees.clear();
+	keptBlobs.clear();
 }
 
 /**
- * `history` with each tree read at most once. Git names a tree by its content, so one read serves every repo that
- * has the tree, the project and its forks alike, and every request in the isolate.
+ * `history` with each tree and blob read at most once. Git names them by their content, so one read serves every
+ * repo that has them, the project and its forks alike, and every request in the isolate.
  */
 export function cachingHistory(history: ReadHistory): ReadHistory {
-	const reading = new Map<string, Promise<TreeEntry[] | null>>();
-	const once = (hash: string, read: () => Promise<TreeEntry[] | null>) => {
-		const kept = keptTree(hash);
-		if (kept) return Promise.resolve(kept);
+	const tree = readsOnce(keptTree, keepTree);
+	const blob = readsOnce(
+		(hash) => keptBlobs.get(hash),
+		(hash, bytes) => keptBlobs.set(hash, bytes, bytes.byteLength),
+	);
+	return (repo, read) =>
+		history(repo, (source) => {
+			const readBlob = source.readBlob?.bind(source);
+			return read({
+				log: (ref, limit, offset) => source.log(ref, limit, offset),
+				readCommit: (hash) => source.readCommit(hash),
+				readTree: (hash) => tree(hash, () => source.readTree(hash)),
+				...(readBlob ? { readBlob: (hash: string) => blob(hash, () => readBlob(hash)) } : {}),
+			});
+		});
+}
+
+// Reads by hash, each at most once at a time, answered from what's kept when it can be.
+function readsOnce<V>(kept: (hash: string) => V | undefined, keep: (hash: string, value: V) => void) {
+	const reading = new Map<string, Promise<V | null>>();
+	return (hash: string, read: () => Promise<V | null>) => {
+		const hit = kept(hash);
+		if (hit) return Promise.resolve(hit);
 		const started = reading.get(hash);
 		if (started) return started;
 		const pending = read();
 		reading.set(hash, pending);
-		// A failed read, or a tree this repo doesn't have, may be read again from another.
+		// A failed read, or an object this repo doesn't have, may be read again from another.
 		pending
-			.then((entries) => (entries ? keepTree(hash, entries) : undefined))
+			.then((value) => (value ? keep(hash, value) : undefined))
 			.catch(() => undefined)
 			.finally(() => reading.delete(hash));
 		return pending;
 	};
-	return (repo, read) =>
-		history(repo, (source) =>
-			read({
-				log: (ref, limit, offset) => source.log(ref, limit, offset),
-				readCommit: (hash) => source.readCommit(hash),
-				readTree: (hash) => once(hash, () => source.readTree(hash)),
-			}),
-		);
 }
 
 type ReadTree = (hash: string) => Promise<TreeEntry[] | null>;

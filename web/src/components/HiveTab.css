@@ -94,6 +94,25 @@
 	color: var(--warn);
 }
 
+/* What agents hear (an interface change, a heads-up, a conflict): a small icon before the line, in a quiet tone. */
+.hive-tab__marker {
+	margin-right: 6px;
+	vertical-align: -2px;
+	color: var(--text-muted);
+}
+
+.hive-tab__event--interface .hive-tab__marker {
+	color: var(--accent);
+}
+
+.hive-tab__event--heads_up .hive-tab__marker {
+	color: var(--warn);
+}
+
+.hive-tab__event--conflicted .hive-tab__marker {
+	color: var(--bad);
+}
+
 .hive-tab__when {
 	white-space: nowrap;
 }

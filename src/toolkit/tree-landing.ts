@@ -99,6 +99,8 @@ export function treeLanding(input: TreeLandingInput): BatchGit["land"] {
 			gate = `it failed: ${err instanceof Error ? err.message : String(err)}`;
 		}
 		console.log(`tree landing of ${batch.merges.length}: ${steps.done()}; in the Gate, because ${gate}`);
+		// When a change and the branch both changed a file, the Gate merges it for real. If that conflicts, the error
+		// names the files and who changed them, and the change's attempt is noted (see batchGitFor in env.ts).
 		return input.fallback(batch);
 	};
 }

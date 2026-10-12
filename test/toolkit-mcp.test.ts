@@ -87,6 +87,40 @@ describe("GitHive's MCP tools", () => {
 		expect(await call("audit", { repo: "project" })).toEqual({ merges: 0, open: 0, violations: [] });
 	});
 
+	it("says what follows a claim, made or refused, and a claim on another agent's change", async () => {
+		await call("settings", { repo: "project" });
+		const made = await call("claim", {
+			repo: "project",
+			change: "a-1",
+			agent: "agent-a",
+			paths: ["src/a/"],
+			intent: "a",
+		});
+		expect(made.next).toBe(
+			"Call `credentials` with change a-1, build on `changes/a-1` in your clone, push to `fork`, then call `status`.",
+		);
+		const refused = await call("claim", {
+			repo: "project",
+			change: "b-1",
+			agent: "agent-b",
+			paths: ["src/a/x.ts"],
+			intent: "b",
+		});
+		expect(refused.next).toBe(
+			"Held by agent-a's a-1 (its intent is in `conflicts`). Pick other work from `backlog`, or claim again later.",
+		);
+		// Claiming under another agent's change name is thrown, and its text ends with the next step.
+		expect(
+			await call("claim", { repo: "project", change: "a-1", agent: "agent-b", paths: ["src/b/"], intent: "b" }),
+		).toEqual({
+			error:
+				"a-1 is agent-a's change: claim under a change name of your own\n" +
+				"next: pick a name nobody uses (`claims` shows those in use), or choose other work from `backlog`",
+		});
+		// A list stays a list.
+		expect(Array.isArray(await call("claims", { repo: "project" }))).toBe(true);
+	});
+
 	it("starts GitHive and sets the rest at once when the first settings also name files to skip", async () => {
 		expect(await call("settings", { repo: "project", verify: ["npm test"], skip_checks: ["docs/"] })).toMatchObject({
 			verify: ["npm test"],
@@ -305,6 +339,7 @@ describe("GitHive's MCP tools", () => {
 		expect(await call("request_review", { repo: "project", change: "a-1", summary: "adds a" })).toEqual({
 			head: "h1",
 			reviewers: ["review", "security"],
+			next: "GitHive's reviewers (review and security) review h1 and vote: call `status` to see their votes.",
 		});
 		expect(reviewRequests).toEqual([
 			{ repo: "project", change: "a-1", roles: ["review", "security"], summary: "adds a" },

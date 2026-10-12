@@ -11,6 +11,7 @@ import {
 	type ChecksBranch,
 	type LandedPush,
 	type LandingMerge,
+	type ChecksResult,
 	type LandingResult,
 	type ReadChange,
 	fetchBatchBase,
@@ -128,7 +129,7 @@ export class Gate extends DurableObject<Env> {
 	 * Merges a batch onto `baseHead` as it will land and pushes it to `ref` on a connected GitHub repo, whose Actions
 	 * check it. This runs with real git in the repo's own Gate, not in a Worker's memory.
 	 */
-	checksBranch(input: BatchBase & ChecksBranch): Promise<{ tip: string } | { failed: string }> {
+	checksBranch(input: BatchBase & ChecksBranch): Promise<ChecksResult> {
 		return this.landing("checksBranch", input, (container) => pushForChecks(container, input));
 	}
 

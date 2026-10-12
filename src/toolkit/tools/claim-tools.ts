@@ -5,6 +5,7 @@ import { GITHUB_AGENT, isGitHubChange, isImportedBranch } from "../github-settin
 import { abandonedRule } from "./change-state";
 import { branchMerge, changeList, dependencyLoop, targetBranch } from "./claim-input";
 import type { ClaimOutcome } from "../claim-store";
+import { BUILDING_IDLE_MS } from "../staleness";
 import type { Args, ToolCall, ToolHandlers } from "./context";
 import { giveUpGitHubChange } from "./github-tools";
 import { containerChecks, shardIfBusy, STALE_AFTER_MS, storeFor } from "./repo";
@@ -51,13 +52,15 @@ export const claimTools: ToolHandlers = {
 		};
 		// If one record would hold agents up, shard first, then claim in the shards.
 		const sharded = await shardIfBusy(ctx, repo, claims, registered, input.agent);
+		// Taken before the claim is written, so the claim's own time is no earlier (see claimReply's freeAfter).
+		const claimedAt = Date.now();
 		const outcome = await (sharded ? storeFor(ctx, repo, sharded) : store).claim(input, stamper);
 		// Once claimed, the source's tip becomes the change's branch in the agent's fork.
 		if (outcome.ok && merging) await merging.push(await changeSource(agent, "write"), change);
 		// Without container checks, a Gate that lands batches does so within minutes, so warm it from the claim. A cold
 		// Gate holds up the first batch. With checks, a claim is too early to install for; they warm at the check.
 		if (outcome.ok && !containerChecks(registered?.verify).length) await warmChecks("claimed", change);
-		return claimReply(outcome, { change, into, branch, made, source, merging, paths });
+		return claimReply(outcome, { change, into, branch, made, source, merging, paths, claimedAt });
 	},
 	async release({ args, ctx, repo, votes, registered, actAs, stamper, store, claimOf }) {
 		const change = requiredString(args, "change");
@@ -141,8 +144,8 @@ async function landingBranch(call: ToolCall, change: string, agent: string) {
 	return { into, made };
 }
 
-// What a claim reports: its outcome with conflicting paths as agents wrote them, where the change lands, and a note
-// on a branch merge or on paths a refused claim still holds.
+// What a claim reports: its outcome with conflicting paths as agents wrote them, where the change lands, when the claim
+// may free up, and a note on a branch merge or on paths a refused claim still holds.
 function claimReply(
 	outcome: ClaimOutcome,
 	claimed: {
@@ -153,9 +156,10 @@ function claimReply(
 		source?: string;
 		merging?: { tip: string };
 		paths: string[];
+		claimedAt: number;
 	},
 ) {
-	const { change, into, branch, made, source, merging, paths } = claimed;
+	const { change, into, branch, made, source, merging, paths, claimedAt } = claimed;
 	// Report conflicting paths as agents wrote them, without the branch scoping.
 	const asWritten = (path: string) => presentClaim({ paths: [path] }, branch).paths[0];
 	const conflicts = outcome.ok
@@ -186,6 +190,9 @@ function claimReply(
 				}
 			: {};
 	const reply: Record<string, unknown> = { ...outcome };
+	// The soonest anyone may take its paths if its agent goes quiet: the floor after a claim (see staleness.ts). It
+	// lasts longer once something is pushed, and status's lease says exactly; claiming again renews it.
+	if (outcome.ok) reply.freeAfter = new Date(claimedAt + BUILDING_IDLE_MS).toISOString();
 	if (conflicts) reply.conflicts = conflicts;
 	if (into !== branch) reply.into = into;
 	if (made) reply.branch = made;
