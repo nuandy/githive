@@ -298,12 +298,15 @@ const TOOL_LIST = [
 	},
 	{
 		name: "vote",
-		description: "Record your review verdict on the exact commit you reviewed.",
+		description:
+			"Record your review verdict on the exact commit you reviewed. Name its `change` too: when you " +
+			"reject, the change's revision then comes back to you first, with your findings, to check.",
 		inputSchema: {
 			type: "object",
 			properties: {
 				repo: str,
 				commit: str,
+				change: str,
 				reviewer: str,
 				role: str,
 				verdict: { type: "string", enum: ["approve", "reject"] },

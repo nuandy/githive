@@ -113,7 +113,8 @@ export class Reviewer extends SandboxAgent<ReviewJob, ReviewerState> {
 	private async vote(job: ReviewJob, verdict: "approve" | "reject", evidence: string) {
 		const votes = votesFor(toolContextFor(this.env, undefined, { hosted: true }), job.project);
 		const stamper = this.env.STAMP_KEY ? await makeStamper(this.env.STAMP_KEY, identityOf(job)) : undefined;
-		await votes.vote({ commit: job.head, reviewer: voterOf(job), role: job.role, verdict, evidence }, stamper);
+		const vote = { commit: job.head, change: job.change, reviewer: voterOf(job), role: job.role, verdict, evidence };
+		await votes.vote(vote, stamper);
 	}
 
 	protected instructions(job: ReviewJob) {

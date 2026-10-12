@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { RECORD_FORMAT } from "../src/record-format";
 import { GitCasLog, type LogCommit, type TipCache } from "../src/record-log";
 import { startGitServer, type GitServer } from "./helpers/git-server";
 
@@ -37,7 +38,7 @@ describe("GitCasLog", () => {
 		const written = commit({ kind: "decisions", state: { claims: { "src/x/": "agent-a" } } });
 		const tip = await log.append(null, written);
 		expect(tip).toMatch(/^[0-9a-f]{40}$/);
-		expect(await log.read()).toEqual({ tip, commit: { ...written, format: 1 } });
+		expect(await log.read()).toEqual({ tip, commit: { ...written, format: RECORD_FORMAT } });
 	});
 
 	it("retries a read the server fails for a moment", async () => {
@@ -49,7 +50,7 @@ describe("GitCasLog", () => {
 			"refs/notes/githive/t1",
 		);
 		server.failFetches(1);
-		expect(await fresh.read()).toEqual({ tip, commit: { ...written, format: 1 } });
+		expect(await fresh.read()).toEqual({ tip, commit: { ...written, format: RECORD_FORMAT } });
 	});
 
 	it("retries a push the server answered with a 500, and counts one it had applied as landed", async () => {
@@ -158,7 +159,9 @@ describe("GitCasLog", () => {
 
 	it("says the record format each commit is in, and reads a commit from before formats as format 1", async () => {
 		await log.append(null, commit());
-		expect(server.git("log", "-1", "--format=%B", "refs/notes/githive/t1")).toMatch(/^GitHive-Format: 1$/m);
+		expect(server.git("log", "-1", "--format=%B", "refs/notes/githive/t1")).toMatch(
+			new RegExp(`^GitHive-Format: ${RECORD_FORMAT}$`, "m"),
+		);
 		const { formatOf } = await import("../src/record-format");
 		expect(formatOf("Old commit\n\nGitHive-Author: x\nGitHive-Kind: decisions\nGitHive-Batch: b\n")).toBe(1);
 	});
@@ -184,9 +187,9 @@ describe("record states shared by readers, by tip", () => {
 		// A reader that fetched it keeps it for the others, under its ref and record format.
 		await new GitCasLog<State>(remote, "t1", "refs/notes/githive/t1", { states }).read();
 		await new Promise((resolve) => setTimeout(resolve, 10));
-		expect(kept.get("refs/notes/githive/t1@1")?.tip).toBe(tip);
+		expect(kept.get(`refs/notes/githive/t1@${RECORD_FORMAT}`)?.tip).toBe(tip);
 		// Another reader starts from the kept tip, shown here by what it was kept as.
-		kept.set("refs/notes/githive/t1@1", {
+		kept.set(`refs/notes/githive/t1@${RECORD_FORMAT}`, {
 			tip: tip!,
 			json: JSON.stringify(commit({ state: { claims: { kept: "yes" } } })),
 		});
@@ -285,7 +288,7 @@ describe("record tips kept for readers", () => {
 		const before = server.requests.length;
 		expect(await reader().read()).toEqual({
 			tip: second,
-			commit: { ...commit({ state: { claims: { "src/y/": "agent-b" } } }), format: 1 },
+			commit: { ...commit({ state: { claims: { "src/y/": "agent-b" } } }), format: RECORD_FORMAT },
 		});
 		expect(server.requests.length).toBe(before);
 	});
@@ -360,7 +363,11 @@ describe("a rehearsed change of record format", () => {
 			claims: Object.fromEntries(Object.entries((state as V1).claims).map(([path, holder]) => [path, { holder }])),
 		}),
 	};
-	const v1 = () => new GitCasLog<V1>(async () => ({ url: server.url, token: "unused" }), "t1", "refs/notes/githive/t1");
+	// Formats 1 and 2 of a made-up record, whatever format GitHive's own records are in.
+	const v1 = () =>
+		new GitCasLog<V1>(async () => ({ url: server.url, token: "unused" }), "t1", "refs/notes/githive/t1", {
+			format: 1,
+		});
 	const v2 = () =>
 		new GitCasLog<V2>(async () => ({ url: server.url, token: "unused" }), "t1", "refs/notes/githive/t1", {
 			format: 2,

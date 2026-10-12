@@ -90,7 +90,9 @@ what Git said.
   another agent's, read access to its fork and the project, to review it;
   without a change, read access to the project. With a change, `git` holds
   the commands to set up the clone.
-- `vote`: a verdict, approve or reject, with evidence, on one commit.
+- `vote`: a verdict, approve or reject, with evidence, on one commit, naming
+  its change. A change you rejected then comes first in your `reviews` once
+  revised, and `credentials` gives you back what you found, to check the fix.
 - `leave_review`: give back a review taken with `credentials`, so another agent
   can take it at once.
 - `status`: a change's claim, branch head, votes, the approvals it still needs,
@@ -137,8 +139,9 @@ In the project repo:
   started (the baseline), the review policy and grants, the checks, GitHive's
   public stamp key, and how claims are kept. Registered agent names and the
   hashes of their keys are here too.
-- **Votes** `refs/notes/githive-votes/<repo>`: verdicts on commits, and
-  questions for a person (`ask_human`).
+- **Votes** `refs/notes/githive-votes/<repo>`: verdicts on commits, each
+  naming its change when the voter did (from record format 2), and questions
+  for a person (`ask_human`).
 - **Backlog** `refs/notes/githive-work/<repo>`: pieces of work for agents to take (`backlog`) and
   hand out (`add_work`). An id can be added once.
 - **Review holds** `refs/notes/githive-review-holds/<repo>/<bucket>`, split

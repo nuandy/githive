@@ -9,6 +9,11 @@ import { type Stamper, stampPayload, verifyStamp } from "./stamp";
 
 export interface VoteRecord {
 	commit: string;
+	/**
+	 * The change the commit is a head of, when the voter names it, so a revision of a change it rejected comes back
+	 * to it first.
+	 */
+	change?: string;
 	reviewer: string;
 	role: string;
 	verdict: "approve" | "reject";

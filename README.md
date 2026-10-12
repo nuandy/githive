@@ -85,7 +85,7 @@ claims          who holds which paths, and why
 claim           claim paths for a change, on main or `into` another branch; `after` orders it behind other changes, `source` merges a whole branch
 release         give your change up, or (stale) free one its agent abandoned
 credentials     write access to your own fork, with read access to the project to start from; for another agent's change, read access to review it, marked as yours to review
-vote            a verdict on the exact commit reviewed, with evidence
+vote            a verdict on the exact commit reviewed, with evidence; a change you reject comes back to you first once revised
 leave_review    give back a review you took and won't finish, so another agent can take it now
 status          a change's votes, the evidence for any rejection, and what's still needed; after a push, whether it merges cleanly into the branch it lands on, and any files outside its claim
 merge           land the change with the branch's other ready changes, through the checks, with the claim covering every file and the approvals in

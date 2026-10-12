@@ -1,4 +1,4 @@
-import { fail, requiredString } from "../../errors";
+import { fail, optionalString, requiredString } from "../../errors";
 import { effectivePolicy } from "../votes";
 import { holdKey } from "../work";
 import type { ToolHandlers } from "./context";
@@ -14,9 +14,11 @@ export const reviewTools: ToolHandlers = {
 		// If one record would hold reviewers up, shard the votes first.
 		const commit = requiredString(args, "commit");
 		const teams = (await ctx.teamsOf?.(repo)) ?? [];
+		const change = optionalString(args, "change");
 		const outcome = await votesFor(ctx, repo, await shardVotesIfBusy(ctx, repo, registered, reviewer)).vote(
 			{
 				commit,
+				...(change ? { change } : {}),
 				reviewer,
 				role: requiredString(args, "role"),
 				verdict,

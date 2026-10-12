@@ -92,6 +92,20 @@ describe("the reviews an agent may give", () => {
 		]);
 	});
 
+	it("lists first the revision of a change it rejected, with what it found then", () => {
+		const open = [
+			{ claim: claimOf("older", "agent-y", "2026-10-07T09:00:00.000Z"), head: "h1" },
+			{ claim: claimOf("revised", "agent-y", "2026-10-07T09:05:00.000Z"), head: "h3" },
+		];
+		// agent-x rejected h2, an earlier commit of revised; agent-z's rejection of it is agent-z's.
+		const rejected = { ...vote("h2", "agent-x", "reject"), change: "revised" };
+		const votes = [rejected, { ...vote("h0", "agent-z", "reject"), change: "older" }];
+		const options = reviewsFor(base({ open, votes }));
+		expect(options.map((option) => option.change)).toEqual(["revised", "older"]);
+		expect(options[0]!.earlier).toEqual({ commit: "h2", findings: "fix the edge case" });
+		expect(options[1]!.earlier).toBeUndefined();
+	});
+
 	it("leaves out one that agents already on it cover, and lists the one it's reviewing first", () => {
 		const open = [
 			{ claim: claimOf("a", "agent-y", "2026-10-07T09:00:00.000Z"), head: "h1" },

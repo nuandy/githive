@@ -88,6 +88,7 @@ beforeAll(async () => {
 	await call("ada/builder", "claim", { change: "docs-1", paths: ["docs/"], intent: "Write docs" });
 	await call("bob/reviewer", "vote", {
 		commit: "1".repeat(40),
+		change: "c-1",
 		role: "security",
 		verdict: "approve",
 		evidence: "ran the tests",

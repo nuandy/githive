@@ -125,6 +125,8 @@ export interface ReviewOption {
 	needed: number;
 	/** Agents reviewing it in this role now, including the caller once it starts. */
 	reviewing: string[];
+	/** An earlier commit of the change the caller rejected, and its findings: the fix is for it to check. */
+	earlier?: { commit: string; findings: string };
 }
 
 /**
@@ -139,6 +141,7 @@ export function reviewsFor(input: WorkInput): ReviewOption[] {
 		.sort(
 			(a, b) =>
 				Number(b.reviewing.includes(agent)) - Number(a.reviewing.includes(agent)) ||
+				Number(!!b.earlier) - Number(!!a.earlier) ||
 				Number(b.blocking) - Number(a.blocking) ||
 				a.approvals - b.approvals ||
 				a.since.localeCompare(b.since),
@@ -148,9 +151,33 @@ export function reviewsFor(input: WorkInput): ReviewOption[] {
 		options,
 		(a, b) =>
 			a.reviewing.includes(agent) === b.reviewing.includes(agent) &&
+			!!a.earlier === !!b.earlier &&
 			a.blocking === b.blocking &&
 			a.approvals === b.approvals,
 	).map(({ since: _, ...option }) => option);
+}
+
+/**
+ * The caller's latest rejection of an earlier commit of `change`, if it has one: it reviews the revision first, since
+ * it knows what it found.
+ */
+export function earlierRejection(input: Pick<WorkInput, "agent" | "by" | "votes">, change: string, head: string) {
+	const mine = (vote: VoteRecord) => {
+		if (vote.reviewer === input.agent) return true;
+		if (!input.by) return false;
+		return vote.by === input.by;
+	};
+	const rejectedEarlier = (vote: VoteRecord) => {
+		if (vote.change !== change) return false;
+		if (vote.commit === head) return false;
+		if (vote.verdict !== "reject") return false;
+		return mine(vote);
+	};
+	const latest = input.votes
+		.filter(rejectedEarlier)
+		.sort((a, b) => a.at.localeCompare(b.at))
+		.at(-1);
+	return latest ? { commit: latest.commit, findings: latest.evidence } : undefined;
 }
 
 const authorOf = (claim: ClaimRecord): Author => ({ agent: claim.agent, ...(claim.by ? { by: claim.by } : {}) });
@@ -190,10 +217,12 @@ function reviewOption(input: WorkInput, claim: ClaimRecord, head: string): (Revi
 	if (needed <= 0) return null;
 	const reviewing = input.held?.[holdKey(head, role ?? "review")] ?? [];
 	if (reviewing.filter((reviewer) => reviewer !== agent).length >= needed) return null;
+	const earlier = earlierRejection(input, claim.change, head);
 	return {
 		change: claim.change,
 		author: claim.agent,
 		head,
+		...(earlier ? { earlier } : {}),
 		role: role ?? "review",
 		blocking: !!role,
 		intent: claim.intent,

@@ -10,7 +10,7 @@ import { pushToGitHub } from "../github-outbound";
 import { bringsGitHubBack, type GitHubSeen, githubSync } from "../github-settings";
 import { type BatchGit, type Candidate, mergeChange, type MergeInput } from "../merge";
 import { countedVotes } from "../votes";
-import { holdKey, reviewersNeeded } from "../work";
+import { earlierRejection, holdKey, reviewersNeeded } from "../work";
 import type { ToolCall, ToolContext, ToolHandlers } from "./context";
 import { ownChangeCommands, reviewCommands } from "./git-commands";
 import { trustedImports } from "./github-tools";
@@ -115,6 +115,13 @@ export const mergeTools: ToolHandlers = {
 		return { ok: true, change, head, role };
 	},
 };
+
+/** The caller's latest rejection of an earlier commit of the change it's about to review, if any. */
+async function yourRejection(call: ToolCall, reviewer: string, change: string, head: string) {
+	const { votes } = await call.votes.read().catch(() => ({ votes: [] }));
+	const by = call.stamper?.by;
+	return earlierRejection({ agent: reviewer, ...(by ? { by } : {}), votes }, change, head);
+}
 
 /** The commit a change's branch holds now, for a review given back without naming it. */
 async function pushedHead(call: ToolCall, change: string) {
@@ -268,6 +275,7 @@ async function reviewAccess(
 	// Agent names only: a person's identity stays in the records, out of logs.
 	console.log(`review access to ${repo} ${change} (${author}) for ${reviewer ?? "an unregistered caller"}`);
 	const into = held?.into ?? branch;
+	const earlier = reviewer ? await yourRejection(call, reviewer, change, head) : undefined;
 	return {
 		change,
 		author,
@@ -279,7 +287,15 @@ async function reviewAccess(
 		project: { url: project.url, token: project.token, branch: into },
 		...(into !== branch ? { into } : {}),
 		git: reviewCommands({ project, fork, into, change, head }),
-		note: "read-only: review this commit, then vote on it. Others aren't offered this review while you hold it.",
+		...(earlier ? { earlier } : {}),
+		note:
+			"read-only: review this commit, then vote on it, naming the change. Others aren't offered this review " +
+			"while you hold it." +
+			(earlier
+				? ` You rejected an earlier commit of it, ${earlier.commit}, with the findings in earlier: check ` +
+					`they're fixed (\`git diff ${earlier.commit} HEAD\` shows what changed since) and that the fix breaks ` +
+					"nothing else."
+				: ""),
 	};
 }
 

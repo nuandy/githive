@@ -1,5 +1,5 @@
 {
-	"format": 1,
+	"format": 2,
 	"shapes": {
 		"claims": {
 			"agents": {
@@ -71,6 +71,7 @@
 				{
 					"at": "string",
 					"by": "string",
+					"change": "string",
 					"commit": "string",
 					"evidence": "string",
 					"reviewer": "string",

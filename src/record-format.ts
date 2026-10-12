@@ -3,14 +3,17 @@ import { fail } from "./errors";
 // To change a shape, bump RECORD_FORMAT, add UPGRADES[old] and update test/fixtures/record-shapes.json.
 // A GitHive never overwrites records newer than it knows, so rolling back can't corrupt them.
 
-export const RECORD_FORMAT = 1;
+export const RECORD_FORMAT = 2;
 export const FORMAT_TRAILER = "GitHive-Format";
 
 /** Turns a state of one format into the next. The ref says which record it is. */
 export type Upgrade = (state: unknown, ref: string) => unknown;
 
 /** UPGRADES[n] turns format n into n + 1. */
-export const UPGRADES: Readonly<Record<number, Upgrade>> = {};
+export const UPGRADES: Readonly<Record<number, Upgrade>> = {
+	// Format 2 lets a vote name its change. Format 1's votes name none, which a vote may still leave out.
+	1: (state) => state,
+};
 
 export function formatOf(message: string): number {
 	const found = message.match(new RegExp(`^${FORMAT_TRAILER}: (\\d+)$`, "m"))?.[1];
