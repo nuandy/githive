@@ -2,6 +2,7 @@ import { fail, requiredString, statusOf } from "../../errors";
 import { branchHead } from "../../git";
 import { checkChange } from "../check";
 import type { ClaimRecord } from "../claims";
+import { likelyEnvironment } from "../failure-hints";
 import { type LandingView, lastLandedOn, type Settled } from "../landing";
 import { conflictFix } from "../merge-ready";
 import { leaseFor } from "../staleness";
@@ -112,6 +113,11 @@ export const workTools: ToolHandlers = {
 		const reply: Record<string, unknown> = { change, claim: held };
 		if (released) reply.released = released;
 		if (landed) reply.landed = { commit: landed.commit, at: landed.at };
+		// Clef's reading of the head's failed checks, when it found the environment likely to blame.
+		const failedHere = landing?.recent.findLast(
+			(outcome) => outcome.change === change && outcome.head === status.head && outcome.how === "failed",
+		);
+		if (failedHere && likelyEnvironment(failedHere)) reply.checksEnvironment = failedHere.environment;
 		if (waits.length) reply.waitsOn = waits;
 		Object.assign(reply, status);
 		// How long the claim lasts if its agent goes quiet. Advice: a failed read leaves it out.

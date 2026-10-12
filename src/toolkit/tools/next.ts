@@ -278,7 +278,8 @@ function standingStep(reply: Reply, args: Args, caller: string | undefined) {
 	// A head the checks rejected because it didn't merge conflicts still, which status's own test merge says above.
 	const checks = rejections.find((vote) => vote.reviewer === CHECKS_REVIEWER);
 	const rejected = checks && rejectedFor(text(checks.evidence) ?? "");
-	if (rejected?.why === "checks") fixes.push(failedCheck(rejected.check?.command, rejected.check?.exitCode));
+	if (rejected?.why === "checks")
+		fixes.push(failedCheck(rejected.check?.command, rejected.check?.exitCode, reply.checksEnvironment));
 	// When status's test merge finds no conflict, the one the head was rejected for was with a change that landed in
 	// the same batch: the rejection stays on the head until a new commit replaces it.
 	const conflictGone = rejected?.why === "conflict" && !conflicts.length;
@@ -353,7 +354,17 @@ function outsideStep(change: string, files: string[]) {
 }
 
 /** How to reproduce a failed check, from its command where that's known. */
-function failedCheck(command?: string, exitCode?: unknown) {
+function failedCheck(command?: string, exitCode?: unknown, environment?: unknown) {
+	const step = failedCheckStep(command, exitCode);
+	if (typeof environment !== "number") return step;
+	return (
+		`${step} Clef thinks something outside the code failed them (environment, ${environment}): if the output ` +
+		"agrees (the network, a timeout, an install) and your clone passes, a new commit won't fix it, so tell a " +
+		"person with `ask_human`."
+	);
+}
+
+function failedCheckStep(command?: string, exitCode?: unknown) {
 	if (!command) return "Its checks failed (see their output): fix it, push a new commit to `fork`, then call `status`.";
 	const exited = typeof exitCode === "number" ? ` exited ${exitCode}` : " failed";
 	return (
@@ -368,7 +379,7 @@ const REFUSED_STEPS: Record<Why, (reply: Reply, change: string) => string | unde
 	conflict: (reply, change) => conflictStep(reply.fix, texts(reply.conflicts), text(reply.into), change),
 	checks: (reply) => {
 		const failed = failedChecks(reply).find((check) => check.command !== BATCH_MERGE);
-		return failedCheck(text(failed?.command), failed?.exitCode);
+		return failedCheck(text(failed?.command), failed?.exitCode, reply.environment);
 	},
 	outside: (reply, change) => outsideStep(change, texts(reply.outsideClaim)),
 	inside: (reply) => {

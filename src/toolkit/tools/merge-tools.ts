@@ -167,6 +167,7 @@ function optionalMergeInput(
 	// Each change's earlier attempts to land, for its merge commit's story, and noting new ones.
 	if (ctx.attemptsOf) optional.attemptsOf = (changes) => ctx.attemptsOf!(repo, changes);
 	if (ctx.noteAttempt) optional.noteAttempt = (change, line) => ctx.noteAttempt!(repo, change, line);
+	if (ctx.clef) optional.clef = ctx.clef;
 	if (ctx.prepareLanding) optional.prepareLanding = () => ctx.prepareLanding!(repo);
 	if (ctx.prefetchChange) optional.prefetch = (change) => ctx.prefetchChange!(repo, into, change);
 	if (ctx.prepareChecks && !at.checksOnActions) optional.prepareChecks = ctx.prepareChecks(repo);

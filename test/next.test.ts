@@ -128,6 +128,43 @@ const CARRIES_NEXT: [string, Record<string, unknown>, Record<string, unknown>, s
 			change: "c-1",
 			claim: { agent: "a" },
 			head: HEAD,
+			checksEnvironment: 0.9,
+			votes: [
+				{
+					commit: HEAD,
+					reviewer: "githive-checks",
+					verdict: "reject",
+					evidence: "checks failed: npm test exited 1 on 4b825dc6, checked alone on the branch, twice:\nECONNRESET",
+				},
+			],
+			approval: { approved: false, approvals: 0, required: 0, awaiting: [], vetoedBy: [] },
+			merge: { into: "main", clean: true, outsideClaim: [] },
+		},
+		/then call `status`\. Clef thinks something outside the code failed them \(environment, 0\.9\).*`ask_human`\.$/,
+	],
+	[
+		"status",
+		{ change: "c-1" },
+		{
+			change: "c-1",
+			claim: { agent: "a" },
+			head: HEAD,
+			hints: [{ kind: "beyond_intent", says: "It seems to change more than its intent says", likelihood: 0.9 }],
+			votes: [],
+			approval: { approved: true, approvals: 1, required: 1, awaiting: [], vetoedBy: [] },
+			merge: { into: "main", clean: true, outsideClaim: [] },
+		},
+		"Clef thinks it may not do just what its intent says (see hints): look before review, or go on if it's wrong.\n" +
+			"Call `merge`.",
+	],
+	["vote", {}, { ok: true, thinEvidence: true }, /^Recorded, but your evidence doesn't say what you checked/],
+	[
+		"status",
+		{ change: "c-1" },
+		{
+			change: "c-1",
+			claim: { agent: "a" },
+			head: HEAD,
 			votes: [],
 			approval: { approved: true, approvals: 1, required: 1, awaiting: [], vetoedBy: [] },
 			merge: { into: "main", clean: false, conflicts: ["src/a.ts"], outsideClaim: ["docs/x.md"] },

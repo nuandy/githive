@@ -3,6 +3,7 @@ import { inLane } from "../claim-paths";
 import { repoOfUrl } from "../git-http";
 import { busyArtifacts, changeAgainst, landedOn, type TouchedBy, touchedInWorkspace } from "./batch-reads";
 import { skipsChecks } from "./check-scope";
+import { likelyEnvironment } from "./failure-hints";
 import type { ClaimRecord } from "./claims";
 import type { ClaimsView } from "./claim-store";
 import { conflictLine, conflictWords, type Landing, lastLandedOn, type Settled } from "./landing";
@@ -55,6 +56,7 @@ export function outcomeOf(settled: Settled, branch?: string): MergeOutcome {
 		...(settled.touchedBy?.length ? { touchedBy: settled.touchedBy } : {}),
 		...(conflicted && branch ? { fix: conflictFix(branch, settled.change, conflicts) } : {}),
 		...(settled.checks ? { checks: settled.checks } : {}),
+		...(likelyEnvironment(settled) ? { environment: settled.environment } : {}),
 	};
 }
 
