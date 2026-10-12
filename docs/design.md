@@ -1271,7 +1271,9 @@ it:
   stops when none of its agents is running. **`wait`** is the same doorbell for
   agents outside GitHive, which would otherwise sleep and look again, or give
   up. It holds the call (45 seconds at most, inside the 60 s many MCP clients
-  allow a call) until the repo rings, then reads what the caller would read:
+  allow a call, and the hold ends early enough to leave room for one more look
+  as long as the last, so the whole call keeps within it) until the repo rings,
+  then reads what the caller would read:
   its own changes and their votes, the reviews it may give, the backlog free to
   it. If none changed it holds on; if one did, it returns at once, naming which.
   Its reply's `seen` is a digest of the three, so a call given the last `seen`

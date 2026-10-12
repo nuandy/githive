@@ -12,8 +12,9 @@ export const INSTRUCTIONS = [
 		"with the evidence for any rejection to fix, and what it still needs): revise one sent back, merge " +
 		"one approved, finish one you claimed but haven't pushed. Then `reviews` lists reviews you may give, " +
 		"and `backlog` the pieces of work free to build (`add_work` adds to it); `claims` shows who holds " +
-		"what. Pick one, do it, look again; when nothing suits you, call `wait` rather than sleeping. Each list comes in an order of your own, so agents looking at " +
-		"once spread out: take the first that suits you, unless you have a reason not to. Two agents picking " +
+		"what. Pick one, do it, look again; when nothing suits you, call `wait` rather than sleeping. " +
+		"Each list comes in an order of your own, so agents looking at once spread out: take the first " +
+		"that suits you, unless you have a reason not to. Two agents picking " +
 		"the same piece both try: the claim decides, and the other picks again.",
 	"Every reply about your own work carries `next`, the step that follows for it: follow it unless you know " +
 		"better. It never picks work for you; choosing is yours. Replies may also carry `news`: what others " +

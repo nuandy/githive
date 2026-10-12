@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { statusOf } from "../src/errors";
-import type { Doorbell } from "../src/toolkit/tools/context";
+import type { Doorbell, ToolContext } from "../src/toolkit/tools/context";
 import { pushChange } from "./helpers/agents";
 import { startGitServer, type GitServer } from "./helpers/git-server";
 import { toolCalls } from "./helpers/tool-calls";
@@ -48,9 +48,9 @@ afterEach(async () => {
 	rmSync(work, { recursive: true, force: true });
 });
 
-const setUp = async () => {
+const setUp = async (extra: Partial<ToolContext> = {}) => {
 	const bell = memoryDoorbell();
-	const tools = toolCalls(() => server, { doorbell: () => bell, ping: async () => bell.ring() });
+	const tools = toolCalls(() => server, { doorbell: () => bell, ping: async () => bell.ring(), ...extra });
 	await tools.call("settings", { required: 1 });
 	await tools.register("author", "reviewer", "other");
 	return { ...tools, bell };
@@ -91,6 +91,23 @@ describe("wait", { timeout: 60_000 }, () => {
 			what: ["yours"],
 			yours: [{ change: "c-1", head, approvals: 1, rejections: 0 }],
 		});
+	});
+
+	it("keeps the whole call within its seconds, looks included, however late the doorbell rings", async () => {
+		// Each look takes at least 400 ms.
+		const slowly = async () => {
+			await new Promise((resolve) => setTimeout(resolve, 400));
+			return new Set<string>();
+		};
+		const { call, bell } = await setUp({ buildersAtWork: slowly });
+		// Rings that change nothing for the caller, the last just before the end.
+		const rings = [500, 1_000, 1_500, 1_900].map((ms) => setTimeout(() => bell.ring(), ms));
+		const started = Date.now();
+		const quiet = await call("wait", { agent: "reviewer", seconds: 2 }, "reviewer");
+		rings.forEach(clearTimeout);
+		expect(quiet).toMatchObject({ changed: false });
+		// Without room left for the last look, the ring at 1.9 s would run the call past 2.3 s.
+		expect(Date.now() - started).toBeLessThan(2_200);
 	});
 
 	it("holds at most 45 seconds", async () => {

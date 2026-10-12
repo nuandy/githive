@@ -272,7 +272,8 @@ async function permissionOf(token: string, repo: string, account: string, fetche
 		const found = await api<{ permission: string }>(token, "GET", path, undefined, fetcher);
 		return found.permission;
 	} catch (err) {
-		if (err instanceof GitHubError && err.status === 404) return "none";
-		throw err;
+		if (!(err instanceof GitHubError)) throw err;
+		if (err.status !== 404) throw err;
+		return "none";
 	}
 }

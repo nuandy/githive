@@ -37,15 +37,20 @@ export const waitTools: ToolHandlers = {
 		const until = Date.now() + holdSeconds(args.seconds) * 1000;
 		// Read the count before looking, so a ring during the look still wakes the hold.
 		let mark = await doorbell.rings();
+		let looked = Date.now();
 		let look = await lookFor(call, agent);
+		let lookMs = Date.now() - looked;
 		const before = optionalString(args, "seen") ?? look.seen;
 		while (look.seen === before) {
-			const left = until - Date.now();
+			// The whole call keeps within `seconds`: the hold leaves room for one more look, as long as the last.
+			const left = until - Date.now() - lookMs;
 			const rung = left > 0 ? await doorbell.ringAfter(mark, left) : null;
 			if (rung === null) break;
 			mark = rung;
+			looked = Date.now();
 			// A fresh call, since one call reads the claims only once.
 			look = await lookFor(await openCall(args, ctx, call.run), agent);
+			lookMs = Date.now() - looked;
 		}
 		return answer(look, before);
 	},
@@ -53,8 +58,11 @@ export const waitTools: ToolHandlers = {
 
 function holdSeconds(value: unknown) {
 	if (value === undefined) return LONGEST_WAIT_SECONDS;
-	const valid = typeof value === "number" && Number.isInteger(value) && value >= 1;
-	if (!valid || value > LONGEST_WAIT_SECONDS) fail(400, `seconds is a whole number from 1 to ${LONGEST_WAIT_SECONDS}`);
+	const refused = `seconds is a whole number from 1 to ${LONGEST_WAIT_SECONDS}`;
+	if (typeof value !== "number") fail(400, refused);
+	if (!Number.isInteger(value)) fail(400, refused);
+	if (value < 1) fail(400, refused);
+	if (value > LONGEST_WAIT_SECONDS) fail(400, refused);
 	return value;
 }
 
@@ -66,7 +74,8 @@ async function lookFor(call: Pick<ToolCall, "ctx" | "repo" | "openWork">, agent:
 	const held = ctx.reviews ? await ctx.reviews.held(repo, heads).catch(() => ({})) : {};
 	const reviews = await reviewOptions(ctx, repo, state, held);
 	const free = backlogFor(state).open;
-	const votesOn = (head: string | null) => state.votes.filter((vote) => head && vote.commit === head);
+	// Nothing pushed has no votes.
+	const votesOn = (head: string | null) => (head ? state.votes.filter((vote) => vote.commit === head) : []);
 	const mine = state.open.filter((entry) => entry.claim.agent === agent);
 	const yours = mine.map(({ claim, head }) => {
 		const votes = votesOn(head);

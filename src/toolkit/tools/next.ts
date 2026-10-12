@@ -232,7 +232,7 @@ function statusStep(reply: Reply, args: Args, caller: string | undefined) {
 	return approvalsMissing(approval);
 }
 
-const isEmpty = (value: unknown) => Array.isArray(value) && value.length === 0;
+const isEmpty = (value: unknown) => (Array.isArray(value) ? value.length === 0 : false);
 
 function waitStep(reply: Reply) {
 	if (reply.changed !== true)
@@ -245,7 +245,8 @@ function waitStep(reply: Reply) {
 	}
 	if (what.includes("reviews")) looks.push("`reviews`");
 	if (what.includes("backlog")) looks.push("`backlog`");
-	return `Something that concerns you changed: look with ${names(looks)}, then pass this reply's \`seen\` to \`wait\`.`;
+	const look = `Something that concerns you changed: look with ${names(looks)}`;
+	return `${look}, then pass this reply's \`seen\` to \`wait\`.`;
 }
 
 function approvalsMissing(approval: Reply) {
