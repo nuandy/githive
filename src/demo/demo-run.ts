@@ -55,9 +55,12 @@ export class DemoRun extends DurableObject<Env> {
 		await this.ctx.storage.put("registry", ended(registry, id));
 	}
 
-	/** The run going now, if any, and the latest ones. */
+	/** The run going now, if any, and the latest ones; a run that never began isn't going. */
 	async runs() {
-		return (await this.ctx.storage.get<Registry>("registry")) ?? EMPTY_REGISTRY;
+		const registry = (await this.ctx.storage.get<Registry>("registry")) ?? EMPTY_REGISTRY;
+		const holder = registry.running;
+		const neverBegan = holder ? !(await this.runBegan(holder.id)) : false;
+		return neverBegan ? ended(registry, holder!.id) : registry;
 	}
 
 	/** Whether run `id` began (tests answer it instead). */

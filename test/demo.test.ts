@@ -224,9 +224,11 @@ describe("the registry's running slot", () => {
 		const going = registryWith(["run-1"]);
 		expect((await going.reserve({ fullName: "ada/honeycomb", since: NOW })).slot?.id).toBe("run-1");
 		expect((await going.reserve({ fullName: "ada/honeycomb", since: NOW + 1 })).refused).toMatch(/going already/);
+		expect((await going.runs()).running?.id).toBe("run-1");
 		// Here run-1 never began: the next run takes the slot.
 		const lost = registryWith([]);
 		await lost.reserve({ fullName: "ada/honeycomb", since: NOW });
+		expect((await lost.runs()).running).toBeUndefined();
 		expect((await lost.reserve({ fullName: "ada/honeycomb", since: NOW + 1 })).slot?.id).toBe("run-2");
 	});
 });
