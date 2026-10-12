@@ -1,10 +1,13 @@
 import { changeId, normalizeClaim } from "../../claim-paths";
 import { fail, requiredPaths, requiredString } from "../../errors";
 import { isReservedPath, presentClaim, scopePaths } from "../branch-scope";
+import { GITHUB_AGENT, isGitHubChange, isImportedBranch } from "../github-settings";
 import { abandonedRule } from "./change-state";
 import { branchMerge, changeList, dependencyLoop, targetBranch } from "./claim-input";
 import type { ClaimOutcome } from "../claim-store";
+import { BUILDING_IDLE_MS } from "../staleness";
 import type { Args, ToolCall, ToolHandlers } from "./context";
+import { giveUpGitHubChange } from "./github-tools";
 import { containerChecks, shardIfBusy, STALE_AFTER_MS, storeFor } from "./repo";
 
 // Tools for claims: claim, release, claims, and build (a claim worked by GitHive's hosted builder).
@@ -24,6 +27,7 @@ export const claimTools: ToolHandlers = {
 		const agent = actAs("agent");
 		// With `source`, the change merges a whole branch, claiming what it changed (see branchMerge).
 		const source = optionalString(args, "source");
+		refuseGitHubBranches(args, agent);
 		const given = source ? [] : normalizeClaim(requiredPaths(args, "paths"));
 		const reserved = given.find(isReservedPath);
 		if (reserved) fail(400, `${reserved}: a path can't start with "::"`);
@@ -48,25 +52,33 @@ export const claimTools: ToolHandlers = {
 		};
 		// If one record would hold agents up, shard first, then claim in the shards.
 		const sharded = await shardIfBusy(ctx, repo, claims, registered, input.agent);
+		// Taken before the claim is written, so the claim's own time is no earlier (see claimReply's freeAfter).
+		const claimedAt = Date.now();
 		const outcome = await (sharded ? storeFor(ctx, repo, sharded) : store).claim(input, stamper);
 		// Once claimed, the source's tip becomes the change's branch in the agent's fork.
 		if (outcome.ok && merging) await merging.push(await changeSource(agent, "write"), change);
 		// Without container checks, a Gate that lands batches does so within minutes, so warm it from the claim. A cold
 		// Gate holds up the first batch. With checks, a claim is too early to install for; they warm at the check.
 		if (outcome.ok && !containerChecks(registered?.verify).length) await warmChecks("claimed", change);
-		return claimReply(outcome, { change, into, branch, made, source, merging, paths });
+		return claimReply(outcome, { change, into, branch, made, source, merging, paths, claimedAt });
 	},
 	async release({ args, ctx, repo, votes, registered, actAs, stamper, store, claimOf }) {
 		const change = requiredString(args, "change");
 		const agent = actAs("agent");
 		// Only a claim's agent may release it; anyone else may release it only as stale, once abandoned.
 		const held = args.stale === true ? null : await claimOf(change);
-		if (held && held.agent !== agent)
+		if (held && held.agent !== agent) {
+			// GitHub's change, held by GitHive's own job, a repo admin may give up (see giveUpGitHubChange).
+			const github = isGitHubChange(held);
+			if (github && ctx.level === "admin")
+				return giveUpGitHubChange(ctx, repo, { store, claim: held, who: agent, ...(stamper ? { stamper } : {}) });
 			fail(
 				403,
 				`${change} is ${held.agent}'s claim: only its agent releases it, or anyone once it's ` +
-					"abandoned (release with stale: true)",
+					"abandoned (release with stale: true)" +
+					(github ? "; GitHub's changes, also a repo admin, or a person who can write from the dashboard" : ""),
 			);
+		}
 		if (args.stale === true)
 			return store.releaseStale(
 				{ change, agent, staleAfterMs: STALE_AFTER_MS, abandoned: abandonedRule(ctx, repo, registered, votes) },
@@ -99,6 +111,22 @@ export const claimTools: ToolHandlers = {
 	},
 };
 
+// GitHive's copies of GitHub's branches (github/<branch>) are written by the toolkit, forced at each import: no change
+// lands on one or starts from one, and only githive-github merges one.
+function refuseGitHubBranches(args: Args, agent: string) {
+	for (const field of ["into", "from"]) {
+		const named = optionalString(args, field);
+		if (named && isImportedBranch(named))
+			fail(
+				403,
+				`${named}: branches under github/ are GitHive's copies of GitHub's; no change lands on or starts from one`,
+			);
+	}
+	const source = optionalString(args, "source");
+	if (source && isImportedBranch(source) && agent !== GITHUB_AGENT)
+		fail(403, `${source}: only ${GITHUB_AGENT} merges GitHive's copies of GitHub's branches`);
+}
+
 // The branch a claim lands on, and how it was made ready if it's new. A change lands on one branch: claiming again
 // keeps it there, and naming another is refused.
 async function landingBranch(call: ToolCall, change: string, agent: string) {
@@ -116,8 +144,8 @@ async function landingBranch(call: ToolCall, change: string, agent: string) {
 	return { into, made };
 }
 
-// What a claim reports: its outcome with conflicting paths as agents wrote them, where the change lands, and a note
-// on a branch merge or on paths a refused claim still holds.
+// What a claim reports: its outcome with conflicting paths as agents wrote them, where the change lands, when the claim
+// may free up, and a note on a branch merge or on paths a refused claim still holds.
 function claimReply(
 	outcome: ClaimOutcome,
 	claimed: {
@@ -128,9 +156,10 @@ function claimReply(
 		source?: string;
 		merging?: { tip: string };
 		paths: string[];
+		claimedAt: number;
 	},
 ) {
-	const { change, into, branch, made, source, merging, paths } = claimed;
+	const { change, into, branch, made, source, merging, paths, claimedAt } = claimed;
 	// Report conflicting paths as agents wrote them, without the branch scoping.
 	const asWritten = (path: string) => presentClaim({ paths: [path] }, branch).paths[0];
 	const conflicts = outcome.ok
@@ -161,6 +190,9 @@ function claimReply(
 				}
 			: {};
 	const reply: Record<string, unknown> = { ...outcome };
+	// The soonest anyone may take its paths if its agent goes quiet: the floor after a claim (see staleness.ts). It
+	// lasts longer once something is pushed, and status's lease says exactly; claiming again renews it.
+	if (outcome.ok) reply.freeAfter = new Date(claimedAt + BUILDING_IDLE_MS).toISOString();
 	if (conflicts) reply.conflicts = conflicts;
 	if (into !== branch) reply.into = into;
 	if (made) reply.branch = made;

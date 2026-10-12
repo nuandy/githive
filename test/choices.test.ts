@@ -6,7 +6,7 @@ import { GitCasLog } from "../src/record-log";
 import { statusOf } from "../src/errors";
 import { claimStore } from "../src/toolkit/claim-store";
 import { type ClaimRecord, type Registry, shardClaims } from "../src/toolkit/claims";
-import { callTool, type ToolContext, repoSnapshot } from "../src/toolkit/mcp";
+import { callTool, mergeAsPerson, type ToolContext, repoSnapshot } from "../src/toolkit/mcp";
 import type { VoteRecord } from "../src/toolkit/votes";
 import { backlogFor, reviewsFor, type WorkInput, type WorkItem, workId } from "../src/toolkit/work";
 import { memoryLanding } from "../src/toolkit/landing";
@@ -14,6 +14,10 @@ import { holdsRef, type ReviewHolds, reviewHolds, reviewsRef } from "../src/tool
 import { pushChange } from "./helpers/agents";
 import { startGitServer, type GitServer } from "./helpers/git-server";
 import { memoryBatchGit } from "./helpers/memory-batch-git";
+import { toolCalls } from "./helpers/tool-calls";
+import { FakeStorage } from "./fakes/env";
+
+const { RepoCache } = await import("../src/repo-cache");
 
 // Agents without set roles look and choose: reviews lists the reviews an
 // agent may give (never its own; a role that can block only if it holds it),
@@ -548,10 +552,17 @@ describe("open changes' heads, as GitHive last saw them", { timeout: 120_000 }, 
 });
 
 describe("news of main moving", { timeout: 120_000 }, () => {
-	it("comes with every reply that's an object, saying what changed, by whom and why; a list stays a list", async () => {
+	it("comes with every reply that's an object, saying what changed, by whom and why, then notices; a list stays a list", async () => {
 		const server = await startGitServer();
 		try {
 			const asked: string[] = [];
+			// A notice keeps its own words.
+			const note = {
+				kind: "note",
+				at: "2026-10-10T10:01:00.000Z",
+				says: "agent-c left a note on c-1",
+				next: "reply with a note",
+			};
 			const ctx = (agentKey?: string): ToolContext => ({
 				remote: async () => ({ url: server.url, token: "unused" }),
 				batchGit: () => memoryBatchGit({ url: server.url, token: "unused" }),
@@ -561,6 +572,7 @@ describe("news of main moving", { timeout: 120_000 }, () => {
 					asked.push(`${branch} ${agent}`),
 					[
 						{
+							kind: "landed",
 							change: "c-7",
 							agent: "agent-b",
 							at: "2026-10-10T10:00:00.000Z",
@@ -568,6 +580,7 @@ describe("news of main moving", { timeout: 120_000 }, () => {
 							files: ["src/billing/invoice.ts"],
 							intent: "add partial refunds",
 						},
+						note,
 					]
 				),
 				...(agentKey ? { agentKey } : {}),
@@ -576,15 +589,93 @@ describe("news of main moving", { timeout: 120_000 }, () => {
 				callTool(name, { repo: "p", ...args }, ctx(key));
 			await call("settings", { required: 1, vetoes: [] });
 			const { key } = (await call("register", { agent: "agent-a" })) as { key: string };
-			expect(await call("backlog", { agent: "agent-a" }, key)).toMatchObject({
+			const backlog = await call("backlog", { agent: "agent-a" }, key);
+			expect(backlog).toMatchObject({
 				open: [],
-				news: [{ change: "c-7", says: 'main changed src/billing/invoice.ts: c-7 by agent-b, "add partial refunds"' }],
+				news: [
+					{
+						kind: "landed",
+						change: "c-7",
+						says: 'main changed src/billing/invoice.ts: c-7 by agent-b, "add partial refunds"',
+					},
+					note,
+				],
 			});
-			expect(Array.isArray(await call("claims", {}, key))).toBe(true);
+			// A list to choose from has no next step: choosing is the agent's.
+			expect(backlog).not.toHaveProperty("next");
+			const claims = await call("claims", {}, key);
+			expect(Array.isArray(claims)).toBe(true);
+			expect(claims).not.toHaveProperty("next");
+			// A reply about the agent's own change has its next step, after the news, whose notices keep their own.
+			const claimed = (await call(
+				"claim",
+				{ change: "c-1", agent: "agent-a", paths: ["src/c/"], intent: "c" },
+				key,
+			)) as Record<string, unknown>;
+			expect(claimed).toMatchObject({
+				ok: true,
+				news: [{ kind: "landed" }, note],
+				next: expect.stringMatching(/^Call `credentials`/),
+			});
+			expect(Object.keys(claimed).at(-1)).toBe("next");
 			expect(asked).toContain("main agent-a");
 		} finally {
 			await server.close();
 		}
+	});
+});
+
+describe("news goes only to the verified caller", { timeout: 120_000 }, () => {
+	let server: GitServer;
+	let work: string;
+	beforeEach(async () => {
+		server = await startGitServer();
+		work = mkdtempSync(join(tmpdir(), "githive-news-"));
+	});
+	afterEach(async () => {
+		await server.close();
+		rmSync(work, { recursive: true, force: true });
+	});
+
+	// Agent a's change c-a, pushed and waiting for approval, with news for a: b's landing and a note.
+	const newsForA = async () => {
+		const live = new RepoCache({ storage: new FakeStorage(), getWebSockets: () => [] } as never, {} as never);
+		const tools = toolCalls(() => server, { news: async (_repo, branch, agent) => live.landingNews(branch, agent) });
+		await tools.call("settings", { required: 1, vetoes: [] });
+		await tools.register("a", "b");
+		// a's first call starts its news; b's starts b's.
+		await tools.call("claim", { change: "c-a", agent: "a", paths: ["src/a/"], intent: "a" }, "a");
+		await tools.call("claim", { change: "c-b", agent: "b", paths: ["src/b/"], intent: "b" }, "b");
+		await pushChange(server.url, work, "a", "c-a", { "src/a/x.js": "a\n" });
+		const at = new Date(Date.now() + 1000).toISOString();
+		await live.landingSettled("main", [
+			{ change: "c-z", head: "h", agent: "z", how: "landed", at, commit: "m1", files: ["src/z.js"] },
+		]);
+		await live.notify("main", [{ agent: "a", notice: { kind: "note", at, says: "b left a note on c-a" } }]);
+		const aHears = async () => {
+			const { news } = (await tools.call("backlog", { agent: "a" }, "a")) as { news?: { kind: string }[] };
+			return (news ?? []).map((item) => item.kind);
+		};
+		return { ...tools, aHears };
+	};
+
+	it("a person's dashboard merge doesn't use up the agent's news", async () => {
+		const { ctx, aHears } = await newsForA();
+		const merged = (await mergeAsPerson(ctx(), "p", "c-a", "person:ada@example.com")) as Record<string, unknown>;
+		expect(merged).toMatchObject({ ok: false });
+		expect(merged.news).toBeUndefined();
+		expect(await aHears()).toEqual(["landed", "note"]);
+	});
+
+	it("a caller naming another agent doesn't get or use up its news", async () => {
+		const { call, aHears } = await newsForA();
+		// b may ask to merge a's change, naming a, but hears only its own news: z's landing.
+		const merged = await call("merge", { change: "c-a", agent: "a" }, "b");
+		expect(merged).toMatchObject({ ok: false, news: [{ kind: "landed", change: "c-z" }] });
+		expect(await aHears()).toEqual(["landed", "note"]);
+		// Nor does a caller with no key or sign-in, naming a.
+		expect((await call("merge", { change: "c-a", agent: "a" })).news).toBeUndefined();
+		expect(await aHears()).toEqual([]);
 	});
 });
 

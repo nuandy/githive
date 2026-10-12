@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { abandoned, AGENT_TURN_IDLE_MS, BUILDING_IDLE_MS, type ChangeSigns, waitingOn } from "../src/toolkit/staleness";
+import {
+	abandonableAt,
+	abandoned,
+	AGENT_TURN_IDLE_MS,
+	BUILDING_IDLE_MS,
+	type ChangeSigns,
+	waitingOn,
+} from "../src/toolkit/staleness";
 
 // A claim is abandoned only on its agent's turn: an agent waiting for review,
 // for its change to be checked and land, or for a person is never robbed of its paths.
@@ -71,5 +78,32 @@ describe("an abandoned change", () => {
 				T0 + AGENT_TURN_IDLE_MS + minutes(10),
 			).abandoned,
 		).toBe(false);
+	});
+});
+
+describe("when a claim frees up", () => {
+	it("is the moment after which its change counts as abandoned, worked out from the same signs", () => {
+		const rejected = signs({ votes: [{ verdict: "reject", at: at(minutes(5)) }] });
+		const approved = signs({ approved: true, votes: [{ verdict: "approve", at: at(minutes(9)) }] });
+		// Handed back long ago, but claimed again since: the floor after the claim decides.
+		const claimedAgain = signs({
+			active: at(AGENT_TURN_IDLE_MS + minutes(9)),
+			votes: [{ verdict: "reject", at: at(0) }],
+		});
+		expect(abandonableAt(signs({ head: null }))).toBe(T0 + BUILDING_IDLE_MS);
+		expect(abandonableAt(rejected)).toBe(T0 + minutes(5) + AGENT_TURN_IDLE_MS);
+		expect(abandonableAt(approved)).toBe(T0 + minutes(9) + AGENT_TURN_IDLE_MS);
+		expect(abandonableAt(claimedAgain)).toBe(T0 + AGENT_TURN_IDLE_MS + minutes(9) + AGENT_TURN_IDLE_MS);
+		for (const each of [signs({ head: null }), rejected, approved, claimedAgain]) {
+			const at = abandonableAt(each)!;
+			expect(abandoned(each, at).abandoned).toBe(false);
+			expect(abandoned(each, at + 1).abandoned).toBe(true);
+		}
+	});
+
+	it("is never while its change waits on reviewers, a landing or a person", () => {
+		expect(abandonableAt(signs())).toBeUndefined();
+		expect(abandonableAt(signs({ landing: true, approved: true }))).toBeUndefined();
+		expect(abandonableAt(signs({ asked: true, head: null }))).toBeUndefined();
 	});
 });

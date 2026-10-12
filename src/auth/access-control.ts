@@ -27,6 +27,7 @@ export const TOOL_LEVEL: Record<string, Level> = {
 	request_review: "write",
 	build: "write",
 	register: "write",
+	github_pr: "write",
 	settings: "admin",
 };
 

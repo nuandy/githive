@@ -157,6 +157,20 @@ describe("an early check", { timeout: 60_000 }, () => {
 			branchHead: async () => main,
 			history: gitHistory(server.git),
 		});
-		expect(read.main).toEqual({ head: main, clean: false, conflicts: ["src/same.txt"] });
+		// The commit pushed to main with plain git is named by its author and subject, and the file shows its markers,
+		// the change's side first, as `git merge origin/main` shows it in the agent's clone.
+		expect(read.main).toEqual({
+			head: main,
+			clean: false,
+			conflicts: ["src/same.txt"],
+			touchedBy: [{ file: "src/same.txt", commit: main, author: expect.stringMatching(/^lander-/), intent: "landed" }],
+			hunks: [
+				{
+					file: "src/same.txt",
+					content: "<<<<<<< ours (changes/a-1)\na\n=======\nmain\n>>>>>>> origin/main\n",
+					truncated: false,
+				},
+			],
+		});
 	});
 });

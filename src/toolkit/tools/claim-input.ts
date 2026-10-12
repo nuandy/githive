@@ -4,6 +4,7 @@ import { branchHead, type Remote, Workspace } from "../../git";
 import { projectBranch } from "../../project-branch";
 import { GitCasLog } from "../../record-log";
 import { recordBranch, type Registry } from "../claims";
+import { isImportedBranch } from "../github-settings";
 import type { Stamper } from "../stamp";
 import { workId } from "../work";
 import type { ToolContext } from "./context";
@@ -12,15 +13,17 @@ import type { ToolContext } from "./context";
 
 /**
  * A change that merges branch `source` into `into` whole. Its claim is the files `source` changed since
- * it left `into`, and its tip becomes the change's branch, so it's reviewed, checked and merged as usual.
+ * it left `into`, and its tip becomes the change's branch, so it's reviewed, checked and merged as usual. A source
+ * whose commits change no file (GitHub's merge of a pull request, say) claims no paths, and still merges.
  */
 export async function branchMerge(ctx: ToolContext, repo: string, source: string, into: string) {
 	if (source === into) fail(400, `a change can't merge ${into} into itself`);
 	const project = await ctx.remote(repo, "read");
 	const workspace = await Workspace.clone(project, into).catch(() => fail(409, `there's no branch ${into}`));
 	const tip = await workspace.fetch("source", project, source).catch(() => fail(409, `there's no branch ${source}`));
-	const files = await workspace.changedPaths(await workspace.mergeBase(await workspace.head(), tip), tip);
-	if (!files.length) fail(409, `${source} has nothing ${into} doesn't have`);
+	const base = await workspace.mergeBase(await workspace.head(), tip);
+	if (base === tip) fail(409, `${source} has nothing ${into} doesn't have`);
+	const files = await workspace.changedPaths(base, tip);
 	const paths =
 		claimCovering(files) ?? fail(409, `${source} changes too much of ${into} to claim at once: merge it in parts`);
 	return {
@@ -102,6 +105,13 @@ export async function targetBranch(
 ): Promise<string | undefined> {
 	const { into, from, registered, claims, agent, stamper } = input;
 	if (!BRANCH_NAME.test(into)) fail(400, `${into} isn't a branch name changes can land on`);
+	// GitHive's copies of GitHub's branches are written at each import, forced: nothing lands on or starts from one.
+	for (const named of [into, from])
+		if (named && isImportedBranch(named))
+			fail(
+				403,
+				`${named}: branches under github/ are GitHive's copies of GitHub's; no change lands on or starts from one`,
+			);
 	if (registered?.branches?.[into]) return undefined;
 	const found = await branchHead(await ctx.remote(repo, "read"), into);
 	if (found) {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { dayLabel, shortAge, timeAgo, timeUntil } from "./relativeTime";
+import { clockTime, dayLabel, shortAge, timeAgo, timeUntil } from "./relativeTime";
 
 const now = Date.parse("2025-01-02T12:00:00.000Z");
 const minus = (ms: number) => new Date(now - ms).toISOString();
@@ -31,6 +31,18 @@ describe("relative times", () => {
 		expect(dayLabel(minus(60_000), now)).toBe("Today");
 		expect(dayLabel(minus(86_400_000), now)).toBe("Yesterday");
 		expect(dayLabel(undefined, now)).toBe("Earlier");
+	});
+
+	it("tells a time on the reader's clock, with its day when it isn't today", () => {
+		const local = (day: number, hour: number, minute: number) => new Date(2026, 9, day, hour, minute);
+		const today = local(11, 9, 0).getTime();
+		expect(clockTime(local(11, 14, 30).toISOString(), today)).toBe("14:30");
+		expect(clockTime(local(11, 7, 5).toISOString(), today)).toBe("07:05");
+		const tomorrow = local(12, 0, 15);
+		expect(clockTime(tomorrow.toISOString(), today)).toBe(
+			`${tomorrow.toLocaleDateString(undefined, { month: "short", day: "numeric" })}, 00:15`,
+		);
+		expect(clockTime("nope", today)).toBe("");
 	});
 
 	it("never throws on bad data", () => {

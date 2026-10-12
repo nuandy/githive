@@ -1,7 +1,7 @@
 import { type ReactNode, useState } from "react";
 import { messageOf } from "../lib/errors";
 import { VoteForm, type VoteApi } from "./VoteForm";
-import type { ChangeHistory, RepoSnapshot } from "../api";
+import type { ChangeHistory, GiveUpAnswer, RepoSnapshot } from "../api";
 import { identityName } from "../lib/agent";
 import type { ChangeStatus } from "../lib/changeStatus";
 import { claimApprovalLabel, claimStatus, votesForClaim, type Claim } from "../lib/claimStatus";
@@ -9,7 +9,9 @@ import { shortSha } from "../lib/model";
 import { timeAgo } from "../lib/relativeTime";
 import { href } from "../lib/routes";
 import { buildTimeline, changeEnding, historyStatus } from "../lib/changeTimeline";
+import { Awareness } from "./Awareness";
 import { ChangeCommits } from "./Commits";
+import { ConflictPanel } from "./ConflictPanel";
 import { Icon, type IconName } from "./Icon";
 import { Tabs } from "./Tabs";
 import { Timeline } from "./Timeline";
@@ -40,6 +42,64 @@ export interface ChangePageProps {
 		repo: string,
 		change: string,
 	) => Promise<{ ok: boolean; commit?: string; reasons?: string[]; conflicts?: string[] }>;
+	/**
+	 * A person giving up GitHub's change (write or more in the repo): its claim released, so its paths are free, until
+	 * GitHub's branch moves or someone asks again. Only GitHub's changes offer it.
+	 */
+	giveUp?: (repo: string, change: string) => Promise<GiveUpAnswer>;
+	/** The time leases are told against (tests fix it). */
+	now?: number;
+}
+
+/** Whether a claim is GitHub's change, brought back by githive-github. */
+export const isGitHubClaim = (claim: Pick<Claim, "agent" | "source">) =>
+	claim.agent === "githive-github" && !!claim.source?.startsWith("github/");
+
+/** Give up GitHub's change, for a person who can write: the one claim someone other than its agent may release. */
+function GiveUpButton({
+	repo,
+	change,
+	giveUp,
+}: {
+	repo: string;
+	change: string;
+	giveUp: NonNullable<ChangePageProps["giveUp"]>;
+}) {
+	const [busy, setBusy] = useState(false);
+	const [outcome, setOutcome] = useState<{ ok: boolean; text: string } | null>(null);
+	const giveUpChange = async () => {
+		setBusy(true);
+		setOutcome(null);
+		try {
+			const answer = await giveUp(repo, change);
+			setOutcome(
+				answer.ok
+					? { ok: true, text: answer.note ?? "Given up: its paths are free." }
+					: { ok: false, text: answer.refused ?? "It couldn't be given up." },
+			);
+		} catch (err) {
+			setOutcome({ ok: false, text: messageOf(err) });
+		} finally {
+			setBusy(false);
+		}
+	};
+	return (
+		<div className="change-merge">
+			<button
+				type="button"
+				onClick={giveUpChange}
+				disabled={busy}
+				title="Releases its claim, so its paths are free; GitHive brings GitHub's changes back when GitHub's branch moves"
+			>
+				{busy ? "Giving up…" : "Give up GitHub's changes"}
+			</button>
+			{outcome ? (
+				<p className={outcome.ok ? "tone-good" : "error"} role="status">
+					{outcome.text}
+				</p>
+			) : null}
+		</div>
+	);
 }
 
 type ChangeEnding = NonNullable<ReturnType<typeof changeEnding>>;
@@ -185,8 +245,14 @@ function ClaimMergeBox({ claim }: { claim: Claim }) {
 				</span>
 				<div className="merge-box__text">
 					<strong>
-						{approval.approvals} of {approval.required} approvals
-						{waitingNote}
+						{claim.trusted ? (
+							approvalLabel
+						) : (
+							<>
+								{approval.approvals} of {approval.required} approvals
+								{waitingNote}
+							</>
+						)}
 					</strong>
 					<div className="muted">
 						{claim.attention
@@ -291,6 +357,8 @@ export function ChangePage({
 	api,
 	canVote = true,
 	merge,
+	giveUp,
+	now,
 }: ChangePageProps) {
 	const branch = claim?.into || history?.branch || snapshot.branch || "main";
 	const record = claim ?? history?.claim ?? undefined;
@@ -307,6 +375,17 @@ export function ChangePage({
 
 	if (!record && !ending) return <ChangeMissing changeId={changeId} repo={repo} loading={history === undefined} />;
 
+	// What its agent hears about it while its claim is in force: a conflict with its branch, and other changes' code.
+	const heard =
+		claim && history ? (
+			<>
+				{history.merge ? <ConflictPanel merge={history.merge} head={claim.head} repo={repo} /> : null}
+				{history.awareness ? (
+					<Awareness awareness={history.awareness} claims={snapshot.claims} head={claim.head} repo={repo} />
+				) : null}
+			</>
+		) : null;
+
 	const conversation = (
 		<div className="change-layout">
 			<div className="change-layout__main">
@@ -314,10 +393,11 @@ export function ChangePage({
 				<OpeningComment agent={agent} record={record} />
 				{history === undefined ? <p className="muted change-layout__loading">Loading history…</p> : null}
 				{history ? <Timeline items={timeline} /> : <LatestPush head={claim?.head} />}
+				{heard}
 				{claim && api && canVote ? <VoteForm repo={repo} claim={claim} policy={snapshot.policy} api={api} /> : null}
 				<MergeStatus claim={claim} ending={ending} branch={branch} repo={repo} />
 			</div>
-			<ChangeSidebar snapshot={snapshot} claim={claim} record={record} agent={agent} votes={votes} />
+			<ChangeSidebar snapshot={snapshot} claim={claim} record={record} agent={agent} votes={votes} now={now} />
 		</div>
 	);
 	const commits =
@@ -340,6 +420,9 @@ export function ChangePage({
 					</span>
 					{claim?.waitsOn?.length ? <span className="pill pill--warn">waits on {claim.waitsOn.join(", ")}</span> : null}
 					{mergeable ? <MergeButton repo={repo} change={changeId} merge={merge} /> : null}
+					{claim && giveUp && isGitHubClaim(claim) ? (
+						<GiveUpButton repo={repo} change={changeId} giveUp={giveUp} />
+					) : null}
 				</div>
 			</div>
 			<Tabs

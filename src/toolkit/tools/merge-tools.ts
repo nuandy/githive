@@ -1,17 +1,21 @@
 import { fail, optionalString, requiredString } from "../../errors";
 import { branchHead } from "../../git";
 import type { GitHubLink } from "../../github";
-import { actionsChecks, mirrorTo, onActions } from "../actions-checks";
+import type { HiveEvent } from "../../hive-events";
+import { actionsChecks, onActions } from "../actions-checks";
 import { artifactsInspect } from "../batch-reads";
 import { scopeFile } from "../branch-scope";
 import type { ClaimRecord, Registry } from "../claims";
+import { pushToGitHub } from "../github-outbound";
+import { bringsGitHubBack, type GitHubSeen, githubSync } from "../github-settings";
 import { type BatchGit, type Candidate, mergeChange, type MergeInput } from "../merge";
 import { countedVotes } from "../votes";
 import { holdKey, reviewersNeeded } from "../work";
 import type { ToolCall, ToolContext, ToolHandlers } from "./context";
 import { ownChangeCommands, reviewCommands } from "./git-commands";
+import { trustedImports } from "./github-tools";
 import { mayActAs } from "./identity";
-import { branchSettings } from "./repo";
+import { branchSettings, claimPolicy } from "./repo";
 
 // Tools for landing a change: merge, and credentials for a change's branch: your own to push to, or someone
 // else's to review.
@@ -31,7 +35,7 @@ export const mergeTools: ToolHandlers = {
 		const into = own?.into ?? branch;
 		// Not before its dependencies have merged into that same branch.
 		const waits = await waitingOn(own?.after ?? [], into);
-		if (waits.length) return { ok: false, reasons: waits };
+		if (waits.length) return { ok: false, reasons: waits, why: ["after"] };
 		// A repo connected to GitHub may run its checks on Actions, and gets main pushed back after each landing.
 		const settings = branchSettings(registry, into);
 		const checksOnActions = onActions(settings.verify);
@@ -40,7 +44,7 @@ export const mergeTools: ToolHandlers = {
 			const why = registry?.github
 				? `GitHive can't reach ${registry.github.repo}: is the GitHive app installed there?`
 				: "no GitHub repo is connected (settings github)";
-			return { ok: false, reasons: [`checks run on GitHub Actions, but ${why}`] };
+			return { ok: false, reasons: [`checks run on GitHub Actions, but ${why}`], why: ["setup"] };
 		}
 		const project = await write();
 		// Batches land with trees in the Worker, or in the repo's Gate (a container running real git), which also does
@@ -50,7 +54,7 @@ export const mergeTools: ToolHandlers = {
 			: fail(503, "GitHive can't land changes here: no Gate is set up to land them");
 		const inspect = ctx.history && artifactsInspect(ctx.history, repo, gate.inspect, ctx.placements?.(repo));
 		const batchGit = inspect ? { ...gate, inspect } : gate;
-		return mergeChange({
+		const outcome = await mergeChange({
 			remote: project,
 			branch: into,
 			store,
@@ -67,6 +71,12 @@ export const mergeTools: ToolHandlers = {
 			change,
 			agent: agentArg("agent"),
 		});
+		// The hive sees a merge refused for a conflict, naming its files: once for each head (see RepoCache.ping).
+		if (!outcome.ok && outcome.conflicts?.length)
+			await ctx
+				.ping?.(repo, conflictedEvent(agentArg("agent"), change, outcome.conflicts, outcome.head))
+				.catch(() => undefined);
+		return outcome;
 	},
 	async credentials(call) {
 		const { args, ctx, repo, acting, changeOf } = call;
@@ -113,16 +123,49 @@ function optionalMergeInput(
 	const optional: Partial<MergeInput> = {};
 	if (into !== branch) optional.scope = (file: string) => scopeFile(file, into, branch);
 	if (registered?.skipChecks) optional.skipChecks = registered.skipChecks;
+	// A merge whose caller's time is bounded answers sooner, and lands a smaller batch (see ToolContext.mergeLimits).
+	const { answerWithinMs, pollMs, maxBatch } = ctx.mergeLimits ?? {};
+	if (answerWithinMs !== undefined) optional.answerWithinMs = answerWithinMs;
+	if (pollMs !== undefined) optional.pollMs = pollMs;
+	if (maxBatch !== undefined) optional.maxBatch = maxBatch;
+	const trusted = trustedImports(ctx, repo, registered, call.store);
+	if (trusted) optional.trusted = trusted;
 	if (ctx.branchHead) optional.branchHead = () => ctx.branchHead!(repo, into);
 	if (ctx.landing) optional.landing = ctx.landing(repo, into);
 	if (ctx.history) optional.history = ctx.history;
+	// Each change's earlier attempts to land, for its merge commit's story, and noting new ones.
+	if (ctx.attemptsOf) optional.attemptsOf = (changes) => ctx.attemptsOf!(repo, changes);
+	if (ctx.noteAttempt) optional.noteAttempt = (change, line) => ctx.noteAttempt!(repo, change, line);
 	if (ctx.prepareLanding) optional.prepareLanding = () => ctx.prepareLanding!(repo);
 	if (ctx.prefetchChange) optional.prefetch = (change) => ctx.prefetchChange!(repo, into, change);
 	if (ctx.prepareChecks && !at.checksOnActions) optional.prepareChecks = ctx.prepareChecks(repo);
-	// Push the landed branch back to GitHub as a fast-forward, refused if someone pushed there directly.
-	if (link && into === branch) optional.afterLanding = (commit: string) => mirrorTo(gate, link, into, commit);
+	// Push the landed branch to GitHub as a fast-forward (its main, or githive/main for the pull request), refused if
+	// someone pushed there directly, then notice whether GitHub's branch holds what main lacks. A link made before
+	// modes, with none recorded, only mirrors, as it always did.
+	const sync = githubSync(registered);
+	if (link && sync && into === branch) {
+		const github = bringsGitHubBack(registered) ? ctx.githubSync?.(repo) : undefined;
+		optional.afterLanding = (commit: string) =>
+			pushToGitHub({
+				gate,
+				link,
+				sync,
+				branch: into,
+				commit,
+				...(github ? { notice: (seen: GitHubSeen) => github.notice(seen) } : {}),
+			});
+	}
 	return optional;
 }
+
+// A `conflicted` hive event, with the first few files in its detail.
+function conflictedEvent(agent: string, change: string, files: string[], head?: string): HiveEvent {
+	const more = files.length > CONFLICTED_SHOWN ? ` and ${files.length - CONFLICTED_SHOWN} more` : "";
+	const detail = `${files.slice(0, CONFLICTED_SHOWN).join(", ")}${more}`;
+	return { kind: "conflicted", agent, change, ...(head ? { commit: head } : {}), detail, at: new Date().toISOString() };
+}
+
+const CONFLICTED_SHOWN = 3;
 
 // Other changes ready for this branch, from the cached advice: claims in force whose dependencies have merged. The
 // batch checks each again before landing.
@@ -196,7 +239,7 @@ async function reviewAccess(
 		taking,
 	]);
 	const head = await branchHead(fork, `changes/${change}`).catch(() => null);
-	if (!head) fail(409, `${change} has nothing pushed to review yet`);
+	if (!head) fail(409, `${change} has nothing pushed to review yet`, "choose another review from `reviews`");
 	if (head !== knownHead) await take(head);
 	// Agent names only: a person's identity stays in the records, out of logs.
 	console.log(`review access to ${repo} ${change} (${author}) for ${reviewer ?? "an unregistered caller"}`);
@@ -223,7 +266,7 @@ async function reviewAccess(
 async function takeReview(call: ToolCall, claim: ClaimRecord, head: string, role: string, reviewer: string) {
 	const { ctx, repo, registered, votes } = call;
 	if (!ctx.reviews) return;
-	const policy = branchSettings(registered, claim.into).policy;
+	const policy = claimPolicy(registered, claim);
 	const cast = (await votes.readFor([head])).votes.filter((vote) => vote.commit === head);
 	const counted = await countedVotes(cast, registered?.stampKey);
 	const needed = reviewersNeeded(policy, claim, head, counted, role);

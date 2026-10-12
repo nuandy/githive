@@ -4,7 +4,8 @@ import { onActions } from "../actions-checks";
 import { settingsForBranch } from "../branch-rules";
 import { presentClaim } from "../branch-scope";
 import { type ClaimStore, claimStore } from "../claim-store";
-import { type Registry, shardClaims, shardingReason } from "../claims";
+import { type ClaimRecord, type Registry, shardClaims, shardingReason } from "../claims";
+import { trustedClaim } from "../github-settings";
 import { BUILDING_IDLE_MS } from "../staleness";
 import { VOTE_BUCKETS, type VoteStore, voteStore } from "../vote-store";
 import { type ReviewPolicy, shardVotes, type Votes, votesShardingReason } from "../votes";
@@ -70,6 +71,17 @@ export function branchSettings(registry: Registry | null | undefined, branch: st
 		},
 		branch ?? project,
 	);
+}
+
+/** What GitHub's changes are held to while the repo trusts them: no review. Their checks still run. */
+export const TRUSTED_POLICY: ReviewPolicy = { required: 0, vetoes: [] };
+
+/** The policy a change is held to: its branch's, or none for GitHub's change while the repo trusts it. */
+export function claimPolicy(
+	registry: Registry | null | undefined,
+	claim: Pick<ClaimRecord, "agent" | "source" | "into">,
+): ReviewPolicy {
+	return trustedClaim(registry, claim) ? TRUSTED_POLICY : branchSettings(registry, claim.into).policy;
 }
 
 /** How a repo's claims are kept, for callers and the dashboard. */
@@ -156,6 +168,7 @@ export function storeFor(
 		...(ctx.recordsRemote ? { recordsRemote: (index: number) => ctx.recordsRemote!(repo, index, "write") } : {}),
 		remote: () => ctx.remote(repo, "write"),
 		log: ctx.records ? (ref) => ctx.records!<Registry>(repo, ref) : undefined,
+		...(ctx.forgetAttempts ? { forgetAttempts: (change: string) => ctx.forgetAttempts!(repo, change) } : {}),
 	});
 }
 

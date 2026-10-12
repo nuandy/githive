@@ -8,10 +8,12 @@ import {
 	claimTitle,
 	blockingRoles,
 	claimStatus,
+	isFromGitHub,
 	shardingSummary,
 	votesShardingSummary,
 	type Claim,
 } from "../lib/claimStatus";
+import { leaseWords } from "../lib/lease";
 import { shortSha, briefPaths } from "../lib/model";
 import { counted } from "../lib/plural";
 import { shortAge, timeAgo } from "../lib/relativeTime";
@@ -50,10 +52,18 @@ function Approvals({ claim }: { claim: Claim }) {
  * Where a change lands and what holds it back, when that isn't the plain case: into another branch, merging a
  * whole branch, or waiting on other changes.
  */
-export function ChangeLabels({ claim }: { claim: Pick<Claim, "into" | "source" | "waitsOn"> }) {
+export function ChangeLabels({
+	claim,
+}: {
+	claim: Pick<Claim, "into" | "source" | "waitsOn" | "trusted"> & { agent?: string };
+}) {
 	return (
 		<>
-			{claim.source ? (
+			{isFromGitHub(claim) ? (
+				<span className="pill pill--outline" title={claim.trusted ?? "GitHub's changes, reviewed like any change"}>
+					from GitHub{claim.trusted ? ", trusted" : ""}
+				</span>
+			) : claim.source ? (
 				<span className="pill pill--outline">
 					merges <code>{claim.source}</code>
 				</span>
@@ -68,9 +78,11 @@ export function ChangeLabels({ claim }: { claim: Pick<Claim, "into" | "source" |
 	);
 }
 
-/** One open change in the list: its status, title, who opened it, what it claims, and its approvals. */
-function ChangeRow({ claim, repo }: { claim: Claim; repo: string }) {
+/** One open change in the list: its status, title, who opened it, what it claims, when it frees up, and its approvals. */
+function ChangeRow({ claim, repo, now }: { claim: Claim; repo: string; now?: number }) {
 	const status = claimStatus(claim);
+	// Only a claim on its agent's turn frees up, at a time; the change's page says why the others don't.
+	const lease = leaseWords(claim.lease, now);
 	return (
 		<li className="change-row">
 			<StatusIcon status={status} />
@@ -92,6 +104,13 @@ function ChangeRow({ claim, repo }: { claim: Claim; repo: string }) {
 							<span title={claim.paths.join("\n")}>{briefPaths(claim.paths)}</span>
 						</span>
 					) : null}
+					{lease?.short ? (
+						<span className={`change-row__lease${lease.free ? " tone-warn" : ""}`} title={lease.long}>
+							{" · "}
+							<Icon name="clock" size={12} />
+							{lease.short}
+						</span>
+					) : null}
 				</p>
 			</div>
 			<div className="change-row__aside">
@@ -110,7 +129,18 @@ function ChangeRow({ claim, repo }: { claim: Claim; repo: string }) {
 }
 
 /** The open changes, newest first: all of them, or those on `shown` (the branch the overview shows). */
-export function ChangeList({ snapshot, repo, shown }: { snapshot: RepoSnapshot; repo: string; shown?: string }) {
+export function ChangeList({
+	snapshot,
+	repo,
+	shown,
+	now,
+}: {
+	snapshot: RepoSnapshot;
+	repo: string;
+	shown?: string;
+	/** The time leases are told against (tests fix it). */
+	now?: number;
+}) {
 	const project = snapshot.branch ?? "main";
 	const claims = [...snapshot.claims]
 		.filter((claim) => !shown || (claim.into ?? project) === shown)
@@ -138,7 +168,7 @@ export function ChangeList({ snapshot, repo, shown }: { snapshot: RepoSnapshot; 
 			) : (
 				<ul className="change-list__rows">
 					{claims.map((claim) => (
-						<ChangeRow key={claim.change} claim={claim} repo={repo} />
+						<ChangeRow key={claim.change} claim={claim} repo={repo} now={now} />
 					))}
 				</ul>
 			)}
@@ -297,6 +327,19 @@ function MergePolicyTerms({ policy, verify }: { policy: Policy; verify: string[]
 	);
 }
 
+/** The GitHub link in words: where GitHive's work goes, and whether GitHub's changes come back reviewed. */
+export function githubTerms(github: NonNullable<RepoSnapshot["github"]>, branch: string) {
+	const how =
+		github.sync === "pr"
+			? `GitHive's work reaches ${github.repo} through one pull request from githive/main, merged on GitHub`
+			: `GitHive pushes ${branch} to ${github.repo} after every landing`;
+	if (!github.inbound) return `${how}, as it did before modes: GitHub's changes aren't brought back.`;
+	const back = github.trust
+		? "GitHub's changes come back as githive-github's change, landing through the checks without review"
+		: "GitHub's changes come back as githive-github's change, reviewed like any change";
+	return `${how}. ${back}.`;
+}
+
 /**
  * The Settings tab: how changes merge (for the repo's admins, `editor` to
  * change it; for everyone else, what it is), how the records are kept, and
@@ -358,6 +401,12 @@ export function SettingsTab({
 							Each change works in its own fork: agents can't write {snapshot.branch ?? "main"}; only the toolkit
 							merges, once the conventions hold.
 						</dd>
+						{snapshot.github ? (
+							<>
+								<dt>GitHub</dt>
+								<dd>{githubTerms(snapshot.github, snapshot.branch ?? "main")}</dd>
+							</>
+						) : null}
 					</dl>
 				</div>
 			</section>

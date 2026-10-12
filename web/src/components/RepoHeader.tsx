@@ -35,6 +35,7 @@ export function RepoHeader({
 	homeHref,
 	live = "off",
 	badges,
+	aside,
 }: {
 	name: string;
 	tabs: TabItem[];
@@ -43,6 +44,8 @@ export function RepoHeader({
 	live?: LiveStatus;
 	/** Badges after the name, e.g. how claims are kept. */
 	badges?: ReactNode;
+	/** Beside the name: the GitHub repo it's connected to, say. */
+	aside?: ReactNode;
 }) {
 	return (
 		<div className="repo-header">
@@ -53,7 +56,10 @@ export function RepoHeader({
 						<a href={homeHref}>{name}</a>
 						{badges}
 					</h1>
-					<LiveDot status={live} />
+					<div className="repo-header__aside">
+						{aside}
+						<LiveDot status={live} />
+					</div>
 				</div>
 				<Tabs items={tabs} current={current} label={`${name} sections`} />
 			</div>

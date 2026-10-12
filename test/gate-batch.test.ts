@@ -1,11 +1,11 @@
-import { spawn } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { pushChange } from "./helpers/agents";
+import { agentClone, pushChange } from "./helpers/agents";
 import { startGitServer, type GitServer } from "./helpers/git-server";
 import { FakeStorage } from "./fakes/env";
+import { localContainer } from "./helpers/local-container";
 import { type HistorySource, type KeptFiles, readBranchHistory } from "../src/toolkit/branch-history";
 import { mergeRecordOf, readMainMerges } from "../src/toolkit/git-records";
 import { concat } from "../src/git-fetch";
@@ -17,50 +17,6 @@ import { fetchPackSince } from "../src/git-pack";
 // the Gate reads and pushes is what git really does.
 
 const { Gate } = await import("../src/gate");
-
-/** A container whose commands run here: the checkout (/work) in `dir`, nothing installed (git is already here). */
-function localContainer(dir: string) {
-	const local = (s: string) => s.replaceAll("/work", dir);
-	const container = {
-		running: false,
-		start: () => void (container.running = true),
-		destroy: async () => void (container.running = false),
-		setInactivityTimeout: async () => undefined,
-		exec: async (cmd: string[], options: { cwd: string; stdin?: ReadableStream }) => {
-			// `timeout -s KILL <seconds>` first: not on every machine, and not needed here.
-			const args = (cmd[0] === "timeout" ? cmd.slice(4) : cmd).map(local);
-			const stdin = options.stdin ? Buffer.from(await new Response(options.stdin).arrayBuffer()) : undefined;
-			const installing = args.join(" ").includes("apt-get");
-			return {
-				output: () =>
-					new Promise<{ exitCode: number; stdout: Uint8Array }>((resolve) => {
-						if (installing) return resolve({ exitCode: 0, stdout: new Uint8Array() });
-						// Ignore this machine's git config, such as its identity, since a container has none.
-						const [command, ...commandArgs] = args;
-						if (command === undefined) throw new Error("an empty command");
-						const child = spawn(command, commandArgs, {
-							cwd: local(options.cwd),
-							env: {
-								...process.env,
-								GIT_TERMINAL_PROMPT: "0",
-								GIT_CONFIG_GLOBAL: "/dev/null",
-								GIT_CONFIG_NOSYSTEM: "1",
-								HOME: tmpdir(),
-							},
-						});
-						const out: Buffer[] = [];
-						child.stdout.on("data", (b) => out.push(b));
-						child.stderr.on("data", (b) => out.push(b));
-						child.on("close", (code) => resolve({ exitCode: code ?? 1, stdout: new Uint8Array(Buffer.concat(out)) }));
-						child.on("error", (err) => resolve({ exitCode: 127, stdout: new TextEncoder().encode(String(err)) }));
-						if (stdin !== undefined) child.stdin.end(stdin);
-						else child.stdin.end();
-					}),
-			};
-		},
-	};
-	return container;
-}
 
 describe("reading and landing a batch in the repo's own Gate", { timeout: 60_000 }, () => {
 	let server: GitServer;
@@ -135,9 +91,14 @@ describe("reading and landing a batch in the repo's own Gate", { timeout: 60_000
 		const main = server.git("rev-parse", "main").trim();
 		const a = await pushChange(server.url, work, "agent-a-1", "a-1", { "src/a.txt": "a\n" });
 		const b = await pushChange(server.url, work, "agent-b-1", "b-1", { "src/b.txt": "b\n" });
+		// b-1's story: no intent, a review and an earlier attempt to land.
+		const story = {
+			reviews: [{ reviewer: "rev", role: "review", evidence: "ran the tests" }],
+			attempts: ["checks failed: npm test exited 1"],
+		};
 		const merges = [
 			{ ...source("a-1"), head: a, claimed: { ...claimed("a-1", a), testedOn: main, testedWith: [a, b] } },
-			{ ...source("b-1"), head: b, claimed: { ...claimed("b-1", b), testedOn: main, testedWith: [a, b] } },
+			{ ...source("b-1"), head: b, claimed: { ...claimed("b-1", b), testedOn: main, testedWith: [a, b], ...story } },
 		];
 		const landed = await gate.landBatch({ repo: "t1", branch: "main", base: base(), baseHead: main, merges });
 		expect(landed).toEqual({ commits: [expect.any(String), expect.any(String)] });
@@ -158,6 +119,10 @@ describe("reading and landing a batch in the repo's own Gate", { timeout: 60_000
 				.trim()
 				.split("\n"),
 		).toEqual(["GitHive <bot@githive.invalid>", "b-1", `${a} ${b}`]);
+		// The story above the trailers, written in the Gate as everywhere else.
+		expect(server.git("log", "-1", "--format=%B", second)).toMatch(
+			/^Merge b-1 by agent-b-1\n\nReviewed by:\n- rev \(review\): ran the tests\n\nEarlier attempts:\n- checks failed: npm test exited 1\n\nGitHive-Change: b-1\n/,
+		);
 		// Checked against the previous main. Main has moved since, so nothing lands.
 		const c = await pushChange(server.url, work, "agent-c-1", "c-1", { "src/c.txt": "c\n" });
 		expect(
@@ -170,6 +135,42 @@ describe("reading and landing a batch in the repo's own Gate", { timeout: 60_000
 			}),
 		).toEqual({ moved: true });
 		expect(server.git("rev-parse", "main").trim()).toBe(second);
+	});
+
+	it("names the change that doesn't merge onto the batch and the files it conflicts on, and lands nothing", async () => {
+		const main = server.git("rev-parse", "main").trim();
+		const a = await pushChange(server.url, work, "agent-a-1", "a-1", { "src/shared.txt": "a\n" });
+		const b = await pushChange(server.url, work, "agent-b-1", "b-1", { "src/shared.txt": "b\n", "src/b.txt": "b\n" });
+		const merges = [
+			{ ...source("a-1"), head: a, claimed: claimed("a-1", a) },
+			{ ...source("b-1"), head: b, claimed: claimed("b-1", b) },
+		];
+		const landed = await gate.landBatch({ repo: "t1", branch: "main", base: base(), baseHead: main, merges });
+		expect(landed).toEqual({
+			error: expect.stringMatching(/^merging b-1 onto the batch failed: src\/shared\.txt\n/),
+			conflict: { change: "b-1", files: ["src/shared.txt"] },
+		});
+		expect(server.git("rev-parse", "main").trim()).toBe(main);
+	});
+
+	it("names the change whose merge fails without listing files, which a fetch or a push never is", async () => {
+		const main = server.git("rev-parse", "main").trim();
+		// A branch with no history in common with main: git refuses to merge it, and lists no conflicted file.
+		const clone = await agentClone(server.url, work, "orphan");
+		await clone.run("checkout", "--quiet", "--orphan", "changes/o-1");
+		await clone.run("rm", "-rqf", "--ignore-unmatch", ".");
+		clone.write("src/o.txt", "o\n");
+		await clone.run("add", "-A");
+		await clone.run("commit", "--quiet", "-m", "start over");
+		await clone.run("push", "--quiet", "origin", "changes/o-1");
+		const head = await clone.run("rev-parse", "HEAD");
+		const merges = [{ ...source("o-1"), head, claimed: claimed("o-1", head) }];
+		const landed = await gate.landBatch({ repo: "t1", branch: "main", base: base(), baseHead: main, merges });
+		expect(landed).toEqual({
+			error: expect.stringMatching(/^merging o-1 onto the batch failed: .*unrelated histories/s),
+			conflict: { change: "o-1", files: [] },
+		});
+		expect(server.git("rev-parse", "main").trim()).toBe(main);
 	});
 
 	it("lands changes from the packs their merges kept, fetching neither them nor main again", async () => {
@@ -368,7 +369,10 @@ describe("reading and landing a batch in the repo's own Gate", { timeout: 60_000
 			to: { remote: server.repo("github"), token: "t" },
 			ref: "githive/checks/y-0",
 		});
-		expect(made).toEqual({ failed: expect.stringMatching(/^b-1 doesn't merge onto the batch: .*src\/same\.txt/s) });
+		expect(made).toEqual({
+			failed: expect.stringMatching(/^b-1 doesn't merge onto the batch: .*src\/same\.txt/s),
+			conflict: { change: "b-1", files: ["src/same.txt"] },
+		});
 		expect(server.gitIn("github", "for-each-ref", "--format=%(refname)").trim()).toBe("");
 	});
 

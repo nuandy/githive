@@ -12,8 +12,8 @@
 // what the repo is (a copy of Express by default). An agent whose key file holds a GitHive agent token (ghv_…)
 // signs in with it, as anyone's agent would, and acts under its full name, <handle>/<agent>.
 // Each agent works in <plan dir>/agents-work/<agent> and logs its session to
-// <agent>.jsonl there. The run ends when every agent stops (when next has
-// nothing for it, or at --minutes), then prints what each did, what landed and
+// <agent>.jsonl there. The run ends when every agent stops (when reviews and
+// backlog have nothing for it, or at --minutes), then prints what each did, what landed and
 // the audit. Tokens and keys are never printed. Each agent's MCP config, which
 // holds its key, is readable only by that agent.
 

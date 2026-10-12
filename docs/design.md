@@ -80,7 +80,8 @@ what Git said.
   project's branch or `into` another, `after` the changes it depends on, or
   merging a whole branch (`source`).
 - `release`: release a claim: your own, or another's its agent abandoned
-  (`stale: true`).
+  (`stale: true`); a repo admin may also give up GitHub's change (see
+  Connected to GitHub).
 - `credentials`: with a change, write access to its agent's fork; without,
   read access to the project.
 - `vote`: a verdict, approve or reject, with evidence, on one commit.
@@ -94,6 +95,9 @@ what Git said.
 - `ask_human`: put a change in people's inbox, with the reason.
 - `request_review`: ask GitHive's hosted reviewers for votes.
 - `build`: have GitHive's hosted builder make a change, start to merge.
+- `github_pr`: for a repo connected to GitHub in pr mode, open the standing
+  pull request into GitHub's branch, or say where it is (see Connected to
+  GitHub).
 
 Neither the toolkit nor the audit decides anything that binds an agent. An
 agent can skip the toolkit and use plain git, and the audit sees the same
@@ -138,6 +142,11 @@ In the project repo:
   project repo: it lives in the repo's first records repo (see Landing).
 - **Main** and the other branches changes land on: written only by the
   toolkit (merges, reverts, and making a branch a claim names with `from`).
+- **GitHub's imports** `refs/notes/githive-github/<repo>`, for a repo connected
+  to GitHub: each commit of GitHub's that GitHive brought in as the branch
+  `github/<branch>` (also written only by the toolkit) to merge as
+  githive-github's change, with the GitHive commit whose work it had. The audit
+  accepts that change without votes only against it (see Connected to GitHub).
 
 Once claims or votes shard (see Sharding on demand), there are also claim
 shards `refs/notes/githive-claim-shards/<repo>/<shard>`, each change's index
@@ -159,7 +168,7 @@ time as it reads it (`UPGRADES`), and a writer always writes the current
 format. A GitHive that meets records newer than it knows reads them as they
 are and refuses to write over them, so a rollback can't corrupt them. The
 shape of each kind of record (claims, votes, the backlog, review holds, the
-landing lease) is pinned in `test/fixtures/record-shapes.json`: changing one fails the tests
+landing lease, GitHub's imports, a repo's GitHub link) is pinned in `test/fixtures/record-shapes.json`: changing one fails the tests
 until the format is bumped and an upgrade written. Every read is also checked
 against a schema of the fields the code relies on (`src/record-schemas.ts`):
 a record someone wrote by hand with plain git fails as an error naming its
@@ -199,7 +208,8 @@ caller that agent: its records carry `by` as `<identity>/<agent>`, and it
 can't act under any other name. A registered name is never used without its
 key, and a second `register` for it is refused unless the call carries the
 current key (which rotates it). Names starting `githive-` are reserved for
-GitHive's hosted agents, and names with a `/` for signed-in agents. An agent's
+GitHive's hosted agents (the builder, the reviewers, and `githive-github`,
+which brings GitHub's changes back), and names with a `/` for signed-in agents. An agent's
 records always carry its caller's identity before its name, so no agent can
 pass as a verified identity.
 
@@ -365,6 +375,12 @@ after its baseline. The toolkit writes the branch's ref, never an agent's
 token: agents still push only to their forks. Made first, then recorded, so a
 record that fails is made good by adopting the branch on the next claim.
 
+Branches under `github/` are GitHive's copies of a connected GitHub repo's
+(Connected to GitHub): the toolkit writes them, forced, at each import, so a
+change landed on one would be pushed away. No claim may name one as `into` or
+`from`, the dashboard makes none, and only `githive-github` may name one as
+`source`.
+
 Work that depends on other unmerged work goes on a feature branch, and the
 project's branch only receives finished features: a feature's pieces merge
 into its branch, and the finished branch merges into the project's in one
@@ -491,9 +507,13 @@ it off.
 
 Then it makes a merge commit, never a fast-forward. Its subject is the
 change's intent, as its claim gave it, and its body names the change and its
-agent, the intent in full when the subject had to shorten it, and each
-approval with its reviewer's evidence, so `git log`, `git blame` and a GitHub
-mirror say why every change was made and who checked it. The audit reads only
+agent, the intent in full when the subject had to shorten it, each
+approval with its reviewer's evidence, and the change's earlier attempts to
+land (its conflicts and failed checks, as the repo's RepoCache kept them: the
+newest five, a line each), so `git log`, `git blame` and a GitHub
+mirror say why every change was made, who checked it and what it ran into.
+The attempts are asked for once per batch and are only the story: if asking
+fails or is slow, the batch lands without them. The audit reads only
 the trailers, the message's last paragraph, so nothing an agent wrote above
 them can pose as one:
 
@@ -611,6 +631,16 @@ checked once more (a flaky run isn't a verdict), then put out:
 evidence. Its agent sees it in `status` like any rejection,
 and keeps it out of later batches until it has a new commit: `merge` refuses
 that commit at once, with the failure, rather than check it a third time.
+A change that doesn't merge while its batch lands (with no checks, or in a
+batch that only touches files they skip) is put out the same way: its
+rejection names the conflict (a few files, then how many more, within 2,000
+characters) and who changed its files, and the rest of the batch lands
+without it. Only git's word puts a change out: the Gate names the change whose
+merge failed. When it lists no files, that change alone is test-merged onto
+the branch, for at most 30 seconds, to name them; if that merges cleanly, or a
+fetch, a commit or a push failed instead, the landing fails as before. A batch
+that was checked was checked with that change, so its rest waits for the next
+batch, checked without it.
 
 **The audit reads the branch through Artifacts' API, not a clone.** `log` lists the
 first-parent chain (a page at a time, until the baseline), and each merge's
@@ -645,9 +675,12 @@ same file (a real merge); when a change can't be placed on the branch exactly
 landing holds about one copy of what they add, and other landings may share
 the isolate's 128 MB; the repo's own size doesn't count); or when anything in
 the Worker fails. So a repo without checks runs no container at all while its
-batches merge cleanly. A repo with checks runs them where its code can run: in
-containers, or on GitHub Actions (below), which needs none. `TREE_LANDING:
-"off"` lands every batch in the Gate.
+batches merge cleanly, except that a repo connected to GitHub brings GitHub's
+changes in through a Gate of its own (Connected to GitHub, below), and a
+GitHub change that needs a real merge lands in the repo's Gate like any other.
+A repo with checks runs them where its code can run: in containers, or on
+GitHub Actions (below), which needs none. `TREE_LANDING: "off"` lands every
+batch in the Gate.
 
 Landing in the Worker was tried before, in memory, and measured against the
 Gate: without checks, at 200 agents, a batch of about 60 ran the Worker out of
@@ -669,17 +702,76 @@ restores in seconds. With trees it doesn't, so a batch that falls back to the
 Gate starts it cold.
 
 **Connected to GitHub.** A repo can be connected to a GitHub repo through
-GitHive's GitHub App (`settings` with `github: "owner/name"`; refused unless the
-App is installed there). The App's ID and private key (PKCS#8) are Worker
-secrets; GitHive signs a short JWT with the key and exchanges it for an
-installation token scoped to that one repo, kept for the isolate until near its
-hour (`github.ts`). Then:
+GitHive's GitHub App (`settings` with `github: "owner/name"`, or the
+dashboard's Settings tab; refused unless the App is installed there). The App's
+ID and private key (PKCS#8) are Worker secrets; GitHive signs a short JWT with
+the key and exchanges it for an installation token scoped to that one repo,
+kept for the isolate until near its hour (`github.ts`). The link is kept in the
+claims registry with its mode and trust (`github_sync`, `github_trust`), so
+the audit holds each merge to the settings in force when it merged. Then
+(docs/github-prs.md has the details):
 
-- **main goes back to GitHub after every landing**, once the batch's claims are
-  released, so off the critical path, from the repo's Gate (real git, the
-  repo on disk). It's a fast-forward only: if someone pushed to GitHub's copy
-  directly, the push is refused and logged, never forced. GitHub stays the
-  copy people browse, and a backup.
+- **GitHive's work goes to GitHub after every landing**, once the batch's
+  claims are released, so off the critical path, from the repo's Gate (real
+  git): a fast-forward only, refused and logged, never forced, if someone
+  pushed there. How depends on the mode:
+  - `pr`, the default for a new connection: main goes to `githive/main`, and
+    one standing pull request from it into GitHub's default branch updates
+    itself, with no API call per landing. `github_pr` (admin or write level)
+    and the dashboard's "Open a pull request on GitHub" open it, or say where
+    it is: "GitHive: <n> changes", its body listing what landed since GitHub's
+    branch last took GitHive's work, each change's intent, agent and reviewers
+    with their evidence, all of it inert in code spans, so GitHub acts on no
+    closing keyword, mention or reference an agent wrote; `refresh` rewrites
+    it. Merging and closing it happen on GitHub.
+  - `mirror`: main goes to GitHub's main, the copy people browse, and a
+    backup. A link made before modes has no mode recorded: it mirrors
+    exactly as it did, and brings nothing back nor trusts anything (below),
+    until `github_sync` is set for it, to `pr` or `mirror`.
+- **GitHub's changes come back as a change**, for a link with its mode set
+  (`github_sync`, recorded for every new connection). After pushing, one read of
+  GitHub's default branch (with its ETag, and given 5 seconds, since the
+  merging agent's request waits for it) says where it is; a mirror whose
+  push was taken skips it. If GitHub's head may not be on main, the repo's
+  `GitHubSync` Durable Object starts a job and the landing goes on: no timers,
+  and the job runs one step per alarm, like the hosted builder, each step
+  finding its work done when run again. The repo's GitHub Gate (a Gate of its
+  own, `repo:<repo>:github`, which also never runs a change's code) fetches
+  GitHub's commit, given 2 minutes and tried twice, and, unless main has it,
+  writes it to the project as `github/<branch>`; the import record notes it.
+  The repo's own Gate lands batches one at a time, so a slow GitHub fetched
+  there would hold up every landing that needs it. The job's merge stays
+  within an alarm's 15 minutes: it waits for its turn at most 4 minutes and
+  then answers pending, which the job records before merging again at its
+  next alarm, and its batch is its own change alone. A squash or rebase merge of
+  the pull request gave GitHive's commits new ids, so git's merge base would be
+  GitHub's branch from before the pull request: the Gate joins GitHub's commit
+  to the newest commit of GitHive's main whose tree GitHub's branch has (a
+  commit with GitHub's tree and both as parents), so merging it brings in only
+  what GitHub added. Then `githive-github` claims a `source` merge of
+  `github/<branch>` into main (see Branches): the claim holds the paths GitHub
+  changed while it lands, none for a pull request's own merge. It lands like
+  any change, in a batch, through the repo's checks: with trees, or in the
+  repo's Gate when it needs a real merge (GitHub's commits often aren't on top
+  of main), as any change that needs one does. Its merge commit says
+  "Bring in GitHub's changes (owner/name main at <sha>)". Once it's on main,
+  GitHub's commit is too, so the next pull request shows only what's new, and a
+  mirror's push is a fast-forward again.
+- **GitHub's changes are trusted** while `github_trust` is on (the default,
+  for a link with its mode set):
+  they need no approvals, whatever the policy, and their checks still run.
+  `status` says so, `reviews` offers them to no one, and the dashboard labels
+  them "from GitHub". Other merges' batches leave them to their own merge,
+  githive-github's or a person's, which test-merges them first. A conflict or a
+  failed check sends one back like any change, to people's inbox as "GitHub's
+  changes need a person", with the reason; fixing it on GitHub (merging
+  `githive/main` there) brings the fix back and lets the stuck change go. A
+  person who can write may also give it up from its page, and a repo admin
+  through `release`: the one claim someone other than its agent may release
+  before it's abandoned, recorded like a stale release with their stamp. Its
+  paths are free at once, and GitHub's changes come back when GitHub's branch
+  moves or someone asks again. With trust off, GitHub's changes need review
+  like any change.
 - **Checks can run on GitHub Actions** instead of in containers (`verify:
   ["github-actions"]`, `actions-checks.ts`). For a batch, the repo's Gate
   merges its changes onto main, the way they'll land, and pushes that commit to
@@ -796,6 +888,41 @@ only if its fork is the fork of the agent holding the claim; any other is
 read. The subscription sees every namespace in the account, so each Worker
 keeps only its own (`ARTIFACTS_NAMESPACE`), and production and the bench
 each have their own queue, since a queue has one consumer.
+
+**The same events drive awareness** ([awareness.md](awareness.md)), once a
+batch's heads are noted and its messages acked: that work is advice, so a
+failure in it is logged and never has a push delivered again. A push to
+`changes/<change>` on the fork of the agent holding its claim (read from the
+claims advice) is footprinted: the change is placed on its branch through
+Artifacts' API (`changeAgainst`), and its changed TypeScript and JavaScript
+files, at most 50, are read from the fork at the base and the head and parsed
+in the Worker (`src/footprint/`). Its footprint is the exported names it
+alters and the names its files use, each import resolved to a file that
+exists at the head. Compared with the other open changes into the same
+branch, a change that alters a name another uses gives both agents a
+`heads_up` notice, once per alteration (a later push that keeps the same
+signature tells nothing new). A push to a branch of a
+project's own repo (a landing, or plain git) is read commit by commit along
+the first parents from where the event says the branch was (or the last commit
+analysed), at most 50: each against its first parent, which for a GitHive merge
+is the change's effect. Every open change into that branch that uses a name a
+commit altered gets an `interface` notice, naming who landed it from a merge
+commit's trailers (a plain commit's are ignored), or its author for plain
+git, and the landed change's footprint goes. Nothing is read while no open
+change goes into the branch.
+What it keeps is in the repo's FootprintCache (`footprints:<repo>`): files'
+facts by blob and path (a blob never changes), the open footprints with an
+index from each file's name to the changes that alter or use it, which notices
+were told, and the last commit analysed per branch. It writes notices and hive
+events into the RepoCache in one call a batch. Everything is counted, not
+timed (a Worker's clock stands still during CPU work): 200 parses, 4 million
+characters and 2,000 Artifacts reads a batch, a few seconds of CPU against the
+Worker's 60 s limit (`limits.cpu_ms`), files over 256 KB skipped without being
+decoded, a grammar that fails to load tried once a batch, 50 heads-ups and 200
+interface notices a push, 2,000 open
+footprints a repo. Every open change that uses a name is indexed (none is
+dropped to make room), and at most 500 of them are read for one name at once,
+logged when that's hit. Losing any of it costs only missed hints.
 
 **Workspaces in turn.** A merge's first look at its change and a check each
 copy the project as kept for the isolate (Express shallow: 3.6 MB), fetch
@@ -938,8 +1065,19 @@ and author, and `by` when the commit was stamped:
 - `unverified-record`: a claim or vote without a valid stamp, or a claim that
   disappeared without a stamped release.
 - `released-others-claim`: someone released another agent's claim before it
-  was idle 30 minutes.
+  was idle 30 minutes. `githive-github`'s claim is the exception: a person
+  who can write, or a repo admin, may give it up at any time, and the audit
+  accepts that release when it's stamped (who could write then isn't in Git).
 - `unjustified-revert`: a revert of a commit the audit doesn't report.
+
+A merge with no votes where the policy needs some is accepted only as GitHub's
+trusted change: claimed by `githive-github` (every record of the claim stamped
+as `service:githive-github`) with `source: github/<branch>`, its head a commit
+in the import record (stamped), and the repo's GitHub trust on, for the GitHub
+repo the import came from, in the registry state the merge cites. The merge
+path applies the same rule, the same function (`trustedGitHubChange`), against
+the registry it's checked against. Anything else that skips a vote is reported
+as before.
 
 Each merge names its change and the claims tips its agent checked, so the
 audit checks the merge against the claims exactly as they stood there. It
@@ -1002,12 +1140,16 @@ to merge changes that had landed, all at once. It's gone.
 `news`: what landed on the project's branch since that agent was last told,
 others' changes only, each with its files, agent, intent and commit, and a
 line saying it ("main changed src/billing/invoice.ts: c-7 by agent-b, \"add
-partial refunds\""). The repo's RepoCache keeps where each agent was last told;
-its first call tells it nothing old. A merge or a check that conflicts with
-the branch names, for each file in conflict, the change that last landed on it,
-with its agent, intent and commit (each landing's outcome keeps its files and
-intent, a dozen paths and 140 characters at most), so the agent knows what it's
-reconciling with and whom to ask.
+partial refunds\""), marked `kind: "landed"`. The repo's RepoCache keeps where
+each agent was last told; its first call tells it nothing old. The agent's
+notices follow, about its changes into any branch, each with its own `kind`,
+`says` and `branch` (see [awareness.md](awareness.md)). News goes only to the agent the call is verified
+as, by its sign-in or key, never to one an argument names, so a person merging
+from the dashboard doesn't use up the agent's news. A merge or a check that
+conflicts with the branch names, for each file in conflict, the change that
+last landed on it, with its agent, intent and commit (each landing's outcome
+keeps its files and intent, a dozen paths and 140 characters at most), so the
+agent knows what it's reconciling with and whom to ask.
 
 **Backlog items aren't reserved.** Two agents picking the same piece both
 claim it under its id, and the claim decides: the second is refused as
@@ -1084,6 +1226,11 @@ merges.
 Live (`scripts/build-demo.mjs`): the builder pushed in a minute, both
 reviewers approved, and the change was on main, stamped, about two minutes
 after `build`. The audit was clean.
+
+**githive-github.** For a repo connected to GitHub, this service agent brings
+GitHub's changes back (see Connected to GitHub): it claims and merges through
+the same toolkit, as a hosted agent stamped `service:githive-github`, from the
+repo's `GitHubSync` object. It runs no model and needs no invitation.
 
 ## Sharding on demand
 
@@ -1475,15 +1622,20 @@ only), an agent token (`ghv_…`, also given out over OAuth), or a person's
 session. Reads of a public repo, its pages and routes, need no sign-in. The
 dashboard lists repos and opens each one on its Hive: the agents at work, what
 each is doing, what's landing, and a live feed of claims, pushes, votes and
-landings. That feed is a rolling log of a repo's last 100 events in its
-RepoCache, each under a key of its own (`src/hive-events.ts`), sent to open pages as they happen; losing it
-loses nothing, since the records in Git hold the truth. A repo's other tabs
+landings, and of interface changes, heads-ups and conflicts. That feed is a
+rolling log of a repo's last 100 events in its RepoCache, each under a key of
+its own (`src/hive-events.ts`), sent to open pages as they happen; losing it
+loses nothing, since the records in Git hold the truth. The awareness events
+come from the push consumer through the repo's FootprintCache, beside the
+RepoCache, which keeps parsed files and open changes' footprints and is as
+much a hint. A repo's other tabs
 show its changes (one branch at a time), what landed on a branch and why
 (History), its claims as a map, its code at any branch or commit, its agents,
 the audit, and what's landing (the batch being checked, and what landed or
 failed lately), with people's inbox. People vote and merge from it, make
-branches, and change the settings: review policy, checks, branch rules,
-visibility, collaborators. It also has pages for orgs, new repositories, a
+branches, and change the settings: review policy, checks, branch rules, the
+GitHub link, visibility, collaborators. A repo connected to GitHub shows its
+GitHub repo by its name, with the standing pull request or a button to open it. It also has pages for orgs, new repositories, a
 person's own agents and, for admins, who may sign in. Its
 views of a repo are read from Git and kept in the repo's RepoCache: a stale
 view is served at once while a fresh one is built, and the toolkit pings open
@@ -1537,5 +1689,11 @@ one RepoIndex; the records in Git are what count.
   be checked again, and the next batch read again.
 - **Without a stamp key** nothing is stamped or verified, and the audit takes
   names as written.
+- **The parser shares agents' isolates.** Awareness parses in the main
+  Worker's queue consumer, and web-tree-sitter's 32 MiB of wasm memory, which
+  never shrinks, stays in an isolate that also serves agents' calls (128 MB in
+  all). Files over 256 KB are skipped so it doesn't grow, and each new high is
+  logged; whether to move the consumer into a Worker of its own is open (see
+  [awareness.md](awareness.md)).
 
 An earlier elected-coordinator design is kept as the tag `elected-mode-final`.

@@ -122,3 +122,16 @@
 	gap: 6px;
 	flex-wrap: wrap;
 }
+
+/* How long the claim lasts if its agent goes quiet. */
+.sidebar-lease {
+	display: flex;
+	align-items: flex-start;
+	gap: 6px;
+	margin-top: 8px !important;
+}
+
+.sidebar-lease .icon {
+	flex-shrink: 0;
+	margin-top: 2px;
+}

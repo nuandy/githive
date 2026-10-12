@@ -61,6 +61,27 @@ describe("a change's conversation", () => {
 		});
 	});
 
+	it("tells its earlier attempts to land after what happened, and before how it ended", () => {
+		const attempts = ["conflict on src/c/x.ts with c-7 by alice (6584265)", "checks failed: npm test exited 1", "odd"];
+		const open = buildTimeline({ ...historyFixture, attempts }, "acme/docs-site");
+		expect(open.slice(-3).map((item) => [item.kind, item.tone, item.text, item.body])).toEqual([
+			["attempt", "warn", "an attempt to land conflicted with its branch", attempts[0]],
+			["attempt", "warn", "an attempt to land failed its checks", attempts[1]],
+			["attempt", "warn", "an attempt to land was refused", "odd"],
+		]);
+		expect(open.slice(-3).every((item) => item.at === undefined)).toBe(true);
+		const released = buildTimeline(
+			{
+				...historyFixture,
+				claim: null,
+				released: [{ reason: "gave up", at: ago(1), agent: "agent-c" }],
+				attempts: attempts.slice(0, 1),
+			},
+			"acme/docs-site",
+		);
+		expect(released.slice(-2).map((item) => item.kind)).toEqual(["attempt", "abandoned"]);
+	});
+
 	it("shows long evidence folded under its first line", () => {
 		const vote = {
 			commit: "c",

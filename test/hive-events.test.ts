@@ -64,6 +64,50 @@ describe("the hive's events", () => {
 		expect(kept.at(-1)?.change).toBe(`c${EVENTS_KEPT + 7}`);
 	});
 
+	it("keeps awareness events one per occurrence: the other agent tells two apart, the detail doesn't", async () => {
+		const at = NOW.toISOString();
+		const headsUp = (other: string, detail: string): HiveEvent => ({
+			kind: "heads_up",
+			agent: "bob",
+			change: "c-3",
+			other,
+			detail,
+			at,
+		});
+		const cache = new RepoCache({ storage: new FakeStorage(), getWebSockets: () => [] } as never, {} as never);
+		await cache.ping("records", false, [headsUp("carol", "loadSettings"), headsUp("dan", "loadSettings")]);
+		await cache.ping("records", false, [headsUp("carol", "saveSettings")]);
+		expect((await cache.events()).map((event) => [event.other, event.detail])).toEqual([
+			["carol", "saveSettings"],
+			["dan", "loadSettings"],
+		]);
+		// One agent's two changes in the same moment are two heads-ups.
+		const twice = [
+			{ ...headsUp("erin", "loadSettings"), otherChange: "e-1" },
+			{ ...headsUp("erin", "loadSettings"), otherChange: "e-2" },
+		];
+		await cache.ping("records", false, twice);
+		expect((await cache.events()).filter((event) => event.other === "erin").map((event) => event.otherChange)).toEqual([
+			"e-1",
+			"e-2",
+		]);
+	});
+
+	it("keeps one conflicted event for each change and head, however often its agent merges it again", async () => {
+		const cache = new RepoCache({ storage: new FakeStorage(), getWebSockets: () => [] } as never, {} as never);
+		const conflicted = (second: number, commit: string): HiveEvent => ({
+			kind: "conflicted",
+			agent: "bob",
+			change: "c-3",
+			commit,
+			detail: "a.ts",
+			at: new Date(NOW.getTime() + second * 1000).toISOString(),
+		});
+		for (let second = 0; second < 5; second++) await cache.ping("records", false, [conflicted(second, HEAD)]);
+		await cache.ping("records", false, [conflicted(9, "b".repeat(40))]);
+		expect((await cache.events()).map((event) => event.commit)).toEqual([HEAD, "b".repeat(40)]);
+	});
+
 	it("moves a log kept as one list under keys of its own", async () => {
 		const storage = new FakeStorage();
 		await storage.put("events", [{ kind: "pushed", change: "old", at: NOW.toISOString() }]);

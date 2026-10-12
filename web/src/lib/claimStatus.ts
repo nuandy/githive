@@ -34,9 +34,11 @@ export function claimStatus(claim: Claim): ChangeStatus {
 	if (claim.approval.approved)
 		return {
 			kind: "approved",
-			label: "Approved",
+			label: claim.trusted ? "Trusted" : "Approved",
 			tone: "good",
-			description: "Approved; it merges once its checks pass.",
+			description: claim.trusted
+				? "GitHub's changes, trusted: it lands through the checks without review."
+				: "Approved; it merges once its checks pass.",
 		};
 	if (!claim.head) return { kind: "draft", label: "Draft", tone: "neutral", description: "Nothing pushed yet." };
 	if (claim.hosted?.reviewers.some((reviewer) => reviewer.verdict === "reject"))
@@ -62,9 +64,14 @@ export function awaitingVetoes(claim: Claim): string[] {
 	return Array.isArray(claim.approval.awaiting) ? claim.approval.awaiting : [];
 }
 
+/** Whether a change is GitHub's, brought back by GitHive's githive-github. */
+export const isFromGitHub = (claim: { agent?: string; source?: string }) =>
+	claim.agent === "githive-github" && !!claim.source?.startsWith("github/");
+
 /** "1/2 approvals", "Waiting for security", "Blocked by security": the review badge. */
 export function claimApprovalLabel(claim: Claim): string {
 	const { approval } = claim;
+	if (claim.trusted) return "No review: trusted";
 	if (approval.vetoedBy.length) return `Blocked by ${approval.vetoedBy.join(", ")}`;
 	const awaiting = awaitingVetoes(claim);
 	if (!approval.approved && approval.approvals >= approval.required && awaiting.length)

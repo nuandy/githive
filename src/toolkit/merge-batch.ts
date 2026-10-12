@@ -1,4 +1,5 @@
 import { branchHead } from "../git";
+import { isGitHubChange } from "./github-settings";
 import type { Landing, Settled } from "./landing";
 import { checkAndPutOut, gateName, newPlace, type Place } from "./merge-checks";
 import { land, type Landed, leaveOutLanded } from "./merge-land";
@@ -95,7 +96,10 @@ export async function landBatch(
 		else firstPassing.found(batch);
 		const checkedAt = Date.now();
 		const done = await firstPassing.outcome();
-		const landedCount = done.landed === null ? "lost the race" : `${done.landed.settled.length}`;
+		const landedCount =
+			done.landed === null
+				? "lost the race"
+				: `${done.landed.settled.filter((settled) => settled.how === "landed").length}`;
 		const { size, foundAt, readAt } = gathered;
 		console.log(
 			`batch of ${batch.length} (at most ${size}) into ${input.branch}: gathering ${gatheredAt - startedAt} ` +
@@ -112,6 +116,7 @@ export async function landBatch(
 				reasons: [
 					`the project's branch kept moving while ${input.change} merged (other merges landed ` + "first): merge again",
 				],
+				why: ["moved"],
 			};
 		}
 		return { ok: true, settled: [...failures, ...done.landed.settled], release: done.landed.release };
@@ -178,8 +183,9 @@ async function gatherBatch(
 	const readAt = Date.now();
 	await holding.step(STEP_MS.records);
 	const own = read[0];
-	if (!own) return { ok: false, reasons: [`${input.change} couldn't be read`] };
-	if ("error" in own) return { ok: false, reasons: [`${input.change} couldn't be read: ${own.error}`] };
+	if (!own) return { ok: false, reasons: [`${input.change} couldn't be read`], why: ["unread"] };
+	if ("error" in own)
+		return { ok: false, reasons: [`${input.change} couldn't be read: ${own.error}`], why: ["unread"] };
 	const checked = await validateAll(input, sources, read);
 	if (checked[0] && !checked[0].ok) return checked[0];
 	const ready = checked.flatMap((result) => (result?.ok ? [result.ready] : []));
@@ -253,12 +259,15 @@ async function otherChanges(input: MergeInput): Promise<Candidate[]> {
 }
 
 // The candidates approved at the head they were last seen at, and not sent back by a reviewer other than their author.
+// GitHub's changes are left to their own merge (githive-github's job, or a person's), which test-merges them first: a
+// conflict sends one to a person with no vote to show it, and in another's batch it would break every landing.
 async function approvedAsSeen<C extends Candidate & { head: string }>(input: MergeInput, others: C[]): Promise<C[]> {
 	const seen = await input.votes.readFor(others.map((candidate) => candidate.head));
 	const onTheirHeads = seen.votes.filter((vote) => others.some((candidate) => candidate.head === vote.commit));
 	const counted = await countedVotes(onTheirHeads, input.stampKey);
 	return others.filter((candidate) => {
 		const { claim, head } = candidate;
+		if (isGitHubChange(claim)) return false;
 		const author = { agent: claim.agent, ...(claim.by ? { by: claim.by } : {}) };
 		const sentBack = counted.some(
 			(vote) => vote.commit === head && vote.verdict === "reject" && vote.reviewer !== author.agent,

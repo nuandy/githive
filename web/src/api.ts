@@ -21,6 +21,53 @@ export interface SettingsInput {
 		grants?: Record<string, string[]>;
 		verify?: string[];
 	}[];
+	/** The connected GitHub repo, "owner/name", or "" for none. */
+	github?: string;
+	/** How GitHive's work reaches GitHub: through a pull request, or pushed to its main. */
+	github_sync?: GitHubSync;
+	/** Whether GitHub's changes come back without review. */
+	github_trust?: boolean;
+}
+
+export type GitHubSync = "mirror" | "pr";
+
+/** A repo's link to GitHub, as the snapshot shows it (newer servers, connected repos only). */
+export interface RepoGitHub {
+	repo: string;
+	sync: GitHubSync;
+	trust: boolean;
+	/** Whether GitHub's changes come back: not for a link made before modes, which only mirrors until one is set. */
+	inbound: boolean;
+	/** The standing pull request as GitHive last saw it: open then, it may have been merged since. */
+	pull: { number: number; url: string } | null;
+	/** Bringing GitHub's changes back, as GitHive last did it. */
+	fromGitHub?: {
+		step: "import" | "claim" | "merge" | "done" | "waiting" | "needs a person" | "given up" | "failed";
+		commit: string;
+		at: string;
+		change?: string;
+		reason?: string;
+	};
+}
+
+/** What giving up GitHub's change answers: released, or why not. */
+export interface GiveUpAnswer {
+	ok: boolean;
+	released?: string;
+	note?: string;
+	refused?: string;
+}
+
+/** What github_pr answers: the pull request, and whether it was just opened or rewritten. */
+export interface PullAnswer {
+	pr: string;
+	number: number;
+	title: string;
+	opened?: true;
+	open?: true;
+	refreshed?: true;
+	changes?: number;
+	note?: string;
 }
 
 /** A branch rule as the server stores it. Without checks of its own, the repo's apply. */
@@ -99,6 +146,8 @@ export interface RepoSnapshot {
 			vetoedBy: string[];
 			/** Veto roles still to approve; the change merges once each has (newer servers). */ awaiting?: string[];
 		};
+		/** For GitHub's change while the repo trusts GitHub's changes: why it needs no review. */
+		trusted?: string;
 		/** A question for a person, from an agent or a failed GitHive builder. It stays until a person votes. */
 		attention?: { reason: string; agent: string; at: string };
 		/** GitHive's hosted agents on the change. */
@@ -106,6 +155,8 @@ export interface RepoSnapshot {
 			builder?: { status: string; revisions: number; error?: string };
 			reviewers: { role: string; status: string; verdict?: string }[];
 		};
+		/** How long the claim lasts if its agent goes quiet (newer servers). */
+		lease?: ClaimLease;
 	}[];
 	votes: {
 		commit: string;
@@ -118,6 +169,17 @@ export interface RepoSnapshot {
 	}[];
 	/** Loaded separately (GET /repos/:repo/audit) and less often, because it replays every record. */
 	audit?: RepoAudit;
+	/** The connected GitHub repo (newer servers). */
+	github?: RepoGitHub;
+}
+
+/**
+ * How long a claim lasts if its agent goes quiet (see the server's toolkit/staleness.ts): whose turn its change is on,
+ * and on its agent's turn the time after which anyone may take its paths. Waiting on anyone else, it never frees.
+ */
+export interface ClaimLease {
+	waitingOn: "agent" | "reviewers" | "landing" | "person";
+	freeAfter?: string;
 }
 
 /**
@@ -166,13 +228,18 @@ export interface HiveEvent {
 		| "asked"
 		| "reverted"
 		| "added"
-		| "building";
+		| "building"
+		| "interface"
+		| "heads_up"
+		| "conflicted";
 	/** Who did it. A push names only its change. */
 	agent?: string;
 	change?: string;
 	commit?: string;
 	verdict?: "approve" | "reject";
-	/** The intent claimed, the role voted as, why a landing failed. */
+	/** The other agent: whose change uses an interface that changed, or the other side of a heads-up. */
+	other?: string;
+	/** The intent claimed, the role voted as, why a landing failed, the names or files an awareness event is about. */
 	detail?: string;
 	at: string;
 }
@@ -249,6 +316,85 @@ export interface ChangeHistory {
 	/** The change's own commits, newest first. */
 	commits: { commit: string; message: string; author: string; at: string }[];
 	votes: RepoSnapshot["votes"];
+	/** While its claim is in force: its merge check as the agent's last status worked it out (newer servers). */
+	merge?: MergeCheck;
+	/** Its earlier attempts to land, oldest first: conflicts and failed checks, in a line each (newer servers). */
+	attempts?: string[];
+	/** While its claim is in force: its footprint, and where it meets other open changes (newer servers). */
+	awareness?: ChangeAwareness;
+}
+
+/** A commit on the branch that touched a conflicted file since the change left it. */
+export interface TouchedBy {
+	file: string;
+	commit: string;
+	/** A GitHive merge's change, agent and intent. */
+	change?: string;
+	agent?: string;
+	/** The claim's intent for a GitHive merge; a plain commit's subject. */
+	intent?: string;
+	/** A commit pushed with plain git: its author. */
+	author?: string;
+}
+
+/** Whether a change merges cleanly into its branch, worked out on `head` against the branch at `branchHead`. */
+export interface MergeCheck {
+	head?: string;
+	into: string;
+	branchHead: string;
+	clean: boolean;
+	conflicts?: string[];
+	/** Who changed each conflicted file, newest first within each file; at most five a file. */
+	touchedBy?: TouchedBy[];
+	/** Each conflicted file with its conflict markers, at most 4 KB, `truncated` when cut. */
+	hunks?: { file: string; content: string; truncated: boolean }[];
+	/** The commands that resolve it in the agent's clone, then its next step. */
+	fix?: string[];
+	outsideClaim?: string[];
+}
+
+/** An exported name whose interface a change alters. */
+export interface AlteredName {
+	/** "loadSettings", or "Store.get" for a class member. */
+	name: string;
+	change: "interface" | "removed" | "no longer exported" | "now exported";
+	before?: string;
+	after?: string;
+	default?: true;
+}
+
+/** Where a use is: a file and a line. */
+export interface UseSite {
+	file: string;
+	line: number;
+}
+
+/** Where a change's footprint meets another open change's: one altered name, as one side uses it. */
+export interface Overlap {
+	file: string;
+	altered: AlteredName;
+	/** The name as imported where it's used ("*" for the whole file). */
+	imported: string;
+	/** Where it's used: in the other change (usedBy), or in this one (alteredBy). */
+	at: UseSite[];
+	other: { by: string; change: string; intent?: string };
+}
+
+/** A change's footprint, and where it meets the other open changes into its branch (see FootprintCache.overlapsOf). */
+export interface ChangeAwareness {
+	change: string;
+	agent: string;
+	branch: string;
+	head: string;
+	base: string;
+	at: number;
+	alters: { file: string; altered: AlteredName }[];
+	uses: { file: string; name: string; at: UseSite[] }[];
+	/** What it alters that other agents' open changes use. */
+	usedBy: Overlap[];
+	/** What it uses that other agents' open changes alter. */
+	alteredBy: Overlap[];
+	omitted?: Partial<Record<"alters" | "uses" | "usedBy" | "alteredBy", number>>;
 }
 
 /** Who is looking at the dashboard (GET /me). */
@@ -437,6 +583,15 @@ export const api = {
 		call<ChangeHistory>("GET", `/repos/${repoPath(repo)}/changes/${encodeURIComponent(change)}`),
 	/** What the caller may do in a repo, and whether it's private or public. */
 	access: (repo: string) => call<RepoAccess>("GET", `/repos/${repoPath(repo)}/access`),
+	/** Opens the standing pull request on GitHub, or finds it; with refresh, rewrites its title and body. */
+	githubPull: (repo: string, refresh = false) =>
+		call<PullAnswer>("POST", `/repos/${repoPath(repo)}/github/pr`, { refresh }),
+	/** A person gives up GitHub's change: its claim released, its paths free, until GitHub's branch moves or asked. */
+	giveUpGitHub: (repo: string, change: string) =>
+		call<GiveUpAnswer>("POST", `/repos/${repoPath(repo)}/changes/${encodeURIComponent(change)}/give-up`, {}),
+	/** Looks at GitHub's branch now and brings its changes back, even a commit given up or sent to a person before. */
+	githubAgain: (repo: string) =>
+		call<{ fromGitHub?: RepoGitHub["fromGitHub"] }>("POST", `/repos/${repoPath(repo)}/github/again`, {}),
 };
 
 /** Repositories, orgs and their people: making, settings, members, teams and collaborators. */

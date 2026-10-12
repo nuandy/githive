@@ -1,16 +1,20 @@
+import type { Level } from "../../auth/orgs";
 import { requiredString, statusOf } from "../../errors";
+import type { ChangeAwareness } from "../../footprint-cache";
 import type { Remote } from "../../git";
 import type { GitHubLink } from "../../github";
+import type { GitHubSyncHandle } from "../github-settings";
 import type { HiveEvent } from "../../hive-events";
 import { projectBranch } from "../../project-branch";
 import { GitCasLog } from "../../record-log";
+import type { NewsItem, Notice } from "../../repo-cache";
 import { Timing } from "../../timing";
 import type { ReadHistory, SharedPlacements } from "../batch-reads";
 import { presentClaim } from "../branch-scope";
 import type { ClaimStore } from "../claim-store";
 import type { ClaimRecord, Registry } from "../claims";
 import type { BranchCommit } from "../git-records";
-import type { Landed, Landing } from "../landing";
+import type { Landing } from "../landing";
 import { atMost, type BatchChange, type BatchGit, type CheckRunner } from "../merge";
 import { abandoned } from "../staleness";
 import type { Stamper } from "../stamp";
@@ -20,7 +24,7 @@ import type { Work } from "../work";
 import { changeHead, changeSigns, changeSourceFor } from "./change-state";
 import { keyAgent, mayActAs } from "./identity";
 import {
-	branchSettings,
+	claimPolicy,
 	claimsRef,
 	containerChecks,
 	DEFAULT_POLICY,
@@ -81,6 +85,11 @@ export interface ToolContext {
 	teamsOf?: (repo: string) => Promise<string[]>;
 	/** Set for GitHive's hosted agents, which act under the reserved githive- names. */
 	hosted?: boolean;
+	/**
+	 * What the caller may do in the call's repo, as the MCP front door checked it for this call. Unset where no one
+	 * checked it per repo (hosted agents, the dashboard's own calls, tests); only an admin's exceptions read it.
+	 */
+	level?: Level;
 	/** Records the repo so the dashboard can list it. */
 	register?: (repo: string) => Promise<void>;
 	/** Starts hosted reviewers on a change's current commit. Each votes, and merges the change if asked to. */
@@ -124,8 +133,31 @@ export interface ToolContext {
 	};
 	/** A GitHub repo (owner/name) through GitHive's App, or null if the App isn't installed. Unset without GitHub. */
 	github?: (repo: string) => Promise<GitHubLink | null>;
-	/** What landed on a branch since this agent was last told (see RepoCache.landingNews). */
-	news?: (repo: string, branch: string, agent: string) => Promise<Landed[]>;
+	/** The repo's GitHubSync: the job bringing GitHub's changes back, and the pull request as last seen. */
+	githubSync?: (repo: string) => GitHubSyncHandle;
+	/**
+	 * Bounds for a merge run where time is short (the GitHub job's, in an alarm): how long it waits for its turn before
+	 * answering pending, how often it looks, and how many changes its batch may take.
+	 */
+	mergeLimits?: { answerWithinMs?: number; pollMs?: number; maxBatch?: number };
+	/** What landed on a branch since this agent was last told, then its notices (see RepoCache.landingNews). */
+	news?: (repo: string, branch: string, agent: string) => Promise<NewsItem[]>;
+	/** Leaves notices for agents on a branch, told with their next reply (see RepoCache.notify). Never fails. */
+	notify?: (repo: string, branch: string, notices: { agent: string; notice: Notice }[]) => Promise<void>;
+	/**
+	 * Notes a line on a change's attempt to land, such as a conflict, for its merge commit's story (see
+	 * RepoCache.noteAttempt). Never fails: losing it costs only a line in a merge commit.
+	 */
+	noteAttempt?: (repo: string, change: string, line: string) => Promise<void>;
+	/** The attempts noted for each change, oldest first; a change with none is left out. Never fails. */
+	attemptsOf?: (repo: string, changes: string[]) => Promise<Record<string, string[]>>;
+	/** Forgets a change's attempts, once its claim is released without merging. Never fails. */
+	forgetAttempts?: (repo: string, change: string) => Promise<void>;
+	/**
+	 * A change's footprint and where it meets other open changes now, from the repo's FootprintCache (see
+	 * FootprintCache.overlapsOf); null when none is kept. A hint for the dashboard: callers catch its failures.
+	 */
+	awarenessOf?: (repo: string, change: string) => Promise<ChangeAwareness | null>;
 	/** A branch's head, briefly cached and shared by the merges watching it (see MergeInput.branchHead). */
 	branchHead?: (repo: string, branch: string) => Promise<string | null>;
 	/** Queues forks to be made in the background: the repo's seeds, or the named agents' own. */
@@ -233,11 +265,20 @@ export async function openCall(args: Args, ctx: ToolContext, run: RunTool) {
 	};
 }
 
+/** The agent key the caller presented: in the X-GitHive-Agent-Key header, or as the agent_key argument. */
+export const presentedKey = (args: Args, ctx: ToolContext) =>
+	ctx.agentKey ?? (typeof args.agent_key === "string" ? args.agent_key : undefined);
+
+/** The agent a call is verified as, if any: a signed-in agent, or the agent whose key the caller presented. */
+export async function verifiedAgent(args: Args, ctx: ToolContext, registered: Registry | undefined) {
+	const key = presentedKey(args, ctx);
+	// A signed-in agent is who its token says; otherwise an agent key names the agent.
+	return ctx.agent ?? (key ? await keyAgent(registered, key) : undefined);
+}
+
 /** Who the call is from: a signed-in agent, or the agent its key names; and the agent each argument names. */
 async function callerOf(args: Args, ctx: ToolContext, registered: Registry | undefined) {
-	const key = ctx.agentKey ?? (typeof args.agent_key === "string" ? args.agent_key : undefined);
-	// A signed-in agent is who its token says; otherwise an agent key names the agent.
-	const acting = ctx.agent ?? (key ? await keyAgent(registered, key) : undefined);
+	const acting = await verifiedAgent(args, ctx, registered);
 	// A signed-in agent may leave its name out.
 	const agentArg = (field: string) => {
 		const given = typeof args[field] === "string" && args[field].trim();
@@ -393,7 +434,7 @@ async function readOpenWork(sources: WorkSources, agent: string) {
 				counted,
 				record: votesCast,
 				landing: claim.into ? null : landing,
-				policy: branchSettings(registered, claim.into).policy,
+				policy: claimPolicy(registered, claim),
 			}),
 			Date.now(),
 		).abandoned;
@@ -403,7 +444,7 @@ async function readOpenWork(sources: WorkSources, agent: string) {
 		...(teams.length ? { teams } : {}),
 		policy: registered?.policy ?? DEFAULT_POLICY,
 		// Each change's policy comes from the branch it lands on.
-		policyOf: (claim: ClaimRecord) => branchSettings(registered, claim.into).policy,
+		policyOf: (claim: ClaimRecord) => claimPolicy(registered, claim),
 		open,
 		votes: counted,
 		merged: new Set([...inForce.merged, ...inForce.claims.filter(landedHere).map((claim) => claim.change)]),

@@ -125,23 +125,26 @@ export function trailer(message: string, name: string) {
 
 /** The branch's first-parent commits after `baseline`, oldest first. Every one is audited. */
 export async function readMainMerges(remote: Remote, baseline: string, branch: string): Promise<MergeRecord[]> {
+	return (await readBranchCommits(remote, baseline, branch)).map(mergeRecordOf);
+}
+
+/** The branch's first-parent commits after `baseline`, oldest first, read in memory with a clone. */
+export async function readBranchCommits(remote: Remote, baseline: string, branch: string): Promise<BranchCommit[]> {
 	const workspace = await Workspace.clone(remote, branch);
-	const records: MergeRecord[] = [];
+	const commits: BranchCommit[] = [];
 	for (let oid: string | undefined = await workspace.head(); oid && oid !== baseline;) {
 		const { commit } = await workspace.ensureCommit(oid);
 		const [first] = commit.parent;
-		records.push(
-			mergeRecordOf({
-				commit: oid,
-				parents: commit.parent,
-				author: commit.author.name,
-				message: commit.message,
-				files: first ? await workspace.changedPaths(first, oid) : [],
-			}),
-		);
+		commits.push({
+			commit: oid,
+			parents: commit.parent,
+			author: commit.author.name,
+			message: commit.message,
+			files: first ? await workspace.changedPaths(first, oid) : [],
+		});
 		oid = first;
 	}
-	return records.reverse();
+	return commits.reverse();
 }
 
 /** A commit on a branch, with the files it changed from its first parent. */

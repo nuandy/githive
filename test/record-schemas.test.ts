@@ -20,6 +20,8 @@ describe("a record's state, checked as it's read", () => {
 		expect(checkedState("refs/notes/githive-votes/p", votes)).toBe(votes);
 		const lease = { checking: null };
 		expect(checkedState("refs/notes/githive-landing/p/main", lease)).toBe(lease);
+		const imports = { imports: [{ github: "acme/shop", branch: "main", commit: "c", head: "h", base: "b" }] };
+		expect(checkedState("refs/notes/githive-github/p", imports)).toBe(imports);
 	});
 
 	it("refuses a malformed one, naming the record and what's wrong", () => {
@@ -31,6 +33,9 @@ describe("a record's state, checked as it's read", () => {
 		const badVerdict = { votes: [{ commit: "c", reviewer: "bob", role: "review", verdict: "maybe" }] };
 		expect(() => checkedState("refs/notes/githive-vote-buckets/p/3", badVerdict)).toThrow(/votes\.0\.verdict/);
 		expect(() => checkedState(claimsRef, null)).toThrow(/malformed \(its state: /);
+		expect(() => checkedState("refs/notes/githive-github/p", { imports: [{ github: "acme/shop" }] })).toThrow(
+			/githive-github\/p is malformed \(imports\.0\.branch: /,
+		);
 	});
 
 	it("passes a record of no known kind as it is", () => {

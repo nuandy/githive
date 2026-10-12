@@ -14,6 +14,7 @@ import {
 	conflictsWith,
 	release,
 	releaseStale,
+	giveUp,
 	withdraw,
 	type ClaimRecord,
 	type Conflict,
@@ -79,6 +80,8 @@ export interface ClaimStore {
 	read(): Promise<ClaimsView>;
 	/** One change's claim and releases, reading only the records that hold them where possible. */
 	readChange(change: string): Promise<ChangeView>;
+	/** One change's claim records as written in each record that holds them, with their stamps: no merged view. */
+	claimRecords(change: string): Promise<ClaimRecord[]>;
 	/** Everything bearing on merging `files` for `change`: its own claim and any covering the files. */
 	readScope(change: string, files: string[]): Promise<ClaimsView>;
 	/** readScope for several changes at once, reading each record once for all of them. */
@@ -92,6 +95,8 @@ export interface ClaimStore {
 		input: { change: string; agent: string; staleAfterMs: number; abandoned?: Abandoned; now?: number },
 		stamper?: Stamper,
 	): Promise<ReleaseOutcome>;
+	/** Releases another agent's claim on `agent`'s word, idle or not (see claims.ts giveUp). */
+	giveUp(input: { change: string; agent: string; reason: string }, stamper?: Stamper): Promise<ReleaseOutcome>;
 	/** The GitHive-Claims trailer for a merge of `files`, from the view its claims were checked in. */
 	cite(view: ClaimsView, files: string[], own?: ClaimRecord): string;
 }
@@ -108,6 +113,11 @@ export interface StoreInput {
 	recordsRemote?: (k: number) => Promise<Remote>;
 	/** A shard's log in the project repo, if the caller caches logs across calls. */
 	log?: (ref: string) => CasLog<Registry> & Pick<GitCasLog<Registry>, "readAt">;
+	/**
+	 * Forgets a change's earlier attempts to land once its claim is released without merging, so a later claim of the
+	 * same name doesn't inherit them in its story (a merged change's go when it lands). Advice: caught.
+	 */
+	forgetAttempts?: (change: string) => Promise<void>;
 }
 
 const RELEASE_REPOS_AT_ONCE = 4;
@@ -333,6 +343,12 @@ class Claims implements ClaimStore {
 		};
 	}
 
+	async claimRecords(change: string): Promise<ClaimRecord[]> {
+		return (await this.changeEntries(change)).flatMap((entry) =>
+			entry.state.claims.filter((held) => held.change === change),
+		);
+	}
+
 	async readScope(change: string, files: string[]): Promise<ClaimsView> {
 		const [view] = await this.readScopes([{ change, files }]);
 		return view!;
@@ -345,7 +361,8 @@ class Claims implements ClaimStore {
 	// Unsharded, a claim goes in the registry. Sharded, each path goes in its shard, or all of them in one common
 	// shard if they are spread too wide.
 	private place(paths: string[]): Map<string, string[]> {
-		if (!this.sharded) return new Map([[ROOT, paths]]);
+		// A claim of no paths (a merge that changes no file) holds nothing, and goes in the registry.
+		if (!this.sharded || !paths.length) return new Map([[ROOT, paths]]);
 		const groups = new Map<string, string[]>();
 		for (const path of paths) {
 			const shard = shardOf(path, this.depth);
@@ -490,6 +507,7 @@ class Claims implements ClaimStore {
 						{ change: conflict.change, agent: input.agent, staleAfterMs: input.staleAfterMs!, now: input.now },
 						stamper,
 					);
+					if (freed.ok) await this.forgetAttempts(conflict.change);
 					if (freed.ok || /holds no claim/.test(freed.refused)) continue;
 				}
 				live.push(conflict);
@@ -517,7 +535,9 @@ class Claims implements ClaimStore {
 	): Promise<ReleaseOutcome> {
 		const held = await this.holding(input.change);
 		if (!held) return { ok: false, refused: `${input.change} holds no claim` };
-		return this.eachShard(held.shards, (shard) => release(this.logOf(shard), input, stamper));
+		const released = await this.eachShard(held.shards, (shard) => release(this.logOf(shard), input, stamper));
+		if (released.ok && !input.mergedAs && input.reason !== "merged") await this.forgetAttempts(input.change);
+		return released;
 	}
 
 	async releaseStale(
@@ -536,7 +556,21 @@ class Claims implements ClaimStore {
 		const turn = input.abandoned ? await input.abandoned(held.own) : undefined;
 		if (turn && !turn.abandoned) return { ok: false, refused: `${input.change} isn't abandoned: it ${turn.why}` };
 		const { abandoned: _abandoned, ...rest } = input;
-		return this.eachShard(held.shards, (shard) => releaseStale(this.logOf(shard), rest, stamper));
+		const released = await this.eachShard(held.shards, (shard) => releaseStale(this.logOf(shard), rest, stamper));
+		if (released.ok) await this.forgetAttempts(input.change);
+		return released;
+	}
+
+	private async forgetAttempts(change: string) {
+		await this.input
+			.forgetAttempts?.(change)
+			.catch((err) => console.error(`forgetting ${change}'s attempts failed`, String(err)));
+	}
+
+	async giveUp(input: { change: string; agent: string; reason: string }, stamper?: Stamper): Promise<ReleaseOutcome> {
+		const held = await this.holding(input.change);
+		if (!held) return { ok: false, refused: `${input.change} holds no claim` };
+		return this.eachShard(held.shards, (shard) => giveUp(this.logOf(shard), input, stamper));
 	}
 
 	// Releases in each record, a few repos at a time. A record that no longer holds the claim is fine, and the first

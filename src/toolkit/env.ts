@@ -1,5 +1,8 @@
+import type { ChangeAwareness } from "../footprint-cache";
+import { type GitHubImportResult, githubGate } from "../gate-github";
 import { linkTo } from "../github";
-import type { SharedPlacements } from "./batch-reads";
+import type { LandingResult } from "../gate-landing";
+import type { ReadHistory, SharedPlacements } from "./batch-reads";
 import { changeCache } from "../change-cache";
 import { SizedCache } from "../sized-cache";
 import { readBranchHistory } from "./branch-history";
@@ -15,7 +18,10 @@ import { claimStore } from "./claim-store";
 import { holdsRef, holdsRepoOf, type ReviewHolds, reviewHolds, reviewsRef, reviewsRepoOf } from "./review-holds";
 import type { Registry } from "./claims";
 import type { ToolContext, HostedStatus } from "./mcp";
+import { conflictLine } from "./landing";
 import type { BatchGit, BatchSource, CheckRunner } from "./merge";
+import { BATCH_MERGE, touchedWhileLanding } from "./merge-checks";
+import type { Conflict, Unlanded } from "./merge-types";
 import { recordsRepoName } from "./shards";
 import { makeStamper } from "./stamp";
 import { type ChangePacks, prefetchChange, treeLanding, type TreeReads } from "./tree-landing";
@@ -178,6 +184,22 @@ function githubApp(env: Env): Pick<ToolContext, "github"> {
 	return { github: (repo: string) => linkTo({ appId, privateKey }, repo) };
 }
 
+// A connected repo's GitHubSync (see github-sync.ts): the job bringing GitHub's changes back, and the pull request.
+function githubSyncParts(env: Env): Pick<ToolContext, "githubSync"> {
+	if (!env.GITHUB_SYNC) return {};
+	return {
+		githubSync: (repo: string) => {
+			const sync = () => env.GITHUB_SYNC.getByName(`repo:${repo}`);
+			return {
+				notice: (seen, again) => rpc(sync().notice({ ...seen, repo }, again)),
+				notePull: (pull) => sync().notePull(pull),
+				gaveUp: (change, reason) => sync().gaveUp(change, reason),
+				state: () => rpc(sync().state()),
+			};
+		},
+	};
+}
+
 // Starts the Gate called `name`, on the repo's branch, before it's needed.
 async function bootGate(env: Env, repo: string, name: string) {
 	const read = await projectRemote(env, repo, "read");
@@ -203,6 +225,7 @@ export function toolContextFor(
 		...gateParts(env),
 		...hostedParts(env),
 		...githubApp(env),
+		...githubSyncParts(env),
 		stamper: async (agent) => {
 			if (!env.STAMP_KEY || !by) return undefined;
 			return makeStamper(env.STAMP_KEY, agent ? `${by}/${agent}` : by);
@@ -210,7 +233,16 @@ export function toolContextFor(
 	};
 }
 
-/** The repo's index entry and its RepoCache: summaries, cached reads, known heads and the fork queue. */
+/** An RPC whose loss costs only a hint: `otherwise` if it fails, never an error. */
+async function quietly<T>(call: () => PromiseLike<T>, otherwise: T): Promise<T> {
+	try {
+		return await rpc(call());
+	} catch {
+		return otherwise;
+	}
+}
+
+/** The repo's index entry and its RepoCache: summaries, cached reads, known heads, news and the fork queue. */
 function repoCacheParts(env: Env) {
 	return {
 		register: async (repo) => env.REPO_INDEX.getByName("all").addRepo(repo),
@@ -232,6 +264,17 @@ function repoCacheParts(env: Env) {
 			keep: (repo, change, kept) => env.REPO_CACHE.getByName(`repo:${repo}`).keepMergeCheck(change, kept),
 		},
 		news: (repo, branch, agent) => rpc(env.REPO_CACHE.getByName(`repo:${repo}`).landingNews(branch, agent)),
+		notify: (repo, branch, notices) =>
+			quietly(() => env.REPO_CACHE.getByName(`repo:${repo}`).notify(branch, notices), undefined),
+		// Attempts are lines for a merge commit's story, so losing them costs only a line.
+		noteAttempt: (repo, change, line) => noteAttempt(env, repo, change, line),
+		attemptsOf: (repo, changes) =>
+			quietly(() => env.REPO_CACHE.getByName(`repo:${repo}`).attemptsOf(changes), {} as Record<string, string[]>),
+		forgetAttempts: (repo, change) =>
+			quietly(() => env.REPO_CACHE.getByName(`repo:${repo}`).forgetAttempts([change]), undefined),
+		// What a change's footprint meets, from the repo's FootprintCache. Async, so a missing binding rejects too.
+		awarenessOf: async (repo, change) =>
+			(await rpc(env.FOOTPRINT_CACHE.getByName(`footprints:${repo}`).overlapsOf(change))) as ChangeAwareness | null,
 		// A branch's head, briefly cached for every merge watching it (see MergeInput.branchHead).
 		branchHead: (repo, branch) =>
 			keptRead(
@@ -384,6 +427,8 @@ async function holdsLog(env: Env, repo: string, bucket: string) {
 }
 
 function checksRunner(env: Env, repo: string): CheckRunner {
+	// A change put out is checked alone twice, so who changed the files it conflicts on is read once.
+	const conflicts = new Map<string, Promise<Conflict>>();
 	return async ({ base, branch, changes, commands, gate }) => {
 		const remote = await projectRemote(env, repo, "read");
 		const sourceOf = async (entry: (typeof changes)[number]) => {
@@ -408,23 +453,44 @@ function checksRunner(env: Env, repo: string): CheckRunner {
 				ahead,
 			}),
 		);
-		const conflict = result.mergeConflict
-			? [
-					{
-						command: "(merging the batch onto main)",
-						exitCode: 1,
-						output: `conflicts in ${result.mergeConflict.join(", ")}`,
-					},
-				]
+		// A change checked alone that doesn't merge conflicts with the branch itself, so who changed its files is named.
+		const naming = (files: string[]) => {
+			if (changes.length > 1) return Promise.resolve<Conflict>({ files });
+			const key = `${base} ${last.head} ${files.join(" ")}`;
+			const alone = { ...last, source: { url: forkOf.remote } };
+			if (!conflicts.has(key)) conflicts.set(key, conflictNamed(env, repo, { branch, main: base, files }, alone));
+			return conflicts.get(key)!;
+		};
+		const conflict = result.mergeConflict ? await naming(result.mergeConflict) : undefined;
+		const merging = conflict
+			? [{ command: BATCH_MERGE, exitCode: 1, output: conflictLine(conflict.files, conflict.touchedBy ?? []) }]
 			: [];
 		const checks = result.results.map((check) => ({
 			command: check.command,
 			exitCode: check.exitCode,
 			output: check.output,
 		}));
-		return { passed: result.passed, results: [...conflict, ...checks] };
+		return { passed: result.passed, results: [...merging, ...checks], ...(conflict ? { conflict } : {}) };
 	};
 }
+
+/**
+ * A conflict with the branch itself, found while landing, with who changed each file since the change left the
+ * branch, read Worker-side through Artifacts' API (see touchedWhileLanding: caught, logged and bounded).
+ */
+async function conflictNamed(
+	env: Env,
+	repo: string,
+	at: { branch: string; main: string; files: string[] },
+	change: { change: string; ref: string; source: { url: string } },
+): Promise<Conflict> {
+	const history: ReadHistory = (name, read) => withHistory(env.ARTIFACTS, name, read);
+	return { files: at.files, touchedBy: await touchedWhileLanding(history, repo, at, change) };
+}
+
+/** Notes a line on a change's attempt to land, for its merge commit's story. Never fails (see quietly). */
+const noteAttempt = (env: Env, repo: string, change: string, line: string) =>
+	quietly(() => env.REPO_CACHE.getByName(`repo:${repo}`).noteAttempt(change, line), undefined);
 
 function readBranchCommits(env: Env, repo: string, baseline: string, branch: string) {
 	const cache = () => env.REPO_CACHE.getByName(`repo:${repo}`);
@@ -479,7 +545,7 @@ function batchGitFor(env: Env, repo: string): BatchGit {
 			);
 			// Retry after a brief outage too. The push names the main it lands on, so a batch that already landed
 			// finds main moved.
-			const landed = await rpcRetried<{ commits: string[] } | { moved: true } | { error: string }>(() =>
+			const landed = await rpcRetried<LandingResult>(() =>
 				gate().landBatch({
 					repo,
 					branch,
@@ -490,7 +556,8 @@ function batchGitFor(env: Env, repo: string): BatchGit {
 				}),
 			);
 			if ("moved" in landed) return "moved";
-			if ("error" in landed) fail(500, `landing the batch failed: ${landed.error}`);
+			// A change that doesn't merge onto the batch is put out and the rest land (see land in merge-land.ts).
+			if ("error" in landed) return { failed: landed.error, ...(landed.conflict ? { conflict: landed.conflict } : {}) };
 			return { commits: landed.commits };
 		},
 		checksBranch: async ({ base, branch, changes, to, ref }) => {
@@ -498,7 +565,7 @@ function batchGitFor(env: Env, repo: string): BatchGit {
 			const sources = await Promise.all(
 				changes.map(async (entry) => ({ ...(await sourceOf(entry)), head: entry.head })),
 			);
-			return rpcRetried<{ tip: string } | { failed: string }>(() =>
+			return rpcRetried<{ tip: string } | Unlanded>(() =>
 				gate().checksBranch({
 					repo,
 					branch,
@@ -510,7 +577,7 @@ function batchGitFor(env: Env, repo: string): BatchGit {
 				}),
 			);
 		},
-		pushBranch: async ({ branch, head, to }) => {
+		pushBranch: async ({ branch, head, to, as }) => {
 			const read = await project("read");
 			const pushed = await rpcRetried<{ pushed: true } | { refused: string }>(() =>
 				gate().pushBranch({
@@ -519,9 +586,25 @@ function batchGitFor(env: Env, repo: string): BatchGit {
 					base: { remote: read.url, token: read.token },
 					head,
 					to: pushTarget(to),
+					...(as ? { as } : {}),
 				}),
 			);
-			if ("refused" in pushed) throw new Error(`pushing ${branch} to ${to.url} was refused: ${pushed.refused}`);
+			if ("refused" in pushed) throw new Error(`pushing ${as ?? branch} to ${to.url} was refused: ${pushed.refused}`);
+		},
+		// In the repo's GitHub Gate, not its own: a slow GitHub holds up no batch (see Gate.importGitHub).
+		importBranch: async ({ base, branch, from, githubBranch, as }) => {
+			const write = await project("write");
+			return rpcRetried<GitHubImportResult>(() =>
+				env.GATE.getByName(githubGate(repo)).importGitHub({
+					repo,
+					branch,
+					base: { remote: write.url, token: write.token },
+					baseHead: base,
+					from: pushTarget(from),
+					githubBranch,
+					as,
+				}),
+			);
 		},
 	};
 	if (!treeLandingOn(env)) return inGate;

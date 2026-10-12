@@ -40,6 +40,9 @@ const landingState = z.looseObject({
 	checking: checking.nullable(),
 });
 
+const githubImport = z.looseObject({ github: z.string(), branch: z.string(), commit: z.string(), head: z.string() });
+const githubState = z.looseObject({ imports: z.array(githubImport) });
+
 /** Each kind of record by its ref's prefix. */
 const SCHEMAS: [prefix: string, schema: z.ZodType][] = [
 	["refs/notes/githive-claims/", claimsState],
@@ -51,6 +54,7 @@ const SCHEMAS: [prefix: string, schema: z.ZodType][] = [
 	["refs/notes/githive-reviews/", reviewsState],
 	["refs/notes/githive-review-holds/", reviewsState],
 	["refs/notes/githive-landing/", landingState],
+	["refs/notes/githive-github/", githubState],
 ];
 
 /**

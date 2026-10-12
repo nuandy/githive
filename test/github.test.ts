@@ -17,6 +17,18 @@ const run = promisify(execFile);
 // on the test Git server stands in for GitHub's git, and the REST API is
 // answered by fakes.
 
+/** A link's REST calls these tests don't make. */
+const noPulls: Pick<GitHubLink, "defaultHead" | "openPull" | "createPull" | "updatePull"> = {
+	defaultHead: async () => ({ branch: "main", head: "" }),
+	openPull: async () => null,
+	createPull: async () => {
+		throw new Error("no pull requests here");
+	},
+	updatePull: async () => {
+		throw new Error("no pull requests here");
+	},
+};
+
 /** An RSA key pair as GitHub gives an App's (here generated), the private key as a PKCS#8 PEM. */
 async function appKey() {
 	const pair = (await crypto.subtle.generateKey(
@@ -100,6 +112,62 @@ describe("GitHive's GitHub App", () => {
 		// The token is kept: one installation lookup and one token for the lot.
 		expect(calls.filter((c) => c.includes("access_tokens"))).toHaveLength(1);
 	});
+
+	it("reads the default branch's head with its ETag, and opens, finds and rewrites a pull request", async () => {
+		const { pem } = await appKey();
+		const calls: string[] = [];
+		const pull = (title: string) => ({
+			number: 7,
+			html_url: "https://github.com/acme/pulls/pull/7",
+			title,
+			body: null,
+			head: { ref: "githive/main" },
+			base: { ref: "trunk" },
+		});
+		const fetcher = (async (url: string, init?: RequestInit) => {
+			const { pathname, search } = new URL(url);
+			const headers = new Headers(init?.headers);
+			calls.push(`${init?.method ?? "GET"} ${pathname}${search}${headers.has("If-None-Match") ? " (etag)" : ""}`);
+			if (pathname === "/repos/acme/pulls/installation") return Response.json({ id: 9 });
+			if (pathname === "/app/installations/9/access_tokens")
+				return Response.json({ token: "t", expires_at: new Date(Date.now() + 3600_000).toISOString() });
+			if (pathname === "/repos/acme/pulls") return Response.json({ default_branch: "trunk" });
+			if (pathname === "/repos/acme/pulls/branches/trunk")
+				return headers.get("If-None-Match") === '"v1"'
+					? new Response(null, { status: 304 })
+					: Response.json({ commit: { sha: "abc" } }, { headers: { ETag: '"v1"' } });
+			if (pathname === "/repos/acme/pulls/pulls" && init?.method === "POST") {
+				const body = JSON.parse(String(init.body));
+				expect(body).toEqual({ head: "githive/main", base: "trunk", title: "GitHive: 1 change", body: "b" });
+				return Response.json(pull(body.title), { status: 201 });
+			}
+			if (pathname === "/repos/acme/pulls/pulls") return Response.json([pull("open one")]);
+			if (pathname === "/repos/acme/pulls/pulls/7") return Response.json(pull(JSON.parse(String(init?.body)).title));
+			return new Response("?", { status: 500 });
+		}) as typeof fetch;
+		const link = (await linkTo({ appId: "1", privateKey: pem }, "acme/pulls", fetcher))!;
+		expect(await link.defaultHead()).toEqual({ branch: "trunk", head: "abc" });
+		// Read again: the default branch is kept, and the head is asked with its ETag (a 304 is free).
+		expect(await link.defaultHead()).toEqual({ branch: "trunk", head: "abc" });
+		expect(calls.filter((c) => c.includes("/repos/acme/pulls") && !c.includes("installation"))).toEqual([
+			"GET /repos/acme/pulls",
+			"GET /repos/acme/pulls/branches/trunk",
+			"GET /repos/acme/pulls/branches/trunk (etag)",
+		]);
+		const opened = { number: 7, url: "https://github.com/acme/pulls/pull/7", body: "", head: "githive/main" };
+		expect(
+			await link.createPull({ head: "githive/main", base: "trunk", title: "GitHive: 1 change", body: "b" }),
+		).toEqual({
+			...opened,
+			title: "GitHive: 1 change",
+			base: "trunk",
+		});
+		expect(await link.openPull("githive/main")).toMatchObject({ number: 7, title: "open one" });
+		expect(calls).toContain("GET /repos/acme/pulls/pulls?head=acme%3Agithive%2Fmain&state=open&per_page=1");
+		expect(await link.updatePull(7, { title: "GitHive: 2 changes", body: "c" })).toMatchObject({
+			title: "GitHive: 2 changes",
+		});
+	});
 });
 
 describe("a repo connected to GitHub", { timeout: 60_000 }, () => {
@@ -137,11 +205,38 @@ describe("a repo connected to GitHub", { timeout: 60_000 }, () => {
 			},
 			deleteBranch: async (name) =>
 				void (deleted.push(name), server.gitIn("github", "update-ref", "-d", `refs/heads/${name}`)),
+			...noPulls,
 		};
 		return { link, deleted };
 	}
 	const project = () => ({ url: server.url, token: "unused" });
 	const timing = { pollMs: 5, firstRunWithinMs: 200, runsWithinMs: 2_000 };
+
+	it("gives up a read of GitHub that doesn't answer in time, passing the signal to fetch", async () => {
+		const { pem } = await appKey();
+		const signals: (AbortSignal | undefined)[] = [];
+		const fetcher = (async (url: string, init?: RequestInit) => {
+			const { pathname } = new URL(url);
+			if (pathname === "/repos/acme/hangs/installation") return Response.json({ id: 9 });
+			if (pathname === "/app/installations/9/access_tokens")
+				return Response.json({ token: "t", expires_at: new Date(Date.now() + 3600_000).toISOString() });
+			signals.push(init?.signal ?? undefined);
+			// GitHub takes the request and never answers, until it's given up.
+			return new Promise<Response>((_, reject) =>
+				init?.signal?.addEventListener("abort", () => reject(new Error("aborted"))),
+			);
+		}) as typeof fetch;
+		const { withinMs } = await import("../src/github");
+		const link = (await linkTo({ appId: "1", privateKey: pem }, "acme/hangs", fetcher))!;
+		await expect(withinMs(50, "acme/hangs's default branch", (signal) => link.defaultHead(signal))).rejects.toThrow(
+			"acme/hangs's default branch didn't answer within 0.05 s",
+		);
+		await expect(withinMs(50, "its pull request", (signal) => link.openPull("githive/main", signal))).rejects.toThrow(
+			"didn't answer",
+		);
+		expect(signals).toHaveLength(2);
+		expect(signals.every((signal) => signal?.aborted)).toBe(true);
+	});
 
 	it("checks a batch on Actions, pushing its merged result to githive/checks/<id>: every run must pass", async () => {
 		const main = server.git("rev-parse", "main").trim();
@@ -327,6 +422,7 @@ describe("merging in a repo connected to GitHub", { timeout: 120_000 }, () => {
 					]
 				),
 				deleteBranch: async () => undefined,
+				...noPulls,
 			};
 			const ctx = (agentKey?: string) => ({
 				remote: async () => ({ url: server.url, token: "unused" }),
@@ -343,7 +439,7 @@ describe("merging in a repo connected to GitHub", { timeout: 120_000 }, () => {
 			const call = async (name: string, args: Record<string, unknown>, key?: string) =>
 				(await callTool(name, { repo: "p", ...args }, ctx(key))) as Record<string, unknown>;
 			await call("settings", { required: 1, vetoes: [] });
-			await call("settings", { github: "acme/shop", verify: ["github-actions"] });
+			await call("settings", { github: "acme/shop", github_sync: "mirror", verify: ["github-actions"] });
 			const keys: Record<string, string> = {};
 			for (const agent of ["a", "rev"]) keys[agent] = ((await call("register", { agent })) as { key: string }).key;
 			await call("claim", { change: "c-1", agent: "a", paths: ["src/a/"], intent: "add a" }, keys.a);

@@ -71,12 +71,33 @@ describe("merge", { timeout: 60_000 }, () => {
 		const bHead = await pushChange(server.url, work, "agent-b-1", "b-1", { "shared.txt": "b\n" }, oldMain);
 		await vote(votes(), { commit: bHead, reviewer: "rev", role: "tests", verdict: "approve", evidence: "ok" });
 		const main = server.git("rev-parse", "main").trim();
+		// It says who changed the file since b-1 left main, shows the file with its conflict markers, and how to fix it.
 		expect(await merge("b-1")).toEqual({
 			ok: false,
 			conflicts: ["shared.txt"],
+			touchedBy: [{ file: "shared.txt", commit: main, change: "a-1", agent: "agent-a-1", intent: "a-1" }],
+			why: ["conflict"],
+			into: "main",
+			head: bHead,
+			// b-1's side first, as `git merge origin/main` shows it in its agent's clone.
+			hunks: [
+				{
+					file: "shared.txt",
+					content: "<<<<<<< ours (changes/b-1)\nb\n=======\na\n>>>>>>> origin/main\n",
+					truncated: false,
+				},
+			],
+			fix: [
+				"git fetch origin main && git merge origin/main",
+				"# resolve shared.txt so both changes make sense, then:",
+				"git add shared.txt && git commit --no-edit",
+				"git push fork changes/b-1",
+				"call status; once the new commit is approved, merge again",
+			],
 			reasons: [
-				"changes/b-1 conflicts with main in shared.txt: merge main into your branch, resolve " +
-					"inside your claim, push, and get the new commit approved",
+				`changes/b-1 conflicts with main in shared.txt (changed by a-1, agent-a-1: "a-1", ${main.slice(0, 8)}): ` +
+					"merge main into your branch, resolve inside your claim, push, and get the new commit approved; see " +
+					"touchedBy, hunks and fix",
 			],
 		});
 		expect(server.git("rev-parse", "main").trim()).toBe(main);
@@ -95,6 +116,7 @@ describe("merge", { timeout: 60_000 }, () => {
 		expect(await merge("a-1")).toEqual({
 			ok: false,
 			reasons: [`${head} has 0 of 1 approvals from reviewers other than its author`],
+			why: ["approvals"],
 		});
 	});
 
@@ -108,6 +130,7 @@ describe("merge", { timeout: 60_000 }, () => {
 		expect(await merge("a-1", failing)).toEqual({
 			ok: false,
 			reasons: ["checks failed: npm test exited 1"],
+			why: ["checks"],
 			checks: [{ command: "npm test", exitCode: 1, output: "1 failing" }],
 		});
 		expect(failing).toHaveBeenCalledWith({

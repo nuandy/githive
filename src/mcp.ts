@@ -1,3 +1,4 @@
+import type { Level } from "./auth/orgs";
 import { type ArtifactsCalls, countingRequests, describeCounts, type GitRequests } from "./git-http";
 import { statusOf } from "./errors";
 import { describeCaches } from "./sized-cache";
@@ -13,7 +14,7 @@ export interface McpContext {
 	 * Resolves the <owner>/<name> a tool call names to the repo's id, checking what the caller may do.
 	 * Without it, a repo is named by its id.
 	 */
-	resolveRepo?: (repo: string, tool: string, args: Args) => Promise<{ id: string; fullName: string }>;
+	resolveRepo?: (repo: string, tool: string, args: Args) => Promise<{ id: string; fullName: string; level?: Level }>;
 }
 
 const PROTOCOL_VERSIONS = ["2025-06-18", "2025-03-26", "2024-11-05"];
@@ -81,7 +82,7 @@ export async function handleRpc(request: RpcRequest, ctx: McpContext): Promise<o
 async function callToolRpc(request: RpcRequest, ctx: McpContext) {
 	const name = request.params?.name;
 	if (typeof name !== "string" || !TOOLS.some((tool) => tool.name === name))
-		return rpcError(request.id, -32602, `unknown tool ${String(name)}`);
+		return rpcError(request.id, -32602, `unknown tool ${String(name)}\nnext: see tools/list for GitHive's tools`);
 	// Log the tool first, so the runtime's own log lines for the request can be told apart by tool.
 	// Log the tool and repo only, never the caller.
 	const from = Date.now();
@@ -97,7 +98,9 @@ async function callToolRpc(request: RpcRequest, ctx: McpContext) {
 			typeof args.repo === "string" && ctx.resolveRepo ? await ctx.resolveRepo(args.repo, name, args) : null;
 		if (named) args = { ...args, repo: named.id };
 		repoId = String(args.repo ?? repoArg);
-		counting = countingRequests(() => callTool(name, args, ctx.toolkit));
+		// What the caller may do there goes with the call, for the few exceptions an admin may make (see release).
+		const toolkit = named?.level ? { ...ctx.toolkit, level: named.level } : ctx.toolkit;
+		counting = countingRequests(() => callTool(name, args, toolkit));
 		let result = await counting.done;
 		logCounts(name, repoId, counting);
 		if (Date.now() - from >= SLOW_TOOL_MS)
@@ -108,11 +111,13 @@ async function callToolRpc(request: RpcRequest, ctx: McpContext) {
 	} catch (err) {
 		if (counting) logCounts(name, repoId, counting);
 		console.log(`mcp ${name} failed after ${Date.now() - from} ms; isolate caches: ${describeCaches()}`);
-		// Tool failures go back to the agent as results it can act on, not protocol errors.
+		// Tool failures go back to the agent as results it can act on, not protocol errors: what failed, then what to
+		// do about it where that's known.
 		const failed = statusOf(err);
 		// Log GitHive's own failures with their stack. The agent's answer says only what failed.
 		if (failed.status >= 500) console.error(`${name} failed: ${err instanceof Error ? err.stack : failed.message}`);
-		return reply(request.id, { content: [{ type: "text", text: failed.message }], isError: true });
+		const text = failed.next ? `${failed.message}\nnext: ${failed.next}` : failed.message;
+		return reply(request.id, { content: [{ type: "text", text }], isError: true });
 	}
 }
 
