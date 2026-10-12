@@ -62,13 +62,13 @@ export const workTools: ToolHandlers = {
 			const twice = ids.filter((id, index) => ids.indexOf(id) !== index);
 			if (twice.length) fail(400, `each piece needs its own id: ${[...new Set(twice)].join(", ")} more than once`);
 			const hints = await piecesLikeOpenWork(call, items);
-			const added = await addWorks(recordLog<Work>(ctx, repo, workRef(repo)), by, items);
+			const added = await addWorks(recordLog<Work>(ctx, repo, workRef(repo)), by, sized(items, hints.big));
 			const reply = { ok: added.ok, added: added.added, ...(added.already.length ? { already: added.already } : {}) };
 			return withPieceHints(reply, hints);
 		}
 		const item = workItemFrom(args);
 		const hints = await piecesLikeOpenWork(call, [item]);
-		const added = await addWork(recordLog<Work>(ctx, repo, workRef(repo)), { ...item, by });
+		const added = await addWork(recordLog<Work>(ctx, repo, workRef(repo)), { ...sized([item], hints.big)[0]!, by });
 		if (!added.ok) return { ok: false, reason: added.refused };
 		return withPieceHints({ ok: true, id: item.id }, hints);
 	},
@@ -153,9 +153,18 @@ async function piecesLikeOpenWork(call: ToolCall, pieces: Parameters<typeof piec
 }
 
 function withPieceHints<R extends object>(reply: R, hints: Awaited<ReturnType<typeof pieceHints>>) {
-	const { similar, mayNeed } = hints;
-	return { ...reply, ...(similar.length ? { similar } : {}), ...(mayNeed.length ? { mayNeed } : {}) };
+	const { similar, mayNeed, big } = hints;
+	return {
+		...reply,
+		...(similar.length ? { similar } : {}),
+		...(mayNeed.length ? { mayNeed } : {}),
+		...(big.length ? { tooBig: big } : {}),
+	};
 }
+
+/** Marks the pieces Clef found too big for one change, for whoever takes them from the backlog. */
+const sized = <T extends { id: string }>(items: T[], big: string[]) =>
+	items.map((item) => (big.includes(item.id) ? { ...item, big: true as const } : item));
 
 /**
  * add_work with `piece`: adds what a piece already in the backlog waits on, such as a dependency Clef suggested. A

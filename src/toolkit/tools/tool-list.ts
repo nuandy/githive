@@ -254,7 +254,9 @@ const TOOL_LIST = [
 			"at once (each with these fields), in " +
 			"one write; ids in the backlog already are left as they are. The reply's `similar` names pieces " +
 			"that seem to duplicate an open change or a piece already there, and `mayNeed` a piece or change " +
-			"one seems to need first without saying so. Or `piece` with `after` and/or `lands_after`: adds " +
+			"one seems to need first without saying so, and `tooBig` those that seem too big for one change: " +
+			"`backlog` marks them `big`, so whoever takes one may build a part and add the rest. Or `piece` with " +
+			"`after` and/or `lands_after`: adds " +
 			"what a piece already in the backlog, not yet claimed, waits on.",
 		inputSchema: {
 			type: "object",

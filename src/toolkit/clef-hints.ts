@@ -16,8 +16,10 @@ const SAME_WORK_AT = 0.6;
 const COMPARED_AT_MOST = 100;
 /** The most of each intent sent, so a hundred of them fit clef-flash's context. */
 const INTENT_CHARS = 300;
-/** The most new pieces in one ask: three questions each, within Clef's 64. */
-const PIECES_PER_ASK = 21;
+/** The most new pieces in one ask: four questions each, within Clef's 64. */
+const PIECES_PER_ASK = 16;
+/** From this place on the size scale (0 to 2), a piece seems too big for one change. */
+const TOO_BIG_AT = 1.5;
 /** How sure Clef must be that a piece needs another first before the reply suggests declaring it. */
 const NEEDS_AT = 0.6;
 
@@ -122,19 +124,35 @@ export async function claimHints(
 }
 
 /**
- * Refuses a backlog piece that steers agents, and for each finds the open change or piece it may duplicate, and one
- * it may need first that it doesn't declare. `existing` is what's in the backlog and in progress, oldest first.
+ * Refuses a backlog piece that steers agents, and for each finds the open change or piece it may duplicate, one it
+ * may need first that it doesn't declare, and whether it seems too big for one change. `existing` is what's in the
+ * backlog and in progress, oldest first.
  */
 export async function pieceHints(ctx: ToolContext, pieces: NewPiece[], existing: Comparable[]) {
-	const asks: Promise<{ similar: PieceLike[]; mayNeed: PieceNeed[] }>[] = [];
+	const asks: Promise<PieceHints>[] = [];
 	for (let start = 0; start < pieces.length; start += PIECES_PER_ASK)
 		asks.push(askAboutPieces(ctx, pieces.slice(start, start + PIECES_PER_ASK), pieces, existing));
 	const answered = await Promise.all(asks);
 	return {
 		similar: answered.flatMap((answer) => answer.similar),
 		mayNeed: answered.flatMap((answer) => answer.mayNeed),
+		big: answered.flatMap((answer) => answer.big),
 	};
 }
+
+interface PieceHints {
+	similar: PieceLike[];
+	mayNeed: PieceNeed[];
+	/** The pieces that seem too big for one change. */
+	big: string[];
+}
+
+/** Sizes of a piece of work, as one change would hold it. */
+const SIZE_LEVELS = [
+	"Small: one focused change",
+	"One change that touches a few parts",
+	"Too big for one change: several pieces of work that could each land on their own",
+];
 
 /** Asks which of `candidates` must exist before `what` can be built. Options are numbered, as for sameWorkQuestion. */
 function needsQuestion(what: string, candidates: Comparable[]): ClefQuestion {
@@ -156,7 +174,12 @@ function needCandidates(piece: NewPiece, batch: NewPiece[], others: Comparable[]
 	return [...others, ...siblings].filter((candidate) => !declared.has(candidate.id)).slice(-COMPARED_AT_MOST);
 }
 
-async function askAboutPieces(ctx: ToolContext, pieces: NewPiece[], batch: NewPiece[], existing: Comparable[]) {
+async function askAboutPieces(
+	ctx: ToolContext,
+	pieces: NewPiece[],
+	batch: NewPiece[],
+	existing: Comparable[],
+): Promise<PieceHints> {
 	const ids = new Set(batch.map((piece) => piece.id));
 	const others = existing.filter((other) => !ids.has(other.id)).slice(-COMPARED_AT_MOST);
 	const candidates = pieces.map((piece) => needCandidates(piece, batch, others));
@@ -166,6 +189,11 @@ async function askAboutPieces(ctx: ToolContext, pieces: NewPiece[], batch: NewPi
 		questions[`steers${index}`] = steeringQuestion(what);
 		if (others.length) questions[`same${index}`] = sameWorkQuestion(what, others);
 		if (candidates[index]!.length) questions[`needs${index}`] = needsQuestion(what, candidates[index]!);
+		questions[`size${index}`] = {
+			type: "score",
+			instructions: `How much work is ${what} for one agent's change?`,
+			criteria: SIZE_LEVELS,
+		};
 	});
 	const state = pieces
 		.map((piece, index) => `New piece ${index + 1}: ${piece.title}\n${piece.intent.slice(0, INTENT_CHARS * 4)}`)
@@ -173,14 +201,17 @@ async function askAboutPieces(ctx: ToolContext, pieces: NewPiece[], batch: NewPi
 	const answers = await consult(ctx, "clef-flash", state, questions);
 	const similar: PieceLike[] = [];
 	const mayNeed: PieceNeed[] = [];
+	const big: string[] = [];
 	pieces.forEach((piece, index) => {
 		refuseSteering(answers?.[`steers${index}`], `Piece ${piece.id}`);
 		const same = sameWorkOf(answers?.[`same${index}`], others);
 		if (same) similar.push({ piece: piece.id, like: same.id, likelihood: same.likelihood });
 		const needed = pickOf(answers?.[`needs${index}`], candidates[index]!, NEEDS_AT);
 		if (needed) mayNeed.push({ piece: piece.id, needs: needed.id, likelihood: needed.likelihood });
+		const size = answers?.[`size${index}`];
+		if (size?.type === "score" && size.score >= TOO_BIG_AT) big.push(piece.id);
 	});
-	return { similar, mayNeed };
+	return { similar, mayNeed, big };
 }
 
 /** Levels of review evidence, as its author can act on it. */

@@ -20,6 +20,8 @@ export interface WorkItem {
 	 * are and merges only once they have.
 	 */
 	landsAfter?: string[];
+	/** Clef found it too big for one change: whoever takes it may build a part and add the rest to the backlog. */
+	big?: true;
 	by: string;
 	at: string;
 }
