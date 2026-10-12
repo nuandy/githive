@@ -123,6 +123,17 @@ export async function defaultBranchOf(artifacts: Artifacts, name: string) {
 	return withRepo(artifacts, name, async (repo) => (await rpc(repo.info())).defaultBranch);
 }
 
+/** When repo `name` was made, or null if there's no repo by that name. */
+export async function createdAtOf(artifacts: Artifacts, name: string): Promise<number | null> {
+	try {
+		const info = await withRepo(artifacts, name, (repo) => rpc(repo.info()));
+		return Date.parse(info.createdAt);
+	} catch (err) {
+		if (notFoundYet(err)) return null;
+		throw err;
+	}
+}
+
 export async function headOf(artifacts: Artifacts, name: string, ref: string) {
 	return withRepo(artifacts, name, async (repo) => {
 		const [latest] = await retryTransient(() => call("log", name, () => rpc(repo.log({ ref, limit: 1 }))));

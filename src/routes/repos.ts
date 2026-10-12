@@ -263,21 +263,20 @@ export function repoRoutes(app: Hono<AppEnv>) {
 	// Delete a project repo for good, with its tokens and kept views.
 	app.delete("/repos/:owner/:name", async (c) => {
 		const repo = await routeRepo(c, "admin");
+		const since = Date.now();
+		// Its agents' forks hold copies of its code and its claim shards hold its records, so they go too. A busy repo
+		// has thousands, so the repo index deletes them in the background, noted before anything else goes, so a
+		// request cut short strands none.
+		const { forks, shards } = leftoversOf(repo.id, await listRepoNames(c.env.ARTIFACTS));
+		await rpc(repoIndex(c.env).forgetLeftovers([...forks, ...shards], since));
+		// A delete cut short may have removed the repo already: this one finishes what it started.
 		const deleted = await retryTransient(() => c.env.ARTIFACTS.delete(repo.id));
-		if (!deleted) return c.json({ error: `no repo ${repo.fullName}` }, 404);
+		const nothingThere = !deleted && forks.length + shards.length === 0;
+		if (nothingThere) return c.json({ error: `no repo ${repo.fullName}` }, 404);
 		if (c.env.DB) await new OrgStore(c.env.DB).removeRepo(repo.id);
 		await forgetRepo(c.env, repo.id);
-		// Its agents' forks hold copies of its code and its claim shards hold its records, so they go too.
-		const { forks, shards } = leftoversOf(repo.id, await listRepoNames(c.env.ARTIFACTS));
-		const failed: string[] = [];
-		for (const name of [...forks, ...shards])
-			await retryTransient(() => c.env.ARTIFACTS.delete(name)).catch(() => failed.push(name));
-		console.log("repo deleted", JSON.stringify({ repo: repo.id, forks: forks.length, shards: shards.length, failed }));
-		return c.json({
-			deleted: repo.fullName,
-			forks: forks.length,
-			shards: shards.length,
-			...(failed.length ? { failed } : {}),
-		});
+		const summary = { repo: repo.id, was: deleted, forks: forks.length, shards: shards.length };
+		console.log("repo deleted", JSON.stringify(summary));
+		return c.json({ deleted: repo.fullName, forks: forks.length, shards: shards.length, cleaningUp: true });
 	});
 }

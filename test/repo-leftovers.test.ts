@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { FakeStorage } from "./fakes/env";
 import { leftoversOf } from "../src/artifacts";
 
 // What a deleted repo leaves behind, and goes with it: its agents' forks and
@@ -48,19 +49,41 @@ describe("a repo's leftovers", () => {
 		);
 	});
 
-	it("go when the repo is deleted", async () => {
-		const worker = (await import("../src/index")).default;
+	/** Artifacts over `names`, each made at `made` (or long ago), recording what's deleted. */
+	const artifactsOver = (made: Record<string, number> = {}) => {
 		const deleted: string[] = [];
+		const live = () => names.filter((name) => !deleted.includes(name));
 		const ARTIFACTS = {
-			list: vi.fn(async () => ({ repos: names.filter((n) => !deleted.includes(n)).map((name) => ({ name })) })),
+			list: vi.fn(async () => ({ repos: live().map((name) => ({ name })) })),
 			delete: vi.fn(async (name: string) => (deleted.push(name), true)),
+			get: vi.fn(async (name: string) => {
+				if (!live().includes(name)) throw Object.assign(new Error("not found"), { code: "NOT_FOUND" });
+				return { info: async () => ({ createdAt: new Date(made[name] ?? 0).toISOString() }) };
+			}),
 		};
+		return { ARTIFACTS, deleted };
+	};
+
+	/** Deletes acme--web through the route, then lets the repo index work through what it left, alarm by alarm. */
+	async function deleteAcmeWeb(made: Record<string, number> = {}) {
+		const worker = (await import("../src/index")).default;
+		const { RepoIndex } = await import("../src/repo-index");
+		const { ARTIFACTS, deleted } = artifactsOver(made);
+		const env = { ARTIFACTS } as Record<string, unknown>;
+		const index = new RepoIndex({ storage: new FakeStorage() } as never, env as never);
+		env.REPO_INDEX = { getByName: () => index };
 		const response = await worker.fetch(
 			new Request("https://githive.test/repos/_/acme--web", { method: "DELETE" }),
-			{ ARTIFACTS } as never,
+			env as never,
 			{ waitUntil: () => {} } as never,
 		);
-		expect(await response.json()).toEqual({ deleted: "_/acme--web", forks: 3, shards: 2 });
+		while ((await index.leftoversToGo()) > 0) await index.alarm();
+		return { response, deleted };
+	}
+
+	it("go when the repo is deleted: the repo at once, its forks and shards in the background", async () => {
+		const { response, deleted } = await deleteAcmeWeb();
+		expect(await response.json()).toEqual({ deleted: "_/acme--web", forks: 3, shards: 2, cleaningUp: true });
 		expect(deleted.sort()).toEqual([
 			"acme--web",
 			"fork--acme--web--agent--builder",
@@ -69,5 +92,11 @@ describe("a repo's leftovers", () => {
 			"records--acme--web--0",
 			"records--acme--web--7",
 		]);
+	});
+
+	it("leave a repo by a leftover's name made since the delete, a new repo's, alone", async () => {
+		const { deleted } = await deleteAcmeWeb({ "fork--acme--web--agent--builder": Date.now() + 60_000 });
+		expect(deleted).not.toContain("fork--acme--web--agent--builder");
+		expect(deleted).toContain("fork--acme--web--contributing-guide");
 	});
 });
