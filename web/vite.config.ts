@@ -3,9 +3,10 @@ import { defineConfig } from "vite";
 
 // The dashboard is built into web/dist and served by the Worker as static
 // assets. In development, API calls go to the deployed Worker, where the real
-// repos and agents live (local dev has no containers). The Worker keeps its
-// blueprint name and host until githive.app is set up.
-const api = process.env.GITHIVE_API ?? "https://blueprint.nuandy.workers.dev";
+// repos and agents live (local dev has no containers): githive.app. Its old
+// workers.dev host sits behind Cloudflare Access, whose sign-in redirect a
+// proxied fetch can't follow. GITHIVE_API points elsewhere.
+const api = process.env.GITHIVE_API ?? "https://githive.app";
 
 export default defineConfig({
 	root: __dirname,
