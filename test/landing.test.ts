@@ -398,7 +398,7 @@ describe("landing ready changes together", { timeout: 120_000 }, () => {
 			hunks: [
 				{ file: "src/shared.txt", content: expect.stringContaining("<<<<<<< ours (changes/b-1)\n"), truncated: false },
 			],
-			fix: expect.arrayContaining(["git add src/shared.txt && git commit --no-edit", "git push fork changes/b-1"]),
+			fix: expect.arrayContaining(["git add -u && git commit --no-edit", "git push fork changes/b-1"]),
 		});
 		expect((refused as { reasons: string[] }).reasons[0]).toMatch(
 			/src\/shared\.txt \(changed by a-1, agent-a-1: "a-1", [0-9a-f]{8}\).*see touchedBy, hunks and fix$/,
@@ -456,7 +456,7 @@ describe("landing ready changes together", { timeout: 120_000 }, () => {
 			fix: [
 				"git fetch origin main && git merge origin/main",
 				"# resolve src/shared.txt so both changes make sense, then:",
-				"git add src/shared.txt && git commit --no-edit",
+				"git add -u && git commit --no-edit",
 				"git push fork changes/c-1",
 				"call status; once the new commit is approved, merge again",
 			],
@@ -477,7 +477,7 @@ describe("landing ready changes together", { timeout: 120_000 }, () => {
 			conflicts: ["src/shared.txt"],
 			touchedBy: [{ file: "src/shared.txt", commit: pushed, author: "pusher", intent: "add shared on main" }],
 			hunks: [{ file: "src/shared.txt", content: expect.stringContaining("<<<<<<< ours (changes/c-1)\n") }],
-			fix: expect.arrayContaining(["git add src/shared.txt && git commit --no-edit"]),
+			fix: expect.arrayContaining(["git add -u && git commit --no-edit"]),
 		});
 	});
 
@@ -545,6 +545,13 @@ describe("landing ready changes together", { timeout: 120_000 }, () => {
 			why: ["conflict"],
 			into: "main",
 			head: aHead,
+			fix: [
+				"git fetch origin main && git merge origin/main",
+				"# resolve the conflicts so both changes make sense, then:",
+				"git add -u && git commit --no-edit",
+				"git push fork changes/a-1",
+				"call status; once the new commit is approved, merge again",
+			],
 			reasons: ["conflict on files git didn't list"],
 		});
 		expect((await checksRejections()).map((vote) => vote.commit)).toEqual([aHead]);

@@ -53,7 +53,7 @@ export function outcomeOf(settled: Settled, branch?: string): MergeOutcome {
 		...(conflicted ? { ...into, head: settled.head } : {}),
 		...(conflicts.length ? { conflicts } : {}),
 		...(settled.touchedBy?.length ? { touchedBy: settled.touchedBy } : {}),
-		...(conflicts.length && branch ? { fix: conflictFix(branch, settled.change, conflicts) } : {}),
+		...(conflicted && branch ? { fix: conflictFix(branch, settled.change, conflicts) } : {}),
 		...(settled.checks ? { checks: settled.checks } : {}),
 	};
 }
@@ -177,15 +177,27 @@ async function conflictRefusal(
  * resolve so that both changes make sense.
  */
 export function conflictFix(branch: string, change: string, files: string[]): string[] {
-	const named = files.map(shellWord).join(" ");
 	const from = shellWord(`origin/${branch}`);
 	return [
 		`git fetch origin ${shellWord(branch)} && git merge ${from}`,
-		`# resolve ${named} so both changes make sense, then:`,
-		`git add ${named} && git commit --no-edit`,
+		`# resolve ${fixNames(files)} so both changes make sense, then:`,
+		// Every tracked file, the conflicted ones included: no list to cut short, and no path git could take for an option.
+		"git add -u && git commit --no-edit",
 		`git push fork ${shellWord(`changes/${change}`)}`,
 		"call status; once the new commit is approved, merge again",
 	];
+}
+
+/** The most conflicted files a fix's comment names. */
+const FIX_FILES_NAMED = 3;
+
+// A few of the conflicted files, as the fix's comment names them. A comment ends at a newline, so a path's newlines
+// are shown as "?" rather than run on as a command.
+function fixNames(files: string[]) {
+	if (!files.length) return "the conflicts";
+	const named = files.slice(0, FIX_FILES_NAMED).map((file) => shellWord(file.replace(/[\r\n]/g, "?")));
+	const more = files.length - named.length;
+	return more > 0 ? `${named.join(" ")} and ${more} more` : named.join(" ");
 }
 
 // The outcome if the change already landed at `head`, since its claim is gone by then. The landing's recent outcomes

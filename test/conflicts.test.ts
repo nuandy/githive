@@ -9,6 +9,7 @@ import { statusOf } from "../src/errors";
 import { callTool, type ToolContext } from "../src/toolkit/mcp";
 import { BATCH_MERGE } from "../src/toolkit/merge-checks";
 import type { CheckRunner } from "../src/toolkit/merge";
+import { conflictFix } from "../src/toolkit/merge-ready";
 import { AGENT_TURN_IDLE_MS, BUILDING_IDLE_MS } from "../src/toolkit/staleness";
 import { agentClone, pushChange } from "./helpers/agents";
 import { startGitServer, type GitServer } from "./helpers/git-server";
@@ -115,7 +116,7 @@ describe("fixing a conflict", { timeout: 60_000 }, () => {
 		}
 	};
 
-	it("gives commands that resolve the conflict when run in the agent's clone", async () => {
+	it("gives commands that resolve the conflict when run in the agent's clone, whatever its files' names", async () => {
 		await call("settings", {});
 		const { key } = (await call("register", { agent: "agent-a" })) as { key: string };
 		await call("claim", { change: "a-1", agent: "agent-a", paths: ["src/"], intent: "a" }, key);
@@ -124,18 +125,23 @@ describe("fixing a conflict", { timeout: 60_000 }, () => {
 		await shell(author, own.git.setup.join(" && "));
 		const clone = join(author, "a-1");
 		writeFileSync(join(clone, "shared.txt"), "a's line\n");
-		await shell(clone, `git add shared.txt && git commit -qm a && ${own.git.push}`);
-		// Meanwhile someone changed the same file on the project's main.
-		await pushToMain("mainline", { "shared.txt": "main's line\n" }, "main's change");
+		// A file whose name git would read as an option, were it named on the command line.
+		writeFileSync(join(clone, "-notes.txt"), "a's notes\n");
+		await shell(clone, `git add -A && git commit -qm a && ${own.git.push}`);
+		// Meanwhile someone changed the same files on the project's main.
+		await pushToMain("mainline", { "shared.txt": "main's line\n", "-notes.txt": "main's notes\n" }, "main's change");
 
 		const before = (await call("status", { change: "a-1" }, key)) as { merge: { clean: boolean; fix: string[] } };
-		expect(before.merge).toMatchObject({ clean: false, conflicts: ["shared.txt"] });
+		expect(before.merge).toMatchObject({ clean: false });
+		expect((before.merge as { conflicts?: string[] }).conflicts?.sort()).toEqual(["-notes.txt", "shared.txt"]);
 		const [merge, resolve, commit, push, then] = before.merge.fix;
-		expect(resolve).toBe("# resolve shared.txt so both changes make sense, then:");
+		expect(resolve).toMatch(/^# resolve (-notes\.txt shared\.txt|shared\.txt -notes\.txt) so both changes make sense/);
+		expect(commit).toBe("git add -u && git commit --no-edit");
 		expect(then).toBe("call status; once the new commit is approved, merge again");
 		// Merging the branch in stops at the conflict, for the agent to resolve.
 		await expect(shell(clone, merge!)).rejects.toThrow();
 		writeFileSync(join(clone, "shared.txt"), "main's line\na's line\n");
+		writeFileSync(join(clone, "-notes.txt"), "main's notes\na's notes\n");
 		await shell(clone, commit!);
 		await shell(clone, push!);
 
@@ -143,6 +149,22 @@ describe("fixing a conflict", { timeout: 60_000 }, () => {
 		expect(after.merge).toMatchObject({ clean: true });
 		expect(after.merge).not.toHaveProperty("conflicts");
 		expect(fork.git("show", "changes/a-1:shared.txt")).toBe("main's line\na's line\n");
+		expect(fork.git("show", "changes/a-1:-notes.txt")).toBe("main's notes\na's notes\n");
+	});
+});
+
+describe("a conflict's fix", () => {
+	it("stages every resolved file however many there are, naming a few in its comment", () => {
+		const files = Array.from({ length: 50 }, (_, i) => `src/f${i}.ts`);
+		expect(conflictFix("main", "c-1", files).slice(1, 3)).toEqual([
+			"# resolve src/f0.ts src/f1.ts src/f2.ts and 47 more so both changes make sense, then:",
+			"git add -u && git commit --no-edit",
+		]);
+		// A path's newline can't end the comment and run on as a command.
+		expect(conflictFix("main", "c-1", ["a\nrm -rf x"])[1]).toBe(
+			"# resolve 'a?rm -rf x' so both changes make sense, then:",
+		);
+		expect(conflictFix("main", "c-1", [])[1]).toBe("# resolve the conflicts so both changes make sense, then:");
 	});
 });
 

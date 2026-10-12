@@ -211,7 +211,7 @@ describe("githive CLI", () => {
 		const fix = [
 			"git fetch origin main && git merge origin/main",
 			"# resolve src/auth/a.ts so both changes make sense, then:",
-			"git add src/auth/a.ts && git commit --no-edit",
+			"git add -u && git commit --no-edit",
 			"git push fork changes/rate-limit",
 			"call status; once the new commit is approved, merge again",
 		];
