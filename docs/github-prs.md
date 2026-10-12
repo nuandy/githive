@@ -106,7 +106,8 @@ people pushed there directly. They come back through GitHive's own path, so the 
      schema.
 3. **Merged as a change.** GitHive's service agent `githive-github` claims a `source` merge of `github/<branch>`
    into `main` (design.md, "Branches"), as change `github-<sha12>`, so the claim holds the paths GitHub changed
-   while it lands. Branches under `github/` are reserved: the import forces them, so no claim may name one as `into`
+   while it lands. Change names starting `github-` are `githive-github`'s: another agent's claim of one is refused,
+   so no one can take the name first. Branches under `github/` are reserved: the import forces them, so no claim may name one as `into`
    or `from` (nor the dashboard make one), and only `githive-github` may name one as `source`. A merge that changes no file (a PR's merge commit, a squash joined to what it took) claims no
    paths: a source merge whose commits change nothing now claims nothing, and still merges. An older GitHub change
    of the same branch still open (it needed a person) is released first: the newer commit has it. A claim refused
@@ -224,6 +225,7 @@ real-git test server) plays GitHub, as GitHive's tests fake Artifacts.
   claimed again once a newer one came in, a repo connected to another GitHub repo since the import, another agent's
   claim of `github/main` (`github-inbound.test.ts`). No hosted agent but the GitHub job may act as `githive-github`.
 - Branches under `github/` are reserved: a claim into or from one, or an agent's `source` merge of one, is refused.
+  So are change names starting `github-`, for any agent but `githive-github`.
 - The import record's shape is pinned.
 - What can go wrong bringing GitHub's changes back (`github-inbound.test.ts`): checks that fail on GitHub's change,
   in containers or on Actions, send it to a person and land nothing, and a fix pushed on GitHub lands; a step that

@@ -716,6 +716,12 @@ describe("GitHive's copies of GitHub's branches", { timeout: 120_000 }, () => {
 		expect(await tryCall("claim", { ...claim, change: "x-3", source: "github/main" }, "a")).toMatch(
 			"github/main: only githive-github merges GitHive's copies of GitHub's branches",
 		);
+		// The names of githive-github's changes are its own: no one else may take one first.
+		const waiting = (await sync.state()).job!.change!;
+		expect(await tryCall("claim", { ...claim, change: waiting }, "a")).toMatch(
+			`${waiting}: changes named github-… are githive-github's`,
+		);
+		expect(await tryCall("claim", { ...claim, change: "github-mine" }, "a")).toMatch("are githive-github's");
 		const { makeBranch } = await import("../src/toolkit/mcp");
 		await expect(
 			makeBranch(ctx(), "p", { name: "github/other", from: "main" }, "person:ana@example.com"),
