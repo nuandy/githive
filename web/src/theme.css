@@ -350,6 +350,25 @@
 	animation-duration: var(--motion-slow);
 }
 
+/* A <details> that unfolds: its content's height grows from nothing and it fades in, and folds back the same way.
+   Browsers without ::details-content open it at once, as before. */
+@utility disclosure {
+	interpolate-size: allow-keywords;
+	&::details-content {
+		block-size: 0;
+		overflow-y: clip;
+		opacity: 0;
+		transition:
+			block-size var(--motion-slow) var(--ease-out),
+			opacity var(--motion-base) ease,
+			content-visibility var(--motion-slow) allow-discrete;
+	}
+	&[open]::details-content {
+		block-size: auto;
+		opacity: 1;
+	}
+}
+
 /* Reduced motion: whatever still moves, moves at once. */
 @layer base {
 	@media (prefers-reduced-motion: reduce) {
