@@ -8,3 +8,6 @@ web/dist/
 bench-results/**/keys-*/
 # Worker log tails captured during bench runs: large, and not kept
 bench-results/**/tail-*
+
+# Screenshots from the visual regression check (web/visual)
+web/visual/out/
