@@ -232,7 +232,7 @@ describe("a change's page", { timeout: 60_000 }, () => {
 			fix: [
 				"git fetch origin main && git merge origin/main",
 				"# resolve shared.txt so both changes make sense, then:",
-				"git add shared.txt && git commit --no-edit",
+				"git add -u && git commit --no-edit",
 				"git push fork changes/b-1",
 				"call status; once the new commit is approved, merge again",
 			],

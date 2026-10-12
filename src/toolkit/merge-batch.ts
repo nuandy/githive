@@ -2,7 +2,7 @@ import { branchHead } from "../git";
 import { isGitHubChange } from "./github-settings";
 import type { Landing, Settled } from "./landing";
 import { checkAndPutOut, gateName, newPlace, type Place } from "./merge-checks";
-import { land, type Landed, leaveOutLanded } from "./merge-land";
+import { type Attempts, attemptsOf, land, type Landed, leaveOutLanded } from "./merge-land";
 import { type Holding, STEP_MS } from "./merge-lease";
 import { conflict, scopedFiles, validated } from "./merge-ready";
 import type { BatchSource, Candidate, Inspected, MergeInput, Ready, Refused } from "./merge-types";
@@ -90,7 +90,8 @@ export async function landBatch(
 		// If the lease was lost while gathering, nothing is checked or landed, and the merge waits for its turn again.
 		if (!holding.held) return { ok: true, settled: [], release: noRelease };
 		const tested = !!input.verify?.length && batch.some((ready) => !ready.skipped);
-		const firstPassing = landFirstPassing(input, landing, holding, baseHead, tested);
+		const attempts = attemptsOf(input, batch);
+		const firstPassing = landFirstPassing(input, landing, holding, baseHead, tested, attempts);
 		let failures: Settled[] = [];
 		if (tested) failures = await checkAndPutOut(input, landing, baseHead, batch, holding, place, firstPassing.found);
 		else firstPassing.found(batch);
@@ -134,10 +135,17 @@ function prepareEarly(input: MergeInput, place: Place) {
 
 // The first part found passing lands at once while the search for the failure goes on. Each part was checked on main
 // alone, so only one can land as checked; the rest wait for the next batch.
-function landFirstPassing(input: MergeInput, landing: Landing, holding: Holding, baseHead: string, tested: boolean) {
+function landFirstPassing(
+	input: MergeInput,
+	landing: Landing,
+	holding: Holding,
+	baseHead: string,
+	tested: boolean,
+	attempts: Promise<Attempts>,
+) {
 	let landingPart: Promise<PartLanded> | undefined;
 	const found = (part: Ready[]) => {
-		landingPart ??= landPart(input, landing, holding, baseHead, part, tested);
+		landingPart ??= landPart(input, landing, holding, baseHead, part, tested, attempts);
 	};
 	const nothingLanded: PartLanded = { landed: { settled: [], release: noRelease }, ms: 0 };
 	const outcome = async () => (landingPart ? await landingPart : nothingLanded);
@@ -151,12 +159,13 @@ async function landPart(
 	baseHead: string,
 	part: Ready[],
 	tested: boolean,
+	attempts: Promise<Attempts>,
 ): Promise<PartLanded> {
 	const startedAt = Date.now();
 	await holding.step(STEP_MS.gate);
 	// If the lease was lost meanwhile, its new holder lands what's ready after checking it again.
 	if (!holding.held) return { landed: { settled: [], release: noRelease }, ms: 0 };
-	const landed = await land(input, landing, baseHead, part, tested, holding);
+	const landed = await land(input, landing, baseHead, part, tested, holding, attempts);
 	return { landed, ms: Date.now() - startedAt };
 }
 

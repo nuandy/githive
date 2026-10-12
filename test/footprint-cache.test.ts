@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { Footprint } from "../src/footprint-cache";
 import { MAX_PARSE_CHARS } from "../src/footprint";
 import { commitAlters, type FactsSource, keptFacts, SIGNATURE_KEPT } from "../src/footprint/footprints";
-import type { HistorySource, TreeEntry } from "../src/toolkit/branch-history";
+import { BLOB_TOO_LARGE, type HistorySource, type TreeEntry } from "../src/toolkit/branch-history";
 import { FakeStorage } from "./fakes/env";
 
 const { RepoCache } = await import("../src/repo-cache");
@@ -322,6 +322,46 @@ describe("facts", () => {
 		);
 		expect(reads).toHaveLength(2);
 		expect(budget.chars).toBe(10_000_000);
+	});
+
+	it("ask for blobs no bigger than the size cap, and skip one answered as too large, its bytes never read", async () => {
+		const { cache } = caches();
+		const { source } = repo({ t1: { "src/big.ts": "x" }, t2: { "src/big.ts": "y" } });
+		const asked: (number | undefined)[] = [];
+		const bytes = vi.fn();
+		const tooLarge: HistorySource = {
+			...source,
+			readBlob: async (_hash, maxBytes) => (asked.push(maxBytes), bytes(), BLOB_TOO_LARGE),
+		};
+		const budget = { parses: 100, chars: 10_000_000 };
+		const facts = { ...factsFrom(cache), budget };
+		expect(await commitAlters(tooLarge, { hash: "c2", treeHash: "t2" }, "t1", facts)).toEqual([]);
+		expect(asked).toEqual([MAX_PARSE_CHARS, MAX_PARSE_CHARS]);
+		expect(budget.chars).toBe(10_000_000);
+		expect(await cache.factsOf(["blob-0:src/big.ts", "blob-1:src/big.ts"])).toEqual({});
+	});
+
+	it("are parsed as each blob arrives, not once the batch's blobs are all read", async () => {
+		const { cache } = caches();
+		const files = (returns: string) =>
+			Object.fromEntries(
+				Array.from({ length: 8 }, (_, i) => [
+					`src/f${i}.ts`,
+					`export function f${i}(): ${returns} {\n  return 1;\n}\n`,
+				]),
+			);
+		const { source } = repo({ t1: files("number"), t2: files("unknown") });
+		const budget = { parses: 100, chars: 1_000_000 };
+		const charsAtEachRead: number[] = [];
+		const watched: HistorySource = {
+			...source,
+			readBlob: async (hash, maxBytes) => (charsAtEachRead.push(budget.chars), source.readBlob!(hash, maxBytes)),
+		};
+		await commitAlters(watched, { hash: "c2", treeHash: "t2" }, "t1", { ...factsFrom(cache), budget });
+		expect(charsAtEachRead).toHaveLength(16);
+		// Six reads at a time: the seventh starts once the first blob has been decoded and counted.
+		expect(new Set(charsAtEachRead.slice(0, 6))).toEqual(new Set([1_000_000]));
+		expect(charsAtEachRead[6]).toBeLessThan(1_000_000);
 	});
 
 	it("are kept for at most 5,000 files, the oldest dropped, and never past 256 KiB a file", async () => {

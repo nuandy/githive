@@ -530,7 +530,7 @@ async function syncWithProject() {
 		const files = gitOk(["diff", "--name-only", "--diff-filter=U"])?.split("\n").filter(Boolean) ?? [];
 		if (!files.length) throw new Error(`merging ${theirs} failed: see git status`);
 		say(`merging ${theirs} conflicts in:`, ...files.map((file) => `  ${file}`));
-		next(`resolve them (inside your claim), git add ${files.join(" ")}, git commit --no-edit, then githive land`);
+		next("resolve them (inside your claim), git add -u, git commit --no-edit, then githive land");
 		process.exitCode = 1;
 		return;
 	}

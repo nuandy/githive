@@ -41,7 +41,7 @@ const conflict: MergeCheck = {
 	fix: [
 		"git fetch origin main && git merge origin/main",
 		"# resolve src/billing/invoice.ts README.md so both changes make sense, then:",
-		"git add src/billing/invoice.ts README.md && git commit --no-edit",
+		"git add -u && git commit --no-edit",
 		"git push fork changes/c-1",
 		"call status; once the new commit is approved, merge again",
 	],

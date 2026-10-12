@@ -210,28 +210,32 @@ async function factsOf(source: HistorySource, wanted: { path: string; blob: stri
 		missing = missing.slice(0, Math.max(0, facts.budget.parses));
 	}
 	facts.budget.parses -= missing.length;
-	const blobs = await atMost(READS_AT_ONCE, missing, ([, { blob }]) => readBlob(blob).catch(() => null));
 	const fresh: Record<string, FileFacts> = {};
-	for (const [index, [key, { path }]] of missing.entries()) {
-		const bytes = blobs[index];
-		// A file over the parse cap in bytes is skipped without decoding it (in characters it may be a little under,
-		// which costs only a hint).
-		if (!bytes || bytes.byteLength > MAX_PARSE_CHARS) continue;
-		const text = new TextDecoder().decode(bytes);
-		if (text.length > facts.budget.chars) {
-			console.log(`footprint: this batch's characters ran out; ${path} skipped`);
-			continue;
-		}
-		facts.budget.chars -= text.length;
-		const parsed = await fileFacts(path, text);
-		if (!parsed) continue;
-		const kept = keptFacts(parsed);
-		known.set(key, kept);
-		fresh[key] = kept;
-	}
+	// Each blob is parsed as soon as it arrives, so only the few being read at once are held, never a batch's worth.
+	await atMost(READS_AT_ONCE, missing, async ([key, { path, blob }]) => {
+		const bytes = await readBlob(blob, MAX_PARSE_CHARS).catch(() => null);
+		const parsed = bytes instanceof Uint8Array ? await parseWithin(path, bytes, facts.budget) : null;
+		if (!parsed) return;
+		known.set(key, parsed);
+		fresh[key] = parsed;
+	});
 	if (Object.keys(fresh).length)
 		await facts.keep(fresh).catch((err) => console.error(`footprint: keeping facts failed: ${String(err)}`));
 	return known;
+}
+
+// A blob's facts as kept, while the batch's characters last. A file over the parse cap in bytes is skipped without
+// decoding it (in characters it may be a little under, which costs only a hint).
+async function parseWithin(path: string, bytes: Uint8Array, budget: FactsSource["budget"]) {
+	if (bytes.byteLength > MAX_PARSE_CHARS) return null;
+	const text = new TextDecoder().decode(bytes);
+	if (text.length > budget.chars) {
+		console.log(`footprint: this batch's characters ran out; ${path} skipped`);
+		return null;
+	}
+	budget.chars -= text.length;
+	const parsed = await fileFacts(path, text);
+	return parsed ? keptFacts(parsed) : null;
 }
 
 // The file an import of `target` loads in the tree, if it's TS or JS: tried in TypeScript's order.

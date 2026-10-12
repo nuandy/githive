@@ -1,7 +1,7 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { statusOf } from "../src/errors";
 import { GitCasLog } from "../src/record-log";
 import { branchHead } from "../src/git";
@@ -398,7 +398,7 @@ describe("landing ready changes together", { timeout: 120_000 }, () => {
 			hunks: [
 				{ file: "src/shared.txt", content: expect.stringContaining("<<<<<<< ours (changes/b-1)\n"), truncated: false },
 			],
-			fix: expect.arrayContaining(["git add src/shared.txt && git commit --no-edit", "git push fork changes/b-1"]),
+			fix: expect.arrayContaining(["git add -u && git commit --no-edit", "git push fork changes/b-1"]),
 		});
 		expect((refused as { reasons: string[] }).reasons[0]).toMatch(
 			/src\/shared\.txt \(changed by a-1, agent-a-1: "a-1", [0-9a-f]{8}\).*see touchedBy, hunks and fix$/,
@@ -415,7 +415,7 @@ describe("landing ready changes together", { timeout: 120_000 }, () => {
 		return server.git("rev-parse", "main").trim();
 	}
 
-	it("puts out a change that conflicts with main while landing, naming the conflict, and lands the rest", async () => {
+	it("puts out a change that conflicts with main while landing, naming its files, and lands the rest", async () => {
 		for (const x of ["a", "b"]) await readyChange(`${x}-1`, { [`src/${x}.txt`]: `${x}\n` });
 		const cHead = await readyChange("c-1", { "src/shared.txt": "from c\n" });
 		const noted: string[][] = [];
@@ -442,22 +442,21 @@ describe("landing ready changes together", { timeout: 120_000 }, () => {
 		await landing.drop("someone");
 		const [cOutcome, aOutcome] = await Promise.all([c, a]);
 
-		// The batch of three landed the two that merge. c-1 is refused for this round, naming the conflict, who
-		// changed the file, and how to resolve it, as a change failing its checks would be.
+		// The batch of three landed the two that merge. c-1 is refused for this round, naming the conflict's files and
+		// how to resolve it, as a change failing its checks would be. Nothing more is read while the lease is held.
 		expect(aOutcome).toMatchObject({ ok: true });
 		expect(landed().sort()).toEqual(["a-1", "b-1"]);
-		const reason = `conflict on src/shared.txt with ${pushed.slice(0, 7)} by pusher ("add shared on main")`;
+		const reason = "conflict on src/shared.txt";
 		expect(cOutcome).toEqual({
 			ok: false,
 			why: ["conflict"],
 			into: "main",
 			head: cHead,
 			conflicts: ["src/shared.txt"],
-			touchedBy: [{ file: "src/shared.txt", commit: pushed, author: "pusher", intent: "add shared on main" }],
 			fix: [
 				"git fetch origin main && git merge origin/main",
 				"# resolve src/shared.txt so both changes make sense, then:",
-				"git add src/shared.txt && git commit --no-edit",
+				"git add -u && git commit --no-edit",
 				"git push fork changes/c-1",
 				"call status; once the new commit is approved, merge again",
 			],
@@ -469,18 +468,20 @@ describe("landing ready changes together", { timeout: 120_000 }, () => {
 		expect(rejected).toMatchObject([{ commit: cHead, role: "checks", verdict: "reject" }]);
 		expect(rejected[0]!.evidence).toBe(`${reason} on ${cHead.slice(0, 8)}, found while landing it on main`);
 		expect((await store().read()).claims.map((claim) => claim.change)).toEqual(["c-1"]);
-		// Merging that commit again is refused at once, with the conflict, its markers and its fix.
+		// Merging that commit again is refused at once, explained by its own test merge: who changed the file, its
+		// markers and its fix.
 		expect(await merge("c-1", runner(), landing, more)).toMatchObject({
 			ok: false,
 			why: ["conflict"],
 			into: "main",
 			conflicts: ["src/shared.txt"],
+			touchedBy: [{ file: "src/shared.txt", commit: pushed, author: "pusher", intent: "add shared on main" }],
 			hunks: [{ file: "src/shared.txt", content: expect.stringContaining("<<<<<<< ours (changes/c-1)\n") }],
-			fix: expect.arrayContaining(["git add src/shared.txt && git commit --no-edit"]),
+			fix: expect.arrayContaining(["git add -u && git commit --no-edit"]),
 		});
 	});
 
-	it("names the files of a change whose merge failed by test-merging it alone, when git didn't list them", async () => {
+	it("puts out a change whose merge failed though git listed no files, test-merging nothing while landing", async () => {
 		await readyChange("a-1", { "src/a.txt": "a\n" });
 		const cHead = await readyChange("c-1", { "src/shared.txt": "from c\n" });
 		const pushed = await pushSharedToMain();
@@ -495,17 +496,26 @@ describe("landing ready changes together", { timeout: 120_000 }, () => {
 			},
 		};
 		const landing = memoryLanding();
-		const more = { verify: [], runChecks: undefined, batchGit: unlisted };
+		const more = { verify: [], runChecks: undefined, batchGit: unlisted, history: gitHistory(server.git) };
 		expect(await merge("a-1", runner(), landing, more)).toMatchObject({ ok: true });
 		expect(landed()).toEqual(["a-1"]);
-		expect((await landing.view()).recent.find((settled) => settled.change === "c-1")).toMatchObject({
+		const putOut = (await landing.view()).recent.find((settled) => settled.change === "c-1");
+		expect(putOut).toMatchObject({
 			how: "failed",
 			head: cHead,
+			conflicts: [],
+			reasons: ["conflict on files git didn't list"],
+		});
+		expect(putOut).not.toHaveProperty("touchedBy");
+		// Only the plain push is reported: what landed names no change put out.
+		expect((await auditNow([])).filter((violation) => violation.commit !== pushed)).toEqual([]);
+		// The change's own merge names the files, and who changed them, from a test merge of its own.
+		expect(await merge("c-1", runner(), landing, more)).toMatchObject({
+			ok: false,
+			why: ["conflict"],
 			conflicts: ["src/shared.txt"],
 			touchedBy: [{ file: "src/shared.txt", commit: pushed, author: "pusher", intent: "add shared on main" }],
 		});
-		// Only the plain push is reported: what landed names no change put out.
-		expect((await auditNow([])).filter((violation) => violation.commit !== pushed)).toEqual([]);
 	});
 
 	it("fails the landing as before, test-merging nothing, when it failed for anything but a merge", async () => {
@@ -523,16 +533,28 @@ describe("landing ready changes together", { timeout: 120_000 }, () => {
 		expect((await landing.view()).recent).toEqual([]);
 	});
 
-	it("fails the landing as before when the change git named merges cleanly alone: it can't be sure", async () => {
-		await readyChange("a-1", { "src/a.txt": "a\n" });
+	it("takes git's word that the change it named didn't merge, without test-merging it under the lease", async () => {
+		const aHead = await readyChange("a-1", { "src/a.txt": "a\n" });
 		const failing: BatchGit = {
 			...memoryBatchGit(remote()),
 			land: async () => ({ failed: "merging a-1 onto the batch failed: ?", conflict: { change: "a-1", files: [] } }),
 		};
 		const more = { verify: [], runChecks: undefined, batchGit: failing };
-		const failed = await merge("a-1", runner(), memoryLanding(), more).catch((err: unknown) => err);
-		expect(statusOf(failed)).toMatchObject({ status: 500 });
-		expect(await checksRejections()).toEqual([]);
+		expect(await merge("a-1", runner(), memoryLanding(), more)).toEqual({
+			ok: false,
+			why: ["conflict"],
+			into: "main",
+			head: aHead,
+			fix: [
+				"git fetch origin main && git merge origin/main",
+				"# resolve the conflicts so both changes make sense, then:",
+				"git add -u && git commit --no-edit",
+				"git push fork changes/a-1",
+				"call status; once the new commit is approved, merge again",
+			],
+			reasons: ["conflict on files git didn't list"],
+		});
+		expect((await checksRejections()).map((vote) => vote.commit)).toEqual([aHead]);
 	});
 
 	it("puts out each change in a batch that conflicts with main, a round each, and lands the rest", async () => {
@@ -554,16 +576,19 @@ describe("landing ready changes together", { timeout: 120_000 }, () => {
 			land: async (input) => (tries.push(input.merges.map((m) => m.change)), git.land(input)),
 		};
 		const landing = memoryLanding();
-		const more = { verify: [], runChecks: undefined, batchGit: noted, history: gitHistory(server.git) };
+		const attemptsOf = vi.fn(async () => ({}));
+		const more = { verify: [], runChecks: undefined, batchGit: noted, history: gitHistory(server.git), attemptsOf };
 		expect(await merge("b-1", runner(), landing, more)).toMatchObject({ ok: true });
 		expect(landed()).toEqual(["b-1"]);
 		// Three rounds: each puts out the change that didn't merge, and lands the rest without it.
 		expect(tries).toHaveLength(3);
 		expect(tries.at(-1)).toEqual(["b-1"]);
+		// The earlier attempts for the merge commits' story are read once for the batch, not once a round.
+		expect(attemptsOf).toHaveBeenCalledOnce();
 		const rejected = await checksRejections();
 		expect(rejected.map((vote) => vote.commit).sort()).toEqual([aHead, cHead].sort());
 		for (const vote of rejected)
-			expect(vote.evidence).toMatch(/^conflict on src\/[ac]\.txt with [0-9a-f]{7} by pusher/);
+			expect(vote.evidence).toMatch(/^conflict on src\/[ac]\.txt on [0-9a-f]{8}, found while landing it on main$/);
 		expect((await landing.view()).recent.map((settled) => [settled.change, settled.how]).sort()).toEqual([
 			["a-1", "failed"],
 			["b-1", "landed"],

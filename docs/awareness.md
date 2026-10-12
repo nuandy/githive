@@ -20,8 +20,8 @@ in Git. Nothing decides, orders work or blocks a landing.
 
 - **Facts, not decisions.** Ported features report what Git says. A merge, a claim and a vote still decide alone,
   from their own reads. If every piece of awareness is lost, agents work exactly as they do today.
-- **Off the hot paths.** The analysis runs in the push-event queue consumer, never in a tool call or a landing.
-  Nothing in a request waits on a parser.
+- **Off the hot paths.** The analysis runs in the repo's FootprintCache, which the push-event queue consumer hands
+  each batch of pushes, never in a tool call or a landing. Nothing in a request waits on a parser.
 - **Derived data lives in caches.** Parsed files, footprints and notices can be rebuilt from Git, so losing them
   costs only speed and a missed hint.
 - **Agents declare things about themselves; they don't direct each other.** An agent says what it is doing in its
@@ -42,7 +42,7 @@ in Git. Nothing decides, orders work or blocks a landing.
                   push-event queue consumer (already exists; now also reads main's pushes)
                             │
                             ▼
-                 FootprintCache (per repo; derived)
+                 FootprintCache (per repo; derived; reads Git and parses here, in its own isolate)
                  - files parsed once per blob hash: exports + signatures, imports + uses
                  - each open change's footprint at its head
                  - main's interface changes per landed commit
@@ -98,10 +98,11 @@ Causes are missing for direct pushes, past 12 files, and when the conflict appea
 
 `causes` stays as it is, so nothing that reads it breaks. A conflict found while landing (in the Gate, or when a
 tree landing hands over) puts the change out, as failed checks do, and the rest of the batch lands. Its refusal
-carries `conflicts`, `touchedBy` and `fix`. Only git's word puts a change out: the Gate names the change whose merge
-failed, and when it lists no files, a test merge of that change alone names them, within 30 seconds, or the landing
-fails as before. A failed fetch, commit or push is never taken for a conflict. A conflict's reason names at most 10
-files, then how many more, and the rejection's evidence is cut to 2,000 characters, as failed checks' output is.
+carries `conflicts` and `fix`. Only git's word puts a change out: the Gate names the change whose merge failed, with
+the files it listed, perhaps none. Nothing more is read while the landing holds its lease: the change's `status` or
+`merge` names who changed the files (`touchedBy`) and shows the hunks, from a test merge of its own. A failed fetch,
+commit or push is never taken for a conflict. A conflict's reason names at most 10 files, then how many more, and the
+rejection's evidence is cut to 2,000 characters, as failed checks' output is.
 
 ### 3. `next` in every reply
 
@@ -182,17 +183,22 @@ the claim); once something is pushed it lasts longer, and status's `lease` says 
 
   A notice words at most 5 facts, then "and N more", and its `says` runs to 1,500 characters at most. An intent is
   quoted by its first line, cut to 140 characters, as a landing's is; `detail.names` lists at most 20 names.
-- **Where parsing runs.** web-tree-sitter in the main Worker's push-event queue consumer, with precompiled grammars
-  as WebAssembly modules (the spike showed it runs in workerd within the bundle limit). The limits are strict:
-  - the Worker's CPU limit is set to 60 s (`limits.cpu_ms`, twice the default), and a batch's budget is far below it:
-    200 parses, 4 million characters and 2,000 Artifacts reads, counted, not timed;
-  - a file over 256 KB is skipped, without being decoded;
+- **Where parsing runs.** web-tree-sitter in the repo's FootprintCache, which the push-event queue consumer hands
+  each batch of the repo's pushes, with precompiled grammars as WebAssembly modules (the spike showed it runs in
+  workerd within the bundle limit). The parser and its grammars are imported at first use, so isolates that only
+  serve agents' calls never load them. The limits are strict:
+  - the Worker's CPU limit is set to 60 s (`limits.cpu_ms`, twice the default), and a repo's batch's budget is far
+    below it: 200 parses, 4 million characters and 2,000 Artifacts reads, at most 500 of them from the project's own
+    repo, which merges read too; counted, not timed;
+  - when Artifacts answers INTERNAL_ERROR (its throttling of a busy repo), the batch's awareness stops there and isn't
+    retried: the rest waits for the next push;
+  - a file over 256 KB is skipped by its size, without its bytes being read, and each blob is parsed as it arrives;
   - a grammar that fails to load is tried once a batch, not once a file.
 
-  The trade-off: the parser's 32 MiB of wasm memory is fixed, never shrinks, and sits in the same isolates that serve
-  agents' calls, which have 128 MB in all. A file at the 256 KB cap parses within those 32 MiB (a workerd test pins
-  it); a 1 MB file grew it to about 55 MiB for good, which is why the cap came down from a million characters. The
-  consumer logs each new high of the parser's memory in an isolate.
+  The trade-off: the parser's 32 MiB of wasm memory is fixed and never shrinks, in an isolate with 128 MB in all,
+  which FootprintCaches of several repos may share. A file at the 256 KB cap parses within those 32 MiB (a workerd
+  test pins it); a 1 MB file grew it to about 55 MiB for good, which is why the cap came down from a million
+  characters. Each new high of the parser's memory in an isolate is logged.
 - **Where it's kept.** A new `FootprintCache` Durable Object per repo (`footprints:<repo>`), like `ChangeCache`,
   so parsing state never shares RepoCache's memory. It writes notices into RepoCache, the one place agents' news
   is read from.
@@ -207,11 +213,10 @@ the claim); once something is pushed it lasts longer, and status's `lease` says 
 
 ## Open question
 
-After this merges, open an issue to measure isolate memory on the bench under a 1,000-agent run (the consumer's
-"the parser's memory is N MiB" lines, and any "Worker exceeded memory limit"), and decide from it whether to move
-the queue consumer and the parser into a Worker of their own, called by service binding. Cloudflare recommends
-splitting a Worker with service bindings, at no extra cost; the parser's memory would then never share an isolate
-with agents' calls.
+After this merges, open an issue to measure the FootprintCaches' memory on the bench under a 1,000-agent run (the
+"the parser's memory is N MiB" lines, and any "exceeded memory limit"), and decide from it whether to move the
+parser into a Worker of its own, called by service binding. Cloudflare recommends splitting a Worker with service
+bindings, at no extra cost.
 
 ## Order of work
 

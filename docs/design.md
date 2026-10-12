@@ -634,13 +634,13 @@ that commit at once, with the failure, rather than check it a third time.
 A change that doesn't merge while its batch lands (with no checks, or in a
 batch that only touches files they skip) is put out the same way: its
 rejection names the conflict (a few files, then how many more, within 2,000
-characters) and who changed its files, and the rest of the batch lands
-without it. Only git's word puts a change out: the Gate names the change whose
-merge failed. When it lists no files, that change alone is test-merged onto
-the branch, for at most 30 seconds, to name them; if that merges cleanly, or a
-fetch, a commit or a push failed instead, the landing fails as before. A batch
-that was checked was checked with that change, so its rest waits for the next
-batch, checked without it.
+characters), and the rest of the batch lands without it. Only git's word puts a
+change out: the Gate names the change whose merge failed, with the files it
+listed, perhaps none; a fetch, a commit or a push that failed instead fails the
+landing as before. Nothing more is read while the lease is held: the change's
+`status` or `merge` names who changed its files, from a test merge of its own.
+A batch that was checked was checked with that change, so its rest waits for
+the next batch, checked without it.
 
 **The audit reads the branch through Artifacts' API, not a clone.** `log` lists the
 first-parent chain (a page at a time, until the baseline), and each merge's
@@ -901,7 +901,9 @@ failure in it is logged and never has a push delivered again. A push to
 claims advice) is footprinted: the change is placed on its branch through
 Artifacts' API (`changeAgainst`), and its changed TypeScript and JavaScript
 files, at most 50, are read from the fork at the base and the head and parsed
-in the Worker (`src/footprint/`). Its footprint is the exported names it
+(`src/footprint/`). The consumer only hands each repo's pushes to the repo's
+FootprintCache, which does that work in its own isolate (`src/awareness.ts`),
+and loads the parser on first use. Its footprint is the exported names it
 alters and the names its files use, each import resolved to a file that
 exists at the head. Compared with the other open changes into the same
 branch, a change that alters a name another uses gives both agents a
@@ -921,9 +923,12 @@ index from each file's name to the changes that alter or use it, which notices
 were told, and the last commit analysed per branch. It writes notices and hive
 events into the RepoCache in one call a batch. Everything is counted, not
 timed (a Worker's clock stands still during CPU work): 200 parses, 4 million
-characters and 2,000 Artifacts reads a batch, a few seconds of CPU against the
-Worker's 60 s limit (`limits.cpu_ms`), files over 256 KB skipped without being
-decoded, a grammar that fails to load tried once a batch, 50 heads-ups and 200
+characters and 2,000 Artifacts reads a repo's batch, at most 500 of them from
+the project's own repo, which merges read too, a few seconds of CPU against the
+Worker's 60 s limit (`limits.cpu_ms`), files over 256 KB skipped by their size
+without their bytes being read, a batch stopped at Artifacts' first
+INTERNAL_ERROR (a busy repo) and never retried, a grammar that fails to load
+tried once a batch, 50 heads-ups and 200
 interface notices a push, 2,000 open
 footprints a repo. Every open change that uses a name is indexed (none is
 dropped to make room), and at most 500 of them are read for one name at once,
@@ -1696,11 +1701,11 @@ one RepoIndex; the records in Git are what count.
   be checked again, and the next batch read again.
 - **Without a stamp key** nothing is stamped or verified, and the audit takes
   names as written.
-- **The parser shares agents' isolates.** Awareness parses in the main
-  Worker's queue consumer, and web-tree-sitter's 32 MiB of wasm memory, which
-  never shrinks, stays in an isolate that also serves agents' calls (128 MB in
-  all). Files over 256 KB are skipped so it doesn't grow, and each new high is
-  logged; whether to move the consumer into a Worker of its own is open (see
+- **The parser's memory stays.** Awareness parses in each repo's
+  FootprintCache, and web-tree-sitter's 32 MiB of wasm memory never shrinks in
+  that isolate (128 MB in all), which several repos' FootprintCaches may share.
+  Files over 256 KB are skipped so it doesn't grow, and each new high is
+  logged; whether to move the parser into a Worker of its own is open (see
   [awareness.md](awareness.md)).
 
 An earlier elected-coordinator design is kept as the tag `elected-mode-final`.

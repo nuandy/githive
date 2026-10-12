@@ -127,6 +127,24 @@ describe("a conflict found while landing", { timeout: 60_000 }, () => {
 	});
 });
 
+describe("a change put out for a conflict", () => {
+	it("is told with the files it was found with, reading nothing more while the lease is held", async () => {
+		const { putOut } = await import("../src/toolkit/merge-checks");
+		const history = vi.fn();
+		const input = {
+			branch: "main",
+			remote: { url: "https://artifacts.invalid/p.git", token: "t" },
+			history,
+			votes: { vote: async () => undefined },
+		} as unknown as import("../src/toolkit/merge-types").MergeInput;
+		const ready = { change: "c-1", head: "c".repeat(40), agent: "agent-c", ref: "changes/c-1" } as never;
+		const settled = await putOut(input, ready, { results: [], conflict: { files: ["src/a.ts"] } }, "checked alone");
+		expect(settled).toMatchObject({ how: "failed", reasons: ["conflict on src/a.ts"], conflicts: ["src/a.ts"] });
+		expect(settled).not.toHaveProperty("touchedBy");
+		expect(history).not.toHaveBeenCalled();
+	});
+});
+
 describe("a conflict on hundreds of files", () => {
 	it("names a few of them and how many more, so its rejection and its outcome stay small", async () => {
 		const { putOut } = await import("../src/toolkit/merge-checks");
@@ -147,7 +165,7 @@ describe("a conflict on hundreds of files", () => {
 		} as unknown as import("../src/toolkit/merge-types").MergeInput;
 		const ready = { change: "c-1", head: "c".repeat(40), agent: "agent-c", ref: "changes/c-1" } as never;
 		const failure = { results: [], conflict: { files, touchedBy } };
-		const settled = await putOut(input, "b".repeat(40), ready, failure, "found while landing it on main");
+		const settled = await putOut(input, ready, failure, "found while landing it on main");
 		const [reason] = settled.reasons!;
 		expect(reason).toMatch(/^conflict on src\/generated\/part-0\.ts with f{7} by fmt-bot \("x{140}"\); /);
 		expect(reason).toMatch(/; and 59\d more files$/);
@@ -157,7 +175,7 @@ describe("a conflict on hundreds of files", () => {
 		expect(noted).toEqual([reason]);
 		// Failed checks keep the end of their output in what's left of the 2,000, however long the command.
 		const checks = { results: [{ command: `npm test ${"z".repeat(3_000)}`, exitCode: 1, output: "y".repeat(10_000) }] };
-		await putOut(input, "b".repeat(40), ready, checks, "checked alone on the branch, twice");
+		await putOut(input, ready, checks, "checked alone on the branch, twice");
 		expect(voted[1]!.evidence.length).toBeLessThanOrEqual(2_000);
 		expect(voted[1]!.evidence).not.toContain("y".repeat(10_000));
 		// The outcome keeps the first 50 files, not 600.
