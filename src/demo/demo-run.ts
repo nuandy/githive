@@ -15,7 +15,7 @@ import {
 } from "./run";
 
 // Honeycomb demo runs (see run.ts), one class in two parts by instance name:
-// - "registry" holds the limits: one run at a time, a few a day.
+// - "registry" holds the limits: one run at a time, up to 100 a day.
 // - "run:<id>" starts GitHive's hosted agents on the run's repo and watches them, to say how the run is going and when
 //   it's over. They're the same agents anyone can add to a repo, and nothing here tells them what to do.
 

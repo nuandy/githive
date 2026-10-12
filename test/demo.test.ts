@@ -16,7 +16,7 @@ import { FakeStorage } from "./fakes/env";
 const { DemoRun } = await import("../src/demo/demo-run");
 
 // Honeycomb demo runs: GitHive's hosted agents build the game while someone watches. The registry lets one run at a
-// time and a few a day; a run starts its repo's agents and watches for them to finish.
+// time and up to 100 a day; a run starts its repo's agents and watches for them to finish.
 
 const NOW = Date.parse("2026-10-12T15:30:00.000Z");
 const empty: Registry = { day: { date: "", started: 0 }, recent: [] };
@@ -32,13 +32,16 @@ describe("the demo registry", () => {
 		expect(ended(one, "other").running?.id).toBe("honeycomb-1");
 	});
 
-	it("starts at most a few a day, counting from each UTC day", () => {
+	it("starts at most 100 a day, counting from each UTC day", () => {
 		let registry = empty;
 		for (let run = 0; run < RUNS_PER_DAY; run++)
 			registry = ended(started(registry, slot(`r${run}`, NOW + run)), `r${run}`);
-		expect(refusal(registry, NOW + 10)).toMatch(/today's 5 demo runs have happened/);
+		expect(refusal(registry, NOW + 10)).toMatch(/today's 100 demo runs have happened/);
 		expect(refusal(registry, NOW + 24 * 3600_000)).toBeNull();
-		expect(registry.recent.map((run) => run.id)).toEqual(["r4", "r3", "r2", "r1", "r0"]);
+		// Only the latest 20 are kept, newest first.
+		expect(registry.recent).toHaveLength(20);
+		expect(registry.recent[0]?.id).toBe("r99");
+		expect(registry.recent[19]?.id).toBe("r80");
 	});
 
 	it("names a run's repo for when it started", () => {

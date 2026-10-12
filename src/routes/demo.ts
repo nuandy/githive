@@ -12,7 +12,7 @@ import { callTool } from "../toolkit/mcp";
 import type { AppEnv } from "./shared";
 
 // Honeycomb demo runs, for anyone signed in: GitHive's hosted agents build a small word game in a fresh public repo of
-// the person's own, while they watch its Hive tab (see demo/demo-run.ts). One runs at a time and a few a day, since
+// the person's own, while they watch its Hive tab (see demo/demo-run.ts). One runs at a time and up to 100 a day, since
 // every run spends GitHive's model account.
 
 /** The settings a demo repo starts with: one approval from GitHive's reviewers, and the game's tests before landing. */

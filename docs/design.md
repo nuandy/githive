@@ -1258,7 +1258,7 @@ approval and `npm test` before landing, and its backlog has 13 pieces
 (`src/demo/backlog.ts`). It then starts six hosted agents on the repo for 45
 minutes, and the repo's Hive tab shows how the run is going. Any signed-in
 person may start one, since the run spends a bounded amount: one run goes at a
-time, five a day across everyone, held by the `DemoRun` registry.
+time, 100 a day across everyone, held by the `DemoRun` registry.
 
 **The builder.** A hosted agent starts one on each piece it claims, and
 `build` claims the given paths as `githive-builder`, under a change id made

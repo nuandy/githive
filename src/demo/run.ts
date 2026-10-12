@@ -15,7 +15,7 @@ export const WATCH_MS = 60_000;
 export const RUN_GIVES_UP_MS = (RUN_MINUTES + 30) * 60_000;
 
 /** At most this many runs start in a day (UTC), across everyone, since each spends GitHive's model account. */
-export const RUNS_PER_DAY = 5;
+export const RUNS_PER_DAY = 100;
 
 /** A run that hasn't said it finished this long after it started no longer holds the one running slot. */
 export const SLOT_LAPSES_MS = RUN_GIVES_UP_MS + 5 * 60_000;
@@ -47,7 +47,7 @@ export interface Registry {
 
 const dayOf = (now: number) => new Date(now).toISOString().slice(0, 10);
 
-/** Why a new run can't start now, or null if it can: one runs at a time, and a few a day. */
+/** Why a new run can't start now, or null if it can: one runs at a time, and up to 100 a day. */
 export function refusal(registry: Registry, now: number): string | null {
 	const running = registry.running && now - registry.running.since < SLOT_LAPSES_MS ? registry.running : undefined;
 	if (running) return `a demo run is going already: watch it at ${running.fullName}`;
