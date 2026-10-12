@@ -350,11 +350,12 @@ describe("GitHub's changes coming back", { timeout: 120_000 }, () => {
 		// One landing record for every merge, as the repo's is, so a lease held elsewhere makes the job's merge wait.
 		const shared = memoryLanding();
 		extra.landing = () => shared;
-		extra.mergeLimits = { answerWithinMs: 200, pollMs: 50 };
 		await land("c-1", { "src/a.js": "a\n" });
 		const pushed = github.push({ "docs/notes.md": "from GitHub\n" });
 		await ready("c-2", { "src/b.js": "b\n" });
 		expect(await call("merge", { change: "c-2", agent: "a" }, "a")).toMatchObject({ ok: true });
+		// Bounded this tightly, only the job's merges: agent a's, on a busy machine, could answer pending.
+		extra.mergeLimits = { answerWithinMs: 200, pollMs: 50 };
 		expect(await stepUntil("merge")).toMatchObject({ step: "merge", commit: pushed });
 		// Another merge holds the lease: the job's merge answers pending within its bound, and its next alarm is set.
 		expect(await shared.turn("someone", "x-1", "h".repeat(40), Date.now(), 60_000)).toEqual({ lease: true });
@@ -373,6 +374,7 @@ describe("GitHub's changes coming back", { timeout: 120_000 }, () => {
 		expect(await settle()).toMatchObject({ step: "done", commit: pushed });
 		expect(server.git("show", "main:docs/notes.md")).toBe("from GitHub\n");
 		expect(server.git("ls-tree", "--name-only", "-r", "main")).not.toContain("src/c.js");
+		delete extra.mergeLimits;
 		expect(await call("merge", { change: "c-3", agent: "a" }, "a")).toMatchObject({ ok: true });
 		expect(lastMerge().parents[1]).toBe(other);
 	});
