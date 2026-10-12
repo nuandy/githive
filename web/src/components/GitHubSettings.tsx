@@ -93,8 +93,9 @@ export function GitHubSettings({
 				</div>
 				<fieldset className="box__body repo-settings__fields" disabled={busy}>
 					<p className="muted">
-						A GitHub repo GitHive's GitHub app is installed on. Whatever GitHub's branch gains (the pull request's
-						merge, or commits pushed there) comes back as a change by githive-github, landing through the checks.
+						Connect this repo to a GitHub repo that has GitHive's GitHub App installed. GitHive sends its work there,
+						and brings back whatever lands on GitHub, a merged pull request or commits pushed there directly, as a
+						change that goes through the checks like any other.
 					</p>
 					{github && !github.inbound ? (
 						<p className="callout">
