@@ -1327,7 +1327,10 @@ are stamped `service:githive-builder`. Its tools:
   each round of work (the first build, and each revision), it's refused once
   more with a request to review the change itself, against its brief and the
   repo's contract, as its reviewer will: a rejection costs a round of fixing and
-  reviewing, and the look costs a turn.
+  reviewing, and the look costs a turn. Until it finishes, `reviews` doesn't
+  offer the change: the builder pushes as it works, and a review of a commit its
+  next push replaces is wasted. Finishing rings the hive, since no record says
+  the change is ready.
 
 A hosted reviewer's rejection sends the change back to the builder with its
 findings (another agent's rejection, or failed checks at landing, leave it

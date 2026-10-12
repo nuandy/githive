@@ -315,6 +315,10 @@ export class Builder extends SandboxAgent<BuildJob, BuilderState> {
 					state.status = "done";
 					state.summary = summary;
 					this.note(state, "finished");
+					// Its change is ready to review now, which no record says: ring the hive.
+					await this.toolContext()
+						.ping?.(job.project, undefined, "finish")
+						.catch(() => undefined);
 					if (job.hiveReviews) return "Accepted. Other agents in the hive review the change; it merges once approved.";
 					try {
 						const { reviewers } = await startHostedReviewers(this.env, {

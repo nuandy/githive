@@ -251,6 +251,7 @@ function repoCacheParts(env: Env) {
 		summarize: (repo, patch) => env.REPO_INDEX.getByName("all").summarize(`repo:${repo}`, patch),
 		ping: async (repo, event, tool) =>
 			void (await env.REPO_CACHE?.getByName(`repo:${repo}`).ping("records", true, event ? [event] : [], tool)),
+		buildersAtWork: (repo, changes) => buildersAtWork(env, repo, changes),
 		// Claims for advice, cached so a busy repo isn't read whole on every call.
 		keptClaims: (repo, read) => keptRead(env, repo, "claims-advice", KEPT_CLAIMS_MS, read),
 		// Heads read from forks, plus those push events reported from the claim holders' forks (see push-events.ts).
@@ -865,6 +866,18 @@ export async function builderCredentials(env: Env, repo: string, change: string)
 	const { read, source } = await changeBrief(env, repo, change);
 	const write = await source("write");
 	return { token: write.token, base: { remote: read.url, token: read.token } };
+}
+
+/** Which of `changes` GitHive's hosted builder is still at, queued or working: their pushes aren't final yet. */
+async function buildersAtWork(env: Env, repo: string, changes: string[]) {
+	const states = await Promise.all(
+		changes.map((change) => rpc(env.BUILDER.getByName(changeRepoName(repo, change)).state()).catch(() => null)),
+	);
+	const atWork = (index: number) => {
+		const status = states[index]?.status;
+		return status === "queued" || status === "working";
+	};
+	return new Set(changes.filter((_, index) => atWork(index)));
 }
 
 /** What GitHive's hosted agents on a change are doing: its builder, if any, and each role's reviewer of `head`. */

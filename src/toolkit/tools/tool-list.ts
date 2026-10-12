@@ -281,8 +281,10 @@ const TOOL_LIST = [
 		description:
 			"The reviews you may give now: changes pushed, not yours, not voted on by you and not sent " +
 			"back, still needing approvals you can give (a role that can block, if you hold one it awaits; " +
-			"else ordinary ones), with how many more each needs and who's reviewing it already. Reviews " +
-			"you started first, then roles that can block, fewest approvals, oldest; equals in an order of " +
+			"else ordinary ones), with how many more each needs and who's reviewing it already. A change " +
+			"GitHive's builder is still working on isn't listed until it finishes. Reviews you started " +
+			"first, then changes you rejected an earlier commit of (with what you found, in earlier), then " +
+			"roles that can block, fewest approvals, oldest; equals in an order of " +
 			"your own, so agents looking at once don't all take the same. Pick one, get it with " +
 			"credentials (its change), vote.",
 		inputSchema: { type: "object", properties: { repo: str, agent: str }, required: ["repo", "agent"] },

@@ -374,6 +374,44 @@ describe("review holds through the toolkit", { timeout: 120_000 }, () => {
 	});
 });
 
+describe("a change GitHive's builder is still working on", () => {
+	it("isn't offered for review until the builder finishes, since its next push replaces the commit", async () => {
+		const server = await startGitServer();
+		const work = mkdtempSync(join(tmpdir(), "githive-building-"));
+		try {
+			const atWork = new Set(["built-here"]);
+			const ctx: ToolContext = {
+				remote: async () => ({ url: server.url, token: "unused" }),
+				batchGit: () => memoryBatchGit({ url: server.url, token: "unused" }),
+				changeRemote: async () => ({ url: server.url, token: "unused" }),
+				head: async () => server.git("rev-parse", "main").trim(),
+				hosted: true,
+				buildersAtWork: async (_repo, changes) => new Set(changes.filter((change) => atWork.has(change))),
+			};
+			const call = (name: string, args: Record<string, unknown>) =>
+				callTool(name, { repo: "p", ...args }, ctx) as Promise<Record<string, unknown>>;
+			await call("settings", { required: 1, vetoes: [] });
+			for (const [change, agent] of [
+				["built-here", "githive-forager"],
+				["outside", "githive-scout"],
+			] as const) {
+				await call("claim", { change, agent, paths: [`src/${change}/`], intent: change });
+				await pushChange(server.url, work, agent, change, { [`src/${change}/x.js`]: `${change}\n` });
+			}
+			const offered = async () =>
+				((await call("reviews", { agent: "githive-nurse" })) as { reviews: { change: string }[] }).reviews.map(
+					(review) => review.change,
+				);
+			expect(await offered()).toEqual(["outside"]);
+			atWork.clear();
+			expect((await offered()).sort()).toEqual(["built-here", "outside"]);
+		} finally {
+			await server.close();
+			rmSync(work, { recursive: true, force: true });
+		}
+	});
+});
+
 describe("warming the checks when a merge is near", { timeout: 60_000 }, () => {
 	it("warms for checks at the start, on status and on approval; for landing, from the claim on", async () => {
 		const server = await startGitServer();

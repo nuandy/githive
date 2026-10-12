@@ -109,6 +109,8 @@ export interface ToolContext {
 	/** Tells the dashboard's open pages that the repo's records changed, and how, for the hive's feed. */
 	/** Tells the repo's watchers that `tool` wrote (see RepoCache.ping). */
 	ping?: (repo: string, event?: HiveEvent, tool?: string) => Promise<void>;
+	/** Which of these changes GitHive's hosted builder is still working on: they aren't ready to review yet. */
+	buildersAtWork?: (repo: string, changes: string[]) => Promise<Set<string>>;
 	/** Warms the repo's check container in the background when a merge is likely soon (see Gate.warmUp). */
 	warmChecks?: (
 		repo: string,
