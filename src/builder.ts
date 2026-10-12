@@ -18,6 +18,8 @@ const LAST_PUSHED_HEAD = "builder-last-pushed-head";
 export interface BuildJob extends ChangeJob {
 	/** Read access to the project, for merging in what has landed since. */
 	base: { remote: string; token: string };
+	/** Other agents in the repo's hive review it (a demo run's), so finishing starts no reviewers of GitHive's. */
+	hiveReviews?: boolean;
 }
 
 export interface BuilderState extends AgentState {
@@ -290,6 +292,7 @@ export class Builder extends SandboxAgent<BuildJob, BuilderState> {
 					state.status = "done";
 					state.summary = summary;
 					this.note(state, "finished");
+					if (job.hiveReviews) return "Accepted. Other agents in the hive review the change; it merges once approved.";
 					try {
 						const { reviewers } = await startHostedReviewers(this.env, {
 							repo: job.project,

@@ -70,3 +70,10 @@
 .agents__table thead th:not(:first-child) {
 	font-variant-numeric: tabular-nums;
 }
+
+.hosted-agents__form {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 8px 16px;
+}

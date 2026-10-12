@@ -32,6 +32,14 @@ describe("who holds a role", () => {
 		expect(holdsRole(ungranted, "security", cast("security-1", "service:x/security-1"))).toBe(false);
 	});
 
+	it("by default also GitHive's hosted agents, each reviewing under its own name", () => {
+		expect(holdsRole(ungranted, "security", cast("githive-scout", "service:githive-scout"))).toBe(true);
+		expect(holdsRole(ungranted, "security", cast("githive-scout", undefined))).toBe(true);
+		// A name that isn't one of theirs, or an agent of a person's calling itself one.
+		expect(holdsRole(ungranted, "security", cast("githive-wasp", "service:githive-wasp"))).toBe(false);
+		expect(holdsRole(ungranted, "security", cast("githive-scout", "service:x/githive-scout"))).toBe(false);
+	});
+
 	it("an agent named in the grant, voting with its own key: its name can't be borrowed", () => {
 		expect(holdsRole(granted, "security", cast("security-1", "service:x/security-1"))).toBe(true);
 		// Another agent's key, calling itself security-1.

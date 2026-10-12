@@ -1,34 +1,27 @@
 import { DurableObject } from "cloudflare:workers";
-import { statusOf } from "../errors";
-import { callTool } from "../toolkit/mcp";
-import { startHostedBuilder, toolContextFor } from "../toolkit/env";
-import type { BacklogView } from "../toolkit/work";
+import type { HostedAgent } from "../hosted-agents";
+import { toolContextFor } from "../toolkit/env";
 import {
 	type Registry,
 	type RunSlot,
 	type RunState,
-	RUN_MS,
-	TICK_MS,
-	TRIES_PER_PIECE,
-	WORKERS,
+	DEMO_AGENTS,
+	RUN_MINUTES,
+	WATCH_MS,
 	ended,
 	refusal,
-	runOver,
+	runEnding,
 	started,
 } from "./run";
 
-// Honeycomb demo runs (see run.ts). The instance named "registry" holds the limits: one run at a time, a few a day.
-// Each run has an instance of its own ("run:<id>") that drives its workers on an alarm. A worker without a change
-// looks at the backlog in its own order, claims the first piece free and starts GitHive's hosted builder on it; the
-// hosted reviewers review it and it lands, or its builder gives up and releases it. Once the change is out of the
-// claims, the worker looks again. Nothing here assigns work: each worker takes what it finds, as any agent does.
-
-/** Ticks in a row that may fail before a run ends as failed. */
-const FAILING_MOST = 15;
+// Honeycomb demo runs (see run.ts), one class in two parts by instance name:
+// - "registry" holds the limits: one run at a time, a few a day.
+// - "run:<id>" starts GitHive's hosted agents on the run's repo and watches them, to say how the run is going and when
+//   it's over. They're the same agents anyone can add to a repo, and nothing here tells them what to do.
 
 const EMPTY_REGISTRY: Registry = { day: { date: "", started: 0 }, recent: [] };
 
-/** The identity a demo run's calls are stamped with, acting as GitHive's own hosted agents. */
+/** The context a run's setup runs in, before its agents start. */
 export const demoContext = (env: Env) => toolContextFor(env, "service:githive-demo", { hosted: true });
 
 export class DemoRun extends DurableObject<Env> {
@@ -56,97 +49,37 @@ export class DemoRun extends DurableObject<Env> {
 
 	// A run.
 
-	/** Starts this run's workers on a repo that is set up already: its files, settings and backlog. */
+	/** Starts a run's agents on a repo that's set up already: its files, settings and backlog. */
 	async begin(input: Pick<RunState, "id" | "repo" | "fullName" | "by">) {
-		const state: RunState = {
-			...input,
-			startedAt: Date.now(),
-			status: "running",
-			workers: WORKERS.map((name) => ({ name })),
-			tries: {},
-			finished: [],
-			failing: 0,
-		};
-		await this.ctx.storage.put("run", state);
-		await this.ctx.storage.setAlarm(Date.now());
+		const startedAt = Date.now();
+		await this.ctx.storage.put("run", { ...input, startedAt, status: "running" } satisfies RunState);
+		const hive = { repo: input.repo, count: DEMO_AGENTS, minutes: RUN_MINUTES, by: input.by };
+		await this.hiveOf(input.repo).start(hive);
+		await this.ctx.storage.setAlarm(startedAt + WATCH_MS);
 	}
 
-	/** Where the run stands, for the dashboard. */
+	/** Where the run stands, with each agent's own account, for the dashboard. */
 	async status() {
-		return (await this.ctx.storage.get<RunState>("run")) ?? null;
+		const run = await this.ctx.storage.get<RunState>("run");
+		if (!run) return null;
+		const hive = await this.hiveOf(run.repo).status();
+		return { ...run, agents: hive?.agents ?? [] };
 	}
 
-	/** A toolkit call as the run's hosted agents (tests answer them instead). */
-	protected callTool(name: string, args: Record<string, unknown>): Promise<unknown> {
-		return callTool(name, args, demoContext(this.env));
+	/** The repo's hosted agents (tests stand in for them). */
+	protected hiveOf(repo: string): Pick<HostedAgent, "start" | "status" | "stopAll"> {
+		return this.env.HOSTED_AGENT.getByName(`hive:${repo}`);
 	}
 
-	/** Starts GitHive's hosted builder on a claimed change (tests note it instead). */
-	protected startBuilder(repo: string, change: string): Promise<unknown> {
-		return startHostedBuilder(this.env, { repo, change });
-	}
-
+	/** The run's look at its agents: it's over once every agent has stopped, or long past its time. */
 	async alarm() {
-		const state = await this.ctx.storage.get<RunState>("run");
-		if (!state || state.status !== "running") return;
-		try {
-			await this.tick(state);
-			state.failing = 0;
-		} catch (err) {
-			state.failing++;
-			console.error(`demo run ${state.id}: a tick failed (${state.failing} in a row)`, statusOf(err).message);
-			if (state.failing >= FAILING_MOST) await this.end(state, "failed", statusOf(err).message);
-		}
-		await this.ctx.storage.put("run", state);
-		if (state.status === "running") await this.ctx.storage.setAlarm(Date.now() + TICK_MS);
-	}
-
-	/** One look at every worker: note what finished, give idle workers work, and end the run when it's over. */
-	private async tick(state: RunState) {
-		const claims = (await this.callTool("claims", { repo: state.repo })) as { change: string }[];
-		const held = new Set(claims.map((claim) => claim.change));
-		const now = Date.now();
-		for (const worker of state.workers) {
-			if (!worker.change || held.has(worker.change)) continue;
-			state.finished.push({ piece: worker.change, worker: worker.name, at: now });
-			delete worker.change;
-		}
-		// Past its time, the run lets what's being built finish, and takes nothing new.
-		const takesWork = now - state.startedAt <= RUN_MS;
-		let left = 0;
-		for (const worker of state.workers) {
-			if (worker.change) continue;
-			const backlog = (await this.callTool("backlog", { repo: state.repo, agent: worker.name })) as BacklogView;
-			const open = backlog.open.filter((piece) => (state.tries[piece.id] ?? 0) < TRIES_PER_PIECE);
-			left = open.length + backlog.waiting.length;
-			const piece = open[0];
-			if (takesWork && piece) await this.take(state, worker, piece);
-		}
-		if (runOver(state, left, now)) await this.end(state, left === 0 ? "done" : "stopped");
-	}
-
-	/** Claims `piece` for `worker` and starts a hosted builder on it; a refused claim waits for the next tick. */
-	private async take(state: RunState, worker: RunState["workers"][number], piece: BacklogView["open"][number]) {
-		const intent = piece.intent ? `${piece.title}\n\n${piece.intent}` : piece.title;
-		const args = { repo: state.repo, change: piece.id, agent: worker.name, paths: piece.paths ?? [], intent };
-		const claimed = (await this.callTool("claim", args)) as { ok?: boolean };
-		if (claimed.ok === false) return;
-		state.tries[piece.id] = (state.tries[piece.id] ?? 0) + 1;
-		try {
-			await this.startBuilder(state.repo, piece.id);
-			worker.change = piece.id;
-		} catch (err) {
-			// No builder means nobody would ever push to the claim: give it up, so the piece is free again.
-			console.error(`demo run ${state.id}: starting a builder on ${piece.id} failed`, statusOf(err).message);
-			const release = { repo: state.repo, change: piece.id, agent: worker.name, reason: "its builder didn't start" };
-			await this.callTool("release", release).catch(() => undefined);
-		}
-	}
-
-	private async end(state: RunState, status: RunState["status"], note?: string) {
-		state.status = status;
-		state.endedAt = Date.now();
-		if (note) state.note = note;
-		await this.env.DEMO_RUN.getByName("registry").release(state.id);
+		const run = await this.ctx.storage.get<RunState>("run");
+		if (run?.status !== "running") return;
+		const hive = await this.hiveOf(run.repo).status();
+		const ending = runEnding(run, hive?.agents ?? [], Date.now());
+		if (!ending) return this.ctx.storage.setAlarm(Date.now() + WATCH_MS);
+		if (ending === "stopped") await this.hiveOf(run.repo).stopAll();
+		await this.ctx.storage.put("run", { ...run, status: ending, endedAt: Date.now() } satisfies RunState);
+		await this.env.DEMO_RUN.getByName("registry").release(run.id);
 	}
 }

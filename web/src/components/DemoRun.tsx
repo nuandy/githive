@@ -64,16 +64,17 @@ export function DemoCard({ api }: { api: DemoApi }) {
 
 /** What a demo run is doing, in a sentence, for the banner. */
 export function runWords(run: DemoRunStatus, now = Date.now()): string {
-	const done = `${run.finished.length} of ${counted(run.pieces, "piece")} finished`;
-	const building = run.workers.filter((worker) => worker.change).length;
+	const finished = run.agents.reduce((sum, agent) => sum + agent.finished.length, 0);
+	const done = `${finished} of ${counted(run.pieces, "piece")} finished`;
 	if (run.status === "running") {
-		const agents = building ? `${counted(building, "agent")} building now` : "agents picking their next piece";
-		return `A demo run, started by ${run.by} ${timeAgo(new Date(run.startedAt).toISOString(), now)}: ${agents}, ${done}.`;
+		const building = run.agents.filter((agent) => agent.change).length;
+		const reviewing = run.agents.filter((agent) => agent.reviewing).length;
+		const started = timeAgo(new Date(run.startedAt).toISOString(), now);
+		return `A demo run, started by ${run.by} ${started}: ${building} building, ${reviewing} reviewing, ${done}.`;
 	}
 	const ended = run.endedAt ? ` ${timeAgo(new Date(run.endedAt).toISOString(), now)}` : "";
-	if (run.status === "done") return `This demo run finished${ended}: every piece of the backlog has been built.`;
-	if (run.status === "stopped") return `This demo run stopped taking work${ended}, its time up: ${done}.`;
-	return `This demo run ended early${ended}${run.note ? `: ${run.note}` : ""}.`;
+	if (run.status === "done") return `This demo run finished${ended}: ${done}.`;
+	return `This demo run was stopped${ended}, long past its time: ${done}.`;
 }
 
 /** The banner on a demo repo's Hive tab; nothing for a repo no demo run made. */
@@ -82,7 +83,8 @@ export function DemoBanner({ repo, load }: { repo: string; load: (repo: string) 
 	if (!run.data) return null;
 	return (
 		<p className={`callout demo-banner demo-banner--${run.data.status}`} role="status">
-			{runWords(run.data)} GitHive's agents are named for jobs in a hive: githive-forager, githive-scout and so on.
+			{runWords(run.data)} Six of GitHive's agents, named for jobs in a hive (githive-forager, githive-scout…), each run
+			on their own: they review one another's changes and take pieces of the backlog, and nothing assigns the work.
 		</p>
 	);
 }

@@ -591,6 +591,13 @@ export const api = {
 	/** A person gives up GitHub's change: its claim released, its paths free, until GitHub's branch moves or asked. */
 	giveUpGitHub: (repo: string, change: string) =>
 		call<GiveUpAnswer>("POST", `/repos/${repoPath(repo)}/changes/${encodeURIComponent(change)}/give-up`, {}),
+	/** GitHive's hosted agents on a repo, if it has had any. */
+	hostedAgents: (repo: string) => call<HiveStatus | null>("GET", `/repos/${repoPath(repo)}/hosted-agents`),
+	/** People who can write, and whom an admin lists: start `count` hosted agents for `minutes`. */
+	startHostedAgents: (repo: string, count: number, minutes: number) =>
+		call<HiveStatus>("POST", `/repos/${repoPath(repo)}/hosted-agents`, { count, minutes }),
+	/** People who can write: stop the repo's hosted agents; what they started finishes on its own. */
+	stopHostedAgents: (repo: string) => call<HiveStatus | null>("DELETE", `/repos/${repoPath(repo)}/hosted-agents`),
 	/** Looks at GitHub's branch now and brings its changes back, even a commit given up or sent to a person before. */
 	githubAgain: (repo: string) =>
 		call<{ fromGitHub?: RepoGitHub["fromGitHub"] }>("POST", `/repos/${repoPath(repo)}/github/again`, {}),
@@ -603,13 +610,33 @@ export interface DemoRunStatus {
 	fullName: string;
 	by: string;
 	startedAt: number;
-	status: "running" | "done" | "stopped" | "failed";
-	workers: { name: string; change?: string }[];
-	finished: { piece: string; worker: string; at: number }[];
+	status: "running" | "done" | "stopped";
+	/** Each agent's own account: its change, the review it's on, and what it has done. */
+	agents: HostedAgentAccount[];
 	/** How many pieces the backlog has. */
 	pieces: number;
 	endedAt?: number;
-	note?: string;
+}
+
+/** One of GitHive's hosted agents in a repo's hive: its change, the review it's on, and what it has done. */
+export interface HostedAgentAccount {
+	name: string;
+	change?: string;
+	reviewing?: { change: string };
+	finished: { piece: string; at: number }[];
+	reviewed: number;
+	done: boolean;
+}
+
+/** A repo's hosted agents, as GET /repos/:owner/:name/hosted-agents answers (null when it never had any). */
+export interface HiveStatus {
+	names: string[];
+	startedAt: number;
+	until: number;
+	by: string;
+	agents: HostedAgentAccount[];
+	/** Whether any agent is still taking turns. */
+	working: boolean;
 }
 
 /** Demo runs: GitHive's hosted agents build Honeycomb in a new public repo of the caller's own. */

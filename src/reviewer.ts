@@ -5,6 +5,8 @@ import { gitGuidance } from "./git-guidance";
 import { changeRepoName, toolContextFor } from "./toolkit/env";
 import { callTool, votesFor } from "./toolkit/mcp";
 import { makeStamper } from "./toolkit/stamp";
+import { GITHUB_AGENT } from "./toolkit/github-settings";
+import { HOSTED_PREFIX } from "./toolkit/tools/repo";
 
 // The hosted reviewer: one agent per change, role and commit. It checks out the exact commit
 // with a read-only token, runs the code, and votes with evidence.
@@ -18,7 +20,19 @@ export interface ReviewJob extends ChangeJob {
 	buildSummary?: string;
 	/** Try to merge after approving. The toolkit refuses until all approvals are in, so the last vote's attempt lands. */
 	mergeWhenApproved?: boolean;
+	/**
+	 * The hosted agent reviewing, when one of a hive's agents reviews under its own name (a demo run's); otherwise
+	 * GitHive's reviewer for the role. Each votes as itself, so they count as separate reviewers.
+	 */
+	reviewer?: string;
 }
+
+/** Who votes: the hosted agent reviewing, or GitHive's reviewer for the role. */
+const voterOf = (job: ReviewJob) => job.reviewer ?? `githive-${job.role}`;
+
+/** The identity its vote is stamped with. */
+const identityOf = (job: ReviewJob) =>
+	job.reviewer ? `service:${job.reviewer}` : `service:githive-reviewer:${job.role}`;
 
 export interface ReviewerState extends AgentState {
 	verdict?: "approve" | "reject";
@@ -68,16 +82,14 @@ export class Reviewer extends SandboxAgent<ReviewJob, ReviewerState> {
 	protected readonly kind = "reviewer";
 
 	private toolContext(job: ReviewJob) {
-		return toolContextFor(this.env, `service:githive-reviewer:${job.role}`, { hosted: true });
+		return toolContextFor(this.env, identityOf(job), { hosted: true });
 	}
 
 	/** Vote on the commit, stamped as this reviewer when a stamp key is configured. */
 	private async vote(job: ReviewJob, verdict: "approve" | "reject", evidence: string) {
 		const votes = votesFor(toolContextFor(this.env, undefined, { hosted: true }), job.project);
-		const stamper = this.env.STAMP_KEY
-			? await makeStamper(this.env.STAMP_KEY, `service:githive-reviewer:${job.role}`)
-			: undefined;
-		await votes.vote({ commit: job.head, reviewer: `githive-${job.role}`, role: job.role, verdict, evidence }, stamper);
+		const stamper = this.env.STAMP_KEY ? await makeStamper(this.env.STAMP_KEY, identityOf(job)) : undefined;
+		await votes.vote({ commit: job.head, reviewer: voterOf(job), role: job.role, verdict, evidence }, stamper);
 	}
 
 	protected instructions(job: ReviewJob) {
@@ -144,9 +156,9 @@ export class Reviewer extends SandboxAgent<ReviewJob, ReviewerState> {
 					Object.assign(state, { status: "done", verdict, summary, evidence });
 					this.note(state, `voted ${verdict} on ${job.head}`);
 					if (job.mergeWhenApproved && verdict === "approve") await this.tryMerge(job, state);
-					// A rejected change from the hosted builder goes back to it with the findings.
-					if (verdict === "reject" && job.agent === "githive-builder")
-						await this.sendBack(job, state, summary, evidence);
+					// A rejected change from a hosted builder goes back to it with the findings. GitHub's changes have none.
+					const builtHere = job.agent.startsWith(HOSTED_PREFIX) && job.agent !== GITHUB_AGENT;
+					if (verdict === "reject" && builtHere) await this.sendBack(job, state, summary, evidence);
 					return "Vote recorded.";
 				},
 			}),

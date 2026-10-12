@@ -1,30 +1,24 @@
-// A Honeycomb demo run: GitHive's hosted agents build the game in a fresh public repo while whoever started it watches
-// the Hive tab. Its six workers are named for jobs in a hive; each takes work the way any agent does (see demo-run.ts),
-// so nothing assigns it. These are the run's limits and the small decisions it makes, kept apart to be tested.
+// A Honeycomb demo run: GitHive's hosted agents (see hosted-agents.ts) build the game in a fresh public repo while
+// whoever started it watches the Hive tab. These are the run's limits and the small decisions it makes, kept apart to
+// be tested.
 
-/** The run's workers, as hosted agents (GitHive's own names start with githive-). */
-export const WORKERS = ["forager", "scout", "nurse", "guard", "waggle", "drone"].map((job) => `githive-${job}`);
+/** How many of GitHive's hosted agents a run starts. */
+export const DEMO_AGENTS = 6;
 
-/** How long workers take new pieces; builders already started finish within their own limits. */
-export const RUN_MS = 45 * 60_000;
+/** How long agents take new pieces; a builder or review already started finishes within its own limits. */
+export const RUN_MINUTES = 45;
 
-/** How often a run looks at its workers. */
-export const TICK_MS = 20_000;
+/** How often the run looks at its agents. */
+export const WATCH_MS = 60_000;
 
-/** How many builders may try one piece before the run leaves it. */
-export const TRIES_PER_PIECE = 2;
+/** Past this, a run whose agents haven't all stopped is stopped. */
+export const RUN_GIVES_UP_MS = (RUN_MINUTES + 30) * 60_000;
 
 /** At most this many runs start in a day (UTC), across everyone, since each spends GitHive's model account. */
 export const RUNS_PER_DAY = 5;
 
 /** A run that hasn't said it finished this long after it started no longer holds the one running slot. */
-export const SLOT_LAPSES_MS = RUN_MS + 30 * 60_000;
-
-export interface Worker {
-	name: string;
-	/** The change it's building, while it's in the claims. */
-	change?: string;
-}
+export const SLOT_LAPSES_MS = RUN_GIVES_UP_MS + 5 * 60_000;
 
 export interface RunState {
 	id: string;
@@ -33,16 +27,8 @@ export interface RunState {
 	/** Who started it, as the dashboard names them. */
 	by: string;
 	startedAt: number;
-	status: "running" | "done" | "stopped" | "failed";
-	workers: Worker[];
-	/** How many builders each piece has had. */
-	tries: Record<string, number>;
-	/** Pieces whose change left the claims, by how: what the dashboard shows of the run. */
-	finished: { piece: string; worker: string; at: number }[];
-	/** Ticks in a row that failed; enough of them end the run. */
-	failing: number;
+	status: "running" | "done" | "stopped";
 	endedAt?: number;
-	note?: string;
 }
 
 export interface RunSlot {
@@ -94,10 +80,9 @@ export function repoName(now: number) {
 	return `honeycomb-${stamp}`;
 }
 
-/** Whether the run is over: every piece landed or left, and no worker still building; or its time is up. */
-export function runOver(state: RunState, backlogLeft: number, now: number) {
-	const building = state.workers.some((worker) => worker.change);
-	if (building) return false;
-	if (backlogLeft === 0) return true;
-	return now - state.startedAt > RUN_MS;
+/** How a run ends, if it has: done once every agent has stopped, stopped once it's long past its time. */
+export function runEnding(run: RunState, agents: { done: boolean }[], now: number): "done" | "stopped" | null {
+	if (agents.length && agents.every((agent) => agent.done)) return "done";
+	if (now - run.startedAt > RUN_GIVES_UP_MS) return "stopped";
+	return null;
 }

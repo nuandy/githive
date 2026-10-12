@@ -1,4 +1,5 @@
 import { entriesOverlap } from "../claim-paths";
+import { isHiveAgent, isHiveIdentity } from "./hive-agents";
 import type { CasLog } from "../record-log";
 import { appendRecord } from "./records";
 import { type Stamper, stampPayload, verifyStamp } from "./stamp";
@@ -204,10 +205,18 @@ export function holdsRole(
 		const pool = poolOf(grant);
 		if (pool) return !!vote.by?.startsWith(`${pool}/`) && !author?.by?.startsWith(`${pool}/`);
 		if (/^(person|service):/.test(grant)) return vote.by === grant;
-		if (grant === "githive")
-			return vote.by ? vote.by === `service:githive-reviewer:${role}` : vote.reviewer === `githive-${role}`;
+		if (grant === "githive") return isGitHiveReviewer(vote, role);
 		return vote.reviewer === grant && (!vote.by || vote.by.endsWith(`/${grant}`));
 	});
+}
+
+/**
+ * GitHive's reviewer for `role`, or one of a repo's hosted agents (hive-agents.ts) reviewing under its own name: the
+ * voters the "githive" grant names. Without a stamp, the name alone says, since only GitHive's agents take githive-.
+ */
+function isGitHiveReviewer(vote: Pick<VoteRecord, "reviewer" | "by">, role: string) {
+	if (vote.by) return vote.by === `service:githive-reviewer:${role}` || isHiveIdentity(vote.by);
+	return vote.reviewer === `githive-${role}` || isHiveAgent(vote.reviewer);
 }
 
 /** The policy for a change touching `paths`, made stricter by every escalation whose paths it touches. */
