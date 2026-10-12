@@ -1,6 +1,7 @@
 import { DurableObject } from "cloudflare:workers";
 import { Traffic, objectLabel } from "./cache-traffic";
 import { countingRequests, describeCounts } from "./git-http";
+import type { KeptPushHints } from "./push-hints";
 import { rpc } from "./rpc";
 import { EVENTS_KEPT, type HiveEvent, eventKey, pushEvents, settledEvents } from "./hive-events";
 import { makeAgentFork, makeSeed } from "./toolkit/env";
@@ -282,6 +283,15 @@ export class RepoCache extends DurableObject<Env> {
 
 	async keepMergeCheck(change: string, kept: KeptMergeCheck) {
 		await this.ctx.storage.put(`merge:${change}`, kept);
+	}
+
+	/** What Clef made of a change's latest push, for its status (see push-hints.ts). */
+	async keptPushHints(change: string) {
+		return (await this.ctx.storage.get<KeptPushHints>(`push-hints:${change}`)) ?? null;
+	}
+
+	async keepPushHints(change: string, kept: KeptPushHints) {
+		await this.ctx.storage.put(`push-hints:${change}`, kept);
 	}
 
 	/** Note pushes from push events. Events can arrive late, twice or out of order, so the newest wins. */

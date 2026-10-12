@@ -18,6 +18,8 @@ export interface VoteRecord {
 	role: string;
 	verdict: "approve" | "reject";
 	evidence: string;
+	/** Clef found an approval's evidence too thin to show what was checked. A hint for people; it still counts. */
+	thin?: true;
 	at: string;
 	by?: string;
 	/** The voter's teams in the repo's org when they voted, as GitHive checked, so a grant to a team counts. */

@@ -275,7 +275,12 @@ async function reviewAccess(
 	// Agent names only: a person's identity stays in the records, out of logs.
 	console.log(`review access to ${repo} ${change} (${author}) for ${reviewer ?? "an unregistered caller"}`);
 	const into = held?.into ?? branch;
-	const earlier = reviewer ? await yourRejection(call, reviewer, change, head) : undefined;
+	const [earlier, pushed] = await Promise.all([
+		reviewer ? yourRejection(call, reviewer, change, head) : undefined,
+		ctx.pushHints?.(repo, change).catch(() => null),
+	]);
+	// What Clef made of the head's push, so a reviewer knows before reading it.
+	const hints = pushed?.head === head && pushed.hints.length ? { hints: pushed.hints } : {};
 	return {
 		change,
 		author,
@@ -288,6 +293,7 @@ async function reviewAccess(
 		...(into !== branch ? { into } : {}),
 		git: reviewCommands({ project, fork, into, change, head }),
 		...(earlier ? { earlier } : {}),
+		...hints,
 		note:
 			"read-only: review this commit, then vote on it, naming the change. Others aren't offered this review " +
 			"while you hold it." +

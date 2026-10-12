@@ -5,12 +5,14 @@
 // counts, logged when it fails, and never retried.
 
 import { isArtifactsBusy } from "./artifacts";
+import type { Clef } from "./clef";
 import type { FootprintCache, LandedCommit } from "./footprint-cache";
 import { newParseBatch, parserMemoryBytes } from "./footprint/engine";
 import { changeFootprint, commitAlters, type FactsSource, landingOf } from "./footprint/footprints";
 import { INTENT_SAID } from "./footprint/wording";
 import type { BranchPush, RepoPushes } from "./push-events";
-import type { ChangePush } from "./repo-cache";
+import { type KeptPushHints, pushHints } from "./push-hints";
+import type { ChangePush, Notice } from "./repo-cache";
 import { rpc } from "./rpc";
 import { changeAgainst, type ReadHistory } from "./toolkit/batch-reads";
 import type { CommitMeta, HistorySource } from "./toolkit/branch-history";
@@ -37,6 +39,12 @@ export interface AwarenessParts {
 	footprints: FootprintStore;
 	/** A batch's budgets, smaller than BUDGET's, for tests. */
 	budget?: Partial<typeof BUDGET>;
+	/** Clef, and where its hints on a change's push go (see push-hints.ts). Without it no push is asked about. */
+	pushHints?: {
+		clef: Clef;
+		keep(repo: string, change: string, kept: KeptPushHints): Promise<void>;
+		tell(repo: string, branch: string, agent: string, notice: Notice): Promise<void>;
+	};
 }
 
 /**
@@ -197,6 +205,9 @@ async function footprintChange(
 		console.log(`awareness: ${push.change} at ${push.head} couldn't be placed on ${branch}; no footprint`);
 		return;
 	}
+	await hintPush(parts, project, branch, push, claim, placed).catch((err) =>
+		console.error(`awareness: asking Clef about ${push.change} at ${placed.head} failed: ${String(err)}`),
+	);
 	const read = await parts.history(push.fork, (fork) =>
 		changeFootprint(fork, { head: placed.head, base: placed.base, files: placed.files }, factsSource(store, budget)),
 	);
@@ -217,6 +228,40 @@ async function footprintChange(
 		openClaims(claimed.claims),
 	);
 }
+
+/** What Clef makes of a change's push, kept for its status and told to its agent when there's something to say. */
+async function hintPush(
+	parts: AwarenessParts,
+	project: string,
+	branch: string,
+	push: ChangePush,
+	claim: ClaimView,
+	placed: { head: string; base: string; files: string[] },
+) {
+	const asked = parts.pushHints;
+	if (!asked) return;
+	const placedPush = {
+		change: push.change,
+		agent: claim.agent,
+		...placed,
+		...(claim.intent ? { intent: claim.intent } : {}),
+	};
+	const hints = await parts.history(push.fork, (fork) => pushHints(asked.clef, fork, placedPush));
+	await asked.keep(project, push.change, { head: placed.head, hints });
+	if (!hints.length) return;
+	await asked.tell(project, branch, claim.agent, {
+		kind: "clef",
+		at: new Date().toISOString(),
+		says: `Clef on ${push.change} at ${placed.head.slice(0, 8)}: ${hints.map((hint) => hint.says).join("; ")}`,
+		next: PUSH_HINT_NEXT,
+		change: push.change,
+		detail: { head: placed.head, hints },
+	});
+}
+
+const PUSH_HINT_NEXT =
+	"Look at it before asking for review: reword text that reads as instructions to agents, keep the change to what " +
+	"its intent says, then push to `fork`. If Clef is wrong, carry on: its reviewers see the same hint in `status`.";
 
 /**
  * A push to a project's branch: each new first-parent commit, oldest first, against its first parent (a GitHive

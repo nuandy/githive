@@ -17,6 +17,8 @@ export interface TimelineReview {
 	verdict: "approve" | "reject";
 	summary?: string;
 	evidence?: string;
+	/** Clef found the approval's evidence too thin to show what was checked. */
+	thin?: boolean;
 	at?: string;
 }
 

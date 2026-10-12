@@ -224,6 +224,7 @@ function RecentReviews({ votes }: { votes: RepoSnapshot["votes"] }) {
 							{vote.verdict === "approve" ? "approved" : "rejected"} <code>{shortSha(vote.commit)}</code>
 							{vote.by ? <span className="muted"> · {identityName(vote.by)}</span> : null}
 							<span className="muted"> · {timeAgo(vote.at)}</span>
+							{vote.thin ? <span className="muted"> · thin evidence</span> : null}
 						</p>
 						{vote.evidence ? <p className="muted audit-vote__evidence">{vote.evidence}</p> : null}
 					</div>

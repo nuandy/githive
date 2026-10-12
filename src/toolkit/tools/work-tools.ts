@@ -120,6 +120,11 @@ export const workTools: ToolHandlers = {
 				console.error(`working out ${change}'s lease failed`, String(err));
 				return undefined;
 			});
+		// What Clef made of the head's push: hints for its agent and its reviewers alike.
+		if (status.head) {
+			const kept = await ctx.pushHints?.(repo, change).catch(() => null);
+			if (kept?.head === status.head && kept.hints.length) reply.hints = kept.hints;
+		}
 		// Whether it merges cleanly and stays inside its claim: worth knowing before asking for review.
 		if (held && status.head && !landed) {
 			const checked = await mergeCheck(call, change, held, status.head).catch((err) => ({

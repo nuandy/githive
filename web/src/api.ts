@@ -164,6 +164,8 @@ export interface RepoSnapshot {
 		role: string;
 		verdict: "approve" | "reject";
 		evidence: string;
+		/** Clef found an approval's evidence too thin to show what was checked. */
+		thin?: boolean;
 		at: string;
 		by?: string;
 	}[];

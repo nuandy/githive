@@ -337,7 +337,8 @@ const TOOL_LIST = [
 			"Record your review verdict on the exact commit you reviewed. Name its `change` too: when you " +
 			"reject, the change's revision then comes back to you first, with your findings, to check. If a " +
 			"rejection's evidence seems too vague to act on, the reply says so (`vagueEvidence`): vote again, " +
-			"saying what is wrong, where, and what would fix it.",
+			"saying what is wrong, where, and what would fix it. An approval's evidence that doesn't say what you " +
+			"checked gets `thinEvidence`.",
 		inputSchema: {
 			type: "object",
 			properties: {

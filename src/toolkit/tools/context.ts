@@ -1,5 +1,6 @@
 import type { Level } from "../../auth/orgs";
 import type { Clef } from "../../clef";
+import type { KeptPushHints } from "../../push-hints";
 import { requiredString, statusOf } from "../../errors";
 import type { ChangeAwareness } from "../../footprint-cache";
 import type { Remote } from "../../git";
@@ -141,6 +142,8 @@ export interface ToolContext {
 		kept: (repo: string, change: string) => Promise<{ key: string; result: unknown } | null>;
 		keep: (repo: string, change: string, kept: { key: string; result: unknown }) => Promise<void>;
 	};
+	/** What Clef made of a change's latest push, by the head it was asked about (see push-hints.ts). */
+	pushHints?: (repo: string, change: string) => Promise<KeptPushHints | null>;
 	/** A GitHub repo (owner/name) through GitHive's App, or null if the App isn't installed. Unset without GitHub. */
 	github?: (repo: string) => Promise<GitHubLink | null>;
 	/**

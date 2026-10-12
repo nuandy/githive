@@ -17,7 +17,7 @@ export const reviewTools: ToolHandlers = {
 		const teams = (await ctx.teamsOf?.(repo)) ?? [];
 		const change = optionalString(args, "change");
 		const evidence = requiredString(args, "evidence");
-		const { vague } = await voteHints(ctx, { verdict, evidence });
+		const { vague, thin } = await voteHints(ctx, { verdict, evidence });
 		const outcome = await votesFor(ctx, repo, await shardVotesIfBusy(ctx, repo, registered, reviewer)).vote(
 			{
 				commit,
@@ -26,6 +26,7 @@ export const reviewTools: ToolHandlers = {
 				role: requiredString(args, "role"),
 				verdict,
 				evidence,
+				...(thin ? { thin: true as const } : {}),
 				...(teams.length ? { teams } : {}),
 			},
 			stamper,
@@ -33,8 +34,10 @@ export const reviewTools: ToolHandlers = {
 		// The review is done, so drop the hold credentials placed when the review began.
 		await ctx.reviews?.release(repo, holdKey(commit, requiredString(args, "role")), reviewer).catch(() => undefined);
 		if (verdict === "approve") await warmChecks("approved", commit);
-		// The vote counts either way; the reply only says the author may not be able to act on it.
-		return vague ? { ...(outcome as Record<string, unknown>), vagueEvidence: true } : outcome;
+		// The vote counts either way; the reply only says its evidence may not do its job.
+		if (vague) return { ...(outcome as Record<string, unknown>), vagueEvidence: true };
+		if (thin) return { ...(outcome as Record<string, unknown>), thinEvidence: true };
+		return outcome;
 	},
 	async request_review({ args, ctx, repo, registered, claimOf }) {
 		if (ctx.mayUseHosted && !(await ctx.mayUseHosted()))

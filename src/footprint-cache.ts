@@ -199,6 +199,16 @@ function awarenessParts(env: Env, footprints: FootprintStore): AwarenessParts {
 		branchHead: (repo, branch) => ctx.branchHead!(repo, branch),
 		forkOf: (repo, agent) => forkName(repo, agent),
 		footprints,
+		...(ctx.clef
+			? {
+					pushHints: {
+						clef: ctx.clef,
+						keep: (repo, change, kept) => env.REPO_CACHE.getByName(`repo:${repo}`).keepPushHints(change, kept),
+						tell: (repo, branch, agent, notice) =>
+							env.REPO_CACHE.getByName(`repo:${repo}`).notify(branch, [{ agent, notice }]),
+					},
+				}
+			: {}),
 	};
 }
 
