@@ -231,7 +231,7 @@ describe("bringing GitHub's branch into the project", { timeout: 60_000 }, () =>
 		expect(await mergeOntoMain(imported.head)).toEqual({ clean: true, files: ["docs/notes.md"] });
 	});
 
-	it("brings a squash onto a GitHub branch that moved on back untrusted: it can't tell what the squash took", async () => {
+	it("brings back untrusted a squash onto a GitHub branch that moved on: what it took is unknown", async () => {
 		await landOnMain({ "src/app.js": "two\n", "src/old.js": "old\n" });
 		pushPullBranch();
 		// A commit of GitHub's own lands first, so the squash's files are no commit of GitHive's.

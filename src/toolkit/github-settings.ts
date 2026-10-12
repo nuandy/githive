@@ -75,6 +75,12 @@ export interface GitHubSeen {
 	commit: string;
 }
 
+/**
+ * Who asks for GitHub's changes again: github_pr's refresh, which anyone who can write may send, or a person from the
+ * dashboard. Both restart what was brought back, sent to a person or failed; only a person takes back a give-up.
+ */
+export type AskedAgain = "refresh" | "person";
+
 /** The standing pull request as GitHive last saw it: a hint for the dashboard; GitHub has the truth. */
 export interface KnownPull {
 	number: number;
@@ -119,9 +125,9 @@ export interface GitHubSyncState {
 export interface GitHubSyncHandle {
 	/**
 	 * GitHub's branch is at `seen.commit`: bring it back if GitHive's main lacks it. Returns at once; the job runs in
-	 * steps of its own. A commit already brought back, or found on main, is left alone unless `again`.
+	 * steps of its own. A commit already brought back, or found on main, is left alone unless `asked` again.
 	 */
-	notice(seen: GitHubSeen, again?: boolean): Promise<GitHubSyncState>;
+	notice(seen: GitHubSeen, asked?: AskedAgain): Promise<GitHubSyncState>;
 	notePull(pull: KnownPull | null): Promise<void>;
 	/**
 	 * Someone gave up `change`, GitHub's change, releasing its claim (see giveUpGitHubChange): its job ends there, and

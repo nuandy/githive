@@ -29,9 +29,11 @@ export const githubTools: ToolHandlers = {
 		const seen = await link.defaultHead();
 		// A link made before modes brings nothing back.
 		const sync = bringsGitHubBack(registered) ? ctx.githubSync?.(repo) : undefined;
-		// No timers: someone asking is when GitHive looks, and refresh tries again what needed a person.
+		// No timers: someone asking is when GitHive looks, and refresh tries again what needed a person, though never
+		// what a person gave up.
+		const asked = refresh ? "refresh" : undefined;
 		const state = await sync
-			?.notice({ github: link.repo, branch: seen.branch, commit: seen.head }, refresh)
+			?.notice({ github: link.repo, branch: seen.branch, commit: seen.head }, asked)
 			.catch((err) => (console.error(`noticing ${link.repo}'s ${seen.branch} failed`, String(err)), undefined));
 		const inbound = inboundOf(state);
 		if (githubSync(registered) !== "pr")
@@ -138,7 +140,7 @@ export async function giveUpGitHubChange(
 		released: claim.change,
 		note:
 			"Its paths are free. GitHive brings GitHub's changes back again when GitHub's branch moves, or when asked " +
-			"(github_pr with refresh, or the dashboard).",
+			"(a person, from the dashboard).",
 	};
 }
 
@@ -153,7 +155,7 @@ export async function bringGitHubBackAgain(ctx: ToolContext, repo: string) {
 		fail(409, `${repo}'s link to ${link.repo} only mirrors: set github_sync to bring GitHub's changes back`);
 	const sync = ctx.githubSync?.(repo) ?? fail(503, "GitHive can't bring GitHub's changes back here");
 	const seen = await link.defaultHead();
-	return inboundOf(await sync.notice({ github: link.repo, branch: seen.branch, commit: seen.head }, true));
+	return inboundOf(await sync.notice({ github: link.repo, branch: seen.branch, commit: seen.head }, "person"));
 }
 
 // The connected GitHub repo, through GitHive's App.

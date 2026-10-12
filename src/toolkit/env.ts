@@ -191,7 +191,7 @@ function githubSyncParts(env: Env): Pick<ToolContext, "githubSync"> {
 		githubSync: (repo: string) => {
 			const sync = () => env.GITHUB_SYNC.getByName(`repo:${repo}`);
 			return {
-				notice: (seen, again) => rpc(sync().notice({ ...seen, repo }, again)),
+				notice: (seen, asked) => rpc(sync().notice({ ...seen, repo }, asked)),
 				notePull: (pull) => sync().notePull(pull),
 				gaveUp: (change, reason) => sync().gaveUp(change, reason),
 				state: () => rpc(sync().state()),

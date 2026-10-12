@@ -72,7 +72,8 @@ people pushed there directly. They come back through GitHive's own path, so the 
    landing looks again. In mirror mode a push GitHub took means its main is GitHive's, so the read is made only
    when the push was refused. The `github_pr` tool, and so the dashboard's pull request button, notice it as well;
    showing the repo page doesn't. GitHive never polls: no timers. A commit already brought back, found on main, or sent to a person isn't started again (unless
-   `github_pr` asks with `refresh`). A job that waited goes on from the step it waited at; one that failed starts
+   `github_pr` asks with `refresh`, which never takes back a give-up: see step 6). A job that waited goes on from
+   the step it waited at; one that failed starts
    again an hour on, or when asked, so a commit that can't come in doesn't start a container at every landing.
 2. **Imported.** The repo's `GitHubSync` starts a job (`github-sync.ts`, `github-inbound.ts`). Main's last 1,000
    first-parent commits are read through Artifacts' API first: a commit on them, or merged into them, needs no
@@ -127,9 +128,9 @@ people pushed there directly. They come back through GitHive's own path, so the 
    the one exception to "only the holder releases", recorded like a stale release (`stale: true`, the reason "GitHub's
    changes given up by <who>") and stamped with who did it; the audit accepts a stamped release of
    `githive-github`'s claim at any time (`giveUpGitHubChange`). Its paths are free at once. The job ends ("given up")
-   and waits: GitHub's branch moving starts it again, as does a person asking (the dashboard's "Bring them in again",
-   `POST /repos/:owner/:name/github/again`, or `github_pr` with `refresh`). Only GitHub's changes are given up this
-   way.
+   and waits: GitHub's branch moving starts it again, as does a person asking from the dashboard ("Bring them in
+   again", `POST /repos/:owner/:name/github/again`, which only a person may call). `github_pr` with `refresh`, which
+   any agent who can write may send, doesn't take a give-up back. Only GitHub's changes are given up this way.
 7. **Recorded.** The merge commit says "Bring in GitHub's changes (owner/name main at <sha>)", with the usual
    trailers.
 

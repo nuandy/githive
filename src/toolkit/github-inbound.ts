@@ -4,6 +4,7 @@ import { projectBranch } from "../project-branch";
 import type { Registry } from "./claims";
 import { type GitHubImports, importsRef, recordImport } from "./github-imports";
 import {
+	type AskedAgain,
 	bringsGitHubBack,
 	GITHUB_AGENT,
 	githubChangeId,
@@ -68,20 +69,25 @@ export function newJob(repo: string, seen: GitHubSeen, now = Date.now()): Inboun
 /**
  * What noticing GitHub's branch at `seen` starts: a new job, the job that waited going on from where it waited, or
  * nothing when one is running, the commit is known to be on main, or it was brought back, sent to a person or given
- * up already (unless `again`). A job that failed starts again after a while, so a commit that can't come in (a GitHub branch
- * sharing no history with main, say) doesn't start a container at every landing.
+ * up already (unless `asked` again; a give-up only by a person). A job that failed starts again after a while, so a
+ * commit that can't come in (a GitHub branch sharing no history with main, say) doesn't start a container at every
+ * landing.
  */
 export function noticed(
 	current: InboundJob | null | undefined,
 	known: string | null | undefined,
 	seen: GitHubSeen,
 	repo: string,
-	again = false,
+	asked?: AskedAgain,
 	now = Date.now(),
 ): InboundJob | null {
 	if (current && isRunning(current) && now - Date.parse(current.updatedAt) < LOST_AFTER_MS) return null;
+	const again = asked !== undefined;
 	if (!again && seen.commit === known) return null;
 	const same = current?.commit === seen.commit;
+	// A person gave it up: only a person asking again undoes that, never an agent's refresh.
+	const givenUp = same && current?.step === "given up";
+	if (givenUp && asked !== "person") return null;
 	if (current && same && current.step === "waiting") {
 		const { reason: _, ...waited } = current;
 		return { ...waited, step: current.resume ?? "import", attempts: 0, updatedAt: new Date(now).toISOString() };

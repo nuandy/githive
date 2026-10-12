@@ -34,7 +34,7 @@ let sync: GitHubSync;
 let privateKey: string;
 
 const handle = (): GitHubSyncHandle => ({
-	notice: (seen, again) => sync.notice({ ...seen, repo: "p" }, again),
+	notice: (seen, asked) => sync.notice({ ...seen, repo: "p" }, asked),
 	notePull: (pull) => sync.notePull(pull),
 	gaveUp: (change, reason) => sync.gaveUp(change, reason),
 	state: () => sync.state(),
@@ -193,7 +193,7 @@ describe("GitHub's changes coming back", { timeout: 120_000 }, () => {
 		},
 	);
 
-	it("brings a squash onto a GitHub branch that moved on back untrusted, so a deleted file can't come back unseen", async () => {
+	it("needs review for a squash onto a GitHub branch that moved on, so a deleted file can't return", async () => {
 		await land("c-1", { "src/a.js": "a\n", "src/old.js": "old\n" });
 		expect(await call("github_pr", {})).toMatchObject({ opened: true });
 		// A commit of GitHub's own lands before the pull request is squashed.
@@ -288,6 +288,10 @@ describe("GitHub's changes coming back", { timeout: 120_000 }, () => {
 		expect(await call("audit", {})).toMatchObject({ open: 0 });
 		// The next landing notices the same commit of GitHub's and starts nothing.
 		await land("c-4", { "src/d.js": "d\n" });
+		expect((await sync.state()).job).toMatchObject({ step: "given up" });
+		expect(await claimsNow()).toEqual([]);
+		// An agent's github_pr refresh doesn't take the give-up back.
+		await call("github_pr", { refresh: true }, "a").catch(() => undefined);
 		expect((await sync.state()).job).toMatchObject({ step: "given up" });
 		expect(await claimsNow()).toEqual([]);
 		// Asked again from the dashboard, it comes back, and conflicts as before.
@@ -395,7 +399,7 @@ describe("GitHub's changes coming back", { timeout: 120_000 }, () => {
 		github.link.remote.url = away;
 		// Not at every landing: a commit that can't come in would start a container each time. Asked, it goes on.
 		expect(await land("c-3", { "src/c.js": "c\n" })).toMatchObject({ step: "failed" });
-		await sync.notice({ repo: "p", github: "acme/shop", branch: "main", commit: github.head() }, true);
+		await sync.notice({ repo: "p", github: "acme/shop", branch: "main", commit: github.head() }, "refresh");
 		expect(await settle()).toMatchObject({ step: "done" });
 		expect(server.git("show", "main:docs/notes.md")).toBe("from GitHub\n");
 	});
@@ -733,26 +737,31 @@ describe("noticing GitHub's branch", () => {
 			...newJob("p", { ...seen, commit }, now - minutesAgo * 60_000),
 			step: step as never,
 		});
-		expect(noticed(null, null, seen, "p", false, now)).toMatchObject({ step: "import", commit: "c1" });
+		expect(noticed(null, null, seen, "p", undefined, now)).toMatchObject({ step: "import", commit: "c1" });
 		// Known to be on main.
-		expect(noticed(null, "c1", seen, "p", false, now)).toBeNull();
+		expect(noticed(null, "c1", seen, "p", undefined, now)).toBeNull();
 		// One runs: it fetches GitHub's newest anyway.
-		expect(noticed(job("merge", "c0"), null, seen, "p", false, now)).toBeNull();
+		expect(noticed(job("merge", "c0"), null, seen, "p", undefined, now)).toBeNull();
 		// Unless it lost its alarm long ago.
-		expect(noticed(job("merge", "c0", 61), null, seen, "p", false, now)).toMatchObject({ commit: "c1" });
+		expect(noticed(job("merge", "c0", 61), null, seen, "p", undefined, now)).toMatchObject({ commit: "c1" });
 		// Brought back, or sent to a person: not again for the same commit, unless asked.
-		expect(noticed(job("done"), null, seen, "p", false, now)).toBeNull();
-		expect(noticed(job("needs a person"), null, seen, "p", false, now)).toBeNull();
-		expect(noticed(job("needs a person"), null, seen, "p", true, now)).toMatchObject({ step: "import" });
+		expect(noticed(job("done"), null, seen, "p", undefined, now)).toBeNull();
+		expect(noticed(job("needs a person"), null, seen, "p", undefined, now)).toBeNull();
+		expect(noticed(job("needs a person"), null, seen, "p", "refresh", now)).toMatchObject({ step: "import" });
+		// Given up, only a person asking again takes it back: an agent's refresh doesn't.
+		expect(noticed(job("given up"), null, seen, "p", undefined, now)).toBeNull();
+		expect(noticed(job("given up"), null, seen, "p", "refresh", now)).toBeNull();
+		expect(noticed(job("given up"), null, seen, "p", "person", now)).toMatchObject({ step: "import" });
+		expect(noticed(job("given up", "c0"), null, seen, "p", undefined, now)).toMatchObject({ commit: "c1" });
 		// A newer commit starts again.
-		expect(noticed(job("needs a person", "c0"), null, seen, "p", false, now)).toMatchObject({ commit: "c1" });
+		expect(noticed(job("needs a person", "c0"), null, seen, "p", undefined, now)).toMatchObject({ commit: "c1" });
 		// A job that waited goes on from where it waited, its import done.
 		const waited = { ...job("waiting"), resume: "claim" as const, reason: "paths held", head: "h1" };
-		expect(noticed(waited, null, seen, "p", false, now)).toMatchObject({ step: "claim", head: "h1" });
-		expect(noticed(waited, null, seen, "p", false, now)).not.toHaveProperty("reason");
+		expect(noticed(waited, null, seen, "p", undefined, now)).toMatchObject({ step: "claim", head: "h1" });
+		expect(noticed(waited, null, seen, "p", undefined, now)).not.toHaveProperty("reason");
 		// A job that failed starts again only after a while, or when asked.
-		expect(noticed(job("failed", "c1", 5), null, seen, "p", false, now)).toBeNull();
-		expect(noticed(job("failed", "c1", 5), null, seen, "p", true, now)).toMatchObject({ step: "import" });
-		expect(noticed(job("failed", "c1", 61), null, seen, "p", false, now)).toMatchObject({ step: "import" });
+		expect(noticed(job("failed", "c1", 5), null, seen, "p", undefined, now)).toBeNull();
+		expect(noticed(job("failed", "c1", 5), null, seen, "p", "refresh", now)).toMatchObject({ step: "import" });
+		expect(noticed(job("failed", "c1", 61), null, seen, "p", undefined, now)).toMatchObject({ step: "import" });
 	});
 });
