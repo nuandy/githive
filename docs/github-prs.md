@@ -170,7 +170,7 @@ is a fast-forward again.
   one lands at once, so the window is small; give it up (step 6) to stop one. The import record and a released older
   GitHub change's question to people stay as written; nothing reads that question once its claim is gone.
 - **Who runs it.** Steps 2 to 4 must not hold up the landing that noticed GitHub moved. They run as a small,
-  resumable job owned by the repo, in its `GitHubSync` Durable Object (a new class, migration `v15`), with an alarm
+  resumable job owned by the repo, in its `GitHubSync` Durable Object (a new class, migration `v16`), with an alarm
   per step like the hosted builder's. Every step is idempotent, so a retried step finds its work done. A step that
   throws, or a merge refused for a passing reason, is tried again, waiting 30 s, 1, 2 and 4 minutes, then the job counts as failed (see step 1 for when it
   starts again). A job not heard from in an hour has lost its alarm, and a notice starts it again. The landing only
