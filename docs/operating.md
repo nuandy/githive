@@ -68,7 +68,7 @@ The Access team domain and application audience are public configuration in `wra
 | People, sessions, agents and their tokens, orgs, teams, permissions | D1 | [AES-256-GCM](https://developers.cloudflare.com/d1/reference/data-security/) |
 | MCP clients' OAuth grants | Workers KV | AES-256-GCM |
 | Push events (repo, branch, commit) on their way to the Worker | Cloudflare Queues | Not documented by Queues |
-| Each repo's cache (live updates, kept dashboard views, record tips, changes' heads, the fork queue, what changes came to as each branch landed), the repo list's counts, cached Artifacts tokens, builders', reviewers' and check containers' state | Durable Objects | AES-256 (LUKS) |
+| Each repo's cache (live updates, kept dashboard views, record tips, changes' heads, the fork queue, what changes came to as each branch landed), the repo list's counts, cached Artifacts tokens, builders', reviewers' and check containers' state; hosted agents' state (each agent's change, the review it holds and what it has finished, and who started them, by handle); demo runs (the latest 20, each with its repo, its starter's handle and its times, and the day's count) | Durable Objects | AES-256 (LUKS) |
 | A repo's snapshot: a container's disk with its code checked out and its main branch's dependencies installed, which check containers, builders and reviewers start from | Cloudflare Containers | Not documented by Containers |
 
 Artifacts is in beta, and its own documentation doesn't yet state encryption at rest: the claim for repos rests on what it's built on. Ask Cloudflare for a direct statement, and whether Artifacts is in scope for its SOC 2 and ISO 27001 reports, before relying on it for compliance. Everything travels over TLS.
