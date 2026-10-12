@@ -63,10 +63,12 @@ describe("a repo", () => {
 				/>,
 			);
 		const flat = page("on demand");
-		expect(flat).toMatch(/class="pill pill--outline mode-badge"[^>]*>One claims record/);
+		// One record is a quiet outline; sharded stands out in the link's blue.
+		expect(flat).toMatch(/class="[^"]*\btext-muted-foreground\b[^"]*"[^>]*>One claims record/);
+		expect(flat).not.toMatch(/class="[^"]*\btext-link\b[^"]*"[^>]*>One claims record/);
 		expect(flat).toMatch(/<dt>Claims<\/dt><dd>Claims are kept in one record/);
 		const sharded = page({ since: "2026-10-07T09:30:00.000Z", because: "8 agents hold claims" });
-		expect(sharded).toMatch(/mode-badge mode-badge--sharded"[^>]*>Sharded claims/);
+		expect(sharded).toMatch(/class="[^"]*\btext-link\b[^"]*"[^>]*>Sharded claims/);
 		expect(sharded).toContain("(8 agents hold claims)");
 		const votes = renderToStaticMarkup(
 			<RepoPage
@@ -80,7 +82,7 @@ describe("a repo", () => {
 				api={stubApi()}
 			/>,
 		);
-		expect(votes).toMatch(/mode-badge--sharded"[^>]*>Sharded votes/);
+		expect(votes).toMatch(/class="[^"]*\btext-link\b[^"]*"[^>]*>Sharded votes/);
 		expect(votes).toMatch(/<dt>Votes<\/dt><dd>Votes are split by commit/);
 		// Older servers don't say: no badge, no line.
 		const older = page(undefined);
@@ -127,7 +129,7 @@ describe("a repo", () => {
 		expect(html).toContain("1 of 2 approvals");
 		expect(html).toMatch(/Builder working \(revision 1\)/);
 		expect(html).toMatch(/security.*reject/);
-		expect(html).toMatch(/Commits<\/span><span class="counter">2<\/span>/);
+		expect(html).toMatch(/Commits<\/span><span data-slot="counter"[^>]*>2<\/span>/);
 		// An agent's question for a person, and a person's vote form.
 		const asked = {
 			...snapshot.claims[0]!,

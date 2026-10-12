@@ -1,9 +1,26 @@
+import type { ComponentProps, ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { Connection, MyAgent } from "../api";
 import { NOW, ago, visibleText } from "../test/fixtures";
 import { AgentsView, type AgentActions } from "./AgentsPage";
 import { TopBar } from "./TopBar";
+
+// A menu draws its choices only once it's open, into a portal, and a server render has neither: here every menu
+// renders open, in place, so the account menu's choices can be read.
+vi.mock("radix-ui", async (importOriginal) => {
+	const radix = await importOriginal<typeof import("radix-ui")>();
+	const { createElement, Fragment } = await import("react");
+	const { Root } = radix.DropdownMenu;
+	return {
+		...radix,
+		DropdownMenu: {
+			...radix.DropdownMenu,
+			Root: (props: ComponentProps<typeof Root>) => createElement(Root, { ...props, open: true }),
+			Portal: ({ children }: { children?: ReactNode }) => createElement(Fragment, null, children),
+		},
+	};
+});
 
 const me = {
 	kind: "user" as const,

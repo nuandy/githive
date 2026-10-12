@@ -145,6 +145,9 @@ const click =
 const openSummary = (text: string) => async (p: Page) => {
 	await p.locator("summary", { hasText: text }).first().click();
 };
+const openUserMenu = async (p: Page) => {
+	await p.getByRole("button", { name: /^Signed in as/ }).click();
+};
 
 const STOREFRONT = "/repos/acme/storefront";
 const CHANGES = [
@@ -170,7 +173,7 @@ const CHANGES = [
 
 const APP: Scene[] = [
 	page("repos", "/"),
-	page("repos-menu", "/", { act: async (p) => p.locator('summary[aria-label^="Signed in as"]').click() }),
+	page("repos-menu", "/", { act: openUserMenu }),
 	page("new-repo", "/new"),
 	page("new-repo-org", "/new?owner=acme"),
 	page("inbox", "/inbox"),
@@ -199,7 +202,13 @@ const APP: Scene[] = [
 	page("storefront-changes-release", `${STOREFRONT}/changes?branch=release%2F2.4`),
 	page("storefront-history", `${STOREFRONT}/history`),
 	page("storefront-claims", `${STOREFRONT}/claims`),
-	page("storefront-claims-open", `${STOREFRONT}/claims`, { act: async (p) => p.locator("summary").first().click() }),
+	// The account menu open over the Claims tab: what its baselines show, as the first <summary> on the page, which
+	// it clicked, was the menu's while the menu was a <details>.
+	page("storefront-claims-open", `${STOREFRONT}/claims`, { act: openUserMenu }),
+	// A folder of the claims tree opened.
+	page("storefront-claims-tree", `${STOREFRONT}/claims`, {
+		act: async (p) => p.locator("main summary").first().click(),
+	}),
 	page("storefront-code", `${STOREFRONT}/code`),
 	page("storefront-code-folder", `${STOREFRONT}/code/src/lib`),
 	page("storefront-code-file", `${STOREFRONT}/code/src/lib/cart.ts`),

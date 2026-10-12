@@ -1,8 +1,5 @@
-.shell {
-	min-height: 100vh;
-	display: flex;
-	flex-direction: column;
-}
+/* A page's column, its header and its loading line, for the pages not yet on utilities (components/Page.tsx is the
+   same column for those that are). */
 
 .page {
 	width: 100%;
@@ -26,41 +23,8 @@
 	text-align: center;
 }
 
-.page-errors {
-	background: var(--bad-soft);
-	border-bottom: 1px solid color-mix(in srgb, var(--bad) 35%, transparent);
-	color: var(--bad);
-	font-size: 13px;
-}
-
-.page-errors__inner {
-	max-width: var(--page-width);
-	margin: 0 auto;
-	padding: 8px 24px;
-	overflow-wrap: anywhere;
-}
-
-.skip-link {
-	position: absolute;
-	left: 8px;
-	top: -40px;
-	z-index: 20;
-	padding: 6px 12px;
-	border-radius: var(--radius);
-	background: var(--surface);
-	box-shadow: var(--shadow-lg);
-}
-
-.skip-link:focus {
-	top: 8px;
-}
-
 @media (max-width: 560px) {
 	.page {
 		padding: 16px;
-	}
-
-	.page-errors__inner {
-		padding: 8px 16px;
 	}
 }

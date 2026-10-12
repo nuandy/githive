@@ -1,7 +1,9 @@
 import type { ReactNode } from "react";
 import type { LiveStatus } from "../lib/liveFeed";
+import { cn } from "../lib/utils";
 import { Icon } from "./Icon";
 import { Tabs, type TabItem } from "./Tabs";
+// Only the all-landed badge RepoPage puts by the name, until that page moves to utilities.
 import "./RepoHeader.css";
 
 const LIVE_WORDS: Record<Exclude<LiveStatus, "off">, { label: string; title: string }> = {
@@ -16,12 +18,28 @@ const LIVE_WORDS: Record<Exclude<LiveStatus, "off">, { label: string; title: str
 	},
 };
 
+// Live, the lamp is green and breathes; on the way there it's amber.
+const DOT: Record<Exclude<LiveStatus, "off">, string> = {
+	live: "bg-good [box-shadow:0_0_0_3px_color-mix(in_srgb,var(--good)_25%,transparent)] animate-live motion-reduce:animate-none",
+	connecting: "bg-warn",
+	reconnecting: "bg-warn",
+};
+
 export function LiveDot({ status }: { status: LiveStatus }) {
 	if (status === "off") return null;
 	const words = LIVE_WORDS[status];
 	return (
-		<span className={`live-dot live-dot--${status}`} title={words.title} role="status" aria-live="polite">
-			<span className="live-dot__dot" aria-hidden="true" />
+		<span
+			className={cn(
+				"inline-flex items-center gap-1.5 rounded-full border border-border px-2.5 py-0.5",
+				"text-caption font-medium text-muted-foreground transition-colors duration-base",
+				status === "live" && "text-good",
+			)}
+			title={words.title}
+			role="status"
+			aria-live="polite"
+		>
+			<span className={cn("size-2 rounded-full transition-colors duration-base", DOT[status])} aria-hidden="true" />
 			{words.label}
 		</span>
 	);
@@ -48,20 +66,23 @@ export function RepoHeader({
 	aside?: ReactNode;
 }) {
 	return (
-		<div className="repo-header">
-			<div className="repo-header__inner">
-				<div className="repo-header__top">
-					<h1 className="repo-header__title">
-						<Icon name="repo" className="muted" />
-						<a href={homeHref}>{name}</a>
+		<div className="border-b border-border bg-card">
+			<div className="mx-auto max-w-(--page-width) px-6 pt-4.5 to-560:px-4 to-560:pt-3.5">
+				<div className="mb-2.5 flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
+					<h1 className="flex flex-wrap items-center gap-2 text-title font-normal tracking-[-0.01em]">
+						<Icon name="repo" className="text-muted-foreground" />
+						<a className="font-semibold wrap-anywhere" href={homeHref}>
+							{name}
+						</a>
 						{badges}
 					</h1>
-					<div className="repo-header__aside">
+					<div className="flex flex-wrap items-center gap-x-4 gap-y-2">
 						{aside}
 						<LiveDot status={live} />
 					</div>
 				</div>
-				<Tabs items={tabs} current={current} label={`${name} sections`} />
+				{/* The tabs' underline sits on the header's own rule. */}
+				<Tabs items={tabs} current={current} label={`${name} sections`} className="-mb-px border-b-0" />
 			</div>
 		</div>
 	);

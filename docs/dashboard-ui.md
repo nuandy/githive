@@ -9,9 +9,10 @@ How `web/` is styled, for anyone changing a screen. The design behind it is in
 | --- | --- |
 | Every design value (colors, radius, type, shadows, motion), light and dark | `web/src/theme.css` |
 | Shared components (Button, Badge, Box, Callout, fields, Collapse, DropdownMenu, …) | `web/src/components/ui/` |
+| The frame every page sits in (`Shell`, `Page`, `EmptyPage`) | `web/src/components/Page.tsx` |
 | Joining class names | `cn()` in `web/src/lib/utils.ts` |
 | Light, dark and the reader's choice | `web/src/lib/theme.ts`, `ThemeMenu.tsx` |
-| Motion hooks (`useLingering`, …) | `web/src/hooks/` |
+| Motion hooks (`useLingering`, `useChanged`, …) | `web/src/hooks/` |
 | The visual regression check | `web/visual/` |
 
 Screens are written in Tailwind CSS v4 utilities. There are no per-component stylesheets: a component's look is in its
@@ -65,7 +66,9 @@ lucide icons for `Icon`, and restyle it from the theme.
 ## Motion: nothing changes abruptly
 
 - State changes (hover, press, focus, selected) transition at `duration-fast`.
-- What appears (loaded content, a message, a confirm) fades in: `animate-appear`.
+- What appears (loaded content, a message, a confirm) fades in: `animate-appear`. A page fades in as you go to it
+  (`PageBoundary`); what's there from its first render comes with that fade, so what fades in on its own later (a
+  tab's content, a bumped count) waits until it has changed (`useChanged`).
 - What opens and closes folds its height: `Collapse`, `disclosure`, or grid rows `0fr ↔ 1fr`.
 - Menus and other overlays grow from their trigger and fade, both ways.
 - Swapped content cross-fades; what leaves goes before it's removed (`useLingering`).
@@ -74,6 +77,8 @@ lucide icons for `Icon`, and restyle it from the theme.
   `ease-out`, `ease-in`, `ease-spring`, `ease-pop`), and reduced motion turns them all off. JavaScript motion checks
   `prefers-reduced-motion` itself.
 - Don't transition a `color-mix()` value: Chrome interpolates it wrongly. Animate opacity instead.
+- A fade-in fills `backwards`, not `both`: a transform left filling once it's done keeps the element on a layer of its
+  own, which Chrome draws a little blurred at a fractional offset (and the visual check catches).
 
 ## The visual regression check
 
@@ -97,7 +102,8 @@ Moving a component:
 1. Read its markup, its stylesheet, and the global rules that reach it (`styles.css`: `button`, `input`, `label`,
    `.pill`, `.box`, `.callout`, `.empty`, `.stat`, `.bar`, `.muted`, …). Its look is the sum of them.
 2. Rewrite its classes as utilities and components that reproduce that look exactly. Use the theme's names; an
-   arbitrary value (`leading-[1.45]`) only where the theme has no step for it.
+   arbitrary value (`leading-[1.45]`) only where the theme has no step for it. A page's `<main className="page">` is
+   `Page`.
 3. Write out what the browser's defaults give it now and preflight will take away: margins of `p`, `ul`, `ol`, `dl`,
    `figure`, `blockquote`, `h1`–`h6`; a list's padding and bullets; a heading's size; an `svg` or `img` sitting inline
    on the text's baseline; a `button`'s or field's font. (Links, `code`, `pre`, headings' weight and line height and

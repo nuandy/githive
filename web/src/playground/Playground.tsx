@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { Hive } from "../components/HiveTab";
+import { Page, Shell } from "../components/Page";
 import { NarrowFrame } from "./NarrowFrame";
 import { createSim, SCENARIOS, type ScenarioName, type Sim, type SimState } from "./sim";
-import "../App.css";
 import "./playground.css";
 
 // The Hive playground: the real Hive tab, drawn from a simulated hive on a virtual clock, with a slim bar to play,
@@ -161,7 +161,7 @@ export function Playground() {
 	) : null;
 
 	return (
-		<div ref={page} className={`shell playground playground--${width}`}>
+		<Shell ref={page} className={`playground playground--${width}`}>
 			<div ref={bar} className="playground__bar" role="toolbar" aria-label="Playground">
 				<div className="playground__row">
 					<strong className="playground__name">Hive playground</strong>
@@ -249,14 +249,12 @@ export function Playground() {
 			{width === "narrow" ? (
 				<div className="playground__narrow">
 					<NarrowFrame width={NARROW_PX}>
-						<main className="page">{hive}</main>
+						<Page>{hive}</Page>
 					</NarrowFrame>
 				</div>
 			) : (
-				<main className="page" id="main">
-					{hive}
-				</main>
+				<Page id="main">{hive}</Page>
 			)}
-		</div>
+		</Shell>
 	);
 }

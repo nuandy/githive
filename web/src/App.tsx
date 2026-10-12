@@ -20,11 +20,15 @@ import { InboxPage } from "./components/InboxPage";
 import { NewRepoPage } from "./components/NewRepoPage";
 import { OrgPage } from "./components/OrgPage";
 import { OrgsPage } from "./components/OrgsPage";
+import { EmptyPage, Page, Shell, SkipLink } from "./components/Page";
 import { PageBoundary } from "./components/PageBoundary";
 import { SignIn } from "./components/SignIn";
 import { RepoList } from "./components/RepoList";
 import { RepoPage, type RepoView } from "./components/RepoPage";
 import { TopBar, type Crumb } from "./components/TopBar";
+import { Collapse } from "./components/ui/collapse";
+import { useChanged } from "./hooks/useChanged";
+import { useLingering } from "./hooks/useLingering";
 import { useLiveFeed } from "./hooks/useLiveFeed";
 import { usePoll } from "./hooks/usePoll";
 import { claimTitle } from "./lib/claimStatus";
@@ -32,6 +36,8 @@ import { buildInbox } from "./lib/inbox";
 import { buildRepoRows } from "./lib/repos";
 import { href, parseRoute, type Route } from "./lib/routes";
 import { type Provider, inviteOf, signinErrorMessage, signinErrorOf, withoutSigninError } from "./lib/session";
+import { cn } from "./lib/utils";
+// The page column's classes, for the pages not yet on utilities.
 import "./App.css";
 
 /** Where a route points, ignoring tabs. Moving to a new place scrolls to the top; switching tabs doesn't. */
@@ -66,24 +72,34 @@ export function useHashRoute(): Route {
 	return route;
 }
 
-/** A page with nothing to show but a message. */
-function EmptyPage({ role, children }: { role?: "alert"; children: ReactNode }) {
+function Loading({ what }: { what: string }) {
 	return (
-		<main className="page" id="main">
-			<div className="box empty" role={role}>
-				{children}
-			</div>
-		</main>
+		<Page id="main">
+			<p className="my-3.75 py-8 text-center text-muted-foreground" role="status">
+				Loading {what}…
+			</p>
+		</Page>
 	);
 }
 
-function Loading({ what }: { what: string }) {
+/** What couldn't be refreshed, in a bar under the top bar: it folds open, and folds away once all is well again. */
+function PageErrors({ errors }: { errors: string[] }) {
+	const said = errors.join(" · ");
+	// While the bar folds away, it still says what it said.
+	const [shown, setShown] = useState(said);
+	if (said && said !== shown) setShown(said);
+	// As long as the fold takes (--motion-slow).
+	const lingering = useLingering(!!said, 400);
 	return (
-		<main className="page" id="main">
-			<p className="muted page__loading" role="status">
-				Loading {what}…
-			</p>
-		</main>
+		<Collapse open={!!said}>
+			{lingering ? (
+				<div className="border-b border-bad/35 bg-bad-soft text-ui text-bad" role="alert">
+					<div className="mx-auto max-w-(--page-width) px-6 py-2 wrap-anywhere to-560:px-4">
+						<strong>Some data couldn't be refreshed.</strong> <span>{shown}</span>
+					</div>
+				</div>
+			) : null}
+		</Collapse>
 	);
 }
 
@@ -177,15 +193,13 @@ function Visitor({
 	// The Repositories list is for people signed in, so the trail starts at the repo.
 	const trail = crumbs.filter((crumb) => crumb.href !== href.repos());
 	return (
-		<div className="shell">
-			<a className="skip-link" href="#main">
-				Skip to content
-			</a>
+		<Shell>
+			<SkipLink />
 			<TopBar crumbs={trail} onSignIn={onSignIn} />
 			<PageBoundary key={routePlace(route)}>
 				{view ? <RepoRoute repo={route.repo} view={view} data={data} visitor /> : <PageNotFound />}
 			</PageBoundary>
-		</div>
+		</Shell>
 	);
 }
 
@@ -255,10 +269,8 @@ export function Dashboard({ me, onSignOut }: { me: Me; onSignOut: () => void }) 
 	}
 
 	return (
-		<div className="shell">
-			<a className="skip-link" href="#main">
-				Skip to content
-			</a>
+		<Shell>
+			<SkipLink />
 			<TopBar
 				crumbs={crumbs}
 				inboxCount={inbox.count}
@@ -270,15 +282,9 @@ export function Dashboard({ me, onSignOut }: { me: Me; onSignOut: () => void }) 
 				{...(adminRequests.data ? { adminRequests: adminRequests.data.length } : {})}
 				orgsCurrent={route.page === "orgs" || route.page === "org"}
 			/>
-			{errors.length > 0 ? (
-				<div className="page-errors" role="alert">
-					<div className="page-errors__inner">
-						<strong>Some data couldn't be refreshed.</strong> <span>{errors.join(" · ")}</span>
-					</div>
-				</div>
-			) : null}
+			<PageErrors errors={errors} />
 			<PageBoundary key={routePlace(route)}>{page}</PageBoundary>
-		</div>
+		</Shell>
 	);
 }
 
@@ -320,8 +326,13 @@ function RepoRoute(props: {
 	const { liveStatus, snapshot, audit, access, change } = props.data;
 	// GitHive hasn't started on this repo yet. It still shows its code, its settings and a way to start.
 	const notStarted = !snapshot.data && !!snapshot.error && !/^no repo /.test(snapshot.error);
-	if (snapshot.data || notStarted) {
-		return (
+	const ready = !!snapshot.data || notStarted;
+	const phase = ready ? "page" : snapshot.error ? "unavailable" : "loading";
+	// What takes the place of "Loading…" fades in; a page that's ready at once comes in with the page's own fade.
+	const swapped = useChanged(phase);
+	let shown: ReactNode;
+	if (ready) {
+		shown = (
 			<RepoPage
 				repo={repo}
 				view={view}
@@ -347,9 +358,16 @@ function RepoRoute(props: {
 				}}
 			/>
 		);
+	} else if (!snapshot.error) {
+		shown = <Loading what={repo} />;
+	} else {
+		shown = <RepoUnavailable repo={repo} error={snapshot.error} />;
 	}
-	if (!snapshot.error) return <Loading what={repo} />;
-	return <RepoUnavailable repo={repo} error={snapshot.error} />;
+	return (
+		<div key={phase} className={cn("flex flex-col", swapped && "animate-appear")}>
+			{shown}
+		</div>
+	);
 }
 
 /** What the repo page shows for a route, or null when the route isn't a repo's. */

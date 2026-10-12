@@ -1,10 +1,14 @@
 import { Component, type ErrorInfo, type ReactNode } from "react";
+import { EmptyPage } from "./Page";
 
 interface PageBoundaryState {
 	failed: boolean;
 }
 
-/** Keep an unexpected render failure in one page from taking down the whole dashboard. */
+/**
+ * Keep an unexpected render failure in one page from taking down the whole dashboard. App keys it by place, so each
+ * place fades in as you go to it; laid out as a column, like the shell it sits in.
+ */
 export class PageBoundary extends Component<{ children: ReactNode }, PageBoundaryState> {
 	state: PageBoundaryState = { failed: false };
 
@@ -17,19 +21,21 @@ export class PageBoundary extends Component<{ children: ReactNode }, PageBoundar
 	}
 
 	render() {
-		if (this.state.failed) {
-			return (
-				<main className="page">
-					<section className="box empty" role="alert">
+		const { failed } = this.state;
+		return (
+			<div key={failed ? "failed" : "page"} className="flex animate-appear flex-col">
+				{failed ? (
+					<EmptyPage role="alert">
 						<h2>This page couldn't be shown</h2>
 						<p>
 							Something in its data was unexpected. The rest of the dashboard still works:{" "}
 							<a href="#/">go to Repositories</a> or reload to try again.
 						</p>
-					</section>
-				</main>
-			);
-		}
-		return this.props.children;
+					</EmptyPage>
+				) : (
+					this.props.children
+				)}
+			</div>
+		);
 	}
 }

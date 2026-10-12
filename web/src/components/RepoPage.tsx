@@ -15,6 +15,7 @@ import type {
 	RepoSnapshot,
 	SettingsInput,
 } from "../api";
+import { useChanged } from "../hooks/useChanged";
 import { canVote, canWrite } from "../lib/permissions";
 import { BranchRules } from "./BranchRules";
 import { GitHubLink } from "./GitHubLink";
@@ -335,6 +336,8 @@ export function RepoPage({
 		{ id: "settings", label: "Settings", icon: "settings", href: href.repo(repo, "settings") },
 	];
 	const current = view.kind === "change" ? "changes" : view.tab;
+	// A tab's content fades in as you switch to it; the first one comes in with the page.
+	const switched = useChanged(current);
 	const admin = manage ? (
 		<RepoAdmin
 			repo={repo}
@@ -384,20 +387,22 @@ export function RepoPage({
 						onStarted={onStarted}
 					/>
 				) : null}
-				<RepoTabContent
-					repo={repo}
-					view={view}
-					current={current}
-					snapshot={snapshot}
-					changeHistory={changeHistory}
-					branch={branch}
-					api={api}
-					access={access}
-					manage={manage}
-					admin={admin}
-					voting={voting}
-					onSettingsChanged={onSettingsChanged}
-				/>
+				<div key={current} className={switched ? "animate-appear" : undefined}>
+					<RepoTabContent
+						repo={repo}
+						view={view}
+						current={current}
+						snapshot={snapshot}
+						changeHistory={changeHistory}
+						branch={branch}
+						api={api}
+						access={access}
+						manage={manage}
+						admin={admin}
+						voting={voting}
+						onSettingsChanged={onSettingsChanged}
+					/>
+				</div>
 			</main>
 		</>
 	);
