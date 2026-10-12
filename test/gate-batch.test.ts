@@ -1,4 +1,3 @@
-import { spawn } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -6,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { agentClone, pushChange } from "./helpers/agents";
 import { startGitServer, type GitServer } from "./helpers/git-server";
 import { FakeStorage } from "./fakes/env";
+import { localContainer } from "./helpers/local-container";
 import { type HistorySource, type KeptFiles, readBranchHistory } from "../src/toolkit/branch-history";
 import { mergeRecordOf, readMainMerges } from "../src/toolkit/git-records";
 import { concat } from "../src/git-fetch";
@@ -17,50 +17,6 @@ import { fetchPackSince } from "../src/git-pack";
 // the Gate reads and pushes is what git really does.
 
 const { Gate } = await import("../src/gate");
-
-/** A container whose commands run here: the checkout (/work) in `dir`, nothing installed (git is already here). */
-function localContainer(dir: string) {
-	const local = (s: string) => s.replaceAll("/work", dir);
-	const container = {
-		running: false,
-		start: () => void (container.running = true),
-		destroy: async () => void (container.running = false),
-		setInactivityTimeout: async () => undefined,
-		exec: async (cmd: string[], options: { cwd: string; stdin?: ReadableStream }) => {
-			// `timeout -s KILL <seconds>` first: not on every machine, and not needed here.
-			const args = (cmd[0] === "timeout" ? cmd.slice(4) : cmd).map(local);
-			const stdin = options.stdin ? Buffer.from(await new Response(options.stdin).arrayBuffer()) : undefined;
-			const installing = args.join(" ").includes("apt-get");
-			return {
-				output: () =>
-					new Promise<{ exitCode: number; stdout: Uint8Array }>((resolve) => {
-						if (installing) return resolve({ exitCode: 0, stdout: new Uint8Array() });
-						// Ignore this machine's git config, such as its identity, since a container has none.
-						const [command, ...commandArgs] = args;
-						if (command === undefined) throw new Error("an empty command");
-						const child = spawn(command, commandArgs, {
-							cwd: local(options.cwd),
-							env: {
-								...process.env,
-								GIT_TERMINAL_PROMPT: "0",
-								GIT_CONFIG_GLOBAL: "/dev/null",
-								GIT_CONFIG_NOSYSTEM: "1",
-								HOME: tmpdir(),
-							},
-						});
-						const out: Buffer[] = [];
-						child.stdout.on("data", (b) => out.push(b));
-						child.stderr.on("data", (b) => out.push(b));
-						child.on("close", (code) => resolve({ exitCode: code ?? 1, stdout: new Uint8Array(Buffer.concat(out)) }));
-						child.on("error", (err) => resolve({ exitCode: 127, stdout: new TextEncoder().encode(String(err)) }));
-						if (stdin !== undefined) child.stdin.end(stdin);
-						else child.stdin.end();
-					}),
-			};
-		},
-	};
-	return container;
-}
 
 describe("reading and landing a batch in the repo's own Gate", { timeout: 60_000 }, () => {
 	let server: GitServer;

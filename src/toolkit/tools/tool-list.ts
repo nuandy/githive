@@ -104,9 +104,13 @@ const TOOL_LIST = [
 			"touching only these merges without them (*.md, docs/, licenses and images by default; a file " +
 			"under test/, fixtures/ or examples/ always runs them); [] makes them always run. github " +
 			"connects a GitHub repo ('owner/name', '' for none) through GitHive's GitHub app, installed " +
-			"there: main is pushed back to it after every landing, and verify ['github-actions'] runs the " +
-			"checks on its Actions instead of in containers (a workflow that runs on pushes to " +
-			"githive/checks/**). Only when GitHive starts on a repo: how claims are kept. They start in " +
+			"there. github_sync says how GitHive's work reaches it: 'pr' (new connections) pushes main to " +
+			"githive/main after every landing, for one standing pull request into GitHub's default branch " +
+			"(github_pr opens it); 'mirror' pushes main to GitHub's main. Either way what GitHub's branch " +
+			"gains (the pull request's merge, or commits pushed there) comes back as a change by " +
+			"githive-github, landing through the checks without review unless github_trust is false. verify " +
+			"['github-actions'] runs the checks on its Actions instead of in containers (a workflow that runs " +
+			"on pushes to githive/checks/**). Only when GitHive starts on a repo: how claims are kept. They start in " +
 			"one record and shard per path, 2 segments deep over 16 records repos, once the load calls for " +
 			"it (8 agents holding claims, or over 15 claim writes a minute); shard_depth shards now, this " +
 			"deep (0: never), and records_repos is how many repos the shards are spread over, since a repo " +
@@ -116,6 +120,8 @@ const TOOL_LIST = [
 			properties: {
 				repo: str,
 				github: str,
+				github_sync: { type: "string", enum: ["mirror", "pr"] },
+				github_trust: { type: "boolean" },
 				shard_depth: { type: "number" },
 				records_repos: { type: "number" },
 				required: { type: "number" },
@@ -207,7 +213,9 @@ const TOOL_LIST = [
 			"Release a claim: yours, or with stale: true another agent's it has abandoned: its change " +
 			"waits on that agent, unanswered for 30 minutes with nothing pushed, or 2 hours after changes " +
 			"were asked for, failed checks, or approval without a merge. Never one waiting for review, " +
-			"being checked to land, or on a person.",
+			"being checked to land, or on a person. A repo admin may also give up GitHub's change " +
+			"(githive-github's github-<sha>, which holds its paths until GitHub's branch moves): name it as " +
+			"your own agent.",
 		inputSchema: {
 			type: "object",
 			properties: { repo: str, change: str, agent: str, reason: str, stale: { type: "boolean" } },
@@ -359,6 +367,23 @@ const TOOL_LIST = [
 		},
 	},
 	{
+		name: "github_pr",
+		description:
+			"For a repo connected to GitHub in pr mode (settings github_sync 'pr'): open the standing pull " +
+			"request from githive/main into GitHub's default branch, or say where it is if it's open. Its " +
+			"title is 'GitHive: <n> changes' and its body lists what landed since GitHub's branch last took " +
+			"GitHive's work: each change's intent, agent and reviewers with their evidence. GitHive pushes " +
+			"githive/main after every landing, so it updates itself; refresh rewrites its title and body. " +
+			"Merging and closing it happen on GitHub, and GitHive brings the merge back as githive-github's " +
+			"change. Asking also looks at GitHub's branch and brings back what it holds that main lacks; " +
+			"refresh tries again what needed a person.",
+		inputSchema: {
+			type: "object",
+			properties: { repo: str, refresh: { type: "boolean" } },
+			required: ["repo"],
+		},
+	},
+	{
 		name: "register",
 		description:
 			"Register your agent name and get its secret key (shown once), so what you write is attributed " +
@@ -405,5 +430,6 @@ export const TOOLS = annotate(
 		status: reads("Change status"),
 		register: destroys("Register an agent key"),
 		ask_human: writes("Ask a person"),
+		github_pr: writes("Open the pull request on GitHub", { idempotent: true }),
 	},
 );

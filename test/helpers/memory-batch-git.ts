@@ -1,12 +1,19 @@
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import git from "isomorphic-git";
+import { run, WORKDIR } from "../../src/container";
+import { importFromGitHub } from "../../src/gate-github";
+import { fetchBatchBase } from "../../src/gate-landing";
 import { BOT, branchHead, type Remote, Workspace } from "../../src/git";
 import { mergeMessage } from "../../src/toolkit/merge-commit";
 import type { BatchGit, Inspected } from "../../src/toolkit/merge";
-import { repoOfUrl } from "../../src/git-http";
+import { http, repoOfUrl } from "../../src/git-http";
 import type { ReadHistory } from "../../src/toolkit/batch-reads";
 import { treeLanding } from "../../src/toolkit/tree-landing";
 import { gitHistory } from "./git-history";
 import { gitAt } from "./git-server";
+import { localContainer } from "./local-container";
 
 // A batch's git work in memory, in this process, for tests: what the repo's
 // Gate does with real git in its container (reading and landing batches, and
@@ -99,9 +106,28 @@ function inMemory(remote: Remote): BatchGit {
 			await ws.pushAs(ws.branch, `refs/heads/${ref}`, to);
 			return { tip };
 		},
-		pushBranch: async ({ branch, head, to }) => {
+		pushBranch: async ({ branch, head, to, as }) => {
 			const ws = await Workspace.at(remote, branch, head);
-			await ws.push(branch, to);
+			// A fast-forward only, as the Gate's push.
+			if (!as) return void (await ws.push(branch, to));
+			await git.writeRef({ fs: ws.fs, dir: "/repo", ref: "refs/heads/pushing", value: head, force: true });
+			const pushed = await git.push({ fs: ws.fs, http, dir: "/repo", url: to.url, ref: "pushing", remoteRef: as });
+			if (!pushed.ok) throw new Error(`pushing ${as} was refused`);
+		},
+		// The Gate's own import, its commands run here with real git (see local-container.ts).
+		importBranch: async ({ base, branch, from, githubBranch, as }) => {
+			const dir = mkdtempSync(join(tmpdir(), "githive-import-"));
+			try {
+				const container = localContainer(dir) as unknown as Container;
+				await run(container, ["git", "clone", "-q", remote.url, WORKDIR], "/");
+				const project = { remote: remote.url, token: remote.token };
+				const input = { repo: repoOfUrl(remote.url), branch, base: project, baseHead: base };
+				await fetchBatchBase(container, input);
+				const github = { remote: from.url, token: from.token, ...(from.user ? { user: from.user } : {}) };
+				return await importFromGitHub(container, { ...input, from: github, githubBranch, as });
+			} finally {
+				rmSync(dir, { recursive: true, force: true });
+			}
 		},
 	};
 }

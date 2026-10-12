@@ -3,6 +3,7 @@ import { branchHead, type Remote } from "../../git";
 import { projectBranch } from "../../project-branch";
 import { presentClaim } from "../branch-scope";
 import type { Abandoned, ClaimRecord, Registry } from "../claims";
+import { trustedClaim } from "../github-settings";
 import type { LandingView } from "../landing";
 import { abandoned, type ChangeSigns } from "../staleness";
 import type { VoteStore } from "../vote-store";
@@ -16,7 +17,7 @@ import {
 	type Votes,
 } from "../votes";
 import type { ToolContext } from "./context";
-import { branchSettings, hostedRoles } from "./repo";
+import { branchSettings, claimPolicy, hostedRoles } from "./repo";
 
 // Where a change stands: where its branch lives, its pushed head, its votes against the policy,
 // and whether it has been abandoned.
@@ -60,6 +61,11 @@ export async function changeHead(
 	return branchHead(await changeSourceFor(ctx, repo)(agent, "read", change, since), ref);
 }
 
+/** What status says of GitHub's change while the repo trusts GitHub's changes. */
+export const TRUSTED_NOTE =
+	"GitHub's changes, brought back by githive-github: trusted, so it lands through the checks without review " +
+	"(settings github_trust)";
+
 /** Where a change stands: its head, the votes on it, its approval under the policy, and its hosted agents. */
 export async function changeStatus(...args: Parameters<typeof changeState>) {
 	return (await changeState(...args)).status;
@@ -86,8 +92,8 @@ export async function changeState(
 	if (head) await ctx.noteHeads?.(repo, { [change]: head }).catch(() => undefined);
 	// The claimed paths can escalate the policy (stricter for CI or deploy files, for example).
 	const paths = author?.paths ?? [];
-	// The branch it lands on decides the policy too (see branch-rules.ts).
-	const policy = branchSettings(registry, author?.into).policy;
+	// The branch it lands on decides the policy too (see branch-rules.ts); GitHub's change, while trusted, needs none.
+	const policy = author ? claimPolicy(registry, author) : branchSettings(registry, undefined).policy;
 	const { required, vetoes } = effectivePolicy(policy, paths);
 	const votesCast = head ? (await votesOn(head)).filter((vote) => vote.commit === head) : [];
 	const counted = head ? await countedVotes(votesCast, registry?.stampKey) : [];
@@ -97,7 +103,15 @@ export async function changeState(
 	const hosted = ctx.agentStatus
 		? await ctx.agentStatus(repo, change, head, hostedRoles(vetoes)).catch(() => undefined)
 		: undefined;
-	const status = { head, votes: votesCast, approval: { ...outcome, required }, ...(hosted ? { hosted } : {}) };
+	// GitHub's change says why it needs no review.
+	const trusted = author && trustedClaim(registry, author) ? { trusted: TRUSTED_NOTE } : {};
+	const status = {
+		head,
+		votes: votesCast,
+		approval: { ...outcome, required },
+		...trusted,
+		...(hosted ? { hosted } : {}),
+	};
 	return { status, counted };
 }
 
@@ -166,7 +180,7 @@ export function abandonedRule(
 			counted,
 			record: view,
 			landing,
-			policy: branchSettings(registered, shown.into).policy,
+			policy: claimPolicy(registered, shown),
 		});
 		const outcome = abandoned(signs, Date.now());
 		return { abandoned: outcome.abandoned, why: outcome.waiting.why };

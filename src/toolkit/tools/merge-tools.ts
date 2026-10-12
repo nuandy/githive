@@ -2,17 +2,20 @@ import { fail, optionalString, requiredString } from "../../errors";
 import { branchHead } from "../../git";
 import type { GitHubLink } from "../../github";
 import type { HiveEvent } from "../../hive-events";
-import { actionsChecks, mirrorTo, onActions } from "../actions-checks";
+import { actionsChecks, onActions } from "../actions-checks";
 import { artifactsInspect } from "../batch-reads";
 import { scopeFile } from "../branch-scope";
 import type { ClaimRecord, Registry } from "../claims";
+import { pushToGitHub } from "../github-outbound";
+import { bringsGitHubBack, type GitHubSeen, githubSync } from "../github-settings";
 import { type BatchGit, type Candidate, mergeChange, type MergeInput } from "../merge";
 import { countedVotes } from "../votes";
 import { holdKey, reviewersNeeded } from "../work";
 import type { ToolCall, ToolContext, ToolHandlers } from "./context";
 import { ownChangeCommands, reviewCommands } from "./git-commands";
+import { trustedImports } from "./github-tools";
 import { mayActAs } from "./identity";
-import { branchSettings } from "./repo";
+import { branchSettings, claimPolicy } from "./repo";
 
 // Tools for landing a change: merge, and credentials for a change's branch: your own to push to, or someone
 // else's to review.
@@ -120,6 +123,13 @@ function optionalMergeInput(
 	const optional: Partial<MergeInput> = {};
 	if (into !== branch) optional.scope = (file: string) => scopeFile(file, into, branch);
 	if (registered?.skipChecks) optional.skipChecks = registered.skipChecks;
+	// A merge whose caller's time is bounded answers sooner, and lands a smaller batch (see ToolContext.mergeLimits).
+	const { answerWithinMs, pollMs, maxBatch } = ctx.mergeLimits ?? {};
+	if (answerWithinMs !== undefined) optional.answerWithinMs = answerWithinMs;
+	if (pollMs !== undefined) optional.pollMs = pollMs;
+	if (maxBatch !== undefined) optional.maxBatch = maxBatch;
+	const trusted = trustedImports(ctx, repo, registered, call.store);
+	if (trusted) optional.trusted = trusted;
 	if (ctx.branchHead) optional.branchHead = () => ctx.branchHead!(repo, into);
 	if (ctx.landing) optional.landing = ctx.landing(repo, into);
 	if (ctx.history) optional.history = ctx.history;
@@ -129,8 +139,22 @@ function optionalMergeInput(
 	if (ctx.prepareLanding) optional.prepareLanding = () => ctx.prepareLanding!(repo);
 	if (ctx.prefetchChange) optional.prefetch = (change) => ctx.prefetchChange!(repo, into, change);
 	if (ctx.prepareChecks && !at.checksOnActions) optional.prepareChecks = ctx.prepareChecks(repo);
-	// Push the landed branch back to GitHub as a fast-forward, refused if someone pushed there directly.
-	if (link && into === branch) optional.afterLanding = (commit: string) => mirrorTo(gate, link, into, commit);
+	// Push the landed branch to GitHub as a fast-forward (its main, or githive/main for the pull request), refused if
+	// someone pushed there directly, then notice whether GitHub's branch holds what main lacks. A link made before
+	// modes, with none recorded, only mirrors, as it always did.
+	const sync = githubSync(registered);
+	if (link && sync && into === branch) {
+		const github = bringsGitHubBack(registered) ? ctx.githubSync?.(repo) : undefined;
+		optional.afterLanding = (commit: string) =>
+			pushToGitHub({
+				gate,
+				link,
+				sync,
+				branch: into,
+				commit,
+				...(github ? { notice: (seen: GitHubSeen) => github.notice(seen) } : {}),
+			});
+	}
 	return optional;
 }
 
@@ -242,7 +266,7 @@ async function reviewAccess(
 async function takeReview(call: ToolCall, claim: ClaimRecord, head: string, role: string, reviewer: string) {
 	const { ctx, repo, registered, votes } = call;
 	if (!ctx.reviews) return;
-	const policy = branchSettings(registered, claim.into).policy;
+	const policy = claimPolicy(registered, claim);
 	const cast = (await votes.readFor([head])).votes.filter((vote) => vote.commit === head);
 	const counted = await countedVotes(cast, registered?.stampKey);
 	const needed = reviewersNeeded(policy, claim, head, counted, role);

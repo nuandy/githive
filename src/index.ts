@@ -25,6 +25,7 @@ export { RecordCache } from "./record-cache";
 export { ChangeCache } from "./change-cache";
 export { TokenCache } from "./token-cache";
 export { FootprintCache } from "./footprint-cache";
+export { GitHubSync } from "./github-sync";
 
 const app = new Hono<AppEnv>();
 

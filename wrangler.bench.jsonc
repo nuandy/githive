@@ -48,6 +48,7 @@
 			{ "name": "CHANGE_CACHE", "class_name": "ChangeCache" },
 			{ "name": "TOKENS", "class_name": "TokenCache" },
 			{ "name": "FOOTPRINT_CACHE", "class_name": "FootprintCache" },
+			{ "name": "GITHUB_SYNC", "class_name": "GitHubSync" },
 		],
 	},
 	// GitHive's own identity: people, sessions, agents and their tokens (migrations/).
@@ -96,5 +97,7 @@
 		{ "tag": "v14", "new_sqlite_classes": ["RecordCache", "ChangeCache"] },
 		// Awareness: parsed files, open changes' footprints and told notices, per repo (docs/awareness.md).
 		{ "tag": "v15", "new_sqlite_classes": ["FootprintCache"] },
+		// A connected repo's GitHub side: the job bringing GitHub's changes back, and the pull request as last seen.
+		{ "tag": "v16", "new_sqlite_classes": ["GitHubSync"] },
 	],
 }

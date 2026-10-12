@@ -75,6 +75,20 @@ describe("MCP front door", () => {
 		expect(JSON.parse(res.result.content[0]!.text)).toEqual({ change: "stats-ab12" });
 	});
 
+	it("passes what the caller may do in the repo it names along with the call", async () => {
+		const resolving: McpContext = {
+			...context,
+			resolveRepo: async (repo) => ({ id: "repo-id", fullName: repo, level: "admin" }),
+		};
+		const params = { name: "release", arguments: { repo: "acme/web", change: "github-abc" } };
+		await handleRpc({ jsonrpc: "2.0", id: 1, method: "tools/call", params }, resolving);
+		expect(calls.callTool).toHaveBeenLastCalledWith(
+			"release",
+			{ repo: "repo-id", change: "github-abc" },
+			{ ...context.toolkit, level: "admin" },
+		);
+	});
+
 	it("returns a refused call as a tool error the agent can read", async () => {
 		calls.callTool.mockRejectedValueOnce(
 			new Error("[409] These paths are already claimed:\n- src/a overlaps src/a/, held by change a-1"),

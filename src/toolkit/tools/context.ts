@@ -1,7 +1,9 @@
+import type { Level } from "../../auth/orgs";
 import { requiredString, statusOf } from "../../errors";
 import type { ChangeAwareness } from "../../footprint-cache";
 import type { Remote } from "../../git";
 import type { GitHubLink } from "../../github";
+import type { GitHubSyncHandle } from "../github-settings";
 import type { HiveEvent } from "../../hive-events";
 import { projectBranch } from "../../project-branch";
 import { GitCasLog } from "../../record-log";
@@ -22,7 +24,7 @@ import type { Work } from "../work";
 import { changeHead, changeSigns, changeSourceFor } from "./change-state";
 import { keyAgent, mayActAs } from "./identity";
 import {
-	branchSettings,
+	claimPolicy,
 	claimsRef,
 	containerChecks,
 	DEFAULT_POLICY,
@@ -83,6 +85,11 @@ export interface ToolContext {
 	teamsOf?: (repo: string) => Promise<string[]>;
 	/** Set for GitHive's hosted agents, which act under the reserved githive- names. */
 	hosted?: boolean;
+	/**
+	 * What the caller may do in the call's repo, as the MCP front door checked it for this call. Unset where no one
+	 * checked it per repo (hosted agents, the dashboard's own calls, tests); only an admin's exceptions read it.
+	 */
+	level?: Level;
 	/** Records the repo so the dashboard can list it. */
 	register?: (repo: string) => Promise<void>;
 	/** Starts hosted reviewers on a change's current commit. Each votes, and merges the change if asked to. */
@@ -126,6 +133,13 @@ export interface ToolContext {
 	};
 	/** A GitHub repo (owner/name) through GitHive's App, or null if the App isn't installed. Unset without GitHub. */
 	github?: (repo: string) => Promise<GitHubLink | null>;
+	/** The repo's GitHubSync: the job bringing GitHub's changes back, and the pull request as last seen. */
+	githubSync?: (repo: string) => GitHubSyncHandle;
+	/**
+	 * Bounds for a merge run where time is short (the GitHub job's, in an alarm): how long it waits for its turn before
+	 * answering pending, how often it looks, and how many changes its batch may take.
+	 */
+	mergeLimits?: { answerWithinMs?: number; pollMs?: number; maxBatch?: number };
 	/** What landed on a branch since this agent was last told, then its notices (see RepoCache.landingNews). */
 	news?: (repo: string, branch: string, agent: string) => Promise<NewsItem[]>;
 	/** Leaves notices for agents on a branch, told with their next reply (see RepoCache.notify). Never fails. */
@@ -420,7 +434,7 @@ async function readOpenWork(sources: WorkSources, agent: string) {
 				counted,
 				record: votesCast,
 				landing: claim.into ? null : landing,
-				policy: branchSettings(registered, claim.into).policy,
+				policy: claimPolicy(registered, claim),
 			}),
 			Date.now(),
 		).abandoned;
@@ -430,7 +444,7 @@ async function readOpenWork(sources: WorkSources, agent: string) {
 		...(teams.length ? { teams } : {}),
 		policy: registered?.policy ?? DEFAULT_POLICY,
 		// Each change's policy comes from the branch it lands on.
-		policyOf: (claim: ClaimRecord) => branchSettings(registered, claim.into).policy,
+		policyOf: (claim: ClaimRecord) => claimPolicy(registered, claim),
 		open,
 		votes: counted,
 		merged: new Set([...inForce.merged, ...inForce.claims.filter(landedHere).map((claim) => claim.change)]),

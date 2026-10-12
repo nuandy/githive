@@ -8,6 +8,7 @@ import { repoSnapshot } from "./tools/dashboard";
 import { advice, claimsRef, recordLog, storeFor } from "./tools/repo";
 import { auditTools } from "./tools/audit-tools";
 import { claimTools } from "./tools/claim-tools";
+import { githubTools } from "./tools/github-tools";
 import { mergeTools } from "./tools/merge-tools";
 import { withNext } from "./tools/next";
 import { reviewTools } from "./tools/review-tools";
@@ -21,7 +22,16 @@ import { workTools } from "./tools/work-tools";
 export type { HostedStatus, ToolContext } from "./tools/context";
 export { DEFAULT_POLICY, hostedRoles, votesFor } from "./tools/repo";
 export { INSTRUCTIONS, TOOLS } from "./tools/tool-list";
-export { changeHistory, makeBranch, openCount, repoAudit, repoSnapshot, voteAsPerson } from "./tools/dashboard";
+export {
+	changeHistory,
+	giveUpAsPerson,
+	makeBranch,
+	openCount,
+	repoAudit,
+	repoSnapshot,
+	voteAsPerson,
+} from "./tools/dashboard";
+export { bringGitHubBackAgain } from "./tools/github-tools";
 
 /**
  * Merges a change from the dashboard: the same batched, checked merge an agent asks for,
@@ -106,6 +116,7 @@ const handlers: ToolHandlers = {
 	...reviewTools,
 	...mergeTools,
 	...auditTools,
+	...githubTools,
 };
 
 async function runTool(name: string, args: Args, ctx: ToolContext): Promise<unknown> {

@@ -223,7 +223,8 @@ const CARRIES_NEXT: [string, Record<string, unknown>, Record<string, unknown>, s
 	["ask_human", { change: "c-1" }, { ok: true, tip: HEAD }, /^A person decides with their own vote/],
 ];
 
-// The tools with no next step of the caller's own: they set things up, are about the whole repo, or are lists to choose
+// The tools with no next step of the caller's own: they set things up, are about the whole repo (github_pr, its pull
+// request on GitHub), or are lists to choose
 // from, which next never chooses from.
 const NO_NEXT: [string, Record<string, unknown>, unknown][] = [
 	["settings", {}, { repo: "p", policy: { required: 0, vetoes: [] }, verify: [] }],
@@ -234,6 +235,7 @@ const NO_NEXT: [string, Record<string, unknown>, unknown][] = [
 	["audit", {}, { merges: 0, open: 0, violations: [] }],
 	["revert", {}, { ok: true }],
 	["register", { agent: "a" }, { agent: "a", key: "a.secret", note: "" }],
+	["github_pr", {}, { url: "https://github.com/acme/shop/pull/1", opened: false }],
 ];
 
 describe("next", () => {

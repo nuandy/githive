@@ -1,4 +1,5 @@
 import type { ChangeAwareness } from "../footprint-cache";
+import { type GitHubImportResult, githubGate } from "../gate-github";
 import { linkTo } from "../github";
 import type { LandingResult } from "../gate-landing";
 import type { ReadHistory, SharedPlacements } from "./batch-reads";
@@ -183,6 +184,22 @@ function githubApp(env: Env): Pick<ToolContext, "github"> {
 	return { github: (repo: string) => linkTo({ appId, privateKey }, repo) };
 }
 
+// A connected repo's GitHubSync (see github-sync.ts): the job bringing GitHub's changes back, and the pull request.
+function githubSyncParts(env: Env): Pick<ToolContext, "githubSync"> {
+	if (!env.GITHUB_SYNC) return {};
+	return {
+		githubSync: (repo: string) => {
+			const sync = () => env.GITHUB_SYNC.getByName(`repo:${repo}`);
+			return {
+				notice: (seen, again) => rpc(sync().notice({ ...seen, repo }, again)),
+				notePull: (pull) => sync().notePull(pull),
+				gaveUp: (change, reason) => sync().gaveUp(change, reason),
+				state: () => rpc(sync().state()),
+			};
+		},
+	};
+}
+
 // Starts the Gate called `name`, on the repo's branch, before it's needed.
 async function bootGate(env: Env, repo: string, name: string) {
 	const read = await projectRemote(env, repo, "read");
@@ -208,6 +225,7 @@ export function toolContextFor(
 		...gateParts(env),
 		...hostedParts(env),
 		...githubApp(env),
+		...githubSyncParts(env),
 		stamper: async (agent) => {
 			if (!env.STAMP_KEY || !by) return undefined;
 			return makeStamper(env.STAMP_KEY, agent ? `${by}/${agent}` : by);
@@ -559,7 +577,7 @@ function batchGitFor(env: Env, repo: string): BatchGit {
 				}),
 			);
 		},
-		pushBranch: async ({ branch, head, to }) => {
+		pushBranch: async ({ branch, head, to, as }) => {
 			const read = await project("read");
 			const pushed = await rpcRetried<{ pushed: true } | { refused: string }>(() =>
 				gate().pushBranch({
@@ -568,9 +586,25 @@ function batchGitFor(env: Env, repo: string): BatchGit {
 					base: { remote: read.url, token: read.token },
 					head,
 					to: pushTarget(to),
+					...(as ? { as } : {}),
 				}),
 			);
-			if ("refused" in pushed) throw new Error(`pushing ${branch} to ${to.url} was refused: ${pushed.refused}`);
+			if ("refused" in pushed) throw new Error(`pushing ${as ?? branch} to ${to.url} was refused: ${pushed.refused}`);
+		},
+		// In the repo's GitHub Gate, not its own: a slow GitHub holds up no batch (see Gate.importGitHub).
+		importBranch: async ({ base, branch, from, githubBranch, as }) => {
+			const write = await project("write");
+			return rpcRetried<GitHubImportResult>(() =>
+				env.GATE.getByName(githubGate(repo)).importGitHub({
+					repo,
+					branch,
+					base: { remote: write.url, token: write.token },
+					baseHead: base,
+					from: pushTarget(from),
+					githubBranch,
+					as,
+				}),
+			);
 		},
 	};
 	if (!treeLandingOn(env)) return inGate;

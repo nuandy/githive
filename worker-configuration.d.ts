@@ -23,11 +23,12 @@ interface __BaseEnv_Env {
 	CHANGE_CACHE: DurableObjectNamespace<import("./src/index").ChangeCache>;
 	TOKENS: DurableObjectNamespace<import("./src/index").TokenCache>;
 	FOOTPRINT_CACHE: DurableObjectNamespace<import("./src/index").FootprintCache>;
+	GITHUB_SYNC: DurableObjectNamespace<import("./src/index").GitHubSync>;
 }
 declare namespace Cloudflare {
 	interface GlobalProps {
 		mainModule: typeof import("./src/index");
-		durableNamespaces: "Builder" | "Reviewer" | "Gate" | "TokenCache" | "RepoIndex" | "RepoCache" | "RecordCache" | "ChangeCache" | "FootprintCache";
+		durableNamespaces: "Builder" | "Reviewer" | "Gate" | "TokenCache" | "RepoIndex" | "RepoCache" | "RecordCache" | "ChangeCache" | "FootprintCache" | "GitHubSync";
 	}
 	interface Env extends __BaseEnv_Env {}
 }

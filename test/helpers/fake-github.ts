@@ -1,0 +1,202 @@
+import { execFileSync } from "node:child_process";
+import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { GitHubError, type GitHubLink, type PullRequest, type WorkflowRun } from "../../src/github";
+import type { GitServer } from "./git-server";
+
+// GitHub, played by another repo on the test Git server for git over HTTP, with its REST API answered here: the
+// default branch, pull requests, workflow runs. People on GitHub merge the pull request the three ways GitHub offers,
+// or push straight to its branch, with real git on the repo's disk.
+
+export interface FakeGitHub {
+	link: GitHubLink;
+	/** Runs git in GitHub's bare repo. */
+	git: (...args: string[]) => string;
+	head: (branch?: string) => string;
+	/** Every pull request opened, open or not. */
+	pulls: (PullRequest & { open: boolean })[];
+	/** Every REST call, as "METHOD path". */
+	calls: string[];
+	/** Makes the next `count` REST calls fail, as GitHub down would. */
+	failCalls: (count: number) => void;
+	/** Makes the next `count` REST calls never answer, as a GitHub that takes the connection and hangs, until given up. */
+	stallCalls: (count: number) => void;
+	/**
+	 * Merges the open pull request (or githive/main) into the default branch as GitHub would, and closes it. A
+	 * conflict is resolved taking `taking`'s side, as a person would on GitHub. Returns the new head.
+	 */
+	mergePull: (how: "merge" | "squash" | "rebase", taking?: "ours" | "theirs") => string;
+	/** Someone commits `files` straight to GitHub's default branch. Returns the new head. */
+	push: (files: Record<string, string>, message?: string) => string;
+	/** Someone force-pushes GitHub's default branch to `onto` with `files` committed on it. Returns the new head. */
+	forcePush: (onto: string, files: Record<string, string>) => string;
+	/** GitHub's default branch becomes `branch`, made from the current one's head if it's new. */
+	setDefault: (branch: string) => void;
+	close: () => void;
+}
+
+const IDENTITY = ["-c", "user.name=octocat", "-c", "user.email=octocat@example.com"];
+
+/** GitHub's acme/shop, starting as a copy of the project's main. */
+export async function fakeGitHub(
+	server: GitServer,
+	options: { repo?: string; runs?: (sha: string) => WorkflowRun[] } = {},
+): Promise<FakeGitHub> {
+	const repo = options.repo ?? "acme/shop";
+	const url = server.repo("github");
+	const bare = server.gitIn("github", "rev-parse", "--absolute-git-dir").trim();
+	const project = server.git("rev-parse", "--absolute-git-dir").trim();
+	const git = (...args: string[]) => execFileSync("git", ["-C", bare, ...args]).toString();
+	git("fetch", "-q", project, "main:main");
+	git("symbolic-ref", "HEAD", "refs/heads/main");
+	const work = mkdtempSync(join(tmpdir(), "githive-fake-github-"));
+	const pulls: (PullRequest & { open: boolean })[] = [];
+	const calls: string[] = [];
+	let failing = 0;
+	let stalling = 0;
+	let defaultBranch = "main";
+	const called = async (what: string, signal?: AbortSignal) => {
+		calls.push(what);
+		if (stalling > 0) {
+			stalling--;
+			await new Promise((_, reject) =>
+				signal?.addEventListener("abort", () => reject(new Error(`GitHub ${what}: given up`))),
+			);
+		}
+		if (failing > 0) {
+			failing--;
+			throw new GitHubError(503, `GitHub ${what}: 503 unavailable`);
+		}
+	};
+	const head = (branch = defaultBranch) => git("rev-parse", `refs/heads/${branch}`).trim();
+	// A working clone of GitHub, fresh for each thing people do there.
+	const inClone = (work_: (dir: string, run: (...args: string[]) => string) => void) => {
+		const dir = join(work, `clone-${Math.random().toString(36).slice(2, 8)}`);
+		execFileSync("git", ["clone", "-q", bare, dir]);
+		const run = (...args: string[]) => execFileSync("git", ["-C", dir, ...IDENTITY, ...args]).toString();
+		work_(dir, run);
+		rmSync(dir, { recursive: true, force: true });
+	};
+	const link: GitHubLink = {
+		repo,
+		remote: { url, token: "unused", user: "x-access-token" },
+		runsFor: async (sha) => {
+			await called(`GET runs ${sha}`);
+			return options.runs?.(sha) ?? [];
+		},
+		deleteBranch: async (name) => {
+			await called(`DELETE ${name}`);
+			git("update-ref", "-d", `refs/heads/${name}`);
+		},
+		defaultHead: async (signal) => {
+			await called("GET default", signal);
+			return { branch: defaultBranch, head: head() };
+		},
+		openPull: async (from, signal) => {
+			await called(`GET pulls ${from}`, signal);
+			const open = pulls.find((pull) => pull.open && pull.head === from);
+			return open ? withoutOpen(open) : null;
+		},
+		createPull: async ({ head: from, base, title, body }) => {
+			await called(`POST pulls ${from}`);
+			if (pulls.some((pull) => pull.open && pull.head === from))
+				throw new GitHubError(422, "A pull request already exists");
+			if (!git("rev-list", `refs/heads/${base}..refs/heads/${from}`).trim())
+				throw new GitHubError(422, `No commits between ${base} and ${from}`);
+			const number = pulls.length + 1;
+			const pull = { number, url: `https://github.com/${repo}/pull/${number}`, title, body, head: from, base };
+			pulls.push({ ...pull, open: true });
+			return pull;
+		},
+		updatePull: async (number, { title, body, base }) => {
+			await called(`PATCH pulls ${number}`);
+			const pull = pulls.find((entry) => entry.number === number);
+			if (!pull) throw new GitHubError(404, "Not Found");
+			Object.assign(pull, { title, body, ...(base ? { base } : {}) });
+			return withoutOpen(pull);
+		},
+	};
+	const mergePull = (how: "merge" | "squash" | "rebase", taking?: "ours" | "theirs") => {
+		const resolving = taking ? ["-X", taking] : [];
+		const pull = pulls.find((entry) => entry.open) ?? { number: 0, head: "githive/main", base: "main", title: "" };
+		inClone((_dir, run) => {
+			run("fetch", "-q", "origin", `${pull.head}:refs/remotes/origin/${pull.head}`);
+			run("checkout", "-q", pull.base);
+			if (how === "merge")
+				run(
+					"merge",
+					"-q",
+					...resolving,
+					"--no-ff",
+					"-m",
+					`Merge pull request #${pull.number} from ${pull.head}`,
+					`origin/${pull.head}`,
+				);
+			if (how === "squash") {
+				run("merge", "-q", ...resolving, "--squash", `origin/${pull.head}`);
+				run("commit", "-q", "-m", `${pull.title} (#${pull.number})`);
+			}
+			if (how === "rebase") {
+				// GitHub replays the pull request's commits on its branch, merges dropped, each with a new id.
+				run("checkout", "-q", "-B", "rebasing", `origin/${pull.head}`);
+				run("rebase", "-q", "--force-rebase", pull.base);
+				run("checkout", "-q", pull.base);
+				run("merge", "-q", "--ff-only", "rebasing");
+			}
+			run("push", "-q", "origin", pull.base);
+		});
+		if ("open" in pull) pull.open = false;
+		return head(pull.base);
+	};
+	const commitFiles = (
+		dir: string,
+		run: (...args: string[]) => string,
+		files: Record<string, string>,
+		message: string,
+	) => {
+		for (const [path, text] of Object.entries(files)) {
+			mkdirSync(join(dir, path, ".."), { recursive: true });
+			writeFileSync(join(dir, path), text);
+		}
+		run("add", "-A");
+		run("commit", "-q", "-m", message);
+	};
+	const forcePush = (onto: string, files: Record<string, string>) => {
+		inClone((dir, run) => {
+			run("checkout", "-q", "-B", defaultBranch, onto);
+			commitFiles(dir, run, files, "Rewritten on GitHub");
+			run("push", "-q", "--force", "origin", defaultBranch);
+		});
+		return head();
+	};
+	const setDefault = (branch: string) => {
+		if (!git("branch", "--list", branch).trim()) git("branch", branch, head());
+		git("symbolic-ref", "HEAD", `refs/heads/${branch}`);
+		defaultBranch = branch;
+	};
+	const push = (files: Record<string, string>, message = "A commit on GitHub") => {
+		inClone((dir, run) => {
+			run("checkout", "-q", defaultBranch);
+			commitFiles(dir, run, files, message);
+			run("push", "-q", "origin", defaultBranch);
+		});
+		return head();
+	};
+	return {
+		link,
+		git,
+		head,
+		pulls,
+		calls,
+		failCalls: (count) => void (failing = count),
+		stallCalls: (count) => void (stalling = count),
+		mergePull,
+		push,
+		forcePush,
+		setDefault,
+		close: () => rmSync(work, { recursive: true, force: true }),
+	};
+}
+
+const withoutOpen = ({ open: _open, ...pull }: PullRequest & { open: boolean }): PullRequest => pull;

@@ -5,6 +5,8 @@ import { stampPayload, verifyStamp } from "./stamp";
 import { approval, type Author, type ReviewPolicy, type VoteRecord, type Votes, effectivePolicy } from "./votes";
 import { settingsForBranch } from "./branch-rules";
 import { skipsChecks } from "./check-scope";
+import { type GitHubImport, trustedGitHubChange } from "./github-imports";
+import { GITHUB_AGENT } from "./github-settings";
 
 // The audit (see docs/design.md). Nothing stops an agent from breaking a convention, so this replays the records
 // and reports every violation with the commit and agent responsible. It's a pure function, so anyone can rerun it
@@ -99,6 +101,8 @@ export interface AuditRecords {
 	verify?: string[];
 	merges: MergeRecord[];
 	staleAfterMs?: number;
+	/** The commits of GitHub's GitHive brought in (the import record): what a trusted GitHub change may merge. */
+	imports?: GitHubImport[];
 }
 
 export async function audit(records: AuditRecords): Promise<Violation[]> {
@@ -129,7 +133,7 @@ export async function audit(records: AuditRecords): Promise<Violation[]> {
 		violations.push(...(await auditMerge(merge, key, indexed)));
 	}
 	for (const history of claimHistories(records))
-		violations.push(...othersClaimsReleased(history, records.staleAfterMs));
+		violations.push(...(await othersClaimsReleased(history, records.staleAfterMs, verified)));
 	resolveReverts(violations, reverts);
 	return violations;
 }
@@ -183,7 +187,9 @@ async function auditMerge(merge: MergeRecord, key: string | undefined, indexed: 
 	checkDependencies(records.merges, merge, own, report);
 	for (const { history, tip } of cited.records) checkReleasedAfter(history, tip, merge, report);
 	const settings = settingsFor(records, registryAt, merge);
-	checkApproved(records, settings.policy, votesAt, merge, report, own);
+	// GitHub's change, while the repo trusted GitHub's changes, needed no votes.
+	if (!(await trustedImport(records, registryAt, merge, ownRecords, key)))
+		checkApproved(records, settings.policy, votesAt, merge, report, own);
 	// A change that only touched files the settings said to skip needs no checks.
 	if (settings.verify?.length && !skipsChecks(merge.files, settings.skipChecks)) checkTested(merge, indexed, report);
 	return violations;
@@ -448,6 +454,25 @@ function registryTip(cited: string): string | undefined {
 		.find(([shard = ""]) => decodeShard(shard) === "")?.[1];
 }
 
+// Whether a merge was GitHub's change, landed without votes as trusted: the trust rule (trustedGitHubChange) against
+// its claim's records and the registry state it cites, the same rule the merge path applied.
+async function trustedImport(
+	records: AuditRecords,
+	registryAt: Map<string, Registry>,
+	merge: MergeRecord,
+	claims: ClaimRecord[],
+	key: string | undefined,
+) {
+	const tip = registryTip(merge.claimsTip!);
+	return trustedGitHubChange({
+		records: claims,
+		head: merge.head,
+		registry: tip ? registryAt.get(tip) : undefined,
+		imports: async () => records.imports ?? [],
+		stampKey: key,
+	});
+}
+
 // The merged commit needs the policy's approvals from reviewers other than its author, every veto role's included,
 // and no veto, in the votes the merge cites.
 function checkApproved(
@@ -511,14 +536,20 @@ function landedAsBatch(merge: MergeRecord, byCommit: Map<string, MergeRecord>, b
 	return true;
 }
 
-/** Releases of another agent's claim that wasn't stale yet. */
-function othersClaimsReleased(history: History, staleAfterMs?: number): Violation[] {
+/**
+ * Releases of another agent's claim that wasn't stale yet. githive-github's claim (GitHub's change) is the exception:
+ * a person who can write, or a repo admin, may give it up at any time, through the toolkit, which stamps the release
+ * with who did it (see giveUpGitHubChange). The audit can't see who could write then, so it holds such a release to
+ * being stamped.
+ */
+async function othersClaimsReleased(history: History, staleAfterMs: number | undefined, verified: Verify) {
 	const staleAfter = staleAfterMs ?? STALE_AFTER_MS;
 	const violations: Violation[] = [];
 	let checked = 0;
 	for (const entry of history) {
 		for (const release of entry.state.released.slice(checked)) {
 			if (release.by === release.agent) continue;
+			if (release.agent === GITHUB_AGENT && release.stale && (await verified("release", release))) continue;
 			const idle = Date.parse(release.at) - Date.parse(release.lastActive);
 			if (idle <= staleAfter)
 				violations.push({

@@ -252,6 +252,29 @@ function refuse(refusal: Refused, why: Why, reason: string) {
 	if (!refusal.why.includes(why)) refusal.why.push(why);
 }
 
+// Approvals count distinct reviewers other than the author, under the policy for the files touched. That policy may
+// be stricter for dependency, CI and deploy files.
+function approvalRefusals(
+	refusal: Refused,
+	input: MergeInput,
+	head: string,
+	own: ClaimRecord | undefined,
+	counted: VotesView["votes"],
+	files: string[],
+): void {
+	const outcome = approval({ votes: counted }, head, input.policy, own, files);
+	const { required } = effectivePolicy(input.policy, files);
+	if (outcome.vetoedBy.length) refuse(refusal, "changes-asked", `${head} is vetoed by ${outcome.vetoedBy.join(", ")}`);
+	else if (outcome.approvals < required)
+		refuse(
+			refusal,
+			"approvals",
+			`${head} has ${outcome.approvals} of ${required} approvals from reviewers other than its author`,
+		);
+	else if (outcome.awaiting.length)
+		refuse(refusal, "approvals", `${head} still needs approval from ${outcome.awaiting.join(", ")}, which can veto it`);
+}
+
 function claimReasons(
 	refusal: Refused,
 	proposed: Proposed,
@@ -285,19 +308,9 @@ async function voteReasons(
 	const { head, files } = proposed;
 	const onHead = votes.votes.filter((vote) => vote.commit === head);
 	const counted = await countedVotes(onHead, input.stampKey);
-	// Approvals count distinct reviewers other than the author, under the policy for the files touched. That policy may
-	// be stricter for dependency, CI and deploy files.
-	const outcome = approval({ votes: counted }, head, input.policy, own, files);
-	const { required } = effectivePolicy(input.policy, files);
-	if (outcome.vetoedBy.length) refuse(refusal, "changes-asked", `${head} is vetoed by ${outcome.vetoedBy.join(", ")}`);
-	else if (outcome.approvals < required)
-		refuse(
-			refusal,
-			"approvals",
-			`${head} has ${outcome.approvals} of ${required} approvals from reviewers other than its author`,
-		);
-	else if (outcome.awaiting.length)
-		refuse(refusal, "approvals", `${head} still needs approval from ${outcome.awaiting.join(", ")}, which can veto it`);
+	// GitHub's changes, while the repo trusts them, need no votes; only their checks can send them back.
+	const trusted = !!own && !!(await input.trusted?.(own, head));
+	if (!trusted) approvalRefusals(refusal, input, head, own, counted, files);
 	// Its checks failed on this exact commit, or it didn't merge, so merging it again would fail. A new commit is
 	// checked afresh.
 	const failed = counted.find((vote) => vote.reviewer === CHECKS_REVIEWER && vote.verdict === "reject");
@@ -306,7 +319,7 @@ async function voteReasons(
 		refuse(refusal, said.why, `${failed.evidence.split("\n")[0]}: push a fix (a new commit) and get it approved`);
 		if (said.why === "conflict") refusal.into = input.branch;
 		else if (said.check) refusal.checks = [said.check];
-	} else if (!proposed.mine) {
+	} else if (!proposed.mine && !trusted) {
 		const author = own?.agent ?? proposed.agent;
 		const sentBack = counted.find((vote) => vote.verdict === "reject" && vote.reviewer !== author);
 		if (sentBack) refuse(refusal, "changes-asked", `${sentBack.reviewer} asked for changes on ${head}`);

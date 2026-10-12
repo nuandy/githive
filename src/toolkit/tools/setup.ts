@@ -15,7 +15,16 @@ import {
 	MOST_AT_ONCE,
 	shardingOf,
 } from "./repo";
-import { branchRulesFrom, checksFrom, githubFrom, POLICY_FIELDS, policyFrom, skipPatternsFrom } from "./settings-input";
+import { bringsGitHubBack, githubSync, trustsGitHub } from "../github-settings";
+import {
+	branchRulesFrom,
+	checksFrom,
+	GITHUB_FIELDS,
+	githubFrom,
+	POLICY_FIELDS,
+	policyFrom,
+	skipPatternsFrom,
+} from "./settings-input";
 import { INSTRUCTIONS } from "./tool-list";
 
 // Tools that set up a repo and its agents: settings (which also starts GitHive on a repo) and register.
@@ -117,7 +126,9 @@ async function startOnRepo({ args, ctx, run, repo, claims, registered, stamper }
 		instructions: INSTRUCTIONS,
 	};
 	// Starting doesn't set branch rules, skipped files or GitHub: apply those with a second settings call.
-	const rest = (["branch_rules", "skip_checks", "github"] as const).filter((field) => args[field] !== undefined);
+	const rest = (["branch_rules", "skip_checks", ...GITHUB_FIELDS] as const).filter(
+		(field) => args[field] !== undefined,
+	);
 	if (!rest.length) return started;
 	const more = (await run(
 		"settings",
@@ -151,9 +162,9 @@ async function changeRepoSettings({ args, ctx, repo, claims, stamper }: ToolCall
 			? undefined
 			: branchRulesFrom(args.branch_rules, registered.policy ?? DEFAULT_POLICY);
 	const skipChecks = args.skip_checks === undefined ? undefined : skipPatternsFrom(args.skip_checks);
-	const github = args.github === undefined ? undefined : await githubFrom(ctx, args.github);
+	const github = await githubFrom(ctx, args, registered.github);
 	if (!policy && !verify && !branchRules && !skipChecks && github === undefined) {
-		const fields = [...POLICY_FIELDS, "verify", "branch_rules", "skip_checks", "github"].join(", ");
+		const fields = [...POLICY_FIELDS, "verify", "branch_rules", "skip_checks", ...GITHUB_FIELDS].join(", ");
 		fail(400, `GitHive has started on ${repo}: name what to change: ${fields}`);
 	}
 	// Checks on Actions need the GitHub repo they run in. A github of null disconnects it.
@@ -183,7 +194,18 @@ async function changeRepoSettings({ args, ctx, repo, claims, stamper }: ToolCall
 		skipChecks: registry?.skipChecks ?? DEFAULT_SKIP_CHECKS,
 	};
 	if (registry?.branchRules?.length) reply.branchRules = registry.branchRules;
-	if (registry?.github) reply.github = registry.github.repo;
+	if (registry?.github) Object.assign(reply, githubReply(registry));
 	if (warnings.length) reply.warnings = warnings;
 	return reply;
+}
+
+// The GitHub link as settings reply with it: the repo, how main goes there, and whether its changes need review.
+function githubReply(registry: Registry) {
+	return {
+		github: registry.github!.repo,
+		githubSync: githubSync(registry),
+		githubTrust: trustsGitHub(registry),
+		// A link made before modes mirrors only, until a mode is set for it.
+		githubInbound: bringsGitHubBack(registry),
+	};
 }

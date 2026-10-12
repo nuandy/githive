@@ -1,4 +1,5 @@
 import { branchHead } from "../git";
+import { isGitHubChange } from "./github-settings";
 import type { Landing, Settled } from "./landing";
 import { checkAndPutOut, gateName, newPlace, type Place } from "./merge-checks";
 import { land, type Landed, leaveOutLanded } from "./merge-land";
@@ -258,12 +259,15 @@ async function otherChanges(input: MergeInput): Promise<Candidate[]> {
 }
 
 // The candidates approved at the head they were last seen at, and not sent back by a reviewer other than their author.
+// GitHub's changes are left to their own merge (githive-github's job, or a person's), which test-merges them first: a
+// conflict sends one to a person with no vote to show it, and in another's batch it would break every landing.
 async function approvedAsSeen<C extends Candidate & { head: string }>(input: MergeInput, others: C[]): Promise<C[]> {
 	const seen = await input.votes.readFor(others.map((candidate) => candidate.head));
 	const onTheirHeads = seen.votes.filter((vote) => others.some((candidate) => candidate.head === vote.commit));
 	const counted = await countedVotes(onTheirHeads, input.stampKey);
 	return others.filter((candidate) => {
 		const { claim, head } = candidate;
+		if (isGitHubChange(claim)) return false;
 		const author = { agent: claim.agent, ...(claim.by ? { by: claim.by } : {}) };
 		const sentBack = counted.some(
 			(vote) => vote.commit === head && vote.verdict === "reject" && vote.reviewer !== author.agent,

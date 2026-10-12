@@ -12,7 +12,7 @@ import { changeSigns, changeStatus } from "./change-state";
 import { workItemFrom } from "./claim-input";
 import type { ToolCall, ToolHandlers } from "./context";
 import { tellPeopleOfWaitingRoles } from "./dashboard";
-import { branchSettings, DEFAULT_POLICY, LISTED_AT_MOST, MOST_AT_ONCE, recordLog, workRef } from "./repo";
+import { claimPolicy, DEFAULT_POLICY, LISTED_AT_MOST, MOST_AT_ONCE, recordLog, workRef } from "./repo";
 
 // Tools agents use to choose their work: reviews, backlog, add_work, and status.
 
@@ -31,7 +31,7 @@ export const workTools: ToolHandlers = {
 				registered?.policy ?? DEFAULT_POLICY,
 				state.open,
 				state.votes,
-				(claim) => branchSettings(registered, claim.into).policy,
+				(claim) => claimPolicy(registered, claim),
 			).catch((err) => console.error(`checking ${repo}'s waiting reviews failed`, String(err)));
 		const options = reviewsFor({ ...state, held });
 		return {
@@ -141,7 +141,7 @@ async function leaseOf(
 	const record = await votesFor(head);
 	const onHead = head ? record.votes.filter((vote) => vote.commit === head) : [];
 	const counted = await countedVotes(onHead, registered?.stampKey);
-	const policy = branchSettings(registered, claim.into).policy;
+	const policy = claimPolicy(registered, claim);
 	return { ...leaseFor(changeSigns({ claim, head, counted, record, landing, policy })), renew: RENEW };
 }
 

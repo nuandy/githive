@@ -8,6 +8,7 @@ import {
 	claimTitle,
 	blockingRoles,
 	claimStatus,
+	isFromGitHub,
 	shardingSummary,
 	votesShardingSummary,
 	type Claim,
@@ -51,10 +52,18 @@ function Approvals({ claim }: { claim: Claim }) {
  * Where a change lands and what holds it back, when that isn't the plain case: into another branch, merging a
  * whole branch, or waiting on other changes.
  */
-export function ChangeLabels({ claim }: { claim: Pick<Claim, "into" | "source" | "waitsOn"> }) {
+export function ChangeLabels({
+	claim,
+}: {
+	claim: Pick<Claim, "into" | "source" | "waitsOn" | "trusted"> & { agent?: string };
+}) {
 	return (
 		<>
-			{claim.source ? (
+			{isFromGitHub(claim) ? (
+				<span className="pill pill--outline" title={claim.trusted ?? "GitHub's changes, reviewed like any change"}>
+					from GitHub{claim.trusted ? ", trusted" : ""}
+				</span>
+			) : claim.source ? (
 				<span className="pill pill--outline">
 					merges <code>{claim.source}</code>
 				</span>
@@ -318,6 +327,19 @@ function MergePolicyTerms({ policy, verify }: { policy: Policy; verify: string[]
 	);
 }
 
+/** The GitHub link in words: where GitHive's work goes, and whether GitHub's changes come back reviewed. */
+export function githubTerms(github: NonNullable<RepoSnapshot["github"]>, branch: string) {
+	const how =
+		github.sync === "pr"
+			? `GitHive's work reaches ${github.repo} through one pull request from githive/main, merged on GitHub`
+			: `GitHive pushes ${branch} to ${github.repo} after every landing`;
+	if (!github.inbound) return `${how}, as it did before modes: GitHub's changes aren't brought back.`;
+	const back = github.trust
+		? "GitHub's changes come back as githive-github's change, landing through the checks without review"
+		: "GitHub's changes come back as githive-github's change, reviewed like any change";
+	return `${how}. ${back}.`;
+}
+
 /**
  * The Settings tab: how changes merge (for the repo's admins, `editor` to
  * change it; for everyone else, what it is), how the records are kept, and
@@ -379,6 +401,12 @@ export function SettingsTab({
 							Each change works in its own fork: agents can't write {snapshot.branch ?? "main"}; only the toolkit
 							merges, once the conventions hold.
 						</dd>
+						{snapshot.github ? (
+							<>
+								<dt>GitHub</dt>
+								<dd>{githubTerms(snapshot.github, snapshot.branch ?? "main")}</dd>
+							</>
+						) : null}
 					</dl>
 				</div>
 			</section>

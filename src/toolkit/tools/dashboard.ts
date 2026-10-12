@@ -5,6 +5,7 @@ import { Timing } from "../../timing";
 import { claimInto, presentClaim } from "../branch-scope";
 import { DEFAULT_SKIP_CHECKS } from "../check-scope";
 import type { ClaimRecord, Registry, ReleaseRecord } from "../claims";
+import { bringsGitHubBack, githubSync, trustsGitHub } from "../github-settings";
 import type { LandingView } from "../landing";
 import { leaseFor } from "../staleness";
 import type { VoteStore, VotesView } from "../vote-store";
@@ -13,6 +14,7 @@ import { holdKey, ROLE_WAIT_MS, waitingRoleReviews } from "../work";
 import { runAudit } from "./audit-tools";
 import { changeHead, changeSigns, changeSourceFor, changeState, type changeStatus } from "./change-state";
 import { targetBranch } from "./claim-input";
+import { giveUpGitHubChange } from "./github-tools";
 import type { HostedStatus, ToolContext } from "./context";
 import {
 	branchSettings,
@@ -243,6 +245,23 @@ export async function makeBranch(
 	return { name: input.name, made };
 }
 
+/**
+ * A person gives up GitHub's change from the dashboard: its claim released, so its paths are free, and its job ended
+ * until GitHub's branch moves or someone asks again (see giveUpGitHubChange). The route checks they can write.
+ */
+export async function giveUpAsPerson(ctx: ToolContext, repo: string, change: string, person: string) {
+	if (!person.startsWith("person:"))
+		fail(403, "only a person gives up GitHub's changes from the dashboard; a repo admin's agents use release");
+	const registry = (await recordLog<Registry>(ctx, repo, claimsRef(repo)).read())?.commit.state;
+	const store = storeFor(ctx, repo, registry);
+	const { claim } = await store.readChange(change);
+	if (!claim) fail(409, `${change} holds no claim: there's nothing to give up`);
+	const stamper = await ctx.stamper?.();
+	const outcome = await giveUpGitHubChange(ctx, repo, { store, claim, who: person, ...(stamper ? { stamper } : {}) });
+	await ctx.ping?.(repo).catch(() => undefined);
+	return outcome;
+}
+
 /** The audit for the dashboard. It replays every record, so it runs apart from the snapshot. */
 export async function repoAudit(ctx: ToolContext, repo: string) {
 	const { merges, violations } = await runAudit(ctx, repo);
@@ -319,6 +338,37 @@ export async function repoSnapshot(ctx: ToolContext, repo: string) {
 		votesSharding: votes.sharded ?? (state.autoShard || state.shardDepth ? "on demand" : "never"),
 		claims,
 		votes: votes.votes.slice(-20).reverse(),
+		...(state.github ? { github: await githubView(ctx, repo, state) } : {}),
+	};
+}
+
+/**
+ * The connected GitHub repo for the dashboard: how GitHive's work reaches it, whether its changes need review, and
+ * as GitHubSync last saw them (hints), the standing pull request and bringing GitHub's changes back.
+ */
+async function githubView(ctx: ToolContext, repo: string, state: Registry) {
+	const seen = await ctx
+		.githubSync?.(repo)
+		.state()
+		.catch(() => null);
+	const job = seen?.job;
+	return {
+		repo: state.github!.repo,
+		sync: githubSync(state),
+		trust: trustsGitHub(state),
+		inbound: bringsGitHubBack(state),
+		pull: seen?.pull ? { number: seen.pull.number, url: seen.pull.url } : null,
+		...(job
+			? {
+					fromGitHub: {
+						step: job.step,
+						commit: job.commit,
+						at: job.updatedAt,
+						...(job.change ? { change: job.change } : {}),
+						...(job.reason ? { reason: job.reason } : {}),
+					},
+				}
+			: {}),
 	};
 }
 
@@ -328,6 +378,8 @@ type ChangeStatus = Awaited<ReturnType<typeof changeStatus>>;
 interface ClaimSnapshot extends ClaimRecord {
 	head: string | null;
 	approval: ChangeStatus["approval"];
+	/** Why GitHub's change needs no review, while the repo trusts GitHub's changes. */
+	trusted?: string;
 	hosted?: HostedStatus;
 	attention?: Attention;
 	waitsOn?: string[];
@@ -361,7 +413,7 @@ async function claimSnapshot(
 ): Promise<ClaimSnapshot> {
 	const claim = presentClaim(record, projectBranch(state));
 	const { status, counted } = await changeState(ctx, repo, state, async () => votes.votes, claim.change, claim);
-	const { head, approval, hosted } = status;
+	const { head, approval, hosted, trusted } = status;
 	// A question stays open until a person votes on the change's commit. For a waiting role's review,
 	// it closes once that role signs off.
 	const asked = openFlag(votes, claim.change, head);
@@ -375,6 +427,7 @@ async function claimSnapshot(
 		);
 	const waitsOn = (claim.after ?? []).filter((dependency) => !mergedInto(dependency));
 	const snapshot: ClaimSnapshot = { ...claim, head, approval };
+	if (trusted) snapshot.trusted = trusted;
 	if (hosted) snapshot.hosted = hosted;
 	if (attention) snapshot.attention = attention;
 	if (waitsOn.length) snapshot.waitsOn = waitsOn;

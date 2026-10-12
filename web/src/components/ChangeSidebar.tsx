@@ -61,7 +61,11 @@ export function ChangeSidebar({
 				) : (
 					<p className="muted">{reviewCount(votes.length)}</p>
 				)}
-				<p className="muted sidebar-note">{snapshot.policy.required} approvals required</p>
+				<p className="muted sidebar-note">
+					{claim?.trusted
+						? "No review: GitHub's changes are trusted"
+						: `${snapshot.policy.required} approvals required`}
+				</p>
 			</section>
 			<section className="sidebar-section">
 				<h2>Agent</h2>

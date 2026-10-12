@@ -1,3 +1,4 @@
+import type { GitHubImportResult } from "../gate-github";
 import type { Hunk, Remote } from "../git";
 import type { ReadHistory, TouchedBy } from "./batch-reads";
 import type { ClaimRecord } from "./claims";
@@ -79,8 +80,22 @@ export interface BatchGit {
 		to: Remote;
 		ref: string;
 	}): Promise<{ tip: string } | Unlanded>;
-	/** Fast-forwards `branch` on `to` (GitHub's copy) to `head`, and throws if that's refused. */
-	pushBranch(input: { branch: string; head: string; to: Remote }): Promise<void>;
+	/**
+	 * Fast-forwards `as` (by default `branch`) on `to`, GitHub's copy, to `head` from the project's `branch`, and throws
+	 * if that's refused.
+	 */
+	pushBranch(input: { branch: string; head: string; to: Remote; as?: string }): Promise<void>;
+	/**
+	 * Fetches `githubBranch` from `from` (GitHub) and, unless the project's `branch` at `base` has it, writes it to the
+	 * project's `as`, joined to the work of GitHive's it already took (see gate-github.ts).
+	 */
+	importBranch?(input: {
+		base: string;
+		branch: string;
+		from: Remote;
+		githubBranch: string;
+		as: string;
+	}): Promise<GitHubImportResult>;
 }
 
 /**
@@ -119,6 +134,11 @@ export interface MergeInput {
 	stamper?: Stamper;
 	/** The registry's stamp key. When set, only stamped votes count. */
 	stampKey?: string;
+	/**
+	 * Whether a change lands without votes at `head`: GitHub's changes, brought in by githive-github, while the repo
+	 * trusts them (see github-settings.ts). Its checks still run.
+	 */
+	trusted?: (claim: ClaimRecord, head: string) => Promise<boolean>;
 	change: string;
 	agent: string;
 	/** Maps a file to its name in the claims records, for a branch other than the project's (see branch-scope.ts). */

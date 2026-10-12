@@ -1,0 +1,29 @@
+.github-link {
+	display: flex;
+	align-items: center;
+	flex-wrap: wrap;
+	gap: 6px 12px;
+	font-size: 13px;
+}
+
+.github-link__repo,
+.github-link__pull,
+.github-link__open {
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+}
+
+.github-link__open {
+	padding: 2px 10px;
+	font-size: 13px;
+}
+
+.github-link__note {
+	max-width: 48ch;
+	overflow-wrap: anywhere;
+}
+
+.github-link__error {
+	flex-basis: 100%;
+}

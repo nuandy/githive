@@ -3,6 +3,7 @@ import { entriesOverlap } from "../claim-paths";
 import { appendRecord } from "./records";
 import { scopedInto } from "./branch-scope";
 import type { BranchRule } from "./branch-rules";
+import type { GitHubSettings } from "./github-settings";
 import { type Stamper, stampPayload } from "./stamp";
 import type { ReviewPolicy } from "./votes";
 
@@ -74,8 +75,8 @@ export interface Registry {
 	policy?: ReviewPolicy;
 	/** The checks run on the branch plus a change before it merges. ["github-actions"] runs them on GitHub. */
 	verify?: string[];
-	/** The connected GitHub repo (owner/name), which main is pushed back to after every landing. */
-	github?: { repo: string };
+	/** The connected GitHub repo (owner/name), how main goes to it, and whether its changes need review. */
+	github?: GitHubSettings;
 	stampKey?: string;
 	/** When set, claims are sharded this many path segments deep (see shards.ts), below this registry. */
 	shardDepth?: number;
@@ -166,7 +167,7 @@ export async function changeSettings(
 		verify?: string[];
 		branchRules?: BranchRule<ReviewPolicy>[];
 		skipChecks?: string[];
-		github?: { repo: string } | null;
+		github?: GitHubSettings | null;
 		by?: string;
 	},
 ) {
@@ -176,7 +177,7 @@ export async function changeSettings(
 		const verify = ifChanged(input.verify, state.verify ?? []);
 		const rules = ifChanged(input.branchRules, state.branchRules ?? []);
 		const skip = ifChanged(input.skipChecks, state.skipChecks);
-		const github = input.github !== undefined && input.github?.repo !== state.github?.repo ? input.github : undefined;
+		const github = input.github !== undefined && !sameGitHub(input.github, state.github) ? input.github : undefined;
 		if (!policy && !verify && !rules && !skip && github === undefined) return { refused: "unchanged" };
 		const { github: _, ...rest } = state;
 		const next: Registry = { ...(github === null ? rest : state) };
@@ -190,7 +191,7 @@ export async function changeSettings(
 			verify && `the checks (${verify.join("; ") || "none"})`,
 			rules && `the branch rules (${rules.map((r) => r.pattern).join(", ") || "none"})`,
 			skip && `what the checks skip (${skip.join(", ") || "nothing"})`,
-			github !== undefined && (github ? `the GitHub repo (${github.repo})` : "the GitHub repo (none)"),
+			github !== undefined && `the GitHub repo (${github ? describeGitHub(github) : "none"})`,
 		]
 			.filter(Boolean)
 			.join(" and ");
@@ -198,6 +199,17 @@ export async function changeSettings(
 	});
 	return outcome.ok ? { changed: true as const } : { changed: false as const, refused: outcome.refused };
 }
+
+// Whether two GitHub links are the same repo, mode and trust.
+const sameGitHub = (a: GitHubSettings | null, b: GitHubSettings | undefined) =>
+	(a?.repo ?? null) === (b?.repo ?? null) && a?.sync === b?.sync && a?.trust === b?.trust;
+
+const describeGitHub = (github: GitHubSettings) =>
+	[
+		github.repo,
+		github.sync === "pr" ? "through a pull request" : "mirrored",
+		github.trust === false ? "its changes reviewed" : "its changes trusted",
+	].join(", ");
 
 // The wanted setting, if it differs from the current one.
 const ifChanged = <T>(wanted: T | undefined, current: unknown) =>
@@ -463,6 +475,32 @@ export function releaseStale(
 				],
 			},
 			text: `${input.agent} releases ${input.change}'s claim, idle for ${Math.round(idle / 60_000)} minutes`,
+		};
+	});
+}
+
+/**
+ * Releases another agent's claim on someone's word, idle or not, recorded like a stale release with their stamp. Only
+ * for claims GitHive's own job holds, which no one else can release otherwise (see giveUpGitHubChange); the caller
+ * decides who may.
+ */
+export function giveUp(
+	log: CasLog<Registry>,
+	input: { change: string; agent: string; reason: string },
+	stamper?: Stamper,
+) {
+	return appendRecord<Registry, string>(log, input.agent, empty, async (state) => {
+		const held = state.claims.find((c) => c.change === input.change);
+		if (!held) return { refused: `${input.change} holds no claim` };
+		const at = new Date().toISOString();
+		const record: ReleaseRecord = { ...staleRelease(held, input.agent, at), reason: input.reason };
+		return {
+			state: {
+				...state,
+				claims: state.claims.filter((c) => c.change !== input.change),
+				released: [...state.released, await stamped("release", record, stamper, "verifiedBy")],
+			},
+			text: `${input.agent} gives up ${input.change} (${held.agent}'s): ${input.reason}`,
 		};
 	});
 }

@@ -1,3 +1,4 @@
+import type { Level } from "./auth/orgs";
 import { type ArtifactsCalls, countingRequests, describeCounts, type GitRequests } from "./git-http";
 import { statusOf } from "./errors";
 import { describeCaches } from "./sized-cache";
@@ -13,7 +14,7 @@ export interface McpContext {
 	 * Resolves the <owner>/<name> a tool call names to the repo's id, checking what the caller may do.
 	 * Without it, a repo is named by its id.
 	 */
-	resolveRepo?: (repo: string, tool: string, args: Args) => Promise<{ id: string; fullName: string }>;
+	resolveRepo?: (repo: string, tool: string, args: Args) => Promise<{ id: string; fullName: string; level?: Level }>;
 }
 
 const PROTOCOL_VERSIONS = ["2025-06-18", "2025-03-26", "2024-11-05"];
@@ -97,7 +98,9 @@ async function callToolRpc(request: RpcRequest, ctx: McpContext) {
 			typeof args.repo === "string" && ctx.resolveRepo ? await ctx.resolveRepo(args.repo, name, args) : null;
 		if (named) args = { ...args, repo: named.id };
 		repoId = String(args.repo ?? repoArg);
-		counting = countingRequests(() => callTool(name, args, ctx.toolkit));
+		// What the caller may do there goes with the call, for the few exceptions an admin may make (see release).
+		const toolkit = named?.level ? { ...ctx.toolkit, level: named.level } : ctx.toolkit;
+		counting = countingRequests(() => callTool(name, args, toolkit));
 		let result = await counting.done;
 		logCounts(name, repoId, counting);
 		if (Date.now() - from >= SLOW_TOOL_MS)
