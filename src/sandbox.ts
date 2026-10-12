@@ -202,12 +202,14 @@ export abstract class SandboxAgent<J extends SandboxJob, S extends AgentState> e
 		return true;
 	}
 
-	/** Leave a message for the agent's next turn. Returns false when the agent isn't running. */
+	/**
+	 * Leave a message for the agent's next turn. Returns false when the agent isn't running. One left during a turn
+	 * waits for the next: a turn acknowledges only the messages it sent.
+	 */
 	async notify(message: string) {
 		return this.lifecycle(async () => {
 			const { state } = await this.load();
 			if (!state || (state.status !== "queued" && state.status !== "working")) return false;
-			if (state.status === "working" && (await this.ctx.storage.get(TURN_IN_FLIGHT))) return false;
 			const inbox = (await this.ctx.storage.get<string[]>(INBOX)) ?? [];
 			await this.ctx.storage.put(INBOX, [...inbox, message]);
 			return true;

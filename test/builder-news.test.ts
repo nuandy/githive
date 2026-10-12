@@ -51,6 +51,6 @@ describe("a change's notices in the repo's cache", () => {
 		expect((await cache.changeNotices("bee-1", "add-hints")).map((told) => told.says)).toEqual(["about add-hints"]);
 		expect(await cache.changeNotices("bee-1", "add-hints")).toEqual([]);
 		const rest = await cache.landingNews("main", "bee-1");
-		expect(rest.map((item) => item.kind === "landed" || item.says)).toEqual(["about add-timer"]);
+		expect(rest.map((item) => (item as Notice).says)).toEqual(["about add-timer"]);
 	});
 });

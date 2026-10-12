@@ -3,9 +3,10 @@ import { FakeStorage } from "../fakes/env";
 import { runCall, type AgentTool } from "../../src/agent";
 import type { BuildJob, BuilderState } from "../../src/builder";
 import type { ReviewJob, ReviewerState } from "../../src/reviewer";
+import { INBOX, TURN_IN_FLIGHT } from "../../src/sandbox";
 
 // What builders and reviewers do differently in their shared container base:
-// only builders guard pushes.
+// only builders guard pushes, and a builder at work takes a second rejection into its next turn.
 
 const openai = vi.hoisted(() => ({ create: vi.fn() }));
 vi.mock("openai", () => ({
@@ -131,5 +132,16 @@ describe("pushes", () => {
 				command,
 			),
 		).toMatch(/^exit code 0/);
+	});
+});
+
+describe("revising", () => {
+	it("keeps a rejection that arrives mid-turn for the builder's next turn", async () => {
+		const working = { status: "working", log: [], pushes: 1, revisions: 1, turns: 4 } as unknown as BuilderState;
+		await storage.put("job", job);
+		await builder.put(working);
+		await storage.put(TURN_IN_FLIGHT, "turn-1");
+		expect(await builder.revise("Second review: the timer never stops.")).toBe("revising");
+		expect(await storage.get(INBOX)).toEqual(["Second review: the timer never stops."]);
 	});
 });

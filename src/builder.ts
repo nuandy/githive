@@ -108,10 +108,9 @@ export class Builder extends SandboxAgent<BuildJob, BuilderState> {
 			return "released";
 		}
 		// A second rejection while revising joins the current revision.
-		if (state.status === "queued" || state.status === "working") {
-			await this.notify(feedback);
-			return "revising";
-		}
+		if (isRunning(state) && (await this.notify(feedback))) return "revising";
+		// It stopped meanwhile: a new revision starts from its state as it is now.
+		if (isRunning(state)) Object.assign(state, (await this.load()).state);
 		const credentials = await builderCredentials(this.env, job.project, job.change);
 		await this.ctx.storage.put("job", { ...job, ...credentials });
 		await this.ctx.storage.delete("cancel");
@@ -411,6 +410,8 @@ export class Builder extends SandboxAgent<BuildJob, BuilderState> {
 		return ahead.exitCode === 0 ? Number(ahead.output.trim()) : 0;
 	}
 }
+
+const isRunning = (state: BuilderState) => state.status === "queued" || state.status === "working";
 
 /** A text's first line: a reviewer's feedback in brief. */
 function firstLine(text: string) {
