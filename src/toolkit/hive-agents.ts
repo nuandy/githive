@@ -14,6 +14,8 @@ export const HIVE_JOBS = [
 	"keeper",
 	"comber",
 	"cleaner",
+	"heater",
+	"carrier",
 ] as const;
 
 /** The most hosted agents a repo may run at once. */

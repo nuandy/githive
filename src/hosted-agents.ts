@@ -14,7 +14,7 @@ import type { BacklogView, ReviewOption } from "./toolkit/work";
 // stops its agents and says what they're doing.
 
 /** How often an agent takes a turn of its loop. */
-export const AGENT_TICK_MS = 20_000;
+export const AGENT_TICK_MS = 10_000;
 
 /** A review an agent started that hasn't voted by then is left, so the agent can go on. */
 export const REVIEW_LAPSES_MS = 20 * 60_000;
@@ -137,7 +137,9 @@ export class HostedAgent extends DurableObject<Env> {
 
 	/** Starts a hosted reviewer that votes as the agent, under its own name (tests note it instead). */
 	protected startReviewer(repo: string, offer: ReviewOption, agent: string): Promise<unknown> {
-		return startHostedReviewers(this.env, { repo, change: offer.change, roles: [offer.role], reviewer: agent });
+		// It merges as soon as it approves, so an approved change doesn't wait for its author's next turn.
+		const review = { repo, change: offer.change, roles: [offer.role], reviewer: agent, mergeWhenApproved: true };
+		return startHostedReviewers(this.env, review);
 	}
 
 	/** Whether the agent's reviewer has voted or given up (tests answer it instead). */
@@ -201,16 +203,26 @@ export class HostedAgent extends DurableObject<Env> {
 		return this.reviewerDone(state.repo, state.reviewing!, state.name);
 	}
 
-	/** Takes the first review offered it, under its own name. */
+	/** Takes the first review offered it that no other agent has taken meanwhile, under its own name. */
 	private async review(state: HostedAgentState, call: Call, now: number) {
 		const { reviews } = (await call("reviews")) as { reviews: ReviewOption[] };
-		const offer = reviews[0];
-		if (!offer) return;
-		// Taking the change's credentials marks the review as this agent's, so others go elsewhere.
-		await call("credentials", { change: offer.change, role: offer.role });
-		await this.startReviewer(state.repo, offer, state.name);
-		state.reviewing = { change: offer.change, head: offer.head, role: offer.role, since: now };
-		state.reviewed++;
+		for (const offer of reviews) {
+			// Taking the change's credentials marks the review as this agent's, so others go elsewhere.
+			const taken = await call("credentials", { change: offer.change, role: offer.role }).then(
+				() => true,
+				(err) => {
+					if (statusOf(err).status === 409) return false;
+					throw err;
+				},
+			);
+			if (!taken) continue;
+			const started = (await this.startReviewer(state.repo, offer, state.name)) as { head?: string } | undefined;
+			// The reviewer is kept under the commit it fetched, which is newer than the offer's after another push.
+			const head = started?.head ?? offer.head;
+			state.reviewing = { change: offer.change, head, role: offer.role, since: now };
+			state.reviewed++;
+			return;
+		}
 	}
 
 	/** Claims the first free piece it hasn't tried and starts a builder on it; a refused claim waits a turn. */
@@ -218,7 +230,12 @@ export class HostedAgent extends DurableObject<Env> {
 		const piece = backlog.open.find((open) => !state.tried.includes(open.id));
 		if (!piece) return;
 		const intent = piece.intent ? `${piece.title}\n\n${piece.intent}` : piece.title;
-		const claimed = (await call("claim", { change: piece.id, paths: piece.paths ?? [], intent })) as { ok?: boolean };
+		const claim = { change: piece.id, paths: piece.paths ?? [], intent };
+		// Another agent may have claimed it since the backlog was read: then it tries again next turn.
+		const claimed = (await call("claim", claim).catch((err) => {
+			if (statusOf(err).status === 409) return { ok: false };
+			throw err;
+		})) as { ok?: boolean };
 		if (claimed.ok === false) return;
 		state.tried.push(piece.id);
 		try {

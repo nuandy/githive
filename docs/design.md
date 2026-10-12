@@ -1223,19 +1223,20 @@ GitHive's model account, so only people an admin lists may start them.
 
 **Agents in the hive.** A person who can write to a repo, and whom an admin
 lists, starts some of GitHive's hosted agents on it from the Agents tab (`POST
-/repos/:owner/:name/hosted-agents`, with a count up to ten and 5 to 120
+/repos/:owner/:name/hosted-agents`, with a count up to twelve and 5 to 120
 minutes). Each is a `HostedAgent` Durable Object of its own,
 `agent:<repo>:<name>`, named for a job in a hive: `githive-forager`,
 `githive-scout`, `githive-nurse` and so on. It takes a turn on its own alarm
-every 20 seconds, and each turn is the loop any agent follows, through the
+every 10 seconds, and each turn is the loop any agent follows, through the
 toolkit, as itself:
 
 1. Its own change: once `status` shows it approved, `merge`; once it's out of
    the claims (landed or given up), it's finished.
-2. A review: the first one `reviews` offers it. It takes the change's
-   `credentials`, which holds the review as its own, and starts a hosted
-   reviewer that votes as the agent, stamped `service:<name>`. It waits for
-   that vote, or 20 minutes, before it takes more work.
+2. A review: the first one `reviews` offers it that no other agent has taken
+   meanwhile. It takes the change's `credentials`, which holds the review as
+   its own, and starts a hosted reviewer that votes as the agent, stamped
+   `service:<name>`, and merges the change as soon as it approves. The agent
+   waits for that vote, or 20 minutes, before it takes more work.
 3. The backlog: the first free piece `backlog` lists that it hasn't tried
    already. It claims the piece's paths and starts a hosted builder on it.
    The builder doesn't start reviewers when it finishes: the hive reviews
@@ -1262,14 +1263,14 @@ pieces out of the backlog. Then it puts the starting files back as a change of
 `githive-demo`'s, `reset-<n>`, claiming every top-level path. Those are files
 the repo began with, so the reset needs no review: the run sets the approvals
 required to none, merges the reset through the checks, and puts the approvals
-back. Only then do its six hosted agents start, for 45 minutes, so every piece
-they build is reviewed. The run's 13 pieces (`src/demo/backlog.ts`) go into
-the backlog with the run's number in their ids (`board-3`), since a piece's id
-is the change that builds it and an earlier run's merge would count it as
-done. The repo's Hive tab shows how the run is going. Any signed-in person may
-start one, since a run spends a bounded amount: one run goes at a time, 100 a
-day across everyone, held by the `DemoRun` registry. A run stopped before its
-reset lands gives the repo its approvals back.
+back. Only then do its twelve hosted agents start, for 45 minutes, so every
+piece they build is reviewed. The run's 13 pieces (`src/demo/backlog.ts`) go
+into the backlog with the run's number in their ids (`board-3`), since a
+piece's id is the change that builds it and an earlier run's merge would count
+it as done. The repo's Hive tab shows how the run is going. Any signed-in
+person may start one, since a run spends a bounded amount: one run goes at a
+time, 100 a day across everyone, held by the `DemoRun` registry. A run stopped
+before its reset lands gives the repo its approvals back.
 
 **The builder.** A hosted agent starts one on each piece it claims, and
 `build` claims the given paths as `githive-builder`, under a change id made

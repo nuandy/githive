@@ -16,7 +16,7 @@ export interface HostedAgentsApi {
 	stopHostedAgents?(repo: string): Promise<unknown>;
 }
 
-const COUNTS = [1, 2, 3, 4, 6, 8, 10];
+const COUNTS = [1, 2, 3, 4, 6, 8, 10, 12];
 const DURATIONS = [15, 30, 60, 120];
 
 /** What one agent is doing, in a few words. */

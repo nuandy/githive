@@ -45,7 +45,7 @@ export function HiveTab({
 	const loadDemo = api.demoRun;
 	return (
 		<>
-			{loadDemo ? <DemoBanner repo={repo} load={loadDemo} /> : null}
+			{loadDemo ? <DemoBanner repo={repo} load={loadDemo} changed={snapshot.claims} /> : null}
 			<Hive
 				repo={repo}
 				branch={branch}

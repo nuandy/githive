@@ -643,12 +643,19 @@ export interface HiveStatus {
 	working: boolean;
 }
 
+/** A demo run as the registry lists it. */
+export interface DemoRunSlot {
+	id: string;
+	number: number;
+	fullName: string;
+	since: number;
+}
+
 /** Demo runs: GitHive's hosted agents build Honeycomb again in GitHive's one public demo repo. */
 export const demo = {
 	start: () => call<{ id: string; repo: string }>("POST", "/demo/runs"),
 	/** The run going now, if any, and the latest ones. */
-	runs: () =>
-		call<{ running: { id: string; fullName: string; since: number } | null; recent: unknown[] }>("GET", "/demo/runs"),
+	runs: () => call<{ running: DemoRunSlot | null; recent: DemoRunSlot[] }>("GET", "/demo/runs"),
 	run: (repo: string) => call<DemoRunStatus>("GET", `/demo/runs/${repoPath(repo)}`),
 };
 

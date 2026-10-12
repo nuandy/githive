@@ -17,7 +17,7 @@ type Offer = { change: string; head: string; role: string };
  * A repo's six hosted agents over a small stand-in for the toolkit: who claims which piece, its head once its builder
  * has pushed, who holds its review, its votes, and what merged. A builder pushes at once; a reviewer votes at once.
  */
-function hive(pieces: Piece[], options: { reject?: string[] } = {}) {
+function hive(pieces: Piece[], options: { reject?: string[]; takenElsewhere?: string[] } = {}) {
 	const claimed = new Map<string, string>();
 	const heads = new Map<string, string>();
 	const holds = new Map<string, string>();
@@ -48,6 +48,8 @@ function hive(pieces: Piece[], options: { reject?: string[] } = {}) {
 				return { reviews: offers };
 			}
 			case "credentials":
+				if (options.takenElsewhere?.includes(change))
+					throw new Error(`[409] ${change} is already being reviewed by githive-other: take another from reviews`);
 				holds.set(change, agent);
 				return { url: "u", token: "t" };
 			case "backlog": {
@@ -133,6 +135,16 @@ describe("a repo's hosted agents", () => {
 		expect(accounts.filter((account) => account?.change)).toHaveLength(2);
 	});
 
+	it("pass over a review another agent took meanwhile, without counting it a failed turn", async () => {
+		const { repoHive, agents, rounds, log, merged } = hive(pieces("a", "b"), { takenElsewhere: ["a"] });
+		await start(repoHive);
+		await rounds(3);
+		expect(log.some((line) => line.includes("reviewed a"))).toBe(false);
+		expect(merged.has("b")).toBe(true);
+		const accounts = (await Promise.all(agents().map((agent) => agent.account()))) as HostedAgentState[];
+		expect(accounts.every((account) => account.failing === 0)).toBe(true);
+	});
+
 	it("take no new work once their time is up, and stop when told", async () => {
 		const { repoHive, agents, rounds, claimed } = hive(pieces("a"), { reject: ["a"] });
 		await start(repoHive, 0);
@@ -151,8 +163,8 @@ describe("starting hosted agents on a repo", () => {
 	it("takes a few for a while, and refuses more than a hive holds or too long", async () => {
 		const { hiveRequest } = await import("../src/routes/hosted-agents");
 		expect(hiveRequest({})).toEqual({ count: 3, minutes: 60 });
-		expect(hiveRequest({ count: 10, minutes: 5 })).toEqual({ count: 10, minutes: 5 });
-		expect(() => hiveRequest({ count: 11 })).toThrow(/from 1 to 10/);
+		expect(hiveRequest({ count: 12, minutes: 5 })).toEqual({ count: 12, minutes: 5 });
+		expect(() => hiveRequest({ count: 13 })).toThrow(/from 1 to 12/);
 		expect(() => hiveRequest({ count: 1.5 })).toThrow(/whole number/);
 		expect(() => hiveRequest({ minutes: 121 })).toThrow(/from 5 to 120/);
 		expect(() => hiveRequest({ minutes: "60" })).toThrow(/minutes/);

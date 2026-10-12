@@ -26,8 +26,16 @@
 
 .demo-card__action {
 	flex: none;
+	display: flex;
+	flex-direction: column;
+	align-items: flex-end;
+	gap: 8px;
 }
 
 .demo-banner {
 	margin: 0;
+}
+
+.demo-play {
+	white-space: nowrap;
 }

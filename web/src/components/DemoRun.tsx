@@ -12,7 +12,7 @@ import "./DemoRun.css";
 
 export interface DemoApi {
 	start(): Promise<{ id: string; repo: string }>;
-	runs(): Promise<{ running: { fullName: string } | null }>;
+	runs(): Promise<{ running: { fullName: string } | null; recent?: { fullName: string }[] }>;
 }
 
 /** Starts a demo run and opens its repo's Hive tab; or says a run is going, or why one can't start. */
@@ -21,6 +21,7 @@ export function DemoCard({ api }: { api: DemoApi }) {
 	const [busy, setBusy] = useState(false);
 	const [error, setError] = useState<string | null>(null);
 	const running = runs.data?.running;
+	const latest = runs.data?.recent?.[0];
 	const start = async () => {
 		setBusy(true);
 		setError(null);
@@ -37,7 +38,7 @@ export function DemoCard({ api }: { api: DemoApi }) {
 			<div className="demo-card__body">
 				<h2 id="demo-card-title">Watch a hive build Honeycomb</h2>
 				<p className="muted">
-					Six of GitHive's own agents build a small word game in GitHive's public demo repo, starting over from its
+					Twelve of GitHive's own agents build a small word game in GitHive's public demo repo, starting over from its
 					first files. Nothing assigns the work: each takes a piece from the backlog, claims its files, builds it, gets
 					it reviewed and tested, and lands it. It takes about half an hour, and you can play the game when it's done.
 				</p>
@@ -57,6 +58,7 @@ export function DemoCard({ api }: { api: DemoApi }) {
 						{busy ? "Setting up the repo…" : "Start a demo run"}
 					</button>
 				)}
+				{latest ? <PlayLink repo={latest.fullName} /> : null}
 			</div>
 		</section>
 	);
@@ -79,10 +81,23 @@ export function runWords(run: DemoRunStatus, now = Date.now()): string {
 }
 
 /** The banner on the demo repo's Hive tab; nothing for any other repo. */
-export function DemoBanner({ repo, load }: { repo: string; load: (repo: string) => Promise<DemoRunStatus> }) {
+export function DemoBanner({
+	repo,
+	load,
+	changed,
+}: {
+	repo: string;
+	load: (repo: string) => Promise<DemoRunStatus>;
+	/** What the live feed reads again on each ping: the banner follows it. */
+	changed?: unknown;
+}) {
 	// Any other repo answers 404 at once: stop asking.
 	const [absent, setAbsent] = useState(false);
 	const run = usePoll(absent ? null : `demo:${repo}`, () => load(repo), 15_000);
+	const refresh = run.refresh;
+	useEffect(() => {
+		if (!absent) refresh();
+	}, [changed, absent, refresh]);
 	const missing = !!run.error && !run.data;
 	useEffect(() => {
 		if (missing) setAbsent(true);
@@ -90,8 +105,17 @@ export function DemoBanner({ repo, load }: { repo: string; load: (repo: string) 
 	if (!run.data) return null;
 	return (
 		<p className={`callout demo-banner demo-banner--${run.data.status}`} role="status">
-			{runWords(run.data)} Six of GitHive's agents, named for jobs in a hive (githive-forager, githive-scout…), each run
-			on their own: they review one another's changes and take pieces of the backlog, and nothing assigns the work.
+			{runWords(run.data)} Twelve of GitHive's agents, each named for a job in a hive, work on their own: they review
+			one another's changes and take pieces of the backlog, and nothing assigns the work. <PlayLink repo={repo} />
 		</p>
+	);
+}
+
+/** The game as the demo repo's main branch has it, served from its files (see src/routes/site.ts). */
+function PlayLink({ repo }: { repo: string }) {
+	return (
+		<a className="demo-play" href={href.site(repo)} target="_blank" rel="noopener noreferrer">
+			Play the game as it stands
+		</a>
 	);
 }
