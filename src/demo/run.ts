@@ -6,8 +6,8 @@
 import type { DemoPiece } from "./backlog";
 
 /** How many of GitHive's hosted agents a run starts. */
-// Enough for every piece that waits on nothing to be taken at once. It adds no builds or reviews, so it costs no more.
-export const DEMO_AGENTS = 12;
+// One for each piece, so every piece is taken at once. It adds no builds or reviews, so it costs no more.
+export const DEMO_AGENTS = 13;
 
 /** How long agents take new pieces; a builder or review already started finishes within its own limits. */
 export const RUN_MINUTES = 45;

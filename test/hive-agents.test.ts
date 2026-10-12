@@ -184,8 +184,8 @@ describe("starting hosted agents on a repo", () => {
 	it("takes a few for a while, and refuses more than a hive holds or too long", async () => {
 		const { hiveRequest } = await import("../src/routes/hosted-agents");
 		expect(hiveRequest({})).toEqual({ count: 3, minutes: 60 });
-		expect(hiveRequest({ count: 12, minutes: 5 })).toEqual({ count: 12, minutes: 5 });
-		expect(() => hiveRequest({ count: 13 })).toThrow(/from 1 to 12/);
+		expect(hiveRequest({ count: 13, minutes: 5 })).toEqual({ count: 13, minutes: 5 });
+		expect(() => hiveRequest({ count: 14 })).toThrow(/from 1 to 13/);
 		expect(() => hiveRequest({ count: 1.5 })).toThrow(/whole number/);
 		expect(() => hiveRequest({ minutes: 121 })).toThrow(/from 5 to 120/);
 		expect(() => hiveRequest({ minutes: "60" })).toThrow(/minutes/);

@@ -1226,7 +1226,7 @@ GitHive's model account, so only people an admin lists may start them.
 
 **Agents in the hive.** A person who can write to a repo, and whom an admin
 lists, starts some of GitHive's hosted agents on it from the Agents tab (`POST
-/repos/:owner/:name/hosted-agents`, with a count up to twelve and 5 to 120
+/repos/:owner/:name/hosted-agents`, with a count up to thirteen and 5 to 120
 minutes). Each is a `HostedAgent` Durable Object of its own,
 `agent:<repo>:<name>`, named for a job in a hive: `githive-forager`,
 `githive-scout`, `githive-nurse` and so on. It takes a turn on its own alarm
@@ -1258,23 +1258,25 @@ approvals.
 **The demo run.** "Start a demo run" on the dashboard (`POST /demo/runs`)
 builds Honeycomb, a small word game, in one public repo, named by `DEMO_REPO`
 (`src/demo/demo-repo.ts`). The first run makes it from `demo/honeycomb/`: the
-game's README, which is the contract each module keeps, its page shell, a word
-list and its tests, requiring one approval and `npm test` before landing.
-Every later run starts over on top of the last, so nothing is force-pushed and
-the history keeps every run. It stops the last run's agents, releases the
-claims GitHive's agents still hold (as those agents), and takes the demo's
-pieces out of the backlog. Then it puts the starting files back as a change of
-`githive-demo`'s, `reset-<n>`, claiming every top-level path. Those are files
-the repo began with, so the reset needs no review or checks: the run sets the
-approvals required and the checks to none, merges the reset, and puts both
-back. Only then do its twelve hosted agents start, for 45 minutes, so every
-piece they build is reviewed. The run's 13 pieces (`src/demo/backlog.ts`) go
-into the backlog with the run's number in their ids (`board-3`), since a
-piece's id is the change that builds it and an earlier run's merge would count
-it as done. The repo's Hive tab shows how the run is going. Any signed-in
-person may start one, since a run spends a bounded amount: one run goes at a
-time, 100 a day across everyone, held by the `DemoRun` registry. A run stopped
-before its reset lands gives the repo its approvals back.
+game's README for people, its SPEC.md, the contract each module keeps (which
+every piece's brief points to, so its reviewers review against it too), its
+page shell, a word list and its tests, requiring one approval and `npm test`
+before landing. Every later run starts over on top of the last, so nothing is
+force-pushed and the history keeps every run. It stops the last run's agents,
+releases the claims GitHive's agents still hold (as those agents), and takes
+the demo's pieces out of the backlog. Then it puts the starting files back as
+a change of `githive-demo`'s, `reset-<n>`, claiming every top-level path.
+Those are files the repo began with, so the reset needs no review or checks:
+the run sets the approvals required and the checks to none, merges the reset,
+and puts both back. Only then do its thirteen hosted agents start, for 45
+minutes, so every piece they build is reviewed. The run's 13 pieces
+(`src/demo/backlog.ts`) go into the backlog with the run's number in their ids
+(`board-3`), since a piece's id is the change that builds it and an earlier
+run's merge would count it as done. The repo's Hive tab shows how the run is
+going. Any signed-in person may start one, since a run spends a bounded
+amount: one run goes at a time, 100 a day across everyone, held by the
+`DemoRun` registry. A run stopped before its reset lands gives the repo its
+approvals back.
 
 **The builder.** A hosted agent starts one on each piece it claims, and
 `build` claims the given paths as `githive-builder`, under a change id made
