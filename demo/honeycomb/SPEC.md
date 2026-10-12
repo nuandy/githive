@@ -73,7 +73,7 @@ Their tests (`test/board.test.js`, `test/yesterday.test.js`) check `combLayout` 
 
 `bindInput` listens for `keydown` on `document`, and the game is fully playable from the keyboard:
 
-- Ignore a key with Ctrl, Meta or Alt held, and every key while a dialog (the help) is open.
+- Ignore a key with Ctrl, Meta or Alt held, and every key while a dialog (the help) is open. A dialog is open when `document.querySelector("dialog[open]")` finds one, and only then: don't infer it from classes, `hidden`, `aria-hidden` or focus, which a closed dialog can still have.
 - A letter key `a` to `z` types it, and Backspace deletes, wherever focus is, including on the board's letter buttons.
 - Enter submits and the space bar shuffles, **except** when focus is on a button: then leave the key to the browser, so the button does what it says (a letter button types its letter, Shuffle shuffles). Don't call `preventDefault` for it.
 - Every button can be reached with Tab and shows a visible focus ring (`--focus`); the board's cells show it as their hexagonal border (see The honeycomb).
