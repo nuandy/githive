@@ -14,6 +14,7 @@ import {
 	type InboundJob,
 	type KnownPull,
 	PR_BRANCH,
+	trustsGitHub,
 } from "./github-settings";
 import { NOTICE_WITHIN_MS } from "./github-outbound";
 import type { MergeOutcome, Why } from "./merge-types";
@@ -222,9 +223,7 @@ async function mergeStep(ctx: ToolContext, job: InboundJob, at: At): Promise<Ste
 		if (merged) return { job: at({ step: "done", merged, attempts: 0 }), pull: await openPull(ctx, job) };
 		return { job: at({ step: "given up", reason: `its claim was released: ${reason}` }) };
 	}
-	// Untrusted, it waits for review like any change, and lands with a batch once approved.
-	if (/approvals from reviewers|still needs approval|is vetoed/.test(reason))
-		return { job: at({ step: "waiting", resume: "merge", reason: `waits for review: ${reason}`, attempts: 0 }) };
+	if (outcome.why.some((why) => IN_REVIEW.includes(why))) return awaitingReview(ctx, job, at, reason);
 	// Anything but a conflict or a failed check, such as a change Artifacts couldn't read while busy, is for now.
 	if (!outcome.why.some((why) => FOR_A_PERSON.includes(why))) return triedAgain(job, at, `merge refused: ${reason}`);
 	// Sent back like any change: people see it in their inbox, with the reason.
@@ -237,6 +236,37 @@ async function mergeStep(ctx: ToolContext, job: InboundJob, at: At): Promise<Ste
 
 /** The refusals only a person can resolve, on GitHub. */
 const FOR_A_PERSON: Why[] = ["conflict", "checks"];
+
+/** The refusals of a change that needs review. */
+const IN_REVIEW: Why[] = ["approvals", "changes-asked"];
+
+// With trust off, it waits for review like any change: reviewers are offered it, and it lands with a batch once
+// approved. While the repo trusts GitHub's changes, no one is offered it, so the trust rule refusing it (an import
+// that needs review, a head no import has, a changed stamp key) is for a person to look at.
+async function awaitingReview(ctx: ToolContext, job: InboundJob, at: At, reason: string): Promise<StepOutcome> {
+	const registry = (await recordLog<Registry>(ctx, job.repo, claimsRef(job.repo)).read())?.commit.state;
+	if (!trustsGitHub(registry))
+		return { job: at({ step: "waiting", resume: "merge", reason: `waits for review: ${reason}`, attempts: 0 }) };
+	const why = await untrustedBecause(ctx, job);
+	const asked =
+		`GitHub's changes need a person: GitHive won't land them without review, as ${why}. ` +
+		"Review them, then approve and merge them from their page, or give them up.";
+	await askPeople(ctx, job, asked);
+	return { job: at({ step: "needs a person", reason: `needs review: ${why}`, attempts: 0 }) };
+}
+
+// Why the trust rule refused the job's head: what its import found, or that no import GitHive stamped has it.
+async function untrustedBecause(ctx: ToolContext, job: InboundJob) {
+	const imports =
+		(await recordLog<GitHubImports>(ctx, job.repo, importsRef(job.repo)).read())?.commit.state.imports ?? [];
+	const newest = imports.findLast((entry) => entry.branch === job.branch);
+	const found = newest?.head === job.head ? newest?.untrusted : undefined;
+	return (
+		found ??
+		`its head and claim don't match the newest import of GitHub's ${job.branch} that GitHive stamped ` +
+			`(github/${job.branch} moved since, or the stamp key changed)`
+	);
+}
 
 // Asked once: while the question is open (a person hasn't voted on its head since), asking again would only add
 // another to people's inbox.

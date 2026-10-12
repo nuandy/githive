@@ -162,6 +162,10 @@ is a fast-forward again.
   merges it from its page (the dashboard's Merge button) rather than waiting for one.
 - **Advice follows the rule.** While trusted, `status` says the change needs no review, `reviews` offers it to no
   one, and the abandoned rule treats it as approved (so its claim waits on a person only once it's asked one).
+  Advice reads no import record, so when the merge's trust rule refuses a change the repo trusts (an import that
+  needs review, a head no stamped import has, a stamp key changed since), no reviewer would be offered it: the job
+  asks a person instead ("needs a person", saying why), who reviews it, approves and merges it from its page, or
+  gives it up. With trust off, the job waits for review as before.
 - **Known limits.** A person's veto counts for nothing while a GitHub change is trusted: it needs no votes, and a clean
   one lands at once, so the window is small; give it up (step 6) to stop one. The import record and a released older
   GitHub change's question to people stay as written; nothing reads that question once its claim is gone.

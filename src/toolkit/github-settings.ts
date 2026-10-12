@@ -70,7 +70,10 @@ export const trustsGitHub = (registry: Pick<Registry, "github"> | null | undefin
 export const isGitHubChange = (claim: Pick<ClaimRecord, "agent" | "source">) =>
 	claim.agent === GITHUB_AGENT && !!claim.source?.startsWith("github/");
 
-/** Whether a claim lands without votes as advice sees it. A merge also checks its head is in the import record. */
+/**
+ * Whether a claim lands without votes as advice sees it. A merge also applies the trust rule (trustedGitHubChange),
+ * and when that refuses, advice offers the change to no reviewer: the job asks a person instead.
+ */
 export const trustedClaim = (
 	registry: Pick<Registry, "github"> | null | undefined,
 	claim: Pick<ClaimRecord, "agent" | "source">,

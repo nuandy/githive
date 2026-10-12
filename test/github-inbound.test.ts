@@ -203,15 +203,22 @@ describe("GitHub's changes coming back", { timeout: 120_000 }, () => {
 		await call("claim", { change: "c-2", agent: "a", paths: ["src/old.js"], intent: "Delete old" }, "a");
 		await approve(await pushDeletion("c-2", "src/old.js"));
 		expect(await call("merge", { change: "c-2", agent: "a" }, "a")).toMatchObject({ ok: true });
-		const job = await settle();
-		expect(job).toMatchObject({ commit: merged, change: `github-${merged.slice(0, 12)}` });
-		expect(job?.step).not.toBe("done");
+		const change = `github-${merged.slice(0, 12)}`;
+		// No one is offered a change advice calls trusted, so the job asks a person, saying why.
+		expect(await settle()).toMatchObject({
+			step: "needs a person",
+			commit: merged,
+			change,
+			reason: expect.stringContaining("src/old.js"),
+		});
+		const shown = (await repoSnapshot(ctx(), "p")).claims.find((claim) => claim.change === change);
+		expect(shown?.attention?.reason).toMatch(/^GitHub's changes need a person: GitHive won't land them without/);
 		const [imported] = await imports();
 		expect(imported).toMatchObject({ commit: merged, untrusted: expect.stringContaining("src/old.js") });
 		// Nothing landed without review: the file stays deleted, and GitHub's commit isn't on main.
 		expect(server.git("ls-tree", "--name-only", "-r", "main")).not.toContain("src/old.js");
 		expect(server.git("ls-tree", "--name-only", "-r", "main")).not.toContain("docs/notes.md");
-		const merge = { repo: "p", change: `github-${merged.slice(0, 12)}`, agent: GITHUB_AGENT };
+		const merge = { repo: "p", change, agent: GITHUB_AGENT };
 		expect(await callTool("merge", merge, githubAgent())).toMatchObject({
 			ok: false,
 			reasons: [expect.stringContaining("approvals from reviewers")],
@@ -544,9 +551,9 @@ describe("what can go wrong bringing GitHub's changes back", { timeout: 120_000 
 		const first = github.push({ "src/a.js": "from GitHub\n" });
 		expect(await land("c-2", { "src/a.js": "from GitHive\n" })).toMatchObject({ step: "needs a person" });
 		// GitHub moves on: the newer commit has the older one in it. On a commit of GitHub's own, and changing what
-		// GitHive changed, it comes back for review.
+		// GitHive changed, it comes back needing review, and a person is asked.
 		const second = github.push({ "docs/notes.md": "more from GitHub\n" });
-		expect(await land("c-3", { "src/c.js": "c\n" })).toMatchObject({ step: "waiting", commit: second });
+		expect(await land("c-3", { "src/c.js": "c\n" })).toMatchObject({ step: "needs a person", commit: second });
 		expect((await claimsNow()).map((claim) => claim.change)).toEqual([`github-${second.slice(0, 12)}`]);
 		const releases = (await registryNow()).released.filter(
 			(release) => release.change === `github-${first.slice(0, 12)}`,
@@ -648,13 +655,13 @@ describe("the merge path's trust rule, the audit's own", { timeout: 120_000 }, (
 		});
 	});
 
-	it("needs votes for a head the import record doesn't hold", async () => {
+	it("needs votes for a head the import record doesn't hold, and asks a person rather than waiting", async () => {
 		await imported();
 		// github/main moves to a commit no import wrote, before githive-github claims it.
 		const tip = server.git("rev-parse", "github/main").trim();
 		const other = server.git("commit-tree", "-p", tip, "-m", "not imported", `${tip}^{tree}`).trim();
 		server.git("update-ref", "refs/heads/github/main", other);
-		expect(await settle()).toMatchObject({ step: "waiting", reason: expect.stringContaining("waits for review") });
+		expect(await settle()).toMatchObject({ step: "needs a person", reason: expect.stringContaining("needs review") });
 		expect(server.git("ls-tree", "--name-only", "-r", "main")).not.toContain("docs/notes.md");
 	});
 
