@@ -1,3 +1,4 @@
+import { SiteLink } from "./SiteLink";
 import { type ReactNode, useState } from "react";
 import { messageOf } from "../lib/errors";
 import { VoteForm, type VoteApi } from "./VoteForm";
@@ -30,6 +31,8 @@ export interface ChangePageProps {
 	history?: ChangeHistory | null;
 	repo: string;
 	tab: "conversation" | "commits";
+	/** Whether the repo's site can be previewed as this change has it: only a public repo's is served. */
+	previewable?: boolean;
 	/** For a person's vote; without it, the page only shows. */
 	api?: VoteApi;
 	/** Whether the reader may vote (review or more in the repo); without it, no vote form. */
@@ -359,6 +362,7 @@ export function ChangePage({
 	merge,
 	giveUp,
 	now,
+	previewable = false,
 }: ChangePageProps) {
 	const branch = claim?.into || history?.branch || snapshot.branch || "main";
 	const record = claim ?? history?.claim ?? undefined;
@@ -420,6 +424,7 @@ export function ChangePage({
 					</span>
 					{claim?.waitsOn?.length ? <span className="pill pill--warn">waits on {claim.waitsOn.join(", ")}</span> : null}
 					{mergeable ? <MergeButton repo={repo} change={changeId} merge={merge} /> : null}
+					{previewable && claim?.head ? <SiteLink repo={repo} change={changeId} /> : null}
 					{claim && giveUp && isGitHubClaim(claim) ? (
 						<GiveUpButton repo={repo} change={changeId} giveUp={giveUp} />
 					) : null}

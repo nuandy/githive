@@ -1738,6 +1738,16 @@ view is served at once while a fresh one is built, and the toolkit pings open
 pages after each write. The list of repos and their counts is a hint kept in
 one RepoIndex; the records in Git are what count.
 
+**Sites.** A public repo's static site is served from its files at `/site/<owner>/<repo>/`, its default branch,
+and a change's latest push at `/site/<owner>/<repo>/@<change>/` (`routes/site.ts`). Each file is read through the
+Artifacts API (`readFile`, 10 MB at most) and typed by its extension; nothing is built or run on GitHive's side, so
+a site needing a build step or a server isn't served yet. The pages share githive.app's origin with the dashboard
+and its session cookie, so every answer, errors and redirects included, carries a CSP `sandbox` without
+`allow-same-origin`: the page runs with an opaque origin of its own and can't read GitHive's cookies or call its
+routes as the visitor. Because that origin is opaque, the files also allow any origin to read them, which only
+public repos' files ever do. A repo is found the way a signed-out read finds one, so a private repo is never
+served, whoever asks.
+
 ## Known limits
 
 - **Detection, not prevention, for account holders.** Whoever holds the

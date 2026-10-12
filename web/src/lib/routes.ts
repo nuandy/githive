@@ -119,6 +119,8 @@ export const href = {
 	change: changeHref,
 	/** A file or folder in the Code tab. Each segment is encoded separately, so the path reads naturally. */
 	code: codeHref,
+	/** A public repo's site as its default branch has it, or as a change has it. Outside the dashboard, so no "#". */
+	site: (repo: string, change?: string) => `/site/${repoPath(repo)}/${change ? `@${encode(change)}/` : ""}`,
 	newRepo: (owner?: string) => `#/new${owner ? `?owner=${encode(owner)}` : ""}`,
 	orgs: () => "#/orgs",
 	org: (org: string) => `#/orgs/${encode(org)}`,

@@ -37,6 +37,7 @@ import { ChangePage } from "./ChangePage";
 import { AuditTab, ChangeList, SettingsTab } from "./RepoTabs";
 import { Overview } from "./Overview";
 import { RepoHeader } from "./RepoHeader";
+import { SiteLink } from "./SiteLink";
 import { ShardingBadge } from "./StatusPill";
 import type { TabItem } from "./Tabs";
 
@@ -248,6 +249,7 @@ function RepoTabContent({
 				canVote={voting}
 				merge={canWrite(access?.level) ? api.merge : undefined}
 				giveUp={canWrite(access?.level) ? api.giveUpGitHub : undefined}
+				previewable={access?.visibility === "public"}
 			/>
 		);
 	}
@@ -355,15 +357,18 @@ export function RepoPage({
 					) : undefined
 				}
 				aside={
-					snapshot?.github ? (
-						<GitHubLink
-							repo={repo}
-							github={snapshot.github}
-							openPull={canWrite(access?.level) ? api.githubPull : undefined}
-							again={canWrite(access?.level) ? api.githubAgain : undefined}
-							onChanged={onSettingsChanged}
-						/>
-					) : undefined
+					<>
+						{access?.visibility === "public" ? <SiteLink repo={repo} /> : null}
+						{snapshot?.github ? (
+							<GitHubLink
+								repo={repo}
+								github={snapshot.github}
+								openPull={canWrite(access?.level) ? api.githubPull : undefined}
+								again={canWrite(access?.level) ? api.githubAgain : undefined}
+								onChanged={onSettingsChanged}
+							/>
+						) : null}
+					</>
 				}
 				tabs={tabs}
 				current={current}
