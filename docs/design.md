@@ -634,13 +634,13 @@ that commit at once, with the failure, rather than check it a third time.
 A change that doesn't merge while its batch lands (with no checks, or in a
 batch that only touches files they skip) is put out the same way: its
 rejection names the conflict (a few files, then how many more, within 2,000
-characters) and who changed its files, and the rest of the batch lands
-without it. Only git's word puts a change out: the Gate names the change whose
-merge failed. When it lists no files, that change alone is test-merged onto
-the branch, for at most 30 seconds, to name them; if that merges cleanly, or a
-fetch, a commit or a push failed instead, the landing fails as before. A batch
-that was checked was checked with that change, so its rest waits for the next
-batch, checked without it.
+characters), and the rest of the batch lands without it. Only git's word puts a
+change out: the Gate names the change whose merge failed, with the files it
+listed, perhaps none; a fetch, a commit or a push that failed instead fails the
+landing as before. Nothing more is read while the lease is held: the change's
+`status` or `merge` names who changed its files, from a test merge of its own.
+A batch that was checked was checked with that change, so its rest waits for
+the next batch, checked without it.
 
 **The audit reads the branch through Artifacts' API, not a clone.** `log` lists the
 first-parent chain (a page at a time, until the baseline), and each merge's

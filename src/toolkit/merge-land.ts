@@ -5,15 +5,9 @@ import { LANDED_FILES_KEPT, LANDED_INTENT_CHARS, type Landing, type Settled } fr
 import { batchChange, putOut } from "./merge-checks";
 import { ATTEMPT_LINE_MOST, ATTEMPTS_MOST, type MergeReview } from "./merge-commit";
 import { type Holding, STEP_MS } from "./merge-lease";
-import { readChange } from "./merge-ready";
 import type { Conflict, MergeInput, Ready, Unlanded } from "./merge-types";
 
 const RELEASES_AT_ONCE = 4;
-/**
- * How long test-merging the change whose merge failed may take, to name its files: well within the lease's step, so
- * the merges waiting behind it wait seconds, not minutes.
- */
-const FINDING_MS = 30_000;
 
 // A landed batch: each change's outcome, and the release of their claims for after the lease is handed on.
 export interface Landed {
@@ -26,6 +20,7 @@ export interface Landed {
 //
 // A change that doesn't merge onto the batch is put out, as a change failing its checks is (see putOut), and the rest
 // land without it. A batch that was checked was checked with it, so then the rest wait for a batch checked without it.
+// `attempts` are the batch's earlier attempts (see attemptsOf), read while it was checked.
 export async function land(
 	input: MergeInput,
 	landing: Landing,
@@ -33,9 +28,11 @@ export async function land(
 	batch: Ready[],
 	tested: boolean,
 	holding: Holding,
+	attempts: Promise<Attempts>,
 ): Promise<Landed | null> {
 	const startedAt = Date.now();
 	const putOuts: Settled[] = [];
+	const earlier = await attempts;
 	let part = batch;
 	let landed: { commits: string[] } | "moved";
 	for (;;) {
@@ -47,7 +44,7 @@ export async function land(
 		const tried = await input.batchGit.land({
 			base: baseHead,
 			branch: input.branch,
-			merges: await mergesOf(input, baseHead, part, tested),
+			merges: mergesOf(input, baseHead, part, tested, earlier),
 			// The Gate stamps with GitHive's key as `by`. An in-process implementation (tests) uses the stamper itself.
 			...(input.stamper ? { by: input.stamper.by, stamper: input.stamper } : {}),
 		});
@@ -55,14 +52,14 @@ export async function land(
 			landed = tried;
 			break;
 		}
-		const found = await conflictIn(input, baseHead, part, tried, holding);
+		const found = conflictIn(part, tried);
 		if (!found) {
 			await settleAny(landing, putOuts);
 			fail(500, `landing the batch failed: ${tried.failed}`);
 		}
 		await holding.step(STEP_MS.records);
 		const failure = { results: [], conflict: found.conflict };
-		putOuts.push(await putOut(input, baseHead, found.ready, failure, `found while landing it on ${input.branch}`));
+		putOuts.push(await putOut(input, found.ready, failure, `found while landing it on ${input.branch}`));
 		part = part.filter((ready) => ready !== found.ready);
 		if (tested || !part.length) {
 			await settleAny(landing, putOuts);
@@ -95,59 +92,25 @@ const settleAny = async (landing: Landing, putOuts: Settled[]) => {
 };
 
 /**
- * The change in `part` that didn't merge onto the batch, and its files. Only a merge that git itself said failed counts
- * (the Gate's, or the tree landing's, which hands such a merge to the Gate): a fetch, a commit or a push that failed
- * isn't a conflict, and fails the landing as before. When git named the change but not its files, a test merge of it
- * alone onto the branch names them, for at most FINDING_MS; if that merges cleanly, or can't tell in time, nothing is
- * sure enough to put the change out, so the landing fails as before. Null then.
+ * The change in `part` that didn't merge onto the batch, with the files git listed (perhaps none). Only a merge that
+ * git itself said failed counts (the Gate's, or the tree landing's, which hands such a merge to the Gate): a fetch, a
+ * commit or a push that failed isn't a conflict, and fails the landing as before. Null then. Nothing more is read
+ * under the lease: the change's `status` or `merge` explains the conflict from a test merge of its own.
  */
-async function conflictIn(
-	input: MergeInput,
-	baseHead: string,
-	part: Ready[],
-	unlanded: Unlanded,
-	holding: Holding,
-): Promise<{ ready: Ready; conflict: Conflict } | null> {
+function conflictIn(part: Ready[], unlanded: Unlanded): { ready: Ready; conflict: Conflict } | null {
 	const said = unlanded.conflict;
 	const ready = said && part.find((each) => each.change === said.change);
 	if (!said || !ready) return null;
-	if (said.files.length) return { ready, conflict: { files: said.files } };
-	await holding.step(FINDING_MS);
-	const read = await withinMs(
-		readChange(input, baseHead, ready).catch((err) => {
-			console.error(`test-merging ${ready.change} to name the files it didn't merge on failed`, String(err));
-			return null;
-		}),
-		FINDING_MS,
-	);
-	// Only the head that was landed counts: a newer one is the next batch's to try.
-	if (!read || read.head !== ready.head || read.tried.clean || !read.tried.files?.length) {
-		console.error(`${ready.change}'s merge onto the batch failed, but a test merge alone didn't name a conflict`);
-		return null;
-	}
-	const touchedBy = read.touchedBy ? { touchedBy: read.touchedBy } : {};
-	return { ready, conflict: { files: read.tried.files, ...touchedBy } };
-}
-
-/** What `work` comes to, or null once `ms` pass first. */
-async function withinMs<T>(work: Promise<T | null>, ms: number): Promise<T | null> {
-	let timer: ReturnType<typeof setTimeout> | undefined;
-	const late = new Promise<null>((resolve) => (timer = setTimeout(() => resolve(null), ms)));
-	try {
-		return await Promise.race([work, late]);
-	} finally {
-		if (timer !== undefined) clearTimeout(timer);
-	}
+	return { ready, conflict: { files: said.files } };
 }
 
 // Each change's merge with the trailers its commit carries (its claim, its votes and what it was checked on), and
 // the story above them.
-async function mergesOf(input: MergeInput, baseHead: string, batch: Ready[], tested: boolean) {
+function mergesOf(input: MergeInput, baseHead: string, batch: Ready[], tested: boolean, attempts: Attempts) {
 	// Every change in the batch, in landing order. A change checked alone needs only testedOn.
 	const heads = batch.map((ready) => ready.head);
 	const testedOn = tested ? { testedOn: baseHead } : {};
 	const testedWith = tested && heads.length > 1 ? { testedWith: heads } : {};
-	const attempts = await attemptsOf(input, batch);
 	return batch.map((ready) => {
 		const tried = (attempts[ready.change] ?? []).slice(-ATTEMPTS_MOST).map((line) => line.slice(0, ATTEMPT_LINE_MOST));
 		return {
@@ -170,14 +133,18 @@ async function mergesOf(input: MergeInput, baseHead: string, batch: Ready[], tes
 
 const ATTEMPTS_WAIT_MS = 2_000;
 
+/** Each change's earlier attempts to land, by change. */
+export type Attempts = Record<string, string[]>;
+
 /**
- * Each change's earlier attempts to land, asked once for the batch. They're only the story, so a call that fails, or
- * takes longer than ATTEMPTS_WAIT_MS, leaves those lines out and never holds the landing up.
+ * Each change's earlier attempts to land, asked once for the batch, best before its checks so landing needn't wait.
+ * They're only the story, so a call that fails, or takes longer than ATTEMPTS_WAIT_MS, leaves those lines out and
+ * never holds the landing up.
  */
-async function attemptsOf(input: MergeInput, batch: Ready[]): Promise<Record<string, string[]>> {
+export async function attemptsOf(input: MergeInput, batch: Ready[]): Promise<Attempts> {
 	if (!input.attemptsOf) return {};
 	let timer: ReturnType<typeof setTimeout> | null = null;
-	const slow = new Promise<Record<string, string[]>>((resolve) => {
+	const slow = new Promise<Attempts>((resolve) => {
 		timer = setTimeout(() => {
 			console.error(`reading earlier attempts took over ${ATTEMPTS_WAIT_MS} ms: landing without them`);
 			resolve({});

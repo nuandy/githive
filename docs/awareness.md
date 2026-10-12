@@ -98,10 +98,11 @@ Causes are missing for direct pushes, past 12 files, and when the conflict appea
 
 `causes` stays as it is, so nothing that reads it breaks. A conflict found while landing (in the Gate, or when a
 tree landing hands over) puts the change out, as failed checks do, and the rest of the batch lands. Its refusal
-carries `conflicts`, `touchedBy` and `fix`. Only git's word puts a change out: the Gate names the change whose merge
-failed, and when it lists no files, a test merge of that change alone names them, within 30 seconds, or the landing
-fails as before. A failed fetch, commit or push is never taken for a conflict. A conflict's reason names at most 10
-files, then how many more, and the rejection's evidence is cut to 2,000 characters, as failed checks' output is.
+carries `conflicts` and `fix`. Only git's word puts a change out: the Gate names the change whose merge failed, with
+the files it listed, perhaps none. Nothing more is read while the landing holds its lease: the change's `status` or
+`merge` names who changed the files (`touchedBy`) and shows the hunks, from a test merge of its own. A failed fetch,
+commit or push is never taken for a conflict. A conflict's reason names at most 10 files, then how many more, and the
+rejection's evidence is cut to 2,000 characters, as failed checks' output is.
 
 ### 3. `next` in every reply
 

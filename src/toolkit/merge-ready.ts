@@ -41,8 +41,10 @@ export function outcomeOf(settled: Settled, branch?: string): MergeOutcome {
 		const skipped = settled.skipped ? { checks: "skipped: it only touches files the checks skip" } : {};
 		return { ok: true, commit: settled.commit!, ...skipped };
 	}
+	// A conflict git listed no files for is kept with none, and is still a conflict.
 	const conflicts = settled.conflicts ?? [];
-	const conflicted = conflicts.length > 0 || !!settled.checks?.some((check) => check.command === BATCH_MERGE);
+	const keptConflict = settled.conflicts !== undefined;
+	const conflicted = keptConflict || !!settled.checks?.some((check) => check.command === BATCH_MERGE);
 	const into = branch ? { into: branch } : {};
 	return {
 		ok: false,

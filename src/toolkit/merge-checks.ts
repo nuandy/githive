@@ -1,4 +1,3 @@
-import { repoOfUrl } from "../git-http";
 import { changeAgainst, type ReadHistory, type TouchedBy, touchedSince } from "./batch-reads";
 import { CONFLICT_FILES_NAMED, CONFLICT_ON, conflictLine, type Landing, type Settled } from "./landing";
 import { type Holding, STEP_MS } from "./merge-lease";
@@ -68,7 +67,7 @@ export async function checkAndPutOut(
 	const failed = await checkBatch(input, baseHead, batch, holding, place, found);
 	await holding.step(STEP_MS.records);
 	const settled: Settled[] = [];
-	for (const { ready, failure } of failed) settled.push(await putOut(input, baseHead, ready, failure, CHECKED_ALONE));
+	for (const { ready, failure } of failed) settled.push(await putOut(input, ready, failure, CHECKED_ALONE));
 	return settled;
 }
 
@@ -129,18 +128,13 @@ async function checkBatch(
  * Puts out a change that failed alone on main: its checks failed, or it doesn't merge onto the branch, as the checks
  * or the landing found (`how` says which, for its rejection). The rejection of its head sends it back to its agent,
  * and keeps it out of later batches until it has a new commit. The failure is noted as an attempt, for its merge
- * commit's story. A conflict names who changed its files, read here where the checks didn't (see touchedWhileLanding).
+ * commit's story. A conflict is told with what the checks or the landing said of it: nothing more is read under the
+ * lease, since the change's `status` or `merge` names who changed its files from a test merge of its own.
  */
-export async function putOut(
-	input: MergeInput,
-	baseHead: string,
-	ready: Ready,
-	failure: Failure,
-	how: string,
-): Promise<Settled> {
+export async function putOut(input: MergeInput, ready: Ready, failure: Failure, how: string): Promise<Settled> {
 	const { results } = failure;
 	const failed = results.find((result) => result.exitCode !== 0);
-	const conflict = failure.conflict && (await withTouchedBy(input, baseHead, ready, failure.conflict));
+	const { conflict } = failure;
 	// A runner without `conflict` still tells one as its failed step, whose output is the conflict in one line.
 	const told = failed?.command === BATCH_MERGE ? failed.output.split("\n")[0] : undefined;
 	const reason =
@@ -180,15 +174,6 @@ export async function putOut(
 
 /** `text` cut to `most` characters, marked where it was cut. */
 const cut = (text: string, most: number) => (text.length > most ? `${text.slice(0, most - 1)}…` : text);
-
-// A conflict with who changed its files, read through Artifacts' API when the checks didn't say.
-async function withTouchedBy(input: MergeInput, baseHead: string, ready: Ready, conflict: Conflict): Promise<Conflict> {
-	if (conflict.touchedBy || !input.history) return conflict;
-	const project = repoOfUrl(input.remote.url);
-	const at = { branch: input.branch, main: baseHead, files: conflict.files };
-	const change = { change: ready.change, ref: ready.ref, ...(ready.source ? { source: ready.source } : {}) };
-	return { ...conflict, touchedBy: await touchedWhileLanding(input.history, project, at, change) };
-}
 
 // A conflict as an outcome keeps it: some of its files, and the newest change to each of the few its words name (the
 // branch's recent outcomes are kept together in one value).

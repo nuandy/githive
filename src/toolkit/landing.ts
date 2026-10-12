@@ -155,6 +155,7 @@ export const CONFLICT_ON = "conflict on ";
  * plain git is named by its commit and author. A few files at most, then how many more (see andMore).
  */
 export function conflictLine(files: string[], touchedBy: TouchedBy[], causes: ReturnType<typeof lastLandedOn> = []) {
+	if (!files.length) return `${CONFLICT_ON}files git didn't list`;
 	const named = andMore(files, (file) => {
 		const touched = touchedBy.find((candidate) => candidate.file === file);
 		const by = touched ?? causes.find((candidate) => candidate.file === file);
