@@ -576,6 +576,54 @@
 	opacity: 0;
 }
 
+/* The empty state and the goals themselves fold into each other as the first goal arrives. */
+.goals__swap {
+	display: grid;
+	grid-template-rows: 0fr;
+	opacity: 0;
+	transition:
+		grid-template-rows var(--ease),
+		opacity 0.3s ease;
+}
+
+.goals__swap > * {
+	min-height: 0;
+	overflow: hidden;
+}
+
+.goals__swap--open {
+	grid-template-rows: 1fr;
+	opacity: 1;
+}
+
+.goals__controls--off {
+	opacity: 0;
+	visibility: hidden;
+}
+
+.goals__controls {
+	transition:
+		opacity 0.3s ease,
+		visibility 0.3s;
+}
+
+.goals__sample {
+	padding: 8px 0 4px;
+}
+
+/* The sample row: dashed and faint, a picture of a goal rather than one. */
+.goal--sample {
+	border: 1px dashed var(--border-strong);
+	opacity: 0.55;
+	pointer-events: none;
+}
+
+.goal--sample .goal__chip {
+	display: grid;
+	place-items: center;
+	border-style: dashed;
+}
+
 /* Finished as a whole folds away when the filter leaves nothing in it. */
 .goals__done {
 	display: grid;

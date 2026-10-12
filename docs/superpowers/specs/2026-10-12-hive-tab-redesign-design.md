@@ -104,6 +104,12 @@ away, rows shrink to one line, and the bars take the room. In Timeline:
 
 An open row stays open across the switch.
 
+### Before the first goal
+
+With no goal at all, the panel shows a faint sample row (what a goal will look like) and a line on what each row
+will show, linking to connecting an agent, instead of an empty clock ticking along. The range and view controls
+fade out with nothing to act on. When the first goal arrives, the sample folds away and the goals fold in.
+
 ### Time axis
 
 Shared by every bar in both modes.

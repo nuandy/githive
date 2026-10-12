@@ -92,6 +92,11 @@ describe("the Hive tab", () => {
 	it("says how to bring the first agent in when the hive is empty, and when the last work finished", () => {
 		const empty = { ...repoSnapshot, claims: [], votes: [] };
 		expect(visibleText(render({ snapshot: empty }))).toContain("No agents in the hive yet");
+		// The goals show a sample row instead of an empty clock.
+		expect(visibleText(render({ snapshot: empty }))).toContain(
+			"No goals yet. Each change an agent claims here becomes a row",
+		);
+		expect(visibleText(render())).not.toContain("No goals yet");
 		const landing = {
 			branch: "main",
 			checking: null,

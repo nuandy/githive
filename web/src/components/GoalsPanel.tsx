@@ -73,6 +73,9 @@ export function GoalsPanel(props: GoalsPanelProps) {
 	const landed = done.filter((goal) => matches(goal, filter) && inRange(goal));
 	const earlier = done.filter((goal) => matches(goal, filter) && !inRange(goal)).length;
 	const working = flying.filter((goal) => !goal.finished).length;
+	// No goal at all yet: a sample of what one will look like, instead of an empty clock ticking along.
+	const empty = !goals.length;
+	const sample = useLingering(empty, 500);
 	useGlide(panel, `${inFlight.map((goal) => goal.key).join(" ")} | ${done.map((goal) => goal.key).join(" ")}`);
 	const toggle = (key: string) => {
 		props.onSeen(key);
@@ -122,7 +125,7 @@ export function GoalsPanel(props: GoalsPanelProps) {
 						<span aria-hidden="true">×</span>
 					</button>
 				) : null}
-				<div className="goals__controls">
+				<div className={`goals__controls${empty ? " goals__controls--off" : ""}`} inert={empty}>
 					<Segmented
 						label="Time range"
 						options={RANGES.map((option) => ({ value: option, words: RANGE_WORDS[option] ?? "" }))}
@@ -143,58 +146,116 @@ export function GoalsPanel(props: GoalsPanelProps) {
 			{props.error ? (
 				<p className="muted goals__note">The event log couldn't be read ({props.error}), so steps may be missing.</p>
 			) : null}
-			<AxisRow axis={axis} />
-			<div className="goals__section">
-				<span>In flight · {working}</span>
+			<div className={`goals__swap goals__empty${empty ? " goals__swap--open" : ""}`} inert={!empty}>
+				<div>{sample ? <EmptyGoals /> : null}</div>
 			</div>
-			<ol className="goals__rows">{inFlight.map((goal) => row(goal, matches(goal, filter)))}</ol>
-			{flying.length ? null : (
-				<p className="muted goals__note">
-					{filter ? "Nothing in flight here." : "Nothing in flight now."}
-					{filter ? (
-						<>
-							{" "}
-							<button type="button" className="link-button" onClick={() => props.onFilter(null)}>
-								Show every goal
-							</button>
-						</>
-					) : null}
-				</p>
-			)}
-			{done.length ? (
-				<div className={`goals__done${landed.length ? "" : " goals__done--empty"}`} inert={!landed.length}>
-					<div>
-						<div className="goals__section">
-							<span>Finished · {landed.length}</span>
-							<button type="button" className="link-button goals__fold" onClick={() => setShowFinished(false)}>
-								fold
-							</button>
-						</div>
-						<div className="goals__summary-wrap">
+			<div className={`goals__swap${empty ? "" : " goals__swap--open"}`} inert={empty}>
+				<div>
+					<AxisRow axis={axis} />
+					<div className="goals__section">
+						<span>In flight · {working}</span>
+					</div>
+					<ol className="goals__rows">{inFlight.map((goal) => row(goal, matches(goal, filter)))}</ol>
+					{flying.length ? null : (
+						<p className="muted goals__note">
+							{filter ? "Nothing in flight here." : "Nothing in flight now."}
+							{filter ? (
+								<>
+									{" "}
+									<button type="button" className="link-button" onClick={() => props.onFilter(null)}>
+										Show every goal
+									</button>
+								</>
+							) : null}
+						</p>
+					)}
+					{done.length ? (
+						<div className={`goals__done${landed.length ? "" : " goals__done--empty"}`} inert={!landed.length}>
 							<div>
-								<button
-									type="button"
-									className="goals__summary"
-									onClick={() => setShowFinished(true)}
-									aria-expanded={showFinished}
-								>
-									<FinishedWords goals={landed} />
-									<span className="goals__show">show</span>
-								</button>
+								<div className="goals__section">
+									<span>Finished · {landed.length}</span>
+									<button type="button" className="link-button goals__fold" onClick={() => setShowFinished(false)}>
+										fold
+									</button>
+								</div>
+								<div className="goals__summary-wrap">
+									<div>
+										<button
+											type="button"
+											className="goals__summary"
+											onClick={() => setShowFinished(true)}
+											aria-expanded={showFinished}
+										>
+											<FinishedWords goals={landed} />
+											<span className="goals__show">show</span>
+										</button>
+									</div>
+								</div>
+								<div className="goals__finished">
+									<ol className="goals__rows">
+										{done.map((goal) => row(goal, matches(goal, filter) && inRange(goal)))}
+									</ol>
+								</div>
 							</div>
 						</div>
-						<div className="goals__finished">
-							<ol className="goals__rows">{done.map((goal) => row(goal, matches(goal, filter) && inRange(goal)))}</ol>
-						</div>
+					) : null}
+					{earlier ? (
+						<p className="muted goals__note">
+							{counted(earlier, "goal")} finished before the range. <a href={href.repo(repo, "history")}>See History</a>
+						</p>
+					) : null}
+				</div>
+			</div>
+		</section>
+	);
+}
+
+/** True while `on` is, and for `ms` after, so what it shows can fold away before it goes. */
+function useLingering(on: boolean, ms: number): boolean {
+	const [lingering, setLingering] = useState(on);
+	useEffect(() => {
+		if (on) {
+			setLingering(true);
+			return;
+		}
+		const timer = setTimeout(() => setLingering(false), ms);
+		return () => clearTimeout(timer);
+	}, [on, ms]);
+	return on || lingering;
+}
+
+/** Before any goal: a faint sample row, saying what each one will show and where agents come from. */
+function EmptyGoals() {
+	return (
+		<div className="goals__sample">
+			<div className="goal goal--sample" aria-hidden="true">
+				<div className="goal__body">
+					<div className="goal__line">
+						<span className="goal__chip">?</span>
+						<span className="goal__main">
+							<Chevron />
+							<span className="goal__words">
+								<span className="goal__title">What an agent sets out to do</span>
+								<span className="goal__meta">where it stands · which agent · how long it took</span>
+							</span>
+							<span className="goal__track">
+								<span className="bar__phase bar__phase--building" style={{ left: "38%", width: "24%" }} />
+								<span className="bar__phase bar__phase--review" style={{ left: "62%", width: "16%" }} />
+								<span className="bar__mark bar__mark--approved bar__mark--loud" style={{ left: "78%" }} />
+								<span className="bar__phase bar__phase--landing" style={{ left: "78%", width: "8%" }} />
+								<span className="bar__end bar__end--landed" style={{ left: "86%" }}>
+									✓
+								</span>
+							</span>
+						</span>
 					</div>
 				</div>
-			) : null}
-			{earlier ? (
-				<p className="muted goals__note">
-					{counted(earlier, "goal")} finished before the range. <a href={href.repo(repo, "history")}>See History</a>
-				</p>
-			) : null}
-		</section>
+			</div>
+			<p className="muted goals__note">
+				No goals yet. Each change an agent claims here becomes a row: what it set out to do, where it stands, and what
+				became of it. <a href={href.agents()}>Connect an agent</a>
+			</p>
+		</div>
 	);
 }
 
