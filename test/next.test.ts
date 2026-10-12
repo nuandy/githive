@@ -427,6 +427,29 @@ describe("next", () => {
 		expect(nextFor("status", { change: "c-1" }, status)).toMatch(/^It conflicts with main in src\/a\.ts/);
 		expect(nextFor("status", { change: "c-1" }, status)).not.toMatch(/checks failed/);
 	});
+
+	it("asks for a new commit when the head was put out for a conflict its status's test merge no longer finds", () => {
+		// The conflict was with another change in the batch, which has landed since: the branch now merges cleanly.
+		const evidence = `conflict on src/a.ts on ${HEAD.slice(0, 8)}, found while landing it on main`;
+		const status = {
+			change: "c-1",
+			claim: { agent: "a" },
+			head: HEAD,
+			votes: [{ commit: HEAD, reviewer: "githive-checks", verdict: "reject", evidence }],
+			approval: { approved: true, approvals: 1, required: 1, awaiting: [], vetoedBy: [] },
+			merge: { into: "main", clean: true, outsideClaim: [] },
+		};
+		const step =
+			"It was put out for a conflict with a change that landed alongside it, so this head stays rejected: merge " +
+			"main into your branch again (git fetch origin main && git merge origin/main), push the new commit to " +
+			"`fork`, then call `status`.";
+		expect(nextFor("status", { change: "c-1" }, status)).toBe(step);
+		// Approvals missing too: the new commit needs them anyway, so the step is the same.
+		const unapproved = { ...status, approval: { approved: false, approvals: 0, required: 1, awaiting: [] } };
+		expect(nextFor("status", { change: "c-1" }, unapproved)).toBe(step);
+		// Once a new commit is pushed, the rejection is of an older head and says nothing.
+		expect(nextFor("status", { change: "c-1" }, { ...status, head: LANDED })).toBe("Call `merge`.");
+	});
 });
 
 describe("next through the tools", { timeout: 120_000 }, () => {

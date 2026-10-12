@@ -214,6 +214,10 @@ function statusStep(reply: Reply, args: Args, caller: string | undefined) {
 	const checks = rejections.find((vote) => vote.reviewer === CHECKS_REVIEWER);
 	const rejected = checks && rejectedFor(text(checks.evidence) ?? "");
 	if (rejected?.why === "checks") fixes.push(failedCheck(rejected.check?.command, rejected.check?.exitCode));
+	// When status's test merge finds no conflict, the one the head was rejected for was with a change that landed in
+	// the same batch: the rejection stays on the head until a new commit replaces it.
+	const conflictGone = rejected?.why === "conflict" && !conflicts.length;
+	if (conflictGone) fixes.push(conflictLandedAlongside(text(merge?.into)));
 	const approval = record(reply.approval) ?? {};
 	const vetoed = Array.isArray(approval.vetoedBy) && approval.vetoedBy.length > 0;
 	if (vetoed || rejections.some((vote) => vote.reviewer !== CHECKS_REVIEWER)) fixes.push(CHANGES_ASKED);
@@ -245,6 +249,16 @@ function conflictStep(fix: unknown, files: string[], into: string | undefined, c
 	return (
 		`${where}: merge ${onto} into your branch${merging}, resolve inside your claim so both changes make sense, ` +
 		`push \`changes/${change}\` to \`fork\`, then call \`status\`.`
+	);
+}
+
+/** A head put out for a conflict with a change that landed alongside it: only a new commit clears its rejection. */
+function conflictLandedAlongside(into: string | undefined) {
+	const onto = into ?? "the branch it lands on";
+	const merging = into ? ` (git fetch origin ${into} && git merge origin/${into})` : "";
+	return (
+		`It was put out for a conflict with a change that landed alongside it, so this head stays rejected: merge ${onto} ` +
+		`into your branch again${merging}, push the new commit to \`fork\`, then call \`status\`.`
 	);
 }
 
