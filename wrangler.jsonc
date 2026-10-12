@@ -75,6 +75,8 @@
 	"rules": [{ "type": "Text", "globs": ["**/browser-check/check.mjs"], "fallthrough": false }],
 	// Clef, Cloudflare's decision models, for hints on what agents write (see src/clef.ts).
 	"ai": { "binding": "AI" },
+	// Browser Rendering, which takes screenshots of a change's site preview for Clef to look at (see src/preview-look.ts).
+	"browser": { "binding": "BROWSER" },
 	"kv_namespaces": [{ "binding": "OAUTH_KV", "id": "9449f5dfdc074c228358d0bbcd85abf0" }],
 	// Every push in the account, from one account-wide subscription (see src/push-events.ts):
 	//   wrangler queues create githive-pushes

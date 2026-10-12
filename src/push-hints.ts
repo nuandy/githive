@@ -12,9 +12,11 @@ import { HOSTED_PREFIX } from "./toolkit/tools/repo";
 
 /** A hint about one push, for its head only. */
 export interface PushHint {
-	kind: "steering" | "off_intent" | "beyond_intent";
+	kind: "steering" | "off_intent" | "beyond_intent" | "looks_broken";
 	/** Where: "commit messages" or "added lines", for a steering hint. */
 	in?: string;
+	/** The preview a looks_broken hint is about (see preview-look.ts). */
+	url?: string;
 	/** One line an agent can read. */
 	says: string;
 	/** How sure Clef is, from 0 to 1. */

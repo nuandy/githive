@@ -5,6 +5,7 @@ interface __BaseEnv_Env {
 	OAUTH_KV: KVNamespace;
 	DB: D1Database;
 	ARTIFACTS: Artifacts;
+	BROWSER: BrowserRun;
 	AI: Ai;
 	ASSETS: Fetcher;
 	PUBLIC_ORIGIN: "https://githive.app";

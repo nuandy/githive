@@ -541,6 +541,8 @@ describe("Clef on a change's push", { timeout: 30_000 }, () => {
 					if (id === "messages") answers[id] = { type: "noul", noul: steers("Its commit messages") };
 					if (id === "added") answers[id] = { type: "noul", noul: steers("The lines it adds") };
 					if (id === "matches") answers[id] = { type: "score", score: 1.9, probabilities: {}, confidence: 0.8 };
+					if (id === "looks")
+						answers[id] = { type: "choice", choice: "blank", probabilities: { blank: 0.85 }, confidence: 0.6 };
 					if (id === "beyond") answers[id] = { type: "noul", noul: /deleteAccounts/.test(state) ? 0.91 : 0.05 };
 				}
 				return answers;
@@ -593,6 +595,32 @@ describe("Clef on a change's push", { timeout: 30_000 }, () => {
 		await deliver(forkPush("bob", "c-9", clean));
 		expect(await repoCache.keptPushHints("c-9")).toEqual({ head: clean, hints: [] });
 		expect(await told("bob")).toEqual([]);
+	});
+
+	it("looks at a public site's preview when a push changes the site, and says when it looks broken", async () => {
+		const clef = pushClef();
+		const parts = withClef(clef);
+		const shot: string[] = [];
+		parts.parts.pushHints!.siteOf = async () => "https://githive.app/site/nuandy/project/";
+		parts.parts.pushHints!.shots = async (url) => (shot.push(url), ["data:image/jpeg;base64,/9j/"]);
+		const { claims, deliver, forkPush, repoCache } = parts;
+		claims.push({ change: "c-9", agent: "bob", intent: "a landing page" });
+		const page = await pushToFork("bob", "c-9", { "index.html": "<!doctype html><title>Hive</title>\n" });
+		await deliver(forkPush("bob", "c-9", page));
+		expect(shot).toEqual(["https://githive.app/site/nuandy/project/@c-9/"]);
+		expect((await repoCache.keptPushHints("c-9"))?.hints).toEqual([
+			{
+				kind: "looks_broken",
+				says: "Its preview seems to show a blank page",
+				likelihood: 0.85,
+				url: "https://githive.app/site/nuandy/project/@c-9/",
+			},
+		]);
+		// A push that changes no file a site's look depends on isn't looked at.
+		claims.push({ change: "c-8", agent: "bob", intent: "sync settings" });
+		const code = await pushToFork("bob", "c-8", { "src/jobs/sync.ts": USES_LOAD });
+		await deliver(forkPush("bob", "c-8", code));
+		expect(shot).toHaveLength(1);
 	});
 
 	it("doesn't ask about GitHive's own agents' pushes", async () => {

@@ -19,11 +19,12 @@ export type ClefAnswer =
 	| { type: "score"; score: number; probabilities: Record<string, number>; confidence: number };
 
 export interface Clef {
-	/** Answers by question id, or null if Clef couldn't answer in time. */
+	/** Answers by question id, or null if Clef couldn't answer in time. `images` are data URLs, at most 4. */
 	ask(
 		model: ClefModel,
 		state: string,
 		questions: Record<string, ClefQuestion>,
+		images?: string[],
 	): Promise<Record<string, ClefAnswer> | null>;
 }
 
@@ -36,8 +37,9 @@ type Run = (model: string, input: unknown) => Promise<unknown>;
 export function clefOn(ai: Ai): Clef {
 	const run = ai.run.bind(ai) as unknown as Run;
 	return {
-		ask: async (model, state, questions) => {
-			const asking = run(`@cf/cloudflare/${model}`, { model, state, questions });
+		ask: async (model, state, questions, images) => {
+			const input = { model, state, questions, ...(images?.length ? { images: images.slice(0, 4) } : {}) };
+			const asking = run(`@cf/cloudflare/${model}`, input);
 			const answer = await withinMs(asking, ANSWER_WITHIN_MS[model]).catch((err) => {
 				console.error(`asking ${model} failed`, String(err));
 				return undefined;
