@@ -12,7 +12,7 @@ Plain ES modules, no framework. Logic lives in `src/*.js` and is tested in `test
 
 **`src/puzzle.js`**
 
-- `puzzleFor(date)`: the puzzle for a day. `date` is a `Date` or a `"YYYY-MM-DD"` string, read as a UTC day. Returns `{ id, letters, center, outer, answers, pangrams }`: `id` is the `"YYYY-MM-DD"` day; `center` is one letter; `outer` the six others; `letters` all seven, center first; `answers` every word in `WORDS` the puzzle accepts, sorted; `pangrams` the answers that use all seven letters. The same day always gives the same puzzle, with 20 to 60 answers and at least one pangram, chosen with a seeded random number generator from the day (never `Math.random`). A date outside the years 2000 to 2999, or one that isn't a real day, throws a `RangeError`.
+- `puzzleFor(date)`: the puzzle for a day. `date` is a `Date` or a `"YYYY-MM-DD"` string, read as a UTC day. Returns `{ id, letters, center, outer, answers, pangrams }`: `id` is the `"YYYY-MM-DD"` day; `center` is one letter; `outer` the six others; `letters` all seven, center first; `answers` every word in `WORDS` the puzzle accepts, sorted; `pangrams` the answers that use all seven letters. The same day always gives the same puzzle, with 20 to 60 answers and at least one pangram, chosen with a seeded random number generator from the day (never `Math.random`). When a candidate doesn't give 20 to 60 answers, draw the next from the same generator, as many as it takes; never fall back to a fixed puzzle, which would give many days the same one. Its tests check a spread of days across the supported years, not just a few. A date outside the years 2000 to 2999, or one that isn't a real day, throws a `RangeError`.
 - `isPangram(word, puzzle)`: whether a word uses all seven letters.
 
 **`src/scoring.js`**
