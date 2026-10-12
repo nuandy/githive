@@ -96,9 +96,7 @@ const TOOL_LIST = [
 			"touching only these merges without them (*.md, docs/, licenses and images by default; a file " +
 			"under test/, fixtures/ or examples/ always runs them); [] makes them always run. github " +
 			"connects a GitHub repo ('owner/name', '' for none) through GitHive's GitHub app, installed " +
-			"there: after every landing, main goes to its githive/main branch with a pull request into main " +
-			"kept open (github_main 'pr', the default), or main itself is fast-forwarded (github_main " +
-			"'push'); and verify ['github-actions'] runs the " +
+			"there: main is pushed back to it after every landing, and verify ['github-actions'] runs the " +
 			"checks on its Actions instead of in containers (a workflow that runs on pushes to " +
 			"githive/checks/**). Only when GitHive starts on a repo: how claims are kept. They start in " +
 			"one record and shard per path, 2 segments deep over 16 records repos, once the load calls for " +
@@ -110,7 +108,6 @@ const TOOL_LIST = [
 			properties: {
 				repo: str,
 				github: str,
-				github_main: { type: "string", enum: ["pr", "push"] },
 				shard_depth: { type: "number" },
 				records_repos: { type: "number" },
 				required: { type: "number" },

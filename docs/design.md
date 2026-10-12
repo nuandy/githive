@@ -675,18 +675,11 @@ secrets; GitHive signs a short JWT with the key and exchanges it for an
 installation token scoped to that one repo, kept for the isolate until near its
 hour (`github.ts`). Then:
 
-- **What lands goes back to GitHub after every landing**, once the batch's
-  claims are released, so off the critical path, from the repo's Gate (real
-  git, the repo on disk), in `github-sync.ts`. By default GitHive never writes
-  GitHub's `main`: it pushes its `main` to `githive/main` there and keeps one
-  pull request open into `main` (opening a new one after each is merged), so
-  the repo's branch protection, required reviews and CI decide when agents'
-  work enters it. The pull request must be merged with a merge commit: squashing
-  or rebasing rewrites the commits, and the next one would show them again; its
-  description says so. A repo can set `github_main: "push"` to have `main`
-  fast-forwarded instead. Either way a push is a fast-forward only: if someone
-  pushed to GitHub's copy directly, the push is refused and logged, never
-  forced. Work flows one way: commits made on GitHub don't come back.
+- **main goes back to GitHub after every landing**, once the batch's claims are
+  released, so off the critical path, from the repo's Gate (real git, the
+  repo on disk). It's a fast-forward only: if someone pushed to GitHub's copy
+  directly, the push is refused and logged, never forced. GitHub stays the
+  copy people browse, and a backup.
 - **Checks can run on GitHub Actions** instead of in containers (`verify:
   ["github-actions"]`, `actions-checks.ts`). For a batch, the repo's Gate
   merges its changes onto main, the way they'll land, and pushes that commit to

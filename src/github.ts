@@ -25,14 +25,6 @@ export interface GitHubLink {
 	remote: Remote;
 	runsFor(sha: string): Promise<WorkflowRun[]>;
 	deleteBranch(name: string): Promise<void>;
-	/** Opens a pull request from `head` into `base`, unless one is open already or there's nothing to merge. */
-	openPullRequest(input: { head: string; base: string; title: string; body: string }): Promise<PullRequest | null>;
-}
-
-/** A pull request GitHive keeps open, and whether this call opened it. */
-export interface PullRequest {
-	url: string;
-	opened: boolean;
 }
 
 export interface GitHubApp {
@@ -128,33 +120,6 @@ async function installationToken(app: GitHubApp, repo: string, fetcher: typeof f
 	return issued.token;
 }
 
-/** The open pull request from `head` into `base`, or a new one. GitHub answers 422 when there's nothing to merge. */
-async function openPullRequest(
-	repo: string,
-	input: { head: string; base: string; title: string; body: string },
-	token: () => Promise<string>,
-	fetcher: typeof fetch,
-): Promise<PullRequest | null> {
-	const owner = repo.split("/")[0];
-	const query = `state=open&head=${encodeURIComponent(`${owner}:${input.head}`)}&base=${encodeURIComponent(input.base)}`;
-	const open = await api<{ html_url: string }[]>(
-		await token(),
-		"GET",
-		`/repos/${repo}/pulls?${query}`,
-		undefined,
-		fetcher,
-	);
-	if (open[0]) return { url: open[0].html_url, opened: false };
-	try {
-		const made = await api<{ html_url: string }>(await token(), "POST", `/repos/${repo}/pulls`, input, fetcher);
-		return { url: made.html_url, opened: true };
-	} catch (err) {
-		// Nothing to merge (the branch has it all already), or another landing opened one meanwhile.
-		if (err instanceof GitHubError && err.status === 422) return null;
-		throw err;
-	}
-}
-
 /** A link to `repo` (owner/name) through the App, or null if the App isn't installed on it. */
 export async function linkTo(app: GitHubApp, repo: string, fetcher: typeof fetch = fetch): Promise<GitHubLink | null> {
 	const token = () => installationToken(app, repo, fetcher);
@@ -178,6 +143,5 @@ export async function linkTo(app: GitHubApp, repo: string, fetcher: typeof fetch
 				if (!(err instanceof GitHubError && err.status === 422)) throw err;
 			});
 		},
-		openPullRequest: (input) => openPullRequest(repo, input, token, fetcher),
 	};
 }

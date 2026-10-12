@@ -1,5 +1,4 @@
 import { BRANCH_PATTERN, type BranchRule } from "../branch-rules";
-import type { GitHubMain } from "../github-sync";
 import { SKIP_PATTERN } from "../check-scope";
 import type { ReviewPolicy } from "../votes";
 import type { Args, ToolContext } from "./context";
@@ -66,12 +65,6 @@ export async function githubFrom(ctx: ToolContext, value: unknown): Promise<{ re
 	const repo = value.trim();
 	if (!(await ctx.github(repo))) fail(409, `GitHive's GitHub app isn't installed on ${repo}: install it there first`);
 	return { repo };
-}
-
-/** How landed work reaches the GitHub repo's branch: "pr" (a pull request GitHive keeps open) or "push". */
-export function githubMainFrom(value: unknown): GitHubMain {
-	if (value === "pr" || value === "push") return value;
-	return fail(400, 'github_main is "pr" (a pull request into the branch) or "push" (fast-forward the branch)');
 }
 
 export function checksFrom(value: unknown): string[] {

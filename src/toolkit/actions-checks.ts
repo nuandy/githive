@@ -80,3 +80,11 @@ async function finishedRuns(
 		await sleep(timing.pollMs ?? POLL_MS);
 	}
 }
+
+/**
+ * Fast-forwards `branch` on the connected GitHub repo to `head`. A commit someone pushed there directly is
+ * never overwritten; the refused push is reported instead.
+ */
+export function mirrorTo(gate: Pick<BatchGit, "pushBranch">, link: GitHubLink, branch: string, head: string) {
+	return gate.pushBranch({ branch, head, to: link.remote });
+}

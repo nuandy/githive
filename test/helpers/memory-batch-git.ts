@@ -89,12 +89,9 @@ function inMemory(remote: Remote): BatchGit {
 			await ws.pushAs(ws.branch, `refs/heads/${ref}`, to);
 			return { tip };
 		},
-		// What landed is on the project's main. Pushed to main it must fast-forward; pushed to a branch only GitHub has
-		// (githive/main), the branch takes main's commits, as the Gate's `git push <head>:<branch>` does.
 		pushBranch: async ({ branch, head, to }) => {
-			const ws = await Workspace.at(remote, "main", head);
-			if (branch === "main") await ws.push("main", to);
-			else await ws.pushAs("main", `refs/heads/${branch}`, to);
+			const ws = await Workspace.at(remote, branch, head);
+			await ws.push(branch, to);
 		},
 	};
 }

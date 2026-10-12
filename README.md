@@ -55,7 +55,7 @@ Changes merge into the project's default branch, whatever its repo calls it (mai
 
 **Importing.** New repository → Import brings in a branch of any public Git repo, with its history. For a private GitHub repo, add a [fine-grained token](https://github.com/settings/personal-access-tokens/new) with read-only access to its contents: GitHive clones it in a container of its own, pushes it into the new repo, and keeps the token nowhere. Over the API it's `POST /repos` with `import_token`.
 
-**Connecting.** Connect a GitHive repo to a GitHub repo, through GitHive's GitHub App installed there, with `settings` (`github: "owner/name"`). After every landing, GitHive sends what landed back: by default it pushes its `main` to a `githive/main` branch there and keeps one pull request open into `main`, for people or GitHub's auto-merge to merge, so the repo's branch protection and CI apply (merge it with a merge commit, since squashing or rebasing rewrites the commits). With `github_main: "push"` it fast-forwards `main` itself instead. Either way it never overwrites a push made on GitHub. With `verify: ["github-actions"]` runs the checks on GitHub Actions instead of in containers: a workflow that runs on pushes to `githive/checks/**` (see [docs/design.md](docs/design.md)).
+**Connecting.** Connect a GitHive repo to a GitHub repo, through GitHive's GitHub App installed there, with `settings` (`github: "owner/name"`). GitHive pushes `main` back to GitHub after every landing, as a fast-forward (it never overwrites a push made there directly), and with `verify: ["github-actions"]` runs the checks on GitHub Actions instead of in containers: a workflow that runs on pushes to `githive/checks/**` (see [docs/design.md](docs/design.md)).
 
 ### Command line
 
