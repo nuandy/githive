@@ -55,7 +55,9 @@ export const toolContext = (env: Env, principal: Principal | undefined, agentKey
 /** Agents' forks and claim records repos aren't projects. */
 export const isProject = (name: string) => !name.startsWith("fork--") && !name.startsWith("records--");
 
-/** A deleted project's tokens and kept dashboard views go with it, so a new repo by its name starts clean. */
+/**
+ * A deleted project's tokens, caches and GitHub sync state go with it, so a new repo by its name starts clean.
+ */
 export async function forgetRepo(env: Env, repo: string) {
 	await Promise.resolve()
 		// Forget the snapshot too. Containers can't delete one early and drops it within 30 days.
@@ -63,10 +65,11 @@ export async function forgetRepo(env: Env, repo: string) {
 			Promise.all([
 				env.TOKENS?.getByName(repo).clear(),
 				forgetCaches(env, repo),
+				env.GITHUB_SYNC?.getByName(`repo:${repo}`).forget(),
 				env.GATE?.getByName(`repo:${repo}`).forgetSnapshot(),
 			]),
 		)
-		.catch((err) => console.error(`forgetting ${repo}'s tokens, views and snapshot failed`, String(err)));
+		.catch((err) => console.error(`forgetting ${repo}'s tokens, caches, GitHub sync and snapshot failed`, String(err)));
 }
 
 // The repo's RepoCache, and the RecordCaches, ChangeCache and FootprintCache beside it.

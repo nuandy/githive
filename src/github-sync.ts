@@ -54,6 +54,12 @@ export class GitHubSync extends DurableObject<Env> {
 		return { job: job ?? null, pull: pull ?? null };
 	}
 
+	/** The repo was deleted: its job stops at its next step, which finds the job gone (see alarm). */
+	async forget() {
+		await this.ctx.storage.deleteAlarm();
+		await this.ctx.storage.deleteAll();
+	}
+
 	/** Runs the job's next step, and sets the alarm for the one after. */
 	async alarm() {
 		const job = await this.ctx.storage.get<InboundJob>("job");
