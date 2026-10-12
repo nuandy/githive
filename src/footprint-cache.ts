@@ -1,4 +1,6 @@
 import { DurableObject } from "cloudflare:workers";
+import { withHistory } from "./artifacts";
+import { awareness, type AwarenessParts, type FootprintStore } from "./awareness";
 import { Traffic, objectLabel } from "./cache-traffic";
 import {
 	type AlteredName,
@@ -18,7 +20,7 @@ import {
 import { type Alter, footprintHash, type UseOf } from "./footprint/footprints";
 import type { HiveEvent } from "./hive-events";
 import { projectBranch } from "./project-branch";
-import type { AwarenessParts, FootprintStore } from "./push-events";
+import type { AwarenessHandOff, RepoPushes } from "./push-events";
 import type { Notice } from "./repo-cache";
 import { rpc } from "./rpc";
 import type { Registry } from "./toolkit/claims";
@@ -29,10 +31,10 @@ import { cachingHistory } from "./toolkit/tree-reads";
 // One per repo ("footprints:<repo>"): what awareness keeps (docs/awareness.md, "Footprints and interface news").
 // Parsed files' facts by blob and path; each open change's footprint at its head (the names it alters and the names
 // it uses); indexes from a file's name to the changes that alter or use it, so a lookup never loads every footprint;
-// which notices were told; and the last commit analysed on each branch. The push-event consumer reads Git and parses;
-// this compares and sends the notices into the repo's RepoCache, where agents' news is read. All of it is derived
-// from Git, so losing it costs only missed hints. It has an object of its own so parsing state never shares
-// RepoCache's memory.
+// which notices were told; and the last commit analysed on each branch. The push-event consumer hands it each batch
+// of the repo's pushes; it reads Git and parses them (awareness.ts), compares, and sends the notices into the repo's
+// RepoCache, where agents' news is read. All of it is derived from Git, so losing it costs only missed hints. It has
+// an object of its own so parsing never shares the memory of RepoCache or of the isolates serving agents' calls.
 //
 // Keys (an index key's parts URI-encoded, so a ":" in a path or a name can't run into the next part; facts and told
 // keys are only ever read whole):
@@ -172,14 +174,22 @@ function indexParts(key: string) {
 export const footprintCache = (env: Env, repo: string) => env.FOOTPRINT_CACHE.getByName(`footprints:${repo}`);
 
 /**
- * What the push consumer reads awareness through, in the Worker: Artifacts' API (trees and blobs kept for the isolate),
- * the claims as the advice tools read them, and each repo's FootprintCache. Null without a FootprintCache binding.
+ * How the push consumer hands each repo's pushes to the repo's FootprintCache, which works out what they mean in its
+ * own isolate. Null without a FootprintCache or Artifacts binding.
  */
-export function awarenessParts(env: Env): AwarenessParts | null {
+export function awarenessHandOff(env: Env): AwarenessHandOff | null {
 	if (!env.FOOTPRINT_CACHE || !env.ARTIFACTS) return null;
+	return (repo, pushes) => rpc(footprintCache(env, repo).aware(repo, pushes));
+}
+
+/**
+ * What a FootprintCache reads awareness through: Artifacts' API (trees and blobs kept for the isolate), giving up on a
+ * busy repo rather than retrying it, the claims as the advice tools read them, and itself.
+ */
+function awarenessParts(env: Env, footprints: FootprintStore): AwarenessParts {
 	const ctx = toolContextFor(env, undefined);
 	return {
-		history: cachingHistory(ctx.history!),
+		history: cachingHistory((name, read) => withHistory(env.ARTIFACTS, name, read, { whenBusy: "give up" })),
 		claims: async (repo) => {
 			const registry = (await recordLog<Registry>(ctx, repo, claimsRef(repo)).read())?.commit.state;
 			if (!registry?.baseline) return null;
@@ -188,13 +198,20 @@ export function awarenessParts(env: Env): AwarenessParts | null {
 		},
 		branchHead: (repo, branch) => ctx.branchHead!(repo, branch),
 		forkOf: (repo, agent) => forkName(repo, agent),
-		// The stub's methods return what the class's do, as RPC results.
-		footprints: (repo) => footprintCache(env, repo) as unknown as FootprintStore,
+		footprints,
 	};
 }
 
 export class FootprintCache extends DurableObject<Env> {
 	private readonly traffic = new Traffic(() => objectLabel(this.ctx));
+
+	/**
+	 * Works out what a batch's pushes to `repo` mean, reading and parsing here, so the parser never runs in an isolate
+	 * that serves agents' calls.
+	 */
+	async aware(repo: string, pushes: RepoPushes) {
+		await awareness(repo, pushes, awarenessParts(this.env, this));
+	}
 
 	/** The facts kept for these `blob:path` keys. */
 	async factsOf(keys: string[]) {

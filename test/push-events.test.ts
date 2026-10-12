@@ -1,8 +1,16 @@
 import { describe, expect, it, vi } from "vitest";
 import { FakeStorage } from "./fakes/env";
-import { branchPushOf, changePushOf, headsForClaims, notePushEvents, type PushedEvent } from "../src/push-events";
+import {
+	branchPushOf,
+	changePushOf,
+	headsForClaims,
+	notePushEvents,
+	type PushedEvent,
+	type RepoPushes,
+} from "../src/push-events";
 
 const { RepoCache } = await import("../src/repo-cache");
+const { awarenessHandOff } = await import("../src/footprint-cache");
 
 // Pushes as Artifacts reports them: a push to a change's branch on an agent's
 // fork is noted in its project's RepoCache, nothing else is, and a head an
@@ -160,6 +168,39 @@ describe("the queue consumer", () => {
 		);
 		expect([messages[0]!.ack.mock.calls.length, messages[0]!.retry.mock.calls.length]).toEqual([0, 1]);
 		expect([messages[1]!.ack.mock.calls.length, messages[1]!.retry.mock.calls.length]).toEqual([1, 0]);
+	});
+
+	it("hands each repo's pushes to its FootprintCache, newest per change, without working them out itself", async () => {
+		const aware = vi.fn(async (_repo: string, _pushes: RepoPushes) => undefined);
+		const getByName = vi.fn((_name: string) => ({ aware }));
+		const env = {
+			...envWith(async () => undefined),
+			FOOTPRINT_CACHE: { getByName },
+			ARTIFACTS: {},
+		} as unknown as Env;
+		const later = "2026-10-10T12:00:05.000Z";
+		const messages = [
+			message(event("fork--p--agent--a", "refs/heads/changes/c1", A)),
+			message(event("fork--p--agent--a", "refs/heads/changes/c1", B, later)),
+			message(event("fork--x--agent--agent--b", "refs/heads/changes/c2", A)),
+			message(event("p", "refs/heads/main", A)),
+			message(event("p", "refs/heads/main", B, later)),
+		];
+		await notePushEvents({ messages } as unknown as MessageBatch<unknown>, env, awarenessHandOff(env));
+		expect(getByName.mock.calls.map(([name]) => name).sort()).toEqual([
+			"footprints:p",
+			"footprints:x",
+			"footprints:x--agent",
+		]);
+		const handed = Object.fromEntries(aware.mock.calls.map(([repo, pushes]) => [repo, pushes]));
+		expect(handed.p).toEqual({
+			moved: [expect.objectContaining({ after: A }), expect.objectContaining({ after: B })],
+			pushed: [{ change: "c1", fork: "fork--p--agent--a", head: B, at: Date.parse(later) }],
+		});
+		// A fork whose name could belong to two projects is handed to both; only its claim holder's counts it.
+		expect(handed.x).toEqual(handed["x--agent"]);
+		expect(handed.x!.pushed).toEqual([expect.objectContaining({ change: "c2" })]);
+		for (const m of messages) expect(m.ack).toHaveBeenCalledOnce();
 	});
 
 	it("notes nothing without its namespace set", async () => {

@@ -2,7 +2,8 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { notePushEvents, type AwarenessParts, type ClaimView, type PushedEvent } from "../src/push-events";
+import { awareness, type AwarenessParts, type ClaimView } from "../src/awareness";
+import { notePushEvents, type PushedEvent, type RepoPushes } from "../src/push-events";
 import type { Notice } from "../src/repo-cache";
 import { forgetChains } from "../src/toolkit/batch-reads";
 import { FakeStorage } from "./fakes/env";
@@ -61,7 +62,7 @@ function hive() {
 		claims: async () => ({ branch: "main", claims }),
 		branchHead: async (repo, branch) => server.gitIn(repo, "rev-parse", branch).trim(),
 		forkOf: async (repo, agent) => `fork--${repo}--agent--${agent}`,
-		footprints: () => footprints,
+		footprints,
 	};
 	const env = { ARTIFACTS_NAMESPACE: "blueprint", REPO_CACHE: { getByName: () => repoCache } } as unknown as Env;
 	let clock = Date.parse("2026-10-11T12:00:00.000Z");
@@ -73,7 +74,9 @@ function hive() {
 	});
 	const deliver = async (...bodies: PushedEvent[]) => {
 		const messages = bodies.map((body) => ({ body, ack: vi.fn(), retry: vi.fn() }));
-		await notePushEvents({ messages } as unknown as MessageBatch<unknown>, env, parts);
+		// As each repo's FootprintCache would, given its pushes.
+		const handOff = (repo: string, pushes: RepoPushes) => awareness(repo, pushes, parts);
+		await notePushEvents({ messages } as unknown as MessageBatch<unknown>, env, handOff);
 		return messages;
 	};
 	return {
@@ -420,6 +423,46 @@ describe("heads-ups between open changes", () => {
 		errors.mockRestore();
 	});
 
+	it("caps a batch's reads of the project's own repo, which merges read too, below its reads of forks", async () => {
+		const { claims, deliver, forkPush, footprints, parts } = hive();
+		claims.push({ change: "c-9", agent: "bob" });
+		const errors = vi.spyOn(console, "error").mockImplementation(() => undefined);
+		parts.budget = { projectReads: 0 };
+		await deliver(forkPush("bob", "c-9", await pushToFork("bob", "c-9", { "src/jobs/sync.ts": USES_LOAD })));
+		expect(await footprints.keptHead("c-9")).toBeNull();
+		expect(errors).toHaveBeenCalledWith(
+			expect.stringMatching(/^awareness: footprinting c-9 .* this batch's 0 reads of project for awareness ran out/),
+		);
+		errors.mockRestore();
+	});
+
+	it("stops a batch once Artifacts says the project is busy, leaving the rest for the next push", async () => {
+		const { claims, deliver, forkPush, branchPush, footprints, parts } = hive();
+		claims.push({ change: "c-9", agent: "bob" }, { change: "c-5", agent: "carol" });
+		await deliver(forkPush("bob", "c-9", await pushToFork("bob", "c-9", { "src/jobs/sync.ts": USES_LOAD })));
+		const moved = await land("c-7", "alice", { "src/config.ts": SIGNATURE_CHANGE }, INTENT_C7);
+		const carol = forkPush("carol", "c-5", await pushToFork("carol", "c-5", { "src/jobs/other.ts": USES_LOAD }));
+		const history = parts.history;
+		const busy = Object.assign(new Error("An internal error occurred."), { code: "INTERNAL_ERROR" });
+		const reads = vi.fn(async () => Promise.reject(busy));
+		parts.history = reads;
+		const logs = vi.spyOn(console, "log").mockImplementation(() => undefined);
+		const errors = vi.spyOn(console, "error").mockImplementation(() => undefined);
+		await deliver(branchPush("main", moved), carol);
+		// The branch's first read was refused; carol's push wasn't read at all.
+		expect(reads).toHaveBeenCalledOnce();
+		expect(logs).toHaveBeenCalledWith("awareness: Artifacts is busy; 1 of project's pushes left for the next push");
+		expect(await footprints.keptHead("c-5")).toBeNull();
+		// Nothing retries it: carol's next push is read once the project isn't busy.
+		parts.history = history;
+		await deliver(
+			forkPush("carol", "c-5", await pushToFork("carol", "c-5", { "src/jobs/other.ts": `${USES_LOAD}\n` })),
+		);
+		expect(await footprints.keptHead("c-5")).not.toBeNull();
+		logs.mockRestore();
+		errors.mockRestore();
+	});
+
 	it("ignores a push to a change's branch on a fork other than its claim holder's, and a change nobody claims", async () => {
 		const { claims, deliver, forkPush, footprints } = hive();
 		claims.push({ change: "c-9", agent: "bob" });
@@ -488,16 +531,9 @@ describe("the queue consumer with awareness", () => {
 			ARTIFACTS_NAMESPACE: "blueprint",
 			REPO_CACHE: { getByName: () => ({ notePushes }) },
 		} as unknown as Env;
-		const boom = () => {
+		const handOff = vi.fn(async () => {
 			throw new Error("FootprintCache is overloaded");
-		};
-		const parts = {
-			history: boom,
-			claims: async () => boom(),
-			branchHead: boom,
-			forkOf: boom,
-			footprints: boom,
-		} as unknown as AwarenessParts;
+		});
 		const errors = vi.spyOn(console, "error").mockImplementation(() => undefined);
 		const at = "2026-10-11T12:00:00.000Z";
 		const body = (repoName: string, ref: string) => ({
@@ -511,7 +547,12 @@ describe("the queue consumer with awareness", () => {
 			ack: vi.fn(),
 			retry: vi.fn(),
 		}));
-		await notePushEvents({ messages } as unknown as MessageBatch<unknown>, env, parts);
+		await notePushEvents({ messages } as unknown as MessageBatch<unknown>, env, handOff);
+		// The fork's push and the branch's are the same project's, so they go to its FootprintCache together.
+		expect(handOff).toHaveBeenCalledExactlyOnceWith("p", {
+			moved: [expect.objectContaining({ repo: "p", branch: "main" })],
+			pushed: [expect.objectContaining({ change: "c" })],
+		});
 		expect(notePushes).toHaveBeenCalledWith([
 			{ change: "c", fork: "fork--p--agent--a", head: "a".repeat(40), at: Date.parse(at) },
 		]);

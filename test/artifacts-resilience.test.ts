@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { forkAndWait, remoteFor } from "../src/artifacts";
+import { forkAndWait, remoteFor, withHistory } from "../src/artifacts";
 import worker from "../src/index";
 
 vi.mock("../src/access", () => ({
@@ -38,6 +38,24 @@ describe("Artifacts transient failures", () => {
 			token: "token",
 		});
 		expect(repo.createToken).toHaveBeenCalledTimes(2);
+	});
+
+	it("reads history without retrying a busy repo when told to give up, though a network failure is still retried", async () => {
+		const internal = () => Object.assign(new Error("An internal error occurred."), { code: "INTERNAL_ERROR" });
+		const repo = { readTree: vi.fn().mockRejectedValueOnce(internal()).mockResolvedValue([]) };
+		const artifacts = { get: vi.fn(async () => repo) } as never;
+		const readTree = () =>
+			withHistory(artifacts, "project", (source) => source.readTree("t1"), { whenBusy: "give up" });
+
+		await expect(readTree()).rejects.toMatchObject({ code: "INTERNAL_ERROR" });
+		expect(repo.readTree).toHaveBeenCalledTimes(1);
+		const busyToGet = { get: vi.fn().mockRejectedValueOnce(internal()).mockResolvedValue(repo) } as never;
+		await expect(
+			withHistory(busyToGet, "project", (source) => source.readTree("t1"), { whenBusy: "give up" }),
+		).rejects.toMatchObject({ code: "INTERNAL_ERROR" });
+		repo.readTree.mockRejectedValueOnce(transient());
+		await expect(readTree()).resolves.toEqual([]);
+		expect(repo.readTree).toHaveBeenCalledTimes(3);
 	});
 
 	it("disposes the repo handle after a successful operation", async () => {

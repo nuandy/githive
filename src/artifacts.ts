@@ -25,10 +25,10 @@ async function withRepo<T>(
 	artifacts: Artifacts,
 	name: string,
 	operation: (repo: ArtifactsRepo) => Promise<T>,
-	{ retry = true } = {},
+	{ retry = true, retrying = retryArtifacts } = {},
 ): Promise<T> {
 	const get = () => call("get", name, () => artifacts.get(name));
-	const repo = await (retry ? retryArtifacts(get) : get()).catch((err) => Promise.reject(naming(err, name)));
+	const repo = await (retry ? retrying(get) : get()).catch((err) => Promise.reject(naming(err, name)));
 	try {
 		return await operation(repo);
 	} catch (err) {
@@ -65,19 +65,28 @@ export async function remoteFor(
 	});
 }
 
-/** Read a repo's history through the Artifacts API rather than Git, retrying transient failures. */
+/**
+ * Read a repo's history through the Artifacts API rather than Git, retrying transient failures, and a busy repo's
+ * INTERNAL_ERROR too unless `whenBusy` is "give up".
+ */
 export async function withHistory<T>(
 	artifacts: Artifacts,
 	name: string,
 	read: (source: HistorySource) => Promise<T>,
+	{ whenBusy = "retry" }: { whenBusy?: "retry" | "give up" } = {},
 ): Promise<T> {
-	return withRepo(artifacts, name, (repo) =>
-		read({
-			log: (ref, limit, offset) => retryArtifacts(() => call("log", name, () => rpc(repo.log({ ref, limit, offset })))),
-			readCommit: (hash) => retryArtifacts(() => call("readCommit", name, () => rpc(repo.readCommit(hash)))),
-			readTree: (hash) => retryArtifacts(() => call("readTree", name, () => rpc(repo.readTree(hash)))),
-			readBlob: (hash, maxBytes) => retryArtifacts(() => call("readBlob", name, () => blobBytes(repo, hash, maxBytes))),
-		}),
+	const retrying = whenBusy === "retry" ? retryArtifacts : retryUnlessBusy;
+	return withRepo(
+		artifacts,
+		name,
+		(repo) =>
+			read({
+				log: (ref, limit, offset) => retrying(() => call("log", name, () => rpc(repo.log({ ref, limit, offset })))),
+				readCommit: (hash) => retrying(() => call("readCommit", name, () => rpc(repo.readCommit(hash)))),
+				readTree: (hash) => retrying(() => call("readTree", name, () => rpc(repo.readTree(hash)))),
+				readBlob: (hash, maxBytes) => retrying(() => call("readBlob", name, () => blobBytes(repo, hash, maxBytes))),
+			}),
+		{ retrying },
 	);
 }
 
@@ -118,6 +127,9 @@ const codeOf = (err: unknown) => (err && typeof err === "object" && "code" in er
 /** Artifacts throttles a busy repo with INTERNAL_ERROR, such as many forks at once; retrying succeeds. */
 const isInternalError = (err: unknown) => codeOf(err) === "INTERNAL_ERROR";
 
+/** Whether Artifacts answered that a repo is busy (INTERNAL_ERROR, its throttling). */
+export const isArtifactsBusy = isInternalError;
+
 /** Retries Artifacts calls for a few seconds, longer than the default, since a busy repo stays busy a while. */
 const retryArtifacts = <T>(operation: () => Promise<T>) =>
 	retryTransient(operation, {
@@ -126,6 +138,10 @@ const retryArtifacts = <T>(operation: () => Promise<T>) =>
 		maxDelayMs: 3_000,
 		retryable: (err) => isTransientFailure(err) || isInternalError(err),
 	});
+
+/** Retries only network failures: a busy repo is left alone, for callers whose reads are only advice. */
+const retryUnlessBusy = <T>(operation: () => Promise<T>) =>
+	retryTransient(operation, { retryable: (err) => !isInternalError(err) && isTransientFailure(err) });
 
 const alreadyExists = (err: unknown) =>
 	/EXISTS/.test(codeOf(err)) || /already exists/i.test(err instanceof Error ? err.message : "");

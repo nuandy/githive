@@ -6,7 +6,7 @@ import { orgRoutes } from "./auth/org-routes";
 import { OAuthProvider } from "@cloudflare/workers-oauth-provider";
 import { statusOf } from "./errors";
 import { notePushEvents } from "./push-events";
-import { awarenessParts } from "./footprint-cache";
+import { awarenessHandOff } from "./footprint-cache";
 import { countingRequests, describeCounts } from "./git-http";
 import { adminRoutes } from "./routes/admin";
 import { dashboardRoutes } from "./routes/dashboard";
@@ -169,5 +169,5 @@ export default {
 		return oauthFor(origin).fetch(request, env, ctx);
 	},
 	// Artifacts' push events, so changes' heads are known without reading forks, and awareness follows the code.
-	queue: (batch: MessageBatch<unknown>, env: Env) => notePushEvents(batch, env, awarenessParts(env)),
+	queue: (batch: MessageBatch<unknown>, env: Env) => notePushEvents(batch, env, awarenessHandOff(env)),
 } satisfies ExportedHandler<Env>;

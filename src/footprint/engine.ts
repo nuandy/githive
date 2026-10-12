@@ -1,21 +1,23 @@
-import { Language, Parser, Query } from "web-tree-sitter";
-// Every .wasm import is a precompiled WebAssembly.Module (wrangler's default CompiledWasm rule): Workers forbid
-// compiling wasm from bytes at run time. The core comes from the package, so it always matches its JS.
-import coreWasm from "web-tree-sitter/web-tree-sitter.wasm";
-import typescriptWasm from "./wasm/tree-sitter-typescript.wasm";
-import tsxWasm from "./wasm/tree-sitter-tsx.wasm";
-import javascriptWasm from "./wasm/tree-sitter-javascript.wasm";
+import type { Parser, Query } from "web-tree-sitter";
 import { JAVASCRIPT_QUERY, TYPESCRIPT_QUERY } from "./queries";
+
+// The parser and its grammars are megabytes of wasm, imported only on first use, so an isolate that never parses
+// never loads them. Every .wasm import is a precompiled WebAssembly.Module (wrangler's default CompiledWasm rule):
+// Workers forbid compiling wasm from bytes at run time. The core comes from the package, so it always matches its JS.
 
 export type Lang = "typescript" | "tsx" | "javascript";
 export type Engine = { parser: Parser; query: Query };
 
-const GRAMMARS: Record<Lang, [WebAssembly.Module, string]> = {
-	typescript: [typescriptWasm, TYPESCRIPT_QUERY],
+type WasmImport = Promise<{ default: WebAssembly.Module }>;
+
+const GRAMMARS: Record<Lang, [() => WasmImport, string]> = {
+	typescript: [() => import("./wasm/tree-sitter-typescript.wasm"), TYPESCRIPT_QUERY],
 	// TSX has the same node types as TypeScript, so the same query.
-	tsx: [tsxWasm, TYPESCRIPT_QUERY],
-	javascript: [javascriptWasm, JAVASCRIPT_QUERY],
+	tsx: [() => import("./wasm/tree-sitter-tsx.wasm"), TYPESCRIPT_QUERY],
+	javascript: [() => import("./wasm/tree-sitter-javascript.wasm"), JAVASCRIPT_QUERY],
 };
+
+const treeSitter = () => import("web-tree-sitter");
 
 let core: Promise<void> | null = null;
 const engines = new Map<Lang, Engine>();
@@ -55,42 +57,48 @@ async function once<T>(what: Lang | "core", load: () => T | Promise<T>): Promise
 }
 
 function initCore(): Promise<void> {
-	core ??= (async () => {
-		// nodejs_compat gives workerd a process.versions.node, so Emscripten's glue takes its Node path and calls
-		// createRequire(import.meta.url), which is undefined in a bundled Worker. The glue skips that path when
-		// process.type is "renderer" (Electron's flag), so it is set for the duration of init only. This depends on
-		// one line of the generated glue (ENVIRONMENT_IS_NODE); web-tree-sitter is pinned and the workerd test
-		// (npm run test:workerd) catches a change.
-		// Nothing else in GitHive reads process.type, and the init takes a few milliseconds, during which other requests
-		// in the isolate see it too.
-		const proc = (globalThis as { process?: { type?: string } }).process;
-		const had = proc !== undefined && Object.hasOwn(proc, "type");
-		const old = proc?.type;
-		if (proc) proc.type = "renderer";
-		try {
-			await Parser.init({
-				instantiateWasm(
-					imports: WebAssembly.Imports,
-					receive: (instance: WebAssembly.Instance, module: WebAssembly.Module) => void,
-				) {
-					memory = (imports.env as { memory?: WebAssembly.Memory } | undefined)?.memory;
-					const instance = new WebAssembly.Instance(coreWasm, imports);
-					receive(instance, coreWasm); // Emscripten's order: (instance, module)
-					return instance.exports;
-				},
-			});
-		} catch (err) {
-			// A failed init may pass next time; don't keep the rejection.
-			core = null;
-			throw err;
-		} finally {
-			if (proc) {
-				if (had) proc.type = old;
-				else delete proc.type;
-			}
-		}
-	})();
+	// A failed load or init may pass next time; don't keep the rejection.
+	core ??= startCore().catch((err) => {
+		core = null;
+		throw err;
+	});
 	return core;
+}
+
+async function startCore() {
+	const [{ Parser }, { default: coreWasm }] = await Promise.all([
+		treeSitter(),
+		import("web-tree-sitter/web-tree-sitter.wasm") as WasmImport,
+	]);
+	// nodejs_compat gives workerd a process.versions.node, so Emscripten's glue takes its Node path and calls
+	// createRequire(import.meta.url), which is undefined in a bundled Worker. The glue skips that path when
+	// process.type is "renderer" (Electron's flag), so it is set for the duration of init only. This depends on
+	// one line of the generated glue (ENVIRONMENT_IS_NODE); web-tree-sitter is pinned and the workerd test
+	// (npm run test:workerd) catches a change.
+	// Nothing else in GitHive reads process.type, and the init takes a few milliseconds, during which other requests
+	// in the isolate see it too.
+	const proc = (globalThis as { process?: { type?: string } }).process;
+	const had = proc !== undefined && Object.hasOwn(proc, "type");
+	const old = proc?.type;
+	if (proc) proc.type = "renderer";
+	try {
+		await Parser.init({
+			instantiateWasm(
+				imports: WebAssembly.Imports,
+				receive: (instance: WebAssembly.Instance, module: WebAssembly.Module) => void,
+			) {
+				memory = (imports.env as { memory?: WebAssembly.Memory } | undefined)?.memory;
+				const instance = new WebAssembly.Instance(coreWasm, imports);
+				receive(instance, coreWasm); // Emscripten's order: (instance, module)
+				return instance.exports;
+			},
+		});
+	} finally {
+		if (proc) {
+			if (had) proc.type = old;
+			else delete proc.type;
+		}
+	}
 }
 
 /**
@@ -101,8 +109,9 @@ export async function engine(lang: Lang): Promise<Engine> {
 	await once("core", initCore);
 	let found = engines.get(lang);
 	if (!found) {
-		const [module, scm] = GRAMMARS[lang];
-		found = await once(lang, () => {
+		const [grammar, scm] = GRAMMARS[lang];
+		found = await once(lang, async () => {
+			const [{ Language, Parser, Query }, { default: module }] = await Promise.all([treeSitter(), grammar()]);
 			// Never Language.load(bytes): it compiles from bytes, which Workers forbid.
 			const language = Language.loadSync(module);
 			const parser = new Parser();
