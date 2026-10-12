@@ -622,7 +622,11 @@ cancel out: two modules each toggling the same panel. A button that did nothing
 gets up to three more tries, each after first clicking one that did something,
 since many controls only act on some state (Delete with nothing typed).
 `data-githive-ignore` or `--ignore <selector>` leaves one out. The check stops
-itself after 8 minutes, inside the 10 a check command gets.
+itself after 8 minutes, inside the 10 a check command gets. On bench (13 Oct,
+`scripts/browser-check-probe.mjs`), a page whose Show button had two handlers
+that undid each other was sent back 91 s after the push, from a cold container
+that installed Chromium on the way, with exactly that click named; its fix
+landed 14 s after its push.
 
 ### Changes the checks skip
 
