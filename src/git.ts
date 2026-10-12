@@ -234,6 +234,19 @@ export class Workspace {
 		}
 	}
 
+	/** Every file at the current head, by path. */
+	files() {
+		return git.listFiles({ fs: this.fs, dir: DIR, cache: this.cache });
+	}
+
+	/** Takes `paths` out of the worktree and the index, for the next commit. */
+	async remove(paths: string[]) {
+		for (const path of paths) {
+			await this.fs.promises.unlink(`${DIR}/${path}`).catch(() => undefined);
+			await git.remove({ fs: this.fs, dir: DIR, filepath: path });
+		}
+	}
+
 	commit(message: string, author = BOT) {
 		return git.commit({ fs: this.fs, dir: DIR, message, author });
 	}

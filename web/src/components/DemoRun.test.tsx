@@ -3,7 +3,6 @@ import { describe, expect, it } from "vitest";
 import type { DemoRunStatus } from "../api";
 import { NOW, visibleText } from "../test/fixtures";
 import { DemoCard, runWords } from "./DemoRun";
-import { isDemoRepo } from "./HiveTab";
 
 // Honeycomb demo runs on the dashboard: the card that starts one, and the words its Hive tab's banner says.
 
@@ -15,8 +14,9 @@ const agent = (name: string, more: Partial<DemoRunStatus["agents"][number]> = {}
 	...more,
 });
 const run = (more: Partial<DemoRunStatus> = {}): DemoRunStatus => ({
-	id: "ada--honeycomb-1",
-	fullName: "ada/honeycomb-1",
+	id: "run-3",
+	number: 3,
+	fullName: "nuandy/honeycomb",
 	by: "ada",
 	startedAt: NOW - 10 * 60_000,
 	status: "running",
@@ -40,15 +40,16 @@ describe("a demo run on the dashboard", () => {
 
 	it("says how a run is going, and how it ended", () => {
 		expect(runWords(run(), NOW)).toBe(
-			"A demo run, started by ada 10 minutes ago: 1 building, 1 reviewing, 1 of 13 pieces finished.",
+			"Demo run 3, started by ada 10 minutes ago: 1 building, 1 reviewing, 1 of 13 pieces finished.",
 		);
 		expect(runWords(run({ status: "done", endedAt: NOW - 60_000 }), NOW)).toBe(
-			"This demo run finished 1 minute ago: 1 of 13 pieces finished.",
+			"Demo run 3 finished 1 minute ago: 1 of 13 pieces finished.",
 		);
 	});
 
-	it("knows a demo run's repo by its name", () => {
-		expect(isDemoRepo("ada/honeycomb-202610121530")).toBe(true);
-		expect(isDemoRepo("ada/honeycomb")).toBe(false);
+	it("says when the hive is reviewing the run's reset, before any piece", () => {
+		expect(runWords(run({ reset: "reset-3" }), NOW)).toBe(
+			"Demo run 3, started by ada 10 minutes ago: the hive reviews reset-3, which puts the starting files back.",
+		);
 	});
 });

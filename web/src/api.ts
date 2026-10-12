@@ -549,7 +549,7 @@ export const api = {
 	/** Every repo with its counts, for the Repositories list and the Inbox. The server keeps them, so it's one read. */
 	summaries: () => call<Summaries>("GET", "/summaries"),
 	snapshot: (repo: string) => call<RepoSnapshot>("GET", `/repos/${repoPath(repo)}`),
-	/** The demo run that made a repo, for its Hive tab's banner (404 when none did). */
+	/** The latest demo run on a repo, for its Hive tab's banner (404 unless it's the demo repo). */
 	demoRun: (repo: string) => call<DemoRunStatus>("GET", `/demo/runs/${repoPath(repo)}`),
 	audit: (repo: string) => call<RepoAudit>("GET", `/repos/${repoPath(repo)}/audit`),
 	history: (repo: string, branch: string) =>
@@ -607,6 +607,10 @@ export const api = {
 /** A Honeycomb demo run, as GET /demo/runs/:owner/:name answers (see the server's src/demo/run.ts). */
 export interface DemoRunStatus {
 	id: string;
+	/** Its place among all runs. */
+	number: number;
+	/** The change putting the starting files back, until it lands. */
+	reset?: string;
 	fullName: string;
 	by: string;
 	startedAt: number;
@@ -639,7 +643,7 @@ export interface HiveStatus {
 	working: boolean;
 }
 
-/** Demo runs: GitHive's hosted agents build Honeycomb in a new public repo of the caller's own. */
+/** Demo runs: GitHive's hosted agents build Honeycomb again in GitHive's one public demo repo. */
 export const demo = {
 	start: () => call<{ id: string; repo: string }>("POST", "/demo/runs"),
 	/** The run going now, if any, and the latest ones. */

@@ -1,6 +1,9 @@
-// A Honeycomb demo run: GitHive's hosted agents (see hosted-agents.ts) build the game in a fresh public repo while
-// whoever started it watches the Hive tab. These are the run's limits and the small decisions it makes, kept apart to
-// be tested.
+// A Honeycomb demo run: GitHive's hosted agents (see hosted-agents.ts) build the game in the one public demo repo
+// while whoever started it watches its Hive tab. Each run puts the starting files back first, as a change the hive
+// reviews, then builds the game again on top, so the repo's history holds every run. These are the run's limits and
+// the small decisions it makes, kept apart to be tested.
+
+import type { DemoPiece } from "./backlog";
 
 /** How many of GitHive's hosted agents a run starts. */
 export const DEMO_AGENTS = 6;
@@ -22,6 +25,10 @@ export const SLOT_LAPSES_MS = RUN_GIVES_UP_MS + 5 * 60_000;
 
 export interface RunState {
 	id: string;
+	/** Its place among all runs, which names its changes. */
+	number: number;
+	/** The change that puts the starting files back, until it lands; a repo's first run needs none. */
+	reset?: string;
 	repo: string;
 	fullName: string;
 	/** Who started it, as the dashboard names them. */
@@ -33,6 +40,7 @@ export interface RunState {
 
 export interface RunSlot {
 	id: string;
+	number: number;
 	fullName: string;
 	since: number;
 }
@@ -43,6 +51,8 @@ export interface Registry {
 	day: { date: string; started: number };
 	/** The latest runs, newest first. */
 	recent: RunSlot[];
+	/** Runs ever started. */
+	total?: number;
 }
 
 const dayOf = (now: number) => new Date(now).toISOString().slice(0, 10);
@@ -64,6 +74,7 @@ export function started(registry: Registry, slot: RunSlot): Registry {
 		running: slot,
 		day: { date, started: before + 1 },
 		recent: [slot, ...registry.recent.filter((run) => run.id !== slot.id)].slice(0, 20),
+		total: slot.number,
 	};
 }
 
@@ -74,10 +85,25 @@ export function ended(registry: Registry, id: string): Registry {
 	return rest;
 }
 
-/** A demo repo's name: honeycomb and when it started, unique enough for a handful a day. */
-export function repoName(now: number) {
-	const stamp = new Date(now).toISOString().slice(0, 16).replace(/[-:T]/g, "");
-	return `honeycomb-${stamp}`;
+/** The next run's number. */
+export const nextRun = (registry: Registry) => (registry.total ?? 0) + 1;
+
+/** The change that puts run `number`'s starting files back. */
+export const resetChange = (number: number) => `reset-${number}`;
+
+/**
+ * The backlog for run `number`: its pieces, with ids of their own, since a piece's id is the change that builds it and
+ * a change that merged in an earlier run would count this run's piece as done.
+ */
+export function runBacklog(pieces: DemoPiece[], number: number) {
+	const own = (id: string) => `${id}-${number}`;
+	return pieces.map(({ id, title, intent, paths, after }) => ({
+		id: own(id),
+		title,
+		intent,
+		paths,
+		...(after ? { after: after.map(own) } : {}),
+	}));
 }
 
 /** How a run ends, if it has: done once every agent has stopped, stopped once it's long past its time. */

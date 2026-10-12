@@ -1251,13 +1251,22 @@ them as they accept GitHive's reviewers. Each votes under its own identity, so
 two of them approving one change count as two approvals.
 
 **The demo run.** "Start a demo run" on the dashboard (`POST /demo/runs`)
-makes a new public repo in the person's own namespace, `honeycomb-<time>`,
-from `demo/honeycomb/`: a word game's README, which is the contract each
-module keeps, its page shell, a word list and its tests. The repo requires one
-approval and `npm test` before landing, and its backlog has 13 pieces
-(`src/demo/backlog.ts`). It then starts six hosted agents on the repo for 45
+builds Honeycomb, a small word game, in one public repo, named by `DEMO_REPO`
+(`src/demo/demo-repo.ts`). The first run makes it from `demo/honeycomb/`: the
+game's README, which is the contract each module keeps, its page shell, a word
+list and its tests, requiring one approval and `npm test` before landing.
+Every later run starts over on top of the last, so nothing is force-pushed and
+the history keeps every run. It stops the last run's agents, releases the
+claims GitHive's agents still hold (as those agents), and takes the demo's
+pieces out of the backlog. Then it puts the starting files back as a change,
+`reset-<n>`, claiming every top-level path, which the hive reviews like any
+other and the run merges once approved. The run's 13 pieces
+(`src/demo/backlog.ts`) go into the backlog with the run's number in their ids
+(`board-3`), since a piece's id is the change that builds it and an earlier
+run's merge would count it as done. They wait on the reset's claim, so the
+hive builds on the starting files. Six hosted agents start with it, for 45
 minutes, and the repo's Hive tab shows how the run is going. Any signed-in
-person may start one, since the run spends a bounded amount: one run goes at a
+person may start one, since a run spends a bounded amount: one run goes at a
 time, 100 a day across everyone, held by the `DemoRun` registry.
 
 **The builder.** A hosted agent starts one on each piece it claims, and

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { DemoRunStatus } from "../api";
 import { usePoll } from "../hooks/usePoll";
 import { messageOf } from "../lib/errors";
@@ -7,8 +7,8 @@ import { timeAgo } from "../lib/relativeTime";
 import { href } from "../lib/routes";
 import "./DemoRun.css";
 
-// Honeycomb demo runs on the dashboard: the card that starts one, and the banner on a demo repo's Hive tab that says how
-// it's going. A run is GitHive's own agents building a small word game in a new public repo of the person's own.
+// Honeycomb demo runs on the dashboard: the card that starts one, and the banner on the demo repo's Hive tab that says
+// how it's going. A run is GitHive's own agents building a small word game again, in GitHive's one public demo repo.
 
 export interface DemoApi {
 	start(): Promise<{ id: string; repo: string }>;
@@ -37,9 +37,9 @@ export function DemoCard({ api }: { api: DemoApi }) {
 			<div className="demo-card__body">
 				<h2 id="demo-card-title">Watch a hive build Honeycomb</h2>
 				<p className="muted">
-					Six of GitHive's own agents build a small word game in a new public repo of yours. Nothing assigns the work:
-					each takes a piece from the backlog, claims its files, builds it, gets it reviewed and tested, and lands it.
-					It takes about half an hour, and you can play the game when it's done.
+					Six of GitHive's own agents build a small word game in GitHive's public demo repo, starting over from its
+					first files. Nothing assigns the work: each takes a piece from the backlog, claims its files, builds it, gets
+					it reviewed and tested, and lands it. It takes about half an hour, and you can play the game when it's done.
 				</p>
 				{error ? (
 					<p className="error" role="alert">
@@ -67,19 +67,26 @@ export function runWords(run: DemoRunStatus, now = Date.now()): string {
 	const finished = run.agents.reduce((sum, agent) => sum + agent.finished.length, 0);
 	const done = `${finished} of ${counted(run.pieces, "piece")} finished`;
 	if (run.status === "running") {
+		const started = `Demo run ${run.number}, started by ${run.by} ${timeAgo(new Date(run.startedAt).toISOString(), now)}`;
+		if (run.reset) return `${started}: the hive reviews ${run.reset}, which puts the starting files back.`;
 		const building = run.agents.filter((agent) => agent.change).length;
 		const reviewing = run.agents.filter((agent) => agent.reviewing).length;
-		const started = timeAgo(new Date(run.startedAt).toISOString(), now);
-		return `A demo run, started by ${run.by} ${started}: ${building} building, ${reviewing} reviewing, ${done}.`;
+		return `${started}: ${building} building, ${reviewing} reviewing, ${done}.`;
 	}
 	const ended = run.endedAt ? ` ${timeAgo(new Date(run.endedAt).toISOString(), now)}` : "";
-	if (run.status === "done") return `This demo run finished${ended}: ${done}.`;
-	return `This demo run was stopped${ended}, long past its time: ${done}.`;
+	if (run.status === "done") return `Demo run ${run.number} finished${ended}: ${done}.`;
+	return `Demo run ${run.number} was stopped${ended}, long past its time: ${done}.`;
 }
 
-/** The banner on a demo repo's Hive tab; nothing for a repo no demo run made. */
+/** The banner on the demo repo's Hive tab; nothing for any other repo. */
 export function DemoBanner({ repo, load }: { repo: string; load: (repo: string) => Promise<DemoRunStatus> }) {
-	const run = usePoll(`demo:${repo}`, () => load(repo), 15_000);
+	// Any other repo answers 404 at once: stop asking.
+	const [absent, setAbsent] = useState(false);
+	const run = usePoll(absent ? null : `demo:${repo}`, () => load(repo), 15_000);
+	const missing = !!run.error && !run.data;
+	useEffect(() => {
+		if (missing) setAbsent(true);
+	}, [missing]);
 	if (!run.data) return null;
 	return (
 		<p className={`callout demo-banner demo-banner--${run.data.status}`} role="status">

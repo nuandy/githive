@@ -23,6 +23,8 @@
 		"ACCESS_AUD": "40a0a047944251bc67f3291f138b617f8cdb68f342635bd15582a6d770d1fd52",
 		// The Artifacts namespace below, by name: push events come from every namespace in the account, and only its own count.
 		"ARTIFACTS_NAMESPACE": "blueprint",
+		// The one public repo demo runs build Honeycomb in (src/demo/demo-repo.ts); the first run makes it.
+		"DEMO_REPO": "nuandy/honeycomb",
 	},
 	// The dashboard (web/, built with `npm run build:web`). The Worker runs first
 	// so API routes win; anything else falls through to these files.

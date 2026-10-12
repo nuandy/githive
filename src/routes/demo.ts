@@ -1,42 +1,32 @@
 import type { Hono } from "hono";
-import { type Org, OrgStore } from "../auth/orgs";
-import { ensureRepo, remoteFor } from "../artifacts";
-import { demoContext } from "../demo/demo-run";
 import { BACKLOG } from "../demo/backlog";
-import { repoName } from "../demo/run";
-import { TEMPLATE_FILES } from "../demo/template-files";
+import { DEMO_AGENT, clearLastRun, demoContext, demoRepo, demoRepoName, startReset } from "../demo/demo-repo";
+import { runBacklog } from "../demo/run";
 import { fail, statusOf } from "../errors";
-import { writeFirstCommit } from "../repo-init";
 import { rpc } from "../rpc";
 import { callTool } from "../toolkit/mcp";
 import type { AppEnv } from "./shared";
 
-// Honeycomb demo runs, for anyone signed in: GitHive's hosted agents build a small word game in a fresh public repo of
-// the person's own, while they watch its Hive tab (see demo/demo-run.ts). One runs at a time and up to 100 a day, since
-// every run spends GitHive's model account.
-
-/** The settings a demo repo starts with: one approval from GitHive's reviewers, and the game's tests before landing. */
-const DEMO_SETTINGS = { required: 1, verify: ["npm test"] };
+// Honeycomb demo runs, for anyone signed in: GitHive's hosted agents build a small word game in the one public demo
+// repo while they watch its Hive tab (see demo/demo-repo.ts and demo/demo-run.ts). One runs at a time and up to 100 a
+// day, since every run spends GitHive's model account.
 
 export function demoRoutes(app: Hono<AppEnv>) {
 	app.post("/demo/runs", async (c) => {
 		const principal = c.get("principal");
 		if (principal?.kind !== "user") fail(403, "a demo run is started by a person, signed in to GitHive");
-		const user = principal.user;
-		const org = await new OrgStore(c.env.DB).personalOrg(user);
-		const now = Date.now();
-		const name = repoName(now);
-		const id = `${org.slug}--${name}`;
-		const fullName = `${org.slug}/${name}`;
+		const { fullName } = demoRepoName(c.env);
 		const registry = c.env.DEMO_RUN.getByName("registry");
-		const reserved = await rpc(registry.reserve({ id, fullName, since: now }));
-		if (reserved.refused) fail(429, reserved.refused);
+		const reserved = await rpc(registry.reserve({ fullName, since: Date.now() }));
+		if (!reserved.slot) fail(429, reserved.refused ?? "a demo run can't start now");
+		const { id, number } = reserved.slot;
 		try {
-			await setUpRepo(c.env, org, user.id, name, id);
-			await rpc(c.env.DEMO_RUN.getByName(`run:${id}`).begin({ id, repo: id, fullName, by: user.handle }));
+			const run = await setUpRun(c.env, number);
+			const begin = { id, number, repo: run.repo, fullName, by: principal.user.handle, ...run.reset };
+			await rpc(c.env.DEMO_RUN.getByName(`run:${id}`).begin(begin));
 		} catch (err) {
 			await rpc(registry.release(id)).catch(() => undefined);
-			console.error(`setting up demo run ${fullName} failed`, statusOf(err).message);
+			console.error(`setting up demo run ${number} failed`, statusOf(err).message);
 			throw err;
 		}
 		return c.json({ id, repo: fullName }, 201);
@@ -50,31 +40,26 @@ export function demoRoutes(app: Hono<AppEnv>) {
 		return c.json({ running: registry.running ?? null, recent: registry.recent, newest: run });
 	});
 
+	// The latest run on a repo, for its Hive tab's banner: none unless it's the demo repo and a run has started.
 	app.get("/demo/runs/:owner/:name", async (c) => {
-		const id = `${c.req.param("owner")}--${c.req.param("name")}`;
-		const run = await rpc(c.env.DEMO_RUN.getByName(`run:${id}`).status());
-		if (!run) fail(404, `no demo run ${c.req.param("owner")}/${c.req.param("name")}`);
+		const fullName = `${c.req.param("owner")}/${c.req.param("name")}`;
+		const registry = await rpc(c.env.DEMO_RUN.getByName("registry").runs());
+		const newest = registry.recent.find((run) => run.fullName === fullName);
+		const run = newest ? await rpc(c.env.DEMO_RUN.getByName(`run:${newest.id}`).status()) : null;
+		if (!run) fail(404, `no demo run on ${fullName}`);
 		return c.json({ ...run, pieces: BACKLOG.length });
 	});
 }
 
-/** The demo's repo, public in the person's namespace: the game's starting files, its settings and its backlog. */
-async function setUpRepo(env: Env, org: Org, userId: string, name: string, id: string) {
-	await ensureRepo(env.ARTIFACTS, id, `${org.slug}/${name}`);
-	await writeFirstCommit(await remoteFor(env.ARTIFACTS, id, "write"), TEMPLATE_FILES, {
-		name: "githive-demo",
-		email: "githive-demo@agents.githive.app",
-		message: "Lay out Honeycomb: the rules, each module's contract, the page shell and the word list",
-	});
-	await new OrgStore(env.DB).addRepo(org, name, userId, { visibility: "public", id });
-	const ctx = demoContext(env);
-	await callTool("settings", { repo: id, ...DEMO_SETTINGS }, ctx);
-	const items = BACKLOG.map(({ id: piece, title, intent, paths, after }) => ({
-		id: piece,
-		title,
-		intent,
-		paths,
-		...(after ? { after } : {}),
-	}));
-	await callTool("add_work", { repo: id, agent: "githive-demo", items }, ctx);
+/** The demo repo ready for run `number`: the last run cleared and a reset started, then this run's backlog. */
+async function setUpRun(env: Env, number: number) {
+	const repo = await demoRepo(env);
+	let reset: string | undefined;
+	if (!repo.made) {
+		await clearLastRun(env, repo.id, number);
+		reset = await startReset(env, repo.id, number);
+	}
+	const items = runBacklog(BACKLOG, number);
+	await callTool("add_work", { repo: repo.id, agent: DEMO_AGENT, items }, demoContext(env));
+	return { repo: repo.id, reset: reset ? { reset } : {} };
 }

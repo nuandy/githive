@@ -89,20 +89,21 @@ export class HostedAgent extends DurableObject<Env> {
 
 	// An agent.
 
-	/** Starts this agent's loop, or gives one already working the new end. */
+	/** Starts this agent's loop afresh, or gives one already working the new end. */
 	async work(input: { repo: string; name: string; until: number; index: number }) {
 		const kept = await this.ctx.storage.get<HostedAgentState>("agent");
 		if (kept && !kept.done) {
 			await this.ctx.storage.put("agent", { ...kept, until: Math.max(kept.until, input.until) });
 			return;
 		}
+		// A stopped agent's account was for its last start: what it tried then may be free to try again.
 		const fresh: HostedAgentState = {
 			repo: input.repo,
 			name: input.name,
 			until: input.until,
-			tried: kept?.tried ?? [],
-			finished: kept?.finished ?? [],
-			reviewed: kept?.reviewed ?? 0,
+			tried: [],
+			finished: [],
+			reviewed: 0,
 			failing: 0,
 			done: false,
 		};

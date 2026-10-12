@@ -16,7 +16,7 @@ export interface HiveApi {
 	tree(repo: string, ref?: string): Promise<RepoTree>;
 	landing?: (repo: string, branch: string) => Promise<RepoLanding>;
 	events?: (repo: string) => Promise<{ events: HiveEvent[] }>;
-	/** The demo run that made the repo, if one did. */
+	/** The latest demo run on the repo, if it's the demo repo. */
 	demoRun?: (repo: string) => Promise<DemoRunStatus>;
 }
 
@@ -45,7 +45,7 @@ export function HiveTab({
 	const loadDemo = api.demoRun;
 	return (
 		<>
-			{loadDemo && isDemoRepo(repo) ? <DemoBanner repo={repo} load={loadDemo} /> : null}
+			{loadDemo ? <DemoBanner repo={repo} load={loadDemo} /> : null}
 			<Hive
 				repo={repo}
 				branch={branch}
@@ -62,9 +62,6 @@ export function HiveTab({
 		</>
 	);
 }
-
-/** Whether a repo was made by a demo run, which names it honeycomb-<when it started>. */
-export const isDemoRepo = (repo: string) => /\/honeycomb-\d{12}$/.test(repo);
 
 export interface HiveProps {
 	repo: string;

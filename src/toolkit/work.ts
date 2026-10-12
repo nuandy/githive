@@ -71,6 +71,20 @@ export async function addWorks(log: CasLog<Work>, by: string, items: Omit<WorkIt
 	return { ok: outcome.ok, added, already };
 }
 
+/** Takes every piece `by` added out of the backlog, with the reason; nothing to take is no write. */
+export function withdrawWork(log: CasLog<Work>, by: string, reason: string) {
+	return appendRecord<Work, string>(
+		log,
+		by,
+		() => ({ items: [] }),
+		(state) => {
+			const kept = state.items.filter((item) => item.by !== by);
+			if (kept.length === state.items.length) return { refused: `${by} has nothing in the backlog` };
+			return { state: { items: kept }, text: `${by} takes its pieces out of the backlog: ${reason}` };
+		},
+	);
+}
+
 export interface WorkInput {
 	agent: string;
 	/** The caller's verified identity, to tell whether it holds a role. */
