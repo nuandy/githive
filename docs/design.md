@@ -1235,11 +1235,15 @@ toolkit, as itself:
 
 1. Its own change: once `status` shows it approved, `merge`; once it's out of
    the claims (landed or given up), it's finished.
-2. A review: the first one `reviews` offers it that no other agent has taken
-   meanwhile. It takes the change's `credentials`, which holds the review as
-   its own, and starts a hosted reviewer that votes as the agent, stamped
-   `service:<name>`, and merges the change as soon as it approves. The agent
-   waits for that vote, or 20 minutes, before it takes more work.
+2. A review: the first one `reviews` offers it that no other agent has
+   taken meanwhile. It takes the change's `credentials`, which holds the
+   review as its own, and starts a hosted reviewer that votes as the agent,
+   stamped `service:<name>`, and merges the change as soon as it approves. The
+   agent waits for that vote before it takes more work. If its reviewer logs
+   no step for 3 minutes, or hasn't voted in 6, the agent stops it and gives
+   the review up, dropping its own hold at once so another agent can take the
+   review instead of waiting out the hold's 15 minutes. It touches only its
+   own review, so nothing here decides for anyone else.
 3. The backlog: the first free piece `backlog` lists that it hasn't tried
    already. It claims the piece's paths and starts a hosted builder on it.
    The builder doesn't start reviewers when it finishes: the hive reviews

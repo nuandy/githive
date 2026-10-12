@@ -89,13 +89,27 @@ export async function holdReview(
 	return outcome.ok;
 }
 
-/** Shortens a hold after its agent votes, so it lapses once the vote is visible everywhere. */
-export async function releaseReview(log: CasLog<ReviewHolds>, key: string, agent: string, now = () => Date.now()) {
+/**
+ * Shortens a hold after its agent votes, so it lapses once the vote is visible everywhere; or, when the agent gave
+ * the review up (`gaveUp`), drops it at once, so another agent can take the review.
+ */
+export async function releaseReview(
+	log: CasLog<ReviewHolds>,
+	key: string,
+	agent: string,
+	{ now = () => Date.now(), gaveUp = false }: { now?: () => number; gaveUp?: boolean } = {},
+) {
 	await appendRecord<ReviewHolds, "none">(log, AUTHOR, empty, (state) => {
 		const holds = live(state.holds, now());
 		const until = holds[key]?.[agent];
+		if (!until) return { refused: "none" };
+		if (gaveUp) {
+			const { [agent]: _, ...others } = holds[key]!;
+			holds[key] = others;
+			return { state: { ...state, holds }, text: `${agent} gave up the review of ${key}` };
+		}
 		const soon = new Date(now() + VOTED_HOLD_MS).toISOString();
-		if (!until || until <= soon) return { refused: "none" };
+		if (until <= soon) return { refused: "none" };
 		holds[key] = { ...holds[key], [agent]: soon };
 		return { state: { ...state, holds }, text: `${agent} voted on ${key}` };
 	});
@@ -160,7 +174,7 @@ export function reviewHolds(logs: ReviewLogs): NonNullable<ToolContext["reviews"
 			return Object.assign({}, ...read);
 		},
 		hold: async (repo, key, agent, needed) => holdReview(await holdsFor(repo, key), key, agent, needed),
-		release: async (repo, key, agent) => releaseReview(await holdsFor(repo, key), key, agent),
+		release: async (repo, key, agent, gaveUp) => releaseReview(await holdsFor(repo, key), key, agent, { gaveUp }),
 		waits: async (repo, keys) => roleWaits(await logs.waits(repo), keys),
 		told: async (repo, key) => roleWaitTold(await logs.waits(repo), key),
 	};

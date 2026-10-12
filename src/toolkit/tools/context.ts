@@ -172,7 +172,8 @@ export interface ToolContext {
 		/** The holds on these heads, by holdKey; on every head when none are named. */
 		held(repo: string, heads?: string[]): Promise<Record<string, string[]>>;
 		hold(repo: string, head: string, agent: string, needed: number): Promise<boolean>;
-		release(repo: string, head: string, agent: string): Promise<void>;
+		/** Shortens an agent's hold once it has voted, or (gaveUp) once it has given the review up. */
+		release(repo: string, head: string, agent: string, gaveUp?: boolean): Promise<void>;
 		/** When each waiting blocking-role review (by holdKey) was first seen, and whether people were told. */
 		waits?(repo: string, keys: string[]): Promise<Record<string, { since: number; told?: boolean }>>;
 		told?(repo: string, key: string): Promise<void>;

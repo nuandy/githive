@@ -29,9 +29,18 @@ describe("review holds, as a record", () => {
 		expect(await holdReview(log, "h1#review", "agent-b", 2, at(0))).toBe(true);
 		expect(await heldReviews(log, t0)).toEqual({ "h1#review": ["agent-a", "agent-b"] });
 		// Voted: held a minute more, until the vote shows everywhere, then gone.
-		await releaseReview(log, "h1#review", "agent-a", at(0));
+		await releaseReview(log, "h1#review", "agent-a", { now: at(0) });
 		expect(await heldReviews(log, t0 + 30_000)).toEqual({ "h1#review": ["agent-a", "agent-b"] });
 		expect(await heldReviews(log, t0 + 61_000)).toEqual({ "h1#review": ["agent-b"] });
+	});
+
+	it("drops a hold at once when its agent gives the review up, so another can take it", async () => {
+		const log = new MemoryLog<ReviewHolds>();
+		const t0 = 1_000_000;
+		await holdReview(log, "h1#review", "agent-a", 1, () => t0);
+		await releaseReview(log, "h1#review", "agent-a", { now: () => t0, gaveUp: true });
+		expect(await heldReviews(log, t0)).toEqual({});
+		expect(await holdReview(log, "h1#review", "agent-b", 1, () => t0)).toBe(true);
 	});
 
 	it("lets holds run out, and two agents asking at once can't both take the last one", async () => {

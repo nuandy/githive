@@ -4,7 +4,7 @@ import { statusOf } from "./errors";
 import { callTool } from "./toolkit/mcp";
 import { changeRepoName, startHostedBuilder, startHostedReviewers, toolContextFor } from "./toolkit/env";
 import { hiveAgentNames, hiveIdentity } from "./toolkit/hive-agents";
-import type { BacklogView, ReviewOption } from "./toolkit/work";
+import { type BacklogView, type ReviewOption, holdKey } from "./toolkit/work";
 
 // GitHive's hosted agents as members of a repo's hive. Each is a Durable Object of its own ("agent:<repo>:<name>")
 // running the loop any agent follows, on its own alarm: its own change first (merge it once approved), then a review
@@ -16,8 +16,14 @@ import type { BacklogView, ReviewOption } from "./toolkit/work";
 /** How often an agent takes a turn of its loop. */
 export const AGENT_TICK_MS = 10_000;
 
-/** A review an agent started that hasn't voted by then is left, so the agent can go on. */
-export const REVIEW_LAPSES_MS = 20 * 60_000;
+/** A review an agent started that hasn't voted by then is given up, so the agent can go on. */
+export const REVIEW_LAPSES_MS = 6 * 60_000;
+
+/**
+ * A reviewer that has logged nothing for this long has stalled: its agent gives the review up and frees its hold, so
+ * another agent can take it. Each step a reviewer takes (a command, a tool call) is logged within this, by far.
+ */
+export const REVIEW_STALLS_MS = 3 * 60_000;
 
 /** Turns in a row an agent's loop may fail before it stops. */
 const FAILING_MOST = 15;
@@ -53,6 +59,14 @@ export interface Hive {
 }
 
 type Call = (name: string, args?: Record<string, unknown>) => Promise<unknown>;
+
+type Reviewing = NonNullable<HostedAgentState["reviewing"]>;
+
+/** Whether an agent's reviewer is still at work, and when it last logged a step. */
+interface ReviewerProgress {
+	working: boolean;
+	lastActive: number;
+}
 
 export class HostedAgent extends DurableObject<Env> {
 	// A repo's hive.
@@ -142,11 +156,27 @@ export class HostedAgent extends DurableObject<Env> {
 		return startHostedReviewers(this.env, review);
 	}
 
-	/** Whether the agent's reviewer has voted or given up (tests answer it instead). */
-	protected async reviewerDone(repo: string, reviewing: NonNullable<HostedAgentState["reviewing"]>, agent: string) {
+	/** The agent's reviewer: whether it's still at work, and when it last logged a step (tests answer it instead). */
+	protected async reviewerProgress(repo: string, reviewing: Reviewing, agent: string): Promise<ReviewerProgress> {
+		const reviewer = await this.reviewerOf(repo, reviewing, agent).state();
+		if (!reviewer) return { working: false, lastActive: reviewing.since };
+		const working = reviewer.status === "queued" || reviewer.status === "working";
+		const lastLogged = reviewer.log.at(-1)?.at;
+		return { working, lastActive: lastLogged ? Date.parse(lastLogged) : reviewing.since };
+	}
+
+	/** Gives up the agent's review: stops its reviewer, if it still can, and frees its hold for another agent. */
+	protected async giveUpReview(repo: string, reviewing: Reviewing, agent: string) {
+		await this.reviewerOf(repo, reviewing, agent)
+			.cancel("its agent gave the review up")
+			.catch(() => undefined);
+		const ctx = toolContextFor(this.env, hiveIdentity(agent), { hosted: true });
+		await ctx.reviews?.release(repo, holdKey(reviewing.head, reviewing.role), agent, true);
+	}
+
+	private reviewerOf(repo: string, reviewing: Reviewing, agent: string) {
 		const name = reviewerName(changeRepoName(repo, reviewing.change), `${reviewing.role}:${agent}`, reviewing.head);
-		const reviewer = await this.env.REVIEWER.getByName(name).state();
-		return reviewer?.status === "done" || reviewer?.status === "failed";
+		return this.env.REVIEWER.getByName(name);
 	}
 
 	/** The instance for one of a repo's agents (tests stand in for it). */
@@ -201,9 +231,23 @@ export class HostedAgent extends DurableObject<Env> {
 	}
 
 	/** A review is over once its reviewer has voted or failed, or once it has taken too long. */
+	/**
+	 * A review is over once its reviewer has voted or failed. One that lapsed, or whose reviewer stalled, is given up,
+	 * so another agent can take it instead of waiting out the hold.
+	 */
 	private async reviewOver(state: HostedAgentState, now: number) {
-		if (now - state.reviewing!.since > REVIEW_LAPSES_MS) return true;
-		return this.reviewerDone(state.repo, state.reviewing!, state.name);
+		const reviewing = state.reviewing!;
+		const progress = await this.reviewerProgress(state.repo, reviewing, state.name);
+		if (!progress.working) return true;
+		const lapsed = now - reviewing.since > REVIEW_LAPSES_MS;
+		const stalled = now - progress.lastActive > REVIEW_STALLS_MS;
+		const givesUp = lapsed || stalled;
+		if (!givesUp) return false;
+		console.error(
+			`${state.name}: gave up reviewing ${reviewing.change}, its reviewer ${lapsed ? "lapsed" : "stalled"}`,
+		);
+		await this.giveUpReview(state.repo, reviewing, state.name);
+		return true;
 	}
 
 	/** Takes the first review offered it that no other agent has taken meanwhile, under its own name. */
