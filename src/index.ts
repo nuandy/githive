@@ -14,6 +14,7 @@ import { demoRoutes } from "./routes/demo";
 import { hostedAgentRoutes } from "./routes/hosted-agents";
 import { mcpResponse, mcpRoutes } from "./routes/mcp";
 import { repoRoutes } from "./routes/repos";
+import { siteRoutes } from "./routes/site";
 import type { AppEnv } from "./routes/shared";
 
 // The Worker: sign-in and request logging around every route, the route groups in src/routes, and MCP over OAuth.
@@ -34,7 +35,7 @@ export { HostedAgent } from "./hosted-agents";
 const app = new Hono<AppEnv>();
 
 const PUBLIC_PATHS = ["/", "/index.html", "/authorize"];
-const PUBLIC_PREFIXES = ["/assets/", "/fonts/", "/auth/", "/.well-known/"];
+const PUBLIC_PREFIXES = ["/assets/", "/fonts/", "/auth/", "/.well-known/", "/site/"];
 
 const SAFE_METHODS = ["GET", "HEAD", "OPTIONS"];
 
@@ -113,6 +114,7 @@ app.get("/api", (c) =>
 			"GET  /repos/:owner/:name/changes/:change  (one change's history)",
 			"POST /repos/:owner/:name/changes/:change/votes {role, verdict, evidence}  (a person's vote; review)",
 			"GET  /repos/:owner/:name/audit | /landing?branch= | /tree?ref= | /file?path=&ref= | /live (WebSocket)",
+			"GET  /site/:owner/:name/[@:change/]path  (a public repo's static site: its default branch, or a change)",
 			"PATCH /repos/:owner/:name {visibility}, GET|PUT|DELETE " +
 				"/repos/:owner/:name/collaborators[/:handle]  (admin)",
 			"DELETE /repos/:owner/:name  (admin)",
@@ -126,6 +128,7 @@ repoRoutes(app);
 dashboardRoutes(app);
 demoRoutes(app);
 hostedAgentRoutes(app);
+siteRoutes(app);
 mcpRoutes(app);
 adminRoutes(app);
 

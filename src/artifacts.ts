@@ -98,6 +98,26 @@ async function blobBytes(repo: ArtifactsRepo, hash: string, maxBytes = Infinity)
 	return new Uint8Array(await blob.arrayBuffer());
 }
 
+/** The most a file served from a repo may weigh. */
+const FILE_MOST = 10 * 1024 * 1024;
+
+/**
+ * A file's bytes at `ref` (a branch, tag or commit) through the Artifacts API, null if the ref or path has no file,
+ * or "too big" past FILE_MOST.
+ */
+export async function fileAt(artifacts: Artifacts, name: string, ref: string, path: string) {
+	return withRepo(artifacts, name, (repo) =>
+		retryArtifacts(() =>
+			call("readFile", name, async (): Promise<Uint8Array | null | "too big"> => {
+				const blob = await rpc(repo.readFile({ ref, path }));
+				if (!blob) return null;
+				if (blob.size > FILE_MOST) return "too big";
+				return new Uint8Array(await blob.arrayBuffer());
+			}),
+		),
+	);
+}
+
 export async function headOf(artifacts: Artifacts, name: string, ref: string) {
 	return withRepo(artifacts, name, async (repo) => {
 		const [latest] = await retryTransient(() => call("log", name, () => rpc(repo.log({ ref, limit: 1 }))));
