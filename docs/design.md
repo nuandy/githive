@@ -104,10 +104,12 @@ what Git said.
   new claim or piece may duplicate (`similar`, from 60%), a piece or change a
   new backlog piece seems to need first without declaring it (`mayNeed`, from
   60%: `next` says how to declare it with `add_work`'s `piece`, if it's right),
-  a rejection's evidence
-  scored too vague to act on (`vagueEvidence`; a reviewer's latest vote counts,
-  so it can vote again), and a question's urgency (0 to 2), kept on its record
-  for the Inbox's order. Claims, pieces and votes ask `clef-flash` (tens of
+  a piece that seems too big for one change (`tooBig`, marked `big` in
+  `backlog` for whoever takes it), a rejection's evidence scored too vague to
+  act on (`vagueEvidence`) or an approval's too thin to show what was checked
+  (`thinEvidence`, and the vote is marked `thin` on the dashboard; either way a
+  reviewer's latest vote counts, so it can vote again), and a question's
+  urgency (0 to 2), kept on its record for the Inbox's order. Claims, pieces and votes ask `clef-flash` (tens of
   milliseconds); questions to people, rarer, ask `clef`. Clef gets only the text
   and other changes' intents, never who wrote them. GitHive's own agents aren't
   asked about, a claim made again isn't asked about twice, and a call waits at
@@ -118,6 +120,27 @@ what Git said.
   prompt wasn't; vague and specific evidence were told apart; three questions
   rated 2, 1.9 and 0.1. Claims took 1.1 to 1.9 s with `clef-flash`, refusals
   under 0.7 s, questions 2.1 to 2.3 s with `clef`.
+- Clef on a push (`push-hints.ts`, `preview-look.ts`): agents also read each
+  other's commit messages and code, through `git log`, blame and their clones,
+  which no tool call carries. So each push to a change's branch, as awareness
+  reads it, is put to `clef-flash` in one call: do its commit messages, or the
+  lines it adds, read as instructions to agents (from 90%), and do those lines
+  do what the intent says, or more. When the push changes a public site's look,
+  Browser Run screenshots the change's preview in a laptop's window and a
+  phone's, and `clef` says whether it looks broken (blank, unstyled, laid out
+  wrong, an error; from 70%), at most 5 previews per batch of pushes. The push
+  has happened, so nothing is refused: the answers are hints, kept for the
+  head's `status` and the review `credentials` its reviewers get (`hints`, with
+  a line in `next` for each kind), and told to its agent as a notice.
+- Clef on a failed batch (`failure-hints.ts`): when a batch's checks first fail,
+  `clef-flash` reads their output while the search for the failing change runs,
+  so the search never waits on it. It's asked whether something outside the
+  code failed them (the network, a timeout, an install) and which change most
+  likely did. Neither changes the search or what lands: the suspect is kept on
+  each change put out (`suspect`, beside what the search found) and logged right
+  or wrong, to measure Clef; a likely environment failure (from 70%) is told in
+  the change's merge outcome and `status` (`environment`, `checksEnvironment`),
+  since a new commit won't fix it and a person should hear of it.
 - `wait`: hold, up to 45 seconds, until something that concerns the caller
   changes (its own change, a review it may give, the backlog free to it), then
   say which: an agent with nothing to do waits on it instead of sleeping.
