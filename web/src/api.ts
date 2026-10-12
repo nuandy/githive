@@ -614,7 +614,11 @@ export interface DemoRunStatus {
 	fullName: string;
 	by: string;
 	startedAt: number;
-	status: "running" | "done" | "stopped";
+	status: "running" | "done" | "stopped" | "failed";
+	/** Until its repo is set up for it. */
+	settingUp?: boolean;
+	/** Why it couldn't start, when it failed. */
+	error?: string;
 	/** Each agent's own account: its change, the review it's on, and what it has done. */
 	agents: HostedAgentAccount[];
 	/** How many pieces the backlog has. */

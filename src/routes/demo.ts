@@ -1,10 +1,9 @@
 import type { Hono } from "hono";
 import { BACKLOG } from "../demo/backlog";
-import { DEMO_AGENT, clearLastRun, demoContext, demoRepo, demoRepoName, setGates, startReset } from "../demo/demo-repo";
-import { runBacklog } from "../demo/run";
+import { repoIdFor } from "../auth/orgs";
+import { demoRepoName } from "../demo/demo-repo";
 import { fail, statusOf } from "../errors";
 import { rpc } from "../rpc";
-import { callTool } from "../toolkit/mcp";
 import type { AppEnv } from "./shared";
 
 // Honeycomb demo runs, for anyone signed in: GitHive's hosted agents build a small word game in the one public demo
@@ -15,20 +14,18 @@ export function demoRoutes(app: Hono<AppEnv>) {
 	app.post("/demo/runs", async (c) => {
 		const principal = c.get("principal");
 		if (principal?.kind !== "user") fail(403, "a demo run is started by a person, signed in to GitHive");
-		const { fullName } = demoRepoName(c.env);
+		const { owner, name, fullName } = demoRepoName(c.env);
 		const registry = c.env.DEMO_RUN.getByName("registry");
 		const reserved = await rpc(registry.reserve({ fullName, since: Date.now() }));
 		if (!reserved.slot) fail(429, reserved.refused ?? "a demo run can't start now");
 		const { id, number } = reserved.slot;
-		try {
-			const run = await setUpRun(c.env, number);
-			const begin = { id, number, repo: run.repo, fullName, by: principal.user.handle, ...run.reset };
-			await rpc(c.env.DEMO_RUN.getByName(`run:${id}`).begin(begin));
-		} catch (err) {
+		// The run sets itself up in its own object, so a request cut short can't leave it half done.
+		const begin = { id, number, repo: repoIdFor(owner, name), fullName, by: principal.user.handle };
+		await rpc(c.env.DEMO_RUN.getByName(`run:${id}`).begin(begin)).catch(async (err) => {
 			await rpc(registry.release(id)).catch(() => undefined);
-			console.error(`setting up demo run ${number} failed`, statusOf(err).message);
+			console.error(`starting demo run ${number} failed`, statusOf(err).message);
 			throw err;
-		}
+		});
 		return c.json({ id, repo: fullName }, 201);
 	});
 
@@ -50,21 +47,4 @@ export function demoRoutes(app: Hono<AppEnv>) {
 		if (!run) fail(404, `no demo run on ${fullName}`);
 		return c.json({ ...run, pieces: BACKLOG.length });
 	});
-}
-
-/** The demo repo ready for run `number`: the last run cleared and its reset pushed, then this run's backlog. */
-async function setUpRun(env: Env, number: number) {
-	const repo = await demoRepo(env);
-	let reset: Awaited<ReturnType<typeof startReset>>;
-	if (!repo.made) {
-		await clearLastRun(env, repo.id, number);
-		reset = await startReset(env, repo.id, number);
-	}
-	const items = runBacklog(BACKLOG, number);
-	await callTool("add_work", { repo: repo.id, agent: DEMO_AGENT, items }, demoContext(env)).catch(async (err) => {
-		// The run won't start, so give the repo its approvals back; the next run releases the reset's claim.
-		if (reset) await setGates(env, repo.id, reset.restore).catch(() => undefined);
-		throw err;
-	});
-	return { repo: repo.id, reset: reset ? { reset: reset.change, restore: reset.restore } : {} };
 }

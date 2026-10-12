@@ -80,6 +80,7 @@ export function runWords(run: DemoRunStatus, now = Date.now()): string {
 	const done = `${finished} of ${counted(run.pieces, "piece")} finished`;
 	if (run.status === "running") {
 		const started = `Demo run ${run.number}, started by ${run.by} ${timeAgo(new Date(run.startedAt).toISOString(), now)}`;
+		if (run.settingUp) return `${started}: setting the repo up for its agents.`;
 		if (run.reset) return `${started}: putting the starting files back (${run.reset}) before its agents start.`;
 		const building = run.agents.filter((agent) => agent.change).length;
 		const reviewing = run.agents.filter((agent) => agent.reviewing).length;
@@ -87,6 +88,8 @@ export function runWords(run: DemoRunStatus, now = Date.now()): string {
 	}
 	const ended = run.endedAt ? ` ${timeAgo(new Date(run.endedAt).toISOString(), now)}` : "";
 	if (run.status === "done") return `Demo run ${run.number} finished${ended}: ${done}.`;
+	if (run.status === "failed")
+		return `Demo run ${run.number} couldn't start${ended}: ${run.error ?? "its repo couldn't be set up"}.`;
 	return `Demo run ${run.number} was stopped${ended}, long past its time: ${done}.`;
 }
 

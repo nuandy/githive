@@ -2,7 +2,7 @@ import { DurableObject } from "cloudflare:workers";
 import { statusOf } from "../errors";
 import type { HostedAgent } from "../hosted-agents";
 import { callTool } from "../toolkit/mcp";
-import { DEMO_AGENT, demoContext } from "./demo-repo";
+import { DEMO_AGENT, demoContext, setUpRun } from "./demo-repo";
 import {
 	type Registry,
 	type RunSlot,
@@ -20,18 +20,26 @@ import {
 
 // Honeycomb demo runs (see run.ts), one class in two parts by instance name:
 // - "registry" holds the limits: one run at a time, up to 100 a day.
-// - "run:<id>" starts GitHive's hosted agents on the demo repo and watches them, to say how the run is going and when
-//   it's over. They're the same agents anyone can add to a repo, and nothing here tells them what to do. A run that
-//   starts with a reset (see demo-repo.ts) merges it first, puts the repo's approvals back, and only then starts them.
+// - "run:<id>" sets the demo repo up for the run, starts GitHive's hosted agents on it and watches them, to say how
+//   the run is going and when it's over. They're the same agents anyone can add to a repo, and nothing here tells
+//   them what to do. A run that starts with a reset (see demo-repo.ts) merges it first, puts the repo's approvals
+//   back, and only then starts them. All of it happens here, on the run's own alarm, not in the request that asked
+//   for the run, so a request cut short leaves nothing half done.
 
 const EMPTY_REGISTRY: Registry = { day: { date: "", started: 0 }, recent: [] };
 
 export class DemoRun extends DurableObject<Env> {
 	// The registry.
 
-	/** Takes the running slot for a new run, numbering it, or says why it can't start. */
+	/**
+	 * Takes the running slot for a new run, numbering it, or says why it can't start. A slot whose run never began, its
+	 * request having failed before it could, holds nothing.
+	 */
 	async reserve(input: Pick<RunSlot, "fullName" | "since">): Promise<{ refused?: string; slot?: RunSlot }> {
-		const registry = (await this.ctx.storage.get<Registry>("registry")) ?? EMPTY_REGISTRY;
+		const kept = (await this.ctx.storage.get<Registry>("registry")) ?? EMPTY_REGISTRY;
+		const holder = kept.running;
+		const neverBegan = holder ? !(await this.runBegan(holder.id)) : false;
+		const registry = neverBegan ? ended(kept, holder!.id) : kept;
 		const reason = refusal(registry, input.since);
 		if (reason) return { refused: reason };
 		const number = nextRun(registry);
@@ -51,15 +59,44 @@ export class DemoRun extends DurableObject<Env> {
 		return (await this.ctx.storage.get<Registry>("registry")) ?? EMPTY_REGISTRY;
 	}
 
+	/** Whether run `id` began (tests answer it instead). */
+	protected async runBegan(id: string) {
+		return this.env.DEMO_RUN.getByName(`run:${id}`).began();
+	}
+
 	// A run.
 
-	/** Starts a run on a repo that's set up already: its agents now, or once its reset has landed. */
-	async begin(input: Pick<RunState, "id" | "number" | "repo" | "fullName" | "by" | "reset" | "restore">) {
+	/** Whether this run has begun. */
+	async began() {
+		return !!(await this.ctx.storage.get<RunState>("run"));
+	}
+
+	/** Begins a run: it sets the demo repo up on its own alarm, at once, then starts its agents. */
+	async begin(input: Pick<RunState, "id" | "number" | "repo" | "fullName" | "by">) {
 		const startedAt = Date.now();
-		const run: RunState = { ...input, startedAt, status: "running" };
-		await this.ctx.storage.put("run", run);
-		if (!run.reset) await this.startAgents(run);
-		await this.ctx.storage.setAlarm(startedAt + this.watchEvery(run));
+		await this.ctx.storage.put("run", { ...input, startedAt, status: "running", settingUp: true } satisfies RunState);
+		await this.ctx.storage.setAlarm(startedAt);
+	}
+
+	/** Sets the demo repo up for run `number` (tests answer it instead). */
+	protected setUp(number: number): Promise<Pick<RunState, "repo" | "reset" | "restore">> {
+		return setUpRun(this.env, number);
+	}
+
+	/** Sets the repo up, then starts the agents, or waits for the reset; a run that can't be set up has failed. */
+	private async setUpThenStart(run: RunState) {
+		try {
+			const { settingUp: _, ...rest } = run;
+			const ready: RunState = { ...rest, ...(await this.setUp(run.number)) };
+			await this.ctx.storage.put("run", ready);
+			if (!ready.reset) await this.startAgents(ready);
+			await this.ctx.storage.setAlarm(Date.now() + this.watchEvery(ready));
+		} catch (err) {
+			const error = statusOf(err).message;
+			console.error(`demo ${run.id}: setting up failed`, error);
+			await this.ctx.storage.put("run", { ...run, status: "failed", error, endedAt: Date.now() } satisfies RunState);
+			await this.env.DEMO_RUN.getByName("registry").release(run.id);
+		}
 	}
 
 	private startAgents(run: RunState) {
@@ -75,7 +112,8 @@ export class DemoRun extends DurableObject<Env> {
 	async status() {
 		const run = await this.ctx.storage.get<RunState>("run");
 		if (!run) return null;
-		if (run.reset) return { ...run, agents: [] };
+		const agentsStarted = !run.settingUp && !run.reset;
+		if (!agentsStarted) return { ...run, agents: [] };
 		const hive = await this.hiveOf(run.repo).status();
 		return { ...run, agents: hive?.agents ?? [] };
 	}
@@ -94,6 +132,7 @@ export class DemoRun extends DurableObject<Env> {
 	async alarm() {
 		const stored = await this.ctx.storage.get<RunState>("run");
 		if (stored?.status !== "running") return;
+		if (stored.settingUp) return this.setUpThenStart(stored);
 		const run = stored.reset ? await this.settleReset(stored) : stored;
 		const hive = await this.hiveOf(run.repo).status();
 		const ending = runEnding(run, hive?.agents ?? [], Date.now());

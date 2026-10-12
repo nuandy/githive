@@ -67,8 +67,13 @@ describe("starting a run over in the one demo repo", () => {
 	});
 });
 
-/** A run over a stand-in for its repo's hosted agents, whose accounts the test sets. */
-function demo() {
+type SetUp = { repo: string; reset?: string; restore?: { required: number; verify: string[] } };
+
+/**
+ * A run over stand-ins for its repo's hosted agents, whose accounts the test sets, and for the repo's setup, which
+ * gives `setUp` (or throws it, when it's an Error).
+ */
+function demo(setUp: SetUp | Error = { repo: "ada--honeycomb" }) {
 	const agents: { name: string; done: boolean }[] = [];
 	const started: unknown[] = [];
 	let stopped = false;
@@ -77,6 +82,10 @@ function demo() {
 	const reset = { claimed: true, merges: 0, settings: [] as unknown[] };
 	const env = { DEMO_RUN: { getByName: () => ({ release: async (id: string) => void released.push(id) }) } };
 	class TestRun extends DemoRun {
+		protected override async setUp() {
+			if (setUp instanceof Error) throw setUp;
+			return setUp;
+		}
 		protected override async callTool(name: string, args: Record<string, unknown>) {
 			if (name === "settings") return void reset.settings.push(args);
 			if (name === "merge") {
@@ -99,21 +108,35 @@ function demo() {
 	return { run, storage, agents, started, released, reset, stopped: () => stopped };
 }
 
-const begin = (run: InstanceType<typeof DemoRun>, reset?: string) =>
-	run.begin({
-		id: "run-1",
-		number: 1,
-		repo: "ada--honeycomb",
-		fullName: "ada/honeycomb",
-		by: "ada",
-		...(reset ? { reset } : {}),
-	});
+/** Begins run 1 and lets its first alarm set it up. */
+async function begin(run: InstanceType<typeof DemoRun>) {
+	await run.begin({ id: "run-1", number: 1, repo: "ada--honeycomb", fullName: "ada/honeycomb", by: "ada" });
+	await run.alarm();
+}
 
 describe("a demo run", () => {
-	it("starts its repo's hosted agents, and is done once each has stopped", async () => {
-		const { run, agents, started, released } = demo();
-		await begin(run);
+	it("sets itself up on its own alarm, not in the request, then starts its agents", async () => {
+		const { run, started } = demo();
+		await run.begin({ id: "run-1", number: 1, repo: "ada--honeycomb", fullName: "ada/honeycomb", by: "ada" });
+		expect(await run.began()).toBe(true);
+		expect(started).toEqual([]);
+		expect((await run.status())?.settingUp).toBe(true);
+		await run.alarm();
 		expect(started).toEqual([{ repo: "ada--honeycomb", count: DEMO_AGENTS, minutes: RUN_MINUTES, by: "ada" }]);
+		expect((await run.status())?.settingUp).toBeUndefined();
+	});
+
+	it("fails, freeing the slot, when its repo can't be set up", async () => {
+		const { run, started, released } = demo(new Error("[409] the reset couldn't claim the repo"));
+		await begin(run);
+		expect(started).toEqual([]);
+		expect(await run.status()).toMatchObject({ status: "failed", error: "the reset couldn't claim the repo" });
+		expect(released).toEqual(["run-1"]);
+	});
+
+	it("is done once each of its agents has stopped", async () => {
+		const { run, agents, released } = demo();
+		await begin(run);
 		agents.push({ name: "githive-forager", done: false }, { name: "githive-scout", done: true });
 		await run.alarm();
 		expect((await run.status())?.status).toBe("running");
@@ -136,37 +159,50 @@ describe("a demo run", () => {
 	});
 
 	it("lands its reset first, gives the repo its approvals back, and only then starts its agents", async () => {
-		const { run, agents, reset, started } = demo();
-		await run.begin({
-			id: "run-2",
-			number: 2,
-			repo: "ada--honeycomb",
-			fullName: "ada/honeycomb",
-			by: "ada",
-			reset: "reset-2",
-			restore: { required: 1, verify: ["npm test"] },
-		});
+		const restore = { required: 1, verify: ["npm test"] };
+		const { run, agents, reset, started } = demo({ repo: "ada--honeycomb", reset: "reset-1", restore });
 		// The last run's agents, all stopped, don't end this one.
 		agents.push({ name: "githive-forager", done: true });
+		await begin(run);
 		expect(started).toEqual([]);
 		await run.alarm();
 		expect(reset.merges).toBe(1);
 		expect((await run.status())?.status).toBe("running");
 		expect(started).toEqual([]);
 		await run.alarm();
-		expect(reset.settings).toEqual([{ repo: "ada--honeycomb", required: 1, verify: ["npm test"] }]);
+		expect(reset.settings).toEqual([{ repo: "ada--honeycomb", ...restore }]);
 		expect(started).toHaveLength(1);
 		expect((await run.status())?.reset).toBeUndefined();
 	});
 
 	it("gives the repo its approvals back if it's stopped before its reset lands", async () => {
-		const { run, storage, reset, stopped } = demo();
-		await begin(run, "reset-1");
-		const state = (await storage.get("run")) as { startedAt: number };
 		const restore = { required: 2, verify: ["npm test"] };
-		await storage.put("run", { ...state, restore, startedAt: state.startedAt - RUN_GIVES_UP_MS - 1 });
+		const { run, storage, reset, stopped } = demo({ repo: "ada--honeycomb", reset: "reset-1", restore });
+		await begin(run);
+		const state = (await storage.get("run")) as { startedAt: number };
+		await storage.put("run", { ...state, startedAt: state.startedAt - RUN_GIVES_UP_MS - 1 });
 		await run.alarm();
 		expect(stopped()).toBe(true);
 		expect(reset.settings).toContainEqual({ repo: "ada--honeycomb", ...restore });
+	});
+});
+
+describe("the registry's running slot", () => {
+	it("is free again when the run holding it never began, its request having failed first", async () => {
+		const registryWith = (began: string[]) => {
+			class TestRegistry extends DemoRun {
+				protected override async runBegan(id: string) {
+					return began.includes(id);
+				}
+			}
+			return new TestRegistry({ storage: new FakeStorage() } as never, {} as never);
+		};
+		const going = registryWith(["run-1"]);
+		expect((await going.reserve({ fullName: "ada/honeycomb", since: NOW })).slot?.id).toBe("run-1");
+		expect((await going.reserve({ fullName: "ada/honeycomb", since: NOW + 1 })).refused).toMatch(/going already/);
+		// Here run-1 never began: the next run takes the slot.
+		const lost = registryWith([]);
+		await lost.reserve({ fullName: "ada/honeycomb", since: NOW });
+		expect((await lost.reserve({ fullName: "ada/honeycomb", since: NOW + 1 })).slot?.id).toBe("run-2");
 	});
 });

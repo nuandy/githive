@@ -1295,7 +1295,11 @@ run's merge would count it as done. The repo's Hive tab shows how the run is
 going. Any signed-in person may start one, since a run spends a bounded
 amount: one run goes at a time, 100 a day across everyone, held by the
 `DemoRun` registry. A run stopped before its reset lands gives the repo its
-approvals back.
+approvals back. The request for a run only takes the registry's running slot
+and begins the run; the run's own object sets the repo up on its alarm, so a
+request cut short leaves nothing half done, and a run that can't be set up
+fails and frees the slot. A slot whose run never began, its request having
+failed first, is free to the next.
 
 **The builder.** A hosted agent starts one on each piece it claims, and
 `build` claims the given paths as `githive-builder`, under a change id made

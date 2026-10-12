@@ -40,7 +40,11 @@ export interface RunState {
 	/** Who started it, as the dashboard names them. */
 	by: string;
 	startedAt: number;
-	status: "running" | "done" | "stopped";
+	status: "running" | "done" | "stopped" | "failed";
+	/** Until its repo is ready: the last run cleared, its reset pushed and its backlog added. */
+	settingUp?: boolean;
+	/** Why it couldn't start, when it failed. */
+	error?: string;
 	endedAt?: number;
 }
 
@@ -120,8 +124,8 @@ export function runBacklog(pieces: DemoPiece[], number: number) {
 
 /** How a run ends, if it has: done once every agent it started has stopped, stopped once it's long past its time. */
 export function runEnding(run: RunState, agents: { done: boolean }[], now: number): "done" | "stopped" | null {
-	// Until its reset lands its agents haven't started, and the hive still lists the last run's.
-	const started = !run.reset;
+	// Until it's set up and its reset lands, its agents haven't started, and the hive still lists the last run's.
+	const started = !run.settingUp && !run.reset;
 	if (started && agents.length && agents.every((agent) => agent.done)) return "done";
 	if (now - run.startedAt > RUN_GIVES_UP_MS) return "stopped";
 	return null;

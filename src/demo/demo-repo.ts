@@ -9,7 +9,8 @@ import { callTool } from "../toolkit/mcp";
 import type { Registry } from "../toolkit/claims";
 import { HOSTED_PREFIX, claimsRef, recordLog, workRef } from "../toolkit/tools/repo";
 import { type Work, withdrawWork } from "../toolkit/work";
-import { type Gates, resetChange } from "./run";
+import { BACKLOG } from "./backlog";
+import { type Gates, resetChange, runBacklog } from "./run";
 import { TEMPLATE_FILES } from "./template-files";
 
 // The one public repo every demo run builds Honeycomb in, named by DEMO_REPO (owner/name). The first run makes it
@@ -131,4 +132,24 @@ export async function resetCommit(project: Remote, number: number, options: { de
 export function topLevel(paths: string[]) {
 	const tops = paths.map((path) => (path.includes("/") ? `${path.slice(0, path.indexOf("/"))}/` : path));
 	return [...new Set(tops)].sort();
+}
+
+/**
+ * The demo repo ready for run `number`: the last run cleared and its reset pushed, then this run's backlog. Returns
+ * the repo, and the reset to land before the agents start with the approvals and checks to put back after it.
+ */
+export async function setUpRun(env: Env, number: number) {
+	const repo = await demoRepo(env);
+	let reset: Awaited<ReturnType<typeof startReset>>;
+	if (!repo.made) {
+		await clearLastRun(env, repo.id, number);
+		reset = await startReset(env, repo.id, number);
+	}
+	const items = runBacklog(BACKLOG, number);
+	await callTool("add_work", { repo: repo.id, agent: DEMO_AGENT, items }, demoContext(env)).catch(async (err) => {
+		// The run won't start, so give the repo its approvals back; the next run releases the reset's claim.
+		if (reset) await setGates(env, repo.id, reset.restore).catch(() => undefined);
+		throw err;
+	});
+	return { repo: repo.id, ...(reset ? { reset: reset.change, restore: reset.restore } : {}) };
 }

@@ -47,6 +47,15 @@ describe("a demo run on the dashboard", () => {
 		);
 	});
 
+	it("says when a run is setting up, and when one couldn't start", () => {
+		expect(runWords(run({ settingUp: true }), NOW)).toBe(
+			"Demo run 3, started by ada 10 minutes ago: setting the repo up for its agents.",
+		);
+		expect(runWords(run({ status: "failed", error: "the reset couldn't claim the repo" }), NOW)).toBe(
+			"Demo run 3 couldn't start: the reset couldn't claim the repo.",
+		);
+	});
+
 	it("says when the hive is reviewing the run's reset, before any piece", () => {
 		expect(runWords(run({ reset: "reset-3" }), NOW)).toBe(
 			"Demo run 3, started by ada 10 minutes ago: putting the starting files back (reset-3) before its agents start.",
