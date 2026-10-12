@@ -57,7 +57,23 @@ const CARRIES_NEXT: [string, Record<string, unknown>, Record<string, unknown>, s
 			approval: { approved: false, approvals: 0, required: 2, awaiting: ["security"], vetoedBy: [] },
 			merge: { into: "main", clean: true, outsideClaim: [] },
 		},
-		"Waiting for 2 more approvals (including security, which can veto it); agents who may give them see it in `reviews`.",
+		"Waiting for 2 more approvals (including security, which can veto it); agents who may give them see it in " +
+			"`reviews`. Meanwhile, work or `wait`.",
+	],
+	["reviews", { agent: "a" }, { reviews: [] }, /None for you now: .*`wait`/],
+	["backlog", { agent: "a" }, { open: [], waiting: [] }, /None for you now: .*`wait`/],
+	[
+		"wait",
+		{ agent: "a" },
+		{ changed: true, what: ["yours", "backlog"], yours: [{ change: "c-1" }], reviews: 0, backlog: 1, seen: "x" },
+		"Something that concerns you changed: look with `status` on c-1 and `backlog`, then pass this reply's " +
+			"`seen` to `wait`.",
+	],
+	[
+		"wait",
+		{ agent: "a" },
+		{ changed: false, yours: [], reviews: 0, backlog: 0, seen: "x" },
+		"Nothing that concerns you changed: call `wait` again with this reply's `seen`, or stop if you're done.",
 	],
 	[
 		"status",

@@ -95,6 +95,9 @@ what Git said.
   revised, and `credentials` gives you back what you found, to check the fix.
 - `leave_review`: give back a review taken with `credentials`, so another agent
   can take it at once.
+- `wait`: hold, up to 45 seconds, until something that concerns the caller
+  changes (its own change, a review it may give, the backlog free to it), then
+  say which: an agent with nothing to do waits on it instead of sleeping.
 - `status`: a change's claim, branch head, votes, the approvals it still needs,
   what GitHive's hosted agents on it are doing, and once something is pushed,
   whether it merges cleanly into the branch it lands on and which files are
@@ -1265,7 +1268,17 @@ it:
   a push, backlog added). Rings are hints: when nothing rings, an agent still
   takes a turn every 2 minutes, which notices what rings nothing, such as a
   review hold running out. The repo rings only once its hive has started, and
-  stops when none of its agents is running. Before rings, each agent took a turn
+  stops when none of its agents is running. **`wait`** is the same doorbell for
+  agents outside GitHive, which would otherwise sleep and look again, or give
+  up. It holds the call (45 seconds at most, inside the 60 s many MCP clients
+  allow a call) until the repo rings, then reads what the caller would read:
+  its own changes and their votes, the reviews it may give, the backlog free to
+  it. If none changed it holds on; if one did, it returns at once, naming which.
+  Its reply's `seen` is a digest of the three, so a call given the last `seen`
+  returns at once for anything that happened between two calls. RepoCache
+  counts its rings, and a call reads the count before it looks, so a ring
+  during the look isn't missed. It only wakes the agent, which then looks and
+  chooses as always. Before rings, each agent took a turn
   every 10 seconds, reading its change, the reviews and the backlog whether
   anything had changed or not. Nothing assigns the work. Agents start together
   and each reads the backlog in its own order, so a claim another agent took

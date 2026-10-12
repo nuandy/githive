@@ -7,10 +7,10 @@ import { conflictFix } from "../merge-ready";
 import { leaseFor } from "../staleness";
 import type { VotesView } from "../vote-store";
 import { countedVotes } from "../votes";
-import { addWork, addWorks, backlogFor, reviewsFor, type Work } from "../work";
+import { addWork, addWorks, backlogFor, reviewsFor, type Work, type WorkInput } from "../work";
 import { changeSigns, changeStatus } from "./change-state";
 import { workItemFrom } from "./claim-input";
-import type { ToolCall, ToolHandlers } from "./context";
+import type { ToolCall, ToolContext, ToolHandlers } from "./context";
 import { tellPeopleOfWaitingRoles } from "./dashboard";
 import { claimPolicy, DEFAULT_POLICY, HOSTED_PREFIX, LISTED_AT_MOST, MOST_AT_ONCE, recordLog, workRef } from "./repo";
 
@@ -33,17 +33,7 @@ export const workTools: ToolHandlers = {
 				state.votes,
 				(claim) => claimPolicy(registered, claim),
 			).catch((err) => console.error(`checking ${repo}'s waiting reviews failed`, String(err)));
-		// A change GitHive's builder is still at gets more pushes: a review now would be of a commit it's replacing.
-		const hosted = state.open.filter((entry) => entry.claim.agent.startsWith(HOSTED_PREFIX));
-		const building = ctx.buildersAtWork
-			? await ctx
-					.buildersAtWork(
-						repo,
-						hosted.map((entry) => entry.claim.change),
-					)
-					.catch(() => new Set<string>())
-			: new Set<string>();
-		const options = reviewsFor({ ...state, held }).filter((option) => !building.has(option.change));
+		const options = await reviewOptions(ctx, repo, state, held);
 		return {
 			reviews: options.slice(0, LISTED_AT_MOST),
 			...(options.length > LISTED_AT_MOST ? { more: options.length - LISTED_AT_MOST } : {}),
@@ -132,6 +122,21 @@ export const workTools: ToolHandlers = {
 		return reply;
 	},
 };
+
+/** The reviews `state`'s agent may give, as `reviews` lists them, given the review holds in force. */
+export async function reviewOptions(ctx: ToolContext, repo: string, state: WorkInput, held: Record<string, string[]>) {
+	// A change GitHive's builder is still at gets more pushes: a review now would be of a commit it's replacing.
+	const hosted = state.open.filter((entry) => entry.claim.agent.startsWith(HOSTED_PREFIX));
+	const building = ctx.buildersAtWork
+		? await ctx
+				.buildersAtWork(
+					repo,
+					hosted.map((entry) => entry.claim.change),
+				)
+				.catch(() => new Set<string>())
+		: new Set<string>();
+	return reviewsFor({ ...state, held }).filter((option) => !building.has(option.change));
+}
 
 /** What renews a claim: claiming again makes it active now (see claims.ts). */
 const RENEW = "claim the same paths again";

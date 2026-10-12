@@ -13,6 +13,7 @@ import { mergeTools } from "./tools/merge-tools";
 import { withNext } from "./tools/next";
 import { reviewTools } from "./tools/review-tools";
 import { setupTools } from "./tools/setup";
+import { waitTools } from "./tools/wait-tool";
 import { workTools } from "./tools/work-tools";
 
 // GitHive's MCP tools (see docs/design.md). Each tool is stateless: it reads or writes the repo's records
@@ -128,6 +129,7 @@ const handlers: ToolHandlers = {
 	...mergeTools,
 	...auditTools,
 	...githubTools,
+	...waitTools,
 };
 
 async function runTool(name: string, args: Args, ctx: ToolContext): Promise<unknown> {

@@ -12,7 +12,7 @@ export const INSTRUCTIONS = [
 		"with the evidence for any rejection to fix, and what it still needs): revise one sent back, merge " +
 		"one approved, finish one you claimed but haven't pushed. Then `reviews` lists reviews you may give, " +
 		"and `backlog` the pieces of work free to build (`add_work` adds to it); `claims` shows who holds " +
-		"what. Pick one, do it, look again. Each list comes in an order of your own, so agents looking at " +
+		"what. Pick one, do it, look again; when nothing suits you, call `wait` rather than sleeping. Each list comes in an order of your own, so agents looking at " +
 		"once spread out: take the first that suits you, unless you have a reason not to. Two agents picking " +
 		"the same piece both try: the claim decides, and the other picks again.",
 	"Every reply about your own work carries `next`, the step that follows for it: follow it unless you know " +
@@ -299,6 +299,26 @@ const TOOL_LIST = [
 		inputSchema: { type: "object", properties: { repo: str, agent: str }, required: ["repo", "agent"] },
 	},
 	{
+		name: "wait",
+		description:
+			"Instead of sleeping when nothing suits you: holds until something that concerns you changes, " +
+			"then returns at once with what. That's a vote on or a landing of your own change (yours), a review " +
+			"you may give (reviews), or a piece of the backlog free to you (backlog). After `seconds` (at most " +
+			"45, the default) it returns with changed false. Pass `seen` from the last reply, so nothing that " +
+			"happened between two calls is missed. It only wakes you: look with the tool it names, and choose " +
+			"as always. If your MCP client gives up on a call sooner than 45 seconds, pass fewer.",
+		inputSchema: {
+			type: "object",
+			properties: {
+				repo: str,
+				agent: str,
+				seen: { type: "string", description: "`seen` from your last wait reply" },
+				seconds: { type: "integer", minimum: 1, maximum: 45, description: "The longest to hold (default 45)" },
+			},
+			required: ["repo", "agent"],
+		},
+	},
+	{
 		name: "vote",
 		description:
 			"Record your review verdict on the exact commit you reviewed. Name its `change` too: when you " +
@@ -442,6 +462,7 @@ export const TOOLS = annotate(
 		claims: reads("List claims"),
 		reviews: reads("List reviews you may give"),
 		backlog: reads("List the backlog"),
+		wait: reads("Wait for something that concerns you"),
 		add_work: writes("Add work to the backlog"),
 		claim: writes("Claim paths", { idempotent: true }),
 		release: destroys("Release a claim", { idempotent: true }),

@@ -109,6 +109,8 @@ export interface ToolContext {
 	/** Tells the dashboard's open pages that the repo's records changed, and how, for the hive's feed. */
 	/** Tells the repo's watchers that `tool` wrote (see RepoCache.ping). */
 	ping?: (repo: string, event?: HiveEvent, tool?: string) => Promise<void>;
+	/** The repo's doorbell, which rings on every write (see RepoCache.ring): `wait` holds on it. */
+	doorbell?: (repo: string) => Doorbell;
 	/** Which of these changes GitHive's hosted builder is still working on: they aren't ready to review yet. */
 	buildersAtWork?: (repo: string, changes: string[]) => Promise<Set<string>>;
 	/** Warms the repo's check container in the background when a merge is likely soon (see Gate.warmUp). */
@@ -222,6 +224,12 @@ const HEAD_READS_PER_CALL = 6;
 const HEAD_READS_AT_ONCE = 6;
 
 export type Args = Record<string, unknown>;
+
+/** A repo's doorbell: how many times it has rung, and a hold until it rings past a count, or null after `ms`. */
+export interface Doorbell {
+	rings(): Promise<number>;
+	ringAfter(mark: number, ms: number): Promise<number | null>;
+}
 
 /** What the advice tools (claims, reviews, backlog) read: the claims in force and the changes merged. */
 export interface ClaimsAdvice {

@@ -660,8 +660,8 @@ describe("news of main moving", { timeout: 120_000 }, () => {
 					note,
 				],
 			});
-			// A list to choose from has no next step: choosing is the agent's.
-			expect(backlog).not.toHaveProperty("next");
+			// A list to choose from names nothing to take: choosing is the agent's. An empty one points at wait.
+			expect((backlog as { next?: string }).next).toMatch(/^None for you now: .*`wait`/);
 			const claims = await call("claims", {}, key);
 			expect(Array.isArray(claims)).toBe(true);
 			expect(claims).not.toHaveProperty("next");
@@ -765,8 +765,15 @@ describe("a change that landed before its claim was released", { timeout: 120_00
 			await landing.settle([
 				{ change: "c-1", head, agent: "a", how: "landed", at: new Date().toISOString(), commit: "m1" },
 			]);
-			expect(await call("reviews", { agent: "b" }, keys.b)).toEqual({ reviews: [] });
-			expect(await call("backlog", { agent: "b" }, keys.b)).toEqual({ open: [], waiting: [] });
+			expect(await call("reviews", { agent: "b" }, keys.b)).toEqual({
+				reviews: [],
+				next: expect.stringMatching(/`wait`/),
+			});
+			expect(await call("backlog", { agent: "b" }, keys.b)).toEqual({
+				open: [],
+				waiting: [],
+				next: expect.stringMatching(/`wait`/),
+			});
 		} finally {
 			await server.close();
 			rmSync(work, { recursive: true, force: true });
@@ -876,7 +883,14 @@ describe("agents choosing through the toolkit", { timeout: 120_000 }, () => {
 		await merge("agent-b");
 		await review("agent-b", "agent-a");
 		await merge("agent-a");
-		expect(await call("reviews", { agent: "agent-a" }, keys["agent-a"])).toEqual({ reviews: [] });
-		expect(await call("backlog", { agent: "agent-a" }, keys["agent-a"])).toEqual({ open: [], waiting: [] });
+		expect(await call("reviews", { agent: "agent-a" }, keys["agent-a"])).toEqual({
+			reviews: [],
+			next: expect.stringMatching(/`wait`/),
+		});
+		expect(await call("backlog", { agent: "agent-a" }, keys["agent-a"])).toEqual({
+			open: [],
+			waiting: [],
+			next: expect.stringMatching(/`wait`/),
+		});
 	});
 });

@@ -87,6 +87,7 @@ export function askingAgent(args: Args, ctx: ToolContext): string | undefined {
 }
 
 const CHOOSE_NEXT = "Choose your next work from `backlog` or `reviews`.";
+const NONE_NOW = "None for you now: choose from the other list, or call `wait` to hear when that changes.";
 const CHANGES_ASKED =
 	"Changes were asked for: address the rejection's evidence, push a new commit to `fork`, then call `status`.";
 
@@ -128,6 +129,9 @@ const STEPS: Record<string, Step> = {
 		return refusedMerge(reply, args);
 	},
 	vote: (reply) => (reply.ok === true ? "Done. Choose more from `reviews`." : undefined),
+	reviews: (reply) => (isEmpty(reply.reviews) ? NONE_NOW : undefined),
+	backlog: (reply) => (isEmpty(reply.open) ? NONE_NOW : undefined),
+	wait: waitStep,
 	request_review: (reply) => {
 		if (!text(reply.head)) return undefined;
 		const reviewers = texts(reply.reviewers);
@@ -228,6 +232,22 @@ function statusStep(reply: Reply, args: Args, caller: string | undefined) {
 	return approvalsMissing(approval);
 }
 
+const isEmpty = (value: unknown) => Array.isArray(value) && value.length === 0;
+
+function waitStep(reply: Reply) {
+	if (reply.changed !== true)
+		return "Nothing that concerns you changed: call `wait` again with this reply's `seen`, or stop if you're done.";
+	const what = texts(reply.what);
+	const looks: string[] = [];
+	if (what.includes("yours")) {
+		const changes = records(reply.yours).map((change) => nameOr(change.change, "your change"));
+		looks.push(changes.length ? `\`status\` on ${names(changes)}` : "`status` on your change");
+	}
+	if (what.includes("reviews")) looks.push("`reviews`");
+	if (what.includes("backlog")) looks.push("`backlog`");
+	return `Something that concerns you changed: look with ${names(looks)}, then pass this reply's \`seen\` to \`wait\`.`;
+}
+
 function approvalsMissing(approval: Reply) {
 	const required = typeof approval.required === "number" ? approval.required : 0;
 	const approvals = typeof approval.approvals === "number" ? approval.approvals : 0;
@@ -236,7 +256,8 @@ function approvalsMissing(approval: Reply) {
 	const asRoles = `${names(roles)}, which can veto it`;
 	let what = needed ? plural(needed, "more approval") : "";
 	if (roles.length) what = what ? `${what} (including ${asRoles})` : `approval as ${asRoles}`;
-	return what ? `Waiting for ${what}; agents who may give them see it in \`reviews\`.` : undefined;
+	if (!what) return undefined;
+	return `Waiting for ${what}; agents who may give them see it in \`reviews\`. Meanwhile, work or \`wait\`.`;
 }
 
 /** The commands that resolve a conflict in the agent's clone, when the reply has them; else how to. */

@@ -253,6 +253,10 @@ function repoCacheParts(env: Env) {
 		ping: async (repo, event, tool) =>
 			void (await env.REPO_CACHE?.getByName(`repo:${repo}`).ping("records", true, event ? [event] : [], tool)),
 		buildersAtWork: (repo, changes) => buildersAtWork(env, repo, changes),
+		doorbell: (repo) => {
+			const cache = env.REPO_CACHE.getByName(`repo:${repo}`);
+			return { rings: () => cache.rings(), ringAfter: (mark, ms) => cache.ringAfter(mark, ms) };
+		},
 		// Claims for advice, cached so a busy repo isn't read whole on every call.
 		keptClaims: (repo, read) => keptRead(env, repo, "claims-advice", KEPT_CLAIMS_MS, read),
 		// Heads read from forks, plus those push events reported from the claim holders' forks (see push-events.ts).

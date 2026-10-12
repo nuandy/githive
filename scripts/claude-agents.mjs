@@ -82,8 +82,9 @@ const prompt = (agent, dir, keyFile, brief, signedIn) =>
 			"the surrounding code and tests, and write good code (and tests where it fits). Commit on the branch " +
 			"changes/<change>, push it to your fork, then call status. Stay inside your claim. If the claim is " +
 			"refused because another agent took it first, pick another.",
-		`4. Nothing to do: run \`sleep 30\`, then look again.`,
-		"Stop when you've looked three times in a row with nothing to do and none of your changes is still " +
+		"4. Nothing to do: call wait, passing `seen` from its last reply. It returns as soon as something that " +
+			"concerns you changes, naming what to look at, or after 45 seconds with changed false. Don't sleep.",
+		"Stop when wait has returned changed false three times in a row and none of your changes is still " +
 			`open, or when ${minutes} minutes have passed. Then print a short summary of what you did.`,
 		"",
 		"Git, without ever printing a token (the helper keeps credentials in each clone's own config):",
