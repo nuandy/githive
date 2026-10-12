@@ -1,7 +1,7 @@
 import { changeId, normalizeClaim } from "../../claim-paths";
 import { fail, requiredPaths, requiredString } from "../../errors";
 import { isReservedPath, presentClaim, scopePaths } from "../branch-scope";
-import { GITHUB_AGENT, isGitHubChange, isImportedBranch } from "../github-settings";
+import { GITHUB_AGENT, GITHUB_CHANGE_PREFIX, isGitHubChange, isImportedBranch } from "../github-settings";
 import { abandonedRule } from "./change-state";
 import { branchMerge, changeList, dependencyLoop, targetBranch } from "./claim-input";
 import type { ClaimOutcome } from "../claim-store";
@@ -28,6 +28,7 @@ export const claimTools: ToolHandlers = {
 		// With `source`, the change merges a whole branch, claiming what it changed (see branchMerge).
 		const source = optionalString(args, "source");
 		refuseGitHubBranches(args, agent);
+		refuseGitHubChangeName(change, agent);
 		const given = source ? [] : normalizeClaim(requiredPaths(args, "paths"));
 		const reserved = given.find(isReservedPath);
 		if (reserved) fail(400, `${reserved}: a path can't start with "::"`);
@@ -125,6 +126,14 @@ function refuseGitHubBranches(args: Args, agent: string) {
 	const source = optionalString(args, "source");
 	if (source && isImportedBranch(source) && agent !== GITHUB_AGENT)
 		fail(403, `${source}: only ${GITHUB_AGENT} merges GitHive's copies of GitHub's branches`);
+}
+
+// githive-github's changes are named for the GitHub commit they bring in: another agent holding that name first would
+// keep GitHub's change from being claimed.
+function refuseGitHubChangeName(change: string, agent: string) {
+	if (agent === GITHUB_AGENT) return;
+	if (change.startsWith(GITHUB_CHANGE_PREFIX))
+		fail(403, `${change}: changes named ${GITHUB_CHANGE_PREFIX}… are ${GITHUB_AGENT}'s, bringing GitHub's in`);
 }
 
 // The branch a claim lands on, and how it was made ready if it's new. A change lands on one branch: claiming again

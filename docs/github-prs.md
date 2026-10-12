@@ -72,7 +72,8 @@ people pushed there directly. They come back through GitHive's own path, so the 
    landing looks again. In mirror mode a push GitHub took means its main is GitHive's, so the read is made only
    when the push was refused. The `github_pr` tool, and so the dashboard's pull request button, notice it as well;
    showing the repo page doesn't. GitHive never polls: no timers. A commit already brought back, found on main, or sent to a person isn't started again (unless
-   `github_pr` asks with `refresh`). A job that waited goes on from the step it waited at; one that failed starts
+   `github_pr` asks with `refresh`, which never takes back a give-up: see step 6). A job that waited goes on from
+   the step it waited at; one that failed starts
    again an hour on, or when asked, so a commit that can't come in doesn't start a container at every landing.
 2. **Imported.** The repo's `GitHubSync` starts a job (`github-sync.ts`, `github-inbound.ts`). Main's last 1,000
    first-parent commits are read through Artifacts' API first: a commit on them, or merged into them, needs no
@@ -92,13 +93,21 @@ people pushed there directly. They come back through GitHive's own path, so the 
      GitHub's (as it is for a merge commit), the Gate joins them: a commit with GitHub's tree and both as parents,
      with GitHub's commit's dates, so making it again makes the same commit. That join is `github/<branch>`, and
      merging it brings in only what GitHub added;
-   - an import record (`refs/notes/githive-github/<repo>`, appended by compare-and-swap, once per commit and head)
+   - when GitHub's branch had commits of its own before a squash or rebase, no tree is GitHive's, and the base found
+     can be older than the work GitHub took: merging from it could bring back what GitHive changed since, such as a
+     file it deleted. So unless each of GitHub's commits that main lacks sits straight on main (a squash or rebase there
+     would have GitHive's files exactly, and been found), or GitHub changed no path GitHive changed after the base,
+     the import comes back untrusted (`untrusted` in its entry says why), and needs review even while the repo trusts
+     GitHub's changes;
+   - an import record (`refs/notes/githive-github/<repo>`, appended by compare-and-swap, unless the branch's newest
+     import is already the same commit and head)
      notes the GitHub repo, branch and commit, the head written, and the GitHive commit whose work it had, stamped
      like every record (by `service:githive-github`). Its shape is pinned, and its reads are checked against a
      schema.
 3. **Merged as a change.** GitHive's service agent `githive-github` claims a `source` merge of `github/<branch>`
    into `main` (design.md, "Branches"), as change `github-<sha12>`, so the claim holds the paths GitHub changed
-   while it lands. Branches under `github/` are reserved: the import forces them, so no claim may name one as `into`
+   while it lands. Change names starting `github-` are `githive-github`'s: another agent's claim of one is refused,
+   so no one can take the name first. Branches under `github/` are reserved: the import forces them, so no claim may name one as `into`
    or `from` (nor the dashboard make one), and only `githive-github` may name one as `source`. A merge that changes no file (a PR's merge commit, a squash joined to what it took) claims no
    paths: a source merge whose commits change nothing now claims nothing, and still merges. An older GitHub change
    of the same branch still open (it needed a person) is released first: the newer commit has it. A claim refused
@@ -112,7 +121,9 @@ people pushed there directly. They come back through GitHive's own path, so the 
    landing. If the checks fail or it conflicts, it is sent back like any change: githive-github asks people
    (`ask_human`, once: asked again while the question is open, it doesn't ask twice), so the dashboard shows it as
    "GitHub's changes need a person" with the reason, and its claim waits on a person. Fixing it on GitHub (merging
-   `githive/main` there) brings the fix back, which lets the stuck change go; or a person gives it up (below).
+   `githive/main` there) brings the fix back, which lets the stuck change go; or a person gives it up (below). Only
+   a conflict or a failed check goes to a person: a merge refused for anything else, such as a change Artifacts
+   couldn't read while busy, is tried again later, as a step that throws is (below).
 6. **Given up, when it can't wait.** A GitHub change sent to a person holds its paths, and only its agent may release
    a claim, which no one can act as. So a person who can write may give it up from the dashboard ("Give up GitHub's
    changes", on the change's page; `POST /repos/:owner/:name/changes/:change/give-up`), and a repo admin through
@@ -120,9 +131,9 @@ people pushed there directly. They come back through GitHive's own path, so the 
    the one exception to "only the holder releases", recorded like a stale release (`stale: true`, the reason "GitHub's
    changes given up by <who>") and stamped with who did it; the audit accepts a stamped release of
    `githive-github`'s claim at any time (`giveUpGitHubChange`). Its paths are free at once. The job ends ("given up")
-   and waits: GitHub's branch moving starts it again, as does a person asking (the dashboard's "Bring them in again",
-   `POST /repos/:owner/:name/github/again`, or `github_pr` with `refresh`). Only GitHub's changes are given up this
-   way.
+   and waits: GitHub's branch moving starts it again, as does a person asking from the dashboard ("Bring them in
+   again", `POST /repos/:owner/:name/github/again`, which only a person may call). `github_pr` with `refresh`, which
+   any agent who can write may send, doesn't take a give-up back. Only GitHub's changes are given up this way.
 7. **Recorded.** The merge commit says "Bring in GitHub's changes (owner/name main at <sha>)", with the usual
    trailers.
 
@@ -134,25 +145,34 @@ is a fast-forward again.
   - its claim is by `githive-github` with `source: github/<branch>`, and every record of it (a claim spread over
     shards has several), as written, is stamped as `service:githive-github` (with a stamp key). The merge path reads
     those records for it, since the merged view of a claim carries no stamp;
-  - its head is a commit in the import record (a stamped entry, for that branch);
+  - its head is the head of the branch's newest import (a stamped entry) as of its claim's last claim or extension,
+    an import that found no reason for review (`untrusted`), and the change is the one made for it,
+    `github-<sha12>` of the imported commit. So a claim can't bring in an older import that was superseded or given
+    up, and never landed; and an older merge still passes the audit after newer imports;
   - the repo's GitHub trust is on, connected to the GitHub repo the import came from: for the merge path, in the
     registry it's checked against; for the audit, in the registry state the merge cites.
 
-  Anything else that skips a vote is refused by the merge, and reported by the audit, as today. A hosted agent acting
-  as `githive-github` (they can) gets no trust: its records are stamped as itself.
+  Anything else that skips a vote is refused by the merge, and reported by the audit, as today. Only the repo's
+  `GitHubSync`, verified as `service:githive-github`, may act as `githive-github`: other hosted agents, which act
+  under the other `githive-` names, are refused (`mayActAs`). Were one to get a record written anyway, it would
+  get no trust: its records are stamped as itself.
 - **Trust is a setting:** `github_trust` defaults to true. Turned off, GitHub's changes need review like any change:
   the job's merge waits for review, reviewers see the change in `reviews`, and once approved it lands with the merge
   of the next notice (a landing, `github_pr`), since other merges' batches leave it out; in a quiet repo, a person
   merges it from its page (the dashboard's Merge button) rather than waiting for one.
 - **Advice follows the rule.** While trusted, `status` says the change needs no review, `reviews` offers it to no
   one, and the abandoned rule treats it as approved (so its claim waits on a person only once it's asked one).
+  Advice reads no import record, so when the merge's trust rule refuses a change the repo trusts (an import that
+  needs review, a head no stamped import has, a stamp key changed since), no reviewer would be offered it: the job
+  asks a person instead ("needs a person", saying why), who reviews it, approves and merges it from its page, or
+  gives it up. With trust off, the job waits for review as before.
 - **Known limits.** A person's veto counts for nothing while a GitHub change is trusted: it needs no votes, and a clean
   one lands at once, so the window is small; give it up (step 6) to stop one. The import record and a released older
   GitHub change's question to people stay as written; nothing reads that question once its claim is gone.
 - **Who runs it.** Steps 2 to 4 must not hold up the landing that noticed GitHub moved. They run as a small,
-  resumable job owned by the repo, in its `GitHubSync` Durable Object (a new class, migration `v15`), with an alarm
+  resumable job owned by the repo, in its `GitHubSync` Durable Object (a new class, migration `v16`), with an alarm
   per step like the hosted builder's. Every step is idempotent, so a retried step finds its work done. A step that
-  throws is tried again, waiting 30 s, 1, 2 and 4 minutes, then the job counts as failed (see step 1 for when it
+  throws, or a merge refused for a passing reason, is tried again, waiting 30 s, 1, 2 and 4 minutes, then the job counts as failed (see step 1 for when it
   starts again). A job not heard from in an hour has lost its alarm, and a notice starts it again. The landing only
   notes that GitHub is ahead and starts the job. The job's own merges push to GitHub as any landing does, but don't
   notice GitHub's branch, which would call the object back while its step runs.
@@ -202,12 +222,14 @@ real-git test server) plays GitHub, as GitHive's tests fake Artifacts.
 - With trust off, review is needed.
 - The Gate's import joins a squash or rebase to what it took, so it merges cleanly where git's own merge base
   conflicts (`github-import.test.ts`). It runs in the repo's GitHub Gate: the repo's own Gate refuses it. A revert on
-  GitHub of what a squash took comes back as a revert.
+  GitHub of what a squash took comes back as a revert. A squash onto a GitHub branch that had a commit of its own
+  comes back untrusted, so a file GitHive deleted since can't come back without review (`github-inbound.test.ts` too).
 - The audit reports every way a vote could be skipped short of the trust rule (`github-audit.test.ts`), and the
-  merge path refuses them: a claim as `githive-github` stamped as another identity, a head the import record doesn't
-  hold, a repo connected to another GitHub repo since the import, another agent's claim of `github/main`
-  (`github-inbound.test.ts`).
+  merge path refuses them: a head the import record doesn't hold, a change not named for its import, an older import
+  claimed again once a newer one came in, a repo connected to another GitHub repo since the import, another agent's
+  claim of `github/main` (`github-inbound.test.ts`). No hosted agent but the GitHub job may act as `githive-github`.
 - Branches under `github/` are reserved: a claim into or from one, or an agent's `source` merge of one, is refused.
+  So are change names starting `github-`, for any agent but `githive-github`.
 - The import record's shape is pinned.
 - What can go wrong bringing GitHub's changes back (`github-inbound.test.ts`): checks that fail on GitHub's change,
   in containers or on Actions, send it to a person and land nothing, and a fix pushed on GitHub lands; a step that

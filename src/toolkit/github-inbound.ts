@@ -4,17 +4,20 @@ import { projectBranch } from "../project-branch";
 import type { Registry } from "./claims";
 import { type GitHubImports, importsRef, recordImport } from "./github-imports";
 import {
+	type AskedAgain,
 	bringsGitHubBack,
 	GITHUB_AGENT,
+	githubChangeId,
 	githubSync,
 	type GitHubSeen,
 	importedBranch,
 	type InboundJob,
 	type KnownPull,
 	PR_BRANCH,
+	trustsGitHub,
 } from "./github-settings";
 import { NOTICE_WITHIN_MS } from "./github-outbound";
-import type { MergeOutcome } from "./merge-types";
+import type { MergeOutcome, Why } from "./merge-types";
 import { callTool, type ToolContext } from "./mcp";
 import { advice, claimsRef, recordLog, storeFor, votesFor } from "./tools/repo";
 import { openFlag } from "./votes";
@@ -67,20 +70,25 @@ export function newJob(repo: string, seen: GitHubSeen, now = Date.now()): Inboun
 /**
  * What noticing GitHub's branch at `seen` starts: a new job, the job that waited going on from where it waited, or
  * nothing when one is running, the commit is known to be on main, or it was brought back, sent to a person or given
- * up already (unless `again`). A job that failed starts again after a while, so a commit that can't come in (a GitHub branch
- * sharing no history with main, say) doesn't start a container at every landing.
+ * up already (unless `asked` again; a give-up only by a person). A job that failed starts again after a while, so a
+ * commit that can't come in (a GitHub branch sharing no history with main, say) doesn't start a container at every
+ * landing.
  */
 export function noticed(
 	current: InboundJob | null | undefined,
 	known: string | null | undefined,
 	seen: GitHubSeen,
 	repo: string,
-	again = false,
+	asked?: AskedAgain,
 	now = Date.now(),
 ): InboundJob | null {
 	if (current && isRunning(current) && now - Date.parse(current.updatedAt) < LOST_AFTER_MS) return null;
+	const again = asked !== undefined;
 	if (!again && seen.commit === known) return null;
 	const same = current?.commit === seen.commit;
+	// A person gave it up: only a person asking again undoes that, never an agent's refresh.
+	const givenUp = same && current?.step === "given up";
+	if (givenUp && asked !== "person") return null;
 	if (current && same && current.step === "waiting") {
 		const { reason: _, ...waited } = current;
 		return { ...waited, step: current.resume ?? "import", attempts: 0, updatedAt: new Date(now).toISOString() };
@@ -114,16 +122,20 @@ export async function inboundStep(ctx: ToolContext, job: InboundJob): Promise<St
 		if (job.step === "merge") return await mergeStep(ctx, job, at);
 		return { job };
 	} catch (err) {
-		// Tried again later, then left for the next time GitHub's branch is noticed.
-		const attempts = job.attempts + 1;
-		const reason = `${job.step} failed: ${statusOf(err).message}`;
-		console.error(`bringing ${job.github} ${job.branch} back into ${job.repo}: ${reason}`);
-		if (attempts >= STEP_TRIES) return { job: at({ step: "failed", attempts, reason }) };
-		return { job: at({ attempts, reason }), next: RETRY_MS * 2 ** (attempts - 1) };
+		return triedAgain(job, at, `${job.step} failed: ${statusOf(err).message}`);
 	}
 }
 
 type At = (changes: Partial<InboundJob>) => InboundJob;
+
+// A step that failed for now is tried again later, waiting longer each time, then left for the next time GitHub's
+// branch is noticed.
+function triedAgain(job: InboundJob, at: At, reason: string): StepOutcome {
+	const attempts = job.attempts + 1;
+	console.error(`bringing ${job.github} ${job.branch} back into ${job.repo}: ${reason}`);
+	if (attempts >= STEP_TRIES) return { job: at({ step: "failed", attempts, reason }) };
+	return { job: at({ attempts, reason }), next: RETRY_MS * 2 ** (attempts - 1) };
+}
 
 // The Gate imports GitHub's branch as github/<branch> and the import record notes it, or finds main has it.
 async function importStep(ctx: ToolContext, job: InboundJob, at: At): Promise<StepOutcome> {
@@ -161,7 +173,7 @@ async function onMain(ctx: ToolContext, repo: string, branch: string, commit: st
 // githive-github claims a merge of github/<branch> into main: what GitHub changed, held while it lands.
 async function claimStep(ctx: ToolContext, job: InboundJob, at: At): Promise<StepOutcome> {
 	const source = importedBranch(job.branch);
-	const change = `github-${job.commit.slice(0, 12)}`;
+	const change = githubChangeId(job.commit);
 	// A change of GitHub's still open from before (it needed a person) gives way to this newer commit.
 	const { claims } = await advice(ctx, job.repo);
 	for (const older of claims.filter((claim) => claim.agent === GITHUB_AGENT && claim.source === source))
@@ -211,18 +223,57 @@ async function mergeStep(ctx: ToolContext, job: InboundJob, at: At): Promise<Ste
 		if (merged) return { job: at({ step: "done", merged, attempts: 0 }), pull: await openPull(ctx, job) };
 		return { job: at({ step: "given up", reason: `its claim was released: ${reason}` }) };
 	}
-	// Untrusted, it waits for review like any change, and lands with a batch once approved.
-	if (/approvals from reviewers|still needs approval|is vetoed/.test(reason))
-		return { job: at({ step: "waiting", resume: "merge", reason: `waits for review: ${reason}`, attempts: 0 }) };
+	if (outcome.why.some((why) => IN_REVIEW.includes(why))) return awaitingReview(ctx, job, at, reason);
+	// Anything but a conflict or a failed check, such as a change Artifacts couldn't read while busy, is for now.
+	if (!outcome.why.some((why) => FOR_A_PERSON.includes(why))) return triedAgain(job, at, `merge refused: ${reason}`);
 	// Sent back like any change: people see it in their inbox, with the reason.
 	const asked =
 		`GitHub's changes need a person: ${reason}. Fix it on GitHub (merge ${PR_BRANCH} into ${job.branch} there, ` +
 		"resolving it) and GitHive brings the fix back, which also lets this one go.";
-	// Asked once: while the question is open (a person hasn't voted on its head since), asking again would only add
-	// another to people's inbox, as github_pr's refresh restarting the job did.
-	if (!(await askedAlready(ctx, job.repo, change, job.head)))
-		await callTool("ask_human", { repo: job.repo, change, agent: GITHUB_AGENT, reason: asked }, ctx);
+	await askPeople(ctx, job, asked);
 	return { job: at({ step: "needs a person", reason, attempts: 0 }) };
+}
+
+/** The refusals only a person can resolve, on GitHub. */
+const FOR_A_PERSON: Why[] = ["conflict", "checks"];
+
+/** The refusals of a change that needs review. */
+const IN_REVIEW: Why[] = ["approvals", "changes-asked"];
+
+// With trust off, it waits for review like any change: reviewers are offered it, and it lands with a batch once
+// approved. While the repo trusts GitHub's changes, no one is offered it, so the trust rule refusing it (an import
+// that needs review, a head no import has, a changed stamp key) is for a person to look at.
+async function awaitingReview(ctx: ToolContext, job: InboundJob, at: At, reason: string): Promise<StepOutcome> {
+	const registry = (await recordLog<Registry>(ctx, job.repo, claimsRef(job.repo)).read())?.commit.state;
+	if (!trustsGitHub(registry))
+		return { job: at({ step: "waiting", resume: "merge", reason: `waits for review: ${reason}`, attempts: 0 }) };
+	const why = await untrustedBecause(ctx, job);
+	const asked =
+		`GitHub's changes need a person: GitHive won't land them without review, as ${why}. ` +
+		"Review them, then approve and merge them from their page, or give them up.";
+	await askPeople(ctx, job, asked);
+	return { job: at({ step: "needs a person", reason: `needs review: ${why}`, attempts: 0 }) };
+}
+
+// Why the trust rule refused the job's head: what its import found, or that no import GitHive stamped has it.
+async function untrustedBecause(ctx: ToolContext, job: InboundJob) {
+	const imports =
+		(await recordLog<GitHubImports>(ctx, job.repo, importsRef(job.repo)).read())?.commit.state.imports ?? [];
+	const newest = imports.findLast((entry) => entry.branch === job.branch);
+	const found = newest?.head === job.head ? newest?.untrusted : undefined;
+	return (
+		found ??
+		`its head and claim don't match the newest import of GitHub's ${job.branch} that GitHive stamped ` +
+			`(github/${job.branch} moved since, or the stamp key changed)`
+	);
+}
+
+// Asked once: while the question is open (a person hasn't voted on its head since), asking again would only add
+// another to people's inbox.
+async function askPeople(ctx: ToolContext, job: InboundJob, reason: string) {
+	const change = job.change!;
+	if (await askedAlready(ctx, job.repo, change, job.head)) return;
+	await callTool("ask_human", { repo: job.repo, change, agent: GITHUB_AGENT, reason }, ctx);
 }
 
 // The merge commit `change` landed as, from its claim's last release, if it merged.

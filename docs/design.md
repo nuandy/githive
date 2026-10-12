@@ -748,9 +748,14 @@ the audit holds each merge to the settings in force when it merged. Then
   GitHub's branch from before the pull request: the Gate joins GitHub's commit
   to the newest commit of GitHive's main whose tree GitHub's branch has (a
   commit with GitHub's tree and both as parents), so merging it brings in only
-  what GitHub added. Then `githive-github` claims a `source` merge of
-  `github/<branch>` into main (see Branches): the claim holds the paths GitHub
-  changed while it lands, none for a pull request's own merge. It lands like
+  what GitHub added. When GitHub's branch had commits of its own before the
+  squash, no tree is GitHive's and that base is in doubt: unless GitHub's new
+  commits each sit straight on main, or change nothing GitHive changed after
+  the base, the import comes back untrusted, needing review, since merging it
+  could bring back what GitHive changed since. Then `githive-github` claims a
+  `source` merge of `github/<branch>` into main (see Branches): the claim
+  holds the paths GitHub changed while it lands, none for a pull request's own
+  merge. It lands like
   any change, in a batch, through the repo's checks: with trees, or in the
   repo's Gate when it needs a real merge (GitHub's commits often aren't on top
   of main), as any change that needs one does. Its merge commit says
@@ -1072,9 +1077,11 @@ and author, and `by` when the commit was stamped:
 
 A merge with no votes where the policy needs some is accepted only as GitHub's
 trusted change: claimed by `githive-github` (every record of the claim stamped
-as `service:githive-github`) with `source: github/<branch>`, its head a commit
-in the import record (stamped), and the repo's GitHub trust on, for the GitHub
-repo the import came from, in the registry state the merge cites. The merge
+as `service:githive-github`) with `source: github/<branch>`, its head the head
+of the branch's newest import when it was claimed (stamped, and not marked
+untrusted), the change named for that import (`github-<sha12>`), and the repo's
+GitHub trust on, for the GitHub repo the import came from, in the registry
+state the merge cites. The merge
 path applies the same rule, the same function (`trustedGitHubChange`), against
 the registry it's checked against. Anything else that skips a vote is reported
 as before.

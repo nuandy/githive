@@ -2,6 +2,7 @@ import { DurableObject } from "cloudflare:workers";
 import { toolContextFor } from "./toolkit/env";
 import { inboundStep, isRunning, noticed, ON_MAIN } from "./toolkit/github-inbound";
 import {
+	type AskedAgain,
 	GITHUB_IDENTITY,
 	type GitHubSeen,
 	type GitHubSyncState,
@@ -17,13 +18,13 @@ import type { ToolContext } from "./toolkit/mcp";
 
 export class GitHubSync extends DurableObject<Env> {
 	/** GitHub's branch is at `seen.commit`: starts bringing it back unless a job runs, or it's known. Returns at once. */
-	async notice(seen: GitHubSeen & { repo: string }, again = false): Promise<GitHubSyncState> {
+	async notice(seen: GitHubSeen & { repo: string }, asked?: AskedAgain): Promise<GitHubSyncState> {
 		const { repo, ...at } = seen;
 		const [job, known] = await Promise.all([
 			this.ctx.storage.get<InboundJob>("job"),
 			this.ctx.storage.get<string>("known"),
 		]);
-		const next = noticed(job, known, at, repo, again);
+		const next = noticed(job, known, at, repo, asked);
 		if (next) {
 			await this.ctx.storage.put("job", next);
 			await this.ctx.storage.setAlarm(Date.now());

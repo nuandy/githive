@@ -189,7 +189,7 @@ async function otherCandidates(call: ToolCall, change: string, into: string): Pr
 /** Write access to the agent's own fork for its change, and read access to the project it starts from. */
 async function ownChangeAccess(call: ToolCall, change: string, own: ClaimRecord) {
 	const { ctx, repo, registered, acting, branch, changeSource } = call;
-	mayActAs(own.agent, acting, registered, ctx.hosted);
+	mayActAs(own.agent, acting, registered, ctx);
 	// One fork serves all the agent's changes. Its default branch may lag the project's, so a new change starts
 	// from the project's branch, fetched into a clone of the fork with the read access `project` gives.
 	const [remote, project] = await Promise.all([changeSource(own.agent, "write"), ctx.remote(repo, "read")]);

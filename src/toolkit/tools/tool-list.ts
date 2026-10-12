@@ -376,7 +376,7 @@ const TOOL_LIST = [
 			"githive/main after every landing, so it updates itself; refresh rewrites its title and body. " +
 			"Merging and closing it happen on GitHub, and GitHive brings the merge back as githive-github's " +
 			"change. Asking also looks at GitHub's branch and brings back what it holds that main lacks; " +
-			"refresh tries again what needed a person.",
+			"refresh tries again what needed a person, but not what a person gave up.",
 		inputSchema: {
 			type: "object",
 			properties: { repo: str, refresh: { type: "boolean" } },

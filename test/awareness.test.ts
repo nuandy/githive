@@ -143,7 +143,8 @@ async function plainPush(author: string, subject: string, files: Record<string, 
 	return { before, after: await clone.run("rev-parse", "HEAD") };
 }
 
-describe("interface news when the branch moves", () => {
+// One of these makes 51 commits, which takes seconds on a busy machine.
+describe("interface news when the branch moves", { timeout: 30_000 }, () => {
 	it("tells an open change that uses a name whose interface just landed changed", async () => {
 		const { claims, deliver, forkPush, branchPush, told, repoCache, footprints } = hive();
 		claims.push({ change: "c-9", agent: "bob", intent: "sync settings" });

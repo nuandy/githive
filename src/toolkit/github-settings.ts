@@ -30,6 +30,12 @@ export const GITHUB_IDENTITY = "service:githive-github";
 /** Where main goes on GitHub in pr mode: the standing pull request's head. */
 export const PR_BRANCH = "githive/main";
 
+/** How the changes githive-github brings GitHub's commits in as are named; no other agent's may be. */
+export const GITHUB_CHANGE_PREFIX = "github-";
+
+/** The change githive-github brings GitHub's `commit` in as. */
+export const githubChangeId = (commit: string) => `${GITHUB_CHANGE_PREFIX}${commit.slice(0, 12)}`;
+
 /** The project repo's branch GitHub's `branch` is written to, the source of the change that brings it back. */
 export const importedBranch = (branch: string) => `github/${branch}`;
 
@@ -37,7 +43,12 @@ export const importedBranch = (branch: string) => `github/${branch}`;
  * Whether a branch is one of GitHive's copies of GitHub's (github/<branch>). They're reserved: the toolkit writes them
  * (force, at each import), so a change landing on one would be pushed away, and only githive-github merges one.
  */
-export const isImportedBranch = (name: string) => name.startsWith("github/");
+export const isImportedBranch = (name: string) => branchName(name).startsWith("github/");
+
+// A branch named as a ref (refs/heads/x, or heads/x, which git also resolves) is still that branch.
+function branchName(name: string) {
+	return name.replace(/^(refs\/)?heads\//, "");
+}
 
 /** The mode a connected repo's GitHub link is in, or null when none is connected. */
 export function githubSync(registry: Pick<Registry, "github"> | null | undefined): GitHubSync | null {
@@ -59,7 +70,10 @@ export const trustsGitHub = (registry: Pick<Registry, "github"> | null | undefin
 export const isGitHubChange = (claim: Pick<ClaimRecord, "agent" | "source">) =>
 	claim.agent === GITHUB_AGENT && !!claim.source?.startsWith("github/");
 
-/** Whether a claim lands without votes as advice sees it. A merge also checks its head is in the import record. */
+/**
+ * Whether a claim lands without votes as advice sees it. A merge also applies the trust rule (trustedGitHubChange),
+ * and when that refuses, advice offers the change to no reviewer: the job asks a person instead.
+ */
 export const trustedClaim = (
 	registry: Pick<Registry, "github"> | null | undefined,
 	claim: Pick<ClaimRecord, "agent" | "source">,
@@ -71,6 +85,12 @@ export interface GitHubSeen {
 	branch: string;
 	commit: string;
 }
+
+/**
+ * Who asks for GitHub's changes again: github_pr's refresh, which anyone who can write may send, or a person from the
+ * dashboard. Both restart what was brought back, sent to a person or failed; only a person takes back a give-up.
+ */
+export type AskedAgain = "refresh" | "person";
 
 /** The standing pull request as GitHive last saw it: a hint for the dashboard; GitHub has the truth. */
 export interface KnownPull {
@@ -116,9 +136,9 @@ export interface GitHubSyncState {
 export interface GitHubSyncHandle {
 	/**
 	 * GitHub's branch is at `seen.commit`: bring it back if GitHive's main lacks it. Returns at once; the job runs in
-	 * steps of its own. A commit already brought back, or found on main, is left alone unless `again`.
+	 * steps of its own. A commit already brought back, or found on main, is left alone unless `asked` again.
 	 */
-	notice(seen: GitHubSeen, again?: boolean): Promise<GitHubSyncState>;
+	notice(seen: GitHubSeen, asked?: AskedAgain): Promise<GitHubSyncState>;
 	notePull(pull: KnownPull | null): Promise<void>;
 	/**
 	 * Someone gave up `change`, GitHub's change, releasing its claim (see giveUpGitHubChange): its job ends there, and

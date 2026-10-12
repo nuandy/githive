@@ -39,10 +39,13 @@ const main = () => server.git("rev-parse", "main").trim();
 const parents = (commit: string) => server.git("log", "-1", "--format=%P", commit).trim().split(" ");
 const tree = (commit: string) => server.git("rev-parse", `${commit}^{tree}`).trim();
 
-/** A landing on GitHive's main: `files` committed there. */
-async function landOnMain(files: Record<string, string>, message = "a landing") {
+/** A landing on GitHive's main: `files` committed there, a null one deleted. */
+async function landOnMain(files: Record<string, string | null>, message = "a landing") {
 	await clone.run("pull", "-q", "origin", "main");
-	for (const [path, text] of Object.entries(files)) clone.write(path, text);
+	for (const [path, text] of Object.entries(files)) {
+		if (text === null) await clone.run("rm", "-q", path);
+		else clone.write(path, text);
+	}
 	await clone.run("add", "-A");
 	await clone.run("commit", "-q", "-m", message);
 	await clone.run("push", "-q", "origin", "main");
@@ -170,6 +173,7 @@ describe("bringing GitHub's branch into the project", { timeout: 60_000 }, () =>
 			await landOnMain({ "src/app.js": "three\n" });
 			const imported = await importGitHub();
 			expect(imported).toMatchObject({ commit: merged, base: pulled });
+			expect(imported).not.toHaveProperty("untrusted");
 			const { head } = imported as { head: string };
 			expect(parents(head)).toEqual([merged, pulled]);
 			expect(tree(head)).toBe(tree(merged));
@@ -222,8 +226,31 @@ describe("bringing GitHub's branch into the project", { timeout: 60_000 }, () =>
 		await landOnMain({ "src/app.js": "three\n" });
 		const imported = (await importGitHub()) as { head: string; base: string };
 		expect(imported.base).toBe(pulled);
+		expect(imported).not.toHaveProperty("untrusted");
 		expect(parents(imported.head)).toEqual([pushed, pulled]);
 		expect(await mergeOntoMain(imported.head)).toEqual({ clean: true, files: ["docs/notes.md"] });
+	});
+
+	it("brings back untrusted a squash onto a GitHub branch that moved on: what it took is unknown", async () => {
+		await landOnMain({ "src/app.js": "two\n", "src/old.js": "old\n" });
+		pushPullBranch();
+		// A commit of GitHub's own lands first, so the squash's files are no commit of GitHive's.
+		github.push({ "docs/notes.md": "from GitHub\n" });
+		const merged = github.mergePull("squash");
+		// GitHive deletes a file the pull request had.
+		await landOnMain({ "src/old.js": null });
+		const imported = await importGitHub();
+		expect(imported).toMatchObject({ commit: merged, head: merged, untrusted: expect.stringContaining("src/old.js") });
+		// Merged from git's own base, the deleted file comes back: for review to see, never to land unseen.
+		expect((await mergeOntoMain(merged)).files).toContain("src/old.js");
+	});
+
+	it("trusts GitHub's own commits on top of each other while they change nothing GitHive changed", async () => {
+		const start = main();
+		await landOnMain({ "src/app.js": "two\n" });
+		github.push({ "docs/notes.md": "from GitHub\n" });
+		const pushed = github.push({ "docs/more.md": "more from GitHub\n" });
+		expect(await importGitHub()).toEqual({ commit: pushed, head: pushed, base: start });
 	});
 });
 

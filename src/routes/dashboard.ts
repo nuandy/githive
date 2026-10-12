@@ -110,9 +110,12 @@ function personActionRoutes(app: Hono<AppEnv>) {
 		return c.json(await giveUpAsPerson(toolContext(c.env, actor), repo.id, c.req.param("change"), byOf(actor)));
 	});
 	// Looks at GitHub's branch now and brings its changes back, even a commit given up or sent to a person before.
+	// Taking back a person's give-up is a person's to do.
 	app.post("/repos/:owner/:name/github/again", async (c) => {
+		const actor = c.get("principal") ?? fail(401, "no identity");
+		if (!isPerson(actor)) fail(403, "asking for GitHub's changes again from the dashboard is a person's");
 		const repo = await routeRepo(c, "write");
-		const ctx = toolContext(c.env, c.get("principal"));
+		const ctx = toolContext(c.env, actor);
 		const state = await bringGitHubBackAgain(ctx, repo.id);
 		await ctx.ping?.(repo.id).catch(() => undefined);
 		return c.json(state);

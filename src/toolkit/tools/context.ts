@@ -85,6 +85,8 @@ export interface ToolContext {
 	teamsOf?: (repo: string) => Promise<string[]>;
 	/** Set for GitHive's hosted agents, which act under the reserved githive- names. */
 	hosted?: boolean;
+	/** The caller's verified identity, as its stamps name it (service:githive-github, person:…). */
+	identity?: string;
 	/**
 	 * What the caller may do in the call's repo, as the MCP front door checked it for this call. Unset where no one
 	 * checked it per repo (hosted agents, the dashboard's own calls, tests); only an admin's exceptions read it.
@@ -286,7 +288,7 @@ async function callerOf(args: Args, ctx: ToolContext, registered: Registry | und
 	};
 	const actAs = (field: string) => {
 		const agent = agentArg(field);
-		mayActAs(agent, acting, registered, ctx.hosted);
+		mayActAs(agent, acting, registered, ctx);
 		return agent;
 	};
 	return { acting, agentArg, actAs };
