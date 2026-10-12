@@ -34,7 +34,7 @@ Plain ES modules, no framework. Logic lives in `src/*.js` and is tested in `test
 
 **`src/puzzle.js`**
 
-- `puzzleFor(date)`: the puzzle for a day. `date` is a `Date` or a `"YYYY-MM-DD"` string, read as a UTC day. Returns `{ id, letters, center, outer, answers, pangrams }`: `id` is the `"YYYY-MM-DD"` day; `center` is one letter; `outer` the six others; `letters` all seven, center first; `answers` every word in `WORDS` the puzzle accepts, sorted; `pangrams` the answers that use all seven letters. The same day always gives the same puzzle, with 20 to 60 answers and at least one pangram, chosen with a seeded random number generator from the day (never `Math.random`).
+- `puzzleFor(date)`: the puzzle for a day. `date` is a `Date` or a `"YYYY-MM-DD"` string, read as a UTC day. Returns `{ id, letters, center, outer, answers, pangrams }`: `id` is the `"YYYY-MM-DD"` day; `center` is one letter; `outer` the six others; `letters` all seven, center first; `answers` every word in `WORDS` the puzzle accepts, sorted; `pangrams` the answers that use all seven letters. The same day always gives the same puzzle, with 20 to 60 answers and at least one pangram, chosen with a seeded random number generator from the day (never `Math.random`). A date outside the years 2000 to 2999, or one that isn't a real day, throws a `RangeError`.
 - `isPangram(word, puzzle)`: whether a word uses all seven letters.
 
 **`src/scoring.js`**
@@ -46,8 +46,8 @@ Plain ES modules, no framework. Logic lives in `src/*.js` and is tested in `test
 
 **`src/game.js`** (game objects are never changed; each function returns a new one)
 
-- `newGame(puzzle, saved)`: `{ puzzle, found, score }`, starting from `saved.found` (a list of words) if given, keeping only words the puzzle accepts.
-- `guess(game, word)`: `{ ok: true, game, points, pangram }` for a new answer, or `{ ok: false, reason }`, where `reason` is one of `"too-short"`, `"missing-center"`, `"bad-letters"`, `"not-a-word"`, `"already-found"`. The word is trimmed and lowercased first.
+- `newGame(puzzle, saved, scoreWord)`: `{ puzzle, found, score }`, starting from `saved.found` (a list of words) if given, keeping only words the puzzle accepts. `scoreWord(word, puzzle)` gives a word's points: `src/main.js` passes `wordScore` from `src/scoring.js`, and tests pass any function they like.
+- `guess(game, word, scoreWord)`: `{ ok: true, game, points, pangram }` for a new answer, or `{ ok: false, reason }`, where `reason` is one of `"too-short"`, `"missing-center"`, `"bad-letters"`, `"not-a-word"`, `"already-found"`. The word is trimmed and lowercased first.
 - `shuffleOuter(outer, random = Math.random)`: the six outer letters in a new order.
 
 **`src/storage.js`** (saves to `localStorage`, and never throws: storage can be missing, full or blocked)
@@ -59,18 +59,18 @@ Plain ES modules, no framework. Logic lives in `src/*.js` and is tested in `test
 
 **`src/share.js`**
 
-- `shareText(game)`: a short summary to paste into a chat, with no answers in it: the day, the rank, points and words found, and a row of hexagons (⬢ for each rank reached, ⬡ for the rest).
+- `shareText(game, rank, ranks)`: a short summary to paste into a chat, with no answers in it: the day, the rank, points and words found, and a row of hexagons (⬢ for each rank reached, ⬡ for the rest). `rank` is what `rankFor` returns and `ranks` is `RANKS`, both passed in by `src/main.js`.
 - `share(text, nav = globalThis.navigator)`: uses the Web Share API if there is one, else copies to the clipboard. Resolves to `"shared"`, `"copied"` or `"failed"`.
 
 ### The page
 
-`index.html` has these regions, by id: `#board`, `#entry`, `#controls`, `#message`, `#progress`, `#found`, `#yesterday`, and the buttons `#help-button`, `#share-button` and `#yesterday-button`. `src/main.js` wires the modules to them, and is the only module that puts two pieces together: it passes each the data it needs, such as yesterday's puzzle to `renderYesterday`.
+`index.html` has these regions, by id: `#board`, `#entry`, `#controls`, `#message`, `#progress`, `#found`, `#yesterday`, and the buttons `#help-button`, `#share-button` and `#yesterday-button`. `src/main.js` wires the modules to them, and is the only module that puts two pieces together: it passes each the data it needs, such as yesterday's puzzle to `renderYesterday`, `wordScore` to the game, and the rank and `RANKS` to whatever shows them. No other module imports another piece's module (`src/words.js`, a starting file, is fine), so every piece can be built and tested on its own.
 
 - **`src/ui/board.js`**: `renderBoard(element, puzzle, outer, { onLetter })` draws the seven letters as hexagons in a honeycomb (see The honeycomb, below), the center one highlighted, each a button that calls `onLetter(letter)`. Returns `{ setOuter(outer) }` to redraw after a shuffle. Styles in `styles/board.css`.
 - **`src/ui/input.js`**: `bindInput(root, { onType, onDelete, onSubmit, onShuffle })` listens for letter keys, Backspace, Enter and the space bar (shuffle) as Keyboard, below, says, and draws the Delete, Shuffle and Enter buttons into `#controls`. `renderEntry(element, word, puzzle)` shows the word being typed, the center letter marked and letters outside the puzzle dimmed. Styles in `styles/input.css`.
-- **`src/ui/progress.js`**: `renderProgress(element, game)` draws the rank and a bar of the ranks with the current one marked, and the points to the next. `renderFound(element, game)` lists the words found, alphabetically, pangrams marked, with the count. Styles in `styles/progress.css`.
+- **`src/ui/progress.js`**: `renderProgress(element, game, rank, ranks)` draws the rank and a bar of the ranks with the current one marked, and the points to the next (`rank` is what `rankFor` returns and `ranks` is `RANKS`). `renderFound(element, game)` lists the words found, alphabetically, pangrams (from `game.puzzle.pangrams`) marked, with the count. Styles in `styles/progress.css`.
 - **`src/ui/message.js`**: `showMessage(element, text, kind)` shows a short message that fades out: `kind` is `"good"`, `"great"` (a pangram) or `"bad"`. `#message` is a live region (`role="status"`) that screen readers must always reach: it fades by opacity alone, and its text is cleared once it has faded. Until the first `showMessage`, it shows whatever text the page put in it, fully visible. Never hide it with `hidden`, `display: none`, `visibility: hidden` or `aria-hidden` while a message shows. `messageFor(result)` turns a `guess` result into its text ("Too short", "Missing center letter", "Pangram!" and so on). Styles in `styles/message.css`.
-- **`src/ui/help.js`**: `openHelp()` opens a dialog with the rules, scoring and ranks, and a line on how the game was built. Styles in `styles/help.css`.
+- **`src/ui/help.js`**: `openHelp(ranks)` opens a dialog with the rules, scoring and the ranks (`ranks` is `RANKS`, passed in), and a line on how the game was built. Escape, its close button, or a click on the backdrop outside the dialog's box closes it; a click inside the box never does. Styles in `styles/help.css`.
 - **`src/ui/yesterday.js`**: `renderYesterday(element, puzzle)` shows the puzzle it is given (`src/main.js` passes yesterday's, from `puzzleFor`): its letters as a small honeycomb laid out exactly as the board's (see The honeycomb), and every answer, pangrams marked, in a panel that opens and closes. It imports nothing from `src/puzzle.js`; its tests build a puzzle by hand. Styles in `styles/yesterday.css`.
 - **`styles/theme.css`**: colors (honey and amber), type, the page layout on phones and desktops, and a dark mode that follows the system. It defines the colors below; every other stylesheet uses only these, never a color of its own.
 

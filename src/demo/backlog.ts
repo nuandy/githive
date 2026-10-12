@@ -41,13 +41,12 @@ export const BACKLOG: DemoPiece[] = [
 		title: "Game rules",
 		intent:
 			"src/game.js: newGame, guess and shuffleOuter as README.md describes, with each guess result's " +
-			"reason. Game objects are never changed. Use wordScore from src/scoring.js for points. Keep to the " +
-			"contract in README.md (How the code fits together), which other agents build against at the same " +
-			"time. Plain ES module, no dependencies. Write thorough tests with node:test in the test file and " +
-			"run `npm test` before pushing (it's fast and needs no install). Tests can build a small puzzle " +
-			"object by hand.",
+			"reason. Game objects are never changed. Points come from the scoreWord function passed in; it " +
+			"imports nothing from src/scoring.js, so it needn't wait for it. Keep to the contract in README.md " +
+			"(How the code fits together), which other agents build against at the same time. Plain ES module, " +
+			"no dependencies. Write thorough tests with node:test in the test file and run `npm test` before " +
+			"pushing (it's fast and needs no install). Tests can build a small puzzle object by hand.",
 		paths: ["src/game.js", "test/game.test.js"],
-		after: ["scoring"],
 	},
 	{
 		id: "storage",
@@ -65,13 +64,13 @@ export const BACKLOG: DemoPiece[] = [
 		id: "share",
 		title: "Sharing a result",
 		intent:
-			"src/share.js: shareText and share as README.md describes. The text never gives away an answer. Keep " +
-			"to the contract in README.md (How the code fits together), which other agents build against at the " +
-			"same time. Plain ES module, no dependencies. Write thorough tests with node:test in the test file " +
-			"and run `npm test` before pushing (it's fast and needs no install). Test share() with fake " +
+			"src/share.js: shareText and share as README.md describes. The text never gives away an answer. The " +
+			"rank and RANKS are passed in; it imports nothing from src/scoring.js, so it needn't wait for it. " +
+			"Keep to the contract in README.md (How the code fits together), which other agents build against at " +
+			"the same time. Plain ES module, no dependencies. Write thorough tests with node:test in the test " +
+			"file and run `npm test` before pushing (it's fast and needs no install). Test share() with fake " +
 			"navigator objects for each path.",
 		paths: ["src/share.js", "test/share.test.js"],
-		after: ["scoring"],
 	},
 	{
 		id: "board",
@@ -108,14 +107,14 @@ export const BACKLOG: DemoPiece[] = [
 		intent:
 			"src/ui/progress.js: renderProgress and renderFound as README.md describes: the rank name, a bar of " +
 			"the nine ranks as small hexagons with the current one filled, the points to the next rank, and the " +
-			"words found in columns, pangrams in bold, with a count. Keep to the contract in README.md (How the " +
-			"code fits together), which other agents build against at the same time. Plain DOM code, no " +
+			"words found in columns, pangrams in bold, with a count. The rank and RANKS are passed in; it " +
+			"imports nothing from src/scoring.js, so it needn't wait for it. Keep to the contract in README.md " +
+			"(How the code fits together), which other agents build against at the same time. Plain DOM code, no " +
 			"framework or dependencies, working in current browsers without a build step; import other modules " +
 			"with relative paths ending in .js. Make it accessible: real buttons, labels, focus states, and " +
 			"keyboard use. Keep its styles in its own stylesheet, using only the theme colors README.md lists " +
 			"(Colors and contrast), always in their text-and-background pairs.",
 		paths: ["src/ui/progress.js", "styles/progress.css"],
-		after: ["scoring"],
 	},
 	{
 		id: "message",
@@ -135,17 +134,17 @@ export const BACKLOG: DemoPiece[] = [
 		id: "help",
 		title: "How to play",
 		intent:
-			"src/ui/help.js: openHelp() as README.md describes: a <dialog> with the rules, how scoring works " +
-			"with an example, the nine ranks from RANKS, and a closing line: built by a hive of AI agents " +
-			"through GitHive (https://githive.app), each claiming its own piece, with no queen assigning the " +
-			"work. Closes with Escape, a close button or a click outside. Keep to the contract in README.md (How " +
-			"the code fits together), which other agents build against at the same time. Plain DOM code, no " +
-			"framework or dependencies, working in current browsers without a build step; import other modules " +
-			"with relative paths ending in .js. Make it accessible: real buttons, labels, focus states, and " +
-			"keyboard use. Keep its styles in its own stylesheet, using only the theme colors README.md lists " +
-			"(Colors and contrast), always in their text-and-background pairs.",
+			"src/ui/help.js: openHelp(ranks) as README.md describes: a <dialog> with the rules, how scoring " +
+			"works with an example, the nine ranks it's given (RANKS, passed in by src/main.js, so it imports " +
+			"nothing from src/scoring.js), and a closing line: built by a hive of AI agents through GitHive " +
+			"(https://githive.app), each claiming its own piece, with no queen assigning the work. Closes with " +
+			"Escape, a close button or a click on the backdrop outside the dialog, never a click inside it. Keep " +
+			"to the contract in README.md (How the code fits together), which other agents build against at the " +
+			"same time. Plain DOM code, no framework or dependencies, working in current browsers without a " +
+			"build step; import other modules with relative paths ending in .js. Make it accessible: real " +
+			"buttons, labels, focus states, and keyboard use. Keep its styles in its own stylesheet, using only " +
+			"the theme colors README.md lists (Colors and contrast), always in their text-and-background pairs.",
 		paths: ["src/ui/help.js", "styles/help.css"],
-		after: ["scoring"],
 	},
 	{
 		id: "yesterday",
