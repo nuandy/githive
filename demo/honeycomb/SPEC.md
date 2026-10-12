@@ -49,7 +49,7 @@ Plain ES modules, no framework. Logic lives in `src/*.js` and is tested in `test
 - **`src/ui/progress.js`**: `renderProgress(element, game, rank, ranks)` draws the rank and a bar of the ranks with the current one marked, and the points to the next (`rank` is what `rankFor` returns and `ranks` is `RANKS`). `renderFound(element, game)` lists the words found, alphabetically, pangrams (from `game.puzzle.pangrams`) marked, with the count. Styles in `styles/progress.css`.
 - **`src/ui/message.js`**: `showMessage(element, text, kind)` shows a short message that fades out: `kind` is `"good"`, `"great"` (a pangram) or `"bad"`. `#message` is a live region (`role="status"`) that screen readers must always reach: it fades by opacity alone, and its text is cleared once it has faded. Until the first `showMessage`, it shows whatever text the page put in it, fully visible. Never hide it with `hidden`, `display: none`, `visibility: hidden` or `aria-hidden` while a message shows. `messageFor(result)` turns a `guess` result into its text ("Too short", "Missing center letter", "Pangram!" and so on). Styles in `styles/message.css`.
 - **`src/ui/help.js`**: `openHelp(ranks)` opens a dialog with the rules, scoring and the ranks (`ranks` is `RANKS`, passed in), and a line on how the game was built. Escape, its close button, or a click on the backdrop outside the dialog's box closes it; a click inside the box never does. Styles in `styles/help.css`.
-- **`src/ui/yesterday.js`**: `renderYesterday(element, puzzle)` shows the puzzle it is given (`src/main.js` passes yesterday's, from `puzzleFor`): its letters as a small honeycomb laid out exactly as the board's (see The honeycomb), and every answer, pangrams marked, in a panel that opens and closes. It imports nothing from `src/puzzle.js`; its tests build a puzzle by hand. Styles in `styles/yesterday.css`.
+- **`src/ui/yesterday.js`**: `renderYesterday(element, puzzle)` shows the puzzle it is given (`src/main.js` passes yesterday's, from `puzzleFor`): its letters as a small honeycomb laid out exactly as the board's (see The honeycomb), and every answer, pangrams marked, in a panel that opens and closes. It imports nothing from `src/puzzle.js`, so any puzzle its tests need is built by hand. Styles in `styles/yesterday.css`.
 - **`styles/theme.css`**: colors (honey and amber), type, the page layout on phones and desktops, and a dark mode that follows the system. It defines the colors below; every other stylesheet uses only these, never a color of its own.
 
 ### The honeycomb
@@ -68,6 +68,8 @@ So that the shape can be tested without a browser, `src/ui/board.js` and `src/ui
 - each cell is a `<button>` clipped to its hexagon (the `clip-path` above, on the button itself), so a tap or click lands only on the letter it shows: an unclipped button is a rectangle, and neighbouring rectangles overlap. The cell's colors are drawn by an element inside it, a hexagon inset 3px on every side (`position: absolute; inset: 3px` and the same `clip-path`), so a 3px hexagonal border of the button's own background shows around it. That border is the focus ring: the button's background is transparent, and `var(--focus)` on `:focus-visible`. Don't use `outline` or `box-shadow` for it; the `clip-path` cuts them off.
 
 Their tests (`test/board.test.js`, `test/yesterday.test.js`) check `combLayout` for a few widths: the center cell is in the middle of the box; every outer cell's center is `1.06 × H` from the center cell's, in the direction above; no two cells' centers are closer than `H`, so no hexagons overlap; and every cell lies inside the box.
+
+Tests run under Node, with no page to draw into. A module in `src/ui/` is tested through its pure functions: `combLayout`, and anything else it exports that doesn't touch the DOM (yesterday's answers in order, say), given a puzzle built by hand. What it draws is checked by its reviewer reading the code, not by its tests, so don't add a DOM library to test drawing, and a reviewer shouldn't ask for one.
 
 ### Keyboard
 
@@ -98,7 +100,7 @@ Text and its background always come as one of these pairs, in both modes: `--ink
 
 A piece is done when:
 
-- it keeps to its part of the contract above, and its tests (for logic) pass with `npm test`;
+- it keeps to its part of the contract above, and its tests (for logic, and for a page module's pure functions) pass with `npm test`;
 - the page loads with no errors in the console, with the files served from a folder of their own: every URL is relative (`src/...`, never `/src/...`);
 - it works with storage blocked and in a sandboxed page;
 - it follows Keyboard, Colors and contrast, and, for anything drawn, The honeycomb;

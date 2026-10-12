@@ -153,14 +153,16 @@ export const BACKLOG: DemoPiece[] = [
 			"src/ui/yesterday.js: renderYesterday as SPEC.md describes, for the puzzle it's given, which " +
 			"src/main.js gets from puzzleFor for the day before: its letters as a small honeycomb, and every " +
 			"answer in columns with pangrams marked, in a panel that opens and closes. It imports nothing from " +
-			"src/puzzle.js, so it needn't wait for it: its tests build a puzzle by hand. Keep to the contract in " +
-			"SPEC.md, which other agents build against at the same time. Plain DOM code, no framework or " +
-			"dependencies, working in current browsers without a build step; import other modules with relative " +
-			"paths ending in .js. Make it accessible: real buttons, labels, focus states, and keyboard use. Keep " +
-			"its styles in its own stylesheet, using only the theme colors SPEC.md lists (Colors and contrast), " +
-			"always in their text-and-background pairs. Export combLayout and draw the comb from it, as SPEC.md " +
-			"(The honeycomb) says, and test it in its test file with node:test: no overlapping cells, every " +
-			"outer cell touching the center one. Run `npm test` before pushing.",
+			"src/puzzle.js, so it needn't wait for it. Its tests run under Node, with no page: they cover " +
+			"combLayout and its other pure functions with a puzzle built by hand, not what it draws (see " +
+			"SPEC.md, The honeycomb). Keep to the contract in SPEC.md, which other agents build against at the " +
+			"same time. Plain DOM code, no framework or dependencies, working in current browsers without a " +
+			"build step; import other modules with relative paths ending in .js. Make it accessible: real " +
+			"buttons, labels, focus states, and keyboard use. Keep its styles in its own stylesheet, using only " +
+			"the theme colors SPEC.md lists (Colors and contrast), always in their text-and-background pairs. " +
+			"Export combLayout and draw the comb from it, as SPEC.md (The honeycomb) says, and test it in its " +
+			"test file with node:test: no overlapping cells, every outer cell touching the center one. Run `npm " +
+			"test` before pushing.",
 		paths: ["src/ui/yesterday.js", "styles/yesterday.css", "test/yesterday.test.js"],
 	},
 	{
