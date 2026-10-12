@@ -100,7 +100,31 @@ export const mergeTools: ToolHandlers = {
 		if (!author) fail(404, `no change ${change} on ${repo}`);
 		return reviewAccess(call, change, author, held, caller);
 	},
+	async leave_review(call) {
+		const { args, ctx, repo, actAs } = call;
+		if (!ctx.reviews) fail(501, "review holds aren't kept here");
+		const agent = actAs("agent");
+		const change = requiredString(args, "change");
+		const role = optionalString(args, "role") ?? "review";
+		const head = optionalString(args, "head") ?? (await pushedHead(call, change));
+		const key = holdKey(head, role);
+		const held = await ctx.reviews.held(repo, [head]);
+		if (!held[key]?.includes(agent))
+			return { ok: false, reason: `you don't hold the ${role} review of ${change} at ${head.slice(0, 8)}` };
+		await ctx.reviews.release(repo, key, agent, true);
+		return { ok: true, change, head, role };
+	},
 };
+
+/** The commit a change's branch holds now, for a review given back without naming it. */
+async function pushedHead(call: ToolCall, change: string) {
+	const { claim, released } = await call.changeOf(change);
+	const author = claim?.agent ?? released.at(-1)?.agent;
+	if (!author) fail(404, `no change ${change} on ${call.repo}`);
+	const fork = await call.changeSource(author, "read", change, claim?.since);
+	const head = await branchHead(fork, `changes/${change}`).catch(() => null);
+	return head ?? fail(409, `${change} has nothing pushed, so there's no review of it to give back`);
+}
 
 // The connected GitHub repo, or null if there is none or it can't be reached.
 async function githubLink(ctx: ToolContext, registry: Registry | undefined): Promise<GitHubLink | null> {

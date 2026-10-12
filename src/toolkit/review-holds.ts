@@ -105,7 +105,8 @@ export async function releaseReview(
 		if (!until) return { refused: "none" };
 		if (gaveUp) {
 			const { [agent]: _, ...others } = holds[key]!;
-			holds[key] = others;
+			if (Object.keys(others).length) holds[key] = others;
+			else delete holds[key];
 			return { state: { ...state, holds }, text: `${agent} gave up the review of ${key}` };
 		}
 		const soon = new Date(now() + VOTED_HOLD_MS).toISOString();

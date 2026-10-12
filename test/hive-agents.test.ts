@@ -1,5 +1,5 @@
-import { describe, expect, it, vi } from "vitest";
-import { type HostedAgentState, REVIEW_STALLS_MS } from "../src/hosted-agents";
+import { describe, expect, it } from "vitest";
+import type { HostedAgentState } from "../src/hosted-agents";
 import { hiveAgentNames } from "../src/toolkit/hive-agents";
 import { FakeStorage } from "./fakes/env";
 
@@ -25,7 +25,7 @@ function hive(pieces: Piece[], options: { reject?: string[]; takenElsewhere?: st
 	const merged = new Set<string>();
 	const log: string[] = [];
 	const claimedAfter = new Map<string, string[]>();
-	const gaveUp: string[] = [];
+	const givenBack = new Set<string>();
 	const approved = (change: string) =>
 		(votes.get(change) ?? []).some((vote) => vote.verdict === "approve" && vote.reviewer !== claimed.get(change));
 	const tools = (name: string, args: Record<string, unknown>): unknown => {
@@ -86,12 +86,11 @@ function hive(pieces: Piece[], options: { reject?: string[]; takenElsewhere?: st
 			holds.delete(offer.change);
 			log.push(`${agent} reviewed ${offer.change}: ${verdict}`);
 		}
-		protected override async reviewerProgress(_repo: string, reviewing: { change: string; since: number }) {
-			const stalled = options.stalls?.includes(reviewing.change);
-			return { working: !!stalled, lastActive: reviewing.since };
+		protected override async reviewerDone(_repo: string, reviewing: { change: string }) {
+			return !options.stalls?.includes(reviewing.change);
 		}
-		protected override async giveUpReview(_repo: string, reviewing: { change: string }, agent: string) {
-			gaveUp.push(`${agent} ${reviewing.change}`);
+		protected override async stillHolds(_repo: string, reviewing: { change: string }) {
+			return !givenBack.has(reviewing.change);
 		}
 		protected override agentNamed(repo: string, name: string): InstanceType<typeof HostedAgent> {
 			return instanceFor(`agent:${repo}:${name}`);
@@ -111,7 +110,7 @@ function hive(pieces: Piece[], options: { reject?: string[]; takenElsewhere?: st
 	const rounds = async (turns: number) => {
 		for (let round = 0; round < turns; round++) for (const agent of agents()) await agent.alarm();
 	};
-	return { repoHive, agents, rounds, log, claimed, merged, votes, claimedAfter, gaveUp };
+	return { repoHive, agents, rounds, log, claimed, merged, votes, claimedAfter, givenBack };
 }
 
 const pieces = (...ids: string[]) => ids.map((id) => ({ id, title: id, intent: `build ${id}`, paths: [`src/${id}/`] }));
@@ -171,17 +170,20 @@ describe("a repo's hosted agents", () => {
 		expect(claimedAfter.get("app")).toEqual(["a"]);
 	});
 
-	it("give up a review whose reviewer has stalled, freeing it for another agent", async () => {
-		const { repoHive, agents, rounds, gaveUp } = hive(pieces("a"), { stalls: ["a"] });
+	it("wait on a review while they hold it, and move on once their hold is gone", async () => {
+		const { repoHive, agents, rounds, givenBack } = hive(pieces("a"), { stalls: ["a"] });
 		await start(repoHive);
+		await rounds(2);
+		const reviewing = async () => {
+			const accounts = await Promise.all(agents().map((agent) => agent.account()));
+			return accounts.filter((account) => account?.reviewing).map((account) => account!.reviewing!.change);
+		};
+		// Its reviewer hasn't voted, and it still holds the review: however long that takes, it waits.
+		expect(await reviewing()).toEqual(["a"]);
+		// The reviewer failed and gave the review back (or the hold ran out): the agent goes on.
+		givenBack.add("a");
 		await rounds(1);
-		const reviewer = (await Promise.all(agents().map((agent) => agent.account()))).find((a) => a?.reviewing);
-		expect(reviewer?.reviewing?.change).toBe("a");
-		// Its reviewer logs nothing for longer than a reviewer ever takes between steps.
-		vi.setSystemTime(Date.now() + REVIEW_STALLS_MS + 1_000);
-		await rounds(1);
-		expect(gaveUp).toEqual([`${reviewer!.name} a`]);
-		vi.useRealTimers();
+		expect(await reviewing()).toEqual([]);
 	});
 
 	it("take no new work once their time is up, and stop when told", async () => {

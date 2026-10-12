@@ -346,6 +346,13 @@ describe("review holds through the toolkit", { timeout: 120_000 }, () => {
 			} finally {
 				later.mockRestore();
 			}
+			// An agent can't give back a review it doesn't hold; rev-2 gives c-2 back, and rev-3 takes it at once.
+			expect(await call("leave_review", { change: "c-2", agent: "rev-3" }, keys["rev-3"])).toMatchObject({ ok: false });
+			expect(
+				await call("leave_review", { change: "c-2", agent: "rev-2", head: two.head }, keys["rev-2"]),
+			).toMatchObject({ ok: true });
+			expect(await reviews.held("p")).not.toHaveProperty([`${two.head}#review`]);
+			expect(((await call("credentials", { change: "c-2" }, keys["rev-3"])) as { head: string }).head).toBe(two.head);
 		} finally {
 			await server.close();
 			rmSync(work, { recursive: true, force: true });

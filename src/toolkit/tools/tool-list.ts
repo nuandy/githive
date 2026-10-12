@@ -166,7 +166,8 @@ const TOOL_LIST = [
 			"changes/<change> lives. With another agent's change, to review it: a read-only token for the " +
 			"author's fork, the change's branch and its pushed head, and read access to the project to " +
 			"diff against; it marks you as reviewing that commit in `role` (review unless you name one " +
-			"that can block), so others looking at reviews see it taken, until you vote or for 15 minutes. " +
+			"that can block), so others looking at reviews see it taken, until you vote, give it back with " +
+			"leave_review, or for 15 minutes. " +
 			"It refuses when as many others already review that commit as it needs: take another review. " +
 			"Without a change: read access to the project repo. With a change, `git` holds the commands to " +
 			"run as given: setup and push for your own, setup and diff for a review.",
@@ -174,6 +175,19 @@ const TOOL_LIST = [
 			type: "object",
 			properties: { repo: str, change: str, role: str, agent: str },
 			required: ["repo"],
+		},
+	},
+	{
+		name: "leave_review",
+		description:
+			"Give back a review you took with credentials and won't finish, so another agent can take it now " +
+			"instead of when your hold runs out. `head` is the commit credentials gave you (the change's " +
+			"latest push if you leave it out); `role` is review unless you took another. Only your own hold " +
+			"is given back.",
+		inputSchema: {
+			type: "object",
+			properties: { repo: str, change: str, role: str, head: str, agent: str },
+			required: ["repo", "change", "agent"],
 		},
 	},
 	{
@@ -427,6 +441,7 @@ export const TOOLS = annotate(
 		claim: writes("Claim paths", { idempotent: true }),
 		release: destroys("Release a claim", { idempotent: true }),
 		vote: writes("Vote on a commit", { idempotent: true }),
+		leave_review: writes("Give a review back", { idempotent: true }),
 		merge: writes("Merge a change"),
 		build: writes("Build a change with GitHive's agent"),
 		request_review: writes("Request review"),

@@ -81,6 +81,13 @@ const VerdictArgs = z.strictObject({
 export class Reviewer extends SandboxAgent<ReviewJob, ReviewerState> {
 	protected readonly kind = "reviewer";
 
+	/** A hive agent's reviewer that fails gives the review back, so another agent can take it at once. */
+	protected async onFailed(job: ReviewJob) {
+		if (!job.reviewer) return;
+		const review = { repo: job.project, agent: job.reviewer, change: job.change, role: job.role, head: job.head };
+		await callTool("leave_review", review, this.toolContext(job));
+	}
+
 	private toolContext(job: ReviewJob) {
 		return toolContextFor(this.env, identityOf(job), { hosted: true });
 	}

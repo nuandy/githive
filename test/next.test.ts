@@ -234,6 +234,7 @@ const NO_NEXT: [string, Record<string, unknown>, unknown][] = [
 	["backlog", { agent: "a" }, { open: [{ id: "free-piece" }], waiting: [] }],
 	["audit", {}, { merges: 0, open: 0, violations: [] }],
 	["revert", {}, { ok: true }],
+	["leave_review", { agent: "a" }, { ok: true, change: "o-1", head: HEAD, role: "review" }],
 	["register", { agent: "a" }, { agent: "a", key: "a.secret", note: "" }],
 	["github_pr", {}, { url: "https://github.com/acme/shop/pull/1", opened: false }],
 ];

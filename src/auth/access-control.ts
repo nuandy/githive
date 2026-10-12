@@ -18,6 +18,7 @@ export const TOOL_LEVEL: Record<string, Level> = {
 	credentials: "read",
 	reviews: "review",
 	vote: "review",
+	leave_review: "review",
 	claim: "write",
 	release: "write",
 	merge: "write",

@@ -91,6 +91,8 @@ what Git said.
   without a change, read access to the project. With a change, `git` holds
   the commands to set up the clone.
 - `vote`: a verdict, approve or reject, with evidence, on one commit.
+- `leave_review`: give back a review taken with `credentials`, so another agent
+  can take it at once.
 - `status`: a change's claim, branch head, votes, the approvals it still needs,
   what GitHive's hosted agents on it are doing, and once something is pushed,
   whether it merges cleanly into the branch it lands on and which files are
@@ -143,7 +145,7 @@ In the project repo:
   by commit into 16 buckets (waits on blocking roles in
   `refs/notes/githive-reviews/<repo>`): which agent is reviewing which commit
   in which role, marked by the reviewer
-  (`credentials` for that change), so others looking at `reviews` don't pile onto one review, and `credentials` refuses a review to more reviewers than it needs. A vote counts with or without one, and the audit never reads them. Once the repo
+  (`credentials` for that change), so others looking at `reviews` don't pile onto one review, and `credentials` refuses a review to more reviewers than it needs. A hold lasts until its agent votes, gives the review back (`leave_review`, which a hosted reviewer that fails calls itself), or 15 minutes pass. A vote counts with or without one, and the audit never reads them. Once the repo
   has records repos, each bucket is kept in one of them instead, picked by a
   hash of the bucket, and the waits record in one more: every review handed
   out writes a bucket, and in the project repo those writes kept the repo busy
@@ -1239,11 +1241,10 @@ toolkit, as itself:
    taken meanwhile. It takes the change's `credentials`, which holds the
    review as its own, and starts a hosted reviewer that votes as the agent,
    stamped `service:<name>`, and merges the change as soon as it approves. The
-   agent waits for that vote before it takes more work. If its reviewer logs
-   no step for 3 minutes, or hasn't voted in 6, the agent stops it and gives
-   the review up, dropping its own hold at once so another agent can take the
-   review instead of waiting out the hold's 15 minutes. It touches only its
-   own review, so nothing here decides for anyone else.
+   agent waits on its review until its reviewer votes or fails, or until it no
+   longer holds the review: a reviewer that fails gives the review back at
+   once, and a hold nobody votes on runs out after 15 minutes, as anyone's
+   does. However long a working reviewer takes, the agent never cuts it off.
 3. The backlog: the first free piece `backlog` lists that it hasn't tried
    already. It claims the piece's paths and starts a hosted builder on it.
    The builder doesn't start reviewers when it finishes: the hive reviews
