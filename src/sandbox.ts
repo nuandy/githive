@@ -92,6 +92,12 @@ export interface AgentState {
 	pending?: ResponseInputItem[];
 }
 
+/** Where an agent's conversation with the model stands: its last response, and what that response is owed. */
+export interface Conversation {
+	responseId: string;
+	pending: ResponseInputItem[];
+}
+
 const ReadArgs = z.strictObject({
 	path: z.string().describe("Path relative to the repository root"),
 	start_line: z.number().describe("First line to return, counting from 1"),
@@ -183,6 +189,7 @@ export abstract class SandboxAgent<J extends SandboxJob, S extends AgentState> e
 			usage: emptyUsage(),
 			log: [],
 			...this.freshFields(),
+			...this.continuing(job),
 		} as unknown as S; // base fields + the subclass's fields make a full S
 		await this.ctx.storage.put("job", job);
 		await this.ctx.storage.delete(this.staleKeys());
@@ -249,6 +256,18 @@ export abstract class SandboxAgent<J extends SandboxJob, S extends AgentState> e
 	async state() {
 		const { state } = await this.load();
 		return state ? this.view(state) : null;
+	}
+
+	/** Where its conversation with the model stands, for another agent to continue it, or null if it never began. */
+	async conversation(): Promise<Conversation | null> {
+		const { state } = await this.load();
+		if (!state?.previousResponseId) return null;
+		return { responseId: state.previousResponseId, pending: state.pending ?? [] };
+	}
+
+	/** A conversation to continue instead of starting a new one with the kickoff; none by default. */
+	protected continuing(_job: J): Pick<AgentState, "previousResponseId" | "pending"> {
+		return {};
 	}
 
 	async alarm() {
@@ -461,16 +480,23 @@ export abstract class SandboxAgent<J extends SandboxJob, S extends AgentState> e
 			? (state.pending ?? [])
 			: [{ role: "user", content: this.kickoff(job) }];
 		const told = [...inbox, ...heard].map((content) => ({ role: "user" as const, content }));
-		const input: ResponseInputItem[] = [...opening, ...told];
-		const response = await client.responses.create({
-			model: MODEL,
-			instructions: this.instructions(job),
-			input,
-			previous_response_id: state.previousResponseId,
-			tools: openAITools(tools),
-			reasoning: { effort: "high" },
-			max_output_tokens: 32000,
-			prompt_cache_key: promptCacheKey(this.kind, job.repo),
+		const ask = (opening: ResponseInputItem[], previous?: string) =>
+			client.responses.create({
+				model: MODEL,
+				instructions: this.instructions(job),
+				input: [...opening, ...told],
+				previous_response_id: previous,
+				tools: openAITools(tools),
+				reasoning: { effort: "high" },
+				max_output_tokens: 32000,
+				prompt_cache_key: promptCacheKey(this.kind, job.repo),
+			});
+		const handedOn = state.turns === 0 && !!state.previousResponseId;
+		const response = await ask(opening, state.previousResponseId).catch((err) => {
+			if (!handedOn) throw err;
+			// The conversation it was given can't be continued (it may have expired): start afresh.
+			this.note(state, `couldn't continue the earlier conversation, starting afresh: ${String(err).slice(0, 160)}`);
+			return ask([{ role: "user", content: this.kickoff(job) }]);
 		});
 		await this.acknowledgeInbox(inbox, state);
 		state.turns++;

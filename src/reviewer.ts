@@ -1,6 +1,13 @@
 import { z } from "zod";
 import { tool, type AgentTool } from "./agent";
-import { ENVIRONMENT, SandboxAgent, changeContext, type AgentState, type ChangeJob } from "./sandbox";
+import {
+	ENVIRONMENT,
+	SandboxAgent,
+	changeContext,
+	type AgentState,
+	type ChangeJob,
+	type Conversation,
+} from "./sandbox";
 import { gitGuidance } from "./git-guidance";
 import { changeRepoName, toolContextFor } from "./toolkit/env";
 import { callTool, votesFor } from "./toolkit/mcp";
@@ -33,6 +40,8 @@ export interface ReviewJob extends ChangeJob {
 export interface Earlier {
 	head: string;
 	findings: string;
+	/** That review's conversation with the model, to continue with what it read rather than start over. */
+	conversation?: Conversation;
 }
 
 /** Who votes: the hosted agent reviewing, or GitHive's reviewer for the role. */
@@ -151,6 +160,20 @@ export class Reviewer extends SandboxAgent<ReviewJob, ReviewerState> {
 
 	protected freshFields() {
 		return {};
+	}
+
+	/** A recheck continues the conversation of the review that rejected the change, if it was handed on. */
+	protected continuing(job: ReviewJob) {
+		const conversation = job.earlier?.conversation;
+		if (!conversation) return {};
+		const told = {
+			role: "user" as const,
+			content:
+				`The builder pushed a revision: the change is now at commit ${job.head}, checked out in a new ` +
+				`container. Check each of your findings is fixed (\`git diff ${job.earlier!.head} HEAD\` shows what ` +
+				"changed), and that the fix breaks nothing else, then call submit_verdict.",
+		};
+		return { previousResponseId: conversation.responseId, pending: [...conversation.pending, told] };
 	}
 
 	protected async afterClone(job: ReviewJob) {

@@ -1246,8 +1246,10 @@ and each turn is the loop any agent follows, through the toolkit, as itself:
    does. However long a working reviewer takes, the agent never cuts it off. A
    change its reviewer rejected comes first when its revision is offered, and
    the reviewer gets its earlier findings and the diff since, to check they're
-   fixed: that's quicker than a review from scratch, and still only this
-   agent's own order, so any agent may take it.
+   fixed. It continues the rejecting review's conversation with the model, so
+   it still has in mind what it read, or starts afresh if that conversation
+   can't be continued: that's quicker than a review from scratch, and still
+   only this agent's own order, so any agent may take it.
 3. The backlog: the first free piece `backlog` lists that it hasn't tried
    already. It claims the piece's paths and starts a hosted builder on it.
    The builder doesn't start reviewers when it finishes: the hive reviews

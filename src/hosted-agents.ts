@@ -1,6 +1,7 @@
 import { DurableObject } from "cloudflare:workers";
 import { reviewerName } from "./artifacts";
 import { statusOf } from "./errors";
+import type { Conversation } from "./sandbox";
 import { callTool } from "./toolkit/mcp";
 import { changeRepoName, startHostedBuilder, startHostedReviewers, toolContextFor } from "./toolkit/env";
 import { hiveAgentNames, hiveIdentity } from "./toolkit/hive-agents";
@@ -73,6 +74,8 @@ interface Rejected {
 	change: string;
 	head: string;
 	findings: string;
+	/** Its reviewer's conversation with the model, for the recheck to continue. */
+	conversation?: Conversation;
 }
 
 /** How many rejected changes an agent remembers. */
@@ -82,6 +85,7 @@ const REJECTED_KEPT = 10;
 interface ReviewerResult {
 	over: boolean;
 	rejected?: string;
+	conversation?: Conversation;
 }
 
 export class HostedAgent extends DurableObject<Env> {
@@ -199,17 +203,20 @@ export class HostedAgent extends DurableObject<Env> {
 	protected startReviewer(repo: string, offer: ReviewOption, agent: string, earlier?: Rejected): Promise<unknown> {
 		// It merges as soon as it approves, so an approved change doesn't wait for its author's next turn.
 		const review = { repo, change: offer.change, roles: [offer.role], reviewer: agent, mergeWhenApproved: true };
-		const recheck = earlier ? { earlier: { head: earlier.head, findings: earlier.findings } } : {};
+		const recheck = earlier ? { earlier } : {};
 		return startHostedReviewers(this.env, { ...review, ...recheck });
 	}
 
 	/** Whether the agent's reviewer has voted or failed, and its findings if it rejected (tests answer it instead). */
 	protected async reviewerResult(repo: string, reviewing: Reviewing, agent: string): Promise<ReviewerResult> {
 		const name = reviewerName(changeRepoName(repo, reviewing.change), `${reviewing.role}:${agent}`, reviewing.head);
-		const reviewer = await this.env.REVIEWER.getByName(name).state();
+		const stub = this.env.REVIEWER.getByName(name);
+		const reviewer = await stub.state();
 		const over = reviewer?.status === "done" || reviewer?.status === "failed";
 		const rejected = reviewer?.verdict === "reject" ? reviewer.evidence : undefined;
-		return rejected ? { over, rejected } : { over };
+		if (!rejected) return { over };
+		const conversation = (await stub.conversation().catch(() => null)) ?? undefined;
+		return conversation ? { over, rejected, conversation } : { over, rejected };
 	}
 
 	/** Whether the agent still holds its review, which it gave back or which ran out (tests answer it instead). */
@@ -293,7 +300,10 @@ export class HostedAgent extends DurableObject<Env> {
 	private async reviewOver(state: HostedAgentState) {
 		const reviewing = state.reviewing!;
 		const result = await this.reviewerResult(state.repo, reviewing, state.name);
-		if (result.rejected) remember(state, { change: reviewing.change, head: reviewing.head, findings: result.rejected });
+		if (result.rejected) {
+			const conversation = result.conversation ? { conversation: result.conversation } : {};
+			remember(state, { change: reviewing.change, head: reviewing.head, findings: result.rejected, ...conversation });
+		}
 		if (result.over) return true;
 		return !(await this.stillHolds(state.repo, reviewing, state.name));
 	}

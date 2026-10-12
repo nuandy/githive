@@ -1,4 +1,5 @@
 import type { ChangeAwareness } from "../footprint-cache";
+import type { Conversation } from "../sandbox";
 import { type GitHubImportResult, githubGate } from "../gate-github";
 import { linkTo } from "../github";
 import type { LandingResult } from "../gate-landing";
@@ -806,7 +807,7 @@ export async function startHostedReviewers(
 		/** A hive's agent reviewing under its own name (see ReviewJob.reviewer). */
 		reviewer?: string;
 		/** An earlier commit of the change the agent rejected, and its findings (see ReviewJob.earlier). */
-		earlier?: { head: string; findings: string };
+		earlier?: { head: string; findings: string; conversation?: Conversation };
 	},
 ) {
 	const { repo, change } = input;
