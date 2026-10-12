@@ -66,6 +66,32 @@ function ProviderButtons({
 	);
 }
 
+const SOURCE = "https://github.com/nuandy/githive";
+
+/** Where to read more before signing in: the code, how it works, how to get in, and what happens to your data. */
+function SignInFooter() {
+	const links: [string, string][] = [
+		["Source on GitHub", SOURCE],
+		["How it works", `${SOURCE}#how-it-works`],
+		["Ask for an invite", `${SOURCE}#try-it`],
+		["Your data", `${SOURCE}/blob/main/docs/operating.md#data-and-security`],
+	];
+	return (
+		<footer className="signin__footer">
+			<ul>
+				{links.map(([label, url]) => (
+					<li key={label}>
+						<a href={url} target="_blank" rel="noreferrer">
+							{label}
+						</a>
+					</li>
+				))}
+				<li>MIT license</li>
+			</ul>
+		</footer>
+	);
+}
+
 /**
  * The page everyone who isn't signed in sees: who GitHive is for, and one
  * button per provider set up on this address. A failed sign-in comes back here
@@ -121,6 +147,7 @@ export function SignIn({
 						: "GitHive is invite-only for now. If you aren't invited yet, signing in asks an admin to let you in."}
 				</p>
 			</div>
+			<SignInFooter />
 		</main>
 	);
 }
