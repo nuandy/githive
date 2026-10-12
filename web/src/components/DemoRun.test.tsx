@@ -2,7 +2,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import type { DemoRunStatus } from "../api";
 import { NOW, visibleText } from "../test/fixtures";
-import { DemoCard, gameLanded, runWords } from "./DemoRun";
+import { DemoCard, gameLanded, runWords, setUpOf } from "./DemoRun";
 
 // Honeycomb demo runs on the dashboard: the card that starts one, and the words its Hive tab's banner says.
 
@@ -70,5 +70,23 @@ describe("a demo run on the dashboard", () => {
 		expect(gameLanded(run({ status: "stopped", agents: all }))).toBe(false);
 		const some = [agent("githive-forager", { finished: landed(12), done: true })];
 		expect(gameLanded(run({ status: "done", agents: some }))).toBe(false);
+	});
+
+	it("opens a new run's repo once the run has set it up, or says why it couldn't", async () => {
+		const answers = (...states: Partial<DemoRunStatus>[]) => {
+			const queue = states.map((state) => ({ running: null, newest: run({ id: "run-4", ...state }) }));
+			return { runs: async () => queue.shift() ?? queue.at(-1)! };
+		};
+		const waited: number[] = [];
+		const wait = async (ms: number) => void waited.push(ms);
+		expect(await setUpOf(answers({ settingUp: true }, { settingUp: true }, {}), "run-4", wait)).toBeUndefined();
+		expect(waited).toHaveLength(2);
+		const failed = answers({ settingUp: true }, { status: "failed", error: "the reset couldn't claim the repo" });
+		expect(await setUpOf(failed, "run-4", wait)).toBe("the reset couldn't claim the repo");
+		// The newest run being another one means this one isn't listed yet: it keeps asking.
+		waited.length = 0;
+		const other = { runs: async () => ({ running: null, newest: run({ id: "run-3" }) }) };
+		expect(await setUpOf(other, "run-4", wait)).toBeUndefined();
+		expect(waited).toHaveLength(60);
 	});
 });

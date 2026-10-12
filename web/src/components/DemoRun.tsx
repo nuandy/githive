@@ -27,6 +27,13 @@ export function DemoCard({ api }: { api: DemoApi }) {
 		setError(null);
 		try {
 			const made = await api.start();
+			// The run makes its repo itself, a few seconds on: open it once it's there, or say why the run failed.
+			const failed = await setUpOf(api, made.id);
+			if (failed) {
+				setError(failed);
+				setBusy(false);
+				return;
+			}
 			window.location.hash = href.repo(made.repo);
 		} catch (err) {
 			setError(messageOf(err));
@@ -72,6 +79,28 @@ export function gameLanded(run: Pick<DemoRunStatus, "status" | "agents" | "piece
 	if (run.status !== "done") return false;
 	const finished = run.agents.reduce((sum, agent) => sum + agent.finished.length, 0);
 	return finished >= run.pieces;
+}
+
+const SETUP_POLL_MS = 2_000;
+const SETUP_POLLS = 60;
+
+/**
+ * Waits for run `id` to be set up: resolves with why it failed, if it did, and otherwise once it's set up, or after
+ * two minutes of asking, when opening its repo is as good as waiting longer.
+ */
+export async function setUpOf(
+	api: Pick<DemoApi, "runs">,
+	id: string,
+	wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms)),
+): Promise<string | undefined> {
+	for (let poll = 0; poll < SETUP_POLLS; poll++) {
+		const { newest } = await api.runs();
+		const run = newest?.id === id ? newest : undefined;
+		if (run?.status === "failed") return run.error ?? "the demo run couldn't be set up";
+		if (run && !run.settingUp) return undefined;
+		await wait(SETUP_POLL_MS);
+	}
+	return undefined;
 }
 
 /** What a demo run is doing, in a sentence, for the banner. */
