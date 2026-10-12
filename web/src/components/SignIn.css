@@ -4,8 +4,11 @@
 	min-height: 100vh;
 	min-height: 100dvh;
 	display: grid;
+	/* The card in the middle, the footer at the bottom. */
+	grid-template-rows: 1fr auto;
 	place-items: center;
-	padding: 40px 16px;
+	gap: 24px;
+	padding: 40px 16px 20px;
 	background-color: var(--bg);
 	/* A faint honeycomb, drawn in the accent so it follows the theme. */
 	background-image:
@@ -120,4 +123,29 @@
 	font-size: 12.5px;
 	color: var(--text-muted);
 	max-width: 34ch;
+}
+
+.signin__footer ul {
+	display: flex;
+	flex-wrap: wrap;
+	justify-content: center;
+	gap: 4px 0;
+	margin: 0;
+	padding: 0;
+	list-style: none;
+	font-size: 12.5px;
+	color: var(--text-muted);
+}
+
+.signin__footer li + li::before {
+	content: "·";
+	margin: 0 8px;
+}
+
+.signin__footer a {
+	color: var(--text-muted);
+}
+
+.signin__footer a:hover {
+	color: var(--text);
 }

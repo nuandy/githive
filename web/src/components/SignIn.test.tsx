@@ -24,6 +24,15 @@ describe("the sign-in screen", () => {
 		expect(visibleText(html)).toContain("invited to GitHive yet. Ask an admin for an invitation.");
 	});
 
+	it("ends with where to read more: the source, how it works, how to get an invite and what happens to your data", () => {
+		const html = renderToStaticMarkup(<SignIn providers={["github"]} />);
+		const footer = html.slice(html.indexOf("<footer"));
+		for (const label of ["Source on GitHub", "How it works", "Ask for an invite", "Your data", "MIT license"])
+			expect(visibleText(footer)).toContain(label);
+		expect(footer).toContain('href="https://github.com/nuandy/githive#try-it"');
+		expect(footer).toContain('href="https://github.com/nuandy/githive/blob/main/docs/operating.md#data-and-security"');
+	});
+
 	it("says so when no sign-in is set up on this address", () => {
 		const html = renderToStaticMarkup(<SignIn providers={[]} />);
 		expect(visibleText(html)).toContain("set up on this address.");
