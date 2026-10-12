@@ -152,17 +152,18 @@ export const BACKLOG: DemoPiece[] = [
 		intent:
 			"src/ui/yesterday.js: renderYesterday as SPEC.md describes, for the puzzle it's given, which " +
 			"src/main.js gets from puzzleFor for the day before: its letters as a small honeycomb, and every " +
-			"answer in columns with pangrams marked, in a panel that opens and closes. It imports nothing from " +
-			"src/puzzle.js, so it needn't wait for it. Its tests run under Node, with no page: they cover " +
-			"combLayout and its other pure functions with a puzzle built by hand, not what it draws (see " +
-			"SPEC.md, The honeycomb). Keep to the contract in SPEC.md, which other agents build against at the " +
-			"same time. Plain DOM code, no framework or dependencies, working in current browsers without a " +
-			"build step; import other modules with relative paths ending in .js. Make it accessible: real " +
-			"buttons, labels, focus states, and keyboard use. Keep its styles in its own stylesheet, using only " +
-			"the theme colors SPEC.md lists (Colors and contrast), always in their text-and-background pairs. " +
-			"Export combLayout and draw the comb from it, as SPEC.md (The honeycomb) says, and test it in its " +
-			"test file with node:test: no overlapping cells, every outer cell touching the center one. Run `npm " +
-			"test` before pushing.",
+			"answer in columns with pangrams marked, drawn into the element it's given. It doesn't bind " +
+			"#yesterday-button or show and hide #yesterday: src/main.js does, so one click never reaches two " +
+			"handlers. It imports nothing from src/puzzle.js, so it needn't wait for it. Its tests run under " +
+			"Node, with no page: they cover combLayout and its other pure functions with a puzzle built by hand, " +
+			"not what it draws (see SPEC.md, The honeycomb). Keep to the contract in SPEC.md, which other agents " +
+			"build against at the same time. Plain DOM code, no framework or dependencies, working in current " +
+			"browsers without a build step; import other modules with relative paths ending in .js. Make it " +
+			"accessible: real buttons, labels, focus states, and keyboard use. Keep its styles in its own " +
+			"stylesheet, using only the theme colors SPEC.md lists (Colors and contrast), always in their " +
+			"text-and-background pairs. Export combLayout and draw the comb from it, as SPEC.md (The honeycomb) " +
+			"says, and test it in its test file with node:test: no overlapping cells, every outer cell touching " +
+			"the center one. Run `npm test` before pushing.",
 		paths: ["src/ui/yesterday.js", "styles/yesterday.css", "test/yesterday.test.js"],
 	},
 	{
@@ -181,17 +182,18 @@ export const BACKLOG: DemoPiece[] = [
 		id: "app",
 		title: "Wire up the game",
 		intent:
-			"src/main.js: put the game together as SPEC.md describes: today's puzzle, progress loaded and saved " +
-			"after every word, the board, typing and controls, feedback messages, rank and words found, the help " +
-			"(opened on a first visit), the share button, and yesterday's answers. It's built while the other " +
-			"pieces are, so write it against the contract, not against their code. Before you finish, fetch " +
-			"main: for every module that has landed by then, read it and check src/main.js uses it as it is, " +
-			"fixing any mismatch in src/main.js rather than in other pieces. It merges only once every other " +
-			"piece has. Keep to the contract in SPEC.md, which other agents build against at the same time. To " +
-			"reviewers: the pieces it lands after may not have landed when its commit was made, so a module they " +
-			"build can be missing from its checkout. That's expected, not a fault: review src/main.js against " +
-			"SPEC.md, since it merges only once every one of them has, and the landing runs the tests with them " +
-			"all.",
+			"src/main.js: put the game together as SPEC.md describes. You alone bind the page's buttons and open " +
+			"and close what they show (the help, the share, yesterday's panel); the other modules only draw into " +
+			"the elements they're given: today's puzzle, progress loaded and saved after every word, the board, " +
+			"typing and controls, feedback messages, rank and words found, the help (opened on a first visit), " +
+			"the share button, and yesterday's answers. It's built while the other pieces are, so write it " +
+			"against the contract, not against their code. Before you finish, fetch main: for every module that " +
+			"has landed by then, read it and check src/main.js uses it as it is, fixing any mismatch in " +
+			"src/main.js rather than in other pieces. It merges only once every other piece has. Keep to the " +
+			"contract in SPEC.md, which other agents build against at the same time. To reviewers: the pieces it " +
+			"lands after may not have landed when its commit was made, so a module they build can be missing " +
+			"from its checkout. That's expected, not a fault: review src/main.js against SPEC.md, since it " +
+			"merges only once every one of them has, and the landing runs the tests with them all.",
 		paths: ["src/main.js", "index.html"],
 		landsAfter: [
 			"puzzle",
