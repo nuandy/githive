@@ -97,7 +97,9 @@ const TOOL_LIST = [
 			"command, run with bash at the repo's top on the merged code (exit 0 passes, the first failure " +
 			"stops the run) in a Linux container with Node 24, npm and git, plus Python, Go, Rust or Bun when " +
 			"the repo uses them; dependencies are installed first; up to 10 minutes per command; no " +
-			"secrets or environment variables, so a test needing a database or an API key fails. Each " +
+			"secrets or environment variables, so a test needing a database or an API key fails. " +
+			"`githive-browser-check` (options --page, --root, --start with --url, --ignore) opens a " +
+			"website or web app in Chromium and fails on page errors and on buttons that do nothing. Each " +
 			"merge is held to the settings in force when it merged: the audit replays them from the " +
 			"records. Returns the settings now. branch_rules sets other branches' settings by pattern " +
 			"(feature/*, release/*, a name), the first match winning: each changes only the policy fields " +

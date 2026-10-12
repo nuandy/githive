@@ -1,0 +1,33 @@
+<!doctype html>
+<html>
+	<body>
+		<p id="entry"></p>
+		<button id="letter">A</button>
+		<button id="delete">Delete</button>
+		<button id="works">Show</button>
+		<div id="panel" hidden>Panel</div>
+		<button id="dead">Yesterday</button>
+		<button id="throws">Share</button>
+		<button id="copy" data-githive-ignore>Copy</button>
+		<button id="help">Help</button>
+		<dialog id="dialog">
+			<p>Help</p>
+			<button id="close">Close</button>
+		</dialog>
+		<script>
+			const entry = document.getElementById("entry");
+			document.getElementById("letter").onclick = () => (entry.textContent += "A");
+			document.getElementById("delete").onclick = () => (entry.textContent = entry.textContent.slice(0, -1));
+			document.getElementById("works").onclick = () => document.getElementById("panel").toggleAttribute("hidden");
+			const dead = document.getElementById("dead");
+			const panel = document.getElementById("panel");
+			dead.addEventListener("click", () => panel.toggleAttribute("hidden"));
+			dead.addEventListener("click", () => panel.toggleAttribute("hidden"));
+			document.getElementById("throws").onclick = () => {
+				throw new Error("share is broken");
+			};
+			document.getElementById("copy").onclick = () => {};
+			document.getElementById("help").onclick = () => document.getElementById("dialog").showModal();
+		</script>
+	</body>
+</html>

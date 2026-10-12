@@ -71,6 +71,8 @@
 		},
 	],
 	// The OAuth provider's grants and tokens, for MCP clients that sign in.
+	// The browser check's script goes into check containers as text (see src/gate-browser.ts).
+	"rules": [{ "type": "Text", "globs": ["**/browser-check/check.mjs"], "fallthrough": false }],
 	// Clef, Cloudflare's decision models, for hints on what agents write (see src/clef.ts).
 	"ai": { "binding": "AI" },
 	"kv_namespaces": [{ "binding": "OAUTH_KV", "id": "9449f5dfdc074c228358d0bbcd85abf0" }],

@@ -598,6 +598,29 @@ head, so a `status` asked again before either moves doesn't test-merge again.
 (It was a tool of its own, `check`, until it folded into `status`: agents
 asked both the same question, where their change stands.)
 
+### The browser check
+
+`githive-browser-check` is a command every check container gets when a repo's
+checks name it (`gate-browser.ts` installs Chromium and puppeteer-core once,
+which the repo's snapshot keeps, and writes `browser-check/check.mjs` each
+time). It runs at the top of the merged checkout like any check, so a failure
+sends the batch back with its output. Without `--start` it serves the
+checkout's files (`--root`), for a static site; with `--start` and `--url` it
+runs the app and waits up to two minutes for it to answer. Each `--page`
+(default `/`) fails on an uncaught error, a console error, or a file of its own
+origin answering 400 or more (not `/favicon.ico`, which browsers ask for
+anyway). Then every visible, enabled button, `[role=button]`, button-type
+input, in-page link and `<summary>` is clicked, each from a fresh load, up to
+40 a page. A click fails if it causes an error. It also fails if afterwards
+the page is the same as before: the same markup, form values and address, and
+no request, dialog or new window. The page is compared, not watched, because
+the dead buttons that two changes make together often do two things that
+cancel out: two modules each toggling the same panel. A button that did nothing
+gets up to three more tries, each after first clicking one that did something,
+since many controls only act on some state (Delete with nothing typed).
+`data-githive-ignore` or `--ignore <selector>` leaves one out. The check stops
+itself after 8 minutes, inside the 10 a check command gets.
+
 ### Changes the checks skip
 
 A change that only touches documentation and other files no check reads
