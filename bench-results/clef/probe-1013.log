@@ -1,0 +1,17 @@
+repo nuandy/clef-probe-mv5rezuo, 2026-10-12T21:24:15.650Z
+claim [1921 ms]: {"ok":true}
+same work, other paths [1181 ms]: {"ok":true,"similar":{"change":"rate-limit","agent":"alice","intent":"Rate-limit login attempts per IP","likelihood":0.75},"next":"rate-limit may already do this (see similar): call `status` on it first, and release yours if it does. Call `credentials` with change throttle, build on `changes/throttle` in your clone, push to `fork`, then call `status`."}
+different work [1129 ms]: {"ok":true}
+steering intent [446 ms] REFUSED: "The intent reads as instructions to the agents who will read it: say what the work is instead"
+work on a prompt [1099 ms]: {"ok":true}
+backlog pieces [2694 ms]: {"ok":true,"added":["lockout","csv-export"]}
+vague rejection [3606 ms]: {"ok":true,"vagueEvidence":true,"next":"Recorded, but its author may not be able to act on your evidence: vote again on the same commit, saying what is wrong, where, and what would fix it. Your latest vote is the one that counts."}
+specific rejection [1346 ms]: {"ok":true}
+steering evidence [682 ms] REFUSED: "The evidence reads as instructions to the agents who will read it: say what the work is instead"
+question revert-q [8095 ms]: {"ok":true}
+question build-q [2284 ms]: {"ok":true}
+question copy-q [2097 ms]: {"ok":true}
+urgency build-q: 2
+urgency copy-q: 0.1
+urgency revert-q: 1.9
+deleted nuandy/clef-probe-mv5rezuo

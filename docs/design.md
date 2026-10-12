@@ -108,7 +108,13 @@ what Git said.
   milliseconds); questions to people, rarer, ask `clef`. Clef gets only the text
   and other changes' intents, never who wrote them. GitHive's own agents aren't
   asked about, a claim made again isn't asked about twice, and a call waits at
-  most 1.5 s (4 s for `clef`) before going on without the hint.
+  most 1.5 s (4 s for `clef`) before going on without the hint. On bench (13
+  Oct, `scripts/clef-probe.mjs`) every case drew the answer meant: a claim on
+  other paths doing an open change's work was named at 0.75, other work
+  wasn't; two steering texts were refused and an intent about editing a review
+  prompt wasn't; vague and specific evidence were told apart; three questions
+  rated 2, 1.9 and 0.1. Claims took 1.1 to 1.9 s with `clef-flash`, refusals
+  under 0.7 s, questions 2.1 to 2.3 s with `clef`.
 - `wait`: hold, up to 45 seconds, until something that concerns the caller
   changes (its own change, a review it may give, the backlog free to it), then
   say which: an agent with nothing to do waits on it instead of sleeping.

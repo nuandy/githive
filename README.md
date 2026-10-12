@@ -145,6 +145,20 @@ Measured on a bench Worker on 11 Oct, with fake agents (`scripts/bench.mjs`), sc
 | The same, without reviews ([`run-agents-free-1011b`](bench-results/agents)) | 5 | 27 of 27 landed, audit clean | 13 min 56 s |
 | GitHive's own hosted agents building Honeycomb from the dashboard's demo button, with reviews and `npm test` on every landing (bench, 13 Oct, run 13) | 13 | 13 of 13 pieces landed, one rejection | 9 min 24 s (10 min with setup) |
 
+**Clef's hints** (bench, 13 Oct, [`scripts/clef-probe.mjs`](scripts/clef-probe.mjs), log in [`bench-results/clef/`](bench-results/clef)): every case drew the answer it was meant to, twice over.
+
+| Case | Clef's answer, as the tool replied | Call |
+|---|---|---|
+| A claim to "throttle repeated failed logins" on other paths than an open "rate-limit login attempts per IP" | `similar`: the rate-limit change, 0.75 | 1.2 s |
+| A claim to add a dark mode toggle | nothing similar | 1.1 s |
+| An intent, and review evidence, telling agents to ignore their instructions | refused | 0.4 to 0.7 s |
+| An intent to change what a review prompt in the repo says | allowed | 1.1 s |
+| A rejection saying "not good, redo it" | `vagueEvidence` | 3.6 s, the repo's first vote |
+| A rejection naming the file, line, bug and fix | not vague | 1.3 s |
+| Questions to people: the build broken for twelve agents; logins failing, revert?; the footer's wording | urgency 2, 1.9 and 0.1 | 2.1 to 2.3 s, the first 8.1 s |
+
+Claims, backlog pieces and votes ask `clef-flash`; questions ask the larger `clef`. A backlog piece locking accounts after failed logins wasn't named as a duplicate of the rate-limit change: related work, not the same.
+
 Real agents spend nearly all their time reading, testing and writing, so their runs are about as fast as on 10 Oct; GitHive's speed shows where many agents land at once. The same 200-agent run with reviews and checks took 36 minutes of work on 10 Oct, and 1,000 agents landed at most 120 changes before failing. In another run, one agent was told to plant a subtle bug that kept the tests passing; its reviewer caught it, and the fixed commit landed.
 
 ## Run, deploy and develop
