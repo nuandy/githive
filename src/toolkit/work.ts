@@ -1,7 +1,5 @@
-import type { CasLog } from "../record-log";
 import { entriesOverlap } from "../claim-paths";
 import type { ClaimRecord } from "./claims";
-import { appendRecord } from "./records";
 import { type Author, approval, effectivePolicy, holdsRole, type ReviewPolicy, type VoteRecord } from "./votes";
 
 // What there is to do: reviews an agent may give and backlog items nobody has claimed. GitHive assigns nothing;
@@ -36,59 +34,6 @@ export const workId = (title: string) =>
 		.replace(/[^a-z0-9]+/g, "-")
 		.replace(/^-+|-+$/g, "")
 		.slice(0, 48) || "work";
-
-/** Adds an item to the backlog, refused if its id is taken. */
-export function addWork(log: CasLog<Work>, input: Omit<WorkItem, "at">) {
-	return appendRecord<Work, string>(
-		log,
-		input.by,
-		() => ({ items: [] }),
-		(state) => {
-			if (state.items.some((item) => item.id === input.id)) return { refused: `${input.id} is in the backlog already` };
-			return {
-				state: { items: [...state.items, { ...input, at: new Date().toISOString() }] },
-				text: `${input.by} adds ${input.id} to the backlog: ${input.title}`,
-			};
-		},
-	);
-}
-
-/** Adds several items in one write. Items whose ids are taken are left alone and returned in `already`. */
-export async function addWorks(log: CasLog<Work>, by: string, items: Omit<WorkItem, "at" | "by">[]) {
-	let already: string[] = [];
-	const outcome = await appendRecord<Work, string>(
-		log,
-		by,
-		() => ({ items: [] }),
-		(state) => {
-			const taken = (item: { id: string }) => state.items.some((existing) => existing.id === item.id);
-			already = items.filter(taken).map((item) => item.id);
-			const fresh = items.filter((item) => !already.includes(item.id));
-			if (!fresh.length) return { refused: "all of them are in the backlog already" };
-			const at = new Date().toISOString();
-			return {
-				state: { items: [...state.items, ...fresh.map((item) => ({ ...item, by, at }))] },
-				text: `${by} adds ${fresh.map((item) => item.id).join(", ")} to the backlog`,
-			};
-		},
-	);
-	const added = outcome.ok ? items.map((item) => item.id).filter((id) => !already.includes(id)) : [];
-	return { ok: outcome.ok, added, already };
-}
-
-/** Takes every piece `by` added out of the backlog, with the reason; nothing to take is no write. */
-export function withdrawWork(log: CasLog<Work>, by: string, reason: string) {
-	return appendRecord<Work, string>(
-		log,
-		by,
-		() => ({ items: [] }),
-		(state) => {
-			const kept = state.items.filter((item) => item.by !== by);
-			if (kept.length === state.items.length) return { refused: `${by} has nothing in the backlog` };
-			return { state: { items: kept }, text: `${by} takes its pieces out of the backlog: ${reason}` };
-		},
-	);
-}
 
 export interface WorkInput {
 	agent: string;
@@ -235,8 +180,11 @@ function reviewOption(input: WorkInput, claim: ClaimRecord, head: string): (Revi
 }
 
 export interface BacklogView {
-	/** Unclaimed or abandoned, clear of other claims, and with its dependencies merged. */
-	open: (WorkItem & { abandonedBy?: string })[];
+	/**
+	 * Unclaimed or abandoned, clear of other claims, and with its dependencies merged. Those with longer chains of
+	 * pieces waiting behind them come first, each with how many wait on it in all (`unblocks`).
+	 */
+	open: (WorkItem & { abandonedBy?: string; unblocks?: number })[];
 	/** Claimed, overlapping a claim in force, or waiting on a dependency. */
 	waiting: { id: string; reason: string }[];
 }
@@ -268,7 +216,65 @@ export function backlogFor(input: WorkInput): BacklogView {
 			open.push({ ...item, ...(abandonedBy ? { abandonedBy } : {}) });
 		}
 	}
-	return { open: inOwnOrder(input.agent, open, () => true), waiting };
+	return { open: criticalFirst(input.agent, open, input.work, input.merged), waiting };
+}
+
+interface Behind {
+	/** The longest run of pieces waiting one after another behind this one. */
+	chain: number;
+	/** Every piece waiting on it, directly or through others. */
+	waiting: Set<string>;
+}
+
+/**
+ * The free pieces, those with the longest chains waiting behind them first, then those the most wait on: starting
+ * them first is what shortens the whole backlog. Equals keep each agent's own order, so a crowd still spreads out.
+ * Only the dependencies pieces declare count (`after`, `landsAfter`); nothing is guessed.
+ */
+function criticalFirst(agent: string, open: BacklogView["open"], work: WorkItem[], merged: Set<string>) {
+	const behind = piecesBehind(work.filter((item) => !merged.has(item.id)));
+	const weighed = open.map((item) => {
+		const found = behind(item.id);
+		const unblocks = found.waiting.size;
+		return { item: unblocks ? { ...item, unblocks } : item, chain: found.chain, unblocks };
+	});
+	weighed.sort((a, b) => b.chain - a.chain || b.unblocks - a.unblocks);
+	const same = (a: (typeof weighed)[number], b: (typeof weighed)[number]) => {
+		if (a.chain !== b.chain) return false;
+		return a.unblocks === b.unblocks;
+	};
+	return inOwnOrder(agent, weighed, same).map((weight) => weight.item);
+}
+
+/**
+ * What waits behind each piece among `items`, worked out once per piece. A loop in the backlog (which claims refuse,
+ * but pieces can name each other) counts each piece once rather than going round.
+ */
+function piecesBehind(items: WorkItem[]) {
+	const waitersOf = new Map<string, string[]>();
+	for (const item of items)
+		for (const dependency of [...(item.after ?? []), ...(item.landsAfter ?? [])])
+			waitersOf.set(dependency, [...(waitersOf.get(dependency) ?? []), item.id]);
+	const known = new Map<string, Behind>();
+	const visiting = new Set<string>();
+	const behind = (id: string): Behind => {
+		const found = known.get(id);
+		if (found) return found;
+		if (visiting.has(id)) return { chain: 0, waiting: new Set() };
+		visiting.add(id);
+		const result: Behind = { chain: 0, waiting: new Set() };
+		for (const waiter of waitersOf.get(id) ?? []) {
+			const next = behind(waiter);
+			result.chain = Math.max(result.chain, next.chain + 1);
+			result.waiting.add(waiter);
+			for (const further of next.waiting) result.waiting.add(further);
+		}
+		result.waiting.delete(id);
+		visiting.delete(id);
+		known.set(id, result);
+		return result;
+	};
+	return behind;
 }
 
 // Rotates each run of equally good items in the sorted `list` to start at a place of the agent's own.

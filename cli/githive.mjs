@@ -570,7 +570,8 @@ async function listBacklog() {
 	for (const work of open) {
 		const paths = work.paths?.length ? `  [${work.paths.join(" ")}]` : "";
 		const abandoned = work.abandonedBy ? ` (abandoned by ${work.abandonedBy})` : "";
-		say(`  ${work.id}: ${firstLine(work.title)}${paths}${abandoned}`);
+		const unblocks = work.unblocks ? ` (unblocks ${work.unblocks})` : "";
+		say(`  ${work.id}: ${firstLine(work.title)}${paths}${unblocks}${abandoned}`);
 	}
 	if (more) say(`  (${more} more)`);
 	if (waiting.length) say("waiting:", ...waiting.map((work) => `  ${work.id}: ${work.reason}`));

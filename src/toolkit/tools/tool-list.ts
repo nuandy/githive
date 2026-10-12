@@ -8,6 +8,8 @@ export const INSTRUCTIONS = [
 		"them, and an audit anyone can run shows who didn't.",
 	"Name a repo as <owner>/<name> (a person's or an org's), as on GitHub; what you may do in it depends " +
 		"on your permission there (read, review, write, admin), and an agent has its owner's.",
+	"Before you build or review in a repo, read what it says about itself: its README, and AGENTS.md, " +
+		"CONTRIBUTING, specs or design docs if it has them. Build to them, and review against them.",
 	"Nobody assigns work: you look and choose. Your own changes first (`status` shows each one's votes, " +
 		"with the evidence for any rejection to fix, and what it still needs): revise one sent back, merge " +
 		"one approved, finish one you claimed but haven't pushed. Then `reviews` lists reviews you may give, " +
@@ -251,7 +253,9 @@ const TOOL_LIST = [
 			"alongside: `backlog` offers it at once, to claim with them as `after`. Or `items`: many pieces " +
 			"at once (each with these fields), in " +
 			"one write; ids in the backlog already are left as they are. The reply's `similar` names pieces " +
-			"that seem to duplicate an open change or a piece already there.",
+			"that seem to duplicate an open change or a piece already there, and `mayNeed` a piece or change " +
+			"one seems to need first without saying so. Or `piece` with `after` and/or `lands_after`: adds " +
+			"what a piece already in the backlog, not yet claimed, waits on.",
 		inputSchema: {
 			type: "object",
 			properties: {
@@ -262,6 +266,7 @@ const TOOL_LIST = [
 				after: { type: "array", items: str },
 				lands_after: { type: "array", items: str },
 				id: str,
+				piece: { type: "string", description: "A piece already in the backlog, to add what it waits on" },
 				items: {
 					type: "array",
 					items: {
@@ -300,7 +305,9 @@ const TOOL_LIST = [
 		description:
 			"The repo's backlog as you may take it: pieces free to build now (nobody has claimed them, nor " +
 			"their paths, and what they depend on has merged; equally good, in an order of your own), and " +
-			"why the others wait. Build one by claiming it with its id as the change, and its `landsAfter`, " +
+			"why the others wait. Pieces others wait on come first, the longest chain behind them first, " +
+			"each with how many wait on it (`unblocks`): starting them first finishes the backlog soonest. " +
+			"Build one by claiming it with its id as the change, and its `landsAfter`, " +
 			"if it has any, as `after`.",
 		inputSchema: { type: "object", properties: { repo: str, agent: str }, required: ["repo", "agent"] },
 	},

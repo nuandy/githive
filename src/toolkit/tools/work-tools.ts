@@ -8,9 +8,10 @@ import { leaseFor } from "../staleness";
 import type { VotesView } from "../vote-store";
 import { countedVotes } from "../votes";
 import { pieceHints } from "../clef-hints";
-import { addWork, addWorks, backlogFor, reviewsFor, type Work, type WorkInput } from "../work";
+import { addDependencies, addWork, addWorks } from "../backlog-records";
+import { backlogFor, reviewsFor, type Work, type WorkInput } from "../work";
 import { changeSigns, changeStatus } from "./change-state";
-import { workItemFrom } from "./claim-input";
+import { changeList, workItemFrom } from "./claim-input";
 import type { ToolCall, ToolContext, ToolHandlers } from "./context";
 import { tellPeopleOfWaitingRoles } from "./dashboard";
 import { claimPolicy, DEFAULT_POLICY, HOSTED_PREFIX, LISTED_AT_MOST, MOST_AT_ONCE, recordLog, workRef } from "./repo";
@@ -52,6 +53,7 @@ export const workTools: ToolHandlers = {
 	async add_work(call) {
 		const { args, ctx, repo, actAs } = call;
 		const by = actAs("agent");
+		if (args.piece !== undefined) return dependOn(call, by);
 		if (args.items !== undefined) {
 			if (!Array.isArray(args.items) || !args.items.length || args.items.length > MOST_AT_ONCE)
 				fail(400, `items is a list of 1 to ${MOST_AT_ONCE} pieces of work`);
@@ -59,16 +61,16 @@ export const workTools: ToolHandlers = {
 			const ids = items.map((item) => item.id);
 			const twice = ids.filter((id, index) => ids.indexOf(id) !== index);
 			if (twice.length) fail(400, `each piece needs its own id: ${[...new Set(twice)].join(", ")} more than once`);
-			const similar = await piecesLikeOpenWork(call, items);
+			const hints = await piecesLikeOpenWork(call, items);
 			const added = await addWorks(recordLog<Work>(ctx, repo, workRef(repo)), by, items);
 			const reply = { ok: added.ok, added: added.added, ...(added.already.length ? { already: added.already } : {}) };
-			return similar.length ? { ...reply, similar } : reply;
+			return withPieceHints(reply, hints);
 		}
 		const item = workItemFrom(args);
-		const similar = await piecesLikeOpenWork(call, [item]);
+		const hints = await piecesLikeOpenWork(call, [item]);
 		const added = await addWork(recordLog<Work>(ctx, repo, workRef(repo)), { ...item, by });
 		if (!added.ok) return { ok: false, reason: added.refused };
-		return similar.length ? { ok: true, id: item.id, similar } : { ok: true, id: item.id };
+		return withPieceHints({ ok: true, id: item.id }, hints);
 	},
 	async status(call) {
 		const { args, ctx, repo, votes, registered, branch, changeOf, claimOf, waitingOn } = call;
@@ -129,16 +131,42 @@ export const workTools: ToolHandlers = {
 	},
 };
 
-/** New pieces that may duplicate a piece already in the backlog or an open change, as Clef sees it: advice. */
-async function piecesLikeOpenWork(call: ToolCall, pieces: { id: string; title: string; intent: string }[]) {
+/**
+ * What Clef sees in new pieces, as advice: a piece already in the backlog or an open change each may duplicate, and
+ * one each may need first without saying so. Merged pieces exist already, so they're neither.
+ */
+async function piecesLikeOpenWork(call: ToolCall, pieces: Parameters<typeof pieceHints>[1]) {
 	const { ctx, repo, adviceView } = call;
 	const [backlog, advice] = await Promise.all([recordLog<Work>(ctx, repo, workRef(repo)).read(), adviceView()]);
-	const items = backlog?.commit.state.items ?? [];
+	const merged = new Set(advice.merged);
+	const items = (backlog?.commit.state.items ?? []).filter((item) => !merged.has(item.id));
 	const existing = [
 		...items.map((item) => ({ id: item.id, intent: `${item.title}: ${item.intent}` })),
 		...advice.claims.map((claim) => ({ id: claim.change, intent: claim.intent })),
 	];
 	return pieceHints(ctx, pieces, existing);
+}
+
+function withPieceHints<R extends object>(reply: R, hints: Awaited<ReturnType<typeof pieceHints>>) {
+	const { similar, mayNeed } = hints;
+	return { ...reply, ...(similar.length ? { similar } : {}), ...(mayNeed.length ? { mayNeed } : {}) };
+}
+
+/**
+ * add_work with `piece`: adds what a piece already in the backlog waits on, such as a dependency Clef suggested. A
+ * claimed piece is its agent's to order, with its claim's `after`.
+ */
+async function dependOn(call: ToolCall, by: string) {
+	const { args, ctx, repo, claimOf } = call;
+	const piece = requiredString(args, "piece");
+	const after = changeList(args.after, "after");
+	const landsAfter = changeList(args.lands_after, "lands_after");
+	const named = [...after, ...landsAfter];
+	if (!named.length) fail(400, "name what it waits on: after, lands_after or both");
+	const claim = await claimOf(piece);
+	if (claim) fail(409, `${piece} is claimed by ${claim.agent}: its claim's after is its agent's to set`);
+	const added = await addDependencies(recordLog<Work>(ctx, repo, workRef(repo)), by, { piece, after, landsAfter });
+	return added.ok ? { ok: true, piece, after, landsAfter } : { ok: false, reason: added.refused };
 }
 
 /** The reviews `state`'s agent may give, as `reviews` lists them, given the review holds in force. */

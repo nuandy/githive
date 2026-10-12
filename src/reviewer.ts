@@ -136,6 +136,8 @@ export class Reviewer extends SandboxAgent<ReviewJob, ReviewerState> {
 			focusFor(job.role),
 			"",
 			"How to work:",
+			"- Before you build or review in a repo, read what it says about itself: its README, and AGENTS.md, " +
+				"CONTRIBUTING, specs or design docs if it has them. Build to them, and review against them.",
 			"- Read the diff and the code around it. Install dependencies and run the project's tests and type checks.",
 			"- Gather concrete evidence: command output, a reproduction, file and line references.",
 			"- Approve when the change does what its intent asks and you found no serious problem within " +

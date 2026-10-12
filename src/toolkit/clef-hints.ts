@@ -16,8 +16,10 @@ const SAME_WORK_AT = 0.6;
 const COMPARED_AT_MOST = 100;
 /** The most of each intent sent, so a hundred of them fit clef-flash's context. */
 const INTENT_CHARS = 300;
-/** The most new pieces in one ask: two questions each, within Clef's 64. */
-const PIECES_PER_ASK = 32;
+/** The most new pieces in one ask: three questions each, within Clef's 64. */
+const PIECES_PER_ASK = 21;
+/** How sure Clef must be that a piece needs another first before the reply suggests declaring it. */
+const NEEDS_AT = 0.6;
 
 export interface SameWork {
 	/** The open change or backlog piece it may duplicate. */
@@ -31,6 +33,22 @@ export interface PieceLike {
 	piece: string;
 	like: string;
 	likelihood: number;
+}
+
+/** A new backlog piece, and a piece or change Clef thinks must exist before it can be built. */
+export interface PieceNeed {
+	piece: string;
+	needs: string;
+	likelihood: number;
+}
+
+/** A new piece as add_work takes it, with the dependencies it already declares. */
+interface NewPiece {
+	id: string;
+	title: string;
+	intent: string;
+	after?: string[];
+	landsAfter?: string[];
 }
 
 interface Comparable {
@@ -72,13 +90,16 @@ function sameWorkQuestion(what: string, others: Comparable[]): ClefQuestion {
 	};
 }
 
-function sameWorkOf(answer: ClefAnswer | undefined, others: Comparable[]): SameWork | undefined {
+const sameWorkOf = (answer: ClefAnswer | undefined, others: Comparable[]) => pickOf(answer, others, SAME_WORK_AT);
+
+/** The option a choice picked, if Clef is at least `sureAt` sure and it isn't "none". */
+function pickOf(answer: ClefAnswer | undefined, options: Comparable[], sureAt: number): SameWork | undefined {
 	if (answer?.type !== "choice") return undefined;
 	const likelihood = answer.probabilities[answer.choice] ?? 0;
-	if (likelihood < SAME_WORK_AT) return undefined;
-	const other = others[Number(answer.choice.slice(1))];
-	if (!other) return undefined;
-	return { id: other.id, likelihood: Math.round(likelihood * 100) / 100 };
+	if (likelihood < sureAt) return undefined;
+	const picked = options[Number(answer.choice.slice(1))];
+	if (!picked) return undefined;
+	return { id: picked.id, likelihood: Math.round(likelihood * 100) / 100 };
 }
 
 /**
@@ -100,43 +121,65 @@ export async function claimHints(
 }
 
 /**
- * Refuses a backlog piece that steers agents, and finds the open change or piece each may duplicate. `existing` is
- * what's already there, oldest first.
+ * Refuses a backlog piece that steers agents, and for each finds the open change or piece it may duplicate, and one
+ * it may need first that it doesn't declare. `existing` is what's in the backlog and in progress, oldest first.
  */
-export async function pieceHints(
-	ctx: ToolContext,
-	pieces: { id: string; title: string; intent: string }[],
-	existing: Comparable[],
-): Promise<PieceLike[]> {
-	const asks: Promise<PieceLike[]>[] = [];
+export async function pieceHints(ctx: ToolContext, pieces: NewPiece[], existing: Comparable[]) {
+	const asks: Promise<{ similar: PieceLike[]; mayNeed: PieceNeed[] }>[] = [];
 	for (let start = 0; start < pieces.length; start += PIECES_PER_ASK)
-		asks.push(askAboutPieces(ctx, pieces.slice(start, start + PIECES_PER_ASK), existing));
-	return (await Promise.all(asks)).flat();
+		asks.push(askAboutPieces(ctx, pieces.slice(start, start + PIECES_PER_ASK), pieces, existing));
+	const answered = await Promise.all(asks);
+	return {
+		similar: answered.flatMap((answer) => answer.similar),
+		mayNeed: answered.flatMap((answer) => answer.mayNeed),
+	};
 }
 
-async function askAboutPieces(
-	ctx: ToolContext,
-	pieces: { id: string; title: string; intent: string }[],
-	existing: Comparable[],
-) {
-	const ids = new Set(pieces.map((piece) => piece.id));
+/** Asks which of `candidates` must exist before `what` can be built. Options are numbered, as for sameWorkQuestion. */
+function needsQuestion(what: string, candidates: Comparable[]): ClefQuestion {
+	const criteria: Record<string, string> = { none: "None of these: it can be built without any of them" };
+	candidates.forEach((candidate, index) => {
+		criteria[`w${index}`] = candidate.intent.slice(0, INTENT_CHARS);
+	});
+	return {
+		type: "choice",
+		instructions: `Which of these must already exist before ${what} can be built, because its code needs theirs?`,
+		criteria,
+	};
+}
+
+/** What `piece` could need first: what's there and the batch's other pieces, less what it already declares. */
+function needCandidates(piece: NewPiece, batch: NewPiece[], others: Comparable[]) {
+	const declared = new Set([piece.id, ...(piece.after ?? []), ...(piece.landsAfter ?? [])]);
+	const siblings = batch.map((other) => ({ id: other.id, intent: `${other.title}: ${other.intent}` }));
+	return [...others, ...siblings].filter((candidate) => !declared.has(candidate.id)).slice(-COMPARED_AT_MOST);
+}
+
+async function askAboutPieces(ctx: ToolContext, pieces: NewPiece[], batch: NewPiece[], existing: Comparable[]) {
+	const ids = new Set(batch.map((piece) => piece.id));
 	const others = existing.filter((other) => !ids.has(other.id)).slice(-COMPARED_AT_MOST);
+	const candidates = pieces.map((piece) => needCandidates(piece, batch, others));
 	const questions: Record<string, ClefQuestion> = {};
 	pieces.forEach((_, index) => {
-		questions[`steers${index}`] = steers(`new piece ${index + 1}`);
-		if (others.length) questions[`same${index}`] = sameWorkQuestion(`new piece ${index + 1}`, others);
+		const what = `new piece ${index + 1}`;
+		questions[`steers${index}`] = steers(what);
+		if (others.length) questions[`same${index}`] = sameWorkQuestion(what, others);
+		if (candidates[index]!.length) questions[`needs${index}`] = needsQuestion(what, candidates[index]!);
 	});
 	const state = pieces
 		.map((piece, index) => `New piece ${index + 1}: ${piece.title}\n${piece.intent.slice(0, INTENT_CHARS * 4)}`)
 		.join("\n\n");
 	const answers = await consult(ctx, "clef-flash", state, questions);
-	const found: PieceLike[] = [];
+	const similar: PieceLike[] = [];
+	const mayNeed: PieceNeed[] = [];
 	pieces.forEach((piece, index) => {
 		refuseSteering(answers?.[`steers${index}`], `Piece ${piece.id}`);
 		const same = sameWorkOf(answers?.[`same${index}`], others);
-		if (same) found.push({ piece: piece.id, like: same.id, likelihood: same.likelihood });
+		if (same) similar.push({ piece: piece.id, like: same.id, likelihood: same.likelihood });
+		const needed = pickOf(answers?.[`needs${index}`], candidates[index]!, NEEDS_AT);
+		if (needed) mayNeed.push({ piece: piece.id, needs: needed.id, likelihood: needed.likelihood });
 	});
-	return found;
+	return { similar, mayNeed };
 }
 
 /** Levels of review evidence, as its author can act on it. */

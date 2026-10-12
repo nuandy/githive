@@ -221,6 +221,39 @@ describe("the backlog as an agent may take it", () => {
 		]);
 	});
 
+	it("lists first the free pieces with the longest chains waiting behind them, saying how many wait on each", () => {
+		// schema → api → ui, one after another; app lands after api; docs and logging stand alone.
+		const work = [
+			item("docs"),
+			item("logging"),
+			item("schema"),
+			{ ...item("api"), after: ["schema"] },
+			{ ...item("ui"), after: ["api"] },
+			{ ...item("app"), landsAfter: ["api", "docs"] },
+		];
+		const backlog = backlogFor(base({ work }));
+		// app is offered at once (it lands after, built alongside); schema's chain is longest, then docs's.
+		expect(backlog.open.map((piece) => [piece.id, piece.unblocks])).toEqual([
+			["schema", 3],
+			["docs", 1],
+			expect.anything(),
+			expect.anything(),
+		]);
+		expect(new Set(backlog.open.slice(2).map((piece) => piece.id))).toEqual(new Set(["logging", "app"]));
+		// Once schema has merged, it waits behind nothing it counted: api leads, with ui and app behind it.
+		const later = backlogFor(base({ work, merged: new Set(["schema"]) }));
+		expect(later.open[0]).toMatchObject({ id: "api", unblocks: 2 });
+	});
+
+	it("keeps each agent's own order among equals, and counts a loop in the backlog once", () => {
+		// a waits on b, and b names a too: a loop, which only counts b's one waiter.
+		const work = [{ ...item("a"), after: ["b"] }, { ...item("b"), landsAfter: ["a"] }, item("c"), item("d")];
+		const looks = Array.from({ length: 12 }, (_, i) => backlogFor(base({ agent: `agent-${i}`, work })).open);
+		expect(looks.map((open) => open[0])).toEqual(looks.map(() => expect.objectContaining({ id: "b", unblocks: 1 })));
+		// c and d are equals: agents look at them in different orders, so a crowd spreads over them.
+		expect(new Set(looks.map((open) => open[1]!.id))).toEqual(new Set(["c", "d"]));
+	});
+
 	it("names work after its title", () => {
 		expect(workId("Use const in lib/ — all of it!")).toBe("use-const-in-lib-all-of-it");
 	});

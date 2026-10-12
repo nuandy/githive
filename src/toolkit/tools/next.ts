@@ -129,6 +129,7 @@ const STEPS: Record<string, Step> = {
 		return refusedMerge(reply, args);
 	},
 	vote: voteStep,
+	add_work: addedStep,
 	reviews: (reply) => (isEmpty(reply.reviews) ? NONE_NOW : undefined),
 	backlog: (reply) => (isEmpty(reply.open) ? NONE_NOW : undefined),
 	wait: waitStep,
@@ -182,6 +183,18 @@ function madeClaim(reply: Reply, args: Args) {
 	const other = nameOr(similar.change, "another open change");
 	const check = `${other} may already do this (see similar): call \`status\` on it first`;
 	return `${check}, and release yours if it does. ${build}`;
+}
+
+/** Only when Clef suggests a dependency a new piece doesn't declare: how to declare it, if it's right. */
+function addedStep(reply: Reply) {
+	const needs = records(reply.mayNeed).slice(0, NAMED);
+	if (!needs.length) return undefined;
+	const steps = needs.map((need) => {
+		const piece = nameOr(need.piece, "a piece");
+		const first = nameOr(need.needs, "another piece");
+		return `${piece} may need ${first} first: if so, call \`add_work\` with piece "${piece}" and after ["${first}"].`;
+	});
+	return `${steps.join("\n")}\nIf it doesn't, leave it: nothing waits on a suggestion.`;
 }
 
 function voteStep(reply: Reply) {
