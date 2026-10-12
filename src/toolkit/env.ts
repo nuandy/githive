@@ -217,6 +217,7 @@ export function toolContextFor(
 		hosted?: boolean;
 		teamsOf?: (repo: string) => Promise<string[]>;
 		mayUseHosted?: () => Promise<boolean>;
+		githubAccount?: () => Promise<string | null>;
 	} = {},
 ): ToolContext {
 	return {

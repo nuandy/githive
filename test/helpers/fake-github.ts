@@ -80,6 +80,7 @@ export async function fakeGitHub(
 	};
 	const link: GitHubLink = {
 		repo,
+		permissionOf: async () => "admin",
 		remote: { url, token: "unused", user: "x-access-token" },
 		runsFor: async (sha) => {
 			await called(`GET runs ${sha}`);

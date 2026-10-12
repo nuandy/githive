@@ -120,6 +120,9 @@ Artifacts is in beta, and its own documentation doesn't yet state encryption at 
    npx wrangler secret put GITHUB_APP_PRIVATE_KEY
    ```
 
+   To let other people connect their repos, make the App public (its settings, Advanced) and point `GITHUB_APP_URL`
+   in `web/src/components/GitHubSettings.tsx` and `src/toolkit/tools/settings-input.ts` at its install page.
+
 5. **Deploy:** `npm run deploy`. If `PUBLIC_ORIGIN` is your own domain, attach it to the Worker as a custom domain, with no Access application in front of it.
 
 6. **Let yourself in.** Only invited emails can sign in. Without Access, invite yourself in D1, sign in with GitHub, and add yourself to the hosted agents' list if you set `OPENAI_API_KEY`:

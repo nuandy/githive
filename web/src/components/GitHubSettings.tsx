@@ -3,6 +3,9 @@ import type { GitHubSync, RepoGitHub, SavedMergeSettings, SettingsInput } from "
 import { messageOf } from "../lib/errors";
 import "./RepoSettings.css";
 
+// Where anyone installs the App on their own account or org, choosing which repos it may reach.
+export const GITHUB_APP_URL = "https://github.com/apps/githiveapp";
+
 /** What the form holds: the GitHub repo, how GitHive's work reaches it, and whether its changes need review. */
 export interface GitHubDraft {
 	repo: string;
@@ -93,9 +96,12 @@ export function GitHubSettings({
 				</div>
 				<fieldset className="box__body repo-settings__fields" disabled={busy}>
 					<p className="muted">
-						Connect this repo to a GitHub repo that has GitHive's GitHub App installed. GitHive sends its work there,
-						and brings back whatever lands on GitHub, a merged pull request or commits pushed there directly, as a
-						change that goes through the checks like any other.
+						Connect this repo to a GitHub repo you can write to that has{" "}
+						<a href={GITHUB_APP_URL} target="_blank" rel="noreferrer">
+							GitHive's GitHub App
+						</a>{" "}
+						installed. GitHive sends its work there, and brings back whatever lands on GitHub, a merged pull request or
+						commits pushed there directly, as a change that goes through the checks like any other.
 					</p>
 					{github && !github.inbound ? (
 						<p className="callout">

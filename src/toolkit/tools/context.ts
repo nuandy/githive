@@ -138,6 +138,11 @@ export interface ToolContext {
 	};
 	/** A GitHub repo (owner/name) through GitHive's App, or null if the App isn't installed. Unset without GitHub. */
 	github?: (repo: string) => Promise<GitHubLink | null>;
+	/**
+	 * The caller's GitHub account id, or null if they signed in another way. Set for people and their agents: a repo
+	 * connects to a GitHub repo only if that account may write there. Unset for Access callers and GitHive itself.
+	 */
+	githubAccount?: () => Promise<string | null>;
 	/** The repo's GitHubSync: the job bringing GitHub's changes back, and the pull request as last seen. */
 	githubSync?: (repo: string) => GitHubSyncHandle;
 	/**

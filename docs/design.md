@@ -728,7 +728,11 @@ Gate starts it cold.
 
 **Connected to GitHub.** A repo can be connected to a GitHub repo through
 GitHive's GitHub App (`settings` with `github: "owner/name"`, or the
-dashboard's Settings tab; refused unless the App is installed there). The App's
+dashboard's Settings tab; refused unless the App is installed there). The App
+is public, so anyone can install it; being installed on a repo therefore says
+nothing about the caller, and a connection also needs the caller's own GitHub
+account (from their sign-in) to have write or admin there. Access callers skip
+that check, and people who signed in with Google can't connect. The App's
 ID and private key (PKCS#8) are Worker secrets; GitHive signs a short JWT with
 the key and exchanges it for an installation token scoped to that one repo,
 kept for the isolate until near its hour (`github.ts`). The link is kept in the

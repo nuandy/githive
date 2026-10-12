@@ -370,6 +370,15 @@ export class IdentityStore {
 		}
 	}
 
+	/** The GitHub account a person signed in with (its numeric id), or null if they never used GitHub. */
+	async githubAccountOf(userId: string) {
+		const row = await this.db
+			.prepare("SELECT provider_id FROM accounts WHERE user_id = ? AND provider = 'github'")
+			.bind(userId)
+			.first<{ provider_id: string }>();
+		return row?.provider_id ?? null;
+	}
+
 	async userById(id: string) {
 		const row = await this.db.prepare("SELECT * FROM users WHERE id = ?").bind(id).first<Row>();
 		return row ? toUser(row) : null;

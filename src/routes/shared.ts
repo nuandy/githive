@@ -44,11 +44,16 @@ export const toolContext = (env: Env, principal: Principal | undefined, agentKey
 		principal && principal.kind !== "access"
 			? async () => !!env.DB && (await new IdentityStore(env.DB).mayUseHosted(principal.user.id))
 			: undefined;
+	const githubAccount =
+		principal && principal.kind !== "access"
+			? async () => (env.DB ? new IdentityStore(env.DB).githubAccountOf(principal.user.id) : null)
+			: undefined;
 	const caller: Parameters<typeof toolContextFor>[2] = {};
 	if (agent) caller.agent = agent;
 	else if (agentKey) caller.agentKey = agentKey;
 	if (teamsOf) caller.teamsOf = teamsOf;
 	if (mayUseHosted) caller.mayUseHosted = mayUseHosted;
+	if (githubAccount) caller.githubAccount = githubAccount;
 	return toolContextFor(env, principal ? byOf(principal) : undefined, caller);
 };
 

@@ -3,7 +3,7 @@ import { statusOf } from "../src/errors";
 import type { GitHubLink } from "../src/github";
 import { GitCasLog } from "../src/record-log";
 import type { Registry } from "../src/toolkit/claims";
-import { callTool } from "../src/toolkit/mcp";
+import { callTool, type ToolContext } from "../src/toolkit/mcp";
 import { startGitServer, type GitServer } from "./helpers/git-server";
 import { linkBeforeModes } from "./helpers/github-link";
 import { memoryBatchGit } from "./helpers/memory-batch-git";
@@ -28,9 +28,9 @@ const ctx = () => ({
 	head: async () => server.git("rev-parse", "main").trim(),
 	github: async (repo: string) => (repo.startsWith("acme/") ? ({ repo } as GitHubLink) : null),
 });
-const settings = async (args: Record<string, unknown>) => {
+const settings = async (args: Record<string, unknown>, caller: Partial<ToolContext> = {}) => {
 	try {
-		return (await callTool("settings", { repo: "p", ...args }, ctx())) as Record<string, unknown>;
+		return (await callTool("settings", { repo: "p", ...args }, { ...ctx(), ...caller })) as Record<string, unknown>;
 	} catch (err) {
 		return { error: statusOf(err).message };
 	}
@@ -111,5 +111,23 @@ describe("connecting a repo to GitHub", { timeout: 60_000 }, () => {
 			githubSync: "mirror",
 			githubTrust: true,
 		});
+	});
+
+	it("connects only a GitHub repo the caller's own GitHub account can write to", async () => {
+		await settings({});
+		// GitHub account 1 writes to acme/shop; 2 only reads it.
+		const permissions: Record<string, string> = { "1": "write", "2": "read" };
+		const github = async (repo: string) =>
+			repo.startsWith("acme/")
+				? ({ repo, permissionOf: async (account: string) => permissions[account] ?? "none" } as GitHubLink)
+				: null;
+		const as = (account: string | null) => ({ github, githubAccount: async () => account });
+		expect(await settings({ github: "acme/shop" }, as("2"))).toEqual({
+			error: "your GitHub account can't write to acme/shop: ask its owner for write access first",
+		});
+		expect(await settings({ github: "acme/shop" }, as(null))).toEqual({
+			error: "connecting acme/shop needs a GitHive account signed in with GitHub",
+		});
+		expect(await settings({ github: "acme/shop" }, as("1"))).toMatchObject({ github: "acme/shop" });
 	});
 });

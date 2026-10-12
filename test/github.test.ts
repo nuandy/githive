@@ -113,6 +113,22 @@ describe("GitHive's GitHub App", () => {
 		expect(calls.filter((c) => c.includes("access_tokens"))).toHaveLength(1);
 	});
 
+	it("asks GitHub what an account may do in the repo, by its id, and none for an account it doesn't know", async () => {
+		const { pem } = await appKey();
+		const fetcher = (async (url: string) => {
+			const path = new URL(url).pathname;
+			if (path === "/repos/acme/perms/installation") return Response.json({ id: 5 });
+			if (path === "/app/installations/5/access_tokens")
+				return Response.json({ token: "t", expires_at: new Date(Date.now() + 3600_000).toISOString() });
+			if (path === "/user/42") return Response.json({ login: "octo" });
+			if (path === "/repos/acme/perms/collaborators/octo/permission") return Response.json({ permission: "write" });
+			return new Response("Not Found", { status: 404 });
+		}) as typeof fetch;
+		const link = (await linkTo({ appId: "1", privateKey: pem }, "acme/perms", fetcher))!;
+		expect(await link.permissionOf("42")).toBe("write");
+		expect(await link.permissionOf("43")).toBe("none");
+	});
+
 	it("reads the default branch's head with its ETag, and opens, finds and rewrites a pull request", async () => {
 		const { pem } = await appKey();
 		const calls: string[] = [];
@@ -198,6 +214,7 @@ describe("a repo connected to GitHub", { timeout: 60_000 }, () => {
 		const asked = new Map<string, number>();
 		const link: GitHubLink = {
 			repo: "acme/shop",
+			permissionOf: async () => "admin",
 			remote: { url, token: "unused", user: "x-access-token" },
 			runsFor: async (sha) => {
 				asked.set(sha, (asked.get(sha) ?? 0) + 1);
@@ -373,7 +390,8 @@ describe("connecting a repo to GitHub with settings", { timeout: 60_000 }, () =>
 				error: "GitHub isn't set up on this GitHive (its App's ID and key)",
 			});
 			expect(await call({ github: "acme/other" })).toEqual({
-				error: "GitHive's GitHub app isn't installed on acme/other: install it there first",
+				error:
+					"GitHive's GitHub app isn't installed on acme/other: install it there first (https://github.com/apps/githiveapp)",
 			});
 			expect(await call({ verify: ["github-actions"] })).toEqual({
 				error: 'checks on GitHub Actions need a connected GitHub repo: set github ("owner/name") too',
@@ -408,6 +426,7 @@ describe("merging in a repo connected to GitHub", { timeout: 120_000 }, () => {
 			const checked: string[] = [];
 			const link: GitHubLink = {
 				repo: "acme/shop",
+				permissionOf: async () => "admin",
 				remote: { url, token: "unused", user: "x-access-token" },
 				runsFor: async (sha) => (
 					checked.push(sha),

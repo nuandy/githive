@@ -1,5 +1,6 @@
 import { BRANCH_PATTERN, type BranchRule } from "../branch-rules";
 import { SKIP_PATTERN } from "../check-scope";
+import type { GitHubLink } from "../../github";
 import { GITHUB_SYNCS, type GitHubSettings, type GitHubSync, NEW_CONNECTION_SYNC } from "../github-settings";
 import type { ReviewPolicy } from "../votes";
 import type { Args, ToolContext } from "./context";
@@ -90,6 +91,8 @@ export async function githubFrom(
 	return next;
 }
 
+const GITHUB_APP_URL = "https://github.com/apps/githiveapp";
+
 // The link `value` names: the current one if it's the same repo, else a new connection, which must have the App.
 async function connected(ctx: ToolContext, value: unknown, current: GitHubSettings | undefined) {
 	if (typeof value !== "string" || !/^[\w.-]+\/[\w.-]+$/.test(value.trim()))
@@ -97,8 +100,21 @@ async function connected(ctx: ToolContext, value: unknown, current: GitHubSettin
 	const repo = value.trim();
 	if (current?.repo === repo) return current;
 	if (!ctx.github) fail(501, "GitHub isn't set up on this GitHive (its App's ID and key)");
-	if (!(await ctx.github(repo))) fail(409, `GitHive's GitHub app isn't installed on ${repo}: install it there first`);
+	const link = await ctx.github(repo);
+	if (!link) fail(409, `GitHive's GitHub app isn't installed on ${repo}: install it there first (${GITHUB_APP_URL})`);
+	await mayWriteOn(ctx, link);
 	return { repo, sync: NEW_CONNECTION_SYNC, trust: true };
+}
+
+// Anyone may install the App, so its being on a repo says nothing about the caller: GitHive would push there and
+// bring its code back, so the caller's own GitHub account must be able to write to it.
+async function mayWriteOn(ctx: ToolContext, link: GitHubLink) {
+	if (!ctx.githubAccount) return;
+	const account = await ctx.githubAccount();
+	if (!account) fail(403, `connecting ${link.repo} needs a GitHive account signed in with GitHub`);
+	const permission = await link.permissionOf(account);
+	if (permission !== "admin" && permission !== "write")
+		fail(403, `your GitHub account can't write to ${link.repo}: ask its owner for write access first`);
 }
 
 export function checksFrom(value: unknown): string[] {

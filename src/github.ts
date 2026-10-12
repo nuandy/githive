@@ -45,6 +45,8 @@ export interface GitHubLink {
 	createPull(input: { head: string; base: string; title: string; body: string }): Promise<PullRequest>;
 	/** Rewrites a pull request's title and body, and with `base` the branch it goes into. */
 	updatePull(number: number, input: { title: string; body: string; base?: string }): Promise<PullRequest>;
+	/** What a GitHub account (its numeric id) may do in the repo: admin, write, read or none. */
+	permissionOf(account: string): Promise<string>;
 }
 
 export interface GitHubApp {
@@ -258,5 +260,19 @@ export async function linkTo(app: GitHubApp, repo: string, fetcher: typeof fetch
 			toPull(await api<ApiPull>(await token(), "POST", `/repos/${repo}/pulls`, input, fetcher)),
 		updatePull: async (number, input) =>
 			toPull(await api<ApiPull>(await token(), "PATCH", `/repos/${repo}/pulls/${number}`, input, fetcher)),
+		permissionOf: async (account) => permissionOf(await token(), repo, account, fetcher),
 	};
+}
+
+// Asked by account id, since a GitHub username can change hands. Someone GitHub doesn't know may do nothing.
+async function permissionOf(token: string, repo: string, account: string, fetcher: typeof fetch) {
+	try {
+		const user = await api<{ login: string }>(token, "GET", `/user/${account}`, undefined, fetcher);
+		const path = `/repos/${repo}/collaborators/${encodeURIComponent(user.login)}/permission`;
+		const found = await api<{ permission: string }>(token, "GET", path, undefined, fetcher);
+		return found.permission;
+	} catch (err) {
+		if (err instanceof GitHubError && err.status === 404) return "none";
+		throw err;
+	}
 }
