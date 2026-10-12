@@ -1,278 +1,358 @@
-/* The hive map: the repo's folders as a honeycomb, each cell in its holding agent's claim color (claim-cN sets --claim). */
+/* The hive map: the repo as a honeycomb, each cell drawn in its stage's color, chips for the agents at work. */
 
-/* Agents in columns of one width, so a long list lines up however many there are. */
-.hive__legend {
-	display: grid;
-	grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
-	gap: 8px 24px;
-	margin: 0 0 12px;
-	padding: 0;
-	list-style: none;
-	font-size: 14px;
-}
-
-/* The swatch, then the agent and its changes, wrapping under the agent's name rather than the swatch. */
-.hive__legend li {
-	display: grid;
-	grid-template-columns: auto minmax(0, 1fr);
-	column-gap: 7px;
+.hive-map {
 	min-width: 0;
-	overflow-wrap: anywhere;
 }
 
-/* Level with the first line of text, however many lines follow. */
-.hive__legend li .hive__swatch {
-	align-self: start;
-	margin-top: 0.3em;
-}
-
-.hive__swatch {
-	border-radius: 2px;
-}
-
-.hive__key {
+.hive-map__head {
 	display: flex;
-	flex-wrap: wrap;
-	gap: 6px 18px;
-	margin: 0 0 18px;
-	padding: 0;
-	list-style: none;
+	align-items: baseline;
+	gap: 10px;
+	margin-bottom: 6px;
+}
+
+.hive-map__head h2 {
+	margin: 0;
+	font-size: 16px;
+}
+
+.hive-map__head span {
 	font-size: 13px;
+}
+
+.hive-map__cluster h3 {
+	margin: 10px 0 2px;
 	color: var(--text-muted);
+	font-size: 11px;
+	font-weight: 700;
+	letter-spacing: 0.06em;
+	text-transform: uppercase;
 }
 
-.hive__key li {
-	display: inline-flex;
-	align-items: center;
-	gap: 7px;
-}
-
-.hive__key-shape {
-	fill: var(--surface-3);
-	stroke: var(--border-strong);
-	stroke-width: 1;
-}
-
-.hive__key-shape--part {
-	fill: color-mix(in srgb, var(--claim) 22%, var(--surface));
-	stroke: var(--claim);
-	stroke-width: 1.5;
-}
-
-.hive__key-ring {
-	fill: none;
-	stroke: var(--text);
-	stroke-width: 1.5;
-	stroke-dasharray: 2.5 1.5;
-}
-
-.hive__key-lamp {
-	fill: var(--amber);
-	stroke: var(--text);
-	stroke-width: 0.75;
-}
-
-.hive__body {
-	display: grid;
-	grid-template-columns: minmax(0, 1fr) minmax(240px, 320px);
-	gap: 20px 28px;
-	align-items: start;
-}
-
-.hive__board {
-	min-width: 0;
-}
-
-.hive__svg {
+.hive-map__cluster svg {
 	display: block;
 	overflow: visible;
 }
 
-/* A cell: neutral until held; held whole, filled in its agent's color; held in part, pale. */
-
-.hive__cell {
-	cursor: pointer;
-	outline: none;
+/* A comb grows and shrinks as cells come and go, so what's below it moves smoothly. */
+.hive-map__comb {
+	transition: height 0.45s ease;
 }
 
-.hive__shape {
-	fill: var(--surface-3);
-	stroke: var(--border-strong);
-	stroke-width: 1;
-	transition:
-		fill 0.3s ease,
-		stroke 0.3s ease,
-		stroke-width 0.12s ease;
+/* A cluster that opens later (a folder agents start on) eases in. */
+.hive-map__cluster--fresh {
+	animation: hive-cluster-in 0.45s ease-out;
 }
 
-.hive__cell--held .hive__shape {
-	fill: color-mix(in srgb, var(--claim) 50%, var(--surface));
-	stroke: var(--claim);
-	stroke-width: 2.5;
-}
-
-.hive__cell--part .hive__shape {
-	fill: color-mix(in srgb, var(--claim) 18%, var(--surface));
-	stroke-dasharray: none;
-}
-
-.hive__cell--planned .hive__shape {
-	stroke-dasharray: 5 3;
-}
-
-.hive__cell:hover .hive__shape {
-	stroke: var(--text);
-	stroke-width: 2.5;
-}
-
-.hive__cell:focus-visible .hive__shape,
-.hive__cell--active .hive__shape {
-	stroke: var(--accent);
-	stroke-width: 4;
-}
-
-/* Landing: an ink ring inside the cell; being checked adds a lamp that breathes. */
-
-.hive__ring {
-	fill: none;
-	stroke: var(--text);
-	stroke-width: 2;
-	stroke-dasharray: 5 3;
-	pointer-events: none;
-}
-
-.hive__lamp {
-	fill: var(--amber);
-	stroke: var(--text);
-	stroke-width: 1.5;
-	pointer-events: none;
-	animation: hive-breathe 1.6s ease-in-out infinite;
-}
-
-@keyframes hive-breathe {
-	50% {
-		opacity: 0.35;
-	}
-}
-
-.hive__cell text {
-	pointer-events: none;
-	text-anchor: middle;
-	dominant-baseline: middle;
-	fill: var(--text);
-}
-
-.hive__name {
-	font: 600 11.5px var(--mono);
-}
-
-.hive__parent,
-.hive__count {
-	font: 9.5px var(--font);
-	fill: var(--text-muted) !important;
-}
-
-.hive__cell--held .hive__parent,
-.hive__cell--held .hive__count {
-	fill: var(--text) !important;
-}
-
-/* What the shown cell holds. */
-
-.hive__details {
-	position: sticky;
-	top: calc(var(--topbar-height) + 12px);
-	/* A cell with many holders scrolls inside the panel rather than running off the window. */
-	max-height: calc(100vh - var(--topbar-height) - 24px);
-	overflow-y: auto;
-	min-width: 0;
-	padding-top: 8px;
-	border-top: 1px solid var(--border);
-	font-size: 14px;
-}
-
-.hive__hint {
-	margin: 0;
-}
-
-.hive__details-body h3 {
-	display: flex;
-	flex-wrap: wrap;
-	align-items: baseline;
-	gap: 2px 10px;
-	margin-bottom: 8px;
-	font-size: 14px;
-	font-weight: 600;
-}
-
-.hive__details-body h3 code {
-	padding: 0;
-	background: none;
-}
-
-.hive__details-body h3 a {
-	font-weight: 400;
+.hive-map__note {
+	margin: 6px 0 0;
 	font-size: 13px;
 }
 
-.hive__details-body p {
-	margin: 0;
+/* A cell: dim when free; its stage's color otherwise. */
+
+.hive-cell {
+	cursor: pointer;
+	outline: none;
+	--cell: var(--border-strong);
+	/* Each cell is moved into place by its transform, so it glides when the comb rearranges. */
+	transition:
+		transform 0.5s cubic-bezier(0.2, 0.7, 0.3, 1),
+		opacity 0.3s ease;
 }
 
-.hive__landing {
-	display: flex;
-	align-items: center;
-	gap: 7px;
-	margin-bottom: 8px !important;
+.hive-cell__in {
+	transform-box: fill-box;
+	transform-origin: center;
 }
 
-.hive__holders {
-	display: grid;
-	gap: 10px;
-	margin: 0;
-	padding: 0;
-	list-style: none;
+/* A cell that appears grows in; one that goes shrinks away where it was. */
+.hive-cell--fresh .hive-cell__in {
+	animation: hive-cell-in 0.45s cubic-bezier(0.3, 1.4, 0.5, 1) backwards;
 }
 
-.hive__holders li {
-	display: flex;
-	align-items: flex-start;
-	gap: 8px;
+.hive-cell--leaving {
+	pointer-events: none;
 }
 
-.hive__holders .hive__swatch {
-	margin-top: 5px;
+.hive-cell--leaving .hive-cell__in {
+	animation: hive-cell-out 0.45s ease-in forwards;
 }
 
-.hive__holder {
-	min-width: 0;
-	overflow-wrap: anywhere;
+.hive-cell__chip--fresh {
+	animation: hive-cell-pop 0.5s cubic-bezier(0.3, 1.6, 0.5, 1) backwards;
+	transform-box: fill-box;
+	transform-origin: center;
 }
 
-.hive__holder code {
-	font-size: 12px;
+.hive-cell__shape {
+	fill: var(--surface);
+	stroke: var(--border);
+	stroke-width: 1.5;
+	transition:
+		fill 0.4s ease,
+		fill-opacity 0.4s ease,
+		stroke 0.4s ease,
+		stroke-opacity 0.4s ease,
+		stroke-width 0.2s ease;
 }
 
-.hive__intent {
-	white-space: pre-line;
+.hive-cell__name {
+	fill: var(--text-muted);
+	font: 9px var(--mono);
+	text-anchor: middle;
+	pointer-events: none;
 }
 
-@media (max-width: 720px) {
-	.hive__body {
-		grid-template-columns: minmax(0, 1fr);
+.hive-cell__parent {
+	fill: var(--text-muted);
+	font: 7.5px var(--mono);
+	text-anchor: middle;
+	pointer-events: none;
+	opacity: 0.8;
+}
+
+.hive-cell__sub {
+	fill: var(--text-muted);
+	font: 600 7.5px var(--font);
+	letter-spacing: 0.04em;
+	text-transform: uppercase;
+	text-anchor: middle;
+	pointer-events: none;
+}
+
+.hive-cell--building,
+.hive-cell--review,
+.hive-cell--approved,
+.hive-cell--landing,
+.hive-cell--revising,
+.hive-cell--asking {
+	--cell: var(--stage-building);
+}
+
+.hive-cell--building .hive-cell__shape {
+	fill: var(--stage-building);
+	fill-opacity: 0.24;
+	stroke: var(--stage-building);
+}
+
+.hive-cell--review .hive-cell__shape {
+	fill: var(--stage-review);
+	fill-opacity: 0.09;
+	stroke: var(--stage-review);
+	stroke-dasharray: 5 3;
+}
+
+.hive-cell--approved .hive-cell__shape {
+	fill: var(--good);
+	fill-opacity: 0.1;
+	stroke: var(--good);
+}
+
+.hive-cell--landing .hive-cell__shape {
+	fill: var(--stage-landing);
+	fill-opacity: 0.18;
+	stroke: var(--stage-landing);
+}
+
+.hive-cell--revising .hive-cell__shape,
+.hive-cell--asking .hive-cell__shape {
+	fill: var(--bad);
+	fill-opacity: 0.14;
+	stroke: var(--bad);
+}
+
+.hive-cell--landed .hive-cell__shape {
+	/* Fades as the landing gets older (--fade from 1 to 0). Tints here are opacities, not mixed colors: Chrome
+	   animates a color-mix() through garbage colors. */
+	fill: var(--good);
+	fill-opacity: calc(0.06 + 0.18 * var(--fade, 1));
+	stroke: var(--good);
+	stroke-opacity: calc(0.3 + 0.45 * var(--fade, 1));
+}
+
+.hive-cell--next .hive-cell__shape {
+	stroke: var(--border-strong);
+	stroke-dasharray: 4 3;
+}
+.hive-cell--building .hive-cell__name,
+.hive-cell--review .hive-cell__name,
+.hive-cell--approved .hive-cell__name,
+.hive-cell--landing .hive-cell__name,
+.hive-cell--revising .hive-cell__name,
+.hive-cell--asking .hive-cell__name {
+	fill: var(--text);
+}
+
+.hive-cell--landed .hive-cell__sub,
+.hive-cell--approved .hive-cell__sub {
+	fill: var(--good);
+}
+.hive-cell--landing .hive-cell__sub {
+	fill: var(--amber);
+}
+.hive-cell--revising .hive-cell__sub,
+.hive-cell--asking .hive-cell__sub {
+	fill: var(--bad);
+}
+.hive-cell--building .hive-cell__sub,
+.hive-cell--review .hive-cell__sub {
+	fill: var(--accent);
+}
+
+.hive-cell__lamp {
+	fill: var(--amber);
+	animation: hive-cell-blink 1s infinite;
+}
+
+.hive-cell:hover .hive-cell__shape,
+.hive-cell:focus-visible .hive-cell__shape,
+.hive-cell--lit .hive-cell__shape {
+	stroke-width: 3;
+}
+
+.hive-cell--picked .hive-cell__shape {
+	stroke: var(--text);
+	stroke-width: 3;
+}
+
+.hive-cell--dim {
+	opacity: 0.3;
+}
+
+/* An agent's chip on a cell. */
+
+.hive-cell__chip circle {
+	fill: var(--surface-3);
+	stroke: var(--text);
+	stroke-width: 1;
+}
+
+.hive-cell__chip text {
+	fill: var(--text);
+	font: 700 7.5px var(--font);
+	text-anchor: middle;
+	pointer-events: none;
+}
+
+.hive-cell__chip--more circle {
+	stroke-dasharray: 2 2;
+}
+
+.hive-cell__chip--landed circle {
+	stroke: var(--good);
+	fill: var(--bg);
+}
+
+.hive-cell__chip--landed text {
+	fill: var(--good);
+}
+
+/* What just happened in a cell. */
+
+.hive-cell[class*="hive-cell--m-"] .hive-cell__shape {
+	animation-delay: var(--motion-delay, 0ms);
+	animation-fill-mode: backwards;
+}
+
+.hive-cell--m-arrived .hive-cell__chip {
+	animation: hive-cell-pop 0.5s cubic-bezier(0.3, 1.6, 0.5, 1) var(--motion-delay, 0ms) backwards;
+	transform-box: fill-box;
+	transform-origin: center;
+}
+
+.hive-cell--m-changes-asked .hive-cell__shape,
+.hive-cell--m-failed .hive-cell__shape,
+.hive-cell--m-asking .hive-cell__shape {
+	animation-name: hive-cell-flash-bad;
+	animation-duration: 1.2s;
+}
+
+.hive-cell--m-landed .hive-cell__shape {
+	animation-name: hive-cell-flash-good;
+	animation-duration: 1.4s;
+}
+
+.hive-cell--m-checking .hive-cell__shape,
+.hive-cell--m-approved .hive-cell__shape {
+	animation-name: hive-cell-pulse;
+	animation-duration: 0.8s;
+}
+
+@keyframes hive-cell-pop {
+	0% {
+		transform: scale(0.3);
+		opacity: 0;
 	}
+	70% {
+		transform: scale(1.2);
+		opacity: 1;
+	}
+	100% {
+		transform: none;
+	}
+}
 
-	.hive__details {
-		position: static;
+@keyframes hive-cell-flash-bad {
+	0% {
+		stroke: var(--bad);
+		stroke-width: 6;
+		fill: var(--bad);
+		fill-opacity: 0.4;
+	}
+}
+
+@keyframes hive-cell-flash-good {
+	0% {
+		stroke: var(--good);
+		stroke-width: 7;
+		fill: var(--good);
+		fill-opacity: 0.6;
+	}
+}
+
+@keyframes hive-cell-pulse {
+	0% {
+		stroke-width: 6;
+	}
+}
+
+@keyframes hive-cell-blink {
+	50% {
+		opacity: 0.25;
+	}
+}
+
+@keyframes hive-cell-in {
+	from {
+		opacity: 0;
+		transform: scale(0.6);
+	}
+}
+
+@keyframes hive-cell-out {
+	to {
+		opacity: 0;
+		transform: scale(0.6);
+	}
+}
+
+@keyframes hive-cluster-in {
+	from {
+		opacity: 0;
+		transform: translateY(-6px);
 	}
 }
 
 @media (prefers-reduced-motion: reduce) {
-	.hive__shape {
-		transition: none;
+	.hive-cell,
+	.hive-cell *,
+	.hive-map__comb,
+	.hive-map__cluster {
+		transition: none !important;
+		animation: none !important;
 	}
-
-	.hive__lamp {
-		animation: none;
+	.hive-cell--leaving {
+		display: none;
 	}
 }

@@ -17,3 +17,10 @@ export function identityName(raw: string | undefined | null): string | undefined
 	if (value.startsWith("person:")) return `person ${value.slice("person:".length).slice(0, 8)}`;
 	return value;
 }
+
+/** A name in a sentence: a recorded identity shortened, and GitHive's own flags as GitHive. */
+export function displayName(raw: string | undefined | null): string | undefined {
+	if (!raw) return undefined;
+	if (raw === "githive") return "GitHive";
+	return raw.includes(":") ? (identityName(raw) ?? raw) : raw;
+}
