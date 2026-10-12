@@ -1,76 +1,395 @@
+import { type CSSProperties, type KeyboardEvent, useEffect, useRef, useState } from "react";
+import { hexGrid, hexPoints } from "../lib/hexGeometry";
+import { agentChip, type Cell, type CellState, type HiveCells, LANDED_LATELY_MS } from "../lib/hiveCells";
+import type { GoalMotion } from "../lib/hiveMotion";
+import { timeOf } from "../lib/model";
 import { counted } from "../lib/plural";
-import "./HiveMap.css";
-import { useEffect, useState } from "react";
-import type { RepoLanding, RepoSnapshot, RepoTree } from "../api";
-import { type Hex, type HexHolder, hexGrid, hexPoints, hiveAgents, honeycomb, MAX_HEXES } from "../lib/honeycomb";
-import { LAMP_WORDS } from "../lib/overview";
-import { timeAgo } from "../lib/relativeTime";
 import { href } from "../lib/routes";
+import type { HiveFilter } from "./HiveTab";
+import "./HiveMap.css";
+
+/** A cell's corner-to-center size, in px. */
+const RADIUS = 34;
+const GAP = 2.5;
+/** Room above a cluster's first row for the chips that sit on its cells' tops. */
+const TOP = 8;
+/** How many columns the map draws before it has measured its box. */
+const COLUMNS = 7;
+/** Chips a cell shows before "+n". */
+const CHIPS = 3;
+
+const STATE_WORDS: Record<CellState, string> = {
+	asking: "asking",
+	revising: "changes asked",
+	landing: "landing",
+	approved: "approved",
+	review: "in review",
+	building: "building",
+	landed: "landed",
+	next: "up next",
+	free: "",
+};
+
+/** How many characters of a name fit in a cell. */
+const NAME_FITS = 10;
+
+/** A name cut to fit a cell: its extension goes first ("res.sendFile.js" → "res.sendF…"). */
+function fitName(name: string): string {
+	if (name.length <= NAME_FITS) return name;
+	const bare = name.replace(/\.[A-Za-z0-9]{1,5}$/, "");
+	return bare.length <= NAME_FITS ? bare : `${bare.slice(0, NAME_FITS - 1)}…`;
+}
+
+/** A deep cell's folder, above its name, cut from the front: "…uth/src/". */
+function fitParent(parent: string): string {
+	const shown = `${parent}/`;
+	return shown.length <= NAME_FITS + 1 ? shown : `…${shown.slice(-NAME_FITS)}`;
+}
+
+/** A cell's state in the fewest words, under its name. */
+const SUB_WORDS: Record<CellState, string> = {
+	asking: "asking",
+	revising: "revising",
+	landing: "landing",
+	approved: "approved",
+	review: "review",
+	building: "building",
+	landed: "landed",
+	next: "up next",
+	free: "",
+};
 
 export interface HiveMapProps {
 	repo: string;
-	/** The branch shown. */
 	branch: string;
-	/** Its claims (those landing on `branch`) and votes. */
-	snapshot: Pick<RepoSnapshot, "claims" | "votes">;
-	tree?: RepoTree;
+	cells?: HiveCells;
+	truncated?: boolean;
 	error?: string;
-	landing?: RepoLanding;
-	/** The time "claimed … ago" counts from (tests fix it). */
-	now?: number;
+	/** Cells of the goal pointed at in the goals panel. */
+	lit: Set<string>;
+	filter: HiveFilter | null;
+	/** What's moving now, by change. */
+	motions: Map<string, GoalMotion & { seq: number }>;
+	onHover(cell: string | null): void;
+	onPick(cell: Cell): void;
+	now: number;
 }
 
-/** A cell's corner-to-center size, in px at full size. */
-const RADIUS = 38;
-/** The gap between cells. */
-const GAP = 3;
-/** How wide the map draws before it has measured its box: wraps after this many cells. */
-const COLUMNS = 10;
-
-/** Short enough to sit inside a cell. */
-const fit = (text: string, max: number) => (text.length > max ? `${text.slice(0, max - 1)}…` : text);
-
-/** Where a cell is, in words: "src/stats/", "the files in src/", "the top-level files". */
-function place(hex: Hex): string {
-	if (hex.kind === "files") return hex.path ? `the files directly in ${hex.path}/` : "the top-level files";
-	return `${hex.path}/`;
+/**
+ * The repo as a honeycomb: each busy top-level folder opened up to the paths agents are on, the rest of the repo
+ * folded. A cell's color is its stage (the strip above is its key); chips on it are the agents at work there.
+ */
+export function HiveMap({
+	repo,
+	branch,
+	cells,
+	truncated,
+	error,
+	lit,
+	filter,
+	motions,
+	onHover,
+	onPick,
+	now,
+}: HiveMapProps) {
+	const [boxRef, width] = useWidth<HTMLDivElement>();
+	const cellWidth = Math.sqrt(3) * RADIUS;
+	const columns = width ? Math.max(3, Math.floor((width - cellWidth / 2) / cellWidth)) : COLUMNS;
+	const picked = filter?.kind === "cell" ? filter.key : undefined;
+	const status = error ? `The tree couldn't be read: ${error}` : "Reading the tree…";
+	const pickedCell = picked
+		? cells?.clusters.flatMap((cluster) => cluster.cells).find((cell) => cell.key === picked)
+		: undefined;
+	const fresh = useFresh(!!cells);
+	const laid = (cells?.clusters ?? []).map((cluster) => {
+		const grid = hexGrid(cluster.cells.length, columns, RADIUS, TOP);
+		const placed = cluster.cells.flatMap((cell, index) => {
+			const center = grid.centers[index];
+			return center ? [{ cell, cluster: cluster.key, x: center.x, y: center.y }] : [];
+		});
+		return { cluster, grid, placed };
+	});
+	const leaving = useLeaving(laid.flatMap((each) => each.placed));
+	return (
+		<section className="hive-map" aria-labelledby="hive-map-title">
+			<div className="hive-map__head">
+				<h2 id="hive-map-title">The hive</h2>
+				<span className="muted">{branch}, opened up where agents work</span>
+			</div>
+			{!cells ? <p className="muted">{status}</p> : null}
+			{cells && !cells.clusters.length ? <p className="muted">{branch} has no files yet.</p> : null}
+			<div className="hive-map__board" ref={boxRef}>
+				{laid.map(({ cluster, grid, placed }) => (
+					<div
+						key={cluster.key || "~rest"}
+						className={[
+							"hive-map__cluster",
+							cluster.busy ? "hive-map__cluster--busy" : "",
+							fresh(`cluster:${cluster.key}`) ? "hive-map__cluster--fresh" : "",
+						]
+							.filter(Boolean)
+							.join(" ")}
+					>
+						<h3>{cluster.label}</h3>
+						{/* The comb's height eases as cells come and go, so what's below doesn't jump. */}
+						<div className="hive-map__comb" style={{ height: grid.height }}>
+							<svg
+								viewBox={`0 0 ${grid.width} ${grid.height}`}
+								width={grid.width}
+								height={grid.height}
+								style={{ maxWidth: "100%", height: "auto" }}
+								role="group"
+								aria-label={`${cluster.label}: ${counted(cluster.cells.length, "cell")}`}
+							>
+								{placed.map(({ cell, x, y }) => (
+									<HexCell
+										key={cell.key}
+										cell={cell}
+										x={x}
+										y={y}
+										lit={lit.has(cell.key)}
+										picked={picked === cell.key}
+										dim={dims(cell, filter)}
+										motion={cell.goals.map((key) => motions.get(key)).find(Boolean)}
+										fresh={fresh}
+										onHover={onHover}
+										onPick={onPick}
+										now={now}
+									/>
+								))}
+								{leaving
+									.filter((gone) => gone.cluster === cluster.key)
+									.map(({ cell, x, y }) => (
+										<HexCell key={`gone:${cell.key}`} cell={cell} x={x} y={y} leaving fresh={fresh} now={now} />
+									))}
+							</svg>
+						</div>
+					</div>
+				))}
+			</div>
+			{cells?.more ? <p className="muted hive-map__note">and {counted(cells.more, "more cell")}</p> : null}
+			{truncated ? (
+				<p className="muted hive-map__note">This repo is large: the map shows the first part of its tree.</p>
+			) : null}
+			{pickedCell && pickedCell.kind !== "files" && !pickedCell.planned ? (
+				<p className="hive-map__note">
+					<code>{pickedCell.path}</code> · <a href={href.code(repo, pickedCell.path, branch)}>Open in Code</a>
+				</p>
+			) : null}
+		</section>
+	);
 }
 
-const LANDING_WORDS = {
-	checking: "a change here is being checked to land",
-	queued: "a change here is approved and waiting to land",
-} as const;
+/** How long something new keeps its arriving class, so a redraw mid-way doesn't cut its animation short. */
+const FRESH_MS = 800;
 
-/** A cell's name inside its hexagon. */
-function cellName(hex: Hex): string {
-	if (hex.kind !== "files") return fit(hex.name, 8);
-	return hex.path ? "· files" : "top files";
+/**
+ * Whether a cell, chip or cluster has only just appeared. What's there on the first draw with cells isn't: the map
+ * opens settled, and only what comes later arrives.
+ */
+function useFresh(ready: boolean): (key: string) => boolean {
+	const seen = useRef<Map<string, number> | null>(null);
+	const first = ready && seen.current === null;
+	if (first) seen.current = new Map();
+	const at = Date.now();
+	return (key) => {
+		const map = seen.current;
+		if (!map) return false;
+		const when = map.get(key);
+		if (when === undefined) {
+			map.set(key, first ? 0 : at);
+			return !first;
+		}
+		return at - when < FRESH_MS;
+	};
 }
 
-/** A cell's path in its details: a folder, or the files directly in one. */
-function detailsPath(hex: Hex): string {
-	if (hex.kind !== "files") return `${hex.path}/`;
-	return hex.path ? `${hex.path}/*` : "top-level files";
+interface Placed {
+	cell: Cell;
+	cluster: string;
+	x: number;
+	y: number;
 }
 
-/** What a cell says to someone who can't see it. */
-export function hexLabel(hex: Hex, now: number = Date.now()): string {
-	const what = `${place(hex)}${hex.planned ? " (new)" : ""}`;
-	const holder = hex.holders[0];
-	if (!holder) return `${what}: not claimed`;
-	const others = hex.holders.length > 1 ? `, and ${counted(hex.holders.length - 1, "more change")}` : "";
-	// Mention that a change in the cell is landing only if the holder's own state doesn't already say so.
-	const said =
-		(hex.landing === "checking" && holder.lamp === "checking") ||
-		(hex.landing === "queued" && holder.lamp === "approved");
-	const landing = hex.landing && !said ? `; ${LANDING_WORDS[hex.landing]}` : "";
-	const held = holder.whole ? "held" : "partly held";
-	const claimed = `claimed ${timeAgo(holder.since, now)}`;
-	const state = LAMP_WORDS[holder.lamp];
-	return `${what}: ${held} by ${holder.agent} for ${holder.title}, ${claimed}, ${state}${others}${landing}`;
+/** How long a cell that has gone stays to fade out where it was. */
+const LEAVING_MS = 450;
+
+/** Cells drawn last time and gone now, kept a moment where they were so they fade instead of vanishing. */
+function useLeaving(placed: Placed[]): Placed[] {
+	const last = useRef(new Map<string, Placed>());
+	const [leaving, setLeaving] = useState<Placed[]>([]);
+	const timers = useRef(new Set<ReturnType<typeof setTimeout>>());
+	useEffect(() => {
+		const now = new Map(placed.map((each) => [each.cell.key, each]));
+		const gone = [...last.current.values()].filter((each) => !now.has(each.cell.key));
+		last.current = now;
+		if (!gone.length) return;
+		setLeaving((current) => [...current.filter((each) => !now.has(each.cell.key)), ...gone]);
+		const timer = setTimeout(() => {
+			timers.current.delete(timer);
+			setLeaving((current) => current.filter((each) => !gone.includes(each)));
+		}, LEAVING_MS);
+		timers.current.add(timer);
+	});
+	useEffect(() => () => timers.current.forEach(clearTimeout), []);
+	const now = new Set(placed.map((each) => each.cell.key));
+	return leaving.filter((each) => !now.has(each.cell.key));
 }
 
-/** The width of the box the map draws in, once known (a callback ref, since the box shows only once the tree is in). */
+/** Whether the filter leaves a cell out: another agent's, or not the cell picked. */
+function dims(cell: Cell, filter: HiveFilter | null): boolean {
+	if (!filter) return false;
+	if (filter.kind === "cell") return filter.key !== cell.key;
+	return !cell.agents.includes(filter.agent) && cell.landed?.agent !== filter.agent;
+}
+
+/** What a cell says to someone who can't see it, and in its tooltip. */
+export function cellLabel(cell: Cell): string {
+	const where =
+		cell.kind === "files"
+			? cell.path
+				? `${cell.folders ? "everything else" : "the other files"} in ${cell.path}/`
+				: "the top-level files"
+			: cell.kind === "folder"
+				? `${cell.path}/`
+				: cell.path;
+	const what = cell.planned ? `${where} (new)` : where;
+	const agents = cell.agents.length ? `, ${cell.agents.join(", ")} at work` : "";
+	if (cell.state === "free") return `${what}: ${cell.kind === "file" ? "nobody on it" : counted(cell.files, "file")}`;
+	if (cell.state === "landed") return `${what}: ${cell.landed?.agent ?? "an agent"} landed a change here lately`;
+	if (cell.state === "next") return `${what}: backlog work waiting for an agent`;
+	return `${what}: ${STATE_WORDS[cell.state]}${agents}`;
+}
+
+function HexCell({
+	cell,
+	x,
+	y,
+	lit = false,
+	picked = false,
+	dim = false,
+	motion,
+	leaving = false,
+	fresh,
+	onHover,
+	onPick,
+	now,
+}: {
+	cell: Cell;
+	x: number;
+	y: number;
+	lit?: boolean;
+	picked?: boolean;
+	dim?: boolean;
+	motion?: GoalMotion | undefined;
+	/** Gone: drawn a moment longer, fading, where it was. */
+	leaving?: boolean;
+	fresh: (key: string) => boolean;
+	onHover?(cell: string | null): void;
+	onPick?(cell: Cell): void;
+	now: number;
+}) {
+	const className = [
+		"hive-cell",
+		`hive-cell--${cell.state}`,
+		cell.planned ? "hive-cell--planned" : "",
+		lit ? "hive-cell--lit" : "",
+		picked ? "hive-cell--picked" : "",
+		dim ? "hive-cell--dim" : "",
+		motion ? `hive-cell--m-${motion.motion}` : "",
+		leaving ? "hive-cell--leaving" : fresh(`cell:${cell.key}`) ? "hive-cell--fresh" : "",
+	]
+		.filter(Boolean)
+		.join(" ");
+	const age = cell.landed ? (now - (timeOf(cell.landed.at) ?? now)) / LANDED_LATELY_MS : 0;
+	// Drawn around its own center and moved into place, so a cell glides when the comb rearranges.
+	const style = {
+		transform: `translate(${x}px, ${y}px)`,
+		"--fade": Math.max(0, 1 - age).toFixed(2),
+		...(motion ? { "--motion-delay": `${motion.delay}ms` } : {}),
+	} as CSSProperties;
+	const label = cellLabel(cell);
+	const sub =
+		cell.planned && cell.state === "free"
+			? "new"
+			: SUB_WORDS[cell.state] || (cell.kind === "file" ? "" : counted(cell.files, "file"));
+	const chips = cell.agents.slice(0, CHIPS);
+	const extra = cell.agents.length - chips.length;
+	const chipY = -RADIUS + 3;
+	const chipX = (index: number, count: number) => (index - (count - 1) / 2) * 15;
+	const chipClass = (agent: string, more = "") =>
+		["hive-cell__chip", more, fresh(`chip:${cell.key}:${agent}`) ? "hive-cell__chip--fresh" : ""]
+			.filter(Boolean)
+			.join(" ");
+	const keys = (event: KeyboardEvent) => {
+		if (event.key === "Enter" || event.key === " ") {
+			event.preventDefault();
+			onPick?.(cell);
+		}
+	};
+	const interactive = leaving
+		? { "aria-hidden": true }
+		: {
+				role: "button",
+				tabIndex: 0,
+				"aria-label": label,
+				"aria-pressed": picked,
+				onMouseEnter: () => onHover?.(cell.key),
+				onMouseLeave: () => onHover?.(null),
+				onFocus: () => onHover?.(cell.key),
+				onBlur: () => onHover?.(null),
+				onClick: () => onPick?.(cell),
+				onKeyDown: keys,
+			};
+	return (
+		<g className={className} style={style} {...interactive}>
+			{leaving ? null : <title>{label}</title>}
+			<g className="hive-cell__in">
+				<polygon className="hive-cell__shape" points={hexPoints(0, 0, RADIUS - GAP)} />
+				{cell.state === "landing" ? <circle className="hive-cell__lamp" cx={0} cy={20} r={3.5} /> : null}
+				{cell.parent ? (
+					<text className="hive-cell__parent" x={0} y={-10}>
+						{fitParent(cell.parent)}
+					</text>
+				) : null}
+				<text className="hive-cell__name" x={0} y={sub ? 2 : 4}>
+					{fitName(cell.name)}
+				</text>
+				{sub ? (
+					<text className="hive-cell__sub" x={0} y={13}>
+						{sub}
+					</text>
+				) : null}
+				{chips.map((agent, index) => (
+					<g key={agent} className={chipClass(agent)}>
+						<circle cx={chipX(index, chips.length + (extra ? 1 : 0))} cy={chipY} r={7.5} />
+						<text x={chipX(index, chips.length + (extra ? 1 : 0))} y={chipY + 3}>
+							{agentChip(agent)}
+						</text>
+					</g>
+				))}
+				{extra ? (
+					<g className={chipClass("+more", "hive-cell__chip--more")}>
+						<circle cx={chipX(chips.length, chips.length + 1)} cy={chipY} r={7.5} />
+						<text x={chipX(chips.length, chips.length + 1)} y={chipY + 3}>
+							+{extra}
+						</text>
+					</g>
+				) : null}
+				{!chips.length && cell.landed ? (
+					<g className={chipClass(`landed:${cell.landed.agent}`, "hive-cell__chip--landed")}>
+						<circle cx={0} cy={chipY} r={7.5} />
+						<text x={0} y={chipY + 3}>
+							{agentChip(cell.landed.agent)}
+						</text>
+					</g>
+				) : null}
+			</g>
+		</g>
+	);
+}
+
+/** The width of the box the map draws in, once known. */
 function useWidth<T extends Element>(): [(element: T | null) => void, number | undefined] {
 	const [element, setElement] = useState<T | null>(null);
 	const [width, setWidth] = useState<number>();
@@ -81,277 +400,4 @@ function useWidth<T extends Element>(): [(element: T | null) => void, number | u
 		return () => observer.disconnect();
 	}, [element]);
 	return [setElement, width];
-}
-
-function Swatch({ color }: { color: number }) {
-	return <span className={`claims__swatch hive__swatch claim-c${color}`} aria-hidden="true" />;
-}
-
-/** One cell: its hexagon in its holder's color, its name, and a ring when a change in it is landing. */
-function Cell({
-	hex,
-	x,
-	y,
-	active,
-	onShow,
-	onPick,
-	now,
-}: {
-	hex: Hex;
-	x: number;
-	y: number;
-	active: boolean;
-	onShow: (key: string | null) => void;
-	onPick: (key: string) => void;
-	now: number;
-}) {
-	const holder = hex.holders[0];
-	const className = [
-		"hive__cell",
-		holder ? `hive__cell--held claim-c${holder.color}` : "",
-		holder && !holder.whole ? "hive__cell--part" : "",
-		hex.planned ? "hive__cell--planned" : "",
-		hex.landing ? `hive__cell--${hex.landing}` : "",
-		active ? "hive__cell--active" : "",
-	]
-		.filter(Boolean)
-		.join(" ");
-	const label = hexLabel(hex, now);
-	return (
-		<g
-			className={className}
-			role="button"
-			tabIndex={0}
-			aria-label={label}
-			aria-pressed={active}
-			onMouseEnter={() => onShow(hex.key)}
-			onMouseLeave={() => onShow(null)}
-			onFocus={() => onShow(hex.key)}
-			onBlur={() => onShow(null)}
-			onClick={() => onPick(hex.key)}
-			onKeyDown={(event) => {
-				if (event.key === "Enter" || event.key === " ") {
-					event.preventDefault();
-					onPick(hex.key);
-				}
-			}}
-		>
-			<title>{label}</title>
-			<polygon className="hive__shape" points={hexPoints(x, y, RADIUS - GAP)} />
-			{hex.landing ? <polygon className="hive__ring" points={hexPoints(x, y, RADIUS - GAP - 6)} /> : null}
-			{hex.landing === "checking" ? <circle className="hive__lamp" cx={x} cy={y - RADIUS + GAP + 15} r={4} /> : null}
-			{hex.parent ? (
-				<text className="hive__parent" x={x} y={y - 11} aria-hidden="true">
-					{fit(`${hex.parent}/`, 10)}
-				</text>
-			) : null}
-			<text className="hive__name" x={x} y={y + (hex.parent ? 4 : 0)} aria-hidden="true">
-				{cellName(hex)}
-			</text>
-			<text className="hive__count" x={x} y={y + (hex.parent ? 18 : 15)} aria-hidden="true">
-				{hex.planned ? "new" : counted(hex.files, "file")}
-				{hex.holders.length > 1 ? ` +${hex.holders.length - 1}` : ""}
-			</text>
-		</g>
-	);
-}
-
-/** A cell's holders, in full. */
-function HolderLine({ repo, holder, now }: { repo: string; holder: HexHolder; now: number }) {
-	return (
-		<li className={`claim-c${holder.color}`}>
-			<Swatch color={holder.color} />
-			<div className="hive__holder">
-				<p>
-					<strong>{holder.agent}</strong> {holder.whole ? "holds it" : "holds part of it"} for{" "}
-					<a href={href.change(repo, holder.change)}>{holder.title}</a>
-				</p>
-				{holder.intent && holder.intent.trim() !== holder.title ? (
-					<p className="muted hive__intent">{fit(holder.intent.trim(), 280)}</p>
-				) : null}
-				<p className="muted">
-					Claimed {timeAgo(holder.since, now)} · {LAMP_WORDS[holder.lamp]} ·{" "}
-					{holder.paths.map((path, index) => (
-						<span key={path}>
-							{index ? ", " : ""}
-							<code>{path || "/"}</code>
-						</span>
-					))}
-				</p>
-			</div>
-		</li>
-	);
-}
-
-/** What the shown cell holds: its path, its holders, and whether something in it is landing. */
-function Details({ repo, branch, hex, now }: { repo: string; branch: string; hex: Hex | undefined; now: number }) {
-	if (!hex)
-		return (
-			<p className="muted hive__hint">
-				Point at a cell, or tab to it, to see who holds it. Select one to keep it here.
-			</p>
-		);
-	return (
-		<div className="hive__details-body">
-			<h3>
-				<code>{detailsPath(hex)}</code>
-				<span className="muted">{hex.planned ? `new: not on ${branch} yet` : counted(hex.files, "file")}</span>
-				{hex.kind === "folder" && !hex.planned ? <a href={href.code(repo, hex.path, branch)}>Open in Code</a> : null}
-			</h3>
-			{hex.landing ? (
-				<p className={`hive__landing lamp--${hex.landing === "checking" ? "amber" : "green"}`}>
-					<span className="lamp" aria-hidden="true" />
-					{hex.landing === "checking"
-						? `A change here is being checked to land on ${branch}.`
-						: `A change here is approved, landing on ${branch} with the next batch.`}
-				</p>
-			) : null}
-			{hex.holders.length ? (
-				<ul className="hive__holders">
-					{hex.holders.map((holder) => (
-						<HolderLine key={holder.change} repo={repo} holder={holder} now={now} />
-					))}
-				</ul>
-			) : (
-				<p className="muted">Not claimed: free for any agent to take.</p>
-			)}
-		</div>
-	);
-}
-
-/** Each agent holding claims, in its color, with its changes and how far along each is. */
-function HiveLegend({ repo, branch, agents }: { repo: string; branch: string; agents: ReturnType<typeof hiveAgents> }) {
-	if (!agents.length) return <p className="muted">No agent holds a claim on {branch}: every folder is free.</p>;
-	return (
-		<ul className="hive__legend" aria-label="Agents holding claims">
-			{agents.map((entry) => (
-				<li key={entry.agent} className={`claim-c${entry.color}`}>
-					<Swatch color={entry.color} />
-					<span className="hive__legend-text">
-						<strong>{entry.agent}</strong>{" "}
-						{entry.changes.map((change, index) => (
-							<span key={change.change} className="hive__legend-change">
-								{index ? "; " : ""}
-								<a href={href.change(repo, change.change)} title={change.intent}>
-									{change.title}
-								</a>
-								<span className="muted"> · {LAMP_WORDS[change.lamp]}</span>
-							</span>
-						))}
-					</span>
-				</li>
-			))}
-		</ul>
-	);
-}
-
-/** What a cell's shading, ring and lamp mean. */
-function HiveKey() {
-	return (
-		<ul className="hive__key" aria-label="What the cells mean">
-			<li>
-				<svg viewBox="0 0 20 22" width="16" height="18" aria-hidden="true">
-					<polygon className="hive__key-shape" points={hexPoints(10, 11, 9)} />
-				</svg>
-				not claimed
-			</li>
-			<li>
-				<svg viewBox="0 0 20 22" width="16" height="18" aria-hidden="true" className="hive__cell--part claim-c0">
-					<polygon className="hive__key-shape hive__key-shape--part" points={hexPoints(10, 11, 9)} />
-				</svg>
-				pale: part of it held
-			</li>
-			<li>
-				<svg viewBox="0 0 20 22" width="16" height="18" aria-hidden="true">
-					<polygon className="hive__key-shape" points={hexPoints(10, 11, 9)} />
-					<polygon className="hive__key-ring" points={hexPoints(10, 11, 5.5)} />
-				</svg>
-				ring: approved, waiting to land
-			</li>
-			<li>
-				<svg viewBox="0 0 20 22" width="16" height="18" aria-hidden="true">
-					<polygon className="hive__key-shape" points={hexPoints(10, 11, 9)} />
-					<polygon className="hive__key-ring" points={hexPoints(10, 11, 5.5)} />
-					<circle className="hive__key-lamp" cx={10} cy={11} r={2} />
-				</svg>
-				ring and lamp: being checked to land
-			</li>
-		</ul>
-	);
-}
-
-/**
- * The repo's folders as a honeycomb: a cell per top-level folder (opened into
- * its second-level folders when it's big or claimed below its top), lit in
- * the color of the agent holding it, ringed while a change in it is landing.
- */
-export function HiveMap({ repo, branch, snapshot, tree, error, landing, now = Date.now() }: HiveMapProps) {
-	const [boxRef, width] = useWidth<HTMLDivElement>();
-	const [hovered, setHovered] = useState<string | null>(null);
-	const [picked, setPicked] = useState<string | null>(null);
-	const context = { landing, votes: snapshot.votes, now };
-	const allHexes = tree ? honeycomb(tree.files, snapshot.claims, context) : [];
-	const hexes = allHexes.slice(0, MAX_HEXES);
-	const agents = hiveAgents(snapshot.claims, context);
-	const cellWidth = Math.sqrt(3) * RADIUS;
-	const columns = width ? Math.max(2, Math.floor((width - cellWidth / 2) / cellWidth)) : COLUMNS;
-	const grid = hexGrid(hexes.length, columns, RADIUS);
-	const shown = hexes.find((hex) => hex.key === (hovered ?? picked));
-	const held = hexes.filter((hex) => hex.holders.length).length;
-	const treeStatus = error ? `The tree couldn't be read: ${error}` : "Reading the tree…";
-	return (
-		<section className="hive" aria-labelledby="hive-title">
-			<div className="overview__head">
-				<h2 id="hive-title">Hive map</h2>
-				<p className="muted">
-					{branch}'s folders, each lit in the color of the agent holding it. A ringed cell has a change landing.
-				</p>
-			</div>
-			<HiveLegend repo={repo} branch={branch} agents={agents} />
-			<HiveKey />
-			{!tree ? <p className="muted">{treeStatus}</p> : null}
-			{tree && !hexes.length ? <p className="muted">{branch} has no files yet.</p> : null}
-			{hexes.length ? (
-				<div className="hive__body">
-					<div className="hive__board" ref={boxRef}>
-						<svg
-							className="hive__svg"
-							viewBox={`0 0 ${grid.width} ${grid.height}`}
-							width={grid.width}
-							height={grid.height}
-							style={{ maxWidth: "100%", height: "auto" }}
-							role="group"
-							aria-label={`${counted(hexes.length, "folder cell")}, ${held} held`}
-						>
-							{hexes.map((hex, index) => {
-								const center = grid.centers[index];
-								if (!center) return null;
-								return (
-									<Cell
-										key={hex.key}
-										hex={hex}
-										x={center.x}
-										y={center.y}
-										active={picked === hex.key}
-										onShow={setHovered}
-										onPick={(key) => setPicked((current) => (current === key ? null : key))}
-										now={now}
-									/>
-								);
-							})}
-						</svg>
-						{allHexes.length > hexes.length ? (
-							<p className="muted">and {allHexes.length - hexes.length} more folders</p>
-						) : null}
-						{tree?.truncated ? (
-							<p className="muted">This repo is large: the map shows the first part of its tree.</p>
-						) : null}
-					</div>
-					<div className="hive__details">
-						<Details repo={repo} branch={branch} hex={shown} now={now} />
-					</div>
-				</div>
-			) : null}
-		</section>
-	);
 }

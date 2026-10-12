@@ -1,15 +1,14 @@
-import type { DemoRunStatus, HiveEvent, LandingStretch, RepoAudit, RepoLanding, RepoSnapshot, RepoTree } from "../api";
-import { useEffect } from "react";
+import type { BacklogItem, DemoRunStatus, HiveEvent, RepoLanding, RepoSnapshot, RepoTree } from "../api";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { usePoll } from "../hooks/usePoll";
-import { type HiveActivity, type HiveState, hiveActivity, hiveCounts } from "../lib/hive";
-import { counted } from "../lib/plural";
-import { timeAgo } from "../lib/relativeTime";
-import { href } from "../lib/routes";
-import { justFinished, stretchWords } from "../lib/stretch";
+import { freeWork, type Goal, hiveGoals } from "../lib/goals";
+import { hiveCells } from "../lib/hiveCells";
+import { announcement, type GoalMotion, goalMotions, MOTION_MS } from "../lib/hiveMotion";
+import { chooseRange, DEFAULT_RANGE, timeAxis } from "../lib/timeAxis";
 import { DemoBanner } from "./DemoRun";
-import { HiveFeed } from "./HiveFeed";
+import { GoalsPanel } from "./GoalsPanel";
 import { HiveMap } from "./HiveMap";
-import { LandingTrack } from "./LandingTrack";
+import { HiveStrip } from "./HiveStrip";
 import "./HiveTab.css";
 
 export interface HiveApi {
@@ -20,7 +19,7 @@ export interface HiveApi {
 	demoRun?: (repo: string) => Promise<DemoRunStatus>;
 }
 
-/** The Hive tab: the agents working on the repo's branch, what each is doing, and what's landing. */
+/** The Hive tab: what each agent working on the repo's branch set out to do, what became of it, and where. */
 export function HiveTab({
 	repo,
 	branch,
@@ -42,6 +41,9 @@ export function HiveTab({
 	useEffect(() => refreshEvents(), [snapshot.claims, refreshEvents]);
 	// Only the claims landing on this branch: each change lands on one branch.
 	const onBranch = { ...snapshot, claims: snapshot.claims.filter((claim) => (claim.into ?? branch) === branch) };
+	const elsewhere = new Set(
+		snapshot.claims.filter((claim) => (claim.into ?? branch) !== branch).map((claim) => claim.change),
+	);
 	const loadDemo = api.demoRun;
 	return (
 		<>
@@ -50,6 +52,7 @@ export function HiveTab({
 				repo={repo}
 				branch={branch}
 				snapshot={onBranch}
+				elsewhere={elsewhere}
 				{...(landing.data ? { landing: landing.data } : {})}
 				{...(landing.error ? { landingError: String(landing.error) } : {})}
 				{...(tree.data ? { tree: tree.data } : {})}
@@ -75,172 +78,203 @@ export interface HiveProps {
 	events?: HiveEvent[];
 	eventsError?: string;
 	showsFeed?: boolean;
-	/** The time "ago" counts from (tests fix it). */
+	/** The repo's backlog, where the server gives one (the playground does). */
+	backlog?: BacklogItem[];
+	/** Changes landing on other branches, left out of this one's goals. */
+	elsewhere?: Set<string>;
+	/** The time everything counts from (tests and the playground fix it). */
 	now?: number;
 }
 
+/** What links the map and the goals: a goal or a cell pointed at, and what the goals are filtered to. */
+export type HiveFilter =
+	{ kind: "agent"; agent: string } | { kind: "cell"; key: string; label: string; goals: string[] };
+
 /** The hive as drawn, from what's been loaded. */
 export function Hive(props: HiveProps) {
-	const { repo, branch, snapshot, landing, now = Date.now() } = props;
-	const rows = hiveActivity(snapshot, landing, now);
+	const { repo, branch, snapshot, landing, events, backlog, now = Date.now() } = props;
+	const remembered = useRemembered(snapshot.claims);
+	const goals = useMemo(
+		() =>
+			hiveGoals({
+				claims: snapshot.claims,
+				votes: snapshot.votes,
+				...(events ? { events } : {}),
+				...(landing ? { landing } : {}),
+				...(props.elsewhere ? { elsewhere: props.elsewhere } : {}),
+				remembered,
+			}),
+		[snapshot.claims, snapshot.votes, events, landing, props.elsewhere, remembered],
+	);
+	const upNext = useMemo(() => (backlog ? freeWork(backlog, goals) : undefined), [backlog, goals]);
+	const cells = useMemo(
+		() => (props.tree ? hiveCells(props.tree.files, goals, upNext ?? [], now) : undefined),
+		[props.tree, goals, upNext, now],
+	);
+	const { motions, unseen, seen, said } = useMotions(goals, now);
+	// The range is picked once, from the first goals read with the event log in, and after that only by the person.
+	// Before the log arrives the landing alone knows when goals finished but not when they began, so they'd look
+	// shorter than they were.
+	const [picked, setPicked] = useState<number | null>(null);
+	const auto = useRef<number | null>(null);
+	const logIn = !props.showsFeed || events !== undefined || props.eventsError !== undefined;
+	if (auto.current === null && logIn && goals.length) auto.current = chooseRange(goals, now);
+	const range = picked ?? auto.current ?? DEFAULT_RANGE;
+	// Where the goals' clock starts: the range back from now, and further when quiet stretches fold.
+	const since = timeAxis(goals, range, now).start;
+	const [hovered, setHovered] = useState<{ goal?: string; cell?: string }>({});
+	const [filter, setFilter] = useState<HiveFilter | null>(null);
+	const litCells = new Set(
+		hovered.goal
+			? (cells?.clusters.flatMap((cluster) => cluster.cells) ?? [])
+					.filter((cell) => cell.goals.includes(hovered.goal!))
+					.map((cell) => cell.key)
+			: [],
+	);
+	const hoveredCell = hovered.cell
+		? cells?.clusters.flatMap((cluster) => cluster.cells).find((cell) => cell.key === hovered.cell)
+		: undefined;
+	const litGoals = new Set(hoveredCell?.goals ?? []);
 	return (
 		<div className="hive-tab">
-			<Headline
+			<HiveStrip
 				repo={repo}
-				rows={rows}
-				open={snapshot.claims.length}
-				{...(landing?.stretch ? { stretch: landing.stretch } : {})}
+				goals={goals}
+				{...(upNext ? { upNext: upNext.length } : {})}
+				{...(landing ? { landing } : {})}
 				{...(snapshot.audit ? { audit: snapshot.audit } : {})}
+				policy={snapshot.policy}
+				range={range}
+				since={since}
 				now={now}
 			/>
-			<div className="hive-tab__grid">
-				<HiveMap
-					repo={repo}
-					branch={branch}
-					snapshot={snapshot}
-					{...(props.tree ? { tree: props.tree } : {})}
-					{...(props.treeError ? { error: props.treeError } : {})}
-					{...(landing ? { landing } : {})}
-					now={now}
-				/>
-				{props.showsLanding ? (
-					<LandingTrack
+			<div className="hive-tab__body">
+				<div className="hive-tab__map">
+					<HiveMap
 						repo={repo}
 						branch={branch}
-						snapshot={snapshot}
-						{...(landing ? { landing } : {})}
-						{...(props.landingError ? { error: props.landingError } : {})}
-					/>
-				) : null}
-			</div>
-			<div className="hive-tab__grid">
-				<AgentsAtWork repo={repo} rows={rows} now={now} />
-				{props.showsFeed ? (
-					<HiveFeed
-						repo={repo}
-						snapshot={snapshot}
-						{...(props.events ? { events: props.events } : {})}
-						{...(props.eventsError ? { error: props.eventsError } : {})}
+						{...(cells ? { cells } : {})}
+						{...(props.tree?.truncated ? { truncated: true } : {})}
+						{...(props.treeError ? { error: props.treeError } : {})}
+						lit={litCells}
+						filter={filter}
+						motions={motions}
+						onHover={(cell) => setHovered(cell ? { cell } : {})}
+						onPick={(cell) =>
+							setFilter((current) =>
+								current?.kind === "cell" && current.key === cell.key
+									? null
+									: {
+											kind: "cell",
+											key: cell.key,
+											label: cell.kind === "folder" ? `${cell.path}/` : cell.path || "top files",
+											goals: cell.goals,
+										},
+							)
+						}
 						now={now}
 					/>
-				) : null}
+				</div>
+				<GoalsPanel
+					repo={repo}
+					branch={branch}
+					goals={goals}
+					range={range}
+					onRange={setPicked}
+					{...(props.eventsError ? { error: props.eventsError } : {})}
+					lit={litGoals}
+					filter={filter}
+					onFilter={setFilter}
+					motions={motions}
+					unseen={unseen}
+					onSeen={seen}
+					onHover={(goal) => setHovered(goal ? { goal } : {})}
+					now={now}
+				/>
 			</div>
+			<p className="sr-only" aria-live="polite">
+				{said}
+			</p>
 		</div>
 	);
 }
 
-interface HeadlineProps {
-	repo: string;
-	rows: HiveActivity[];
-	/** Claims in force. */
-	open: number;
-	stretch?: LandingStretch;
-	audit?: RepoAudit;
-	now: number;
+/**
+ * The paths of every claim seen while the page is open, by change. Once a change lands its claim is gone, and
+ * nothing else the server sends says what it touched, so the map would forget who built what.
+ */
+function useRemembered(claims: RepoSnapshot["claims"]): Map<string, string[]> {
+	const seen = useRef(new Map<string, string[]>());
+	return useMemo(() => {
+		for (const claim of claims) seen.current.set(claim.change, claim.paths);
+		return new Map(seen.current);
+	}, [claims]);
 }
 
-/** Who's at work and doing what; once a stretch of work has landed and nothing's open, that it's all done. */
-function Headline({ repo, rows, open, stretch, audit, now }: HeadlineProps) {
-	if (!open && justFinished(stretch, now)) return <AllLanded repo={repo} stretch={stretch} audit={audit} now={now} />;
-	const counts = hiveCounts(rows);
-	if (!counts.agents) return <EmptyHive stretch={stretch} now={now} />;
-	const parts = [
-		counted(counts.building, "building", "building"),
-		counted(counts.inReview, "in review", "in review"),
-		counted(counts.landing, "landing", "landing"),
-	];
-	return (
-		<header className="hive-tab__head">
-			<h2>
-				{counted(counts.agents, "agent")} in the hive · {parts.join(" · ")}
-			</h2>
-			<p className="muted">
-				No queen: nothing assigns the work. Each agent claims its own, and every claim, vote and landing is a record in
-				Git.
-			</p>
-		</header>
-	);
-}
+/** How often the live region may speak. */
+const SAY_EVERY_MS = 4_000;
 
-/** The recap once a stretch of work has landed: how much, how fast, by how many, and what the audit says. */
-function AllLanded({
-	repo,
-	stretch,
-	audit,
-	now,
-}: {
-	repo: string;
-	stretch: LandingStretch;
-	audit?: RepoAudit;
-	now: number;
-}) {
-	return (
-		<header className="hive-tab__head hive-tab__head--done">
-			<h2>
-				<span className="tone-good">✓ All landed.</span> The hive is quiet.
-			</h2>
-			<p className="muted">
-				{stretchWords(stretch)}, finished {timeAgo(stretch.to, now)}. <AuditWords repo={repo} audit={audit} />{" "}
-				<a href={href.repo(repo, "history")}>See what landed</a>
-			</p>
-		</header>
-	);
-}
-
-/** What the audit found, in a sentence: nothing, or how many merges to look at. */
-function AuditWords({ repo, audit }: { repo: string; audit?: RepoAudit }) {
-	if (!audit) return null;
-	if (!audit.open) return <>The audit is clean.</>;
-	return (
-		<a href={href.repo(repo, "audit")} className="tone-bad">
-			{counted(audit.open, "merge")} for the audit to look at.
-		</a>
-	);
-}
-
-/** No agent at work: how to bring one in, or when the last work finished. */
-function EmptyHive({ stretch, now }: { stretch?: LandingStretch; now: number }) {
-	return (
-		<header className="hive-tab__head">
-			<h2>No agents in the hive {stretch ? "now" : "yet"}</h2>
-			<p className="muted">
-				{stretch ? `Its last stretch of work finished ${timeAgo(stretch.to, now)}: ${stretchWords(stretch)}. ` : ""}
-				Connect an agent from the Agents page: it claims work here, and shows up as it does.
-			</p>
-		</header>
-	);
-}
-
-const STATE_WORDS: Record<HiveState, string> = {
-	building: "building",
-	revising: "revising",
-	"in-review": "in review",
-	asking: "asking a person",
-	landing: "landing",
-	waiting: "waiting to land",
-	reviewed: "reviewing",
-};
-
-function AgentsAtWork({ repo, rows, now }: { repo: string; rows: HiveActivity[]; now: number }) {
-	if (!rows.length) return null;
-	return (
-		<section className="box hive-tab__agents" aria-labelledby="hive-agents">
-			<div className="box__header">
-				<h2 id="hive-agents">Agents</h2>
-			</div>
-			<ul className="hive-tab__rows">
-				{rows.map((row) => (
-					<li key={`${row.agent}:${row.change}`} className={`hive-tab__row hive-tab__row--${row.state}`}>
-						<strong className="hive-tab__agent">{row.agent}</strong>
-						<span className="hive-tab__state">{STATE_WORDS[row.state]}</span>
-						<a href={href.change(repo, row.change)}>{row.change}</a>
-						<span className="muted">{row.detail}</span>
-						<time className="muted hive-tab__when" dateTime={row.at}>
-							{timeAgo(row.at, now)}
-						</time>
-					</li>
-				))}
-			</ul>
-		</section>
-	);
+/**
+ * What's moving now, by change, from comparing each read of the goals with the last one drawn. While the tab is
+ * hidden nothing plays; what changed meanwhile is marked unseen until it's looked at.
+ */
+function useMotions(goals: Goal[], now: number) {
+	const drawn = useRef<Goal[] | undefined>(undefined);
+	const [motions, setMotions] = useState<Map<string, GoalMotion & { seq: number }>>(new Map());
+	const [unseen, setUnseen] = useState<Set<string>>(new Set());
+	const [said, setSaid] = useState("");
+	const lastSaid = useRef(0);
+	const seq = useRef(0);
+	const timers = useRef(new Set<ReturnType<typeof setTimeout>>());
+	useEffect(() => {
+		const before = drawn.current;
+		drawn.current = goals;
+		const found = goalMotions(before, goals, now);
+		if (!found.length) return;
+		if (typeof document !== "undefined" && document.hidden) {
+			setUnseen((current) => new Set([...current, ...found.map((motion) => motion.key)]));
+			return;
+		}
+		const started = found.map((motion) => ({ ...motion, seq: ++seq.current }));
+		setMotions((current) => {
+			const next = new Map(current);
+			for (const motion of started) next.set(motion.key, motion);
+			return next;
+		});
+		const words = started
+			.map((motion) => {
+				const goal = goals.find((each) => each.key === motion.key);
+				return goal ? announcement(goal, motion.motion) : undefined;
+			})
+			.filter(Boolean);
+		// A screen reader hears at most one announcement every few seconds, however busy the hive.
+		const quietFor = Date.now() - lastSaid.current;
+		if (words.length && quietFor >= SAY_EVERY_MS) {
+			lastSaid.current = Date.now();
+			setSaid(words.join(". "));
+		}
+		// Each motion's class comes off once it has played; a newer read mustn't cancel that.
+		for (const motion of started) {
+			const timer = setTimeout(() => {
+				timers.current.delete(timer);
+				setMotions((current) => {
+					if (current.get(motion.key)?.seq !== motion.seq) return current;
+					const next = new Map(current);
+					next.delete(motion.key);
+					return next;
+				});
+			}, motion.delay + MOTION_MS[motion.motion]);
+			timers.current.add(timer);
+		}
+		// `now` moves every tick; only a new read of the goals is compared.
+	}, [goals]);
+	useEffect(() => () => timers.current.forEach(clearTimeout), []);
+	const seen = (change: string) =>
+		setUnseen((current) => {
+			if (!current.has(change)) return current;
+			const next = new Set(current);
+			next.delete(change);
+			return next;
+		});
+	return { motions, unseen, seen, said };
 }

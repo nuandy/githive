@@ -1,129 +1,221 @@
-/* The Hive tab: the swarm on a repo's branch at a glance. */
+/* The Hive tab: what needs a person, the stage strip, then the hive beside the goals. */
 
 .hive-tab {
 	display: grid;
 	gap: 16px;
+	/* What each stage is drawn in, on the strip, the map and the bars alike. */
+	--stage-building: var(--accent);
+	--stage-review: var(--accent);
+	--stage-landing: var(--amber);
+	--stage-landed: var(--good);
+	--stage-asking: var(--bad);
 }
 
-.hive-tab__head h2 {
-	margin: 0;
-	font-size: 18px;
-}
-
-/* Once a stretch of work has landed: the same headline, marked done. */
-.hive-tab__head--done {
-	padding-left: 12px;
-	border-left: 3px solid var(--good);
-}
-
-.hive-tab__head p {
-	margin: 4px 0 0;
-}
-
-.hive-tab__grid {
+.hive-tab__body {
 	display: grid;
-	gap: 16px;
-	grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+	gap: 20px;
+	grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
 	align-items: start;
 }
 
-@media (max-width: 900px) {
-	.hive-tab__grid {
+/* The map stays in view while the goals scroll past it. */
+.hive-tab__map {
+	position: sticky;
+	top: calc(var(--topbar-height) + 12px);
+}
+
+@media (max-width: 1100px) {
+	.hive-tab__body {
 		grid-template-columns: minmax(0, 1fr);
+	}
+	.hive-tab__map {
+		position: static;
+		order: 2;
 	}
 }
 
-.hive-tab__agents h2,
-.hive-tab__feed h2 {
+/* What needs a person: one line, only when something does. It slides open and shut. */
+
+.hive-needs-wrap {
+	display: grid;
+	grid-template-rows: 0fr;
+	opacity: 0;
+	transition:
+		grid-template-rows 0.4s ease,
+		opacity 0.3s ease;
+}
+
+.hive-needs-wrap > * {
+	min-height: 0;
+	overflow: hidden;
+}
+
+.hive-needs-wrap--on {
+	grid-template-rows: 1fr;
+	opacity: 1;
+}
+
+.hive-needs {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 6px 14px;
+	margin: 0 0 12px;
+	padding: 8px 12px;
+	border: 1px solid color-mix(in srgb, var(--bad) 45%, transparent);
+	border-radius: var(--radius);
+	background: var(--bad-soft);
 	font-size: 14px;
 }
 
-.hive-tab__rows {
+.hive-needs__lead {
+	display: inline-flex;
+	align-items: center;
+	gap: 8px;
+	font-weight: 700;
+	color: var(--bad);
+}
+
+.hive-needs a + a::before {
+	content: "·";
+	margin-right: 14px;
+	color: var(--text-muted);
+}
+
+/* The stage strip: five counts, each with its swatch, which is also the map's key. */
+
+.hive-strip__stages {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+	gap: 8px;
 	margin: 0;
 	padding: 0;
 	list-style: none;
 }
 
-.hive-tab__row {
-	display: grid;
-	grid-template-columns: minmax(7em, auto) 9em minmax(6em, auto) 1fr auto;
-	gap: 10px;
-	align-items: baseline;
-	padding: 8px 16px;
-	border-top: 1px solid var(--border);
-	font-size: 13px;
-}
-
-.hive-tab__row:first-child {
-	border-top: 0;
-}
-
-.hive-tab__state {
-	font-weight: 600;
-}
-
-.hive-tab__row--landing .hive-tab__state,
-.hive-tab__row--waiting .hive-tab__state {
-	color: var(--good);
-}
-
-.hive-tab__row--revising .hive-tab__state,
-.hive-tab__row--asking .hive-tab__state {
-	color: var(--warn);
-}
-
-.hive-tab__event {
+.hive-strip__stage {
 	display: flex;
-	justify-content: space-between;
-	gap: 10px;
-	padding: 6px 16px;
-	border-top: 1px solid var(--border);
-	font-size: 13px;
+	align-items: center;
+	gap: 8px;
+	padding: 8px 12px;
+	border: 1px solid var(--border);
+	border-radius: var(--radius);
+	background: var(--surface);
 }
 
-.hive-tab__event:first-child {
-	border-top: 0;
+/* As tall as the count's digits, and level with them. */
+.hive-strip__swatch {
+	flex: none;
+	font-size: 22px;
+	width: 1cap;
+	height: 1cap;
+	border-radius: 3px;
+	border: 1.5px solid var(--swatch, var(--border-strong));
+	background: color-mix(in srgb, var(--swatch, transparent) 25%, transparent);
 }
 
-.hive-tab__event--landed strong {
+.hive-strip__stage--next .hive-strip__swatch {
+	border-style: dashed;
+	background: none;
+}
+.hive-strip__stage--building {
+	--swatch: var(--stage-building);
+}
+.hive-strip__stage--review {
+	--swatch: var(--stage-review);
+}
+.hive-strip__stage--review .hive-strip__swatch {
+	border-style: dashed;
+	background: color-mix(in srgb, var(--stage-review) 8%, transparent);
+}
+.hive-strip__stage--landing {
+	--swatch: var(--stage-landing);
+}
+.hive-strip__stage--landed {
+	--swatch: var(--stage-landed);
+}
+
+.hive-strip__count {
+	display: inline-block;
+	font-size: 22px;
+	font-weight: 800;
+	line-height: 1;
+	font-variant-numeric: tabular-nums;
+	/* The box is the digits' height, so centring it centres the digits, not the line with its descender room. */
+	text-box: trim-both cap alphabetic;
+}
+
+@supports not (text-box: trim-both cap alphabetic) {
+	.hive-strip__swatch {
+		position: relative;
+		top: -2px;
+	}
+}
+
+.hive-strip__stage--landing .hive-strip__count {
+	color: var(--amber);
+}
+.hive-strip__stage--landed .hive-strip__count {
 	color: var(--good);
 }
 
-.hive-tab__event--failed strong,
-.hive-tab__event--asked strong {
-	color: var(--warn);
+.hive-strip__count--bump {
+	animation: hive-bump 0.6s ease-out;
 }
 
-/* What agents hear (an interface change, a heads-up, a conflict): a small icon before the line, in a quiet tone. */
-.hive-tab__marker {
-	margin-right: 6px;
-	vertical-align: -2px;
+.hive-strip__words {
+	font-size: 13px;
 	color: var(--text-muted);
 }
 
-.hive-tab__event--interface .hive-tab__marker {
-	color: var(--accent);
+.hive-strip__recap {
+	margin: 10px 0 0;
+	padding-left: 12px;
+	border-left: 3px solid var(--good);
 }
 
-.hive-tab__event--heads_up .hive-tab__marker {
-	color: var(--warn);
-}
-
-.hive-tab__event--conflicted .hive-tab__marker {
-	color: var(--bad);
-}
-
-.hive-tab__when {
-	white-space: nowrap;
-}
-
-.hive-tab__quiet {
-	padding: 8px 16px;
+.hive-strip__empty h2 {
 	margin: 0;
+	font-size: 18px;
 }
 
-@media (max-width: 640px) {
-	.hive-tab__row {
-		grid-template-columns: 1fr auto;
+.hive-strip__empty p {
+	margin: 4px 0 0;
+}
+
+@keyframes hive-bump {
+	0% {
+		transform: scale(1.6);
+	}
+	100% {
+		transform: none;
+	}
+}
+
+/* The recap and the empty hive's words fade in rather than appearing at once. */
+.hive-strip__appear {
+	animation: hive-strip-appear 0.4s ease-out;
+}
+
+.hive-strip__stage {
+	transition:
+		border-color 0.3s ease,
+		background-color 0.3s ease;
+}
+
+@keyframes hive-strip-appear {
+	from {
+		opacity: 0;
+		transform: translateY(-4px);
+	}
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.hive-strip__count--bump,
+	.hive-strip__appear {
+		animation: none;
+	}
+	.hive-needs-wrap {
+		transition: none;
 	}
 }

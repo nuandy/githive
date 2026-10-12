@@ -239,8 +239,26 @@ export interface HiveEvent {
 	verdict?: "approve" | "reject";
 	/** The other agent: whose change uses an interface that changed, or the other side of a heads-up. */
 	other?: string;
+	/** A heads-up's other side's change: the one using the names this event's change alters. */
+	otherChange?: string;
 	/** The intent claimed, the role voted as, why a landing failed, the names or files an awareness event is about. */
 	detail?: string;
+	at: string;
+}
+
+/**
+ * A piece of work in a repo's backlog, as agents see it with `backlog`: taken once a change with its id is claimed,
+ * done once that change merges. The dashboard has no endpoint for it yet; the Hive tab shows it when it's given one.
+ */
+export interface BacklogItem {
+	id: string;
+	title: string;
+	intent: string;
+	/** What it's likely to touch. */
+	paths?: string[];
+	/** Items it waits for: it's free only once each has merged. */
+	after?: string[];
+	by: string;
 	at: string;
 }
 
