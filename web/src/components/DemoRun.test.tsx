@@ -49,7 +49,7 @@ describe("a demo run on the dashboard", () => {
 
 	it("says when the hive is reviewing the run's reset, before any piece", () => {
 		expect(runWords(run({ reset: "reset-3" }), NOW)).toBe(
-			"Demo run 3, started by ada 10 minutes ago: the hive reviews reset-3, which puts the starting files back.",
+			"Demo run 3, started by ada 10 minutes ago: putting the starting files back (reset-3) before its agents start.",
 		);
 	});
 });

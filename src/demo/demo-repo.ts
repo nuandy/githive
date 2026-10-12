@@ -6,7 +6,8 @@ import { writeFirstCommit } from "../repo-init";
 import { GITHUB_AGENT } from "../toolkit/github-settings";
 import { toolContextFor } from "../toolkit/env";
 import { callTool } from "../toolkit/mcp";
-import { HOSTED_PREFIX, recordLog, workRef } from "../toolkit/tools/repo";
+import type { Registry } from "../toolkit/claims";
+import { HOSTED_PREFIX, claimsRef, recordLog, workRef } from "../toolkit/tools/repo";
 import { type Work, withdrawWork } from "../toolkit/work";
 import { resetChange } from "./run";
 import { TEMPLATE_FILES } from "./template-files";
@@ -14,7 +15,9 @@ import { TEMPLATE_FILES } from "./template-files";
 // The one public repo every demo run builds Honeycomb in, named by DEMO_REPO (owner/name). The first run makes it
 // with the game's starting files. Every later run starts over on top of the last: it stops the last run's agents,
 // releases the claims they left, takes the last run's pieces out of the backlog, and puts the starting files back as
-// a change the hive reviews, so nothing goes around the rules and the history keeps every run.
+// a change of the demo's own, so nothing is force-pushed and the history keeps every run. Those are the files the repo
+// began with, so the reset lands without a review, through the checks: the run sets the approvals required to none
+// while it lands, and puts them back before its agents start.
 
 /** The demo's own agent: it sets the repo up, adds the backlog and lands each run's reset. */
 export const DEMO_AGENT = "githive-demo";
@@ -67,8 +70,8 @@ export async function clearLastRun(env: Env, repo: string, number: number) {
 }
 
 /**
- * Puts the starting files back for run `number`, as a change claiming the whole repo, for the hive to review before
- * anything else. Returns its id, or nothing when the repo holds just the starting files already.
+ * Puts the starting files back for run `number`, as a change claiming the whole repo, with no approvals required while
+ * it lands. Returns its id and the approvals to put back once it has, or nothing when main holds just those files.
  */
 export async function startReset(env: Env, repo: string, number: number) {
 	const ctx = demoContext(env);
@@ -77,22 +80,37 @@ export async function startReset(env: Env, repo: string, number: number) {
 	if (!reset) return undefined;
 	const change = resetChange(number);
 	const intent =
-		`Start demo run ${number} over: remove every file the last run built and put Honeycomb's starting files back ` +
-		"(the README's rules and contract, the page shell, the styles' stubs, the word list and its test), as the " +
-		"repo began. Nothing else changes, and npm test passes on them.";
-	const claimed = (await callTool("claim", { repo, agent: DEMO_AGENT, change, paths: reset.paths, intent }, ctx)) as {
-		ok?: boolean;
-		reason?: string;
-	};
-	if (claimed.ok === false) fail(409, `the reset couldn't claim the repo: ${claimed.reason ?? "refused"}`);
-	const fork = (await callTool("credentials", { repo, agent: DEMO_AGENT, change }, ctx)) as Remote;
-	const to = `refs/heads/changes/${change}`;
-	// The fork may lack history the shallow clone leaves out; then push with all of it.
-	await reset.workspace.pushAs("refs/heads/main", to, fork).catch(async () => {
-		const full = await resetCommit(project, number, { depth: 1 << 20 });
-		await full!.workspace.pushAs("refs/heads/main", to, fork);
-	});
-	return change;
+		`Start demo run ${number} over: remove every file the last run built and put Honeycomb's starting files back, ` +
+		"as the repo began.";
+	const required = await requiredApprovals(env, repo);
+	await setRequired(env, repo, 0);
+	try {
+		const claim = { repo, agent: DEMO_AGENT, change, paths: reset.paths, intent };
+		const claimed = (await callTool("claim", claim, ctx)) as { ok?: boolean; reason?: string };
+		if (claimed.ok === false) fail(409, `the reset couldn't claim the repo: ${claimed.reason ?? "refused"}`);
+		const fork = (await callTool("credentials", { repo, agent: DEMO_AGENT, change }, ctx)) as Remote;
+		const to = `refs/heads/changes/${change}`;
+		// The fork may lack history the shallow clone leaves out; then push with all of it.
+		await reset.workspace.pushAs("refs/heads/main", to, fork).catch(async () => {
+			const full = await resetCommit(project, number, { depth: 1 << 20 });
+			await full!.workspace.pushAs("refs/heads/main", to, fork);
+		});
+	} catch (err) {
+		await setRequired(env, repo, required).catch(() => undefined);
+		throw err;
+	}
+	return { change, required };
+}
+
+/** How many approvals the repo's changes need now. */
+async function requiredApprovals(env: Env, repo: string) {
+	const registry = await recordLog<Registry>(demoContext(env), repo, claimsRef(repo)).read();
+	return registry?.commit.state.policy?.required ?? 0;
+}
+
+/** Sets how many approvals the repo's changes need, leaving the rest of its settings as they are. */
+export async function setRequired(env: Env, repo: string, required: number) {
+	await callTool("settings", { repo, agent: DEMO_AGENT, required }, demoContext(env));
 }
 
 /** Main with the starting files in place of whatever is there, committed; nothing when that changes no file. */

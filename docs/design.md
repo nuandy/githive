@@ -1258,16 +1258,18 @@ list and its tests, requiring one approval and `npm test` before landing.
 Every later run starts over on top of the last, so nothing is force-pushed and
 the history keeps every run. It stops the last run's agents, releases the
 claims GitHive's agents still hold (as those agents), and takes the demo's
-pieces out of the backlog. Then it puts the starting files back as a change,
-`reset-<n>`, claiming every top-level path, which the hive reviews like any
-other and the run merges once approved. The run's 13 pieces
-(`src/demo/backlog.ts`) go into the backlog with the run's number in their ids
-(`board-3`), since a piece's id is the change that builds it and an earlier
-run's merge would count it as done. They wait on the reset's claim, so the
-hive builds on the starting files. Six hosted agents start with it, for 45
-minutes, and the repo's Hive tab shows how the run is going. Any signed-in
-person may start one, since a run spends a bounded amount: one run goes at a
-time, 100 a day across everyone, held by the `DemoRun` registry.
+pieces out of the backlog. Then it puts the starting files back as a change of
+`githive-demo`'s, `reset-<n>`, claiming every top-level path. Those are files
+the repo began with, so the reset needs no review: the run sets the approvals
+required to none, merges the reset through the checks, and puts the approvals
+back. Only then do its six hosted agents start, for 45 minutes, so every piece
+they build is reviewed. The run's 13 pieces (`src/demo/backlog.ts`) go into
+the backlog with the run's number in their ids (`board-3`), since a piece's id
+is the change that builds it and an earlier run's merge would count it as
+done. The repo's Hive tab shows how the run is going. Any signed-in person may
+start one, since a run spends a bounded amount: one run goes at a time, 100 a
+day across everyone, held by the `DemoRun` registry. A run stopped before its
+reset lands gives the repo its approvals back.
 
 **The builder.** A hosted agent starts one on each piece it claims, and
 `build` claims the given paths as `githive-builder`, under a change id made

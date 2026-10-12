@@ -68,7 +68,7 @@ export function runWords(run: DemoRunStatus, now = Date.now()): string {
 	const done = `${finished} of ${counted(run.pieces, "piece")} finished`;
 	if (run.status === "running") {
 		const started = `Demo run ${run.number}, started by ${run.by} ${timeAgo(new Date(run.startedAt).toISOString(), now)}`;
-		if (run.reset) return `${started}: the hive reviews ${run.reset}, which puts the starting files back.`;
+		if (run.reset) return `${started}: putting the starting files back (${run.reset}) before its agents start.`;
 		const building = run.agents.filter((agent) => agent.change).length;
 		const reviewing = run.agents.filter((agent) => agent.reviewing).length;
 		return `${started}: ${building} building, ${reviewing} reviewing, ${done}.`;

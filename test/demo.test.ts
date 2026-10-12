@@ -73,16 +73,18 @@ function demo() {
 	const started: unknown[] = [];
 	let stopped = false;
 	const released: string[] = [];
-	const reset = { claimed: true, approved: false, merges: 0 };
+	// The reset's claim until it merges (which the first merge does here), and the settings the run sets.
+	const reset = { claimed: true, merges: 0, settings: [] as unknown[] };
 	const env = { DEMO_RUN: { getByName: () => ({ release: async (id: string) => void released.push(id) }) } };
 	class TestRun extends DemoRun {
-		protected override async callTool(name: string) {
+		protected override async callTool(name: string, args: Record<string, unknown>) {
+			if (name === "settings") return void reset.settings.push(args);
 			if (name === "merge") {
 				reset.merges++;
 				reset.claimed = false;
 				return { ok: true };
 			}
-			return reset.claimed ? { claim: {}, approval: { approved: reset.approved } } : {};
+			return reset.claimed ? { claim: {} } : {};
 		}
 		protected override hiveOf() {
 			return {
@@ -133,17 +135,37 @@ describe("a demo run", () => {
 		expect(released).toEqual(["run-1"]);
 	});
 
-	it("merges its reset once the hive approves it, and waits on it till then", async () => {
-		const { run, agents, reset } = demo();
-		await begin(run, "reset-1");
-		agents.push({ name: "githive-forager", done: false });
-		await run.alarm();
-		expect(reset.merges).toBe(0);
-		expect((await run.status())?.reset).toBe("reset-1");
-		reset.approved = true;
+	it("lands its reset first, gives the repo its approvals back, and only then starts its agents", async () => {
+		const { run, agents, reset, started } = demo();
+		await run.begin({
+			id: "run-2",
+			number: 2,
+			repo: "ada--honeycomb",
+			fullName: "ada/honeycomb",
+			by: "ada",
+			reset: "reset-2",
+			required: 1,
+		});
+		// The last run's agents, all stopped, don't end this one.
+		agents.push({ name: "githive-forager", done: true });
+		expect(started).toEqual([]);
 		await run.alarm();
 		expect(reset.merges).toBe(1);
+		expect((await run.status())?.status).toBe("running");
+		expect(started).toEqual([]);
 		await run.alarm();
+		expect(reset.settings).toEqual([{ repo: "ada--honeycomb", required: 1 }]);
+		expect(started).toHaveLength(1);
 		expect((await run.status())?.reset).toBeUndefined();
+	});
+
+	it("gives the repo its approvals back if it's stopped before its reset lands", async () => {
+		const { run, storage, reset, stopped } = demo();
+		await begin(run, "reset-1");
+		const state = (await storage.get("run")) as { startedAt: number };
+		await storage.put("run", { ...state, required: 2, startedAt: state.startedAt - RUN_GIVES_UP_MS - 1 });
+		await run.alarm();
+		expect(stopped()).toBe(true);
+		expect(reset.settings).toContainEqual({ repo: "ada--honeycomb", required: 2 });
 	});
 });

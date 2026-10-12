@@ -1,6 +1,6 @@
 // A Honeycomb demo run: GitHive's hosted agents (see hosted-agents.ts) build the game in the one public demo repo
-// while whoever started it watches its Hive tab. Each run puts the starting files back first, as a change the hive
-// reviews, then builds the game again on top, so the repo's history holds every run. These are the run's limits and
+// while whoever started it watches its Hive tab. Each run puts the starting files back first, as a change of its own,
+// then builds the game again on top, so the repo's history holds every run. These are the run's limits and
 // the small decisions it makes, kept apart to be tested.
 
 import type { DemoPiece } from "./backlog";
@@ -13,6 +13,9 @@ export const RUN_MINUTES = 45;
 
 /** How often the run looks at its agents. */
 export const WATCH_MS = 60_000;
+
+/** How often a run waiting on its reset looks at it. */
+export const RESET_WATCH_MS = 15_000;
 
 /** Past this, a run whose agents haven't all stopped is stopped. */
 export const RUN_GIVES_UP_MS = (RUN_MINUTES + 30) * 60_000;
@@ -29,6 +32,8 @@ export interface RunState {
 	number: number;
 	/** The change that puts the starting files back, until it lands; a repo's first run needs none. */
 	reset?: string;
+	/** The approvals the repo required before the reset, put back once it lands, before the agents start. */
+	required?: number;
 	repo: string;
 	fullName: string;
 	/** Who started it, as the dashboard names them. */
@@ -106,9 +111,11 @@ export function runBacklog(pieces: DemoPiece[], number: number) {
 	}));
 }
 
-/** How a run ends, if it has: done once every agent has stopped, stopped once it's long past its time. */
+/** How a run ends, if it has: done once every agent it started has stopped, stopped once it's long past its time. */
 export function runEnding(run: RunState, agents: { done: boolean }[], now: number): "done" | "stopped" | null {
-	if (agents.length && agents.every((agent) => agent.done)) return "done";
+	// Until its reset lands its agents haven't started, and the hive still lists the last run's.
+	const started = !run.reset;
+	if (started && agents.length && agents.every((agent) => agent.done)) return "done";
 	if (now - run.startedAt > RUN_GIVES_UP_MS) return "stopped";
 	return null;
 }
