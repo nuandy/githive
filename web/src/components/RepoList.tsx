@@ -4,6 +4,7 @@ import { stretchWords } from "../lib/stretch";
 import { splitRepo } from "../lib/repoName";
 import { href } from "../lib/routes";
 import { timeAgo } from "../lib/relativeTime";
+import { DemoCard, type DemoApi } from "./DemoRun";
 import { Icon } from "./Icon";
 import "./RepoList.css";
 
@@ -12,6 +13,8 @@ export interface RepoListProps {
 	loaded: boolean;
 	/** A person signed in to GitHive, who can make repositories and organizations. */
 	canCreate?: boolean;
+	/** Demo runs, which a person signed in can start. */
+	demo?: DemoApi;
 }
 
 const LAMP: Record<RepoState, string> = {
@@ -153,7 +156,7 @@ function RepoGroups(props: { rows: RepoRow[]; loaded: boolean; shown: RepoRow[];
  * The home page: every repo the reader can see. Those that need a person come first, then those at work,
  * then the quiet ones.
  */
-export function RepoList({ rows, loaded, canCreate = false }: RepoListProps) {
+export function RepoList({ rows, loaded, canCreate = false, demo }: RepoListProps) {
 	const [query, setQuery] = useState("");
 	const shown = filterRepos(rows, query);
 
@@ -175,6 +178,8 @@ export function RepoList({ rows, loaded, canCreate = false }: RepoListProps) {
 					</div>
 				) : null}
 			</div>
+
+			{demo ? <DemoCard api={demo} /> : null}
 
 			{rows.length > 0 ? (
 				<div className="repo-list__search">

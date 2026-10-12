@@ -549,6 +549,8 @@ export const api = {
 	/** Every repo with its counts, for the Repositories list and the Inbox. The server keeps them, so it's one read. */
 	summaries: () => call<Summaries>("GET", "/summaries"),
 	snapshot: (repo: string) => call<RepoSnapshot>("GET", `/repos/${repoPath(repo)}`),
+	/** The demo run that made a repo, for its Hive tab's banner (404 when none did). */
+	demoRun: (repo: string) => call<DemoRunStatus>("GET", `/demo/runs/${repoPath(repo)}`),
 	audit: (repo: string) => call<RepoAudit>("GET", `/repos/${repoPath(repo)}/audit`),
 	history: (repo: string, branch: string) =>
 		call<BranchHistory>("GET", `/repos/${repoPath(repo)}/history?branch=${encodeURIComponent(branch)}`),
@@ -589,12 +591,63 @@ export const api = {
 	/** A person gives up GitHub's change: its claim released, its paths free, until GitHub's branch moves or asked. */
 	giveUpGitHub: (repo: string, change: string) =>
 		call<GiveUpAnswer>("POST", `/repos/${repoPath(repo)}/changes/${encodeURIComponent(change)}/give-up`, {}),
+	/** GitHive's hosted agents on a repo, if it has had any. */
+	hostedAgents: (repo: string) => call<HiveStatus | null>("GET", `/repos/${repoPath(repo)}/hosted-agents`),
+	/** People who can write, and whom an admin lists: start `count` hosted agents for `minutes`. */
+	startHostedAgents: (repo: string, count: number, minutes: number) =>
+		call<HiveStatus>("POST", `/repos/${repoPath(repo)}/hosted-agents`, { count, minutes }),
+	/** People who can write: stop the repo's hosted agents; what they started finishes on its own. */
+	stopHostedAgents: (repo: string) => call<HiveStatus | null>("DELETE", `/repos/${repoPath(repo)}/hosted-agents`),
 	/** Looks at GitHub's branch now and brings its changes back, even a commit given up or sent to a person before. */
 	githubAgain: (repo: string) =>
 		call<{ fromGitHub?: RepoGitHub["fromGitHub"] }>("POST", `/repos/${repoPath(repo)}/github/again`, {}),
 };
 
 /** Repositories, orgs and their people: making, settings, members, teams and collaborators. */
+/** A Honeycomb demo run, as GET /demo/runs/:owner/:name answers (see the server's src/demo/run.ts). */
+export interface DemoRunStatus {
+	id: string;
+	fullName: string;
+	by: string;
+	startedAt: number;
+	status: "running" | "done" | "stopped";
+	/** Each agent's own account: its change, the review it's on, and what it has done. */
+	agents: HostedAgentAccount[];
+	/** How many pieces the backlog has. */
+	pieces: number;
+	endedAt?: number;
+}
+
+/** One of GitHive's hosted agents in a repo's hive: its change, the review it's on, and what it has done. */
+export interface HostedAgentAccount {
+	name: string;
+	change?: string;
+	reviewing?: { change: string };
+	finished: { piece: string; at: number }[];
+	reviewed: number;
+	done: boolean;
+}
+
+/** A repo's hosted agents, as GET /repos/:owner/:name/hosted-agents answers (null when it never had any). */
+export interface HiveStatus {
+	names: string[];
+	startedAt: number;
+	until: number;
+	by: string;
+	agents: HostedAgentAccount[];
+	/** Whether any agent is still taking turns. */
+	working: boolean;
+}
+
+/** Demo runs: GitHive's hosted agents build Honeycomb in a new public repo of the caller's own. */
+export const demo = {
+	start: () => call<{ id: string; repo: string }>("POST", "/demo/runs"),
+	/** The run going now, if any, and the latest ones. */
+	runs: () =>
+		call<{ running: { id: string; fullName: string; since: number } | null; recent: unknown[] }>("GET", "/demo/runs"),
+	run: (repo: string) => call<DemoRunStatus>("GET", `/demo/runs/${repoPath(repo)}`),
+};
+
 export const manage = {
 	/** Every repo the caller can see, by full name. */
 	repos: () => call<{ name: string; id: string; visibility: "private" | "public" }[]>("GET", "/repos"),

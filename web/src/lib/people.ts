@@ -51,7 +51,13 @@ export function reviewerStats(snapshot: Pick<RepoSnapshot, "votes">): ReviewerSt
 	const reviewers = new Map<string, ReviewerStats>();
 	for (const vote of snapshot.votes) {
 		const name = vote.reviewer || identityName(vote.by) || "reviewer";
-		const stats = reviewers.get(name) ?? { name, roles: [], approvals: 0, rejections: 0, hosted: false };
+		const stats = reviewers.get(name) ?? {
+			name,
+			roles: [],
+			approvals: 0,
+			rejections: 0,
+			hosted: name.startsWith("githive-"),
+		};
 		if (vote.role && !stats.roles.includes(vote.role)) stats.roles.push(vote.role);
 		if (vote.verdict === "approve") stats.approvals++;
 		else stats.rejections++;

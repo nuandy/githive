@@ -4,7 +4,7 @@ import { forgetRepo } from "../src/routes/shared";
 // Deleting a repo clears every object keyed by its name, so a new repo by that name starts with nothing of the old one.
 
 describe("forgetting a deleted repo", () => {
-	it("clears its tokens, caches, GitHub sync state and snapshot", async () => {
+	it("clears its tokens, caches, GitHub sync state and snapshot, and stops its hosted agents", async () => {
 		const cleared: string[] = [];
 		const object = (calls: Record<string, () => unknown>) => ({
 			getByName: (name: string) =>
@@ -26,12 +26,14 @@ describe("forgetting a deleted repo", () => {
 			FOOTPRINT_CACHE: object({ forget: () => undefined }),
 			GITHUB_SYNC: object({ forget: () => undefined }),
 			GATE: object({ forgetSnapshot: () => undefined }),
+			HOSTED_AGENT: object({ stopAll: () => undefined }),
 		};
 		await forgetRepo(env as never, "acme--web");
 		expect(cleared.sort()).toEqual([
 			"acme--web clear",
 			"changes:acme--web forget",
 			"footprints:acme--web forget",
+			"hive:acme--web stopAll",
 			"records:acme--web:0 forget",
 			"repo:acme--web clearViews",
 			"repo:acme--web forget",

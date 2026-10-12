@@ -1,4 +1,4 @@
-import type { HiveEvent, LandingStretch, RepoAudit, RepoLanding, RepoSnapshot, RepoTree } from "../api";
+import type { DemoRunStatus, HiveEvent, LandingStretch, RepoAudit, RepoLanding, RepoSnapshot, RepoTree } from "../api";
 import { useEffect } from "react";
 import { usePoll } from "../hooks/usePoll";
 import { type HiveActivity, type HiveState, hiveActivity, hiveCounts } from "../lib/hive";
@@ -6,6 +6,7 @@ import { counted } from "../lib/plural";
 import { timeAgo } from "../lib/relativeTime";
 import { href } from "../lib/routes";
 import { justFinished, stretchWords } from "../lib/stretch";
+import { DemoBanner } from "./DemoRun";
 import { HiveFeed } from "./HiveFeed";
 import { HiveMap } from "./HiveMap";
 import { LandingTrack } from "./LandingTrack";
@@ -15,6 +16,8 @@ export interface HiveApi {
 	tree(repo: string, ref?: string): Promise<RepoTree>;
 	landing?: (repo: string, branch: string) => Promise<RepoLanding>;
 	events?: (repo: string) => Promise<{ events: HiveEvent[] }>;
+	/** The demo run that made the repo, if one did. */
+	demoRun?: (repo: string) => Promise<DemoRunStatus>;
 }
 
 /** The Hive tab: the agents working on the repo's branch, what each is doing, and what's landing. */
@@ -39,22 +42,29 @@ export function HiveTab({
 	useEffect(() => refreshEvents(), [snapshot.claims, refreshEvents]);
 	// Only the claims landing on this branch: each change lands on one branch.
 	const onBranch = { ...snapshot, claims: snapshot.claims.filter((claim) => (claim.into ?? branch) === branch) };
+	const loadDemo = api.demoRun;
 	return (
-		<Hive
-			repo={repo}
-			branch={branch}
-			snapshot={onBranch}
-			{...(landing.data ? { landing: landing.data } : {})}
-			{...(landing.error ? { landingError: String(landing.error) } : {})}
-			{...(tree.data ? { tree: tree.data } : {})}
-			{...(tree.error ? { treeError: String(tree.error) } : {})}
-			{...(events.data ? { events: events.data.events } : {})}
-			{...(events.error ? { eventsError: String(events.error) } : {})}
-			showsLanding={!!load}
-			showsFeed={!!loadEvents}
-		/>
+		<>
+			{loadDemo && isDemoRepo(repo) ? <DemoBanner repo={repo} load={loadDemo} /> : null}
+			<Hive
+				repo={repo}
+				branch={branch}
+				snapshot={onBranch}
+				{...(landing.data ? { landing: landing.data } : {})}
+				{...(landing.error ? { landingError: String(landing.error) } : {})}
+				{...(tree.data ? { tree: tree.data } : {})}
+				{...(tree.error ? { treeError: String(tree.error) } : {})}
+				{...(events.data ? { events: events.data.events } : {})}
+				{...(events.error ? { eventsError: String(events.error) } : {})}
+				showsLanding={!!load}
+				showsFeed={!!loadEvents}
+			/>
+		</>
 	);
 }
+
+/** Whether a repo was made by a demo run, which names it honeycomb-<when it started>. */
+export const isDemoRepo = (repo: string) => /\/honeycomb-\d{12}$/.test(repo);
 
 export interface HiveProps {
 	repo: string;

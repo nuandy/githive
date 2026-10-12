@@ -1,0 +1,33 @@
+/* A demo run's card on the Repositories page, and its banner on the Hive tab. */
+
+.demo-card {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 12px 24px;
+	margin-bottom: 20px;
+	padding: 16px 20px;
+	border-left: 3px solid var(--accent);
+}
+
+.demo-card__body {
+	flex: 1 1 360px;
+	min-width: 0;
+}
+
+.demo-card__body h2 {
+	margin: 0 0 6px;
+	font-size: 16px;
+}
+
+.demo-card__body p {
+	margin: 0;
+}
+
+.demo-card__action {
+	flex: none;
+}
+
+.demo-banner {
+	margin: 0;
+}

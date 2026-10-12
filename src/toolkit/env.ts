@@ -797,7 +797,15 @@ async function changeBrief(env: Env, repo: string, change: string) {
  */
 export async function startHostedReviewers(
 	env: Env,
-	input: { repo: string; change: string; roles?: string[]; summary?: string; mergeWhenApproved?: boolean },
+	input: {
+		repo: string;
+		change: string;
+		roles?: string[];
+		summary?: string;
+		mergeWhenApproved?: boolean;
+		/** A hive's agent reviewing under its own name (see ReviewJob.reviewer). */
+		reviewer?: string;
+	},
 ) {
 	const { repo, change } = input;
 	const ref = `changes/${change}`;
@@ -816,21 +824,34 @@ export async function startHostedReviewers(
 		baseCommit,
 		buildSummary: input.summary,
 		mergeWhenApproved: !!input.mergeWhenApproved,
+		...(input.reviewer ? { reviewer: input.reviewer } : {}),
 	};
+	// A hive agent's review has an object of its own, apart from GitHive's reviewer for the same role and commit.
+	const nameFor = (role: string) => (input.reviewer ? `${role}:${input.reviewer}` : role);
 	await Promise.all(
 		roles.map((role) =>
-			env.REVIEWER.getByName(reviewerName(changeRepoName(repo, change), role, head)).start({ ...review, role }),
+			env.REVIEWER.getByName(reviewerName(changeRepoName(repo, change), nameFor(role), head)).start({
+				...review,
+				role,
+			}),
 		),
 	);
 	return { head, reviewers: roles };
 }
 
 /** Starts GitHive's hosted builder on a claimed change, working on changes/<change> in the change's fork. */
-export async function startHostedBuilder(env: Env, input: { repo: string; change: string }) {
+export async function startHostedBuilder(env: Env, input: { repo: string; change: string; hiveReviews?: boolean }) {
 	const { repo, change } = input;
 	const { read, job, source } = await changeBrief(env, repo, change);
 	const write = await source("write");
-	const build = { ...job, remote: write.url, token: write.token, base: { remote: read.url, token: read.token } };
+	const base = { remote: read.url, token: read.token };
+	const build = {
+		...job,
+		remote: write.url,
+		token: write.token,
+		base,
+		...(input.hiveReviews ? { hiveReviews: true } : {}),
+	};
 	await env.BUILDER.getByName(changeRepoName(repo, change)).start(build);
 	return { change, builder: changeRepoName(repo, change) };
 }

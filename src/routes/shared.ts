@@ -56,7 +56,8 @@ export const toolContext = (env: Env, principal: Principal | undefined, agentKey
 export const isProject = (name: string) => !name.startsWith("fork--") && !name.startsWith("records--");
 
 /**
- * A deleted project's tokens, caches and GitHub sync state go with it, so a new repo by its name starts clean.
+ * A deleted project's tokens, caches, GitHub sync state and hosted agents go with it, so a new repo by its name
+ * starts clean.
  */
 export async function forgetRepo(env: Env, repo: string) {
 	await Promise.resolve()
@@ -67,9 +68,10 @@ export async function forgetRepo(env: Env, repo: string) {
 				forgetCaches(env, repo),
 				env.GITHUB_SYNC?.getByName(`repo:${repo}`).forget(),
 				env.GATE?.getByName(`repo:${repo}`).forgetSnapshot(),
+				env.HOSTED_AGENT?.getByName(`hive:${repo}`).stopAll(),
 			]),
 		)
-		.catch((err) => console.error(`forgetting ${repo}'s tokens, caches, GitHub sync and snapshot failed`, String(err)));
+		.catch((err) => console.error(`forgetting ${repo} failed`, String(err)));
 }
 
 // The repo's RepoCache, and the RecordCaches, ChangeCache and FootprintCache beside it.

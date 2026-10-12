@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="utf-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		<title>Honeycomb</title>
+		<meta name="description" content="A daily word game played on a honeycomb of seven letters." />
+		<link rel="stylesheet" href="styles/theme.css" />
+		<link rel="stylesheet" href="styles/board.css" />
+		<link rel="stylesheet" href="styles/input.css" />
+		<link rel="stylesheet" href="styles/progress.css" />
+		<link rel="stylesheet" href="styles/message.css" />
+		<link rel="stylesheet" href="styles/help.css" />
+		<link rel="stylesheet" href="styles/yesterday.css" />
+		<script type="module" src="src/main.js"></script>
+	</head>
+	<body>
+		<header class="top">
+			<h1>Honeycomb</h1>
+			<nav class="top__actions">
+				<button type="button" id="yesterday-button">Yesterday</button>
+				<button type="button" id="share-button">Share</button>
+				<button type="button" id="help-button" aria-label="How to play">?</button>
+			</nav>
+		</header>
+		<main class="game">
+			<section class="game__play" aria-label="Puzzle">
+				<div id="message" role="status" aria-live="polite"></div>
+				<div id="entry" aria-label="Your word"></div>
+				<div id="board"></div>
+				<div id="controls"></div>
+			</section>
+			<aside class="game__side">
+				<section id="progress" aria-label="Rank"></section>
+				<section id="found" aria-label="Words found"></section>
+			</aside>
+		</main>
+		<section id="yesterday" hidden></section>
+	</body>
+</html>

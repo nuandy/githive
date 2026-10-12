@@ -3,10 +3,12 @@ import "./RepoPage.css";
 import type { VoteApi } from "./VoteForm";
 import type {
 	BranchHistory,
+	DemoRunStatus,
 	LandingStretch,
 	ChangeHistory,
 	GiveUpAnswer,
 	HiveEvent,
+	HiveStatus,
 	RepoAccess,
 	PullAnswer,
 	RepoLanding,
@@ -29,6 +31,7 @@ import { AgentsTab } from "./Agents";
 import { ClaimsTab } from "./ClaimsMap";
 import { HistoryTab } from "./History";
 import { HiveTab } from "./HiveTab";
+import type { HostedAgentsApi } from "./HostedAgents";
 import { CodeTab, type CodeApi } from "./CodeBrowser";
 import { ChangePage } from "./ChangePage";
 import { AuditTab, ChangeList, SettingsTab } from "./RepoTabs";
@@ -36,6 +39,16 @@ import { Overview } from "./Overview";
 import { RepoHeader } from "./RepoHeader";
 import { ShardingBadge } from "./StatusPill";
 import type { TabItem } from "./Tabs";
+
+/** The Agents tab's hosted agents: shown when the dashboard can read them, started and stopped by writers. */
+function hostedAgentsApi(api: RepoPageApi, writes: boolean): HostedAgentsApi | undefined {
+	if (!api.hostedAgents) return undefined;
+	const hosted: HostedAgentsApi = { hostedAgents: api.hostedAgents };
+	if (!writes) return hosted;
+	if (api.startHostedAgents) hosted.startHostedAgents = api.startHostedAgents;
+	if (api.stopHostedAgents) hosted.stopHostedAgents = api.stopHostedAgents;
+	return hosted;
+}
 
 export type RepoView =
 	| {
@@ -54,6 +67,13 @@ export type RepoPageApi = CodeApi &
 		landing?: (repo: string, branch: string) => Promise<RepoLanding>;
 		/** The hive's recent events, for the Hive tab's live feed (stand-ins may leave it out). */
 		events?: (repo: string) => Promise<{ events: HiveEvent[] }>;
+		/** The demo run that made a repo, for the Hive tab's banner (stand-ins may leave it out). */
+		demoRun?: (repo: string) => Promise<DemoRunStatus>;
+		/** GitHive's hosted agents on the repo, for the Agents tab (stand-ins may leave it out). */
+		hostedAgents?: (repo: string) => Promise<HiveStatus | null>;
+		/** People who can write: start or stop the repo's hosted agents. */
+		startHostedAgents?: (repo: string, count: number, minutes: number) => Promise<unknown>;
+		stopHostedAgents?: (repo: string) => Promise<unknown>;
 		/** The changes landed on a branch, for the History tab (stand-ins may leave it out). */
 		history?: (repo: string, branch: string) => Promise<BranchHistory>;
 		/** People who can write: make a branch, merge a change. */
@@ -241,7 +261,7 @@ function RepoTabContent({
 		case "claims":
 			return <ClaimsTab repo={repo} branch={branch} holders={holdersFromSnapshot(snapshot, repo)} api={api} />;
 		case "agents":
-			return <AgentsTab snapshot={snapshot} />;
+			return <AgentsTab repo={repo} snapshot={snapshot} hosted={hostedAgentsApi(api, canWrite(access?.level))} />;
 		case "settings": {
 			const editor =
 				access?.level === "admin" && manage?.changeSettings ? (

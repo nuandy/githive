@@ -57,7 +57,7 @@ describe("the Inbox", () => {
 
 describe("Agents", () => {
 	it("lists who holds claims and who reviews", () => {
-		const html = renderToStaticMarkup(<AgentsTab snapshot={repoSnapshot} />);
+		const html = renderToStaticMarkup(<AgentsTab repo="o/r" snapshot={repoSnapshot} />);
 		expect(html).toContain("agent-c");
 		expect(html).toContain("rev-1");
 		expect(html).toContain("Claims in force");

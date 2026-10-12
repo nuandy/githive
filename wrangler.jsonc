@@ -53,6 +53,8 @@
 			{ "name": "TOKENS", "class_name": "TokenCache" },
 			{ "name": "FOOTPRINT_CACHE", "class_name": "FootprintCache" },
 			{ "name": "GITHUB_SYNC", "class_name": "GitHubSync" },
+			{ "name": "DEMO_RUN", "class_name": "DemoRun" },
+			{ "name": "HOSTED_AGENT", "class_name": "HostedAgent" },
 		],
 	},
 	// One container per builder or reviewer agent, and per integration gate run. The image (cloudflare/debian-trixie)
@@ -105,5 +107,7 @@
 		{ "tag": "v15", "new_sqlite_classes": ["FootprintCache"] },
 		// A connected repo's GitHub side: the job bringing GitHub's changes back, and the pull request as last seen.
 		{ "tag": "v16", "new_sqlite_classes": ["GitHubSync"] },
+		// Honeycomb demo runs: the registry that caps them, and one per run driving its workers (src/demo/).
+		{ "tag": "v17", "new_sqlite_classes": ["DemoRun", "HostedAgent"] },
 	],
 }

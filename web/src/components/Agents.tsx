@@ -1,8 +1,12 @@
 import type { RepoSnapshot } from "../api";
+import { HostedAgents, type HostedAgentsApi } from "./HostedAgents";
 import { authorStats, reviewerStats, type AuthorStats, type ReviewerStats } from "../lib/people";
 import { timeAgo } from "../lib/relativeTime";
 import { Icon } from "./Icon";
 import "./Agents.css";
+
+/** GitHive's own agents, whose names start githive-, and its one-off builder. */
+const isGitHiveAgent = (name: string) => name === "GitHive builder" || name.startsWith("githive-");
 
 function Authors({ authors }: { authors: AuthorStats[] }) {
 	return (
@@ -24,7 +28,7 @@ function Authors({ authors }: { authors: AuthorStats[] }) {
 							{authors.map((author) => (
 								<tr key={author.name}>
 									<th scope="row">
-										<Icon name={author.name === "GitHive builder" ? "bot" : "user"} size={14} className="muted" />{" "}
+										<Icon name={isGitHiveAgent(author.name) ? "bot" : "user"} size={14} className="muted" />{" "}
 										{author.name}
 									</th>
 									<td>{author.open}</td>
@@ -81,8 +85,16 @@ function Reviewers({ reviewers }: { reviewers: ReviewerStats[] }) {
 	);
 }
 
-/** A repo's agents, from the claims in force and the recent votes. */
-export function AgentsTab({ snapshot }: { snapshot: RepoSnapshot }) {
+/** A repo's agents, from the claims in force and the recent votes, and GitHive's hosted agents on it. */
+export function AgentsTab({
+	repo,
+	snapshot,
+	hosted,
+}: {
+	repo: string;
+	snapshot: RepoSnapshot;
+	hosted?: HostedAgentsApi;
+}) {
 	return (
 		<div className="agents">
 			<p className="muted agents__note">
@@ -90,6 +102,7 @@ export function AgentsTab({ snapshot }: { snapshot: RepoSnapshot }) {
 			</p>
 			<Authors authors={authorStats(snapshot)} />
 			<Reviewers reviewers={reviewerStats(snapshot)} />
+			{hosted ? <HostedAgents repo={repo} api={hosted} /> : null}
 		</div>
 	);
 }

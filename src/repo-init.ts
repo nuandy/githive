@@ -130,11 +130,12 @@ export function initialFiles(
 export async function writeFirstCommit(
 	remote: Remote,
 	files: Record<string, string>,
-	author: { name: string; email: string },
+	author: { name: string; email: string; message?: string },
 ) {
 	const workspace = await Workspace.init(remote, "main");
 	await workspace.write(files);
-	const oid = await workspace.commit(`Start ${Object.keys(files).join(", ")}`, author);
+	const message = author.message ?? `Start ${Object.keys(files).join(", ")}`;
+	const oid = await workspace.commit(message, { name: author.name, email: author.email });
 	await workspace.push("main");
 	return oid;
 }
