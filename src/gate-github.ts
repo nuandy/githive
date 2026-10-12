@@ -8,6 +8,10 @@
 // commit of GitHive's main whose tree a commit on GitHub's branch has, the work GitHub took, and joins GitHub's
 // commit to it: a commit with GitHub's tree and both as parents. Merging that brings in only what GitHub added since.
 // A merge commit needs no joining: GitHive's commit is already one of its parents.
+//
+// When GitHub's branch had commits of its own before it squashed or rebased, no tree is GitHive's, so the base found
+// can be older than the work GitHub took, and merging from it would bring back what GitHive changed since, such as a
+// file it deleted. Unless the import can show that can't happen, it comes back untrusted, for people to review.
 import { WORKDIR, clip, gitWithToken, run } from "./container";
 import type { BatchBase } from "./gate-types";
 import { BOT } from "./git";
@@ -37,10 +41,11 @@ export interface GitHubImport {
 
 /**
  * The outcome: GitHub's head is on the project's branch already (known), or it was written to `as` (head: GitHub's
- * commit, or the commit joining it to `base`, the newest of GitHive's commits whose work GitHub had), or why not.
+ * commit, or the commit joining it to `base`, the newest of GitHive's commits whose work GitHub had, and `untrusted`:
+ * why it needs review), or why not.
  */
 export type GitHubImportResult =
-	{ known: string } | { commit: string; head: string; base: string } | { failed: string };
+	{ known: string } | { commit: string; head: string; base: string; untrusted?: string } | { failed: string };
 
 const SHA = /^[0-9a-f]{40}$/;
 
@@ -73,6 +78,8 @@ export async function importFromGitHub(
 	const took = await workTaken(git, main, head, mergeBase);
 	const base = took?.main ?? mergeBase;
 	const joined = took && !(await isAncestor(took.main, head)) && took.tree !== (await treeOf(git, mergeBase));
+	// The merge sets GitHub's commit against the join's base, or git's own.
+	const untrusted = await doubtedBase(git, { main, head, base: joined ? base : mergeBase });
 	// The join's commits go into a shell script: both must be commit ids, whatever a later caller passes.
 	if (joined && !SHA.test(base)) return { failed: `joining GitHub's ${githubBranch} found no commit to join: ${base}` };
 	const tip = joined ? await joinedCommit(container, { head, base, githubBranch, branch: input.branch }) : head;
@@ -86,7 +93,7 @@ export async function importFromGitHub(
 		`${tip}:refs/heads/${as}`,
 	]);
 	if (pushed.exitCode !== 0) return { failed: `writing ${as} failed: ${clip(pushed.output, 500)}` };
-	return { commit: head, head: tip, base };
+	return { commit: head, head: tip, base, ...(untrusted ? { untrusted } : {}) };
 }
 
 type Git = (...args: string[]) => Promise<string>;
@@ -120,6 +127,41 @@ async function workTaken(git: Git, main: string, head: string, mergeBase: string
 	}
 	return taken && { main: taken.commit, tree: taken.tree };
 }
+
+/** How many of the paths both sides changed a doubted import names. */
+const DOUBTED_SHOWN = 5;
+
+// Why merging `head` from `base` may bring back what GitHive changed since, or undefined when it can't. It can't
+// when each of GitHub's commits that main lacks sits straight on main: a squash or rebase there would have GitHive's
+// files exactly, and been found, so these are GitHub's own. Nor when GitHub changed no path GitHive changed after
+// `base`. Otherwise a squash or rebase may have taken GitHive's newer work under new ids, and the base is in doubt.
+async function doubtedBase(git: Git, at: { main: string; head: string; base: string }) {
+	if (await onMain(git, at)) return undefined;
+	const theirs = lines(await git("diff", "--name-only", "--no-renames", at.base, at.head));
+	const changedSince = ["log", "--format=", "--name-only", "--no-renames", `${at.base}..${at.main}`];
+	const ours = new Set(lines(await git(...changedSince)));
+	const both = theirs.filter((path) => ours.has(path));
+	if (!both.length) return undefined;
+	const more = both.length > DOUBTED_SHOWN ? ` and ${both.length - DOUBTED_SHOWN} more` : "";
+	const shown = `${both.slice(0, DOUBTED_SHOWN).join(", ")}${more}`;
+	return (
+		"GitHub's commits sit on commits of its own that GitHive doesn't have, as after a squash or rebase onto a " +
+		`branch that had moved on, and change ${shown}, which GitHive changed after ${at.base.slice(0, 8)}: GitHive ` +
+		"can't tell which of its work GitHub took, so merging could bring back what GitHive changed since"
+	);
+}
+
+// Whether each of GitHub's commits that main lacks has only parents on main: none is on another of them.
+async function onMain(git: Git, at: { main: string; head: string }) {
+	const listed = await git("rev-list", "--parents", `--max-count=${GITHUB_SEARCHED}`, at.head, `^${at.main}`);
+	const commits = lines(listed).map((line) => line.split(" "));
+	// As many as were searched: there may be more, so it can't say.
+	if (commits.length >= GITHUB_SEARCHED) return false;
+	const lacked = new Set(commits.map(([commit]) => commit));
+	return commits.every(([, ...parents]) => parents.every((parent) => !lacked.has(parent)));
+}
+
+const lines = (output: string) => output.split("\n").filter(Boolean);
 
 // A commit with GitHub's tree whose parents are GitHub's commit and GitHive's `base`. Its dates are GitHub's
 // commit's, so making it again makes the same commit.

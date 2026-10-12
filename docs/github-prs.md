@@ -92,6 +92,12 @@ people pushed there directly. They come back through GitHive's own path, so the 
      GitHub's (as it is for a merge commit), the Gate joins them: a commit with GitHub's tree and both as parents,
      with GitHub's commit's dates, so making it again makes the same commit. That join is `github/<branch>`, and
      merging it brings in only what GitHub added;
+   - when GitHub's branch had commits of its own before a squash or rebase, no tree is GitHive's, and the base found
+     can be older than the work GitHub took: merging from it could bring back what GitHive changed since, such as a
+     file it deleted. So unless each of GitHub's commits that main lacks sits straight on main (a squash or rebase there
+     would have GitHive's files exactly, and been found), or GitHub changed no path GitHive changed after the base,
+     the import comes back untrusted (`untrusted` in its entry says why), and needs review even while the repo trusts
+     GitHub's changes;
    - an import record (`refs/notes/githive-github/<repo>`, appended by compare-and-swap, once per commit and head)
      notes the GitHub repo, branch and commit, the head written, and the GitHive commit whose work it had, stamped
      like every record (by `service:githive-github`). Its shape is pinned, and its reads are checked against a
@@ -134,7 +140,8 @@ is a fast-forward again.
   - its claim is by `githive-github` with `source: github/<branch>`, and every record of it (a claim spread over
     shards has several), as written, is stamped as `service:githive-github` (with a stamp key). The merge path reads
     those records for it, since the merged view of a claim carries no stamp;
-  - its head is a commit in the import record (a stamped entry, for that branch);
+  - its head is a commit in the import record (a stamped entry, for that branch), whose import found no reason for
+    review (`untrusted`);
   - the repo's GitHub trust is on, connected to the GitHub repo the import came from: for the merge path, in the
     registry it's checked against; for the audit, in the registry state the merge cites.
 
@@ -202,7 +209,8 @@ real-git test server) plays GitHub, as GitHive's tests fake Artifacts.
 - With trust off, review is needed.
 - The Gate's import joins a squash or rebase to what it took, so it merges cleanly where git's own merge base
   conflicts (`github-import.test.ts`). It runs in the repo's GitHub Gate: the repo's own Gate refuses it. A revert on
-  GitHub of what a squash took comes back as a revert.
+  GitHub of what a squash took comes back as a revert. A squash onto a GitHub branch that had a commit of its own
+  comes back untrusted, so a file GitHive deleted since can't come back without review (`github-inbound.test.ts` too).
 - The audit reports every way a vote could be skipped short of the trust rule (`github-audit.test.ts`), and the
   merge path refuses them: a claim as `githive-github` stamped as another identity, a head the import record doesn't
   hold, a repo connected to another GitHub repo since the import, another agent's claim of `github/main`

@@ -12,7 +12,7 @@ import { callTool, repoSnapshot, type ToolContext } from "../src/toolkit/mcp";
 import { generateStampKey, makeStamper } from "../src/toolkit/stamp";
 import type { Votes } from "../src/toolkit/votes";
 import { FakeStorage } from "./fakes/env";
-import { pushChange } from "./helpers/agents";
+import { agentClone, pushChange } from "./helpers/agents";
 import { fakeGitHub, type FakeGitHub } from "./helpers/fake-github";
 import { linkBeforeModes } from "./helpers/github-link";
 import { memoryBatchGit } from "./helpers/memory-batch-git";
@@ -46,12 +46,27 @@ const extra: Partial<ToolContext> = {
 };
 const { ctx, call, keys, register, approve } = toolCalls(() => server, extra);
 
-/** githive-github's job, as the repo's GitHubSync runs it: a hosted context stamped as it. */
+/** A hosted context stamped as service:githive-github, as the repo's GitHubSync acts. */
+function githubAgent(): ToolContext {
+	const { githubSync: _, ...rest } = ctx();
+	return { ...rest, hosted: true, stamper: async () => makeStamper(privateKey, GITHUB_IDENTITY) };
+}
+
+/** githive-github's job, as the repo's GitHubSync runs it. */
 class TestSync extends GitHubSync {
 	protected override toolContext(): ToolContext {
-		const { githubSync: _, ...rest } = ctx();
-		return { ...rest, hosted: true, stamper: async () => makeStamper(privateKey, GITHUB_IDENTITY) };
+		return githubAgent();
 	}
+}
+
+/** Agent a's change deleting `path` from main, pushed; returns its head. */
+async function pushDeletion(change: string, path: string) {
+	const clone = await agentClone(server.url, work, `a-${change}`);
+	await clone.run("checkout", "-q", "-b", `changes/${change}`);
+	await clone.run("rm", "-q", path);
+	await clone.run("commit", "-q", "-m", `${change}: delete ${path}`);
+	await clone.run("push", "-q", "origin", `changes/${change}`);
+	return clone.run("rev-parse", "HEAD");
 }
 
 /** Runs the job's steps, alarm after alarm, until none is set. */
@@ -172,6 +187,32 @@ describe("GitHub's changes coming back", { timeout: 120_000 }, () => {
 			expect(github.pulls.at(-1)!.body).not.toContain("Bring in GitHub's changes");
 		},
 	);
+
+	it("brings a squash onto a GitHub branch that moved on back untrusted, so a deleted file can't come back unseen", async () => {
+		await land("c-1", { "src/a.js": "a\n", "src/old.js": "old\n" });
+		expect(await call("github_pr", {})).toMatchObject({ opened: true });
+		// A commit of GitHub's own lands before the pull request is squashed.
+		github.push({ "docs/notes.md": "from GitHub\n" });
+		const merged = github.mergePull("squash");
+		// GitHive deletes a file the pull request had: merged from git's own base, the squash would bring it back.
+		await call("claim", { change: "c-2", agent: "a", paths: ["src/old.js"], intent: "Delete old" }, "a");
+		await approve(await pushDeletion("c-2", "src/old.js"));
+		expect(await call("merge", { change: "c-2", agent: "a" }, "a")).toMatchObject({ ok: true });
+		const job = await settle();
+		expect(job).toMatchObject({ commit: merged, change: `github-${merged.slice(0, 12)}` });
+		expect(job?.step).not.toBe("done");
+		const [imported] = await imports();
+		expect(imported).toMatchObject({ commit: merged, untrusted: expect.stringContaining("src/old.js") });
+		// Nothing landed without review: the file stays deleted, and GitHub's commit isn't on main.
+		expect(server.git("ls-tree", "--name-only", "-r", "main")).not.toContain("src/old.js");
+		expect(server.git("ls-tree", "--name-only", "-r", "main")).not.toContain("docs/notes.md");
+		const merge = { repo: "p", change: `github-${merged.slice(0, 12)}`, agent: GITHUB_AGENT };
+		expect(await callTool("merge", merge, githubAgent())).toMatchObject({
+			ok: false,
+			reasons: [expect.stringContaining("approvals from reviewers")],
+		});
+		expect(await call("audit", {})).toMatchObject({ open: 0 });
+	});
 
 	it("brings commits pushed straight to GitHub back the same way, with what they changed", async () => {
 		await land("c-1", { "src/a.js": "a\n" });
@@ -463,9 +504,10 @@ describe("what can go wrong bringing GitHub's changes back", { timeout: 120_000 
 		await land("c-1", { "src/a.js": "a\n" });
 		const first = github.push({ "src/a.js": "from GitHub\n" });
 		expect(await land("c-2", { "src/a.js": "from GitHive\n" })).toMatchObject({ step: "needs a person" });
-		// GitHub moves on, still conflicting: the newer commit has the older one in it.
+		// GitHub moves on: the newer commit has the older one in it. On a commit of GitHub's own, and changing what
+		// GitHive changed, it comes back for review.
 		const second = github.push({ "docs/notes.md": "more from GitHub\n" });
-		expect(await land("c-3", { "src/c.js": "c\n" })).toMatchObject({ step: "needs a person", commit: second });
+		expect(await land("c-3", { "src/c.js": "c\n" })).toMatchObject({ step: "waiting", commit: second });
 		expect((await claimsNow()).map((claim) => claim.change)).toEqual([`github-${second.slice(0, 12)}`]);
 		const releases = (await registryNow()).released.filter(
 			(release) => release.change === `github-${first.slice(0, 12)}`,

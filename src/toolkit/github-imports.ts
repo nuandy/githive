@@ -19,6 +19,8 @@ export interface GitHubImport {
 	head: string;
 	/** The newest commit of GitHive's main whose work GitHub's branch had. */
 	base: string;
+	/** Why it needs review even while the repo trusts GitHub's changes (see gate-github.ts). */
+	untrusted?: string;
 	at: string;
 	by?: string;
 	stamp?: string;
@@ -54,7 +56,8 @@ export async function recordImport(
 			state: { imports: [...state.imports, recorded] },
 			text:
 				`GitHub's ${entry.github} ${entry.branch} at ${entry.commit.slice(0, 8)} comes in as github/${entry.branch} ` +
-				`(${entry.head.slice(0, 8)}), having GitHive's work up to ${entry.base.slice(0, 8)}`,
+				`(${entry.head.slice(0, 8)}), having GitHive's work up to ${entry.base.slice(0, 8)}` +
+				(entry.untrusted ? `; it needs review: ${entry.untrusted}` : ""),
 		};
 	});
 	return recorded!;
@@ -83,7 +86,8 @@ export const importedAt = (imports: GitHubImport[], branch: string, head: string
  * disagree: whether a change lands without votes at `head`. Every record of its claim (`records`, as written, with
  * their stamps) is githive-github's with `source: github/<branch>`, stamped as service:githive-github when there's a
  * stamp key; the repo trusts GitHub's changes in `registry` (the state a merge is checked against, or the one it
- * cites); and `head` is in a stamped import of that branch, from the GitHub repo `registry` is connected to.
+ * cites); and `head` is in a stamped import of that branch, from the GitHub repo `registry` is connected to, that
+ * didn't find a reason to need review.
  */
 export async function trustedGitHubChange(rule: {
 	records: ClaimRecord[];
@@ -102,5 +106,5 @@ export async function trustedGitHubChange(rule: {
 	if (stampKey && !(await Promise.all(records.map(stamped))).every(Boolean)) return false;
 	const imports = await verifiedImports(await rule.imports(), stampKey);
 	const imported = importedAt(imports, first.source!.slice("github/".length), head);
-	return !!imported && imported.github === registry!.github!.repo;
+	return !!imported && imported.github === registry!.github!.repo && !imported.untrusted;
 }
