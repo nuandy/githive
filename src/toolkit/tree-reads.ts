@@ -1,5 +1,5 @@
 import type { ReadHistory } from "./batch-reads";
-import type { TreeEntry } from "./branch-history";
+import type { BLOB_TOO_LARGE, TreeEntry } from "./branch-history";
 import { SizedCache } from "../sized-cache";
 
 // Tree reads for a landing. A batch's changes mostly share their merge base and the folders near the top, so reading
@@ -33,37 +33,44 @@ export function forgetTrees() {
  */
 export function cachingHistory(history: ReadHistory): ReadHistory {
 	const tree = readsOnce(keptTree, keepTree);
-	const blob = readsOnce(
+	const blob = readsOnce<Uint8Array | typeof BLOB_TOO_LARGE>(
 		(hash) => keptBlobs.get(hash),
-		(hash, bytes) => keptBlobs.set(hash, bytes, bytes.byteLength),
+		(hash, bytes) => {
+			if (bytes instanceof Uint8Array) keptBlobs.set(hash, bytes, bytes.byteLength);
+		},
 	);
 	return (repo, read) =>
 		history(repo, (source) => {
 			const readBlob = source.readBlob?.bind(source);
+			// Reads with different caps are told apart, so one never gets another's BLOB_TOO_LARGE.
+			const readCapped = (hash: string, maxBytes?: number) =>
+				blob(hash, () => readBlob!(hash, maxBytes), `:${maxBytes ?? ""}`);
 			return read({
 				log: (ref, limit, offset) => source.log(ref, limit, offset),
 				readCommit: (hash) => source.readCommit(hash),
 				readTree: (hash) => tree(hash, () => source.readTree(hash)),
-				...(readBlob ? { readBlob: (hash: string) => blob(hash, () => readBlob(hash)) } : {}),
+				...(readBlob ? { readBlob: readCapped } : {}),
 			});
 		});
 }
 
-// Reads by hash, each at most once at a time, answered from what's kept when it can be.
+// Reads by hash, each at most once at a time, answered from what's kept when it can be. Reads of the same hash that
+// may answer differently pass a `variant`.
 function readsOnce<V>(kept: (hash: string) => V | undefined, keep: (hash: string, value: V) => void) {
 	const reading = new Map<string, Promise<V | null>>();
-	return (hash: string, read: () => Promise<V | null>) => {
+	return (hash: string, read: () => Promise<V | null>, variant = "") => {
 		const hit = kept(hash);
 		if (hit) return Promise.resolve(hit);
-		const started = reading.get(hash);
+		const key = hash + variant;
+		const started = reading.get(key);
 		if (started) return started;
 		const pending = read();
-		reading.set(hash, pending);
+		reading.set(key, pending);
 		// A failed read, or an object this repo doesn't have, may be read again from another.
 		pending
 			.then((value) => (value ? keep(hash, value) : undefined))
 			.catch(() => undefined)
-			.finally(() => reading.delete(hash));
+			.finally(() => reading.delete(key));
 		return pending;
 	};
 }

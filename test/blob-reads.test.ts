@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { withHistory } from "../src/artifacts";
 import type { ReadHistory } from "../src/toolkit/batch-reads";
-import type { HistorySource } from "../src/toolkit/branch-history";
+import { BLOB_TOO_LARGE, type HistorySource } from "../src/toolkit/branch-history";
 import { cachingHistory, forgetTrees } from "../src/toolkit/tree-reads";
 import { agentClone } from "./helpers/agents";
 import { gitHistory } from "./helpers/git-history";
@@ -13,7 +13,8 @@ import { startGitServer, type GitServer } from "./helpers/git-server";
 // Files are read by their blob's hash: through Artifacts' readBlob, once per isolate through the caching history,
 // and in tests by git itself.
 
-const text = (bytes: Uint8Array | null | undefined) => (bytes ? new TextDecoder().decode(bytes) : bytes);
+const text = (bytes: Uint8Array | typeof BLOB_TOO_LARGE | null | undefined) =>
+	bytes instanceof Uint8Array ? new TextDecoder().decode(bytes) : bytes;
 const transient = () => Object.assign(new Error("temporarily unavailable"), { status: 503 });
 
 describe("blob reads", () => {
@@ -27,6 +28,36 @@ describe("blob reads", () => {
 		expect(text(await read("b1"))).toBe("export const a = 1;\n");
 		expect(readBlob).toHaveBeenCalledTimes(2);
 		expect(await read("missing")).toBeNull();
+	});
+
+	it("through the Artifacts wrapper: a blob over the size asked for, by its size alone, its bytes never read", async () => {
+		const big = { size: 300_000, arrayBuffer: vi.fn(async () => new ArrayBuffer(300_000)) };
+		const small = { size: 4, arrayBuffer: vi.fn(async () => new Blob(["tiny"]).arrayBuffer()) };
+		const blobs: Record<string, typeof big> = { big, small };
+		const artifacts = { get: vi.fn(async () => ({ readBlob: async (hash: string) => blobs[hash] })) } as never;
+		const read = (hash: string, maxBytes?: number) =>
+			withHistory(artifacts, "project", async (source) => source.readBlob!(hash, maxBytes));
+		expect(await read("big", 256_000)).toBe(BLOB_TOO_LARGE);
+		expect(big.arrayBuffer).not.toHaveBeenCalled();
+		expect(text(await read("small", 256_000))).toBe("tiny");
+		// Without a cap, any size is read.
+		expect(await read("big")).toHaveLength(300_000);
+	});
+
+	it("through the caching history: a blob over one read's cap is still read whole for another", async () => {
+		forgetTrees();
+		const readBlob = vi.fn(async (hash: string, maxBytes?: number) =>
+			maxBytes === undefined ? new TextEncoder().encode(hash) : BLOB_TOO_LARGE,
+		);
+		const source: HistorySource = { log: async () => [], readCommit: async () => null, readTree: async () => null };
+		const history = cachingHistory((_repo, read) => read({ ...source, readBlob }));
+		const blob = (maxBytes?: number) => history("project", async (each) => each.readBlob!("big", maxBytes));
+		const [capped, whole] = await Promise.all([blob(1), blob()]);
+		expect(capped).toBe(BLOB_TOO_LARGE);
+		expect(text(whole)).toBe("big");
+		// Only the bytes are kept: a capped read is answered from them now, without reading again.
+		expect(text(await blob(1))).toBe("big");
+		expect(readBlob).toHaveBeenCalledTimes(2);
 	});
 
 	it("through the caching history: each blob read once for every repo that has it, and none it hasn't", async () => {

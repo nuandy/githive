@@ -186,7 +186,7 @@ the claim); once something is pushed it lasts longer, and status's `lease` says 
   as WebAssembly modules (the spike showed it runs in workerd within the bundle limit). The limits are strict:
   - the Worker's CPU limit is set to 60 s (`limits.cpu_ms`, twice the default), and a batch's budget is far below it:
     200 parses, 4 million characters and 2,000 Artifacts reads, counted, not timed;
-  - a file over 256 KB is skipped, without being decoded;
+  - a file over 256 KB is skipped by its size, without its bytes being read, and each blob is parsed as it arrives;
   - a grammar that fails to load is tried once a batch, not once a file.
 
   The trade-off: the parser's 32 MiB of wasm memory is fixed, never shrinks, and sits in the same isolates that serve

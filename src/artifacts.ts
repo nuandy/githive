@@ -1,6 +1,6 @@
 import type { Remote } from "./git";
 import { noteArtifactsCall } from "./git-http";
-import type { HistorySource } from "./toolkit/branch-history";
+import { BLOB_TOO_LARGE, type HistorySource } from "./toolkit/branch-history";
 import { isTransientFailure, jitteredDelay, retryTransient, sleep, transientDelay } from "./retry";
 import { rpc } from "./rpc";
 
@@ -76,15 +76,17 @@ export async function withHistory<T>(
 			log: (ref, limit, offset) => retryArtifacts(() => call("log", name, () => rpc(repo.log({ ref, limit, offset })))),
 			readCommit: (hash) => retryArtifacts(() => call("readCommit", name, () => rpc(repo.readCommit(hash)))),
 			readTree: (hash) => retryArtifacts(() => call("readTree", name, () => rpc(repo.readTree(hash)))),
-			readBlob: (hash) =>
-				retryArtifacts(() =>
-					call("readBlob", name, async () => {
-						const blob = await rpc(repo.readBlob(hash));
-						return blob ? new Uint8Array(await blob.arrayBuffer()) : null;
-					}),
-				),
+			readBlob: (hash, maxBytes) => retryArtifacts(() => call("readBlob", name, () => blobBytes(repo, hash, maxBytes))),
 		}),
 	);
+}
+
+// A blob over `maxBytes` is answered by its size alone, so its bytes are never copied into the isolate's heap.
+async function blobBytes(repo: ArtifactsRepo, hash: string, maxBytes = Infinity) {
+	const blob = await rpc(repo.readBlob(hash));
+	if (!blob) return null;
+	if (blob.size > maxBytes) return BLOB_TOO_LARGE;
+	return new Uint8Array(await blob.arrayBuffer());
 }
 
 export async function headOf(artifacts: Artifacts, name: string, ref: string) {

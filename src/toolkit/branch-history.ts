@@ -29,11 +29,15 @@ export interface HistorySource {
 	readCommit(hash: string): Promise<CommitMeta | null>;
 	readTree(hash: string): Promise<TreeEntry[] | null>;
 	/**
-	 * A blob's bytes, or null if the repo has no blob by that hash. Optional, so sources that never read files
-	 * needn't have it. The bytes may be shared with other reads, so they're never changed.
+	 * A blob's bytes, or null if the repo has no blob by that hash. Over `maxBytes` it may answer BLOB_TOO_LARGE
+	 * without reading the bytes. Optional, so sources that never read files needn't have it. The bytes may be shared
+	 * with other reads, so they're never changed.
 	 */
-	readBlob?(hash: string): Promise<Uint8Array | null>;
+	readBlob?(hash: string, maxBytes?: number): Promise<Uint8Array | typeof BLOB_TOO_LARGE | null>;
 }
+
+/** What readBlob answers for a blob over the size its caller asked for, whose bytes it didn't read. */
+export const BLOB_TOO_LARGE = "too large";
 
 /** A cache of each commit's files changed from its first parent. Commits never change, so entries never expire. */
 export interface KeptFiles {

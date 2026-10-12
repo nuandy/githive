@@ -241,7 +241,7 @@ function counted(source: HistorySource, reads: { left: number; most: number }): 
 		log: async (ref, limit, offset) => (spend(), source.log(ref, limit, offset)),
 		readCommit: async (hash) => (spend(), source.readCommit(hash)),
 		readTree: async (hash) => (spend(), source.readTree(hash)),
-		...(readBlob ? { readBlob: async (hash: string) => (spend(), readBlob(hash)) } : {}),
+		...(readBlob ? { readBlob: async (hash: string, maxBytes?: number) => (spend(), readBlob(hash, maxBytes)) } : {}),
 	};
 }
 
