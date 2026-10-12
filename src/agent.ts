@@ -3,7 +3,7 @@ import { zodResponsesFunction } from "openai/helpers/zod";
 import type { ResponseInputItem } from "openai/resources/responses/responses";
 import type { z } from "zod";
 
-// Shared plumbing for the agents (planner, builders): function tools defined
+// Shared plumbing for GitHive's hosted builders and reviewers: function tools defined
 // with Zod, strict schemas for the model, and a call runner that turns every
 // failure into text the model can act on.
 
