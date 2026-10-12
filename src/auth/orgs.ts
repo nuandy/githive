@@ -482,6 +482,18 @@ export class OrgStore {
 		]);
 	}
 
+	/** The repos that are a person's own: their orgs' (their own namespace is one) and the ones they collaborate on. */
+	async yourRepoIds(userId: string) {
+		const { results } = await this.db
+			.prepare(
+				"SELECT r.id FROM repos r WHERE r.org_id IN (SELECT org_id FROM org_members WHERE user_id = ?) OR r.id IN " +
+					"(SELECT repo_id FROM repo_collaborators WHERE user_id = ?)",
+			)
+			.bind(userId, userId)
+			.all<{ id: string }>();
+		return new Set(results.map((row) => row.id));
+	}
+
 	/** Every repo a person can see: their orgs', the ones they collaborate on, and public ones. */
 	async visibleRepos(userId: string) {
 		const { results } = await this.db

@@ -46,4 +46,12 @@ describe("the inbox", () => {
 		expect(buildInbox(undefined)).toEqual({ groups: [], count: 0 });
 		expect(buildInbox({ repos: [{ repo: "a", since: "", summary: null }] })).toEqual({ groups: [], count: 0 });
 	});
+
+	it("leaves out someone else's public repo: its changes wait on its own people", () => {
+		const waiting = [{ change: "c-1", title: "", reason: "Reviewers disagree" }];
+		const { count } = buildInbox({
+			repos: [{ repo: "bob/demo", since: "2026-01-01T00:00:00Z", summary: { waiting }, public: true }],
+		});
+		expect(count).toBe(0);
+	});
 });

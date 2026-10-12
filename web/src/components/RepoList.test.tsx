@@ -25,6 +25,21 @@ describe("the Repositories page", () => {
 		expect(html).not.toMatch(/elected/);
 	});
 
+	it("lists other people's public repos apart, under Public, after the reader's own", () => {
+		const rows = buildRepoRows({
+			repos: [
+				{ repo: "ada/mine", since: ago(5), summary: { open: 1, countedAt: ago(1) } },
+				{ repo: "bob/shared-demo", since: ago(1), summary: { open: 2, countedAt: ago(1) }, public: true },
+			],
+		});
+		const text = visibleText(renderToStaticMarkup(<RepoList rows={rows} loaded />));
+		expect(text.indexOf("ada/ mine")).toBeGreaterThan(-1);
+		expect(text.indexOf("ada/ mine")).toBeLessThan(text.indexOf("Public 1"));
+		expect(text.indexOf("Public 1")).toBeLessThan(text.indexOf("bob/ shared-demo"));
+		// Its work isn't counted as the reader's own.
+		expect(text).toContain("1 repository 1 open change");
+	});
+
 	it("says a repo's work all landed, how much and when, once its last stretch finishes", () => {
 		const lastStretch = { landed: 200, failed: 0, agents: 200, from: ago(37), to: ago(5) };
 		const rows = buildRepoRows({

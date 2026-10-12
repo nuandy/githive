@@ -187,6 +187,25 @@ describe("what each person can see", () => {
 		expect((await list("eve")).map((r) => r.name)).toEqual(["acme/docs", "eve/notes"]);
 	});
 
+	it("marks a public repo that isn't a person's own, for the list to show apart and the Inbox to leave out", async () => {
+		const { env, people, orgs } = await world();
+		await orgs.addRepo((await orgs.org("eve"))!, "notes", people.eve.id);
+		// No counts kept yet: the list is the repos alone.
+		const index = { getByName: () => ({ summaries: async () => ({ repos: [] }), summarize: async () => undefined }) };
+		const listed = async (who: Handle) => {
+			const response = await worker.fetch(
+				new Request(`${ORIGIN}/summaries`, { headers: { Cookie: people[who].session } }),
+				{ ...(env as object), REPO_INDEX: index } as never,
+				{ waitUntil: () => {} } as never,
+			);
+			const { repos } = (await response.json()) as { repos: { repo: string; public?: boolean }[] };
+			return Object.fromEntries(repos.map((row) => [row.repo, !!row.public]));
+		};
+		// acme/docs is eve's to see only because it's public; bob is in acme, so it's his own.
+		expect(await listed("eve")).toEqual({ "acme/docs": true, "eve/notes": false });
+		expect(await listed("bob")).toEqual({ "acme/docs": false, "acme/web": false });
+	});
+
 	it("lets anyone signed in read a public repo, and nothing more", async () => {
 		const { env, people } = await world();
 		expect(refused((await route(env, "GET", "/repos/acme/docs/access", people.eve.session)).error)).toBe(false);

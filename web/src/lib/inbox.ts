@@ -22,6 +22,8 @@ export function buildInbox(summaries: Summaries | undefined): { groups: InboxGro
 	if (!summaries) return { groups: [], count: 0 };
 	const groups: InboxGroup[] = [];
 	for (const repo of summaries.repos ?? []) {
+		// Someone else's public repo waits on its own people, not the reader.
+		if (repo.public) continue;
 		const waiting = repo.summary?.waiting ?? [];
 		if (!waiting.length) continue;
 		groups.push({

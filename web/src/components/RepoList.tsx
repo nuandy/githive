@@ -152,12 +152,34 @@ function RepoGroups(props: { rows: RepoRow[]; loaded: boolean; shown: RepoRow[];
 	));
 }
 
+/** Other people's public repos the reader can open, apart from their own. */
+function PublicRepos({ rows }: { rows: RepoRow[] }) {
+	if (!rows.length) return null;
+	return (
+		<section className="repo-group" aria-labelledby="repos-public">
+			<h2 id="repos-public" className="repo-group__title">
+				Public <span className="muted">{rows.length}</span>
+			</h2>
+			<ul className="repo-list__rows">
+				{rows.map((row) => (
+					<RepoLine key={row.name} row={row} />
+				))}
+			</ul>
+		</section>
+	);
+}
+
 /**
- * The home page: every repo the reader can see. Those that need a person come first, then those at work,
- * then the quiet ones.
+ * The home page: the reader's own repos (theirs, their orgs' and those shared with them), those that need a person
+ * first, then those at work, then the quiet ones; then other people's public repos, apart.
  */
-export function RepoList({ rows, loaded, canCreate = false, demo }: RepoListProps) {
+export function RepoList({ rows: all, loaded, canCreate = false, demo }: RepoListProps) {
 	const [query, setQuery] = useState("");
+	const rows = all.filter((row) => !row.public);
+	const others = filterRepos(
+		all.filter((row) => row.public),
+		query,
+	);
 	const shown = filterRepos(rows, query);
 
 	return (
@@ -181,7 +203,7 @@ export function RepoList({ rows, loaded, canCreate = false, demo }: RepoListProp
 
 			{demo ? <DemoCard api={demo} /> : null}
 
-			{rows.length > 0 ? (
+			{all.length > 0 ? (
 				<div className="repo-list__search">
 					<Icon name="search" className="repo-list__search-icon" />
 					<label className="sr-only" htmlFor="repo-search">
@@ -199,6 +221,7 @@ export function RepoList({ rows, loaded, canCreate = false, demo }: RepoListProp
 
 			<div className="repo-list__groups" aria-label="Repositories">
 				<RepoGroups rows={rows} loaded={loaded} shown={shown} query={query} canCreate={canCreate} />
+				<PublicRepos rows={others} />
 			</div>
 		</main>
 	);

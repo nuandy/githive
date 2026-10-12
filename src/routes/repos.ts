@@ -126,6 +126,13 @@ interface RepoListing {
 	since: string;
 	summary: RepoSummary | null;
 	started: boolean;
+	public?: true;
+}
+
+/** The ids of the repos that are the caller's own, or null when every repo it sees is (an Access admin's). */
+async function yourRepos(env: Env, principal: Principal | undefined) {
+	if (!principal || principal.kind === "access" || !env.DB) return null;
+	return new OrgStore(env.DB).yourRepoIds(principal.user.id);
 }
 
 const needsRecount = (listing: RepoListing) =>
@@ -222,7 +229,12 @@ export function repoRoutes(app: Hono<AppEnv>) {
 	// background, a few per request.
 	app.get("/summaries", async (c) => {
 		const index = repoIndex(c.env);
-		const [listed, visible] = await Promise.all([rpc(index.summaries()), visibleRepos(c.env, c.get("principal"))]);
+		const principal = c.get("principal");
+		const [listed, visible, yours] = await Promise.all([
+			rpc(index.summaries()),
+			visibleRepos(c.env, principal),
+			yourRepos(c.env, principal),
+		]);
 		const summaries = new Map(listed.repos.map((row) => [row.repo, row]));
 		const listings: RepoListing[] = visible.map((repo) => ({
 			repo: repo.fullName,
@@ -230,6 +242,8 @@ export function repoRoutes(app: Hono<AppEnv>) {
 			since: summaries.get(repo.id)?.since ?? repo.createdAt,
 			summary: summaries.get(repo.id)?.summary ?? null,
 			started: summaries.has(repo.id),
+			// Someone else's, listed only because it's public: the page shows it apart, and the Inbox leaves it out.
+			...(yours && !yours.has(repo.id) ? { public: true } : {}),
 		}));
 		c.executionCtx.waitUntil(recountStale(index, toolContext(c.env, c.get("principal")), listings));
 		return c.json({ repos: listings.map(({ started: _started, ...listing }) => listing) });

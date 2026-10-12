@@ -19,6 +19,8 @@ export interface RepoRow {
 	stretch?: LandingStretch;
 	/** False until the server has counted the repo's changes (it does so in the background). */
 	detailed: boolean;
+	/** Someone else's, listed because it's public: shown apart from the reader's own. */
+	public?: boolean;
 }
 
 /** What the server keeps per repo for this list (GET /summaries); counts are absent until first taken. */
@@ -36,11 +38,12 @@ export interface RepoSummary {
 
 export interface Summaries {
 	/** Every repo the reader can see, by full name (<owner>/<name>), with its counts once GitHive has started on it. */
-	repos: { repo: string; id?: string; since: string; summary: RepoSummary | null }[];
+	repos: { repo: string; id?: string; since: string; summary: RepoSummary | null; public?: boolean }[];
 }
 
-function summaryRow(name: string, since: string, summary: RepoSummary | null): RepoRow {
+function summaryRow(name: string, since: string, summary: RepoSummary | null, others?: boolean): RepoRow {
 	return {
+		...(others ? { public: true } : {}),
 		name,
 		open: summary?.open ?? 0,
 		needsYou: summary?.needsYou ?? 0,
@@ -54,7 +57,9 @@ function summaryRow(name: string, since: string, summary: RepoSummary | null): R
 
 /** Every repo, most recently active first. */
 export function buildRepoRows(summaries: Summaries): RepoRow[] {
-	return (summaries.repos ?? []).map((repo) => summaryRow(repo.repo, repo.since, repo.summary)).sort(byLatestActivity);
+	return (summaries.repos ?? [])
+		.map((repo) => summaryRow(repo.repo, repo.since, repo.summary, repo.public))
+		.sort(byLatestActivity);
 }
 
 function byLatestActivity(a: RepoRow, b: RepoRow): number {
