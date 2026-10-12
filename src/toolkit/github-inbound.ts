@@ -16,7 +16,7 @@ import {
 	PR_BRANCH,
 } from "./github-settings";
 import { NOTICE_WITHIN_MS } from "./github-outbound";
-import type { MergeOutcome } from "./merge-types";
+import type { MergeOutcome, Why } from "./merge-types";
 import { callTool, type ToolContext } from "./mcp";
 import { advice, claimsRef, recordLog, storeFor, votesFor } from "./tools/repo";
 import { openFlag } from "./votes";
@@ -121,16 +121,20 @@ export async function inboundStep(ctx: ToolContext, job: InboundJob): Promise<St
 		if (job.step === "merge") return await mergeStep(ctx, job, at);
 		return { job };
 	} catch (err) {
-		// Tried again later, then left for the next time GitHub's branch is noticed.
-		const attempts = job.attempts + 1;
-		const reason = `${job.step} failed: ${statusOf(err).message}`;
-		console.error(`bringing ${job.github} ${job.branch} back into ${job.repo}: ${reason}`);
-		if (attempts >= STEP_TRIES) return { job: at({ step: "failed", attempts, reason }) };
-		return { job: at({ attempts, reason }), next: RETRY_MS * 2 ** (attempts - 1) };
+		return triedAgain(job, at, `${job.step} failed: ${statusOf(err).message}`);
 	}
 }
 
 type At = (changes: Partial<InboundJob>) => InboundJob;
+
+// A step that failed for now is tried again later, waiting longer each time, then left for the next time GitHub's
+// branch is noticed.
+function triedAgain(job: InboundJob, at: At, reason: string): StepOutcome {
+	const attempts = job.attempts + 1;
+	console.error(`bringing ${job.github} ${job.branch} back into ${job.repo}: ${reason}`);
+	if (attempts >= STEP_TRIES) return { job: at({ step: "failed", attempts, reason }) };
+	return { job: at({ attempts, reason }), next: RETRY_MS * 2 ** (attempts - 1) };
+}
 
 // The Gate imports GitHub's branch as github/<branch> and the import record notes it, or finds main has it.
 async function importStep(ctx: ToolContext, job: InboundJob, at: At): Promise<StepOutcome> {
@@ -221,15 +225,25 @@ async function mergeStep(ctx: ToolContext, job: InboundJob, at: At): Promise<Ste
 	// Untrusted, it waits for review like any change, and lands with a batch once approved.
 	if (/approvals from reviewers|still needs approval|is vetoed/.test(reason))
 		return { job: at({ step: "waiting", resume: "merge", reason: `waits for review: ${reason}`, attempts: 0 }) };
+	// Anything but a conflict or a failed check, such as a change Artifacts couldn't read while busy, is for now.
+	if (!outcome.why.some((why) => FOR_A_PERSON.includes(why))) return triedAgain(job, at, `merge refused: ${reason}`);
 	// Sent back like any change: people see it in their inbox, with the reason.
 	const asked =
 		`GitHub's changes need a person: ${reason}. Fix it on GitHub (merge ${PR_BRANCH} into ${job.branch} there, ` +
 		"resolving it) and GitHive brings the fix back, which also lets this one go.";
-	// Asked once: while the question is open (a person hasn't voted on its head since), asking again would only add
-	// another to people's inbox, as github_pr's refresh restarting the job did.
-	if (!(await askedAlready(ctx, job.repo, change, job.head)))
-		await callTool("ask_human", { repo: job.repo, change, agent: GITHUB_AGENT, reason: asked }, ctx);
+	await askPeople(ctx, job, asked);
 	return { job: at({ step: "needs a person", reason, attempts: 0 }) };
+}
+
+/** The refusals only a person can resolve, on GitHub. */
+const FOR_A_PERSON: Why[] = ["conflict", "checks"];
+
+// Asked once: while the question is open (a person hasn't voted on its head since), asking again would only add
+// another to people's inbox.
+async function askPeople(ctx: ToolContext, job: InboundJob, reason: string) {
+	const change = job.change!;
+	if (await askedAlready(ctx, job.repo, change, job.head)) return;
+	await callTool("ask_human", { repo: job.repo, change, agent: GITHUB_AGENT, reason }, ctx);
 }
 
 // The merge commit `change` landed as, from its claim's last release, if it merged.

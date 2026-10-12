@@ -388,6 +388,36 @@ describe("GitHub's changes coming back", { timeout: 120_000 }, () => {
 		expect(await settle()).toMatchObject({ step: "done", commit: pushed });
 	});
 
+	it("merges again later, waiting longer each time, when a merge is refused for a passing reason", async () => {
+		await land("c-1", { "src/a.js": "a\n" });
+		const pushed = github.push({ "docs/notes.md": "from GitHub\n" });
+		await ready("c-2", { "src/b.js": "b\n" });
+		expect(await call("merge", { change: "c-2", agent: "a" }, "a")).toMatchObject({ ok: true });
+		expect(await stepUntil("merge")).toMatchObject({ step: "merge" });
+		// Artifacts is busy: no change can be read for a while.
+		const busy = async ({ changes }: { changes: { change: string }[] }) =>
+			changes.map(({ change }) => ({ change, error: "Artifacts is busy" }));
+		extra.batchGit = () => ({ ...memoryBatchGit({ url: server.url, token: "unused" }), inspect: busy });
+		const waits: number[] = [];
+		for (let round = 1; round <= 2; round++) {
+			storage.alarm = null;
+			await sync.alarm();
+			expect((await sync.state()).job).toMatchObject({
+				step: "merge",
+				attempts: round,
+				reason: expect.stringContaining("couldn't be read"),
+			});
+			waits.push(storage.alarm! - Date.now());
+		}
+		expect(waits[0]).toBeGreaterThan(20_000);
+		expect(waits[1]).toBeGreaterThan(waits[0]!);
+		// No one was asked: it isn't a person's to fix.
+		expect((await votesNow()).flags ?? []).toEqual([]);
+		delete extra.batchGit;
+		expect(await settle()).toMatchObject({ step: "done", commit: pushed });
+		expect(server.git("show", "main:docs/notes.md")).toBe("from GitHub\n");
+	});
+
 	it("never fails a landing when GitHub or the import does", async () => {
 		await land("c-1", { "src/a.js": "a\n" });
 		github.push({ "docs/notes.md": "from GitHub\n" });

@@ -120,7 +120,9 @@ people pushed there directly. They come back through GitHive's own path, so the 
    landing. If the checks fail or it conflicts, it is sent back like any change: githive-github asks people
    (`ask_human`, once: asked again while the question is open, it doesn't ask twice), so the dashboard shows it as
    "GitHub's changes need a person" with the reason, and its claim waits on a person. Fixing it on GitHub (merging
-   `githive/main` there) brings the fix back, which lets the stuck change go; or a person gives it up (below).
+   `githive/main` there) brings the fix back, which lets the stuck change go; or a person gives it up (below). Only
+   a conflict or a failed check goes to a person: a merge refused for anything else, such as a change Artifacts
+   couldn't read while busy, is tried again later, as a step that throws is (below).
 6. **Given up, when it can't wait.** A GitHub change sent to a person holds its paths, and only its agent may release
    a claim, which no one can act as. So a person who can write may give it up from the dashboard ("Give up GitHub's
    changes", on the change's page; `POST /repos/:owner/:name/changes/:change/give-up`), and a repo admin through
@@ -165,7 +167,7 @@ is a fast-forward again.
 - **Who runs it.** Steps 2 to 4 must not hold up the landing that noticed GitHub moved. They run as a small,
   resumable job owned by the repo, in its `GitHubSync` Durable Object (a new class, migration `v15`), with an alarm
   per step like the hosted builder's. Every step is idempotent, so a retried step finds its work done. A step that
-  throws is tried again, waiting 30 s, 1, 2 and 4 minutes, then the job counts as failed (see step 1 for when it
+  throws, or a merge refused for a passing reason, is tried again, waiting 30 s, 1, 2 and 4 minutes, then the job counts as failed (see step 1 for when it
   starts again). A job not heard from in an hour has lost its alarm, and a notice starts it again. The landing only
   notes that GitHub is ahead and starts the job. The job's own merges push to GitHub as any landing does, but don't
   notice GitHub's branch, which would call the object back while its step runs.
