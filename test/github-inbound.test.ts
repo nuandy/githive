@@ -716,6 +716,14 @@ describe("GitHive's copies of GitHub's branches", { timeout: 120_000 }, () => {
 		expect(await tryCall("claim", { ...claim, change: "x-3", source: "github/main" }, "a")).toMatch(
 			"github/main: only githive-github merges GitHive's copies of GitHub's branches",
 		);
+		// Named as a ref, it's the same branch.
+		for (const source of ["refs/heads/github/main", "heads/github/main"])
+			expect(await tryCall("claim", { ...claim, change: "x-4", source }, "a")).toMatch(
+				`${source}: only githive-github merges`,
+			);
+		expect(await tryCall("claim", { ...claim, change: "x-5", into: "refs/heads/github/main" }, "a")).toMatch(
+			"branches under github/ are GitHive's copies of GitHub's",
+		);
 		// The names of githive-github's changes are its own: no one else may take one first.
 		const waiting = (await sync.state()).job!.change!;
 		expect(await tryCall("claim", { ...claim, change: waiting }, "a")).toMatch(

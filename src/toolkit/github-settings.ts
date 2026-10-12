@@ -43,7 +43,12 @@ export const importedBranch = (branch: string) => `github/${branch}`;
  * Whether a branch is one of GitHive's copies of GitHub's (github/<branch>). They're reserved: the toolkit writes them
  * (force, at each import), so a change landing on one would be pushed away, and only githive-github merges one.
  */
-export const isImportedBranch = (name: string) => name.startsWith("github/");
+export const isImportedBranch = (name: string) => branchName(name).startsWith("github/");
+
+// A branch named as a ref (refs/heads/x, or heads/x, which git also resolves) is still that branch.
+function branchName(name: string) {
+	return name.replace(/^(refs\/)?heads\//, "");
+}
 
 /** The mode a connected repo's GitHub link is in, or null when none is connected. */
 export function githubSync(registry: Pick<Registry, "github"> | null | undefined): GitHubSync | null {
