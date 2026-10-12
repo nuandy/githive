@@ -164,7 +164,7 @@ describe("GitHive's builder", () => {
 		]);
 	});
 
-	it("finishes only with everything pushed, then asks the hosted reviewers, who merge once approved", async () => {
+	it("finishes only with everything pushed and checked, then asks the hosted reviewers, who merge once approved", async () => {
 		const unpushed = builder({ "rev-list --count": "2" });
 		unpushed.state.pushes = 1;
 		expect(await unpushed.run("finish", { summary: "done" })).toMatch(/not pushed/i);
@@ -172,7 +172,10 @@ describe("GitHive's builder", () => {
 
 		const b = builder({ "rev-list --count": "0" });
 		b.state.pushes = 1;
-		expect(await b.run("finish", { summary: "adds stats" })).toMatch(/review/i);
+		// The first finish asks it to check its own change as a reviewer would; the next one hands it on.
+		expect(await b.run("finish", { summary: "adds stats" })).toMatch(/^Not yet: first review your change yourself/);
+		expect(hosted.startHostedReviewers).not.toHaveBeenCalled();
+		expect(await b.run("finish", { summary: "adds stats" })).toMatch(/reviewers review the change/i);
 		expect(hosted.startHostedReviewers).toHaveBeenCalledWith(
 			env,
 			expect.objectContaining({
@@ -209,7 +212,7 @@ describe("GitHive's builder, sent back by review", () => {
 		const b = await finished(0);
 		expect(await b.agent.revise("The tests reviewer rejected h1: no tests")).toBe("revising");
 		const state = await b.state();
-		expect(state).toMatchObject({ status: "queued", revisions: 1 });
+		expect(state).toMatchObject({ status: "queued", revisions: 1, selfChecked: false });
 		expect(JSON.stringify(state.pending)).toContain("no tests");
 	});
 
@@ -232,6 +235,18 @@ describe("GitHive's builder, sent back by review", () => {
 });
 
 describe("GitHive's reviewer", () => {
+	it("checking a revision of a change it rejected, starts from its findings and the diff since", () => {
+		const reviewer = new Reviewer({ storage: new FakeStorage() } as never, env as never);
+		const instructions = (job: ReviewJob) =>
+			(reviewer as unknown as { instructions(job: ReviewJob): string }).instructions(job);
+		const review = { ...job, role: "review", head: "h2", baseCommit: "b0" } as unknown as ReviewJob;
+		expect(instructions(review)).not.toContain("You reviewed an earlier commit");
+		const recheck = instructions({ ...review, earlier: { head: "h1", findings: "no tests for empty input" } });
+		expect(recheck).toContain("You reviewed an earlier commit of this change, h1, and rejected it");
+		expect(recheck).toContain("no tests for empty input");
+		expect(recheck).toContain("git diff h1 HEAD");
+	});
+
 	it("votes, then tries the merge as the change's agent when asked to", async () => {
 		const reviewer = new Reviewer({ storage: new FakeStorage() } as never, env as never);
 		const review = {

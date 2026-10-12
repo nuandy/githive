@@ -25,6 +25,14 @@ export interface ReviewJob extends ChangeJob {
 	 * GitHive's reviewer for the role. Each votes as itself, so they count as separate reviewers.
 	 */
 	reviewer?: string;
+	/** An earlier commit of the change that this reviewer rejected, and its findings, for it to check are fixed. */
+	earlier?: Earlier;
+}
+
+/** A commit a reviewer rejected, and the findings it gave. */
+export interface Earlier {
+	head: string;
+	findings: string;
 }
 
 /** Who votes: the hosted agent reviewing, or GitHive's reviewer for the role. */
@@ -113,6 +121,7 @@ export class Reviewer extends SandboxAgent<ReviewJob, ReviewerState> {
 			"",
 			`The builder's summary of its work: ${job.buildSummary ?? "none given"}`,
 			"",
+			...(job.earlier ? [recheck(job.earlier), ""] : []),
 			`Your focus as the ${job.role} reviewer:`,
 			focusFor(job.role),
 			"",
@@ -197,4 +206,14 @@ export class Reviewer extends SandboxAgent<ReviewJob, ReviewerState> {
 		if (outcome === "revising") this.note(state, "sent the change back to its builder");
 		else this.note(state, "its builder gave up; claim released");
 	}
+}
+
+/** What a reviewer that rejected an earlier commit of the change checks first, and what it can skip. */
+function recheck(earlier: Earlier) {
+	return [
+		`You reviewed an earlier commit of this change, ${earlier.head}, and rejected it with these findings:`,
+		earlier.findings,
+		`First check each finding is fixed: \`git diff ${earlier.head} HEAD\` shows what changed since. Then check ` +
+			"that what changed breaks nothing else. What didn't change since you reviewed it needn't be reviewed again.",
+	].join("\n");
 }

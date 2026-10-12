@@ -33,6 +33,8 @@ export interface BuilderState extends AgentState {
 	summary?: string;
 	/** The last push's report, which finish checks before accepting. */
 	lastReport?: { outOfLane: string[]; conflicts: string[] };
+	/** Whether it has checked this round of work as a reviewer would, which finish asks for once a round. */
+	selfChecked?: boolean;
 }
 
 const PushArgs = z.strictObject({ message: z.string().describe("Commit message") });
@@ -120,6 +122,7 @@ export class Builder extends SandboxAgent<BuildJob, BuilderState> {
 		state.nudges = 0;
 		state.turnsAtRunStart = state.turns;
 		state.revisions++;
+		state.selfChecked = false;
 		// The model is still owed the finish call's output, so that goes first.
 		state.pending = [...(state.pending ?? []), { role: "user", content: feedback }];
 		this.note(state, `sent back (revision ${state.revisions}): ${firstLine(feedback).slice(0, 160)}`);
@@ -303,6 +306,12 @@ export class Builder extends SandboxAgent<BuildJob, BuilderState> {
 				run: async ({ summary }) => {
 					const refusal = await this.handOffRefusal(state);
 					if (refusal) return refusal;
+					// A reviewer's rejection costs a whole round of fixing and reviewing; a look first costs a turn.
+					if (!state.selfChecked) {
+						state.selfChecked = true;
+						this.note(state, "checking its own change before finishing");
+						return selfCheck(state.revisions > 0);
+					}
 					state.status = "done";
 					state.summary = summary;
 					this.note(state, "finished");
@@ -416,4 +425,17 @@ const isRunning = (state: BuilderState) => state.status === "queued" || state.st
 /** A text's first line: a reviewer's feedback in brief. */
 function firstLine(text: string) {
 	return text.split("\n")[0] ?? "";
+}
+
+/** What finish asks once a round, before the change goes to its reviewers. */
+function selfCheck(revising: boolean) {
+	const findings = revising ? " Check first that every one of the reviewer's findings is fixed." : "";
+	return [
+		"Not yet: first review your change yourself, as its reviewer will." + findings,
+		"- Read your whole change, every commit of it, against your brief and any contract the repo keeps (a " +
+			"SPEC.md, the README's rules, whatever the brief points to). Reviewers reject for a requirement that " +
+			"isn't met, so check each one the brief and the contract state, including edge cases they name.",
+		"- Check your tests cover what's asked, and that they pass.",
+		"If you find anything, fix it, push with commit_and_push, then call finish again. If not, call finish again.",
+	].join("\n");
 }

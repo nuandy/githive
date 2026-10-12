@@ -805,6 +805,8 @@ export async function startHostedReviewers(
 		mergeWhenApproved?: boolean;
 		/** A hive's agent reviewing under its own name (see ReviewJob.reviewer). */
 		reviewer?: string;
+		/** An earlier commit of the change the agent rejected, and its findings (see ReviewJob.earlier). */
+		earlier?: { head: string; findings: string };
 	},
 ) {
 	const { repo, change } = input;
@@ -825,6 +827,7 @@ export async function startHostedReviewers(
 		buildSummary: input.summary,
 		mergeWhenApproved: !!input.mergeWhenApproved,
 		...(input.reviewer ? { reviewer: input.reviewer } : {}),
+		...(input.earlier ? { earlier: input.earlier } : {}),
 	};
 	// A hive agent's review has an object of its own, apart from GitHive's reviewer for the same role and commit.
 	const nameFor = (role: string) => (input.reviewer ? `${role}:${input.reviewer}` : role);

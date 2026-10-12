@@ -26,6 +26,7 @@ function hive(pieces: Piece[], options: { reject?: string[]; takenElsewhere?: st
 	const log: string[] = [];
 	const claimedAfter = new Map<string, string[]>();
 	const givenBack = new Set<string>();
+	const rechecks: string[] = [];
 	const approved = (change: string) =>
 		(votes.get(change) ?? []).some((vote) => vote.verdict === "approve" && vote.reviewer !== claimed.get(change));
 	const tools = (name: string, args: Record<string, unknown>): unknown => {
@@ -80,14 +81,16 @@ function hive(pieces: Piece[], options: { reject?: string[]; takenElsewhere?: st
 			heads.set(change, `${change}-1`);
 			log.push(`builder on ${change}`);
 		}
-		protected override async startReviewer(_repo: string, offer: Offer, agent: string) {
+		protected override async startReviewer(_repo: string, offer: Offer, agent: string, earlier?: { head: string }) {
+			if (earlier) rechecks.push(`${agent} ${offer.change} after ${earlier.head}`);
 			const verdict = options.reject?.includes(offer.change) ? "reject" : "approve";
 			votes.set(offer.change, [...(votes.get(offer.change) ?? []), { reviewer: agent, verdict }]);
 			holds.delete(offer.change);
 			log.push(`${agent} reviewed ${offer.change}: ${verdict}`);
 		}
-		protected override async reviewerDone(_repo: string, reviewing: { change: string }) {
-			return !options.stalls?.includes(reviewing.change);
+		protected override async reviewerResult(_repo: string, reviewing: { change: string }) {
+			const over = !options.stalls?.includes(reviewing.change);
+			return options.reject?.includes(reviewing.change) ? { over, rejected: `${reviewing.change} is wrong` } : { over };
 		}
 		protected override async stillHolds(_repo: string, reviewing: { change: string }) {
 			return !givenBack.has(reviewing.change);
@@ -110,7 +113,7 @@ function hive(pieces: Piece[], options: { reject?: string[]; takenElsewhere?: st
 	const rounds = async (turns: number) => {
 		for (let round = 0; round < turns; round++) for (const agent of agents()) await agent.alarm();
 	};
-	return { repoHive, agents, rounds, log, claimed, merged, votes, claimedAfter, givenBack };
+	return { repoHive, agents, rounds, log, claimed, merged, votes, claimedAfter, givenBack, rechecks, heads };
 }
 
 const pieces = (...ids: string[]) => ids.map((id) => ({ id, title: id, intent: `build ${id}`, paths: [`src/${id}/`] }));
@@ -184,6 +187,18 @@ describe("a repo's hosted agents", () => {
 		givenBack.add("a");
 		await rounds(1);
 		expect(await reviewing()).toEqual([]);
+	});
+
+	it("review first the revision of a change they rejected, given what they found", async () => {
+		const { repoHive, agents, rounds, rechecks, heads } = hive(pieces("a"), { reject: ["a"] });
+		await start(repoHive);
+		await rounds(2);
+		const reviewer = (await Promise.all(agents().map((agent) => agent.account()))).find((a) => a?.rejected?.length);
+		expect(reviewer?.rejected).toEqual([{ change: "a", head: "a-1", findings: "a is wrong" }]);
+		// Its builder pushes a revision: the agent that rejected it reviews it next, checking its findings.
+		heads.set("a", "a-2");
+		await rounds(1);
+		expect(rechecks).toContain(`${reviewer!.name} a after a-1`);
 	});
 
 	it("take no new work once their time is up, and stop when told", async () => {

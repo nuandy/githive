@@ -47,6 +47,8 @@ export interface HostedAgentState {
 	/** Its changes that left the claims: landed, or given up. */
 	finished: { piece: string; at: number }[];
 	reviewed: number;
+	/** The latest changes its reviewer rejected, so it reviews their revisions first, checking its own findings. */
+	rejected?: Rejected[];
 	/** Turns in a row that failed. */
 	failing: number;
 	/** It has stopped: nothing left for it, its time is up, or it was stopped. */
@@ -65,6 +67,22 @@ export interface Hive {
 type Call = (name: string, args?: Record<string, unknown>) => Promise<unknown>;
 
 type Reviewing = NonNullable<HostedAgentState["reviewing"]>;
+
+/** A change an agent's reviewer rejected: the commit, and the findings it gave. */
+interface Rejected {
+	change: string;
+	head: string;
+	findings: string;
+}
+
+/** How many rejected changes an agent remembers. */
+const REJECTED_KEPT = 10;
+
+/** What the agent's reviewer came to: whether it's over, and its findings if it rejected. */
+interface ReviewerResult {
+	over: boolean;
+	rejected?: string;
+}
 
 export class HostedAgent extends DurableObject<Env> {
 	// A repo's hive.
@@ -178,17 +196,20 @@ export class HostedAgent extends DurableObject<Env> {
 	}
 
 	/** Starts a hosted reviewer that votes as the agent, under its own name (tests note it instead). */
-	protected startReviewer(repo: string, offer: ReviewOption, agent: string): Promise<unknown> {
+	protected startReviewer(repo: string, offer: ReviewOption, agent: string, earlier?: Rejected): Promise<unknown> {
 		// It merges as soon as it approves, so an approved change doesn't wait for its author's next turn.
 		const review = { repo, change: offer.change, roles: [offer.role], reviewer: agent, mergeWhenApproved: true };
-		return startHostedReviewers(this.env, review);
+		const recheck = earlier ? { earlier: { head: earlier.head, findings: earlier.findings } } : {};
+		return startHostedReviewers(this.env, { ...review, ...recheck });
 	}
 
-	/** Whether the agent's reviewer has voted or failed (tests answer it instead). */
-	protected async reviewerDone(repo: string, reviewing: Reviewing, agent: string) {
+	/** Whether the agent's reviewer has voted or failed, and its findings if it rejected (tests answer it instead). */
+	protected async reviewerResult(repo: string, reviewing: Reviewing, agent: string): Promise<ReviewerResult> {
 		const name = reviewerName(changeRepoName(repo, reviewing.change), `${reviewing.role}:${agent}`, reviewing.head);
 		const reviewer = await this.env.REVIEWER.getByName(name).state();
-		return reviewer?.status === "done" || reviewer?.status === "failed";
+		const over = reviewer?.status === "done" || reviewer?.status === "failed";
+		const rejected = reviewer?.verdict === "reject" ? reviewer.evidence : undefined;
+		return rejected ? { over, rejected } : { over };
 	}
 
 	/** Whether the agent still holds its review, which it gave back or which ran out (tests answer it instead). */
@@ -271,14 +292,19 @@ export class HostedAgent extends DurableObject<Env> {
 	 */
 	private async reviewOver(state: HostedAgentState) {
 		const reviewing = state.reviewing!;
-		if (await this.reviewerDone(state.repo, reviewing, state.name)) return true;
+		const result = await this.reviewerResult(state.repo, reviewing, state.name);
+		if (result.rejected) remember(state, { change: reviewing.change, head: reviewing.head, findings: result.rejected });
+		if (result.over) return true;
 		return !(await this.stillHolds(state.repo, reviewing, state.name));
 	}
 
 	/** Takes the first review offered it that no other agent has taken meanwhile, under its own name. */
 	private async review(state: HostedAgentState, call: Call, now: number) {
 		const { reviews } = (await call("reviews")) as { reviews: ReviewOption[] };
-		for (const offer of reviews) {
+		// A change it rejected comes first: it knows what it found, so checking the fix is quick.
+		const earlierOf = (offer: ReviewOption) => state.rejected?.find((rejected) => rejected.change === offer.change);
+		const ordered = [...reviews.filter(earlierOf), ...reviews.filter((offer) => !earlierOf(offer))];
+		for (const offer of ordered) {
 			// Taking the change's credentials marks the review as this agent's, so others go elsewhere.
 			const taken = await call("credentials", { change: offer.change, role: offer.role }).then(
 				() => true,
@@ -288,7 +314,9 @@ export class HostedAgent extends DurableObject<Env> {
 				},
 			);
 			if (!taken) continue;
-			const started = (await this.startReviewer(state.repo, offer, state.name)) as { head?: string } | undefined;
+			const earlier = earlierOf(offer);
+			const started = (await this.startReviewer(state.repo, offer, state.name, earlier)) as
+				{ head?: string } | undefined;
 			// The reviewer is kept under the commit it fetched, which is newer than the offer's after another push.
 			const head = started?.head ?? offer.head;
 			state.reviewing = { change: offer.change, head, role: offer.role, since: now };
@@ -320,4 +348,10 @@ export class HostedAgent extends DurableObject<Env> {
 			await call("release", { change: piece.id, reason: "its builder didn't start" }).catch(() => undefined);
 		}
 	}
+}
+
+/** Remembers a change the agent's reviewer rejected, the latest few and once each. */
+function remember(state: HostedAgentState, rejected: Rejected) {
+	const others = (state.rejected ?? []).filter((kept) => kept.change !== rejected.change);
+	state.rejected = [...others, rejected].slice(-REJECTED_KEPT);
 }

@@ -1243,7 +1243,11 @@ and each turn is the loop any agent follows, through the toolkit, as itself:
    agent waits on its review until its reviewer votes or fails, or until it no
    longer holds the review: a reviewer that fails gives the review back at
    once, and a hold nobody votes on runs out after 15 minutes, as anyone's
-   does. However long a working reviewer takes, the agent never cuts it off.
+   does. However long a working reviewer takes, the agent never cuts it off. A
+   change its reviewer rejected comes first when its revision is offered, and
+   the reviewer gets its earlier findings and the diff since, to check they're
+   fixed: that's quicker than a review from scratch, and still only this
+   agent's own order, so any agent may take it.
 3. The backlog: the first free piece `backlog` lists that it hasn't tried
    already. It claims the piece's paths and starts a hosted builder on it.
    The builder doesn't start reviewers when it finishes: the hive reviews
@@ -1314,7 +1318,11 @@ are stamped `service:githive-builder`. Its tools:
   another agent holds them.
 - `fetch_base` fetches main, to merge in what has merged meanwhile.
 - `finish` is refused until everything is pushed and inside the claim. Then it
-  starts the hosted reviewers, asked to merge once approved.
+  starts the hosted reviewers, asked to merge once approved. The first time in
+  each round of work (the first build, and each revision), it's refused once
+  more with a request to review the change itself, against its brief and the
+  repo's contract, as its reviewer will: a rejection costs a round of fixing and
+  reviewing, and the look costs a turn.
 
 A hosted reviewer's rejection sends the change back to the builder with its
 findings (another agent's rejection, or failed checks at landing, leave it
