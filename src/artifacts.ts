@@ -118,6 +118,11 @@ export async function fileAt(artifacts: Artifacts, name: string, ref: string, pa
 	);
 }
 
+/** The branch a repo's HEAD names, which Artifacts' reads by ref don't take. */
+export async function defaultBranchOf(artifacts: Artifacts, name: string) {
+	return withRepo(artifacts, name, async (repo) => (await rpc(repo.info())).defaultBranch);
+}
+
 export async function headOf(artifacts: Artifacts, name: string, ref: string) {
 	return withRepo(artifacts, name, async (repo) => {
 		const [latest] = await retryTransient(() => call("log", name, () => rpc(repo.log({ ref, limit: 1 }))));

@@ -31,6 +31,8 @@ async function world(files: Files) {
 	const session = `__Host-githive_session=${encodeURIComponent(await ids.createSession(user.id))}`;
 	const ARTIFACTS = {
 		get: async (name: string) => ({
+			// Like Artifacts, reads take a branch, not HEAD: the site asks the repo for its default branch.
+			info: async () => ({ defaultBranch: "main" }),
 			readFile: async ({ ref, path }: { ref: string; path: string }) => {
 				const text = files[name]?.[ref]?.[path];
 				return text === undefined ? null : new Blob([text]);
@@ -49,9 +51,9 @@ async function world(files: Files) {
 
 const site: Files = {
 	"acme--docs": {
-		HEAD: { "index.html": "<h1>Honeycomb</h1>", "style.css": "h1 {}", "game/index.html": "<p>play</p>" },
+		main: { "index.html": "<h1>Honeycomb</h1>", "style.css": "h1 {}", "game/index.html": "<p>play</p>" },
 	},
-	"acme--web": { HEAD: { "index.html": "<h1>private</h1>" } },
+	"acme--web": { main: { "index.html": "<h1>private</h1>" } },
 };
 
 const expectSandboxed = (response: Response) => {

@@ -1,5 +1,5 @@
 import type { Context, Hono } from "hono";
-import { fileAt } from "../artifacts";
+import { defaultBranchOf, fileAt } from "../artifacts";
 import { resolveRepo } from "../auth/access-control";
 import { SizedCache } from "../sized-cache";
 import type { Registry } from "../toolkit/claims";
@@ -105,6 +105,17 @@ function fileOf(path: string) {
 const changeForks = new SizedCache<{ fork: string; until: number }>("site forks", 512);
 const FORK_KEPT_MS = 60_000;
 
+// Each repo's default branch, for a minute: Artifacts reads a file at a branch, tag or commit, not at HEAD.
+const branches = new SizedCache<{ branch: string; until: number }>("site branches", 512);
+
+async function siteBranch(env: Env, repo: string) {
+	const kept = branches.get(repo);
+	if ((kept?.until ?? 0) > Date.now()) return kept!.branch;
+	const branch = await defaultBranchOf(env.ARTIFACTS, repo);
+	branches.set(repo, { branch, until: Date.now() + FORK_KEPT_MS });
+	return branch;
+}
+
 async function changeFork(env: Env, repo: string, change: string) {
 	const key = `${repo}|${change}`;
 	const kept = changeForks.get(key);
@@ -134,7 +145,7 @@ async function serve(c: Context<AppEnv>) {
 	if (!repo) return notFound();
 	const where = asked.change
 		? { name: await changeFork(c.env, repo.id, asked.change), ref: `changes/${asked.change}` }
-		: { name: repo.id, ref: "HEAD" };
+		: { name: repo.id, ref: await siteBranch(c.env, repo.id) };
 	if (!where.name) return answer(404, `No change ${asked.change} in ${owner}/${name}.`);
 	const bytes = await fileAt(c.env.ARTIFACTS, where.name, where.ref, asked.path);
 	if (bytes === "too big") return answer(413, `${asked.path} is too big to serve.`);
