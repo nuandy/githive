@@ -4,8 +4,8 @@
 	display: grid;
 	gap: 16px;
 	/* What each stage is drawn in, on the strip, the map and the bars alike. */
-	--stage-building: var(--accent);
-	--stage-review: var(--accent);
+	--stage-building: var(--link);
+	--stage-review: var(--link);
 	--stage-landing: var(--amber);
 	--stage-landed: var(--good);
 	--stage-asking: var(--bad);

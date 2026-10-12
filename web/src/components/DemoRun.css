@@ -7,7 +7,7 @@
 	gap: 12px 24px;
 	margin-bottom: 20px;
 	padding: 16px 20px;
-	border-left: 3px solid var(--accent);
+	border-left: 3px solid var(--link);
 }
 
 .demo-card__body {

@@ -12,7 +12,7 @@
 	background-color: var(--bg);
 	/* A faint honeycomb, drawn in the accent so it follows the theme. */
 	background-image:
-		radial-gradient(circle at 50% 0%, color-mix(in srgb, var(--accent-fill) 16%, transparent), transparent 60%),
+		radial-gradient(circle at 50% 0%, color-mix(in srgb, var(--primary) 16%, transparent), transparent 60%),
 		url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='56' height='98' viewBox='0 0 56 98'%3E%3Cpath d='M28 66 0 50V18L28 2l28 16v32L28 66Zm0 32L0 82V66' fill='none' stroke='%23f2a516' stroke-opacity='0.16' stroke-width='1'/%3E%3C/svg%3E");
 }
 
@@ -94,13 +94,13 @@
 }
 
 .signin__button:first-child {
-	background: var(--accent-fill);
-	border-color: var(--accent-fill);
-	color: var(--on-accent);
+	background: var(--primary);
+	border-color: var(--primary);
+	color: var(--primary-foreground);
 }
 
 .signin__button:first-child:hover {
-	background: color-mix(in srgb, var(--accent-fill) 90%, #000);
+	background: color-mix(in srgb, var(--primary) 90%, #000);
 }
 
 .signin__invite {
@@ -115,7 +115,7 @@
 .signin__invite input {
 	width: 100%;
 	font: inherit;
-	font-family: var(--font-mono, monospace);
+	font-family: monospace;
 }
 
 .signin__note {

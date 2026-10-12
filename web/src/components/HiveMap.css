@@ -197,7 +197,7 @@
 }
 .hive-cell--building .hive-cell__sub,
 .hive-cell--review .hive-cell__sub {
-	fill: var(--accent);
+	fill: var(--link);
 }
 
 .hive-cell__lamp {

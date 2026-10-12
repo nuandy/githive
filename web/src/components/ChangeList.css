@@ -69,7 +69,7 @@
 }
 
 .change-row__title a:hover {
-	color: var(--accent);
+	color: var(--link);
 }
 
 .change-row__title .pill {

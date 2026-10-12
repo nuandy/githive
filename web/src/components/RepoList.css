@@ -147,13 +147,13 @@
 }
 
 .button.accent-link {
-	background: var(--accent-fill);
-	border-color: var(--accent-fill);
-	color: var(--on-accent);
+	background: var(--primary);
+	border-color: var(--primary);
+	color: var(--primary-foreground);
 }
 
 .button.accent-link:hover {
-	background: color-mix(in srgb, var(--accent-fill) 90%, #000);
+	background: color-mix(in srgb, var(--primary) 90%, #000);
 }
 
 .repo-row__owner {

@@ -61,7 +61,7 @@
 	align-items: center;
 	gap: 6px;
 	padding: 3px 8px;
-	border-radius: var(--radius-sm);
+	border-radius: var(--radius);
 	color: var(--text);
 	font-family: var(--mono);
 	font-size: 12.5px;
@@ -88,7 +88,7 @@ details:not([open]) > .claims__dir .claims__chevron {
 }
 
 .claims__folder {
-	color: var(--accent);
+	color: var(--link);
 }
 
 .claims__name {

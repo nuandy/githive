@@ -56,11 +56,11 @@
 }
 
 .playground__segments button:first-child {
-	border-radius: var(--radius-sm) 0 0 var(--radius-sm);
+	border-radius: var(--radius) 0 0 var(--radius);
 }
 
 .playground__segments button:last-child {
-	border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+	border-radius: 0 var(--radius) var(--radius) 0;
 }
 
 .playground__segments button + button {

@@ -111,8 +111,8 @@
 }
 
 .topbar__inbox[aria-current="page"] {
-	border-color: var(--accent);
-	color: var(--accent);
+	border-color: var(--link);
+	color: var(--link);
 }
 
 /* After the Inbox, which already sits at the right. */
@@ -188,8 +188,8 @@
 .usermenu__avatar--initial {
 	display: grid;
 	place-items: center;
-	background: var(--accent-fill);
-	color: var(--on-accent);
+	background: var(--primary);
+	color: var(--primary-foreground);
 	font-size: 11.5px;
 	font-weight: 700;
 }
@@ -227,7 +227,7 @@
 	width: 100%;
 	padding: 7px 10px;
 	border: 0;
-	border-radius: var(--radius-sm);
+	border-radius: var(--radius);
 	background: none;
 	color: var(--text);
 	font-size: 13.5px;
@@ -241,7 +241,7 @@
 }
 
 .usermenu__item[aria-current="page"] {
-	color: var(--accent);
+	color: var(--link);
 }
 
 @media (max-width: 560px) {

@@ -3,6 +3,15 @@
 	<head>
 		<meta charset="UTF-8" />
 		<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+		<!-- Light or dark before the first paint, so no page flashes the wrong one (the same rule as lib/theme.ts). -->
+		<script>
+			try {
+				const choice = localStorage.getItem("githive.theme");
+				const dark = choice === "dark" || (choice !== "light" && matchMedia("(prefers-color-scheme: dark)").matches);
+				document.documentElement.classList.toggle("dark", dark);
+				if (choice === "light" || choice === "dark") document.documentElement.dataset.theme = choice;
+			} catch {}
+		</script>
 		<title>GitHive · Hive playground</title>
 		<link rel="preload" href="/fonts/overpass.woff2" as="font" type="font/woff2" crossorigin />
 		<link

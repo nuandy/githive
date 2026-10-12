@@ -49,7 +49,7 @@
 }
 
 .inbox__title:hover {
-	color: var(--accent);
+	color: var(--link);
 }
 
 .inbox__id {

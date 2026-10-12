@@ -131,7 +131,7 @@
 .repo-settings__table-wrap {
 	overflow-x: auto;
 	border: 1px solid var(--border);
-	border-radius: var(--radius-sm);
+	border-radius: var(--radius);
 	margin-bottom: 8px;
 }
 
@@ -180,7 +180,7 @@
 	gap: 8px;
 	padding: 12px;
 	border: 1px solid var(--border);
-	border-radius: var(--radius-sm);
+	border-radius: var(--radius);
 }
 
 .repo-settings__rule legend {
@@ -225,7 +225,7 @@
 .repo-settings__errors {
 	margin: 0;
 	padding: 10px 14px 10px 30px;
-	border-radius: var(--radius-sm);
+	border-radius: var(--radius);
 	background: var(--bad-soft);
 	color: var(--bad);
 	font-size: 13px;

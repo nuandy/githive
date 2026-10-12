@@ -49,14 +49,14 @@
 	gap: 10px;
 	padding: 8px 10px;
 	border: 1px solid var(--border);
-	border-radius: var(--radius-sm);
+	border-radius: var(--radius);
 	font-weight: 400;
 	cursor: pointer;
 }
 
 .review-form__choice.is-selected {
-	border-color: var(--accent);
-	background: var(--accent-soft);
+	border-color: var(--link);
+	background: var(--link-soft);
 }
 
 .review-form__choice input {

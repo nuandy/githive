@@ -55,8 +55,8 @@
 	color: #fff;
 }
 .timeline__badge--accent {
-	background: var(--accent-soft);
-	color: var(--accent);
+	background: var(--link-soft);
+	color: var(--link);
 }
 
 .timeline__item--pushed .timeline__badge,
@@ -99,7 +99,7 @@
 .timeline__body--commit {
 	border-left: 0;
 	padding: 6px 10px;
-	border-radius: var(--radius-sm);
+	border-radius: var(--radius);
 	background: var(--surface);
 	border: 1px solid var(--border);
 	font-family: var(--mono);

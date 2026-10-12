@@ -2,8 +2,9 @@
 //
 //   node web/visual/compare.ts <before-label> <after-label> [--only <regex>]
 //
-// A shot passes when it has the same size and no pixel differs beyond pixelmatch's threshold (anti-aliased pixels
-// are ignored). The report, web/visual/out/<after>-vs-<before>.html, shows before, after and the difference.
+// A shot passes when it has the same size and no more than NOISE pixels differ beyond pixelmatch's threshold
+// (anti-aliased pixels are ignored): two captures of the same build differ, now and then, in a pixel or two of
+// anti-aliasing, where the smallest real change (a line moved by a pixel) moves hundreds. The report, web/visual/out/<after>-vs-<before>.html, shows before, after and the difference.
 
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -11,6 +12,7 @@ import pixelmatch from "pixelmatch";
 import { PNG } from "pngjs";
 
 const OUT = new URL("./out", import.meta.url).pathname;
+const NOISE = 4;
 const [before, after] = process.argv.slice(2);
 const onlyAt = process.argv.indexOf("--only");
 const only = onlyAt >= 0 ? new RegExp(process.argv[onlyAt + 1]!) : null;
@@ -49,7 +51,7 @@ for (const shot of shots) {
 	}
 	const diff = new PNG({ width: a.width, height: a.height });
 	const changed = pixelmatch(a.data, b.data, diff.data, a.width, a.height, { threshold: 0.1 });
-	if (changed === 0) {
+	if (changed <= NOISE) {
 		passed++;
 		continue;
 	}

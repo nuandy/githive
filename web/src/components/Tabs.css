@@ -25,7 +25,7 @@
 	color: var(--text-muted);
 	font-weight: 500;
 	white-space: nowrap;
-	border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+	border-radius: var(--radius) var(--radius) 0 0;
 }
 
 .tabs__tab:hover {
@@ -47,11 +47,11 @@
 	bottom: -1px;
 	height: 2px;
 	border-radius: 2px;
-	background: var(--accent-fill);
+	background: var(--primary);
 }
 
 .tabs__tab:focus-visible {
-	outline: 2px solid var(--accent);
+	outline: 2px solid var(--link);
 	outline-offset: -2px;
 }
 

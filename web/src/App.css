@@ -46,7 +46,7 @@
 	top: -40px;
 	z-index: 20;
 	padding: 6px 12px;
-	border-radius: var(--radius-sm);
+	border-radius: var(--radius);
 	background: var(--surface);
 	box-shadow: var(--shadow-lg);
 }

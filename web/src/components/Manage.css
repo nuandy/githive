@@ -168,8 +168,8 @@
 .manage__avatar--initial {
 	display: inline-grid;
 	place-items: center;
-	background: var(--accent-soft);
-	color: var(--accent);
+	background: var(--link-soft);
+	color: var(--link);
 	font-size: 12px;
 	font-weight: 600;
 }

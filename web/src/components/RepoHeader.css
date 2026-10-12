@@ -20,7 +20,7 @@
 }
 
 .repo-header__title a {
-	color: var(--accent);
+	color: var(--link);
 	font-weight: 600;
 	overflow-wrap: anywhere;
 }

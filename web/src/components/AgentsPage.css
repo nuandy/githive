@@ -123,8 +123,8 @@
 .agents__agent-name code {
 	font-size: 13px;
 	font-weight: 600;
-	background: var(--accent-soft);
-	color: var(--accent);
+	background: var(--link-soft);
+	color: var(--link);
 }
 
 .agents__agent-actions {
@@ -139,7 +139,7 @@
 	font-size: 13px;
 	padding: 3px 6px;
 	border: 1px solid var(--border-strong);
-	border-radius: var(--radius-sm);
+	border-radius: var(--radius);
 	background: var(--surface);
 	color: var(--text);
 }
@@ -251,7 +251,7 @@
 	display: inline-flex;
 	align-items: center;
 	padding: 5px 12px;
-	border-radius: var(--radius-sm);
+	border-radius: var(--radius);
 	font-size: 13.5px;
 	font-weight: 500;
 	color: var(--text-muted);
@@ -271,6 +271,6 @@
 }
 
 .agents__client:has(input:focus-visible) {
-	outline: 2px solid var(--accent);
+	outline: 2px solid var(--link);
 	outline-offset: 1px;
 }

@@ -1,0 +1,379 @@
+/*
+ * GitHive's theme: every design value the dashboard uses, and nothing else. Components draw only from here, through
+ * Tailwind's utilities (bg-card, text-muted-foreground, rounded-md, animate-appear) or, in SVG and inline styles,
+ * through the variables themselves.
+ *
+ * The look is a signal box's track plan: ink on cool paper, ruled sections rather than cards, and three lamp colors
+ * that always mean the same thing: amber (claimed, in line, checking), green (approved, passed, landed), red
+ * (failed, vetoed, waits on a person).
+ *
+ * Colors use shadcn's names, so its components fit and a palette from its ecosystem can be dropped in, plus
+ * GitHive's own (the lamps, the stages, diffs, the mark). Light is :root, dark is .dark on <html> (see lib/theme.ts).
+ * Another palette is another block of the same variables; corners follow --radius.
+ */
+
+/* Before Tailwind's own layers, so `legacy` sits between the base and the utilities: the stylesheets not yet moved to
+   utilities (wrapped in @layer legacy by vite.config.ts) override the base, and utilities override them. */
+@layer theme, base, legacy, components, utilities;
+
+@import "tailwindcss/theme.css" layer(theme);
+/* Tailwind's reset (its preflight) isn't imported while the legacy layer remains: those stylesheets were written
+   against the browser's own defaults (paragraph margins, inline icons, sized headings). */
+@import "tailwindcss/utilities.css" layer(utilities);
+@import "tw-animate-css";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* Overpass and Overpass Mono (SIL Open Font License, see /fonts/OFL.txt), served by GitHive itself: latin, every weight in one file. */
+@font-face {
+	font-family: "Overpass";
+	src: url("/fonts/overpass.woff2") format("woff2");
+	font-weight: 100 900;
+	font-display: swap;
+	unicode-range:
+		U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC,
+		U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+	font-family: "Overpass Mono";
+	src: url("/fonts/overpass-mono.woff2") format("woff2");
+	font-weight: 300 700;
+	font-display: swap;
+	unicode-range:
+		U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC,
+		U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+/* Overpass sets its middle dot hard against the next letter; the dashboard's "a · b" separators take it from the system face. */
+@font-face {
+	font-family: "Separator";
+	src: local("Helvetica Neue"), local("HelveticaNeue"), local("Segoe UI"), local("Arial"), local("Roboto");
+	unicode-range: U+00B7;
+}
+
+:root {
+	/* Native controls and scroll bars follow the system, as the page does, unless the reader chose (below). */
+	color-scheme: light dark;
+
+	/* Paper and ink. */
+	--background: #f5f6f4;
+	--foreground: #1e2b33;
+	--card: #fbfcfb;
+	--card-foreground: var(--foreground);
+	--popover: #fbfcfb;
+	--popover-foreground: var(--foreground);
+	--muted: #eef0ee;
+	--muted-foreground: #56636b;
+	--secondary: #eef0ee;
+	--secondary-foreground: var(--foreground);
+	/* shadcn's accent: the surface under a hovered or highlighted item. */
+	--accent: #eef0ee;
+	--accent-foreground: var(--foreground);
+	--surface-2: #eef0ee;
+	--surface-3: #e3e7e5;
+	--border: #d3d9d6;
+	--border-strong: #b7c0bc;
+	--input: #b7c0bc;
+
+	/* A primary action's ink fill. */
+	--primary: #1e2b33;
+	--primary-foreground: #f5f6f4;
+	/* Links and focus: a slate blue from the ink's family. */
+	--link: #23506e;
+	--link-soft: #e3ecf1;
+	--ring: #23506e;
+
+	/* The lamps. --amber is the lamp itself (the logo's honey); --warn is amber dark enough for text. */
+	--amber: #e59a0b;
+	--amber-soft: #fbf0d9;
+	--good: #2e7d5b;
+	--good-soft: #e1efe8;
+	--warn: #8f5800;
+	--warn-soft: #fbf0d9;
+	--bad: #c03a2b;
+	--bad-soft: #f8e4e1;
+	--needs: #b13527;
+	--needs-soft: #f8e4e1;
+	--neutral: #56636b;
+	--neutral-soft: #e8ecea;
+	--destructive: var(--bad);
+
+	--diff-add: #e3f2e9;
+	--diff-add-strong: #c6e6d3;
+	--diff-del: #fbe9e6;
+	--diff-del-strong: #f3cdc6;
+
+	/* Claim colors: one per open change on the Claims map, in order. Readable on both themes. */
+	--claim-0: #3b82f6;
+	--claim-1: #f59e0b;
+	--claim-2: #14b8a6;
+	--claim-3: #ec4899;
+	--claim-4: #8b5cf6;
+	--claim-5: #22c55e;
+	--claim-6: #ef4444;
+	--claim-7: #06b6d4;
+
+	/* The mark (HiveMark): an ink tile with paper lines, flipped on dark. */
+	--mark-tile: #1e2b33;
+	--mark-line: #f5f6f4;
+
+	--shadow-raised: 0 10px 28px rgba(30, 43, 51, 0.18);
+
+	/* Corners: every radius is a multiple of this. 0 is square, 8px is soft. */
+	--radius: 4px;
+
+	/* Motion. Reduced motion sets these to nothing (below). */
+	--motion-fast: 150ms;
+	--motion-base: 250ms;
+	--motion-slow: 400ms;
+
+	--page-width: 1180px;
+	/* How far the sticky top bar reaches down the window; what sticks under it starts below this. */
+	--topbar-height: 56px;
+}
+
+.dark {
+	--background: #121a1f;
+	--foreground: #e4e9e7;
+	--card: #172127;
+	--popover: #172127;
+	--muted: #1d282f;
+	--muted-foreground: #9aa8a6;
+	--secondary: #1d282f;
+	--accent: #1d282f;
+	--surface-2: #1d282f;
+	--surface-3: #24313a;
+	--border: #2c3a41;
+	--border-strong: #3d4d55;
+	--input: #3d4d55;
+
+	--primary: #e4e9e7;
+	--primary-foreground: #121a1f;
+	--link: #8cc0e0;
+	--link-soft: #1c2e3a;
+	--ring: #8cc0e0;
+
+	--amber: #f2b13a;
+	--amber-soft: #33270f;
+	--good: #4fb386;
+	--good-soft: #15302a;
+	--warn: #f2b13a;
+	--warn-soft: #33270f;
+	--bad: #e5604f;
+	--bad-soft: #3a1d1a;
+	--needs: #e5604f;
+	--needs-soft: #3a1d1a;
+	--neutral: #9aa8a6;
+	--neutral-soft: #232f35;
+
+	--diff-add: #12261c;
+	--diff-add-strong: #1b3a29;
+	--diff-del: #2c1618;
+	--diff-del-strong: #48201f;
+
+	--mark-tile: #f5f6f4;
+	--mark-line: #1e2b33;
+
+	--shadow-raised: 0 12px 32px rgba(0, 0, 0, 0.55);
+}
+
+:root[data-theme="light"] {
+	color-scheme: light;
+}
+:root[data-theme="dark"] {
+	color-scheme: dark;
+}
+
+@media (prefers-reduced-motion: reduce) {
+	:root {
+		--motion-fast: 0ms;
+		--motion-base: 0ms;
+		--motion-slow: 0ms;
+	}
+}
+
+/* Only the theme's own values: no stock palette, shadows or radii to reach for instead. */
+@theme {
+	--color-*: initial;
+	--shadow-*: initial;
+	--radius-*: initial;
+	--color-white: #fff;
+	--color-black: #000;
+}
+
+/* Tailwind's names for the variables above: bg-card, text-muted-foreground, border-border-strong, ring-ring. */
+@theme inline {
+	--color-background: var(--background);
+	--color-foreground: var(--foreground);
+	--color-card: var(--card);
+	--color-card-foreground: var(--card-foreground);
+	--color-popover: var(--popover);
+	--color-popover-foreground: var(--popover-foreground);
+	--color-muted: var(--muted);
+	--color-muted-foreground: var(--muted-foreground);
+	--color-secondary: var(--secondary);
+	--color-secondary-foreground: var(--secondary-foreground);
+	--color-accent: var(--accent);
+	--color-accent-foreground: var(--accent-foreground);
+	--color-surface-2: var(--surface-2);
+	--color-surface-3: var(--surface-3);
+	--color-border: var(--border);
+	--color-border-strong: var(--border-strong);
+	--color-input: var(--input);
+	--color-primary: var(--primary);
+	--color-primary-foreground: var(--primary-foreground);
+	--color-link: var(--link);
+	--color-link-soft: var(--link-soft);
+	--color-ring: var(--ring);
+	--color-destructive: var(--destructive);
+	--color-amber: var(--amber);
+	--color-amber-soft: var(--amber-soft);
+	--color-good: var(--good);
+	--color-good-soft: var(--good-soft);
+	--color-warn: var(--warn);
+	--color-warn-soft: var(--warn-soft);
+	--color-bad: var(--bad);
+	--color-bad-soft: var(--bad-soft);
+	--color-needs: var(--needs);
+	--color-needs-soft: var(--needs-soft);
+	--color-neutral: var(--neutral);
+	--color-neutral-soft: var(--neutral-soft);
+	--color-diff-add: var(--diff-add);
+	--color-diff-add-strong: var(--diff-add-strong);
+	--color-diff-del: var(--diff-del);
+	--color-diff-del-strong: var(--diff-del-strong);
+	--color-claim-0: var(--claim-0);
+	--color-claim-1: var(--claim-1);
+	--color-claim-2: var(--claim-2);
+	--color-claim-3: var(--claim-3);
+	--color-claim-4: var(--claim-4);
+	--color-claim-5: var(--claim-5);
+	--color-claim-6: var(--claim-6);
+	--color-claim-7: var(--claim-7);
+	--color-mark-tile: var(--mark-tile);
+	--color-mark-line: var(--mark-line);
+
+	/* Corners: steps of --radius, so a theme changes one number. At 4px these are 1, 2, 3, 4, 5, 6, 12 and 14px. */
+	--radius-2xs: calc(var(--radius) * 0.25);
+	--radius-xs: calc(var(--radius) * 0.5);
+	--radius-sm: calc(var(--radius) * 0.75);
+	--radius-md: var(--radius);
+	--radius-lg: calc(var(--radius) * 1.25);
+	--radius-xl: calc(var(--radius) * 1.5);
+	--radius-2xl: calc(var(--radius) * 3);
+	--radius-3xl: calc(var(--radius) * 3.5);
+
+	--shadow-raised: var(--shadow-raised);
+}
+
+@theme {
+	--font-sans: "Separator", "Overpass", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+	--font-mono: "Overpass Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+
+	/* Type: the sizes the dashboard uses, by role. */
+	--text-*: initial;
+	--text-micro: 11.5px;
+	--text-caption: 12px;
+	--text-meta: 12.5px;
+	--text-ui: 13px;
+	--text-ui-lg: 13.5px;
+	--text-body-sm: 14px;
+	--text-body: 15px;
+	--text-lead: 16px;
+	--text-title-sm: 18px;
+	--text-title: 20px;
+	--text-title-lg: 22px;
+	--text-display-sm: 24px;
+	--text-display: 26px;
+
+	--ease-out: cubic-bezier(0.2, 0.7, 0.3, 1);
+	--ease-in: cubic-bezier(0.4, 0, 1, 1);
+	/* A little past the mark and back: what arrives, pops. */
+	--ease-spring: cubic-bezier(0.3, 1.4, 0.5, 1);
+	--ease-pop: cubic-bezier(0.3, 1.6, 0.5, 1);
+
+	--animate-appear: appear var(--motion-base) var(--ease-out) both;
+	--animate-leave: leave var(--motion-base) var(--ease-in) both;
+	--animate-bump: bump 0.6s ease-out;
+	--animate-pop: pop 0.5s var(--ease-pop) backwards;
+
+	@keyframes appear {
+		from {
+			opacity: 0;
+			transform: translateY(4px);
+		}
+	}
+	@keyframes leave {
+		to {
+			opacity: 0;
+			transform: translateY(-4px);
+		}
+	}
+	@keyframes bump {
+		0% {
+			transform: scale(1.6);
+		}
+		100% {
+			transform: none;
+		}
+	}
+	@keyframes pop {
+		0% {
+			opacity: 0;
+			transform: scale(0.6);
+		}
+	}
+}
+
+/* Motion durations by name: transition-colors duration-fast. */
+@utility duration-fast {
+	transition-duration: var(--motion-fast);
+	animation-duration: var(--motion-fast);
+}
+@utility duration-base {
+	transition-duration: var(--motion-base);
+	animation-duration: var(--motion-base);
+}
+@utility duration-slow {
+	transition-duration: var(--motion-slow);
+	animation-duration: var(--motion-slow);
+}
+
+/* Reduced motion: whatever still moves, moves at once. */
+@layer base {
+	@media (prefers-reduced-motion: reduce) {
+		*,
+		::before,
+		::after {
+			animation-duration: 1ms !important;
+			animation-delay: 0ms !important;
+			animation-iteration-count: 1 !important;
+			transition-duration: 1ms !important;
+			transition-delay: 0ms !important;
+			scroll-behavior: auto !important;
+		}
+	}
+
+	/* Switching light and dark cross-fades the whole page (lib/theme.ts starts the view transition). */
+	::view-transition-old(root),
+	::view-transition-new(root) {
+		animation-duration: var(--motion-slow);
+		animation-timing-function: ease;
+	}
+}
+
+/* Until stage 5: the names the stylesheets not yet on utilities use. */
+:root,
+.dark {
+	--bg: var(--background);
+	--surface: var(--card);
+	--text: var(--foreground);
+	--text-muted: var(--muted-foreground);
+	--shadow-lg: var(--shadow-raised);
+	--shadow: none;
+	--gap: 16px;
+	--focus: 0 0 0 3px color-mix(in srgb, var(--ring) 35%, transparent);
+	--font: var(--font-sans);
+	--mono: var(--font-mono);
+}

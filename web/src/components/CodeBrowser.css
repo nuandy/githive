@@ -62,11 +62,11 @@
 .code__entry:hover {
 	background: var(--surface-2);
 	text-decoration: none;
-	color: var(--accent);
+	color: var(--link);
 }
 
 .code__folder {
-	color: var(--accent);
+	color: var(--link);
 }
 
 .code__file {

@@ -154,6 +154,21 @@ async function stillAnimations(page: Page) {
 		});
 }
 
+/** Makes the window as tall as the page, so one ordinary screenshot holds all of it. Playwright's full-page capture
+ * paints what lies beyond the window in a way that moves a select's text by a pixel between builds that lay it out
+ * identically. */
+async function growToPage(page: Page, job: Job, pending: () => number) {
+	const least = job.scene.height ?? 900;
+	for (let tries = 0; tries < 3; tries++) {
+		const tall = await page.evaluate(() => Math.ceil(document.documentElement.scrollHeight));
+		const height = Math.max(least, tall);
+		if (height === page.viewportSize()?.height) return;
+		await page.setViewportSize({ width: job.width, height });
+		if (job.scene.clock === "paused") await page.clock.runFor(1_000);
+		await settle(page, pending);
+	}
+}
+
 function fileName(job: Job, suffix = "") {
 	return `${job.scene.name}.${job.scheme}.${job.width}${suffix}.png`;
 }
@@ -185,13 +200,9 @@ async function capture(browser: Browser, job: Job) {
 			await captureMotion(page, job);
 			return;
 		}
+		await growToPage(page, job, pending);
 		await stillAnimations(page);
-		await page.screenshot({
-			path: join(dir, fileName(job)),
-			fullPage: true,
-			animations: "disabled",
-			caret: "hide",
-		});
+		await page.screenshot({ path: join(dir, fileName(job)), animations: "disabled", caret: "hide" });
 	} finally {
 		await context.close();
 	}
